@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import type { Dir, File, UuidStr } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import {
+	createMoveTreeGates,
 	isMoveConfirmDisabled,
 	isMoveDestinationForbidden,
 	isMoveNoOp,
@@ -163,5 +164,67 @@ describe("isMoveConfirmDisabled", () => {
 	it("enabled at the root when nothing moved lives there yet", () => {
 		const moved = dirItem("a")
 		expect(isMoveConfirmDisabled([], [moved], [])).toBe(false)
+	})
+})
+
+describe("createMoveTreeGates (directory-tree submenu)", () => {
+	// Root holds "a" (which holds "child") and an undecryptable "locked"; "f" is a file inside "a".
+	const a = dirItem("a")
+	const child = dirItem("child")
+	const locked = narrowItem({ ...mockDir({ uuid: testUuid("locked") }), meta: { type: "encrypted", data: "cipher" } })
+	const f = fileItem("f")
+	const listings = new Map<string | null, DriveItem[]>([
+		[null, [a, locked]],
+		[testUuid("a"), [child, f]],
+		[testUuid("child"), []]
+	])
+
+	function gates(moved: DriveItem[], readListing = (uuid: string | null) => listings.get(uuid)) {
+		return createMoveTreeGates(moved, readListing)
+	}
+
+	it("browse: disables the moved directory itself and anything below it", () => {
+		const { isBrowseDisabled } = gates([a])
+		expect(isBrowseDisabled({ uuid: testUuid("a"), ancestry: [testUuid("a")] })).toBe(true)
+		expect(isBrowseDisabled({ uuid: testUuid("child"), ancestry: [testUuid("a"), testUuid("child")] })).toBe(true)
+	})
+
+	it("browse: disables an undecryptable directory, found through its parent listing", () => {
+		expect(gates([f]).isBrowseDisabled({ uuid: testUuid("locked"), ancestry: [testUuid("locked")] })).toBe(true)
+	})
+
+	it("browse: allows an unrelated, decryptable directory", () => {
+		expect(gates([f]).isBrowseDisabled({ uuid: testUuid("a"), ancestry: [testUuid("a")] })).toBe(false)
+	})
+
+	it("browse: without a readable parent listing, still applies the self/descendant rule", () => {
+		const { isBrowseDisabled } = gates([a], () => undefined)
+		expect(isBrowseDisabled({ uuid: testUuid("a"), ancestry: [testUuid("a")] })).toBe(true)
+		expect(isBrowseDisabled({ uuid: testUuid("other"), ancestry: [testUuid("other")] })).toBe(false)
+	})
+
+	it("target: disables the current parent (every moved item already there)", () => {
+		expect(gates([f]).isTargetDisabled({ uuid: testUuid("a"), ancestry: [testUuid("a")] })).toBe(true)
+	})
+
+	it("target: disables the moved directory and its descendants", () => {
+		const { isTargetDisabled } = gates([a])
+		expect(isTargetDisabled({ uuid: testUuid("a"), ancestry: [testUuid("a")] })).toBe(true)
+		expect(isTargetDisabled({ uuid: testUuid("child"), ancestry: [testUuid("a"), testUuid("child")] })).toBe(true)
+	})
+
+	it("target: enables the root and a directory elsewhere", () => {
+		const { isTargetDisabled } = gates([f])
+		expect(isTargetDisabled({ uuid: null, ancestry: [] })).toBe(false)
+		expect(isTargetDisabled({ uuid: testUuid("child"), ancestry: [testUuid("a"), testUuid("child")] })).toBe(false)
+	})
+
+	it("target: stays disabled until its own listing has been read", () => {
+		expect(gates([f]).isTargetDisabled({ uuid: testUuid("unread"), ancestry: [testUuid("unread")] })).toBe(true)
+	})
+
+	it("target: a multi-item selection is a no-op only when every item already sits there", () => {
+		const { isTargetDisabled } = gates([f, a])
+		expect(isTargetDisabled({ uuid: null, ancestry: [] })).toBe(false)
 	})
 })

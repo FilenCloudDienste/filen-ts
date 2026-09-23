@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { render, cleanup, fireEvent } from "@testing-library/react"
+import { render, cleanup, fireEvent, screen, act } from "@testing-library/react"
 import { createElement } from "react"
 import type { Dir, UuidStr } from "@filen/sdk-rs"
 import "@/lib/i18n"
@@ -10,6 +10,12 @@ import "@/lib/i18n"
 // unresolvable under vitest and no case here reaches a worker op. The thumbnail + drop hooks are
 // stubbed for the same reason: neither is what these assertions are about.
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
+// The Move submenu's tree levels read through this hook once opened; left loading here, since the tree
+// itself is covered by directoryTreeSubmenu.test.ts.
+vi.mock("@/features/drive/queries/drive", async importOriginal => {
+	const actual = await importOriginal<typeof import("@/features/drive/queries/drive")>()
+	return { ...actual, useDirectoryTreeChildrenQuery: () => ({ status: "pending" }) }
+})
 vi.mock("@/features/drive/hooks/useThumbnail", () => ({ useThumbnail: () => null }))
 vi.mock("@/features/drive/hooks/useDriveDropTarget", () => ({
 	useDriveDropTarget: () => ({
@@ -23,7 +29,7 @@ vi.mock("@/features/drive/hooks/useDriveDropTarget", () => ({
 
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
-import { DriveRow } from "@/features/drive/components/driveRow"
+import { DriveRow, type DriveRowProps } from "@/features/drive/components/driveRow"
 import { DriveTile } from "@/features/drive/components/driveTile"
 
 function testUuid(label: string): UuidStr {
@@ -45,7 +51,12 @@ function dirItem(label: string): DriveItem {
 
 const ROW_INDEX = 4
 
-function sharedProps(item: DriveItem, selected: boolean, onCursorMove: (index: number) => void) {
+function sharedProps(
+	item: DriveItem,
+	selected: boolean,
+	onCursorMove: (index: number) => void,
+	handlers: Partial<Pick<DriveRowProps, "onItemAction" | "onBulkAction">> = {}
+) {
 	return {
 		item,
 		index: ROW_INDEX,
@@ -60,7 +71,8 @@ function sharedProps(item: DriveItem, selected: boolean, onCursorMove: (index: n
 		onOpen: () => undefined,
 		onItemAction: () => undefined,
 		onBulkAction: () => undefined,
-		registerRef: () => undefined
+		registerRef: () => undefined,
+		...handlers
 	}
 }
 
@@ -122,5 +134,87 @@ describe("right-click retarget", () => {
 
 		expect(useDriveStore.getState().selectedItems).toEqual([])
 		expect(onCursorMove).not.toHaveBeenCalled()
+	})
+})
+
+describe("Move submenu", () => {
+	async function openMove(): Promise<HTMLElement> {
+		const move = screen.getByRole("menuitem", { name: "Move" })
+
+		await act(async () => {
+			move.focus()
+			fireEvent.keyDown(move, { key: "ArrowRight" })
+			await Promise.resolve()
+		})
+
+		return move
+	}
+
+	it("the single-item menu offers Move as a submenu whose picker entry opens the move dialog for the item", async () => {
+		const item = dirItem("target")
+		const onItemAction = vi.fn()
+		const { container } = render(
+			createElement(DriveRow, {
+				...sharedProps(item, false, () => undefined, { onItemAction }),
+				style: {},
+				directorySizes: new Map()
+			})
+		)
+
+		rightClick(container)
+		const move = await openMove()
+		expect(move.getAttribute("aria-haspopup")).toBe("menu")
+
+		fireEvent.click(screen.getByRole("menuitem", { name: "Choose destination…" }))
+		expect(onItemAction).toHaveBeenCalledExactlyOnceWith("move", item)
+	})
+
+	it("the bulk menu offers the same submenu, its picker entry dispatching the bulk move", async () => {
+		const item = dirItem("target")
+		const onBulkAction = vi.fn()
+		const { container } = render(
+			createElement(DriveRow, {
+				...sharedProps(item, true, () => undefined, { onBulkAction }),
+				style: {},
+				directorySizes: new Map()
+			})
+		)
+
+		rightClick(container)
+		const move = await openMove()
+		expect(move.getAttribute("aria-haspopup")).toBe("menu")
+
+		fireEvent.click(screen.getByRole("menuitem", { name: "Choose destination…" }))
+		expect(onBulkAction).toHaveBeenCalledExactlyOnceWith("move")
+	})
+
+	// The ⋯ dropdown is mounted inside the row (unlike the context menu, a sibling of its trigger), so its
+	// portaled popups' clicks bubble through the React tree into the row's own handlers.
+	it("clicks and double-clicks inside the ⋯ dropdown's submenu never reach the row's own handlers", async () => {
+		const item = dirItem("target")
+		const onPointerSelect = vi.fn()
+		const onOpen = vi.fn()
+		render(
+			createElement(DriveRow, {
+				...sharedProps(item, false, () => undefined),
+				onPointerSelect,
+				onOpen,
+				style: {},
+				directorySizes: new Map()
+			})
+		)
+
+		await act(async () => {
+			fireEvent.click(screen.getByRole("button", { name: "More actions" }))
+			await Promise.resolve()
+		})
+		const move = await openMove()
+		fireEvent.click(move)
+		fireEvent.doubleClick(move)
+		fireEvent.click(screen.getByText("Cloud Drive"))
+		fireEvent.doubleClick(screen.getByText("Cloud Drive"))
+
+		expect(onPointerSelect).not.toHaveBeenCalled()
+		expect(onOpen).not.toHaveBeenCalled()
 	})
 })

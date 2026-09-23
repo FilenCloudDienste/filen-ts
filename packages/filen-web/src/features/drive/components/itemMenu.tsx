@@ -22,8 +22,14 @@ import {
 	type ItemActionDialogKind,
 	type ItemActionId
 } from "@/features/drive/components/itemMenu.logic"
-import { ContextMenuContent, ContextMenuItem, ContextMenuSeparator } from "@/components/ui/context-menu"
-import { DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu"
+import {
+	CONTEXT_TREE_MENU_FAMILY,
+	DROPDOWN_TREE_MENU_FAMILY,
+	type DirectoryTreeMenuFamily
+} from "@/features/drive/components/directoryTreeSubmenu"
+import { MoveSubmenu } from "@/features/drive/components/moveSubmenu"
+import { ContextMenuContent } from "@/components/ui/context-menu"
+import { DropdownMenuContent } from "@/components/ui/dropdown-menu"
 
 export interface ItemMenuContentProps {
 	item: DriveItem
@@ -45,11 +51,6 @@ export interface ItemMenuContentProps {
 	searchHit?: boolean | undefined
 }
 
-interface MenuItemFamily {
-	Item: typeof DropdownMenuItem
-	Separator: typeof DropdownMenuSeparator
-}
-
 // Groups the flat descriptor list for readability: a rule before the reference/reveal action (info)
 // and before whichever removal action closes the list (trash in the normal menu, deletePermanently in
 // the trash/undecryptable-reduced menus) — a pure presentation concern the gating builder itself
@@ -61,7 +62,7 @@ const SEPARATOR_BEFORE = new Set<ItemActionId>(["info", "trash", "deletePermanen
 // one mapping from descriptor to menu row. Base UI's ContextMenu and DropdownMenu are separate Root
 // families with their own Item/Separator primitives (not interchangeable across triggers even though
 // their props are structurally identical), so the one piece each caller supplies is which family to
-// render rows with.
+// render rows with. Move is a submenu (moveSubmenu.tsx) that also needs the family's submenu parts.
 function ItemMenuEntries({
 	item,
 	variant,
@@ -71,7 +72,7 @@ function ItemMenuEntries({
 	hiddenActionIds,
 	searchHit,
 	family
-}: ItemMenuContentProps & { family: MenuItemFamily }) {
+}: ItemMenuContentProps & { family: DirectoryTreeMenuFamily }) {
 	const { t } = useTranslation(["drive", "common"])
 	const navigate = useNavigate()
 	const isOnline = useIsOnline()
@@ -165,34 +166,46 @@ function ItemMenuEntries({
 			{descriptors.map((descriptor, index) => (
 				<Fragment key={descriptor.id}>
 					{index > 0 && SEPARATOR_BEFORE.has(descriptor.id) ? <Separator /> : null}
-					<Item
-						variant={descriptor.destructive ? "destructive" : "default"}
-						disabled={descriptor.enabled === false}
-						title={descriptor.enabled === false && !isOnline ? t("common:offlineActionDisabled") : undefined}
-						onClick={event => {
-							// The ⋯ dropdown is mounted as a React descendant of the row's own clickable div
-							// (needed so the trigger button sits visually inside the row) — Base UI's MenuItem
-							// itself never stops propagation, and a portaled popup's synthetic events still
-							// bubble through the REACT tree (not the DOM tree), so without this an item click
-							// would also fire the row's onClick and reselect it.
-							event.stopPropagation()
+					{descriptor.id === "move" ? (
+						<MoveSubmenu
+							family={family}
+							items={[item]}
+							disabled={descriptor.enabled === false}
+							title={descriptor.enabled === false && !isOnline ? t("common:offlineActionDisabled") : undefined}
+							onChooseDestination={() => {
+								onItemAction("move", item)
+							}}
+						/>
+					) : (
+						<Item
+							variant={descriptor.destructive ? "destructive" : "default"}
+							disabled={descriptor.enabled === false}
+							title={descriptor.enabled === false && !isOnline ? t("common:offlineActionDisabled") : undefined}
+							onClick={event => {
+								// The ⋯ dropdown is mounted as a React descendant of the row's own clickable div
+								// (needed so the trigger button sits visually inside the row) — Base UI's MenuItem
+								// itself never stops propagation, and a portaled popup's synthetic events still
+								// bubble through the REACT tree (not the DOM tree), so without this an item click
+								// would also fire the row's onClick and reselect it.
+								event.stopPropagation()
 
-							if (descriptor.id === "copyLink") {
-								void runCopyLink()
-								return
-							}
+								if (descriptor.id === "copyLink") {
+									void runCopyLink()
+									return
+								}
 
-							if (descriptor.run === "direct") {
-								void runDirect(descriptor)
-								return
-							}
+								if (descriptor.run === "direct") {
+									void runDirect(descriptor)
+									return
+								}
 
-							onItemAction(descriptor.dialogKind, item)
-						}}
-					>
-						{createElement(descriptor.icon, { "aria-hidden": true })}
-						{t(descriptor.labelKey)}
-					</Item>
+								onItemAction(descriptor.dialogKind, item)
+							}}
+						>
+							{createElement(descriptor.icon, { "aria-hidden": true })}
+							{t(descriptor.labelKey)}
+						</Item>
+					)}
 				</Fragment>
 			))}
 		</>
@@ -219,7 +232,7 @@ export function DriveContextMenuContent({
 				onRestored={onRestored}
 				hiddenActionIds={hiddenActionIds}
 				searchHit={searchHit}
-				family={{ Item: ContextMenuItem, Separator: ContextMenuSeparator }}
+				family={CONTEXT_TREE_MENU_FAMILY}
 			/>
 		</ContextMenuContent>
 	)
@@ -246,7 +259,7 @@ export function DriveDropdownMenuContent({
 				onRestored={onRestored}
 				hiddenActionIds={hiddenActionIds}
 				searchHit={searchHit}
-				family={{ Item: DropdownMenuItem, Separator: DropdownMenuSeparator }}
+				family={DROPDOWN_TREE_MENU_FAMILY}
 			/>
 		</DropdownMenuContent>
 	)

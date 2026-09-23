@@ -245,8 +245,12 @@ export const drive = {
 	// descriptions of state — see driveActionFavorite/driveActionUnfavorite in particular.
 	/** Item menu — rename the selected item; opens the rename dialog */
 	driveActionRename: "Rename",
-	/** Item menu — move the selected item(s); opens the destination picker (driveMoveDialogTitle) */
+	/** Item menu — move the selected item(s): a submenu in the item menus (driveMoveChooseDestination plus a directory tree), the destination picker (driveMoveDialogTitle) from the bulk bar */
 	driveActionMove: "Move",
+	/** Item menu — first entry of the Move submenu; opens the destination picker (driveMoveDialogTitle) */
+	driveMoveChooseDestination: "Choose destination…",
+	/** Item menu — disabled row in a directory-tree submenu (Move) when the directory has no subdirectories */
+	driveTreeMenuNoDirectories: "No directories",
 	/** Item menu — move the selected item(s) to the trash; also the trash-confirm dialog's confirm button */
 	driveActionTrash: "Trash",
 	/** Item menu — restore the selected item(s) out of the trash; also the bulk-restore confirm dialog's confirm button */
@@ -343,7 +347,7 @@ export const drive = {
 	// ── Move dialog ──────────────────────────────────────────────────────────
 	/** Move dialog — title of the destination-directory picker */
 	driveMoveDialogTitle: "Select destination",
-	/** Move dialog — confirm button moving the selection into the currently open directory */
+	/** Move dialog — confirm button moving the selection into the currently open directory; also the Move submenu's per-directory entry */
 	driveMoveHereAction: "Move here",
 	/** Move/import dialog — filter box placeholder and aria-label over the currently listed directories (shared with the import dialog below, same picker component) */
 	driveMoveDialogFilterPlaceholder: "Filter directories",

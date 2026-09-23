@@ -1,4 +1,5 @@
 import type { DriveItem } from "@/features/drive/lib/item"
+import type { DirectoryTreeTarget } from "@/features/drive/components/directoryTreeSubmenu"
 
 // A move destination is illegal for two independent reasons, checked separately so the picker can
 // apply them at different points: entering a row (browsing) only ever needs the first, "Move here"
@@ -51,4 +52,49 @@ export function isMoveConfirmDisabled(
 	targetListing: readonly DriveItem[]
 ): boolean {
 	return isMoveDestinationForbidden(currentAncestry, movedItems) || isMoveNoOp(movedItems, targetListing)
+}
+
+export interface MoveTreeGates {
+	isBrowseDisabled: (target: DirectoryTreeTarget) => boolean
+	isTargetDisabled: (target: DirectoryTreeTarget) => boolean
+}
+
+// The same two gates for the item menu's directory-tree submenu, which knows each directory only by its
+// uuid chain. `readListing` supplies what the dialog would have on screen: a node's parent listing (to
+// find the row itself) and a target's own listing (for the no-op check). An unread target listing
+// keeps "Move here" disabled, as the dialog does until its listing loads.
+export function createMoveTreeGates(
+	movedItems: readonly DriveItem[],
+	readListing: (uuid: string | null) => readonly DriveItem[] | undefined
+): MoveTreeGates {
+	// One uuid index per listing array, so a level of n directories isn't n linear scans.
+	const rowIndexes = new WeakMap<readonly DriveItem[], Map<string, DriveItem>>()
+
+	function findRow(listing: readonly DriveItem[], uuid: string): DriveItem | undefined {
+		let index = rowIndexes.get(listing)
+
+		if (index === undefined) {
+			index = new Map(listing.map(item => [item.data.uuid, item]))
+			rowIndexes.set(listing, index)
+		}
+
+		return index.get(uuid)
+	}
+
+	return {
+		isBrowseDisabled: target => {
+			const parentAncestry = target.ancestry.slice(0, -1)
+			const listing = readListing(parentAncestry.at(-1) ?? null)
+			const row = listing !== undefined && target.uuid !== null ? findRow(listing, target.uuid) : undefined
+
+			return row === undefined
+				? isMoveDestinationForbidden(target.ancestry, movedItems)
+				: isMoveRowDisabled(row, parentAncestry, movedItems)
+		},
+		isTargetDisabled: target => {
+			const listing = readListing(target.uuid)
+
+			return listing === undefined || isMoveConfirmDisabled(target.ancestry, movedItems, listing)
+		}
+	}
 }
