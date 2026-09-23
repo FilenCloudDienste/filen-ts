@@ -1,7 +1,9 @@
 import { useTranslation } from "react-i18next"
-import { FolderSearchIcon } from "lucide-react"
+import { ScissorsIcon, FolderSearchIcon } from "lucide-react"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { ACTION_DEFS } from "@/features/drive/lib/actionDefs"
+import { cutToClipboard } from "@/features/drive/lib/clipboard"
+import { Kbd } from "@/lib/keymap/kbd"
 import { performMove } from "@/features/drive/lib/dnd"
 import { driveListingQueryKey } from "@/features/drive/queries/drive"
 import { queryClient } from "@/queries/client"
@@ -25,7 +27,8 @@ function readDriveListing(uuid: string | null): DriveItem[] | undefined {
 	return queryClient.getQueryData<DriveItem[]>(driveListingQueryKey({ variant: "drive", uuid }))
 }
 
-// "Move" as a submenu: the destination picker first, then the Cloud Drive tree for moving in one pick.
+// "Move" as a submenu: Cut (for a later paste), the destination picker, then the Cloud Drive tree for
+// moving in one pick.
 // A pick runs the drop-to-move path (moveItems, bulk toast, selection prune), which is what the
 // dialog's own confirm runs too, and the tree greys out exactly what the dialog would.
 export function MoveSubmenu({ family, items, disabled, title, onChooseDestination }: MoveSubmenuProps) {
@@ -43,10 +46,23 @@ export function MoveSubmenu({ family, items, disabled, title, onChooseDestinatio
 			disabled={disabled}
 			title={title}
 			leading={
-				<Item onClick={onChooseDestination}>
-					<FolderSearchIcon aria-hidden="true" />
-					{t("driveMoveChooseDestination")}
-				</Item>
+				<>
+					<Item
+						onClick={() => {
+							cutToClipboard(items)
+						}}
+					>
+						<ScissorsIcon aria-hidden="true" />
+						{t("driveClipboardCut")}
+						<span className="ml-auto pl-4">
+							<Kbd action="drive.cut" />
+						</span>
+					</Item>
+					<Item onClick={onChooseDestination}>
+						<FolderSearchIcon aria-hidden="true" />
+						{t("driveMoveChooseDestination")}
+					</Item>
+				</>
 			}
 			actionLabel={t("driveMoveHereAction")}
 			actionIcon={ACTION_DEFS.move.icon}

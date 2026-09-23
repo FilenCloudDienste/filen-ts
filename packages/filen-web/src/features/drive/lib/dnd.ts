@@ -3,6 +3,7 @@ import { driveItemName } from "@filen/shared"
 import { i18n } from "@/lib/i18n"
 import { canDragVariant, assembleDragPayload } from "@/features/drive/lib/dnd.logic"
 import { moveItems } from "@/features/drive/lib/actions"
+import { type BulkOutcome } from "@/features/drive/lib/bulk"
 import { toastBulkOutcome } from "@/features/drive/lib/bulkToast"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import { type DriveItem } from "@/features/drive/lib/item"
@@ -157,14 +158,15 @@ export function buildDragSourceProps(item: DriveItem, variant: DriveVariant): Dr
 	}
 }
 
-// Runs the move for a completed drop, or for a pick in the item menu's directory tree (moveSubmenu.tsx).
+// Runs the move for a completed drop, a pick in the item menu's directory tree (moveSubmenu.tsx), or a
+// pasted cut (clipboard.ts).
 // Reuses moveItems' existing confirm-then-patch machinery (both source and destination listings,
 // cancel-in-flight already inside driveListingQueryUpdate) and the standard bulk toast; a rejection
 // surfaces there via errorLabel. Detaches the payload from the module ref before awaiting so a
 // concurrent dragend clear can't mutate it mid-op.
-export async function performMove(items: readonly DriveItem[], targetUuid: string | null): Promise<void> {
+export async function performMove(items: readonly DriveItem[], targetUuid: string | null): Promise<BulkOutcome<DriveItem>> {
 	if (items.length === 0) {
-		return
+		return { succeeded: [], failed: [] }
 	}
 
 	const moved = items.slice()
@@ -172,4 +174,6 @@ export async function performMove(items: readonly DriveItem[], targetUuid: strin
 
 	toastBulkOutcome(outcome)
 	useDriveStore.getState().removeFromSelection(outcome.succeeded.map(item => item.data.uuid))
+
+	return outcome
 }

@@ -7,6 +7,11 @@ import { createElement } from "react"
 // The pickers' upload paths reach the SDK worker, which is unresolvable under vitest; no case here
 // starts an upload. The HEIC preference is a kv-backed query with no provider in this harness.
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
+// The Paste entry's shortcut badge, reduced to its action id (the registry isn't loaded here).
+vi.mock("@/lib/keymap/kbd", async () => {
+	const { createElement: element } = await import("react")
+	return { Kbd: ({ action }: { action: string }) => element("span", null, ` ${action}`) }
+})
 vi.mock("@/features/drive/queries/drive", async importOriginal => ({
 	...(await importOriginal<typeof import("@/features/drive/queries/drive")>()),
 	useHeicUploadConvertPreferenceQuery: () => ({ data: false, refetch: vi.fn() })
@@ -14,6 +19,7 @@ vi.mock("@/features/drive/queries/drive", async importOriginal => ({
 
 import "@/lib/i18n"
 import { UploadContextMenu, UploadMenu } from "@/features/drive/components/uploadMenu"
+import type { DrivePasteAction } from "@/features/drive/hooks/useDriveClipboard"
 
 afterEach(() => {
 	cleanup()
@@ -34,7 +40,7 @@ function surface() {
 	)
 }
 
-function renderContextMenu(options: { disabled?: boolean } = {}) {
+function renderContextMenu(options: { disabled?: boolean; paste?: DrivePasteAction } = {}) {
 	const onOpen = vi.fn()
 
 	render(
@@ -42,6 +48,7 @@ function renderContextMenu(options: { disabled?: boolean } = {}) {
 			parentUuid: null,
 			disabled: options.disabled ?? false,
 			openPreview: vi.fn(),
+			paste: options.paste,
 			onOpen,
 			render: surface()
 		})
@@ -110,6 +117,25 @@ describe("UploadContextMenu", () => {
 		expect(menuLabels()).toEqual([])
 		expect(onOpen).not.toHaveBeenCalled()
 		expect(event.defaultPrevented).toBe(false)
+	})
+
+	it("offers Paste in both menus, greyed out while there is nothing to paste here", () => {
+		const run = vi.fn()
+
+		render(createElement(UploadMenu, { parentUuid: null, openPreview: vi.fn(), paste: { enabled: false, run } }))
+		fireEvent.click(screen.getByRole("button", { name: "Upload" }))
+
+		const toolbarPaste = screen.getByRole("menuitem", { name: /^Paste/ })
+
+		expect(menuLabels()).toEqual(["Upload files", "Upload directory", "New text file", "Paste drive.paste", "Convert HEIC/HEIF to JPG"])
+		expect(toolbarPaste.getAttribute("aria-disabled")).toBe("true")
+
+		cleanup()
+		renderContextMenu({ paste: { enabled: true, run } })
+		rightClick(screen.getByTestId("blank"))
+		fireEvent.click(screen.getByRole("menuitem", { name: /^Paste/ }))
+
+		expect(run).toHaveBeenCalledOnce()
 	})
 
 	it("does nothing where the toolbar menu is disabled, so empty space behaves as before", () => {

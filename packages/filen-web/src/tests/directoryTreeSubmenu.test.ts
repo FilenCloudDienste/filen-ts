@@ -15,6 +15,11 @@ const { treeResults, performMoveMock, startCopyWithCardMock } = vi.hoisted(() =>
 	startCopyWithCardMock: vi.fn()
 }))
 
+// The clipboard entries' shortcut badge, reduced to its action id (the registry isn't loaded here).
+vi.mock("@/lib/keymap/kbd", async () => {
+	const { createElement: element } = await import("react")
+	return { Kbd: ({ action }: { action: string }) => element("span", null, ` ${action}`) }
+})
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
 vi.mock("@/queries/client", async () => {
 	const { QueryClient: Client } = await import("@tanstack/react-query")
@@ -36,6 +41,7 @@ import { driveListingQueryKey, projectTreeChildren } from "@/features/drive/quer
 import { queryClient } from "@/queries/client"
 import { DROPDOWN_TREE_MENU_FAMILY, DirectoryTreeSubmenu, type DirectoryTreeTarget } from "@/features/drive/components/directoryTreeSubmenu"
 import { MoveSubmenu } from "@/features/drive/components/moveSubmenu"
+import { useDriveClipboardStore } from "@/features/drive/store/useDriveClipboardStore"
 import { CopySubmenu } from "@/features/drive/components/copySubmenu"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { FolderInputIcon } from "lucide-react"
@@ -118,6 +124,19 @@ async function openSubmenu(name: string): Promise<void> {
 	})
 }
 
+const CUT_ENTRY = "Cut drive.cut"
+const COPY_ENTRY = "Copy drive.copy"
+
+function menuItemByText(text: string): HTMLElement {
+	const found = screen.getAllByRole("menuitem").find(entry => entry.textContent === text)
+
+	if (found === undefined) {
+		throw new Error(`no menu item "${text}"`)
+	}
+
+	return found
+}
+
 function menuItem(name: string): HTMLElement {
 	return screen.getByRole("menuitem", { name })
 }
@@ -129,6 +148,7 @@ function isDisabled(element: HTMLElement): boolean {
 beforeEach(() => {
 	treeResults.clear()
 	queryClient.clear()
+	useDriveClipboardStore.getState().clear()
 })
 
 afterEach(() => {
@@ -252,7 +272,7 @@ describe("MoveSubmenu", () => {
 		return { onChooseDestination }
 	}
 
-	it("opens the destination picker from its first entry", async () => {
+	it("opens the destination picker from its entry", async () => {
 		seedTree()
 		const { onChooseDestination } = renderMove([REPORT])
 
@@ -260,6 +280,20 @@ describe("MoveSubmenu", () => {
 		fireEvent.click(menuItem("Choose destination…"))
 
 		expect(onChooseDestination).toHaveBeenCalledOnce()
+		expect(performMoveMock).not.toHaveBeenCalled()
+	})
+
+	it("leads with Cut, which puts the items on the drive clipboard for a later paste", async () => {
+		seedTree()
+		renderMove([REPORT, PHOTOS])
+
+		await openSubmenu("Move")
+		const entries = screen.getAllByRole("menuitem").map(entry => entry.textContent)
+		fireEvent.click(menuItemByText(CUT_ENTRY))
+
+		expect(entries.indexOf(CUT_ENTRY)).toBeLessThan(entries.indexOf("Choose destination…"))
+		expect(entries.indexOf(CUT_ENTRY)).not.toBe(-1)
+		expect(useDriveClipboardStore.getState().entry).toEqual({ mode: "cut", items: [REPORT, PHOTOS] })
 		expect(performMoveMock).not.toHaveBeenCalled()
 	})
 
@@ -337,7 +371,7 @@ describe("CopySubmenu", () => {
 		return { onChooseDestination }
 	}
 
-	it("opens the destination picker from its first entry", async () => {
+	it("opens the destination picker from its entry", async () => {
 		seedTree()
 		const { onChooseDestination } = renderCopy([REPORT])
 
@@ -345,6 +379,17 @@ describe("CopySubmenu", () => {
 		fireEvent.click(menuItem("Choose destination…"))
 
 		expect(onChooseDestination).toHaveBeenCalledOnce()
+		expect(startCopyWithCardMock).not.toHaveBeenCalled()
+	})
+
+	it("leads with Copy, which puts the items on the drive clipboard for a later paste", async () => {
+		seedTree()
+		renderCopy([REPORT])
+
+		await openSubmenu("Copy")
+		fireEvent.click(menuItemByText(COPY_ENTRY))
+
+		expect(useDriveClipboardStore.getState().entry).toEqual({ mode: "copy", items: [REPORT] })
 		expect(startCopyWithCardMock).not.toHaveBeenCalled()
 	})
 

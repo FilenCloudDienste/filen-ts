@@ -9,6 +9,11 @@ import "@/lib/i18n"
 // The row/tile pull the SDK surface in transitively (item menu -> actions); a Vite `?worker` import is
 // unresolvable under vitest and no case here reaches a worker op. The thumbnail + drop hooks are
 // stubbed for the same reason: neither is what these assertions are about.
+// The clipboard entries' shortcut badge, reduced to its action id (the registry isn't loaded here).
+vi.mock("@/lib/keymap/kbd", async () => {
+	const { createElement: element } = await import("react")
+	return { Kbd: ({ action }: { action: string }) => element("span", null, ` ${action}`) }
+})
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
 // The Move submenu's tree levels read through this hook once opened; left loading here, since the tree
 // itself is covered by directoryTreeSubmenu.test.ts.

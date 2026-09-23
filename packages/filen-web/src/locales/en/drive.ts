@@ -236,6 +236,12 @@ export const drive = {
 	driveCommandDownload: "Download",
 	/** Keymap registry — description for the drive.search command */
 	driveCommandSearch: "Search",
+	/** Keymap registry — description for the drive.copy command: marks the selection to be copied by a later paste (drive's own clipboard, not the system one) */
+	driveCommandCopy: "Copy",
+	/** Keymap registry — description for the drive.cut command: marks the selection to be moved by a later paste */
+	driveCommandCut: "Cut",
+	/** Keymap registry — description for the drive.paste command: copies or moves the copied/cut items into the directory on screen */
+	driveCommandPaste: "Paste",
 
 	// ── Item action menu ─────────────────────────────────────────────────────
 	/** Item menu — accessible label for the ⋯ button opening the per-item action menu */
@@ -359,6 +365,22 @@ export const drive = {
 	driveCopyDialogTitle: "Copy to",
 	/** Copy dialog and the Copy submenu's directory tree — button copying the item(s) into the directory currently open or picked; the copy gets a free name if the directory already holds one of that name */
 	driveCopyHereAction: "Copy here",
+
+	// ── Drive clipboard (in-app copy/cut/paste; never the system clipboard) ──
+	/** Copy submenu — first entry: marks the item(s) to be copied into whichever directory the user pastes into later (driveClipboardPaste) */
+	driveClipboardCopy: "Copy",
+	/** Move submenu — first entry: marks the item(s) to be moved into whichever directory the user pastes into later (driveClipboardPaste) */
+	driveClipboardCut: "Cut",
+	/** Upload menu and the listing's empty-space menu — copies or moves the copied/cut item(s) into the directory on screen */
+	driveClipboardPaste: "Paste",
+	/** Toast after Copy (driveClipboardCopy or its shortcut) */
+	driveClipboardCopiedToast_one: "{{count}} item ready to paste",
+	/** Toast after Copy (driveClipboardCopy or its shortcut) */
+	driveClipboardCopiedToast_other: "{{count}} items ready to paste",
+	/** Toast after Cut (driveClipboardCut or its shortcut); pasting moves the item */
+	driveClipboardCutToast_one: "{{count}} item cut — paste it to move it",
+	/** Toast after Cut (driveClipboardCut or its shortcut); pasting moves the items */
+	driveClipboardCutToast_other: "{{count}} items cut — paste them to move them",
 
 	// ── Share dialog (contact picker) ────────────────────────────────────────
 	/** Share dialog — title of the contact picker (opened via driveActionShare); the submit button reuses driveActionShare */

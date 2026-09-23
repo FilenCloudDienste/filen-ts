@@ -11,6 +11,7 @@ import {
 	LIVE_WRITE_TIMEOUT_MS
 } from "./helpers/listing"
 import { FIREFOX_HANG_REASON } from "./helpers/firefox"
+import { resolveModKey } from "./helpers/modkey"
 
 // Copies land through the SDK's copy job (download + re-upload), so each leg waits on the job's own
 // card reaching its end state rather than on the listing alone. Shared-in copies can't be exercised
@@ -135,6 +136,83 @@ test.describe("drive copy", () => {
 			await expect(listbox.getByRole("option", { name: `first-${runId}` })).toHaveCount(2)
 			await expect(listbox.getByRole("option", { name: `second-${runId}` })).toHaveCount(2)
 			await page.getByRole("button", { name: "Hide copy progress" }).click()
+		} finally {
+			await trashScratchDirectory(page, scratchName)
+		}
+	})
+
+	test("copies with mod+c and cuts with mod+x, pasting by key and from the empty-space menu", async ({
+		page,
+		injectedSession,
+		browserName
+	}) => {
+		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+		expect(injectedSession.length).toBeGreaterThan(0)
+
+		const runId = crypto.randomUUID()
+		const scratchName = `e2e-copy-${runId}`
+		const subName = `sub-${runId}`
+		const keptName = `kept-${runId}.txt`
+		const movedName = `moved-${runId}.txt`
+
+		await bootTo(page)
+
+		const mod = await resolveModKey(page)
+
+		try {
+			const { listbox } = await enterScratchDirectory(page, scratchName)
+
+			await createDirectoryViaDialog(page, subName)
+			await uploadTextFile(page, keptName)
+			await uploadTextFile(page, movedName)
+			await expect(listbox.getByRole("option")).toHaveCount(3, { timeout: LIVE_WRITE_TIMEOUT_MS })
+
+			// mod+c in a text field stays the browser's text copy; over the listing it takes the selection.
+			// Focus moves back without a click, which would toggle the selected row off again.
+			const keptRow = listbox.getByRole("option", { name: keptName })
+
+			await keptRow.click()
+			await expect(keptRow).toHaveAttribute("aria-selected", "true")
+			await page.getByRole("searchbox", { name: "Search" }).focus()
+			await page.keyboard.press(`${mod}+c`)
+			await keptRow.focus()
+			await page.keyboard.press(`${mod}+c`)
+			await expect(page.getByText("1 item ready to paste")).toHaveCount(1)
+
+			await descendInto(page, listbox, subName)
+			await waitForListingSettled(page)
+			await page.keyboard.press(`${mod}+v`)
+
+			await expect(page.getByText(`Copied 1 item → ${subName}`)).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
+			await page.getByRole("button", { name: "Hide copy progress" }).click()
+			await expect(listbox.getByRole("option", { name: keptName })).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
+
+			// Cut in the parent, paste into the subdirectory through its empty-space menu: a move.
+			const breadcrumb = page.getByRole("navigation", { name: "Breadcrumb" })
+
+			await breadcrumb.getByRole("link", { name: scratchName, exact: true }).click()
+			await expect(listbox.getByRole("option", { name: movedName })).toBeVisible()
+			await listbox.getByRole("option", { name: movedName }).click()
+			await page.keyboard.press(`${mod}+x`)
+			await expect(page.getByText("1 item cut — paste it to move it")).toBeVisible()
+
+			await descendInto(page, listbox, subName)
+			await expect(listbox.getByRole("option", { name: keptName })).toBeVisible()
+
+			const box = await listbox.boundingBox()
+
+			if (box === null) {
+				throw new Error("the listing has no box")
+			}
+
+			await listbox.click({ button: "right", position: { x: 16, y: box.height - 16 } })
+			await page.getByRole("menuitem", { name: /^Paste/ }).click()
+
+			await expect(listbox.getByRole("option", { name: movedName })).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
+
+			await breadcrumb.getByRole("link", { name: scratchName, exact: true }).click()
+			await expect(listbox.getByRole("option", { name: keptName })).toBeVisible()
+			await expect(listbox.getByRole("option", { name: movedName })).toHaveCount(0)
 		} finally {
 			await trashScratchDirectory(page, scratchName)
 		}

@@ -1,0 +1,91 @@
+import { useTranslation } from "react-i18next"
+import { type HotkeyCallback } from "react-hotkeys-hook"
+import { type DriveItem } from "@/features/drive/lib/item"
+import { type DriveVariant } from "@/features/drive/lib/preferences"
+import { cachedDirectoryName } from "@/features/drive/queries/drive"
+import { canCopyToClipboard, canCutToClipboard, canPaste, shouldHandleClipboardShortcut } from "@/features/drive/lib/clipboard.logic"
+import { copyToClipboard, cutToClipboard, pasteClipboard } from "@/features/drive/lib/clipboard"
+import { useDriveClipboardStore } from "@/features/drive/store/useDriveClipboardStore"
+import { isAnyDialogOpen, isAnyMenuOpen } from "@/lib/keymap/dialogGuard"
+import { useAction } from "@/lib/keymap/useAction"
+
+export interface DrivePasteAction {
+	enabled: boolean
+	run: () => void
+}
+
+export interface UseDriveClipboardParams {
+	variant: DriveVariant
+	// The directory on screen and its root-to-directory uuid chain.
+	uuid: string | null
+	ancestry: readonly string[]
+	// Its listing; undefined until it has loaded.
+	listing: readonly DriveItem[] | undefined
+	selectedItems: readonly DriveItem[]
+	isOnline: boolean
+	isDialogOpen: boolean
+}
+
+function hasTextSelection(): boolean {
+	const selection = window.getSelection()
+
+	return selection !== null && !selection.isCollapsed
+}
+
+// The listing's mod+c/x/v and the Paste entry its menus show. Each shortcut stands down (without
+// preventDefault) whenever it has nothing to do, so the browser's own copy/paste still runs.
+export function useDriveClipboard({
+	variant,
+	uuid,
+	ancestry,
+	listing,
+	selectedItems,
+	isOnline,
+	isDialogOpen
+}: UseDriveClipboardParams): DrivePasteAction {
+	const { t } = useTranslation("drive")
+	const entry = useDriveClipboardStore(state => state.entry)
+	const pasteEnabled = canPaste(entry, { variant, uuid, ancestry, listing, online: isOnline })
+
+	function paste(): void {
+		void pasteClipboard({ uuid, name: uuid === null ? t("driveMyDrive") : (cachedDirectoryName(uuid) ?? "") })
+	}
+
+	function claims(event: KeyboardEvent, textMatters: boolean): boolean {
+		return (
+			!isDialogOpen &&
+			shouldHandleClipboardShortcut({
+				target: event.target,
+				overlayOpen: isAnyDialogOpen() || isAnyMenuOpen(),
+				textSelected: textMatters && hasTextSelection()
+			})
+		)
+	}
+
+	const onCopy: HotkeyCallback = event => {
+		if (claims(event, true) && canCopyToClipboard(selectedItems, variant)) {
+			event.preventDefault()
+			copyToClipboard(selectedItems)
+		}
+	}
+
+	const onCut: HotkeyCallback = event => {
+		if (claims(event, true) && canCutToClipboard(selectedItems, variant)) {
+			event.preventDefault()
+			cutToClipboard(selectedItems)
+		}
+	}
+
+	const onPaste: HotkeyCallback = event => {
+		if (claims(event, false) && pasteEnabled) {
+			event.preventDefault()
+			paste()
+		}
+	}
+
+	useAction("drive.copy", onCopy, undefined, [onCopy])
+	useAction("drive.cut", onCut, undefined, [onCut])
+	useAction("drive.paste", onPaste, undefined, [onPaste])
+
+	return { enabled: pasteEnabled, run: paste }
+}

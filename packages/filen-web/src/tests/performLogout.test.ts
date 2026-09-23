@@ -58,6 +58,7 @@ vi.mock("sonner", () => ({ toast: { warning: toastWarning } }))
 import { usePreviewUnsavedGuardStore } from "@/features/preview/store/usePreviewUnsavedGuard"
 import { performLogout } from "@/features/shell/lib/performLogout"
 import { consumeUnloadAllowance } from "@/lib/unloadGuard"
+import { useDriveClipboardStore } from "@/features/drive/store/useDriveClipboardStore"
 import { getPreviewBytes, loadPreviewBytes } from "@/features/preview/lib/previewCache"
 
 // Stands in for the overlay's unsaved-changes prompt: waits for the request the guard armed, then
@@ -129,6 +130,14 @@ describe("performLogout", () => {
 		await expect(performLogout()).resolves.toBe(true)
 
 		expect(getPreviewBytes("authed", "file-uuid")).toBeUndefined()
+	})
+
+	it("empties the drive clipboard, whose items belong to this account", async () => {
+		useDriveClipboardStore.getState().set({ mode: "cut", items: [] })
+
+		await expect(performLogout()).resolves.toBe(true)
+
+		expect(useDriveClipboardStore.getState().entry).toBeNull()
 	})
 
 	it("a forced sign-out with a clean buffer never shows the pending notice", async () => {

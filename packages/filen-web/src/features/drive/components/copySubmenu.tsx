@@ -1,7 +1,9 @@
 import { useTranslation } from "react-i18next"
-import { FolderSearchIcon } from "lucide-react"
+import { ClipboardCopyIcon, FolderSearchIcon } from "lucide-react"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { ACTION_DEFS } from "@/features/drive/lib/actionDefs"
+import { copyToClipboard } from "@/features/drive/lib/clipboard"
+import { Kbd } from "@/lib/keymap/kbd"
 import { cachedDirectoryName, driveListingQueryKey } from "@/features/drive/queries/drive"
 import { queryClient } from "@/queries/client"
 import { useIsOnline } from "@/lib/useIsOnline"
@@ -34,8 +36,8 @@ function targetName(target: DirectoryTreeTarget, rootName: string): string {
 	return target.uuid === null ? rootName : (cachedDirectoryName(target.uuid) ?? "")
 }
 
-// "Copy" as a submenu, the Move submenu's twin: the destination picker first, then the Cloud Drive tree
-// for copying in one pick. Unlike a move, the source's own directory is a valid target (the copy gets
+// "Copy" as a submenu, the Move submenu's twin: Copy (for a later paste), the destination picker, then
+// the Cloud Drive tree for copying in one pick. Unlike a move, the source's own directory is a valid target (the copy gets
 // a free name there); only the copied directories themselves and their descendants are not.
 export function CopySubmenu({ family, items, disabled, title, onChooseDestination }: CopySubmenuProps) {
 	const { t } = useTranslation("drive")
@@ -52,10 +54,23 @@ export function CopySubmenu({ family, items, disabled, title, onChooseDestinatio
 			disabled={disabled}
 			title={title}
 			leading={
-				<Item onClick={onChooseDestination}>
-					<FolderSearchIcon aria-hidden="true" />
-					{t("driveMoveChooseDestination")}
-				</Item>
+				<>
+					<Item
+						onClick={() => {
+							copyToClipboard(items)
+						}}
+					>
+						<ClipboardCopyIcon aria-hidden="true" />
+						{t("driveClipboardCopy")}
+						<span className="ml-auto pl-4">
+							<Kbd action="drive.copy" />
+						</span>
+					</Item>
+					<Item onClick={onChooseDestination}>
+						<FolderSearchIcon aria-hidden="true" />
+						{t("driveMoveChooseDestination")}
+					</Item>
+				</>
 			}
 			actionLabel={t("driveCopyHereAction")}
 			actionIcon={ACTION_DEFS.copy.icon}

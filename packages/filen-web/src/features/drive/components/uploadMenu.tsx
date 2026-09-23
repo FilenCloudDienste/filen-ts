@@ -30,6 +30,8 @@ import {
 	ContextMenuTrigger
 } from "@/components/ui/context-menu"
 import { InputDialog } from "@/components/dialogs/inputDialog"
+import { Kbd } from "@/lib/keymap/kbd"
+import type { DrivePasteAction } from "@/features/drive/hooks/useDriveClipboard"
 
 export interface UploadMenuProps {
 	// The directory uploaded files land in — the current listing's own uuid (null at My Drive's root).
@@ -48,6 +50,8 @@ export interface UploadMenuProps {
 	offline?: boolean
 	// True when this listing would actually hide a dot-prefixed name — see NewDirectory's identical prop.
 	hiddenNotice?: boolean
+	// Pastes the drive clipboard into the directory this menu writes into (useDriveClipboard).
+	paste?: DrivePasteAction | undefined
 }
 
 interface UploadMenuActions {
@@ -220,7 +224,15 @@ const CONTEXT_FAMILY: UploadMenuFamily = {
 // The one entry list both surfaces render. "New text file" rides the same trigger/gating as the two
 // upload pickers rather than a separate button, since it's the same "put a new file into this
 // directory" family (mobile nests it under its own create menu for the identical reason).
-function UploadMenuEntries({ actions, family }: { actions: UploadMenuActions; family: UploadMenuFamily }) {
+function UploadMenuEntries({
+	actions,
+	family,
+	paste
+}: {
+	actions: UploadMenuActions
+	family: UploadMenuFamily
+	paste: DrivePasteAction | undefined
+}) {
 	const { t } = useTranslation("drive")
 	const { Item, Separator, CheckboxItem } = family
 
@@ -230,6 +242,20 @@ function UploadMenuEntries({ actions, family }: { actions: UploadMenuActions; fa
 			<Item onClick={actions.pickDirectory}>{t("driveUploadDirectory")}</Item>
 			<Item onClick={actions.newTextFile}>{t("driveNewTextFile")}</Item>
 			<Separator />
+			{paste === undefined ? null : (
+				<>
+					<Item
+						disabled={!paste.enabled}
+						onClick={paste.run}
+					>
+						{t("driveClipboardPaste")}
+						<span className="ml-auto pl-4">
+							<Kbd action="drive.paste" />
+						</span>
+					</Item>
+					<Separator />
+				</>
+			)}
 			<CheckboxItem
 				checked={actions.heicConvert}
 				onCheckedChange={actions.setHeicConvert}
@@ -241,7 +267,7 @@ function UploadMenuEntries({ actions, family }: { actions: UploadMenuActions; fa
 }
 
 // Toolbar entry point for starting an upload.
-export function UploadMenu({ parentUuid, disabled = false, openPreview, offline = false, hiddenNotice = false }: UploadMenuProps) {
+export function UploadMenu({ parentUuid, disabled = false, openPreview, offline = false, hiddenNotice = false, paste }: UploadMenuProps) {
 	const { t } = useTranslation(["drive", "common"])
 	const actions = useUploadMenuActions({ parentUuid, disabled, openPreview, hiddenNotice })
 
@@ -269,6 +295,7 @@ export function UploadMenu({ parentUuid, disabled = false, openPreview, offline 
 					<UploadMenuEntries
 						actions={actions}
 						family={DROPDOWN_FAMILY}
+						paste={paste}
 					/>
 				</DropdownMenuContent>
 			</DropdownMenu>
@@ -294,6 +321,7 @@ export function UploadContextMenu({
 	disabled = false,
 	openPreview,
 	hiddenNotice = false,
+	paste,
 	render,
 	onOpen
 }: UploadContextMenuProps) {
@@ -344,6 +372,7 @@ export function UploadContextMenu({
 					<UploadMenuEntries
 						actions={actions}
 						family={CONTEXT_FAMILY}
+						paste={paste}
 					/>
 				</ContextMenuContent>
 			</ContextMenu>

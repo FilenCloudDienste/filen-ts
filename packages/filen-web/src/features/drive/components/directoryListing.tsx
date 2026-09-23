@@ -77,6 +77,7 @@ import { useDriveListboxNav } from "@/features/drive/hooks/useDriveListboxNav"
 import { useMarqueeSelection } from "@/features/drive/hooks/useMarqueeSelection"
 import { useClickAwayDeselect } from "@/features/drive/hooks/useClickAwayDeselect"
 import { useDriveDialogHost } from "@/features/drive/hooks/useDriveDialogHost"
+import { useDriveClipboard } from "@/features/drive/hooks/useDriveClipboard"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { Spinner } from "@/components/ui/spinner"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
@@ -537,6 +538,18 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 		[reconciledSelectedItems, isDialogOpen, variant, isOnline]
 	)
 
+	// mod+c/x/v and the Paste entry in the upload menus. A paste always lands in the directory on
+	// screen, whatever is selected.
+	const paste = useDriveClipboard({
+		variant,
+		uuid,
+		ancestry: pathUuids,
+		listing: listingQuery.status === "success" ? listingQuery.data : undefined,
+		selectedItems: reconciledSelectedItems,
+		isOnline,
+		isDialogOpen
+	})
+
 	const isSearchTruncated = search.active && search.total > BigInt(resolvedCount)
 	const searchFooterVisible = search.active && (search.status === "background" || isSearchTruncated)
 	// Every row that exists here was removed by the display filter — the "No matches"/"Nothing here
@@ -569,6 +582,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 				disabled={writeDisabled}
 				openPreview={openPreview}
 				hiddenNotice={hideHidden}
+				paste={paste}
 				onOpen={clearSelection}
 				render={surface}
 			/>
@@ -610,6 +624,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 								parentUuid={uuid}
 								openPreview={openPreview}
 								hiddenNotice={hideHidden}
+								paste={paste}
 							/>
 						</>
 					)
@@ -823,6 +838,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 						openPreview={openPreview}
 						offline={!isOnline}
 						hiddenNotice={hideHidden}
+						paste={paste}
 					/>
 				</div>
 			</header>
