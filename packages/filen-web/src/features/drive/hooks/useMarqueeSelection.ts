@@ -1,18 +1,19 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react"
 import { type DriveViewMode } from "@/features/drive/lib/preferences"
 import {
+	DRAG_THRESHOLD_PX,
+	clampMarqueeRect,
+	marqueeAutoScrollTop,
 	marqueeAutoScrollVelocity,
 	marqueeContentBox,
 	marqueeIndexAtPoint,
 	marqueeIndices,
 	marqueeRectFromPoints,
+	marqueeScrollBounds,
 	type MarqueeContentBox,
 	type MarqueeContentRect
 } from "@/features/drive/lib/marquee.logic"
 
-// A plain click (or a sub-threshold wiggle) must never arm the rectangle — otherwise a zero-size
-// replace-mode marquee would clear the selection on every click. Only a drag past this starts it.
-const START_THRESHOLD_PX = 4
 // Windows-Explorer edge auto-scroll: within this many px of the container's top/bottom, the listing
 // scrolls while marqueeing, at up to this many px per frame (ramped by proximity).
 const AUTO_SCROLL_EDGE_PX = 32
@@ -145,7 +146,12 @@ export function useMarqueeSelection<T extends MarqueeItem>({
 		const box = contentBoxFor(el, drag)
 		const contentX = clientX - bounds.left - box.insetLeft
 		const contentY = clientY - bounds.top - box.insetTop + el.scrollTop
-		const marqueeRect = marqueeRectFromPoints(drag.anchorX, drag.anchorY, contentX, contentY)
+		// Bounded by the live scrollHeight, which the clamped rectangle can never exceed — so it can never
+		// grow it either.
+		const marqueeRect = clampMarqueeRect(
+			marqueeRectFromPoints(drag.anchorX, drag.anchorY, contentX, contentY),
+			marqueeScrollBounds(box, el.clientLeft, el.clientTop, el.clientWidth, el.scrollHeight)
+		)
 		const items = itemsRef.current
 		const geometry = geometryRef.current
 		const indices = marqueeIndices(
@@ -268,8 +274,7 @@ export function useMarqueeSelection<T extends MarqueeItem>({
 		)
 
 		if (velocity !== 0) {
-			const maxScroll = el.scrollHeight - el.clientHeight
-			const nextTop = Math.min(maxScroll, Math.max(0, el.scrollTop + velocity))
+			const nextTop = marqueeAutoScrollTop(el.scrollTop, velocity, el.scrollHeight, el.clientHeight)
 
 			if (nextTop !== el.scrollTop) {
 				el.scrollTop = nextTop
@@ -294,7 +299,7 @@ export function useMarqueeSelection<T extends MarqueeItem>({
 			const dx = event.clientX - drag.startClientX
 			const dy = event.clientY - drag.startClientY
 
-			if (Math.hypot(dx, dy) < START_THRESHOLD_PX) {
+			if (Math.hypot(dx, dy) < DRAG_THRESHOLD_PX) {
 				return
 			}
 

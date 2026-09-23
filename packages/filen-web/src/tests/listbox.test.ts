@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest"
-import { clampListboxIndex, listboxKeyTarget, listboxRange, resolveCursorIndex } from "@/features/drive/lib/listbox"
+import {
+	clampListboxIndex,
+	clickPointerType,
+	isPlainClickDeselect,
+	listboxKeyTarget,
+	listboxRange,
+	resolveCursorIndex
+} from "@/features/drive/lib/listbox"
 
 describe("clampListboxIndex", () => {
 	it("passes through an index already in range", () => {
@@ -111,5 +118,49 @@ describe("listboxKeyTarget", () => {
 	it("returns out-of-range targets raw — clamping is the caller's job", () => {
 		expect(listboxKeyTarget("ArrowDown", 9, 10, 4, true)).toBe(13)
 		expect(listboxKeyTarget("ArrowUp", 0, 10, 4, true)).toBe(-4)
+	})
+})
+
+describe("isPlainClickDeselect", () => {
+	const a = { data: { uuid: "a" } }
+	const b = { data: { uuid: "b" } }
+
+	it("deselects when the clicked item is the whole selection", () => {
+		expect(isPlainClickDeselect([a], "a", 1, "mouse")).toBe(true)
+	})
+
+	it("selects an item that is not selected yet", () => {
+		expect(isPlainClickDeselect([], "a", 1, "mouse")).toBe(false)
+		expect(isPlainClickDeselect([b], "a", 1, "mouse")).toBe(false)
+	})
+
+	it("narrows to the clicked item when several are selected, even if it is one of them", () => {
+		expect(isPlainClickDeselect([a, b], "a", 1, "mouse")).toBe(false)
+	})
+
+	it("never toggles off on the second click of a double-click, so the open keeps its item selected", () => {
+		// Unselected item: click 1 selects it, click 2 (detail 2) must not undo that.
+		expect(isPlainClickDeselect([a], "a", 2, "mouse")).toBe(false)
+		// A triple click is no different.
+		expect(isPlainClickDeselect([a], "a", 3, "mouse")).toBe(false)
+	})
+
+	it("keeps tap-to-select for touch", () => {
+		expect(isPlainClickDeselect([a], "a", 1, "touch")).toBe(false)
+	})
+
+	it("treats pen and an unknown pointer type like a mouse", () => {
+		expect(isPlainClickDeselect([a], "a", 1, "pen")).toBe(true)
+		expect(isPlainClickDeselect([a], "a", 1, "")).toBe(true)
+	})
+})
+
+describe("clickPointerType", () => {
+	it("reads the pointer type off a PointerEvent-shaped click", () => {
+		expect(clickPointerType({ pointerType: "touch" } as unknown as MouseEvent)).toBe("touch")
+	})
+
+	it("returns an empty string for a plain MouseEvent", () => {
+		expect(clickPointerType({ button: 0 } as unknown as MouseEvent)).toBe("")
 	})
 })

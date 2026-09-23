@@ -76,3 +76,22 @@ export function listboxKeyTarget(key: string, activeIndex: number, itemCount: nu
 
 	return null
 }
+
+// A plain click on the item that already IS the whole selection deselects it. Only the first click of a
+// sequence (`clickCount` is the event's `detail`): the second click of a double-click lands on the item
+// the first one just selected or deselected, and has to leave it selected for the open that follows.
+// Touch is left as it was: a tap always selects.
+export function isPlainClickDeselect(
+	selected: readonly { data: { uuid: string } }[],
+	uuid: string,
+	clickCount: number,
+	pointerType: string
+): boolean {
+	return clickCount === 1 && pointerType !== "touch" && selected.length === 1 && selected[0]?.data.uuid === uuid
+}
+
+// The pointer type behind a click, or "" where the browser still dispatches click as a plain MouseEvent
+// (read as a mouse by isPlainClickDeselect).
+export function clickPointerType(event: MouseEvent): string {
+	return "pointerType" in event && typeof event.pointerType === "string" ? event.pointerType : ""
+}

@@ -1,7 +1,7 @@
 import type { Locator } from "@playwright/test"
 import { test, expect } from "./fixtures"
-import { enterFixtureDirectory } from "./helpers/fixtures"
-import { bootTo } from "./helpers/listing"
+import { enterFixtureDirectory, enterFixtureRoot } from "./helpers/fixtures"
+import { bootTo, waitForListingSettled } from "./helpers/listing"
 import { MOD_KEY } from "./helpers/modkey"
 import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
@@ -84,5 +84,137 @@ test.describe("drive rubber-band selection", () => {
 		// ...and Escape put the pre-drag five back, never clearing.
 		await expect(page.getByText("5 selected", { exact: true })).toBeVisible()
 		await assertSelected([1, 2, 3, 4, 5])
+	})
+
+	test("a marquee dragged past a short listing's edges never scrolls it or grows its content", async ({
+		page,
+		injectedSession,
+		browserName
+	}) => {
+		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+		expect(injectedSession.length).toBeGreaterThan(0)
+
+		await bootTo(page)
+
+		const { listbox } = await enterFixtureDirectory(page, "marquee")
+		const options = listbox.getByRole("option")
+		await expect(options).toHaveCount(6)
+
+		// Back to a desktop-sized window: six rows still fit, and the pointer can now leave the listbox
+		// through its bottom edge while staying inside the page.
+		await page.setViewportSize({ width: 1280, height: 720 })
+
+		const metrics = (): Promise<{ scrollTop: number; scrollHeight: number; clientHeight: number }> =>
+			listbox.evaluate(el => ({ scrollTop: el.scrollTop, scrollHeight: el.scrollHeight, clientHeight: el.clientHeight }))
+		const before = await metrics()
+		expect(before.scrollHeight).toBe(before.clientHeight)
+
+		const listboxBox = await boxOf(listbox)
+		const box5 = await boxOf(options.nth(5))
+		const centerX = listboxBox.x + listboxBox.width / 2
+		const blankY = box5.y + box5.height + 20
+		const viewport = page.viewportSize()
+
+		if (!viewport) {
+			throw new Error("expected a fixed viewport")
+		}
+
+		// Down: past the listbox's bottom edge to the window's last pixel row, then hold there long enough
+		// for the edge auto-scroll to run many frames.
+		await page.mouse.move(centerX, blankY)
+		await page.mouse.down()
+		await page.mouse.move(centerX, viewport.height - 1, { steps: 12 })
+		await expect(page.getByTestId("marquee-rect")).toBeVisible()
+		await page.waitForTimeout(1_000)
+
+		const down = await metrics()
+		expect(down.scrollTop).toBe(Math.max(0, before.scrollHeight - before.clientHeight))
+		expect(down.scrollHeight).toBe(before.scrollHeight)
+
+		// Up: past the top edge, same hold.
+		await page.mouse.move(centerX, 1, { steps: 12 })
+		await page.waitForTimeout(1_000)
+
+		const up = await metrics()
+		expect(up.scrollTop).toBe(0)
+		expect(up.scrollHeight).toBe(before.scrollHeight)
+
+		await page.mouse.up()
+		await expect(page.getByTestId("marquee-rect")).toHaveCount(0)
+	})
+
+	test("a click away from the items clears the selection, a click on the sole selected row deselects it, and a double-click still opens", async ({
+		page,
+		injectedSession,
+		browserName
+	}) => {
+		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+		expect(injectedSession.length).toBeGreaterThan(0)
+
+		await bootTo(page)
+
+		const { listbox: rootListbox } = await enterFixtureRoot(page)
+		const breadcrumb = page.getByRole("navigation", { name: "Breadcrumb" })
+		// Token-anchored like helpers/listing.ts's own row lookup: the row's accessible name carries its
+		// size/date columns after the item name.
+		const marqueeDir = rootListbox.getByRole("option", { name: /(^|\s)marquee(\s|$)/ })
+
+		// Double-click on the sole selected directory: its first click deselects, the second (detail 2)
+		// must not leave it deselected, and the dblclick still navigates.
+		await marqueeDir.click()
+		await expect(marqueeDir).toHaveAttribute("aria-selected", "true")
+		await marqueeDir.dblclick()
+		await expect(breadcrumb.getByText("marquee", { exact: true })).toBeVisible()
+
+		const { listbox } = await waitForListingSettled(page)
+		const options = listbox.getByRole("option")
+		await expect(options).toHaveCount(6)
+
+		const selectedBar = page.getByText(/^\d+ selected$/)
+		const first = options.nth(0)
+		const box5 = await boxOf(options.nth(5))
+		const listboxBox = await boxOf(listbox)
+
+		// Empty listing space below the last row.
+		await first.click()
+		await expect(page.getByText("1 selected", { exact: true })).toBeVisible()
+		await page.mouse.click(listboxBox.x + listboxBox.width / 2, box5.y + box5.height + 40)
+		await expect(listbox.getByRole("option", { selected: true })).toHaveCount(0)
+		await expect(selectedBar).toHaveCount(0)
+
+		// The page header's background, in the gap between the breadcrumb and the action buttons.
+		const header = page.locator("header", { has: breadcrumb })
+		const headerBox = await boxOf(header)
+		const breadcrumbBox = await boxOf(breadcrumb)
+
+		await first.click()
+		await expect(page.getByText("1 selected", { exact: true })).toBeVisible()
+		await page.mouse.click(breadcrumbBox.x + breadcrumbBox.width + 40, headerBox.y + headerBox.height / 2)
+		await expect(selectedBar).toHaveCount(0)
+
+		// A control that acts around the selection keeps it — including the press that closes its menu.
+		await first.click()
+		await page.getByRole("button", { name: "Sort by", exact: true }).click()
+		await expect(page.getByRole("menu")).toBeVisible()
+		await expect(page.getByText("1 selected", { exact: true })).toBeVisible()
+		await page.mouse.click(listboxBox.x + listboxBox.width / 2, box5.y + box5.height + 40)
+		await expect(page.getByRole("menu")).toHaveCount(0)
+		await expect(page.getByText("1 selected", { exact: true })).toBeVisible()
+		await expect(first).toHaveAttribute("aria-selected", "true")
+
+		// Clicking the sole selected row again deselects it.
+		await first.click()
+		await expect(first).toHaveAttribute("aria-selected", "false")
+		await expect(selectedBar).toHaveCount(0)
+
+		// A marquee released over empty space (the column header above the listbox) is a drag, not a
+		// click-away: its selection survives the release.
+		const centerX = listboxBox.x + listboxBox.width / 2
+
+		await page.mouse.move(centerX, box5.y + box5.height + 40)
+		await page.mouse.down()
+		await page.mouse.move(centerX, listboxBox.y - 10, { steps: 12 })
+		await page.mouse.up()
+		await expect(page.getByText("6 selected", { exact: true })).toBeVisible()
 	})
 })

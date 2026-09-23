@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
+	clampMarqueeRect,
+	marqueeAutoScrollTop,
 	marqueeAutoScrollVelocity,
 	marqueeContentBox,
 	marqueeGridIndices,
@@ -7,6 +9,7 @@ import {
 	marqueeIndices,
 	marqueeListIndices,
 	marqueeRectFromPoints,
+	marqueeScrollBounds,
 	type MarqueeContentRect
 } from "@/features/drive/lib/marquee.logic"
 
@@ -239,5 +242,110 @@ describe("marqueeContentBox", () => {
 
 	it("clamps the width at 0 rather than going negative when padding exceeds the container", () => {
 		expect(marqueeContentBox(0, 0, 20, 30, 0, 30)).toEqual({ insetLeft: 30, insetTop: 0, width: 0 })
+	})
+})
+
+describe("clampMarqueeRect", () => {
+	// An unpadded 800x600 scroll area.
+	const AREA = { top: 0, bottom: 600, left: 0, right: 800 }
+
+	it("leaves a rect already inside the scroll area untouched", () => {
+		expect(clampMarqueeRect({ top: 10, bottom: 50, left: 5, right: 200 }, AREA)).toEqual({ top: 10, bottom: 50, left: 5, right: 200 })
+	})
+
+	it("stops a downward drag at the scroll area's bottom edge instead of growing past it", () => {
+		expect(clampMarqueeRect({ top: 100, bottom: 5000, left: 0, right: 100 }, AREA)).toEqual({
+			top: 100,
+			bottom: 600,
+			left: 0,
+			right: 100
+		})
+	})
+
+	it("stops an upward drag at the top edge", () => {
+		expect(clampMarqueeRect({ top: -300, bottom: 100, left: 0, right: 100 }, AREA)).toEqual({
+			top: 0,
+			bottom: 100,
+			left: 0,
+			right: 100
+		})
+	})
+
+	it("clips both horizontal sides", () => {
+		expect(clampMarqueeRect({ top: 0, bottom: 10, left: -40, right: 1200 }, AREA)).toEqual({ top: 0, bottom: 10, left: 0, right: 800 })
+	})
+
+	it("collapses onto the edge when the whole rect lies past it", () => {
+		expect(clampMarqueeRect({ top: 700, bottom: 900, left: 0, right: 10 }, AREA)).toEqual({ top: 600, bottom: 600, left: 0, right: 10 })
+	})
+
+	it("lets the rect reach into a padded container's padding (negative content space)", () => {
+		const padded = { top: 0, bottom: 600, left: -16, right: 784 }
+
+		expect(clampMarqueeRect({ top: 20, bottom: 40, left: -8, right: 100 }, padded)).toEqual({
+			top: 20,
+			bottom: 40,
+			left: -8,
+			right: 100
+		})
+		expect(clampMarqueeRect({ top: 20, bottom: 40, left: -30, right: 900 }, padded)).toEqual({
+			top: 20,
+			bottom: 40,
+			left: -16,
+			right: 784
+		})
+	})
+
+	it("selects the same rows as the unclamped rect", () => {
+		const raw = { top: 200, bottom: 100000, left: -50, right: 5000 }
+
+		expect(marqueeListIndices(clampMarqueeRect(raw, { top: 0, bottom: 400, left: 0, right: 800 }), 10, ROW)).toEqual(
+			marqueeListIndices(raw, 10, ROW)
+		)
+	})
+})
+
+describe("marqueeScrollBounds", () => {
+	it("is the plain client area for an unpadded, borderless container", () => {
+		const box = marqueeContentBox(0, 0, 800, 0, 0, 0)
+
+		expect(marqueeScrollBounds(box, 0, 0, 800, 600)).toEqual({ top: 0, bottom: 600, left: 0, right: 800 })
+	})
+
+	it("reaches back over the padding, since content space starts inside it", () => {
+		const box = marqueeContentBox(0, 0, 800, 16, 8, 16)
+
+		expect(marqueeScrollBounds(box, 0, 0, 800, 2000)).toEqual({ top: -8, bottom: 1992, left: -16, right: 784 })
+	})
+
+	it("excludes the border, which clientLeft/clientTop fold into the insets", () => {
+		const box = marqueeContentBox(2, 3, 800, 16, 8, 16)
+
+		expect(marqueeScrollBounds(box, 2, 3, 800, 600)).toEqual({ top: -8, bottom: 592, left: -16, right: 784 })
+	})
+})
+
+describe("marqueeAutoScrollTop", () => {
+	it("never scrolls content that fits (scrollHeight === clientHeight)", () => {
+		expect(marqueeAutoScrollTop(0, 18, 600, 600)).toBe(0)
+		expect(marqueeAutoScrollTop(0, -18, 600, 600)).toBe(0)
+	})
+
+	it("advances by the velocity inside the scroll range", () => {
+		expect(marqueeAutoScrollTop(100, 18, 2000, 600)).toBe(118)
+		expect(marqueeAutoScrollTop(100, -18, 2000, 600)).toBe(82)
+	})
+
+	it("pins at the maximum offset at the bottom", () => {
+		expect(marqueeAutoScrollTop(1395, 18, 2000, 600)).toBe(1400)
+		expect(marqueeAutoScrollTop(1400, 18, 2000, 600)).toBe(1400)
+	})
+
+	it("pins at 0 at the top", () => {
+		expect(marqueeAutoScrollTop(5, -18, 2000, 600)).toBe(0)
+	})
+
+	it("treats a container taller than its content as unscrollable", () => {
+		expect(marqueeAutoScrollTop(0, 18, 300, 600)).toBe(0)
 	})
 })

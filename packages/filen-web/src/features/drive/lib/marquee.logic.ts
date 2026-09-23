@@ -177,6 +177,51 @@ export function marqueeIndexAtPoint(
 	return index < itemCount ? index : -1
 }
 
+// Pointer travel (px) that turns a press into a drag. Below it the press is still a click: the marquee
+// never arms (a zero-size replace-mode marquee would clear the selection on every click), and a
+// click-away may still clear the selection.
+export const DRAG_THRESHOLD_PX = 4
+
+// Pins a content-space rect inside `bounds` (the scroll container's scrollable area, in the same content
+// space — see marqueeScrollBounds). The rectangle is rendered inside the scroll content, so any part of
+// it past that area's far edge becomes scrollable overflow itself: dragging below a short listing then
+// grew scrollHeight, the edge auto-scroll advanced into the new room, the rectangle stretched with it,
+// and the listing scrolled away without end. Clipping leaves the hit-test unchanged — nothing selectable
+// lies outside the scrollable area.
+export function clampMarqueeRect(rect: MarqueeContentRect, bounds: MarqueeContentRect): MarqueeContentRect {
+	const top = Math.min(bounds.top, bounds.bottom)
+	const left = Math.min(bounds.left, bounds.right)
+
+	return {
+		top: Math.min(bounds.bottom, Math.max(top, rect.top)),
+		bottom: Math.min(bounds.bottom, Math.max(top, rect.bottom)),
+		left: Math.min(bounds.right, Math.max(left, rect.left)),
+		right: Math.min(bounds.right, Math.max(left, rect.right))
+	}
+}
+
+// The scroll container's whole scrollable area (padding box, scrollHeight tall) in content space, whose
+// origin sits `box.insetLeft`/`box.insetTop` inside it — so the rectangle can still reach into the
+// padding, where the pointer can be, without ever extending the area.
+export function marqueeScrollBounds(
+	box: MarqueeContentBox,
+	clientLeft: number,
+	clientTop: number,
+	clientWidth: number,
+	scrollHeight: number
+): MarqueeContentRect {
+	const left = clientLeft - box.insetLeft
+	const top = clientTop - box.insetTop
+
+	return { top, bottom: top + scrollHeight, left, right: left + clientWidth }
+}
+
+// One auto-scroll frame's next scrollTop, kept inside the real scroll range: a listing whose content
+// fits never moves, and one that overflows stops at either end.
+export function marqueeAutoScrollTop(scrollTop: number, velocity: number, scrollHeight: number, clientHeight: number): number {
+	return Math.min(Math.max(0, scrollHeight - clientHeight), Math.max(0, scrollTop + velocity))
+}
+
 // Signed px/frame the scroll container should advance when the pointer nears its top/bottom edge while
 // marqueeing. Negative = scroll up, positive = down, 0 = outside both edge zones. Magnitude ramps
 // linearly with proximity, capped at `maxSpeed`; a pointer past the edge (outside the container) pins to

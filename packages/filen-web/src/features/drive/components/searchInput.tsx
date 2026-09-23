@@ -4,6 +4,7 @@ import { SearchIcon, XIcon } from "lucide-react"
 import { useAction } from "@/lib/keymap/useAction"
 import { isAnyDialogOpen } from "@/lib/keymap/dialogGuard"
 import { Kbd } from "@/lib/keymap/kbd"
+import { KEEP_SELECTION_PROPS } from "@/features/drive/lib/clickAway.logic"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 
@@ -48,7 +49,10 @@ export function SearchInput({ value, onChange, onClear, dialogOpen }: SearchInpu
 		// min-w-0: the input's own intrinsic width is this wrapper's flex floor otherwise, and the controls
 		// row beside it cannot shrink at all — on a narrow card the box would be pushed past the content
 		// card's edge instead of narrowing.
-		<div className="relative w-full max-w-xs min-w-0">
+		<div
+			className="relative w-full max-w-xs min-w-0"
+			{...KEEP_SELECTION_PROPS}
+		>
 			<SearchIcon
 				aria-hidden="true"
 				className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground"

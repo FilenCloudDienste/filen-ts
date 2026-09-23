@@ -10,6 +10,7 @@ import { useDriveDropTarget } from "@/features/drive/hooks/useDriveDropTarget"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { cn } from "@filen/shared"
+import { KEEP_SELECTION_PROPS } from "@/features/drive/lib/clickAway.logic"
 import { Spinner } from "@/components/ui/spinner"
 
 const VARIANT_ROOT_LABEL_KEY = {
@@ -95,6 +96,7 @@ export function Breadcrumb({ variant, splat }: BreadcrumbProps) {
 		<nav
 			aria-label={t("driveBreadcrumbLabel")}
 			className="min-w-0 overflow-hidden"
+			{...KEEP_SELECTION_PROPS}
 		>
 			<ol className="flex items-center justify-end gap-1.5 text-sm whitespace-nowrap">
 				<li>

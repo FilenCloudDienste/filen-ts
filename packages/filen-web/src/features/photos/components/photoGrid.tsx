@@ -11,6 +11,7 @@ import { usePhotosStore } from "@/features/photos/store/usePhotosStore"
 import { usePhotosSelection } from "@/features/photos/hooks/usePhotosSelection"
 import { usePhotosGridNav } from "@/features/photos/hooks/usePhotosGridNav"
 import { useMarqueeSelection } from "@/features/drive/hooks/useMarqueeSelection"
+import { useClickAwayDeselect } from "@/features/drive/hooks/useClickAwayDeselect"
 import { usePhotosDialogHost } from "@/features/photos/hooks/usePhotosDialogHost"
 import { resolveTileClickIntent, previewOpenTarget } from "@/features/photos/components/photoGrid.logic"
 import { usePhotosGridDensityQuery } from "@/features/photos/queries/preferences"
@@ -58,10 +59,10 @@ export function PhotoGrid({ rootUuid, items }: PhotoGridProps) {
 	})
 
 	// Plain click opens the viewer (browsing is the grid's whole point); once a selection is active a
-	// plain click instead falls through to handlePointerSelect's own replace-with-just-this-item branch,
-	// exactly matching drive's plain-click convention on an already-selected tile. A modifier click
-	// always builds/extends the selection regardless of selection state — see photoGrid.logic.ts's own
-	// doc comment on resolveTileClickIntent for the full decision table.
+	// plain click instead falls through to handlePointerSelect's own plain-click branch (select just this
+	// item, or deselect it when it is the whole selection), exactly matching drive's plain-click
+	// convention. A modifier click always builds/extends the selection regardless of selection state —
+	// see photoGrid.logic.ts's own doc comment on resolveTileClickIntent for the full decision table.
 	function handleTileClick(index: number, event: MouseEvent<HTMLDivElement>): void {
 		const intent = resolveTileClickIntent(event, selectedItems.length > 0)
 
@@ -150,6 +151,11 @@ export function PhotoGrid({ rootUuid, items }: PhotoGridProps) {
 		},
 		scrollElement,
 		setCursor
+	})
+
+	// Drive parity (directoryListing.tsx): a plain click on empty space drops the selection.
+	useClickAwayDeselect(selectedItems.length > 0, () => {
+		usePhotosStore.getState().clearSelectedItems()
 	})
 
 	useAction(

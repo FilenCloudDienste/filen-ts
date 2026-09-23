@@ -40,10 +40,23 @@ function photoItem(uuid: UuidStr): PhotoItem {
 	return item
 }
 
+// `detail` is the click count (2 = the second click of a double-click); `pointerType` rides on the
+// native event, as it does where the browser dispatches click as a PointerEvent.
 function clickEvent(
-	modifiers: Partial<Pick<ReactMouseEvent<HTMLDivElement>, "shiftKey" | "metaKey" | "ctrlKey">> = {}
+	modifiers: Partial<Pick<ReactMouseEvent<HTMLDivElement>, "shiftKey" | "metaKey" | "ctrlKey" | "detail">> & {
+		pointerType?: string
+	} = {}
 ): ReactMouseEvent<HTMLDivElement> {
-	return { shiftKey: false, metaKey: false, ctrlKey: false, ...modifiers } as ReactMouseEvent<HTMLDivElement>
+	const { pointerType, ...rest } = modifiers
+
+	return {
+		shiftKey: false,
+		metaKey: false,
+		ctrlKey: false,
+		detail: 1,
+		nativeEvent: pointerType === undefined ? {} : { pointerType },
+		...rest
+	} as ReactMouseEvent<HTMLDivElement>
 }
 
 const a = photoItem(testUuid("a"))
@@ -82,6 +95,43 @@ describe("usePhotosSelection — plain click", () => {
 		handlePointerSelect(2, clickEvent())
 
 		expect(anchor).toBe(c.data.uuid)
+	})
+
+	it("deselects the clicked item when it is the whole selection", () => {
+		usePhotosStore.getState().setSelectedItems([b])
+		const { handlePointerSelect } = usePhotosSelection(items, anchor, setAnchor)
+
+		handlePointerSelect(1, clickEvent())
+
+		expect(usePhotosStore.getState().selectedItems).toEqual([])
+		expect(anchor).toBe(b.data.uuid)
+	})
+
+	it("narrows to the clicked item when it is one of several selected", () => {
+		usePhotosStore.getState().setSelectedItems([a, b])
+		const { handlePointerSelect } = usePhotosSelection(items, anchor, setAnchor)
+
+		handlePointerSelect(1, clickEvent())
+
+		expect(uuidsOf(usePhotosStore.getState().selectedItems)).toEqual([b.data.uuid])
+	})
+
+	it("leaves the item selected on the second click of a double-click", () => {
+		usePhotosStore.getState().setSelectedItems([b])
+		const { handlePointerSelect } = usePhotosSelection(items, anchor, setAnchor)
+
+		handlePointerSelect(1, clickEvent({ detail: 2 }))
+
+		expect(uuidsOf(usePhotosStore.getState().selectedItems)).toEqual([b.data.uuid])
+	})
+
+	it("keeps a touch tap on the sole selected item selected", () => {
+		usePhotosStore.getState().setSelectedItems([b])
+		const { handlePointerSelect } = usePhotosSelection(items, anchor, setAnchor)
+
+		handlePointerSelect(1, clickEvent({ pointerType: "touch" }))
+
+		expect(uuidsOf(usePhotosStore.getState().selectedItems)).toEqual([b.data.uuid])
 	})
 })
 

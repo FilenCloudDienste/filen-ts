@@ -75,6 +75,7 @@ import { useDriveVirtualizer } from "@/features/drive/hooks/useDriveVirtualizer"
 import { useDriveDirectorySizes } from "@/features/drive/hooks/useDriveDirectorySizes"
 import { useDriveListboxNav } from "@/features/drive/hooks/useDriveListboxNav"
 import { useMarqueeSelection } from "@/features/drive/hooks/useMarqueeSelection"
+import { useClickAwayDeselect } from "@/features/drive/hooks/useClickAwayDeselect"
 import { useDriveDialogHost } from "@/features/drive/hooks/useDriveDialogHost"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { Spinner } from "@/components/ui/spinner"
@@ -306,6 +307,11 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 		},
 		scrollElement,
 		setCursor
+	})
+
+	// A plain click on empty space anywhere in the window drops the selection, as in a file manager.
+	useClickAwayDeselect(selectedItems.length > 0, () => {
+		useDriveStore.getState().clearSelectedItems()
 	})
 
 	// Stale-selection purge (sharedIn only): drops any selected item that just became blocked (the

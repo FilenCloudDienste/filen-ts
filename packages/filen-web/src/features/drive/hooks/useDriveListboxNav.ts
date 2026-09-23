@@ -1,5 +1,12 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from "react"
-import { clampListboxIndex, listboxKeyTarget, listboxRange, resolveCursorIndex } from "@/features/drive/lib/listbox"
+import {
+	clampListboxIndex,
+	clickPointerType,
+	isPlainClickDeselect,
+	listboxKeyTarget,
+	listboxRange,
+	resolveCursorIndex
+} from "@/features/drive/lib/listbox"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant, type DriveViewMode } from "@/features/drive/lib/preferences"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
@@ -210,7 +217,14 @@ export function useDriveListboxNav({
 			return
 		}
 
-		useDriveStore.getState().setSelectedItems([item])
+		const store = useDriveStore.getState()
+
+		if (isPlainClickDeselect(store.selectedItems, item.data.uuid, event.detail, clickPointerType(event.nativeEvent))) {
+			store.clearSelectedItems()
+		} else {
+			store.setSelectedItems([item])
+		}
+
 		setActiveUuid(item.data.uuid)
 		setAnchorUuid(item.data.uuid)
 	}
