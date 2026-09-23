@@ -4,13 +4,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { createElement, type ReactNode } from "react"
 import { act, renderHook, waitFor } from "@testing-library/react"
 import { QueryClient, QueryClientProvider, focusManager, onlineManager } from "@tanstack/react-query"
-import type { File, NormalDirsAndFiles, SocketEvent, UuidStr } from "@filen/sdk-rs"
+import type { Dir, File, NormalDirsAndFiles, SharedRootDirsAndFiles, SocketEvent, UuidStr } from "@filen/sdk-rs"
 
-const { listDirectory } = vi.hoisted(() => ({
-	listDirectory: vi.fn<(target: unknown) => Promise<NormalDirsAndFiles>>()
+const { listDirectory, listSharedInRoot, listSharedOutRoot } = vi.hoisted(() => ({
+	listDirectory: vi.fn<(target: unknown) => Promise<NormalDirsAndFiles>>(),
+	listSharedInRoot: vi.fn<() => Promise<SharedRootDirsAndFiles>>(),
+	listSharedOutRoot: vi.fn<() => Promise<SharedRootDirsAndFiles>>()
 }))
 
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: { listDirectory } }))
+vi.mock("@/lib/sdk/client", () => ({ sdkApi: { listDirectory, listSharedInRoot, listSharedOutRoot } }))
 
 // The production defaults minus the persister (sqlite, unavailable under vitest).
 vi.mock("@/queries/client", () => ({
@@ -26,6 +28,7 @@ vi.mock("@/lib/log", () => ({ log: { warn: vi.fn(), error: vi.fn(), info: vi.fn(
 import { queryClient } from "@/queries/client"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { driveListingQueryKey, driveListingQueryUpdate, useDirectoryListingQuery } from "@/features/drive/queries/drive"
+import type { DriveVariant } from "@/features/drive/lib/preferences"
 import {
 	handleDriveAuthSuccess,
 	handleDriveEvent,
@@ -59,6 +62,17 @@ function mockFile(label: string, parent: UuidStr): File {
 
 type DriveInner = Extract<SocketEvent, { type: "drive" }>["inner"]
 
+function mockDir(label: string, parent: UuidStr): Dir {
+	return {
+		uuid: testUuid(label),
+		parent,
+		color: "default",
+		timestamp: 1_700_000_000_000n,
+		favorited: false,
+		meta: { type: "decoded", data: { name: label } }
+	}
+}
+
 function driveEvent(inner: DriveInner): Extract<SocketEvent, { type: "drive" }> {
 	return { type: "drive", inner, driveMessageId: 0n }
 }
@@ -85,8 +99,8 @@ function wrapper({ children }: { children: ReactNode }) {
 	return createElement(QueryClientProvider, { client: queryClient, children })
 }
 
-function mountListing(uuid: string, variant: "drive" | "recents" = "drive") {
-	return renderHook(() => useDirectoryListingQuery(variant, variant === "drive" ? uuid : null), { wrapper })
+function mountListing(uuid: string) {
+	return renderHook(() => useDirectoryListingQuery("drive", uuid), { wrapper })
 }
 
 async function drain(): Promise<void> {
@@ -101,18 +115,21 @@ async function drain(): Promise<void> {
 }
 
 function reads(): number {
-	return listDirectory.mock.calls.length
+	return listDirectory.mock.calls.length + listSharedInRoot.mock.calls.length + listSharedOutRoot.mock.calls.length
 }
 
 function listing(uuid: string): DriveItem[] | undefined {
 	return queryClient.getQueryData<DriveItem[]>(driveListingQueryKey({ variant: "drive", uuid }))
 }
 
-function isInvalidated(uuid: string): boolean {
+function isInvalidated(uuid: string | null, variant: DriveVariant = "drive"): boolean {
 	return (
-		queryClient.getQueryCache().find({ queryKey: driveListingQueryKey({ variant: "drive", uuid }), exact: true })?.state
-			.isInvalidated ?? false
+		queryClient.getQueryCache().find({ queryKey: driveListingQueryKey({ variant, uuid }), exact: true })?.state.isInvalidated ?? false
 	)
+}
+
+function mountFlat(variant: Exclude<DriveVariant, "drive">) {
+	return renderHook(() => useDirectoryListingQuery(variant, null), { wrapper })
 }
 
 async function refocus(): Promise<void> {
@@ -158,6 +175,10 @@ beforeEach(() => {
 	socketAuthenticated()
 	listDirectory.mockReset()
 	listDirectory.mockImplementation(() => Promise.resolve({ dirs: [], files: [] }))
+	listSharedInRoot.mockReset()
+	listSharedInRoot.mockImplementation(() => Promise.resolve({ dirs: [], files: [] }))
+	listSharedOutRoot.mockReset()
+	listSharedOutRoot.mockImplementation(() => Promise.resolve({ dirs: [], files: [] }))
 })
 
 afterEach(() => {
@@ -231,9 +252,138 @@ describe("drive listing request counts", () => {
 
 		expect(reads()).toBe(2)
 	})
+})
 
-	it("variants no event fully patches keep refetching on focus", async () => {
-		mountListing("", "recents")
+describe("flat and shared listing request counts", () => {
+	it.each(["favorites", "trash"] as const)(
+		"%s reads once across mount, remount and focus; a network reconnect reads again",
+		async variant => {
+			const first = mountFlat(variant)
+			await drain()
+
+			first.unmount()
+			mountFlat(variant)
+			await drain()
+			await refocus()
+			await refocus()
+
+			expect(reads()).toBe(1)
+
+			await reconnectNetwork()
+
+			expect(reads()).toBe(2)
+		}
+	)
+
+	it.each(["favorites", "trash"] as const)("%s is re-read by the authSuccess that ends a socket drop", async variant => {
+		mountFlat(variant)
+		await drain()
+
+		dropSocket()
+		recoverSocket()
+		await drain()
+
+		expect(reads()).toBe(2)
+	})
+
+	// No event reports a recent aging out, or a link or share made on another device.
+	it.each(["recents", "links", "sharedIn", "sharedOut"] as const)("%s reads on every mount, focus and reconnect", async variant => {
+		const first = mountFlat(variant)
+		await drain()
+
+		expect(reads()).toBe(1)
+
+		first.unmount()
+		mountFlat(variant)
+		await drain()
+
+		expect(reads()).toBe(2)
+
+		await refocus()
+
+		expect(reads()).toBe(3)
+
+		await reconnectNetwork()
+
+		expect(reads()).toBe(4)
+	})
+
+	it("a trashing no cached row can patch marks the trash stale: the next focus reads, once", async () => {
+		mountFlat("trash")
+		await drain()
+
+		handleDriveEvent(
+			driveEvent({ type: "fileTrash", uuid: testUuid("uncached"), stableUUID: testUuid("stable-uncached"), newUUID: undefined })
+		)
+		await drain()
+
+		expect(reads()).toBe(1)
+		expect(isInvalidated(null, "trash")).toBe(true)
+
+		await refocus()
+		await refocus()
+
+		expect(reads()).toBe(2)
+	})
+
+	it("a trashing a cached row patches is taken in without a read", async () => {
+		const dir = nextDir()
+
+		await mountRead(dir)
+		driveListingQueryUpdate(dir, () => [narrowItem(mockFile("cached", dir))])
+		mountFlat("trash")
+		await drain()
+
+		handleDriveEvent(
+			driveEvent({ type: "fileTrash", uuid: testUuid("cached"), stableUUID: testUuid("stable-cached"), newUUID: undefined })
+		)
+		await refocus()
+
+		expect(reads()).toBe(2)
+		expect(
+			queryClient.getQueryData<DriveItem[]>(driveListingQueryKey({ variant: "trash", uuid: null }))?.map(i => i.data.uuid)
+		).toEqual([testUuid("cached")])
+	})
+
+	it("a folder trashing marks Favorites stale: the next focus reads, once", async () => {
+		mountFlat("favorites")
+		await drain()
+
+		handleDriveEvent(driveEvent({ type: "folderTrash", parent: nextDir(), uuid: testUuid("folder") }))
+		await drain()
+
+		expect(reads()).toBe(1)
+
+		await refocus()
+		await refocus()
+
+		expect(reads()).toBe(2)
+	})
+
+	it("a remote move of a favorite patches Favorites without a read", async () => {
+		const dir = nextDir()
+		const favorite = { ...mockDir("fav", dir), favorited: true }
+
+		listDirectory.mockImplementationOnce(() => Promise.resolve({ dirs: [favorite], files: [] }))
+		mountFlat("favorites")
+		await drain()
+
+		handleDriveEvent(driveEvent({ type: "folderMove", dir: { ...favorite, parent: nextDir() } }))
+		await refocus()
+
+		expect(reads()).toBe(1)
+		expect(
+			queryClient.getQueryData<DriveItem[]>(driveListingQueryKey({ variant: "favorites", uuid: null }))?.map(i => i.data.uuid)
+		).toEqual([testUuid("fav")])
+	})
+
+	it("a stale mark landing during a read keeps the listing stale once the read settles", async () => {
+		const pending = deferred<NormalDirsAndFiles>()
+
+		listDirectory.mockImplementationOnce(() => pending.promise)
+		mountFlat("favorites")
+		handleDriveEvent(driveEvent({ type: "folderTrash", parent: nextDir(), uuid: testUuid("folder") }))
+		pending.resolve({ dirs: [], files: [] })
 		await drain()
 
 		expect(reads()).toBe(1)
@@ -241,6 +391,31 @@ describe("drive listing request counts", () => {
 		await refocus()
 
 		expect(reads()).toBe(2)
+
+		await refocus()
+
+		expect(reads()).toBe(2)
+	})
+
+	it("a favorite patch landing on a pending refresh keeps it pending", async () => {
+		mountFlat("favorites")
+		await drain()
+
+		const pending = deferred<NormalDirsAndFiles>()
+
+		listDirectory.mockImplementationOnce(() => pending.promise)
+		dropSocket()
+		recoverSocket()
+		handleDriveEvent(driveEvent({ type: "itemFavorite", item: { type: "file", ...mockFile("fav", nextDir()), favorited: true } }))
+		pending.resolve({ dirs: [], files: [] })
+		await drain()
+
+		expect(reads()).toBe(2)
+		expect(isInvalidated(null, "favorites")).toBe(true)
+
+		await refocus()
+
+		expect(reads()).toBe(3)
 	})
 })
 

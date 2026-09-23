@@ -7,9 +7,9 @@ import { queryClient } from "@/queries/client"
 import { ACCOUNT_QUERY_KEY, markAccountStale } from "@/queries/account"
 import {
 	driveListingQueryKey,
-	cancelListingFetch,
 	driveListingQueryUpdate,
 	driveListingQueryUpdateGlobal,
+	flatListingQueryUpdate,
 	driveItemLinkStatusQueryUpdate,
 	fetchDriveItemLinkStatus,
 	normalizeParentUuid,
@@ -80,18 +80,37 @@ export async function renameItem(item: DriveItem, newName: string): Promise<Acti
 
 export function moveItems(items: DriveItem[], targetParentUuid: string | null): Promise<BulkOutcome<DriveItem>> {
 	const rootUuid = currentRootUuid()
-	const normalizedTarget = normalizeParentUuid(targetParentUuid, rootUuid)
 
 	return runBulk(items, async item => {
 		const base = asDirectoryOrFile(item)
 		const moved = await runOp<Dir | File>(
 			base.type === "directory" ? sdkApi.moveDirectory(base.data, targetParentUuid) : sdkApi.moveFile(base.data, targetParentUuid)
 		)
-		const updated = narrowItem(moved)
 
-		driveListingQueryUpdate(normalizeParentUuid(item.data.parent, rootUuid), prev => removeByUuid(prev, item.data.uuid))
-		driveListingQueryUpdate(normalizedTarget, prev => upsertDriveItem(prev, updated))
+		patchMovedItem(narrowItem(moved), rootUuid)
 	})
+}
+
+// A move changes only the row's parent. It leaves every directory listing and the trash (a move always
+// lands outside it) for its new parent's; a favorite, recent or linked row stays where it is with the new
+// parent. A shared root row stays shared; a nested shared listing loses a child that moved out of it.
+// Exported: the realtime fileMove/folderMove handlers apply the same rule.
+export function patchMovedItem(item: DriveItem, rootUuid: string): void {
+	driveListingQueryUpdateGlobal((prev, { variant, uuid }) => {
+		switch (variant) {
+			case "recents":
+			case "favorites":
+			case "links":
+				return replaceIfPresent(prev, item)
+			case "sharedIn":
+			case "sharedOut":
+				return uuid === null ? prev : removeByUuid(prev, item.data.uuid)
+			case "drive":
+			case "trash":
+				return removeByUuid(prev, item.data.uuid)
+		}
+	})
+	driveListingQueryUpdate(normalizeParentUuid(item.data.parent, rootUuid), prev => upsertDriveItem(prev, item))
 }
 
 // ── Trash (bulk) ─────────────────────────────────────────────────────────
@@ -105,12 +124,7 @@ export function moveItems(items: DriveItem[], targetParentUuid: string | null): 
 // favorites listing), and `prev === undefined` (nobody has opened Trash) stays a no-op so an unfetched
 // listing is never conjured. Exported: the realtime fileTrash/folderTrash handlers apply the same rule.
 export function insertIntoTrashListing(item: DriveItem): void {
-	const queryKey = driveListingQueryKey({ variant: "trash", uuid: null })
-
-	// Same cancel-before-patch discipline as every other listing patch: a trash refetch already in
-	// flight was snapshotted before this membership change and would land on top of it.
-	cancelListingFetch(queryKey)
-	queryClient.setQueryData<DriveItem[]>(queryKey, prev => (prev === undefined ? prev : [...removeByUuid(prev, item.data.uuid), item]))
+	flatListingQueryUpdate("trash", prev => [...removeByUuid(prev, item.data.uuid), item])
 }
 
 export function trashItems(items: DriveItem[]): Promise<BulkOutcome<DriveItem>> {
@@ -171,10 +185,8 @@ export async function emptyTrash(): Promise<VoidActionOutcome> {
 		return { status: "error", dto: asErrorDTO(e) }
 	}
 
-	// driveListingQueryUpdate is hardcoded to variant "drive" and driveListingQueryUpdateGlobal has no
-	// way to target one key — neither can single out the trash listing, so patch its exact key
-	// directly. Trashed items live in no other listing, so this alone empties the whole surface.
-	queryClient.setQueryData(driveListingQueryKey({ variant: "trash", uuid: null }), [])
+	// Trashed items live in no other listing, so this alone empties the whole surface.
+	flatListingQueryUpdate("trash", () => [])
 	markAccountStale()
 
 	return { status: "success" }
@@ -191,12 +203,7 @@ export async function emptyTrash(): Promise<VoidActionOutcome> {
 // listing is never conjured. Exported: the realtime ItemFavorite handler (lib/socketHandlers.ts)
 // applies the identical membership rule for a change made on another device.
 export function patchFavoritesListing(favorited: boolean, item: DriveItem): void {
-	const queryKey = driveListingQueryKey({ variant: "favorites", uuid: null })
-
-	// Same cancel-before-patch discipline as every other listing patch: a Favorites refetch already in
-	// flight was snapshotted before this membership change and would land on top of it.
-	cancelListingFetch(queryKey)
-	queryClient.setQueryData<DriveItem[]>(queryKey, prev => (prev === undefined ? prev : applyMembershipPatch(prev, item, favorited)))
+	flatListingQueryUpdate("favorites", prev => applyMembershipPatch(prev, item, favorited))
 }
 
 // Shared cache-patch tail for both the single-item toggle and the bulk SET below — factored out so

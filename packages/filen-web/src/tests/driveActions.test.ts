@@ -414,6 +414,22 @@ describe("moveItems", () => {
 		expect(testQueryClient.getQueryData<DriveItem[]>(driveListing(null))?.map(i => i.data.uuid)).toEqual([testUuid("b")])
 	})
 
+	it("keeps a moved favorite in the Favorites listing with its new parent", async () => {
+		seedRootUuid()
+		const item = fileItem({ uuid: testUuid("f"), parent: OTHER_PARENT_UUID, favorited: true })
+		const targetUuid = testUuid("target")
+		testQueryClient.setQueryData(driveListing(OTHER_PARENT_UUID), [item])
+		testQueryClient.setQueryData(favoritesListing(), [item])
+		moveFile.mockResolvedValueOnce(mockFile({ uuid: testUuid("f"), parent: targetUuid, favorited: true }))
+
+		await moveItems([item], targetUuid)
+
+		expect(testQueryClient.getQueryData<DriveItem[]>(driveListing(OTHER_PARENT_UUID))).toEqual([])
+		expect(testQueryClient.getQueryData<DriveItem[]>(favoritesListing())?.map(i => [i.data.uuid, i.data.parent])).toEqual([
+			[testUuid("f"), targetUuid]
+		])
+	})
+
 	it("moves a file via moveFile, not moveDirectory", async () => {
 		seedRootUuid()
 		const item = fileItem({ uuid: testUuid("f"), parent: OTHER_PARENT_UUID })

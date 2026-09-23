@@ -111,6 +111,21 @@ function getRecents(): DriveItem[] | undefined {
 	return testQueryClient.getQueryData<DriveItem[]>(driveListingQueryKey({ variant: "recents", uuid: null }))
 }
 
+function seedFlat(variant: "links" | "sharedOut", items: DriveItem[], uuid: string | null = null): void {
+	testQueryClient.setQueryData(driveListingQueryKey({ variant, uuid }), items)
+}
+
+function getFlat(variant: "links" | "sharedOut", uuid: string | null = null): DriveItem[] | undefined {
+	return testQueryClient.getQueryData<DriveItem[]>(driveListingQueryKey({ variant, uuid }))
+}
+
+function isInvalidated(variant: "favorites" | "trash"): boolean {
+	return (
+		testQueryClient.getQueryCache().find({ queryKey: driveListingQueryKey({ variant, uuid: null }), exact: true })?.state
+			.isInvalidated ?? false
+	)
+}
+
 beforeEach(() => {
 	testQueryClient.clear()
 	useDriveStore.setState({ selectedItems: [] })
@@ -201,6 +216,144 @@ describe("drive socket handlers — moves", () => {
 
 		expect(getListing(PARENT_A)).toEqual([])
 		expect(getListing(PARENT_B).map(i => i.data.uuid)).toEqual([testUuid("dir")])
+	})
+
+	it("fileMove keeps a favorite in the cached Favorites listing with its new parent", () => {
+		seedListing(PARENT_A, [narrowItem(mockFile({ favorited: true }))])
+		seedFavorites([narrowItem(mockFile({ favorited: true }))])
+		handleDriveEvent(driveEvt({ type: "fileMove", file: mockFile({ parent: PARENT_B, favorited: true }) }))
+
+		expect(getFavorites()?.map(i => [i.data.uuid, i.data.parent])).toEqual([[testUuid("file"), PARENT_B]])
+		expect(getListing(PARENT_A)).toEqual([])
+	})
+
+	it("fileMove keeps a recent and a linked row in place with the new parent", () => {
+		seedRecents([narrowItem(mockFile())])
+		seedFlat("links", [narrowItem(mockFile())])
+		handleDriveEvent(driveEvt({ type: "fileMove", file: mockFile({ parent: PARENT_B }) }))
+
+		expect(getRecents()?.map(i => i.data.parent)).toEqual([PARENT_B])
+		expect(getFlat("links")?.map(i => i.data.parent)).toEqual([PARENT_B])
+	})
+
+	it("folderMove keeps a favorite directory in Favorites with its new parent", () => {
+		seedFavorites([narrowItem(mockDir({ favorited: true }))])
+		handleDriveEvent(driveEvt({ type: "folderMove", dir: mockDir({ parent: PARENT_B, favorited: true }) }))
+
+		expect(getFavorites()?.map(i => [i.data.uuid, i.data.parent])).toEqual([[testUuid("dir"), PARENT_B]])
+	})
+
+	it("a move never adds the row to a flat listing that didn't hold it", () => {
+		seedFavorites([])
+		seedRecents([])
+		handleDriveEvent(driveEvt({ type: "fileMove", file: mockFile({ parent: PARENT_B }) }))
+
+		expect(getFavorites()).toEqual([])
+		expect(getRecents()).toEqual([])
+	})
+
+	it("a move takes the row out of the trash", () => {
+		seedTrash([narrowItem(mockFile())])
+		handleDriveEvent(driveEvt({ type: "fileMove", file: mockFile({ parent: PARENT_B }) }))
+
+		expect(getTrash()).toEqual([])
+	})
+
+	it("a move keeps a shared root row but drops it from a nested shared listing it left", () => {
+		const row = narrowItem(mockFile())
+
+		seedFlat("sharedOut", [row])
+		seedFlat("sharedOut", [row], PARENT_A)
+		handleDriveEvent(driveEvt({ type: "fileMove", file: mockFile({ parent: PARENT_B }) }))
+
+		expect(getFlat("sharedOut")).toEqual([row])
+		expect(getFlat("sharedOut", PARENT_A)).toEqual([])
+	})
+})
+
+describe("drive socket handlers — favorites rejoin", () => {
+	it("fileRestore of a favorited file puts it back in Favorites", () => {
+		seedTrash([narrowItem(mockFile({ favorited: true }))])
+		seedFavorites([])
+		handleDriveEvent(driveEvt({ type: "fileRestore", file: mockFile({ favorited: true }) }))
+
+		expect(getFavorites()?.map(i => i.data.uuid)).toEqual([testUuid("file")])
+	})
+
+	it("folderRestore of a favorited directory puts it back in Favorites", () => {
+		seedFavorites([])
+		handleDriveEvent(driveEvt({ type: "folderRestore", dir: mockDir({ favorited: true }) }))
+
+		expect(getFavorites()?.map(i => i.data.uuid)).toEqual([testUuid("dir")])
+	})
+
+	it("an edited favorite's successor replaces it in Favorites", () => {
+		seedFavorites([narrowItem(mockFile({ favorited: true }))])
+		handleDriveEvent(driveEvt({ type: "fileArchived", uuid: testUuid("file"), stableUUID: STABLE_FILE, newUUID: NEW_FILE }))
+		handleDriveEvent(driveEvt({ type: "fileNew", file: mockFile({ uuid: NEW_FILE, favorited: true }) }))
+
+		expect(getFavorites()?.map(i => i.data.uuid)).toEqual([NEW_FILE])
+	})
+
+	it("fileArchiveRestored of a favorite swaps the restored version into Favorites", () => {
+		seedFavorites([narrowItem(mockFile({ uuid: testUuid("old-current"), favorited: true }))])
+		handleDriveEvent(
+			driveEvt({ type: "fileArchiveRestored", currentUuid: testUuid("old-current"), file: mockFile({ favorited: true }) })
+		)
+
+		expect(getFavorites()?.map(i => i.data.uuid)).toEqual([testUuid("file")])
+	})
+
+	it("an unfavorited new file leaves Favorites alone", () => {
+		seedFavorites([])
+		handleDriveEvent(driveEvt({ type: "fileNew", file: mockFile() }))
+
+		expect(getFavorites()).toEqual([])
+		expect(isInvalidated("favorites")).toBe(false)
+	})
+})
+
+// A folder event names only the folder, so the listings its descendants may sit in go stale instead.
+describe("drive socket handlers — stale marks", () => {
+	it("folderTrash marks Favorites stale", () => {
+		seedFavorites([])
+		handleDriveEvent(driveEvt({ type: "folderTrash", parent: PARENT_A, uuid: testUuid("dir") }))
+
+		expect(isInvalidated("favorites")).toBe(true)
+	})
+
+	it("folderRestore marks Favorites stale", () => {
+		seedFavorites([])
+		handleDriveEvent(driveEvt({ type: "folderRestore", dir: mockDir() }))
+
+		expect(isInvalidated("favorites")).toBe(true)
+	})
+
+	it("folderDeletedPermanent marks Favorites and the trash stale", () => {
+		seedFavorites([])
+		seedTrash([])
+		handleDriveEvent(driveEvt({ type: "folderDeletedPermanent", uuid: testUuid("dir") }))
+
+		expect(isInvalidated("favorites")).toBe(true)
+		expect(isInvalidated("trash")).toBe(true)
+	})
+
+	it("trashEmpty marks Favorites stale", () => {
+		seedFavorites([])
+		handleDriveEvent(driveEvt({ type: "trashEmpty" }))
+
+		expect(isInvalidated("favorites")).toBe(true)
+	})
+
+	it("a fileTrash or fileDeletedPermanent patches without any stale mark", () => {
+		seedListing(PARENT_A, [narrowItem(mockFile())])
+		seedFavorites([])
+		seedTrash([])
+		handleDriveEvent(driveEvt({ type: "fileTrash", uuid: testUuid("file"), stableUUID: STABLE_FILE, newUUID: undefined }))
+		handleDriveEvent(driveEvt({ type: "fileDeletedPermanent", uuid: testUuid("file"), stableUUID: STABLE_FILE }))
+
+		expect(isInvalidated("favorites")).toBe(false)
+		expect(isInvalidated("trash")).toBe(false)
 	})
 })
 
@@ -357,7 +510,7 @@ describe("drive socket handlers — trash listing membership", () => {
 		expect(getTrash()).toBeUndefined()
 	})
 
-	it("applies the removal alone when no cached listing holds the trashed uuid", () => {
+	it("marks the trash listing stale when no cached listing holds the trashed uuid", () => {
 		seedTrash([])
 
 		handleDriveEvent(
@@ -365,6 +518,15 @@ describe("drive socket handlers — trash listing membership", () => {
 		)
 
 		expect(getTrash()).toEqual([])
+		expect(isInvalidated("trash")).toBe(true)
+	})
+
+	it("a versioning-disabled edit never marks the trash listing stale", () => {
+		seedTrash([])
+
+		handleDriveEvent(driveEvt({ type: "fileTrash", uuid: testUuid("unknown"), stableUUID: RETIRED_STABLE, newUUID: NEW_FILE }))
+
+		expect(isInvalidated("trash")).toBe(false)
 	})
 
 	// The owner trashing a file they shared with this account removes it from the shared listing; it

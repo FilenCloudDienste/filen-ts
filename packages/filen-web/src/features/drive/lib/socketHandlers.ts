@@ -1,19 +1,19 @@
 import type { SocketEvent, NonRootItemTagged } from "@filen/sdk-rs"
 import { removeByUuid } from "@filen/shared"
 import { registerSocketHandler } from "@/lib/sdk/socket"
-import { queryClient } from "@/queries/client"
 import { log } from "@/lib/log"
 import {
-	cancelListingFetch,
 	driveListingQueryKey,
 	driveListingQueryUpdate,
 	driveListingQueryUpdateGlobal,
 	findCachedListingItem,
+	flatListingQueryUpdate,
 	invalidateDriveListings,
+	markListingsStale,
 	normalizeParentUuid
 } from "@/features/drive/queries/drive"
 import { narrowItem, upsertDriveItem, type DriveItem } from "@/features/drive/lib/item"
-import { currentRootUuid, insertIntoTrashListing, patchFavoritesListing } from "@/features/drive/lib/actions"
+import { currentRootUuid, insertIntoTrashListing, patchFavoritesListing, patchMovedItem } from "@/features/drive/lib/actions"
 import { invalidatePhotosListing, markPhotosListingStale, type PhotosEventScope } from "@/features/photos/queries/photos"
 import { markAccountStale } from "@/queries/account"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
@@ -31,7 +31,8 @@ import {
 // it into its parent listing (the item's own `.parent`); an event that ships only a uuid patches every
 // currently-instantiated listing at once via driveListingQueryUpdateGlobal (the same fan-out actions.ts
 // uses), which reaches whichever listing holds the row without a parent lookup. No invalidate-storm — every
-// path is a targeted setQueryData with the queries' own cancel-before-patch discipline.
+// path is a targeted setQueryData with the queries' own cancel-before-patch discipline, or a stale mark on
+// the one listing a payload can't patch.
 //
 // Alongside the listing-cache patch, an event that removes / rotates / renames an item also emits a
 // previewReconcile signal so an OPEN preview pager (which steps a frozen snapshot the cache patch can't
@@ -64,7 +65,7 @@ export function registerDriveSocketHandlers(): () => void {
 let sawReconnecting = false
 
 export function markDriveEventsMissed(): void {
-	void queryClient.invalidateQueries({ queryKey: ["drive", "listing"], refetchType: "none" })
+	markListingsStale()
 
 	markPhotosListingStale()
 }
@@ -97,23 +98,27 @@ function ownedRowOrUndefined(item: DriveItem | undefined): DriveItem | undefined
 	return item !== undefined && (item.type === "file" || item.type === "directory") ? item : undefined
 }
 
-// Recents is a flat, cross-directory aggregation with its own key — driveListingQueryUpdate is
-// hardcoded to variant "drive" (queries/drive.ts) and the global fan-out can't single out one key, so
-// this patches the key directly, the same way the trashEmpty case below does, with the same
-// cancel-before-patch guard (recents runs staleTime 0 and refetches on mount/focus, so an in-flight
-// refetch snapshotted before the upload would otherwise land on top of this insert). Only when it's
-// already cached: the updater returns an unfetched key's `undefined` untouched (setQueryData's own
-// no-op) rather than conjuring a phantom one-item Recents for a user who has never opened it. Dedups
-// on uuid alone (recents aggregates across parents, so upsertDriveItem's name-collision rule doesn't
-// apply here — same reasoning as the favorites listing). Appending is enough for ordering:
-// resolveEffectiveSort forces uploadDateDesc for the recents variant (lib/preferences.ts), so the row
-// sorts to the top at render.
+// Recents is a flat, cross-directory aggregation with its own key. Dedups on uuid alone (recents
+// aggregates across parents, so upsertDriveItem's name-collision rule doesn't apply here — same
+// reasoning as the favorites listing). Appending is enough for ordering: resolveEffectiveSort forces
+// uploadDateDesc for the recents variant (lib/preferences.ts), so the row sorts to the top at render.
 function insertIntoRecents(item: DriveItem): void {
-	const key = driveListingQueryKey({ variant: "recents", uuid: null })
-
-	cancelListingFetch(key)
-	queryClient.setQueryData<DriveItem[]>(key, prev => (prev === undefined ? prev : [...removeByUuid(prev, item.data.uuid), item]))
+	flatListingQueryUpdate("recents", prev => [...removeByUuid(prev, item.data.uuid), item])
 }
+
+// A row the payload carries in full keeps its favorite, so one leaving the trash or replacing an
+// edited or restored version rejoins Favorites alongside its parent listing.
+function rejoinFavorites(item: DriveItem): void {
+	if (item.data.favorited) {
+		patchFavoritesListing(true, item)
+	}
+}
+
+// A folder event names only the folder, while favorited descendants may enter or leave Favorites with
+// it (trashed, restored or purged), and a purged folder takes its own trashed descendants out of the
+// trash.
+const FAVORITES_KEY = driveListingQueryKey({ variant: "favorites", uuid: null })
+const TRASH_KEY = driveListingQueryKey({ variant: "trash", uuid: null })
 
 // ItemFavorite ships a NonRootItemTagged (the full item carrying its new favorited flag). Mobile's socket
 // path handles only owned files/dirs here — shared/linked arms have no favorite toggle — so this narrows
@@ -222,6 +227,7 @@ export function handleDriveEvent(event: DriveSocketEvent): void {
 			driveListingQueryUpdate(normalizeParentUuid(inner.file.parent, rootUuid), prev => upsertDriveItem(prev, item))
 			// A brand-new file is a recents entry by definition — mobile inserts unconditionally too.
 			insertIntoRecents(item)
+			rejoinFavorites(item)
 
 			break
 		}
@@ -234,6 +240,7 @@ export function handleDriveEvent(event: DriveSocketEvent): void {
 			// the just-restored row right back out.
 			driveListingQueryUpdateGlobal(prev => removeByUuid(prev, item.data.uuid))
 			driveListingQueryUpdate(normalizeParentUuid(inner.file.parent, rootUuid), prev => upsertDriveItem(prev, item))
+			rejoinFavorites(item)
 			// The item left the trash listing — a trash preview open on it advances to a neighbour or closes.
 			emitPreviewItemRemoved(item.data.uuid)
 
@@ -247,6 +254,7 @@ export function handleDriveEvent(event: DriveSocketEvent): void {
 			// and the superseded current uuid, then splice the fresh file into its parent.
 			driveListingQueryUpdateGlobal(prev => removeByUuid(removeByUuid(prev, item.data.uuid), inner.currentUuid))
 			driveListingQueryUpdate(normalizeParentUuid(inner.file.parent, rootUuid), prev => upsertDriveItem(prev, item))
+			rejoinFavorites(item)
 			// A preview open on the superseded uuid reseeds with the restored file (same slot, fresh content).
 			emitPreviewItemReplaced(inner.currentUuid, item)
 
@@ -264,6 +272,8 @@ export function handleDriveEvent(event: DriveSocketEvent): void {
 
 			driveListingQueryUpdateGlobal(prev => removeByUuid(prev, item.data.uuid))
 			driveListingQueryUpdate(normalizeParentUuid(inner.dir.parent, rootUuid), prev => upsertDriveItem(prev, item))
+			rejoinFavorites(item)
+			markListingsStale(FAVORITES_KEY)
 			emitPreviewItemRemoved(item.data.uuid)
 
 			break
@@ -272,10 +282,9 @@ export function handleDriveEvent(event: DriveSocketEvent): void {
 		case "fileMove": {
 			const item = narrowItem(inner.file)
 
-			// The File carries its NEW parent; web keeps no item cache to look up the OLD parent, so a global
-			// remove clears the stale copy from wherever it was before splicing into the destination.
-			driveListingQueryUpdateGlobal(prev => removeByUuid(prev, item.data.uuid))
-			driveListingQueryUpdate(normalizeParentUuid(inner.file.parent, rootUuid), prev => upsertDriveItem(prev, item))
+			// The File carries its NEW parent; web keeps no item cache to look up the OLD parent, so the patch
+			// fans out to wherever the row was cached.
+			patchMovedItem(item, rootUuid)
 			// The item left this listing for another directory — a preview open on it advances or closes.
 			emitPreviewItemRemoved(item.data.uuid)
 
@@ -285,8 +294,7 @@ export function handleDriveEvent(event: DriveSocketEvent): void {
 		case "folderMove": {
 			const item = narrowItem(inner.dir)
 
-			driveListingQueryUpdateGlobal(prev => removeByUuid(prev, item.data.uuid))
-			driveListingQueryUpdate(normalizeParentUuid(inner.dir.parent, rootUuid), prev => upsertDriveItem(prev, item))
+			patchMovedItem(item, rootUuid)
 			emitPreviewItemRemoved(item.data.uuid)
 
 			break
@@ -305,7 +313,7 @@ export function handleDriveEvent(event: DriveSocketEvent): void {
 			// patches both halves the same way). Purge it from the selection so the count / select-all toggle /
 			// bulk ops never target a ghost. The payload carries no row, so the one for the trash insert is
 			// read out of a cached listing BEFORE the removal fan-out strips it — with no cached copy
-			// anywhere, only the removal applies and the trash listing refetches on its next mount.
+			// anywhere, only the removal applies and the trash listing is marked stale.
 			useDriveStore.getState().removeFromSelection([inner.uuid])
 
 			const trashed = supersededByEdit ? undefined : ownedRowOrUndefined(findCachedListingItem(inner.uuid))
@@ -314,6 +322,12 @@ export function handleDriveEvent(event: DriveSocketEvent): void {
 
 			if (trashed !== undefined) {
 				insertIntoTrashListing(trashed)
+			} else if (!supersededByEdit) {
+				markListingsStale(TRASH_KEY)
+			}
+
+			if (inner.type === "folderTrash") {
+				markListingsStale(FAVORITES_KEY)
 			}
 
 			// A preview open on the trashed item advances to a neighbour or closes.
@@ -352,6 +366,12 @@ export function handleDriveEvent(event: DriveSocketEvent): void {
 			// open preview (advance to a neighbour, or close once it was the only slot).
 			useDriveStore.getState().removeFromSelection([inner.uuid])
 			driveListingQueryUpdateGlobal(prev => removeByUuid(prev, inner.uuid))
+
+			if (inner.type === "folderDeletedPermanent") {
+				markListingsStale(FAVORITES_KEY)
+				markListingsStale(TRASH_KEY)
+			}
+
 			emitPreviewItemRemoved(inner.uuid)
 
 			break
@@ -407,16 +427,8 @@ export function handleDriveEvent(event: DriveSocketEvent): void {
 		}
 
 		case "trashEmpty": {
-			// Clear the trash listing directly (neither driveListingQueryUpdate — hardcoded to "drive" — nor the
-			// global fan-out can single out one key). Only when it's cached: an unopened trash listing has
-			// nothing to empty and setting [] would conjure a phantom slice. Cancel first, like every other
-			// patch here: an in-flight trash refetch would otherwise restore the rows this just cleared.
-			const key = driveListingQueryKey({ variant: "trash", uuid: null })
-
-			if (queryClient.getQueryData(key) !== undefined) {
-				cancelListingFetch(key)
-				queryClient.setQueryData<DriveItem[]>(key, [])
-			}
+			flatListingQueryUpdate("trash", () => [])
+			markListingsStale(FAVORITES_KEY)
 
 			break
 		}
