@@ -54,9 +54,9 @@ export async function fetchNoteContentOrThrow(note: Note): Promise<string> {
 
 // Each note's last content read that ran entirely under a live socket (socketSession.ts) with no
 // contentEdited arriving meanwhile. contentEdited drops a note's entry, a drop or re-auth retires them
-// all, and the persister restores content without one. readAt catches a read that was cancelled rather
-// than committed: the reverted cache keeps an older dataUpdatedAt.
-const contentReads = new Map<string, { epoch: number; readAt: number }>()
+// all, and the persister restores content without one. The cache must still hold what the read returned:
+// a cancelled read never lands (the queryFn runs on regardless), and a local write replaces it.
+const contentReads = new Map<string, { epoch: number; content: string }>()
 let contentEditEvents = 0
 
 // Called for EVERY contentEdited, echoes included: the echo test keys on userId, so it also swallows the
@@ -72,7 +72,7 @@ async function fetchTrackedNoteContent(note: Note): Promise<string> {
 	const content = await fetchNoteContentOrThrow(note)
 
 	if (epoch !== null && socketLiveSince(epoch) && editEvents === contentEditEvents) {
-		contentReads.set(note.uuid, { epoch, readAt: Date.now() })
+		contentReads.set(note.uuid, { epoch, content })
 	} else {
 		contentReads.delete(note.uuid)
 	}
@@ -80,10 +80,10 @@ async function fetchTrackedNoteContent(note: Note): Promise<string> {
 	return content
 }
 
-function noteContentIsCurrent(uuid: string, dataUpdatedAt: number): boolean {
+function noteContentIsCurrent(uuid: string, cached: string | undefined): boolean {
 	const read = contentReads.get(uuid)
 
-	return read !== undefined && socketLiveSince(read.epoch) && dataUpdatedAt >= read.readAt
+	return read !== undefined && socketLiveSince(read.epoch) && cached === read.content
 }
 
 // staleTime: Infinity stops focus/reconnect refetches from clobbering an open editor mid-session. A
@@ -127,6 +127,6 @@ export function useNoteContentQuery(note: Note | undefined, options?: { enabled?
 		enabled: (options?.enabled ?? true) && note !== undefined && !editing,
 		staleTime: Infinity,
 		refetchOnMount: query =>
-			query.state.status !== "error" && noteContentIsCurrent(note?.uuid ?? "", query.state.dataUpdatedAt) ? true : "always"
+			query.state.status !== "error" && noteContentIsCurrent(note?.uuid ?? "", query.state.data) ? true : "always"
 	})
 }
