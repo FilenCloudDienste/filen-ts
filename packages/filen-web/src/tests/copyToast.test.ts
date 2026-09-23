@@ -37,7 +37,9 @@ describe("copy toast", () => {
 		showCopyToast("a")
 
 		expect(toastCustom).toHaveBeenCalledTimes(2)
-		expect(lastOptions()).toMatchObject({ id: "copy:a", duration: Infinity })
+		expect(toastCustom.mock.calls[0]?.[1]?.id).toBe(lastOptions()?.id)
+		expect(lastOptions()?.id).toMatch(/^copy:a:\d+$/)
+		expect(lastOptions()?.duration).toBe(Infinity)
 		expect(getCopyJob("a")?.cardVisible).toBe(true)
 	})
 
@@ -52,18 +54,44 @@ describe("copy toast", () => {
 		useCopyJobsStore.getState().put({ ...createCopyJob("settled", DESTINATION, 1), outcome: { status: "cancelled" } })
 
 		showCopyToast("running")
-		lastOptions()?.onDismiss?.({ id: "copy:running" })
+		lastOptions()?.onDismiss?.({ id: "running" })
 		showCopyToast("settled")
-		lastOptions()?.onDismiss?.({ id: "copy:settled" })
+		lastOptions()?.onDismiss?.({ id: "settled" })
 
 		expect(getCopyJob("running")?.cardVisible).toBe(false)
 		expect(getCopyJob("settled")).toBeUndefined()
 	})
 
-	it("dismisses through sonner", () => {
-		hideCopyToast("a")
+	it("dismisses the showing card through sonner, and nothing when none shows", () => {
+		useCopyJobsStore.getState().put(createCopyJob("hidden", DESTINATION, 1))
+		hideCopyToast("hidden")
 
-		expect(toastDismiss).toHaveBeenCalledWith("copy:a")
+		expect(toastDismiss).not.toHaveBeenCalled()
+
+		showCopyToast("hidden")
+		hideCopyToast("hidden")
+
+		expect(toastDismiss).toHaveBeenCalledWith(toastCustom.mock.calls.at(-1)?.[1]?.id)
+	})
+
+	// Sonner keeps a leaving toast for its exit animation and merges a same-id toast issued meanwhile into
+	// it, so a card reopened right after being hidden would leave with the old one.
+	it("reopens a hidden card under a fresh id that the old card's late dismissal leaves showing", () => {
+		useCopyJobsStore.getState().put(createCopyJob("reopened", DESTINATION, 1))
+
+		showCopyToast("reopened")
+		const first = lastOptions()
+		hideCopyToast("reopened")
+		showCopyToast("reopened")
+		const second = lastOptions()
+		first?.onDismiss?.({ id: "reopened" })
+
+		expect(second?.id).not.toBe(first?.id)
+		expect(getCopyJob("reopened")?.cardVisible).toBe(true)
+
+		second?.onDismiss?.({ id: "reopened" })
+
+		expect(getCopyJob("reopened")?.cardVisible).toBe(false)
 	})
 
 	it("starts a copy with its card already showing", () => {
@@ -83,7 +111,7 @@ describe("copy toast", () => {
 
 		expect(id).not.toBeNull()
 		expect(getCopyJob(id ?? "")?.cardVisible).toBe(true)
-		expect(lastOptions()?.id).toBe(`copy:${id ?? ""}`)
+		expect(lastOptions()?.id).toMatch(new RegExp(`^copy:${id ?? ""}:\\d+$`))
 		expect(startCopyWithCard([], DESTINATION)).toBeNull()
 	})
 })
