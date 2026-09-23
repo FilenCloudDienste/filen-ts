@@ -63,6 +63,16 @@ describe("previewStreamUrl", () => {
 		expect(a).not.toBe(b)
 	})
 
+	it("re-registers a given id and returns its same url", async () => {
+		registerWithSw.mockResolvedValue(undefined)
+
+		const { previewStreamUrl } = await import("@/features/preview/lib/previewStream")
+		const url = await previewStreamUrl(testFile(), "clip.mp4", "video/mp4", "known-id")
+
+		expect(url).toBe(`${SW_DOWNLOAD_PREFIX}known-id`)
+		expect((registerWithSw.mock.calls[0] as [string, Record<string, unknown>])[1]["id"]).toBe("known-id")
+	})
+
 	it("propagates a registration failure — caller (usePreviewStreamUrl) maps it to a fallback state, not a toast", async () => {
 		registerWithSw.mockRejectedValue(new Error("no room in sw registry"))
 

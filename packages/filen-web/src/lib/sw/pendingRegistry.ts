@@ -20,6 +20,9 @@ export class PendingRegistry<T> {
 	}
 
 	public set(id: string, entry: T): void {
+		// Re-registering an existing id (a preview revisit reuses its id) must count as fresh too, or the
+		// entry keeps its old position and the next unrelated registration could evict it before its GET.
+		this.entries.delete(id)
 		this.entries.set(id, entry)
 
 		if (this.entries.size <= this.max) {

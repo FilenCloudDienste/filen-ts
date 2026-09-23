@@ -7,9 +7,15 @@ import { SW_DOWNLOAD_PREFIX, SW_MSG_REGISTER_PREVIEW } from "@/lib/sw/protocol"
 // <video>/<audio>/<img> element streams+seeks against directly. Rides saveDownload.ts's shared
 // registration seam (session handoff + restart healing), minus the FSA branch and the plain-navigation
 // trigger: an inline media element just needs a stable URL, it never "saves" anything.
-export async function previewStreamUrl(file: AnyFile, name: string, contentType: string): Promise<string> {
-	const id = crypto.randomUUID()
-
+//
+// Passing an earlier `id` re-registers it (the worker may have been restarted or evicted it since),
+// so a revisit gets back the same URL rather than a new one.
+export async function previewStreamUrl(
+	file: AnyFile,
+	name: string,
+	contentType: string,
+	id: string = crypto.randomUUID()
+): Promise<string> {
 	await registerWithSw(SW_MSG_REGISTER_PREVIEW, { id, file, name, size: Number(file.size), contentType })
 
 	return `${SW_DOWNLOAD_PREFIX}${id}`

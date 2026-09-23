@@ -46,6 +46,7 @@ vi.mock("sonner", () => ({ toast: { warning: toastWarning } }))
 
 import { usePreviewUnsavedGuardStore } from "@/features/preview/store/usePreviewUnsavedGuard"
 import { performLogout } from "@/features/shell/lib/performLogout"
+import { getPreviewBytes, loadPreviewBytes } from "@/features/preview/lib/previewCache"
 
 // Stands in for the overlay's unsaved-changes prompt: waits for the request the guard armed, then
 // answers it the way a Cancel click does.
@@ -107,6 +108,15 @@ describe("performLogout", () => {
 
 		await expect(result).resolves.toBe(true)
 		expect(runLogout).toHaveBeenCalledTimes(1)
+	})
+
+	it("drops every decrypted preview buffer held for pager revisits", async () => {
+		await loadPreviewBytes("authed", "file-uuid", 3, () => Promise.resolve(new Uint8Array([1, 2, 3])))
+		expect(getPreviewBytes("authed", "file-uuid")).toBeDefined()
+
+		await expect(performLogout()).resolves.toBe(true)
+
+		expect(getPreviewBytes("authed", "file-uuid")).toBeUndefined()
 	})
 
 	it("a forced sign-out with a clean buffer never shows the pending notice", async () => {

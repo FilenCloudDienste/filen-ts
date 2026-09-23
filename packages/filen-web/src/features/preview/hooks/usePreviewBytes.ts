@@ -4,7 +4,8 @@ import { narrowToAnyFile } from "@/features/drive/lib/download"
 import { sdkApi } from "@/lib/sdk/client"
 import { runOp } from "@/lib/actions/outcome"
 import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
-import { usePreviewAccessMode } from "@/features/preview/lib/accessMode"
+import { usePreviewAccessMode, usePreviewCacheScope } from "@/features/preview/lib/accessMode"
+import { getPreviewBytes, loadPreviewBytes } from "@/features/preview/lib/previewCache"
 
 // `refetch` is merged onto every variant (rather than living beside the union as a sibling return
 // field) so every call site's existing `result.status`-narrowing keeps working unchanged — only the
@@ -30,6 +31,11 @@ export type UsePreviewBytesResult =
 // ordinary event-handler setState, not an effect one) to re-run the SAME effect against the SAME item
 // without needing a remount — an item change already gets a fresh load via `item` itself changing, so
 // `reloadToken` only ever needs to move on an explicit user retry.
+//
+// A buffer already loaded this session (previewCache.ts) is served without a download: the initial
+// state reads it so a revisited slot renders on its first paint, and only a completed load is stored,
+// so a failed or cancelled one is fetched again next time. A load of the same file already in flight
+// is joined rather than repeated; this hook's token only ever cancels a fetch it started itself.
 export function usePreviewBytes(item: DriveItem): UsePreviewBytesResult {
 	// ★ The single byte-source seam: an "anon" ambient mode (the public-link routes) routes the whole
 	// buffer through the UNAUTHENTICATED linked-file worker method instead of the authed one, so a
@@ -37,10 +43,13 @@ export function usePreviewBytes(item: DriveItem): UsePreviewBytesResult {
 	// path is byte-for-byte unchanged. Both methods share the same previewAborts token registry, so the
 	// cancel-on-unmount below reaches an anon read with no change of its own.
 	const accessMode = usePreviewAccessMode()
+	const cacheScope = usePreviewCacheScope()
 	const [result, setResult] = useState<
 		{ status: "pending" } | { status: "success"; bytes: Uint8Array } | { status: "error"; dto: ErrorDTO }
-	>({
-		status: "pending"
+	>(() => {
+		const bytes = getPreviewBytes(cacheScope, item.data.uuid)
+
+		return bytes === undefined ? { status: "pending" } : { status: "success", bytes }
 	})
 	const [reloadToken, setReloadToken] = useState(0)
 
@@ -51,12 +60,13 @@ export function usePreviewBytes(item: DriveItem): UsePreviewBytesResult {
 		async function load(): Promise<void> {
 			try {
 				const file = narrowToAnyFile(item)
-				const bytes = await runOp(
-					accessMode === "anon" ? sdkApi.downloadLinkedFileBytesAnon(file, token) : sdkApi.downloadFileBytes(file, token)
+				const bytes = await loadPreviewBytes(cacheScope, item.data.uuid, Number(file.size), () =>
+					runOp(accessMode === "anon" ? sdkApi.downloadLinkedFileBytesAnon(file, token) : sdkApi.downloadFileBytes(file, token))
 				)
 
 				if (live) {
-					setResult({ status: "success", bytes })
+					// Same buffer as the cache-seeded initial state: keep the state object so nothing re-renders.
+					setResult(prev => (prev.status === "success" && prev.bytes === bytes ? prev : { status: "success", bytes }))
 				}
 			} catch (e) {
 				if (live) {
@@ -71,7 +81,7 @@ export function usePreviewBytes(item: DriveItem): UsePreviewBytesResult {
 			live = false
 			void sdkApi.cancelPreviewDownload(token)
 		}
-	}, [item, reloadToken, accessMode])
+	}, [item, reloadToken, accessMode, cacheScope])
 
 	function refetch(): void {
 		setResult({ status: "pending" })

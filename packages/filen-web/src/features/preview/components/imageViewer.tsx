@@ -290,6 +290,10 @@ function BufferedImage({ item, alt }: { item: DriveItem; alt: string }) {
 	)
 }
 
+// Keyed by the buffer itself: a revisited slot gets the same cached Uint8Array back from
+// usePreviewBytes, so it skips the decode too, and each JPEG is dropped along with its source bytes.
+const heicJpegs = new WeakMap<Uint8Array, Blob>()
+
 // HEIC/HEIF byte stage: pipes the already-downloaded buffer through the lazy-loaded transform and
 // mints/revokes a blob URL from the resulting JPEG, mirroring BufferedImageBytes's own lifecycle
 // (minting the URL IS the effect; the cleanup revokes it on unmount/bytes-change).
@@ -309,7 +313,9 @@ function TransformedImageBytes({ bytes, alt }: { bytes: Uint8Array; alt: string 
 
 		async function run(): Promise<void> {
 			try {
-				const blob = await transformHeicBytes(bytes)
+				const blob = heicJpegs.get(bytes) ?? (await transformHeicBytes(bytes))
+
+				heicJpegs.set(bytes, blob)
 
 				if (!live) {
 					return

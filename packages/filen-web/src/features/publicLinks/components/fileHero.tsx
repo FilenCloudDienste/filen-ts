@@ -21,8 +21,19 @@ type DownloadUiState =
 // icon, name, size/type — with a flag-gated Download and, when the file is previewable within the
 // memory cap, an inline preview (auto-invoked). `onBack` is present only for the in-dir child view
 // (returns to the listing); the /f/ route omits it. `downloadEnabled` is the link's own flag (a file
-// link always allows download; a dir link carries enableDownload).
-export function FileHero({ item, downloadEnabled, onBack }: { item: DriveItem; downloadEnabled: boolean; onBack?: () => void }) {
+// link always allows download; a dir link carries enableDownload). `linkScope` fingerprints the link's
+// key and password, scoping the bytes the preview loads so Download can reuse them.
+export function FileHero({
+	item,
+	downloadEnabled,
+	linkScope,
+	onBack
+}: {
+	item: DriveItem
+	downloadEnabled: boolean
+	linkScope: string
+	onBack?: () => void
+}) {
 	const { t } = useTranslation("publicLinks")
 	const base = asDirectoryOrFile(item)
 	const name = base.type === "file" ? driveItemName(base) : base.data.uuid
@@ -38,6 +49,7 @@ export function FileHero({ item, downloadEnabled, onBack }: { item: DriveItem; d
 			file: narrowToAnyFile(item),
 			name,
 			size,
+			linkScope,
 			onProgress: (loaded, total) => {
 				setDownload(prev => (prev.status === "running" ? { status: "running", loaded, total } : prev))
 			}
@@ -110,7 +122,10 @@ export function FileHero({ item, downloadEnabled, onBack }: { item: DriveItem; d
 					)}
 				</div>
 				<div className="min-h-0 flex-1">
-					<PublicPreview item={item} />
+					<PublicPreview
+						item={item}
+						linkScope={linkScope}
+					/>
 				</div>
 			</div>
 		)

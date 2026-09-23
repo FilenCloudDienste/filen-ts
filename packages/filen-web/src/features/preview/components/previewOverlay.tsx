@@ -48,6 +48,7 @@ import {
 import { setPreviewDirty, usePreviewUnsavedGuardStore } from "@/features/preview/store/usePreviewUnsavedGuard"
 import { type PreviewSource, previewSourceKey, previewSourceName } from "@/features/preview/lib/previewSource"
 import { clearVideoPlaybackStates } from "@/features/preview/lib/videoContinuity"
+import { clearPreviewCache } from "@/features/preview/lib/previewCache"
 import { DriveDropdownMenuContent } from "@/features/drive/components/itemMenu"
 import { type ItemActionDialogKind } from "@/features/drive/components/itemMenu.logic"
 import { MoveTargetDialog } from "@/features/drive/components/moveTargetDialog"
@@ -512,10 +513,12 @@ export function PreviewOverlay({ variant, items, index, onStep, onClose, onItemR
 	// only ever mounts while a preview is open (useDriveDialogHost's conditional render), so its own
 	// unmount is precisely "the overlay closed"; clearing here (rather than in onClose, which the header
 	// item-menu's own Trash/Unshare success paths also call, all funneling through the SAME close) keeps
-	// this a single, unconditional cleanup with no risk of missing a dismissal route.
+	// this a single, unconditional cleanup with no risk of missing a dismissal route. The preview
+	// byte cache is scoped the same way, so a closed overlay stops holding file buffers.
 	useEffect(() => {
 		return () => {
 			clearVideoPlaybackStates()
+			clearPreviewCache()
 		}
 	}, [])
 

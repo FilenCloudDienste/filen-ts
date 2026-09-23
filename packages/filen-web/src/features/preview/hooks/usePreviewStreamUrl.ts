@@ -2,6 +2,8 @@ import { useEffect, useState } from "react"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { narrowToAnyFile } from "@/features/drive/lib/download"
 import { previewStreamUrl } from "@/features/preview/lib/previewStream"
+import { usePreviewCacheScope } from "@/features/preview/lib/accessMode"
+import { forgetPreviewStreamId, getPreviewStreamId, previewCacheEpoch, setPreviewStreamId } from "@/features/preview/lib/previewCache"
 
 // `refetch` merged onto every variant — mirrors usePreviewBytes.ts's own identical shape/rationale.
 // Re-registering (rather than just re-rendering) is the correct retry here: a mid-consumption failure
@@ -24,19 +26,28 @@ export type UsePreviewStreamUrlResult =
 // mediaViewer.tsx's own onFallback wiring). An over-cap file (streamFailureAction "error") instead
 // shows a labeled error state with Retry — `refetch` (see `reloadToken` below) is that retry's wiring,
 // re-running this SAME registration rather than falling back to an unbounded buffered download.
+//
+// A revisit reuses the id this item was registered under earlier (previewCache.ts), re-registered so
+// it is live again, so the element gets the same URL and the browser can answer it from what it
+// already holds. A retry drops that id: a broken stream needs a URL the element has not seen.
 export function usePreviewStreamUrl(item: DriveItem, name: string, contentType: string): UsePreviewStreamUrlResult {
 	const [result, setResult] = useState<{ status: "pending" } | { status: "success"; url: string } | { status: "error" }>({
 		status: "pending"
 	})
 	const [reloadToken, setReloadToken] = useState(0)
+	const cacheScope = usePreviewCacheScope()
 
 	useEffect(() => {
 		let live = true
+		const epoch = previewCacheEpoch()
 
 		async function register(): Promise<void> {
 			try {
 				const file = narrowToAnyFile(item)
-				const url = await previewStreamUrl(file, name, contentType)
+				const id = getPreviewStreamId(cacheScope, item.data.uuid, contentType) ?? crypto.randomUUID()
+				const url = await previewStreamUrl(file, name, contentType, id)
+
+				setPreviewStreamId(cacheScope, item.data.uuid, contentType, id, epoch)
 
 				if (live) {
 					setResult({ status: "success", url })
@@ -53,9 +64,10 @@ export function usePreviewStreamUrl(item: DriveItem, name: string, contentType: 
 		return () => {
 			live = false
 		}
-	}, [item, name, contentType, reloadToken])
+	}, [item, name, contentType, reloadToken, cacheScope])
 
 	function refetch(): void {
+		forgetPreviewStreamId(cacheScope, item.data.uuid, contentType)
 		setResult({ status: "pending" })
 		setReloadToken(prev => prev + 1)
 	}

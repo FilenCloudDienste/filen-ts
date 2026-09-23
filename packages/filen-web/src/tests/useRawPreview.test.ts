@@ -17,6 +17,7 @@ vi.mock("@/lib/sdk/client", () => ({
 const { useRawPreview } = await import("@/features/preview/hooks/useRawPreview")
 const { PreviewAccessModeProvider } = await import("@/features/preview/lib/accessMode")
 const { linkedFileIntoDriveItem } = await import("@/features/drive/lib/item")
+const { clearPreviewCache } = await import("@/features/preview/lib/previewCache")
 
 const item = linkedFileIntoDriveItem({
 	uuid: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
@@ -35,6 +36,8 @@ const item = linkedFileIntoDriveItem({
 
 describe("useRawPreview", () => {
 	beforeEach(() => {
+		// Every test reads the same uuid; the session cache would otherwise answer all but the first.
+		clearPreviewCache()
 		fetchRawPreview.mockClear()
 		fetchLinkedRawPreviewAnon.mockClear()
 		cancelPreviewDownload.mockClear()

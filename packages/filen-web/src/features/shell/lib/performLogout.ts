@@ -10,6 +10,7 @@ import { wipeSwClient } from "@/features/drive/lib/saveDownload"
 import { clearSession, broadcastAuth } from "@/lib/sdk/session"
 import { kvClear } from "@/lib/storage/adapter"
 import { disposeAudioEngine } from "@/features/audio/lib/audioEngine"
+import { clearPreviewCache } from "@/features/preview/lib/previewCache"
 import { confirmDiscardUnsavedPreview, usePreviewUnsavedGuardStore } from "@/features/preview/store/usePreviewUnsavedGuard"
 import { queryClient } from "@/queries/client"
 import { toast } from "sonner"
@@ -87,6 +88,8 @@ export async function performLogout(options?: PerformLogoutOptions): Promise<boo
 	// Stop playback, revoke the live blob URL, tear down the media element and clear the queue so no
 	// audio from this account survives into the next session.
 	disposeAudioEngine()
+	// Decrypted preview buffers held for pager revisits.
+	clearPreviewCache()
 	// Tear the realtime socket down before the client is released — unsubscribeFromSocket needs the live
 	// client. Fire-and-forget: the worker also frees the listener in releaseClient as a backstop.
 	void socketBridge.stop()

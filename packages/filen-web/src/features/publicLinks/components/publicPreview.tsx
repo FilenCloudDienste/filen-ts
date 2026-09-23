@@ -28,7 +28,7 @@ function ViewerFallback() {
 // access-mode provider so every byte read routes through the UNAUTHENTICATED worker method and the
 // buffered (never service-worker-streamed) path. The caller (fileView) has already gated size via
 // anonPreviewability, so an oversized file never reaches a viewer here.
-export function PublicPreview({ item }: { item: DriveItem }) {
+export function PublicPreview({ item, linkScope }: { item: DriveItem; linkScope: string }) {
 	const base = asDirectoryOrFile(item)
 
 	if (base.type !== "file") {
@@ -39,7 +39,10 @@ export function PublicPreview({ item }: { item: DriveItem }) {
 	const category = previewType(item)
 
 	return (
-		<PreviewAccessModeProvider mode="anon">
+		<PreviewAccessModeProvider
+			mode="anon"
+			linkScope={linkScope}
+		>
 			<div className="size-full">
 				<PublicPreviewBody
 					item={item}

@@ -2,6 +2,7 @@ import { useState } from "react"
 import { linkedFileIntoDriveItem } from "@/features/drive/lib/item"
 import { usePublicFile } from "@/features/publicLinks/queries/publicLink"
 import { fileAccessState } from "@/features/publicLinks/lib/password.logic"
+import { secretFingerprint } from "@/features/publicLinks/lib/queryKey.logic"
 import { PasswordGate } from "@/features/publicLinks/components/passwordGate"
 import { FileHero } from "@/features/publicLinks/components/fileHero"
 import { PublicLinkLoading, PublicLinkInvalid, PublicLinkError } from "@/features/publicLinks/components/publicLinkStates"
@@ -55,6 +56,7 @@ export function FileLinkView({ uuid, linkKey }: { uuid: string; linkKey: string 
 		<FileHero
 			item={linkedFileIntoDriveItem(query.data)}
 			downloadEnabled={true}
+			linkScope={secretFingerprint(linkKey, password)}
 		/>
 	)
 }

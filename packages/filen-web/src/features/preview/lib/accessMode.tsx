@@ -15,13 +15,41 @@ import { createContext, useContext, type ReactNode } from "react"
 export type PreviewAccessMode = "authed" | "anon"
 
 const PreviewAccessModeContext = createContext<PreviewAccessMode>("authed")
+const PreviewCacheScopeContext = createContext<string | null>("authed")
 
-export function PreviewAccessModeProvider({ mode, children }: { mode: PreviewAccessMode; children: ReactNode }) {
-	return <PreviewAccessModeContext value={mode}>{children}</PreviewAccessModeContext>
+// The preview cache's key scope (previewCache.ts). Authed items share one. A public link's is a
+// fingerprint of its key and password, so bytes read under one password are never served under
+// another; an anon provider given none caches nothing.
+export function previewCacheScope(mode: PreviewAccessMode, linkScope: string | undefined): string | null {
+	if (mode === "authed") {
+		return "authed"
+	}
+
+	return linkScope === undefined ? null : `anon:${linkScope}`
+}
+
+export function PreviewAccessModeProvider({
+	mode,
+	linkScope,
+	children
+}: {
+	mode: PreviewAccessMode
+	linkScope?: string
+	children: ReactNode
+}) {
+	return (
+		<PreviewAccessModeContext value={mode}>
+			<PreviewCacheScopeContext value={previewCacheScope(mode, linkScope)}>{children}</PreviewCacheScopeContext>
+		</PreviewAccessModeContext>
+	)
 }
 
 // Reads the ambient mode; "authed" when no provider is present (the whole existing app), so the
 // public routes are the only place "anon" is ever observed.
 export function usePreviewAccessMode(): PreviewAccessMode {
 	return useContext(PreviewAccessModeContext)
+}
+
+export function usePreviewCacheScope(): string | null {
+	return useContext(PreviewCacheScopeContext)
 }

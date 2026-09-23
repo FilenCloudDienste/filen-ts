@@ -4,6 +4,8 @@ import { sdkApi } from "@/lib/sdk/client"
 import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
 import { isFsaAvailable, isPickerCancelled } from "@/features/drive/lib/saveDownload"
 import { chooseDownloadStrategy, createCollectingSink } from "@/features/publicLinks/lib/download.logic"
+import { previewCacheScope } from "@/features/preview/lib/accessMode"
+import { joinPreviewBytes, loadPreviewBytes } from "@/features/preview/lib/previewCache"
 
 // Effectful anon-download wiring for the public-link routes. NO service worker (its wasm bundle is
 // authed-only) and NO authed transfers store (session-scoped machinery) — this surface is fully
@@ -85,16 +87,31 @@ async function pipeWorkerToSink(
 	await sinkDone
 }
 
+// Writes a buffer already in memory to the picked file; an aborted write leaves no partial file behind.
+async function writeBytes(writable: FileSystemWritableFileStream, bytes: Uint8Array): Promise<void> {
+	try {
+		await writable.write(bytes as Uint8Array<ArrayBuffer>)
+		await writable.close()
+	} catch (e) {
+		await writable.abort().catch(() => undefined)
+
+		throw e
+	}
+}
+
 // Single linked file → disk. FSA path streams; the buffered fallback refuses a file over the in-memory
 // cap up front (the caller renders the "too large" note from that outcome) rather than attempting an
-// allocation that would crash the tab.
+// allocation that would crash the tab. A file the inline preview already loaded, or is still loading,
+// under this link's scope (`linkScope`, see previewCacheScope) is saved from those bytes on either path
+// instead of fetched again; if that shared load is cancelled with the preview, this fetches on its own.
 export async function startAnonFileDownload(args: {
 	file: AnyFile
 	name: string
 	size: bigint
+	linkScope: string
 	onProgress: AnonDownloadProgress
 }): Promise<AnonDownloadOutcome> {
-	const { file, name, size, onProgress } = args
+	const { file, name, size, linkScope, onProgress } = args
 	const fsaAvailable = isFsaAvailable()
 
 	let writable: FileSystemWritableFileStream | null = null
@@ -118,9 +135,15 @@ export async function startAnonFileDownload(args: {
 	}
 
 	const transferId = crypto.randomUUID()
+	const scope = previewCacheScope("anon", linkScope)
 
 	try {
-		if (strategy.kind === "fsa" && writable !== null) {
+		const previewed = strategy.kind === "fsa" ? await joinPreviewBytes(scope, file.uuid) : undefined
+
+		if (strategy.kind === "fsa" && writable !== null && previewed !== undefined) {
+			await writeBytes(writable, previewed)
+			onProgress(Number(size), Number(size))
+		} else if (strategy.kind === "fsa" && writable !== null) {
 			const fsaWritable = writable
 
 			await pipeWorkerToSink(fsaWritable, transferred =>
@@ -136,7 +159,7 @@ export async function startAnonFileDownload(args: {
 		} else {
 			onProgress(0, Number(size))
 
-			const bytes = await sdkApi.downloadLinkedFileBytesAnon(file, transferId)
+			const bytes = await loadPreviewBytes(scope, file.uuid, Number(size), () => sdkApi.downloadLinkedFileBytesAnon(file, transferId))
 
 			saveBlob(new Blob([bytes as BlobPart]), name)
 			onProgress(Number(size), Number(size))

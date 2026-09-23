@@ -31,6 +31,18 @@ describe("PendingRegistry", () => {
 		expect(registry.get("b")).toBeUndefined()
 	})
 
+	it("treats re-registering an existing id as fresh, so it outlives the next registration", () => {
+		const registry = new PendingRegistry<string>(2)
+
+		registry.set("a", "A")
+		registry.set("b", "B")
+		registry.set("a", "A2")
+		registry.set("c", "C")
+
+		expect(registry.get("a")).toBe("A2")
+		expect(registry.get("b")).toBeUndefined()
+	})
+
 	it("never evicts an entry whose stream is still in flight", () => {
 		const registry = new PendingRegistry<string>(2)
 
