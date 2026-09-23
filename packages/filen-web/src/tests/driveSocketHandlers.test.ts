@@ -18,7 +18,8 @@ import { ACCOUNT_QUERY_KEY } from "@/queries/account"
 import { driveListingQueryKey } from "@/features/drive/queries/drive"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
-import { handleDriveEvent } from "@/features/drive/lib/socketHandlers"
+import { flushDeferredRecents, handleDriveEvent } from "@/features/drive/lib/socketHandlers"
+import { useTransfersStore, type Transfer } from "@/features/transfers/store/useTransfersStore"
 import { subscribePreviewReconcile, type PreviewReconcileEvent } from "@/features/preview/lib/previewReconcile"
 
 function testUuid(label: string): UuidStr {
@@ -119,9 +120,25 @@ function getFlat(variant: "links" | "sharedOut", uuid: string | null = null): Dr
 	return testQueryClient.getQueryData<DriveItem[]>(driveListingQueryKey({ variant, uuid }))
 }
 
+function copyRow(status: Transfer["status"]): Transfer {
+	return {
+		id: "copy",
+		direction: "copy",
+		name: "2 items",
+		size: 0,
+		bytesTransferred: 0,
+		status,
+		paused: false,
+		parentUuid: null,
+		startedAt: 0
+	}
+}
+
 beforeEach(() => {
 	testQueryClient.clear()
 	useDriveStore.setState({ selectedItems: [] })
+	useTransfersStore.setState({ transfers: [], speedSamples: [] })
+	flushDeferredRecents()
 	vi.clearAllMocks()
 })
 
@@ -146,6 +163,18 @@ describe("drive socket handlers — additions", () => {
 		handleDriveEvent(driveEvt({ type: "folderSubCreated", dir: mockDir() }))
 
 		expect(getListing(PARENT_A).map(i => i.data.uuid)).toEqual([testUuid("dir")])
+	})
+
+	it.each([
+		["fileNew", () => driveEvt({ type: "fileNew", file: mockFile() })],
+		["folderSubCreated", () => driveEvt({ type: "folderSubCreated", dir: mockDir() })],
+		["fileRestore", () => driveEvt({ type: "fileRestore", file: mockFile() })],
+		["folderRestore", () => driveEvt({ type: "folderRestore", dir: mockDir() })],
+		["fileArchiveRestored", () => driveEvt({ type: "fileArchiveRestored", currentUuid: testUuid("old"), file: mockFile() })]
+	])("%s never creates a listing for a parent nobody has read", (_label, buildEvent) => {
+		handleDriveEvent(buildEvent())
+
+		expect(testQueryClient.getQueryData(driveListingQueryKey({ variant: "drive", uuid: PARENT_A }))).toBeUndefined()
 	})
 
 	it("fileRestore removes the item everywhere then re-adds it to its parent (trash included)", () => {
@@ -295,6 +324,47 @@ describe("drive socket handlers — favorites rejoin", () => {
 		)
 
 		expect(getFavorites()?.map(i => i.data.uuid)).toEqual([testUuid("file")])
+	})
+
+	it("a new file joins Recents", () => {
+		seedRecents([])
+		handleDriveEvent(driveEvt({ type: "fileNew", file: mockFile() }))
+
+		expect(getRecents()?.map(i => i.data.uuid)).toEqual([testUuid("file")])
+	})
+
+	it("while a copy runs, new files leave Recents alone; it is re-read once after the last copy settles", () => {
+		seedRecents([])
+		useTransfersStore.setState({ transfers: [copyRow("copying"), { ...copyRow("copying"), id: "copy-2" }] })
+
+		handleDriveEvent(driveEvt({ type: "fileNew", file: mockFile() }))
+		handleDriveEvent(driveEvt({ type: "fileNew", file: mockFile({ uuid: testUuid("file-2") }) }))
+
+		expect(getRecents()).toEqual([])
+
+		const recentsQuery = () =>
+			testQueryClient.getQueryCache().find({ queryKey: driveListingQueryKey({ variant: "recents", uuid: null }) })
+
+		// One copy still runs: nothing yet.
+		useTransfersStore.setState({ transfers: [copyRow("done"), { ...copyRow("copying"), id: "copy-2" }] })
+		flushDeferredRecents()
+
+		expect(recentsQuery()?.state.isInvalidated).toBe(false)
+
+		useTransfersStore.setState({ transfers: [copyRow("done"), { ...copyRow("completedWithErrors"), id: "copy-2" }] })
+		flushDeferredRecents()
+
+		expect(recentsQuery()?.state.isInvalidated).toBe(true)
+	})
+
+	it("flushing with nothing deferred reads nothing", () => {
+		seedRecents([])
+		flushDeferredRecents()
+
+		expect(
+			testQueryClient.getQueryCache().find({ queryKey: driveListingQueryKey({ variant: "recents", uuid: null }) })?.state
+				.isInvalidated
+		).toBe(false)
 	})
 
 	it("an unfavorited new file leaves Favorites alone", () => {

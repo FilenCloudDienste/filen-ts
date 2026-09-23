@@ -1,4 +1,4 @@
-import { useQuery, type UseQueryResult } from "@tanstack/react-query"
+import { useQuery, type QueryKey, type UseQueryResult } from "@tanstack/react-query"
 import { sdkApi } from "@/lib/sdk/client"
 import { currentSocketEpoch, socketLiveSince } from "@/lib/sdk/socketSession"
 import { queryClient } from "@/queries/client"
@@ -92,17 +92,28 @@ export interface PhotosEventScope {
 // three subdirectories down has no cheap membership test from a bare uuid/parent payload. Given a
 // scope, a listing is skipped only when that is proven harmless; anything unproven invalidates. The
 // proof reads the worker's dir cache, which is only trusted for an active listing that was read this
-// session and is neither mid-walk (the walk may predate the change) nor already invalidated (a
-// missed or pending change may have left cached parent pointers stale). An inactive listing is just
-// marked stale, which costs nothing until it mounts.
+// session and is neither mid-walk (the walk may predate the change, so it walks once more after) nor
+// already invalidated (a missed or pending change may have left cached parent pointers stale). An
+// inactive listing is just marked stale, which costs nothing until it mounts.
 export function invalidatePhotosListing(scope: PhotosEventScope | null): void {
 	for (const query of queryClient.getQueryCache().findAll({ queryKey: ["photos", "listing"] })) {
 		const queryKey = query.queryKey
 		const rootUuid = queryKey[2]
 		const photos = queryClient.getQueryData<PhotoItem[]>(queryKey)
 
+		// Read at call time: a scope check resolving later may find a walk already under way.
 		const invalidate = (): void => {
-			void queryClient.invalidateQueries({ queryKey, exact: true })
+			if (query.state.fetchStatus === "idle") {
+				void queryClient.invalidateQueries({ queryKey, exact: true })
+			} else {
+				rewalkAfterCurrentWalk(query.queryHash, queryKey)
+			}
+		}
+
+		if (query.state.fetchStatus !== "idle") {
+			invalidate()
+
+			continue
 		}
 
 		if (
@@ -111,7 +122,6 @@ export function invalidatePhotosListing(scope: PhotosEventScope | null): void {
 			photos === undefined ||
 			!readThisSession.has(rootUuid) ||
 			!query.isActive() ||
-			query.state.fetchStatus !== "idle" ||
 			query.state.isInvalidated
 		) {
 			invalidate()
@@ -136,6 +146,25 @@ export function invalidatePhotosListing(scope: PhotosEventScope | null): void {
 			}
 		}, invalidate)
 	}
+}
+
+// A walk in flight may predate the event, so it walks once more after it settles — once, however many
+// events arrive meanwhile. Restarting it per event instead would never let a walk finish while a copy
+// under the root streams its files in.
+const rewalkQueued = new Set<string>()
+
+function rewalkAfterCurrentWalk(queryHash: string, queryKey: QueryKey): void {
+	if (rewalkQueued.has(queryHash)) {
+		return
+	}
+
+	rewalkQueued.add(queryHash)
+
+	void queryClient.refetchQueries({ queryKey, exact: true }, { cancelRefetch: false }).finally(() => {
+		rewalkQueued.delete(queryHash)
+
+		void queryClient.invalidateQueries({ queryKey, exact: true })
+	})
 }
 
 // A dropped socket may have missed events: mark every listing stale without refetching while the socket

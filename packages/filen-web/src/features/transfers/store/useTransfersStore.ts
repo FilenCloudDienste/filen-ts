@@ -44,6 +44,10 @@ export function hasActiveTransfers(transfers: readonly Transfer[]): boolean {
 	return transfers.some(transfer => isActiveTransfer(transfer.status))
 }
 
+export function hasActiveCopies(transfers: readonly Transfer[]): boolean {
+	return transfers.some(transfer => transfer.direction === "copy" && isActiveTransfer(transfer.status))
+}
+
 // Drop the OLDEST finished (non-active) rows once the finished count exceeds the cap — active rows
 // are never dropped. `transfers` is insertion-ordered (add() appends), so array position already IS
 // startedAt order; this walks forward and only skips (drops) the first `excess` finished rows it

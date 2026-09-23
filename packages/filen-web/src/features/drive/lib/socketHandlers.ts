@@ -3,11 +3,12 @@ import { removeByUuid } from "@filen/shared"
 import { registerSocketHandler } from "@/lib/sdk/socket"
 import { log } from "@/lib/log"
 import {
-	driveListingQueryUpdate,
+	driveListingQueryUpdateIfCached,
 	driveListingQueryUpdateGlobal,
 	findCachedListingItem,
 	flatListingQueryUpdate,
 	invalidateDriveListings,
+	invalidateFlatListing,
 	markListingsStale,
 	normalizeParentUuid
 } from "@/features/drive/queries/drive"
@@ -16,6 +17,7 @@ import { currentRootUuid, insertIntoTrashListing, patchFavoritesListing, patchMo
 import { invalidatePhotosListing, markPhotosListingStale, type PhotosEventScope } from "@/features/photos/queries/photos"
 import { markAccountStale } from "@/queries/account"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
+import { hasActiveCopies, useTransfersStore } from "@/features/transfers/store/useTransfersStore"
 import {
 	emitPreviewFileMetaChanged,
 	emitPreviewFolderMetaChanged,
@@ -27,7 +29,9 @@ import {
 // SEMANTICS onto the wasm surface (flat discriminated `event.inner.type`), registered on the generic
 // socket bridge. Web keeps no worker-side item cache like mobile's fileUuidToNormalFile map, so the two
 // resolution strategies differ where a payload is sparse: an event that ships the full File/Dir splices
-// it into its parent listing (the item's own `.parent`); an event that ships only a uuid patches every
+// it into its parent listing (the item's own `.parent`) if that listing has been read — a copy or an
+// upload elsewhere creates items by the thousand under directories nobody has opened, and a listing made
+// from them would sit in memory for the session and show as that directory's whole content until read; an event that ships only a uuid patches every
 // currently-instantiated listing at once via driveListingQueryUpdateGlobal (the same fan-out actions.ts
 // uses), which reaches whichever listing holds the row without a parent lookup. No invalidate-storm — every
 // path is a targeted setQueryData with the queries' own cancel-before-patch discipline.
@@ -100,8 +104,29 @@ function ownedRowOrUndefined(item: DriveItem | undefined): DriveItem | undefined
 // aggregates across parents, so upsertDriveItem's name-collision rule doesn't apply here — same
 // reasoning as the favorites listing). Appending is enough for ordering: resolveEffectiveSort forces
 // uploadDateDesc for the recents variant (lib/preferences.ts), so the row sorts to the top at render.
+// A copy lands its files as fileNew events by the thousand, and rebuilding recents for each is quadratic
+// and cancels its refetch every time; while one runs, recents is read once after the last copy instead.
+let recentsDeferred = false
+
 function insertIntoRecents(item: DriveItem): void {
+	if (hasActiveCopies(useTransfersStore.getState().transfers)) {
+		recentsDeferred = true
+
+		return
+	}
+
 	flatListingQueryUpdate("recents", prev => [...removeByUuid(prev, item.data.uuid), item])
+}
+
+// Called as each copy settles; only the last one standing reads.
+export function flushDeferredRecents(): void {
+	if (!recentsDeferred || hasActiveCopies(useTransfersStore.getState().transfers)) {
+		return
+	}
+
+	recentsDeferred = false
+
+	invalidateFlatListing("recents")
 }
 
 // A row the payload carries in full keeps its favorite, so one leaving the trash or replacing an
@@ -216,7 +241,7 @@ export function handleDriveEvent(event: DriveSocketEvent): void {
 			// stale row so a re-delivered event never duplicates.
 			const item = narrowItem(inner.file)
 
-			driveListingQueryUpdate(normalizeParentUuid(inner.file.parent, rootUuid), prev => upsertDriveItem(prev, item))
+			driveListingQueryUpdateIfCached(normalizeParentUuid(inner.file.parent, rootUuid), prev => upsertDriveItem(prev, item))
 			// A brand-new file is a recents entry by definition — mobile inserts unconditionally too.
 			insertIntoRecents(item)
 			rejoinFavorites(item)
@@ -231,7 +256,7 @@ export function handleDriveEvent(event: DriveSocketEvent): void {
 			// destination parent — uuid is preserved across a restore, so removing after the upsert would strip
 			// the just-restored row right back out.
 			driveListingQueryUpdateGlobal(prev => removeByUuid(prev, item.data.uuid))
-			driveListingQueryUpdate(normalizeParentUuid(inner.file.parent, rootUuid), prev => upsertDriveItem(prev, item))
+			driveListingQueryUpdateIfCached(normalizeParentUuid(inner.file.parent, rootUuid), prev => upsertDriveItem(prev, item))
 			rejoinFavorites(item)
 			// The item left the trash listing — a trash preview open on it advances to a neighbour or closes.
 			emitPreviewItemRemoved(item.data.uuid)
@@ -245,7 +270,7 @@ export function handleDriveEvent(event: DriveSocketEvent): void {
 			// A version restore rotates the file's uuid: drop both the restored uuid (if a stale copy lingers)
 			// and the superseded current uuid, then splice the fresh file into its parent.
 			driveListingQueryUpdateGlobal(prev => removeByUuid(removeByUuid(prev, item.data.uuid), inner.currentUuid))
-			driveListingQueryUpdate(normalizeParentUuid(inner.file.parent, rootUuid), prev => upsertDriveItem(prev, item))
+			driveListingQueryUpdateIfCached(normalizeParentUuid(inner.file.parent, rootUuid), prev => upsertDriveItem(prev, item))
 			rejoinFavorites(item)
 			// A preview open on the superseded uuid reseeds with the restored file (same slot, fresh content).
 			emitPreviewItemReplaced(inner.currentUuid, item)
@@ -254,7 +279,9 @@ export function handleDriveEvent(event: DriveSocketEvent): void {
 		}
 
 		case "folderSubCreated": {
-			driveListingQueryUpdate(normalizeParentUuid(inner.dir.parent, rootUuid), prev => upsertDriveItem(prev, narrowItem(inner.dir)))
+			driveListingQueryUpdateIfCached(normalizeParentUuid(inner.dir.parent, rootUuid), prev =>
+				upsertDriveItem(prev, narrowItem(inner.dir))
+			)
 
 			break
 		}
@@ -263,7 +290,7 @@ export function handleDriveEvent(event: DriveSocketEvent): void {
 			const item = narrowItem(inner.dir)
 
 			driveListingQueryUpdateGlobal(prev => removeByUuid(prev, item.data.uuid))
-			driveListingQueryUpdate(normalizeParentUuid(inner.dir.parent, rootUuid), prev => upsertDriveItem(prev, item))
+			driveListingQueryUpdateIfCached(normalizeParentUuid(inner.dir.parent, rootUuid), prev => upsertDriveItem(prev, item))
 			rejoinFavorites(item)
 			emitPreviewItemRemoved(item.data.uuid)
 

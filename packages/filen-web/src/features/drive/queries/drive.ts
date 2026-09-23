@@ -247,6 +247,11 @@ function keepRefreshPending(queryKey: QueryKey): void {
 	void queryClient.invalidateQueries({ queryKey, exact: true, refetchType: "none" })
 }
 
+// One flat listing re-read if mounted, else marked stale.
+export function invalidateFlatListing(variant: "recents" | "favorites" | "trash" | "links"): void {
+	void queryClient.invalidateQueries({ queryKey: driveListingQueryKey({ variant, uuid: null }), exact: true })
+}
+
 // Re-reads the mounted listings and marks the rest stale, for a change no event patches in place.
 export function invalidateDriveListings(): void {
 	listingStaleMarks++

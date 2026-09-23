@@ -431,7 +431,7 @@ describe("photos listing socket scoping", () => {
 		expect(walks()).toBe(2)
 	})
 
-	it("an event during a walk restarts it without asking", async () => {
+	it("an event during a walk walks once more after it, without asking", async () => {
 		await mountRead()
 
 		const pending = deferred<NormalDirsAndFiles>()
@@ -443,6 +443,49 @@ describe("photos listing socket scoping", () => {
 		await drain()
 
 		expect(isOutsidePhotosRoot).not.toHaveBeenCalled()
+		expect(walks()).toBe(3)
+	})
+
+	it("a burst of events during a walk queues one more walk, not one per event", async () => {
+		await mountRead()
+
+		const pending = deferred<NormalDirsAndFiles>()
+
+		listPhotosRecursive.mockImplementationOnce(() => pending.promise)
+		invalidatePhotosListing(null)
+
+		for (let i = 0; i < 50; i++) {
+			handleDriveEvent(driveEvent({ type: "fileNew", file: mockFile(testUuid(`burst${String(i)}`), B) }))
+		}
+
+		expect(walks()).toBe(2)
+
+		pending.resolve({ dirs: [], files: [] })
+		await drain()
+
+		expect(walks()).toBe(3)
+	})
+
+	it("a scope check that resolves during a walk queues behind it instead of restarting it", async () => {
+		await mountRead()
+
+		const check = deferred<boolean>()
+		const pending = deferred<NormalDirsAndFiles>()
+
+		isOutsidePhotosRoot.mockImplementationOnce(() => check.promise)
+		handleDriveEvent(driveEvent({ type: "fileNew", file: mockFile(UNLISTED, B) }))
+		listPhotosRecursive.mockImplementationOnce(() => pending.promise)
+		invalidatePhotosListing(null)
+		check.resolve(false)
+		await act(async () => {
+			await Promise.resolve()
+		})
+
+		expect(walks()).toBe(2)
+
+		pending.resolve({ dirs: [], files: [] })
+		await drain()
+
 		expect(walks()).toBe(3)
 	})
 

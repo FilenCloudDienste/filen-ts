@@ -139,6 +139,7 @@ function makeDeps() {
 			cached: vi.fn<RunCopyDeps["account"]["cached"]>(() => undefined),
 			fetchFresh: vi.fn<RunCopyDeps["account"]["fetchFresh"]>()
 		},
+		seedThumbnail: vi.fn<RunCopyDeps["seedThumbnail"]>(),
 		patchCreated: vi.fn<RunCopyDeps["patchCreated"]>(),
 		trash: vi.fn<RunCopyDeps["trash"]>(() => Promise.resolve({ succeeded: [], failed: [] })),
 		settled: vi.fn<RunCopyDeps["settled"]>()
@@ -205,6 +206,8 @@ describe("runCopyJob", () => {
 
 		expect(deps.patchCreated).toHaveBeenCalledTimes(1)
 		expect(deps.patchCreated.mock.calls[0]?.[0].data.uuid).toBe(dir.uuid)
+		expect(deps.seedThumbnail).toHaveBeenCalledWith(testUuid("source"), deps.patchCreated.mock.calls[0]?.[0])
+		expect(deps.seedThumbnail.mock.invocationCallOrder[0]).toBeLessThan(deps.patchCreated.mock.invocationCallOrder[0] ?? 0)
 		expect(job?.created.map(item => item.data.uuid)).toEqual([dir.uuid])
 	})
 

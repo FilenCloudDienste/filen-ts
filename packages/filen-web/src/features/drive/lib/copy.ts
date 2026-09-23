@@ -13,6 +13,9 @@ import { driveListingQueryUpdateIfCached, invalidateDirectorySize, normalizePare
 import { currentRootUuid, trashItems } from "@/features/drive/lib/actions"
 import { type BulkOutcome } from "@/features/drive/lib/bulk"
 import { toastBulkOutcome } from "@/features/drive/lib/bulkToast"
+import { flushDeferredRecents } from "@/features/drive/lib/socketHandlers"
+import { seedThumbnail } from "@/features/drive/lib/thumbnails"
+import { readThumbnailBlob } from "@/features/drive/lib/thumbCache"
 import { accountQuotaDeps, addAccountStorageUsed } from "@/features/drive/lib/quota"
 import { type QuotaCheckDeps, type StorageCounters } from "@/features/drive/lib/quota.logic"
 import {
@@ -52,6 +55,7 @@ export interface RunCopyDeps {
 	transfers: Pick<TransfersStore, "add" | "setProgress" | "setSize" | "settle" | "remove">
 	jobs: Pick<CopyJobsStore, "put" | "update"> & { get: (id: string) => CopyJob | undefined }
 	account: QuotaCheckDeps
+	seedThumbnail: (sourceUuid: string, item: DriveItem) => void
 	patchCreated: (item: DriveItem) => void
 	trash: (items: DriveItem[]) => Promise<BulkOutcome<DriveItem>>
 	settled: (job: CopyJob, trashed: BulkOutcome<DriveItem> | null) => void
@@ -149,6 +153,8 @@ export async function runCopyJob(deps: RunCopyDeps, request: CopyJobRequest): Pr
 			const item = narrowItem(event.item.item)
 
 			deps.jobs.update(id, job => applyCopyCreated(job, item))
+			// Before the patch: the row's tile asks for its thumbnail on the next commit.
+			deps.seedThumbnail(event.item.sourceUuid, item)
 			deps.patchCreated(item)
 
 			return
@@ -214,7 +220,19 @@ function patchCopiedItem(item: DriveItem): void {
 	driveListingQueryUpdateIfCached(normalizeParentUuid(item.data.parent, currentRootUuid()), prev => upsertDriveItem(prev, item))
 }
 
+// A copied file is the source's content under a new uuid, so the source's cached thumbnail is its
+// thumbnail too; without one the seat falls through to the ordinary generation, only if a tile asks.
+function seedCopiedThumbnail(sourceUuid: string, item: DriveItem): void {
+	seedThumbnail(item, async () => {
+		const blob = await readThumbnailBlob(sourceUuid)
+
+		return blob === null ? { type: "unanswered" } : { type: "bytes", bytes: new Uint8Array(await blob.arrayBuffer()) }
+	})
+}
+
 function announceCopySettled(job: CopyJob, trashed: BulkOutcome<DriveItem> | null): void {
+	flushDeferredRecents()
+
 	if (job.counts.bytesDone > 0) {
 		addAccountStorageUsed(BigInt(job.counts.bytesDone))
 	}
@@ -257,6 +275,7 @@ export const defaultCopyDeps: RunCopyDeps = {
 	transfers: useTransfersStore.getState(),
 	jobs: { ...useCopyJobsStore.getState(), get: getCopyJob },
 	account: accountQuotaDeps,
+	seedThumbnail: seedCopiedThumbnail,
 	patchCreated: patchCopiedItem,
 	trash: trashItems,
 	settled: announceCopySettled
