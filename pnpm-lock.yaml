@@ -773,8 +773,8 @@ importers:
         specifier: 6.43.11
         version: 6.43.11
       '@filen/sdk-rs':
-        specifier: 0.4.45
-        version: 0.4.45
+        specifier: 0.4.47
+        version: 0.4.47
       '@filen/shared':
         specifier: workspace:*
         version: link:../filen-shared
@@ -2225,6 +2225,10 @@ packages:
 
   '@filen/sdk-rs@0.4.45':
     resolution: {integrity: sha512-sY3LYtLCebR3+bZviAFJ4aysNkL1Bmglw487fT9Y7SnRJ4T0Cbz7qwuSjRSBG/wb6+/zD2dctccDQXrGE2Q59Q==}
+    engines: {node: '>=23'}
+
+  '@filen/sdk-rs@0.4.47':
+    resolution: {integrity: sha512-RlKqNsixjOQST/nW5S/b0EBe1aK7fi4bKrY8VsFrZDGEKYffZv6QjzCflBlTJ0MZVtTHav6Wk0Xc4zQ+/fKXfA==}
     engines: {node: '>=23'}
 
   '@floating-ui/core@1.8.0':
@@ -11619,6 +11623,10 @@ snapshots:
       js-yaml: 4.3.2
 
   '@filen/sdk-rs@0.4.45':
+    dependencies:
+      uniffi-bindgen-react-native: https://codeload.github.com/Enduriel/uniffi-bindgen-react-native/tar.gz/e0282ad3eb972eaea74225dcc06247b7a67204dd
+
+  '@filen/sdk-rs@0.4.47':
     dependencies:
       uniffi-bindgen-react-native: https://codeload.github.com/Enduriel/uniffi-bindgen-react-native/tar.gz/e0282ad3eb972eaea74225dcc06247b7a67204dd
 
