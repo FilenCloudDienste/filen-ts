@@ -15,6 +15,7 @@ import {
 import { narrowItem, upsertDriveItem, type DriveItem } from "@/features/drive/lib/item"
 import { currentRootUuid, insertIntoTrashListing, patchFavoritesListing } from "@/features/drive/lib/actions"
 import { invalidatePhotosListing, markPhotosListingStale, type PhotosEventScope } from "@/features/photos/queries/photos"
+import { markAccountStale } from "@/queries/account"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import {
 	emitPreviewFileMetaChanged,
@@ -184,12 +185,32 @@ function photosEventScope(inner: DriveSocketEvent["inner"]): PhotosEventScope | 
 	}
 }
 
+// Drive events that move the account's storage used or versioned storage. Trashing and restoring don't:
+// trashed items keep counting until deleted. A new version arrives as fileNew, its predecessor as
+// fileArchived.
+const ACCOUNT_STORAGE_EVENT_TYPES: ReadonlySet<DriveSocketEvent["inner"]["type"]> = new Set([
+	"fileNew",
+	"fileArchived",
+	"fileArchiveRestored",
+	"fileDeletedPermanent",
+	"folderDeletedPermanent",
+	"trashEmpty",
+	"deleteAll",
+	"deleteVersioned"
+])
+
 export function handleDriveEvent(event: DriveSocketEvent): void {
 	const inner = event.inner
 	const rootUuid = currentRootUuid()
 
 	if (PHOTOS_INVALIDATING_EVENT_TYPES.has(inner.type)) {
 		invalidatePhotosListing(photosEventScope(inner))
+	}
+
+	// No event carries the new totals, so a change from any device marks the account for its next focus
+	// or mount instead of waiting out its stale time (queries/account.ts).
+	if (ACCOUNT_STORAGE_EVENT_TYPES.has(inner.type)) {
+		markAccountStale()
 	}
 
 	switch (inner.type) {

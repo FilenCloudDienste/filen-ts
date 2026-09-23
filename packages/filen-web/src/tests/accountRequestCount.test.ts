@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { createElement, type ComponentType, type ReactNode } from "react"
 import { act, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react"
 import { QueryClient, QueryClientProvider, focusManager, onlineManager } from "@tanstack/react-query"
-import type { UserInfo, UserPersonalUpdateInfo } from "@filen/sdk-rs"
+import type { File, FileMeta, SocketEvent, UserInfo, UserPersonalUpdateInfo, UuidStr } from "@filen/sdk-rs"
 
 const { getUserInfo, setNickname, updatePersonalInfo, setVersioningEnabled, setLoginAlertsEnabled, exportMasterKeys } = vi.hoisted(() => ({
 	getUserInfo: vi.fn<() => Promise<UserInfo>>(),
@@ -48,6 +48,7 @@ import { NicknameCard } from "@/features/settings/components/account/nicknameCar
 import { PersonalInfoCard } from "@/features/settings/components/account/personalInfoCard"
 import { AccountPreferencesCard } from "@/features/settings/components/account/accountPreferencesCard"
 import { ExportMasterKeysCard } from "@/features/settings/components/security/exportMasterKeys"
+import { handleDriveEvent } from "@/features/drive/lib/socketHandlers"
 
 const EMPTY_PERSONAL: UserPersonalUpdateInfo = {
 	city: undefined,
@@ -362,6 +363,84 @@ describe("account writes patch instead of reading back", () => {
 		expect(exportMasterKeys).toHaveBeenCalledOnce()
 		expect(cached()?.didExportMasterKeys).toBe(true)
 		expect(reads()).toBe(1)
+	})
+})
+
+type DriveInner = Extract<SocketEvent, { type: "drive" }>["inner"]
+
+const FILE_UUID = "file-0000-0000-0000-000000000000" as UuidStr
+const PARENT_UUID = "parent-0000-0000-0000-000000000000" as UuidStr
+
+const FILE: File = {
+	uuid: FILE_UUID,
+	stableUUID: undefined,
+	parent: PARENT_UUID,
+	size: 1_024n,
+	favorited: false,
+	region: "de-1",
+	bucket: "filen-1",
+	timestamp: 1_700_000_000_000n,
+	chunks: 1n,
+	canMakeThumbnail: false,
+	meta: {
+		type: "decoded",
+		data: { name: "report.pdf", mime: "application/pdf", modified: 1_700_000_000_000n, size: 1_024n, key: "k", version: 2 }
+	}
+}
+
+const RENAMED: FileMeta = {
+	type: "decoded",
+	data: { name: "renamed.pdf", mime: "application/pdf", modified: 1_700_000_000_000n, size: 1_024n, key: "k", version: 2 }
+}
+
+const STORAGE_EVENTS: DriveInner[] = [
+	{ type: "fileNew", file: FILE },
+	{ type: "fileArchived", uuid: FILE_UUID, stableUUID: FILE_UUID, newUUID: undefined },
+	{ type: "fileArchiveRestored", currentUuid: FILE_UUID, file: FILE },
+	{ type: "fileDeletedPermanent", uuid: FILE_UUID, stableUUID: undefined },
+	{ type: "folderDeletedPermanent", uuid: PARENT_UUID },
+	{ type: "trashEmpty" },
+	{ type: "deleteAll" },
+	{ type: "deleteVersioned" }
+]
+
+const OTHER_EVENTS: DriveInner[] = [
+	{ type: "fileMetadataChanged", uuid: FILE_UUID, metadata: RENAMED },
+	{ type: "itemFavorite", item: { type: "file", ...FILE, favorited: true } },
+	{ type: "fileMove", file: FILE },
+	{ type: "fileTrash", uuid: FILE_UUID, stableUUID: FILE_UUID, newUUID: undefined }
+]
+
+// The socket echoes this tab's writes too, and reports every other device's.
+describe("drive events and the account", () => {
+	it.each(STORAGE_EVENTS.map(inner => [inner.type, inner] as const))("%s marks it stale; the next focus reads once", async (_, inner) => {
+		mountAccount()
+		await drain()
+
+		handleDriveEvent({ type: "drive", inner, driveMessageId: 0n })
+		await drain()
+
+		expect(reads()).toBe(1)
+		expect(isInvalidated()).toBe(true)
+
+		focus()
+		await drain()
+		focus()
+		await drain()
+
+		expect(reads()).toBe(2)
+	})
+
+	it.each(OTHER_EVENTS.map(inner => [inner.type, inner] as const))("%s leaves it fresh", async (_, inner) => {
+		mountAccount()
+		await drain()
+
+		handleDriveEvent({ type: "drive", inner, driveMessageId: 0n })
+		focus()
+		await drain()
+
+		expect(reads()).toBe(1)
+		expect(isInvalidated()).toBe(false)
 	})
 })
 
