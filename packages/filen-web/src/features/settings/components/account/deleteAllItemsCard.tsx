@@ -8,6 +8,7 @@ import { errorLabel } from "@/lib/i18n/errorLabel"
 import { DELETE_ALL_ITEMS_PHRASE } from "@/features/settings/lib/dangerPhrases"
 import { useIsOnline } from "@/lib/useIsOnline"
 import type { AccountQuerySuccess } from "@/queries/account"
+import { invalidateDriveListings } from "@/features/drive/queries/drive"
 import { Card, CardFooter, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { TypedConfirmDialog } from "@/components/dialogs/typedConfirmDialog"
@@ -31,6 +32,8 @@ function DeleteAllItemsCard({ accountQuery }: DeleteAllItemsCardProps) {
 		setPending(true)
 		try {
 			await sdkApi.deleteAllItems()
+			// Nothing patches the listings here, and a read My Drive listing never refetches on its own.
+			invalidateDriveListings()
 			setOpen(false)
 			toast.success(t("settingsDeleteAllItemsSuccess"))
 			void accountQuery.refetch()

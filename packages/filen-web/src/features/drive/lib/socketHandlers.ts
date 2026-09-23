@@ -9,6 +9,7 @@ import {
 	driveListingQueryUpdate,
 	driveListingQueryUpdateGlobal,
 	findCachedListingItem,
+	invalidateDriveListings,
 	normalizeParentUuid
 } from "@/features/drive/queries/drive"
 import { narrowItem, upsertDriveItem, type DriveItem } from "@/features/drive/lib/item"
@@ -38,17 +39,49 @@ import {
 
 type DriveSocketEvent = Extract<SocketEvent, { type: "drive" }>
 
-// Registers the drive handler on the generic bridge; returns the unregister fn. Called once by the authed
-// shell's socket host. Only "drive" events reach handleDriveEvent — the registry routes by type. A socket
-// drop marks the photos listing stale, since the drive events it missed are what keep that listing fresh.
+// Registers the drive handlers on the generic bridge; returns the unregister fn. Called once by the authed
+// shell's socket host. Only "drive" events reach handleDriveEvent — the registry routes by type.
 export function registerDriveSocketHandlers(): () => void {
 	const unregisterDrive = registerSocketHandler("drive", handleDriveEvent)
-	const unregisterReconnecting = registerSocketHandler("reconnecting", markPhotosListingStale)
+	const unregisterMalformed = registerSocketHandler("driveMalformed", markDriveEventsMissed)
+	const unregisterReconnecting = registerSocketHandler("reconnecting", handleDriveReconnecting)
+	const unregisterAuthSuccess = registerSocketHandler("authSuccess", handleDriveAuthSuccess)
 
 	return () => {
 		unregisterDrive()
+		unregisterMalformed()
 		unregisterReconnecting()
+		unregisterAuthSuccess()
 	}
+}
+
+// Drive events are what keep the listings and the photos listing fresh, so one that can't be decoded, or
+// a drop that loses them, leaves both stale: each re-reads on its next mount, focus or reconnect. The
+// authSuccess that ends a drop also re-reads the mounted listings, since what changed meanwhile never
+// arrived. The first authSuccess of a session re-reads nothing: a listing read before it doesn't count
+// as current (drive.ts), so its next mount or focus reads it again.
+let sawReconnecting = false
+
+export function markDriveEventsMissed(): void {
+	void queryClient.invalidateQueries({ queryKey: ["drive", "listing"], refetchType: "none" })
+
+	markPhotosListingStale()
+}
+
+export function handleDriveReconnecting(): void {
+	sawReconnecting = true
+
+	markDriveEventsMissed()
+}
+
+export function handleDriveAuthSuccess(): void {
+	if (!sawReconnecting) {
+		return
+	}
+
+	sawReconnecting = false
+
+	invalidateDriveListings()
 }
 
 // In-place attribute swap by uuid (a flag/color/meta changed; identity and membership did not) — never
@@ -370,8 +403,9 @@ export function handleDriveEvent(event: DriveSocketEvent): void {
 		case "deleteAll":
 		case "deleteVersioned": {
 			// Account-wide bulk operations with no per-item payload — a blanket cache wipe from an ambiguous
-			// signal would be riskier than letting the next mount refetch (mobile leaves these unhandled too).
+			// signal would be riskier than re-reading the listings (mobile leaves these unhandled).
 			log.warn("socket", "drive event not cache-patched", inner.type)
+			invalidateDriveListings()
 
 			break
 		}

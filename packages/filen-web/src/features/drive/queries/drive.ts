@@ -1,5 +1,6 @@
-import { useQueries, useQuery, type UseQueryResult } from "@tanstack/react-query"
+import { useQueries, useQuery, type Query, type QueryKey, type UseQueryResult } from "@tanstack/react-query"
 import { sdkApi } from "@/lib/sdk/client"
+import { currentSocketEpoch, socketLiveSince } from "@/lib/sdk/socketSession"
 import { queryClient } from "@/queries/client"
 // Whole-statement `import type` here too — sdk.worker.ts's own top-level code pulls in
 // @filen/sdk-rs as a real value import, same elision hazard as above.
@@ -67,6 +68,40 @@ export async function fetchDirectoryListing(variant: DriveVariant, uuid: string 
 	return [...dirs.map(narrowItem), ...files.map(narrowItem)]
 }
 
+// My Drive listings whose latest read ran entirely under a live socket, by uuid (null = root). A
+// persisted listing restores with its original read time, a patch can create one no read backs
+// (driveListingQueryUpdate's `prev ?? []`), and a read the socket wasn't up for may predate an event
+// it never delivered, so none of those count.
+const driveListingsReadThisSession = new Set<string | null>()
+
+async function readDriveListing(uuid: string | null): Promise<DriveItem[]> {
+	const epoch = currentSocketEpoch()
+	const items = await fetchDirectoryListing("drive", uuid)
+
+	if (socketLiveSince(epoch)) {
+		driveListingsReadThisSession.add(uuid)
+	} else {
+		driveListingsReadThisSession.delete(uuid)
+	}
+
+	return items
+}
+
+// A read My Drive listing changes only through writes and socket events that patch it in place, so it
+// stays fresh until a socket drop or an unpatchable event invalidates it (socketHandlers.ts); the first
+// mount after boot still reads. The other variants gain rows no event inserts (a move strips a
+// favorite or recent, a link or share made elsewhere), so they keep the default. A network reconnect
+// always re-reads: events may have been missed meanwhile. Both observers of a key take these together,
+// since focus/reconnect refetch whenever any one observer asks.
+const listingRefetchPolicy = {
+	staleTime: (query: { queryKey: ReturnType<typeof driveListingQueryKey> }) => {
+		const { variant, uuid } = query.queryKey[2]
+
+		return variant === "drive" && driveListingsReadThisSession.has(uuid) ? Infinity : 0
+	},
+	refetchOnReconnect: "always"
+} as const
+
 // dirs/files bigints (timestamp, size, chunks, meta created/modified/size) cross Comlink via
 // structured clone already (see sdk.worker.ts); this module never JSON.stringifies them, and the
 // result rides the persister's own envelope serializer at rest — zero customization needed here.
@@ -85,11 +120,15 @@ export function useDirectoryListingQuery(
 	path: readonly string[] = []
 ): UseQueryResult<DriveItem[]> {
 	return useQuery({
+		...listingRefetchPolicy,
 		queryKey: driveListingQueryKey({ variant, uuid }),
-		queryFn: () =>
-			variant === "sharedIn" || variant === "sharedOut"
-				? fetchSharedListing(variant, uuid, path)
-				: fetchDirectoryListing(variant, uuid)
+		queryFn: () => {
+			if (variant === "sharedIn" || variant === "sharedOut") {
+				return fetchSharedListing(variant, uuid, path)
+			}
+
+			return variant === "drive" ? readDriveListing(uuid) : fetchDirectoryListing(variant, uuid)
+		}
 	})
 }
 
@@ -124,8 +163,9 @@ export function projectTreeChildren(items: DriveItem[]): DirectoryTreeChild[] {
 // its subtree does (see directoryTree.tsx), so an unopened node never fetches.
 export function useDirectoryTreeChildrenQuery(uuid: string | null): UseQueryResult<DirectoryTreeChild[]> {
 	return useQuery({
+		...listingRefetchPolicy,
 		queryKey: driveListingQueryKey({ variant: "drive", uuid }),
-		queryFn: () => fetchDirectoryListing("drive", uuid),
+		queryFn: () => readDriveListing(uuid),
 		select: projectTreeChildren
 	})
 }
@@ -161,9 +201,30 @@ export async function fetchSharedListing(
 // defaults to [] so the patch still lands for whenever it first mounts.
 export function driveListingQueryUpdate(parentUuid: string | null, updater: (prev: DriveItem[]) => DriveItem[]): void {
 	const queryKey = driveListingQueryKey({ variant: "drive", uuid: parentUuid })
+	const pending = isRefreshPending(queryClient.getQueryCache().find({ queryKey, exact: true }))
 
 	cancelListingFetch(queryKey)
 	queryClient.setQueryData<DriveItem[]>(queryKey, prev => updater(prev ?? []))
+
+	if (pending) {
+		keepRefreshPending(queryKey)
+	}
+}
+
+// setQueryData marks a listing fresh, dropping a pending invalidation and the refetch a patch cancels.
+// A read My Drive listing never goes stale on its own, so left unrestored, the change behind them
+// would never be read.
+function isRefreshPending(query: Query | undefined): boolean {
+	return query !== undefined && (query.state.isInvalidated || query.state.fetchStatus !== "idle")
+}
+
+function keepRefreshPending(queryKey: QueryKey): void {
+	void queryClient.invalidateQueries({ queryKey, exact: true, refetchType: "none" })
+}
+
+// Re-reads the mounted listings and marks the rest stale, for a change no event patches in place.
+export function invalidateDriveListings(): void {
+	void queryClient.invalidateQueries({ queryKey: ["drive", "listing"] })
 }
 
 // The cancel half of this module's cancel-before-patch discipline, shared by every listing patch —
@@ -215,8 +276,14 @@ export function driveListingQueryUpdateGlobal(updater: (items: DriveItem[]) => D
 		// Same in-flight-refetch hazard as driveListingQueryUpdate above, with the same initial-fetch
 		// carve-out — only a listing that already holds data (and is actually changing) gets its fetch
 		// aborted, so an initial fetch is never left stranded on its loading state.
+		const pending = isRefreshPending(query)
+
 		void queryClient.cancelQueries({ queryKey: query.queryKey, exact: true })
 		queryClient.setQueryData<DriveItem[]>(query.queryKey, next)
+
+		if (pending) {
+			keepRefreshPending(query.queryKey)
+		}
 	}
 }
 

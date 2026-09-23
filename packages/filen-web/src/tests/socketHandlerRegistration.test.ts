@@ -31,12 +31,17 @@ vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 vi.mock("@/lib/log", () => ({ log: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() } }))
 vi.mock("@/features/shell/lib/performLogout", () => ({ performLogout: vi.fn(() => Promise.resolve(true)) }))
 
-import { registerDriveSocketHandlers, handleDriveEvent } from "@/features/drive/lib/socketHandlers"
+import {
+	registerDriveSocketHandlers,
+	handleDriveAuthSuccess,
+	handleDriveEvent,
+	handleDriveReconnecting,
+	markDriveEventsMissed
+} from "@/features/drive/lib/socketHandlers"
 import { registerGeneralSocketHandlers, handleGeneralEvent } from "@/features/shell/lib/generalSocketHandlers"
 import { registerNoteSocketHandlers, handleNoteEvent } from "@/features/notes/lib/socketHandlers"
 import { registerChatSocketHandlers, handleChatEvent, handleReconnecting, handleAuthSuccess } from "@/features/chats/lib/socketHandlers"
 import { registerContactSocketHandlers, handleContactEvent } from "@/features/contacts/lib/socketHandlers"
-import { markPhotosListingStale } from "@/features/photos/queries/photos"
 
 // The three domains that subscribe exactly one category.
 const SINGLE_REGISTRATIONS = [
@@ -78,21 +83,23 @@ describe("socket handler registration", () => {
 		expect(unregister).toHaveBeenCalledTimes(3)
 	})
 
-	// Drive also marks the photos listing stale on a drop, since the drive events it missed are what keep
-	// that listing fresh.
-	it("subscribes the drive handler alongside the photos listing's drop handler", () => {
+	// Drive also marks its listings and the photos listing stale on an undecodable event or a drop, since
+	// the drive events missed are what keep them fresh, and re-reads the mounted listings once it ends.
+	it("subscribes the drive handler alongside its missed-event and connection-lifecycle handlers", () => {
 		registerDriveSocketHandlers()
 
 		expect(registerSocketHandler.mock.calls).toEqual([
 			["drive", handleDriveEvent],
-			["reconnecting", markPhotosListingStale]
+			["driveMalformed", markDriveEventsMissed],
+			["reconnecting", handleDriveReconnecting],
+			["authSuccess", handleDriveAuthSuccess]
 		])
 	})
 
-	it("the drive disposer releases both of its subscriptions", () => {
+	it("the drive disposer releases all four of its subscriptions", () => {
 		registerDriveSocketHandlers()()
 
-		expect(unregister).toHaveBeenCalledTimes(2)
+		expect(unregister).toHaveBeenCalledTimes(4)
 	})
 
 	// Connection-lifecycle categories are shared by design: every domain that caches socket-fed data
@@ -105,7 +112,9 @@ describe("socket handler registration", () => {
 		registerChatSocketHandlers()
 		registerDriveSocketHandlers()
 
-		const categories = registerSocketHandler.mock.calls.map(call => call[0]).filter(category => category !== "reconnecting")
+		const categories = registerSocketHandler.mock.calls
+			.map(call => call[0])
+			.filter(category => category !== "reconnecting" && category !== "authSuccess")
 
 		expect(new Set(categories).size).toBe(categories.length)
 	})

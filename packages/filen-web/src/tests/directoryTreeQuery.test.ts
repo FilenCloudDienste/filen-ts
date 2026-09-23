@@ -30,6 +30,7 @@ import {
 	useDirectoryListingQuery,
 	useDirectoryTreeChildrenQuery
 } from "@/features/drive/queries/drive"
+import { socketAuthenticated } from "@/lib/sdk/socketSession"
 
 function testUuid(label: string): UuidStr {
 	return `${label}-0000-0000-0000-000000000000` as UuidStr
@@ -83,6 +84,7 @@ function renderTreeAndListing(uuid: string | null) {
 
 beforeEach(() => {
 	queryClient.clear()
+	socketAuthenticated()
 	listDirectory.mockImplementation(() => Promise.resolve(LISTING))
 })
 
@@ -109,7 +111,7 @@ describe("useDirectoryTreeChildrenQuery shares the drive listing's cache entry",
 		])
 	})
 
-	it("refetches once, not once per observer, on window focus and on reconnect", async () => {
+	it("skips the refetch on window focus and refetches once, not once per observer, on reconnect", async () => {
 		const { result } = renderTreeAndListing(null)
 
 		await waitFor(() => {
@@ -124,7 +126,7 @@ describe("useDirectoryTreeChildrenQuery shares the drive listing's cache entry",
 		await waitFor(() => {
 			expect(queryClient.isFetching()).toBe(0)
 		})
-		expect(listDirectory).toHaveBeenCalledTimes(2)
+		expect(listDirectory).toHaveBeenCalledTimes(1)
 
 		act(() => {
 			onlineManager.setOnline(false)
@@ -133,7 +135,7 @@ describe("useDirectoryTreeChildrenQuery shares the drive listing's cache entry",
 		await waitFor(() => {
 			expect(queryClient.isFetching()).toBe(0)
 		})
-		expect(listDirectory).toHaveBeenCalledTimes(3)
+		expect(listDirectory).toHaveBeenCalledTimes(2)
 	})
 
 	it("serves a node already listed in the main pane from that entry, with only the one stale-mount refetch", async () => {

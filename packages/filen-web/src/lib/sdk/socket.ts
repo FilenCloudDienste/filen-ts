@@ -2,6 +2,7 @@ import * as Comlink from "comlink"
 import type { SocketEvent, MaybeEncrypted } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
 import { log } from "@/lib/log"
+import { socketAuthenticated, socketDropped } from "@/lib/sdk/socketSession"
 
 // The main-thread half of the realtime socket bridge — the FIRST socket wiring in filen-web, kept
 // generic so drive/chats reuse it later; the note handlers live in features/notes, never here. One
@@ -53,6 +54,13 @@ export function registerSocketHandler<T extends SocketEvent["type"]>(type: T, ha
 // handlers registered for that category; a throwing handler is logged and never aborts the fan-out or
 // the socket. An unregistered category (e.g. "drive", which has no handler yet) is a silent no-op.
 function dispatch(event: SocketEvent): void {
+	// Before the fan-out, so a read a handler starts (a reconnect re-read) already counts as live.
+	if (event.type === "authSuccess") {
+		socketAuthenticated()
+	} else if (event.type === "reconnecting" || event.type === "authFailed" || event.type === "unsubscribed") {
+		socketDropped()
+	}
+
 	const handlers = registry.get(event.type)
 
 	if (handlers === undefined) {
@@ -121,6 +129,7 @@ class SocketBridge {
 
 		this.started = false
 		this.proxied = null
+		socketDropped()
 
 		try {
 			await sdkApi.unsubscribeFromSocket()

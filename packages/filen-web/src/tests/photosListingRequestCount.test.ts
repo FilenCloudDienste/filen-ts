@@ -34,6 +34,7 @@ import {
 	usePhotosListingQuery
 } from "@/features/photos/queries/photos"
 import { handleDriveEvent } from "@/features/drive/lib/socketHandlers"
+import { socketAuthenticated, socketDropped } from "@/lib/sdk/socketSession"
 
 function testUuid(label: string): UuidStr {
 	return `${label}-0000-0000-0000-000000000000` as UuidStr
@@ -142,6 +143,7 @@ async function fire(inner: DriveInner): Promise<void> {
 beforeEach(() => {
 	queryClient.clear()
 	clearDirectoryCache()
+	socketAuthenticated()
 	listPhotosRecursive.mockReset()
 	isOutsidePhotosRoot.mockReset()
 
@@ -200,6 +202,49 @@ describe("photos listing request counts", () => {
 		await drain()
 
 		expect(walks()).toBe(1)
+	})
+
+	it("a walk before the socket first authenticates doesn't count: the next focus walks", async () => {
+		socketDropped()
+		await mountRead()
+		socketAuthenticated()
+
+		act(() => {
+			focusManager.setFocused(false)
+			focusManager.setFocused(true)
+		})
+		await drain()
+
+		expect(walks()).toBe(2)
+
+		act(() => {
+			focusManager.setFocused(false)
+			focusManager.setFocused(true)
+		})
+		await drain()
+
+		expect(walks()).toBe(2)
+	})
+
+	it("a walk a drop interrupts doesn't count, even once the socket is back", async () => {
+		const pending = deferred<NormalDirsAndFiles>()
+
+		listPhotosRecursive.mockImplementationOnce(() => pending.promise)
+		mountListing()
+		socketDropped()
+		pending.resolve({ dirs: [], files: [mockFile(PHOTO, B)] })
+		await drain()
+		socketAuthenticated()
+
+		expect(walks()).toBe(1)
+
+		act(() => {
+			focusManager.setFocused(false)
+			focusManager.setFocused(true)
+		})
+		await drain()
+
+		expect(walks()).toBe(2)
 	})
 
 	it("an unscoped invalidation still refetches the mounted listing", async () => {

@@ -15,6 +15,7 @@ const { logError, logWarn } = vi.hoisted(() => ({ logError: vi.fn(), logWarn: vi
 vi.mock("@/lib/log", () => ({ log: { error: logError, warn: logWarn, info: vi.fn(), debug: vi.fn() } }))
 
 import { registerSocketHandler, decryptedOrSkip, socketBridge } from "@/lib/sdk/socket"
+import { currentSocketEpoch, socketLiveSince } from "@/lib/sdk/socketSession"
 
 // Grab the plain dispatch fn the bridge handed to subscribeToSocket (Comlink.proxy is a no-op marker in
 // node, so the value passed IS the dispatch closure — invoking it drives the fan-out).
@@ -136,5 +137,42 @@ describe("socket bridge — lifecycle", () => {
 		await socketBridge.stop()
 
 		expect(unsubscribeFromSocket).not.toHaveBeenCalled()
+	})
+})
+
+describe("socket bridge — socket session", () => {
+	it("opens an epoch on authSuccess before its handlers run, and closes it on a drop or stop", async () => {
+		let epochSeenByHandler: number | null = null
+		const unregister = registerSocketHandler("authSuccess", () => {
+			epochSeenByHandler = currentSocketEpoch()
+		})
+
+		await socketBridge.start()
+
+		expect(currentSocketEpoch()).toBeNull()
+
+		dispatchFn()({ type: "authSuccess" })
+
+		const epoch = currentSocketEpoch()
+
+		expect(epoch).not.toBeNull()
+		expect(epochSeenByHandler).toBe(epoch)
+		expect(socketLiveSince(epoch)).toBe(true)
+
+		dispatchFn()({ type: "reconnecting" })
+
+		expect(socketLiveSince(epoch)).toBe(false)
+
+		dispatchFn()({ type: "authSuccess" })
+
+		// A new session: a read begun under the old one missed what the drop lost.
+		expect(socketLiveSince(epoch)).toBe(false)
+		expect(socketLiveSince(currentSocketEpoch())).toBe(true)
+
+		await socketBridge.stop()
+
+		expect(currentSocketEpoch()).toBeNull()
+
+		unregister()
 	})
 })

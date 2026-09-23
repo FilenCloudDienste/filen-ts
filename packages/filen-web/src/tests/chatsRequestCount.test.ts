@@ -54,6 +54,7 @@ import { handleAuthSuccess, handleChatEvent, handleReconnecting, resetSocketReco
 import { Sync } from "@/features/chats/lib/sync"
 import { buildOptimisticMessage } from "@/features/chats/lib/sync.logic"
 import useChatsInflightStore from "@/features/chats/store/useChatsInflight"
+import { socketAuthenticated, socketDropped } from "@/lib/sdk/socketSession"
 
 const USER_ID = 7n
 
@@ -120,10 +121,22 @@ function renderShellOnChats() {
 	)
 }
 
+// The bridge moves the socket session before its handlers see the event.
+function dropSocket(): void {
+	socketDropped()
+	handleReconnecting()
+}
+
+function recoverSocket(): void {
+	socketAuthenticated()
+	handleAuthSuccess()
+}
+
 beforeEach(() => {
 	queryClient.clear()
 	kvStore.clear()
 	resetSocketReconnectState()
+	socketAuthenticated()
 	useChatsInflightStore.setState({ inflightMessages: {}, inflightErrors: {} })
 	listChats.mockReset()
 	listMessagesBefore.mockReset()
@@ -205,13 +218,92 @@ describe("chat list and message request counts", () => {
 		shell.unmount()
 	})
 
+	it("reads taken before the socket first authenticates don't count: a remount reads again", async () => {
+		socketDropped()
+
+		const shell = renderShellOnChats()
+		await drain()
+		listChats.mockClear()
+		listMessagesBefore.mockClear()
+
+		socketAuthenticated()
+		handleAuthSuccess()
+
+		const thread = renderHook(
+			() => {
+				useChats()
+				useChatMessages(CHAT_A.uuid)
+			},
+			{ wrapper }
+		)
+		await drain()
+
+		expect(listChats).toHaveBeenCalledTimes(1)
+		expect(listMessagesBefore).toHaveBeenCalledTimes(1)
+
+		thread.unmount()
+
+		renderHook(
+			() => {
+				useChats()
+				useChatMessages(CHAT_A.uuid)
+			},
+			{ wrapper }
+		)
+		await drain()
+
+		expect(listChats).toHaveBeenCalledTimes(1)
+		expect(listMessagesBefore).toHaveBeenCalledTimes(1)
+
+		shell.unmount()
+	})
+
+	it("a read a drop interrupts doesn't count: a remount reads again", async () => {
+		const list = deferred<Chat[]>()
+		const page = deferred<ChatMessage[]>()
+		listChats.mockImplementationOnce(() => list.promise)
+		listMessagesBefore.mockImplementationOnce(() => page.promise)
+		queryClient.setQueryData(["chats", "list"], CHATS)
+
+		const thread = renderHook(
+			() => {
+				useChats()
+				useChatMessages(CHAT_A.uuid)
+			},
+			{ wrapper }
+		)
+
+		await act(async () => {
+			await Promise.resolve()
+		})
+		dropSocket()
+		list.resolve(CHATS)
+		page.resolve([mockMessage(CHAT_A)])
+		await drain()
+		thread.unmount()
+		listChats.mockClear()
+		listMessagesBefore.mockClear()
+
+		renderHook(
+			() => {
+				useChats()
+				useChatMessages(CHAT_A.uuid)
+			},
+			{ wrapper }
+		)
+		await drain()
+
+		expect(listChats).toHaveBeenCalledTimes(1)
+		expect(listMessagesBefore).toHaveBeenCalledTimes(1)
+	})
+
 	it("a socket reconnect runs exactly one full pass, and a mount during the gap re-reads", async () => {
 		const shell = renderShellOnChats()
 		await drain()
 		listChats.mockClear()
 		listMessagesBefore.mockClear()
 
-		handleReconnecting()
+		dropSocket()
 
 		const thread = renderHook(() => useChatMessages(CHAT_A.uuid), { wrapper })
 		await drain()
@@ -219,7 +311,7 @@ describe("chat list and message request counts", () => {
 		expect(listMessagesBefore).toHaveBeenCalledTimes(1)
 		listMessagesBefore.mockClear()
 
-		handleAuthSuccess()
+		recoverSocket()
 		await drain()
 
 		expect(listChats).toHaveBeenCalledTimes(1)
@@ -271,8 +363,8 @@ describe("chat list and message request counts", () => {
 		listChats.mockImplementationOnce(() => first.promise)
 		listChats.mockImplementationOnce(() => Promise.resolve([...CHATS, introduced]))
 
-		handleReconnecting()
-		handleAuthSuccess()
+		dropSocket()
+		recoverSocket()
 
 		await act(async () => {
 			await Promise.resolve()

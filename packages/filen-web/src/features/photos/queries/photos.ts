@@ -1,5 +1,6 @@
 import { useQuery, type UseQueryResult } from "@tanstack/react-query"
 import { sdkApi } from "@/lib/sdk/client"
+import { currentSocketEpoch, socketLiveSince } from "@/lib/sdk/socketSession"
 import { queryClient } from "@/queries/client"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { isPhotoItem } from "@/features/photos/lib/predicate"
@@ -14,17 +15,23 @@ export function photosListingQueryKey(rootUuid: string) {
 	return ["photos", "listing", rootUuid] as const
 }
 
-// Roots whose listing was read from the server in this page session. A persisted listing restores with
-// its original read time, and the socket can't replay what changed while the app was closed.
+// Roots whose latest walk ran entirely under a live socket. A persisted listing restores with its
+// original read time, the socket can't replay what changed while the app was closed, and a walk it
+// wasn't up for may predate an event it never delivered.
 const readThisSession = new Set<string>()
 
 // The recursive walk (listPhotosRecursive) plus the media predicate and capture-date sort, all in one
 // queryFn — a photos listing has exactly one consumer shape (the grid), so there is no separate
 // selector layer filtering/sorting on every render the way a multi-mode drive listing would need.
 export async function fetchPhotosListing(rootUuid: string): Promise<PhotoItem[]> {
+	const epoch = currentSocketEpoch()
 	const { dirs, files } = await sdkApi.listPhotosRecursive(rootUuid)
 
-	readThisSession.add(rootUuid)
+	if (socketLiveSince(epoch)) {
+		readThisSession.add(rootUuid)
+	} else {
+		readThisSession.delete(rootUuid)
+	}
 
 	const items: DriveItem[] = [...dirs.map(narrowItem), ...files.map(narrowItem)]
 	const photos = items.filter(isPhotoItem) as PhotoItem[]
@@ -33,8 +40,9 @@ export async function fetchPhotosListing(rootUuid: string): Promise<PhotoItem[]>
 }
 
 // A full recursive walk, and drive socket events already mark the listing stale when something under the
-// root changes (invalidatePhotosListing), so a remount or refocus reuses it. The first mount of a
-// session still reads, and a network reconnect always does: events may have been missed meanwhile.
+// root changes (invalidatePhotosListing), so a remount or refocus reuses it. Until a walk counts (see
+// readThisSession) it refetches like any staleTime-0 query, and a network reconnect always does: events
+// may have been missed meanwhile.
 export const PHOTOS_LISTING_STALE_TIME = 15 * 60 * 1000
 
 export function usePhotosListingQuery(rootUuid: string | null): UseQueryResult<PhotoItem[]> {
@@ -42,8 +50,7 @@ export function usePhotosListingQuery(rootUuid: string | null): UseQueryResult<P
 		queryKey: photosListingQueryKey(rootUuid ?? ""),
 		queryFn: () => fetchPhotosListing(rootUuid ?? ""),
 		enabled: rootUuid !== null,
-		staleTime: PHOTOS_LISTING_STALE_TIME,
-		refetchOnMount: query => (readThisSession.has(query.queryKey[2]) ? true : "always"),
+		staleTime: query => (readThisSession.has(query.queryKey[2]) ? PHOTOS_LISTING_STALE_TIME : 0),
 		refetchOnReconnect: "always"
 	})
 }

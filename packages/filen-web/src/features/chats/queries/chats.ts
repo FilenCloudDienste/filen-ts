@@ -1,5 +1,6 @@
 import { CancelledError, useQuery, type UseQueryResult } from "@tanstack/react-query"
 import { sdkApi } from "@/lib/sdk/client"
+import { currentSocketEpoch, socketLiveSince } from "@/lib/sdk/socketSession"
 import { queryClient } from "@/queries/client"
 import type { Chat } from "@filen/sdk-rs"
 
@@ -8,7 +9,7 @@ import type { Chat } from "@filen/sdk-rs"
 // (chat counts are small) and is a full-list replace on every refetch.
 export const CHATS_QUERY_KEY = ["chats", "list"] as const
 
-// Whether the cache holds a server read taken since the socket last (re)connected. A socket patch can
+// Whether the cache holds a server read that ran entirely under a live socket. A socket patch can
 // create the cache without one (chatsQueryUpdate's `prev ?? []`), and events missed while disconnected
 // are only reconciled by the next read, so a mount trusts the cache only while this is set.
 let listSynced = false
@@ -21,9 +22,10 @@ export function markChatsListUnsynced(): void {
 // one-line pass-through no node-environment test can render, so this is exported and unit-tested
 // against a mocked sdkApi instead.
 export async function fetchChats(): Promise<Chat[]> {
+	const epoch = currentSocketEpoch()
 	const chats = await sdkApi.listChats()
 
-	listSynced = true
+	listSynced = socketLiveSince(epoch)
 
 	return chats
 }

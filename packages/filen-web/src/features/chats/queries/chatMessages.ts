@@ -1,5 +1,6 @@
 import { useQuery, type UseQueryResult } from "@tanstack/react-query"
 import { sdkApi } from "@/lib/sdk/client"
+import { currentSocketEpoch, socketLiveSince } from "@/lib/sdk/socketSession"
 import { queryClient } from "@/queries/client"
 import type { Chat, ChatMessage } from "@filen/sdk-rs"
 import { chatsQueryGet } from "@/features/chats/queries/chats"
@@ -32,8 +33,8 @@ function resolveChat(chatUuid: string): Chat | undefined {
 	return chatsQueryGet()?.find(c => c.uuid === chatUuid)
 }
 
-// Chats whose newest page was read from the server since the socket last (re)connected — the same
-// trust rule as the chat list's own marker (chats.ts): a socket patch can create a thread's cache
+// Chats whose newest page was last read entirely under a live socket — the same trust rule as the chat
+// list's own marker (chats.ts): a socket patch can create a thread's cache
 // without that page (chatMessagesQueryUpdate's `prev ?? []`), so a mount skips its fetch only for these.
 const syncedChatUuids = new Set<string>()
 
@@ -45,9 +46,14 @@ export function markChatMessagesUnsynced(): void {
 // so the bulk refetch (refetchChatsAndMessages.ts) can pull messages for a freshly-listed chat before
 // that list has been written back to the chats cache. Sorted ascending, same as the query below.
 export async function fetchMessagesForChat(chat: Chat): Promise<ChatMessage[]> {
+	const epoch = currentSocketEpoch()
 	const messages = await sdkApi.listMessagesBefore(chat, BigInt(Date.now() + INITIAL_CURSOR_OFFSET_MS))
 
-	syncedChatUuids.add(chat.uuid)
+	if (socketLiveSince(epoch)) {
+		syncedChatUuids.add(chat.uuid)
+	} else {
+		syncedChatUuids.delete(chat.uuid)
+	}
 
 	return sortAscending(messages)
 }
