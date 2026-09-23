@@ -156,10 +156,20 @@ export async function fetchChatMessageLinks(urls: readonly string[], signal?: Ab
 	return settled.filter(result => result.status === "fulfilled").map(result => result.value)
 }
 
+// The thread virtualizer remounts a row each time it scrolls back into view, and nothing (socket or
+// mutation) ever patches this key, so staleTime 0 would re-resolve every link on each pass. Finite so
+// a revoked or re-passworded link still surfaces eventually.
+export const CHAT_MESSAGE_LINKS_STALE_TIME = 60 * 60 * 1000
+// A failed resolution can be a network blip, so it retries sooner; still long enough that scrolling
+// past a CORS-blocked probe doesn't loop.
+export const CHAT_MESSAGE_LINKS_FAILED_STALE_TIME = 5 * 60 * 1000
+
 export function useChatMessageLinksQuery(urls: readonly string[]): UseQueryResult<ChatLinkResolution[]> {
 	return useQuery({
 		queryKey: chatMessageLinksQueryKey(urls),
 		queryFn: ({ signal }) => fetchChatMessageLinks(urls, signal),
-		enabled: urls.length > 0
+		enabled: urls.length > 0,
+		staleTime: query =>
+			query.state.data?.some(result => !result.success) ? CHAT_MESSAGE_LINKS_FAILED_STALE_TIME : CHAT_MESSAGE_LINKS_STALE_TIME
 	})
 }
