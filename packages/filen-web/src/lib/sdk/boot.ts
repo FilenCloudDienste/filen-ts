@@ -28,8 +28,9 @@ export function whenBootReady(): Promise<void> {
 	return bootReady
 }
 
-// Drives the worker boot + the async-runtime smoke test, reflecting each phase into the boot store.
-// Boot success is NOT health: probeAsync() (an unauth network op that must settle) gates "ready".
+// Drives the worker boot, reflecting each phase into the boot store. There is no separate network
+// probe: the first real SDK call (session resume, login) exercises the async runtime, and a runtime
+// failure in the steps below lands in the catch as an "async-runtime" boot error.
 export async function bootSdk(): Promise<void> {
 	const { setBooting, setReady, setError } = useBootStore.getState()
 	setBooting()
@@ -112,11 +113,6 @@ export async function bootSdk(): Promise<void> {
 			// logout/persister-write race) into the cache, where it would flash under whatever
 			// account signs in next — wipe instead of restoring.
 			await purgePersistedQueries()
-		}
-		// Async-runtime health check: boot success ≠ health. Gated to dev so a transient probe failure
-		// can't block first paint in production/preview, where real ops exercise the runtime anyway.
-		if (import.meta.env.DEV) {
-			await sdkApi.probeAsync()
 		}
 		setReady()
 		log.info("boot", `ready (${String(result.threads)} threads)`)

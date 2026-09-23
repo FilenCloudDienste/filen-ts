@@ -98,7 +98,7 @@ let client: Client | null = null
 // Concurrency/bandwidth/I-O-memory-budget knobs the wasm surface only accepts at UnauthClient
 // construction time (verified against the generated .d.ts — Client exposes no live bandwidth
 // setter, unlike the RN uniffi client mobile builds against). Every UnauthClient this worker ever
-// creates (withUnauth, probeAsync, injectClient) reads this one module-level value, so a single
+// creates (withUnauth, injectClient) reads this one module-level value, so a single
 // setClientConfig call before boot's first login/session-resume is enough to make the persisted
 // Advanced-settings preference (features/settings/lib/transferConfig.ts, read on the main thread
 // since it needs kv access) apply for the whole worker lifetime. A change made while already signed
@@ -409,19 +409,6 @@ const api = {
 			return { ok: false, reason: "pool", detail: toErrorDTO(pool.error).label }
 		}
 		return { ok: true, threads }
-	},
-	// Async-runtime health check: an unauth network op that MUST settle (either way).
-	async probeAsync(): Promise<void> {
-		const r = await runTimeout(async defer => {
-			const unauth = UnauthClient.from_config(clientConfig)
-			defer(() => {
-				unauth.free()
-			}) // defer() releases the wasm handle (LIFO)
-			await unauth.startPasswordReset("filen-web-healthcheck-nonexistent@filen.io").catch(() => undefined)
-		}, 10_000)
-		if (!r.success) {
-			throw r.error
-		}
 	},
 	login(params: { email: string; password: string; twoFactorCode?: string }): Promise<StringifiedClient> {
 		return withUnauth(async unauth => {
