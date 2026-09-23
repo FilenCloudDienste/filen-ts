@@ -1172,7 +1172,9 @@ const api = {
 	},
 	// Breadcrumb primitive: a splat route carries the full ancestor-uuid path in the URL already (see
 	// features/drive/lib/navigate.ts), so this only resolves one crumb's DISPLAY NAME — no getItemPath
-	// walk. Reached only when no cached listing on the main thread held the name
+	// walk. A walk would save nothing on a cold deep link: getItemPath fetches every ancestor with its own
+	// v3/dir, one after another, where these per-crumb lookups issue the same requests in parallel.
+	// Reached only when no cached listing on the main thread held the name
 	// (queries/drive.ts's fetchDirectoryName). Without `hint` the uuid is an owned directory and
 	// resolves cache-first through resolveOwnedDir; with it, through the same share-context walk the
 	// shared listing uses, which a click-through has already seeded and a cold deep link shares with
