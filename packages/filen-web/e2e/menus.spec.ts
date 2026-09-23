@@ -40,6 +40,7 @@ function labelsFor(ids: ActionId[]): string[] {
 const DIRECTORY_MENU_IDS: ActionId[] = [
 	"rename",
 	"move",
+	"copy",
 	"favorite",
 	"color",
 	"info",
@@ -50,12 +51,24 @@ const DIRECTORY_MENU_IDS: ActionId[] = [
 	"trash"
 ]
 // Drive-variant file (itemMenu.test.ts's own "drive variant, file" case): versions, no color.
-const FILE_MENU_IDS: ActionId[] = ["rename", "move", "favorite", "versions", "info", "download", "share", "publicLink", "copyLink", "trash"]
+const FILE_MENU_IDS: ActionId[] = [
+	"rename",
+	"move",
+	"copy",
+	"favorite",
+	"versions",
+	"info",
+	"download",
+	"share",
+	"publicLink",
+	"copyLink",
+	"trash"
+]
 // Trash variant, either type (itemMenu.test.ts's own "trash variant" case) — the maximally-reduced set.
 const TRASH_MENU_IDS: ActionId[] = ["restore", "deletePermanently", "info"]
 // Bulk bar, plain drive-variant selection (bulkActionBar.test.ts's own "drive variant" case) — no
 // color/versions id exists in the bulk builder at all, per-type or not.
-const BULK_MENU_IDS: ActionId[] = ["favorite", "move", "share", "download", "trash"]
+const BULK_MENU_IDS: ActionId[] = ["favorite", "move", "copy", "share", "download", "trash"]
 
 test.describe.configure({ mode: "serial" })
 
