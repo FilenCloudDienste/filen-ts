@@ -14,10 +14,42 @@ export const PLAYLISTS_QUERY_KEY = ["audio", "playlists"] as const
 // only identity available for a file whose body never parsed enough to yield the playlist's OWN uuid).
 export type PlaylistEntry = { status: "ok"; playlist: Playlist } | { status: "degraded"; fileUuid: string; name: string }
 
+// A read downloads every playlist file in full. Same-tab writes patch the cache and the socket marks it
+// unsynced when anything else touches the Playlists directory (features/audio/lib/socketHandlers.ts), so
+// a synced cache holds across mounts, focus and reconnect; the window backstops a change no event
+// reported. Unsynced — no clean read yet this page load, or a signal since the last one — it refetches
+// like any staleTime-0 query.
+export const PLAYLISTS_STALE_TIME = 15 * 60 * 1000
+
+let unsyncSignals = 0
+// The signal count the last clean read began under; -1 = none this page load (a restored cache predates
+// this tab's socket, so it vouches for nothing).
+let syncedAtSignal = -1
+// Bumped by every cache patch: one landing mid-read cancels it or is overwritten by it.
+let patchCount = 0
+
+export function markPlaylistsUnsynced(): void {
+	unsyncSignals++
+}
+
+async function fetchPlaylistsQuery(): Promise<PlaylistEntry[]> {
+	const signals = unsyncSignals
+	const patches = patchCount
+	const entries = await fetchPlaylistEntries()
+
+	// A degraded row may be a transient download failure — keep retrying it on mount/focus as before.
+	if (patchCount === patches && entries.every(entry => entry.status === "ok")) {
+		syncedAtSignal = signals
+	}
+
+	return entries
+}
+
 export function usePlaylistsQuery(): UseQueryResult<PlaylistEntry[]> {
 	return useQuery({
 		queryKey: PLAYLISTS_QUERY_KEY,
-		queryFn: fetchPlaylistEntries
+		queryFn: fetchPlaylistsQuery,
+		staleTime: () => (syncedAtSignal === unsyncSignals ? PLAYLISTS_STALE_TIME : 0)
 	})
 }
 
@@ -32,6 +64,7 @@ function cancelInFlightIfCached(): void {
 }
 
 export function playlistsQueryUpdate(updater: (prev: PlaylistEntry[]) => PlaylistEntry[]): void {
+	patchCount++
 	cancelInFlightIfCached()
 	queryClient.setQueryData<PlaylistEntry[]>(PLAYLISTS_QUERY_KEY, prev => updater(prev ?? []))
 }

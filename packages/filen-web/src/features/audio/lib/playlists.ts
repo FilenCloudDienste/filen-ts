@@ -12,7 +12,7 @@ import {
 	renamePlaylist as renamePlaylistPure,
 	reorderPlaylistFile as reorderPure
 } from "@filen/shared"
-import type { File as SdkFile, FileEncryptionVersion, UuidStr } from "@filen/sdk-rs"
+import type { DriveEvent, File as SdkFile, FileEncryptionVersion, UuidStr } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
 import { runOp } from "@/lib/actions/outcome"
 import { log } from "@/lib/log"
@@ -32,10 +32,18 @@ const DOT_FILEN_DIR_NAME = ".filen"
 const PLAYLISTS_DIR_NAME = "Playlists"
 
 let playlistsDirUuidPromise: Promise<string> | null = null
+// The same uuid once resolved, for the synchronous socket-event match below.
+let playlistsDirUuid: string | null = null
+
+// Drive uuids of the files this tab knows the Playlists directory holds: the last listing plus its own
+// uploads since. What lets a uuid-only socket event be tied to a playlist.
+const knownPlaylistFileUuids = new Set<string>()
 
 async function resolvePlaylistsDirectoryUuid(): Promise<string> {
 	const dotFilen = await runOp(sdkApi.createDirectory(null, DOT_FILEN_DIR_NAME))
 	const playlists = await runOp(sdkApi.createDirectory(dotFilen.uuid, PLAYLISTS_DIR_NAME))
+
+	playlistsDirUuid = playlists.uuid
 
 	return playlists.uuid
 }
@@ -147,14 +155,56 @@ export async function fetchPlaylistEntries(): Promise<PlaylistEntry[]> {
 	const dirUuid = await getPlaylistsDirectoryUuid()
 	const { files } = await runOp(sdkApi.listDirectory({ kind: "uuid", uuid: dirUuid }))
 
+	knownPlaylistFileUuids.clear()
+
+	for (const file of files) {
+		knownPlaylistFileUuids.add(file.uuid)
+	}
+
 	return Promise.all(files.map(readOnePlaylistEntry))
+}
+
+// Whether a drive event may have changed the Playlists directory's contents behind the query cache. A
+// content edit arrives as the old version retired plus a fileNew, so the fileNew is the one signal; one
+// for a uuid this tab already knows is its own save echoing back (an echo that beats the upload's return
+// still counts, costing a refetch, never a missed change). Every other event counts when it lands a file
+// in the directory or names a known one — version-only deletes and edit-retirements excepted.
+export function isPlaylistsDriveEvent(inner: DriveEvent): boolean {
+	if (playlistsDirUuid === null) {
+		return false
+	}
+
+	switch (inner.type) {
+		case "fileNew":
+			return inner.file.parent === playlistsDirUuid && !knownPlaylistFileUuids.has(inner.file.uuid)
+
+		case "fileRestore":
+		case "fileMove":
+			return inner.file.parent === playlistsDirUuid || knownPlaylistFileUuids.has(inner.file.uuid)
+
+		case "fileArchiveRestored":
+			return inner.file.parent === playlistsDirUuid || knownPlaylistFileUuids.has(inner.currentUuid)
+
+		case "fileTrash":
+			return inner.newUUID === undefined && knownPlaylistFileUuids.has(inner.uuid)
+
+		case "fileDeletedPermanent":
+			return inner.stableUUID !== undefined && knownPlaylistFileUuids.has(inner.uuid)
+
+		case "fileMetadataChanged":
+			return knownPlaylistFileUuids.has(inner.uuid)
+
+		default:
+			return false
+	}
 }
 
 async function savePlaylist(playlist: Playlist): Promise<void> {
 	const dirUuid = await getPlaylistsDirectoryUuid()
 	const bytes = new TextEncoder().encode(serializePlaylist(playlist))
+	const file = await runOp(sdkApi.uploadFileBytes(dirUuid, bytes, `${playlist.uuid}.json`, "application/json"))
 
-	await runOp(sdkApi.uploadFileBytes(dirUuid, bytes, `${playlist.uuid}.json`, "application/json"))
+	knownPlaylistFileUuids.add(file.uuid)
 	playlistsQueryUpsert(playlist)
 }
 
@@ -262,6 +312,9 @@ export async function deletePlaylistAction(playlist: Playlist): Promise<void> {
 
 		if (match) {
 			await runOp(sdkApi.deleteFilePermanently(match))
+			// So this delete's own socket echo isn't taken for a remote change (one racing ahead of this
+			// line still is, which costs a refetch, never a missed change).
+			knownPlaylistFileUuids.delete(match.uuid)
 		}
 
 		playlistsQueryRemove(playlist.uuid)
