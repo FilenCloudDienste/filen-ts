@@ -15,6 +15,7 @@ import { BootScreen } from "@/features/shell/components/bootScreen"
 import { BootErrorScreen } from "@/features/shell/components/bootErrorScreen"
 import { OfflineIndicator } from "@/features/shell/components/offlineIndicator"
 import { TransfersUnloadGuard } from "@/features/shell/components/transfersUnloadGuard"
+import { CopyCancelDialog } from "@/features/transfers/components/copyCancelDialog"
 import { allowNextUnload } from "@/lib/unloadGuard"
 import { titleMeta } from "@/lib/head/routeHead"
 
@@ -130,6 +131,8 @@ function RootLayout() {
 					    Top positions are no alternative — they intercepted the header buttons and the
 					    listing's first rows. */}
 					<Toaster />
+					{/* Asked from a copy's progress toast or its transfers row, so it lives beside the toasts. */}
+					<CopyCancelDialog />
 				</TooltipProvider>
 			</ThemeProvider>
 		</QueryClientProvider>

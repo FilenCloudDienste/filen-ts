@@ -9,6 +9,9 @@ export interface CopyJobsStore {
 	// A no-op for an id that is already gone, so a late callback can't resurrect a pruned job.
 	update: (id: string, updater: (job: CopyJob) => CopyJob) => void
 	remove: (id: string) => void
+	// The job the three-way cancel prompt is open for, whichever surface asked (card or transfers row).
+	cancelPromptId: string | null
+	setCancelPromptId: (id: string | null) => void
 }
 
 export const useCopyJobsStore = create<CopyJobsStore>(set => ({
@@ -22,6 +25,10 @@ export const useCopyJobsStore = create<CopyJobsStore>(set => ({
 
 			return job === undefined ? state : { jobs: { ...state.jobs, [id]: updater(job) } }
 		})
+	},
+	cancelPromptId: null,
+	setCancelPromptId: id => {
+		set({ cancelPromptId: id })
 	},
 	remove: id => {
 		set(state => (id in state.jobs ? { jobs: Object.fromEntries(Object.entries(state.jobs).filter(([key]) => key !== id)) } : state))

@@ -35,7 +35,7 @@ vi.mock("@/queries/client", () => ({
 
 vi.mock("@/lib/log", () => ({ log: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() } }))
 
-vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), custom: vi.fn(), dismiss: vi.fn() } }))
 
 import { queryClient } from "@/queries/client"
 import { ACCOUNT_QUERY_KEY } from "@/queries/account"

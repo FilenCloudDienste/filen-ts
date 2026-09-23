@@ -206,9 +206,26 @@ export async function runCopyJob(deps: RunCopyDeps, request: CopyJobRequest): Pr
 	// what the user asked to remove. Only top-level items are trashed; their subtrees go with them.
 	const trashed = job.cancelRequest === "trash" && job.created.length > 0 ? await deps.trash(job.created) : null
 
-	deps.settled(job, trashed)
+	if (trashed !== null) {
+		deps.jobs.update(id, settled => ({ ...settled, trashResult: { moved: trashed.succeeded.length, failed: trashed.failed.length } }))
+	}
 
-	return job
+	const settled = deps.jobs.get(id) ?? job
+
+	deps.settled(settled, trashed)
+
+	return settled
+}
+
+// A settled job stays while its card shows or its transfers row can reopen the card.
+export function pruneSettledCopyJobs(): void {
+	const rows = new Set(useTransfersStore.getState().transfers.map(transfer => transfer.id))
+
+	for (const job of Object.values(useCopyJobsStore.getState().jobs)) {
+		if (job.outcome.status !== "running" && !job.cardVisible && !rows.has(job.id)) {
+			useCopyJobsStore.getState().remove(job.id)
+		}
+	}
 }
 
 function copyRowName(itemCount: number, firstName: string): string {
@@ -240,6 +257,13 @@ function announceCopySettled(job: CopyJob, trashed: BulkOutcome<DriveItem> | nul
 	if (job.counts.dirsCreated > 0 || job.counts.filesDone > 0) {
 		invalidateDirectorySize(job.destination.uuid)
 	}
+
+	// An open card already shows how the copy ended.
+	if (job.cardVisible) {
+		return
+	}
+
+	pruneSettledCopyJobs()
 
 	switch (job.outcome.status) {
 		case "done":
@@ -281,7 +305,8 @@ export const defaultCopyDeps: RunCopyDeps = {
 	settled: announceCopySettled
 }
 
-// Starts the copy and returns its job id at once; the job outlives whatever started it.
+// Starts the copy and returns its job id at once; the job outlives whatever started it. The UI shows its
+// card (features/transfers/lib/copyToast.tsx's startCopyWithCard), keeping this module free of it.
 export function startCopy(items: DriveItem[], destination: CopyDestination): string | null {
 	const first = items[0]
 

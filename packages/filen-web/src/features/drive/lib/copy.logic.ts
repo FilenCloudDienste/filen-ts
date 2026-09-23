@@ -62,7 +62,11 @@ export interface CopyJob {
 	// The report's failures, as copyItemsTo takes them back.
 	retryable: CopyFailure[]
 	cancelRequest: "keep" | "trash" | null
+	// What "move copied items to trash" did, once it ran.
+	trashResult: { moved: number; failed: number } | null
 	outcome: CopyJobOutcome
+	// The progress card is showing; a job whose card is dismissed announces its end with a toast.
+	cardVisible: boolean
 }
 
 const ZERO_COUNTS: CopyJobCounts = {
@@ -101,7 +105,9 @@ export function createCopyJob(id: string, destination: CopyDestination, itemCoun
 		created: [],
 		retryable: [],
 		cancelRequest: null,
-		outcome: { status: "running" }
+		trashResult: null,
+		outcome: { status: "running" },
+		cardVisible: false
 	}
 }
 

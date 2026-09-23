@@ -3,7 +3,9 @@ import { useTranslation } from "react-i18next"
 import { useShallow } from "zustand/shallow"
 import { ArrowDownUpIcon, PauseIcon, PlayIcon, Trash2Icon, XIcon } from "lucide-react"
 import { formatBytes } from "@filen/shared"
-import { isActiveTransfer, useTransfersAggregate, useTransfersStore } from "@/features/transfers/store/useTransfersStore"
+import { isActiveTransfer, useTransfersAggregate, useTransfersStore, type Transfer } from "@/features/transfers/store/useTransfersStore"
+import { useCopyJobsStore } from "@/features/transfers/store/useCopyJobsStore"
+import { pruneSettledCopyJobs } from "@/features/drive/lib/copy"
 import {
 	buildTransfersDisplayList,
 	cancellableTransferIds,
@@ -53,6 +55,16 @@ export function TransfersScreen() {
 	// dialog closes itself gracefully on the next render instead of confirming a no-op or holding a
 	// stale target.
 	const cancelConfirmOpen = cancelTarget !== null && isActiveTransfer(cancelTarget.status)
+
+	// A copy asks what to do with what it already copied, in its own prompt.
+	function requestRowCancel(transfer: Transfer): void {
+		if (transfer.direction === "copy") {
+			useCopyJobsStore.getState().setCancelPromptId(transfer.id)
+			return
+		}
+
+		setCancelTargetId(transfer.id)
+	}
 
 	function handlePauseAll(): void {
 		for (const id of pausable) {
@@ -135,6 +147,7 @@ export function TransfersScreen() {
 						// .getState() idiom — the exact store call, outside render (mirrors directoryListing.tsx's
 						// own convention for every store mutation triggered from an event handler).
 						useTransfersStore.getState().clearFinished()
+						pruneSettledCopyJobs()
 					}}
 				>
 					<Trash2Icon aria-hidden="true" />
@@ -167,7 +180,7 @@ export function TransfersScreen() {
 											key={transfer.id}
 											transfer={transfer}
 											onRequestCancel={() => {
-												setCancelTargetId(transfer.id)
+												requestRowCancel(transfer)
 											}}
 										/>
 									))}
@@ -188,7 +201,7 @@ export function TransfersScreen() {
 											// TransferRow's own finished/active branch), so this is never actually
 											// invoked here; still required for the prop's type.
 											onRequestCancel={() => {
-												setCancelTargetId(transfer.id)
+												requestRowCancel(transfer)
 											}}
 										/>
 									))}

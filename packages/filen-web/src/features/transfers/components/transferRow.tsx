@@ -4,6 +4,7 @@ import {
 	CircleCheckIcon,
 	CopyIcon,
 	DownloadIcon,
+	PanelBottomOpenIcon,
 	PauseCircleIcon,
 	PauseIcon,
 	PlayIcon,
@@ -20,6 +21,9 @@ import {
 	transferIconKey
 } from "@/features/transfers/components/transferRow.logic"
 import { pauseTransfer, resumeTransfer } from "@/features/transfers/lib/control"
+import { showCopyToast } from "@/features/transfers/lib/copyToast"
+import { pruneSettledCopyJobs } from "@/features/drive/lib/copy"
+import { useCopyJobsStore } from "@/features/transfers/store/useCopyJobsStore"
 import { FileTypeIcon } from "@/features/drive/components/itemIcon"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { cn } from "@filen/shared"
@@ -137,6 +141,8 @@ export function TransferRow({ transfer, onRequestCancel }: TransferRowProps) {
 	const { t, i18n } = useTranslation("transfers")
 	const progress = transferProgress(transfer)
 	const finished = !isActiveTransfer(transfer.status)
+	// A copy's row reopens its progress card for as long as the job's detail is kept.
+	const hasCopyCard = useCopyJobsStore(state => transfer.direction === "copy" && transfer.id in state.jobs)
 
 	// Never renders bytesTransferred for a "done" row (only its final size) — settle()/setProgress()
 	// are separate store writes, so a just-finished row's bytesTransferred can still briefly trail
@@ -185,6 +191,18 @@ export function TransferRow({ transfer, onRequestCancel }: TransferRowProps) {
 				<TransferDirectionIcon direction={transfer.direction} />
 				<span className="min-w-0 flex-1 truncate text-sm">{transfer.name}</span>
 				<span className="shrink-0 text-xs text-muted-foreground tabular-nums">{trailingLabel}</span>
+				{hasCopyCard ? (
+					<Button
+						variant="ghost"
+						size="icon-xs"
+						aria-label={t("transfersRowCopyDetails")}
+						onClick={() => {
+							showCopyToast(transfer.id)
+						}}
+					>
+						<PanelBottomOpenIcon />
+					</Button>
+				) : null}
 				{finished ? (
 					<Button
 						variant="ghost"
@@ -192,6 +210,7 @@ export function TransferRow({ transfer, onRequestCancel }: TransferRowProps) {
 						aria-label={t("transfersRowRemove")}
 						onClick={() => {
 							useTransfersStore.getState().remove(transfer.id)
+							pruneSettledCopyJobs()
 						}}
 					>
 						<Trash2Icon />

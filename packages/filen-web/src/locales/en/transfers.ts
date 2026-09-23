@@ -35,8 +35,8 @@ export const transfers = {
 	transfersClearFinished: "Clear finished",
 
 	// ── Screen ───────────────────────────────────────────────────────────────
-	/** Transfers screen — empty-state body under transfersEmptyTitle (this body mentions both directions since the full page has room to) */
-	transfersScreenEmptyBody: "Uploads and downloads will appear here.",
+	/** Transfers screen — empty-state body under transfersEmptyTitle (names every kind of transfer since the full page has room to) */
+	transfersScreenEmptyBody: "Uploads, downloads and copies will appear here.",
 	/** Transfers screen — heading above the section listing in-flight (uploading/downloading) transfers */
 	transfersScreenSectionActive: "Active",
 	/** Transfers screen — heading above the section listing finished (done/error) transfers */
@@ -137,6 +137,97 @@ export const transfers = {
 	transfersCopySummaryCompleteWithFailures_other: "Copy finished, {{count}} items failed",
 	/** Copy error (toast and transfer row) — the copy is larger than the account's free storage; checked after the copy's scan, before anything was written; {{free}} = formatted free storage */
 	transfersCopyQuotaExceeded: "This copy doesn't fit the {{free}} of free storage.",
+
+	// ── Copy progress card (features/transfers/components/copyJobToast.tsx) ────
+	// A persistent toast per copy job; dismissing hides it and the job's transfers row reopens it.
+	/** Copy card — title while copying; {{destination}} = the destination directory's name; singular */
+	transfersCopyCardTitleRunning_one: "Copying {{count}} item → {{destination}}",
+	/** Copy card — title while copying; {{destination}} = the destination directory's name; plural */
+	transfersCopyCardTitleRunning_other: "Copying {{count}} items → {{destination}}",
+	/** Copy card — title once every item was copied; singular */
+	transfersCopyCardTitleDone_one: "Copied {{count}} item → {{destination}}",
+	/** Copy card — title once every item was copied; plural */
+	transfersCopyCardTitleDone_other: "Copied {{count}} items → {{destination}}",
+	/** Copy card — title once the copy ended any other way (cancelled, failed, some items failed); the line below says how */
+	transfersCopyCardTitleEnded: "Copy to {{destination}}",
+	/** Copy card — accessible label on the button hiding the card; the copy keeps running and its transfers row reopens the card */
+	transfersCopyCardDismiss: "Hide copy progress",
+	/** Copy card — accessible label on the progress bar */
+	transfersCopyProgressLabel: "Copy progress",
+	/** Copy card — status while the copy lists what it has to copy, before anything is written */
+	transfersCopyPhaseScanning: "Scanning…",
+	/** Copy card — status while the copy recreates the directory tree at the destination */
+	transfersCopyPhaseCreatingDirectories: "Creating directories",
+	/** Copy card — status while the last files are being finalized */
+	transfersCopyPhaseFinishing: "Finishing",
+	/** Copy card — status after pause was pressed, while files already in flight finish */
+	transfersCopyPhasePausing: "Pausing…",
+	/** Copy card — status after stop was confirmed, until the copy has stopped */
+	transfersCopyPhaseCancelling: "Stopping…",
+	/** Copy card — status while copying files; {{done}} = files copied so far, {{count}} = files to copy; singular */
+	transfersCopyFilesProgress_one: "{{done}} of {{count}} file",
+	/** Copy card — status while copying files; {{done}} = files copied so far, {{count}} = files to copy; plural */
+	transfersCopyFilesProgress_other: "{{done}} of {{count}} files",
+	/** Copy card — bytes copied so far out of the total; both pre-formatted sizes */
+	transfersCopyBytesProgress: "{{done}} of {{total}}",
+	/** Copy card — estimated time left; {{eta}} = a pre-formatted m:ss (or h:mm:ss) duration */
+	transfersCopyEta: "{{eta}} left",
+	/** Copy card — status when the copy finished but some files or directories could not be copied; singular */
+	transfersCopyFailedItems_one: "{{count}} item couldn't be copied",
+	/** Copy card — status when the copy finished but some files or directories could not be copied; plural */
+	transfersCopyFailedItems_other: "{{count}} items couldn't be copied",
+	/** Copy card — status after a stopped copy whose copied items were kept at the destination */
+	transfersCopyCancelledKept: "Stopped. What was copied so far was kept.",
+	/** Copy card — status after a stopped copy whose copied items were moved to the trash; {{count}} = items moved; singular */
+	transfersCopyCancelledTrashed_one: "Stopped. {{count}} copied item was moved to the trash.",
+	/** Copy card — status after a stopped copy whose copied items were moved to the trash; {{count}} = items moved; plural */
+	transfersCopyCancelledTrashed_other: "Stopped. {{count}} copied items were moved to the trash.",
+	/** Copy card — status after a stopped copy when some copied items could not be moved to the trash */
+	transfersCopyCancelledTrashFailed: "Stopped. Some copied items couldn't be moved to the trash.",
+	/** Copy card — button expanding and collapsing the details section */
+	transfersCopyDetails: "Details",
+	/** Copy card details — shown when there is nothing to list yet (no file in flight, no failure, no note) */
+	transfersCopyNoDetails: "Nothing to report yet.",
+	/** Copy card — one-line note while the copy runs: the copy runs in this tab */
+	transfersCopyTabNote: "Closing this tab stops the copy.",
+	/** Copy card details — heading above the files being copied right now */
+	transfersCopyCurrentFiles: "Copying now",
+	/** Copy card details — heading above the files and directories that could not be copied */
+	transfersCopyFailures: "Couldn't copy",
+	/** Copy card details — the failures beyond the listed ones; singular */
+	transfersCopyMoreFailures_one: "and {{count}} more",
+	/** Copy card details — the failures beyond the listed ones; plural */
+	transfersCopyMoreFailures_other: "and {{count}} more",
+	/** Copy card details — button copying the failed items again, each into the directory it was meant for */
+	transfersCopyRetryFailed: "Retry failed",
+	/** Copy card details — note: items copied under another name (the name was taken, or not allowed); singular */
+	transfersCopyRenamedNote_one: "{{count}} item got a new name because its name was taken or not allowed.",
+	/** Copy card details — note: items copied under another name (the name was taken, or not allowed); plural */
+	transfersCopyRenamedNote_other: "{{count}} items got a new name because their names were taken or not allowed.",
+	/** Copy card details — note: items left out because they couldn't be decrypted or reached; singular */
+	transfersCopySkippedNote_one: "{{count}} item was skipped because it couldn't be decrypted or reached.",
+	/** Copy card details — note: items left out because they couldn't be decrypted or reached; plural */
+	transfersCopySkippedNote_other: "{{count}} items were skipped because they couldn't be decrypted or reached.",
+	/** Copy card details — note: files the server stored as a new version of an existing file of the same name; singular */
+	transfersCopySavedAsVersionNote_one: "{{count}} file was saved as a new version of an existing file.",
+	/** Copy card details — note: files the server stored as a new version of an existing file of the same name; plural */
+	transfersCopySavedAsVersionNote_other: "{{count}} files were saved as new versions of existing files.",
+	/** Copy card details — note: copied items that could not join the destination's shares or public links; singular */
+	transfersCopyPropagationNote_one: "{{count}} item couldn't be added to the destination's shares or public links.",
+	/** Copy card details — note: copied items that could not join the destination's shares or public links; plural */
+	transfersCopyPropagationNote_other: "{{count}} items couldn't be added to the destination's shares or public links.",
+	/** Copy transfer row — accessible label on the button reopening the copy's progress card */
+	transfersRowCopyDetails: "Show copy progress",
+	/** Copy cancel dialog — title */
+	transfersCopyCancelTitle: "Stop copying?",
+	/** Copy cancel dialog — body; {{destination}} = the destination directory's name */
+	transfersCopyCancelBody: "Items already copied to {{destination}} can stay there or move to the trash.",
+	/** Copy cancel dialog — dismiss button; the copy keeps running */
+	transfersCopyCancelContinue: "Continue copying",
+	/** Copy cancel dialog — stops the copy and moves the top-level items it created to the trash (never a permanent delete) */
+	transfersCopyCancelTrash: "Move copied items to trash",
+	/** Copy cancel dialog — default button; stops the copy and keeps what was copied */
+	transfersCopyCancelKeep: "Stop and keep copied items",
 
 	// ── Zip download (startZipDownload) ───────────────────────────────────────
 	/** Suggested filename for a zip download of a multi-item selection (no single item to name it after) — a save-dialog/transfer-row filename, not a sentence; keep the .zip extension */

@@ -21,12 +21,25 @@ vi.mock("@/lib/sdk/client", () => ({ sdkApi: { copyItems, copyItemsTo, cancelCop
 
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
-const { toastSuccess, toastError } = vi.hoisted(() => ({ toastSuccess: vi.fn(), toastError: vi.fn() }))
+const { toastSuccess, toastError, toastCustom, toastDismiss } = vi.hoisted(() => ({
+	toastSuccess: vi.fn(),
+	toastError: vi.fn(),
+	toastCustom: vi.fn(),
+	toastDismiss: vi.fn()
+}))
 
-vi.mock("sonner", () => ({ toast: { success: toastSuccess, error: toastError } }))
+vi.mock("sonner", () => ({ toast: { success: toastSuccess, error: toastError, custom: toastCustom, dismiss: toastDismiss } }))
 
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
-import { requestCopyCancel, retryFailedCopy, runCopyJob, startCopy, type RunCopyDeps } from "@/features/drive/lib/copy"
+import {
+	pruneSettledCopyJobs,
+	requestCopyCancel,
+	retryFailedCopy,
+	runCopyJob,
+	startCopy,
+	type RunCopyDeps
+} from "@/features/drive/lib/copy"
+import { createCopyJob } from "@/features/drive/lib/copy.logic"
 import { useTransfersStore } from "@/features/transfers/store/useTransfersStore"
 import { getCopyJob, useCopyJobsStore } from "@/features/transfers/store/useCopyJobsStore"
 import { queryClient } from "@/queries/client"
@@ -405,6 +418,24 @@ describe("cancel", () => {
 		}
 	})
 
+	it("records how many copied items went to the trash", async () => {
+		const deps = makeDeps()
+		const dir = mockDir("copied")
+
+		deps.trash.mockResolvedValue({ succeeded: [narrowItem(dir)], failed: [] })
+		deps.copyItems.mockImplementation((id, _items, _dest, _max, onEvent) => {
+			onEvent({ type: "created", item: created(dir) })
+			requestCopyCancel(id, { trashCopied: true })
+
+			return Promise.resolve(report({ error: { kind: "Cancelled", message: "copy cancelled", ...NO_SERVER } }))
+		})
+
+		const job = await runCopyJob(deps, request())
+
+		expect(job?.trashResult).toEqual({ moved: 1, failed: 0 })
+		expect(deps.settled.mock.calls[0]?.[0].trashResult).toEqual({ moved: 1, failed: 0 })
+	})
+
 	it("does not trash anything when the cancelled copy had created nothing", async () => {
 		const deps = makeDeps()
 
@@ -472,7 +503,31 @@ describe("startCopy and retryFailedCopy", () => {
 		expect(queryClient.getQueryData<DriveItem[]>(rootKey)?.map(item => item.data.uuid)).toEqual([dir.uuid])
 		expect(queryClient.getQueryData(unreadKey)).toBeUndefined()
 		expect(copyItems.mock.calls[0]?.[3]).toBe(10_000)
+		// Nobody showed a card for this job, so its end is announced with a toast.
 		expect(toastSuccess).toHaveBeenCalledTimes(1)
+	})
+
+	it("leaves the end to the card while one shows", async () => {
+		let release!: () => void
+		const running = new Promise<void>(resolve => {
+			release = resolve
+		})
+
+		copyItems.mockImplementation(async () => {
+			await running
+
+			return report()
+		})
+
+		const id = startCopy([narrowItem(mockFile("a"))], DESTINATION) ?? ""
+
+		useCopyJobsStore.getState().update(id, job => ({ ...job, cardVisible: true }))
+		release()
+		await vi.waitFor(() => {
+			expect(getCopyJob(id)?.outcome.status).toBe("done")
+		})
+
+		expect(toastSuccess).not.toHaveBeenCalled()
 	})
 
 	it("retries a job's failures as a new job into their own directories", async () => {
@@ -503,5 +558,39 @@ describe("startCopy and retryFailedCopy", () => {
 		expect(copyItemsTo.mock.calls[0]?.[1]).toEqual([{ item: failure.item, destination: { uuid: ROOT }, name: "failed.txt" }])
 		expect(row(retryId ?? "")).toMatchObject({ direction: "copy", name: "failed.txt" })
 		expect(retryFailedCopy("unknown")).toBeNull()
+	})
+})
+
+describe("pruneSettledCopyJobs", () => {
+	it("drops only settled jobs with neither a card nor a transfers row", () => {
+		const settled = { outcome: { status: "done" as const } }
+
+		useCopyJobsStore.setState({
+			jobs: {
+				running: createCopyJob("running", DESTINATION, 1),
+				carded: { ...createCopyJob("carded", DESTINATION, 1), ...settled, cardVisible: true },
+				rowed: { ...createCopyJob("rowed", DESTINATION, 1), ...settled },
+				orphan: { ...createCopyJob("orphan", DESTINATION, 1), ...settled }
+			}
+		})
+		useTransfersStore.setState({
+			transfers: [
+				{
+					id: "rowed",
+					direction: "copy",
+					name: "x",
+					size: 0,
+					bytesTransferred: 0,
+					status: "done",
+					paused: false,
+					parentUuid: null,
+					startedAt: 0
+				}
+			]
+		})
+
+		pruneSettledCopyJobs()
+
+		expect(Object.keys(useCopyJobsStore.getState().jobs).sort()).toEqual(["carded", "rowed", "running"])
 	})
 })
