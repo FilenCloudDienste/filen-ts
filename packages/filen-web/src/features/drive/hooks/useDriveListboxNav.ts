@@ -236,6 +236,12 @@ export function useDriveListboxNav({
 	// the drive.* action defs in features/drive/lib/keymap.ts) so they stay user-remappable with
 	// one firing owner; keeping a second hand-rolled check here would double-fire on every keypress.
 	function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+		// A row's ⋯ menu is portaled out of the listbox but stays its React descendant, so its key
+		// presses bubble here too — Enter on a menu item would also open the item under the cursor.
+		if (!(event.target instanceof Node) || !event.currentTarget.contains(event.target)) {
+			return
+		}
+
 		if (items.length === 0) {
 			return
 		}
