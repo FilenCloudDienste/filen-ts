@@ -47,7 +47,7 @@ vi.mock("@/lib/storage/adapter", () => ({
 vi.mock("@/features/chats/lib/inflight", () => ({ purgeChatInflightState: () => Promise.resolve() }))
 
 import { queryClient } from "@/queries/client"
-import { chatsQueryGet, chatsQueryUpsert, useChats } from "@/features/chats/queries/chats"
+import { CHATS_LIST_REREAD_MS, chatsQueryGet, chatsQueryUpsert, useChats } from "@/features/chats/queries/chats"
 import { chatMessagesQueryUpdate, useChatMessages } from "@/features/chats/queries/chatMessages"
 import { useChatsUnreadCount } from "@/features/chats/hooks/useChatsUnreadCount"
 import { handleAuthSuccess, handleChatEvent, handleReconnecting, resetSocketReconnectState } from "@/features/chats/lib/socketHandlers"
@@ -146,6 +146,7 @@ beforeEach(() => {
 
 afterEach(() => {
 	focusManager.setFocused(undefined)
+	vi.useRealTimers()
 })
 
 describe("chat list and message request counts", () => {
@@ -183,7 +184,7 @@ describe("chat list and message request counts", () => {
 		unmount()
 	})
 
-	it("remounting the list and an open thread reuses the cache, while focus still refetches", async () => {
+	it("remounting the list and an open thread reuses the cache", async () => {
 		const shell = renderShellOnChats()
 		await drain()
 		listChats.mockClear()
@@ -204,15 +205,6 @@ describe("chat list and message request counts", () => {
 
 		expect(listChats).not.toHaveBeenCalled()
 		expect(listMessagesBefore).not.toHaveBeenCalled()
-
-		act(() => {
-			focusManager.setFocused(false)
-			focusManager.setFocused(true)
-		})
-		await drain()
-
-		expect(listChats).toHaveBeenCalledTimes(1)
-		expect(listMessagesBefore).toHaveBeenCalledTimes(1)
 
 		thread.unmount()
 		shell.unmount()
@@ -417,5 +409,204 @@ describe("chat list and message request counts", () => {
 
 		outbox.cancel()
 		shell.unmount()
+	})
+})
+
+// The chats route with a thread open: the list's own read next to the thread's.
+async function mountOpenThread() {
+	const view = renderHook(
+		() => {
+			useChatsUnreadCount(USER_ID)
+			useChats()
+			useChatMessages(CHAT_A.uuid)
+		},
+		{ wrapper }
+	)
+
+	await drain()
+	listChats.mockClear()
+	listMessagesBefore.mockClear()
+
+	return view
+}
+
+function hide(): void {
+	act(() => {
+		focusManager.setFocused(false)
+	})
+}
+
+async function show(): Promise<void> {
+	act(() => {
+		focusManager.setFocused(true)
+	})
+	await drain()
+}
+
+// Read state and mute changed on another device, which no socket event reports.
+function changeElsewhere(): void {
+	listChats.mockImplementation(() => Promise.resolve([{ ...CHAT_A, lastFocus: 50n, muted: true }, ...CHATS.slice(1)]))
+}
+
+async function elapse(ms: number): Promise<void> {
+	await act(async () => {
+		await new Promise(resolve => setTimeout(resolve, ms))
+	})
+	await drain()
+}
+
+describe("chat list and thread requests on returning to the tab", () => {
+	it("a return soon after the last list read reads nothing", async () => {
+		const view = await mountOpenThread()
+
+		hide()
+		await show()
+
+		expect(listChats).not.toHaveBeenCalled()
+		expect(listMessagesBefore).not.toHaveBeenCalled()
+
+		view.unmount()
+	})
+
+	it("a return once the list read is old re-reads the list only, and shows another device's read state and mute", async () => {
+		vi.useFakeTimers({ toFake: ["Date"] })
+
+		const view = await mountOpenThread()
+
+		hide()
+		changeElsewhere()
+		vi.setSystemTime(Date.now() + CHATS_LIST_REREAD_MS)
+		await show()
+
+		expect(listChats).toHaveBeenCalledTimes(1)
+		expect(listMessagesBefore).not.toHaveBeenCalled()
+		expect(chatsQueryGet()?.[0]).toMatchObject({ lastFocus: 50n, muted: true })
+
+		view.unmount()
+	})
+
+	it("a return inside the window re-reads the list once when the window ends, bounding a change made elsewhere", async () => {
+		vi.useFakeTimers({ toFake: ["Date"] })
+
+		const view = await mountOpenThread()
+
+		hide()
+		changeElsewhere()
+		vi.setSystemTime(Date.now() + CHATS_LIST_REREAD_MS - 50)
+		await show()
+
+		expect(listChats).not.toHaveBeenCalled()
+
+		hide()
+		await show()
+		await elapse(150)
+
+		expect(listChats).toHaveBeenCalledTimes(1)
+		expect(listMessagesBefore).not.toHaveBeenCalled()
+		expect(chatsQueryGet()?.[0]).toMatchObject({ lastFocus: 50n, muted: true })
+
+		view.unmount()
+	})
+
+	it("hiding the tab again drops the deferred read; the next return makes it", async () => {
+		vi.useFakeTimers({ toFake: ["Date"] })
+
+		const view = await mountOpenThread()
+		const readAt = Date.now()
+
+		hide()
+		vi.setSystemTime(readAt + CHATS_LIST_REREAD_MS - 50)
+		await show()
+		hide()
+		await elapse(150)
+
+		expect(listChats).not.toHaveBeenCalled()
+
+		vi.setSystemTime(readAt + CHATS_LIST_REREAD_MS)
+		await show()
+
+		expect(listChats).toHaveBeenCalledTimes(1)
+		expect(listMessagesBefore).not.toHaveBeenCalled()
+
+		view.unmount()
+	})
+
+	it("a socket patch cancelling the return's read makes it read again, so the change still shows", async () => {
+		vi.useFakeTimers({ toFake: ["Date"] })
+
+		const view = await mountOpenThread()
+		const first = deferred<Chat[]>()
+
+		listChats.mockImplementationOnce(() => first.promise)
+		hide()
+		changeElsewhere()
+		vi.setSystemTime(Date.now() + CHATS_LIST_REREAD_MS)
+		act(() => {
+			focusManager.setFocused(true)
+		})
+		await act(async () => {
+			await Promise.resolve()
+		})
+
+		act(() => {
+			chatsQueryUpsert({ ...CHAT_A, name: "renamed" })
+		})
+		first.resolve(CHATS)
+		await drain()
+
+		expect(listChats).toHaveBeenCalledTimes(2)
+		expect(chatsQueryGet()?.[0]).toMatchObject({ lastFocus: 50n, muted: true })
+
+		view.unmount()
+	})
+
+	it("off the chats route, where only the rail's badge reads the list, a return reads nothing", async () => {
+		vi.useFakeTimers({ toFake: ["Date"] })
+
+		const view = renderHook(() => useChatsUnreadCount(USER_ID), { wrapper })
+
+		await drain()
+		listChats.mockClear()
+		listMessagesBefore.mockClear()
+
+		hide()
+		vi.setSystemTime(Date.now() + CHATS_LIST_REREAD_MS)
+		await show()
+
+		expect(listChats).not.toHaveBeenCalled()
+		expect(listMessagesBefore).not.toHaveBeenCalled()
+
+		view.unmount()
+	})
+
+	it("a return while the socket is down re-reads the list and the open thread", async () => {
+		const view = await mountOpenThread()
+
+		hide()
+		dropSocket()
+		await show()
+
+		expect(listChats).toHaveBeenCalledTimes(1)
+		expect(listMessagesBefore).toHaveBeenCalledTimes(1)
+
+		view.unmount()
+	})
+
+	it("after a reconnect's full pass, a return reads nothing", async () => {
+		const view = await mountOpenThread()
+
+		dropSocket()
+		recoverSocket()
+		await drain()
+		listChats.mockClear()
+		listMessagesBefore.mockClear()
+
+		hide()
+		await show()
+
+		expect(listChats).not.toHaveBeenCalled()
+		expect(listMessagesBefore).not.toHaveBeenCalled()
+
+		view.unmount()
 	})
 })

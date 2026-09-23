@@ -1,4 +1,4 @@
-import { CancelledError, useQuery, type UseQueryResult } from "@tanstack/react-query"
+import { CancelledError, focusManager, useQuery, type UseQueryResult } from "@tanstack/react-query"
 import { sdkApi } from "@/lib/sdk/client"
 import { currentSocketEpoch, socketLiveSince } from "@/lib/sdk/socketSession"
 import { queryClient } from "@/queries/client"
@@ -9,23 +9,68 @@ import type { Chat } from "@filen/sdk-rs"
 // (chat counts are small) and is a full-list replace on every refetch.
 export const CHATS_QUERY_KEY = ["chats", "list"] as const
 
-// Whether the cache holds a server read that ran entirely under a live socket. A socket patch can
-// create the cache without one (chatsQueryUpdate's `prev ?? []`), and events missed while disconnected
-// are only reconciled by the next read, so a mount trusts the cache only while this is set.
-let listSynced = false
+// The latest list read that ran entirely under a live socket: its socket epoch and when it began. A
+// socket patch can create the cache without one (chatsQueryUpdate's `prev ?? []`), and events missed
+// while disconnected are only reconciled by the next read, so the cache counts as synced only while
+// that socket session lasts.
+let listRead: { epoch: number; at: number } | null = null
 
 export function markChatsListUnsynced(): void {
-	listSynced = false
+	listRead = null
 }
+
+function listSynced(): boolean {
+	return listRead !== null && socketLiveSince(listRead.epoch)
+}
+
+// Another device's read state (lastFocus) and mute arrive on no socket event, so returning to the tab
+// re-reads the mounted list, at most once per this window: a return sooner defers the read to when the
+// latest one turns this old, so such a change shows at most this long after a return. The read goes
+// through chatsQueryFetch, so a socket patch that cancels it makes it read again rather than dropping it.
+export const CHATS_LIST_REREAD_MS = 30_000
+
+let deferredReread: ReturnType<typeof setTimeout> | undefined
+
+function rereadMountedList(): void {
+	if (queryClient.getQueryCache().find({ queryKey: CHATS_QUERY_KEY, exact: true })?.isActive() === true) {
+		// A failed read is already logged by the query cache.
+		chatsQueryFetch().catch(() => undefined)
+	}
+}
+
+focusManager.subscribe(focused => {
+	clearTimeout(deferredReread)
+
+	if (!focused) {
+		return
+	}
+
+	const read = listRead
+	const wait = read !== null && listSynced() ? read.at + CHATS_LIST_REREAD_MS - Date.now() : 0
+
+	if (wait <= 0) {
+		rereadMountedList()
+
+		return
+	}
+
+	deferredReread = setTimeout(() => {
+		// A read since (or a drop, which the reconnect resync answers) already covers this return.
+		if (listRead === read) {
+			rereadMountedList()
+		}
+	}, wait)
+})
 
 // Plain, testable query function — same rationale as fetchNotes: the hook wrapper below is a
 // one-line pass-through no node-environment test can render, so this is exported and unit-tested
 // against a mocked sdkApi instead.
 export async function fetchChats(): Promise<Chat[]> {
 	const epoch = currentSocketEpoch()
+	const at = Date.now()
 	const chats = await sdkApi.listChats()
 
-	listSynced = socketLiveSince(epoch)
+	listRead = epoch !== null && socketLiveSince(epoch) ? { epoch, at } : null
 
 	return chats
 }
@@ -36,14 +81,15 @@ export async function fetchChats(): Promise<Chat[]> {
 // list fetch of its own. Defaults to true so the sidebar's own bare call is unaffected.
 //
 // No refetch on mount once the list is synced: socket events patch it live, so a remount would only
-// re-read what is already here. Focus and reconnect still refetch (staleTime 0), and an errored query
-// still retries on mount.
+// re-read what is already here. A return to the tab re-reads it on the schedule above, reconnect
+// always (staleTime 0), and an errored query still retries on mount.
 export function useChats(options?: { enabled?: boolean }): UseQueryResult<Chat[]> {
 	return useQuery({
 		queryKey: CHATS_QUERY_KEY,
 		queryFn: fetchChats,
 		enabled: options?.enabled ?? true,
-		refetchOnMount: query => query.state.status === "error" || !listSynced
+		refetchOnMount: query => query.state.status === "error" || !listSynced(),
+		refetchOnWindowFocus: false
 	})
 }
 

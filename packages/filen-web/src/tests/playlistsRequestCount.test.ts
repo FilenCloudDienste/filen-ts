@@ -41,6 +41,7 @@ import { markPlaylistsUnsynced, PLAYLISTS_QUERY_KEY, PLAYLISTS_STALE_TIME, usePl
 import { createPlaylist } from "@/features/audio/lib/playlists"
 import { handlePlaylistsDriveEvent, registerPlaylistSocketHandlers } from "@/features/audio/lib/socketHandlers"
 import { socketBridge } from "@/lib/sdk/socket"
+import { socketAuthenticated, socketDropped } from "@/lib/sdk/socketSession"
 
 type DriveEvent = Extract<SocketEvent, { type: "drive" }>["inner"]
 
@@ -136,8 +137,9 @@ beforeEach(() => {
 	uploadFileBytes.mockImplementation(() => Promise.resolve(fakeJsonFile(testUuid("ownsave"))))
 
 	// The sync markers are module state that outlives a test; a signal starts each one unsynced, as a
-	// page load does.
+	// page load does, under a live socket.
 	markPlaylistsUnsynced()
+	socketAuthenticated()
 })
 
 afterEach(() => {
@@ -172,6 +174,59 @@ describe("usePlaylistsQuery request counts", () => {
 		await focus()
 
 		expect(counts()).toEqual({ list: 2, download: 6 })
+	})
+
+	it("a read taken while the socket is down is read again on focus, and until it re-authenticates", async () => {
+		socketDropped()
+
+		await mountLoaded()
+		await focus()
+
+		expect(counts()).toEqual({ list: 2, download: 6 })
+
+		socketAuthenticated()
+		await focus()
+		await focus()
+
+		expect(counts()).toEqual({ list: 3, download: 9 })
+	})
+
+	it("a read a drop interrupts is read again on focus after re-authentication", async () => {
+		let releaseListing: () => void = () => undefined
+
+		listDirectory.mockImplementationOnce(
+			() =>
+				new Promise(resolve => {
+					releaseListing = () => {
+						resolve({ dirs: [], files: PLAYLIST_FILE_UUIDS.map(uuid => fakeJsonFile(uuid)) })
+					}
+				})
+		)
+
+		renderHook(() => usePlaylistsQuery(), { wrapper })
+		await waitFor(() => {
+			expect(listDirectory).toHaveBeenCalledTimes(1)
+		})
+
+		socketDropped()
+		socketAuthenticated()
+		releaseListing()
+		await settle()
+		await focus()
+
+		expect(counts()).toEqual({ list: 2, download: 6 })
+	})
+
+	it("a playlist that failed to download is retried on focus even after an earlier clean read", async () => {
+		vi.useFakeTimers({ toFake: ["Date"] })
+		await mountLoaded()
+
+		downloadFileBytes.mockImplementationOnce(() => Promise.reject(new Error("network blip")))
+		vi.setSystemTime(Date.now() + PLAYLISTS_STALE_TIME + 1)
+		await focus()
+		await focus()
+
+		expect(counts()).toEqual({ list: 3, download: 9 })
 	})
 
 	it("still reads once per page load when the cache was restored from disk", async () => {

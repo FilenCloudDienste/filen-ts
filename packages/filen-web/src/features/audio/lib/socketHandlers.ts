@@ -19,18 +19,14 @@ export function handlePlaylistsDriveEvent(event: DriveSocketEvent): void {
 }
 
 // Called once by the authed shell's socket host; returns the combined unregister fn. A malformed drive
-// event can't be ruled out as a playlist change, and events are lost while the socket is down, so a drop
-// and every (re)authentication unsync too.
+// event can't be ruled out as a playlist change, so it unsyncs too; a drop or re-authentication needs no
+// handler, since a read counts only within the socket session it ran in (queries/playlists.ts).
 export function registerPlaylistSocketHandlers(): () => void {
 	const unregisterDrive = registerSocketHandler("drive", handlePlaylistsDriveEvent)
 	const unregisterMalformed = registerSocketHandler("driveMalformed", markPlaylistsUnsynced)
-	const unregisterReconnecting = registerSocketHandler("reconnecting", markPlaylistsUnsynced)
-	const unregisterAuthSuccess = registerSocketHandler("authSuccess", markPlaylistsUnsynced)
 
 	return () => {
 		unregisterDrive()
 		unregisterMalformed()
-		unregisterReconnecting()
-		unregisterAuthSuccess()
 	}
 }

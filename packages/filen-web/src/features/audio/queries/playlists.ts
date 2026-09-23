@@ -1,4 +1,5 @@
 import { useQuery, type UseQueryResult } from "@tanstack/react-query"
+import { currentSocketEpoch, socketLiveSince } from "@/lib/sdk/socketSession"
 import { queryClient } from "@/queries/client"
 import { fetchPlaylistEntries } from "@/features/audio/lib/playlists"
 import type { Playlist } from "@filen/shared"
@@ -17,14 +18,16 @@ export type PlaylistEntry = { status: "ok"; playlist: Playlist } | { status: "de
 // A read downloads every playlist file in full. Same-tab writes patch the cache and the socket marks it
 // unsynced when anything else touches the Playlists directory (features/audio/lib/socketHandlers.ts), so
 // a synced cache holds across mounts, focus and reconnect; the window backstops a change no event
-// reported. Unsynced — no clean read yet this page load, or a signal since the last one — it refetches
-// like any staleTime-0 query.
+// reported. Unsynced — no clean read yet in the current socket session, or a signal since the last one —
+// it refetches like any staleTime-0 query.
 export const PLAYLISTS_STALE_TIME = 15 * 60 * 1000
 
 let unsyncSignals = 0
-// The signal count the last clean read began under; -1 = none this page load (a restored cache predates
-// this tab's socket, so it vouches for nothing).
+// The signal count and socket epoch the last read began under; the count is -1 when that read wasn't
+// clean or none has run (a restored cache predates this tab's socket, so it vouches for nothing). A read
+// the socket wasn't live for throughout is not clean: an event it needed may never have been delivered.
 let syncedAtSignal = -1
+let syncedEpoch: number | null = null
 // Bumped by every cache patch: one landing mid-read cancels it or is overwritten by it.
 let patchCount = 0
 
@@ -35,11 +38,14 @@ export function markPlaylistsUnsynced(): void {
 async function fetchPlaylistsQuery(): Promise<PlaylistEntry[]> {
 	const signals = unsyncSignals
 	const patches = patchCount
+	const epoch = currentSocketEpoch()
 	const entries = await fetchPlaylistEntries()
 
-	// A degraded row may be a transient download failure — keep retrying it on mount/focus as before.
-	if (patchCount === patches && entries.every(entry => entry.status === "ok")) {
-		syncedAtSignal = signals
+	// A degraded row may be a transient download failure — keep retrying it on mount/focus as before, even
+	// after an earlier clean read.
+	if (patchCount === patches) {
+		syncedAtSignal = socketLiveSince(epoch) && entries.every(entry => entry.status === "ok") ? signals : -1
+		syncedEpoch = epoch
 	}
 
 	return entries
@@ -49,7 +55,7 @@ export function usePlaylistsQuery(): UseQueryResult<PlaylistEntry[]> {
 	return useQuery({
 		queryKey: PLAYLISTS_QUERY_KEY,
 		queryFn: fetchPlaylistsQuery,
-		staleTime: () => (syncedAtSignal === unsyncSignals ? PLAYLISTS_STALE_TIME : 0)
+		staleTime: () => (syncedAtSignal === unsyncSignals && socketLiveSince(syncedEpoch) ? PLAYLISTS_STALE_TIME : 0)
 	})
 }
 

@@ -33,13 +33,19 @@ function resolveChat(chatUuid: string): Chat | undefined {
 	return chatsQueryGet()?.find(c => c.uuid === chatUuid)
 }
 
-// Chats whose newest page was last read entirely under a live socket — the same trust rule as the chat
-// list's own marker (chats.ts): a socket patch can create a thread's cache
+// Chats whose newest page was last read entirely under a live socket, with that socket's epoch — the
+// same trust rule as the chat list's own marker (chats.ts): a socket patch can create a thread's cache
 // without that page (chatMessagesQueryUpdate's `prev ?? []`), so a mount skips its fetch only for these.
-const syncedChatUuids = new Set<string>()
+const syncedChatEpochs = new Map<string, number>()
 
 export function markChatMessagesUnsynced(): void {
-	syncedChatUuids.clear()
+	syncedChatEpochs.clear()
+}
+
+function chatMessagesSynced(chatUuid: string): boolean {
+	const epoch = syncedChatEpochs.get(chatUuid)
+
+	return epoch !== undefined && socketLiveSince(epoch)
 }
 
 // Fetches a chat's initial (newest) message page from a Chat object directly — no cache resolution,
@@ -49,10 +55,10 @@ export async function fetchMessagesForChat(chat: Chat): Promise<ChatMessage[]> {
 	const epoch = currentSocketEpoch()
 	const messages = await sdkApi.listMessagesBefore(chat, BigInt(Date.now() + INITIAL_CURSOR_OFFSET_MS))
 
-	if (socketLiveSince(epoch)) {
-		syncedChatUuids.add(chat.uuid)
+	if (epoch !== null && socketLiveSince(epoch)) {
+		syncedChatEpochs.set(chat.uuid, epoch)
 	} else {
-		syncedChatUuids.delete(chat.uuid)
+		syncedChatEpochs.delete(chat.uuid)
 	}
 
 	return sortAscending(messages)
@@ -104,14 +110,19 @@ export async function fetchChatMessages(chatUuid: string): Promise<ChatMessage[]
 // query keeps updating the observer from cache writes even while disabled) — the per-chat unread-count
 // hook reads the cache the bulk refetch populates, rather than each rendered row firing its own
 // listMessagesBefore. Defaults to true so the open-thread route's own bare call is unaffected; a
-// disabled query still respects the empty-uuid guard. Mount refetch follows useChats's rule: skipped
-// once the thread is synced, since socket events patch it live.
+// disabled query still respects the empty-uuid guard. Mount and focus refetches are skipped once the
+// thread is synced: every change to a message arrives as a socket event that patches it live (the
+// read state that has none lives on the chat list, which re-reads on focus itself).
 export function useChatMessages(chatUuid: string, options?: { enabled?: boolean }): UseQueryResult<ChatMessage[]> {
+	const refetchUnlessSynced = (query: { state: { status: string } }): boolean =>
+		query.state.status === "error" || !chatMessagesSynced(chatUuid)
+
 	return useQuery({
 		queryKey: chatMessagesQueryKey(chatUuid),
 		queryFn: () => fetchChatMessages(chatUuid),
 		enabled: (options?.enabled ?? true) && chatUuid.length > 0,
-		refetchOnMount: query => query.state.status === "error" || !syncedChatUuids.has(chatUuid)
+		refetchOnMount: refetchUnlessSynced,
+		refetchOnWindowFocus: refetchUnlessSynced
 	})
 }
 
