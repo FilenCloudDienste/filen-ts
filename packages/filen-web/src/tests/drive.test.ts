@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
 import type {
-	AnyDirWithContext,
 	Dir,
 	DirSizeResponse,
 	DirPublicLinkRW,
@@ -501,7 +500,7 @@ describe("itemPathQueryKey / fetchItemPath", () => {
 describe("fetchItemInfo", () => {
 	it("passes the item through to sdkApi.getItemInfo unchanged", async () => {
 		const dir = mockDir()
-		const result = { path: "Documents/", ancestors: [], size: { size: 0n, files: 0n, dirs: 0n } }
+		const result = { path: "Documents/", ancestors: [] }
 		getItemInfo.mockResolvedValueOnce(result)
 
 		await expect(fetchItemInfo(dir)).resolves.toEqual(result)
@@ -520,30 +519,16 @@ describe("fetchItemInfo", () => {
 	// is a plain pass-through either way, so a null path needs no special handling here either.
 	it("passes a null path through unchanged (a trashed item's path can be individually unresolvable)", async () => {
 		const file = mockFile()
-		const result = { path: null, ancestors: [], size: null }
+		const result = { path: null, ancestors: [] }
 		getItemInfo.mockResolvedValueOnce(result)
 
 		await expect(fetchItemInfo(file)).resolves.toEqual(result)
-	})
-
-	// dirContext is what a shared directory's caller (infoDialog.tsx, via item.ts's
-	// toAnyDirWithContext) passes so getDirSize dispatches through the SDK's Shared arm instead of the
-	// owned one a bare Dir would land on — forwarded as a second argument only when given, so the
-	// "unchanged" pass-through above still exercises the plain owned-directory call shape.
-	it("forwards dirContext to sdkApi.getItemInfo as a second argument when given", async () => {
-		const dir = mockDir()
-		const dirContext: AnyDirWithContext = mockDir({ uuid: testUuid("shared-ctx") })
-		const result = { path: "Documents/", ancestors: [], size: { size: 0n, files: 0n, dirs: 0n } }
-		getItemInfo.mockResolvedValueOnce(result)
-
-		await expect(fetchItemInfo(dir, dirContext)).resolves.toEqual(result)
-		expect(getItemInfo).toHaveBeenCalledExactlyOnceWith(dir, dirContext)
 	})
 })
 
 describe("fetchDirectorySize", () => {
 	// An owned directory's AnyDirWithContext IS the bare Dir (item.ts's toAnyDirWithContext), so the
-	// worker op receives it unchanged — the size-only counterpart of fetchItemInfo's owned case.
+	// worker op receives it unchanged.
 	it("dispatches an owned directory to sdkApi.getDirSize as its bare Dir", async () => {
 		const item = narrowItem(mockDir())
 		const result: DirSizeResponse = { size: 4_096n, files: 3n, dirs: 1n }
@@ -594,7 +579,7 @@ describe("invalidateDirectorySize", () => {
 })
 
 describe("useItemInfoQuery", () => {
-	// The info dialog disables this query for a trashed item (getItemPath/getDirSize stall on a
+	// The info dialog disables this query for a trashed item (getItemPath stalls on a
 	// trashed item's unresolvable ancestry rather than reject — see fetchItemInfo's own tests above
 	// and sdk.worker.ts's getItemInfo), so `enabled` reaching useQuery unchanged is the one thing
 	// this thin wrapper must get right.

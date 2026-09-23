@@ -141,8 +141,8 @@ export function resolvePremiumGateState(isPremium: boolean | undefined): Premium
 }
 
 // The dialog's item-hero header — name, type label, and (files only) a size line. A directory's true
-// size needs the same remote getItemInfo call infoDialog.tsx pays for its own hero; this panel skips
-// that fetch (nothing else here needs it) and just omits the size line for a directory, same degrade
+// size needs the remote getDirSize read infoDialog.tsx makes for its size rows; this panel skips that
+// fetch (nothing else here needs it) and just omits the size line for a directory, same degrade
 // infoDialog uses while its own size row hasn't resolved yet.
 export interface LinkHeroInfo {
 	name: string

@@ -3,8 +3,7 @@ import { useTranslation } from "react-i18next"
 import { Link } from "@tanstack/react-router"
 import { formatBytes, driveItemName } from "@filen/shared"
 import { StarIcon } from "lucide-react"
-import type { AnyDirWithContext } from "@filen/sdk-rs"
-import { asDirectoryOrFile, toAnyDirWithContext, type DriveItem } from "@/features/drive/lib/item"
+import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { ItemIcon } from "@/features/drive/components/itemIcon"
 import { formatCreatedDate, formatItemSize, formatModifiedDate, formatUploadedDate, sharedIdentityLabel } from "@/features/drive/lib/format"
@@ -14,7 +13,8 @@ import { invalidateThumbnail } from "@/features/drive/lib/thumbnails"
 import { parentNavigationTarget } from "@/features/drive/lib/navigate"
 import { previewKindLabelKey } from "@/features/drive/components/infoDialog.logic"
 import { useThumbnail } from "@/features/drive/hooks/useThumbnail"
-import { useItemInfoQuery } from "@/features/drive/queries/drive"
+import { useDirectorySizeQuery, useItemInfoQuery, type DirectorySizeItem } from "@/features/drive/queries/drive"
+import { isDirectorySizeItem } from "@/features/drive/hooks/useDriveDirectorySizes.logic"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { cn } from "@filen/shared"
@@ -29,22 +29,6 @@ export interface InfoDialogProps {
 	onClose: () => void
 }
 
-// A nested sharedDirectory's role is normally spread on by its fetcher (queries/drive.ts) — the catch
-// here is a last-resort backstop for the one contract violation toAnyDirWithContext refuses to guess
-// through (no role to dispatch with), so a stale/unspread row degrades to no size shown, same as any
-// other getDirSize failure, instead of crashing the panel.
-function safeDirContext(item: DriveItem): AnyDirWithContext | undefined {
-	if (item.type !== "sharedDirectory" && item.type !== "sharedRootDirectory") {
-		return undefined
-	}
-
-	try {
-		return toAnyDirWithContext(item)
-	} catch {
-		return undefined
-	}
-}
-
 // One row of the grouped detail card: a muted label, a right-aligned value. The value column opts into
 // text selection (the global user-select policy leaves it off everywhere else) — see the app-shell
 // spec's text-selection rule.
@@ -57,33 +41,52 @@ function InfoRow({ label, children }: { label: string; children: ReactNode }) {
 	)
 }
 
+// A directory's recursive size and counts, read from the listing's own dirSize entry so a size its row
+// already resolved shows without a second getDirSize. A failed read (including a shared directory
+// whose role never got spread on — toAnyDirWithContext throws) omits the rows, same as any absent data.
+function DirectorySizeRows({ item }: { item: DirectorySizeItem }) {
+	const { t } = useTranslation("drive")
+	const sizeQuery = useDirectorySizeQuery(item)
+
+	if (sizeQuery.status === "success") {
+		return (
+			<>
+				<InfoRow label={t("driveInfoSize")}>{formatBytes(Number(sizeQuery.data.size))}</InfoRow>
+				<InfoRow label={t("driveInfoFileCount")}>{sizeQuery.data.files.toString()}</InfoRow>
+				<InfoRow label={t("driveInfoDirectoryCount")}>{sizeQuery.data.dirs.toString()}</InfoRow>
+			</>
+		)
+	}
+
+	return sizeQuery.isLoading ? (
+		<InfoRow label={t("driveInfoSize")}>
+			<Spinner className="ml-auto size-4 text-muted-foreground" />
+		</InfoRow>
+	) : null
+}
+
 // Read-only item-info dialog — mounted-when-active by the listing's dialog host. Works for a directory
 // or a file, including any of the four shared arms (routed through asDirectoryOrFile), and for an item
 // in any variant including trash. Two tiers of data: item.data-derived rows (name, kind, mime,
-// size for a file, created/uploaded/modified) are synchronous and always render; the Location path and
-// a directory's recursive size/counts come from the remote getItemInfo call, gated by remoteInfoEnabled
-// (false for trash — a trashed item's ancestry has nothing navigable to walk, and the worker's calls
-// stall rather than reject on it). A large hero (thumbnail when the service has one, else the item icon
-// on a soft tonal tile tinted by the directory's own color) carries the name and a type label; the
-// grouped rows follow in filen-mobile's order. The Location row is a deliberate desktop addition — its
+// size for a file, created/uploaded/modified) are synchronous and always render; the Location path
+// (the remote getItemInfo call) and a directory's recursive size/counts (the listing's dirSize entry)
+// are gated by remoteInfoEnabled (false for trash — a trashed item's ancestry has nothing navigable
+// to walk, and the worker's calls stall rather than reject on it). A large hero (thumbnail when the
+// service has one, else the item icon on a soft tonal tile tinted by the directory's own color)
+// carries the name and a type label; the grouped rows follow in filen-mobile's order. The Location row is a deliberate desktop addition — its
 // value is a link that navigates to the item's parent directory and closes the dialog.
 export function InfoDialog({ item, variant, remoteInfoEnabled, onClose }: InfoDialogProps) {
 	// ["drive", "common"] so the undecryptable branch can reach the shared cannot-decrypt label; drive
 	// stays the default namespace, so every bare t("drive…") key below is unaffected.
 	const { t } = useTranslation(["drive", "common"])
-	const dirContext = safeDirContext(item)
 	// An undecryptable item's metadata never decrypted for this account, so every synchronous row below
 	// would fall back to the raw uuid and the remote getItemInfo call would resolve nothing useful — the
 	// dialog stands down to the shared explainer instead (see the early return below). Computed here so
 	// it can also switch the remote fetch off.
 	const undecryptable = item.data.undecryptable
 	// Rules-of-hooks: called unconditionally regardless of variant — remoteInfoEnabled controls
-	// fetching through `enabled`, never whether the hook itself runs. dirContext is spread in only
-	// when built (exactOptionalPropertyTypes rejects an explicit `dirContext: undefined`).
-	const infoQuery = useItemInfoQuery(item.data, {
-		enabled: remoteInfoEnabled && !undecryptable,
-		...(dirContext !== undefined ? { dirContext } : {})
-	})
+	// fetching through `enabled`, never whether the hook itself runs.
+	const infoQuery = useItemInfoQuery(item.data, { enabled: remoteInfoEnabled && !undecryptable })
 	const thumbUrl = useThumbnail(item)
 	// Downgrades a torn/corrupt cache entry back to the icon without waiting for a remount — see the
 	// img's own onError below. Never reset back to false: this mount already gave up on this uuid.
@@ -110,7 +113,6 @@ export function InfoDialog({ item, variant, remoteInfoEnabled, onClose }: InfoDi
 	// never resolves a size shows no size row; an item whose path can't resolve shows no Location row).
 	const remoteLoading = remoteInfoEnabled && infoQuery.isLoading
 	const remoteError = remoteInfoEnabled && infoQuery.status === "error"
-	const dirSize = isDirectory && infoQuery.status === "success" ? infoQuery.data.size : null
 	const path = infoQuery.status === "success" ? infoQuery.data.path : null
 	const ancestors = infoQuery.status === "success" ? infoQuery.data.ancestors : []
 	// An item at the drive root resolves an empty path string (empty ancestor chain) — show the root
@@ -200,21 +202,8 @@ export function InfoDialog({ item, variant, remoteInfoEnabled, onClose }: InfoDi
 				<div className="flex min-w-0 flex-col divide-y divide-border/50 rounded-xl ring-1 ring-border/60">
 					{base.type === "file" ? (
 						<InfoRow label={t("driveInfoSize")}>{formatItemSize(item)}</InfoRow>
-					) : remoteInfoEnabled && (dirSize !== null || remoteLoading) ? (
-						<InfoRow label={t("driveInfoSize")}>
-							{dirSize !== null ? (
-								formatBytes(Number(dirSize.size))
-							) : (
-								<Spinner className="ml-auto size-4 text-muted-foreground" />
-							)}
-						</InfoRow>
-					) : null}
-
-					{dirSize !== null ? (
-						<>
-							<InfoRow label={t("driveInfoFileCount")}>{dirSize.files.toString()}</InfoRow>
-							<InfoRow label={t("driveInfoDirectoryCount")}>{dirSize.dirs.toString()}</InfoRow>
-						</>
+					) : remoteInfoEnabled && isDirectorySizeItem(item) ? (
+						<DirectorySizeRows item={item} />
 					) : null}
 
 					{kindKey !== null ? <InfoRow label={t("driveInfoKind")}>{t(kindKey)}</InfoRow> : null}

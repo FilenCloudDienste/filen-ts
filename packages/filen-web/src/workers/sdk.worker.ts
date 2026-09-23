@@ -325,14 +325,11 @@ export type ListDirectoryTarget = { kind: "root" } | { kind: "uuid"; uuid: strin
 // getItemPath has nothing to walk and would only fail (or stall) resolving them.
 const PSEUDO_PARENTS: ReadonlySet<string> = new Set(["trash", "recents", "favorites", "links"])
 
-// getItemInfo's return shape: getItemPath's path/ancestors flattened up one level, plus a directory-
-// only size aggregate (null for a file — a file already carries its own size on the held item).
-// `path` is nullable: see getItemInfo's own comment on why the getItemPath call underneath it can
-// fail independently of everything else this op reads.
+// getItemInfo's return shape: getItemPath's path/ancestors flattened up one level. `path` is
+// nullable: see getItemInfo's own comment on why the getItemPath call underneath it can fail.
 export interface ItemInfoResult {
 	path: string | null
 	ancestors: Dir[]
-	size: DirSizeResponse | null
 }
 
 // Cache-first parent resolve shared by createDirectory/moveDirectory/moveFile: `null` maps to
@@ -993,51 +990,35 @@ const api = {
 		return requireClient().deleteFileVersion(version)
 	},
 	// ── Item info (info panel) ───────────────────────────────────────────────
-	// Single op over the NonRootNormalItem union, mirroring getItemPath's own signature — a file is
-	// the only arm with a `chunks` field (see features/drive/lib/item.ts's identical isFile probe), so the `in`
-	// check below narrows Dir vs File exhaustively. getDirSize only applies to directories; a file
-	// already carries its own size on the held item, so the two calls only ever run together, in
-	// parallel, when both are actually needed. `dirContext` is the AnyDirWithContext the caller builds
-	// via item.ts's toAnyDirWithContext for a shared directory (infoDialog.tsx) — getDirSize is a
-	// category-dispatched op, so a bare owned Dir only dispatches correctly for an OWNED directory;
-	// omitted, `item` itself is passed, which is exactly right for that owned case (already an
-	// AnyNormalDir).
-	// getItemPath walks the item's ancestor chain by uuid and can reject independently of every
-	// other row this op returns — a trashed item's original parent directory (its own uuid is still
-	// carried by the trashed item's meta) may since have been permanently deleted, so that call is
-	// wrapped in its own catch. A pseudo-parent sentinel (trash/recents/favorites/links) has no chain
-	// to walk at all, and getItemPath doesn't reject cleanly on one — it stalls — so PSEUDO_PARENTS
-	// short-circuits the path to a resolved null before getItemPath is ever called. getDirSize gets
-	// the same catch treatment: a size failure shouldn't fail the whole read either. Every field this
-	// op resolves degrades independently — the caller (info-dialog) omits a row when its value is
-	// null, same as it already omits every other absent-data row.
-	async getItemInfo(item: Dir | File, dirContext?: AnyDirWithContext): Promise<ItemInfoResult> {
+	// The info panel's Location read. No directory size here: the panel reads the listing's dirSize
+	// query entry instead (queries/drive.ts), so a size a row already resolved costs no second
+	// getDirSize. getItemPath walks the item's ancestor chain by uuid and can reject — a trashed
+	// item's original parent directory (its uuid is still carried by the trashed item's meta) may
+	// since have been permanently deleted — so a failed walk resolves to a null path rather than
+	// failing the read. A pseudo-parent sentinel (trash/recents/favorites/links) has no chain to walk
+	// at all, and getItemPath doesn't reject cleanly on one — it stalls — so PSEUDO_PARENTS
+	// short-circuits to a null path before getItemPath is ever called. The caller (info-dialog) omits
+	// the Location row when the path is null.
+	async getItemInfo(item: Dir | File): Promise<ItemInfoResult> {
 		const c = requireClient()
-		const pathPromise = PSEUDO_PARENTS.has(item.parent) ? Promise.resolve(null) : cachedItemPath(c, item).catch(() => null)
-		if ("chunks" in item) {
-			const pathResult = await pathPromise
-			return { path: pathResult?.path ?? null, ancestors: pathResult?.ancestors ?? [], size: null }
-		}
-		const [pathResult, size] = await Promise.all([pathPromise, c.getDirSize(dirContext ?? item).catch(() => null)])
-		return { path: pathResult?.path ?? null, ancestors: pathResult?.ancestors ?? [], size }
+		const pathResult = PSEUDO_PARENTS.has(item.parent) ? null : await cachedItemPath(c, item).catch(() => null)
+		return { path: pathResult?.path ?? null, ancestors: pathResult?.ancestors ?? [] }
 	},
-	// Path-only sibling of getItemInfo, for callers that need the ancestor CHAIN and nothing else (the
-	// reveal action, features/drive/lib/reveal.ts). Deliberately NOT a slice of getItemInfo: that op
-	// swallows a failed walk into an empty chain so its other rows can still render, and it also awaits
-	// a recursive getDirSize for a directory — both wrong for a caller whose entire answer is the chain
-	// and whose navigation must not proceed when the walk fails. So this one REJECTS on failure and
-	// issues exactly one request. A pseudo-parent sentinel has no chain and makes getItemPath stall
-	// rather than reject (see getItemInfo's own note), so it throws before the call instead of hanging
-	// the caller.
+	// Rejecting sibling of getItemInfo, for callers whose entire answer is the ancestor CHAIN (the
+	// reveal action, features/drive/lib/reveal.ts). Deliberately NOT getItemInfo: that op swallows a
+	// failed walk into an empty chain so the panel's other rows can still render — wrong for a caller
+	// whose navigation must not proceed when the walk fails. So this one REJECTS on failure. A
+	// pseudo-parent sentinel has no chain and makes getItemPath stall rather than reject (see
+	// getItemInfo's own note), so it throws before the call instead of hanging the caller.
 	getItemPath(item: Dir | File): Promise<GetItemPathResult> {
 		if (PSEUDO_PARENTS.has(item.parent)) {
 			throw new Error(`item has no navigable ancestry: ${item.uuid}`)
 		}
 		return cachedItemPath(requireClient(), item)
 	},
-	// Size-only aggregate (bytes + child file/dir counts) for ONE directory, split out from
-	// getItemInfo (which also walks getItemPath) so the size-sort bridge can prefetch a whole
-	// listing's directories without paying for a path walk each. `dir` is the AnyDirWithContext the
+	// Size-only aggregate (bytes + child file/dir counts) for ONE directory, with no path walk, so the
+	// size-sort bridge can prefetch a whole listing's directories cheaply; the info panel reads the
+	// same query entry (queries/drive.ts's directorySizeQueryOptions). `dir` is the AnyDirWithContext the
 	// caller builds via item.ts's toAnyDirWithContext, so an owned directory and a shared one both
 	// dispatch correctly. No abort param: the wasm getDirSize carries none — a superseded
 	// computation on rapid navigation is left to settle unused.

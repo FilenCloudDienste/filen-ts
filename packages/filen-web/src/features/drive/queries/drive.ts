@@ -5,17 +5,7 @@ import { queryClient } from "@/queries/client"
 // Whole-statement `import type` here too — sdk.worker.ts's own top-level code pulls in
 // @filen/sdk-rs as a real value import, same elision hazard as above.
 import type { ListDirectoryTarget, ItemInfoResult } from "@/workers/sdk.worker"
-import type {
-	Dir,
-	File,
-	FileVersion,
-	DirPublicLinkRW,
-	FilePublicLink,
-	AnyDirWithContext,
-	DirColor,
-	DirSizeResponse,
-	GetItemPathResult
-} from "@filen/sdk-rs"
+import type { Dir, File, FileVersion, DirPublicLinkRW, FilePublicLink, DirColor, DirSizeResponse, GetItemPathResult } from "@filen/sdk-rs"
 import { fastLocaleCompare, driveItemName } from "@filen/shared"
 import { narrowItem, asDirectoryOrFile, toAnyDirWithContext, type DriveItem } from "@/features/drive/lib/item"
 import {
@@ -416,40 +406,33 @@ export function useDirectoryNamesQuery(uuids: string[], variant: DriveVariant = 
 	})
 }
 
-// Info panel primitive: an on-demand, single-item read (path + ancestors + a directory-only size
-// aggregate — see sdk.worker.ts's ItemInfoResult) — keyed on the item's own uuid so switching between
-// two items' info panels never shows a stale read while the new one is still in flight.
+// Info panel primitive: an on-demand, single-item path + ancestors read (see sdk.worker.ts's
+// ItemInfoResult) — keyed on the item's own uuid so switching between two items' info panels never
+// shows a stale read while the new one is still in flight. A directory's size is not part of it: the
+// panel reads directorySizeQueryKey, the entry the listing's row prefetch already fills.
 export function itemInfoQueryKey(uuid: string) {
 	return ["drive", "itemInfo", uuid] as const
 }
 
-// `dirContext` forwards the AnyDirWithContext a caller built for a shared directory (item.ts's
-// toAnyDirWithContext) straight through to getDirSize — omitted, sdkApi.getItemInfo dispatches
-// getDirSize off the bare item instead, correct for an owned directory but not a shared one.
-export async function fetchItemInfo(item: Dir | File, dirContext?: AnyDirWithContext): Promise<ItemInfoResult> {
-	return dirContext === undefined ? sdkApi.getItemInfo(item) : sdkApi.getItemInfo(item, dirContext)
+export async function fetchItemInfo(item: Dir | File): Promise<ItemInfoResult> {
+	return sdkApi.getItemInfo(item)
 }
 
 // `enabled` lets a caller skip the fetch entirely rather than rely on a `.catch` to rescue it — the
-// info dialog does this for a trashed item, since getItemPath/getDirSize stall rather than reject on
-// a trashed item's unresolvable ancestry (see sdk.worker.ts's getItemInfo), and a stalled promise
+// info dialog does this for a trashed item, since getItemPath stalls rather than rejects on a
+// trashed item's unresolvable ancestry (see sdk.worker.ts's getItemInfo), and a stalled promise
 // can't be caught. Defaults to true so every other caller is unaffected.
-export function useItemInfoQuery(
-	item: Dir | File,
-	options?: { enabled?: boolean; dirContext?: AnyDirWithContext }
-): UseQueryResult<ItemInfoResult> {
+export function useItemInfoQuery(item: Dir | File, options?: { enabled?: boolean }): UseQueryResult<ItemInfoResult> {
 	return useQuery({
 		queryKey: itemInfoQueryKey(item.uuid),
-		queryFn: () => fetchItemInfo(item, options?.dirContext),
+		queryFn: () => fetchItemInfo(item),
 		enabled: options?.enabled ?? true
 	})
 }
 
 // The reveal's ancestor-chain read (features/drive/lib/reveal.ts). Its OWN key, not itemInfoQueryKey:
-// that entry holds getItemInfo's swallow-on-failure shape plus a directory size, so sharing it would
-// hand the reveal exactly the two properties the path-only worker op exists to avoid. The duplicated
-// cost versus a warm info entry is one path walk — no size aggregate — which is what the reveal needs
-// anyway.
+// that entry holds getItemInfo's swallow-on-failure shape, exactly what the rejecting worker op exists
+// to avoid. The duplicated cost versus a warm info entry is one path walk.
 export function itemPathQueryKey(uuid: string) {
 	return ["drive", "itemPath", uuid] as const
 }
@@ -459,13 +442,10 @@ export async function fetchItemPath(item: Dir | File): Promise<GetItemPathResult
 }
 
 // Per-directory recursive size aggregate (bytes + child file/dir counts), keyed on the directory's
-// own uuid. One cache slice serves two consumers: the row size column (useDriveDirectorySizes
-// prefetches a listing's directories under this exact key — see directoryListing.tsx) and, at sort
-// time, the size sort. Deliberately NOT folded into itemInfo — that op also walks getItemPath, dead
-// weight for bulk size prefetch; both resolve the same underlying getDirSize, so a directory read both
-// ways (opening its info dialog after its row has already resolved a size) fetches twice, an accepted
-// cost for keeping the size-only path path-walk-free and the info dialog's getItemPath/getDirSize
-// trashed-item resilience (see sdk.worker.ts's getItemInfo) unentangled from the bulk prefetch path.
+// own uuid. One cache slice serves three consumers: the row size column (useDriveDirectorySizes
+// prefetches a listing's directories under this exact key — see directoryListing.tsx), at sort time
+// the size sort, and the info dialog's size rows — so opening Info on a directory whose row already
+// resolved a size costs no second getDirSize.
 export type DirectorySizeItem = Extract<DriveItem, { type: "directory" | "sharedDirectory" | "sharedRootDirectory" }>
 
 // 15-minute staleTime: a directory's recursive size is expensive to recompute server-side and drifts
@@ -484,7 +464,7 @@ export async function fetchDirectorySize(item: DirectorySizeItem): Promise<DirSi
 	return sdkApi.getDirSize(toAnyDirWithContext(item))
 }
 
-// Key + fn + freshness in ONE builder so useDirectorySizeQuery (a row) and the size-sort bridge's
+// Key + fn + freshness in ONE builder so useDirectorySizeQuery (the info dialog) and the size-sort bridge's
 // prefetch can never drift onto different keys — a prefetch under a mismatched key would fetch a
 // second time and the reader would find nothing.
 export function directorySizeQueryOptions(item: DirectorySizeItem) {
@@ -500,11 +480,11 @@ export function useDirectorySizeQuery(item: DirectorySizeItem): UseQueryResult<D
 }
 
 // A directory's own cached size (if any consumer has ever prefetched/read it) goes stale the moment
-// something writes new content into it — upload.ts is the caller, right after a file lands. No active
-// observer exists for a bare dirSize key (useDriveDirectorySizes prefetches, it never `useQuery`s per
-// row — see that hook's own comment), so this only flags the entry stale; the next listing that shows
-// this directory re-prefetches for real instead of serving pre-write bytes for the rest of
-// DIRECTORY_SIZE_STALE_TIME. Root (null parent) has no dirSize entry of its own to invalidate.
+// something writes new content into it — upload.ts is the caller, right after a file lands. The only
+// observer a dirSize key can have is an open info dialog (useDriveDirectorySizes prefetches, it never
+// `useQuery`s per row — see that hook's own comment), so this mostly just flags the entry stale; the
+// next listing or info dialog that shows this directory refetches instead of serving pre-write bytes
+// for the rest of DIRECTORY_SIZE_STALE_TIME. Root (null parent) has no dirSize entry to invalidate.
 export function invalidateDirectorySize(uuid: string | null): void {
 	if (uuid === null) {
 		return
