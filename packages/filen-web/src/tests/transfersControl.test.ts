@@ -3,18 +3,26 @@ import type { Transfer } from "@/features/transfers/store/useTransfersStore"
 
 // Same mock boundary as download.test.ts's own cancel test: the real sdk client module
 // touches a Vite `?worker`, unresolvable/unwanted under node vitest.
-const { cancelUpload, cancelDownload, pauseUpload, pauseDownload, resumeUpload, resumeDownload } = vi.hoisted(() => ({
-	cancelUpload: vi.fn(),
-	cancelDownload: vi.fn(),
-	pauseUpload: vi.fn(),
-	pauseDownload: vi.fn(),
-	resumeUpload: vi.fn(),
-	resumeDownload: vi.fn()
-}))
+const { cancelUpload, cancelDownload, pauseUpload, pauseDownload, resumeUpload, resumeDownload, pauseCopy, resumeCopy } = vi.hoisted(
+	() => ({
+		cancelUpload: vi.fn(),
+		cancelDownload: vi.fn(),
+		pauseUpload: vi.fn(),
+		pauseDownload: vi.fn(),
+		resumeUpload: vi.fn(),
+		resumeDownload: vi.fn(),
+		pauseCopy: vi.fn(),
+		resumeCopy: vi.fn()
+	})
+)
 
 vi.mock("@/lib/sdk/client", () => ({
-	sdkApi: { cancelUpload, cancelDownload, pauseUpload, pauseDownload, resumeUpload, resumeDownload }
+	sdkApi: { cancelUpload, cancelDownload, pauseUpload, pauseDownload, resumeUpload, resumeDownload, pauseCopy, resumeCopy }
 }))
+
+const { requestCopyCancel } = vi.hoisted(() => ({ requestCopyCancel: vi.fn() }))
+
+vi.mock("@/features/drive/lib/copy", () => ({ requestCopyCancel }))
 
 import { cancelTransfer, pauseTransfer, resumeTransfer } from "@/features/transfers/lib/control"
 import { useTransfersStore } from "@/features/transfers/store/useTransfersStore"
@@ -159,5 +167,41 @@ describe("resumeTransfer", () => {
 		expect(resumeUpload).not.toHaveBeenCalled()
 		expect(resumeDownload).not.toHaveBeenCalled()
 		expect(useTransfersStore.getState().transfers.find(transfer => transfer.id === "t4")?.paused).toBe(true)
+	})
+})
+
+describe("copy transfers", () => {
+	it("cancels a copy keeping what it already copied", () => {
+		useTransfersStore.setState({ transfers: [makeTransfer({ id: "c1", direction: "copy", status: "copying" })] })
+
+		cancelTransfer("c1")
+
+		expect(requestCopyCancel).toHaveBeenCalledWith("c1", { trashCopied: false })
+		expect(cancelUpload).not.toHaveBeenCalled()
+		expect(cancelDownload).not.toHaveBeenCalled()
+	})
+
+	it("pauses and resumes a copy through the copy job", () => {
+		useTransfersStore.setState({ transfers: [makeTransfer({ id: "c1", direction: "copy", status: "copying" })] })
+
+		pauseTransfer("c1")
+
+		expect(pauseCopy).toHaveBeenCalledWith("c1")
+		expect(useTransfersStore.getState().transfers[0]?.paused).toBe(true)
+
+		resumeTransfer("c1")
+
+		expect(resumeCopy).toHaveBeenCalledWith("c1")
+		expect(useTransfersStore.getState().transfers[0]?.paused).toBe(false)
+	})
+
+	it("is a no-op for a finished copy", () => {
+		useTransfersStore.setState({ transfers: [makeTransfer({ id: "c1", direction: "copy", status: "completedWithErrors" })] })
+
+		cancelTransfer("c1")
+		pauseTransfer("c1")
+
+		expect(requestCopyCancel).not.toHaveBeenCalled()
+		expect(pauseCopy).not.toHaveBeenCalled()
 	})
 })

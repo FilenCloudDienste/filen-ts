@@ -1,4 +1,5 @@
 import { sdkApi } from "@/lib/sdk/client"
+import { requestCopyCancel } from "@/features/drive/lib/copy"
 import { isActiveTransfer, useTransfersStore } from "@/features/transfers/store/useTransfersStore"
 
 // Direction-agnostic cancel entry point for the active-row cancel button (transferRow.tsx). Reads
@@ -15,12 +16,21 @@ export function cancelTransfer(id: string): void {
 		return
 	}
 
-	if (transfer.direction === "upload") {
-		void sdkApi.cancelUpload(id)
-		return
-	}
+	switch (transfer.direction) {
+		case "upload":
+			void sdkApi.cancelUpload(id)
 
-	void sdkApi.cancelDownload(id)
+			break
+		case "download":
+			void sdkApi.cancelDownload(id)
+
+			break
+		case "copy":
+			// Keeps what the copy already made; trashing it is an explicit choice made elsewhere.
+			requestCopyCancel(id, { trashCopied: false })
+
+			break
+	}
 }
 
 // Direction-agnostic pause entry point for the active-row pause/resume toggle (transferRow.tsx).
@@ -35,10 +45,19 @@ export function pauseTransfer(id: string): void {
 		return
 	}
 
-	if (transfer.direction === "upload") {
-		void sdkApi.pauseUpload(id)
-	} else {
-		void sdkApi.pauseDownload(id)
+	switch (transfer.direction) {
+		case "upload":
+			void sdkApi.pauseUpload(id)
+
+			break
+		case "download":
+			void sdkApi.pauseDownload(id)
+
+			break
+		case "copy":
+			void sdkApi.pauseCopy(id)
+
+			break
 	}
 
 	useTransfersStore.getState().setPaused(id, true)
@@ -52,10 +71,19 @@ export function resumeTransfer(id: string): void {
 		return
 	}
 
-	if (transfer.direction === "upload") {
-		void sdkApi.resumeUpload(id)
-	} else {
-		void sdkApi.resumeDownload(id)
+	switch (transfer.direction) {
+		case "upload":
+			void sdkApi.resumeUpload(id)
+
+			break
+		case "download":
+			void sdkApi.resumeDownload(id)
+
+			break
+		case "copy":
+			void sdkApi.resumeCopy(id)
+
+			break
 	}
 
 	useTransfersStore.getState().setPaused(id, false)

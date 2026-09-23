@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
 import type { AnyFile, SharedDir, SharedRootDir, SharingRole, UuidStr, ZipItem } from "@filen/sdk-rs"
-import type { DriveItem } from "@/features/drive/lib/item"
+import { narrowToSdkItems, type DriveItem } from "@/features/drive/lib/item"
 import type { ErrorDTO } from "@/lib/sdk/errors"
 import type { FsaSaveTarget, SaveTarget, SwSaveTarget } from "@/features/drive/lib/saveDownload"
 
@@ -29,13 +29,7 @@ const { toastSuccess, toastError } = vi.hoisted(() => ({ toastSuccess: vi.fn(), 
 
 vi.mock("sonner", () => ({ toast: { success: toastSuccess, error: toastError } }))
 
-import {
-	narrowToZipItems,
-	runZipDownload,
-	defaultZipDownloadDeps,
-	startZipDownload,
-	type RunZipDownloadDeps
-} from "@/features/drive/lib/downloadZip"
+import { runZipDownload, defaultZipDownloadDeps, startZipDownload, type RunZipDownloadDeps } from "@/features/drive/lib/downloadZip"
 import { useTransfersStore, type Transfer, type TerminalStatus } from "@/features/transfers/store/useTransfersStore"
 
 const PARENT_UUID = "22222222-2222-2222-2222-222222222222" as UuidStr
@@ -211,11 +205,11 @@ afterEach(() => {
 	vi.useRealTimers()
 })
 
-describe("narrowToZipItems", () => {
+describe("narrowToSdkItems", () => {
 	it("maps a file item to its data (structurally an AnyFile)", () => {
 		const item = fileItem({ name: "a.txt", size: 10n })
 
-		const [zipItem] = narrowToZipItems([item])
+		const [zipItem] = narrowToSdkItems([item])
 
 		expect(zipItem).toEqual(item.data)
 	})
@@ -223,7 +217,7 @@ describe("narrowToZipItems", () => {
 	it("maps a directory item to its data (structurally an AnyDirWithContext via the AnyNormalDir=Dir arm)", () => {
 		const item = dirItem({ name: "Documents" })
 
-		const [zipItem] = narrowToZipItems([item])
+		const [zipItem] = narrowToSdkItems([item])
 
 		expect(zipItem).toEqual(item.data)
 	})
@@ -232,11 +226,11 @@ describe("narrowToZipItems", () => {
 		const file = fileItem({ name: "a.txt" })
 		const dir = dirItem({ name: "Documents" })
 
-		expect(narrowToZipItems([file, dir])).toEqual([file.data, dir.data])
+		expect(narrowToSdkItems([file, dir])).toEqual([file.data, dir.data])
 	})
 
 	it("returns an empty array for an empty selection", () => {
-		expect(narrowToZipItems([])).toEqual([])
+		expect(narrowToSdkItems([])).toEqual([])
 	})
 
 	// A flattened shared directory would match the SDK's untagged AnyDirWithContext on its owned
@@ -249,7 +243,7 @@ describe("narrowToZipItems", () => {
 			throw new Error("expected a sharedRootDirectory arm")
 		}
 
-		const [zipItem] = narrowToZipItems([item])
+		const [zipItem] = narrowToSdkItems([item])
 
 		expect(zipItem).toEqual({ dir: item.data.shareSource, shareInfo: item.data.sharingRole })
 	})
@@ -262,7 +256,7 @@ describe("narrowToZipItems", () => {
 			throw new Error("expected a sharedDirectory arm")
 		}
 
-		const [zipItem] = narrowToZipItems([item])
+		const [zipItem] = narrowToSdkItems([item])
 
 		expect(zipItem).toEqual({ dir: item.data.shareSource, shareInfo: role })
 	})
@@ -273,7 +267,7 @@ describe("narrowToZipItems", () => {
 	it("throws for a nested sharedDirectory with no sharingRole, rather than mis-dispatching to the owned arm", () => {
 		const item = sharedDirItem({ name: "SharedChild" })
 
-		expect(() => narrowToZipItems([item])).toThrow(/sharingRole/)
+		expect(() => narrowToSdkItems([item])).toThrow(/sharingRole/)
 	})
 
 	it("preserves selection order across a mix of owned and shared arms", () => {
@@ -286,7 +280,7 @@ describe("narrowToZipItems", () => {
 			throw new Error("expected shared arms")
 		}
 
-		expect(narrowToZipItems([file, sharedDir, dir, sharedRootDir])).toEqual([
+		expect(narrowToSdkItems([file, sharedDir, dir, sharedRootDir])).toEqual([
 			file.data,
 			{ dir: sharedDir.data.shareSource, shareInfo: sharedDir.data.sharingRole },
 			dir.data,
@@ -346,7 +340,7 @@ describe("runZipDownload (injected deps, save-download mocked)", () => {
 
 		await runZipDownload(h.deps, { items, suggestedName: "Filen.zip" })
 
-		expect(h.downloadZip.mock.calls[0]?.[0]).toEqual(narrowToZipItems(items))
+		expect(h.downloadZip.mock.calls[0]?.[0]).toEqual(narrowToSdkItems(items))
 	})
 
 	it("resolves the save target using the suggestedName", async () => {
@@ -402,7 +396,7 @@ describe("runZipDownload (injected deps, save-download mocked)", () => {
 		expect(h.settle).toHaveBeenCalledWith(expect.any(String), "error", dto)
 	})
 
-	// narrowToZipItems' throw (a nested sharedDirectory with no sharingRole) happens synchronously
+	// narrowToSdkItems' throw (a nested sharedDirectory with no sharingRole) happens synchronously
 	// inside the same try this catches every other downloadZip failure with — settling a clean error
 	// outcome, never calling downloadZip with a bare, wrongly-dispatched Dir.
 	it("settles a clean error outcome and never calls downloadZip when a nested sharedDirectory has no sharingRole", async () => {

@@ -4,18 +4,17 @@ import { formatBytes } from "@filen/shared"
 import { i18n } from "@/lib/i18n"
 import { queryClient } from "@/queries/client"
 import { ACCOUNT_QUERY_KEY, accountQueryUpdate, fetchAccount } from "@/queries/account"
-import { resolveQuotaVerdict, type QuotaVerdict } from "@/features/drive/lib/quota.logic"
+import { resolveQuotaVerdict, type QuotaCheckDeps, type QuotaVerdict } from "@/features/drive/lib/quota.logic"
 
-// Upload pre-flight against the cached account; see resolveQuotaVerdict for when it reads fresh. The
-// fresh read goes through the query so it also refreshes every other account consumer.
+// The fresh read goes through the query so it also refreshes every other account consumer.
+export const accountQuotaDeps: QuotaCheckDeps = {
+	cached: () => queryClient.getQueryData<UserInfo>(ACCOUNT_QUERY_KEY),
+	fetchFresh: () => queryClient.query({ queryKey: ACCOUNT_QUERY_KEY, queryFn: fetchAccount, staleTime: 0 })
+}
+
+// Upload pre-flight against the cached account; see resolveQuotaVerdict for when it reads fresh.
 export function checkUploadQuota(neededBytes: bigint): Promise<QuotaVerdict> {
-	return resolveQuotaVerdict(
-		{
-			cached: () => queryClient.getQueryData<UserInfo>(ACCOUNT_QUERY_KEY),
-			fetchFresh: () => queryClient.query({ queryKey: ACCOUNT_QUERY_KEY, queryFn: fetchAccount, staleTime: 0 })
-		},
-		neededBytes
-	)
+	return resolveQuotaVerdict(accountQuotaDeps, neededBytes)
 }
 
 export function quotaExceededMessage(verdict: Extract<QuotaVerdict, { status: "exceeds" }>): string {

@@ -207,6 +207,12 @@ export function driveListingQueryUpdate(parentUuid: string | null, updater: (pre
 	listingQueryUpdate(driveListingQueryKey({ variant: "drive", uuid: parentUuid }), prev => updater(prev ?? []))
 }
 
+// For a write the caller may not be looking at: a listing nobody has read stays unread rather than being
+// created from the rows the patch adds, which would show as that directory's whole content until its read.
+export function driveListingQueryUpdateIfCached(parentUuid: string | null, updater: (prev: DriveItem[]) => DriveItem[]): void {
+	listingQueryUpdate(driveListingQueryKey({ variant: "drive", uuid: parentUuid }), prev => (prev === undefined ? prev : updater(prev)))
+}
+
 // The flat listings (recents/favorites/trash/links) patched by their one key. An unread one stays unread
 // rather than conjured from a single row.
 export function flatListingQueryUpdate(

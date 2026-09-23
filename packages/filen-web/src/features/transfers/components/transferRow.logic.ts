@@ -29,12 +29,30 @@ export function transferProgress(transfer: Transfer): number {
 export function activeStatusLabelKey(
 	direction: Transfer["direction"],
 	paused = false
-): "transfersStatusUploading" | "transfersStatusDownloading" | "transfersStatusPaused" {
+): "transfersStatusUploading" | "transfersStatusDownloading" | "transfersStatusCopying" | "transfersStatusPaused" {
 	if (paused) {
 		return "transfersStatusPaused"
 	}
 
-	return direction === "upload" ? "transfersStatusUploading" : "transfersStatusDownloading"
+	switch (direction) {
+		case "upload":
+			return "transfersStatusUploading"
+		case "download":
+			return "transfersStatusDownloading"
+		case "copy":
+			return "transfersStatusCopying"
+	}
+}
+
+// A finished row's status word. A copy that finished with some items failed is not a failed copy.
+export function finishedStatusLabelKey(
+	status: Transfer["status"]
+): "transfersStatusDone" | "transfersStatusCompletedWithErrors" | "transfersStatusError" {
+	if (status === "done") {
+		return "transfersStatusDone"
+	}
+
+	return status === "completedWithErrors" ? "transfersStatusCompletedWithErrors" : "transfersStatusError"
 }
 
 // The row's leading type-icon key, resolved straight from the transfer's own file name — reuses

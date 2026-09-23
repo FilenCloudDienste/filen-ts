@@ -2,6 +2,7 @@ import { useTranslation } from "react-i18next"
 import {
 	CircleAlertIcon,
 	CircleCheckIcon,
+	CopyIcon,
 	DownloadIcon,
 	PauseCircleIcon,
 	PauseIcon,
@@ -12,7 +13,12 @@ import {
 } from "lucide-react"
 import { formatBytes } from "@filen/shared"
 import { isActiveTransfer, useTransfersStore, type Transfer } from "@/features/transfers/store/useTransfersStore"
-import { transferProgress, activeStatusLabelKey, transferIconKey } from "@/features/transfers/components/transferRow.logic"
+import {
+	transferProgress,
+	activeStatusLabelKey,
+	finishedStatusLabelKey,
+	transferIconKey
+} from "@/features/transfers/components/transferRow.logic"
 import { pauseTransfer, resumeTransfer } from "@/features/transfers/lib/control"
 import { FileTypeIcon } from "@/features/drive/components/itemIcon"
 import { errorLabel } from "@/lib/i18n/errorLabel"
@@ -72,6 +78,15 @@ function TransferStatusIcon({
 		)
 	}
 
+	if (status === "completedWithErrors") {
+		return (
+			<CircleAlertIcon
+				aria-hidden="true"
+				className="size-4 shrink-0 text-muted-foreground"
+			/>
+		)
+	}
+
 	return (
 		<>
 			{paused ? (
@@ -90,13 +105,15 @@ function TransferStatusIcon({
 	)
 }
 
-// Small decorative direction glyph (upload vs download), aria-hidden — purely an at-a-glance visual
+// Small decorative direction glyph (upload, download or copy), aria-hidden — purely an at-a-glance visual
 // cue; the accessible direction distinction lives in TransferStatusIcon's own sr-only label above.
 // Reuses the same icons the rest of the app already associates with each direction (uploadMenu.tsx/
 // uploadDropzone.tsx's UploadIcon, bulkActionBar.logic.ts's DownloadIcon) rather than a generic
 // arrow pair.
+const DIRECTION_ICONS = { upload: UploadIcon, download: DownloadIcon, copy: CopyIcon } as const
+
 function TransferDirectionIcon({ direction }: { direction: Transfer["direction"] }) {
-	const Icon = direction === "upload" ? UploadIcon : DownloadIcon
+	const Icon = DIRECTION_ICONS[direction]
 
 	return (
 		<Icon
@@ -145,13 +162,7 @@ export function TransferRow({ transfer, onRequestCancel }: TransferRowProps) {
 	const trailingLabel =
 		isActiveTransfer(transfer.status) && !transfer.paused
 			? new Intl.NumberFormat(i18n.language, { style: "percent" }).format(progress / 100)
-			: t(
-					isActiveTransfer(transfer.status)
-						? "transfersStatusPaused"
-						: transfer.status === "done"
-							? "transfersStatusDone"
-							: "transfersStatusError"
-				)
+			: t(isActiveTransfer(transfer.status) ? "transfersStatusPaused" : finishedStatusLabelKey(transfer.status))
 
 	return (
 		<div className="flex flex-col gap-1.5 rounded-xl px-1 py-1.5 hover:bg-accent/50">

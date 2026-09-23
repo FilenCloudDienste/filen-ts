@@ -7,6 +7,11 @@ import init, {
 	type Client,
 	type AnyFile,
 	type ZipItem,
+	type CopyItem,
+	type CopyEntry,
+	type CopyReport,
+	type CopyUpdate,
+	type CopiedTopLevelItem,
 	type StringifiedClient,
 	type UserInfo,
 	type RegisterParams,
@@ -130,6 +135,10 @@ const downloadAborts = new Map<string, AbortController>()
 // safe (0.4.33 stopped burying managedFuture under serde(flatten)).
 const uploadAborts = new Map<string, AbortController>()
 
+// A copy job's registries, keyed by the caller's job id — same lifecycle as the transfer maps below.
+const copyAborts = new Map<string, AbortController>()
+const copyPauses = new Map<string, PauseSignal>()
+
 // Per-transfer PauseSignal so pauseUpload/pauseDownload can suspend an in-flight transfer's future
 // without erroring it — unlike abort, pause never rejects; resume just continues the same future.
 // Mirrors downloadAborts/uploadAborts, one map per direction. Each entry is a wasm-heap object: it
@@ -172,6 +181,38 @@ async function withPauseSignal<T>(
 		pauses.delete(transferId)
 		pause.free()
 	}
+}
+
+// A copy's callbacks as one stream to the caller. The SDK delivers them in order and all of them before
+// the call settles, and Comlink keeps that order across the boundary.
+export type CopyJobEvent = { type: "update"; update: CopyUpdate } | { type: "created"; item: CopiedTopLevelItem }
+
+type CopyJobCall = (
+	callbacks: Pick<Parameters<Client["copyItems"]>[0], "onUpdate" | "onTopLevelCreated" | "managedFuture">
+) => Promise<CopyReport>
+
+// Plain worker-side callbacks around the caller's proxy: the wasm layer rejects the proxy object itself.
+// The planned-items callback is left out, as nothing cleans up after a copy the tab closed on.
+async function runCopyJob(jobId: string, onEvent: (event: CopyJobEvent) => void, call: CopyJobCall): Promise<CopyReport> {
+	const controller = new AbortController()
+	copyAborts.set(jobId, controller)
+
+	return withPauseSignal(copyPauses, copyAborts, jobId, pause =>
+		call({
+			onUpdate: update => {
+				onEvent({ type: "update", update })
+			},
+			onTopLevelCreated: item => {
+				// Resolvable as a parent right away, like a directory createDirectory made.
+				if (item.item.type === "dir") {
+					cacheDirs([item.item])
+				}
+
+				onEvent({ type: "created", item })
+			},
+			managedFuture: { abortSignal: controller.signal, pauseSignal: pause }
+		})
+	)
 }
 
 // Per-preview-token AbortController so cancelPreviewDownload(token) can abort an in-flight whole-buffer
@@ -862,6 +903,47 @@ const api = {
 	// Continues a paused download; a no-op once the download has settled. Mirrors resumeUpload.
 	resumeDownload(transferId: string): void {
 		downloadPauses.get(transferId)?.resume()
+	},
+	// ── Copy ─────────────────────────────────────────────────────────────────
+	// The SDK owns the whole job (scan, concurrency, retries, share/link propagation) and resolves with
+	// its report whether the copy completed, was cancelled or failed; it rejects only when it ignores a
+	// cancel for its grace period.
+	async copyItems(
+		jobId: string,
+		items: CopyItem[],
+		destinationUuid: string | null,
+		maxBytes: number | undefined,
+		onEvent: (event: CopyJobEvent) => void
+	): Promise<CopyReport> {
+		const c = requireClient()
+		const destination = await resolveNormalDirParent(c, destinationUuid)
+
+		return runCopyJob(jobId, onEvent, callbacks =>
+			c.copyItems({ items, destination, ...(maxBytes !== undefined ? { maxBytes } : {}), ...callbacks })
+		)
+	},
+	// Retrying a report's failures: each entry already carries its own destination directory.
+	copyItemsTo(
+		jobId: string,
+		entries: CopyEntry[],
+		maxBytes: number | undefined,
+		onEvent: (event: CopyJobEvent) => void
+	): Promise<CopyReport> {
+		const c = requireClient()
+
+		return runCopyJob(jobId, onEvent, callbacks =>
+			c.copyItemsTo({ entries, ...(maxBytes !== undefined ? { maxBytes } : {}), ...callbacks })
+		)
+	},
+	// No-ops once the job has settled, like cancelUpload/pauseUpload/resumeUpload.
+	cancelCopy(jobId: string): void {
+		copyAborts.get(jobId)?.abort()
+	},
+	pauseCopy(jobId: string): void {
+		copyPauses.get(jobId)?.pause()
+	},
+	resumeCopy(jobId: string): void {
+		copyPauses.get(jobId)?.resume()
 	},
 	// ── Preview ──────────────────────────────────────────────────────────────
 	// Whole-buffer fetch for the preview overlay (image/pdf/docx/text/code/markdown — never the

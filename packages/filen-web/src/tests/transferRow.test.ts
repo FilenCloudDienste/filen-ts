@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest"
 import { type Transfer } from "@/features/transfers/store/useTransfersStore"
-import { transferProgress, activeStatusLabelKey, transferIconKey } from "@/features/transfers/components/transferRow.logic"
+import {
+	transferProgress,
+	activeStatusLabelKey,
+	finishedStatusLabelKey,
+	transferIconKey
+} from "@/features/transfers/components/transferRow.logic"
 
 function transfer(overrides: Partial<Transfer> = {}): Transfer {
 	return {
@@ -56,13 +61,26 @@ describe("activeStatusLabelKey", () => {
 		expect(activeStatusLabelKey("download")).toBe("transfersStatusDownloading")
 	})
 
+	it("copy direction reads the copying key", () => {
+		expect(activeStatusLabelKey("copy")).toBe("transfersStatusCopying")
+	})
+
 	it("paused overrides direction, regardless of which direction", () => {
 		expect(activeStatusLabelKey("upload", true)).toBe("transfersStatusPaused")
 		expect(activeStatusLabelKey("download", true)).toBe("transfersStatusPaused")
+		expect(activeStatusLabelKey("copy", true)).toBe("transfersStatusPaused")
 	})
 
 	it("unpaused (explicit false) behaves the same as the default", () => {
 		expect(activeStatusLabelKey("upload", false)).toBe("transfersStatusUploading")
+	})
+})
+
+describe("finishedStatusLabelKey", () => {
+	it("tells a partly failed copy apart from a failed transfer", () => {
+		expect(finishedStatusLabelKey("done")).toBe("transfersStatusDone")
+		expect(finishedStatusLabelKey("completedWithErrors")).toBe("transfersStatusCompletedWithErrors")
+		expect(finishedStatusLabelKey("error")).toBe("transfersStatusError")
 	})
 })
 

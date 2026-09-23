@@ -8,6 +8,7 @@ import type {
 	SharedFile,
 	SharingRole,
 	AnyDirWithContext,
+	AnyFile,
 	LinkedFile
 } from "@filen/sdk-rs"
 import { type ExtraData, type ShareIdentity, keepAgainstIncoming, shareIdentityFromRole } from "@filen/shared"
@@ -303,6 +304,25 @@ export function toAnyDirWithContext(
 			return { dir: item.data.shareSource, shareInfo: sharingRole }
 		}
 	}
+}
+
+// A selection as the SDK's item-taking ops want it (zip download, copy). A file's data is already a
+// structural AnyFile. A directory is not: AnyDirWithContext is an UNTAGGED union, so a flattened shared
+// directory's bare Dir-shaped data would match AnyNormalDir and be listed and decrypted through the
+// OWNED code path instead of the share's — toAnyDirWithContext rebuilds the real wrapper.
+export function narrowToSdkItems(items: readonly DriveItem[]): (AnyFile | AnyDirWithContext)[] {
+	return items.map(item => {
+		switch (item.type) {
+			case "file":
+			case "sharedFile":
+			case "sharedRootFile":
+				return item.data
+			case "directory":
+			case "sharedDirectory":
+			case "sharedRootDirectory":
+				return toAnyDirWithContext(item)
+		}
+	})
 }
 
 // Resolves the OTHER party's identity for a shared item (in the sharedIn context, the sharer). The

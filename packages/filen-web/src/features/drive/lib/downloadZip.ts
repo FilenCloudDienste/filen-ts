@@ -6,7 +6,7 @@ import { sdkApi } from "@/lib/sdk/client"
 import { i18n } from "@/lib/i18n"
 import { runOp, type VoidActionOutcome } from "@/lib/actions/outcome"
 import { asErrorDTO } from "@/lib/sdk/errors"
-import { asDirectoryOrFile, toAnyDirWithContext, type DriveItem } from "@/features/drive/lib/item"
+import { asDirectoryOrFile, narrowToSdkItems, type DriveItem } from "@/features/drive/lib/item"
 import { throttle, PROGRESS_THROTTLE_MS } from "@/features/drive/lib/upload"
 import {
 	saveDownload,
@@ -16,30 +16,6 @@ import {
 	type FsaSaveTarget
 } from "@/features/drive/lib/saveDownload"
 import { useTransfersStore, type TransfersStore } from "@/features/transfers/store/useTransfersStore"
-
-// Maps a selection to what downloadItemsToZip wants. A file narrows the same way narrowToAnyFile does
-// (download.ts): item.data is a structural superset of AnyFile, assignable with no adapter — a shared
-// file carries its own key material, so content download needs no category dispatch either way. A
-// directory is different: @filen/sdk-rs's AnyDirWithContext is an UNTAGGED union
-// (AnySharedDirWithContext | AnyLinkedDirWithContext | AnyNormalDir), so a flattened shared directory's
-// bare Dir-shaped data would match AnyNormalDir instead of the dedicated Shared arm — silently listing
-// and decrypting through the OWNED code path instead of the share endpoint/crypter a shared directory
-// actually needs. toAnyDirWithContext (item.ts) rebuilds the real wrapper from each directory arm's
-// own retained share context instead.
-export function narrowToZipItems(items: DriveItem[]): ZipItem[] {
-	return items.map(item => {
-		switch (item.type) {
-			case "file":
-			case "sharedFile":
-			case "sharedRootFile":
-				return item.data
-			case "directory":
-			case "sharedDirectory":
-			case "sharedRootDirectory":
-				return toAnyDirWithContext(item)
-		}
-	})
-}
 
 // DI mirror of RunDownloadDeps (download.ts) for the zip path — one archive, one transfer row, one
 // save dialog. No `cancel` field: cancelTransfer/pauseTransfer (features/transfers/lib/control.ts) already
@@ -99,7 +75,7 @@ export async function runZipDownload(
 	}, PROGRESS_THROTTLE_MS)
 
 	try {
-		await runOp(deps.downloadZip(narrowToZipItems(items), id, save, reportProgress))
+		await runOp(deps.downloadZip(narrowToSdkItems(items), id, save, reportProgress))
 	} catch (e) {
 		const dto = asErrorDTO(e)
 

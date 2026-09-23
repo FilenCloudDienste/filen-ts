@@ -6,10 +6,8 @@
 // common/errors/auth/drive/contacts: flat `as const` object, camelCase keys, no literal '.' or ':'
 // (real i18next namespaces, keySeparator/nsSeparator both ON).
 //
-// No "cancelled"/"completedWithErrors" copy yet — those statuses exist at the store level
-// (useTransfersStore.ts) but no row in this panel renders them today: a cancelled transfer is removed
-// right after settling (never displayed), and completedWithErrors backs a zip transfer no code
-// produces yet. Active (uploading/downloading) rows get transfersRowCancel plus a pause/resume
+// No "cancelled" copy — a cancelled transfer is removed right after settling (never displayed). Active
+// (uploading/downloading/copying) rows get transfersRowCancel plus a pause/resume
 // toggle (transfersRowPause/transfersRowResume) and, while paused, transfersStatusPaused replaces the
 // live percentage; finished rows get transfersRowRemove.
 export const transfers = {
@@ -63,10 +61,14 @@ export const transfers = {
 	transfersStatusUploading: "Uploading",
 	/** Transfer row — status label while a file is downloading */
 	transfersStatusDownloading: "Downloading",
+	/** Transfer row — status label while a copy job runs (one row per copy, however many items it holds) */
+	transfersStatusCopying: "Copying",
 	/** Transfer row — status label once a file finished uploading */
 	transfersStatusDone: "Done",
 	/** Transfer row — status label when a file failed to upload; the row also surfaces the failing outcome's own error label */
 	transfersStatusError: "Failed",
+	/** Transfer row — status label for a copy that finished with some of its items failed; the rest were copied */
+	transfersStatusCompletedWithErrors: "Completed with errors",
 	/** Transfer row — status label replacing the live percentage while an active (uploading/downloading) transfer is suspended in place */
 	transfersStatusPaused: "Paused",
 	/** Transfer row — accessible label on the button removing a single finished (done/error) transfer from the list */
@@ -119,6 +121,22 @@ export const transfers = {
 	transfersDownloadSummaryCompleteWithFailures_one: "{{count}} file downloaded, {{failed}} failed",
 	/** Download summary toast — at least one file in the batch failed; {{count}} = files that succeeded, {{failed}} = files that failed; plural */
 	transfersDownloadSummaryCompleteWithFailures_other: "{{count}} files downloaded, {{failed}} failed",
+
+	// ── Copy (features/drive/lib/copy.ts) ─────────────────────────────────────
+	/** Copy transfer row — name of a copy job holding more than one item (a one-item copy shows that item's own name); singular */
+	transfersCopyRowName_one: "{{count}} item",
+	/** Copy transfer row — name of a copy job holding more than one item (a one-item copy shows that item's own name); plural */
+	transfersCopyRowName_other: "{{count}} items",
+	/** Copy summary toast — the copy finished and every item was copied; {{count}} = items the user chose to copy; singular */
+	transfersCopySummaryComplete_one: "{{count}} item copied",
+	/** Copy summary toast — the copy finished and every item was copied; {{count}} = items the user chose to copy; plural */
+	transfersCopySummaryComplete_other: "{{count}} items copied",
+	/** Copy summary toast — the copy finished but some files or directories could not be copied; the rest were; {{count}} = failed files/directories; singular */
+	transfersCopySummaryCompleteWithFailures_one: "Copy finished, {{count}} item failed",
+	/** Copy summary toast — the copy finished but some files or directories could not be copied; the rest were; {{count}} = failed files/directories; plural */
+	transfersCopySummaryCompleteWithFailures_other: "Copy finished, {{count}} items failed",
+	/** Copy error (toast and transfer row) — the copy is larger than the account's free storage; checked after the copy's scan, before anything was written; {{free}} = formatted free storage */
+	transfersCopyQuotaExceeded: "This copy doesn't fit the {{free}} of free storage.",
 
 	// ── Zip download (startZipDownload) ───────────────────────────────────────
 	/** Suggested filename for a zip download of a multi-item selection (no single item to name it after) — a save-dialog/transfer-row filename, not a sentence; keep the .zip extension */

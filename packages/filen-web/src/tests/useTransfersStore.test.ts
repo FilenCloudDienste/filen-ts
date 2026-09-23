@@ -313,9 +313,10 @@ describe("clearFinished", () => {
 })
 
 describe("isActiveTransfer", () => {
-	it("is true for uploading and downloading", () => {
+	it("is true for uploading, downloading and copying", () => {
 		expect(isActiveTransfer("uploading")).toBe(true)
 		expect(isActiveTransfer("downloading")).toBe(true)
+		expect(isActiveTransfer("copying")).toBe(true)
 	})
 
 	it("is false for every terminal status", () => {
