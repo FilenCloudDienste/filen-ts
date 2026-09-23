@@ -5,7 +5,7 @@ import { sdkApi } from "@/lib/sdk/client"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { runPreferenceToggle, isPreferenceRowDisabled } from "@/features/settings/components/account/accountPreferences.logic"
 import { useIsOnline } from "@/lib/useIsOnline"
-import type { AccountQuerySuccess } from "@/queries/account"
+import { accountQueryUpdate, type AccountQuerySuccess } from "@/queries/account"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Switch } from "@/components/ui/switch"
 
@@ -46,8 +46,8 @@ function PreferenceRow({ title, description, checked, pending, offlineDisabled, 
 
 // Two safe, reversible toggles — versioning and login-alerts — each a direct flip with no confirm
 // dialog (unlike the destructive delete cards below them on the Account page). `checked` is driven
-// straight from the account query, never local optimistic state: a failed mutation is a no-op visually
-// once `refetch` resolves back to the pre-toggle server value (accountPreferences.logic.ts).
+// straight from the account query, never local optimistic state: a failed mutation never patches it,
+// so the switch stays on the pre-toggle server value (accountPreferences.logic.ts).
 function AccountPreferencesCard({ accountQuery }: AccountPreferencesCardProps) {
 	const { t } = useTranslation(["settings", "common"])
 	const isOnline = useIsOnline()
@@ -58,7 +58,12 @@ function AccountPreferencesCard({ accountQuery }: AccountPreferencesCardProps) {
 	async function handleVersioningChange(next: boolean): Promise<void> {
 		setVersioningPending(true)
 		const outcome = await runPreferenceToggle(
-			{ setEnabled: enabled => sdkApi.setVersioningEnabled(enabled), refetch: () => accountQuery.refetch() },
+			{
+				setEnabled: enabled => sdkApi.setVersioningEnabled(enabled),
+				patch: enabled => {
+					accountQueryUpdate(prev => ({ ...prev, versioningEnabled: enabled }))
+				}
+			},
 			next
 		)
 		if (outcome.status === "error") {
@@ -70,7 +75,12 @@ function AccountPreferencesCard({ accountQuery }: AccountPreferencesCardProps) {
 	async function handleLoginAlertsChange(next: boolean): Promise<void> {
 		setLoginAlertsPending(true)
 		const outcome = await runPreferenceToggle(
-			{ setEnabled: enabled => sdkApi.setLoginAlertsEnabled(enabled), refetch: () => accountQuery.refetch() },
+			{
+				setEnabled: enabled => sdkApi.setLoginAlertsEnabled(enabled),
+				patch: enabled => {
+					accountQueryUpdate(prev => ({ ...prev, loginAlertsEnabled: enabled }))
+				}
+			},
 			next
 		)
 		if (outcome.status === "error") {

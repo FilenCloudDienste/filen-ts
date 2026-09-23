@@ -18,6 +18,30 @@ export function computeNextEventsPage(
 	return { newOk, terminate: newOk.length === 0 }
 }
 
+// A refresh of the first page, merged into the cached slice so the older pages scrolled in survive
+// it. Only when the page shares an event with the slice: without one, events between the two may be
+// missing, so the page replaces the slice and pagination resumes from its end. The page's Err entries
+// replace the old ones, which only ever came from an earlier first page.
+export function mergeFirstEventsPage(current: UserEventResult[] | undefined, page: UserEventResult[]): UserEventResult[] {
+	if (current === undefined) {
+		return page
+	}
+
+	const pageOkIds = new Set<bigint>()
+
+	for (const event of page) {
+		if (event.type === "ok") {
+			pageOkIds.add(event.id)
+		}
+	}
+
+	if (!current.some(event => event.type === "ok" && pageOkIds.has(event.id))) {
+		return page
+	}
+
+	return [...page, ...current.filter(event => event.type === "ok" && !pageOkIds.has(event.id))]
+}
+
 export interface EventsView {
 	// Sorted desc by timestamp (newest first, matching mobile's own Events screen).
 	ok: OkEventResult[]

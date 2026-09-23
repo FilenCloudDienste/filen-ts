@@ -4,7 +4,7 @@ import { applyMembershipPatch, removeByUuid } from "@filen/shared"
 import { sdkApi } from "@/lib/sdk/client"
 import { i18n } from "@/lib/i18n"
 import { queryClient } from "@/queries/client"
-import { ACCOUNT_QUERY_KEY } from "@/queries/account"
+import { ACCOUNT_QUERY_KEY, markAccountStale } from "@/queries/account"
 import {
 	driveListingQueryKey,
 	cancelListingFetch,
@@ -158,6 +158,7 @@ export function deleteItemsPermanently(items: DriveItem[]): Promise<BulkOutcome<
 		// The worker's own deleteDirectoryPermanently already evicts the directory cache worker-side
 		// (that cache is worker-realm private, unreachable from here) — this is only the listing side.
 		driveListingQueryUpdateGlobal(prev => removeByUuid(prev, item.data.uuid))
+		markAccountStale()
 	})
 }
 
@@ -174,6 +175,7 @@ export async function emptyTrash(): Promise<VoidActionOutcome> {
 	// way to target one key — neither can single out the trash listing, so patch its exact key
 	// directly. Trashed items live in no other listing, so this alone empties the whole surface.
 	queryClient.setQueryData(driveListingQueryKey({ variant: "trash", uuid: null }), [])
+	markAccountStale()
 
 	return { status: "success" }
 }
@@ -288,6 +290,8 @@ export async function deleteVersion(file: FileItem, version: FileVersion): Promi
 	} catch (e) {
 		return { status: "error", dto: asErrorDTO(e) }
 	}
+
+	markAccountStale()
 
 	return { status: "success" }
 }

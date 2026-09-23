@@ -111,14 +111,16 @@ describe("runUpload (injected deps, no worker or query client)", () => {
 		const patchListing = vi.fn<(parentUuid: string | null, updater: (prev: DriveItem[]) => DriveItem[]) => void>()
 		const invalidateDirectorySize = vi.fn<(parentUuid: string | null) => void>()
 		const warmThumbnail = vi.fn<(uploaded: SdkFile, file: File) => void>()
+		const markAccountStale = vi.fn<() => void>()
 		const deps: RunUploadDeps = {
 			upload,
 			store: { add, setProgress, settle, remove },
 			patchListing,
 			invalidateDirectorySize,
+			markAccountStale,
 			warmThumbnail
 		}
-		return { deps, upload, add, setProgress, settle, remove, patchListing, invalidateDirectorySize, warmThumbnail }
+		return { deps, upload, add, setProgress, settle, remove, patchListing, invalidateDirectorySize, markAccountStale, warmThumbnail }
 	}
 
 	it("adds an uploading transfer before calling upload", async () => {
@@ -153,6 +155,8 @@ describe("runUpload (injected deps, no worker or query client)", () => {
 		// The destination directory's own cached recursive size is now stale (see queries/drive.ts's
 		// invalidateDirectorySize) — the size-sort's async re-position depends on this firing.
 		expect(h.invalidateDirectorySize).toHaveBeenCalledWith("parent-uuid")
+		// Storage used moved; the account read waits for the next focus or mount rather than one per file.
+		expect(h.markAccountStale).toHaveBeenCalledOnce()
 
 		const updater = h.patchListing.mock.calls[0]?.[1]
 		if (!updater) {
@@ -278,6 +282,7 @@ describe("runUpload (injected deps, no worker or query client)", () => {
 		expect(h.settle).toHaveBeenCalledWith(expect.any(String), "error", dto)
 		expect(h.patchListing).not.toHaveBeenCalled()
 		expect(h.invalidateDirectorySize).not.toHaveBeenCalled()
+		expect(h.markAccountStale).not.toHaveBeenCalled()
 	})
 
 	it("normalizes a plain Error rejection through asErrorDTO", async () => {
@@ -303,6 +308,7 @@ describe("runUpload (injected deps, no worker or query client)", () => {
 		expect(h.settle).toHaveBeenCalledWith(id, "cancelled")
 		expect(h.remove).toHaveBeenCalledWith(id)
 		expect(h.invalidateDirectorySize).not.toHaveBeenCalled()
+		expect(h.markAccountStale).not.toHaveBeenCalled()
 	})
 })
 

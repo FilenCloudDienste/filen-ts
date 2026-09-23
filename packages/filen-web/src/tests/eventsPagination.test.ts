@@ -4,6 +4,7 @@ import {
 	computeNextEventsPage,
 	shouldSkipEventsScroll,
 	fetchEventsPageSafely,
+	mergeFirstEventsPage,
 	selectEventsView
 } from "@/features/settings/lib/eventsPagination"
 
@@ -45,6 +46,32 @@ describe("computeNextEventsPage", () => {
 
 	it("terminates when every Ok id in the page was already seen (full dedup)", () => {
 		expect(computeNextEventsPage(new Set([1n, 2n]), [ok(1n), ok(2n)]).terminate).toBe(true)
+	})
+})
+
+describe("mergeFirstEventsPage", () => {
+	it("takes the page as is when nothing is cached", () => {
+		const page = [ok(3n), err()]
+
+		expect(mergeFirstEventsPage(undefined, page)).toBe(page)
+	})
+
+	it("keeps the older cached events behind an overlapping page, once each", () => {
+		const merged = mergeFirstEventsPage([ok(3n), ok(2n), ok(1n)], [ok(4n), ok(3n)])
+
+		expect(merged).toEqual([ok(4n), ok(3n), ok(2n), ok(1n)])
+	})
+
+	it("replaces the slice when the page shares no event with it (events between may be missing)", () => {
+		const page = [ok(9n), ok(8n)]
+
+		expect(mergeFirstEventsPage([ok(3n), ok(2n)], page)).toBe(page)
+	})
+
+	it("drops the old Err entries in favour of the page's own", () => {
+		const merged = mergeFirstEventsPage([err(), ok(2n), ok(1n)], [ok(3n), ok(2n), err()])
+
+		expect(merged).toEqual([ok(3n), ok(2n), err(), ok(1n)])
 	})
 })
 

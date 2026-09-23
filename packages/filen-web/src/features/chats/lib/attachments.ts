@@ -10,6 +10,7 @@ import { buildPublicLinkUrl } from "@/features/drive/components/linkDialog.logic
 import { useTransfersStore } from "@/features/transfers/store/useTransfersStore"
 import { throttle, PROGRESS_THROTTLE_MS } from "@/features/drive/lib/upload"
 import { noop } from "@/lib/utils"
+import { markAccountStale } from "@/queries/account"
 
 // Composer attachment flow: no first-class attachment message type
 // on either mobile or old-web — attachments are Filen public links pasted into the message body. A
@@ -156,6 +157,7 @@ export async function uploadAttachment(file: File, onProgress: (bytesTransferred
 
 	const item = narrowItem(uploaded)
 	driveListingQueryUpdate(parentUuid, prev => upsertDriveItem(prev, item))
+	markAccountStale()
 
 	return ensurePublicLinkUrl(item)
 }

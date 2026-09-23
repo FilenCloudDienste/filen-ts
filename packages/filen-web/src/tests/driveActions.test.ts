@@ -128,6 +128,11 @@ function testUuid(label: string): UuidStr {
 const ROOT_UUID = testUuid("root")
 const OTHER_PARENT_UUID = testUuid("other-parent")
 
+// Storage used moved on the server; the account is marked for the next focus or mount to read.
+function accountInvalidated(): boolean {
+	return testQueryClient.getQueryCache().find({ queryKey: ACCOUNT_QUERY_KEY, exact: true })?.state.isInvalidated ?? false
+}
+
 function seedRootUuid(uuid: UuidStr = ROOT_UUID): void {
 	testQueryClient.setQueryData<UserInfo>(ACCOUNT_QUERY_KEY, { rootDirUuid: uuid } as UserInfo)
 }
@@ -577,9 +582,12 @@ describe("deleteItemsPermanently", () => {
 		testQueryClient.setQueryData(driveListing(OTHER_PARENT_UUID), [item])
 		deleteFilePermanently.mockResolvedValueOnce(undefined)
 
+		seedRootUuid()
+
 		const result = await deleteItemsPermanently([item])
 
 		expect(result.succeeded).toEqual([item])
+		expect(accountInvalidated()).toBe(true)
 		expect(testQueryClient.getQueryData<DriveItem[]>(trashListing())).toEqual([other])
 		expect(testQueryClient.getQueryData<DriveItem[]>(driveListing(OTHER_PARENT_UUID))).toEqual([])
 	})
@@ -599,10 +607,12 @@ describe("deleteItemsPermanently", () => {
 		testQueryClient.setQueryData(driveListing(OTHER_PARENT_UUID), [item])
 		const dto = sdkDto("Forbidden")
 		deleteDirectoryPermanently.mockRejectedValueOnce(dto)
+		seedRootUuid()
 
 		const result = await deleteItemsPermanently([item])
 
 		expect(result.failed).toEqual([{ item, error: dto }])
+		expect(accountInvalidated()).toBe(false)
 		expect(testQueryClient.getQueryData<DriveItem[]>(driveListing(OTHER_PARENT_UUID))).toEqual([item])
 	})
 })
@@ -615,10 +625,12 @@ describe("emptyTrash", () => {
 		testQueryClient.setQueryData(driveListing(null), [driveItemFixture])
 		testQueryClient.setQueryData(favoritesListing(), [driveItemFixture])
 		emptyTrashOp.mockResolvedValueOnce(undefined)
+		seedRootUuid()
 
 		const outcome = await emptyTrash()
 
 		expect(outcome).toEqual({ status: "success" })
+		expect(accountInvalidated()).toBe(true)
 		expect(testQueryClient.getQueryData(trashListing())).toEqual([])
 		expect(testQueryClient.getQueryData(driveListing(null))).toEqual([driveItemFixture])
 		expect(testQueryClient.getQueryData(favoritesListing())).toEqual([driveItemFixture])
@@ -629,10 +641,12 @@ describe("emptyTrash", () => {
 		testQueryClient.setQueryData(trashListing(), [trashedItem])
 		const dto = sdkDto("Forbidden")
 		emptyTrashOp.mockRejectedValueOnce(dto)
+		seedRootUuid()
 
 		const outcome = await emptyTrash()
 
 		expect(outcome).toEqual({ status: "error", dto })
+		expect(accountInvalidated()).toBe(false)
 		expect(testQueryClient.getQueryData(trashListing())).toEqual([trashedItem])
 	})
 })
@@ -923,10 +937,12 @@ describe("deleteVersion", () => {
 		testQueryClient.setQueryData(driveListing(OTHER_PARENT_UUID), [file])
 		const version = mockVersion()
 		deleteFileVersionOp.mockResolvedValueOnce(undefined)
+		seedRootUuid()
 
 		const outcome = await deleteVersion(file, version)
 
 		expect(outcome).toEqual({ status: "success" })
+		expect(accountInvalidated()).toBe(true)
 		expect(deleteFileVersionOp).toHaveBeenCalledExactlyOnceWith(version)
 		expect(testQueryClient.getQueryData<DriveItem[]>(driveListing(OTHER_PARENT_UUID))).toEqual([file])
 	})
@@ -935,10 +951,12 @@ describe("deleteVersion", () => {
 		const file = fileItem({ uuid: testUuid("f") })
 		const dto = sdkDto("NotFound")
 		deleteFileVersionOp.mockRejectedValueOnce(dto)
+		seedRootUuid()
 
 		const outcome = await deleteVersion(file, mockVersion())
 
 		expect(outcome).toEqual({ status: "error", dto })
+		expect(accountInvalidated()).toBe(false)
 	})
 
 	// Defense-in-depth: deleteFileVersionOp deletes by the version's uuid alone, and the live

@@ -6,7 +6,7 @@ import { asErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { downloadTextFile } from "@/features/settings/lib/downloadTextFile"
 import { useIsOnline } from "@/lib/useIsOnline"
-import { type AccountQuerySuccess } from "@/queries/account"
+import { accountQueryUpdate, type AccountQuerySuccess } from "@/queries/account"
 import { buildMasterKeysFilename } from "@/features/settings/components/security/exportMasterKeys.logic"
 import { Card, CardAction, CardFooter, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -19,8 +19,8 @@ interface ExportMasterKeysCardProps {
 
 // Red-badged whenever the server reports `didExportMasterKeys === false`. Confirm → exportMasterKeys()
 // → immediate browser download (Blob + object URL, revoked after — see lib/download.ts) named
-// `${email}.masterKeys.${timestamp}.txt` → refetch (the server flips the flag on the call itself, so
-// the badge clears once the refetch lands).
+// `${email}.masterKeys.${timestamp}.txt` → patch `didExportMasterKeys` (the server flips the flag on
+// the call itself, so no read-back is needed to clear the badge).
 function ExportMasterKeysCard({ accountQuery }: ExportMasterKeysCardProps) {
 	const { t } = useTranslation(["auth", "common"])
 	const isOnline = useIsOnline()
@@ -34,7 +34,7 @@ function ExportMasterKeysCard({ accountQuery }: ExportMasterKeysCardProps) {
 			const masterKeys = await sdkApi.exportMasterKeys()
 			downloadTextFile(buildMasterKeysFilename(email, Date.now()), masterKeys)
 			setConfirmOpen(false)
-			void accountQuery.refetch()
+			accountQueryUpdate(prev => ({ ...prev, didExportMasterKeys: true }))
 		} catch (e) {
 			toast.error(errorLabel(asErrorDTO(e)))
 		} finally {

@@ -5,7 +5,7 @@ import { sdkApi } from "@/lib/sdk/client"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { useIsOnline } from "@/lib/useIsOnline"
-import type { AccountQuerySuccess } from "@/queries/account"
+import { accountQueryUpdate, type AccountQuerySuccess } from "@/queries/account"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
@@ -34,9 +34,10 @@ function NicknameCard({ accountQuery }: NicknameCardProps) {
 	async function handleSave(): Promise<void> {
 		setPending(true)
 		try {
-			await sdkApi.setNickname(trimmed.length > 0 ? trimmed : null)
+			const next = trimmed.length > 0 ? trimmed : null
+			await sdkApi.setNickname(next)
 			toast.success(t("settingsNicknameSuccess"))
-			void accountQuery.refetch()
+			accountQueryUpdate(prev => ({ ...prev, nickName: next ?? undefined }))
 		} catch (e) {
 			toast.error(errorLabel(asErrorDTO(e)))
 		} finally {

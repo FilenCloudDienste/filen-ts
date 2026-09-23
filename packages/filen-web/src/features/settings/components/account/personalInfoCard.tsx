@@ -8,7 +8,7 @@ import { asErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import type { SettingsKey } from "@/lib/i18n"
 import { useIsOnline } from "@/lib/useIsOnline"
-import type { AccountQuerySuccess } from "@/queries/account"
+import { accountQueryUpdate, type AccountQuerySuccess } from "@/queries/account"
 import {
 	personalToFormState,
 	formStateToUpdateInfo,
@@ -61,10 +61,12 @@ function PersonalInfoCard({ accountQuery }: PersonalInfoCardProps) {
 	async function handleSave(): Promise<void> {
 		setPending(true)
 		try {
-			await sdkApi.updatePersonalInfo(formStateToUpdateInfo(form))
+			const personal = formStateToUpdateInfo(form)
+			await sdkApi.updatePersonalInfo(personal)
 			toast.success(t("settingsPersonalSuccess"))
 			setInitial(form)
-			void accountQuery.refetch()
+			// A whole-record write (an absent field clears it), so the sent record is the new server state.
+			accountQueryUpdate(prev => ({ ...prev, personal }))
 		} catch (e) {
 			toast.error(errorLabel(asErrorDTO(e)))
 		} finally {

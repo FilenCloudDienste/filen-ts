@@ -7,6 +7,7 @@ import { runOp, type VoidActionOutcome } from "@/lib/actions/outcome"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { narrowItem, upsertDriveItem } from "@/features/drive/lib/item"
 import { driveListingQueryUpdate, invalidateDirectorySize } from "@/features/drive/queries/drive"
+import { markAccountStale } from "@/queries/account"
 import { useTransfersStore, type TransfersStore } from "@/features/transfers/store/useTransfersStore"
 import { defaultHeicUploadDeps, heicUploadConversionEnabled, maybeConvertHeicUpload } from "@/features/drive/lib/heicUpload"
 import { warmUploadThumbnail } from "@/features/drive/lib/thumbGenerators"
@@ -74,6 +75,9 @@ export interface RunUploadDeps {
 	// recursive size (see queries/drive.ts's invalidateDirectorySize) — real wiring always supplies it,
 	// tests that don't care about the size-sort path simply omit it.
 	invalidateDirectorySize?: typeof invalidateDirectorySize
+	// Optional for the same DI reason: the account's storage used moved (see queries/account.ts's
+	// markAccountStale).
+	markAccountStale?: () => void
 	// Optional for the same DI reason as the two above: turns the bytes still in hand into this file's
 	// thumbnail instead of letting the listing download them straight back. Synchronous and
 	// fire-and-forget by contract — see warmUploadThumbnail (thumbGenerators.ts) for why.
@@ -137,6 +141,7 @@ export async function runUpload(deps: RunUploadDeps, args: { parentUuid: string 
 	deps.warmThumbnail?.(uploaded, file)
 	deps.patchListing(parentUuid, prev => upsertDriveItem(prev, narrowItem(uploaded)))
 	deps.invalidateDirectorySize?.(parentUuid)
+	deps.markAccountStale?.()
 
 	return { status: "success" }
 }
@@ -159,6 +164,7 @@ export const defaultUploadDeps: RunUploadDeps = {
 	store: useTransfersStore.getState(),
 	patchListing: driveListingQueryUpdate,
 	invalidateDirectorySize,
+	markAccountStale,
 	warmThumbnail: warmUploadThumbnail
 }
 

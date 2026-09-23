@@ -39,9 +39,9 @@ export function handleGeneralEvent(event: GeneralSocketEvent): void {
 		case "newEvent": {
 			// The payload carries only a raw eventType string + opaque info — not the typed id/kind the
 			// account-events list renders and dedupes on — so it can act only as a "something changed"
-			// trigger, never a splice: refetch page one. Guarded on an existing cache slice — an events list
-			// nobody has opened yet has nothing to refresh, and refetching would fetch into a slice no view
-			// reads (its own mount refetches from scratch anyway, staleTime 0).
+			// trigger, never a splice: refetch page one, which merges into the loaded pages (fetchEvents).
+			// Guarded on an existing cache slice — an events list nobody has opened yet has nothing to
+			// refresh, and its first mount reads anyway.
 			if (queryClient.getQueryData(EVENTS_QUERY_KEY) !== undefined) {
 				void queryClient.invalidateQueries({ queryKey: EVENTS_QUERY_KEY })
 			}
