@@ -151,7 +151,7 @@ export function MessageContent({ chat, text }: { chat: Chat; text: string | unde
 							)
 						}
 
-						return <Fragment key={index}>:{segment.shortcode}:</Fragment>
+						return <Fragment key={index}>{segment.raw}</Fragment>
 					}
 
 					default:

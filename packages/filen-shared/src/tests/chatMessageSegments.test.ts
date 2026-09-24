@@ -59,8 +59,68 @@ describe("segmentMessage", () => {
 	it("detects an emoji shortcode segment (emoji has priority in the alternation order)", () => {
 		expect(segmentMessage("hi :smile:")).toEqual([
 			{ kind: "text", value: "hi " },
-			{ kind: "emoji", shortcode: "smile" }
+			{ kind: "emoji", shortcode: "smile", raw: ":smile:" }
 		])
+	})
+
+	// The shortcode drops every colon, so an unresolved skin-tone form can only be shown as sent via raw.
+	it("keeps a skin-tone shortcode's matched text as raw", () => {
+		expect(segmentMessage("nice :thumbsup::skin-tone-2:")).toEqual([
+			{ kind: "text", value: "nice " },
+			{ kind: "emoji", shortcode: "thumbsupskin-tone-2", raw: ":thumbsup::skin-tone-2:" }
+		])
+	})
+})
+
+describe("segmentMessage — where a link ends", () => {
+	// Both apps open a link segment's raw string, so a closing character left in it corrupts the URL.
+	it.each([
+		["\"https://example.com/path\"", "\"", "https://example.com/path", "\""],
+		["'https://example.com'", "'", "https://example.com", "'"],
+		["`https://example.com`", "`", "https://example.com", "`"],
+		["<https://example.com/path>", "<", "https://example.com/path", ">"],
+		["('https://example.com/path'),", "('", "https://example.com/path", "'),"]
+	])("leaves the closing character of %s out of the link", (wrapped, before, url, after) => {
+		expect(segmentMessage(`see ${wrapped} now`)).toEqual([
+			{ kind: "text", value: `see ${before}` },
+			{ kind: "link", raw: url },
+			{ kind: "text", value: `${after} now` }
+		])
+	})
+
+	it("keeps an apostrophe a letter or digit follows in the path, and ends the host at any apostrophe", () => {
+		expect(segmentMessage("https://en.wikipedia.org/wiki/Hitchhiker's_Guide")).toEqual([
+			{ kind: "link", raw: "https://en.wikipedia.org/wiki/Hitchhiker's_Guide" }
+		])
+		expect(segmentMessage("https://example.com/l'été")).toEqual([{ kind: "link", raw: "https://example.com/l'été" }])
+		expect(segmentMessage("https://example.com's pricing")).toEqual([
+			{ kind: "link", raw: "https://example.com" },
+			{ kind: "text", value: "'s pricing" }
+		])
+	})
+
+	it("segments what follows a link's end in the same pass, a code fence across whitespace included", () => {
+		expect(segmentMessage("[\"https://a.example.com\",\"https://b.example.com\"]:gigachad:")).toEqual([
+			{ kind: "text", value: "[\"" },
+			{ kind: "link", raw: "https://a.example.com" },
+			{ kind: "text", value: "\",\"" },
+			{ kind: "link", raw: "https://b.example.com" },
+			{ kind: "text", value: "\"]" },
+			{ kind: "emoji", shortcode: "gigachad", raw: ":gigachad:" }
+		])
+		expect(segmentMessage("\"https://example.com\"```a b```")).toEqual([
+			{ kind: "text", value: "\"" },
+			{ kind: "link", raw: "https://example.com" },
+			{ kind: "text", value: "\"" },
+			{ kind: "code", code: "a b" }
+		])
+	})
+
+	it("ends every link of a message-length run with no spaces", () => {
+		const segments = segmentMessage("http://a\"".repeat(7274))
+
+		expect(segments).toHaveLength(14548)
+		expect(segments.filter(segment => segment.kind === "link" && segment.raw === "http://a")).toHaveLength(7274)
 	})
 })
 

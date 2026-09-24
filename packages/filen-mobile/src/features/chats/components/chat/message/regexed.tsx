@@ -266,7 +266,7 @@ const Regexed = ({ chat, message, fromSelf }: { chat: Chat; message: ChatMessage
 								key={index}
 								className={plainTextClassName}
 							>
-								{`:${segment.shortcode}:`}
+								{segment.raw}
 							</Text>
 						)
 					}

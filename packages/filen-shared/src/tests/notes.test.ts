@@ -21,6 +21,15 @@ describe("createNotePreviewFromContentText", () => {
 
 			expect(result.length).toBeLessThanOrEqual(128)
 		})
+
+		it("decodes the text's entities after stripping tags", () => {
+			expect(createNotePreviewFromContentText("rich", "<p>Tom &amp; Jerry</p>")).toBe("Tom & Jerry")
+			expect(createNotePreviewFromContentText("rich", "<p>Fix &lt;Header&gt;</p><p><br></p><p>next</p>")).toBe("Fix <Header>")
+		})
+
+		it("keeps a typed entity literal (&amp;lt; reads as &lt;)", () => {
+			expect(createNotePreviewFromContentText("rich", "<p>&amp;lt;</p>")).toBe("&lt;")
+		})
 	})
 
 	describe("checklist", () => {
@@ -43,6 +52,36 @@ describe("createNotePreviewFromContentText", () => {
 			const result = createNotePreviewFromContentText("checklist", html)
 
 			expect(result).toBe("")
+		})
+
+		it("decodes the row text instead of showing its entities", () => {
+			const html = "<ul data-checked=\"false\"><li>Tom &amp; Jerry</li></ul>"
+
+			expect(createNotePreviewFromContentText("checklist", html)).toBe("Tom & Jerry")
+		})
+
+		it("keeps an escaped tag-like row as text (decoded after tags are gone, not stripped)", () => {
+			const html = "<ul data-checked=\"true\"><li>Fix &lt;Header&gt;</li></ul>"
+
+			expect(createNotePreviewFromContentText("checklist", html)).toBe("Fix <Header>")
+		})
+
+		it("skips an empty first row (<br>) and previews the first row with text", () => {
+			const html = "<ul data-checked=\"false\"><li><br></li><li>Milk</li></ul>"
+
+			expect(createNotePreviewFromContentText("checklist", html)).toBe("Milk")
+		})
+
+		it("reads a row older mobile builds stored unescaped as it was typed", () => {
+			const html = "<ul data-checked=\"false\"><li>cut&copy</li></ul>"
+
+			expect(createNotePreviewFromContentText("checklist", html)).toBe("cut&copy")
+		})
+
+		it("truncates the row to 128 characters", () => {
+			const html = `<ul data-checked="false"><li>${"&amp;".repeat(200)}</li></ul>`
+
+			expect(createNotePreviewFromContentText("checklist", html)).toBe("&".repeat(128))
 		})
 	})
 

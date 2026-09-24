@@ -2,9 +2,12 @@
 
 import { vi, describe, it, expect, afterEach } from "vitest"
 import { createElement } from "react"
-import { render, cleanup } from "@testing-library/react"
+import { render, cleanup, fireEvent } from "@testing-library/react"
 import type { Chat } from "@/types"
 import type { ChatMessageWithInflightId } from "@/features/chats/store/useChats.store"
+
+const openExternalLink = vi.hoisted(() => vi.fn((_url: string) => Promise.resolve()))
+const segmentMessage = vi.hoisted(() => vi.fn())
 
 // ─── Module boundary mocks ──────────────────────────────────────────────────
 
@@ -21,23 +24,26 @@ vi.mock("@/features/chats/store/useChats.store", () => ({
 	default: (selector: (state: { inflightMessages: Record<string, unknown> }) => unknown) => selector({ inflightMessages: {} })
 }))
 
-// Link press behavior (the external-link trust funnel) is out of scope here — this suite tests
-// segmentation + rendering only, never a real navigation.
+// The external-link trust funnel itself is out of scope here, never a real navigation — the spy only
+// records which URL a pressed link hands it.
 vi.mock("@/hooks/useOpenExternalLink", () => ({
-	default: () => vi.fn()
+	default: () => openExternalLink
 }))
 
 vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 
 // segmentMessage/isEmojiOnly/contactDisplayName pulled through REAL — this suite's whole point is to
 // exercise the actual shared segmentation pipeline driving the rewritten component, not a stand-in.
+// segmentMessage runs through a spy only to count the passes.
 vi.mock("@filen/shared", async () => {
 	const actual = await vi.importActual<typeof import("@filen/shared")>("@filen/shared")
+
+	segmentMessage.mockImplementation(actual.segmentMessage)
 
 	return {
 		cn: (...parts: (string | undefined | false)[]) => parts.filter(Boolean).join(" "),
 		contactDisplayName: actual.contactDisplayName,
-		segmentMessage: actual.segmentMessage,
+		segmentMessage,
 		isEmojiOnly: actual.isEmojiOnly
 	}
 })
@@ -82,6 +88,7 @@ import Regexed from "@/features/chats/components/chat/message/regexed"
 
 afterEach(() => {
 	cleanup()
+	openExternalLink.mockClear()
 })
 
 function mockChat(participants: { email: string; nickName?: string }[] = []): Chat {
@@ -187,6 +194,15 @@ describe("Regexed — segment mapping", () => {
 		expect(container.querySelector("img")).toBeNull()
 	})
 
+	it("renders an unresolved skin-tone shortcode exactly as it was sent", () => {
+		const { container } = render(
+			createElement(Regexed, { chat: mockChat(), message: mockMessage("nice :thumbsup::skin-tone-2:"), fromSelf: false })
+		)
+
+		expect(container.textContent).toBe("nice :thumbsup::skin-tone-2:")
+		expect(container.querySelector("img")).toBeNull()
+	})
+
 	// Named case from the batch: the shared URL source (https?:// only) no longer swallows a
 	// zero-separator www.-prefixed run together with an immediately-following @mention the way
 	// mobile's old broader URL_REGEX did — it now renders an inert "www.example.com" text run
@@ -205,5 +221,89 @@ describe("Regexed — segment mapping", () => {
 		const withoutButton = container.cloneNode(true) as HTMLElement
 		withoutButton.querySelector("button")?.remove()
 		expect(withoutButton.textContent).toBe("www.example.com")
+	})
+})
+
+describe("Regexed — where a link ends", () => {
+	function renderText(text: string) {
+		return render(createElement(Regexed, { chat: mockChat(), message: mockMessage(text), fromSelf: false })).container
+	}
+
+	// A URL ends before a closing quote, backtick or angle bracket: the link must show and open the clean
+	// URL, with the delimiters left as plain text around it.
+	it.each([
+		["\"https://example.com/path\"", "https://example.com/path"],
+		["'https://example.com'", "https://example.com"],
+		["`https://example.com`", "https://example.com"],
+		["<https://example.com>", "https://example.com"],
+		["<https://example.com/path>", "https://example.com/path"],
+		["('https://example.com/path'),", "https://example.com/path"]
+	])("links only the URL in %s", (wrapped, url) => {
+		const container = renderText(`see ${wrapped} now`)
+		const buttons = container.querySelectorAll("button")
+
+		expect(buttons).toHaveLength(1)
+		expect(buttons[0]?.textContent).toBe(url)
+		expect(container.textContent).toBe(`see ${wrapped} now`)
+
+		fireEvent.click(buttons[0] as HTMLElement)
+
+		expect(openExternalLink).toHaveBeenCalledExactlyOnceWith(url)
+	})
+
+	it("opens a quoted public link with its whole key and nothing after it", () => {
+		const url = `https://app.filen.io/f/00000000-0000-0000-0000-000000000000#${"ab".repeat(32)}`
+		const container = renderText(`see "${url}" now`)
+		const button = container.querySelector("button")
+
+		expect(button?.textContent).toBe(url)
+
+		fireEvent.click(button as HTMLElement)
+
+		expect(openExternalLink).toHaveBeenCalledExactlyOnceWith(url)
+	})
+
+	it("keeps an apostrophe between letters in the path as part of the link", () => {
+		const url = "https://en.wikipedia.org/wiki/Hitchhiker's_Guide"
+		const container = renderText(`read ${url} first`)
+		const button = container.querySelector("button")
+
+		expect(button?.textContent).toBe(url)
+
+		fireEvent.click(button as HTMLElement)
+
+		expect(openExternalLink).toHaveBeenCalledExactlyOnceWith(url)
+	})
+
+	it("ends the host at an apostrophe", () => {
+		const container = renderText("https://example.com's pricing")
+		const buttons = container.querySelectorAll("button")
+
+		expect(buttons).toHaveLength(1)
+		expect(buttons[0]?.textContent).toBe("https://example.com")
+		expect(container.textContent).toBe("https://example.com's pricing")
+	})
+
+	it("links each URL of a run with no spaces, and segments what follows each one", () => {
+		const container = renderText("[\"https://a.example.com\",\"https://b.example.com\"]:gigachad:")
+		const buttons = container.querySelectorAll("button")
+
+		expect([...buttons].map(button => button.textContent)).toEqual(["https://a.example.com", "https://b.example.com"])
+		expect(container.querySelector("img")?.getAttribute("src")).toBe("https://cdn.filen.io/emojis/gigachad.webp")
+		expect(container.textContent).toBe("[\"https://a.example.com\",\"https://b.example.com\"]")
+	})
+
+	// Any participant can send this. Cutting each link and segmenting the rest of its run again recurses
+	// once per link: quadratic in the run, and deep enough to overflow the stack while rendering.
+	it("renders a message-length run of thousands of links with no spaces in one segmentation pass", () => {
+		const text = "http://a\"".repeat(7274)
+
+		segmentMessage.mockClear()
+
+		const container = renderText(text)
+
+		expect(segmentMessage).toHaveBeenCalledOnce()
+		expect(container.textContent).toBe(text)
+		expect(container.querySelector("button")).toBeNull()
 	})
 })

@@ -58,6 +58,13 @@ describe("MessageContent — custom emoji pack + jumbo sizing", () => {
 		expect(container.querySelector("img")).toBeNull()
 	})
 
+	it("renders an unresolved skin-tone shortcode exactly as it was sent", () => {
+		const { container } = render(createElement(MessageContent, { chat: mockChat(), text: "nice :thumbsup::skin-tone-2:" }))
+
+		expect(container.textContent).toBe("nice :thumbsup::skin-tone-2:")
+		expect(container.querySelector("img")).toBeNull()
+	})
+
 	it("renders a standard unicode shortcode at jumbo text size when the message is emoji-only", () => {
 		const { container } = render(createElement(MessageContent, { chat: mockChat(), text: ":joy:" }))
 

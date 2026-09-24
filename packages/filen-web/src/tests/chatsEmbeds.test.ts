@@ -214,6 +214,16 @@ describe("extractMessageLinks", () => {
 	it("never extracts a url embedded inside a code fence (regexed.logic's own ordering)", () => {
 		expect(extractMessageLinks("```https://inside-code.example.com```")).toEqual([])
 	})
+
+	// A closing quote kept in the href lands in the key fragment, and the public link no longer parses.
+	it("leaves a closing quote or angle bracket out of the href, so a quoted public link keeps its card", () => {
+		const url = newFileLinkUrl()
+
+		expect(extractMessageLinks(`see "${url}" and <https://example.com/a.png>`)).toEqual([url, "https://example.com/a.png"])
+		expect(embedCandidatesForLinks(extractMessageLinks(`see "${url}" now`))).toEqual([
+			{ kind: "filenLink", url, link: { kind: "file", linkUuid: UUID, key: KEY_PLAINTEXT } }
+		])
+	})
 })
 
 describe("contentTypeMatchesCategory", () => {

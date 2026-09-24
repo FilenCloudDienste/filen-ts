@@ -145,3 +145,32 @@ describe("ChecklistParser — tag-like text losslessness", () => {
 		expect(roundTrip("Tom & Jerry")).toEqual(["Tom & Jerry"])
 	})
 })
+
+describe("ChecklistParser — rows older mobile builds stored unescaped", () => {
+	function parseRow(rowHtml: string): string[] {
+		return checklistParser.parse(`<ul data-checked="false"><li>${rowHtml}</li></ul>`).map(item => item.content)
+	}
+
+	// An "&" followed by a legacy entity name without its ";" must not expand ("cut&copy" -> "cut©").
+	it.each(["cut&copy", "Save&note", "Check&register", "Get&quote", "left&center", "Issue&#42", "R&D", "AT&T", "Tom & Jerry"])(
+		"reads %s back unchanged",
+		raw => {
+			expect(parseRow(raw)).toEqual([raw])
+		}
+	)
+
+	it("keeps a legacy row's text when the list is next saved", () => {
+		const saved = checklistParser.stringify(checklistParser.parse("<ul data-checked=\"false\"><li>cut&copy</li><li>Issue&#42</li></ul>"))
+
+		expect(checklistParser.parse(saved).map(item => item.content)).toEqual(["cut&copy", "Issue&#42"])
+	})
+
+	it("still decodes every entity that ends in a semicolon", () => {
+		expect(parseRow("Tom &amp; Jerry")).toEqual(["Tom & Jerry"])
+		expect(parseRow("&amp;lt;")).toEqual(["&lt;"])
+		expect(parseRow("&lt;Header&gt;")).toEqual(["<Header>"])
+		expect(parseRow("a&nbsp;b")).toEqual(["a b"])
+		expect(parseRow("it&#39;s it&#x27;s")).toEqual(["it's it's"])
+		expect(parseRow("&quot;quoted&quot;")).toEqual(["\"quoted\""])
+	})
+})

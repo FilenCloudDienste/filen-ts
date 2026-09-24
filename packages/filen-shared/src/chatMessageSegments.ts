@@ -11,8 +11,12 @@
 const MENTION_SOURCE = "@[\\w.-]+@[\\w.-]+\\.\\w+|@everyone"
 // Triple-backtick fenced block, non-greedy across newlines.
 const CODE_SOURCE = "```[\\s\\S]*?```"
-// Bare http(s) URL — only http(s) auto-links; other schemes stay plain text.
-const URL_SOURCE = "https?://[^\\s]+"
+// Bare http(s) URL — only http(s) auto-links; other schemes stay plain text. It ends before `<>"` and the
+// backtick, which a URL never holds unencoded, so a quoted or bracketed link leaves the closing character
+// out. An apostrophe ends it in the host, and in the path when no letter or digit follows (a closing
+// quote), so "Hitchhiker's_Guide" stays whole; any non-ASCII character counts as a letter. Ending it here
+// rather than cutting the match afterwards keeps segmentation one linear pass.
+const URL_SOURCE = "https?://[^\\s<>\"'`/?#]*(?:[/?#][^\\s<>\"'`]*(?:'(?=[\\dA-Za-z\\u0080-\\uffff])[^\\s<>\"'`]*)*)?"
 // :shortcode: (optionally ::skin-tone-N:). Detected so the ordering slot exists and the emoji-only
 // heuristic below can be computed; resolving a shortcode to a glyph or image is a render-layer concern.
 const EMOJI_SOURCE = ":[\\d+_a-z-]+(?:::skin-tone-\\d+)?:"
@@ -28,7 +32,9 @@ export type MessageSegment =
 	| { kind: "code"; code: string }
 	| { kind: "link"; raw: string }
 	| { kind: "mention"; everyone: boolean; email: string | null }
-	| { kind: "emoji"; shortcode: string }
+	// `raw` is the matched text: an unresolved shortcode renders it as sent, since `shortcode` drops
+	// every colon (":thumbsup::skin-tone-2:" is "thumbsupskin-tone-2").
+	| { kind: "emoji"; shortcode: string; raw: string }
 
 // Strips the ``` fences and surrounding blank lines from a code match.
 function extractCode(match: string): string {
@@ -73,7 +79,7 @@ function classify(match: string): MessageSegment {
 	}
 
 	// Emoji shortcode (the only remaining alternative).
-	return { kind: "emoji", shortcode: match.split(":").join("").trim() }
+	return { kind: "emoji", shortcode: match.split(":").join("").trim(), raw: match }
 }
 
 // Splits raw message text into ordered typed segments, interleaving the plain-text runs between
