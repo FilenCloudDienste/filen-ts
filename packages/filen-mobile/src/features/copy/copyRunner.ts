@@ -12,7 +12,6 @@ import {
 import {
 	applyCopyUpdate,
 	copyMaxBytes,
-	effectiveBytesDone,
 	isQuotaPreflightFailure,
 	settleCopyJob,
 	type CopyUpdateEvents,
@@ -381,7 +380,7 @@ class CopyRunner {
 
 			// The total grows while the scan finds more to copy.
 			const size = job.totals.bytes
-			const bytesTransferred = effectiveBytesDone(job.counts, job.active)
+			const bytesTransferred = job.counts.bytesDone
 
 			useTransfersStore.getState().setTransfers(prev => prev.map(t => (t.id === id ? { ...t, size, bytesTransferred } : t)))
 		}

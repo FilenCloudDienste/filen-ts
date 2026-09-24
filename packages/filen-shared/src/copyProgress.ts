@@ -1,24 +1,9 @@
 import { clampedRatio } from "./ratio"
-import type { CopyJob, CopyJobActiveFile, CopyJobCounts } from "./copyJob"
+import type { CopyJob } from "./copyJob"
 
 // Pure reads of a copy job's progress, for whatever surface shows it.
 
 type AnyCopyJob = CopyJob<unknown, unknown, unknown, unknown>
-
-// The files in flight count too, so progress moves with each chunk rather than only as whole files
-// finish.
-export function effectiveBytesDone(
-	counts: Pick<CopyJobCounts, "bytesDone">,
-	active: readonly Pick<CopyJobActiveFile, "bytesDone">[]
-): number {
-	let bytes = counts.bytesDone
-
-	for (const file of active) {
-		bytes += file.bytesDone
-	}
-
-	return bytes
-}
 
 export function isCopyJobRunning(job: AnyCopyJob): boolean {
 	return job.outcome.status === "running"
@@ -34,7 +19,7 @@ export function copyJobPercent(job: AnyCopyJob): number | null {
 		return null
 	}
 
-	return clampedRatio(effectiveBytesDone(job.counts, job.active), job.totals.bytes, 100)
+	return clampedRatio(job.counts.bytesDone, job.totals.bytes, 100)
 }
 
 // Speed and time left only mean something while bytes are moving.

@@ -253,7 +253,8 @@ describe("runCopyJob", () => {
 		expect(job?.created.map(item => item.data.uuid)).toEqual([dir.uuid])
 	})
 
-	it("counts the files in flight in the row's progress", async () => {
+	// The SDK's bytesDone already includes in-flight chunks; adding the active files again doubled it.
+	it("counts in-flight bytes once in the row's progress", async () => {
 		const deps = makeDeps()
 
 		deps.copyItems.mockImplementation((_id, _items, _dest, _max, onEvent) => {
@@ -267,7 +268,7 @@ describe("runCopyJob", () => {
 				})
 			})
 
-			expect(row()).toMatchObject({ size: 200, bytesTransferred: 80 })
+			expect(row()).toMatchObject({ size: 200, bytesTransferred: 50 })
 
 			return Promise.resolve(report())
 		})

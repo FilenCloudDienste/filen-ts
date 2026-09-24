@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { copyJobPercent, copyJobRate, createCopyJob, effectiveBytesDone, isCopyJobRunning, type CopyJob } from "@filen/shared"
+import { copyJobPercent, copyJobRate, createCopyJob, isCopyJobRunning, type CopyJob } from "@filen/shared"
 
 type Job = CopyJob<unknown, unknown, unknown, unknown>
 
@@ -13,29 +13,20 @@ function active(bytesDone: number) {
 	return { destUuid: "d", name: "x", size: 500, bytesDone }
 }
 
-describe("effectiveBytesDone", () => {
-	it("adds the files in flight to the finished bytes", () => {
-		expect(effectiveBytesDone({ bytesDone: 100 }, [active(20), active(30)])).toBe(150)
-	})
-
-	it("is the finished bytes with nothing in flight", () => {
-		expect(effectiveBytesDone({ bytesDone: 100 }, [])).toBe(100)
-	})
-})
-
 describe("copyJobPercent", () => {
 	it("is indeterminate while the scan still grows the total", () => {
 		expect(copyJobPercent(job())).toBeNull()
 		expect(copyJobPercent(job({ phase: "copyingFiles" }))).toBeNull()
 	})
 
-	it("is the share of bytes copied once the total is known, the files in flight included", () => {
+	// The SDK's bytesDone already counts each chunk as it uploads; the in-flight files are not added again.
+	it("is the share of bytes copied once the total is known, in-flight chunks counted once", () => {
 		expect(copyJobPercent(job({ ...COPYING, counts: { ...job().counts, bytesDone: 250 } }))).toBe(25)
-		expect(copyJobPercent(job({ ...COPYING, counts: { ...job().counts, bytesDone: 250 }, active: [active(50)] }))).toBe(30)
+		expect(copyJobPercent(job({ ...COPYING, counts: { ...job().counts, bytesDone: 250 }, active: [active(50)] }))).toBe(25)
 	})
 
 	it("never passes 100", () => {
-		expect(copyJobPercent(job({ ...COPYING, counts: { ...job().counts, bytesDone: 900 }, active: [active(400)] }))).toBe(100)
+		expect(copyJobPercent(job({ ...COPYING, counts: { ...job().counts, bytesDone: 1_300 } }))).toBe(100)
 	})
 
 	it("is full once done, and frozen where a stopped copy left off", () => {

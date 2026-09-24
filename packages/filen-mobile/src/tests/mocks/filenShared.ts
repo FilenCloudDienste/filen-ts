@@ -92,7 +92,6 @@ export const {
 	settleCopyJob,
 	isQuotaPreflightFailure,
 	copyMaxBytes,
-	effectiveBytesDone,
 	copyJobPercent,
 	isCopyJobRunning,
 	copyJobRate,

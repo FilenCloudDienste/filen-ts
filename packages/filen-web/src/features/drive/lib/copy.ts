@@ -5,7 +5,6 @@ import {
 	applyCopyUpdate,
 	copyMaxBytes,
 	driveItemName,
-	effectiveBytesDone,
 	formatBytes,
 	isQuotaPreflightFailure,
 	settleCopyJob,
@@ -190,7 +189,7 @@ export async function runCopyJob(deps: RunCopyDeps, request: CopyJobRequest): Pr
 			deps.transfers.setSize(id, rowSize)
 		}
 
-		deps.transfers.setProgress(id, effectiveBytesDone(job.counts, job.active))
+		deps.transfers.setProgress(id, job.counts.bytesDone)
 	}
 
 	const cancelRequested = (): boolean => deps.jobs.get(id)?.cancelRequest != null
