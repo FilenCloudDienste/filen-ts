@@ -1,4 +1,4 @@
-import { useQuery, type UseQueryResult } from "@tanstack/react-query"
+import { useQuery, type Query, type UseQueryResult } from "@tanstack/react-query"
 import type { UserInfo } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
 import { queryClient } from "@/queries/client"
@@ -55,11 +55,17 @@ export function useAccountQuery(): UseQueryResult<UserInfo> {
 // Counts this tab's writes to the cached account, patches and stale marks alike.
 let accountWrites = 0
 
+// One lookup by the key's hash: find(), cancelQueries and invalidateQueries each copy and re-hash the
+// whole query cache, and an upload batch writes once per file.
+function accountQuery(): Query<UserInfo> | undefined {
+	return queryClient.getQueryCache().get<UserInfo>(queryClient.defaultQueryOptions({ queryKey: ACCOUNT_QUERY_KEY }).queryHash)
+}
+
 // A read in flight may have been answered before this tab's write and would land over it. Not an
 // initial fetch: cancelling that would strand the query on its loading state with nothing to show.
-function cancelInFlightIfCached(): void {
-	if (queryClient.getQueryData(ACCOUNT_QUERY_KEY) !== undefined) {
-		void queryClient.cancelQueries({ queryKey: ACCOUNT_QUERY_KEY })
+function cancelInFlightIfCached(query: Query<UserInfo>): void {
+	if (query.state.data !== undefined) {
+		void query.cancel({ revert: true })
 	}
 }
 
@@ -68,23 +74,36 @@ function cancelInFlightIfCached(): void {
 // per write during a many-file batch.
 export function markAccountStale(): void {
 	accountWrites++
-	cancelInFlightIfCached()
-	void queryClient.invalidateQueries({ queryKey: ACCOUNT_QUERY_KEY, refetchType: "none" })
+
+	const query = accountQuery()
+
+	if (query === undefined) {
+		return
+	}
+
+	cancelInFlightIfCached(query)
+	query.invalidate()
 }
 
 // Confirm-then-patch for a write whose whole effect is known locally. A cache miss is left alone: the
 // first read will carry the write. setQueryData marks the account fresh, dropping a pending refresh
 // and the read cancelled above; left unrestored, the change behind them would wait out the stale time.
 export function accountQueryUpdate(updater: (prev: UserInfo) => UserInfo): void {
-	const query = queryClient.getQueryCache().find({ queryKey: ACCOUNT_QUERY_KEY, exact: true })
-	const refreshPending = query !== undefined && (query.state.isInvalidated || query.state.fetchStatus !== "idle")
-
 	accountWrites++
-	cancelInFlightIfCached()
+
+	const query = accountQuery()
+
+	if (query?.state.data === undefined) {
+		return
+	}
+
+	const refreshPending = query.state.isInvalidated || query.state.fetchStatus !== "idle"
+
+	cancelInFlightIfCached(query)
 	queryClient.setQueryData<UserInfo>(ACCOUNT_QUERY_KEY, prev => (prev === undefined ? prev : updater(prev)))
 
-	if (refreshPending && queryClient.getQueryData(ACCOUNT_QUERY_KEY) !== undefined) {
-		void queryClient.invalidateQueries({ queryKey: ACCOUNT_QUERY_KEY, refetchType: "none" })
+	if (refreshPending) {
+		query.invalidate()
 	}
 }
 

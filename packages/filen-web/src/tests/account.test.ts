@@ -7,7 +7,8 @@ const { getUserInfo } = vi.hoisted(() => ({ getUserInfo: vi.fn<() => Promise<Use
 
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: { getUserInfo } }))
 
-import { fetchAccount, ACCOUNT_QUERY_KEY } from "@/queries/account"
+import { queryClient } from "@/queries/client"
+import { accountQueryUpdate, fetchAccount, markAccountStale, ACCOUNT_QUERY_KEY } from "@/queries/account"
 
 describe("account query", () => {
 	it("queryKey is the stable, exact tuple every consumer imports", () => {
@@ -28,5 +29,31 @@ describe("account query", () => {
 		getUserInfo.mockRejectedValueOnce(error)
 
 		await expect(fetchAccount()).rejects.toBe(error)
+	})
+})
+
+// An upload batch writes the account once per file.
+describe("account writes", () => {
+	it("find the cached account by its key's hash, never by scanning the query cache", () => {
+		queryClient.clear()
+		queryClient.setQueryData(ACCOUNT_QUERY_KEY, { storageUsed: 1n })
+
+		for (let i = 0; i < 20; i++) {
+			queryClient.setQueryData(["other", i], i)
+		}
+
+		const scan = vi.spyOn(queryClient.getQueryCache(), "getAll")
+
+		accountQueryUpdate(prev => ({ ...prev, storageUsed: prev.storageUsed + 1n }))
+		markAccountStale()
+		accountQueryUpdate(prev => ({ ...prev, storageUsed: prev.storageUsed + 1n }))
+
+		expect(scan).not.toHaveBeenCalled()
+		expect(queryClient.getQueryData<UserInfo>(ACCOUNT_QUERY_KEY)?.storageUsed).toBe(3n)
+		// The patch after the mark keeps it.
+		expect(queryClient.getQueryState(ACCOUNT_QUERY_KEY)?.isInvalidated).toBe(true)
+
+		scan.mockRestore()
+		queryClient.clear()
 	})
 })
