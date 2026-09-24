@@ -1,4 +1,4 @@
-import { type Query, type QueryCache } from "@tanstack/react-query"
+import { type Query, type QueryCache, type QueryKey } from "@tanstack/react-query"
 import useSocketStore from "@/stores/useSocket.store"
 
 /**
@@ -15,8 +15,8 @@ export function readStartedInCurrentSocketSession(startedAt: number): boolean {
 
 // When each query's last server read began. dataUpdatedAt can't answer this: every setQueryData
 // patch and restored row restamps it. Keyed by the Query object, so an entry goes with its query.
-const readStartedAt = new WeakMap<Query, number>()
-const pendingReadStartedAt = new WeakMap<Query, number>()
+const readStartedAt = new WeakMap<object, number>()
+const pendingReadStartedAt = new WeakMap<object, number>()
 
 /**
  * Records server reads from the cache's own events: a fetch start, then its non-manual success. The
@@ -64,7 +64,10 @@ export function trackServerReads(queryCache: QueryCache): () => void {
 // A cached value a mount can trust as-is: read by its query during the current socket session, not
 // invalidated since, not errored, and (for data some changes of which no socket event carries) no
 // older than maxAgeMs.
-export function queryReadInCurrentSocketSession(query: Query, maxAgeMs?: number): boolean {
+export function queryReadInCurrentSocketSession<TQueryFnData, TError, TData, TQueryKey extends QueryKey>(
+	query: Query<TQueryFnData, TError, TData, TQueryKey>,
+	maxAgeMs?: number
+): boolean {
 	const startedAt = readStartedAt.get(query)
 
 	return (
@@ -80,6 +83,8 @@ export function queryReadInCurrentSocketSession(query: Query, maxAgeMs?: number)
  * refetchOnMount for a query the socket patches: a mount reuses a read from the current socket
  * session and reads otherwise. Reconnect refetches (refetchOnReconnect) are untouched.
  */
-export function socketCoveredRefetchOnMount(maxAgeMs?: number): (query: Query) => boolean | "always" {
+export function socketCoveredRefetchOnMount(
+	maxAgeMs?: number
+): <TQueryFnData, TError, TData, TQueryKey extends QueryKey>(query: Query<TQueryFnData, TError, TData, TQueryKey>) => boolean | "always" {
 	return query => (queryReadInCurrentSocketSession(query, maxAgeMs) ? false : "always")
 }
