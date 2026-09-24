@@ -36,6 +36,7 @@ import logger from "@/lib/logger"
 import { queryClientPersisterKv } from "@/queries/client"
 import driveSearch from "@/features/drive/driveSearch"
 import drive from "@/features/drive/drive"
+import useDriveClipboardStore from "@/features/drive/store/useDriveClipboard.store"
 import events from "@/lib/events"
 import { reloadAppAsync } from "expo"
 import { isEqual } from "es-toolkit"
@@ -475,6 +476,9 @@ class Auth {
 		} catch (e) {
 			logger.error("auth", "in-memory cache clear failed during logout", { err: e })
 		}
+
+		// The drive clipboard holds decrypted items of this account.
+		useDriveClipboardStore.getState().clear()
 
 		// Session-cached root uuid must not leak into the next account's session.
 		try {

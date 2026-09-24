@@ -7,6 +7,7 @@ import { confirmedDriveAction } from "@/features/drive/components/item/menuActio
 import { notifyIfNameIsHidden } from "@/features/drive/components/hiddenNameNotice"
 import { buildUndecryptableMenuButtons } from "@/features/drive/components/item/menuActionsUndecryptable"
 import { buildDownloadSubButtons, buildExportButton, buildOpenWithButton } from "@/features/drive/components/item/menuActionsDownload"
+import { buildCopyMenuButton, offersCopy } from "@/features/drive/components/item/menuActionsCopy"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import prompts from "@/lib/prompts"
 import { run } from "@filen/shared"
@@ -74,7 +75,13 @@ export function createMenuButtons({
 		drivePath
 	})
 
-	const isOwner = !(drivePath.type === "sharedIn")
+	const offersMove =
+		(item.type === "file" || item.type === "directory") &&
+		(drivePath.type === "drive" ||
+			drivePath.type === "sharedOut" ||
+			drivePath.type === "favorites" ||
+			drivePath.type === "links" ||
+			drivePath.type === "recents")
 
 	// Bulk-selection entry: the row's Menu owns iOS long-press (contextmenu),
 	// so we can't add an onLongPress to the inner Pressable. The Menu's
@@ -147,7 +154,6 @@ export function createMenuButtons({
 		isStoredOffline,
 		parentForOfflineStorage,
 		previewType,
-		isOwner,
 		t
 	})
 
@@ -332,7 +338,7 @@ export function createMenuButtons({
 			}
 		})
 
-		if (drivePath.type !== "photos") {
+		if (offersMove) {
 			menuButtons.push({
 				id: "move",
 				requiresOnline: true,
@@ -364,6 +370,17 @@ export function createMenuButtons({
 				}
 			})
 		}
+	}
+
+	if (offersCopy(drivePath)) {
+		menuButtons.push(
+			buildCopyMenuButton({
+				items: [item],
+				withCut: offersMove,
+				bulk: false,
+				t
+			})
+		)
 	}
 
 	if (

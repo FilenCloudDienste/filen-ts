@@ -35,7 +35,6 @@ export function buildDownloadSubButtons({
 	isStoredOffline,
 	parentForOfflineStorage,
 	previewType,
-	isOwner,
 	t
 }: {
 	item: DriveItem
@@ -43,7 +42,6 @@ export function buildDownloadSubButtons({
 	isStoredOffline: boolean
 	parentForOfflineStorage: OfflineParent | null
 	previewType: PreviewType | null
-	isOwner: boolean
 	t: TFunction
 }): MenuButton[] {
 	const downloadSubButtons: MenuButton[] = []
@@ -217,7 +215,8 @@ export function buildDownloadSubButtons({
 			item.type === "sharedDirectory" ||
 			item.type === "sharedRootDirectory") &&
 		item.data.decryptedMeta &&
-		(!isOwner || drivePath.type === "linked")
+		// Shared-in items are copied server-side through the Copy submenu instead.
+		drivePath.type === "linked"
 	) {
 		downloadSubButtons.push({
 			id: "import",

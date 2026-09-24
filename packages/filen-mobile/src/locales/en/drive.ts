@@ -316,6 +316,10 @@ export const drive = {
 	edit_public_link: "Edit public link",
 	/** Per-item context menu (links screen): copy the public link URL to the clipboard */
 	copy_link: "Copy link",
+	/** Copy submenu (item and bulk menus): mark the items to be moved by a later paste */
+	cut: "Cut",
+	/** Copy submenu (item and bulk menus): pick a directory and copy the items into it */
+	copy_to: "Copy to…",
 	/** Per-item context menu: view file version history */
 	versions: "Versions",
 	/** Per-item context menu: change the directory icon color */

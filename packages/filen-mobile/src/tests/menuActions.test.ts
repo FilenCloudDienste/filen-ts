@@ -615,7 +615,6 @@ describe("buildDownloadSubButtons (#35)", () => {
 		isStoredOffline: false,
 		parentForOfflineStorage: null as OfflineParent | null,
 		previewType: null as PreviewType | null,
-		isOwner: true,
 		t
 	}
 
@@ -875,46 +874,45 @@ describe("buildDownloadSubButtons (#35)", () => {
 	})
 
 	describe("import gating", () => {
-		it("includes import when isOwner=false (non-owned item)", () => {
+		it("includes import in a linked view", () => {
 			const buttons = buildDownloadSubButtons({
 				...baseDownloadArgs,
 				item: makeFile({ name: "file.txt" }),
-				isOwner: false
+				drivePath: makeDrivePath("linked")
 			})
 			const ids = buttons.map(b => b.id)
 
 			expect(ids).toContain("import")
 		})
 
-		it("includes import when drivePath.type='linked' even when isOwner=true", () => {
-			const buttons = buildDownloadSubButtons({
-				...baseDownloadArgs,
-				item: makeFile({ name: "file.txt" }),
-				drivePath: makeDrivePath("linked"),
-				isOwner: true
-			})
-			const ids = buttons.map(b => b.id)
+		it("omits import for shared-in items (the Copy submenu replaces it)", () => {
+			for (const item of [makeSharedFile(), makeDirectory()]) {
+				const buttons = buildDownloadSubButtons({
+					...baseDownloadArgs,
+					item,
+					drivePath: makeDrivePath("sharedIn")
+				})
 
-			expect(ids).toContain("import")
+				expect(buttons.map(b => b.id)).not.toContain("import")
+			}
 		})
 
-		it("omits import when isOwner=true and drivePath.type='drive'", () => {
+		it("omits import in the own drive", () => {
 			const buttons = buildDownloadSubButtons({
 				...baseDownloadArgs,
 				item: makeFile({ name: "file.txt" }),
-				drivePath: makeDrivePath("drive"),
-				isOwner: true
+				drivePath: makeDrivePath("drive")
 			})
 			const ids = buttons.map(b => b.id)
 
 			expect(ids).not.toContain("import")
 		})
 
-		it("omits import when decryptedMeta is null even for non-owner", () => {
+		it("omits import when decryptedMeta is null even in a linked view", () => {
 			const buttons = buildDownloadSubButtons({
 				...baseDownloadArgs,
 				item: makeFile(null),
-				isOwner: false
+				drivePath: makeDrivePath("linked")
 			})
 			const ids = buttons.map(b => b.id)
 
@@ -923,13 +921,12 @@ describe("buildDownloadSubButtons (#35)", () => {
 	})
 
 	describe("empty result", () => {
-		it("returns [] when decryptedMeta=null and no offline parent and isOwner=true", () => {
+		it("returns [] when decryptedMeta=null and no offline parent", () => {
 			const buttons = buildDownloadSubButtons({
 				...baseDownloadArgs,
 				item: makeFile(null),
 				parentForOfflineStorage: null,
-				previewType: null,
-				isOwner: true
+				previewType: null
 			})
 
 			expect(buttons).toHaveLength(0)
@@ -970,11 +967,10 @@ describe("import flow partial-transfer honesty (C1)", () => {
 	type UploadResult = Awaited<ReturnType<typeof transfers.upload>>
 
 	const importArgs = {
-		drivePath: makeDrivePath("drive"),
+		drivePath: makeDrivePath("linked"),
 		isStoredOffline: false,
 		parentForOfflineStorage: null as OfflineParent | null,
 		previewType: null as PreviewType | null,
-		isOwner: false,
 		t
 	}
 

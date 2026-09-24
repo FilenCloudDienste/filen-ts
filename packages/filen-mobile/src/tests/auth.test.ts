@@ -277,6 +277,7 @@ vi.mock("expo", () => ({
 }))
 
 import auth from "@/lib/auth"
+import useDriveClipboardStore from "@/features/drive/store/useDriveClipboard.store"
 
 type AuthInternals = {
 	logoutPromise: Promise<void> | null
@@ -356,6 +357,17 @@ describe("auth.logout", () => {
 		const reloadIdx = callLog.indexOf("reloadAppAsync")
 
 		expect(reloadIdx).toBeGreaterThan(secureClearIdx)
+	})
+
+	it("empties the drive clipboard", async () => {
+		useDriveClipboardStore.getState().set({ mode: "cut", items: [{ type: "file", data: { uuid: "f1" } } as never] })
+
+		const promise = auth.logout()
+
+		await vi.runAllTimersAsync()
+		await promise
+
+		expect(useDriveClipboardStore.getState().entry).toBeNull()
 	})
 
 	it("removes auth secret before reloading the app", async () => {

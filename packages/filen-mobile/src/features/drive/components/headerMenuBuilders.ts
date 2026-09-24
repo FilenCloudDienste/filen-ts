@@ -24,6 +24,7 @@ import { runBulk } from "@/lib/bulkOps"
 import { type DriveSelectionFlags } from "@/features/drive/driveSelectors"
 import { downloadDriveItemToDevice } from "@/features/drive/driveDownload"
 import { selectContacts } from "@/features/contacts/contactsSelect"
+import { buildCopyMenuButton, offersCopy } from "@/features/drive/components/item/menuActionsCopy"
 import logger from "@/lib/logger"
 
 export function buildSortMenuButton(current: SortByType, setSort: (next: SortByType) => void, t: TFunction): MenuButton {
@@ -211,19 +212,20 @@ export function buildBulkActionMenu({
 		})
 	}
 
-	// Move — modify (location) comes before output (download/share).
-	// driveSelectToolbar already handles `Promise.all` over the items
-	// it receives, so the bulk handler just opens the picker with all
-	// selected items. useFocusEffect on Drive clears selection when
-	// we return.
-	if (
+	const offersMove =
 		!hasUndecryptable &&
 		(drivePath.type === "drive" ||
 			drivePath.type === "favorites" ||
 			drivePath.type === "sharedOut" ||
 			drivePath.type === "links" ||
 			drivePath.type === "recents")
-	) {
+
+	// Move — modify (location) comes before output (download/share).
+	// driveSelectToolbar already handles `Promise.all` over the items
+	// it receives, so the bulk handler just opens the picker with all
+	// selected items. useFocusEffect on Drive clears selection when
+	// we return.
+	if (offersMove) {
 		menuButtons.push({
 			id: "bulkMove",
 			title: t("move_selected"),
@@ -254,6 +256,18 @@ export function buildBulkActionMenu({
 				})
 			}
 		})
+	}
+
+	if (!hasUndecryptable && offersCopy(drivePath)) {
+		menuButtons.push(
+			buildCopyMenuButton({
+				items: selectedDriveItems,
+				withCut: offersMove,
+				bulk: true,
+				onDone: () => useDriveStore.getState().clearSelectedItems(),
+				t
+			})
+		)
 	}
 
 	// Download to device — applies to every read-capable variant.

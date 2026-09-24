@@ -3,10 +3,11 @@ vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 
 // ---- hoist mutable mocks so they are available inside vi.mock factories ----
 
-const { mockIsItemStoredSync, mockIsItemTopLevelStoredSync, mockActionSheetShow } = vi.hoisted(() => ({
+const { mockIsItemStoredSync, mockIsItemTopLevelStoredSync, mockActionSheetShow, mockClearSelectedItems } = vi.hoisted(() => ({
 	mockIsItemStoredSync: vi.fn(),
 	mockIsItemTopLevelStoredSync: vi.fn(),
-	mockActionSheetShow: vi.fn()
+	mockActionSheetShow: vi.fn(),
+	mockClearSelectedItems: vi.fn()
 }))
 
 // ---- heavy native deps that must be stubbed before the module under test loads ----
@@ -51,7 +52,7 @@ vi.mock("@/features/drive/drive", () => ({
 }))
 
 vi.mock("@/features/drive/store/useDrive.store", () => ({
-	default: { getState: vi.fn(() => ({ clearSelectedItems: vi.fn() })) }
+	default: { getState: vi.fn(() => ({ clearSelectedItems: mockClearSelectedItems })) }
 }))
 
 vi.mock("@/features/drive/driveSelectors", () => ({}))
@@ -76,11 +77,16 @@ vi.mock("@/hooks/useMediaPermissions", () => ({
 }))
 
 vi.mock("@/features/contacts/contactsSelect", () => ({ selectContacts: vi.fn() }))
+vi.mock("@/features/drive/screens/driveSelect", () => ({ selectCopyDestination: vi.fn() }))
+vi.mock("@/features/copy/copyRunner", () => ({ default: { start: vi.fn(() => "job-1") } }))
 
 // ---- imports after mocks ----
 
 import { buildSortMenuButton, buildBulkActionMenu, buildViewModeMenuButton } from "@/features/drive/components/headerMenuBuilders"
 import { Platform } from "react-native"
+import { selectCopyDestination } from "@/features/drive/screens/driveSelect"
+import copyRunner from "@/features/copy/copyRunner"
+import useDriveClipboardStore from "@/features/drive/store/useDriveClipboard.store"
 import type { DrivePath } from "@/hooks/useDrivePath"
 import type { DriveItem } from "@/types"
 import type { DriveSelectionFlags } from "@/features/drive/driveSelectors"
@@ -933,7 +939,7 @@ describe("buildBulkActionMenu", () => {
 
 	// --- overall button-ordering sanity for drive variant ---
 
-	it("type='drive' button order: bulkFavorite, bulkMove, bulkDownload, bulkShareFilenUser, bulkMakeOffline, bulkTrash", () => {
+	it("type='drive' button order: bulkFavorite, bulkMove, bulkCopyMenu, bulkDownload, bulkShareFilenUser, bulkMakeOffline, bulkTrash", () => {
 		mockIsItemStoredSync.mockReturnValue(false)
 		mockIsItemTopLevelStoredSync.mockReturnValue(false)
 
@@ -947,7 +953,83 @@ describe("buildBulkActionMenu", () => {
 			})
 		)
 
-		expect(ids).toEqual(["bulkFavorite", "bulkMove", "bulkDownload", "bulkShareFilenUser", "bulkMakeOffline", "bulkTrash"])
+		expect(ids).toEqual(["bulkFavorite", "bulkMove", "bulkCopyMenu", "bulkDownload", "bulkShareFilenUser", "bulkMakeOffline", "bulkTrash"])
+	})
+
+	// --- Copy submenu ---
+
+	function copySubIds(type: DrivePath["type"], flags: Partial<DriveSelectionFlags> = {}): string[] | undefined {
+		return buildBulkActionMenu({
+			drivePath: makeDrivePath(type),
+			selectedDriveItems: selectedItems,
+			liveItems,
+			driveFlags: makeFlags(flags),
+			t: t as never
+		})
+			.find(b => b.id === "bulkCopyMenu")
+			?.subButtons?.map(b => b.id)
+	}
+
+	it("offers Copy with Cut exactly where bulk Move is", () => {
+		for (const type of ["drive", "favorites", "recents", "sharedOut", "links"] as const) {
+			expect(copySubIds(type)).toEqual(["bulkCopyToClipboard", "bulkCutToClipboard", "bulkCopyTo"])
+		}
+
+		for (const type of ["sharedIn", "offline", "photos"] as const) {
+			expect(copySubIds(type)).toEqual(["bulkCopyToClipboard", "bulkCopyTo"])
+		}
+	})
+
+	it("offers no Copy in the trash, link views or with an undecryptable item selected", () => {
+		expect(copySubIds("trash")).toBeUndefined()
+		expect(copySubIds("linked")).toBeUndefined()
+		expect(copySubIds("drive", { includesUndecryptable: true })).toBeUndefined()
+	})
+
+	it("bulk Copy puts the whole selection on the clipboard and clears the selection", () => {
+		const items = [makeFileItem("a"), makeFileItem("b")]
+		const copyMenu = buildBulkActionMenu({
+			drivePath: makeDrivePath("drive"),
+			selectedDriveItems: items,
+			liveItems,
+			driveFlags: makeFlags({ count: 2 }),
+			t: t as never
+		}).find(b => b.id === "bulkCopyMenu")
+
+		mockClearSelectedItems.mockClear()
+		copyMenu?.subButtons?.find(b => b.id === "bulkCutToClipboard")?.onPress?.()
+
+		expect(useDriveClipboardStore.getState().entry).toEqual({ mode: "cut", items })
+		expect(mockClearSelectedItems).toHaveBeenCalledTimes(1)
+
+		useDriveClipboardStore.getState().clear()
+	})
+
+	it("bulk 'Copy to…' starts ONE copy job for the whole selection", async () => {
+		const items = [makeFileItem("a"), makeFileItem("b"), makeFileItem("c")]
+		const picked = { destinationDir: { tag: "Dir" }, destination: { uuid: "dest", name: "Dest" } }
+
+		vi.mocked(selectCopyDestination).mockResolvedValueOnce(picked as never)
+		vi.mocked(copyRunner.start).mockClear()
+		mockClearSelectedItems.mockClear()
+
+		const copyTo = buildBulkActionMenu({
+			drivePath: makeDrivePath("sharedIn"),
+			selectedDriveItems: items,
+			liveItems,
+			driveFlags: makeFlags({ count: 3 }),
+			t: t as never
+		})
+			.find(b => b.id === "bulkCopyMenu")
+			?.subButtons?.find(b => b.id === "bulkCopyTo")
+
+		expect(copyTo?.requiresOnline).toBe(true)
+
+		await copyTo?.onPress?.()
+
+		expect(copyRunner.start).toHaveBeenCalledTimes(1)
+		expect(copyRunner.start).toHaveBeenCalledWith({ items, ...picked })
+		expect(mockClearSelectedItems).toHaveBeenCalledTimes(1)
 	})
 
 	// --- #28: includesUndecryptable gates meta-requiring bulk ops ---

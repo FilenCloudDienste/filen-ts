@@ -62,6 +62,9 @@ export type Icons =
 	| "checkmark"
 	| "queue"
 	| "block"
+	| "copyItems"
+	| "cut"
+	| "copyTo"
 
 export function iconToSwiftUiIcon(name: Icons, fill?: boolean): React.ComponentPropsWithoutRef<typeof SwiftUiImage>["systemName"] {
 	switch (name) {
@@ -311,6 +314,19 @@ export function iconToSwiftUiIcon(name: Icons, fill?: boolean): React.ComponentP
 
 		case "block": {
 			return "nosign"
+		}
+
+		// Drive's item Copy; "copy" (doc.on.clipboard) stays Copy link's, and both sit in the same menu.
+		case "copyItems": {
+			return fill ? "doc.on.doc.fill" : "doc.on.doc"
+		}
+
+		case "cut": {
+			return "scissors"
+		}
+
+		case "copyTo": {
+			return fill ? "folder.fill.badge.plus" : "folder.badge.plus"
 		}
 	}
 }
