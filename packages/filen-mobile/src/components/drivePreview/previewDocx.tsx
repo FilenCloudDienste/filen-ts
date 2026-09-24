@@ -6,6 +6,8 @@ import { useShallow } from "zustand/shallow"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import useFileUriQuery from "@/queries/useFileUri.query"
+import { isUnavailableOffline } from "@/components/drivePreview/previewAvailability"
+import useIsOnline from "@/hooks/useIsOnline"
 import useRangeSource from "@/hooks/useRangeSource"
 import { ZIP_MAGIC } from "@/lib/rangeTransfer"
 import { ActivityIndicator } from "react-native"
@@ -18,6 +20,7 @@ const PreviewDocx = ({ item }: { item: GalleryItemTagged }) => {
 	const { t } = useTranslation()
 	const headerHeight = useDrivePreviewStore(useShallow(state => state.headerHeight))
 	const insets = useSafeAreaInsets()
+	const isOnline = useIsOnline()
 
 	const query = useFileUriQuery(
 		item.type === "external"
@@ -56,7 +59,7 @@ const PreviewDocx = ({ item }: { item: GalleryItemTagged }) => {
 		)
 	}
 
-	if (query.status !== "success" && query.fetchStatus === "paused") {
+	if (isUnavailableOffline(query, isOnline)) {
 		return (
 			<View className="bg-background flex-1 items-center justify-center px-8">
 				<Ionicons

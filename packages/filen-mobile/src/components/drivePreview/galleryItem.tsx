@@ -37,6 +37,7 @@ const GalleryItem = ({
 	const isActive = useDrivePreviewStore(useShallow(state => state.currentIndex === info.index))
 
 	const previewType = getPreviewType(info.item.type === "drive" ? (info.item.data.data.decryptedMeta?.name ?? "") : info.item.data.name)
+	const rendersFromUrl = previewType === "image" || previewType === "video"
 
 	const fileUrlQuery = useFileUrlQuery(
 		info.item.type === "drive"
@@ -57,10 +58,10 @@ const GalleryItem = ({
 					}
 				},
 		{
-			// A RAW file's bytes are never rendered (PreviewRawImage shows the SDK-extracted JPEG):
-			// resolving a URL for them would block on the HTTP provider and report "unavailable
-			// offline" even when a preview is cached.
-			enabled: previewType !== "rawImage"
+			// Only image and video render from a URL. Every other type reads its own bytes (audio
+			// resolves its URL once its tags have pulled the file local), so resolving one here would
+			// only hold that read back behind an HTTP-provider wait.
+			enabled: rendersFromUrl
 		}
 	)
 
@@ -96,11 +97,11 @@ const GalleryItem = ({
 	// Resolver succeeded but produced no URL — happens when the device is
 	// offline AND the item is in neither the offline store nor the file cache.
 	// Render an explicit "unavailable offline" state instead of an indefinite spinner.
-	if (fileUrlQuery.status === "success" && fileUrl === null && previewType !== "unknown") {
+	if (rendersFromUrl && fileUrlQuery.status === "success" && fileUrl === null) {
 		return <UnavailableOfflineNotice style={itemStyle} />
 	}
 
-	if (!fileUrl || previewType === "unknown" || previewType === "rawImage") {
+	if (previewType === "unknown" || previewType === "rawImage" || (rendersFromUrl && fileUrl === null)) {
 		return (
 			<View
 				className="bg-transparent"
@@ -118,6 +119,10 @@ const GalleryItem = ({
 
 	switch (previewType) {
 		case "image": {
+			if (fileUrl === null) {
+				return null
+			}
+
 			return (
 				<View
 					className="bg-transparent"
@@ -190,6 +195,10 @@ const GalleryItem = ({
 		}
 
 		case "video": {
+			if (fileUrl === null) {
+				return null
+			}
+
 			return (
 				<View
 					className="bg-transparent"
@@ -212,10 +221,7 @@ const GalleryItem = ({
 					style={itemStyle}
 				>
 					<PreviewSlot isActive={isActive}>
-						<PreviewAudio
-							item={info.item}
-							fileUrl={fileUrl}
-						/>
+						<PreviewAudio item={info.item} />
 					</PreviewSlot>
 				</View>
 			)

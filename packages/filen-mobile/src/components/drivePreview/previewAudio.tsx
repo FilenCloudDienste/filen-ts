@@ -7,6 +7,11 @@ import { PressableScale } from "@/components/ui/pressables"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import { type TextStyle, useWindowDimensions, ActivityIndicator } from "react-native"
 import useAudioMetadataQuery from "@/features/audio/queries/useAudioMetadata.query"
+import useFileUrlQuery from "@/queries/useFileUrl.query"
+import { type FileSource } from "@/queries/fileSource"
+import useIsOnline from "@/hooks/useIsOnline"
+import UnavailableOfflineNotice from "@/components/drivePreview/unavailableOfflineNotice"
+import { isUnavailableOffline } from "@/components/drivePreview/previewAvailability"
 import { ImageBackground, Image } from "@/components/ui/image"
 import { useResolveClassNames } from "uniwind"
 import { Gesture, GestureDetector } from "react-native-gesture-handler"
@@ -444,15 +449,17 @@ const PreviewAudioInner = ({ item, metadata, fileUrl }: { item: GalleryItemTagge
 	)
 }
 
-const PreviewAudio = ({ item, fileUrl }: { item: GalleryItemTagged; fileUrl: string }) => {
+const PreviewAudio = ({ item }: { item: GalleryItemTagged }) => {
 	const { t } = useTranslation()
-	const audioMetadataQuery = useAudioMetadataQuery(
+	const dimensions = useWindowDimensions()
+	const isOnline = useIsOnline()
+	const source: FileSource =
 		item.type === "drive"
 			? {
 					type: "drive",
 					data: {
 						uuid: item.data.data.uuid,
-						// By-value so a cross-directory search hit resolves its metadata.
+						// By-value so a cross-directory search hit resolves its metadata and bytes.
 						item: item.data
 					}
 				}
@@ -463,7 +470,24 @@ const PreviewAudio = ({ item, fileUrl }: { item: GalleryItemTagged; fileUrl: str
 						name: item.data.name
 					}
 				}
-	)
+	const audioMetadataQuery = useAudioMetadataQuery(source)
+	// Resolved only once the tags are read: reading them pulls an uncached file into the file cache,
+	// which this URL then prefers, so playback reuses those bytes instead of streaming them again.
+	// Resolved after, never swapped: the player's source is fixed for its lifetime.
+	const fileUrlQuery = useFileUrlQuery(source, {
+		enabled: audioMetadataQuery.status === "success"
+	})
+
+	if (isUnavailableOffline(audioMetadataQuery, isOnline) || (fileUrlQuery.status === "success" && fileUrlQuery.data === null)) {
+		return (
+			<UnavailableOfflineNotice
+				style={{
+					width: dimensions.width,
+					height: dimensions.height
+				}}
+			/>
+		)
+	}
 
 	if (audioMetadataQuery.status === "error") {
 		return (
@@ -485,7 +509,7 @@ const PreviewAudio = ({ item, fileUrl }: { item: GalleryItemTagged; fileUrl: str
 		)
 	}
 
-	if (audioMetadataQuery.status !== "success") {
+	if (audioMetadataQuery.status !== "success" || fileUrlQuery.status !== "success" || fileUrlQuery.data === null) {
 		return (
 			<View className="bg-transparent flex-1 items-center justify-center">
 				<ActivityIndicator
@@ -500,7 +524,7 @@ const PreviewAudio = ({ item, fileUrl }: { item: GalleryItemTagged; fileUrl: str
 		<PreviewAudioInner
 			item={item}
 			metadata={audioMetadataQuery.data}
-			fileUrl={fileUrl}
+			fileUrl={fileUrlQuery.data}
 		/>
 	)
 }

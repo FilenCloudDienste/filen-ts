@@ -23,6 +23,7 @@ import { AnyDirWithContext_Tags } from "@filen/sdk-rs"
 import { type GalleryItemTagged, galleryItemKey } from "@/components/drivePreview/gallery"
 import useEditableTarget from "@/components/drivePreview/useEditableTarget"
 import PreviewLoadFailedNotice from "@/components/drivePreview/previewLoadFailedNotice"
+import { isUnavailableOffline } from "@/components/drivePreview/previewAvailability"
 import useIsOnline from "@/hooks/useIsOnline"
 import logger from "@/lib/logger"
 import type { File } from "expo-file-system"
@@ -247,6 +248,7 @@ const PreviewText = ({ item }: { item: GalleryItemTagged }) => {
 	const bgBackground = useResolveClassNames("bg-background")
 	const { theme } = useUniwind()
 
+	const isOnline = useIsOnline()
 	const previewType = getPreviewType(item.type === "drive" ? (item.data.data.decryptedMeta?.name ?? "") : item.data.name)
 
 	const query = useFileUriQuery(
@@ -293,7 +295,7 @@ const PreviewText = ({ item }: { item: GalleryItemTagged }) => {
 		)
 	}
 
-	if (query.status !== "success" && query.fetchStatus === "paused") {
+	if (isUnavailableOffline(query, isOnline)) {
 		return (
 			<View
 				className="flex-1 items-center justify-center px-8"

@@ -12,6 +12,7 @@ import useRangeSource from "@/hooks/useRangeSource"
 import { MAX_PDF_BYTES } from "@/components/pdfPreview/constants"
 import { PDF_MAGIC } from "@/lib/rangeTransfer"
 import useFileUriQuery from "@/queries/useFileUri.query"
+import { isUnavailableOffline } from "@/components/drivePreview/previewAvailability"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
 import { galleryItemKey, type GalleryItemTagged } from "@/components/drivePreview/gallery"
 import useEditableTarget from "@/components/drivePreview/useEditableTarget"
@@ -175,7 +176,7 @@ const PreviewPdf = ({ item }: { item: GalleryItemTagged }) => {
 		)
 	}
 
-	if (query.status !== "success" && query.fetchStatus === "paused") {
+	if (isUnavailableOffline(query, isOnline)) {
 		return (
 			<View className="bg-background flex-1 items-center justify-center px-8">
 				<Ionicons

@@ -7,6 +7,9 @@ import { type SharedValue } from "react-native-reanimated"
 import { SvgXml, parse } from "react-native-svg"
 import useFileTextQuery from "@/queries/useFileText.query"
 import { type GalleryItemTagged } from "@/components/drivePreview/gallery"
+import UnavailableOfflineNotice from "@/components/drivePreview/unavailableOfflineNotice"
+import { isUnavailableOffline } from "@/components/drivePreview/previewAvailability"
+import useIsOnline from "@/hooks/useIsOnline"
 
 // Coarse cap on SVG source length (UTF-16 code units of the decoded document, not exact bytes)
 // before we hand it to react-native-svg. Unlike the native androidsvg path this can't take the
@@ -52,6 +55,7 @@ const PreviewSvg = ({
 	onPinchActiveChange?: (active: boolean) => void
 }) => {
 	const dimensions = useWindowDimensions()
+	const isOnline = useIsOnline()
 
 	const fileTextQuery = useFileTextQuery(
 		item.type === "drive"
@@ -109,6 +113,10 @@ const PreviewSvg = ({
 	const itemStyle = {
 		width: dimensions.width,
 		height: dimensions.height
+	}
+
+	if (isUnavailableOffline(fileTextQuery, isOnline)) {
+		return <UnavailableOfflineNotice style={itemStyle} />
 	}
 
 	const status: "loading" | "loaded" | "error" =
