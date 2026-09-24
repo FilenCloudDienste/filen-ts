@@ -11,14 +11,14 @@ import logger from "@/lib/logger"
 import drive from "@/features/drive/drive"
 import copyRunner from "@/features/copy/copyRunner"
 import { canPasteInto, copyDestinationOf } from "@/features/drive/clipboard"
+import { restoreFailedCut, takeCutForPaste } from "@/features/drive/clipboardFollow"
 import useDriveClipboardStore, { type DriveClipboardEntry } from "@/features/drive/store/useDriveClipboard.store"
 
 // Pastes the clipboard into `targetDir`. A copy starts one copy job and stays on the clipboard for more
 // pastes; a cut moves each item behind the full-screen loader like Move, leaves the clipboard as it
-// starts, and puts back whatever failed to move.
+// starts, and puts back whatever failed to move (as it is by then).
 export async function pasteClipboard({ targetDir, allowCut, t }: { targetDir: AnyNormalDir; allowCut: boolean; t: TFunction }): Promise<void> {
-	const store = useDriveClipboardStore.getState()
-	const entry = store.entry
+	const entry = useDriveClipboardStore.getState().entry
 
 	// The menu may be older than the clipboard.
 	if (!canPasteInto({ entry, targetUuid: targetDir.inner[0].uuid, allowCut }) || entry === null) {
@@ -42,7 +42,7 @@ export async function pasteClipboard({ targetDir, allowCut, t }: { targetDir: An
 		return
 	}
 
-	store.clear()
+	takeCutForPaste(entry)
 
 	const result = await runWithLoading(async () => {
 		return await Promise.allSettled(
@@ -55,28 +55,29 @@ export async function pasteClipboard({ targetDir, allowCut, t }: { targetDir: An
 		)
 	})
 
-	const failed: DriveItem[] = []
+	const failedIndexes: number[] = []
 	let firstError: unknown = result.success ? null : result.error
 
 	if (result.success) {
 		result.data.forEach((outcome, index) => {
-			const item = entry.items[index]
-
-			if (outcome.status === "rejected" && item) {
-				failed.push(item)
+			if (outcome.status === "rejected") {
+				failedIndexes.push(index)
 				firstError ??= outcome.reason
 			}
 		})
 	} else {
-		failed.push(...entry.items)
+		entry.items.forEach((_, index) => {
+			failedIndexes.push(index)
+		})
 	}
 
-	if (failed.length === 0) {
+	restoreFailedCut(failedIndexes)
+
+	if (failedIndexes.length === 0) {
 		return
 	}
 
-	useDriveClipboardStore.getState().restoreCut(failed)
-	logger.error("drive", "paste: move failed", { error: firstError, failed: failed.length, count: entry.items.length })
+	logger.error("drive", "paste: move failed", { error: firstError, failed: failedIndexes.length, count: entry.items.length })
 	alerts.error(firstError)
 }
 

@@ -1,7 +1,6 @@
 import auth from "@/lib/auth"
 import {
 	ErrorKind,
-	AnyLinkedDir,
 	type LinkedRootDir,
 	DirMeta_Tags,
 	type File,
@@ -9,7 +8,7 @@ import {
 	ParentUuid,
 	MaybeEncryptedUniffi_Tags
 } from "@filen/sdk-rs"
-import { linkPasswordState } from "@/features/drive/utils"
+import { linkedRootOf } from "@/features/drive/utils"
 import { unwrapFileMeta, unwrappedFileIntoDriveItem } from "@/lib/sdkUnwrap"
 import { unwrapSdkError } from "@/lib/sdkErrors"
 import prompts from "@/lib/prompts"
@@ -74,13 +73,11 @@ const drive = {
 						}
 					: undefined
 			)
+			const linkedRoot = linkedRootOf(info, password)
 
-			return authedSdkClient.listLinkedDir(
-				new AnyLinkedDir.Root(info.root),
-				{
-					...info.link,
-					password: linkPasswordState(password, info.link.password)
-				},
+			await authedSdkClient.listLinkedDir(
+				linkedRoot.dir,
+				linkedRoot.meta,
 				undefined,
 				signal
 					? {
@@ -88,6 +85,8 @@ const drive = {
 						}
 					: undefined
 			)
+
+			return linkedRoot
 		})
 
 		if (!result.success) {
@@ -139,6 +138,10 @@ const drive = {
 
 			return
 		}
+
+		// The link screen decides Save to Cloud Drive from the root in its first render, which happens before
+		// its own listing fetch caches the root, and nothing re-renders it when that fetch does.
+		cache.linkedRootByLinkUuid.set(linkUuid, result.data)
 
 		router.push({
 			pathname: "/linkedDir/[uuid]",

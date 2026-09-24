@@ -1,19 +1,21 @@
 import { vi, describe, it, expect, beforeEach } from "vitest"
 vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 
-const { mockMarkDirectorySizesStale, mockEnqueue, mockFlushNow, mockRemoveDirectoryFromPhotos, callOrder } = vi.hoisted(() => {
-	const callOrder: string[] = []
+const { mockMarkDirectorySizesStale, mockEnqueue, mockFlushNow, mockRemoveDirectoryFromPhotos, mockInvalidateAfterDeleteAll, callOrder } =
+	vi.hoisted(() => {
+		const callOrder: string[] = []
 
-	return {
-		mockMarkDirectorySizesStale: vi.fn(),
-		mockEnqueue: vi.fn(),
-		mockFlushNow: vi.fn(() => {
-			callOrder.push("flush")
-		}),
-		mockRemoveDirectoryFromPhotos: vi.fn(),
-		callOrder
-	}
-})
+		return {
+			mockMarkDirectorySizesStale: vi.fn(),
+			mockEnqueue: vi.fn(),
+			mockFlushNow: vi.fn(() => {
+				callOrder.push("flush")
+			}),
+			mockRemoveDirectoryFromPhotos: vi.fn(),
+			mockInvalidateAfterDeleteAll: vi.fn(),
+			callOrder
+		}
+	})
 
 vi.mock("@/features/drive/socketCreateBatcher", () => ({
 	default: {
@@ -73,7 +75,9 @@ vi.mock("@/features/drive/queries/useDriveItems.query", () => ({
 	driveItemsQueryUpdate: mockDriveItemsQueryUpdate,
 	driveItemsQueryUpdateForNormalParent: mockDriveItemsQueryUpdateForNormalParent,
 	driveItemsQueryUpdateForPhotos: vi.fn(),
-	driveItemsQueryRemoveDirectoryFromPhotos: mockRemoveDirectoryFromPhotos
+	driveItemsQueryRemoveDirectoryFromPhotos: mockRemoveDirectoryFromPhotos,
+	driveItemsQueryInvalidateAfterDeleteAll: mockInvalidateAfterDeleteAll,
+	driveItemsQueryMarkAllStale: vi.fn()
 }))
 
 // Faithful mirror of driveMetadata's pure favoritesListingUpdater (the real module pulls
@@ -273,6 +277,7 @@ describe("handleDriveEvent — drive socket handler", () => {
 		mockEnqueue.mockClear()
 		mockFlushNow.mockClear()
 		mockRemoveDirectoryFromPhotos.mockClear()
+		mockInvalidateAfterDeleteAll.mockClear()
 		callOrder.length = 0
 		mockCacheDirectoryUuidToAnyNormalDirGet.mockReset()
 		mockCacheFileUuidToNormalFileGet.mockReset()
@@ -1311,21 +1316,23 @@ describe("handleDriveEvent — drive socket handler", () => {
 		})
 	})
 
-	describe("DriveEvent_Tags.DeleteAll / DeleteVersioned — ignored no-ops", () => {
-		it("DeleteAll: resolves without throwing and touches no query updater", async () => {
+	describe("DriveEvent_Tags.DeleteAll / DeleteVersioned — no per-item payload", () => {
+		it("DeleteAll: patches no listing but has every listing read again", async () => {
 			await expect(handleDriveEvent({ event: makeEvent(DriveEvent_Tags.DeleteAll, {}) })).resolves.toBeUndefined()
 
 			expect(mockDriveItemsQueryUpdateGlobal).not.toHaveBeenCalled()
 			expect(mockDriveItemsQueryUpdate).not.toHaveBeenCalled()
 			expect(mockDriveItemsQueryUpdateForNormalParent).not.toHaveBeenCalled()
+			expect(mockInvalidateAfterDeleteAll).toHaveBeenCalledTimes(1)
 		})
 
-		it("DeleteVersioned: resolves without throwing and touches no query updater", async () => {
+		it("DeleteVersioned: resolves without throwing and touches no listing", async () => {
 			await expect(handleDriveEvent({ event: makeEvent(DriveEvent_Tags.DeleteVersioned, {}) })).resolves.toBeUndefined()
 
 			expect(mockDriveItemsQueryUpdateGlobal).not.toHaveBeenCalled()
 			expect(mockDriveItemsQueryUpdate).not.toHaveBeenCalled()
 			expect(mockDriveItemsQueryUpdateForNormalParent).not.toHaveBeenCalled()
+			expect(mockInvalidateAfterDeleteAll).not.toHaveBeenCalled()
 		})
 	})
 
@@ -1423,7 +1430,29 @@ describe("handleDriveEvent — drive socket handler", () => {
 
 			await handleDriveEvent({ event: makeFolderMoveEvent({ uuid: "moved-dir", parent: {} }) })
 
-			expect(mockRemoveDirectoryFromPhotos).toHaveBeenCalledExactlyOnceWith({ dirUuid: "moved-dir", newParentUuid: "parent-1" })
+			expect(mockRemoveDirectoryFromPhotos).toHaveBeenCalledExactlyOnceWith({
+				dirUuid: "moved-dir",
+				newParentUuid: "parent-1",
+				previousParentUuid: null
+			})
+		})
+
+		it("FolderMove passes the cached previous parent, read before the payload overwrites it", async () => {
+			mockCacheDirectoryUuidToAnyNormalDirGet.mockReturnValue({
+				tag: AnyNormalDir_Tags.Dir,
+				inner: [{ uuid: "moved-dir", parent: {} }]
+			})
+			mockUnwrapParentUuid.mockReturnValueOnce("old-parent").mockReturnValueOnce("new-parent")
+			mockUnwrapDirMeta.mockReturnValue({ uuid: "moved-dir", meta: null })
+			mockUnwrappedDirIntoDriveItem.mockReturnValue({ type: "directory", data: { uuid: "moved-dir" } })
+
+			await handleDriveEvent({ event: makeFolderMoveEvent({ uuid: "moved-dir", parent: {} }) })
+
+			expect(mockRemoveDirectoryFromPhotos).toHaveBeenCalledExactlyOnceWith({
+				dirUuid: "moved-dir",
+				newParentUuid: "new-parent",
+				previousParentUuid: "old-parent"
+			})
 		})
 	})
 

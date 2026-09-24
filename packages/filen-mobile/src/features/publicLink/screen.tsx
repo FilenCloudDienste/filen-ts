@@ -35,8 +35,9 @@ import { driveItemDisplayName } from "@/lib/decryption"
 import CannotDecryptScreen from "@/components/cannotDecryptScreen"
 import i18n from "@/lib/i18n"
 import ListEmpty from "@/components/ui/listEmpty"
-import { currentHeldLinkStatus, isExpirationChecked, isPublicLinkQueryError, linkStatusForWrite } from "@/features/publicLink/utils"
+import { recentHeldLinkStatus, isExpirationChecked, isPublicLinkQueryError, linkStatusForWrite } from "@/features/publicLink/utils"
 import logger from "@/lib/logger"
+import { type PublicLinkEdits } from "@/features/drive/drivePublicLink"
 
 function expirationToText(expiration: PublicLinkExpiration, t: TFunction) {
 	switch (expiration) {
@@ -86,11 +87,7 @@ function PublicLink() {
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const textForeground = useResolveClassNames("text-foreground")
 	const insets = useSafeAreaInsets()
-	const [edited, setEdited] = useState<{
-		password?: PasswordState
-		expiration?: PublicLinkExpiration
-		downloadable?: boolean
-	} | null>(null)
+	const [edited, setEdited] = useState<PublicLinkEdits | null>(null)
 	const isOnline = useIsOnline()
 
 	const itemParsed = (() => {
@@ -195,27 +192,8 @@ function PublicLink() {
 
 													return await drive.updatePublicLink({
 														item: itemParsed,
-														link:
-															status.type === "file"
-																? {
-																		type: "file" as const,
-																		link: {
-																			...status.status,
-																			password: edited.password ?? status.status.password,
-																			downloadable: edited.downloadable ?? status.status.downloadable,
-																			expiration: edited.expiration ?? status.status.expiration
-																		}
-																	}
-																: {
-																		type: "directory" as const,
-																		link: {
-																			...status.status,
-																			password: edited.password ?? status.status.password,
-																			enableDownload:
-																				edited.downloadable ?? status.status.enableDownload,
-																			expiration: edited.expiration ?? status.status.expiration
-																		}
-																	}
+														held: status,
+														edits: edited
 													})
 												})
 
@@ -227,6 +205,13 @@ function PublicLink() {
 												}
 
 												setEdited(null)
+
+												// Nothing was written; the screen now shows what the server has.
+												if (result.data === "gone") {
+													alerts.error(t("public_link_gone_elsewhere"))
+												} else if (result.data === "replaced") {
+													alerts.error(t("public_link_replaced_elsewhere"))
+												}
 											}
 										}
 									}
@@ -334,7 +319,7 @@ function PublicLink() {
 														value: true,
 														onValueChange: async () => {
 															const result = await runWithLoading(async () => {
-																const held = currentHeldLinkStatus(publicLinkStatusQuery)
+																const held = recentHeldLinkStatus(publicLinkStatusQuery)
 
 																return await drive.disablePublicLink({
 																	item: itemParsed,
@@ -478,9 +463,7 @@ function PublicLink() {
 																	<CrossGlassContainerView className="min-h-9 p-2 px-3 items-center justify-center flex-row">
 																		<Text className="text-blue-500 text-base">
 																			{expirationToText(
-																				edited && edited.expiration
-																					? edited.expiration
-																					: publicLinkStatusQuery.data.status.expiration,
+																				edited?.expiration ?? publicLinkStatusQuery.data.status.expiration,
 																				t
 																			)}
 																		</Text>
@@ -533,7 +516,7 @@ function PublicLink() {
 													}
 
 													const result = await runWithLoading(async () => {
-														const held = currentHeldLinkStatus(publicLinkStatusQuery)
+														const held = recentHeldLinkStatus(publicLinkStatusQuery)
 
 														return await drive.enablePublicLink({
 															item: itemParsed,

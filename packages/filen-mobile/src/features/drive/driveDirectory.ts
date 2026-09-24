@@ -175,7 +175,8 @@ export async function move({
 		if (item.type === "directory") {
 			driveItemsQueryRemoveDirectoryFromPhotos({
 				dirUuid: item.data.uuid,
-				newParentUuid: unwrappedParentUuid
+				newParentUuid: unwrappedParentUuid,
+				previousParentUuid: unwrappedParentUuidPrevious
 			})
 		}
 	}

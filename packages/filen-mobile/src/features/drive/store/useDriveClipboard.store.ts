@@ -19,6 +19,10 @@ export type DriveClipboardStore = {
 	// A pasted cut leaves the clipboard as it starts moving, so a second paste can't move the same items
 	// again; what failed to move comes back, unless something else was copied or cut meanwhile.
 	restoreCut: (items: readonly DriveItem[]) => void
+	// Rewrites the items through `map` (another row replaces one, null drops it) into a new entry, so the
+	// paste guard is derived again. The same state when nothing changed, so no row re-renders; an entry left
+	// empty is cleared. See clipboardFollow.
+	mapItems: (map: (item: DriveItem) => DriveItem | null) => void
 }
 
 const NOTHING_CUT: ReadonlySet<string> = new Set()
@@ -41,6 +45,43 @@ export const useDriveClipboardStore = create<DriveClipboardStore>(set => ({
 	},
 	restoreCut(items) {
 		set(state => (state.entry !== null || items.length === 0 ? state : withEntry({ mode: "cut", items: items.slice() })))
+	},
+	mapItems(map) {
+		set(state => {
+			const entry = state.entry
+
+			if (entry === null) {
+				return state
+			}
+
+			const items: DriveItem[] = []
+			let changed = false
+
+			for (const item of entry.items) {
+				const next = map(item)
+
+				if (next !== item) {
+					changed = true
+				}
+
+				if (next !== null) {
+					items.push(next)
+				}
+			}
+
+			if (!changed) {
+				return state
+			}
+
+			return withEntry(
+				items.length === 0
+					? null
+					: {
+							mode: entry.mode,
+							items
+						}
+			)
+		})
 	}
 }))
 

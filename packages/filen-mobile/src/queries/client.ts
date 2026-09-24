@@ -166,6 +166,11 @@ export class QueryPersisterKv {
 	private readonly persistedBytes = new Map<string, number>()
 	private readonly persistedAt = new Map<string, number>()
 	private restoredOnce = false
+	// Set by clearForLogout, never cleared: logout ends in a JS reload. Its writes bypass sqlite's
+	// clearGeneration guard, so a late socket event, trash or query update would otherwise re-insert the
+	// ended account's rows after the kv wipe, and the next boot restores them. Staying closed in a process
+	// whose reload failed is deliberate: its query client still holds the ended account's queries.
+	private closed = false
 
 	public constructor() {
 		AppState.addEventListener("change", nextAppState => {
@@ -182,6 +187,10 @@ export class QueryPersisterKv {
 	}
 
 	public setItem(key: string, value: unknown): void {
+		if (this.closed) {
+			return
+		}
+
 		const previous = this.buffer.get(key)
 
 		this.buffer.set(key, value)
@@ -274,6 +283,10 @@ export class QueryPersisterKv {
 	}
 
 	public removeItem(key: string): void {
+		if (this.closed) {
+			return
+		}
+
 		this.buffer.delete(key)
 
 		this.dirtyDeletes.add(key)
@@ -301,6 +314,14 @@ export class QueryPersisterKv {
 		sqlite.kvAsync.removeByPrefix(`${QUERY_CLIENT_PERSISTER_PREFIX}:`).catch(err => {
 			logger.error("queries-persist", "Failed to clear persisted query cache from SQLite", { error: err })
 		})
+	}
+
+	// Logout: empties everything and takes no write until the JS reload.
+	public clearForLogout(): void {
+		this.closed = true
+		this.persistDirty.cancel()
+
+		this.clear()
 	}
 
 	public async restore(): Promise<void> {
@@ -398,6 +419,10 @@ export class QueryPersisterKv {
 	public flushNow(): Promise<void> {
 		this.persistDirty.cancel()
 
+		if (this.closed) {
+			return Promise.resolve()
+		}
+
 		if (!this.persisting) {
 			return this.persistNow()
 		}
@@ -425,7 +450,7 @@ export class QueryPersisterKv {
 	private inFlight: Promise<void> | null = null
 
 	private persistNow(): Promise<void> {
-		if (this.dirtyUpserts.size === 0 && this.dirtyDeletes.size === 0) {
+		if (this.closed || (this.dirtyUpserts.size === 0 && this.dirtyDeletes.size === 0)) {
 			return Promise.resolve()
 		}
 
@@ -446,9 +471,10 @@ export class QueryPersisterKv {
 		// Chain depth is pinned by client.test.ts (openDb → executeBatch → catch → finally,
 		// one microtask each) — the void-normalizing .then must come AFTER the catch so the
 		// dirty-set restore still lands on the third hop.
+		// A logout that lands while the database opens must not see this batch after its wipe.
 		return sqlite
 			.openDb()
-			.then(db => db.executeBatch(commands))
+			.then(db => (this.closed ? undefined : db.executeBatch(commands)))
 			.catch(err => {
 				logger.error("queries-persist", "In-flight persist failed before flush", { error: err })
 
@@ -480,6 +506,10 @@ export class QueryPersisterKv {
 	}
 
 	private persistAsync(): Promise<void> {
+		if (this.closed) {
+			return Promise.resolve()
+		}
+
 		if (this.persisting) {
 			return this.inFlight ?? Promise.resolve()
 		}
@@ -570,6 +600,11 @@ export class QueryPersisterKv {
 			logger.debug("queries-persist", "Async persist started", { count: commands.length })
 
 			const db = await sqlite.openDb()
+
+			// Serializing yields to the event loop, so a logout can land mid-batch; what it built is dropped.
+			if (this.closed) {
+				return
+			}
 
 			await db.executeBatch(commands)
 

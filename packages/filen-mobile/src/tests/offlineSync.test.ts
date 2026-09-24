@@ -2099,7 +2099,7 @@ describe("offlineSync — per-item failure isolation", () => {
 	})
 })
 
-describe("offlineSync — sibling own-cloud trees share their parent listing", () => {
+describe("offlineSync — own-cloud trees and their parent's listing", () => {
 	const parent = makeNormalParent("parent-1")
 
 	function givenSiblings(count: number): void {
@@ -2110,6 +2110,18 @@ describe("offlineSync — sibling own-cloud trees share their parent listing", (
 			}))
 		)
 	}
+
+	// A standalone offline file of the user's own in parent-1: that parent is listed for it anyway.
+	function givenStandaloneInParent(): void {
+		givenFiles([
+			{
+				item: makeFileItem("file-1", "a.txt"),
+				parent
+			}
+		])
+	}
+
+	const standaloneListed = makeRemoteFile("file-1", "a.txt", uuidParent("parent-1"))
 
 	function treeLookups(): unknown[][] {
 		return client.getDirOptional.mock.calls.filter(call => String(call[0]).startsWith("tree-"))
@@ -2122,11 +2134,31 @@ describe("offlineSync — sibling own-cloud trees share their parent listing", (
 		)
 	})
 
-	it("3 siblings → 1 listDir and no per-tree lookup; each tree reconciles", async () => {
+	it("sibling trees never list their parent (often the root, of any size): one lookup per tree", async () => {
 		givenSiblings(3)
+		client.getDirOptional.mockImplementation(async (uuid: string) => {
+			if (uuid.startsWith("tree-")) {
+				return makeRemoteDir(uuid, `Tree ${uuid.slice("tree-".length)}`, uuidParent("parent-1"))
+			}
+
+			return uuid === "parent-1" ? makeRemoteDir("parent-1", "Parent", uuidParent(ROOT_UUID)) : undefined
+		})
+
+		await runAutoPass()
+
+		expect(client.listDir).not.toHaveBeenCalled()
+		expect(treeLookups()).toHaveLength(3)
+		expect(vi.mocked(offline.reconcileTree)).toHaveBeenCalledTimes(3)
+		expect(vi.mocked(offline.removeItem)).not.toHaveBeenCalled()
+		expect(syncErrors()).toEqual([])
+	})
+
+	it("a parent listed anyway (for a standalone file there) answers its trees: no per-tree lookup", async () => {
+		givenSiblings(3)
+		givenStandaloneInParent()
 		client.listDir.mockResolvedValue({
 			dirs: [0, 1, 2].map(i => makeRemoteDir(`tree-${i}`, `Tree ${i}`, uuidParent("parent-1"))),
-			files: []
+			files: [standaloneListed]
 		})
 
 		await runAutoPass()
@@ -2154,11 +2186,12 @@ describe("offlineSync — sibling own-cloud trees share their parent listing", (
 		expect(treeLookups()).toHaveLength(1)
 	})
 
-	it("a rename seen in the shared listing updates the root meta", async () => {
+	it("a rename seen in the parent's listing updates the root meta", async () => {
 		givenSiblings(2)
+		givenStandaloneInParent()
 		client.listDir.mockResolvedValue({
 			dirs: [makeRemoteDir("tree-0", "Renamed", uuidParent("parent-1")), makeRemoteDir("tree-1", "Tree 1", uuidParent("parent-1"))],
-			files: []
+			files: [standaloneListed]
 		})
 
 		await runAutoPass()
@@ -2170,9 +2203,10 @@ describe("offlineSync — sibling own-cloud trees share their parent listing", (
 
 	it("a tree absent from the listing (moved away) falls back to one lookup that follows the move", async () => {
 		givenSiblings(2)
+		givenStandaloneInParent()
 		client.listDir.mockResolvedValue({
 			dirs: [makeRemoteDir("tree-0", "Tree 0", uuidParent("parent-1"))],
-			files: []
+			files: [standaloneListed]
 		})
 		client.getDirOptional.mockImplementation(async (uuid: string) => {
 			if (uuid === "tree-1") {
@@ -2203,6 +2237,7 @@ describe("offlineSync — sibling own-cloud trees share their parent listing", (
 
 	it("a parent listing that is gone does not remove its trees: each is looked up and kept where it moved", async () => {
 		givenSiblings(2)
+		givenStandaloneInParent()
 		client.listDir.mockRejectedValue({ __kind: "FolderNotFound" })
 		client.getDirOptional.mockImplementation(async (uuid: string) => {
 			if (uuid.startsWith("tree-")) {
@@ -2211,6 +2246,10 @@ describe("offlineSync — sibling own-cloud trees share their parent listing", (
 
 			return uuid === "parent-new" ? makeRemoteDir("parent-new", "New", uuidParent(ROOT_UUID)) : undefined
 		})
+		// The standalone file moved along with them.
+		client.getFileOptional.mockImplementation(async (uuid: string) =>
+			uuid === "file-1" ? makeRemoteFile("file-1", "a.txt", uuidParent("parent-new")) : undefined
+		)
 
 		await runAutoPass()
 

@@ -98,11 +98,11 @@ vi.mock("@/features/chats/components/sync", () => ({
 	SyncHost: vi.fn()
 }))
 
-// auth now clears the query persister's buffer before the kv wipe; queries/client reaches SQLite.
+// auth clears and closes the query persister before the kv wipe; queries/client reaches SQLite.
 vi.mock("@/queries/client", () => ({
 	queryClientPersisterKv: {
-		clear: vi.fn(() => {
-			callLog.push("queryClientPersisterKv.clear")
+		clearForLogout: vi.fn(() => {
+			callLog.push("queryClientPersisterKv.clearForLogout")
 		})
 	}
 }))
@@ -540,10 +540,10 @@ describe("auth.logout", () => {
 			expect(notesLedgerClearIdx).toBeLessThan(kvWipeIdx)
 		}
 
-		// The persister's writes bypass sqlite's wipe generation and nothing cancels its debounce, so
-		// its buffer must be emptied BEFORE the kv wipe or a write landing in that window re-inserts
-		// decrypted rows after the DELETE, where the next boot restores them.
-		const persisterClearIdx = callLog.indexOf("queryClientPersisterKv.clear")
+		// The persister's writes bypass sqlite's wipe generation, so it must be emptied and closed BEFORE
+		// the kv wipe or a later write re-inserts decrypted rows after the DELETE, where the next boot
+		// restores them.
+		const persisterClearIdx = callLog.indexOf("queryClientPersisterKv.clearForLogout")
 
 		expect(persisterClearIdx).toBeGreaterThan(-1)
 

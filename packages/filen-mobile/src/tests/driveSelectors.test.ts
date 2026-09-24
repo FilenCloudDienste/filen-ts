@@ -115,6 +115,16 @@ describe("aggregateDriveSelectionFlags", () => {
 		expect(EMPTY_DRIVE_FLAGS.everyDirectory).toBe(false)
 		expect(EMPTY_DRIVE_FLAGS.everyImageOrVideoFile).toBe(false)
 		expect(EMPTY_DRIVE_FLAGS.includesUndecryptable).toBe(false)
+		expect(EMPTY_DRIVE_FLAGS.everyNormalItem).toBe(false)
+	})
+
+	it("everyNormalItem only when every item is a plain file or directory (move, favorite and cut accept no other)", () => {
+		expect(aggregateDriveSelectionFlags([file("a"), dir("b")]).everyNormalItem).toBe(true)
+
+		for (const shared of [sharedFile("s"), sharedRootFile("s"), sharedDirectory("s"), sharedRootDir("s")]) {
+			expect(aggregateDriveSelectionFlags([file("a"), shared]).everyNormalItem).toBe(false)
+			expect(aggregateDriveSelectionFlags([shared]).everyNormalItem).toBe(false)
+		}
 	})
 
 	it("non-empty call does NOT return the EMPTY_DRIVE_FLAGS constant by reference", () => {

@@ -69,6 +69,7 @@ vi.mock("@/components/ui/image", () => ({
 // mocked above.
 
 import { directoryColorToHex, shadeColor, unwrapDirColor, directorySvg, resolveFileIconKey } from "@/components/itemIcons/index"
+import { Paths } from "expo-file-system"
 import { DirColor_Tags } from "@filen/sdk-rs"
 import { type DirColor } from "@filen/sdk-rs"
 
@@ -455,5 +456,21 @@ describe("resolveFileIconKey", () => {
 
 	it("fixes the ninth extension, .markdown, the same way", () => {
 		expect(resolveFileIconKey("readme.markdown")).toBe("code")
+	})
+
+	// Paths.extname parses the name as a URL first; for a name without a scheme that throws and is caught
+	// on every call, and this runs per icon bind.
+	it("never calls Paths.extname for a name without a colon, and still does for one with a colon", () => {
+		const extname = vi.spyOn(Paths, "extname")
+		const keys = ["IMG_0001.HEIC", "song.mp3", "report.pdf", "notes.txt", "noextension", ".jpg"].map(resolveFileIconKey)
+
+		expect(extname).not.toHaveBeenCalled()
+		// Same parse as before: a leading-dot name like ".jpg" has no extension.
+		expect(keys).toEqual(["image", "audio", "pdf", "txt", "other", "other"])
+
+		expect(resolveFileIconKey("clip 12:30.mp4")).toBe("video")
+		expect(extname).toHaveBeenCalledTimes(1)
+
+		extname.mockRestore()
 	})
 })

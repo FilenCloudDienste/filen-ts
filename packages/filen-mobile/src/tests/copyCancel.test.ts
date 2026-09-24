@@ -1,5 +1,6 @@
 import { vi, describe, it, expect, beforeEach } from "vitest"
-import type { TFunction } from "i18next"
+import i18next, { type TFunction } from "i18next"
+import { en } from "@/locales/en"
 
 vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 
@@ -8,7 +9,7 @@ const h = vi.hoisted(() => ({
 	alertError: vi.fn(),
 	hold: vi.fn(),
 	resolve: vi.fn(),
-	job: undefined as { counts: { filesDone: number }; totals: { files: number } } | undefined
+	job: undefined as { phase: string; counts: { filesDone: number }; totals: { files: number } } | undefined
 }))
 
 vi.mock("@/lib/prompts", () => ({ default: { confirm3: h.confirm3 } }))
@@ -26,7 +27,7 @@ beforeEach(() => {
 	h.alertError.mockReset()
 	h.hold.mockReset().mockReturnValue(true)
 	h.resolve.mockReset().mockResolvedValue(undefined)
-	h.job = { counts: { filesDone: 340 }, totals: { files: 812 } }
+	h.job = { phase: "copyingFiles", counts: { filesDone: 340 }, totals: { files: 812 } }
 })
 
 describe("stopCopyWithChoice", () => {
@@ -39,11 +40,48 @@ describe("stopCopyWithChoice", () => {
 		expect(h.hold.mock.invocationCallOrder[0]).toBeLessThan(h.confirm3.mock.invocationCallOrder[0] ?? 0)
 		expect(h.confirm3).toHaveBeenCalledExactlyOnceWith({
 			title: "copy_stop_title",
-			message: 'copy_stop_message:{"done":"340","total":"812"}',
+			message: 'copy_stop_message:{"done":340,"count":812}',
 			primaryText: "copy_stop_keep",
 			destructiveText: "copy_stop_trash",
 			cancelText: "copy_continue"
 		})
+	})
+
+	it("reads one file in the singular", async () => {
+		const english = i18next.createInstance()
+
+		await english.init({
+			resources: {
+				en: {
+					translation: en
+				}
+			},
+			lng: "en",
+			keySeparator: false,
+			nsSeparator: false,
+			interpolation: {
+				escapeValue: false
+			}
+		})
+
+		h.job = { phase: "copyingFiles", counts: { filesDone: 0 }, totals: { files: 1 } }
+		h.confirm3.mockResolvedValue("cancel")
+
+		await stopCopyWithChoice("job", english.t.bind(english) as unknown as TFunction)
+
+		expect(h.confirm3.mock.calls[0]?.[0]).toMatchObject({ message: "0 of 1 file is already copied." })
+	})
+
+	it.each([
+		["while the scan is still totalling", { phase: "scanning", counts: { filesDone: 0 }, totals: { files: 12 } }],
+		["for a copy without files", { phase: "creatingDirectories", counts: { filesDone: 0 }, totals: { files: 0 } }]
+	])("asks without a count %s", async (_label, job) => {
+		h.job = job
+		h.confirm3.mockResolvedValue("cancel")
+
+		await stopCopyWithChoice("job", t)
+
+		expect(h.confirm3.mock.calls[0]?.[0]).toMatchObject({ message: undefined })
 	})
 
 	it.each([

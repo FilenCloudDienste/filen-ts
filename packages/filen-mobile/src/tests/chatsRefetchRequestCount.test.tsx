@@ -228,6 +228,33 @@ describe("chats.refetchChatsAndMessages request counts", () => {
 		expect(sdk.listMessagesBefore).toHaveBeenCalledTimes(1)
 	})
 
+	it("the open chat is re-read even with an unchanged lastMessage: an older message deleted meanwhile drops out", async () => {
+		renderHook(() => useChatMessagesQuery({ uuid: "c0" }), { wrapper })
+
+		// The chat screen's own mount read.
+		await waitFor(() => expect(sdk.listMessagesBefore).toHaveBeenCalledTimes(1))
+		await waitFor(() => expect(queryClient.getQueryState(["useChatMessagesQuery", { uuid: "c0" }])?.fetchStatus).toBe("idle"))
+
+		seedMessages("c0", [message("c0", "deleted-while-away", 1n), lasts[0] as ChatMessage])
+		sdk.listMessagesBefore.mockClear()
+
+		await chats.refetchChatsAndMessages()
+
+		expect(sdk.listMessagesBefore).toHaveBeenCalledTimes(1)
+		expect((sdk.listMessagesBefore.mock.calls[0]?.[0] as Chat).uuid).toBe("c0")
+		expect(chatMessagesQueryGet({ uuid: "c0" })?.map(m => m.inner.uuid)).toEqual(["m0"])
+	})
+
+	it("the chats list's unread badges (disabled observers) don't make a chat count as open", async () => {
+		for (const c of listing) {
+			renderHook(() => useChatMessagesQuery({ uuid: c.uuid }, { enabled: false }), { wrapper })
+		}
+
+		await chats.refetchChatsAndMessages()
+
+		expect(sdk.listMessagesBefore).not.toHaveBeenCalled()
+	})
+
 	it("a mounted chats list's in-flight listing read is shared, not duplicated", async () => {
 		const pending = deferred<Chat[]>()
 

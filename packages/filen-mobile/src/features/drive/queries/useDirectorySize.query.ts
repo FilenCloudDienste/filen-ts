@@ -1,4 +1,4 @@
-import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
+import { useQuery, type QueryCache, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
 import { DEFAULT_QUERY_OPTIONS, queryClient } from "@/queries/client"
 import { queryReadInCurrentSocketSession } from "@/queries/socketSession"
 import { markAccountStale } from "@/queries/useAccount.query"
@@ -219,15 +219,49 @@ export function directorySizeQueryOptions(params: UseDirectorySizeQueryParams): 
 // no socket, and offline sizes are a free local read, so those keep refetching on every mount.
 const SOCKET_COVERED_TYPES = new Set<UseDirectorySizeQueryParams["type"]>(["normal", "trash", "sharedOut"])
 
+// Whether a size query may have left the invalidated state since the last mark scanned the cache. Until one
+// does, a mark has nothing to change, so a burst of drive events (a remote mass delete, a bulk action and its
+// echoes) scans the whole cache once, not once per event.
+let sizesMaybeFresh = true
+let watchedQueryCache: QueryCache | null = null
+
+function watchSizeFreshness(): void {
+	const queryCache = queryClient.getQueryCache()
+
+	if (queryCache === watchedQueryCache) {
+		return
+	}
+
+	watchedQueryCache = queryCache
+	sizesMaybeFresh = true
+
+	queryCache.subscribe(event => {
+		if (
+			!sizesMaybeFresh &&
+			(event.type === "added" || event.type === "updated") &&
+			event.query.queryKey[0] === BASE_QUERY_KEY &&
+			!event.query.state.isInvalidated
+		) {
+			sizesMaybeFresh = true
+		}
+	})
+}
+
 // Nothing observes a size change directly; every size-changing drive event and local write marks all
 // sizes stale instead (ancestors all the way up change, and the tree isn't known here). No refetch:
 // mounted rows keep today's behaviour, the next mount refetches. The account's storage figures (and
 // anything else read off drive content) move with the same writes.
 export function markDirectorySizesStale(): void {
-	void queryClient.invalidateQueries({
-		queryKey: [BASE_QUERY_KEY],
-		refetchType: "none"
-	})
+	watchSizeFreshness()
+
+	if (sizesMaybeFresh) {
+		sizesMaybeFresh = false
+
+		void queryClient.invalidateQueries({
+			queryKey: [BASE_QUERY_KEY],
+			refetchType: "none"
+		})
+	}
 
 	markAccountStale()
 	noteDriveContentChanged()

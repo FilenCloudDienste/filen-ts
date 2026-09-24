@@ -1,5 +1,6 @@
 import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
 import { DEFAULT_QUERY_OPTIONS, queryUpdater } from "@/queries/client"
+import { socketCoveredRefetchOnMount } from "@/queries/socketSession"
 import auth from "@/lib/auth"
 import { type Note } from "@/types"
 
@@ -10,12 +11,11 @@ export const BASE_QUERY_KEY = "useNotesQuery"
 // pins, favorites, trash state and tags changed on another device carry no socket event.
 export const NOTES_REUSE_WINDOW_MS = 60 * 1000
 
-// Stamped by server reads only. dataUpdatedAt cannot answer this: every optimistic or socket patch
-// restamps it.
-let lastServerReadAt = 0
-
+// Only a read of this query counts, not a bare fetchData whose listing never reaches the cache (the
+// offline pass, the boot reconcile), and only one from the current socket session: events missed while
+// backgrounded or disconnected are not in it.
 export const reuseRecentNotesRead = {
-	refetchOnMount: () => (Date.now() - lastServerReadAt < NOTES_REUSE_WINDOW_MS ? false : "always")
+	refetchOnMount: socketCoveredRefetchOnMount(NOTES_REUSE_WINDOW_MS)
 } satisfies Omit<UseQueryOptions, "queryKey" | "queryFn">
 
 export async function fetchData(params?: { signal?: AbortSignal }) {
@@ -33,8 +33,6 @@ export async function fetchData(params?: { signal?: AbortSignal }) {
 		...n,
 		undecryptable: n.encryptionKey === undefined
 	}))
-
-	lastServerReadAt = Date.now()
 
 	return notes
 }

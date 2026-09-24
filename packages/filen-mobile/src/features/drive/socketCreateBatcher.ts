@@ -23,11 +23,17 @@ type PendingCreate = {
 // and queued for persisting) the whole parent listing, Photos and Recents — O(k·n) for k creates into
 // a listing of n. Pending items live at most one window; every other drive event flushes them first so
 // a remove, move or trash never lands before the create it follows.
-class SocketCreateBatcher {
+export class SocketCreateBatcher {
 	private pending = new Map<string, Map<string, PendingCreate>>()
 	private timer: ReturnType<typeof setTimeout> | null = null
+	// Set by discard, never cleared: logout ends in a JS reload.
+	private closed = false
 
 	public enqueue({ parentUuid, item, recent }: { parentUuid: string; item: DriveItem; recent: boolean }): void {
+		if (this.closed) {
+			return
+		}
+
 		let byUuid = this.pending.get(parentUuid)
 
 		if (!byUuid) {
@@ -58,7 +64,7 @@ class SocketCreateBatcher {
 			this.timer = null
 		}
 
-		if (this.pending.size === 0) {
+		if (this.closed || this.pending.size === 0) {
 			return
 		}
 
@@ -73,9 +79,12 @@ class SocketCreateBatcher {
 		}
 	}
 
-	// Logout, once the socket is gone: what is still queued belongs to the ended session and must not be
-	// written after its caches are wiped.
+	// Logout: what is queued belongs to the ended session and must not be written after its caches are
+	// wiped. Nothing is taken after it either; events already queued for JS, or a copy's late create,
+	// can still arrive.
 	public discard(): void {
+		this.closed = true
+
 		if (this.timer) {
 			clearTimeout(this.timer)
 

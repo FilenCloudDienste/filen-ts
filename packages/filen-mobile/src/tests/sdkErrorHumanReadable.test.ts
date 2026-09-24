@@ -29,7 +29,8 @@ const { ErrorKindMock } = vi.hoisted(() => {
 		FileChangedDuringSync: "FileChangedDuringSync",
 		FolderNotFound: "FolderNotFound",
 		WrongPassword: "WrongPassword",
-		MaxStorageReached: "MaxStorageReached"
+		MaxStorageReached: "MaxStorageReached",
+		FileChunkNotFound: "FileChunkNotFound"
 	} as const
 
 	return { ErrorKindMock }
@@ -136,6 +137,17 @@ describe("unwrappedSdkErrorToHumanReadable", () => {
 		expect(result).toBe(en.max_remote_storage_reached)
 	})
 
+	it("a file whose chunks are gone shows the translated label, never the raw request URL", () => {
+		const result = unwrappedSdkErrorToHumanReadable(
+			makeError(ErrorKindMock.FileChunkNotFound, "", {
+				innerMessage:
+					"Error of kind Reqwest: error: HTTP status client error (404 Not Found) for url (https://egest.filen.io/x/y/0)"
+			})
+		)
+
+		expect(result).toBe(en.file_data_not_found)
+	})
+
 	it("uses the translated label for the generic Server kind with no server message", () => {
 		const result = unwrappedSdkErrorToHumanReadable(
 			makeError(ErrorKindMock.Server, "", { innerMessage: "API Error, message: `None`, code: `None`" })
@@ -166,6 +178,7 @@ describe("unwrappedSdkErrorToHumanReadable", () => {
 		[ErrorKindMock.InvalidType, en.invalid_type],
 		[ErrorKindMock.Io, en.fs_io_error],
 		[ErrorKindMock.MaxStorageReached, en.max_remote_storage_reached],
+		[ErrorKindMock.FileChunkNotFound, en.file_data_not_found],
 		[ErrorKindMock.Reqwest, en.network_error],
 		[ErrorKindMock.Response, en.network_error],
 		[ErrorKindMock.RetryFailed, en.network_retry_failed],

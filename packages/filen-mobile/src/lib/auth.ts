@@ -417,9 +417,9 @@ class Auth {
 			}
 		}
 
-		// Component-land teardown (gallery video players → closes any live PiP window) before the
-		// clients the players stream through are destroyed. Event-based so lib/auth never imports
-		// native-backed component modules.
+		// Component-land teardown (gallery video players → closes any live PiP window; the shell socket
+		// drops its listener) before the clients they use are destroyed. Event-based so lib/auth never
+		// imports native-backed component modules.
 		events.emit("logout")
 
 		// Phase 2 — cancel in-flight work (synchronous aborts). These trip the abort signals the SDK
@@ -464,13 +464,14 @@ class Auth {
 		}
 
 		// Phase 4 — destroy the native handles AFTER cancellations settled (avoid use-after-destroy).
-		// Destroying the authed client tears down the socket it owns, so no socket event can mutate the
-		// in-memory cache during the wipe that follows.
+		// The socket outlives this: its listener handle holds the connection, and events already queued
+		// for JS still arrive. The shell socket drops its listener, and ignores every event, from the
+		// "logout" event above.
 		this.destroyClient(authedClient)
 		this.destroyClient(unauthedClient)
 
 		// Socket creates still queued for a batched write belong to the ended session: dropped before the
-		// wipe so none lands after it.
+		// wipe, and the batcher takes none after it until the reload.
 		socketCreateBatcher.discard()
 
 		// Phase 5 — wipe the session-scoped decrypted metadata from memory BEFORE the SQLite wipe.
@@ -515,13 +516,13 @@ class Auth {
 			logger.error("auth", "offline-notes ledger clear failed during logout", { err: e })
 		}
 
-		// Drop the query persister's in-memory buffer and dirty sets BEFORE the kv wipe below. Its
-		// writes go through executeBatch, which bypasses sqlite's clearGeneration guard, and nothing
-		// cancels its debounce — so an update landing within the debounce window of a logout could
-		// otherwise re-insert rows AFTER the DELETE, where the next boot's restore picks them up.
-		// Every optimistic update has had this window; note bodies now flow through it too.
+		// Drop the query persister's in-memory buffer and dirty sets BEFORE the kv wipe below, and close it
+		// until the reload. Its writes go through executeBatch, which bypasses sqlite's clearGeneration
+		// guard, so any later update (a socket event, a copy's trash still running past the wait above, a
+		// query settling, the background flush) would otherwise re-insert rows AFTER the DELETE, where the
+		// next boot's restore picks them up.
 		try {
-			queryClientPersisterKv.clear()
+			queryClientPersisterKv.clearForLogout()
 		} catch (e) {
 			logger.error("auth", "query persister buffer clear failed during logout", { err: e })
 		}

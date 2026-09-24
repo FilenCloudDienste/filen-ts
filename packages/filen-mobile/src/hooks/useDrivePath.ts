@@ -1,8 +1,8 @@
 import { useLocalSearchParams, useNavigation } from "expo-router"
 import { validateUuid } from "@/lib/uuid"
 import type { DriveItem, DriveItemDirectorySharedRoot, DriveItemDirectorySharedNonRoot } from "@/types"
-import { deserialize, deserializeRouteParam } from "@/lib/serializer"
-import useDriveSelectStore from "@/features/drive/store/useDriveSelect.store"
+import { deserializeRouteParam } from "@/lib/serializer"
+import { getDriveSelectSession } from "@/features/drive/store/useDriveSelect.store"
 import { useCameraUpload } from "@/features/cameraUpload/cameraUpload"
 import type { PreviewType } from "@/lib/previewType"
 import type { SharingRole } from "@filen/sdk-rs"
@@ -113,46 +113,26 @@ export default function useDrivePath(): DrivePath {
 	const { getId: getNavigationId } = useNavigation()
 	const { config: cameraUploadConfig } = useCameraUpload()
 
-	const selectOptions = ((): SelectOptions | null => {
-		if (selectOptionsParam) {
-			try {
-				const parsed = deserialize(selectOptionsParam) as SelectOptionsParam
-				// Opened before the session's first screen is pushed and fixed for its lifetime, so a
-				// plain read (no subscription) is exact.
-				const session = useDriveSelectStore.getState().sessions[parsed.id]
-
-				return {
-					type: parsed.type,
-					files: parsed.files,
-					directories: parsed.directories,
-					intention: parsed.intention,
-					items: session?.items ?? NO_ITEMS,
-					itemUuids: session?.itemUuids ?? NO_UUIDS,
-					initiallySelected: session?.initiallySelected,
-					id: parsed.id,
-					previewType: parsed.previewType
-				}
-			} catch {
-				return null
+	// No try/catch and no hook referenced as a value in here: either makes the React Compiler skip this hook,
+	// and the DrivePath it returns is then a new object every render (every row re-renders, the listing
+	// re-sorts). deserializeRouteParam swallows a garbage param itself.
+	const parsedSelectOptions = deserializeRouteParam<SelectOptionsParam>(selectOptionsParam)
+	const selectSession = parsedSelectOptions ? getDriveSelectSession(parsedSelectOptions.id) : undefined
+	const selectOptions: SelectOptions | null = parsedSelectOptions
+		? {
+				type: parsedSelectOptions.type,
+				files: parsedSelectOptions.files,
+				directories: parsedSelectOptions.directories,
+				intention: parsedSelectOptions.intention,
+				items: selectSession?.items ?? NO_ITEMS,
+				itemUuids: selectSession?.itemUuids ?? NO_UUIDS,
+				initiallySelected: selectSession?.initiallySelected,
+				id: parsedSelectOptions.id,
+				previewType: parsedSelectOptions.previewType
 			}
-		}
+		: null
 
-		return null
-	})()
-
-	const linked = ((): Linked | null => {
-		if (linkedParam) {
-			try {
-				const parsed = deserialize(linkedParam) as Linked
-
-				return parsed
-			} catch {
-				return null
-			}
-		}
-
-		return null
-	})()
+	const linked = deserializeRouteParam<Linked>(linkedParam)
 
 	// The sharedIn/sharedOut destination screens carry the tapped directory's SDK share context here;
 	// garbage/absent parses to null (deserializeRouteParam swallows its own error).

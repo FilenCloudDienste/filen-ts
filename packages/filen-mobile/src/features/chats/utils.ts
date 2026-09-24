@@ -3,10 +3,8 @@ import { contactDisplayName } from "@filen/shared"
 import { type Chat, type ChatMessage } from "@/types"
 import { type LinkResult } from "@/features/chats/queries/useChatMessageLinks.query"
 import { type ChatMessageWithInflightId, type Suggestions } from "@/features/chats/store/useChats.store"
-import { linkedFileIntoDriveItem } from "@/lib/sdkUnwrap"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
-import alerts from "@/lib/alerts"
-import { t as i18nT } from "@/lib/i18n"
+import { openLinkedFilePreview } from "@/features/drive/linkedFilePreview"
 
 // D4c: pure composition of the rendered message list. The messages query is replaced wholesale
 // by every refetch, so a list rendered from query data alone loses optimistic pending bubbles on
@@ -227,36 +225,7 @@ export function openAttachmentPreview({
 	name: string
 }): void {
 	if (linked && linked.type === "file") {
-		const driveItem = linkedFileIntoDriveItem(linked.file)
-
-		if (driveItem.type !== "file") {
-			return
-		}
-
-		if (driveItem.data.decryptedMeta === null) {
-			alerts.normal(i18nT("cannot_decrypt_toast"))
-
-			return
-		}
-
-		useDrivePreviewStore.getState().open({
-			initialItem: {
-				type: "drive",
-				data: {
-					item: driveItem,
-					drivePath: {
-						type: "linked",
-						uuid: null
-					}
-				}
-			},
-			items: [
-				{
-					type: "drive",
-					data: driveItem
-				}
-			]
-		})
+		openLinkedFilePreview(linked.file)
 
 		return
 	}

@@ -113,6 +113,8 @@ export type FinishedTransfer = {
 	// Copies only: top-level items "move to trash" could not move. A cancelled copy keeps its row only
 	// while this is above 0.
 	copyTrashFailed?: number
+	// Copies only: no directory or file was made, e.g. every entry of a copy without a job error failed.
+	copyNothingCopied?: boolean
 }
 
 // The most finished transfers retained for the current session. Beyond this the

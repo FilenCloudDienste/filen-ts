@@ -44,6 +44,11 @@ export type DriveSelectionFlags = {
 	 * etc.) so the toolbar can downgrade to a minimal Trash-only mode.
 	 */
 	includesUndecryptable: boolean
+	/**
+	 * True iff every selected item is a plain "file" or "directory". Move, favorite and a cut's paste
+	 * throw "Invalid item type" for the shared variants every Shared Out row is.
+	 */
+	everyNormalItem: boolean
 }
 
 export const EMPTY_DRIVE_FLAGS: DriveSelectionFlags = Object.freeze({
@@ -52,7 +57,8 @@ export const EMPTY_DRIVE_FLAGS: DriveSelectionFlags = Object.freeze({
 	everyFile: false,
 	everyDirectory: false,
 	everyImageOrVideoFile: false,
-	includesUndecryptable: false
+	includesUndecryptable: false,
+	everyNormalItem: false
 }) as DriveSelectionFlags
 
 export const FILE_TYPES = new Set<DriveItem["type"]>(["file", "sharedFile", "sharedRootFile"])
@@ -102,6 +108,7 @@ export function aggregateDriveSelectionFlags(items: readonly DriveItem[]): Drive
 	let everyDirectory = true
 	let everyImageOrVideoFile = true
 	let includesUndecryptable = false
+	let everyNormalItem = true
 
 	for (let i = 0; i < items.length; i++) {
 		const it = items[i]!
@@ -131,6 +138,10 @@ export function aggregateDriveSelectionFlags(items: readonly DriveItem[]): Drive
 		if (!DIRECTORY_TYPES.has(it.type)) {
 			everyDirectory = false
 		}
+
+		if (it.type !== "file" && it.type !== "directory") {
+			everyNormalItem = false
+		}
 	}
 
 	return {
@@ -139,7 +150,8 @@ export function aggregateDriveSelectionFlags(items: readonly DriveItem[]): Drive
 		everyFile,
 		everyDirectory,
 		everyImageOrVideoFile,
-		includesUndecryptable
+		includesUndecryptable,
+		everyNormalItem
 	}
 }
 

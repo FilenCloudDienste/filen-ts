@@ -1,13 +1,18 @@
 import { vi, describe, it, expect, beforeEach } from "vitest"
 vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 
-const { mockMarkDirectorySizesStale, mockAccountQueryPatch } = vi.hoisted(() => ({
+const { mockMarkDirectorySizesStale, mockAccountQueryPatch, mockInvalidateAfterDeleteAll } = vi.hoisted(() => ({
 	mockMarkDirectorySizesStale: vi.fn(),
-	mockAccountQueryPatch: vi.fn()
+	mockAccountQueryPatch: vi.fn(),
+	mockInvalidateAfterDeleteAll: vi.fn()
 }))
 
 vi.mock("@/features/drive/queries/useDirectorySize.query", () => ({
 	markDirectorySizesStale: mockMarkDirectorySizesStale
+}))
+
+vi.mock("@/features/drive/queries/useDriveItems.query", () => ({
+	driveItemsQueryInvalidateAfterDeleteAll: mockInvalidateAfterDeleteAll
 }))
 
 // --- hoisted mocks -----------------------------------------------------------
@@ -350,6 +355,8 @@ describe("buildDangerZoneButtons", () => {
 			await btn?.onPress?.()
 
 			expect(mockAuthedSdkClient.deleteAllItems).toHaveBeenCalledTimes(1)
+			// Drive listings don't wait for the socket echo, which a down socket never delivers.
+			expect(mockInvalidateAfterDeleteAll).toHaveBeenCalledTimes(1)
 		})
 	})
 

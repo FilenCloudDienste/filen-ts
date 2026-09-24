@@ -44,6 +44,7 @@ import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import drive from "@/features/drive/drive"
 import copyRunner from "@/features/copy/copyRunner"
 import alerts from "@/lib/alerts"
+import events from "@/lib/events"
 import type { AnyNormalDir } from "@filen/sdk-rs"
 import type { DriveItem } from "@/types"
 
@@ -227,6 +228,45 @@ describe("pasteClipboard", () => {
 		expect(useDriveClipboardStore.getState().entry).toEqual({ mode: "cut", items: [items[1]] })
 		expect(useDriveClipboardStore.getState().cutUuids).toEqual(new Set(["f2"]))
 		expect(alerts.error).toHaveBeenCalledWith(error)
+
+		vi.mocked(drive.move).mockReset()
+	})
+
+	it("cut: moves each item as it is now, after a rename or content save since the cut", async () => {
+		const cut = file("f1", "a")
+		const saved = { type: "file", data: { uuid: "f2", parent: "a", decryptedMeta: { name: "renamed" } } } as unknown as DriveItem
+
+		useDriveClipboardStore.getState().set({ mode: "cut", items: [cut] })
+		events.emit("driveItemUpdated", { previousUuid: "f1", item: saved })
+
+		expect(useDriveClipboardStore.getState().cutUuids).toEqual(new Set(["f2"]))
+
+		await pasteClipboard({ targetDir: normalDir("b"), allowCut: true, t })
+
+		expect(drive.move).toHaveBeenCalledExactlyOnceWith({ item: saved, newParent: normalDir("b") })
+	})
+
+	it("cut: what fails comes back as it is by then, and an item trashed meanwhile doesn't", async () => {
+		const items = [file("f1", "a"), file("f2", "a"), file("f3", "a")]
+		const renamed = { type: "file", data: { uuid: "f1", parent: "a", decryptedMeta: { name: "renamed" } } } as unknown as DriveItem
+
+		vi.mocked(drive.move).mockImplementation(async ({ item }) => {
+			if (item.data.uuid === "f1") {
+				events.emit("driveItemUpdated", { previousUuid: "f1", item: renamed })
+			}
+
+			if (item.data.uuid === "f2") {
+				events.emit("driveItemRemoved", { uuid: "f2" })
+			}
+
+			throw new Error("move failed")
+		})
+
+		useDriveClipboardStore.getState().set({ mode: "cut", items })
+
+		await pasteClipboard({ targetDir: normalDir("b"), allowCut: true, t })
+
+		expect(useDriveClipboardStore.getState().entry).toEqual({ mode: "cut", items: [renamed, items[2]] })
 
 		vi.mocked(drive.move).mockReset()
 	})

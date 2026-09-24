@@ -162,8 +162,8 @@ function isGoneListingError(error: unknown): boolean {
 //
 // One pass (runPass):
 //   1. Gates: abort signal, onlineManager, Wi-Fi-only setting (all passes incl. manual).
-//   2. Normal trees (own cloud): one getDirOptional per tree root, or one shared parent listing for
-//      sibling roots (absent from it → the by-uuid lookup still decides). undefined/trashed → remove;
+//   2. Normal trees (own cloud): one getDirOptional per tree root, unless a parent listing made for
+//      step 3 holds it (absent from it → the by-uuid lookup still decides). undefined/trashed → remove;
 //      alive → ONE-LEVEL trash-containment gate (the tree's parent dir resolved via a per-pass
 //      cached getDirOptional; a trash-tagged parent ⇒ the tree lives inside a trashed folder ⇒
 //      remove — items inside trashed dirs keep resolving alive, so the item's own parent-tag
@@ -473,7 +473,7 @@ export class OfflineSync {
 		}
 
 		// A clean listing of the stored parent that still holds the tree answers presence, name and
-		// parent from a request shared with its siblings. Anything else (absent: moved or deleted;
+		// parent from a request the pass made anyway. Anything else (absent: moved or deleted;
 		// parent gone, failed or not listed) goes to the by-uuid lookup, which follows moves — a
 		// vanished old parent is no proof the tree is gone.
 		const listed = listingState?.status === "ok" ? listingState.dirs.byUuid.get(item.data.uuid) : undefined
@@ -1421,35 +1421,14 @@ export class OfflineSync {
 					listingParents.push(tree.parent)
 				}
 
-				// Own-cloud trees resolve by uuid, but siblings under one parent share one listing
-				// instead: M lookups become 1. A lone tree keeps its lookup — listing its parent would
-				// fetch and decrypt every sibling entry to answer one. A parent listed anyway (for a
-				// standalone file or shared tree) serves its trees for free.
-				const normalTreesPerParent = new Map<string, { parent: OfflineParent; count: number }>()
-
-				for (const tree of normalTrees) {
-					const key = parentCacheKey(tree.parent)
-					const entry = normalTreesPerParent.get(key)
-
-					if (entry) {
-						entry.count++
-					} else {
-						normalTreesPerParent.set(key, { parent: tree.parent, count: 1 })
-					}
-				}
-
-				for (const { parent, count } of normalTreesPerParent.values()) {
-					if (count > 1) {
-						listingParents.push(parent)
-					}
-				}
-
 				for (const file of syncableFiles) {
 					listingParents.push(file.parent)
 				}
 
 				// ONE deduped listing per unique parent, shared by the shared-trees pass and the
-				// standalone-files pass.
+				// standalone-files pass. Own-cloud trees never add their parent: that listing fetches and
+				// decrypts every entry there (often the root), where their by-uuid lookups cost ~1 KB each.
+				// A parent listed anyway answers its trees for free.
 				const parentListings = await this.fetchParentListings({
 					parents: listingParents,
 					authedSdkClient,

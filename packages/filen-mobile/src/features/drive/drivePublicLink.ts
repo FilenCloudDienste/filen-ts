@@ -1,5 +1,5 @@
 import auth from "@/lib/auth"
-import { type DirPublicLinkRw, type FilePublicLink } from "@filen/sdk-rs"
+import { type DirPublicLinkRw, type FilePublicLink, type PasswordState, type PublicLinkExpiration } from "@filen/sdk-rs"
 import type { DriveItem } from "@/types"
 import { driveItemsQueryUpdate } from "@/features/drive/queries/useDriveItems.query"
 import { driveItemPublicLinkStatusQueryUpdate } from "@/features/drive/queries/useDriveItemPublicLinkStatus.query"
@@ -103,28 +103,24 @@ export async function enablePublicLink({
 						: undefined
 				)
 
-		if (existing) {
-			return {
-				type: "directory" as const,
-				link: existing
-			}
-		}
-
-		const status = await authedSdkClient.publicLinkDir(
-			item.data,
-			onProgress
-				? {
-						onProgress: (bytesDownloaded, totalBytes) => {
-							onProgress(Number(bytesDownloaded), totalBytes ? Number(totalBytes) : undefined)
+		// A link made elsewhere since the caller's read is kept (never a second one) and cached like a new one.
+		const status =
+			existing ??
+			(await authedSdkClient.publicLinkDir(
+				item.data,
+				onProgress
+					? {
+							onProgress: (bytesDownloaded, totalBytes) => {
+								onProgress(Number(bytesDownloaded), totalBytes ? Number(totalBytes) : undefined)
+							}
 						}
-					}
-				: undefined,
-			signal
-				? {
-						signal
-					}
-				: undefined
-		)
+					: undefined,
+				signal
+					? {
+							signal
+						}
+					: undefined
+			))
 
 		driveItemsQueryUpdate({
 			params: {
@@ -162,21 +158,16 @@ export async function enablePublicLink({
 						: undefined
 				)
 
-		if (existing) {
-			return {
-				type: "file" as const,
-				link: existing
-			}
-		}
-
-		const status = await authedSdkClient.publicLinkFile(
-			item.data,
-			signal
-				? {
-						signal
-					}
-				: undefined
-		)
+		const status =
+			existing ??
+			(await authedSdkClient.publicLinkFile(
+				item.data,
+				signal
+					? {
+							signal
+						}
+					: undefined
+			))
 
 		driveItemsQueryUpdate({
 			params: {
@@ -225,37 +216,18 @@ export async function disablePublicLink({ item, signal, known }: { item: DriveIt
 							: undefined
 					)
 
-		if (!status) {
-			return
-		}
-
 		// SDK 0.4.27: removeDirLink takes the directory, not the link. getDirLinkStatus above is only
 		// the "is there a link to remove?" guard; the removal itself keys off the dir's uuid.
-		await authedSdkClient.removeDirLink(
-			item.data,
-			signal
-				? {
-						signal
-					}
-				: undefined
-		)
-
-		driveItemsQueryUpdate({
-			params: {
-				path: {
-					type: "links",
-					uuid: null
-				}
-			},
-			updater: prev => prev.filter(i => i.data.uuid !== item.data.uuid)
-		})
-
-		driveItemPublicLinkStatusQueryUpdate({
-			params: {
-				uuid: item.data.uuid
-			},
-			updater: () => null
-		})
+		if (status) {
+			await authedSdkClient.removeDirLink(
+				item.data,
+				signal
+					? {
+							signal
+						}
+					: undefined
+			)
+		}
 	} else {
 		const status =
 			known?.type === "file"
@@ -269,58 +241,61 @@ export async function disablePublicLink({ item, signal, known }: { item: DriveIt
 							: undefined
 					)
 
-		if (!status) {
-			return
+		if (status) {
+			await authedSdkClient.removeFileLink(
+				item.data,
+				status,
+				signal
+					? {
+							signal
+						}
+					: undefined
+			)
 		}
-
-		await authedSdkClient.removeFileLink(
-			item.data,
-			status,
-			signal
-				? {
-						signal
-					}
-				: undefined
-		)
-
-		driveItemsQueryUpdate({
-			params: {
-				path: {
-					type: "links",
-					uuid: null
-				}
-			},
-			updater: prev => prev.filter(i => i.data.uuid !== item.data.uuid)
-		})
-
-		driveItemPublicLinkStatusQueryUpdate({
-			params: {
-				uuid: item.data.uuid
-			},
-			updater: () => null
-		})
 	}
+
+	// No link to remove means it was disabled elsewhere, while the caches still show it.
+	driveItemsQueryUpdate({
+		params: {
+			path: {
+				type: "links",
+				uuid: null
+			}
+		},
+		updater: prev => prev.filter(i => i.data.uuid !== item.data.uuid)
+	})
+
+	driveItemPublicLinkStatusQueryUpdate({
+		params: {
+			uuid: item.data.uuid
+		},
+		updater: () => null
+	})
 }
 
-// `link` is the complete link record (every field of the SDK type is required), so there is nothing
-// a fresh status read could add: a merge onto it would come back byte-for-byte equal.
+// The link fields the Manage Public Link screen edits. A save writes only these onto the link.
+export type PublicLinkEdits = {
+	password?: PasswordState
+	expiration?: PublicLinkExpiration
+	downloadable?: boolean
+}
+
+// "gone": the link was disabled elsewhere. "replaced": another link took its place. Neither is written
+// to; the status cache takes the server's answer instead.
+export type PublicLinkUpdateOutcome = "updated" | "gone" | "replaced"
+
 export async function updatePublicLink({
 	item,
 	signal,
-	link
+	held,
+	edits
 }: {
 	item: DriveItem
 	signal?: AbortSignal
-	link:
-		| {
-				type: "directory"
-				link: DirPublicLinkRw
-		  }
-		| {
-				type: "file"
-				link: FilePublicLink
-		  }
-}) {
+	// The link status the edits were made against.
+	held: KnownPublicLinkStatus
+	edits: PublicLinkEdits
+}): Promise<PublicLinkUpdateOutcome> {
 	if (item.type !== "directory" && item.type !== "file") {
 		throw new Error("Invalid item type")
 	}
@@ -328,13 +303,21 @@ export async function updatePublicLink({
 	const { authedSdkClient } = await auth.getSdkClients()
 
 	if (item.type === "directory") {
-		if (link.type !== "directory") {
+		if (held.type !== "directory") {
 			throw new Error("Invalid link type for directory")
+		}
+
+		// dir/link/edit is keyed by the directory, so it can't bring back a link disabled elsewhere: no read.
+		const link: DirPublicLinkRw = {
+			...held.status,
+			password: edits.password ?? held.status.password,
+			enableDownload: edits.downloadable ?? held.status.enableDownload,
+			expiration: edits.expiration ?? held.status.expiration
 		}
 
 		await authedSdkClient.updateDirLink(
 			item.data,
-			link.link,
+			link,
 			signal
 				? {
 						signal
@@ -348,17 +331,73 @@ export async function updatePublicLink({
 			},
 			updater: () => ({
 				type: "directory" as const,
-				status: link.link
+				status: link
 			})
 		})
+
+		return "updated"
 	} else {
-		if (link.type !== "file") {
+		if (held.type !== "file") {
 			throw new Error("Invalid link type for file")
+		}
+
+		// file/link/edit is keyed by the link uuid and enables that link: a write built on the held status
+		// would re-publish a link disabled or replaced elsewhere.
+		const current = await authedSdkClient.getFileLinkStatus(
+			item.data,
+			signal
+				? {
+						signal
+					}
+				: undefined
+		)
+
+		if (!current) {
+			driveItemsQueryUpdate({
+				params: {
+					path: {
+						type: "links",
+						uuid: null
+					}
+				},
+				updater: prev => prev.filter(i => i.data.uuid !== item.data.uuid)
+			})
+
+			driveItemPublicLinkStatusQueryUpdate({
+				params: {
+					uuid: item.data.uuid
+				},
+				updater: () => null
+			})
+
+			return "gone"
+		}
+
+		if (current.linkUuid !== held.status.linkUuid) {
+			driveItemPublicLinkStatusQueryUpdate({
+				params: {
+					uuid: item.data.uuid
+				},
+				updater: () => ({
+					type: "file" as const,
+					status: current
+				})
+			})
+
+			return "replaced"
+		}
+
+		// Onto the current record, so fields changed elsewhere since the held read survive.
+		const link: FilePublicLink = {
+			...current,
+			password: edits.password ?? current.password,
+			downloadable: edits.downloadable ?? current.downloadable,
+			expiration: edits.expiration ?? current.expiration
 		}
 
 		await authedSdkClient.updateFileLink(
 			item.data,
-			link.link,
+			link,
 			signal
 				? {
 						signal
@@ -372,8 +411,10 @@ export async function updatePublicLink({
 			},
 			updater: () => ({
 				type: "file" as const,
-				status: link.link
+				status: link
 			})
 		})
+
+		return "updated"
 	}
 }

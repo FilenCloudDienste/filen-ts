@@ -27,7 +27,7 @@ import { unwrapParentUuid } from "@/lib/sdkUnwrap"
 import { unwrapSdkError } from "@/lib/sdkErrors"
 import { driveItemDisplayName } from "@/lib/decryption"
 import transfers from "@/features/transfers/transfers"
-import { notEnoughStorageMessage } from "@/features/transfers/quota"
+import { copyDoesNotFitMessage, notEnoughStorageMessage } from "@/features/transfers/quota"
 import useTransfersStore, { type FinishedTransfer } from "@/features/transfers/store/useTransfers.store"
 import useCopyJobsStore, { getCopyJob } from "@/features/copy/store/useCopyJobs.store"
 import {
@@ -108,15 +108,7 @@ function finishedOutcome(job: CopyJob): Pick<FinishedTransfer, "outcome" | "erro
 		case "quotaExceeded": {
 			return {
 				outcome: "errored",
-				// The scan's total is what didn't fit; without one only the plain limit message can be said.
-				errorMessage:
-					job.totals.bytes > job.outcome.freeBytes
-						? notEnoughStorageMessage(job.totals.bytes, job.outcome.freeBytes)
-						: copyJobErrorToHumanReadable({
-								kind: "MaxStorageReached",
-								message: "",
-								serverMessage: undefined
-							})
+				errorMessage: quotaExceededMessage(job.totals, job.outcome.freeBytes)
 			}
 		}
 
@@ -129,9 +121,85 @@ function finishedOutcome(job: CopyJob): Pick<FinishedTransfer, "outcome" | "erro
 	}
 }
 
+// The scan's total is what didn't fit. The SDK's own pre-flight refusal reports no totals at all, so
+// only the free figure it was checked against can be said; a server refusal of a copy that fit that
+// figure gets the plain limit message.
+function quotaExceededMessage(totals: CopyJob["totals"], freeBytes: number): string {
+	if (totals.bytes > freeBytes) {
+		return notEnoughStorageMessage(totals.bytes, freeBytes)
+	}
+
+	if (totals.bytes === 0 && totals.files === 0 && totals.dirs === 0) {
+		return copyDoesNotFitMessage(freeBytes)
+	}
+
+	return copyJobErrorToHumanReadable({
+		kind: "MaxStorageReached",
+		message: "",
+		serverMessage: undefined
+	})
+}
+
+// A settled job's finished row; null for a cancelled one, whose row comes back only while "move to
+// trash" left items behind.
+function finishedRow(job: CopyJob): FinishedTransfer | null {
+	const finished = finishedOutcome(job)
+
+	if (!finished) {
+		return null
+	}
+
+	return {
+		id: job.id,
+		type: "copy",
+		name: job.rowName,
+		size: job.totals.bytes,
+		bytesTransferred: job.counts.bytesDone,
+		startedAt: job.startedAt,
+		finishedAt: Date.now(),
+		outcome: finished.outcome,
+		errorMessage: finished.errorMessage,
+		errorCount: job.failures.length,
+		copyGlyph: job.glyph,
+		copyNotes: {
+			skipped: job.counts.entriesSkipped,
+			renamed: job.renamedCount,
+			savedAsVersion: job.savedAsVersionCount,
+			propagationFailed: job.propagationFailedCount
+		},
+		// A file saved as a new version still landed its bytes.
+		copyNothingCopied: job.counts.dirsCreated === 0 && job.counts.filesDone === 0 && job.savedAsVersionCount === 0
+	}
+}
+
+// The row of a stopped copy whose "move to trash" left items behind.
+function stoppedRow(job: CopyJob): FinishedTransfer {
+	return {
+		id: job.id,
+		type: "copy",
+		name: job.rowName,
+		size: job.totals.bytes,
+		bytesTransferred: job.counts.bytesDone,
+		startedAt: job.startedAt,
+		finishedAt: Date.now(),
+		outcome: "errored",
+		errorMessage: null,
+		errorCount: 0,
+		copyGlyph: job.glyph
+	}
+}
+
 // Jobs whose stop dialog is open: the job and what it made are kept for a "move to trash" answer even
 // if it settles meanwhile.
 const choosingCancel = new Set<string>()
+
+// "Move to trash" runs in flight per job; the main batch, late creates and Retry can overlap. The job is
+// kept while one runs, or a failure it reports would find no job to keep it.
+const trashing = new Map<string, number>()
+
+// Destinations whose listings may have missed create echoes. Refetched once no copy runs: a refetch
+// while another copy still streams echoes drops the ones landing mid-fetch.
+const socketGapDestinations = new Set<string | null>()
 
 // Runs copies as one SDK job and one transfers row each, however many items a job holds. The SDK owns
 // the scan, concurrency, retries and share/link propagation; this feeds its progress into the stores
@@ -317,9 +385,6 @@ class CopyRunner {
 		copyActivity.begin()
 
 		const socketAtStart = useSocketStore.getState()
-		// Set when what the job made below its destination may have outrun the socket.
-		let refetchDestination: { uuid: string | null } | null = null
-
 		const startedAt = Date.now()
 
 		useCopyJobsStore.getState().put(
@@ -366,7 +431,9 @@ class CopyRunner {
 		// Set once the job settled with "move to trash": a create delivered after that (a job dropped past
 		// its grace still delivers what it queued) is trashed on arrival.
 		let trashLateCreates = false
-		const trashLate = (item: DriveItem) => this.trashForJob(id, [item], "append")
+		// The job as it settled, brought back when a late create's trash fails after the job was pruned.
+		let settledJob: CopyJob | undefined
+		const trashLate = (item: DriveItem) => this.trashForJob(id, [item], settledJob)
 
 		const flush = () => {
 			if (trailing) {
@@ -510,13 +577,27 @@ class CopyRunner {
 			) {
 				const freshMaxBytes = copyMaxBytes(await readFreshAccount())
 
-				if (freshMaxBytes !== undefined && freshMaxBytes > maxBytes && !compositeAbort.aborted) {
-					maxBytes = freshMaxBytes
-					settlement = await attempt(maxBytes)
-				} else if (freshMaxBytes !== undefined) {
-					settlement = {
-						report: settlement.report,
-						maxBytes: freshMaxBytes
+				if (!compositeAbort.aborted && freshMaxBytes !== undefined) {
+					if (freshMaxBytes > maxBytes) {
+						maxBytes = freshMaxBytes
+						settlement = await attempt(maxBytes)
+					} else {
+						settlement = {
+							report: settlement.report,
+							maxBytes: freshMaxBytes
+						}
+					}
+				}
+			}
+
+			// Refused before anything was written, and stopped meanwhile (its own stop, Cancel all or the
+			// background lifecycle, the last two setting no cancelRequest): it ends as the stop it was.
+			if ("report" in settlement && isQuotaPreflightFailure(settlement.report) && compositeAbort.aborted) {
+				settlement = {
+					error: {
+						kind: "Cancelled",
+						message: "",
+						serverMessage: undefined
 					}
 				}
 			}
@@ -543,7 +624,8 @@ class CopyRunner {
 
 			// Nested items only reach listings as socket echoes. A socket that was down, or reconnected, at
 			// any point during the job may have dropped some.
-			const settledJob = getCopyJob(id)
+			settledJob = getCopyJob(id)
+
 			const socket = useSocketStore.getState()
 
 			if (
@@ -551,14 +633,12 @@ class CopyRunner {
 				(settledJob.counts.dirsCreated > 0 || settledJob.counts.filesDone > 0) &&
 				(socketAtStart.state !== "connected" || socket.state !== "connected" || socket.connectedAt !== socketAtStart.connectedAt)
 			) {
-				refetchDestination = {
-					uuid: settledJob.destination.uuid
-				}
+				socketGapDestinations.add(settledJob.destination.uuid)
 			}
 
 			trashLateCreates = settledJob?.cancelRequest === "trash"
 
-			return await this.settle(id)
+			return await this.settle(id, live)
 		} finally {
 			if (trailing) {
 				clearTimeout(trailing)
@@ -576,19 +656,26 @@ class CopyRunner {
 			// Created items land in their listings before Recents is refreshed.
 			if (live()) {
 				socketCreateBatcher.flushNow()
-
-				if (refetchDestination) {
-					driveItemsQueryRefetchAfterSocketGap(refetchDestination.uuid)
-				}
 			}
 
 			copyActivity.end()
+
+			// The last copy out refetches whatever any of them may have missed.
+			if (!copyActivity.isActive()) {
+				if (live()) {
+					for (const destinationUuid of socketGapDestinations) {
+						driveItemsQueryRefetchAfterSocketGap(destinationUuid)
+					}
+				}
+
+				socketGapDestinations.clear()
+			}
 		}
 	}
 
 	// Only top-level items; their subtrees go with them. Moved to the trash, never deleted.
 	private async trashCreated(id: string): Promise<void> {
-		await this.trashForJob(id, getCopyJob(id)?.created ?? [], "replace")
+		await this.trashForJob(id, getCopyJob(id)?.created ?? [])
 	}
 
 	// "Retry" on a stopped copy's row: moves to the trash just what the last attempt could not.
@@ -599,61 +686,86 @@ class CopyRunner {
 			return
 		}
 
-		await this.trashForJob(id, failed, "replace")
+		await this.trashForJob(id, failed)
 	}
 
-	// What fails stays on the job ("append" for a late create, whose earlier failures still stand) and
-	// keeps, or brings back, the job's row with a Retry.
-	private async trashForJob(id: string, items: readonly DriveItem[], mode: "replace" | "append"): Promise<void> {
-		const { failedItems, ...trashResult } = await trashCopied(id, items)
+	// What fails stays on the job next to earlier failures this run did not retry, and keeps, or brings
+	// back, the job's row with a Retry. `settled` brings back a job pruned before a late create's trash
+	// failed. Takes no abort signal: the job's own is aborted by the very stop that asked for the trash,
+	// and the copy scope's by iOS backgrounding too.
+	private async trashForJob(id: string, items: readonly DriveItem[], settled?: CopyJob): Promise<void> {
+		const epoch = transfers.sessionEpoch
 
-		useCopyJobsStore.getState().update(id, job => ({
-			...job,
-			trashResult,
-			trashFailed: mode === "replace" ? failedItems : [...job.trashFailed, ...failedItems]
-		}))
+		trashing.set(id, (trashing.get(id) ?? 0) + 1)
 
-		syncTrashFailedRow(id)
+		try {
+			const { failedItems, ...trashResult } = await trashCopied(id, items)
+
+			// Signed out meanwhile: the ended session gets no job or row back.
+			if (transfers.sessionEpoch !== epoch) {
+				return
+			}
+
+			if (!getCopyJob(id)) {
+				if (!settled || failedItems.length === 0) {
+					return
+				}
+
+				useCopyJobsStore.getState().put({
+					...settled,
+					created: [],
+					trashFailed: []
+				})
+			}
+
+			const attempted = new Set(items.map(item => item.data.uuid))
+
+			useCopyJobsStore.getState().update(id, job => ({
+				...job,
+				trashResult,
+				trashFailed: [...job.trashFailed.filter(item => !attempted.has(item.data.uuid)), ...failedItems]
+			}))
+
+			syncTrashFailedRow(id)
+		} finally {
+			const running = (trashing.get(id) ?? 1) - 1
+
+			if (running > 0) {
+				trashing.set(id, running)
+			} else {
+				trashing.delete(id)
+
+				// A prune the trash held back happens now.
+				pruneSettledCopyJobs()
+			}
+		}
 	}
 
-	private async settle(id: string): Promise<CopyJob | undefined> {
+	private async settle(id: string, live: () => boolean): Promise<CopyJob | undefined> {
 		const job = getCopyJob(id)
 
 		if (!job) {
 			return undefined
 		}
 
-		const finished = finishedOutcome(job)
-		const row = useTransfersStore.getState().transfers.find(t => t.id === id)
+		const hadRow = useTransfersStore.getState().transfers.some(t => t.id === id)
+		const row = hadRow ? finishedRow(job) : null
 
 		useTransfersStore.getState().setTransfers(prev => prev.filter(t => t.id !== id))
 
-		if (finished && row) {
-			useTransfersStore.getState().addFinishedTransfer({
-				id,
-				type: "copy",
-				name: row.type === "copy" ? row.name : "",
-				size: job.totals.bytes,
-				bytesTransferred: job.counts.bytesDone,
-				startedAt: row.startedAt,
-				finishedAt: Date.now(),
-				outcome: finished.outcome,
-				errorMessage: finished.errorMessage,
-				errorCount: job.failures.length,
-				copyGlyph: job.glyph,
-				copyNotes: {
-					skipped: job.counts.entriesSkipped,
-					renamed: job.renamedCount,
-					savedAsVersion: job.savedAsVersionCount,
-					propagationFailed: job.propagationFailedCount
-				}
-			})
+		if (row) {
+			useTransfersStore.getState().addFinishedTransfer(row)
 		}
 
 		// Honoured however the job ended: a copy that finished before the cancel reached it still made
 		// what the user asked to remove.
 		if (job.cancelRequest === "trash") {
 			await this.trashCreated(id)
+
+			// Signed out while the trash ran: no account, size or job write for the ended session.
+			if (!live()) {
+				return undefined
+			}
 		}
 
 		if (job.counts.bytesDone > 0) {
@@ -779,18 +891,10 @@ function syncTrashFailedRow(id: string): void {
 			return
 		}
 
+		// A copy that finished comes back as it ended (its row was removed meanwhile), so a later clean
+		// retry leaves that row rather than an empty error.
 		store.addFinishedTransfer({
-			id,
-			type: "copy",
-			name: job.rowName,
-			size: job.totals.bytes,
-			bytesTransferred: job.counts.bytesDone,
-			startedAt: job.startedAt,
-			finishedAt: Date.now(),
-			outcome: "errored",
-			errorMessage: null,
-			errorCount: 0,
-			copyGlyph: job.glyph,
+			...(finishedRow(job) ?? stoppedRow(job)),
 			copyTrashFailed: failed
 		})
 
@@ -840,7 +944,7 @@ function pruneSettledCopyJobs(): void {
 	}
 
 	for (const job of Object.values(useCopyJobsStore.getState().jobs)) {
-		if (job.outcome.status !== "running" && !rows.has(job.id) && !choosingCancel.has(job.id)) {
+		if (job.outcome.status !== "running" && !rows.has(job.id) && !choosingCancel.has(job.id) && !trashing.has(job.id)) {
 			useCopyJobsStore.getState().remove(job.id)
 		}
 	}

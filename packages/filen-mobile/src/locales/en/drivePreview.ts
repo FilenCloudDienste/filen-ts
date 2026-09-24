@@ -99,6 +99,11 @@ export const drivePreview = {
 	thirty_days: "30 days",
 	/** Error shown when the public link could not be built for sharing */
 	public_link_generate_failed: "Could not create the public link. Please try again.",
+	/** Error shown when saving public-link settings finds the link was disabled on another device; nothing was saved */
+	public_link_gone_elsewhere: "This link was disabled on another device, so your changes were not saved.",
+	/** Error shown when saving public-link settings finds the link was replaced by a new one on another device; the screen now shows the new link */
+	public_link_replaced_elsewhere:
+		"This link was replaced on another device, so your changes were not saved. Its current settings are shown.",
 	/** Error shown when the device does not support the system share sheet */
 	sharing_not_available: "Sharing is not available on this device.",
 

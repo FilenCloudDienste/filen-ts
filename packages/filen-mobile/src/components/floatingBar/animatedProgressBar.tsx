@@ -11,8 +11,13 @@ const TIMING_CONFIG = {
 	easing: Easing.linear
 }
 
+// Outside the component: the React Compiler skips a component that references a hook as a value.
+function currentProgress(): number {
+	return useTransfersStore.getState().stats.progress
+}
+
 const AnimatedProgressBar = () => {
-	const progress = useSharedValue(useTransfersStore.getState().stats.progress)
+	const progress = useSharedValue(currentProgress())
 	const textBlue500 = useResolveClassNames("text-blue-500")
 	const bgBackgroundTertiary = useResolveClassNames("bg-background-tertiary")
 

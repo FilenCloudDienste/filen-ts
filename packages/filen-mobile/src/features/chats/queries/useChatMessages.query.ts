@@ -113,4 +113,14 @@ export function chatMessagesQueryGet(params: UseChatMessagesQueryParams) {
 	return queryUpdater.get<Awaited<ReturnType<typeof fetchData>>>([BASE_QUERY_KEY, sortedParams])
 }
 
+// Whether an open chat screen observes this chat's messages. The chats list's unread badges observe
+// with enabled:false and don't count. One hash lookup, like chatMessagesQueryGet.
+export function chatMessagesQueryIsActive(params: UseChatMessagesQueryParams): boolean {
+	const { queryHash } = queryClient.defaultQueryOptions({
+		queryKey: [BASE_QUERY_KEY, sortParams(chatMessagesQueryKey(params))]
+	})
+
+	return queryClient.getQueryCache().get(queryHash)?.isActive() === true
+}
+
 export default useChatMessagesQuery

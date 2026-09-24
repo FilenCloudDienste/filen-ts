@@ -143,6 +143,162 @@ describe("accountQueryPatch", () => {
 	})
 })
 
+describe("accountQueryPatch while a read is out", () => {
+	function deferred<T>() {
+		let resolve: (value: T) => void = () => {}
+		let reject: (error: unknown) => void = () => {}
+		const promise = new Promise<T>((res, rej) => {
+			resolve = res
+			reject = rej
+		})
+
+		return { promise, resolve, reject }
+	}
+
+	function cachedAccount(): Account | undefined {
+		return holder.client.getQueryData<Account>([BASE_QUERY_KEY])
+	}
+
+	// A stale row renders while the mount read is out, as on Settings > Account.
+	async function mountReading(read: Promise<Account>) {
+		holder.client.setQueryData([BASE_QUERY_KEY], account, { updatedAt: Date.now() - 61 * 1000 })
+		mockGetUserInfo.mockImplementationOnce(() => read)
+
+		const screen = renderHook(() => useAccountQuery(), { wrapper })
+
+		await waitFor(() => expect(mockGetUserInfo).toHaveBeenCalledTimes(1))
+
+		return screen
+	}
+
+	it("a switch flipped meanwhile survives the read's older answer, with no extra request", async () => {
+		const read = deferred<Account>()
+		const screen = await mountReading(read.promise)
+
+		accountQueryPatch({ versioningEnabled: false })
+		read.resolve({ ...account, storageUsed: 300n })
+
+		await waitFor(() => expect(screen.result.current.fetchStatus).toBe("idle"))
+
+		expect(cachedAccount()?.versioningEnabled).toBe(false)
+		expect(cachedAccount()?.storageUsed).toBe(300n)
+		expect(mockGetUserInfo).toHaveBeenCalledTimes(1)
+
+		screen.unmount()
+	})
+
+	it("several writes during one read all survive it, the later one winning", async () => {
+		const read = deferred<Account>()
+		const screen = await mountReading(read.promise)
+
+		accountQueryPatch({ nickName: "first", versioningEnabled: false })
+		accountQueryPatch({ nickName: "second" })
+		read.resolve(account)
+
+		await waitFor(() => expect(screen.result.current.fetchStatus).toBe("idle"))
+
+		expect(cachedAccount()?.nickName).toBe("second")
+		expect(cachedAccount()?.versioningEnabled).toBe(false)
+
+		screen.unmount()
+	})
+
+	it("a quota check that joined the read gets its answer, not a cancellation", async () => {
+		const read = deferred<Account>()
+		const screen = await mountReading(read.promise)
+		const fresh = fetchFreshAccount()
+
+		accountQueryPatch({ versioningEnabled: false })
+		read.resolve({ ...account, storageUsed: 300n })
+
+		expect((await fresh).storageUsed).toBe(300n)
+		expect(mockGetUserInfo).toHaveBeenCalledTimes(1)
+
+		screen.unmount()
+	})
+
+	it("a storage bump is not laid over the read: its figure is the server's own", async () => {
+		const read = deferred<Account>()
+		const screen = await mountReading(read.promise)
+
+		addAccountStorageUsed(50n)
+
+		expect(cachedAccount()?.storageUsed).toBe(150n)
+
+		read.resolve({ ...account, storageUsed: 500n })
+
+		await waitFor(() => expect(screen.result.current.fetchStatus).toBe("idle"))
+
+		expect(cachedAccount()?.storageUsed).toBe(500n)
+
+		screen.unmount()
+	})
+
+	it("a read that fails keeps the patch, and a later read is not overridden", async () => {
+		const read = deferred<Account>()
+		const screen = await mountReading(read.promise)
+
+		accountQueryPatch({ versioningEnabled: false })
+		read.reject(new Error("offline"))
+
+		await waitFor(() => expect(screen.result.current.fetchStatus).toBe("idle"))
+
+		expect(cachedAccount()?.versioningEnabled).toBe(false)
+
+		// Switched back on another device since: a read that starts after the write has the server's value.
+		mockGetUserInfo.mockResolvedValueOnce({ ...account, versioningEnabled: true })
+
+		await screen.result.current.refetch()
+
+		expect(cachedAccount()?.versioningEnabled).toBe(true)
+
+		screen.unmount()
+	})
+
+	it("a reread that replaced the read out at the write has the server's value, and is not overridden", async () => {
+		const read = deferred<Account>()
+		const screen = await mountReading(read.promise)
+
+		// 2FA turned on while the mount read is out, then off again: disabling rereads, cancelling that read.
+		accountQueryPatch({ twoFactorEnabled: true, twoFactorKey: undefined })
+		mockGetUserInfo.mockResolvedValueOnce({ ...account, twoFactorEnabled: false, twoFactorKey: "k2" })
+
+		await screen.result.current.refetch()
+
+		expect(cachedAccount()?.twoFactorEnabled).toBe(false)
+		expect(cachedAccount()?.twoFactorKey).toBe("k2")
+		expect(mockGetUserInfo).toHaveBeenCalledTimes(2)
+
+		screen.unmount()
+	})
+
+	it("a write during the reread is laid over the reread; one made before it is not", async () => {
+		const first = deferred<Account>()
+		const screen = await mountReading(first.promise)
+
+		accountQueryPatch({ nickName: "before the reread" })
+
+		const second = deferred<Account>()
+
+		mockGetUserInfo.mockImplementationOnce(() => second.promise)
+
+		const reread = screen.result.current.refetch()
+
+		await waitFor(() => expect(mockGetUserInfo).toHaveBeenCalledTimes(2))
+
+		accountQueryPatch({ versioningEnabled: false })
+		second.resolve({ ...account, nickName: "server" })
+
+		await reread
+
+		// The reread was sent after the nickname write, so its nickname stands; it may predate the versioning write.
+		expect(cachedAccount()?.nickName).toBe("server")
+		expect(cachedAccount()?.versioningEnabled).toBe(false)
+
+		screen.unmount()
+	})
+})
+
 describe("quota helpers", () => {
 	it("trusts a cached account for ten minutes, then not; nothing cached is never fresh", () => {
 		const now = Date.now()

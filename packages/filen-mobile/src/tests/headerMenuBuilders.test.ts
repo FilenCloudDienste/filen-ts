@@ -113,6 +113,7 @@ function makeFlags(overrides: Partial<DriveSelectionFlags> = {}): DriveSelection
 		everyDirectory: false,
 		everyImageOrVideoFile: false,
 		includesUndecryptable: false,
+		everyNormalItem: true,
 		...overrides
 	}
 }
@@ -1013,6 +1014,25 @@ describe("buildBulkActionMenu", () => {
 		for (const type of ["sharedIn", "offline", "photos"] as const) {
 			expect(copySubIds(type)).toEqual(["bulkCopyToClipboard", "bulkCopyTo"])
 		}
+	})
+
+	it("offers no Cut, Move or Favorite for shared-typed rows (all of Shared Out), but keeps Copy and Copy to", () => {
+		const idsFor = (everyNormalItem: boolean) =>
+			buttonIds(
+				buildBulkActionMenu({
+					drivePath: makeDrivePath("sharedOut"),
+					selectedDriveItems: selectedItems,
+					liveItems,
+					driveFlags: makeFlags({ everyNormalItem }),
+					t: t as never
+				})
+			)
+
+		expect(copySubIds("sharedOut", { everyNormalItem: false })).toEqual(["bulkCopyToClipboard", "bulkCopyTo"])
+		expect(idsFor(false)).not.toContain("bulkMove")
+		expect(idsFor(false)).not.toContain("bulkFavorite")
+		expect(copySubIds("sharedOut", { everyNormalItem: true })).toEqual(["bulkCopyToClipboard", "bulkCutToClipboard", "bulkCopyTo"])
+		expect(idsFor(true)).toEqual(expect.arrayContaining(["bulkMove", "bulkFavorite"]))
 	})
 
 	it("offers no Copy in the trash, link views or with an undecryptable item selected", () => {

@@ -5,7 +5,9 @@ import {
 	driveItemsQueryUpdate,
 	driveItemsQueryUpdateForNormalParent,
 	driveItemsQueryUpdateForPhotos,
-	driveItemsQueryRemoveDirectoryFromPhotos
+	driveItemsQueryRemoveDirectoryFromPhotos,
+	driveItemsQueryInvalidateAfterDeleteAll,
+	driveItemsQueryMarkAllStale
 } from "@/features/drive/queries/useDriveItems.query"
 import { unwrapParentUuid, unwrapFileMeta, unwrappedFileIntoDriveItem, unwrapDirMeta, unwrappedDirIntoDriveItem } from "@/lib/sdkUnwrap"
 import { upsertItem } from "@filen/shared"
@@ -13,6 +15,7 @@ import cache from "@/lib/cache"
 import useDriveStore from "@/features/drive/store/useDrive.store"
 import { markDirectorySizesStale } from "@/features/drive/queries/useDirectorySize.query"
 import socketCreateBatcher from "@/features/drive/socketCreateBatcher"
+import { dropCutItem, dropDriveItem, followDriveItem, followFileSuccessor } from "@/features/drive/clipboardFollow"
 import logger from "@/lib/logger"
 
 export type DriveSocketEvent = Extract<SocketEvent, { tag: typeof SocketEvent_Tags.Drive }>
@@ -28,6 +31,12 @@ const SIZE_NEUTRAL_TAGS = new Set<DriveEvent_Tags>([
 
 // Applied in batches per parent (socketCreateBatcher), which also marks sizes stale once per batch.
 const BATCHED_CREATE_TAGS = new Set<DriveEvent_Tags>([DriveEvent_Tags.FileNew, DriveEvent_Tags.FolderSubCreated])
+
+// A drive event the SDK couldn't read (SocketEvent_Tags.DriveMalformed): some change happened that no
+// listing got, so every listing reads again on its next mount.
+export function handleDriveMalformedEvent(): void {
+	driveItemsQueryMarkAllStale()
+}
 
 export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): Promise<void> {
 	const [eventInner] = event.inner
@@ -62,6 +71,9 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 				cache.cacheNewFile(inner.file, driveItem)
 			}
 
+			// A content edit arrives as a new file of the same lineage.
+			followFileSuccessor(driveItem)
+
 			break
 		}
 
@@ -92,6 +104,13 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 					parentUuid: unwrappedParentUuid,
 					updater: prev => [...prev.filter(i => i.data.uuid !== unwrappedFileMeta.file.uuid), driveItem]
 				})
+			}
+
+			// The restored version takes over from the file's current one.
+			if (eventInner.inner.tag === DriveEvent_Tags.FileArchiveRestored) {
+				const [archiveRestored] = eventInner.inner.inner
+
+				followDriveItem(archiveRestored.currentUuid, driveItem)
 			}
 
 			// A restore leaves mtime unchanged, so it is not surfaced in Recents (a new file is, via the batcher).
@@ -137,6 +156,19 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 			// archive listing — left in cache so it's previewable there).
 			if (eventInner.inner.tag === DriveEvent_Tags.FileDeletedPermanent) {
 				cache.forgetItem(inner.uuid)
+
+				// Without a stableUuid only an old version went, not the file.
+				if (inner.stableUuid) {
+					dropDriveItem(inner.uuid)
+				}
+			} else {
+				const [archived] = eventInner.inner.inner
+
+				// Without newUuid another file replaced this one and its lineage ended; with it, a cut follows
+				// the paired FileNew instead.
+				if (!archived.newUuid) {
+					dropCutItem(archived.uuid)
+				}
 			}
 
 			break
@@ -167,6 +199,7 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 			})
 
 			cache.forgetItem(inner.uuid)
+			dropDriveItem(inner.uuid)
 
 			break
 		}
@@ -203,6 +236,8 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 						updater: prev => prev.map(i => (i.data.uuid === unwrappedFileMeta.file.uuid ? driveItem : i))
 					})
 				}
+
+				followDriveItem(inner.uuid, driveItem)
 			}
 
 			break
@@ -246,6 +281,8 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 					updater: prev => upsertItem(prev, driveItem)
 				})
 			}
+
+			followDriveItem(inner.file.uuid, driveItem)
 
 			break
 		}
@@ -291,9 +328,12 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 
 				driveItemsQueryRemoveDirectoryFromPhotos({
 					dirUuid: unwrappedDirMeta.uuid,
-					newParentUuid: unwrappedParentUuidNew
+					newParentUuid: unwrappedParentUuidNew,
+					previousParentUuid: unwrappedParentUuidOld
 				})
 			}
+
+			followDriveItem(inner.dir.uuid, driveItem)
 
 			break
 		}
@@ -323,6 +363,8 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 						updater: prev => prev.map(i => (i.data.uuid === unwrappedDirMeta.uuid ? driveItem : i))
 					})
 				}
+
+				followDriveItem(inner.uuid, driveItem)
 			}
 
 			break
@@ -334,6 +376,11 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 			// The item left the current listing — purge it from the selection so
 			// the count / select-all toggle / bulk ops never target a ghost.
 			useDriveStore.getState().removeFromSelection([inner.uuid])
+
+			// With newUuid it was an edit (see below), which a cut follows through the paired FileNew.
+			if (!inner.newUuid) {
+				dropDriveItem(inner.uuid)
+			}
 
 			const fromCache = cache.fileUuidToNormalFile.get(inner.uuid)
 
@@ -378,6 +425,7 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 			// The item left the current listing — purge it from the selection so
 			// the count / select-all toggle / bulk ops never target a ghost.
 			useDriveStore.getState().removeFromSelection([inner.uuid])
+			dropDriveItem(inner.uuid)
 
 			// The payload's `{ parent, uuid }` is enough to drop the item from its previous listing
 			// without the cache. Building the trash-listing ROW still needs the full Dir, so that half
@@ -423,6 +471,16 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 
 			if (fromCache && fromCache.tag === AnyNormalDir_Tags.Dir) {
 				const unwrappedParentUuid = unwrapParentUuid(fromCache.inner[0].parent)
+				const updatedRawDir = {
+					...fromCache.inner[0],
+					color: inner.color
+				}
+				const driveItem = unwrappedDirIntoDriveItem(unwrapDirMeta(updatedRawDir))
+
+				// The cached Dir keeps the colour too: a later metadata change rebuilds the row from it.
+				if (driveItem.type === "directory") {
+					cache.cacheNewNormalDir(updatedRawDir, driveItem)
+				}
 
 				if (unwrappedParentUuid) {
 					driveItemsQueryUpdateGlobal({
@@ -441,6 +499,8 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 							)
 					})
 				}
+
+				followDriveItem(inner.uuid, driveItem)
 			}
 
 			break
@@ -598,10 +658,15 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 			break
 		}
 
-		case DriveEvent_Tags.DeleteAll:
+		case DriveEvent_Tags.DeleteAll: {
+			// No per-item payload to patch listings with.
+			driveItemsQueryInvalidateAfterDeleteAll()
+
+			break
+		}
+
 		case DriveEvent_Tags.DeleteVersioned: {
-			// These carry no per-item payload a listing patch could apply; ignoring them beats
-			// surfacing an error for a routine remote action.
+			// Only old versions go, which no listing shows.
 			break
 		}
 

@@ -194,6 +194,7 @@ export function buildBulkActionMenu({
 	// action, belongs at the top of the menu.
 	if (
 		!hasUndecryptable &&
+		driveFlags.everyNormalItem &&
 		(drivePath.type === "drive" || drivePath.type === "recents" || drivePath.type === "favorites" || drivePath.type === "sharedOut")
 	) {
 		menuButtons.push({
@@ -218,6 +219,7 @@ export function buildBulkActionMenu({
 
 	const offersMove =
 		!hasUndecryptable &&
+		driveFlags.everyNormalItem &&
 		(drivePath.type === "drive" ||
 			drivePath.type === "favorites" ||
 			drivePath.type === "sharedOut" ||

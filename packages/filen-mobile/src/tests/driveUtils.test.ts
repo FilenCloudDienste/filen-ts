@@ -223,6 +223,7 @@ describe("resolveDriveHeaderTitle", () => {
 			drivePath: drivePath("drive", { uuid: "uuid-1" }),
 			selectedCount: 3,
 			stringifiedClientRootUuid: null,
+			listingFetchStatus: "idle",
 			t: t
 		})
 
@@ -238,6 +239,7 @@ describe("resolveDriveHeaderTitle", () => {
 			}),
 			selectedCount: 5,
 			stringifiedClientRootUuid: null,
+			listingFetchStatus: "idle",
 			t: t
 		})
 
@@ -249,6 +251,7 @@ describe("resolveDriveHeaderTitle", () => {
 			drivePath: drivePath("trash"),
 			selectedCount: 0,
 			stringifiedClientRootUuid: null,
+			listingFetchStatus: "idle",
 			t: t
 		})
 
@@ -265,6 +268,7 @@ describe("resolveDriveHeaderTitle", () => {
 			drivePath: drivePath("drive", { selectOptions: selectOptions({ intention: "move" }) }),
 			selectedCount: 0,
 			stringifiedClientRootUuid: null,
+			listingFetchStatus: "idle",
 			t: t
 		})
 
@@ -282,6 +286,7 @@ describe("resolveDriveHeaderTitle", () => {
 			}),
 			selectedCount: 0,
 			stringifiedClientRootUuid: null,
+			listingFetchStatus: "idle",
 			t: t
 		})
 
@@ -295,6 +300,7 @@ describe("resolveDriveHeaderTitle", () => {
 			}),
 			selectedCount: 0,
 			stringifiedClientRootUuid: null,
+			listingFetchStatus: "idle",
 			t: t
 		})
 
@@ -308,6 +314,7 @@ describe("resolveDriveHeaderTitle", () => {
 			}),
 			selectedCount: 0,
 			stringifiedClientRootUuid: null,
+			listingFetchStatus: "idle",
 			t: t
 		})
 
@@ -321,6 +328,7 @@ describe("resolveDriveHeaderTitle", () => {
 			}),
 			selectedCount: 0,
 			stringifiedClientRootUuid: null,
+			listingFetchStatus: "idle",
 			t: t
 		})
 
@@ -334,6 +342,7 @@ describe("resolveDriveHeaderTitle", () => {
 			}),
 			selectedCount: 0,
 			stringifiedClientRootUuid: null,
+			listingFetchStatus: "idle",
 			t: t
 		})
 
@@ -347,6 +356,7 @@ describe("resolveDriveHeaderTitle", () => {
 			}),
 			selectedCount: 0,
 			stringifiedClientRootUuid: null,
+			listingFetchStatus: "idle",
 			t: t
 		})
 
@@ -362,6 +372,7 @@ describe("resolveDriveHeaderTitle", () => {
 			drivePath: drivePath("drive", { uuid: "root-uuid" }),
 			selectedCount: 0,
 			stringifiedClientRootUuid: "root-uuid",
+			listingFetchStatus: "idle",
 			t: t
 		})
 
@@ -375,6 +386,7 @@ describe("resolveDriveHeaderTitle", () => {
 			drivePath: drivePath("drive", { uuid: "dir-abc" }),
 			selectedCount: 0,
 			stringifiedClientRootUuid: null,
+			listingFetchStatus: "idle",
 			t: t
 		})
 
@@ -390,6 +402,7 @@ describe("resolveDriveHeaderTitle", () => {
 			drivePath: drivePath("drive", { uuid: "dir-xyz" }),
 			selectedCount: 0,
 			stringifiedClientRootUuid: null,
+			listingFetchStatus: "idle",
 			t: t
 		})
 
@@ -402,6 +415,7 @@ describe("resolveDriveHeaderTitle", () => {
 			drivePath: drivePath("drive", { uuid: "unknown-uuid" }),
 			selectedCount: 0,
 			stringifiedClientRootUuid: "other-root",
+			listingFetchStatus: "idle",
 			t: t
 		})
 
@@ -413,6 +427,7 @@ describe("resolveDriveHeaderTitle", () => {
 			drivePath: drivePath("drive", { uuid: null }),
 			selectedCount: 0,
 			stringifiedClientRootUuid: null,
+			listingFetchStatus: "idle",
 			t: t
 		})
 
@@ -430,6 +445,7 @@ describe("resolveDriveHeaderTitle", () => {
 			drivePath: drivePath("trash", { uuid: "trash-dir" }),
 			selectedCount: 0,
 			stringifiedClientRootUuid: null,
+			listingFetchStatus: "idle",
 			t: t
 		})
 
@@ -445,6 +461,7 @@ describe("resolveDriveHeaderTitle", () => {
 			drivePath: drivePath("recents"),
 			selectedCount: 0,
 			stringifiedClientRootUuid: null,
+			listingFetchStatus: "idle",
 			t: t
 		})
 
@@ -462,6 +479,7 @@ describe("resolveDriveHeaderTitle", () => {
 			drivePath: drivePath("offline", { uuid: "offline-dir" }),
 			selectedCount: 0,
 			stringifiedClientRootUuid: null,
+			listingFetchStatus: "idle",
 			t: t
 		})
 
@@ -473,6 +491,7 @@ describe("resolveDriveHeaderTitle", () => {
 			drivePath: drivePath("offline", { uuid: "missing" }),
 			selectedCount: 0,
 			stringifiedClientRootUuid: null,
+			listingFetchStatus: "idle",
 			t: t
 		})
 
@@ -490,6 +509,7 @@ describe("resolveDriveHeaderTitle", () => {
 			drivePath: drivePath("sharedIn", { uuid: "shared-in-dir" }),
 			selectedCount: 0,
 			stringifiedClientRootUuid: null,
+			listingFetchStatus: "idle",
 			t: t
 		})
 
@@ -501,6 +521,7 @@ describe("resolveDriveHeaderTitle", () => {
 			drivePath: drivePath("sharedIn", { uuid: null }),
 			selectedCount: 0,
 			stringifiedClientRootUuid: null,
+			listingFetchStatus: "idle",
 			t: t
 		})
 
@@ -516,6 +537,7 @@ describe("resolveDriveHeaderTitle", () => {
 			drivePath: drivePath("sharedOut", { uuid: null }),
 			selectedCount: 0,
 			stringifiedClientRootUuid: null,
+			listingFetchStatus: "idle",
 			t: t
 		})
 
@@ -531,6 +553,7 @@ describe("resolveDriveHeaderTitle", () => {
 			drivePath: drivePath("links", { uuid: null }),
 			selectedCount: 0,
 			stringifiedClientRootUuid: null,
+			listingFetchStatus: "idle",
 			t: t
 		})
 
@@ -546,6 +569,7 @@ describe("resolveDriveHeaderTitle", () => {
 			drivePath: drivePath("favorites", { uuid: null }),
 			selectedCount: 0,
 			stringifiedClientRootUuid: null,
+			listingFetchStatus: "idle",
 			t: t
 		})
 
@@ -566,6 +590,7 @@ describe("resolveDriveHeaderTitle", () => {
 			}),
 			selectedCount: 0,
 			stringifiedClientRootUuid: null,
+			listingFetchStatus: "idle",
 			t: t
 		})
 
@@ -580,6 +605,7 @@ describe("resolveDriveHeaderTitle", () => {
 			}),
 			selectedCount: 0,
 			stringifiedClientRootUuid: null,
+			listingFetchStatus: "idle",
 			t: t
 		})
 
@@ -591,6 +617,7 @@ describe("resolveDriveHeaderTitle", () => {
 			drivePath: drivePath("linked", { uuid: null }),
 			selectedCount: 0,
 			stringifiedClientRootUuid: null,
+			listingFetchStatus: "idle",
 			t: t
 		})
 
@@ -606,6 +633,7 @@ describe("resolveDriveHeaderTitle", () => {
 			drivePath: { type: null, uuid: null } as DrivePath,
 			selectedCount: 0,
 			stringifiedClientRootUuid: null,
+			listingFetchStatus: "idle",
 			t: t
 		})
 
@@ -624,6 +652,7 @@ describe("resolveDriveHeaderTitle", () => {
 			drivePath: drivePath("drive", { uuid: "decryptable-dir" }),
 			selectedCount: 0,
 			stringifiedClientRootUuid: null,
+			listingFetchStatus: "idle",
 			t: t
 		})
 

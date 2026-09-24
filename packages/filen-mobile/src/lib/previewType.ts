@@ -23,7 +23,7 @@ export type PreviewType = "image" | "svg" | "rawImage" | "video" | "unknown" | "
  * original path untouched — including its latent `URIError` on malformed percent-escapes
  * (`file:///a/b%zz.txt`), which is preserved deliberately rather than silently swallowed.
  */
-function extnameOf(name: string): string {
+export function extnameOf(name: string): string {
 	return name.includes(":") ? FileSystem.Paths.extname(name) : pathModule.posix.extname(name)
 }
 

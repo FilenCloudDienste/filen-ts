@@ -8,6 +8,7 @@ const {
 	mockChatsQueryFetch,
 	mockChatMessagesQueryFetch,
 	mockChatMessagesQueryGet,
+	mockChatMessagesQueryIsActive,
 	mockSdkClient,
 	mockPurgeChatInflightState
 } = vi.hoisted(() => {
@@ -41,6 +42,7 @@ const {
 		mockChatsQueryFetch: vi.fn().mockResolvedValue([]),
 		mockChatMessagesQueryFetch: vi.fn().mockResolvedValue([]),
 		mockChatMessagesQueryGet: vi.fn().mockReturnValue(undefined),
+		mockChatMessagesQueryIsActive: vi.fn().mockReturnValue(false),
 		mockChatMessagesQueryUpdate: vi.fn(),
 		mockPurgeChatInflightState: vi.fn().mockResolvedValue(undefined)
 	}
@@ -67,7 +69,8 @@ vi.mock("@/features/chats/queries/useChats.query", () => ({
 vi.mock("@/features/chats/queries/useChatMessages.query", () => ({
 	chatMessagesQueryUpdate: mockChatMessagesQueryUpdate,
 	chatMessagesQueryFetch: mockChatMessagesQueryFetch,
-	chatMessagesQueryGet: mockChatMessagesQueryGet
+	chatMessagesQueryGet: mockChatMessagesQueryGet,
+	chatMessagesQueryIsActive: mockChatMessagesQueryIsActive
 }))
 
 vi.mock("@filen/sdk-rs", () => ({
@@ -1436,6 +1439,8 @@ describe("chats.refetchChatsAndMessages", () => {
 		mockChatMessagesQueryFetch.mockReset()
 		mockChatMessagesQueryFetch.mockResolvedValue([])
 		mockChatMessagesQueryGet.mockImplementation(({ uuid }: { uuid: string }) => cachedMessages.get(uuid))
+		mockChatMessagesQueryIsActive.mockReset()
+		mockChatMessagesQueryIsActive.mockReturnValue(false)
 		mockChatsQueryUpdate.mockClear()
 		mockChatMessagesQueryUpdate.mockClear()
 	})
@@ -1466,6 +1471,21 @@ describe("chats.refetchChatsAndMessages", () => {
 		// fetchQuery commits both caches itself — no manual writes on top.
 		expect(mockChatsQueryUpdate).not.toHaveBeenCalled()
 		expect(mockChatMessagesQueryUpdate).not.toHaveBeenCalled()
+	})
+
+	it("also fetches the open chat whose page already ends at lastMessage (an older message may have changed)", async () => {
+		const last = makeMessage("same", { inner: { uuid: "m-same" } as ChatMessageWithInflightId["inner"] })
+		const open = makeChat({ uuid: "rf-open", lastMessage: last })
+		const closed = makeChat({ uuid: "rf-closed", lastMessage: last })
+
+		cachedMessages.set("rf-open", [last])
+		cachedMessages.set("rf-closed", [last])
+		mockChatMessagesQueryIsActive.mockImplementation(({ uuid }: { uuid: string }) => uuid === "rf-open")
+		mockChatsQueryFetch.mockResolvedValueOnce([open, closed])
+
+		await chats.refetchChatsAndMessages()
+
+		expect(mockChatMessagesQueryFetch).toHaveBeenCalledExactlyOnceWith({ uuid: "rf-open", chat: open })
 	})
 
 	it("rejects when the listing read fails", async () => {

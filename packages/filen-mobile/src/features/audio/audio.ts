@@ -1337,7 +1337,8 @@ export class Audio {
 							uuid: result.uuid,
 							fallback: result,
 							mutate: current => pruneDeadTracksShared(current, nonExistentFileUuids),
-							signal
+							signal,
+							keepInFlightRead: true
 						}).catch(e =>
 							logger.error("audio", "playlist cleanup persist failed", {
 								playlistUuid: result.uuid,
@@ -1377,12 +1378,14 @@ export class Audio {
 		uuid,
 		fallback,
 		mutate,
-		signal
+		signal,
+		keepInFlightRead
 	}: {
 		uuid: string
 		fallback: Playlist
 		mutate: (current: Playlist) => Playlist | null
 		signal?: AbortSignal
+		keepInFlightRead?: boolean
 	}): Promise<void> {
 		let mutex = this.playlistWriteMutexes.get(uuid)
 
@@ -1406,14 +1409,24 @@ export class Audio {
 
 			await this.savePlaylist({
 				playlist: next,
-				signal
+				signal,
+				keepInFlightRead
 			})
 		} finally {
 			mutex.release()
 		}
 	}
 
-	public async savePlaylist({ playlist, signal }: { playlist: Playlist; signal?: AbortSignal }): Promise<void> {
+	public async savePlaylist({
+		playlist,
+		signal,
+		keepInFlightRead
+	}: {
+		playlist: Playlist
+		signal?: AbortSignal
+		// See playlistsQueryUpdate.
+		keepInFlightRead?: boolean
+	}): Promise<void> {
 		const { authedSdkClient } = await auth.getSdkClients()
 		const playlistsDir = await this.getPlaylistsDirectory(signal)
 
@@ -1467,7 +1480,8 @@ export class Audio {
 		}
 
 		playlistsQueryUpdate({
-			updater: prev => [...prev.filter(p => p.uuid !== playlist.uuid), playlistWithItems]
+			updater: prev => [...prev.filter(p => p.uuid !== playlist.uuid), playlistWithItems],
+			keepInFlightRead
 		})
 	}
 

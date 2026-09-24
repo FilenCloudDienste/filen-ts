@@ -48,8 +48,9 @@ export function copyRowStatus(job: CopyJob | undefined, rowPaused: boolean, t: T
 		return t("copy_preparing")
 	}
 
-	const done = job.counts.filesDone.toString()
-	const total = job.totals.files.toString()
+	const done = job.counts.filesDone
+	// The plural form follows the total.
+	const count = job.totals.files
 	const percentText = Math.floor(percent).toString()
 	// The rate reads like an upload row's, shown once the SDK has one.
 	const rate = copyJobRate(job)
@@ -57,15 +58,27 @@ export function copyRowStatus(job: CopyJob | undefined, rowPaused: boolean, t: T
 	return rate
 		? t("copy_progress_files_speed", {
 				done,
-				total,
+				count,
 				percent: percentText,
 				speed: bpsToReadable(rate.bytesPerSecond)
 			})
 		: t("copy_progress_files", {
 				done,
-				total,
+				count,
 				percent: percentText
 			})
+}
+
+// A finished copy's title. A stopped copy's row exists only while "move to trash" left items behind;
+// an error, a storage refusal or a copy that made nothing reads as failed.
+export function copyFinishedTitle(finished: FinishedTransfer, t: TFunction): string {
+	const name = finished.name
+
+	if (finished.outcome === "errored") {
+		return (finished.copyTrashFailed ?? 0) > 0 ? t("copy_row_stopped_title", { name }) : t("copy_row_failed_title", { name })
+	}
+
+	return finished.copyNothingCopied ? t("copy_row_failed_title", { name }) : t("copy_row_finished_title", { name })
 }
 
 // A finished copy's notes line, zero counts left out; null when there is nothing to note.

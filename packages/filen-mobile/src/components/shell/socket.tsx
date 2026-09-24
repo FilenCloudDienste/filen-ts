@@ -17,10 +17,11 @@ import useEffectOnce from "@/hooks/useEffectOnce"
 import chats from "@/features/chats/chats"
 import { handleNoteEvent } from "@/features/notes/socketHandlers"
 import { handleChatEvent, chatTypingTimeoutsRef } from "@/features/chats/socketHandlers"
-import { handleDriveEvent } from "@/features/drive/socketHandlers"
+import { handleDriveEvent, handleDriveMalformedEvent } from "@/features/drive/socketHandlers"
 import { handleContactEvent } from "@/features/contacts/socketHandlers"
 import logger from "@/lib/logger"
 import { noteSocketDataEvent } from "@/queries/socketSession"
+import events from "@/lib/events"
 
 type ConnectionTag =
 	| SocketEvent_Tags.Reconnecting
@@ -40,10 +41,12 @@ export function socketEventTagToState(tag: ConnectionTag): SocketState {
 			: "disconnected"
 }
 
-// A change to data some query holds: not a typing indicator or a connection-state change.
+// A change to data some query holds: not a typing indicator or a connection-state change. A drive event the
+// SDK couldn't read is still a change.
 export function isSocketDataEvent(event: SocketEvent): boolean {
 	switch (event.tag) {
 		case SocketEvent_Tags.Drive:
+		case SocketEvent_Tags.DriveMalformed:
 		case SocketEvent_Tags.Note:
 		case SocketEvent_Tags.Contact: {
 			return true
@@ -145,6 +148,8 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 			case SocketEvent_Tags.DriveMalformed: {
 				logger.warn("socket", "malformed drive event skipped", { driveMessageId: event.inner[0].driveMessageId })
 
+				handleDriveMalformedEvent()
+
 				break
 			}
 
@@ -164,6 +169,9 @@ const mutex = new Semaphore(1)
 
 const InnerSocket = ({ sdkClient }: { sdkClient: JsClientInterface }) => {
 	const socketListenerHandleRef = useRef<ListenerHandle | null>(null)
+	// Set by the "logout" event: this unmounts only after the logout's wipe, and events already queued for
+	// JS still arrive after the listener is destroyed. Its session gets no event and no listener after it.
+	const sessionEndedRef = useRef(false)
 	const stringifiedClient = useStringifiedClient()
 	const stringifiedClientRef = useRef(stringifiedClient)
 
@@ -186,10 +194,14 @@ const InnerSocket = ({ sdkClient }: { sdkClient: JsClientInterface }) => {
 
 				switch (nextAppState) {
 					case "active": {
-						if (!socketListenerHandleRef.current) {
+						if (!socketListenerHandleRef.current && !sessionEndedRef.current) {
 							socketListenerHandleRef.current = (await sdkClient.addEventListener(
 								{
 									onEvent: event => {
+										if (sessionEndedRef.current) {
+											return
+										}
+
 										const client = stringifiedClientRef.current
 
 										onEvent({
@@ -243,13 +255,13 @@ const InnerSocket = ({ sdkClient }: { sdkClient: JsClientInterface }) => {
 				appStateSubscription.remove()
 			})
 
-			defer(() => {
-				// Take the mutex like every other transition (mirrors http.tsx's unmount teardown): if
-				// unmount (logout flips isAuthed) lands while an "active" transition is mid-flight —
-				// holding the mutex, awaiting sdkClient.addEventListener — a synchronous check here would
-				// see a null ref, skip, and then the resumed handler would assign the ref and leave that
-				// ListenerHandle undestroyed with onEvent live during the logout wipe. Serializing makes
-				// the in-flight registration complete first, so this reliably destroys it.
+			// Takes the mutex like every other transition (mirrors http.tsx's unmount teardown): if the
+			// logout or an unmount lands while an "active" transition is mid-flight — holding the mutex,
+			// awaiting sdkClient.addEventListener — a synchronous check here would see a null ref, skip, and
+			// then the resumed handler would assign the ref and leave that ListenerHandle undestroyed with
+			// onEvent live during the logout wipe. Serializing makes the in-flight registration complete
+			// first, so this reliably destroys it.
+			const destroyListener = () => {
 				run(async innerDefer => {
 					await mutex.acquire()
 
@@ -264,9 +276,23 @@ const InnerSocket = ({ sdkClient }: { sdkClient: JsClientInterface }) => {
 					}
 				}).then(result => {
 					if (!result.success) {
-						logger.error("socket", "socket unmount teardown failed", { error: result.error })
+						logger.error("socket", "socket listener teardown failed", { error: result.error })
 					}
 				})
+			}
+
+			const logoutSubscription = events.subscribe("logout", () => {
+				sessionEndedRef.current = true
+
+				destroyListener()
+			})
+
+			defer(() => {
+				logoutSubscription.remove()
+			})
+
+			defer(() => {
+				destroyListener()
 			})
 		})
 

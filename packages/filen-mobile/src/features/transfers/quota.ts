@@ -10,6 +10,13 @@ export function notEnoughStorageMessage(neededBytes: bigint | number, freeBytes:
 	})
 }
 
+// A copy refused before its size was reported: only the free storage it was checked against is known.
+export function copyDoesNotFitMessage(freeBytes: number): string {
+	return i18n.t("copy_quota_exceeded", {
+		free: formatBytes(freeBytes)
+	})
+}
+
 /**
  * Checks a manual upload against the account's free storage before any transfer row exists: a fresh
  * cached figure answers without a request, a stale or refusing one is read once. Returns the refusal

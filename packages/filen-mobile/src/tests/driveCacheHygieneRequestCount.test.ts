@@ -380,13 +380,13 @@ describe("local writes patch only read listings", () => {
 
 describe("Photos: a directory leaving the camera-upload tree", () => {
 	beforeEach(() => {
-		// camroot ─ a ─ b, camroot ─ c, and "outside" directly under the drive root.
+		// camroot ─ a ─ b, camroot ─ c, and "outside" directly under the drive root. Like production, the
+		// directory map holds no entry for the drive root itself.
 		seedCacheDir(CAMERA_ROOT, "root")
 		seedCacheDir("a", CAMERA_ROOT)
 		seedCacheDir("b", "a")
 		seedCacheDir("c", CAMERA_ROOT)
 		seedCacheDir("outside", "root")
-		h.fakeCache.directoryUuidToAnyNormalDir.set("root", { tag: "Root", inner: [{ uuid: "root", parent: null, decryptedMeta: null }] })
 		queryClient.setQueryData(photosKey, [file("in-a", "a"), file("in-b", "b"), file("in-c", "c"), file("orphan", "uncached")])
 	})
 
@@ -409,17 +409,133 @@ describe("Photos: a directory leaving the camera-upload tree", () => {
 	})
 
 	it("moving a directory outside the tree drops them; within the tree or to an uncached place keeps them", async () => {
-		driveItemsQueryRemoveDirectoryFromPhotos({ dirUuid: "b", newParentUuid: "c" })
+		driveItemsQueryRemoveDirectoryFromPhotos({ dirUuid: "b", newParentUuid: "c", previousParentUuid: "a" })
 		await vi.advanceTimersByTimeAsync(0)
-		driveItemsQueryRemoveDirectoryFromPhotos({ dirUuid: "b", newParentUuid: "somewhere-uncached" })
+		driveItemsQueryRemoveDirectoryFromPhotos({ dirUuid: "b", newParentUuid: "somewhere-uncached", previousParentUuid: "a" })
 		await vi.advanceTimersByTimeAsync(0)
 
 		expect(photoUuids()).toEqual(["in-a", "in-b", "in-c", "orphan"])
 
-		driveItemsQueryRemoveDirectoryFromPhotos({ dirUuid: "a", newParentUuid: "outside" })
+		driveItemsQueryRemoveDirectoryFromPhotos({ dirUuid: "a", newParentUuid: "outside", previousParentUuid: CAMERA_ROOT })
 		await vi.advanceTimersByTimeAsync(0)
 
 		expect(photoUuids()).toEqual(["in-c", "orphan"])
+	})
+
+	it("moving a directory straight into the drive root drops its photos", async () => {
+		driveItemsQueryRemoveDirectoryFromPhotos({ dirUuid: "a", newParentUuid: "root", previousParentUuid: CAMERA_ROOT })
+		await vi.advanceTimersByTimeAsync(0)
+
+		expect(photoUuids()).toEqual(["in-c", "orphan"])
+	})
+
+	it("a move whose previous parent isn't known still drops them, by the ancestor walk", async () => {
+		driveItemsQueryRemoveDirectoryFromPhotos({ dirUuid: "a", newParentUuid: "outside", previousParentUuid: null })
+		await vi.advanceTimersByTimeAsync(0)
+
+		expect(photoUuids()).toEqual(["in-c", "orphan"])
+	})
+
+	it("a remote move out of the tree (socket FolderMove) drops them too", async () => {
+		await handleDriveEvent({ event: event("FolderMove", { dir: { uuid: "c", parent: "root", name: "c" } }) })
+		await vi.advanceTimersByTimeAsync(0)
+
+		expect(photoUuids()).toEqual(["in-a", "in-b", "orphan"])
+	})
+
+	it("moving the camera-upload root itself keeps every photo, whether or not its previous parent is known", async () => {
+		driveItemsQueryRemoveDirectoryFromPhotos({ dirUuid: CAMERA_ROOT, newParentUuid: "outside", previousParentUuid: "root" })
+		await vi.advanceTimersByTimeAsync(0)
+		driveItemsQueryRemoveDirectoryFromPhotos({ dirUuid: CAMERA_ROOT, newParentUuid: "outside" })
+		await vi.advanceTimersByTimeAsync(0)
+
+		expect(photoUuids()).toEqual(["in-a", "in-b", "in-c", "orphan"])
+	})
+
+	describe("a directory holding the camera-upload root", () => {
+		// root ─ parent ─ camroot, the camera-upload root picked one level down, and "archive" under the root.
+		beforeEach(() => {
+			seedCacheDir("parent", "root")
+			seedCacheDir(CAMERA_ROOT, "parent")
+			seedCacheDir("archive", "root")
+		})
+
+		it("moved here keeps every photo: the camera-upload root went along", async () => {
+			// driveDirectory.move re-caches the directory under its new parent before this runs.
+			seedCacheDir("parent", "archive")
+
+			driveItemsQueryRemoveDirectoryFromPhotos({ dirUuid: "parent", newParentUuid: "archive", previousParentUuid: "root" })
+			await vi.advanceTimersByTimeAsync(0)
+			driveItemsQueryRemoveDirectoryFromPhotos({ dirUuid: "parent", newParentUuid: "archive", previousParentUuid: null })
+			await vi.advanceTimersByTimeAsync(0)
+
+			expect(photoUuids()).toEqual(["in-a", "in-b", "in-c", "orphan"])
+		})
+
+		it("moved remotely (socket FolderMove) keeps every photo", async () => {
+			await handleDriveEvent({ event: event("FolderMove", { dir: { uuid: "parent", parent: "archive", name: "parent" } }) })
+			await vi.advanceTimersByTimeAsync(0)
+
+			expect(photoUuids()).toEqual(["in-a", "in-b", "in-c", "orphan"])
+		})
+	})
+
+	describe("cost: a move reads the grid's rows only when it can take photos out of the tree", () => {
+		let rowReads = 0
+
+		// Swaps the grid's rows for ones that count reads of their data: the scan reads each row, nothing else
+		// in these paths does. A write replaces them with plain copies (structural sharing), so a test swaps
+		// again after one.
+		function countRowReads(): void {
+			const rows = (listing(photosKey) ?? []).map(row => {
+				const data = row.data
+
+				return Object.defineProperty({ type: row.type }, "data", {
+					enumerable: true,
+					get: () => {
+						rowReads++
+
+						return data
+					}
+				}) as DriveItem
+			})
+
+			queryClient.removeQueries({ queryKey: photosKey })
+			queryClient.setQueryData(photosKey, rows)
+			rowReads = 0
+		}
+
+		beforeEach(countRowReads)
+
+		it("a move outside the tree, into the drive root or to another outside directory, reads none", async () => {
+			seedCacheDir("docs", "root")
+
+			driveItemsQueryRemoveDirectoryFromPhotos({ dirUuid: "docs", newParentUuid: "outside", previousParentUuid: "root" })
+			await vi.advanceTimersByTimeAsync(0)
+			driveItemsQueryRemoveDirectoryFromPhotos({ dirUuid: "outside", newParentUuid: "root", previousParentUuid: "root" })
+			await vi.advanceTimersByTimeAsync(0)
+
+			expect(rowReads).toBe(0)
+			expect(photoUuids()).toEqual(["in-a", "in-b", "in-c", "orphan"])
+		})
+
+		it("a local move out of the tree scans once; its socket echo reads none", async () => {
+			// driveDirectory.move re-caches the directory under its new parent, then asks Photos.
+			seedCacheDir("a", "outside")
+
+			driveItemsQueryRemoveDirectoryFromPhotos({ dirUuid: "a", newParentUuid: "outside", previousParentUuid: CAMERA_ROOT })
+			await vi.advanceTimersByTimeAsync(0)
+
+			expect(rowReads).toBeGreaterThan(0)
+
+			countRowReads()
+
+			await handleDriveEvent({ event: event("FolderMove", { dir: { uuid: "a", parent: "outside", name: "a" } }) })
+			await vi.advanceTimersByTimeAsync(0)
+
+			expect(rowReads).toBe(0)
+			expect(photoUuids()).toEqual(["in-c", "orphan"])
+		})
 	})
 
 	it("a Photos grid nobody has read is left alone", async () => {

@@ -57,6 +57,47 @@ describe("useDriveClipboardStore", () => {
 		expect(useDriveClipboardStore.getState().entry).toBeNull()
 	})
 
+	it("mapItems replaces or drops items into a new entry, keeps the state when nothing changes, and clears an emptied entry", () => {
+		const entry = { mode: "cut" as const, items: [item("a"), item("b")] }
+
+		useDriveClipboardStore.getState().set(entry)
+
+		const unchanged = useDriveClipboardStore.getState()
+
+		useDriveClipboardStore.getState().mapItems(existing => existing)
+
+		expect(useDriveClipboardStore.getState()).toBe(unchanged)
+
+		useDriveClipboardStore.getState().mapItems(existing => (existing.data.uuid === "a" ? item("a2") : existing))
+
+		expect(useDriveClipboardStore.getState().entry).toEqual({ mode: "cut", items: [item("a2"), item("b")] })
+		expect(useDriveClipboardStore.getState().entry).not.toBe(entry)
+		expect(useDriveClipboardStore.getState().cutUuids).toEqual(new Set(["a2", "b"]))
+
+		useDriveClipboardStore.getState().mapItems(() => null)
+
+		expect(useDriveClipboardStore.getState().entry).toBeNull()
+		expect(useDriveClipboardStore.getState().cutUuids.size).toBe(0)
+	})
+
+	it("a followed cut item re-renders only the two rows whose cut state flips", () => {
+		useDriveClipboardStore.getState().set({ mode: "cut", items: [item("a"), item("b")] })
+
+		render(
+			<>
+				<Row uuid="a" />
+				<Row uuid="a2" />
+				<Row uuid="b" />
+			</>
+		)
+
+		act(() => {
+			useDriveClipboardStore.getState().mapItems(existing => (existing.data.uuid === "a" ? item("a2") : existing))
+		})
+
+		expect([renders.get("a"), renders.get("a2"), renders.get("b")]).toEqual([2, 2, 1])
+	})
+
 	it("re-renders only the rows whose cut state flips", () => {
 		const view = render(
 			<>

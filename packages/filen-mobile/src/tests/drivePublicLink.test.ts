@@ -42,6 +42,11 @@ function statusCalls(): number {
 	return sdk.getDirLinkStatus.mock.calls.length + sdk.getFileLinkStatus.mock.calls.length
 }
 
+// What each status-cache write set the status to.
+function statusUpdates(): unknown[] {
+	return mockStatusQueryUpdate.mock.calls.map(call => (call[0] as { updater: () => unknown }).updater())
+}
+
 beforeEach(() => {
 	for (const fn of Object.values(sdk)) {
 		fn.mockReset()
@@ -84,29 +89,71 @@ describe("disablePublicLink", () => {
 
 		expect(sdk.getFileLinkStatus).toHaveBeenCalledTimes(1)
 	})
+
+	it("a link already disabled elsewhere: nothing to remove, but the caches stop showing it", async () => {
+		sdk.getFileLinkStatus.mockResolvedValue(undefined)
+
+		await disablePublicLink({ item: file })
+
+		expect(sdk.removeFileLink).not.toHaveBeenCalled()
+		expect(statusUpdates()).toEqual([null])
+		expect(mockDriveItemsQueryUpdate).toHaveBeenCalledTimes(1)
+	})
 })
 
 describe("updatePublicLink", () => {
-	it("writes the caller's link as-is with no status read (directory)", async () => {
-		const edited = { ...dirLink, enableDownload: false }
+	it("a directory save writes the edits onto the held link with no status read", async () => {
+		await updatePublicLink({ item: dir, held: { type: "directory", status: dirLink }, edits: { downloadable: false } })
 
-		await updatePublicLink({ item: dir, link: { type: "directory", link: edited } })
+		const written = { ...dirLink, enableDownload: false }
 
 		expect(statusCalls()).toBe(0)
-		expect(sdk.updateDirLink).toHaveBeenCalledWith(dir.data, edited, undefined)
-
-		const updater = mockStatusQueryUpdate.mock.calls[0]?.[0]?.updater as () => unknown
-
-		expect(updater()).toEqual({ type: "directory", status: edited })
+		expect(sdk.updateDirLink).toHaveBeenCalledWith(dir.data, written, undefined)
+		expect(statusUpdates()).toEqual([{ type: "directory", status: written }])
 	})
 
-	it("writes the caller's link as-is with no status read (file)", async () => {
-		const edited = { ...fileLink, downloadable: false }
+	it("a file save reads the status once and writes the edits onto it", async () => {
+		const outcome = await updatePublicLink({ item: file, held: { type: "file", status: fileLink }, edits: { downloadable: false } })
 
-		await updatePublicLink({ item: file, link: { type: "file", link: edited } })
+		const written = { ...fileLink, downloadable: false }
 
-		expect(statusCalls()).toBe(0)
-		expect(sdk.updateFileLink).toHaveBeenCalledWith(file.data, edited, undefined)
+		expect(outcome).toBe("updated")
+		expect(sdk.getFileLinkStatus).toHaveBeenCalledTimes(1)
+		expect(sdk.updateFileLink).toHaveBeenCalledWith(file.data, written, undefined)
+		expect(statusUpdates()).toEqual([{ type: "file", status: written }])
+	})
+
+	it("a file link disabled elsewhere is not re-published: no write, the status becomes none", async () => {
+		sdk.getFileLinkStatus.mockResolvedValue(undefined)
+
+		const outcome = await updatePublicLink({ item: file, held: { type: "file", status: fileLink }, edits: { downloadable: false } })
+
+		expect(outcome).toBe("gone")
+		expect(sdk.updateFileLink).not.toHaveBeenCalled()
+		expect(statusUpdates()).toEqual([null])
+		expect(mockDriveItemsQueryUpdate).toHaveBeenCalledTimes(1)
+	})
+
+	it("a file link replaced elsewhere is not written: the status becomes the new link", async () => {
+		const replacement = { ...fileLink, linkUuid: "l-file-2" } as FilePublicLink
+
+		sdk.getFileLinkStatus.mockResolvedValue(replacement)
+
+		const outcome = await updatePublicLink({ item: file, held: { type: "file", status: fileLink }, edits: { downloadable: false } })
+
+		expect(outcome).toBe("replaced")
+		expect(sdk.updateFileLink).not.toHaveBeenCalled()
+		expect(statusUpdates()).toEqual([{ type: "file", status: replacement }])
+	})
+
+	it("fields changed elsewhere since the held read are kept: only the edited ones are written", async () => {
+		const changedElsewhere = { ...fileLink, expiration: "one_day", salt: "salt-2" } as unknown as FilePublicLink
+
+		sdk.getFileLinkStatus.mockResolvedValue(changedElsewhere)
+
+		await updatePublicLink({ item: file, held: { type: "file", status: fileLink }, edits: { downloadable: false } })
+
+		expect(sdk.updateFileLink).toHaveBeenCalledWith(file.data, { ...changedElsewhere, downloadable: false }, undefined)
 	})
 })
 
@@ -126,5 +173,17 @@ describe("enablePublicLink", () => {
 		expect(sdk.getFileLinkStatus).toHaveBeenCalledTimes(1)
 		expect(sdk.publicLinkFile).not.toHaveBeenCalled()
 		expect(result).toEqual({ type: "file", link: fileLink })
+	})
+
+	it("an existing link (made elsewhere since the screen's read) is cached, so the screen shows it", async () => {
+		await enablePublicLink({ item: dir })
+		await enablePublicLink({ item: file })
+
+		expect(sdk.publicLinkDir).not.toHaveBeenCalled()
+		expect(sdk.publicLinkFile).not.toHaveBeenCalled()
+		expect(statusUpdates()).toEqual([
+			{ type: "directory", status: dirLink },
+			{ type: "file", status: fileLink }
+		])
 	})
 })

@@ -1,5 +1,6 @@
 import { type TFunction } from "i18next"
-import { PasswordState } from "@filen/sdk-rs"
+import { type FetchStatus } from "@tanstack/react-query"
+import { PasswordState, AnyLinkedDir, type DirPublicInfo, type DirPublicLink } from "@filen/sdk-rs"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import type { DrivePath, DrivePathType } from "@/hooks/useDrivePath"
 import { type DriveItem } from "@/types"
@@ -135,6 +136,10 @@ export function resolveDriveHeaderTitle({
 	drivePath: DrivePath
 	selectedCount: number
 	stringifiedClientRootUuid: string | null
+	// Not read here. The name comes from the uuid cache, written outside React: a directory reached by uuid
+	// alone (a search hit, "Open containing directory") is only cached during its listing's fetch. A compiled
+	// caller keys this call on its inputs, so passing the fetch status resolves the title again when it settles.
+	listingFetchStatus: FetchStatus
 	t: TFunction
 }): string {
 	// In bulk-selection mode, swap the directory name out for the count —
@@ -329,4 +334,23 @@ export function normalizeCustomDirColorHex(text: string): string | null {
 // WrongPassword, which the open/list flows already turn into a password prompt).
 export function linkPasswordState(entered: string | undefined, current: PasswordState): PasswordState {
 	return entered !== undefined ? new PasswordState.Known(entered) : current
+}
+
+export type LinkedRoot = {
+	dir: AnyLinkedDir
+	meta: DirPublicLink
+	rootUuid: string
+}
+
+// A directory link's root as it is listed, copied and cached (cache.linkedRootByLinkUuid), built from its link
+// info and the password the visitor entered.
+export function linkedRootOf(info: DirPublicInfo, password: string | undefined): LinkedRoot {
+	return {
+		dir: new AnyLinkedDir.Root(info.root),
+		meta: {
+			...info.link,
+			password: linkPasswordState(password, info.link.password)
+		},
+		rootUuid: info.root.inner.uuid
+	}
 }

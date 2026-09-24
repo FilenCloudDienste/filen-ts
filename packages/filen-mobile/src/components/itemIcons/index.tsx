@@ -1,9 +1,8 @@
 import { ExpoImage } from "@/components/ui/image"
-import { Paths } from "expo-file-system"
 import { isValidHexColor, cn, fileIconKey, type FileIconKey } from "@filen/shared"
 import { memoize } from "es-toolkit/function"
 import { type DirColor, DirColor_Tags } from "@filen/sdk-rs"
-import { SDK_RAW_PREVIEW_EXTENSIONS } from "@/lib/previewType"
+import { SDK_RAW_PREVIEW_EXTENSIONS, extnameOf } from "@/lib/previewType"
 import { EXPO_IMAGE_SUPPORTED_EXTENSIONS, EXPO_VIDEO_SUPPORTED_EXTENSIONS, EXPO_AUDIO_SUPPORTED_EXTENSIONS } from "@/constants"
 
 const FILE_ICONS = {
@@ -47,9 +46,10 @@ function isAudioIconExtension(ext: string): boolean {
 
 // Resolves a file name to its type-icon key — mobile's existing trim+lowercase extname (unchanged by
 // this move to @filen/shared) feeds the shared classifier's already-normalised signature. Exported for
-// itemIcons.test.ts's diff-check against the old inline two-switch classification.
+// itemIcons.test.ts's diff-check against the old inline two-switch classification. Runs on every icon
+// mount and list recycle, hence extnameOf: Paths.extname throws and catches a URL error per plain name.
 export function resolveFileIconKey(name: string): FileIconKey {
-	const ext = Paths.extname(name.trim().toLowerCase()).slice(1)
+	const ext = extnameOf(name.trim().toLowerCase()).slice(1)
 
 	return fileIconKey(ext, { isImage: isImageIconExtension, isVideo: isVideoIconExtension, isAudio: isAudioIconExtension })
 }

@@ -95,6 +95,9 @@ export default [
 			"react/prop-types": "off",
 			"react/display-name": "off",
 			"react-hooks/preserve-manual-memoization": "error",
+			// A hook referenced as a value (useXStore.getState() in render) makes the React Compiler skip the
+			// whole component or hook, silently.
+			"react-hooks/hooks": "error",
 			"@typescript-eslint/no-unused-vars": [
 				"error",
 				{

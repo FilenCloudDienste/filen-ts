@@ -646,6 +646,60 @@ describe("QueryPersisterKv", () => {
 		})
 	})
 
+	// Logout's writers can outlive its kv wipe (a socket event already queued for JS, a copy's trash past
+	// the settle wait, a query settling): none of them may put the ended account's rows back.
+	describe("clearForLogout()", () => {
+		function background(): void {
+			for (const listener of mockAppStateListeners) {
+				listener("background")
+			}
+		}
+
+		it("takes no write after it: set, remove, the debounce, flushNow and the background flush reach no batch", async () => {
+			const kv = new QueryPersisterKv()
+
+			kv.setItem("before", "value")
+			kv.clearForLogout()
+			kv.setItem("after", "value")
+			kv.removeItem("before")
+
+			await flushDebounce()
+			await kv.flushNow()
+			background()
+			await vi.advanceTimersByTimeAsync(0)
+
+			expect(mockDb.executeBatch).not.toHaveBeenCalled()
+			expect(kv.getItem("after")).toBeNull()
+		})
+
+		it("a batch still serializing when the logout lands is dropped", async () => {
+			const kv = new QueryPersisterKv()
+
+			// More rows than one serialize chunk, so the persist yields to the event loop part-way.
+			for (let i = 0; i < 150; i++) {
+				kv.setItem(`key-${i}`, `value-${i}`)
+			}
+
+			vi.advanceTimersByTime(2000)
+			kv.clearForLogout()
+			await vi.runAllTimersAsync()
+
+			expect(mockDb.executeBatch).not.toHaveBeenCalled()
+		})
+
+		it("a restore after it does not open it again", async () => {
+			const kv = new QueryPersisterKv()
+
+			kv.clearForLogout()
+			await kv.restore()
+			kv.setItem("after", "value")
+			await flushDebounce()
+			await kv.flushNow()
+
+			expect(mockDb.executeBatch).not.toHaveBeenCalled()
+		})
+	})
+
 	describe("flush()", () => {
 		it("schedules a debounced persist (trailing edge — not immediate)", async () => {
 			// flush() calls persistDirty() which is debounced at 1000ms trailing edge.

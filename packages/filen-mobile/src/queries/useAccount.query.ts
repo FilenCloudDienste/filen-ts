@@ -24,16 +24,13 @@ export async function fetchData(signal?: AbortSignal) {
 
 export type Account = Awaited<ReturnType<typeof fetchData>>
 
-/**
- * Writes fields an account mutation just set, instead of refetching the whole record. Keeps the
- * row's dataUpdatedAt: the unpatched fields (storage above all) are only as fresh as the last
- * read, and a restamp would make them look newer than they are.
- */
-export function accountQueryPatch(fields: Partial<Account>): void {
+// Keeps the row's dataUpdatedAt: the unpatched fields (storage above all) are only as fresh as the last
+// read, and a restamp would make them look newer than they are. False when nothing is cached.
+function writeAccountFields(fields: Partial<Account>): boolean {
 	const state = queryClient.getQueryState<Account>([BASE_QUERY_KEY])
 
 	if (!state?.data) {
-		return
+		return false
 	}
 
 	queryUpdater.set<Account>(
@@ -44,16 +41,92 @@ export function accountQueryPatch(fields: Partial<Account>): void {
 		},
 		state.dataUpdatedAt
 	)
+
+	return true
+}
+
+// Values written while a read was out, each with that read. Its answer may predate them and would revert
+// them on landing, so they are written again on top of it; restarting the read instead would cost a
+// request and reject the quota checks that joined it. A read started after them (a refetch replaces the
+// one out) already has them, and may hold a newer value.
+let writesDuringRead: {
+	fields: Partial<Account>
+	read: Promise<unknown>
+}[] = []
+
+function rewriteWhenReadLands(fields: Partial<Account>, read: Promise<unknown>): void {
+	writesDuringRead.push({
+		fields,
+		read
+	})
+
+	if (writesDuringRead.length > 1) {
+		return
+	}
+
+	const unsubscribe = queryClient.getQueryCache().subscribe(event => {
+		if (event.query.queryKey[0] !== BASE_QUERY_KEY) {
+			return
+		}
+
+		// A read's answer, or a read's end without one (failed, or cancelled back to the patched row).
+		const landed = event.type === "updated" && event.action.type === "success" && !event.action.manual
+		const settled =
+			landed ||
+			event.type === "removed" ||
+			(event.type === "updated" && (event.action.type === "error" || event.action.type === "setState"))
+
+		if (!settled) {
+			return
+		}
+
+		// The answer is set while its read is still the query's promise.
+		const landedRead = landed ? event.query.promise : undefined
+		const merged: Partial<Account> = {}
+		let rewrite = false
+
+		for (const write of writesDuringRead) {
+			if (write.read === landedRead) {
+				Object.assign(merged, write.fields)
+
+				rewrite = true
+			}
+		}
+
+		writesDuringRead = []
+		unsubscribe()
+
+		if (rewrite) {
+			writeAccountFields(merged)
+		}
+	})
+}
+
+/**
+ * Writes fields an account mutation just set, instead of refetching the whole record.
+ */
+export function accountQueryPatch(fields: Partial<Account>): void {
+	if (!writeAccountFields(fields)) {
+		return
+	}
+
+	const query = queryClient.getQueryCache().get(queryClient.defaultQueryOptions({ queryKey: [BASE_QUERY_KEY] }).queryHash)
+
+	if (query?.promise && query.state.fetchStatus !== "idle") {
+		rewriteWhenReadLands(fields, query.promise)
+	}
 }
 
 // Storage moved (a drive write or event): the next mount rereads instead of waiting out the
-// staleTime. Mounted screens are left alone.
+// staleTime. Mounted screens are left alone. Runs for every drive event and write, so the query is
+// looked up by its hash (as getQueryState does) rather than invalidateQueries hashing the key once per
+// cached query.
 export function markAccountStale(): void {
-	void queryClient.invalidateQueries({
-		queryKey: [BASE_QUERY_KEY],
-		exact: true,
-		refetchType: "none"
-	})
+	const query = queryClient.getQueryCache().get(queryClient.defaultQueryOptions({ queryKey: [BASE_QUERY_KEY] }).queryHash)
+
+	if (query && !query.state.isInvalidated) {
+		query.invalidate()
+	}
 }
 
 // How long quota checks (copies, uploads) answer from the cached storage figure before one fresh read.
@@ -82,7 +155,8 @@ export const accountQuotaDeps: QuotaCheckDeps = {
 	}
 }
 
-// A write that added bytes the server will count: the cached figure follows without a read.
+// A write that added bytes the server will count: the cached figure follows without a read. Never
+// written again over a read that lands: that read's figure is the server's own.
 export function addAccountStorageUsed(bytes: bigint): void {
 	const account = cachedAccountState()?.data
 
@@ -90,7 +164,7 @@ export function addAccountStorageUsed(bytes: bigint): void {
 		return
 	}
 
-	accountQueryPatch({
+	writeAccountFields({
 		storageUsed: account.storageUsed + bytes
 	})
 }

@@ -134,6 +134,7 @@ describe("errors catalog", () => {
 			"invalid_type",
 			"fs_io_error",
 			"max_remote_storage_reached",
+			"file_data_not_found",
 			"metadata_was_not_decrypted",
 			"network_error",
 			"network_retry_failed",
@@ -422,6 +423,7 @@ describe("unwrappedSdkErrorToHumanReadable", () => {
 			// SDK publishes "IO" (not "Io") as the runtime string; ErrorKind.Io resolves to "IO".
 			["IO", "fs_io_error"],
 			["MaxStorageReached", "max_remote_storage_reached"],
+			["FileChunkNotFound", "file_data_not_found"],
 			["MetadataWasNotDecrypted", "metadata_was_not_decrypted"],
 			["Reqwest", "network_error"],
 			["Response", "network_error"],
@@ -441,7 +443,7 @@ describe("unwrappedSdkErrorToHumanReadable", () => {
 	it("maps unhandled SDK ErrorKind variants to error_generic", () => {
 		// These variants exist in the SDK published type but have no explicit case in the switch.
 		// They MUST fall through to the default: "error_generic" branch.
-		const unhandledKindValues = ["FileChunkNotFound", "FileNotFound", "EmailOrPasswordWrong", "Enter2fa", "Wrong2fa"]
+		const unhandledKindValues = ["FileNotFound", "EmailOrPasswordWrong", "Enter2fa", "Wrong2fa"]
 
 		for (const kindValue of unhandledKindValues) {
 			const result = unwrappedSdkErrorToHumanReadable(fakeError(kindValue))

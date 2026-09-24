@@ -17,7 +17,14 @@ vi.mock("@filen/sdk-rs", () => ({
 }))
 
 import { PublicLinkExpiration } from "@filen/sdk-rs"
-import { currentHeldLinkStatus, isExpirationChecked, isPublicLinkQueryError, linkStatusForWrite } from "@/features/publicLink/utils"
+import {
+	currentHeldLinkStatus,
+	HELD_LINK_STATUS_TRUST_MS,
+	isExpirationChecked,
+	isPublicLinkQueryError,
+	linkStatusForWrite,
+	recentHeldLinkStatus
+} from "@/features/publicLink/utils"
 
 describe("isExpirationChecked", () => {
 	it("returns true for the edited value when an edited selection is present", () => {
@@ -168,12 +175,14 @@ describe("the link status the screen holds", () => {
 	function query(
 		fetchStatus: "fetching" | "paused" | "idle",
 		data: typeof persisted | null,
-		status: "pending" | "error" | "success" = "success"
+		status: "pending" | "error" | "success" = "success",
+		dataUpdatedAt: number = Date.now()
 	) {
 		return {
 			status,
 			fetchStatus,
 			data,
+			dataUpdatedAt,
 			refetch: vi.fn(async () => ({ data: fresh }))
 		}
 	}
@@ -198,5 +207,24 @@ describe("the link status the screen holds", () => {
 
 		expect(await linkStatusForWrite(reading)).toBe(fresh)
 		expect(reading.refetch).toHaveBeenCalledExactlyOnceWith({ cancelRefetch: false })
+	})
+
+	it("enable and disable act on it only while it is recent: an older read may be a link changed elsewhere since", () => {
+		const recent = Date.now() - 1000
+		const old = Date.now() - HELD_LINK_STATUS_TRUST_MS - 1000
+
+		expect(recentHeldLinkStatus(query("idle", persisted, "success", recent))).toEqual({ current: true, value: persisted })
+		expect(recentHeldLinkStatus(query("idle", null, "success", recent))).toEqual({ current: true, value: null })
+		expect(recentHeldLinkStatus(query("idle", persisted, "success", old))).toEqual({ current: false })
+		expect(recentHeldLinkStatus(query("idle", null, "success", old))).toEqual({ current: false })
+		// Recent but not settled is still not trusted.
+		expect(recentHeldLinkStatus(query("fetching", persisted, "success", recent))).toEqual({ current: false })
+	})
+
+	it("a save still builds on an older settled read (its own write re-checks the link)", async () => {
+		const old = query("idle", persisted, "success", Date.now() - HELD_LINK_STATUS_TRUST_MS - 1000)
+
+		expect(await linkStatusForWrite(old)).toBe(persisted)
+		expect(old.refetch).not.toHaveBeenCalled()
 	})
 })

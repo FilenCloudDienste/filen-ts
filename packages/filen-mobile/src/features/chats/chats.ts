@@ -2,7 +2,12 @@ import auth from "@/lib/auth"
 import { type ChatMessagePartial, ChatTypingType, type Contact, type ChatParticipant, AnyNormalDir, DirMeta_Tags } from "@filen/sdk-rs"
 import { type Chat, type ChatMessage } from "@/types"
 import { chatsQueryUpdate, chatsQueryFetch, chatsQueryGet } from "@/features/chats/queries/useChats.query"
-import { chatMessagesQueryUpdate, chatMessagesQueryFetch, chatMessagesQueryGet } from "@/features/chats/queries/useChatMessages.query"
+import {
+	chatMessagesQueryUpdate,
+	chatMessagesQueryFetch,
+	chatMessagesQueryGet,
+	chatMessagesQueryIsActive
+} from "@/features/chats/queries/useChatMessages.query"
 import { cachedMessagesMatchLastMessage } from "@/features/chats/chatSelectors"
 import { wrapChat, wrapMessage } from "@/features/chats/chatsWrap"
 import { Semaphore, run } from "@filen/shared"
@@ -531,8 +536,9 @@ class Chats {
 	}
 
 	// The listing is always re-read (read state, mute and lastMessage carry no socket event while
-	// disconnected); a chat's message page only when its lastMessage moved away from the cached one.
-	// Older edits/deletes in an unchanged chat are picked up when that chat is opened.
+	// disconnected); a chat's message page when its lastMessage moved away from the cached one, or
+	// when the chat is open: older edits/deletes in an unchanged chat otherwise wait for the chat's
+	// next opening, and an open chat's screen shows them now.
 	public async refetchChatsAndMessages() {
 		await run(
 			async defer => {
@@ -548,6 +554,9 @@ class Chats {
 					chats
 						.filter(
 							chat =>
+								chatMessagesQueryIsActive({
+									uuid: chat.uuid
+								}) ||
 								!cachedMessagesMatchLastMessage(
 									chat,
 									chatMessagesQueryGet({

@@ -708,7 +708,11 @@ describe("drive.move", () => {
 		await drive.move({ item, newParent: newParentDir as any })
 
 		expect(mockBatcherFlushNow).toHaveBeenCalledOnce()
-		expect(mockRemoveDirectoryFromPhotos).toHaveBeenCalledExactlyOnceWith({ dirUuid: "dir-move-photos", newParentUuid: "new-parent-uuid" })
+		expect(mockRemoveDirectoryFromPhotos).toHaveBeenCalledExactlyOnceWith({
+			dirUuid: "dir-move-photos",
+			newParentUuid: "new-parent-uuid",
+			previousParentUuid: "old-parent-uuid"
+		})
 	})
 
 	it("removes old item uuid from old parent query after successful move", async () => {

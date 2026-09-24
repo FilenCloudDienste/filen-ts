@@ -75,34 +75,52 @@ export const transfers = {
 	copy_row_title: "Copying {{name}}",
 	/** Transfers row title of a finished copy. {{name}} is the item's name or "12 items" */
 	copy_row_finished_title: "Copied {{name}}",
+	/** Transfers row title of a copy that ended in an error, was refused for lack of storage, or copied nothing. {{name}} is the item's name or "12 items" */
+	copy_row_failed_title: "Couldn't copy {{name}}",
 	/** Transfers — title of a stopped copy whose "move to trash" left items behind */
 	copy_row_stopped_title: "Stopped copying {{name}}",
-	/** Transfers — line on a stopped copy's row: copied items that "move to trash" could not move (a Retry action re-trashes them) */
+	/** Transfers — line on a stopped copy's row: copied items that "move to trash" could not move (a Retry action re-trashes them), singular. {{count}} is the number */
 	copy_trash_failed_one: "{{count}} copied item couldn't be moved to trash",
+	/** Transfers — line on a stopped copy's row: copied items that "move to trash" could not move (a Retry action re-trashes them), plural. {{count}} is the number */
 	copy_trash_failed_other: "{{count}} copied items couldn't be moved to trash",
 	/** Copy row status while the copy measures what it will copy */
 	copy_preparing: "Preparing…",
-	/** Copy row status while files are copied. {{done}} and {{total}} are file counts, {{percent}} the overall progress */
-	copy_progress_files: "{{done}} of {{total}} files · {{percent}}%",
-	copy_progress_files_speed: "{{done}} of {{total}} files · {{percent}}% · {{speed}}",
+	/** Copy row status while files are copied, one file in total. {{done}} is the files copied so far, {{count}} the total file count, {{percent}} the overall progress */
+	copy_progress_files_one: "{{done}} of {{count}} file · {{percent}}%",
+	/** Copy row status while files are copied, several files in total. {{done}} is the files copied so far, {{count}} the total file count, {{percent}} the overall progress */
+	copy_progress_files_other: "{{done}} of {{count}} files · {{percent}}%",
+	/** Copy row status while files are copied, with the speed, one file in total. {{done}} is the files copied so far, {{count}} the total file count, {{percent}} the overall progress, {{speed}} the human-readable speed */
+	copy_progress_files_speed_one: "{{done}} of {{count}} file · {{percent}}% · {{speed}}",
+	/** Copy row status while files are copied, with the speed, several files in total. {{done}} is the files copied so far, {{count}} the total file count, {{percent}} the overall progress, {{speed}} the human-readable speed */
+	copy_progress_files_speed_other: "{{done}} of {{count}} files · {{percent}}% · {{speed}}",
 	/** Copy row status while the copy is paused */
 	copy_paused: "Paused",
 	/** Copy row status while the copy wraps up after the last file */
 	copy_finishing: "Finishing…",
 	/** Copy row status after the user stopped the copy, until it has stopped */
 	copy_stopping: "Stopping…",
-	/** Finished copy row notes: entries that could not be copied and were left out (undecryptable or unreachable). {{count}} is the number */
-	copy_notes_skipped: "{{count}} skipped",
-	/** Finished copy row notes: items that got a new name because the name was taken. {{count}} is the number */
-	copy_notes_renamed: "{{count}} renamed",
-	/** Finished copy row notes: files stored as a new version of an existing file. {{count}} is the number */
-	copy_notes_saved_as_version: "{{count}} saved as a new version",
-	/** Finished copy row notes: items whose sharing or public links could not be applied to the copy. {{count}} is the number */
-	copy_notes_sharing_not_applied: "sharing not applied to {{count}}",
+	/** Finished copy row notes: entries that could not be copied and were left out (undecryptable or unreachable), singular. {{count}} is the number */
+	copy_notes_skipped_one: "{{count}} skipped",
+	/** Finished copy row notes: entries that could not be copied and were left out (undecryptable or unreachable), plural. {{count}} is the number */
+	copy_notes_skipped_other: "{{count}} skipped",
+	/** Finished copy row notes: items that got a new name because the name was taken, singular. {{count}} is the number */
+	copy_notes_renamed_one: "{{count}} renamed",
+	/** Finished copy row notes: items that got a new name because the name was taken, plural. {{count}} is the number */
+	copy_notes_renamed_other: "{{count}} renamed",
+	/** Finished copy row notes: files stored as a new version of an existing file, singular. {{count}} is the number */
+	copy_notes_saved_as_version_one: "{{count}} saved as a new version",
+	/** Finished copy row notes: files stored as new versions of existing files, plural. {{count}} is the number */
+	copy_notes_saved_as_version_other: "{{count}} saved as new versions",
+	/** Finished copy row notes: items whose sharing or public links could not be applied to the copy, singular. {{count}} is the number */
+	copy_notes_sharing_not_applied_one: "sharing not applied to {{count}}",
+	/** Finished copy row notes: items whose sharing or public links could not be applied to the copy, plural. {{count}} is the number */
+	copy_notes_sharing_not_applied_other: "sharing not applied to {{count}}",
 	/** Title of the dialog asking how to stop a running copy */
 	copy_stop_title: "Stop copying?",
-	/** Message of the dialog asking how to stop a running copy. {{done}} and {{total}} are file counts */
-	copy_stop_message: "{{done}} of {{total}} files are already copied.",
+	/** Message of the dialog asking how to stop a running copy, one file in total. {{done}} is the files copied so far, {{count}} the total file count */
+	copy_stop_message_one: "{{done}} of {{count}} file is already copied.",
+	/** Message of the dialog asking how to stop a running copy, several files in total. {{done}} is the files copied so far, {{count}} the total file count */
+	copy_stop_message_other: "{{done}} of {{count}} files are already copied.",
 	/** Stop-copy dialog: stop and keep everything copied so far */
 	copy_stop_keep: "Stop and keep copied items",
 	/** Stop-copy dialog: stop and move everything this copy created to the trash */
@@ -112,5 +130,7 @@ export const transfers = {
 	/** Finished copy row menu: start a new copy of only the items that failed */
 	copy_retry_failed: "Retry failed items",
 	/** Error shown when an upload or copy would not fit the account's free storage; nothing was sent. {{needed}} and {{free}} are formatted sizes */
-	not_enough_storage: "Not enough storage: needs {{needed}}, {{free}} free."
+	not_enough_storage: "Not enough storage: needs {{needed}}, {{free}} free.",
+	/** Error on a copy refused before anything was copied because it would not fit the account's free storage, when its size is not known. {{free}} is a formatted size */
+	copy_quota_exceeded: "This copy doesn't fit the {{free}} of free storage."
 } as const

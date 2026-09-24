@@ -96,6 +96,11 @@ export function sdkErrorPartsToHumanReadable(parts: { kind: ErrorKind; serverMes
 				return "max_remote_storage_reached" as const
 			}
 
+			// A 404 on a stored chunk: carries no server message, and its inner text is a raw request URL.
+			case ErrorKind.FileChunkNotFound: {
+				return "file_data_not_found" as const
+			}
+
 			case ErrorKind.MetadataWasNotDecrypted: {
 				return "metadata_was_not_decrypted" as const
 			}

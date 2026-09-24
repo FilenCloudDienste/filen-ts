@@ -17,12 +17,11 @@ import {
 	type SharedRootDirsAndFiles,
 	NonRootDir_Tags,
 	type LinkedDirsAndFiles,
-	AnyLinkedDir,
 	type DirPublicLink,
 	ErrorKind
 } from "@filen/sdk-rs"
-import { type DrivePath, type SharedNavContext, DRIVE_PATH_TYPES } from "@/hooks/useDrivePath"
-import { linkPasswordState } from "@/features/drive/utils"
+import { type DrivePath, type DrivePathType, type SharedNavContext, DRIVE_PATH_TYPES } from "@/hooks/useDrivePath"
+import { linkPasswordState, linkedRootOf } from "@/features/drive/utils"
 import { unwrapFileMeta, unwrapDirMeta, unwrappedDirIntoDriveItem, unwrappedFileIntoDriveItem, unwrapParentUuid } from "@/lib/sdkUnwrap"
 import { unwrapSdkError } from "@/lib/sdkErrors"
 import type { DriveItem } from "@/types"
@@ -469,22 +468,13 @@ export async function fetchData(
 
 				if (!parent) {
 					const info = await authedSdkClient.getDirPublicLinkInfo(params.path.linked.uuid, params.path.linked.key, signal)
+					const linkedRoot = linkedRootOf(info, params.path.linked.password)
+					const meta = linkedRoot.meta
 
-					const meta = {
-						...info.link,
-						password: linkPasswordState(params.path.linked?.password, info.link.password)
-					}
-
-					const rootDir = new AnyLinkedDir.Root(info.root)
-
-					cache.linkedRootByLinkUuid.set(params.path.linked.uuid, {
-						dir: rootDir,
-						meta,
-						rootUuid: info.root.inner.uuid
-					})
+					cache.linkedRootByLinkUuid.set(params.path.linked.uuid, linkedRoot)
 
 					const result = await run(async () => {
-						return authedSdkClient.listLinkedDir(rootDir, meta, undefined, signal)
+						return authedSdkClient.listLinkedDir(linkedRoot.dir, meta, undefined, signal)
 					})
 
 					if (!result.success) {
@@ -872,6 +862,11 @@ function cameraRootRelation(parentUuid: string, rootUuid: string): CameraRootRel
 			return "inside"
 		}
 
+		// The drive root is never in the directory map, so it is recognised by uuid.
+		if (cache.rootUuid !== null && current === cache.rootUuid) {
+			return "outside"
+		}
+
 		const anyDir = cache.directoryUuidToAnyNormalDir.get(current)
 
 		if (!anyDir) {
@@ -971,9 +966,19 @@ export function driveItemsQueryUpsertManyIntoPhotos(entries: readonly { parentUu
 
 // Photos lists files recursively, so a directory leaving the camera-upload tree (trashed, deleted or,
 // with `newParentUuid`, moved) takes rows a uuid filter can't see: every photo whose cached ancestry
-// passes through it. A move only removes them when the destination is known to lie outside the tree.
-// A photo whose ancestry isn't cached stays until the grid's next read.
-export function driveItemsQueryRemoveDirectoryFromPhotos({ dirUuid, newParentUuid }: { dirUuid: string; newParentUuid?: string }): void {
+// passes through it. A move only removes them when the directory wasn't already outside the tree and
+// the destination is known to lie outside it. A photo whose ancestry isn't cached stays until the
+// grid's next read.
+export function driveItemsQueryRemoveDirectoryFromPhotos({
+	dirUuid,
+	newParentUuid,
+	previousParentUuid
+}: {
+	dirUuid: string
+	newParentUuid?: string
+	// A move's previous parent, when known.
+	previousParentUuid?: string | null
+}): void {
 	cameraUpload
 		.getConfig()
 		.then(config => {
@@ -983,8 +988,19 @@ export function driveItemsQueryRemoveDirectoryFromPhotos({ dirUuid, newParentUui
 				return
 			}
 
-			if (newParentUuid !== undefined && cameraRootRelation(newParentUuid, params.path.uuid) !== "outside") {
-				return
+			const rootUuid = params.path.uuid
+
+			if (newParentUuid !== undefined) {
+				// A directory that was outside the tree took no photos out of it: it had none, or it is the
+				// camera-upload root or one of its ancestors, and the whole tree went along. One walk up from
+				// where it was answers most moves without reading the grid.
+				if (previousParentUuid && cameraRootRelation(previousParentUuid, rootUuid) === "outside") {
+					return
+				}
+
+				if (cameraRootRelation(newParentUuid, rootUuid) !== "outside") {
+					return
+				}
 			}
 
 			// Per parent directory: does its cached ancestry pass through dirUuid.
@@ -1029,6 +1045,12 @@ export function driveItemsQueryRemoveDirectoryFromPhotos({ dirUuid, newParentUui
 				}
 
 				return result
+			}
+
+			// With where it came from unknown, a moved directory holding the camera-upload root took the root
+			// along, photos and all.
+			if (newParentUuid !== undefined && isUnderDir(rootUuid)) {
+				return
 			}
 
 			updateListing(
@@ -1141,8 +1163,10 @@ export function driveItemsQueryUpdateForRecents({
 }
 
 // A copy below `destinationUuid` (null for the root) whose socket session changed while it ran may
-// have missed the create echoes of what it made: the destination's listing and, when the destination
-// lies in the camera-upload tree, the Photos grid are marked stale and refetched only if mounted.
+// have missed the create echoes of what it made, nested ones included: every drive listing whose cached
+// ancestry reaches the destination (all of them for the root) and, when the destination lies in the
+// camera-upload tree, the Photos grid are marked stale and refetched only if mounted. The batcher cached
+// every directory the copy made, and an opened directory was cached by its parent's read.
 export function driveItemsQueryRefetchAfterSocketGap(destinationUuid: string | null): void {
 	const invalidate = (params: UseDriveItemsQueryParams) => {
 		queryClient
@@ -1157,16 +1181,72 @@ export function driveItemsQueryRefetchAfterSocketGap(destinationUuid: string | n
 	}
 
 	const parentUuid = destinationUuid ?? cache.rootUuid
+	const wholeDrive = destinationUuid === null || (cache.rootUuid !== null && destinationUuid === cache.rootUuid)
+	// Per directory: whether its cached ancestry reaches the destination.
+	const reaches = new Map<string, boolean>()
 
-	if (destinationUuid === null || (cache.rootUuid !== null && destinationUuid === cache.rootUuid)) {
-		invalidate({ path: { type: "drive", uuid: null } })
+	const reachesDestination = (uuid: string): boolean => {
+		const walked: string[] = []
+		let current: string | null = uuid
+		let result = false
+		let guard = 0
+
+		while (current && guard++ < 64) {
+			const known = reaches.get(current)
+
+			if (known !== undefined) {
+				result = known
+
+				break
+			}
+
+			if (current === parentUuid) {
+				result = true
+
+				break
+			}
+
+			walked.push(current)
+
+			const anyDir = cache.directoryUuidToAnyNormalDir.get(current)
+
+			if (!anyDir || anyDir.tag !== AnyNormalDir_Tags.Dir) {
+				break
+			}
+
+			const next = unwrapParentUuid(anyDir.inner[0].parent)
+
+			current = next && next !== current ? next : null
+		}
+
+		for (const walkedUuid of walked) {
+			reaches.set(walkedUuid, result)
+		}
+
+		return result
 	}
+
+	queryClient
+		.invalidateQueries({
+			queryKey: [BASE_QUERY_KEY],
+			refetchType: "active",
+			predicate: query => {
+				const path = (query.queryKey[1] as UseDriveItemsQueryParams | undefined)?.path
+
+				if (path?.type !== "drive") {
+					return false
+				}
+
+				return wholeDrive || (path.uuid !== null && reachesDestination(path.uuid))
+			}
+		})
+		.catch(err => {
+			logger.error("drive", "invalidation after a socket gap failed", { error: err })
+		})
 
 	if (parentUuid === null) {
 		return
 	}
-
-	invalidate({ path: { type: "drive", uuid: parentUuid } })
 
 	cameraUpload
 		.getConfig()
@@ -1181,6 +1261,45 @@ export function driveItemsQueryRefetchAfterSocketGap(destinationUuid: string | n
 		})
 		.catch(err => {
 			logger.error("drive", "driveItemsQueryRefetchAfterSocketGap: failed to get camera upload config", { error: err })
+		})
+}
+
+// A drive change the socket patches couldn't carry (a malformed event): no listing read before it can be
+// trusted as complete, so each one reads again on its next mount (the move/copy pickers otherwise reuse a
+// read from the current socket session). Nothing is fetched now.
+export function driveItemsQueryMarkAllStale(): void {
+	void queryClient.invalidateQueries({
+		queryKey: [BASE_QUERY_KEY],
+		refetchType: "none"
+	})
+}
+
+// The own-drive roots that exist after a delete-all.
+const DELETE_ALL_ROOT_TYPES = new Set<DrivePathType>(["drive", "recents", "favorites", "links", "sharedOut", "trash"])
+
+// Everything in the own drive was deleted (remotely or here): every listing reads again on its next mount,
+// and the mounted roots read now. A mounted subdirectory is not refetched: it no longer exists, so its read
+// would fail and alert.
+export function driveItemsQueryInvalidateAfterDeleteAll(): void {
+	driveItemsQueryMarkAllStale()
+
+	queryClient
+		.refetchQueries({
+			queryKey: [BASE_QUERY_KEY],
+			type: "active",
+			predicate: query => {
+				const path = (query.queryKey[1] as UseDriveItemsQueryParams | undefined)?.path
+
+				return (
+					path !== undefined &&
+					path.type !== null &&
+					DELETE_ALL_ROOT_TYPES.has(path.type) &&
+					(path.uuid === null || (path.type === "drive" && path.uuid === cache.rootUuid))
+				)
+			}
+		})
+		.catch(err => {
+			logger.error("drive", "root listings refetch after delete-all failed", { error: err })
 		})
 }
 

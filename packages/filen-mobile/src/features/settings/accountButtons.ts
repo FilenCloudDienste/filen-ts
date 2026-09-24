@@ -8,6 +8,7 @@ import alerts from "@/lib/alerts"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import auth from "@/lib/auth"
 import { markDirectorySizesStale } from "@/features/drive/queries/useDirectorySize.query"
+import { driveItemsQueryInvalidateAfterDeleteAll } from "@/features/drive/queries/useDriveItems.query"
 import { router } from "@/lib/router"
 import { serialize } from "@/lib/serializer"
 import { shareTmpFile } from "@/lib/share"
@@ -163,6 +164,8 @@ export function buildDangerZoneButtons({
 
 					await authedSdkClient.deleteAllItems()
 					markDirectorySizesStale()
+					// The socket echo does the same, but not while the socket is down.
+					driveItemsQueryInvalidateAfterDeleteAll()
 					await accountQuery.refetch()
 				})
 

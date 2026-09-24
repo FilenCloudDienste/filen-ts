@@ -318,6 +318,7 @@ const Drive = () => {
 				setSearchQuery={setSearchQuery}
 				listItems={items}
 				searchStatus={status}
+				listingFetchStatus={driveItemsQuery.fetchStatus}
 			/>
 			<SafeAreaView
 				className={cn(

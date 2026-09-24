@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next"
 import { useResolveClassNames } from "uniwind"
 import { Platform } from "react-native"
 import { useShallow } from "zustand/shallow"
+import { type FetchStatus } from "@tanstack/react-query"
 import { run } from "@filen/shared"
 import StackHeader, { type HeaderItem } from "@/components/ui/header"
 import { type MenuButton } from "@/components/ui/menu"
@@ -33,7 +34,8 @@ import logger from "@/lib/logger"
 const Header = ({
 	setSearchQuery,
 	listItems,
-	searchStatus
+	searchStatus,
+	listingFetchStatus
 }: {
 	setSearchQuery: React.Dispatch<React.SetStateAction<string>>
 	// The search-filtered, sorted set the list body actually renders. Select-all
@@ -45,6 +47,8 @@ const Header = ({
 	// Cache-backed search status. Drives the non-blocking header "searching" spinner
 	// (warming/background) and gates select-all until the result set has settled.
 	searchStatus: DriveSearchStatus
+	// The directory listing's fetch status: see resolveDriveHeaderTitle.
+	listingFetchStatus: FetchStatus
 }) => {
 	const textForeground = useResolveClassNames("text-foreground")
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
@@ -353,6 +357,7 @@ const Header = ({
 		drivePath,
 		selectedCount: selectedDriveItems.length,
 		stringifiedClientRootUuid: stringifiedClient?.rootUuid ?? null,
+		listingFetchStatus,
 		t
 	})
 

@@ -15,12 +15,14 @@ export async function stopCopyWithChoice(jobId: string, t: TFunction): Promise<v
 	const result = await run(async () => {
 		return await prompts.confirm3({
 			title: t("copy_stop_title"),
-			message: job
-				? t("copy_stop_message", {
-						done: job.counts.filesDone.toString(),
-						total: job.totals.files.toString()
-					})
-				: undefined,
+			// No count while the scan is still totalling, nor for a copy without files.
+			message:
+				job && job.phase !== "scanning" && job.totals.files > 0
+					? t("copy_stop_message", {
+							done: job.counts.filesDone,
+							count: job.totals.files
+						})
+					: undefined,
 			primaryText: t("copy_stop_keep"),
 			destructiveText: t("copy_stop_trash"),
 			cancelText: t("copy_continue")

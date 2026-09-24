@@ -82,4 +82,11 @@ export const useDriveSelectStore = create<DriveSelectStore>(set => ({
 	}
 }))
 
+// A plain read for render code: a session is opened before its first screen is pushed and is fixed for its
+// lifetime, so nothing needs to subscribe. Not named use*, because the React Compiler skips a hook that
+// references a hook as a value (useDriveSelectStore.getState).
+export function getDriveSelectSession(sessionId: string): DriveSelectSession | undefined {
+	return useDriveSelectStore.getState().sessions[sessionId]
+}
+
 export default useDriveSelectStore

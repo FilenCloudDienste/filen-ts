@@ -2,14 +2,13 @@ import { DirColor, MaybeEncryptedUniffi_Tags, DirMeta_Tags } from "@filen/sdk-rs
 import View from "@/components/ui/view"
 import Text from "@/components/ui/text"
 import { cn, formatBytes, run } from "@filen/shared"
-import { linkedFileIntoDriveItem } from "@/lib/sdkUnwrap"
 import { Fragment } from "react"
 import { simpleDate } from "@/lib/time"
 import { FileIcon, DirectoryIcon } from "@/components/itemIcons"
 import { PressableScale } from "@/components/ui/pressables"
 import alerts from "@/lib/alerts"
 import drive from "@/features/drive/drive"
-import useDrivePreviewStore from "@/stores/useDrivePreview.store"
+import { openLinkedFilePreview } from "@/features/drive/linkedFilePreview"
 import { cannotDecryptPlaceholder } from "@/lib/decryption"
 import { t as i18nT } from "@/lib/i18n"
 import { type InternalLinkData } from "@/features/chats/utils"
@@ -88,36 +87,7 @@ export const InternalAttachment = ({
 					return
 				}
 
-				const driveItem = linkedFileIntoDriveItem(data.file)
-
-				if (driveItem.type !== "file") {
-					return
-				}
-
-				if (driveItem.data.decryptedMeta === null) {
-					alerts.normal(i18nT("cannot_decrypt_toast"))
-
-					return
-				}
-
-				useDrivePreviewStore.getState().open({
-					initialItem: {
-						type: "drive",
-						data: {
-							item: driveItem,
-							drivePath: {
-								type: "linked",
-								uuid: null
-							}
-						}
-					},
-					items: [
-						{
-							type: "drive",
-							data: driveItem
-						}
-					]
-				})
+				openLinkedFilePreview(data.file)
 			}}
 		>
 			{data.type === "directory" ? (

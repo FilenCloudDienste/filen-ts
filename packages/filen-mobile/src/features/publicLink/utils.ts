@@ -49,13 +49,17 @@ type LinkStatusQuery<T> = {
 	status: "pending" | "error" | "success"
 	fetchStatus: "fetching" | "paused" | "idle"
 	data: T | undefined
+	dataUpdatedAt: number
 	refetch: (options: { cancelRefetch: boolean }) => Promise<{ data: T | undefined }>
 }
 
+// How long the screen's own read stands in for the read enable and disable would make. Nothing reports
+// a link changed on another device, so an older one may be a link since disabled or replaced.
+export const HELD_LINK_STATUS_TRUST_MS = 15 * 1000
+
 /**
  * The link status the screen holds, when it is current: its mount read has settled. Until then the
- * value may be a persisted row from before a change made on another device, which enable and disable
- * must not trust in place of their own read.
+ * value may be a persisted row from before a change made on another device.
  */
 export function currentHeldLinkStatus<T>(query: LinkStatusQuery<T>): { current: true; value: T | undefined } | { current: false } {
 	if (query.status !== "success" || query.fetchStatus !== "idle") {
@@ -68,6 +72,20 @@ export function currentHeldLinkStatus<T>(query: LinkStatusQuery<T>): { current: 
 		current: true,
 		value: query.data
 	}
+}
+
+/**
+ * The held link status enable and disable may act on in place of their own read: current, and read
+ * within HELD_LINK_STATUS_TRUST_MS.
+ */
+export function recentHeldLinkStatus<T>(query: LinkStatusQuery<T>): { current: true; value: T | undefined } | { current: false } {
+	if (Date.now() - query.dataUpdatedAt > HELD_LINK_STATUS_TRUST_MS) {
+		return {
+			current: false
+		}
+	}
+
+	return currentHeldLinkStatus(query)
 }
 
 /**

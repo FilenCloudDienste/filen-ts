@@ -12,6 +12,12 @@ export const BASE_QUERY_KEY = "usePlaylistsQuery"
 // since (a deleted track must drop out). Local edits patch the cache; pull-to-refresh always reads.
 const PLAYLISTS_STALE_TIME = 60 * 1000
 
+// Bumped by every cache patch. A read one overlapped may hold a playlist from before that patch's save.
+let patchCount = 0
+// When the last read no patch overlapped began; null while there is none. Freshness counts from a read's
+// start: a save made while it ran is after it, whatever it fetched.
+let cleanReadStartedAt: number | null = null
+
 /**
  * Seeds a playlist track so the audioMetadata query — which resolves each file by uuid FROM this
  * cache — can find it.
@@ -30,6 +36,8 @@ function seedTrackIfUncached(item: DriveItemFileExtracted): void {
 }
 
 export async function fetchData(params?: { signal?: AbortSignal }) {
+	const startedAt = Date.now()
+	const patchesBefore = patchCount
 	const playlists = await audio.getPlaylists(params?.signal)
 
 	for (const playlist of playlists) {
@@ -38,7 +46,21 @@ export async function fetchData(params?: { signal?: AbortSignal }) {
 		}
 	}
 
+	cleanReadStartedAt = patchCount === patchesBefore ? startedAt : null
+
 	return playlists
+}
+
+// The cached list is that clean read's (not a restored row, nor an older read it never replaced), no
+// read failed since, it is under a minute old, and the drive hasn't changed since it began.
+function cachedReadReusable(state: { dataUpdatedAt: number; isInvalidated: boolean }): boolean {
+	return (
+		cleanReadStartedAt !== null &&
+		state.dataUpdatedAt >= cleanReadStartedAt &&
+		!state.isInvalidated &&
+		Date.now() - cleanReadStartedAt < PLAYLISTS_STALE_TIME &&
+		!driveContentChangedSince(cleanReadStartedAt)
+	)
 }
 
 export function usePlaylistsQuery(
@@ -47,7 +69,7 @@ export function usePlaylistsQuery(
 	const query = useQuery({
 		...DEFAULT_QUERY_OPTIONS,
 		staleTime: PLAYLISTS_STALE_TIME,
-		refetchOnMount: q => (driveContentChangedSince(q.state.dataUpdatedAt) ? "always" : true),
+		refetchOnMount: q => (cachedReadReusable(q.state) ? false : "always"),
 		...options,
 		queryKey: [BASE_QUERY_KEY],
 		queryFn: ({ signal }) =>
@@ -60,12 +82,29 @@ export function usePlaylistsQuery(
 }
 
 export function playlistsQueryUpdate({
-	updater
+	updater,
+	keepInFlightRead
 }: {
 	updater:
 		| Awaited<ReturnType<typeof fetchData>>
 		| ((prev: Awaited<ReturnType<typeof fetchData>>) => Awaited<ReturnType<typeof fetchData>>)
+	// For the dead-track prune, which patches during its own read: that read already leaves them out.
+	keepInFlightRead?: boolean
 }) {
+	patchCount++
+
+	const state = queryClient.getQueryState([BASE_QUERY_KEY])
+
+	// A read in flight would land after this patch and overwrite it with what it fetched before the save
+	// behind it, and the next edit would build on that. Cancelled, so the cached list comes back and the
+	// patch applies to it; a first read (nothing cached yet) still lands.
+	if (!keepInFlightRead && state?.data !== undefined && state.fetchStatus !== "idle") {
+		void queryClient.cancelQueries({
+			queryKey: [BASE_QUERY_KEY],
+			exact: true
+		})
+	}
+
 	queryUpdater.set<Awaited<ReturnType<typeof fetchData>>>(
 		[BASE_QUERY_KEY],
 		prev => {

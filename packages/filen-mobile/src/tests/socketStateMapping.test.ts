@@ -36,6 +36,7 @@ vi.mock("@filen/sdk-rs", () => ({
 		Reconnecting: "Reconnecting",
 		Unsubscribed: "Unsubscribed",
 		Drive: "Drive",
+		DriveMalformed: "DriveMalformed",
 		Chat: "Chat",
 		Note: "Note",
 		Contact: "Contact",
@@ -164,8 +165,8 @@ describe("useSocketStore.setState — driven by mapped values", () => {
 describe("isSocketDataEvent — what makes an in-flight read untrustworthy", () => {
 	const chatEvent = (tag: string) => ({ tag: "Chat", inner: [{ inner: { tag } }] }) as unknown as SocketEvent
 
-	it("drive, note, contact and chat data events count", () => {
-		for (const tag of ["Drive", "Note", "Contact"]) {
+	it("drive, note, contact and chat data events count, and so does a drive event the SDK couldn't read", () => {
+		for (const tag of ["Drive", "DriveMalformed", "Note", "Contact"]) {
 			expect(isSocketDataEvent({ tag } as unknown as SocketEvent)).toBe(true)
 		}
 

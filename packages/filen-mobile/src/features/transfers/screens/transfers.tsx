@@ -30,7 +30,7 @@ import alerts from "@/lib/alerts"
 import logger from "@/lib/logger"
 import useCopyJobsStore from "@/features/copy/store/useCopyJobs.store"
 import copyRunner from "@/features/copy/copyRunner"
-import { copyNotesText, copyRowStatus } from "@/features/copy/copyRowText"
+import { copyFinishedTitle, copyNotesText, copyRowStatus } from "@/features/copy/copyRowText"
 import { stopCopyWithChoice } from "@/features/copy/copyCancel"
 
 type CopyTransfer = Extract<TTransfer, { type: "copy" }>
@@ -212,9 +212,7 @@ const CopyFinishedRow = ({ finished }: { finished: TFinishedTransfer }) => {
 							numberOfLines={1}
 							ellipsizeMode="middle"
 						>
-							{finished.outcome === "errored" && trashFailed > 0
-								? t("copy_row_stopped_title", { name: finished.name })
-								: t("copy_row_finished_title", { name: finished.name })}
+							{copyFinishedTitle(finished, t)}
 						</Text>
 						<Text
 							className="text-muted-foreground text-xs"

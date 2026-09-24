@@ -21,9 +21,11 @@ vi.mock("@/lib/auth", () => ({
 	}
 }))
 
-// The real TanStack client with the app's refetch defaults, minus the SQLite persister.
+// The real TanStack client with the app's refetch defaults and server-read tracking, minus the SQLite
+// persister.
 vi.mock("@/queries/client", async () => {
 	const { QueryClient } = await import("@tanstack/react-query")
+	const { trackServerReads } = await import("@/queries/socketSession")
 
 	const DEFAULT_QUERY_OPTIONS = {
 		refetchOnMount: "always",
@@ -38,6 +40,8 @@ vi.mock("@/queries/client", async () => {
 			queries: DEFAULT_QUERY_OPTIONS
 		}
 	})
+
+	trackServerReads(queryClient.getQueryCache())
 
 	return {
 		default: queryClient,
@@ -56,8 +60,14 @@ import { renderHook, waitFor, cleanup } from "@testing-library/react"
 import { QueryClientProvider } from "@tanstack/react-query"
 import { createElement, type ReactNode } from "react"
 import queryClient from "@/queries/client"
-import useNotesQuery, { reuseRecentNotesRead, notesQueryUpdate, NOTES_REUSE_WINDOW_MS } from "@/features/notes/queries/useNotesQuery"
+import useNotesQuery, {
+	reuseRecentNotesRead,
+	notesQueryUpdate,
+	fetchData as notesQueryFetch,
+	NOTES_REUSE_WINDOW_MS
+} from "@/features/notes/queries/useNotesQuery"
 import useNotesTagsQuery, { reuseRecentNotesTagsRead } from "@/features/notes/queries/useNotesTags.query"
+import useSocketStore from "@/stores/useSocket.store"
 
 function wrapper({ children }: { children: ReactNode }) {
 	return createElement(QueryClientProvider, { client: queryClient }, children)
@@ -85,11 +95,18 @@ async function settle(): Promise<void> {
 
 let now = 1_000_000_000_000
 
+// A socket (re)connect at the current time: reads from before it may have missed events.
+function reconnectSocket(): void {
+	useSocketStore.getState().setState("disconnected")
+	useSocketStore.getState().setState("connected")
+}
+
 beforeEach(() => {
 	queryClient.clear()
 	now += 10 * NOTES_REUSE_WINDOW_MS
 	vi.useFakeTimers({ toFake: ["Date"] })
 	vi.setSystemTime(now)
+	reconnectSocket()
 	sdk.listNotes.mockReset()
 	sdk.listNoteTags.mockReset()
 	sdk.listNotes.mockResolvedValue([{ uuid: "n1", encryptionKey: "k" }])
@@ -146,6 +163,29 @@ describe("notes tag screens request counts", () => {
 
 		// Restamps dataUpdatedAt, yet pins/tags from other devices are still as old as the last read.
 		notesQueryUpdate({ updater: prev => prev })
+
+		mountNotesScreen("t1")
+
+		await waitFor(() => expect(sdk.listNotes).toHaveBeenCalledTimes(2))
+	})
+
+	it("a listing read that never reaches the cache (the offline pass, the boot reconcile) does not count", async () => {
+		await mountRootTab()
+
+		vi.setSystemTime(now + NOTES_REUSE_WINDOW_MS + 1)
+
+		await notesQueryFetch()
+
+		mountNotesScreen("t1")
+
+		await waitFor(() => expect(sdk.listNotes).toHaveBeenCalledTimes(3))
+	})
+
+	it("a read from before a socket reconnect (a background drops events) is not reused, even inside the window", async () => {
+		await mountRootTab()
+
+		vi.setSystemTime(now + 1000)
+		reconnectSocket()
 
 		mountNotesScreen("t1")
 

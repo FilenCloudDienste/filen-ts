@@ -70,11 +70,17 @@ vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/u
 vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
 vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
 vi.mock("@filen/sdk-rs", async () => await import("@/tests/mocks/sdkCopy"))
-vi.mock("@/lib/i18n", () => ({ default: { t: (key: string, options?: { count?: number }) => `${key}:${options?.count ?? ""}` } }))
+vi.mock("@/lib/i18n", () => ({
+	default: {
+		t: (key: string, options?: Record<string, unknown>) =>
+			`${key}:${String(options?.["count"] ?? (options ? JSON.stringify(options) : ""))}`
+	}
+}))
 vi.mock("@/lib/auth", () => ({ default: { getSdkClients: async () => ({ authedSdkClient: h.sdk }) } }))
 vi.mock("@/lib/sdkErrors", () => ({
 	unwrapSdkError: () => null,
-	sdkErrorPartsToHumanReadable: (parts: { serverMessage?: string; innerMessage?: string }) => parts.serverMessage ?? parts.innerMessage ?? "error"
+	sdkErrorPartsToHumanReadable: (parts: { kind: number; serverMessage?: string; innerMessage?: string }) =>
+		parts.serverMessage || parts.innerMessage || `kind-${parts.kind}`
 }))
 vi.mock("@/lib/decryption", () => ({ driveItemDisplayName: (item: { data: { uuid: string } }) => `name-${item.data.uuid}` }))
 vi.mock("@/lib/cache", () => ({ default: { directoryUuidToAnySharedDirWithContext: new Map() } }))
@@ -131,6 +137,7 @@ import copyActivity from "@/features/drive/copyActivity"
 import useSocketStore from "@/stores/useSocket.store"
 import logger from "@/lib/logger"
 import { CopyPhase, CopyStage, ErrorKind, NonRootNormalItem_Tags } from "@/tests/mocks/sdkCopy"
+import { formatBytes } from "@filen/shared"
 import type { CopyItemsCallback, CopyReport, CopyUpdate } from "@filen/sdk-rs"
 import type { DriveItem } from "@/types"
 
@@ -202,6 +209,44 @@ async function runJob(items: DriveItem[] = [file("a")]): Promise<string> {
 	await Promise.all(h.tracked)
 
 	return id
+}
+
+// Starts a job without waiting for it to settle.
+function launchJob(items: DriveItem[] = [file("a")]): string {
+	return copyRunner.start({ items, destination: DEST, destinationDir: DEST_DIR }) as string
+}
+
+// Holds every trash call until released; the listed uuids then fail.
+function holdTrash(refused: ReadonlySet<string>): () => void {
+	let release = () => {}
+	const gate = new Promise<void>(resolve => {
+		release = resolve
+	})
+
+	h.trash.mockImplementation(async ({ item }: { item: DriveItem }) => {
+		await gate
+
+		if (refused.has(item.data.uuid)) {
+			throw new Error("server refused")
+		}
+	})
+
+	return release
+}
+
+function jobIdOf(index = 0): string {
+	return Object.keys(useCopyJobsStore.getState().jobs)[index] as string
+}
+
+// A copy stopped with "move to trash" after making "moved" and "stuck".
+function scriptStoppedWithTrash(): void {
+	scriptCopy(async callback => {
+		callback.onTopLevelCreated(createdFile("moved") as never)
+		callback.onTopLevelCreated(createdFile("stuck") as never)
+		copyRunner.requestCancel(jobIdOf(), "trash")
+
+		return report({ error: { kind: ErrorKind.Cancelled, message: "", serverMessage: undefined } })
+	})
 }
 
 beforeEach(() => {
@@ -375,6 +420,29 @@ describe("a copy job", () => {
 		expect(h.markDirectorySizesStale).toHaveBeenCalledOnce()
 	})
 
+	it("a copy whose every entry failed is marked as having copied nothing; one that copied something is not", async () => {
+		const failure = {
+			item: { tag: "File", inner: [{}] },
+			info: {
+				stage: CopyStage.Download,
+				error: { kind: ErrorKind.FileChunkNotFound, message: "", serverMessage: undefined },
+				affectedFiles: 1n,
+				affectedBytes: 1000n
+			}
+		}
+
+		scriptCopy(async () => report({ failures: [failure], counts: { ...ZERO, filesFailed: 1n, bytesFailed: 1000n } }))
+		scriptCopy(async () => report({ failures: [failure] }))
+
+		await runJob()
+		await runJob()
+
+		expect(useTransfersStore.getState().finishedTransfers).toEqual([
+			expect.objectContaining({ outcome: "completedWithErrors", copyNothingCopied: true }),
+			expect.objectContaining({ outcome: "completedWithErrors", copyNothingCopied: false })
+		])
+	})
+
 	it("a failed job shows its error on the finished row", async () => {
 		scriptCopy(async () => report({ error: { kind: ErrorKind.Server, message: "inner", serverMessage: "Server says no" }, counts: ZERO }))
 
@@ -388,8 +456,8 @@ describe("a copy job", () => {
 })
 
 describe("quota", () => {
-	const preflightRefusal = () =>
-		report({ error: { kind: ErrorKind.MaxStorageReached, message: "", serverMessage: undefined }, counts: ZERO, totals: { dirs: 0n, files: 0n, bytes: 0n } })
+	const maxStorageReached = { kind: ErrorKind.MaxStorageReached, message: "", serverMessage: undefined }
+	const preflightRefusal = () => report({ error: maxStorageReached, counts: ZERO, totals: { dirs: 0n, files: 0n, bytes: 0n } })
 
 	it("a fresh cached account is trusted: no read", async () => {
 		scriptCopy(async () => report())
@@ -425,30 +493,42 @@ describe("quota", () => {
 		expect(useTransfersStore.getState().finishedTransfers[0]?.outcome).toBe("succeeded")
 	})
 
-	it("a refusal says what the scan needed and what is free; without a scanned total, the plain limit", async () => {
+	// The SDK refuses against maxBytes with a default report: no totals, however big the scan found it.
+	it("the SDK's own refusal reports no total, so it says the free storage it did not fit", async () => {
 		h.account.isCachedFresh.mockReturnValue(false)
 		h.account.fetchFresh.mockResolvedValue({ storageUsed: 9_000n, maxStorage: 10_000n })
-		scriptCopy(async () =>
-			report({
-				error: { kind: ErrorKind.MaxStorageReached, message: "", serverMessage: undefined },
-				counts: ZERO,
-				totals: { dirs: 0n, files: 3n, bytes: 5000n }
-			})
-		)
-
-		await runJob()
-
-		expect(useTransfersStore.getState().finishedTransfers[0]?.errorMessage).toMatch(/^not_enough_storage/)
-
 		scriptCopy(async () => preflightRefusal())
 
 		await runJob()
 
-		const rows = useTransfersStore.getState().finishedTransfers
+		expect(useTransfersStore.getState().finishedTransfers).toEqual([
+			expect.objectContaining({
+				outcome: "errored",
+				errorMessage: `copy_quota_exceeded:${JSON.stringify({ free: formatBytes(1000) })}`
+			})
+		])
+	})
 
-		expect(rows).toHaveLength(2)
-		expect(rows.at(-1)?.outcome).toBe("errored")
-		expect(rows.at(-1)?.errorMessage).not.toMatch(/^not_enough_storage/)
+	// A cached figure lets the SDK start, the server refuses the first write, and the fresh read shows
+	// less free: the scan's total is known then.
+	it("a server refusal after a fresh cached figure passed says what was needed against the figure read fresh", async () => {
+		h.account.fetchFresh.mockResolvedValue({ storageUsed: 8_000n, maxStorage: 10_000n })
+		scriptCopy(async () => report({ error: maxStorageReached, counts: ZERO, totals: { dirs: 0n, files: 3n, bytes: 5000n } }))
+
+		await runJob()
+
+		expect(h.sdk.copyItems).toHaveBeenCalledOnce()
+		expect(useTransfersStore.getState().finishedTransfers[0]?.errorMessage).toBe(
+			`not_enough_storage:${JSON.stringify({ needed: formatBytes(5000), free: formatBytes(2000) })}`
+		)
+	})
+
+	it("a server refusal of a copy that fits the figure read fresh gets the plain limit", async () => {
+		scriptCopy(async () => report({ error: maxStorageReached, counts: ZERO, totals: { dirs: 0n, files: 3n, bytes: 5000n } }))
+
+		await runJob()
+
+		expect(useTransfersStore.getState().finishedTransfers[0]?.errorMessage).toBe(`kind-${ErrorKind.MaxStorageReached}`)
 	})
 
 	it("a refusal against a figure just read fresh is final: no second read, no rerun", async () => {
@@ -462,22 +542,29 @@ describe("quota", () => {
 		expect(useTransfersStore.getState().finishedTransfers[0]?.outcome).toBe("errored")
 	})
 
-	it("no rerun after a cancel", async () => {
+	// A stopped copy's refusal wrote nothing: it ends as the stop, its row gone and its job pruned.
+	function expectEndedAsStopped(id: string): void {
+		expect(useTransfersStore.getState().transfers).toEqual([])
+		expect(useTransfersStore.getState().finishedTransfers).toEqual([])
+		expect(getCopyJob(id)).toBeUndefined()
+	}
+
+	it.each(["keep", "trash"] as const)("no rerun after a %s stop that reached the refusal in transit; it ends as stopped", async mode => {
 		h.account.cached.mockReturnValue({ storageUsed: 9_999n, maxStorage: 10_000n })
 		scriptCopy(async () => {
-			const id = Object.keys(useCopyJobsStore.getState().jobs)[0] as string
-
-			copyRunner.requestCancel(id, "keep")
+			copyRunner.requestCancel(jobIdOf(), mode)
 
 			return preflightRefusal()
 		})
 
-		await runJob()
+		const id = await runJob()
 
 		expect(h.sdk.copyItems).toHaveBeenCalledOnce()
+		expectEndedAsStopped(id)
+		expect(h.trash).not.toHaveBeenCalled()
 	})
 
-	it("no rerun when Cancel all or the background lifecycle cancels during the fresh read", async () => {
+	it("no rerun when Cancel all or the background lifecycle cancels during the fresh read; it ends as stopped", async () => {
 		h.account.cached.mockReturnValue({ storageUsed: 9_999n, maxStorage: 10_000n })
 		h.account.fetchFresh.mockImplementation(async () => {
 			h.scope.controller.abort()
@@ -486,10 +573,35 @@ describe("quota", () => {
 		})
 		scriptCopy(async () => preflightRefusal())
 
-		await runJob()
+		const id = await runJob()
 
 		expect(h.account.fetchFresh).toHaveBeenCalledOnce()
 		expect(h.sdk.copyItems).toHaveBeenCalledOnce()
+		expectEndedAsStopped(id)
+	})
+
+	it("a fresh read that fails after the cancel still ends as stopped", async () => {
+		h.account.cached.mockReturnValue({ storageUsed: 9_999n, maxStorage: 10_000n })
+		h.account.fetchFresh.mockImplementation(async () => {
+			h.scope.controller.abort()
+
+			throw new Error("offline")
+		})
+		scriptCopy(async () => preflightRefusal())
+
+		expectEndedAsStopped(await runJob())
+	})
+
+	it("a storage error after something was written stays a failure, stopped or not", async () => {
+		scriptCopy(async () => {
+			copyRunner.requestCancel(jobIdOf(), "keep")
+
+			return report({ error: maxStorageReached, counts: { ...ZERO, filesDone: 1n, bytesDone: 10n } })
+		})
+
+		await runJob()
+
+		expect(useTransfersStore.getState().finishedTransfers[0]?.outcome).toBe("errored")
 	})
 })
 
@@ -711,6 +823,169 @@ describe("cancel", () => {
 		await runJob()
 
 		expect(h.trash).not.toHaveBeenCalled()
+	})
+})
+
+describe("move to trash racing a prune", () => {
+	function trashFailedUuids(id: string): string[] | undefined {
+		return getCopyJob(id)?.trashFailed.map(item => item.data.uuid)
+	}
+
+	it("Clear finished while the trash runs: its failure still brings the row with Retry", async () => {
+		useTransfersStore.getState().addFinishedTransfer({
+			id: "other",
+			type: "uploadFile",
+			name: "other",
+			size: 0,
+			bytesTransferred: 0,
+			startedAt: 0,
+			finishedAt: 0,
+			outcome: "succeeded",
+			errorMessage: null,
+			errorCount: 0
+		})
+
+		const release = holdTrash(new Set(["stuck"]))
+
+		scriptStoppedWithTrash()
+
+		const id = launchJob()
+
+		await vi.waitFor(() => expect(h.trash).toHaveBeenCalledTimes(2))
+
+		useTransfersStore.getState().clearFinishedTransfers()
+		release()
+		await Promise.all(h.tracked)
+
+		expect(useTransfersStore.getState().finishedTransfers).toEqual([expect.objectContaining({ id, copyTrashFailed: 1 })])
+		expect(trashFailedUuids(id)).toEqual(["stuck"])
+	})
+
+	it("a parallel copy settling while the trash runs leaves the stopped copy's job", async () => {
+		const release = holdTrash(new Set(["stuck"]))
+
+		scriptStoppedWithTrash()
+
+		const id = launchJob()
+
+		await vi.waitFor(() => expect(h.trash).toHaveBeenCalledTimes(2))
+
+		scriptCopy(async () => report())
+		launchJob([file("b")])
+		await h.tracked[1]
+
+		release()
+		await Promise.all(h.tracked)
+
+		expect(useTransfersStore.getState().finishedTransfers).toContainEqual(expect.objectContaining({ id, copyTrashFailed: 1 }))
+		expect(trashFailedUuids(id)).toEqual(["stuck"])
+	})
+
+	it("a late create whose trash fails after a clean batch brings the pruned job back with its row", async () => {
+		let late: ((item: never) => void) | undefined
+
+		h.trash.mockImplementation(async ({ item }: { item: DriveItem }) => {
+			if (item.data.uuid === "late") {
+				throw new Error("server refused")
+			}
+		})
+		scriptCopy(async callback => {
+			late = item => callback.onTopLevelCreated(item)
+			callback.onTopLevelCreated(createdFile("made") as never)
+			copyRunner.requestCancel(jobIdOf(), "trash")
+
+			return report({ error: { kind: ErrorKind.Cancelled, message: "", serverMessage: undefined } })
+		})
+
+		const id = await runJob()
+
+		expect(getCopyJob(id)).toBeUndefined()
+		expect(useTransfersStore.getState().finishedTransfers).toEqual([])
+
+		late?.(createdFile("late") as never)
+
+		await vi.waitFor(() => expect(useTransfersStore.getState().finishedTransfers).toHaveLength(1))
+
+		expect(useTransfersStore.getState().finishedTransfers[0]).toMatchObject({ id, outcome: "errored", copyTrashFailed: 1 })
+		expect(trashFailedUuids(id)).toEqual(["late"])
+
+		h.trash.mockReset().mockResolvedValue(undefined)
+
+		await copyRunner.retryTrash(id)
+
+		expect(useTransfersStore.getState().finishedTransfers).toEqual([])
+		expect(getCopyJob(id)).toBeUndefined()
+	})
+
+	it("a late create's failure landing before a clean batch is kept", async () => {
+		let late: ((item: never) => void) | undefined
+		let releaseBatch = () => {}
+		const batch = new Promise<void>(resolve => {
+			releaseBatch = resolve
+		})
+
+		h.trash.mockImplementation(async ({ item }: { item: DriveItem }) => {
+			if (item.data.uuid === "late") {
+				throw new Error("server refused")
+			}
+
+			await batch
+		})
+		scriptCopy(async callback => {
+			late = item => callback.onTopLevelCreated(item)
+			callback.onTopLevelCreated(createdFile("made") as never)
+			copyRunner.requestCancel(jobIdOf(), "trash")
+
+			return report({ error: { kind: ErrorKind.Cancelled, message: "", serverMessage: undefined } })
+		})
+
+		const id = launchJob()
+
+		await vi.waitFor(() => expect(h.trash).toHaveBeenCalledOnce())
+
+		late?.(createdFile("late") as never)
+
+		await vi.waitFor(() => expect(useTransfersStore.getState().finishedTransfers).toHaveLength(1))
+
+		releaseBatch()
+		await Promise.all(h.tracked)
+
+		expect(useTransfersStore.getState().finishedTransfers).toEqual([expect.objectContaining({ id, copyTrashFailed: 1 })])
+		expect(trashFailedUuids(id)).toEqual(["late"])
+	})
+
+	it("a finished copy whose row was removed while its trash ran comes back as it ended, and stays after a clean retry", async () => {
+		const release = holdTrash(new Set(["stuck"]))
+
+		scriptCopy(async callback => {
+			callback.onTopLevelCreated(createdFile("moved") as never)
+			callback.onTopLevelCreated(createdFile("stuck") as never)
+			copyRunner.requestCancel(jobIdOf(), "trash")
+
+			// The copy finished before the stop reached it.
+			return report()
+		})
+
+		const id = launchJob()
+
+		await vi.waitFor(() => expect(h.trash).toHaveBeenCalledTimes(2))
+
+		useTransfersStore.getState().removeFinishedTransfer(id)
+		release()
+		await Promise.all(h.tracked)
+
+		expect(useTransfersStore.getState().finishedTransfers).toEqual([
+			expect.objectContaining({ id, outcome: "succeeded", copyTrashFailed: 1, copyNothingCopied: false })
+		])
+
+		h.trash.mockReset().mockResolvedValue(undefined)
+
+		await copyRunner.retryTrash(id)
+
+		const row = useTransfersStore.getState().finishedTransfers[0]
+
+		expect(row).toMatchObject({ id, outcome: "succeeded" })
+		expect(row?.copyTrashFailed).toBeUndefined()
 	})
 })
 
@@ -980,6 +1255,36 @@ describe("a socket gap during the copy", () => {
 		expect(h.refetchAfterSocketGap).toHaveBeenCalledOnce()
 	})
 
+	// A refetch while another copy still streams echoes loses the ones landing mid-fetch.
+	it("with copies running in parallel, the refetch waits for the last one to end", async () => {
+		let releaseHeld = () => {}
+
+		scriptCopy(async () => {
+			await new Promise<void>(resolve => {
+				releaseHeld = resolve
+			})
+
+			return report()
+		})
+		scriptCopy(async () => {
+			useSocketStore.setState({ state: "reconnecting", connectedAt: 1 })
+			useSocketStore.setState({ state: "connected", connectedAt: 2 })
+
+			return report()
+		})
+
+		launchJob([file("held")])
+		launchJob([file("gap")])
+		await h.tracked[1]
+
+		expect(h.refetchAfterSocketGap).not.toHaveBeenCalled()
+
+		releaseHeld()
+		await Promise.all(h.tracked)
+
+		expect(h.refetchAfterSocketGap).toHaveBeenCalledExactlyOnceWith("dest")
+	})
+
 	it("a socket up the whole time, or a copy that made nothing, refetches nothing", async () => {
 		scriptCopy(async () => report())
 
@@ -1023,5 +1328,26 @@ describe("logout mid-copy", () => {
 		// Handles are still released and the activity count still drops.
 		expect(h.disposals).toEqual({ pause: 1, sdkAbort: 1, composite: 1 })
 		expect(copyActivity.isActive()).toBe(false)
+	})
+
+	// Sign-out waits a bounded time for copies; a "move to trash" still running past it must not write
+	// the ended account's figures, sizes or a trash row after the wipe.
+	it("a sign-out while the trash runs leaves no account, size, job or row write", async () => {
+		const release = holdTrash(new Set(["stuck"]))
+
+		scriptStoppedWithTrash()
+
+		const id = launchJob()
+
+		await vi.waitFor(() => expect(h.trash).toHaveBeenCalledTimes(2))
+
+		h.epoch.value++
+		release()
+		await Promise.all(h.tracked)
+
+		expect(h.addAccountStorageUsed).not.toHaveBeenCalled()
+		expect(h.markDirectorySizesStale).not.toHaveBeenCalled()
+		expect(useTransfersStore.getState().finishedTransfers).toEqual([])
+		expect(getCopyJob(id)).toBeUndefined()
 	})
 })
