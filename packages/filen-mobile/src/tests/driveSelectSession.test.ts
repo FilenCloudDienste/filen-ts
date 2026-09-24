@@ -15,8 +15,7 @@ vi.mock("@/lib/serializer", () => ({ serialize: (value: unknown) => JSON.stringi
 vi.mock("expo-crypto", () => ({ randomUUID: () => "session-1" }))
 vi.mock("@/lib/cache", () => ({ default: { uuidToAnyDriveItem: h.cacheItems } }))
 vi.mock("@/lib/auth", () => ({
-	default: { getSdkClients: async () => ({ authedSdkClient: { root: () => ({ uuid: "root-uuid" }) } }) },
-	useSdkClients: () => ({})
+	default: { getSdkClients: async () => ({ authedSdkClient: { root: () => ({ uuid: "root-uuid" }) } }) }
 }))
 vi.mock("@/lib/events", () => ({
 	default: {
@@ -32,14 +31,7 @@ vi.mock("@/lib/events", () => ({
 		}
 	}
 }))
-// The screen module also renders the drive list; only its exported helpers are under test.
-vi.mock("@/features/drive/components", () => ({ default: () => null }))
-vi.mock("@/components/driveSelectToolbar", () => ({ default: () => null }))
-vi.mock("@/hooks/useDrivePath", () => ({ default: () => ({}) }))
-vi.mock("@/hooks/useEffectOnce", () => ({ default: () => undefined }))
-
-import { openDriveSelect } from "@/features/drive/driveSelectSession"
-import { selectCopyDestination } from "@/features/drive/screens/driveSelect"
+import { openDriveSelect, selectCopyDestination } from "@/features/drive/driveSelectSession"
 import useDriveSelectStore from "@/features/drive/store/useDriveSelect.store"
 import events from "@/lib/events"
 import type { DriveItem } from "@/types"

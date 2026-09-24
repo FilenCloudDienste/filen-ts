@@ -48,7 +48,7 @@ vi.mock("@/features/audio/audio", () => ({
 	useAudioQueue: vi.fn(() => ({ queueItem: null }))
 }))
 
-vi.mock("@/features/drive/screens/driveSelect", () => ({
+vi.mock("@/features/drive/driveSelectSession", () => ({
 	selectDriveItems: vi.fn()
 }))
 

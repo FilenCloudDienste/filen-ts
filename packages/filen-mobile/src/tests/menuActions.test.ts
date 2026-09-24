@@ -166,7 +166,7 @@ vi.mock("@/lib/cache", () => ({
 	default: { directoryUuidToAnyNormalDir: new Map() }
 }))
 
-vi.mock("@/features/drive/screens/driveSelect", () => ({
+vi.mock("@/features/drive/driveSelectSession", () => ({
 	selectDriveItems: vi.fn()
 }))
 

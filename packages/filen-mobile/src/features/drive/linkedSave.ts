@@ -8,7 +8,7 @@ import alerts from "@/lib/alerts"
 import cache from "@/lib/cache"
 import logger from "@/lib/logger"
 import { driveItemDisplayName } from "@/lib/decryption"
-import { selectCopyDestination } from "@/features/drive/screens/driveSelect"
+import { selectCopyDestination } from "@/features/drive/driveSelectSession"
 import copyRunner from "@/features/copy/copyRunner"
 
 // Whose ownership decides whether a link view offers "Save to Cloud Drive": a directory link's root

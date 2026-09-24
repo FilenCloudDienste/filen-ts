@@ -24,13 +24,13 @@ vi.mock("@/features/drive/driveSelectors", () => ({
 		includesUndecryptable: items.some(item => item.data.undecryptable)
 	})
 }))
-vi.mock("@/features/drive/screens/driveSelect", () => ({ selectCopyDestination: vi.fn() }))
+vi.mock("@/features/drive/driveSelectSession", () => ({ selectCopyDestination: vi.fn() }))
 vi.mock("@/features/copy/copyRunner", () => ({ default: { start: vi.fn(() => "job-1") } }))
 
 import usePhotoBulkActions from "@/features/photos/hooks/usePhotoBulkActions"
 import useDriveStore from "@/features/drive/store/useDrive.store"
 import useDriveClipboardStore from "@/features/drive/store/useDriveClipboard.store"
-import { selectCopyDestination } from "@/features/drive/screens/driveSelect"
+import { selectCopyDestination } from "@/features/drive/driveSelectSession"
 import copyRunner from "@/features/copy/copyRunner"
 import type { DriveItem, DriveItemFileExtracted } from "@/types"
 import type { DrivePath } from "@/hooks/useDrivePath"

@@ -50,7 +50,7 @@ vi.mock("@/features/audio/audio", () => ({
 	}
 }))
 
-vi.mock("@/features/drive/screens/driveSelect", () => ({
+vi.mock("@/features/drive/driveSelectSession", () => ({
 	selectDriveItems: vi.fn()
 }))
 

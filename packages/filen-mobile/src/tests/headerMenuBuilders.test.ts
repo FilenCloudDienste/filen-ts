@@ -77,7 +77,7 @@ vi.mock("@/hooks/useMediaPermissions", () => ({
 }))
 
 vi.mock("@/features/contacts/contactsSelect", () => ({ selectContacts: vi.fn() }))
-vi.mock("@/features/drive/screens/driveSelect", () => ({ selectCopyDestination: vi.fn() }))
+vi.mock("@/features/drive/driveSelectSession", () => ({ selectCopyDestination: vi.fn() }))
 vi.mock("@/features/copy/copyRunner", () => ({ default: { start: vi.fn(() => "job-1") } }))
 vi.mock("@/features/drive/linkedSave", () => ({
 	buildSaveToCloudDriveButton: vi.fn(({ id, title }: { id: string; title: string }) => ({ id, title }))
@@ -87,7 +87,7 @@ vi.mock("@/features/drive/linkedSave", () => ({
 
 import { buildSortMenuButton, buildBulkActionMenu, buildViewModeMenuButton } from "@/features/drive/components/headerMenuBuilders"
 import { Platform } from "react-native"
-import { selectCopyDestination } from "@/features/drive/screens/driveSelect"
+import { selectCopyDestination } from "@/features/drive/driveSelectSession"
 import copyRunner from "@/features/copy/copyRunner"
 import useDriveClipboardStore from "@/features/drive/store/useDriveClipboard.store"
 import type { DrivePath } from "@/hooks/useDrivePath"

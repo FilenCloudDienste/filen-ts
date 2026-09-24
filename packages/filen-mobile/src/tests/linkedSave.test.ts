@@ -28,7 +28,7 @@ vi.mock("@filen/sdk-rs", () => {
 })
 vi.mock("@/lib/alerts", () => ({ default: { error: vi.fn() } }))
 vi.mock("@/lib/decryption", () => ({ driveItemDisplayName: (item: { data: { uuid: string } }) => `name-${item.data.uuid}` }))
-vi.mock("@/features/drive/screens/driveSelect", () => ({ selectCopyDestination: vi.fn() }))
+vi.mock("@/features/drive/driveSelectSession", () => ({ selectCopyDestination: vi.fn() }))
 vi.mock("@/features/copy/copyRunner", () => ({ default: { startCopyItems: vi.fn(() => "job-1") } }))
 
 import {
@@ -42,7 +42,7 @@ import {
 import cache from "@/lib/cache"
 import alerts from "@/lib/alerts"
 import copyRunner from "@/features/copy/copyRunner"
-import { selectCopyDestination } from "@/features/drive/screens/driveSelect"
+import { selectCopyDestination } from "@/features/drive/driveSelectSession"
 import type { DrivePath } from "@/hooks/useDrivePath"
 import type { DriveItem } from "@/types"
 import type { AnyLinkedDir, CopyItem, DirPublicLink, LinkedFile } from "@filen/sdk-rs"

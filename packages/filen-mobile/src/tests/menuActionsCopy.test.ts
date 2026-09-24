@@ -35,7 +35,6 @@ vi.mock("@/lib/sdkUnwrap", () => ({
 vi.mock("@/components/ui/fullScreenLoadingModal", () => ({ runWithLoading: vi.fn() }))
 vi.mock("@/features/drive/drive", () => ({ default: { getRootUuid: vi.fn() } }))
 vi.mock("@/features/offline/offline", () => ({ default: { isItemTopLevelStoredSync: vi.fn(() => false) } }))
-vi.mock("@/features/drive/driveSelectSession", () => ({ openDriveSelect: vi.fn() }))
 vi.mock("@/features/contacts/contactsSelect", () => ({ selectContacts: vi.fn() }))
 vi.mock("@/features/drive/store/useDrive.store", () => ({
 	default: { getState: () => ({ selectedItems: [], toggleSelectedItem: vi.fn() }) }
@@ -58,7 +57,7 @@ vi.mock("@/features/drive/components/item/menuActionsDownload", () => ({
 	buildExportButton: vi.fn(() => null),
 	buildOpenWithButton: vi.fn(() => null)
 }))
-vi.mock("@/features/drive/screens/driveSelect", () => ({ selectCopyDestination: vi.fn() }))
+vi.mock("@/features/drive/driveSelectSession", () => ({ openDriveSelect: vi.fn(), selectCopyDestination: vi.fn() }))
 vi.mock("@/features/copy/copyRunner", () => ({ default: { start: vi.fn(() => "job-1") } }))
 vi.mock("@/features/drive/linkedSave", () => ({
 	buildSaveToCloudDriveButton: vi.fn(({ id, title }: { id: string; title: string }) => ({ id, title }))
@@ -66,7 +65,7 @@ vi.mock("@/features/drive/linkedSave", () => ({
 
 import { createMenuButtons } from "@/features/drive/components/item/menuActions"
 import { buildCopyMenuButton, offersCopy } from "@/features/drive/components/item/menuActionsCopy"
-import { selectCopyDestination } from "@/features/drive/screens/driveSelect"
+import { selectCopyDestination } from "@/features/drive/driveSelectSession"
 import copyRunner from "@/features/copy/copyRunner"
 import useDriveClipboardStore, { type DriveClipboardEntry } from "@/features/drive/store/useDriveClipboard.store"
 import alerts from "@/lib/alerts"

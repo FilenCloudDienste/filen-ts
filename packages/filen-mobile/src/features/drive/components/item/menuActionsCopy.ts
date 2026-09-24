@@ -5,7 +5,7 @@ import { type TFunction } from "i18next"
 import { run } from "@filen/shared"
 import alerts from "@/lib/alerts"
 import logger from "@/lib/logger"
-import { selectCopyDestination } from "@/features/drive/screens/driveSelect"
+import { selectCopyDestination } from "@/features/drive/driveSelectSession"
 import copyRunner from "@/features/copy/copyRunner"
 import useDriveClipboardStore from "@/features/drive/store/useDriveClipboard.store"
 
