@@ -28,6 +28,7 @@ import { unwrapSdkError } from "@/lib/sdkErrors"
 import type { DriveItem } from "@/types"
 import offline from "@/features/offline/offline"
 import cameraUpload from "@/features/cameraUpload/cameraUpload"
+import { listCameraUploadRemote, remoteWalkDropsEntries } from "@/features/cameraUpload/remoteListing"
 import logger from "@/lib/logger"
 
 export const BASE_QUERY_KEY = "useDriveItemsQuery"
@@ -262,11 +263,24 @@ export async function fetchData(
 					} satisfies Result
 				}
 
-				const { dirs: resultDirs, files } = await authedSdkClient.listDirRecursive(
-					new AnyDirWithContext.Normal(config.remoteDir),
-					undefined,
-					signal
-				)
+				// Shared with camera upload's delta pass, so a pull-to-refresh or reconnect walks the tree
+				// once. The with-paths walk drops what it can't place (undecryptable names, duplicates,
+				// orphans) and reports each as a scan error, so only a clean walk matches what the plain
+				// listing would show; otherwise list plainly (straight away once a root is known to drop).
+				const remoteDir = config.remoteDir
+				const shared = remoteWalkDropsEntries(remoteDir.inner[0].uuid)
+					? null
+					: await listCameraUploadRemote({
+							remoteDir,
+							signal: params.signal
+						})
+				const { dirs: resultDirs, files } =
+					shared && shared.scanErrors.length === 0
+						? {
+								dirs: shared.listing.dirs.map(entry => entry.dir),
+								files: shared.listing.files.map(entry => entry.file)
+							}
+						: await authedSdkClient.listDirRecursive(new AnyDirWithContext.Normal(remoteDir), undefined, signal)
 				const dirs: Dir[] = []
 
 				for (const resultDir of resultDirs) {

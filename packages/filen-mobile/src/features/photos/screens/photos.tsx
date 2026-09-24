@@ -15,6 +15,7 @@ import useDrivePath from "@/hooks/useDrivePath"
 import { useFocusEffect } from "expo-router"
 import { router } from "@/lib/router"
 import cameraUpload, { DEFAULT_CONFIG, type Config } from "@/features/cameraUpload/cameraUpload"
+import { remoteListingPosition } from "@/features/cameraUpload/remoteListing"
 import { useCameraUploadDestination } from "@/features/cameraUpload/queries/useCameraUploadDestination.query"
 import Button from "@/components/ui/button"
 import usePhotosStore from "@/features/photos/store/usePhotos.store"
@@ -149,6 +150,7 @@ const Photos = () => {
 										return
 									}
 
+									const listingPosition = remoteListingPosition()
 									const result = await run(async () => {
 										await driveItemsQuery.refetch()
 									})
@@ -158,8 +160,9 @@ const Photos = () => {
 										alerts.error(result.error)
 									}
 
+									// The sync takes over the remote walk the refetch just made instead of repeating it.
 									cameraUpload
-										.sync({ manual: true })
+										.sync({ manual: true, remoteListingSince: listingPosition })
 										.catch(e => logger.warn("photos", "cameraUpload.sync failed on pull-to-refresh", { error: e }))
 								}}
 								loading={driveItemsQuery.status === "pending"}

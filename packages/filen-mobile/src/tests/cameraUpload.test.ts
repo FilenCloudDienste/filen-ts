@@ -351,6 +351,7 @@ vi.mock("@/constants", async () => await import("@/tests/mocks/constants"))
 
 import cameraUploadState from "@/features/cameraUpload/cameraUploadState"
 import cameraUpload, { type Config, canonicalRemoteName, MAX_BACKGROUND_UPLOAD_ABORTS } from "@/features/cameraUpload/cameraUpload"
+import { listCameraUploadRemote, remoteListingPosition } from "@/features/cameraUpload/remoteListing"
 import { InFlight } from "@filen/shared"
 import { AppState } from "react-native"
 import {
@@ -6204,6 +6205,59 @@ describe("B3 — degraded remote listing", () => {
 
 		expect(transfers.upload).toHaveBeenCalledTimes(1)
 		expect(mockSetErrors).not.toHaveBeenCalled()
+	})
+})
+
+// ─── shared remote walk with the Photos grid ─────────────────────────────────
+
+describe("shared remote walk", () => {
+	function setup() {
+		ml.addAlbum({ id: "album-1", title: "Camera Roll", assetIds: ["a1"] })
+		ml.addAsset({
+			id: "a1",
+			filename: "photo.jpg",
+			uri: "file:///media/a1",
+			mediaType: MediaType.IMAGE,
+			creationTime: 1000,
+			modificationTime: 2000
+		})
+		fs.set("file:///media/a1", new Uint8Array([1, 2, 3]))
+
+		const walk = vi.fn(async (_dir: any, _progress: any, errorCallback: any) => {
+			errorCallback.onErrors([new Error("subtree failed")])
+
+			return { files: [] }
+		})
+
+		vi.mocked(auth.getSdkClients).mockResolvedValue({
+			authedSdkClient: {
+				listDirRecursiveWithPaths: walk,
+				createDir: vi.fn(async () => ({ uuid: "dir" }))
+			}
+		} as any)
+
+		return walk
+	}
+
+	it("a pull-to-refresh sync takes over the grid's walk: one walk, the degraded-listing error still surfaces", async () => {
+		const walk = setup()
+		const position = remoteListingPosition()
+
+		await listCameraUploadRemote({ remoteDir: ENABLED_CONFIG.remoteDir as any })
+		await cameraUpload.sync({ manual: true, remoteListingSince: position })
+
+		expect(walk).toHaveBeenCalledTimes(1)
+		expect(transfers.upload).toHaveBeenCalledTimes(1)
+		expect(mockSetErrors).toHaveBeenCalledTimes(1)
+	})
+
+	it("a sync never takes over a walk that started before it", async () => {
+		const walk = setup()
+
+		await listCameraUploadRemote({ remoteDir: ENABLED_CONFIG.remoteDir as any })
+		await cameraUpload.sync({ manual: true })
+
+		expect(walk).toHaveBeenCalledTimes(2)
 	})
 })
 

@@ -869,6 +869,20 @@ describe("fetchData — drive branch non-root uuid cache miss", () => {
 
 // ─── fetchData photos branch — dir filtering ───────────────────────────────
 
+// The photos branch reads the shared with-paths walk; the paths are camera upload's concern.
+function withPaths(dirs: unknown[], files: unknown[], scanErrors: unknown[] = []) {
+	return vi.fn(async (_dir: unknown, _progress: unknown, errorCallback: { onErrors: (errors: unknown[]) => void }) => {
+		if (scanErrors.length > 0) {
+			errorCallback.onErrors(scanErrors)
+		}
+
+		return {
+			dirs: dirs.map(dir => ({ dir, path: "p" })),
+			files: files.map(file => ({ file, path: "p" }))
+		}
+	})
+}
+
 describe("fetchData — photos branch dir filtering", () => {
 	it("returns empty when camera upload is disabled", async () => {
 		mockCameraUploadGetConfig.mockResolvedValue({ enabled: false, remoteDir: null })
@@ -896,10 +910,7 @@ describe("fetchData — photos branch dir filtering", () => {
 
 		mockGetSdkClients.mockResolvedValue({
 			authedSdkClient: {
-				listDirRecursive: vi.fn().mockResolvedValue({
-					dirs: [nonNormalDir1, nonNormalDir2],
-					files: []
-				})
+				listDirRecursiveWithPaths: withPaths([nonNormalDir1, nonNormalDir2], [])
 			}
 		})
 
@@ -911,6 +922,37 @@ describe("fetchData — photos branch dir filtering", () => {
 		expect(vi.mocked(unwrapDirMeta)).not.toHaveBeenCalled()
 	})
 
+	it("uses the shared walk alone when it is clean, and falls back to the plain listing when it reported scan errors", async () => {
+		const remoteDir = { inner: [{ uuid: "remote-dir-uuid-4" }] }
+		const fileItem = { uuid: "photo-file-2", size: 100n, region: "", bucket: "", chunks: 1n, timestamp: 0n, meta: {} }
+		const undecryptable = { uuid: "photo-file-3", size: 100n, region: "", bucket: "", chunks: 1n, timestamp: 0n, meta: {} }
+
+		mockCameraUploadGetConfig.mockResolvedValue({ enabled: true, remoteDir })
+
+		const cleanWalk = withPaths([], [fileItem])
+		const plain = vi.fn().mockResolvedValue({ dirs: [], files: [fileItem, undecryptable] })
+
+		mockGetSdkClients.mockResolvedValue({ authedSdkClient: { listDirRecursiveWithPaths: cleanWalk, listDirRecursive: plain } })
+
+		expect(await fetchData({ path: { type: "photos", uuid: null } })).toHaveLength(1)
+		expect(cleanWalk).toHaveBeenCalledTimes(1)
+		expect(plain).not.toHaveBeenCalled()
+
+		// The with-paths walk dropped an entry it could not place; the grid must still show it.
+		const degradedWalk = withPaths([], [fileItem], [new Error("encrypted meta")])
+
+		mockGetSdkClients.mockResolvedValue({ authedSdkClient: { listDirRecursiveWithPaths: degradedWalk, listDirRecursive: plain } })
+
+		expect(await fetchData({ path: { type: "photos", uuid: null } })).toHaveLength(2)
+		expect(degradedWalk).toHaveBeenCalledTimes(1)
+		expect(plain).toHaveBeenCalledTimes(1)
+
+		// Known to drop entries now: the next refetch lists plainly without walking twice.
+		expect(await fetchData({ path: { type: "photos", uuid: null } })).toHaveLength(2)
+		expect(degradedWalk).toHaveBeenCalledTimes(1)
+		expect(plain).toHaveBeenCalledTimes(2)
+	})
+
 	it("includes files from photos listing regardless of dir filtering", async () => {
 		const remoteDir = { inner: [{ uuid: "remote-dir-uuid-3" }] }
 
@@ -920,10 +962,7 @@ describe("fetchData — photos branch dir filtering", () => {
 
 		mockGetSdkClients.mockResolvedValue({
 			authedSdkClient: {
-				listDirRecursive: vi.fn().mockResolvedValue({
-					dirs: [],
-					files: [fileItem]
-				})
+				listDirRecursiveWithPaths: withPaths([], [fileItem])
 			}
 		})
 
@@ -955,7 +994,7 @@ describe("fetchData — post-processing: photos and recents cache dirs but exclu
 
 		mockGetSdkClients.mockResolvedValue({
 			authedSdkClient: {
-				listDirRecursive: vi.fn().mockResolvedValue({ dirs: [normalDir], files: [] })
+				listDirRecursiveWithPaths: withPaths([normalDir], [])
 			}
 		})
 

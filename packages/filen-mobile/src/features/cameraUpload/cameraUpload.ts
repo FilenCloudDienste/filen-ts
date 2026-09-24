@@ -3,15 +3,7 @@ import * as MediaLibraryLegacy from "expo-media-library/legacy"
 import { AppState } from "react-native"
 import logger from "@/lib/logger"
 import auth from "@/lib/auth"
-import {
-	type FileWithPath,
-	AnyNormalDir,
-	AnyNormalDir_Tags,
-	AnyDirWithContext,
-	NonRootDir_Tags,
-	parseName,
-	encodeName
-} from "@filen/sdk-rs"
+import { type FileWithPath, AnyNormalDir, AnyNormalDir_Tags, NonRootDir_Tags, parseName, encodeName } from "@filen/sdk-rs"
 import { normalizeModificationTimestampForComparison } from "@/lib/utils"
 import { type UnwrapFileMetaResult, unwrapFileMeta, unwrapDirMeta, unwrappedDirIntoDriveItem } from "@/lib/sdkUnwrap"
 import { normalizeFilePathForExpo, stripUriFragmentAndQuery } from "@/lib/paths"
@@ -35,6 +27,7 @@ import * as Battery from "expo-battery"
 import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
 import cache from "@/lib/cache"
 import cameraUploadState, { type CameraUploadHashEntry } from "@/features/cameraUpload/cameraUploadState"
+import { listCameraUploadRemote, remoteListingPosition } from "@/features/cameraUpload/remoteListing"
 import i18n from "@/lib/i18n"
 import {
 	blake3ToHex,
@@ -900,34 +893,26 @@ class CameraUpload {
 		remoteDir,
 		signal,
 		compress,
-		convertHeic
+		convertHeic,
+		since
 	}: {
 		remoteDir: AnyNormalDir
 		signal: AbortSignal
 		compress: boolean
 		convertHeic: boolean
+		since: number
 	}): Promise<RemoteListing> {
-		const { authedSdkClient } = await auth.getSdkClients()
 		// Per the SDK contract, entries inside errored subtrees are silently ABSENT from
-		// the listing while the call still resolves Ok — collect the scan errors instead
-		// of discarding them.
-		const scanErrors: unknown[] = []
-		const { files, dirs = [] } = await authedSdkClient.listDirRecursiveWithPaths(
-			new AnyDirWithContext.Normal(remoteDir),
-			{
-				onProgress() {
-					// Noop
-				}
-			},
-			{
-				onErrors(errors) {
-					scanErrors.push(...errors)
-				}
-			},
-			{
-				signal
-			}
-		)
+		// the listing while the call still resolves Ok — the scan errors are collected instead
+		// of discarded.
+		const {
+			listing: { files, dirs = [] },
+			scanErrors
+		} = await listCameraUploadRemote({
+			remoteDir,
+			signal,
+			since
+		})
 
 		// A degraded listing must not be silently authoritative: the diff would see the
 		// local counterparts of the missing entries as "missing remotely" and re-upload
@@ -1088,7 +1073,17 @@ class CameraUpload {
 		)
 	}
 
-	private async deltas({ config, convertHeic, signal }: { config: Config; convertHeic: boolean; signal: AbortSignal }): Promise<{
+	private async deltas({
+		config,
+		convertHeic,
+		signal,
+		remoteListingSince
+	}: {
+		config: Config
+		convertHeic: boolean
+		signal: AbortSignal
+		remoteListingSince: number
+	}): Promise<{
 		deltas: Delta[]
 		localListing: LocalListing
 		remoteListing: RemoteListing
@@ -1109,7 +1104,8 @@ class CameraUpload {
 				remoteDir: config.remoteDir,
 				signal,
 				compress: config.compress,
-				convertHeic
+				convertHeic,
+				since: remoteListingSince
 			})
 		])
 
@@ -1311,6 +1307,12 @@ class CameraUpload {
 		background?: boolean
 		manual?: boolean
 		/**
+		 * remoteListingPosition() after which a remote walk may be taken over instead of walking
+		 * again. Defaults to the pass's own start; pull-to-refresh passes the gesture's, so the
+		 * grid refetch it just awaited is reused.
+		 */
+		remoteListingSince?: number
+		/**
 		 * Wall-clock instant (Date.now()) after which the pass must stop picking up NEW work.
 		 *
 		 * A budgeted background run previously relied solely on the abort that fires at the run
@@ -1328,6 +1330,7 @@ class CameraUpload {
 		 */
 		deadlineAt?: number
 	}): Promise<{ success: boolean; error?: unknown; skipped?: CameraUploadSkipReason; uploaded?: number }> {
+		const remoteListingSince = params?.remoteListingSince ?? remoteListingPosition()
 		// Capture both signals once so that cancel() — which aborts the current
 		// controller and creates fresh instances for future syncs — reliably
 		// stops every operation in this sync via the captured references,
@@ -1580,7 +1583,8 @@ class CameraUpload {
 						}
 					: config,
 				convertHeic,
-				signal: abortController.signal
+				signal: abortController.signal,
+				remoteListingSince
 			})
 
 			// #B4/B6 hygiene: drop md5-cache entries whose local asset is gone from the
