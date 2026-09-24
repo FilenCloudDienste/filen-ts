@@ -61,14 +61,29 @@ export async function removeFileLink({ item, signal, link }: { item: DriveItem; 
 	})
 }
 
+// A status the caller already read (the Manage Public Link screen's query), passed to skip the SDK's
+// status call: two HTTP requests per call, with no SDK-side cache.
+export type KnownPublicLinkStatus =
+	| {
+			type: "directory"
+			status: DirPublicLinkRw
+	  }
+	| {
+			type: "file"
+			status: FilePublicLink
+	  }
+
 export async function enablePublicLink({
 	item,
 	signal,
-	onProgress
+	onProgress,
+	knownAbsent
 }: {
 	item: DriveItem
 	signal?: AbortSignal
 	onProgress?: (bytesDownloaded: number, totalBytes: number | undefined) => void
+	// The caller just read the status and found no link, so the existence check is skipped.
+	knownAbsent?: boolean
 }) {
 	if (item.type !== "directory" && item.type !== "file") {
 		throw new Error("Invalid item type")
@@ -77,23 +92,25 @@ export async function enablePublicLink({
 	const { authedSdkClient } = await auth.getSdkClients()
 
 	if (item.type === "directory") {
-		let status = await authedSdkClient.getDirLinkStatus(
-			item.data,
-			signal
-				? {
-						signal
-					}
-				: undefined
-		)
+		const existing = knownAbsent
+			? undefined
+			: await authedSdkClient.getDirLinkStatus(
+					item.data,
+					signal
+						? {
+								signal
+							}
+						: undefined
+				)
 
-		if (status) {
+		if (existing) {
 			return {
 				type: "directory" as const,
-				link: status
+				link: existing
 			}
 		}
 
-		status = await authedSdkClient.publicLinkDir(
+		const status = await authedSdkClient.publicLinkDir(
 			item.data,
 			onProgress
 				? {
@@ -134,23 +151,25 @@ export async function enablePublicLink({
 			link: status
 		}
 	} else {
-		let status = await authedSdkClient.getFileLinkStatus(
-			item.data,
-			signal
-				? {
-						signal
-					}
-				: undefined
-		)
+		const existing = knownAbsent
+			? undefined
+			: await authedSdkClient.getFileLinkStatus(
+					item.data,
+					signal
+						? {
+								signal
+							}
+						: undefined
+				)
 
-		if (status) {
+		if (existing) {
 			return {
 				type: "file" as const,
-				link: status
+				link: existing
 			}
 		}
 
-		status = await authedSdkClient.publicLinkFile(
+		const status = await authedSdkClient.publicLinkFile(
 			item.data,
 			signal
 				? {
@@ -186,7 +205,7 @@ export async function enablePublicLink({
 	}
 }
 
-export async function disablePublicLink({ item, signal }: { item: DriveItem; signal?: AbortSignal }) {
+export async function disablePublicLink({ item, signal, known }: { item: DriveItem; signal?: AbortSignal; known?: KnownPublicLinkStatus }) {
 	if (item.type !== "directory" && item.type !== "file") {
 		throw new Error("Invalid item type")
 	}
@@ -194,14 +213,17 @@ export async function disablePublicLink({ item, signal }: { item: DriveItem; sig
 	const { authedSdkClient } = await auth.getSdkClients()
 
 	if (item.type === "directory") {
-		const status = await authedSdkClient.getDirLinkStatus(
-			item.data,
-			signal
-				? {
+		const status =
+			known?.type === "directory"
+				? known.status
+				: await authedSdkClient.getDirLinkStatus(
+						item.data,
 						signal
-					}
-				: undefined
-		)
+							? {
+									signal
+								}
+							: undefined
+					)
 
 		if (!status) {
 			return
@@ -235,14 +257,17 @@ export async function disablePublicLink({ item, signal }: { item: DriveItem; sig
 			updater: () => null
 		})
 	} else {
-		const status = await authedSdkClient.getFileLinkStatus(
-			item.data,
-			signal
-				? {
+		const status =
+			known?.type === "file"
+				? known.status
+				: await authedSdkClient.getFileLinkStatus(
+						item.data,
 						signal
-					}
-				: undefined
-		)
+							? {
+									signal
+								}
+							: undefined
+					)
 
 		if (!status) {
 			return
@@ -277,6 +302,8 @@ export async function disablePublicLink({ item, signal }: { item: DriveItem; sig
 	}
 }
 
+// `link` is the complete link record (every field of the SDK type is required), so there is nothing
+// a fresh status read could add: a merge onto it would come back byte-for-byte equal.
 export async function updatePublicLink({
 	item,
 	signal,
@@ -305,27 +332,9 @@ export async function updatePublicLink({
 			throw new Error("Invalid link type for directory")
 		}
 
-		const status = await authedSdkClient.getDirLinkStatus(
-			item.data,
-			signal
-				? {
-						signal
-					}
-				: undefined
-		)
-
-		if (!status) {
-			return
-		}
-
-		const merged: DirPublicLinkRw = {
-			...status,
-			...link.link
-		}
-
 		await authedSdkClient.updateDirLink(
 			item.data,
-			merged,
+			link.link,
 			signal
 				? {
 						signal
@@ -339,7 +348,7 @@ export async function updatePublicLink({
 			},
 			updater: () => ({
 				type: "directory" as const,
-				status: merged
+				status: link.link
 			})
 		})
 	} else {
@@ -347,27 +356,9 @@ export async function updatePublicLink({
 			throw new Error("Invalid link type for file")
 		}
 
-		const status = await authedSdkClient.getFileLinkStatus(
-			item.data,
-			signal
-				? {
-						signal
-					}
-				: undefined
-		)
-
-		if (!status) {
-			return
-		}
-
-		const merged: FilePublicLink = {
-			...status,
-			...link.link
-		}
-
 		await authedSdkClient.updateFileLink(
 			item.data,
-			merged,
+			link.link,
 			signal
 				? {
 						signal
@@ -381,7 +372,7 @@ export async function updatePublicLink({
 			},
 			updater: () => ({
 				type: "file" as const,
-				status: merged
+				status: link.link
 			})
 		})
 	}

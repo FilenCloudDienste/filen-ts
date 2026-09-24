@@ -344,7 +344,9 @@ function PublicLink() {
 														onValueChange: async () => {
 															const result = await runWithLoading(async () => {
 																return await drive.disablePublicLink({
-																	item: itemParsed
+																	item: itemParsed,
+																	// The switch only renders with a loaded status.
+																	known: publicLinkStatusQuery.data ?? undefined
 																})
 															})
 
@@ -540,7 +542,10 @@ function PublicLink() {
 
 													const result = await runWithLoading(async () => {
 														return await drive.enablePublicLink({
-															item: itemParsed
+															item: itemParsed,
+															// This button only renders once the status read found no link.
+															knownAbsent:
+																publicLinkStatusQuery.status === "success" && publicLinkStatusQuery.data === null
 														})
 													})
 
