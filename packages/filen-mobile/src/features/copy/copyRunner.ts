@@ -11,6 +11,7 @@ import {
 } from "@filen/sdk-rs"
 import {
 	applyCopyUpdate,
+	copyJobShownBytes,
 	copyMaxBytes,
 	isQuotaPreflightFailure,
 	settleCopyJob,
@@ -382,7 +383,7 @@ class CopyRunner {
 
 			// The total grows while the scan finds more to copy.
 			const size = job.totals.bytes
-			const bytesTransferred = job.counts.bytesDone
+			const bytesTransferred = copyJobShownBytes(job)
 
 			useTransfersStore.getState().setTransfers(prev => prev.map(t => (t.id === id ? { ...t, size, bytesTransferred } : t)))
 		}

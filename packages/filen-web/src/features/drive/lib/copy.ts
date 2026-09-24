@@ -3,6 +3,7 @@ import type { CopyEntry, CopyItem, CopyReport } from "@filen/sdk-rs"
 import {
 	applyCopyCreated,
 	applyCopyUpdate,
+	copyJobShownBytes,
 	copyMaxBytes,
 	driveItemName,
 	formatBytes,
@@ -189,7 +190,7 @@ export async function runCopyJob(deps: RunCopyDeps, request: CopyJobRequest): Pr
 			deps.transfers.setSize(id, rowSize)
 		}
 
-		deps.transfers.setProgress(id, job.counts.bytesDone)
+		deps.transfers.setProgress(id, copyJobShownBytes(job))
 	}
 
 	const cancelRequested = (): boolean => deps.jobs.get(id)?.cancelRequest != null

@@ -278,6 +278,23 @@ describe("runCopyJob", () => {
 		expect(row()).toMatchObject({ status: "done", bytesTransferred: 200 })
 	})
 
+	// Bytes finish before the files are registered: a running copy's row stops short of 100%.
+	it("keeps a running copy's row below 100% until it settles", async () => {
+		const deps = makeDeps()
+
+		deps.copyItems.mockImplementation((_id, _items, _dest, _max, onEvent) => {
+			onEvent({ type: "update", update: update({ counts: counts({ bytesDone: 200n }) }) })
+
+			expect(row()).toMatchObject({ size: 200, bytesTransferred: 198 })
+
+			return Promise.resolve(report())
+		})
+
+		await runCopyJob(deps, request())
+
+		expect(row()).toMatchObject({ status: "done", bytesTransferred: 200 })
+	})
+
 	it("settles a clean copy as done and hands the settled job to the announcer", async () => {
 		const deps = makeDeps()
 

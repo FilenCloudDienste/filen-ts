@@ -321,6 +321,24 @@ describe("a copy job", () => {
 		expect(getCopyJob(id)?.counts.bytesDone).toBe(1000)
 	})
 
+	// Every byte can be up while files are still being registered: the row, and the bar and notification
+	// it feeds, stop short of 100% until the job settles.
+	it("keeps the running row below 100% and gives it the full count once settled", async () => {
+		let running: number | undefined
+
+		scriptCopy(async callback => {
+			callback.onUpdate(update(1000n))
+			running = useTransfersStore.getState().transfers[0]?.bytesTransferred
+
+			return report()
+		})
+
+		await runJob()
+
+		expect(running).toBe(990)
+		expect(useTransfersStore.getState().finishedTransfers[0]?.bytesTransferred).toBe(1000)
+	})
+
 	it("swallows a throw inside a handler instead of failing the Rust call", async () => {
 		scriptCopy(async callback => {
 			expect(() => callback.onUpdate({ events: null } as unknown as CopyUpdate)).not.toThrow()
