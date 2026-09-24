@@ -1,6 +1,9 @@
 import { useQuery, type UseQueryResult } from "@tanstack/react-query"
 import type { LinkedFile, DirPublicInfo, LinkedDirsAndFiles, AnyLinkedDir, DirPublicLink, DirSizeResponse } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
+import { queryClient } from "@/queries/client"
+import type { DriveItem } from "@/features/drive/lib/item"
+import type { DriveListingParams } from "@/features/drive/queries/drive"
 import { isNetworkClassError } from "@/lib/sdk/retry"
 import { publicLinkQueryKey, secretFingerprint, passwordStatePart } from "@/features/publicLinks/lib/queryKey.logic"
 
@@ -114,4 +117,42 @@ export function usePublicDirListing(args: {
 		persister: (queryFn, context) => queryFn(context),
 		...snapshotFreshness
 	})
+}
+
+// An owned drive listing already in the cache that holds the item. "sharedIn" lists other people's
+// items, so it never proves ownership.
+function isInCachedOwnedListing(uuid: string): boolean {
+	return queryClient
+		.getQueryCache()
+		.findAll({ queryKey: ["drive", "listing"] })
+		.some(query => {
+			const params = query.queryKey[2] as DriveListingParams | undefined
+
+			return (
+				params?.variant !== "sharedIn" &&
+				(query.state.data as DriveItem[] | undefined)?.some(item => item.data.uuid === uuid) === true
+			)
+		})
+}
+
+// Whether "Save to Cloud Drive" applies: the visitor is signed in and the link isn't their own. An owned
+// item already in a cached listing answers without a request; otherwise one owner lookup does.
+export function useLinkSaveable(kind: "file" | "directory", uuid: string | null): boolean {
+	const signedIn = useQuery({
+		queryKey: ["publicLinks", "signedIn"],
+		queryFn: () => sdkApi.hasClient(),
+		staleTime: Infinity,
+		refetchOnWindowFocus: false,
+		persister: (queryFn, context) => queryFn(context)
+	})
+	const owned = useQuery({
+		queryKey: ["publicLinks", "owned", kind, uuid],
+		queryFn: async () => uuid !== null && (isInCachedOwnedListing(uuid) || (await sdkApi.ownsItem(kind, uuid))),
+		enabled: signedIn.data === true && uuid !== null,
+		retry: false,
+		persister: (queryFn, context) => queryFn(context),
+		...snapshotFreshness
+	})
+
+	return signedIn.data === true && owned.data === false
 }

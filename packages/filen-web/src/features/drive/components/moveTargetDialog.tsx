@@ -6,6 +6,7 @@ import type { DialogRoot } from "@base-ui/react/dialog"
 import type { DriveItem } from "@/features/drive/lib/item"
 import { moveItems } from "@/features/drive/lib/actions"
 import { startCopyWithCard } from "@/features/transfers/lib/copyToast"
+import { type CopyDestination } from "@/features/drive/lib/copy.logic"
 import { toastBulkOutcome } from "@/features/drive/lib/bulkToast"
 import { runCreateDirectory } from "@/features/drive/lib/createDirectory"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
@@ -36,6 +37,9 @@ export interface MoveTargetDialogProps {
 	// a copy job into the chosen destination and closes at once — the job runs on with its own progress
 	// card — leaving the source and the selection as they were.
 	mode?: "move" | "copy"
+	// Copy mode only: runs the copy instead of starting one over `items` (a public link's own source has
+	// no DriveItem; `items` is then empty and gates nothing).
+	onCopy?: (destination: CopyDestination) => void
 }
 
 // Destination-directory picker — mounted-when-active by the listing's dialog host. Navigation is LOCAL
@@ -43,7 +47,7 @@ export interface MoveTargetDialogProps {
 // the app's own navigation history; it always browses the "drive" variant regardless of where the
 // move/copy was dispatched from — recents/favorites/trash/sharedIn have no navigable tree of their
 // own to land into (mirrors newDirectory.tsx's identical rule for creating a directory).
-export function MoveTargetDialog({ items, onClose, mode = "move" }: MoveTargetDialogProps) {
+export function MoveTargetDialog({ items, onClose, mode = "move", onCopy }: MoveTargetDialogProps) {
 	const { t } = useTranslation(["drive", "common"])
 	const isOnline = useIsOnline()
 	// Both writes in this dialog (the confirm and the in-place create) re-check connectivity here: the
@@ -117,10 +121,14 @@ export function MoveTargetDialog({ items, onClose, mode = "move" }: MoveTargetDi
 	async function handleConfirm(): Promise<void> {
 		if (mode === "copy") {
 			// Never awaited: a copy is a transfer, and transfers never sit behind a pending dialog.
-			startCopyWithCard(items, {
-				uuid: targetUuid,
-				name: targetUuid === null ? t("driveMyDrive") : (namesQuery.data?.[targetUuid] ?? "")
-			})
+			const destination = { uuid: targetUuid, name: targetUuid === null ? t("driveMyDrive") : (namesQuery.data?.[targetUuid] ?? "") }
+
+			if (onCopy === undefined) {
+				startCopyWithCard(items, destination)
+			} else {
+				onCopy(destination)
+			}
+
 			onClose()
 
 			return

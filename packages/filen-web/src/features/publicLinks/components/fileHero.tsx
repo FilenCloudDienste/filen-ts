@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { formatBytes, driveItemName } from "@filen/shared"
 import { ArrowLeftIcon, DownloadIcon, EyeIcon, EyeOffIcon } from "lucide-react"
@@ -27,12 +27,16 @@ export function FileHero({
 	item,
 	downloadEnabled,
 	linkScope,
-	onBack
+	onBack,
+	saveAction
 }: {
 	item: DriveItem
 	downloadEnabled: boolean
 	linkScope: string
 	onBack?: () => void
+	// "Save to Cloud Drive" for a signed-in visitor: the full button for the hero, the compact one for
+	// the preview bar.
+	saveAction?: { hero: ReactNode; bar: ReactNode } | undefined
 }) {
 	const { t } = useTranslation("publicLinks")
 	const base = asDirectoryOrFile(item)
@@ -109,6 +113,7 @@ export function FileHero({
 						<EyeOffIcon data-icon="inline-start" />
 						<span className="hidden sm:inline">{t("hidePreview")}</span>
 					</Button>
+					{saveAction?.bar}
 					{downloadEnabled && (
 						<Button
 							variant="outline"
@@ -153,6 +158,7 @@ export function FileHero({
 
 				<div className="flex flex-wrap items-center justify-center gap-2">
 					{downloadButton}
+					{saveAction?.hero}
 					{previewability === "previewable" && (
 						<Button
 							variant="outline"

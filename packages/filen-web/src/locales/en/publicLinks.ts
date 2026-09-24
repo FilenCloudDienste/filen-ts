@@ -65,6 +65,8 @@ export const publicLinks = {
 
 	/** Directory view — download the whole directory as a zip */
 	downloadDirectory: "Download all",
+	/** File and directory views, signed-in visitors only — copies the linked file or the directory on screen into their own Cloud Drive (a destination picker, then a progress card) */
+	saveToDrive: "Save to Cloud Drive",
 	/** Directory view — preparing/streaming the zip */
 	preparingDownload: "Preparing download…",
 	/** Directory view — filter box placeholder */

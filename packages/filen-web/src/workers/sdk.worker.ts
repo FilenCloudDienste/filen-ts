@@ -1621,6 +1621,19 @@ const api = {
 	hasClient(): boolean {
 		return client !== null
 	},
+	// Whether a public link's file or directory belongs to the signed-in account: only the owner can look
+	// it up by uuid. False without a session, and on any failure (the caller only hides a button on it).
+	async ownsItem(kind: "file" | "directory", uuid: string): Promise<boolean> {
+		if (client === null) {
+			return false
+		}
+
+		try {
+			return (kind === "file" ? await client.getFileOptional(uuid) : await client.getDirOptional(uuid)) !== undefined
+		} catch {
+			return false
+		}
+	},
 	// Called once by boot.ts (after storage() resolves, before resumeSession()) with the persisted
 	// Advanced-settings transfer config, and again whenever the settings page writes a new
 	// preference — the latter only affects the NEXT UnauthClient this worker constructs (see

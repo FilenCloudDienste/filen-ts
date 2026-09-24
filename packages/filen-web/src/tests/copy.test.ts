@@ -1,6 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
-import type { CopiedTopLevelItem, CopyCounts, CopyFailure, CopyReport, CopyUpdate, Dir, File, UserInfo, UuidStr } from "@filen/sdk-rs"
+import type {
+	CopiedTopLevelItem,
+	CopyCounts,
+	CopyFailure,
+	CopyItem,
+	CopyReport,
+	CopyUpdate,
+	Dir,
+	File,
+	UserInfo,
+	UuidStr
+} from "@filen/sdk-rs"
 import type { CopyJobEvent } from "@/workers/sdk.worker"
 
 type SdkCopyItems = (
@@ -200,6 +211,26 @@ describe("runCopyJob", () => {
 		expect(deps.copyItems.mock.calls[0]?.[0]).toBe("job")
 		expect(deps.copyItems.mock.calls[0]?.[1]).toEqual([SOURCE_ITEMS[0]?.data, SOURCE_ITEMS[1]?.data])
 		expect(deps.copyItems.mock.calls[0]?.[2]).toBeNull()
+	})
+
+	// A public link's file or directory has no DriveItem shape: it goes to the SDK exactly as it came.
+	it("passes a linked source's SDK items through untouched", async () => {
+		const deps = makeDeps()
+		const linked = { dir: { inner: { uuid: "root" }, linkedTag: true }, link: { linkUuid: "link" } } as unknown as CopyItem
+
+		deps.copyItems.mockResolvedValue(report())
+
+		await runCopyJob(deps, {
+			...request(),
+			source: { kind: "linked", items: [linked], destinationUuid: "dest" },
+			itemCount: 1,
+			name: "Shared",
+			glyph: "directory"
+		})
+
+		expect(deps.copyItems.mock.calls[0]?.[1]).toEqual([linked])
+		expect(deps.copyItems.mock.calls[0]?.[2]).toBe("dest")
+		expect(row()).toMatchObject({ name: "Shared", status: "done" })
 	})
 
 	it("feeds updates into the job and the row, and patches each created top-level item", async () => {

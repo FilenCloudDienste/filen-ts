@@ -1,10 +1,12 @@
 import { useState } from "react"
+import { driveItemName } from "@filen/shared"
 import { linkedFileIntoDriveItem } from "@/features/drive/lib/item"
-import { usePublicFile } from "@/features/publicLinks/queries/publicLink"
+import { useLinkSaveable, usePublicFile } from "@/features/publicLinks/queries/publicLink"
 import { fileAccessState } from "@/features/publicLinks/lib/password.logic"
 import { secretFingerprint } from "@/features/publicLinks/lib/queryKey.logic"
 import { PasswordGate } from "@/features/publicLinks/components/passwordGate"
 import { FileHero } from "@/features/publicLinks/components/fileHero"
+import { SaveToDriveButton } from "@/features/publicLinks/components/saveToDrive"
 import { PublicLinkLoading, PublicLinkInvalid, PublicLinkError } from "@/features/publicLinks/components/publicLinkStates"
 
 // The /f/ route body. Resolves a LinkedFile against the anon worker surface, driving the password gate
@@ -17,6 +19,7 @@ export function FileLinkView({ uuid, linkKey }: { uuid: string; linkKey: string 
 	const [submitted, setSubmitted] = useState(false)
 	const query = usePublicFile(uuid, linkKey, password)
 	const access = fileAccessState({ status: query.status, error: query.error, submitted })
+	const saveable = useLinkSaveable("file", query.data?.uuid ?? null)
 
 	if (access === "loading") {
 		return <PublicLinkLoading />
@@ -52,11 +55,35 @@ export function FileLinkView({ uuid, linkKey }: { uuid: string; linkKey: string 
 		return <PublicLinkLoading />
 	}
 
+	const item = linkedFileIntoDriveItem(query.data)
+	const linked = query.data
+
 	return (
 		<FileHero
-			item={linkedFileIntoDriveItem(query.data)}
+			item={item}
 			downloadEnabled={true}
 			linkScope={secretFingerprint(linkKey, password)}
+			saveAction={
+				saveable
+					? {
+							hero: (
+								<SaveToDriveButton
+									item={linked}
+									name={driveItemName(item)}
+									glyph="file"
+								/>
+							),
+							bar: (
+								<SaveToDriveButton
+									item={linked}
+									name={driveItemName(item)}
+									glyph="file"
+									compact
+								/>
+							)
+						}
+					: undefined
+			}
 		/>
 	)
 }

@@ -22,8 +22,15 @@ const { getLinkedFileAnon, getDirPublicLinkInfoAnon, getLinkedDirSizeAnon, listL
 	listLinkedDirAnon: vi.fn<(dir: AnyLinkedDir, link: DirPublicLink) => Promise<LinkedDirsAndFiles>>()
 }))
 
+// A signed-out visitor: no "Save to Cloud Drive", so no owner lookup either.
 vi.mock("@/lib/sdk/client", () => ({
-	sdkApi: { getLinkedFileAnon, getDirPublicLinkInfoAnon, getLinkedDirSizeAnon, listLinkedDirAnon }
+	sdkApi: {
+		getLinkedFileAnon,
+		getDirPublicLinkInfoAnon,
+		getLinkedDirSizeAnon,
+		listLinkedDirAnon,
+		hasClient: () => Promise.resolve(false)
+	}
 }))
 
 // The production defaults minus the persister (sqlite, unavailable under vitest).

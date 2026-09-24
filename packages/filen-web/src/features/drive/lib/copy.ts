@@ -42,7 +42,12 @@ import { getCopyJob, useCopyJobsStore, type CopyJobsStore } from "@/features/tra
 // and patches the destination listing with the top-level items it creates. Nested items reach the
 // listings through the socket's own create events, so they are never inserted twice.
 
-export type CopySource = { kind: "items"; items: DriveItem[]; destinationUuid: string | null } | { kind: "entries"; entries: CopyEntry[] }
+// "linked" carries SDK items as they came from a public link (a LinkedFile, or a linked directory with
+// its link); they have no DriveItem shape to narrow from.
+export type CopySource =
+	| { kind: "items"; items: DriveItem[]; destinationUuid: string | null }
+	| { kind: "linked"; items: CopyItem[]; destinationUuid: string | null }
+	| { kind: "entries"; entries: CopyEntry[] }
 
 type OnCopyEvent = (event: CopyJobEvent) => void
 
@@ -82,9 +87,17 @@ async function attempt(
 ): Promise<CopySettlement> {
 	try {
 		const report =
-			source.kind === "items"
-				? await runOp(deps.copyItems(id, narrowToSdkItems(source.items), source.destinationUuid, maxBytes, onEvent))
-				: await runOp(deps.copyItemsTo(id, source.entries, maxBytes, onEvent))
+			source.kind === "entries"
+				? await runOp(deps.copyItemsTo(id, source.entries, maxBytes, onEvent))
+				: await runOp(
+						deps.copyItems(
+							id,
+							source.kind === "items" ? narrowToSdkItems(source.items) : source.items,
+							source.destinationUuid,
+							maxBytes,
+							onEvent
+						)
+					)
 
 		return { report, maxBytes }
 	} catch (e) {
@@ -327,6 +340,22 @@ export function startCopy(items: DriveItem[], destination: CopyDestination): str
 		itemCount: items.length,
 		name: copyRowName(items.length, driveItemName(first)),
 		glyph: copyGlyphForItems(items)
+	})
+
+	return id
+}
+
+// Saves what a public link points at (the whole linked file or directory) into the caller's own drive.
+export function startLinkedCopy(item: CopyItem, name: string, glyph: CopyJobGlyph, destination: CopyDestination): string {
+	const id = crypto.randomUUID()
+
+	void runCopyJob(defaultCopyDeps, {
+		id,
+		source: { kind: "linked", items: [item], destinationUuid: destination.uuid },
+		destination,
+		itemCount: 1,
+		name,
+		glyph
 	})
 
 	return id

@@ -1,12 +1,12 @@
 import { useState } from "react"
 import { useTranslation } from "react-i18next"
-import { formatBytes } from "@filen/shared"
+import { driveItemName, formatBytes } from "@filen/shared"
 import { ChevronRightIcon, DownloadIcon, SearchIcon, ArrowDownAZIcon, ArrowUpAZIcon } from "lucide-react"
 import type { DirPublicInfo, DirPublicLink, File as SdkFile } from "@filen/sdk-rs"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { ItemIcon } from "@/features/drive/components/itemIcon"
 import { formatItemSize, formatModifiedDate } from "@/features/drive/lib/format"
-import { usePublicDirListing, usePublicDirSize } from "@/features/publicLinks/queries/publicLink"
+import { useLinkSaveable, usePublicDirListing, usePublicDirSize } from "@/features/publicLinks/queries/publicLink"
 import {
 	rootCrumb,
 	enterCrumb,
@@ -23,6 +23,7 @@ import {
 import { startAnonDirZipDownload } from "@/features/publicLinks/lib/download"
 import { secretFingerprint, passwordStatePart } from "@/features/publicLinks/lib/queryKey.logic"
 import { FileHero } from "@/features/publicLinks/components/fileHero"
+import { SaveToDriveButton } from "@/features/publicLinks/components/saveToDrive"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
@@ -50,6 +51,8 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 	const [zip, setZip] = useState<ZipUiState>({ status: "idle" })
 
 	const current = stack[stack.length - 1] ?? rootCrumb(info)
+	// Asked once for the whole link: its subdirectories and files belong to whoever owns its root.
+	const saveable = useLinkSaveable("directory", info.root.inner.uuid)
 	const listing = usePublicDirListing({ levelUuid: current.uuid, dir: current.dir, link })
 	const sizeInfo = usePublicDirSize({ levelUuid: current.uuid, dir: current.dir, link })
 
@@ -96,6 +99,27 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 				onBack={() => {
 					setSelected(null)
 				}}
+				saveAction={
+					saveable
+						? {
+								hero: (
+									<SaveToDriveButton
+										item={selected.file}
+										name={driveItemName(selected.item)}
+										glyph="file"
+									/>
+								),
+								bar: (
+									<SaveToDriveButton
+										item={selected.file}
+										name={driveItemName(selected.item)}
+										glyph="file"
+										compact
+									/>
+								)
+							}
+						: undefined
+				}
 			/>
 		)
 	}
@@ -120,17 +144,28 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 					<h1 className="truncate text-lg font-semibold">{current.name}</h1>
 					{summary !== null && <p className="text-xs text-muted-foreground">{summary}</p>}
 				</div>
-				{link.enableDownload && (
-					<Button
-						variant="outline"
-						size="sm"
-						onClick={handleZip}
-						disabled={zip.status === "running"}
-					>
-						{zip.status === "running" ? <Spinner data-icon="inline-start" /> : <DownloadIcon data-icon="inline-start" />}
-						{zip.status === "running" ? t("preparingDownload") : t("downloadDirectory")}
-					</Button>
-				)}
+				<div className="flex flex-wrap items-center gap-2">
+					{/* The directory on screen, the link's root or a subdirectory of it. */}
+					{saveable ? (
+						<SaveToDriveButton
+							item={{ dir: current.dir, link }}
+							name={current.name}
+							glyph="directory"
+							compact
+						/>
+					) : null}
+					{link.enableDownload && (
+						<Button
+							variant="outline"
+							size="sm"
+							onClick={handleZip}
+							disabled={zip.status === "running"}
+						>
+							{zip.status === "running" ? <Spinner data-icon="inline-start" /> : <DownloadIcon data-icon="inline-start" />}
+							{zip.status === "running" ? t("preparingDownload") : t("downloadDirectory")}
+						</Button>
+					)}
+				</div>
 			</div>
 
 			{zip.status === "running" && (
