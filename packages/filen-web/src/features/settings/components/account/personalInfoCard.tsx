@@ -13,6 +13,8 @@ import {
 	personalToFormState,
 	formStateToUpdateInfo,
 	isPersonalFormDirty,
+	keepBlankFields,
+	mergePersonalUpdate,
 	PERSONAL_FIELD_ORDER,
 	type PersonalFormState
 } from "@/features/settings/components/account/personalInfoCard.logic"
@@ -46,8 +48,8 @@ const FIELD_LABEL_KEYS: Record<keyof PersonalFormState, SettingsKey> = {
 // same editor invariant this app's other freeze-on-mount forms use) — a background refetch from
 // another card's save (avatar/nickname/email) must never clobber in-progress edits here. `initial`
 // captures that SAME frozen snapshot a second time (the dirty-gate's baseline) and is advanced to
-// the just-saved `form` on a successful save — never re-derived from a refetch, which would violate
-// the freeze invariant above.
+// the just-saved `form` on a successful save, its blank fields showing the values they kept — never
+// re-derived from a refetch, which would violate the freeze invariant above.
 function PersonalInfoCard({ accountQuery }: PersonalInfoCardProps) {
 	const { t } = useTranslation(["settings", "common"])
 	const isOnline = useIsOnline()
@@ -61,12 +63,14 @@ function PersonalInfoCard({ accountQuery }: PersonalInfoCardProps) {
 	async function handleSave(): Promise<void> {
 		setPending(true)
 		try {
-			const personal = formStateToUpdateInfo(form)
-			await sdkApi.updatePersonalInfo(personal)
+			const sent = formStateToUpdateInfo(form)
+			await sdkApi.updatePersonalInfo(sent)
 			toast.success(t("settingsPersonalSuccess"))
-			setInitial(form)
-			// A whole-record write (an absent field clears it), so the sent record is the new server state.
-			accountQueryUpdate(prev => ({ ...prev, personal }))
+			// A blank field is sent as "leave unchanged", so it shows, and stays cached, as the value it kept.
+			const saved = keepBlankFields(form, accountQuery.data.personal)
+			setInitial(saved)
+			setForm(saved)
+			accountQueryUpdate(prev => ({ ...prev, personal: mergePersonalUpdate(prev.personal, sent) }))
 		} catch (e) {
 			toast.error(errorLabel(asErrorDTO(e)))
 		} finally {

@@ -4,6 +4,8 @@ import {
 	personalToFormState,
 	formStateToUpdateInfo,
 	isPersonalFormDirty,
+	keepBlankFields,
+	mergePersonalUpdate,
 	PERSONAL_FIELD_ORDER
 } from "@/features/settings/components/account/personalInfoCard.logic"
 
@@ -118,5 +120,24 @@ describe("isPersonalFormDirty", () => {
 		const form = { ...initial, country: "France" }
 
 		expect(isPersonalFormDirty(form, initial)).toBe(true)
+	})
+})
+
+// A field sent blank is left as it was on the server.
+describe("mergePersonalUpdate", () => {
+	it("keeps what was sent blank and takes what was sent", () => {
+		const prev: Personal = { ...emptyPersonal(), firstName: "Old", city: "Old City" }
+		const sent = { ...emptyPersonal(), firstName: "Ada" }
+
+		expect(mergePersonalUpdate(prev, sent)).toEqual({ ...emptyPersonal(), firstName: "Ada", city: "Old City" })
+	})
+})
+
+describe("keepBlankFields", () => {
+	it("shows a blank field as the value it kept and leaves the rest as typed", () => {
+		const form = { ...personalToFormState(emptyPersonal()), firstName: " Ada ", city: "  " }
+		const kept: Personal = { ...emptyPersonal(), city: "Old City" }
+
+		expect(keepBlankFields(form, kept)).toEqual({ ...form, city: "Old City" })
 	})
 })

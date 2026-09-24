@@ -308,7 +308,8 @@ describe("account writes patch instead of reading back", () => {
 		expect(reads()).toBe(1)
 	})
 
-	it("saving personal info patches the whole record that was sent", async () => {
+	// The server keeps a field sent blank, so the cache and the form both keep "Old City".
+	it("saving personal info patches only the fields it sent and shows a blank one as the value it kept", async () => {
 		renderCard(PersonalInfoCard)
 		await drain()
 
@@ -318,9 +319,10 @@ describe("account writes patch instead of reading back", () => {
 		fireEvent.click(screen.getByRole("button", { name: EN_SETTINGS.settingsPersonalSave }))
 		await drain()
 
-		const sent = { ...EMPTY_PERSONAL, firstName: "Ada" }
-		expect(updatePersonalInfo).toHaveBeenCalledExactlyOnceWith(sent)
-		expect(cached()?.personal).toEqual(sent)
+		expect(updatePersonalInfo).toHaveBeenCalledExactlyOnceWith({ ...EMPTY_PERSONAL, firstName: "Ada" })
+		expect(cached()?.personal).toEqual({ ...EMPTY_PERSONAL, firstName: "Ada", city: "Old City" })
+		expect(screen.getByLabelText<HTMLInputElement>(EN_SETTINGS.settingsPersonalCity).value).toBe("Old City")
+		expect(screen.getByRole("button", { name: EN_SETTINGS.settingsPersonalSave })).toHaveProperty("disabled", true)
 		expect(reads()).toBe(1)
 	})
 
