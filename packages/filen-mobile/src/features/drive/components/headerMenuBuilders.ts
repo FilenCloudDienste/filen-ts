@@ -1,4 +1,3 @@
-import { router } from "@/lib/router"
 import { type TFunction } from "i18next"
 import { run } from "@filen/shared"
 import { type DriveViewMode } from "@/features/drive/driveViewModePreference"
@@ -8,7 +7,8 @@ import * as MediaLibrary from "expo-media-library/legacy"
 import { type MenuButton } from "@/components/ui/menu"
 import { type Icons } from "@/components/ui/menuIcons"
 import { buildSortFieldButton, type SortDirectionOption } from "@/components/ui/sortFieldMenu"
-import { type SelectOptions, type DrivePath } from "@/hooks/useDrivePath"
+import { type DrivePath } from "@/hooks/useDrivePath"
+import { openDriveSelect } from "@/features/drive/driveSelectSession"
 import type { DriveItem } from "@/types"
 import { type SortByType } from "@/lib/sort"
 import alerts from "@/lib/alerts"
@@ -23,7 +23,6 @@ import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
 import { runBulk } from "@/lib/bulkOps"
 import { type DriveSelectionFlags } from "@/features/drive/driveSelectors"
 import { downloadDriveItemToDevice } from "@/features/drive/driveDownload"
-import { serialize } from "@/lib/serializer"
 import { selectContacts } from "@/features/contacts/contactsSelect"
 import logger from "@/lib/logger"
 
@@ -242,18 +241,15 @@ export function buildBulkActionMenu({
 					return
 				}
 
-				router.push({
-					pathname: "/driveSelect/[uuid]",
-					params: {
-						uuid: driveRootUuidResult.data,
-						selectOptions: serialize({
-							type: "single",
-							files: false,
-							directories: true,
-							intention: "move",
-							items: selectedDriveItems,
-							id: randomUUID()
-						} satisfies SelectOptions)
+				openDriveSelect({
+					rootUuid: driveRootUuidResult.data,
+					options: {
+						type: "single",
+						files: false,
+						directories: true,
+						intention: "move",
+						items: selectedDriveItems,
+						id: randomUUID()
 					}
 				})
 			}

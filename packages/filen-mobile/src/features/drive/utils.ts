@@ -146,7 +146,8 @@ export function resolveDriveHeaderTitle({
 
 	if (drivePath.selectOptions) {
 		switch (drivePath.selectOptions.intention) {
-			case "move": {
+			case "move":
+			case "copy": {
 				return t("select_destination")
 			}
 

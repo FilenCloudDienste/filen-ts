@@ -16,7 +16,8 @@ import { getRealDriveItemParent, makeDriveItemPublicLink, unwrapParentUuid } fro
 import * as Clipboard from "expo-clipboard"
 import auth from "@/lib/auth"
 import { getPreviewType } from "@/lib/previewType"
-import type { DrivePath, SelectOptions } from "@/hooks/useDrivePath"
+import type { DrivePath } from "@/hooks/useDrivePath"
+import { openDriveSelect } from "@/features/drive/driveSelectSession"
 import { serialize } from "@/lib/serializer"
 import { selectContacts } from "@/features/contacts/contactsSelect"
 import useDriveStore from "@/features/drive/store/useDrive.store"
@@ -349,18 +350,15 @@ export function createMenuButtons({
 						return
 					}
 
-					router.push({
-						pathname: "/driveSelect/[uuid]",
-						params: {
-							uuid: driveRootUuidResult.data,
-							selectOptions: serialize({
-								type: "single",
-								files: false,
-								directories: true,
-								intention: "move",
-								items: [item],
-								id: randomUUID()
-							} satisfies SelectOptions)
+					openDriveSelect({
+						rootUuid: driveRootUuidResult.data,
+						options: {
+							type: "single",
+							files: false,
+							directories: true,
+							intention: "move",
+							items: [item],
+							id: randomUUID()
 						}
 					})
 				}

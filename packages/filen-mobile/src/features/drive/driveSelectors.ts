@@ -3,6 +3,7 @@ import type { DrivePath, DrivePathType, SharedNavContext } from "@/hooks/useDriv
 import type { PreviewType } from "@/lib/previewType"
 import { EXPO_IMAGE_SUPPORTED_EXTENSIONS, EXPO_VIDEO_SUPPORTED_EXTENSIONS } from "@/constants"
 import { serialize } from "@/lib/serializer"
+import { serializeSelectOptions } from "@/features/drive/driveSelectParams"
 import { keepAgainstIncoming } from "@filen/shared"
 
 // Local extension check — kept inline (rather than calling getPreviewType from
@@ -147,7 +148,7 @@ export function aggregateDriveSelectionFlags(items: readonly DriveItem[]): Drive
  * Returns false outside picker mode (normal browsing never disables rows here).
  *
  * Mirrors the per-row gating in the picker:
- *   - move : undecryptable items + the very items being moved are invalid targets.
+ *   - move / copy: undecryptable items + the very items being moved or copied are invalid targets.
  *   - select: undecryptable items, type/previewType mismatches, already-selected
  *             source items, and (single-select) any row once another is picked.
  *
@@ -168,14 +169,17 @@ export function isDriveItemDisabled({
 	}
 
 	switch (drivePath.selectOptions.intention) {
-		case "move": {
+		case "move":
+		case "copy": {
 			// Undecryptable items can't be valid move/copy destinations — we
 			// don't know what they are, and the SDK can't act on them either.
 			if (item.data.undecryptable) {
 				return true
 			}
 
-			return drivePath.selectOptions.items.some(i => i.data.uuid === item.data.uuid)
+			// A moved or copied directory is not a destination, and being disabled it can't be entered,
+			// so its subtree can't be picked either.
+			return drivePath.selectOptions.itemUuids.has(item.data.uuid)
 		}
 
 		case "select": {
@@ -200,7 +204,7 @@ export function isDriveItemDisabled({
 			if (
 				!allowedItemTypes.includes(normalizeItemType) ||
 				(drivePath.selectOptions.previewType && drivePath.selectOptions.previewType !== previewType) ||
-				drivePath.selectOptions.items.some(i => i.data.uuid === item.data.uuid)
+				drivePath.selectOptions.itemUuids.has(item.data.uuid)
 			) {
 				return true
 			}
@@ -236,6 +240,19 @@ export function nextDriveSelectSelection({
 	}
 
 	return [...prev, item]
+}
+
+/**
+ * Whether moving `items` into `parentUuid` would change nothing: only when EVERY item already lives
+ * there. A selection partly elsewhere still moves the rest (items already there are skipped by move).
+ * Shared items never count as already there. `parentOf` resolves an item's parent uuid.
+ */
+export function everyItemAlreadyIn(items: readonly DriveItem[], parentUuid: string, parentOf: (item: DriveItem) => string | null): boolean {
+	if (items.length === 0) {
+		return false
+	}
+
+	return items.every(item => (item.type === "file" || item.type === "directory") && parentOf(item) === parentUuid)
 }
 
 /**
@@ -342,7 +359,7 @@ export function resolveDriveNavigationTarget({ item, drivePath }: { item: DriveI
 			pathname: "/driveSelect/[uuid]" as const,
 			params: {
 				uuid: item.data.uuid,
-				selectOptions: serialize(drivePath.selectOptions)
+				selectOptions: serializeSelectOptions(drivePath.selectOptions)
 			}
 		}
 	}

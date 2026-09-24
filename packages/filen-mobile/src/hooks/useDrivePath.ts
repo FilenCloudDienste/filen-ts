@@ -2,6 +2,7 @@ import { useLocalSearchParams, useNavigation } from "expo-router"
 import { validateUuid } from "@/lib/uuid"
 import type { DriveItem, DriveItemDirectorySharedRoot, DriveItemDirectorySharedNonRoot } from "@/types"
 import { deserialize, deserializeRouteParam } from "@/lib/serializer"
+import useDriveSelectStore from "@/features/drive/store/useDriveSelect.store"
 import { useCameraUpload } from "@/features/cameraUpload/cameraUpload"
 import type { PreviewType } from "@/lib/previewType"
 import type { SharingRole } from "@filen/sdk-rs"
@@ -32,8 +33,11 @@ export type SelectOptions = {
 	type: "single" | "multiple"
 	files: boolean
 	directories: boolean
-	intention: "move" | "select"
+	intention: "move" | "copy" | "select"
+	// The session's source items (moved or copied, or excluded from a pick) — never in the route params,
+	// read back from the picker session store by `id`.
 	items: DriveItem[]
+	itemUuids: ReadonlySet<string>
 	// Rows the picker opens with already ticked — the caller's current value (e.g. the
 	// configured camera-upload directory). Pure selection-store seeding; unlike `items`
 	// (which DISABLES rows in select intent), these stay fully interactive.
@@ -41,6 +45,12 @@ export type SelectOptions = {
 	previewType?: PreviewType
 	id: string
 }
+
+// What a picker screen's route param carries: everything but the session's items and preselection.
+export type SelectOptionsParam = Omit<SelectOptions, "items" | "itemUuids" | "initiallySelected">
+
+const NO_ITEMS: DriveItem[] = []
+const NO_UUIDS: ReadonlySet<string> = new Set()
 
 export type Linked = {
 	uuid: string
@@ -106,15 +116,19 @@ export default function useDrivePath(): DrivePath {
 	const selectOptions = ((): SelectOptions | null => {
 		if (selectOptionsParam) {
 			try {
-				const parsed = deserialize(selectOptionsParam) as SelectOptions
+				const parsed = deserialize(selectOptionsParam) as SelectOptionsParam
+				// Opened before the session's first screen is pushed and fixed for its lifetime, so a
+				// plain read (no subscription) is exact.
+				const session = useDriveSelectStore.getState().sessions[parsed.id]
 
 				return {
 					type: parsed.type,
 					files: parsed.files,
 					directories: parsed.directories,
 					intention: parsed.intention,
-					items: parsed.items,
-					initiallySelected: parsed.initiallySelected,
+					items: session?.items ?? NO_ITEMS,
+					itemUuids: session?.itemUuids ?? NO_UUIDS,
+					initiallySelected: session?.initiallySelected,
 					id: parsed.id,
 					previewType: parsed.previewType
 				}

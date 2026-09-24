@@ -17,6 +17,7 @@ import { AnyNormalDir } from "@filen/sdk-rs"
 import { useSdkClients } from "@/lib/auth"
 import { unwrapParentUuid } from "@/lib/sdkUnwrap"
 import useDriveSelectStore from "@/features/drive/store/useDriveSelect.store"
+import { everyItemAlreadyIn } from "@/features/drive/driveSelectors"
 import { useShallow } from "zustand/shallow"
 import events from "@/lib/events"
 import { useNavigation } from "expo-router"
@@ -53,21 +54,12 @@ const DriveSelectToolbar = () => {
 		return parentDir
 	})()
 
-	const isSameParentAsSelectedItems = (() => {
-		if (!parentDir || !drivePath.selectOptions) {
-			return false
-		}
-
-		return drivePath.selectOptions.items.some(item => {
-			if (item.type !== "file" && item.type !== "directory") {
-				return false
-			}
-
-			const itemParentUuid = unwrapParentUuid(item.data.parent)
-
-			return itemParentUuid === parentDir.inner[0].uuid
-		})
-	})()
+	const isSameParentAsSelectedItems =
+		parentDir !== null &&
+		drivePath.selectOptions !== undefined &&
+		everyItemAlreadyIn(drivePath.selectOptions.items, parentDir.inner[0].uuid, item =>
+			item.type === "file" || item.type === "directory" ? unwrapParentUuid(item.data.parent) : null
+		)
 
 	const canSelect = (() => {
 		if (!drivePath.selectOptions) {
@@ -144,7 +136,7 @@ const DriveSelectToolbar = () => {
 			return
 		}
 
-		if (drivePath.selectOptions.intention === "move" && !isOnline) {
+		if ((drivePath.selectOptions.intention === "move" || drivePath.selectOptions.intention === "copy") && !isOnline) {
 			alerts.error(new Error(t("youre_offline")))
 
 			return
@@ -181,6 +173,29 @@ const DriveSelectToolbar = () => {
 
 						return
 					}
+
+					navigation.getParent()?.goBack()
+
+					break
+				}
+
+				// Copying into the items' own directory is allowed (the copies get "name (1)"). The caller
+				// starts the job; the picker only hands back where.
+				case "copy": {
+					if (!parentDir || drivePath.selectOptions.items.length === 0) {
+						return
+					}
+
+					events.emit("driveSelect", {
+						id: drivePath.selectOptions.id,
+						selectedItems: [
+							{
+								type: "root",
+								data: parentDir
+							}
+						],
+						cancelled: false
+					})
 
 					navigation.getParent()?.goBack()
 
@@ -266,6 +281,20 @@ const DriveSelectToolbar = () => {
 						)}
 					>
 						<Text className="font-bold text-blue-500">{t("move_here")}</Text>
+					</CrossGlassContainerView>
+				</PressableScale>
+			)}
+			{drivePath.selectOptions?.intention === "copy" && parentDir && drivePath.selectOptions.items.length > 0 && (
+				<PressableScale
+					onPress={submit}
+					className="absolute right-4"
+					enabled={isOnline}
+					style={{
+						bottom: insets.bottom
+					}}
+				>
+					<CrossGlassContainerView className={cn("min-h-12 min-w-12 px-4 flex-row items-center justify-center", !isOnline && "opacity-50")}>
+						<Text className="font-bold text-blue-500">{t("copy_here")}</Text>
 					</CrossGlassContainerView>
 				</PressableScale>
 			)}

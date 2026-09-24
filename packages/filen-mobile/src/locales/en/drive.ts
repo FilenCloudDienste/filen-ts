@@ -359,6 +359,8 @@ export const drive = {
 	enter_directory_name: "Enter a name for the new directory",
 	/** Confirm button in the move toolbar: moves selected items into the current directory */
 	move_here: "Move here",
+	/** Destination picker confirm button for a copy: copy the chosen items into the directory being shown */
+	copy_here: "Copy here",
 	/** Select toolbar confirm button shown when a root directory is selected with no item selected */
 	select_root: "Select this directory",
 	/** Select toolbar confirm button: select {{count}} items (singular) */

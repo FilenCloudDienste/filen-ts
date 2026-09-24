@@ -73,7 +73,9 @@ vi.mock("@/features/cameraUpload/cameraUpload", () => ({
 import { renderHook } from "@testing-library/react"
 import useDrivePath, { isDrivePathType, DRIVE_PATH_TYPES } from "@/hooks/useDrivePath"
 import { serialize } from "@/lib/serializer"
-import type { SelectOptions, Linked } from "@/hooks/useDrivePath"
+import type { SelectOptionsParam, Linked } from "@/hooks/useDrivePath"
+import useDriveSelectStore from "@/features/drive/store/useDriveSelect.store"
+import type { DriveItem } from "@/types"
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -199,12 +201,11 @@ describe("useDrivePath — navigationId → DrivePathType mapping", () => {
 	})
 
 	it("'/driveSelect' with valid selectOptions → type='drive' with selectOptions", () => {
-		const opts: SelectOptions = {
+		const opts: SelectOptionsParam = {
 			type: "multiple",
 			files: true,
 			directories: false,
 			intention: "move",
-			items: [],
 			id: "sel-1"
 		}
 		const serialized = serialize(opts)
@@ -217,6 +218,35 @@ describe("useDrivePath — navigationId → DrivePathType mapping", () => {
 		expect(result.current.selectOptions).toBeDefined()
 		expect(result.current.selectOptions!.id).toBe("sel-1")
 		expect(result.current.selectOptions!.type).toBe("multiple")
+	})
+
+	it("a picker session's items come from the session store, not the route param", () => {
+		const moved = { type: "directory", data: { uuid: "moved-dir" } } as unknown as DriveItem
+
+		useDriveSelectStore.getState().openSession("sel-copy", [moved])
+
+		const opts: SelectOptionsParam = {
+			type: "single",
+			files: false,
+			directories: true,
+			intention: "copy",
+			id: "sel-copy"
+		}
+
+		setNav("/driveSelect/" + VALID_UUID, { uuid: VALID_UUID, selectOptions: serialize(opts) })
+
+		const { result } = renderHook(() => useDrivePath())
+
+		expect(result.current.selectOptions?.intention).toBe("copy")
+		expect(result.current.selectOptions?.items).toEqual([moved])
+		expect(result.current.selectOptions?.itemUuids.has("moved-dir")).toBe(true)
+
+		useDriveSelectStore.getState().closeSession("sel-copy")
+
+		const { result: afterClose } = renderHook(() => useDrivePath())
+
+		expect(afterClose.current.selectOptions?.items).toEqual([])
+		expect(afterClose.current.selectOptions?.itemUuids.size).toBe(0)
 	})
 
 	it("'/linkedDir' with valid linked param → type='linked' with linked payload", () => {
@@ -304,12 +334,11 @@ describe("useDrivePath — selectOptions/linked deserialization", () => {
 	})
 
 	it("valid selectOptions deserializes and all fields are forwarded", () => {
-		const opts: SelectOptions = {
+		const opts: SelectOptionsParam = {
 			type: "single",
 			files: true,
 			directories: true,
 			intention: "select",
-			items: [],
 			id: "sel-abc",
 			previewType: "image"
 		}

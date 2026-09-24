@@ -25,6 +25,7 @@ import {
 	isDriveItemNavigateOnly,
 	nextDriveSelectSelection,
 	resolveDriveNavigationTarget,
+	everyItemAlreadyIn,
 	resolveDriveContainingDirectoryTarget,
 	hiddenFilterAppliesTo,
 	keepAgainstIncomingDriveItem,
@@ -408,14 +409,17 @@ function drivePath(type: DrivePath["type"], extra?: Partial<DrivePath>): DrivePa
 }
 
 function selectOptions(over: Partial<SelectOptions>): SelectOptions {
+	const items = over.items ?? []
+
 	return {
 		type: "single",
 		files: true,
 		directories: true,
 		intention: "select",
-		items: [],
 		id: "id",
-		...over
+		...over,
+		items,
+		itemUuids: new Set(items.map(item => item.data.uuid))
 	} as SelectOptions
 }
 
@@ -466,6 +470,19 @@ describe("isDriveItemDisabled", () => {
 				previewType: null
 			})
 		).toBe(false)
+	})
+
+	// --- copy intention ---
+
+	it("copy: the copied items and undecryptable rows are disabled, everything else is a destination", () => {
+		const copied = dir("copied")
+		const dp = drivePath("drive", {
+			selectOptions: selectOptions({ intention: "copy", directories: true, files: false, items: [copied] })
+		})
+
+		expect(isDriveItemDisabled({ item: copied, drivePath: dp, previewType: null })).toBe(true)
+		expect(isDriveItemDisabled({ item: dir("x", false, true), drivePath: dp, previewType: null })).toBe(true)
+		expect(isDriveItemDisabled({ item: dir("sibling"), drivePath: dp, previewType: null })).toBe(false)
 	})
 
 	// --- select intention ---
@@ -680,11 +697,15 @@ describe("resolveDriveNavigationTarget", () => {
 	})
 
 	it("routes picker (selectOptions) directories to /driveSelect/[uuid] with serialized options", () => {
-		const opts = selectOptions({ directories: true, files: false, intention: "move" })
+		const opts = selectOptions({ directories: true, files: false, intention: "move", items: [dir("moved")] })
 
+		// Only the session id and flags ride the route; the moved items stay in the session store.
 		expect(resolveDriveNavigationTarget({ item: dir("a"), drivePath: drivePath("drive", { selectOptions: opts }) })).toEqual({
 			pathname: "/driveSelect/[uuid]",
-			params: { uuid: "a", selectOptions: `serialized:${JSON.stringify(opts)}` }
+			params: {
+				uuid: "a",
+				selectOptions: `serialized:${JSON.stringify({ type: "single", files: false, directories: true, intention: "move", id: "id" })}`
+			}
 		})
 	})
 
@@ -981,5 +1002,23 @@ describe("driveItemHasLeadingCheckbox", () => {
 
 		expect(driveItemHasLeadingCheckbox({ drivePath: path, areDriveItemsSelected: false })).toBe(false)
 		expect(driveItemHasLeadingCheckbox({ drivePath: path, areDriveItemsSelected: true })).toBe(false)
+	})
+})
+
+describe("everyItemAlreadyIn (Move here disabled)", () => {
+	const parentOf = (item: DriveItem) => (item.data as unknown as { parentUuid: string | null }).parentUuid
+	const at = (uuid: string, parentUuid: string) => ({ type: "file", data: { uuid, parentUuid } }) as unknown as DriveItem
+
+	it("only when every item already lives in the target", () => {
+		expect(everyItemAlreadyIn([at("a", "p"), at("b", "p")], "p", parentOf)).toBe(true)
+	})
+
+	it("a selection partly elsewhere can still be moved here", () => {
+		expect(everyItemAlreadyIn([at("a", "p"), at("b", "q")], "p", parentOf)).toBe(false)
+	})
+
+	it("nothing selected, or shared items, never count as already there", () => {
+		expect(everyItemAlreadyIn([], "p", parentOf)).toBe(false)
+		expect(everyItemAlreadyIn([{ type: "sharedFile", data: { uuid: "s", parentUuid: "p" } } as unknown as DriveItem], "p", parentOf)).toBe(false)
 	})
 })

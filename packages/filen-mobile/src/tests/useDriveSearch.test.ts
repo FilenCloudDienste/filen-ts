@@ -214,6 +214,7 @@ describe("useDriveSearch — gating + lifecycle", () => {
 			directories: false,
 			intention: "select" as const,
 			items: [],
+			itemUuids: new Set<string>(),
 			id: "sel-1"
 		}
 

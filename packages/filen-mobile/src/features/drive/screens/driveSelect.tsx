@@ -5,14 +5,15 @@ import auth, { useSdkClients } from "@/lib/auth"
 import events from "@/lib/events"
 import { randomUUID } from "expo-crypto"
 import useEffectOnce from "@/hooks/useEffectOnce"
-import { router } from "@/lib/router"
 import useDrivePath, { type SelectOptions } from "@/hooks/useDrivePath"
-import { serialize } from "@/lib/serializer"
 import type { DriveItem } from "@/types"
 import useDriveSelectStore from "@/features/drive/store/useDriveSelect.store"
-import type { AnyNormalDir } from "@filen/sdk-rs"
+import { openDriveSelect } from "@/features/drive/driveSelectSession"
+import { AnyNormalDir_Tags, type AnyNormalDir } from "@filen/sdk-rs"
+import cache from "@/lib/cache"
+import type { CopyDestination } from "@/features/copy/copyAdapter"
 
-export async function selectDriveItems(options: Omit<SelectOptions, "intention" | "id">): Promise<
+export async function selectDriveItems(options: Omit<SelectOptions, "intention" | "id" | "itemUuids">): Promise<
 	| {
 			cancelled: true
 	  }
@@ -55,15 +56,65 @@ export async function selectDriveItems(options: Omit<SelectOptions, "intention" 
 			}
 		})
 
-		router.push({
-			pathname: "/driveSelect/[uuid]",
-			params: {
-				uuid: rootUuid,
-				selectOptions: serialize({
-					...options,
-					intention: "select",
-					id
-				} satisfies SelectOptions)
+		openDriveSelect({
+			rootUuid,
+			options: {
+				...options,
+				intention: "select",
+				id
+			}
+		})
+	})
+}
+
+// Picks where `items` get copied to: the directory the picker is showing when "Copy here" is tapped, or
+// null when it is dismissed. The caller starts the copy. `rootName` names the drive root as a destination.
+export async function selectCopyDestination(
+	items: DriveItem[],
+	rootName: string
+): Promise<{ destinationDir: AnyNormalDir; destination: CopyDestination } | null> {
+	const { authedSdkClient } = await auth.getSdkClients()
+	const rootUuid = authedSdkClient.root().uuid
+
+	return new Promise(resolve => {
+		const id = randomUUID()
+
+		const sub = events.subscribe("driveSelect", data => {
+			if (data.id !== id) {
+				return
+			}
+
+			sub.remove()
+
+			const picked = data.cancelled ? undefined : data.selectedItems[0]
+
+			if (!picked || picked.type !== "root") {
+				resolve(null)
+
+				return
+			}
+
+			const destinationDir = picked.data
+			const uuid = destinationDir.inner[0].uuid
+
+			resolve({
+				destinationDir,
+				destination:
+					destinationDir.tag === AnyNormalDir_Tags.Root || uuid === rootUuid
+						? { uuid: null, name: rootName }
+						: { uuid, name: cache.uuidToAnyDriveItem.get(uuid)?.data.decryptedMeta?.name ?? uuid }
+			})
+		})
+
+		openDriveSelect({
+			rootUuid,
+			options: {
+				type: "single",
+				files: false,
+				directories: true,
+				intention: "copy",
+				items,
+				id
 			}
 		})
 	})
@@ -87,15 +138,16 @@ const DriveSelectListener = () => {
 		return () => {
 			const current = cancelStateRef.current
 
-			if (
-				current.drivePath.selectOptions &&
-				current.drivePath.selectOptions.intention === "select" &&
-				current.authedSdkClient?.root().uuid === current.drivePath.uuid
-			) {
-				events.emit("driveSelect", {
-					id: current.drivePath.selectOptions.id,
-					cancelled: true
-				})
+			if (current.drivePath.selectOptions && current.authedSdkClient?.root().uuid === current.drivePath.uuid) {
+				// A pick or copy the user dismissed resolves as cancelled; one already resolved ignores it.
+				if (current.drivePath.selectOptions.intention !== "move") {
+					events.emit("driveSelect", {
+						id: current.drivePath.selectOptions.id,
+						cancelled: true
+					})
+				}
+
+				useDriveSelectStore.getState().closeSession(current.drivePath.selectOptions.id)
 			}
 		}
 	}, [])
