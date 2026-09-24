@@ -16,6 +16,7 @@ vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/u
 vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
 vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
 vi.mock("@/features/transfers/transfers", () => ({ default: { upload: vi.fn() } }))
+vi.mock("@/features/transfers/quota", () => ({ uploadQuotaRefusal: vi.fn(async () => null) }))
 vi.mock("@/features/drive/drive", () => ({ default: { enablePublicLink: vi.fn() } }))
 vi.mock("@/lib/utils", () => ({}))
 vi.mock("@/lib/sdkUnwrap", () => ({

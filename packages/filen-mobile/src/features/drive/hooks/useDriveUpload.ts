@@ -19,6 +19,7 @@ import transfers from "@/features/transfers/transfers"
 import alerts from "@/lib/alerts"
 import prompts from "@/lib/prompts"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
+import { uploadQuotaRefusal } from "@/features/transfers/quota"
 import { newTmpDir } from "@/lib/tmp"
 import { unwrapFileMeta, unwrappedFileIntoDriveItem } from "@/lib/sdkUnwrap"
 import { useDrivePreviewStore } from "@/stores/useDrivePreview.store"
@@ -164,6 +165,26 @@ export function useDriveUpload({
 		)
 	}
 
+	// Refuses a batch that won't fit before any transfer row exists, shown like any failed upload; the
+	// picked files are then this flow's to delete.
+	const fitsOrRefuse = async (files: FileSystem.File[]): Promise<boolean> => {
+		const refusal = await uploadQuotaRefusal(files.map(file => (file.exists ? file.size : 0)))
+
+		if (!refusal) {
+			return true
+		}
+
+		for (const file of files) {
+			if (file.exists) {
+				file.delete()
+			}
+		}
+
+		alerts.error(refusal)
+
+		return false
+	}
+
 	const requireMediaPermissions = async (needCamera: boolean): Promise<boolean> => {
 		const permissionsResult = await run(async () => {
 			return await withSystemPresentation(() =>
@@ -215,6 +236,11 @@ export function useDriveUpload({
 		}
 
 		const assets = documentPickerResult.data.documents
+
+		if (!(await fitsOrRefuse(assets.map(asset => new FileSystem.File(asset.uri))))) {
+			return
+		}
+
 		const convertHeic = await isConvertHeicToJpgEnabled()
 
 		const transferResult = await run(async () => {
@@ -308,6 +334,11 @@ export function useDriveUpload({
 		}
 
 		const assets = imagePickerResult.data.assets
+
+		if (!(await fitsOrRefuse(assets.map(asset => new FileSystem.File(asset.uri))))) {
+			return
+		}
+
 		const convertHeic = await isConvertHeicToJpgEnabled()
 
 		const transferResult = await run(async () => {
@@ -438,6 +469,10 @@ export function useDriveUpload({
 		const scans = scannerResult.data.scannedImages
 
 		if (!scans || scans.length === 0) {
+			return
+		}
+
+		if (!(await fitsOrRefuse(scans.map(scan => new FileSystem.File(normalizeFilePathForExpo(scan)))))) {
 			return
 		}
 

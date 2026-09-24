@@ -400,6 +400,32 @@ describe("quota", () => {
 		expect(useTransfersStore.getState().finishedTransfers[0]?.outcome).toBe("succeeded")
 	})
 
+	it("a refusal says what the scan needed and what is free; without a scanned total, the plain limit", async () => {
+		h.account.isCachedFresh.mockReturnValue(false)
+		h.account.fetchFresh.mockResolvedValue({ storageUsed: 9_000n, maxStorage: 10_000n })
+		scriptCopy(async () =>
+			report({
+				error: { kind: ErrorKind.MaxStorageReached, message: "", serverMessage: undefined },
+				counts: ZERO,
+				totals: { dirs: 0n, files: 3n, bytes: 5000n }
+			})
+		)
+
+		await runJob()
+
+		expect(useTransfersStore.getState().finishedTransfers[0]?.errorMessage).toMatch(/^not_enough_storage/)
+
+		scriptCopy(async () => preflightRefusal())
+
+		await runJob()
+
+		const rows = useTransfersStore.getState().finishedTransfers
+
+		expect(rows).toHaveLength(2)
+		expect(rows.at(-1)?.outcome).toBe("errored")
+		expect(rows.at(-1)?.errorMessage).not.toMatch(/^not_enough_storage/)
+	})
+
 	it("a refusal against a figure just read fresh is final: no second read, no rerun", async () => {
 		h.account.isCachedFresh.mockReturnValue(false)
 		scriptCopy(async () => preflightRefusal())

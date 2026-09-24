@@ -163,10 +163,17 @@ const {
 
 vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 
-const { mockMarkDirectorySizesStale } = vi.hoisted(() => ({ mockMarkDirectorySizesStale: vi.fn() }))
+const { mockMarkDirectorySizesStale, mockAddAccountStorageUsed } = vi.hoisted(() => ({
+	mockMarkDirectorySizesStale: vi.fn(),
+	mockAddAccountStorageUsed: vi.fn()
+}))
 
 vi.mock("@/features/drive/queries/useDirectorySize.query", () => ({
 	markDirectorySizesStale: mockMarkDirectorySizesStale
+}))
+
+vi.mock("@/queries/useAccount.query", () => ({
+	addAccountStorageUsed: mockAddAccountStorageUsed
 }))
 
 vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
@@ -455,6 +462,24 @@ describe("Transfers", () => {
 
 	describe("upload", () => {
 		describe("file", () => {
+			it("adds the uploaded bytes to the cached account figure, except in someone else's share", async () => {
+				const file = new FsFile("file:///document/test.txt")
+				fs.set(file.uri, new Uint8Array([1, 2, 3]))
+
+				mockUploadFile.mockResolvedValueOnce({ uuid: "own", size: 3n, parent: { tag: "Uuid", inner: ["parent-uuid"] } })
+				await transfers.upload({ localFileOrDir: file, parent: makeParentDir("parent-uuid") })
+
+				expect(mockAddAccountStorageUsed).toHaveBeenCalledExactlyOnceWith(3n)
+
+				mockAddAccountStorageUsed.mockClear()
+				fs.set(file.uri, new Uint8Array([1, 2, 3]))
+				mockUnwrapFileMeta.mockReturnValue({ shared: true, file: { uuid: "theirs" }, meta: { name: "test.txt" } })
+				mockUploadFile.mockResolvedValueOnce({ uuid: "theirs", size: 3n, parent: { tag: "Uuid", inner: ["parent-uuid"] } })
+				await transfers.upload({ localFileOrDir: file, parent: makeParentDir("parent-uuid") })
+
+				expect(mockAddAccountStorageUsed).not.toHaveBeenCalled()
+			})
+
 			it("uploads file and updates query cache", async () => {
 				const file = new FsFile("file:///document/test.txt")
 				fs.set(file.uri, new Uint8Array([1, 2, 3]))
@@ -1148,6 +1173,7 @@ describe("Transfers", () => {
 
 				const uploadedFile = {
 					uuid: "uploaded-file-uuid",
+					size: 512n,
 					parent: { tag: "Uuid", inner: [subFileParentUuid] }
 				}
 
@@ -1217,7 +1243,7 @@ describe("Transfers", () => {
 				const parent = makeParentDir("parent-uuid")
 
 				const uploadedDir = { uuid: "dir-1", parent: { tag: "Uuid", inner: ["parent-uuid"] } }
-				const uploadedFile = { uuid: "file-1", parent: { tag: "Uuid", inner: ["dir-1"] } }
+				const uploadedFile = { uuid: "file-1", size: 1024n, parent: { tag: "Uuid", inner: ["dir-1"] } }
 
 				mockUploadDirRecursively.mockImplementationOnce(async (_path: string, callbacks: any) => {
 					callbacks.onUploadUpdate([uploadedDir], [uploadedFile], 1024n)
@@ -1230,6 +1256,8 @@ describe("Transfers", () => {
 
 				expect(result!.directories).toHaveLength(1)
 				expect(result!.files).toHaveLength(1)
+				// The finished files' bytes follow into the cached account figure, per batch.
+				expect(mockAddAccountStorageUsed).toHaveBeenCalledWith(1024n)
 			})
 
 			// Pins the directory-branch resolved-value contract (parity with downloadCore): per-entry
@@ -1240,7 +1268,7 @@ describe("Transfers", () => {
 				fs.set(dir.uri, "dir")
 				const parent = makeParentDir("parent-uuid")
 				const entryError = { error: { message: () => "entry failed" }, path: "/document/testdir/f.txt" }
-				const uploadedFile = { uuid: "file-1", parent: { tag: "Uuid", inner: ["parent-uuid"] } }
+				const uploadedFile = { uuid: "file-1", size: 256n, parent: { tag: "Uuid", inner: ["parent-uuid"] } }
 
 				mockUploadDirRecursively.mockImplementationOnce(async (_path: string, callbacks: any) => {
 					callbacks.onUploadErrors([entryError])

@@ -4,11 +4,16 @@ import { vi, describe, it, expect, beforeEach } from "vitest"
 // Hoisted mocks (must be defined before any imports)
 // ------------------------------------------------------------------
 
-const { mockTransfersUpload, mockAlertsError, mockAlertsNormal, mockPickDocuments } = vi.hoisted(() => ({
+const { mockTransfersUpload, mockAlertsError, mockAlertsNormal, mockPickDocuments, mockUploadQuotaRefusal } = vi.hoisted(() => ({
 	mockTransfersUpload: vi.fn(),
 	mockAlertsError: vi.fn(),
 	mockAlertsNormal: vi.fn(),
-	mockPickDocuments: vi.fn()
+	mockPickDocuments: vi.fn(),
+	mockUploadQuotaRefusal: vi.fn(async (): Promise<string | null> => null)
+}))
+
+vi.mock("@/features/transfers/quota", () => ({
+	uploadQuotaRefusal: mockUploadQuotaRefusal
 }))
 
 vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
@@ -241,6 +246,7 @@ describe("useDriveUpload reportTransferResults wiring (C2)", () => {
 
 	beforeEach(() => {
 		fs.clear()
+		mockUploadQuotaRefusal.mockReset().mockResolvedValue(null)
 		mockTransfersUpload.mockReset()
 		mockAlertsError.mockClear()
 		mockAlertsNormal.mockClear()
@@ -305,5 +311,26 @@ describe("useDriveUpload reportTransferResults wiring (C2)", () => {
 		// ...and the toast reports 1 succeeded / 1 failed — the abort appears in neither.
 		expect(mockAlertsNormal).toHaveBeenCalledTimes(1)
 		expect(mockAlertsNormal).toHaveBeenCalledWith('upload_complete_with_failures:{"count":1,"failed":1}')
+	})
+
+	it("a batch that won't fit is refused before any transfer: one error, no upload, picked files gone", async () => {
+		primePicker(["file:///document/a.bin", "file:///document/b.bin"])
+		mockUploadQuotaRefusal.mockResolvedValue("not_enough_storage")
+
+		const { uploadFiles } = useDriveUpload({
+			parent,
+			drivePath,
+			t
+		})
+
+		await uploadFiles()
+
+		// Checked once for the whole batch, against every picked file's size.
+		expect(mockUploadQuotaRefusal).toHaveBeenCalledExactlyOnceWith([1, 1])
+		expect(mockTransfersUpload).not.toHaveBeenCalled()
+		expect(mockAlertsError).toHaveBeenCalledExactlyOnceWith("not_enough_storage")
+		expect(mockAlertsNormal).not.toHaveBeenCalled()
+		expect(fs.has("file:///document/a.bin")).toBe(false)
+		expect(fs.has("file:///document/b.bin")).toBe(false)
 	})
 })

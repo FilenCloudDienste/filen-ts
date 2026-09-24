@@ -34,6 +34,7 @@ import {
 	driveItemsQueryUpdateForRecents
 } from "@/features/drive/queries/useDriveItems.query"
 import { markDirectorySizesStale } from "@/features/drive/queries/useDirectorySize.query"
+import { addAccountStorageUsed } from "@/queries/useAccount.query"
 import type { DriveItem } from "@/types"
 import { driveItemToAnyDirWithContext } from "@/lib/sdkSources"
 import cache from "@/lib/cache"
@@ -604,6 +605,16 @@ export async function uploadCore(
 						if (uploadedDirs.length > 0 || uploadedFiles.length > 0) {
 							markDirectorySizesStale()
 						}
+
+						let ownBytes = 0n
+
+						for (const uploadedFile of uploadedFiles) {
+							if (!unwrapFileMeta(uploadedFile).shared) {
+								ownBytes += uploadedFile.size
+							}
+						}
+
+						addAccountStorageUsed(ownBytes)
 					}
 				},
 				parentDir,
@@ -841,6 +852,12 @@ export async function uploadCore(
 	const unwrappedFileMeta = unwrapFileMeta(result.data)
 
 	markDirectorySizesStale()
+
+	// The server now counts these bytes; the quota pre-flight's cached figure follows without a read.
+	// A file in someone else's share counts against its owner.
+	if (!unwrappedFileMeta.shared) {
+		addAccountStorageUsed(result.data.size)
+	}
 
 	if (!unwrappedFileMeta.shared) {
 		const driveItem = {

@@ -12,6 +12,7 @@ import { unwrapFileMeta, unwrappedFileIntoDriveItem, makeDriveItemPublicLink } f
 import * as FileSystem from "expo-file-system"
 import { purgeChatInflightState } from "@/features/chats/chatsInflight"
 import logger from "@/lib/logger"
+import { uploadQuotaRefusal } from "@/features/transfers/quota"
 
 class Chats {
 	private readonly refetchChatsAndMessagesMutex: Semaphore = new Semaphore(1)
@@ -632,6 +633,27 @@ class Chats {
 			mimeType?: string
 		}[]
 	): Promise<string[]> {
+		// Refused before any transfer row exists; the caller shows the message like any failed upload.
+		const refusal = await uploadQuotaRefusal(
+			assets.map(asset => {
+				const assetFile = new FileSystem.File(asset.uri)
+
+				return assetFile.exists ? assetFile.size : 0
+			})
+		)
+
+		if (refusal) {
+			for (const asset of assets) {
+				const assetFile = new FileSystem.File(asset.uri)
+
+				if (assetFile.exists) {
+					assetFile.delete()
+				}
+			}
+
+			throw new Error(refusal)
+		}
+
 		const parent = new AnyNormalDir.Dir(await this.getChatUploadsDirectory())
 
 		return (

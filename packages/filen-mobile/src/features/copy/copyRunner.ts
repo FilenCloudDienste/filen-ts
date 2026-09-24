@@ -26,6 +26,7 @@ import { unwrapParentUuid } from "@/lib/sdkUnwrap"
 import { unwrapSdkError } from "@/lib/sdkErrors"
 import { driveItemDisplayName } from "@/lib/decryption"
 import transfers from "@/features/transfers/transfers"
+import { notEnoughStorageMessage } from "@/features/transfers/quota"
 import useTransfersStore, { type FinishedTransfer } from "@/features/transfers/store/useTransfers.store"
 import useCopyJobsStore, { getCopyJob } from "@/features/copy/store/useCopyJobs.store"
 import {
@@ -103,11 +104,15 @@ function finishedOutcome(job: CopyJob): Pick<FinishedTransfer, "outcome" | "erro
 		case "quotaExceeded": {
 			return {
 				outcome: "errored",
-				errorMessage: copyJobErrorToHumanReadable({
-					kind: "MaxStorageReached",
-					message: "",
-					serverMessage: undefined
-				})
+				// The scan's total is what didn't fit; without one only the plain limit message can be said.
+				errorMessage:
+					job.totals.bytes > job.outcome.freeBytes
+						? notEnoughStorageMessage(job.totals.bytes, job.outcome.freeBytes)
+						: copyJobErrorToHumanReadable({
+								kind: "MaxStorageReached",
+								message: "",
+								serverMessage: undefined
+							})
 			}
 		}
 

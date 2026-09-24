@@ -62,5 +62,7 @@ export const transfers = {
 	/** Copy transfer row name when a copy holds several items (singular). {{count}} is the item count */
 	copy_n_items_one: "{{count}} item",
 	/** Copy transfer row name when a copy holds several items (plural). {{count}} is the item count */
-	copy_n_items_other: "{{count}} items"
+	copy_n_items_other: "{{count}} items",
+	/** Error shown when an upload or copy would not fit the account's free storage; nothing was sent. {{needed}} and {{free}} are formatted sizes */
+	not_enough_storage: "Not enough storage: needs {{needed}}, {{free}} free."
 } as const

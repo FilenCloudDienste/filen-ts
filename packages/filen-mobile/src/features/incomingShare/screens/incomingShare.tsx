@@ -13,6 +13,7 @@ import * as FileSystem from "expo-file-system"
 import transfers from "@/features/transfers/transfers"
 import { run, formatBytes } from "@filen/shared"
 import alerts from "@/lib/alerts"
+import { uploadQuotaRefusal } from "@/features/transfers/quota"
 import useIsOnline from "@/hooks/useIsOnline"
 import { selectDriveItems } from "@/features/drive/screens/driveSelect"
 import { resolveSelectedDriveItemToAnyNormalDir } from "@/features/drive/driveSelectResolve"
@@ -297,6 +298,21 @@ function IncomingShare() {
 			clear(batch)
 
 			navigation.getParent()?.goBack()
+
+			// Refused before any transfer row exists, shown like a failed upload; the tmp copies go.
+			const refusal = await uploadQuotaRefusal(assets.map(asset => asset.file.size))
+
+			if (refusal) {
+				for (const asset of assets) {
+					if (asset.file.exists) {
+						asset.file.delete()
+					}
+				}
+
+				alerts.error(refusal)
+
+				return
+			}
 
 			const result = await run(async defer => {
 				return await Promise.all(

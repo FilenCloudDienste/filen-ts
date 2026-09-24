@@ -91,6 +91,7 @@ vi.mock("@filen/sdk-rs", () => ({
 // uploadAssetsAndGenerateLinks path (not covered here) — mock them so the module loads.
 vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
 vi.mock("@/features/transfers/transfers", () => ({ default: { upload: vi.fn() } }))
+vi.mock("@/features/transfers/quota", () => ({ uploadQuotaRefusal: vi.fn(async () => null) }))
 vi.mock("@/features/drive/drive", () => ({ default: { enablePublicLink: vi.fn() } }))
 vi.mock("@/lib/utils", () => ({}))
 
