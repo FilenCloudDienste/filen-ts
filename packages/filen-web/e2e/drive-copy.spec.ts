@@ -237,6 +237,16 @@ test.describe("drive copy", () => {
 		try {
 			const { listbox } = await enterScratchDirectory(page, scratchName)
 
+			const openEmptySpaceMenu = async (): Promise<void> => {
+				const box = await listbox.boundingBox()
+
+				if (box === null) {
+					throw new Error("the listing has no box")
+				}
+
+				await listbox.click({ button: "right", position: { x: 16, y: box.height - 16 } })
+			}
+
 			await createDirectoryViaDialog(page, subName)
 			await uploadTextFile(page, keptName)
 			await uploadTextFile(page, movedName)
@@ -262,6 +272,14 @@ test.describe("drive copy", () => {
 			await page.getByRole("button", { name: "Hide copy progress" }).click()
 			await expect(listbox.getByRole("option", { name: keptName })).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 
+			// A copy stays on the clipboard for further pastes until it is cleared.
+			await openEmptySpaceMenu()
+			await page.getByRole("menuitem", { name: "Clear clipboard" }).click()
+			await openEmptySpaceMenu()
+			await expect(page.getByRole("menuitem", { name: /^Paste/ })).toHaveAttribute("aria-disabled", "true")
+			await expect(page.getByRole("menuitem", { name: "Clear clipboard" })).toHaveAttribute("aria-disabled", "true")
+			await page.keyboard.press("Escape")
+
 			// Cut in the parent, paste into the subdirectory through its empty-space menu: a move.
 			const breadcrumb = page.getByRole("navigation", { name: "Breadcrumb" })
 
@@ -274,13 +292,7 @@ test.describe("drive copy", () => {
 			await descendInto(page, listbox, subName)
 			await expect(listbox.getByRole("option", { name: keptName })).toBeVisible()
 
-			const box = await listbox.boundingBox()
-
-			if (box === null) {
-				throw new Error("the listing has no box")
-			}
-
-			await listbox.click({ button: "right", position: { x: 16, y: box.height - 16 } })
+			await openEmptySpaceMenu()
 			await page.getByRole("menuitem", { name: /^Paste/ }).click()
 
 			await expect(listbox.getByRole("option", { name: movedName })).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })

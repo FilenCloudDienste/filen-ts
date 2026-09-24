@@ -1,10 +1,19 @@
 import * as Comlink from "comlink"
 import type { CopyEntry, CopyItem, CopyReport } from "@filen/sdk-rs"
-import { toast } from "sonner"
-import { driveItemName, formatBytes } from "@filen/shared"
+import {
+	applyCopyCreated,
+	applyCopyUpdate,
+	copyMaxBytes,
+	driveItemName,
+	effectiveBytesDone,
+	formatBytes,
+	isQuotaPreflightFailure,
+	settleCopyJob,
+	type QuotaCheckDeps,
+	type StorageCounters
+} from "@filen/shared"
 import { sdkApi } from "@/lib/sdk/client"
 import { i18n } from "@/lib/i18n"
-import { errorLabel } from "@/lib/i18n/errorLabel"
 import { runOp } from "@/lib/actions/outcome"
 import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
 import type { CopyJobEvent } from "@/workers/sdk.worker"
@@ -12,22 +21,15 @@ import { narrowItem, narrowToSdkItems, upsertDriveItem, type DriveItem } from "@
 import { driveListingQueryUpdate, invalidateDirectorySize, normalizeParentUuid } from "@/features/drive/queries/drive"
 import { currentRootUuid, trashItems } from "@/features/drive/lib/actions"
 import { type BulkOutcome } from "@/features/drive/lib/bulk"
-import { toastBulkOutcome } from "@/features/drive/lib/bulkToast"
 import { flushDeferredRecents } from "@/features/drive/lib/socketHandlers"
-import { seedThumbnail } from "@/features/drive/lib/thumbnails"
-import { readThumbnailBlob } from "@/features/drive/lib/thumbCache"
 import { accountQuotaDeps, addAccountStorageUsed } from "@/features/drive/lib/quota"
-import { type QuotaCheckDeps, type StorageCounters } from "@/features/drive/lib/quota.logic"
 import {
-	applyCopyCreated,
-	applyCopyUpdate,
 	copyGlyphForEntries,
 	copyGlyphForItems,
-	copyMaxBytes,
+	copyReportInput,
+	copyUpdateInput,
 	createCopyJob,
-	isQuotaPreflightFailure,
 	retryEntries,
-	settleCopyJob,
 	type CopyDestination,
 	type CopyJob,
 	type CopyJobGlyph,
@@ -63,10 +65,9 @@ export interface RunCopyDeps {
 	transfers: Pick<TransfersStore, "add" | "setProgress" | "setSize" | "settle" | "remove">
 	jobs: Pick<CopyJobsStore, "put" | "update"> & { get: (id: string) => CopyJob | undefined }
 	account: QuotaCheckDeps
-	seedThumbnail: (sourceUuid: string, item: DriveItem) => void
 	patchCreated: (item: DriveItem) => void
 	trash: (items: DriveItem[]) => Promise<BulkOutcome<DriveItem>>
-	settled: (job: CopyJob, trashed: BulkOutcome<DriveItem> | null) => void
+	settled: (job: CopyJob) => void
 }
 
 export interface CopyJobRequest {
@@ -99,7 +100,7 @@ async function attempt(
 						)
 					)
 
-		return { report, maxBytes }
+		return { report: copyReportInput(report), maxBytes }
 	} catch (e) {
 		return { error: asErrorDTO(e) }
 	}
@@ -170,24 +171,26 @@ export async function runCopyJob(deps: RunCopyDeps, request: CopyJobRequest): Pr
 			const item = narrowItem(event.item.item)
 
 			deps.jobs.update(id, job => applyCopyCreated(job, item))
-			// Before the patch: the row's tile asks for its thumbnail on the next commit.
-			deps.seedThumbnail(event.item.sourceUuid, item)
 			deps.patchCreated(item)
 
 			return
 		}
 
-		deps.jobs.update(id, job => applyCopyUpdate(job, event.update))
+		deps.jobs.update(id, job => applyCopyUpdate(job, copyUpdateInput(event.update)))
 
-		// The total grows while the scan finds more to copy.
-		const size = Number(event.update.totals.bytes)
+		const job = deps.jobs.get(id)
 
-		if (size !== rowSize) {
-			rowSize = size
-			deps.transfers.setSize(id, size)
+		if (job === undefined) {
+			return
 		}
 
-		deps.transfers.setProgress(id, Number(event.update.counts.bytesDone))
+		// The total grows while the scan finds more to copy.
+		if (job.totals.bytes !== rowSize) {
+			rowSize = job.totals.bytes
+			deps.transfers.setSize(id, rowSize)
+		}
+
+		deps.transfers.setProgress(id, effectiveBytesDone(job.counts, job.active))
 	}
 
 	const cancelRequested = (): boolean => deps.jobs.get(id)?.cancelRequest != null
@@ -229,7 +232,7 @@ export async function runCopyJob(deps: RunCopyDeps, request: CopyJobRequest): Pr
 
 	const settled = deps.jobs.get(id) ?? job
 
-	deps.settled(settled, trashed)
+	deps.settled(settled)
 
 	return settled
 }
@@ -254,17 +257,8 @@ function patchCopiedItem(item: DriveItem): void {
 	driveListingQueryUpdate(normalizeParentUuid(item.data.parent, currentRootUuid()), prev => upsertDriveItem(prev, item))
 }
 
-// A copied file is the source's content under a new uuid, so the source's cached thumbnail is its
-// thumbnail too; without one the seat falls through to the ordinary generation, only if a tile asks.
-function seedCopiedThumbnail(sourceUuid: string, item: DriveItem): void {
-	seedThumbnail(item, async () => {
-		const blob = await readThumbnailBlob(sourceUuid)
-
-		return blob === null ? { type: "unanswered" } : { type: "bytes", bytes: new Uint8Array(await blob.arrayBuffer()) }
-	})
-}
-
-function announceCopySettled(job: CopyJob, trashed: BulkOutcome<DriveItem> | null): void {
+// No toast: the card, or the transfers row, shows how the copy ended.
+function afterCopySettled(job: CopyJob): void {
 	flushDeferredRecents()
 
 	if (job.counts.bytesDone > 0) {
@@ -275,38 +269,7 @@ function announceCopySettled(job: CopyJob, trashed: BulkOutcome<DriveItem> | nul
 		invalidateDirectorySize(job.destination.uuid)
 	}
 
-	// An open card already shows how the copy ended.
-	if (job.cardVisible) {
-		return
-	}
-
 	pruneSettledCopyJobs()
-
-	switch (job.outcome.status) {
-		case "done":
-			toast.success(i18n.t("transfers:transfersCopySummaryComplete", { count: job.itemCount }))
-
-			break
-		case "doneWithFailures":
-			toast.error(i18n.t("transfers:transfersCopySummaryCompleteWithFailures", { count: job.failures.length }))
-
-			break
-		case "quotaExceeded":
-			toast.error(quotaExceededDTO(job.outcome.freeBytes).label)
-
-			break
-		case "failed":
-			toast.error(errorLabel(job.outcome.error))
-
-			break
-		case "running":
-		case "cancelled":
-			break
-	}
-
-	if (trashed !== null) {
-		toastBulkOutcome(trashed)
-	}
 }
 
 export const defaultCopyDeps: RunCopyDeps = {
@@ -316,10 +279,9 @@ export const defaultCopyDeps: RunCopyDeps = {
 	transfers: useTransfersStore.getState(),
 	jobs: { ...useCopyJobsStore.getState(), get: getCopyJob },
 	account: accountQuotaDeps,
-	seedThumbnail: seedCopiedThumbnail,
 	patchCreated: patchCopiedItem,
 	trash: trashItems,
-	settled: announceCopySettled
+	settled: afterCopySettled
 }
 
 // Starts the copy and returns its job id at once; the job outlives whatever started it. The UI shows its

@@ -51,8 +51,9 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 	const [zip, setZip] = useState<ZipUiState>({ status: "idle" })
 
 	const current = stack[stack.length - 1] ?? rootCrumb(info)
-	// Asked once for the whole link: its subdirectories and files belong to whoever owns its root.
-	const saveable = useLinkSaveable("directory", info.root.inner.uuid)
+	// Asked once for the whole link: its subdirectories and files belong to whoever owns its root. A link
+	// with downloads disabled offers no way to take its content, a copy included, so nothing is asked.
+	const saveable = useLinkSaveable("directory", link.enableDownload ? info.root.inner.uuid : null)
 	const listing = usePublicDirListing({ levelUuid: current.uuid, dir: current.dir, link })
 	const sizeInfo = usePublicDirSize({ levelUuid: current.uuid, dir: current.dir, link })
 

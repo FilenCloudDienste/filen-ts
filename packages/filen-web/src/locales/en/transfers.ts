@@ -127,15 +127,7 @@ export const transfers = {
 	transfersCopyRowName_one: "{{count}} item",
 	/** Copy transfer row — name of a copy job holding more than one item (a one-item copy shows that item's own name); plural */
 	transfersCopyRowName_other: "{{count}} items",
-	/** Copy summary toast — the copy finished and every item was copied; {{count}} = items the user chose to copy; singular */
-	transfersCopySummaryComplete_one: "{{count}} item copied",
-	/** Copy summary toast — the copy finished and every item was copied; {{count}} = items the user chose to copy; plural */
-	transfersCopySummaryComplete_other: "{{count}} items copied",
-	/** Copy summary toast — the copy finished but some files or directories could not be copied; the rest were; {{count}} = failed files/directories; singular */
-	transfersCopySummaryCompleteWithFailures_one: "Copy finished, {{count}} item failed",
-	/** Copy summary toast — the copy finished but some files or directories could not be copied; the rest were; {{count}} = failed files/directories; plural */
-	transfersCopySummaryCompleteWithFailures_other: "Copy finished, {{count}} items failed",
-	/** Copy error (toast and transfer row) — the copy is larger than the account's free storage; checked after the copy's scan, before anything was written; {{free}} = formatted free storage */
+	/** Copy error (progress card and transfer row) — the copy is larger than the account's free storage; checked after the copy's scan, before anything was written; {{free}} = formatted free storage */
 	transfersCopyQuotaExceeded: "This copy doesn't fit the {{free}} of free storage.",
 
 	// ── Copy progress card (features/transfers/components/copyJobToast.tsx) ────

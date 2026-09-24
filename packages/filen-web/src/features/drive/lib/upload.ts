@@ -1,5 +1,6 @@
 import * as Comlink from "comlink"
 import type { File as SdkFile } from "@filen/sdk-rs"
+import { sumBytes } from "@filen/shared"
 import { toast } from "sonner"
 import { sdkApi } from "@/lib/sdk/client"
 import { i18n } from "@/lib/i18n"
@@ -12,7 +13,6 @@ import { useTransfersStore, type TransfersStore } from "@/features/transfers/sto
 import { defaultHeicUploadDeps, heicUploadConversionEnabled, maybeConvertHeicUpload } from "@/features/drive/lib/heicUpload"
 import { warmUploadThumbnail } from "@/features/drive/lib/thumbGenerators"
 import { addAccountStorageUsed, ensureUploadQuota } from "@/features/drive/lib/quota"
-import { sumBytes } from "@/features/drive/lib/quota.logic"
 
 // Leading+trailing throttle, written locally rather than pulling a dependency — no throttle/debounce
 // util exists in src/lib yet. The leading edge invokes immediately so the first progress

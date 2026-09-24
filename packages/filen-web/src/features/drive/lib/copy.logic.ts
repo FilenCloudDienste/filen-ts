@@ -1,23 +1,21 @@
-import type { CopyCounts, CopyEntry, CopyError, CopyFailure, CopyFailureInfo, CopyPhase, CopyReport, CopyUpdate } from "@filen/sdk-rs"
+import type { CopyEntry, CopyError, CopyEvent, CopyFailure, CopyFailureInfo, CopyReport, CopyUpdate } from "@filen/sdk-rs"
+import {
+	createCopyJob as createSharedCopyJob,
+	type CopyJob as SharedCopyJob,
+	type CopyJobOutcome as SharedCopyJobOutcome,
+	type CopyReportInput,
+	type CopySettlement as SharedCopySettlement,
+	type CopyUpdateEvents,
+	type CopyUpdateInput,
+	type CopyDestination
+} from "@filen/shared"
 import { labelFirst, type ErrorDTO } from "@/lib/sdk/errors"
-import { freeBytes, type StorageCounters } from "@/features/drive/lib/quota.logic"
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 
-// Pure state for one copy job: the SDK's bigint progress is narrowed to numbers here, so nothing
-// downstream renders or compares a bigint.
+// The wasm side of @filen/shared's copy job: maps the SDK's copy values onto its inputs, and adds what
+// only web's copy card and transfers row use.
 
-export interface CopyDestination {
-	// null for the drive root.
-	uuid: string | null
-	name: string
-}
-
-export interface CopyJobActiveFile {
-	destUuid: string
-	name: string
-	size: number
-	bytesDone: number
-}
+export type { CopyDestination }
 
 export interface CopyJobFailure {
 	sourceUuid: string
@@ -28,8 +26,6 @@ export interface CopyJobFailure {
 	affectedFiles: number
 	affectedBytes: number
 }
-
-export type CopyJobCounts = { [K in keyof CopyCounts]: number }
 
 // What a copy's transfers row shows as its icon: the one item's kind, or several items.
 export type CopyJobGlyph = "directory" | "file" | "items"
@@ -55,101 +51,21 @@ export function copyGlyphForEntries(entries: readonly CopyEntry[]): CopyJobGlyph
 	return "chunks" in only.item ? "file" : "directory"
 }
 
-export type CopyJobOutcome =
-	| { status: "running" }
-	| { status: "done" }
-	| { status: "doneWithFailures" }
-	| { status: "cancelled" }
-	| { status: "quotaExceeded"; freeBytes: number }
-	| { status: "failed"; error: ErrorDTO }
+export type CopyJobOutcome = SharedCopyJobOutcome<ErrorDTO>
 
-export interface CopyJob {
-	id: string
-	destination: CopyDestination
-	itemCount: number
+export interface CopyJob extends SharedCopyJob<DriveItem, CopyJobFailure, CopyFailure, ErrorDTO> {
 	glyph: CopyJobGlyph
-	phase: CopyPhase
-	pausing: boolean
-	paused: boolean
-	cancelling: boolean
-	scan: { sourcesDone: number; sourcesTotal: number }
-	totals: { dirs: number; files: number; bytes: number }
-	counts: CopyJobCounts
-	active: CopyJobActiveFile[]
-	bytesPerSecond: number | null
-	etaMs: number | null
-	failures: CopyJobFailure[]
-	renamedCount: number
-	savedAsVersionCount: number
-	propagationFailedCount: number
-	// Top-level items this job created — the only ones "move copied items to trash" may touch.
-	created: DriveItem[]
-	// The report's failures, as copyItemsTo takes them back.
-	retryable: CopyFailure[]
-	cancelRequest: "keep" | "trash" | null
-	// What "move copied items to trash" did, once it ran.
-	trashResult: { moved: number; failed: number } | null
-	outcome: CopyJobOutcome
-	// The progress card is showing; a job whose card is dismissed announces its end with a toast.
+	// The progress card is showing.
 	cardVisible: boolean
 }
 
-const ZERO_COUNTS: CopyJobCounts = {
-	dirsCreated: 0,
-	dirsFailed: 0,
-	filesDone: 0,
-	filesFailed: 0,
-	bytesDone: 0,
-	bytesFailed: 0,
-	dirsNotAttempted: 0,
-	filesNotAttempted: 0,
-	bytesNotAttempted: 0,
-	entriesSkipped: 0,
-	bytesSkipped: 0
-}
+export type CopySettlement = SharedCopySettlement<CopyJobFailure, CopyFailure, ErrorDTO>
 
 export function createCopyJob(id: string, destination: CopyDestination, itemCount: number, glyph: CopyJobGlyph = "items"): CopyJob {
 	return {
-		id,
-		destination,
-		itemCount,
+		...createSharedCopyJob<DriveItem, CopyJobFailure, CopyFailure, ErrorDTO>(id, destination, itemCount),
 		glyph,
-		phase: "scanning",
-		pausing: false,
-		paused: false,
-		cancelling: false,
-		scan: { sourcesDone: 0, sourcesTotal: 0 },
-		totals: { dirs: 0, files: 0, bytes: 0 },
-		counts: ZERO_COUNTS,
-		active: [],
-		bytesPerSecond: null,
-		etaMs: null,
-		failures: [],
-		renamedCount: 0,
-		savedAsVersionCount: 0,
-		propagationFailedCount: 0,
-		created: [],
-		retryable: [],
-		cancelRequest: null,
-		trashResult: null,
-		outcome: { status: "running" },
 		cardVisible: false
-	}
-}
-
-function toCounts(counts: CopyCounts): CopyJobCounts {
-	return {
-		dirsCreated: Number(counts.dirsCreated),
-		dirsFailed: Number(counts.dirsFailed),
-		filesDone: Number(counts.filesDone),
-		filesFailed: Number(counts.filesFailed),
-		bytesDone: Number(counts.bytesDone),
-		bytesFailed: Number(counts.bytesFailed),
-		dirsNotAttempted: Number(counts.dirsNotAttempted),
-		filesNotAttempted: Number(counts.filesNotAttempted),
-		bytesNotAttempted: Number(counts.bytesNotAttempted),
-		entriesSkipped: Number(counts.entriesSkipped),
-		bytesSkipped: Number(counts.bytesSkipped)
 	}
 }
 
@@ -168,9 +84,7 @@ export function copyErrorDTO(error: CopyError): ErrorDTO {
 	return dto
 }
 
-// A file the backend registered as a new version of an existing one is not a failure the user can
-// act on: its bytes are stored, retrying would add yet another version, and it is not a copy to trash.
-export function isSavedAsVersion(info: CopyFailureInfo): boolean {
+function isSavedAsVersion(info: CopyFailureInfo): boolean {
 	return info.stage === "registeredAsVersion"
 }
 
@@ -185,31 +99,27 @@ function toFailure(info: CopyFailureInfo): CopyJobFailure {
 	}
 }
 
-// An update carries the complete current state plus the events since the previous one; only the
-// events that name something the user may want to see are kept.
-export function applyCopyUpdate(job: CopyJob, update: CopyUpdate): CopyJob {
-	const failures: CopyJobFailure[] = []
-	let renamedCount = job.renamedCount
-	let savedAsVersionCount = job.savedAsVersionCount
-	let propagationFailedCount = job.propagationFailedCount
+// Only the events that name something the user may want to see are kept.
+function classifyEvents(events: readonly CopyEvent[]): CopyUpdateEvents<CopyJobFailure> {
+	const classified: CopyUpdateEvents<CopyJobFailure> = { failures: [], savedAsVersion: 0, renamed: 0, propagationFailed: 0 }
 
-	for (const event of update.events) {
+	for (const event of events) {
 		switch (event.type) {
 			case "dirFailed":
 			case "fileFailed":
 				if (isSavedAsVersion(event)) {
-					savedAsVersionCount++
+					classified.savedAsVersion++
 				} else {
-					failures.push(toFailure(event))
+					classified.failures.push(toFailure(event))
 				}
 
 				break
 			case "renamed":
-				renamedCount++
+				classified.renamed++
 
 				break
 			case "propagationFailed":
-				propagationFailedCount++
+				classified.propagationFailed++
 
 				break
 			default:
@@ -217,89 +127,24 @@ export function applyCopyUpdate(job: CopyJob, update: CopyUpdate): CopyJob {
 		}
 	}
 
-	return {
-		...job,
-		phase: update.phase,
-		pausing: update.pausing,
-		paused: update.paused,
-		cancelling: update.cancelling,
-		scan: { sourcesDone: Number(update.scan.sourcesDone), sourcesTotal: Number(update.scan.sourcesTotal) },
-		totals: { dirs: Number(update.totals.dirs), files: Number(update.totals.files), bytes: Number(update.totals.bytes) },
-		counts: toCounts(update.counts),
-		active: update.active.map(file => ({
-			destUuid: file.destUuid,
-			name: file.name,
-			size: Number(file.size),
-			bytesDone: Number(file.bytesDone)
-		})),
-		bytesPerSecond: update.bytesPerSecond === undefined ? null : Number(update.bytesPerSecond),
-		etaMs: update.etaMs === undefined ? null : Number(update.etaMs),
-		failures: failures.length === 0 ? job.failures : [...job.failures, ...failures],
-		renamedCount,
-		savedAsVersionCount,
-		propagationFailedCount
-	}
+	return classified
 }
 
-export function applyCopyCreated(job: CopyJob, item: DriveItem): CopyJob {
-	return { ...job, created: [...job.created, item] }
+export function copyUpdateInput(update: CopyUpdate): CopyUpdateInput<CopyJobFailure> {
+	return { ...update, events: classifyEvents(update.events) }
 }
 
-// The SDK checks maxBytes after its scan and fails before writing anything; it reports no totals then.
-export function isQuotaPreflightFailure(report: CopyReport): boolean {
-	return (
-		report.error?.kind === "MaxStorageReached" &&
-		report.topLevel.length === 0 &&
-		report.counts.dirsCreated === 0n &&
-		report.counts.filesDone === 0n
-	)
-}
-
-// The storage still free, as maxBytes takes it; undefined when unknown, which leaves the check to the
-// server.
-export function copyMaxBytes(info: StorageCounters | undefined): number | undefined {
-	const free = info === undefined ? null : freeBytes(info)
-
-	return free === null ? undefined : Number(free)
-}
-
-export type CopySettlement = { report: CopyReport; maxBytes: number | undefined } | { error: ErrorDTO }
-
-// The report is authoritative once the job is over, so it replaces what the updates accumulated.
-export function settleCopyJob(job: CopyJob, settlement: CopySettlement): CopyJob {
-	if ("error" in settlement) {
-		const outcome: CopyJobOutcome =
-			settlement.error.kind === "Cancelled" ? { status: "cancelled" } : { status: "failed", error: settlement.error }
-
-		return { ...job, active: [], pausing: false, paused: false, outcome }
-	}
-
-	const { report, maxBytes } = settlement
-	const retryable = report.failures.filter(failure => !isSavedAsVersion(failure.info))
-	let outcome: CopyJobOutcome
-
-	if (report.error === undefined) {
-		outcome = retryable.length === 0 ? { status: "done" } : { status: "doneWithFailures" }
-	} else if (report.error.kind === "Cancelled") {
-		outcome = { status: "cancelled" }
-	} else if (isQuotaPreflightFailure(report) && maxBytes !== undefined) {
-		outcome = { status: "quotaExceeded", freeBytes: maxBytes }
-	} else {
-		outcome = { status: "failed", error: copyErrorDTO(report.error) }
-	}
+export function copyReportInput(report: CopyReport): CopyReportInput<CopyJobFailure, CopyFailure, ErrorDTO> {
+	const failures = report.failures.filter(failure => !isSavedAsVersion(failure.info))
 
 	return {
-		...job,
-		totals: { dirs: Number(report.totals.dirs), files: Number(report.totals.files), bytes: Number(report.totals.bytes) },
-		counts: toCounts(report.counts),
-		active: [],
-		pausing: false,
-		paused: false,
-		failures: retryable.map(failure => toFailure(failure.info)),
-		savedAsVersionCount: report.failures.length - retryable.length,
+		createdCount: report.topLevel.length,
+		totals: report.totals,
+		counts: report.counts,
+		failures: failures.map(failure => ({ failure: toFailure(failure.info), retryable: failure })),
+		savedAsVersionCount: report.failures.length - failures.length,
 		renamedCount: report.renamed.length,
-		retryable,
-		outcome
+		error: report.error === undefined ? undefined : copyErrorDTO(report.error)
 	}
 }
 

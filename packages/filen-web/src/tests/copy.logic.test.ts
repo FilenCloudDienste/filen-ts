@@ -1,17 +1,15 @@
 import { describe, expect, it } from "vitest"
 import type { CopyCounts, CopyFailure, CopyFailureInfo, CopyReport, CopyUpdate, Dir, File, UuidStr } from "@filen/sdk-rs"
+import { applyCopyCreated, applyCopyUpdate, settleCopyJob } from "@filen/shared"
 import { narrowItem } from "@/features/drive/lib/item"
 import {
-	applyCopyCreated,
-	applyCopyUpdate,
 	copyErrorDTO,
 	copyGlyphForEntries,
 	copyGlyphForItems,
-	copyMaxBytes,
+	copyReportInput,
+	copyUpdateInput,
 	createCopyJob,
-	isQuotaPreflightFailure,
-	retryEntries,
-	settleCopyJob
+	retryEntries
 } from "@/features/drive/lib/copy.logic"
 
 function testUuid(label: string): UuidStr {
@@ -107,58 +105,57 @@ function report(overrides: Partial<CopyReport> = {}): CopyReport {
 	}
 }
 
-describe("applyCopyUpdate", () => {
-	it("narrows the SDK's bigint state to numbers", () => {
+describe("copyUpdateInput", () => {
+	it("narrows the SDK's bigint state to numbers through the shared job", () => {
 		const job = applyCopyUpdate(
 			createCopyJob("j", DESTINATION, 2),
-			update({
-				counts: counts({ filesDone: 2n, bytesDone: 200n }),
-				active: [
-					{ sourceUuid: testUuid("s"), destUuid: testUuid("d"), destParent: testUuid("p"), name: "x", size: 50n, bytesDone: 10n }
-				],
-				bytesPerSecond: 1_000n,
-				etaMs: 5_000n
-			})
+			copyUpdateInput(
+				update({
+					counts: counts({ filesDone: 2n, bytesDone: 200n }),
+					active: [
+						{
+							sourceUuid: testUuid("s"),
+							destUuid: testUuid("d"),
+							destParent: testUuid("p"),
+							name: "x",
+							size: 50n,
+							bytesDone: 10n
+						}
+					],
+					bytesPerSecond: 1_000n,
+					etaMs: 5_000n
+				})
+			)
 		)
 
 		expect(job.totals).toEqual({ dirs: 1, files: 3, bytes: 300 })
-		expect(job.counts.filesDone).toBe(2)
 		expect(job.counts.bytesDone).toBe(200)
 		expect(job.active).toEqual([{ destUuid: testUuid("d"), name: "x", size: 50, bytesDone: 10 }])
 		expect(job.bytesPerSecond).toBe(1_000)
 		expect(job.etaMs).toBe(5_000)
 		expect(job.phase).toBe("copyingFiles")
+		expect(job.glyph).toBe("items")
 	})
 
-	it("reads an unknown speed and ETA as null", () => {
-		const job = applyCopyUpdate(createCopyJob("j", DESTINATION, 1), update())
-
-		expect(job.bytesPerSecond).toBeNull()
-		expect(job.etaMs).toBeNull()
-	})
-
-	it("appends failures across updates and counts a saved-as-version file apart from them", () => {
-		let job = applyCopyUpdate(createCopyJob("j", DESTINATION, 1), update({ events: [{ type: "fileFailed", ...failureInfo() }] }))
-
-		job = applyCopyUpdate(
-			job,
+	it("keeps failures, counting a saved-as-version file apart from them", () => {
+		const { events } = copyUpdateInput(
 			update({
 				events: [
+					{ type: "fileFailed", ...failureInfo() },
 					{ type: "dirFailed", ...failureInfo({ sourcePath: "a/dir", destName: "dir", affectedFiles: 4n }) },
 					{ type: "fileFailed", ...failureInfo({ stage: "registeredAsVersion", existingFile: testUuid("existing") }) }
 				]
 			})
 		)
 
-		expect(job.failures.map(f => f.destName)).toEqual(["b.txt", "dir"])
-		expect(job.failures[1]?.affectedFiles).toBe(4)
-		expect(job.failures[0]?.error.label).toBe("Server said no")
-		expect(job.savedAsVersionCount).toBe(1)
+		expect(events.failures.map(f => f.destName)).toEqual(["b.txt", "dir"])
+		expect(events.failures[1]?.affectedFiles).toBe(4)
+		expect(events.failures[0]?.error.label).toBe("Server said no")
+		expect(events.savedAsVersion).toBe(1)
 	})
 
 	it("counts renames and propagation failures and ignores routine events", () => {
-		const job = applyCopyUpdate(
-			createCopyJob("j", DESTINATION, 1),
+		const { events } = copyUpdateInput(
 			update({
 				events: [
 					{ type: "renamed", sourceUuid: testUuid("s"), sourcePath: "x", name: "x (1)", reason: "duplicateName" },
@@ -176,15 +173,69 @@ describe("applyCopyUpdate", () => {
 			})
 		)
 
-		expect(job.renamedCount).toBe(1)
-		expect(job.propagationFailedCount).toBe(1)
-		expect(job.failures).toEqual([])
+		expect(events).toEqual({ failures: [], savedAsVersion: 0, renamed: 1, propagationFailed: 1 })
+	})
+})
+
+describe("copyReportInput", () => {
+	it("pairs each retryable failure with its SDK form and counts saved-as-version files apart", () => {
+		const version = failure({ stage: "registeredAsVersion", existingFile: testUuid("existing") })
+		const failed = failure()
+		const input = copyReportInput(report({ failures: [failed, version] }))
+
+		expect(input.failures).toHaveLength(1)
+		expect(input.failures[0]?.retryable).toBe(failed)
+		expect(input.failures[0]?.failure.destName).toBe("b.txt")
+		expect(input.savedAsVersionCount).toBe(1)
 	})
 
-	it("keeps the failures array identity when an update brings none", () => {
-		const job = applyCopyUpdate(createCopyJob("j", DESTINATION, 1), update())
+	it("counts the created top-level items and the renames, and labels the error", () => {
+		const dir: Dir = {
+			uuid: testUuid("copied"),
+			parent: testUuid("dest"),
+			color: "default",
+			timestamp: 0n,
+			favorited: false,
+			meta: { type: "decoded", data: { name: "copied" } }
+		}
+		const input = copyReportInput(
+			report({
+				topLevel: [{ request: 0n, sourceUuid: testUuid("s"), item: { type: "dir", ...dir } }],
+				renamed: [{ sourceUuid: testUuid("s"), sourcePath: "x", name: "x (1)", reason: "duplicateName" }],
+				error: { kind: "Server", message: "boom", serverMessage: undefined, serverCode: undefined }
+			})
+		)
 
-		expect(applyCopyUpdate(job, update()).failures).toBe(job.failures)
+		expect(input.createdCount).toBe(1)
+		expect(input.renamedCount).toBe(1)
+		expect(input.error).toMatchObject({ species: "sdk", kind: "Server", label: "boom" })
+	})
+
+	it("settles through the shared job with the report's retryable failures", () => {
+		const failed = failure()
+		const job = settleCopyJob(createCopyJob("j", DESTINATION, 3), {
+			report: copyReportInput(report({ failures: [failed] })),
+			maxBytes: undefined
+		})
+
+		expect(job.outcome).toEqual({ status: "doneWithFailures" })
+		expect(job.retryable).toEqual([failed])
+		expect(job.failures.map(f => f.destName)).toEqual(["b.txt"])
+	})
+
+	it("reads a quota pre-flight refusal through the shared job", () => {
+		const job = settleCopyJob(createCopyJob("j", DESTINATION, 3), {
+			report: copyReportInput(
+				report({
+					counts: counts(),
+					totals: { dirs: 0n, files: 0n, bytes: 0n },
+					error: { kind: "MaxStorageReached", message: "needs more", serverMessage: undefined, serverCode: undefined }
+				})
+			),
+			maxBytes: 42
+		})
+
+		expect(job.outcome).toEqual({ status: "quotaExceeded", freeBytes: 42 })
 	})
 })
 
@@ -216,133 +267,6 @@ describe("copyErrorDTO", () => {
 			kind: "IO",
 			message: "disk",
 			label: "disk"
-		})
-	})
-})
-
-describe("copyMaxBytes", () => {
-	it("is the free storage as a number", () => {
-		expect(copyMaxBytes({ maxStorage: 1_000n, storageUsed: 400n })).toBe(600)
-	})
-
-	it("is undefined without a cached account or a resolvable quota", () => {
-		expect(copyMaxBytes(undefined)).toBeUndefined()
-		expect(copyMaxBytes({ maxStorage: 0n, storageUsed: 0n })).toBeUndefined()
-	})
-
-	it("floors at zero when usage exceeds the plan", () => {
-		expect(copyMaxBytes({ maxStorage: 100n, storageUsed: 500n })).toBe(0)
-	})
-})
-
-describe("isQuotaPreflightFailure", () => {
-	it("is a MaxStorageReached report that wrote nothing", () => {
-		expect(
-			isQuotaPreflightFailure(
-				report({
-					counts: counts(),
-					totals: { dirs: 0n, files: 0n, bytes: 0n },
-					error: { kind: "MaxStorageReached", message: "needs more", serverMessage: undefined, serverCode: undefined }
-				})
-			)
-		).toBe(true)
-	})
-
-	it("is not a server-side quota failure part way through", () => {
-		expect(
-			isQuotaPreflightFailure(
-				report({ error: { kind: "MaxStorageReached", message: "full", serverMessage: undefined, serverCode: undefined } })
-			)
-		).toBe(false)
-	})
-
-	it("is not another error", () => {
-		expect(
-			isQuotaPreflightFailure(
-				report({ counts: counts(), error: { kind: "Server", message: "x", serverMessage: undefined, serverCode: undefined } })
-			)
-		).toBe(false)
-	})
-})
-
-describe("settleCopyJob", () => {
-	const running = createCopyJob("j", DESTINATION, 3)
-
-	it("settles a clean report as done with the report's totals and counts", () => {
-		const job = settleCopyJob(
-			{ ...running, active: [{ destUuid: "d", name: "x", size: 1, bytesDone: 0 }], paused: true },
-			{
-				report: report(),
-				maxBytes: undefined
-			}
-		)
-
-		expect(job.outcome).toEqual({ status: "done" })
-		expect(job.totals.bytes).toBe(300)
-		expect(job.counts.filesDone).toBe(3)
-		expect(job.active).toEqual([])
-		expect(job.paused).toBe(false)
-	})
-
-	it("settles as doneWithFailures and keeps only retryable failures", () => {
-		const version = failure({ stage: "registeredAsVersion", existingFile: testUuid("existing") })
-		const failed = failure()
-		const job = settleCopyJob(running, { report: report({ failures: [failed, version] }), maxBytes: undefined })
-
-		expect(job.outcome).toEqual({ status: "doneWithFailures" })
-		expect(job.retryable).toEqual([failed])
-		expect(job.failures).toHaveLength(1)
-		expect(job.savedAsVersionCount).toBe(1)
-	})
-
-	it("is done when the only failures were saved as versions", () => {
-		const job = settleCopyJob(running, {
-			report: report({ failures: [failure({ stage: "registeredAsVersion" })] }),
-			maxBytes: undefined
-		})
-
-		expect(job.outcome).toEqual({ status: "done" })
-		expect(job.retryable).toEqual([])
-	})
-
-	it("settles a Cancelled report as cancelled", () => {
-		const job = settleCopyJob(running, {
-			report: report({ error: { kind: "Cancelled", message: "copy cancelled", serverMessage: undefined, serverCode: undefined } }),
-			maxBytes: undefined
-		})
-
-		expect(job.outcome).toEqual({ status: "cancelled" })
-	})
-
-	it("settles a quota pre-flight refusal with the free storage it was checked against", () => {
-		const job = settleCopyJob(running, {
-			report: report({
-				counts: counts(),
-				totals: { dirs: 0n, files: 0n, bytes: 0n },
-				error: { kind: "MaxStorageReached", message: "x", serverMessage: undefined, serverCode: undefined }
-			}),
-			maxBytes: 42
-		})
-
-		expect(job.outcome).toEqual({ status: "quotaExceeded", freeBytes: 42 })
-	})
-
-	it("settles any other report error as failed", () => {
-		const job = settleCopyJob(running, {
-			report: report({ error: { kind: "Server", message: "boom", serverMessage: undefined, serverCode: undefined } }),
-			maxBytes: 42
-		})
-
-		expect(job.outcome).toMatchObject({ status: "failed", error: { kind: "Server", label: "boom" } })
-	})
-
-	it("settles a rejection: Cancelled as cancelled, anything else as failed", () => {
-		expect(settleCopyJob(running, { error: { species: "sdk", kind: "Cancelled", message: "c", label: "c" } }).outcome).toEqual({
-			status: "cancelled"
-		})
-		expect(settleCopyJob(running, { error: { species: "plain", message: "no client", label: "no client" } }).outcome).toEqual({
-			status: "failed",
-			error: { species: "plain", message: "no client", label: "no client" }
 		})
 	})
 })

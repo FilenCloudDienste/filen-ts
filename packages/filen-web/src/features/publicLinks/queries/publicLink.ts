@@ -148,7 +148,8 @@ function isInCachedOwnedListing(uuid: string): boolean {
 }
 
 // Whether "Save to Cloud Drive" applies: the visitor is signed in and the link isn't their own. An owned
-// item already in a cached listing answers without a request; otherwise one owner lookup does.
+// item already in a cached listing answers without a request; otherwise one owner lookup does. A null
+// uuid never is.
 export function useLinkSaveable(kind: "file" | "directory", uuid: string | null): boolean {
 	const signedIn = usePublicVisitorSignedIn()
 	const owned = useQuery({

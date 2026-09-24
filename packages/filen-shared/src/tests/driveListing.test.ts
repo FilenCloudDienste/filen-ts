@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { keepAgainstIncoming, upsertItem, removeByUuid, applyMembershipPatch } from "@filen/shared"
+import { keepAgainstIncoming, upsertItem, upsertItems, removeByUuid, applyMembershipPatch } from "@filen/shared"
 
 describe("keepAgainstIncoming", () => {
 	it("drops the existing row when its uuid matches the incoming item", () => {
@@ -31,6 +31,39 @@ describe("keepAgainstIncoming", () => {
 function item(uuid: string, name?: string) {
 	return { data: { uuid, decryptedMeta: name !== undefined ? { name } : null } }
 }
+
+describe("upsertItems", () => {
+	function sequential<T extends ReturnType<typeof item>>(items: T[], incoming: T[]): T[] {
+		return incoming.reduce((list, next) => upsertItem(list, next), items)
+	}
+
+	it("matches upsertItem applied to each incoming item in turn", () => {
+		const items = [item("a", "a.txt"), item("b", "B.txt"), item("u1"), item("c", "c.txt")]
+		const incoming = [item("n1", " b.TXT"), item("a", "renamed.txt"), item("n2", "b.txt"), item("u2"), item("n3", "fresh.txt")]
+
+		expect(upsertItems(items, incoming)).toEqual(sequential(items, incoming))
+		expect(upsertItems(items, incoming).map(row => row.data.uuid)).toEqual(["u1", "c", "a", "n2", "u2", "n3"])
+	})
+
+	it("keeps only the last of several incoming items sharing a uuid", () => {
+		const first = item("x", "one.txt")
+		const last = item("x", "two.txt")
+
+		expect(upsertItems([], [first, last])).toEqual([last])
+	})
+
+	it("never collapses undecryptable rows into one another", () => {
+		const items = [item("u1"), item("u2")]
+
+		expect(upsertItems(items, [item("u3")]).map(row => row.data.uuid)).toEqual(["u1", "u2", "u3"])
+	})
+
+	it("returns the same listing when nothing comes in", () => {
+		const items = [item("a", "a.txt")]
+
+		expect(upsertItems(items, [])).toBe(items)
+	})
+})
 
 describe("upsertItem", () => {
 	it("replaces an existing row with the same uuid", () => {

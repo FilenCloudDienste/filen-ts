@@ -80,6 +80,18 @@ describe("useLinkSaveable", () => {
 		expect(ownsItem).not.toHaveBeenCalled()
 	})
 
+	// What a link with downloads disabled passes: nothing to save, so nothing to ask.
+	it("is off for a null uuid, without an owner lookup", async () => {
+		hasClient.mockResolvedValue(true)
+		ownsItem.mockResolvedValue(false)
+		const { result } = renderHook(() => useLinkSaveable("directory", null), { wrapper })
+
+		await settle()
+
+		expect(result.current).toBe(false)
+		expect(ownsItem).not.toHaveBeenCalled()
+	})
+
 	it("is on for a signed-in visitor who doesn't own the link", async () => {
 		hasClient.mockResolvedValue(true)
 		ownsItem.mockResolvedValue(false)

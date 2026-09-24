@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
-import { cleanup, createEvent, fireEvent, renderHook } from "@testing-library/react"
+import { act, cleanup, createEvent, fireEvent, renderHook } from "@testing-library/react"
 import type { File, UuidStr } from "@filen/sdk-rs"
 
 const { copyToClipboard, cutToClipboard, pasteClipboard } = vi.hoisted(() => ({
@@ -114,6 +114,28 @@ describe("useDriveClipboard", () => {
 		expect(result.current.enabled).toBe(true)
 		expect(press(row(), "v").defaultPrevented).toBe(true)
 		expect(pasteClipboard).toHaveBeenCalledExactlyOnceWith({ uuid: DEST, name: "dest" })
+	})
+
+	it("clears the clipboard, which it offers only while something is copied or cut", () => {
+		const { result, rerender } = renderClipboard({ variant: "trash" })
+
+		expect(result.current.clearable).toBe(false)
+
+		act(() => {
+			useDriveClipboardStore.getState().set({ mode: "cut", items: [REPORT] })
+		})
+		rerender()
+
+		// Clearable even where the paste itself isn't possible.
+		expect(result.current.enabled).toBe(false)
+		expect(result.current.clearable).toBe(true)
+
+		act(() => {
+			result.current.clear()
+		})
+
+		expect(useDriveClipboardStore.getState().entry).toBeNull()
+		expect(result.current.clearable).toBe(false)
 	})
 
 	it("leaves text copy and paste in a field to the browser", () => {

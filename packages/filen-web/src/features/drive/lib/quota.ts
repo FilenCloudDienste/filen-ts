@@ -1,10 +1,9 @@
 import { toast } from "sonner"
 import type { UserInfo } from "@filen/sdk-rs"
-import { formatBytes } from "@filen/shared"
+import { formatBytes, resolveQuotaVerdict, type QuotaCheckDeps, type QuotaVerdict } from "@filen/shared"
 import { i18n } from "@/lib/i18n"
 import { queryClient } from "@/queries/client"
 import { ACCOUNT_QUERY_KEY, accountQueryUpdate, fetchAccount } from "@/queries/account"
-import { resolveQuotaVerdict, type QuotaCheckDeps, type QuotaVerdict } from "@/features/drive/lib/quota.logic"
 
 // The fresh read goes through the query so it also refreshes every other account consumer.
 export const accountQuotaDeps: QuotaCheckDeps = {

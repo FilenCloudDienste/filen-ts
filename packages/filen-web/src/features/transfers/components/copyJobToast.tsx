@@ -1,7 +1,15 @@
 import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import { ChevronRightIcon, PauseIcon, PlayIcon, RotateCcwIcon, XIcon } from "lucide-react"
-import { cn, formatBytes, formatSecondsToMediaClock } from "@filen/shared"
+import {
+	cn,
+	copyJobPercent,
+	copyJobRate,
+	effectiveBytesDone,
+	formatBytes,
+	formatSecondsToMediaClock,
+	isCopyJobRunning
+} from "@filen/shared"
 import { retryFailedCopy } from "@/features/drive/lib/copy"
 import { pauseTransfer, resumeTransfer } from "@/features/transfers/lib/control"
 import { useCopyJobsStore } from "@/features/transfers/store/useCopyJobsStore"
@@ -10,11 +18,8 @@ import {
 	COPY_CARD_ACTIVE_SHOWN,
 	COPY_CARD_FAILURES_SHOWN,
 	copyJobNotes,
-	copyJobPercent,
-	copyJobRate,
 	copyJobStatus,
-	copyJobTitle,
-	isCopyJobRunning
+	copyJobTitle
 } from "@/features/transfers/components/copyJobToast.logic"
 import { type CopyJob } from "@/features/drive/lib/copy.logic"
 import { Button } from "@/components/ui/button"
@@ -50,7 +55,10 @@ export function CopyJobToast({ jobId, onHeightChange, onDismiss, onRetried }: Co
 		percent === null ? null : new Intl.NumberFormat(i18n.language, { style: "percent", maximumFractionDigits: 0 }).format(percent / 100)
 	const bytesLine = [
 		job.totals.bytes > 0
-			? t("transfersCopyBytesProgress", { done: formatBytes(job.counts.bytesDone), total: formatBytes(job.totals.bytes) })
+			? t("transfersCopyBytesProgress", {
+					done: formatBytes(effectiveBytesDone(job.counts, job.active)),
+					total: formatBytes(job.totals.bytes)
+				})
 			: null,
 		rate === null ? null : t("transfersAggregateSpeed", { speed: formatBytes(rate.bytesPerSecond) }),
 		rate?.etaSeconds == null ? null : t("transfersCopyEta", { eta: formatSecondsToMediaClock(rate.etaSeconds) })

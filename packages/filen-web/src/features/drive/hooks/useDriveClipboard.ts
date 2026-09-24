@@ -11,6 +11,9 @@ import { useAction } from "@/lib/keymap/useAction"
 export interface DrivePasteAction {
 	enabled: boolean
 	run: () => void
+	// Something is copied or cut, whether or not it can be pasted here.
+	clearable: boolean
+	clear: () => void
 }
 
 export interface UseDriveClipboardParams {
@@ -25,8 +28,9 @@ export interface UseDriveClipboardParams {
 	isDialogOpen: boolean
 }
 
-// The listing's mod+c/x/v and the Paste entry its menus show. Each shortcut stands down (without
-// preventDefault) whenever it has nothing to do, so the browser's own copy/paste still runs.
+// The listing's mod+c/x/v and the Paste and Clear clipboard entries its menus show. Each shortcut
+// stands down (without preventDefault) whenever it has nothing to do, so the browser's own copy/paste
+// still runs.
 export function useDriveClipboard({
 	variant,
 	uuid,
@@ -73,5 +77,12 @@ export function useDriveClipboard({
 	useAction("drive.cut", onCut, undefined, [onCut])
 	useAction("drive.paste", onPaste, undefined, [onPaste])
 
-	return { enabled: pasteEnabled, run: paste }
+	return {
+		enabled: pasteEnabled,
+		run: paste,
+		clearable: entry !== null,
+		clear: () => {
+			useDriveClipboardStore.getState().clear()
+		}
+	}
 }

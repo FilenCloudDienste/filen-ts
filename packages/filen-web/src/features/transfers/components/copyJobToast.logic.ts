@@ -1,24 +1,6 @@
-import { clampedRatio } from "@filen/shared"
 import { type CopyJob } from "@/features/drive/lib/copy.logic"
 
 // Pure reads of a copy job for its progress card, so what the card says is testable without rendering.
-
-export function isCopyJobRunning(job: CopyJob): boolean {
-	return job.outcome.status === "running"
-}
-
-// 0-100 for the bar, or null while the total is still unknown (the scan), which renders indeterminate.
-export function copyJobPercent(job: CopyJob): number | null {
-	if (job.outcome.status === "done") {
-		return 100
-	}
-
-	if (isCopyJobRunning(job) && (job.phase === "scanning" || job.totals.bytes === 0)) {
-		return null
-	}
-
-	return clampedRatio(job.counts.bytesDone, job.totals.bytes, 100)
-}
 
 export type CopyJobTitle =
 	| { key: "transfersCopyCardTitleRunning" | "transfersCopyCardTitleDone"; count: number; destination: string }
@@ -110,15 +92,6 @@ function cancelledStatus(job: CopyJob): CopyJobStatus {
 	}
 
 	return { kind: "key", key: "transfersCopyCancelledTrashed", count: job.trashResult.moved }
-}
-
-// Speed and time left only mean something while bytes are moving.
-export function copyJobRate(job: CopyJob): { bytesPerSecond: number; etaSeconds: number | null } | null {
-	if (!isCopyJobRunning(job) || job.paused || job.pausing || job.bytesPerSecond === null || job.bytesPerSecond <= 0) {
-		return null
-	}
-
-	return { bytesPerSecond: job.bytesPerSecond, etaSeconds: job.etaMs === null ? null : Math.ceil(job.etaMs / 1000) }
 }
 
 export const COPY_CARD_FAILURES_SHOWN = 20

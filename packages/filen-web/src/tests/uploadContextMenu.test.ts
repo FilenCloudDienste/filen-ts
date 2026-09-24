@@ -119,23 +119,41 @@ describe("UploadContextMenu", () => {
 		expect(event.defaultPrevented).toBe(false)
 	})
 
-	it("offers Paste in both menus, greyed out while there is nothing to paste here", () => {
+	it("offers Paste and Clear clipboard in both menus, each greyed out while it has nothing to act on", () => {
 		const run = vi.fn()
+		const clear = vi.fn()
 
-		render(createElement(UploadMenu, { parentUuid: null, openPreview: vi.fn(), paste: { enabled: false, run } }))
+		render(
+			createElement(UploadMenu, { parentUuid: null, openPreview: vi.fn(), paste: { enabled: false, run, clearable: false, clear } })
+		)
 		fireEvent.click(screen.getByRole("button", { name: "Upload" }))
 
 		const toolbarPaste = screen.getByRole("menuitem", { name: /^Paste/ })
 
-		expect(menuLabels()).toEqual(["Upload files", "Upload directory", "New text file", "Paste drive.paste", "Convert HEIC/HEIF to JPG"])
+		expect(menuLabels()).toEqual([
+			"Upload files",
+			"Upload directory",
+			"New text file",
+			"Paste drive.paste",
+			"Clear clipboard",
+			"Convert HEIC/HEIF to JPG"
+		])
 		expect(toolbarPaste.getAttribute("aria-disabled")).toBe("true")
+		expect(screen.getByRole("menuitem", { name: "Clear clipboard" }).getAttribute("aria-disabled")).toBe("true")
 
 		cleanup()
-		renderContextMenu({ paste: { enabled: true, run } })
+		renderContextMenu({ paste: { enabled: true, run, clearable: true, clear } })
 		rightClick(screen.getByTestId("blank"))
 		fireEvent.click(screen.getByRole("menuitem", { name: /^Paste/ }))
 
 		expect(run).toHaveBeenCalledOnce()
+
+		cleanup()
+		renderContextMenu({ paste: { enabled: false, run, clearable: true, clear } })
+		rightClick(screen.getByTestId("blank"))
+		fireEvent.click(screen.getByRole("menuitem", { name: "Clear clipboard" }))
+
+		expect(clear).toHaveBeenCalledOnce()
 	})
 
 	it("does nothing where the toolbar menu is disabled, so empty space behaves as before", () => {

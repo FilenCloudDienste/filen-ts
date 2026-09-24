@@ -1,5 +1,9 @@
 import type { DriveItemLike } from "./driveItem"
 
+function collisionName(name: string | undefined): string | undefined {
+	return name?.toLowerCase().trim()
+}
+
 // Collision rule for splicing an incoming item into a cached listing: an existing row is dropped
 // when it IS the incoming item (uuid match) or is a same-name duplicate the incoming item
 // supersedes (case-insensitive, trimmed) — a kept row returns true. Authored against primitives
@@ -20,8 +24,8 @@ export function keepAgainstIncoming(
 		return false
 	}
 
-	const normalizedExistingName = existingName?.toLowerCase().trim()
-	const normalizedIncomingName = incomingName?.toLowerCase().trim()
+	const normalizedExistingName = collisionName(existingName)
+	const normalizedIncomingName = collisionName(incomingName)
 
 	if (normalizedExistingName !== undefined && normalizedIncomingName !== undefined && normalizedExistingName === normalizedIncomingName) {
 		return false
@@ -39,6 +43,54 @@ export function upsertItem<T extends DriveItemLike>(items: T[], incoming: T): T[
 		),
 		incoming
 	]
+}
+
+// upsertItem over each incoming item in turn, in one pass: a row survives only if no incoming item
+// collides with it, and an incoming item only if no later one does. Unchanged when nothing comes in.
+export function upsertItems<T extends DriveItemLike>(items: T[], incoming: readonly T[]): T[] {
+	if (incoming.length === 0) {
+		return items
+	}
+
+	const incomingUuids = new Set<string>()
+	const incomingNames = new Set<string>()
+	const survivors: T[] = []
+
+	for (let i = incoming.length - 1; i >= 0; i--) {
+		const item = incoming[i]
+
+		if (item === undefined) {
+			continue
+		}
+
+		const name = collisionName(item.data.decryptedMeta?.name)
+
+		if (!incomingUuids.has(item.data.uuid) && (name === undefined || !incomingNames.has(name))) {
+			survivors.push(item)
+		}
+
+		incomingUuids.add(item.data.uuid)
+
+		if (name !== undefined) {
+			incomingNames.add(name)
+		}
+	}
+
+	const result = items.filter(existing => {
+		const name = collisionName(existing.data.decryptedMeta?.name)
+
+		return !incomingUuids.has(existing.data.uuid) && (name === undefined || !incomingNames.has(name))
+	})
+
+	for (let i = survivors.length - 1; i >= 0; i--) {
+		const item = survivors[i]
+
+		if (item !== undefined) {
+			result.push(item)
+		}
+	}
+
+	return result
 }
 
 // Drop a row by uuid.

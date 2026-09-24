@@ -373,6 +373,8 @@ export const drive = {
 	driveClipboardCut: "Cut",
 	/** Upload menu and the listing's empty-space menu — copies or moves the copied/cut item(s) into the directory on screen */
 	driveClipboardPaste: "Paste",
+	/** Upload menu and the listing's empty-space menu, under Paste — forgets the copied/cut item(s) without pasting them; disabled when nothing is copied or cut */
+	driveClipboardClear: "Clear clipboard",
 	/** Toast after Copy (driveClipboardCopy or its shortcut) */
 	driveClipboardCopiedToast_one: "{{count}} item ready to paste",
 	/** Toast after Copy (driveClipboardCopy or its shortcut) */

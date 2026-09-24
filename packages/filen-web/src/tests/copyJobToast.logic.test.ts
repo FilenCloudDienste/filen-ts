@@ -1,35 +1,12 @@
 import { describe, expect, it } from "vitest"
 import { createCopyJob, type CopyJob } from "@/features/drive/lib/copy.logic"
-import {
-	copyJobNotes,
-	copyJobPercent,
-	copyJobRate,
-	copyJobStatus,
-	copyJobTitle,
-	isCopyJobRunning
-} from "@/features/transfers/components/copyJobToast.logic"
+import { copyJobNotes, copyJobStatus, copyJobTitle } from "@/features/transfers/components/copyJobToast.logic"
 
 function job(overrides: Partial<CopyJob> = {}): CopyJob {
 	return { ...createCopyJob("j", { uuid: null, name: "Photos" }, 3), ...overrides }
 }
 
 const COPYING: Partial<CopyJob> = { phase: "copyingFiles", totals: { dirs: 0, files: 40, bytes: 1_000 } }
-
-describe("copyJobPercent", () => {
-	it("is indeterminate while the scan still grows the total", () => {
-		expect(copyJobPercent(job())).toBeNull()
-		expect(copyJobPercent(job({ phase: "copyingFiles" }))).toBeNull()
-	})
-
-	it("is the share of bytes copied once the total is known", () => {
-		expect(copyJobPercent(job({ ...COPYING, counts: { ...job().counts, bytesDone: 250 } }))).toBe(25)
-	})
-
-	it("is full once done, and frozen where a stopped copy left off", () => {
-		expect(copyJobPercent(job({ outcome: { status: "done" } }))).toBe(100)
-		expect(copyJobPercent(job({ ...COPYING, counts: { ...job().counts, bytesDone: 500 }, outcome: { status: "cancelled" } }))).toBe(50)
-	})
-})
 
 describe("copyJobTitle", () => {
 	it("counts the items while copying and once copied, and names only the destination otherwise", () => {
@@ -109,16 +86,6 @@ describe("copyJobStatus", () => {
 	})
 })
 
-describe("copyJobRate", () => {
-	it("gives speed and seconds left only while bytes move", () => {
-		expect(copyJobRate(job({ ...COPYING, bytesPerSecond: 2_000, etaMs: 1_500 }))).toEqual({ bytesPerSecond: 2_000, etaSeconds: 2 })
-		expect(copyJobRate(job({ ...COPYING, bytesPerSecond: 2_000, etaMs: null }))).toEqual({ bytesPerSecond: 2_000, etaSeconds: null })
-		expect(copyJobRate(job({ ...COPYING, bytesPerSecond: null }))).toBeNull()
-		expect(copyJobRate(job({ ...COPYING, bytesPerSecond: 2_000, paused: true }))).toBeNull()
-		expect(copyJobRate(job({ bytesPerSecond: 2_000, outcome: { status: "done" } }))).toBeNull()
-	})
-})
-
 describe("copyJobNotes", () => {
 	it("lists only the notes with something to say", () => {
 		expect(copyJobNotes(job())).toEqual([])
@@ -127,12 +94,5 @@ describe("copyJobNotes", () => {
 			{ key: "transfersCopySkippedNote", count: 3 },
 			{ key: "transfersCopySavedAsVersionNote", count: 1 }
 		])
-	})
-})
-
-describe("isCopyJobRunning", () => {
-	it("is true only until the job settles", () => {
-		expect(isCopyJobRunning(job())).toBe(true)
-		expect(isCopyJobRunning(job({ outcome: { status: "cancelled" } }))).toBe(false)
 	})
 })

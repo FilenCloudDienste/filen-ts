@@ -80,8 +80,7 @@ export function hideCopyToast(jobId: string): void {
 	}
 }
 
-// Every copy the user starts shows its card; the card is shown before the job can settle, so a quick
-// copy ends on its card rather than on a toast.
+// Every copy the user starts shows its card, before the job can settle, so even a quick copy ends on it.
 export function startCopyWithCard(items: DriveItem[], destination: CopyDestination): string | null {
 	const id = startCopy(items, destination)
 

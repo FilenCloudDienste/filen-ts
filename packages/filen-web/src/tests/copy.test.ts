@@ -163,7 +163,6 @@ function makeDeps() {
 			cached: vi.fn<RunCopyDeps["account"]["cached"]>(() => undefined),
 			fetchFresh: vi.fn<RunCopyDeps["account"]["fetchFresh"]>()
 		},
-		seedThumbnail: vi.fn<RunCopyDeps["seedThumbnail"]>(),
 		patchCreated: vi.fn<RunCopyDeps["patchCreated"]>(),
 		trash: vi.fn<RunCopyDeps["trash"]>(() => Promise.resolve({ succeeded: [], failed: [] })),
 		settled: vi.fn<RunCopyDeps["settled"]>()
@@ -251,9 +250,31 @@ describe("runCopyJob", () => {
 
 		expect(deps.patchCreated).toHaveBeenCalledTimes(1)
 		expect(deps.patchCreated.mock.calls[0]?.[0].data.uuid).toBe(dir.uuid)
-		expect(deps.seedThumbnail).toHaveBeenCalledWith(testUuid("source"), deps.patchCreated.mock.calls[0]?.[0])
-		expect(deps.seedThumbnail.mock.invocationCallOrder[0]).toBeLessThan(deps.patchCreated.mock.invocationCallOrder[0] ?? 0)
 		expect(job?.created.map(item => item.data.uuid)).toEqual([dir.uuid])
+	})
+
+	it("counts the files in flight in the row's progress", async () => {
+		const deps = makeDeps()
+
+		deps.copyItems.mockImplementation((_id, _items, _dest, _max, onEvent) => {
+			onEvent({
+				type: "update",
+				update: update({
+					counts: counts({ bytesDone: 50n }),
+					active: [
+						{ sourceUuid: testUuid("s"), destUuid: testUuid("d"), destParent: ROOT, name: "b.txt", size: 100n, bytesDone: 30n }
+					]
+				})
+			})
+
+			expect(row()).toMatchObject({ size: 200, bytesTransferred: 80 })
+
+			return Promise.resolve(report())
+		})
+
+		await runCopyJob(deps, request())
+
+		expect(row()).toMatchObject({ status: "done", bytesTransferred: 200 })
 	})
 
 	it("settles a clean copy as done and hands the settled job to the announcer", async () => {
@@ -265,7 +286,7 @@ describe("runCopyJob", () => {
 
 		expect(job?.outcome).toEqual({ status: "done" })
 		expect(row()).toMatchObject({ status: "done", size: 200, bytesTransferred: 200 })
-		expect(deps.settled).toHaveBeenCalledWith(job, null)
+		expect(deps.settled).toHaveBeenCalledWith(job)
 		expect(deps.trash).not.toHaveBeenCalled()
 	})
 
@@ -535,31 +556,24 @@ describe("startCopy and retryFailedCopy", () => {
 		expect(queryClient.getQueryData<DriveItem[]>(rootKey)?.map(item => item.data.uuid)).toEqual([dir.uuid])
 		expect(queryClient.getQueryData(unreadKey)).toBeUndefined()
 		expect(copyItems.mock.calls[0]?.[3]).toBe(10_000)
-		// Nobody showed a card for this job, so its end is announced with a toast.
-		expect(toastSuccess).toHaveBeenCalledTimes(1)
 	})
 
-	it("leaves the end to the card while one shows", async () => {
-		let release!: () => void
-		const running = new Promise<void>(resolve => {
-			release = resolve
-		})
+	// The card, or the transfers row, is how a copy's end shows.
+	it("announces no ending with a toast, whether the copy finished or failed", async () => {
+		copyItems
+			.mockResolvedValueOnce(report())
+			.mockResolvedValueOnce(report({ error: { kind: "Server", message: "boom", ...NO_SERVER } }))
 
-		copyItems.mockImplementation(async () => {
-			await running
+		for (const expected of ["done", "failed"]) {
+			const id = startCopy([narrowItem(mockFile("a"))], DESTINATION) ?? ""
 
-			return report()
-		})
-
-		const id = startCopy([narrowItem(mockFile("a"))], DESTINATION) ?? ""
-
-		useCopyJobsStore.getState().update(id, job => ({ ...job, cardVisible: true }))
-		release()
-		await vi.waitFor(() => {
-			expect(getCopyJob(id)?.outcome.status).toBe("done")
-		})
+			await vi.waitFor(() => {
+				expect(getCopyJob(id)?.outcome.status).toBe(expected)
+			})
+		}
 
 		expect(toastSuccess).not.toHaveBeenCalled()
+		expect(toastError).not.toHaveBeenCalled()
 	})
 
 	it("retries a job's failures as a new job into their own directories", async () => {

@@ -1,5 +1,5 @@
 import { toast } from "sonner"
-import { dirnameOf, pathSegmentDepth } from "@filen/shared"
+import { dirnameOf, pathSegmentDepth, sumBytes } from "@filen/shared"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { i18n } from "@/lib/i18n"
@@ -14,7 +14,6 @@ import {
 } from "@/features/drive/lib/heicUpload"
 import { driveListingQueryUpdate } from "@/features/drive/queries/drive"
 import { checkUploadQuota, quotaExceededMessage } from "@/features/drive/lib/quota"
-import { sumBytes } from "@/features/drive/lib/quota.logic"
 
 // Directory upload: pick/drop a whole directory and recreate its sub-directory tree in the current
 // listing, uploading every file into its recreated parent. The wasm SDK has no recursive-upload

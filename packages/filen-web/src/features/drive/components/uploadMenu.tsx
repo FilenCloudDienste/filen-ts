@@ -50,7 +50,7 @@ export interface UploadMenuProps {
 	offline?: boolean
 	// True when this listing would actually hide a dot-prefixed name — see NewDirectory's identical prop.
 	hiddenNotice?: boolean
-	// Pastes the drive clipboard into the directory this menu writes into (useDriveClipboard).
+	// Pastes the drive clipboard into the directory this menu writes into, or clears it (useDriveClipboard).
 	paste?: DrivePasteAction | undefined
 }
 
@@ -252,6 +252,12 @@ function UploadMenuEntries({
 						<span className="ml-auto pl-4">
 							<Kbd action="drive.paste" />
 						</span>
+					</Item>
+					<Item
+						disabled={!paste.clearable}
+						onClick={paste.clear}
+					>
+						{t("driveClipboardClear")}
 					</Item>
 					<Separator />
 				</>

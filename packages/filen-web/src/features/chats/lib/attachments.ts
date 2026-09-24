@@ -1,5 +1,6 @@
 import * as Comlink from "comlink"
 import type { File as SdkFile } from "@filen/sdk-rs"
+import { sumBytes } from "@filen/shared"
 import { sdkApi } from "@/lib/sdk/client"
 import { runOp } from "@/lib/actions/outcome"
 import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
@@ -12,7 +13,6 @@ import { throttle, PROGRESS_THROTTLE_MS } from "@/features/drive/lib/upload"
 import { noop } from "@/lib/utils"
 import { markAccountStale } from "@/queries/account"
 import { addAccountStorageUsed, ensureUploadQuota } from "@/features/drive/lib/quota"
-import { sumBytes } from "@/features/drive/lib/quota.logic"
 
 // Composer attachment flow: no first-class attachment message type
 // on either mobile or old-web — attachments are Filen public links pasted into the message body. A
