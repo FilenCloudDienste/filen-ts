@@ -50,7 +50,7 @@ export const transfers = {
 	background_transfers: "Background transfers",
 	/** Advanced settings (Android only) — subtitle under the background-transfers toggle, explaining the persistent notification trade-off */
 	background_transfers_description:
-		"Keep uploads and downloads running while the app is in the background. Shows a persistent notification while transfers are active.",
+		"Keep uploads, downloads and copies running while the app is in the background. Shows a persistent notification while transfers are active.",
 	/** Advanced settings (Android only) — warning subtitle shown when the toggle is on but the OS notification permission was revoked, so background transfers can't run */
 	background_transfers_notifications_disabled: "Notifications are off, so background transfers won't run. Tap to open settings.",
 	/** Advanced settings (Android only) — alert message when notification permission is denied and the user tries to enable background transfers */
@@ -79,6 +79,7 @@ export const transfers = {
 	copy_preparing: "Preparing…",
 	/** Copy row status while files are copied. {{done}} and {{total}} are file counts, {{percent}} the overall progress */
 	copy_progress_files: "{{done}} of {{total}} files · {{percent}}%",
+	copy_progress_files_speed: "{{done}} of {{total}} files · {{percent}}% · {{speed}}",
 	/** Copy row status while the copy is paused */
 	copy_paused: "Paused",
 	/** Copy row status while the copy wraps up after the last file */

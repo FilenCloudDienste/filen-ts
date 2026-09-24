@@ -1,5 +1,5 @@
 import { type TFunction } from "i18next"
-import { copyJobPercent } from "@filen/shared"
+import { bpsToReadable, copyJobPercent, copyJobRate } from "@filen/shared"
 import type { CopyJob } from "@/features/copy/copyAdapter"
 import { getCopyJob } from "@/features/copy/store/useCopyJobs.store"
 import type { FinishedTransfer, Transfer } from "@/features/transfers/store/useTransfers.store"
@@ -48,11 +48,24 @@ export function copyRowStatus(job: CopyJob | undefined, rowPaused: boolean, t: T
 		return t("copy_preparing")
 	}
 
-	return t("copy_progress_files", {
-		done: job.counts.filesDone.toString(),
-		total: job.totals.files.toString(),
-		percent: Math.floor(percent).toString()
-	})
+	const done = job.counts.filesDone.toString()
+	const total = job.totals.files.toString()
+	const percentText = Math.floor(percent).toString()
+	// The rate reads like an upload row's, shown once the SDK has one.
+	const rate = copyJobRate(job)
+
+	return rate
+		? t("copy_progress_files_speed", {
+				done,
+				total,
+				percent: percentText,
+				speed: bpsToReadable(rate.bytesPerSecond)
+			})
+		: t("copy_progress_files", {
+				done,
+				total,
+				percent: percentText
+			})
 }
 
 // A finished copy's notes line, zero counts left out; null when there is nothing to note.

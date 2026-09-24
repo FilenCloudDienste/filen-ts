@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest"
-import { createCopyJob as createSharedCopyJob } from "@filen/shared"
+import { bpsToReadable, createCopyJob as createSharedCopyJob } from "@filen/shared"
 import type { TFunction } from "i18next"
 import { copyingItemCount, copyNotesText, copyRowStatus } from "@/features/copy/copyRowText"
 import useCopyJobsStore from "@/features/copy/store/useCopyJobs.store"
@@ -39,6 +39,23 @@ describe("copyRowStatus", () => {
 		})
 
 		expect(copyRowStatus(copying, false, t)).toBe('copy_progress_files:{"done":"340","total":"812","percent":"43"}')
+	})
+
+	it("adds the rate, formatted like an upload row's, once the SDK reports one", () => {
+		const copying = job({
+			phase: "copyingFiles",
+			totals: { dirs: 0, files: 812, bytes: 1000 },
+			counts: { ...job().counts, filesDone: 340, bytesDone: 437 },
+			bytesPerSecond: 2_202_010
+		})
+
+		expect(copyRowStatus(copying, false, t)).toBe(
+			`copy_progress_files_speed:{"done":"340","total":"812","percent":"43","speed":"${bpsToReadable(2_202_010)}"}`
+		)
+		// No rate yet, or a zero rate: the line without it.
+		expect(copyRowStatus({ ...copying, bytesPerSecond: 0 }, false, t)).toBe(
+			'copy_progress_files:{"done":"340","total":"812","percent":"43"}'
+		)
 	})
 
 	it("stopping outranks paused, paused outranks finishing", () => {
