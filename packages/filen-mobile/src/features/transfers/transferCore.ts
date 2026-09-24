@@ -36,6 +36,7 @@ import {
 	driveItemsQueryUpdateForPhotos,
 	driveItemsQueryUpdateForRecents
 } from "@/features/drive/queries/useDriveItems.query"
+import { markDirectorySizesStale } from "@/features/drive/queries/useDirectorySize.query"
 import type { DriveItem } from "@/types"
 import cache from "@/lib/cache"
 import fileCache from "@/lib/fileCache"
@@ -596,6 +597,10 @@ export async function uploadCore(
 
 							// TODO: Add thumbnail generation for uploaded files here once sdk exposes different type with path
 						}
+
+						if (uploadedDirs.length > 0 || uploadedFiles.length > 0) {
+							markDirectorySizesStale()
+						}
 					}
 				},
 				parentDir,
@@ -831,6 +836,8 @@ export async function uploadCore(
 	}
 
 	const unwrappedFileMeta = unwrapFileMeta(result.data)
+
+	markDirectorySizesStale()
 
 	if (!unwrappedFileMeta.shared) {
 		const driveItem = {

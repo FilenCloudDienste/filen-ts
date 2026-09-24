@@ -11,9 +11,19 @@ import { unwrapParentUuid, unwrapFileMeta, unwrappedFileIntoDriveItem, unwrapDir
 import { upsertItem } from "@filen/shared"
 import cache from "@/lib/cache"
 import useDriveStore from "@/features/drive/store/useDrive.store"
+import { markDirectorySizesStale } from "@/features/drive/queries/useDirectorySize.query"
 import logger from "@/lib/logger"
 
 export type DriveSocketEvent = Extract<SocketEvent, { tag: typeof SocketEvent_Tags.Drive }>
+
+// Renames, colours and favourites leave every directory's size and counts untouched (a content change
+// arrives as a new file uuid, not a metadata change).
+const SIZE_NEUTRAL_TAGS = new Set<DriveEvent_Tags>([
+	DriveEvent_Tags.FileMetadataChanged,
+	DriveEvent_Tags.FolderMetadataChanged,
+	DriveEvent_Tags.FolderColorChanged,
+	DriveEvent_Tags.ItemFavorite
+])
 
 export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): Promise<void> {
 	const [eventInner] = event.inner
@@ -21,6 +31,10 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 	// narrows to `never` in the default branch, which is kept only as runtime defense against a
 	// future SDK tag the pinned bindings don't yet know about.
 	const eventTag = eventInner.inner.tag
+
+	if (!SIZE_NEUTRAL_TAGS.has(eventTag)) {
+		markDirectorySizesStale()
+	}
 
 	switch (eventInner.inner.tag) {
 		case DriveEvent_Tags.FileArchiveRestored:

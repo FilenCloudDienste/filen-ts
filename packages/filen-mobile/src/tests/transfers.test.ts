@@ -163,6 +163,12 @@ const {
 
 vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 
+const { mockMarkDirectorySizesStale } = vi.hoisted(() => ({ mockMarkDirectorySizesStale: vi.fn() }))
+
+vi.mock("@/features/drive/queries/useDirectorySize.query", () => ({
+	markDirectorySizesStale: mockMarkDirectorySizesStale
+}))
+
 vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
 
 vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))

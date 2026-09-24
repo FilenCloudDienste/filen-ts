@@ -52,6 +52,12 @@ const {
 
 vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 
+const { mockMarkDirectorySizesStale } = vi.hoisted(() => ({ mockMarkDirectorySizesStale: vi.fn() }))
+
+vi.mock("@/features/drive/queries/useDirectorySize.query", () => ({
+	markDirectorySizesStale: mockMarkDirectorySizesStale
+}))
+
 // driveTrash now imports driveSelectors → serializer → logger, which pulls in expo-file-system
 // (crashes under vitest with "__DEV__ is not defined"). Mock the logger to break that chain.
 vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
@@ -321,5 +327,30 @@ describe("restore — search self-heal events", () => {
 		expect(updated).toHaveLength(1)
 		expect(updated[0]?.previousUuid).toBe("trash-file-1")
 		expect(updated[0]?.item.data.uuid).toBe("file-1")
+	})
+})
+
+// ---------------------------------------------------------------------------
+// Directory sizes — every size-changing write marks them stale, only once it succeeded
+// ---------------------------------------------------------------------------
+
+describe("directory sizes", () => {
+	it("marks sizes stale after a permanent delete, a restore and a version restore", async () => {
+		await deletePermanently({ item: trashFileItem })
+		expect(mockMarkDirectorySizesStale).toHaveBeenCalledTimes(1)
+
+		await restore({ item: trashFileItem })
+		expect(mockMarkDirectorySizesStale).toHaveBeenCalledTimes(2)
+
+		await restoreFileVersion({ item: fileItem, version: makeVersion("ver-old") })
+		expect(mockMarkDirectorySizesStale).toHaveBeenCalledTimes(3)
+	})
+
+	it("leaves sizes alone when the SDK call fails", async () => {
+		mockDeleteFilePermanently.mockRejectedValueOnce(new Error("boom"))
+
+		await expect(deletePermanently({ item: trashFileItem })).rejects.toThrow("boom")
+
+		expect(mockMarkDirectorySizesStale).not.toHaveBeenCalled()
 	})
 })

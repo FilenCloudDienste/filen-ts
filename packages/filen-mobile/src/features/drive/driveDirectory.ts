@@ -3,6 +3,7 @@ import { AnyNormalDir } from "@filen/sdk-rs"
 import type { DriveItem } from "@/types"
 import { unwrapDirMeta, unwrapFileMeta, unwrapParentUuid, unwrappedDirIntoDriveItem, unwrappedFileIntoDriveItem } from "@/lib/sdkUnwrap"
 import { driveItemsQueryUpdateForNormalParent } from "@/features/drive/queries/useDriveItems.query"
+import { markDirectorySizesStale } from "@/features/drive/queries/useDirectorySize.query"
 import { upsertItem } from "@filen/shared"
 import cache from "@/lib/cache"
 import events from "@/lib/events"
@@ -58,6 +59,7 @@ export async function createDirectory({
 	}
 
 	cache.cacheNewNormalDir(createdDir, createdDriveItem)
+	markDirectorySizesStale()
 
 	driveItemsQueryUpdateForNormalParent({
 		parentUuid: parentDir.inner[0].uuid,
@@ -149,6 +151,8 @@ export async function move({
 	} else if (item.type === "directory" && !("region" in modifiedItem)) {
 		cache.cacheNewNormalDir(modifiedItem, item)
 	}
+
+	markDirectorySizesStale()
 
 	if (unwrappedParentUuidPrevious) {
 		driveItemsQueryUpdateForNormalParent({

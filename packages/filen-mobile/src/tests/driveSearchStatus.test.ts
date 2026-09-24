@@ -3,6 +3,7 @@ import {
 	deriveStatus,
 	isOnlineComplete,
 	shouldShowSearchTruncationNotice,
+	shouldRefetchListingAfterSearch,
 	type DriveSearchStatus
 } from "@/features/drive/hooks/driveSearchStatus"
 
@@ -146,5 +147,23 @@ describe("shouldShowSearchTruncationNotice", () => {
 		for (const status of ["searching-empty", "offline-incomplete"] as const) {
 			expect(shouldShowSearchTruncationNotice(args({ status, totalCount: 0, loadedCount: 0 }))).toBe(false)
 		}
+	})
+})
+
+describe("shouldRefetchListingAfterSearch", () => {
+	it("skips a settled listing — it stayed mounted and socket-patched during the search", () => {
+		expect(shouldRefetchListingAfterSearch("success", "idle")).toBe(false)
+		expect(shouldRefetchListingAfterSearch("success", "fetching")).toBe(false)
+	})
+
+	it("refetches an errored or never-started listing", () => {
+		expect(shouldRefetchListingAfterSearch("error", "idle")).toBe(true)
+		expect(shouldRefetchListingAfterSearch("pending", "idle")).toBe(true)
+	})
+
+	it("leaves an in-flight or paused fetch alone", () => {
+		expect(shouldRefetchListingAfterSearch("pending", "fetching")).toBe(false)
+		expect(shouldRefetchListingAfterSearch("pending", "paused")).toBe(false)
+		expect(shouldRefetchListingAfterSearch("error", "fetching")).toBe(false)
 	})
 })

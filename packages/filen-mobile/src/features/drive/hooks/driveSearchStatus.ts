@@ -93,3 +93,13 @@ export function isSearchWindowTruncated(totalCount: number, loadedCount: number)
 export function shouldShowSearchTruncationNotice(input: { status: DriveSearchStatus; totalCount: number; loadedCount: number }): boolean {
 	return (input.status === "settled" || input.status === "background") && isSearchWindowTruncated(input.totalCount, input.loadedCount)
 }
+
+// Clearing a cache search hands the list back to the directory listing, which stayed mounted (and
+// socket-patched) throughout. Only a listing that errored or never settled needs a refetch, and only
+// when nothing is in flight: a running fetch lands on its own and a paused one resumes on reconnect.
+export function shouldRefetchListingAfterSearch(
+	status: "pending" | "error" | "success",
+	fetchStatus: "fetching" | "paused" | "idle"
+): boolean {
+	return status !== "success" && fetchStatus === "idle"
+}

@@ -1,6 +1,12 @@
 import { vi, describe, it, expect, beforeEach, afterEach } from "vitest"
 vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 
+const { mockMarkDirectorySizesStale } = vi.hoisted(() => ({ mockMarkDirectorySizesStale: vi.fn() }))
+
+vi.mock("@/features/drive/queries/useDirectorySize.query", () => ({
+	markDirectorySizesStale: mockMarkDirectorySizesStale
+}))
+
 // ──────────────────────────────────────────────
 // Mock player factory
 // ──────────────────────────────────────────────

@@ -1,5 +1,6 @@
 import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
-import { DEFAULT_QUERY_OPTIONS } from "@/queries/client"
+import { DEFAULT_QUERY_OPTIONS, queryClient } from "@/queries/client"
+import useSocketStore from "@/stores/useSocket.store"
 import auth from "@/lib/auth"
 import { sortParams } from "@filen/shared"
 import cache from "@/lib/cache"
@@ -210,6 +211,21 @@ export function directorySizeQueryOptions(params: UseDirectorySizeQueryParams): 
 	}
 }
 
+// Types whose size only changes through the user's own drive, i.e. through socket events and local
+// writes that call markDirectorySizesStale. Changes inside a shared-in or public-link directory reach
+// no socket, and offline sizes are a free local read, so those keep refetching on every mount.
+const SOCKET_COVERED_TYPES = new Set<UseDirectorySizeQueryParams["type"]>(["normal", "trash", "sharedOut"])
+
+// Nothing observes a size change directly; every size-changing drive event and local write marks all
+// sizes stale instead (ancestors all the way up change, and the tree isn't known here). No refetch:
+// mounted rows keep today's behaviour, the next mount refetches.
+export function markDirectorySizesStale(): void {
+	void queryClient.invalidateQueries({
+		queryKey: [BASE_QUERY_KEY],
+		refetchType: "none"
+	})
+}
+
 export function useDirectorySizeQuery(
 	params: UseDirectorySizeQueryParams,
 	options?: Omit<UseQueryOptions, "queryKey" | "queryFn">
@@ -217,7 +233,16 @@ export function useDirectorySizeQuery(
 	const query = useQuery({
 		...DEFAULT_QUERY_OPTIONS,
 		...options,
-		...directorySizeQueryOptions(params)
+		...directorySizeQueryOptions(params),
+		// Let the staleTime decide only while the socket has been up since the value was fetched:
+		// before that (a persisted row, or events missed while disconnected) nothing marked it stale.
+		refetchOnMount: q => {
+			const socket = useSocketStore.getState()
+
+			return SOCKET_COVERED_TYPES.has(params.type) && socket.state === "connected" && q.state.dataUpdatedAt >= socket.connectedAt
+				? true
+				: "always"
+		}
 	})
 
 	return query as UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error>

@@ -1,6 +1,12 @@
 import { vi, describe, it, expect, beforeEach } from "vitest"
 vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 
+const { mockMarkDirectorySizesStale } = vi.hoisted(() => ({ mockMarkDirectorySizesStale: vi.fn() }))
+
+vi.mock("@/features/drive/queries/useDirectorySize.query", () => ({
+	markDirectorySizesStale: mockMarkDirectorySizesStale
+}))
+
 // ---------------------------------------------------------------------------
 // Hoisted state
 // ---------------------------------------------------------------------------
@@ -1344,6 +1350,42 @@ describe("handleDriveEvent — drive socket handler", () => {
 			expect(mockDriveItemsQueryUpdateGlobal).not.toHaveBeenCalled()
 			expect(mockDriveItemsQueryUpdate).not.toHaveBeenCalled()
 			expect(mockDriveItemsQueryUpdateForNormalParent).not.toHaveBeenCalled()
+		})
+	})
+
+	describe("directory sizes", () => {
+		beforeEach(() => {
+			mockMarkDirectorySizesStale.mockClear()
+		})
+
+		it.each([
+			DriveEvent_Tags.FileNew,
+			DriveEvent_Tags.FileRestore,
+			DriveEvent_Tags.FileArchived,
+			DriveEvent_Tags.FileDeletedPermanent,
+			DriveEvent_Tags.FolderDeletedPermanent,
+			DriveEvent_Tags.FileTrash,
+			DriveEvent_Tags.FolderTrash,
+			DriveEvent_Tags.FolderSubCreated,
+			DriveEvent_Tags.TrashEmpty,
+			DriveEvent_Tags.DeleteAll
+		])("%s marks every directory size stale exactly once", async tag => {
+			await handleDriveEvent({ event: makeEvent(tag, { uuid: "x", file: { uuid: "x" }, dir: { uuid: "x" } }) }).catch(() => undefined)
+
+			expect(mockMarkDirectorySizesStale).toHaveBeenCalledTimes(1)
+		})
+
+		it.each([
+			DriveEvent_Tags.FileMetadataChanged,
+			DriveEvent_Tags.FolderMetadataChanged,
+			DriveEvent_Tags.FolderColorChanged,
+			DriveEvent_Tags.ItemFavorite
+		])("%s leaves directory sizes alone", async tag => {
+			await handleDriveEvent({ event: makeEvent(tag, { uuid: "x", item: { tag: "File", inner: [{ uuid: "x" }] } }) }).catch(
+				() => undefined
+			)
+
+			expect(mockMarkDirectorySizesStale).not.toHaveBeenCalled()
 		})
 	})
 

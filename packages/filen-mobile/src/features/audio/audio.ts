@@ -23,6 +23,7 @@ import { AnyNormalDir, DirMeta_Tags, AnyFile, FileMeta_Tags, FileMeta, ParentUui
 import { Buffer } from "react-native-quick-crypto"
 import { wrapAbortSignalForSdk, disposeSdkAbortSignal } from "@/lib/signals"
 import { playlistsQueryUpdate, playlistsQueryGet } from "@/features/audio/queries/usePlaylists.query"
+import { markDirectorySizesStale } from "@/features/drive/queries/useDirectorySize.query"
 import secureStore, { useSecureStore } from "@/lib/secureStore"
 import { convertBigInts } from "@/lib/utils"
 import logger from "@/lib/logger"
@@ -1450,6 +1451,8 @@ export class Audio {
 			disposeSdkAbortSignal(wrappedAbortSignal)
 		}
 
+		markDirectorySizesStale()
+
 		const now = Date.now()
 		const playlistWithItems = {
 			...playlist,
@@ -1682,6 +1685,8 @@ export class Audio {
 						}
 					: undefined
 			)
+
+			markDirectorySizesStale()
 		}
 
 		playlistsQueryUpdate({

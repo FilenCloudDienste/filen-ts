@@ -7,6 +7,7 @@ import prompts from "@/lib/prompts"
 import alerts from "@/lib/alerts"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import auth from "@/lib/auth"
+import { markDirectorySizesStale } from "@/features/drive/queries/useDirectorySize.query"
 import { router } from "@/lib/router"
 import { serialize } from "@/lib/serializer"
 import { shareTmpFile } from "@/lib/share"
@@ -91,6 +92,7 @@ export function buildDangerZoneButtons({
 					const { authedSdkClient } = await auth.getSdkClients()
 
 					await authedSdkClient.deleteAllVersions()
+					markDirectorySizesStale()
 					await accountQuery.refetch()
 				})
 
@@ -160,6 +162,7 @@ export function buildDangerZoneButtons({
 					const { authedSdkClient } = await auth.getSdkClients()
 
 					await authedSdkClient.deleteAllItems()
+					markDirectorySizesStale()
 					await accountQuery.refetch()
 				})
 

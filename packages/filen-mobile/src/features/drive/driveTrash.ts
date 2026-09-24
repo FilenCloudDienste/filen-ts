@@ -9,6 +9,7 @@ import {
 	driveItemsQueryGet
 } from "@/features/drive/queries/useDriveItems.query"
 import { driveItemVersionsQueryUpdate } from "@/features/drive/queries/useDriveItemVersions.query"
+import { markDirectorySizesStale } from "@/features/drive/queries/useDirectorySize.query"
 import { upsertItem } from "@filen/shared"
 import useFileVersionsStore from "@/features/drive/store/useFileVersions.store"
 import cache from "@/lib/cache"
@@ -43,6 +44,7 @@ export async function deletePermanently({ item, signal }: { item: DriveItem; sig
 	}
 
 	cache.forgetItem(item.data.uuid)
+	markDirectorySizesStale()
 
 	// Always remove from the trash listing — trash items carry `parent = Trash`
 	// sentinel, so unwrappedParentUuidPrevious is always null for them and the
@@ -113,6 +115,8 @@ export async function trash({ item, signal }: { item: DriveItem; signal?: AbortS
 	} else if (item.type === "directory" && !("region" in modifiedItem)) {
 		cache.cacheNewNormalDir(modifiedItem, item)
 	}
+
+	markDirectorySizesStale()
 
 	if (unwrappedParentUuidPrevious) {
 		driveItemsQueryUpdateGlobal({
@@ -189,6 +193,8 @@ export async function restore({ item, signal }: { item: DriveItem; signal?: Abor
 		cache.cacheNewNormalDir(modifiedItem, item)
 	}
 
+	markDirectorySizesStale()
+
 	const unwrappedParentUuid = unwrapParentUuid(item.data.parent)
 
 	if (unwrappedParentUuid) {
@@ -250,6 +256,8 @@ export async function emptyTrash({ signal }: { signal?: AbortSignal }) {
 		}
 	}
 
+	markDirectorySizesStale()
+
 	driveItemsQueryUpdate({
 		params: {
 			path: {
@@ -289,6 +297,7 @@ export async function restoreFileVersion({ item, version, signal }: { item: Driv
 
 	// Sync persistent caches — file size / chunks changed after version restore.
 	cache.cacheNewFile(modifiedFile, item)
+	markDirectorySizesStale()
 
 	const unwrappedParentUuid = unwrapParentUuid(item.data.parent)
 

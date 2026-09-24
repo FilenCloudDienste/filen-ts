@@ -25,7 +25,7 @@ import { useFocusEffect } from "expo-router"
 import useDriveStore from "@/features/drive/store/useDrive.store"
 import { onlineManager } from "@tanstack/react-query"
 import { useDriveSearch } from "@/features/drive/hooks/useDriveSearch"
-import { isSearchWindowTruncated } from "@/features/drive/hooks/driveSearchStatus"
+import { isSearchWindowTruncated, shouldRefetchListingAfterSearch } from "@/features/drive/hooks/driveSearchStatus"
 import { useDriveDirectorySizes } from "@/features/drive/hooks/useDriveDirectorySizes"
 import { useDriveHighlight } from "@/features/drive/hooks/useDriveHighlight"
 import useBlockedUsers from "@/features/contacts/hooks/useBlockedUsers"
@@ -192,10 +192,13 @@ const Drive = () => {
 
 	// Returning from a cache search to the directory listing: the search REPLACED the
 	// listing as the rendered source, so on clear the list shows whatever
-	// `driveItemsQuery.data` currently holds. Refetch on that transition so a listing that
-	// went stale / errored / never settled while the search was the view repopulates,
-	// instead of dropping to a false empty state.
+	// `driveItemsQuery.data` currently holds. Refetch on that transition only when the listing
+	// errored or never settled while the search was the view, instead of dropping to a false
+	// empty state. A settled listing stayed mounted throughout, so socket patches and
+	// reconnect refetches kept it as current as any unsearched listing.
 	const refetchListing = driveItemsQuery.refetch
+	const listingStatus = driveItemsQuery.status
+	const listingFetchStatus = driveItemsQuery.fetchStatus
 	const wasCacheSearchRef = useRef<boolean>(isCacheSearch)
 
 	useEffect(() => {
@@ -203,10 +206,10 @@ const Drive = () => {
 
 		wasCacheSearchRef.current = isCacheSearch
 
-		if (wasCacheSearch && !isCacheSearch) {
+		if (wasCacheSearch && !isCacheSearch && shouldRefetchListingAfterSearch(listingStatus, listingFetchStatus)) {
 			void refetchListing()
 		}
-	}, [isCacheSearch, refetchListing])
+	}, [isCacheSearch, refetchListing, listingStatus, listingFetchStatus])
 
 	// Stale-selection purge (hidden filter): a selected row that becomes hidden — renamed to a
 	// dot-name locally or remotely, or the preference flipped — would otherwise stay selected while
