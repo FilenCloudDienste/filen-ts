@@ -208,17 +208,35 @@ describe("fetchData (useFileUrl.query)", () => {
 	})
 
 	describe("external type", () => {
-		it("returns params.data.url directly without touching cache or fileCache", async () => {
-			const params: UseFileUrlQueryParams = {
-				type: "external",
-				data: { url: "https://cdn.example.com/audio.mp3", name: "audio.mp3" }
-			}
+		const params: UseFileUrlQueryParams = {
+			type: "external",
+			data: { url: "https://cdn.example.com/audio.mp3", name: "audio.mp3" }
+		}
 
+		it("returns the url itself when nothing is cached, without downloading", async () => {
 			const result = await fetchData(params)
 
 			expect(result).toBe("https://cdn.example.com/audio.mp3")
-			expect(mockFileCacheHas).not.toHaveBeenCalled()
+			expect(mockFileCacheHas).toHaveBeenCalledWith({ type: "external", data: params.data })
 			expect(mockFileCacheGet).not.toHaveBeenCalled()
+		})
+
+		it("serves the cached copy (e.g. from the audio tag read) instead of fetching the url again", async () => {
+			mockFileCacheHas.mockResolvedValue(true)
+			mockFileCacheGet.mockResolvedValue({ exists: true, uri: "file:///cache/abc/abc.mp3" })
+
+			const result = await fetchData(params)
+
+			expect(result).toBe("file:///cache/abc/abc.mp3")
+			expect(mockFileCacheGet).toHaveBeenCalledWith({ item: { type: "external", data: params.data } })
+			expect(mockOfflineGetLocalFile).not.toHaveBeenCalled()
+		})
+
+		it("falls back to the url when the cached copy vanished from disk", async () => {
+			mockFileCacheHas.mockResolvedValue(true)
+			mockFileCacheGet.mockResolvedValue({ exists: false, uri: "file:///cache/abc/abc.mp3" })
+
+			expect(await fetchData(params)).toBe("https://cdn.example.com/audio.mp3")
 		})
 	})
 

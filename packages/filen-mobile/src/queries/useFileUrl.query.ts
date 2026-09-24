@@ -5,7 +5,7 @@ import { AnyFile } from "@filen/sdk-rs"
 import cache from "@/lib/cache"
 import useHttpStore from "@/stores/useHttp.store"
 import { normalizeFilePathForExpo } from "@/lib/paths"
-import type { DriveItemFileExtracted } from "@/types"
+import type { CacheItem, DriveItemFileExtracted } from "@/types"
 import { type FileSource, fileSourceKey } from "@/queries/fileSource"
 import offline from "@/features/offline/offline"
 import fileCache from "@/lib/fileCache"
@@ -35,13 +35,33 @@ function getFileUrlForItem(item: DriveItemFileExtracted, getFileUrl: (file: AnyF
 	}
 }
 
+// A copy something else already downloaded (the audio preview's tag read pulls the whole file) is
+// served from disk instead of fetched again. fileCache matches a drive entry on uuid + size and an
+// external one on its full URL + name, so a different link or token never resolves to it.
+async function cachedFileUri(item: CacheItem): Promise<string | null> {
+	if (!(await fileCache.has(item))) {
+		return null
+	}
+
+	const file = await fileCache.get({
+		item
+	})
+
+	return file?.exists ? normalizeFilePathForExpo(file.uri) : null
+}
+
 export async function fetchData(
 	params: UseFileUrlQueryParams & {
 		signal?: AbortSignal
 	}
 ): Promise<string | null> {
 	if (params.type === "external") {
-		return params.data.url
+		return (
+			(await cachedFileUri({
+				type: "external",
+				data: params.data
+			})) ?? params.data.url
+		)
 	}
 
 	// Prefer the by-value item (a cross-directory search hit may not be in the global uuid
@@ -52,22 +72,13 @@ export async function fetchData(
 		return null
 	}
 
-	if (
-		await fileCache.has({
-			type: "drive",
-			data: item
-		})
-	) {
-		const fileCacheFile = await fileCache.get({
-			item: {
-				type: "drive",
-				data: item
-			}
-		})
+	const cachedUri = await cachedFileUri({
+		type: "drive",
+		data: item
+	})
 
-		if (fileCacheFile?.exists) {
-			return normalizeFilePathForExpo(fileCacheFile.uri)
-		}
+	if (cachedUri) {
+		return cachedUri
 	}
 
 	const offlineFile = await offline.getLocalFile(item)

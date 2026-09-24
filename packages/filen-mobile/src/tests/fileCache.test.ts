@@ -323,6 +323,18 @@ describe("FileCache", () => {
 	})
 
 	describe("has", () => {
+		it("an external entry answers only for its exact url and name (a different link or token never matches)", async () => {
+			const cache = await createFileCache()
+			const url = "https://example.com/s/song.mp3?token=a"
+			const cached = makeExternalItem(url, "song.mp3")
+
+			await cache.get({ item: cached })
+
+			expect(await cache.has(cached)).toBe(true)
+			expect(await cache.has(makeExternalItem("https://example.com/s/song.mp3?token=b", "song.mp3"))).toBe(false)
+			expect(await cache.has(makeExternalItem(url, "other.mp3"))).toBe(false)
+		})
+
 		it("returns true when file and metadata exist and match", async () => {
 			const cache = await createFileCache()
 			const item = wrapDrive(makeFileItem("has-uuid", "photo.jpg"))
