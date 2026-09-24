@@ -4,6 +4,7 @@
 
 import { vi, describe, it, expect, beforeEach, afterEach } from "vitest"
 vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
+vi.mock("expo-crypto", async () => await import("@/tests/mocks/expoCrypto"))
 
 const h = vi.hoisted(() => {
 	const disposals = { pause: 0, sdkAbort: 0, composite: 0 }

@@ -18,6 +18,7 @@ import {
 	type CopyUpdateEvents,
 	type StorageCounters
 } from "@filen/shared"
+import { randomUUID } from "expo-crypto"
 import auth from "@/lib/auth"
 import i18n from "@/lib/i18n"
 import logger from "@/lib/logger"
@@ -282,7 +283,7 @@ class CopyRunner {
 	}
 
 	private launch(request: Omit<CopyRequest, "id">): string {
-		const id = globalThis.crypto.randomUUID()
+		const id = randomUUID()
 		const job = this.run({
 			...request,
 			id

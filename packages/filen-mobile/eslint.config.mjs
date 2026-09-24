@@ -14,6 +14,11 @@ const ZUSTAND_SELECTOR_RULE = {
 	message:
 		"Zustand store hooks must be called with a selector — e.g. useXStore(s => s.foo) or useXStore(useShallow(...)); never a bare useXStore()."
 }
+// Hermes has no crypto.randomUUID (the polyfill only adds getRandomValues); node has one, so tests don't catch it.
+const NO_GLOBAL_RANDOM_UUID_RULE = {
+	selector: "MemberExpression[property.name='randomUUID'][object.property.name='crypto']",
+	message: "Hermes has no globalThis.crypto.randomUUID — use randomUUID from expo-crypto."
+}
 // No barrel re-export aggregators inside features/ (hurt Metro tree-shaking + fast refresh).
 const NO_FEATURE_BARREL_RULE = {
 	selector: "ExportAllDeclaration",
@@ -106,7 +111,7 @@ export default [
 					patterns: [".*"]
 				}
 			],
-			"no-restricted-syntax": ["error", ZUSTAND_SELECTOR_RULE],
+			"no-restricted-syntax": ["error", ZUSTAND_SELECTOR_RULE, NO_GLOBAL_RANDOM_UUID_RULE],
 			"react-hooks/exhaustive-deps": [
 				"error",
 				{
@@ -127,7 +132,7 @@ export default [
 		// No barrel re-exports inside features/ (in addition to the project-wide zustand rule).
 		files: ["src/features/**/*.ts", "src/features/**/*.tsx"],
 		rules: {
-			"no-restricted-syntax": ["error", ZUSTAND_SELECTOR_RULE, NO_FEATURE_BARREL_RULE]
+			"no-restricted-syntax": ["error", ZUSTAND_SELECTOR_RULE, NO_GLOBAL_RANDOM_UUID_RULE, NO_FEATURE_BARREL_RULE]
 		}
 	},
 	{
