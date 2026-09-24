@@ -350,9 +350,12 @@ class CopyRunner {
 		let pendingEvents: CopyUpdateEvents<CopyJobFailure> = emptyCopyEvents()
 		let lastFlushAt = 0
 		let trailing: ReturnType<typeof setTimeout> | null = null
-		// What the job made as it went: the fallback for "move to trash" when the SDK call rejects and
-		// returns no report.
+		// What the job made as it went, as its callbacks reported it. Joined with the report for "move to
+		// trash": the SDK call rejects without a report when the job ignores its cancel past the grace.
 		const createdAsReported: DriveItem[] = []
+		// Set once the job settled with "move to trash": a create delivered after that (a job dropped past
+		// its grace still delivers what it queued) is trashed on arrival.
+		let trashLateCreates = false
 
 		const flush = () => {
 			if (trailing) {
@@ -400,6 +403,12 @@ class CopyRunner {
 
 					const item = createdDriveItem(topLevel.item)
 					const parentUuid = "parent" in item.data ? unwrapParentUuid(item.data.parent) : null
+
+					if (trashLateCreates) {
+						void trashCopied(id, [item])
+
+						return
+					}
 
 					createdAsReported.push(item)
 
@@ -511,9 +520,9 @@ class CopyRunner {
 				return undefined
 			}
 
-			// The final attempt's report lists what this job made, however it ended. Defensive: whether a
-			// version target can appear among them is unverified. Without a report, what the callbacks saw.
-			const copied = lastReport ? copiedTopLevel(lastReport) : createdAsReported
+			// Everything this job made at the top level: the final attempt's report joined with what the
+			// callbacks reported, once per uuid, never a version target.
+			const copied = copiedTopLevel(lastReport, createdAsReported)
 			const final = settlement
 
 			useCopyJobsStore.getState().update(id, job => ({
@@ -542,6 +551,8 @@ class CopyRunner {
 					}
 				}
 			}
+
+			trashLateCreates = settledJob?.cancelRequest === "trash"
 
 			return await this.settle(id)
 		} finally {
@@ -578,20 +589,11 @@ class CopyRunner {
 	// Only top-level items; their subtrees go with them. Moved to the trash, never deleted.
 	private async trashCreated(id: string): Promise<void> {
 		const created = getCopyJob(id)?.created ?? []
-
-		if (created.length === 0) {
-			return
-		}
-
-		const results = await Promise.allSettled(created.map(item => trash({ item })))
-		const moved = results.filter(result => result.status === "fulfilled").length
+		const trashResult = await trashCopied(id, created)
 
 		useCopyJobsStore.getState().update(id, settled => ({
 			...settled,
-			trashResult: {
-				moved,
-				failed: results.length - moved
-			}
+			trashResult
 		}))
 	}
 
@@ -665,19 +667,66 @@ async function readFreshAccount(): Promise<StorageCounters | undefined> {
 	}
 }
 
-function copiedTopLevel(report: CopyReport): DriveItem[] {
-	const targets = versionTargets(report)
+function copiedTopLevel(report: CopyReport | null, reported: readonly DriveItem[]): DriveItem[] {
+	const targets = report ? versionTargets(report) : new Set<string>()
+	const seen = new Set<string>()
 	const items: DriveItem[] = []
 
-	for (const topLevel of report.topLevel) {
-		const item = createdDriveItem(topLevel.item)
-
-		if (!targets.has(item.data.uuid)) {
+	const add = (item: DriveItem) => {
+		if (!targets.has(item.data.uuid) && !seen.has(item.data.uuid)) {
+			seen.add(item.data.uuid)
 			items.push(item)
 		}
 	}
 
+	for (const topLevel of report?.topLevel ?? []) {
+		add(createdDriveItem(topLevel.item))
+	}
+
+	for (const item of reported) {
+		add(item)
+	}
+
 	return items
+}
+
+// Moves a copy's top-level items to the trash (their subtrees go with them) and logs the outcome, so a
+// partial or slow trash is visible in the diagnostic log.
+async function trashCopied(id: string, items: readonly DriveItem[]): Promise<{ moved: number; failed: number }> {
+	if (items.length === 0) {
+		logger.info("copy", "move to trash: nothing to trash", { id })
+
+		return {
+			moved: 0,
+			failed: 0
+		}
+	}
+
+	const startedAt = Date.now()
+	const results = await Promise.allSettled(items.map(item => trash({ item })))
+	const failures: { uuid: string; error: unknown }[] = []
+
+	results.forEach((result, index) => {
+		if (result.status === "rejected") {
+			failures.push({
+				uuid: items[index]?.data.uuid ?? "",
+				error: result.reason
+			})
+		}
+	})
+
+	const outcome = {
+		moved: results.length - failures.length,
+		failed: failures.length
+	}
+
+	if (failures.length > 0) {
+		logger.warn("copy", "move to trash: some items were not trashed", { id, ...outcome, durationMs: Date.now() - startedAt, failures })
+	} else {
+		logger.info("copy", "move to trash: done", { id, ...outcome, durationMs: Date.now() - startedAt })
+	}
+
+	return outcome
 }
 
 // A thrown copy (the SDK couldn't start or report), as the error record the job carries.

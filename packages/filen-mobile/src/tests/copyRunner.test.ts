@@ -133,6 +133,7 @@ import useCopyJobsStore, { getCopyJob } from "@/features/copy/store/useCopyJobs.
 import useTransfersStore from "@/features/transfers/store/useTransfers.store"
 import copyActivity from "@/features/drive/copyActivity"
 import useSocketStore from "@/stores/useSocket.store"
+import logger from "@/lib/logger"
 import { CopyPhase, CopyStage, ErrorKind, NonRootNormalItem_Tags } from "@/tests/mocks/sdkCopy"
 import type { CopyItemsCallback, CopyReport, CopyUpdate } from "@filen/sdk-rs"
 import type { DriveItem } from "@/types"
@@ -564,6 +565,72 @@ describe("cancel", () => {
 		await runJob()
 
 		expect(h.trash).toHaveBeenCalledExactlyOnceWith({ item: { type: "file", data: { uuid: "made", parent: "dest" } } })
+	})
+
+	it("trash takes every top-level item the job made: the report joined with the callbacks, once each", async () => {
+		scriptCopy(async callback => {
+			callback.onTopLevelCreated(createdFile("in-report") as never)
+			callback.onTopLevelCreated(createdFile("callback-only") as never)
+			copyRunner.requestCancel(Object.keys(useCopyJobsStore.getState().jobs)[0] as string, "trash")
+
+			return report({
+				error: { kind: ErrorKind.Cancelled, message: "", serverMessage: undefined },
+				topLevel: [createdFile("in-report")]
+			})
+		})
+
+		await runJob()
+
+		expect(h.trash.mock.calls.map(call => (call[0] as { item: DriveItem }).item.data.uuid).sort()).toEqual([
+			"callback-only",
+			"in-report"
+		])
+	})
+
+	it("a top-level create delivered after a trash settle is trashed on arrival, and never listed", async () => {
+		let late: ((item: never) => void) | undefined
+
+		scriptCopy(async callback => {
+			late = item => callback.onTopLevelCreated(item)
+			copyRunner.requestCancel(Object.keys(useCopyJobsStore.getState().jobs)[0] as string, "trash")
+
+			throw new Error("job dropped after its cancel grace")
+		})
+
+		await runJob()
+
+		h.enqueue.mockClear()
+		late?.(createdFile("late") as never)
+		await Promise.resolve()
+
+		expect(h.trash).toHaveBeenCalledExactlyOnceWith({ item: { type: "file", data: { uuid: "late", parent: "dest" } } })
+		expect(h.enqueue).not.toHaveBeenCalled()
+	})
+
+	it("logs how the trash went, with the items that failed", async () => {
+		h.trash.mockImplementation(async ({ item }: { item: DriveItem }) => {
+			if (item.data.uuid === "stuck") {
+				throw new Error("server refused")
+			}
+		})
+		vi.mocked(logger.warn).mockClear()
+		vi.mocked(logger.info).mockClear()
+
+		scriptCopy(async callback => {
+			callback.onTopLevelCreated(createdFile("moved") as never)
+			callback.onTopLevelCreated(createdFile("stuck") as never)
+			copyRunner.requestCancel(Object.keys(useCopyJobsStore.getState().jobs)[0] as string, "trash")
+
+			return report({ error: { kind: ErrorKind.Cancelled, message: "", serverMessage: undefined } })
+		})
+
+		await runJob()
+
+		expect(logger.warn).toHaveBeenCalledWith(
+			"copy",
+			"move to trash: some items were not trashed",
+			expect.objectContaining({ moved: 1, failed: 1, failures: [expect.objectContaining({ uuid: "stuck" })] })
+		)
 	})
 
 	it("cancelAll / the background lifecycle (the scope) cancels as keep", async () => {
