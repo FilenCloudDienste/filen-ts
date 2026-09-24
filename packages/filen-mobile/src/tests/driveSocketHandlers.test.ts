@@ -1,7 +1,26 @@
 import { vi, describe, it, expect, beforeEach } from "vitest"
 vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 
-const { mockMarkDirectorySizesStale } = vi.hoisted(() => ({ mockMarkDirectorySizesStale: vi.fn() }))
+const { mockMarkDirectorySizesStale, mockEnqueue, mockFlushNow, mockRemoveDirectoryFromPhotos, callOrder } = vi.hoisted(() => {
+	const callOrder: string[] = []
+
+	return {
+		mockMarkDirectorySizesStale: vi.fn(),
+		mockEnqueue: vi.fn(),
+		mockFlushNow: vi.fn(() => {
+			callOrder.push("flush")
+		}),
+		mockRemoveDirectoryFromPhotos: vi.fn(),
+		callOrder
+	}
+})
+
+vi.mock("@/features/drive/socketCreateBatcher", () => ({
+	default: {
+		enqueue: mockEnqueue,
+		flushNow: mockFlushNow
+	}
+}))
 
 vi.mock("@/features/drive/queries/useDirectorySize.query", () => ({
 	markDirectorySizesStale: mockMarkDirectorySizesStale
@@ -54,7 +73,7 @@ vi.mock("@/features/drive/queries/useDriveItems.query", () => ({
 	driveItemsQueryUpdate: mockDriveItemsQueryUpdate,
 	driveItemsQueryUpdateForNormalParent: mockDriveItemsQueryUpdateForNormalParent,
 	driveItemsQueryUpdateForPhotos: vi.fn(),
-	driveItemsQueryUpdateForRecents: vi.fn()
+	driveItemsQueryRemoveDirectoryFromPhotos: mockRemoveDirectoryFromPhotos
 }))
 
 // Faithful mirror of driveMetadata's pure favoritesListingUpdater (the real module pulls
@@ -251,6 +270,10 @@ describe("handleDriveEvent — drive socket handler", () => {
 		mockCacheNewFile.mockClear()
 		mockCacheNewNormalDir.mockClear()
 		mockRemoveFromSelection.mockClear()
+		mockEnqueue.mockClear()
+		mockFlushNow.mockClear()
+		mockRemoveDirectoryFromPhotos.mockClear()
+		callOrder.length = 0
 		mockCacheDirectoryUuidToAnyNormalDirGet.mockReset()
 		mockCacheFileUuidToNormalFileGet.mockReset()
 		mockUnwrapParentUuid.mockReturnValue("parent-1")
@@ -427,7 +450,7 @@ describe("handleDriveEvent — drive socket handler", () => {
 		const rawFile = { uuid: "file-new", parent: {}, meta: { name: "test.txt" } }
 		const driveItemFile = { type: "file", data: { uuid: "file-new", decryptedMeta: { name: "test.txt" } } }
 
-		it("FileNew: adds item to parent listing via driveItemsQueryUpdateForNormalParent", async () => {
+		it("FileNew: queues the item for its parent's batch, as a recent, and writes no listing now", async () => {
 			mockUnwrapFileMeta.mockReturnValue({
 				file: { uuid: "file-new", meta: { name: "test.txt" } },
 				meta: { name: "test.txt" }
@@ -436,71 +459,21 @@ describe("handleDriveEvent — drive socket handler", () => {
 
 			await handleDriveEvent({ event: makeFileWithParentEvent(DriveEvent_Tags.FileNew, rawFile) })
 
-			expect(mockDriveItemsQueryUpdateForNormalParent).toHaveBeenCalledOnce()
-			expect(mockDriveItemsQueryUpdateForNormalParent).toHaveBeenCalledWith(expect.objectContaining({ parentUuid: "parent-1" }))
+			expect(mockEnqueue).toHaveBeenCalledExactlyOnceWith({ parentUuid: "parent-1", item: driveItemFile, recent: true })
+			expect(mockFlushNow).not.toHaveBeenCalled()
+			expect(mockDriveItemsQueryUpdateForNormalParent).not.toHaveBeenCalled()
+			expect(mockDriveItemsQueryUpdate).not.toHaveBeenCalled()
 		})
 
-		it("FileNew: updater deduplicates by uuid and name, then appends new item", async () => {
-			const fileMeta = { file: { uuid: "file-new", meta: { name: "test.txt" } }, meta: { name: "test.txt" } }
-			mockUnwrapFileMeta.mockReturnValue(fileMeta)
-			mockUnwrappedFileIntoDriveItem.mockReturnValue(driveItemFile)
-
-			await handleDriveEvent({ event: makeFileWithParentEvent(DriveEvent_Tags.FileNew, rawFile) })
-
-			const { updater } = mockDriveItemsQueryUpdateForNormalParent.mock.calls[0]?.[0] as {
-				updater: (prev: Array<{ data: { uuid: string; decryptedMeta?: { name: string } } }>) => unknown[]
-			}
-
-			const prev = [
-				{ data: { uuid: "file-new", decryptedMeta: { name: "OLD" } } },
-				{ data: { uuid: "other-file", decryptedMeta: { name: "Other" } } }
-			]
-			const result = updater(prev) as typeof prev
-
-			// Duplicate uuid removed, "other-file" preserved, new driveItemFile appended
-			expect(result.find(i => i.data.uuid === "file-new")).toBe(driveItemFile)
-			expect(result.find(i => i.data.uuid === "other-file")).toBeDefined()
-		})
-
-		it("FileNew: does NOT call driveItemsQueryUpdate when parentUuid is null", async () => {
+		it("FileNew: with no parent, only caches the file", async () => {
 			mockUnwrapParentUuid.mockReturnValue(null)
 			mockUnwrapFileMeta.mockReturnValue({ file: { uuid: "file-new" }, meta: null })
 			mockUnwrappedFileIntoDriveItem.mockReturnValue({ type: "file", data: { uuid: "file-new" } })
 
 			await handleDriveEvent({ event: makeFileWithParentEvent(DriveEvent_Tags.FileNew, rawFile) })
 
-			expect(mockDriveItemsQueryUpdateForNormalParent).not.toHaveBeenCalled()
-		})
-
-		it("FileNew: an incoming UNDECRYPTABLE file does not evict existing undecryptable siblings", async () => {
-			// Undecryptable items carry meta:null / decryptedMeta:null, so their name is undefined.
-			// The old dedup predicate compared `undefined !== undefined` (false) and wrongly treated
-			// every existing undecryptable sibling as a same-name duplicate, dropping them all.
-			const incomingUndecryptable = { type: "file", data: { uuid: "file-new", decryptedMeta: null } }
-			mockUnwrapFileMeta.mockReturnValue({ file: { uuid: "file-new", meta: null }, meta: null })
-			mockUnwrappedFileIntoDriveItem.mockReturnValue(incomingUndecryptable)
-
-			await handleDriveEvent({ event: makeFileWithParentEvent(DriveEvent_Tags.FileNew, rawFile) })
-
-			const { updater } = mockDriveItemsQueryUpdateForNormalParent.mock.calls[0]?.[0] as {
-				updater: (
-					prev: Array<{ data: { uuid: string; decryptedMeta: { name: string } | null } }>
-				) => Array<{ data: { uuid: string } }>
-			}
-
-			const prev = [
-				{ data: { uuid: "undec-a", decryptedMeta: null } },
-				{ data: { uuid: "undec-b", decryptedMeta: null } },
-				{ data: { uuid: "decryptable", decryptedMeta: { name: "notes.txt" } } }
-			]
-			const result = updater(prev)
-
-			// Both existing undecryptable siblings survive, the decryptable item survives, and the
-			// incoming item is appended — nothing is wrongly evicted.
-			expect(result.find(i => i.data.uuid === "undec-a")).toBeDefined()
-			expect(result.find(i => i.data.uuid === "undec-b")).toBeDefined()
-			expect(result.find(i => i.data.uuid === "decryptable")).toBeDefined()
-			expect(result.find(i => i.data.uuid === "file-new")).toBe(incomingUndecryptable)
+			expect(mockEnqueue).not.toHaveBeenCalled()
+			expect(mockCacheNewFile).toHaveBeenCalledOnce()
 		})
 
 		it("FileRestore: adds item to parent listing AND removes from trash query", async () => {
@@ -1080,9 +1053,11 @@ describe("handleDriveEvent — drive socket handler", () => {
 			expect(result[0]?.data.uuid).toBe("other")
 		})
 
-		it("FolderSubCreated: adds item to parent listing but does NOT touch trash query", async () => {
+		it("FolderSubCreated: queues the directory for its parent's batch, not as a recent", async () => {
+			const created = { type: "directory", data: { uuid: "dir-new" } }
+
 			mockUnwrapDirMeta.mockReturnValue({ uuid: "dir-new", meta: { name: "new-dir" } })
-			mockUnwrappedDirIntoDriveItem.mockReturnValue({ type: "directory", data: { uuid: "dir-new" } })
+			mockUnwrappedDirIntoDriveItem.mockReturnValue(created)
 
 			await handleDriveEvent({
 				event: makeDirWithParentEvent(DriveEvent_Tags.FolderSubCreated, {
@@ -1092,7 +1067,8 @@ describe("handleDriveEvent — drive socket handler", () => {
 				})
 			})
 
-			expect(mockDriveItemsQueryUpdateForNormalParent).toHaveBeenCalledOnce()
+			expect(mockEnqueue).toHaveBeenCalledExactlyOnceWith({ parentUuid: "parent-1", item: created, recent: false })
+			expect(mockDriveItemsQueryUpdateForNormalParent).not.toHaveBeenCalled()
 			expect(mockDriveItemsQueryUpdate).not.toHaveBeenCalled()
 		})
 
@@ -1358,15 +1334,19 @@ describe("handleDriveEvent — drive socket handler", () => {
 			mockMarkDirectorySizesStale.mockClear()
 		})
 
+		it.each([DriveEvent_Tags.FileNew, DriveEvent_Tags.FolderSubCreated])("%s leaves the size mark to its batch", async tag => {
+			await handleDriveEvent({ event: makeEvent(tag, { uuid: "x", file: { uuid: "x" }, dir: { uuid: "x" } }) })
+
+			expect(mockMarkDirectorySizesStale).not.toHaveBeenCalled()
+		})
+
 		it.each([
-			DriveEvent_Tags.FileNew,
 			DriveEvent_Tags.FileRestore,
 			DriveEvent_Tags.FileArchived,
 			DriveEvent_Tags.FileDeletedPermanent,
 			DriveEvent_Tags.FolderDeletedPermanent,
 			DriveEvent_Tags.FileTrash,
 			DriveEvent_Tags.FolderTrash,
-			DriveEvent_Tags.FolderSubCreated,
 			DriveEvent_Tags.TrashEmpty,
 			DriveEvent_Tags.DeleteAll
 		])("%s marks every directory size stale exactly once", async tag => {
@@ -1386,6 +1366,64 @@ describe("handleDriveEvent — drive socket handler", () => {
 			)
 
 			expect(mockMarkDirectorySizesStale).not.toHaveBeenCalled()
+		})
+	})
+
+	describe("create batching", () => {
+		it.each([
+			DriveEvent_Tags.FileRestore,
+			DriveEvent_Tags.FileArchived,
+			DriveEvent_Tags.FileDeletedPermanent,
+			DriveEvent_Tags.FolderDeletedPermanent,
+			DriveEvent_Tags.FileMetadataChanged,
+			DriveEvent_Tags.FileMove,
+			DriveEvent_Tags.FolderMove,
+			DriveEvent_Tags.FolderMetadataChanged,
+			DriveEvent_Tags.FileTrash,
+			DriveEvent_Tags.FolderTrash,
+			DriveEvent_Tags.FolderColorChanged,
+			DriveEvent_Tags.FolderRestore,
+			DriveEvent_Tags.TrashEmpty
+		])("%s applies queued creates before its own change", async tag => {
+			mockDriveItemsQueryUpdateGlobal.mockImplementation(() => callOrder.push("update"))
+			mockDriveItemsQueryUpdate.mockImplementation(() => callOrder.push("update"))
+			mockDriveItemsQueryUpdateForNormalParent.mockImplementation(() => callOrder.push("update"))
+			mockCacheFileUuidToNormalFileGet.mockReturnValue({ uuid: "x", parent: {} })
+			mockCacheDirectoryUuidToAnyNormalDirGet.mockReturnValue({ tag: AnyNormalDir_Tags.Dir, inner: [{ uuid: "x", parent: {} }] })
+
+			await handleDriveEvent({
+				event: makeEvent(tag, { uuid: "x", parent: "parent-1", file: { uuid: "x", parent: {} }, dir: { uuid: "x", parent: {} }, metadata: {}, meta: {}, color: "blue" })
+			})
+
+			expect(mockFlushNow).toHaveBeenCalledOnce()
+			expect(callOrder[0]).toBe("flush")
+
+			mockDriveItemsQueryUpdateGlobal.mockReset()
+			mockDriveItemsQueryUpdate.mockReset()
+			mockDriveItemsQueryUpdateForNormalParent.mockReset()
+		})
+	})
+
+	describe("Photos: a directory leaving the camera-upload tree", () => {
+		it("FolderTrash drops the directory's descendants from Photos", async () => {
+			await handleDriveEvent({ event: makeFolderTrashEvent("trashed-dir") })
+
+			expect(mockRemoveDirectoryFromPhotos).toHaveBeenCalledExactlyOnceWith({ dirUuid: "trashed-dir" })
+		})
+
+		it("FolderDeletedPermanent drops the directory's descendants from Photos", async () => {
+			await handleDriveEvent({ event: makeFolderDeletedPermanentEvent("deleted-dir") })
+
+			expect(mockRemoveDirectoryFromPhotos).toHaveBeenCalledExactlyOnceWith({ dirUuid: "deleted-dir" })
+		})
+
+		it("FolderMove asks Photos to drop them only if the destination is outside the tree", async () => {
+			mockUnwrapDirMeta.mockReturnValue({ uuid: "moved-dir", meta: null })
+			mockUnwrappedDirIntoDriveItem.mockReturnValue({ type: "directory", data: { uuid: "moved-dir" } })
+
+			await handleDriveEvent({ event: makeFolderMoveEvent({ uuid: "moved-dir", parent: {} }) })
+
+			expect(mockRemoveDirectoryFromPhotos).toHaveBeenCalledExactlyOnceWith({ dirUuid: "moved-dir", newParentUuid: "parent-1" })
 		})
 	})
 

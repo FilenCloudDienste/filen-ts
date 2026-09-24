@@ -6,8 +6,10 @@ import {
 	driveItemsQueryUpdateGlobal,
 	driveItemsQueryUpdate,
 	driveItemsQueryUpdateForNormalParent,
-	driveItemsQueryGet
+	driveItemsQueryGet,
+	driveItemsQueryRemoveDirectoryFromPhotos
 } from "@/features/drive/queries/useDriveItems.query"
+import socketCreateBatcher from "@/features/drive/socketCreateBatcher"
 import { driveItemVersionsQueryUpdate } from "@/features/drive/queries/useDriveItemVersions.query"
 import { markDirectorySizesStale } from "@/features/drive/queries/useDirectorySize.query"
 import { upsertItem } from "@filen/shared"
@@ -117,11 +119,19 @@ export async function trash({ item, signal }: { item: DriveItem; signal?: AbortS
 	}
 
 	markDirectorySizesStale()
+	// A queued create of this item must not land after the removal below.
+	socketCreateBatcher.flushNow()
 
 	if (unwrappedParentUuidPrevious) {
 		driveItemsQueryUpdateGlobal({
 			parentUuid: unwrappedParentUuidPrevious,
 			updater: prev => prev.filter(i => i.data.uuid !== item.data.uuid)
+		})
+	}
+
+	if (item.type === "directory") {
+		driveItemsQueryRemoveDirectoryFromPhotos({
+			dirUuid: item.data.uuid
 		})
 	}
 

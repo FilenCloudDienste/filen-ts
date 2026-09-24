@@ -527,10 +527,12 @@ describe("removeVolatileParamsForKey (via driveItemsQueryGet)", () => {
 // ─── driveItemsQueryUpdateForNormalParent ───────────────────────────────────
 
 describe("driveItemsQueryUpdateForNormalParent", () => {
+	const ITEM = { type: "file", data: { uuid: "item-1" } } as unknown as DriveItem
+
 	it("calls driveItemsQueryUpdate once when parentUuid does not match cache.rootUuid", () => {
 		mockCacheRootUuid.value = "root-uuid-999"
 
-		driveItemsQueryUpdateForNormalParent({ parentUuid: "other-uuid", updater: [] })
+		driveItemsQueryUpdateForNormalParent({ parentUuid: "other-uuid", updater: [ITEM] })
 
 		const calls = mockQueryUpdaterSet.mock.calls.filter(c => (c[0] as unknown[])[0] === BASE_QUERY_KEY)
 
@@ -540,7 +542,7 @@ describe("driveItemsQueryUpdateForNormalParent", () => {
 	it("calls driveItemsQueryUpdate twice when parentUuid matches cache.rootUuid", () => {
 		mockCacheRootUuid.value = "root-uuid-abc"
 
-		driveItemsQueryUpdateForNormalParent({ parentUuid: "root-uuid-abc", updater: [] })
+		driveItemsQueryUpdateForNormalParent({ parentUuid: "root-uuid-abc", updater: [ITEM] })
 
 		const calls = mockQueryUpdaterSet.mock.calls.filter(c => (c[0] as unknown[])[0] === BASE_QUERY_KEY)
 
@@ -556,7 +558,7 @@ describe("driveItemsQueryUpdateForNormalParent", () => {
 	it("calls driveItemsQueryUpdate once when cache.rootUuid is null", () => {
 		mockCacheRootUuid.value = null
 
-		driveItemsQueryUpdateForNormalParent({ parentUuid: "some-parent", updater: [] })
+		driveItemsQueryUpdateForNormalParent({ parentUuid: "some-parent", updater: [ITEM] })
 
 		const calls = mockQueryUpdaterSet.mock.calls.filter(c => (c[0] as unknown[])[0] === BASE_QUERY_KEY)
 
@@ -595,43 +597,37 @@ describe("driveItemsQueryUpdateForNormalParent", () => {
 		expect(cacheFileUuidToNormalFile.has("opt-seed-1")).toBe(true)
 	})
 
-	// A socket event fans out across every path variant × {uuid, null}; without this gate each of those
-	// twenty absent listings would be materialized holding [] and written to SQLite.
-	it("does not create a listing row when the query is absent and the update is empty", () => {
+	// Socket events and local writes alike: a listing nobody has read stays unread, even when the update
+	// carries items — its first read lands it whole instead of flashing the patched rows alone.
+	it("does not create a listing row when the query is absent, whatever the update carries", () => {
 		mockCacheRootUuid.value = null
 		mockGetQueryState.mockReturnValue(undefined)
 
-		driveItemsQueryUpdateForNormalParent({ parentUuid: "never-opened", updater: [] })
+		const updater = vi.fn(() => [ITEM])
+
+		driveItemsQueryUpdateForNormalParent({ parentUuid: "never-opened", updater })
+
+		expect(updater).not.toHaveBeenCalled()
+		expect(mockQueryUpdaterSet.mock.calls.filter(c => (c[0] as unknown[])[0] === BASE_QUERY_KEY)).toHaveLength(0)
+		expect(cacheUuidToAnyDriveItem.has("item-1")).toBe(false)
+	})
+
+	it("leaves a pending, data-less query to its read", () => {
+		mockCacheRootUuid.value = null
+		mockGetQueryState.mockReturnValue({ data: undefined })
+
+		driveItemsQueryUpdateForNormalParent({ parentUuid: "pending-dir", updater: [ITEM] })
 
 		expect(mockQueryUpdaterSet.mock.calls.filter(c => (c[0] as unknown[])[0] === BASE_QUERY_KEY)).toHaveLength(0)
 	})
 
-	it("still creates the row when the query is absent but the update carries items", () => {
+	it("writes nothing when the updater changes nothing", () => {
 		mockCacheRootUuid.value = null
-		mockGetQueryState.mockReturnValue(undefined)
+		mockGetQueryState.mockReturnValue({ data: [ITEM] })
 
-		const item = { type: "file", data: { uuid: "opt-create-1" } } as unknown as DriveItem
+		driveItemsQueryUpdateForNormalParent({ parentUuid: "read-dir", updater: prev => prev.filter(i => i.data.uuid !== "absent") })
 
-		driveItemsQueryUpdateForNormalParent({ parentUuid: "never-opened", updater: [item] })
-
-		const calls = mockQueryUpdaterSet.mock.calls.filter(c => (c[0] as unknown[])[0] === BASE_QUERY_KEY)
-
-		expect(calls).toHaveLength(1)
-		expect(calls[0]![1]).toEqual([item])
-	})
-
-	// A mounted-but-still-pending query has no data yet and MUST keep the old behaviour: it exists, so
-	// an empty update writes through to it exactly as before.
-	it("updates an existing but data-less query even when the update is empty", () => {
-		mockCacheRootUuid.value = null
-		mockGetQueryState.mockReturnValue({ data: undefined })
-
-		driveItemsQueryUpdateForNormalParent({ parentUuid: "pending-dir", updater: [] })
-
-		const calls = mockQueryUpdaterSet.mock.calls.filter(c => (c[0] as unknown[])[0] === BASE_QUERY_KEY)
-
-		expect(calls).toHaveLength(1)
-		expect(calls[0]![1]).toEqual([])
+		expect(mockQueryUpdaterSet.mock.calls.filter(c => (c[0] as unknown[])[0] === BASE_QUERY_KEY)).toHaveLength(0)
 	})
 })
 

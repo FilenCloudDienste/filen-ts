@@ -207,11 +207,24 @@ vi.mock("@/lib/paths", () => ({
 	normalizeFilePathForSdk: mockNormalizeFilePathForSdk
 }))
 
+const { mockRemoveDirectoryFromPhotos, mockBatcherFlushNow } = vi.hoisted(() => ({
+	mockRemoveDirectoryFromPhotos: vi.fn(),
+	mockBatcherFlushNow: vi.fn()
+}))
+
+vi.mock("@/features/drive/socketCreateBatcher", () => ({
+	default: {
+		flushNow: mockBatcherFlushNow,
+		enqueue: vi.fn()
+	}
+}))
+
 vi.mock("@/features/drive/queries/useDriveItems.query", () => ({
 	driveItemsQueryUpdate: mockDriveItemsQueryUpdate,
 	driveItemsQueryUpdateGlobal: mockDriveItemsQueryUpdateGlobal,
 	driveItemsQueryUpdateForNormalParent: mockDriveItemsQueryUpdateForNormalParent,
-	driveItemsQueryGet: mockDriveItemsQueryGet
+	driveItemsQueryGet: mockDriveItemsQueryGet,
+	driveItemsQueryRemoveDirectoryFromPhotos: mockRemoveDirectoryFromPhotos
 }))
 
 vi.mock("@/features/drive/queries/useDriveItemVersions.query", () => ({
@@ -684,6 +697,20 @@ describe("drive.move", () => {
 		expect(mockAuthedSdkClient.moveFile).not.toHaveBeenCalled()
 	})
 
+	it("asks Photos to drop a moved directory's photos when its new parent is outside the tree", async () => {
+		const item = makeDirItem({ uuid: "dir-move-photos", parentUuid: "old-parent-uuid" })
+		const newParentDir = new MockAnyNormalDirDir({ uuid: "new-parent-uuid" })
+
+		mockUnwrapParentUuid.mockReturnValueOnce("old-parent-uuid").mockReturnValueOnce("new-parent-uuid")
+		mockAuthedSdkClient.moveDir.mockResolvedValue({ ...item.data })
+		mockUnwrappedDirIntoDriveItem.mockReturnValue({ type: "directory", data: { ...item.data } })
+
+		await drive.move({ item, newParent: newParentDir as any })
+
+		expect(mockBatcherFlushNow).toHaveBeenCalledOnce()
+		expect(mockRemoveDirectoryFromPhotos).toHaveBeenCalledExactlyOnceWith({ dirUuid: "dir-move-photos", newParentUuid: "new-parent-uuid" })
+	})
+
 	it("removes old item uuid from old parent query after successful move", async () => {
 		const item = makeDirItem({ uuid: "dir-move-0001", parentUuid: "old-parent-uuid" })
 		const newParentDir = new MockAnyNormalDirDir({ uuid: "new-parent-uuid" })
@@ -890,6 +917,32 @@ describe("drive.trash", () => {
 
 		expect(after.some(i => i.data.uuid === "trash-dir-uuid")).toBe(false)
 		expect(after.some(i => i.data.uuid === "other-dir-uuid")).toBe(true)
+	})
+
+	it("drops a trashed directory's photos from Photos and applies queued creates before removing", async () => {
+		const item = makeDirItem({ uuid: "trash-dir-uuid" })
+
+		mockAuthedSdkClient.trashDir.mockResolvedValue({ ...item.data })
+		mockUnwrappedDirIntoDriveItem.mockReturnValue({ type: "directory", data: item.data })
+		mockDriveItemsQueryUpdateGlobal.mockImplementationOnce(() => {
+			expect(mockBatcherFlushNow).toHaveBeenCalledOnce()
+		})
+
+		await drive.trash({ item })
+
+		expect(mockDriveItemsQueryUpdateGlobal).toHaveBeenCalled()
+		expect(mockRemoveDirectoryFromPhotos).toHaveBeenCalledExactlyOnceWith({ dirUuid: "trash-dir-uuid" })
+	})
+
+	it("does not touch Photos when trashing a file (the uuid filter covers it)", async () => {
+		const item = makeFileItem({ uuid: "trash-file-2" })
+
+		mockAuthedSdkClient.trashFile.mockResolvedValue({ region: "us-east-1", ...item.data, trash: true })
+		mockUnwrappedFileIntoDriveItem.mockReturnValue({ type: "file", data: { ...item.data, trash: true } as any })
+
+		await drive.trash({ item })
+
+		expect(mockRemoveDirectoryFromPhotos).not.toHaveBeenCalled()
 	})
 
 	it("does not optimistically touch the recents listing (relies on refetch-on-focus)", async () => {

@@ -5,13 +5,14 @@ import {
 	driveItemsQueryUpdate,
 	driveItemsQueryUpdateForNormalParent,
 	driveItemsQueryUpdateForPhotos,
-	driveItemsQueryUpdateForRecents
+	driveItemsQueryRemoveDirectoryFromPhotos
 } from "@/features/drive/queries/useDriveItems.query"
 import { unwrapParentUuid, unwrapFileMeta, unwrappedFileIntoDriveItem, unwrapDirMeta, unwrappedDirIntoDriveItem } from "@/lib/sdkUnwrap"
 import { upsertItem } from "@filen/shared"
 import cache from "@/lib/cache"
 import useDriveStore from "@/features/drive/store/useDrive.store"
 import { markDirectorySizesStale } from "@/features/drive/queries/useDirectorySize.query"
+import socketCreateBatcher from "@/features/drive/socketCreateBatcher"
 import logger from "@/lib/logger"
 
 export type DriveSocketEvent = Extract<SocketEvent, { tag: typeof SocketEvent_Tags.Drive }>
@@ -25,6 +26,9 @@ const SIZE_NEUTRAL_TAGS = new Set<DriveEvent_Tags>([
 	DriveEvent_Tags.ItemFavorite
 ])
 
+// Applied in batches per parent (socketCreateBatcher), which also marks sizes stale once per batch.
+const BATCHED_CREATE_TAGS = new Set<DriveEvent_Tags>([DriveEvent_Tags.FileNew, DriveEvent_Tags.FolderSubCreated])
+
 export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): Promise<void> {
 	const [eventInner] = event.inner
 	// Captured while the union is intact — the switch below is exhaustive, so `eventInner.inner`
@@ -32,14 +36,37 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 	// future SDK tag the pinned bindings don't yet know about.
 	const eventTag = eventInner.inner.tag
 
-	if (!SIZE_NEUTRAL_TAGS.has(eventTag)) {
-		markDirectorySizesStale()
+	if (!BATCHED_CREATE_TAGS.has(eventTag)) {
+		// Queued creates land first, so nothing this event removes, moves or edits is re-added after it.
+		socketCreateBatcher.flushNow()
+
+		if (!SIZE_NEUTRAL_TAGS.has(eventTag)) {
+			markDirectorySizesStale()
+		}
 	}
 
 	switch (eventInner.inner.tag) {
-		case DriveEvent_Tags.FileArchiveRestored:
-		case DriveEvent_Tags.FileRestore:
 		case DriveEvent_Tags.FileNew: {
+			const [inner] = eventInner.inner.inner
+
+			const unwrappedParentUuid = unwrapParentUuid(inner.file.parent)
+			const driveItem = unwrappedFileIntoDriveItem(unwrapFileMeta(inner.file))
+
+			if (unwrappedParentUuid) {
+				socketCreateBatcher.enqueue({
+					parentUuid: unwrappedParentUuid,
+					item: driveItem,
+					recent: true
+				})
+			} else if (driveItem.type === "file") {
+				cache.cacheNewFile(inner.file, driveItem)
+			}
+
+			break
+		}
+
+		case DriveEvent_Tags.FileArchiveRestored:
+		case DriveEvent_Tags.FileRestore: {
 			const [inner] = eventInner.inner.inner
 
 			const unwrappedParentUuid = unwrapParentUuid(inner.file.parent)
@@ -67,14 +94,7 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 				})
 			}
 
-			// Recents (`{ type: "recents", uuid: null }`) holds recently-modified files across the account, so
-			// a genuinely NEW file belongs there. A restore leaves mtime unchanged, so it is not surfaced here.
-			if (eventInner.inner.tag === DriveEvent_Tags.FileNew) {
-				driveItemsQueryUpdateForRecents({
-					updater: prev => [...prev.filter(i => i.data.uuid !== unwrappedFileMeta.file.uuid), driveItem]
-				})
-			}
-
+			// A restore leaves mtime unchanged, so it is not surfaced in Recents (a new file is, via the batcher).
 			if (eventInner.inner.tag === DriveEvent_Tags.FileRestore) {
 				// In case of a restore from trash, we need to remove the item from the trash list
 				driveItemsQueryUpdate({
@@ -141,6 +161,10 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 					})
 				}
 			}
+
+			driveItemsQueryRemoveDirectoryFromPhotos({
+				dirUuid: inner.uuid
+			})
 
 			cache.forgetItem(inner.uuid)
 
@@ -264,6 +288,11 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 					parentUuid: unwrappedParentUuidNew,
 					updater: prev => upsertItem(prev, driveItem)
 				})
+
+				driveItemsQueryRemoveDirectoryFromPhotos({
+					dirUuid: unwrappedDirMeta.uuid,
+					newParentUuid: unwrappedParentUuidNew
+				})
 			}
 
 			break
@@ -360,6 +389,10 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 				})
 			}
 
+			driveItemsQueryRemoveDirectoryFromPhotos({
+				dirUuid: inner.uuid
+			})
+
 			const fromCache = cache.directoryUuidToAnyNormalDir.get(inner.uuid)
 
 			if (fromCache && fromCache.tag === AnyNormalDir_Tags.Dir) {
@@ -413,8 +446,26 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 			break
 		}
 
-		case DriveEvent_Tags.FolderRestore:
 		case DriveEvent_Tags.FolderSubCreated: {
+			const [inner] = eventInner.inner.inner
+
+			const unwrappedParentUuid = unwrapParentUuid(inner.dir.parent)
+			const driveItem = unwrappedDirIntoDriveItem(unwrapDirMeta(inner.dir))
+
+			if (unwrappedParentUuid) {
+				socketCreateBatcher.enqueue({
+					parentUuid: unwrappedParentUuid,
+					item: driveItem,
+					recent: false
+				})
+			} else if (driveItem.type === "directory") {
+				cache.cacheNewNormalDir(inner.dir, driveItem)
+			}
+
+			break
+		}
+
+		case DriveEvent_Tags.FolderRestore: {
 			const [inner] = eventInner.inner.inner
 
 			const unwrappedParentUuid = unwrapParentUuid(inner.dir.parent)
@@ -434,18 +485,16 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 				})
 			}
 
-			if (eventInner.inner.tag === DriveEvent_Tags.FolderRestore) {
-				// In case of a restore from trash, we need to remove the item from the trash list
-				driveItemsQueryUpdate({
-					params: {
-						path: {
-							type: "trash",
-							uuid: null
-						}
-					},
-					updater: prev => prev.filter(i => i.data.uuid !== unwrappedDirMeta.uuid)
-				})
-			}
+			// In case of a restore from trash, we need to remove the item from the trash list
+			driveItemsQueryUpdate({
+				params: {
+					path: {
+						type: "trash",
+						uuid: null
+					}
+				},
+				updater: prev => prev.filter(i => i.data.uuid !== unwrappedDirMeta.uuid)
+			})
 
 			break
 		}

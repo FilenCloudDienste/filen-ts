@@ -2,7 +2,8 @@ import auth from "@/lib/auth"
 import { AnyNormalDir } from "@filen/sdk-rs"
 import type { DriveItem } from "@/types"
 import { unwrapDirMeta, unwrapFileMeta, unwrapParentUuid, unwrappedDirIntoDriveItem, unwrappedFileIntoDriveItem } from "@/lib/sdkUnwrap"
-import { driveItemsQueryUpdateForNormalParent } from "@/features/drive/queries/useDriveItems.query"
+import { driveItemsQueryUpdateForNormalParent, driveItemsQueryRemoveDirectoryFromPhotos } from "@/features/drive/queries/useDriveItems.query"
+import socketCreateBatcher from "@/features/drive/socketCreateBatcher"
 import { markDirectorySizesStale } from "@/features/drive/queries/useDirectorySize.query"
 import { upsertItem } from "@filen/shared"
 import cache from "@/lib/cache"
@@ -153,6 +154,8 @@ export async function move({
 	}
 
 	markDirectorySizesStale()
+	// A queued create of this item must not land in its old parent after the removal below.
+	socketCreateBatcher.flushNow()
 
 	if (unwrappedParentUuidPrevious) {
 		driveItemsQueryUpdateForNormalParent({
@@ -168,6 +171,13 @@ export async function move({
 			parentUuid: unwrappedParentUuid,
 			updater: prev => upsertItem(prev, item)
 		})
+
+		if (item.type === "directory") {
+			driveItemsQueryRemoveDirectoryFromPhotos({
+				dirUuid: item.data.uuid,
+				newParentUuid: unwrappedParentUuid
+			})
+		}
 	}
 
 	// Re-point an open drive preview to the moved item. A move keeps the uuid but

@@ -2,7 +2,7 @@ import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/r
 import { DEFAULT_QUERY_OPTIONS, queryUpdater, preserveArrayIdentity, queryClient } from "@/queries/client"
 import auth from "@/lib/auth"
 import cache from "@/lib/cache"
-import { sortParams, run } from "@filen/shared"
+import { sortParams, run, upsertItems } from "@filen/shared"
 import {
 	type File,
 	type Dir,
@@ -30,6 +30,7 @@ import offline from "@/features/offline/offline"
 import cameraUpload from "@/features/cameraUpload/cameraUpload"
 import { listCameraUploadRemote, remoteWalkDropsEntries } from "@/features/cameraUpload/remoteListing"
 import logger from "@/lib/logger"
+import copyActivity from "@/features/drive/copyActivity"
 
 export const BASE_QUERY_KEY = "useDriveItemsQuery"
 
@@ -684,36 +685,39 @@ export function useDriveItemsQuery(
 	return query as UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error>
 }
 
-export function driveItemsQueryUpdate({
-	updater,
-	params
-}: {
-	params: Parameters<typeof fetchData>[0]
-} & {
+export function driveItemsQueryKey(params: UseDriveItemsQueryParams): unknown[] {
+	return [BASE_QUERY_KEY, removeVolatileParamsForKey(sortParams(params))]
+}
+
+// Whether a listing has been read (holds data). Only read listings are patched.
+export function driveItemsQueryIsRead(params: UseDriveItemsQueryParams): boolean {
+	return queryClient.getQueryState(driveItemsQueryKey(params))?.data !== undefined
+}
+
+function updateListing(
+	params: UseDriveItemsQueryParams,
 	updater:
 		| Awaited<ReturnType<typeof fetchData>>
-		| ((prev: Awaited<ReturnType<typeof fetchData>>) => Awaited<ReturnType<typeof fetchData>>)
-}): void {
-	const sortedParams = removeVolatileParamsForKey(sortParams(params))
-	const queryKey = [BASE_QUERY_KEY, sortedParams]
+		| ((prev: Awaited<ReturnType<typeof fetchData>>) => Awaited<ReturnType<typeof fetchData>>),
+	cacheNext: boolean
+): void {
+	const queryKey = driveItemsQueryKey(params)
+	const currentData = queryClient.getQueryState<Awaited<ReturnType<typeof fetchData>>>(queryKey)?.data
 
-	// Resolved here rather than inside setQueryData's functional updater so the row-creation decision
-	// below can see it. getQueryState reads the same cache entry through the same global
-	// queryKeyHashFn, and nothing can interleave in straight-line synchronous code, so `currentData`
-	// is exactly the `prev` the updater used to receive.
-	const state = queryClient.getQueryState<Awaited<ReturnType<typeof fetchData>>>(queryKey)
-	const currentData = state?.data ?? ([] satisfies Awaited<ReturnType<typeof fetchData>>)
-	const next = typeof updater === "function" ? updater(currentData) : updater
+	// Socket events and local writes alike patch only a listing that was read. One nobody has read stays
+	// unread: made from the rows a patch adds it would show as the directory's whole content until its
+	// read, and every copy, directory upload or remote create would leave such a row behind in memory
+	// and SQLite (driveItemsQueryUpdateGlobal alone fans out to twenty keys). A pending first read lands
+	// the server's state anyway.
+	if (currentData === undefined) {
+		return
+	}
 
-	// driveItemsQueryUpdateGlobal fans every mutation across all ten path variants × {uuid, null}, so a
-	// single socket event used to MATERIALIZE up to twenty listing rows for screens the user has never
-	// opened — each holding [], each written to SQLite, each restored and re-persisted on every later
-	// launch. Such a row buys nothing: whatever mounts that query refetches it anyway (refetchOnMount:
-	// "always"), and until that lands the cached [] paints an empty state where a loading state belongs.
-	// Narrow on purpose — the skip needs BOTH no existing entry (a pending, data-less query still counts
-	// as existing and is updated exactly as before) and an empty result, so optimistic inserts into a
-	// never-opened directory still create their row unchanged.
-	if (state === undefined && next.length === 0) {
+	const next = preserveArrayIdentity(currentData, typeof updater === "function" ? updater(currentData) : updater)
+
+	// An updater that changed nothing (a removal or map over a listing without the item, the common case
+	// for the global fan-out) writes nothing: no cache pass, no notify, no persist.
+	if (next === currentData) {
 		return
 	}
 
@@ -726,18 +730,34 @@ export function driveItemsQueryUpdate({
 	// index copies that must not overwrite fresher fetch-derived dir views.
 	// Runs over every item, before the cache write, exactly as it did inside the updater: it is the one
 	// place that keeps the uuid caches coherent with an optimistic listing, and skipping it would rest
-	// on an assumption about who populated them first. Only the STORED value takes the fast path.
-	const offlineListing = params.path.type === "offline"
+	// on an assumption about who populated them first. A bulk upsert whose caller cached its own delta
+	// skips it — the rest of the listing was cached when it got there.
+	if (cacheNext) {
+		const offlineListing = params.path.type === "offline"
 
-	for (const item of next) {
-		if (offlineListing) {
-			cache.cacheDriveItemReference(item)
-		} else {
-			cache.cacheDriveItem(item)
+		for (const item of next) {
+			if (offlineListing) {
+				cache.cacheDriveItemReference(item)
+			} else {
+				cache.cacheDriveItem(item)
+			}
 		}
 	}
 
-	queryUpdater.set<Awaited<ReturnType<typeof fetchData>>>(queryKey, preserveArrayIdentity(currentData, next))
+	queryUpdater.set<Awaited<ReturnType<typeof fetchData>>>(queryKey, next)
+}
+
+export function driveItemsQueryUpdate({
+	updater,
+	params
+}: {
+	params: Parameters<typeof fetchData>[0]
+} & {
+	updater:
+		| Awaited<ReturnType<typeof fetchData>>
+		| ((prev: Awaited<ReturnType<typeof fetchData>>) => Awaited<ReturnType<typeof fetchData>>)
+}): void {
+	updateListing(params, updater, true)
 }
 
 /**
@@ -771,6 +791,26 @@ export function driveItemsQueryUpdateForNormalParent({
 			params: { path: { type: "drive", uuid: null } },
 			updater
 		})
+	}
+}
+
+// Whether a normal parent's listing was read, under either root key.
+export function driveItemsQueryIsReadForNormalParent(parentUuid: string): boolean {
+	return (
+		driveItemsQueryIsRead({ path: { type: "drive", uuid: parentUuid } }) ||
+		(cache.rootUuid !== null && parentUuid === cache.rootUuid && driveItemsQueryIsRead({ path: { type: "drive", uuid: null } }))
+	)
+}
+
+// Upsert many items into one normal parent's listing in a single write. The caller caches the items
+// itself; the listing's existing rows are not re-cached.
+export function driveItemsQueryUpsertManyForNormalParent({ parentUuid, items }: { parentUuid: string; items: readonly DriveItem[] }): void {
+	const updater = (prev: DriveItem[]) => upsertItems(prev, items)
+
+	updateListing({ path: { type: "drive", uuid: parentUuid } }, updater, false)
+
+	if (cache.rootUuid && parentUuid === cache.rootUuid) {
+		updateListing({ path: { type: "drive", uuid: null } }, updater, false)
 	}
 }
 
@@ -810,36 +850,186 @@ export function driveItemsQueryUpdateGlobal({
 	driveItemsQueryUpdateForPhotos({ updater })
 }
 
-// Walks the cached directory tree up from `parentUuid`, reporting whether it is the camera-upload root
-// or a descendant of it. Gates the APPEND into the recursive photos query so a file uploaded OUTSIDE
-// the camera-upload subtree is never wrongly inserted there (it would otherwise linger until the query
-// next refetches). Bails to false on an uncached ancestor — a miss (the item just shows on the next
-// fetch) is acceptable; a false insert is not.
-function isUnderCameraUploadRoot(parentUuid: string, rootUuid: string): boolean {
+type CameraRootRelation = "inside" | "outside" | "unknown"
+
+// Walks the cached directory tree up from `parentUuid`: "inside" when it is the camera-upload root or a
+// descendant, "outside" when the walk reaches the drive root without passing it, "unknown" on an
+// uncached ancestor.
+function cameraRootRelation(parentUuid: string, rootUuid: string): CameraRootRelation {
 	let current: string | null = parentUuid
 	let guard = 0
 
 	while (current && guard++ < 64) {
 		if (current === rootUuid) {
-			return true
+			return "inside"
 		}
 
 		const anyDir = cache.directoryUuidToAnyNormalDir.get(current)
 
-		if (!anyDir || anyDir.tag !== AnyNormalDir_Tags.Dir) {
-			return false
+		if (!anyDir) {
+			return "unknown"
+		}
+
+		if (anyDir.tag !== AnyNormalDir_Tags.Dir) {
+			return "outside"
 		}
 
 		const next = unwrapParentUuid(anyDir.inner[0].parent)
 
 		if (!next || next === current) {
-			return false
+			return "unknown"
 		}
 
 		current = next
 	}
 
-	return false
+	return "unknown"
+}
+
+// Gates the APPEND into the recursive photos query so a file uploaded OUTSIDE the camera-upload subtree
+// is never wrongly inserted there (it would otherwise linger until the query next refetches). An
+// uncached ancestor counts as outside — a miss (the item just shows on the next fetch) is acceptable; a
+// false insert is not.
+function isUnderCameraUploadRoot(parentUuid: string, rootUuid: string): boolean {
+	return cameraRootRelation(parentUuid, rootUuid) === "inside"
+}
+
+function photosParams(config: Awaited<ReturnType<typeof cameraUpload.getConfig>>): UseDriveItemsQueryParams | null {
+	if (!config.remoteDir) {
+		return null
+	}
+
+	return {
+		path: {
+			type: "photos",
+			uuid: config.remoteDir.inner[0].uuid
+		}
+	}
+}
+
+// Upserts new files into the Photos grid in one write and one camera-upload config read, keeping only
+// those whose parent lies under the camera-upload root.
+export function driveItemsQueryUpsertManyIntoPhotos(entries: readonly { parentUuid: string; item: DriveItem }[]): void {
+	if (entries.length === 0) {
+		return
+	}
+
+	cameraUpload
+		.getConfig()
+		.then(config => {
+			const params = photosParams(config)
+
+			if (!params || !params.path.uuid || !driveItemsQueryIsRead(params)) {
+				return
+			}
+
+			const rootUuid = params.path.uuid
+			const relations = new Map<string, boolean>()
+			const items: DriveItem[] = []
+
+			for (const entry of entries) {
+				let inside = relations.get(entry.parentUuid)
+
+				if (inside === undefined) {
+					inside = isUnderCameraUploadRoot(entry.parentUuid, rootUuid)
+
+					relations.set(entry.parentUuid, inside)
+				}
+
+				if (inside) {
+					items.push(entry.item)
+				}
+			}
+
+			if (items.length === 0) {
+				return
+			}
+
+			const uuids = new Set(items.map(item => item.data.uuid))
+
+			updateListing(params, prev => [...prev.filter(item => !uuids.has(item.data.uuid)), ...items], false)
+		})
+		.catch(err => {
+			logger.error("drive", "driveItemsQueryUpsertManyIntoPhotos: failed to get camera upload config", { error: err })
+		})
+}
+
+// Photos lists files recursively, so a directory leaving the camera-upload tree (trashed, deleted or,
+// with `newParentUuid`, moved) takes rows a uuid filter can't see: every photo whose cached ancestry
+// passes through it. A move only removes them when the destination is known to lie outside the tree.
+// A photo whose ancestry isn't cached stays until the grid's next read.
+export function driveItemsQueryRemoveDirectoryFromPhotos({ dirUuid, newParentUuid }: { dirUuid: string; newParentUuid?: string }): void {
+	cameraUpload
+		.getConfig()
+		.then(config => {
+			const params = photosParams(config)
+
+			if (!params || !params.path.uuid || !driveItemsQueryIsRead(params)) {
+				return
+			}
+
+			if (newParentUuid !== undefined && cameraRootRelation(newParentUuid, params.path.uuid) !== "outside") {
+				return
+			}
+
+			// Per parent directory: does its cached ancestry pass through dirUuid.
+			const underDir = new Map<string, boolean>()
+
+			const isUnderDir = (parentUuid: string): boolean => {
+				const walked: string[] = []
+				let current: string | null = parentUuid
+				let result = false
+				let guard = 0
+
+				while (current && guard++ < 64) {
+					const known = underDir.get(current)
+
+					if (known !== undefined) {
+						result = known
+
+						break
+					}
+
+					if (current === dirUuid) {
+						result = true
+
+						break
+					}
+
+					walked.push(current)
+
+					const anyDir = cache.directoryUuidToAnyNormalDir.get(current)
+
+					if (!anyDir || anyDir.tag !== AnyNormalDir_Tags.Dir) {
+						break
+					}
+
+					const next = unwrapParentUuid(anyDir.inner[0].parent)
+
+					current = next && next !== current ? next : null
+				}
+
+				for (const uuid of walked) {
+					underDir.set(uuid, result)
+				}
+
+				return result
+			}
+
+			updateListing(
+				params,
+				prev =>
+					prev.filter(item => {
+						const parentUuid = "parent" in item.data ? unwrapParentUuid(item.data.parent) : null
+
+						return !parentUuid || !isUnderDir(parentUuid)
+					}),
+				false
+			)
+		})
+		.catch(err => {
+			logger.error("drive", "driveItemsQueryRemoveDirectoryFromPhotos: failed to get camera upload config", { error: err })
+		})
 }
 
 // Optimistically update the recursive photos-grid query. It is a SEPARATE query from any `drive`
@@ -897,6 +1087,8 @@ export function driveItemsQueryUpdateForPhotos({
 // (no ancestry gate). Do NOT route new files through the global updater instead: that would also append
 // them to the favorites / links / sharedIn / sharedOut virtual roots, where an un-favorited, un-shared
 // file does not belong.
+//
+// Deferred while a copy runs (see copyActivity): one invalidation at the end, a refetch only if mounted.
 export function driveItemsQueryUpdateForRecents({
 	updater
 }: {
@@ -904,13 +1096,31 @@ export function driveItemsQueryUpdateForRecents({
 		| Awaited<ReturnType<typeof fetchData>>
 		| ((prev: Awaited<ReturnType<typeof fetchData>>) => Awaited<ReturnType<typeof fetchData>>)
 }): void {
+	const params: UseDriveItemsQueryParams = {
+		path: {
+			type: "recents",
+			uuid: null
+		}
+	}
+
+	if (
+		copyActivity.deferRecents(() => {
+			queryClient
+				.invalidateQueries({
+					queryKey: driveItemsQueryKey(params),
+					exact: true,
+					refetchType: "active"
+				})
+				.catch(err => {
+					logger.error("drive", "deferred Recents invalidation failed", { error: err })
+				})
+		})
+	) {
+		return
+	}
+
 	driveItemsQueryUpdate({
-		params: {
-			path: {
-				type: "recents",
-				uuid: null
-			}
-		},
+		params,
 		updater
 	})
 }
