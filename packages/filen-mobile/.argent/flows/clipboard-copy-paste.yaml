@@ -1,0 +1,96 @@
+steps:
+  - echo: "Prerequisite: signed in, Filen opens on the Drive root sorted by name. The flow makes its own scratch directory 0flowclip at the root and trashes it at the end. Restart Filen and expect the Drive root"
+  - launch: io.filen.app
+  - await: { visible: { text: { matches: '^Drive$' } }, timeout: 30000 }
+  - await: { idle: true }
+  - echo: "Dev builds show the LogBox warning banner over the bottom bar; dismiss it (unlabeled close button, raw point)"
+  - when: { visible: { text: "Open debugger to view warnings" } }
+    steps:
+      - tap: { x: 0.92, y: 0.929 }
+  - echo: "Set up: create 0flowclip at the root; the leading 0 sorts it to the top of a name-sorted root (header More actions menu: drive-header-more is absent from the iOS runner tree; raw point)"
+  - tap: { x: 0.766, y: 0.096 }
+  - await: { visible: { text: Create directory } }
+  - tap: { text: Create directory }
+  - await: { visible: { text: Enter a name for the new directory } }
+  - tool: keyboard
+    args:
+      text: 0flowclip
+  - tap: { text: Create }
+  - await: { visible: { text: { matches: '^0flowclip \d' } }, timeout: 10000 }
+  - await: { idle: true }
+  - tap: { text: { matches: '^0flowclip \d' } }
+  - await: { visible: { text: This directory is empty }, timeout: 10000 }
+  - await: { idle: true }
+  - echo: "Set up: note.txt through the empty-state Add menu"
+  - tap: { id: drive-empty-add }
+  - await: { visible: { text: Upload } }
+  - tap: { text: Upload }
+  - await: { visible: { text: Create text file } }
+  - tap: { text: Create text file }
+  - await: { visible: { text: Enter a name for the new text file } }
+  - tool: keyboard
+    args:
+      text: note.txt
+  - tap: { text: Create }
+  - echo: "The text editor opens; close it with its unlabeled close button (raw point)"
+  - wait: 2500
+  - await: { idle: true }
+  - tap: { x: 0.094, y: 0.096 }
+  - await: { visible: { text: { matches: '^note\.txt \d' } }, timeout: 10000 }
+  - await: { idle: true }
+  - echo: "Set up: subdirectory inbox (header More actions menu, raw point)"
+  - tap: { x: 0.766, y: 0.096 }
+  - await: { visible: { text: Create directory } }
+  - tap: { text: Create directory }
+  - await: { visible: { text: Enter a name for the new directory } }
+  - tool: keyboard
+    args:
+      text: inbox
+  - tap: { text: Create }
+  - await: { visible: { text: { matches: '^inbox \d' } }, timeout: 10000 }
+  - await: { idle: true }
+  - echo: "Copy note.txt to the clipboard (Copy submenu; its child Copy shares the parent's label, so raw point)"
+  - long-press: { on: { text: { matches: '^note\.txt \d' } }, duration: 900 }
+  - await: { visible: { text: Versions } }
+  - tap: { text: Copy }
+  - await: { visible: { text: Cut } }
+  - tap: { x: 0.35, y: 0.714 }
+  - await: { hidden: { text: Cut } }
+  - echo: "Paste from the header menu: expect the keep-both copy note (1).txt"
+  - tap: { x: 0.766, y: 0.096 }
+  - await: { visible: { text: Clear clipboard } }
+  - tap: { text: Paste }
+  - await: { visible: { text: { matches: '^note \(1\)\.txt \d' } }, timeout: 15000 }
+  - await: { idle: true }
+  - echo: "Paste into the inbox row: expect note.txt inside inbox"
+  - long-press: { on: { text: { matches: '^inbox \d' } }, duration: 900 }
+  - await: { visible: { text: Paste into } }
+  - tap: { text: Paste into }
+  - await: { hidden: { text: Paste into } }
+  - tap: { text: { matches: '^inbox \d' } }
+  - await: { visible: { text: { matches: '^inbox$' } } }
+  - await: { visible: { text: { matches: '^note\.txt \d' } }, timeout: 15000 }
+  - await: { idle: true }
+  - echo: "Clear clipboard: Paste leaves the header menu"
+  - tap: { x: 0.766, y: 0.096 }
+  - await: { visible: { text: Clear clipboard } }
+  - tap: { text: Clear clipboard }
+  - await: { hidden: { text: Clear clipboard } }
+  - tap: { x: 0.766, y: 0.096 }
+  - await: { visible: { text: Transfers } }
+  - assert: { hidden: { text: Paste } }
+  - tap: { x: 0.5, y: 0.8 }
+  - await: { hidden: { text: Transfers } }
+  - echo: "Clean up: back through 0flowclip to the root and trash 0flowclip"
+  - tap: { id: BackButton }
+  - await: { visible: { text: { matches: '^note \(1\)\.txt \d' } } }
+  - await: { idle: true }
+  - tap: { id: BackButton }
+  - await: { visible: { text: { matches: '^0flowclip \d' } } }
+  - await: { idle: true }
+  - long-press: { on: { text: { matches: '^0flowclip \d' } }, duration: 900 }
+  - await: { visible: { text: Color } }
+  - tap: { text: Trash }
+  - await: { visible: { text: Are you sure you want to move this item to the trash } }
+  - tap: { text: Trash, after: { text: Cancel } }
+  - await: { hidden: { text: { matches: '^0flowclip \d' } }, timeout: 15000 }
