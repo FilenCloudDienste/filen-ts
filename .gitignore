@@ -48,3 +48,7 @@ codedb.snapshot
 .superpowers/
 .playwright-mcp/
 docs/
+
+# argent tool output (screen recordings etc.); saved flows stay tracked
+**/.argent/*
+!**/.argent/flows/
