@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest"
 import type { Dir, File, UuidStr } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
-import { assembleDragPayload, canDragVariant, isSameParentTarget, isValidMoveTarget } from "@/features/drive/lib/dnd.logic"
+import {
+	assembleDragPayload,
+	canDragVariant,
+	dragDropMode,
+	isSameParentTarget,
+	isValidCopyTarget,
+	isValidMoveTarget
+} from "@/features/drive/lib/dnd.logic"
 
 // UuidStr is a template-literal brand requiring at least 3 dashes (mirrors moveTargetDialog.test.ts) —
 // a padded label doubles as both an item's `data.uuid` and a matching ancestry entry.
@@ -181,5 +188,35 @@ describe("isValidMoveTarget", () => {
 		const payload = [dirItem("a", "home")]
 
 		expect(isValidMoveTarget({ targetUuid: null, targetAncestry: [], payload, rootUuid: ROOT })).toBe(true)
+	})
+})
+
+describe("dragDropMode", () => {
+	it("copies with Option on macOS, and Ctrl held there still moves", () => {
+		expect(dragDropMode({ altKey: true, ctrlKey: false }, true)).toBe("copy")
+		expect(dragDropMode({ altKey: false, ctrlKey: true }, true)).toBe("move")
+		expect(dragDropMode({ altKey: false, ctrlKey: false }, true)).toBe("move")
+	})
+
+	it("copies with Ctrl on Windows and Linux, and Alt held there still moves", () => {
+		expect(dragDropMode({ altKey: false, ctrlKey: true }, false)).toBe("copy")
+		expect(dragDropMode({ altKey: true, ctrlKey: false }, false)).toBe("move")
+	})
+})
+
+describe("isValidCopyTarget", () => {
+	it("accepts the payload's own parent, which a move refuses", () => {
+		const payload = [fileItem("a", "home")]
+
+		expect(isValidCopyTarget({ targetAncestry: [testUuid("home")], payload })).toBe(true)
+		expect(isValidMoveTarget({ targetUuid: testUuid("home"), targetAncestry: [testUuid("home")], payload, rootUuid: ROOT })).toBe(false)
+	})
+
+	it("refuses an empty payload and a copied directory as its own destination or below it", () => {
+		const payload = [dirItem("a", "home")]
+
+		expect(isValidCopyTarget({ targetAncestry: [testUuid("home")], payload: [] })).toBe(false)
+		expect(isValidCopyTarget({ targetAncestry: [testUuid("home"), testUuid("a")], payload })).toBe(false)
+		expect(isValidCopyTarget({ targetAncestry: [testUuid("home"), testUuid("a"), testUuid("inner")], payload })).toBe(false)
 	})
 })

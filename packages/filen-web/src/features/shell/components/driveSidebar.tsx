@@ -7,7 +7,7 @@ import { type DriveRouteId, splatToUuids } from "@/features/drive/lib/navigate"
 import { useDirectoryTreeChildrenQuery } from "@/features/drive/queries/drive"
 import { useDirectoryTreeStore } from "@/features/drive/store/useDirectoryTreeStore"
 import { DirectoryTree, type DirectoryTreeContext } from "@/features/drive/components/directoryTree"
-import { useDriveDropTarget } from "@/features/drive/hooks/useDriveDropTarget"
+import { dropHighlightClass, useDriveDropTarget } from "@/features/drive/hooks/useDriveDropTarget"
 import { StorageMeter } from "@/features/shell/components/storageMeter"
 import { useResizableSidebar } from "@/features/shell/hooks/useResizableSidebar"
 import { SidebarResizeHandle } from "@/features/shell/components/sidebarResizeHandle"
@@ -102,6 +102,7 @@ function CloudDriveRoot({ label, open, onToggle }: { label: string; open: boolea
 	const drop = useDriveDropTarget({
 		targetUuid: null,
 		targetAncestry: [],
+		targetName: label,
 		onDwell: open ? undefined : onToggle
 	})
 
@@ -113,7 +114,7 @@ function CloudDriveRoot({ label, open, onToggle }: { label: string; open: boolea
 			onDrop={drop.onDrop}
 			className={cn(
 				"group flex h-8 items-center gap-1 rounded-xl pr-1 transition-colors app-region-no-drag hover:bg-sidebar-accent/60",
-				drop.isOver && "bg-primary/10 ring-2 ring-primary/60 ring-inset"
+				dropHighlightClass(drop)
 			)}
 		>
 			<button

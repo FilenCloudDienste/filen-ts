@@ -17,7 +17,7 @@ import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import { useDriveClipboardStore } from "@/features/drive/store/useDriveClipboardStore"
 import { showVideoBadge } from "@/features/drive/components/driveTile.logic"
 import { useThumbnail } from "@/features/drive/hooks/useThumbnail"
-import { useDriveDropTarget } from "@/features/drive/hooks/useDriveDropTarget"
+import { dropHighlightClass, useDriveDropTarget } from "@/features/drive/hooks/useDriveDropTarget"
 import { cn, driveItemName } from "@filen/shared"
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
@@ -75,6 +75,7 @@ export function DriveTile({
 	const drop = useDriveDropTarget({
 		targetUuid: item.data.uuid,
 		targetAncestry: [...splatToUuids(splat), item.data.uuid],
+		targetName: name,
 		disabled: item.type !== "directory" || !canDragVariant(variant)
 	})
 	// Only the two shared variants' ROOT listing resolve a counterparty; every other variant/nested
@@ -113,7 +114,7 @@ export function DriveTile({
 						// assumes — see gridLayout.ts's own comment on the shared constants.
 						className={cn(
 							"group/tile relative flex w-44 shrink-0 flex-col gap-2 justify-self-center rounded-2xl p-2 text-center text-sm focus-ring-row outline-none select-none not-aria-selected:hover:bg-accent/50 aria-selected:bg-accent aria-selected:text-accent-foreground",
-							drop.isOver && "bg-primary/10 ring-2 ring-primary/60 ring-inset",
+							dropHighlightClass(drop),
 							cut && "*:not-data-[slot=dropdown-menu-trigger]:opacity-50"
 						)}
 						data-cut={cut ? "" : undefined}

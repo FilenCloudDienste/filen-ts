@@ -148,7 +148,8 @@ export function buildDragSourceProps(item: DriveItem, variant: DriveVariant): Dr
 			}
 
 			setDragPayload(dragged)
-			event.dataTransfer.effectAllowed = "move"
+			// Copy too: a drop with the copy modifier held copies (useDriveDropTarget).
+			event.dataTransfer.effectAllowed = "copyMove"
 			event.dataTransfer.setData(INTERNAL_DRAG_TYPE, "1")
 			applyDragImage(event.dataTransfer, dragged)
 		},

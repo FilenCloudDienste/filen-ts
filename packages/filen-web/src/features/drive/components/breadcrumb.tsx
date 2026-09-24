@@ -6,7 +6,7 @@ import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { driveRouteIdFor, type DriveRouteId, splatToUuids } from "@/features/drive/lib/navigate"
 import { useDirectoryNamesQuery } from "@/features/drive/queries/drive"
 import { canDragVariant } from "@/features/drive/lib/dnd.logic"
-import { useDriveDropTarget } from "@/features/drive/hooks/useDriveDropTarget"
+import { dropHighlightClass, useDriveDropTarget } from "@/features/drive/hooks/useDriveDropTarget"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { cn } from "@filen/shared"
@@ -50,6 +50,7 @@ function CrumbLink({ variant, routeId, splatValue, targetUuid, targetAncestry, l
 	const drop = useDriveDropTarget({
 		targetUuid,
 		targetAncestry,
+		targetName: label,
 		disabled: !canDragVariant(variant)
 	})
 
@@ -61,11 +62,7 @@ function CrumbLink({ variant, routeId, splatValue, targetUuid, targetAncestry, l
 			onDragOver={drop.onDragOver}
 			onDragLeave={drop.onDragLeave}
 			onDrop={drop.onDrop}
-			className={cn(
-				CRUMB_LINK_CLASS,
-				"rounded-sm px-1",
-				drop.isOver && "bg-primary/10 text-foreground ring-2 ring-primary/60 ring-inset"
-			)}
+			className={cn(CRUMB_LINK_CLASS, "rounded-sm px-1", drop.isOver && "text-foreground", dropHighlightClass(drop))}
 		>
 			{label}
 		</Link>

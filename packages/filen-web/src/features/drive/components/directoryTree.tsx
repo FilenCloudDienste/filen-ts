@@ -4,7 +4,7 @@ import type { UseQueryResult } from "@tanstack/react-query"
 import { cn } from "@filen/shared"
 import { DirectoryGlyph } from "@/features/drive/components/itemIcon"
 import type { DirectoryTreeChild } from "@/features/drive/queries/drive"
-import { useDriveDropTarget } from "@/features/drive/hooks/useDriveDropTarget"
+import { dropHighlightClass, useDriveDropTarget } from "@/features/drive/hooks/useDriveDropTarget"
 import { Spinner } from "@/components/ui/spinner"
 
 // Reusable collapsible directory tree. Data wiring is fully injected (`useChildren`, `isOpen`,
@@ -134,6 +134,7 @@ function DirectoryTreeNode({ child, path, depth, tree }: DirectoryTreeNodeProps)
 	const drop = useDriveDropTarget({
 		targetUuid: child.uuid,
 		targetAncestry: path,
+		targetName: child.name,
 		disabled: !tree.enableDrop,
 		onDwell: open
 			? undefined
@@ -159,7 +160,7 @@ function DirectoryTreeNode({ child, path, depth, tree }: DirectoryTreeNodeProps)
 						: onBranch
 							? "text-sidebar-accent-foreground hover:bg-sidebar-accent/60"
 							: "text-sidebar-foreground/80 hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground",
-					drop.isOver && "bg-primary/10 ring-2 ring-primary/60 ring-inset"
+					dropHighlightClass(drop)
 				)}
 			>
 				{/* The chevron owns the disclosure state — it is what expands and collapses the subtree. */}

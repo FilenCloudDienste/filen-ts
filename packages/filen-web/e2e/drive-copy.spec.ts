@@ -34,6 +34,79 @@ async function uploadTextFile(page: Page, name: string): Promise<void> {
 		.setInputFiles({ name, mimeType: "text/plain", buffer: Buffer.from(`copy probe ${name}`) })
 }
 
+// Drives an HTML5 drag with the copy modifier held, the way drive-dnd-move.spec drives a plain one:
+// one shared DataTransfer through dragstart → dragenter → dragover → drop → dragend, both endpoints
+// resolved in the same turn. The modifier is the page's own copy key (Option on macOS, else Ctrl), and
+// the target has to accept the drop as a copy (dragover cancelled, dropEffect "copy").
+async function html5DragCopy(page: Page, source: { selector: string; text: string }, target: { selector: string; text: string }) {
+	const contract = await page.evaluate(
+		([src, tgt]) => {
+			function resolve(endpoint: { selector: string; text: string }): Element {
+				const match = Array.from(document.querySelectorAll(endpoint.selector)).find(element =>
+					element.textContent.includes(endpoint.text)
+				)
+
+				if (match === undefined) {
+					throw new Error(`no ${endpoint.selector} element contains "${endpoint.text}"`)
+				}
+
+				return match
+			}
+
+			const mac = /mac/i.test(navigator.userAgent) && !/iphone|ipad|ipod/i.test(navigator.userAgent)
+			const srcElement = resolve(src)
+			const tgtElement = resolve(tgt)
+			const dataTransfer = new DataTransfer()
+			const fire = (element: Element, type: string, copy: boolean): boolean =>
+				element.dispatchEvent(
+					new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer, altKey: copy && mac, ctrlKey: copy && !mac })
+				)
+
+			// A synthetic transfer outside a real drag session drops what the handler writes to its drop
+			// effect, so the write itself is recorded.
+			let dropEffect = "unset"
+
+			Object.defineProperty(dataTransfer, "dropEffect", {
+				get: () => dropEffect,
+				set: (value: string) => {
+					dropEffect = value
+				}
+			})
+
+			fire(srcElement, "dragstart", false)
+			fire(tgtElement, "dragenter", true)
+
+			const dropAllowed = !fire(tgtElement, "dragover", true)
+
+			fire(tgtElement, "drop", true)
+			fire(srcElement, "dragend", true)
+
+			return { dropAllowed, dropEffect }
+		},
+		[source, target] as const
+	)
+
+	expect(contract.dropAllowed).toBe(true)
+	expect(contract.dropEffect).toBe("copy")
+}
+
+// A finished copy card stays until hidden, and the teardown's trash waits for toasts to clear; a test
+// that failed after starting a copy would otherwise leak its scratch directory.
+async function hideCopyCards(page: Page): Promise<void> {
+	const hide = page.getByRole("button", { name: "Hide copy progress" })
+
+	// Bounded: a card leaving on its own can detach under the click, which is fine.
+	for (let attempt = 0; attempt < 5 && (await hide.count()) > 0; attempt++) {
+		await hide
+			.first()
+			.click({ timeout: 5_000 })
+			.catch(() => undefined)
+		await expect(hide)
+			.toHaveCount(0, { timeout: 2_000 })
+			.catch(() => undefined)
+	}
+}
+
 test.describe.configure({ mode: "serial" })
 
 test.describe("drive copy", () => {
@@ -89,6 +162,7 @@ test.describe("drive copy", () => {
 			// A finished card stays until dismissed, and the teardown's trash waits for toasts to clear.
 			await page.getByRole("button", { name: "Hide copy progress" }).click()
 		} finally {
+			await hideCopyCards(page)
 			await trashScratchDirectory(page, scratchName)
 		}
 	})
@@ -137,6 +211,7 @@ test.describe("drive copy", () => {
 			await expect(listbox.getByRole("option", { name: `second-${runId}` })).toHaveCount(2)
 			await page.getByRole("button", { name: "Hide copy progress" }).click()
 		} finally {
+			await hideCopyCards(page)
 			await trashScratchDirectory(page, scratchName)
 		}
 	})
@@ -214,6 +289,55 @@ test.describe("drive copy", () => {
 			await expect(listbox.getByRole("option", { name: keptName })).toBeVisible()
 			await expect(listbox.getByRole("option", { name: movedName })).toHaveCount(0)
 		} finally {
+			await hideCopyCards(page)
+			await trashScratchDirectory(page, scratchName)
+		}
+	})
+
+	test("copies by dragging with the copy modifier held, onto a row and onto a breadcrumb", async ({
+		page,
+		injectedSession,
+		browserName
+	}) => {
+		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+		expect(injectedSession.length).toBeGreaterThan(0)
+
+		const runId = crypto.randomUUID()
+		const scratchName = `e2e-copy-${runId}`
+		const subName = `sub-${runId}`
+		const fileName = `dragged-${runId}.txt`
+
+		await bootTo(page)
+
+		try {
+			const { listbox } = await enterScratchDirectory(page, scratchName)
+
+			await createDirectoryViaDialog(page, subName)
+			await uploadTextFile(page, fileName)
+			await expect(listbox.getByRole("option")).toHaveCount(2, { timeout: LIVE_WRITE_TIMEOUT_MS })
+
+			// Onto a directory row: a copy lands there and the source stays.
+			await html5DragCopy(page, { selector: '[role="option"]', text: fileName }, { selector: '[role="option"]', text: subName })
+			await expect(page.getByText(`Copied 1 item → ${subName}`)).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
+			await page.getByRole("button", { name: "Hide copy progress" }).click()
+			await expect(listbox.getByRole("option", { name: fileName })).toBeVisible()
+
+			// From inside the subdirectory back onto its parent's breadcrumb: a second copy there.
+			await descendInto(page, listbox, subName)
+			await expect(listbox.getByRole("option", { name: fileName })).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
+			await html5DragCopy(
+				page,
+				{ selector: '[role="option"]', text: fileName },
+				{ selector: 'nav[aria-label="Breadcrumb"] a', text: scratchName }
+			)
+			await expect(page.getByText(`Copied 1 item → ${scratchName}`)).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
+			await page.getByRole("button", { name: "Hide copy progress" }).click()
+			await expect(listbox.getByRole("option", { name: fileName })).toBeVisible()
+
+			await page.getByRole("navigation", { name: "Breadcrumb" }).getByRole("link", { name: scratchName, exact: true }).click()
+			await expect(listbox.getByRole("option", { name: `dragged-${runId}` })).toHaveCount(2, { timeout: LIVE_WRITE_TIMEOUT_MS })
+		} finally {
+			await hideCopyCards(page)
 			await trashScratchDirectory(page, scratchName)
 		}
 	})

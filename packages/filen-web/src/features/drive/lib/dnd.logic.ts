@@ -67,3 +67,17 @@ export function isValidMoveTarget({ targetUuid, targetAncestry, payload, rootUui
 
 	return true
 }
+
+export type DragDropMode = "move" | "copy"
+
+// A drop copies instead of moving while the platform's copy modifier is held, as in Finder (Option) and
+// Explorer (Ctrl). Read off each drag event, so pressing or releasing it mid-drag switches the mode.
+export function dragDropMode(event: { altKey: boolean; ctrlKey: boolean }, mac: boolean): DragDropMode {
+	return (mac ? event.altKey : event.ctrlKey) ? "copy" : "move"
+}
+
+// A copy may land beside its source (the SDK gives it a free name), so only the self/descendant guard
+// applies — the copy picker's own rule (isCopyConfirmDisabled).
+export function isValidCopyTarget({ targetAncestry, payload }: Pick<MoveTargetParams, "targetAncestry" | "payload">): boolean {
+	return payload.length > 0 && !isMoveDestinationForbidden(targetAncestry, payload)
+}

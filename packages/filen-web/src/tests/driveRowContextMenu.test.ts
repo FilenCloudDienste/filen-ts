@@ -23,8 +23,10 @@ vi.mock("@/features/drive/queries/drive", async importOriginal => {
 })
 vi.mock("@/features/drive/hooks/useThumbnail", () => ({ useThumbnail: () => null }))
 vi.mock("@/features/drive/hooks/useDriveDropTarget", () => ({
+	dropHighlightClass: () => false,
 	useDriveDropTarget: () => ({
 		isOver: false,
+		mode: "move",
 		onDragEnter: () => undefined,
 		onDragOver: () => undefined,
 		onDragLeave: () => undefined,

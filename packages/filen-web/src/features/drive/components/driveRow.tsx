@@ -16,7 +16,7 @@ import { DriveBulkContextMenuContent } from "@/features/drive/components/bulkMen
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import { useDriveClipboardStore } from "@/features/drive/store/useDriveClipboardStore"
 import { useThumbnail } from "@/features/drive/hooks/useThumbnail"
-import { useDriveDropTarget } from "@/features/drive/hooks/useDriveDropTarget"
+import { dropHighlightClass, useDriveDropTarget } from "@/features/drive/hooks/useDriveDropTarget"
 import { cn, driveItemName } from "@filen/shared"
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
@@ -84,6 +84,7 @@ export function DriveRow({
 	const drop = useDriveDropTarget({
 		targetUuid: item.data.uuid,
 		targetAncestry: [...splatToUuids(splat), item.data.uuid],
+		targetName: name,
 		disabled: item.type !== "directory" || !canDragVariant(variant)
 	})
 	// Only the two shared variants' ROOT listing resolve a counterparty; every other variant/nested
@@ -122,7 +123,7 @@ export function DriveRow({
 						style={style}
 						className={cn(
 							"group/row flex h-10 items-center gap-3 rounded-xl px-3 text-sm focus-ring-row outline-none select-none not-aria-selected:hover:bg-accent/50 aria-selected:bg-accent aria-selected:text-accent-foreground",
-							drop.isOver && "bg-primary/10 ring-2 ring-primary/60 ring-inset",
+							dropHighlightClass(drop),
 							cut && "*:not-data-[slot=dropdown-menu-trigger]:opacity-50"
 						)}
 						data-cut={cut ? "" : undefined}
