@@ -17,10 +17,11 @@ import { newTmpDir } from "@/lib/tmp"
 import { getRealDriveItemParent } from "@/lib/sdkUnwrap"
 import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
 import alerts from "@/lib/alerts"
+import { buildCopyMenuButton } from "@/features/drive/components/item/menuActionsCopy"
 import logger from "@/lib/logger"
 
 /**
- * Builds the bulk-action menu buttons (favorite / save-to-device / download /
+ * Builds the bulk-action menu buttons (favorite / copy / save-to-device / download /
  * make-offline / trash + select-all) shown in the photos header while in
  * selection mode. Subscribes to the drive selection store itself so the
  * returned buttons stay in sync with the current selection.
@@ -65,6 +66,19 @@ export function usePhotoBulkActions({ items, drivePath }: { items: DriveItemFile
 			})
 		}
 	})
+
+	// Copy and "Copy to…" only: Photos has no Move, so no Cut, and no directory to paste into.
+	if (!driveFlags.includesUndecryptable) {
+		bulkButtons.push(
+			buildCopyMenuButton({
+				items: selectedItems,
+				withCut: false,
+				bulk: true,
+				onDone: () => useDriveStore.getState().clearSelectedItems(),
+				t
+			})
+		)
+	}
 
 	if (driveFlags.everyImageOrVideoFile) {
 		bulkButtons.push({
