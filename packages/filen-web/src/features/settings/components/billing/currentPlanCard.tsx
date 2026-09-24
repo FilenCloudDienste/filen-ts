@@ -4,7 +4,7 @@ import { tierLabelKey } from "@/features/settings/lib/billing"
 import type { AccountQuerySuccess } from "@/queries/account"
 import { Card, CardFooter, CardHeader, CardTitle, CardDescription, CardAction } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
+import { buttonVariants } from "@/components/ui/button"
 
 interface CurrentPlanCardProps {
 	accountQuery: AccountQuerySuccess
@@ -31,18 +31,14 @@ function CurrentPlanCard({ accountQuery }: CurrentPlanCardProps) {
 				</CardAction>
 			</CardHeader>
 			<CardFooter>
-				<Button
-					variant="outline"
-					render={
-						<a
-							href="https://filen.io/pricing"
-							target="_blank"
-							rel="noopener noreferrer"
-						/>
-					}
+				<a
+					href="https://filen.io/pricing"
+					target="_blank"
+					rel="noopener noreferrer"
+					className={buttonVariants({ variant: "outline" })}
 				>
 					{t("settingsBillingManageOnFilen")}
-				</Button>
+				</a>
 			</CardFooter>
 		</Card>
 	)

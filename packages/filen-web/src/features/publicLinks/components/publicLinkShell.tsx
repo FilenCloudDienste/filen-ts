@@ -2,19 +2,22 @@ import { type ReactNode } from "react"
 import { Link } from "@tanstack/react-router"
 import { useTranslation } from "react-i18next"
 import { Logo } from "@/features/shell/components/logo"
-import { Button } from "@/components/ui/button"
+import { buttonVariants } from "@/components/ui/button"
+import { usePublicVisitorSignedIn } from "@/features/publicLinks/queries/publicLink"
 
 const FILEN_HOME_URL = "https://filen.io"
 const REPORT_ABUSE_MAILTO = "mailto:abuse@filen.io"
 
 // The shared shell for BOTH public-link routes — a slim, marketing-light chrome around whatever surface
 // the link resolves to (invalid / password / file / directory). This page deliberately drops
-// old-web's upsell sidebar: just a brand mark, a quiet sign-in link, one tasteful "Get Filen" CTA, and
-// a one-line footer with the e2e tagline and a minimal report-abuse affordance. Fully responsive and
+// old-web's upsell sidebar: just a brand mark, a quiet sign-in link, one tasteful "Get Filen" CTA (for a
+// signed-in visitor, a single way back to Cloud Drive instead), and a one-line footer with the e2e
+// tagline and a minimal report-abuse affordance. Fully responsive and
 // theme-aware via the app's existing tokens (the ambient ThemeProvider resolves system default for an
 // anonymous visitor, so nothing theme-specific is hardcoded here).
 export function PublicLinkShell({ children }: { children: ReactNode }) {
 	const { t } = useTranslation("publicLinks")
+	const signedIn = usePublicVisitorSignedIn()
 
 	return (
 		<div className="flex min-h-svh flex-col bg-canvas text-foreground">
@@ -30,24 +33,34 @@ export function PublicLinkShell({ children }: { children: ReactNode }) {
 					<span className="text-base font-semibold tracking-tight">Filen</span>
 				</a>
 				<div className="flex items-center gap-1 sm:gap-2">
-					<Link
-						to="/login"
-						className="rounded-md px-2 py-1 text-sm text-muted-foreground focus-ring transition-colors outline-none hover:text-foreground"
-					>
-						{t("signIn")}
-					</Link>
-					<Button
-						render={
+					{/* A signed-in visitor already has Filen: the way back to their drive replaces both the
+					    sign-in link and the marketing CTA. Nothing renders until the session answer is in. */}
+					{signedIn.data === true ? (
+						<Link
+							to="/drive/$"
+							params={{ _splat: "" }}
+							className={buttonVariants({ size: "sm" })}
+						>
+							{t("openCloudDrive")}
+						</Link>
+					) : signedIn.data === false ? (
+						<>
+							<Link
+								to="/login"
+								className="rounded-md px-2 py-1 text-sm text-muted-foreground focus-ring transition-colors outline-none hover:text-foreground"
+							>
+								{t("signIn")}
+							</Link>
 							<a
 								href={FILEN_HOME_URL}
 								target="_blank"
 								rel="noopener noreferrer"
-							/>
-						}
-						size="sm"
-					>
-						{t("getFilen")}
-					</Button>
+								className={buttonVariants({ size: "sm" })}
+							>
+								{t("getFilen")}
+							</a>
+						</>
+					) : null}
 				</div>
 			</header>
 

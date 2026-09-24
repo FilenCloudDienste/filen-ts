@@ -169,8 +169,8 @@ test.describe("context menus", () => {
 			const linkDialog = page.getByRole("dialog", { name: driveDict.driveLinkDialogTitle })
 			await expect(linkDialog).toBeVisible()
 			await expect(linkDialog.getByText(driveDict.driveLinkPremiumRequiredTitle, { exact: true })).toBeVisible()
-			// The Upgrade action is a Button rendered polymorphically as a router Link (an <a> under the
-			// hood, not a real <button>) — its accessible role is "link", carrying the billing-settings href.
+			// The Upgrade action is a router Link styled with buttonVariants (a real <a>, not a <button>) — its
+			// accessible role is "link", carrying the billing-settings href.
 			await expect(linkDialog.getByRole("link", { name: driveDict.driveLinkUpgradeAction, exact: true })).toBeVisible()
 			await page.keyboard.press("Escape")
 			await expect(linkDialog).toHaveCount(0)

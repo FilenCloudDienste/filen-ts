@@ -1,7 +1,7 @@
 import { useTranslation } from "react-i18next"
 import { FILEN_PRIVACY_URL, FILEN_TERMS_URL } from "@/lib/externalUrls"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
+import { buttonVariants } from "@/components/ui/button"
 
 // External links only — same target="_blank" + rel="noopener noreferrer" convention as
 // currentPlanCard's "Manage on filen.io" link. Electron: window.desktop carries no "open external
@@ -17,32 +17,22 @@ function AboutCard() {
 				<CardTitle>{t("settingsAboutTitle")}</CardTitle>
 			</CardHeader>
 			<CardContent className="flex flex-wrap gap-2">
-				<Button
-					variant="outline"
-					size="sm"
-					render={
-						<a
-							href={FILEN_TERMS_URL}
-							target="_blank"
-							rel="noopener noreferrer"
-						/>
-					}
+				<a
+					href={FILEN_TERMS_URL}
+					target="_blank"
+					rel="noopener noreferrer"
+					className={buttonVariants({ variant: "outline", size: "sm" })}
 				>
 					{t("settingsAboutTermsOfService")}
-				</Button>
-				<Button
-					variant="outline"
-					size="sm"
-					render={
-						<a
-							href={FILEN_PRIVACY_URL}
-							target="_blank"
-							rel="noopener noreferrer"
-						/>
-					}
+				</a>
+				<a
+					href={FILEN_PRIVACY_URL}
+					target="_blank"
+					rel="noopener noreferrer"
+					className={buttonVariants({ variant: "outline", size: "sm" })}
 				>
 					{t("settingsAboutPrivacyPolicy")}
-				</Button>
+				</a>
 			</CardContent>
 		</Card>
 	)

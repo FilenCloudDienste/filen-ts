@@ -20,6 +20,8 @@ export const publicLinks = {
 
 	/** Chrome top bar — quiet link to the sign-in page */
 	signIn: "Sign in",
+	/** Chrome top bar — for a signed-in visitor, in place of the sign-in link and the "Get Filen" CTA: back to their own drive */
+	openCloudDrive: "Open Cloud Drive",
 	/** Chrome top bar — primary call to action opening filen.io */
 	getFilen: "Get Filen",
 	/** Chrome — accessible label for the brand mark linking to filen.io */

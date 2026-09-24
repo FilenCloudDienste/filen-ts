@@ -119,6 +119,18 @@ export function usePublicDirListing(args: {
 	})
 }
 
+// Whether the visitor on a public-link page is signed in. Boot has already restored any session by the
+// time these routes render, and a sign-in or sign-out elsewhere reloads the tab.
+export function usePublicVisitorSignedIn(): UseQueryResult<boolean> {
+	return useQuery({
+		queryKey: ["publicLinks", "signedIn"],
+		queryFn: () => sdkApi.hasClient(),
+		staleTime: Infinity,
+		refetchOnWindowFocus: false,
+		persister: (queryFn, context) => queryFn(context)
+	})
+}
+
 // An owned drive listing already in the cache that holds the item. "sharedIn" lists other people's
 // items, so it never proves ownership.
 function isInCachedOwnedListing(uuid: string): boolean {
@@ -138,13 +150,7 @@ function isInCachedOwnedListing(uuid: string): boolean {
 // Whether "Save to Cloud Drive" applies: the visitor is signed in and the link isn't their own. An owned
 // item already in a cached listing answers without a request; otherwise one owner lookup does.
 export function useLinkSaveable(kind: "file" | "directory", uuid: string | null): boolean {
-	const signedIn = useQuery({
-		queryKey: ["publicLinks", "signedIn"],
-		queryFn: () => sdkApi.hasClient(),
-		staleTime: Infinity,
-		refetchOnWindowFocus: false,
-		persister: (queryFn, context) => queryFn(context)
-	})
+	const signedIn = usePublicVisitorSignedIn()
 	const owned = useQuery({
 		queryKey: ["publicLinks", "owned", kind, uuid],
 		queryFn: async () => uuid !== null && (isInCachedOwnedListing(uuid) || (await sdkApi.ownsItem(kind, uuid))),

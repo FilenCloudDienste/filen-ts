@@ -31,7 +31,7 @@ import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Field, FieldContent, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { Button } from "@/components/ui/button"
+import { Button, buttonVariants } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { LoadingState } from "@/components/loadingState"
 import { Switch } from "@/components/ui/switch"
@@ -241,17 +241,13 @@ export function LinkDialog({ item, onClose }: LinkDialogProps) {
 								<EmptyDescription>{t("driveLinkPremiumRequiredDescription")}</EmptyDescription>
 							</EmptyHeader>
 							<EmptyContent>
-								<Button
-									variant="outline"
-									render={
-										<Link
-											to="/settings/billing"
-											onClick={onClose}
-										/>
-									}
+								<Link
+									to="/settings/billing"
+									onClick={onClose}
+									className={buttonVariants({ variant: "outline" })}
 								>
 									{t("driveLinkUpgradeAction")}
-								</Button>
+								</Link>
 							</EmptyContent>
 						</Empty>
 					) : (

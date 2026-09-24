@@ -1,7 +1,7 @@
 import { Link } from "@tanstack/react-router"
 import { useTranslation } from "react-i18next"
 import { FileQuestionIcon } from "lucide-react"
-import { Button } from "@/components/ui/button"
+import { buttonVariants } from "@/components/ui/button"
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 
 // The router's global not-found page, same full-screen centred geometry as the boot-error and
@@ -21,7 +21,12 @@ export function NotFoundScreen() {
 					<EmptyDescription>{t("notFoundBody")}</EmptyDescription>
 				</EmptyHeader>
 				<EmptyContent>
-					<Button render={<Link to="/" />}>{t("notFoundAction")}</Button>
+					<Link
+						to="/"
+						className={buttonVariants()}
+					>
+						{t("notFoundAction")}
+					</Link>
 				</EmptyContent>
 			</Empty>
 		</div>
