@@ -251,6 +251,8 @@ const DriveSelectToolbar = () => {
 			{parentDir && (
 				<PressableScale
 					className="absolute left-4"
+					testID="drive-select-create-directory"
+					accessibilityLabel={t("create_directory")}
 					onPress={createDirectory}
 					enabled={isOnline}
 					style={{
@@ -268,6 +270,7 @@ const DriveSelectToolbar = () => {
 			)}
 			{drivePath.selectOptions?.intention === "move" && parentDir && drivePath.selectOptions.items.length > 0 && (
 				<PressableScale
+					testID="drive-select-move-here"
 					onPress={submit}
 					className="absolute right-4"
 					enabled={!isSameParentAsSelectedItems && isOnline}
@@ -287,6 +290,7 @@ const DriveSelectToolbar = () => {
 			)}
 			{drivePath.selectOptions?.intention === "copy" && parentDir && (
 				<PressableScale
+					testID="drive-select-copy-here"
 					onPress={submit}
 					className="absolute right-4"
 					enabled={isOnline}

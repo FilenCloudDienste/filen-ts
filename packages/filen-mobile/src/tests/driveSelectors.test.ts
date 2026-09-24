@@ -485,6 +485,16 @@ describe("isDriveItemDisabled", () => {
 		expect(isDriveItemDisabled({ item: dir("sibling"), drivePath: dp, previewType: null })).toBe(false)
 	})
 
+	it("move/copy pickers: file rows are never destinations, so they stay inert", () => {
+		for (const intention of ["move", "copy"] as const) {
+			const dp = drivePath("drive", { selectOptions: selectOptions({ intention, directories: true, files: false }) })
+
+			expect(isDriveItemDisabled({ item: file("f"), drivePath: dp, previewType: "image" })).toBe(true)
+			expect(isDriveItemNavigateOnly({ item: file("f"), drivePath: dp, disabled: true })).toBe(false)
+			expect(isDriveItemDisabled({ item: dir("d"), drivePath: dp, previewType: null })).toBe(false)
+		}
+	})
+
 	// --- select intention ---
 
 	it("select: undecryptable item is disabled", () => {

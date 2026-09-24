@@ -75,7 +75,11 @@ const EmptyAddMenu = ({
 			type="dropdown"
 			buttons={buildDriveCreateMenuButtons({ t, parent, upload, drivePath, clipboard })}
 		>
-			<PressableScale className="flex-row items-center gap-1.5 px-4 py-2">
+			<PressableScale
+				className="flex-row items-center gap-1.5 px-4 py-2"
+				testID="drive-empty-add"
+				accessibilityLabel={t("add")}
+			>
 				<Ionicons
 					name="add"
 					size={20}

@@ -330,6 +330,8 @@ export const drive = {
 	paste_into: "Paste into",
 	/** Header and empty-state menus: empty the drive clipboard */
 	clear_clipboard: "Clear clipboard",
+	/** Accessibility label of the drive header's "…" menu button */
+	more_actions: "More actions",
 	/** Public-link views (header, rows, linked file, preview): copy the link's item into the user's own drive */
 	save_to_cloud_drive: "Save to Cloud Drive",
 	/** Public-link views, selection menu: copy the selected items into the user's own drive */

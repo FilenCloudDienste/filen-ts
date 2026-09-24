@@ -177,6 +177,11 @@ export function isDriveItemDisabled({
 				return true
 			}
 
+			// Only directories are destinations: a file row stays inert (no preview over the picker).
+			if (!DIRECTORY_TYPES.has(item.type)) {
+				return true
+			}
+
 			// A moved or copied directory is not a destination, and being disabled it can't be entered,
 			// so its subtree can't be picked either.
 			return drivePath.selectOptions.itemUuids.has(item.data.uuid)

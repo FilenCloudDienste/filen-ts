@@ -279,7 +279,9 @@ const Header = ({
 					buttons: menuButtons
 				},
 				triggerProps: {
-					hitSlop: 20
+					hitSlop: 20,
+					testID: "drive-header-more",
+					accessibilityLabel: t("more_actions")
 				},
 				icon: {
 					name: "ellipsis-horizontal",
