@@ -1256,8 +1256,47 @@ describe("Transfers", () => {
 
 				expect(result!.directories).toHaveLength(1)
 				expect(result!.files).toHaveLength(1)
-				// The finished files' bytes follow into the cached account figure, per batch.
-				expect(mockAddAccountStorageUsed).toHaveBeenCalledWith(1024n)
+				expect(mockAddAccountStorageUsed).toHaveBeenCalledExactlyOnceWith(1024n)
+			})
+
+			it("adds the uploaded bytes to the cached account once, however many batches, and not after Cancel all", async () => {
+				const dir = new FsDirectory("file:///document/testdir")
+				fs.set(dir.uri, "dir")
+				const parent = makeParentDir("parent-uuid")
+				const files = Array.from({ length: 50 }, (_, i) => ({
+					uuid: `f${i}`,
+					size: 10n,
+					parent: { tag: "Uuid", inner: ["parent-uuid"] }
+				}))
+
+				mockUploadDirRecursively.mockImplementationOnce(async (_path: string, callbacks: any) => {
+					for (const uploaded of files) {
+						callbacks.onUploadUpdate([], [uploaded], 10n)
+					}
+				})
+
+				await transfers.upload({
+					localFileOrDir: dir,
+					parent
+				})
+
+				expect(mockAddAccountStorageUsed).toHaveBeenCalledExactlyOnceWith(500n)
+
+				mockAddAccountStorageUsed.mockClear()
+
+				mockUploadDirRecursively.mockImplementationOnce(async (_path: string, callbacks: any) => {
+					callbacks.onUploadUpdate([], [files[0]], 10n)
+					transfers.cancelAll()
+
+					throw new Error("Aborted")
+				})
+
+				await transfers.upload({
+					localFileOrDir: dir,
+					parent
+				})
+
+				expect(mockAddAccountStorageUsed).not.toHaveBeenCalled()
 			})
 
 			// Pins the directory-branch resolved-value contract (parity with downloadCore): per-entry

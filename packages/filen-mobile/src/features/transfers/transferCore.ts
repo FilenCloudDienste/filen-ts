@@ -353,6 +353,9 @@ export async function uploadCore(
 		: createCompositeAbortSignal(globalAbortController.signal, transferAbortController.signal)
 
 	if (localFileOrDir instanceof FileSystem.Directory) {
+		// Summed per batch and added to the cached account once the upload settles, not per batch.
+		let ownBytesUploaded = 0n
+
 		const result = await run(async defer => {
 			// wrapAbortSignalForSdk allocates a uniffi (Rust Arc-backed) ManagedAbortSignal that must be
 			// released explicitly. Register the disposal defer() BEFORE the fallible uniffi allocation
@@ -606,15 +609,11 @@ export async function uploadCore(
 							markDirectorySizesStale()
 						}
 
-						let ownBytes = 0n
-
 						for (const uploadedFile of uploadedFiles) {
 							if (!unwrapFileMeta(uploadedFile).shared) {
-								ownBytes += uploadedFile.size
+								ownBytesUploaded += uploadedFile.size
 							}
 						}
-
-						addAccountStorageUsed(ownBytes)
 					}
 				},
 				parentDir,
@@ -631,6 +630,12 @@ export async function uploadCore(
 
 			return transferred
 		})
+
+		// What reached the server counts however the upload ended. Not after Cancel all or sign-out, whose
+		// session may already be wiped; the batches marked the account stale, so its next read corrects it.
+		if (!globalAbortController.signal.aborted) {
+			addAccountStorageUsed(ownBytesUploaded)
+		}
 
 		if (!result.success) {
 			if (transferAbortController.signal.aborted || globalAbortController.signal.aborted || signal?.aborted) {
