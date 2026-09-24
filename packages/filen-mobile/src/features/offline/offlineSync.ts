@@ -38,6 +38,15 @@ type AuthedSdkClient = Awaited<ReturnType<typeof auth.getSdkClients>>["authedSdk
 // the last COMPLETED pass; manual triggers (offline-screen sync button / pull-to-refresh) bypass it.
 export const AUTO_SYNC_MIN_INTERVAL_MS = 60_000
 
+// A broken meta whose parent could not be resolved usually stays that way for a while (the parent
+// was deleted, or sits outside anything resolvable), so automatic passes skip its lookups for this
+// long instead of repeating 1-2 requests on every foreground/reconnect. Short, so a real fix heals
+// promptly; manual passes bypass it.
+export const HEAL_BACKOFF_MS = 5 * 60 * 1000
+
+// Keyed by the broken uuid; holds the error the attempt produced so a skipped pass still shows it.
+type HealBackoff = Map<string, { at: number; error: OfflineSyncError }>
+
 // One fetched + indexed parent listing, shared by the shared-trees pass and the standalone-files
 // pass (deduped by parentCacheKey). A parent that is remotely gone/revoked (FolderNotFound /
 // WrongPassword) is positive evidence its stored children are gone; any other listing failure is
@@ -153,7 +162,8 @@ function isGoneListingError(error: unknown): boolean {
 //
 // One pass (runPass):
 //   1. Gates: abort signal, onlineManager, Wi-Fi-only setting (all passes incl. manual).
-//   2. Normal trees (own cloud): one getDirOptional per tree root. undefined/trashed → remove;
+//   2. Normal trees (own cloud): one getDirOptional per tree root, or one shared parent listing for
+//      sibling roots (absent from it → the by-uuid lookup still decides). undefined/trashed → remove;
 //      alive → ONE-LEVEL trash-containment gate (the tree's parent dir resolved via a per-pass
 //      cached getDirOptional; a trash-tagged parent ⇒ the tree lives inside a trashed folder ⇒
 //      remove — items inside trashed dirs keep resolving alive, so the item's own parent-tag
@@ -174,7 +184,9 @@ function isGoneListingError(error: unknown): boolean {
 //      wrong-size bytes are never blessed), remove trashed/deleted/trash-contained leftovers.
 //      Broken TREE metas analogously via getDirOptional: alive → one reconcileTree rebuilds the
 //      meta around the existing bytes (an unreadable meta yields an empty local view in BOTH
-//      modes); trashed/deleted/trash-contained/undecidable → removeTreeDirectory.
+//      modes); trashed/deleted/trash-contained/undecidable → removeTreeDirectory. An item whose
+//      parent stayed unresolvable is not looked up again for HEAL_BACKOFF_MS on automatic passes
+//      (its error stays on the surface); thorough (manual) passes always look.
 //   6. Finish: one updateIndex, replace useOfflineStore.syncErrors, stamp lastCompletedAt.
 //
 // Coalescing: concurrent sync() calls join the in-flight pass; auto passes within
@@ -184,6 +196,9 @@ function isGoneListingError(error: unknown): boolean {
 // is stamped by the joined pass like any other completion).
 export class OfflineSync {
 	private readonly syncMutex = new Semaphore(1)
+	// Per-session, bounded by the number of broken metas: pruned every heal to the uuids still broken.
+	private readonly standaloneHealBackoff: HealBackoff = new Map()
+	private readonly treeHealBackoff: HealBackoff = new Map()
 	private inFlight: Promise<void> | null = null
 	private lastCompletedAt = 0
 	private abortController = new AbortController()
@@ -433,6 +448,7 @@ export class OfflineSync {
 	private async syncNormalTree({
 		item,
 		parent,
+		listingState,
 		authedSdkClient,
 		parentContextCache,
 		thorough,
@@ -443,6 +459,7 @@ export class OfflineSync {
 	}: {
 		item: DriveItem
 		parent: OfflineParent
+		listingState: ParentListingState | undefined
 		authedSdkClient: AuthedSdkClient
 		parentContextCache: ParentContextCache
 		thorough: boolean
@@ -455,11 +472,22 @@ export class OfflineSync {
 			return
 		}
 
-		const lookup = await run(async () =>
-			authedSdkClient.getDirOptional(item.data.uuid, {
-				signal
-			})
-		)
+		// A clean listing of the stored parent that still holds the tree answers presence, name and
+		// parent from a request shared with its siblings. Anything else (absent: moved or deleted;
+		// parent gone, failed or not listed) goes to the by-uuid lookup, which follows moves — a
+		// vanished old parent is no proof the tree is gone.
+		const listed = listingState?.status === "ok" ? listingState.dirs.byUuid.get(item.data.uuid) : undefined
+		const lookup =
+			listed && !listed.shared
+				? {
+						success: true as const,
+						data: listed.dir
+					}
+				: await run(async () =>
+						authedSdkClient.getDirOptional(item.data.uuid, {
+							signal
+						})
+					)
 
 		if (!lookup.success) {
 			pushError(
@@ -934,24 +962,75 @@ export class OfflineSync {
 	// exact size, a full redownload otherwise (no bytes: crash/aborted-adoption residue; wrong-size
 	// bytes: partial/stale residue that must never be blessed with a fresh meta); remove trashed/
 	// deleted/trash-contained/undecidable leftovers; leave lookup failures for the next pass.
+	// Prunes the backoff to the uuids still broken and returns those to look up this pass; the rest
+	// re-surface their last error. Thorough passes look up everything.
+	private healCandidates({
+		uuids,
+		backoff,
+		thorough,
+		pushError
+	}: {
+		uuids: string[]
+		backoff: HealBackoff
+		thorough: boolean
+		pushError: (error: OfflineSyncError) => void
+	}): Set<string> {
+		const broken = new Set(uuids)
+
+		for (const uuid of backoff.keys()) {
+			if (!broken.has(uuid)) {
+				backoff.delete(uuid)
+			}
+		}
+
+		if (thorough) {
+			return broken
+		}
+
+		const now = Date.now()
+
+		for (const uuid of uuids) {
+			const entry = backoff.get(uuid)
+
+			if (entry && now - entry.at < HEAL_BACKOFF_MS) {
+				broken.delete(uuid)
+				pushError(entry.error)
+			}
+		}
+
+		return broken
+	}
+
 	private async healBrokenStandalones({
 		authedSdkClient,
 		parentContextCache,
+		thorough,
 		signal,
 		pushError
 	}: {
 		authedSdkClient: AuthedSdkClient
 		parentContextCache: ParentContextCache
+		thorough: boolean
 		signal: AbortSignal
 		pushError: (error: OfflineSyncError) => void
 	}): Promise<void> {
 		const brokenStandalones = await offline.listBrokenStandaloneUuids()
+		const backoff = this.standaloneHealBackoff
+		const candidates = this.healCandidates({
+			uuids: brokenStandalones.map(broken => broken.uuid),
+			backoff,
+			thorough,
+			pushError
+		})
 
 		await Promise.all(
 			brokenStandalones.map(async ({ uuid, hasDataFile, dataFileSize }) => {
-				if (signal.aborted) {
+				if (signal.aborted || !candidates.has(uuid)) {
 					return
 				}
+
+				// Settled one way or another below unless the parent stays unresolvable.
+				backoff.delete(uuid)
 
 				let resolvedName: string | undefined
 
@@ -1018,16 +1097,22 @@ export class OfflineSync {
 					if (parentResolution.status !== "resolved") {
 						// A broken meta has no stored parent to fall back to — leave the dir for the
 						// next pass instead of writing a meta with a guessed parent.
-						pushError(
-							makeSyncError({
-								itemUuid: uuid,
-								topLevelUuid: null,
-								name: unwrappedRemote.meta.name,
-								itemType: "file",
-								kind: "listing",
-								message: "Could not resolve the parent directory of a broken offline file meta"
-							})
-						)
+						const error = makeSyncError({
+							itemUuid: uuid,
+							topLevelUuid: null,
+							name: unwrappedRemote.meta.name,
+							itemType: "file",
+							kind: "listing",
+							message: "Could not resolve the parent directory of a broken offline file meta"
+						})
+
+						pushError(error)
+
+						// A failed request is transient and retried next pass; an unresolvable parent
+						// (deleted, or none) is not, so back off.
+						if (parentResolution.status === "unresolvable") {
+							backoff.set(uuid, { at: Date.now(), error })
+						}
 
 						return
 					}
@@ -1095,12 +1180,22 @@ export class OfflineSync {
 		pushErrors: (errors: OfflineSyncError[]) => void
 	}): Promise<void> {
 		const brokenTrees = await offline.listBrokenTreeUuids()
+		const backoff = this.treeHealBackoff
+		const candidates = this.healCandidates({
+			uuids: brokenTrees,
+			backoff,
+			thorough,
+			pushError
+		})
 
 		await Promise.all(
 			brokenTrees.map(async uuid => {
-				if (signal.aborted) {
+				if (signal.aborted || !candidates.has(uuid)) {
 					return
 				}
+
+				// Settled one way or another below unless the parent stays unresolvable.
+				backoff.delete(uuid)
 
 				let resolvedName: string | undefined
 
@@ -1167,16 +1262,21 @@ export class OfflineSync {
 					if (parentResolution.status !== "resolved") {
 						// A broken meta has no stored parent to fall back to — leave the dir for the
 						// next pass instead of writing a meta with a guessed parent.
-						pushError(
-							makeSyncError({
-								itemUuid: uuid,
-								topLevelUuid: uuid,
-								name: unwrappedRemote.meta.name,
-								itemType: "directory",
-								kind: "listing",
-								message: "Could not resolve the parent directory of a broken offline tree meta"
-							})
-						)
+						const error = makeSyncError({
+							itemUuid: uuid,
+							topLevelUuid: uuid,
+							name: unwrappedRemote.meta.name,
+							itemType: "directory",
+							kind: "listing",
+							message: "Could not resolve the parent directory of a broken offline tree meta"
+						})
+
+						pushError(error)
+
+						// Same backoff rule as broken standalones.
+						if (parentResolution.status === "unresolvable") {
+							backoff.set(uuid, { at: Date.now(), error })
+						}
 
 						return
 					}
@@ -1321,6 +1421,29 @@ export class OfflineSync {
 					listingParents.push(tree.parent)
 				}
 
+				// Own-cloud trees resolve by uuid, but siblings under one parent share one listing
+				// instead: M lookups become 1. A lone tree keeps its lookup — listing its parent would
+				// fetch and decrypt every sibling entry to answer one. A parent listed anyway (for a
+				// standalone file or shared tree) serves its trees for free.
+				const normalTreesPerParent = new Map<string, { parent: OfflineParent; count: number }>()
+
+				for (const tree of normalTrees) {
+					const key = parentCacheKey(tree.parent)
+					const entry = normalTreesPerParent.get(key)
+
+					if (entry) {
+						entry.count++
+					} else {
+						normalTreesPerParent.set(key, { parent: tree.parent, count: 1 })
+					}
+				}
+
+				for (const { parent, count } of normalTreesPerParent.values()) {
+					if (count > 1) {
+						listingParents.push(parent)
+					}
+				}
+
 				for (const file of syncableFiles) {
 					listingParents.push(file.parent)
 				}
@@ -1377,6 +1500,7 @@ export class OfflineSync {
 								this.syncNormalTree({
 									item,
 									parent,
+									listingState: parentListings.get(parentCacheKey(parent)),
 									authedSdkClient,
 									parentContextCache,
 									thorough,
@@ -1432,6 +1556,7 @@ export class OfflineSync {
 						this.healBrokenStandalones({
 							authedSdkClient,
 							parentContextCache,
+							thorough,
 							signal,
 							pushError
 						}),

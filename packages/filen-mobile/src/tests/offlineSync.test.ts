@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach } from "vitest"
+import { vi, describe, it, expect, beforeEach, afterEach } from "vitest"
 
 // offlineSync decision-table tests. The offline singleton (storage layer) is fully mocked — these
 // tests exercise the orchestrator's DECISIONS (what gets removed/renamed/re-anchored/re-downloaded
@@ -258,7 +258,7 @@ vi.mock("@filen/sdk-rs", () => ({
 	}
 }))
 
-import { OfflineSync, AUTO_SYNC_MIN_INTERVAL_MS } from "@/features/offline/offlineSync"
+import { OfflineSync, AUTO_SYNC_MIN_INTERVAL_MS, HEAL_BACKOFF_MS } from "@/features/offline/offlineSync"
 import offline from "@/features/offline/offline"
 import auth from "@/lib/auth"
 import secureStore from "@/lib/secureStore"
@@ -2096,5 +2096,241 @@ describe("offlineSync — per-item failure isolation", () => {
 		expect(syncErrors()[0]?.itemUuid).toBe("tree-1")
 		expect(syncErrors()[0]?.topLevelUuid).toBe("tree-1")
 		expect(syncErrors()[0]?.message).toBe("lock acquisition failed")
+	})
+})
+
+describe("offlineSync — sibling own-cloud trees share their parent listing", () => {
+	const parent = makeNormalParent("parent-1")
+
+	function givenSiblings(count: number): void {
+		givenTrees(
+			Array.from({ length: count }, (_, i) => ({
+				item: makeTreeItem(`tree-${i}`, `Tree ${i}`, "parent-1"),
+				parent
+			}))
+		)
+	}
+
+	function treeLookups(): unknown[][] {
+		return client.getDirOptional.mock.calls.filter(call => String(call[0]).startsWith("tree-"))
+	}
+
+	beforeEach(() => {
+		// parent-1 resolves alive under the root (the one-level trash gate's lookup).
+		client.getDirOptional.mockImplementation(async (uuid: string) =>
+			uuid === "parent-1" ? makeRemoteDir("parent-1", "Parent", uuidParent(ROOT_UUID)) : undefined
+		)
+	})
+
+	it("3 siblings → 1 listDir and no per-tree lookup; each tree reconciles", async () => {
+		givenSiblings(3)
+		client.listDir.mockResolvedValue({
+			dirs: [0, 1, 2].map(i => makeRemoteDir(`tree-${i}`, `Tree ${i}`, uuidParent("parent-1"))),
+			files: []
+		})
+
+		await runAutoPass()
+
+		expect(client.listDir).toHaveBeenCalledTimes(1)
+		expect(treeLookups()).toHaveLength(0)
+		expect(vi.mocked(offline.reconcileTree)).toHaveBeenCalledTimes(3)
+		expect(vi.mocked(offline.removeItem)).not.toHaveBeenCalled()
+		expect(syncErrors()).toEqual([])
+	})
+
+	it("a lone tree keeps its by-uuid lookup and never lists its parent", async () => {
+		givenSiblings(1)
+		client.getDirOptional.mockImplementation(async (uuid: string) => {
+			if (uuid === "tree-0") {
+				return makeRemoteDir("tree-0", "Tree 0", uuidParent("parent-1"))
+			}
+
+			return uuid === "parent-1" ? makeRemoteDir("parent-1", "Parent", uuidParent(ROOT_UUID)) : undefined
+		})
+
+		await runAutoPass()
+
+		expect(client.listDir).not.toHaveBeenCalled()
+		expect(treeLookups()).toHaveLength(1)
+	})
+
+	it("a rename seen in the shared listing updates the root meta", async () => {
+		givenSiblings(2)
+		client.listDir.mockResolvedValue({
+			dirs: [makeRemoteDir("tree-0", "Renamed", uuidParent("parent-1")), makeRemoteDir("tree-1", "Tree 1", uuidParent("parent-1"))],
+			files: []
+		})
+
+		await runAutoPass()
+
+		expect(treeLookups()).toHaveLength(0)
+		expect(vi.mocked(offline.updateTreeRootMeta)).toHaveBeenCalledTimes(1)
+		expect(vi.mocked(offline.updateTreeRootMeta).mock.calls[0]?.[0]?.item.data.decryptedMeta?.name).toBe("Renamed")
+	})
+
+	it("a tree absent from the listing (moved away) falls back to one lookup that follows the move", async () => {
+		givenSiblings(2)
+		client.listDir.mockResolvedValue({
+			dirs: [makeRemoteDir("tree-0", "Tree 0", uuidParent("parent-1"))],
+			files: []
+		})
+		client.getDirOptional.mockImplementation(async (uuid: string) => {
+			if (uuid === "tree-1") {
+				return makeRemoteDir("tree-1", "Tree 1", uuidParent("parent-new"))
+			}
+
+			if (uuid === "parent-new" || uuid === "parent-1") {
+				return makeRemoteDir(uuid, "Parent", uuidParent(ROOT_UUID))
+			}
+
+			return undefined
+		})
+
+		await runAutoPass()
+
+		expect(treeLookups()).toEqual([["tree-1", expect.anything()]])
+		expect(vi.mocked(offline.removeItem)).not.toHaveBeenCalled()
+		expect(vi.mocked(offline.updateTreeRootMeta)).toHaveBeenCalledTimes(1)
+
+		const reanchored = vi.mocked(offline.updateTreeRootMeta).mock.calls[0]?.[0] as unknown as {
+			uuid: string
+			parent: { inner: [{ inner: [{ uuid: string }] }] }
+		}
+
+		expect(reanchored.uuid).toBe("tree-1")
+		expect(reanchored.parent.inner[0].inner[0].uuid).toBe("parent-new")
+	})
+
+	it("a parent listing that is gone does not remove its trees: each is looked up and kept where it moved", async () => {
+		givenSiblings(2)
+		client.listDir.mockRejectedValue({ __kind: "FolderNotFound" })
+		client.getDirOptional.mockImplementation(async (uuid: string) => {
+			if (uuid.startsWith("tree-")) {
+				return makeRemoteDir(uuid, uuid === "tree-0" ? "Tree 0" : "Tree 1", uuidParent("parent-new"))
+			}
+
+			return uuid === "parent-new" ? makeRemoteDir("parent-new", "New", uuidParent(ROOT_UUID)) : undefined
+		})
+
+		await runAutoPass()
+
+		expect(vi.mocked(offline.removeItem)).not.toHaveBeenCalled()
+		expect(treeLookups()).toHaveLength(2)
+		expect(vi.mocked(offline.updateTreeRootMeta)).toHaveBeenCalledTimes(2)
+	})
+})
+
+describe("offlineSync — heal backoff for broken metas whose parent stays unresolvable", () => {
+	const t0 = new Date("2026-01-01T00:00:00Z").getTime()
+
+	beforeEach(() => {
+		vi.useFakeTimers({ toFake: ["Date"] })
+		vi.setSystemTime(t0)
+
+		vi.mocked(offline.listBrokenStandaloneUuids).mockResolvedValue([{ uuid: "broken-1", hasDataFile: true, dataFileSize: 100 }])
+		// Alive, but its parent resolves to nothing: undecidable, the dir is left alone.
+		client.getFileOptional.mockImplementation(async () => makeRemoteFile("broken-1", "orphan.txt", uuidParent("parent-gone")))
+		client.getDirOptional.mockImplementation(async () => undefined)
+	})
+
+	afterEach(() => {
+		vi.useRealTimers()
+	})
+
+	function lookups(): number {
+		return client.getFileOptional.mock.calls.length
+	}
+
+	it("an automatic pass 2 minutes later skips the lookup but keeps the error on the surface", async () => {
+		const sync = new OfflineSync()
+
+		await sync.sync()
+
+		expect(lookups()).toBe(1)
+		expect(syncErrors()).toHaveLength(1)
+
+		vi.setSystemTime(t0 + 2 * 60 * 1000)
+
+		await sync.sync()
+
+		expect(lookups()).toBe(1)
+		expect(syncErrors()).toHaveLength(1)
+		expect(syncErrors()[0]?.itemUuid).toBe("broken-1")
+	})
+
+	it("a manual pass looks again, and so does an automatic one after the window", async () => {
+		const sync = new OfflineSync()
+
+		await sync.sync()
+
+		vi.setSystemTime(t0 + 2 * 60 * 1000)
+
+		await sync.sync({ manual: true })
+
+		expect(lookups()).toBe(2)
+
+		vi.setSystemTime(t0 + 2 * 60 * 1000 + HEAL_BACKOFF_MS + 1)
+
+		await sync.sync()
+
+		expect(lookups()).toBe(3)
+	})
+
+	it("a failed request is not backed off (it may be transient)", async () => {
+		client.getFileOptional.mockRejectedValue(new Error("network down"))
+
+		const sync = new OfflineSync()
+
+		await sync.sync()
+
+		vi.setSystemTime(t0 + 2 * 60 * 1000)
+
+		await sync.sync()
+
+		expect(lookups()).toBe(2)
+	})
+
+	it("an item that resolved leaves the backoff: broken again later, it is looked up at once", async () => {
+		const sync = new OfflineSync()
+
+		await sync.sync()
+
+		// The parent resolves now; the manual pass rebuilds the meta.
+		client.getDirOptional.mockImplementation(async (uuid: string) =>
+			uuid === "parent-gone" ? makeRemoteDir("parent-gone", "Back", uuidParent(ROOT_UUID)) : undefined
+		)
+		vi.setSystemTime(t0 + 60 * 1000)
+
+		await sync.sync({ manual: true })
+
+		expect(vi.mocked(offline.renameStandaloneFile)).toHaveBeenCalledTimes(1)
+
+		// Broken again, parent unresolvable again, within the old window.
+		client.getDirOptional.mockImplementation(async () => undefined)
+		vi.setSystemTime(t0 + 2 * 60 * 1000 + 1)
+
+		await sync.sync()
+
+		expect(lookups()).toBe(3)
+	})
+
+	it("broken trees follow the same backoff", async () => {
+		vi.mocked(offline.listBrokenStandaloneUuids).mockResolvedValue([])
+		vi.mocked(offline.listBrokenTreeUuids).mockResolvedValue(["broken-tree"])
+		client.getDirOptional.mockImplementation(async (uuid: string) =>
+			uuid === "broken-tree" ? makeRemoteDir("broken-tree", "Orphan", uuidParent("parent-gone")) : undefined
+		)
+
+		const sync = new OfflineSync()
+
+		await sync.sync()
+
+		vi.setSystemTime(t0 + 2 * 60 * 1000)
+
+		await sync.sync()
+
+		expect(client.getDirOptional.mock.calls.filter(call => call[0] === "broken-tree")).toHaveLength(1)
+		expect(syncErrors()).toHaveLength(1)
+		expect(vi.mocked(offline.removeTreeDirectory)).not.toHaveBeenCalled()
 	})
 })
