@@ -1,7 +1,7 @@
 import { type Button } from "@/components/ui/settingsGroup"
 import { type TFunction } from "i18next"
 import { useResolveClassNames } from "uniwind"
-import useAccountQuery from "@/queries/useAccount.query"
+import useAccountQuery, { accountQueryPatch } from "@/queries/useAccount.query"
 import { run, formatBytes } from "@filen/shared"
 import prompts from "@/lib/prompts"
 import alerts from "@/lib/alerts"
@@ -261,8 +261,8 @@ export function buildDangerZoneButtons({
 				const result = await runWithLoading(async () => {
 					const { authedSdkClient } = await auth.getSdkClients()
 
+					// Only sends a confirmation email; no account field changes yet.
 					await authedSdkClient.deleteAccount(twoFactorCode)
-					await accountQuery.refetch()
 				})
 
 				if (!result.success) {
@@ -437,7 +437,10 @@ export function buildProfileButtons({
 					const { authedSdkClient } = await auth.getSdkClients()
 
 					await authedSdkClient.setNickname(newNickname)
-					await accountQuery.refetch()
+
+					accountQueryPatch({
+						nickName: newNickname
+					})
 				})
 
 				if (!result.success) {
@@ -581,8 +584,13 @@ export function buildAccountToggleButtons({
 					const result = await runWithLoading(async () => {
 						const { authedSdkClient } = await auth.getSdkClients()
 
-						await authedSdkClient.setVersioningEnabled(!accountQuery.data.versioningEnabled)
-						await accountQuery.refetch()
+						const versioningEnabled = !accountQuery.data.versioningEnabled
+
+						await authedSdkClient.setVersioningEnabled(versioningEnabled)
+
+						accountQueryPatch({
+							versioningEnabled
+						})
 					})
 
 					if (!result.success) {
@@ -606,8 +614,13 @@ export function buildAccountToggleButtons({
 					const result = await runWithLoading(async () => {
 						const { authedSdkClient } = await auth.getSdkClients()
 
-						await authedSdkClient.setLoginAlertsEnabled(!accountQuery.data.loginAlertsEnabled)
-						await accountQuery.refetch()
+						const loginAlertsEnabled = !accountQuery.data.loginAlertsEnabled
+
+						await authedSdkClient.setLoginAlertsEnabled(loginAlertsEnabled)
+
+						accountQueryPatch({
+							loginAlertsEnabled
+						})
 					})
 
 					if (!result.success) {
@@ -694,6 +707,8 @@ export function buildTwoFactorButtons({
 
 						const result = await runWithLoading(async () => {
 							await (await auth.getSdkClients()).authedSdkClient.disable2fa(twoFactor)
+							// A reread, not a patch: the setup key the screen shows next is only returned
+							// once 2FA is off, and whether the server issues a new one isn't known here.
 							await accountQuery.refetch()
 						})
 
@@ -737,7 +752,11 @@ export function buildTwoFactorButtons({
 					const result = await runWithLoading(async () => {
 						const recoverKey = await (await auth.getSdkClients()).authedSdkClient.enable2faGetRecoveryKey(twoFactor)
 
-						await accountQuery.refetch()
+						// getUserInfo withholds the key while 2FA is on; mirror that.
+						accountQueryPatch({
+							twoFactorEnabled: true,
+							twoFactorKey: undefined
+						})
 
 						return recoverKey
 					})

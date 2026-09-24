@@ -10,7 +10,7 @@ import { router } from "@/lib/router"
 import { run } from "@filen/shared"
 import { useResolveClassNames } from "uniwind"
 import SettingsHeader from "@/components/ui/settingsHeader"
-import useAccountQuery from "@/queries/useAccount.query"
+import useAccountQuery, { accountQueryPatch } from "@/queries/useAccount.query"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import prompts from "@/lib/prompts"
 import alerts from "@/lib/alerts"
@@ -246,7 +246,10 @@ function Security() {
 
 											file.write(keys)
 
-											await accountQuery.refetch()
+											// The export call itself records the flag server-side.
+											accountQueryPatch({
+												didExportMasterKeys: true
+											})
 
 											return file
 										})

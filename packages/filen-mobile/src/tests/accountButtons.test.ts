@@ -1,7 +1,10 @@
 import { vi, describe, it, expect, beforeEach } from "vitest"
 vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 
-const { mockMarkDirectorySizesStale } = vi.hoisted(() => ({ mockMarkDirectorySizesStale: vi.fn() }))
+const { mockMarkDirectorySizesStale, mockAccountQueryPatch } = vi.hoisted(() => ({
+	mockMarkDirectorySizesStale: vi.fn(),
+	mockAccountQueryPatch: vi.fn()
+}))
 
 vi.mock("@/features/drive/queries/useDirectorySize.query", () => ({
 	markDirectorySizesStale: mockMarkDirectorySizesStale
@@ -30,7 +33,8 @@ const {
 		setVersioningEnabled: vi.fn(),
 		setLoginAlertsEnabled: vi.fn(),
 		disable2fa: vi.fn(),
-		enable2faGetRecoveryKey: vi.fn()
+		enable2faGetRecoveryKey: vi.fn(),
+		setNickname: vi.fn()
 	}
 
 	const mockRefetch = vi.fn()
@@ -116,7 +120,7 @@ vi.mock("@/lib/utils", () => ({
 
 // settingsGroup.tsx imports native UI: mock it to avoid transform failures
 vi.mock("@/components/ui/settingsGroup", () => ({}))
-vi.mock("@/queries/useAccount.query", () => ({ default: vi.fn() }))
+vi.mock("@/queries/useAccount.query", () => ({ default: vi.fn(), accountQueryPatch: mockAccountQueryPatch }))
 vi.mock("uniwind", () => ({
 	useResolveClassNames: vi.fn(() => ({ color: "#ff0000" }))
 }))
@@ -859,5 +863,147 @@ describe("buildTwoFactorButtons", () => {
 
 			expect(mockAuthedSdkClient.enable2faGetRecoveryKey).not.toHaveBeenCalled()
 		})
+	})
+})
+
+// ---------------------------------------------------------------------------
+// Account writes patch the field they set instead of rereading the whole account
+// ---------------------------------------------------------------------------
+
+describe("account writes — patch vs reread", () => {
+	beforeEach(() => {
+		runWithLoadingPassthrough()
+	})
+
+	async function flipSwitch(buttons: ReturnType<typeof buildAccountToggleButtons>, index: number, value: boolean) {
+		const btn = buttons[index]
+
+		if (btn?.rightItem?.type === "switch") {
+			await btn.rightItem.onValueChange(value)
+		}
+	}
+
+	it("file versioning: patches the value it sent, no reread", async () => {
+		await flipSwitch(
+			buildAccountToggleButtons({ t, accountQuery: makeAccountQuery({ versioningEnabled: true }), isOnline: true }),
+			0,
+			false
+		)
+
+		expect(mockAuthedSdkClient.setVersioningEnabled).toHaveBeenCalledWith(false)
+		expect(mockAccountQueryPatch).toHaveBeenCalledWith({ versioningEnabled: false })
+		expect(mockRefetch).not.toHaveBeenCalled()
+	})
+
+	it("login alerts: patches the value it sent, no reread", async () => {
+		await flipSwitch(
+			buildAccountToggleButtons({ t, accountQuery: makeAccountQuery({ loginAlertsEnabled: false }), isOnline: true }),
+			1,
+			true
+		)
+
+		expect(mockAuthedSdkClient.setLoginAlertsEnabled).toHaveBeenCalledWith(true)
+		expect(mockAccountQueryPatch).toHaveBeenCalledWith({ loginAlertsEnabled: true })
+		expect(mockRefetch).not.toHaveBeenCalled()
+	})
+
+	it("a failed write patches nothing", async () => {
+		mockAuthedSdkClient.setVersioningEnabled.mockRejectedValueOnce(new Error("boom"))
+
+		await flipSwitch(
+			buildAccountToggleButtons({ t, accountQuery: makeAccountQuery({ versioningEnabled: true }), isOnline: true }),
+			0,
+			false
+		)
+
+		expect(mockAccountQueryPatch).not.toHaveBeenCalled()
+		expect(mockAlertsError).toHaveBeenCalledTimes(1)
+	})
+
+	it("nickname: patches the trimmed name it sent, no reread", async () => {
+		mockPromptsInput.mockResolvedValueOnce({ cancelled: false, type: "string", value: "  new name  " })
+
+		const buttons = buildProfileButtons({ t, accountQuery: makeAccountQuery(), isOnline: true })
+		const nicknameBtn = buttons.find(b => b.title === "change_nickname")
+
+		await nicknameBtn?.onPress?.()
+
+		expect(mockAuthedSdkClient.setNickname).toHaveBeenCalledWith("new name")
+		expect(mockAccountQueryPatch).toHaveBeenCalledWith({ nickName: "new name" })
+		expect(mockRefetch).not.toHaveBeenCalled()
+	})
+
+	it("enabling 2FA patches it on and withholds the key like getUserInfo does, no reread", async () => {
+		mockPromptsInput.mockResolvedValueOnce({ cancelled: false, type: "string", value: "123456" })
+		mockAuthedSdkClient.enable2faGetRecoveryKey.mockResolvedValueOnce("recovery-key")
+
+		const buttons = buildTwoFactorButtons({ t, accountQuery: makeAccountQuery({ twoFactorEnabled: false }), isOnline: true })
+
+		if (buttons[0]?.rightItem?.type === "switch") {
+			await buttons[0].rightItem.onValueChange(true)
+		}
+
+		expect(mockAccountQueryPatch).toHaveBeenCalledWith({ twoFactorEnabled: true, twoFactorKey: undefined })
+		expect(mockRefetch).not.toHaveBeenCalled()
+	})
+
+	it("disabling 2FA rereads (the next setup key only comes from the server)", async () => {
+		mockPromptsAlert.mockResolvedValueOnce({ cancelled: false })
+		mockPromptsInput.mockResolvedValueOnce({ cancelled: false, type: "string", value: "654321" })
+
+		const buttons = buildTwoFactorButtons({ t, accountQuery: makeAccountQuery({ twoFactorEnabled: true }), isOnline: true })
+
+		if (buttons[0]?.rightItem?.type === "switch") {
+			await buttons[0].rightItem.onValueChange(false)
+		}
+
+		expect(mockRefetch).toHaveBeenCalledTimes(1)
+		expect(mockAccountQueryPatch).not.toHaveBeenCalled()
+	})
+
+	it("requesting account deletion neither rereads nor patches (it only sends an email)", async () => {
+		alwaysConfirm()
+
+		const buttons = buildDangerZoneButtons({
+			t,
+			accountQuery: makeAccountQuery({ twoFactorEnabled: false }),
+			isOnline: true,
+			textRed500
+		})
+
+		await buttons[2]?.onPress?.()
+
+		expect(mockAuthedSdkClient.deleteAccount).toHaveBeenCalledTimes(1)
+		expect(mockRefetch).not.toHaveBeenCalled()
+		expect(mockAccountQueryPatch).not.toHaveBeenCalled()
+	})
+
+	it("changing email still rereads (whether it applies before confirmation is the server's call)", async () => {
+		mockPromptsInput
+			.mockResolvedValueOnce({ cancelled: false, type: "string", value: "new@example.com" })
+			.mockResolvedValueOnce({ cancelled: false, type: "string", value: "new@example.com" })
+			.mockResolvedValueOnce({ cancelled: false, type: "string", value: "secret" })
+
+		await buildProfileButtons({ t, accountQuery: makeAccountQuery(), isOnline: true })[0]?.onPress?.()
+
+		expect(mockAuthedSdkClient.changeEmail).toHaveBeenCalledWith("secret", "new@example.com")
+		expect(mockRefetch).toHaveBeenCalledTimes(1)
+		expect(mockAccountQueryPatch).not.toHaveBeenCalled()
+	})
+
+	it("deleting all versions or all items still rereads (freed storage is the server's to report)", async () => {
+		alwaysConfirm()
+
+		const buttons = buildDangerZoneButtons({
+			t,
+			accountQuery: makeAccountQuery({ versionedStorage: 10n, storageUsed: 10n }),
+			isOnline: true,
+			textRed500
+		})
+
+		await buttons[0]?.onPress?.()
+		await buttons[1]?.onPress?.()
+
+		expect(mockRefetch).toHaveBeenCalledTimes(2)
 	})
 })

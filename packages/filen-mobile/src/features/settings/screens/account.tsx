@@ -12,7 +12,7 @@ import Ionicons from "@expo/vector-icons/Ionicons"
 import { useResolveClassNames } from "uniwind"
 import SettingsHeader from "@/components/ui/settingsHeader"
 import Text from "@/components/ui/text"
-import useAccountQuery from "@/queries/useAccount.query"
+import useAccountQuery, { accountQueryPatch } from "@/queries/useAccount.query"
 import {
 	buildDangerZoneButtons,
 	buildProfileButtons,
@@ -132,8 +132,11 @@ function Account() {
 								const result = await runWithLoading(async defer => {
 									const fileToUpload = await prepareAvatarFileForUpload({ asset, defer })
 									const { authedSdkClient } = await auth.getSdkClients()
-									await authedSdkClient.uploadAvatar(await fileToUpload.arrayBuffer())
-									await accountQuery.refetch()
+									const avatarUrl = await authedSdkClient.uploadAvatar(await fileToUpload.arrayBuffer())
+
+									accountQueryPatch({
+										avatarUrl
+									})
 								})
 
 								if (!result.success) {
