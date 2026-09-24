@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import useDrivePath from "@/hooks/useDrivePath"
 import useDriveItemsQuery from "@/features/drive/queries/useDriveItems.query"
+import { socketCoveredRefetchOnMount } from "@/queries/socketSession"
 import type { DriveItem } from "@/types"
 import { itemSorter } from "@/lib/sort"
 import { useDriveSortPreference } from "@/features/drive/driveSortPreference"
@@ -83,7 +84,14 @@ const Drive = () => {
 			path: drivePath
 		},
 		{
-			enabled: drivePath.type !== null
+			enabled: drivePath.type !== null,
+			// The move/copy picker shares its listings with the browser, and socket events patch them:
+			// a directory read in the current socket session is shown as-is, not listed again.
+			...(drivePath.type === "drive" && drivePath.selectOptions
+				? {
+						refetchOnMount: socketCoveredRefetchOnMount()
+					}
+				: {})
 		}
 	)
 

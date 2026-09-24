@@ -6,6 +6,7 @@ import { type Chat } from "@/types"
 import type { ChatMessageWithInflightId } from "@/features/chats/store/useChats.store"
 import { wrapMessage } from "@/features/chats/chatsWrap"
 import { chatsQueryGet } from "@/features/chats/queries/useChats.query"
+import { socketCoveredRefetchOnMount } from "@/queries/socketSession"
 
 export const BASE_QUERY_KEY = "useChatMessagesQuery"
 
@@ -63,6 +64,9 @@ export function useChatMessagesQuery(
 ): UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error> {
 	const query = useQuery({
 		...DEFAULT_QUERY_OPTIONS,
+		// Every message change arrives as a socket event, so reopening a chat reuses a read from the
+		// current socket session.
+		refetchOnMount: socketCoveredRefetchOnMount(),
 		...options,
 		queryKey: [BASE_QUERY_KEY, sortParams(chatMessagesQueryKey(params))],
 		queryFn: ({ signal }) =>

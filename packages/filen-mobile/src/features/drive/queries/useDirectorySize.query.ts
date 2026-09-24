@@ -1,6 +1,6 @@
 import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
 import { DEFAULT_QUERY_OPTIONS, queryClient } from "@/queries/client"
-import useSocketStore from "@/stores/useSocket.store"
+import { queryReadInCurrentSocketSession } from "@/queries/socketSession"
 import { markAccountStale } from "@/queries/useAccount.query"
 import { noteDriveContentChanged } from "@/lib/driveChanges"
 import auth from "@/lib/auth"
@@ -240,15 +240,9 @@ export function useDirectorySizeQuery(
 		...DEFAULT_QUERY_OPTIONS,
 		...options,
 		...directorySizeQueryOptions(params),
-		// Let the staleTime decide only while the socket has been up since the value was fetched:
-		// before that (a persisted row, or events missed while disconnected) nothing marked it stale.
-		refetchOnMount: q => {
-			const socket = useSocketStore.getState()
-
-			return SOCKET_COVERED_TYPES.has(params.type) && socket.state === "connected" && q.state.dataUpdatedAt >= socket.connectedAt
-				? true
-				: "always"
-		}
+		// Let the staleTime decide only for a value read in the current socket session: before that (a
+		// persisted row, or events missed while disconnected) nothing marked it stale.
+		refetchOnMount: q => (SOCKET_COVERED_TYPES.has(params.type) && queryReadInCurrentSocketSession(q) ? true : "always")
 	})
 
 	return query as UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error>

@@ -3,8 +3,13 @@ import queryClient, { DEFAULT_QUERY_OPTIONS, queryUpdater } from "@/queries/clie
 import auth from "@/lib/auth"
 import { type Chat } from "@/types"
 import { wrapChat } from "@/features/chats/chatsWrap"
+import { socketCoveredRefetchOnMount } from "@/queries/socketSession"
 
 export const BASE_QUERY_KEY = "useChatsQuery"
+
+// Chat and message events patch the list, but another device's read state (lastFocus) and mute
+// arrive on no socket event, so a remount reuses a current-session read only this long.
+export const CHATS_LIST_REUSE_MS = 30 * 1000
 
 export async function fetchData(params?: { signal?: AbortSignal }): Promise<Chat[]> {
 	const { authedSdkClient } = await auth.getSdkClients()
@@ -27,6 +32,7 @@ export function useChatsQuery(
 ): UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error> {
 	const query = useQuery({
 		...DEFAULT_QUERY_OPTIONS,
+		refetchOnMount: socketCoveredRefetchOnMount(CHATS_LIST_REUSE_MS),
 		...options,
 		queryKey: [BASE_QUERY_KEY],
 		queryFn: ({ signal }) =>

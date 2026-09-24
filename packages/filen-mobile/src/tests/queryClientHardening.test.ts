@@ -79,10 +79,14 @@ vi.mock("@tanstack/react-query", () => ({
 			return typeof updater === "function" ? (updater as (prev: unknown) => unknown)(undefined) : updater
 		})
 		public getQueryData = vi.fn()
+		public getQueryCache = () => ({ get: () => undefined })
 		public constructor(_opts?: unknown) {}
 	},
 	QueryCache: class {
 		public constructor(_config?: unknown) {}
+		public subscribe() {
+			return () => undefined
+		}
 	},
 	onlineManager: { isOnline: vi.fn(() => true) },
 	notifyManager: { batch: (fn: () => unknown) => fn() },

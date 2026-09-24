@@ -118,6 +118,7 @@ import useDirectorySizeQuery, {
 	type UseDirectorySizeQueryParams
 } from "@/features/drive/queries/useDirectorySize.query"
 import useSocketStore from "@/stores/useSocket.store"
+import { trackServerReads } from "@/queries/socketSession"
 import type { DriveItem } from "@/types"
 
 const dirItem = { type: "directory", data: { uuid: "dir-1" } } as unknown as DriveItem
@@ -140,6 +141,7 @@ const normal: UseDirectorySizeQueryParams = { uuid: "dir-1", type: "normal", ite
 
 beforeEach(() => {
 	holder.client = new QueryClient()
+	trackServerReads(holder.client.getQueryCache())
 	mockGetDirSize.mockReset()
 	mockGetDirSize.mockResolvedValue({ size: 10n, files: 1n, dirs: 0n })
 	useSocketStore.setState({ state: "disconnected", connectedAt: 0 })

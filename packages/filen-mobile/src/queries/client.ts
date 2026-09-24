@@ -10,6 +10,7 @@ import { AppState } from "react-native"
 import auth from "@/lib/auth"
 import useAppStore from "@/stores/useApp.store"
 import logger from "@/lib/logger"
+import { trackServerReads } from "@/queries/socketSession"
 
 // Critical: When changing anything related to query persistence, increment the VERSION constant to invalidate old caches and prevent potential issues from stale or incompatible data.
 // v2: the SDK's File gained `stableUuid`, and a drive mutation now REFUSES a file that lacks one
@@ -903,6 +904,9 @@ const queryCache = new QueryCache({
 	}
 })
 
+// Socket-covered queries reuse a read from the current socket session (queries/socketSession).
+trackServerReads(queryCache)
+
 export const queryClient = new QueryClient({
 	queryCache,
 	defaultOptions: {
@@ -947,6 +951,11 @@ export const queryUpdater = {
 		return queryClient.getQueryData<T>(queryKey)
 	},
 	set<T>(queryKey: unknown[], updater: T | ((prev?: T) => T), dataUpdatedAt?: number): void {
+		const queryHash = serialize(queryKey)
+		// setQueryData clears isInvalidated. A patch writes the change it knows about, not whatever
+		// made the query stale, so a pending invalidation must survive it (the next mount still reads).
+		const wasInvalidated = queryClient.getQueryCache().get(queryHash)?.state.isInvalidated === true
+
 		queryClient.setQueryData(
 			queryKey,
 			(oldData: T | undefined) => {
@@ -961,6 +970,10 @@ export const queryUpdater = {
 			}
 		)
 
+		if (wasInvalidated) {
+			queryClient.getQueryCache().get(queryHash)?.invalidate()
+		}
+
 		// persistQueryByKey resolves its query via `getQueryCache().find({queryKey})` —
 		// query-core's find() materializes getAll() and LINEAR-SCANS it, re-running
 		// hashQueryKeyByOptions (our serialize-based hash) against the searched key for
@@ -973,7 +986,6 @@ export const queryUpdater = {
 		// persisted shape, storage key format, and gating stay the persister's own.
 		// (Version-pinned third-party surface: persistQueryByKey touches nothing else of
 		// the client — re-verify on @tanstack/query-persist-client-core upgrades.)
-		const queryHash = serialize(queryKey)
 		const lookupFacade = {
 			getQueryCache: () => ({
 				find: () => queryClient.getQueryCache().get(queryHash)

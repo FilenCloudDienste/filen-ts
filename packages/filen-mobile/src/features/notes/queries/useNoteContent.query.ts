@@ -4,7 +4,7 @@ import { sortParams } from "@filen/shared"
 import auth from "@/lib/auth"
 import logger from "@/lib/logger"
 import { notesQueryGet } from "@/features/notes/queries/useNotesQuery"
-import useSocketStore from "@/stores/useSocket.store"
+import { readStartedInCurrentSocketSession } from "@/queries/socketSession"
 
 export const BASE_QUERY_KEY = "useNoteContentQuery"
 
@@ -36,15 +36,13 @@ export function noteContentRemoteEditSeen(uuid: string): void {
 // ever since, with no remote edit announced after the read began and the listed edit stamp unchanged.
 export function noteContentReadIsCurrent(uuid: string, state: { data: unknown; status: string }): boolean {
 	const read = contentReads.get(uuid)
-	const socket = useSocketStore.getState()
 	const listed = notesQueryGet()?.find(n => n.uuid === uuid)
 
 	return (
 		typeof state.data === "string" &&
 		state.status !== "error" &&
 		read !== undefined &&
-		socket.state === "connected" &&
-		read.startedAt >= socket.connectedAt &&
+		readStartedInCurrentSocketSession(read.startedAt) &&
 		(remoteEditSequences.get(uuid) ?? 0) < read.sequence &&
 		listed !== undefined &&
 		listed.editedTimestamp === read.editedTimestamp

@@ -10,7 +10,8 @@ const {
 	mockIsOnline,
 	mockSetQueryData,
 	mockGetQueryData,
-	mockPersistQueryByKey
+	mockPersistQueryByKey,
+	mockQueryCacheGet
 } = vi.hoisted(() => ({
 	mockIsNetworkClassError: vi.fn().mockReturnValue(false),
 	mockUnwrapSdkError: vi.fn().mockReturnValue(null),
@@ -19,7 +20,8 @@ const {
 	mockIsOnline: vi.fn().mockReturnValue(true),
 	mockSetQueryData: vi.fn(),
 	mockGetQueryData: vi.fn().mockReturnValue(undefined),
-	mockPersistQueryByKey: vi.fn().mockResolvedValue(undefined)
+	mockPersistQueryByKey: vi.fn().mockResolvedValue(undefined),
+	mockQueryCacheGet: vi.fn().mockReturnValue(undefined)
 }))
 
 // ─── vi.mock declarations (must appear before any imports of the mocked modules) ─
@@ -89,6 +91,7 @@ vi.mock("@tanstack/react-query", () => ({
 		setQueryData: typeof mockSetQueryData = mockSetQueryData
 		getQueryData: typeof mockGetQueryData = mockGetQueryData
 		getQueryState = () => undefined
+		getQueryCache = () => ({ get: mockQueryCacheGet })
 		constructor(opts?: { queryCache?: unknown }) {
 			this.queryCache = opts?.queryCache
 		}
@@ -97,6 +100,9 @@ vi.mock("@tanstack/react-query", () => ({
 		config: { onError?: (err: unknown, query: unknown) => void }
 		constructor(config?: { onError?: (err: unknown, query: unknown) => void }) {
 			this.config = config ?? {}
+		}
+		subscribe() {
+			return () => undefined
 		}
 	},
 	onlineManager: {
@@ -620,11 +626,33 @@ describe("restoreQueries", () => {
 
 describe("QueryUpdater.set", () => {
 	beforeEach(() => {
+		mockQueryCacheGet.mockReset().mockReturnValue(undefined)
 		mockSetQueryData.mockReset()
 		mockGetQueryData.mockReset()
 		mockGetQueryData.mockReturnValue(undefined)
 		mockPersistQueryByKey.mockReset()
 		mockPersistQueryByKey.mockResolvedValue(undefined)
+	})
+
+	it("a patch keeps a pending invalidation: the query is re-invalidated after the write", () => {
+		const order: string[] = []
+
+		mockQueryCacheGet.mockReturnValue({ state: { isInvalidated: true }, invalidate: () => order.push("invalidate") })
+		mockSetQueryData.mockImplementation(() => order.push("set"))
+
+		queryUpdater.set<string>(["stale-key"], "patched")
+
+		expect(order).toEqual(["set", "invalidate"])
+	})
+
+	it("a patch on a query that isn't invalidated doesn't invalidate it", () => {
+		const invalidate = vi.fn()
+
+		mockQueryCacheGet.mockReturnValue({ state: { isInvalidated: false }, invalidate })
+
+		queryUpdater.set<string>(["fresh-key"], "patched")
+
+		expect(invalidate).not.toHaveBeenCalled()
 	})
 
 	it("stores a plain value via setQueryData", () => {
