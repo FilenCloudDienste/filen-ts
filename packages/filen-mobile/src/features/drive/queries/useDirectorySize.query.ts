@@ -2,6 +2,7 @@ import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/r
 import { DEFAULT_QUERY_OPTIONS, queryClient } from "@/queries/client"
 import useSocketStore from "@/stores/useSocket.store"
 import { markAccountStale } from "@/queries/useAccount.query"
+import { noteDriveContentChanged } from "@/lib/driveChanges"
 import auth from "@/lib/auth"
 import { sortParams } from "@filen/shared"
 import cache from "@/lib/cache"
@@ -219,8 +220,8 @@ const SOCKET_COVERED_TYPES = new Set<UseDirectorySizeQueryParams["type"]>(["norm
 
 // Nothing observes a size change directly; every size-changing drive event and local write marks all
 // sizes stale instead (ancestors all the way up change, and the tree isn't known here). No refetch:
-// mounted rows keep today's behaviour, the next mount refetches. The account's storage figures move
-// with the same writes.
+// mounted rows keep today's behaviour, the next mount refetches. The account's storage figures (and
+// anything else read off drive content) move with the same writes.
 export function markDirectorySizesStale(): void {
 	void queryClient.invalidateQueries({
 		queryKey: [BASE_QUERY_KEY],
@@ -228,6 +229,7 @@ export function markDirectorySizesStale(): void {
 	})
 
 	markAccountStale()
+	noteDriveContentChanged()
 }
 
 export function useDirectorySizeQuery(

@@ -10,6 +10,7 @@ const { mockCacheSet, mockCacheHas, mockQueryUpdaterSet } = vi.hoisted(() => ({
 
 vi.mock("@/queries/client", () => ({
 	DEFAULT_QUERY_OPTIONS: {},
+	queryClient: { getQueryState: () => undefined },
 	queryUpdater: { set: mockQueryUpdaterSet }
 }))
 

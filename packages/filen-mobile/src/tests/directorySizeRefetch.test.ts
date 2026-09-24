@@ -264,3 +264,18 @@ describe("useSocketStore — connectedAt", () => {
 		expect(useSocketStore.getState().connectedAt).toBe(first)
 	})
 })
+
+describe("markDirectorySizesStale — drive-derived caches", () => {
+	it("records the drive change the playlists (and other drive-derived reads) compare against", async () => {
+		const { driveContentChangedSince } = await import("@/lib/driveChanges")
+		const before = Date.now() + 1
+
+		expect(driveContentChangedSince(before)).toBe(false)
+
+		await new Promise(resolve => setTimeout(resolve, 2))
+
+		markDirectorySizesStale()
+
+		expect(driveContentChangedSince(before)).toBe(true)
+	})
+})

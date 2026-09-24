@@ -88,6 +88,7 @@ vi.mock("@tanstack/react-query", () => ({
 		queryCache: unknown
 		setQueryData: typeof mockSetQueryData = mockSetQueryData
 		getQueryData: typeof mockGetQueryData = mockGetQueryData
+		getQueryState = () => undefined
 		constructor(opts?: { queryCache?: unknown }) {
 			this.queryCache = opts?.queryCache
 		}
