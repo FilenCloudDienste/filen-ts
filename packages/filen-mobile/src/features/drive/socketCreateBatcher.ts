@@ -73,6 +73,18 @@ class SocketCreateBatcher {
 		}
 	}
 
+	// Logout, once the socket is gone: what is still queued belongs to the ended session and must not be
+	// written after its caches are wiped.
+	public discard(): void {
+		if (this.timer) {
+			clearTimeout(this.timer)
+
+			this.timer = null
+		}
+
+		this.pending = new Map()
+	}
+
 	private apply(pending: Map<string, Map<string, PendingCreate>>): void {
 		const copying = copyActivity.isActive()
 		const photos: { parentUuid: string; item: DriveItem }[] = []

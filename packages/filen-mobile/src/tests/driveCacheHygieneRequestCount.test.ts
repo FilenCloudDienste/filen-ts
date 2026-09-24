@@ -318,6 +318,42 @@ describe("socket create storm (a copy of 40 directories × 25 files plus 5k top-
 		expect(listing(photosKey)).toHaveLength(50)
 		expect(h.getConfig).toHaveBeenCalledTimes(1)
 	})
+
+	it("while a copy runs, a file under an unread listing that reaches Photos is cached, so a later trash finds it", async () => {
+		seedCacheDir("album", CAMERA_ROOT)
+		queryClient.setQueryData(photosKey, [])
+
+		copyActivity.begin()
+		void handleDriveEvent({ event: event("FileNew", { file: { uuid: "copied", parent: "album", name: "copied" } }) })
+		await flushWindow()
+
+		expect(listing(photosKey)).toHaveLength(1)
+		expect(h.fakeCache.fileUuidToNormalFile.has("copied")).toBe(true)
+
+		copyActivity.end()
+
+		await handleDriveEvent({ event: event("FileTrash", { uuid: "copied" }) })
+		await vi.advanceTimersByTimeAsync(0)
+
+		expect(listing(photosKey)).toEqual([])
+	})
+
+	it("discard drops what is queued: nothing is written once the window closes", async () => {
+		queryClient.setQueryData(driveKey("dest"), [])
+		queryClient.setQueryData(photosKey, [])
+		seedCacheDir("album", CAMERA_ROOT)
+
+		void handleDriveEvent({ event: event("FileNew", { file: { uuid: "late", parent: "dest", name: "late" } }) })
+		void handleDriveEvent({ event: event("FileNew", { file: { uuid: "late-photo", parent: "album", name: "late-photo" } }) })
+
+		socketCreateBatcher.discard()
+		await flushWindow()
+		socketCreateBatcher.flushNow()
+
+		expect(allWrites()).toBe(0)
+		expect(h.fakeCache.uuidToAnyDriveItem.has("late")).toBe(false)
+		expect(h.getConfig).not.toHaveBeenCalled()
+	})
 })
 
 describe("local writes patch only read listings", () => {

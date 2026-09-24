@@ -270,6 +270,14 @@ vi.mock("@/features/drive/drive", () => ({
 	}
 }))
 
+vi.mock("@/features/drive/socketCreateBatcher", () => ({
+	default: {
+		discard: vi.fn(() => {
+			callLog.push("socketCreateBatcher.discard")
+		})
+	}
+}))
+
 vi.mock("expo", () => ({
 	reloadAppAsync: vi.fn(async () => {
 		callLog.push("reloadAppAsync")
@@ -619,6 +627,28 @@ describe("auth.logout", () => {
 
 		expect(destroyIdx).toBeGreaterThan(offlineSyncCancelIdx)
 		expect(cacheClearIdx).toBeGreaterThan(destroyIdx)
+	})
+
+	// Socket creates queued for a batched write before the socket went away must not land after the wipe.
+	it("drops queued socket creates once the socket is gone and before the cache wipe", async () => {
+		const internals = authInternals()
+
+		internals.authedClient = {
+			uniffiDestroy: vi.fn(() => {
+				callLog.push("authedClient.uniffiDestroy")
+			})
+		}
+
+		const promise = auth.logout()
+
+		await vi.runAllTimersAsync()
+		await promise
+
+		const destroyIdx = callLog.indexOf("authedClient.uniffiDestroy")
+		const discardIdx = callLog.indexOf("socketCreateBatcher.discard")
+
+		expect(discardIdx).toBeGreaterThan(destroyIdx)
+		expect(callLog.indexOf("cache.clear")).toBeGreaterThan(discardIdx)
 	})
 
 	// A copy still settling must not write after the session ends, and must hand back its report (and

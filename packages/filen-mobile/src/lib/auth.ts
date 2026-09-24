@@ -37,6 +37,7 @@ import { queryClientPersisterKv } from "@/queries/client"
 import driveSearch from "@/features/drive/driveSearch"
 import drive from "@/features/drive/drive"
 import useDriveClipboardStore from "@/features/drive/store/useDriveClipboard.store"
+import socketCreateBatcher from "@/features/drive/socketCreateBatcher"
 import events from "@/lib/events"
 import { reloadAppAsync } from "expo"
 import { isEqual } from "es-toolkit"
@@ -467,6 +468,10 @@ class Auth {
 		// in-memory cache during the wipe that follows.
 		this.destroyClient(authedClient)
 		this.destroyClient(unauthedClient)
+
+		// Socket creates still queued for a batched write belong to the ended session: dropped before the
+		// wipe so none lands after it.
+		socketCreateBatcher.discard()
 
 		// Phase 5 — wipe the session-scoped decrypted metadata from memory BEFORE the SQLite wipe.
 		// cache.clear() empties the in-memory uuid maps + secureStore mirror and resets rootUuid; the

@@ -953,6 +953,13 @@ export function driveItemsQueryUpsertManyIntoPhotos(entries: readonly { parentUu
 				return
 			}
 
+			// A row shown in Photos must be in the uuid caches, or a later trash, rename or delete event for
+			// it finds nothing to update. The batcher leaves files under unread listings uncached during a
+			// copy, so these are cached here.
+			for (const item of items) {
+				cache.cacheDriveItem(item)
+			}
+
 			const uuids = new Set(items.map(item => item.data.uuid))
 
 			updateListing(params, prev => [...prev.filter(item => !uuids.has(item.data.uuid)), ...items], false)
