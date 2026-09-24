@@ -1,7 +1,15 @@
 import { describe, it, expect } from "vitest"
-import { aggregateChatSelectionFlags, allVisibleChatsSelected, EMPTY_CHAT_FLAGS, chatHasUnread, isMessageUnread } from "@/features/chats/chatSelectors"
+import {
+	aggregateChatSelectionFlags,
+	allVisibleChatsSelected,
+	EMPTY_CHAT_FLAGS,
+	chatHasUnread,
+	isMessageUnread,
+	cachedMessagesMatchLastMessage
+} from "@/features/chats/chatSelectors"
 import type { ChatParticipant } from "@filen/sdk-rs"
 import type { Chat, ChatMessage } from "@/types"
+import type { ChatMessageWithInflightId } from "@/features/chats/store/useChats.store"
 
 const ME = 100n
 const SOMEONE_ELSE = 200n
@@ -346,5 +354,68 @@ describe("isMessageUnread", () => {
 		})
 
 		expect(isMessageUnread(msg, c, ME)).toBe(true)
+	})
+})
+
+describe("cachedMessagesMatchLastMessage", () => {
+	function msg(uuid: string, sentTimestamp: bigint, overrides: Partial<ChatMessageWithInflightId> = {}): ChatMessageWithInflightId {
+		return {
+			inner: { uuid, message: `text ${uuid}` },
+			sentTimestamp,
+			editedTimestamp: 0n,
+			edited: false,
+			embedDisabled: false,
+			inflightId: "",
+			...overrides
+		} as unknown as ChatMessageWithInflightId
+	}
+
+	it("false when nothing is cached", () => {
+		expect(cachedMessagesMatchLastMessage(chat({ lastMessage: msg("a", 1n) }), undefined)).toBe(false)
+	})
+
+	it("true when the newest cached message is lastMessage", () => {
+		expect(cachedMessagesMatchLastMessage(chat({ lastMessage: msg("b", 2n) }), [msg("b", 2n), msg("a", 1n)])).toBe(true)
+	})
+
+	it("false when lastMessage moved to a message the cache does not hold", () => {
+		expect(cachedMessagesMatchLastMessage(chat({ lastMessage: msg("c", 3n) }), [msg("a", 1n), msg("b", 2n)])).toBe(false)
+	})
+
+	it("false for the same uuid with a later edit", () => {
+		expect(
+			cachedMessagesMatchLastMessage(chat({ lastMessage: msg("b", 2n, { editedTimestamp: 9n, edited: true }) }), [msg("b", 2n)])
+		).toBe(false)
+	})
+
+	it("false for the same uuid with different content", () => {
+		const last = msg("b", 2n)
+
+		expect(cachedMessagesMatchLastMessage(chat({ lastMessage: last }), [{ ...last, inner: { ...last.inner, message: "old" } }])).toBe(false)
+	})
+
+	it("false when embeds were disabled on lastMessage", () => {
+		expect(cachedMessagesMatchLastMessage(chat({ lastMessage: msg("b", 2n, { embedDisabled: true }) }), [msg("b", 2n)])).toBe(false)
+	})
+
+	it("true for an empty chat with an empty cached page, false when the cache still holds messages", () => {
+		expect(cachedMessagesMatchLastMessage(chat(), [])).toBe(true)
+		expect(cachedMessagesMatchLastMessage(chat(), [msg("a", 1n)])).toBe(false)
+	})
+
+	it("false for a chat with a lastMessage but an empty cached page", () => {
+		expect(cachedMessagesMatchLastMessage(chat({ lastMessage: msg("a", 1n) }), [])).toBe(false)
+	})
+
+	it("ignores an optimistic copy newer than lastMessage", () => {
+		const pending = msg("local-1", 5n, { inflightId: "local-1" })
+
+		expect(cachedMessagesMatchLastMessage(chat({ lastMessage: msg("b", 2n) }), [msg("b", 2n), pending])).toBe(true)
+	})
+
+	it("counts an own committed message that still carries its inflight id", () => {
+		const committed = msg("server-b", 2n, { inflightId: "local-1" })
+
+		expect(cachedMessagesMatchLastMessage(chat({ lastMessage: msg("server-b", 2n) }), [msg("a", 1n), committed])).toBe(true)
 	})
 })

@@ -1,5 +1,6 @@
 import { type Chat, type ChatMessage } from "@/types"
 import { type BlockedUsers, EMPTY_BLOCKED_USERS, isBlocked, isMessageUnreadCore, chatHasUnreadCore } from "@filen/shared"
+import type { ChatMessageWithInflightId } from "@/features/chats/store/useChats.store"
 
 /**
  * Aggregated flags for a Chats selection, computed in a single pass.
@@ -71,6 +72,42 @@ export function chatHasUnread(
 		userId,
 		sender => isBlocked(sender, blocked),
 		() => getMessages?.(c.uuid)?.map(m => ({ sentTimestamp: m.sentTimestamp, senderId: m.inner.senderId, senderEmail: m.inner.senderEmail }))
+	)
+}
+
+/**
+ * Whether a chat's cached message page already ends at the listing's `lastMessage`, so re-reading it
+ * would return what is held. Compared on edit and embed state too: an edit keeps the uuid. Optimistic
+ * copies (uuid still the local inflight id) are not server messages and are skipped.
+ */
+export function cachedMessagesMatchLastMessage(chat: Chat, messages: readonly ChatMessageWithInflightId[] | undefined): boolean {
+	if (!messages) {
+		return false
+	}
+
+	let newest: ChatMessageWithInflightId | undefined
+
+	for (const message of messages) {
+		if (message.inflightId !== "" && message.inner.uuid === message.inflightId) {
+			continue
+		}
+
+		if (!newest || message.sentTimestamp > newest.sentTimestamp) {
+			newest = message
+		}
+	}
+
+	const last = chat.lastMessage
+
+	if (!last || !newest) {
+		return !last && !newest
+	}
+
+	return (
+		newest.inner.uuid === last.inner.uuid &&
+		newest.editedTimestamp === last.editedTimestamp &&
+		newest.inner.message === last.inner.message &&
+		newest.embedDisabled === last.embedDisabled
 	)
 }
 

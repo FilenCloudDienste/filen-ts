@@ -230,6 +230,8 @@ export async function handleChatEvent({ event, userId }: { event: ChatSocketEven
 								m.inner.uuid === inner.uuid
 									? {
 											...m,
+											edited: true,
+											editedTimestamp: inner.editedTimestamp,
 											inner: {
 												...m.inner,
 												message: newContent
@@ -249,6 +251,8 @@ export async function handleChatEvent({ event, userId }: { event: ChatSocketEven
 											...c,
 											lastMessage: {
 												...c.lastMessage,
+												edited: true,
+												editedTimestamp: inner.editedTimestamp,
 												inner: {
 													...c.lastMessage.inner,
 													message: newContent
@@ -340,10 +344,7 @@ export async function handleChatEvent({ event, userId }: { event: ChatSocketEven
 						m.inner.uuid === inner.uuid
 							? {
 									...m,
-									inner: {
-										...m.inner,
-										embedsDisabled: true
-									}
+									embedDisabled: true
 								}
 							: m
 					)

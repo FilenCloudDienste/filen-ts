@@ -170,7 +170,8 @@ function makeMessageEditedEvent(chatUuid: string, msgUuid: string, newContent: {
 	return makeEvent(ChatEvent_Tags.MessageEdited, {
 		chat: chatUuid,
 		uuid: msgUuid,
-		newContent
+		newContent,
+		editedTimestamp: 777n
 	})
 }
 
@@ -623,7 +624,10 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 			const result = updater(prev) as Array<Record<string, unknown>>
 
 			expect((result[0]!["inner"] as Record<string, unknown>)["message"]).toBe("Updated content")
-			expect((result[1]!["inner"] as Record<string, unknown>)["message"]).toBe("Keep me")
+			expect((result[1]!["inner"] as Record<string, unknown>)["message"]).toBe("Keep me")			// The edit stamp travels with the content, so the cached page still matches the listing's lastMessage.
+			expect(result[0]!["edited"]).toBe(true)
+			expect(result[0]!["editedTimestamp"]).toBe(777n)
+			expect(result[1]!["editedTimestamp"]).toBeUndefined()
 		})
 
 		it("Encrypted: does NOT call chatMessagesQueryUpdate (skip path)", async () => {
@@ -699,7 +703,7 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 	// ---------------------------------------------------------------------------
 
 	describe("ChatEvent_Tags.MessageEmbedDisabled", () => {
-		it("sets embedsDisabled=true on the matching message", async () => {
+		it("sets embedDisabled=true on the matching message", async () => {
 			mockChatsQueryGet.mockReturnValue([{ uuid: "chat-1" }])
 			mockChatMessagesQueryGet.mockImplementation(({ uuid }: { uuid: string }) => {
 				if (uuid === "chat-1") return [{ inner: { uuid: "msg-embed" } }]
@@ -713,11 +717,14 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 			expect(mockChatMessagesQueryUpdate).toHaveBeenCalledOnce()
 
 			const updater = capturedMessagesUpdaters[0]!
-			const prev = [{ inner: { uuid: "msg-embed", embedsDisabled: false } }, { inner: { uuid: "msg-other", embedsDisabled: false } }]
+			const prev = [
+				{ inner: { uuid: "msg-embed" }, embedDisabled: false },
+				{ inner: { uuid: "msg-other" }, embedDisabled: false }
+			]
 			const result = updater(prev) as Array<Record<string, unknown>>
 
-			expect((result[0]!["inner"] as Record<string, unknown>)["embedsDisabled"]).toBe(true)
-			expect((result[1]!["inner"] as Record<string, unknown>)["embedsDisabled"]).toBe(false)
+			expect(result[0]!["embedDisabled"]).toBe(true)
+			expect(result[1]!["embedDisabled"]).toBe(false)
 		})
 
 		it("no-op when the message is not found in any chat", async () => {

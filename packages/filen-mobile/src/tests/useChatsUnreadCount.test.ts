@@ -11,7 +11,8 @@ const mocks = vi.hoisted(() => ({
 	// chatMessagesQueryGet returns a messages array or null (missing)
 	chatMessagesMap: new Map<string, unknown[] | null>(),
 	stringifiedClient: { userId: 1n } as { userId: bigint } | null,
-	refetchChatsAndMessages: vi.fn().mockResolvedValue(undefined)
+	refetchChatsAndMessages: vi.fn().mockResolvedValue(undefined),
+	fetchMissingMessages: vi.fn().mockResolvedValue(undefined)
 }))
 
 vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
@@ -34,7 +35,8 @@ vi.mock("@/features/chats/queries/useChatMessages.query", () => ({
 
 vi.mock("@/features/chats/chats", () => ({
 	default: {
-		refetchChatsAndMessages: () => mocks.refetchChatsAndMessages()
+		refetchChatsAndMessages: () => mocks.refetchChatsAndMessages(),
+		fetchMissingMessages: () => mocks.fetchMissingMessages()
 	}
 }))
 
@@ -107,6 +109,8 @@ beforeEach(() => {
 	mocks.stringifiedClient = { userId: 1n }
 	mocks.refetchChatsAndMessages.mockClear()
 	mocks.refetchChatsAndMessages.mockResolvedValue(undefined)
+	mocks.fetchMissingMessages.mockClear()
+	mocks.fetchMissingMessages.mockResolvedValue(undefined)
 })
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
@@ -133,7 +137,7 @@ describe("useChatsUnreadCount", () => {
 		expect(result.current).toBe(0)
 	})
 
-	it("sets hasMissingMessages and triggers refetch when chatMessagesQueryGet returns null for any chat", () => {
+	it("fetches only the missing pages when chatMessagesQueryGet returns null for any chat", () => {
 		const chat1 = makeChat("c1")
 		const chat2 = makeChat("c2")
 
@@ -146,8 +150,9 @@ describe("useChatsUnreadCount", () => {
 
 		// Chat c1 has 1 unread message, chat c2 is missing (triggers refetch)
 		expect(result.current).toBe(1)
-		// hasMissingMessages=true → useEffect called refetchChatsAndMessages
-		expect(mocks.refetchChatsAndMessages).toHaveBeenCalled()
+		// hasMissingMessages=true → the effect fetches just the missing pages; the mount-once full sync is separate
+		expect(mocks.fetchMissingMessages).toHaveBeenCalledTimes(1)
+		expect(mocks.refetchChatsAndMessages).toHaveBeenCalledTimes(1)
 	})
 
 	it("skips (continue) the chat with missing messages but still counts other chats", () => {
@@ -186,6 +191,7 @@ describe("useChatsUnreadCount", () => {
 		// is non-null. We verify hasMissingMessages=false by checking refetch was called at most
 		// once (only from useEffectOnce, not from the hasMissingMessages effect).
 		expect(mocks.refetchChatsAndMessages).toHaveBeenCalledTimes(1)
+		expect(mocks.fetchMissingMessages).not.toHaveBeenCalled()
 	})
 
 	it("hasMissingMessages=false when all chats have message arrays (even empty ones)", () => {

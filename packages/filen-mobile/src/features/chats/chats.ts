@@ -1,8 +1,9 @@
 import auth from "@/lib/auth"
 import { type ChatMessagePartial, ChatTypingType, type Contact, type ChatParticipant, AnyNormalDir, DirMeta_Tags } from "@filen/sdk-rs"
 import { type Chat, type ChatMessage } from "@/types"
-import { chatsQueryUpdate, fetchData as chatsQueryFetch } from "@/features/chats/queries/useChats.query"
-import { chatMessagesQueryUpdate, fetchData as chatMessagesQueryFetch } from "@/features/chats/queries/useChatMessages.query"
+import { chatsQueryUpdate, chatsQueryFetch, chatsQueryGet } from "@/features/chats/queries/useChats.query"
+import { chatMessagesQueryUpdate, chatMessagesQueryFetch, chatMessagesQueryGet } from "@/features/chats/queries/useChatMessages.query"
+import { cachedMessagesMatchLastMessage } from "@/features/chats/chatSelectors"
 import { wrapChat, wrapMessage } from "@/features/chats/chatsWrap"
 import { Semaphore, run } from "@filen/shared"
 import transfers from "@/features/transfers/transfers"
@@ -528,6 +529,9 @@ class Chats {
 		return chats
 	}
 
+	// The listing is always re-read (read state, mute and lastMessage carry no socket event while
+	// disconnected); a chat's message page only when its lastMessage moved away from the cached one.
+	// Older edits/deletes in an unchanged chat are picked up when that chat is opened.
 	public async refetchChatsAndMessages() {
 		await run(
 			async defer => {
@@ -539,35 +543,50 @@ class Chats {
 
 				const chats = await chatsQueryFetch()
 
-				if (!chats || chats.length === 0) {
-					return
-				}
-
 				await Promise.all(
-					chats.map(async chat => {
-						// Pass the fresh chat by value: the messages query keys on uuid only, so this resolves
-						// the fan-out even for chats the list query hasn't committed yet (commit is below).
-						const messages = await chatMessagesQueryFetch({
-							uuid: chat.uuid,
-							chat
-						})
-
-						chatMessagesQueryUpdate({
-							params: {
-								uuid: chat.uuid
-							},
-							updater: () => messages
-						})
-					})
+					chats
+						.filter(
+							chat =>
+								!cachedMessagesMatchLastMessage(
+									chat,
+									chatMessagesQueryGet({
+										uuid: chat.uuid
+									})
+								)
+						)
+						.map(chat =>
+							// The fresh chat by value, so the read never depends on the list query's current contents.
+							chatMessagesQueryFetch({
+								uuid: chat.uuid,
+								chat
+							})
+						)
 				)
-
-				chatsQueryUpdate({
-					updater: () => chats
-				})
 			},
 			{
 				throw: true
 			}
+		)
+	}
+
+	// Only the listed chats with no cached page at all — the listing itself is already current.
+	public async fetchMissingMessages() {
+		const chats = chatsQueryGet() ?? []
+
+		await Promise.all(
+			chats
+				.filter(
+					chat =>
+						!chatMessagesQueryGet({
+							uuid: chat.uuid
+						})
+				)
+				.map(chat =>
+					chatMessagesQueryFetch({
+						uuid: chat.uuid,
+						chat
+					})
+				)
 		)
 	}
 

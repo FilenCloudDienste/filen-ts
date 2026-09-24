@@ -54,7 +54,7 @@ export function useChatsUnreadCount() {
 
 	useEffect(() => {
 		if (hasMissingMessages && stringifiedClient) {
-			chats.refetchChatsAndMessages().catch(e => logger.warn("chats", "refetchChatsAndMessages (missing messages) failed", { error: e }))
+			chats.fetchMissingMessages().catch(e => logger.warn("chats", "fetchMissingMessages failed", { error: e }))
 		}
 	}, [hasMissingMessages, stringifiedClient])
 

@@ -7,6 +7,7 @@ const {
 	mockChatsQueryGet,
 	mockChatsQueryFetch,
 	mockChatMessagesQueryFetch,
+	mockChatMessagesQueryGet,
 	mockSdkClient,
 	mockPurgeChatInflightState
 } = vi.hoisted(() => {
@@ -39,6 +40,7 @@ const {
 		mockChatsQueryGet: vi.fn().mockReturnValue([]),
 		mockChatsQueryFetch: vi.fn().mockResolvedValue([]),
 		mockChatMessagesQueryFetch: vi.fn().mockResolvedValue([]),
+		mockChatMessagesQueryGet: vi.fn().mockReturnValue(undefined),
 		mockChatMessagesQueryUpdate: vi.fn(),
 		mockPurgeChatInflightState: vi.fn().mockResolvedValue(undefined)
 	}
@@ -59,12 +61,13 @@ vi.mock("@/lib/auth", () => ({
 vi.mock("@/features/chats/queries/useChats.query", () => ({
 	chatsQueryUpdate: mockChatsQueryUpdate,
 	chatsQueryGet: mockChatsQueryGet,
-	fetchData: mockChatsQueryFetch
+	chatsQueryFetch: mockChatsQueryFetch
 }))
 
 vi.mock("@/features/chats/queries/useChatMessages.query", () => ({
 	chatMessagesQueryUpdate: mockChatMessagesQueryUpdate,
-	fetchData: mockChatMessagesQueryFetch
+	chatMessagesQueryFetch: mockChatMessagesQueryFetch,
+	chatMessagesQueryGet: mockChatMessagesQueryGet
 }))
 
 vi.mock("@filen/sdk-rs", () => ({
@@ -1423,77 +1426,74 @@ describe("chats.create", () => {
 })
 
 describe("chats.refetchChatsAndMessages", () => {
+	const cachedMessages = new Map<string, ChatMessageWithInflightId[]>()
+
 	beforeEach(() => {
-		mockChatsQueryFetch.mockClear()
-		mockChatMessagesQueryFetch.mockClear()
+		cachedMessages.clear()
+		mockChatsQueryFetch.mockReset()
+		mockChatsQueryFetch.mockResolvedValue([])
+		mockChatMessagesQueryFetch.mockReset()
+		mockChatMessagesQueryFetch.mockResolvedValue([])
+		mockChatMessagesQueryGet.mockImplementation(({ uuid }: { uuid: string }) => cachedMessages.get(uuid))
 		mockChatsQueryUpdate.mockClear()
 		mockChatMessagesQueryUpdate.mockClear()
 	})
 
-	it("does nothing when chatsQueryFetch returns empty array", async () => {
-		mockChatsQueryFetch.mockResolvedValueOnce([])
-
+	it("reads the listing and nothing else when there are no chats", async () => {
 		await chats.refetchChatsAndMessages()
 
+		expect(mockChatsQueryFetch).toHaveBeenCalledTimes(1)
 		expect(mockChatMessagesQueryFetch).not.toHaveBeenCalled()
-		expect(mockChatsQueryUpdate).not.toHaveBeenCalled()
-		expect(mockChatMessagesQueryUpdate).not.toHaveBeenCalled()
 	})
 
-	it("does nothing when chatsQueryFetch returns null", async () => {
-		mockChatsQueryFetch.mockResolvedValueOnce(null)
+	it("fetches only the chats whose cached page does not end at lastMessage, passing the fresh chat by value", async () => {
+		const unchangedLast = makeMessage("same", { inner: { uuid: "m-same" } as ChatMessageWithInflightId["inner"] })
+		const movedLast = makeMessage("new", { inner: { uuid: "m-new" } as ChatMessageWithInflightId["inner"], sentTimestamp: 5n })
+		const unchanged = makeChat({ uuid: "rf-1", lastMessage: unchangedLast })
+		const moved = makeChat({ uuid: "rf-2", lastMessage: movedLast })
+		const uncached = makeChat({ uuid: "rf-3", lastMessage: movedLast })
 
-		await chats.refetchChatsAndMessages()
-
-		expect(mockChatMessagesQueryFetch).not.toHaveBeenCalled()
-		expect(mockChatsQueryUpdate).not.toHaveBeenCalled()
-	})
-
-	it("fetches messages for each chat and updates both caches when chats are returned", async () => {
-		const chat1 = makeChat({ uuid: "rf-1" })
-		const chat2 = makeChat({ uuid: "rf-2" })
-		const msgs1 = [makeMessage("a")]
-		const msgs2 = [makeMessage("b"), makeMessage("c")]
-
-		mockChatsQueryFetch.mockResolvedValueOnce([chat1, chat2])
-		mockChatMessagesQueryFetch.mockImplementation(async ({ uuid }: { uuid: string }) => {
-			if (uuid === "rf-1") return msgs1
-
-			return msgs2
-		})
+		cachedMessages.set("rf-1", [unchangedLast])
+		cachedMessages.set("rf-2", [makeMessage("old", { inner: { uuid: "m-old" } as ChatMessageWithInflightId["inner"] })])
+		mockChatsQueryFetch.mockResolvedValueOnce([unchanged, moved, uncached])
 
 		await chats.refetchChatsAndMessages()
 
 		expect(mockChatMessagesQueryFetch).toHaveBeenCalledTimes(2)
-		// Each fan-out fetch receives the fresh chat by value (uuid + chat), so it resolves even
-		// before the chats-list commit below — the whole point of the by-value param.
-		expect(mockChatMessagesQueryFetch).toHaveBeenCalledWith({ uuid: "rf-1", chat: chat1 })
-		expect(mockChatMessagesQueryFetch).toHaveBeenCalledWith({ uuid: "rf-2", chat: chat2 })
-		// chatMessagesQueryUpdate called once per chat
-		expect(mockChatMessagesQueryUpdate).toHaveBeenCalledTimes(2)
-		// chatsQueryUpdate called once at the end
-		expect(mockChatsQueryUpdate).toHaveBeenCalledTimes(1)
+		expect(mockChatMessagesQueryFetch).toHaveBeenCalledWith({ uuid: "rf-2", chat: moved })
+		expect(mockChatMessagesQueryFetch).toHaveBeenCalledWith({ uuid: "rf-3", chat: uncached })
+		// fetchQuery commits both caches itself — no manual writes on top.
+		expect(mockChatsQueryUpdate).not.toHaveBeenCalled()
+		expect(mockChatMessagesQueryUpdate).not.toHaveBeenCalled()
 	})
 
-	it("chatMessagesQueryUpdate updater replaces messages for each chat", async () => {
-		const chat1 = makeChat({ uuid: "rf-3" })
-		const msgs1 = [makeMessage("msg a")]
+	it("rejects when the listing read fails", async () => {
+		mockChatsQueryFetch.mockRejectedValueOnce(new Error("offline"))
 
-		mockChatsQueryFetch.mockResolvedValueOnce([chat1])
-		mockChatMessagesQueryFetch.mockResolvedValueOnce(msgs1)
+		await expect(chats.refetchChatsAndMessages()).rejects.toThrow("offline")
+		expect(mockChatMessagesQueryFetch).not.toHaveBeenCalled()
+	})
+})
 
-		await chats.refetchChatsAndMessages()
+describe("chats.fetchMissingMessages", () => {
+	beforeEach(() => {
+		mockChatsQueryFetch.mockReset()
+		mockChatMessagesQueryFetch.mockReset()
+		mockChatMessagesQueryFetch.mockResolvedValue([])
+	})
 
-		// Find the call for chat1's messages
-		const msgCall = mockChatMessagesQueryUpdate.mock.calls.find(c => c[0]?.params?.uuid === "rf-3")
+	it("fetches only the listed chats with no cached page, without re-reading the listing", async () => {
+		const cached = makeChat({ uuid: "fm-1" })
+		const missing = makeChat({ uuid: "fm-2" })
 
-		expect(msgCall).toBeDefined()
+		mockChatsQueryGet.mockReturnValueOnce([cached, missing])
+		mockChatMessagesQueryGet.mockImplementation(({ uuid }: { uuid: string }) => (uuid === "fm-1" ? [] : undefined))
 
-		const updater = msgCall![0].updater
-		const result = updater([makeMessage("old")])
+		await chats.fetchMissingMessages()
 
-		expect(result).toHaveLength(1)
-		expect(result[0]!.inner.message).toBe("msg a")
+		expect(mockChatsQueryFetch).not.toHaveBeenCalled()
+		expect(mockChatMessagesQueryFetch).toHaveBeenCalledTimes(1)
+		expect(mockChatMessagesQueryFetch).toHaveBeenCalledWith({ uuid: "fm-2", chat: missing })
 	})
 })
 

@@ -1,5 +1,5 @@
 import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
-import { DEFAULT_QUERY_OPTIONS, queryUpdater } from "@/queries/client"
+import queryClient, { DEFAULT_QUERY_OPTIONS, queryUpdater } from "@/queries/client"
 import auth from "@/lib/auth"
 import { sortParams } from "@filen/shared"
 import { type Chat } from "@/types"
@@ -88,6 +88,18 @@ export function chatMessagesQueryUpdate({
 
 	queryUpdater.set<Awaited<ReturnType<typeof fetchData>>>([BASE_QUERY_KEY, sortedParams], prev => {
 		return typeof updater === "function" ? updater(prev ?? []) : updater
+	})
+}
+
+// Through the query registry rather than the bare fetchData, so an open chat's in-flight read is shared.
+export function chatMessagesQueryFetch(params: UseChatMessagesQueryParams): Promise<Awaited<ReturnType<typeof fetchData>>> {
+	return queryClient.fetchQuery({
+		queryKey: [BASE_QUERY_KEY, sortParams(chatMessagesQueryKey(params))],
+		queryFn: ({ signal }) =>
+			fetchData({
+				...params,
+				signal
+			})
 	})
 }
 
