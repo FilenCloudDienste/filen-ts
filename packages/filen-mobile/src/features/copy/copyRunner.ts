@@ -52,6 +52,8 @@ import socketCreateBatcher from "@/features/drive/socketCreateBatcher"
 import { markDirectorySizesStale } from "@/features/drive/queries/useDirectorySize.query"
 import { trash } from "@/features/drive/driveTrash"
 import { accountQuotaDeps, addAccountStorageUsed } from "@/queries/useAccount.query"
+import { driveItemsQueryRefetchAfterSocketGap } from "@/features/drive/queries/useDriveItems.query"
+import useSocketStore from "@/stores/useSocket.store"
 import type { DriveItem } from "@/types"
 
 // At most one job store and row write per window from progress callbacks. Each callback holds a Rust
@@ -312,6 +314,10 @@ class CopyRunner {
 
 		copyActivity.begin()
 
+		const socketAtStart = useSocketStore.getState()
+		// Set when what the job made below its destination may have outrun the socket.
+		let refetchDestination: { uuid: string | null } | null = null
+
 		useCopyJobsStore.getState().put(createCopyJob(id, destination, itemCount, glyph))
 
 		const setRowPaused = (paused: boolean) => {
@@ -512,6 +518,21 @@ class CopyRunner {
 				created: copied
 			}))
 
+			// Nested items only reach listings as socket echoes. A socket that was down, or reconnected, at
+			// any point during the job may have dropped some.
+			const settledJob = getCopyJob(id)
+			const socket = useSocketStore.getState()
+
+			if (
+				settledJob &&
+				(settledJob.counts.dirsCreated > 0 || settledJob.counts.filesDone > 0) &&
+				(socketAtStart.state !== "connected" || socket.state !== "connected" || socket.connectedAt !== socketAtStart.connectedAt)
+			) {
+				refetchDestination = {
+					uuid: settledJob.destination.uuid
+				}
+			}
+
 			return await this.settle(id)
 		} finally {
 			if (trailing) {
@@ -530,6 +551,10 @@ class CopyRunner {
 			// Created items land in their listings before Recents is refreshed.
 			if (live()) {
 				socketCreateBatcher.flushNow()
+
+				if (refetchDestination) {
+					driveItemsQueryRefetchAfterSocketGap(refetchDestination.uuid)
+				}
 			}
 
 			copyActivity.end()

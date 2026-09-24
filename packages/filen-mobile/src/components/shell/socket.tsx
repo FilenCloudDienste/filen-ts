@@ -1,5 +1,12 @@
 import auth, { useSdkClients, useStringifiedClient } from "@/lib/auth"
-import { type JsClientInterface, SocketEvent_Tags, ListenerHandle, GeneralEvent_Tags, type SocketEvent } from "@filen/sdk-rs"
+import {
+	type JsClientInterface,
+	SocketEvent_Tags,
+	ListenerHandle,
+	GeneralEvent_Tags,
+	ChatEvent_Tags,
+	type SocketEvent
+} from "@filen/sdk-rs"
 import { useEffect, useRef, useCallback } from "react"
 import { runEffect, run, Semaphore } from "@filen/shared"
 import useChatsStore from "@/features/chats/store/useChats.store"
@@ -13,6 +20,7 @@ import { handleChatEvent, chatTypingTimeoutsRef } from "@/features/chats/socketH
 import { handleDriveEvent } from "@/features/drive/socketHandlers"
 import { handleContactEvent } from "@/features/contacts/socketHandlers"
 import logger from "@/lib/logger"
+import { noteSocketDataEvent } from "@/queries/socketSession"
 
 type ConnectionTag =
 	| SocketEvent_Tags.Reconnecting
@@ -32,7 +40,30 @@ export function socketEventTagToState(tag: ConnectionTag): SocketState {
 			: "disconnected"
 }
 
+// A change to data some query holds: not a typing indicator or a connection-state change.
+export function isSocketDataEvent(event: SocketEvent): boolean {
+	switch (event.tag) {
+		case SocketEvent_Tags.Drive:
+		case SocketEvent_Tags.Note:
+		case SocketEvent_Tags.Contact: {
+			return true
+		}
+
+		case SocketEvent_Tags.Chat: {
+			return event.inner[0].inner.tag !== ChatEvent_Tags.Typing
+		}
+
+		default: {
+			return false
+		}
+	}
+}
+
 async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }) {
+	if (isSocketDataEvent(event)) {
+		noteSocketDataEvent()
+	}
+
 	try {
 		switch (event.tag) {
 			case SocketEvent_Tags.Reconnecting:

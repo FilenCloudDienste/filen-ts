@@ -42,7 +42,7 @@ vi.mock("@/features/chats/chatsWrap", () => ({
 	wrapMessage: (message: unknown) => message
 }))
 
-import { socketCoveredRefetchOnMount, trackServerReads } from "@/queries/socketSession"
+import { noteSocketDataEvent, socketCoveredRefetchOnMount, trackServerReads } from "@/queries/socketSession"
 import useSocketStore from "@/stores/useSocket.store"
 import useChatsQuery, { CHATS_LIST_REUSE_MS, BASE_QUERY_KEY as CHATS_KEY } from "@/features/chats/queries/useChats.query"
 import useChatMessagesQuery from "@/features/chats/queries/useChatMessages.query"
@@ -104,6 +104,51 @@ describe("socketCoveredRefetchOnMount — generic rule", () => {
 
 	beforeEach(() => {
 		queryFn.mockClear()
+	})
+
+	// A read whose result may lack a change that arrived while it was in flight.
+	async function readOverlapping(during: () => void): Promise<void> {
+		let release = () => {}
+
+		queryFn.mockImplementationOnce(
+			() =>
+				new Promise<string>(resolve => {
+					release = () => resolve("fresh")
+				})
+		)
+
+		const { result, unmount } = renderHook(() => useCovered(), { wrapper })
+
+		await waitFor(() => expect(result.current.fetchStatus).toBe("fetching"))
+
+		during()
+		release()
+
+		await waitFor(() => expect(result.current.fetchStatus).toBe("idle"))
+
+		unmount()
+	}
+
+	it("a socket event while the read is in flight makes it no read: the next mount reads again", async () => {
+		await readOverlapping(() => noteSocketDataEvent())
+		await mountAndSettle(() => useCovered())
+		// That read ran clean, so it is reused.
+		await mountAndSettle(() => useCovered())
+
+		expect(queryFn).toHaveBeenCalledTimes(2)
+	})
+
+	it("a patch its result overwrote makes it no read, and drops the read before it", async () => {
+		await mountAndSettle(() => useCovered())
+
+		holder.client.invalidateQueries({ queryKey: ["covered"], refetchType: "none" })
+
+		await readOverlapping(() => {
+			holder.client.setQueryData(["covered"], "patched")
+		})
+		await mountAndSettle(() => useCovered())
+
+		expect(queryFn).toHaveBeenCalledTimes(3)
 	})
 
 	it("a remount reuses a read from the current socket session", async () => {

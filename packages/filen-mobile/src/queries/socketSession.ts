@@ -16,12 +16,28 @@ export function readStartedInCurrentSocketSession(startedAt: number): boolean {
 // When each query's last server read began. dataUpdatedAt can't answer this: every setQueryData
 // patch and restored row restamps it. Keyed by the Query object, so an entry goes with its query.
 const readStartedAt = new WeakMap<object, number>()
-const pendingReadStartedAt = new WeakMap<object, number>()
+
+type PendingRead = {
+	startedAt: number
+	socketEventSeq: number
+	// A patch landed while the read was in flight: its result replaces the patched data.
+	patched: boolean
+}
+
+const pendingReads = new WeakMap<object, PendingRead>()
+// Counts socket data events. A read in flight when one arrives can come back without that change,
+// whether the patch was overwritten by its result or had nothing to patch yet (a first read).
+let socketEventSeq = 0
+
+export function noteSocketDataEvent(): void {
+	socketEventSeq++
+}
 
 /**
  * Records server reads from the cache's own events: a fetch start, then its non-manual success. The
  * persister answering a fetch from storage restores the stored dataUpdatedAt (a setState) on the way,
- * which marks that fetch as no read. Returns the unsubscribe.
+ * which marks that fetch as no read. A read that a patch or a socket event overlapped is no read
+ * either, and the one before it no longer describes the data. Returns the unsubscribe.
  */
 export function trackServerReads(queryCache: QueryCache): () => void {
 	return queryCache.subscribe(event => {
@@ -31,29 +47,46 @@ export function trackServerReads(queryCache: QueryCache): () => void {
 
 		switch (event.action.type) {
 			case "fetch": {
-				pendingReadStartedAt.set(event.query, Date.now())
+				pendingReads.set(event.query, {
+					startedAt: Date.now(),
+					socketEventSeq,
+					patched: false
+				})
 
 				break
 			}
 
 			case "setState":
 			case "error": {
-				pendingReadStartedAt.delete(event.query)
+				pendingReads.delete(event.query)
 
 				break
 			}
 
 			case "success": {
+				const pending = pendingReads.get(event.query)
+
 				if (event.action.manual) {
+					if (pending) {
+						pending.patched = true
+					}
+
 					break
 				}
 
-				const startedAt = pendingReadStartedAt.get(event.query)
-
-				if (startedAt !== undefined) {
-					readStartedAt.set(event.query, startedAt)
-					pendingReadStartedAt.delete(event.query)
+				if (!pending) {
+					break
 				}
+
+				pendingReads.delete(event.query)
+
+				if (pending.patched || pending.socketEventSeq !== socketEventSeq) {
+					readStartedAt.delete(event.query)
+
+					break
+				}
+
+				readStartedAt.set(event.query, pending.startedAt)
 
 				break
 			}

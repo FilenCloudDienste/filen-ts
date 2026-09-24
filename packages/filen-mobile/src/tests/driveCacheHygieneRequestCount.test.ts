@@ -139,7 +139,12 @@ vi.mock("@/queries/client", async () => {
 })
 
 import { queryClient, queryUpdater } from "@/queries/client"
-import { driveItemsQueryKey, driveItemsQueryRemoveDirectoryFromPhotos, driveItemsQueryUpdateForNormalParent } from "@/features/drive/queries/useDriveItems.query"
+import {
+	driveItemsQueryKey,
+	driveItemsQueryRefetchAfterSocketGap,
+	driveItemsQueryRemoveDirectoryFromPhotos,
+	driveItemsQueryUpdateForNormalParent
+} from "@/features/drive/queries/useDriveItems.query"
 import socketCreateBatcher, { SOCKET_CREATE_FLUSH_MS } from "@/features/drive/socketCreateBatcher"
 import copyActivity from "@/features/drive/copyActivity"
 import { handleDriveEvent, type DriveSocketEvent } from "@/features/drive/socketHandlers"
@@ -425,5 +430,51 @@ describe("Photos: a directory leaving the camera-upload tree", () => {
 
 		expect(listing(photosKey)).toBeUndefined()
 		expect(allWrites()).toBe(0)
+	})
+})
+
+describe("after a copy outran the socket", () => {
+	function invalidated(key: unknown[]): boolean | undefined {
+		return queryClient.getQueryState(key)?.isInvalidated
+	}
+
+	it("marks the destination listing and, for a destination in the camera-upload tree, Photos stale; fetches nothing unmounted", async () => {
+		seedCacheDir("album", CAMERA_ROOT)
+		queryClient.setQueryData(driveKey("album"), [])
+		queryClient.setQueryData(driveKey("other"), [])
+		queryClient.setQueryData(photosKey, [])
+
+		driveItemsQueryRefetchAfterSocketGap("album")
+		await vi.advanceTimersByTimeAsync(0)
+
+		expect(invalidated(driveKey("album"))).toBe(true)
+		expect(invalidated(photosKey)).toBe(true)
+		expect(invalidated(driveKey("other"))).toBe(false)
+		expect(h.sdk.listDir).not.toHaveBeenCalled()
+		expect(h.sdk.listDirRecursive).not.toHaveBeenCalled()
+	})
+
+	it("a destination outside the camera-upload tree leaves Photos alone", async () => {
+		seedCacheDir("docs", "root", "Dir")
+		seedCacheDir("root", "", "Root")
+		queryClient.setQueryData(driveKey("docs"), [])
+		queryClient.setQueryData(photosKey, [])
+
+		driveItemsQueryRefetchAfterSocketGap("docs")
+		await vi.advanceTimersByTimeAsync(0)
+
+		expect(invalidated(driveKey("docs"))).toBe(true)
+		expect(invalidated(photosKey)).toBe(false)
+	})
+
+	it("the root destination covers both root keys", async () => {
+		queryClient.setQueryData(driveKey(null), [])
+		queryClient.setQueryData(driveKey("root"), [])
+
+		driveItemsQueryRefetchAfterSocketGap(null)
+		await vi.advanceTimersByTimeAsync(0)
+
+		expect(invalidated(driveKey(null))).toBe(true)
+		expect(invalidated(driveKey("root"))).toBe(true)
 	})
 })

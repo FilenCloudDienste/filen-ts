@@ -44,6 +44,10 @@ vi.mock("@filen/sdk-rs", () => ({
 	GeneralEvent_Tags: {
 		PasswordChanged: "PasswordChanged",
 		NewEvent: "NewEvent"
+	},
+	ChatEvent_Tags: {
+		Typing: "Typing",
+		MessageNew: "MessageNew"
 	}
 }))
 
@@ -89,7 +93,8 @@ vi.mock("@/lib/auth", () => ({
 // ---------------------------------------------------------------------------
 
 import { SocketEvent_Tags } from "@filen/sdk-rs"
-import { socketEventTagToState } from "@/components/shell/socket"
+import { isSocketDataEvent, socketEventTagToState } from "@/components/shell/socket"
+import type { SocketEvent } from "@filen/sdk-rs"
 import { useSocketStore } from "@/stores/useSocket.store"
 
 beforeEach(() => {
@@ -153,5 +158,25 @@ describe("useSocketStore.setState — driven by mapped values", () => {
 
 		// No poll can overwrite this — assert it stays disconnected
 		expect(useSocketStore.getState().state).toBe("disconnected")
+	})
+})
+
+describe("isSocketDataEvent — what makes an in-flight read untrustworthy", () => {
+	const chatEvent = (tag: string) => ({ tag: "Chat", inner: [{ inner: { tag } }] }) as unknown as SocketEvent
+
+	it("drive, note, contact and chat data events count", () => {
+		for (const tag of ["Drive", "Note", "Contact"]) {
+			expect(isSocketDataEvent({ tag } as unknown as SocketEvent)).toBe(true)
+		}
+
+		expect(isSocketDataEvent(chatEvent("MessageNew"))).toBe(true)
+	})
+
+	it("typing and connection-state events do not", () => {
+		expect(isSocketDataEvent(chatEvent("Typing"))).toBe(false)
+
+		for (const tag of ["AuthSuccess", "AuthFailed", "Reconnecting", "Unsubscribed", "General"]) {
+			expect(isSocketDataEvent({ tag } as unknown as SocketEvent)).toBe(false)
+		}
 	})
 })

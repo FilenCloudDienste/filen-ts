@@ -60,7 +60,8 @@ const h = vi.hoisted(() => {
 			fetchFresh: vi.fn(),
 			isCachedFresh: vi.fn()
 		},
-		addAccountStorageUsed: vi.fn()
+		addAccountStorageUsed: vi.fn(),
+		refetchAfterSocketGap: vi.fn()
 	}
 })
 
@@ -120,11 +121,13 @@ vi.mock("@/features/drive/socketCreateBatcher", () => ({ default: { enqueue: h.e
 vi.mock("@/features/drive/queries/useDirectorySize.query", () => ({ markDirectorySizesStale: h.markDirectorySizesStale }))
 vi.mock("@/features/drive/driveTrash", () => ({ trash: h.trash }))
 vi.mock("@/queries/useAccount.query", () => ({ accountQuotaDeps: h.account, addAccountStorageUsed: h.addAccountStorageUsed }))
+vi.mock("@/features/drive/queries/useDriveItems.query", () => ({ driveItemsQueryRefetchAfterSocketGap: h.refetchAfterSocketGap }))
 
 import copyRunner, { COPY_FLUSH_MS } from "@/features/copy/copyRunner"
 import useCopyJobsStore, { getCopyJob } from "@/features/copy/store/useCopyJobs.store"
 import useTransfersStore from "@/features/transfers/store/useTransfers.store"
 import copyActivity from "@/features/drive/copyActivity"
+import useSocketStore from "@/stores/useSocket.store"
 import { CopyPhase, CopyStage, ErrorKind, NonRootNormalItem_Tags } from "@/tests/mocks/sdkCopy"
 import type { CopyItemsCallback, CopyReport, CopyUpdate } from "@filen/sdk-rs"
 import type { DriveItem } from "@/types"
@@ -210,6 +213,8 @@ beforeEach(() => {
 	h.account.fetchFresh.mockReset().mockResolvedValue({ storageUsed: 0n, maxStorage: 10_000n })
 	h.account.isCachedFresh.mockReset().mockReturnValue(true)
 	h.addAccountStorageUsed.mockClear()
+	h.refetchAfterSocketGap.mockClear()
+	useSocketStore.setState({ state: "connected", connectedAt: 1 })
 	h.disposals.pause = 0
 	h.disposals.sdkAbort = 0
 	h.disposals.composite = 0
@@ -786,6 +791,50 @@ describe("retry and pause", () => {
 
 		expect(pausedSeen).toBe(true)
 		expect(resumedSeen).toBe(false)
+	})
+})
+
+describe("a socket gap during the copy", () => {
+	it("a reconnect while it ran refetches the destination once, after the final flush", async () => {
+		scriptCopy(async () => {
+			useSocketStore.setState({ state: "reconnecting", connectedAt: 1 })
+			useSocketStore.setState({ state: "connected", connectedAt: 2 })
+
+			return report()
+		})
+
+		await runJob()
+
+		expect(h.refetchAfterSocketGap).toHaveBeenCalledExactlyOnceWith("dest")
+		expect(h.flushNow.mock.invocationCallOrder[0]).toBeLessThan(h.refetchAfterSocketGap.mock.invocationCallOrder[0] ?? 0)
+	})
+
+	it("a socket still down at the end refetches too", async () => {
+		scriptCopy(async () => {
+			useSocketStore.setState({ state: "reconnecting" })
+
+			return report()
+		})
+
+		await runJob()
+
+		expect(h.refetchAfterSocketGap).toHaveBeenCalledOnce()
+	})
+
+	it("a socket up the whole time, or a copy that made nothing, refetches nothing", async () => {
+		scriptCopy(async () => report())
+
+		await runJob()
+
+		scriptCopy(async () => {
+			useSocketStore.setState({ state: "connected", connectedAt: 5 })
+
+			return report({ counts: ZERO })
+		})
+
+		await runJob()
+
+		expect(h.refetchAfterSocketGap).not.toHaveBeenCalled()
 	})
 })
 

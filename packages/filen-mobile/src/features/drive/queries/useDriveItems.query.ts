@@ -1140,6 +1140,50 @@ export function driveItemsQueryUpdateForRecents({
 	})
 }
 
+// A copy below `destinationUuid` (null for the root) whose socket session changed while it ran may
+// have missed the create echoes of what it made: the destination's listing and, when the destination
+// lies in the camera-upload tree, the Photos grid are marked stale and refetched only if mounted.
+export function driveItemsQueryRefetchAfterSocketGap(destinationUuid: string | null): void {
+	const invalidate = (params: UseDriveItemsQueryParams) => {
+		queryClient
+			.invalidateQueries({
+				queryKey: driveItemsQueryKey(params),
+				exact: true,
+				refetchType: "active"
+			})
+			.catch(err => {
+				logger.error("drive", "invalidation after a socket gap failed", { error: err })
+			})
+	}
+
+	const parentUuid = destinationUuid ?? cache.rootUuid
+
+	if (destinationUuid === null || (cache.rootUuid !== null && destinationUuid === cache.rootUuid)) {
+		invalidate({ path: { type: "drive", uuid: null } })
+	}
+
+	if (parentUuid === null) {
+		return
+	}
+
+	invalidate({ path: { type: "drive", uuid: parentUuid } })
+
+	cameraUpload
+		.getConfig()
+		.then(config => {
+			const params = photosParams(config)
+
+			if (!params || !params.path.uuid || !driveItemsQueryIsRead(params) || !isUnderCameraUploadRoot(parentUuid, params.path.uuid)) {
+				return
+			}
+
+			invalidate(params)
+		})
+		.catch(err => {
+			logger.error("drive", "driveItemsQueryRefetchAfterSocketGap: failed to get camera upload config", { error: err })
+		})
+}
+
 export function driveItemsQueryGet(params: UseDriveItemsQueryParams) {
 	const sortedParams = removeVolatileParamsForKey(sortParams(params))
 
