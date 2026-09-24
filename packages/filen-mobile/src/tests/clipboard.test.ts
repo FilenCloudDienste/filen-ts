@@ -3,6 +3,7 @@ import { type TFunction } from "i18next"
 
 const h = vi.hoisted(() => ({
 	items: new Map<string, unknown>(),
+	dirs: new Map<string, unknown>(),
 	cache: { rootUuid: "root" as string | null }
 }))
 
@@ -19,7 +20,8 @@ vi.mock("@/lib/cache", () => ({
 		get rootUuid() {
 			return h.cache.rootUuid
 		},
-		uuidToAnyDriveItem: h.items
+		uuidToAnyDriveItem: h.items,
+		directoryUuidToAnyNormalDir: h.dirs
 	}
 }))
 vi.mock("@/lib/alerts", () => ({ default: { error: vi.fn() } }))
@@ -59,16 +61,23 @@ function normalDir(uuid: string, tag: "Dir" | "Root" = "Dir"): AnyNormalDir {
 	return { tag, inner: [{ uuid }] } as unknown as AnyNormalDir
 }
 
+// An own directory as the cache holds it: the SDK Dir under its parent.
+function ownDir(uuid: string, parent: string | null): void {
+	h.dirs.set(uuid, { tag: "Dir", inner: [{ uuid, parent }] })
+	h.items.set(uuid, dir(uuid, parent))
+}
+
 // root ─ a ─ b ─ c
 function seedTree(): void {
-	for (const item of [dir("a", "root"), dir("b", "a"), dir("c", "b")]) {
-		h.items.set(item.data.uuid, item)
-	}
+	ownDir("a", "root")
+	ownDir("b", "a")
+	ownDir("c", "b")
 }
 
 beforeEach(() => {
 	vi.clearAllMocks()
 	h.items.clear()
+	h.dirs.clear()
 	h.cache.rootUuid = "root"
 	useDriveClipboardStore.getState().clear()
 	seedTree()
@@ -85,10 +94,19 @@ describe("ancestryHits", () => {
 	it("is unresolved when a link is missing or the chain never ends", () => {
 		expect(ancestryHits("x", new Set(["a"]), "root")).toBe("unresolved")
 
-		h.items.set("loop1", dir("loop1", "loop2"))
-		h.items.set("loop2", dir("loop2", "loop1"))
+		ownDir("loop1", "loop2")
+		ownDir("loop2", "loop1")
 
 		expect(ancestryHits("loop1", new Set(["a"]), "root")).toBe("unresolved")
+	})
+
+	it("walks through a shared-out directory, which the uuid→item map holds as its shared variant", () => {
+		// A shared-out listing overwrites the own directory's item entry; the own-directory map keeps the Dir.
+		h.items.set("b", { type: "sharedRootDirectory", data: { uuid: "b" } })
+
+		expect(ancestryHits("c", new Set(["x"]), "root")).toBe(false)
+		expect(ancestryHits("c", new Set(["a"]), "root")).toBe(true)
+		expect(canPasteInto({ entry: { mode: "copy", items: [dir("x", "root")] }, targetUuid: "c", allowCut: true })).toBe(true)
 	})
 })
 
@@ -124,6 +142,26 @@ describe("canPasteInto", () => {
 		expect(canPasteInto({ entry: cutOf(items), targetUuid: "b", allowCut: true })).toBe(true)
 		// The root may be addressed by null or by its uuid.
 		expect(canPasteInto({ entry: cutOf([file("r", "root")]), targetUuid: null, allowCut: true })).toBe(false)
+	})
+
+	it("derives the guard once per clipboard entry, not per row render", () => {
+		let indexReads = 0
+		const items = new Proxy([file("f1", "a"), dir("d1", "a"), file("f2", "a")], {
+			get(target, key, receiver) {
+				if (typeof key === "string" && /^\d+$/.test(key)) {
+					indexReads++
+				}
+
+				return Reflect.get(target, key, receiver)
+			}
+		})
+		const entry: DriveClipboardEntry = { mode: "cut", items }
+
+		for (let i = 0; i < 100; i++) {
+			canPasteInto({ entry, targetUuid: "b", allowCut: true })
+		}
+
+		expect(indexReads).toBe(3)
 	})
 
 	it("lets a copy land beside its source", () => {
@@ -239,7 +277,7 @@ describe("paste menu buttons", () => {
 		expect(buildPasteIntoMenuButton({ entry, targetDir: undefined, allowCut: true, t })).toBeNull()
 		expect(buildPasteIntoMenuButton({ entry, targetDir: normalDir("x-sibling"), allowCut: true, t })).toBeNull()
 
-		h.items.set("sib", dir("sib", "root"))
+		ownDir("sib", "root")
 
 		expect(buildPasteIntoMenuButton({ entry, targetDir: normalDir("sib"), allowCut: true, t })?.id).toBe("pasteInto")
 	})

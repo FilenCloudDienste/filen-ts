@@ -5,6 +5,7 @@ import type { DrivePath } from "@/hooks/useDrivePath"
 import { useTranslation } from "react-i18next"
 import { createMenuButtons } from "@/features/drive/components/item/menuActions"
 import useDriveClipboardStore from "@/features/drive/store/useDriveClipboard.store"
+import { offersPasteInto } from "@/features/drive/components/clipboardMenu"
 import useLinkSaveable from "@/features/drive/hooks/useLinkSaveable"
 import { linkSaveTarget } from "@/features/drive/linkedSave"
 
@@ -44,8 +45,9 @@ const MenuInner = ({
 	linkSaveable
 }: MenuProps & { linkSaveable?: boolean }) => {
 	const { t } = useTranslation()
-	// Only directory rows offer "Paste into", so only they re-render when the clipboard changes.
-	const clipboard = useDriveClipboardStore(state => (item.type === "directory" && !disabled ? state.entry : null))
+	// Only rows offering "Paste into" re-render when the clipboard changes.
+	const followsClipboard = !disabled && offersPasteInto(drivePath, item)
+	const clipboard = useDriveClipboardStore(state => (followsClipboard ? state.entry : null))
 	const menuButtons = disabled
 		? []
 		: createMenuButtons({

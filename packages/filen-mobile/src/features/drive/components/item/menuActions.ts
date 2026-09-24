@@ -8,7 +8,7 @@ import { notifyIfNameIsHidden } from "@/features/drive/components/hiddenNameNoti
 import { buildUndecryptableMenuButtons } from "@/features/drive/components/item/menuActionsUndecryptable"
 import { buildDownloadSubButtons, buildExportButton, buildOpenWithButton } from "@/features/drive/components/item/menuActionsDownload"
 import { buildCopyMenuButton, offersCopy } from "@/features/drive/components/item/menuActionsCopy"
-import { buildPasteIntoMenuButton } from "@/features/drive/components/clipboardMenu"
+import { buildPasteIntoMenuButton, offersPasteInto } from "@/features/drive/components/clipboardMenu"
 import { type DriveClipboardEntry } from "@/features/drive/store/useDriveClipboard.store"
 import { buildSaveToCloudDriveButton } from "@/features/drive/linkedSave"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
@@ -399,14 +399,7 @@ export function createMenuButtons({
 		}
 	}
 
-	if (
-		item.type === "directory" &&
-		(drivePath.type === "drive" ||
-			drivePath.type === "favorites" ||
-			drivePath.type === "recents" ||
-			drivePath.type === "links" ||
-			drivePath.type === "sharedOut")
-	) {
+	if (offersPasteInto(drivePath, item)) {
 		const pasteInto = buildPasteIntoMenuButton({
 			entry: clipboard ?? null,
 			targetDir: cache.directoryUuidToAnyNormalDir.get(item.data.uuid),

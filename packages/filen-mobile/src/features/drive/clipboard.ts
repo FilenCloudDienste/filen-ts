@@ -2,7 +2,6 @@ import { AnyNormalDir_Tags, type AnyNormalDir } from "@filen/sdk-rs"
 import type { DriveItem } from "@/types"
 import type { CopyDestination } from "@/features/copy/copyAdapter"
 import type { DriveClipboardEntry } from "@/features/drive/store/useDriveClipboard.store"
-import { everyItemAlreadyIn } from "@/features/drive/driveSelectors"
 import { unwrapParentUuid } from "@/lib/sdkUnwrap"
 import cache from "@/lib/cache"
 
@@ -17,9 +16,49 @@ function parentUuidOf(item: DriveItem): string | null {
 	return item.type === "file" || item.type === "directory" ? unwrapParentUuid(item.data.parent) : null
 }
 
-// Whether `targetUuid` lies inside (or is) one of `dirUuids`, walking cached parent pointers up to the
-// root. "unresolved" when a link is missing from the cache: a directory paste is then refused rather
-// than risked.
+type PasteGuard = {
+	// The clipboard's directories: a paste can't land in any of them or below.
+	dirUuids: ReadonlySet<string>
+	// For a cut, the directory every item sits in when they all share one (a cut there moves nothing); else null.
+	sharedParentUuid: string | null
+}
+
+// Directory rows run the guard on every render, so it is derived once per clipboard entry.
+const guards = new WeakMap<DriveClipboardEntry, PasteGuard>()
+
+function pasteGuardOf(entry: DriveClipboardEntry): PasteGuard {
+	const cached = guards.get(entry)
+
+	if (cached) {
+		return cached
+	}
+
+	const dirUuids = new Set<string>()
+	let sharedParentUuid: string | null | undefined = undefined
+
+	for (const item of entry.items) {
+		if (isDirectoryItem(item)) {
+			dirUuids.add(item.data.uuid)
+		}
+
+		if (entry.mode === "cut") {
+			const parentUuid = parentUuidOf(item)
+
+			sharedParentUuid = sharedParentUuid === undefined || sharedParentUuid === parentUuid ? parentUuid : null
+		}
+	}
+
+	const guard = { dirUuids, sharedParentUuid: sharedParentUuid ?? null }
+
+	guards.set(entry, guard)
+
+	return guard
+}
+
+// Whether `targetUuid` lies inside (or is) one of `dirUuids`, walking the own directories' parent
+// pointers up to the root. The own-directory map, because the uuid→item map holds a shared-out
+// directory as its shared variant. "unresolved" when a link is missing: a directory paste is then
+// refused rather than risked.
 export function ancestryHits(targetUuid: string, dirUuids: ReadonlySet<string>, rootUuid: string | null): boolean | "unresolved" {
 	let uuid: string | null = targetUuid
 
@@ -32,13 +71,13 @@ export function ancestryHits(targetUuid: string, dirUuids: ReadonlySet<string>, 
 			return true
 		}
 
-		const item = cache.uuidToAnyDriveItem.get(uuid)
+		const dir = cache.directoryUuidToAnyNormalDir.get(uuid)
 
-		if (!item || item.type !== "directory") {
+		if (!dir || dir.tag !== AnyNormalDir_Tags.Dir) {
 			return "unresolved"
 		}
 
-		uuid = unwrapParentUuid(item.data.parent)
+		uuid = unwrapParentUuid(dir.inner[0].parent)
 	}
 
 	return "unresolved"
@@ -61,8 +100,13 @@ export function canPasteInto({
 
 	const rootUuid = cache.rootUuid
 	const target = targetUuid ?? rootUuid
+	if (entry.mode === "cut" && !allowCut) {
+		return false
+	}
 
-	if (entry.mode === "cut" && (!allowCut || (target !== null && everyItemAlreadyIn(entry.items, target, parentUuidOf)))) {
+	const guard = pasteGuardOf(entry)
+
+	if (entry.mode === "cut" && target !== null && guard.sharedParentUuid === target) {
 		return false
 	}
 
@@ -70,9 +114,7 @@ export function canPasteInto({
 		return true
 	}
 
-	const dirUuids = new Set(entry.items.filter(isDirectoryItem).map(item => item.data.uuid))
-
-	return dirUuids.size === 0 || ancestryHits(target, dirUuids, rootUuid) === false
+	return guard.dirUuids.size === 0 || ancestryHits(target, guard.dirUuids, rootUuid) === false
 }
 
 // The copy destination a directory stands for: the root as { uuid: null } under `rootName`.

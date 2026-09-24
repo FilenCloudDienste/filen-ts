@@ -31,6 +31,8 @@ export function linkSaveTarget(drivePath: DrivePath, item?: DriveItem): LinkSave
 		return root?.meta.enableDownload === true ? { kind: "directory", uuid: root.rootUuid } : null
 	}
 
+	// A file link can disable downloads, but the SDK's LinkedFile drops that flag, so a visitor can't
+	// tell; Download on the same screen is ungated for the same reason.
 	return item && cache.linkedFileByUuid.has(item.data.uuid) ? { kind: "file", uuid: item.data.uuid } : null
 }
 

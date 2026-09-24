@@ -4,6 +4,7 @@ import { run } from "@filen/shared"
 import { type MenuButton } from "@/components/ui/menu"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import type { DriveItem } from "@/types"
+import type { DrivePath } from "@/hooks/useDrivePath"
 import alerts from "@/lib/alerts"
 import cache from "@/lib/cache"
 import logger from "@/lib/logger"
@@ -122,6 +123,18 @@ export function buildPasteHereMenuButtons({
 			}
 		}
 	]
+}
+
+// Own directory rows in the writable browsing views; only these rows follow the clipboard.
+export function offersPasteInto(drivePath: DrivePath, item: DriveItem): boolean {
+	return (
+		item.type === "directory" &&
+		(drivePath.type === "drive" ||
+			drivePath.type === "favorites" ||
+			drivePath.type === "recents" ||
+			drivePath.type === "links" ||
+			drivePath.type === "sharedOut")
+	)
 }
 
 // "Paste into" on a directory row: only where the paste can land.
