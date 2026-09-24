@@ -29,7 +29,7 @@ import prompts from "@/lib/prompts"
 import alerts from "@/lib/alerts"
 import logger from "@/lib/logger"
 import useCopyJobsStore from "@/features/copy/store/useCopyJobs.store"
-import copyRunner, { pruneSettledCopyJobs } from "@/features/copy/copyRunner"
+import copyRunner from "@/features/copy/copyRunner"
 import { copyNotesText, copyRowStatus } from "@/features/copy/copyRowText"
 import { stopCopyWithChoice } from "@/features/copy/copyCancel"
 
@@ -244,7 +244,6 @@ const CopyFinishedRow = ({ finished }: { finished: TFinishedTransfer }) => {
 												// The retry is a new row; this one would only repeat its failures.
 												if (copyRunner.retryFailed(finished.id) !== null) {
 													removeFinishedTransfer(finished.id)
-													pruneSettledCopyJobs()
 												}
 											}
 										}

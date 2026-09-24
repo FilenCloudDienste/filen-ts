@@ -451,6 +451,21 @@ describe("quota", () => {
 
 		expect(h.sdk.copyItems).toHaveBeenCalledOnce()
 	})
+
+	it("no rerun when Cancel all or the background lifecycle cancels during the fresh read", async () => {
+		h.account.cached.mockReturnValue({ storageUsed: 9_999n, maxStorage: 10_000n })
+		h.account.fetchFresh.mockImplementation(async () => {
+			h.scope.controller.abort()
+
+			return { storageUsed: 0n, maxStorage: 10_000n }
+		})
+		scriptCopy(async () => preflightRefusal())
+
+		await runJob()
+
+		expect(h.account.fetchFresh).toHaveBeenCalledOnce()
+		expect(h.sdk.copyItems).toHaveBeenCalledOnce()
+	})
 })
 
 describe("cancel", () => {
@@ -502,6 +517,20 @@ describe("cancel", () => {
 
 	it("trash: only the created top-level items, never a version target", async () => {
 		scriptCopy(cancelMidway("trash"))
+
+		await runJob()
+
+		expect(h.trash).toHaveBeenCalledExactlyOnceWith({ item: { type: "file", data: { uuid: "made", parent: "dest" } } })
+	})
+
+	it("trash when the SDK call rejects instead of reporting: what the callbacks saw is trashed", async () => {
+		scriptCopy(async callback => {
+			callback.onTopLevelCreated(createdFile("made") as never)
+
+			copyRunner.requestCancel(Object.keys(useCopyJobsStore.getState().jobs)[0] as string, "trash")
+
+			throw new Error("job dropped after its cancel grace")
+		})
 
 		await runJob()
 
@@ -707,6 +736,35 @@ describe("retry and pause", () => {
 		expect(h.sdk.copyItemsTo).toHaveBeenCalledOnce()
 		expect(h.sdk.copyItemsTo.mock.calls[0]?.[0]).toEqual([{ item: failure.item, destination: failure.info.destParentDir, name: "x" }])
 		expect(h.sdk.copyItemsTo.mock.calls[0]).toHaveLength(4)
+	})
+
+	it.each([
+		["Remove from list", (id: string) => useTransfersStore.getState().removeFinishedTransfer(id)],
+		["Clear finished", () => useTransfersStore.getState().clearFinishedTransfers()]
+	] as const)("%s drops the settled job with its row", async (_label, removeRow) => {
+		scriptCopy(async () =>
+			report({
+				failures: [
+					{
+						item: { tag: "File", inner: [{}] },
+						info: {
+							stage: CopyStage.Upload,
+							error: { kind: ErrorKind.Server, message: "", serverMessage: undefined },
+							affectedFiles: 1n,
+							affectedBytes: 1n
+						}
+					}
+				]
+			})
+		)
+
+		const id = await runJob()
+
+		expect(getCopyJob(id)).toBeDefined()
+
+		removeRow(id)
+
+		expect(getCopyJob(id)).toBeUndefined()
 	})
 
 	it("pause and resume from the row flip its paused flag", async () => {

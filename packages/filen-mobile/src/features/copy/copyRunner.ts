@@ -341,6 +341,9 @@ class CopyRunner {
 		let pendingEvents: CopyUpdateEvents<CopyJobFailure> = emptyCopyEvents()
 		let lastFlushAt = 0
 		let trailing: ReturnType<typeof setTimeout> | null = null
+		// What the job made as it went: the fallback for "move to trash" when the SDK call rejects and
+		// returns no report.
+		const createdAsReported: DriveItem[] = []
 
 		const flush = () => {
 			if (trailing) {
@@ -388,6 +391,8 @@ class CopyRunner {
 
 					const item = createdDriveItem(topLevel.item)
 					const parentUuid = "parent" in item.data ? unwrapParentUuid(item.data.parent) : null
+
+					createdAsReported.push(item)
 
 					if (parentUuid) {
 						socketCreateBatcher.enqueue({
@@ -438,6 +443,8 @@ class CopyRunner {
 					maxBytes: maxBytes === undefined ? undefined : BigInt(maxBytes)
 				}
 
+				lastReport = null
+
 				try {
 					const { authedSdkClient } = await auth.getSdkClients()
 					const report: CopyReport =
@@ -469,12 +476,12 @@ class CopyRunner {
 				"report" in settlement &&
 				isQuotaPreflightFailure(settlement.report) &&
 				maxBytes !== undefined &&
-				!abort.signal.aborted &&
+				!compositeAbort.aborted &&
 				live()
 			) {
 				const freshMaxBytes = copyMaxBytes(await readFreshAccount())
 
-				if (freshMaxBytes !== undefined && freshMaxBytes > maxBytes && !abort.signal.aborted) {
+				if (freshMaxBytes !== undefined && freshMaxBytes > maxBytes && !compositeAbort.aborted) {
 					maxBytes = freshMaxBytes
 					settlement = await attempt(maxBytes)
 				} else if (freshMaxBytes !== undefined) {
@@ -495,9 +502,9 @@ class CopyRunner {
 				return undefined
 			}
 
-			// The report's top-level items are what this job made, however it ended. Defensive: whether a
-			// version target can appear among them is unverified.
-			const copied = lastReport ? copiedTopLevel(lastReport) : []
+			// The final attempt's report lists what this job made, however it ended. Defensive: whether a
+			// version target can appear among them is unverified. Without a report, what the callbacks saw.
+			const copied = lastReport ? copiedTopLevel(lastReport) : createdAsReported
 			const final = settlement
 
 			useCopyJobsStore.getState().update(id, job => ({
@@ -656,7 +663,7 @@ function toJobError(e: unknown): ReturnType<typeof copyJobError> {
 
 // A settled job stays while its finished row can still offer "Retry failed items"; a cancelled one
 // (no finished row) goes at once.
-export function pruneSettledCopyJobs(): void {
+function pruneSettledCopyJobs(): void {
 	const rows = new Set<string>()
 
 	for (const finished of useTransfersStore.getState().finishedTransfers) {
@@ -669,6 +676,13 @@ export function pruneSettledCopyJobs(): void {
 		}
 	}
 }
+
+// A finished row removed by hand (Remove from list, Clear finished, a retry) takes its settled job with it.
+useTransfersStore.subscribe((state, prev) => {
+	if (state.finishedTransfers.length < prev.finishedTransfers.length) {
+		pruneSettledCopyJobs()
+	}
+})
 
 const copyRunner = new CopyRunner()
 
