@@ -60,6 +60,9 @@ vi.mock("@/features/drive/components/item/menuActionsDownload", () => ({
 }))
 vi.mock("@/features/drive/screens/driveSelect", () => ({ selectCopyDestination: vi.fn() }))
 vi.mock("@/features/copy/copyRunner", () => ({ default: { start: vi.fn(() => "job-1") } }))
+vi.mock("@/features/drive/linkedSave", () => ({
+	buildSaveToCloudDriveButton: vi.fn(({ id, title }: { id: string; title: string }) => ({ id, title }))
+}))
 
 import { createMenuButtons } from "@/features/drive/components/item/menuActions"
 import { buildCopyMenuButton, offersCopy } from "@/features/drive/components/item/menuActionsCopy"
@@ -202,6 +205,37 @@ describe("item menu Copy submenu gating", () => {
 		for (const pathType of DRIVE_PATH_TYPES) {
 			expect(offersCopy(makeDrivePath(pathType))).toBe(COPY_VIEWS.has(pathType))
 		}
+	})
+})
+
+describe("link-view rows", () => {
+	for (const itemType of ["file", "directory"] as const) {
+		it(`${itemType}: Save to Cloud Drive only when the link is saveable, never clipboard Copy or Import`, () => {
+			const idsFor = (linkSaveable: boolean) =>
+				flatIds(
+					createMenuButtons({
+						item: makeItem(itemType),
+						drivePath: makeDrivePath("linked"),
+						isStoredOffline: false,
+						linkSaveable,
+						t
+					})
+				)
+
+			expect(idsFor(true)).toContain("saveToCloudDrive")
+			expect(idsFor(false)).not.toContain("saveToCloudDrive")
+
+			for (const ids of [idsFor(true), idsFor(false)]) {
+				expect(ids).not.toContain("copyMenu")
+				expect(ids).not.toContain("import")
+			}
+		})
+	}
+
+	it("ignores linkSaveable outside link views", () => {
+		const ids = flatIds(createMenuButtons({ item: makeItem("file"), drivePath: makeDrivePath("drive"), isStoredOffline: false, linkSaveable: true, t }))
+
+		expect(ids).not.toContain("saveToCloudDrive")
 	})
 })
 

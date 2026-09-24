@@ -1,6 +1,5 @@
 import { type MenuButton } from "@/components/ui/menu"
 import type { DriveItem } from "@/types"
-import type { DrivePath } from "@/hooks/useDrivePath"
 import { type TFunction } from "i18next"
 import { type PreviewType } from "@/lib/previewType"
 import { type OfflineParent } from "@/features/offline/offlineHelpers"
@@ -19,26 +18,22 @@ import { withSystemPresentation } from "@/lib/systemPresentation"
 import { normalizeFilePathForSdk } from "@/lib/paths"
 import * as ReactNativeBlobUtil from "react-native-blob-util"
 import { Platform } from "react-native"
-import { selectDriveItems } from "@/features/drive/screens/driveSelect"
-import { resolveSelectedDriveItemToAnyNormalDir } from "@/features/drive/driveSelectResolve"
 import { downloadDriveItemToDevice } from "@/features/drive/driveDownload"
 import { isFileItem } from "@/features/drive/driveSelectors"
 import logger from "@/lib/logger"
 
 // Builds the "Download" submenu buttons (download-to-device / make-available-offline /
-// save-to-photos / export / import-into-directory) for a drive item, gated on item type,
+// save-to-photos / export) for a drive item, gated on item type,
 // decrypted meta, offline state and preview type. Pure: returns the button list to nest
 // under the menu's Download entry.
 export function buildDownloadSubButtons({
 	item,
-	drivePath,
 	isStoredOffline,
 	parentForOfflineStorage,
 	previewType,
 	t
 }: {
 	item: DriveItem
-	drivePath: DrivePath
 	isStoredOffline: boolean
 	parentForOfflineStorage: OfflineParent | null
 	previewType: PreviewType | null
@@ -205,139 +200,6 @@ export function buildDownloadSubButtons({
 
 	if (openWithButton) {
 		downloadSubButtons.push(openWithButton)
-	}
-
-	if (
-		(item.type === "file" ||
-			item.type === "directory" ||
-			item.type === "sharedFile" ||
-			item.type === "sharedRootFile" ||
-			item.type === "sharedDirectory" ||
-			item.type === "sharedRootDirectory") &&
-		item.data.decryptedMeta &&
-		// Shared-in items are copied server-side through the Copy submenu instead.
-		drivePath.type === "linked"
-	) {
-		downloadSubButtons.push({
-			id: "import",
-			requiresOnline: true,
-			title: t("import"),
-			icon: "import",
-			onPress: async () => {
-				const selectResult = await run(async () => {
-					return await selectDriveItems({
-						type: "single",
-						files: false,
-						directories: true,
-						items: []
-					})
-				})
-
-				if (!selectResult.success) {
-					logger.warn("drive", "import: drive item select failed", { error: selectResult.error })
-					alerts.error(selectResult.error)
-
-					return
-				}
-
-				if (selectResult.data.cancelled) {
-					return
-				}
-
-				const selectedItem = selectResult.data.selectedItems[0]
-
-				if (!selectedItem) {
-					return
-				}
-
-				// Cache-first; falls back to the by-value AnyNormalDir for an own-directory pick,
-				// and logs (uuid + type) when a pick can't resolve to a usable directory.
-				const remoteDir = resolveSelectedDriveItemToAnyNormalDir(selectedItem)
-
-				if (!remoteDir) {
-					return
-				}
-
-				const result = await run(async defer => {
-					if (!item.data.decryptedMeta) {
-						throw new Error("Missing decrypted metadata")
-					}
-
-					const destination = isFileItem(item)
-						? new FileSystem.File(FileSystem.Paths.join(newTmpDir().uri, item.data.decryptedMeta.name))
-						: new FileSystem.Directory(FileSystem.Paths.join(newTmpDir().uri, item.data.decryptedMeta.name))
-
-					// On a partial download/upload the staging copy is deliberately kept (filen-tmp/
-					// is reclaimed by the tmp lifecycle anyway) — deleting it would discard the bytes
-					// that DID transfer while the alert tells the user something is missing.
-					let keepStagingForRetry = false
-
-					defer(() => {
-						if (!keepStagingForRetry && destination.parentDirectory.exists) {
-							destination.parentDirectory.delete()
-						}
-					})
-
-					if (!destination.parentDirectory.exists) {
-						destination.parentDirectory.create({
-							intermediates: true,
-							idempotent: true
-						})
-					}
-
-					if (destination.exists) {
-						destination.delete()
-					}
-
-					const downloadResult = await transfers.download({
-						item,
-						destination
-					})
-
-					if (!downloadResult) {
-						return
-					}
-
-					// Directory downloads resolve Ok while per-entry failures arrive only via the SDK's
-					// error callbacks — re-uploading an incomplete tree would silently import a hollowed-out
-					// copy, so bail before the upload and keep the staging copy.
-					if ("errors" in downloadResult && downloadResult.errors.length > 0) {
-						keepStagingForRetry = true
-
-						throw new Error(t("import_partial_download", { count: downloadResult.errors.length }))
-					}
-
-					const uploadResult = await transfers.upload({
-						localFileOrDir: destination,
-						parent: remoteDir,
-						name: item.data.decryptedMeta.name,
-						created: isFileItem(item) && item.data.decryptedMeta.created ? Number(item.data.decryptedMeta.created) : undefined,
-						modified:
-							isFileItem(item) && item.data.decryptedMeta.modified ? Number(item.data.decryptedMeta.modified) : undefined,
-						mime: isFileItem(item) && item.data.decryptedMeta.mime ? item.data.decryptedMeta.mime : undefined
-					})
-
-					if (!uploadResult) {
-						return
-					}
-
-					// Same honesty for the upload leg: a resolved directory upload can still carry
-					// per-entry failures.
-					if ("errors" in uploadResult && uploadResult.errors.length > 0) {
-						keepStagingForRetry = true
-
-						throw new Error(t("import_partial_upload", { count: uploadResult.errors.length }))
-					}
-				})
-
-				if (!result.success) {
-					logger.error("drive", "import failed", { error: result.error, uuid: item.data.uuid })
-					alerts.error(result.error)
-
-					return
-				}
-			}
-		})
 	}
 
 	return downloadSubButtons

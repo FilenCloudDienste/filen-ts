@@ -99,7 +99,8 @@ const UNCACHED_QUERY_KEYS = new Map<string, true>([
 	["useLocalAuthenticationQuery", true],
 	["useCacheSizes", true],
 	["useFileProviderCacheBudget", true],
-	["useRegisterCheck", true]
+	["useRegisterCheck", true],
+	["useLinkOwnedQuery", true]
 ])
 
 // Hoisted .some predicates — shouldPersistQuery runs per persisted row at restore and

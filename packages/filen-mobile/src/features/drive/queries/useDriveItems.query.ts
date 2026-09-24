@@ -475,8 +475,16 @@ export async function fetchData(
 						password: linkPasswordState(params.path.linked?.password, info.link.password)
 					}
 
+					const rootDir = new AnyLinkedDir.Root(info.root)
+
+					cache.linkedRootByLinkUuid.set(params.path.linked.uuid, {
+						dir: rootDir,
+						meta,
+						rootUuid: info.root.inner.uuid
+					})
+
 					const result = await run(async () => {
-						return authedSdkClient.listLinkedDir(new AnyLinkedDir.Root(info.root), meta, undefined, signal)
+						return authedSdkClient.listLinkedDir(rootDir, meta, undefined, signal)
 					})
 
 					if (!result.success) {

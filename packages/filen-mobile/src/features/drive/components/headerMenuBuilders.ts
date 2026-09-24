@@ -25,6 +25,7 @@ import { type DriveSelectionFlags } from "@/features/drive/driveSelectors"
 import { downloadDriveItemToDevice } from "@/features/drive/driveDownload"
 import { selectContacts } from "@/features/contacts/contactsSelect"
 import { buildCopyMenuButton, offersCopy } from "@/features/drive/components/item/menuActionsCopy"
+import { buildSaveToCloudDriveButton } from "@/features/drive/linkedSave"
 import logger from "@/lib/logger"
 
 export function buildSortMenuButton(current: SortByType, setSort: (next: SortByType) => void, t: TFunction): MenuButton {
@@ -127,12 +128,15 @@ export function buildBulkActionMenu({
 	selectedDriveItems,
 	liveItems,
 	driveFlags,
+	linkSaveable,
 	t
 }: {
 	drivePath: DrivePath
 	selectedDriveItems: DriveItem[]
 	liveItems: DriveItem[]
 	driveFlags: DriveSelectionFlags
+	// A link view whose link may be saved (useLinkSaveable).
+	linkSaveable?: boolean
 	t: TFunction
 }): MenuButton[] {
 	const menuButtons: MenuButton[] = []
@@ -256,6 +260,20 @@ export function buildBulkActionMenu({
 				})
 			}
 		})
+	}
+
+	if (drivePath.type === "linked" && linkSaveable && !hasUndecryptable) {
+		const saveButton = buildSaveToCloudDriveButton({
+			id: "bulkSaveToCloudDrive",
+			title: t("save_selected_to_cloud_drive"),
+			items: selectedDriveItems,
+			onDone: () => useDriveStore.getState().clearSelectedItems(),
+			t
+		})
+
+		if (saveButton) {
+			menuButtons.push(saveButton)
+		}
 	}
 
 	if (!hasUndecryptable && offersCopy(drivePath)) {

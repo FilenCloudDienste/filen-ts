@@ -14,12 +14,14 @@ const {
 	cacheDirectoryUuidToAnyNormalDir,
 	cacheDirectoryUuidToAnySharedDirWithContext,
 	cacheUuidToAnyDriveItem,
-	cacheFileUuidToNormalFile
+	cacheFileUuidToNormalFile,
+	cacheLinkedRootByLinkUuid
 } = vi.hoisted(() => {
 	const cacheDirectoryUuidToAnyNormalDir = new Map<string, unknown>()
 	const cacheDirectoryUuidToAnySharedDirWithContext = new Map<string, unknown>()
 	const cacheUuidToAnyDriveItem = new Map<string, unknown>()
 	const cacheFileUuidToNormalFile = new Map<string, unknown>()
+	const cacheLinkedRootByLinkUuid = new Map<string, { meta: unknown; rootUuid: string }>()
 
 	return {
 		mockQueryUpdaterSet: vi.fn(),
@@ -62,7 +64,8 @@ const {
 		cacheDirectoryUuidToAnyNormalDir,
 		cacheDirectoryUuidToAnySharedDirWithContext,
 		cacheUuidToAnyDriveItem,
-		cacheFileUuidToNormalFile
+		cacheFileUuidToNormalFile,
+		cacheLinkedRootByLinkUuid
 	}
 })
 
@@ -196,6 +199,7 @@ vi.mock("@/lib/cache", () => {
 			directoryUuidToAnyNormalDir: cacheDirectoryUuidToAnyNormalDir,
 			directoryUuidToAnySharedDirWithContext: cacheDirectoryUuidToAnySharedDirWithContext,
 			directoryUuidToAnyLinkedDirWithMeta: new Map(),
+			linkedRootByLinkUuid: cacheLinkedRootByLinkUuid,
 			uuidToAnyDriveItem: cacheUuidToAnyDriveItem,
 			fileUuidToNormalFile: cacheFileUuidToNormalFile,
 			cacheNewFile,
@@ -437,6 +441,7 @@ beforeEach(() => {
 	cacheDirectoryUuidToAnySharedDirWithContext.clear()
 	cacheUuidToAnyDriveItem.clear()
 	cacheFileUuidToNormalFile.clear()
+	cacheLinkedRootByLinkUuid.clear()
 })
 
 // ─── removeVolatileParamsForKey (indirectly, via driveItemsQueryGet key) ────
@@ -1224,6 +1229,28 @@ describe("fetchData — linked WrongPassword error handling", () => {
 		// Assert the concrete item identity — the mocked unwrappedFileIntoDriveItem propagates
 		// the uuid from unwrapFileMeta's file.uuid, which originates from fileItem.uuid.
 		expect((result[0] as { type: string; data: { uuid: string } }).data.uuid).toBe("linked-file-1")
+	})
+
+	it("keeps the link's root from the info it already fetched, for Save to Cloud Drive", async () => {
+		const getDirPublicLinkInfo = vi.fn().mockResolvedValue({
+			link: { linkUuid: "l-uuid", linkKey: "key", linkKeyVersion: 1, salt: "salt", enableDownload: false, password: undefined },
+			root: { inner: { uuid: "root-u" }, linkedTag: true }
+		})
+
+		mockGetSdkClients.mockResolvedValue({
+			authedSdkClient: { getDirPublicLinkInfo, listLinkedDir: vi.fn().mockResolvedValue({ dirs: [], files: [] }) }
+		})
+
+		await fetchData({
+			path: {
+				type: "linked",
+				uuid: "",
+				linked: { uuid: "link-uuid", key: "link-key", rootName: "", password: undefined }
+			}
+		})
+
+		expect(getDirPublicLinkInfo).toHaveBeenCalledTimes(1)
+		expect(cacheLinkedRootByLinkUuid.get("link-uuid")).toMatchObject({ rootUuid: "root-u", meta: { enableDownload: false } })
 	})
 
 	it("returns empty array without calling SDK when linked is undefined", async () => {

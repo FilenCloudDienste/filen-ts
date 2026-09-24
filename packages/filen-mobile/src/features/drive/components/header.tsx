@@ -26,6 +26,8 @@ import { useDriveUpload } from "@/features/drive/hooks/useDriveUpload"
 import { buildSortMenuButton, buildBulkActionMenu, buildViewModeMenuButton } from "@/features/drive/components/headerMenuBuilders"
 import { getDriveParent, canShowDriveCreateMenu, buildDriveCreateMenuButtons } from "@/features/drive/components/driveCreateMenu"
 import useDriveClipboardStore from "@/features/drive/store/useDriveClipboard.store"
+import useLinkSaveable from "@/features/drive/hooks/useLinkSaveable"
+import { buildSaveLinkedDirectoryButton, linkSaveTarget } from "@/features/drive/linkedSave"
 import logger from "@/lib/logger"
 
 const Header = ({
@@ -81,6 +83,7 @@ const Header = ({
 
 	const upload = useDriveUpload({ parent, drivePath, t })
 	const clipboard = useDriveClipboardStore(state => state.entry)
+	const linkSaveable = useLinkSaveable(linkSaveTarget(drivePath))
 
 	const rightItems = (() => {
 		if (drivePath.selectOptions) {
@@ -90,6 +93,14 @@ const Header = ({
 		const selectionMode = selectedDriveItems.length > 0
 		const items: HeaderItem[] = []
 		const menuButtons: MenuButton[] = []
+
+		if (linkSaveable && !selectionMode) {
+			const saveButton = buildSaveLinkedDirectoryButton(drivePath, t)
+
+			if (saveButton) {
+				menuButtons.push(saveButton)
+			}
+		}
 
 		// Select-all / deselect-all must mirror the list body's VISIBLE (search-
 		// filtered) set, not the unfiltered query data. With a search active,
@@ -196,6 +207,7 @@ const Header = ({
 				selectedDriveItems,
 				liveItems,
 				driveFlags,
+				linkSaveable,
 				t
 			})) {
 				menuButtons.push(button)

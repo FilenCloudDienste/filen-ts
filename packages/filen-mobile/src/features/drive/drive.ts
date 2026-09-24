@@ -26,6 +26,7 @@ import { createDirectory, move } from "@/features/drive/driveDirectory"
 import { favorite, rename, setDirColor, updateTimestamps } from "@/features/drive/driveMetadata"
 import { shareWithFilenUser, removeShare } from "@/features/drive/driveShare"
 import logger from "@/lib/logger"
+import cache from "@/lib/cache"
 
 const drive = {
 	favorite,
@@ -226,6 +227,8 @@ const drive = {
 
 			return
 		}
+
+		cache.linkedFileByUuid.set(result.data.uuid, result.data)
 
 		router.push({
 			pathname: "/linkedFile",

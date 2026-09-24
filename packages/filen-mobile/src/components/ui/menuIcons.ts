@@ -67,6 +67,7 @@ export type Icons =
 	| "copyTo"
 	| "paste"
 	| "clearClipboard"
+	| "saveToCloud"
 
 export function iconToSwiftUiIcon(name: Icons, fill?: boolean): React.ComponentPropsWithoutRef<typeof SwiftUiImage>["systemName"] {
 	switch (name) {
@@ -337,6 +338,10 @@ export function iconToSwiftUiIcon(name: Icons, fill?: boolean): React.ComponentP
 
 		case "clearClipboard": {
 			return fill ? "eraser.fill" : "eraser"
+		}
+
+		case "saveToCloud": {
+			return fill ? "icloud.and.arrow.down.fill" : "icloud.and.arrow.down"
 		}
 	}
 }

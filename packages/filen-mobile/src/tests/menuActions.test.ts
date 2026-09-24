@@ -210,10 +210,7 @@ vi.mock("@/lib/serializer", () => ({
 import { buildUndecryptableMenuButtons } from "@/features/drive/components/item/menuActionsUndecryptable"
 import { confirmedDriveAction } from "@/features/drive/components/item/menuActionsShared"
 import { buildDownloadSubButtons, buildExportButton } from "@/features/drive/components/item/menuActionsDownload"
-import { selectDriveItems } from "@/features/drive/screens/driveSelect"
 import { Platform } from "react-native"
-import transfers from "@/features/transfers/transfers"
-import alerts from "@/lib/alerts"
 import type { DriveItem } from "@/types"
 import type { DrivePath } from "@/hooks/useDrivePath"
 import type { PreviewType } from "@/lib/previewType"
@@ -611,7 +608,6 @@ describe("buildUndecryptableMenuButtons preview dismiss (#40)", () => {
 
 describe("buildDownloadSubButtons (#35)", () => {
 	const baseDownloadArgs = {
-		drivePath: makeDrivePath("drive"),
 		isStoredOffline: false,
 		parentForOfflineStorage: null as OfflineParent | null,
 		previewType: null as PreviewType | null,
@@ -873,50 +869,13 @@ describe("buildDownloadSubButtons (#35)", () => {
 		})
 	})
 
-	describe("import gating", () => {
-		it("includes import in a linked view", () => {
-			const buttons = buildDownloadSubButtons({
-				...baseDownloadArgs,
-				item: makeFile({ name: "file.txt" }),
-				drivePath: makeDrivePath("linked")
-			})
-			const ids = buttons.map(b => b.id)
+	describe("import", () => {
+		it("is never offered: link views save through the copy engine instead", () => {
+			for (const item of [makeFile({ name: "file.txt" }), makeSharedFile(), makeDirectory()]) {
+				const ids = buildDownloadSubButtons({ ...baseDownloadArgs, item }).map(b => b.id)
 
-			expect(ids).toContain("import")
-		})
-
-		it("omits import for shared-in items (the Copy submenu replaces it)", () => {
-			for (const item of [makeSharedFile(), makeDirectory()]) {
-				const buttons = buildDownloadSubButtons({
-					...baseDownloadArgs,
-					item,
-					drivePath: makeDrivePath("sharedIn")
-				})
-
-				expect(buttons.map(b => b.id)).not.toContain("import")
+				expect(ids).not.toContain("import")
 			}
-		})
-
-		it("omits import in the own drive", () => {
-			const buttons = buildDownloadSubButtons({
-				...baseDownloadArgs,
-				item: makeFile({ name: "file.txt" }),
-				drivePath: makeDrivePath("drive")
-			})
-			const ids = buttons.map(b => b.id)
-
-			expect(ids).not.toContain("import")
-		})
-
-		it("omits import when decryptedMeta is null even in a linked view", () => {
-			const buttons = buildDownloadSubButtons({
-				...baseDownloadArgs,
-				item: makeFile(null),
-				drivePath: makeDrivePath("linked")
-			})
-			const ids = buttons.map(b => b.id)
-
-			expect(ids).not.toContain("import")
 		})
 	})
 
@@ -954,160 +913,6 @@ describe("buildDownloadSubButtons (#35)", () => {
 
 			expect(btn?.requiresOnline).toBe(true)
 		})
-	})
-})
-
-// ---------------------------------------------------------------------------
-// C1 — Import flow honesty: partial download / partial upload keep the staging
-// copy, alert, and never silently import an incomplete tree.
-// ---------------------------------------------------------------------------
-
-describe("import flow partial-transfer honesty (C1)", () => {
-	type DownloadResult = Awaited<ReturnType<typeof transfers.download>>
-	type UploadResult = Awaited<ReturnType<typeof transfers.upload>>
-
-	const importArgs = {
-		drivePath: makeDrivePath("linked"),
-		isStoredOffline: false,
-		parentForOfflineStorage: null as OfflineParent | null,
-		previewType: null as PreviewType | null,
-		t
-	}
-
-	// The staging destination is the only FS node the import onPress constructs.
-	const stagingDestination = () => fsMockInstances[fsMockInstances.length - 1]
-
-	async function runImport(item: DriveItem): Promise<void> {
-		const buttons = buildDownloadSubButtons({
-			...importArgs,
-			item
-		})
-		const importButton = buttons.find(b => b.id === "import")
-
-		expect(importButton).toBeDefined()
-
-		await (importButton?.onPress as () => Promise<void>)()
-	}
-
-	beforeEach(() => {
-		fsMockInstances.length = 0
-		vi.mocked(alerts.error).mockClear()
-		vi.mocked(transfers.download).mockReset()
-		vi.mocked(transfers.upload).mockReset()
-		vi.mocked(selectDriveItems).mockReset()
-		vi.mocked(selectDriveItems).mockResolvedValue({
-			cancelled: false,
-			selectedItems: [{ type: "root", data: { uuid: "root-dir" } }]
-		} as never)
-	})
-
-	it("partial download: alerts import_partial_download, skips the upload and keeps the staging copy", async () => {
-		vi.mocked(transfers.download).mockImplementation(async () => {
-			const destination = stagingDestination()
-
-			if (destination) {
-				// Simulate the download having materialized the staging tree.
-				destination.parentDirectory.exists = true
-			}
-
-			return {
-				files: [],
-				directories: [],
-				errors: [{ path: "/missing.txt", error: new Error("entry failed") }]
-			} as unknown as DownloadResult
-		})
-
-		await runImport(makeDirectory({ name: "dir" }))
-
-		// The incomplete tree was NOT re-uploaded.
-		expect(transfers.upload).not.toHaveBeenCalled()
-
-		// The user was told (t stub returns the bare key).
-		expect(alerts.error).toHaveBeenCalledTimes(1)
-
-		const alerted = vi.mocked(alerts.error).mock.calls[0]?.[0] as Error
-
-		expect(alerted.message).toBe("import_partial_download")
-
-		// The staging copy survived for retry/recovery.
-		expect(stagingDestination()?.parentDirectory.delete).not.toHaveBeenCalled()
-	})
-
-	it("partial upload: alerts import_partial_upload and keeps the staging copy", async () => {
-		vi.mocked(transfers.download).mockImplementation(async () => {
-			const destination = stagingDestination()
-
-			if (destination) {
-				destination.parentDirectory.exists = true
-			}
-
-			return {
-				files: [],
-				directories: [],
-				errors: []
-			} as unknown as DownloadResult
-		})
-
-		vi.mocked(transfers.upload).mockResolvedValue({
-			files: [],
-			directories: [],
-			errors: [{ path: "/failed-upload.txt", error: new Error("entry failed") }]
-		} as unknown as UploadResult)
-
-		await runImport(makeDirectory({ name: "dir" }))
-
-		expect(transfers.upload).toHaveBeenCalledTimes(1)
-		expect(alerts.error).toHaveBeenCalledTimes(1)
-
-		const alerted = vi.mocked(alerts.error).mock.calls[0]?.[0] as Error
-
-		expect(alerted.message).toBe("import_partial_upload")
-		expect(stagingDestination()?.parentDirectory.delete).not.toHaveBeenCalled()
-	})
-
-	it("clean run: no alert, staging copy deleted", async () => {
-		vi.mocked(transfers.download).mockImplementation(async () => {
-			const destination = stagingDestination()
-
-			if (destination) {
-				destination.parentDirectory.exists = true
-			}
-
-			return {
-				files: [],
-				directories: [],
-				errors: []
-			} as unknown as DownloadResult
-		})
-
-		vi.mocked(transfers.upload).mockResolvedValue({
-			files: [],
-			directories: [],
-			errors: []
-		} as unknown as UploadResult)
-
-		await runImport(makeDirectory({ name: "dir" }))
-
-		expect(alerts.error).not.toHaveBeenCalled()
-		expect(stagingDestination()?.parentDirectory.delete).toHaveBeenCalledTimes(1)
-	})
-
-	it("aborted download (null result): no alert, staging cleaned up as before", async () => {
-		vi.mocked(transfers.download).mockImplementation(async () => {
-			const destination = stagingDestination()
-
-			if (destination) {
-				destination.parentDirectory.exists = true
-			}
-
-			return null
-		})
-
-		await runImport(makeDirectory({ name: "dir" }))
-
-		expect(transfers.upload).not.toHaveBeenCalled()
-		expect(alerts.error).not.toHaveBeenCalled()
-		expect(stagingDestination()?.parentDirectory.delete).toHaveBeenCalledTimes(1)
 	})
 })
 

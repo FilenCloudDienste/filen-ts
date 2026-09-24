@@ -79,6 +79,9 @@ vi.mock("@/hooks/useMediaPermissions", () => ({
 vi.mock("@/features/contacts/contactsSelect", () => ({ selectContacts: vi.fn() }))
 vi.mock("@/features/drive/screens/driveSelect", () => ({ selectCopyDestination: vi.fn() }))
 vi.mock("@/features/copy/copyRunner", () => ({ default: { start: vi.fn(() => "job-1") } }))
+vi.mock("@/features/drive/linkedSave", () => ({
+	buildSaveToCloudDriveButton: vi.fn(({ id, title }: { id: string; title: string }) => ({ id, title }))
+}))
 
 // ---- imports after mocks ----
 
@@ -954,6 +957,38 @@ describe("buildBulkActionMenu", () => {
 		)
 
 		expect(ids).toEqual(["bulkFavorite", "bulkMove", "bulkCopyMenu", "bulkDownload", "bulkShareFilenUser", "bulkMakeOffline", "bulkTrash"])
+	})
+
+	// --- public links: Save selected to Cloud Drive ---
+
+	it("offers bulk Save to Cloud Drive only in a saveable link view, never clipboard Copy there", () => {
+		const idsFor = (linkSaveable: boolean, flags: Partial<DriveSelectionFlags> = {}) =>
+			buttonIds(
+				buildBulkActionMenu({
+					drivePath: makeDrivePath("linked"),
+					selectedDriveItems: selectedItems,
+					liveItems,
+					driveFlags: makeFlags(flags),
+					linkSaveable,
+					t: t as never
+				})
+			)
+
+		expect(idsFor(true)).toEqual(["bulkSaveToCloudDrive"])
+		expect(idsFor(false)).toEqual([])
+		expect(idsFor(true, { includesUndecryptable: true })).toEqual([])
+		expect(
+			buttonIds(
+				buildBulkActionMenu({
+					drivePath: makeDrivePath("drive"),
+					selectedDriveItems: selectedItems,
+					liveItems,
+					driveFlags: makeFlags(),
+					linkSaveable: true,
+					t: t as never
+				})
+			)
+		).not.toContain("bulkSaveToCloudDrive")
 	})
 
 	// --- Copy submenu ---

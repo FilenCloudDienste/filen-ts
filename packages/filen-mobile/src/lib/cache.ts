@@ -9,7 +9,8 @@ import {
 	type LinkedDirsAndFiles,
 	type File,
 	type DirPublicLink,
-	type Dir
+	type Dir,
+	type LinkedFile
 } from "@filen/sdk-rs"
 import { type DriveItem } from "@/types"
 
@@ -41,6 +42,18 @@ export class Cache {
 			meta: DirPublicLink
 		}
 	>()
+	// A directory link's root as the SDK copies it, keyed by link uuid; its root uuid is who owns the link.
+	public readonly linkedRootByLinkUuid = new Map<
+		string,
+		{
+			dir: AnyLinkedDir
+			meta: DirPublicLink
+			rootUuid: string
+		}
+	>()
+	// A standalone file link's file as the SDK returned it, keyed by file uuid: a copy needs the raw
+	// LinkedFile, which the File-shaped DriveItem on the screen can't stand in for.
+	public readonly linkedFileByUuid = new Map<string, LinkedFile>()
 	public readonly chatAttachmentLayouts = new Map<
 		string,
 		{
@@ -258,6 +271,8 @@ export class Cache {
 		this.directoryUuidToAnySharedDirWithContext.clear()
 		this.directoryUuidToAnyNormalDir.clear()
 		this.directoryUuidToAnyLinkedDirWithMeta.clear()
+		this.linkedRootByLinkUuid.clear()
+		this.linkedFileByUuid.clear()
 		this.chatAttachmentLayouts.clear()
 	}
 }

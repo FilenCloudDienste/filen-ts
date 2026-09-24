@@ -5,23 +5,10 @@ import type { DrivePath } from "@/hooks/useDrivePath"
 import { useTranslation } from "react-i18next"
 import { createMenuButtons } from "@/features/drive/components/item/menuActions"
 import useDriveClipboardStore from "@/features/drive/store/useDriveClipboard.store"
+import useLinkSaveable from "@/features/drive/hooks/useLinkSaveable"
+import { linkSaveTarget } from "@/features/drive/linkedSave"
 
-const Menu = ({
-	item,
-	children,
-	type,
-	className,
-	isAnchoredToRight,
-	onOpenMenu,
-	onCloseMenu,
-	drivePath,
-	isStoredOffline,
-	disabled,
-	style,
-	showSelectToggle,
-	isPreview,
-	previewBackground
-}: {
+type MenuProps = {
 	item: DriveItem
 	children: React.ReactNode
 	type: React.ComponentPropsWithoutRef<typeof MenuComponent>["type"]
@@ -37,7 +24,25 @@ const Menu = ({
 	// Set by the preview (gallery) header so destructive actions close the preview on success.
 	isPreview?: boolean
 	previewBackground?: boolean
-}) => {
+}
+
+const MenuInner = ({
+	item,
+	children,
+	type,
+	className,
+	isAnchoredToRight,
+	onOpenMenu,
+	onCloseMenu,
+	drivePath,
+	isStoredOffline,
+	disabled,
+	style,
+	showSelectToggle,
+	isPreview,
+	previewBackground,
+	linkSaveable
+}: MenuProps & { linkSaveable?: boolean }) => {
 	const { t } = useTranslation()
 	// Only directory rows offer "Paste into", so only they re-render when the clipboard changes.
 	const clipboard = useDriveClipboardStore(state => (item.type === "directory" && !disabled ? state.entry : null))
@@ -50,6 +55,7 @@ const Menu = ({
 				showSelectToggle,
 				isPreview,
 				clipboard,
+				linkSaveable,
 				t
 			})
 
@@ -69,6 +75,22 @@ const Menu = ({
 			{children}
 		</MenuComponent>
 	)
+}
+
+// Only link views ask whether the link may be saved, so rows elsewhere pay for no query observer.
+const LinkedMenu = (props: MenuProps) => {
+	const linkSaveable = useLinkSaveable(props.disabled ? null : linkSaveTarget(props.drivePath, props.item))
+
+	return (
+		<MenuInner
+			{...props}
+			linkSaveable={linkSaveable}
+		/>
+	)
+}
+
+const Menu = (props: MenuProps) => {
+	return props.drivePath.type === "linked" ? <LinkedMenu {...props} /> : <MenuInner {...props} />
 }
 
 export default Menu

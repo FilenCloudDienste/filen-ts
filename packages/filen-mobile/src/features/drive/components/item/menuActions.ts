@@ -10,6 +10,7 @@ import { buildDownloadSubButtons, buildExportButton, buildOpenWithButton } from 
 import { buildCopyMenuButton, offersCopy } from "@/features/drive/components/item/menuActionsCopy"
 import { buildPasteIntoMenuButton } from "@/features/drive/components/clipboardMenu"
 import { type DriveClipboardEntry } from "@/features/drive/store/useDriveClipboard.store"
+import { buildSaveToCloudDriveButton } from "@/features/drive/linkedSave"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import prompts from "@/lib/prompts"
 import { run } from "@filen/shared"
@@ -54,6 +55,7 @@ export function createMenuButtons({
 	showSelectToggle,
 	isPreview,
 	clipboard,
+	linkSaveable,
 	t
 }: {
 	item: DriveItem
@@ -66,6 +68,8 @@ export function createMenuButtons({
 	isPreview?: boolean
 	// The drive clipboard, for "Paste into" on directory rows; callers without one offer no paste.
 	clipboard?: DriveClipboardEntry | null
+	// A link view whose link may be saved (useLinkSaveable): not the account's own, downloads allowed.
+	linkSaveable?: boolean
 	t: TFunction
 }): MenuButton[] {
 	if (item.data.undecryptable) {
@@ -155,7 +159,6 @@ export function createMenuButtons({
 
 	const downloadSubButtons = buildDownloadSubButtons({
 		item,
-		drivePath,
 		isStoredOffline,
 		parentForOfflineStorage,
 		previewType,
@@ -386,6 +389,14 @@ export function createMenuButtons({
 				t
 			})
 		)
+	}
+
+	if (drivePath.type === "linked" && linkSaveable) {
+		const saveButton = buildSaveToCloudDriveButton({ id: "saveToCloudDrive", title: t("save_to_cloud_drive"), items: [item], t })
+
+		if (saveButton) {
+			menuButtons.push(saveButton)
+		}
 	}
 
 	if (

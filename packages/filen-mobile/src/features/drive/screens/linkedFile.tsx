@@ -17,6 +17,15 @@ import { useShallow } from "zustand/shallow"
 import { createMenuButtons } from "@/features/drive/components/item/menuActions"
 import { driveItemDisplayName } from "@/lib/decryption"
 import CannotDecryptScreen from "@/components/cannotDecryptScreen"
+import type { DrivePath } from "@/hooks/useDrivePath"
+import useLinkSaveable from "@/features/drive/hooks/useLinkSaveable"
+import { linkSaveTarget } from "@/features/drive/linkedSave"
+
+// A standalone file link: a link view with no directory behind it.
+const LINKED_FILE_PATH: DrivePath = {
+	type: "linked",
+	uuid: null
+}
 
 const LinkedFile = () => {
 	const { t } = useTranslation()
@@ -29,6 +38,7 @@ const LinkedFile = () => {
 	const navigation = useNavigation()
 
 	const item = deserializeRouteParam<Extract<DriveItem, { type: "file" }>>(itemSerialized)
+	const linkSaveable = useLinkSaveable(item?.type === "file" ? linkSaveTarget(LINKED_FILE_PATH, item) : null)
 
 	if (!item || item.type !== "file") {
 		return <DismissStack />
@@ -81,11 +91,9 @@ const LinkedFile = () => {
 							buttons: getFileUrl
 								? createMenuButtons({
 										item,
-										drivePath: {
-											type: "linked",
-											uuid: null
-										},
+										drivePath: LINKED_FILE_PATH,
 										isStoredOffline: false,
+										linkSaveable,
 										t
 									})
 								: []

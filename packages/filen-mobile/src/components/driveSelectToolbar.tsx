@@ -180,9 +180,10 @@ const DriveSelectToolbar = () => {
 				}
 
 				// Copying into the items' own directory is allowed (the copies get "name (1)"). The caller
-				// starts the job; the picker only hands back where.
+				// starts the job; the picker only hands back where. A public link's sources aren't drive
+				// items, so a copy session may carry none.
 				case "copy": {
-					if (!parentDir || drivePath.selectOptions.items.length === 0) {
+					if (!parentDir) {
 						return
 					}
 
@@ -284,7 +285,7 @@ const DriveSelectToolbar = () => {
 					</CrossGlassContainerView>
 				</PressableScale>
 			)}
-			{drivePath.selectOptions?.intention === "copy" && parentDir && drivePath.selectOptions.items.length > 0 && (
+			{drivePath.selectOptions?.intention === "copy" && parentDir && (
 				<PressableScale
 					onPress={submit}
 					className="absolute right-4"
