@@ -279,19 +279,21 @@ describe("runCopyJob", () => {
 	it("feeds updates into the job and the row, and patches each created top-level item", async () => {
 		const deps = makeDeps()
 		const dir = mockDir("copied")
+		let midRun: { bytesDone: number | undefined; created: number | undefined; row: ReturnType<typeof row> } | undefined
 
 		deps.copyItems.mockImplementation((_id, _items, _dest, _max, onEvent) => {
 			onEvent({ type: "update", update: update({ counts: counts({ bytesDone: 50n }) }) })
 			onEvent({ type: "created", item: created(dir) })
 
-			expect(getCopyJob("job")?.counts.bytesDone).toBe(50)
-			expect(getCopyJob("job")?.created.map(item => item.data.uuid)).toEqual([dir.uuid])
-			expect(row()).toMatchObject({ size: 200, bytesTransferred: 50 })
+			midRun = { bytesDone: getCopyJob("job")?.counts.bytesDone, created: getCopyJob("job")?.created.length, row: row() }
 
 			return Promise.resolve(report())
 		})
 
 		const job = await runCopyJob(deps, request())
+
+		// A created item stays off the job until the settle, the only reader.
+		expect(midRun).toMatchObject({ bytesDone: 50, created: 0, row: { size: 200, bytesTransferred: 50 } })
 
 		expect(deps.patchCreated).toHaveBeenCalledTimes(1)
 		expect(deps.patchCreated.mock.calls[0]?.[0].data.uuid).toBe(dir.uuid)
@@ -617,6 +619,34 @@ describe("cancel", () => {
 
 			expect(job?.created).toEqual([])
 		}
+	})
+
+	// A store write per created item copied the whole list each time.
+	it("writes nothing to the job store per created item, and still trashes every one on a stop", async () => {
+		const deps = makeDeps()
+		const dirs = Array.from({ length: 50 }, (_, index) => mockDir(`copied${String(index)}`))
+		let writes = 0
+
+		deps.copyItems.mockImplementation((id, _items, _dest, _max, onEvent) => {
+			const unsubscribe = useCopyJobsStore.subscribe(() => {
+				writes++
+			})
+
+			for (const dir of dirs) {
+				onEvent({ type: "created", item: created(dir) })
+			}
+
+			unsubscribe()
+			requestCopyCancel(id, { trashCopied: true })
+
+			return Promise.resolve(report({ error: { kind: "Cancelled", message: "copy cancelled", ...NO_SERVER } }))
+		})
+
+		await runCopyJob(deps, request())
+
+		expect(writes).toBe(0)
+		expect(deps.patchCreated).toHaveBeenCalledTimes(dirs.length)
+		expect(deps.trash.mock.calls[0]?.[0].map(item => item.data.uuid)).toEqual(dirs.map(dir => dir.uuid))
 	})
 
 	it("records how many copied items went to the trash", async () => {

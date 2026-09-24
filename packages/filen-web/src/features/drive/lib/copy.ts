@@ -1,7 +1,6 @@
 import * as Comlink from "comlink"
 import type { CopyEntry, CopyItem, CopyReport } from "@filen/sdk-rs"
 import {
-	applyCopyCreated,
 	applyCopyUpdate,
 	copyJobShownBytes,
 	copyMaxBytes,
@@ -137,12 +136,12 @@ function addTrashOutcome(result: CopyJob["trashResult"], outcome: BulkOutcome<Dr
 }
 
 // Outside runCopyJob, so the report isn't kept alive by the callbacks the worker may still hold.
-function settleJob(jobs: RunCopyDeps["jobs"], id: string, settlement: CopySettlement): void {
+function settleJob(jobs: RunCopyDeps["jobs"], id: string, settlement: CopySettlement, delivered: readonly DriveItem[]): void {
 	jobs.update(id, job => {
 		const settled = settleCopyJob(job, settlement)
 
 		// Only "move copied items to trash" reads what the job made.
-		return { ...settled, created: settled.cancelRequest === "trash" ? copiedTopLevel(settlement, settled.created) : [] }
+		return { ...settled, created: settled.cancelRequest === "trash" ? copiedTopLevel(settlement, delivered) : [] }
 	})
 }
 
@@ -208,6 +207,9 @@ export async function runCopyJob(deps: RunCopyDeps, request: CopyJobRequest): Pr
 	// the settle left out.
 	let settledJob: CopyJob | undefined
 	let settledFromReport = false
+	// The top-level items delivered before the settle, kept here rather than on the job: a store write
+	// per item would copy the whole list each time. Only the settle reads them.
+	let delivered: DriveItem[] = []
 	// Every copy handed to the trash: one both in the report and delivered late goes once.
 	const trashing = new Set<string>()
 
@@ -248,7 +250,7 @@ export async function runCopyJob(deps: RunCopyDeps, request: CopyJobRequest): Pr
 			deps.patchCreated(item)
 
 			if (settledJob === undefined) {
-				deps.jobs.update(id, job => applyCopyCreated(job, item))
+				delivered.push(item)
 			} else if (settledJob.cancelRequest === "trash") {
 				void trashLate(item)
 			}
@@ -319,7 +321,10 @@ export async function runCopyJob(deps: RunCopyDeps, request: CopyJobRequest): Pr
 	}
 
 	deps.release(id)
-	settleJob(deps.jobs, id, settlement)
+	settleJob(deps.jobs, id, settlement, delivered)
+
+	// Let go of them: the worker may still hold the callbacks.
+	delivered = []
 
 	settledJob = deps.jobs.get(id)
 	settledFromReport = "report" in settlement
