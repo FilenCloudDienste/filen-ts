@@ -1,44 +1,35 @@
 import type { SocketEvent } from "@filen/sdk-rs"
 import { asDirectoryOrFile, narrowItem, type DriveItem } from "@/features/drive/lib/item"
-import { useDriveClipboardStore } from "@/features/drive/store/useDriveClipboardStore"
+import { stableUuidOf, useDriveClipboardStore } from "@/features/drive/store/useDriveClipboardStore"
 
-// Keeps the clipboard on its items as they now are, the same way the selection is kept. A cut is a move
-// still to come, so it follows its items through renames, moves, color changes and content saves: a
-// move re-encrypts the passed item's name for the destination's shares and links, and a superseded
-// version isn't the file anymore. A copy keeps what was copied. Either drops an item once it is trashed
-// or deleted. Matched by uuid or a file's stable id, never by name. Shared-in items carry no stable id
-// and get no owner events, so they stay as they are.
+// Keeps the clipboard on its items as they now are, the same way the selection is kept. Copies and cuts
+// alike follow their items through renames, moves, color changes and content saves: a paste copies the
+// current name and newest version, and a move re-encrypts the passed item's name for the destination's
+// shares and links. Either drops an item once it is trashed or deleted. Matched by uuid or a file's
+// stable id, never by name. Shared-in items carry no stable id and get no owner events, so they stay as
+// they are.
 
 type DriveSocketEvent = Extract<SocketEvent, { type: "drive" }>
 
-function stableUuidOf(item: DriveItem): string | undefined {
-	const base = asDirectoryOrFile(item)
-
-	return base.type === "file" ? base.data.stableUUID : undefined
-}
-
-// Cut only: each matching item as `rebuild` makes it.
-function followCut(matches: (item: DriveItem) => boolean, rebuild: (item: DriveItem) => DriveItem): void {
+// The item that is `uuid`, as `rebuild` makes it.
+function followUuid(uuid: string, rebuild: (item: DriveItem) => DriveItem): void {
 	useDriveClipboardStore.getState().follow({
-		update: item => (matches(item) ? rebuild(item) : item),
-		cutOnly: true
+		keys: [uuid],
+		update: item => (item.data.uuid === uuid ? rebuild(item) : item)
 	})
 }
 
 // A local write's result for the item that was `previousUuid` (a content save or version restore
 // rotates the uuid).
 export function followClipboardItem(next: DriveItem, previousUuid: string = next.data.uuid): void {
-	followCut(
-		item => item.data.uuid === previousUuid,
-		() => next
-	)
+	followUuid(previousUuid, () => next)
 }
 
 // Gone, and for a file its whole lineage, older versions a copy holds included.
 function dropGone(uuid: string, stableUuid: string | undefined): void {
 	useDriveClipboardStore.getState().follow({
-		update: item => (item.data.uuid === uuid || (stableUuid !== undefined && stableUuidOf(item) === stableUuid) ? null : item),
-		cutOnly: false
+		keys: stableUuid === undefined ? [uuid] : [uuid, stableUuid],
+		update: item => (item.data.uuid === uuid || (stableUuid !== undefined && stableUuidOf(item) === stableUuid) ? null : item)
 	})
 }
 
@@ -58,10 +49,10 @@ export function followDriveEventOnClipboard(event: DriveSocketEvent): void {
 			const stableUuid = file.stableUUID
 
 			if (stableUuid !== undefined) {
-				followCut(
-					item => stableUuidOf(item) === stableUuid,
-					() => narrowItem(file)
-				)
+				useDriveClipboardStore.getState().follow({
+					keys: [stableUuid],
+					update: item => (stableUuidOf(item) === stableUuid ? narrowItem(file) : item)
+				})
 			}
 
 			break
@@ -70,10 +61,7 @@ export function followDriveEventOnClipboard(event: DriveSocketEvent): void {
 		case "fileArchiveRestored": {
 			const { currentUuid, file } = inner
 
-			followCut(
-				item => item.data.uuid === currentUuid,
-				() => narrowItem(file)
-			)
+			followUuid(currentUuid, () => narrowItem(file))
 
 			break
 		}
@@ -81,10 +69,7 @@ export function followDriveEventOnClipboard(event: DriveSocketEvent): void {
 		case "fileMove": {
 			const file = inner.file
 
-			followCut(
-				item => item.data.uuid === file.uuid,
-				() => narrowItem(file)
-			)
+			followUuid(file.uuid, () => narrowItem(file))
 
 			break
 		}
@@ -94,14 +79,11 @@ export function followDriveEventOnClipboard(event: DriveSocketEvent): void {
 		case "folderMove": {
 			const dir = inner.dir
 
-			followCut(
-				item => item.data.uuid === dir.uuid,
-				item => {
-					const base = asDirectoryOrFile(item)
+			followUuid(dir.uuid, item => {
+				const base = asDirectoryOrFile(item)
 
-					return base.type === "directory" ? narrowItem({ ...dir, color: base.data.color }) : item
-				}
-			)
+				return base.type === "directory" ? narrowItem({ ...dir, color: base.data.color }) : item
+			})
 
 			break
 		}
@@ -109,14 +91,11 @@ export function followDriveEventOnClipboard(event: DriveSocketEvent): void {
 		case "fileMetadataChanged": {
 			const { uuid, metadata } = inner
 
-			followCut(
-				item => item.data.uuid === uuid,
-				item => {
-					const base = asDirectoryOrFile(item)
+			followUuid(uuid, item => {
+				const base = asDirectoryOrFile(item)
 
-					return base.type === "file" ? narrowItem({ ...base.data, meta: metadata }) : item
-				}
-			)
+				return base.type === "file" ? narrowItem({ ...base.data, meta: metadata }) : item
+			})
 
 			break
 		}
@@ -124,14 +103,11 @@ export function followDriveEventOnClipboard(event: DriveSocketEvent): void {
 		case "folderMetadataChanged": {
 			const { uuid, meta } = inner
 
-			followCut(
-				item => item.data.uuid === uuid,
-				item => {
-					const base = asDirectoryOrFile(item)
+			followUuid(uuid, item => {
+				const base = asDirectoryOrFile(item)
 
-					return base.type === "directory" ? narrowItem({ ...base.data, meta }) : item
-				}
-			)
+				return base.type === "directory" ? narrowItem({ ...base.data, meta }) : item
+			})
 
 			break
 		}
@@ -139,14 +115,11 @@ export function followDriveEventOnClipboard(event: DriveSocketEvent): void {
 		case "folderColorChanged": {
 			const { uuid, color } = inner
 
-			followCut(
-				item => item.data.uuid === uuid,
-				item => {
-					const base = asDirectoryOrFile(item)
+			followUuid(uuid, item => {
+				const base = asDirectoryOrFile(item)
 
-					return base.type === "directory" ? narrowItem({ ...base.data, color }) : item
-				}
-			)
+				return base.type === "directory" ? narrowItem({ ...base.data, color }) : item
+			})
 
 			break
 		}
@@ -155,17 +128,14 @@ export function followDriveEventOnClipboard(event: DriveSocketEvent): void {
 			const favorite = inner.item
 
 			if (favorite.type === "file" || favorite.type === "normalDir") {
-				followCut(
-					item => item.data.uuid === favorite.uuid,
-					() => narrowItem(favorite)
-				)
+				followUuid(favorite.uuid, () => narrowItem(favorite))
 			}
 
 			break
 		}
 
 		// With newUUID it's a content save on an account without versioning, not a trash: the successor's
-		// fileNew is what a cut follows.
+		// fileNew is what the clipboard follows.
 		case "fileTrash": {
 			if (inner.newUUID === undefined) {
 				dropGone(inner.uuid, inner.stableUUID)

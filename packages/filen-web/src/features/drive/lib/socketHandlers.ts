@@ -265,7 +265,7 @@ export function handleDriveEvent(event: DriveSocketEvent): void {
 		markAccountStale()
 	}
 
-	// A cut follows its items, and a trashed or deleted item leaves the clipboard.
+	// The clipboard follows its items, and a trashed or deleted item leaves it.
 	followDriveEventOnClipboard(event)
 
 	switch (inner.type) {

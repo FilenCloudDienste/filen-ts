@@ -6,15 +6,17 @@ import type { Dir, File, FileMeta, FileVersion, SocketEvent, UserInfo, UuidStr }
 // go in through the real drive socket handler and writes through the real drive actions, so the wiring is
 // covered along with the mapping.
 
-const { performMove, renameFile, moveFile, trashFile, deleteFilePermanently, setDirectoryColor, restoreFileVersionOp } = vi.hoisted(() => ({
-	performMove: vi.fn(),
-	renameFile: vi.fn(),
-	moveFile: vi.fn(),
-	trashFile: vi.fn(),
-	deleteFilePermanently: vi.fn(),
-	setDirectoryColor: vi.fn(),
-	restoreFileVersionOp: vi.fn()
-}))
+const { performMove, startCopyWithCard, renameFile, moveFile, trashFile, deleteFilePermanently, setDirectoryColor, restoreFileVersionOp } =
+	vi.hoisted(() => ({
+		performMove: vi.fn(),
+		startCopyWithCard: vi.fn(),
+		renameFile: vi.fn(),
+		moveFile: vi.fn(),
+		trashFile: vi.fn(),
+		deleteFilePermanently: vi.fn(),
+		setDirectoryColor: vi.fn(),
+		restoreFileVersionOp: vi.fn()
+	}))
 
 vi.mock("@/lib/sdk/client", () => ({
 	sdkApi: { renameFile, moveFile, trashFile, deleteFilePermanently, setDirectoryColor, restoreFileVersionOp }
@@ -22,7 +24,7 @@ vi.mock("@/lib/sdk/client", () => ({
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 vi.mock("@/lib/log", () => ({ log: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() } }))
 vi.mock("@/features/drive/lib/dnd", () => ({ performMove }))
-vi.mock("@/features/transfers/lib/copyToast", () => ({ startCopyWithCard: vi.fn() }))
+vi.mock("@/features/transfers/lib/copyToast", () => ({ startCopyWithCard }))
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 
 import "@/lib/i18n"
@@ -197,20 +199,38 @@ describe("a cut follows its items", () => {
 	})
 })
 
-describe("a copy keeps what was copied", () => {
-	it("is left as it was by renames, content saves and moves", () => {
+describe("a copy follows its items", () => {
+	it("pastes the current name and newest version after renames, content saves and moves", async () => {
 		copyToClipboard([U1, DOCS])
-
-		const copied = entry()
 
 		drive({ type: "fileMetadataChanged", uuid: testUuid("u1"), metadata: fileMeta("b.txt") })
 		drive({ type: "fileArchived", uuid: testUuid("u1"), stableUUID: STABLE, newUUID: testUuid("u2") })
-		drive({ type: "fileNew", file: rawFile("u2") })
-		drive({ type: "fileTrash", uuid: testUuid("u1"), stableUUID: testUuid("retired"), newUUID: testUuid("u2") })
-		drive({ type: "folderMove", dir: rawDir("docs", { parent: ELSEWHERE }) })
-		followClipboardItem(narrowItem(rawFile("u1", { meta: fileMeta("b.txt") })))
+		drive({ type: "fileNew", file: rawFile("u2", { meta: fileMeta("b.txt") }) })
+		drive({ type: "folderColorChanged", uuid: testUuid("docs"), color: "red" })
+		drive({ type: "folderMove", dir: rawDir("docs", { parent: ELSEWHERE, meta: { type: "decoded", data: { name: "papers" } } }) })
 
-		expect(entry()).toBe(copied)
+		expect(entry()?.mode).toBe("copy")
+		expect(useDriveClipboardStore.getState().cutUuids.size).toBe(0)
+
+		await pasteClipboard(DESTINATION)
+
+		expect(startCopyWithCard.mock.calls[0]?.[0]).toMatchObject([
+			{ data: { uuid: testUuid("u2"), decryptedMeta: { name: "b.txt" } } },
+			{ data: { uuid: testUuid("docs"), parent: ELSEWHERE, color: "red", decryptedMeta: { name: "papers" } } }
+		])
+		// A copy stays for further pastes.
+		expect(uuids()).toEqual([testUuid("u2"), testUuid("docs")])
+	})
+
+	it("follows this tab's own renames and saves", async () => {
+		copyToClipboard([U1])
+
+		renameFile.mockResolvedValue(rawFile("u1", { meta: fileMeta("b.txt") }))
+		await renameItem(U1, "b.txt")
+		expect(names()).toEqual(["b.txt"])
+
+		followClipboardItem(narrowItem(rawFile("u2", { meta: fileMeta("b.txt") })), testUuid("u1"))
+		expect(uuids()).toEqual([testUuid("u2")])
 	})
 })
 
@@ -280,6 +300,18 @@ describe("trashed and deleted items leave the clipboard", () => {
 		drive({ type: "fileNew", file: rawFile("other", { stableUUID: testUuid("other-stable") }) })
 
 		expect(useDriveClipboardStore.getState()).toBe(before)
+	})
+
+	it("looks at no held item for a change about none of them", () => {
+		copyToClipboard([U1, DOCS])
+
+		const update = vi.fn((item: DriveItem) => item)
+
+		useDriveClipboardStore.getState().follow({ keys: [testUuid("other"), testUuid("other-stable")], update })
+		expect(update).not.toHaveBeenCalled()
+
+		useDriveClipboardStore.getState().follow({ keys: [STABLE], update })
+		expect(update).toHaveBeenCalledTimes(2)
 	})
 })
 
