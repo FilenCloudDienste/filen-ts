@@ -15,7 +15,10 @@ vi.mock("@/features/drive/driveHiddenItems", () => ({
 }))
 vi.mock("@filen/shared", async () => await import("@/tests/mocks/filenShared"))
 
+vi.mock("@/features/copy/copyRunner", () => ({ default: { start: vi.fn() } }))
+
 vi.mock("@filen/sdk-rs", () => ({
+	AnyNormalDir_Tags: { Dir: "Dir", Root: "Root" },
 	AnyNormalDir: {
 		Root: class {
 			tag = "Root"
@@ -37,7 +40,8 @@ vi.mock("@filen/sdk-rs", () => ({
 vi.mock("@/lib/cache", () => ({
 	default: {
 		rootUuid: null as string | null,
-		directoryUuidToAnyNormalDir: new Map<string, unknown>()
+		directoryUuidToAnyNormalDir: new Map<string, unknown>(),
+		uuidToAnyDriveItem: new Map<string, unknown>()
 	}
 }))
 
@@ -63,7 +67,10 @@ vi.mock("@/features/drive/drive", () => ({
 	}
 }))
 
-import { getDriveParent, canShowDriveCreateMenu } from "@/features/drive/components/driveCreateMenu"
+import { getDriveParent, canShowDriveCreateMenu, buildDriveCreateMenuButtons } from "@/features/drive/components/driveCreateMenu"
+import type { UseDriveUpload } from "@/features/drive/hooks/useDriveUpload"
+import type { DriveItem } from "@/types"
+import type { TFunction } from "i18next"
 import cache from "@/lib/cache"
 import type { DrivePath } from "@/hooks/useDrivePath"
 import type { AnyNormalDir } from "@filen/sdk-rs"
@@ -163,5 +170,49 @@ describe("canShowDriveCreateMenu", () => {
 				selectionMode: true
 			})
 		).toBe(false)
+	})
+})
+
+// ---------------------------------------------------------------------------
+// buildDriveCreateMenuButtons — Paste + Clear clipboard (header and empty-state Add menu)
+// ---------------------------------------------------------------------------
+
+describe("buildDriveCreateMenuButtons clipboard entries", () => {
+	const t = ((key: string) => key) as unknown as TFunction
+	const upload = {} as UseDriveUpload
+	const files = [{ type: "file", data: { uuid: "f1", parent: DIR_UUID } } as unknown as DriveItem]
+
+	function ids(drivePath: DrivePath, clipboard: Parameters<typeof buildDriveCreateMenuButtons>[0]["clipboard"]) {
+		cache.rootUuid = ROOT_UUID
+
+		return buildDriveCreateMenuButtons({ t, parent: getDriveParent(drivePath), upload, drivePath, clipboard }).map(button => [
+			button.id,
+			button.disabled === true
+		])
+	}
+
+	it("adds nothing while the clipboard is empty", () => {
+		expect(ids(drivePathAt(null), null)).toEqual([
+			["createFolder", false],
+			["upload", false]
+		])
+	})
+
+	it("adds Paste and Clear clipboard after the create actions", () => {
+		expect(ids(drivePathAt(null), { mode: "copy", items: files })).toEqual([
+			["createFolder", false],
+			["upload", false],
+			["paste", false],
+			["clearClipboard", false]
+		])
+	})
+
+	it("disables a cut paste outside the drive view", () => {
+		const favoritesPath: DrivePath = { type: "favorites", uuid: DIR_UUID }
+
+		cache.directoryUuidToAnyNormalDir.set(DIR_UUID, { tag: "Dir", inner: [{ uuid: "other" }] } as unknown as AnyNormalDir)
+
+		expect(ids(favoritesPath, { mode: "cut", items: files }).find(([id]) => id === "paste")).toEqual(["paste", true])
+		expect(ids(favoritesPath, { mode: "copy", items: files }).find(([id]) => id === "paste")).toEqual(["paste", false])
 	})
 })

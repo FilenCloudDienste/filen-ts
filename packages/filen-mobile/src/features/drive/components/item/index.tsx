@@ -22,6 +22,7 @@ import useDriveItemIndicators from "@/features/drive/hooks/useDriveItemIndicator
 import { driveItemDisplayName } from "@/lib/decryption"
 import { driveItemHasLeadingCheckbox } from "@/features/drive/driveSelectors"
 import { useTranslation } from "react-i18next"
+import { useIsDriveItemCut } from "@/features/drive/store/useDriveClipboard.store"
 
 const Item = ({
 	info,
@@ -57,6 +58,7 @@ const Item = ({
 		drivePath
 	})
 	const hasLeadingCheckbox = driveItemHasLeadingCheckbox({ drivePath, areDriveItemsSelected })
+	const isCut = useIsDriveItemCut(info.item.data.uuid)
 
 	return (
 		<View
@@ -92,7 +94,9 @@ const Item = ({
 						// edges — its ripple is masked to its own box, and long-press covers the whole row
 						// (see pressables.tsx). iOS has no ripple, so it keeps the gutter here.
 						Platform.OS !== "android" && "px-4",
-						areDriveItemsSelected || (drivePath.selectOptions && drivePath.selectOptions.intention === "select" && "pr-14")
+						areDriveItemsSelected || (drivePath.selectOptions && drivePath.selectOptions.intention === "select" && "pr-14"),
+						// Inside the menu, so the lifted context-menu preview shows the cut state too.
+						isCut && "opacity-50"
 					)}
 				>
 					{areDriveItemsSelected && !drivePath.selectOptions && (

@@ -65,6 +65,8 @@ export type Icons =
 	| "copyItems"
 	| "cut"
 	| "copyTo"
+	| "paste"
+	| "clearClipboard"
 
 export function iconToSwiftUiIcon(name: Icons, fill?: boolean): React.ComponentPropsWithoutRef<typeof SwiftUiImage>["systemName"] {
 	switch (name) {
@@ -327,6 +329,14 @@ export function iconToSwiftUiIcon(name: Icons, fill?: boolean): React.ComponentP
 
 		case "copyTo": {
 			return fill ? "folder.fill.badge.plus" : "folder.badge.plus"
+		}
+
+		case "paste": {
+			return "doc.on.clipboard.fill"
+		}
+
+		case "clearClipboard": {
+			return fill ? "eraser.fill" : "eraser"
 		}
 	}
 }

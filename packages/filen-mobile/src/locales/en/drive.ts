@@ -320,6 +320,16 @@ export const drive = {
 	cut: "Cut",
 	/** Copy submenu (item and bulk menus): pick a directory and copy the items into it */
 	copy_to: "Copy to…",
+	/** Header, empty-state and directory-row menus: paste the one item on the drive clipboard here */
+	paste: "Paste",
+	/** Header and empty-state menus: paste the items on the drive clipboard here (singular) */
+	paste_items_one: "Paste {{count}} item",
+	/** Header and empty-state menus: paste the items on the drive clipboard here (plural) */
+	paste_items_other: "Paste {{count}} items",
+	/** Directory-row menu: paste the drive clipboard into this directory */
+	paste_into: "Paste into",
+	/** Header and empty-state menus: empty the drive clipboard */
+	clear_clipboard: "Clear clipboard",
 	/** Per-item context menu: view file version history */
 	versions: "Versions",
 	/** Per-item context menu: change the directory icon color */

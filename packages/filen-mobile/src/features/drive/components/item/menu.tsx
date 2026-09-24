@@ -4,6 +4,7 @@ import { type StyleProp, type ViewStyle } from "react-native"
 import type { DrivePath } from "@/hooks/useDrivePath"
 import { useTranslation } from "react-i18next"
 import { createMenuButtons } from "@/features/drive/components/item/menuActions"
+import useDriveClipboardStore from "@/features/drive/store/useDriveClipboard.store"
 
 const Menu = ({
 	item,
@@ -38,6 +39,8 @@ const Menu = ({
 	previewBackground?: boolean
 }) => {
 	const { t } = useTranslation()
+	// Only directory rows offer "Paste into", so only they re-render when the clipboard changes.
+	const clipboard = useDriveClipboardStore(state => (item.type === "directory" && !disabled ? state.entry : null))
 	const menuButtons = disabled
 		? []
 		: createMenuButtons({
@@ -46,6 +49,7 @@ const Menu = ({
 				isStoredOffline,
 				showSelectToggle,
 				isPreview,
+				clipboard,
 				t
 			})
 

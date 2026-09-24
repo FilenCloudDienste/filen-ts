@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useEffect, useRef } from "react"
 import { useTranslation } from "react-i18next"
 import SafeAreaView from "@/components/ui/safeAreaView"
-import useDrivePath from "@/hooks/useDrivePath"
+import useDrivePath, { type DrivePath } from "@/hooks/useDrivePath"
 import useDriveItemsQuery from "@/features/drive/queries/useDriveItems.query"
 import { socketCoveredRefetchOnMount } from "@/queries/socketSession"
 import type { DriveItem } from "@/types"
@@ -41,7 +41,9 @@ import offlineSync from "@/features/offline/offlineSync"
 import SyncErrorsHeaderRow from "@/features/offline/components/syncErrorsHeaderRow"
 import { LazyWrapper } from "@/components/lazyWrapper"
 import { getDriveParent, canShowDriveCreateMenu, buildDriveCreateMenuButtons } from "@/features/drive/components/driveCreateMenu"
-import { useDriveUpload } from "@/features/drive/hooks/useDriveUpload"
+import { useDriveUpload, type UseDriveUpload } from "@/features/drive/hooks/useDriveUpload"
+import useDriveClipboardStore from "@/features/drive/store/useDriveClipboard.store"
+import { type AnyNormalDir } from "@filen/sdk-rs"
 import View from "@/components/ui/view"
 import Menu from "@/components/ui/menu"
 import { PressableScale } from "@/components/ui/pressables"
@@ -52,6 +54,43 @@ import { useResolveClassNames } from "uniwind"
 
 // Height reserved below each grid card for the single-line filename label.
 const GRID_LABEL_HEIGHT = 28
+
+// Subscribes to the clipboard itself so a copy or cut re-renders this button, not the whole listing.
+const EmptyAddMenu = ({
+	parent,
+	upload,
+	drivePath,
+	primaryColor
+}: {
+	parent: AnyNormalDir | null
+	upload: UseDriveUpload
+	drivePath: DrivePath
+	primaryColor: string
+}) => {
+	const { t } = useTranslation()
+	const clipboard = useDriveClipboardStore(state => state.entry)
+
+	return (
+		<Menu
+			type="dropdown"
+			buttons={buildDriveCreateMenuButtons({ t, parent, upload, drivePath, clipboard })}
+		>
+			<PressableScale className="flex-row items-center gap-1.5 px-4 py-2">
+				<Ionicons
+					name="add"
+					size={20}
+					color={primaryColor}
+				/>
+				<Text
+					style={{ color: primaryColor }}
+					className="text-base font-medium"
+				>
+					{t("add")}
+				</Text>
+			</PressableScale>
+		</Menu>
+	)
+}
 
 const Drive = () => {
 	const drivePath = useDrivePath()
@@ -75,9 +114,7 @@ const Drive = () => {
 	const upload = useDriveUpload({ parent, drivePath, t })
 	const textForegroundColor = useResolveClassNames("text-foreground").color as string
 	const primaryColor = useResolveClassNames("bg-primary").backgroundColor as string
-	const driveCreateButtons = canShowDriveCreateMenu({ drivePath, parent, selectionMode: false })
-		? buildDriveCreateMenuButtons({ t, parent, upload })
-		: []
+	const canCreate = canShowDriveCreateMenu({ drivePath, parent, selectionMode: false })
 
 	const driveItemsQuery = useDriveItemsQuery(
 		{
@@ -503,25 +540,13 @@ const Drive = () => {
 										title={t(getDriveEmptyStateTitleKey(drivePath.type))}
 										description={t(getDriveEmptyStateDescriptionKey(drivePath.type))}
 										action={
-											driveCreateButtons.length > 0 ? (
-												<Menu
-													type="dropdown"
-													buttons={driveCreateButtons}
-												>
-													<PressableScale className="flex-row items-center gap-1.5 px-4 py-2">
-														<Ionicons
-															name="add"
-															size={20}
-															color={primaryColor}
-														/>
-														<Text
-															style={{ color: primaryColor }}
-															className="text-base font-medium"
-														>
-															{t("add")}
-														</Text>
-													</PressableScale>
-												</Menu>
+											canCreate ? (
+												<EmptyAddMenu
+													parent={parent}
+													upload={upload}
+													drivePath={drivePath}
+													primaryColor={primaryColor}
+												/>
 											) : undefined
 										}
 									/>

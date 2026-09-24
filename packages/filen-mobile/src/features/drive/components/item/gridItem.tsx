@@ -15,6 +15,7 @@ import { driveItemDisplayName } from "@/lib/decryption"
 import { driveScreenUsesBaseBackground } from "@/features/drive/driveSelectors"
 import { GRID_CELL_PADDING } from "@/features/drive/driveGrid"
 import { cn } from "@filen/shared"
+import { useIsDriveItemCut } from "@/features/drive/store/useDriveClipboard.store"
 
 // Per-cell padding on all sides (the gap between adjacent cells = 2× this). Sourced from driveGrid
 // so the grid's screen-edge inset and inter-item gutter stay in sync.
@@ -43,6 +44,7 @@ export default function GridItem({
 	})
 
 	const cardSize = itemWidth - CELL_PADDING * 2
+	const isCut = useIsDriveItemCut(info.item.data.uuid)
 
 	// Differentiate the two selection modes so the checkbox wires the correct handler,
 	// matching the list row's per-mode Checkbox wiring exactly.
@@ -88,7 +90,8 @@ export default function GridItem({
 					<View
 						className={cn(
 							"rounded-3xl items-center justify-center overflow-hidden",
-							driveScreenUsesBaseBackground(drivePath) ? "bg-background-secondary" : "bg-background-tertiary"
+							driveScreenUsesBaseBackground(drivePath) ? "bg-background-secondary" : "bg-background-tertiary",
+							isCut && "opacity-50"
 						)}
 						style={{ width: cardSize, height: cardSize }}
 					>
@@ -118,7 +121,11 @@ export default function GridItem({
 					    above, like the photos grid, so nothing offsets the text). A red name flags an
 					    offline sync error in the /offline view. */}
 					<Text
-						className={cn("text-sm text-center px-1 pt-1.5 flex-1", hasSyncError ? "text-red-500" : "text-foreground")}
+						className={cn(
+							"text-sm text-center px-1 pt-1.5 flex-1",
+							hasSyncError ? "text-red-500" : "text-foreground",
+							isCut && "opacity-50"
+						)}
 						numberOfLines={1}
 						ellipsizeMode="middle"
 					>

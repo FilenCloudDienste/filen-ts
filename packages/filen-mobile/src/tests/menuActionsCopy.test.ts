@@ -1,6 +1,10 @@
 import { vi, describe, it, expect, beforeEach } from "vitest"
 import { type TFunction } from "i18next"
 
+const h = vi.hoisted(() => ({
+	dirs: new Map<string, unknown>()
+}))
+
 vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
 vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
@@ -13,11 +17,20 @@ vi.mock("@/lib/prompts", () => ({ default: { alert: vi.fn(), input: vi.fn() } })
 vi.mock("@/lib/auth", () => ({ default: { getSdkClients: vi.fn() } }))
 vi.mock("@/lib/serializer", () => ({ serialize: vi.fn((x: unknown) => JSON.stringify(x)) }))
 vi.mock("@/lib/previewType", () => ({ getPreviewType: vi.fn(() => "other") }))
-vi.mock("@/lib/cache", () => ({ default: { rootUuid: null, cacheNewFile: vi.fn(), cacheNewNormalDir: vi.fn() } }))
+vi.mock("@filen/sdk-rs", () => ({ AnyNormalDir_Tags: { Dir: "Dir", Root: "Root" } }))
+vi.mock("@/lib/cache", () => ({
+	default: {
+		rootUuid: "root",
+		cacheNewFile: vi.fn(),
+		cacheNewNormalDir: vi.fn(),
+		uuidToAnyDriveItem: new Map(),
+		directoryUuidToAnyNormalDir: h.dirs
+	}
+}))
 vi.mock("@/lib/sdkUnwrap", () => ({
 	getRealDriveItemParent: vi.fn(() => null),
 	makeDriveItemPublicLink: vi.fn(),
-	unwrapParentUuid: vi.fn(() => null)
+	unwrapParentUuid: vi.fn((parent: string | null) => parent ?? null)
 }))
 vi.mock("@/components/ui/fullScreenLoadingModal", () => ({ runWithLoading: vi.fn() }))
 vi.mock("@/features/drive/drive", () => ({ default: { getRootUuid: vi.fn() } }))
@@ -31,7 +44,9 @@ vi.mock("@/features/drive/driveSelectors", () => ({
 	hiddenFilterAppliesTo: vi.fn(() => false),
 	isFileItem: (item: { type: string }) => item.type === "file" || item.type === "sharedFile" || item.type === "sharedRootFile",
 	resolveDriveContainingDirectoryTarget: vi.fn(() => null),
-	resolveDriveNavigationTarget: vi.fn(() => null)
+	resolveDriveNavigationTarget: vi.fn(() => null),
+	everyItemAlreadyIn: (items: { data: { parent?: string } }[], parentUuid: string) =>
+		items.length > 0 && items.every(item => item.data.parent === parentUuid)
 }))
 vi.mock("@/features/drive/components/item/menuActionsShared", () => ({ confirmedDriveAction: vi.fn(() => async () => {}) }))
 vi.mock("@/features/drive/components/hiddenNameNotice", () => ({ notifyIfNameIsHidden: vi.fn() }))
@@ -50,7 +65,7 @@ import { createMenuButtons } from "@/features/drive/components/item/menuActions"
 import { buildCopyMenuButton, offersCopy } from "@/features/drive/components/item/menuActionsCopy"
 import { selectCopyDestination } from "@/features/drive/screens/driveSelect"
 import copyRunner from "@/features/copy/copyRunner"
-import useDriveClipboardStore from "@/features/drive/store/useDriveClipboard.store"
+import useDriveClipboardStore, { type DriveClipboardEntry } from "@/features/drive/store/useDriveClipboard.store"
 import alerts from "@/lib/alerts"
 import type { DrivePath, DrivePathType } from "@/hooks/useDrivePath"
 import type { MenuButton } from "@/components/ui/menu"
@@ -187,6 +202,49 @@ describe("item menu Copy submenu gating", () => {
 		for (const pathType of DRIVE_PATH_TYPES) {
 			expect(offersCopy(makeDrivePath(pathType))).toBe(COPY_VIEWS.has(pathType))
 		}
+	})
+})
+
+describe("directory-row Paste into", () => {
+	const PASTE_VIEWS: ReadonlySet<DrivePathType> = new Set(["drive", "favorites", "recents", "links", "sharedOut"])
+	const copied = { mode: "copy" as const, items: [{ type: "file", data: { uuid: "src", parent: "root" } } as unknown as DriveItem] }
+
+	for (const pathType of DRIVE_PATH_TYPES) {
+		for (const itemType of ITEM_TYPES) {
+			it(`${pathType} × ${itemType}`, () => {
+				const item = makeItem(itemType)
+
+				h.dirs.set(item.data.uuid, { tag: "Dir", inner: [{ uuid: item.data.uuid }] })
+
+				const ids = flatIds(
+					createMenuButtons({
+						item,
+						drivePath: makeDrivePath(pathType),
+						isStoredOffline: false,
+						showSelectToggle: false,
+						clipboard: copied,
+						t
+					})
+				)
+
+				expect(new Set(ids).size).toBe(ids.length)
+				expect(ids.includes("pasteInto")).toBe(itemType === "directory" && PASTE_VIEWS.has(pathType))
+			})
+		}
+	}
+
+	it("offers no paste without a clipboard, and a cut only in the drive view", () => {
+		const item = makeItem("directory", "target")
+
+		h.dirs.set("target", { tag: "Dir", inner: [{ uuid: "target" }] })
+
+		const idsFor = (pathType: DrivePathType, clipboard: DriveClipboardEntry | null) =>
+			flatIds(createMenuButtons({ item, drivePath: makeDrivePath(pathType), isStoredOffline: false, clipboard, t }))
+		const cut = { ...copied, mode: "cut" as const }
+
+		expect(idsFor("drive", null)).not.toContain("pasteInto")
+		expect(idsFor("drive", cut)).toContain("pasteInto")
+		expect(idsFor("favorites", cut)).not.toContain("pasteInto")
 	})
 })
 

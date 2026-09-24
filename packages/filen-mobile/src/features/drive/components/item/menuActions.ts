@@ -8,6 +8,8 @@ import { notifyIfNameIsHidden } from "@/features/drive/components/hiddenNameNoti
 import { buildUndecryptableMenuButtons } from "@/features/drive/components/item/menuActionsUndecryptable"
 import { buildDownloadSubButtons, buildExportButton, buildOpenWithButton } from "@/features/drive/components/item/menuActionsDownload"
 import { buildCopyMenuButton, offersCopy } from "@/features/drive/components/item/menuActionsCopy"
+import { buildPasteIntoMenuButton } from "@/features/drive/components/clipboardMenu"
+import { type DriveClipboardEntry } from "@/features/drive/store/useDriveClipboard.store"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import prompts from "@/lib/prompts"
 import { run } from "@filen/shared"
@@ -51,6 +53,7 @@ export function createMenuButtons({
 	isStoredOffline,
 	showSelectToggle,
 	isPreview,
+	clipboard,
 	t
 }: {
 	item: DriveItem
@@ -61,6 +64,8 @@ export function createMenuButtons({
 	// destructive actions that remove the previewed item pop the preview on success.
 	// List-row menus leave this false (they must NOT pop the underlying list).
 	isPreview?: boolean
+	// The drive clipboard, for "Paste into" on directory rows; callers without one offer no paste.
+	clipboard?: DriveClipboardEntry | null
 	t: TFunction
 }): MenuButton[] {
 	if (item.data.undecryptable) {
@@ -381,6 +386,27 @@ export function createMenuButtons({
 				t
 			})
 		)
+	}
+
+	if (
+		item.type === "directory" &&
+		(drivePath.type === "drive" ||
+			drivePath.type === "favorites" ||
+			drivePath.type === "recents" ||
+			drivePath.type === "links" ||
+			drivePath.type === "sharedOut")
+	) {
+		const pasteInto = buildPasteIntoMenuButton({
+			entry: clipboard ?? null,
+			targetDir: cache.directoryUuidToAnyNormalDir.get(item.data.uuid),
+			// A cut is a move, which only exists within the own drive.
+			allowCut: drivePath.type === "drive",
+			t
+		})
+
+		if (pasteInto) {
+			menuButtons.push(pasteInto)
+		}
 	}
 
 	if (

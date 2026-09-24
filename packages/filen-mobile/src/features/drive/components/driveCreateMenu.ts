@@ -10,6 +10,8 @@ import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import drive from "@/features/drive/drive"
 import cache from "@/lib/cache"
 import { notifyIfNameIsHidden } from "@/features/drive/components/hiddenNameNotice"
+import { buildPasteHereMenuButtons } from "@/features/drive/components/clipboardMenu"
+import { type DriveClipboardEntry } from "@/features/drive/store/useDriveClipboard.store"
 import logger from "@/lib/logger"
 
 // Resolves the AnyNormalDir to create/upload into for the current Drive path, or null when the
@@ -56,16 +58,21 @@ export function canShowDriveCreateMenu({
 	)
 }
 
-// The "Create directory" + "Upload" menu buttons. Single source for the drive header's right menu
-// and the empty-state CTA's dropdown, so both always offer the identical actions.
+// The "Create directory" + "Upload" menu buttons, then Paste + "Clear clipboard" while the clipboard
+// holds something. Single source for the drive header's right menu and the empty-state CTA's dropdown,
+// so both always offer the identical actions.
 export function buildDriveCreateMenuButtons({
 	t,
 	parent,
-	upload
+	upload,
+	drivePath,
+	clipboard
 }: {
 	t: TFunction
 	parent: AnyNormalDir | null
 	upload: UseDriveUpload
+	drivePath: DrivePath
+	clipboard: DriveClipboardEntry | null
 }): MenuButton[] {
 	return [
 		{
@@ -167,6 +174,8 @@ export function buildDriveCreateMenuButtons({
 					onPress: upload.createTextFile
 				}
 			]
-		}
+		},
+		// A cut is a move, which only exists within the own drive.
+		...buildPasteHereMenuButtons({ entry: clipboard, targetDir: parent, allowCut: drivePath.type === "drive", t })
 	]
 }

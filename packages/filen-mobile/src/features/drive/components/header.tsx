@@ -25,6 +25,7 @@ import { resolveDriveHeaderTitle } from "@/features/drive/utils"
 import { useDriveUpload } from "@/features/drive/hooks/useDriveUpload"
 import { buildSortMenuButton, buildBulkActionMenu, buildViewModeMenuButton } from "@/features/drive/components/headerMenuBuilders"
 import { getDriveParent, canShowDriveCreateMenu, buildDriveCreateMenuButtons } from "@/features/drive/components/driveCreateMenu"
+import useDriveClipboardStore from "@/features/drive/store/useDriveClipboard.store"
 import logger from "@/lib/logger"
 
 const Header = ({
@@ -79,6 +80,7 @@ const Header = ({
 	const parent = getDriveParent(drivePath)
 
 	const upload = useDriveUpload({ parent, drivePath, t })
+	const clipboard = useDriveClipboardStore(state => state.entry)
 
 	const rightItems = (() => {
 		if (drivePath.selectOptions) {
@@ -132,7 +134,7 @@ const Header = ({
 		}
 
 		if (canShowDriveCreateMenu({ drivePath, parent, selectionMode })) {
-			menuButtons.push(...buildDriveCreateMenuButtons({ t, parent, upload }))
+			menuButtons.push(...buildDriveCreateMenuButtons({ t, parent, upload, drivePath, clipboard }))
 		}
 
 		if (!selectionMode) {

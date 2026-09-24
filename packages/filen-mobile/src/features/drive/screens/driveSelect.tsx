@@ -9,9 +9,9 @@ import useDrivePath, { type SelectOptions } from "@/hooks/useDrivePath"
 import type { DriveItem } from "@/types"
 import useDriveSelectStore from "@/features/drive/store/useDriveSelect.store"
 import { openDriveSelect } from "@/features/drive/driveSelectSession"
-import { AnyNormalDir_Tags, type AnyNormalDir } from "@filen/sdk-rs"
-import cache from "@/lib/cache"
+import { type AnyNormalDir } from "@filen/sdk-rs"
 import type { CopyDestination } from "@/features/copy/copyAdapter"
+import { copyDestinationOf } from "@/features/drive/clipboard"
 
 export async function selectDriveItems(options: Omit<SelectOptions, "intention" | "id" | "itemUuids">): Promise<
 	| {
@@ -94,15 +94,9 @@ export async function selectCopyDestination(
 				return
 			}
 
-			const destinationDir = picked.data
-			const uuid = destinationDir.inner[0].uuid
-
 			resolve({
-				destinationDir,
-				destination:
-					destinationDir.tag === AnyNormalDir_Tags.Root || uuid === rootUuid
-						? { uuid: null, name: rootName }
-						: { uuid, name: cache.uuidToAnyDriveItem.get(uuid)?.data.decryptedMeta?.name ?? uuid }
+				destinationDir: picked.data,
+				destination: copyDestinationOf(picked.data, rootUuid, rootName)
 			})
 		})
 
