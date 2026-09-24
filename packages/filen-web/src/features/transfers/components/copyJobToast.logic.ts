@@ -1,4 +1,5 @@
-import { type CopyJob } from "@/features/drive/lib/copy.logic"
+import { isCopyTrashPending, type CopyJob } from "@/features/drive/lib/copy.logic"
+import { type ErrorDTO } from "@/lib/sdk/errors"
 
 // Pure reads of a copy job for its progress card, so what the card says is testable without rendering.
 
@@ -32,15 +33,21 @@ export type CopyJobStatusKey =
 	| "transfersCopyCancelledKept"
 	| "transfersCopyCancelledTrashFailed"
 	| "transfersCopyCancelledTrashed"
+	| "transfersCopyMovingToTrash"
 
-// The line under the title. A failed copy shows its error's own label, which is already localized.
+// The line under the title. A failed copy's error is put into words where it's shown, so the text
+// follows the language.
 export type CopyJobStatus =
 	| { kind: "key"; key: CopyJobStatusKey; count?: number }
 	| { kind: "files"; done: number; count: number }
-	| { kind: "error"; label: string }
+	| { kind: "error"; error: ErrorDTO }
 	| { kind: "quota"; freeBytes: number }
 
 export function copyJobStatus(job: CopyJob): CopyJobStatus {
+	if (isCopyTrashPending(job)) {
+		return { kind: "key", key: "transfersCopyMovingToTrash" }
+	}
+
 	switch (job.outcome.status) {
 		case "running":
 			return runningStatus(job)
@@ -51,7 +58,7 @@ export function copyJobStatus(job: CopyJob): CopyJobStatus {
 		case "quotaExceeded":
 			return { kind: "quota", freeBytes: job.outcome.freeBytes }
 		case "failed":
-			return { kind: "error", label: job.outcome.error.label }
+			return { kind: "error", error: job.outcome.error }
 		case "cancelled":
 			return cancelledStatus(job)
 	}

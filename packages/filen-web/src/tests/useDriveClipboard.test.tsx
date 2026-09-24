@@ -4,10 +4,11 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { act, cleanup, createEvent, fireEvent, renderHook } from "@testing-library/react"
 import type { File, UuidStr } from "@filen/sdk-rs"
 
-const { copyToClipboard, cutToClipboard, pasteClipboard } = vi.hoisted(() => ({
+const { copyToClipboard, cutToClipboard, pasteClipboard, destinationDirectoryName } = vi.hoisted(() => ({
 	copyToClipboard: vi.fn(),
 	cutToClipboard: vi.fn(),
-	pasteClipboard: vi.fn(() => Promise.resolve())
+	pasteClipboard: vi.fn(() => Promise.resolve()),
+	destinationDirectoryName: vi.fn((_scope: string, _path: readonly string[]) => Promise.resolve<string | null>("dest"))
 }))
 
 // The real module is kept for its shortcut-context reader; its copy/move paths stay out of reach.
@@ -19,7 +20,11 @@ vi.mock("@/features/drive/lib/clipboard", async importOriginal => ({
 	cutToClipboard,
 	pasteClipboard
 }))
-vi.mock("@/features/drive/queries/drive", () => ({ cachedDirectoryName: () => "dest" }))
+// Its resolution order (listing row, breadcrumb entry, one worker call) is drive.test.ts's.
+vi.mock("@/features/drive/queries/drive", () => ({
+	destinationDirectoryName,
+	directoryNameScope: (variant: string) => (variant === "sharedIn" || variant === "sharedOut" ? variant : "drive")
+}))
 vi.mock("@/lib/storage/adapter", () => ({ kvGetJson: () => Promise.resolve(null), kvSetJson: () => Promise.resolve() }))
 
 import "@/lib/i18n"
@@ -107,13 +112,51 @@ describe("useDriveClipboard", () => {
 		expect(cutToClipboard).toHaveBeenCalledExactlyOnceWith([REPORT])
 	})
 
-	it("pastes into the directory on screen, by its name", () => {
+	it("pastes into the directory on screen, by its name", async () => {
 		useDriveClipboardStore.getState().set({ mode: "copy", items: [REPORT] })
 		const { result } = renderClipboard({ selectedItems: [] })
 
 		expect(result.current.enabled).toBe(true)
 		expect(press(row(), "v").defaultPrevented).toBe(true)
-		expect(pasteClipboard).toHaveBeenCalledExactlyOnceWith({ uuid: DEST, name: "dest" })
+
+		await vi.waitFor(() => {
+			expect(pasteClipboard).toHaveBeenCalledExactlyOnceWith({ uuid: DEST, name: "dest" })
+		})
+	})
+
+	// A directory opened by a deep link or a reveal often has no cached parent listing: its name is
+	// resolved the way its breadcrumb resolves it, under the breadcrumb's scope and chain.
+	it("names the destination through its breadcrumb's resolution, shared scope included", async () => {
+		useDriveClipboardStore.getState().set({ mode: "copy", items: [REPORT] })
+		destinationDirectoryName.mockResolvedValueOnce("Shared dest")
+		const { result } = renderClipboard({
+			variant: "sharedOut",
+			ancestry: ["root-0000-0000-0000-000000000000", DEST],
+			selectedItems: []
+		})
+
+		act(() => {
+			result.current.run()
+		})
+
+		await vi.waitFor(() => {
+			expect(pasteClipboard).toHaveBeenCalledExactlyOnceWith({ uuid: DEST, name: "Shared dest" })
+		})
+		expect(destinationDirectoryName).toHaveBeenCalledExactlyOnceWith("sharedOut", ["root-0000-0000-0000-000000000000", DEST])
+	})
+
+	it("still pastes when the name can't be resolved", async () => {
+		useDriveClipboardStore.getState().set({ mode: "copy", items: [REPORT] })
+		destinationDirectoryName.mockRejectedValueOnce(new Error("no authenticated client"))
+		const { result } = renderClipboard({ selectedItems: [] })
+
+		act(() => {
+			result.current.run()
+		})
+
+		await vi.waitFor(() => {
+			expect(pasteClipboard).toHaveBeenCalledExactlyOnceWith({ uuid: DEST, name: "" })
+		})
 	})
 
 	it("clears the clipboard, which it offers only while something is copied or cut", () => {

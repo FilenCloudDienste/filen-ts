@@ -77,6 +77,23 @@ export function listboxKeyTarget(key: string, activeIndex: number, itemCount: nu
 	return null
 }
 
+// Controls inside an option that own their own keys: the row or tile's ⋯ menu trigger, which carries
+// the cursor option's tab stop alongside the option itself.
+const INTERACTIVE_KEY_TARGET_SELECTOR = "button, a, input, select, textarea"
+
+// Probed by shape, not with `instanceof Element`, so this module stays testable in the DOM-free node
+// environment.
+function hasClosest(target: EventTarget | null): target is EventTarget & { closest: (selector: string) => Element | null } {
+	return typeof target === "object" && target !== null && typeof (target as { closest?: unknown }).closest === "function"
+}
+
+// True when a keydown started on such a control rather than on the option itself. The listbox leaves
+// those keys alone: its preventDefault on Enter/Space would cancel the native click the control's menu
+// opens on. Shared by the drive listbox and the photos grid.
+export function listboxKeyTargetIsInteractive(target: EventTarget | null): boolean {
+	return hasClosest(target) && target.closest(INTERACTIVE_KEY_TARGET_SELECTOR) !== null
+}
+
 // A plain click on the item that already IS the whole selection deselects it. Only the first click of a
 // sequence (`clickCount` is the event's `detail`): the second click of a double-click lands on the item
 // the first one just selected or deselected, and has to leave it selected for the open that follows.

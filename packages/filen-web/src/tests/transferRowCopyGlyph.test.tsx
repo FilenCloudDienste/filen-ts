@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { cleanup, render } from "@testing-library/react"
+import { cleanup, render, screen } from "@testing-library/react"
 import "@/lib/i18n"
 
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
@@ -9,6 +9,7 @@ vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), custom: vi
 
 import { TransferRow } from "@/features/transfers/components/transferRow"
 import { createCopyJob, type CopyJobGlyph } from "@/features/drive/lib/copy.logic"
+import { narrowItem } from "@/features/drive/lib/item"
 import { useCopyJobsStore } from "@/features/transfers/store/useCopyJobsStore"
 import type { Transfer } from "@/features/transfers/store/useTransfersStore"
 
@@ -70,5 +71,42 @@ describe("TransferRow — copy glyph", () => {
 		expect(renderRow("report.pdf", "file").querySelector("img")).not.toBeNull()
 		cleanup()
 		expect(renderRow("report.pdf", null).querySelector("img")).not.toBeNull()
+	})
+})
+
+describe("TransferRow — a stopped copy moving its copies to the trash", () => {
+	it("says so in place of its percentage and offers no pause or cancel, which a trash can't take", () => {
+		const copied = narrowItem({
+			uuid: "d-0000-0000-0000-000000000000",
+			parent: "p-0000-0000-0000-000000000000",
+			color: "default",
+			timestamp: 0n,
+			favorited: false,
+			meta: { type: "decoded", data: { name: "d" } }
+		})
+
+		useCopyJobsStore.setState({
+			jobs: {
+				job: {
+					...createCopyJob("job", { uuid: null, name: "Cloud Drive" }, 1),
+					outcome: { status: "cancelled" },
+					cancelRequest: "trash",
+					created: [copied]
+				}
+			},
+			cancelPromptId: null
+		})
+
+		render(
+			<TransferRow
+				transfer={{ ...copyRow("3 items"), status: "copying", bytesTransferred: 4 }}
+				onRequestCancel={vi.fn()}
+			/>
+		)
+
+		expect(screen.getByText("Moving to trash…")).toBeTruthy()
+		expect(screen.queryByText("40%")).toBeNull()
+		expect(screen.queryByRole("button", { name: "Pause" })).toBeNull()
+		expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull()
 	})
 })

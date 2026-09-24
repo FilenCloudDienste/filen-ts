@@ -42,10 +42,9 @@ function asPhotoItems(items: DriveItem[]): PhotoItem[] {
 // The preview overlay's own header menu runs drive's raw toggleFavorite (it is the shared,
 // un-forked PreviewOverlay component — see previewOverlay.tsx's own itemMenu.tsx-sourced descriptor),
 // never this file's toggleFavoritePhoto wrapper. This is the patch that extension point calls instead
-// (PreviewOverlayProps.onFavoriteToggled, wired from usePhotosDialogHost) — the ONE local patch that
-// keeps the grid's heart badge in sync without a reload, since the realtime itemFavorite socket event
-// is deliberately excluded from socketHandlers.ts's photos-invalidating set (an attribute flip, not a
-// membership change, so it never triggers invalidatePhotosListing the way trash/rename do).
+// (PreviewOverlayProps.onFavoriteToggled, wired from usePhotosDialogHost), so the grid's heart badge
+// flips at once rather than on the itemFavorite socket echo (patchPhotosFavorite), which only flips it
+// in place: an attribute flip, not a membership change, never re-walks the listing.
 export function patchPhotoFavoriteFromPreview(rootUuid: string, item: DriveItem): void {
 	const photoItem = asPhotoItem(item)
 

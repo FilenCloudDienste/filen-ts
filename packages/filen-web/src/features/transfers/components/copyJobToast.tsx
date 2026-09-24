@@ -13,7 +13,8 @@ import {
 	copyJobStatus,
 	copyJobTitle
 } from "@/features/transfers/components/copyJobToast.logic"
-import { type CopyJob } from "@/features/drive/lib/copy.logic"
+import { canRetryCopy, type CopyJob } from "@/features/drive/lib/copy.logic"
+import { errorLabelOr } from "@/lib/i18n/errorLabel"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 
@@ -188,7 +189,7 @@ function CopyJobStatusLine({ job }: { job: CopyJob }) {
 
 			break
 		case "error":
-			text = status.label
+			text = errorLabelOr(status.error, t("transfersCopyErrorGeneric"))
 
 			break
 		case "quota":
@@ -241,14 +242,16 @@ function CopyJobDetails({ job, onRetried }: { job: CopyJob; onRetried: (retryJob
 								className="flex flex-col"
 							>
 								<span className="truncate">{failure.sourcePath}</span>
-								<span className="truncate text-destructive">{failure.error.label}</span>
+								<span className="truncate text-destructive">
+									{errorLabelOr(failure.error, t("transfersCopyErrorGeneric"))}
+								</span>
 							</li>
 						))}
 					</ul>
 					{moreFailures > 0 ? (
 						<p className="text-muted-foreground">{t("transfersCopyMoreFailures", { count: moreFailures })}</p>
 					) : null}
-					{job.outcome.status !== "running" && job.retryable.length > 0 ? (
+					{canRetryCopy(job) ? (
 						<Button
 							variant="outline"
 							size="xs"

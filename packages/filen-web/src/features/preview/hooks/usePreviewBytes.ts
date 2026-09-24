@@ -56,12 +56,22 @@ export function usePreviewBytes(item: DriveItem): UsePreviewBytesResult {
 	useEffect(() => {
 		let live = true
 		const token = crypto.randomUUID()
+		// A joined load that fails after this hook is gone must not restart under its token, which
+		// nothing would cancel anymore.
+		const gone = new AbortController()
 
 		async function load(): Promise<void> {
 			try {
 				const file = narrowToAnyFile(item)
-				const bytes = await loadPreviewBytes(cacheScope, item.data.uuid, Number(file.size), () =>
-					runOp(accessMode === "anon" ? sdkApi.downloadLinkedFileBytesAnon(file, token) : sdkApi.downloadFileBytes(file, token))
+				const bytes = await loadPreviewBytes(
+					cacheScope,
+					item.data.uuid,
+					Number(file.size),
+					() =>
+						runOp(
+							accessMode === "anon" ? sdkApi.downloadLinkedFileBytesAnon(file, token) : sdkApi.downloadFileBytes(file, token)
+						),
+					gone.signal
 				)
 
 				if (live) {
@@ -79,6 +89,7 @@ export function usePreviewBytes(item: DriveItem): UsePreviewBytesResult {
 
 		return () => {
 			live = false
+			gone.abort()
 			void sdkApi.cancelPreviewDownload(token)
 		}
 	}, [item, reloadToken, accessMode, cacheScope])

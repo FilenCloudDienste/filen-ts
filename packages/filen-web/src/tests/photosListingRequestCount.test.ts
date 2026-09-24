@@ -34,6 +34,7 @@ import {
 	usePhotosListingQuery
 } from "@/features/photos/queries/photos"
 import { handleDriveEvent } from "@/features/drive/lib/socketHandlers"
+import type { PhotoItem } from "@/features/photos/lib/captureSort"
 import { socketAuthenticated, socketDropped } from "@/lib/sdk/socketSession"
 
 function testUuid(label: string): UuidStr {
@@ -306,6 +307,152 @@ describe("photos listing request counts", () => {
 		await drain()
 
 		expect(walks()).toBe(3)
+	})
+})
+
+// A favorite set in a drive listing, the preview or on another device reaches the grid only through its
+// socket echo; a flag flip, so never a walk.
+describe("photos listing favorites", () => {
+	function favorited(uuid: string): boolean | undefined {
+		return queryClient.getQueryData<PhotoItem[]>(photosListingQueryKey(root))?.find(photo => photo.data.uuid === uuid)?.data.favorited
+	}
+
+	it("a favorite set elsewhere flips the listed photo's flag in place, without walking", async () => {
+		await mountRead()
+
+		await fire({ type: "itemFavorite", item: { type: "file", ...mockFile(PHOTO, B), favorited: true } })
+
+		expect(favorited(PHOTO)).toBe(true)
+		expect(walks()).toBe(1)
+		expect(isInvalidated()).toBe(false)
+	})
+
+	it("a favorite on a file the listing doesn't hold, or on a directory, leaves it untouched", async () => {
+		await mountRead()
+
+		const before = queryClient.getQueryData(photosListingQueryKey(root))
+
+		await fire({ type: "itemFavorite", item: { type: "file", ...mockFile(UNLISTED, C), favorited: true } })
+		await fire({ type: "itemFavorite", item: { type: "normalDir", ...mockDir(B, A), favorited: true } })
+
+		expect(queryClient.getQueryData(photosListingQueryKey(root))).toBe(before)
+		expect(walks()).toBe(1)
+	})
+
+	it("a favorite during a walk flips the flag at once, and the walk returns it flipped without walking again", async () => {
+		await mountRead()
+
+		const pending = deferred<NormalDirsAndFiles>()
+
+		listPhotosRecursive.mockImplementationOnce(() => pending.promise)
+		invalidatePhotosListing(null)
+		handleDriveEvent(driveEvent({ type: "itemFavorite", item: { type: "file", ...mockFile(PHOTO, B), favorited: true } }))
+
+		expect(favorited(PHOTO)).toBe(true)
+
+		// The walk under way read the flag before the flip.
+		pending.resolve({ dirs: [], files: [mockFile(PHOTO, B)] })
+		await drain()
+
+		expect(walks()).toBe(2)
+		expect(favorited(PHOTO)).toBe(true)
+	})
+
+	it("a favorite during the first walk, before the listing has rows, lands in what the walk returns", async () => {
+		const pending = deferred<NormalDirsAndFiles>()
+
+		listPhotosRecursive.mockImplementationOnce(() => pending.promise)
+		mountListing()
+		handleDriveEvent(driveEvent({ type: "itemFavorite", item: { type: "file", ...mockFile(PHOTO, B), favorited: true } }))
+		pending.resolve({ dirs: [], files: [mockFile(PHOTO, B)] })
+		await drain()
+
+		expect(favorited(PHOTO)).toBe(true)
+		expect(walks()).toBe(1)
+		expect(isOutsidePhotosRoot).not.toHaveBeenCalled()
+	})
+
+	it("a favorite on a new photo, during the walk its upload set off, lands in what that walk returns", async () => {
+		await mountRead()
+
+		const pending = deferred<NormalDirsAndFiles>()
+
+		listPhotosRecursive.mockImplementationOnce(() => pending.promise)
+		handleDriveEvent(driveEvent({ type: "fileNew", file: mockFile(UNLISTED, B) }))
+		await waitFor(() => {
+			expect(walks()).toBe(2)
+		})
+		handleDriveEvent(driveEvent({ type: "itemFavorite", item: { type: "file", ...mockFile(UNLISTED, B), favorited: true } }))
+
+		// The walk listed the new photo before its favorite.
+		pending.resolve({ dirs: [], files: [mockFile(PHOTO, B), mockFile(UNLISTED, B)] })
+		await drain()
+
+		expect(favorited(UNLISTED)).toBe(true)
+		expect(favorited(PHOTO)).toBe(false)
+		expect(walks()).toBe(2)
+	})
+
+	it("the latest of several flips during one walk wins", async () => {
+		await mountRead()
+
+		const pending = deferred<NormalDirsAndFiles>()
+
+		listPhotosRecursive.mockImplementationOnce(() => pending.promise)
+		invalidatePhotosListing(null)
+		handleDriveEvent(driveEvent({ type: "itemFavorite", item: { type: "file", ...mockFile(PHOTO, B), favorited: true } }))
+		handleDriveEvent(driveEvent({ type: "itemFavorite", item: { type: "file", ...mockFile(PHOTO, B), favorited: false } }))
+
+		// Read between the two.
+		pending.resolve({ dirs: [], files: [{ ...mockFile(PHOTO, B), favorited: true }] })
+		await drain()
+
+		expect(favorited(PHOTO)).toBe(false)
+		expect(walks()).toBe(2)
+	})
+
+	it("a flip reaches only the walk it lands during, never a later one", async () => {
+		await mountRead()
+
+		const pending = deferred<NormalDirsAndFiles>()
+
+		listPhotosRecursive.mockImplementationOnce(() => pending.promise)
+		invalidatePhotosListing(null)
+		handleDriveEvent(driveEvent({ type: "itemFavorite", item: { type: "file", ...mockFile(PHOTO, B), favorited: true } }))
+		pending.resolve({ dirs: [], files: [mockFile(PHOTO, B)] })
+		await drain()
+
+		expect(favorited(PHOTO)).toBe(true)
+
+		// Unfavorited later, its echo lost to a socket drop: the next walk shows what the server holds.
+		markPhotosListingStale()
+		act(() => {
+			focusManager.setFocused(false)
+			focusManager.setFocused(true)
+		})
+		await drain()
+
+		expect(walks()).toBe(3)
+		expect(favorited(PHOTO)).toBe(false)
+	})
+
+	it("deleting everything walks the mounted listing again", async () => {
+		await mountRead()
+
+		await fire({ type: "deleteAll" })
+
+		expect(walks()).toBe(2)
+	})
+
+	it("a local patch finds its listing by its key's hash, never by scanning the query cache", async () => {
+		await mountRead()
+
+		const scan = vi.spyOn(queryClient.getQueryCache(), "getAll")
+
+		photosListingQueryUpdate(root, prev => prev)
+		photosListingQueryUpdate(testUuid("never-walked"), prev => prev)
+
+		expect(scan).not.toHaveBeenCalled()
 	})
 })
 

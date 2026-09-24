@@ -115,8 +115,8 @@ export function getPreviewBytes(scope: string | null, uuid: string): Uint8Array 
 	return entry.value
 }
 
-// One whole-buffer load per key at a time, shared by the preview and a public Download. Removed when
-// it settles, so a failure never outlives the attempt that made it.
+// One whole-buffer load per key at a time, started by a preview and joined by another preview or a
+// public Download. Removed when it settles, so a failure never outlives the attempt that made it.
 const pendingBytes = new Map<string, Promise<Uint8Array>>()
 
 // The bytes of `uuid` if they are cached or already loading, else undefined. A shared load that fails
@@ -132,10 +132,32 @@ export async function joinPreviewBytes(scope: string | null, uuid: string): Prom
 	return await pendingBytes.get(`bytes:${scope}:${uuid}`)?.catch(() => undefined)
 }
 
+// What a caller that went away gets instead of a load of its own: asErrorDTO reads the name as the
+// Cancelled kind.
+function cancelledError(): Error {
+	const error = new Error("Cancelled")
+
+	error.name = "Cancelled"
+
+	return error
+}
+
 // The cached or in-flight bytes of `uuid`, else `load`'s, shared with any caller that joins while it
 // runs and stored once it succeeds. Everything up to registering the load runs synchronously, so two
-// callers in the same tick still share one fetch. `size` makes room before the buffer lands.
-export function loadPreviewBytes(scope: string | null, uuid: string, size: number, load: () => Promise<Uint8Array>): Promise<Uint8Array> {
+// callers in the same tick still share one fetch. `size` makes room before the buffer lands. Once
+// `signal` aborts, the caller starts no load: its cancel token only reaches a download it started, so
+// one begun after it went away could never be cancelled.
+export function loadPreviewBytes(
+	scope: string | null,
+	uuid: string,
+	size: number,
+	load: () => Promise<Uint8Array>,
+	signal?: AbortSignal
+): Promise<Uint8Array> {
+	if (signal?.aborted === true) {
+		return Promise.reject(cancelledError())
+	}
+
 	const cached = getPreviewBytes(scope, uuid)
 
 	if (cached !== undefined) {
@@ -151,13 +173,14 @@ export function loadPreviewBytes(scope: string | null, uuid: string, size: numbe
 
 	if (pending !== undefined) {
 		// The owner's failure (or cancellation) is not this caller's: retry with its own fetch, which the
-		// next joiner shares in turn.
+		// next joiner shares in turn. The retry checks `signal` again, since the caller may have gone
+		// away while it waited.
 		return pending.catch(() => {
 			if (pendingBytes.get(key) === pending) {
 				pendingBytes.delete(key)
 			}
 
-			return loadPreviewBytes(scope, uuid, size, load)
+			return loadPreviewBytes(scope, uuid, size, load, signal)
 		})
 	}
 
@@ -182,6 +205,12 @@ export function loadPreviewBytes(scope: string | null, uuid: string, size: numbe
 	own.then(settle, settle)
 
 	return own
+}
+
+// Makes room for a buffer about to be held outside the cache (a public Download's own fetch), so the
+// two together stay within the budget, as a preview's load does.
+export function reservePreviewRoom(size: number): void {
+	loaded.reserve(size)
 }
 
 export function getRawPreview(scope: string | null, uuid: string): RawPreviewResult | undefined {
@@ -216,7 +245,7 @@ export function forgetPreviewStreamId(scope: string | null, uuid: string, conten
 	}
 }
 
-// On overlay close and logout.
+// On overlay close, on leaving a public link and on logout.
 export function clearPreviewCache(): void {
 	epoch++
 	loaded.clear()

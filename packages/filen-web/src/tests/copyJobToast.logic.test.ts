@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { createCopyJob, type CopyJob } from "@/features/drive/lib/copy.logic"
+import { narrowItem } from "@/features/drive/lib/item"
 import { copyJobNotes, copyJobStatus, copyJobTitle } from "@/features/transfers/components/copyJobToast.logic"
 
 function job(overrides: Partial<CopyJob> = {}): CopyJob {
@@ -46,11 +47,17 @@ describe("copyJobStatus", () => {
 	})
 
 	it("says how a settled copy ended", () => {
+		const error = {
+			species: "sdk" as const,
+			kind: "Reqwest",
+			message: "Error of kind Reqwest: error: error sending request for url (https://gateway.filen.io/v3/file/upload)",
+			label: "Error of kind Reqwest: error: error sending request for url (https://gateway.filen.io/v3/file/upload)"
+		}
+
 		expect(copyJobStatus(job({ outcome: { status: "done" } }))).toEqual({ kind: "key", key: "transfersStatusDone" })
 		expect(copyJobStatus(job({ outcome: { status: "quotaExceeded", freeBytes: 7 } }))).toEqual({ kind: "quota", freeBytes: 7 })
-		expect(
-			copyJobStatus(job({ outcome: { status: "failed", error: { species: "plain", message: "m", label: "Server said no" } } }))
-		).toEqual({ kind: "error", label: "Server said no" })
+		// The error itself, put into words where it's shown so the text follows the language.
+		expect(copyJobStatus(job({ outcome: { status: "failed", error } }))).toEqual({ kind: "error", error })
 	})
 
 	it("counts the failed items of a copy that finished with failures", () => {
@@ -82,6 +89,26 @@ describe("copyJobStatus", () => {
 		expect(copyJobStatus(job({ ...cancelled, trashResult: { moved: 1, failed: 1 } }))).toEqual({
 			kind: "key",
 			key: "transfersCopyCancelledTrashFailed"
+		})
+	})
+
+	it("says the copies are moving to the trash until that settles, and only when there is something to move", () => {
+		const copied = narrowItem({
+			uuid: "d-0000-0000-0000-000000000000",
+			parent: "p-0000-0000-0000-000000000000",
+			color: "default",
+			timestamp: 0n,
+			favorited: false,
+			meta: { type: "decoded", data: { name: "d" } }
+		})
+		const stopping: Partial<CopyJob> = { outcome: { status: "cancelled" }, cancelRequest: "trash", created: [copied] }
+
+		expect(copyJobStatus(job(stopping))).toEqual({ kind: "key", key: "transfersCopyMovingToTrash" })
+		expect(copyJobStatus(job({ ...stopping, created: [] }))).toEqual({ kind: "key", key: "transfersCopyCancelledKept" })
+		expect(copyJobStatus(job({ ...stopping, created: [], trashResult: { moved: 1, failed: 0 } }))).toEqual({
+			kind: "key",
+			key: "transfersCopyCancelledTrashed",
+			count: 1
 		})
 	})
 })

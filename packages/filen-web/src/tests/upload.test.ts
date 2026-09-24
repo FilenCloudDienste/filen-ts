@@ -53,6 +53,7 @@ import { useTransfersStore } from "@/features/transfers/store/useTransfersStore"
 import { queryClient } from "@/queries/client"
 import { ACCOUNT_QUERY_KEY } from "@/queries/account"
 import { addAccountStorageUsed } from "@/features/drive/lib/quota"
+import { queueListingCreate } from "@/features/drive/queries/drive"
 
 // UuidStr is a template-literal brand requiring at least 3 dashes (see @filen/sdk-rs) — pad a short
 // readable test label into a shape that satisfies it, mirroring queries/drive.test.ts's own fixture.
@@ -115,7 +116,7 @@ describe("runUpload (injected deps, no worker or query client)", () => {
 		const setProgress = vi.fn<(id: string, bytesTransferred: number) => void>()
 		const settle = vi.fn<(id: string, status: TerminalStatus, error?: ErrorDTO) => void>()
 		const remove = vi.fn<(id: string) => void>()
-		const patchListing = vi.fn<(parentUuid: string | null, updater: (prev: DriveItem[]) => DriveItem[]) => void>()
+		const patchCreated = vi.fn<(parentUuid: string | null, item: DriveItem) => void>()
 		const invalidateDirectorySize = vi.fn<(parentUuid: string | null) => void>()
 		const warmThumbnail = vi.fn<(uploaded: SdkFile, file: File) => void>()
 		const markAccountStale = vi.fn<() => void>()
@@ -123,7 +124,7 @@ describe("runUpload (injected deps, no worker or query client)", () => {
 		const deps: RunUploadDeps = {
 			upload,
 			store: { add, setProgress, settle, remove },
-			patchListing,
+			patchCreated,
 			invalidateDirectorySize,
 			markAccountStale,
 			addStorageUsed,
@@ -136,7 +137,7 @@ describe("runUpload (injected deps, no worker or query client)", () => {
 			setProgress,
 			settle,
 			remove,
-			patchListing,
+			patchCreated,
 			invalidateDirectorySize,
 			markAccountStale,
 			addStorageUsed,
@@ -172,7 +173,14 @@ describe("runUpload (injected deps, no worker or query client)", () => {
 
 		expect(outcome).toEqual({ status: "success" })
 		expect(h.settle).toHaveBeenCalledWith(expect.any(String), "done")
-		expect(h.patchListing).toHaveBeenCalledWith("parent-uuid", expect.any(Function))
+		expect(h.patchCreated).toHaveBeenCalledOnce()
+
+		const [parentUuid, created] = h.patchCreated.mock.calls[0] ?? []
+
+		expect(parentUuid).toBe("parent-uuid")
+		// narrowItem routes the uploaded SDK file to the plain "file" arm (has `chunks`, and carries
+		// `favorited` — see features/drive/lib/item.ts's narrowFile).
+		expect(created).toMatchObject({ type: "file", data: { uuid: testUuid("new") } })
 		// The destination directory's own cached recursive size is now stale (see queries/drive.ts's
 		// invalidateDirectorySize) — the size-sort's async re-position depends on this firing.
 		expect(h.invalidateDirectorySize).toHaveBeenCalledWith("parent-uuid")
@@ -180,16 +188,6 @@ describe("runUpload (injected deps, no worker or query client)", () => {
 		expect(h.markAccountStale).toHaveBeenCalledOnce()
 		// The uploaded size lands in the cached storage used for the next quota pre-flight.
 		expect(h.addStorageUsed).toHaveBeenCalledExactlyOnceWith(1_024n)
-
-		const updater = h.patchListing.mock.calls[0]?.[1]
-		if (!updater) {
-			throw new Error("expected patchListing to receive an updater")
-		}
-		const patched = updater([])
-		expect(patched).toHaveLength(1)
-		// narrowItem routes the uploaded SDK file to the plain "file" arm (has `chunks`, and carries
-		// `favorited` — see features/drive/lib/item.ts's narrowFile).
-		expect(patched[0]).toMatchObject({ type: "file", data: { uuid: testUuid("new") } })
 	})
 
 	// The upload's own bytes are the cheapest thumbnail source there will ever be — handing them over
@@ -215,7 +213,7 @@ describe("runUpload (injected deps, no worker or query client)", () => {
 		h.warmThumbnail.mockImplementation(() => {
 			order.push("warm")
 		})
-		h.patchListing.mockImplementation(() => {
+		h.patchCreated.mockImplementation(() => {
 			order.push("patch")
 		})
 
@@ -250,7 +248,7 @@ describe("runUpload (injected deps, no worker or query client)", () => {
 		delete h.deps.warmThumbnail
 
 		await expect(runUpload(h.deps, { parentUuid: null, file: mockBrowserFile() })).resolves.toEqual({ status: "success" })
-		expect(h.patchListing).toHaveBeenCalled()
+		expect(h.patchCreated).toHaveBeenCalled()
 	})
 
 	it("uploads at the drive root when parentUuid is null", async () => {
@@ -260,7 +258,7 @@ describe("runUpload (injected deps, no worker or query client)", () => {
 		await runUpload(h.deps, { parentUuid: null, file: mockBrowserFile() })
 
 		expect(h.upload).toHaveBeenCalledWith(null, expect.any(String), expect.any(File), expect.any(Function))
-		expect(h.patchListing).toHaveBeenCalledWith(null, expect.any(Function))
+		expect(h.patchCreated).toHaveBeenCalledWith(null, expect.objectContaining({ type: "file" }))
 		expect(h.invalidateDirectorySize).toHaveBeenCalledWith(null)
 	})
 
@@ -303,7 +301,7 @@ describe("runUpload (injected deps, no worker or query client)", () => {
 
 		expect(outcome).toEqual({ status: "error", dto })
 		expect(h.settle).toHaveBeenCalledWith(expect.any(String), "error", dto)
-		expect(h.patchListing).not.toHaveBeenCalled()
+		expect(h.patchCreated).not.toHaveBeenCalled()
 		expect(h.invalidateDirectorySize).not.toHaveBeenCalled()
 		expect(h.markAccountStale).not.toHaveBeenCalled()
 		expect(h.addStorageUsed).not.toHaveBeenCalled()
@@ -608,5 +606,11 @@ describe("defaultUploadDeps.addStorageUsed", () => {
 describe("defaultUploadDeps.warmThumbnail", () => {
 	it("is wired to the real warmUploadThumbnail", () => {
 		expect(defaultUploadDeps.warmThumbnail).toBe(warmUploadThumbnail)
+	})
+})
+
+describe("defaultUploadDeps.patchCreated", () => {
+	it("queues the landed file with the other listing creates", () => {
+		expect(defaultUploadDeps.patchCreated).toBe(queueListingCreate)
 	})
 })

@@ -4,6 +4,7 @@ import {
 	clickPointerType,
 	isPlainClickDeselect,
 	listboxKeyTarget,
+	listboxKeyTargetIsInteractive,
 	listboxRange,
 	resolveCursorIndex
 } from "@/features/drive/lib/listbox"
@@ -162,5 +163,44 @@ describe("clickPointerType", () => {
 
 	it("returns an empty string for a plain MouseEvent", () => {
 		expect(clickPointerType({ button: 0 } as unknown as MouseEvent)).toBe("")
+	})
+})
+
+// Duck-typed stand-in for a DOM EventTarget — this project's vitest environment is "node"
+// (vitest.config.ts), mirroring previewOverlay.logic.test.ts's own fakeTarget for the same reason.
+function fakeTarget(closestResult: object | null): EventTarget {
+	return { closest: (_selector: string) => closestResult } as unknown as EventTarget
+}
+
+describe("listboxKeyTargetIsInteractive", () => {
+	it("is false for a null target", () => {
+		expect(listboxKeyTargetIsInteractive(null)).toBe(false)
+	})
+
+	it("is false for a target with no closest method at all (not element-shaped)", () => {
+		expect(listboxKeyTargetIsInteractive({} as unknown as EventTarget)).toBe(false)
+	})
+
+	it("is false on the option itself — the listbox owns those keys", () => {
+		expect(listboxKeyTargetIsInteractive(fakeTarget(null))).toBe(false)
+	})
+
+	it("is true inside the option's own menu trigger — the button owns Enter/Space, not the listbox", () => {
+		expect(listboxKeyTargetIsInteractive(fakeTarget({}))).toBe(true)
+	})
+
+	it("queries the interactive-control selector, covering the ⋯ trigger's <button>", () => {
+		let queried: string | undefined
+		const target = {
+			closest: (selector: string) => {
+				queried = selector
+
+				return {}
+			}
+		} as unknown as EventTarget
+
+		listboxKeyTargetIsInteractive(target)
+
+		expect(queried).toBe("button, a, input, select, textarea")
 	})
 })

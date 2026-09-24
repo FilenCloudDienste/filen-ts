@@ -16,6 +16,7 @@ import {
 	type DriveItemLinkStatus
 } from "@/features/drive/queries/drive"
 import { narrowItem, upsertDriveItem, asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
+import { dropFromClipboard, followClipboardItem } from "@/features/drive/lib/clipboardSync"
 import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
 import { runBulk, type BulkOutcome } from "@/features/drive/lib/bulk"
 import { runOp, type ActionOutcome as GenericActionOutcome, type VoidActionOutcome } from "@/lib/actions/outcome"
@@ -68,6 +69,7 @@ export async function renameItem(item: DriveItem, newName: string): Promise<Acti
 	// covers the drive-parent listing too, and also fans the new name out to a favorited/recent copy
 	// of the same row, which a narrow per-parent patch never reached.
 	driveListingQueryUpdateGlobal(prev => replaceIfPresent(prev, updated))
+	followClipboardItem(updated)
 	// Breadcrumb name cache — this item's uuid may appear as an ancestor segment on some open path.
 	// Fire-and-forget: the optimistic patch above already covers the success outcome, so a rejection
 	// here must not delay it or escape renameItem uncaught.
@@ -87,7 +89,10 @@ export function moveItems(items: DriveItem[], targetParentUuid: string | null): 
 			base.type === "directory" ? sdkApi.moveDirectory(base.data, targetParentUuid) : sdkApi.moveFile(base.data, targetParentUuid)
 		)
 
-		patchMovedItem(narrowItem(moved), rootUuid)
+		const movedItem = narrowItem(moved)
+
+		patchMovedItem(movedItem, rootUuid)
+		followClipboardItem(movedItem)
 	})
 }
 
@@ -139,6 +144,7 @@ export function trashItems(items: DriveItem[]): Promise<BulkOutcome<DriveItem>> 
 		// after the insert would strip the just-trashed row right back out.
 		driveListingQueryUpdateGlobal(prev => removeByUuid(prev, item.data.uuid))
 		insertIntoTrashListing(trashed)
+		dropFromClipboard(item)
 	})
 }
 
@@ -172,6 +178,7 @@ export function deleteItemsPermanently(items: DriveItem[]): Promise<BulkOutcome<
 		// The worker's own deleteDirectoryPermanently already evicts the directory cache worker-side
 		// (that cache is worker-realm private, unreachable from here) — this is only the listing side.
 		driveListingQueryUpdateGlobal(prev => removeByUuid(prev, item.data.uuid))
+		dropFromClipboard(item)
 		markAccountStale()
 	})
 }
@@ -214,6 +221,7 @@ function applyFavoritePatch(favorited: boolean, result: DriveItem): void {
 	// The global flag patch only ever updates rows that already exist; membership is the other half.
 	driveListingQueryUpdateGlobal(prev => replaceIfPresent(prev, result))
 	patchFavoritesListing(favorited, result)
+	followClipboardItem(result)
 }
 
 export async function toggleFavorite(item: DriveItem): Promise<ActionOutcome> {
@@ -254,6 +262,7 @@ export async function setColor(dir: DirectoryItem, color: DirColor): Promise<Act
 
 	const updated = narrowItem(colored)
 	driveListingQueryUpdateGlobal(prev => replaceIfPresent(prev, updated))
+	followClipboardItem(updated)
 
 	return { status: "success", item: updated }
 }
@@ -276,6 +285,7 @@ export async function restoreVersion(file: FileItem, version: FileVersion): Prom
 	driveListingQueryUpdate(normalizeParentUuid(file.data.parent, currentRootUuid()), prev =>
 		removeByUuid(upsertDriveItem(prev, updated), oldUuid)
 	)
+	followClipboardItem(updated, oldUuid)
 
 	return { status: "success", item: updated }
 }

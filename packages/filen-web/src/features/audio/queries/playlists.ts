@@ -59,10 +59,10 @@ export function usePlaylistsQuery(): UseQueryResult<PlaylistEntry[]> {
 	})
 }
 
-// Cancel-before-patch WITH the initial-fetch carve-out — same rule as driveListingQueryUpdate/
-// notesQueryUpdate: abort an in-flight refetch before patching (it would otherwise land after the
-// patch and silently overwrite it), but only once cached data already exists, so a first-ever mount's
-// initial fetch is never stranded loading forever.
+// Cancel-before-patch WITH the initial-fetch carve-out — same rule as notesQueryUpdate: abort an
+// in-flight refetch before patching (it would otherwise land after the patch and silently overwrite
+// it), but only once cached data already exists, so a first-ever mount's initial fetch is never
+// stranded loading forever.
 function cancelInFlightIfCached(): void {
 	if (queryClient.getQueryData(PLAYLISTS_QUERY_KEY) !== undefined) {
 		void queryClient.cancelQueries({ queryKey: PLAYLISTS_QUERY_KEY })

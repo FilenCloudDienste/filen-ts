@@ -27,6 +27,22 @@ export const errors = {
 	FileNotFound: "File not found.",
 	/** Fires when an operation would exceed the account's storage limit (e.g. an upload); surfaces via errorLabel wherever the transfer reports */
 	MaxStorageReached: "You have reached your maximum storage capacity.",
+	/** Fires when a request could not reach the server (connection lost, DNS, timeout) after the SDK's own retries; surfaces via errorLabel wherever the operation reports, e.g. a copy's failed items */
+	Reqwest: "Network error. Please check your connection and try again.",
+	/** Fires when the server's reply could not be read (an unexpected or cut-off response); same wording as Reqwest, since both mean the request didn't go through */
+	Response: "Network error. Please check your connection and try again.",
+	/** Fires when the server rejected a call without a message of its own; one that sent a message shows that message instead (see errorLabel) */
+	Server: "The server returned an error. Please try again later.",
+	/** Fires when a file's stored data is missing on the server, e.g. the file was deleted after the listing was loaded; worded without claiming the file is gone */
+	FileChunkNotFound: "This file's data could not be found on the server. It may have been deleted.",
+	/** Fires when reading or writing local data failed (e.g. browser storage) */
+	IO: "Could not read or write a file on this device.",
+	/** Fires on an unexpected failure inside the app's file engine */
+	Internal: "An internal error occurred. Please try again.",
+	/** Fires when an action can't run in the current state of the item or the app */
+	InvalidState: "This action can't be completed right now. Please try again.",
+	/** Fires when data could not be converted while being processed (e.g. an unexpected format) */
+	Conversion: "Something went wrong while processing your data.",
 	/** Fires when the SDK rejects a file/directory name (rename, create directory, new text file, move-picker create, upload). The SDK collapses several distinct causes into this one kind, so this message summarises the whole rule set instead of naming one cause; it replaces the raw, English-only detail string that surfaced through labelFirst before */
 	InvalidName:
 		"That name can't be used. A name can't contain \\ / : * ? \" < > |, can't start or end with a space, can't end with a dot, and must be 255 bytes or shorter."

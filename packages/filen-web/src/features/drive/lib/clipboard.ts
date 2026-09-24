@@ -34,11 +34,18 @@ export async function pasteClipboard(destination: CopyDestination): Promise<void
 		return
 	}
 
-	store.clear()
+	const paste = store.takeCut()
 
-	const outcome = await performMove(entry.items, destination.uuid)
+	if (paste === null) {
+		return
+	}
 
-	useDriveClipboardStore.getState().restoreCut(outcome.failed.map(failure => failure.item))
+	const outcome = await performMove(paste.items, destination.uuid)
+
+	useDriveClipboardStore.getState().restoreCut(
+		paste,
+		outcome.failed.map(failure => failure.item)
+	)
 }
 
 // What shouldHandleClipboardShortcut needs to know about a keydown, read off the page. Selected text

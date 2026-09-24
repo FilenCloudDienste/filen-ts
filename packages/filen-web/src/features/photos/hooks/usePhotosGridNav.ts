@@ -1,7 +1,7 @@
 import { useRef, useState, type KeyboardEvent } from "react"
 import { type Virtualizer } from "@tanstack/react-virtual"
-import { clampListboxIndex, resolveCursorIndex } from "@/features/drive/lib/listbox"
-import { photosGridKeyAction, photosGridKeyTargetIsInteractive, photosRangeSelection } from "@/features/photos/components/photoGrid.logic"
+import { clampListboxIndex, listboxKeyTargetIsInteractive, resolveCursorIndex } from "@/features/drive/lib/listbox"
+import { photosGridKeyAction, photosRangeSelection } from "@/features/photos/components/photoGrid.logic"
 import { type PhotoItem } from "@/features/photos/lib/captureSort"
 import { usePhotosStore } from "@/features/photos/store/usePhotosStore"
 
@@ -110,9 +110,10 @@ export function usePhotosGridNav({
 	}
 
 	function handleKeyDown(event: KeyboardEvent<HTMLDivElement>): void {
-		// The tile's ⋯ trigger is in the tab sequence alongside the tile face, and its Enter/Space belong
-		// to the button, not the grid — see photosGridKeyTargetIsInteractive.
-		if (photosGridKeyTargetIsInteractive(event.target)) {
+		// A tile's menus are portaled out of the grid but stay its React descendants, so a menu item's
+		// Enter bubbles here too; and the tile's ⋯ trigger owns its own Enter/Space (see
+		// listboxKeyTargetIsInteractive). Neither is the grid's.
+		if (!(event.target instanceof Node) || !event.currentTarget.contains(event.target) || listboxKeyTargetIsInteractive(event.target)) {
 			return
 		}
 

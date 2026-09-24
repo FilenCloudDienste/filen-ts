@@ -14,6 +14,7 @@ import { cancelActiveTransfers } from "@/features/transfers/lib/control"
 import { allowNextUnload } from "@/lib/unloadGuard"
 import { clearPreviewCache } from "@/features/preview/lib/previewCache"
 import { useDriveClipboardStore } from "@/features/drive/store/useDriveClipboardStore"
+import { discardListingPatches } from "@/features/drive/queries/drive"
 import { confirmDiscardUnsavedPreview, usePreviewUnsavedGuardStore } from "@/features/preview/store/usePreviewUnsavedGuard"
 import { queryClient } from "@/queries/client"
 import { toast } from "sonner"
@@ -101,6 +102,8 @@ export async function performLogout(options?: PerformLogoutOptions): Promise<boo
 	// Tear the realtime socket down before the client is released — unsubscribeFromSocket needs the live
 	// client. Fire-and-forget: the worker also frees the listener in releaseClient as a backstop.
 	void socketBridge.stop()
+	// Drive listing creates still queued, and patches kept for listing reads under way.
+	discardListingPatches()
 
 	await runLogout({
 		cancelQueries: () => queryClient.cancelQueries(),

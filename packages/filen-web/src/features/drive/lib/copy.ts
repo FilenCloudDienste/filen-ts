@@ -17,13 +17,15 @@ import { i18n } from "@/lib/i18n"
 import { runOp } from "@/lib/actions/outcome"
 import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
 import type { CopyJobEvent } from "@/workers/sdk.worker"
-import { narrowItem, narrowToSdkItems, upsertDriveItem, type DriveItem } from "@/features/drive/lib/item"
-import { driveListingQueryUpdate, invalidateDirectorySize, normalizeParentUuid } from "@/features/drive/queries/drive"
+import { narrowItem, narrowToSdkItems, type DriveItem } from "@/features/drive/lib/item"
+import { invalidateDirectorySize, normalizeParentUuid, queueListingCreate } from "@/features/drive/queries/drive"
 import { currentRootUuid, trashItems } from "@/features/drive/lib/actions"
 import { type BulkOutcome } from "@/features/drive/lib/bulk"
 import { flushDeferredRecents } from "@/features/drive/lib/socketHandlers"
 import { accountQuotaDeps, addAccountStorageUsed } from "@/features/drive/lib/quota"
 import {
+	canRetryCopy,
+	copiedTopLevel,
 	copyGlyphForEntries,
 	copyGlyphForItems,
 	copyReportInput,
@@ -33,7 +35,6 @@ import {
 	type CopyDestination,
 	type CopyJob,
 	type CopyJobGlyph,
-	type CopyJobOutcome,
 	type CopySettlement
 } from "@/features/drive/lib/copy.logic"
 import { useTransfersStore, type TransfersStore } from "@/features/transfers/store/useTransfersStore"
@@ -62,6 +63,8 @@ export interface RunCopyDeps {
 		onEvent: OnCopyEvent
 	) => Promise<CopyReport>
 	copyItemsTo: (id: string, entries: CopyEntry[], maxBytes: number | undefined, onEvent: OnCopyEvent) => Promise<CopyReport>
+	// Frees the worker's stop and pause for the job, which span its calls.
+	release: (id: string) => void
 	transfers: Pick<TransfersStore, "add" | "setProgress" | "setSize" | "settle" | "remove">
 	jobs: Pick<CopyJobsStore, "put" | "update"> & { get: (id: string) => CopyJob | undefined }
 	account: QuotaCheckDeps
@@ -120,7 +123,40 @@ function quotaExceededDTO(freeBytes: number): ErrorDTO {
 	return { species: "plain", message, label: message }
 }
 
-function settleRow(transfers: RunCopyDeps["transfers"], id: string, outcome: CopyJobOutcome): void {
+// Settles a job the user stopped as cancelled; never shown.
+const STOPPED: ErrorDTO = { species: "sdk", kind: "Cancelled", message: "", label: "" }
+
+function trashFailedDTO(count: number): ErrorDTO {
+	const message = i18n.t("transfers:transfersCopyTrashFailedItems", { count })
+
+	return { species: "plain", message, label: message }
+}
+
+function addTrashOutcome(result: CopyJob["trashResult"], outcome: BulkOutcome<DriveItem>): NonNullable<CopyJob["trashResult"]> {
+	return { moved: (result?.moved ?? 0) + outcome.succeeded.length, failed: (result?.failed ?? 0) + outcome.failed.length }
+}
+
+// Outside runCopyJob, so the report isn't kept alive by the callbacks the worker may still hold.
+function settleJob(jobs: RunCopyDeps["jobs"], id: string, settlement: CopySettlement): void {
+	jobs.update(id, job => {
+		const settled = settleCopyJob(job, settlement)
+
+		// Only "move copied items to trash" reads what the job made.
+		return { ...settled, created: settled.cancelRequest === "trash" ? copiedTopLevel(settlement, settled.created) : [] }
+	})
+}
+
+function settleRow(transfers: RunCopyDeps["transfers"], id: string, job: CopyJob): void {
+	// Copies the stop asked to trash that are still at the destination: the row stays, as an error, and
+	// reopens the card that says so.
+	if (job.trashResult !== null && job.trashResult.failed > 0) {
+		transfers.settle(id, "error", trashFailedDTO(job.trashResult.failed))
+
+		return
+	}
+
+	const { outcome } = job
+
 	switch (outcome.status) {
 		case "running":
 		case "done":
@@ -151,9 +187,7 @@ function settleRow(transfers: RunCopyDeps["transfers"], id: string, outcome: Cop
 // was dropped from the store meanwhile.
 export async function runCopyJob(deps: RunCopyDeps, request: CopyJobRequest): Promise<CopyJob | undefined> {
 	const { id, source, destination, itemCount, name, glyph } = request
-
-	deps.jobs.put(createCopyJob(id, destination, itemCount, glyph))
-	deps.transfers.add({
+	const row: Parameters<RunCopyDeps["transfers"]["add"]>[0] = {
 		id,
 		direction: "copy",
 		name,
@@ -162,21 +196,89 @@ export async function runCopyJob(deps: RunCopyDeps, request: CopyJobRequest): Pr
 		status: "copying",
 		parentUuid: destination.uuid,
 		startedAt: Date.now()
-	})
+	}
+
+	deps.jobs.put(createCopyJob(id, destination, itemCount, glyph))
+	deps.transfers.add(row)
 
 	let rowSize = 0
+	// The job as it settled, and whether from a report. An event can still arrive after that: a call
+	// that rejected past its cancel grace still delivers what it had queued. A created item is then only
+	// patched in, or goes straight to the trash when the stop asked for that; an update adds only what
+	// the settle left out.
+	let settledJob: CopyJob | undefined
+	let settledFromReport = false
+	// Every copy handed to the trash: one both in the report and delivered late goes once.
+	const trashing = new Set<string>()
+
+	const trashLate = async (item: DriveItem): Promise<void> => {
+		if (trashing.has(item.data.uuid)) {
+			return
+		}
+
+		trashing.add(item.data.uuid)
+
+		const outcome = await deps.trash([item])
+
+		if (outcome.failed.length === 0) {
+			deps.jobs.update(id, job => ({ ...job, trashResult: addTrashOutcome(job.trashResult, outcome) }))
+
+			return
+		}
+
+		// Left at the destination: a job dropped meanwhile comes back, with the row that says so.
+		const base = deps.jobs.get(id) ?? (settledJob === undefined ? undefined : { ...settledJob, cardVisible: false })
+
+		if (base === undefined) {
+			return
+		}
+
+		const job: CopyJob = { ...base, created: [], trashResult: addTrashOutcome(base.trashResult, outcome) }
+
+		deps.jobs.put(job)
+		deps.transfers.remove(id)
+		deps.transfers.add({ ...row, size: job.totals.bytes, bytesTransferred: job.counts.bytesDone })
+		settleRow(deps.transfers, id, job)
+	}
 
 	const onEvent: OnCopyEvent = event => {
 		if (event.type === "created") {
 			const item = narrowItem(event.item.item)
 
-			deps.jobs.update(id, job => applyCopyCreated(job, item))
 			deps.patchCreated(item)
+
+			if (settledJob === undefined) {
+				deps.jobs.update(id, job => applyCopyCreated(job, item))
+			} else if (settledJob.cancelRequest === "trash") {
+				void trashLate(item)
+			}
 
 			return
 		}
 
-		deps.jobs.update(id, job => applyCopyUpdate(job, copyUpdateInput(event.update)))
+		const update = copyUpdateInput(event.update)
+
+		// A report already lists the failures and renames its updates carried, but not their propagation
+		// failures.
+		if (settledJob !== undefined) {
+			deps.jobs.update(id, job => {
+				const merged = applyCopyUpdate(job, update)
+
+				return settledFromReport
+					? { ...job, propagationFailedCount: merged.propagationFailedCount }
+					: {
+							...job,
+							failures: merged.failures,
+							renamedCount: merged.renamedCount,
+							savedAsVersionCount: merged.savedAsVersionCount,
+							propagationFailedCount: merged.propagationFailedCount
+						}
+			})
+
+			return
+		}
+
+		deps.jobs.update(id, job => applyCopyUpdate(job, update))
 
 		const job = deps.jobs.get(id)
 
@@ -205,36 +307,50 @@ export async function runCopyJob(deps: RunCopyDeps, request: CopyJobRequest): Pr
 		if (freshMaxBytes !== undefined && freshMaxBytes > maxBytes && !cancelRequested()) {
 			maxBytes = freshMaxBytes
 			settlement = await attempt(deps, id, source, maxBytes, onEvent)
-		} else if (freshMaxBytes !== undefined) {
+		} else if (freshMaxBytes !== undefined && freshMaxBytes <= maxBytes) {
+			// Never a figure the SDK's own check didn't refuse.
 			settlement = { report: settlement.report, maxBytes: freshMaxBytes }
 		}
 	}
 
-	deps.jobs.update(id, job => settleCopyJob(job, settlement))
+	// Refused before anything was written, by a job stopped meanwhile: it ends as the stop it was.
+	if ("report" in settlement && isQuotaPreflightFailure(settlement.report) && cancelRequested()) {
+		settlement = { ...settlement, report: { ...settlement.report, error: STOPPED } }
+	}
 
-	const job = deps.jobs.get(id)
+	deps.release(id)
+	settleJob(deps.jobs, id, settlement)
 
-	if (job === undefined) {
+	settledJob = deps.jobs.get(id)
+	settledFromReport = "report" in settlement
+
+	if (settledJob === undefined) {
 		return undefined
 	}
 
-	deps.transfers.setSize(id, job.totals.bytes)
-	deps.transfers.setProgress(id, job.counts.bytesDone)
-	settleRow(deps.transfers, id, job.outcome)
+	deps.transfers.setSize(id, settledJob.totals.bytes)
+	deps.transfers.setProgress(id, settledJob.counts.bytesDone)
 
-	// Honoured however the job ended: a copy that finished before the cancel reached it still made
-	// what the user asked to remove. Only top-level items are trashed; their subtrees go with them.
-	const trashed = job.cancelRequest === "trash" && job.created.length > 0 ? await deps.trash(job.created) : null
+	// Honoured however the job ended: a copy that finished before the cancel reached it still made what
+	// the user asked to remove. Only top-level items are trashed; their subtrees go with them. The row
+	// stays active until then, which also keeps the tab from closing on the trash.
+	if (settledJob.created.length > 0) {
+		for (const item of settledJob.created) {
+			trashing.add(item.data.uuid)
+		}
 
-	if (trashed !== null) {
-		deps.jobs.update(id, settled => ({ ...settled, trashResult: { moved: trashed.succeeded.length, failed: trashed.failed.length } }))
+		const outcome = await deps.trash(settledJob.created)
+
+		deps.jobs.update(id, job => ({ ...job, created: [], trashResult: addTrashOutcome(job.trashResult, outcome) }))
+		settledJob = deps.jobs.get(id) ?? { ...settledJob, created: [], trashResult: addTrashOutcome(settledJob.trashResult, outcome) }
 	}
 
-	const settled = deps.jobs.get(id) ?? job
+	const job = settledJob
 
-	deps.settled(settled)
+	settleRow(deps.transfers, id, job)
+	deps.settled(job)
 
-	return settled
+	return job
 }
 
 // A settled job stays while its card shows or its transfers row can reopen the card.
@@ -253,8 +369,9 @@ function copyRowName(itemCount: number, firstName: string): string {
 }
 
 // The destination listing is usually the one on screen; one nobody has read is left to its first read.
+// Batched with the socket echoes, which carry the same items again.
 function patchCopiedItem(item: DriveItem): void {
-	driveListingQueryUpdate(normalizeParentUuid(item.data.parent, currentRootUuid()), prev => upsertDriveItem(prev, item))
+	queueListingCreate(normalizeParentUuid(item.data.parent, currentRootUuid()), item)
 }
 
 // No toast: the card, or the transfers row, shows how the copy ended.
@@ -276,6 +393,9 @@ export const defaultCopyDeps: RunCopyDeps = {
 	copyItems: (id, items, destinationUuid, maxBytes, onEvent) =>
 		sdkApi.copyItems(id, items, destinationUuid, maxBytes, Comlink.proxy(onEvent)),
 	copyItemsTo: (id, entries, maxBytes, onEvent) => sdkApi.copyItemsTo(id, entries, maxBytes, Comlink.proxy(onEvent)),
+	release: id => {
+		void sdkApi.releaseCopy(id)
+	},
 	transfers: useTransfersStore.getState(),
 	jobs: { ...useCopyJobsStore.getState(), get: getCopyJob },
 	account: accountQuotaDeps,
@@ -324,11 +444,14 @@ export function startLinkedCopy(item: CopyItem, name: string, glyph: CopyJobGlyp
 }
 
 // A new job for what the given one could not copy, each item back into the directory it was meant for.
+// It supersedes the given one, which would only copy the same items again: that one offers no retry
+// any more and loses its row, so it goes once its card does. A row reporting copies its stop couldn't
+// move to the trash stays, as nothing else says they are still at the destination.
 export function retryFailedCopy(jobId: string): string | null {
 	const job = getCopyJob(jobId)
 	const first = job?.retryable[0]
 
-	if (job === undefined || first === undefined) {
+	if (job === undefined || first === undefined || !canRetryCopy(job)) {
 		return null
 	}
 
@@ -345,16 +468,27 @@ export function retryFailedCopy(jobId: string): string | null {
 		glyph: copyGlyphForEntries(entries)
 	})
 
+	useCopyJobsStore.getState().update(jobId, retried => ({ ...retried, retryable: [] }))
+
+	if ((job.trashResult?.failed ?? 0) === 0) {
+		useTransfersStore.getState().remove(jobId)
+	}
+
+	pruneSettledCopyJobs()
+
 	return id
 }
 
 // The job settles as cancelled through its own report; trashCopied then moves its top-level items to
-// the trash (never a permanent delete).
+// the trash (never a permanent delete). The first request stands: its stop is already on its way, and a
+// later one (Cancel all, sign-out) must not turn a "trash" into a "keep".
 export function requestCopyCancel(jobId: string, options: { trashCopied: boolean }): void {
-	if (getCopyJob(jobId)?.outcome.status !== "running") {
+	const job = getCopyJob(jobId)
+
+	if (job?.outcome.status !== "running" || job.cancelRequest !== null) {
 		return
 	}
 
-	useCopyJobsStore.getState().update(jobId, job => ({ ...job, cancelRequest: options.trashCopied ? "trash" : "keep" }))
+	useCopyJobsStore.getState().update(jobId, running => ({ ...running, cancelRequest: options.trashCopied ? "trash" : "keep" }))
 	void sdkApi.cancelCopy(jobId)
 }

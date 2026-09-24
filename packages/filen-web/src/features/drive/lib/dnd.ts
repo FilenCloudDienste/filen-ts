@@ -161,8 +161,8 @@ export function buildDragSourceProps(item: DriveItem, variant: DriveVariant): Dr
 
 // Runs the move for a completed drop, a pick in the item menu's directory tree (moveSubmenu.tsx), or a
 // pasted cut (clipboard.ts).
-// Reuses moveItems' existing confirm-then-patch machinery (both source and destination listings,
-// cancel-in-flight already inside driveListingQueryUpdate) and the standard bulk toast; a rejection
+// Reuses moveItems' existing confirm-then-patch machinery (both source and destination listings, a
+// listing read under way included) and the standard bulk toast; a rejection
 // surfaces there via errorLabel. Detaches the payload from the module ref before awaiting so a
 // concurrent dragend clear can't mutate it mid-op.
 export async function performMove(items: readonly DriveItem[], targetUuid: string | null): Promise<BulkOutcome<DriveItem>> {

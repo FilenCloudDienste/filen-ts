@@ -134,9 +134,26 @@ const downloadAborts = new Map<string, AbortController>()
 // safe (0.4.33 stopped burying managedFuture under serde(flatten)).
 const uploadAborts = new Map<string, AbortController>()
 
-// A copy job's registries, keyed by the caller's job id — same lifecycle as the transfer maps below.
-const copyAborts = new Map<string, AbortController>()
-const copyPauses = new Map<string, PauseSignal>()
+// A copy job's stop and pause, keyed by the caller's job id. They span the job, not one call: a retry
+// after a storage refusal is the same job, so a stop or pause made between its calls still holds.
+// releaseCopy frees them once the caller's job is over (the pause is a wasm-heap object).
+interface CopyControls {
+	abort: AbortController
+	pause: PauseSignal
+}
+
+const copyJobs = new Map<string, CopyControls>()
+
+function copyControls(jobId: string): CopyControls {
+	let controls = copyJobs.get(jobId)
+
+	if (controls === undefined) {
+		controls = { abort: new AbortController(), pause: new PauseSignal() }
+		copyJobs.set(jobId, controls)
+	}
+
+	return controls
+}
 
 // Per-transfer PauseSignal so pauseUpload/pauseDownload can suspend an in-flight transfer's future
 // without erroring it — unlike abort, pause never rejects; resume just continues the same future.
@@ -182,8 +199,9 @@ async function withPauseSignal<T>(
 	}
 }
 
-// A copy's callbacks as one stream to the caller. The SDK delivers them in order and all of them before
-// the call settles, and Comlink keeps that order across the boundary.
+// A copy's callbacks as one stream to the caller, in the order the SDK makes them. They travel on the
+// callback's own port and the result on the worker's, and two ports keep no order between them, so a
+// call returns only once the caller has taken every event it sent.
 export type CopyJobEvent = { type: "update"; update: CopyUpdate } | { type: "created"; item: CopiedTopLevelItem }
 
 type CopyJobCall = (
@@ -194,15 +212,27 @@ type CopyJobCall = (
 // Nothing cleans up after a copy the tab closed on, so the planned items are ignored, but the callback
 // must still be passed: the SDK stands in for a missing one with `new Function("")`, which the
 // production CSP (no 'unsafe-eval') rejects, leaving the copy's promise pending forever.
-async function runCopyJob(jobId: string, onEvent: (event: CopyJobEvent) => void, call: CopyJobCall): Promise<CopyReport> {
-	const controller = new AbortController()
-	copyAborts.set(jobId, controller)
+async function runCopyJob(
+	controls: CopyControls,
+	onEvent: (event: CopyJobEvent) => void | Promise<void>,
+	call: CopyJobCall
+): Promise<CopyReport> {
+	// The reply to the last event means the caller ran every earlier one, which came before it on the
+	// same port. Waiting on each instead would cost a round trip per update.
+	let delivered: Promise<void> = Promise.resolve()
 
-	return withPauseSignal(copyPauses, copyAborts, jobId, pause =>
-		call({
+	const deliver = (event: CopyJobEvent): void => {
+		// A caller that failed to take an event must not fail the copy.
+		delivered = Promise.resolve(onEvent(event)).catch((e: unknown) => {
+			log.warn("sdk.worker", "copy event delivery failed", e)
+		})
+	}
+
+	try {
+		return await call({
 			onTopLevelPlanned: () => undefined,
 			onUpdate: update => {
-				onEvent({ type: "update", update })
+				deliver({ type: "update", update })
 			},
 			onTopLevelCreated: item => {
 				// Resolvable as a parent right away, like a directory createDirectory made.
@@ -210,11 +240,13 @@ async function runCopyJob(jobId: string, onEvent: (event: CopyJobEvent) => void,
 					cacheDirs([item.item])
 				}
 
-				onEvent({ type: "created", item })
+				deliver({ type: "created", item })
 			},
-			managedFuture: { abortSignal: controller.signal, pauseSignal: pause }
+			managedFuture: { abortSignal: controls.abort.signal, pauseSignal: controls.pause }
 		})
-	)
+	} finally {
+		await delivered
+	}
 }
 
 // Per-preview-token AbortController so cancelPreviewDownload(token) can abort an in-flight whole-buffer
@@ -915,12 +947,15 @@ const api = {
 		items: CopyItem[],
 		destinationUuid: string | null,
 		maxBytes: number | undefined,
-		onEvent: (event: CopyJobEvent) => void
+		onEvent: (event: CopyJobEvent) => void | Promise<void>
 	): Promise<CopyReport> {
 		const c = requireClient()
+		// Before the destination lookup, which can go to the network: a stop or pause sent meanwhile finds
+		// the job.
+		const controls = copyControls(jobId)
 		const destination = await resolveNormalDirParent(c, destinationUuid)
 
-		return runCopyJob(jobId, onEvent, callbacks =>
+		return runCopyJob(controls, onEvent, callbacks =>
 			c.copyItems({ items, destination, ...(maxBytes !== undefined ? { maxBytes } : {}), ...callbacks })
 		)
 	},
@@ -929,23 +964,32 @@ const api = {
 		jobId: string,
 		entries: CopyEntry[],
 		maxBytes: number | undefined,
-		onEvent: (event: CopyJobEvent) => void
+		onEvent: (event: CopyJobEvent) => void | Promise<void>
 	): Promise<CopyReport> {
 		const c = requireClient()
 
-		return runCopyJob(jobId, onEvent, callbacks =>
+		return runCopyJob(copyControls(jobId), onEvent, callbacks =>
 			c.copyItemsTo({ entries, ...(maxBytes !== undefined ? { maxBytes } : {}), ...callbacks })
 		)
 	},
-	// No-ops once the job has settled, like cancelUpload/pauseUpload/resumeUpload.
+	// No-ops once the job is released, like cancelUpload/pauseUpload/resumeUpload once theirs settled.
 	cancelCopy(jobId: string): void {
-		copyAborts.get(jobId)?.abort()
+		copyJobs.get(jobId)?.abort.abort()
 	},
 	pauseCopy(jobId: string): void {
-		copyPauses.get(jobId)?.pause()
+		copyJobs.get(jobId)?.pause.pause()
 	},
 	resumeCopy(jobId: string): void {
-		copyPauses.get(jobId)?.resume()
+		copyJobs.get(jobId)?.pause.resume()
+	},
+	// The caller's job is over: none of its calls runs again.
+	releaseCopy(jobId: string): void {
+		const controls = copyJobs.get(jobId)
+
+		if (controls !== undefined) {
+			copyJobs.delete(jobId)
+			controls.pause.free()
+		}
 	},
 	// ── Preview ──────────────────────────────────────────────────────────────
 	// Whole-buffer fetch for the preview overlay (image/pdf/docx/text/code/markdown — never the

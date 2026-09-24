@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
-import { describe, expect, it } from "vitest"
-import type { Dir, File, UuidStr } from "@filen/sdk-rs"
+import { describe, expect, it, vi } from "vitest"
+import type { Dir, File, SharedRootDir, UuidStr } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 import {
@@ -12,6 +12,7 @@ import {
 	type PasteTarget
 } from "@/features/drive/lib/clipboard.logic"
 import { type DriveClipboardEntry } from "@/features/drive/store/useDriveClipboardStore"
+import { type ParentLookup } from "@/features/drive/components/moveTargetDialog.logic"
 
 function testUuid(label: string): UuidStr {
 	return `${label}-0000-0000-0000-000000000000` as UuidStr
@@ -60,8 +61,28 @@ const DOCS = dirItem("docs", "home")
 const REPORT = fileItem("report", "home")
 const NOTES = fileItem("notes", "docs")
 
+// home > docs > inner, and dest at the root.
+const PARENTS = new Map<string, string | null>([
+	[testUuid("home"), null],
+	[testUuid("dest"), null],
+	[testUuid("docs"), testUuid("home")],
+	[testUuid("inner"), testUuid("docs")]
+])
+
+function parentsFrom(map: ReadonlyMap<string, string | null>): () => ParentLookup {
+	return () => uuid => map.get(uuid)
+}
+
 function target(overrides: Partial<PasteTarget> = {}): PasteTarget {
-	return { variant: "drive", uuid: testUuid("dest"), ancestry: [testUuid("dest")], listing: [], online: true, ...overrides }
+	return {
+		variant: "drive",
+		uuid: testUuid("dest"),
+		ancestry: [testUuid("dest")],
+		readParents: parentsFrom(PARENTS),
+		listing: [],
+		online: true,
+		...overrides
+	}
 }
 
 const COPY: DriveClipboardEntry = { mode: "copy", items: [DOCS, REPORT] }
@@ -110,6 +131,58 @@ describe("canPaste", () => {
 		expect(canPaste(COPY, target({ uuid: testUuid("docs"), ancestry: [testUuid("docs")] }))).toBe(false)
 		expect(canPaste(COPY, insideDocs)).toBe(false)
 		expect(canPaste(CUT, insideDocs)).toBe(false)
+	})
+
+	it("refuses a directory cut or copied from Shared by me as its own destination or below it", () => {
+		const sharedDocs = narrowItem({
+			inner: { uuid: testUuid("docs"), color: "default", timestamp: 0n, meta: { type: "decoded", data: { name: "docs" } } },
+			sharingRole: { Receiver: { email: "friend@filen.io", id: 7 } },
+			writeAccess: true
+		} satisfies SharedRootDir)
+		const insideDocs = target({ uuid: testUuid("inner"), ancestry: [testUuid("docs"), testUuid("inner")] })
+
+		expect(canPaste({ mode: "cut", items: [sharedDocs] }, insideDocs)).toBe(false)
+		expect(canPaste({ mode: "copy", items: [sharedDocs] }, target({ uuid: testUuid("docs"), ancestry: [testUuid("docs")] }))).toBe(
+			false
+		)
+	})
+
+	// Search, Favorites, Recents, Links and a pasted address all open a directory on a route that starts
+	// at it, so its route chain names none of the directories above it.
+	it("walks the real chain of a directory opened on a fresh route", () => {
+		const openedFromSearch = target({ uuid: testUuid("inner"), ancestry: [testUuid("inner")] })
+
+		expect(canPaste(COPY, openedFromSearch)).toBe(false)
+		expect(canPaste(CUT, openedFromSearch)).toBe(false)
+		expect(canPaste({ mode: "copy", items: [REPORT] }, openedFromSearch)).toBe(true)
+	})
+
+	it("refuses a directory where the chain can't be resolved, and still pastes files there", () => {
+		const unknownChain = target({ uuid: testUuid("far"), ancestry: [testUuid("far")] })
+
+		expect(canPaste(COPY, unknownChain)).toBe(false)
+		expect(canPaste({ mode: "copy", items: [REPORT] }, unknownChain)).toBe(true)
+	})
+
+	// Someone else's directory can never hold one of the user's own, however little of the chain is known.
+	it("pastes a directory copied from Shared with me where the chain can't be resolved", () => {
+		const received = narrowItem({
+			inner: { uuid: testUuid("received"), color: "default", timestamp: 0n, meta: { type: "decoded", data: { name: "received" } } },
+			sharingRole: { Sharer: { email: "owner@filen.io", id: 9 } },
+			writeAccess: false
+		} satisfies SharedRootDir)
+
+		expect(canPaste({ mode: "copy", items: [received] }, target({ uuid: testUuid("far"), ancestry: [testUuid("far")] }))).toBe(true)
+	})
+
+	it("reads the parents only while a directory is on the clipboard", () => {
+		const readParents = vi.fn(parentsFrom(PARENTS))
+
+		canPaste({ mode: "copy", items: [REPORT] }, target({ readParents }))
+		expect(readParents).not.toHaveBeenCalled()
+
+		expect(canPaste(COPY, target({ readParents }))).toBe(true)
+		expect(readParents).toHaveBeenCalledOnce()
 	})
 
 	it("copies beside the source, but moves a cut only somewhere else in My Drive", () => {

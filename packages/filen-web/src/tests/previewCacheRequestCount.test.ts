@@ -46,7 +46,7 @@ const createObjectURL = vi.fn<(object: Blob | MediaSource) => string>(() => "blo
 const { usePreviewBytes } = await import("@/features/preview/hooks/usePreviewBytes")
 const { usePreviewStreamUrl } = await import("@/features/preview/hooks/usePreviewStreamUrl")
 const { PreviewAccessModeProvider } = await import("@/features/preview/lib/accessMode")
-const { clearPreviewCache } = await import("@/features/preview/lib/previewCache")
+const { clearPreviewCache, getPreviewBytes } = await import("@/features/preview/lib/previewCache")
 const { ImageViewer } = await import("@/features/preview/components/imageViewer")
 const { FileHero } = await import("@/features/publicLinks/components/fileHero")
 const { startAnonFileDownload } = await import("@/features/publicLinks/lib/download")
@@ -423,11 +423,11 @@ describe("a Download while the preview is still loading", () => {
 	const anon = ({ children }: { children: ReactNode }) =>
 		createElement(PreviewAccessModeProvider, { mode: "anon", linkScope: "scope-1", children })
 
-	function download() {
+	function download(item: DriveItem = photo) {
 		return startAnonFileDownload({
-			file: narrowToAnyFile(photo),
-			name: "photo.jpg",
-			size: 10n,
+			file: narrowToAnyFile(item),
+			name: "download.bin",
+			size: item.data.size,
 			linkScope: "scope-1",
 			onProgress: () => undefined
 		})
@@ -538,7 +538,7 @@ describe("a Download while the preview is still loading", () => {
 		expect(downloadLinkedFileBytesAnon).toHaveBeenCalledTimes(2)
 	})
 
-	it("a failed shared load leaves nothing behind: the joiner's own fetch is what gets reused", async () => {
+	it("a failed shared load leaves nothing behind, and the Download's own fetch is not cached either", async () => {
 		const first = holdFirstTransfer()
 		const preview = renderHook(() => usePreviewBytes(photo), { wrapper: anon })
 
@@ -558,8 +558,70 @@ describe("a Download while the preview is still loading", () => {
 
 		const again = renderHook(() => usePreviewBytes(photo), { wrapper: anon })
 
-		expect(again.result.current.status).toBe("success")
+		expect(again.result.current.status).toBe("pending")
+		await waitFor(() => {
+			expect(again.result.current.status).toBe("success")
+		})
+		expect(downloadLinkedFileBytesAnon).toHaveBeenCalledTimes(3)
+	})
+
+	// Firefox and Safari always take the buffered path: the saved file must not stay in memory for the
+	// rest of the visit, least of all a file nothing will ever preview.
+	it("buffered: a Download of a file nobody previewed leaves the cache empty", async () => {
+		await expect(download()).resolves.toEqual({ status: "success" })
+		expect((await savedBytes()).byteLength).toBe(10)
+
+		const preview = renderHook(() => usePreviewBytes(photo), { wrapper: anon })
+
+		expect(preview.result.current.status).toBe("pending")
+		await waitFor(() => {
+			expect(preview.result.current.status).toBe("success")
+		})
 		expect(downloadLinkedFileBytesAnon).toHaveBeenCalledTimes(2)
+	})
+
+	// Uncached, its buffer is still memory: cached previews make way for it as for a preview's own load,
+	// only as far as the budget needs, so a large file never lands on top of a full cache.
+	it("buffered: a Download's own fetch makes room for its buffer", async () => {
+		const cached = makeItem("ffffffff-0000-0000-0000-000000000003", "cached.jpg", 40)
+		const preview = renderHook(() => usePreviewBytes(cached), { wrapper: anon })
+
+		await waitFor(() => {
+			expect(preview.result.current.status).toBe("success")
+		})
+
+		// 40 held and 50 incoming fit the 100-byte budget.
+		await expect(download(makeItem("eeeeeeee-0000-0000-0000-000000000001", "fits.bin", 50))).resolves.toEqual({ status: "success" })
+		expect(getPreviewBytes("anon:scope-1", cached.data.uuid)).toBeDefined()
+
+		// 40 held and 70 incoming don't.
+		await expect(download(makeItem("eeeeeeee-0000-0000-0000-000000000002", "large.bin", 70))).resolves.toEqual({ status: "success" })
+		expect(getPreviewBytes("anon:scope-1", cached.data.uuid)).toBeUndefined()
+		expect(downloadLinkedFileBytesAnon).toHaveBeenCalledTimes(3)
+	})
+
+	// Its token only cancels a download it started, so a retry begun after it went away could never be
+	// stopped: a whole file fetched with no UI, evicting what the cache held.
+	it("a preview that joined a load and went away does not restart it when it fails", async () => {
+		const first = holdFirstTransfer()
+		const owner = renderHook(() => usePreviewBytes(photo), { wrapper: anon })
+
+		await waitFor(() => {
+			expect(downloadLinkedFileBytesAnon).toHaveBeenCalledTimes(1)
+		})
+
+		// Show, hide, show, hide: each hidden preview had joined the load still running.
+		for (let toggle = 0; toggle < 2; toggle++) {
+			renderHook(() => usePreviewBytes(photo), { wrapper: anon }).unmount()
+		}
+
+		first.reject(new Error("network down"))
+
+		await waitFor(() => {
+			expect(owner.result.current.status).toBe("error")
+		})
+		await new Promise(resolve => setTimeout(resolve, 0))
+		expect(downloadLinkedFileBytesAnon).toHaveBeenCalledTimes(1)
 	})
 
 	it("two viewers of the same file mounting together share one transfer", async () => {
@@ -572,5 +634,38 @@ describe("a Download while the preview is still loading", () => {
 		}
 
 		expect(downloadFileBytes).toHaveBeenCalledTimes(1)
+	})
+})
+
+describe("a revisited slot the pager leaves before the first load's cancel lands", () => {
+	it("starts nothing after the overlay closed, and caches nothing", async () => {
+		const held = { reject: (_error: Error): void => undefined }
+
+		downloadFileBytes.mockImplementationOnce(
+			() =>
+				new Promise<Uint8Array>((_resolve, reject) => {
+					held.reject = reject
+				})
+		)
+
+		const first = renderHook(() => usePreviewBytes(A))
+
+		await waitFor(() => {
+			expect(downloadFileBytes).toHaveBeenCalledTimes(1)
+		})
+
+		// Stepped away and straight back: the revisit joins the load its first visit started.
+		first.unmount()
+
+		const revisit = renderHook(() => usePreviewBytes(A))
+
+		// Stepped away again, then closed, all before the first visit's cancel reached the worker.
+		revisit.unmount()
+		clearPreviewCache()
+		held.reject(new Error("Cancelled"))
+
+		await new Promise(resolve => setTimeout(resolve, 0))
+		expect(downloadFileBytes).toHaveBeenCalledTimes(1)
+		expect(getPreviewBytes("authed", A.data.uuid)).toBeUndefined()
 	})
 })

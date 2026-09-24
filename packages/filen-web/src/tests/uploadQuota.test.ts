@@ -38,6 +38,7 @@ vi.mock("@/features/drive/lib/heicUpload", async importOriginal => {
 
 import { queryClient } from "@/queries/client"
 import { ACCOUNT_QUERY_KEY, markAccountStale } from "@/queries/account"
+import { addAccountStorageUsed, checkUploadQuota } from "@/features/drive/lib/quota"
 import { startUploads } from "@/features/drive/lib/upload"
 import { startDirectoryUpload } from "@/features/drive/lib/uploadDirectory"
 import { useTransfersStore } from "@/features/transfers/store/useTransfersStore"
@@ -164,6 +165,61 @@ describe("startUploads quota pre-flight", () => {
 
 		expect(uploadFile).toHaveBeenCalledOnce()
 		expect(toastError).not.toHaveBeenCalled()
+	})
+})
+
+// Any account write cancels the account query's own read, which then resolves with the cached figure;
+// the pre-flight's fresh read must not be that read.
+describe("the pre-flight's fresh read", () => {
+	function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+		let resolve: (value: T) => void = () => undefined
+		const promise = new Promise<T>(r => {
+			resolve = r
+		})
+
+		return { promise, resolve }
+	}
+
+	it.each([
+		[
+			"a stale mark",
+			() => {
+				markAccountStale()
+			}
+		],
+		[
+			"an optimistic storage patch",
+			() => {
+				addAccountStorageUsed(50n)
+			}
+		]
+	])("judges on the server's figure when %s lands during the read, and leaves the cache to that write", async (_, write) => {
+		queryClient.setQueryData(ACCOUNT_QUERY_KEY, account(9_900n, 10_000n))
+
+		const fresh = deferred<UserInfo>()
+
+		getUserInfo.mockReturnValueOnce(fresh.promise)
+
+		const verdict = checkUploadQuota(3_000n)
+
+		write()
+
+		const written = cachedAccount()
+
+		fresh.resolve(account(1_000n, 10_000n))
+
+		await expect(verdict).resolves.toEqual({ status: "fits" })
+		expect(cachedAccount()).toBe(written)
+	})
+
+	it("refreshes the cached account when nothing was written during the read", async () => {
+		queryClient.setQueryData(ACCOUNT_QUERY_KEY, account(9_900n, 10_000n))
+		markAccountStale()
+		getUserInfo.mockResolvedValue(account(1_000n, 10_000n))
+
+		await expect(checkUploadQuota(3_000n)).resolves.toEqual({ status: "fits" })
+		expect(cachedAccount()?.storageUsed).toBe(1_000n)
+		expect(queryClient.getQueryState(ACCOUNT_QUERY_KEY)?.isInvalidated).toBe(false)
 	})
 })
 

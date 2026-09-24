@@ -1,6 +1,6 @@
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { type DriveItem } from "@/features/drive/lib/item"
-import { isMoveDestinationForbidden } from "@/features/drive/components/moveTargetDialog.logic"
+import { isChainForbidden, isMoveDestinationForbidden, type ParentLookup } from "@/features/drive/components/moveTargetDialog.logic"
 
 // Pure drag-to-move logic — framework-free so the unit tests exercise it directly (self/descendant/
 // same-parent target guards, drag-payload assembly). The browser-facing side (module payload ref,
@@ -44,20 +44,31 @@ export interface MoveTargetParams {
 	targetUuid: string | null
 	// The target's root-to-target uuid chain, inclusive of the target itself; empty for the root.
 	targetAncestry: readonly string[]
+	// Reads the target's real parents, for a target whose chain skips directories (a search hit below
+	// the search root's children); asked only when the payload holds a directory.
+	readParents?: (() => ParentLookup) | undefined
 	payload: readonly DriveItem[]
 	rootUuid: string
+}
+
+// Self/descendant, via the target's known chain and, where that chain has gaps, its walked parents.
+function isSubtreeTarget({ targetUuid, targetAncestry, readParents, payload }: Omit<MoveTargetParams, "rootUuid">): boolean {
+	return (
+		isMoveDestinationForbidden(targetAncestry, payload) ||
+		(readParents !== undefined && targetUuid !== null && isChainForbidden(targetUuid, payload, readParents))
+	)
 }
 
 // The single client-side validity gate every drop target shares. The SDK/server remains the final
 // validator — a rejection there surfaces as the standard error toast — so this only rules out the
 // cheap, locally-knowable illegal drops: an empty payload, moving a directory into itself or a
 // descendant (self/descendant, via the target's known ancestry), and a no-op onto the current parent.
-export function isValidMoveTarget({ targetUuid, targetAncestry, payload, rootUuid }: MoveTargetParams): boolean {
+export function isValidMoveTarget({ targetUuid, targetAncestry, readParents, payload, rootUuid }: MoveTargetParams): boolean {
 	if (payload.length === 0) {
 		return false
 	}
 
-	if (isMoveDestinationForbidden(targetAncestry, payload)) {
+	if (isSubtreeTarget({ targetUuid, targetAncestry, readParents, payload })) {
 		return false
 	}
 
@@ -78,6 +89,6 @@ export function dragDropMode(event: { altKey: boolean; ctrlKey: boolean }, mac: 
 
 // A copy may land beside its source (the SDK gives it a free name), so only the self/descendant guard
 // applies — the copy picker's own rule (isCopyConfirmDisabled).
-export function isValidCopyTarget({ targetAncestry, payload }: Pick<MoveTargetParams, "targetAncestry" | "payload">): boolean {
-	return payload.length > 0 && !isMoveDestinationForbidden(targetAncestry, payload)
+export function isValidCopyTarget(params: Omit<MoveTargetParams, "rootUuid">): boolean {
+	return params.payload.length > 0 && !isSubtreeTarget(params)
 }

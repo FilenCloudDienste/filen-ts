@@ -1,4 +1,4 @@
-import { useQueries, useQuery, type Query, type QueryKey, type UseQueryResult } from "@tanstack/react-query"
+import { useQueries, useQuery, type Query, type UseQueryResult } from "@tanstack/react-query"
 import { sdkApi } from "@/lib/sdk/client"
 import { currentSocketEpoch, socketLiveSince } from "@/lib/sdk/socketSession"
 import { queryClient } from "@/queries/client"
@@ -6,7 +6,7 @@ import { queryClient } from "@/queries/client"
 // @filen/sdk-rs as a real value import, same elision hazard as above.
 import type { ListDirectoryTarget, ItemInfoResult } from "@/workers/sdk.worker"
 import type { Dir, File, FileVersion, DirPublicLinkRW, FilePublicLink, DirColor, DirSizeResponse, GetItemPathResult } from "@filen/sdk-rs"
-import { fastLocaleCompare, driveItemName } from "@filen/shared"
+import { fastLocaleCompare, driveItemName, upsertItems } from "@filen/shared"
 import { narrowItem, asDirectoryOrFile, toAnyDirWithContext, type DriveItem } from "@/features/drive/lib/item"
 import {
 	getHideHiddenItems,
@@ -76,13 +76,64 @@ function listingId(variant: DriveVariant, uuid: string | null): string {
 const listingsReadThisSession = new Set<string>()
 let listingStaleMarks = 0
 
+type ListingPatch = (items: DriveItem[]) => DriveItem[]
+
+// The listing reads under way, per listing, with the patches that landed meanwhile. A read may have
+// snapshotted the server before the change behind such a patch, so it applies the ones that landed after
+// it began to what it returns: a patch is never lost to an overlapping read, which therefore needs neither
+// cancelling nor repeating. `marks` counts patches that couldn't carry their whole change
+// (markDriveListingStale); one landing during a read keeps it from counting.
+interface ListingReads {
+	params: DriveListingParams
+	running: number
+	patches: ListingPatch[]
+	marks: number
+}
+
+const listingReads = new Map<string, ListingReads>()
+
+async function readApplyingPatches(
+	params: DriveListingParams,
+	read: () => Promise<DriveItem[]>
+): Promise<{ items: DriveItem[]; marked: boolean }> {
+	const id = listingId(params.variant, params.uuid)
+	let reads = listingReads.get(id)
+
+	if (reads === undefined) {
+		reads = { params, running: 0, patches: [], marks: 0 }
+
+		listingReads.set(id, reads)
+	}
+
+	const from = reads.patches.length
+	const marks = reads.marks
+
+	reads.running++
+
+	try {
+		let items = await read()
+
+		for (const patch of reads.patches.slice(from)) {
+			items = patch(items)
+		}
+
+		return { items, marked: reads.marks !== marks }
+	} finally {
+		reads.running--
+
+		if (reads.running === 0 && listingReads.get(id) === reads) {
+			listingReads.delete(id)
+		}
+	}
+}
+
 async function readListing(variant: Exclude<DriveVariant, "sharedIn" | "sharedOut">, uuid: string | null): Promise<DriveItem[]> {
 	const epoch = currentSocketEpoch()
 	const marks = listingStaleMarks
-	const items = await fetchDirectoryListing(variant, uuid)
+	const { items, marked } = await readApplyingPatches({ variant, uuid }, () => fetchDirectoryListing(variant, uuid))
 	const id = listingId(variant, uuid)
 
-	if (SOCKET_SYNCED_VARIANTS.has(variant) && socketLiveSince(epoch) && marks === listingStaleMarks) {
+	if (SOCKET_SYNCED_VARIANTS.has(variant) && socketLiveSince(epoch) && marks === listingStaleMarks && !marked) {
 		listingsReadThisSession.add(id)
 	} else {
 		listingsReadThisSession.delete(id)
@@ -125,9 +176,9 @@ export function useDirectoryListingQuery(
 	return useQuery({
 		...listingRefetchPolicy,
 		queryKey: driveListingQueryKey({ variant, uuid }),
-		queryFn: () => {
+		queryFn: async () => {
 			if (variant === "sharedIn" || variant === "sharedOut") {
-				return fetchSharedListing(variant, uuid, path)
+				return (await readApplyingPatches({ variant, uuid }, () => fetchSharedListing(variant, uuid, path))).items
 			}
 
 			return readListing(variant, uuid)
@@ -198,47 +249,145 @@ export async function fetchSharedListing(
 	return [...dirs.map(dir => narrowItem({ ...dir, sharingRole: role })), ...files.map(file => narrowItem({ ...file, sharingRole: role }))]
 }
 
-// Confirm-then-patch for a write landing in My Drive (queries/client.ts's zero-useMutation
-// convention) — always the "drive" variant: the three flat listings (recents/favorites/trash) have
-// no navigable parent to create/move into. A listing nobody has read stays unread: made from the rows
-// a patch adds, it would show as that directory's whole content until its read, and a copy or a
-// directory upload would leave one such entry behind per directory it creates.
-export function driveListingQueryUpdate(parentUuid: string | null, updater: (prev: DriveItem[]) => DriveItem[]): void {
-	listingQueryUpdate(driveListingQueryKey({ variant: "drive", uuid: parentUuid }), prev => (prev === undefined ? prev : updater(prev)))
+// One lookup by the key's hash: a filter find() copies and re-hashes the whole query cache per call.
+function listingQuery(params: DriveListingParams): Query | undefined {
+	return queryClient.getQueryCache().get(queryClient.defaultQueryOptions({ queryKey: driveListingQueryKey(params) }).queryHash)
 }
 
-// The flat listings (recents/favorites/trash/links) patched by their one key. An unread one stays unread
-// rather than conjured from a single row.
+// setQueryData marks a listing fresh, which drops a pending invalidation: a read socket-synced listing
+// never goes stale on its own, so the change behind it would then never be read.
+function writeListing(query: Query, next: DriveItem[]): void {
+	const invalidated = query.state.isInvalidated
+
+	queryClient.setQueryData<DriveItem[]>(query.queryKey, next)
+
+	if (invalidated) {
+		query.invalidate()
+	}
+}
+
+// A read under way gets the patch through its replay, cached data directly. A listing nobody has read
+// gets neither: made from the rows a patch adds, it would show as that directory's whole content until
+// its read, and a copy or a directory upload would leave one such entry behind per directory it creates.
+function patchListing(params: DriveListingParams, updater: ListingPatch): void {
+	listingReads.get(listingId(params.variant, params.uuid))?.patches.push(updater)
+
+	const query = listingQuery(params)
+	const prev = query?.state.data as DriveItem[] | undefined
+
+	if (query === undefined || prev === undefined) {
+		return
+	}
+
+	const next = updater(prev)
+
+	if (next !== prev) {
+		writeListing(query, next)
+	}
+}
+
+// Confirm-then-patch for a write landing in My Drive (queries/client.ts's zero-useMutation
+// convention) — always the "drive" variant: the three flat listings (recents/favorites/trash) have
+// no navigable parent to create/move into.
+export function driveListingQueryUpdate(parentUuid: string | null, updater: (prev: DriveItem[]) => DriveItem[]): void {
+	flushListingCreates()
+	patchListing({ variant: "drive", uuid: parentUuid }, updater)
+}
+
+// The flat listings (recents/favorites/trash/links) patched by their one key.
 export function flatListingQueryUpdate(
 	variant: "recents" | "favorites" | "trash" | "links",
 	updater: (prev: DriveItem[]) => DriveItem[]
 ): void {
-	listingQueryUpdate(driveListingQueryKey({ variant, uuid: null }), prev => (prev === undefined ? prev : updater(prev)))
+	flushListingCreates()
+	patchListing({ variant, uuid: null }, updater)
 }
 
-function listingQueryUpdate(
-	queryKey: ReturnType<typeof driveListingQueryKey>,
-	updater: (prev: DriveItem[] | undefined) => DriveItem[] | undefined
-): void {
-	const pending = isRefreshPending(queryClient.getQueryCache().find({ queryKey, exact: true }))
+// How long a created item waits to land in its parent listing together with the others created meanwhile.
+export const LISTING_CREATE_FLUSH_MS = 250
 
-	cancelListingFetch(queryKey)
-	queryClient.setQueryData<DriveItem[]>(queryKey, updater)
+// A copy or a many-file upload creates items by the thousand, each reported by the job and again by its
+// socket echo, and every splice rewrites, re-sorts and re-renders the whole parent listing. Queued per
+// parent and by uuid, they land in one write per listing per window. Every other listing patch applies
+// the queue first, so nothing it removes, moves or edits comes back after it.
+let queuedCreates = new Map<string | null, Map<string, DriveItem>>()
+let queuedRecents = new Map<string, DriveItem>()
+let createFlushTimer: ReturnType<typeof setTimeout> | undefined
 
-	if (pending) {
-		keepRefreshPending(queryKey)
+// `recent`: a new file that also joins Recents.
+export function queueListingCreate(parentUuid: string | null, item: DriveItem, options?: { recent: boolean }): void {
+	let byUuid = queuedCreates.get(parentUuid)
+
+	if (byUuid === undefined) {
+		byUuid = new Map()
+
+		queuedCreates.set(parentUuid, byUuid)
+	}
+
+	byUuid.set(item.data.uuid, item)
+
+	if (options?.recent === true) {
+		queuedRecents.set(item.data.uuid, item)
+	}
+
+	createFlushTimer ??= setTimeout(flushListingCreates, LISTING_CREATE_FLUSH_MS)
+}
+
+export function flushListingCreates(): void {
+	if (createFlushTimer !== undefined) {
+		clearTimeout(createFlushTimer)
+
+		createFlushTimer = undefined
+	}
+
+	if (queuedCreates.size === 0) {
+		return
+	}
+
+	const creates = queuedCreates
+	const recents = queuedRecents
+
+	queuedCreates = new Map()
+	queuedRecents = new Map()
+
+	for (const [parentUuid, byUuid] of creates) {
+		const items = [...byUuid.values()]
+
+		patchListing({ variant: "drive", uuid: parentUuid }, prev => upsertItems(prev, items))
+	}
+
+	if (recents.size > 0) {
+		const items = [...recents.values()]
+
+		// Recents spans directories, so only the uuid dedups: two recent files may share a name.
+		patchListing({ variant: "recents", uuid: null }, prev => [...prev.filter(row => !recents.has(row.data.uuid)), ...items])
 	}
 }
 
-// setQueryData marks a listing fresh, dropping a pending invalidation and the refetch a patch cancels.
-// A read socket-synced listing never goes stale on its own, so left unrestored, the change behind them
-// would never be read.
-function isRefreshPending(query: Query | undefined): boolean {
-	return query !== undefined && (query.state.isInvalidated || query.state.fetchStatus !== "idle")
+// Logout: the queued creates and the patches kept for reads under way belong to the ended session.
+export function discardListingPatches(): void {
+	if (createFlushTimer !== undefined) {
+		clearTimeout(createFlushTimer)
+
+		createFlushTimer = undefined
+	}
+
+	queuedCreates = new Map()
+	queuedRecents = new Map()
+	listingReads.clear()
 }
 
-function keepRefreshPending(queryKey: QueryKey): void {
-	void queryClient.invalidateQueries({ queryKey, exact: true, refetchType: "none" })
+// For a patch that can't carry its whole change (a moved or restored directory, whose echo has no
+// colour): the listing reads again on its next mount or focus, and a read under way, which gets the
+// patch through its replay, doesn't count as current.
+export function markDriveListingStale(uuid: string | null): void {
+	const reads = listingReads.get(listingId("drive", uuid))
+
+	if (reads !== undefined) {
+		reads.marks++
+	}
+
+	listingQuery({ variant: "drive", uuid })?.invalidate()
 }
 
 // One flat listing re-read if mounted, else marked stale.
@@ -259,18 +408,6 @@ export function markListingsStale(): void {
 	void queryClient.invalidateQueries({ queryKey: ["drive", "listing"], refetchType: "none" })
 }
 
-// The cancel half of this module's cancel-before-patch discipline, shared by every listing patch —
-// the per-key updaters above and the fan-out below. A refetch snapshotted on the server BEFORE a
-// write lands after the patch and silently overwrites it, so anything in flight is aborted first.
-// Only when cached data already exists: cancelling a query's INITIAL fetch would strand it on its
-// loading state with nothing to show until the next mount/focus trigger, and the overwrite hazard
-// only applies to data a patch can lose.
-function cancelListingFetch(queryKey: ReturnType<typeof driveListingQueryKey>): void {
-	if (queryClient.getQueryData(queryKey) !== undefined) {
-		void queryClient.cancelQueries({ queryKey, exact: true })
-	}
-}
-
 // Every updater this fan-out receives is a filter/map, which allocates a fresh array even when nothing
 // matched — so an array-reference check can't tell an affected listing from an untouched one, but an
 // element-identity walk can.
@@ -285,11 +422,20 @@ function sameItems(prev: DriveItem[], next: DriveItem[]): boolean {
 // "trash" listing at once, the null-root included. For an action whose effect isn't confined to one
 // parent — an item can be favorited/colored in place, or moved out of one listing into another — a
 // single narrow driveListingQueryUpdate call can't reach every affected key, but this can. A listing
-// nobody has fetched yet has no cached data and is skipped entirely, so this can never conjure a `[]`
-// into an unfetched query.
+// with no cached data is never written, so this can never conjure a `[]` into an unfetched query; one
+// whose first read is under way gets the patch through that read's replay.
 export function driveListingQueryUpdateGlobal(updater: (items: DriveItem[], params: DriveListingParams) => DriveItem[]): void {
+	flushListingCreates()
+
+	// Every read under way, with or without data yet: its result may hold a row this touches.
+	for (const reads of listingReads.values()) {
+		const params = reads.params
+
+		reads.patches.push(items => updater(items, params))
+	}
+
 	for (const query of queryClient.getQueryCache().findAll({ queryKey: ["drive", "listing"] })) {
-		const prev = queryClient.getQueryData<DriveItem[]>(query.queryKey)
+		const prev = query.state.data as DriveItem[] | undefined
 
 		if (prev === undefined) {
 			continue
@@ -297,24 +443,12 @@ export function driveListingQueryUpdateGlobal(updater: (items: DriveItem[], para
 
 		const next = updater(prev, (query.queryKey as ReturnType<typeof driveListingQueryKey>)[2])
 
-		// Most cached listings hold no row a given updater touches, and an untouched listing must be left
-		// strictly alone: cancelling its in-flight refetch (below) would strand it on pre-fetch rows until
-		// the next mount/focus, since a cancelled fetch reverts and never retries on its own.
+		// Most cached listings hold no row a given updater touches; writing one would re-render it for nothing.
 		if (sameItems(prev, next)) {
 			continue
 		}
 
-		// Same in-flight-refetch hazard as driveListingQueryUpdate above, with the same initial-fetch
-		// carve-out — only a listing that already holds data (and is actually changing) gets its fetch
-		// aborted, so an initial fetch is never left stranded on its loading state.
-		const pending = isRefreshPending(query)
-
-		void queryClient.cancelQueries({ queryKey: query.queryKey, exact: true })
-		queryClient.setQueryData<DriveItem[]>(query.queryKey, next)
-
-		if (pending) {
-			keepRefreshPending(query.queryKey)
-		}
+		writeListing(query, next)
 	}
 }
 
@@ -325,7 +459,7 @@ export function driveListingQueryUpdateGlobal(updater: (items: DriveItem[], para
 // next mount.
 export function findCachedListingItem(uuid: string): DriveItem | undefined {
 	for (const query of queryClient.getQueryCache().findAll({ queryKey: ["drive", "listing"] })) {
-		const found = queryClient.getQueryData<DriveItem[]>(query.queryKey)?.find(item => item.data.uuid === uuid)
+		const found = (query.state.data as DriveItem[] | undefined)?.find(item => item.data.uuid === uuid)
 
 		if (found !== undefined) {
 			return found
@@ -393,6 +527,27 @@ export async function fetchDirectoryName(scope: DirectoryNameScope, path: readon
 	}
 
 	return scope === "drive" ? sdkApi.resolveDirectoryName(uuid) : sdkApi.resolveDirectoryName(uuid, { variant: scope, path: [...path] })
+}
+
+// A paste destination's name, for its copy card. A directory opened by a deep link or a reveal often has
+// no cached parent listing, so its name may only be in the breadcrumb's entry, which this reads, or joins
+// while it still resolves, instead of asking again. A cached listing row still wins: socket renames patch
+// listings, not the breadcrumb.
+export async function destinationDirectoryName(scope: DirectoryNameScope, path: readonly string[]): Promise<string | null> {
+	const uuid = path.at(-1)
+
+	if (uuid === undefined) {
+		return null
+	}
+
+	return (
+		cachedDirectoryName(uuid) ??
+		queryClient.query({
+			queryKey: driveNamesQueryKey(scope, uuid),
+			queryFn: () => fetchDirectoryName(scope, path),
+			staleTime: Infinity
+		})
+	)
 }
 
 export type DirectoryNamesResult =

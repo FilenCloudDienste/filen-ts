@@ -20,23 +20,57 @@ export function photosListingQueryKey(rootUuid: string) {
 // wasn't up for may predate an event it never delivered.
 const readThisSession = new Set<string>()
 
+// Favorite flips that land while a walk runs, one map per walk. The walk may have read a flag before its
+// flip, so it applies them to what it returns. The echo carries the whole change, the new flag, so unlike
+// an event that can change which photos are listed, a favorite never costs another walk.
+const flipsDuringWalks = new Set<Map<string, boolean>>()
+
+// The same array when no flip changes a flag.
+function withFavoriteFlips(photos: PhotoItem[], flips: ReadonlyMap<string, boolean>): PhotoItem[] {
+	if (flips.size === 0) {
+		return photos
+	}
+
+	let next: PhotoItem[] | undefined
+
+	for (let index = 0; index < photos.length; index++) {
+		const photo = photos[index]
+		const favorited = photo === undefined ? undefined : flips.get(photo.data.uuid)
+
+		if (photo !== undefined && favorited !== undefined && favorited !== photo.data.favorited) {
+			next ??= photos.slice()
+			next[index] = { ...photo, data: { ...photo.data, favorited } }
+		}
+	}
+
+	return next ?? photos
+}
+
 // The recursive walk (listPhotosRecursive) plus the media predicate and capture-date sort, all in one
 // queryFn — a photos listing has exactly one consumer shape (the grid), so there is no separate
 // selector layer filtering/sorting on every render the way a multi-mode drive listing would need.
 export async function fetchPhotosListing(rootUuid: string): Promise<PhotoItem[]> {
 	const epoch = currentSocketEpoch()
-	const { dirs, files } = await sdkApi.listPhotosRecursive(rootUuid)
+	const flips = new Map<string, boolean>()
 
-	if (socketLiveSince(epoch)) {
-		readThisSession.add(rootUuid)
-	} else {
-		readThisSession.delete(rootUuid)
+	flipsDuringWalks.add(flips)
+
+	try {
+		const { dirs, files } = await sdkApi.listPhotosRecursive(rootUuid)
+
+		if (socketLiveSince(epoch)) {
+			readThisSession.add(rootUuid)
+		} else {
+			readThisSession.delete(rootUuid)
+		}
+
+		const items: DriveItem[] = [...dirs.map(narrowItem), ...files.map(narrowItem)]
+		const photos = items.filter(isPhotoItem) as PhotoItem[]
+
+		return withFavoriteFlips(sortPhotosByCaptureDesc(photos), flips)
+	} finally {
+		flipsDuringWalks.delete(flips)
 	}
-
-	const items: DriveItem[] = [...dirs.map(narrowItem), ...files.map(narrowItem)]
-	const photos = items.filter(isPhotoItem) as PhotoItem[]
-
-	return sortPhotosByCaptureDesc(photos)
 }
 
 // A full recursive walk, and drive socket events already mark the listing stale when something under the
@@ -59,24 +93,67 @@ export function usePhotosListingQuery(rootUuid: string | null): UseQueryResult<P
 // queries/drive.ts) but scoped to the one photos key currently mounted for `rootUuid` — there is only
 // ever one photos listing query alive at a time (kv-persisted single root), so this needs no
 // "Global" fan-out counterpart the way drive's own multi-listing surface does. A cache miss (nobody
-// has viewed this root yet) is left alone rather than defaulting to [] — unlike driveListingQueryUpdate,
-// a photos patch is always the tail of an action taken FROM an already-rendered grid, so the query is
-// always already populated by the time this runs.
+// has viewed this root yet) is left alone; a photos patch is the tail of an action taken FROM an
+// already-rendered grid anyway. Unlike drive's patches it still cancels a walk under way, which then
+// stays pending until the next mount or focus.
 export function photosListingQueryUpdate(rootUuid: string, updater: (prev: PhotoItem[]) => PhotoItem[]): void {
 	const queryKey = photosListingQueryKey(rootUuid)
-	const query = queryClient.getQueryCache().find({ queryKey, exact: true })
-	// setQueryData marks the listing fresh, dropping a pending invalidation and the refetch cancelled
-	// below; left unrestored, the change behind them would wait out the stale time.
-	const refreshPending = query !== undefined && (query.state.isInvalidated || query.state.fetchStatus !== "idle")
+	// One lookup by the key's hash: a filter find() copies and re-hashes the whole query cache per call.
+	const query = queryClient.getQueryCache().get<PhotoItem[]>(queryClient.defaultQueryOptions({ queryKey }).queryHash)
 
-	if (queryClient.getQueryData(queryKey) !== undefined) {
-		void queryClient.cancelQueries({ queryKey })
+	if (query?.state.data === undefined) {
+		return
 	}
 
+	// setQueryData marks the listing fresh, dropping a pending invalidation and the refetch cancelled
+	// below; left unrestored, the change behind them would wait out the stale time.
+	const refreshPending = query.state.isInvalidated || query.state.fetchStatus !== "idle"
+
+	void query.cancel({ revert: true })
 	queryClient.setQueryData<PhotoItem[]>(queryKey, prev => (prev === undefined ? prev : updater(prev)))
 
-	if (refreshPending && queryClient.getQueryData(queryKey) !== undefined) {
-		void queryClient.invalidateQueries({ queryKey, exact: true, refetchType: "none" })
+	if (refreshPending) {
+		query.invalidate()
+	}
+}
+
+// A favorite set outside the grid, in Drive or on another device, reaches it through its socket echo: a
+// flag flip on a listed photo, never a new row and never a walk, which is why the echo isn't among the
+// invalidating events. A listing without the photo, or with the flag already set, is left alone. A walk
+// under way gets the flip too (flipsDuringWalks), whether or not the rows it will replace hold the photo.
+export function patchPhotosFavorite(item: DriveItem): void {
+	// A listing holds photos only, so no other favorite can concern one.
+	if (item.type !== "file" || !isPhotoItem(item)) {
+		return
+	}
+
+	const flip = new Map([[item.data.uuid, item.data.favorited]])
+
+	for (const flips of flipsDuringWalks) {
+		flips.set(item.data.uuid, item.data.favorited)
+	}
+
+	for (const query of queryClient.getQueryCache().findAll({ queryKey: ["photos", "listing"] })) {
+		const photos = query.state.data as PhotoItem[] | undefined
+
+		if (photos === undefined) {
+			continue
+		}
+
+		const next = withFavoriteFlips(photos, flip)
+
+		if (next === photos) {
+			continue
+		}
+
+		// No cancel: the walk under way returns the flip too. setQueryData drops a pending invalidation.
+		const invalidated = query.state.isInvalidated
+
+		queryClient.setQueryData<PhotoItem[]>(query.queryKey, next)
+
+		if (invalidated) {
+			query.invalidate()
+		}
 	}
 }
 
@@ -101,12 +178,15 @@ export function invalidatePhotosListing(scope: PhotosEventScope | null): void {
 		const rootUuid = queryKey[2]
 		const photos = queryClient.getQueryData<PhotoItem[]>(queryKey)
 
-		// Read at call time: a scope check resolving later may find a walk already under way.
+		// Read at call time: a scope check resolving later may find a walk already under way. An inactive
+		// listing is only marked, on the query itself rather than through a filter that scans the cache.
 		const invalidate = (): void => {
-			if (query.state.fetchStatus === "idle") {
+			if (query.state.fetchStatus !== "idle") {
+				rewalkAfterCurrentWalk(query.queryHash, queryKey)
+			} else if (query.isActive()) {
 				void queryClient.invalidateQueries({ queryKey, exact: true })
 			} else {
-				rewalkAfterCurrentWalk(query.queryHash, queryKey)
+				query.invalidate()
 			}
 		}
 

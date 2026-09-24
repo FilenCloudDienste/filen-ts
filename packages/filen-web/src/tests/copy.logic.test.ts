@@ -3,6 +3,7 @@ import type { CopyCounts, CopyFailure, CopyFailureInfo, CopyReport, CopyUpdate, 
 import { applyCopyCreated, applyCopyUpdate, settleCopyJob } from "@filen/shared"
 import { narrowItem } from "@/features/drive/lib/item"
 import {
+	copiedTopLevel,
 	copyErrorDTO,
 	copyGlyphForEntries,
 	copyGlyphForItems,
@@ -17,6 +18,8 @@ function testUuid(label: string): UuidStr {
 }
 
 const DESTINATION = { uuid: null, name: "My Drive" }
+// The SDK's own message: developer text, kept on the error for logs.
+const SERVER_MESSAGE = 'Error of kind Server: error: API Error, message: `Some("Server said no")`'
 
 function counts(overrides: Partial<CopyCounts> = {}): CopyCounts {
 	return {
@@ -61,7 +64,7 @@ function failureInfo(overrides: Partial<CopyFailureInfo> = {}): CopyFailureInfo 
 		destParentDir: { uuid: testUuid("dest") },
 		destName: "b.txt",
 		stage: "upload",
-		error: { kind: "Server", message: "upload failed", serverMessage: "Server said no", serverCode: "code" },
+		error: { kind: "Server", message: SERVER_MESSAGE, serverMessage: "Server said no", serverCode: "code" },
 		affectedFiles: 1n,
 		affectedBytes: 100n,
 		existingFile: undefined,
@@ -202,13 +205,18 @@ describe("copyReportInput", () => {
 			report({
 				topLevel: [{ request: 0n, sourceUuid: testUuid("s"), item: { type: "dir", ...dir } }],
 				renamed: [{ sourceUuid: testUuid("s"), sourcePath: "x", name: "x (1)", reason: "duplicateName" }],
-				error: { kind: "Server", message: "boom", serverMessage: undefined, serverCode: undefined }
+				error: {
+					kind: "Server",
+					message: "Error of kind Server: error: API Error",
+					serverMessage: undefined,
+					serverCode: undefined
+				}
 			})
 		)
 
 		expect(input.createdCount).toBe(1)
 		expect(input.renamedCount).toBe(1)
-		expect(input.error).toMatchObject({ species: "sdk", kind: "Server", label: "boom" })
+		expect(input.error).toMatchObject({ species: "sdk", kind: "Server", message: "Error of kind Server: error: API Error" })
 	})
 
 	it("settles through the shared job with the report's retryable failures", () => {
@@ -229,13 +237,57 @@ describe("copyReportInput", () => {
 				report({
 					counts: counts(),
 					totals: { dirs: 0n, files: 0n, bytes: 0n },
-					error: { kind: "MaxStorageReached", message: "needs more", serverMessage: undefined, serverCode: undefined }
+					error: {
+						kind: "MaxStorageReached",
+						message: "Error of kind MaxStorageReached: error: the copy needs 300 bytes, 42 are free",
+						serverMessage: undefined,
+						serverCode: undefined
+					}
 				})
 			),
 			maxBytes: 42
 		})
 
 		expect(job.outcome).toEqual({ status: "quotaExceeded", freeBytes: 42 })
+	})
+})
+
+describe("copiedTopLevel", () => {
+	const dir: Dir = {
+		uuid: testUuid("copied"),
+		parent: testUuid("dest"),
+		color: "default",
+		timestamp: 0n,
+		favorited: false,
+		meta: { type: "decoded", data: { name: "copied" } }
+	}
+
+	it("joins the report's items with the delivered ones, once each, and never a file saved as a new version", () => {
+		const delivered = narrowItem(dir)
+		const listed = mockFile("listed")
+		const versioned = mockFile("versioned")
+		const settlement = {
+			report: copyReportInput(
+				report({
+					topLevel: [
+						{ request: 0n, sourceUuid: testUuid("s"), item: { type: "dir", ...dir } },
+						{ request: 1n, sourceUuid: testUuid("s"), item: { type: "file", ...listed } },
+						{ request: 2n, sourceUuid: testUuid("s"), item: { type: "file", ...versioned } }
+					],
+					failures: [failure({ stage: "registeredAsVersion", existingFile: versioned.uuid })]
+				})
+			),
+			maxBytes: undefined
+		}
+
+		expect(copiedTopLevel(settlement, [delivered]).map(item => item.data.uuid)).toEqual([dir.uuid, listed.uuid])
+		expect(copiedTopLevel(settlement, [delivered])[0]).toBe(delivered)
+	})
+
+	it("keeps the delivered items of a call that rejected without a report", () => {
+		const delivered = narrowItem(dir)
+
+		expect(copiedTopLevel({ error: { species: "plain", message: "m", label: "m" } }, [delivered, delivered])).toEqual([delivered])
 	})
 })
 
@@ -254,7 +306,7 @@ describe("copyErrorDTO", () => {
 		expect(copyErrorDTO(failureInfo().error)).toEqual({
 			species: "sdk",
 			kind: "Server",
-			message: "upload failed",
+			message: SERVER_MESSAGE,
 			serverMessage: "Server said no",
 			serverCode: "code",
 			label: "Server said no"
@@ -262,11 +314,13 @@ describe("copyErrorDTO", () => {
 	})
 
 	it("falls back to the message and omits absent server fields", () => {
-		expect(copyErrorDTO({ kind: "IO", message: "disk", serverMessage: undefined, serverCode: undefined })).toEqual({
+		const message = "Error of kind IO: error: No space left on device (os error 28)"
+
+		expect(copyErrorDTO({ kind: "IO", message, serverMessage: undefined, serverCode: undefined })).toEqual({
 			species: "sdk",
 			kind: "IO",
-			message: "disk",
-			label: "disk"
+			message,
+			label: message
 		})
 	})
 })

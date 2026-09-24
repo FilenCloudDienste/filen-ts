@@ -71,6 +71,8 @@ export const transfers = {
 	transfersStatusCompletedWithErrors: "Completed with errors",
 	/** Transfer row — status label replacing the live percentage while an active (uploading/downloading) transfer is suspended in place */
 	transfersStatusPaused: "Paused",
+	/** Transfer row — status label replacing the live percentage of a stopped copy while the items it copied are being moved to the trash, as the user asked when stopping it */
+	transfersStatusMovingToTrash: "Moving to trash…",
 	/** Transfer row — accessible label on the button removing a single finished (done/error) transfer from the list */
 	transfersRowRemove: "Remove",
 	/** Transfer row — accessible label on the button opening the single-transfer Cancel confirm dialog; also reused as the confirm dialog's own destructive confirm button label */
@@ -176,6 +178,14 @@ export const transfers = {
 	transfersCopyCancelledTrashed_other: "Stopped. {{count}} copied items were moved to the trash.",
 	/** Copy card — status after a stopped copy when some copied items could not be moved to the trash */
 	transfersCopyCancelledTrashFailed: "Stopped. Some copied items couldn't be moved to the trash.",
+	/** Copy card — status once a copy stopped with "Move copied items to trash" has ended, while the items it copied are being moved to the trash */
+	transfersCopyMovingToTrash: "Moving copied items to the trash…",
+	/** Copy transfer row — error line of a stopped copy whose copied items could not all be moved to the trash; they are still at the destination; singular */
+	transfersCopyTrashFailedItems_one: "{{count}} copied item couldn't be moved to the trash",
+	/** Copy transfer row — error line of a stopped copy whose copied items could not all be moved to the trash; they are still at the destination; plural */
+	transfersCopyTrashFailedItems_other: "{{count}} copied items couldn't be moved to the trash",
+	/** Copy card — error line for a failed item or a failed copy when the error has no text of its own for the user */
+	transfersCopyErrorGeneric: "Something went wrong.",
 	/** Copy card — button expanding and collapsing the details section */
 	transfersCopyDetails: "Details",
 	/** Copy card details — shown when there is nothing to list yet (no file in flight, no failure, no note) */

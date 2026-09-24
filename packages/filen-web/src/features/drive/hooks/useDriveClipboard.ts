@@ -2,7 +2,8 @@ import { useTranslation } from "react-i18next"
 import { type HotkeyCallback } from "react-hotkeys-hook"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
-import { cachedDirectoryName } from "@/features/drive/queries/drive"
+import { destinationDirectoryName, directoryNameScope } from "@/features/drive/queries/drive"
+import { cachedOwnParents } from "@/features/drive/lib/ownAncestry"
 import { canCopyToClipboard, canCutToClipboard, canPaste, shouldHandleClipboardShortcut } from "@/features/drive/lib/clipboard.logic"
 import { clipboardShortcutContext, copyToClipboard, cutToClipboard, pasteClipboard } from "@/features/drive/lib/clipboard"
 import { useDriveClipboardStore } from "@/features/drive/store/useDriveClipboardStore"
@@ -42,10 +43,28 @@ export function useDriveClipboard({
 }: UseDriveClipboardParams): DrivePasteAction {
 	const { t } = useTranslation("drive")
 	const entry = useDriveClipboardStore(state => state.entry)
-	const pasteEnabled = canPaste(entry, { variant, uuid, ancestry, listing, online: isOnline })
+	const target = { variant, uuid, ancestry, readParents: cachedOwnParents, listing, online: isOnline }
+	const pasteEnabled = canPaste(entry, target)
+
+	async function destinationName(): Promise<string> {
+		if (uuid === null) {
+			return t("driveMyDrive")
+		}
+
+		try {
+			return (await destinationDirectoryName(directoryNameScope(variant), ancestry)) ?? ""
+		} catch {
+			return ""
+		}
+	}
 
 	function paste(): void {
-		void pasteClipboard({ uuid, name: uuid === null ? t("driveMyDrive") : (cachedDirectoryName(uuid) ?? "") })
+		void destinationName().then(async name => {
+			// Asked again on use: the tree may have changed since this render, with nothing re-rendering it.
+			if (canPaste(useDriveClipboardStore.getState().entry, target)) {
+				await pasteClipboard({ uuid, name })
+			}
+		})
 	}
 
 	function claims(event: KeyboardEvent, textMatters: boolean): boolean {

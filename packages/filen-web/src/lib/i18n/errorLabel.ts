@@ -7,10 +7,25 @@ import { labelFirst, type ErrorDTO } from "@/lib/sdk/errors"
 // runtime, the typed `t()` can never statically prove the template-string key is valid. `as never`
 // is the documented escape hatch for exactly this dynamic-key-under-a-typed-catalog gap — confine
 // it to this one call site, never widen it elsewhere.
-export function errorLabel(dto: ErrorDTO): string {
+function kindLabel(dto: ErrorDTO): string | undefined {
+	// A server error's reason is what the server said; its kind's text only stands in when it said nothing.
+	if (dto.kind === "Server" && dto.serverMessage !== undefined) {
+		return dto.serverMessage
+	}
+
 	if (dto.kind !== undefined && i18n.exists(`errors:${dto.kind}`)) {
 		return i18n.t(`errors:${dto.kind}` as never)
 	}
 
-	return labelFirst(dto)
+	return undefined
+}
+
+export function errorLabel(dto: ErrorDTO): string {
+	return kindLabel(dto) ?? labelFirst(dto)
+}
+
+// For an error whose own message is developer text (a copy's): the server's message, then `fallback`,
+// where errorLabel would fall back to that message.
+export function errorLabelOr(dto: ErrorDTO, fallback: string): string {
+	return kindLabel(dto) ?? dto.serverMessage ?? fallback
 }

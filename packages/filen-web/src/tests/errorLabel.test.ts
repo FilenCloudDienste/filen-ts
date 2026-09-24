@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { errorLabel } from "@/lib/i18n/errorLabel"
+import { errorLabel, errorLabelOr } from "@/lib/i18n/errorLabel"
 import type { ErrorDTO } from "@/lib/sdk/errors"
 
 // Importing errorLabel transitively imports @/lib/i18n, which runs its i18next.init() as a module
@@ -29,7 +29,7 @@ describe("errorLabel", () => {
 	it("falls back to labelFirst for a real SdkErrorKind that has no catalog entry", () => {
 		const dto: ErrorDTO = {
 			species: "sdk",
-			kind: "Internal",
+			kind: "Walk",
 			message: "boom",
 			serverMessage: "server said boom",
 			label: "server said boom"
@@ -42,5 +42,41 @@ describe("errorLabel", () => {
 		const dto: ErrorDTO = { species: "plain", message: "plain failure", label: "plain failure" }
 
 		expect(errorLabel(dto)).toBe("plain failure")
+	})
+
+	it("translates a network error instead of showing the SDK's own text", () => {
+		const message = "Error of kind Reqwest: error: error sending request for url (https://gateway.filen.io/v3/upload)"
+		const dto: ErrorDTO = { species: "sdk", kind: "Reqwest", message, label: message }
+
+		expect(errorLabel(dto)).toBe("Network error. Please check your connection and try again.")
+	})
+
+	// "Server" is the kind for the server's own refusals: what it said is the reason.
+	it("shows a server error's own message, and its kind's text only when the server sent none", () => {
+		const message = "Error of kind Server: error: API Error"
+
+		expect(errorLabel({ species: "sdk", kind: "Server", message, serverMessage: "Upload rejected", label: "Upload rejected" })).toBe(
+			"Upload rejected"
+		)
+		expect(errorLabel({ species: "sdk", kind: "Server", message, label: message })).toBe(
+			"The server returned an error. Please try again later."
+		)
+	})
+})
+
+describe("errorLabelOr", () => {
+	it("takes the kind's text, then the server's message, then the fallback, never the error's own message", () => {
+		const message = "Error of kind Walk: error: walk failed"
+
+		expect(errorLabelOr({ species: "sdk", kind: "FileChunkNotFound", message, label: message }, "fallback")).toBe(
+			"This file's data could not be found on the server. It may have been deleted."
+		)
+		expect(errorLabelOr({ species: "sdk", kind: "Walk", message, serverMessage: "said so", label: "said so" }, "fallback")).toBe(
+			"said so"
+		)
+		expect(errorLabelOr({ species: "sdk", kind: "Walk", message, label: message }, "fallback")).toBe("fallback")
+		expect(errorLabelOr({ species: "plain", message: "no authenticated client", label: "no authenticated client" }, "fallback")).toBe(
+			"fallback"
+		)
 	})
 })

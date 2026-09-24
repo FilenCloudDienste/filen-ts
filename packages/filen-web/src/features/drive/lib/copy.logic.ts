@@ -1,16 +1,24 @@
-import type { CopyEntry, CopyError, CopyEvent, CopyFailure, CopyFailureInfo, CopyReport, CopyUpdate } from "@filen/sdk-rs"
+import type {
+	CopiedTopLevelItem,
+	CopyEntry,
+	CopyError,
+	CopyEvent,
+	CopyFailure,
+	CopyFailureInfo,
+	CopyReport,
+	CopyUpdate
+} from "@filen/sdk-rs"
 import {
 	createCopyJob as createSharedCopyJob,
 	type CopyJob as SharedCopyJob,
 	type CopyJobOutcome as SharedCopyJobOutcome,
 	type CopyReportInput,
-	type CopySettlement as SharedCopySettlement,
 	type CopyUpdateEvents,
 	type CopyUpdateInput,
 	type CopyDestination
 } from "@filen/shared"
 import { labelFirst, type ErrorDTO } from "@/lib/sdk/errors"
-import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
+import { asDirectoryOrFile, narrowItem, type DriveItem } from "@/features/drive/lib/item"
 
 // The wasm side of @filen/shared's copy job: maps the SDK's copy values onto its inputs, and adds what
 // only web's copy card and transfers row use.
@@ -59,7 +67,14 @@ export interface CopyJob extends SharedCopyJob<DriveItem, CopyJobFailure, CopyFa
 	cardVisible: boolean
 }
 
-export type CopySettlement = SharedCopySettlement<CopyJobFailure, CopyFailure, ErrorDTO>
+export interface CopyJobReport extends CopyReportInput<CopyJobFailure, CopyFailure, ErrorDTO> {
+	// The top-level items the report lists as created.
+	topLevel: CopiedTopLevelItem[]
+	// Existing files it registered new versions of: stored, not created, so never trashed as copies.
+	versionTargets: ReadonlySet<string>
+}
+
+export type CopySettlement = { report: CopyJobReport; maxBytes: number | undefined } | { error: ErrorDTO }
 
 export function createCopyJob(id: string, destination: CopyDestination, itemCount: number, glyph: CopyJobGlyph = "items"): CopyJob {
 	return {
@@ -69,6 +84,7 @@ export function createCopyJob(id: string, destination: CopyDestination, itemCoun
 	}
 }
 
+// The SDK's message is developer text, kept for logs; the card words what it shows with errorLabelOr.
 export function copyErrorDTO(error: CopyError): ErrorDTO {
 	const dto: ErrorDTO = {
 		species: "sdk",
@@ -134,8 +150,17 @@ export function copyUpdateInput(update: CopyUpdate): CopyUpdateInput<CopyJobFail
 	return { ...update, events: classifyEvents(update.events) }
 }
 
-export function copyReportInput(report: CopyReport): CopyReportInput<CopyJobFailure, CopyFailure, ErrorDTO> {
-	const failures = report.failures.filter(failure => !isSavedAsVersion(failure.info))
+export function copyReportInput(report: CopyReport): CopyJobReport {
+	const failures: CopyFailure[] = []
+	const versionTargets = new Set<string>()
+
+	for (const failure of report.failures) {
+		if (!isSavedAsVersion(failure.info)) {
+			failures.push(failure)
+		} else if (failure.info.existingFile !== undefined) {
+			versionTargets.add(failure.info.existingFile)
+		}
+	}
 
 	return {
 		createdCount: report.topLevel.length,
@@ -144,8 +169,49 @@ export function copyReportInput(report: CopyReport): CopyReportInput<CopyJobFail
 		failures: failures.map(failure => ({ failure: toFailure(failure.info), retryable: failure })),
 		savedAsVersionCount: report.failures.length - failures.length,
 		renamedCount: report.renamed.length,
-		error: report.error === undefined ? undefined : copyErrorDTO(report.error)
+		error: report.error === undefined ? undefined : copyErrorDTO(report.error),
+		topLevel: report.topLevel,
+		versionTargets
 	}
+}
+
+// Everything a job made at the top level, for "move copied items to trash": its report's items joined
+// with those its callbacks delivered, once each, never a version target. A call that rejected has no
+// report, only the delivered items.
+export function copiedTopLevel(settlement: CopySettlement, delivered: readonly DriveItem[]): DriveItem[] {
+	const report = "report" in settlement ? settlement.report : undefined
+	const seen = new Set<string>()
+	const items: DriveItem[] = []
+
+	const add = (item: DriveItem): void => {
+		if (!seen.has(item.data.uuid) && report?.versionTargets.has(item.data.uuid) !== true) {
+			seen.add(item.data.uuid)
+			items.push(item)
+		}
+	}
+
+	for (const item of delivered) {
+		add(item)
+	}
+
+	for (const entry of report?.topLevel ?? []) {
+		if (!seen.has(entry.item.uuid)) {
+			add(narrowItem(entry.item))
+		}
+	}
+
+	return items
+}
+
+// A settled job whose stop asked for its copies to go to the trash, still moving them there.
+export function isCopyTrashPending(job: CopyJob): boolean {
+	return job.outcome.status !== "running" && job.cancelRequest === "trash" && job.trashResult === null && job.created.length > 0
+}
+
+// A settled job's failures can go into a new job once its stop is done moving its copies to the trash:
+// whether the retry may take the job's row depends on how that went.
+export function canRetryCopy(job: CopyJob): boolean {
+	return job.outcome.status !== "running" && job.retryable.length > 0 && !isCopyTrashPending(job)
 }
 
 // Each failed item goes back to the directory it was meant for, under the name it was planned with.

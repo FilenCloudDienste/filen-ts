@@ -72,9 +72,13 @@ export function DriveTile({
 	// Drag-to-move — see DriveRow's identical wiring. Pointer-only enhancement; the item menu's "Move"
 	// stays the accessible route.
 	const dragSource = buildDragSourceProps(item, variant)
+	// See DriveRow's identical derivation.
+	const searchHit = searchParentPath !== undefined && searchParentPath.length > 0
+	const pathUuids = splatToUuids(splat)
 	const drop = useDriveDropTarget({
 		targetUuid: item.data.uuid,
-		targetAncestry: [...splatToUuids(splat), item.data.uuid],
+		targetAncestry: [...pathUuids, item.data.uuid],
+		searchHit: searchHit ? { parent: item.data.parent, searchRoot: pathUuids.at(-1) ?? null } : undefined,
 		targetName: name,
 		disabled: item.type !== "directory" || !canDragVariant(variant)
 	})
@@ -89,8 +93,6 @@ export function DriveTile({
 	// Cut for a later paste: dimmed, Explorer-style, until the paste or the next copy/cut. The ⋯ trigger
 	// keeps its own hover-only opacity.
 	const cut = useDriveClipboardStore(state => state.cutUuids.has(item.data.uuid))
-	// See DriveRow's identical derivation.
-	const searchHit = searchParentPath !== undefined && searchParentPath.length > 0
 
 	return (
 		<ContextMenu>

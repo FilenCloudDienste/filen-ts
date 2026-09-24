@@ -4,6 +4,7 @@ import {
 	clickPointerType,
 	isPlainClickDeselect,
 	listboxKeyTarget,
+	listboxKeyTargetIsInteractive,
 	listboxRange,
 	resolveCursorIndex
 } from "@/features/drive/lib/listbox"
@@ -237,8 +238,9 @@ export function useDriveListboxNav({
 	// one firing owner; keeping a second hand-rolled check here would double-fire on every keypress.
 	function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
 		// A row's ⋯ menu is portaled out of the listbox but stays its React descendant, so its key
-		// presses bubble here too — Enter on a menu item would also open the item under the cursor.
-		if (!(event.target instanceof Node) || !event.currentTarget.contains(event.target)) {
+		// presses bubble here too — Enter on a menu item would also open the item under the cursor. The
+		// ⋯ trigger itself owns its Enter/Space (see listboxKeyTargetIsInteractive).
+		if (!(event.target instanceof Node) || !event.currentTarget.contains(event.target) || listboxKeyTargetIsInteractive(event.target)) {
 			return
 		}
 

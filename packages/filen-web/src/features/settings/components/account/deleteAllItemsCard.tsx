@@ -9,6 +9,7 @@ import { DELETE_ALL_ITEMS_PHRASE } from "@/features/settings/lib/dangerPhrases"
 import { useIsOnline } from "@/lib/useIsOnline"
 import type { AccountQuerySuccess } from "@/queries/account"
 import { invalidateDriveListings } from "@/features/drive/queries/drive"
+import { invalidatePhotosListing } from "@/features/photos/queries/photos"
 import { Card, CardFooter, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { TypedConfirmDialog } from "@/components/dialogs/typedConfirmDialog"
@@ -32,8 +33,10 @@ function DeleteAllItemsCard({ accountQuery }: DeleteAllItemsCardProps) {
 		setPending(true)
 		try {
 			await sdkApi.deleteAllItems()
-			// Nothing patches the listings here, and a read My Drive listing never refetches on its own.
+			// Nothing patches the listings here, and a read My Drive listing never refetches on its own. The
+			// photos walk trusts itself for a while too; a mounted one re-walks, finds its root gone and resets.
 			invalidateDriveListings()
+			invalidatePhotosListing(null)
 			setOpen(false)
 			toast.success(t("settingsDeleteAllItemsSuccess"))
 			void accountQuery.refetch()

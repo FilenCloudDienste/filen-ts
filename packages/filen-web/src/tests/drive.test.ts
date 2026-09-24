@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
 import type {
 	Dir,
@@ -87,7 +87,10 @@ vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
 import { queryClient as testQueryClient } from "@/queries/client"
 import {
+	LISTING_CREATE_FLUSH_MS,
 	directorySizeQueryKey,
+	destinationDirectoryName,
+	discardListingPatches,
 	driveItemLinkStatusQueryKey,
 	driveItemLinkStatusQueryUpdate,
 	driveListingQueryKey,
@@ -107,11 +110,15 @@ import {
 	fetchSharedListing,
 	fileVersionsQueryKey,
 	findCachedListingItem,
+	flatListingQueryUpdate,
+	flushListingCreates,
 	invalidateDirectorySize,
 	itemInfoQueryKey,
 	itemPathQueryKey,
+	markDriveListingStale,
 	normalizeParentUuid,
 	projectTreeChildren,
+	queueListingCreate,
 	toListingTarget,
 	useItemInfoQuery
 } from "@/features/drive/queries/drive"
@@ -121,6 +128,11 @@ import {
 beforeEach(() => {
 	vi.clearAllMocks()
 	testQueryClient.clear()
+	discardListingPatches()
+})
+
+afterEach(() => {
+	vi.useRealTimers()
 })
 
 // UuidStr is a template-literal brand requiring at least 3 dashes (see @filen/sdk-rs) — pad a short
@@ -183,6 +195,15 @@ function mockFileLink(overrides: Partial<FilePublicLink> = {}): FilePublicLink {
 		salt: "file-salt",
 		...overrides
 	}
+}
+
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+	let resolve: (value: T) => void = () => undefined
+	const promise = new Promise<T>(r => {
+		resolve = r
+	})
+
+	return { promise, resolve }
 }
 
 describe("driveListingQueryKey", () => {
@@ -439,6 +460,66 @@ describe("fetchDirectoryName", () => {
 		resolveDirectoryName.mockRejectedValueOnce(error)
 
 		await expect(fetchDirectoryName("drive", ["uuid-a"])).rejects.toBe(error)
+	})
+})
+
+// Reached by a deep link or a reveal, a directory's parent listing is often unread, so the breadcrumb's
+// entry may be the only place its name already is.
+describe("destinationDirectoryName", () => {
+	it("prefers a cached listing row, which socket renames keep current", async () => {
+		const [a, b, c] = [testUuid("a"), testUuid("b"), testUuid("c")]
+		seedOwnedChain(a, b, c)
+		testQueryClient.setQueryData(driveNamesQueryKey("drive", c), "Old C")
+
+		await expect(destinationDirectoryName("drive", [a, b, c])).resolves.toBe("C")
+		expect(resolveDirectoryName).not.toHaveBeenCalled()
+	})
+
+	it("uses the breadcrumb's resolved entry when no listing holds the directory", async () => {
+		const [a, b, c] = [testUuid("a"), testUuid("b"), testUuid("c")]
+		testQueryClient.setQueryData(driveNamesQueryKey("drive", c), "From the crumb")
+
+		await expect(destinationDirectoryName("drive", [a, b, c])).resolves.toBe("From the crumb")
+		expect(resolveDirectoryName).not.toHaveBeenCalled()
+	})
+
+	it("reads a shared directory's entry under its own scope", async () => {
+		const [a, b] = [testUuid("sa"), testUuid("sb")]
+		testQueryClient.setQueryData(driveNamesQueryKey("sharedOut", b), "Shared B")
+
+		await expect(destinationDirectoryName("sharedOut", [a, b])).resolves.toBe("Shared B")
+		expect(resolveDirectoryName).not.toHaveBeenCalled()
+	})
+
+	it("joins the breadcrumb's resolution while it is still under way instead of asking again", async () => {
+		const [a, b] = [testUuid("a"), testUuid("b")]
+		const worker = deferred<string | null>()
+		resolveDirectoryName.mockReturnValueOnce(worker.promise)
+
+		const crumb = testQueryClient.query({
+			queryKey: driveNamesQueryKey("drive", b),
+			queryFn: () => fetchDirectoryName("drive", [a, b])
+		})
+		const name = destinationDirectoryName("drive", [a, b])
+
+		worker.resolve("B")
+
+		await expect(name).resolves.toBe("B")
+		await expect(crumb).resolves.toBe("B")
+		expect(resolveDirectoryName).toHaveBeenCalledOnce()
+	})
+
+	it("asks the worker once when nothing holds the name yet", async () => {
+		const [a, b] = [testUuid("a"), testUuid("b")]
+		resolveDirectoryName.mockResolvedValueOnce("B")
+
+		await expect(destinationDirectoryName("drive", [a, b])).resolves.toBe("B")
+		expect(resolveDirectoryName).toHaveBeenCalledExactlyOnceWith(b)
+	})
+
+	it("an empty path resolves null without a worker call", async () => {
+		await expect(destinationDirectoryName("drive", [])).resolves.toBeNull()
+		expect(resolveDirectoryName).not.toHaveBeenCalled()
 	})
 })
 
@@ -814,20 +895,34 @@ describe("driveListingQueryUpdateGlobal", () => {
 		expect(testQueryClient.getQueryData(keyB)).toEqual([])
 	})
 
-	// A cancelled TanStack fetch reverts and never retries on its own: cancelling listings the updater
-	// does not even touch strands them on pre-fetch rows until the next mount/focus.
-	it("cancels the in-flight fetch of ONLY the listings the updater actually changes", () => {
-		const cancelSpy = vi.spyOn(testQueryClient, "cancelQueries")
+	// A cancelled read reverts and never retries on its own; the read applies the patch to what it
+	// returns instead (driveListingRequestCount.test.ts).
+	it("never cancels a read under way, on a listing it changes or not", async () => {
 		const drop = narrowItem(mockDir({ uuid: testUuid("drop") }))
 		const affected = driveListingQueryKey({ variant: "drive", uuid: null })
-		const untouched = driveListingQueryKey({ variant: "favorites", uuid: null })
+		const read = deferred<DriveItem[]>()
 		testQueryClient.setQueryData(affected, [drop])
-		testQueryClient.setQueryData(untouched, [narrowItem(mockDir({ uuid: testUuid("other") }))])
+		const refetch = testQueryClient.query({ queryKey: affected, queryFn: () => read.promise, staleTime: 0 })
 
 		driveListingQueryUpdateGlobal(items => items.filter(item => item.data.uuid !== drop.data.uuid))
 
-		expect(cancelSpy).toHaveBeenCalledWith({ queryKey: affected, exact: true })
-		expect(cancelSpy).not.toHaveBeenCalledWith({ queryKey: untouched, exact: true })
+		expect(testQueryClient.getQueryState(affected)?.fetchStatus).toBe("fetching")
+		expect(testQueryClient.getQueryData(affected)).toEqual([])
+
+		read.resolve([])
+		await refetch
+	})
+
+	it("keeps a pending refresh pending on a listing it writes", () => {
+		const drop = narrowItem(mockDir({ uuid: testUuid("drop") }))
+		const key = driveListingQueryKey({ variant: "drive", uuid: null })
+		testQueryClient.setQueryData(key, [drop])
+		void testQueryClient.invalidateQueries({ queryKey: key, refetchType: "none" })
+
+		driveListingQueryUpdateGlobal(items => items.filter(item => item.data.uuid !== drop.data.uuid))
+
+		expect(testQueryClient.getQueryData(key)).toEqual([])
+		expect(testQueryClient.getQueryState(key)?.isInvalidated).toBe(true)
 	})
 
 	it("does not write to a listing the updater left unchanged", () => {
@@ -838,6 +933,161 @@ describe("driveListingQueryUpdateGlobal", () => {
 		driveListingQueryUpdateGlobal(items => items.filter(item => item.data.uuid !== testUuid("absent")))
 
 		expect(setSpy).not.toHaveBeenCalled()
+	})
+})
+
+describe("listing patch lookups", () => {
+	// Q grows with every persisted row and every dirSize entry a listing prefetches, and a patch per
+	// created file used to copy and re-hash all of it, even for a listing nobody had read.
+	it("finds a patched listing by its key's hash, never by scanning the query cache", () => {
+		const key = driveListingQueryKey({ variant: "drive", uuid: "parent" })
+		const created = narrowItem(mockDir({ uuid: testUuid("new") }))
+		testQueryClient.setQueryData(key, [])
+
+		for (let i = 0; i < 20; i++) {
+			testQueryClient.setQueryData(directorySizeQueryKey(`dir-${String(i)}`), { size: 0n, files: 0n, dirs: 0n })
+		}
+
+		const scan = vi.spyOn(testQueryClient.getQueryCache(), "getAll")
+
+		driveListingQueryUpdate("parent", prev => [...prev, created])
+		driveListingQueryUpdate("never-read", prev => [...prev, created])
+		flatListingQueryUpdate("recents", prev => [...prev, created])
+
+		expect(scan).not.toHaveBeenCalled()
+		expect(testQueryClient.getQueryData(key)).toEqual([created])
+	})
+
+	it("keeps a pending refresh pending on the listing it writes", () => {
+		const key = driveListingQueryKey({ variant: "drive", uuid: "parent" })
+		testQueryClient.setQueryData(key, [])
+		void testQueryClient.invalidateQueries({ queryKey: key, refetchType: "none" })
+
+		driveListingQueryUpdate("parent", prev => [...prev, narrowItem(mockDir({ uuid: testUuid("new") }))])
+
+		expect(testQueryClient.getQueryState(key)?.isInvalidated).toBe(true)
+	})
+})
+
+describe("queueListingCreate", () => {
+	// Named `${name}.txt`, under the uuid of its own label unless given another.
+	function namedFile(name: string, uuid: UuidStr = testUuid(name)): DriveItem {
+		return narrowItem(
+			mockFile({
+				uuid,
+				meta: {
+					type: "decoded",
+					data: { name: `${name}.txt`, mime: "text/plain", modified: 1_700_000_000_000n, size: 1n, key: "key", version: 2 }
+				}
+			})
+		)
+	}
+
+	function uuids(uuid: string | null, variant: "drive" | "recents" = "drive"): string[] | undefined {
+		return testQueryClient
+			.getQueryData<DriveItem[]>(driveListingQueryKey({ variant, uuid: variant === "drive" ? uuid : null }))
+			?.map(item => item.data.uuid)
+	}
+
+	// A copy reports each top-level item and its socket echo repeats it; each used to rewrite and
+	// re-render the whole listing on its own.
+	it("lands what a window queued for a parent in one write, a re-delivered item once", () => {
+		vi.useFakeTimers()
+
+		const key = driveListingQueryKey({ variant: "drive", uuid: "parent" })
+		const [a, b] = [namedFile("a"), namedFile("b")]
+		testQueryClient.setQueryData(key, [])
+		const write = vi.spyOn(testQueryClient, "setQueryData")
+
+		queueListingCreate("parent", a)
+		queueListingCreate("parent", b)
+		queueListingCreate("parent", a)
+
+		expect(uuids("parent")).toEqual([])
+
+		vi.advanceTimersByTime(LISTING_CREATE_FLUSH_MS)
+
+		expect(write).toHaveBeenCalledOnce()
+		expect(uuids("parent")).toEqual([a.data.uuid, b.data.uuid])
+	})
+
+	it("replaces a same-name row the way a single upsert does", () => {
+		const key = driveListingQueryKey({ variant: "drive", uuid: "parent" })
+		const stale = namedFile("a", testUuid("stale"))
+		const fresh = namedFile("a")
+		testQueryClient.setQueryData(key, [stale])
+
+		queueListingCreate("parent", fresh)
+		flushListingCreates()
+
+		expect(uuids("parent")).toEqual([fresh.data.uuid])
+	})
+
+	it("never creates a listing nobody has read", () => {
+		queueListingCreate("cold", namedFile("a"))
+		flushListingCreates()
+
+		expect(testQueryClient.getQueryCache().find({ queryKey: driveListingQueryKey({ variant: "drive", uuid: "cold" }) })).toBeUndefined()
+	})
+
+	it("adds a new file to Recents with its batch, deduplicated by uuid alone", () => {
+		const sameName = namedFile("a", testUuid("elsewhere"))
+		const created = namedFile("a")
+		testQueryClient.setQueryData(driveListingQueryKey({ variant: "recents", uuid: null }), [sameName, created])
+
+		queueListingCreate("parent", created, { recent: true })
+		queueListingCreate("parent", namedFile("b"))
+		flushListingCreates()
+
+		expect(uuids(null, "recents")).toEqual([sameName.data.uuid, created.data.uuid])
+	})
+
+	// A file trashed or moved moments after its create must not come back when the window closes.
+	it("is applied before any other patch, so nothing that patch removes comes back", () => {
+		vi.useFakeTimers()
+
+		const key = driveListingQueryKey({ variant: "drive", uuid: "parent" })
+		const created = namedFile("a")
+		testQueryClient.setQueryData(key, [])
+
+		queueListingCreate("parent", created)
+		driveListingQueryUpdateGlobal(items => items.filter(item => item.data.uuid !== created.data.uuid))
+		vi.advanceTimersByTime(LISTING_CREATE_FLUSH_MS)
+
+		expect(uuids("parent")).toEqual([])
+	})
+
+	it("drops what is queued on logout", () => {
+		vi.useFakeTimers()
+
+		const key = driveListingQueryKey({ variant: "drive", uuid: "parent" })
+		testQueryClient.setQueryData(key, [])
+
+		queueListingCreate("parent", namedFile("a"))
+		discardListingPatches()
+		vi.advanceTimersByTime(LISTING_CREATE_FLUSH_MS)
+		flushListingCreates()
+
+		expect(uuids("parent")).toEqual([])
+	})
+})
+
+describe("markDriveListingStale", () => {
+	it("marks a read listing for its next mount or focus without writing it", () => {
+		const key = driveListingQueryKey({ variant: "drive", uuid: "parent" })
+		const rows = [narrowItem(mockDir())]
+		testQueryClient.setQueryData(key, rows)
+
+		markDriveListingStale("parent")
+
+		expect(testQueryClient.getQueryState(key)?.isInvalidated).toBe(true)
+		expect(testQueryClient.getQueryData(key)).toBe(rows)
+	})
+
+	it("leaves a listing nobody has read alone", () => {
+		markDriveListingStale("cold")
+
+		expect(testQueryClient.getQueryCache().find({ queryKey: driveListingQueryKey({ variant: "drive", uuid: "cold" }) })).toBeUndefined()
 	})
 })
 

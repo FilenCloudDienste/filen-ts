@@ -1,4 +1,6 @@
+import { useEffect } from "react"
 import { resolveRouteLink, type PublicLinkKind } from "@/features/publicLinks/lib/format.logic"
+import { clearPreviewCache } from "@/features/preview/lib/previewCache"
 import { PublicLinkShell } from "@/features/publicLinks/components/publicLinkShell"
 import { PublicLinkInvalid } from "@/features/publicLinks/components/publicLinkStates"
 import { FileLinkView } from "@/features/publicLinks/components/fileLinkView"
@@ -16,6 +18,14 @@ export function PublicLinkView({ kind, uuid }: { kind: PublicLinkKind; uuid: str
 	// navigation), so reading it straight off the live location is sufficient.
 	const hash = typeof window === "undefined" ? "" : window.location.hash
 	const resolved = resolveRouteLink(uuid, hash)
+
+	// The preview buffers this link loaded stay only while it is open: leaving it (Back, sign-in, Open
+	// Cloud Drive, another link) drops them. Hiding a preview keeps them for a Download or a revisit.
+	useEffect(() => {
+		return () => {
+			clearPreviewCache()
+		}
+	}, [uuid])
 
 	return (
 		<PublicLinkShell>

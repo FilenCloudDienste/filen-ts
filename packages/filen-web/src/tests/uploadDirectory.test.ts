@@ -295,17 +295,17 @@ describe("runDirectoryUpload (injected deps, real runCreateDirectory/runUpload)"
 		const setProgress = vi.fn<(id: string, bytesTransferred: number) => void>()
 		const settle = vi.fn<(id: string, status: TerminalStatus, error?: ErrorDTO) => void>()
 		const remove = vi.fn<(id: string) => void>()
-		const patchFileListing = vi.fn<(parentUuid: string | null, updater: (prev: DriveItem[]) => DriveItem[]) => void>()
+		const patchFileCreated = vi.fn<(parentUuid: string | null, item: DriveItem) => void>()
 		const transform = vi.fn<(bytes: Uint8Array) => Promise<Blob>>().mockResolvedValue(new Blob([new Uint8Array([9])]))
 		const readPreference = vi.fn<() => Promise<boolean>>().mockResolvedValue(false)
 
 		const deps: RunDirectoryUploadDeps = {
 			createDirectory: { createDirectory: create, patchListing: patchDirListing },
-			upload: { upload, store: { add, setProgress, settle, remove }, patchListing: patchFileListing },
+			upload: { upload, store: { add, setProgress, settle, remove }, patchCreated: patchFileCreated },
 			heic: { convert: { transform }, readPreference }
 		}
 
-		return { deps, create, patchDirListing, upload, add, settle, patchFileListing, transform, readPreference }
+		return { deps, create, patchDirListing, upload, add, settle, patchFileCreated, transform, readPreference }
 	}
 
 	// createDirectory resolves a distinct uuid per leaf name — lets assertions confirm each file/dir

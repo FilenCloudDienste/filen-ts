@@ -52,6 +52,9 @@ export function useAccountQuery(): UseQueryResult<UserInfo> {
 	})
 }
 
+// Counts this tab's writes to the cached account, patches and stale marks alike.
+let accountWrites = 0
+
 // A read in flight may have been answered before this tab's write and would land over it. Not an
 // initial fetch: cancelling that would strand the query on its loading state with nothing to show.
 function cancelInFlightIfCached(): void {
@@ -64,6 +67,7 @@ function cancelInFlightIfCached(): void {
 // delete): the next focus or mount reads, as it did before the stale time existed, without a read
 // per write during a many-file batch.
 export function markAccountStale(): void {
+	accountWrites++
 	cancelInFlightIfCached()
 	void queryClient.invalidateQueries({ queryKey: ACCOUNT_QUERY_KEY, refetchType: "none" })
 }
@@ -75,10 +79,25 @@ export function accountQueryUpdate(updater: (prev: UserInfo) => UserInfo): void 
 	const query = queryClient.getQueryCache().find({ queryKey: ACCOUNT_QUERY_KEY, exact: true })
 	const refreshPending = query !== undefined && (query.state.isInvalidated || query.state.fetchStatus !== "idle")
 
+	accountWrites++
 	cancelInFlightIfCached()
 	queryClient.setQueryData<UserInfo>(ACCOUNT_QUERY_KEY, prev => (prev === undefined ? prev : updater(prev)))
 
 	if (refreshPending && queryClient.getQueryData(ACCOUNT_QUERY_KEY) !== undefined) {
 		void queryClient.invalidateQueries({ queryKey: ACCOUNT_QUERY_KEY, refetchType: "none" })
 	}
+}
+
+// The server's figure, whatever this tab writes meanwhile: a write cancels the query's own read, which
+// then resolves with the cached account instead. The cache takes the answer only if nothing was written
+// during the read, so it never lands over a patch or clears a stale mark.
+export async function fetchAccountFresh(): Promise<UserInfo> {
+	const writes = accountWrites
+	const info = await fetchAccount()
+
+	if (accountWrites === writes) {
+		queryClient.setQueryData(ACCOUNT_QUERY_KEY, info)
+	}
+
+	return info
 }

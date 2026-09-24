@@ -22,13 +22,15 @@ type SdkCopyItems = (
 	onEvent: (event: CopyJobEvent) => void
 ) => Promise<CopyReport>
 
-const { copyItems, copyItemsTo, cancelCopy } = vi.hoisted(() => ({
+const { copyItems, copyItemsTo, cancelCopy, releaseCopy, getUserInfo } = vi.hoisted(() => ({
 	copyItems: vi.fn<SdkCopyItems>(),
 	copyItemsTo: vi.fn<(id: string, entries: unknown, maxBytes: number | undefined, onEvent: unknown) => Promise<CopyReport>>(),
-	cancelCopy: vi.fn<(id: string) => void>()
+	cancelCopy: vi.fn<(id: string) => void>(),
+	releaseCopy: vi.fn<(id: string) => void>(),
+	getUserInfo: vi.fn<() => Promise<UserInfo>>()
 }))
 
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: { copyItems, copyItemsTo, cancelCopy } }))
+vi.mock("@/lib/sdk/client", () => ({ sdkApi: { copyItems, copyItemsTo, cancelCopy, releaseCopy, getUserInfo } }))
 
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
@@ -42,6 +44,7 @@ const { toastSuccess, toastError, toastCustom, toastDismiss } = vi.hoisted(() =>
 vi.mock("sonner", () => ({ toast: { success: toastSuccess, error: toastError, custom: toastCustom, dismiss: toastDismiss } }))
 
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
+import { type BulkOutcome } from "@/features/drive/lib/bulk"
 import {
 	pruneSettledCopyJobs,
 	requestCopyCancel,
@@ -55,7 +58,8 @@ import { useTransfersStore } from "@/features/transfers/store/useTransfersStore"
 import { getCopyJob, useCopyJobsStore } from "@/features/transfers/store/useCopyJobsStore"
 import { queryClient } from "@/queries/client"
 import { ACCOUNT_QUERY_KEY } from "@/queries/account"
-import { driveListingQueryKey } from "@/features/drive/queries/drive"
+import { accountQuotaDeps, addAccountStorageUsed } from "@/features/drive/lib/quota"
+import { discardListingPatches, driveListingQueryKey, flushListingCreates } from "@/features/drive/queries/drive"
 
 function testUuid(label: string): UuidStr {
 	return `${label}-0000-0000-0000-000000000000` as UuidStr
@@ -153,10 +157,49 @@ function created(dir: Dir): CopiedTopLevelItem {
 	return { request: 0n, sourceUuid: testUuid("source"), item: { type: "dir", ...dir } }
 }
 
+function createdFile(file: File): CopiedTopLevelItem {
+	return { request: 0n, sourceUuid: testUuid("source"), item: { type: "file", ...file } }
+}
+
+const CANCELLED = { kind: "Cancelled", message: "Error of kind Cancelled: error: copy cancelled", ...NO_SERVER } as const
+
+function copyFailure(label: string, stage: CopyFailure["info"]["stage"] = "upload", existingFile?: UuidStr): CopyFailure {
+	return {
+		item: mockFile(label),
+		info: {
+			sourceUuid: testUuid(label),
+			sourcePath: `${label}.txt`,
+			destParent: ROOT,
+			destParentDir: { uuid: ROOT },
+			destName: `${label}.txt`,
+			stage,
+			error: {
+				kind: "Server",
+				message: "Error of kind Server: error: API Error",
+				serverMessage: "Upload rejected",
+				serverCode: undefined
+			},
+			affectedFiles: 1n,
+			affectedBytes: 100n,
+			existingFile
+		}
+	}
+}
+
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+	let resolve: (value: T) => void = () => undefined
+	const promise = new Promise<T>(r => {
+		resolve = r
+	})
+
+	return { promise, resolve }
+}
+
 function makeDeps() {
 	return {
 		copyItems: vi.fn<RunCopyDeps["copyItems"]>(),
 		copyItemsTo: vi.fn<RunCopyDeps["copyItemsTo"]>(),
+		release: vi.fn<RunCopyDeps["release"]>(),
 		transfers: useTransfersStore.getState(),
 		jobs: { ...useCopyJobsStore.getState(), get: getCopyJob },
 		account: {
@@ -190,6 +233,7 @@ beforeEach(() => {
 	useTransfersStore.setState({ transfers: [], speedSamples: [] })
 	useCopyJobsStore.setState({ jobs: {} })
 	queryClient.clear()
+	discardListingPatches()
 })
 
 describe("runCopyJob", () => {
@@ -241,6 +285,7 @@ describe("runCopyJob", () => {
 			onEvent({ type: "created", item: created(dir) })
 
 			expect(getCopyJob("job")?.counts.bytesDone).toBe(50)
+			expect(getCopyJob("job")?.created.map(item => item.data.uuid)).toEqual([dir.uuid])
 			expect(row()).toMatchObject({ size: 200, bytesTransferred: 50 })
 
 			return Promise.resolve(report())
@@ -250,7 +295,8 @@ describe("runCopyJob", () => {
 
 		expect(deps.patchCreated).toHaveBeenCalledTimes(1)
 		expect(deps.patchCreated.mock.calls[0]?.[0].data.uuid).toBe(dir.uuid)
-		expect(job?.created.map(item => item.data.uuid)).toEqual([dir.uuid])
+		// Only "move copied items to trash" reads what a job made, so a settled one lets go of it.
+		expect(job?.created).toEqual([])
 	})
 
 	// The SDK's bytesDone already includes in-flight chunks; adding the active files again doubled it.
@@ -443,20 +489,102 @@ describe("runCopyJob quota", () => {
 		expect(job?.outcome).toEqual({ status: "quotaExceeded", freeBytes: 100 })
 	})
 
-	it("does not run again when the copy was cancelled during the fresh read", async () => {
+	// Nothing was written and the user asked to stop: a storage error would quote a figure for a copy
+	// the user no longer wants.
+	it("settles a copy stopped during the fresh read as cancelled, without running again", async () => {
+		for (const cancelRequest of ["keep", "trash"] as const) {
+			useCopyJobsStore.setState({ jobs: {} })
+
+			const deps = makeDeps()
+
+			deps.account.cached.mockReturnValue({ maxStorage: 1_000n, storageUsed: 900n })
+			deps.account.fetchFresh.mockImplementation(() => {
+				useCopyJobsStore.getState().update("job", job => ({ ...job, cancelRequest }))
+
+				return Promise.resolve({ maxStorage: 1_000n, storageUsed: 0n })
+			})
+			deps.copyItems.mockResolvedValue(QUOTA_REPORT)
+
+			const job = await runCopyJob(deps, request())
+
+			expect(deps.copyItems).toHaveBeenCalledTimes(1)
+			expect(job?.outcome).toEqual({ status: "cancelled" })
+			expect(row()).toBeUndefined()
+			expect(deps.trash).not.toHaveBeenCalled()
+		}
+	})
+
+	it("settles a stop that reached the job while its refusal was on the way as cancelled, reading nothing", async () => {
 		const deps = makeDeps()
 
 		deps.account.cached.mockReturnValue({ maxStorage: 1_000n, storageUsed: 900n })
-		deps.account.fetchFresh.mockImplementation(() => {
-			useCopyJobsStore.getState().update("job", job => ({ ...job, cancelRequest: "keep" }))
+		deps.copyItems.mockImplementation(id => {
+			requestCopyCancel(id, { trashCopied: false })
 
-			return Promise.resolve({ maxStorage: 1_000n, storageUsed: 0n })
+			return Promise.resolve(QUOTA_REPORT)
 		})
+
+		const job = await runCopyJob(deps, request())
+
+		expect(deps.account.fetchFresh).not.toHaveBeenCalled()
+		expect(job?.outcome).toEqual({ status: "cancelled" })
+		expect(row()).toBeUndefined()
+	})
+
+	it("still quotes the figure the SDK refused against when nothing stopped the copy", async () => {
+		const deps = makeDeps()
+
+		deps.account.cached.mockReturnValue({ maxStorage: 1_000n, storageUsed: 900n })
+		deps.account.fetchFresh.mockResolvedValue({ maxStorage: 1_000n, storageUsed: 900n })
 		deps.copyItems.mockResolvedValue(QUOTA_REPORT)
+
+		const job = await runCopyJob(deps, request())
+
+		expect(job?.outcome).toEqual({ status: "quotaExceeded", freeBytes: 100 })
+	})
+
+	// Any account write cancels the account query's own read, which then resolves with the cached
+	// figure; the fresh read must not be that read.
+	it("runs again on the server's figure even when an account write lands during the fresh read", async () => {
+		const deps = { ...makeDeps(), account: accountQuotaDeps }
+		const fresh = deferred<UserInfo>()
+
+		queryClient.setQueryData<Partial<UserInfo>>(ACCOUNT_QUERY_KEY, { maxStorage: 1_000n, storageUsed: 900n })
+		getUserInfo.mockReturnValueOnce(fresh.promise)
+		deps.copyItems.mockResolvedValueOnce(QUOTA_REPORT).mockResolvedValueOnce(report())
+
+		const running = runCopyJob(deps, request())
+
+		await vi.waitFor(() => {
+			expect(getUserInfo).toHaveBeenCalledOnce()
+		})
+
+		addAccountStorageUsed(50n)
+		fresh.resolve({ maxStorage: 1_000n, storageUsed: 0n } as UserInfo)
+
+		const job = await running
+
+		expect(deps.copyItems.mock.calls.map(call => call[3])).toEqual([100, 1_000])
+		expect(job?.outcome).toEqual({ status: "done" })
+	})
+
+	// The worker keeps the job's stop and pause across its calls, so a pause made during the fresh read
+	// holds for the retry; they go once no call runs again.
+	it("releases the worker's stop and pause once, after the job's last call", async () => {
+		const deps = makeDeps()
+
+		deps.account.cached.mockReturnValue({ maxStorage: 1_000n, storageUsed: 900n })
+		deps.account.fetchFresh.mockResolvedValue({ maxStorage: 1_000n, storageUsed: 0n })
+		deps.copyItems.mockResolvedValueOnce(QUOTA_REPORT).mockImplementationOnce(() => {
+			expect(deps.release).not.toHaveBeenCalled()
+
+			return Promise.resolve(report())
+		})
 
 		await runCopyJob(deps, request())
 
-		expect(deps.copyItems).toHaveBeenCalledTimes(1)
+		expect(deps.copyItems).toHaveBeenCalledTimes(2)
+		expect(deps.release).toHaveBeenCalledExactlyOnceWith("job")
 	})
 })
 
@@ -481,11 +609,13 @@ describe("cancel", () => {
 			expect(cancelCopy).toHaveBeenCalledWith("job")
 
 			if (trashCopied) {
-				expect(deps.trash).toHaveBeenCalledWith(job?.created)
-				expect(job?.created.map(item => item.data.uuid)).toEqual([dir.uuid])
+				expect(deps.trash).toHaveBeenCalledTimes(1)
+				expect(deps.trash.mock.calls[0]?.[0].map(item => item.data.uuid)).toEqual([dir.uuid])
 			} else {
 				expect(deps.trash).not.toHaveBeenCalled()
 			}
+
+			expect(job?.created).toEqual([])
 		}
 	})
 
@@ -534,6 +664,201 @@ describe("cancel", () => {
 		expect(cancelCopy).not.toHaveBeenCalled()
 		expect(getCopyJob("job")?.cancelRequest).toBeNull()
 	})
+
+	// Cancel all and sign-out ask to keep; they must not undo a "move to trash" still winding down.
+	it("keeps the first stop's choice when a later one asks to keep", async () => {
+		const deps = makeDeps()
+		const dir = mockDir("copied")
+
+		deps.copyItems.mockImplementation((id, _items, _dest, _max, onEvent) => {
+			onEvent({ type: "created", item: created(dir) })
+			requestCopyCancel(id, { trashCopied: true })
+			requestCopyCancel(id, { trashCopied: false })
+
+			return Promise.resolve(report({ error: CANCELLED }))
+		})
+
+		const job = await runCopyJob(deps, request())
+
+		expect(cancelCopy).toHaveBeenCalledTimes(1)
+		expect(job?.cancelRequest).toBe("trash")
+		expect(deps.trash.mock.calls[0]?.[0].map(item => item.data.uuid)).toEqual([dir.uuid])
+	})
+
+	it("keeps a stopped copy's row active until its copies are in the trash, then removes it", async () => {
+		const deps = makeDeps()
+		const dir = mockDir("copied")
+		const trash = deferred<{ succeeded: DriveItem[]; failed: [] }>()
+
+		deps.trash.mockReturnValue(trash.promise)
+		deps.copyItems.mockImplementation((id, _items, _dest, _max, onEvent) => {
+			onEvent({ type: "created", item: created(dir) })
+			requestCopyCancel(id, { trashCopied: true })
+
+			return Promise.resolve(report({ error: CANCELLED }))
+		})
+
+		const running = runCopyJob(deps, request())
+
+		await vi.waitFor(() => {
+			expect(deps.trash).toHaveBeenCalledTimes(1)
+		})
+
+		expect(row()?.status).toBe("copying")
+		expect(getCopyJob("job")?.outcome).toEqual({ status: "cancelled" })
+
+		trash.resolve({ succeeded: [narrowItem(dir)], failed: [] })
+
+		const job = await running
+
+		expect(job?.trashResult).toEqual({ moved: 1, failed: 0 })
+		expect(row()).toBeUndefined()
+	})
+
+	it("keeps a stopped copy's row, as an error, while copies it asked to trash are still there", async () => {
+		const deps = makeDeps()
+		const moved = mockDir("moved")
+		const stuck = mockDir("stuck")
+
+		deps.trash.mockResolvedValue({ succeeded: [narrowItem(moved)], failed: [{ item: narrowItem(stuck), error: new Error("offline") }] })
+		deps.copyItems.mockImplementation((id, _items, _dest, _max, onEvent) => {
+			onEvent({ type: "created", item: created(moved) })
+			onEvent({ type: "created", item: created(stuck) })
+			requestCopyCancel(id, { trashCopied: true })
+
+			return Promise.resolve(report({ error: CANCELLED }))
+		})
+
+		const job = await runCopyJob(deps, request())
+
+		expect(job?.trashResult).toEqual({ moved: 1, failed: 1 })
+		expect(job?.cardVisible).toBe(false)
+		expect(row()).toMatchObject({ status: "error", error: { label: "1 copied item couldn't be moved to the trash" } })
+
+		pruneSettledCopyJobs()
+
+		expect(getCopyJob("job")).toBeDefined()
+
+		// Removing the row still takes the job with it.
+		useTransfersStore.getState().remove("job")
+		pruneSettledCopyJobs()
+
+		expect(getCopyJob("job")).toBeUndefined()
+	})
+})
+
+// Events and the result reach the main thread on different ports; the worker holds the result back
+// until the last event is taken, and the job copes with one that still arrives after it.
+describe("events after the result", () => {
+	it("trashes a copy the report lists even if its event never came, but never a file saved as a new version", async () => {
+		const deps = makeDeps()
+		const delivered = mockDir("delivered")
+		const listedOnly = mockFile("listed")
+		const versioned = mockFile("versioned")
+
+		deps.copyItems.mockImplementation((id, _items, _dest, _max, onEvent) => {
+			onEvent({ type: "created", item: created(delivered) })
+			requestCopyCancel(id, { trashCopied: true })
+
+			return Promise.resolve(
+				report({
+					topLevel: [created(delivered), createdFile(listedOnly), createdFile(versioned)],
+					failures: [copyFailure("existing", "registeredAsVersion", versioned.uuid)],
+					error: CANCELLED
+				})
+			)
+		})
+
+		await runCopyJob(deps, request())
+
+		expect(deps.trash).toHaveBeenCalledTimes(1)
+		expect(deps.trash.mock.calls[0]?.[0].map(item => item.data.uuid).sort()).toEqual([delivered.uuid, listedOnly.uuid].sort())
+	})
+
+	it("takes the last update and a created item that arrive after the report without counting either twice", async () => {
+		const deps = makeDeps()
+		const early = mockDir("early")
+		const late = mockDir("late")
+		const failed = copyFailure("failed")
+		const renamed = { sourceUuid: testUuid("renamed"), sourcePath: "x", name: "x (1)", reason: "duplicateName" } as const
+		let deliverLate = (): void => undefined
+
+		deps.trash.mockImplementation(items => Promise.resolve({ succeeded: items, failed: [] }))
+		deps.copyItems.mockImplementation((id, _items, _dest, _max, onEvent) => {
+			onEvent({ type: "created", item: created(early) })
+			requestCopyCancel(id, { trashCopied: true })
+
+			deliverLate = () => {
+				onEvent({
+					type: "update",
+					update: update({
+						phase: "cancelled",
+						events: [
+							{ type: "fileFailed", ...failed.info },
+							{ type: "renamed", ...renamed },
+							{ type: "propagationFailed", destUuid: testUuid("d"), error: failed.info.error }
+						]
+					})
+				})
+				onEvent({ type: "created", item: created(late) })
+			}
+
+			return Promise.resolve(
+				report({ topLevel: [created(early), created(late)], failures: [failed], renamed: [renamed], error: CANCELLED })
+			)
+		})
+
+		await runCopyJob(deps, request())
+		deliverLate()
+
+		const job = getCopyJob("job")
+
+		expect(job?.failures.map(failure => failure.destName)).toEqual(["failed.txt"])
+		expect(job?.renamedCount).toBe(1)
+		expect(job?.propagationFailedCount).toBe(1)
+		// Both went to the trash with the report's items, once.
+		expect(deps.trash).toHaveBeenCalledTimes(1)
+		expect(deps.trash.mock.calls[0]?.[0].map(item => item.data.uuid).sort()).toEqual([early.uuid, late.uuid].sort())
+		expect(job?.trashResult).toEqual({ moved: 2, failed: 0 })
+	})
+
+	// A call that rejected past its cancel grace has no report, and can still deliver what it queued.
+	it("trashes an item delivered after a stop that ended without a report, and brings the row back if that fails", async () => {
+		const deps = makeDeps()
+		const late = mockDir("late")
+		let deliverLate = (): void => undefined
+
+		deps.trash.mockResolvedValue({ succeeded: [], failed: [{ item: narrowItem(late), error: new Error("offline") }] })
+		deps.copyItems.mockImplementation((id, _items, _dest, _max, onEvent) => {
+			requestCopyCancel(id, { trashCopied: true })
+
+			deliverLate = () => {
+				onEvent({ type: "created", item: created(late) })
+			}
+
+			// The worker rejects with its error's DTO.
+			return Promise.reject(
+				Object.assign(new Error("Error of kind Cancelled: error: grace exceeded"), { species: "sdk", kind: "Cancelled", label: "" })
+			)
+		})
+
+		const job = await runCopyJob(deps, request())
+
+		expect(job?.outcome).toEqual({ status: "cancelled" })
+		expect(row()).toBeUndefined()
+
+		useCopyJobsStore.getState().remove("job")
+		deliverLate()
+
+		await vi.waitFor(() => {
+			expect(getCopyJob("job")?.trashResult).toEqual({ moved: 0, failed: 1 })
+		})
+
+		expect(deps.patchCreated.mock.calls.map(([item]) => item.data.uuid)).toEqual([late.uuid])
+		expect(deps.trash.mock.calls[0]?.[0].map(item => item.data.uuid)).toEqual([late.uuid])
+		expect(getCopyJob("job")?.cardVisible).toBe(false)
+		expect(row()).toMatchObject({ status: "error", error: { label: "1 copied item couldn't be moved to the trash" } })
+	})
 })
 
 describe("startCopy and retryFailedCopy", () => {
@@ -570,6 +895,9 @@ describe("startCopy and retryFailedCopy", () => {
 		await vi.waitFor(() => {
 			expect(getCopyJob(id ?? "")?.outcome.status).toBe("done")
 		})
+
+		// Created items land in their listing once the batch window closes.
+		flushListingCreates()
 
 		expect(queryClient.getQueryData<DriveItem[]>(rootKey)?.map(item => item.data.uuid)).toEqual([dir.uuid])
 		expect(queryClient.getQueryData(unreadKey)).toBeUndefined()
@@ -622,6 +950,94 @@ describe("startCopy and retryFailedCopy", () => {
 		expect(copyItemsTo.mock.calls[0]?.[1]).toEqual([{ item: failure.item, destination: { uuid: ROOT }, name: "failed.txt" }])
 		expect(row(retryId ?? "")).toMatchObject({ direction: "copy", name: "failed.txt" })
 		expect(retryFailedCopy("unknown")).toBeNull()
+	})
+
+	// A second retry of the same job would copy the same items again, as "name (1)" duplicates.
+	it("lets a retried job offer no retry again, and drops it with its row once its card is hidden", async () => {
+		const deps = makeDeps()
+
+		deps.copyItems.mockResolvedValue(report({ failures: [copyFailure("failed")] }))
+		await runCopyJob(deps, request())
+		useCopyJobsStore.getState().update("job", job => ({ ...job, cardVisible: true }))
+		copyItemsTo.mockReturnValue(new Promise(() => undefined))
+
+		expect(retryFailedCopy("job")).not.toBeNull()
+		expect(getCopyJob("job")?.retryable).toEqual([])
+		expect(row()).toBeUndefined()
+		expect(retryFailedCopy("job")).toBeNull()
+		expect(copyItemsTo).toHaveBeenCalledTimes(1)
+
+		useCopyJobsStore.getState().update("job", job => ({ ...job, cardVisible: false }))
+		pruneSettledCopyJobs()
+
+		expect(getCopyJob("job")).toBeUndefined()
+	})
+
+	// A retry takes the job's row, which must first say where the copies a stop asked to trash ended up.
+	it("retries nothing while a stop is still moving the copies to the trash", async () => {
+		const deps = makeDeps()
+		const stuck = mockDir("stuck")
+		const trash = deferred<BulkOutcome<DriveItem>>()
+
+		deps.trash.mockReturnValue(trash.promise)
+		deps.copyItems.mockImplementation((id, _items, _dest, _max, onEvent) => {
+			onEvent({ type: "created", item: created(stuck) })
+			requestCopyCancel(id, { trashCopied: true })
+
+			return Promise.resolve(report({ failures: [copyFailure("failed")], error: CANCELLED }))
+		})
+
+		const running = runCopyJob(deps, request())
+
+		await vi.waitFor(() => {
+			expect(deps.trash).toHaveBeenCalledTimes(1)
+		})
+
+		useCopyJobsStore.getState().update("job", job => ({ ...job, cardVisible: true }))
+		copyItemsTo.mockReturnValue(new Promise(() => undefined))
+
+		const retried = retryFailedCopy("job")
+
+		// With the card gone, only the row keeps the job until the trash settles.
+		useCopyJobsStore.getState().update("job", job => ({ ...job, cardVisible: false }))
+		pruneSettledCopyJobs()
+
+		expect(row()?.status).toBe("copying")
+
+		trash.resolve({ succeeded: [], failed: [{ item: narrowItem(stuck), error: new Error("offline") }] })
+		await running
+
+		expect(row()).toMatchObject({ status: "error", error: { label: "1 copied item couldn't be moved to the trash" } })
+		expect(getCopyJob("job")?.trashResult).toEqual({ moved: 0, failed: 1 })
+		expect(retried).toBeNull()
+		expect(copyItemsTo).not.toHaveBeenCalled()
+	})
+
+	it("keeps the row that reports copies left at the destination when the job's failures are retried", async () => {
+		const deps = makeDeps()
+		const stuck = mockDir("stuck")
+
+		deps.trash.mockResolvedValue({ succeeded: [], failed: [{ item: narrowItem(stuck), error: new Error("offline") }] })
+		deps.copyItems.mockImplementation((id, _items, _dest, _max, onEvent) => {
+			onEvent({ type: "created", item: created(stuck) })
+			requestCopyCancel(id, { trashCopied: true })
+
+			return Promise.resolve(report({ failures: [copyFailure("failed")], error: CANCELLED }))
+		})
+
+		await runCopyJob(deps, request())
+		useCopyJobsStore.getState().update("job", job => ({ ...job, cardVisible: true }))
+		copyItemsTo.mockReturnValue(new Promise(() => undefined))
+
+		expect(retryFailedCopy("job")).not.toBeNull()
+
+		useCopyJobsStore.getState().update("job", job => ({ ...job, cardVisible: false }))
+		pruneSettledCopyJobs()
+
+		expect(row()).toMatchObject({ status: "error", error: { label: "1 copied item couldn't be moved to the trash" } })
+		expect(getCopyJob("job")).toMatchObject({ retryable: [], trashResult: { moved: 0, failed: 1 } })
+		expect(retryFailedCopy("job")).toBeNull()
+		expect(copyItemsTo).toHaveBeenCalledTimes(1)
 	})
 })
 

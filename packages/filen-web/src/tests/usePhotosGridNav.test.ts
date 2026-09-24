@@ -47,16 +47,34 @@ function photoItem(label: string): PhotoItem {
 
 const ITEMS = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"].map(photoItem)
 
-// Duck-typed EventTarget — `closest` is all photosGridKeyTargetIsInteractive probes for.
-function keyTarget(interactive: boolean): EventTarget {
-	return { closest: () => (interactive ? {} : null) } as unknown as EventTarget
+// Where a key press starts: the tile face inside the grid, the tile's ⋯ trigger, or one of the tile's
+// menu items, which Base UI portals out to the body while React still bubbles its keys through the grid.
+type KeyOrigin = "tile" | "trigger" | "menuItem"
+
+interface GridDom {
+	listbox: HTMLElement
+	origins: Record<KeyOrigin, HTMLElement>
 }
 
-function keyEvent(key: string, options: { shiftKey?: boolean; interactiveTarget?: boolean } = {}): ReactKeyboardEvent<HTMLDivElement> {
+let dom: GridDom
+
+function buildGridDom(): GridDom {
+	const listbox = document.createElement("div")
+	const tile = listbox.appendChild(document.createElement("div"))
+	const trigger = tile.appendChild(document.createElement("button"))
+	const menuItem = document.body.appendChild(document.createElement("div"))
+
+	menuItem.setAttribute("role", "menuitem")
+
+	return { listbox, origins: { tile, trigger, menuItem } }
+}
+
+function keyEvent(key: string, options: { shiftKey?: boolean; from?: KeyOrigin } = {}): ReactKeyboardEvent<HTMLDivElement> {
 	return {
 		key,
 		shiftKey: options.shiftKey ?? false,
-		target: keyTarget(options.interactiveTarget ?? false),
+		target: dom.origins[options.from ?? "tile"],
+		currentTarget: dom.listbox,
 		preventDefault: vi.fn()
 	} as unknown as ReactKeyboardEvent<HTMLDivElement>
 }
@@ -94,6 +112,8 @@ function selectedUuids(): string[] {
 
 beforeEach(() => {
 	usePhotosStore.setState({ selectedItems: [] })
+	document.body.replaceChildren()
+	dom = buildGridDom()
 })
 
 describe("usePhotosGridNav — cursor movement", () => {
@@ -221,18 +241,42 @@ describe("usePhotosGridNav — selection", () => {
 	})
 
 	it("leaves a key that originated on the tile's own ⋯ trigger to that button", () => {
-		const { result, onOpen, scrollToIndex } = renderNav()
+		const { result, onOpen, scrollToIndex, setAnchorUuid } = renderNav()
+		const preventDefault = vi.fn()
 
 		act(() => {
-			result.current.handleKeyDown(keyEvent("Enter", { interactiveTarget: true }))
-		})
-		act(() => {
-			result.current.handleKeyDown(keyEvent("ArrowRight", { interactiveTarget: true }))
+			for (const key of ["Enter", " ", "ArrowRight"]) {
+				result.current.handleKeyDown({ ...keyEvent(key, { from: "trigger" }), preventDefault })
+			}
 		})
 
 		expect(onOpen).not.toHaveBeenCalled()
 		expect(scrollToIndex).not.toHaveBeenCalled()
+		expect(setAnchorUuid).not.toHaveBeenCalled()
+		expect(selectedUuids()).toEqual([])
 		expect(result.current.safeActiveIndex).toBe(0)
+		// The button's own click (what opens its menu) needs the default action.
+		expect(preventDefault).not.toHaveBeenCalled()
+	})
+
+	// Base UI turns a menu item's Enter/Space into its click without stopping the keydown, which React
+	// then bubbles through the portal into the grid: a Rename or Info entry must not also open the viewer.
+	it("leaves Enter and Space from a tile's portaled menu item to the menu", () => {
+		const { result, onOpen, setAnchorUuid } = renderNav()
+
+		act(() => {
+			result.current.handleKeyDown(keyEvent("ArrowRight"))
+		})
+		setAnchorUuid.mockClear()
+		act(() => {
+			result.current.handleKeyDown(keyEvent("Enter", { from: "menuItem" }))
+			result.current.handleKeyDown(keyEvent(" ", { from: "menuItem" }))
+		})
+
+		expect(onOpen).not.toHaveBeenCalled()
+		expect(selectedUuids()).toEqual([])
+		expect(setAnchorUuid).not.toHaveBeenCalled()
+		expect(result.current.safeActiveIndex).toBe(1)
 	})
 })
 

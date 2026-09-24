@@ -1,13 +1,16 @@
 import { describe, expect, it } from "vitest"
-import type { Dir, File, UuidStr } from "@filen/sdk-rs"
+import type { Dir, File, SharedDir, SharedRootDir, SharingRole, UuidStr } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import {
+	ancestryHits,
 	createMoveTreeGates,
+	isChainForbidden,
 	isCopyConfirmDisabled,
 	isMoveConfirmDisabled,
 	isMoveDestinationForbidden,
 	isMoveNoOp,
-	isMoveRowDisabled
+	isMoveRowDisabled,
+	type ParentLookup
 } from "@/features/drive/components/moveTargetDialog.logic"
 
 // UuidStr is a template-literal brand requiring at least 3 dashes (see @filen/sdk-rs) — pad a short
@@ -60,6 +63,27 @@ function fileItem(uuid: string, overrides: Partial<File> = {}): DriveItem {
 	return narrowItem(mockFile({ uuid: testUuid(uuid), ...overrides }))
 }
 
+const RECEIVER: SharingRole = { Receiver: { email: "friend@filen.io", id: 7 } }
+
+// The user's own directory as Shared by me lists it: at the share root, and one level below it.
+function sharedOutRootDir(uuid: string): DriveItem {
+	return narrowItem({
+		inner: { uuid: testUuid(uuid), color: "default", timestamp: 1_700_000_000_000n, meta: { type: "decoded", data: { name: uuid } } },
+		sharingRole: RECEIVER,
+		writeAccess: true
+	} satisfies SharedRootDir)
+}
+
+function sharedOutNestedDir(uuid: string): DriveItem {
+	const dir: SharedDir & { sharingRole: SharingRole } = {
+		inner: mockDir({ uuid: testUuid(uuid) }),
+		sharedTag: true,
+		sharingRole: RECEIVER
+	}
+
+	return narrowItem(dir)
+}
+
 describe("isMoveDestinationForbidden", () => {
 	it("root (empty ancestry) is never forbidden, even with moved items present", () => {
 		const moved = dirItem("a")
@@ -90,6 +114,52 @@ describe("isMoveDestinationForbidden", () => {
 		const movedA = dirItem("a")
 		const movedB = dirItem("b")
 		expect(isMoveDestinationForbidden([testUuid("unrelated"), testUuid("b")], [movedA, movedB])).toBe(true)
+	})
+
+	// Shared by me lists the user's own directories under their real uuids, and offers Move on them.
+	it("counts a directory moved out of Shared by me, at the share root or below it", () => {
+		for (const moved of [sharedOutRootDir("a"), sharedOutNestedDir("a")]) {
+			expect(moved.type).not.toBe("directory")
+			expect(isMoveDestinationForbidden([testUuid("a")], [moved])).toBe(true)
+			expect(isMoveDestinationForbidden([testUuid("p"), testUuid("a"), testUuid("child")], [moved])).toBe(true)
+			expect(isMoveDestinationForbidden([testUuid("p")], [moved])).toBe(false)
+		}
+	})
+})
+
+describe("ancestryHits", () => {
+	// root > p > a > child > grandchild; `a` is the moved directory.
+	const parents = new Map<string, string | null>([
+		["p", null],
+		["a", "p"],
+		["child", "a"],
+		["grandchild", "child"]
+	])
+	const parentOf: ParentLookup = uuid => parents.get(uuid)
+	const moved = new Set(["a"])
+
+	it("finds a moved directory anywhere up the walked chain, the target itself included", () => {
+		expect(ancestryHits("a", moved, parentOf)).toBe(true)
+		expect(ancestryHits("grandchild", moved, parentOf)).toBe(true)
+	})
+
+	it("clears a chain that reaches the top without passing one", () => {
+		expect(ancestryHits("p", moved, parentOf)).toBe(false)
+	})
+
+	it("is unresolved where a link is missing, loops, or runs too deep", () => {
+		expect(ancestryHits("orphan", moved, parentOf)).toBe("unresolved")
+		expect(ancestryHits("loop", moved, uuid => (uuid === "loop" ? "loop" : undefined))).toBe("unresolved")
+		expect(ancestryHits("x0", moved, uuid => `x${String(Number(uuid.slice(1)) + 1)}`)).toBe("unresolved")
+	})
+
+	it("refuses a directory whose chain can't be proven clear, but never a file", () => {
+		const unknown = (): ParentLookup => () => undefined
+
+		expect(isChainForbidden(testUuid("t"), [dirItem("a")], unknown)).toBe(true)
+		expect(isChainForbidden(testUuid("t"), [sharedOutRootDir("a")], unknown)).toBe(true)
+		expect(isChainForbidden(testUuid("t"), [fileItem("f")], unknown)).toBe(false)
+		expect(isChainForbidden(testUuid("t"), [dirItem("a")], () => () => null)).toBe(false)
 	})
 })
 
@@ -228,6 +298,14 @@ describe("createMoveTreeGates (directory-tree submenu)", () => {
 		const { isTargetDisabled } = gates([f, a])
 		expect(isTargetDisabled({ uuid: null, ancestry: [] })).toBe(false)
 	})
+
+	it("a directory moved from Shared by me can't be moved into itself or below it either", () => {
+		const { isBrowseDisabled, isTargetDisabled } = gates([sharedOutRootDir("a")])
+		expect(isBrowseDisabled({ uuid: testUuid("a"), ancestry: [testUuid("a")] })).toBe(true)
+		expect(isTargetDisabled({ uuid: testUuid("a"), ancestry: [testUuid("a")] })).toBe(true)
+		expect(isBrowseDisabled({ uuid: testUuid("child"), ancestry: [testUuid("a"), testUuid("child")] })).toBe(true)
+		expect(isTargetDisabled({ uuid: testUuid("child"), ancestry: [testUuid("a"), testUuid("child")] })).toBe(true)
+	})
 })
 
 describe("copy gates", () => {
@@ -258,5 +336,12 @@ describe("copy gates", () => {
 
 	it("keeps a target disabled until its own listing has been read, like move", () => {
 		expect(gates([f]).isTargetDisabled({ uuid: testUuid("unread"), ancestry: [testUuid("unread")] })).toBe(true)
+	})
+
+	it("refuses a directory copied from Shared by me as its own destination", () => {
+		expect(isCopyConfirmDisabled([testUuid("a")], [sharedOutNestedDir("a")])).toBe(true)
+		expect(
+			gates([sharedOutRootDir("a")]).isTargetDisabled({ uuid: testUuid("child"), ancestry: [testUuid("a"), testUuid("child")] })
+		).toBe(true)
 	})
 })

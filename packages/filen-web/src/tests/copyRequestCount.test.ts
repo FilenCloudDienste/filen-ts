@@ -22,7 +22,7 @@ const { listDirectory, copyItems, getUserInfo } = vi.hoisted(() => ({
 	getUserInfo: vi.fn<() => Promise<UserInfo>>()
 }))
 
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: { listDirectory, copyItems, getUserInfo } }))
+vi.mock("@/lib/sdk/client", () => ({ sdkApi: { listDirectory, copyItems, getUserInfo, releaseCopy: vi.fn() } }))
 
 // The production defaults minus the persister (sqlite, unavailable under vitest).
 vi.mock("@/queries/client", () => ({
@@ -40,7 +40,7 @@ vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), custom: vi
 import { queryClient } from "@/queries/client"
 import { ACCOUNT_QUERY_KEY } from "@/queries/account"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
-import { driveListingQueryKey, useDirectoryListingQuery } from "@/features/drive/queries/drive"
+import { discardListingPatches, driveListingQueryKey, flushListingCreates, useDirectoryListingQuery } from "@/features/drive/queries/drive"
 import { handleDriveEvent } from "@/features/drive/lib/socketHandlers"
 import { startCopy } from "@/features/drive/lib/copy"
 import { getCopyJob } from "@/features/transfers/store/useCopyJobsStore"
@@ -149,6 +149,7 @@ function copyEchoes(): void {
 
 beforeEach(() => {
 	queryClient.clear()
+	discardListingPatches()
 	socketAuthenticated()
 	useTransfersStore.setState({ transfers: [], speedSamples: [] })
 	listDirectory.mockReset()
@@ -183,7 +184,13 @@ describe("copy request counts", () => {
 
 		await drain()
 
-		// Mid-copy: the open listing holds the top-level copy once; recents is left alone.
+		const write = vi.spyOn(queryClient, "setQueryData")
+
+		flushListingCreates()
+
+		// Mid-copy: the open listing holds the top-level copy once, taken with its echo in one write;
+		// recents is left alone.
+		expect(write.mock.calls.filter(([key]) => key[1] === "listing")).toHaveLength(1)
 		expect(
 			queryClient.getQueryData<DriveItem[]>(driveListingQueryKey({ variant: "drive", uuid: null }))?.map(i => i.data.uuid)
 		).toEqual([TOP])

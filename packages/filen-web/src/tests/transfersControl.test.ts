@@ -26,6 +26,8 @@ vi.mock("@/features/drive/lib/copy", () => ({ requestCopyCancel }))
 
 import { cancelActiveTransfers, cancelTransfer, pauseTransfer, resumeTransfer } from "@/features/transfers/lib/control"
 import { useTransfersStore } from "@/features/transfers/store/useTransfersStore"
+import { useCopyJobsStore } from "@/features/transfers/store/useCopyJobsStore"
+import { createCopyJob } from "@/features/drive/lib/copy.logic"
 
 function makeTransfer(overrides: Partial<Transfer> = {}): Transfer {
 	return {
@@ -45,6 +47,7 @@ function makeTransfer(overrides: Partial<Transfer> = {}): Transfer {
 beforeEach(() => {
 	vi.clearAllMocks()
 	useTransfersStore.setState({ transfers: [] })
+	useCopyJobsStore.setState({ jobs: {} })
 })
 
 describe("cancelTransfer", () => {
@@ -203,6 +206,25 @@ describe("copy transfers", () => {
 
 		expect(requestCopyCancel).not.toHaveBeenCalled()
 		expect(pauseCopy).not.toHaveBeenCalled()
+	})
+
+	// Its row stays active while what it copied moves to the trash, which has no pause.
+	it("neither pauses nor resumes a copy whose job already ended", () => {
+		useCopyJobsStore.setState({
+			jobs: { c1: { ...createCopyJob("c1", { uuid: null, name: "Cloud Drive" }, 1), outcome: { status: "cancelled" } } }
+		})
+		useTransfersStore.setState({ transfers: [makeTransfer({ id: "c1", direction: "copy", status: "copying" })] })
+
+		pauseTransfer("c1")
+
+		expect(pauseCopy).not.toHaveBeenCalled()
+		expect(useTransfersStore.getState().transfers[0]?.paused).toBe(false)
+
+		useTransfersStore.getState().setPaused("c1", true)
+		resumeTransfer("c1")
+
+		expect(resumeCopy).not.toHaveBeenCalled()
+		expect(useTransfersStore.getState().transfers[0]?.paused).toBe(true)
 	})
 })
 

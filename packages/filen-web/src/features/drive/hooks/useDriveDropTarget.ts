@@ -2,6 +2,8 @@ import { useEffect, useRef, useState, type DragEvent } from "react"
 import { currentRootUuid } from "@/features/drive/lib/actions"
 import { isInternalDrag, getDragPayload, performMove } from "@/features/drive/lib/dnd"
 import { dragDropMode, isValidCopyTarget, isValidMoveTarget, type DragDropMode } from "@/features/drive/lib/dnd.logic"
+import { searchHitParents } from "@/features/drive/lib/ownAncestry"
+import type { ParentLookup } from "@/features/drive/components/moveTargetDialog.logic"
 import { isMacPlatform } from "@/lib/keymap/kbd.logic"
 import { startCopyWithCard } from "@/features/transfers/lib/copyToast"
 
@@ -16,6 +18,10 @@ export interface DriveDropTargetParams {
 	targetUuid: string | null
 	// The target's root-to-target uuid chain, inclusive of the target itself; empty for the root.
 	targetAncestry: readonly string[]
+	// A search hit below the search root's children: its own parent, and the directory the search runs
+	// in. Its chain above skips what lies between the two, so a directory drop waits on a walk of the
+	// cached parents.
+	searchHit?: { parent: string; searchRoot: string | null } | undefined
 	// The target directory's name, for the card of a copy dropped on it.
 	targetName: string
 	// Auto-expand callback for a collapsed tree node — fired once after a dwell while a valid internal
@@ -44,6 +50,7 @@ export interface DriveDropTarget {
 export function useDriveDropTarget({
 	targetUuid,
 	targetAncestry,
+	searchHit,
 	targetName,
 	onDwell,
 	disabled = false
@@ -69,6 +76,17 @@ export function useDriveDropTarget({
 		}
 	}
 
+	// Only read when the payload holds a directory: the walk reads every cached listing.
+	function searchHitParentReader(): (() => ParentLookup) | undefined {
+		if (searchHit === undefined || targetUuid === null) {
+			return undefined
+		}
+
+		const hit = { uuid: targetUuid, ...searchHit }
+
+		return () => searchHitParents({ ...hit, rootUuid: currentRootUuid() })
+	}
+
 	// A valid drop here needs the internal marker AND a payload (read from the module ref, since the
 	// transfer's data is unreadable mid-drag) that clears the guards for the drop's mode: a move is also
 	// refused onto the payload's own parent, a copy is not.
@@ -78,10 +96,11 @@ export function useDriveDropTarget({
 		}
 
 		const payload = getDragPayload()
+		const readParents = searchHitParentReader()
 
 		return dragDropMode(event, MAC) === "copy"
-			? isValidCopyTarget({ targetAncestry, payload })
-			: isValidMoveTarget({ targetUuid, targetAncestry, payload, rootUuid: currentRootUuid() })
+			? isValidCopyTarget({ targetUuid, targetAncestry, readParents, payload })
+			: isValidMoveTarget({ targetUuid, targetAncestry, readParents, payload, rootUuid: currentRootUuid() })
 	}
 
 	function onDragEnter(event: DragEvent<HTMLElement>): void {

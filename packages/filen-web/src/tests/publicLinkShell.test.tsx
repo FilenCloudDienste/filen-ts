@@ -6,10 +6,15 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import "@/lib/i18n"
 
-const { hasClient } = vi.hoisted(() => ({ hasClient: vi.fn<() => Promise<boolean>>() }))
+const { hasClient, ownsItem } = vi.hoisted(() => ({
+	hasClient: vi.fn<() => Promise<boolean>>(),
+	ownsItem: vi.fn<(kind: "file" | "directory", uuid: string) => Promise<boolean>>()
+}))
 
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: { hasClient } }))
-vi.mock("@/queries/client", () => ({ queryClient: new QueryClient({ defaultOptions: { queries: { retry: false } } }) }))
+vi.mock("@/lib/sdk/client", () => ({ sdkApi: { hasClient, ownsItem } }))
+// An unobserved entry outlives the page here, as the app's own gcTime does: Node clamps a timeout past
+// 2^31 ms to 1 ms, so the app's value itself would drop it at once.
+vi.mock("@/queries/client", () => ({ queryClient: new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } }) }))
 // A plain anchor stands in for the router's Link, so the rendered href shows where it points.
 vi.mock("@tanstack/react-router", async () => {
 	const { createElement: element, forwardRef } = await import("react")
@@ -24,9 +29,16 @@ vi.mock("@tanstack/react-router", async () => {
 
 import { queryClient } from "@/queries/client"
 import { PublicLinkShell } from "@/features/publicLinks/components/publicLinkShell"
+import { useLinkSaveable } from "@/features/publicLinks/queries/publicLink"
+
+function SaveableProbe() {
+	return useLinkSaveable("file", "file-0000-0000-0000-000000000000") ? "saveable" : "not saveable"
+}
 
 function renderShell() {
-	return render(createElement(QueryClientProvider, { client: queryClient }, createElement(PublicLinkShell, null, "body")))
+	return render(
+		createElement(QueryClientProvider, { client: queryClient }, createElement(PublicLinkShell, null, createElement(SaveableProbe)))
+	)
 }
 
 let consoleError: MockInstance<typeof console.error>
@@ -61,6 +73,33 @@ describe("PublicLinkShell header", () => {
 		})
 		expect(screen.queryByRole("link", { name: "Sign in" })).toBeNull()
 		expect(screen.queryByRole("link", { name: "Get Filen" })).toBeNull()
+	})
+
+	// Signing in from the header's link navigates within the tab, and Back returns to the link page with
+	// no reload in between.
+	it("asks again when the visitor comes back signed in, offering the drive and Save", async () => {
+		hasClient.mockResolvedValue(false)
+		ownsItem.mockResolvedValue(false)
+
+		const signedOut = renderShell()
+
+		await waitFor(() => {
+			expect(screen.getByRole("link", { name: "Sign in" })).toBeDefined()
+		})
+		expect(screen.getByText("not saveable")).toBeDefined()
+
+		signedOut.unmount()
+		hasClient.mockResolvedValue(true)
+		await new Promise(resolve => setTimeout(resolve, 0))
+		renderShell()
+
+		await waitFor(() => {
+			expect(screen.getByRole("link", { name: "Open Cloud Drive" })).toBeDefined()
+		})
+		await waitFor(() => {
+			expect(screen.getByText("saveable")).toBeDefined()
+		})
+		expect(screen.queryByRole("link", { name: "Sign in" })).toBeNull()
 	})
 
 	// A link styled as a button stays a link (buttonVariants on a real <a>), so Base UI has no

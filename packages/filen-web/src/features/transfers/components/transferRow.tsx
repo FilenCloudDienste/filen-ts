@@ -24,6 +24,7 @@ import {
 import { pauseTransfer, resumeTransfer } from "@/features/transfers/lib/control"
 import { showCopyToast } from "@/features/transfers/lib/copyToast"
 import { pruneSettledCopyJobs } from "@/features/drive/lib/copy"
+import { isCopyTrashPending } from "@/features/drive/lib/copy.logic"
 import { useCopyJobsStore } from "@/features/transfers/store/useCopyJobsStore"
 import { DirectoryGlyph, FileTypeIcon } from "@/features/drive/components/itemIcon"
 import { errorLabel } from "@/lib/i18n/errorLabel"
@@ -146,6 +147,12 @@ export function TransferRow({ transfer, onRequestCancel }: TransferRowProps) {
 	const hasCopyCard = useCopyJobsStore(state => transfer.direction === "copy" && transfer.id in state.jobs)
 	// A copy row's name may be a directory's or "N items", which no file glyph fits; the job knows which.
 	const copyGlyph = useCopyJobsStore(state => (transfer.direction === "copy" ? state.jobs[transfer.id]?.glyph : undefined))
+	// A stopped copy's row stays active while its copies move to the trash, which can't be paused or stopped.
+	const copyTrashing = useCopyJobsStore(state => {
+		const job = transfer.direction === "copy" ? state.jobs[transfer.id] : undefined
+
+		return job !== undefined && isCopyTrashPending(job)
+	})
 
 	// Never renders bytesTransferred for a "done" row (only its final size) — settle()/setProgress()
 	// are separate store writes, so a just-finished row's bytesTransferred can still briefly trail
@@ -168,10 +175,14 @@ export function TransferRow({ transfer, onRequestCancel }: TransferRowProps) {
 	// template) so the symbol/rounding follow the active locale — some locales space or place "%"
 	// differently, and percent's default maximumFractionDigits is 0, which is also what rounds the
 	// value for display.
-	const trailingLabel =
-		isActiveTransfer(transfer.status) && !transfer.paused
-			? new Intl.NumberFormat(i18n.language, { style: "percent" }).format(progress / 100)
-			: t(isActiveTransfer(transfer.status) ? "transfersStatusPaused" : finishedStatusLabelKey(transfer.status))
+	let trailingLabel: string
+	if (copyTrashing) {
+		trailingLabel = t("transfersStatusMovingToTrash")
+	} else if (isActiveTransfer(transfer.status) && !transfer.paused) {
+		trailingLabel = new Intl.NumberFormat(i18n.language, { style: "percent" }).format(progress / 100)
+	} else {
+		trailingLabel = t(isActiveTransfer(transfer.status) ? "transfersStatusPaused" : finishedStatusLabelKey(transfer.status))
+	}
 
 	return (
 		<div className="flex flex-col gap-1.5 rounded-xl px-1 py-1.5 hover:bg-accent/50">
@@ -230,7 +241,7 @@ export function TransferRow({ transfer, onRequestCancel }: TransferRowProps) {
 					>
 						<Trash2Icon />
 					</Button>
-				) : (
+				) : copyTrashing ? null : (
 					<>
 						<Button
 							variant="ghost"

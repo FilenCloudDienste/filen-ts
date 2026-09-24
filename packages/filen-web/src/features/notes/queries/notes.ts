@@ -23,9 +23,9 @@ export function useNotes(): UseQueryResult<Note[]> {
 	})
 }
 
-// Cancel-before-patch WITH the initial-fetch carve-out (driveListingQueryUpdate's own rule, queries/
-// drive.ts): a refetch snapshotted on the server BEFORE this write would land after the patch and
-// silently overwrite it — abort anything in flight first, but only when cached data already exists.
+// Cancel-before-patch WITH the initial-fetch carve-out: a refetch snapshotted on the server BEFORE this
+// write would land after the patch and silently overwrite it — abort anything in flight first, but only
+// when cached data already exists.
 // Cancelling a query's INITIAL fetch would strand it on its loading state with nothing to show until
 // the next mount/focus trigger, and the overwrite hazard only applies to data a patch can lose.
 function cancelInFlightIfCached(): void {
@@ -35,8 +35,7 @@ function cancelInFlightIfCached(): void {
 }
 
 // Confirm-then-patch (queries/client.ts's zero-useMutation convention). A cache miss (nobody has
-// mounted the notes list yet) defaults to [] so the patch still lands for whenever it first mounts,
-// same rule as driveListingQueryUpdate.
+// mounted the notes list yet) defaults to [] so the patch still lands for whenever it first mounts.
 export function notesQueryUpdate(updater: (prev: Note[]) => Note[]): void {
 	cancelInFlightIfCached()
 	queryClient.setQueryData<Note[]>(NOTES_QUERY_KEY, prev => updater(prev ?? []))

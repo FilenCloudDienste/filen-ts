@@ -120,12 +120,15 @@ export function usePublicDirListing(args: {
 }
 
 // Whether the visitor on a public-link page is signed in. Boot has already restored any session by the
-// time these routes render, and a sign-in or sign-out elsewhere reloads the tab.
+// time these routes render, and a sign-in or sign-out in another tab reloads this one. One in this tab
+// doesn't: it navigates within the app, so the answer is dropped once the link page is left and read
+// again, from the worker without a request, on the way back.
 export function usePublicVisitorSignedIn(): UseQueryResult<boolean> {
 	return useQuery({
 		queryKey: ["publicLinks", "signedIn"],
 		queryFn: () => sdkApi.hasClient(),
 		staleTime: Infinity,
+		gcTime: 0,
 		refetchOnWindowFocus: false,
 		persister: (queryFn, context) => queryFn(context)
 	})

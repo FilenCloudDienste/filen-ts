@@ -83,4 +83,24 @@ describe("useDriveListboxNav — key presses", () => {
 		expect(onOpen).not.toHaveBeenCalled()
 		expect(useDriveStore.getState().selectedItems).toEqual([])
 	})
+
+	// The active row's ⋯ trigger is in the tab sequence and sits inside the listbox: Enter/Space on it
+	// must reach the button, whose native click is what opens its menu.
+	it("leaves Enter and Space on a row's ⋯ trigger to the button (no open, no toggle, no preventDefault)", () => {
+		const { result, onOpen } = renderNav()
+		const listbox = document.createElement("div")
+		const row = listbox.appendChild(document.createElement("div"))
+		const trigger = row.appendChild(document.createElement("button"))
+		const preventDefault = vi.fn()
+
+		act(() => {
+			for (const key of ["Enter", " "]) {
+				result.current.handleKeyDown({ ...keyDown(key, listbox, trigger), preventDefault })
+			}
+		})
+
+		expect(onOpen).not.toHaveBeenCalled()
+		expect(useDriveStore.getState().selectedItems).toEqual([])
+		expect(preventDefault).not.toHaveBeenCalled()
+	})
 })

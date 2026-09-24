@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import type { Dir, File, UuidStr } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import {
@@ -208,15 +208,65 @@ describe("isValidCopyTarget", () => {
 	it("accepts the payload's own parent, which a move refuses", () => {
 		const payload = [fileItem("a", "home")]
 
-		expect(isValidCopyTarget({ targetAncestry: [testUuid("home")], payload })).toBe(true)
+		expect(isValidCopyTarget({ targetUuid: testUuid("home"), targetAncestry: [testUuid("home")], payload })).toBe(true)
 		expect(isValidMoveTarget({ targetUuid: testUuid("home"), targetAncestry: [testUuid("home")], payload, rootUuid: ROOT })).toBe(false)
 	})
 
 	it("refuses an empty payload and a copied directory as its own destination or below it", () => {
 		const payload = [dirItem("a", "home")]
 
-		expect(isValidCopyTarget({ targetAncestry: [testUuid("home")], payload: [] })).toBe(false)
-		expect(isValidCopyTarget({ targetAncestry: [testUuid("home"), testUuid("a")], payload })).toBe(false)
-		expect(isValidCopyTarget({ targetAncestry: [testUuid("home"), testUuid("a"), testUuid("inner")], payload })).toBe(false)
+		expect(isValidCopyTarget({ targetUuid: testUuid("home"), targetAncestry: [testUuid("home")], payload: [] })).toBe(false)
+		expect(isValidCopyTarget({ targetUuid: testUuid("a"), targetAncestry: [testUuid("home"), testUuid("a")], payload })).toBe(false)
+		expect(
+			isValidCopyTarget({
+				targetUuid: testUuid("inner"),
+				targetAncestry: [testUuid("home"), testUuid("a"), testUuid("inner")],
+				payload
+			})
+		).toBe(false)
+	})
+})
+
+// Search results list hits from anywhere below the search root, and a hit's route chain is the search
+// root's plus the hit: the directories between the two are missing from it.
+describe("drops onto a search hit below the search root's children", () => {
+	// search root > a > b > hit, with `a` and `hit` both among the results.
+	const parents = new Map<string, string | null>([
+		[testUuid("hit"), testUuid("b")],
+		[testUuid("b"), testUuid("a")],
+		[testUuid("a"), null]
+	])
+	const readParents = () => (uuid: string) => parents.get(uuid)
+	const hitTarget = { targetUuid: testUuid("hit"), targetAncestry: [testUuid("hit")], rootUuid: ROOT }
+
+	it("refuses a directory the walk finds above the hit, for a move and a copy", () => {
+		const payload = [dirItem("a", "root")]
+
+		expect(isValidMoveTarget({ ...hitTarget, payload, readParents })).toBe(false)
+		expect(isValidCopyTarget({ ...hitTarget, payload, readParents })).toBe(false)
+	})
+
+	it("refuses a directory where the walk can't reach the search root", () => {
+		const payload = [dirItem("elsewhere", "root")]
+
+		expect(isValidMoveTarget({ ...hitTarget, payload, readParents: () => () => undefined })).toBe(false)
+	})
+
+	it("takes a directory the walk proves is not above the hit, and any file", () => {
+		expect(isValidMoveTarget({ ...hitTarget, payload: [dirItem("elsewhere", "root")], readParents })).toBe(true)
+		expect(isValidCopyTarget({ ...hitTarget, payload: [fileItem("f", "root")], readParents: () => () => undefined })).toBe(true)
+	})
+
+	// Every dragover asks, and reading the parents scans every cached listing.
+	it("reads the parents only while the payload holds a directory", () => {
+		const reader = vi.fn(readParents)
+		const files = [fileItem("f", "root")]
+
+		expect(isValidMoveTarget({ ...hitTarget, payload: files, readParents: reader })).toBe(true)
+		expect(isValidCopyTarget({ ...hitTarget, payload: files, readParents: reader })).toBe(true)
+		expect(reader).not.toHaveBeenCalled()
+
+		expect(isValidMoveTarget({ ...hitTarget, payload: [dirItem("elsewhere", "root")], readParents: reader })).toBe(true)
+		expect(reader).toHaveBeenCalledOnce()
 	})
 })

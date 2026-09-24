@@ -3,12 +3,12 @@ import type { UserInfo } from "@filen/sdk-rs"
 import { formatBytes, resolveQuotaVerdict, type QuotaCheckDeps, type QuotaVerdict } from "@filen/shared"
 import { i18n } from "@/lib/i18n"
 import { queryClient } from "@/queries/client"
-import { ACCOUNT_QUERY_KEY, accountQueryUpdate, fetchAccount } from "@/queries/account"
+import { ACCOUNT_QUERY_KEY, accountQueryUpdate, fetchAccountFresh } from "@/queries/account"
 
-// The fresh read goes through the query so it also refreshes every other account consumer.
+// The fresh read also refreshes every other account consumer, unless the account was written meanwhile.
 export const accountQuotaDeps: QuotaCheckDeps = {
 	cached: () => queryClient.getQueryData<UserInfo>(ACCOUNT_QUERY_KEY),
-	fetchFresh: () => queryClient.query({ queryKey: ACCOUNT_QUERY_KEY, queryFn: fetchAccount, staleTime: 0 })
+	fetchFresh: fetchAccountFresh
 }
 
 // Upload pre-flight against the cached account; see resolveQuotaVerdict for when it reads fresh.

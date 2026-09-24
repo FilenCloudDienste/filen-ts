@@ -22,6 +22,7 @@ import { previewCategoryForName, previewType } from "@/features/drive/lib/previe
 import { startDownloads } from "@/features/drive/lib/download"
 import { isEditable, isUnresolvableParentError, runPreviewSave } from "@/features/drive/lib/previewSave.logic"
 import { currentRootUuid, renameItem, trashItems, deleteItemsPermanently } from "@/features/drive/lib/actions"
+import { followClipboardItem } from "@/features/drive/lib/clipboardSync"
 import { unshareItems } from "@/features/drive/lib/share/actions"
 import { driveListingQueryUpdate } from "@/features/drive/queries/drive"
 import { toastBulkOutcome } from "@/features/drive/lib/bulkToast"
@@ -103,10 +104,9 @@ export interface PreviewOverlayProps {
 	// sync, never any listing cache). The drive host omits this: toggleFavorite already patches every
 	// `["drive", "listing", …]` key itself (features/drive/lib/actions.ts's applyFavoritePatch), so a
 	// drive-opened overlay needs nothing further. A photos-opened overlay does: the photos listing lives
-	// under its own `["photos", …]` key that patch never reaches, and the realtime `itemFavorite` socket
-	// event is deliberately excluded from the photos-invalidating event set (an attribute flip, not a
-	// membership change — see socketHandlers.ts's own PHOTOS_INVALIDATING_EVENT_TYPES comment), so
-	// nothing else would ever reflect the toggle back into the grid without a reload.
+	// under its own `["photos", …]` key that patch never reaches, and otherwise only the realtime
+	// `itemFavorite` echo (photos queries' patchPhotosFavorite) would reflect the toggle back into the
+	// grid, a socket round trip later.
 	onFavoriteToggled?: (item: DriveItem) => void
 	// Header-menu entries the opening surface doesn't offer in its own menus, so the viewer matches them
 	// (Photos hides Move).
@@ -641,6 +641,8 @@ export function PreviewOverlay({
 		// Keyed by the FROZEN slot uuid (targetRawItem), never targetItem's own uuid — see `saved`'s own
 		// comment on why that's what makes a chained re-save of the same slot collapse onto one entry.
 		setSaved(prev => new Map(prev).set(targetRawItem.data.uuid, outcome.item))
+		// A cut of the file now moves the saved version, not the one archived under the old uuid.
+		followClipboardItem(outcome.item, targetItem.data.uuid)
 		setPreviewDirty(false)
 		// The remounted viewer re-seeds this itself when it mounts an editor; markdown returns in RENDERED
 		// mode and mounts none, so a stale buffer would otherwise stay readable to a second save.

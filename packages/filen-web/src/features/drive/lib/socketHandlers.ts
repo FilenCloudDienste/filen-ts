@@ -1,4 +1,4 @@
-import type { SocketEvent, NonRootItemTagged } from "@filen/sdk-rs"
+import type { Dir, SocketEvent, NonRootItemTagged } from "@filen/sdk-rs"
 import { removeByUuid } from "@filen/shared"
 import { registerSocketHandler } from "@/lib/sdk/socket"
 import { log } from "@/lib/log"
@@ -7,14 +7,23 @@ import {
 	driveListingQueryUpdateGlobal,
 	findCachedListingItem,
 	flatListingQueryUpdate,
+	flushListingCreates,
 	invalidateDriveListings,
 	invalidateFlatListing,
+	markDriveListingStale,
 	markListingsStale,
-	normalizeParentUuid
+	normalizeParentUuid,
+	queueListingCreate
 } from "@/features/drive/queries/drive"
 import { narrowItem, upsertDriveItem, type DriveItem } from "@/features/drive/lib/item"
 import { currentRootUuid, insertIntoTrashListing, patchFavoritesListing, patchMovedItem } from "@/features/drive/lib/actions"
-import { invalidatePhotosListing, markPhotosListingStale, type PhotosEventScope } from "@/features/photos/queries/photos"
+import { followDriveEventOnClipboard } from "@/features/drive/lib/clipboardSync"
+import {
+	invalidatePhotosListing,
+	markPhotosListingStale,
+	patchPhotosFavorite,
+	type PhotosEventScope
+} from "@/features/photos/queries/photos"
 import { markAccountStale } from "@/queries/account"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import { hasActiveCopies, useTransfersStore } from "@/features/transfers/store/useTransfersStore"
@@ -34,7 +43,7 @@ import {
 // from them would sit in memory for the session and show as that directory's whole content until read; an event that ships only a uuid patches every
 // currently-instantiated listing at once via driveListingQueryUpdateGlobal (the same fan-out actions.ts
 // uses), which reaches whichever listing holds the row without a parent lookup. No invalidate-storm — every
-// path is a targeted setQueryData with the queries' own cancel-before-patch discipline.
+// path is a targeted setQueryData, which a listing read under way also applies to what it returns.
 //
 // Alongside the listing-cache patch, an event that removes / rotates / renames an item also emits a
 // previewReconcile signal so an OPEN preview pager (which steps a frozen snapshot the cache patch can't
@@ -100,22 +109,21 @@ function ownedRowOrUndefined(item: DriveItem | undefined): DriveItem | undefined
 	return item !== undefined && (item.type === "file" || item.type === "directory") ? item : undefined
 }
 
-// Recents is a flat, cross-directory aggregation with its own key. Dedups on uuid alone (recents
-// aggregates across parents, so upsertDriveItem's name-collision rule doesn't apply here — same
-// reasoning as the favorites listing). Appending is enough for ordering: resolveEffectiveSort forces
-// uploadDateDesc for the recents variant (lib/preferences.ts), so the row sorts to the top at render.
-// A copy lands its files as fileNew events by the thousand, and rebuilding recents for each is quadratic
-// and cancels its refetch every time; while one runs, recents is read once after the last copy instead.
+// Recents is a flat, cross-directory aggregation with its own key, which a new file joins with the batch
+// its parent listing gets (queueListingCreate). Appending is enough for ordering: resolveEffectiveSort
+// forces uploadDateDesc for the recents variant (lib/preferences.ts), so the row sorts to the top at
+// render. A copy lands its files as fileNew events by the thousand; while one runs, recents is read once
+// after the last copy instead.
 let recentsDeferred = false
 
-function insertIntoRecents(item: DriveItem): void {
+function newFileJoinsRecents(): boolean {
 	if (hasActiveCopies(useTransfersStore.getState().transfers)) {
 		recentsDeferred = true
 
-		return
+		return false
 	}
 
-	flatListingQueryUpdate("recents", prev => [...removeByUuid(prev, item.data.uuid), item])
+	return true
 }
 
 // Called as each copy settles; only the last one standing reads.
@@ -152,6 +160,23 @@ function narrowFavoriteItem(item: NonRootItemTagged): DriveItem | undefined {
 	}
 }
 
+// The socket's directory move and restore payloads carry no colour: the SDK fills in the default. The
+// directory keeps the colour of a cached row of it, read before any fan-out strips that row; with none
+// cached anywhere, the colour is unknown.
+function directoryKeepingColor(dir: Dir): { item: DriveItem; colorKnown: boolean } {
+	const cached = findCachedListingItem(dir.uuid)
+
+	if (cached !== undefined && "color" in cached.data) {
+		return { item: narrowItem({ ...dir, color: cached.data.color }), colorKnown: true }
+	}
+
+	return { item: narrowItem(dir), colorKnown: false }
+}
+
+// Batched per parent listing (queueListingCreate). Every other event applies the queue first, so none
+// lands before a create it follows.
+const BATCHED_CREATE_EVENT_TYPES: ReadonlySet<DriveSocketEvent["inner"]["type"]> = new Set(["fileNew", "folderSubCreated"])
+
 // Drive events that can add, remove or rename a photo; photosEventScope then narrows each to the part
 // of the tree it touched, so a change outside the photos root skips the recursive refetch.
 const PHOTOS_INVALIDATING_EVENT_TYPES: ReadonlySet<DriveSocketEvent["inner"]["type"]> = new Set([
@@ -167,7 +192,8 @@ const PHOTOS_INVALIDATING_EVENT_TYPES: ReadonlySet<DriveSocketEvent["inner"]["ty
 	"fileDeletedPermanent",
 	"folderDeletedPermanent",
 	"fileMetadataChanged",
-	"folderMetadataChanged"
+	"folderMetadataChanged",
+	"deleteAll"
 ])
 
 // null when the payload can't locate every end of the change, which always invalidates: a move names
@@ -225,6 +251,10 @@ export function handleDriveEvent(event: DriveSocketEvent): void {
 	const inner = event.inner
 	const rootUuid = currentRootUuid()
 
+	if (!BATCHED_CREATE_EVENT_TYPES.has(inner.type)) {
+		flushListingCreates()
+	}
+
 	if (PHOTOS_INVALIDATING_EVENT_TYPES.has(inner.type)) {
 		invalidatePhotosListing(photosEventScope(inner))
 	}
@@ -235,15 +265,17 @@ export function handleDriveEvent(event: DriveSocketEvent): void {
 		markAccountStale()
 	}
 
+	// A cut follows its items, and a trashed or deleted item leaves the clipboard.
+	followDriveEventOnClipboard(event)
+
 	switch (inner.type) {
 		case "fileNew": {
-			// A brand-new file — splice into its parent listing. upsertDriveItem drops any same-name/same-uuid
-			// stale row so a re-delivered event never duplicates.
+			// A brand-new file — spliced into its parent listing, where a same-name/same-uuid stale row makes
+			// way so a re-delivered event never duplicates, and into Recents, which it joins by definition
+			// (mobile inserts unconditionally too).
 			const item = narrowItem(inner.file)
 
-			driveListingQueryUpdate(normalizeParentUuid(inner.file.parent, rootUuid), prev => upsertDriveItem(prev, item))
-			// A brand-new file is a recents entry by definition — mobile inserts unconditionally too.
-			insertIntoRecents(item)
+			queueListingCreate(normalizeParentUuid(inner.file.parent, rootUuid), item, { recent: newFileJoinsRecents() })
 			rejoinFavorites(item)
 
 			break
@@ -279,16 +311,22 @@ export function handleDriveEvent(event: DriveSocketEvent): void {
 		}
 
 		case "folderSubCreated": {
-			driveListingQueryUpdate(normalizeParentUuid(inner.dir.parent, rootUuid), prev => upsertDriveItem(prev, narrowItem(inner.dir)))
+			queueListingCreate(normalizeParentUuid(inner.dir.parent, rootUuid), narrowItem(inner.dir))
 
 			break
 		}
 
 		case "folderRestore": {
-			const item = narrowItem(inner.dir)
+			const { item, colorKnown } = directoryKeepingColor(inner.dir)
+			const parentUuid = normalizeParentUuid(inner.dir.parent, rootUuid)
 
 			driveListingQueryUpdateGlobal(prev => removeByUuid(prev, item.data.uuid))
-			driveListingQueryUpdate(normalizeParentUuid(inner.dir.parent, rootUuid), prev => upsertDriveItem(prev, item))
+			driveListingQueryUpdate(parentUuid, prev => upsertDriveItem(prev, item))
+
+			if (!colorKnown) {
+				markDriveListingStale(parentUuid)
+			}
+
 			rejoinFavorites(item)
 			emitPreviewItemRemoved(item.data.uuid)
 
@@ -308,9 +346,14 @@ export function handleDriveEvent(event: DriveSocketEvent): void {
 		}
 
 		case "folderMove": {
-			const item = narrowItem(inner.dir)
+			const { item, colorKnown } = directoryKeepingColor(inner.dir)
 
 			patchMovedItem(item, rootUuid)
+
+			if (!colorKnown) {
+				markDriveListingStale(normalizeParentUuid(inner.dir.parent, rootUuid))
+			}
+
 			emitPreviewItemRemoved(item.data.uuid)
 
 			break
@@ -425,6 +468,9 @@ export function handleDriveEvent(event: DriveSocketEvent): void {
 				// …plus the Favorites root's own membership add/remove, which a replace-only fan-out can never
 				// do (mobile does both arms too). The payload item carries its NEW favorited flag.
 				patchFavoritesListing(item.data.favorited, item)
+
+				// How a favorite set anywhere else reaches the photos grid.
+				patchPhotosFavorite(item)
 			}
 
 			break

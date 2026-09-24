@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import type { CopyFailure, CopyReport, UuidStr } from "@filen/sdk-rs"
 import "@/lib/i18n"
 
@@ -15,7 +15,8 @@ vi.mock("@/lib/sdk/client", () => ({ sdkApi: { pauseCopy, resumeCopy, copyItemsT
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), custom: vi.fn(), dismiss: vi.fn() } }))
 
 import { CopyJobToast } from "@/features/transfers/components/copyJobToast"
-import { createCopyJob, type CopyJob } from "@/features/drive/lib/copy.logic"
+import { copyErrorDTO, createCopyJob, type CopyJob } from "@/features/drive/lib/copy.logic"
+import { narrowItem } from "@/features/drive/lib/item"
 import { useCopyJobsStore } from "@/features/transfers/store/useCopyJobsStore"
 import { useTransfersStore } from "@/features/transfers/store/useTransfersStore"
 
@@ -75,7 +76,12 @@ function failure(label: string): CopyFailure {
 			destParentDir: { uuid: testUuid("root") },
 			destName: label,
 			stage: "upload",
-			error: { kind: "Server", message: "m", serverMessage: "Upload rejected", serverCode: undefined },
+			error: {
+				kind: "Server",
+				message: 'Error of kind Server: error: API Error, message: `Some("Upload rejected")`',
+				serverMessage: "Upload rejected",
+				serverCode: undefined
+			},
 			affectedFiles: 1n,
 			affectedBytes: 1n,
 			existingFile: undefined
@@ -209,7 +215,7 @@ describe("CopyJobToast", () => {
 				sourceUuid: f.info.sourceUuid,
 				sourcePath: f.info.sourcePath,
 				destName: f.info.destName,
-				error: { species: "sdk" as const, kind: "Server", message: "m", label: "Upload rejected" },
+				error: copyErrorDTO(f.info.error),
 				affectedFiles: 1,
 				affectedBytes: 1
 			})),
@@ -235,6 +241,130 @@ describe("CopyJobToast", () => {
 		expect(copyItemsTo).toHaveBeenCalledTimes(1)
 		expect(onRetried).toHaveBeenCalledTimes(1)
 		expect(onRetried.mock.calls[0]?.[0]).not.toBe("job")
+	})
+
+	// The SDK's message is developer text, in English whatever the language.
+	it("words an item's error by its kind, then the server's message, never the SDK's own message", () => {
+		const network = failure("network.txt")
+		const unknown = failure("unknown.txt")
+		const refused = failure("refused.txt")
+
+		network.info.error = {
+			kind: "Reqwest",
+			message: "Error of kind Reqwest: error: error sending request for url (https://gateway.filen.io/v3/upload)",
+			serverMessage: undefined,
+			serverCode: undefined
+		}
+		unknown.info.error = {
+			kind: "Walk",
+			message: "Error of kind Walk: error: walk failed",
+			serverMessage: undefined,
+			serverCode: undefined
+		}
+
+		const failed = [network, unknown, refused]
+
+		seed({
+			...COPYING,
+			outcome: { status: "doneWithFailures" },
+			failures: failed.map(f => ({
+				sourceUuid: f.info.sourceUuid,
+				sourcePath: f.info.sourcePath,
+				destName: f.info.destName,
+				error: copyErrorDTO(f.info.error),
+				affectedFiles: 1,
+				affectedBytes: 1
+			}))
+		})
+		renderCard()
+		fireEvent.click(screen.getByRole("button", { name: "Details" }))
+
+		expect(screen.getByText("Network error. Please check your connection and try again.")).toBeTruthy()
+		expect(screen.getByText("Something went wrong.")).toBeTruthy()
+		expect(screen.getByText("Upload rejected")).toBeTruthy()
+		expect(screen.queryByText(/Error of kind/)).toBeNull()
+	})
+
+	it("words a failed copy's error by its kind", () => {
+		seed({
+			...COPYING,
+			outcome: {
+				status: "failed",
+				error: copyErrorDTO({
+					kind: "MaxStorageReached",
+					message: "Error of kind MaxStorageReached: error: Error of kind MaxStorageReached: error: API Error",
+					serverMessage: undefined,
+					serverCode: undefined
+				})
+			}
+		})
+		renderCard()
+
+		expect(screen.getByText("You have reached your maximum storage capacity.")).toBeTruthy()
+		expect(screen.queryByText(/Error of kind/)).toBeNull()
+	})
+
+	it("says the copies are moving to the trash while a stop that asked for it finishes", () => {
+		seed({
+			...COPYING,
+			outcome: { status: "cancelled" },
+			cancelRequest: "trash",
+			created: [
+				narrowItem({
+					uuid: testUuid("copied"),
+					parent: testUuid("root"),
+					color: "default",
+					timestamp: 0n,
+					favorited: false,
+					meta: { type: "decoded", data: { name: "copied" } }
+				})
+			]
+		})
+		renderCard()
+
+		expect(screen.getByText("Moving copied items to the trash…")).toBeTruthy()
+	})
+
+	it("offers no retry of the failures until the copies a stop asked to trash are there", () => {
+		const failed = failure("a.txt")
+
+		seed({
+			...COPYING,
+			outcome: { status: "cancelled" },
+			cancelRequest: "trash",
+			created: [
+				narrowItem({
+					uuid: testUuid("copied"),
+					parent: testUuid("root"),
+					color: "default",
+					timestamp: 0n,
+					favorited: false,
+					meta: { type: "decoded", data: { name: "copied" } }
+				})
+			],
+			retryable: [failed],
+			failures: [
+				{
+					sourceUuid: failed.info.sourceUuid,
+					sourcePath: failed.info.sourcePath,
+					destName: failed.info.destName,
+					error: copyErrorDTO(failed.info.error),
+					affectedFiles: 1,
+					affectedBytes: 1
+				}
+			]
+		})
+		renderCard()
+		fireEvent.click(screen.getByRole("button", { name: "Details" }))
+
+		expect(screen.getByText("dir/a.txt")).toBeTruthy()
+		expect(screen.queryByRole("button", { name: "Retry failed" })).toBeNull()
+
+		act(() => {
+			useCopyJobsStore.getState().update("job", job => ({ ...job, created: [], trashResult: { moved: 1, failed: 0 } }))
+		})
+
+		expect(screen.getByRole("button", { name: "Retry failed" })).toBeTruthy()
 	})
 
 	it("shows a finished copy as complete", () => {

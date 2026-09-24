@@ -1,6 +1,14 @@
 import { sdkApi } from "@/lib/sdk/client"
 import { requestCopyCancel } from "@/features/drive/lib/copy"
-import { isActiveTransfer, useTransfersStore } from "@/features/transfers/store/useTransfersStore"
+import { isActiveTransfer, useTransfersStore, type Transfer } from "@/features/transfers/store/useTransfersStore"
+import { getCopyJob } from "@/features/transfers/store/useCopyJobsStore"
+
+// A copy's row stays active past its SDK job while its copies move to the trash, which has no pause.
+function isSettledCopy(transfer: Transfer): boolean {
+	const job = transfer.direction === "copy" ? getCopyJob(transfer.id) : undefined
+
+	return job !== undefined && job.outcome.status !== "running"
+}
 
 // Direction-agnostic cancel entry point for the active-row cancel button (transferRow.tsx). Reads
 // the live transfer straight from the store — this fires outside any particular runUpload/runDownload
@@ -33,7 +41,8 @@ export function cancelTransfer(id: string): void {
 	}
 }
 
-// Sign-out: nothing may keep writing with the session being torn down. Copies keep what they made.
+// Sign-out: nothing may keep writing with the session being torn down. A copy keeps what it made unless
+// its stop already asked for the trash.
 export function cancelActiveTransfers(): void {
 	for (const transfer of useTransfersStore.getState().transfers) {
 		cancelTransfer(transfer.id)
@@ -48,7 +57,7 @@ export function cancelActiveTransfers(): void {
 export function pauseTransfer(id: string): void {
 	const transfer = useTransfersStore.getState().transfers.find(t => t.id === id)
 
-	if (transfer === undefined || !isActiveTransfer(transfer.status)) {
+	if (transfer === undefined || !isActiveTransfer(transfer.status) || isSettledCopy(transfer)) {
 		return
 	}
 
@@ -74,7 +83,7 @@ export function pauseTransfer(id: string): void {
 export function resumeTransfer(id: string): void {
 	const transfer = useTransfersStore.getState().transfers.find(t => t.id === id)
 
-	if (transfer === undefined || !isActiveTransfer(transfer.status)) {
+	if (transfer === undefined || !isActiveTransfer(transfer.status) || isSettledCopy(transfer)) {
 		return
 	}
 

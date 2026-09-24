@@ -81,9 +81,14 @@ export function DriveRow({
 	// move (self/descendant/same-parent guarded via its own ancestry). The accessible move route stays
 	// the item menu's "Move" action — this is a pointer-only enhancement.
 	const dragSource = buildDragSourceProps(item, variant)
+	// A cross-directory search hit is the only case "Open containing directory" has somewhere to go —
+	// searchParentPath is "" for a direct child of the search root and undefined outside a search.
+	const searchHit = searchParentPath !== undefined && searchParentPath.length > 0
+	const pathUuids = splatToUuids(splat)
 	const drop = useDriveDropTarget({
 		targetUuid: item.data.uuid,
-		targetAncestry: [...splatToUuids(splat), item.data.uuid],
+		targetAncestry: [...pathUuids, item.data.uuid],
+		searchHit: searchHit ? { parent: item.data.parent, searchRoot: pathUuids.at(-1) ?? null } : undefined,
 		targetName: name,
 		disabled: item.type !== "directory" || !canDragVariant(variant)
 	})
@@ -98,9 +103,6 @@ export function DriveRow({
 	// Cut for a later paste: dimmed, Explorer-style, until the paste or the next copy/cut. The ⋯ trigger
 	// keeps its own hover-only opacity.
 	const cut = useDriveClipboardStore(state => state.cutUuids.has(item.data.uuid))
-	// A cross-directory search hit is the only case "Open containing directory" has somewhere to go —
-	// searchParentPath is "" for a direct child of the search root and undefined outside a search.
-	const searchHit = searchParentPath !== undefined && searchParentPath.length > 0
 
 	return (
 		<ContextMenu>

@@ -384,7 +384,7 @@ export class Sync {
 	// The hydration edge the editor waits on: the store now reflects this tab's authoritative pending
 	// work, so a seed taken from it is truthful. Any content read still in flight for one of these notes
 	// was issued while the store looked clean — it would land on top of the restored draft and remount
-	// the editor onto server content, so it is cancelled here (the drive modules' cancel-before-patch
+	// the editor onto server content, so it is cancelled here (notesQueryUpdate's cancel-before-patch
 	// discipline). A note with no cached content simply refetches once its outbox entry drains. Only the
 	// FIRST hydration can have raced such a read (from then on the store itself keeps the query
 	// disabled), so later calls — the leader's own tail, a follower's every subsequent broadcast — only

@@ -6,8 +6,8 @@ import { sdkApi } from "@/lib/sdk/client"
 import { i18n } from "@/lib/i18n"
 import { runOp, type VoidActionOutcome } from "@/lib/actions/outcome"
 import { asErrorDTO } from "@/lib/sdk/errors"
-import { narrowItem, upsertDriveItem } from "@/features/drive/lib/item"
-import { driveListingQueryUpdate, invalidateDirectorySize } from "@/features/drive/queries/drive"
+import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
+import { invalidateDirectorySize, queueListingCreate } from "@/features/drive/queries/drive"
 import { markAccountStale } from "@/queries/account"
 import { useTransfersStore, type TransfersStore } from "@/features/transfers/store/useTransfersStore"
 import { defaultHeicUploadDeps, heicUploadConversionEnabled, maybeConvertHeicUpload } from "@/features/drive/lib/heicUpload"
@@ -72,7 +72,9 @@ export interface RunUploadDeps {
 	upload: (parentUuid: string | null, transferId: string, file: File, onProgress: (bytes: bigint) => void) => Promise<SdkFile>
 	cancel?: (transferId: string) => void
 	store: Pick<TransfersStore, "add" | "setProgress" | "settle" | "remove">
-	patchListing: typeof driveListingQueryUpdate
+	// Splices the landed file into its parent listing (queueListingCreate: batched with the other
+	// creates, its own socket echo included).
+	patchCreated: (parentUuid: string | null, item: DriveItem) => void
 	// Optional (mirrors `cancel` above): a landed upload staled the destination directory's own cached
 	// recursive size (see queries/drive.ts's invalidateDirectorySize) — real wiring always supplies it,
 	// tests that don't care about the size-sort path simply omit it.
@@ -144,7 +146,7 @@ export async function runUpload(deps: RunUploadDeps, args: { parentUuid: string 
 	// Blob.stream() does hand out a fresh reader per call, there is no reason to have the SDK read the
 	// same local file twice at once.
 	deps.warmThumbnail?.(uploaded, file)
-	deps.patchListing(parentUuid, prev => upsertDriveItem(prev, narrowItem(uploaded)))
+	deps.patchCreated(parentUuid, narrowItem(uploaded))
 	deps.invalidateDirectorySize?.(parentUuid)
 	deps.markAccountStale?.()
 	deps.addStorageUsed?.(uploaded.size)
@@ -168,7 +170,7 @@ export const defaultUploadDeps: RunUploadDeps = {
 		void sdkApi.cancelUpload(id)
 	},
 	store: useTransfersStore.getState(),
-	patchListing: driveListingQueryUpdate,
+	patchCreated: queueListingCreate,
 	invalidateDirectorySize,
 	markAccountStale,
 	addStorageUsed: addAccountStorageUsed,

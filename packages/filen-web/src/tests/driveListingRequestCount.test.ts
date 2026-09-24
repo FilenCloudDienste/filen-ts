@@ -27,15 +27,23 @@ vi.mock("@/lib/log", () => ({ log: { warn: vi.fn(), error: vi.fn(), info: vi.fn(
 
 import { queryClient } from "@/queries/client"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
-import { driveListingQueryKey, driveListingQueryUpdate, useDirectoryListingQuery } from "@/features/drive/queries/drive"
+import {
+	discardListingPatches,
+	driveListingQueryKey,
+	driveListingQueryUpdate,
+	flushListingCreates,
+	useDirectoryListingQuery
+} from "@/features/drive/queries/drive"
 import type { DriveVariant } from "@/features/drive/lib/preferences"
 import {
+	flushDeferredRecents,
 	handleDriveAuthSuccess,
 	handleDriveEvent,
 	handleDriveReconnecting,
 	markDriveEventsMissed
 } from "@/features/drive/lib/socketHandlers"
 import { socketAuthenticated, socketDropped } from "@/lib/sdk/socketSession"
+import { useTransfersStore, type Transfer } from "@/features/transfers/store/useTransfersStore"
 
 function testUuid(label: string): UuidStr {
 	return `${label}-0000-0000-0000-000000000000` as UuidStr
@@ -160,6 +168,20 @@ async function mountRead(uuid: string) {
 	return view
 }
 
+// Creates land once their window closes (queueListingCreate); these tests don't wait it out.
+function fire(inner: DriveInner): void {
+	handleDriveEvent(driveEvent(inner))
+	flushListingCreates()
+}
+
+function uuids(uuid: string): string[] | undefined {
+	return listing(uuid)?.map(item => item.data.uuid)
+}
+
+function named(file: File, name: string): File {
+	return { ...file, meta: { type: "decoded", data: { name, mime: "application/pdf", modified: 1n, size: 1n, key: "k", version: 2 } } }
+}
+
 // The bridge moves the socket session before its handlers see the event.
 function dropSocket(): void {
 	socketDropped()
@@ -173,6 +195,9 @@ function recoverSocket(): void {
 
 beforeEach(() => {
 	queryClient.clear()
+	discardListingPatches()
+	useTransfersStore.setState({ transfers: [], speedSamples: [] })
+	flushDeferredRecents()
 	socketAuthenticated()
 	listDirectory.mockReset()
 	listDirectory.mockImplementation(() => Promise.resolve({ dirs: [], files: [] }))
@@ -472,7 +497,9 @@ describe("drive listing socket reconcile", () => {
 		expect(reads()).toBe(2)
 	})
 
-	it("a socket patch that cancels the reconcile keeps the listing stale", async () => {
+	// The reconcile is the only read of what changed during the drop; an event landing meanwhile used to
+	// cancel it with revert, losing that change until the next focus.
+	it("a socket patch during the reconcile keeps it: the drop's row and the patch both land, with no further read", async () => {
 		const dir = nextDir()
 
 		await mountRead(dir)
@@ -482,17 +509,20 @@ describe("drive listing socket reconcile", () => {
 		listDirectory.mockImplementationOnce(() => pending.promise)
 		dropSocket()
 		recoverSocket()
-		handleDriveEvent(driveEvent({ type: "fileNew", file: mockFile("new", dir) }))
-		pending.resolve({ dirs: [], files: [] })
+		fire({ type: "fileNew", file: named(mockFile("new", dir), "new.pdf") })
+
+		expect(uuids(dir)).toEqual([testUuid("new")])
+
+		pending.resolve({ dirs: [], files: [named(mockFile("dropped", dir), "dropped.pdf")] })
 		await drain()
 
 		expect(reads()).toBe(2)
-		expect(listing(dir)?.map(item => item.data.uuid)).toEqual([testUuid("new")])
-		expect(isInvalidated(dir)).toBe(true)
+		expect(uuids(dir)).toEqual([testUuid("dropped"), testUuid("new")])
+		expect(isInvalidated(dir)).toBe(false)
 
 		await refocus()
 
-		expect(reads()).toBe(3)
+		expect(reads()).toBe(2)
 	})
 
 	it("a socket patch on a settled listing leaves it fresh", async () => {
@@ -500,10 +530,169 @@ describe("drive listing socket reconcile", () => {
 
 		await mountRead(dir)
 
-		handleDriveEvent(driveEvent({ type: "fileNew", file: mockFile("new", dir) }))
+		fire({ type: "fileNew", file: mockFile("new", dir) })
 		await refocus()
 
 		expect(reads()).toBe(1)
-		expect(listing(dir)?.map(item => item.data.uuid)).toEqual([testUuid("new")])
+		expect(uuids(dir)).toEqual([testUuid("new")])
+	})
+})
+
+// A read snapshots the server at some point while it runs; a patch landing meanwhile may be missing
+// from what it returns, so the read applies the patch to its result. Without that, the patch was lost
+// and the listing, counted as current, stayed without it for the session.
+describe("drive listing patches that land during a read", () => {
+	it("a first read gets the file created and the row trashed while it ran, and still counts", async () => {
+		const dir = nextDir()
+		const pending = deferred<NormalDirsAndFiles>()
+
+		listDirectory.mockImplementationOnce(() => pending.promise)
+		mountListing(dir)
+		fire({ type: "fileNew", file: named(mockFile("created", dir), "created.pdf") })
+		fire({ type: "fileTrash", uuid: testUuid("trashed"), stableUUID: testUuid("stable-trashed"), newUUID: undefined })
+		pending.resolve({
+			dirs: [],
+			files: [named(mockFile("trashed", dir), "trashed.pdf"), named(mockFile("kept", dir), "kept.pdf")]
+		})
+		await drain()
+
+		expect(reads()).toBe(1)
+		expect(uuids(dir)).toEqual([testUuid("kept"), testUuid("created")])
+
+		await refocus()
+
+		expect(reads()).toBe(1)
+	})
+
+	it("a rename by uuid alone reaches a first read's rows", async () => {
+		const dir = nextDir()
+		const pending = deferred<NormalDirsAndFiles>()
+
+		listDirectory.mockImplementationOnce(() => pending.promise)
+		mountListing(dir)
+		fire({
+			type: "fileMetadataChanged",
+			uuid: testUuid("renamed"),
+			metadata: {
+				type: "decoded",
+				data: { name: "after.pdf", mime: "application/pdf", modified: 1n, size: 1n, key: "k", version: 2 }
+			}
+		})
+		pending.resolve({ dirs: [], files: [named(mockFile("renamed", dir), "before.pdf")] })
+		await drain()
+
+		expect(listing(dir)?.map(item => item.data.decryptedMeta?.name)).toEqual(["after.pdf"])
+		expect(reads()).toBe(1)
+	})
+
+	it("many creates during one read cost no further read", async () => {
+		const dir = nextDir()
+		const pending = deferred<NormalDirsAndFiles>()
+
+		listDirectory.mockImplementationOnce(() => pending.promise)
+		mountListing(dir)
+
+		for (let i = 0; i < 50; i++) {
+			handleDriveEvent(driveEvent({ type: "fileNew", file: named(mockFile(`burst${String(i)}`, dir), `${String(i)}.pdf`) }))
+		}
+
+		flushListingCreates()
+		pending.resolve({ dirs: [], files: [] })
+		await drain()
+
+		expect(reads()).toBe(1)
+		expect(listing(dir)).toHaveLength(50)
+
+		await refocus()
+
+		expect(reads()).toBe(1)
+	})
+
+	// A move or restore echo carries no colour, so its row may be wrong where the read's was right.
+	it("a directory move with no colour to keep doesn't let the destination's read count", async () => {
+		const dir = nextDir()
+		const pending = deferred<NormalDirsAndFiles>()
+
+		listDirectory.mockImplementationOnce(() => pending.promise)
+		mountListing(dir)
+		fire({ type: "folderMove", dir: mockDir("moved", dir) })
+		pending.resolve({ dirs: [{ ...mockDir("moved", dir), color: "blue" }], files: [] })
+		await drain()
+
+		expect(reads()).toBe(1)
+
+		await refocus()
+
+		expect(reads()).toBe(2)
+	})
+
+	it("a shared listing's read gets a patch that landed while it ran", async () => {
+		const pending = deferred<SharedRootDirsAndFiles>()
+		const { meta, size, region, bucket, chunks, timestamp, canMakeThumbnail } = mockFile("gone", nextDir())
+
+		listSharedOutRoot.mockImplementationOnce(() => pending.promise)
+		mountFlat("sharedOut")
+		fire({ type: "fileDeletedPermanent", uuid: testUuid("gone"), stableUUID: testUuid("stable-gone") })
+		pending.resolve({
+			dirs: [],
+			files: [
+				{
+					uuid: testUuid("gone"),
+					meta,
+					size,
+					region,
+					bucket,
+					chunks,
+					timestamp,
+					canMakeThumbnail,
+					sharedTag: true,
+					sharingRole: { Receiver: { email: "friend@filen.io", id: 7 } }
+				}
+			]
+		})
+		await drain()
+
+		expect(reads()).toBe(1)
+		expect(queryClient.getQueryData<DriveItem[]>(driveListingQueryKey({ variant: "sharedOut", uuid: null }))).toEqual([])
+	})
+})
+
+describe("recents after a copy", () => {
+	function copyRow(status: Transfer["status"]): Transfer {
+		return {
+			id: "copy",
+			direction: "copy",
+			name: "copy",
+			size: 0,
+			bytesTransferred: 0,
+			status,
+			paused: false,
+			parentUuid: null,
+			startedAt: 0
+		}
+	}
+
+	// The copy's last echo typically follows its settle at once; it used to cancel the one post-copy
+	// read, leaving Recents without everything deferred during the copy.
+	it("the post-copy read and a trailing echo converge", async () => {
+		mountFlat("recents")
+		await drain()
+
+		const dir = nextDir()
+		const pending = deferred<NormalDirsAndFiles>()
+
+		useTransfersStore.setState({ transfers: [copyRow("copying")] })
+		fire({ type: "fileNew", file: named(mockFile("copied", dir), "copied.pdf") })
+		useTransfersStore.setState({ transfers: [copyRow("done")] })
+		listDirectory.mockImplementationOnce(() => pending.promise)
+		flushDeferredRecents()
+		fire({ type: "fileNew", file: named(mockFile("trailing", dir), "trailing.pdf") })
+		pending.resolve({ dirs: [], files: [named(mockFile("copied", dir), "copied.pdf")] })
+		await drain()
+
+		expect(reads()).toBe(2)
+		expect(
+			queryClient.getQueryData<DriveItem[]>(driveListingQueryKey({ variant: "recents", uuid: null }))?.map(item => item.data.uuid)
+		).toEqual([testUuid("copied"), testUuid("trailing")])
 	})
 })

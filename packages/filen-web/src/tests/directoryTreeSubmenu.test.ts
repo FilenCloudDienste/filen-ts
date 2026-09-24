@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { render, cleanup, fireEvent, screen, act } from "@testing-library/react"
 import { createElement, type ReactNode } from "react"
 import { onlineManager } from "@tanstack/react-query"
-import type { Dir, File, UuidStr } from "@filen/sdk-rs"
+import type { Dir, File, SharedRootDir, UuidStr } from "@filen/sdk-rs"
 import "@/lib/i18n"
 
 // The tree reads each level through useDirectoryTreeChildrenQuery; the per-uuid results below stand in
@@ -322,6 +322,27 @@ describe("MoveSubmenu", () => {
 		expect(isDisabled(menuItem("photos"))).toBe(false)
 		// DOCS already sits in the root.
 		expect(isDisabled(menuItem("Move here"))).toBe(true)
+	})
+
+	// Shared by me offers Move on the user's own shared directories, listed under their real uuids.
+	it("disables a directory moved out of Shared by me, and everything below it, in Cloud Drive", async () => {
+		seedTree()
+		const sharedDocs = narrowItem({
+			inner: {
+				uuid: DOCS.data.uuid,
+				color: "default",
+				timestamp: 1_700_000_000_000n,
+				meta: { type: "decoded", data: { name: "docs" } }
+			},
+			sharingRole: { Receiver: { email: "friend@filen.io", id: 7 } },
+			writeAccess: true
+		} satisfies SharedRootDir)
+		renderMove([sharedDocs])
+
+		await openSubmenu("Move")
+
+		expect(isDisabled(menuItem("docs"))).toBe(true)
+		expect(isDisabled(menuItem("photos"))).toBe(false)
 	})
 
 	it("disables 'Move here' on the current parent while its children stay browsable", async () => {

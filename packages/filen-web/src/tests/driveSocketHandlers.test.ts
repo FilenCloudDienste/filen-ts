@@ -15,7 +15,7 @@ vi.mock("@/lib/log", () => ({ log: { warn: logWarn, error: logError, info: vi.fn
 
 import { queryClient as testQueryClient } from "@/queries/client"
 import { ACCOUNT_QUERY_KEY } from "@/queries/account"
-import { driveListingQueryKey } from "@/features/drive/queries/drive"
+import { discardListingPatches, driveListingQueryKey, flushListingCreates } from "@/features/drive/queries/drive"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import { flushDeferredRecents, handleDriveEvent } from "@/features/drive/lib/socketHandlers"
@@ -134,18 +134,42 @@ function copyRow(status: Transfer["status"]): Transfer {
 	}
 }
 
+// A read of a cached listing that stays under way until settled.
+function readUnderWay(queryKey: ReturnType<typeof driveListingQueryKey>) {
+	let resolve: (items: DriveItem[]) => void = () => undefined
+	const pending = new Promise<DriveItem[]>(r => {
+		resolve = r
+	})
+	const read = testQueryClient.query({ queryKey, queryFn: () => pending, staleTime: 0 })
+
+	return {
+		fetchStatus: () => testQueryClient.getQueryState(queryKey)?.fetchStatus,
+		settle: async () => {
+			resolve([])
+			await read
+		}
+	}
+}
+
 beforeEach(() => {
 	testQueryClient.clear()
+	discardListingPatches()
 	useDriveStore.setState({ selectedItems: [] })
 	useTransfersStore.setState({ transfers: [], speedSamples: [] })
 	flushDeferredRecents()
 	vi.clearAllMocks()
 })
 
+// Creates land per parent once their window closes (queueListingCreate); these tests read at once.
+function handleCreated(inner: Extract<SocketEvent, { type: "drive" }>["inner"]): void {
+	handleDriveEvent(driveEvt(inner))
+	flushListingCreates()
+}
+
 describe("drive socket handlers — additions", () => {
 	it("fileNew splices the file into its parent listing", () => {
 		seedListing(PARENT_A, [])
-		handleDriveEvent(driveEvt({ type: "fileNew", file: mockFile() }))
+		handleCreated({ type: "fileNew", file: mockFile() })
 
 		expect(getListing(PARENT_A).map(i => i.data.uuid)).toEqual([testUuid("file")])
 	})
@@ -153,14 +177,14 @@ describe("drive socket handlers — additions", () => {
 	it("fileNew into the root collapses the real root uuid onto the null-keyed listing", () => {
 		seedRootUuid()
 		seedListing(null, [])
-		handleDriveEvent(driveEvt({ type: "fileNew", file: mockFile({ parent: ROOT_UUID }) }))
+		handleCreated({ type: "fileNew", file: mockFile({ parent: ROOT_UUID }) })
 
 		expect(getListing(null).map(i => i.data.uuid)).toEqual([testUuid("file")])
 	})
 
 	it("folderSubCreated splices the directory into its parent listing", () => {
 		seedListing(PARENT_A, [])
-		handleDriveEvent(driveEvt({ type: "folderSubCreated", dir: mockDir() }))
+		handleCreated({ type: "folderSubCreated", dir: mockDir() })
 
 		expect(getListing(PARENT_A).map(i => i.data.uuid)).toEqual([testUuid("dir")])
 	})
@@ -173,6 +197,7 @@ describe("drive socket handlers — additions", () => {
 		["fileArchiveRestored", () => driveEvt({ type: "fileArchiveRestored", currentUuid: testUuid("old"), file: mockFile() })]
 	])("%s never creates a listing for a parent nobody has read", (_label, buildEvent) => {
 		handleDriveEvent(buildEvent())
+		flushListingCreates()
 
 		expect(testQueryClient.getQueryData(driveListingQueryKey({ variant: "drive", uuid: PARENT_A }))).toBeUndefined()
 	})
@@ -328,7 +353,7 @@ describe("drive socket handlers — favorites rejoin", () => {
 
 	it("a new file joins Recents", () => {
 		seedRecents([])
-		handleDriveEvent(driveEvt({ type: "fileNew", file: mockFile() }))
+		handleCreated({ type: "fileNew", file: mockFile() })
 
 		expect(getRecents()?.map(i => i.data.uuid)).toEqual([testUuid("file")])
 	})
@@ -338,7 +363,7 @@ describe("drive socket handlers — favorites rejoin", () => {
 		useTransfersStore.setState({ transfers: [copyRow("copying"), { ...copyRow("copying"), id: "copy-2" }] })
 
 		handleDriveEvent(driveEvt({ type: "fileNew", file: mockFile() }))
-		handleDriveEvent(driveEvt({ type: "fileNew", file: mockFile({ uuid: testUuid("file-2") }) }))
+		handleCreated({ type: "fileNew", file: mockFile({ uuid: testUuid("file-2") }) })
 
 		expect(getRecents()).toEqual([])
 
@@ -369,7 +394,7 @@ describe("drive socket handlers — favorites rejoin", () => {
 
 	it("an unfavorited new file leaves Favorites alone", () => {
 		seedFavorites([])
-		handleDriveEvent(driveEvt({ type: "fileNew", file: mockFile() }))
+		handleCreated({ type: "fileNew", file: mockFile() })
 
 		expect(getFavorites()).toEqual([])
 	})
@@ -554,14 +579,114 @@ describe("drive socket handlers — trash listing membership", () => {
 		expect(getTrash()).toEqual([])
 	})
 
-	it("aborts an in-flight trash refetch before patching membership", () => {
-		const cancelSpy = vi.spyOn(testQueryClient, "cancelQueries")
-
+	// A cancelled read reverts and never retries on its own; the read applies the insert to its result.
+	it("patches membership without cancelling a trash read under way", async () => {
 		seedListing(PARENT_A, [narrowItem(mockFile())])
 		seedTrash([])
+		const read = readUnderWay(driveListingQueryKey({ variant: "trash", uuid: null }))
+
 		handleDriveEvent(driveEvt({ type: "fileTrash", uuid: testUuid("file"), stableUUID: STABLE_FILE, newUUID: undefined }))
 
-		expect(cancelSpy).toHaveBeenCalledWith({ queryKey: driveListingQueryKey({ variant: "trash", uuid: null }), exact: true })
+		expect(read.fetchStatus()).toBe("fetching")
+		expect(getTrash()?.map(i => i.data.uuid)).toEqual([testUuid("file")])
+
+		await read.settle()
+	})
+})
+
+describe("drive socket handlers — batched creates", () => {
+	// A copy or a many-file upload lands one create per item and its echo repeats it; each used to
+	// rewrite and re-render the whole parent listing and Recents on its own.
+	it("a burst of creates lands in one write per listing once its window closes", () => {
+		seedListing(PARENT_A, [])
+		seedRecents([])
+		const write = vi.spyOn(testQueryClient, "setQueryData")
+
+		for (let i = 0; i < 20; i++) {
+			const file = mockFile({
+				uuid: testUuid(`file${String(i)}`),
+				meta: {
+					type: "decoded",
+					data: { name: `${String(i)}.pdf`, mime: "application/pdf", modified: 1n, size: 1n, key: "k", version: 2 }
+				}
+			})
+
+			handleDriveEvent(driveEvt({ type: "fileNew", file }))
+			handleDriveEvent(driveEvt({ type: "fileNew", file }))
+		}
+
+		handleDriveEvent(driveEvt({ type: "folderSubCreated", dir: mockDir() }))
+
+		expect(write).not.toHaveBeenCalled()
+
+		flushListingCreates()
+
+		expect(write).toHaveBeenCalledTimes(2)
+		expect(getListing(PARENT_A)).toHaveLength(21)
+		expect(getRecents()).toHaveLength(20)
+	})
+
+	// The queued row is what the trash insert is read from, and the trash must not be undone later.
+	it("a trash right after a create moves the new row into the trash for good", () => {
+		seedListing(PARENT_A, [])
+		seedTrash([])
+
+		handleDriveEvent(driveEvt({ type: "fileNew", file: mockFile() }))
+		handleDriveEvent(driveEvt({ type: "fileTrash", uuid: testUuid("file"), stableUUID: STABLE_FILE, newUUID: undefined }))
+		flushListingCreates()
+
+		expect(getListing(PARENT_A)).toEqual([])
+		expect(getTrash()?.map(i => i.data.uuid)).toEqual([testUuid("file")])
+	})
+})
+
+// The socket's directory move and restore payloads carry no colour: the SDK fills in the default.
+describe("drive socket handlers — directory colour on move and restore", () => {
+	function colorOf(items: DriveItem[] | undefined, uuid: string): string | undefined {
+		const row = items?.find(item => item.data.uuid === uuid)
+
+		return row?.type === "directory" ? row.data.color : undefined
+	}
+
+	function isInvalidated(uuid: string | null): boolean | undefined {
+		return testQueryClient.getQueryState(driveListingQueryKey({ variant: "drive", uuid }))?.isInvalidated
+	}
+
+	it("folderMove keeps the colour its cached row holds, in the destination and in Favorites", () => {
+		const blue = mockDir({ color: "blue", favorited: true })
+		seedListing(PARENT_A, [narrowItem(blue)])
+		seedListing(PARENT_B, [])
+		seedFavorites([narrowItem(blue)])
+
+		handleDriveEvent(driveEvt({ type: "folderMove", dir: mockDir({ parent: PARENT_B, favorited: true }) }))
+
+		expect(colorOf(getListing(PARENT_B), testUuid("dir"))).toBe("blue")
+		expect(colorOf(getFavorites(), testUuid("dir"))).toBe("blue")
+		expect(isInvalidated(PARENT_B)).toBe(false)
+	})
+
+	it("folderRestore keeps the colour of the row the trash listing holds", () => {
+		seedTrash([narrowItem(mockDir({ color: "green" }))])
+		seedListing(PARENT_A, [])
+
+		handleDriveEvent(driveEvt({ type: "folderRestore", dir: mockDir() }))
+
+		expect(colorOf(getListing(PARENT_A), testUuid("dir"))).toBe("green")
+		expect(getTrash()).toEqual([])
+		expect(isInvalidated(PARENT_A)).toBe(false)
+	})
+
+	// Nothing to take the colour from: the destination reads again rather than keep a guess.
+	it.each([
+		["folderMove", () => driveEvt({ type: "folderMove", dir: mockDir({ parent: PARENT_B }) })],
+		["folderRestore", () => driveEvt({ type: "folderRestore", dir: mockDir({ parent: PARENT_B }) })]
+	])("%s of a directory no listing holds marks its destination stale", (_label, buildEvent) => {
+		seedListing(PARENT_B, [])
+
+		handleDriveEvent(buildEvent())
+
+		expect(getListing(PARENT_B).map(i => i.data.uuid)).toEqual([testUuid("dir")])
+		expect(isInvalidated(PARENT_B)).toBe(true)
 	})
 })
 
@@ -640,13 +765,16 @@ describe("drive socket handlers — favorites membership", () => {
 		expect(getFavorites()?.map(item => item.data.uuid)).toEqual([testUuid("file")])
 	})
 
-	it("itemFavorite aborts an in-flight favorites refetch before patching membership", () => {
-		const cancelSpy = vi.spyOn(testQueryClient, "cancelQueries")
-
+	it("itemFavorite patches membership without cancelling a favorites read under way", async () => {
 		seedFavorites([])
+		const read = readUnderWay(driveListingQueryKey({ variant: "favorites", uuid: null }))
+
 		handleDriveEvent(driveEvt({ type: "itemFavorite", item: { type: "file", ...mockFile({ favorited: true }) } }))
 
-		expect(cancelSpy).toHaveBeenCalledWith({ queryKey: driveListingQueryKey({ variant: "favorites", uuid: null }), exact: true })
+		expect(read.fetchStatus()).toBe("fetching")
+		expect(getFavorites()?.map(item => item.data.uuid)).toEqual([testUuid("file")])
+
+		await read.settle()
 	})
 
 	it("itemFavorite still replaces the row in place in every other cached listing", () => {
@@ -662,13 +790,13 @@ describe("drive socket handlers — favorites membership", () => {
 describe("drive socket handlers — recents insertion", () => {
 	it("fileNew appends the file to a cached recents listing", () => {
 		seedRecents([])
-		handleDriveEvent(driveEvt({ type: "fileNew", file: mockFile() }))
+		handleCreated({ type: "fileNew", file: mockFile() })
 
 		expect(getRecents()?.map(item => item.data.uuid)).toEqual([testUuid("file")])
 	})
 
 	it("fileNew never conjures a recents listing that was never fetched", () => {
-		handleDriveEvent(driveEvt({ type: "fileNew", file: mockFile() }))
+		handleCreated({ type: "fileNew", file: mockFile() })
 
 		expect(getRecents()).toBeUndefined()
 	})
@@ -676,28 +804,23 @@ describe("drive socket handlers — recents insertion", () => {
 	it("fileNew dedups by uuid in recents on a re-delivered event", () => {
 		seedRecents([])
 		handleDriveEvent(driveEvt({ type: "fileNew", file: mockFile() }))
-		handleDriveEvent(driveEvt({ type: "fileNew", file: mockFile() }))
+		handleCreated({ type: "fileNew", file: mockFile() })
 
 		expect(getRecents()?.map(item => item.data.uuid)).toEqual([testUuid("file")])
 	})
 
-	// Recents runs staleTime 0 and refetches on mount/focus: a refetch snapshotted before the upload was
-	// server-visible would land after this insert and drop the row again.
-	it("fileNew aborts an in-flight recents refetch before patching it", () => {
-		const cancelSpy = vi.spyOn(testQueryClient, "cancelQueries")
-
+	// Recents runs staleTime 0 and refetches on mount/focus. A refetch snapshotted before the upload was
+	// server-visible gets the insert applied to what it returns (driveListingRequestCount.test.ts).
+	it("fileNew patches recents without cancelling a recents read under way", async () => {
 		seedRecents([])
-		handleDriveEvent(driveEvt({ type: "fileNew", file: mockFile() }))
+		const read = readUnderWay(driveListingQueryKey({ variant: "recents", uuid: null }))
 
-		expect(cancelSpy).toHaveBeenCalledWith({ queryKey: driveListingQueryKey({ variant: "recents", uuid: null }), exact: true })
-	})
+		handleCreated({ type: "fileNew", file: mockFile() })
 
-	it("leaves an unfetched recents listing's fetch alone — cancelling an INITIAL fetch would strand it", () => {
-		const cancelSpy = vi.spyOn(testQueryClient, "cancelQueries")
+		expect(read.fetchStatus()).toBe("fetching")
+		expect(getRecents()?.map(item => item.data.uuid)).toEqual([testUuid("file")])
 
-		handleDriveEvent(driveEvt({ type: "fileNew", file: mockFile() }))
-
-		expect(cancelSpy).not.toHaveBeenCalledWith({ queryKey: driveListingQueryKey({ variant: "recents", uuid: null }), exact: true })
+		await read.settle()
 	})
 })
 
