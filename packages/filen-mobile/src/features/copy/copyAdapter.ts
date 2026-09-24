@@ -54,16 +54,38 @@ export type CopyJobGlyph = "directory" | "file" | "items"
 
 export type CopyJob = SharedCopyJob<DriveItem, CopyJobFailure, CopyFailure, CopyJobError> & {
 	glyph: CopyJobGlyph
+	// Its row's name and start, for a row brought back after the copy settled.
+	rowName: string
+	startedAt: number
+	// Top-level items "move to trash" could not move; the row's Retry tries just these again.
+	trashFailed: DriveItem[]
 }
 
 export type CopyJobOutcome = SharedCopyJobOutcome<CopyJobError>
 
 export type CopySettlement = SharedCopySettlement<CopyJobFailure, CopyFailure, CopyJobError>
 
-export function createCopyJob(id: string, destination: CopyDestination, itemCount: number, glyph: CopyJobGlyph): CopyJob {
+export function createCopyJob({
+	id,
+	destination,
+	itemCount,
+	glyph,
+	rowName,
+	startedAt
+}: {
+	id: string
+	destination: CopyDestination
+	itemCount: number
+	glyph: CopyJobGlyph
+	rowName: string
+	startedAt: number
+}): CopyJob {
 	return {
 		...createSharedCopyJob<DriveItem, CopyJobFailure, CopyFailure, CopyJobError>(id, destination, itemCount),
-		glyph
+		glyph,
+		rowName,
+		startedAt,
+		trashFailed: []
 	}
 }
 

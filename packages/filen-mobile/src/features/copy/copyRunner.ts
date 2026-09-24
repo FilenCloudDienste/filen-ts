@@ -50,7 +50,7 @@ import {
 import { copyGlyphForCopyItems, copyGlyphForEntries, copyGlyphForItems, driveItemToCopyItem } from "@/features/copy/copySource"
 import copyActivity from "@/features/drive/copyActivity"
 import socketCreateBatcher from "@/features/drive/socketCreateBatcher"
-import { markDirectorySizesStale, refetchMountedDirectorySizes } from "@/features/drive/queries/useDirectorySize.query"
+import { markDirectorySizesStale } from "@/features/drive/queries/useDirectorySize.query"
 import { trash } from "@/features/drive/driveTrash"
 import { accountQuotaDeps, addAccountStorageUsed } from "@/queries/useAccount.query"
 import { driveItemsQueryRefetchAfterSocketGap } from "@/features/drive/queries/useDriveItems.query"
@@ -99,7 +99,8 @@ function finishedOutcome(job: CopyJob): Pick<FinishedTransfer, "outcome" | "erro
 			}
 		}
 
-		// A cancelled copy's row just goes; what it made stays (or went to the trash on request).
+		// A cancelled copy's row just goes; what it made stays, or went to the trash on request. A trash
+		// that left items behind brings the row back (syncTrashFailedRow).
 		case "cancelled": {
 			return null
 		}
@@ -318,10 +319,19 @@ class CopyRunner {
 		const socketAtStart = useSocketStore.getState()
 		// Set when what the job made below its destination may have outrun the socket.
 		let refetchDestination: { uuid: string | null } | null = null
-		// Set when the job made something: the mounted sizes it changed are read once after it settles.
-		let sizesChanged: { destinationUuid: string | null; createdDirUuids: string[] } | null = null
 
-		useCopyJobsStore.getState().put(createCopyJob(id, destination, itemCount, glyph))
+		const startedAt = Date.now()
+
+		useCopyJobsStore.getState().put(
+			createCopyJob({
+				id,
+				destination,
+				itemCount,
+				glyph,
+				rowName: name,
+				startedAt
+			})
+		)
 
 		const setRowPaused = (paused: boolean) => {
 			useTransfersStore.getState().setTransfers(prev => prev.map(t => (t.id === id && t.paused !== paused ? { ...t, paused } : t)))
@@ -338,7 +348,7 @@ class CopyRunner {
 				glyph,
 				size: 0,
 				bytesTransferred: 0,
-				startedAt: Date.now(),
+				startedAt,
 				paused: false,
 				abort: () => this.requestCancel(id, "keep"),
 				pause: () => this.pause(id),
@@ -356,6 +366,7 @@ class CopyRunner {
 		// Set once the job settled with "move to trash": a create delivered after that (a job dropped past
 		// its grace still delivers what it queued) is trashed on arrival.
 		let trashLateCreates = false
+		const trashLate = (item: DriveItem) => this.trashForJob(id, [item], "append")
 
 		const flush = () => {
 			if (trailing) {
@@ -405,7 +416,7 @@ class CopyRunner {
 					const parentUuid = "parent" in item.data ? unwrapParentUuid(item.data.parent) : null
 
 					if (trashLateCreates) {
-						void trashCopied(id, [item])
+						void trashLate(item)
 
 						return
 					}
@@ -535,20 +546,13 @@ class CopyRunner {
 			const settledJob = getCopyJob(id)
 			const socket = useSocketStore.getState()
 
-			if (settledJob && (settledJob.counts.dirsCreated > 0 || settledJob.counts.filesDone > 0)) {
-				sizesChanged = {
-					destinationUuid: settledJob.destination.uuid,
-					createdDirUuids: copied.filter(item => item.type === "directory").map(item => item.data.uuid)
-				}
-
-				if (
-					socketAtStart.state !== "connected" ||
-					socket.state !== "connected" ||
-					socket.connectedAt !== socketAtStart.connectedAt
-				) {
-					refetchDestination = {
-						uuid: settledJob.destination.uuid
-					}
+			if (
+				settledJob &&
+				(settledJob.counts.dirsCreated > 0 || settledJob.counts.filesDone > 0) &&
+				(socketAtStart.state !== "connected" || socket.state !== "connected" || socket.connectedAt !== socketAtStart.connectedAt)
+			) {
+				refetchDestination = {
+					uuid: settledJob.destination.uuid
 				}
 			}
 
@@ -576,10 +580,6 @@ class CopyRunner {
 				if (refetchDestination) {
 					driveItemsQueryRefetchAfterSocketGap(refetchDestination.uuid)
 				}
-
-				if (sizesChanged) {
-					refetchMountedDirectorySizes(sizesChanged)
-				}
 			}
 
 			copyActivity.end()
@@ -588,13 +588,32 @@ class CopyRunner {
 
 	// Only top-level items; their subtrees go with them. Moved to the trash, never deleted.
 	private async trashCreated(id: string): Promise<void> {
-		const created = getCopyJob(id)?.created ?? []
-		const trashResult = await trashCopied(id, created)
+		await this.trashForJob(id, getCopyJob(id)?.created ?? [], "replace")
+	}
 
-		useCopyJobsStore.getState().update(id, settled => ({
-			...settled,
-			trashResult
+	// "Retry" on a stopped copy's row: moves to the trash just what the last attempt could not.
+	public async retryTrash(id: string): Promise<void> {
+		const failed = getCopyJob(id)?.trashFailed ?? []
+
+		if (failed.length === 0) {
+			return
+		}
+
+		await this.trashForJob(id, failed, "replace")
+	}
+
+	// What fails stays on the job ("append" for a late create, whose earlier failures still stand) and
+	// keeps, or brings back, the job's row with a Retry.
+	private async trashForJob(id: string, items: readonly DriveItem[], mode: "replace" | "append"): Promise<void> {
+		const { failedItems, ...trashResult } = await trashCopied(id, items)
+
+		useCopyJobsStore.getState().update(id, job => ({
+			...job,
+			trashResult,
+			trashFailed: mode === "replace" ? failedItems : [...job.trashFailed, ...failedItems]
 		}))
+
+		syncTrashFailedRow(id)
 	}
 
 	private async settle(id: string): Promise<CopyJob | undefined> {
@@ -692,24 +711,29 @@ function copiedTopLevel(report: CopyReport | null, reported: readonly DriveItem[
 
 // Moves a copy's top-level items to the trash (their subtrees go with them) and logs the outcome, so a
 // partial or slow trash is visible in the diagnostic log.
-async function trashCopied(id: string, items: readonly DriveItem[]): Promise<{ moved: number; failed: number }> {
+async function trashCopied(id: string, items: readonly DriveItem[]): Promise<{ moved: number; failed: number; failedItems: DriveItem[] }> {
 	if (items.length === 0) {
 		logger.info("copy", "move to trash: nothing to trash", { id })
 
 		return {
 			moved: 0,
-			failed: 0
+			failed: 0,
+			failedItems: []
 		}
 	}
 
 	const startedAt = Date.now()
 	const results = await Promise.allSettled(items.map(item => trash({ item })))
 	const failures: { uuid: string; error: unknown }[] = []
+	const failedItems: DriveItem[] = []
 
 	results.forEach((result, index) => {
-		if (result.status === "rejected") {
+		const item = items[index]
+
+		if (result.status === "rejected" && item) {
+			failedItems.push(item)
 			failures.push({
-				uuid: items[index]?.data.uuid ?? "",
+				uuid: item.data.uuid,
 				error: result.reason
 			})
 		}
@@ -726,7 +750,64 @@ async function trashCopied(id: string, items: readonly DriveItem[]): Promise<{ m
 		logger.info("copy", "move to trash: done", { id, ...outcome, durationMs: Date.now() - startedAt })
 	}
 
-	return outcome
+	return {
+		...outcome,
+		failedItems
+	}
+}
+
+// A stopped copy keeps its row only while "move to trash" left items behind; a copy that finished keeps
+// its row regardless and just drops the line once the retry succeeds. No toast either way.
+function syncTrashFailedRow(id: string): void {
+	const job = getCopyJob(id)
+
+	if (!job) {
+		return
+	}
+
+	const failed = job.trashFailed.length
+	const store = useTransfersStore.getState()
+	const row = store.finishedTransfers.find(finished => finished.id === id)
+
+	if (failed > 0) {
+		if (row) {
+			store.updateFinishedTransfer(id, finished => ({
+				...finished,
+				copyTrashFailed: failed
+			}))
+
+			return
+		}
+
+		store.addFinishedTransfer({
+			id,
+			type: "copy",
+			name: job.rowName,
+			size: job.totals.bytes,
+			bytesTransferred: job.counts.bytesDone,
+			startedAt: job.startedAt,
+			finishedAt: Date.now(),
+			outcome: "errored",
+			errorMessage: null,
+			errorCount: 0,
+			copyGlyph: job.glyph,
+			copyTrashFailed: failed
+		})
+
+		return
+	}
+
+	if (!row?.copyTrashFailed) {
+		return
+	}
+
+	if (job.outcome.status === "cancelled") {
+		store.removeFinishedTransfer(id)
+
+		return
+	}
+
+	store.updateFinishedTransfer(id, ({ copyTrashFailed: _cleared, ...finished }) => finished)
 }
 
 // A thrown copy (the SDK couldn't start or report), as the error record the job carries.

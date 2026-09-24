@@ -110,6 +110,9 @@ export type FinishedTransfer = {
 		savedAsVersion: number
 		propagationFailed: number
 	}
+	// Copies only: top-level items "move to trash" could not move. A cancelled copy keeps its row only
+	// while this is above 0.
+	copyTrashFailed?: number
 }
 
 // The most finished transfers retained for the current session. Beyond this the
@@ -308,6 +311,7 @@ export type TransfersStore = {
 	// — it must never recompute stats or touch the speed interval (those are active-only).
 	addFinishedTransfer: (finished: FinishedTransfer) => void
 	removeFinishedTransfer: (id: string) => void
+	updateFinishedTransfer: (id: string, fn: (finished: FinishedTransfer) => FinishedTransfer) => void
 	clearFinishedTransfers: () => void
 }
 
@@ -351,6 +355,24 @@ export const useTransfersStore = create<TransfersStore>(set => ({
 	},
 	clearFinishedTransfers() {
 		set(state => (state.finishedTransfers.length === 0 ? state : { finishedTransfers: [] }))
+	},
+	updateFinishedTransfer(id, fn) {
+		set(state => {
+			const index = state.finishedTransfers.findIndex(finished => finished.id === id)
+			const current = state.finishedTransfers[index]
+
+			if (!current) {
+				return state
+			}
+
+			const finishedTransfers = [...state.finishedTransfers]
+
+			finishedTransfers[index] = fn(current)
+
+			return {
+				finishedTransfers
+			}
+		})
 	}
 }))
 

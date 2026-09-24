@@ -8,7 +8,8 @@ vi.mock("@/lib/sdkUnwrap", () => ({}))
 import useCopyJobsStore, { getCopyJob } from "@/features/copy/store/useCopyJobs.store"
 import { createCopyJob } from "@/features/copy/copyAdapter"
 
-const job = (id: string) => createCopyJob(id, { uuid: null, name: "Cloud Drive" }, 1, "file")
+const job = (id: string) =>
+	createCopyJob({ id, destination: { uuid: null, name: "Cloud Drive" }, itemCount: 1, glyph: "file", rowName: "", startedAt: 0 })
 
 beforeEach(() => {
 	useCopyJobsStore.getState().clear()

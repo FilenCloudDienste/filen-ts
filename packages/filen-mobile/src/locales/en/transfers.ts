@@ -75,6 +75,11 @@ export const transfers = {
 	copy_row_title: "Copying {{name}}",
 	/** Transfers row title of a finished copy. {{name}} is the item's name or "12 items" */
 	copy_row_finished_title: "Copied {{name}}",
+	/** Transfers — title of a stopped copy whose "move to trash" left items behind */
+	copy_row_stopped_title: "Stopped copying {{name}}",
+	/** Transfers — line on a stopped copy's row: copied items that "move to trash" could not move (a Retry action re-trashes them) */
+	copy_trash_failed_one: "{{count}} copied item couldn't be moved to trash",
+	copy_trash_failed_other: "{{count}} copied items couldn't be moved to trash",
 	/** Copy row status while the copy measures what it will copy */
 	copy_preparing: "Preparing…",
 	/** Copy row status while files are copied. {{done}} and {{total}} are file counts, {{percent}} the overall progress */

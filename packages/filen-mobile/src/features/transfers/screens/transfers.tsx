@@ -193,7 +193,9 @@ const CopyActiveRow = ({ transfer }: { transfer: CopyTransfer }) => {
 const CopyFinishedRow = ({ finished }: { finished: TFinishedTransfer }) => {
 	const { t } = useTranslation()
 	const removeFinishedTransfer = useTransfersStore(state => state.removeFinishedTransfer)
-	const canRetry = useCopyJobsStore(state => (state.jobs[finished.id]?.retryable.length ?? 0) > 0)
+	const trashFailed = finished.copyTrashFailed ?? 0
+	// A re-copy of failures is never offered while copied items still wait to go to the trash.
+	const canRetry = useCopyJobsStore(state => trashFailed === 0 && (state.jobs[finished.id]?.retryable.length ?? 0) > 0)
 	const notes = copyNotesText(finished.copyNotes, t)
 
 	return (
@@ -210,14 +212,16 @@ const CopyFinishedRow = ({ finished }: { finished: TFinishedTransfer }) => {
 							numberOfLines={1}
 							ellipsizeMode="middle"
 						>
-							{t("copy_row_finished_title", { name: finished.name })}
+							{finished.outcome === "errored" && trashFailed > 0
+								? t("copy_row_stopped_title", { name: finished.name })
+								: t("copy_row_finished_title", { name: finished.name })}
 						</Text>
 						<Text
 							className="text-muted-foreground text-xs"
 							numberOfLines={1}
 							ellipsizeMode="middle"
 						>
-							{finishedTransferSubtitle(finished, t)}
+							{trashFailed > 0 ? t("copy_trash_failed", { count: trashFailed }) : finishedTransferSubtitle(finished, t)}
 						</Text>
 						{notes ? (
 							<Text
@@ -233,6 +237,21 @@ const CopyFinishedRow = ({ finished }: { finished: TFinishedTransfer }) => {
 					<Menu
 						type="dropdown"
 						buttons={[
+							...(trashFailed > 0
+								? [
+										{
+											id: "retryTrash",
+											title: t("retry"),
+											icon: "restore" as const,
+											requiresOnline: true,
+											onPress: () => {
+												copyRunner.retryTrash(finished.id).catch(err => {
+													logger.error("copy", "retrying move to trash failed", { id: finished.id, error: err })
+												})
+											}
+										}
+									]
+								: []),
 							...(canRetry
 								? [
 										{

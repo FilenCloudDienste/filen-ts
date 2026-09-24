@@ -187,16 +187,22 @@ describe("copyReportInput", () => {
 
 		expect(isQuotaPreflightFailure(input)).toBe(true)
 
-		const settled = settleCopyJob(createCopyJob("j", { uuid: null, name: "" }, 1, "file"), { report: input, maxBytes: 42 })
+		const settled = settleCopyJob(
+			createCopyJob({ id: "j", destination: { uuid: null, name: "" }, itemCount: 1, glyph: "file", rowName: "", startedAt: 0 }),
+			{ report: input, maxBytes: 42 }
+		)
 
 		expect(settled.outcome).toEqual({ status: "quotaExceeded", freeBytes: 42 })
 	})
 
 	it("a Cancelled report settles as cancelled", () => {
-		const settled = settleCopyJob(createCopyJob("j", { uuid: null, name: "" }, 1, "file"), {
-			report: copyReportInput(report({ error: error(ErrorKind.Cancelled) })),
-			maxBytes: undefined
-		})
+		const settled = settleCopyJob(
+			createCopyJob({ id: "j", destination: { uuid: null, name: "" }, itemCount: 1, glyph: "file", rowName: "", startedAt: 0 }),
+			{
+				report: copyReportInput(report({ error: error(ErrorKind.Cancelled) })),
+				maxBytes: undefined
+			}
+		)
 
 		expect(settled.outcome).toEqual({ status: "cancelled" })
 	})

@@ -33,7 +33,7 @@ import {
 	driveItemsQueryUpdateForPhotos,
 	driveItemsQueryUpdateForRecents
 } from "@/features/drive/queries/useDriveItems.query"
-import { markDirectorySizesStale, refetchMountedDirectorySizes } from "@/features/drive/queries/useDirectorySize.query"
+import { markDirectorySizesStale } from "@/features/drive/queries/useDirectorySize.query"
 import { addAccountStorageUsed } from "@/queries/useAccount.query"
 import type { DriveItem } from "@/types"
 import { driveItemToAnyDirWithContext } from "@/lib/sdkSources"
@@ -355,8 +355,6 @@ export async function uploadCore(
 	if (localFileOrDir instanceof FileSystem.Directory) {
 		// Summed per batch and added to the cached account once the upload settles, not per batch.
 		let ownBytesUploaded = 0n
-		// The directory the upload made; its size and every size above it change as it fills.
-		let uploadedRootUuid: string | null = null
 
 		const result = await run(async defer => {
 			// wrapAbortSignalForSdk allocates a uniffi (Rust Arc-backed) ManagedAbortSignal that must be
@@ -444,8 +442,6 @@ export async function uploadCore(
 
 				return created.data
 			})()
-
-			uploadedRootUuid = parentDir.uuid
 
 			const transferred: {
 				files: File[]
@@ -639,13 +635,6 @@ export async function uploadCore(
 		// session may already be wiped; the batches marked the account stale, so its next read corrects it.
 		if (!globalAbortController.signal.aborted) {
 			addAccountStorageUsed(ownBytesUploaded)
-
-			if (uploadedRootUuid !== null) {
-				refetchMountedDirectorySizes({
-					destinationUuid: parent.inner[0].uuid,
-					createdDirUuids: [uploadedRootUuid]
-				})
-			}
 		}
 
 		if (!result.success) {

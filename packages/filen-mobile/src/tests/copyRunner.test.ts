@@ -62,8 +62,7 @@ const h = vi.hoisted(() => {
 			isCachedFresh: vi.fn()
 		},
 		addAccountStorageUsed: vi.fn(),
-		refetchAfterSocketGap: vi.fn(),
-		refetchMountedDirectorySizes: vi.fn()
+		refetchAfterSocketGap: vi.fn()
 	}
 })
 
@@ -120,10 +119,7 @@ vi.mock("@/features/transfers/transfers", () => ({
 	}
 }))
 vi.mock("@/features/drive/socketCreateBatcher", () => ({ default: { enqueue: h.enqueue, flushNow: h.flushNow } }))
-vi.mock("@/features/drive/queries/useDirectorySize.query", () => ({
-	markDirectorySizesStale: h.markDirectorySizesStale,
-	refetchMountedDirectorySizes: h.refetchMountedDirectorySizes
-}))
+vi.mock("@/features/drive/queries/useDirectorySize.query", () => ({ markDirectorySizesStale: h.markDirectorySizesStale }))
 vi.mock("@/features/drive/driveTrash", () => ({ trash: h.trash }))
 vi.mock("@/queries/useAccount.query", () => ({ accountQuotaDeps: h.account, addAccountStorageUsed: h.addAccountStorageUsed }))
 vi.mock("@/features/drive/queries/useDriveItems.query", () => ({ driveItemsQueryRefetchAfterSocketGap: h.refetchAfterSocketGap }))
@@ -220,7 +216,6 @@ beforeEach(() => {
 	h.account.isCachedFresh.mockReset().mockReturnValue(true)
 	h.addAccountStorageUsed.mockClear()
 	h.refetchAfterSocketGap.mockClear()
-	h.refetchMountedDirectorySizes.mockClear()
 	useSocketStore.setState({ state: "connected", connectedAt: 1 })
 	h.disposals.pause = 0
 	h.disposals.sdkAbort = 0
@@ -607,6 +602,79 @@ describe("cancel", () => {
 		expect(h.enqueue).not.toHaveBeenCalled()
 	})
 
+	describe("when move to trash partly fails", () => {
+		function cancelWithTrash(): void {
+			scriptCopy(async callback => {
+				callback.onTopLevelCreated(createdFile("moved") as never)
+				callback.onTopLevelCreated(createdFile("stuck") as never)
+				copyRunner.requestCancel(Object.keys(useCopyJobsStore.getState().jobs)[0] as string, "trash")
+
+				return report({ error: { kind: ErrorKind.Cancelled, message: "", serverMessage: undefined } })
+			})
+		}
+
+		function trashRefusing(uuids: Set<string>): void {
+			h.trash.mockImplementation(async ({ item }: { item: DriveItem }) => {
+				if (uuids.has(item.data.uuid)) {
+					throw new Error("server refused")
+				}
+			})
+		}
+
+		function trashedUuids(): string[] {
+			return h.trash.mock.calls.map(call => (call[0] as { item: DriveItem }).item.data.uuid)
+		}
+
+		it("a stopped copy keeps its row, counting what is left, and a fully trashed one does not", async () => {
+			trashRefusing(new Set(["stuck"]))
+			cancelWithTrash()
+
+			const id = await runJob()
+
+			expect(useTransfersStore.getState().finishedTransfers).toEqual([
+				expect.objectContaining({ id, type: "copy", copyTrashFailed: 1, name: "name-a", outcome: "errored" })
+			])
+			expect(getCopyJob(id)?.trashFailed.map(item => item.data.uuid)).toEqual(["stuck"])
+
+			useTransfersStore.setState({ finishedTransfers: [] })
+			useCopyJobsStore.getState().clear()
+			trashRefusing(new Set())
+			cancelWithTrash()
+
+			await runJob([file("a"), file("b")])
+
+			expect(useTransfersStore.getState().finishedTransfers).toEqual([])
+		})
+
+		it("Retry trashes just what was left and, once it goes, the row goes too", async () => {
+			trashRefusing(new Set(["stuck"]))
+			cancelWithTrash()
+
+			const id = await runJob()
+
+			h.trash.mockClear()
+			trashRefusing(new Set())
+
+			await copyRunner.retryTrash(id)
+
+			expect(trashedUuids()).toEqual(["stuck"])
+			expect(useTransfersStore.getState().finishedTransfers).toEqual([])
+			expect(getCopyJob(id)).toBeUndefined()
+		})
+
+		it("a Retry that fails again keeps the row and what is left", async () => {
+			trashRefusing(new Set(["stuck"]))
+			cancelWithTrash()
+
+			const id = await runJob()
+
+			await copyRunner.retryTrash(id)
+
+			expect(useTransfersStore.getState().finishedTransfers[0]?.copyTrashFailed).toBe(1)
+			expect(getCopyJob(id)?.trashFailed).toHaveLength(1)
+		})
+	})
+
 	it("logs how the trash went, with the items that failed", async () => {
 		h.trash.mockImplementation(async ({ item }: { item: DriveItem }) => {
 			if (item.data.uuid === "stuck") {
@@ -882,33 +950,6 @@ describe("retry and pause", () => {
 
 		expect(pausedSeen).toBe(true)
 		expect(resumedSeen).toBe(false)
-	})
-})
-
-describe("directory sizes on screen", () => {
-	it("a copy that made something reads the mounted sizes it changed once, after the final flush", async () => {
-		const createdDir = {
-			request: 0n,
-			sourceUuid: "src-d",
-			item: { tag: NonRootNormalItem_Tags.Dir, inner: [{ uuid: "made-dir", parent: "dest" }] }
-		}
-
-		scriptCopy(async () =>
-			report({ topLevel: [createdFile("made-file"), createdDir], counts: { ...ZERO, filesDone: 2n, dirsCreated: 1n } })
-		)
-
-		await runJob()
-
-		expect(h.refetchMountedDirectorySizes).toHaveBeenCalledExactlyOnceWith({ destinationUuid: "dest", createdDirUuids: ["made-dir"] })
-		expect(h.flushNow.mock.invocationCallOrder[0]).toBeLessThan(h.refetchMountedDirectorySizes.mock.invocationCallOrder[0] ?? 0)
-	})
-
-	it("a copy that made nothing reads none", async () => {
-		scriptCopy(async () => report({ counts: ZERO }))
-
-		await runJob()
-
-		expect(h.refetchMountedDirectorySizes).not.toHaveBeenCalled()
 	})
 })
 

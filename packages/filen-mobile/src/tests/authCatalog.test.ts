@@ -75,6 +75,8 @@ const INTENTIONAL_PLURAL_KEYS = new Set([
 	"paste_items_other",
 	"copy_n_items_one",
 	"copy_n_items_other",
+	"copy_trash_failed_one",
+	"copy_trash_failed_other",
 	"copying_items_one",
 	"copying_items_other",
 	"copying_progress_one",
