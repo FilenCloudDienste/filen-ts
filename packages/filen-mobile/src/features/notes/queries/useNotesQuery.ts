@@ -5,6 +5,19 @@ import { type Note } from "@/types"
 
 export const BASE_QUERY_KEY = "useNotesQuery"
 
+// A secondary notes screen (tag drill-down, Manage Tags) mounting over a listing this device read from
+// the server within the window shows it instead of re-reading. Past the window it re-reads as before:
+// pins, favorites, trash state and tags changed on another device carry no socket event.
+export const NOTES_REUSE_WINDOW_MS = 60 * 1000
+
+// Stamped by server reads only. dataUpdatedAt cannot answer this: every optimistic or socket patch
+// restamps it.
+let lastServerReadAt = 0
+
+export const reuseRecentNotesRead = {
+	refetchOnMount: () => (Date.now() - lastServerReadAt < NOTES_REUSE_WINDOW_MS ? false : "always")
+} satisfies Omit<UseQueryOptions, "queryKey" | "queryFn">
+
 export async function fetchData(params?: { signal?: AbortSignal }) {
 	const { authedSdkClient } = await auth.getSdkClients()
 
@@ -20,6 +33,8 @@ export async function fetchData(params?: { signal?: AbortSignal }) {
 		...n,
 		undecryptable: n.encryptionKey === undefined
 	}))
+
+	lastServerReadAt = Date.now()
 
 	return notes
 }

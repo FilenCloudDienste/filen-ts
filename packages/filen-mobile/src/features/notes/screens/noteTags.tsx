@@ -21,7 +21,7 @@ import { PressableScale } from "@/components/ui/pressables"
 import useNotesQuery from "@/features/notes/queries/useNotesQuery"
 import notes from "@/features/notes/notes"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
-import useNotesTagsQuery from "@/features/notes/queries/useNotesTags.query"
+import useNotesTagsQuery, { reuseRecentNotesTagsRead } from "@/features/notes/queries/useNotesTags.query"
 import DismissStack from "@/components/dismissStack"
 import { useTranslation } from "react-i18next"
 import { computeTagState } from "@/features/notes/utils"
@@ -252,7 +252,7 @@ const NoteTags = () => {
 		return notesQuery.data.filter(n => wantedUuids.has(n.uuid))
 	})()
 
-	const notesTagsQuery = useNotesTagsQuery()
+	const notesTagsQuery = useNotesTagsQuery(reuseRecentNotesTagsRead)
 
 	// A failed refetch keeps the data and only flips `status` (#103).
 	const tags = notesTagsQuery.data

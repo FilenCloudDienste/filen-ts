@@ -176,6 +176,14 @@ export async function handleNoteEvent({ event }: { event: NoteSocketEvent }): Pr
 		}
 
 		case NoteEvent_Tags.New: {
+			const [inner] = eventInner.inner.inner
+
+			// The event carries only the uuid. A note already listed was written by this device's own
+			// create/import/duplicate before the echo arrived — nothing to learn from a full re-list.
+			if (notesQueryGet()?.some(n => n.uuid === inner.note)) {
+				break
+			}
+
 			// TODO: Don't refetch the query, build from socket event once added
 			//
 			// Until then, guard the blind snapshot replace: an optimistic write (pin/favorite/

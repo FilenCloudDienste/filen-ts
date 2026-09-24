@@ -225,14 +225,14 @@ function makeParticipantPermissionsEvent(noteUuid: string, userId: bigint, permi
 	} as unknown as NoteSocketEvent
 }
 
-function makeNewEvent(): NoteSocketEvent {
+function makeNewEvent(noteUuid = "uuid-new"): NoteSocketEvent {
 	return {
 		tag: SocketEvent_Tags.Note,
 		inner: [
 			{
 				inner: {
 					tag: NoteEvent_Tags.New,
-					inner: [{}]
+					inner: [{ note: noteUuid }]
 				}
 			}
 		]
@@ -719,6 +719,33 @@ describe("handleNoteEvent — notes socket handler", () => {
 
 			expect(mockFetchData).toHaveBeenCalledTimes(2)
 			expect(mockNotesWithContentQueryUpdate).not.toHaveBeenCalled()
+		})
+
+		it("skips the re-list for a note this device already listed (its own create/import/duplicate echo)", async () => {
+			mockNotesWithContentQueryGet.mockReturnValueOnce([{ uuid: "uuid-own" }])
+
+			await handleNoteEvent({ event: makeNewEvent("uuid-own") })
+
+			expect(mockFetchData).not.toHaveBeenCalled()
+			expect(mockNotesWithContentQueryUpdate).not.toHaveBeenCalled()
+		})
+
+		it("re-lists for a note created elsewhere even when other notes are cached", async () => {
+			mockNotesWithContentQueryGet.mockReturnValueOnce([{ uuid: "uuid-own" }])
+			mockFetchData.mockResolvedValueOnce([{ uuid: "uuid-own" }, { uuid: "uuid-remote" }])
+
+			await handleNoteEvent({ event: makeNewEvent("uuid-remote") })
+
+			expect(mockFetchData).toHaveBeenCalledOnce()
+			expect(mockNotesWithContentQueryUpdate).toHaveBeenCalledOnce()
+		})
+
+		it("re-lists when nothing is cached yet", async () => {
+			mockNotesWithContentQueryGet.mockReturnValueOnce(undefined)
+
+			await handleNoteEvent({ event: makeNewEvent("uuid-remote") })
+
+			expect(mockFetchData).toHaveBeenCalledOnce()
 		})
 	})
 

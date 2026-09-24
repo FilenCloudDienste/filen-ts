@@ -1,8 +1,16 @@
 import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
 import { DEFAULT_QUERY_OPTIONS, queryUpdater } from "@/queries/client"
 import auth from "@/lib/auth"
+import { NOTES_REUSE_WINDOW_MS } from "@/features/notes/queries/useNotesQuery"
 
 export const BASE_QUERY_KEY = "useNotesTagsQuery"
+
+// Stamped by server reads only (see NOTES_REUSE_WINDOW_MS); tag changes have no socket event at all.
+let lastServerReadAt = 0
+
+export const reuseRecentNotesTagsRead = {
+	refetchOnMount: () => (Date.now() - lastServerReadAt < NOTES_REUSE_WINDOW_MS ? false : "always")
+} satisfies Omit<UseQueryOptions, "queryKey" | "queryFn">
 
 export async function fetchData(params?: { signal?: AbortSignal }) {
 	const { authedSdkClient } = await auth.getSdkClients()
@@ -14,6 +22,8 @@ export async function fetchData(params?: { signal?: AbortSignal }) {
 				}
 			: undefined
 	)
+
+	lastServerReadAt = Date.now()
 
 	return tags.map(tag => ({
 		...tag,

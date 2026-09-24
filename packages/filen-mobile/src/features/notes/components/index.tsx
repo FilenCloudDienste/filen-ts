@@ -1,7 +1,7 @@
 import { Fragment, useState, useCallback, useEffect } from "react"
 import { onlineManager } from "@tanstack/react-query"
 import SafeAreaView from "@/components/ui/safeAreaView"
-import useNotesQuery from "@/features/notes/queries/useNotesQuery"
+import useNotesQuery, { reuseRecentNotesRead } from "@/features/notes/queries/useNotesQuery"
 import { notesSorter } from "@/lib/sort"
 import VirtualList, { type ListRenderItemInfo } from "@/components/ui/virtualList"
 import ListEmpty from "@/components/ui/listEmpty"
@@ -15,7 +15,7 @@ import { Platform } from "react-native"
 import { useLocalSearchParams, useFocusEffect } from "expo-router"
 import Note, { type ListItem as NoteListItem, type DataItem as NoteDataItem } from "@/features/notes/components/note"
 import useNotesStore from "@/features/notes/store/useNotes.store"
-import useNotesTagsQuery from "@/features/notes/queries/useNotesTags.query"
+import useNotesTagsQuery, { reuseRecentNotesTagsRead } from "@/features/notes/queries/useNotesTags.query"
 import { useSecureStore } from "@/lib/secureStore"
 import { useShallow } from "zustand/shallow"
 import {
@@ -48,14 +48,16 @@ import logger from "@/lib/logger"
 const Notes = () => {
 	const { t } = useTranslation()
 	const isOnline = useIsOnline()
-	const notesQuery = useNotesQuery()
 	const blocked = useBlockedUsers()
 	const [notesViewMode] = useSecureStore<NotesViewMode>("notesViewMode", "notes")
 	const [tagsSortBy] = useNotesTagsSortBy()
 	const { tagUuid } = useLocalSearchParams<{
 		tagUuid?: string
 	}>()
-	const notesTagsQuery = useNotesTagsQuery()
+	// This component is also the root notes tab, which always reads on mount. A tag drill-down is pushed
+	// over it and reuses a recent read.
+	const notesQuery = useNotesQuery(tagUuid ? reuseRecentNotesRead : undefined)
+	const notesTagsQuery = useNotesTagsQuery(tagUuid ? reuseRecentNotesTagsRead : undefined)
 	const [searchQuery, setSearchQuery] = useState<string>("")
 
 	// Read the DATA, never the last fetch's verdict (#103).
