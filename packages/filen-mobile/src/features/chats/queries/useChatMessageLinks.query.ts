@@ -189,6 +189,16 @@ export async function fetchData(
 	return parsed.filter(result => result.status === "fulfilled").map(result => result.value)
 }
 
+// A resolved preview survives FlashList recycling for an hour: not forever, because a link can be
+// disabled or expire elsewhere and nothing invalidates it (gcTime and the persister keep it for a year).
+export const LINK_PREVIEW_STALE_TIME = 60 * 60 * 1000
+
+// A failed Filen link resolve may be transient (run() folds network errors into success:false), so it
+// stays re-checkable on every mount. External links never touch the network, so they never count.
+export function chatMessageLinksStaleTime(data: LinkResult[] | undefined): number {
+	return data?.some(result => result.type === "internal" && !result.success) ? 0 : LINK_PREVIEW_STALE_TIME
+}
+
 export function useChatMessageLinksQuery(
 	params: useChatMessageLinksQueryParams,
 	options?: Omit<UseQueryOptions, "queryKey" | "queryFn">
@@ -197,6 +207,8 @@ export function useChatMessageLinksQuery(
 
 	const query = useQuery({
 		...DEFAULT_QUERY_OPTIONS,
+		refetchOnMount: true,
+		staleTime: cached => chatMessageLinksStaleTime(cached.state.data),
 		...options,
 		queryKey: [BASE_QUERY_KEY, sortedParams],
 		queryFn: ({ signal }) =>
