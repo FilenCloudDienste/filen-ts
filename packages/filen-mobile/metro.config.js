@@ -10,6 +10,9 @@ const config = {
 	...defaultConfig,
 	resolver: {
 		...defaultConfig.resolver,
+		// Metro also watches with this list. Argent flows and screen recordings (this package's .argent and
+		// the repo root's) must not fast-refresh the app: a refresh under an open iOS context menu crashes it.
+		blockList: [...[defaultConfig.resolver.blockList ?? []].flat(), /(?:^|[\\/])\.argent(?:[\\/]|$)/],
 		extraNodeModules: {
 			crypto: require.resolve("react-native-quick-crypto"),
 			stream: require.resolve("readable-stream"),
