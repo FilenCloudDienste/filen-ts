@@ -15,7 +15,8 @@ const {
 	mockCurrentUserId,
 	mockRemoveQueryEverywhere,
 	mockForget,
-	mockRefreshAfterRemoteEdit
+	mockRefreshAfterRemoteEdit,
+	mockNoteContentRemoteEditSeen
 } = vi.hoisted(() => {
 	const capturedUpdaters: Array<(prev: unknown[]) => unknown[]> = []
 
@@ -35,7 +36,8 @@ const {
 		mockCurrentUserId: vi.fn((): bigint | null => null),
 		mockRemoveQueryEverywhere: vi.fn(),
 		mockForget: vi.fn(async () => undefined),
-		mockRefreshAfterRemoteEdit: vi.fn(async () => undefined)
+		mockRefreshAfterRemoteEdit: vi.fn(async () => undefined),
+		mockNoteContentRemoteEditSeen: vi.fn()
 	}
 })
 
@@ -72,7 +74,8 @@ vi.mock("@/queries/client", () => ({
 }))
 
 vi.mock("@/features/notes/queries/useNoteContent.query", () => ({
-	noteContentQueryKey: ({ uuid }: { uuid: string }) => ["useNoteContentQuery", { uuid }]
+	noteContentQueryKey: ({ uuid }: { uuid: string }) => ["useNoteContentQuery", { uuid }],
+	noteContentRemoteEditSeen: mockNoteContentRemoteEditSeen
 }))
 
 vi.mock("@/features/notes/queries/useNotesQuery", () => ({
@@ -777,6 +780,18 @@ describe("handleNoteEvent — notes socket handler", () => {
 			})
 
 			expect(mockEventsEmit).not.toHaveBeenCalled()
+		})
+
+		// Recorded for every delivered edit, refreshed or not: the next open of that note must re-read.
+		it("marks the note's content as remotely edited, even when the note is not listed", async () => {
+			mockNoteContentRemoteEditSeen.mockClear()
+			mockNotesWithContentQueryGet.mockReturnValueOnce([])
+
+			await handleNoteEvent({
+				event: makeContentEditedEvent("uuid-missing", {})
+			})
+
+			expect(mockNoteContentRemoteEditSeen).toHaveBeenCalledWith("uuid-missing")
 		})
 
 		it("does not throw when the note is not found", async () => {

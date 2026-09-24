@@ -177,10 +177,11 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 	// staleTime: Infinity keeps the query from auto-refetching on the
 	// re-enable that follows a sync. Without it, every 3s typing pause would
 	// trigger a fetch → loader → editor remount cycle that resets the user's
-	// cursor. Initial mount still refetches because refetchOnMount:"always"
-	// bypasses the stale check; refetchOnReconnect:"always" bypasses it too
-	// when no inflight is in the way. Catch-up for remote edits arrives via
-	// the socket → onContentEditedRemotely reload prompt below.
+	// cursor. A mount still refetches unless the hook finds the cached body
+	// current (read this session, socket up since, no remote edit announced
+	// after); refetchOnReconnect:"always" bypasses the stale check too when no
+	// inflight is in the way. Catch-up for remote edits arrives via the socket
+	// → onContentEditedRemotely reload prompt below.
 	const noteContentQuery = useNoteContentQuery(
 		{
 			uuid: note.uuid

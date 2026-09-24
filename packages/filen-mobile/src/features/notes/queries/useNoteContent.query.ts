@@ -4,11 +4,51 @@ import { sortParams } from "@filen/shared"
 import auth from "@/lib/auth"
 import logger from "@/lib/logger"
 import { notesQueryGet } from "@/features/notes/queries/useNotesQuery"
+import useSocketStore from "@/stores/useSocket.store"
 
 export const BASE_QUERY_KEY = "useNoteContentQuery"
 
 export type UseNoteContentQueryParams = {
 	uuid: string
+}
+
+// Session memory of this query's own server reads, NOT dataUpdatedAt: local edits and the post-push
+// truth write restamp that. A body restored from disk has no entry, so its first open still reads.
+type ContentRead = {
+	startedAt: number
+	sequence: number
+	editedTimestamp: bigint
+}
+
+const contentReads = new Map<string, ContentRead>()
+const remoteEditSequences = new Map<string, number>()
+let sequence = 0
+
+// Every ContentEdited the socket delivers, whether or not the cached body got refreshed afterwards:
+// the open note only raises a reload prompt the user may dismiss, and refreshAfterRemoteEdit skips
+// locked, offline, drafted and mid-burst notes. The next open re-reads any of them.
+export function noteContentRemoteEditSeen(uuid: string): void {
+	remoteEditSequences.set(uuid, ++sequence)
+}
+
+// Whether a mount can show the cached body without re-reading: a string body (undefined is an
+// undecryptable or unresolved read, never trusted), read by this query while the socket has been up
+// ever since, with no remote edit announced after the read began and the listed edit stamp unchanged.
+export function noteContentReadIsCurrent(uuid: string, state: { data: unknown; status: string }): boolean {
+	const read = contentReads.get(uuid)
+	const socket = useSocketStore.getState()
+	const listed = notesQueryGet()?.find(n => n.uuid === uuid)
+
+	return (
+		typeof state.data === "string" &&
+		state.status !== "error" &&
+		read !== undefined &&
+		socket.state === "connected" &&
+		read.startedAt >= socket.connectedAt &&
+		(remoteEditSequences.get(uuid) ?? 0) < read.sequence &&
+		listed !== undefined &&
+		listed.editedTimestamp === read.editedTimestamp
+	)
 }
 
 export async function fetchData(
@@ -26,9 +66,15 @@ export async function fetchData(
 		return undefined
 	}
 
+	const read: ContentRead = {
+		startedAt: Date.now(),
+		sequence: ++sequence,
+		editedTimestamp: note.editedTimestamp
+	}
+
 	const { authedSdkClient } = await auth.getSdkClients()
 
-	return await authedSdkClient.getNoteContent(
+	const content = await authedSdkClient.getNoteContent(
 		note,
 		params.signal
 			? {
@@ -36,6 +82,10 @@ export async function fetchData(
 				}
 			: undefined
 	)
+
+	contentReads.set(params.uuid, read)
+
+	return content
 }
 
 // The cache key for one note's content. Single source of the key shape — the offline ledger
@@ -53,6 +103,9 @@ export function useNoteContentQuery(
 
 	const query = useQuery({
 		...DEFAULT_QUERY_OPTIONS,
+		// A reopened note whose body is still current defers to staleTime (the editor passes Infinity),
+		// which only an invalidation beats. Anything else re-reads, as every mount did before.
+		refetchOnMount: cached => (noteContentReadIsCurrent(sortedParams.uuid, cached.state) ? true : "always"),
 		...options,
 		// Built from `sortedParams` rather than `params` so the exhaustive-deps rule can see that the
 		// key covers everything the queryFn closes over. sortParams is idempotent, so routing the

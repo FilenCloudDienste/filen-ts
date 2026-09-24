@@ -8,7 +8,7 @@ import {
 import events from "@/lib/events"
 import useNotesStore from "@/features/notes/store/useNotes.store"
 import notesOffline from "@/features/notes/notesOffline"
-import { noteContentQueryKey } from "@/features/notes/queries/useNoteContent.query"
+import { noteContentQueryKey, noteContentRemoteEditSeen } from "@/features/notes/queries/useNoteContent.query"
 import { removeQueryEverywhere } from "@/queries/client"
 import logger from "@/lib/logger"
 
@@ -210,6 +210,8 @@ export async function handleNoteEvent({ event }: { event: NoteSocketEvent }): Pr
 
 		case NoteEvent_Tags.ContentEdited: {
 			const [inner] = eventInner.inner.inner
+
+			noteContentRemoteEditSeen(inner.note)
 
 			const notes = notesQueryGet()
 			const note = notes?.find(n => n.uuid === inner.note)
