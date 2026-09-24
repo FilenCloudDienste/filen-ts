@@ -7,7 +7,6 @@ import contacts from "@/features/contacts/contacts"
 import { addContactFlow } from "@/features/contacts/contactsActions"
 import useContactsStore, { type ContactListItem } from "@/features/contacts/store/useContacts.store"
 import { runBulk } from "@/lib/bulkOps"
-import { queryClient } from "@/queries/client"
 import { useNavigation } from "expo-router"
 import { router } from "@/lib/router"
 import type { Contact as TContact } from "@filen/sdk-rs"
@@ -109,19 +108,29 @@ export const Header = ({ setSearchQuery }: { setSearchQuery: React.Dispatch<Reac
 					icon: "checkmark",
 					requiresOnline: true,
 					onPress: async () => {
-						const ok = await runBulk({
+						// One contacts reread for the whole batch. runBulk returns at the first
+						// failure while other accepts may still land; those reread for themselves.
+						let accepted = 0
+						let batchSettled = false
+
+						await runBulk({
 							items: selectedByType.incoming,
 							clearSelection: () => useContactsStore.getState().clearSelectedContacts(),
-							op: c => contacts.acceptRequest({ uuid: c.data.uuid })
+							op: async c => {
+								await contacts.acceptRequest({ uuid: c.data.uuid, refreshContacts: false })
+
+								accepted++
+
+								if (batchSettled) {
+									await contacts.refreshContacts()
+								}
+							}
 						})
 
-						// Single amortized invalidation instead of N refetches
-						// triggered by per-call contactsQueryUpdate(). Accepted
-						// requests promote to contacts, so both queries need a
-						// fresh fetch.
-						if (ok) {
-							queryClient.invalidateQueries({ queryKey: ["contacts"] })
-							queryClient.invalidateQueries({ queryKey: ["contactRequests"] })
+						batchSettled = true
+
+						if (accepted > 0) {
+							await contacts.refreshContacts()
 						}
 					}
 				})

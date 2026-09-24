@@ -2,6 +2,7 @@ import { vi, describe, it, expect, beforeEach } from "vitest"
 vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 
 const contactsQueryUpdates: Array<{ updater: (prev: unknown) => unknown }> = []
+const { contactsCache } = vi.hoisted(() => ({ contactsCache: { current: undefined as unknown } }))
 const contactRequestsQueryUpdates: Array<{ updater: (prev: unknown) => unknown }> = []
 
 vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
@@ -16,6 +17,7 @@ vi.mock("@/features/contacts/queries/useContacts.query", () => ({
 	contactsQueryUpdate: vi.fn((opts: { updater: (prev: unknown) => unknown }) => {
 		contactsQueryUpdates.push(opts)
 	}),
+	contactsQueryGet: () => contactsCache.current,
 	BASE_QUERY_KEY: "useContactsQuery"
 }))
 
@@ -66,6 +68,7 @@ function makeRequest(overrides?: { uuid?: string; email?: string }) {
 }
 
 beforeEach(() => {
+	contactsCache.current = { contacts: [], blocked: [] }
 	contactsQueryUpdates.length = 0
 	contactRequestsQueryUpdates.length = 0
 	vi.clearAllMocks()
@@ -350,27 +353,6 @@ describe("contacts.acceptRequest", () => {
 		expect(reqNext.outgoing).toEqual([])
 	})
 
-	it("invalidates both contacts and contactRequests queries after acceptRequest instead of calling getContacts() inline", async () => {
-		// #45 fix: acceptRequest now uses queryClient.invalidateQueries for both caches
-		// rather than an inline getContacts() call that could leave them inconsistent.
-		const acceptContactRequest = vi.fn().mockResolvedValue(undefined)
-
-		vi.mocked(auth.getSdkClients).mockResolvedValue({
-			authedSdkClient: { acceptContactRequest }
-		} as unknown as Awaited<ReturnType<typeof auth.getSdkClients>>)
-
-		await contacts.acceptRequest({ uuid: "req-invalidate" })
-
-		// contactsQueryUpdate must NOT be called (no inline getContacts anymore)
-		expect(contactsQueryUpdate).not.toHaveBeenCalled()
-
-		// invalidateQueries must be called for both keys
-		expect(queryClient.invalidateQueries).toHaveBeenCalledTimes(2)
-		const calls = vi.mocked(queryClient.invalidateQueries).mock.calls.map(c => (c[0] as { queryKey: string[] }).queryKey[0])
-		expect(calls).toContain("useContactsQuery")
-		expect(calls).toContain("useContactRequestsQuery")
-	})
-
 	it("calls acceptContactRequest with the uuid and no options when no signal is given", async () => {
 		const acceptContactRequest = vi.fn().mockResolvedValue(undefined)
 
@@ -403,7 +385,7 @@ describe("contacts.acceptRequest", () => {
 			authedSdkClient: { acceptContactRequest }
 		} as unknown as Awaited<ReturnType<typeof auth.getSdkClients>>)
 
-		await contacts.acceptRequest({ uuid: "req-partial-ok" })
+		await contacts.acceptRequest({ uuid: "req-partial-ok", refreshContacts: false })
 
 		// contactRequestsQueryUpdate was called (incoming was filtered)
 		expect(contactRequestsQueryUpdate).toHaveBeenCalledOnce()
@@ -416,8 +398,106 @@ describe("contacts.acceptRequest", () => {
 		expect(reqNext.incoming).toHaveLength(1)
 		expect(reqNext.incoming[0]!.uuid).toBe("req-other")
 
-		// contacts is refreshed via invalidation, not a direct cache write
+		// refreshContacts: false leaves the contacts list to the caller's batch reread.
 		expect(contactsQueryUpdate).not.toHaveBeenCalled()
+	})
+})
+
+describe("contacts.acceptRequest — request count", () => {
+	function sdk(getContacts = vi.fn().mockResolvedValue([makeContact({ uuid: "new-contact" })])) {
+		const client = {
+			acceptContactRequest: vi.fn().mockResolvedValue("new-contact"),
+			getContacts,
+			getBlockedContacts: vi.fn(),
+			listIncomingContactRequests: vi.fn(),
+			listOutgoingContactRequests: vi.fn()
+		}
+
+		vi.mocked(auth.getSdkClients).mockResolvedValue({ authedSdkClient: client } as unknown as Awaited<
+			ReturnType<typeof auth.getSdkClients>
+		>)
+
+		return client
+	}
+
+	it("rereads only the contacts list and leaves blocked untouched", async () => {
+		const client = sdk()
+
+		await contacts.acceptRequest({ uuid: "req-1" })
+
+		expect(client.getContacts).toHaveBeenCalledTimes(1)
+		expect(client.getBlockedContacts).not.toHaveBeenCalled()
+		expect(client.listIncomingContactRequests).not.toHaveBeenCalled()
+		expect(client.listOutgoingContactRequests).not.toHaveBeenCalled()
+		expect(queryClient.invalidateQueries).not.toHaveBeenCalled()
+
+		const blocked = [makeContact({ uuid: "blocked-1" })]
+		const next = (contactsQueryUpdates[0]!.updater as (p: unknown) => { contacts: unknown[]; blocked: unknown[] })({
+			contacts: [],
+			blocked
+		})
+
+		expect(next.contacts).toEqual([makeContact({ uuid: "new-contact" })])
+		expect(next.blocked).toBe(blocked)
+	})
+
+	it("falls back to invalidating the contacts query only when the reread fails", async () => {
+		const client = sdk(vi.fn().mockRejectedValue(new Error("network")))
+
+		await expect(contacts.acceptRequest({ uuid: "req-1" })).resolves.toBeUndefined()
+
+		expect(contactsQueryUpdate).not.toHaveBeenCalled()
+		expect(queryClient.invalidateQueries).toHaveBeenCalledTimes(1)
+		expect(queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["useContactsQuery"] })
+		expect(client.listIncomingContactRequests).not.toHaveBeenCalled()
+	})
+
+	it("reads nothing when the contacts list was never loaded (the first mount reads it)", async () => {
+		const client = sdk()
+
+		contactsCache.current = undefined
+
+		await contacts.acceptRequest({ uuid: "req-1" })
+
+		expect(client.getContacts).not.toHaveBeenCalled()
+		expect(contactsQueryUpdate).not.toHaveBeenCalled()
+	})
+
+	it("a bulk accept of N rereads the contacts list once", async () => {
+		const client = sdk()
+
+		await Promise.all(["a", "b", "c", "d"].map(uuid => contacts.acceptRequest({ uuid, refreshContacts: false })))
+		await contacts.refreshContacts()
+
+		expect(client.acceptContactRequest).toHaveBeenCalledTimes(4)
+		expect(client.getContacts).toHaveBeenCalledTimes(1)
+	})
+
+	it("rereads made while one is in flight collapse into one more pass", async () => {
+		let release: () => void = () => undefined
+		const client = sdk(
+			vi.fn(
+				() =>
+					new Promise(resolve => {
+						release = () => resolve([])
+					})
+			)
+		)
+
+		const first = contacts.refreshContacts()
+
+		await new Promise(resolve => setTimeout(resolve, 0))
+
+		const second = contacts.refreshContacts()
+		const third = contacts.refreshContacts()
+
+		release()
+		await new Promise(resolve => setTimeout(resolve, 0))
+		release()
+
+		await Promise.all([first, second, third])
+
+		expect(client.getContacts).toHaveBeenCalledTimes(2)
 	})
 })
 
