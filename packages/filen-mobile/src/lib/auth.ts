@@ -42,6 +42,8 @@ import { isEqual } from "es-toolkit"
 
 const RELOAD_RETRY_DELAY = 1000
 const RELOAD_MAX_ATTEMPTS = 5
+// How long sign-out waits for running copies to hand back their reports.
+const COPY_SETTLE_WAIT_MS = 6000
 
 class Auth {
 	private authedClient: JsClientInterface | null = null
@@ -419,8 +421,10 @@ class Auth {
 		events.emit("logout")
 
 		// Phase 2 — cancel in-flight work (synchronous aborts). These trip the abort signals the SDK
-		// calls below were issued with, so awaiting them next observes settled cancellations.
+		// calls below were issued with, so awaiting them next observes settled cancellations. The session
+		// epoch moves first, so a copy settling during the wipe makes no listing, cache or account write.
 		try {
+			transfers.endSession()
 			transfers.cancelAll()
 			cameraUpload.cancel()
 			chatsSync.cancel()
@@ -430,6 +434,10 @@ class Auth {
 		} catch (e) {
 			logger.warn("auth", "logout phase-2 cancel threw", { err: e })
 		}
+
+		// A cancelled copy still returns its report (the SDK drops a job that ignores the cancel after
+		// 5 s); its handles must be released before the client they belong to is destroyed below.
+		await transfers.awaitCopiesSettled(COPY_SETTLE_WAIT_MS)
 
 		// Phase 3 — snapshot the SDK clients, then immediately null the fields and re-arm clientsReady
 		// BEFORE any further await. A post-wipe getSdkClients() must block on the next session's

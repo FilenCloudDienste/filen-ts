@@ -53,22 +53,7 @@ export function ensureDirectory(): void {
 	}
 }
 
-export function driveItemToAnyFile(item: DriveItem): AnyFile | null {
-	switch (item.type) {
-		case "file": {
-			return new AnyFile.File(item.data)
-		}
-
-		case "sharedFile":
-		case "sharedRootFile": {
-			return new AnyFile.Shared(item.data)
-		}
-
-		default: {
-			return null
-		}
-	}
-}
+export { driveItemToAnyFile } from "@/lib/sdkSources"
 
 export type ThumbnailKind = "image" | "video"
 

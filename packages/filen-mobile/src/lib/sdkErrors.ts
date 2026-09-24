@@ -28,9 +28,10 @@ export function isNetworkClassError(error: unknown): boolean {
 // reqwest/serde string ("error sending request for url …") the average user can't act on, whereas
 // the label ("Network error") is clear; (3) only an UNMAPPED kind falls back to the raw inner
 // message (`innerMessage()`), then the generic label. Module level (not a hook) → uses `i18n`.
-export function unwrappedSdkErrorToHumanReadable(unwrapped: FilenSdkError): string {
+// The same priority for an SDK error record (a copy's CopyError, whose fields arrive as plain values).
+export function sdkErrorPartsToHumanReadable(parts: { kind: ErrorKind; serverMessage: string | undefined; innerMessage: string | undefined }): string {
 	const errorKey = (() => {
-		switch (unwrapped.kind()) {
+		switch (parts.kind) {
 			case ErrorKind.BadRecoveryKey: {
 				return "bad_recovery_key" as const
 			}
@@ -138,7 +139,7 @@ export function unwrappedSdkErrorToHumanReadable(unwrapped: FilenSdkError): stri
 	})()
 
 	// Server/API errors → the server's own human-readable message (the most specific text we have).
-	const serverMessage = unwrapped.serverMessage()
+	const serverMessage = parts.serverMessage
 
 	if (serverMessage) {
 		return serverMessage
@@ -152,7 +153,7 @@ export function unwrappedSdkErrorToHumanReadable(unwrapped: FilenSdkError): stri
 	}
 
 	// Unmapped/unknown kind → the raw inner Rust message as a better-than-generic fallback.
-	const innerMessage = unwrapped.innerMessage()
+	const innerMessage = parts.innerMessage
 
 	if (innerMessage) {
 		return innerMessage
@@ -160,4 +161,12 @@ export function unwrappedSdkErrorToHumanReadable(unwrapped: FilenSdkError): stri
 
 	// Nothing better available.
 	return i18n.t(errorKey)
+}
+
+export function unwrappedSdkErrorToHumanReadable(unwrapped: FilenSdkError): string {
+	return sdkErrorPartsToHumanReadable({
+		kind: unwrapped.kind(),
+		serverMessage: unwrapped.serverMessage(),
+		innerMessage: unwrapped.innerMessage()
+	})
 }

@@ -88,9 +88,9 @@ const ActiveTransferRow = ({ transfer, target }: { transfer: TTransfer; target: 
 		<View className="bg-transparent px-4 flex-col py-2">
 			<View className="bg-transparent items-center justify-between flex-row gap-4">
 				<View className="flex-row items-center gap-3 bg-transparent flex-1">
-					{transfer.type === "uploadDirectory" || transfer.type === "uploadFile" ? (
+					{transfer.type === "uploadDirectory" || transfer.type === "uploadFile" || transfer.type === "copy" ? (
 						<Fragment>
-							{transfer.type === "uploadDirectory" ? (
+							{transfer.type === "uploadDirectory" || (transfer.type === "copy" && transfer.glyph !== "file") ? (
 								<DirectoryIcon
 									color={DirColor.Default.new()}
 									width={32}
@@ -121,7 +121,7 @@ const ActiveTransferRow = ({ transfer, target }: { transfer: TTransfer; target: 
 						numberOfLines={1}
 						ellipsizeMode="middle"
 					>
-						{transfer.type === "uploadDirectory" || transfer.type === "uploadFile"
+						{transfer.type === "uploadDirectory" || transfer.type === "uploadFile" || transfer.type === "copy"
 							? transfer.name
 							: driveItemDisplayName(transfer.item)}
 					</Text>

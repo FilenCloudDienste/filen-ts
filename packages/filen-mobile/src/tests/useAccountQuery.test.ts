@@ -39,7 +39,16 @@ vi.mock("@/lib/auth", () => ({
 	}
 }))
 
-import useAccountQuery, { accountQueryPatch, markAccountStale, BASE_QUERY_KEY, type Account } from "@/queries/useAccount.query"
+import useAccountQuery, {
+	accountQueryPatch,
+	accountQuotaDeps,
+	addAccountStorageUsed,
+	ACCOUNT_QUOTA_TRUST_MS,
+	fetchFreshAccount,
+	markAccountStale,
+	BASE_QUERY_KEY,
+	type Account
+} from "@/queries/useAccount.query"
 
 const account = {
 	nickName: "old",
@@ -131,5 +140,55 @@ describe("accountQueryPatch", () => {
 		accountQueryPatch({ nickName: "new" })
 
 		expect(holder.client.getQueryState([BASE_QUERY_KEY])).toBeUndefined()
+	})
+})
+
+describe("quota helpers", () => {
+	it("trusts a cached account for ten minutes, then not; nothing cached is never fresh", () => {
+		const now = Date.now()
+
+		expect(accountQuotaDeps.isCachedFresh?.()).toBe(false)
+
+		holder.client.setQueryData([BASE_QUERY_KEY], account, { updatedAt: now - ACCOUNT_QUOTA_TRUST_MS + 1000 })
+
+		expect(accountQuotaDeps.isCachedFresh?.()).toBe(true)
+		expect(accountQuotaDeps.cached()).toBe(account)
+
+		holder.client.setQueryData([BASE_QUERY_KEY], account, { updatedAt: now - ACCOUNT_QUOTA_TRUST_MS - 1000 })
+
+		expect(accountQuotaDeps.isCachedFresh?.()).toBe(false)
+	})
+
+	it("a fresh read goes through the query: concurrent callers share one request and the cache keeps it", async () => {
+		const [first, second] = await Promise.all([fetchFreshAccount(), fetchFreshAccount()])
+
+		expect(mockGetUserInfo).toHaveBeenCalledOnce()
+		expect(first).toBe(account)
+		expect(second).toBe(account)
+		expect(holder.client.getQueryData([BASE_QUERY_KEY])).toBe(account)
+	})
+
+	it("adds copied or uploaded bytes to storageUsed, keeping the read's stamp", () => {
+		const readAt = Date.now() - 5000
+
+		holder.client.setQueryData([BASE_QUERY_KEY], account, { updatedAt: readAt })
+
+		addAccountStorageUsed(50n)
+
+		const state = holder.client.getQueryState<Account>([BASE_QUERY_KEY])
+
+		expect(state?.data?.storageUsed).toBe(150n)
+		expect(state?.dataUpdatedAt).toBe(readAt)
+	})
+
+	it("adds nothing without a cached account or bytes", () => {
+		addAccountStorageUsed(50n)
+
+		expect(holder.client.getQueryState([BASE_QUERY_KEY])).toBeUndefined()
+
+		holder.client.setQueryData([BASE_QUERY_KEY], account)
+		addAccountStorageUsed(0n)
+
+		expect(holder.client.getQueryData<Account>([BASE_QUERY_KEY])?.storageUsed).toBe(100n)
 	})
 })

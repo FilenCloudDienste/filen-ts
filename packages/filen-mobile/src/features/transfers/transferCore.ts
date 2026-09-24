@@ -9,9 +9,6 @@ import {
 	type DirWithPath,
 	FilenSdkError,
 	ManagedFuture,
-	AnyDirWithContext,
-	AnySharedDirWithContext,
-	AnySharedDir,
 	AnyNormalDir,
 	AnyNormalDir_Tags,
 	AnyFile,
@@ -38,6 +35,7 @@ import {
 } from "@/features/drive/queries/useDriveItems.query"
 import { markDirectorySizesStale } from "@/features/drive/queries/useDirectorySize.query"
 import type { DriveItem } from "@/types"
+import { driveItemToAnyDirWithContext } from "@/lib/sdkSources"
 import cache from "@/lib/cache"
 import fileCache from "@/lib/fileCache"
 import drive from "@/features/drive/drive"
@@ -110,6 +108,11 @@ export function shouldRemoveSettledTransfer(args: { succeeded: boolean; aborted:
 // (onUploadErrors/onDownloadErrors), so the settle path must read the accumulated state
 // instead of trusting resolution alone.
 export function countTransferErrors(transfer: Transfer): number {
+	// A copy's failures live on its job (useCopyJobs.store), not on the row.
+	if (transfer.type === "copy") {
+		return 0
+	}
+
 	if (transfer.type === "uploadDirectory" || transfer.type === "uploadFile") {
 		return transfer.errors.upload.length + transfer.errors.scan.length + transfer.errors.unknown.length
 	}
@@ -120,7 +123,7 @@ export function countTransferErrors(transfer: Transfer): number {
 // Display name for a settled transfer, matching the transfers screen row exactly:
 // uploads use the effective remote name, downloads use the drive item's decrypted name.
 function finishedTransferName(transfer: Transfer): string {
-	if (transfer.type === "uploadDirectory" || transfer.type === "uploadFile") {
+	if (transfer.type === "uploadDirectory" || transfer.type === "uploadFile" || transfer.type === "copy") {
 		return transfer.name
 	}
 
@@ -1067,59 +1070,7 @@ export async function downloadCore(
 				scanErrors: []
 			}
 
-			const targetDir: AnyDirWithContext = (() => {
-				switch (item.type) {
-					case "directory": {
-						return new AnyDirWithContext.Normal(new AnyNormalDir.Dir(item.data))
-					}
-
-					case "sharedDirectory": {
-						const parentUuid = unwrapParentUuid(item.data.inner.parent)
-
-						if (!parentUuid) {
-							throw new Error("Shared directory is missing parent information.")
-						}
-
-						// TC-06: resolve the share context for THIS child directory. We need a SharingRole; the
-						// listing path stamps the parent's role onto the child both as the cached parent's
-						// shareInfo AND (when present) directly on item.data.sharingRole. Prefer the cached
-						// parent, then fall back to the item's own sharingRole, so a cold start / restored route
-						// param / evicted cache no longer hard-fails when the role is still recoverable from the
-						// item — mirroring offlineHelpers, which resolves the same miss gracefully.
-						const shareInfo = cache.directoryUuidToAnySharedDirWithContext.get(parentUuid)?.shareInfo ?? item.data.sharingRole
-
-						if (!shareInfo) {
-							// Neither the cached parent nor the item carries the share context. This is genuinely
-							// recoverable — re-opening the shared parent in the drive repopulates the cache — but
-							// resolving it here would require an extra SDK round-trip the silent transfer layer
-							// deliberately avoids; a clearer retryable message is the sanctioned minimum.
-							throw new Error(
-								"Shared directory download is missing its share context. Open the shared directory once, then retry."
-							)
-						}
-
-						// Target the shared directory ITSELF (item.data), borrowing only the shareInfo resolved
-						// above — mirrors offline.ts findParentAnyDirWithContext. Wrapping the parent's
-						// AnySharedDirWithContext directly would download the PARENT's (larger) tree instead of
-						// this child directory.
-						return new AnyDirWithContext.Shared(
-							AnySharedDirWithContext.new({
-								dir: new AnySharedDir.Dir(item.data),
-								shareInfo
-							})
-						)
-					}
-
-					case "sharedRootDirectory": {
-						return new AnyDirWithContext.Shared(
-							AnySharedDirWithContext.new({
-								dir: new AnySharedDir.Root(item.data),
-								shareInfo: item.data.sharingRole
-							})
-						)
-					}
-				}
-			})()
+			const targetDir = driveItemToAnyDirWithContext(item)
 
 			if (!preserveDestinationOnStart && destination.exists) {
 				destination.delete()

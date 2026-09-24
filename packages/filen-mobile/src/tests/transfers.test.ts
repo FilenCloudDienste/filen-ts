@@ -1903,7 +1903,7 @@ describe("Transfers", () => {
 						item: sharedDirItem as any,
 						destination: dest
 					})
-				).rejects.toThrow("Shared directory download is missing its share context. Open the shared directory once, then retry.")
+				).rejects.toThrow("Shared directory is missing its share context. Open the shared directory once, then retry.")
 			})
 
 			it("resolves the sharedRootDirectory targetDir branch without throwing", async () => {
@@ -2261,6 +2261,84 @@ describe("Transfers", () => {
 			const result = await uploadPromise
 
 			expect(result).toBeNull()
+		})
+	})
+
+	describe("copies", () => {
+		it("run under the foreground scope: cancelAll and cancelForegroundTransfers both reach them", () => {
+			const first = transfers.copyScopeSignal()
+
+			transfers.cancelForegroundTransfers()
+
+			expect(first.aborted).toBe(true)
+
+			const second = transfers.copyScopeSignal()
+
+			transfers.cancelAll()
+
+			expect(second.aborted).toBe(true)
+			expect(transfers.copyScopeSignal().aborted).toBe(false)
+		})
+
+		it("endSession moves the epoch a copy checks before any late side effect", () => {
+			const before = transfers.sessionEpoch
+
+			transfers.endSession()
+
+			expect(transfers.sessionEpoch).toBe(before + 1)
+		})
+
+		it("awaitCopiesSettled resolves as soon as the tracked copies settle", async () => {
+			let settle: () => void = () => {}
+
+			transfers.trackCopy(
+				new Promise<void>(resolve => {
+					settle = resolve
+				})
+			)
+
+			const waited = transfers.awaitCopiesSettled(60_000)
+
+			settle()
+
+			await expect(waited).resolves.toBeUndefined()
+		})
+
+		it("awaitCopiesSettled gives up after its timeout on a copy that never settles", async () => {
+			vi.useFakeTimers()
+
+			let settle: () => void = () => {}
+
+			try {
+				transfers.trackCopy(
+					new Promise<void>(resolve => {
+						settle = resolve
+					})
+				)
+
+				const waited = transfers.awaitCopiesSettled(6000)
+				let done = false
+
+				void waited.then(() => {
+					done = true
+				})
+
+				await vi.advanceTimersByTimeAsync(5999)
+
+				expect(done).toBe(false)
+
+				await vi.advanceTimersByTimeAsync(1)
+
+				expect(done).toBe(true)
+			} finally {
+				settle()
+				await vi.advanceTimersByTimeAsync(0)
+				vi.useRealTimers()
+			}
+		})
+
+		it("awaitCopiesSettled returns at once with nothing tracked", async () => {
+			await expect(transfers.awaitCopiesSettled(6000)).resolves.toBeUndefined()
 		})
 	})
 

@@ -12,6 +12,54 @@ class Transfers {
 	private foregroundAbortController = new AbortController()
 	private backgroundAbortController = new AbortController()
 	private globalPauseSignal = new PauseSignal()
+	// Copies run under the foreground scope (they cancel exactly like manual transfers); their promises
+	// are tracked so logout can wait for them to settle.
+	private readonly copies = new Set<Promise<unknown>>()
+	private epoch = 0
+
+	// Bumped by logout before it cancels anything: work that captured an older epoch skips every side
+	// effect it would still make (listing patches, account writes) once its SDK call returns.
+	public get sessionEpoch(): number {
+		return this.epoch
+	}
+
+	public endSession(): void {
+		this.epoch++
+	}
+
+	// The signal a copy starting now is cancelled through: cancelAll() and the app→background lifecycle
+	// (cancelForegroundTransfers) both reach it. Read at start — each reset installs a fresh controller.
+	public copyScopeSignal(): AbortSignal {
+		return this.foregroundAbortController.signal
+	}
+
+	public trackCopy(copy: Promise<unknown>): void {
+		this.copies.add(copy)
+
+		const untrack = () => {
+			this.copies.delete(copy)
+		}
+
+		copy.then(untrack, untrack)
+	}
+
+	// Resolves once every tracked copy has settled, or after `timeoutMs`, whichever comes first.
+	public async awaitCopiesSettled(timeoutMs: number): Promise<void> {
+		if (this.copies.size === 0) {
+			return
+		}
+
+		let timer: ReturnType<typeof setTimeout> | undefined
+
+		await Promise.race([
+			Promise.allSettled([...this.copies]),
+			new Promise<void>(resolve => {
+				timer = setTimeout(resolve, timeoutMs)
+			})
+		])
+
+		clearTimeout(timer)
+	}
 
 	// Cancel EVERY in-flight transfer (both scopes) and reset. Used by logout (auth.ts) and the transfers
 	// screen's "Cancel all" button.

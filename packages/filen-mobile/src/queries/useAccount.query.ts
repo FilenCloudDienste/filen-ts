@@ -1,6 +1,7 @@
 import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
 import { DEFAULT_QUERY_OPTIONS, queryClient, queryUpdater } from "@/queries/client"
 import auth from "@/lib/auth"
+import type { QuotaCheckDeps } from "@filen/shared"
 
 export const BASE_QUERY_KEY = "useAccountQuery"
 
@@ -52,6 +53,45 @@ export function markAccountStale(): void {
 		queryKey: [BASE_QUERY_KEY],
 		exact: true,
 		refetchType: "none"
+	})
+}
+
+// How long quota checks (copies, uploads) answer from the cached storage figure before one fresh read.
+export const ACCOUNT_QUOTA_TRUST_MS = 10 * 60 * 1000
+
+function cachedAccountState() {
+	return queryClient.getQueryState<Account>([BASE_QUERY_KEY])
+}
+
+// One read through the query, so a mounted screen shares it and the cache keeps the result.
+export function fetchFreshAccount(): Promise<Account> {
+	return queryClient.fetchQuery({
+		queryKey: [BASE_QUERY_KEY],
+		queryFn: ({ signal }) => fetchData(signal),
+		staleTime: 0
+	})
+}
+
+export const accountQuotaDeps: QuotaCheckDeps = {
+	cached: () => cachedAccountState()?.data,
+	fetchFresh: fetchFreshAccount,
+	isCachedFresh: () => {
+		const state = cachedAccountState()
+
+		return state?.data !== undefined && Date.now() - state.dataUpdatedAt < ACCOUNT_QUOTA_TRUST_MS
+	}
+}
+
+// A write that added bytes the server will count: the cached figure follows without a read.
+export function addAccountStorageUsed(bytes: bigint): void {
+	const account = cachedAccountState()?.data
+
+	if (!account || bytes <= 0n) {
+		return
+	}
+
+	accountQueryPatch({
+		storageUsed: account.storageUsed + bytes
 	})
 }
 

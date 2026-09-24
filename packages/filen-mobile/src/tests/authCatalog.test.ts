@@ -71,6 +71,8 @@ const INTENTIONAL_PLURAL_KEYS = new Set([
 	"transfers_active_other",
 	"transfers_progress_one",
 	"transfers_progress_other",
+	"copy_n_items_one",
+	"copy_n_items_other",
 	"upload_complete_one",
 	"upload_complete_other",
 	"upload_complete_with_failures_one",

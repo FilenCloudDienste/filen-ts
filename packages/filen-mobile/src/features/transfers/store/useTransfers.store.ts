@@ -55,6 +55,13 @@ export type Transfer = {
 			destination: FileSystem.File
 	  }
 	| {
+			// One row per copy job, however many items it holds (its detail lives in useCopyJobs.store).
+			// abort stops the copy and keeps what it already made.
+			type: "copy"
+			name: string
+			glyph: "directory" | "file" | "items"
+	  }
+	| {
 			type: "downloadDirectory"
 			knownFiles: number
 			knownDirectories: number
@@ -95,6 +102,13 @@ export type FinishedTransfer = {
 	// buckets: upload/download + scan + unknown). 0 for clean successes; drives the
 	// "Completed with N errors" row label for completedWithErrors.
 	errorCount: number
+	// Copies only: what the job reports besides failures, for the finished row's notes line.
+	copyNotes?: {
+		skipped: number
+		renamed: number
+		savedAsVersion: number
+		propagationFailed: number
+	}
 }
 
 // The most finished transfers retained for the current session. Beyond this the

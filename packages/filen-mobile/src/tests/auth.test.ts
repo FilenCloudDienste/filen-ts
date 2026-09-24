@@ -61,8 +61,14 @@ vi.mock("@/lib/secureStore", () => ({
 
 vi.mock("@/features/transfers/transfers", () => ({
 	default: {
+		endSession: vi.fn(() => {
+			callLog.push("transfers.endSession")
+		}),
 		cancelAll: vi.fn(() => {
 			callLog.push("transfers.cancelAll")
+		}),
+		awaitCopiesSettled: vi.fn(async (timeoutMs: number) => {
+			callLog.push(`transfers.awaitCopiesSettled:${timeoutMs}`)
 		})
 	}
 }))
@@ -601,6 +607,34 @@ describe("auth.logout", () => {
 
 		expect(destroyIdx).toBeGreaterThan(offlineSyncCancelIdx)
 		expect(cacheClearIdx).toBeGreaterThan(destroyIdx)
+	})
+
+	// A copy still settling must not write after the session ends, and must hand back its report (and
+	// release its handles) before the client it runs on is destroyed.
+	it("ends the session before cancelling, then waits up to 6 s for copies before destroying the client", async () => {
+		const internals = authInternals()
+
+		internals.authedClient = {
+			uniffiDestroy: vi.fn(() => {
+				callLog.push("authedClient.uniffiDestroy")
+			})
+		}
+
+		const promise = auth.logout()
+
+		await vi.runAllTimersAsync()
+		await promise
+
+		const endIdx = callLog.indexOf("transfers.endSession")
+		const cancelIdx = callLog.indexOf("transfers.cancelAll")
+		const waitIdx = callLog.indexOf("transfers.awaitCopiesSettled:6000")
+		const offlineSyncCancelIdx = callLog.indexOf("offlineSync.cancel")
+		const destroyIdx = callLog.indexOf("authedClient.uniffiDestroy")
+
+		expect(endIdx).toBeGreaterThan(-1)
+		expect(cancelIdx).toBeGreaterThan(endIdx)
+		expect(waitIdx).toBeGreaterThan(offlineSyncCancelIdx)
+		expect(destroyIdx).toBeGreaterThan(waitIdx)
 	})
 
 	// #8 — a reload rejection must be retried, not swallowed, since the in-memory state is now safe.

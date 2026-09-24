@@ -58,5 +58,9 @@ export const transfers = {
 	/** Generic action to open the system settings app (used in permission-denied alerts) */
 	open_settings: "Open settings",
 	/** Transfers — empty-state subtitle when there are no active or finished transfers */
-	no_transfers_description: "Your uploads and downloads will appear here."
+	no_transfers_description: "Your uploads and downloads will appear here.",
+	/** Copy transfer row name when a copy holds several items (singular). {{count}} is the item count */
+	copy_n_items_one: "{{count}} item",
+	/** Copy transfer row name when a copy holds several items (plural). {{count}} is the item count */
+	copy_n_items_other: "{{count}} items"
 } as const
