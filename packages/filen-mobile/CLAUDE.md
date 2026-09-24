@@ -61,6 +61,7 @@ Note: `socketHandlers.ts` exists for `drive`/`chats`/`notes`/`contacts`
 - **Screen entry**: a feature screen entry is `screen.tsx` (single-screen features) or `screens/<name>.tsx`.
 - **Cross-feature imports** use full `@/features/...` paths. Relative imports are forbidden repo-wide (ESLint).
 - **Silent feature libs**: a feature's `<feature>.ts` singleton(s) expose state and never fire alerts/toasts — UI owns UX.
+- **Project decisions override the generic Expo guide skills**: no Expo Go and no EAS (native builds via the package scripts, e.g. `pnpm run ios` / `pnpm run android`); icons from `@expo/vector-icons`, not SF Symbols via expo-image; no expo-blur; storage via the `src/lib/sqlite.ts` kv + `src/lib/secureStore.ts`; no reanimated `entering`/`exiting` on views inside FlashList rows.
 
 ### i18n / localization workflow
 
@@ -300,7 +301,7 @@ DriveItemDirectoryExtracted = all dir/root types
 ### UI Base (`components/ui/`)
 
 - `View` / `KeyboardAvoidingView` / `KeyboardAwareScrollView` / `KeyboardStickyView` — Uniwind-wrapped
-- `BlurView` / `LiquidGlassView` / `CrossGlassContainerView` — glassmorphism (expo-blur + expo-glass-effect)
+- `LiquidGlassView` / `LiquidGlassContainerView` / `CrossGlassContainerView` — expo-glass-effect; where the real material is unavailable, a box-shadow fake (no blur: expo-blur crashes Android when nested in its BlurTargetView)
 - `Text` — Uniwind + foreground color default (react-native-boost)
 - `Image` — Uniwind-wrapped expo-image
 - `PressableOpacity` / `PressableScale` / `AndroidIconButton` — haptic via Pressto
@@ -393,7 +394,6 @@ Mounted by the root `_layout.tsx`. Pattern: subscribe to a single concern, never
 - **Styling**: Tailwind CSS v4 + Uniwind, global.css with dark theme (OLED black #000000), iOS system color palette
 - **Metro**: crypto/stream/path polyfills, Uniwind CSS + TS type generation
 - **Babel**: babel-preset-expo + react-native-worklets/plugin. In production also `transform-remove-console` with `exclude: ["error", "warn"]` — strips `console.log/info/debug/trace` call sites (keeps prod lean) but KEEPS `console.warn`/`console.error` so they reach the diagnostic-logger tee. Removing the exclude would silently disable warn/error capture in prod. Applies to the WebView bundle too — `domConsoleProxy.ts` overrides via `globalThis.console` (immune to the plugin).
-- **Testing**: Vitest (node env), path alias `@` → `./src`, react-native + expo-\* modules mocked under `src/tests/mocks/`. Submodule trees excluded.
 - **iOS**: deployment target **26.0**, app group `group.io.filen.app`, iCloud, 26 localizations, UIBackgroundModes: audio/fetch/processing, Apple team `7YTW5D2K7P`
 - **Android**: min SDK **31** (Android 12; can lower to 26 with no code change, or 24 with a DocumentsProvider rework — hard dep floor is API 24), target SDK **36**, compile SDK 36, build tools 36.0.0; 23 permissions (incl. MANAGE_DOCUMENTS for the documents provider, ACTION_OPEN_DOCUMENT/\_TREE for incoming intents); Hermes; predictiveBackGestureEnabled: false; allowBackup: false
 - **Stock Expo plugins** (in app.config.ts plugins array): expo-plugin-ios-static-libraries (op-sqlite), expo-build-properties, expo-router (typed routes + React compiler), expo-splash-screen, expo-video, expo-audio, expo-media-library, expo-document-picker, expo-image-picker, expo-local-authentication, expo-sqlite, expo-localization, expo-background-task, expo-secure-store, expo-navigation-bar, expo-asset, expo-sharing (with iOS app-group activation rules), expo-web-browser, expo-image, react-native-edge-to-edge, react-native-document-scanner-plugin, @config-plugins/react-native-blob-util
@@ -410,7 +410,19 @@ Mounted by the root `_layout.tsx`. Pattern: subscribe to a single concern, never
 - **cargo-ndk** 4.x for prebuild (reads `ANDROID_ABI` per filen-rs `d454f4d`; the old 3.5.4 pin no longer propagates the heif-decoder ABI, reversing the earlier bbqsrc/cargo-ndk#181 workaround — see README)
 - **meson + ninja + nasm** for prebuild — filen-rs `heif-decoder` builds its vendored dav1d with meson + ninja on every target, nasm for the x86_64 Android slice (`brew install meson ninja nasm`); the four `build-mobile-*` workflows install them right after the Rust toolchain
 
+## Testing
+
+- Vitest, node environment, `src/tests/*.test.ts` (`.tsx` when the test renders JSX); `pnpm test` runs once. Path alias `@` → `./src`; submodule trees excluded.
+- ESLint ignores `src/tests/**`, so `pnpm run typecheck` is the only static gate for tests. `vitest run` strips types, so a green test can still fail `pnpm run verify`. Style rules still apply (no `!`; `mock.calls[0]?.[0]`).
+- Hook and store-render tests start with `// @vitest-environment happy-dom` and use `renderHook`/`act`/`waitFor` from `@testing-library/react`. Pure logic stays in node.
+- `vitest.config.ts` aliases `react-native` to a minimal mock (`src/tests/mocks/reactNative.ts`: `AppState`, `Platform`, `Share`), plus `@/modules/filen-exif` and `uniffi-bindgen-react-native`. Tests are self-contained: needing more RN surface means an inline `vi.mock("react-native", ...)` (or a `vi.hoisted` mutable `Platform`) in that file, never a bigger shared mock. Other native modules are mocked per file, e.g. `vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))`.
+- Lib-singleton tests follow `chats.test.ts`: `vi.hoisted` mocks, `vi.mock("@/lib/auth")` for the SDK clients, `vi.mock("@filen/sdk-rs", ...)` enum stubs; tests stub the SDK rather than call it.
+- `@/components/ui/view` pulls in native deps esbuild can't transform; `vi.mock` it when a tested module imports it.
+- The `vitest-svg-require-stub` plugin in `vitest.config.ts` rewrites `require("….svg")` to `0` so icon components load.
+
 ## SDK Integration Patterns
+
+`@filen/sdk-rs` ships two surfaces: the RN app runs the uniffi bindings (`react-native` entry → `node_modules/@filen/sdk-rs/src/generated/filen_sdk_rs.ts`); the root `sdk-rs.d.ts` is the wasm surface filen-web uses. Verify API claims against the generated `.ts`, never the wasm `.d.ts`.
 
 ```typescript
 // Get authed SDK client

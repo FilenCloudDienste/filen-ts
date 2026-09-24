@@ -24,6 +24,8 @@ Install once at the repo root (`pnpm install`); these run from this directory.
 | `pnpm run typecheck` | Type-check without emitting                              |
 | `pnpm run format`    | Format the source with Prettier                          |
 
+Unit tests are Vitest in `src/**/*.test.{ts,tsx}`, node by default (DOM tests opt in per file with `// @vitest-environment jsdom`). E2E is Playwright against a free-tier account (`FILEN_WEB_E2E_TEST_EMAIL` / `FILEN_WEB_E2E_TEST_PASSWORD` from `.env` or the environment), so premium-gated flows can only be checked for a graceful upgrade error; without credentials only the SDK-free specs run.
+
 ## Deployment
 
 `pnpm run build` emits a static `dist/` plus a service worker. Any static host can serve it, but the response headers below are part of the contract — the app does not boot without them.
