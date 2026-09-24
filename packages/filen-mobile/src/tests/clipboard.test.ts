@@ -194,6 +194,30 @@ describe("pasteClipboard", () => {
 		expect(useDriveClipboardStore.getState().entry).toEqual({ mode: "copy", items })
 	})
 
+	it("copy: copies each item as it is now, after a rename or content save since the copy", async () => {
+		const saved = { type: "file", data: { uuid: "f2", parent: "a", decryptedMeta: { name: "renamed" } } } as unknown as DriveItem
+		const renamedDir = { type: "directory", data: { uuid: "a", parent: "root", decryptedMeta: { name: "renamed-a" } } } as unknown as DriveItem
+
+		useDriveClipboardStore.getState().set({ mode: "copy", items: [file("f1", "a"), dir("a", "root")] })
+		events.emit("driveItemUpdated", { previousUuid: "f1", item: saved })
+		events.emit("driveItemUpdated", { previousUuid: "a", item: renamedDir })
+
+		// The replaced entry is guarded afresh: the directory still can't land in itself or below.
+		expect(canPasteInto({ entry: useDriveClipboardStore.getState().entry, targetUuid: "c", allowCut: false })).toBe(false)
+
+		await pasteClipboard({ targetDir: normalDir("c"), allowCut: false, t })
+
+		expect(copyRunner.start).not.toHaveBeenCalled()
+
+		await pasteClipboard({ targetDir: normalDir("root", "Root"), allowCut: false, t })
+
+		expect(copyRunner.start).toHaveBeenCalledExactlyOnceWith({
+			items: [saved, renamedDir],
+			destination: { uuid: null, name: "drive" },
+			destinationDir: normalDir("root", "Root")
+		})
+	})
+
 	it("cut: moves each item behind the loader and clears the clipboard", async () => {
 		const items = [file("f1", "a"), dir("d1", "a")]
 

@@ -1,6 +1,5 @@
-// The drive clipboard against later changes to its items: a cut follows each item (its paste moves by uuid
-// and re-encrypts the passed row for the destination's shares and links), any entry drops what was trashed
-// or deleted, and a copy otherwise keeps what it copied. Local changes arrive as driveItemUpdated /
+// The drive clipboard against later changes to its items: a copy or a cut follows each item (a paste acts on
+// the item as it is now), and drops what was trashed or deleted. Local changes arrive as driveItemUpdated /
 // driveItemRemoved, remote ones through the real drive socket handler.
 
 import { vi, describe, it, expect, beforeEach } from "vitest"
@@ -159,14 +158,55 @@ describe("local changes (driveItemUpdated / driveItemRemoved)", () => {
 		expect(clipboard().cutUuids).toEqual(new Set(["u2"]))
 	})
 
-	it("a copy keeps the row it copied", () => {
-		const copied = listedFile("u1")
-		const entry = { mode: "copy" as const, items: [copied] }
+	it("a copy follows a rename, and still dims no row", () => {
+		const renamed = fileRow(rawFile("u1", "renamed.txt"))
 
-		clipboard().set(entry)
-		events.emit("driveItemUpdated", { previousUuid: "u1", item: fileRow(rawFile("u1", "renamed.txt")) })
+		clipboard().set({ mode: "copy", items: [listedFile("u1"), listedFile("u9")] })
 
-		expect(clipboard().entry).toBe(entry)
+		const { cutUuids } = clipboard()
+
+		events.emit("driveItemUpdated", { previousUuid: "u1", item: renamed })
+
+		expect(clipboard().entry?.items[0]).toBe(renamed)
+		expect(uuids()).toEqual(["u1", "u9"])
+		expect(clipboard().cutUuids).toBe(cutUuids)
+	})
+
+	it("a copy follows a move", () => {
+		const moved = dirRow(rawDir("d1", "default", "elsewhere"))
+
+		clipboard().set({ mode: "copy", items: [listedDir("d1")] })
+		events.emit("driveItemUpdated", { previousUuid: "d1", item: moved })
+
+		expect(clipboard().entry).toEqual({ mode: "copy", items: [moved] })
+	})
+
+	it("a copy follows a content save to the new uuid, and its socket echo changes nothing", async () => {
+		const saved = fileRow(rawFile("u2", "u1.txt", "p", "s-u1"))
+
+		clipboard().set({ mode: "copy", items: [listedFile("u1")] })
+		events.emit("driveItemUpdated", { previousUuid: "u1", item: saved })
+
+		expect(clipboard().entry).toEqual({ mode: "copy", items: [saved] })
+
+		const state = clipboard()
+
+		await handleDriveEvent({ event: event("FileNew", { file: rawFile("u2", "u1.txt", "p", "s-u1") }) })
+
+		expect(clipboard()).toBe(state)
+	})
+
+	it("leaves a copy's state identical for updates to items it doesn't hold", async () => {
+		clipboard().set({ mode: "copy", items: [listedFile("a"), listedDir("d")] })
+
+		const state = clipboard()
+
+		events.emit("driveItemUpdated", { previousUuid: "other", item: listedFile("other") })
+		events.emit("driveItemRemoved", { uuid: "gone" })
+		await handleDriveEvent({ event: event("FileNew", { file: rawFile("n2", "n.txt", "p", "s-n1") }) })
+		await handleDriveEvent({ event: event("FileMove", { file: rawFile("x", "x.txt", "elsewhere") }) })
+
+		expect(clipboard()).toBe(state)
 	})
 
 	it("never swaps an item for a row of another type", () => {
@@ -237,23 +277,15 @@ describe("a cut being pasted", () => {
 })
 
 describe("remote changes (socket events)", () => {
-	it("a cut follows a rename, and a copy doesn't", async () => {
-		clipboard().set({ mode: "cut", items: [listedFile("a")] })
+	it.each(["cut", "copy"] as const)("a %s follows a rename", async mode => {
+		clipboard().set({ mode, items: [listedFile("a")] })
 		await handleDriveEvent({ event: event("FileMetadataChanged", { uuid: "a", metadata: { name: "b.txt" } }) })
 
 		expect(clipboard().entry?.items[0]?.data.decryptedMeta?.name).toBe("b.txt")
-
-		const copied = listedFile("c")
-		const entry = { mode: "copy" as const, items: [copied] }
-
-		clipboard().set(entry)
-		await handleDriveEvent({ event: event("FileMetadataChanged", { uuid: "c", metadata: { name: "d.txt" } }) })
-
-		expect(clipboard().entry).toBe(entry)
 	})
 
-	it("a cut follows a move and a directory's rename and colour", async () => {
-		clipboard().set({ mode: "cut", items: [listedFile("f"), listedDir("d")] })
+	it.each(["cut", "copy"] as const)("a %s follows a move and a directory's rename and colour", async mode => {
+		clipboard().set({ mode, items: [listedFile("f"), listedDir("d")] })
 
 		await handleDriveEvent({ event: event("FileMove", { file: rawFile("f", "f.txt", "elsewhere") }) })
 		await handleDriveEvent({ event: event("FolderMetadataChanged", { uuid: "d", meta: { name: "Renamed" } }) })
@@ -266,10 +298,12 @@ describe("remote changes (socket events)", () => {
 	})
 
 	it.each([
-		["FileArchived first", ["FileArchived", "FileNew"]],
-		["FileNew first", ["FileNew", "FileArchived"]]
-	])("a cut follows a content edit made elsewhere (%s)", async (_order, tags) => {
-		clipboard().set({ mode: "cut", items: [listedFile("u1")] })
+		["cut", "FileArchived first", ["FileArchived", "FileNew"]],
+		["cut", "FileNew first", ["FileNew", "FileArchived"]],
+		["copy", "FileArchived first", ["FileArchived", "FileNew"]],
+		["copy", "FileNew first", ["FileNew", "FileArchived"]]
+	] as const)("a %s follows a content edit made elsewhere (%s)", async (mode, _order, tags) => {
+		clipboard().set({ mode, items: [listedFile("u1")] })
 
 		for (const tag of tags) {
 			await handleDriveEvent({
@@ -281,21 +315,15 @@ describe("remote changes (socket events)", () => {
 		}
 
 		expect(uuids()).toEqual(["u2"])
-		expect(clipboard().cutUuids).toEqual(new Set(["u2"]))
+		expect(clipboard().cutUuids).toEqual(mode === "cut" ? new Set(["u2"]) : new Set())
 	})
 
-	it("a cut follows an edit on a versioning-disabled account; a copy keeps its item", async () => {
-		clipboard().set({ mode: "cut", items: [listedFile("u1")] })
+	it.each(["cut", "copy"] as const)("a %s follows an edit on a versioning-disabled account", async mode => {
+		clipboard().set({ mode, items: [listedFile("u1")] })
 		await handleDriveEvent({ event: event("FileTrash", { uuid: "u1", stableUuid: "fresh", newUuid: "u2" }) })
 		await handleDriveEvent({ event: event("FileNew", { file: rawFile("u2", "u1.txt", "p", "s-u1") }) })
 
 		expect(uuids()).toEqual(["u2"])
-
-		clipboard().set({ mode: "copy", items: [listedFile("v1")] })
-		await handleDriveEvent({ event: event("FileTrash", { uuid: "v1", stableUuid: "fresh", newUuid: "v2" }) })
-		await handleDriveEvent({ event: event("FileNew", { file: rawFile("v2", "v1.txt", "p", "s-v1") }) })
-
-		expect(uuids()).toEqual(["v1"])
 	})
 
 	it("a cut follows a version restore", async () => {
@@ -305,7 +333,7 @@ describe("remote changes (socket events)", () => {
 		expect(uuids()).toEqual(["u0"])
 	})
 
-	it("a trash drops the item; a file whose lineage ended leaves a cut but not a copy", async () => {
+	it("a trash drops the item, and a file whose lineage ended leaves a copy or a cut", async () => {
 		clipboard().set({ mode: "copy", items: [listedFile("a"), listedDir("d"), listedFile("b")] })
 		await handleDriveEvent({ event: event("FileTrash", { uuid: "a", stableUuid: "s-a" }) })
 		await handleDriveEvent({ event: event("FolderTrash", { uuid: "d", parent: "p" }) })
@@ -314,7 +342,7 @@ describe("remote changes (socket events)", () => {
 
 		await handleDriveEvent({ event: event("FileArchived", { uuid: "b", stableUuid: "s-b" }) })
 
-		expect(uuids()).toEqual(["b"])
+		expect(clipboard().entry).toBeNull()
 
 		clipboard().set({ mode: "cut", items: [listedFile("c")] })
 		await handleDriveEvent({ event: event("FileArchived", { uuid: "c", stableUuid: "s-c" }) })

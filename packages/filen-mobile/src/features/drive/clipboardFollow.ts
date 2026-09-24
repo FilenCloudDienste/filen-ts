@@ -2,11 +2,12 @@ import type { DriveItem } from "@/types"
 import events from "@/lib/events"
 import useDriveClipboardStore, { type DriveClipboardEntry } from "@/features/drive/store/useDriveClipboard.store"
 
-// The clipboard holds item rows from Copy/Cut time. A cut follows its items as they change: its paste is a
-// move, which addresses the item by uuid and re-encrypts the passed row's metadata for the destination's
-// shares and links, so a stale row would move an old version or publish an old name. Any entry drops an
-// item that was trashed or deleted. What a copy pastes after a rename or content edit stays as copied.
-// Matched by uuid or, for a file's new version, by its stableUuid; never by name.
+// The clipboard holds item rows from Copy/Cut time and follows its items as they change, so a paste acts on
+// each item as it is now: a copy copies the current name and newest version, and a cut's move (which
+// addresses the item by uuid and re-encrypts the passed row's metadata for the destination's shares and
+// links) neither moves an old version nor publishes an old name. An item that was trashed or deleted, or
+// whose lineage ended, leaves the clipboard. Matched by uuid or, for a file's new version, by its
+// stableUuid; never by name.
 
 type EntryIndex = {
 	uuids: ReadonlySet<string>
@@ -129,7 +130,8 @@ export function restoreFailedCut(failedIndexes: readonly number[]): void {
 }
 
 // A newer row of an item: a local rename, move, colour change, favourite, version restore or content save, or
-// the socket echo of one. A cut follows it, to a row of the same type only (a shared variant can't be moved).
+// the socket echo of one. The clipboard follows it, to a row of the same type only (a shared variant can't be
+// moved).
 export function followDriveItem(previousUuid: string, item: DriveItem): void {
 	if (movingCut) {
 		const index = movingCut.byUuid.get(previousUuid)
@@ -141,15 +143,15 @@ export function followDriveItem(previousUuid: string, item: DriveItem): void {
 
 	const { entry } = useDriveClipboardStore.getState()
 
-	if (entry === null || entry.mode !== "cut" || !indexOf(entry).uuids.has(previousUuid)) {
+	if (entry === null || !indexOf(entry).uuids.has(previousUuid)) {
 		return
 	}
 
 	useDriveClipboardStore.getState().mapItems(existing => (existing.data.uuid === previousUuid && existing.type === item.type ? item : existing))
 }
 
-// A file's new version (a content edit on any device arrives as a new file of the same lineage): a cut
-// follows it.
+// A file's new version (a content edit on any device arrives as a new file of the same lineage): the
+// clipboard follows it.
 export function followFileSuccessor(item: DriveItem): void {
 	const stableUuid = stableUuidOf(item)
 
@@ -167,7 +169,7 @@ export function followFileSuccessor(item: DriveItem): void {
 
 	const { entry } = useDriveClipboardStore.getState()
 
-	if (entry === null || entry.mode !== "cut" || !indexOf(entry).stableUuids.has(stableUuid)) {
+	if (entry === null || !indexOf(entry).stableUuids.has(stableUuid)) {
 		return
 	}
 
@@ -176,7 +178,9 @@ export function followFileSuccessor(item: DriveItem): void {
 		.mapItems(existing => (stableUuidOf(existing) === stableUuid && existing.data.uuid !== item.data.uuid ? item : existing))
 }
 
-function drop(uuid: string, cutOnly: boolean): void {
+// A trashed or permanently deleted item, or a file whose lineage ended (another file moved in over it),
+// can't be pasted any more.
+export function dropDriveItem(uuid: string): void {
 	if (movingCut) {
 		const index = movingCut.byUuid.get(uuid)
 
@@ -187,21 +191,11 @@ function drop(uuid: string, cutOnly: boolean): void {
 
 	const { entry } = useDriveClipboardStore.getState()
 
-	if (entry === null || (cutOnly && entry.mode !== "cut") || !indexOf(entry).uuids.has(uuid)) {
+	if (entry === null || !indexOf(entry).uuids.has(uuid)) {
 		return
 	}
 
 	useDriveClipboardStore.getState().mapItems(existing => (existing.data.uuid === uuid ? null : existing))
-}
-
-// A trashed or permanently deleted item can't be pasted any more, copied or cut.
-export function dropDriveItem(uuid: string): void {
-	drop(uuid, false)
-}
-
-// A file whose lineage ended (another file moved in over it) can't be moved any more; a copy keeps it.
-export function dropCutItem(uuid: string): void {
-	drop(uuid, true)
 }
 
 events.subscribe("driveItemUpdated", ({ previousUuid, item }) => {

@@ -15,7 +15,7 @@ import cache from "@/lib/cache"
 import useDriveStore from "@/features/drive/store/useDrive.store"
 import { markDirectorySizesStale } from "@/features/drive/queries/useDirectorySize.query"
 import socketCreateBatcher from "@/features/drive/socketCreateBatcher"
-import { dropCutItem, dropDriveItem, followDriveItem, followFileSuccessor } from "@/features/drive/clipboardFollow"
+import { dropDriveItem, followDriveItem, followFileSuccessor } from "@/features/drive/clipboardFollow"
 import logger from "@/lib/logger"
 
 export type DriveSocketEvent = Extract<SocketEvent, { tag: typeof SocketEvent_Tags.Drive }>
@@ -164,10 +164,10 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 			} else {
 				const [archived] = eventInner.inner.inner
 
-				// Without newUuid another file replaced this one and its lineage ended; with it, a cut follows
-				// the paired FileNew instead.
+				// Without newUuid another file replaced this one and its lineage ended; with it, the clipboard
+				// follows the paired FileNew instead.
 				if (!archived.newUuid) {
-					dropCutItem(archived.uuid)
+					dropDriveItem(archived.uuid)
 				}
 			}
 
@@ -377,7 +377,7 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 			// the count / select-all toggle / bulk ops never target a ghost.
 			useDriveStore.getState().removeFromSelection([inner.uuid])
 
-			// With newUuid it was an edit (see below), which a cut follows through the paired FileNew.
+			// With newUuid it was an edit (see below), which the clipboard follows through the paired FileNew.
 			if (!inner.newUuid) {
 				dropDriveItem(inner.uuid)
 			}
