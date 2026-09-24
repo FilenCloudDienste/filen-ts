@@ -31,12 +31,15 @@ vi.mock("react-native-notify-kit", () => ({
 	default: mockNotifee,
 	AndroidImportance: { LOW: 2, HIGH: 4 },
 	AndroidForegroundServiceType: { FOREGROUND_SERVICE_TYPE_DATA_SYNC: 1 },
-	AuthorizationStatus: { NOT_DETERMINED: 0, DENIED: 1, AUTHORIZED: 2, PROVISIONAL: 3 }
+	AuthorizationStatus: { NOT_DETERMINED: 0, DENIED: 1, AUTHORIZED: 2, PROVISIONAL: 3 },
+	EventType: { DISMISSED: 0, PRESS: 1, DELIVERED: 3, FG_ALREADY_EXIST: 8 }
 }))
+
+const mockT = vi.hoisted(() => vi.fn((key: string, _options?: Record<string, unknown>) => key))
 
 vi.mock("@/lib/i18n", () => ({
 	default: {
-		t: (key: string) => key
+		t: mockT
 	}
 }))
 
@@ -86,7 +89,7 @@ describe("foregroundService", () => {
 
 		const { default: fgs } = await import("@/features/transfers/foregroundService")
 
-		await fgs.start({ count: 1, progress: 0.25, speed: 1024 })
+		await fgs.start({ count: 1, progress: 0.25, speed: 1024, copyingItems: null })
 
 		expect(mockNotifee.requestPermission).not.toHaveBeenCalled()
 		expect(mockNotifee.displayNotification).toHaveBeenCalledWith(
@@ -105,7 +108,7 @@ describe("foregroundService", () => {
 
 		expect(fgs.isRunning()).toBe(false)
 
-		await fgs.start({ count: 1, progress: 0, speed: 0 })
+		await fgs.start({ count: 1, progress: 0, speed: 0, copyingItems: null })
 
 		expect(fgs.isRunning()).toBe(true)
 
@@ -119,7 +122,7 @@ describe("foregroundService", () => {
 
 		const { default: fgs } = await import("@/features/transfers/foregroundService")
 
-		await expect(fgs.start({ count: 1, progress: 0, speed: 0 })).rejects.toThrow()
+		await expect(fgs.start({ count: 1, progress: 0, speed: 0, copyingItems: null })).rejects.toThrow()
 
 		expect(fgs.isRunning()).toBe(false)
 	})
@@ -131,7 +134,7 @@ describe("foregroundService", () => {
 
 		const { default: fgs } = await import("@/features/transfers/foregroundService")
 
-		await fgs.start({ count: 1, progress: 0.25, speed: 1024 })
+		await fgs.start({ count: 1, progress: 0.25, speed: 1024, copyingItems: null })
 
 		expect(mockNotifee.displayNotification).not.toHaveBeenCalled()
 		expect(fgs.isRunning()).toBe(false)
@@ -143,7 +146,7 @@ describe("foregroundService", () => {
 
 		const { default: fgs } = await import("@/features/transfers/foregroundService")
 
-		await fgs.start({ count: 1, progress: 0, speed: 0 })
+		await fgs.start({ count: 1, progress: 0, speed: 0, copyingItems: null })
 
 		expect(mockNotifee.requestPermission).toHaveBeenCalledTimes(1)
 		expect(mockNotifee.displayNotification).toHaveBeenCalledWith(
@@ -162,7 +165,7 @@ describe("foregroundService", () => {
 
 		const { default: fgs } = await import("@/features/transfers/foregroundService")
 
-		await fgs.start({ count: 1, progress: 0.5, speed: 1024 })
+		await fgs.start({ count: 1, progress: 0.5, speed: 1024, copyingItems: null })
 
 		expect(mockSecureStoreGet).toHaveBeenCalledWith("transfersForegroundServiceEnabled")
 		expect(mockNotifee.registerForegroundService).not.toHaveBeenCalled()
@@ -176,7 +179,7 @@ describe("foregroundService", () => {
 
 		const { default: fgs } = await import("@/features/transfers/foregroundService")
 
-		await fgs.start({ count: 1, progress: 0.25, speed: 1024 })
+		await fgs.start({ count: 1, progress: 0.25, speed: 1024, copyingItems: null })
 
 		expect(mockNotifee.displayNotification).toHaveBeenCalledTimes(1)
 	})
@@ -187,7 +190,7 @@ describe("foregroundService", () => {
 
 		const { default: fgs } = await import("@/features/transfers/foregroundService")
 
-		await fgs.start({ count: 1, progress: 0.25, speed: 1024 })
+		await fgs.start({ count: 1, progress: 0.25, speed: 1024, copyingItems: null })
 
 		expect(mockNotifee.displayNotification).toHaveBeenCalledTimes(1)
 	})
@@ -197,8 +200,8 @@ describe("foregroundService", () => {
 
 		const { default: fgs } = await import("@/features/transfers/foregroundService")
 
-		await fgs.start({ count: 1, progress: 0, speed: 0 })
-		await fgs.start({ count: 2, progress: 0.1, speed: 1024 })
+		await fgs.start({ count: 1, progress: 0, speed: 0, copyingItems: null })
+		await fgs.start({ count: 2, progress: 0.1, speed: 1024, copyingItems: null })
 
 		expect(mockNotifee.requestPermission).not.toHaveBeenCalled()
 		expect(mockNotifee.displayNotification).not.toHaveBeenCalled()
@@ -210,8 +213,8 @@ describe("foregroundService", () => {
 
 		const { default: fgs } = await import("@/features/transfers/foregroundService")
 
-		await fgs.start({ count: 1, progress: 0, speed: 0 })
-		await fgs.start({ count: 1, progress: 0, speed: 0 })
+		await fgs.start({ count: 1, progress: 0, speed: 0, copyingItems: null })
+		await fgs.start({ count: 1, progress: 0, speed: 0, copyingItems: null })
 
 		expect(mockNotifee.requestPermission).toHaveBeenCalledTimes(1)
 		expect(mockNotifee.displayNotification).not.toHaveBeenCalled()
@@ -230,7 +233,7 @@ describe("foregroundService", () => {
 		const { default: fgs } = await import("@/features/transfers/foregroundService")
 
 		const controller = new AbortController()
-		const startPromise = fgs.start({ count: 1, progress: 0, speed: 0 }, controller.signal)
+		const startPromise = fgs.start({ count: 1, progress: 0, speed: 0, copyingItems: null }, controller.signal)
 
 		controller.abort()
 		resolveRequest?.({ authorizationStatus: 2 })
@@ -248,7 +251,7 @@ describe("foregroundService", () => {
 		const controller = new AbortController()
 		controller.abort()
 
-		await fgs.start({ count: 1, progress: 0.5, speed: 512 }, controller.signal)
+		await fgs.start({ count: 1, progress: 0.5, speed: 512, copyingItems: null }, controller.signal)
 
 		expect(mockNotifee.registerForegroundService).not.toHaveBeenCalled()
 		expect(mockNotifee.displayNotification).not.toHaveBeenCalled()
@@ -257,7 +260,7 @@ describe("foregroundService", () => {
 	it("update before successful start is a no-op", async () => {
 		const { default: fgs } = await import("@/features/transfers/foregroundService")
 
-		await fgs.update({ count: 1, progress: 0.5, speed: 0 })
+		await fgs.update({ count: 1, progress: 0.5, speed: 0, copyingItems: null })
 
 		expect(mockNotifee.displayNotification).not.toHaveBeenCalled()
 	})
@@ -265,12 +268,12 @@ describe("foregroundService", () => {
 	it("update after successful start calls displayNotification with the new progress payload", async () => {
 		const { default: fgs } = await import("@/features/transfers/foregroundService")
 
-		await fgs.start({ count: 1, progress: 0.25, speed: 512 })
+		await fgs.start({ count: 1, progress: 0.25, speed: 512, copyingItems: null })
 
 		vi.clearAllMocks()
 		mockBpsToReadable.mockImplementation((speed: number) => `${speed}B/s`)
 
-		await fgs.update({ count: 3, progress: 0.75, speed: 2048 })
+		await fgs.update({ count: 3, progress: 0.75, speed: 2048, copyingItems: null })
 
 		expect(mockNotifee.displayNotification).toHaveBeenCalledTimes(1)
 		expect(mockNotifee.displayNotification).toHaveBeenCalledWith(
@@ -292,7 +295,7 @@ describe("foregroundService", () => {
 	it("stop after successful start calls stopForegroundService once", async () => {
 		const { default: fgs } = await import("@/features/transfers/foregroundService")
 
-		await fgs.start({ count: 1, progress: 0, speed: 0 })
+		await fgs.start({ count: 1, progress: 0, speed: 0, copyingItems: null })
 		await fgs.stop()
 		await fgs.stop()
 
@@ -304,7 +307,7 @@ describe("foregroundService", () => {
 
 		const { default: fgs } = await import("@/features/transfers/foregroundService")
 
-		await fgs.start({ count: 1, progress: 0, speed: 0 })
+		await fgs.start({ count: 1, progress: 0, speed: 0, copyingItems: null })
 
 		expect(fgs.isRunning()).toBe(true)
 
@@ -318,7 +321,7 @@ describe("foregroundService", () => {
 	it("TC-11: update clears running when displayNotification rejects, so the host can re-arm start()", async () => {
 		const { default: fgs } = await import("@/features/transfers/foregroundService")
 
-		await fgs.start({ count: 1, progress: 0.25, speed: 512 })
+		await fgs.start({ count: 1, progress: 0.25, speed: 512, copyingItems: null })
 
 		expect(fgs.isRunning()).toBe(true)
 
@@ -326,7 +329,7 @@ describe("foregroundService", () => {
 		// app is backgrounded. update() must self-heal by clearing `running` rather than throwing.
 		mockNotifee.displayNotification.mockRejectedValueOnce(new Error("service not live"))
 
-		await expect(fgs.update({ count: 1, progress: 0.5, speed: 1024 })).resolves.toBeUndefined()
+		await expect(fgs.update({ count: 1, progress: 0.5, speed: 1024, copyingItems: null })).resolves.toBeUndefined()
 
 		expect(fgs.isRunning()).toBe(false)
 	})
@@ -334,7 +337,7 @@ describe("foregroundService", () => {
 	it("TC-12: the OS timing the foreground service out clears running, so no start is issued from the background", async () => {
 		const { default: fgs } = await import("@/features/transfers/foregroundService")
 
-		await fgs.start({ count: 1, progress: 0.25, speed: 512 })
+		await fgs.start({ count: 1, progress: 0.25, speed: 512, copyingItems: null })
 
 		expect(fgs.isRunning()).toBe(true)
 
@@ -353,7 +356,7 @@ describe("foregroundService", () => {
 		// the timeout, since each further update would ask notifee to start a fresh service.
 		mockNotifee.displayNotification.mockClear()
 
-		await fgs.update({ count: 1, progress: 0.5, speed: 1024 })
+		await fgs.update({ count: 1, progress: 0.5, speed: 1024, copyingItems: null })
 
 		expect(mockNotifee.displayNotification).not.toHaveBeenCalled()
 	})
@@ -361,7 +364,7 @@ describe("foregroundService", () => {
 	it("TC-12: the timeout is also observed while backgrounded, where it actually fires", async () => {
 		const { default: fgs } = await import("@/features/transfers/foregroundService")
 
-		await fgs.start({ count: 1, progress: 0.25, speed: 512 })
+		await fgs.start({ count: 1, progress: 0.25, speed: 512, copyingItems: null })
 
 		const onBackgroundEvent = mockNotifee.onBackgroundEvent.mock.calls[0]?.[0] as (event: { type: number }) => Promise<void>
 
@@ -377,7 +380,7 @@ describe("foregroundService", () => {
 	it("TC-12: unrelated notifee events leave the mirror alone", async () => {
 		const { default: fgs } = await import("@/features/transfers/foregroundService")
 
-		await fgs.start({ count: 1, progress: 0.25, speed: 512 })
+		await fgs.start({ count: 1, progress: 0.25, speed: 512, copyingItems: null })
 
 		const onForegroundEvent = mockNotifee.onForegroundEvent.mock.calls[0]?.[0] as (event: { type: number }) => void
 
@@ -387,6 +390,49 @@ describe("foregroundService", () => {
 		}
 
 		expect(fgs.isRunning()).toBe(true)
+	})
+
+	it("says what is being copied when copies are all that runs", async () => {
+		const { default: fgs } = await import("@/features/transfers/foregroundService")
+
+		await fgs.start({ count: 2, progress: 0.43, speed: 2048, copyingItems: 12 })
+
+		expect(mockT).toHaveBeenCalledWith("copying_progress", { count: 12, percent: "43", speed: "2048B/s" })
+		expect(mockNotifee.displayNotification).toHaveBeenLastCalledWith(expect.objectContaining({ body: "copying_progress" }))
+
+		await fgs.update({ count: 3, progress: 0.5, speed: 2048, copyingItems: null })
+
+		expect(mockT).toHaveBeenLastCalledWith("transfers_progress", { count: 3, percent: "50", speed: "2048B/s" })
+		expect(mockNotifee.displayNotification).toHaveBeenLastCalledWith(expect.objectContaining({ body: "transfers_progress" }))
+	})
+
+	it("records a tap on its own notification as a request to open Transfers", async () => {
+		const { default: fgs } = await import("@/features/transfers/foregroundService")
+
+		await fgs.init()
+
+		const listener = vi.fn()
+		const unsubscribe = fgs.onOpenTransfersRequest(listener)
+		const onForegroundEvent = mockNotifee.onForegroundEvent.mock.calls[0]?.[0] as (event: unknown) => void
+		const onBackgroundEvent = mockNotifee.onBackgroundEvent.mock.calls[0]?.[0] as (event: unknown) => Promise<void>
+
+		onForegroundEvent({ type: 1, detail: { notification: { id: "other" } } })
+
+		expect(listener).not.toHaveBeenCalled()
+		expect(fgs.consumeOpenTransfersRequest()).toBe(false)
+
+		await onBackgroundEvent({ type: 1, detail: { notification: { id: "filen-transfers-fgs" } } })
+
+		expect(listener).toHaveBeenCalledTimes(1)
+		expect(fgs.consumeOpenTransfersRequest()).toBe(true)
+		expect(fgs.consumeOpenTransfersRequest()).toBe(false)
+
+		unsubscribe()
+
+		onForegroundEvent({ type: 1, detail: { notification: { id: "filen-transfers-fgs" } } })
+
+		expect(listener).toHaveBeenCalledTimes(1)
+		expect(fgs.consumeOpenTransfersRequest()).toBe(true)
 	})
 
 	it("getStatus reports the correct status", async () => {
@@ -416,7 +462,7 @@ describe("foregroundService", () => {
 
 		const { default: fgs } = await import("@/features/transfers/foregroundService")
 
-		await fgs.start({ count: 1, progress: 0, speed: 0 })
+		await fgs.start({ count: 1, progress: 0, speed: 0, copyingItems: null })
 
 		expect(mockNotifee.requestPermission).toHaveBeenCalledTimes(1)
 		expect(mockNotifee.displayNotification).toHaveBeenCalledWith(
@@ -441,7 +487,7 @@ describe("foregroundService", () => {
 	it("display sets progress.current to clamped percent and indeterminate false when ratio > 0", async () => {
 		const { default: fgs } = await import("@/features/transfers/foregroundService")
 
-		await fgs.start({ count: 2, progress: 0.6, speed: 1024 })
+		await fgs.start({ count: 2, progress: 0.6, speed: 1024, copyingItems: null })
 
 		expect(mockNotifee.displayNotification).toHaveBeenCalledTimes(1)
 
@@ -457,7 +503,7 @@ describe("foregroundService", () => {
 	it("display sets indeterminate true when count > 0 and ratio is 0", async () => {
 		const { default: fgs } = await import("@/features/transfers/foregroundService")
 
-		await fgs.start({ count: 3, progress: 0, speed: 0 })
+		await fgs.start({ count: 3, progress: 0, speed: 0, copyingItems: null })
 
 		expect(mockNotifee.displayNotification).toHaveBeenCalledTimes(1)
 
@@ -472,7 +518,7 @@ describe("foregroundService", () => {
 	it("display uses em-dash speedText and does not call bpsToReadable when speed is zero", async () => {
 		const { default: fgs } = await import("@/features/transfers/foregroundService")
 
-		await fgs.start({ count: 1, progress: 0.5, speed: 0 })
+		await fgs.start({ count: 1, progress: 0.5, speed: 0, copyingItems: null })
 
 		expect(mockBpsToReadable).not.toHaveBeenCalled()
 		expect(mockNotifee.displayNotification).toHaveBeenCalledTimes(1)
@@ -483,7 +529,7 @@ describe("foregroundService", () => {
 
 		const { default: fgs } = await import("@/features/transfers/foregroundService")
 
-		await fgs.start({ count: 1, progress: 0.5, speed: 512 })
+		await fgs.start({ count: 1, progress: 0.5, speed: 512, copyingItems: null })
 
 		expect(mockBpsToReadable).toHaveBeenCalledWith(512)
 	})
@@ -512,7 +558,7 @@ describe("foregroundService", () => {
 		const { default: fgs } = await import("@/features/transfers/foregroundService")
 
 		await fgs.init()
-		await fgs.start({ count: 1, progress: 0, speed: 0 })
+		await fgs.start({ count: 1, progress: 0, speed: 0, copyingItems: null })
 		await fgs.stop()
 		await fgs.openSettings()
 

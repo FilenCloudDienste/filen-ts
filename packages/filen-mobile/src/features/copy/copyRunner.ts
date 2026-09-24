@@ -125,6 +125,10 @@ function finishedOutcome(job: CopyJob): Pick<FinishedTransfer, "outcome" | "erro
 	}
 }
 
+// Jobs whose stop dialog is open: the job and what it made are kept for a "move to trash" answer even
+// if it settles meanwhile.
+const choosingCancel = new Set<string>()
+
 // Runs copies as one SDK job and one transfers row each, however many items a job holds. The SDK owns
 // the scan, concurrency, retries and share/link propagation; this feeds its progress into the stores
 // and hands the top-level items it creates to the socket create batcher (nested ones arrive as socket
@@ -223,6 +227,52 @@ class CopyRunner {
 
 	public pause(jobId: string): void {
 		this.controls.get(jobId)?.pause.pause()
+	}
+
+	// The stop dialog opens: the copy waits so the count shown stays true and nothing new is made while
+	// the user decides. Returns whether this paused it, so "continue" resumes only then.
+	public holdForCancelChoice(jobId: string): boolean {
+		choosingCancel.add(jobId)
+
+		const controls = this.controls.get(jobId)
+
+		if (!controls || controls.pause.isPaused()) {
+			return false
+		}
+
+		controls.pause.pause()
+
+		return true
+	}
+
+	public async resolveCancelChoice(jobId: string, choice: "keep" | "trash" | "continue", resumeOnContinue: boolean): Promise<void> {
+		choosingCancel.delete(jobId)
+
+		if (this.controls.has(jobId)) {
+			if (choice === "continue") {
+				if (resumeOnContinue) {
+					this.resume(jobId)
+				}
+
+				return
+			}
+
+			this.requestCancel(jobId, choice)
+			// A paused job only takes the stop once it runs again.
+			this.resume(jobId)
+
+			return
+		}
+
+		// Settled while the dialog was open. A "trash" answer still removes what it made, as it would have
+		// had the job been running.
+		if (choice === "trash") {
+			await this.trashCreated(jobId)
+		}
+
+		useCopyJobsStore.getState().update(jobId, settled => (settled.created.length === 0 ? settled : { ...settled, created: [] }))
+
+		pruneSettledCopyJobs()
 	}
 
 	public resume(jobId: string): void {
@@ -479,6 +529,26 @@ class CopyRunner {
 		}
 	}
 
+	// Only top-level items; their subtrees go with them. Moved to the trash, never deleted.
+	private async trashCreated(id: string): Promise<void> {
+		const created = getCopyJob(id)?.created ?? []
+
+		if (created.length === 0) {
+			return
+		}
+
+		const results = await Promise.allSettled(created.map(item => trash({ item })))
+		const moved = results.filter(result => result.status === "fulfilled").length
+
+		useCopyJobsStore.getState().update(id, settled => ({
+			...settled,
+			trashResult: {
+				moved,
+				failed: results.length - moved
+			}
+		}))
+	}
+
 	private async settle(id: string): Promise<CopyJob | undefined> {
 		const job = getCopyJob(id)
 
@@ -503,6 +573,7 @@ class CopyRunner {
 				outcome: finished.outcome,
 				errorMessage: finished.errorMessage,
 				errorCount: job.failures.length,
+				copyGlyph: job.glyph,
 				copyNotes: {
 					skipped: job.counts.entriesSkipped,
 					renamed: job.renamedCount,
@@ -513,18 +584,9 @@ class CopyRunner {
 		}
 
 		// Honoured however the job ended: a copy that finished before the cancel reached it still made
-		// what the user asked to remove. Only top-level items; their subtrees go with them.
-		if (job.cancelRequest === "trash" && job.created.length > 0) {
-			const results = await Promise.allSettled(job.created.map(item => trash({ item })))
-			const moved = results.filter(result => result.status === "fulfilled").length
-
-			useCopyJobsStore.getState().update(id, settled => ({
-				...settled,
-				trashResult: {
-					moved,
-					failed: results.length - moved
-				}
-			}))
+		// what the user asked to remove.
+		if (job.cancelRequest === "trash") {
+			await this.trashCreated(id)
 		}
 
 		if (job.counts.bytesDone > 0) {
@@ -535,8 +597,11 @@ class CopyRunner {
 			markDirectorySizesStale()
 		}
 
-		// What it created was only needed for "move to trash"; failures stay for "Retry failed items".
-		useCopyJobsStore.getState().update(id, settled => (settled.created.length === 0 ? settled : { ...settled, created: [] }))
+		// What it created was only needed for "move to trash", unless that question is still open;
+		// failures stay for "Retry failed items".
+		if (!choosingCancel.has(id)) {
+			useCopyJobsStore.getState().update(id, settled => (settled.created.length === 0 ? settled : { ...settled, created: [] }))
+		}
 
 		const settled = getCopyJob(id)
 
@@ -599,7 +664,7 @@ export function pruneSettledCopyJobs(): void {
 	}
 
 	for (const job of Object.values(useCopyJobsStore.getState().jobs)) {
-		if (job.outcome.status !== "running" && !rows.has(job.id)) {
+		if (job.outcome.status !== "running" && !rows.has(job.id) && !choosingCancel.has(job.id)) {
 			useCopyJobsStore.getState().remove(job.id)
 		}
 	}

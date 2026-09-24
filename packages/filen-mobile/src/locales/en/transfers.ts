@@ -63,6 +63,48 @@ export const transfers = {
 	copy_n_items_one: "{{count}} item",
 	/** Copy transfer row name when a copy holds several items (plural). {{count}} is the item count */
 	copy_n_items_other: "{{count}} items",
+	/** Floating-bar label while only copies run (singular). {{count}} is the number of items being copied */
+	copying_items_one: "Copying {{count}} item",
+	/** Floating-bar label while only copies run (plural). {{count}} is the number of items being copied */
+	copying_items_other: "Copying {{count}} items",
+	/** Android transfers notification body while only copies run (singular). {{count}} items, {{percent}} overall progress, {{speed}} human-readable speed */
+	copying_progress_one: "Copying {{count}} item · {{percent}}% · {{speed}}",
+	/** Android transfers notification body while only copies run (plural). {{count}} items, {{percent}} overall progress, {{speed}} human-readable speed */
+	copying_progress_other: "Copying {{count}} items · {{percent}}% · {{speed}}",
+	/** Transfers row title of a running copy. {{name}} is the item's name or "12 items" */
+	copy_row_title: "Copying {{name}}",
+	/** Transfers row title of a finished copy. {{name}} is the item's name or "12 items" */
+	copy_row_finished_title: "Copied {{name}}",
+	/** Copy row status while the copy measures what it will copy */
+	copy_preparing: "Preparing…",
+	/** Copy row status while files are copied. {{done}} and {{total}} are file counts, {{percent}} the overall progress */
+	copy_progress_files: "{{done}} of {{total}} files · {{percent}}%",
+	/** Copy row status while the copy is paused */
+	copy_paused: "Paused",
+	/** Copy row status while the copy wraps up after the last file */
+	copy_finishing: "Finishing…",
+	/** Copy row status after the user stopped the copy, until it has stopped */
+	copy_stopping: "Stopping…",
+	/** Finished copy row notes: entries that could not be copied and were left out (undecryptable or unreachable). {{count}} is the number */
+	copy_notes_skipped: "{{count}} skipped",
+	/** Finished copy row notes: items that got a new name because the name was taken. {{count}} is the number */
+	copy_notes_renamed: "{{count}} renamed",
+	/** Finished copy row notes: files stored as a new version of an existing file. {{count}} is the number */
+	copy_notes_saved_as_version: "{{count}} saved as a new version",
+	/** Finished copy row notes: items whose sharing or public links could not be applied to the copy. {{count}} is the number */
+	copy_notes_sharing_not_applied: "sharing not applied to {{count}}",
+	/** Title of the dialog asking how to stop a running copy */
+	copy_stop_title: "Stop copying?",
+	/** Message of the dialog asking how to stop a running copy. {{done}} and {{total}} are file counts */
+	copy_stop_message: "{{done}} of {{total}} files are already copied.",
+	/** Stop-copy dialog: stop and keep everything copied so far */
+	copy_stop_keep: "Stop and keep copied items",
+	/** Stop-copy dialog: stop and move everything this copy created to the trash */
+	copy_stop_trash: "Move copied items to trash",
+	/** Stop-copy dialog: close the dialog and let the copy go on */
+	copy_continue: "Continue copying",
+	/** Finished copy row menu: start a new copy of only the items that failed */
+	copy_retry_failed: "Retry failed items",
 	/** Error shown when an upload or copy would not fit the account's free storage; nothing was sent. {{needed}} and {{free}} are formatted sizes */
 	not_enough_storage: "Not enough storage: needs {{needed}}, {{free}} free."
 } as const

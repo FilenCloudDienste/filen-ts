@@ -28,6 +28,12 @@ import { run, clampedRatio } from "@filen/shared"
 import prompts from "@/lib/prompts"
 import alerts from "@/lib/alerts"
 import logger from "@/lib/logger"
+import useCopyJobsStore from "@/features/copy/store/useCopyJobs.store"
+import copyRunner, { pruneSettledCopyJobs } from "@/features/copy/copyRunner"
+import { copyNotesText, copyRowStatus } from "@/features/copy/copyRowText"
+import { stopCopyWithChoice } from "@/features/copy/copyCancel"
+
+type CopyTransfer = Extract<TTransfer, { type: "copy" }>
 
 // Discriminated wrapper so the list can hold both still-running ("active") transfers and
 // settled ("finished") snapshots and the renderer can branch on `kind`.
@@ -78,6 +84,189 @@ export function finishedTransferSubtitle(finished: TFinishedTransfer, t: TFuncti
 	}
 
 	return t("transfer_completed")
+}
+
+const RowMenuTrigger = () => {
+	const textForeground = useResolveClassNames("text-foreground")
+
+	return (
+		<CrossGlassContainerView>
+			<PressableScale
+				className="size-9 flex-row items-center justify-center"
+				rippleColor="transparent"
+			>
+				<Ionicons
+					name="ellipsis-horizontal"
+					size={20}
+					color={textForeground.color}
+				/>
+			</PressableScale>
+		</CrossGlassContainerView>
+	)
+}
+
+const CopyGlyph = ({ glyph, name }: { glyph: CopyTransfer["glyph"] | undefined; name: string }) => {
+	return glyph === "file" ? (
+		<FileIcon
+			name={name}
+			width={32}
+			height={32}
+		/>
+	) : (
+		<DirectoryIcon
+			color={DirColor.Default.new()}
+			width={32}
+			height={32}
+		/>
+	)
+}
+
+// Same layout as an upload row, with the state as text under the title instead of a second icon.
+const CopyActiveRow = ({ transfer }: { transfer: CopyTransfer }) => {
+	const { t } = useTranslation()
+	const job = useCopyJobsStore(state => state.jobs[transfer.id])
+
+	return (
+		<View className="bg-transparent px-4 flex-col py-2">
+			<View className="bg-transparent items-center justify-between flex-row gap-4">
+				<View className="flex-row items-center gap-3 bg-transparent flex-1">
+					<CopyGlyph
+						glyph={transfer.glyph}
+						name={transfer.name}
+					/>
+					<View className="flex-col bg-transparent flex-1">
+						<Text
+							className="text-foreground"
+							numberOfLines={1}
+							ellipsizeMode="middle"
+						>
+							{t("copy_row_title", { name: transfer.name })}
+						</Text>
+						<Text
+							className="text-muted-foreground text-xs"
+							numberOfLines={1}
+						>
+							{copyRowStatus(job, transfer.paused, t)}
+						</Text>
+					</View>
+				</View>
+				<View className="flex-row items-center bg-transparent gap-3 shrink-0">
+					<Menu
+						type="dropdown"
+						buttons={[
+							transfer.paused
+								? {
+										id: "resume",
+										title: t("resume"),
+										icon: "play",
+										onPress: () => {
+											transfer.resume()
+										}
+									}
+								: {
+										id: "pause",
+										title: t("pause"),
+										icon: "pause",
+										onPress: () => {
+											transfer.pause()
+										}
+									},
+							{
+								id: "cancel",
+								title: t("cancel"),
+								icon: "cancel",
+								destructive: true,
+								onPress: () => {
+									void stopCopyWithChoice(transfer.id, t)
+								}
+							}
+						]}
+					>
+						<RowMenuTrigger />
+					</Menu>
+				</View>
+			</View>
+		</View>
+	)
+}
+
+const CopyFinishedRow = ({ finished }: { finished: TFinishedTransfer }) => {
+	const { t } = useTranslation()
+	const removeFinishedTransfer = useTransfersStore(state => state.removeFinishedTransfer)
+	const canRetry = useCopyJobsStore(state => (state.jobs[finished.id]?.retryable.length ?? 0) > 0)
+	const notes = copyNotesText(finished.copyNotes, t)
+
+	return (
+		<View className="bg-transparent px-4 flex-col py-2">
+			<View className="bg-transparent items-center justify-between flex-row gap-4">
+				<View className="flex-row items-center gap-3 bg-transparent flex-1">
+					<CopyGlyph
+						glyph={finished.copyGlyph}
+						name={finished.name}
+					/>
+					<View className="flex-col bg-transparent flex-1">
+						<Text
+							className="text-foreground"
+							numberOfLines={1}
+							ellipsizeMode="middle"
+						>
+							{t("copy_row_finished_title", { name: finished.name })}
+						</Text>
+						<Text
+							className="text-muted-foreground text-xs"
+							numberOfLines={1}
+							ellipsizeMode="middle"
+						>
+							{finishedTransferSubtitle(finished, t)}
+						</Text>
+						{notes ? (
+							<Text
+								className="text-muted-foreground text-xs"
+								numberOfLines={2}
+							>
+								{notes}
+							</Text>
+						) : null}
+					</View>
+				</View>
+				<View className="flex-row items-center bg-transparent gap-3 shrink-0">
+					<Menu
+						type="dropdown"
+						buttons={[
+							...(canRetry
+								? [
+										{
+											id: "retryFailed",
+											title: t("copy_retry_failed"),
+											icon: "restore" as const,
+											requiresOnline: true,
+											onPress: () => {
+												// The retry is a new row; this one would only repeat its failures.
+												if (copyRunner.retryFailed(finished.id) !== null) {
+													removeFinishedTransfer(finished.id)
+													pruneSettledCopyJobs()
+												}
+											}
+										}
+									]
+								: []),
+							{
+								id: "removeFromList",
+								title: t("transfer_remove_from_list"),
+								icon: "trash",
+								destructive: true,
+								onPress: () => {
+									removeFinishedTransfer(finished.id)
+								}
+							}
+						]}
+					>
+						<RowMenuTrigger />
+					</Menu>
+				</View>
+			</View>
+		</View>
+	)
 }
 
 const ActiveTransferRow = ({ transfer, target }: { transfer: TTransfer; target: ListRenderItemInfo<TransfersListItem>["target"] }) => {
@@ -192,18 +381,7 @@ const ActiveTransferRow = ({ transfer, target }: { transfer: TTransfer; target: 
 							}
 						]}
 					>
-						<CrossGlassContainerView>
-							<PressableScale
-								className="size-9 flex-row items-center justify-center"
-								rippleColor="transparent"
-							>
-								<Ionicons
-									name="ellipsis-horizontal"
-									size={20}
-									color={textForeground.color}
-								/>
-							</PressableScale>
-						</CrossGlassContainerView>
+						<RowMenuTrigger />
 					</Menu>
 				</View>
 			</View>
@@ -213,7 +391,6 @@ const ActiveTransferRow = ({ transfer, target }: { transfer: TTransfer; target: 
 
 const FinishedTransferRow = ({ finished }: { finished: TFinishedTransfer }) => {
 	const { t } = useTranslation()
-	const textForeground = useResolveClassNames("text-foreground")
 	const removeFinishedTransfer = useTransfersStore(state => state.removeFinishedTransfer)
 
 	return (
@@ -265,18 +442,7 @@ const FinishedTransferRow = ({ finished }: { finished: TFinishedTransfer }) => {
 							}
 						]}
 					>
-						<CrossGlassContainerView>
-							<PressableScale
-								className="size-9 flex-row items-center justify-center"
-								rippleColor="transparent"
-							>
-								<Ionicons
-									name="ellipsis-horizontal"
-									size={20}
-									color={textForeground.color}
-								/>
-							</PressableScale>
-						</CrossGlassContainerView>
+						<RowMenuTrigger />
 					</Menu>
 				</View>
 			</View>
@@ -288,7 +454,15 @@ const TransfersRow = ({ info }: { info: ListRenderItemInfo<TransfersListItem> })
 	const item = info.item
 
 	if (item.kind === "finished") {
-		return <FinishedTransferRow finished={item.finished} />
+		return item.finished.type === "copy" ? (
+			<CopyFinishedRow finished={item.finished} />
+		) : (
+			<FinishedTransferRow finished={item.finished} />
+		)
+	}
+
+	if (item.transfer.type === "copy") {
+		return <CopyActiveRow transfer={item.transfer} />
 	}
 
 	return (

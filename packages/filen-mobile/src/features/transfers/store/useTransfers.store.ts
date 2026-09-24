@@ -102,7 +102,8 @@ export type FinishedTransfer = {
 	// buckets: upload/download + scan + unknown). 0 for clean successes; drives the
 	// "Completed with N errors" row label for completedWithErrors.
 	errorCount: number
-	// Copies only: what the job reports besides failures, for the finished row's notes line.
+	// Copies only: the row glyph, and what the job reports besides failures for the notes line.
+	copyGlyph?: "directory" | "file" | "items"
 	copyNotes?: {
 		skipped: number
 		renamed: number

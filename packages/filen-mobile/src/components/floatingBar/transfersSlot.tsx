@@ -10,6 +10,7 @@ import Text from "@/components/ui/text"
 import { PressableScale } from "@/components/ui/pressables"
 import { useResolveClassNames } from "uniwind"
 import AnimatedProgressBar from "@/components/floatingBar/animatedProgressBar"
+import { copyingItemCount } from "@/features/copy/copyRowText"
 
 /**
  * Returns true when at least one transfer is actively making progress
@@ -63,10 +64,11 @@ const SpeedDisplay = () => {
 
 const TransfersSlot = () => {
 	const { t } = useTranslation()
-	const { transfersActive, count } = useTransfersStore(
+	const { transfersActive, count, copyingItems } = useTransfersStore(
 		useShallow(state => ({
 			transfersActive: state.transfers.length > 0,
-			count: state.stats.count
+			count: state.stats.count,
+			copyingItems: copyingItemCount(state.transfers)
 		}))
 	)
 
@@ -88,7 +90,7 @@ const TransfersSlot = () => {
 					numberOfLines={1}
 					ellipsizeMode="middle"
 				>
-					{t("transfers_active", { count })}
+					{copyingItems === null ? t("transfers_active", { count }) : t("copying_items", { count: copyingItems })}
 				</Text>
 				<SpeedDisplay />
 			</View>

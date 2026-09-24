@@ -1,5 +1,11 @@
 import { Platform, AppState } from "react-native"
-import notifee, { AndroidImportance, AndroidForegroundServiceType, AuthorizationStatus } from "react-native-notify-kit"
+import notifee, {
+	AndroidImportance,
+	AndroidForegroundServiceType,
+	AuthorizationStatus,
+	EventType,
+	type Event
+} from "react-native-notify-kit"
 import { bpsToReadable } from "@filen/shared"
 import i18n from "@/lib/i18n"
 import secureStore from "@/lib/secureStore"
@@ -14,7 +20,7 @@ const NOTIFICATION_ID = "filen-transfers-fgs"
 // service and REJECTS further starts until the app is foregrounded again. It arrives as a raw type
 // id because notifee's own EventType enum stops at FG_ALREADY_EXIST (8), so it is matched
 // numerically. Without it `running` would keep claiming a service that no longer exists.
-const FOREGROUND_SERVICE_TIMEOUT_EVENT_TYPE = 9
+const FOREGROUND_SERVICE_TIMEOUT_EVENT_TYPE: number = 9
 
 // secureStore key for the "Background transfers" setting (Android only). Boolean; absent →
 // DEFAULT_TRANSFERS_FOREGROUND_SERVICE_ENABLED (on). When off, start() never displays the
@@ -40,12 +46,16 @@ export type TransferProgressSnapshot = {
 	count: number
 	progress: number
 	speed: number
+	// Items being copied when copies are all that runs, else null.
+	copyingItems: number | null
 }
 
 class ForegroundService {
 	private initPromise: Promise<void> | null = null
 	private running = false
 	private deniedThisSession = false
+	private openTransfersRequested = false
+	private readonly openTransfersListeners = new Set<() => void>()
 
 	public init(): Promise<void> {
 		if (Platform.OS !== "android") {
@@ -72,13 +82,13 @@ class ForegroundService {
 
 			// The ongoing transfers notification emits events (e.g. dismissal) while the app is backgrounded.
 			// notifee requires a background-event handler for these or it logs a warning and drops them. The
-			// notification has no actions, so the only event worth acting on is the service timing out.
-			notifee.onBackgroundEvent(async ({ type }) => {
-				this.handleNotifeeEvent(type)
+			// events acted on are a body tap and the service timing out.
+			notifee.onBackgroundEvent(async event => {
+				this.handleNotifeeEvent(event)
 			})
 
-			notifee.onForegroundEvent(({ type }) => {
-				this.handleNotifeeEvent(type)
+			notifee.onForegroundEvent(event => {
+				this.handleNotifeeEvent(event)
 			})
 
 			await notifee.createChannel({
@@ -220,13 +230,45 @@ class ForegroundService {
 		}
 	}
 
-	// The one notifee event this service acts on: Android timing the foreground service out. The OS
-	// has already stopped the service by the time this arrives, so the mirror must drop with it —
-	// otherwise update() would keep displaying against a dead service, and each of those displays
-	// would ask notifee to start a fresh one from the background, which Android answers by killing
-	// the process. Clearing here lets the host re-arm from the foreground instead, where a start is
-	// both permitted and resets the OS time budget.
-	private handleNotifeeEvent(type: number): void {
+	// A tap on the notification. The tap itself brings the app forward; opening Transfers is left to
+	// the host, which waits for the unlocked, active app. Silent: this only records the request.
+	public consumeOpenTransfersRequest(): boolean {
+		const requested = this.openTransfersRequested
+
+		this.openTransfersRequested = false
+
+		return requested
+	}
+
+	public onOpenTransfersRequest(listener: () => void): () => void {
+		this.openTransfersListeners.add(listener)
+
+		return () => {
+			this.openTransfersListeners.delete(listener)
+		}
+	}
+
+	// Two events are acted on: a body tap (see consumeOpenTransfersRequest) and Android timing the
+	// foreground service out. On timeout the OS has already stopped the service, so the mirror must
+	// drop with it — otherwise update() would keep displaying against a dead service, and each of
+	// those displays would ask notifee to start a fresh one from the background, which Android
+	// answers by killing the process. Clearing here lets the host re-arm from the foreground instead,
+	// where a start is both permitted and resets the OS time budget.
+	private handleNotifeeEvent({ type, detail }: Event): void {
+		if (type === EventType.PRESS) {
+			if (detail.notification?.id !== NOTIFICATION_ID) {
+				return
+			}
+
+			this.openTransfersRequested = true
+
+			for (const listener of this.openTransfersListeners) {
+				listener()
+			}
+
+			return
+		}
+
 		if (type !== FOREGROUND_SERVICE_TIMEOUT_EVENT_TYPE || !this.running) {
 			return
 		}
@@ -268,17 +310,24 @@ class ForegroundService {
 	}
 
 	private async display(progress: TransferProgressSnapshot): Promise<void> {
-		const { count, progress: ratio, speed } = progress
+		const { count, progress: ratio, speed, copyingItems } = progress
 		const percent = Math.round(ratio * 100)
 		const speedText = speed > 0 ? bpsToReadable(speed) : "—"
 		// `count` stays a number so i18next selects the right plural form; `percent` is passed as a
 		// string because i18next's TS types collapse the interpolation overload once a key has 3+
 		// variables and one is numeric — stringifying it keeps the call fully typed.
-		const body = i18n.t("transfers_progress", {
-			count,
-			percent: percent.toString(),
-			speed: speedText
-		})
+		const body =
+			copyingItems === null
+				? i18n.t("transfers_progress", {
+						count,
+						percent: percent.toString(),
+						speed: speedText
+					})
+				: i18n.t("copying_progress", {
+						count: copyingItems,
+						percent: percent.toString(),
+						speed: speedText
+					})
 
 		await notifee.displayNotification({
 			id: NOTIFICATION_ID,

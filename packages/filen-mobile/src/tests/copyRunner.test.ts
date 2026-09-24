@@ -521,6 +521,158 @@ describe("cancel", () => {
 	})
 })
 
+describe("the stop dialog", () => {
+	// A copy that waits mid-run until it is cancelled or let go, as the SDK does while paused.
+	function heldCopy(): { started: Promise<void>; finish: () => void } {
+		let markStarted = () => {}
+		let finish = () => {}
+		const started = new Promise<void>(resolve => {
+			markStarted = resolve
+		})
+
+		scriptCopy(async (callback, managedFuture) => {
+			const abort = managedFuture.abortSignal.sdkAbortFor
+
+			callback.onTopLevelCreated(createdFile("made") as never)
+			markStarted()
+
+			await new Promise<void>(resolve => {
+				finish = resolve
+				abort.addEventListener("abort", () => resolve(), { once: true })
+			})
+
+			return abort.aborted
+				? report({ error: { kind: ErrorKind.Cancelled, message: "", serverMessage: undefined }, topLevel: [createdFile("made")] })
+				: report({ topLevel: [createdFile("made")] })
+		})
+
+		return {
+			started,
+			finish: () => finish()
+		}
+	}
+
+	function startJob(): string {
+		return copyRunner.start({ items: [file("a")], destination: DEST, destinationDir: DEST_DIR }) as string
+	}
+
+	function rowPaused(): boolean | undefined {
+		return useTransfersStore.getState().transfers[0]?.paused
+	}
+
+	it("pauses the copy while open; continue resumes it and nothing is cancelled", async () => {
+		const copy = heldCopy()
+		const id = startJob()
+
+		await copy.started
+
+		expect(copyRunner.holdForCancelChoice(id)).toBe(true)
+		expect(rowPaused()).toBe(true)
+
+		await copyRunner.resolveCancelChoice(id, "continue", true)
+
+		expect(rowPaused()).toBe(false)
+
+		copy.finish()
+		await Promise.all(h.tracked)
+
+		expect(useTransfersStore.getState().finishedTransfers[0]?.outcome).toBe("succeeded")
+		expect(h.trash).not.toHaveBeenCalled()
+	})
+
+	it("continue leaves a copy the user had paused paused", async () => {
+		const copy = heldCopy()
+		const id = startJob()
+
+		await copy.started
+
+		copyRunner.pause(id)
+
+		const pausedHere = copyRunner.holdForCancelChoice(id)
+
+		expect(pausedHere).toBe(false)
+
+		await copyRunner.resolveCancelChoice(id, "continue", pausedHere)
+
+		expect(rowPaused()).toBe(true)
+
+		copyRunner.resume(id)
+		copy.finish()
+		await Promise.all(h.tracked)
+	})
+
+	it("stop and keep: the paused copy takes the stop, the row goes, nothing is trashed", async () => {
+		const copy = heldCopy()
+		const id = startJob()
+
+		await copy.started
+
+		copyRunner.pause(id)
+		copyRunner.holdForCancelChoice(id)
+
+		await copyRunner.resolveCancelChoice(id, "keep", false)
+		await Promise.all(h.tracked)
+
+		expect(useTransfersStore.getState().transfers).toEqual([])
+		expect(useTransfersStore.getState().finishedTransfers).toEqual([])
+		expect(h.trash).not.toHaveBeenCalled()
+		expect(getCopyJob(id)).toBeUndefined()
+	})
+
+	it("move to trash: what the copy made goes to the trash", async () => {
+		const copy = heldCopy()
+		const id = startJob()
+
+		await copy.started
+
+		copyRunner.holdForCancelChoice(id)
+
+		await copyRunner.resolveCancelChoice(id, "trash", true)
+		await Promise.all(h.tracked)
+
+		expect(h.trash).toHaveBeenCalledExactlyOnceWith({ item: { type: "file", data: { uuid: "made", parent: "dest" } } })
+	})
+
+	it("a copy stopped by Cancel all while the dialog is open still honours a trash answer, then is dropped", async () => {
+		const copy = heldCopy()
+		const id = startJob()
+
+		await copy.started
+
+		copyRunner.holdForCancelChoice(id)
+		h.scope.controller.abort()
+		await Promise.all(h.tracked)
+
+		expect(h.trash).not.toHaveBeenCalled()
+		expect(getCopyJob(id)?.created).toHaveLength(1)
+
+		await copyRunner.resolveCancelChoice(id, "trash", true)
+
+		expect(h.trash).toHaveBeenCalledOnce()
+		expect(getCopyJob(id)).toBeUndefined()
+	})
+
+	it("a copy that finishes while the dialog is open: continue keeps everything and lets go of what it made", async () => {
+		const copy = heldCopy()
+		const id = startJob()
+
+		await copy.started
+
+		copyRunner.holdForCancelChoice(id)
+		copyRunner.resume(id)
+		copy.finish()
+		await Promise.all(h.tracked)
+
+		expect(getCopyJob(id)?.created).toHaveLength(1)
+
+		await copyRunner.resolveCancelChoice(id, "continue", true)
+
+		expect(h.trash).not.toHaveBeenCalled()
+		expect(getCopyJob(id)?.created).toEqual([])
+		expect(useTransfersStore.getState().finishedTransfers[0]?.outcome).toBe("succeeded")
+	})
+})
+
 describe("retry and pause", () => {
 	it("retries a job's failures through copyItemsTo, back into their planned directories", async () => {
 		const failure = {
