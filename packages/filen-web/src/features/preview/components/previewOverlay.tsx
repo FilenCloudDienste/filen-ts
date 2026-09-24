@@ -37,7 +37,7 @@ import {
 	isTextEditingTarget,
 	previewMenuVisible,
 	previewNavigationUnmountsOverlay,
-	PREVIEW_MENU_HIDDEN_ACTION_IDS,
+	previewMenuHiddenActionIds,
 	hasClosest,
 	isVideoControlsBandClick,
 	resolveUnsavedConfirm,
@@ -50,7 +50,7 @@ import { type PreviewSource, previewSourceKey, previewSourceName } from "@/featu
 import { clearVideoPlaybackStates } from "@/features/preview/lib/videoContinuity"
 import { clearPreviewCache } from "@/features/preview/lib/previewCache"
 import { DriveDropdownMenuContent } from "@/features/drive/components/itemMenu"
-import { type ItemActionDialogKind } from "@/features/drive/components/itemMenu.logic"
+import { type ItemActionDialogKind, type ItemActionId } from "@/features/drive/components/itemMenu.logic"
 import { MoveTargetDialog } from "@/features/drive/components/moveTargetDialog"
 import { InfoDialog } from "@/features/drive/components/infoDialog"
 import { LinkDialog } from "@/features/drive/components/linkDialog"
@@ -108,6 +108,9 @@ export interface PreviewOverlayProps {
 	// membership change — see socketHandlers.ts's own PHOTOS_INVALIDATING_EVENT_TYPES comment), so
 	// nothing else would ever reflect the toggle back into the grid without a reload.
 	onFavoriteToggled?: (item: DriveItem) => void
+	// Header-menu entries the opening surface doesn't offer in its own menus, so the viewer matches them
+	// (Photos hides Move).
+	hiddenMenuActionIds?: ReadonlySet<ItemActionId> | undefined
 }
 
 // True while focus sits on (or inside) a <video>/<audio> element — its own native controls own
@@ -164,7 +167,16 @@ function PreviewRenderError() {
 // state in exactly one case now: an editable text/code buffer with unsaved edits (see requestOrRun) —
 // every other viewer's own data load stays a read-only, ephemeral fetch never worth protecting an
 // interrupted close against.
-export function PreviewOverlay({ variant, items, index, onStep, onClose, onItemRemoved, onFavoriteToggled }: PreviewOverlayProps) {
+export function PreviewOverlay({
+	variant,
+	items,
+	index,
+	onStep,
+	onClose,
+	onItemRemoved,
+	onFavoriteToggled,
+	hiddenMenuActionIds
+}: PreviewOverlayProps) {
 	const { t } = useTranslation(["preview", "common", "drive"])
 	const isOnline = useIsOnline()
 	const rawSource = items[index]
@@ -901,7 +913,7 @@ export function PreviewOverlay({ variant, items, index, onStep, onClose, onItemR
 						faces' own ⋯ trigger. Same descriptor list + dropdown renderer those use (itemMenu.tsx),
 						just with "download" hidden (the button above already covers it) and the two extra
 						"direct"-outcome hooks wired into this overlay's own per-slot `saved` override / pager
-						housekeeping — see PREVIEW_MENU_HIDDEN_ACTION_IDS and the handleMenu* functions above. */}
+						housekeeping — see previewMenuHiddenActionIds and the handleMenu* functions above. */}
 						{previewMenuVisible(currentSource) && driveItem !== undefined ? (
 							<DropdownMenu>
 								<DropdownMenuTrigger
@@ -923,7 +935,7 @@ export function PreviewOverlay({ variant, items, index, onStep, onClose, onItemR
 									}}
 									onFavoriteToggled={handleMenuFavoriteToggled}
 									onRestored={handleMenuRestored}
-									hiddenActionIds={PREVIEW_MENU_HIDDEN_ACTION_IDS}
+									hiddenActionIds={previewMenuHiddenActionIds(hiddenMenuActionIds)}
 								/>
 							</DropdownMenu>
 						) : null}

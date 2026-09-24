@@ -29,6 +29,7 @@ import {
 	unsavedPromptOpen,
 	VIDEO_CONTROLS_BAND_PX
 } from "@/features/preview/components/previewOverlay.logic"
+import { PHOTOS_PREVIEW_HIDDEN_ACTION_IDS, photosItemActions } from "@/features/photos/lib/itemActions"
 
 // Minimal duck-typed stand-in for a DOM EventTarget — no jsdom/happy-dom in this project
 // (vitest.config.ts: environment "node"), mirroring lib/auth/referral.test.ts's own stubbed `document`
@@ -130,6 +131,16 @@ describe("previewMenuActions (preview header item-menu derivation)", () => {
 			"copyLink",
 			"trash"
 		])
+	})
+
+	it("opened from Photos, offers exactly what the Photos grid does (the header keeps its own download)", () => {
+		const item = fileItem()
+		const photosGrid = photosItemActions(item)
+			.map(descriptor => descriptor.id)
+			.filter(id => id !== "download")
+
+		expect(previewMenuActions(item, "drive", PHOTOS_PREVIEW_HIDDEN_ACTION_IDS).map(descriptor => descriptor.id)).toEqual(photosGrid)
+		expect(photosGrid).not.toContain("move")
 	})
 
 	it("otherwise matches driveItemActions' own variant gating exactly (download aside)", () => {

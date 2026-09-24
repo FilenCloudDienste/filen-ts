@@ -12,6 +12,7 @@ import { usePhotosStore } from "@/features/photos/store/usePhotosStore"
 import { type PreviewSource, previewSourceKey, stepPreviewSourceIndex } from "@/features/preview/lib/previewSource"
 import { reconcilePreviewSources, subscribePreviewReconcile } from "@/features/preview/lib/previewReconcile"
 import { PreviewOverlay } from "@/features/preview/components/previewOverlay"
+import { PHOTOS_PREVIEW_HIDDEN_ACTION_IDS } from "@/features/photos/lib/itemActions"
 import { VersionsDialog } from "@/features/drive/components/versionsDialog"
 import { InfoDialog } from "@/features/drive/components/infoDialog"
 import { LinkDialog } from "@/features/drive/components/linkDialog"
@@ -331,6 +332,7 @@ export function usePhotosDialogHost({ rootUuid, selectedItems }: UsePhotosDialog
 						onFavoriteToggled={item => {
 							patchPhotoFavoriteFromPreview(rootUuid, item)
 						}}
+						hiddenMenuActionIds={PHOTOS_PREVIEW_HIDDEN_ACTION_IDS}
 					/>
 				)
 			}

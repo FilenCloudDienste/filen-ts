@@ -9,7 +9,8 @@ import {
 	TRASH,
 	favoriteDescriptor,
 	downloadDescriptor,
-	type ItemActionDescriptor
+	type ItemActionDescriptor,
+	type ItemActionId
 } from "@/features/drive/components/itemMenu.logic"
 import type { DriveItem } from "@/features/drive/lib/item"
 
@@ -30,3 +31,6 @@ export type { ItemActionDescriptor }
 export function photosItemActions(item: DriveItem): ItemActionDescriptor[] {
 	return [RENAME, COPY, favoriteDescriptor(item), VERSIONS, INFO, downloadDescriptor(), SHARE, PUBLIC_LINK, COPY_LINK, TRASH]
 }
+
+// The viewer opened from Photos uses drive's item menu; this keeps it to what the grid offers.
+export const PHOTOS_PREVIEW_HIDDEN_ACTION_IDS: ReadonlySet<ItemActionId> = new Set(["move"])

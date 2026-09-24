@@ -15,8 +15,19 @@ export const PREVIEW_MENU_HIDDEN_ACTION_IDS = new Set<ItemActionId>(["download"]
 // (driveItemActions), Download stripped — pulled out here so the gating itself (trash reduces to
 // restore/delete/info, links drops move, sharedIn/sharedOut drop the owner-mutating group, etc.) is
 // unit-testable without mounting the overlay itself.
-export function previewMenuActions(item: DriveItem, variant: DriveVariant): ItemActionDescriptor[] {
-	return driveItemActions(item, variant).filter(descriptor => !PREVIEW_MENU_HIDDEN_ACTION_IDS.has(descriptor.id))
+export function previewMenuActions(
+	item: DriveItem,
+	variant: DriveVariant,
+	extraHidden?: ReadonlySet<ItemActionId>
+): ItemActionDescriptor[] {
+	const hidden = previewMenuHiddenActionIds(extraHidden)
+
+	return driveItemActions(item, variant).filter(descriptor => !hidden.has(descriptor.id))
+}
+
+// Download, plus whatever the opening surface leaves out of its own menus (Photos: Move).
+export function previewMenuHiddenActionIds(extra?: ReadonlySet<ItemActionId>): ReadonlySet<ItemActionId> {
+	return extra === undefined ? PREVIEW_MENU_HIDDEN_ACTION_IDS : new Set([...PREVIEW_MENU_HIDDEN_ACTION_IDS, ...extra])
 }
 
 // The header's ⋯ trigger only ever mounts for a drive-sourced slot — the external arm (the seam for
