@@ -7,6 +7,7 @@ import {
 	isChatUndecryptable,
 	isLastMessageFromBlocked,
 	messageSenderName,
+	newestMessage,
 	sortChats
 } from "@/features/chats/lib/sort"
 import { deriveBlockedUsers } from "@filen/shared"
@@ -156,6 +157,27 @@ describe("sortChats", () => {
 		sortChats(input)
 
 		expect(input).toEqual(snapshot)
+	})
+})
+
+describe("newestMessage", () => {
+	const older = mockMessage({ uuid: testUuid("older"), sentTimestamp: 100n })
+	const newer = mockMessage({ uuid: testUuid("newer"), sentTimestamp: 200n })
+
+	it("keeps the shown message over an older one", () => {
+		expect(newestMessage(newer, older)).toBe(newer)
+	})
+
+	it("takes a newer message, and a chat's first", () => {
+		expect(newestMessage(older, newer)).toBe(newer)
+		expect(newestMessage(undefined, older)).toBe(older)
+	})
+
+	// The same message delivered again, as a committed send's own echo is.
+	it("takes a message sent at the same moment", () => {
+		const again = { ...newer }
+
+		expect(newestMessage(newer, again)).toBe(again)
 	})
 })
 

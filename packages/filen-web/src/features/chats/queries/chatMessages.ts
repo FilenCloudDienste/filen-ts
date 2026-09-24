@@ -38,6 +38,9 @@ function resolveChat(chatUuid: string): Chat | undefined {
 // without that page (chatMessagesQueryUpdate's `prev ?? []`), so a mount skips its fetch only for these.
 const syncedChatEpochs = new Map<string, number>()
 
+// Per chat, bumped by every patch that would cancel an in-flight read of its thread (cancelInFlightIfCached).
+const threadFetchCancels = new Map<string, number>()
+
 export function markChatMessagesUnsynced(): void {
 	syncedChatEpochs.clear()
 }
@@ -48,20 +51,37 @@ function chatMessagesSynced(chatUuid: string): boolean {
 	return epoch !== undefined && socketLiveSince(epoch)
 }
 
-// Fetches a chat's initial (newest) message page from a Chat object directly — no cache resolution,
-// so the bulk refetch (refetchChatsAndMessages.ts) can pull messages for a freshly-listed chat before
-// that list has been written back to the chats cache. Sorted ascending, same as the query below.
+function threadCancels(chatUuid: string): number {
+	return threadFetchCancels.get(chatUuid) ?? 0
+}
+
+// A newest page read under `epoch` just landed in the thread's cache.
+function markNewestPageLanded(chatUuid: string, epoch: number | null): void {
+	if (epoch !== null && socketLiveSince(epoch)) {
+		syncedChatEpochs.set(chatUuid, epoch)
+	} else {
+		syncedChatEpochs.delete(chatUuid)
+	}
+}
+
+// Fetches a chat's initial (newest) message page from a Chat object directly — no cache resolution and
+// no sync marker: each caller marks the thread once the page is in its cache. Sorted ascending, same as
+// the query below.
 export async function fetchMessagesForChat(chat: Chat): Promise<ChatMessage[]> {
-	const epoch = currentSocketEpoch()
 	const messages = await sdkApi.listMessagesBefore(chat, BigInt(Date.now() + INITIAL_CURSOR_OFFSET_MS))
 
-	if (epoch !== null && socketLiveSince(epoch)) {
-		syncedChatEpochs.set(chat.uuid, epoch)
-	} else {
-		syncedChatEpochs.delete(chat.uuid)
-	}
-
 	return sortAscending(messages)
+}
+
+// The bulk resync's per-chat read. Merge, never replace: this pulls only the newest page, and the open
+// thread may have older pages scrolled in (mergeNewestPage). The merge always lands, cancelling any mount
+// read it overlaps, so the thread's marker is this read's.
+export async function refreshNewestChatMessages(chat: Chat): Promise<void> {
+	const epoch = currentSocketEpoch()
+	const page = await fetchMessagesForChat(chat)
+
+	chatMessagesQueryUpdate(chat.uuid, prev => mergeNewestPage(prev, page))
+	markNewestPageLanded(chat.uuid, epoch)
 }
 
 // Folds a freshly-fetched NEWEST page into what the chat already has cached. A refetch (window focus,
@@ -100,7 +120,15 @@ export async function fetchChatMessages(chatUuid: string): Promise<ChatMessage[]
 		return chatMessagesQueryGet(chatUuid) ?? []
 	}
 
+	const epoch = currentSocketEpoch()
+	const cancels = threadCancels(chatUuid)
 	const page = await fetchMessagesForChat(chat)
+
+	// A patch that landed meanwhile cancelled this read: query-core drops what it returns, so the page never
+	// reaches the cache and can't mark the thread synced. Unmarked, the next mount or focus reads it again.
+	if (threadCancels(chatUuid) === cancels) {
+		markNewestPageLanded(chatUuid, epoch)
+	}
 
 	// Read the cache AFTER the fetch so anything socket-delivered mid-flight is part of the merge.
 	return mergeNewestPage(chatMessagesQueryGet(chatUuid) ?? [], page)
@@ -130,6 +158,8 @@ export function useChatMessages(chatUuid: string, options?: { enabled?: boolean 
 // scoped per chat uuid.
 function cancelInFlightIfCached(chatUuid: string): void {
 	if (queryClient.getQueryData(chatMessagesQueryKey(chatUuid)) !== undefined) {
+		threadFetchCancels.set(chatUuid, threadCancels(chatUuid) + 1)
+
 		void queryClient.cancelQueries({ queryKey: chatMessagesQueryKey(chatUuid) })
 	}
 }

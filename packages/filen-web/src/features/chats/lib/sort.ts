@@ -5,7 +5,7 @@ import {
 	resolveChatParticipantsDisplayName,
 	type BlockedUsers
 } from "@filen/shared"
-import type { Chat, ChatMessagePartial } from "@filen/sdk-rs"
+import type { Chat, ChatMessage, ChatMessagePartial } from "@filen/sdk-rs"
 import { contactDisplayName } from "@/features/contacts/components/contactsList.logic"
 
 // Conversation-list ordering — ported from
@@ -39,6 +39,12 @@ function compareChats(a: Chat, b: Chat): number {
 // Returns a NEW array, never mutates the input.
 export function sortChats(chats: readonly Chat[]): Chat[] {
 	return [...chats].sort(compareChats)
+}
+
+// The lastMessage a chat's row takes from `incoming`: never an older one than it already shows. A parked
+// own echo, or a send's commit, can land after a reply did.
+export function newestMessage(current: ChatMessage | undefined, incoming: ChatMessage): ChatMessage {
+	return current !== undefined && incoming.sentTimestamp < current.sentTimestamp ? current : incoming
 }
 
 // A chat's group key failing to decrypt (`Chat.key === undefined`) is this surface's

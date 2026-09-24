@@ -1,4 +1,5 @@
 import type { Chat, ChatMessage, ChatParticipant, MaybeEncrypted, ChatTypingType, UserInfo } from "@filen/sdk-rs"
+import { notifyManager } from "@tanstack/react-query"
 import { registerSocketHandler, decryptedOrSkip } from "@/lib/sdk/socket"
 import { queryClient } from "@/queries/client"
 import { ACCOUNT_QUERY_KEY } from "@/queries/account"
@@ -6,11 +7,13 @@ import { log } from "@/lib/log"
 import { chatsQueryUpdate, chatsQueryUpsert, chatsQueryGet, markChatsListUnsynced } from "@/features/chats/queries/chats"
 import { chatMessagesQueryUpdate, chatMessagesQueryGet, markChatMessagesUnsynced } from "@/features/chats/queries/chatMessages"
 import { refetchChatsAndMessages } from "@/features/chats/lib/refetchChatsAndMessages"
+import { newestMessage } from "@/features/chats/lib/sort"
 import { useSocketStatusStore } from "@/features/chats/store/useSocketStatus"
 import { purgeChatInflightState } from "@/features/chats/lib/inflight"
 import { applyTypingSignal, clearTypingForSender } from "@/features/chats/lib/typing"
 import { useChatTypingStore, type ChatTypingUser } from "@/features/chats/store/useChatTyping"
 import { isChatFocused, getFocusedChat, setFocusedChat } from "@/features/chats/lib/focusedChat"
+import { chatLastFocus } from "@/features/chats/lib/unread.logic"
 import {
 	parkOwnMessageEcho,
 	releaseOwnMessageEcho,
@@ -242,33 +245,40 @@ function handleMessageNew(msg: ChatMessage): void {
 				releaseOwnMessageEcho(msg.uuid)
 			}
 
-			// Dedup by SERVER uuid against the thread cache AND the reconciled outbox: if the message is
-			// already present (our own send's commit reconciled the optimistic copy, or a prior echo landed),
-			// leave it untouched instead of re-appending a duplicate.
-			chatMessagesQueryUpdate(msg.chat, prev =>
-				prev.some(m => m.uuid === msg.uuid) ? prev : [...prev, msg].sort(bySentTimestampAsc)
-			)
+			// One notify batch, so observers render both writes together: a render between them counts the
+			// new message against the chat's old lastFocus, flashing an unread badge and the thread's New
+			// divider in the open chat.
+			notifyManager.batch(() => {
+				// Dedup by SERVER uuid against the thread cache AND the reconciled outbox: if the message is
+				// already present (our own send's commit reconciled the optimistic copy, or a prior echo
+				// landed), leave it untouched instead of re-appending a duplicate.
+				chatMessagesQueryUpdate(msg.chat, prev =>
+					prev.some(m => m.uuid === msg.uuid) ? prev : [...prev, msg].sort(bySentTimestampAsc)
+				)
 
-			// Patch the conversation row AFTER the message cache (mobile's ordering). Always refresh
-			// lastMessage/timestamp; for a FOREIGN message in the FOCUSED chat, advance lastFocus so the
-			// derived per-row unread stays false — unread accrues ONLY when the chat is not the open one.
-			setTimeout(() => {
+				// Always refresh lastMessage/timestamp; for a FOREIGN message in the FOCUSED chat, advance
+				// lastFocus so the derived per-row unread stays false — unread accrues ONLY when the chat is
+				// not the open one.
 				chatsQueryUpdate(prev =>
 					prev.map(c => {
 						if (c.uuid !== msg.chat) {
 							return c
 						}
 
-						const advanceFocus = !isOwn && focused && msg.sentTimestamp > c.lastFocus
+						const advanceFocus = !isOwn && focused && msg.sentTimestamp > chatLastFocus(c)
 
-						return { ...c, lastMessage: msg, ...(advanceFocus ? { lastFocus: msg.sentTimestamp } : {}) }
+						return {
+							...c,
+							lastMessage: newestMessage(c.lastMessage, msg),
+							...(advanceFocus ? { lastFocus: msg.sentTimestamp } : {})
+						}
 					})
 				)
 
 				// No separate unread-badge write is needed: the message landing in the cache above is what
 				// the client-derived count re-reads on its next render — a foreign message in a non-focused
 				// chat now satisfies isMessageUnread on its own, with no scalar to invalidate.
-			}, 1)
+			})
 		},
 		isOwn ? OWN_MESSAGE_RECONCILE_DELAY_MS : FOREIGN_MESSAGE_DELAY_MS
 	)
@@ -305,9 +315,12 @@ export async function handleConversationDeleted(uuid: string): Promise<void> {
 
 	// Cache removal — the open thread route resolves the chat from the list cache, so removing it here
 	// re-renders that route to the select-a-conversation placeholder (the web nav-away: no imperative
-	// navigation needed, unlike mobile's stack redirect).
-	chatMessagesQueryUpdate(uuid, () => [])
-	chatsQueryUpdate(prev => prev.filter(c => c.uuid !== uuid))
+	// navigation needed, unlike mobile's stack redirect). One notify batch, so the open thread never
+	// renders emptied before the route drops it.
+	notifyManager.batch(() => {
+		chatMessagesQueryUpdate(uuid, () => [])
+		chatsQueryUpdate(prev => prev.filter(c => c.uuid !== uuid))
+	})
 
 	if (getFocusedChat() === uuid) {
 		setFocusedChat(null)

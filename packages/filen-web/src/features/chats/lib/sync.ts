@@ -6,8 +6,9 @@ import { log } from "@/lib/log"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { kvGetJson, kvSetJson, kvDelete } from "@/lib/storage/adapter"
 import { type OutboxChannelTransport, type OutboxRole } from "@/lib/storage/outboxChannel"
-import { chatsQueryUpsert, chatsQueryGet, chatsQueryFetch } from "@/features/chats/queries/chats"
+import { chatsQueryUpdate, chatsQueryGet, chatsQueryFetch } from "@/features/chats/queries/chats"
 import { chatMessagesQueryUpdate } from "@/features/chats/queries/chatMessages"
+import { newestMessage } from "@/features/chats/lib/sort"
 import useChatsInflightStore, { type ChatMessageWithInflightId, type InflightChatMessages } from "@/features/chats/store/useChatsInflight"
 import {
 	reconcileChatFollower,
@@ -466,9 +467,14 @@ export class Sync {
 		// Reconcile the query caches off the committed chat: refresh the conversation row (new
 		// lastMessage/timestamp) and, in the message list, drop the optimistic in-flight copy (uuid ===
 		// inflightId) plus any prior copy of the same server uuid, then append the committed message.
-		chatsQueryUpsert(updatedChat)
-
 		if (lastMessage) {
+			// The returned chat is the one this send started from, so a cached row takes only its lastMessage:
+			// a reply, or the open chat's read state, that landed during the send stays.
+			chatsQueryUpdate(prev =>
+				prev.some(c => c.uuid === chat.uuid)
+					? prev.map(c => (c.uuid === chat.uuid ? { ...c, lastMessage: newestMessage(c.lastMessage, lastMessage) } : c))
+					: [...prev, updatedChat]
+			)
 			chatMessagesQueryUpdate(chat.uuid, prev => [
 				...prev.filter(m => m.uuid !== lastMessage.uuid && m.uuid !== inflightId),
 				lastMessage

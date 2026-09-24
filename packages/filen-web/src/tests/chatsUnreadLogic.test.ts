@@ -8,7 +8,7 @@ import type { Chat, ChatMessage, UuidStr } from "@filen/sdk-rs"
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
-import { isMessageUnread, chatHasUnread } from "@/features/chats/lib/unread.logic"
+import { isMessageUnread, chatHasUnread, chatLastFocus } from "@/features/chats/lib/unread.logic"
 import { countUnreadMessages } from "@/features/chats/hooks/useChatUnreadCount"
 import { sumUnread } from "@/features/chats/hooks/useChatsUnreadCount"
 import { deriveBlockedUsers, EMPTY_BLOCKED_USERS } from "@filen/shared"
@@ -46,15 +46,44 @@ function mockMessage(overrides: Partial<ChatMessage> = {}): ChatMessage {
 	}
 }
 
+// What the SDK hands over for a chat this account never focused: sdk-rs.d.ts types lastFocus as bigint,
+// but an unset focus arrives as undefined.
+function neverFocusedChat(overrides: Partial<Chat> = {}): Chat {
+	return { ...mockChat(overrides), lastFocus: undefined } as unknown as Chat
+}
+
 const SELF = 1n
+
+describe("chatLastFocus", () => {
+	it("reads a chat never focused as the epoch, whether lastFocus is undefined or absent", () => {
+		const absent: Partial<Chat> = mockChat()
+
+		delete absent.lastFocus
+
+		expect(chatLastFocus(neverFocusedChat())).toBe(0n)
+		expect(chatLastFocus(absent)).toBe(0n)
+	})
+
+	it("passes a focus time through", () => {
+		expect(chatLastFocus(mockChat({ lastFocus: 100n }))).toBe(100n)
+	})
+})
 
 // Raw predicate coverage (muted/lastFocus/self/boundary/blocked-scan matrices) moved to
 // @filen/shared's src/tests/chatUnread.test.ts (isMessageUnreadCore / chatHasUnreadCore) — these are
-// thin adapter tests proving web's flat `senderId: number` → `BigInt()` coercion, always-defined
-// `lastFocus`, and `getMessages(uuid)` reader closure map correctly into the shared core.
+// thin adapter tests proving web's flat `senderId: number` → `BigInt()` coercion, the never-focused
+// `lastFocus` read as the epoch, and `getMessages(uuid)` reader closure map correctly into the shared core.
 describe("isMessageUnread", () => {
 	it("is unread: a foreign message newer than lastFocus in an unmuted chat", () => {
 		expect(isMessageUnread(mockMessage({ sentTimestamp: 200n }), mockChat({ lastFocus: 100n }), SELF)).toBe(true)
+	})
+
+	it("is unread: a foreign message in a chat this account never focused", () => {
+		expect(isMessageUnread(mockMessage({ sentTimestamp: 200n }), neverFocusedChat(), SELF)).toBe(true)
+	})
+
+	it("is not unread: our own message in a chat this account never focused", () => {
+		expect(isMessageUnread(mockMessage({ senderId: 1, sentTimestamp: 200n }), neverFocusedChat(), SELF)).toBe(false)
 	})
 
 	it("is not unread: our own message (senderId coerced from number to bigint before compare)", () => {
@@ -89,6 +118,10 @@ describe("chatHasUnread (cheap boolean tier, with blocked cross-ref)", () => {
 
 	it("false for our own last message (senderId coerced from number to bigint before compare)", () => {
 		expect(chatHasUnread(mockChat({ lastFocus: 0n, lastMessage: mockMessage({ senderId: 1, sentTimestamp: 900n }) }), SELF)).toBe(false)
+	})
+
+	it("true for a foreign lastMessage in a chat this account never focused", () => {
+		expect(chatHasUnread(neverFocusedChat({ lastMessage: mockMessage({ senderId: 2, sentTimestamp: 900n }) }), SELF)).toBe(true)
 	})
 })
 
@@ -138,6 +171,16 @@ describe("countUnreadMessages", () => {
 
 	it("is zero for an empty message list", () => {
 		expect(countUnreadMessages([], mockChat(), SELF, EMPTY_BLOCKED_USERS)).toBe(0)
+	})
+
+	it("counts every foreign message in a chat this account never focused", () => {
+		const messages = [
+			mockMessage({ uuid: testUuid("m1"), senderId: 2, sentTimestamp: 150n }),
+			mockMessage({ uuid: testUuid("m2"), senderId: 2, sentTimestamp: 200n }),
+			mockMessage({ uuid: testUuid("m3"), senderId: 1, sentTimestamp: 250n })
+		]
+
+		expect(countUnreadMessages(messages, neverFocusedChat(), SELF, EMPTY_BLOCKED_USERS)).toBe(2)
 	})
 })
 

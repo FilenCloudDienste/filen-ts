@@ -48,7 +48,7 @@ vi.mock("@/features/chats/lib/inflight", () => ({ purgeChatInflightState: () => 
 
 import { queryClient } from "@/queries/client"
 import { CHATS_LIST_REREAD_MS, chatsQueryGet, chatsQueryUpsert, useChats } from "@/features/chats/queries/chats"
-import { chatMessagesQueryUpdate, useChatMessages } from "@/features/chats/queries/chatMessages"
+import { chatMessagesQueryGet, chatMessagesQueryUpdate, useChatMessages } from "@/features/chats/queries/chatMessages"
 import { useChatsUnreadCount } from "@/features/chats/hooks/useChatsUnreadCount"
 import { handleAuthSuccess, handleChatEvent, handleReconnecting, resetSocketReconnectState } from "@/features/chats/lib/socketHandlers"
 import { Sync } from "@/features/chats/lib/sync"
@@ -130,6 +130,38 @@ function dropSocket(): void {
 function recoverSocket(): void {
 	socketAuthenticated()
 	handleAuthSuccess()
+}
+
+function threadMessage(label: string, sentTimestamp: bigint): ChatMessage {
+	return { ...mockMessage(CHAT_A), uuid: testUuid(label), sentTimestamp }
+}
+
+// An open thread whose cached page is missing m2 (read before the socket was up to deliver it) mounts
+// and reads, and a socket delivery of m3 lands mid-read: the patch cancels the read, so the gap stays.
+async function cancelThreadReadWithPatch() {
+	const [m1, m2, m3] = [threadMessage("m1", 10n), threadMessage("m2", 20n), threadMessage("m3", 30n)]
+	const page = deferred<ChatMessage[]>()
+	queryClient.setQueryData(["chats", "list"], CHATS)
+	chatMessagesQueryUpdate(CHAT_A.uuid, () => [m1])
+	listMessagesBefore.mockImplementationOnce(() => page.promise)
+
+	const thread = renderHook(() => useChatMessages(CHAT_A.uuid), { wrapper })
+
+	await act(async () => {
+		await Promise.resolve()
+	})
+	act(() => {
+		chatMessagesQueryUpdate(CHAT_A.uuid, prev => [...prev, m3])
+	})
+	page.resolve([m1, m2])
+	await drain()
+
+	expect(listMessagesBefore).toHaveBeenCalledTimes(1)
+	expect(chatMessagesQueryGet(CHAT_A.uuid)?.map(m => m.uuid)).toEqual([m1.uuid, m3.uuid])
+
+	listMessagesBefore.mockImplementation(() => Promise.resolve([m1, m2, m3]))
+
+	return { thread, complete: [m1, m2, m3] }
 }
 
 beforeEach(() => {
@@ -287,6 +319,54 @@ describe("chat list and message request counts", () => {
 
 		expect(listChats).toHaveBeenCalledTimes(1)
 		expect(listMessagesBefore).toHaveBeenCalledTimes(1)
+	})
+
+	it("a list read a patch cancels doesn't count: a remount reads again and shows the change", async () => {
+		queryClient.setQueryData(["chats", "list"], CHATS)
+		const first = deferred<Chat[]>()
+		listChats.mockImplementationOnce(() => first.promise)
+
+		const list = renderHook(() => useChats(), { wrapper })
+
+		await act(async () => {
+			await Promise.resolve()
+		})
+		act(() => {
+			chatsQueryUpsert({ ...CHAT_A, name: "renamed" })
+		})
+		first.resolve(CHATS)
+		await drain()
+		list.unmount()
+		changeElsewhere()
+
+		renderHook(() => useChats(), { wrapper })
+		await drain()
+
+		expect(listChats).toHaveBeenCalledTimes(2)
+		expect(chatsQueryGet()?.[0]).toMatchObject({ lastFocus: 50n, muted: true })
+	})
+
+	it("a thread read a patch cancels doesn't count: a remount reads again and fills the gap", async () => {
+		const { thread, complete } = await cancelThreadReadWithPatch()
+
+		thread.unmount()
+		renderHook(() => useChatMessages(CHAT_A.uuid), { wrapper })
+		await drain()
+
+		expect(listMessagesBefore).toHaveBeenCalledTimes(2)
+		expect(chatMessagesQueryGet(CHAT_A.uuid)?.map(m => m.uuid)).toEqual(complete.map(m => m.uuid))
+	})
+
+	it("a thread read a patch cancels doesn't count: a return to the tab reads it again and fills the gap", async () => {
+		const { thread, complete } = await cancelThreadReadWithPatch()
+
+		hide()
+		await show()
+
+		expect(listMessagesBefore).toHaveBeenCalledTimes(2)
+		expect(chatMessagesQueryGet(CHAT_A.uuid)?.map(m => m.uuid)).toEqual(complete.map(m => m.uuid))
+
+		thread.unmount()
 	})
 
 	it("a socket reconnect runs exactly one full pass, and a mount during the gap re-reads", async () => {

@@ -25,6 +25,7 @@ import { chatDisplayName, isChatUndecryptable, chatAvatarUrl } from "@/features/
 import { useBlockedUsers } from "@/features/contacts/hooks/useBlockedUsers"
 import { useRevealedBlockedMessages } from "@/features/chats/store/useRevealedBlockedMessages"
 import { markChatRead } from "@/features/chats/lib/actions"
+import { chatLastFocus } from "@/features/chats/lib/unread.logic"
 import { MessageRow } from "@/features/chats/components/thread/messageRow"
 import { ChatDropdownMenuContent } from "@/features/chats/components/chatMenu"
 import { useChatDialogHost } from "@/features/chats/hooks/useChatDialogHost"
@@ -185,7 +186,10 @@ export function MessageThread({ chat }: { chat: Chat }) {
 				}
 			: undefined
 
-	const rows = buildThreadRows(messages, currentUserId !== undefined ? { lastFocus: chat.lastFocus, currentUserId, blocked } : undefined)
+	const rows = buildThreadRows(
+		messages,
+		currentUserId !== undefined ? { lastFocus: chatLastFocus(chat), currentUserId, blocked } : undefined
+	)
 
 	const virtualizer = useVirtualizer({
 		count: rows.length,

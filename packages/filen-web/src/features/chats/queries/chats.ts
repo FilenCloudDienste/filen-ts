@@ -15,6 +15,9 @@ export const CHATS_QUERY_KEY = ["chats", "list"] as const
 // that socket session lasts.
 let listRead: { epoch: number; at: number } | null = null
 
+// Bumped by every patch that would cancel an in-flight list read (cancelInFlightIfCached).
+let listFetchCancels = 0
+
 export function markChatsListUnsynced(): void {
 	listRead = null
 }
@@ -68,9 +71,14 @@ focusManager.subscribe(focused => {
 export async function fetchChats(): Promise<Chat[]> {
 	const epoch = currentSocketEpoch()
 	const at = Date.now()
+	const cancels = listFetchCancels
 	const chats = await sdkApi.listChats()
 
-	listRead = epoch !== null && socketLiveSince(epoch) ? { epoch, at } : null
+	// A patch that landed meanwhile cancelled this read: query-core drops what it returns, so the list never
+	// reaches the cache and the read can't count as its latest.
+	if (listFetchCancels === cancels) {
+		listRead = epoch !== null && socketLiveSince(epoch) ? { epoch, at } : null
+	}
 
 	return chats
 }
@@ -92,9 +100,6 @@ export function useChats(options?: { enabled?: boolean }): UseQueryResult<Chat[]
 		refetchOnWindowFocus: false
 	})
 }
-
-// Bumped by every patch that would cancel an in-flight list fetch (cancelInFlightIfCached).
-let listFetchCancels = 0
 
 function fetchChatsQuery(): Promise<Chat[]> {
 	return queryClient.query({ queryKey: CHATS_QUERY_KEY, queryFn: fetchChats, staleTime: 0 })

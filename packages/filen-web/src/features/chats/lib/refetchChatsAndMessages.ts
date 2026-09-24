@@ -1,6 +1,6 @@
 import { run, Semaphore } from "@filen/shared"
 import { chatsQueryFetch, chatsQueryGet } from "@/features/chats/queries/chats"
-import { fetchMessagesForChat, chatMessagesQueryGet, chatMessagesQueryUpdate, mergeNewestPage } from "@/features/chats/queries/chatMessages"
+import { chatMessagesQueryGet, refreshNewestChatMessages } from "@/features/chats/queries/chatMessages"
 
 // Bulk authoritative resync: the chat list PLUS every chat's message list, all in parallel. This is the
 // one mechanism that makes a client-derived unread count possible — without every chat's messages
@@ -36,11 +36,7 @@ export async function refetchChatsAndMessages(options?: { onlyMissing?: boolean 
 			await Promise.all(
 				chats.map(async chat => {
 					try {
-						const messages = await fetchMessagesForChat(chat)
-
-						// Merge, never replace: this pulls only the newest page, and the open thread may have
-						// older pages scrolled in (mergeNewestPage).
-						chatMessagesQueryUpdate(chat.uuid, prev => mergeNewestPage(prev, messages))
+						await refreshNewestChatMessages(chat)
 					} catch {
 						// A single flaky per-chat read leaves that chat's cache as-is; the next resync retries it.
 					}

@@ -46,7 +46,7 @@ import { sync, enqueueChatMessage } from "@/features/chats/lib/sync"
 import { retryInflightMessage, removeInflightMessage } from "@/features/chats/lib/inflight"
 import { buildOptimisticMessage, type OptimisticSender } from "@/features/chats/lib/sync.logic"
 import { chatMessagesQueryGet } from "@/features/chats/queries/chatMessages"
-import { chatsQueryUpsert } from "@/features/chats/queries/chats"
+import { chatsQueryGet, chatsQueryUpdate, chatsQueryUpsert } from "@/features/chats/queries/chats"
 import useChatsInflightStore, { type ChatMessageWithInflightId, type InflightChatMessages } from "@/features/chats/store/useChatsInflight"
 
 const SENDER: OptimisticSender = { id: 7n, email: "me@filen.io", avatarUrl: undefined, nickName: "Me" }
@@ -202,6 +202,59 @@ describe("commit — dequeue + reconcile the message cache off the returned chat
 		expect(cached[0]?.uuid).toBe("srv-1-1-1")
 		expect(queue()["chat-a-a-a"]).toBeUndefined()
 		expect(useChatsInflightStore.getState().inflightErrors).toEqual({})
+	})
+})
+
+// The SDK hands back the chat the send started from, with the sent message as its lastMessage.
+describe("commit — the conversation row", () => {
+	it("shows the sent message and keeps the rest of the cached row", async () => {
+		chatsQueryUpsert({ ...makeChat("chat-a-a-a"), name: "LIVE", lastFocus: 50n })
+		seed("chat-a-a-a", [opt("chat-a-a-a", "inf-1-1-1", 1n, "hi")])
+
+		sync.syncNow()
+		await tick()
+		await tick()
+
+		expect(chatsQueryGet()).toEqual([
+			{ ...makeChat("chat-a-a-a"), name: "LIVE", lastFocus: 50n, lastMessage: makeConfirmed("chat-a-a-a", "srv-1-1-1") }
+		])
+	})
+
+	it("adds the chat when the list does not hold it", async () => {
+		seed("chat-c-c-c", [opt("chat-c-c-c", "inf-1-1-1", 1n, "hi")])
+
+		sync.syncNow()
+		await tick()
+		await tick()
+
+		expect(chatsQueryGet()).toEqual([{ ...makeChat("chat-c-c-c"), lastMessage: makeConfirmed("chat-c-c-c", "srv-1-1-1") }])
+	})
+
+	it("keeps a reply that landed during the send, and the open chat's read state with it", async () => {
+		let releaseSend: (() => void) | undefined
+		sendChatMessage.mockImplementation(
+			(chat: Chat) =>
+				new Promise(resolve => {
+					releaseSend = () => {
+						resolve({ ...chat, lastMessage: { ...makeConfirmed(chat.uuid, "srv-1-1-1"), sentTimestamp: 100n } })
+					}
+				})
+		)
+		chatsQueryUpsert({ ...makeChat("chat-a-a-a"), lastFocus: 50n })
+		seed("chat-a-a-a", [opt("chat-a-a-a", "inf-1-1-1", 1n, "hi")])
+
+		sync.syncNow()
+		await tick()
+
+		// What the socket handler writes for a reply in the open chat.
+		const reply = { ...makeConfirmed("chat-a-a-a", "srv-2-2-2"), senderId: 8, sentTimestamp: 200n }
+		chatsQueryUpdate(prev => prev.map(c => ({ ...c, lastMessage: reply, lastFocus: 200n })))
+
+		releaseSend?.()
+		await tick()
+		await tick()
+
+		expect(chatsQueryGet()).toEqual([{ ...makeChat("chat-a-a-a"), lastFocus: 200n, lastMessage: reply }])
 	})
 })
 

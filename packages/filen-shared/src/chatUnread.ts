@@ -1,10 +1,11 @@
 // Unread derivation core — the two-tier rule behind every chat unread badge: unmuted, newer than
 // lastFocus, not sent by self, not from a blocked sender. Runs over pre-normalized primitives only;
 // mobile's uniffi Chat/ChatMessage (nested `.inner.senderId: bigint`, optional `lastFocus`) and web's
-// wasm Chat/ChatMessage (flat `senderId: number`, non-optional `lastFocus`) are shaped too differently
-// to share a function that takes them directly, so each app adapts its own shape into these types
-// before calling in. Blocking is injected (`isSenderBlocked`) rather than imported, keeping this
-// module independent of which blocked-user set an app is using.
+// wasm Chat/ChatMessage (flat `senderId: number`, `lastFocus` typed non-optional yet undefined for a chat
+// never focused, which web passes in as the epoch) are shaped too differently to share a function that
+// takes them directly, so each app adapts its own shape into these types before calling in. Blocking is
+// injected (`isSenderBlocked`) rather than imported, keeping this module independent of which
+// blocked-user set an app is using.
 
 export type UnreadMessage = {
 	sentTimestamp: bigint

@@ -173,9 +173,29 @@ describe("chat socket handlers — messages", () => {
 		vi.advanceTimersByTime(100)
 		expect(getMessages("c1")).toHaveLength(0)
 
-		// Past the reconcile delay (3s) + the nested row-patch tick.
+		// Past the reconcile delay (3s).
 		vi.advanceTimersByTime(3_100)
 		expect(getMessages("c1")).toHaveLength(1)
+	})
+
+	// The own echo is parked for the reconcile delay, so a reply can land before it does.
+	it("messageNew never moves a chat's lastMessage back to an older message", () => {
+		vi.useFakeTimers()
+		testQueryClient.setQueryData(ACCOUNT_QUERY_KEY, { id: 1n })
+		seedChats([makeChat("c1")])
+		seedMessages("c1", [])
+		const own = makeMessage("m1", "c1", { senderId: 1, sentTimestamp: 100n })
+		const reply = makeMessage("m2", "c1", { senderId: 2, sentTimestamp: 200n })
+
+		handleChatEvent({ inner: { type: "messageNew", msg: own }, chatMessageId: 0n })
+		vi.advanceTimersByTime(1_000)
+		handleChatEvent({ inner: { type: "messageNew", msg: reply }, chatMessageId: 0n })
+		vi.runAllTimers()
+
+		const chat = getChats()[0]
+		expect(getMessages("c1").map(m => m.uuid)).toEqual([own.uuid, reply.uuid])
+		expect(chat?.lastMessage?.uuid).toBe(reply.uuid)
+		expect(chat !== undefined ? chatHasUnread(chat, 1n) : false).toBe(true)
 	})
 
 	it("unread gating: a FOREIGN message advances lastFocus for the FOCUSED chat (stays read)", () => {
@@ -211,6 +231,43 @@ describe("chat socket handlers — messages", () => {
 
 		const chat = getChats()[0]
 		expect(chat?.lastFocus).toBe(50n)
+		expect(chat !== undefined ? chatHasUnread(chat, 1n) : false).toBe(true)
+	})
+
+	// The SDK hands over lastFocus undefined for a chat this account never focused, whatever the .d.ts says.
+	it("unread gating: a FOREIGN message advances lastFocus for the FOCUSED chat even when it was never focused", () => {
+		vi.useFakeTimers()
+		testQueryClient.setQueryData(ACCOUNT_QUERY_KEY, { id: 1n })
+		seedChats([{ ...makeChat("c1"), lastFocus: undefined } as unknown as Chat])
+		seedMessages("c1", [])
+		setFocusedChat(testUuid("c1"))
+
+		handleChatEvent({
+			inner: { type: "messageNew", msg: makeMessage("m1", "c1", { senderId: 2, sentTimestamp: 200n }) },
+			chatMessageId: 0n
+		})
+		vi.runAllTimers()
+
+		const chat = getChats()[0]
+		expect(chat?.lastFocus).toBe(200n)
+		expect(chat !== undefined ? chatHasUnread(chat, 1n) : true).toBe(false)
+	})
+
+	it("unread gating: a FOREIGN message in a NON-focused chat that was never focused derives unread", () => {
+		vi.useFakeTimers()
+		testQueryClient.setQueryData(ACCOUNT_QUERY_KEY, { id: 1n })
+		seedChats([{ ...makeChat("c1"), lastFocus: undefined } as unknown as Chat])
+		seedMessages("c1", [])
+		setFocusedChat(testUuid("other"))
+
+		handleChatEvent({
+			inner: { type: "messageNew", msg: makeMessage("m1", "c1", { senderId: 2, sentTimestamp: 200n }) },
+			chatMessageId: 0n
+		})
+		vi.runAllTimers()
+
+		const chat = getChats()[0]
+		expect(chat?.lastFocus).toBeUndefined()
 		expect(chat !== undefined ? chatHasUnread(chat, 1n) : false).toBe(true)
 	})
 
