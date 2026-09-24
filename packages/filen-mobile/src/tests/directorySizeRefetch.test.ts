@@ -55,6 +55,11 @@ vi.mock("@/lib/auth", () => ({
 	}
 }))
 
+// Parents in these tests are plain uuid strings.
+vi.mock("@/lib/sdkUnwrap", () => ({
+	unwrapParentUuid: (parent: unknown) => (typeof parent === "string" ? parent : null)
+}))
+
 vi.mock("@/features/offline/offline", () => ({
 	default: {
 		itemSize: vi.fn()
@@ -114,12 +119,14 @@ vi.mock("@filen/sdk-rs", () => {
 
 import useDirectorySizeQuery, {
 	markDirectorySizesStale,
+	refetchMountedDirectorySizes,
 	directorySizeQueryOptions,
 	type UseDirectorySizeQueryParams
 } from "@/features/drive/queries/useDirectorySize.query"
 import useSocketStore from "@/stores/useSocket.store"
 import { trackServerReads } from "@/queries/socketSession"
 import type { DriveItem } from "@/types"
+import cache from "@/lib/cache"
 
 const dirItem = { type: "directory", data: { uuid: "dir-1" } } as unknown as DriveItem
 const sharedItem = { type: "sharedRootDirectory", data: { uuid: "dir-1", sharingRole: {} } } as unknown as DriveItem
@@ -279,5 +286,59 @@ describe("markDirectorySizesStale — drive-derived caches", () => {
 		markDirectorySizesStale()
 
 		expect(driveContentChangedSince(before)).toBe(true)
+	})
+})
+
+describe("refetchMountedDirectorySizes — once a copy or directory upload settles", () => {
+	function params(uuid: string): UseDirectorySizeQueryParams {
+		return { uuid, type: "normal", item: { type: "directory", data: { uuid } } as unknown as DriveItem }
+	}
+
+	function sizedUuids(): string[] {
+		return mockGetDirSize.mock.calls.map(call => (call[0] as { inner: [{ inner: [{ uuid: string }] }] }).inner[0].inner[0].uuid)
+	}
+
+	beforeEach(() => {
+		const dirs = cache.directoryUuidToAnyNormalDir as unknown as Map<string, unknown>
+
+		dirs.clear()
+		dirs.set("dest", { tag: "Dir", inner: [{ uuid: "dest", parent: "grandparent" }] })
+		dirs.set("grandparent", { tag: "Dir", inner: [{ uuid: "grandparent", parent: "root" }] })
+		dirs.set("root", { tag: "Root", inner: [{ uuid: "root" }] })
+	})
+
+	it("reads again only the mounted sizes it changed: what it made and every directory above its destination", async () => {
+		const mounted = ["made", "dest", "grandparent", "sibling"].map(uuid =>
+			renderHook(() => useDirectorySizeQuery(params(uuid)), { wrapper })
+		)
+
+		for (const { result } of mounted) {
+			await waitFor(() => expect(result.current.data).toBeDefined())
+		}
+
+		// An affected size that nothing shows stays for its next mount.
+		await mountAndSettle(params("root"))
+
+		mockGetDirSize.mockClear()
+		markDirectorySizesStale()
+
+		refetchMountedDirectorySizes({ destinationUuid: "dest", createdDirUuids: ["made"] })
+
+		await waitFor(() => expect(mockGetDirSize).toHaveBeenCalledTimes(3))
+		await new Promise(resolve => setTimeout(resolve, 10))
+
+		expect(sizedUuids().sort()).toEqual(["dest", "grandparent", "made"])
+	})
+
+	it("nothing mounted, nothing read", async () => {
+		await mountAndSettle(params("dest"))
+
+		mockGetDirSize.mockClear()
+
+		refetchMountedDirectorySizes({ destinationUuid: "dest", createdDirUuids: ["made"] })
+
+		await new Promise(resolve => setTimeout(resolve, 10))
+
+		expect(mockGetDirSize).not.toHaveBeenCalled()
 	})
 })

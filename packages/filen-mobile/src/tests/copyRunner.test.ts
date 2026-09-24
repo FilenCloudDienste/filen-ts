@@ -62,7 +62,8 @@ const h = vi.hoisted(() => {
 			isCachedFresh: vi.fn()
 		},
 		addAccountStorageUsed: vi.fn(),
-		refetchAfterSocketGap: vi.fn()
+		refetchAfterSocketGap: vi.fn(),
+		refetchMountedDirectorySizes: vi.fn()
 	}
 })
 
@@ -119,7 +120,10 @@ vi.mock("@/features/transfers/transfers", () => ({
 	}
 }))
 vi.mock("@/features/drive/socketCreateBatcher", () => ({ default: { enqueue: h.enqueue, flushNow: h.flushNow } }))
-vi.mock("@/features/drive/queries/useDirectorySize.query", () => ({ markDirectorySizesStale: h.markDirectorySizesStale }))
+vi.mock("@/features/drive/queries/useDirectorySize.query", () => ({
+	markDirectorySizesStale: h.markDirectorySizesStale,
+	refetchMountedDirectorySizes: h.refetchMountedDirectorySizes
+}))
 vi.mock("@/features/drive/driveTrash", () => ({ trash: h.trash }))
 vi.mock("@/queries/useAccount.query", () => ({ accountQuotaDeps: h.account, addAccountStorageUsed: h.addAccountStorageUsed }))
 vi.mock("@/features/drive/queries/useDriveItems.query", () => ({ driveItemsQueryRefetchAfterSocketGap: h.refetchAfterSocketGap }))
@@ -215,6 +219,7 @@ beforeEach(() => {
 	h.account.isCachedFresh.mockReset().mockReturnValue(true)
 	h.addAccountStorageUsed.mockClear()
 	h.refetchAfterSocketGap.mockClear()
+	h.refetchMountedDirectorySizes.mockClear()
 	useSocketStore.setState({ state: "connected", connectedAt: 1 })
 	h.disposals.pause = 0
 	h.disposals.sdkAbort = 0
@@ -792,6 +797,33 @@ describe("retry and pause", () => {
 
 		expect(pausedSeen).toBe(true)
 		expect(resumedSeen).toBe(false)
+	})
+})
+
+describe("directory sizes on screen", () => {
+	it("a copy that made something reads the mounted sizes it changed once, after the final flush", async () => {
+		const createdDir = {
+			request: 0n,
+			sourceUuid: "src-d",
+			item: { tag: NonRootNormalItem_Tags.Dir, inner: [{ uuid: "made-dir", parent: "dest" }] }
+		}
+
+		scriptCopy(async () =>
+			report({ topLevel: [createdFile("made-file"), createdDir], counts: { ...ZERO, filesDone: 2n, dirsCreated: 1n } })
+		)
+
+		await runJob()
+
+		expect(h.refetchMountedDirectorySizes).toHaveBeenCalledExactlyOnceWith({ destinationUuid: "dest", createdDirUuids: ["made-dir"] })
+		expect(h.flushNow.mock.invocationCallOrder[0]).toBeLessThan(h.refetchMountedDirectorySizes.mock.invocationCallOrder[0] ?? 0)
+	})
+
+	it("a copy that made nothing reads none", async () => {
+		scriptCopy(async () => report({ counts: ZERO }))
+
+		await runJob()
+
+		expect(h.refetchMountedDirectorySizes).not.toHaveBeenCalled()
 	})
 })
 

@@ -19,6 +19,7 @@ import {
 import offline from "@/features/offline/offline"
 import { isDirectoryItem } from "@/features/drive/driveSelectors"
 import { type DriveItem } from "@/types"
+import { unwrapParentUuid } from "@/lib/sdkUnwrap"
 
 export const BASE_QUERY_KEY = "useDirectorySizeQuery"
 
@@ -230,6 +231,49 @@ export function markDirectorySizesStale(): void {
 
 	markAccountStale()
 	noteDriveContentChanged()
+}
+
+// Deep enough for any real tree; a cycle or an uncached ancestor ends the walk earlier.
+const MAX_ANCESTOR_DEPTH = 64
+
+/**
+ * Once a copy or directory upload settles, the sizes on screen that it changed are read again: the
+ * directories it made and every directory from its destination up to the root. markDirectorySizesStale
+ * leaves mounted rows alone, so a row that mounted while the directory was still filling (it appears
+ * as soon as it is created) would otherwise keep that early size until it remounts. Unmounted sizes
+ * stay marked stale for their next mount.
+ */
+export function refetchMountedDirectorySizes({
+	destinationUuid,
+	createdDirUuids
+}: {
+	destinationUuid: string | null
+	createdDirUuids: readonly string[]
+}): void {
+	const affected = new Set<string>(createdDirUuids)
+	let uuid = destinationUuid ?? cache.rootUuid
+
+	for (let depth = 0; uuid && depth < MAX_ANCESTOR_DEPTH && !affected.has(uuid); depth++) {
+		affected.add(uuid)
+
+		const dir = cache.directoryUuidToAnyNormalDir.get(uuid)
+
+		uuid = dir && dir.tag === AnyNormalDir_Tags.Dir ? unwrapParentUuid(dir.inner[0].parent) : null
+	}
+
+	if (affected.size === 0) {
+		return
+	}
+
+	void queryClient.refetchQueries({
+		queryKey: [BASE_QUERY_KEY],
+		type: "active",
+		predicate: query => {
+			const key = query.queryKey[1] as ReturnType<typeof directorySizeQueryKey> | undefined
+
+			return key !== undefined && key.type !== "offline" && affected.has(key.uuid)
+		}
+	})
 }
 
 export function useDirectorySizeQuery(

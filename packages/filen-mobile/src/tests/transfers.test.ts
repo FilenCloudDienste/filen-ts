@@ -163,13 +163,15 @@ const {
 
 vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 
-const { mockMarkDirectorySizesStale, mockAddAccountStorageUsed } = vi.hoisted(() => ({
+const { mockMarkDirectorySizesStale, mockAddAccountStorageUsed, mockRefetchMountedDirectorySizes } = vi.hoisted(() => ({
 	mockMarkDirectorySizesStale: vi.fn(),
-	mockAddAccountStorageUsed: vi.fn()
+	mockAddAccountStorageUsed: vi.fn(),
+	mockRefetchMountedDirectorySizes: vi.fn()
 }))
 
 vi.mock("@/features/drive/queries/useDirectorySize.query", () => ({
-	markDirectorySizesStale: mockMarkDirectorySizesStale
+	markDirectorySizesStale: mockMarkDirectorySizesStale,
+	refetchMountedDirectorySizes: mockRefetchMountedDirectorySizes
 }))
 
 vi.mock("@/queries/useAccount.query", () => ({
@@ -1281,8 +1283,14 @@ describe("Transfers", () => {
 				})
 
 				expect(mockAddAccountStorageUsed).toHaveBeenCalledExactlyOnceWith(500n)
+				// The sizes on screen that it changed are read once, not per batch.
+				expect(mockRefetchMountedDirectorySizes).toHaveBeenCalledExactlyOnceWith({
+					destinationUuid: "parent-uuid",
+					createdDirUuids: ["dir-uuid"]
+				})
 
 				mockAddAccountStorageUsed.mockClear()
+				mockRefetchMountedDirectorySizes.mockClear()
 
 				mockUploadDirRecursively.mockImplementationOnce(async (_path: string, callbacks: any) => {
 					callbacks.onUploadUpdate([], [files[0]], 10n)
@@ -1297,6 +1305,7 @@ describe("Transfers", () => {
 				})
 
 				expect(mockAddAccountStorageUsed).not.toHaveBeenCalled()
+				expect(mockRefetchMountedDirectorySizes).not.toHaveBeenCalled()
 			})
 
 			// Pins the directory-branch resolved-value contract (parity with downloadCore): per-entry

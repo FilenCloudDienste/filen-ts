@@ -49,7 +49,7 @@ import {
 import { copyGlyphForCopyItems, copyGlyphForEntries, copyGlyphForItems, driveItemToCopyItem } from "@/features/copy/copySource"
 import copyActivity from "@/features/drive/copyActivity"
 import socketCreateBatcher from "@/features/drive/socketCreateBatcher"
-import { markDirectorySizesStale } from "@/features/drive/queries/useDirectorySize.query"
+import { markDirectorySizesStale, refetchMountedDirectorySizes } from "@/features/drive/queries/useDirectorySize.query"
 import { trash } from "@/features/drive/driveTrash"
 import { accountQuotaDeps, addAccountStorageUsed } from "@/queries/useAccount.query"
 import { driveItemsQueryRefetchAfterSocketGap } from "@/features/drive/queries/useDriveItems.query"
@@ -317,6 +317,8 @@ class CopyRunner {
 		const socketAtStart = useSocketStore.getState()
 		// Set when what the job made below its destination may have outrun the socket.
 		let refetchDestination: { uuid: string | null } | null = null
+		// Set when the job made something: the mounted sizes it changed are read once after it settles.
+		let sizesChanged: { destinationUuid: string | null; createdDirUuids: string[] } | null = null
 
 		useCopyJobsStore.getState().put(createCopyJob(id, destination, itemCount, glyph))
 
@@ -523,13 +525,20 @@ class CopyRunner {
 			const settledJob = getCopyJob(id)
 			const socket = useSocketStore.getState()
 
-			if (
-				settledJob &&
-				(settledJob.counts.dirsCreated > 0 || settledJob.counts.filesDone > 0) &&
-				(socketAtStart.state !== "connected" || socket.state !== "connected" || socket.connectedAt !== socketAtStart.connectedAt)
-			) {
-				refetchDestination = {
-					uuid: settledJob.destination.uuid
+			if (settledJob && (settledJob.counts.dirsCreated > 0 || settledJob.counts.filesDone > 0)) {
+				sizesChanged = {
+					destinationUuid: settledJob.destination.uuid,
+					createdDirUuids: copied.filter(item => item.type === "directory").map(item => item.data.uuid)
+				}
+
+				if (
+					socketAtStart.state !== "connected" ||
+					socket.state !== "connected" ||
+					socket.connectedAt !== socketAtStart.connectedAt
+				) {
+					refetchDestination = {
+						uuid: settledJob.destination.uuid
+					}
 				}
 			}
 
@@ -554,6 +563,10 @@ class CopyRunner {
 
 				if (refetchDestination) {
 					driveItemsQueryRefetchAfterSocketGap(refetchDestination.uuid)
+				}
+
+				if (sizesChanged) {
+					refetchMountedDirectorySizes(sizesChanged)
 				}
 			}
 
