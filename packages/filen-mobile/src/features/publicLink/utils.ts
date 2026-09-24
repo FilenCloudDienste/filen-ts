@@ -44,3 +44,46 @@ export function isPublicLinkQueryError(
 ): boolean {
 	return publicLinkStatus === "error" || account === "error"
 }
+
+type LinkStatusQuery<T> = {
+	status: "pending" | "error" | "success"
+	fetchStatus: "fetching" | "paused" | "idle"
+	data: T | undefined
+	refetch: (options: { cancelRefetch: boolean }) => Promise<{ data: T | undefined }>
+}
+
+/**
+ * The link status the screen holds, when it is current: its mount read has settled. Until then the
+ * value may be a persisted row from before a change made on another device, which enable and disable
+ * must not trust in place of their own read.
+ */
+export function currentHeldLinkStatus<T>(query: LinkStatusQuery<T>): { current: true; value: T | undefined } | { current: false } {
+	if (query.status !== "success" || query.fetchStatus !== "idle") {
+		return {
+			current: false
+		}
+	}
+
+	return {
+		current: true,
+		value: query.data
+	}
+}
+
+/**
+ * The link status to build a save from: the held one when current, else the read in flight (joined,
+ * not restarted), so a save never writes back fields a newer server state has replaced.
+ */
+export async function linkStatusForWrite<T>(query: LinkStatusQuery<T>): Promise<T | undefined> {
+	const held = currentHeldLinkStatus(query)
+
+	if (held.current) {
+		return held.value
+	}
+
+	return (
+		await query.refetch({
+			cancelRefetch: false
+		})
+	).data
+}

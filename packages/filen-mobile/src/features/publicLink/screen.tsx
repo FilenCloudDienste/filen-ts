@@ -35,7 +35,7 @@ import { driveItemDisplayName } from "@/lib/decryption"
 import CannotDecryptScreen from "@/components/cannotDecryptScreen"
 import i18n from "@/lib/i18n"
 import ListEmpty from "@/components/ui/listEmpty"
-import { isExpirationChecked, isPublicLinkQueryError } from "@/features/publicLink/utils"
+import { currentHeldLinkStatus, isExpirationChecked, isPublicLinkQueryError, linkStatusForWrite } from "@/features/publicLink/utils"
 import logger from "@/lib/logger"
 
 function expirationToText(expiration: PublicLinkExpiration, t: TFunction) {
@@ -183,46 +183,37 @@ function PublicLink() {
 										props: {
 											onPress: async () => {
 												const result = await runWithLoading(async () => {
-													if (!publicLinkStatusQuery.data) {
+													const status = await linkStatusForWrite(publicLinkStatusQuery)
+
+													if (!status) {
 														throw new Error(i18n.t("error_generic"))
 													}
 
-													if (itemParsed.type !== publicLinkStatusQuery.data.type) {
+													if (itemParsed.type !== status.type) {
 														throw new Error(i18n.t("error_generic"))
 													}
 
 													return await drive.updatePublicLink({
 														item: itemParsed,
 														link:
-															publicLinkStatusQuery.data.type === "file"
+															status.type === "file"
 																? {
 																		type: "file" as const,
 																		link: {
-																			...publicLinkStatusQuery.data.status,
-																			password:
-																				edited.password ??
-																				publicLinkStatusQuery.data.status.password,
-																			downloadable:
-																				edited.downloadable ??
-																				publicLinkStatusQuery.data.status.downloadable,
-																			expiration:
-																				edited.expiration ??
-																				publicLinkStatusQuery.data.status.expiration
+																			...status.status,
+																			password: edited.password ?? status.status.password,
+																			downloadable: edited.downloadable ?? status.status.downloadable,
+																			expiration: edited.expiration ?? status.status.expiration
 																		}
 																	}
 																: {
 																		type: "directory" as const,
 																		link: {
-																			...publicLinkStatusQuery.data.status,
-																			password:
-																				edited.password ??
-																				publicLinkStatusQuery.data.status.password,
+																			...status.status,
+																			password: edited.password ?? status.status.password,
 																			enableDownload:
-																				edited.downloadable ??
-																				publicLinkStatusQuery.data.status.enableDownload,
-																			expiration:
-																				edited.expiration ??
-																				publicLinkStatusQuery.data.status.expiration
+																				edited.downloadable ?? status.status.enableDownload,
+																			expiration: edited.expiration ?? status.status.expiration
 																		}
 																	}
 													})
@@ -343,10 +334,11 @@ function PublicLink() {
 														value: true,
 														onValueChange: async () => {
 															const result = await runWithLoading(async () => {
+																const held = currentHeldLinkStatus(publicLinkStatusQuery)
+
 																return await drive.disablePublicLink({
 																	item: itemParsed,
-																	// The switch only renders with a loaded status.
-																	known: publicLinkStatusQuery.data ?? undefined
+																	known: held.current ? (held.value ?? undefined) : undefined
 																})
 															})
 
@@ -541,11 +533,11 @@ function PublicLink() {
 													}
 
 													const result = await runWithLoading(async () => {
+														const held = currentHeldLinkStatus(publicLinkStatusQuery)
+
 														return await drive.enablePublicLink({
 															item: itemParsed,
-															// This button only renders once the status read found no link.
-															knownAbsent:
-																publicLinkStatusQuery.status === "success" && publicLinkStatusQuery.data === null
+															knownAbsent: held.current && held.value === null
 														})
 													})
 

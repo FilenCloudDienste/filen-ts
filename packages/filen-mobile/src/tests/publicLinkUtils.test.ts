@@ -17,7 +17,7 @@ vi.mock("@filen/sdk-rs", () => ({
 }))
 
 import { PublicLinkExpiration } from "@filen/sdk-rs"
-import { isExpirationChecked, isPublicLinkQueryError } from "@/features/publicLink/utils"
+import { currentHeldLinkStatus, isExpirationChecked, isPublicLinkQueryError, linkStatusForWrite } from "@/features/publicLink/utils"
 
 describe("isExpirationChecked", () => {
 	it("returns true for the edited value when an edited selection is present", () => {
@@ -158,5 +158,45 @@ describe("isPublicLinkQueryError", () => {
 	it("returns false when one is success and the other is pending", () => {
 		expect(isPublicLinkQueryError("success", "pending")).toBe(false)
 		expect(isPublicLinkQueryError("pending", "success")).toBe(false)
+	})
+})
+
+describe("the link status the screen holds", () => {
+	const persisted = { linkUuid: "old" }
+	const fresh = { linkUuid: "new" }
+
+	function query(
+		fetchStatus: "fetching" | "paused" | "idle",
+		data: typeof persisted | null,
+		status: "pending" | "error" | "success" = "success"
+	) {
+		return {
+			status,
+			fetchStatus,
+			data,
+			refetch: vi.fn(async () => ({ data: fresh }))
+		}
+	}
+
+	it("is current only once the mount read has settled", () => {
+		expect(currentHeldLinkStatus(query("idle", null))).toEqual({ current: true, value: null })
+		expect(currentHeldLinkStatus(query("idle", persisted))).toEqual({ current: true, value: persisted })
+		// A persisted "no link" or link shown while the read is in flight is not trusted.
+		expect(currentHeldLinkStatus(query("fetching", null))).toEqual({ current: false })
+		expect(currentHeldLinkStatus(query("fetching", persisted))).toEqual({ current: false })
+		expect(currentHeldLinkStatus(query("paused", persisted))).toEqual({ current: false })
+		expect(currentHeldLinkStatus(query("idle", persisted, "error"))).toEqual({ current: false })
+	})
+
+	it("a save builds on the held status when current, else joins the read in flight", async () => {
+		const settled = query("idle", persisted)
+
+		expect(await linkStatusForWrite(settled)).toBe(persisted)
+		expect(settled.refetch).not.toHaveBeenCalled()
+
+		const reading = query("fetching", persisted)
+
+		expect(await linkStatusForWrite(reading)).toBe(fresh)
+		expect(reading.refetch).toHaveBeenCalledExactlyOnceWith({ cancelRefetch: false })
 	})
 })
