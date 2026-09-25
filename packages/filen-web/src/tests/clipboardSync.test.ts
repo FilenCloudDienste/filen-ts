@@ -7,6 +7,7 @@ import type {
 	FileVersion,
 	NormalDirsAndFiles,
 	SharedFile,
+	SharedRootDir,
 	SharedRootDirsAndFiles,
 	SharingRole,
 	SocketEvent,
@@ -30,6 +31,8 @@ const {
 	restoreFileVersionOp,
 	listDirectory,
 	listSharedOutRoot,
+	getFile,
+	getDirectory,
 	toastWarning,
 	toastError
 } = vi.hoisted(() => ({
@@ -43,6 +46,8 @@ const {
 	restoreFileVersionOp: vi.fn(),
 	listDirectory: vi.fn<(target: ListDirectoryTarget) => Promise<NormalDirsAndFiles>>(),
 	listSharedOutRoot: vi.fn<() => Promise<SharedRootDirsAndFiles>>(),
+	getFile: vi.fn<(uuid: string) => Promise<File | undefined>>(),
+	getDirectory: vi.fn<(uuid: string) => Promise<Dir | undefined>>(),
 	toastWarning: vi.fn(),
 	toastError: vi.fn()
 }))
@@ -56,7 +61,9 @@ vi.mock("@/lib/sdk/client", () => ({
 		setDirectoryColor,
 		restoreFileVersionOp,
 		listDirectory,
-		listSharedOutRoot
+		listSharedOutRoot,
+		getFile,
+		getDirectory
 	}
 }))
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
@@ -648,6 +655,146 @@ describe("a paste after the socket missed events", () => {
 		expect(listDirectory).not.toHaveBeenCalled()
 	})
 
+	// The Shared by me root lists what is shared; one it stops listing may still exist.
+	describe("a Shared by me root row the root no longer lists", () => {
+		const sharedRootDir: SharedRootDir = {
+			inner: { uuid: testUuid("sd1"), color: "red", timestamp: 0n, meta: { type: "decoded", data: { name: "papers" } } },
+			sharingRole: RECEIVER,
+			writeAccess: true
+		}
+
+		async function copySharedRoots(): Promise<void> {
+			listSharedOutRoot.mockResolvedValue({ dirs: [sharedRootDir], files: [rawSharedFile("s1", RECEIVER)] })
+			await queryClient.query(driveListingQueryOptions("sharedOut", null))
+			copyToClipboard([narrowItem(rawSharedFile("s1", RECEIVER)), narrowItem(sharedRootDir)])
+			socketGap()
+			listSharedOutRoot.mockResolvedValue({ dirs: [], files: [] })
+		}
+
+		it("pastes it as its owner now has it once it was only unshared", async () => {
+			await copySharedRoots()
+			getFile.mockResolvedValue(rawFile("s1", { stableUUID: LINEAGE, meta: fileMeta("report.pdf") }))
+			getDirectory.mockResolvedValue(rawDir("sd1", { color: "red", meta: { type: "decoded", data: { name: "papers" } } }))
+			listHome({ files: [rawFile("s1", { stableUUID: LINEAGE, meta: fileMeta("report.pdf") })] })
+
+			await expect(recheckClipboard()).resolves.toBe(true)
+			expect(getFile).toHaveBeenCalledExactlyOnceWith(testUuid("s1"))
+			expect(getDirectory).toHaveBeenCalledExactlyOnceWith(testUuid("sd1"))
+			expect(listDirectory).toHaveBeenCalledExactlyOnceWith({ kind: "uuid", uuid: HOME })
+			expect(toastWarning).not.toHaveBeenCalled()
+
+			await pasteClipboard(DESTINATION)
+
+			expect(startCopyWithCard.mock.calls[0]?.[0]).toMatchObject([
+				{ type: "file", data: { uuid: testUuid("s1"), stableUUID: LINEAGE, decryptedMeta: { name: "report.pdf" } } },
+				{ type: "directory", data: { uuid: testUuid("sd1"), parent: HOME, decryptedMeta: { name: "papers" } } }
+			])
+		})
+
+		// A content save leaves the old uuid resolving as it was, its parent unchanged and not trashed.
+		it("pastes the newest version of a file whose content was saved", async () => {
+			await copySharedRoots()
+			getFile.mockResolvedValue(rawFile("s1", { stableUUID: LINEAGE, meta: fileMeta("report.pdf") }))
+			getDirectory.mockResolvedValue(rawDir("sd1"))
+			listHome({ files: [rawFile("s2", { stableUUID: LINEAGE, meta: fileMeta("report.pdf") })] })
+
+			await expect(recheckClipboard()).resolves.toBe(true)
+			expect(toastWarning).not.toHaveBeenCalled()
+
+			await pasteClipboard(DESTINATION)
+
+			expect(startCopyWithCard.mock.calls[0]?.[0]).toMatchObject([
+				{ type: "file", data: { uuid: testUuid("s2"), stableUUID: LINEAGE } },
+				{ type: "directory", data: { uuid: testUuid("sd1") } }
+			])
+		})
+
+		it.each([
+			{
+				gone: "no longer holds it",
+				read: () => {
+					listHome({})
+				}
+			},
+			{
+				gone: "is gone",
+				read: () => {
+					listDirectory.mockRejectedValue({
+						species: "sdk",
+						kind: "FolderNotFound",
+						label: "Folder not found",
+						message: "Folder not found"
+					})
+				}
+			}
+		])("leaves out a file once its directory $gone", async ({ read }) => {
+			await copySharedRoots()
+			getFile.mockResolvedValue(rawFile("s1", { stableUUID: LINEAGE }))
+			getDirectory.mockResolvedValue(rawDir("sd1"))
+			read()
+
+			await expect(recheckClipboard()).resolves.toBe(true)
+			expect(uuids()).toEqual([testUuid("sd1")])
+			expect(toastWarning).toHaveBeenCalledExactlyOnceWith("1 item was moved or deleted and won't be pasted")
+			expect(toastError).not.toHaveBeenCalled()
+		})
+
+		// As logout cancels every read.
+		it("gives up quietly on its directory's read cancelled for good", async () => {
+			await copySharedRoots()
+			getFile.mockResolvedValue(rawFile("s1", { stableUUID: LINEAGE }))
+			getDirectory.mockResolvedValue(rawDir("sd1"))
+			listDirectory.mockImplementation(() => new Promise(() => undefined))
+
+			const rechecked = recheckClipboard()
+
+			await vi.waitFor(() => {
+				expect(listDirectory).toHaveBeenCalledOnce()
+			})
+			await queryClient.cancelQueries()
+
+			await expect(rechecked).resolves.toBe(false)
+			expect(toastError).not.toHaveBeenCalled()
+		})
+
+		it.each([
+			{ gone: "trashed", file: () => rawFile("s1", { parent: "trash", stableUUID: LINEAGE }) },
+			{ gone: "deleted", file: () => undefined }
+		])("leaves it out once $gone", async ({ file }) => {
+			await copySharedRoots()
+			getFile.mockResolvedValue(file())
+			getDirectory.mockResolvedValue(rawDir("sd1"))
+
+			await expect(recheckClipboard()).resolves.toBe(true)
+			expect(uuids()).toEqual([testUuid("sd1")])
+			expect(toastWarning).toHaveBeenCalledExactlyOnceWith("1 item was moved or deleted and won't be pasted")
+		})
+
+		it("isn't looked up for an entry replaced while the root was read", async () => {
+			await copySharedRoots()
+
+			let land: () => void = () => undefined
+
+			listSharedOutRoot.mockImplementationOnce(
+				() =>
+					new Promise(resolve => {
+						land = () => {
+							resolve({ dirs: [], files: [] })
+						}
+					})
+			)
+
+			const rechecked = recheckClipboard()
+
+			copyToClipboard([U1])
+			land()
+
+			await expect(rechecked).resolves.toBe(false)
+			expect(getFile).not.toHaveBeenCalled()
+			expect(getDirectory).not.toHaveBeenCalled()
+		})
+	})
+
 	it("leaves an item shared with the user as it is, reading nothing", async () => {
 		const sharedIn = narrowItem(rawSharedFile("in1", SHARER))
 
@@ -847,5 +994,53 @@ describe("a paste after the socket missed events", () => {
 
 		expect(names()).toEqual(["b.txt"])
 		expect(isClipboardCurrent()).toBe(true)
+	})
+
+	// The paste was for the entry it looked up: one copied or cut meanwhile is looked up by its own paste.
+	it("applies no lookup to an entry made while it ran", async () => {
+		let elsewhereName = "e.txt"
+
+		listDirectory.mockImplementation(target =>
+			Promise.resolve(
+				target.kind === "uuid" && target.uuid === ELSEWHERE
+					? {
+							dirs: [],
+							files: [rawFile("e1", { parent: ELSEWHERE, stableUUID: testUuid("e-lineage"), meta: fileMeta(elsewhereName) })]
+						}
+					: { dirs: [], files: [rawFile("u1")] }
+			)
+		)
+		await queryClient.query(driveListingQueryOptions("drive", HOME))
+		await queryClient.query(driveListingQueryOptions("drive", ELSEWHERE))
+		copyToClipboard([U1])
+		socketGap()
+
+		let land: () => void = () => undefined
+
+		listDirectory.mockImplementationOnce(
+			() =>
+				new Promise(resolve => {
+					land = () => {
+						resolve({ dirs: [], files: [rawFile("u1")] })
+					}
+				})
+		)
+
+		const rechecked = recheckClipboard()
+
+		// The rows on screen, whose read after the gap hasn't landed.
+		cutToClipboard(queryClient.getQueryData<DriveItem[]>(driveListingQueryKey({ variant: "drive", uuid: ELSEWHERE })) ?? [])
+		land()
+
+		await expect(rechecked).resolves.toBe(false)
+		expect(isClipboardCurrent()).toBe(false)
+
+		elsewhereName = "f.txt"
+		await expect(recheckClipboard()).resolves.toBe(true)
+
+		performMove.mockResolvedValue({ succeeded: [], failed: [] })
+		await pasteClipboard(DESTINATION)
+
+		expect(performMove.mock.calls[0]?.[0]).toMatchObject([{ data: { uuid: testUuid("e1"), decryptedMeta: { name: "f.txt" } } }])
 	})
 })

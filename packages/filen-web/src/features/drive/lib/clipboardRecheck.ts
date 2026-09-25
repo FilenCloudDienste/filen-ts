@@ -4,8 +4,9 @@ import type { ParentUuid, SharingRole } from "@filen/sdk-rs"
 import { i18n } from "@/lib/i18n"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { asErrorDTO, DIRECTORY_NOT_FOUND_PREFIX, type ErrorDTO } from "@/lib/sdk/errors"
+import { sdkApi } from "@/lib/sdk/client"
 import { queryClient } from "@/queries/client"
-import type { DriveItem } from "@/features/drive/lib/item"
+import { asDirectoryOrFile, narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { currentRootUuid } from "@/features/drive/lib/actions"
 import {
 	driveListingQueryKey,
@@ -14,14 +15,21 @@ import {
 	normalizeParentUuid,
 	type DriveListingParams
 } from "@/features/drive/queries/drive"
-import { clipboardStamp, isClipboardCurrent, stableUuidOf, useDriveClipboardStore } from "@/features/drive/store/useDriveClipboardStore"
+import {
+	clipboardGeneration,
+	clipboardStamp,
+	isClipboardCurrent,
+	stableUuidOf,
+	useDriveClipboardStore
+} from "@/features/drive/store/useDriveClipboardStore"
 
 // Events keep the clipboard on its items only while the socket stays up and delivers every drive event
 // (clipboardSync.ts). After a gap, or when rows were copied from a listing that may be out of date, a paste
 // first looks each item up again in the listing that holds it, read cache-first: a current one costs
 // nothing, and any other the cache holds is read once, the read its next visit makes anyway. One the cache
 // doesn't hold was never opened here and isn't read for this: its items paste as they are. Never a lookup
-// per item, and nothing while the socket stays up.
+// per item, save a Shared by me root item its root no longer lists, looked up by itself and, for a file, in
+// its directory's listing too. Nothing while the socket stays up.
 
 // The other party's role: the receiver's for an item shared out, so the user owns it.
 function sharedOut(role: SharingRole | undefined): boolean {
@@ -96,6 +104,33 @@ function currentRow(item: DriveItem, rows: ListingRows): DriveItem | null {
 	const stableUuid = stableUuidOf(item)
 
 	return (stableUuid === undefined ? undefined : rows.byStableUuid.get(stableUuid)) ?? null
+}
+
+// A Shared by me root item its root no longer lists was unshared, trashed or deleted, which only the item
+// itself tells apart: as its owner now has it, or null once gone. A content save leaves a file's old uuid
+// resolving as it was, so a file is taken as its directory's listing now holds it.
+async function unlistedSharedRoot(
+	item: DriveItem,
+	rootUuid: string,
+	rowsOf: (params: DriveListingParams) => Promise<ListingRows | null>
+): Promise<DriveItem | null> {
+	const uuid = item.data.uuid
+
+	if (asDirectoryOrFile(item).type === "directory") {
+		const dir = await sdkApi.getDirectory(uuid)
+
+		return dir === undefined || dir.parent === "trash" ? null : narrowItem(dir)
+	}
+
+	const file = await sdkApi.getFile(uuid)
+
+	if (file === undefined || file.parent === "trash") {
+		return null
+	}
+
+	const rows = await rowsOf(parentListing(file.parent, rootUuid))
+
+	return rows === null ? null : currentRow(narrowItem(file), rows)
 }
 
 interface CachedListing {
@@ -196,8 +231,32 @@ async function readRows(params: DriveListingParams, rejoins = 0): Promise<DriveI
 	}
 }
 
-// Brings the clipboard's items up to date before a paste. false when a listing couldn't be read: the
-// paste is refused rather than acting on items that may be stale.
+// A listing's rows, read cache-first. null once its directory is gone, and with it everything it held.
+async function listingRows(params: DriveListingParams): Promise<ListingRows | null> {
+	try {
+		return indexRows(await readRows(params))
+	} catch (e) {
+		if (isDirectoryGone(asErrorDTO(e))) {
+			return null
+		}
+
+		throw e
+	}
+}
+
+// The paste is refused over a lookup that failed. A read cancelled for good, as logout cancels them, is no
+// error to show.
+function refuse(e: unknown): false {
+	if (!(e instanceof CancelledError)) {
+		toast.error(errorLabel(asErrorDTO(e)))
+	}
+
+	return false
+}
+
+// Brings the clipboard's items up to date before a paste. false when a listing couldn't be read, or when
+// something else was copied or cut meanwhile: the paste is refused rather than acting on items that may be
+// stale, or that it wasn't asked for.
 export async function recheckClipboard(): Promise<boolean> {
 	const entry = useDriveClipboardStore.getState().entry
 
@@ -208,14 +267,29 @@ export async function recheckClipboard(): Promise<boolean> {
 	// Taken before the reads: an event landing during them still reaches the items, and a gap during them
 	// makes the next paste look again.
 	const checked = clipboardStamp()
+	const generation = clipboardGeneration()
 	const rootUuid = currentRootUuid()
-	// null once the listing's directory is gone, and with it everything it held.
 	const listings = new Map<string, ListingRows | null>()
-	const reads = new Map<string, Promise<void>>()
-	const homes = new Map<DriveItem, string>()
+	const reads = new Map<string, Promise<ListingRows | null>>()
+	// Each listing read once. A file created moments ago joins its listing first, so a content save's
+	// successor is found there.
+	const rowsOf = (params: DriveListingParams): Promise<ListingRows | null> => {
+		const key = listingKey(params)
+		let read = reads.get(key)
 
-	// A file created moments ago joins its listing first, so a content save's successor is found there.
-	flushListingCreates()
+		if (read === undefined) {
+			flushListingCreates()
+			read = listingRows(params).then(rows => {
+				listings.set(key, rows)
+
+				return rows
+			})
+			reads.set(key, read)
+		}
+
+		return read
+	}
+	const homes = new Map<DriveItem, string>()
 
 	for (const item of entry.items) {
 		const home = homeListing(item, rootUuid)
@@ -224,51 +298,53 @@ export async function recheckClipboard(): Promise<boolean> {
 			continue
 		}
 
-		const key = listingKey(home)
-
-		if (!reads.has(key)) {
-			reads.set(
-				key,
-				readRows(home).then(
-					rows => {
-						listings.set(key, indexRows(rows))
-					},
-					(e: unknown) => {
-						if (!isDirectoryGone(asErrorDTO(e))) {
-							throw e
-						}
-
-						listings.set(key, null)
-					}
-				)
-			)
-		}
-
-		homes.set(item, key)
+		void rowsOf(home)
+		homes.set(item, listingKey(home))
 	}
 
 	try {
 		await Promise.all(reads.values())
 	} catch (e) {
-		// A read cancelled for good, as logout cancels them, is no error to show.
-		if (!(e instanceof CancelledError)) {
-			toast.error(errorLabel(asErrorDTO(e)))
-		}
-
-		return false
+		return refuse(e)
 	}
 
 	const found = new Map<DriveItem, DriveItem | null>()
+	const unlisted: DriveItem[] = []
 
 	for (const [item, key] of homes) {
 		const rows = listings.get(key)
 
-		if (rows !== undefined) {
-			found.set(item, rows === null ? null : currentRow(item, rows))
+		if (rows === undefined) {
+			continue
+		}
+
+		const row = rows === null ? null : currentRow(item, rows)
+
+		if (row === null && (item.type === "sharedRootDirectory" || item.type === "sharedRootFile")) {
+			unlisted.push(item)
+		} else {
+			found.set(item, row)
 		}
 	}
 
-	const gone = useDriveClipboardStore.getState().applyRecheck(found, checked)
+	// Not for an entry the user has already replaced.
+	if (unlisted.length > 0 && clipboardGeneration() === generation) {
+		try {
+			await Promise.all(
+				unlisted.map(async item => {
+					found.set(item, await unlistedSharedRoot(item, rootUuid, rowsOf))
+				})
+			)
+		} catch (e) {
+			return refuse(e)
+		}
+	}
+
+	const gone = useDriveClipboardStore.getState().applyRecheck(found, checked, generation)
+
+	if (gone === null) {
+		return false
+	}
 
 	if (gone > 0) {
 		toast.warning(i18n.t("drive:driveClipboardItemsGoneToast", { count: gone }))

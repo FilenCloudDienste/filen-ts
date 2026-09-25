@@ -48,10 +48,10 @@ interface DriveClipboardState {
 	// Applies a change to the items held here: the entry's, and those of the cuts being pasted. The state
 	// stays as it is when none of them changed.
 	follow: (change: ClipboardChange) => void
-	// Applies a lookup of the entry's items begun at `checked` (clipboardRecheck.ts): each item it found
-	// becomes its current row, or leaves once gone. One a change replaced meanwhile keeps that change.
-	// Returns how many left.
-	applyRecheck: (found: ReadonlyMap<DriveItem, DriveItem | null>, checked: ClipboardStamp) => number
+	// Applies a lookup of the entry's items begun at `checked`, in generation `begunIn` (clipboardRecheck.ts):
+	// each item it found becomes its current row, or leaves once gone. One a change replaced meanwhile keeps
+	// that change. Returns how many left, or null, applying nothing, once the clipboard holds another entry.
+	applyRecheck: (found: ReadonlyMap<DriveItem, DriveItem | null>, checked: ClipboardStamp, begunIn: number) => number | null
 	// A pasted cut leaves the clipboard as it starts moving, so a second paste can't move the same items
 	// again; what failed to move comes back, unless something else was copied or cut meanwhile.
 	takeCut: () => CutPaste | null
@@ -68,6 +68,9 @@ const UNCHECKED: ClipboardStamp = { epoch: null, missed: 0 }
 
 let missedEvents = 0
 let checkedAt = UNCHECKED
+// Moves each time the clipboard takes another entry or gives one up: a copy, a cut, a clear, a cut's paste
+// and its return. A followed change keeps it: the entry is still the one the user made.
+let generation = 0
 
 // Drive events went undelivered while the socket stayed up (one it couldn't decode), or it dropped.
 export function markClipboardEventsMissed(): void {
@@ -76,6 +79,10 @@ export function markClipboardEventsMissed(): void {
 
 export function clipboardStamp(): ClipboardStamp {
 	return { epoch: currentSocketEpoch(), missed: missedEvents }
+}
+
+export function clipboardGeneration(): number {
+	return generation
 }
 
 // Whether events have kept the held items current since they were last known to be.
@@ -176,11 +183,13 @@ export const useDriveClipboardStore = create<DriveClipboardState>((set, get) => 
 	entry: null,
 	cutUuids: NOTHING_CUT,
 	set: (entry, current = true) => {
+		generation++
 		heldKeys = null
 		checkedAt = current ? clipboardStamp() : UNCHECKED
 		set(withEntry(entry))
 	},
 	clear: () => {
+		generation++
 		cutPastes.clear()
 		heldKeys = null
 		set(withEntry(null))
@@ -221,7 +230,12 @@ export const useDriveClipboardStore = create<DriveClipboardState>((set, get) => 
 			set(withEntry(items.length === 0 ? null : { mode: entry.mode, items }))
 		}
 	},
-	applyRecheck: (found, checked) => {
+	applyRecheck: (found, checked, begunIn) => {
+		// The user made another entry while the lookup ran: it looked up none of it.
+		if (begunIn !== generation) {
+			return null
+		}
+
 		checkedAt = checked
 
 		const entry = get().entry
@@ -257,6 +271,7 @@ export const useDriveClipboardStore = create<DriveClipboardState>((set, get) => 
 
 		const paste: CutPaste = { items: entry.items, current: entry.items.slice(), checked: checkedAt }
 
+		generation++
 		cutPastes.add(paste)
 		heldKeys = null
 		set(withEntry(null))
@@ -286,6 +301,7 @@ export const useDriveClipboardStore = create<DriveClipboardState>((set, get) => 
 		}
 
 		// Events kept them current only as far as they kept the pasted cut.
+		generation++
 		checkedAt = paste.checked
 		set(withEntry({ mode: "cut", items }))
 	}
