@@ -1872,6 +1872,33 @@ describe("notes.create", () => {
 		expect(callOrder[2]).toBe("setNoteContent")
 	})
 
+	it("lists the new note before setType and setContent run, so their socket echoes find it", async () => {
+		const listedBeforeWrite: Record<string, boolean> = {}
+		const listedNow = () =>
+			mockNotesWithContentQueryUpdate.mock.calls.some(([{ updater }]) =>
+				(updater as (prev: Note[]) => Note[])([]).some(n => n.uuid === "note-uuid-new")
+			)
+		const sdkClient = makeMockSdkClient({
+			createNote: vi.fn().mockResolvedValue(makeSdkNote("note-uuid-new")),
+			setNoteType: vi.fn().mockImplementation(async () => {
+				listedBeforeWrite["setNoteType"] = listedNow()
+				return makeSdkNote("note-uuid-new", { noteType: "md" as unknown as NoteType })
+			}),
+			setNoteContent: vi.fn().mockImplementation(async () => {
+				listedBeforeWrite["setNoteContent"] = listedNow()
+				return makeSdkNote("note-uuid-new")
+			})
+		})
+		mockGetSdkClients.mockResolvedValue({ authedSdkClient: sdkClient })
+
+		await notes.create({ title: "New Note", content: "hello", type: "md" as unknown as NoteType })
+
+		expect(listedBeforeWrite).toEqual({
+			setNoteType: true,
+			setNoteContent: true
+		})
+	})
+
 	it("setType is skipped when newly created note already has the requested type", async () => {
 		const sdkClient = makeMockSdkClient({
 			createNote: vi.fn().mockResolvedValue(makeSdkNote("note-uuid-new", { noteType: "text" as unknown as NoteType })),

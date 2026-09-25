@@ -232,6 +232,12 @@ const notes = {
 			)
 		)
 
+		// Listed before the follow-up writes: their socket echoes (New, ContentEdited) can arrive
+		// before those writes resolve, and the handlers look the note up in this list.
+		notesQueryUpdate({
+			updater: prev => [...prev.filter(n => n.uuid !== note.uuid), note]
+		})
+
 		note = await this.setType({
 			note,
 			type,
