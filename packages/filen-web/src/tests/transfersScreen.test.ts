@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { render, screen, cleanup, fireEvent, within } from "@testing-library/react"
+import { act, render, screen, cleanup, fireEvent, within } from "@testing-library/react"
 import { createElement } from "react"
 import "@/lib/i18n"
 import type { Transfer } from "@/features/transfers/store/useTransfersStore"
@@ -19,6 +19,8 @@ vi.mock("@/lib/sdk/client", () => ({
 }))
 
 const { useTransfersStore } = await import("@/features/transfers/store/useTransfersStore")
+const { useCopyJobsStore } = await import("@/features/transfers/store/useCopyJobsStore")
+const { createCopyJob } = await import("@/features/drive/lib/copy.logic")
 const { TransfersScreen } = await import("@/features/transfers/screens/transfers")
 
 function transfer(overrides: Partial<Transfer> = {}): Transfer {
@@ -39,6 +41,7 @@ function transfer(overrides: Partial<Transfer> = {}): Transfer {
 beforeEach(() => {
 	vi.clearAllMocks()
 	useTransfersStore.setState({ transfers: [], speedSamples: [] })
+	useCopyJobsStore.setState({ jobs: {}, cancelPromptId: null })
 })
 
 afterEach(() => {
@@ -130,5 +133,59 @@ describe("TransfersScreen — Cancel all confirm gate", () => {
 
 		expect(screen.queryByRole("alertdialog", { name: "Cancel all transfers?" })).toBeNull()
 		expect(cancelUpload).not.toHaveBeenCalled()
+	})
+})
+
+// Its row stays active while the copies it made move to the trash, which can be neither paused nor
+// stopped.
+describe("TransfersScreen — a copy whose job has ended", () => {
+	const destination = { uuid: null, name: "Cloud Drive" }
+
+	function button(name: string): HTMLButtonElement {
+		const found = screen.getByRole("button", { name })
+
+		if (!(found instanceof HTMLButtonElement)) {
+			throw new Error(`${name} is not a button`)
+		}
+
+		return found
+	}
+
+	it("counts in Cancel all only the transfers it stops", () => {
+		useCopyJobsStore.setState({
+			jobs: { c: { ...createCopyJob("c", destination, 1), outcome: { status: "cancelled" }, cancelRequest: "trash" } }
+		})
+		useTransfersStore.setState({
+			transfers: [
+				transfer({ id: "a", status: "uploading" }),
+				transfer({ id: "c", direction: "copy", status: "copying", paused: true })
+			]
+		})
+
+		render(createElement(TransfersScreen))
+
+		expect(button("Resume all").disabled).toBe(true)
+
+		fireEvent.click(button("Cancel all"))
+
+		expect(screen.getByText("1 active transfer will stop. This can't be undone.")).toBeTruthy()
+	})
+
+	it("disables every bulk action once the job ends, while its row is still active", () => {
+		useCopyJobsStore.setState({ jobs: { c: createCopyJob("c", destination, 1) } })
+		useTransfersStore.setState({ transfers: [transfer({ id: "c", direction: "copy", status: "copying" })] })
+
+		render(createElement(TransfersScreen))
+
+		expect(button("Pause all").disabled).toBe(false)
+		expect(button("Cancel all").disabled).toBe(false)
+
+		act(() => {
+			useCopyJobsStore.getState().update("c", job => ({ ...job, outcome: { status: "cancelled" }, cancelRequest: "trash" }))
+		})
+
+		expect(button("Pause all").disabled).toBe(true)
+		expect(button("Resume all").disabled).toBe(true)
+		expect(button("Cancel all").disabled).toBe(true)
 	})
 })

@@ -221,6 +221,60 @@ describe("the pre-flight's fresh read", () => {
 		expect(cachedAccount()?.storageUsed).toBe(1_000n)
 		expect(queryClient.getQueryState(ACCOUNT_QUERY_KEY)?.isInvalidated).toBe(false)
 	})
+
+	it("shares one read among pre-flights that start while it runs", async () => {
+		queryClient.setQueryData(ACCOUNT_QUERY_KEY, account(9_900n, 10_000n))
+
+		const fresh = deferred<UserInfo>()
+
+		getUserInfo.mockReturnValueOnce(fresh.promise)
+
+		const first = checkUploadQuota(3_000n)
+		const second = checkUploadQuota(5_000n)
+
+		fresh.resolve(account(1_000n, 10_000n))
+
+		await expect(first).resolves.toEqual({ status: "fits" })
+		await expect(second).resolves.toEqual({ status: "fits" })
+		expect(getUserInfo).toHaveBeenCalledOnce()
+	})
+
+	// The shared read may have been answered before that write.
+	it("reads again for a pre-flight that starts after an account write", async () => {
+		queryClient.setQueryData(ACCOUNT_QUERY_KEY, account(9_900n, 10_000n))
+
+		const before = deferred<UserInfo>()
+		const after = deferred<UserInfo>()
+
+		getUserInfo.mockReturnValueOnce(before.promise).mockReturnValueOnce(after.promise)
+
+		const first = checkUploadQuota(3_000n)
+
+		markAccountStale()
+
+		const second = checkUploadQuota(3_000n)
+
+		before.resolve(account(1_000n, 10_000n))
+		after.resolve(account(9_500n, 10_000n))
+
+		await expect(first).resolves.toEqual({ status: "fits" })
+		await expect(second).resolves.toEqual({ status: "exceeds", neededBytes: 3_000n, freeBytes: 500n })
+		expect(getUserInfo).toHaveBeenCalledTimes(2)
+		expect(cachedAccount()?.storageUsed).toBe(9_500n)
+	})
+
+	it("reads again once the shared read has settled, whether it answered or failed", async () => {
+		queryClient.setQueryData(ACCOUNT_QUERY_KEY, account(9_900n, 10_000n))
+		getUserInfo.mockRejectedValueOnce(new Error("offline")).mockResolvedValueOnce(account(9_900n, 10_000n))
+
+		await expect(checkUploadQuota(3_000n)).resolves.toEqual({ status: "unknown" })
+		await expect(checkUploadQuota(3_000n)).resolves.toEqual({ status: "exceeds", neededBytes: 3_000n, freeBytes: 100n })
+
+		getUserInfo.mockResolvedValueOnce(account(1_000n, 10_000n))
+
+		await expect(checkUploadQuota(3_000n)).resolves.toEqual({ status: "fits" })
+		expect(getUserInfo).toHaveBeenCalledTimes(3)
+	})
 })
 
 describe("optimistic storage used after an upload", () => {

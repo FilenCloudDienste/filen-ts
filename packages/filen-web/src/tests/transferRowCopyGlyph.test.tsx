@@ -75,16 +75,16 @@ describe("TransferRow — copy glyph", () => {
 })
 
 describe("TransferRow — a stopped copy moving its copies to the trash", () => {
-	it("says so in place of its percentage and offers no pause or cancel, which a trash can't take", () => {
-		const copied = narrowItem({
-			uuid: "d-0000-0000-0000-000000000000",
-			parent: "p-0000-0000-0000-000000000000",
-			color: "default",
-			timestamp: 0n,
-			favorited: false,
-			meta: { type: "decoded", data: { name: "d" } }
-		})
+	const copied = narrowItem({
+		uuid: "d-0000-0000-0000-000000000000",
+		parent: "p-0000-0000-0000-000000000000",
+		color: "default",
+		timestamp: 0n,
+		favorited: false,
+		meta: { type: "decoded", data: { name: "d" } }
+	})
 
+	it("says so in place of its percentage and offers no pause or cancel, which a trash can't take", () => {
 		useCopyJobsStore.setState({
 			jobs: {
 				job: {
@@ -106,6 +106,33 @@ describe("TransferRow — a stopped copy moving its copies to the trash", () => 
 
 		expect(screen.getByText("Moving to trash…")).toBeTruthy()
 		expect(screen.queryByText("40%")).toBeNull()
+		expect(screen.queryByRole("button", { name: "Pause" })).toBeNull()
+		expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull()
+	})
+
+	// An item delivered after the job ended can reach the trash before the rest, and record its result.
+	it("keeps saying so until the row settles, whatever the job has recorded meanwhile", () => {
+		useCopyJobsStore.setState({
+			jobs: {
+				job: {
+					...createCopyJob("job", { uuid: null, name: "Cloud Drive" }, 1),
+					outcome: { status: "cancelled" },
+					cancelRequest: "trash",
+					created: [copied],
+					trashResult: { moved: 1, failed: 0 }
+				}
+			},
+			cancelPromptId: null
+		})
+
+		render(
+			<TransferRow
+				transfer={{ ...copyRow("3 items"), status: "copying", bytesTransferred: 4 }}
+				onRequestCancel={vi.fn()}
+			/>
+		)
+
+		expect(screen.getByText("Moving to trash…")).toBeTruthy()
 		expect(screen.queryByRole("button", { name: "Pause" })).toBeNull()
 		expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull()
 	})

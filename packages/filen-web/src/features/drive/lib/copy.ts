@@ -30,6 +30,7 @@ import {
 	copyReportInput,
 	copyUpdateInput,
 	createCopyJob,
+	isCopyTrashPending,
 	retryEntries,
 	type CopyDestination,
 	type CopyJob,
@@ -64,7 +65,7 @@ export interface RunCopyDeps {
 	copyItemsTo: (id: string, entries: CopyEntry[], maxBytes: number | undefined, onEvent: OnCopyEvent) => Promise<CopyReport>
 	// Frees the worker's stop and pause for the job, which span its calls.
 	release: (id: string) => void
-	transfers: Pick<TransfersStore, "add" | "setProgress" | "setSize" | "settle" | "remove">
+	transfers: Pick<TransfersStore, "add" | "setProgress" | "setSize" | "setPaused" | "settle" | "remove">
 	jobs: Pick<CopyJobsStore, "put" | "update"> & { get: (id: string) => CopyJob | undefined }
 	account: QuotaCheckDeps
 	patchCreated: (item: DriveItem) => void
@@ -156,6 +157,15 @@ function settleRow(transfers: RunCopyDeps["transfers"], id: string, job: CopyJob
 
 	const { outcome } = job
 
+	// The stop reached the copy only after it had finished, and moved every copy it made to the trash:
+	// undone, it leaves no row, as when the stop came first. A failed copy keeps its error.
+	if (job.trashResult !== null && (outcome.status === "done" || outcome.status === "doneWithFailures")) {
+		transfers.settle(id, "cancelled")
+		transfers.remove(id)
+
+		return
+	}
+
 	switch (outcome.status) {
 		case "running":
 		case "done":
@@ -221,8 +231,10 @@ export async function runCopyJob(deps: RunCopyDeps, request: CopyJobRequest): Pr
 		trashing.add(item.data.uuid)
 
 		const outcome = await deps.trash([item])
+		const current = deps.jobs.get(id)
 
-		if (outcome.failed.length === 0) {
+		// While the stop's own batch is still moving, that batch settles the row, this one's result included.
+		if (outcome.failed.length === 0 || (current !== undefined && isCopyTrashPending(current))) {
 			deps.jobs.update(id, job => ({ ...job, trashResult: addTrashOutcome(job.trashResult, outcome) }))
 
 			return
@@ -338,8 +350,11 @@ export async function runCopyJob(deps: RunCopyDeps, request: CopyJobRequest): Pr
 
 	// Honoured however the job ended: a copy that finished before the cancel reached it still made what
 	// the user asked to remove. Only top-level items are trashed; their subtrees go with them. The row
-	// stays active until then, which also keeps the tab from closing on the trash.
+	// stays active until then, which also keeps the tab from closing on the trash, but nothing on it is
+	// paused any more.
 	if (settledJob.created.length > 0) {
+		deps.transfers.setPaused(id, false)
+
 		for (const item of settledJob.created) {
 			trashing.add(item.data.uuid)
 		}

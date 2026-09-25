@@ -22,6 +22,22 @@ describe("copyJobTitle", () => {
 			destination: "Photos"
 		})
 	})
+
+	// The stop reached it only after the copy had finished; what it copied goes to the trash all the same.
+	it("doesn't call a copy copied once its stop asked to trash what it made", () => {
+		const done: Partial<CopyJob> = { outcome: { status: "done" }, cancelRequest: "trash" }
+
+		expect(copyJobTitle(job(done))).toEqual({ key: "transfersCopyCardTitleEnded", destination: "Photos" })
+		expect(copyJobTitle(job({ ...done, trashResult: { moved: 3, failed: 0 } }))).toEqual({
+			key: "transfersCopyCardTitleEnded",
+			destination: "Photos"
+		})
+		expect(copyJobTitle(job({ ...done, cancelRequest: "keep" }))).toEqual({
+			key: "transfersCopyCardTitleDone",
+			count: 3,
+			destination: "Photos"
+		})
+	})
 })
 
 describe("copyJobStatus", () => {
@@ -104,12 +120,55 @@ describe("copyJobStatus", () => {
 		const stopping: Partial<CopyJob> = { outcome: { status: "cancelled" }, cancelRequest: "trash", created: [copied] }
 
 		expect(copyJobStatus(job(stopping))).toEqual({ kind: "key", key: "transfersCopyMovingToTrash" })
+		// A late item's trash can record its result before the stop's batch is done.
+		expect(copyJobStatus(job({ ...stopping, trashResult: { moved: 1, failed: 0 } }))).toEqual({
+			kind: "key",
+			key: "transfersCopyMovingToTrash"
+		})
+		expect(copyJobStatus(job({ ...stopping, outcome: { status: "done" }, trashResult: { moved: 1, failed: 0 } }))).toEqual({
+			kind: "key",
+			key: "transfersCopyMovingToTrash"
+		})
 		expect(copyJobStatus(job({ ...stopping, created: [] }))).toEqual({ kind: "key", key: "transfersCopyCancelledKept" })
 		expect(copyJobStatus(job({ ...stopping, created: [], trashResult: { moved: 1, failed: 0 } }))).toEqual({
 			kind: "key",
 			key: "transfersCopyCancelledTrashed",
 			count: 1
 		})
+	})
+
+	// The stop reached it only after the copy had finished; what it copied goes to the trash all the same.
+	it("says what the trash did for a copy that finished before its stop reached it", () => {
+		for (const outcome of [{ status: "done" }, { status: "doneWithFailures" }] as const) {
+			const finished: Partial<CopyJob> = { outcome, cancelRequest: "trash", failures: [] }
+
+			expect(copyJobStatus(job({ ...finished, trashResult: { moved: 3, failed: 0 } }))).toEqual({
+				kind: "key",
+				key: "transfersCopyTrashed",
+				count: 3
+			})
+			expect(copyJobStatus(job({ ...finished, trashResult: { moved: 2, failed: 1 } }))).toEqual({
+				kind: "key",
+				key: "transfersCopyTrashFailed"
+			})
+		}
+	})
+
+	it("tells what the trash did after a failed copy's error", () => {
+		const error = { species: "plain" as const, message: "offline", label: "offline" }
+		const failed: Partial<CopyJob> = { outcome: { status: "failed", error }, cancelRequest: "trash" }
+
+		expect(copyJobStatus(job({ ...failed, trashResult: { moved: 2, failed: 1 } }))).toEqual({
+			kind: "error",
+			error,
+			trash: { kind: "key", key: "transfersCopyTrashFailed" }
+		})
+		expect(copyJobStatus(job({ ...failed, trashResult: { moved: 3, failed: 0 } }))).toEqual({
+			kind: "error",
+			error,
+			trash: { kind: "key", key: "transfersCopyTrashed", count: 3 }
+		})
+		expect(copyJobStatus(job(failed))).toEqual({ kind: "error", error })
 	})
 })
 

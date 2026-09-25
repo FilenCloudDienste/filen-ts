@@ -11,7 +11,8 @@ import {
 	COPY_CARD_FAILURES_SHOWN,
 	copyJobNotes,
 	copyJobStatus,
-	copyJobTitle
+	copyJobTitle,
+	type CopyJobKeyStatus
 } from "@/features/transfers/components/copyJobToast.logic"
 import { canRetryCopy, type CopyJob } from "@/features/drive/lib/copy.logic"
 import { errorLabelOr } from "@/lib/i18n/errorLabel"
@@ -177,11 +178,13 @@ function CopyJobStatusLine({ job }: { job: CopyJob }) {
 	const { t } = useTranslation("transfers")
 	const status = copyJobStatus(job)
 	const failed = job.outcome.status === "failed" || job.outcome.status === "quotaExceeded"
+	const keyText = (keyStatus: CopyJobKeyStatus): string =>
+		keyStatus.count === undefined ? t(keyStatus.key) : t(keyStatus.key, { count: keyStatus.count })
 	let text: string
 
 	switch (status.kind) {
 		case "key":
-			text = status.count === undefined ? t(status.key) : t(status.key, { count: status.count })
+			text = keyText(status)
 
 			break
 		case "files":
@@ -198,7 +201,14 @@ function CopyJobStatusLine({ job }: { job: CopyJob }) {
 			break
 	}
 
-	return <p className={cn("text-xs", failed ? "text-destructive" : "text-muted-foreground")}>{text}</p>
+	return (
+		<>
+			<p className={cn("text-xs", failed ? "text-destructive" : "text-muted-foreground")}>{text}</p>
+			{status.kind === "error" && status.trash !== undefined ? (
+				<p className="text-xs text-muted-foreground">{keyText(status.trash)}</p>
+			) : null}
+		</>
+	)
 }
 
 function CopyJobDetails({ job, onRetried }: { job: CopyJob; onRetried: (retryJobId: string) => void }) {

@@ -13,7 +13,7 @@ import {
 	UploadIcon,
 	XIcon
 } from "lucide-react"
-import { formatBytes } from "@filen/shared"
+import { formatBytes, isCopyJobRunning } from "@filen/shared"
 import { isActiveTransfer, useTransfersStore, type Transfer } from "@/features/transfers/store/useTransfersStore"
 import {
 	transferProgress,
@@ -24,7 +24,6 @@ import {
 import { pauseTransfer, resumeTransfer } from "@/features/transfers/lib/control"
 import { showCopyToast } from "@/features/transfers/lib/copyToast"
 import { pruneSettledCopyJobs } from "@/features/drive/lib/copy"
-import { isCopyTrashPending } from "@/features/drive/lib/copy.logic"
 import { useCopyJobsStore } from "@/features/transfers/store/useCopyJobsStore"
 import { DirectoryGlyph, FileTypeIcon } from "@/features/drive/components/itemIcon"
 import { errorLabel } from "@/lib/i18n/errorLabel"
@@ -147,11 +146,12 @@ export function TransferRow({ transfer, onRequestCancel }: TransferRowProps) {
 	const hasCopyCard = useCopyJobsStore(state => transfer.direction === "copy" && transfer.id in state.jobs)
 	// A copy row's name may be a directory's or "N items", which no file glyph fits; the job knows which.
 	const copyGlyph = useCopyJobsStore(state => (transfer.direction === "copy" ? state.jobs[transfer.id]?.glyph : undefined))
-	// A stopped copy's row stays active while its copies move to the trash, which can't be paused or stopped.
+	// A stopped copy's row stays active past its job while its copies move to the trash, which can't be
+	// paused or stopped.
 	const copyTrashing = useCopyJobsStore(state => {
 		const job = transfer.direction === "copy" ? state.jobs[transfer.id] : undefined
 
-		return job !== undefined && isCopyTrashPending(job)
+		return !finished && job !== undefined && !isCopyJobRunning(job)
 	})
 
 	// Never renders bytesTransferred for a "done" row (only its final size) — settle()/setProgress()

@@ -178,6 +178,12 @@ export const transfers = {
 	transfersCopyCancelledTrashed_other: "Stopped. {{count}} copied items were moved to the trash.",
 	/** Copy card — status after a stopped copy when some copied items could not be moved to the trash */
 	transfersCopyCancelledTrashFailed: "Stopped. Some copied items couldn't be moved to the trash.",
+	/** Copy card — status of a copy that ended before its "Move copied items to trash" stop reached it, once its copied items were moved to the trash; for a failed copy it follows the error; {{count}} = items moved; singular */
+	transfersCopyTrashed_one: "{{count}} copied item was moved to the trash.",
+	/** Copy card — status of a copy that ended before its "Move copied items to trash" stop reached it, once its copied items were moved to the trash; for a failed copy it follows the error; {{count}} = items moved; plural */
+	transfersCopyTrashed_other: "{{count}} copied items were moved to the trash.",
+	/** Copy card — status of a copy that ended before its "Move copied items to trash" stop reached it, when some copied items could not be moved to the trash; for a failed copy it follows the error */
+	transfersCopyTrashFailed: "Some copied items couldn't be moved to the trash.",
 	/** Copy card — status once a copy stopped with "Move copied items to trash" has ended, while the items it copied are being moved to the trash */
 	transfersCopyMovingToTrash: "Moving copied items to the trash…",
 	/** Copy transfer row — error line of a stopped copy whose copied items could not all be moved to the trash; they are still at the destination; singular */

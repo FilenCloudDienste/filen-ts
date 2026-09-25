@@ -54,6 +54,7 @@ import {
 	type RunCopyDeps
 } from "@/features/drive/lib/copy"
 import { createCopyJob } from "@/features/drive/lib/copy.logic"
+import { copyJobStatus, copyJobTitle } from "@/features/transfers/components/copyJobToast.logic"
 import { useTransfersStore } from "@/features/transfers/store/useTransfersStore"
 import { getCopyJob, useCopyJobsStore } from "@/features/transfers/store/useCopyJobsStore"
 import { queryClient } from "@/queries/client"
@@ -745,6 +746,84 @@ describe("cancel", () => {
 		expect(row()).toBeUndefined()
 	})
 
+	// The stop reached the job only after the SDK had finished it.
+	it("still trashes what a copy made when it finished before its stop, and the card says what the trash did", async () => {
+		const deps = makeDeps()
+		const moved = mockDir("moved")
+		const stuck = mockDir("stuck")
+
+		deps.trash.mockResolvedValue({ succeeded: [narrowItem(moved)], failed: [{ item: narrowItem(stuck), error: new Error("offline") }] })
+		deps.copyItems.mockImplementation((id, _items, _dest, _max, onEvent) => {
+			onEvent({ type: "created", item: created(moved) })
+			onEvent({ type: "created", item: created(stuck) })
+			requestCopyCancel(id, { trashCopied: true })
+
+			return Promise.resolve(report({ topLevel: [created(moved), created(stuck)] }))
+		})
+
+		const job = await runCopyJob(deps, request())
+
+		if (job === undefined) {
+			throw new Error("the job was dropped")
+		}
+
+		expect(job.outcome).toEqual({ status: "done" })
+		expect(deps.trash.mock.calls[0]?.[0].map(item => item.data.uuid)).toEqual([moved.uuid, stuck.uuid])
+		expect(row()).toMatchObject({ status: "error", error: { label: "1 copied item couldn't be moved to the trash" } })
+		expect(copyJobTitle(job)).toEqual({ key: "transfersCopyCardTitleEnded", destination: DESTINATION.name })
+		expect(copyJobStatus(job)).toEqual({ kind: "key", key: "transfersCopyTrashFailed" })
+	})
+
+	it("drops a finished copy's row once its stop moved all its copies to the trash, as a stopped copy's", async () => {
+		for (const failures of [[], [copyFailure("failed")]]) {
+			useTransfersStore.setState({ transfers: [], speedSamples: [] })
+			useCopyJobsStore.setState({ jobs: {} })
+
+			const deps = makeDeps()
+			const dir = mockDir("copied")
+
+			deps.trash.mockImplementation(items => Promise.resolve({ succeeded: items, failed: [] }))
+			deps.copyItems.mockImplementation((id, _items, _dest, _max, onEvent) => {
+				onEvent({ type: "created", item: created(dir) })
+				requestCopyCancel(id, { trashCopied: true })
+
+				return Promise.resolve(report({ topLevel: [created(dir)], failures }))
+			})
+
+			const job = await runCopyJob(deps, request())
+
+			if (job === undefined) {
+				throw new Error("the job was dropped")
+			}
+
+			expect(job.outcome.status).toBe(failures.length === 0 ? "done" : "doneWithFailures")
+			expect(job.trashResult).toEqual({ moved: 1, failed: 0 })
+			expect(row()).toBeUndefined()
+			// The card, while it shows, says where the copies went.
+			expect(copyJobStatus(job)).toEqual({ kind: "key", key: "transfersCopyTrashed", count: 1 })
+		}
+	})
+
+	// A file saved as a new version is stored, not created, so the stop undid nothing.
+	it("keeps a finished copy's row when its stop had nothing it could move to the trash", async () => {
+		const deps = makeDeps()
+		const versioned = mockFile("versioned")
+
+		deps.copyItems.mockImplementation(id => {
+			requestCopyCancel(id, { trashCopied: true })
+
+			return Promise.resolve(
+				report({ topLevel: [createdFile(versioned)], failures: [copyFailure("existing", "registeredAsVersion", versioned.uuid)] })
+			)
+		})
+
+		const job = await runCopyJob(deps, request())
+
+		expect(job?.outcome).toEqual({ status: "done" })
+		expect(deps.trash).not.toHaveBeenCalled()
+		expect(row()?.status).toBe("done")
+	})
+
 	it("keeps a stopped copy's row, as an error, while copies it asked to trash are still there", async () => {
 		const deps = makeDeps()
 		const moved = mockDir("moved")
@@ -774,6 +853,34 @@ describe("cancel", () => {
 		pruneSettledCopyJobs()
 
 		expect(getCopyJob("job")).toBeUndefined()
+	})
+
+	// The trash can't be paused, so a pause made before the stop no longer shows on the row.
+	it("clears a paused row's pause once the job ends, while its copies move to the trash", async () => {
+		const deps = makeDeps()
+		const dir = mockDir("copied")
+		const trash = deferred<BulkOutcome<DriveItem>>()
+
+		deps.trash.mockReturnValue(trash.promise)
+		deps.copyItems.mockImplementation((id, _items, _dest, _max, onEvent) => {
+			onEvent({ type: "created", item: created(dir) })
+			useTransfersStore.getState().setPaused(id, true)
+			requestCopyCancel(id, { trashCopied: true })
+
+			return Promise.resolve(report({ error: CANCELLED }))
+		})
+
+		const running = runCopyJob(deps, request())
+
+		await vi.waitFor(() => {
+			expect(deps.trash).toHaveBeenCalledTimes(1)
+		})
+
+		expect(row()).toMatchObject({ status: "copying", paused: false })
+
+		trash.resolve({ succeeded: [narrowItem(dir)], failed: [] })
+
+		await running
 	})
 })
 
@@ -850,6 +957,57 @@ describe("events after the result", () => {
 		expect(deps.trash).toHaveBeenCalledTimes(1)
 		expect(deps.trash.mock.calls[0]?.[0].map(item => item.data.uuid).sort()).toEqual([early.uuid, late.uuid].sort())
 		expect(job?.trashResult).toEqual({ moved: 2, failed: 0 })
+	})
+
+	it("leaves the row to the stop's batch while it moves, whatever a late item's trash did first", async () => {
+		const deps = makeDeps()
+		const early = mockDir("early")
+		const late = mockDir("late")
+		const failed = copyFailure("failed")
+		const batch = deferred<BulkOutcome<DriveItem>>()
+		let deliverLate = (): void => undefined
+
+		deps.trash
+			.mockReturnValueOnce(batch.promise)
+			.mockResolvedValueOnce({ succeeded: [], failed: [{ item: narrowItem(late), error: new Error("offline") }] })
+		deps.copyItems.mockImplementation((id, _items, _dest, _max, onEvent) => {
+			onEvent({ type: "created", item: created(early) })
+			requestCopyCancel(id, { trashCopied: true })
+
+			deliverLate = () => {
+				onEvent({ type: "created", item: created(late) })
+			}
+
+			return Promise.resolve(report({ topLevel: [created(early)], failures: [failed], error: CANCELLED }))
+		})
+
+		const running = runCopyJob(deps, request())
+
+		await vi.waitFor(() => {
+			expect(deps.trash).toHaveBeenCalledTimes(1)
+		})
+
+		deliverLate()
+
+		await vi.waitFor(() => {
+			expect(getCopyJob("job")?.trashResult).toEqual({ moved: 0, failed: 1 })
+		})
+
+		const trashing = getCopyJob("job")
+
+		if (trashing === undefined) {
+			throw new Error("the job was dropped")
+		}
+
+		expect(row()?.status).toBe("copying")
+		expect(copyJobStatus(trashing)).toEqual({ kind: "key", key: "transfersCopyMovingToTrash" })
+		expect(retryFailedCopy("job")).toBeNull()
+
+		batch.resolve({ succeeded: [narrowItem(early)], failed: [] })
+		await running
+
+		expect(getCopyJob("job")?.trashResult).toEqual({ moved: 1, failed: 1 })
+		expect(row()).toMatchObject({ status: "error", error: { label: "1 copied item couldn't be moved to the trash" } })
 	})
 
 	// A call that rejected past its cancel grace has no report, and can still deliver what it queued.

@@ -1,14 +1,18 @@
 import { describe, expect, it, vi } from "vitest"
 import { type Transfer } from "@/features/transfers/store/useTransfersStore"
+import { createCopyJob } from "@/features/drive/lib/copy.logic"
 import {
 	buildTransfersDisplayList,
 	cancellableTransferIds,
 	confirmCancelAllTransfers,
+	endedCopyIds,
 	hasFinishedTransfers,
 	pausableTransferIds,
 	resumableTransferIds,
 	shouldShowTransfersAggregate
 } from "@/features/transfers/screens/transfers.logic"
+
+const NONE: ReadonlySet<string> = new Set()
 
 function transfer(overrides: Partial<Transfer> = {}): Transfer {
 	return {
@@ -74,61 +78,70 @@ describe("buildTransfersDisplayList", () => {
 
 describe("cancellableTransferIds", () => {
 	it("returns every active transfer id, including paused ones", () => {
-		const ids = cancellableTransferIds([
-			transfer({ id: "a", status: "uploading", paused: false }),
-			transfer({ id: "b", status: "downloading", paused: true }),
-			transfer({ id: "c", status: "done" })
-		])
+		const ids = cancellableTransferIds(
+			[
+				transfer({ id: "a", status: "uploading", paused: false }),
+				transfer({ id: "b", status: "downloading", paused: true }),
+				transfer({ id: "c", status: "done" })
+			],
+			NONE
+		)
 
 		expect(ids.sort()).toEqual(["a", "b"])
 	})
 
 	it("empty when nothing is active", () => {
-		expect(cancellableTransferIds([transfer({ status: "done" }), transfer({ status: "error" })])).toEqual([])
+		expect(cancellableTransferIds([transfer({ status: "done" }), transfer({ status: "error" })], NONE)).toEqual([])
 	})
 
 	it("empty for an empty list", () => {
-		expect(cancellableTransferIds([])).toEqual([])
+		expect(cancellableTransferIds([], NONE)).toEqual([])
 	})
 })
 
 describe("pausableTransferIds", () => {
 	it("returns active, unpaused transfer ids only", () => {
-		const ids = pausableTransferIds([
-			transfer({ id: "a", status: "uploading", paused: false }),
-			transfer({ id: "b", status: "downloading", paused: true }),
-			transfer({ id: "c", status: "done", paused: false })
-		])
+		const ids = pausableTransferIds(
+			[
+				transfer({ id: "a", status: "uploading", paused: false }),
+				transfer({ id: "b", status: "downloading", paused: true }),
+				transfer({ id: "c", status: "done", paused: false })
+			],
+			NONE
+		)
 
 		expect(ids).toEqual(["a"])
 	})
 
 	it("empty when every active transfer is already paused", () => {
-		expect(pausableTransferIds([transfer({ status: "uploading", paused: true })])).toEqual([])
+		expect(pausableTransferIds([transfer({ status: "uploading", paused: true })], NONE)).toEqual([])
 	})
 
 	it("empty when nothing is active", () => {
-		expect(pausableTransferIds([transfer({ status: "done", paused: false })])).toEqual([])
+		expect(pausableTransferIds([transfer({ status: "done", paused: false })], NONE)).toEqual([])
 	})
 })
 
 describe("resumableTransferIds", () => {
 	it("returns active, paused transfer ids only", () => {
-		const ids = resumableTransferIds([
-			transfer({ id: "a", status: "uploading", paused: true }),
-			transfer({ id: "b", status: "downloading", paused: false }),
-			transfer({ id: "c", status: "error", paused: true })
-		])
+		const ids = resumableTransferIds(
+			[
+				transfer({ id: "a", status: "uploading", paused: true }),
+				transfer({ id: "b", status: "downloading", paused: false }),
+				transfer({ id: "c", status: "error", paused: true })
+			],
+			NONE
+		)
 
 		expect(ids).toEqual(["a"])
 	})
 
 	it("empty when nothing is paused", () => {
-		expect(resumableTransferIds([transfer({ status: "uploading", paused: false })])).toEqual([])
+		expect(resumableTransferIds([transfer({ status: "uploading", paused: false })], NONE)).toEqual([])
 	})
 
 	it("empty when nothing is active", () => {
-		expect(resumableTransferIds([transfer({ status: "done", paused: true })])).toEqual([])
+		expect(resumableTransferIds([transfer({ status: "done", paused: true })], NONE)).toEqual([])
 	})
 })
 
@@ -171,7 +184,7 @@ describe("confirmCancelAllTransfers", () => {
 			transfer({ id: "d", status: "error" })
 		]
 
-		confirmCancelAllTransfers(transfers, cancel)
+		confirmCancelAllTransfers(transfers, NONE, cancel)
 
 		expect(cancel).toHaveBeenCalledTimes(2)
 		expect(cancel.mock.calls.map(call => call[0]).sort()).toEqual(["a", "b"])
@@ -180,7 +193,7 @@ describe("confirmCancelAllTransfers", () => {
 	it("calls the injected cancel fn zero times when nothing is active", () => {
 		const cancel = vi.fn<(id: string) => void>()
 
-		confirmCancelAllTransfers([transfer({ status: "done" }), transfer({ status: "error" })], cancel)
+		confirmCancelAllTransfers([transfer({ status: "done" }), transfer({ status: "error" })], NONE, cancel)
 
 		expect(cancel).not.toHaveBeenCalled()
 	})
@@ -188,9 +201,44 @@ describe("confirmCancelAllTransfers", () => {
 	it("is a no-op for an empty list", () => {
 		const cancel = vi.fn<(id: string) => void>()
 
-		confirmCancelAllTransfers([], cancel)
+		confirmCancelAllTransfers([], NONE, cancel)
 
 		expect(cancel).not.toHaveBeenCalled()
+	})
+})
+
+// Its row stays active while the copies it made move to the trash, which can be neither paused nor
+// stopped.
+describe("a copy whose job has ended", () => {
+	const destination = { uuid: null, name: "Cloud Drive" }
+
+	it("is named by endedCopyIds, a running one is not", () => {
+		const ended = endedCopyIds({
+			running: createCopyJob("running", destination, 1),
+			stopped: { ...createCopyJob("stopped", destination, 1), outcome: { status: "cancelled" }, cancelRequest: "trash" },
+			finished: { ...createCopyJob("finished", destination, 1), outcome: { status: "done" } }
+		})
+
+		expect([...ended].sort()).toEqual(["finished", "stopped"])
+	})
+
+	it("is left out of Cancel all, Pause all and Resume all, paused or not", () => {
+		const ended = new Set(["copy", "pausedCopy"])
+		const transfers = [
+			transfer({ id: "upload", status: "uploading" }),
+			transfer({ id: "pausedUpload", status: "uploading", paused: true }),
+			transfer({ id: "copy", direction: "copy", status: "copying" }),
+			transfer({ id: "pausedCopy", direction: "copy", status: "copying", paused: true })
+		]
+		const cancel = vi.fn<(id: string) => void>()
+
+		expect(cancellableTransferIds(transfers, ended)).toEqual(["upload", "pausedUpload"])
+		expect(pausableTransferIds(transfers, ended)).toEqual(["upload"])
+		expect(resumableTransferIds(transfers, ended)).toEqual(["pausedUpload"])
+
+		confirmCancelAllTransfers(transfers, ended, cancel)
+
+		expect(cancel.mock.calls).toEqual([["upload"], ["pausedUpload"]])
 	})
 })
 

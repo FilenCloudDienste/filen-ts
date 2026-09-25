@@ -1,4 +1,6 @@
+import { isCopyJobRunning } from "@filen/shared"
 import { isActiveTransfer, type Transfer } from "@/features/transfers/store/useTransfersStore"
+import type { CopyJob } from "@/features/drive/lib/copy.logic"
 
 // Gates the header's "Clear finished" affordance — true the moment at least one row has settled
 // (done/error/completedWithErrors). Active (uploading OR downloading) rows show no such control since
@@ -43,20 +45,39 @@ export function buildTransfersDisplayList(transfers: Transfer[]): TransfersDispl
 // (`.length === 0`) — the screen never duplicates the selection rule between "what runs" and "when is
 // this greyed out".
 
+// The copies whose job has ended. Such a copy's row stays active while the copies it made move to the
+// trash, which can be neither paused nor stopped.
+export function endedCopyIds(jobs: Readonly<Record<string, CopyJob>>): Set<string> {
+	const ended = new Set<string>()
+
+	for (const job of Object.values(jobs)) {
+		if (!isCopyJobRunning(job)) {
+			ended.add(job.id)
+		}
+	}
+
+	return ended
+}
+
+// An active row, left out while its copy's job has ended, as the row hides its own controls then.
+function isControllableTransfer(transfer: Transfer, endedCopies: ReadonlySet<string>): boolean {
+	return isActiveTransfer(transfer.status) && !endedCopies.has(transfer.id)
+}
+
 // Cancel-all's targets: every active transfer, paused or not — mirrors the row's own Cancel button,
 // always present on an active row regardless of `paused`.
-export function cancellableTransferIds(transfers: Transfer[]): string[] {
-	return transfers.filter(transfer => isActiveTransfer(transfer.status)).map(transfer => transfer.id)
+export function cancellableTransferIds(transfers: Transfer[], endedCopies: ReadonlySet<string>): string[] {
+	return transfers.filter(transfer => isControllableTransfer(transfer, endedCopies)).map(transfer => transfer.id)
 }
 
 // Pause-all's targets: active AND not yet paused — an already-paused row has nothing left to pause.
-export function pausableTransferIds(transfers: Transfer[]): string[] {
-	return transfers.filter(transfer => isActiveTransfer(transfer.status) && !transfer.paused).map(transfer => transfer.id)
+export function pausableTransferIds(transfers: Transfer[], endedCopies: ReadonlySet<string>): string[] {
+	return transfers.filter(transfer => isControllableTransfer(transfer, endedCopies) && !transfer.paused).map(transfer => transfer.id)
 }
 
 // Resume-all's targets: active AND currently paused — the mirror image of pausableTransferIds.
-export function resumableTransferIds(transfers: Transfer[]): string[] {
-	return transfers.filter(transfer => isActiveTransfer(transfer.status) && transfer.paused).map(transfer => transfer.id)
+export function resumableTransferIds(transfers: Transfer[], endedCopies: ReadonlySet<string>): string[] {
+	return transfers.filter(transfer => isControllableTransfer(transfer, endedCopies) && transfer.paused).map(transfer => transfer.id)
 }
 
 // Cancel-all's real side-effecting step, extracted from the header's onClick so the "confirmed cancel
@@ -66,8 +87,8 @@ export function resumableTransferIds(transfers: Transfer[]): string[] {
 // confirms is always what the button showed as available). `cancel` is injected (mirrors
 // runDirectoryUpload's own DI shape) rather than importing control.ts's cancelTransfer directly, so a
 // test can assert the call set without touching the real sdk worker.
-export function confirmCancelAllTransfers(transfers: Transfer[], cancel: (id: string) => void): void {
-	for (const id of cancellableTransferIds(transfers)) {
+export function confirmCancelAllTransfers(transfers: Transfer[], endedCopies: ReadonlySet<string>, cancel: (id: string) => void): void {
+	for (const id of cancellableTransferIds(transfers, endedCopies)) {
 		cancel(id)
 	}
 }

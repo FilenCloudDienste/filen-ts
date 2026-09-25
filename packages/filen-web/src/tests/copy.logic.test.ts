@@ -3,6 +3,7 @@ import type { CopyCounts, CopyFailure, CopyFailureInfo, CopyReport, CopyUpdate, 
 import { applyCopyCreated, applyCopyUpdate, settleCopyJob } from "@filen/shared"
 import { narrowItem } from "@/features/drive/lib/item"
 import {
+	canRetryCopy,
 	copiedTopLevel,
 	copyErrorDTO,
 	copyGlyphForEntries,
@@ -10,6 +11,7 @@ import {
 	copyReportInput,
 	copyUpdateInput,
 	createCopyJob,
+	isCopyTrashPending,
 	retryEntries
 } from "@/features/drive/lib/copy.logic"
 
@@ -288,6 +290,24 @@ describe("copiedTopLevel", () => {
 		const delivered = narrowItem(dir)
 
 		expect(copiedTopLevel({ error: { species: "plain", message: "m", label: "m" } }, [delivered, delivered])).toEqual([delivered])
+	})
+})
+
+describe("isCopyTrashPending", () => {
+	const batch = [narrowItem(mockFile("copied"))]
+	const stopped = { ...createCopyJob("j", DESTINATION, 1), outcome: { status: "cancelled" as const }, cancelRequest: "trash" as const }
+
+	// An item delivered after the job ended can reach the trash before the batch its stop settled with.
+	it("holds while the stop's batch is still moving, whatever a late item's trash recorded", () => {
+		const withRetry = { ...stopped, retryable: [failure()] }
+
+		expect(isCopyTrashPending({ ...stopped, created: batch })).toBe(true)
+		expect(isCopyTrashPending({ ...stopped, created: batch, trashResult: { moved: 1, failed: 0 } })).toBe(true)
+		expect(canRetryCopy({ ...withRetry, created: batch, trashResult: { moved: 1, failed: 0 } })).toBe(false)
+		expect(isCopyTrashPending({ ...stopped, created: [], trashResult: { moved: 2, failed: 0 } })).toBe(false)
+		expect(canRetryCopy({ ...withRetry, created: [], trashResult: { moved: 2, failed: 0 } })).toBe(true)
+		expect(isCopyTrashPending({ ...stopped, cancelRequest: "keep", created: batch })).toBe(false)
+		expect(isCopyTrashPending({ ...stopped, outcome: { status: "running" }, created: batch })).toBe(false)
 	})
 })
 

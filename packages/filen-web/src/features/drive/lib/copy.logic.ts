@@ -203,9 +203,10 @@ export function copiedTopLevel(settlement: CopySettlement, delivered: readonly D
 	return items
 }
 
-// A settled job whose stop asked for its copies to go to the trash, still moving them there.
+// A settled job whose stop asked for its copies to go to the trash, still moving them there. The job
+// keeps that batch until its trash ends, whatever a late item's trash records meanwhile.
 export function isCopyTrashPending(job: CopyJob): boolean {
-	return job.outcome.status !== "running" && job.cancelRequest === "trash" && job.trashResult === null && job.created.length > 0
+	return job.outcome.status !== "running" && job.cancelRequest === "trash" && job.created.length > 0
 }
 
 // A settled job's failures can go into a new job once its stop is done moving its copies to the trash:

@@ -10,6 +10,7 @@ import {
 	buildTransfersDisplayList,
 	cancellableTransferIds,
 	confirmCancelAllTransfers,
+	endedCopyIds,
 	hasFinishedTransfers,
 	pausableTransferIds,
 	resumableTransferIds,
@@ -30,11 +31,13 @@ import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 export function TransfersScreen() {
 	const { t } = useTranslation(["transfers", "common"])
 	const transfers = useTransfersStore(useShallow(state => state.transfers))
+	// Changes when a copy's job ends, which takes its row out of the bulk actions.
+	const endedCopies = useCopyJobsStore(useShallow(state => endedCopyIds(state.jobs)))
 	const { active, finished } = buildTransfersDisplayList(transfers)
 	const { activeCount, percent, speed } = useTransfersAggregate()
-	const cancellable = cancellableTransferIds(transfers)
-	const pausable = pausableTransferIds(transfers)
-	const resumable = resumableTransferIds(transfers)
+	const cancellable = cancellableTransferIds(transfers, endedCopies)
+	const pausable = pausableTransferIds(transfers, endedCopies)
+	const resumable = resumableTransferIds(transfers, endedCopies)
 	const clearable = hasFinishedTransfers(transfers)
 	const showAggregate = shouldShowTransfersAggregate(activeCount)
 	// Cancel all fires immediately with no confirmation; gate it behind the shared AlertDialog
@@ -221,7 +224,7 @@ export function TransfersScreen() {
 				destructive
 				onOpenChange={setCancelAllConfirmOpen}
 				onConfirm={() => {
-					confirmCancelAllTransfers(transfers, cancelTransfer)
+					confirmCancelAllTransfers(transfers, endedCopies, cancelTransfer)
 					setCancelAllConfirmOpen(false)
 				}}
 			/>

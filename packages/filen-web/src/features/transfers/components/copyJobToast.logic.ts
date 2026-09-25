@@ -14,7 +14,10 @@ export function copyJobTitle(job: CopyJob): CopyJobTitle {
 		case "running":
 			return { key: "transfersCopyCardTitleRunning", count: job.itemCount, destination }
 		case "done":
-			return { key: "transfersCopyCardTitleDone", count: job.itemCount, destination }
+			// A stop asking for the trash undoes even a copy that finished before the stop reached it.
+			return job.cancelRequest === "trash"
+				? { key: "transfersCopyCardTitleEnded", destination }
+				: { key: "transfersCopyCardTitleDone", count: job.itemCount, destination }
 		default:
 			return { key: "transfersCopyCardTitleEnded", destination }
 	}
@@ -33,14 +36,22 @@ export type CopyJobStatusKey =
 	| "transfersCopyCancelledKept"
 	| "transfersCopyCancelledTrashFailed"
 	| "transfersCopyCancelledTrashed"
+	| "transfersCopyTrashFailed"
+	| "transfersCopyTrashed"
 	| "transfersCopyMovingToTrash"
 
+export interface CopyJobKeyStatus {
+	kind: "key"
+	key: CopyJobStatusKey
+	count?: number
+}
+
 // The line under the title. A failed copy's error is put into words where it's shown, so the text
-// follows the language.
+// follows the language; what its stop's move to the trash did follows it.
 export type CopyJobStatus =
-	| { kind: "key"; key: CopyJobStatusKey; count?: number }
+	| CopyJobKeyStatus
 	| { kind: "files"; done: number; count: number }
-	| { kind: "error"; error: ErrorDTO }
+	| { kind: "error"; error: ErrorDTO; trash?: CopyJobKeyStatus }
 	| { kind: "quota"; freeBytes: number }
 
 export function copyJobStatus(job: CopyJob): CopyJobStatus {
@@ -52,16 +63,32 @@ export function copyJobStatus(job: CopyJob): CopyJobStatus {
 		case "running":
 			return runningStatus(job)
 		case "done":
-			return { kind: "key", key: "transfersStatusDone" }
+			return trashedStatus(job) ?? { kind: "key", key: "transfersStatusDone" }
 		case "doneWithFailures":
-			return { kind: "key", key: "transfersCopyFailedItems", count: job.failures.length }
+			return trashedStatus(job) ?? { kind: "key", key: "transfersCopyFailedItems", count: job.failures.length }
 		case "quotaExceeded":
 			return { kind: "quota", freeBytes: job.outcome.freeBytes }
-		case "failed":
-			return { kind: "error", error: job.outcome.error }
+		case "failed": {
+			const trash = trashedStatus(job)
+
+			return trash === undefined ? { kind: "error", error: job.outcome.error } : { kind: "error", error: job.outcome.error, trash }
+		}
 		case "cancelled":
 			return cancelledStatus(job)
 	}
+}
+
+// What the stop's move to the trash did, for a copy that ended before the stop reached it.
+function trashedStatus(job: CopyJob): CopyJobKeyStatus | undefined {
+	if (job.trashResult === null) {
+		return undefined
+	}
+
+	if (job.trashResult.failed > 0) {
+		return { kind: "key", key: "transfersCopyTrashFailed" }
+	}
+
+	return { kind: "key", key: "transfersCopyTrashed", count: job.trashResult.moved }
 }
 
 function runningStatus(job: CopyJob): CopyJobStatus {

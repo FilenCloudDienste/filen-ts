@@ -376,4 +376,36 @@ describe("CopyJobToast", () => {
 		expect(screen.getByText("100%")).toBeTruthy()
 		expect(screen.queryByRole("button", { name: "Pause" })).toBeNull()
 	})
+
+	// The stop reached it only after the copy had finished; what it copied went to the trash all the same.
+	it("shows a finished copy whose stop moved its copies to the trash as undone, not complete", () => {
+		seed({ ...COPYING, outcome: { status: "done" }, cancelRequest: "trash", trashResult: { moved: 2, failed: 1 } })
+		renderCard()
+
+		expect(screen.getByText("Copy to Photos")).toBeTruthy()
+		expect(screen.getByText("Some copied items couldn't be moved to the trash.")).toBeTruthy()
+		expect(screen.queryByText("Copied 3 items → Photos")).toBeNull()
+		expect(screen.queryByText("Done")).toBeNull()
+	})
+
+	it("tells what the trash did after a failed copy's error", () => {
+		seed({
+			...COPYING,
+			outcome: {
+				status: "failed",
+				error: copyErrorDTO({
+					kind: "Reqwest",
+					message: "Error of kind Reqwest: error: offline",
+					serverMessage: undefined,
+					serverCode: undefined
+				})
+			},
+			cancelRequest: "trash",
+			trashResult: { moved: 3, failed: 0 }
+		})
+		renderCard()
+
+		expect(screen.getByText("Network error. Please check your connection and try again.")).toBeTruthy()
+		expect(screen.getByText("3 copied items were moved to the trash.")).toBeTruthy()
+	})
 })

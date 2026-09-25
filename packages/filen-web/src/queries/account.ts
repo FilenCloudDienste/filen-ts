@@ -107,11 +107,7 @@ export function accountQueryUpdate(updater: (prev: UserInfo) => UserInfo): void 
 	}
 }
 
-// The server's figure, whatever this tab writes meanwhile: a write cancels the query's own read, which
-// then resolves with the cached account instead. The cache takes the answer only if nothing was written
-// during the read, so it never lands over a patch or clears a stale mark.
-export async function fetchAccountFresh(): Promise<UserInfo> {
-	const writes = accountWrites
+async function readAccountFresh(writes: number): Promise<UserInfo> {
 	const info = await fetchAccount()
 
 	if (accountWrites === writes) {
@@ -119,4 +115,27 @@ export async function fetchAccountFresh(): Promise<UserInfo> {
 	}
 
 	return info
+}
+
+// The fresh read in flight, and the write count it started at.
+let freshRead: { promise: Promise<UserInfo>; writes: number } | undefined
+
+// The server's figure, whatever this tab writes meanwhile: a write cancels the query's own read, which
+// then resolves with the cached account instead. The cache takes the answer only if nothing was written
+// during the read, so it never lands over a patch or clears a stale mark. Callers share a read in flight
+// until the next write, whose effect it may predate.
+export function fetchAccountFresh(): Promise<UserInfo> {
+	if (freshRead?.writes === accountWrites) {
+		return freshRead.promise
+	}
+
+	const promise = readAccountFresh(accountWrites).finally(() => {
+		if (freshRead?.promise === promise) {
+			freshRead = undefined
+		}
+	})
+
+	freshRead = { promise, writes: accountWrites }
+
+	return promise
 }
