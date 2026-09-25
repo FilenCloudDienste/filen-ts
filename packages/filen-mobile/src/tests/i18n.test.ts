@@ -165,6 +165,39 @@ describe("getInitialLanguage", () => {
 		expect(result).toBe("pt-BR")
 	})
 
+	it("uses zh-TW for a Taiwan Traditional Chinese device locale", async () => {
+		mockSecureStoreGet.mockResolvedValue(null)
+		mockGetLocales.mockReturnValue([{ languageCode: "zh", languageTag: "zh-TW" }])
+
+		const result = await getInitialLanguage()
+
+		expect(result).toBe("zh-TW")
+	})
+
+	it.each([
+		["generic Traditional Chinese", { languageCode: "zh", languageTag: "zh-Hant" }],
+		["script-qualified Taiwan Chinese", { languageCode: "zh", languageTag: "zh-Hant-TW" }],
+		["Hong Kong Chinese", { languageCode: "zh", languageTag: "zh-HK" }],
+		["Macau Chinese", { languageCode: "zh", languageTag: "zh-MO" }],
+		["explicit Hant script", { languageCode: "zh", languageTag: "zh-CN", languageScriptCode: "Hant", regionCode: "CN" }]
+	])("maps %s to zh-TW", async (_label, locale) => {
+		mockSecureStoreGet.mockResolvedValue(null)
+		mockGetLocales.mockReturnValue([locale])
+
+		const result = await getInitialLanguage()
+
+		expect(result).toBe("zh-TW")
+	})
+
+	it("keeps Simplified Chinese devices on the existing zh catalog", async () => {
+		mockSecureStoreGet.mockResolvedValue(null)
+		mockGetLocales.mockReturnValue([{ languageCode: "zh", languageTag: "zh-CN" }])
+
+		const result = await getInitialLanguage()
+
+		expect(result).toBe("zh")
+	})
+
 	it("defaults a generic Portuguese device with an unrecognised region tag to pt-BR", async () => {
 		mockSecureStoreGet.mockResolvedValue(null)
 		mockGetLocales.mockReturnValue([{ languageCode: "pt", languageTag: "pt-AO" }])
