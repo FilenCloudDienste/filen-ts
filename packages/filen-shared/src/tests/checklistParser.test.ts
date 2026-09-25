@@ -1,6 +1,52 @@
 import { describe, it, expect } from "vitest"
-import { parse } from "node-html-better-parser"
+import { parse, HTMLElement, TextNode } from "node-html-better-parser"
 import { checklistParser, decodeHtmlEntities } from "@filen/shared"
+
+// The rows node-html-better-parser itself reads from the note as stored, on notes it reads quickly.
+function asStored(html: string): [boolean, string][] {
+	const rows: [boolean, string][] = []
+
+	for (const ul of parse(html).querySelectorAll("ul")) {
+		const checked = ul.getAttribute("data-checked") === "true"
+
+		for (const li of ul.querySelectorAll("li")) {
+			rows.push([checked, decodeHtmlEntities(li.rawText).trim()])
+		}
+	}
+
+	return rows
+}
+
+// The parser's tree read once: each `li` inside a `ul`, under the nearest one, without the text of the rows nested in it.
+function readOnce(html: string): [boolean, string][] {
+	const rows: [boolean, string][] = []
+
+	function walk(node: HTMLElement, ul: HTMLElement | undefined, own: string[] | undefined): void {
+		for (const child of node.childNodes) {
+			if (child instanceof TextNode) {
+				own?.push(child.rawText)
+			} else if (child instanceof HTMLElement && child.tagName === "li" && ul !== undefined) {
+				const checked = ul.getAttribute("data-checked") === "true"
+				const text: string[] = []
+				const at = rows.push([checked, ""]) - 1
+
+				walk(child, ul, text)
+
+				rows[at] = [checked, decodeHtmlEntities(text.join("")).trim()]
+			} else if (child instanceof HTMLElement) {
+				walk(child, child.tagName === "ul" ? child : ul, own)
+			}
+		}
+	}
+
+	walk(parse(html), undefined, undefined)
+
+	return rows
+}
+
+function rows(html: string): [boolean, string][] {
+	return checklistParser.parse(html).map(item => [item.checked, item.content])
+}
 
 describe("ChecklistParser", () => {
 	it("should parse empty string to empty checklist", () => {
@@ -200,25 +246,6 @@ describe("ChecklistParser — rows older mobile builds stored unescaped", () => 
 })
 
 describe("ChecklistParser — rows read as node-html-better-parser reads the note", () => {
-	// The rows the parser itself reads from the note as stored, on notes it reads quickly.
-	function asStored(html: string): [boolean, string][] {
-		const rows: [boolean, string][] = []
-
-		for (const ul of parse(html).querySelectorAll("ul")) {
-			const checked = ul.getAttribute("data-checked") === "true"
-
-			for (const li of ul.querySelectorAll("li")) {
-				rows.push([checked, decodeHtmlEntities(li.rawText).trim()])
-			}
-		}
-
-		return rows
-	}
-
-	function rows(html: string): [boolean, string][] {
-		return checklistParser.parse(html).map(item => [item.checked, item.content])
-	}
-
 	// A rich note switched to a checklist keeps its Quill markup, which is parsed as it is stored.
 	it("reads rows with attributes, plain lists and inline formatting as before", () => {
 		const html =
@@ -265,8 +292,32 @@ describe("ChecklistParser — rows read as node-html-better-parser reads the not
 		// The parser drops all that follows a raw text element with no close tag, even a list
 		"<ul data-checked=\"false\"><li>a</li></ul><pre> x<y </pre a=\"b\"><ul data-checked=\"true\"><li>b</li></ul>",
 		"<ul data-checked=\"false\"><li>a</li></ul><constructor> x<y </constructor a=\"b\"><ul data-checked=\"true\"><li>b</li></ul>",
-		"<ul data-checked=\"false\"><li>a <!-- <li>no --> b</li><li>c<!--d</li></ul>"
+		"<ul data-checked=\"false\"><li>a <!-- <li>no --> b</li><li>c<!--d</li></ul>",
+		// A closed element named for an inherited key keeps its content as text, also after a "<" that starts no tag
+		"<ul data-checked=\"false\"><li>a<b c</li><li>x<i><toString>kept</toString></i>y</li></ul>",
+		"<ul data-checked=\"false\"><li>count<limit</li><li>x<b><constructor>two words</constructor></b>y</li></ul>",
+		// Stray close tags pop every element up to theirs, lists and rows included
+		"<ul data-checked=\"false\"><li>Remove </div> from footer</li><li>Buy milk</li></ul>",
+		"<ul data-checked=\"true\"><li>a</LI><li>b</li></ul>"
 	])("reads %s as the parser does", html => {
+		expect(rows(html)).toEqual(asStored(html))
+	})
+
+	it("keeps what an element named for an inherited key holds, after a \"<\" that starts no tag", () => {
+		expect(rows("<ul data-checked=\"false\"><li>a<b c</li><li>x<i><toString>kept</toString></i>y</li></ul>")).toEqual([
+			[false, "a<b c"],
+			[false, "xkepty"]
+		])
+	})
+
+	// Rows older mobile builds stored unescaped can hold a typed list, which the parser nests in the row.
+	it.each([
+		"<ul data-checked=\"false\"><li>Use <ol> for numbered steps</li><li>Buy milk</li></ul>",
+		"<ul data-checked=\"false\"><li>Wrap nav links in <ul> element</li><li>Buy milk</li></ul>",
+		"<ul data-checked=\"true\"><li>Replace <ul><li> with FlatList</li><li>next</li></ul>",
+		"<ul data-checked=\"false\"><li>Use <ol><li> for steps</li><li>a</li><li>b</li></ul>",
+		"<ul data-checked=\"false\"><li>a<ul><li>b</li></ul>"
+	])("reads the typed list in %s as the parser does", html => {
 		expect(rows(html)).toEqual(asStored(html))
 	})
 
@@ -313,7 +364,11 @@ describe("ChecklistParser — rows read as node-html-better-parser reads the not
 			"</li>",
 			"</ul>",
 			"<ul data-checked=true>",
-			"<LI>"
+			"<LI>",
+			"<i><constructor>k</constructor></i>",
+			"<toString>",
+			"<ol>",
+			"</div>"
 		]
 		let seed = 1
 
@@ -347,6 +402,64 @@ describe("ChecklistParser — rows read as node-html-better-parser reads the not
 	})
 })
 
+describe("ChecklistParser — rows nested in rows", () => {
+	// No client writes nested lists. Read as the parser reads them, every row once under each list around it and with the
+	// rows nested in it, a crafted note of them held cubic text, and the parser's queries recursed until the stack ran out.
+	it("reads hundreds of nested lists quickly, each row once", () => {
+		const html = `${"<ul data-checked=\"false\"><li>x".repeat(400)}${"</li></ul>".repeat(400)}`
+		const start = performance.now()
+		const read = rows(html)
+
+		expect(performance.now() - start).toBeLessThan(100)
+		expect(read).toHaveLength(400)
+		expect(read).toEqual(readOnce(html))
+	})
+
+	it("reads rows nested past a few levels once each, under the nearest list, and previews the first of them", () => {
+		const html = `<ul data-checked="true"><li>a${"<ul data-checked=\"false\"><li>b".repeat(12)}${"</li></ul>".repeat(12)}</li></ul>`
+
+		expect(rows(html)).toEqual([[true, "a"], ...Array.from({ length: 12 }, () => [false, "b"])])
+		expect(rows(html)).toEqual(readOnce(html))
+		expect(checklistParser.firstNonEmptyContent(html)).toBe("a")
+	})
+
+	it("reads a row thousands of inline tags deep and keeps the rows around it", () => {
+		const html = `<ul data-checked="false"><li>first</li><li>${"<b>x<i>x".repeat(1000)}</li><li>last</li></ul>`
+		const start = performance.now()
+
+		expect(rows(html)).toEqual([
+			[false, "first"],
+			[false, "x".repeat(2000)],
+			[false, "last"]
+		])
+		expect(performance.now() - start).toBeLessThan(100)
+	})
+
+	// The parser's clean-up at the end moves each open element's children up one level at a time.
+	it("reads a note that ends thousands of inline tags deep quickly", () => {
+		const html = `<ul data-checked="false"><li>first</li><li>${"<b>x<i>x".repeat(16_000)}`
+		const start = performance.now()
+
+		expect(rows(html)).toEqual([[false, "first"]])
+		expect(performance.now() - start).toBeLessThan(100)
+	})
+
+	// The parser's table lookup for "caller" inside "constructor" throws. It read the note as no rows, and the next note it
+	// read started where the throw left its shared regex.
+	it("reads on where the parser's own lookup throws, and reads the next note in full", () => {
+		const html = "<ul data-checked=\"false\"><li>a</li><li>b<constructor>c</constructor><caller>d</li><li>e</li></ul>"
+
+		expect(rows(html)).toEqual([
+			[false, "a"],
+			[false, "b"]
+		])
+		expect(rows("<ul data-checked=\"false\"><li>Milk</li><li>Eggs</li></ul>")).toEqual([
+			[false, "Milk"],
+			[false, "Eggs"]
+		])
+	})
+})
+
 describe("ChecklistParser.firstNonEmptyContent", () => {
 	// The preview reads rows without the parser, so it must land on the row the editor shows first.
 	it.each([
@@ -374,5 +487,23 @@ describe("ChecklistParser.firstNonEmptyContent", () => {
 	])("reads %s as the first row the parser returns", (html, first) => {
 		expect(checklistParser.firstNonEmptyContent(html)).toBe(first)
 		expect(checklistParser.parse(html).find(item => item.content.length > 0)?.content ?? "").toBe(first)
+	})
+
+	// Rows older mobile builds stored unescaped: a typed list nests in the row, and a stray close tag ends the list.
+	it.each([
+		["<ul data-checked=\"false\"><li>Use <ol> here</li><li>Buy milk</li></ul>", "Use  here"],
+		["<ul data-checked=\"false\"><li>Wrap nav links in <ul> element</li><li>Buy milk</li></ul>", "Wrap nav links in  element"],
+		["<ul data-checked=\"false\"><li>Remove </div> from footer</li><li>Buy milk</li></ul>", "Remove"],
+		["<ul data-checked=\"false\"><li><ol></li><li>Buy milk</li></ul>", "Buy milk"],
+		["<ul data-checked=\"false\"><li><br><ul><li>b</li></ul></li></ul>", "b"],
+		["<ul data-checked=\"false\"><li>a<ul><li>b</li></ul>", "b"],
+		["<ul data-checked=\"false\"><li>x<i><constructor>kept</constructor></i>y</li></ul>", "xkepty"],
+		// A list inside another element stays only if it closes
+		["<div><ul data-checked=\"true\"><li>b</li></ul>", "b"],
+		["<div><ul data-checked=\"true\"><li>b</li>", ""]
+	])("reads %s as the first row the parser itself returns", (html, first) => {
+		expect(checklistParser.firstNonEmptyContent(html)).toBe(first)
+		expect(checklistParser.parse(html).find(item => item.content.length > 0)?.content ?? "").toBe(first)
+		expect(asStored(html).find(([, content]) => content.length > 0)?.[1] ?? "").toBe(first)
 	})
 })

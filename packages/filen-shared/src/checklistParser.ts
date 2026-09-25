@@ -1,4 +1,4 @@
-import { HTMLElement, parse } from "node-html-better-parser"
+import { HTMLElement } from "node-html-better-parser"
 import { v4 as uuidv4 } from "uuid"
 import { decodeHtmlEntities } from "./htmlEntities"
 
@@ -10,20 +10,73 @@ export type ChecklistItem = {
 
 export type Checklist = ChecklistItem[]
 
-// node-html-better-parser finds markup with one regex. After a "<" that starts no tag ("count<limit fails on second
-// try"), that regex tries every way of splitting the text that follows into attributes before giving up, which takes
-// exponential time. walkMarkup finds exactly the markup the regex finds in linear time, so the parser is only handed
-// markup it reads in one pass and rows read as they always have.
+// Rows are read as node-html-better-parser reads the note, without running it. After a "<" that starts no tag
+// ("count<limit fails on second try"), its markup regex tries every way of splitting the text that follows into
+// attributes, which takes exponential time, and its tree queries recurse once per nesting level. walkMarkup finds
+// exactly the markup the regex finds, in linear time, and readRows follows the parser's own rules to build the rows
+// its tree holds.
 
 const FAIL = -1
 
-// The parser's table of elements whose content it skips, read the same way, so inherited keys ("constructor") count.
+// The parser's tables, as object literals so that inherited keys ("constructor") read as they do there.
+const HEADINGS = { p: true, h1: true, h2: true, h3: true, h4: true, h5: true, h6: true }
+const CELLS = { td: true, th: true }
+const TABLE_ROWS = { tr: true, thead: true, tbody: true, tfoot: true }
+const LISTS = { ul: true, ol: true }
+
+// For each element, the opening tags that end it first
+const CLOSED_BY_OPENING: Record<string, Record<string, unknown>> = {
+	li: { li: true },
+	p: HEADINGS,
+	b: { div: true },
+	td: CELLS,
+	th: CELLS,
+	h1: HEADINGS,
+	h2: HEADINGS,
+	h3: HEADINGS,
+	h4: HEADINGS,
+	h5: HEADINGS,
+	h6: HEADINGS,
+	colgroup: TABLE_ROWS,
+	tr: TABLE_ROWS,
+	thead: TABLE_ROWS,
+	tbody: TABLE_ROWS,
+	tfoot: TABLE_ROWS,
+	ul: LISTS,
+	ol: LISTS,
+	aside: { aside: true },
+	nav: { nav: true },
+	form: { form: true },
+	header: { header: true },
+	footer: { footer: true },
+	main: { main: true }
+}
+
+// Elements that end as they open, and whose close tags are ignored
+const VOID_ELEMENTS: Record<string, unknown> = {
+	area: true,
+	base: true,
+	br: true,
+	col: true,
+	hr: true,
+	img: true,
+	input: true,
+	link: true,
+	meta: true,
+	source: true
+}
+
+// Elements whose content is skipped up to their close tag
 const RAW_TEXT_ELEMENTS: Record<string, unknown> = {
 	script: true,
 	noscript: true,
 	style: true,
 	pre: true
 }
+
+// The parser's default options, empty: a raw text element keeps its content as text only when its name is found here,
+// as an inherited key
+const KEPT_RAW_TEXT: Record<string, unknown> = {}
 
 // JavaScript's `\s`.
 function isSpace(c: number): boolean {
@@ -244,14 +297,16 @@ function tagEnds(html: string, lo: number): Int32Array {
 }
 
 type MarkupVisitor = {
-	// A "<" the parser keeps as text
-	text?: (at: number) => void
 	// Markup the parser reads from `start` to `end`: a tag named from `nameStart` to `nameEnd`, or a comment when
-	// `nameStart` is FAIL. `verbatim` when the regex reads it in one pass as written. Returning true stops the walk.
-	markup: (start: number, nameStart: number, nameEnd: number, end: number, verbatim: boolean) => boolean
+	// `nameStart` is FAIL
+	markup: (start: number, nameStart: number, nameEnd: number, end: number) => boolean
+	// The content of the raw text element just opened, from `start` to `end`, and where its close tag ends, FAIL when it
+	// has none and the content runs to the end of the note
+	rawText: (start: number, end: number, closeEnd: number) => boolean
 }
 
-// Walks the markup the parser reads, in order: what its regex matches and what it skips of raw text elements.
+// Walks the markup the parser reads, in order: what its regex matches, and the content of raw text elements, which the
+// regex never reads. A callback returning true stops the walk.
 function walkMarkup(html: string, visitor: MarkupVisitor): void {
 	const n = html.length
 	// Every reading from the first "<" where the regex would backtrack on
@@ -304,19 +359,16 @@ function walkMarkup(html: string, visitor: MarkupVisitor): void {
 		}
 
 		if (end === FAIL) {
-			visitor.text?.(lt)
 			lt = html.indexOf("<", lt + 1)
 
 			continue
 		}
 
-		const verbatim = nameStart === FAIL || ends === undefined
-
-		if (visitor.markup(lt, nameStart, nameEnd, end, verbatim)) {
+		if (visitor.markup(lt, nameStart, nameEnd, end)) {
 			return
 		}
 
-		// The parser skips a raw text element's content up to its close tag, and all the rest when there is none.
+		// The parser takes a raw text element's content up to its close tag, and all the rest when there is none.
 		const opened = nameStart === FAIL || html.charCodeAt(nameStart - 1) === 47 ? "" : html.slice(nameStart, nameEnd)
 
 		if (RAW_TEXT_ELEMENTS[opened]) {
@@ -326,7 +378,13 @@ function walkMarkup(html: string, visitor: MarkupVisitor): void {
 
 			const closed = close.exec(html)
 
-			if (closed === null || visitor.markup(end, closed.index + 2, closed.index + 2 + opened.length, close.lastIndex, verbatim)) {
+			if (closed === null) {
+				visitor.rawText(end, n, FAIL)
+
+				return
+			}
+
+			if (visitor.rawText(end, closed.index, close.lastIndex)) {
 				return
 			}
 
@@ -337,72 +395,378 @@ function walkMarkup(html: string, visitor: MarkupVisitor): void {
 	}
 }
 
-// A tag the parser reads, reduced to its name and, on a list, its checked state. It adds no quote: a tag kept as
-// written may end where it does only because its opening quote is never closed.
-function bareTag(html: string, nameStart: number, nameEnd: number, end: number): string {
-	const name = html.slice(nameStart, nameEnd)
-	const closing = html.charCodeAt(nameStart - 1) === 47
-	const selfClosing = html.charCodeAt(end - 2) === 47
-	const checked =
-		!closing &&
-		name === "ul" &&
-		new HTMLElement(name, html.slice(nameEnd, end - (selfClosing ? 2 : 1)).trim()).getAttribute("data-checked") === "true"
-
-	return `<${closing ? "/" : ""}${name}${checked ? " data-checked=true" : ""}${selfClosing ? "/" : ""}>`
-}
-
-// `html` changed only where the parser's regex would backtrack: a "<" it keeps as text is escaped, which rowContent
-// decodes back, and a tag it reaches by backtracking is reduced to what the rows read of it.
-function readableMarkup(html: string): string {
-	const parts: string[] = []
-	let copied = 0
-
-	walkMarkup(html, {
-		text: at => {
-			parts.push(html.slice(copied, at), "&lt;")
-			copied = at + 1
-		},
-		markup: (start, nameStart, nameEnd, end, verbatim) => {
-			if (!verbatim) {
-				parts.push(html.slice(copied, start), bareTag(html, nameStart, nameEnd, end))
-				copied = end
-			}
-
-			return false
-		}
-	})
-
-	if (copied === 0) {
-		return html
-	}
-
-	parts.push(html.slice(copied))
-
-	return parts.join("")
-}
-
 // Rows are escaped on write and decoded on read, so text with `<`, `>` or `&` survives the round trip.
 function escapeHtml(text: string): string {
 	return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
 }
 
-// Older mobile builds stored rows unescaped, and the parser's own `.text` would also expand legacy names
-// that lack the ";": "cut&copy" read as "cut©", "Issue&#42" as "Issue*".
-function rowContent(li: HTMLElement): string {
-	return decodeHtmlEntities(li.rawText).trim()
+// A `ul`, which rows are read under.
+type List = {
+	// Where its tag's attributes lie, read for its checked state once a row is read under it
+	attributesStart: number
+	attributesEnd: number
+	checked: boolean | undefined
+	parent: List | undefined
+	// The list at the top level it sits in, itself included. At the end the parser removes every list still open except
+	// one at the top level, so that list is kept even if never closed.
+	top: List | undefined
+	closed: boolean
+	// The rows opened inside it: rows[firstRow..endRow), endRow FAIL while open
+	firstRow: number
+	endRow: number
 }
 
-// Visits every row in document order; `visit` returning true stops the walk.
-function walkRows(html: string, visit: (checked: boolean, content: string) => boolean): void {
-	for (const ul of parse(readableMarkup(html)).querySelectorAll("ul")) {
-		const checked = ul.getAttribute("data-checked") === "true"
+// An `li` inside a list. Still open at the end, it is removed and reads as no row.
+type Row = {
+	list: List
+	parent: Row | undefined
+	// All the text inside it, nested rows included: chunks[firstChunk..endChunk), which span textStart..textEnd of all
+	// the row text read
+	firstChunk: number
+	endChunk: number
+	textStart: number
+	textEnd: number
+	closed: boolean
+}
 
-		for (const li of ul.querySelectorAll("li")) {
-			if (visit(checked, rowContent(li))) {
+type Frame = {
+	name: string
+	list: List | undefined
+	row: Row | undefined
+}
+
+// Whether opening `name` inside `parent` ends `parent` first. Where the parser's lookup throws ("caller" inside
+// "constructor"), the parser fails on the whole note; this ends nothing, and the rows read on.
+function endsParent(parent: string, name: string): boolean {
+	const ended = CLOSED_BY_OPENING[parent]
+
+	if (!ended) {
+		return false
+	}
+
+	try {
+		return Boolean(ended[name])
+	} catch {
+		return false
+	}
+}
+
+function isChecked(html: string, list: List): boolean {
+	if (list.checked === undefined) {
+		list.checked =
+			new HTMLElement("ul", html.slice(list.attributesStart, list.attributesEnd).trim()).getAttribute("data-checked") === "true"
+	}
+
+	return list.checked
+}
+
+function isKept(list: List): boolean {
+	return list.closed || list.top === list
+}
+
+// Older mobile builds stored rows unescaped, and the parser's own `.text` would also expand legacy names
+// that lack the ";": "cut&copy" read as "cut©", "Issue&#42" as "Issue*".
+function rowContent(chunks: string[], firstChunk: number, endChunk: number): string {
+	return decodeHtmlEntities(endChunk - firstChunk === 1 ? (chunks[firstChunk] ?? "") : chunks.slice(firstChunk, endChunk).join("")).trim()
+}
+
+type NestedRows = {
+	lists: List[]
+	rows: Row[]
+	chunks: string[]
+	// The innermost row open as each chunk was read
+	owners: Row[]
+	noteLength: number
+	// How many rows were visited already, which lead in either reading
+	visited: number
+	visit: (list: List, content: string) => boolean
+}
+
+// The parser reads every row inside a list, nested ones included, once under each list around it, and a row's text
+// includes the rows nested in it, so each level of nesting repeats rows and text. That reading is kept while it holds
+// at most four times the rows read once and four times the note's length in text. Past that, each row is read once,
+// under its nearest list, without the rows nested in it.
+function readNestedRows({ lists, rows, chunks, owners, noteLength, visited, visit }: NestedRows): void {
+	let once = 0
+
+	for (const row of rows) {
+		if (row.closed && (isKept(row.list) || row.list.top !== undefined)) {
+			once++
+		}
+	}
+
+	let pairs = 0
+	let length = 0
+
+	for (const list of lists) {
+		if (!isKept(list)) {
+			continue
+		}
+
+		for (let i = list.firstRow, end = list.endRow === FAIL ? rows.length : list.endRow; i < end; i++) {
+			const row = rows[i]
+
+			if (row !== undefined && row.closed) {
+				pairs++
+				length += row.textEnd - row.textStart
+			}
+		}
+
+		if (pairs > once * 4 || length > noteLength * 4) {
+			break
+		}
+	}
+
+	let index = 0
+
+	if (pairs <= once * 4 && length <= noteLength * 4) {
+		for (const list of lists) {
+			if (!isKept(list)) {
+				continue
+			}
+
+			for (let i = list.firstRow, end = list.endRow === FAIL ? rows.length : list.endRow; i < end; i++) {
+				const row = rows[i]
+
+				if (row === undefined || !row.closed || index++ < visited) {
+					continue
+				}
+
+				if (visit(list, rowContent(chunks, row.firstChunk, row.endChunk))) {
+					return
+				}
+			}
+		}
+
+		return
+	}
+
+	const own = new Map<Row, string[]>()
+
+	for (let i = 0; i < chunks.length; i++) {
+		const owner = owners[i]
+		const chunk = chunks[i]
+
+		if (owner === undefined || chunk === undefined) {
+			continue
+		}
+
+		const parts = own.get(owner)
+
+		if (parts === undefined) {
+			own.set(owner, [chunk])
+		} else {
+			parts.push(chunk)
+		}
+	}
+
+	for (const row of rows) {
+		// An open list other than the top-level one is removed at the end, leaving its rows in the list around it
+		const list = isKept(row.list) ? row.list : row.list.top
+
+		if (!row.closed || list === undefined || index++ < visited) {
+			continue
+		}
+
+		const parts = own.get(row)
+
+		if (visit(list, rowContent(parts ?? [], 0, parts?.length ?? 0))) {
+			return
+		}
+	}
+}
+
+// Visits the rows the parser's tree holds, in the order the parser reads them: each list in turn, every row inside it,
+// with all the text inside that row. `visit` returning true stops the walk.
+function readRows(html: string, visit: (list: List, content: string) => boolean): void {
+	const frames: Frame[] = []
+	const lists: List[] = []
+	const rows: Row[] = []
+	const chunks: string[] = []
+	const owners: Row[] = []
+	let list: List | undefined
+	let row: Row | undefined
+	let text = 0
+	let textLength = 0
+	let rawName = ""
+	let rawSelfClosing = false
+	// While each row sits alone in a list at the top level, nothing after it changes how it reads, so it is visited as
+	// it closes. Once one does not, the rest is visited at the end.
+	let streaming = true
+	let visited = 0
+	let stopped = false
+
+	function addText(start: number, end: number): void {
+		if (row === undefined || end <= start) {
+			return
+		}
+
+		const chunk = html.slice(start, end)
+
+		chunks.push(chunk)
+		owners.push(row)
+
+		textLength += chunk.length
+	}
+
+	function open(name: string, attributesStart: number, attributesEnd: number): void {
+		let openedList: List | undefined
+		let openedRow: Row | undefined
+
+		if (name === "ul") {
+			openedList = {
+				attributesStart,
+				attributesEnd,
+				checked: undefined,
+				parent: list,
+				top: list?.top,
+				closed: false,
+				firstRow: rows.length,
+				endRow: FAIL
+			}
+
+			if (list === undefined && frames.length === 0) {
+				openedList.top = openedList
+			}
+
+			lists.push(openedList)
+
+			list = openedList
+		} else if (name === "li" && list !== undefined) {
+			if (row !== undefined || list.top !== list) {
+				streaming = false
+			}
+
+			openedRow = {
+				list,
+				parent: row,
+				firstChunk: chunks.length,
+				endChunk: chunks.length,
+				textStart: textLength,
+				textEnd: textLength,
+				closed: false
+			}
+
+			rows.push(openedRow)
+
+			row = openedRow
+		}
+
+		frames.push({
+			name,
+			list: openedList,
+			row: openedRow
+		})
+	}
+
+	function pop(): void {
+		const frame = frames.pop()
+		const closedRow = frame?.row
+		const closedList = frame?.list
+
+		if (closedRow !== undefined) {
+			closedRow.endChunk = chunks.length
+			closedRow.textEnd = textLength
+			closedRow.closed = true
+
+			row = closedRow.parent
+
+			if (streaming && !stopped) {
+				visited++
+
+				stopped = visit(closedRow.list, rowContent(chunks, closedRow.firstChunk, closedRow.endChunk))
+			}
+		}
+
+		if (closedList !== undefined) {
+			closedList.endRow = rows.length
+			closedList.closed = true
+
+			list = closedList.parent
+		}
+	}
+
+	// Pops up to and including the innermost `name`, or everything when none is open, as the parser's close tag does
+	function close(name: string): void {
+		for (let top = frames[frames.length - 1]; top !== undefined; top = frames[frames.length - 1]) {
+			pop()
+
+			if (top.name === name) {
 				return
 			}
 		}
 	}
+
+	walkMarkup(html, {
+		markup: (start, nameStart, nameEnd, end) => {
+			addText(text, start)
+
+			text = end
+
+			if (nameStart === FAIL) {
+				return false
+			}
+
+			const name = html.slice(nameStart, nameEnd)
+
+			if (html.charCodeAt(nameStart - 1) === 47) {
+				// The close tag of an element that takes none is ignored
+				if (!VOID_ELEMENTS[name]) {
+					close(name)
+				}
+
+				return stopped
+			}
+
+			const selfClosing = html.charCodeAt(end - 2) === 47
+			const parent = frames[frames.length - 1]
+
+			if (!selfClosing && parent !== undefined && endsParent(parent.name, name)) {
+				pop()
+			}
+
+			open(name, nameEnd, end - (selfClosing ? 2 : 1))
+
+			if (RAW_TEXT_ELEMENTS[name]) {
+				rawName = name
+				rawSelfClosing = selfClosing
+			} else if (selfClosing || VOID_ELEMENTS[name]) {
+				close(name)
+			}
+
+			return stopped
+		},
+		rawText: (start, end, closeEnd) => {
+			if (KEPT_RAW_TEXT[rawName]) {
+				addText(start, end)
+			}
+
+			// Its close tag ends it, except a void one's, which the parser ignores. Without a close tag, it ends only
+			// when it closes itself or is void.
+			if (closeEnd === FAIL ? rawSelfClosing || VOID_ELEMENTS[rawName] : !VOID_ELEMENTS[rawName]) {
+				close(rawName)
+			}
+
+			text = closeEnd
+
+			return stopped
+		}
+	})
+
+	// Text after the last markup goes to the top level, outside every row, so it is never read.
+	if (stopped || streaming) {
+		return
+	}
+
+	readNestedRows({
+		lists,
+		rows,
+		chunks,
+		owners,
+		noteLength: html.length,
+		visited,
+		visit
+	})
 }
 
 export class ChecklistParser {
@@ -410,9 +774,9 @@ export class ChecklistParser {
 		try {
 			const checklist: Checklist = []
 
-			walkRows(html, (checked, content) => {
+			readRows(html, (list, content) => {
 				checklist.push({
-					checked,
+					checked: isChecked(html, list),
 					content,
 					id: uuidv4()
 				})
@@ -426,53 +790,22 @@ export class ChecklistParser {
 		}
 	}
 
-	// The first row with text, "" when there is none, taking rows as parse does in well-formed lists: each `li`
-	// of a `ul`, ended by the next row or list tag and dropped if still open at the end. Previews are made for
-	// every saved or received edit, so this reads only up to that row and builds no document.
+	// The first row with text that parse reads, "" when there is none. Previews are made for every saved or received
+	// edit, so rows that do not nest are read only up to that one, and no ids are made.
 	public firstNonEmptyContent(html: string): string {
-		const row: string[] = []
-		let inRow = false
-		let inList = false
-		let text = 0
-		let content = ""
+		let first = ""
 
-		walkMarkup(html, {
-			markup: (start, nameStart, nameEnd, end) => {
-				if (inRow) {
-					row.push(html.slice(text, start))
-				}
-
-				text = end
-
-				const name = nameStart === FAIL ? "" : html.slice(nameStart, nameEnd)
-				const opening = html.charCodeAt(nameStart - 1) !== 47
-
-				// "<li/>" or "<ul/>" is an empty element of its own and changes no row or list.
-				if ((name !== "li" && name !== "ul" && name !== "ol") || (opening && html.charCodeAt(end - 2) === 47)) {
-					return false
-				}
-
-				if (inRow) {
-					content = decodeHtmlEntities(row.join("")).trim()
-
-					if (content.length > 0) {
-						return true
-					}
-
-					row.length = 0
-				}
-
-				if (name !== "li") {
-					inList = opening && name === "ul"
-				}
-
-				inRow = opening && name === "li" && inList
-
+		readRows(html, (_list, content) => {
+			if (content.length === 0) {
 				return false
 			}
+
+			first = content
+
+			return true
 		})
 
-		return content
+		return first
 	}
 
 	public stringify(checklist: Checklist): string {
