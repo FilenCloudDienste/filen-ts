@@ -148,6 +148,7 @@ function mockLinkedFile(overrides: Partial<LinkedFile> = {}): LinkedFile {
 		version: 2,
 		timestamp: 1_700_000_000_000n,
 		fileKey: "the-file-key",
+		downloadable: true,
 		linkedTag: true,
 		canMakeThumbnail: true,
 		...overrides

@@ -67,6 +67,7 @@ function makeItem(uuid: LinkedFile["uuid"], name: string, size: number): DriveIt
 		version: 2,
 		timestamp: 0n,
 		fileKey: "k",
+		downloadable: true,
 		linkedTag: true,
 		canMakeThumbnail: false
 	}

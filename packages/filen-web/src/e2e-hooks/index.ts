@@ -70,7 +70,7 @@ interface E2eHooks {
 	// branch, the one path that can never reach the sw route under test).
 	rawStringifiedClient: () => Promise<StringifiedClient>
 	// Uploads one small real file through the real worker path (no UI) and returns the resulting File
-	// record — gives the sw zip e2e case real, live-downloadable ZipItems without depending on whatever
+	// record — gives the sw zip e2e case real, live-downloadable zip items without depending on whatever
 	// the shared e2e account happens to already hold. `parentUuid` defaults to the drive root; callers
 	// nesting inside a scratch directory (net-zero on the shared account) pass its uuid explicitly.
 	createTestFile: (name: string, content: string, parentUuid?: string | null) => Promise<File>

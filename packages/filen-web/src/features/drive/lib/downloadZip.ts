@@ -1,5 +1,5 @@
 import * as Comlink from "comlink"
-import type { ZipItem } from "@filen/sdk-rs"
+import type { AnyItemWithContext } from "@filen/sdk-rs"
 import { driveItemName } from "@filen/shared"
 import { toast } from "sonner"
 import { sdkApi } from "@/lib/sdk/client"
@@ -24,7 +24,7 @@ import { useTransfersStore, type TransfersStore } from "@/features/transfers/sto
 // keys single-file downloads by — no zip-specific control wiring is needed here.
 export interface RunZipDownloadDeps {
 	downloadZip: (
-		items: ZipItem[],
+		items: AnyItemWithContext[],
 		transferId: string,
 		save: SaveTarget,
 		onProgress: (bytesWritten: bigint, totalBytes: bigint, itemsProcessed: bigint, totalItems: bigint) => void
@@ -108,7 +108,7 @@ export async function runZipDownload(
 // (disk full at close, a revoked handle) rejects this function too, rather than reporting a finished
 // zip that never actually finished writing.
 async function downloadZipViaFsa(
-	items: ZipItem[],
+	items: AnyItemWithContext[],
 	transferId: string,
 	save: FsaSaveTarget,
 	onProgress: (bytesWritten: bigint, totalBytes: bigint, itemsProcessed: bigint, totalItems: bigint) => void
@@ -135,8 +135,8 @@ async function downloadZipViaFsa(
 }
 
 // The real wiring behind RunZipDownloadDeps.downloadZip: fsa streams through the worker directly, sw
-// registers the ZipItem[] with the service worker and lets a plain navigation trigger the browser's
-// own download manager — mirrors download.ts's defaultDownloadDeps.download split exactly.
+// registers the AnyItemWithContext[] with the service worker and lets a plain navigation trigger the
+// browser's own download manager — mirrors download.ts's defaultDownloadDeps.download split exactly.
 export const defaultZipDownloadDeps: RunZipDownloadDeps = {
 	downloadZip: (items, transferId, save, onProgress) =>
 		save.kind === "sw" ? triggerSwZipDownload(items, save) : downloadZipViaFsa(items, transferId, save, onProgress),

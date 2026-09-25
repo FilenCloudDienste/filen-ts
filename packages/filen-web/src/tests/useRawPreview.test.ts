@@ -30,6 +30,7 @@ const item = linkedFileIntoDriveItem({
 	version: 2,
 	timestamp: 0n,
 	fileKey: "k",
+	downloadable: true,
 	linkedTag: true,
 	canMakeThumbnail: true
 })

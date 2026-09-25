@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { useTranslation } from "react-i18next"
-import type { CopyItem } from "@filen/sdk-rs"
+import type { AnyItemWithContext } from "@filen/sdk-rs"
 import { ACTION_DEFS } from "@/features/drive/lib/actionDefs"
 import { type CopyJobGlyph } from "@/features/drive/lib/copy.logic"
 import { MoveTargetDialog } from "@/features/drive/components/moveTargetDialog"
@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button"
 
 export interface SaveToDriveButtonProps {
 	// The linked file, or a linked directory with its link (password state included), as the SDK copies it.
-	item: CopyItem
+	item: AnyItemWithContext
 	name: string
 	glyph: CopyJobGlyph
 	// The slim bars' compact form: small, with the label only from sm up.

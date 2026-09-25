@@ -6,7 +6,7 @@ import initSdk, {
 	type Client as SwClient,
 	type StringifiedClient as SwStringifiedClient,
 	type AnyFile as SwAnyFile,
-	type ZipItem as SwZipItem
+	type AnyItemWithContext as SwZipItem
 } from "@filen/sdk-rs/service-worker/sdk-rs.js"
 import {
 	SW_PROTOCOL_VERSION,
@@ -351,9 +351,9 @@ self.addEventListener("message", (event: ExtendableMessageEvent) => {
 
 	if (type === SW_MSG_LOGOUT) {
 		// Logout must leave no decrypted key material resident in the worker: free the reconstructed
-		// Client and drop every pending download (each holds a decrypted AnyFile/ZipItem). The page sends
-		// this before its reload; the SW keeps running independently of that navigation, so the wipe
-		// lands regardless of reload timing.
+		// Client and drop every pending download (each holds a decrypted AnyFile/AnyItemWithContext). The
+		// page sends this before its reload; the SW keeps running independently of that navigation, so the
+		// wipe lands regardless of reload timing.
 		swClient?.free()
 		swClient = null
 		downloads.clear()

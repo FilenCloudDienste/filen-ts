@@ -1,5 +1,5 @@
 import * as Comlink from "comlink"
-import type { CopyEntry, CopyItem, CopyReport } from "@filen/sdk-rs"
+import type { AnyItemWithContext, CopyEntry, CopyReport } from "@filen/sdk-rs"
 import {
 	applyCopyUpdate,
 	copyJobShownBytes,
@@ -49,7 +49,7 @@ import { getCopyJob, useCopyJobsStore, type CopyJobsStore } from "@/features/tra
 // its link); they have no DriveItem shape to narrow from.
 export type CopySource =
 	| { kind: "items"; items: DriveItem[]; destinationUuid: string | null }
-	| { kind: "linked"; items: CopyItem[]; destinationUuid: string | null }
+	| { kind: "linked"; items: AnyItemWithContext[]; destinationUuid: string | null }
 	| { kind: "entries"; entries: CopyEntry[] }
 
 type OnCopyEvent = (event: CopyJobEvent) => void
@@ -57,7 +57,7 @@ type OnCopyEvent = (event: CopyJobEvent) => void
 export interface RunCopyDeps {
 	copyItems: (
 		id: string,
-		items: CopyItem[],
+		items: AnyItemWithContext[],
 		destinationUuid: string | null,
 		maxBytes: number | undefined,
 		onEvent: OnCopyEvent
@@ -448,7 +448,7 @@ export function startCopy(items: DriveItem[], destination: CopyDestination): str
 }
 
 // Saves what a public link points at (the whole linked file or directory) into the caller's own drive.
-export function startLinkedCopy(item: CopyItem, name: string, glyph: CopyJobGlyph, destination: CopyDestination): string {
+export function startLinkedCopy(item: AnyItemWithContext, name: string, glyph: CopyJobGlyph, destination: CopyDestination): string {
 	const id = crypto.randomUUID()
 
 	void runCopyJob(defaultCopyDeps, {

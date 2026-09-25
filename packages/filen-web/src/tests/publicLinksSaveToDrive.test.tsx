@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { createElement, type ReactNode } from "react"
 import { act, cleanup, fireEvent, render, renderHook, screen } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import type { CopyItem, File as SdkFile, UuidStr } from "@filen/sdk-rs"
+import type { AnyItemWithContext, File as SdkFile, UuidStr } from "@filen/sdk-rs"
 import "@/lib/i18n"
 
 const { hasClient, ownsItem, startLinkedCopyWithCard, dialogProps } = vi.hoisted(() => ({
@@ -138,7 +138,7 @@ describe("useLinkSaveable", () => {
 
 describe("SaveToDriveButton", () => {
 	it("copies the linked item into the directory the picker returns", () => {
-		const item = { uuid: FILE_UUID, fileKey: "k" } as unknown as CopyItem
+		const item = { uuid: FILE_UUID, fileKey: "k" } as unknown as AnyItemWithContext
 
 		render(createElement(SaveToDriveButton, { item, name: "a.txt", glyph: "file" }))
 		fireEvent.click(screen.getByRole("button", { name: "Save to Cloud Drive" }))

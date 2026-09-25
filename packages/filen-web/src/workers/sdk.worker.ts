@@ -6,8 +6,7 @@ import init, {
 	PauseSignal,
 	type Client,
 	type AnyFile,
-	type ZipItem,
-	type CopyItem,
+	type AnyItemWithContext,
 	type CopyEntry,
 	type CopyReport,
 	type CopyUpdate,
@@ -904,7 +903,7 @@ const api = {
 	// wasm signature, unlike downloadFileToWriter's single-object DownloadFileStreamParams); progress
 	// is still a plain-fn-wrapped proxy — a raw proxy object is serde-rejected.
 	async downloadItemsToZip(
-		items: ZipItem[],
+		items: AnyItemWithContext[],
 		transferId: string,
 		writer: WritableStream<Uint8Array>,
 		onProgress: (bytesWritten: bigint, totalBytes: bigint, itemsProcessed: bigint, totalItems: bigint) => void
@@ -940,11 +939,11 @@ const api = {
 	},
 	// ── Copy ─────────────────────────────────────────────────────────────────
 	// The SDK owns the whole job (scan, concurrency, retries, share/link propagation) and resolves with
-	// its report whether the copy completed, was cancelled or failed; it rejects only when it ignores a
-	// cancel for its grace period.
+	// its report whether the copy completed, was cancelled or failed; it rejects only when it refuses an
+	// item or a name before starting, or ignores a cancel for its grace period.
 	async copyItems(
 		jobId: string,
-		items: CopyItem[],
+		items: AnyItemWithContext[],
 		destinationUuid: string | null,
 		maxBytes: number | undefined,
 		onEvent: (event: CopyJobEvent) => void | Promise<void>
@@ -1275,7 +1274,7 @@ const api = {
 	},
 	// Anon directory zip — the SDK recurses + frames the zip in this one call. Mirrors
 	// downloadItemsToZip's plumbing, but takes a linked directory (dir + its DirPublicLink) rather than
-	// a ZipItem list, and the wasm signature makes managed_future a required 4th positional arg.
+	// an AnyItemWithContext list, and the wasm signature makes managed_future a required 4th positional arg.
 	async downloadLinkedDirToZipAnon(
 		dir: AnyLinkedDirWithContext,
 		transferId: string,

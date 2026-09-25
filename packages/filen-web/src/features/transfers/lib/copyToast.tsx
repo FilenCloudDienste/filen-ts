@@ -4,7 +4,7 @@ import { getCopyJob, useCopyJobsStore } from "@/features/transfers/store/useCopy
 import { pruneSettledCopyJobs, startCopy, startLinkedCopy } from "@/features/drive/lib/copy"
 import { type CopyDestination, type CopyJobGlyph } from "@/features/drive/lib/copy.logic"
 import { type DriveItem } from "@/features/drive/lib/item"
-import type { CopyItem } from "@filen/sdk-rs"
+import type { AnyItemWithContext } from "@filen/sdk-rs"
 
 // The toast id of each job's card while it is showing. A card reopened after being hidden gets a fresh
 // id: a leaving toast stays in sonner's list for its exit animation, and a toast issued under the same
@@ -91,7 +91,7 @@ export function startCopyWithCard(items: DriveItem[], destination: CopyDestinati
 	return id
 }
 
-export function startLinkedCopyWithCard(item: CopyItem, name: string, glyph: CopyJobGlyph, destination: CopyDestination): string {
+export function startLinkedCopyWithCard(item: AnyItemWithContext, name: string, glyph: CopyJobGlyph, destination: CopyDestination): string {
 	const id = startLinkedCopy(item, name, glyph, destination)
 
 	showCopyToast(id)

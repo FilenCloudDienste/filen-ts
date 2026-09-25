@@ -22,6 +22,7 @@ function makeLinkedFile(name: string, size: bigint): LinkedFile {
 		version: 2,
 		timestamp: 0n,
 		fileKey: "k",
+		downloadable: true,
 		linkedTag: true,
 		canMakeThumbnail: false
 	}

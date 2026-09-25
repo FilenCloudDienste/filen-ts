@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
-import type { AnyFile, SharedDir, SharedRootDir, SharingRole, UuidStr, ZipItem } from "@filen/sdk-rs"
+import type { AnyFile, AnyItemWithContext, SharedDir, SharedRootDir, SharingRole, UuidStr } from "@filen/sdk-rs"
 import { narrowToSdkItems, type DriveItem } from "@/features/drive/lib/item"
 import type { ErrorDTO } from "@/lib/sdk/errors"
 import type { FsaSaveTarget, SaveTarget, SwSaveTarget } from "@/features/drive/lib/saveDownload"
@@ -299,7 +299,7 @@ describe("runZipDownload (injected deps, save-download mocked)", () => {
 		const downloadZip =
 			vi.fn<
 				(
-					items: ZipItem[],
+					items: AnyItemWithContext[],
 					transferId: string,
 					save: SaveTarget,
 					onProgress: (bytesWritten: bigint, totalBytes: bigint, itemsProcessed: bigint, totalItems: bigint) => void
@@ -333,7 +333,7 @@ describe("runZipDownload (injected deps, save-download mocked)", () => {
 		expect(h.downloadZip).toHaveBeenCalledTimes(1)
 	})
 
-	it("passes the narrowed ZipItems (not the raw DriveItems) to downloadZip", async () => {
+	it("passes the narrowed AnyItemWithContext items (not the raw DriveItems) to downloadZip", async () => {
 		const h = makeHarness()
 		h.downloadZip.mockResolvedValue(undefined)
 		const items = [fileItem(), dirItem()]
@@ -461,7 +461,7 @@ describe("defaultZipDownloadDeps.downloadZip — fsa branch", () => {
 
 		downloadItemsToZip.mockImplementation(
 			async (
-				_items: ZipItem[],
+				_items: AnyItemWithContext[],
 				_id: string,
 				writer: WritableStream<Uint8Array>,
 				onProgress: (bytesWritten: bigint, totalBytes: bigint, itemsProcessed: bigint, totalItems: bigint) => void
@@ -505,7 +505,7 @@ describe("runZipDownload (real defaultZipDownloadDeps) — fsa sink close failur
 		const closeError = new Error("disk full")
 		const save: FsaSaveTarget = { kind: "fsa", writable: fsaWritable({ close: () => Promise.reject(closeError) }) }
 		saveDownloadMock.mockResolvedValue(save)
-		downloadItemsToZip.mockImplementation(async (_items: ZipItem[], _id: string, writer: WritableStream<Uint8Array>) => {
+		downloadItemsToZip.mockImplementation(async (_items: AnyItemWithContext[], _id: string, writer: WritableStream<Uint8Array>) => {
 			await writer.getWriter().close()
 		})
 
@@ -552,7 +552,7 @@ describe("startZipDownload (real runZipDownload + defaultZipDownloadDeps)", () =
 	})
 
 	it("suggests `${dirName}.zip` for a single directory", async () => {
-		downloadItemsToZip.mockImplementation(async (_items: ZipItem[], _id: string, writer: WritableStream<Uint8Array>) => {
+		downloadItemsToZip.mockImplementation(async (_items: AnyItemWithContext[], _id: string, writer: WritableStream<Uint8Array>) => {
 			await writer.getWriter().close()
 		})
 
@@ -562,7 +562,7 @@ describe("startZipDownload (real runZipDownload + defaultZipDownloadDeps)", () =
 	})
 
 	it("suggests a generic archive name for a multi-item selection", async () => {
-		downloadItemsToZip.mockImplementation(async (_items: ZipItem[], _id: string, writer: WritableStream<Uint8Array>) => {
+		downloadItemsToZip.mockImplementation(async (_items: AnyItemWithContext[], _id: string, writer: WritableStream<Uint8Array>) => {
 			await writer.getWriter().close()
 		})
 
@@ -572,7 +572,7 @@ describe("startZipDownload (real runZipDownload + defaultZipDownloadDeps)", () =
 	})
 
 	it("produces no success toast on a successful zip (the transfer row is the signal)", async () => {
-		downloadItemsToZip.mockImplementation(async (_items: ZipItem[], _id: string, writer: WritableStream<Uint8Array>) => {
+		downloadItemsToZip.mockImplementation(async (_items: AnyItemWithContext[], _id: string, writer: WritableStream<Uint8Array>) => {
 			await writer.getWriter().close()
 		})
 
@@ -602,7 +602,7 @@ describe("startZipDownload (real runZipDownload + defaultZipDownloadDeps)", () =
 	})
 
 	it("registers one done transfer in the real transfers store for a successful zip", async () => {
-		downloadItemsToZip.mockImplementation(async (_items: ZipItem[], _id: string, writer: WritableStream<Uint8Array>) => {
+		downloadItemsToZip.mockImplementation(async (_items: AnyItemWithContext[], _id: string, writer: WritableStream<Uint8Array>) => {
 			await writer.getWriter().close()
 		})
 

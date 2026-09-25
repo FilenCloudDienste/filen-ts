@@ -198,6 +198,7 @@ describe("previewMenuVisible (drive-sourced items only)", () => {
 			version: 2,
 			timestamp: 1_700_000_000_000n,
 			fileKey: "key",
+			downloadable: true,
 			linkedTag: true,
 			canMakeThumbnail: false
 		})

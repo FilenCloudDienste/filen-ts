@@ -75,16 +75,16 @@ function failure(label: string): CopyFailure {
 			destParent: testUuid("root"),
 			destParentDir: { uuid: testUuid("root") },
 			destName: label,
-			stage: "upload",
+			stage: { type: "upload" },
 			error: {
 				kind: "Server",
 				message: 'Error of kind Server: error: API Error, message: `Some("Upload rejected")`',
 				serverMessage: "Upload rejected",
-				serverCode: undefined
+				serverCode: undefined,
+				innerMessage: 'error: API Error, message: `Some("Upload rejected")`'
 			},
 			affectedFiles: 1n,
-			affectedBytes: 1n,
-			existingFile: undefined
+			affectedBytes: 1n
 		}
 	}
 }
@@ -253,13 +253,15 @@ describe("CopyJobToast", () => {
 			kind: "Reqwest",
 			message: "Error of kind Reqwest: error: error sending request for url (https://gateway.filen.io/v3/upload)",
 			serverMessage: undefined,
-			serverCode: undefined
+			serverCode: undefined,
+			innerMessage: "error: error sending request for url (https://gateway.filen.io/v3/upload)"
 		}
 		unknown.info.error = {
 			kind: "Walk",
 			message: "Error of kind Walk: error: walk failed",
 			serverMessage: undefined,
-			serverCode: undefined
+			serverCode: undefined,
+			innerMessage: "error: walk failed"
 		}
 
 		const failed = [network, unknown, refused]
@@ -283,6 +285,8 @@ describe("CopyJobToast", () => {
 		expect(screen.getByText("Something went wrong.")).toBeTruthy()
 		expect(screen.getByText("Upload rejected")).toBeTruthy()
 		expect(screen.queryByText(/Error of kind/)).toBeNull()
+		// The inner message is developer text too.
+		expect(screen.queryByText("error: walk failed")).toBeNull()
 	})
 
 	it("words a failed copy's error by its kind", () => {
@@ -294,7 +298,8 @@ describe("CopyJobToast", () => {
 					kind: "MaxStorageReached",
 					message: "Error of kind MaxStorageReached: error: Error of kind MaxStorageReached: error: API Error",
 					serverMessage: undefined,
-					serverCode: undefined
+					serverCode: undefined,
+					innerMessage: "error: Error of kind MaxStorageReached: error: API Error"
 				})
 			}
 		})
@@ -397,7 +402,8 @@ describe("CopyJobToast", () => {
 					kind: "Reqwest",
 					message: "Error of kind Reqwest: error: offline",
 					serverMessage: undefined,
-					serverCode: undefined
+					serverCode: undefined,
+					innerMessage: "error: offline"
 				})
 			},
 			cancelRequest: "trash",

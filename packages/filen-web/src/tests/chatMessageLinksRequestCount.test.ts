@@ -37,6 +37,7 @@ const LINKED_FILE: LinkedFile = {
 	version: 2,
 	timestamp: 0n,
 	fileKey: KEY_PLAINTEXT,
+	downloadable: true,
 	linkedTag: true,
 	canMakeThumbnail: false
 }

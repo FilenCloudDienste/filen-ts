@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import type { AnyFile, ZipItem } from "@filen/sdk-rs"
+import type { AnyFile, AnyItemWithContext } from "@filen/sdk-rs"
 import { type SwSaveTarget } from "@/features/drive/lib/saveDownload"
 import {
 	SW_DOWNLOAD_PREFIX,
@@ -503,7 +503,7 @@ describe("triggerSwZipDownload", () => {
 		stubServiceWorkerReady(sw)
 
 		const { triggerSwZipDownload } = await freshModule()
-		const items: ZipItem[] = [testFile({ size: 2_048n }), testFile({ size: 512n })]
+		const items: AnyItemWithContext[] = [testFile({ size: 2_048n }), testFile({ size: 512n })]
 		const save: SwSaveTarget = { kind: "sw", id: "abc-123", url: `${SW_DOWNLOAD_PREFIX}abc-123`, name: "Filen.zip" }
 
 		await triggerSwZipDownload(items, save)

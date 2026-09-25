@@ -21,7 +21,8 @@ function testUuid(label: string): UuidStr {
 
 const DESTINATION = { uuid: null, name: "My Drive" }
 // The SDK's own message: developer text, kept on the error for logs.
-const SERVER_MESSAGE = 'Error of kind Server: error: API Error, message: `Some("Server said no")`'
+const SERVER_INNER_MESSAGE = 'error: API Error, message: `Some("Server said no")`'
+const SERVER_MESSAGE = `Error of kind Server: ${SERVER_INNER_MESSAGE}`
 
 function counts(overrides: Partial<CopyCounts> = {}): CopyCounts {
 	return {
@@ -43,9 +44,7 @@ function counts(overrides: Partial<CopyCounts> = {}): CopyCounts {
 function update(overrides: Partial<CopyUpdate> = {}): CopyUpdate {
 	return {
 		phase: "copyingFiles",
-		pausing: false,
-		paused: false,
-		cancelling: false,
+		runState: "running",
 		scan: { sourcesDone: 1n, sourcesTotal: 1n, listingBytes: 0n, listingTotalBytes: undefined },
 		totals: { dirs: 1n, files: 3n, bytes: 300n },
 		counts: counts(),
@@ -65,11 +64,16 @@ function failureInfo(overrides: Partial<CopyFailureInfo> = {}): CopyFailureInfo 
 		destParent: testUuid("dest"),
 		destParentDir: { uuid: testUuid("dest") },
 		destName: "b.txt",
-		stage: "upload",
-		error: { kind: "Server", message: SERVER_MESSAGE, serverMessage: "Server said no", serverCode: "code" },
+		stage: { type: "upload" },
+		error: {
+			kind: "Server",
+			message: SERVER_MESSAGE,
+			serverMessage: "Server said no",
+			serverCode: "code",
+			innerMessage: SERVER_INNER_MESSAGE
+		},
 		affectedFiles: 1n,
 		affectedBytes: 100n,
-		existingFile: undefined,
 		...overrides
 	}
 }
@@ -148,7 +152,7 @@ describe("copyUpdateInput", () => {
 				events: [
 					{ type: "fileFailed", ...failureInfo() },
 					{ type: "dirFailed", ...failureInfo({ sourcePath: "a/dir", destName: "dir", affectedFiles: 4n }) },
-					{ type: "fileFailed", ...failureInfo({ stage: "registeredAsVersion", existingFile: testUuid("existing") }) }
+					{ type: "fileFailed", ...failureInfo({ stage: { type: "registeredAsVersion", existingFile: testUuid("existing") } }) }
 				]
 			})
 		)
@@ -157,6 +161,43 @@ describe("copyUpdateInput", () => {
 		expect(events.failures[1]?.affectedFiles).toBe(4)
 		expect(events.failures[0]?.error.label).toBe("Server said no")
 		expect(events.savedAsVersion).toBe(1)
+	})
+
+	it("reads the run state into the shared job's pause and cancel flags", () => {
+		const flags = (runState: CopyUpdate["runState"]) => {
+			const { pausing, paused, cancelling } = copyUpdateInput(update({ runState }))
+
+			return { pausing, paused, cancelling }
+		}
+
+		expect(flags("running")).toEqual({ pausing: false, paused: false, cancelling: false })
+		expect(flags("pausing")).toEqual({ pausing: true, paused: false, cancelling: false })
+		expect(flags("paused")).toEqual({ pausing: false, paused: true, cancelling: false })
+		expect(flags("cancelling")).toEqual({ pausing: false, paused: false, cancelling: true })
+
+		const job = applyCopyUpdate(createCopyJob("j", DESTINATION, 1), copyUpdateInput(update({ runState: "paused" })))
+
+		expect(job.paused).toBe(true)
+		expect(applyCopyUpdate(job, copyUpdateInput(update({ runState: "running" }))).paused).toBe(false)
+	})
+
+	it("leaves skipped entries to the counts: they are neither failures nor retryable", () => {
+		const { events } = copyUpdateInput(
+			update({
+				counts: counts({ entriesSkipped: 2n, bytesSkipped: 150n }),
+				events: [
+					{
+						type: "skipped",
+						sourcePath: "a/broken.bin",
+						bytes: 100n,
+						reason: { type: "undecryptableFile", uuid: testUuid("broken") }
+					},
+					{ type: "skipped", sourcePath: "a/lost", bytes: 50n, reason: { type: "unreachable", count: 3n } }
+				]
+			})
+		)
+
+		expect(events).toEqual({ failures: [], savedAsVersion: 0, renamed: 0, propagationFailed: 0 })
 	})
 
 	it("counts renames and propagation failures and ignores routine events", () => {
@@ -184,13 +225,30 @@ describe("copyUpdateInput", () => {
 
 describe("copyReportInput", () => {
 	it("pairs each retryable failure with its SDK form and counts saved-as-version files apart", () => {
-		const version = failure({ stage: "registeredAsVersion", existingFile: testUuid("existing") })
+		const version = failure({ stage: { type: "registeredAsVersion", existingFile: testUuid("existing") } })
 		const failed = failure()
 		const input = copyReportInput(report({ failures: [failed, version] }))
 
 		expect(input.failures).toHaveLength(1)
 		expect(input.failures[0]?.retryable).toBe(failed)
 		expect(input.failures[0]?.failure.destName).toBe("b.txt")
+		expect(input.savedAsVersionCount).toBe(1)
+	})
+
+	it("reads a version target off its stage, never from another stage's failure", () => {
+		const input = copyReportInput(
+			report({
+				failures: [
+					failure({ stage: { type: "registeredAsVersion", existingFile: testUuid("existing") } }),
+					failure({ stage: { type: "download" } }),
+					failure({ stage: { type: "finalize" } })
+				],
+				skipped: [{ sourcePath: "a/broken.bin", bytes: 100n, reason: { type: "undecryptableFile", uuid: testUuid("broken") } }]
+			})
+		)
+
+		expect([...input.versionTargets]).toEqual([testUuid("existing")])
+		expect(input.failures.map(f => f.retryable.info.stage.type)).toEqual(["download", "finalize"])
 		expect(input.savedAsVersionCount).toBe(1)
 	})
 
@@ -211,7 +269,8 @@ describe("copyReportInput", () => {
 					kind: "Server",
 					message: "Error of kind Server: error: API Error",
 					serverMessage: undefined,
-					serverCode: undefined
+					serverCode: undefined,
+					innerMessage: "error: API Error"
 				}
 			})
 		)
@@ -243,7 +302,8 @@ describe("copyReportInput", () => {
 						kind: "MaxStorageReached",
 						message: "Error of kind MaxStorageReached: error: the copy needs 300 bytes, 42 are free",
 						serverMessage: undefined,
-						serverCode: undefined
+						serverCode: undefined,
+						innerMessage: "error: the copy needs 300 bytes, 42 are free"
 					}
 				})
 			),
@@ -276,7 +336,7 @@ describe("copiedTopLevel", () => {
 						{ request: 1n, sourceUuid: testUuid("s"), item: { type: "file", ...listed } },
 						{ request: 2n, sourceUuid: testUuid("s"), item: { type: "file", ...versioned } }
 					],
-					failures: [failure({ stage: "registeredAsVersion", existingFile: versioned.uuid })]
+					failures: [failure({ stage: { type: "registeredAsVersion", existingFile: versioned.uuid } })]
 				})
 			),
 			maxBytes: undefined
@@ -327,18 +387,34 @@ describe("copyErrorDTO", () => {
 			species: "sdk",
 			kind: "Server",
 			message: SERVER_MESSAGE,
+			innerMessage: SERVER_INNER_MESSAGE,
 			serverMessage: "Server said no",
 			serverCode: "code",
 			label: "Server said no"
 		})
 	})
 
-	it("falls back to the message and omits absent server fields", () => {
-		const message = "Error of kind IO: error: No space left on device (os error 28)"
+	it("labels one without a server message by its inner message, without the kind wrapper", () => {
+		const innerMessage = "error: No space left on device (os error 28)"
+		const message = `Error of kind IO: ${innerMessage}`
 
-		expect(copyErrorDTO({ kind: "IO", message, serverMessage: undefined, serverCode: undefined })).toEqual({
+		expect(copyErrorDTO({ kind: "IO", message, serverMessage: undefined, serverCode: undefined, innerMessage })).toEqual({
 			species: "sdk",
 			kind: "IO",
+			message,
+			innerMessage,
+			label: innerMessage
+		})
+	})
+
+	it("falls back to the message and omits absent fields", () => {
+		const message = "Error of kind Cancelled"
+
+		expect(
+			copyErrorDTO({ kind: "Cancelled", message, serverMessage: undefined, serverCode: undefined, innerMessage: undefined })
+		).toEqual({
+			species: "sdk",
+			kind: "Cancelled",
 			message,
 			label: message
 		})

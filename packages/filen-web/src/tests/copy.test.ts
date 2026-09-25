@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
 import type {
+	AnyItemWithContext,
 	CopiedTopLevelItem,
 	CopyCounts,
 	CopyFailure,
-	CopyItem,
 	CopyReport,
 	CopyUpdate,
 	Dir,
@@ -68,7 +68,7 @@ function testUuid(label: string): UuidStr {
 
 const ROOT = testUuid("root")
 const DESTINATION = { uuid: null, name: "My Drive" }
-const NO_SERVER = { serverMessage: undefined, serverCode: undefined }
+const NO_SERVER = { serverMessage: undefined, serverCode: undefined, innerMessage: undefined }
 
 function counts(overrides: Partial<CopyCounts> = {}): CopyCounts {
 	return {
@@ -90,9 +90,7 @@ function counts(overrides: Partial<CopyCounts> = {}): CopyCounts {
 function update(overrides: Partial<CopyUpdate> = {}): CopyUpdate {
 	return {
 		phase: "copyingFiles",
-		pausing: false,
-		paused: false,
-		cancelling: false,
+		runState: "running",
 		scan: { sourcesDone: 1n, sourcesTotal: 1n, listingBytes: 0n, listingTotalBytes: undefined },
 		totals: { dirs: 0n, files: 2n, bytes: 200n },
 		counts: counts(),
@@ -164,7 +162,7 @@ function createdFile(file: File): CopiedTopLevelItem {
 
 const CANCELLED = { kind: "Cancelled", message: "Error of kind Cancelled: error: copy cancelled", ...NO_SERVER } as const
 
-function copyFailure(label: string, stage: CopyFailure["info"]["stage"] = "upload", existingFile?: UuidStr): CopyFailure {
+function copyFailure(label: string, stage: CopyFailure["info"]["stage"] = { type: "upload" }): CopyFailure {
 	return {
 		item: mockFile(label),
 		info: {
@@ -178,11 +176,11 @@ function copyFailure(label: string, stage: CopyFailure["info"]["stage"] = "uploa
 				kind: "Server",
 				message: "Error of kind Server: error: API Error",
 				serverMessage: "Upload rejected",
-				serverCode: undefined
+				serverCode: undefined,
+				innerMessage: "error: API Error"
 			},
 			affectedFiles: 1n,
-			affectedBytes: 100n,
-			existingFile
+			affectedBytes: 100n
 		}
 	}
 }
@@ -260,7 +258,7 @@ describe("runCopyJob", () => {
 	// A public link's file or directory has no DriveItem shape: it goes to the SDK exactly as it came.
 	it("passes a linked source's SDK items through untouched", async () => {
 		const deps = makeDeps()
-		const linked = { dir: { inner: { uuid: "root" }, linkedTag: true }, link: { linkUuid: "link" } } as unknown as CopyItem
+		const linked = { dir: { inner: { uuid: "root" }, linkedTag: true }, link: { linkUuid: "link" } } as unknown as AnyItemWithContext
 
 		deps.copyItems.mockResolvedValue(report())
 
@@ -367,11 +365,10 @@ describe("runCopyJob", () => {
 				destParent: ROOT,
 				destParentDir: { uuid: ROOT },
 				destName: "failed.txt",
-				stage: "upload",
+				stage: { type: "upload" },
 				error: { kind: "Server", message: "x", ...NO_SERVER },
 				affectedFiles: 1n,
-				affectedBytes: 100n,
-				existingFile: undefined
+				affectedBytes: 100n
 			}
 		}
 
@@ -813,7 +810,10 @@ describe("cancel", () => {
 			requestCopyCancel(id, { trashCopied: true })
 
 			return Promise.resolve(
-				report({ topLevel: [createdFile(versioned)], failures: [copyFailure("existing", "registeredAsVersion", versioned.uuid)] })
+				report({
+					topLevel: [createdFile(versioned)],
+					failures: [copyFailure("existing", { type: "registeredAsVersion", existingFile: versioned.uuid })]
+				})
 			)
 		})
 
@@ -900,7 +900,7 @@ describe("events after the result", () => {
 			return Promise.resolve(
 				report({
 					topLevel: [created(delivered), createdFile(listedOnly), createdFile(versioned)],
-					failures: [copyFailure("existing", "registeredAsVersion", versioned.uuid)],
+					failures: [copyFailure("existing", { type: "registeredAsVersion", existingFile: versioned.uuid })],
 					error: CANCELLED
 				})
 			)
@@ -1119,11 +1119,10 @@ describe("startCopy and retryFailedCopy", () => {
 				destParent: ROOT,
 				destParentDir: { uuid: ROOT },
 				destName: "failed.txt",
-				stage: "upload",
+				stage: { type: "upload" },
 				error: { kind: "Server", message: "x", ...NO_SERVER },
 				affectedFiles: 1n,
-				affectedBytes: 100n,
-				existingFile: undefined
+				affectedBytes: 100n
 			}
 		}
 		const deps = makeDeps()

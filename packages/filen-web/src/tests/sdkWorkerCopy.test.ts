@@ -103,9 +103,7 @@ const REPORT: CopyReport = {
 
 const UPDATE: CopyUpdate = {
 	phase: "copyingFiles",
-	pausing: false,
-	paused: false,
-	cancelling: false,
+	runState: "running",
 	scan: { sourcesDone: 1n, sourcesTotal: 1n, listingBytes: 0n, listingTotalBytes: undefined },
 	totals: { dirs: 0n, files: 1n, bytes: 1n },
 	counts: counts(),

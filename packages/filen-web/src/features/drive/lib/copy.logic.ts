@@ -90,6 +90,7 @@ export function copyErrorDTO(error: CopyError): ErrorDTO {
 		species: "sdk",
 		kind: error.kind,
 		message: error.message,
+		...(error.innerMessage !== undefined ? { innerMessage: error.innerMessage } : {}),
 		...(error.serverMessage !== undefined ? { serverMessage: error.serverMessage } : {}),
 		...(error.serverCode !== undefined ? { serverCode: error.serverCode } : {}),
 		label: ""
@@ -100,8 +101,9 @@ export function copyErrorDTO(error: CopyError): ErrorDTO {
 	return dto
 }
 
-function isSavedAsVersion(info: CopyFailureInfo): boolean {
-	return info.stage === "registeredAsVersion"
+// The file the backend registered this copy as a new version of, if it did.
+function versionTarget(info: CopyFailureInfo): string | undefined {
+	return info.stage.type === "registeredAsVersion" ? info.stage.existingFile : undefined
 }
 
 function toFailure(info: CopyFailureInfo): CopyJobFailure {
@@ -123,7 +125,7 @@ function classifyEvents(events: readonly CopyEvent[]): CopyUpdateEvents<CopyJobF
 		switch (event.type) {
 			case "dirFailed":
 			case "fileFailed":
-				if (isSavedAsVersion(event)) {
+				if (versionTarget(event) !== undefined) {
 					classified.savedAsVersion++
 				} else {
 					classified.failures.push(toFailure(event))
@@ -147,7 +149,15 @@ function classifyEvents(events: readonly CopyEvent[]): CopyUpdateEvents<CopyJobF
 }
 
 export function copyUpdateInput(update: CopyUpdate): CopyUpdateInput<CopyJobFailure> {
-	return { ...update, events: classifyEvents(update.events) }
+	const { runState, events, ...rest } = update
+
+	return {
+		...rest,
+		pausing: runState === "pausing",
+		paused: runState === "paused",
+		cancelling: runState === "cancelling",
+		events: classifyEvents(events)
+	}
 }
 
 export function copyReportInput(report: CopyReport): CopyJobReport {
@@ -155,10 +165,12 @@ export function copyReportInput(report: CopyReport): CopyJobReport {
 	const versionTargets = new Set<string>()
 
 	for (const failure of report.failures) {
-		if (!isSavedAsVersion(failure.info)) {
+		const target = versionTarget(failure.info)
+
+		if (target === undefined) {
 			failures.push(failure)
-		} else if (failure.info.existingFile !== undefined) {
-			versionTargets.add(failure.info.existingFile)
+		} else {
+			versionTargets.add(target)
 		}
 	}
 

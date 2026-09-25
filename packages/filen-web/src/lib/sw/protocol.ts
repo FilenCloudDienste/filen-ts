@@ -19,9 +19,9 @@ export const SW_DOWNLOAD_PREFIX = "/sw/download/"
 // MessagePort in `event.ports[0]` for its ACK.
 export const SW_MSG_INIT_CLIENT = "FILEN_SW_INIT_CLIENT"
 export const SW_MSG_REGISTER_DOWNLOAD = "FILEN_SW_REGISTER_DOWNLOAD"
-// Same secrets-never-in-a-URL rule as SW_MSG_REGISTER_DOWNLOAD — the ZipItem[] (each item's own decrypted meta/key
-// material) crosses ONLY through this structured-clone postMessage, never a URL/query/log. No `size`:
-// a freshly-generated zip's total byte count isn't known upfront.
+// Same secrets-never-in-a-URL rule as SW_MSG_REGISTER_DOWNLOAD — the AnyItemWithContext[] (each item's
+// own decrypted meta/key material) crosses ONLY through this structured-clone postMessage, never a
+// URL/query/log. No `size`: a freshly-generated zip's total byte count isn't known upfront.
 export const SW_MSG_REGISTER_ZIP_DOWNLOAD = "FILEN_SW_REGISTER_ZIP_DOWNLOAD"
 // Same cross-only-via-structured-clone-postMessage rule, registering an INLINE (non-attachment)
 // stream instead — the `<video>`/`<audio>`/`<img>` preview route. `contentType` is the caller's own
