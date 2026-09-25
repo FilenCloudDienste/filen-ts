@@ -1,12 +1,14 @@
+import { useEffect, useRef } from "react"
 import { useTranslation } from "react-i18next"
+import { onlineManager } from "@tanstack/react-query"
 import { type HotkeyCallback } from "react-hotkeys-hook"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { destinationDirectoryName, directoryNameScope } from "@/features/drive/queries/drive"
 import { cachedOwnParents } from "@/features/drive/lib/ownAncestry"
 import { canCopyToClipboard, canCutToClipboard, canPaste, shouldHandleClipboardShortcut } from "@/features/drive/lib/clipboard.logic"
-import { clipboardShortcutContext, copyToClipboard, cutToClipboard, pasteClipboard } from "@/features/drive/lib/clipboard"
-import { recheckClipboard } from "@/features/drive/lib/clipboardRecheck"
+import { clipboardShortcutContext, copyToClipboard, cutToClipboard } from "@/features/drive/lib/clipboard"
+import { pasteWhenStillValid } from "@/features/drive/lib/clipboardPaste"
 import { useDriveClipboardStore } from "@/features/drive/store/useDriveClipboardStore"
 import { useAction } from "@/lib/keymap/useAction"
 
@@ -46,6 +48,12 @@ export function useDriveClipboard({
 	const entry = useDriveClipboardStore(state => state.entry)
 	const target = { variant, uuid, ancestry, readParents: cachedOwnParents, listing, online: isOnline }
 	const pasteEnabled = canPaste(entry, target)
+	// The listing as last rendered, for a paste judged again once its recheck settles.
+	const listingRef = useRef(listing)
+
+	useEffect(() => {
+		listingRef.current = listing
+	})
 
 	async function destinationName(): Promise<string> {
 		if (uuid === null) {
@@ -59,13 +67,12 @@ export function useDriveClipboard({
 	}
 
 	function paste(): void {
-		void Promise.all([destinationName(), recheckClipboard()]).then(async ([name, current]) => {
-			// Asked again on use, of the items as they now are: the tree may have changed since this render,
-			// with nothing re-rendering it.
-			if (current && canPaste(useDriveClipboardStore.getState().entry, target)) {
-				await pasteClipboard({ uuid, name })
-			}
-		})
+		// Against the listing and the connection as they are when the recheck settles, not as this render
+		// saw them.
+		void pasteWhenStillValid(
+			current => canPaste(current, { ...target, listing: listingRef.current, online: onlineManager.isOnline() }),
+			async () => ({ uuid, name: await destinationName() })
+		)
 	}
 
 	function claims(event: KeyboardEvent, textMatters: boolean): boolean {

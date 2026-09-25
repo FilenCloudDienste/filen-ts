@@ -2,6 +2,7 @@
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, createEvent, fireEvent, renderHook } from "@testing-library/react"
+import { onlineManager } from "@tanstack/react-query"
 import type { File, UuidStr } from "@filen/sdk-rs"
 
 const { copyToClipboard, cutToClipboard, pasteClipboard, recheckClipboard, destinationDirectoryName } = vi.hoisted(() => ({
@@ -33,7 +34,7 @@ vi.mock("@/lib/storage/adapter", () => ({ kvGetJson: () => Promise.resolve(null)
 import "@/lib/i18n"
 import { registerAction } from "@/lib/keymap/registry"
 import { DRIVE_ACTIONS } from "@/features/drive/lib/keymap"
-import { narrowItem } from "@/features/drive/lib/item"
+import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { useDriveClipboard, type UseDriveClipboardParams } from "@/features/drive/hooks/useDriveClipboard"
 import { useDriveClipboardStore } from "@/features/drive/store/useDriveClipboardStore"
 
@@ -173,6 +174,51 @@ describe("useDriveClipboard", () => {
 
 		await vi.waitFor(() => {
 			expect(recheckClipboard).toHaveBeenCalledOnce()
+		})
+		await new Promise(resolve => setTimeout(resolve, 0))
+		expect(pasteClipboard).not.toHaveBeenCalled()
+	})
+
+	// The connection and the listing as they are once the lookup settles, not as the render that took the
+	// paste saw them.
+	it("asks again against the connection and the listing as they now are", async () => {
+		useDriveClipboardStore.getState().set({ mode: "cut", items: [REPORT] })
+		const { result, rerender } = renderHook(
+			({ listing }: { listing: DriveItem[] }) =>
+				useDriveClipboard({
+					variant: "drive",
+					uuid: DEST,
+					ancestry: [DEST],
+					listing,
+					selectedItems: [],
+					isOnline: true,
+					isDialogOpen: false
+				}),
+			{ initialProps: { listing: [] as DriveItem[] } }
+		)
+
+		recheckClipboard.mockImplementationOnce(() => {
+			onlineManager.setOnline(false)
+
+			return Promise.resolve(true)
+		})
+		act(() => {
+			result.current.run()
+		})
+		await vi.waitFor(() => {
+			expect(recheckClipboard).toHaveBeenCalledOnce()
+		})
+		await new Promise(resolve => setTimeout(resolve, 0))
+		onlineManager.setOnline(true)
+		expect(pasteClipboard).not.toHaveBeenCalled()
+
+		act(() => {
+			result.current.run()
+		})
+		// The cut item lands in the listing before the lookup settles: pasting it there is now a no-op.
+		rerender({ listing: [REPORT] })
+		await vi.waitFor(() => {
+			expect(recheckClipboard).toHaveBeenCalledTimes(2)
 		})
 		await new Promise(resolve => setTimeout(resolve, 0))
 		expect(pasteClipboard).not.toHaveBeenCalled()
