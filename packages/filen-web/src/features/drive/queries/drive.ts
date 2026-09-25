@@ -256,6 +256,16 @@ export function useDirectoryTreeChildrenQuery(uuid: string | null): UseQueryResu
 	})
 }
 
+// The row behind a sidebar tree node, as the "drive" listing its level rendered from holds it: a cache
+// read, never a fetch — that level is mounted, so its listing is cached. `parentUuid` is null for a
+// root-level node.
+export function cachedTreeDirectory(parentUuid: string | null, uuid: string): Extract<DriveItem, { type: "directory" }> | undefined {
+	const listing = queryClient.getQueryData<DriveItem[]>(driveListingQueryKey({ variant: "drive", uuid: parentUuid }))
+	const found = listing?.find(item => item.data.uuid === uuid)
+
+	return found?.type === "directory" ? found : undefined
+}
+
 // Shared listings, keyed in the same taxonomy as normal listings (variant carries sharedIn/sharedOut)
 // but fetched through their own worker ops. A null uuid lists the shared root (each returned item
 // already carries its own share role, so narrowItem classifies it structurally); a non-null uuid

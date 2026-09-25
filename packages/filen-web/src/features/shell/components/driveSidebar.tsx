@@ -7,6 +7,7 @@ import { type DriveRouteId, splatToUuids } from "@/features/drive/lib/navigate"
 import { useDirectoryTreeChildrenQuery } from "@/features/drive/queries/drive"
 import { useDirectoryTreeStore } from "@/features/drive/store/useDirectoryTreeStore"
 import { DirectoryTree, type DirectoryTreeContext } from "@/features/drive/components/directoryTree"
+import { DirectoryTreeMenu } from "@/features/drive/components/directoryTreeMenu"
 import { dropHighlightClass, useDriveDropTarget } from "@/features/drive/hooks/useDriveDropTarget"
 import { StorageMeter } from "@/features/shell/components/storageMeter"
 import { useResizableSidebar } from "@/features/shell/hooks/useResizableSidebar"
@@ -108,12 +109,14 @@ function CloudDriveRoot({ label, open, onToggle }: { label: string; open: boolea
 
 	return (
 		<div
+			// The root's chain is empty — see directoryTreeMenu.tsx.
+			data-tree-path=""
 			onDragEnter={drop.onDragEnter}
 			onDragOver={drop.onDragOver}
 			onDragLeave={drop.onDragLeave}
 			onDrop={drop.onDrop}
 			className={cn(
-				"group flex h-8 items-center gap-1 rounded-xl pr-1 transition-colors app-region-no-drag hover:bg-sidebar-accent/60",
+				"group flex h-8 items-center gap-1 rounded-xl pr-1 transition-colors app-region-no-drag hover:bg-sidebar-accent/60 data-menu-open:bg-sidebar-accent/60",
 				dropHighlightClass(drop)
 			)}
 		>
@@ -156,16 +159,19 @@ export function DriveSidebar() {
 	// Default expanded so the tree reads as present; a persisted `false` still collapses it.
 	const rootOpen = openMap[ROOT_KEY] ?? true
 
+	function navigateTo(path: string[]): void {
+		void navigate({ to: "/drive/$", params: { _splat: path.join("/") } })
+	}
+
 	const tree: DirectoryTreeContext = {
 		activePath,
 		isOpen: uuid => openMap[uuid] ?? false,
 		onToggle: toggle,
-		onNavigate: path => {
-			void navigate({ to: "/drive/$", params: { _splat: path.join("/") } })
-		},
+		onNavigate: navigateTo,
 		useChildren: useDirectoryTreeChildrenQuery,
-		// The sidebar tree accepts drag-to-move drops (the move dialog's reuse of this primitive won't).
-		enableDrop: true
+		// The sidebar tree takes drops and starts drags (the move dialog's reuse of this primitive won't).
+		enableDrop: true,
+		enableDrag: true
 	}
 
 	// Virtual roots in two groups, each under a muted header. Built inside the component rather than as
@@ -223,21 +229,26 @@ export function DriveSidebar() {
 					role without it sends a screen-reader user into an interaction mode whose items never take
 					focus. Plain list semantics describe what is really here — each row's chevron carries its
 					own aria-expanded, and the subtree it discloses is nested inside its own item. */}
-					<ul
-						aria-label={t("driveTreeLabel")}
-						className="flex flex-col gap-0.5"
-					>
-						<li className="flex flex-col gap-0.5">
-							<CloudDriveRoot
-								label={t("driveMyDrive")}
-								open={rootOpen}
-								onToggle={() => {
-									toggle(ROOT_KEY)
-								}}
-							/>
-							{rootOpen ? <DirectoryTree tree={tree} /> : null}
-						</li>
-					</ul>
+					<DirectoryTreeMenu
+						onNavigate={navigateTo}
+						render={
+							<ul
+								aria-label={t("driveTreeLabel")}
+								className="flex flex-col gap-0.5"
+							>
+								<li className="flex flex-col gap-0.5">
+									<CloudDriveRoot
+										label={t("driveMyDrive")}
+										open={rootOpen}
+										onToggle={() => {
+											toggle(ROOT_KEY)
+										}}
+									/>
+									{rootOpen ? <DirectoryTree tree={tree} /> : null}
+								</li>
+							</ul>
+						}
+					/>
 					<p className={GROUP_HEADER_CLASS}>{t("driveGroupOther")}</p>
 					<div className="flex flex-col gap-0.5">{otherItems.map(renderItem)}</div>
 					<p className={GROUP_HEADER_CLASS}>{t("driveGroupShared")}</p>

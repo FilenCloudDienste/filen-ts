@@ -8,7 +8,9 @@ import {
 	canCopyToClipboard,
 	canCutToClipboard,
 	canPaste,
+	canPasteIntoDirectory,
 	shouldHandleClipboardShortcut,
+	type DirectoryPasteTarget,
 	type PasteTarget
 } from "@/features/drive/lib/clipboard.logic"
 import { type DriveClipboardEntry } from "@/features/drive/store/useDriveClipboardStore"
@@ -194,6 +196,40 @@ describe("canPaste", () => {
 		expect(canPaste(CUT, target({ variant: "sharedOut" }))).toBe(false)
 		// Only part of the cut sits here already: the rest still moves.
 		expect(canPaste({ mode: "cut", items: [REPORT, NOTES] }, home)).toBe(true)
+	})
+})
+
+// A sidebar tree node: its listing is only there when something has read it.
+describe("canPasteIntoDirectory", () => {
+	function directory(overrides: Partial<DirectoryPasteTarget> = {}): DirectoryPasteTarget {
+		return { ...target(), listing: undefined, parentUuid: testUuid("dest"), ...overrides }
+	}
+
+	const home = { uuid: testUuid("home"), ancestry: [testUuid("home")], parentUuid: testUuid("home") }
+
+	it("copies into a directory whose listing was never read", () => {
+		expect(canPasteIntoDirectory(COPY, directory())).toBe(true)
+		expect(canPaste(COPY, target({ listing: undefined }))).toBe(false)
+	})
+
+	it("judges a cut's no-op by the items' own parents without a listing, and by the listing with one", () => {
+		expect(canPasteIntoDirectory(CUT, directory(home))).toBe(false)
+		expect(canPasteIntoDirectory({ mode: "cut", items: [REPORT, NOTES] }, directory(home))).toBe(true)
+		expect(canPasteIntoDirectory(CUT, directory())).toBe(true)
+		// A listing, when cached, is what the no-op is read from.
+		expect(canPasteIntoDirectory(CUT, directory({ ...home, listing: [] }))).toBe(true)
+		expect(canPasteIntoDirectory(CUT, directory({ listing: [DOCS, REPORT] }))).toBe(false)
+	})
+
+	it("keeps canPaste's other rules: online, writable, never into a copied or cut directory or below it", () => {
+		expect(canPasteIntoDirectory(null, directory())).toBe(false)
+		expect(canPasteIntoDirectory(COPY, directory({ online: false }))).toBe(false)
+		expect(canPasteIntoDirectory(COPY, directory({ variant: "trash" }))).toBe(false)
+		expect(canPasteIntoDirectory(COPY, directory({ uuid: testUuid("docs"), ancestry: [testUuid("docs")] }))).toBe(false)
+		expect(canPasteIntoDirectory(CUT, directory({ uuid: testUuid("inner"), ancestry: [testUuid("docs"), testUuid("inner")] }))).toBe(
+			false
+		)
+		expect(canPasteIntoDirectory(COPY, directory({ uuid: null, ancestry: [], parentUuid: testUuid("root") }))).toBe(true)
 	})
 })
 

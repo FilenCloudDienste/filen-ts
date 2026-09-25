@@ -44,7 +44,7 @@ function directoriesOf(entry: DriveClipboardEntry): ReadonlySet<string> {
 
 // A copied or cut directory can't land in itself or below it. Beyond what the route proves, the chain
 // is walked, and one that can't be resolved is refused.
-function isIntoOwnSubtree(entry: DriveClipboardEntry, target: PasteTarget): boolean {
+function isIntoOwnSubtree(entry: DriveClipboardEntry, target: Pick<PasteTarget, "uuid" | "ancestry" | "readParents">): boolean {
 	const directories = directoriesOf(entry)
 
 	if (directories.size === 0 || target.uuid === null) {
@@ -58,7 +58,17 @@ function isIntoOwnSubtree(entry: DriveClipboardEntry, target: PasteTarget): bool
 // itself or below it; a cut is a move within My Drive and, like the move picker, not onto its own
 // parent.
 export function canPaste(entry: DriveClipboardEntry | null, target: PasteTarget): boolean {
-	if (entry === null || entry.items.length === 0 || !target.online || target.listing === undefined) {
+	const listing = target.listing
+
+	return listing !== undefined && canPasteWith(entry, target, items => isMoveNoOp(items, listing))
+}
+
+function canPasteWith(
+	entry: DriveClipboardEntry | null,
+	target: Omit<PasteTarget, "listing">,
+	isCutNoOp: (items: readonly DriveItem[]) => boolean
+): boolean {
+	if (entry === null || entry.items.length === 0 || !target.online) {
 		return false
 	}
 
@@ -66,7 +76,25 @@ export function canPaste(entry: DriveClipboardEntry | null, target: PasteTarget)
 		return false
 	}
 
-	return entry.mode === "copy" || (target.variant === "drive" && !isMoveNoOp(entry.items, target.listing))
+	return entry.mode === "copy" || (target.variant === "drive" && !isCutNoOp(entry.items))
+}
+
+export interface DirectoryPasteTarget extends Omit<PasteTarget, "listing"> {
+	// Its listing when cached; a directory that was never opened has none.
+	listing: readonly DriveItem[] | undefined
+	// The directory as an item records its parent: the account root's own uuid for the root.
+	parentUuid: string
+}
+
+// A paste into a directory that need not be on screen (a sidebar tree node): canPaste's rules, but its
+// listing is only read when cached, never fetched for the check. Without one a cut is a no-op when every
+// item already names the directory as its parent.
+export function canPasteIntoDirectory(entry: DriveClipboardEntry | null, target: DirectoryPasteTarget): boolean {
+	const listing = target.listing
+
+	return canPasteWith(entry, target, items =>
+		listing !== undefined ? isMoveNoOp(items, listing) : items.every(item => item.data.parent === target.parentUuid)
+	)
 }
 
 export interface ClipboardShortcutContext {

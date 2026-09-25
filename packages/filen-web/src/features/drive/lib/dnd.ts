@@ -148,11 +148,39 @@ export function buildDragSourceProps(item: DriveItem, variant: DriveVariant, cur
 				useDriveStore.getState().setSelectedItems([item])
 			}
 
-			setDragPayload(dragged)
-			// Copy too: a drop with the copy modifier held copies (useDriveDropTarget).
-			event.dataTransfer.effectAllowed = "copyMove"
-			event.dataTransfer.setData(INTERNAL_DRAG_TYPE, "1")
-			applyDragImage(event.dataTransfer, dragged)
+			startInternalDrag(event, dragged)
+		},
+		onDragEnd: () => {
+			clearDragPayload()
+		}
+	}
+}
+
+// The dragstart every drive drag source shares: the payload ref, the internal marker and the chip.
+function startInternalDrag(event: DragEvent<HTMLElement>, items: readonly DriveItem[]): void {
+	setDragPayload(items)
+	// Copy too: a drop with the copy modifier held copies (useDriveDropTarget).
+	event.dataTransfer.effectAllowed = "copyMove"
+	event.dataTransfer.setData(INTERNAL_DRAG_TYPE, "1")
+	applyDragImage(event.dataTransfer, items)
+}
+
+// Drag-source props for a sidebar tree node: it drags its own directory alone, leaving the listing's
+// selection alone. The item is resolved at dragstart (a cached listing read); a node whose row isn't
+// cached cancels the drag rather than start one nothing can drop.
+export function buildTreeDragSourceProps(resolveItem: () => DriveItem | undefined): DragSourceProps {
+	return {
+		draggable: true,
+		onDragStart: event => {
+			const item = resolveItem()
+
+			if (item === undefined) {
+				event.preventDefault()
+
+				return
+			}
+
+			startInternalDrag(event, [item])
 		},
 		onDragEnd: () => {
 			clearDragPayload()

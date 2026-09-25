@@ -1,4 +1,4 @@
-import { createElement, Fragment } from "react"
+import { createElement, Fragment, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { useNavigate } from "@tanstack/react-router"
 import { toast } from "sonner"
@@ -50,6 +50,9 @@ export interface ItemMenuContentProps {
 	// True for a search hit whose parent is not the directory on screen — the only case
 	// "Open containing directory" is offered for. Omitted by every non-listing caller.
 	searchHit?: boolean | undefined
+	// Entries above the item's own, closed by a separator — the sidebar tree's actions on the directory
+	// as a destination (open, create, upload, paste). Omitted by every row/tile caller.
+	leading?: ReactNode
 }
 
 // Groups the flat descriptor list for readability: a rule before the reference/reveal action (info)
@@ -73,6 +76,7 @@ function ItemMenuEntries({
 	onRestored,
 	hiddenActionIds,
 	searchHit,
+	leading,
 	family
 }: ItemMenuContentProps & { family: DirectoryTreeMenuFamily }) {
 	const { t } = useTranslation(["drive", "common"])
@@ -165,6 +169,12 @@ function ItemMenuEntries({
 
 	return (
 		<>
+			{leading === undefined ? null : (
+				<>
+					{leading}
+					<Separator />
+				</>
+			)}
 			{descriptors.map((descriptor, index) => (
 				<Fragment key={descriptor.id}>
 					{index > 0 && SEPARATOR_BEFORE.has(descriptor.id) ? <Separator /> : null}
@@ -222,7 +232,8 @@ function ItemMenuEntries({
 	)
 }
 
-// Right-click surface — rendered inside a per-row/tile <ContextMenu> (see driveRow.tsx/driveTile.tsx).
+// Right-click surface — rendered inside a per-row/tile <ContextMenu> (see driveRow.tsx/driveTile.tsx)
+// and the sidebar tree's one menu (directoryTreeMenu.tsx).
 export function DriveContextMenuContent({
 	item,
 	variant,
@@ -230,7 +241,8 @@ export function DriveContextMenuContent({
 	onFavoriteToggled,
 	onRestored,
 	hiddenActionIds,
-	searchHit
+	searchHit,
+	leading
 }: ItemMenuContentProps) {
 	return (
 		<ContextMenuContent>
@@ -242,6 +254,7 @@ export function DriveContextMenuContent({
 				onRestored={onRestored}
 				hiddenActionIds={hiddenActionIds}
 				searchHit={searchHit}
+				leading={leading}
 				family={CONTEXT_TREE_MENU_FAMILY}
 			/>
 		</ContextMenuContent>

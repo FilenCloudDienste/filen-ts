@@ -3,8 +3,10 @@ import { ChevronRightIcon } from "lucide-react"
 import type { UseQueryResult } from "@tanstack/react-query"
 import { cn } from "@filen/shared"
 import { DirectoryGlyph } from "@/features/drive/components/itemIcon"
-import type { DirectoryTreeChild } from "@/features/drive/queries/drive"
+import { cachedTreeDirectory, type DirectoryTreeChild } from "@/features/drive/queries/drive"
 import { dropHighlightClass, useDriveDropTarget } from "@/features/drive/hooks/useDriveDropTarget"
+import { buildTreeDragSourceProps } from "@/features/drive/lib/dnd"
+import { useDriveClipboardStore } from "@/features/drive/store/useDriveClipboardStore"
 import { Spinner } from "@/components/ui/spinner"
 
 // Reusable collapsible directory tree. Data wiring is fully injected (`useChildren`, `isOpen`,
@@ -31,6 +33,8 @@ export interface DirectoryTreeContext {
 	// Opt-in: each node becomes a drag-to-move drop target (a collapsed one auto-expands on hover-dwell).
 	// Off by default so a non-drive reuse of this primitive (e.g. the move dialog) stays inert.
 	enableDrop?: boolean
+	// Opt-in: each node is a drag source for its own directory (move, or copy with the copy modifier).
+	enableDrag?: boolean
 }
 
 export interface DirectoryTreeProps {
@@ -143,10 +147,20 @@ function DirectoryTreeNode({ child, path, depth, tree }: DirectoryTreeNodeProps)
 				}
 	})
 
+	const parentUuid = path.at(-2) ?? null
+	const dragSource = tree.enableDrag ? buildTreeDragSourceProps(() => cachedTreeDirectory(parentUuid, child.uuid)) : undefined
+	// Cut for a later paste: dimmed, as its listing row is, until the paste or the next copy/cut.
+	const cut = useDriveClipboardStore(state => state.cutUuids.has(child.uuid))
+
 	return (
 		<li>
 			<div
+				// The node's root-to-node chain, for the sidebar's one tree menu and its clipboard shortcuts
+				// (directoryTreeMenu.tsx).
+				data-tree-path={path.join("/")}
+				data-cut={cut ? "" : undefined}
 				style={{ paddingInlineStart: levelInset(depth) }}
+				{...dragSource}
 				onDragEnter={drop.onDragEnter}
 				onDragOver={drop.onDragOver}
 				onDragLeave={drop.onDragLeave}
@@ -158,8 +172,8 @@ function DirectoryTreeNode({ child, path, depth, tree }: DirectoryTreeNodeProps)
 					active
 						? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
 						: onBranch
-							? "text-sidebar-accent-foreground hover:bg-sidebar-accent/60"
-							: "text-sidebar-foreground/80 hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground",
+							? "text-sidebar-accent-foreground hover:bg-sidebar-accent/60 data-menu-open:bg-sidebar-accent/60"
+							: "text-sidebar-foreground/80 hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground data-menu-open:bg-sidebar-accent/60",
 					dropHighlightClass(drop)
 				)}
 			>
@@ -183,7 +197,10 @@ function DirectoryTreeNode({ child, path, depth, tree }: DirectoryTreeNodeProps)
 					onClick={() => {
 						tree.onNavigate(path)
 					}}
-					className="flex min-w-0 flex-1 items-center gap-2 rounded-lg py-1 text-left text-sm focus-ring outline-none [&_svg]:size-4 [&_svg]:shrink-0"
+					className={cn(
+						"flex min-w-0 flex-1 items-center gap-2 rounded-lg py-1 text-left text-sm focus-ring outline-none [&_svg]:size-4 [&_svg]:shrink-0",
+						cut && "opacity-50"
+					)}
 				>
 					<DirectoryGlyph
 						color={child.color}

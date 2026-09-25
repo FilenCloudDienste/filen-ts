@@ -1,4 +1,4 @@
-import type { DependencyList } from "react"
+import type { DependencyList, RefCallback } from "react"
 import { useHotkeys, type HotkeyCallback, type Options } from "react-hotkeys-hook"
 import { isRecordingCombo, useComboFor } from "@/lib/keymap/registry"
 
@@ -48,8 +48,17 @@ const DEFAULT_OPTIONS: Options = {
 // isolation. Isolation is each handler's own `isDialogOpen`/`isAnyDialogOpen` guard, and a provider
 // plus an active-scope stack could only land atomically with removing every one of those guards —
 // forwarding `scopes` on its own would silently kill every scoped hotkey.
-export function useAction(id: string, handler: HotkeyCallback, options?: Options, deps: DependencyList = []): void {
+//
+// The returned ref scopes the action to one element: attached, the listener moves off the document onto
+// that element and only fires while focus is inside it. Unattached (every caller ignoring it), the action
+// stays document-wide.
+export function useAction(
+	id: string,
+	handler: HotkeyCallback,
+	options?: Options,
+	deps: DependencyList = []
+): RefCallback<HTMLElement | null> {
 	const combo = useComboFor(id)
 
-	useHotkeys<HTMLElement>(combo, handler, { ...DEFAULT_OPTIONS, ...options }, [combo, ...deps])
+	return useHotkeys<HTMLElement>(combo, handler, { ...DEFAULT_OPTIONS, ...options }, [combo, ...deps])
 }
