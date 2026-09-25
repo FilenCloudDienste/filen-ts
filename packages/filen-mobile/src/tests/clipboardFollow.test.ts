@@ -362,3 +362,65 @@ describe("remote changes (socket events)", () => {
 		expect(clipboard().entry).toBeNull()
 	})
 })
+
+// Copied or cut from search results: no listing read this session holds these, so the session caches don't either.
+describe("remote changes to items no listing holds", () => {
+	it.each(["cut", "copy"] as const)("a %s follows a rename, a directory's rename and a colour change", async mode => {
+		clipboard().set({ mode, items: [fileRow(rawFile("f")), dirRow(rawDir("d"))] })
+
+		await handleDriveEvent({ event: event("FileMetadataChanged", { uuid: "f", metadata: { name: "renamed.txt" } }) })
+		await handleDriveEvent({ event: event("FolderMetadataChanged", { uuid: "d", meta: { name: "Renamed" } }) })
+		await handleDriveEvent({ event: event("FolderColorChanged", { uuid: "d", color: "blue" }) })
+
+		const [file, dir] = clipboard().entry?.items ?? []
+
+		expect(file?.data).toMatchObject({ uuid: "f", parent: "p", stableUuid: "s-f", decryptedMeta: { name: "renamed.txt" } })
+		expect(dir?.data).toMatchObject({ uuid: "d", parent: "p", color: "blue", decryptedMeta: { name: "Renamed" } })
+		expect(clipboard().cutUuids).toEqual(mode === "cut" ? new Set(["f", "d"]) : new Set())
+	})
+
+	it("a cut being pasted puts back what failed to move as a rename left it", async () => {
+		const cut = fileRow(rawFile("f"))
+
+		clipboard().set({ mode: "cut", items: [cut] })
+		takeCutForPaste({ mode: "cut", items: [cut] })
+		await handleDriveEvent({ event: event("FileMetadataChanged", { uuid: "f", metadata: { name: "renamed.txt" } }) })
+		restoreFailedCut([0])
+
+		expect(clipboard().entry?.items[0]?.data.decryptedMeta?.name).toBe("renamed.txt")
+	})
+
+	it("keeps the same entry for changes to items it doesn't hold, and never rebuilds a shared variant", async () => {
+		const shared = { type: "sharedDirectory", data: { uuid: "s", decryptedMeta: { name: "s" } } } as unknown as DriveItem
+		const entry = { mode: "copy" as const, items: [fileRow(rawFile("f")), shared] }
+
+		clipboard().set(entry)
+
+		await handleDriveEvent({ event: event("FileMetadataChanged", { uuid: "other", metadata: { name: "other.txt" } }) })
+		await handleDriveEvent({ event: event("FolderMetadataChanged", { uuid: "s", meta: { name: "Renamed" } }) })
+		await handleDriveEvent({ event: event("FolderColorChanged", { uuid: "s", color: "blue" }) })
+
+		expect(clipboard().entry).toBe(entry)
+	})
+})
+
+describe("a delete-all", () => {
+	it.each(["cut", "copy"] as const)("clears a %s", async mode => {
+		clipboard().set({ mode, items: [listedFile("a"), fileRow(rawFile("b")), listedDir("d")] })
+		await handleDriveEvent({ event: event("DeleteAll", undefined) })
+
+		expect(clipboard().entry).toBeNull()
+		expect(clipboard().cutUuids.size).toBe(0)
+	})
+
+	it("puts nothing back from a cut being pasted", async () => {
+		const cut = listedFile("a")
+
+		clipboard().set({ mode: "cut", items: [cut] })
+		takeCutForPaste({ mode: "cut", items: [cut] })
+		await handleDriveEvent({ event: event("DeleteAll", undefined) })
+		restoreFailedCut([0])
+
+		expect(clipboard().entry).toBeNull()
+	})
+})

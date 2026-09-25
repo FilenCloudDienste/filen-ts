@@ -54,7 +54,9 @@ vi.mock("@/lib/sdkUnwrap", () => ({
 		data: { uuid: file.uuid, undecryptable: false, decryptedMeta: { name: `name-${file.uuid}` } }
 	}),
 	unwrapFileMeta: vi.fn(),
-	unwrappedFileIntoDriveItem: vi.fn()
+	unwrappedFileIntoDriveItem: vi.fn(),
+	unwrapDirMeta: (dir: unknown) => dir,
+	unwrappedDirIntoDriveItem: (dir: { uuid: string }) => ({ type: "directory", data: { uuid: dir.uuid } })
 }))
 vi.mock("@/stores/useDrivePreview.store", () => ({ default: { getState: () => ({ open: h.open }) } }))
 vi.mock("@/lib/alerts", () => ({ default: { normal: vi.fn(), error: vi.fn() } }))
@@ -103,7 +105,7 @@ import { openLinkedFilePreview } from "@/features/drive/linkedFilePreview"
 import { openAttachmentPreview, type InternalLinkData } from "@/features/chats/utils"
 import { InternalAttachment } from "@/features/chats/components/chat/message/internalAttachment"
 import drive from "@/features/drive/drive"
-import { linkSaveTarget, linkedItemToCopyItem } from "@/features/drive/linkedSave"
+import { linkSaveTarget, linkedDirectoryCopySource, linkedItemToCopyItem } from "@/features/drive/linkedSave"
 import cache from "@/lib/cache"
 import type { DrivePath } from "@/hooks/useDrivePath"
 import type { DriveItem } from "@/types"
@@ -198,6 +200,40 @@ describe("directory links", () => {
 			kind: "directory",
 			uuid: "root-9"
 		})
+	})
+
+	// A subdirectory lists from the link context its parent's read cached, and the link screen can show a restored
+	// listing before its own read lands: one tapped there first could otherwise not be listed or saved.
+	it("openLinkedDirectory caches the root's subdirectories from the listing it already read", async () => {
+		const sub = { inner: { uuid: "sub-1" }, linkedTag: true }
+
+		h.sdk.getDirPublicLinkInfo.mockResolvedValue({
+			root: { inner: { uuid: "root-9" } },
+			link: { enableDownload: true, password: "none" }
+		})
+		h.sdk.listLinkedDir.mockResolvedValue({ dirs: [sub], files: [] })
+
+		let subAtPush: unknown = undefined
+
+		h.push.mockImplementation(() => {
+			subAtPush = cache.directoryUuidToAnyLinkedDirWithMeta.get("sub-1")
+		})
+
+		await drive.openLinkedDirectory({
+			linkUuid: "link-9",
+			linkKey: "key-9",
+			root: { inner: { uuid: "root-9", meta: { tag: "Decoded", inner: [{ name: "Holiday" }] } } } as unknown as LinkedRootDir
+		})
+
+		expect(subAtPush).toEqual({
+			dir: { tag: "AnyLinkedDir.Dir", inner: [sub] },
+			meta: cache.linkedRootByLinkUuid.get("link-9")?.meta
+		})
+		expect(cache.uuidToAnyDriveItem.get("sub-1")).toEqual({ type: "directory", data: { uuid: "sub-1" } })
+		expect(
+			linkedDirectoryCopySource({ type: "linked", uuid: "sub-1", linked: { uuid: "link-9", key: "key-9", rootName: "Holiday" } })
+		).not.toBeNull()
+		expect(h.sdk.listLinkedDir).toHaveBeenCalledTimes(1)
 	})
 
 	it("a link that fails to open caches nothing", async () => {

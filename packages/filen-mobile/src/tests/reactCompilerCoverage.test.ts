@@ -14,7 +14,8 @@ import { type DriveItem } from "@/types"
 
 const h = vi.hoisted(() => ({
 	uuidToAnyDriveItem: new Map<string, unknown>(),
-	directoryUuidToAnyNormalDir: new Map<string, unknown>()
+	directoryUuidToAnyNormalDir: new Map<string, unknown>(),
+	directoryUuidToAnyLinkedDirWithMeta: new Map<string, unknown>()
 }))
 
 vi.mock("@/lib/cache", () => ({ default: { uuidToAnyDriveItem: h.uuidToAnyDriveItem } }))
@@ -108,8 +109,9 @@ describe("React Compiler coverage of the drive hot path", () => {
 	)
 })
 
-// The compiled Header, rendered through one memo cache the way React keeps it across renders. Its title and create
-// menu read the uuid caches, which React can't see: a memoized value is only computed again when an input changes.
+// The compiled Header, rendered through one memo cache the way React keeps it across renders. Its title, create menu
+// and Save to Cloud Drive read the uuid caches, which React can't see: a memoized value is only computed again when an
+// input changes.
 describe("the compiled drive Header", () => {
 	type HeaderProps = {
 		setSearchQuery: (query: string) => void
@@ -124,6 +126,7 @@ describe("the compiled drive Header", () => {
 	}
 
 	const DIRECTORY_UUID = "0b7c4f1e-3a52-4d8e-9f61-2c5d8a7e4b90"
+	const LINK = { uuid: "5e2a9c7d-1f3b-4c8e-a6d0-9b4f2e7c1a35", key: "key", rootName: "Holidays" }
 	const NO_ITEMS: DriveItem[] = []
 	const t = ((key: string) => key) as unknown as TFunction
 	const translation = { t }
@@ -146,6 +149,10 @@ describe("the compiled drive Header", () => {
 		const memoSentinel = Symbol.for("react.memo_cache_sentinel")
 		let memo: unknown[] | null = null
 		const resolveTitle = vi.fn(resolveDriveHeaderTitle)
+		// Like linkedDirectoryCopySource: a linked subdirectory is saveable once its parent's listing has cached it.
+		const buildSaveButton = vi.fn(({ drivePath: path }: { drivePath: DrivePath }) =>
+			h.directoryUuidToAnyLinkedDirWithMeta.has(path.uuid ?? "") ? { id: "saveDirectoryToCloudDrive" } : null
+		)
 		const storeState = { selectedItems: NO_ITEMS, syncing: false, entry: null }
 		const modules: Record<string, unknown> = {
 			"react/compiler-runtime": {
@@ -190,8 +197,9 @@ describe("the compiled drive Header", () => {
 			"@/features/drive/store/useDriveClipboard.store": withDefault((selector: (state: typeof storeState) => unknown) =>
 				selector(storeState)
 			),
-			"@/features/drive/hooks/useLinkSaveable": withDefault(() => false),
-			"@/features/drive/linkedSave": { buildSaveLinkedDirectoryButton: () => null, linkSaveTarget: () => null },
+			// A link someone else owns, whose downloads are allowed.
+			"@/features/drive/hooks/useLinkSaveable": withDefault(() => drivePath.type === "linked"),
+			"@/features/drive/linkedSave": { buildSaveLinkedDirectoryButton: buildSaveButton, linkSaveTarget: () => null },
 			"@/lib/logger": withDefault({})
 		}
 		const module = { exports: {} as { default?: (props: HeaderProps) => { props: StackHeaderProps } } }
@@ -222,13 +230,15 @@ describe("the compiled drive Header", () => {
 				Header(props)
 					.props.rightItems.flatMap(item => item.props?.buttons ?? [])
 					.map(button => button.id),
-			resolveTitle
+			resolveTitle,
+			buildSaveButton
 		}
 	}
 
 	beforeEach(() => {
 		h.uuidToAnyDriveItem.clear()
 		h.directoryUuidToAnyNormalDir.clear()
+		h.directoryUuidToAnyLinkedDirWithMeta.clear()
 	})
 
 	it("names a directory reached by uuid alone once its listing's fetch has cached it", () => {
@@ -267,5 +277,32 @@ describe("the compiled drive Header", () => {
 		header.title(props)
 
 		expect(header.resolveTitle).toHaveBeenCalledOnce()
+	})
+
+	it("offers Save to Cloud Drive in a linked subdirectory once its parent's listing has cached it", () => {
+		const header = mountHeader({ type: "linked", uuid: DIRECTORY_UUID, linked: LINK })
+
+		// Opened from a restored listing before its parent's read cached it, so its own read failed.
+		expect(header.menuIds({ setSearchQuery, listItems: NO_ITEMS, searchStatus: "idle", listingFetchStatus: "idle" })).not.toContain(
+			"saveDirectoryToCloudDrive"
+		)
+
+		// The parent's read lands, then the subdirectory's retry reads it.
+		h.directoryUuidToAnyLinkedDirWithMeta.set(DIRECTORY_UUID, { dir: {}, meta: {} })
+
+		expect(header.menuIds({ setSearchQuery, listItems: NO_ITEMS, searchStatus: "idle", listingFetchStatus: "fetching" })).toContain(
+			"saveDirectoryToCloudDrive"
+		)
+	})
+
+	it("builds Save to Cloud Drive once while nothing it depends on changes", () => {
+		const header = mountHeader({ type: "linked", uuid: DIRECTORY_UUID, linked: LINK })
+		const props: HeaderProps = { setSearchQuery, listItems: NO_ITEMS, searchStatus: "idle", listingFetchStatus: "idle" }
+
+		h.directoryUuidToAnyLinkedDirWithMeta.set(DIRECTORY_UUID, { dir: {}, meta: {} })
+		header.menuIds(props)
+		header.menuIds(props)
+
+		expect(header.buildSaveButton).toHaveBeenCalledOnce()
 	})
 })

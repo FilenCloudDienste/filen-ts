@@ -15,7 +15,13 @@ import cache from "@/lib/cache"
 import useDriveStore from "@/features/drive/store/useDrive.store"
 import { markDirectorySizesStale } from "@/features/drive/queries/useDirectorySize.query"
 import socketCreateBatcher from "@/features/drive/socketCreateBatcher"
-import { dropDriveItem, followDriveItem, followFileSuccessor } from "@/features/drive/clipboardFollow"
+import {
+	clearClipboardAfterDeleteAll,
+	dropDriveItem,
+	followDriveItem,
+	followFileSuccessor,
+	heldDriveItem
+} from "@/features/drive/clipboardFollow"
 import logger from "@/lib/logger"
 
 export type DriveSocketEvent = Extract<SocketEvent, { tag: typeof SocketEvent_Tags.Drive }>
@@ -213,6 +219,13 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 				// A session-scoped cache miss is routine for items not listed this session; the next
 				// listing fetch converges, so these misses are debug, not warnings.
 				logger.debug("drive-socket", "FileMetadataChanged: file not in cache, update skipped", { uuid: inner.uuid })
+
+				// Uncached but on the clipboard (a search hit, say): it follows from the clipboard's row.
+				const held = heldDriveItem(inner.uuid)
+
+				if (held?.type === "file") {
+					followDriveItem(inner.uuid, unwrappedFileIntoDriveItem(unwrapFileMeta({ ...held.data, meta: inner.metadata })))
+				}
 			}
 
 			if (fromCache) {
@@ -365,6 +378,13 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 				}
 
 				followDriveItem(inner.uuid, driveItem)
+			} else {
+				// Uncached but on the clipboard (a search hit, say): it follows from the clipboard's row.
+				const held = heldDriveItem(inner.uuid)
+
+				if (held?.type === "directory") {
+					followDriveItem(inner.uuid, unwrappedDirIntoDriveItem(unwrapDirMeta({ ...held.data, meta: inner.meta })))
+				}
 			}
 
 			break
@@ -501,6 +521,19 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 				}
 
 				followDriveItem(inner.uuid, driveItem)
+			} else {
+				// Uncached but on the clipboard (a search hit, say): it follows from the clipboard's row.
+				const held = heldDriveItem(inner.uuid)
+
+				if (held?.type === "directory") {
+					followDriveItem(inner.uuid, {
+						...held,
+						data: {
+							...held.data,
+							color: inner.color
+						}
+					})
+				}
 			}
 
 			break
@@ -661,6 +694,7 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 		case DriveEvent_Tags.DeleteAll: {
 			// No per-item payload to patch listings with.
 			driveItemsQueryInvalidateAfterDeleteAll()
+			clearClipboardAfterDeleteAll()
 
 			break
 		}

@@ -9,6 +9,7 @@ import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import auth from "@/lib/auth"
 import { markDirectorySizesStale } from "@/features/drive/queries/useDirectorySize.query"
 import { driveItemsQueryInvalidateAfterDeleteAll } from "@/features/drive/queries/useDriveItems.query"
+import { clearClipboardAfterDeleteAll } from "@/features/drive/clipboardFollow"
 import { router } from "@/lib/router"
 import { serialize } from "@/lib/serializer"
 import { shareTmpFile } from "@/lib/share"
@@ -166,6 +167,7 @@ export function buildDangerZoneButtons({
 					markDirectorySizesStale()
 					// The socket echo does the same, but not while the socket is down.
 					driveItemsQueryInvalidateAfterDeleteAll()
+					clearClipboardAfterDeleteAll()
 					await accountQuery.refetch()
 				})
 

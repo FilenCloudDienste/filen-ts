@@ -201,12 +201,20 @@ describe("saving", () => {
 	})
 
 	it("offers the header button only for a held directory", () => {
-		expect(buildSaveLinkedDirectoryButton(linkPath(), t)).toBeNull()
+		const saveButtonId = (drivePath: DrivePath) => buildSaveLinkedDirectoryButton({ drivePath, listingFetchStatus: "idle", t })?.id
+
+		expect(saveButtonId(linkPath())).toBeUndefined()
 
 		cache.linkedRootByLinkUuid.set("link-1", { dir: rootDir, meta: meta(true), rootUuid: "root-1" })
 
-		expect(buildSaveLinkedDirectoryButton(linkPath(), t)?.id).toBe("saveDirectoryToCloudDrive")
-		expect(buildSaveLinkedDirectoryButton({ type: "drive", uuid: null }, t)).toBeNull()
+		expect(saveButtonId(linkPath())).toBe("saveDirectoryToCloudDrive")
+		expect(saveButtonId({ type: "drive", uuid: null })).toBeUndefined()
+		// A subdirectory is held once its parent's listing caches it.
+		expect(saveButtonId(linkPath("d-1"))).toBeUndefined()
+
+		cache.directoryUuidToAnyLinkedDirWithMeta.set("d-1", { dir: subDir, meta: meta(true) })
+
+		expect(saveButtonId(linkPath("d-1"))).toBe("saveDirectoryToCloudDrive")
 	})
 
 	it("forgets link sources on logout", () => {

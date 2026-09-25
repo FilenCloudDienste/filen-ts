@@ -9,7 +9,7 @@ import {
 	MaybeEncryptedUniffi_Tags
 } from "@filen/sdk-rs"
 import { linkedRootOf } from "@/features/drive/utils"
-import { unwrapFileMeta, unwrappedFileIntoDriveItem } from "@/lib/sdkUnwrap"
+import { unwrapDirMeta, unwrapFileMeta, unwrappedDirIntoDriveItem, unwrappedFileIntoDriveItem } from "@/lib/sdkUnwrap"
 import { unwrapSdkError } from "@/lib/sdkErrors"
 import prompts from "@/lib/prompts"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
@@ -74,8 +74,7 @@ const drive = {
 					: undefined
 			)
 			const linkedRoot = linkedRootOf(info, password)
-
-			await authedSdkClient.listLinkedDir(
+			const { dirs } = await authedSdkClient.listLinkedDir(
 				linkedRoot.dir,
 				linkedRoot.meta,
 				undefined,
@@ -86,7 +85,10 @@ const drive = {
 					: undefined
 			)
 
-			return linkedRoot
+			return {
+				linkedRoot,
+				dirs
+			}
 		})
 
 		if (!result.success) {
@@ -141,7 +143,13 @@ const drive = {
 
 		// The link screen decides Save to Cloud Drive from the root in its first render, which happens before
 		// its own listing fetch caches the root, and nothing re-renders it when that fetch does.
-		cache.linkedRootByLinkUuid.set(linkUuid, result.data)
+		cache.linkedRootByLinkUuid.set(linkUuid, result.data.linkedRoot)
+
+		// Its subdirectories too, as the screen's own read caches them: one tapped in a restored listing before that
+		// read lands has no other link context to be listed with.
+		for (const dir of result.data.dirs) {
+			cache.cacheNewLinkedDir(dir, unwrappedDirIntoDriveItem(unwrapDirMeta(dir.inner)), result.data.linkedRoot.meta)
+		}
 
 		router.push({
 			pathname: "/linkedDir/[uuid]",

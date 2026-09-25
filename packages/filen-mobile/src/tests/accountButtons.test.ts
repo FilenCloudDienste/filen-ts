@@ -136,6 +136,8 @@ import {
 	buildAccountToggleButtons,
 	buildTwoFactorButtons
 } from "@/features/settings/accountButtons"
+import useDriveClipboardStore from "@/features/drive/store/useDriveClipboard.store"
+import type { DriveItem } from "@/types"
 import type { TFunction } from "i18next"
 
 // ---------------------------------------------------------------------------
@@ -357,6 +359,30 @@ describe("buildDangerZoneButtons", () => {
 			expect(mockAuthedSdkClient.deleteAllItems).toHaveBeenCalledTimes(1)
 			// Drive listings don't wait for the socket echo, which a down socket never delivers.
 			expect(mockInvalidateAfterDeleteAll).toHaveBeenCalledTimes(1)
+		})
+
+		it("empties the drive clipboard once the items are deleted, and only then", async () => {
+			alwaysConfirm()
+			runWithLoadingPassthrough()
+
+			const entry = { mode: "copy" as const, items: [{ type: "file", data: { uuid: "a" } } as unknown as DriveItem] }
+			const button = buildDangerZoneButtons({
+				t,
+				accountQuery: makeAccountQuery({ storageUsed: 5000n }),
+				isOnline: true,
+				textRed500
+			})[1]
+
+			useDriveClipboardStore.getState().set(entry)
+			mockAuthedSdkClient.deleteAllItems.mockRejectedValueOnce(new Error("offline"))
+
+			await button?.onPress?.()
+
+			expect(useDriveClipboardStore.getState().entry).toBe(entry)
+
+			await button?.onPress?.()
+
+			expect(useDriveClipboardStore.getState().entry).toBeNull()
 		})
 	})
 

@@ -198,6 +198,28 @@ export function dropDriveItem(uuid: string): void {
 	useDriveClipboardStore.getState().mapItems(existing => (existing.data.uuid === uuid ? null : existing))
 }
 
+// The clipboard's row of an item, or a moving cut's: a rename or colour change arrives as a delta, applied to this row
+// when the session caches hold none for the item.
+export function heldDriveItem(uuid: string): DriveItem | null {
+	const { entry } = useDriveClipboardStore.getState()
+
+	if (entry !== null && indexOf(entry).uuids.has(uuid)) {
+		return entry.items.find(item => item.data.uuid === uuid) ?? null
+	}
+
+	const index = movingCut?.byUuid.get(uuid)
+
+	return index === undefined ? null : (movingCut?.items[index] ?? null)
+}
+
+// A delete-all removed every own item. Shared-in rows go too, as a row can't reliably tell shared in from shared
+// out, and a cut still moving puts nothing back.
+export function clearClipboardAfterDeleteAll(): void {
+	movingCut = null
+
+	useDriveClipboardStore.getState().clear()
+}
+
 events.subscribe("driveItemUpdated", ({ previousUuid, item }) => {
 	followDriveItem(previousUuid, item)
 })

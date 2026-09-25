@@ -47,7 +47,7 @@ const Header = ({
 	// Cache-backed search status. Drives the non-blocking header "searching" spinner
 	// (warming/background) and gates select-all until the result set has settled.
 	searchStatus: DriveSearchStatus
-	// The directory listing's fetch status: see resolveDriveHeaderTitle.
+	// The directory listing's fetch status: see resolveDriveHeaderTitle and buildSaveLinkedDirectoryButton.
 	listingFetchStatus: FetchStatus
 }) => {
 	const textForeground = useResolveClassNames("text-foreground")
@@ -99,7 +99,11 @@ const Header = ({
 		const menuButtons: MenuButton[] = []
 
 		if (linkSaveable && !selectionMode) {
-			const saveButton = buildSaveLinkedDirectoryButton(drivePath, t)
+			const saveButton = buildSaveLinkedDirectoryButton({
+				drivePath,
+				listingFetchStatus,
+				t
+			})
 
 			if (saveButton) {
 				menuButtons.push(saveButton)

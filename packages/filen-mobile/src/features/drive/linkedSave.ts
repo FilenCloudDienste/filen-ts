@@ -1,4 +1,5 @@
 import { type TFunction } from "i18next"
+import { type FetchStatus } from "@tanstack/react-query"
 import { AnyDirWithContext, AnyFile, CopyItem } from "@filen/sdk-rs"
 import { run } from "@filen/shared"
 import { type MenuButton } from "@/components/ui/menu"
@@ -81,7 +82,17 @@ export function linkedDirectoryCopySource(drivePath: DrivePath): { item: CopyIte
 }
 
 // "Save to Cloud Drive" for the linked directory on screen.
-export function buildSaveLinkedDirectoryButton(drivePath: DrivePath, t: TFunction): MenuButton | null {
+export function buildSaveLinkedDirectoryButton({
+	drivePath,
+	t
+}: {
+	drivePath: DrivePath
+	// Not read here. A subdirectory's link context is cached by its parent's listing, which can land after this
+	// screen opened: a compiled caller keys this call on its inputs, so the button is built again when the listing's
+	// fetch settles.
+	listingFetchStatus: FetchStatus
+	t: TFunction
+}): MenuButton | null {
 	if (!linkedDirectoryCopySource(drivePath)) {
 		return null
 	}
