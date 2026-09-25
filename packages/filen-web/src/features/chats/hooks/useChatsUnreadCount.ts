@@ -1,73 +1,12 @@
 import { useEffect, useSyncExternalStore } from "react"
-import { notifyManager } from "@tanstack/react-query"
 import type { Chat, ChatMessage } from "@filen/sdk-rs"
-import { queryClient } from "@/queries/client"
 import { useChats } from "@/features/chats/queries/chats"
 import { chatMessagesQueryGet } from "@/features/chats/queries/chatMessages"
+import { getMessagesVersion, subscribeMessagesVersion } from "@/features/chats/lib/messagesVersion"
 import { useBlockedUsers } from "@/features/contacts/hooks/useBlockedUsers"
 import { refetchChatsAndMessages } from "@/features/chats/lib/refetchChatsAndMessages"
 import { countUnreadMessages } from "@/features/chats/hooks/useChatUnreadCount"
 import type { BlockedUsers } from "@filen/shared"
-
-// The sum reads each chat's message cache without observing it, so a change to message caches alone
-// re-renders nothing: the resync lands every chat's messages after the list, and a socket edit or delete
-// patches a thread without touching the list. This moves on every write to, or removal of, a message
-// cache, and goes into the sum as an input so its memo re-runs. One cache listener for the whole app,
-// subscribed from the start so no write lands unseen before the rail subscribes.
-let messagesVersion = 0
-let messagesVersionNotifyPending = false
-const messagesVersionListeners = new Set<() => void>()
-
-// The part of a query-cache event this reads; the event types its query's key as any.
-interface MessagesCacheEvent {
-	type: string
-	action?: { type?: string }
-	query: { queryKey: readonly unknown[] }
-}
-
-function isChatMessagesChange(event: MessagesCacheEvent): boolean {
-	return (
-		(event.type === "removed" || (event.type === "updated" && event.action?.type === "success")) &&
-		event.query.queryKey[0] === "chats" &&
-		event.query.queryKey[1] === "messages"
-	)
-}
-
-queryClient.getQueryCache().subscribe(event => {
-	if (!isChatMessagesChange(event)) {
-		return
-	}
-
-	messagesVersion++
-
-	// Writes landing before the scheduled flush share one notification, delivered in the same batch as the
-	// query observers' own, so a fan-out's burst doesn't re-render once per write.
-	if (messagesVersionNotifyPending) {
-		return
-	}
-
-	messagesVersionNotifyPending = true
-
-	notifyManager.schedule(() => {
-		messagesVersionNotifyPending = false
-
-		for (const listener of messagesVersionListeners) {
-			listener()
-		}
-	})
-})
-
-function subscribeMessagesVersion(listener: () => void): () => void {
-	messagesVersionListeners.add(listener)
-
-	return () => {
-		messagesVersionListeners.delete(listener)
-	}
-}
-
-function getMessagesVersion(): number {
-	return messagesVersion
-}
 
 export interface GlobalUnread {
 	// Summed unread across every chat whose message cache is resident.

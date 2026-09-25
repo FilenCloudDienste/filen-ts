@@ -7,29 +7,40 @@ import type { LogoutDeps } from "@/lib/logout"
 // Each collaborator records its own name in `calls` before doing anything else, so the ORDER assertions
 // below read one array instead of comparing invocation counters: the security property is that every
 // plaintext producer is silenced BEFORE the wipe, not merely that each was called at some point.
-const { calls, runLogout, notesCancel, chatsCancel, cancelActiveTransfers, clearAllTyping, disposeAudioEngine, socketStop, toastWarning } =
-	vi.hoisted(() => {
-		const calls: string[] = []
-		const record =
-			<T>(name: string, result: () => T) =>
-			() => {
-				calls.push(name)
+const {
+	calls,
+	runLogout,
+	notesCancel,
+	chatsCancel,
+	cancelActiveTransfers,
+	clearAllTyping,
+	detachUnreadBadges,
+	disposeAudioEngine,
+	socketStop,
+	toastWarning
+} = vi.hoisted(() => {
+	const calls: string[] = []
+	const record =
+		<T>(name: string, result: () => T) =>
+		() => {
+			calls.push(name)
 
-				return result()
-			}
-
-		return {
-			calls,
-			runLogout: vi.fn<(deps: LogoutDeps) => Promise<void>>(record("runLogout", () => Promise.resolve())),
-			notesCancel: vi.fn(record("notesSync.cancel", () => undefined)),
-			chatsCancel: vi.fn(record("chatsSync.cancel", () => undefined)),
-			cancelActiveTransfers: vi.fn(record("cancelActiveTransfers", () => undefined)),
-			clearAllTyping: vi.fn(record("clearAllTyping", () => undefined)),
-			disposeAudioEngine: vi.fn(record("disposeAudioEngine", () => undefined)),
-			socketStop: vi.fn(record("socketBridge.stop", () => Promise.resolve())),
-			toastWarning: vi.fn()
+			return result()
 		}
-	})
+
+	return {
+		calls,
+		runLogout: vi.fn<(deps: LogoutDeps) => Promise<void>>(record("runLogout", () => Promise.resolve())),
+		notesCancel: vi.fn(record("notesSync.cancel", () => undefined)),
+		chatsCancel: vi.fn(record("chatsSync.cancel", () => undefined)),
+		cancelActiveTransfers: vi.fn(record("cancelActiveTransfers", () => undefined)),
+		clearAllTyping: vi.fn(record("clearAllTyping", () => undefined)),
+		detachUnreadBadges: vi.fn(record("detachUnreadBadges", () => undefined)),
+		disposeAudioEngine: vi.fn(record("disposeAudioEngine", () => undefined)),
+		socketStop: vi.fn(record("socketBridge.stop", () => Promise.resolve())),
+		toastWarning: vi.fn()
+	}
+})
 
 // Every step that must run before the wipe, in the order performLogout runs them.
 const TEARDOWN_STEPS = [
@@ -37,6 +48,7 @@ const TEARDOWN_STEPS = [
 	"chatsSync.cancel",
 	"cancelActiveTransfers",
 	"clearAllTyping",
+	"detachUnreadBadges",
 	"disposeAudioEngine",
 	"socketBridge.stop"
 ]
@@ -45,6 +57,7 @@ vi.mock("@/lib/logout", () => ({ runLogout }))
 vi.mock("@/features/notes/lib/sync", () => ({ sync: { cancel: notesCancel } }))
 vi.mock("@/features/chats/lib/sync", () => ({ sync: { cancel: chatsCancel } }))
 vi.mock("@/features/chats/lib/typing", () => ({ clearAllTyping }))
+vi.mock("@/features/chats/lib/messagesVersion", () => ({ detachUnreadBadges }))
 vi.mock("@/features/transfers/lib/control", () => ({ cancelActiveTransfers }))
 vi.mock("@/lib/sdk/socket", () => ({ socketBridge: { stop: socketStop } }))
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: { logout: vi.fn() } }))
@@ -157,7 +170,15 @@ describe("performLogout — pre-wipe teardown", () => {
 
 		expect(calls).toEqual([...TEARDOWN_STEPS, "runLogout"])
 
-		for (const step of [notesCancel, chatsCancel, cancelActiveTransfers, clearAllTyping, disposeAudioEngine, socketStop]) {
+		for (const step of [
+			notesCancel,
+			chatsCancel,
+			cancelActiveTransfers,
+			clearAllTyping,
+			detachUnreadBadges,
+			disposeAudioEngine,
+			socketStop
+		]) {
 			expect(step).toHaveBeenCalledTimes(1)
 		}
 	})

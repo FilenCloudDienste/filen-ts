@@ -2,6 +2,7 @@ import { runLogout } from "@/lib/logout"
 import { sync as notesSync } from "@/features/notes/lib/sync"
 import { sync as chatsSync } from "@/features/chats/lib/sync"
 import { clearAllTyping } from "@/features/chats/lib/typing"
+import { detachUnreadBadges } from "@/features/chats/lib/messagesVersion"
 import { resetChatUploadsDirCache } from "@/features/chats/lib/attachments"
 import { resetSocketReconnectState } from "@/features/chats/lib/socketHandlers"
 import { socketBridge } from "@/lib/sdk/socket"
@@ -92,6 +93,8 @@ export async function performLogout(options?: PerformLogoutOptions): Promise<boo
 	resetSocketReconnectState()
 	// Stop every typing watchdog + wipe the typing store so no timer fires into the cleared session.
 	clearAllTyping()
+	// A chat write landing after the wipe must not render the rail, which would read its queries back in.
+	detachUnreadBadges()
 	// Stop playback, revoke the live blob URL, tear down the media element and clear the queue so no
 	// audio from this account survives into the next session.
 	disposeAudioEngine()

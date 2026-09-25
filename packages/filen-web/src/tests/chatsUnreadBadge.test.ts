@@ -3,7 +3,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { createElement, Fragment, useLayoutEffect, type ReactNode } from "react"
 import { act, render, renderHook, waitFor } from "@testing-library/react"
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query"
 import type { Chat, ChatMessage, UuidStr } from "@filen/sdk-rs"
 import { EMPTY_BLOCKED_USERS } from "@filen/shared"
 
@@ -11,12 +11,14 @@ function testUuid(label: string): UuidStr {
 	return `${label}-0000-0000-0000-000000000000` as UuidStr
 }
 
-const { listChats, listMessagesBefore } = vi.hoisted(() => ({
+const { listChats, listMessagesBefore, leaveChatOp, purgeChatInflightState } = vi.hoisted(() => ({
 	listChats: vi.fn<() => Promise<Chat[]>>(),
-	listMessagesBefore: vi.fn<(chat: Chat, before: bigint) => Promise<ChatMessage[]>>()
+	listMessagesBefore: vi.fn<(chat: Chat, before: bigint) => Promise<ChatMessage[]>>(),
+	leaveChatOp: vi.fn<(chat: Chat) => Promise<void>>(),
+	purgeChatInflightState: vi.fn<(chatUuid: string) => Promise<void>>(() => Promise.resolve())
 }))
 
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: { listChats, listMessagesBefore } }))
+vi.mock("@/lib/sdk/client", () => ({ sdkApi: { listChats, listMessagesBefore, leaveChat: leaveChatOp } }))
 
 // The production defaults minus the persister (sqlite, unavailable under vitest).
 vi.mock("@/queries/client", () => ({
@@ -27,15 +29,18 @@ vi.mock("@/queries/client", () => ({
 	})
 }))
 
-vi.mock("@/features/chats/lib/inflight", () => ({ purgeChatInflightState: () => Promise.resolve() }))
+vi.mock("@/features/chats/lib/inflight", () => ({ purgeChatInflightState }))
 
 import { queryClient } from "@/queries/client"
+import { ACCOUNT_QUERY_KEY } from "@/queries/account"
 import { CHATS_QUERY_KEY, chatsQueryGet, useChats } from "@/features/chats/queries/chats"
-import { chatMessagesQueryKey, useChatMessages } from "@/features/chats/queries/chatMessages"
+import { chatMessagesQueryGet, chatMessagesQueryKey, useChatMessages } from "@/features/chats/queries/chatMessages"
 import { useChatsUnreadCount } from "@/features/chats/hooks/useChatsUnreadCount"
 import { useChatUnreadCount } from "@/features/chats/hooks/useChatUnreadCount"
+import { detachUnreadBadges } from "@/features/chats/lib/messagesVersion"
 import { handleAuthSuccess, handleChatEvent, handleReconnecting, resetSocketReconnectState } from "@/features/chats/lib/socketHandlers"
 import { setFocusedChat } from "@/features/chats/lib/focusedChat"
+import { leaveChat } from "@/features/chats/lib/actions"
 import { socketAuthenticated, socketDropped } from "@/lib/sdk/socketSession"
 
 const USER_ID = 7n
@@ -138,6 +143,22 @@ function RailBadgeProbe() {
 	return null
 }
 
+// Stands in for the rail's own reads (its account and contact requests).
+const railRead = vi.fn(() => Promise.resolve(true))
+
+// The rail's shape: the badge beside those reads.
+function RailProbe() {
+	const count = useChatsUnreadCount(USER_ID)
+
+	useQuery({ queryKey: ["rail"], queryFn: railRead })
+
+	useLayoutEffect(() => {
+		committed.push(count)
+	})
+
+	return null
+}
+
 function RowBadgeProbe({ chat }: { chat: Chat }) {
 	const count = useChatUnreadCount(chat, USER_ID, EMPTY_BLOCKED_USERS)
 
@@ -184,6 +205,7 @@ beforeEach(() => {
 	setFocusedChat(null)
 	listChats.mockReset()
 	listMessagesBefore.mockReset()
+	leaveChatOp.mockReset()
 	committed.length = 0
 })
 
@@ -267,6 +289,35 @@ describe("rail unread badge", () => {
 		unmount()
 	})
 
+	// Removing a message cache alone re-renders nothing: leaving drops the chat from the list first, and that
+	// list write re-renders the rail.
+	it("drops a chat left", async () => {
+		const a1 = peerMessage("a1", "a", 150n)
+		const b1 = peerMessage("b1", "b", 150n)
+		listChats.mockResolvedValue([mockChat("a", a1), mockChat("b", b1)])
+		listMessagesBefore.mockImplementation(chat => Promise.resolve(chat.uuid === testUuid("a") ? [a1] : [b1]))
+		leaveChatOp.mockResolvedValue(undefined)
+
+		const { unmount } = render(createElement(RailBadgeProbe), { wrapper })
+		await drain()
+
+		expect(committed.at(-1)).toBe(2)
+
+		committed.length = 0
+
+		expect(await leaveChat(mockChat("a", a1))).toEqual({ status: "success" })
+
+		// waitFor lifts act, so each cache notification renders when it lands, as in a browser.
+		await waitFor(() => {
+			expect(committed.at(-1)).toBe(1)
+		})
+		await drain()
+
+		expect(committed).toEqual([1])
+
+		unmount()
+	})
+
 	it("still heals a chat introduced after the boot's resync filled the rest", async () => {
 		const a1 = peerMessage("a1", "a", 150n)
 		listChats.mockResolvedValue([mockChat("a", a1)])
@@ -346,6 +397,148 @@ describe("a message from someone else in the open chat", () => {
 		await awaitDelivery()
 
 		expect(committed).toEqual([0])
+
+		unmount()
+	})
+})
+
+// Sign-out up to its wipe, in performLogout's order: detach the rail badge, stop the reads in flight, then
+// empty the in-memory cache.
+async function wipeCache(): Promise<void> {
+	await act(async () => {
+		detachUnreadBadges()
+		await queryClient.cancelQueries()
+		queryClient.clear()
+	})
+}
+
+// Between sign-out's wipe and its reload, a rail render reads the rail's queries back into the emptied
+// cache, against a client that is being logged out.
+describe("signing out", () => {
+	const a1 = peerMessage("a1", "a", 150n)
+
+	// The rail with one chat and its unread message resident.
+	async function renderRail(): Promise<() => void> {
+		listChats.mockResolvedValue([mockChat("a", a1)])
+		listMessagesBefore.mockResolvedValue([a1])
+
+		const { unmount } = render(createElement(RailProbe), { wrapper })
+		await drain()
+
+		expect(committed.at(-1)).toBe(1)
+
+		committed.length = 0
+
+		return unmount
+	}
+
+	function expectRailUntouched(): void {
+		expect(committed).toEqual([])
+		expect(railRead).toHaveBeenCalledTimes(1)
+	}
+
+	it("renders nothing once the cache is wiped", async () => {
+		const unmount = await renderRail()
+
+		await wipeCache()
+		await settle()
+
+		expectRailUntouched()
+		expect(listChats).toHaveBeenCalledTimes(1)
+		expect(listMessagesBefore).toHaveBeenCalledTimes(1)
+		expect(queryClient.getQueryCache().getAll()).toEqual([])
+
+		unmount()
+	})
+
+	it("renders nothing for a message read that lands after the wipe", async () => {
+		listChats.mockResolvedValue([mockChat("a", a1)])
+		const answer = holdMessageReads()
+
+		const { unmount } = render(createElement(RailProbe), { wrapper })
+		await settle()
+
+		committed.length = 0
+		await wipeCache()
+		answer("a", [a1])
+		await settle()
+
+		expectRailUntouched()
+		expect(listChats).toHaveBeenCalledTimes(1)
+		expect(listMessagesBefore).toHaveBeenCalledTimes(1)
+
+		unmount()
+	})
+
+	// Each patch below lands after the wipe and recreates the list it removed.
+	it("renders nothing for a message delivered just before the wipe", async () => {
+		const unmount = await renderRail()
+		const a2 = peerMessage("a2", "a", 200n)
+
+		handleChatEvent({ inner: { type: "messageNew", msg: a2 }, chatMessageId: 1n })
+		await wipeCache()
+		await settle()
+
+		expect(chatsQueryGet()).toEqual([])
+		expect(chatMessagesQueryGet(testUuid("a"))).toEqual([a2])
+		expectRailUntouched()
+
+		unmount()
+	})
+
+	// Sign-out neither waits out nor cancels the send's reconcile window, which holds back an own message's echo.
+	it("renders nothing for an own message's echo landing after the wipe", async () => {
+		const unmount = await renderRail()
+		const own = { ...peerMessage("own", "a", 200n), senderId: Number(USER_ID) }
+
+		// The handler tells an own message by the cached account.
+		queryClient.setQueryData(ACCOUNT_QUERY_KEY, { id: USER_ID })
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+		handleChatEvent({ inner: { type: "messageNew", msg: own }, chatMessageId: 1n })
+		await wipeCache()
+		// Past the window, and the flush it schedules.
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(3_100)
+		})
+		vi.useRealTimers()
+		await settle()
+
+		expect(chatMessagesQueryGet(testUuid("a"))).toEqual([own])
+		expectRailUntouched()
+
+		unmount()
+	})
+
+	it("renders nothing for a chat deleted just before the wipe", async () => {
+		const unmount = await renderRail()
+		const purged = deferred<undefined>()
+
+		// The removal waits on the chat's queued sends and draft being purged first.
+		purgeChatInflightState.mockReturnValueOnce(purged.promise)
+		handleChatEvent({ inner: { type: "conversationDeleted", uuid: testUuid("a") }, chatMessageId: 1n })
+		await wipeCache()
+		purged.resolve(undefined)
+		await settle()
+
+		expect(chatsQueryGet()).toEqual([])
+		expect(chatMessagesQueryGet(testUuid("a"))).toEqual([])
+		expectRailUntouched()
+
+		unmount()
+	})
+
+	// Events the worker sent before it dropped the socket are still dispatched, and can leave chats in the list.
+	it("renders nothing for a chat and its message arriving after the wipe", async () => {
+		const unmount = await renderRail()
+
+		await wipeCache()
+		handleChatEvent({ inner: { type: "conversationsNew", chat: mockChat("d") }, chatMessageId: 1n })
+		handleChatEvent({ inner: { type: "messageNew", msg: peerMessage("d1", "d", 400n) }, chatMessageId: 2n })
+		await settle()
+
+		expect(chatsQueryGet()).toHaveLength(1)
+		expect(chatMessagesQueryGet(testUuid("d"))).toHaveLength(1)
+		expectRailUntouched()
 
 		unmount()
 	})
