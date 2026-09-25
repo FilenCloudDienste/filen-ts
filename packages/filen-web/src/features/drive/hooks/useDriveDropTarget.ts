@@ -2,8 +2,9 @@ import { useEffect, useRef, useState, type DragEvent } from "react"
 import { currentRootUuid } from "@/features/drive/lib/actions"
 import { isInternalDrag, getDragPayload, performMove } from "@/features/drive/lib/dnd"
 import { dragDropMode, isValidCopyTarget, isValidMoveTarget, type DragDropMode } from "@/features/drive/lib/dnd.logic"
-import { searchHitParents } from "@/features/drive/lib/ownAncestry"
+import { targetOwnParents } from "@/features/drive/lib/ownAncestry"
 import type { ParentLookup } from "@/features/drive/components/moveTargetDialog.logic"
+import type { DriveItem } from "@/features/drive/lib/item"
 import { isMacPlatform } from "@/lib/keymap/kbd.logic"
 import { startCopyWithCard } from "@/features/transfers/lib/copyToast"
 
@@ -18,10 +19,13 @@ export interface DriveDropTargetParams {
 	targetUuid: string | null
 	// The target's root-to-target uuid chain, inclusive of the target itself; empty for the root.
 	targetAncestry: readonly string[]
-	// A search hit below the search root's children: its own parent, and the directory the search runs
-	// in. Its chain above skips what lies between the two, so a directory drop waits on a walk of the
-	// cached parents.
-	searchHit?: { parent: string; searchRoot: string | null } | undefined
+	// Set for a target whose ancestry comes from the route (a listing row or tile, a breadcrumb crumb). A
+	// route can start below the root (a directory opened from Favorites, Recents or a link) or skip what
+	// lies between a search's root and its hit, and the sidebar tree can drag any directory, so a
+	// directory drop also walks the target's real chain through the cached listings, from `parent` when
+	// the target's own parent is known, and is refused where that walk can't reach the root. The tree's
+	// own nodes leave this unset: their ancestry is read from the listings themselves.
+	routeChain?: { parent: string | undefined } | undefined
 	// The target directory's name, for the card of a copy dropped on it.
 	targetName: string
 	// Auto-expand callback for a collapsed tree node — fired once after a dwell while a valid internal
@@ -50,7 +54,7 @@ export interface DriveDropTarget {
 export function useDriveDropTarget({
 	targetUuid,
 	targetAncestry,
-	searchHit,
+	routeChain,
 	targetName,
 	onDwell,
 	disabled = false
@@ -76,15 +80,26 @@ export function useDriveDropTarget({
 		}
 	}
 
-	// Only read when the payload holds a directory: the walk reads every cached listing.
-	function searchHitParentReader(): (() => ParentLookup) | undefined {
-		if (searchHit === undefined || targetUuid === null) {
+	// The walk's parents, built once per drag (the payload array is the drag's identity): building them
+	// scans every cached listing, and dragover fires many times a second. Only read when the payload
+	// holds a directory.
+	const walkRef = useRef<{ payload: readonly DriveItem[]; parents: ParentLookup } | null>(null)
+
+	function routeChainReader(payload: readonly DriveItem[]): (() => ParentLookup) | undefined {
+		if (routeChain === undefined || targetUuid === null) {
 			return undefined
 		}
 
-		const hit = { uuid: targetUuid, ...searchHit }
+		const uuid = targetUuid
+		const parent = routeChain.parent
 
-		return () => searchHitParents({ ...hit, rootUuid: currentRootUuid() })
+		return () => {
+			if (walkRef.current?.payload !== payload) {
+				walkRef.current = { payload, parents: targetOwnParents({ uuid, parent, rootUuid: currentRootUuid() }) }
+			}
+
+			return walkRef.current.parents
+		}
 	}
 
 	// A valid drop here needs the internal marker AND a payload (read from the module ref, since the
@@ -96,7 +111,7 @@ export function useDriveDropTarget({
 		}
 
 		const payload = getDragPayload()
-		const readParents = searchHitParentReader()
+		const readParents = routeChainReader(payload)
 
 		return dragDropMode(event, MAC) === "copy"
 			? isValidCopyTarget({ targetUuid, targetAncestry, readParents, payload })

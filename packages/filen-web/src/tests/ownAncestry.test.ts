@@ -10,7 +10,7 @@ vi.mock("@/queries/client", async () => {
 import { queryClient } from "@/queries/client"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
-import { cachedOwnParents, searchHitParents } from "@/features/drive/lib/ownAncestry"
+import { cachedOwnParents, targetOwnParents } from "@/features/drive/lib/ownAncestry"
 
 function testUuid(label: string): UuidStr {
 	return `${label}-0000-0000-0000-000000000000` as UuidStr
@@ -102,24 +102,20 @@ describe("cachedOwnParents", () => {
 	})
 })
 
-describe("searchHitParents", () => {
-	it("starts from the hit's own parent and stops at the search root", () => {
-		seed("drive", testUuid("search"), [dirItem("mid", "search")])
+describe("targetOwnParents", () => {
+	it("starts from the target's own parent, then walks the cached listings up to the account root", () => {
+		seed("drive", null, [dirItem("top", "root")])
+		seed("drive", testUuid("top"), [dirItem("mid", "top")])
 
-		const parentOf = searchHitParents({
-			uuid: testUuid("hit"),
-			parent: testUuid("mid"),
-			searchRoot: testUuid("search"),
-			rootUuid: ROOT
-		})
+		const parentOf = targetOwnParents({ uuid: testUuid("hit"), parent: testUuid("mid"), rootUuid: ROOT })
 
 		expect(parentOf(testUuid("hit"))).toBe(testUuid("mid"))
-		expect(parentOf(testUuid("mid"))).toBeNull()
+		expect(parentOf(testUuid("mid"))).toBe(testUuid("top"))
+		expect(parentOf(testUuid("top"))).toBeNull()
 	})
 
-	it("stops at the drive root for a search run there", () => {
-		const parentOf = searchHitParents({ uuid: testUuid("hit"), parent: ROOT, searchRoot: null, rootUuid: ROOT })
-
-		expect(parentOf(testUuid("hit"))).toBeNull()
+	it("ends at the root for a target whose own parent is the account root, and knows nothing past the cache", () => {
+		expect(targetOwnParents({ uuid: testUuid("hit"), parent: ROOT, rootUuid: ROOT })(testUuid("hit"))).toBeNull()
+		expect(targetOwnParents({ uuid: testUuid("hit"), parent: undefined, rootUuid: ROOT })(testUuid("hit"))).toBeUndefined()
 	})
 })

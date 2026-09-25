@@ -3,7 +3,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, renderHook } from "@testing-library/react"
 import type { DragEvent } from "react"
-import type { File, UuidStr } from "@filen/sdk-rs"
+import type { Dir, File, UuidStr } from "@filen/sdk-rs"
 
 const { performMove, startCopyWithCard } = vi.hoisted(() => ({ performMove: vi.fn(), startCopyWithCard: vi.fn() }))
 
@@ -13,8 +13,16 @@ vi.mock("@/features/drive/lib/dnd", async importOriginal => ({
 }))
 vi.mock("@/features/transfers/lib/copyToast", () => ({ startCopyWithCard }))
 vi.mock("@/features/drive/lib/actions", () => ({ currentRootUuid: () => "root-0000-0000-0000-000000000000" }))
+vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
+vi.mock("@/queries/client", async () => {
+	const { QueryClient } = await import("@tanstack/react-query")
 
-import { narrowItem } from "@/features/drive/lib/item"
+	return { queryClient: new QueryClient() }
+})
+
+import { queryClient } from "@/queries/client"
+import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
+import { driveListingQueryKey } from "@/features/drive/queries/drive"
 import { INTERNAL_DRAG_TYPE, clearDragPayload, setDragPayload } from "@/features/drive/lib/dnd"
 import { dropHighlightClass, useDriveDropTarget } from "@/features/drive/hooks/useDriveDropTarget"
 
@@ -123,5 +131,87 @@ describe("useDriveDropTarget", () => {
 		})
 
 		expect(result.current.isOver).toBe(false)
+	})
+})
+
+// A route can start below the root: a directory opened from Favorites lists at /drive/<it>, so the
+// route names none of its ancestors. The sidebar tree can drag any of them onto a row there.
+describe("a row on a route cut short", () => {
+	function dir(label: string, parent: string): DriveItem {
+		return narrowItem({
+			uuid: `${label}-0000-0000-0000-000000000000` as UuidStr,
+			parent: `${parent}-0000-0000-0000-000000000000` as UuidStr,
+			color: "default",
+			timestamp: 0n,
+			favorited: false,
+			meta: { type: "decoded", data: { name: label } }
+		} satisfies Dir)
+	}
+
+	// root > grand > fav > child; the route is /drive/fav.
+	const GRAND = dir("grand", "root")
+	const FAV = dir("fav", "grand")
+	const CHILD = dir("child", "fav")
+	const ELSEWHERE = dir("elsewhere", "root")
+
+	function seed(parent: DriveItem | null, items: DriveItem[]): void {
+		queryClient.setQueryData(driveListingQueryKey({ variant: "drive", uuid: parent?.data.uuid ?? null }), items)
+	}
+
+	function renderChildRow() {
+		return renderHook(() =>
+			useDriveDropTarget({
+				targetUuid: CHILD.data.uuid,
+				targetAncestry: [FAV.data.uuid, CHILD.data.uuid],
+				routeChain: { parent: CHILD.data.parent },
+				targetName: "child"
+			})
+		)
+	}
+
+	function accepts(copy: boolean): boolean {
+		const { result } = renderChildRow()
+		const over = dragEvent(copy)
+
+		act(() => {
+			result.current.onDragOver(over.event)
+		})
+
+		return over.preventDefault.mock.calls.length > 0
+	}
+
+	beforeEach(() => {
+		queryClient.clear()
+	})
+
+	it("refuses moving or copying an ancestor the route doesn't name into its own subtree", () => {
+		seed(null, [GRAND, ELSEWHERE])
+		seed(GRAND, [FAV])
+		seed(FAV, [CHILD])
+		setDragPayload([GRAND])
+
+		expect(accepts(false)).toBe(false)
+		expect(accepts(true)).toBe(false)
+	})
+
+	it("refuses a directory where the chain above the route can't be resolved", () => {
+		seed(FAV, [CHILD])
+		setDragPayload([ELSEWHERE])
+
+		expect(accepts(false)).toBe(false)
+	})
+
+	it("takes an unrelated directory once the chain resolves, and a file without walking it", () => {
+		seed(null, [GRAND, ELSEWHERE])
+		seed(GRAND, [FAV])
+		seed(FAV, [CHILD])
+		setDragPayload([ELSEWHERE])
+
+		expect(accepts(false)).toBe(true)
+
+		queryClient.clear()
+		setDragPayload([REPORT])
+
+		expect(accepts(false)).toBe(true)
 	})
 })

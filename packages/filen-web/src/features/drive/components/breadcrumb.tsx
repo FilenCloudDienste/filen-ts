@@ -50,6 +50,7 @@ function CrumbLink({ variant, routeId, splatValue, targetUuid, targetAncestry, l
 	const drop = useDriveDropTarget({
 		targetUuid,
 		targetAncestry,
+		routeChain: { parent: undefined },
 		targetName: label,
 		disabled: !canDragVariant(variant)
 	})

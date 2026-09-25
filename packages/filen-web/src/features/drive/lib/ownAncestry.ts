@@ -65,24 +65,14 @@ export function cachedOwnParents(): ParentLookup {
 	}
 }
 
-// A search hit's parents up to the directory the search runs in: the hit's own, then the cached
-// listings. Whatever is dragged out of the results lies below that directory, so the walk stops there.
-export function searchHitParents({
-	uuid,
-	parent,
-	searchRoot,
-	rootUuid
-}: {
-	uuid: string
-	parent: string
-	searchRoot: string | null
-	rootUuid: string
-}): ParentLookup {
+// A drop target's parents, for walking its real chain up to the account root: its own parent where the
+// caller knows it (a listing row's), then the cached listings. undefined past what they hold.
+export function targetOwnParents({ uuid, parent, rootUuid }: { uuid: string; parent: string | undefined; rootUuid: string }): ParentLookup {
 	const cached = cachedOwnParents()
 
 	return current => {
-		const next = current === uuid ? parent : cached(current)
+		const next = current === uuid && parent !== undefined ? parent : cached(current)
 
-		return next === searchRoot || next === rootUuid ? null : next
+		return next === rootUuid ? null : next
 	}
 }

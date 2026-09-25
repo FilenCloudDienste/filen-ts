@@ -78,7 +78,7 @@ export function DriveTile({
 	const drop = useDriveDropTarget({
 		targetUuid: item.data.uuid,
 		targetAncestry: [...pathUuids, item.data.uuid],
-		searchHit: searchHit ? { parent: item.data.parent, searchRoot: pathUuids.at(-1) ?? null } : undefined,
+		routeChain: { parent: item.data.parent },
 		targetName: name,
 		disabled: item.type !== "directory" || !canDragVariant(variant)
 	})
