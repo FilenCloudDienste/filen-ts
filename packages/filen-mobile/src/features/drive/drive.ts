@@ -24,6 +24,7 @@ import { deletePermanently, trash, restore, emptyTrash, restoreFileVersion, dele
 import { createDirectory, move } from "@/features/drive/driveDirectory"
 import { favorite, rename, setDirColor, updateTimestamps } from "@/features/drive/driveMetadata"
 import { shareWithFilenUser, removeShare } from "@/features/drive/driveShare"
+import { driveItemsQueryRefetchFailedLinkedListing } from "@/features/drive/queries/useDriveItems.query"
 import logger from "@/lib/logger"
 import cache from "@/lib/cache"
 
@@ -148,7 +149,10 @@ const drive = {
 		// Its subdirectories too, as the screen's own read caches them: one tapped in a restored listing before that
 		// read lands has no other link context to be listed with.
 		for (const dir of result.data.dirs) {
-			cache.cacheNewLinkedDir(dir, unwrappedDirIntoDriveItem(unwrapDirMeta(dir.inner)), result.data.linkedRoot.meta)
+			const driveItem = unwrappedDirIntoDriveItem(unwrapDirMeta(dir.inner))
+
+			cache.cacheNewLinkedDir(dir, driveItem, result.data.linkedRoot.meta)
+			driveItemsQueryRefetchFailedLinkedListing(driveItem.data.uuid)
 		}
 
 		router.push({

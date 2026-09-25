@@ -53,7 +53,11 @@ import socketCreateBatcher from "@/features/drive/socketCreateBatcher"
 import { markDirectorySizesStale } from "@/features/drive/queries/useDirectorySize.query"
 import { trash } from "@/features/drive/driveTrash"
 import { accountQuotaDeps, addAccountStorageUsed } from "@/queries/useAccount.query"
-import { driveItemsQueryRefetchAfterSocketGap } from "@/features/drive/queries/useDriveItems.query"
+import {
+	type CopyWrites,
+	driveItemsQueryRefetchAfterSocketGap,
+	driveItemsQuerySocketGapReadsCopyWrites
+} from "@/features/drive/queries/useDriveItems.query"
 import useSocketStore from "@/stores/useSocket.store"
 import type { DriveItem } from "@/types"
 
@@ -197,9 +201,27 @@ const choosingCancel = new Set<string>()
 // kept while one runs, or a failure it reports would find no job to keep it.
 const trashing = new Map<string, number>()
 
-// Destinations whose listings may have missed create echoes. Refetched once no copy creates items: a
-// refetch while one does drops the echoes landing mid-fetch.
+// Destinations whose listings may have missed create echoes. Each is refetched once no copy creating items writes where
+// its refetch reads: a refetch while one does drops the echoes landing mid-fetch.
 const socketGapDestinations = new Set<string | null>()
+
+// Where each running copy the SDK doesn't report paused writes, by job.
+const creatingCopies = new Map<string, CopyWrites>()
+
+// The directories a copy creates its top-level items in: its destination, or each retried item's own.
+function copyTargets(source: CopySource, destination: CopyDestination): Set<string | null> {
+	if (source.kind === "items") {
+		return new Set([destination.uuid])
+	}
+
+	const targets = new Set<string | null>()
+
+	for (const entry of source.entries) {
+		targets.add(entry.destination.inner[0].uuid)
+	}
+
+	return targets
+}
 
 // Runs copies as one SDK job and one transfers row each, however many items a job holds. The SDK owns
 // the scan, concurrency, retries and share/link propagation; this feeds its progress into the stores
@@ -376,6 +398,10 @@ class CopyRunner {
 		const compositeAbort = createCompositeAbortSignal(transfers.copyScopeSignal(), abort.signal)
 		const pause = new PauseSignal()
 		let sdkAbort: ReturnType<typeof wrapAbortSignalForSdk> | null = null
+		const writes = {
+			targets: copyTargets(source, destination),
+			createdDirs: new Set<string>()
+		}
 
 		this.controls.set(id, {
 			abort,
@@ -383,6 +409,7 @@ class CopyRunner {
 		})
 
 		copyActivity.begin()
+		creatingCopies.set(id, writes)
 
 		const socketAtStart = useSocketStore.getState()
 		const startedAt = Date.now()
@@ -417,9 +444,15 @@ class CopyRunner {
 
 			copyActivity.setPaused(paused)
 
-			if (paused) {
-				this.refetchSocketGaps(live)
+			if (!paused) {
+				creatingCopies.set(id, writes)
+
+				return
 			}
+
+			creatingCopies.delete(id)
+
+			this.refetchSocketGaps(live)
 		}
 
 		const pauseListeners = [
@@ -522,6 +555,11 @@ class CopyRunner {
 					}
 
 					createdAsReported.push(item)
+
+					// The copy writes below it as it runs.
+					if (item.type === "directory") {
+						writes.createdDirs.add(item.data.uuid)
+					}
 
 					if (parentUuid) {
 						socketCreateBatcher.enqueue({
@@ -697,23 +735,24 @@ class CopyRunner {
 			pauseRequested = false
 			countPaused(false)
 			copyActivity.end()
+			creatingCopies.delete(id)
 
 			this.refetchSocketGaps(live)
 		}
 	}
 
 	private refetchSocketGaps(live: () => boolean): void {
-		if (socketGapDestinations.size === 0 || copyActivity.isCreating()) {
-			return
-		}
+		for (const destinationUuid of socketGapDestinations) {
+			if (driveItemsQuerySocketGapReadsCopyWrites(destinationUuid, creatingCopies.values())) {
+				continue
+			}
 
-		if (live()) {
-			for (const destinationUuid of socketGapDestinations) {
+			socketGapDestinations.delete(destinationUuid)
+
+			if (live()) {
 				driveItemsQueryRefetchAfterSocketGap(destinationUuid)
 			}
 		}
-
-		socketGapDestinations.clear()
 	}
 
 	// Only top-level items; their subtrees go with them. Moved to the trash, never deleted.

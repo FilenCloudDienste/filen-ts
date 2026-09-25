@@ -8,7 +8,8 @@ const h = vi.hoisted(() => ({
 	sdk: {
 		getDirPublicLinkInfo: vi.fn(),
 		listLinkedDir: vi.fn()
-	}
+	},
+	refetchFailedLinkedListing: vi.fn()
 }))
 
 vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
@@ -100,6 +101,7 @@ vi.mock("@/features/drive/driveMetadata", () => ({ favorite: vi.fn(), rename: vi
 vi.mock("@/features/drive/driveShare", () => ({ shareWithFilenUser: vi.fn(), removeShare: vi.fn() }))
 vi.mock("@/features/drive/driveSelectSession", () => ({ selectCopyDestination: vi.fn() }))
 vi.mock("@/features/copy/copyRunner", () => ({ default: { startCopyItems: vi.fn() } }))
+vi.mock("@/features/drive/queries/useDriveItems.query", () => ({ driveItemsQueryRefetchFailedLinkedListing: h.refetchFailedLinkedListing }))
 
 import { openLinkedFilePreview } from "@/features/drive/linkedFilePreview"
 import { openAttachmentPreview, type InternalLinkData } from "@/features/chats/utils"
@@ -214,9 +216,13 @@ describe("directory links", () => {
 		h.sdk.listLinkedDir.mockResolvedValue({ dirs: [sub], files: [] })
 
 		let subAtPush: unknown = undefined
+		let cachedWhenRelisted = false
 
 		h.push.mockImplementation(() => {
 			subAtPush = cache.directoryUuidToAnyLinkedDirWithMeta.get("sub-1")
+		})
+		h.refetchFailedLinkedListing.mockImplementationOnce((uuid: string) => {
+			cachedWhenRelisted = cache.directoryUuidToAnyLinkedDirWithMeta.has(uuid)
 		})
 
 		await drive.openLinkedDirectory({
@@ -225,6 +231,9 @@ describe("directory links", () => {
 			root: { inner: { uuid: "root-9", meta: { tag: "Decoded", inner: [{ name: "Holiday" }] } } } as unknown as LinkedRootDir
 		})
 
+		// Once its context is cached, a listing of it that failed without one reads again.
+		expect(h.refetchFailedLinkedListing).toHaveBeenCalledExactlyOnceWith("sub-1")
+		expect(cachedWhenRelisted).toBe(true)
 		expect(subAtPush).toEqual({
 			dir: { tag: "AnyLinkedDir.Dir", inner: [sub] },
 			meta: cache.linkedRootByLinkUuid.get("link-9")?.meta

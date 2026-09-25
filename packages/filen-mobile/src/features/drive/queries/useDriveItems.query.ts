@@ -22,6 +22,7 @@ import {
 } from "@filen/sdk-rs"
 import { type DrivePath, type DrivePathType, type SharedNavContext, DRIVE_PATH_TYPES } from "@/hooks/useDrivePath"
 import { linkPasswordState, linkedRootOf } from "@/features/drive/utils"
+import { ancestryHits } from "@/features/drive/clipboard"
 import { unwrapFileMeta, unwrapDirMeta, unwrappedDirIntoDriveItem, unwrappedFileIntoDriveItem, unwrapParentUuid } from "@/lib/sdkUnwrap"
 import { unwrapSdkError } from "@/lib/sdkErrors"
 import type { DriveItem } from "@/types"
@@ -29,6 +30,7 @@ import offline from "@/features/offline/offline"
 import cameraUpload from "@/features/cameraUpload/cameraUpload"
 import { listCameraUploadRemote, remoteWalkDropsEntries } from "@/features/cameraUpload/remoteListing"
 import logger from "@/lib/logger"
+import events from "@/lib/events"
 import copyActivity from "@/features/drive/copyActivity"
 
 export const BASE_QUERY_KEY = "useDriveItemsQuery"
@@ -47,6 +49,14 @@ export class DriveDirectoryNotFoundError extends Error {
 		this.name = "DriveDirectoryNotFoundError"
 	}
 }
+
+// Query keys of linked subdirectory listings that failed for want of their link context, by directory uuid. Only the
+// parent's read caches that context, and nothing else lists them again.
+const failedLinkedListings = new Map<string, unknown[]>()
+
+events.subscribe("logout", () => {
+	failedLinkedListings.clear()
+})
 
 export type UseDriveItemsQueryParams = {
 	path: Omit<DrivePath, "selectOptions">
@@ -463,6 +473,8 @@ export async function fetchData(
 						return cachedDir
 					}
 
+					failedLinkedListings.set(linkedUuid, driveItemsQueryKey({ path: params.path }))
+
 					throw new DriveDirectoryNotFoundError(linkedUuid)
 				})()
 
@@ -621,6 +633,7 @@ export async function fetchData(
 				items.push(driveItem)
 
 				cache.cacheNewLinkedDir(resultDir, driveItem, result.meta)
+				driveItemsQueryRefetchFailedLinkedListing(driveItem.data.uuid)
 			}
 
 			for (const resultFile of result.files) {
@@ -690,6 +703,28 @@ export function driveItemsQueryKey(params: UseDriveItemsQueryParams): unknown[] 
 // Whether a listing has been read (holds data). Only read listings are patched.
 export function driveItemsQueryIsRead(params: UseDriveItemsQueryParams): boolean {
 	return queryClient.getQueryState(driveItemsQueryKey(params))?.data !== undefined
+}
+
+// A linked directory's link context was just cached: its listing, if it failed for want of one, reads again while
+// mounted. Its header offers Save to Cloud Drive only once that listing's fetch status changes.
+export function driveItemsQueryRefetchFailedLinkedListing(uuid: string): void {
+	const queryKey = failedLinkedListings.get(uuid)
+
+	if (queryKey === undefined) {
+		return
+	}
+
+	failedLinkedListings.delete(uuid)
+
+	queryClient
+		.invalidateQueries({
+			queryKey,
+			exact: true,
+			refetchType: "active"
+		})
+		.catch(err => {
+			logger.error("drive", "linked listing refetch after its link context was cached failed", { error: err })
+		})
 }
 
 function updateListing(
@@ -846,6 +881,51 @@ export function driveItemsQueryUpdateGlobal({
 	}
 
 	driveItemsQueryUpdateForPhotos({ updater })
+}
+
+// Walks the cached directory tree up from `uuid`: whether it reaches `ancestorUuid`, `uuid` itself included. The walk
+// ends at an uncached directory. `memo` keeps each walked directory's answer for later walks toward the same ancestor.
+function cachedAncestryReaches(uuid: string, ancestorUuid: string, memo?: Map<string, boolean>): boolean {
+	const walked: string[] = []
+	let current: string | null = uuid
+	let result = false
+	let guard = 0
+
+	while (current && guard++ < 64) {
+		const known = memo?.get(current)
+
+		if (known !== undefined) {
+			result = known
+
+			break
+		}
+
+		if (current === ancestorUuid) {
+			result = true
+
+			break
+		}
+
+		walked.push(current)
+
+		const anyDir = cache.directoryUuidToAnyNormalDir.get(current)
+
+		if (!anyDir || anyDir.tag !== AnyNormalDir_Tags.Dir) {
+			break
+		}
+
+		const next = unwrapParentUuid(anyDir.inner[0].parent)
+
+		current = next && next !== current ? next : null
+	}
+
+	if (memo) {
+		for (const walkedUuid of walked) {
+			memo.set(walkedUuid, result)
+		}
+	}
+
+	return result
 }
 
 type CameraRootRelation = "inside" | "outside" | "unknown"
@@ -1005,47 +1085,7 @@ export function driveItemsQueryRemoveDirectoryFromPhotos({
 
 			// Per parent directory: does its cached ancestry pass through dirUuid.
 			const underDir = new Map<string, boolean>()
-
-			const isUnderDir = (parentUuid: string): boolean => {
-				const walked: string[] = []
-				let current: string | null = parentUuid
-				let result = false
-				let guard = 0
-
-				while (current && guard++ < 64) {
-					const known = underDir.get(current)
-
-					if (known !== undefined) {
-						result = known
-
-						break
-					}
-
-					if (current === dirUuid) {
-						result = true
-
-						break
-					}
-
-					walked.push(current)
-
-					const anyDir = cache.directoryUuidToAnyNormalDir.get(current)
-
-					if (!anyDir || anyDir.tag !== AnyNormalDir_Tags.Dir) {
-						break
-					}
-
-					const next = unwrapParentUuid(anyDir.inner[0].parent)
-
-					current = next && next !== current ? next : null
-				}
-
-				for (const uuid of walked) {
-					underDir.set(uuid, result)
-				}
-
-				return result
-			}
+			const isUnderDir = (parentUuid: string): boolean => cachedAncestryReaches(parentUuid, dirUuid, underDir)
 
 			// With where it came from unknown, a moved directory holding the camera-upload root took the root
 			// along, photos and all.
@@ -1186,47 +1226,6 @@ export function driveItemsQueryRefetchAfterSocketGap(destinationUuid: string | n
 	// Per directory: whether its cached ancestry reaches the destination.
 	const reaches = new Map<string, boolean>()
 
-	const reachesDestination = (uuid: string): boolean => {
-		const walked: string[] = []
-		let current: string | null = uuid
-		let result = false
-		let guard = 0
-
-		while (current && guard++ < 64) {
-			const known = reaches.get(current)
-
-			if (known !== undefined) {
-				result = known
-
-				break
-			}
-
-			if (current === parentUuid) {
-				result = true
-
-				break
-			}
-
-			walked.push(current)
-
-			const anyDir = cache.directoryUuidToAnyNormalDir.get(current)
-
-			if (!anyDir || anyDir.tag !== AnyNormalDir_Tags.Dir) {
-				break
-			}
-
-			const next = unwrapParentUuid(anyDir.inner[0].parent)
-
-			current = next && next !== current ? next : null
-		}
-
-		for (const walkedUuid of walked) {
-			reaches.set(walkedUuid, result)
-		}
-
-		return result
-	}
-
 	queryClient
 		.invalidateQueries({
 			queryKey: [BASE_QUERY_KEY],
@@ -1238,7 +1237,10 @@ export function driveItemsQueryRefetchAfterSocketGap(destinationUuid: string | n
 					return false
 				}
 
-				return wholeDrive || (path.uuid !== null && reachesDestination(path.uuid))
+				return (
+					wholeDrive ||
+					(path.uuid !== null && destinationUuid !== null && cachedAncestryReaches(path.uuid, destinationUuid, reaches))
+				)
 			}
 		})
 		.catch(err => {
@@ -1263,6 +1265,72 @@ export function driveItemsQueryRefetchAfterSocketGap(destinationUuid: string | n
 		.catch(err => {
 			logger.error("drive", "driveItemsQueryRefetchAfterSocketGap: failed to get camera upload config", { error: err })
 		})
+}
+
+// Where a running copy writes: the directories it creates items in (the root as null or by uuid) and the directories it
+// created at the top level, whose subtrees fill in as it runs. Nowhere else: it creates every directory it copies anew.
+export type CopyWrites = {
+	targets: ReadonlySet<string | null>
+	createdDirs: ReadonlySet<string>
+}
+
+// The roots of the read Photos grids whose camera-upload tree holds `uuid`.
+function readPhotosRootsHolding(uuid: string): string[] {
+	const roots: string[] = []
+
+	for (const query of queryClient.getQueryCache().getAll()) {
+		if (query.queryKey[0] !== BASE_QUERY_KEY || query.state.data === undefined) {
+			continue
+		}
+
+		const path = (query.queryKey[1] as UseDriveItemsQueryParams | undefined)?.path
+
+		if (path?.type === "photos" && path.uuid !== null && isUnderCameraUploadRoot(uuid, path.uuid)) {
+			roots.push(path.uuid)
+		}
+	}
+
+	return roots
+}
+
+// Whether the socket-gap refetch below `destinationUuid` (null for the root) reads a listing one of these copies still
+// writes into. The root's reads them all. Below another destination, a copy writes into a directory it creates items in
+// there, anywhere there when the destination lies in a directory it created, and into the Photos grid of a camera-upload
+// tree holding the destination and its target. An uncached ancestry overlaps nothing: the refetch can't reach below it
+// either.
+export function driveItemsQuerySocketGapReadsCopyWrites(destinationUuid: string | null, copies: Iterable<CopyWrites>): boolean {
+	// Per directory: whether its cached ancestry reaches the destination.
+	const reaches = new Map<string, boolean>()
+	// Read on first need; most destinations lie outside every camera-upload tree.
+	let photosRoots: string[] | undefined
+
+	for (const copy of copies) {
+		if (destinationUuid === null || destinationUuid === cache.rootUuid) {
+			return true
+		}
+
+		for (const target of copy.targets) {
+			if (target !== null && cachedAncestryReaches(target, destinationUuid, reaches)) {
+				return true
+			}
+		}
+
+		if (copy.createdDirs.size > 0 && ancestryHits(destinationUuid, copy.createdDirs, cache.rootUuid) === true) {
+			return true
+		}
+
+		photosRoots ??= readPhotosRootsHolding(destinationUuid)
+
+		for (const photosRoot of photosRoots) {
+			for (const target of copy.targets) {
+				if (target !== null && isUnderCameraUploadRoot(target, photosRoot)) {
+					return true
+				}
+			}
+		}
+	}
+
+	return false
 }
 
 // A drive change the socket patches couldn't carry (a malformed event): no listing read before it can be

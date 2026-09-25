@@ -39,7 +39,7 @@ class CopyActivity {
 		return this.active > 0
 	}
 
-	public isCreating(): boolean {
+	private isCreating(): boolean {
 		return this.active > this.paused
 	}
 

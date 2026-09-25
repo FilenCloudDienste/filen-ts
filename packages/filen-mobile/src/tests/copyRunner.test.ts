@@ -62,7 +62,10 @@ const h = vi.hoisted(() => {
 			isCachedFresh: vi.fn()
 		},
 		addAccountStorageUsed: vi.fn(),
-		refetchAfterSocketGap: vi.fn()
+		refetchAfterSocketGap: vi.fn(),
+		socketGapReadsCopyWrites: vi.fn(),
+		// What each socket-gap check saw of the copies still creating items.
+		socketGapChecks: [] as { destination: string | null; copies: { targets: (string | null)[]; createdDirs: string[] }[] }[]
 	}
 })
 
@@ -128,7 +131,10 @@ vi.mock("@/features/drive/socketCreateBatcher", () => ({ default: { enqueue: h.e
 vi.mock("@/features/drive/queries/useDirectorySize.query", () => ({ markDirectorySizesStale: h.markDirectorySizesStale }))
 vi.mock("@/features/drive/driveTrash", () => ({ trash: h.trash }))
 vi.mock("@/queries/useAccount.query", () => ({ accountQuotaDeps: h.account, addAccountStorageUsed: h.addAccountStorageUsed }))
-vi.mock("@/features/drive/queries/useDriveItems.query", () => ({ driveItemsQueryRefetchAfterSocketGap: h.refetchAfterSocketGap }))
+vi.mock("@/features/drive/queries/useDriveItems.query", () => ({
+	driveItemsQueryRefetchAfterSocketGap: h.refetchAfterSocketGap,
+	driveItemsQuerySocketGapReadsCopyWrites: h.socketGapReadsCopyWrites
+}))
 
 import copyRunner, { COPY_FLUSH_MS } from "@/features/copy/copyRunner"
 import useCopyJobsStore, { getCopyJob } from "@/features/copy/store/useCopyJobs.store"
@@ -139,6 +145,7 @@ import logger from "@/lib/logger"
 import { CopyPhase, CopyStage, ErrorKind, NonRootNormalItem_Tags } from "@/tests/mocks/sdkCopy"
 import { formatBytes } from "@filen/shared"
 import type { CopyItemsCallback, CopyReport, CopyUpdate } from "@filen/sdk-rs"
+import type { CopyWrites } from "@/features/drive/queries/useDriveItems.query"
 import type { DriveItem } from "@/types"
 
 const DEST = { uuid: "dest", name: "Dest" }
@@ -182,6 +189,27 @@ function update(bytesDone: bigint, overrides: Partial<CopyUpdate> = {}): CopyUpd
 
 function createdFile(uuid: string, parent = "dest") {
 	return { request: 0n, sourceUuid: `src-${uuid}`, item: { tag: NonRootNormalItem_Tags.File, inner: [{ uuid, parent }] } }
+}
+
+function createdDir(uuid: string, parent = "dest") {
+	return { request: 0n, sourceUuid: `src-${uuid}`, item: { tag: NonRootNormalItem_Tags.Dir, inner: [{ uuid, parent }] } }
+}
+
+// The real check reads the cached tree; `reads` stands in for it. Each check records what it saw.
+function checkSocketGapsWith(reads: (destination: string | null, copy: CopyWrites) => boolean): void {
+	h.socketGapReadsCopyWrites.mockReset().mockImplementation((destination: string | null, copies: Iterable<CopyWrites>) => {
+		const running = [...copies]
+
+		h.socketGapChecks.push({
+			destination,
+			copies: running.map(copy => ({
+				targets: [...copy.targets],
+				createdDirs: [...copy.createdDirs]
+			}))
+		})
+
+		return running.some(copy => reads(destination, copy))
+	})
 }
 
 function report(overrides: Partial<Record<keyof CopyReport, unknown>> = {}): CopyReport {
@@ -261,6 +289,9 @@ beforeEach(() => {
 	h.account.isCachedFresh.mockReset().mockReturnValue(true)
 	h.addAccountStorageUsed.mockClear()
 	h.refetchAfterSocketGap.mockClear()
+	h.socketGapChecks.length = 0
+	// Here a refetch reads only the directories a copy creates items in.
+	checkSocketGapsWith((destination, copy) => copy.targets.has(destination))
 	useSocketStore.setState({ state: "connected", connectedAt: 1 })
 	h.disposals.pause = 0
 	h.disposals.sdkAbort = 0
@@ -991,7 +1022,11 @@ describe("move to trash racing a prune", () => {
 
 // A copy that waits mid-run until it is cancelled or let go, as the SDK does while paused; `progress`
 // sends the state reports the SDK sends meanwhile.
-function heldCopy(): { started: Promise<void>; finish: () => void; progress: (state: Partial<CopyUpdate>) => void } {
+function heldCopy(created: ReturnType<typeof createdFile>[] = [createdFile("made")]): {
+	started: Promise<void>
+	finish: () => void
+	progress: (state: Partial<CopyUpdate>) => void
+} {
 	let markStarted = () => {}
 	let finish = () => {}
 	let onUpdate: (next: CopyUpdate) => void = () => {}
@@ -1003,7 +1038,11 @@ function heldCopy(): { started: Promise<void>; finish: () => void; progress: (st
 		const abort = managedFuture.abortSignal.sdkAbortFor
 
 		onUpdate = next => callback.onUpdate(next)
-		callback.onTopLevelCreated(createdFile("made") as never)
+
+		for (const topLevel of created) {
+			callback.onTopLevelCreated(topLevel as never)
+		}
+
 		markStarted()
 
 		await new Promise<void>(resolve => {
@@ -1012,8 +1051,8 @@ function heldCopy(): { started: Promise<void>; finish: () => void; progress: (st
 		})
 
 		return abort.aborted
-			? report({ error: { kind: ErrorKind.Cancelled, message: "", serverMessage: undefined }, topLevel: [createdFile("made")] })
-			: report({ topLevel: [createdFile("made")] })
+			? report({ error: { kind: ErrorKind.Cancelled, message: "", serverMessage: undefined }, topLevel: created })
+			: report({ topLevel: created })
 	})
 
 	return {
@@ -1368,6 +1407,128 @@ describe("a socket gap during the copy", () => {
 
 		expect(whileHeldRuns).toBe(0)
 		expect(h.refetchAfterSocketGap).toHaveBeenCalledExactlyOnceWith("dest")
+	})
+
+	function launchJobInto(uuid: string, items: DriveItem[]): string {
+		return copyRunner.start({
+			items,
+			destination: { uuid, name: uuid },
+			destinationDir: { tag: "Dir", inner: [{ uuid }] } as never
+		}) as string
+	}
+
+	// A held copy into "backup", then a copy into "work" that outran the socket; the held one then finishes.
+	async function refetchesAroundHeldCopy(): Promise<{ beforeHeldEnds: unknown[][]; all: unknown[][] }> {
+		const held = heldCopy()
+
+		launchJobInto("backup", [file("held")])
+		await held.started
+
+		scriptCopyAcrossReconnect()
+		launchJobInto("work", [file("gap")])
+		await h.tracked[1]
+
+		const beforeHeldEnds = [...h.refetchAfterSocketGap.mock.calls]
+
+		held.finish()
+		await Promise.all(h.tracked)
+
+		return {
+			beforeHeldEnds,
+			all: [...h.refetchAfterSocketGap.mock.calls]
+		}
+	}
+
+	it("a copy still creating items elsewhere holds no other copy's refetch", async () => {
+		const { beforeHeldEnds, all } = await refetchesAroundHeldCopy()
+
+		expect(beforeHeldEnds).toEqual([["work"]])
+		expect(h.socketGapChecks[0]).toEqual({ destination: "work", copies: [{ targets: ["backup"], createdDirs: [] }] })
+		// The held copy outran the same reconnect.
+		expect(all).toEqual([["work"], ["backup"]])
+	})
+
+	it("a copy still creating items where the refetch reads holds it until it ends", async () => {
+		// The held copy creates items where the refetch of "work" reads.
+		checkSocketGapsWith((destination, copy) => copy.targets.has(destination) || (destination === "work" && copy.targets.has("backup")))
+
+		const { beforeHeldEnds, all } = await refetchesAroundHeldCopy()
+
+		expect(beforeHeldEnds).toEqual([])
+		expect(all).toEqual([["work"], ["backup"]])
+	})
+
+	it("each check sees where the copies still creating items write: the directories they made at the top level, not their files", async () => {
+		const held = heldCopy([createdDir("made-dir", "root"), createdFile("made-file", "root")])
+
+		copyRunner.start({
+			items: [file("held")],
+			destination: { uuid: null, name: "Cloud Drive" },
+			destinationDir: { tag: "Root", inner: [{ uuid: "root" }] } as never
+		})
+		await held.started
+
+		scriptCopyAcrossReconnect()
+		launchJobInto("work", [file("gap")])
+		await h.tracked[1]
+
+		const beforeHeldEnds = [...h.refetchAfterSocketGap.mock.calls]
+
+		held.finish()
+		await Promise.all(h.tracked)
+
+		expect(h.socketGapChecks[0]).toEqual({ destination: "work", copies: [{ targets: [null], createdDirs: ["made-dir"] }] })
+		expect(beforeHeldEnds).toEqual([["work"]])
+	})
+
+	it("a retried copy writes into each retried item's own directory", async () => {
+		const failed = (destParentDir: { tag: string; inner: [{ uuid: string }] }) => ({
+			item: { tag: "File", inner: [{}] },
+			info: {
+				sourceUuid: "s",
+				sourcePath: "/x",
+				destParent: destParentDir.inner[0].uuid,
+				destParentDir,
+				destName: "x",
+				stage: CopyStage.Upload,
+				error: { kind: ErrorKind.Server, message: "", serverMessage: undefined },
+				affectedFiles: 1n,
+				affectedBytes: 1n,
+				existingFile: undefined
+			}
+		})
+
+		scriptCopy(async () =>
+			report({
+				failures: [
+					failed({ tag: "Dir", inner: [{ uuid: "sub" }] }),
+					failed({ tag: "Root", inner: [{ uuid: "root" }] }),
+					failed({ tag: "Dir", inner: [{ uuid: "sub" }] })
+				]
+			})
+		)
+
+		const id = await runJob()
+		let releaseRetry = () => {}
+
+		h.sdk.copyItemsTo.mockImplementationOnce(async () => {
+			await new Promise<void>(resolve => {
+				releaseRetry = resolve
+			})
+
+			return report()
+		})
+		h.tracked.length = 0
+
+		copyRunner.retryFailed(id)
+		scriptCopyAcrossReconnect()
+		launchJobInto("work", [file("gap")])
+		await h.tracked[1]
+
+		releaseRetry()
+		await Promise.all(h.tracked)
+
+		expect(h.socketGapChecks[0]).toEqual({ destination: "work", copies: [{ targets: ["sub", "root"], createdDirs: [] }] })
 	})
 
 	it("a socket up the whole time, or a copy that made nothing, refetches nothing", async () => {

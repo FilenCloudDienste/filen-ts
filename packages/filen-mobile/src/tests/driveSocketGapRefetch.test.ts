@@ -62,7 +62,12 @@ vi.mock("@/queries/client", async () => {
 
 import { QueryObserver } from "@tanstack/react-query"
 import { queryClient } from "@/queries/client"
-import { driveItemsQueryKey, driveItemsQueryRefetchAfterSocketGap } from "@/features/drive/queries/useDriveItems.query"
+import {
+	type CopyWrites,
+	driveItemsQueryKey,
+	driveItemsQueryRefetchAfterSocketGap,
+	driveItemsQuerySocketGapReadsCopyWrites
+} from "@/features/drive/queries/useDriveItems.query"
 
 type Params = Parameters<typeof driveItemsQueryKey>[0]
 
@@ -191,5 +196,70 @@ describe("driveItemsQueryRefetchAfterSocketGap", () => {
 
 		nested.unmount()
 		beside.unmount()
+	})
+})
+
+// A copy's gap refetch waits only for a copy still creating items where that refetch reads.
+describe("driveItemsQuerySocketGapReadsCopyWrites", () => {
+	function copy(targets: (string | null)[], createdDirs: string[] = []): CopyWrites {
+		return {
+			targets: new Set(targets),
+			createdDirs: new Set(createdDirs)
+		}
+	}
+
+	const reads = (destination: string | null, ...copies: CopyWrites[]) => driveItemsQuerySocketGapReadsCopyWrites(destination, copies)
+
+	it("the root's refetch reads what any copy writes, and with none running nothing waits", () => {
+		expect(reads(null, copy(["elsewhere"]))).toBe(true)
+		expect(reads("root", copy(["elsewhere"]))).toBe(true)
+		expect(reads(null)).toBe(false)
+	})
+
+	it("reads what a copy creates in the destination or below it, not beside it", () => {
+		expect(reads("dest", copy(["dest"]))).toBe(true)
+		expect(reads("dest", copy(["g"]))).toBe(true)
+		expect(reads("dest", copy(["elsewhere"]))).toBe(false)
+		expect(reads("f", copy(["h"]))).toBe(false)
+	})
+
+	it("reads nothing a copy into the root or an ancestor writes, below it, in a directory it didn't create", () => {
+		expect(reads("dest", copy([null], ["made"]))).toBe(false)
+		expect(reads("g", copy(["dest"], ["made"]))).toBe(false)
+		// A retried copy's items each go back to their own directory, the root among them.
+		expect(reads("f", copy(["root", "dest"]))).toBe(false)
+	})
+
+	it("reads what a copy writes in a directory it created, or below one", () => {
+		expect(reads("f", copy(["dest"], ["f"]))).toBe(true)
+		expect(reads("g", copy([null], ["f"]))).toBe(true)
+		expect(reads("h", copy(["dest"], ["f"]))).toBe(false)
+	})
+
+	it("one copy writing where it reads is enough", () => {
+		expect(reads("g", copy(["elsewhere"]), copy(["dest"], ["f"]))).toBe(true)
+	})
+
+	it("an uncached ancestry overlaps nothing", () => {
+		expect(reads("dest", copy(["orphan"]))).toBe(false)
+		expect(reads("orphan", copy(["dest"], ["dest"]))).toBe(false)
+	})
+
+	it("reads what a copy writes into the camera-upload tree it lies in, once its Photos grid was read", () => {
+		for (const [uuid, parent] of [
+			["cam", "root"],
+			["2024", "cam"],
+			["2025", "cam"]
+		] as const) {
+			h.fakeCache.directoryUuidToAnyNormalDir.set(uuid, { tag: "Dir", inner: [{ uuid, parent }] })
+		}
+
+		expect(reads("2024", copy(["2025"]))).toBe(false)
+
+		read(driveItemsQueryKey({ path: { type: "photos", uuid: "cam" } } as Params))
+
+		expect(reads("2024", copy(["2025"]))).toBe(true)
+		expect(reads("2024", copy(["elsewhere"], ["made"]))).toBe(false)
+		expect(reads("elsewhere", copy(["2025"]))).toBe(false)
 	})
 })
