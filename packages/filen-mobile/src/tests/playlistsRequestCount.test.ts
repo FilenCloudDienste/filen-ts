@@ -43,7 +43,11 @@ vi.mock("@/lib/cache", () => ({
 	}
 }))
 
-import usePlaylistsQuery, { playlistsQueryUpdate, BASE_QUERY_KEY } from "@/features/audio/queries/usePlaylists.query"
+import usePlaylistsQuery, {
+	playlistsQueryUpdate,
+	playlistPatchedSinceNow,
+	BASE_QUERY_KEY
+} from "@/features/audio/queries/usePlaylists.query"
 import { noteDriveContentChanged } from "@/lib/driveChanges"
 
 const playlist = { uuid: "p1", name: "Mix", files: [] }
@@ -88,12 +92,16 @@ function cached(): Playlists {
 }
 
 // What savePlaylist does once its upload is done: note the drive change, then patch the list.
-function savePatch(saved: typeof playlist, keepInFlightRead?: boolean): void {
+function savePatch(saved: typeof playlist): void {
 	noteDriveContentChanged()
 	playlistsQueryUpdate({
-		updater: (prev => [...prev.filter(p => p.uuid !== saved.uuid), saved]) as Parameters<typeof playlistsQueryUpdate>[0]["updater"],
-		keepInFlightRead
+		updater: (prev => [...prev.filter(p => p.uuid !== saved.uuid), saved]) as Parameters<typeof playlistsQueryUpdate>[0]["updater"]
 	})
+}
+
+// A persisted row from days ago, restored at boot.
+function restoreOldRow(playlists: (typeof playlist)[]): void {
+	holder.client.setQueryData([BASE_QUERY_KEY], playlists, { updatedAt: Date.now() - 24 * 60 * 60 * 1000 })
 }
 
 beforeEach(() => {
@@ -170,36 +178,135 @@ describe("usePlaylistsQuery — request count", () => {
 		expect(mockGetPlaylists).toHaveBeenCalledTimes(3)
 	})
 
-	it("the dead-track prune's patch during its own read keeps that read", async () => {
-		const pruned = { ...playlist, name: "Mix (pruned)" }
+	it("a save during the open list's read keeps that read, whose answer with the save replaces the restored row", async () => {
+		const road = { uuid: "p2", name: "Road", files: [] }
+		// Another device changed Road after the row was persisted; here, Mix gets renamed.
+		const roadNow = { ...road, name: "Road + c" }
+		const renamed = { ...playlist, name: "Mix renamed" }
 		const read = deferred<(typeof playlist)[]>()
+
+		restoreOldRow([playlist, road])
+		mockGetPlaylists.mockImplementationOnce(() => read.promise)
+
+		const screen = renderHook(() => usePlaylistsQuery(), { wrapper })
+
+		await waitFor(() => expect(mockGetPlaylists).toHaveBeenCalledTimes(1))
+
+		savePatch(renamed)
+
+		// The save shows at once, and the read stays out.
+		expect(cached()).toEqual([road, renamed])
+		expect(holder.client.getQueryState([BASE_QUERY_KEY])?.fetchStatus).toBe("fetching")
+
+		// It fetched Mix before the save.
+		read.resolve([playlist, roadNow])
+
+		// The next edit of Road builds on this, so it must hold the other device's change.
+		await waitFor(() => expect(screen.result.current.data).toEqual([roadNow, renamed]))
+
+		expect(mockGetPlaylists).toHaveBeenCalledTimes(1)
+
+		screen.unmount()
+	})
+
+	it("edits one after another while the open list reads cost no further read", async () => {
+		const road = { ...playlist, uuid: "p2", name: "Road" }
+		const fromElsewhere = { ...playlist, uuid: "p3", name: "From another device" }
+		const read = deferred<(typeof playlist)[]>()
+
+		restoreOldRow([playlist])
+		// Every read is slow.
+		mockGetPlaylists.mockImplementation(() => read.promise)
+
+		const screen = renderHook(() => usePlaylistsQuery(), { wrapper })
+
+		await waitFor(() => expect(mockGetPlaylists).toHaveBeenCalledTimes(1))
+
+		// A rename, a new playlist, then another rename, each once the one before has saved.
+		savePatch({ ...playlist, name: "Mix 2" })
+
+		await tick()
+
+		savePatch(road)
+
+		await tick()
+
+		savePatch({ ...playlist, name: "Mix 3" })
+
+		await tick()
+
+		read.resolve([playlist, fromElsewhere])
+
+		await waitFor(() => expect(screen.result.current.data).toEqual([fromElsewhere, road, { ...playlist, name: "Mix 3" }]))
+
+		expect(mockGetPlaylists).toHaveBeenCalledTimes(1)
+
+		screen.unmount()
+	})
+
+	it("leaving the list mid-read keeps a save made during that read", async () => {
+		const renamed = { ...playlist, name: "Mix renamed" }
+		const read = deferred<(typeof playlist)[]>()
+
+		restoreOldRow([playlist])
+		mockGetPlaylists.mockImplementationOnce(() => read.promise)
+
+		const screen = renderHook(() => usePlaylistsQuery(), { wrapper })
+
+		await waitFor(() => expect(mockGetPlaylists).toHaveBeenCalledTimes(1))
+
+		savePatch(renamed)
+
+		// The last screen showing the list goes, so its read is cancelled: query-core puts the list back as
+		// last patched, not as the read began.
+		screen.unmount()
+
+		// The next edit builds on this.
+		expect(cached()).toEqual([renamed])
+
+		// The cancelled read answers anyway, with the copy from before the save.
+		read.resolve([playlist])
+
+		await tick()
+
+		expect(cached()).toEqual([renamed])
+	})
+
+	it("a read a pull-to-refresh replaced doesn't count when it answers late", async () => {
+		const replaced = deferred<(typeof playlist)[]>()
 
 		await tick()
 		await mountAndSettle()
 		await tick()
 
+		// Something forces the next mount to read.
 		noteDriveContentChanged()
-		mockGetPlaylists.mockImplementationOnce(() => read.promise)
+		mockGetPlaylists.mockImplementationOnce(() => replaced.promise)
 
-		const screen = renderHook(() => usePlaylistsQuery(), { wrapper })
+		const { result, unmount } = renderHook(() => usePlaylistsQuery(), { wrapper })
 
 		await waitFor(() => expect(mockGetPlaylists).toHaveBeenCalledTimes(2))
+		await tick()
 
-		// The read also brings a playlist made on another device; cancelling it would lose that.
-		const fromElsewhere = { uuid: "p3", name: "From another device", files: [] }
+		// The drive changes after that read began, then a pull-to-refresh's read replaces it.
+		noteDriveContentChanged()
 
-		savePatch(pruned, true)
-		read.resolve([pruned, fromElsewhere])
+		await tick()
+		await result.current.refetch()
 
-		await waitFor(() => expect(screen.result.current.fetchStatus).toBe("idle"))
+		replaced.resolve([playlist])
 
-		expect(cached()).toEqual([pruned, fromElsewhere])
-		expect(screen.result.current.isError).toBe(false)
+		await tick()
 
-		screen.unmount()
+		unmount()
+
+		await mountAndSettle()
+
+		expect(mockGetPlaylists).toHaveBeenCalledTimes(3)
 	})
 
-	it("a first read (nothing cached yet) is not cancelled by a save landing meanwhile, nor reused after", async () => {
+	it("a first read (nothing cached yet) lands with a save made meanwhile, and isn't reused after", async () => {
+		const created = { ...playlist, uuid: "p2", name: "New" }
 		const read = deferred<(typeof playlist)[]>()
 
 		await tick()
@@ -210,7 +317,7 @@ describe("usePlaylistsQuery — request count", () => {
 
 		await waitFor(() => expect(mockGetPlaylists).toHaveBeenCalledTimes(1))
 
-		savePatch({ ...playlist, uuid: "p2", name: "New" })
+		savePatch(created)
 
 		await tick()
 
@@ -218,7 +325,7 @@ describe("usePlaylistsQuery — request count", () => {
 
 		await waitFor(() => expect(screen.result.current.fetchStatus).toBe("idle"))
 
-		expect(cached()).toEqual([playlist])
+		expect(cached()).toEqual([playlist, created])
 
 		screen.unmount()
 
@@ -309,5 +416,24 @@ describe("playlistsQueryUpdate", () => {
 		await mountAndSettle()
 
 		expect(mockGetPlaylists).toHaveBeenCalledTimes(1)
+	})
+})
+
+describe("playlistPatchedSinceNow", () => {
+	it("tells the playlists saved or deleted after it was asked from the rest", () => {
+		const road = { uuid: "p2", name: "Road", files: [] }
+		const kept = { uuid: "p3", name: "Kept", files: [] }
+
+		holder.client.setQueryData([BASE_QUERY_KEY], [playlist, road, kept])
+
+		const patchedSince = playlistPatchedSinceNow()
+
+		savePatch({ ...playlist, name: "Mix renamed" })
+		playlistsQueryUpdate({ updater: prev => prev.filter(p => p.uuid !== road.uuid) })
+
+		expect(patchedSince(playlist.uuid)).toBe(true)
+		expect(patchedSince(road.uuid)).toBe(true)
+		expect(patchedSince(kept.uuid)).toBe(false)
+		expect(playlistPatchedSinceNow()(playlist.uuid)).toBe(false)
 	})
 })

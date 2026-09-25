@@ -22,7 +22,7 @@ import auth from "@/lib/auth"
 import { AnyNormalDir, DirMeta_Tags, AnyFile, FileMeta_Tags, FileMeta, ParentUuid, type Dir } from "@filen/sdk-rs"
 import { Buffer } from "react-native-quick-crypto"
 import { wrapAbortSignalForSdk, disposeSdkAbortSignal } from "@/lib/signals"
-import { playlistsQueryUpdate, playlistsQueryGet } from "@/features/audio/queries/usePlaylists.query"
+import { playlistsQueryUpdate, playlistsQueryGet, playlistPatchedSinceNow } from "@/features/audio/queries/usePlaylists.query"
 import { markDirectorySizesStale } from "@/features/drive/queries/useDirectorySize.query"
 import secureStore, { useSecureStore } from "@/lib/secureStore"
 import { convertBigInts } from "@/lib/utils"
@@ -122,7 +122,8 @@ export class Audio {
 
 	// Per-playlist write mutex (AU-06/AU-07): serializes whole-file overwrites to a given playlist so
 	// concurrent edits (rename / add / remove / reorder / dead-file cleanup) re-read the freshest copy
-	// and compose, instead of racing the read-modify-upload and clobbering each other. Keyed by uuid.
+	// and compose, instead of racing the read-modify-upload and clobbering each other. A delete waits for
+	// them too, or an upload still out would bring the playlist back. Keyed by uuid.
 	private readonly playlistWriteMutexes = new Map<string, Semaphore>()
 
 	private state = new Proxy<State>(
@@ -1239,6 +1240,7 @@ export class Audio {
 	}
 
 	public async getPlaylists(signal?: AbortSignal): Promise<PlaylistWithItems[]> {
+		const patchedSinceRead = playlistPatchedSinceNow()
 		const { authedSdkClient } = await auth.getSdkClients()
 		const playlistsDir = await this.getPlaylistsDirectory(signal)
 		const playlists = await authedSdkClient.listDir(
@@ -1329,23 +1331,40 @@ export class Audio {
 
 						// Fire-and-forget: don't block the read on cleanup persistence. UI already sees the
 						// filtered list via filesWithItems, so a delayed persist is harmless. Routed through
-						// mutatePlaylist so it (a) merges onto the FRESHEST copy instead of clobbering a
-						// concurrent user edit, and (b) skips the upload entirely when the freshest copy has
-						// no dead files left to strip (AU-06) — the playlistCleanupDone guard already caps
-						// this to once per playlist per session, so cleanup uploads stay rare.
+						// mutatePlaylist so it serializes with this playlist's other writes — the
+						// playlistCleanupDone guard already caps this to once per playlist per session, so
+						// cleanup uploads stay rare.
 						this.mutatePlaylist({
 							uuid: result.uuid,
 							fallback: result,
-							mutate: current => pruneDeadTracksShared(current, nonExistentFileUuids),
-							signal,
-							keepInFlightRead: true
-						}).catch(e =>
+							// The copy this read downloaded, not the cached one: that may be a restored row missing
+							// tracks added elsewhere since. Unless the playlist was saved here after the read began,
+							// so the cached copy is newer (one with no dead files left skips the upload, AU-06), or
+							// deleted, so it stays deleted.
+							mutate: current => {
+								if (!patchedSinceRead(result.uuid)) {
+									return pruneDeadTracksShared(result, nonExistentFileUuids)
+								}
+
+								return playlistsQueryGet()?.some(p => p.uuid === result.uuid)
+									? pruneDeadTracksShared(current, nonExistentFileUuids)
+									: null
+							},
+							signal
+						}).catch(e => {
+							// Aborted with its read: the next read prunes instead.
+							if (signal?.aborted) {
+								this.playlistCleanupDone.delete(result.uuid)
+
+								return
+							}
+
 							logger.error("audio", "playlist cleanup persist failed", {
 								playlistUuid: result.uuid,
 								removedCount: nonExistentFileUuids.size,
 								error: e
 							})
-						)
+						})
 					}
 
 					return {
@@ -1366,6 +1385,18 @@ export class Audio {
 		return parsedPlaylists.filter(p => p !== null)
 	}
 
+	private playlistWriteMutex(uuid: string): Semaphore {
+		let mutex = this.playlistWriteMutexes.get(uuid)
+
+		if (!mutex) {
+			mutex = new Semaphore(1)
+
+			this.playlistWriteMutexes.set(uuid, mutex)
+		}
+
+		return mutex
+	}
+
 	/**
 	 * Serializes every whole-file write to a given playlist AND re-reads the freshest copy from the
 	 * query cache as the merge base, so concurrent edits (rename / add / remove / reorder / dead-file
@@ -1378,22 +1409,14 @@ export class Audio {
 		uuid,
 		fallback,
 		mutate,
-		signal,
-		keepInFlightRead
+		signal
 	}: {
 		uuid: string
 		fallback: Playlist
 		mutate: (current: Playlist) => Playlist | null
 		signal?: AbortSignal
-		keepInFlightRead?: boolean
 	}): Promise<void> {
-		let mutex = this.playlistWriteMutexes.get(uuid)
-
-		if (!mutex) {
-			mutex = new Semaphore(1)
-
-			this.playlistWriteMutexes.set(uuid, mutex)
-		}
+		const mutex = this.playlistWriteMutex(uuid)
 
 		await mutex.acquire()
 
@@ -1409,24 +1432,14 @@ export class Audio {
 
 			await this.savePlaylist({
 				playlist: next,
-				signal,
-				keepInFlightRead
+				signal
 			})
 		} finally {
 			mutex.release()
 		}
 	}
 
-	public async savePlaylist({
-		playlist,
-		signal,
-		keepInFlightRead
-	}: {
-		playlist: Playlist
-		signal?: AbortSignal
-		// See playlistsQueryUpdate.
-		keepInFlightRead?: boolean
-	}): Promise<void> {
+	public async savePlaylist({ playlist, signal }: { playlist: Playlist; signal?: AbortSignal }): Promise<void> {
 		const { authedSdkClient } = await auth.getSdkClients()
 		const playlistsDir = await this.getPlaylistsDirectory(signal)
 
@@ -1480,8 +1493,7 @@ export class Audio {
 		}
 
 		playlistsQueryUpdate({
-			updater: prev => [...prev.filter(p => p.uuid !== playlist.uuid), playlistWithItems],
-			keepInFlightRead
+			updater: prev => [...prev.filter(p => p.uuid !== playlist.uuid), playlistWithItems]
 		})
 	}
 
@@ -1673,39 +1685,47 @@ export class Audio {
 	}
 
 	public async deletePlaylist({ playlist, signal }: { playlist: Playlist; signal?: AbortSignal }): Promise<void> {
-		const { authedSdkClient } = await auth.getSdkClients()
-		const playlistsDir = await this.getPlaylistsDirectory(signal)
-		// Built once instead of per candidate file: `playlist.uuid` cannot change during the synchronous
-		// find below, and the template concat + toLowerCase + trim are pure.
-		const playlistFileName = `${playlist.uuid}.json`.toLowerCase().trim()
+		const mutex = this.playlistWriteMutex(playlist.uuid)
 
-		const file = (
-			await authedSdkClient.listDir(
-				new AnyNormalDir.Dir(playlistsDir),
-				signal
-					? {
-							signal
-						}
-					: undefined
-			)
-		).files.find(f => f.meta.tag === FileMeta_Tags.Decoded && f.meta.inner[0].name.toLowerCase().trim() === playlistFileName)
+		await mutex.acquire()
 
-		if (file) {
-			await authedSdkClient.deleteFilePermanently(
-				file,
-				signal
-					? {
-							signal
-						}
-					: undefined
-			)
+		try {
+			const { authedSdkClient } = await auth.getSdkClients()
+			const playlistsDir = await this.getPlaylistsDirectory(signal)
+			// Built once instead of per candidate file: `playlist.uuid` cannot change during the synchronous
+			// find below, and the template concat + toLowerCase + trim are pure.
+			const playlistFileName = `${playlist.uuid}.json`.toLowerCase().trim()
 
-			markDirectorySizesStale()
+			const file = (
+				await authedSdkClient.listDir(
+					new AnyNormalDir.Dir(playlistsDir),
+					signal
+						? {
+								signal
+							}
+						: undefined
+				)
+			).files.find(f => f.meta.tag === FileMeta_Tags.Decoded && f.meta.inner[0].name.toLowerCase().trim() === playlistFileName)
+
+			if (file) {
+				await authedSdkClient.deleteFilePermanently(
+					file,
+					signal
+						? {
+								signal
+							}
+						: undefined
+				)
+
+				markDirectorySizesStale()
+			}
+
+			playlistsQueryUpdate({
+				updater: prev => prev.filter(p => p.uuid !== playlist.uuid)
+			})
+		} finally {
+			mutex.release()
 		}
-
-		playlistsQueryUpdate({
-			updater: prev => prev.filter(p => p.uuid !== playlist.uuid)
-		})
 	}
 }
 

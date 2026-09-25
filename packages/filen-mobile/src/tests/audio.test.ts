@@ -183,13 +183,22 @@ vi.mock("@/lib/utils", () => ({
 // tests below observe mutatePlaylist re-reading the freshest copy. hoisted so the vi.mock factory
 // (which is hoisted above module init) can close over it.
 const playlistsCache = vi.hoisted(() => ({ current: [] as unknown[] }))
+// The playlists a test saves or deletes here after a read began, as playlistPatchedSinceNow reports them.
+const patchedSinceRead = vi.hoisted(() => ({ uuids: new Set<string>() }))
 
 vi.mock("@/features/audio/queries/usePlaylists.query", () => ({
 	playlistsQueryUpdate: vi.fn(({ updater }: { updater: unknown }) => {
 		playlistsCache.current =
 			typeof updater === "function" ? (updater as (prev: unknown[]) => unknown[])(playlistsCache.current) : (updater as unknown[])
 	}),
-	playlistsQueryGet: vi.fn(() => playlistsCache.current)
+	playlistsQueryGet: vi.fn(() => playlistsCache.current),
+	playlistPatchedSinceNow: () => (uuid: string) => patchedSinceRead.uuids.has(uuid)
+}))
+
+// The SDK abort handle needs the native bindings; the source signal stands in for it.
+vi.mock("@/lib/signals", () => ({
+	wrapAbortSignalForSdk: (signal: AbortSignal) => signal,
+	disposeSdkAbortSignal: () => {}
 }))
 
 class WrapClass {
@@ -307,6 +316,7 @@ beforeEach(() => {
 	mockSdkClient.root.mockReset().mockReturnValue({ uuid: "root-uuid" })
 
 	playlistsCache.current = []
+	patchedSinceRead.uuids.clear()
 })
 
 afterEach(() => {
@@ -2167,6 +2177,35 @@ describe("Audio", () => {
 			expect(result).toHaveLength(1)
 			expect(result[0]!.uuid).toBe("p-uuid")
 		})
+
+		it("retries on the next read a cleanup its own read's cancellation stopped", async () => {
+			const { audio } = await createAudio()
+
+			setupCleanupScenario()
+
+			const read = new AbortController()
+
+			// The cleanup's upload is still out when the read that started it is cancelled (its screen left).
+			mockSdkClient.uploadFileFromBytes.mockImplementationOnce(
+				(_bytes: ArrayBuffer, { managedFuture }: { managedFuture: { abortSignal: AbortSignal } }) =>
+					new Promise((_resolve, reject) => {
+						managedFuture.abortSignal.addEventListener("abort", () => reject(new Error("aborted")))
+					})
+			)
+
+			await audio.getPlaylists(read.signal)
+			await flushMicrotasks()
+
+			expect(mockSdkClient.uploadFileFromBytes).toHaveBeenCalledTimes(1)
+
+			read.abort()
+
+			await flushMicrotasks()
+			await audio.getPlaylists()
+			await flushMicrotasks()
+
+			expect(mockSdkClient.uploadFileFromBytes).toHaveBeenCalledTimes(2)
+		})
 	})
 
 	describe("track-end watchdog (short-track fallback)", () => {
@@ -3715,29 +3754,109 @@ describe("Audio", () => {
 			expect(savedPlaylist()?.files.map(f => f.uuid)).toEqual(["b", "c", "a"])
 		})
 
-		it("AU-06: getPlaylists cleanup skips the rewrite when the freshest copy already has no dead files", async () => {
-			const { audio } = await createAudio()
-
-			// Cloud read still carries a now-deleted file → getFileOptional reports it missing.
-			const cloudPlaylist = makePlaylist("p-uuid", [file("missing-file", "song.mp3")])
-
+		// The one playlist file a read downloads, and the tracks the drive no longer has.
+		function setupPlaylistRead(downloaded: ReturnType<typeof makePlaylist>, deadUuids: string[]) {
 			mockSdkClient.listDir.mockImplementation(async () => ({
 				dirs: [
 					{ meta: { tag: "Decoded", inner: [{ name: ".filen" }] } },
 					{ meta: { tag: "Decoded", inner: [{ name: "Playlists" }] } }
 				],
-				files: [{ uuid: "playlist-1", meta: { tag: "Decoded", inner: [{ name: "playlist-1.json" }] } }]
+				files: [{ uuid: `file-${downloaded.uuid}`, meta: { tag: "Decoded", inner: [{ name: `${downloaded.uuid}.json` }] } }]
 			}))
-			mockSdkClient.downloadFileToBytes.mockResolvedValue(Buffer.from(JSON.stringify(cloudPlaylist), "utf-8"))
-			mockSdkClient.getFileOptional.mockResolvedValue(null)
+			mockSdkClient.downloadFileToBytes.mockResolvedValue(Buffer.from(JSON.stringify(downloaded), "utf-8"))
+			mockSdkClient.getFileOptional.mockImplementation(async (uuid: string) => (deadUuids.includes(uuid) ? null : { uuid }))
+		}
 
-			// The freshest copy has ALREADY been cleaned elsewhere — nothing left to strip.
+		it("AU-06: getPlaylists cleanup skips the rewrite when a save here during the read already dropped the dead files", async () => {
+			const { audio } = await createAudio()
+
+			// Cloud read still carries a now-deleted file → getFileOptional reports it missing.
+			setupPlaylistRead(makePlaylist("p-uuid", [file("missing-file", "song.mp3")]), ["missing-file"])
+
+			// Saved here after the read began, already without it — nothing left to strip.
+			patchedSinceRead.uuids.add("p-uuid")
 			playlistsCache.current = [makePlaylist("p-uuid", [])]
 
 			await audio.getPlaylists()
 			await flushMicrotasks()
 
 			expect(mockSdkClient.uploadFileFromBytes).not.toHaveBeenCalled()
+		})
+
+		it("getPlaylists cleanup prunes the copy it downloaded, not an older cached one", async () => {
+			const { audio } = await createAudio()
+
+			// Another device added c after the cached row was persisted.
+			setupPlaylistRead(makePlaylist("p-uuid", [file("a"), file("c"), file("dead")]), ["dead"])
+			playlistsCache.current = [makePlaylist("p-uuid", [file("a"), file("dead")])]
+
+			await audio.getPlaylists()
+			await flushMicrotasks()
+
+			expect(mockSdkClient.uploadFileFromBytes).toHaveBeenCalledTimes(1)
+			expect(savedPlaylist("p-uuid")?.files.map(f => f.uuid)).toEqual(["a", "c"])
+		})
+
+		it("getPlaylists cleanup builds on a save made here after the read began", async () => {
+			const { audio } = await createAudio()
+
+			setupPlaylistRead(makePlaylist("p-uuid", [file("a"), file("dead")]), ["dead"])
+
+			// Renamed here after the read downloaded it.
+			patchedSinceRead.uuids.add("p-uuid")
+			playlistsCache.current = [makePlaylist("p-uuid", [file("a"), file("dead")], "renamed")]
+
+			await audio.getPlaylists()
+			await flushMicrotasks()
+
+			expect(savedPlaylist("p-uuid")?.name).toBe("renamed")
+			expect(savedPlaylist("p-uuid")?.files.map(f => f.uuid)).toEqual(["a"])
+		})
+
+		it("getPlaylists cleanup leaves a playlist deleted here after the read began deleted", async () => {
+			const { audio } = await createAudio()
+
+			setupPlaylistRead(makePlaylist("p-uuid", [file("a"), file("dead")]), ["dead"])
+
+			patchedSinceRead.uuids.add("p-uuid")
+			playlistsCache.current = []
+
+			await audio.getPlaylists()
+			await flushMicrotasks()
+
+			expect(mockSdkClient.uploadFileFromBytes).not.toHaveBeenCalled()
+			expect(savedPlaylist("p-uuid")).toBeUndefined()
+		})
+
+		it("a delete waits for that playlist's cleanup still uploading, which would bring it back", async () => {
+			const { audio } = await createAudio()
+			const uploads: Array<() => void> = []
+
+			setupPlaylistRead(makePlaylist("p-uuid", [file("a"), file("dead")]), ["dead"])
+			mockSdkClient.uploadFileFromBytes.mockImplementation(
+				() =>
+					new Promise<void>(resolve => {
+						uploads.push(resolve)
+					})
+			)
+
+			await audio.getPlaylists()
+			await flushMicrotasks()
+
+			expect(uploads).toHaveLength(1)
+
+			const deleted = audio.deletePlaylist({ playlist: makePlaylist("p-uuid", []) })
+
+			await flushMicrotasks()
+
+			expect(mockSdkClient.deleteFilePermanently).not.toHaveBeenCalled()
+
+			uploads.shift()?.()
+
+			await deleted
+
+			expect(mockSdkClient.deleteFilePermanently).toHaveBeenCalledTimes(1)
+			expect(savedPlaylist("p-uuid")).toBeUndefined()
 		})
 	})
 

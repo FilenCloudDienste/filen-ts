@@ -12,10 +12,21 @@ export const BASE_QUERY_KEY = "usePlaylistsQuery"
 // since (a deleted track must drop out). Local edits patch the cache; pull-to-refresh always reads.
 const PLAYLISTS_STALE_TIME = 60 * 1000
 
-// Bumped by every cache patch. A read one overlapped may hold a playlist from before that patch's save.
+type Playlists = Awaited<ReturnType<typeof audio.getPlaylists>>
+type PlaylistsUpdater = Playlists | ((prev: Playlists) => Playlists)
+
+// Bumped by every cache patch.
 let patchCount = 0
+// The patches made while a read was out, in order, with the patchCount each bumped to. A read may have
+// fetched a playlist before the save behind one, so it applies those made after it began to what it
+// fetched: no patch is lost to a read, and no read is cancelled or repeated for one.
+let patchesDuringReads: { count: number; updater: PlaylistsUpdater }[] = []
+let readsInFlight = 0
+// The patchCount of each playlist's latest save or delete here.
+const lastPatchOf = new Map<string, number>()
 // When the last read no patch overlapped began; null while there is none. Freshness counts from a read's
-// start: a save made while it ran is after it, whatever it fetched.
+// start: a save made while it ran is after it, whatever it fetched. A read a patch overlapped holds the
+// patch in place of its own copy of that playlist, which may be newer, so it doesn't count.
 let cleanReadStartedAt: number | null = null
 
 /**
@@ -35,20 +46,50 @@ function seedTrackIfUncached(item: DriveItemFileExtracted): void {
 	cache.uuidToAnyDriveItem.set(item.data.uuid, item)
 }
 
-export async function fetchData(params?: { signal?: AbortSignal }) {
-	const startedAt = Date.now()
-	const patchesBefore = patchCount
-	const playlists = await audio.getPlaylists(params?.signal)
+function applyPatchesSince(count: number, playlists: Playlists): Playlists {
+	let next = playlists
 
-	for (const playlist of playlists) {
-		for (const { item } of playlist.files) {
-			seedTrackIfUncached(item)
+	for (const patch of patchesDuringReads) {
+		if (patch.count > count) {
+			next = typeof patch.updater === "function" ? patch.updater(next) : patch.updater
 		}
 	}
 
-	cleanReadStartedAt = patchCount === patchesBefore ? startedAt : null
+	return next
+}
 
-	return playlists
+export async function fetchData(params?: { signal?: AbortSignal }) {
+	const startedAt = Date.now()
+	const patchesBefore = patchCount
+
+	readsInFlight++
+
+	try {
+		const fetched = await audio.getPlaylists(params?.signal)
+
+		// Cancelled: its answer never lands, so it mustn't overwrite the freshness of the read that replaced it.
+		if (params?.signal?.aborted) {
+			return fetched
+		}
+
+		const playlists = applyPatchesSince(patchesBefore, fetched)
+
+		for (const playlist of playlists) {
+			for (const { item } of playlist.files) {
+				seedTrackIfUncached(item)
+			}
+		}
+
+		cleanReadStartedAt = patchCount === patchesBefore ? startedAt : null
+
+		return playlists
+	} finally {
+		readsInFlight--
+
+		if (readsInFlight === 0) {
+			patchesDuringReads = []
+		}
+	}
 }
 
 // The cached list is that clean read's (not a restored row, nor an older read it never replaced), no
@@ -81,34 +122,46 @@ export function usePlaylistsQuery(
 	return query as UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error>
 }
 
-export function playlistsQueryUpdate({
-	updater,
-	keepInFlightRead
-}: {
-	updater:
-		| Awaited<ReturnType<typeof fetchData>>
-		| ((prev: Awaited<ReturnType<typeof fetchData>>) => Awaited<ReturnType<typeof fetchData>>)
-	// For the dead-track prune, which patches during its own read: that read already leaves them out.
-	keepInFlightRead?: boolean
-}) {
-	patchCount++
+// The playlists a patch saved or deleted: the ones it replaced, added or dropped.
+function notePatchedPlaylists(prev: Playlists, next: Playlists, count: number): void {
+	const before = new Map(prev.map(playlist => [playlist.uuid, playlist]))
 
-	const state = queryClient.getQueryState([BASE_QUERY_KEY])
+	for (const playlist of next) {
+		if (before.get(playlist.uuid) !== playlist) {
+			lastPatchOf.set(playlist.uuid, count)
+		}
 
-	// A read in flight would land after this patch and overwrite it with what it fetched before the save
-	// behind it, and the next edit would build on that. Cancelled, so the cached list comes back and the
-	// patch applies to it; a first read (nothing cached yet) still lands.
-	if (!keepInFlightRead && state?.data !== undefined && state.fetchStatus !== "idle") {
-		void queryClient.cancelQueries({
-			queryKey: [BASE_QUERY_KEY],
-			exact: true
-		})
+		before.delete(playlist.uuid)
 	}
 
-	queryUpdater.set<Awaited<ReturnType<typeof fetchData>>>(
+	for (const uuid of before.keys()) {
+		lastPatchOf.set(uuid, count)
+	}
+}
+
+// For a read as it begins: whether a playlist is saved or deleted here after that.
+export function playlistPatchedSinceNow(): (uuid: string) => boolean {
+	const since = patchCount
+
+	return uuid => (lastPatchOf.get(uuid) ?? 0) > since
+}
+
+export function playlistsQueryUpdate({ updater }: { updater: PlaylistsUpdater }) {
+	patchCount++
+
+	const count = patchCount
+
+	if (readsInFlight > 0) {
+		patchesDuringReads.push({ count, updater })
+	}
+
+	queryUpdater.set<Playlists>(
 		[BASE_QUERY_KEY],
 		prev => {
-			const next = typeof updater === "function" ? updater(prev ?? []) : updater
+			const before = prev ?? []
+			const next = typeof updater === "function" ? updater(before) : updater
+
+			notePatchedPlaylists(before, next, count)
 
 			// Keep cache.uuidToAnyDriveItem in sync with the list query (mirrors fetchData). The audio
 			// metadata query resolves each file by uuid FROM this cache, so an optimistically-updated
