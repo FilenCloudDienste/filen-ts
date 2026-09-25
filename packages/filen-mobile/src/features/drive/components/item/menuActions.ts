@@ -10,7 +10,7 @@ import { buildDownloadSubButtons, buildExportButton, buildOpenWithButton } from 
 import { buildCopyMenuButton, offersCopy } from "@/features/drive/components/item/menuActionsCopy"
 import { buildPasteIntoMenuButton, offersPasteInto } from "@/features/drive/components/clipboardMenu"
 import { type DriveClipboardEntry } from "@/features/drive/store/useDriveClipboard.store"
-import { buildSaveToCloudDriveButton } from "@/features/drive/linkedSave"
+import { buildSaveToCloudDriveButton, linkAllowsDownload } from "@/features/drive/linkedSave"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import prompts from "@/lib/prompts"
 import { run } from "@filen/shared"
@@ -157,13 +157,16 @@ export function createMenuButtons({
 		}
 	}
 
-	const downloadSubButtons = buildDownloadSubButtons({
-		item,
-		isStoredOffline,
-		parentForOfflineStorage,
-		previewType,
-		t
-	})
+	// A link that disables downloads offers no way to take its content (see linkAllowsDownload).
+	const downloadSubButtons = linkAllowsDownload(drivePath, item)
+		? buildDownloadSubButtons({
+				item,
+				isStoredOffline,
+				parentForOfflineStorage,
+				previewType,
+				t
+			})
+		: []
 
 	// download + share moved further down (after rename/move) so the menu
 	// reads: meta (favorite/info/versions/color) → modify (rename/move) →

@@ -6,8 +6,8 @@ vi.mock("@/lib/sdkUnwrap", () => ({ unwrapParentUuid: (parent: unknown) => (type
 vi.mock("@/lib/cache", () => ({ default: { directoryUuidToAnySharedDirWithContext: new Map([["shared-parent", { shareInfo: "role" }]]) } }))
 
 import { copyGlyphForCopyItems, copyGlyphForEntries, copyGlyphForItems, driveItemToCopyItem } from "@/features/copy/copySource"
-import { CopyItem_Tags } from "@/tests/mocks/sdkCopy"
-import type { CopyEntry, CopyItem } from "@filen/sdk-rs"
+import { AnyItemWithContext_Tags } from "@/tests/mocks/sdkCopy"
+import type { AnyItemWithContext, CopyEntry } from "@filen/sdk-rs"
 import type { DriveItem } from "@/types"
 
 function item(type: DriveItem["type"], data: Record<string, unknown> = {}): DriveItem {
@@ -24,14 +24,14 @@ describe("driveItemToCopyItem", () => {
 	] as const)("a %s copies as File(AnyFile.%s)", (type, anyFileTag) => {
 		const copyItem = driveItemToCopyItem(item(type)) as unknown as Tagged
 
-		expect(copyItem.tag).toBe(CopyItem_Tags.File)
+		expect(copyItem.tag).toBe(AnyItemWithContext_Tags.File)
 		expect((copyItem.inner[0] as Tagged).tag).toBe(anyFileTag)
 	})
 
 	it("a directory copies as Dir(AnyDirWithContext.Normal)", () => {
 		const copyItem = driveItemToCopyItem(item("directory")) as unknown as Tagged
 
-		expect(copyItem.tag).toBe(CopyItem_Tags.Dir)
+		expect(copyItem.tag).toBe(AnyItemWithContext_Tags.Dir)
 		expect((copyItem.inner[0] as Tagged).tag).toBe("Normal")
 	})
 
@@ -54,8 +54,8 @@ describe("copy glyphs", () => {
 		expect(copyGlyphForItems([item("sharedRootDirectory")])).toBe("directory")
 		expect(copyGlyphForItems([item("file")])).toBe("file")
 		expect(copyGlyphForItems([item("file"), item("file")])).toBe("items")
-		expect(copyGlyphForCopyItems([{ tag: CopyItem_Tags.Dir } as unknown as CopyItem])).toBe("directory")
-		expect(copyGlyphForEntries([{ item: { tag: CopyItem_Tags.File } } as unknown as CopyEntry])).toBe("file")
+		expect(copyGlyphForCopyItems([{ tag: AnyItemWithContext_Tags.Dir } as unknown as AnyItemWithContext])).toBe("directory")
+		expect(copyGlyphForEntries([{ item: { tag: AnyItemWithContext_Tags.File } } as unknown as CopyEntry])).toBe("file")
 		expect(copyGlyphForEntries([])).toBe("items")
 	})
 })

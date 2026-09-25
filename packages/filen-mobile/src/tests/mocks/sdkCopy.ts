@@ -19,12 +19,24 @@ export enum CopyPhase {
 	Failed
 }
 
-export enum CopyStage {
-	CreateDirectory,
-	Download,
-	Upload,
-	Finalize,
-	RegisteredAsVersion
+export enum CopyStage_Tags {
+	CreateDirectory = "CreateDirectory",
+	Download = "Download",
+	Upload = "Upload",
+	Finalize = "Finalize",
+	RegisteredAsVersion = "RegisteredAsVersion"
+}
+
+export enum RunState {
+	Running,
+	Pausing,
+	Paused,
+	Cancelling
+}
+
+export enum SkipReason_Tags {
+	UndecryptableFile = "UndecryptableFile",
+	Unreachable = "Unreachable"
 }
 
 export enum CopyEvent_Tags {
@@ -77,7 +89,7 @@ export enum NonRootNormalItem_Tags {
 	File = "File"
 }
 
-export enum CopyItem_Tags {
+export enum AnyItemWithContext_Tags {
 	File = "File",
 	Dir = "Dir"
 }
@@ -93,9 +105,51 @@ function taggedUnion(tag: string) {
 	}
 }
 
-export const CopyItem = {
-	File: taggedUnion(CopyItem_Tags.File),
-	Dir: taggedUnion(CopyItem_Tags.Dir)
+// A variant whose inner is a record, not a 1-tuple.
+function taggedRecord<T extends object>(tag: string) {
+	return class {
+		public readonly tag = tag
+		public readonly inner: Readonly<T>
+
+		public constructor(inner: T) {
+			this.inner = Object.freeze(inner)
+		}
+	}
+}
+
+function taggedUnit(tag: string) {
+	return class {
+		public readonly tag = tag
+	}
+}
+
+export const AnyItemWithContext = {
+	File: taggedUnion(AnyItemWithContext_Tags.File),
+	Dir: taggedUnion(AnyItemWithContext_Tags.Dir)
+}
+
+export const CopyStage = {
+	CreateDirectory: taggedUnit(CopyStage_Tags.CreateDirectory),
+	Download: taggedUnit(CopyStage_Tags.Download),
+	Upload: taggedUnit(CopyStage_Tags.Upload),
+	Finalize: taggedUnit(CopyStage_Tags.Finalize),
+	RegisteredAsVersion: taggedRecord<{ existingFile: string }>(CopyStage_Tags.RegisteredAsVersion)
+}
+
+export const SkipReason = {
+	UndecryptableFile: taggedRecord<{ uuid: string }>(SkipReason_Tags.UndecryptableFile),
+	Unreachable: taggedRecord<{ count: bigint }>(SkipReason_Tags.Unreachable)
+}
+
+// A copy's errors arrive as the SDK error itself, whose fields are methods.
+export function sdkError(kind: ErrorKind, innerMessage?: string, serverMessage?: string) {
+	return {
+		kind: () => kind,
+		message: () => `Error of kind ${ErrorKind[kind]}: ${innerMessage ?? ""}`,
+		innerMessage: () => innerMessage,
+		serverMessage: () => serverMessage,
+		serverCode: () => undefined
+	}
 }
 
 export const AnyFile = {

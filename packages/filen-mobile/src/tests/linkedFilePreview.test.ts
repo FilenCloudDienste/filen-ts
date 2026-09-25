@@ -32,7 +32,7 @@ vi.mock("@filen/sdk-rs", () => {
 		}
 
 	return {
-		CopyItem: { File: variant("CopyItem.File"), Dir: variant("CopyItem.Dir") },
+		AnyItemWithContext: { File: variant("AnyItemWithContext.File"), Dir: variant("AnyItemWithContext.Dir") },
 		AnyFile: { File: variant("AnyFile.File"), Linked: variant("AnyFile.Linked") },
 		AnyDirWithContext: { Linked: variant("AnyDirWithContext.Linked") },
 		AnyNormalDir: { Dir: variant("AnyNormalDir.Dir"), Root: variant("AnyNormalDir.Root") },
@@ -116,7 +116,7 @@ import type { LinkedFile, LinkedRootDir } from "@filen/sdk-rs"
 const LINK_VIEW: DrivePath = { type: "linked", uuid: null }
 
 function linkedFile(uuid: string): LinkedFile {
-	return { uuid, name: { tag: "Decrypted", inner: [`${uuid}.jpg`] }, size: 1n } as unknown as LinkedFile
+	return { uuid, name: { tag: "Decrypted", inner: [`${uuid}.jpg`] }, size: 1n, downloadable: true } as unknown as LinkedFile
 }
 
 function fileLink(uuid: string): InternalLinkData {
@@ -141,7 +141,7 @@ function expectSaveableFromLink(item: DriveItem, uuid: string): void {
 
 	const source = linkedItemToCopyItem(item) as unknown as { tag: string; inner: [{ tag: string; inner: [LinkedFile] }] }
 
-	expect([source.tag, source.inner[0].tag, source.inner[0].inner[0].uuid]).toEqual(["CopyItem.File", "AnyFile.Linked", uuid])
+	expect([source.tag, source.inner[0].tag, source.inner[0].inner[0].uuid]).toEqual(["AnyItemWithContext.File", "AnyFile.Linked", uuid])
 }
 
 beforeEach(() => {

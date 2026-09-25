@@ -142,7 +142,7 @@ import useTransfersStore from "@/features/transfers/store/useTransfers.store"
 import copyActivity from "@/features/drive/copyActivity"
 import useSocketStore from "@/stores/useSocket.store"
 import logger from "@/lib/logger"
-import { CopyPhase, CopyStage, ErrorKind, NonRootNormalItem_Tags } from "@/tests/mocks/sdkCopy"
+import { CopyPhase, CopyStage, ErrorKind, NonRootNormalItem_Tags, RunState, sdkError } from "@/tests/mocks/sdkCopy"
 import { formatBytes } from "@filen/shared"
 import type { CopyItemsCallback, CopyReport, CopyUpdate } from "@filen/sdk-rs"
 import type { CopyWrites } from "@/features/drive/queries/useDriveItems.query"
@@ -172,9 +172,7 @@ function file(uuid: string): DriveItem {
 function update(bytesDone: bigint, overrides: Partial<CopyUpdate> = {}): CopyUpdate {
 	return {
 		phase: CopyPhase.CopyingFiles,
-		pausing: false,
-		paused: false,
-		cancelling: false,
+		runState: RunState.Running,
 		scan: { sourcesDone: 1n, sourcesTotal: 1n, listingBytes: 0n, listingTotalBytes: undefined },
 		totals: { dirs: 0n, files: 1n, bytes: 1000n },
 		counts: { ...ZERO, bytesDone },
@@ -273,7 +271,7 @@ function scriptStoppedWithTrash(): void {
 		callback.onTopLevelCreated(createdFile("stuck") as never)
 		copyRunner.requestCancel(jobIdOf(), "trash")
 
-		return report({ error: { kind: ErrorKind.Cancelled, message: "", serverMessage: undefined } })
+		return report({ error: sdkError(ErrorKind.Cancelled) })
 	})
 }
 
@@ -426,7 +424,7 @@ describe("a copy job", () => {
 
 	it.each([
 		["succeeds", async () => report()],
-		["is cancelled", async () => report({ error: { kind: ErrorKind.Cancelled, message: "", serverMessage: undefined } })],
+		["is cancelled", async () => report({ error: sdkError(ErrorKind.Cancelled) })],
 		[
 			"throws",
 			async () => {
@@ -455,8 +453,8 @@ describe("a copy job", () => {
 		const failure = {
 			item: { tag: "File", inner: [{}] },
 			info: {
-				stage: CopyStage.Download,
-				error: { kind: ErrorKind.FileChunkNotFound, message: "", serverMessage: undefined },
+				stage: new CopyStage.Download(),
+				error: sdkError(ErrorKind.FileChunkNotFound),
 				affectedFiles: 1n,
 				affectedBytes: 1000n
 			}
@@ -475,7 +473,7 @@ describe("a copy job", () => {
 	})
 
 	it("a failed job shows its error on the finished row", async () => {
-		scriptCopy(async () => report({ error: { kind: ErrorKind.Server, message: "inner", serverMessage: "Server says no" }, counts: ZERO }))
+		scriptCopy(async () => report({ error: sdkError(ErrorKind.Server, "inner", "Server says no"), counts: ZERO }))
 
 		await runJob()
 
@@ -487,7 +485,7 @@ describe("a copy job", () => {
 })
 
 describe("quota", () => {
-	const maxStorageReached = { kind: ErrorKind.MaxStorageReached, message: "", serverMessage: undefined }
+	const maxStorageReached = sdkError(ErrorKind.MaxStorageReached)
 	const preflightRefusal = () => report({ error: maxStorageReached, counts: ZERO, totals: { dirs: 0n, files: 0n, bytes: 0n } })
 
 	it("a fresh cached account is trusted: no read", async () => {
@@ -653,12 +651,12 @@ describe("cancel", () => {
 			expect(managedFuture.abortSignal.sdkAbortFor.aborted).toBe(true)
 
 			return report({
-				error: { kind: ErrorKind.Cancelled, message: "", serverMessage: undefined },
+				error: sdkError(ErrorKind.Cancelled),
 				topLevel: [createdFile("made"), createdFile("version-target")],
 				failures: [
 					{
 						item: {},
-						info: { stage: CopyStage.RegisteredAsVersion, existingFile: "version-target", error: { kind: ErrorKind.Server } }
+						info: { stage: new CopyStage.RegisteredAsVersion({ existingFile: "version-target" }), error: sdkError(ErrorKind.Server) }
 					}
 				]
 			})
@@ -712,7 +710,7 @@ describe("cancel", () => {
 			copyRunner.requestCancel(Object.keys(useCopyJobsStore.getState().jobs)[0] as string, "trash")
 
 			return report({
-				error: { kind: ErrorKind.Cancelled, message: "", serverMessage: undefined },
+				error: sdkError(ErrorKind.Cancelled),
 				topLevel: [createdFile("in-report")]
 			})
 		})
@@ -752,7 +750,7 @@ describe("cancel", () => {
 				callback.onTopLevelCreated(createdFile("stuck") as never)
 				copyRunner.requestCancel(Object.keys(useCopyJobsStore.getState().jobs)[0] as string, "trash")
 
-				return report({ error: { kind: ErrorKind.Cancelled, message: "", serverMessage: undefined } })
+				return report({ error: sdkError(ErrorKind.Cancelled) })
 			})
 		}
 
@@ -832,7 +830,7 @@ describe("cancel", () => {
 			callback.onTopLevelCreated(createdFile("stuck") as never)
 			copyRunner.requestCancel(Object.keys(useCopyJobsStore.getState().jobs)[0] as string, "trash")
 
-			return report({ error: { kind: ErrorKind.Cancelled, message: "", serverMessage: undefined } })
+			return report({ error: sdkError(ErrorKind.Cancelled) })
 		})
 
 		await runJob()
@@ -848,7 +846,7 @@ describe("cancel", () => {
 		scriptCopy(async () => {
 			h.scope.controller.abort()
 
-			return report({ error: { kind: ErrorKind.Cancelled, message: "", serverMessage: undefined }, topLevel: [createdFile("made")] })
+			return report({ error: sdkError(ErrorKind.Cancelled), topLevel: [createdFile("made")] })
 		})
 
 		await runJob()
@@ -925,7 +923,7 @@ describe("move to trash racing a prune", () => {
 			callback.onTopLevelCreated(createdFile("made") as never)
 			copyRunner.requestCancel(jobIdOf(), "trash")
 
-			return report({ error: { kind: ErrorKind.Cancelled, message: "", serverMessage: undefined } })
+			return report({ error: sdkError(ErrorKind.Cancelled) })
 		})
 
 		const id = await runJob()
@@ -967,7 +965,7 @@ describe("move to trash racing a prune", () => {
 			callback.onTopLevelCreated(createdFile("made") as never)
 			copyRunner.requestCancel(jobIdOf(), "trash")
 
-			return report({ error: { kind: ErrorKind.Cancelled, message: "", serverMessage: undefined } })
+			return report({ error: sdkError(ErrorKind.Cancelled) })
 		})
 
 		const id = launchJob()
@@ -1051,7 +1049,7 @@ function heldCopy(created: ReturnType<typeof createdFile>[] = [createdFile("made
 		})
 
 		return abort.aborted
-			? report({ error: { kind: ErrorKind.Cancelled, message: "", serverMessage: undefined }, topLevel: created })
+			? report({ error: sdkError(ErrorKind.Cancelled), topLevel: created })
 			: report({ topLevel: created })
 	})
 
@@ -1194,11 +1192,10 @@ describe("retry and pause", () => {
 				destParent: "sub",
 				destParentDir: { tag: "Dir", inner: [{ uuid: "sub" }] },
 				destName: "x",
-				stage: CopyStage.Upload,
-				error: { kind: ErrorKind.Server, message: "", serverMessage: undefined },
+				stage: new CopyStage.Upload(),
+				error: sdkError(ErrorKind.Server),
 				affectedFiles: 1n,
-				affectedBytes: 1n,
-				existingFile: undefined
+				affectedBytes: 1n
 			}
 		}
 
@@ -1230,8 +1227,8 @@ describe("retry and pause", () => {
 					{
 						item: { tag: "File", inner: [{}] },
 						info: {
-							stage: CopyStage.Upload,
-							error: { kind: ErrorKind.Server, message: "", serverMessage: undefined },
+							stage: new CopyStage.Upload(),
+							error: sdkError(ErrorKind.Server),
 							affectedFiles: 1n,
 							affectedBytes: 1n
 						}
@@ -1344,7 +1341,7 @@ describe("a socket gap during the copy", () => {
 		await held.started
 
 		copyRunner.pause(heldId)
-		held.progress({ paused: true })
+		held.progress({ runState: RunState.Paused })
 		scriptCopyAcrossReconnect()
 		launchJob([file("gap")])
 		await h.tracked[1]
@@ -1370,11 +1367,11 @@ describe("a socket gap during the copy", () => {
 
 		copyRunner.pause(heldId)
 		// Its in-flight work still finishing creates items.
-		held.progress({ pausing: true })
+		held.progress({ runState: RunState.Pausing })
 
 		const whilePausing = h.refetchAfterSocketGap.mock.calls.length
 
-		held.progress({ paused: true })
+		held.progress({ runState: RunState.Paused })
 
 		const oncePaused = [...h.refetchAfterSocketGap.mock.calls]
 
@@ -1393,9 +1390,9 @@ describe("a socket gap during the copy", () => {
 		await held.started
 
 		copyRunner.pause(heldId)
-		held.progress({ paused: true })
+		held.progress({ runState: RunState.Paused })
 		copyRunner.resume(heldId)
-		held.progress({ paused: true })
+		held.progress({ runState: RunState.Paused })
 		scriptCopyAcrossReconnect()
 		launchJob([file("gap")])
 		await h.tracked[1]
@@ -1490,11 +1487,10 @@ describe("a socket gap during the copy", () => {
 				destParent: destParentDir.inner[0].uuid,
 				destParentDir,
 				destName: "x",
-				stage: CopyStage.Upload,
-				error: { kind: ErrorKind.Server, message: "", serverMessage: undefined },
+				stage: new CopyStage.Upload(),
+				error: sdkError(ErrorKind.Server),
 				affectedFiles: 1n,
-				affectedBytes: 1n,
-				existingFile: undefined
+				affectedBytes: 1n
 			}
 		})
 
@@ -1559,11 +1555,11 @@ describe("a copy the SDK reports paused", () => {
 		const deferred = [copyActivity.deferRecents(refresh)]
 
 		copyRunner.pause(id)
-		copy.progress({ pausing: true })
+		copy.progress({ runState: RunState.Pausing })
 
 		const refreshedWhilePausing = refresh.mock.calls.length
 
-		copy.progress({ paused: true })
+		copy.progress({ runState: RunState.Paused })
 		deferred.push(copyActivity.deferRecents(vi.fn()))
 		copyRunner.resume(id)
 		deferred.push(copyActivity.deferRecents(vi.fn()))
@@ -1583,7 +1579,7 @@ describe("a copy the SDK reports paused", () => {
 		await copy.started
 
 		copyRunner.pause(id)
-		copy.progress({ paused: true })
+		copy.progress({ runState: RunState.Paused })
 		h.scope.controller.abort()
 		await Promise.all(h.tracked)
 
@@ -1597,7 +1593,7 @@ describe("a copy the SDK reports paused", () => {
 		const deferredAfterStop = copyActivity.deferRecents(vi.fn())
 
 		// Queued before the job was dropped, delivered after it.
-		copy.progress({ paused: true })
+		copy.progress({ runState: RunState.Paused })
 
 		const deferredAfterLateReport = copyActivity.deferRecents(vi.fn())
 

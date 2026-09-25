@@ -1,6 +1,6 @@
 import { type TFunction } from "i18next"
 import { type FetchStatus } from "@tanstack/react-query"
-import { AnyDirWithContext, AnyFile, CopyItem } from "@filen/sdk-rs"
+import { AnyDirWithContext, AnyFile, AnyItemWithContext } from "@filen/sdk-rs"
 import { run } from "@filen/shared"
 import { type MenuButton } from "@/components/ui/menu"
 import type { DrivePath } from "@/hooks/useDrivePath"
@@ -20,21 +20,34 @@ export type LinkSaveTarget = {
 	uuid: string
 }
 
-export function linkSaveTarget(drivePath: DrivePath, item?: DriveItem): LinkSaveTarget | null {
+// Whether a view lets content leave its link: Download and everything under it (export, open with,
+// offline, save to photos) and Save to Cloud Drive, since a copy takes the content just like a download
+// does. A directory link's enableDownload covers everything below it, a standalone file link's LinkedFile
+// carries its own downloadable. A link whose source isn't held allows none of it.
+export function linkAllowsDownload(drivePath: DrivePath, item?: DriveItem): boolean {
 	if (drivePath.type !== "linked") {
+		return true
+	}
+
+	if (drivePath.linked) {
+		return cache.linkedRootByLinkUuid.get(drivePath.linked.uuid)?.meta.enableDownload === true
+	}
+
+	return item !== undefined && cache.linkedFileByUuid.get(item.data.uuid)?.downloadable === true
+}
+
+export function linkSaveTarget(drivePath: DrivePath, item?: DriveItem): LinkSaveTarget | null {
+	if (drivePath.type !== "linked" || !linkAllowsDownload(drivePath, item)) {
 		return null
 	}
 
 	if (drivePath.linked) {
 		const root = cache.linkedRootByLinkUuid.get(drivePath.linked.uuid)
 
-		// A copy takes the content just like a download does, so a link that disables downloads offers neither.
-		return root?.meta.enableDownload === true ? { kind: "directory", uuid: root.rootUuid } : null
+		return root ? { kind: "directory", uuid: root.rootUuid } : null
 	}
 
-	// A file link can disable downloads, but the SDK's LinkedFile drops that flag, so a visitor can't
-	// tell; Download on the same screen is ungated for the same reason.
-	return item && cache.linkedFileByUuid.has(item.data.uuid) ? { kind: "file", uuid: item.data.uuid } : null
+	return item ? { kind: "file", uuid: item.data.uuid } : null
 }
 
 function canCopyLinkedItem(item: DriveItem): boolean {
@@ -43,24 +56,24 @@ function canCopyLinkedItem(item: DriveItem): boolean {
 
 // A link-view item as the SDK copies it: a directory with its link, the raw LinkedFile of a standalone
 // file link, or a plain File for a file listed inside a linked directory.
-export function linkedItemToCopyItem(item: DriveItem): CopyItem | null {
+export function linkedItemToCopyItem(item: DriveItem): AnyItemWithContext | null {
 	if (item.type === "directory") {
 		const linked = cache.directoryUuidToAnyLinkedDirWithMeta.get(item.data.uuid)
 
-		return linked ? new CopyItem.Dir(new AnyDirWithContext.Linked({ dir: linked.dir, link: linked.meta })) : null
+		return linked ? new AnyItemWithContext.Dir(new AnyDirWithContext.Linked({ dir: linked.dir, link: linked.meta })) : null
 	}
 
 	if (item.type === "file") {
 		const linkedFile = cache.linkedFileByUuid.get(item.data.uuid)
 
-		return new CopyItem.File(linkedFile ? new AnyFile.Linked(linkedFile) : new AnyFile.File(item.data))
+		return new AnyItemWithContext.File(linkedFile ? new AnyFile.Linked(linkedFile) : new AnyFile.File(item.data))
 	}
 
 	return null
 }
 
 // The linked directory on screen, the link's root or a subdirectory of it.
-export function linkedDirectoryCopySource(drivePath: DrivePath): { item: CopyItem; name: string } | null {
+export function linkedDirectoryCopySource(drivePath: DrivePath): { item: AnyItemWithContext; name: string } | null {
 	if (drivePath.type !== "linked" || !drivePath.linked) {
 		return null
 	}
@@ -76,7 +89,7 @@ export function linkedDirectoryCopySource(drivePath: DrivePath): { item: CopyIte
 	const dirItem = drivePath.uuid ? cache.uuidToAnyDriveItem.get(drivePath.uuid) : undefined
 
 	return {
-		item: new CopyItem.Dir(new AnyDirWithContext.Linked({ dir: linked.dir, link: linked.meta })),
+		item: new AnyItemWithContext.Dir(new AnyDirWithContext.Linked({ dir: linked.dir, link: linked.meta })),
 		name: dirItem ? driveItemDisplayName(dirItem) : drivePath.linked.rootName
 	}
 }
@@ -113,7 +126,7 @@ export function buildSaveLinkedDirectoryButton({
 }
 
 // Picks a directory in the own drive and copies the link's items into it as one job.
-export async function saveLinkedToDrive({ items, name, t }: { items: CopyItem[]; name: string; t: TFunction }): Promise<void> {
+export async function saveLinkedToDrive({ items, name, t }: { items: AnyItemWithContext[]; name: string; t: TFunction }): Promise<void> {
 	if (items.length === 0) {
 		return
 	}

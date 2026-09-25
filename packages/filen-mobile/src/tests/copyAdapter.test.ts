@@ -12,27 +12,39 @@ vi.mock("@/lib/sdkUnwrap", () => ({
 }))
 
 import * as sdkCopy from "@/tests/mocks/sdkCopy"
-import { CopyEvent_Tags, CopyPhase, CopyStage, ErrorKind, NonRootNormalItem_Tags } from "@/tests/mocks/sdkCopy"
+import {
+	CopyEvent_Tags,
+	CopyPhase,
+	CopyStage,
+	ErrorKind,
+	NonRootNormalItem_Tags,
+	RunState,
+	SkipReason,
+	sdkError
+} from "@/tests/mocks/sdkCopy"
 import {
 	collectCopyEvents,
 	copyJobError,
 	copyJobErrorToHumanReadable,
 	copyJobPhase,
 	copyReportInput,
+	copyUpdateInput,
 	createdDriveItem,
 	emptyCopyEvents,
 	retryEntries,
 	versionTargets
 } from "@/features/copy/copyAdapter"
-import { settleCopyJob, isQuotaPreflightFailure } from "@filen/shared"
+import { applyCopyUpdate, settleCopyJob, isQuotaPreflightFailure } from "@filen/shared"
 import { createCopyJob } from "@/features/copy/copyAdapter"
-import type { CopyEvent, CopyFailure, CopyReport } from "@filen/sdk-rs"
+import type { CopyEvent, CopyFailure, CopyReport, CopyUpdate } from "@filen/sdk-rs"
 
 function error(kind: ErrorKind, serverMessage?: string) {
-	return { kind, message: `inner ${ErrorKind[kind]}`, serverMessage, serverCode: undefined }
+	return sdkError(kind, `inner ${ErrorKind[kind]}`, serverMessage)
 }
 
-function info(stage: CopyStage, overrides: Record<string, unknown> = {}) {
+type Stage = InstanceType<(typeof CopyStage)[keyof typeof CopyStage]>
+
+function info(stage: Stage, overrides: Record<string, unknown> = {}) {
 	return {
 		sourceUuid: "src",
 		sourcePath: "/a/b",
@@ -43,9 +55,12 @@ function info(stage: CopyStage, overrides: Record<string, unknown> = {}) {
 		error: error(ErrorKind.Server, "Server said no"),
 		affectedFiles: 3n,
 		affectedBytes: 300n,
-		existingFile: undefined,
 		...overrides
 	}
+}
+
+function asVersionOf(existingFile: string): Stage {
+	return new CopyStage.RegisteredAsVersion({ existingFile })
 }
 
 function event(tag: CopyEvent_Tags, inner: unknown): CopyEvent {
@@ -93,7 +108,16 @@ function stubEnumMembers(stub: Record<string, string | number>): string[] {
 }
 
 describe("SDK enum stubs match the installed bindings", () => {
-	it.each(["CopyPhase", "CopyStage", "CopyEvent_Tags", "ErrorKind", "NonRootNormalItem_Tags", "CopyItem_Tags"] as const)("%s", name => {
+	it.each([
+		"CopyPhase",
+		"CopyStage_Tags",
+		"CopyEvent_Tags",
+		"ErrorKind",
+		"NonRootNormalItem_Tags",
+		"AnyItemWithContext_Tags",
+		"RunState",
+		"SkipReason_Tags"
+	] as const)("%s", name => {
 		expect(stubEnumMembers(sdkCopy[name] as unknown as Record<string, string | number>)).toEqual(generatedEnumMembers(name))
 	})
 })
@@ -122,6 +146,44 @@ describe("copyJobError", () => {
 		expect(copyJobErrorToHumanReadable(copyJobError(error(ErrorKind.Server, "Quota exhausted") as never))).toBe("Quota exhausted")
 		expect(copyJobErrorToHumanReadable(copyJobError(error(ErrorKind.MaxStorageReached) as never))).toBe("max_remote_storage_reached")
 	})
+
+	it("reads the SDK error's inner message, not its developer-facing wrapper", () => {
+		expect(copyJobError(sdkError(ErrorKind.Io, "disk gone") as never)).toEqual({ kind: "Io", message: "disk gone", serverMessage: undefined })
+		expect(copyJobError(sdkError(ErrorKind.Io) as never).message).toBe("")
+	})
+})
+
+describe("copyUpdateInput", () => {
+	const update = (runState: RunState) =>
+		({
+			phase: CopyPhase.CopyingFiles,
+			runState,
+			scan: { sourcesDone: 1n, sourcesTotal: 1n },
+			totals: { dirs: 0n, files: 1n, bytes: 10n },
+			counts: ZERO,
+			active: [],
+			events: [],
+			bytesPerSecond: undefined,
+			etaMs: undefined
+		}) as unknown as CopyUpdate
+
+	it.each([
+		[RunState.Running, { pausing: false, paused: false, cancelling: false }],
+		[RunState.Pausing, { pausing: true, paused: false, cancelling: false }],
+		[RunState.Paused, { pausing: false, paused: true, cancelling: false }],
+		[RunState.Cancelling, { pausing: false, paused: false, cancelling: true }]
+	])("run state %s → at most one flag", (runState, flags) => {
+		const input = copyUpdateInput(update(runState), emptyCopyEvents())
+
+		expect({ pausing: input.pausing, paused: input.paused, cancelling: input.cancelling }).toEqual(flags)
+
+		const job = applyCopyUpdate(
+			createCopyJob({ id: "j", destination: { uuid: null, name: "" }, itemCount: 1, glyph: "file", rowName: "", startedAt: 0 }),
+			input
+		)
+
+		expect({ pausing: job.pausing, paused: job.paused, cancelling: job.cancelling }).toEqual(flags)
+	})
 })
 
 describe("collectCopyEvents", () => {
@@ -133,10 +195,10 @@ describe("collectCopyEvents", () => {
 				event(CopyEvent_Tags.DirCreated, {}),
 				event(CopyEvent_Tags.FileStarted, {}),
 				event(CopyEvent_Tags.FileDone, {}),
-				event(CopyEvent_Tags.FileFailed, info(CopyStage.Upload)),
-				event(CopyEvent_Tags.DirFailed, info(CopyStage.CreateDirectory)),
-				event(CopyEvent_Tags.FileFailed, info(CopyStage.RegisteredAsVersion)),
-				event(CopyEvent_Tags.Skipped, {}),
+				event(CopyEvent_Tags.FileFailed, info(new CopyStage.Upload())),
+				event(CopyEvent_Tags.DirFailed, info(new CopyStage.CreateDirectory())),
+				event(CopyEvent_Tags.FileFailed, info(asVersionOf("old-uuid"))),
+				event(CopyEvent_Tags.Skipped, { sourcePath: "/a/c", bytes: 5n, reason: new SkipReason.UndecryptableFile({ uuid: "c" }) }),
 				event(CopyEvent_Tags.Renamed, {}),
 				event(CopyEvent_Tags.PropagationFailed, {}),
 				event(CopyEvent_Tags.ColorFailed, {})
@@ -170,8 +232,8 @@ describe("collectCopyEvents", () => {
 
 describe("copyReportInput", () => {
 	it("splits saved-as-version files off the retryable failures", () => {
-		const failed = { item: { tag: "File" }, info: info(CopyStage.Download) }
-		const version = { item: { tag: "File" }, info: info(CopyStage.RegisteredAsVersion, { existingFile: "old-uuid" }) }
+		const failed = { item: { tag: "File" }, info: info(new CopyStage.Download()) }
+		const version = { item: { tag: "File" }, info: info(asVersionOf("old-uuid")) }
 		const input = copyReportInput(report({ failures: [failed, version], renamed: [{}, {}], topLevel: [{}] }))
 
 		expect(input.failures).toHaveLength(1)
@@ -195,6 +257,17 @@ describe("copyReportInput", () => {
 		expect(settled.outcome).toEqual({ status: "quotaExceeded", freeBytes: 42 })
 	})
 
+	it("takes skipped entries from the counts, whatever their reason carries", () => {
+		const skipped = [
+			{ sourcePath: "/a/c", bytes: 5n, reason: new SkipReason.UndecryptableFile({ uuid: "c" }) },
+			{ sourcePath: "/a/d", bytes: 0n, reason: new SkipReason.Unreachable({ count: 4n }) }
+		]
+		const input = copyReportInput(report({ skipped, counts: { ...ZERO, entriesSkipped: 5n, bytesSkipped: 5n } }))
+
+		expect(input.failures).toEqual([])
+		expect([input.counts.entriesSkipped, input.counts.bytesSkipped]).toEqual([5n, 5n])
+	})
+
 	it("a Cancelled report settles as cancelled", () => {
 		const settled = settleCopyJob(
 			createCopyJob({ id: "j", destination: { uuid: null, name: "" }, itemCount: 1, glyph: "file", rowName: "", startedAt: 0 }),
@@ -213,8 +286,8 @@ describe("versionTargets / createdDriveItem / retryEntries", () => {
 		const targets = versionTargets(
 			report({
 				failures: [
-					{ item: {}, info: info(CopyStage.RegisteredAsVersion, { existingFile: "old-uuid" }) },
-					{ item: {}, info: info(CopyStage.Upload, { existingFile: "not-a-version" }) }
+					{ item: {}, info: info(asVersionOf("old-uuid")) },
+					{ item: {}, info: info(new CopyStage.Upload()) }
 				]
 			})
 		)
@@ -228,7 +301,7 @@ describe("versionTargets / createdDriveItem / retryEntries", () => {
 	})
 
 	it("sends each failure back to its planned directory under its planned name", () => {
-		const failure = { item: { tag: "File" }, info: info(CopyStage.Upload) } as unknown as CopyFailure
+		const failure = { item: { tag: "File" }, info: info(new CopyStage.Upload()) } as unknown as CopyFailure
 
 		expect(retryEntries([failure])).toEqual([{ item: failure.item, destination: failure.info.destParentDir, name: "b" }])
 	})

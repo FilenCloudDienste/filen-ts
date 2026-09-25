@@ -28,7 +28,7 @@ export function isNetworkClassError(error: unknown): boolean {
 // reqwest/serde string ("error sending request for url …") the average user can't act on, whereas
 // the label ("Network error") is clear; (3) only an UNMAPPED kind falls back to the raw inner
 // message (`innerMessage()`), then the generic label. Module level (not a hook) → uses `i18n`.
-// The same priority for an SDK error record (a copy's CopyError, whose fields arrive as plain values).
+// The same priority for an SDK error already read into its parts (a copy job keeps its errors that way).
 export function sdkErrorPartsToHumanReadable(parts: { kind: ErrorKind; serverMessage: string | undefined; innerMessage: string | undefined }): string {
 	const errorKey = (() => {
 		switch (parts.kind) {

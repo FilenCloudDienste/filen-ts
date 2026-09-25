@@ -1,13 +1,13 @@
 import {
+	type AnyItemWithContext,
 	type AnyNormalDir,
 	type CopyEntry,
-	type CopyError,
-	type CopyItem,
 	type CopyItemsCallback,
 	type CopyReport,
 	type CopyUpdate,
 	ErrorKind,
-	ManagedFuture
+	ManagedFuture,
+	RunState
 } from "@filen/sdk-rs"
 import {
 	applyCopyUpdate,
@@ -66,7 +66,7 @@ import type { DriveItem } from "@/types"
 // leading edge, a trailing timer catches the last update, and settle always writes.
 export const COPY_FLUSH_MS = 250
 
-type CopySource = { kind: "items"; items: CopyItem[]; destination: AnyNormalDir } | { kind: "entries"; entries: CopyEntry[] }
+type CopySource = { kind: "items"; items: AnyItemWithContext[]; destination: AnyNormalDir } | { kind: "entries"; entries: CopyEntry[] }
 
 type CopyRequest = {
 	id: string
@@ -257,7 +257,7 @@ class CopyRunner {
 		destination,
 		destinationDir
 	}: {
-		items: CopyItem[]
+		items: AnyItemWithContext[]
 		name: string
 		destination: CopyDestination
 		destinationDir: AnyNormalDir
@@ -582,7 +582,7 @@ class CopyRunner {
 
 					latest = update
 
-					countPaused(update.paused && pauseRequested)
+					countPaused(update.runState === RunState.Paused && pauseRequested)
 
 					if (Date.now() - lastFlushAt >= COPY_FLUSH_MS) {
 						flush()
@@ -608,7 +608,7 @@ class CopyRunner {
 			// Never pass asyncOpts: its signal cancels the Rust future and loses the report. Cancelling goes
 			// through the managed future instead, and the report comes back either way.
 			const attempt = async (maxBytes: number | undefined): Promise<CopySettlement> => {
-				const options = {
+				const config = {
 					maxBytes: maxBytes === undefined ? undefined : BigInt(maxBytes)
 				}
 
@@ -618,8 +618,8 @@ class CopyRunner {
 					const { authedSdkClient } = await auth.getSdkClients()
 					const report: CopyReport =
 						source.kind === "entries"
-							? await authedSdkClient.copyItemsTo(source.entries, options, callback, managedFuture)
-							: await authedSdkClient.copyItems(source.items, source.destination, options, callback, managedFuture)
+							? await authedSdkClient.copyItemsTo(source.entries, config, callback, managedFuture)
+							: await authedSdkClient.copyItems(source.items, source.destination, config, callback, managedFuture)
 
 					lastReport = report
 
@@ -999,21 +999,16 @@ function syncTrashFailedRow(id: string): void {
 // A thrown copy (the SDK couldn't start or report), as the error record the job carries.
 function toJobError(e: unknown): ReturnType<typeof copyJobError> {
 	const sdkError = unwrapSdkError(e)
-	const error: CopyError = sdkError
-		? {
-				kind: sdkError.kind(),
-				message: sdkError.innerMessage() ?? "",
-				serverMessage: sdkError.serverMessage(),
-				serverCode: sdkError.serverCode()
-			}
-		: {
-				kind: ErrorKind.Internal,
-				message: e instanceof Error ? e.message : String(e),
-				serverMessage: undefined,
-				serverCode: undefined
-			}
 
-	return copyJobError(error)
+	if (sdkError) {
+		return copyJobError(sdkError)
+	}
+
+	return {
+		kind: ErrorKind[ErrorKind.Internal],
+		message: e instanceof Error ? e.message : String(e),
+		serverMessage: undefined
+	}
 }
 
 // A settled job stays while its finished row can still offer "Retry failed items"; a cancelled one

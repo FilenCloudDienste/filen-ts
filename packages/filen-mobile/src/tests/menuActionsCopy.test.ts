@@ -2,7 +2,8 @@ import { vi, describe, it, expect, beforeEach } from "vitest"
 import { type TFunction } from "i18next"
 
 const h = vi.hoisted(() => ({
-	dirs: new Map<string, unknown>()
+	dirs: new Map<string, unknown>(),
+	linkAllowsDownload: vi.fn(() => true)
 }))
 
 vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
@@ -60,10 +61,12 @@ vi.mock("@/features/drive/components/item/menuActionsDownload", () => ({
 vi.mock("@/features/drive/driveSelectSession", () => ({ openDriveSelect: vi.fn(), selectCopyDestination: vi.fn() }))
 vi.mock("@/features/copy/copyRunner", () => ({ default: { start: vi.fn(() => "job-1") } }))
 vi.mock("@/features/drive/linkedSave", () => ({
-	buildSaveToCloudDriveButton: vi.fn(({ id, title }: { id: string; title: string }) => ({ id, title }))
+	buildSaveToCloudDriveButton: vi.fn(({ id, title }: { id: string; title: string }) => ({ id, title })),
+	linkAllowsDownload: h.linkAllowsDownload
 }))
 
 import { createMenuButtons } from "@/features/drive/components/item/menuActions"
+import { buildDownloadSubButtons } from "@/features/drive/components/item/menuActionsDownload"
 import { buildCopyMenuButton, offersCopy } from "@/features/drive/components/item/menuActionsCopy"
 import { selectCopyDestination } from "@/features/drive/driveSelectSession"
 import copyRunner from "@/features/copy/copyRunner"
@@ -134,6 +137,7 @@ const MOVE_VIEWS: ReadonlySet<DrivePathType> = new Set(["drive", "favorites", "r
 
 beforeEach(() => {
 	vi.clearAllMocks()
+	h.linkAllowsDownload.mockReturnValue(true)
 	useDriveClipboardStore.getState().clear()
 })
 
@@ -235,6 +239,35 @@ describe("link-view rows", () => {
 		const ids = flatIds(createMenuButtons({ item: makeItem("file"), drivePath: makeDrivePath("drive"), isStoredOffline: false, linkSaveable: true, t }))
 
 		expect(ids).not.toContain("saveToCloudDrive")
+	})
+})
+
+describe("link-view Download", () => {
+	const idsFor = (itemType: "file" | "directory", pathType: DrivePathType) =>
+		flatIds(createMenuButtons({ item: makeItem(itemType), drivePath: makeDrivePath(pathType), isStoredOffline: false, linkSaveable: true, t }))
+
+	beforeEach(() => {
+		vi.mocked(buildDownloadSubButtons).mockReturnValue([{ id: "downloadToDevice", title: "download_to_device" }])
+	})
+
+	for (const itemType of ["file", "directory"] as const) {
+		it(`${itemType}: offered while the link allows downloads, and nothing under it is built when it doesn't`, () => {
+			expect(idsFor(itemType, "linked")).toEqual(expect.arrayContaining(["download", "downloadToDevice"]))
+			expect(h.linkAllowsDownload).toHaveBeenLastCalledWith(makeDrivePath("linked"), makeItem(itemType))
+
+			h.linkAllowsDownload.mockReturnValue(false)
+			vi.mocked(buildDownloadSubButtons).mockClear()
+
+			const ids = idsFor(itemType, "linked")
+
+			expect(ids).not.toContain("download")
+			expect(ids).not.toContain("downloadToDevice")
+			expect(buildDownloadSubButtons).not.toHaveBeenCalled()
+		})
+	}
+
+	it("the gate is the link's alone: a view it lets through keeps Download", () => {
+		expect(idsFor("file", "drive")).toContain("download")
 	})
 })
 

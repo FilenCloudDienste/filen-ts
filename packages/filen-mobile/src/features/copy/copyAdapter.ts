@@ -1,17 +1,18 @@
 import {
 	type CopyEntry,
-	type CopyError,
 	type CopyEvent,
 	CopyEvent_Tags,
 	type CopyFailure,
 	type CopyFailureInfo,
 	CopyPhase,
 	type CopyReport,
-	CopyStage,
+	CopyStage_Tags,
 	type CopyUpdate,
 	ErrorKind,
+	type FilenSdkErrorInterface,
 	type NonRootNormalItem,
-	NonRootNormalItem_Tags
+	NonRootNormalItem_Tags,
+	RunState
 } from "@filen/sdk-rs"
 import {
 	createCopyJob as createSharedCopyJob,
@@ -103,11 +104,12 @@ export function copyJobPhase(phase: CopyPhase): CopyJobPhase {
 	return PHASES[phase]
 }
 
-export function copyJobError(error: CopyError): CopyJobError {
+// Read once into a plain record: the job keeps it, and the SDK error answers each field over the FFI.
+export function copyJobError(error: FilenSdkErrorInterface): CopyJobError {
 	return {
-		kind: ErrorKind[error.kind],
-		message: error.message,
-		serverMessage: error.serverMessage
+		kind: ErrorKind[error.kind()],
+		message: error.innerMessage() ?? "",
+		serverMessage: error.serverMessage()
 	}
 }
 
@@ -125,7 +127,7 @@ export function copyJobErrorToHumanReadable(error: CopyJobError): string {
 // A file the backend registered as a new version of an existing one is stored, not failed: retrying
 // would add yet another version, and it is not a copy to trash.
 function isSavedAsVersion(info: CopyFailureInfo): boolean {
-	return info.stage === CopyStage.RegisteredAsVersion
+	return info.stage.tag === CopyStage_Tags.RegisteredAsVersion
 }
 
 function toFailure(info: CopyFailureInfo): CopyJobFailure {
@@ -188,9 +190,9 @@ export function collectCopyEvents(events: readonly CopyEvent[], into: CopyUpdate
 export function copyUpdateInput(update: CopyUpdate, events: CopyUpdateEvents<CopyJobFailure>): CopyUpdateInput<CopyJobFailure> {
 	return {
 		phase: copyJobPhase(update.phase),
-		pausing: update.pausing,
-		paused: update.paused,
-		cancelling: update.cancelling,
+		pausing: update.runState === RunState.Pausing,
+		paused: update.runState === RunState.Paused,
+		cancelling: update.runState === RunState.Cancelling,
 		scan: update.scan,
 		totals: update.totals,
 		counts: update.counts,
@@ -223,8 +225,10 @@ export function versionTargets(report: CopyReport): Set<string> {
 	const targets = new Set<string>()
 
 	for (const failure of report.failures) {
-		if (isSavedAsVersion(failure.info) && failure.info.existingFile !== undefined) {
-			targets.add(failure.info.existingFile)
+		const stage = failure.info.stage
+
+		if (stage.tag === CopyStage_Tags.RegisteredAsVersion) {
+			targets.add(stage.inner.existingFile)
 		}
 	}
 

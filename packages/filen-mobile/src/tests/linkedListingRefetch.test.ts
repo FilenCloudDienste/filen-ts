@@ -57,7 +57,7 @@ vi.mock("@filen/sdk-rs", () => {
 		AnySharedDir: {},
 		AnySharedDirWithContext: {},
 		AnyFile: {},
-		CopyItem: { Dir: variant("CopyItem.Dir") },
+		AnyItemWithContext: { Dir: variant("AnyItemWithContext.Dir") },
 		NonRootDir_Tags: {},
 		SharingRole: {},
 		ErrorKind: {}

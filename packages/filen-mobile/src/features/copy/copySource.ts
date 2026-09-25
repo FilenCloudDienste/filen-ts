@@ -1,11 +1,11 @@
-import { CopyItem, CopyItem_Tags, type CopyEntry } from "@filen/sdk-rs"
+import { AnyItemWithContext, AnyItemWithContext_Tags, type CopyEntry } from "@filen/sdk-rs"
 import type { DriveItem } from "@/types"
 import { driveItemToAnyDirWithContext, driveItemToAnyFile } from "@/lib/sdkSources"
 import type { CopyJobGlyph } from "@/features/copy/copyAdapter"
 
 // A drive item as the SDK copies it: the file itself, or the directory with the share context it is
-// listed under. Linked sources (public links) arrive already as CopyItems.
-export function driveItemToCopyItem(item: DriveItem): CopyItem {
+// listed under. Linked sources (public links) arrive already built.
+export function driveItemToCopyItem(item: DriveItem): AnyItemWithContext {
 	switch (item.type) {
 		case "file":
 		case "sharedFile":
@@ -16,13 +16,13 @@ export function driveItemToCopyItem(item: DriveItem): CopyItem {
 				throw new Error("Invalid item type")
 			}
 
-			return new CopyItem.File(file)
+			return new AnyItemWithContext.File(file)
 		}
 
 		case "directory":
 		case "sharedDirectory":
 		case "sharedRootDirectory": {
-			return new CopyItem.Dir(driveItemToAnyDirWithContext(item))
+			return new AnyItemWithContext.Dir(driveItemToAnyDirWithContext(item))
 		}
 	}
 }
@@ -37,14 +37,14 @@ export function copyGlyphForItems(items: readonly DriveItem[]): CopyJobGlyph {
 	return only.type === "directory" || only.type === "sharedDirectory" || only.type === "sharedRootDirectory" ? "directory" : "file"
 }
 
-export function copyGlyphForCopyItems(items: readonly CopyItem[]): CopyJobGlyph {
+export function copyGlyphForCopyItems(items: readonly AnyItemWithContext[]): CopyJobGlyph {
 	const [only] = items
 
 	if (only === undefined || items.length > 1) {
 		return "items"
 	}
 
-	return only.tag === CopyItem_Tags.Dir ? "directory" : "file"
+	return only.tag === AnyItemWithContext_Tags.Dir ? "directory" : "file"
 }
 
 export function copyGlyphForEntries(entries: readonly CopyEntry[]): CopyJobGlyph {
@@ -54,5 +54,5 @@ export function copyGlyphForEntries(entries: readonly CopyEntry[]): CopyJobGlyph
 		return "items"
 	}
 
-	return only.item.tag === CopyItem_Tags.Dir ? "directory" : "file"
+	return only.item.tag === AnyItemWithContext_Tags.Dir ? "directory" : "file"
 }
