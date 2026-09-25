@@ -34,6 +34,7 @@ import { useIsOnline } from "@/lib/useIsOnline"
 import { cn, driveItemName } from "@filen/shared"
 import { ImageViewer, RawImageViewer, ZoomableImage } from "@/features/preview/components/imageViewer"
 import { MediaViewer, MediaElement } from "@/features/preview/components/mediaViewer"
+import { PreviewDownloadableProvider } from "@/features/preview/lib/accessMode"
 import {
 	isTextEditingTarget,
 	previewMenuVisible,
@@ -111,6 +112,8 @@ export interface PreviewOverlayProps {
 	// Header-menu entries the opening surface doesn't offer in its own menus, so the viewer matches them
 	// (Photos hides Move).
 	hiddenMenuActionIds?: ReadonlySet<ItemActionId> | undefined
+	// False for a public link's file whose owner disallows downloads: nothing here offers to save it.
+	downloadable?: boolean
 }
 
 // True while focus sits on (or inside) a <video>/<audio> element — its own native controls own
@@ -175,7 +178,8 @@ export function PreviewOverlay({
 	onClose,
 	onItemRemoved,
 	onFavoriteToggled,
-	hiddenMenuActionIds
+	hiddenMenuActionIds,
+	downloadable = true
 }: PreviewOverlayProps) {
 	const { t } = useTranslation(["preview", "common", "drive"])
 	const isOnline = useIsOnline()
@@ -896,7 +900,7 @@ export function PreviewOverlay({
 						>
 							<ChevronRightIcon />
 						</Button>
-						{currentSource.type === "drive" && variant !== "trash" ? (
+						{currentSource.type === "drive" && variant !== "trash" && downloadable ? (
 							<Button
 								variant="ghost"
 								size="icon-sm"
@@ -958,12 +962,14 @@ export function PreviewOverlay({
 						onClick={handleBodyClick}
 					>
 						<PreviewErrorBoundary key={previewSourceKey(currentSource)}>
-							<PreviewBody
-								source={currentSource}
-								editable={editable}
-								onDirtyChange={setPreviewDirty}
-								contentRef={contentRef}
-							/>
+							<PreviewDownloadableProvider downloadable={downloadable}>
+								<PreviewBody
+									source={currentSource}
+									editable={editable}
+									onDirtyChange={setPreviewDirty}
+									contentRef={contentRef}
+								/>
+							</PreviewDownloadableProvider>
 						</PreviewErrorBoundary>
 					</div>
 					{/* Nested confirmation dialog — Base UI supports nesting a dialog inside another normally

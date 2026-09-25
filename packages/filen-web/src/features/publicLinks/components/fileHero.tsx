@@ -21,8 +21,9 @@ type DownloadUiState =
 // icon, name, size/type — with a flag-gated Download and, when the file is previewable within the
 // memory cap, an inline preview (auto-invoked). `onBack` is present only for the in-dir child view
 // (returns to the listing); the /f/ route omits it. `downloadEnabled` is the link's own flag (a file
-// link always allows download; a dir link carries enableDownload). `linkScope` fingerprints the link's
-// key and password, scoping the bytes the preview loads so Download can reuse them.
+// link's downloadable, a directory link's enableDownload); without it the preview stays and nothing
+// offers to save the file. `linkScope` fingerprints the link's key and password, scoping the bytes the
+// preview loads so Download can reuse them.
 export function FileHero({
 	item,
 	downloadEnabled,
@@ -130,6 +131,7 @@ export function FileHero({
 					<PublicPreview
 						item={item}
 						linkScope={linkScope}
+						downloadable={downloadEnabled}
 					/>
 				</div>
 			</div>

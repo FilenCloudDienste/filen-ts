@@ -7,7 +7,7 @@ import { isMediaStreamAvailable } from "@/features/preview/lib/previewStream"
 import { streamFailureAction } from "@/features/drive/lib/preview.logic"
 import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
 import { usePreviewStreamUrl } from "@/features/preview/hooks/usePreviewStreamUrl"
-import { usePreviewAccessMode } from "@/features/preview/lib/accessMode"
+import { mediaControlsList, usePreviewAccessMode, usePreviewDownloadable } from "@/features/preview/lib/accessMode"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { LoadingState } from "@/components/loadingState"
 import { PreviewErrorState } from "@/features/preview/components/previewErrorState"
@@ -29,7 +29,19 @@ export interface MediaViewerProps {
 // chat thread's own inline mini-player renders directly (filenLinkCard.tsx, bypassing this component
 // entirely) is deliberately excluded, per the mobile-parity decision that loop/autoplay belong to the
 // full preview experience, not a glanceable inline embed.
-function VideoElement({ url, alt, onError, positionKey }: { url: string; alt: string; onError?: () => void; positionKey?: string }) {
+function VideoElement({
+	url,
+	alt,
+	controlsList,
+	onError,
+	positionKey
+}: {
+	url: string
+	alt: string
+	controlsList: "nodownload" | undefined
+	onError?: () => void
+	positionKey?: string
+}) {
 	const videoRef = useRef<HTMLVideoElement | null>(null)
 
 	useEffect(() => {
@@ -92,6 +104,7 @@ function VideoElement({ url, alt, onError, positionKey }: { url: string; alt: st
 		<video
 			ref={videoRef}
 			controls
+			controlsList={controlsList}
 			loop
 			preload="metadata"
 			src={url}
@@ -125,12 +138,15 @@ export function MediaElement({
 	// continuity belongs to the persistent player, not the preview).
 	positionKey?: string
 }) {
+	const controlsList = mediaControlsList(usePreviewDownloadable())
+
 	if (category === "video") {
 		return (
 			<div className="flex size-full items-center justify-center overflow-hidden p-4">
 				<VideoElement
 					url={url}
 					alt={alt}
+					controlsList={controlsList}
 					{...(onError !== undefined ? { onError } : {})}
 					{...(positionKey !== undefined ? { positionKey } : {})}
 				/>
@@ -142,6 +158,7 @@ export function MediaElement({
 		<div className="flex size-full items-center justify-center px-6">
 			<audio
 				controls
+				controlsList={controlsList}
 				preload="metadata"
 				src={url}
 				aria-label={alt}

@@ -16,6 +16,9 @@ export type PreviewAccessMode = "authed" | "anon"
 
 const PreviewAccessModeContext = createContext<PreviewAccessMode>("authed")
 const PreviewCacheScopeContext = createContext<string | null>("authed")
+// A public link can allow previewing its file but not downloading it; its viewers then offer no way of
+// their own to save the bytes. Everything else may.
+const PreviewDownloadableContext = createContext(true)
 
 // The preview cache's key scope (previewCache.ts). Authed items share one. A public link's is a
 // fingerprint of its key and password, so bytes read under one password are never served under
@@ -52,4 +55,17 @@ export function usePreviewAccessMode(): PreviewAccessMode {
 
 export function usePreviewCacheScope(): string | null {
 	return useContext(PreviewCacheScopeContext)
+}
+
+export function PreviewDownloadableProvider({ downloadable, children }: { downloadable: boolean; children: ReactNode }) {
+	return <PreviewDownloadableContext value={downloadable}>{children}</PreviewDownloadableContext>
+}
+
+export function usePreviewDownloadable(): boolean {
+	return useContext(PreviewDownloadableContext)
+}
+
+// Takes a native <video>/<audio> control bar's own download entry away when the file may not be saved.
+export function mediaControlsList(downloadable: boolean): "nodownload" | undefined {
+	return downloadable ? undefined : "nodownload"
 }

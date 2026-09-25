@@ -9,6 +9,7 @@ import { DirectoryGlyph, ItemIcon } from "@/features/drive/components/itemIcon"
 import { allowedMediaContentType } from "@/features/preview/lib/mediaType"
 import { isMediaStreamAvailable } from "@/features/preview/lib/previewStream"
 import { usePreviewStreamUrl } from "@/features/preview/hooks/usePreviewStreamUrl"
+import { mediaControlsList } from "@/features/preview/lib/accessMode"
 import { PreviewOverlay } from "@/features/preview/components/previewOverlay"
 import { LoadingState } from "@/components/loadingState"
 import { noop } from "@/lib/utils"
@@ -78,7 +79,20 @@ function LinkCardShell({
 // zero new viewer code for any of these categories. `variant="links"` (not "drive"): the item is
 // neither owned nor a real tree member, so this keeps the overlay's inline-editor save path inert
 // (isEditable gates on variant==="drive") on top of previewMenuVisible's own isLinkedEmbedItem check.
-function FilenPreviewCard({ item, name, subtitle, icon }: { item: DriveItem; name: string; subtitle: string; icon: ReactNode }) {
+// `downloadable` is the link's own flag.
+function FilenPreviewCard({
+	item,
+	name,
+	subtitle,
+	icon,
+	downloadable
+}: {
+	item: DriveItem
+	name: string
+	subtitle: string
+	icon: ReactNode
+	downloadable: boolean
+}) {
 	const { t } = useTranslation("chats")
 	const [previewOpen, setPreviewOpen] = useState(false)
 
@@ -105,6 +119,7 @@ function FilenPreviewCard({ item, name, subtitle, icon }: { item: DriveItem; nam
 					onItemRemoved={() => {
 						setPreviewOpen(false)
 					}}
+					downloadable={downloadable}
 				/>
 			) : null}
 		</>
@@ -122,12 +137,14 @@ function FilenStreamedInlineMedia({
 	name,
 	category,
 	contentType,
+	downloadable,
 	fallback
 }: {
 	item: DriveItem
 	name: string
 	category: "image" | "video" | "audio"
 	contentType: string
+	downloadable: boolean
 	fallback: ReactNode
 }) {
 	const { t } = useTranslation("chats")
@@ -152,6 +169,7 @@ function FilenStreamedInlineMedia({
 			<video
 				src={result.url}
 				controls
+				controlsList={mediaControlsList(downloadable)}
 				preload="metadata"
 				aria-label={name}
 				className="mt-1 max-h-72 max-w-sm rounded-xl border border-border"
@@ -164,6 +182,7 @@ function FilenStreamedInlineMedia({
 			<audio
 				src={result.url}
 				controls
+				controlsList={mediaControlsList(downloadable)}
 				preload="metadata"
 				aria-label={name}
 				className="mt-1 w-64"
@@ -202,6 +221,7 @@ function FilenStreamedInlineMedia({
 					onItemRemoved={() => {
 						setPreviewOpen(false)
 					}}
+					downloadable={downloadable}
 				/>
 			) : null}
 		</>
@@ -217,11 +237,13 @@ function FilenInlineMedia({
 	item,
 	name,
 	category,
+	downloadable,
 	fallback
 }: {
 	item: DriveItem
 	name: string
 	category: "image" | "video" | "audio"
+	downloadable: boolean
 	fallback: ReactNode
 }) {
 	const contentType = allowedMediaContentType(item)
@@ -236,6 +258,7 @@ function FilenInlineMedia({
 			name={name}
 			category={category}
 			contentType={contentType}
+			downloadable={downloadable}
 			fallback={fallback}
 		/>
 	)
@@ -308,6 +331,7 @@ export function FilenLinkCard({
 	const name = data.name ?? link.linkUuid
 	const item = linkedFileIntoDriveItem(data.linkedFile)
 	const sizeLabel = formatBytes(Number(data.size))
+	const { downloadable } = data.linkedFile
 	const icon = (
 		<ItemIcon
 			item={item}
@@ -321,12 +345,14 @@ export function FilenLinkCard({
 				item={item}
 				name={name}
 				category={data.previewCategory}
+				downloadable={downloadable}
 				fallback={
 					<FilenPreviewCard
 						item={item}
 						name={name}
 						subtitle={sizeLabel}
 						icon={icon}
+						downloadable={downloadable}
 					/>
 				}
 			/>
@@ -352,6 +378,7 @@ export function FilenLinkCard({
 			name={name}
 			subtitle={sizeLabel}
 			icon={icon}
+			downloadable={downloadable}
 		/>
 	)
 }

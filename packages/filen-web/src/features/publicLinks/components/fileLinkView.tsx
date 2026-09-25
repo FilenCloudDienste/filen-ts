@@ -12,14 +12,15 @@ import { PublicLinkLoading, PublicLinkInvalid, PublicLinkError } from "@/feature
 // The /f/ route body. Resolves a LinkedFile against the anon worker surface, driving the password gate
 // off the resolve outcome (a protected file throws until the password matches — there is no up-front
 // flag). The typed password lives ONLY in this component's state and the query closure; a reload drops
-// it and re-prompts. A file link always permits download (the LinkedFile surface carries no disable
-// flag — that flag is directory-only), so the hero's download is unconditionally offered.
+// it and re-prompts. A link that disallows downloads offers neither Download nor Save to Cloud Drive, as a
+// directory link without enableDownload doesn't.
 export function FileLinkView({ uuid, linkKey }: { uuid: string; linkKey: string }) {
 	const [password, setPassword] = useState<string | undefined>(undefined)
 	const [submitted, setSubmitted] = useState(false)
 	const query = usePublicFile(uuid, linkKey, password)
 	const access = fileAccessState({ status: query.status, error: query.error, submitted })
-	const saveable = useLinkSaveable("file", query.data?.uuid ?? null)
+	// Not asked for a link whose file may not be taken, a copy included.
+	const saveable = useLinkSaveable("file", query.data?.downloadable === true ? query.data.uuid : null)
 
 	if (access === "loading") {
 		return <PublicLinkLoading />
@@ -61,7 +62,7 @@ export function FileLinkView({ uuid, linkKey }: { uuid: string; linkKey: string 
 	return (
 		<FileHero
 			item={item}
-			downloadEnabled={true}
+			downloadEnabled={linked.downloadable}
 			linkScope={secretFingerprint(linkKey, password)}
 			saveAction={
 				saveable
