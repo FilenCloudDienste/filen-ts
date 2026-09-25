@@ -171,15 +171,60 @@ export function filterDriveItemsByLocalSearch<T extends DriveItem>(items: readon
 	return items.filter(item => driveItemName(item).toLowerCase().includes(normalized))
 }
 
-// Reconciles the store's possibly-stale selected-item snapshots against the freshest metadata in
-// the current live/search result set before either the bulk toolbar or a bulk dialog action reads them
-// — a remote favorite/rename/undecryptable-flip that landed after the item was selected is picked up
-// here instead of the object captured at click time (mirrors mobile's own rule that bulk actions always
-// operate against the freshest metadata). An item no longer present in `liveItems` is passed through
-// unchanged rather than dropped — dropping it is staleSelectionUuids' own job (the ghost-selection purge
-// effect), not this function's; this only ever refreshes fields, never prunes.
-export function reconcileSelectedItems(selectedItems: readonly DriveItem[], liveItems: readonly DriveItem[]): DriveItem[] {
-	const liveByUuid = new Map(liveItems.map(item => [item.data.uuid, item]))
+// A row's identity: the Shared by me root lists an item once per receiver, and each row unshares only its
+// own receiver, so a shared root row is told apart by its counterpart too.
+function rowKey(item: DriveItem): string {
+	if (item.type !== "sharedRootDirectory" && item.type !== "sharedRootFile") {
+		return item.data.uuid
+	}
 
-	return selectedItems.map(item => liveByUuid.get(item.data.uuid) ?? item)
+	const role = item.data.sharingRole
+
+	return `${item.data.uuid}:${String("Receiver" in role ? role.Receiver.id : role.Sharer.id)}`
+}
+
+// Reconciles the store's possibly-stale selected-item snapshots against the freshest metadata in
+// the listing's live rows or search results before the bulk toolbar, a bulk dialog action, a menu or the
+// clipboard reads them — a rename/favorite/move/undecryptable-flip that landed after the item was selected
+// is picked up here instead of the object captured at click time (mirrors mobile's own rule that bulk
+// actions always operate against the freshest metadata). An item no longer present in `liveItems` is
+// passed through unchanged rather than dropped — dropping it is staleSelectionUuids' own job (the
+// ghost-selection purge effect), not this function's; this only ever refreshes fields, never prunes. The
+// same array when no selected item changed, so a change to another row re-renders nothing it feeds; one
+// pass over the live rows, indexing only the selection, each selected row taking its first live match.
+export function reconcileSelectedItems<T extends DriveItem>(selectedItems: T[], liveItems: readonly T[]): T[] {
+	if (selectedItems.length === 0) {
+		return selectedItems
+	}
+
+	// Left to match.
+	const positions = new Map<string, number>()
+
+	for (const [index, item] of selectedItems.entries()) {
+		positions.set(rowKey(item), index)
+	}
+
+	let reconciled: T[] | null = null
+
+	for (const live of liveItems) {
+		const key = rowKey(live)
+		const index = positions.get(key)
+
+		if (index === undefined) {
+			continue
+		}
+
+		if (selectedItems[index] !== live) {
+			reconciled ??= selectedItems.slice()
+			reconciled[index] = live
+		}
+
+		positions.delete(key)
+
+		if (positions.size === 0) {
+			break
+		}
+	}
+
+	return reconciled ?? selectedItems
 }

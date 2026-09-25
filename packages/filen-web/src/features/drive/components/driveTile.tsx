@@ -71,7 +71,7 @@ export function DriveTile({
 	const name = driveItemName(item)
 	// Drag-to-move — see DriveRow's identical wiring. Pointer-only enhancement; the item menu's "Move"
 	// stays the accessible route.
-	const dragSource = buildDragSourceProps(item, variant)
+	const dragSource = buildDragSourceProps(item, variant, selectedItems)
 	// See DriveRow's identical derivation.
 	const searchHit = searchParentPath !== undefined && searchParentPath.length > 0
 	const pathUuids = splatToUuids(splat)

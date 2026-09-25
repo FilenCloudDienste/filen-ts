@@ -6,6 +6,7 @@ import { useVirtualizer } from "@tanstack/react-virtual"
 import { useAction } from "@/lib/keymap/useAction"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { selectableForSelectAll } from "@/features/drive/lib/selectionFlags"
+import { reconcileSelectedItems } from "@/features/drive/components/directoryListing.logic"
 import { canCopyToClipboard, shouldHandleClipboardShortcut } from "@/features/drive/lib/clipboard.logic"
 import { clipboardShortcutContext, copyToClipboard } from "@/features/drive/lib/clipboard"
 import { type PhotoItem } from "@/features/photos/lib/captureSort"
@@ -53,7 +54,10 @@ export function PhotoGrid({ rootUuid, items }: PhotoGridProps) {
 	const [containerWidth, setContainerWidth] = useState(0)
 	const [anchorUuid, setAnchorUuid] = useState<string | null>(null)
 
-	const selectedItems = usePhotosStore(useShallow(state => state.selectedItems))
+	const selection = usePhotosStore(useShallow(state => state.selectedItems))
+	// Each selected photo as the grid now holds it, not as it was when selected: a rename or favorite
+	// replaces it in the grid, never in the selection (see reconcileSelectedItems).
+	const selectedItems = reconcileSelectedItems(selection, items)
 	const { handlePointerSelect } = usePhotosSelection(items, anchorUuid, setAnchorUuid)
 	const { isDialogOpen, handleItemAction, handleBulkDialogAction, openPreview, renderActiveDialog } = usePhotosDialogHost({
 		rootUuid,

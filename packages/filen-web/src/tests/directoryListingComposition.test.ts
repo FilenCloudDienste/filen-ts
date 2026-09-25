@@ -113,10 +113,17 @@ vi.mock("@/features/drive/components/driveRow", () => ({
 }))
 vi.mock("@/features/drive/components/driveTile", () => ({ DriveTile: () => null }))
 vi.mock("@/features/drive/components/bulkActionBar", () => ({
-	BulkActionBar: (props: { selectedItems: { data: { uuid: string; decryptedMeta?: { name?: string } | null } }[] }) =>
+	BulkActionBar: (props: {
+		selectedItems: {
+			data: { uuid: string; decryptedMeta?: { name?: string } | null; sharingRole?: { Receiver?: { email: string } } }
+		}[]
+	}) =>
 		createElement(
 			"div",
-			{ "data-testid": "bulk-bar" },
+			{
+				"data-testid": "bulk-bar",
+				"data-receivers": props.selectedItems.map(item => item.data.sharingRole?.Receiver?.email ?? "").join("|")
+			},
 			props.selectedItems.map(item => item.data.decryptedMeta?.name ?? item.data.uuid).join("|")
 		)
 }))
@@ -399,6 +406,39 @@ describe("DirectoryListing — hidden-items filter", () => {
 		refresh()
 
 		expect(useDriveStore.getState().selectedItems.map(item => item.data.decryptedMeta?.name)).toEqual(["Documents"])
+	})
+})
+
+// Writes and socket events replace a row in its listing, never in the selection: a paste, a copy or a
+// move of the click-time snapshot would carry the name it had then.
+describe("DirectoryListing — selection reconcile", () => {
+	it("hands the bulk bar a selected row as its listing now holds it", () => {
+		for (const variant of ["drive", "recents"] as const) {
+			const selected = narrowItem(mockFile("Old name", testUuid("row")))
+			const { select, refresh } = renderListing({ variant, items: [selected, narrowItem(mockDir("Documents"))] })
+
+			select([selected])
+			listingQuery.current = {
+				...listingQuery.current,
+				data: [narrowItem(mockFile("New name", testUuid("row"))), narrowItem(mockDir("Documents"))]
+			}
+			refresh()
+
+			expect(screen.getByTestId("bulk-bar").textContent).toBe("New name")
+
+			cleanup()
+		}
+	})
+
+	// The Shared by me root lists an item once per receiver, and each row unshares only its own receiver.
+	it("hands the bulk bar the Shared by me root row that was selected, not another receiver's", () => {
+		const row = (id: number, email: string) => narrowItem(mockSharedFile("Report", { Receiver: { email, id } }))
+		const carol = row(2, "carol@x.com")
+		const { select } = renderListing({ variant: "sharedOut", items: [row(1, "bob@x.com"), carol] })
+
+		select([carol])
+
+		expect(screen.getByTestId("bulk-bar").getAttribute("data-receivers")).toBe("carol@x.com")
 	})
 })
 

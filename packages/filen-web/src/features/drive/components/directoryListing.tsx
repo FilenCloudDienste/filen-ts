@@ -192,12 +192,12 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	const resolvedCount = display.resolvedCount
 
 	const selectedItems = useDriveStore(useShallow(state => state.selectedItems))
-	// Bulk consumers (the dialog host + the floating bulk bar below) always read the freshest
-	// metadata for a still-selected SEARCH hit, not the possibly-stale object captured at select time —
-	// see reconcileSelectedItems' own doc comment. Scoped to the cache-backed engine only: the local
-	// filter above has no live push stream to reconcile against (its source is the same listingQuery
-	// data `selectedItems` was already drawn from).
-	const reconciledSelectedItems = search.active ? reconcileSelectedItems(selectedItems, search.results) : selectedItems
+	// Bulk consumers (the dialog host, the floating bulk bar, the menus and the clipboard below) always
+	// read the freshest metadata for a still-selected row or search hit, not the possibly-stale object
+	// captured at select time: writes and socket events replace a row in its listing, never in the
+	// selection — see reconcileSelectedItems' own doc comment. Against the listing's unfiltered rows, so a
+	// row the local filter hides is kept current too.
+	const reconciledSelectedItems = reconcileSelectedItems(selectedItems, search.active ? search.results : visibleItems)
 	// Derived once per render so each row/tile's membership check is an O(1) `.has()` instead of an
 	// O(selected) `.some()` — select-all in a large directory would otherwise make every render
 	// O(visible * selected).

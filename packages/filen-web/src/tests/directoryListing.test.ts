@@ -514,4 +514,44 @@ describe("reconcileSelectedItems", () => {
 		expect(result.map(item => item.data.uuid)).toEqual([a.data.uuid, b.data.uuid])
 		expect(result.every(item => item.data.favorited)).toBe(true)
 	})
+
+	// Every row and the bulk bar take the selection as a prop.
+	it("returns the selection itself while no selected row changed, whatever else the listing did", () => {
+		const a = narrowItem(mockDir({ uuid: testUuid("reconcile-same-a") }))
+		const other = narrowItem(mockDir({ uuid: testUuid("reconcile-same-other"), favorited: true }))
+		const selection = [a]
+
+		expect(reconcileSelectedItems(selection, [other, a])).toBe(selection)
+		expect(reconcileSelectedItems(selection, [other])).toBe(selection)
+	})
+
+	// The Shared by me root lists an item once per receiver, and each row unshares only its own receiver.
+	it("matches each selected Shared by me root row to its own receiver's live row", () => {
+		const row = (receiver: number, name: string) =>
+			narrowItem({
+				...mockSharedFile(testUuid("reconcile-receivers"), { Receiver: { email: `${String(receiver)}@x.com`, id: receiver } }),
+				meta: {
+					type: "decoded",
+					data: { name, mime: "application/pdf", modified: 1_700_000_000_000n, size: 2_048n, key: "k", version: 2 }
+				}
+			})
+		const dir = (favorited: boolean) => narrowItem(mockDir({ uuid: testUuid("reconcile-receivers-dir"), favorited }))
+		// Renamed since they were selected.
+		const live = [row(1, "new.pdf"), row(2, "new.pdf"), dir(true)]
+
+		expect(reconcileSelectedItems([row(2, "old.pdf")], live)).toEqual([row(2, "new.pdf")])
+		expect(reconcileSelectedItems([row(2, "old.pdf"), dir(false)], live)).toEqual([row(2, "new.pdf"), dir(true)])
+		expect(reconcileSelectedItems([row(1, "old.pdf"), row(2, "old.pdf"), dir(false)], live)).toEqual(live)
+	})
+
+	it("takes a selected row's first live match and still reaches the rest when a row repeats", () => {
+		const a = (favorited: boolean) => narrowItem(mockDir({ uuid: testUuid("reconcile-repeat-a"), favorited }))
+		const b = (favorited: boolean) => narrowItem(mockDir({ uuid: testUuid("reconcile-repeat-b"), favorited }))
+		const first = a(true)
+
+		const result = reconcileSelectedItems([a(false), b(false)], [first, a(false), b(true)])
+
+		expect(result[0]).toBe(first)
+		expect(result[1]).toEqual(b(true))
+	})
 })

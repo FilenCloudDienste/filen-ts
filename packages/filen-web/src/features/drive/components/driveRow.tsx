@@ -80,7 +80,7 @@ export function DriveRow({
 	// Drag-to-move: a move-capable row is a drag source; a directory row is also a drop target for a
 	// move (self/descendant/same-parent guarded via its own ancestry). The accessible move route stays
 	// the item menu's "Move" action — this is a pointer-only enhancement.
-	const dragSource = buildDragSourceProps(item, variant)
+	const dragSource = buildDragSourceProps(item, variant, selectedItems)
 	// A cross-directory search hit is the only case "Open containing directory" has somewhere to go —
 	// searchParentPath is "" for a direct child of the search root and undefined outside a search.
 	const searchHit = searchParentPath !== undefined && searchParentPath.length > 0

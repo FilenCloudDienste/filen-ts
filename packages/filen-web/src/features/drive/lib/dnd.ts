@@ -6,6 +6,7 @@ import { moveItems } from "@/features/drive/lib/actions"
 import { type BulkOutcome } from "@/features/drive/lib/bulk"
 import { toastBulkOutcome } from "@/features/drive/lib/bulkToast"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
+import { reconcileSelectedItems } from "@/features/drive/components/directoryListing.logic"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 
@@ -126,11 +127,11 @@ export interface DragSourceProps {
 }
 
 // Drag-source props for a move-capable row/tile, or undefined when the variant can't drag (the row
-// renders non-draggable). Reading the selection from the store at dragstart (not via a subscription)
-// keeps rows from re-rendering on every selection change. Pointer-only affordance — the accessible
-// move route stays the item menu's "Move" action (opens the destination picker); see the row/tile
-// draggable wiring.
-export function buildDragSourceProps(item: DriveItem, variant: DriveVariant): DragSourceProps | undefined {
+// renders non-draggable). The selection is read from the store at dragstart, each item as `current` (the
+// listing's reconciled selection) now has it: a move re-encrypts the passed item's name for the
+// destination's shares and links. Pointer-only affordance — the accessible move route stays the item
+// menu's "Move" action (opens the destination picker); see the row/tile draggable wiring.
+export function buildDragSourceProps(item: DriveItem, variant: DriveVariant, current: DriveItem[]): DragSourceProps | undefined {
 	if (!canDragVariant(variant)) {
 		return undefined
 	}
@@ -138,7 +139,7 @@ export function buildDragSourceProps(item: DriveItem, variant: DriveVariant): Dr
 	return {
 		draggable: true,
 		onDragStart: event => {
-			const selectedItems = useDriveStore.getState().selectedItems
+			const selectedItems = reconcileSelectedItems(useDriveStore.getState().selectedItems, current)
 			const selectedUuids = new Set(selectedItems.map(selected => selected.data.uuid))
 			const dragged = assembleDragPayload(item, selectedUuids, selectedItems)
 
