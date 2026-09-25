@@ -3,9 +3,9 @@ import { queryClient } from "@/queries/client"
 
 // The rail's unread sum (useChatsUnreadCount) reads each chat's message cache without observing it, so a
 // change to message caches alone re-renders nothing: the resync lands every chat's messages after the list,
-// and a socket edit or delete patches a thread without touching the list. This moves on every write to a
-// message cache, and goes into the sum as an input so its memo re-runs. One cache listener for the whole
-// app, subscribed from the start so no write lands unseen before the rail subscribes.
+// and a socket edit or delete patches a thread without touching the list. This moves on every write to, or
+// removal of, a message cache, and goes into the sum as an input so its memo re-runs. One cache listener
+// for the whole app, subscribed from the start so no write lands unseen before the rail subscribes.
 let messagesVersion = 0
 let messagesVersionNotifyPending = false
 const messagesVersionListeners = new Set<() => void>()
@@ -17,12 +17,12 @@ interface MessagesCacheEvent {
 	query: { queryKey: readonly unknown[] }
 }
 
-// Removals aren't counted: leaving or deleting a chat drops it from the list first, which re-renders the
-// rail anyway, and the only other removal is sign-out's wipe.
+// A removal counts: query-core's gc drops a message cache nothing observes (browser timers wrap GC_TIME to
+// about 21 days), and the sum then finds it missing and heals it. Sign-out's wipe renders nothing, as it
+// detaches the badges first.
 function isChatMessagesChange(event: MessagesCacheEvent): boolean {
 	return (
-		event.type === "updated" &&
-		event.action?.type === "success" &&
+		(event.type === "removed" || (event.type === "updated" && event.action?.type === "success")) &&
 		event.query.queryKey[0] === "chats" &&
 		event.query.queryKey[1] === "messages"
 	)

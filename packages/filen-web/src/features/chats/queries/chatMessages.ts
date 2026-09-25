@@ -38,7 +38,7 @@ function resolveChat(chatUuid: string): Chat | undefined {
 // without that page (chatMessagesQueryUpdate's `prev ?? []`), so a mount skips its fetch only for these.
 const syncedChatEpochs = new Map<string, number>()
 
-// Per chat, bumped by every patch that would cancel an in-flight read of its thread (cancelInFlightIfCached).
+// Per chat, bumped by every patch that would cancel an in-flight read of its thread (beforePatch).
 const threadFetchCancels = new Map<string, number>()
 
 export function markChatMessagesUnsynced(): void {
@@ -155,17 +155,22 @@ export function useChatMessages(chatUuid: string, options?: { enabled?: boolean 
 }
 
 // Cancel-before-patch WITH the initial-fetch carve-out — identical rule to chatsQueryUpdate,
-// scoped per chat uuid.
-function cancelInFlightIfCached(chatUuid: string): void {
-	if (queryClient.getQueryData(chatMessagesQueryKey(chatUuid)) !== undefined) {
-		threadFetchCancels.set(chatUuid, threadCancels(chatUuid) + 1)
+// scoped per chat uuid. A patch that creates the cache, after the gc or a leave removed it, holds none of
+// the page the thread's marker vouches for, so the thread reads again when opened.
+function beforePatch(chatUuid: string): void {
+	if (queryClient.getQueryData(chatMessagesQueryKey(chatUuid)) === undefined) {
+		syncedChatEpochs.delete(chatUuid)
 
-		void queryClient.cancelQueries({ queryKey: chatMessagesQueryKey(chatUuid) })
+		return
 	}
+
+	threadFetchCancels.set(chatUuid, threadCancels(chatUuid) + 1)
+
+	void queryClient.cancelQueries({ queryKey: chatMessagesQueryKey(chatUuid) })
 }
 
 export function chatMessagesQueryUpdate(chatUuid: string, updater: (prev: ChatMessage[]) => ChatMessage[]): void {
-	cancelInFlightIfCached(chatUuid)
+	beforePatch(chatUuid)
 	queryClient.setQueryData<ChatMessage[]>(chatMessagesQueryKey(chatUuid), prev => updater(prev ?? []))
 }
 

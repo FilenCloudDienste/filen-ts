@@ -41,6 +41,7 @@ import { detachUnreadBadges } from "@/features/chats/lib/messagesVersion"
 import { handleAuthSuccess, handleChatEvent, handleReconnecting, resetSocketReconnectState } from "@/features/chats/lib/socketHandlers"
 import { setFocusedChat } from "@/features/chats/lib/focusedChat"
 import { leaveChat } from "@/features/chats/lib/actions"
+import { refetchChatsAndMessages } from "@/features/chats/lib/refetchChatsAndMessages"
 import { socketAuthenticated, socketDropped } from "@/lib/sdk/socketSession"
 
 const USER_ID = 7n
@@ -539,6 +540,70 @@ describe("signing out", () => {
 		expect(chatsQueryGet()).toHaveLength(1)
 		expect(chatMessagesQueryGet(testUuid("d"))).toHaveLength(1)
 		expectRailUntouched()
+
+		unmount()
+	})
+})
+
+// query-core's gc removes a message cache nothing observes; browser timers wrap GC_TIME to about 21 days.
+describe("a message cache the gc collects", () => {
+	const a1 = peerMessage("a1", "a", 150n)
+	const a2 = peerMessage("a2", "a", 200n)
+
+	function collectMessages(chatLabel: string): void {
+		const query = queryClient.getQueryCache().find({ queryKey: chatMessagesQueryKey(testUuid(chatLabel)), exact: true })
+
+		if (query === undefined) {
+			throw new Error(`no message cache for ${chatLabel}`)
+		}
+
+		act(() => {
+			queryClient.getQueryCache().remove(query)
+		})
+	}
+
+	it("is read again for the rail badge", async () => {
+		listChats.mockResolvedValue([mockChat("a", a2)])
+		listMessagesBefore.mockResolvedValue([a1, a2])
+
+		const { result, unmount } = renderBadge()
+		await drain()
+
+		expect(result.current).toBe(2)
+
+		collectMessages("a")
+		await drain()
+
+		expect(listMessagesBefore).toHaveBeenCalledTimes(2)
+		expect(chatMessagesQueryGet(testUuid("a"))).toEqual([a1, a2])
+
+		handleChatEvent({ inner: { type: "messageNew", msg: peerMessage("a3", "a", 250n) }, chatMessageId: 1n })
+		await waitFor(() => {
+			expect(result.current).toBe(3)
+		})
+
+		unmount()
+	})
+
+	// The rail's heal hasn't refilled it yet: the patch recreates the cache with only what it brings.
+	it("is read again when its thread opens after a patch recreated it", async () => {
+		listChats.mockResolvedValue([mockChat("a", a1)])
+		listMessagesBefore.mockResolvedValue([a1])
+		await act(() => refetchChatsAndMessages())
+
+		collectMessages("a")
+		handleChatEvent({ inner: { type: "messageNew", msg: a2 }, chatMessageId: 1n })
+		await waitFor(() => {
+			expect(chatMessagesQueryGet(testUuid("a"))).toEqual([a2])
+		})
+
+		listMessagesBefore.mockResolvedValue([a1, a2])
+
+		const { result, unmount } = renderHook(() => useChatMessages(testUuid("a")), { wrapper })
+		await drain()
+
+		expect(listMessagesBefore).toHaveBeenCalledTimes(2)
+		expect(result.current.data).toEqual([a1, a2])
 
 		unmount()
 	})
