@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
 import type { Dir, DirPublicLinkRW, File, FilePublicLink, FileVersion, NormalDirsAndFiles, UserInfo, UuidStr } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
@@ -93,6 +93,7 @@ vi.mock("@/lib/sdk/client", () => ({
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
 import { queryClient as testQueryClient } from "@/queries/client"
+import { subscribeBranchChanges, type BranchChange } from "@/features/drive/lib/branchChanges"
 import { ACCOUNT_QUERY_KEY } from "@/queries/account"
 import { socketAuthenticated } from "@/lib/sdk/socketSession"
 import {
@@ -380,6 +381,41 @@ describe("renameItem", () => {
 		const outcome = await renameItem(original, "New")
 
 		expect(outcome.status).toBe("success")
+	})
+})
+
+// A route through the directory follows it (branchChanges.ts); a file is never on a route.
+describe("branch changes", () => {
+	function recordBranchChanges(): BranchChange[] {
+		const changes: BranchChange[] = []
+		const unsubscribe = subscribeBranchChanges(change => {
+			changes.push(change)
+		})
+
+		onTestFinished(unsubscribe)
+
+		return changes
+	}
+
+	it("announces a moved directory with its new parent, root-normalized", async () => {
+		seedRootUuid()
+		const changes = recordBranchChanges()
+		const item = dirItem({ uuid: testUuid("a"), parent: OTHER_PARENT_UUID })
+		moveDirectory.mockResolvedValueOnce(mockDir({ uuid: testUuid("a"), parent: ROOT_UUID }))
+
+		await moveItems([item], null)
+
+		expect(changes).toEqual([{ type: "moved", uuid: testUuid("a"), parentUuid: null }])
+	})
+
+	it("announces a trashed directory, and nothing for a trashed file", async () => {
+		const changes = recordBranchChanges()
+		trashDirectory.mockResolvedValueOnce(mockDir({ uuid: testUuid("a"), parent: "trash" }))
+		trashFile.mockResolvedValueOnce(mockFile({ uuid: testUuid("f"), parent: "trash" }))
+
+		await trashItems([dirItem({ uuid: testUuid("a") }), fileItem({ uuid: testUuid("f") })])
+
+		expect(changes).toEqual([{ type: "trashed", uuid: testUuid("a") }])
 	})
 })
 

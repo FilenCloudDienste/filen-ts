@@ -22,6 +22,7 @@ import { dropFromClipboard, followClipboardItem } from "@/features/drive/lib/cli
 import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
 import { runBulk, type BulkOutcome } from "@/features/drive/lib/bulk"
 import { runOp, type ActionOutcome as GenericActionOutcome, type VoidActionOutcome } from "@/lib/actions/outcome"
+import { emitBranchChange } from "@/features/drive/lib/branchChanges"
 
 export type { VoidActionOutcome }
 
@@ -147,6 +148,10 @@ export function patchMovedItem(moved: DriveItem, rootUuid: string): void {
 	if (!colorKnown) {
 		markDriveListingStale(parentUuid)
 	}
+
+	if (item.type === "directory") {
+		emitBranchChange({ type: "moved", uuid: item.data.uuid, parentUuid })
+	}
 }
 
 // ── Trash (bulk) ─────────────────────────────────────────────────────────
@@ -181,6 +186,10 @@ export function trashItems(items: DriveItem[]): Promise<BulkOutcome<DriveItem>> 
 		driveListingQueryUpdateGlobal({ type: "remove", uuid: item.data.uuid })
 		insertIntoTrashListing(trashed, colorKnown)
 		dropFromClipboard(item)
+
+		if (base.type === "directory") {
+			emitBranchChange({ type: "trashed", uuid: item.data.uuid })
+		}
 	})
 }
 

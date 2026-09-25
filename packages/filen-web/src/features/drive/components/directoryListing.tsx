@@ -81,6 +81,8 @@ import { useDriveClipboard } from "@/features/drive/hooks/useDriveClipboard"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { Spinner } from "@/components/ui/spinner"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
+import { reroutedRoute, subscribeBranchChanges } from "@/features/drive/lib/branchChanges"
+import { cachedOwnParents } from "@/features/drive/lib/ownAncestry"
 
 // Grid-view inset between the tiles and the pane's edges. A CSS padding on the listbox, not a
 // virtualizer padding, because the marquee reads the listbox's computed paddings for its hit math.
@@ -316,6 +318,33 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 
 	// A plain click on empty space anywhere in the window drops the selection, as in a file manager.
 	useClickAwayDeselect(selectedItems.length > 0, clearSelection)
+
+	// A directory on the route moved or went to the trash (from the sidebar tree, or on another device):
+	// the route follows it rather than keep naming a chain that no longer exists. Only My Drive and Shared
+	// by me routes are chains of the user's own directories (reroutedRoute).
+	useEffect(() => {
+		if (variant !== "drive" && variant !== "sharedOut") {
+			return
+		}
+
+		const path = splatToUuids(splat)
+
+		return subscribeBranchChanges(change => {
+			const next = reroutedRoute(variant, path, change, cachedOwnParents)
+
+			if (next === null) {
+				return
+			}
+
+			const params = { _splat: next.path.join("/") }
+
+			if (next.to === "/drive/$") {
+				void navigate({ to: "/drive/$", params, replace: true })
+			} else {
+				void navigate({ to: "/shared-out/$", params, replace: true })
+			}
+		})
+	}, [variant, splat, navigate])
 
 	// Stale-selection purge (sharedIn only): drops any selected item that just became blocked (the
 	// user blocked its sharer while viewing this listing) so the bulk bar can never target a

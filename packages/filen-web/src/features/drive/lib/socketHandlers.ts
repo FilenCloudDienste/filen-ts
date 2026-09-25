@@ -38,6 +38,7 @@ import {
 	emitPreviewItemRemoved,
 	emitPreviewItemReplaced
 } from "@/features/preview/lib/previewReconcile"
+import { emitBranchChange } from "@/features/drive/lib/branchChanges"
 
 // The realtime DRIVE event handlers — a faithful port of filen-mobile's drive socketHandlers.ts
 // SEMANTICS onto the wasm surface (flat discriminated `event.inner.type`), registered on the generic
@@ -355,6 +356,11 @@ export function handleDriveEvent(event: DriveSocketEvent): void {
 			// A preview open on the trashed item advances to a neighbour or closes.
 			if (!supersededByEdit) {
 				emitPreviewItemRemoved(inner.uuid)
+			}
+
+			// A route through the trashed directory leaves it (branchChanges.ts).
+			if (inner.type === "folderTrash") {
+				emitBranchChange({ type: "trashed", uuid: inner.uuid })
 			}
 
 			break
