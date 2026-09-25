@@ -160,6 +160,8 @@ export async function getInitialLanguage(): Promise<Language> {
 	const normalizedTag = deviceTag?.toLowerCase()
 	const isTraditionalChinese =
 		deviceLanguage === "zh" &&
+		// An explicit Simplified script wins over a Traditional-majority region (zh-Hans-HK).
+		locale?.languageScriptCode !== "Hans" &&
 		(locale?.languageScriptCode === "Hant" ||
 			deviceRegion === "TW" ||
 			deviceRegion === "HK" ||

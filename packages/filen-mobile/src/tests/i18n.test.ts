@@ -189,6 +189,15 @@ describe("getInitialLanguage", () => {
 		expect(result).toBe("zh-TW")
 	})
 
+	it("keeps a Simplified-script device in a Traditional-majority region on zh", async () => {
+		mockSecureStoreGet.mockResolvedValue(null)
+		mockGetLocales.mockReturnValue([{ languageCode: "zh", languageTag: "zh-Hans-HK", languageScriptCode: "Hans", regionCode: "HK" }])
+
+		const result = await getInitialLanguage()
+
+		expect(result).toBe("zh")
+	})
+
 	it("keeps Simplified Chinese devices on the existing zh catalog", async () => {
 		mockSecureStoreGet.mockResolvedValue(null)
 		mockGetLocales.mockReturnValue([{ languageCode: "zh", languageTag: "zh-CN" }])
