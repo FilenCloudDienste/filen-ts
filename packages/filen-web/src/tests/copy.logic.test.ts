@@ -297,7 +297,7 @@ describe("copyReportInput", () => {
 			report: copyReportInput(
 				report({
 					counts: counts(),
-					totals: { dirs: 0n, files: 0n, bytes: 0n },
+					totals: { dirs: 0n, files: 2n, bytes: 300n },
 					error: {
 						kind: "MaxStorageReached",
 						message: "Error of kind MaxStorageReached: error: the copy needs 300 bytes, 42 are free",
@@ -310,7 +310,7 @@ describe("copyReportInput", () => {
 			maxBytes: 42
 		})
 
-		expect(job.outcome).toEqual({ status: "quotaExceeded", freeBytes: 42 })
+		expect(job.outcome).toEqual({ status: "quotaExceeded", neededBytes: 300, freeBytes: 42 })
 	})
 })
 

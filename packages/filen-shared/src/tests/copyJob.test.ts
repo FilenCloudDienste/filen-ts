@@ -84,7 +84,7 @@ function report(overrides: Partial<Report> = {}): Report {
 
 const QUOTA_REPORT = report({
 	counts: counts(),
-	totals: { dirs: 0n, files: 0n, bytes: 0n },
+	totals: { dirs: 1n, files: 2n, bytes: 100n },
 	error: { kind: "MaxStorageReached", label: "needs more" }
 })
 
@@ -238,8 +238,19 @@ describe("settleCopyJob", () => {
 		expect(settled.outcome).toEqual({ status: "cancelled" })
 	})
 
-	it("settles a quota pre-flight refusal with the free storage it was checked against", () => {
-		expect(settleCopyJob(running, { report: QUOTA_REPORT, maxBytes: 42 }).outcome).toEqual({ status: "quotaExceeded", freeBytes: 42 })
+	it("settles a quota pre-flight refusal with what it needs and the free storage it was checked against", () => {
+		expect(settleCopyJob(running, { report: QUOTA_REPORT, maxBytes: 42 }).outcome).toEqual({
+			status: "quotaExceeded",
+			neededBytes: 100,
+			freeBytes: 42
+		})
+	})
+
+	it("settles a server refusal of a copy that fit the free figure as failed", () => {
+		expect(settleCopyJob(running, { report: QUOTA_REPORT, maxBytes: 100 }).outcome).toEqual({
+			status: "failed",
+			error: { kind: "MaxStorageReached", label: "needs more" }
+		})
 	})
 
 	it("settles a quota pre-flight refusal without a known free figure as failed", () => {

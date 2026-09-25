@@ -129,8 +129,8 @@ export const transfers = {
 	transfersCopyRowName_one: "{{count}} item",
 	/** Copy transfer row — name of a copy job holding more than one item (a one-item copy shows that item's own name); plural */
 	transfersCopyRowName_other: "{{count}} items",
-	/** Copy error (progress card and transfer row) — the copy is larger than the account's free storage; checked after the copy's scan, before anything was written; {{free}} = formatted free storage */
-	transfersCopyQuotaExceeded: "This copy doesn't fit the {{free}} of free storage.",
+	/** Copy error (progress card and transfer row) — the copy is larger than the account's free storage; checked after the copy's scan, before anything was written; {{needed}} = formatted size of the copy, {{free}} = formatted free storage */
+	transfersCopyQuotaExceeded: "This copy needs {{needed}} but only {{free}} is free.",
 
 	// ── Copy progress card (features/transfers/components/copyJobToast.tsx) ────
 	// A persistent toast per copy job; dismissing hides it and the job's transfers row reopens it.

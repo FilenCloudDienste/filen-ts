@@ -141,7 +141,7 @@ describe("copyFinishedTitle", () => {
 
 	it("a copy that ended in an error or a storage refusal reads failed, never copied", () => {
 		expect(
-			copyFinishedTitle(finished({ outcome: "errored", errorMessage: "This copy doesn't fit the 1 GB of free storage." }), realT)
+			copyFinishedTitle(finished({ outcome: "errored", errorMessage: "Not enough storage: needs 2 GB, 1 GB free." }), realT)
 		).toBe("Couldn't copy Vacation")
 		// Its trash retry succeeded: the error row stays failed.
 		expect(copyFinishedTitle(finished({ outcome: "errored", errorMessage: "Network error", copyTrashFailed: 0 }), realT)).toBe(

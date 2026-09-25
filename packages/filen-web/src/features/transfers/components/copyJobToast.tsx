@@ -196,7 +196,7 @@ function CopyJobStatusLine({ job }: { job: CopyJob }) {
 
 			break
 		case "quota":
-			text = t("transfersCopyQuotaExceeded", { free: formatBytes(status.freeBytes) })
+			text = t("transfersCopyQuotaExceeded", { needed: formatBytes(status.neededBytes), free: formatBytes(status.freeBytes) })
 
 			break
 	}

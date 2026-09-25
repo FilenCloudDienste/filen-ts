@@ -117,7 +117,7 @@ function report(overrides: Partial<CopyReport> = {}): CopyReport {
 }
 
 const QUOTA_REPORT = report({
-	totals: { dirs: 0n, files: 0n, bytes: 0n },
+	totals: { dirs: 0n, files: 3n, bytes: 900n },
 	counts: counts(),
 	error: { kind: "MaxStorageReached", message: "the copy needs 900 bytes but only 100 are free", ...NO_SERVER }
 })
@@ -472,9 +472,9 @@ describe("runCopyJob quota", () => {
 		const job = await runCopyJob(deps, request())
 
 		expect(deps.copyItems).toHaveBeenCalledTimes(1)
-		expect(job?.outcome).toEqual({ status: "quotaExceeded", freeBytes: 50 })
+		expect(job?.outcome).toEqual({ status: "quotaExceeded", neededBytes: 900, freeBytes: 50 })
 		expect(row()?.status).toBe("error")
-		expect(row()?.error?.label).toContain("50 B")
+		expect(row()?.error?.label).toBe("This copy needs 900 B but only 50 B is free.")
 	})
 
 	it("keeps the cached figure when the fresh read fails", async () => {
@@ -486,7 +486,7 @@ describe("runCopyJob quota", () => {
 
 		const job = await runCopyJob(deps, request())
 
-		expect(job?.outcome).toEqual({ status: "quotaExceeded", freeBytes: 100 })
+		expect(job?.outcome).toEqual({ status: "quotaExceeded", neededBytes: 900, freeBytes: 100 })
 	})
 
 	// Nothing was written and the user asked to stop: a storage error would quote a figure for a copy
@@ -540,7 +540,7 @@ describe("runCopyJob quota", () => {
 
 		const job = await runCopyJob(deps, request())
 
-		expect(job?.outcome).toEqual({ status: "quotaExceeded", freeBytes: 100 })
+		expect(job?.outcome).toEqual({ status: "quotaExceeded", neededBytes: 900, freeBytes: 100 })
 	})
 
 	// Any account write cancels the account query's own read, which then resolves with the cached

@@ -486,7 +486,8 @@ describe("a copy job", () => {
 
 describe("quota", () => {
 	const maxStorageReached = sdkError(ErrorKind.MaxStorageReached)
-	const preflightRefusal = () => report({ error: maxStorageReached, counts: ZERO, totals: { dirs: 0n, files: 0n, bytes: 0n } })
+	// The SDK refuses against maxBytes before writing anything; its report carries the scan's totals.
+	const preflightRefusal = () => report({ error: maxStorageReached, counts: ZERO, totals: { dirs: 0n, files: 3n, bytes: 5000n } })
 
 	it("a fresh cached account is trusted: no read", async () => {
 		scriptCopy(async () => report())
@@ -522,8 +523,7 @@ describe("quota", () => {
 		expect(useTransfersStore.getState().finishedTransfers[0]?.outcome).toBe("succeeded")
 	})
 
-	// The SDK refuses against maxBytes with a default report: no totals, however big the scan found it.
-	it("the SDK's own refusal reports no total, so it says the free storage it did not fit", async () => {
+	it("the SDK's own refusal says what the copy needs against the free storage it did not fit", async () => {
 		h.account.isCachedFresh.mockReturnValue(false)
 		h.account.fetchFresh.mockResolvedValue({ storageUsed: 9_000n, maxStorage: 10_000n })
 		scriptCopy(async () => preflightRefusal())
@@ -533,7 +533,7 @@ describe("quota", () => {
 		expect(useTransfersStore.getState().finishedTransfers).toEqual([
 			expect.objectContaining({
 				outcome: "errored",
-				errorMessage: `copy_quota_exceeded:${JSON.stringify({ free: formatBytes(1000) })}`
+				errorMessage: `not_enough_storage:${JSON.stringify({ needed: formatBytes(5000), free: formatBytes(1000) })}`
 			})
 		])
 	})

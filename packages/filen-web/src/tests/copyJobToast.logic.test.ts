@@ -71,7 +71,11 @@ describe("copyJobStatus", () => {
 		}
 
 		expect(copyJobStatus(job({ outcome: { status: "done" } }))).toEqual({ kind: "key", key: "transfersStatusDone" })
-		expect(copyJobStatus(job({ outcome: { status: "quotaExceeded", freeBytes: 7 } }))).toEqual({ kind: "quota", freeBytes: 7 })
+		expect(copyJobStatus(job({ outcome: { status: "quotaExceeded", neededBytes: 9, freeBytes: 7 } }))).toEqual({
+			kind: "quota",
+			neededBytes: 9,
+			freeBytes: 7
+		})
 		// The error itself, put into words where it's shown so the text follows the language.
 		expect(copyJobStatus(job({ outcome: { status: "failed", error } }))).toEqual({ kind: "error", error })
 	})

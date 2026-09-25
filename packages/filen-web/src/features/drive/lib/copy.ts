@@ -117,8 +117,8 @@ async function readFreshAccount(account: QuotaCheckDeps): Promise<StorageCounter
 	}
 }
 
-function quotaExceededDTO(freeBytes: number): ErrorDTO {
-	const message = i18n.t("transfers:transfersCopyQuotaExceeded", { free: formatBytes(freeBytes) })
+function quotaExceededDTO(neededBytes: number, freeBytes: number): ErrorDTO {
+	const message = i18n.t("transfers:transfersCopyQuotaExceeded", { needed: formatBytes(neededBytes), free: formatBytes(freeBytes) })
 
 	return { species: "plain", message, label: message }
 }
@@ -182,7 +182,7 @@ function settleRow(transfers: RunCopyDeps["transfers"], id: string, job: CopyJob
 
 			break
 		case "quotaExceeded":
-			transfers.settle(id, "error", quotaExceededDTO(outcome.freeBytes))
+			transfers.settle(id, "error", quotaExceededDTO(outcome.neededBytes, outcome.freeBytes))
 
 			break
 		case "failed":

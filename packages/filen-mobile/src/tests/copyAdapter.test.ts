@@ -245,7 +245,7 @@ describe("copyReportInput", () => {
 	})
 
 	it("a MaxStorageReached before anything was created is the quota pre-flight refusal", () => {
-		const input = copyReportInput(report({ error: error(ErrorKind.MaxStorageReached) }))
+		const input = copyReportInput(report({ error: error(ErrorKind.MaxStorageReached), totals: { dirs: 0n, files: 1n, bytes: 100n } }))
 
 		expect(isQuotaPreflightFailure(input)).toBe(true)
 
@@ -254,7 +254,7 @@ describe("copyReportInput", () => {
 			{ report: input, maxBytes: 42 }
 		)
 
-		expect(settled.outcome).toEqual({ status: "quotaExceeded", freeBytes: 42 })
+		expect(settled.outcome).toEqual({ status: "quotaExceeded", neededBytes: 100, freeBytes: 42 })
 	})
 
 	it("takes skipped entries from the counts, whatever their reason carries", () => {

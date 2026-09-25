@@ -130,7 +130,5 @@ export const transfers = {
 	/** Finished copy row menu: start a new copy of only the items that failed */
 	copy_retry_failed: "Retry failed items",
 	/** Error shown when an upload or copy would not fit the account's free storage; nothing was sent. {{needed}} and {{free}} are formatted sizes */
-	not_enough_storage: "Not enough storage: needs {{needed}}, {{free}} free.",
-	/** Error on a copy refused before anything was copied because it would not fit the account's free storage, when its size is not known. {{free}} is a formatted size */
-	copy_quota_exceeded: "This copy doesn't fit the {{free}} of free storage."
+	not_enough_storage: "Not enough storage: needs {{needed}}, {{free}} free."
 } as const

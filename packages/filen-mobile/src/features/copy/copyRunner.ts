@@ -27,7 +27,7 @@ import { unwrapParentUuid } from "@/lib/sdkUnwrap"
 import { unwrapSdkError } from "@/lib/sdkErrors"
 import { driveItemDisplayName } from "@/lib/decryption"
 import transfers from "@/features/transfers/transfers"
-import { copyDoesNotFitMessage, notEnoughStorageMessage } from "@/features/transfers/quota"
+import { notEnoughStorageMessage } from "@/features/transfers/quota"
 import useTransfersStore, { type FinishedTransfer } from "@/features/transfers/store/useTransfers.store"
 import useCopyJobsStore, { getCopyJob } from "@/features/copy/store/useCopyJobs.store"
 import {
@@ -112,7 +112,7 @@ function finishedOutcome(job: CopyJob): Pick<FinishedTransfer, "outcome" | "erro
 		case "quotaExceeded": {
 			return {
 				outcome: "errored",
-				errorMessage: quotaExceededMessage(job.totals, job.outcome.freeBytes)
+				errorMessage: notEnoughStorageMessage(job.outcome.neededBytes, job.outcome.freeBytes)
 			}
 		}
 
@@ -123,25 +123,6 @@ function finishedOutcome(job: CopyJob): Pick<FinishedTransfer, "outcome" | "erro
 			}
 		}
 	}
-}
-
-// The scan's total is what didn't fit. The SDK's own pre-flight refusal reports no totals at all, so
-// only the free figure it was checked against can be said; a server refusal of a copy that fit that
-// figure gets the plain limit message.
-function quotaExceededMessage(totals: CopyJob["totals"], freeBytes: number): string {
-	if (totals.bytes > freeBytes) {
-		return notEnoughStorageMessage(totals.bytes, freeBytes)
-	}
-
-	if (totals.bytes === 0 && totals.files === 0 && totals.dirs === 0) {
-		return copyDoesNotFitMessage(freeBytes)
-	}
-
-	return copyJobErrorToHumanReadable({
-		kind: "MaxStorageReached",
-		message: "",
-		serverMessage: undefined
-	})
 }
 
 // A settled job's finished row; null for a cancelled one, whose row comes back only while "move to

@@ -52,7 +52,7 @@ export type CopyJobStatus =
 	| CopyJobKeyStatus
 	| { kind: "files"; done: number; count: number }
 	| { kind: "error"; error: ErrorDTO; trash?: CopyJobKeyStatus }
-	| { kind: "quota"; freeBytes: number }
+	| { kind: "quota"; neededBytes: number; freeBytes: number }
 
 export function copyJobStatus(job: CopyJob): CopyJobStatus {
 	if (isCopyTrashPending(job)) {
@@ -67,7 +67,7 @@ export function copyJobStatus(job: CopyJob): CopyJobStatus {
 		case "doneWithFailures":
 			return trashedStatus(job) ?? { kind: "key", key: "transfersCopyFailedItems", count: job.failures.length }
 		case "quotaExceeded":
-			return { kind: "quota", freeBytes: job.outcome.freeBytes }
+			return { kind: "quota", neededBytes: job.outcome.neededBytes, freeBytes: job.outcome.freeBytes }
 		case "failed": {
 			const trash = trashedStatus(job)
 

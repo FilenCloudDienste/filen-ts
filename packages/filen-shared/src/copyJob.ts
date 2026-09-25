@@ -98,7 +98,7 @@ export type CopyJobOutcome<TError> =
 	| { status: "done" }
 	| { status: "doneWithFailures" }
 	| { status: "cancelled" }
-	| { status: "quotaExceeded"; freeBytes: number }
+	| { status: "quotaExceeded"; neededBytes: number; freeBytes: number }
 	| { status: "failed"; error: TError }
 
 export interface CopyJob<TItem, TFailure, TRetryable, TError> {
@@ -228,7 +228,8 @@ export function applyCopyCreated<TItem, TJob extends CopyJob<TItem, unknown, unk
 	return { ...job, created: [...job.created, item] }
 }
 
-// The SDK checks maxBytes after its scan and fails before writing anything; it reports no totals then.
+// The SDK checks maxBytes after its scan and fails before writing anything, reporting the totals the
+// copy needs as not attempted. The server's own limit can refuse the same way before anything lands.
 export function isQuotaPreflightFailure(report: CopyReportInput<unknown, unknown, CopyJobErrorLike>): boolean {
 	return (
 		report.error?.kind === "MaxStorageReached" &&
@@ -270,8 +271,8 @@ export function settleCopyJob<
 		outcome = report.failures.length === 0 ? { status: "done" } : { status: "doneWithFailures" }
 	} else if (report.error.kind === "Cancelled") {
 		outcome = { status: "cancelled" }
-	} else if (isQuotaPreflightFailure(report) && maxBytes !== undefined) {
-		outcome = { status: "quotaExceeded", freeBytes: maxBytes }
+	} else if (isQuotaPreflightFailure(report) && maxBytes !== undefined && Number(report.totals.bytes) > maxBytes) {
+		outcome = { status: "quotaExceeded", neededBytes: Number(report.totals.bytes), freeBytes: maxBytes }
 	} else {
 		outcome = { status: "failed", error: report.error }
 	}
