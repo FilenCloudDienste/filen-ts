@@ -258,8 +258,8 @@ importers:
         specifier: ^15.1.1
         version: 15.1.1(expo-font@57.0.4)(react-native@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3)
       '@filen/sdk-rs':
-        specifier: 0.4.48
-        version: 0.4.48
+        specifier: 0.4.49
+        version: 0.4.49
       '@filen/shared':
         specifier: workspace:*
         version: link:../filen-shared
@@ -773,8 +773,8 @@ importers:
         specifier: 6.43.11
         version: 6.43.11
       '@filen/sdk-rs':
-        specifier: 0.4.48
-        version: 0.4.48
+        specifier: 0.4.49
+        version: 0.4.49
       '@filen/shared':
         specifier: workspace:*
         version: link:../filen-shared
@@ -2223,8 +2223,8 @@ packages:
     resolution: {integrity: sha512-J3eL4n4h5QTwfD0SIz8OIk6/+sOL/hFZAMacgCM07UNlxBQfJipEpIC2AQxvGkbYeStByJ0TVhQAJo+DeNgaSQ==}
     hasBin: true
 
-  '@filen/sdk-rs@0.4.48':
-    resolution: {integrity: sha512-i3p5MPW+USGQkgFZEOQsgFICJKNfq4/NBrJbYtcyCiDyzIS5CD69zNz7ol8F/a/RAYMxjfpMyVQsPxrRBvUEuQ==}
+  '@filen/sdk-rs@0.4.49':
+    resolution: {integrity: sha512-U9D2DJlC95LezLOAg9gUThxUqvmQzFkbAd3Xb1/JhTLxU+097YH26VGD2iNleqIeDTwEjsIgb08mOrpaVQBjNg==}
     engines: {node: '>=23'}
 
   '@floating-ui/core@1.8.0':
@@ -11618,7 +11618,7 @@ snapshots:
       chalk: 4.1.2
       js-yaml: 4.3.2
 
-  '@filen/sdk-rs@0.4.48':
+  '@filen/sdk-rs@0.4.49':
     dependencies:
       uniffi-bindgen-react-native: https://codeload.github.com/Enduriel/uniffi-bindgen-react-native/tar.gz/e0282ad3eb972eaea74225dcc06247b7a67204dd
 
