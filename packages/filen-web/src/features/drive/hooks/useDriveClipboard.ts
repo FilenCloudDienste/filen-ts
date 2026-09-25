@@ -6,6 +6,7 @@ import { destinationDirectoryName, directoryNameScope } from "@/features/drive/q
 import { cachedOwnParents } from "@/features/drive/lib/ownAncestry"
 import { canCopyToClipboard, canCutToClipboard, canPaste, shouldHandleClipboardShortcut } from "@/features/drive/lib/clipboard.logic"
 import { clipboardShortcutContext, copyToClipboard, cutToClipboard, pasteClipboard } from "@/features/drive/lib/clipboard"
+import { recheckClipboard } from "@/features/drive/lib/clipboardRecheck"
 import { useDriveClipboardStore } from "@/features/drive/store/useDriveClipboardStore"
 import { useAction } from "@/lib/keymap/useAction"
 
@@ -51,17 +52,17 @@ export function useDriveClipboard({
 			return t("driveMyDrive")
 		}
 
-		try {
-			return (await destinationDirectoryName(directoryNameScope(variant), ancestry)) ?? ""
-		} catch {
-			return ""
-		}
+		// No try/catch: a `??` inside one makes the React Compiler skip the whole hook.
+		const name = await destinationDirectoryName(directoryNameScope(variant), ancestry).catch(() => null)
+
+		return name ?? ""
 	}
 
 	function paste(): void {
-		void destinationName().then(async name => {
-			// Asked again on use: the tree may have changed since this render, with nothing re-rendering it.
-			if (canPaste(useDriveClipboardStore.getState().entry, target)) {
+		void Promise.all([destinationName(), recheckClipboard()]).then(async ([name, current]) => {
+			// Asked again on use, of the items as they now are: the tree may have changed since this render,
+			// with nothing re-rendering it.
+			if (current && canPaste(useDriveClipboardStore.getState().entry, target)) {
 				await pasteClipboard({ uuid, name })
 			}
 		})

@@ -6,7 +6,7 @@ import { queryClient } from "@/queries/client"
 // @filen/sdk-rs as a real value import, same elision hazard as above.
 import type { ListDirectoryTarget, ItemInfoResult } from "@/workers/sdk.worker"
 import type { Dir, File, FileVersion, DirPublicLinkRW, FilePublicLink, DirColor, DirSizeResponse, GetItemPathResult } from "@filen/sdk-rs"
-import { fastLocaleCompare, driveItemName, upsertItems } from "@filen/shared"
+import { fastLocaleCompare, driveItemName, removeByUuid, upsertItems } from "@filen/shared"
 import { narrowItem, asDirectoryOrFile, toAnyDirWithContext, type DriveItem } from "@/features/drive/lib/item"
 import {
 	getHideHiddenItems,
@@ -69,24 +69,41 @@ function listingId(variant: DriveVariant, uuid: string | null): string {
 	return `${variant}:${uuid ?? ""}`
 }
 
-// Socket-synced listings whose latest read ran entirely under a live socket with no stale mark landing
-// meanwhile. A persisted listing restores with its original read time, a read the socket wasn't up for
-// may predate an event it never delivered, and a read a stale mark overlaps may predate the change behind
-// it, so none of those count.
+// Listings whose latest read ran entirely under a live socket with no stale mark landing meanwhile, so
+// every change since has reached their rows as an event. A persisted listing restores with its original
+// read time, a read the socket wasn't up for may predate an event it never delivered, and a read a stale
+// mark overlaps may predate the change behind it, so none of those count.
 const listingsReadThisSession = new Set<string>()
 let listingStaleMarks = 0
 
 type ListingPatch = (items: DriveItem[]) => DriveItem[]
 
-// The listing reads under way, per listing, with the patches that landed meanwhile. A read may have
-// snapshotted the server before the change behind such a patch, so it applies the ones that landed after
-// it began to what it returns: a patch is never lost to an overlapping read, which therefore needs neither
-// cancelling nor repeating. `marks` counts patches that couldn't carry their whole change
-// (markDriveListingStale); one landing during a read keeps it from counting.
+// A listing patch kept as data, so a read under way can fold a burst of them into one pass over what it
+// returns (applyListingChanges).
+export type ListingChange =
+	| { type: "remove"; uuid: string }
+	// Never adds a row.
+	| { type: "replace"; uuid: string; replace: (row: DriveItem) => DriveItem }
+	// A same-uuid or same-name row makes way (upsertItems).
+	| { type: "upsert"; items: readonly DriveItem[] }
+	// A same-uuid row makes way: rows of a flat listing may share a name.
+	| { type: "append"; items: readonly DriveItem[] }
+	| { type: "update"; update: ListingPatch }
+
+// A change to one row wherever a listing holds it.
+export type ListingRowChange = Extract<ListingChange, { type: "remove" | "replace" }>
+
+// The listing reads under way, per listing, with the changes that landed meanwhile. A read may have
+// snapshotted the server before the change behind one, so it applies the ones that landed after it began
+// to what it returns: a change is never lost to an overlapping read, which therefore needs neither
+// cancelling nor repeating. `marks` counts changes that couldn't carry their whole effect
+// (markListingStale); one landing during a read keeps it from counting. `started` counts the reads
+// begun: query-core begins one while another is under way only once it has dropped that one.
 interface ListingReads {
 	params: DriveListingParams
 	running: number
-	patches: ListingPatch[]
+	started: number
+	changes: ListingChange[]
 	marks: number
 }
 
@@ -95,29 +112,35 @@ const listingReads = new Map<string, ListingReads>()
 async function readApplyingPatches(
 	params: DriveListingParams,
 	read: () => Promise<DriveItem[]>
-): Promise<{ items: DriveItem[]; marked: boolean }> {
+): Promise<{ items: DriveItem[]; marked: boolean; dropped: boolean }> {
 	const id = listingId(params.variant, params.uuid)
 	let reads = listingReads.get(id)
 
 	if (reads === undefined) {
-		reads = { params, running: 0, patches: [], marks: 0 }
+		reads = { params, running: 0, started: 0, changes: [], marks: 0 }
 
 		listingReads.set(id, reads)
 	}
 
-	const from = reads.patches.length
+	const from = reads.changes.length
 	const marks = reads.marks
 
+	reads.started++
 	reads.running++
 
-	try {
-		let items = await read()
+	const started = reads.started
 
-		for (const patch of reads.patches.slice(from)) {
-			items = patch(items)
+	try {
+		const items = await read()
+
+		// The listing read never touches the abort signal: once read, it makes unmounting a listing mid-read
+		// cancel the read, which the next mount then repeats. So a read an invalidation cancelled still gets
+		// here, with a result query-core throws away.
+		if (reads.started !== started) {
+			return { items, marked: false, dropped: true }
 		}
 
-		return { items, marked: reads.marks !== marks }
+		return { items: applyListingChanges(items, reads.changes, from), marked: reads.marks !== marks, dropped: false }
 	} finally {
 		reads.running--
 
@@ -130,10 +153,16 @@ async function readApplyingPatches(
 async function readListing(variant: Exclude<DriveVariant, "sharedIn" | "sharedOut">, uuid: string | null): Promise<DriveItem[]> {
 	const epoch = currentSocketEpoch()
 	const marks = listingStaleMarks
-	const { items, marked } = await readApplyingPatches({ variant, uuid }, () => fetchDirectoryListing(variant, uuid))
+	const { items, marked, dropped } = await readApplyingPatches({ variant, uuid }, () => fetchDirectoryListing(variant, uuid))
+
+	// The read that replaced it records its own.
+	if (dropped) {
+		return items
+	}
+
 	const id = listingId(variant, uuid)
 
-	if (SOCKET_SYNCED_VARIANTS.has(variant) && socketLiveSince(epoch) && marks === listingStaleMarks && !marked) {
+	if (socketLiveSince(epoch) && marks === listingStaleMarks && !marked) {
 		listingsReadThisSession.add(id)
 	} else {
 		listingsReadThisSession.delete(id)
@@ -151,7 +180,7 @@ const listingRefetchPolicy = {
 	staleTime: (query: { queryKey: ReturnType<typeof driveListingQueryKey> }) => {
 		const { variant, uuid } = query.queryKey[2]
 
-		return listingsReadThisSession.has(listingId(variant, uuid)) ? Infinity : 0
+		return SOCKET_SYNCED_VARIANTS.has(variant) && listingsReadThisSession.has(listingId(variant, uuid)) ? Infinity : 0
 	},
 	refetchOnReconnect: "always"
 } as const
@@ -160,7 +189,7 @@ const listingRefetchPolicy = {
 // structured clone already (see sdk.worker.ts); this module never JSON.stringifies them, and the
 // result rides the persister's own envelope serializer at rest — zero customization needed here.
 //
-// One hook serves every variant — DirectoryListing is variant-generic, so rules-of-hooks forbid
+// One builder serves every variant — DirectoryListing is variant-generic, so rules-of-hooks forbid
 // picking between two listing hooks per render. The queryFn dispatches instead: the two shared
 // variants fetch through fetchSharedListing (whose worker ops return a different result shape than
 // listDirectory — see fetchSharedListing / toListingTarget's throw), everything else through
@@ -168,22 +197,27 @@ const listingRefetchPolicy = {
 // `path` is a shared-variant resolution hint only (see fetchSharedListing) — deliberately NOT part of
 // the query KEY: the same uuid lists the same contents however it was reached, so keying on it would
 // fragment the cache for nothing. Defaulted, so every picker call site keeps its two-argument shape.
-export function useDirectoryListingQuery(
-	variant: DriveVariant,
-	uuid: string | null,
-	path: readonly string[] = []
-): UseQueryResult<DriveItem[]> {
-	return useQuery({
+// Key, read and freshness in one builder, so every observer of a listing reads it the same way.
+export function driveListingQueryOptions(variant: DriveVariant, uuid: string | null, path: readonly string[] = []) {
+	return {
 		...listingRefetchPolicy,
 		queryKey: driveListingQueryKey({ variant, uuid }),
-		queryFn: async () => {
+		queryFn: async (): Promise<DriveItem[]> => {
 			if (variant === "sharedIn" || variant === "sharedOut") {
 				return (await readApplyingPatches({ variant, uuid }, () => fetchSharedListing(variant, uuid, path))).items
 			}
 
 			return readListing(variant, uuid)
 		}
-	})
+	}
+}
+
+export function useDirectoryListingQuery(
+	variant: DriveVariant,
+	uuid: string | null,
+	path: readonly string[] = []
+): UseQueryResult<DriveItem[]> {
+	return useQuery(driveListingQueryOptions(variant, uuid, path))
 }
 
 // Sidebar directory-tree primitive: the minimal per-node shape the collapsible Cloud Drive tree
@@ -212,14 +246,12 @@ export function projectTreeChildren(items: DriveItem[]): DirectoryTreeChild[] {
 // Reads the drive listing's own cache entry rather than a slice of its own: listDirectory returns a
 // directory's files alongside its dirs in one call anyway, so sharing the key costs nothing and lets
 // the tree and the main pane dedupe one in-flight fetch, one focus/reconnect refetch, and pick up the
-// listing's socket patches. Same queryFn as useDirectoryListingQuery's "drive" arm — two observers on
-// one key must never disagree on how it is fetched. Lazy per node: a node's query only mounts once
-// its subtree does (see directoryTree.tsx), so an unopened node never fetches.
+// listing's socket patches. Same options as useDirectoryListingQuery — two observers on one key must
+// never disagree on how it is fetched. Lazy per node: a node's query only mounts once its subtree does
+// (see directoryTree.tsx), so an unopened node never fetches.
 export function useDirectoryTreeChildrenQuery(uuid: string | null): UseQueryResult<DirectoryTreeChild[]> {
 	return useQuery({
-		...listingRefetchPolicy,
-		queryKey: driveListingQueryKey({ variant: "drive", uuid }),
-		queryFn: () => readListing("drive", uuid),
+		...driveListingQueryOptions("drive", uuid),
 		select: projectTreeChildren
 	})
 }
@@ -266,11 +298,180 @@ function writeListing(query: Query, next: DriveItem[]): void {
 	}
 }
 
-// A read under way gets the patch through its replay, cached data directly. A listing nobody has read
-// gets neither: made from the rows a patch adds, it would show as that directory's whole content until
+// A read's changes applied to what it returned in as few passes as their order allows, so a burst of k
+// changes to n rows costs O(n + k) instead of a pass each: removals and replacements gather into one
+// pass, with the upserts or appends after them. A change that would act differently once gathered applies
+// what is gathered first.
+export function applyListingChanges(items: DriveItem[], changes: readonly ListingChange[], from = 0): DriveItem[] {
+	let result = items
+	const removed = new Set<string>()
+	const replaced = new Map<string, (row: DriveItem) => DriveItem>()
+	const upserted: DriveItem[] = []
+	const upsertedUuids = new Set<string>()
+	const appended = new Map<string, DriveItem>()
+
+	const flush = (): void => {
+		if (removed.size > 0 || replaced.size > 0 || appended.size > 0) {
+			const kept: DriveItem[] = []
+
+			for (const row of result) {
+				const uuid = row.data.uuid
+
+				if (removed.has(uuid) || appended.has(uuid)) {
+					continue
+				}
+
+				const replace = replaced.get(uuid)
+
+				kept.push(replace === undefined ? row : replace(row))
+			}
+
+			for (const row of appended.values()) {
+				kept.push(row)
+			}
+
+			result = kept
+		}
+
+		if (upserted.length > 0) {
+			result = upsertItems(result, upserted)
+		}
+
+		removed.clear()
+		replaced.clear()
+		upserted.length = 0
+		upsertedUuids.clear()
+		appended.clear()
+	}
+
+	for (let index = from; index < changes.length; index++) {
+		const change = changes[index]
+
+		if (change === undefined) {
+			continue
+		}
+
+		switch (change.type) {
+			case "remove": {
+				// An upsert also made way for its name, which dropping its row alone would undo.
+				if (upsertedUuids.has(change.uuid)) {
+					flush()
+				}
+
+				appended.delete(change.uuid)
+				removed.add(change.uuid)
+
+				break
+			}
+
+			case "replace": {
+				// A replacement may rename a row, which decides whether an upsert before it made way for it.
+				if (upserted.length > 0) {
+					flush()
+				}
+
+				const row = appended.get(change.uuid)
+
+				if (row !== undefined) {
+					appended.set(change.uuid, change.replace(row))
+
+					break
+				}
+
+				const earlier = replaced.get(change.uuid)
+
+				replaced.set(change.uuid, earlier === undefined ? change.replace : current => change.replace(earlier(current)))
+
+				break
+			}
+
+			case "upsert": {
+				if (appended.size > 0) {
+					flush()
+				}
+
+				for (const item of change.items) {
+					upserted.push(item)
+					upsertedUuids.add(item.data.uuid)
+				}
+
+				break
+			}
+
+			case "append": {
+				if (upserted.length > 0) {
+					flush()
+				}
+
+				// Appending a row again moves it to the end.
+				for (const item of change.items) {
+					appended.delete(item.data.uuid)
+					appended.set(item.data.uuid, item)
+				}
+
+				break
+			}
+
+			case "update": {
+				flush()
+
+				result = change.update(result)
+
+				break
+			}
+		}
+	}
+
+	flush()
+
+	return result
+}
+
+// A row change leaves a listing that doesn't hold the row as it was, so the caller can skip writing it.
+function applyListingChange(items: DriveItem[], change: ListingChange): DriveItem[] {
+	switch (change.type) {
+		case "remove": {
+			return items.some(row => row.data.uuid === change.uuid) ? removeByUuid(items, change.uuid) : items
+		}
+
+		case "replace": {
+			let next: DriveItem[] | undefined
+
+			for (let index = 0; index < items.length; index++) {
+				const row = items[index]
+
+				if (row?.data.uuid !== change.uuid) {
+					continue
+				}
+
+				const replaced = change.replace(row)
+
+				if (replaced !== row) {
+					next ??= [...items]
+					next[index] = replaced
+				}
+			}
+
+			return next ?? items
+		}
+
+		case "upsert":
+		case "append":
+		case "update": {
+			return applyListingChanges(items, [change])
+		}
+	}
+}
+
+function asListingChange(change: ListingChange | ListingPatch): ListingChange {
+	return typeof change === "function" ? { type: "update", update: change } : change
+}
+
+// A read under way gets the change through its replay, cached data directly. A listing nobody has read
+// gets neither: made from the rows a change adds, it would show as that directory's whole content until
 // its read, and a copy or a directory upload would leave one such entry behind per directory it creates.
-function patchListing(params: DriveListingParams, updater: ListingPatch): void {
-	listingReads.get(listingId(params.variant, params.uuid))?.patches.push(updater)
+function patchListing(params: DriveListingParams, change: ListingChange): void {
+	listingReads.get(listingId(params.variant, params.uuid))?.changes.push(change)
 
 	const query = listingQuery(params)
 	const prev = query?.state.data as DriveItem[] | undefined
@@ -279,7 +480,7 @@ function patchListing(params: DriveListingParams, updater: ListingPatch): void {
 		return
 	}
 
-	const next = updater(prev)
+	const next = applyListingChange(prev, change)
 
 	if (next !== prev) {
 		writeListing(query, next)
@@ -288,19 +489,17 @@ function patchListing(params: DriveListingParams, updater: ListingPatch): void {
 
 // Confirm-then-patch for a write landing in My Drive (queries/client.ts's zero-useMutation
 // convention) — always the "drive" variant: the three flat listings (recents/favorites/trash) have
-// no navigable parent to create/move into.
-export function driveListingQueryUpdate(parentUuid: string | null, updater: (prev: DriveItem[]) => DriveItem[]): void {
+// no navigable parent to create/move into. A ListingChange folds into a read's replay with the others; a
+// function costs that replay a pass of its own.
+export function driveListingQueryUpdate(parentUuid: string | null, change: ListingChange | ListingPatch): void {
 	flushListingCreates()
-	patchListing({ variant: "drive", uuid: parentUuid }, updater)
+	patchListing({ variant: "drive", uuid: parentUuid }, asListingChange(change))
 }
 
 // The flat listings (recents/favorites/trash/links) patched by their one key.
-export function flatListingQueryUpdate(
-	variant: "recents" | "favorites" | "trash" | "links",
-	updater: (prev: DriveItem[]) => DriveItem[]
-): void {
+export function flatListingQueryUpdate(variant: "recents" | "favorites" | "trash" | "links", change: ListingChange | ListingPatch): void {
 	flushListingCreates()
-	patchListing({ variant, uuid: null }, updater)
+	patchListing({ variant, uuid: null }, asListingChange(change))
 }
 
 // How long a created item waits to land in its parent listing together with the others created meanwhile.
@@ -351,20 +550,17 @@ export function flushListingCreates(): void {
 	queuedRecents = new Map()
 
 	for (const [parentUuid, byUuid] of creates) {
-		const items = [...byUuid.values()]
-
-		patchListing({ variant: "drive", uuid: parentUuid }, prev => upsertItems(prev, items))
+		patchListing({ variant: "drive", uuid: parentUuid }, { type: "upsert", items: [...byUuid.values()] })
 	}
 
 	if (recents.size > 0) {
-		const items = [...recents.values()]
-
 		// Recents spans directories, so only the uuid dedups: two recent files may share a name.
-		patchListing({ variant: "recents", uuid: null }, prev => [...prev.filter(row => !recents.has(row.data.uuid)), ...items])
+		patchListing({ variant: "recents", uuid: null }, { type: "append", items: [...recents.values()] })
 	}
 }
 
-// Logout: the queued creates and the patches kept for reads under way belong to the ended session.
+// Logout: the queued creates, the changes kept for reads under way and which listings were read belong to
+// the ended session.
 export function discardListingPatches(): void {
 	if (createFlushTimer !== undefined) {
 		clearTimeout(createFlushTimer)
@@ -375,19 +571,29 @@ export function discardListingPatches(): void {
 	queuedCreates = new Map()
 	queuedRecents = new Map()
 	listingReads.clear()
+	listingsReadThisSession.clear()
 }
 
-// For a patch that can't carry its whole change (a moved or restored directory, whose echo has no
-// colour): the listing reads again on its next mount or focus, and a read under way, which gets the
-// patch through its replay, doesn't count as current.
-export function markDriveListingStale(uuid: string | null): void {
-	const reads = listingReads.get(listingId("drive", uuid))
+// For a patch that can't carry its whole change (a directory row whose colour no current listing holds):
+// the listing reads again on its next mount or focus, and a read under way, which gets the patch through
+// its replay, doesn't count as current.
+function markListingStale(params: DriveListingParams): void {
+	const reads = listingReads.get(listingId(params.variant, params.uuid))
 
 	if (reads !== undefined) {
 		reads.marks++
 	}
 
-	listingQuery({ variant: "drive", uuid })?.invalidate()
+	listingQuery(params)?.invalidate()
+}
+
+export function markDriveListingStale(uuid: string | null): void {
+	markListingStale({ variant: "drive", uuid })
+}
+
+// A flat listing reads on every mount and focus anyway, so this only stops it counting as current.
+export function markFlatListingStale(variant: "recents" | "favorites" | "trash" | "links"): void {
+	markListingStale({ variant, uuid: null })
 }
 
 // One flat listing re-read if mounted, else marked stale.
@@ -408,13 +614,6 @@ export function markListingsStale(): void {
 	void queryClient.invalidateQueries({ queryKey: ["drive", "listing"], refetchType: "none" })
 }
 
-// Every updater this fan-out receives is a filter/map, which allocates a fresh array even when nothing
-// matched — so an array-reference check can't tell an affected listing from an untouched one, but an
-// element-identity walk can.
-function sameItems(prev: DriveItem[], next: DriveItem[]): boolean {
-	return prev.length === next.length && prev.every((item, index) => item === next[index])
-}
-
 // Fan-out patch across EVERY currently-instantiated listing, any variant, any uuid — a
 // `["drive","listing"]` queryKey filter only compares the indices IT specifies (verified against
 // the installed @tanstack/query-core's partialMatchKey: it walks Object.keys of the FILTER key, so
@@ -423,15 +622,22 @@ function sameItems(prev: DriveItem[], next: DriveItem[]): boolean {
 // parent — an item can be favorited/colored in place, or moved out of one listing into another — a
 // single narrow driveListingQueryUpdate call can't reach every affected key, but this can. A listing
 // with no cached data is never written, so this can never conjure a `[]` into an unfetched query; one
-// whose first read is under way gets the patch through that read's replay.
-export function driveListingQueryUpdateGlobal(updater: (items: DriveItem[], params: DriveListingParams) => DriveItem[]): void {
+// whose first read is under way gets the change through that read's replay. A function picks the
+// change per listing, or none.
+export function driveListingQueryUpdateGlobal(
+	change: ListingRowChange | ((params: DriveListingParams) => ListingRowChange | undefined)
+): void {
 	flushListingCreates()
 
-	// Every read under way, with or without data yet: its result may hold a row this touches.
-	for (const reads of listingReads.values()) {
-		const params = reads.params
+	const changeFor: (params: DriveListingParams) => ListingRowChange | undefined = typeof change === "function" ? change : () => change
 
-		reads.patches.push(items => updater(items, params))
+	// Every read under way, with or without data yet: its result may hold the row.
+	for (const reads of listingReads.values()) {
+		const resolved = changeFor(reads.params)
+
+		if (resolved !== undefined) {
+			reads.changes.push(resolved)
+		}
 	}
 
 	for (const query of queryClient.getQueryCache().findAll({ queryKey: ["drive", "listing"] })) {
@@ -441,22 +647,19 @@ export function driveListingQueryUpdateGlobal(updater: (items: DriveItem[], para
 			continue
 		}
 
-		const next = updater(prev, (query.queryKey as ReturnType<typeof driveListingQueryKey>)[2])
+		const resolved = changeFor((query.queryKey as ReturnType<typeof driveListingQueryKey>)[2])
+		const next = resolved === undefined ? prev : applyListingChange(prev, resolved)
 
-		// Most cached listings hold no row a given updater touches; writing one would re-render it for nothing.
-		if (sameItems(prev, next)) {
-			continue
+		// Most cached listings don't hold the row; writing one would re-render it for nothing.
+		if (next !== prev) {
+			writeListing(query, next)
 		}
-
-		writeListing(query, next)
 	}
 }
 
-// The row behind a uuid-only socket payload. Web keeps no worker-side item cache (mobile's
-// fileUuidToNormalFile), so the only full shape available for such an event is the row a cached
-// listing still holds — read it BEFORE a removal fan-out strips it. `undefined` when no cached listing
-// holds the uuid: there is nothing to rebuild the row from, and the affected listing refetches on its
-// next mount.
+// The row behind a uuid as the first cached listing holding it holds it, shared or owned, however current:
+// web keeps no worker-side item cache (mobile's fileUuidToNormalFile), so a listing row is the only full
+// shape at hand. `undefined` when no cached listing holds the uuid.
 export function findCachedListingItem(uuid: string): DriveItem | undefined {
 	for (const query of queryClient.getQueryCache().findAll({ queryKey: ["drive", "listing"] })) {
 		const found = (query.state.data as DriveItem[] | undefined)?.find(item => item.data.uuid === uuid)
@@ -467,6 +670,43 @@ export function findCachedListingItem(uuid: string): DriveItem | undefined {
 	}
 
 	return undefined
+}
+
+// The owned row behind a uuid, as a current listing holds it where one does: read this session under the
+// live socket and not marked stale since, so every change to the row has reached it. Otherwise as any
+// cached listing holds it, which may be outdated: a listing restored from disk, read while the socket was
+// down or left stale by a drop may have missed a change. Owned only: a shared row is never current, and
+// only an owned row can join this account's trash. Queued creates land first, so a new row is found.
+export function findOwnedListingItem(uuid: string): { item: DriveItem; current: boolean } | undefined {
+	flushListingCreates()
+
+	let outdated: DriveItem | undefined
+
+	for (const query of queryClient.getQueryCache().findAll({ queryKey: ["drive", "listing"] })) {
+		const { variant, uuid: listingUuid } = (query.queryKey as ReturnType<typeof driveListingQueryKey>)[2]
+		const current = !query.state.isInvalidated && listingsReadThisSession.has(listingId(variant, listingUuid))
+
+		// Past the first match, only a current listing's row is worth a scan.
+		if (!current && outdated !== undefined) {
+			continue
+		}
+
+		const found = (query.state.data as DriveItem[] | undefined)?.find(
+			item => item.data.uuid === uuid && (item.type === "directory" || item.type === "file")
+		)
+
+		if (found === undefined) {
+			continue
+		}
+
+		if (current) {
+			return { item: found, current: true }
+		}
+
+		outdated = found
+	}
+
+	return outdated === undefined ? undefined : { item: outdated, current: false }
 }
 
 // Dir/File.parent is NEVER null on the wasm side (ParentUuid = a real uuid or one of

@@ -1,4 +1,5 @@
 import { create } from "zustand"
+import { currentSocketEpoch, socketLiveSince } from "@/lib/sdk/socketSession"
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 
 // Drive's own clipboard: items marked to be copied or moved by a later paste. In memory and per tab,
@@ -20,23 +21,37 @@ export interface ClipboardChange {
 	update: ClipboardItemUpdate
 }
 
+// When the held items were last known current: the socket epoch and the drive events missed so far.
+// Events keep them current only while the socket stays up and delivers every drive event.
+export interface ClipboardStamp {
+	readonly epoch: number | null
+	readonly missed: number
+}
+
 // A cut whose paste is moving. Changes keep reaching its items, so what failed to move comes back as it
 // now is, and not at all once it's gone.
 export interface CutPaste {
 	readonly items: readonly DriveItem[]
 	readonly current: (DriveItem | null)[]
+	readonly checked: ClipboardStamp
 }
 
 interface DriveClipboardState {
 	entry: DriveClipboardEntry | null
 	// The cut items' uuids, for the rows that dim while cut; empty for a copy.
 	cutUuids: ReadonlySet<string>
-	set: (entry: DriveClipboardEntry) => void
+	// `current` false for items events may not have kept current though the socket is up: their paste looks
+	// them up first.
+	set: (entry: DriveClipboardEntry, current?: boolean) => void
 	// Also forgets the cuts being pasted: what they fail to move stays off the clipboard.
 	clear: () => void
 	// Applies a change to the items held here: the entry's, and those of the cuts being pasted. The state
 	// stays as it is when none of them changed.
 	follow: (change: ClipboardChange) => void
+	// Applies a lookup of the entry's items begun at `checked` (clipboardRecheck.ts): each item it found
+	// becomes its current row, or leaves once gone. One a change replaced meanwhile keeps that change.
+	// Returns how many left.
+	applyRecheck: (found: ReadonlyMap<DriveItem, DriveItem | null>, checked: ClipboardStamp) => number
 	// A pasted cut leaves the clipboard as it starts moving, so a second paste can't move the same items
 	// again; what failed to move comes back, unless something else was copied or cut meanwhile.
 	takeCut: () => CutPaste | null
@@ -48,11 +63,45 @@ const NOTHING_CUT: ReadonlySet<string> = new Set()
 // Outside the state: nothing renders them.
 const cutPastes = new Set<CutPaste>()
 
+// No socket epoch matches it.
+const UNCHECKED: ClipboardStamp = { epoch: null, missed: 0 }
+
+let missedEvents = 0
+let checkedAt = UNCHECKED
+
+// Drive events went undelivered while the socket stayed up (one it couldn't decode), or it dropped.
+export function markClipboardEventsMissed(): void {
+	missedEvents++
+}
+
+export function clipboardStamp(): ClipboardStamp {
+	return { epoch: currentSocketEpoch(), missed: missedEvents }
+}
+
+// Whether events have kept the held items current since they were last known to be.
+export function isClipboardCurrent(): boolean {
+	return socketLiveSince(checkedAt.epoch) && checkedAt.missed === missedEvents
+}
+
 export function stableUuidOf(item: DriveItem): string | undefined {
 	const base = asDirectoryOrFile(item)
 
 	return base.type === "file" ? base.data.stableUUID : undefined
 }
+
+// A Shared by me file: its owner's events reach this tab, but it carries no stable id, so its content
+// saves are followed by uuid (clipboardSync.ts).
+export function lacksStableId(item: DriveItem): boolean {
+	return (
+		(item.type === "sharedFile" || item.type === "sharedRootFile") &&
+		item.data.stableUUID === undefined &&
+		"Receiver" in item.data.sharingRole
+	)
+}
+
+// Whether a file that lacks a stable id is held, as of when heldKeys was built; a followed item may only
+// set it.
+let fileLackingStableIdHeld = false
 
 function addKeys(keys: Set<string>, item: DriveItem): void {
 	keys.add(item.data.uuid)
@@ -61,6 +110,8 @@ function addKeys(keys: Set<string>, item: DriveItem): void {
 
 	if (stableUuid !== undefined) {
 		keys.add(stableUuid)
+	} else if (lacksStableId(item)) {
+		fileLackingStableIdHeld = true
 	}
 }
 
@@ -75,6 +126,8 @@ function currentHeldKeys(entry: DriveClipboardEntry | null): Set<string> {
 	}
 
 	const keys = new Set<string>()
+
+	fileLackingStableIdHeld = false
 
 	for (const item of entry?.items ?? []) {
 		addKeys(keys, item)
@@ -122,8 +175,9 @@ function followItems(items: DriveItem[], update: ClipboardItemUpdate): DriveItem
 export const useDriveClipboardStore = create<DriveClipboardState>((set, get) => ({
 	entry: null,
 	cutUuids: NOTHING_CUT,
-	set: entry => {
+	set: (entry, current = true) => {
 		heldKeys = null
+		checkedAt = current ? clipboardStamp() : UNCHECKED
 		set(withEntry(entry))
 	},
 	clear: () => {
@@ -167,6 +221,33 @@ export const useDriveClipboardStore = create<DriveClipboardState>((set, get) => 
 			set(withEntry(items.length === 0 ? null : { mode: entry.mode, items }))
 		}
 	},
+	applyRecheck: (found, checked) => {
+		checkedAt = checked
+
+		const entry = get().entry
+
+		if (entry === null) {
+			return 0
+		}
+
+		let left = 0
+		const items = followItems(entry.items, item => {
+			const now = found.get(item)
+
+			if (now === null) {
+				left++
+			}
+
+			return now === undefined ? item : now
+		})
+
+		if (items !== entry.items) {
+			heldKeys = null
+			set(withEntry(items.length === 0 ? null : { mode: entry.mode, items }))
+		}
+
+		return left
+	},
 	takeCut: () => {
 		const entry = get().entry
 
@@ -174,7 +255,7 @@ export const useDriveClipboardStore = create<DriveClipboardState>((set, get) => 
 			return null
 		}
 
-		const paste: CutPaste = { items: entry.items, current: entry.items.slice() }
+		const paste: CutPaste = { items: entry.items, current: entry.items.slice(), checked: checkedAt }
 
 		cutPastes.add(paste)
 		heldKeys = null
@@ -200,6 +281,19 @@ export const useDriveClipboardStore = create<DriveClipboardState>((set, get) => 
 			}
 		}
 
-		set(state => (state.entry !== null || items.length === 0 ? state : withEntry({ mode: "cut", items })))
+		if (get().entry !== null || items.length === 0) {
+			return
+		}
+
+		// Events kept them current only as far as they kept the pasted cut.
+		checkedAt = paste.checked
+		set(withEntry({ mode: "cut", items }))
 	}
 }))
+
+// Whether a held file lacks a stable id (see lacksStableId).
+export function holdsFileLackingStableId(): boolean {
+	currentHeldKeys(useDriveClipboardStore.getState().entry)
+
+	return fileLackingStableIdHeld
+}

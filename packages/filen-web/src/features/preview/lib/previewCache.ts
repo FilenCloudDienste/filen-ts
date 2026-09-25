@@ -115,8 +115,8 @@ export function getPreviewBytes(scope: string | null, uuid: string): Uint8Array 
 	return entry.value
 }
 
-// One whole-buffer load per key at a time, started by a preview and joined by another preview or a
-// public Download. Removed when it settles, so a failure never outlives the attempt that made it.
+// One whole-buffer load per key at a time, started by a preview or a buffered public Download and joined
+// by whichever comes next. Removed when it settles, so a failure never outlives the attempt that made it.
 const pendingBytes = new Map<string, Promise<Uint8Array>>()
 
 // The bytes of `uuid` if they are cached or already loading, else undefined. A shared load that fails
@@ -146,14 +146,18 @@ function cancelledError(): Error {
 // runs and stored once it succeeds. Everything up to registering the load runs synchronously, so two
 // callers in the same tick still share one fetch. `size` makes room before the buffer lands. Once
 // `signal` aborts, the caller starts no load: its cancel token only reaches a download it started, so
-// one begun after it went away could never be cancelled.
+// one begun after it went away could never be cancelled. `store: false` shares a load without keeping
+// it (a public Download's own fetch): nothing reads a Download's bytes back, and the cache would hold
+// them for the rest of the visit.
 export function loadPreviewBytes(
 	scope: string | null,
 	uuid: string,
 	size: number,
 	load: () => Promise<Uint8Array>,
-	signal?: AbortSignal
+	options?: { signal?: AbortSignal; store?: boolean }
 ): Promise<Uint8Array> {
+	const signal = options?.signal
+
 	if (signal?.aborted === true) {
 		return Promise.reject(cancelledError())
 	}
@@ -180,16 +184,17 @@ export function loadPreviewBytes(
 				pendingBytes.delete(key)
 			}
 
-			return loadPreviewBytes(scope, uuid, size, load, signal)
+			return loadPreviewBytes(scope, uuid, size, load, options)
 		})
 	}
 
 	const loadEpoch = epoch
+	const store = options?.store ?? true
 
 	loaded.reserve(size)
 
 	const own = load().then(bytes => {
-		if (loadEpoch === epoch) {
+		if (store && loadEpoch === epoch) {
 			loaded.set(key, bytes, bytes.byteLength)
 		}
 
@@ -205,12 +210,6 @@ export function loadPreviewBytes(
 	own.then(settle, settle)
 
 	return own
-}
-
-// Makes room for a buffer about to be held outside the cache (a public Download's own fetch), so the
-// two together stay within the budget, as a preview's load does.
-export function reservePreviewRoom(size: number): void {
-	loaded.reserve(size)
 }
 
 export function getRawPreview(scope: string | null, uuid: string): RawPreviewResult | undefined {

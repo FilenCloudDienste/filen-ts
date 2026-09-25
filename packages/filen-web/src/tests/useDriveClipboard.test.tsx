@@ -4,10 +4,11 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { act, cleanup, createEvent, fireEvent, renderHook } from "@testing-library/react"
 import type { File, UuidStr } from "@filen/sdk-rs"
 
-const { copyToClipboard, cutToClipboard, pasteClipboard, destinationDirectoryName } = vi.hoisted(() => ({
+const { copyToClipboard, cutToClipboard, pasteClipboard, recheckClipboard, destinationDirectoryName } = vi.hoisted(() => ({
 	copyToClipboard: vi.fn(),
 	cutToClipboard: vi.fn(),
 	pasteClipboard: vi.fn(() => Promise.resolve()),
+	recheckClipboard: vi.fn(() => Promise.resolve(true)),
 	destinationDirectoryName: vi.fn((_scope: string, _path: readonly string[]) => Promise.resolve<string | null>("dest"))
 }))
 
@@ -20,6 +21,8 @@ vi.mock("@/features/drive/lib/clipboard", async importOriginal => ({
 	cutToClipboard,
 	pasteClipboard
 }))
+// Its lookups after a socket gap are clipboardSync.test.ts's.
+vi.mock("@/features/drive/lib/clipboardRecheck", () => ({ recheckClipboard }))
 // Its resolution order (listing row, breadcrumb entry, one worker call) is drive.test.ts's.
 vi.mock("@/features/drive/queries/drive", () => ({
 	destinationDirectoryName,
@@ -157,6 +160,43 @@ describe("useDriveClipboard", () => {
 		await vi.waitFor(() => {
 			expect(pasteClipboard).toHaveBeenCalledExactlyOnceWith({ uuid: DEST, name: "" })
 		})
+	})
+
+	it("doesn't paste when the items couldn't be looked up again", async () => {
+		useDriveClipboardStore.getState().set({ mode: "copy", items: [REPORT] })
+		recheckClipboard.mockResolvedValueOnce(false)
+		const { result } = renderClipboard({ selectedItems: [] })
+
+		act(() => {
+			result.current.run()
+		})
+
+		await vi.waitFor(() => {
+			expect(recheckClipboard).toHaveBeenCalledOnce()
+		})
+		await new Promise(resolve => setTimeout(resolve, 0))
+		expect(pasteClipboard).not.toHaveBeenCalled()
+	})
+
+	// A lookup after a socket gap can leave nothing to paste.
+	it("asks again once the items were looked up, of the items as they now are", async () => {
+		useDriveClipboardStore.getState().set({ mode: "copy", items: [REPORT] })
+		recheckClipboard.mockImplementationOnce(() => {
+			useDriveClipboardStore.getState().clear()
+
+			return Promise.resolve(true)
+		})
+		const { result } = renderClipboard({ selectedItems: [] })
+
+		act(() => {
+			result.current.run()
+		})
+
+		await vi.waitFor(() => {
+			expect(recheckClipboard).toHaveBeenCalledOnce()
+		})
+		await new Promise(resolve => setTimeout(resolve, 0))
+		expect(pasteClipboard).not.toHaveBeenCalled()
 	})
 
 	it("clears the clipboard, which it offers only while something is copied or cut", () => {

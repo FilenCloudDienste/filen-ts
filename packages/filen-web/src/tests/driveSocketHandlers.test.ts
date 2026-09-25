@@ -1,11 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
-import type { Dir, File, FileMeta, SocketEvent, UserInfo, UuidStr } from "@filen/sdk-rs"
+import type { Dir, File, FileMeta, NormalDirsAndFiles, SocketEvent, UserInfo, UuidStr } from "@filen/sdk-rs"
 
 // The real sdk client module imports a Vite `?worker`, unresolvable under node vitest — the drive handler
-// pulls it in transitively through queries/drive + lib/actions, so it's mocked down to nothing (the
-// handler only ever runs cache patchers, never a worker op). Mirrors driveActions.test's mock boundary.
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
+// pulls it in transitively through queries/drive + lib/actions, so it's mocked down to the listing read
+// (the handler only ever runs cache patchers, never a worker op; the colour tests read their source
+// listings). Mirrors driveActions.test's mock boundary.
+const { listDirectory } = vi.hoisted(() => ({ listDirectory: vi.fn<(target: unknown) => Promise<NormalDirsAndFiles>>() }))
+
+vi.mock("@/lib/sdk/client", () => ({ sdkApi: { listDirectory } }))
 
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
@@ -15,10 +18,11 @@ vi.mock("@/lib/log", () => ({ log: { warn: logWarn, error: logError, info: vi.fn
 
 import { queryClient as testQueryClient } from "@/queries/client"
 import { ACCOUNT_QUERY_KEY } from "@/queries/account"
-import { discardListingPatches, driveListingQueryKey, flushListingCreates } from "@/features/drive/queries/drive"
+import { discardListingPatches, driveListingQueryKey, driveListingQueryOptions, flushListingCreates } from "@/features/drive/queries/drive"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
-import { flushDeferredRecents, handleDriveEvent } from "@/features/drive/lib/socketHandlers"
+import { flushDeferredRecents, handleDriveEvent, markDriveEventsMissed } from "@/features/drive/lib/socketHandlers"
+import { socketAuthenticated } from "@/lib/sdk/socketSession"
 import { useTransfersStore, type Transfer } from "@/features/transfers/store/useTransfersStore"
 import { subscribePreviewReconcile, type PreviewReconcileEvent } from "@/features/preview/lib/previewReconcile"
 
@@ -132,6 +136,15 @@ function copyRow(status: Transfer["status"]): Transfer {
 		parentUuid: null,
 		startedAt: 0
 	}
+}
+
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+	let resolve!: (value: T) => void
+	const promise = new Promise<T>(r => {
+		resolve = r
+	})
+
+	return { promise, resolve }
 }
 
 // A read of a cached listing that stays under way until settled.
@@ -652,9 +665,21 @@ describe("drive socket handlers — directory colour on move and restore", () =>
 		return testQueryClient.getQueryState(driveListingQueryKey({ variant: "drive", uuid }))?.isInvalidated
 	}
 
-	it("folderMove keeps the colour its cached row holds, in the destination and in Favorites", () => {
+	function flatInvalidated(variant: "trash" | "favorites"): boolean | undefined {
+		return testQueryClient.getQueryState(driveListingQueryKey({ variant, uuid: null }))?.isInvalidated
+	}
+
+	// Read from the server under the live socket, so every event since has reached its rows.
+	async function readListing(variant: "drive" | "trash" | "favorites", uuid: string | null, dirs: Dir[]): Promise<void> {
+		socketAuthenticated()
+		listDirectory.mockResolvedValueOnce({ dirs, files: [] })
+
+		await testQueryClient.query(driveListingQueryOptions(variant, uuid))
+	}
+
+	it("folderMove keeps the colour its current row holds, in the destination and in Favorites", async () => {
 		const blue = mockDir({ color: "blue", favorited: true })
-		seedListing(PARENT_A, [narrowItem(blue)])
+		await readListing("drive", PARENT_A, [blue])
 		seedListing(PARENT_B, [])
 		seedFavorites([narrowItem(blue)])
 
@@ -665,8 +690,8 @@ describe("drive socket handlers — directory colour on move and restore", () =>
 		expect(isInvalidated(PARENT_B)).toBe(false)
 	})
 
-	it("folderRestore keeps the colour of the row the trash listing holds", () => {
-		seedTrash([narrowItem(mockDir({ color: "green" }))])
+	it("folderRestore keeps the colour of the row a current trash listing holds", async () => {
+		await readListing("trash", null, [mockDir({ color: "green" })])
 		seedListing(PARENT_A, [])
 
 		handleDriveEvent(driveEvt({ type: "folderRestore", dir: mockDir() }))
@@ -674,6 +699,138 @@ describe("drive socket handlers — directory colour on move and restore", () =>
 		expect(colorOf(getListing(PARENT_A), testUuid("dir"))).toBe("green")
 		expect(getTrash()).toEqual([])
 		expect(isInvalidated(PARENT_A)).toBe(false)
+	})
+
+	// Restored from disk, it may predate a recolour made while the app was closed.
+	it.each([
+		[
+			"folderMove",
+			() => {
+				seedListing(PARENT_A, [narrowItem(mockDir({ color: "red" }))])
+			},
+			() => driveEvt({ type: "folderMove", dir: mockDir({ parent: PARENT_B }) })
+		],
+		[
+			"folderRestore",
+			() => {
+				seedTrash([narrowItem(mockDir({ color: "red" }))])
+			},
+			() => driveEvt({ type: "folderRestore", dir: mockDir({ parent: PARENT_B }) })
+		]
+	])("%s takes no colour from a listing this session hasn't read, and marks its destination stale", (_label, seedSource, buildEvent) => {
+		seedSource()
+		seedListing(PARENT_B, [])
+
+		handleDriveEvent(buildEvent())
+
+		expect(colorOf(getListing(PARENT_B), testUuid("dir"))).toBe("default")
+		expect(isInvalidated(PARENT_B)).toBe(true)
+	})
+
+	// Its rows missed whatever changed while the socket was gone.
+	it("folderMove takes no colour from a listing a socket drop left stale", async () => {
+		await readListing("drive", PARENT_A, [mockDir({ color: "red" })])
+		markDriveEventsMissed()
+		seedListing(PARENT_B, [])
+
+		handleDriveEvent(driveEvt({ type: "folderMove", dir: mockDir({ parent: PARENT_B }) }))
+
+		expect(colorOf(getListing(PARENT_B), testUuid("dir"))).toBe("default")
+		expect(isInvalidated(PARENT_B)).toBe(true)
+	})
+
+	// A trash echo carries only the uuid, so its row comes from whichever listing holds it.
+	it("a trash listing given a row only an unread listing held lends no colour to the restore", async () => {
+		seedListing(PARENT_A, [narrowItem(mockDir({ color: "red" }))])
+		await readListing("trash", null, [])
+		await readListing("drive", PARENT_B, [])
+
+		handleDriveEvent(driveEvt({ type: "folderTrash", parent: PARENT_A, uuid: testUuid("dir") }))
+
+		expect(colorOf(getTrash(), testUuid("dir"))).toBe("red")
+		expect(flatInvalidated("trash")).toBe(true)
+
+		handleDriveEvent(driveEvt({ type: "folderRestore", dir: mockDir({ parent: PARENT_B }) }))
+
+		expect(colorOf(getListing(PARENT_B), testUuid("dir"))).toBe("default")
+		expect(isInvalidated(PARENT_B)).toBe(true)
+	})
+
+	it("a trash listing given a current row stays current and lends its colour to the restore", async () => {
+		// Cached first, so a search that stopped at the first row would take its colour.
+		seedListing(PARENT_A, [narrowItem(mockDir({ color: "red" }))])
+		await readListing("favorites", null, [mockDir({ color: "blue", favorited: true })])
+		await readListing("trash", null, [])
+		await readListing("drive", PARENT_B, [])
+
+		handleDriveEvent(driveEvt({ type: "folderTrash", parent: PARENT_A, uuid: testUuid("dir") }))
+
+		expect(colorOf(getTrash(), testUuid("dir"))).toBe("blue")
+		expect(flatInvalidated("trash")).toBe(false)
+
+		handleDriveEvent(driveEvt({ type: "folderRestore", dir: mockDir({ parent: PARENT_B }) }))
+
+		expect(colorOf(getListing(PARENT_B), testUuid("dir"))).toBe("blue")
+		expect(isInvalidated(PARENT_B)).toBe(false)
+	})
+
+	it("a file row from an unread listing leaves the trash listing current", async () => {
+		seedListing(PARENT_A, [narrowItem(mockFile())])
+		await readListing("trash", null, [])
+
+		handleDriveEvent(driveEvt({ type: "fileTrash", uuid: testUuid("file"), stableUUID: STABLE_FILE, newUUID: undefined }))
+
+		expect(getTrash()?.map(i => i.data.uuid)).toEqual([testUuid("file")])
+		expect(flatInvalidated("trash")).toBe(false)
+	})
+
+	it("a favorite restored with no colour to keep leaves Favorites lending none to a later move", async () => {
+		await readListing("favorites", null, [])
+		await readListing("drive", PARENT_A, [])
+		await readListing("drive", PARENT_B, [])
+
+		handleDriveEvent(driveEvt({ type: "folderRestore", dir: mockDir({ favorited: true }) }))
+
+		expect(colorOf(getFavorites(), testUuid("dir"))).toBe("default")
+		expect(flatInvalidated("favorites")).toBe(true)
+
+		handleDriveEvent(driveEvt({ type: "folderMove", dir: mockDir({ parent: PARENT_B, favorited: true }) }))
+
+		expect(isInvalidated(PARENT_B)).toBe(true)
+	})
+
+	// A read under way applies the move to what it returns: writing the payload's default there would
+	// overwrite the colour the server just returned, in a read that still counts.
+	it("a colourless move leaves a Favorites read's server colour in place, which it then lends", async () => {
+		const pending = deferred<NormalDirsAndFiles>()
+
+		socketAuthenticated()
+		listDirectory.mockReturnValueOnce(pending.promise)
+
+		const read = testQueryClient.query(driveListingQueryOptions("favorites", null))
+
+		handleDriveEvent(driveEvt({ type: "folderMove", dir: mockDir({ parent: PARENT_B, favorited: true }) }))
+		pending.resolve({ dirs: [mockDir({ parent: PARENT_B, favorited: true, color: "blue" })], files: [] })
+		await read
+
+		expect(colorOf(getFavorites(), testUuid("dir"))).toBe("blue")
+
+		await readListing("drive", PARENT_A, [])
+		handleDriveEvent(driveEvt({ type: "folderMove", dir: mockDir({ parent: PARENT_A, favorited: true }) }))
+
+		expect(colorOf(getListing(PARENT_A), testUuid("dir"))).toBe("blue")
+		expect(isInvalidated(PARENT_A)).toBe(false)
+	})
+
+	it("a colourless move leaves each flat row its own colour", () => {
+		seedFavorites([narrowItem(mockDir({ color: "green", favorited: true }))])
+		seedFlat("links", [narrowItem(mockDir({ color: "purple" }))])
+
+		handleDriveEvent(driveEvt({ type: "folderMove", dir: mockDir({ parent: PARENT_B, favorited: true }) }))
+
+		expect(colorOf(getFavorites(), testUuid("dir"))).toBe("green")
+		expect(colorOf(getFlat("links"), testUuid("dir"))).toBe("purple")
+		expect(getFavorites()?.map(i => i.data.parent)).toEqual([PARENT_B])
 	})
 
 	// Nothing to take the colour from: the destination reads again rather than keep a guess.

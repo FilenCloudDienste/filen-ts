@@ -383,6 +383,10 @@ export const drive = {
 	driveClipboardCutToast_one: "{{count}} item cut — paste it to move it",
 	/** Toast after Cut (driveClipboardCut or its shortcut); pasting moves the items */
 	driveClipboardCutToast_other: "{{count}} items cut — paste them to move them",
+	/** Toast when a paste, looking the copied or cut items up again after live updates were missed (e.g. a dropped connection), finds one was moved, trashed or deleted meanwhile; the paste leaves it out */
+	driveClipboardItemsGoneToast_one: "{{count}} item was moved or deleted and won't be pasted",
+	/** Toast when a paste, looking the copied or cut items up again after live updates were missed (e.g. a dropped connection), finds some were moved, trashed or deleted meanwhile; the paste leaves them out */
+	driveClipboardItemsGoneToast_other: "{{count}} items were moved or deleted and won't be pasted",
 
 	// ── Share dialog (contact picker) ────────────────────────────────────────
 	/** Share dialog — title of the contact picker (opened via driveActionShare); the submit button reuses driveActionShare */

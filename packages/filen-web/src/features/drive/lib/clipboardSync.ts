@@ -1,15 +1,55 @@
-import type { SocketEvent } from "@filen/sdk-rs"
+import type { File, SocketEvent } from "@filen/sdk-rs"
 import { asDirectoryOrFile, narrowItem, type DriveItem } from "@/features/drive/lib/item"
-import { stableUuidOf, useDriveClipboardStore } from "@/features/drive/store/useDriveClipboardStore"
+import {
+	holdsFileLackingStableId,
+	lacksStableId,
+	stableUuidOf,
+	useDriveClipboardStore
+} from "@/features/drive/store/useDriveClipboardStore"
 
 // Keeps the clipboard on its items as they now are, the same way the selection is kept. Copies and cuts
 // alike follow their items through renames, moves, color changes and content saves: a paste copies the
 // current name and newest version, and a move re-encrypts the passed item's name for the destination's
 // shares and links. Either drops an item once it is trashed or deleted. Matched by uuid or a file's
-// stable id, never by name. Shared-in items carry no stable id and get no owner events, so they stay as
-// they are.
+// stable id, never by name. Shared by me files carry no stable id but get owner events, so their content
+// saves are matched by uuid. Shared-in items get no owner events, so they stay as they are.
 
 type DriveSocketEvent = Extract<SocketEvent, { type: "drive" }>
+
+// A content save retires a file's uuid in a fileArchived (or, without versioning, a fileTrash) naming its
+// successor, whose fileNew may land first or second. For a held file lacking a stable id the two are
+// paired here: whichever comes first waits for the other, a few at most, and only while such a file is
+// held.
+const MAX_WAITING = 8
+// Successor uuid → the held uuid it replaces.
+const retiredBy = new Map<string, string>()
+// Successor uuid → its file, until the uuid it replaces is named.
+const successors = new Map<string, File>()
+
+function wait<T>(waiting: Map<string, T>, successorUuid: string, value: T): void {
+	waiting.delete(successorUuid)
+	waiting.set(successorUuid, value)
+
+	if (waiting.size > MAX_WAITING) {
+		const oldest = waiting.keys().next()
+
+		if (oldest.done !== true) {
+			waiting.delete(oldest.value)
+		}
+	}
+}
+
+// Whether a held file lacks a stable id; drops what waits once none does.
+function pairingByUuid(): boolean {
+	if (holdsFileLackingStableId()) {
+		return true
+	}
+
+	retiredBy.clear()
+	successors.clear()
+
+	return false
+}
 
 // The item that is `uuid`, as `rebuild` makes it.
 function followUuid(uuid: string, rebuild: (item: DriveItem) => DriveItem): void {
@@ -38,6 +78,42 @@ export function dropFromClipboard(gone: DriveItem): void {
 	dropGone(gone.data.uuid, stableUuidOf(gone))
 }
 
+// A content save retired `uuid` for `successorUuid`. A held file with a stable id follows the successor's
+// fileNew by that id instead.
+function followRetired(uuid: string, successorUuid: string): void {
+	if (!pairingByUuid()) {
+		return
+	}
+
+	const successor = successors.get(successorUuid)
+	const next = successor === undefined ? undefined : narrowItem(successor)
+	// Held files it retires whose successor hasn't arrived yet.
+	const waiting: DriveItem[] = []
+
+	useDriveClipboardStore.getState().follow({
+		keys: [uuid],
+		update: item => {
+			if (item.data.uuid !== uuid || !lacksStableId(item)) {
+				return item
+			}
+
+			if (next === undefined) {
+				waiting.push(item)
+
+				return item
+			}
+
+			return next
+		}
+	})
+
+	successors.delete(successorUuid)
+
+	if (waiting.length > 0) {
+		wait(retiredBy, successorUuid, uuid)
+	}
+}
+
 export function followDriveEventOnClipboard(event: DriveSocketEvent): void {
 	const inner = event.inner
 
@@ -53,6 +129,17 @@ export function followDriveEventOnClipboard(event: DriveSocketEvent): void {
 					keys: [stableUuid],
 					update: item => (stableUuidOf(item) === stableUuid ? narrowItem(file) : item)
 				})
+			}
+
+			if (pairingByUuid()) {
+				const retired = retiredBy.get(file.uuid)
+
+				if (retired === undefined) {
+					wait(successors, file.uuid, file)
+				} else {
+					retiredBy.delete(file.uuid)
+					followUuid(retired, () => narrowItem(file))
+				}
 			}
 
 			break
@@ -134,11 +221,13 @@ export function followDriveEventOnClipboard(event: DriveSocketEvent): void {
 			break
 		}
 
-		// With newUUID it's a content save on an account without versioning, not a trash: the successor's
-		// fileNew is what the clipboard follows.
+		// With newUUID it's a content save on an account without versioning, not a trash: the clipboard follows
+		// the successor. The stable id this carries is then freshly minted, so it pairs by uuid alone.
 		case "fileTrash": {
 			if (inner.newUUID === undefined) {
 				dropGone(inner.uuid, inner.stableUUID)
+			} else {
+				followRetired(inner.uuid, inner.newUUID)
 			}
 
 			break
@@ -148,6 +237,8 @@ export function followDriveEventOnClipboard(event: DriveSocketEvent): void {
 		case "fileArchived": {
 			if (inner.newUUID === undefined) {
 				dropGone(inner.uuid, inner.stableUUID)
+			} else {
+				followRetired(inner.uuid, inner.newUUID)
 			}
 
 			break

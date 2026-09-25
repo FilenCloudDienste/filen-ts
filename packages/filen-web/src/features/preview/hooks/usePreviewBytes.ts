@@ -71,7 +71,9 @@ export function usePreviewBytes(item: DriveItem): UsePreviewBytesResult {
 						runOp(
 							accessMode === "anon" ? sdkApi.downloadLinkedFileBytesAnon(file, token) : sdkApi.downloadFileBytes(file, token)
 						),
-					gone.signal
+					{
+						signal: gone.signal
+					}
 				)
 
 				if (live) {

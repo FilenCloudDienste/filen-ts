@@ -5,7 +5,7 @@ import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
 import { isFsaAvailable, isPickerCancelled } from "@/features/drive/lib/saveDownload"
 import { chooseDownloadStrategy, createCollectingSink } from "@/features/publicLinks/lib/download.logic"
 import { previewCacheScope } from "@/features/preview/lib/accessMode"
-import { joinPreviewBytes, reservePreviewRoom } from "@/features/preview/lib/previewCache"
+import { joinPreviewBytes, loadPreviewBytes } from "@/features/preview/lib/previewCache"
 
 // Effectful anon-download wiring for the public-link routes. NO service worker (its wasm bundle is
 // authed-only) and NO authed transfers store (session-scoped machinery) — this surface is fully
@@ -106,7 +106,8 @@ async function writeBytes(writable: FileSystemWritableFileStream, bytes: Uint8Ar
 // instead of fetched again; if that shared load is cancelled with the preview, this fetches on its own.
 // Its own fetch never enters the preview cache: nothing reads a Download's bytes back, and the cache
 // would hold them for the rest of the visit. The buffered one still has cached previews make way for
-// it, so a large file never lands on top of a full cache.
+// it, so a large file never lands on top of a full cache, and a preview opened while it runs joins it
+// instead of fetching the file a second time.
 export async function startAnonFileDownload(args: {
 	file: AnyFile
 	name: string
@@ -169,9 +170,15 @@ export async function startAnonFileDownload(args: {
 				)
 			)
 		} else {
-			reservePreviewRoom(Number(size))
-
-			const bytes = await sdkApi.downloadLinkedFileBytesAnon(file, transferId)
+			const bytes = await loadPreviewBytes(
+				scope,
+				file.uuid,
+				Number(size),
+				() => sdkApi.downloadLinkedFileBytesAnon(file, transferId),
+				{
+					store: false
+				}
+			)
 
 			saveBlob(new Blob([bytes as BlobPart]), name)
 			onProgress(Number(size), Number(size))

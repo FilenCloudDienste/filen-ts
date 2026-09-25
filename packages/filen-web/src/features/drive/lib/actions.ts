@@ -1,17 +1,19 @@
 import * as Comlink from "comlink"
 import type { Dir, DirColor, File, FileVersion, UserInfo } from "@filen/sdk-rs"
-import { applyMembershipPatch, removeByUuid } from "@filen/shared"
+import { removeByUuid } from "@filen/shared"
 import { sdkApi } from "@/lib/sdk/client"
 import { i18n } from "@/lib/i18n"
 import { queryClient } from "@/queries/client"
 import { ACCOUNT_QUERY_KEY, markAccountStale } from "@/queries/account"
 import {
-	driveListingQueryKey,
 	driveListingQueryUpdate,
 	driveListingQueryUpdateGlobal,
+	findOwnedListingItem,
 	flatListingQueryUpdate,
 	driveItemLinkStatusQueryUpdate,
 	fetchDriveItemLinkStatus,
+	markDriveListingStale,
+	markFlatListingStale,
 	normalizeParentUuid,
 	type DriveItemLinkStatus
 } from "@/features/drive/queries/drive"
@@ -51,6 +53,27 @@ export function replaceIfPresent(items: DriveItem[], updated: DriveItem): DriveI
 	return items.map(item => (item.data.uuid === updated.data.uuid ? updated : item))
 }
 
+// A directory row keeps the colour it holds: an action's result carries the colour of the row the action
+// started from, which may be outdated, and a move or restore echo carries none.
+function keepingColor(row: DriveItem, item: DriveItem): DriveItem {
+	return row.type === "directory" && item.type === "directory" && row.data.color !== item.data.color
+		? { ...item, data: { ...item.data, color: row.data.color } }
+		: item
+}
+
+// A directory row with the colour a current listing holds, read before any fan-out strips that row. With
+// none, colorKnown is false and a listing the row joins stops counting as current, so its next mount or
+// focus reads it again.
+function withCurrentColor(item: DriveItem): { item: DriveItem; colorKnown: boolean } {
+	if (item.type !== "directory") {
+		return { item, colorKnown: true }
+	}
+
+	const found = findOwnedListingItem(item.data.uuid)
+
+	return found?.current === true ? { item: keepingColor(found.item, item), colorKnown: true } : { item, colorKnown: false }
+}
+
 // ── Rename ───────────────────────────────────────────────────────────────
 
 export async function renameItem(item: DriveItem, newName: string): Promise<ActionOutcome> {
@@ -65,10 +88,11 @@ export async function renameItem(item: DriveItem, newName: string): Promise<Acti
 	}
 
 	const updated = narrowItem(renamed)
-	// A rename never changes listing membership (same uuid, same parent) — a global replace-in-place
-	// covers the drive-parent listing too, and also fans the new name out to a favorited/recent copy
-	// of the same row, which a narrow per-parent patch never reached.
-	driveListingQueryUpdateGlobal(prev => replaceIfPresent(prev, updated))
+	// A rename never changes listing membership (same uuid, same parent) or colour — a global
+	// replace-in-place covers the drive-parent listing too, and also fans the new name out to a
+	// favorited/recent copy of the same row, which a narrow per-parent patch never reached; each row keeps
+	// its colour.
+	driveListingQueryUpdateGlobal({ type: "replace", uuid: updated.data.uuid, replace: row => keepingColor(row, updated) })
 	followClipboardItem(updated)
 	// Breadcrumb name cache — this item's uuid may appear as an ancestor segment on some open path.
 	// Fire-and-forget: the optimistic patch above already covers the success outcome, so a rejection
@@ -98,24 +122,31 @@ export function moveItems(items: DriveItem[], targetParentUuid: string | null): 
 
 // A move changes only the row's parent. It leaves every directory listing and the trash (a move always
 // lands outside it) for its new parent's; a favorite, recent or linked row stays where it is with the new
-// parent. A shared root row stays shared; a nested shared listing loses a child that moved out of it.
-// Exported: the realtime fileMove/folderMove handlers apply the same rule.
-export function patchMovedItem(item: DriveItem, rootUuid: string): void {
-	driveListingQueryUpdateGlobal((prev, { variant, uuid }) => {
+// parent and its own colour. A shared root row stays shared; a nested shared listing loses a child that
+// moved out of it. Exported: the realtime fileMove/folderMove handlers apply the same rule.
+export function patchMovedItem(moved: DriveItem, rootUuid: string): void {
+	const { item, colorKnown } = withCurrentColor(moved)
+	const parentUuid = normalizeParentUuid(item.data.parent, rootUuid)
+
+	driveListingQueryUpdateGlobal(({ variant, uuid }) => {
 		switch (variant) {
 			case "recents":
 			case "favorites":
 			case "links":
-				return replaceIfPresent(prev, item)
+				return { type: "replace", uuid: item.data.uuid, replace: row => keepingColor(row, item) }
 			case "sharedIn":
 			case "sharedOut":
-				return uuid === null ? prev : removeByUuid(prev, item.data.uuid)
+				return uuid === null ? undefined : { type: "remove", uuid: item.data.uuid }
 			case "drive":
 			case "trash":
-				return removeByUuid(prev, item.data.uuid)
+				return { type: "remove", uuid: item.data.uuid }
 		}
 	})
-	driveListingQueryUpdate(normalizeParentUuid(item.data.parent, rootUuid), prev => upsertDriveItem(prev, item))
+	driveListingQueryUpdate(parentUuid, { type: "upsert", items: [item] })
+
+	if (!colorKnown) {
+		markDriveListingStale(parentUuid)
+	}
 }
 
 // ── Trash (bulk) ─────────────────────────────────────────────────────────
@@ -128,27 +159,51 @@ export function patchMovedItem(item: DriveItem, rootUuid: string): void {
 // across directories, so two trashed items can legitimately share a name — same reasoning as the
 // favorites listing), and `prev === undefined` (nobody has opened Trash) stays a no-op so an unfetched
 // listing is never conjured. Exported: the realtime fileTrash/folderTrash handlers apply the same rule.
-export function insertIntoTrashListing(item: DriveItem): void {
-	flatListingQueryUpdate("trash", prev => [...removeByUuid(prev, item.data.uuid), item])
+// A directory row joining with an unknown colour (withCurrentColor) stops the listing counting as current.
+export function insertIntoTrashListing(item: DriveItem, colorKnown: boolean): void {
+	flatListingQueryUpdate("trash", { type: "append", items: [item] })
+
+	if (!colorKnown) {
+		markFlatListingStale("trash")
+	}
 }
 
 export function trashItems(items: DriveItem[]): Promise<BulkOutcome<DriveItem>> {
 	return runBulk(items, async item => {
 		const base = asDirectoryOrFile(item)
-		const trashed = narrowItem(
-			await runOp<Dir | File>(base.type === "directory" ? sdkApi.trashDirectory(base.data) : sdkApi.trashFile(base.data))
+		const { item: trashed, colorKnown } = withCurrentColor(
+			narrowItem(await runOp<Dir | File>(base.type === "directory" ? sdkApi.trashDirectory(base.data) : sdkApi.trashFile(base.data)))
 		)
 
 		// Global remove FIRST (it also strips the trash listing this item is about to join), then splice
 		// the SDK's own post-trash shape into that listing — uuid is preserved across a trash, so removing
 		// after the insert would strip the just-trashed row right back out.
-		driveListingQueryUpdateGlobal(prev => removeByUuid(prev, item.data.uuid))
-		insertIntoTrashListing(trashed)
+		driveListingQueryUpdateGlobal({ type: "remove", uuid: item.data.uuid })
+		insertIntoTrashListing(trashed, colorKnown)
 		dropFromClipboard(item)
 	})
 }
 
 // ── Restore (bulk) ───────────────────────────────────────────────────────
+
+// A restore brings the item out of the trash into its parent. Exported: the realtime fileRestore/
+// folderRestore handlers apply the same rule.
+export function patchRestoredItem(restored: DriveItem, rootUuid: string): { item: DriveItem; colorKnown: boolean } {
+	const resolved = withCurrentColor(restored)
+	const parentUuid = normalizeParentUuid(resolved.item.data.parent, rootUuid)
+
+	// Global remove FIRST: it fans out over every currently-cached listing, including the
+	// destination key the next line populates — running it after that upsert would strip the
+	// just-restored row right back out (uuid is preserved across a restore).
+	driveListingQueryUpdateGlobal({ type: "remove", uuid: resolved.item.data.uuid })
+	driveListingQueryUpdate(parentUuid, { type: "upsert", items: [resolved.item] })
+
+	if (!resolved.colorKnown) {
+		markDriveListingStale(parentUuid)
+	}
+
+	return resolved
+}
 
 export function restoreItems(items: DriveItem[]): Promise<BulkOutcome<DriveItem>> {
 	const rootUuid = currentRootUuid()
@@ -158,13 +213,8 @@ export function restoreItems(items: DriveItem[]): Promise<BulkOutcome<DriveItem>
 		const restored = await runOp<Dir | File>(
 			base.type === "directory" ? sdkApi.restoreDirectory(base.data) : sdkApi.restoreFile(base.data)
 		)
-		const updated = narrowItem(restored)
 
-		// Global remove FIRST: it fans out over every currently-cached listing, including the
-		// destination key the next line populates — running it after that upsert would strip the
-		// just-restored row right back out (uuid is preserved across a restore).
-		driveListingQueryUpdateGlobal(prev => removeByUuid(prev, updated.data.uuid))
-		driveListingQueryUpdate(normalizeParentUuid(updated.data.parent, rootUuid), prev => upsertDriveItem(prev, updated))
+		patchRestoredItem(narrowItem(restored), rootUuid)
 	})
 }
 
@@ -177,7 +227,7 @@ export function deleteItemsPermanently(items: DriveItem[]): Promise<BulkOutcome<
 
 		// The worker's own deleteDirectoryPermanently already evicts the directory cache worker-side
 		// (that cache is worker-realm private, unreachable from here) — this is only the listing side.
-		driveListingQueryUpdateGlobal(prev => removeByUuid(prev, item.data.uuid))
+		driveListingQueryUpdateGlobal({ type: "remove", uuid: item.data.uuid })
 		dropFromClipboard(item)
 		markAccountStale()
 	})
@@ -208,9 +258,14 @@ export async function emptyTrash(): Promise<VoidActionOutcome> {
 // other upsert call site targets a single drive-parent where the backend already enforces
 // name-uniqueness. `prev === undefined` (nobody has opened Favorites) stays a no-op so an unfetched
 // listing is never conjured. Exported: the realtime ItemFavorite handler (lib/socketHandlers.ts)
-// applies the identical membership rule for a change made on another device.
-export function patchFavoritesListing(favorited: boolean, item: DriveItem): void {
-	flatListingQueryUpdate("favorites", prev => applyMembershipPatch(prev, item, favorited))
+// applies the identical membership rule for a change made on another device. A directory row joining with
+// an unknown colour (withCurrentColor) stops the listing counting as current.
+export function patchFavoritesListing(favorited: boolean, item: DriveItem, colorKnown: boolean): void {
+	flatListingQueryUpdate("favorites", favorited ? { type: "append", items: [item] } : { type: "remove", uuid: item.data.uuid })
+
+	if (favorited && !colorKnown) {
+		markFlatListingStale("favorites")
+	}
 }
 
 // Shared cache-patch tail for both the single-item toggle and the bulk SET below — factored out so
@@ -218,9 +273,12 @@ export function patchFavoritesListing(favorited: boolean, item: DriveItem): void
 // than reading `result.data.favorited` so a caller applying the same target across a whole selection
 // (setFavoritedItems) never has to reconstruct it from the item.
 function applyFavoritePatch(favorited: boolean, result: DriveItem): void {
-	// The global flag patch only ever updates rows that already exist; membership is the other half.
-	driveListingQueryUpdateGlobal(prev => replaceIfPresent(prev, result))
-	patchFavoritesListing(favorited, result)
+	const joining = favorited ? withCurrentColor(result) : { item: result, colorKnown: true }
+
+	// The global flag patch only ever updates rows that already exist, each keeping its colour; membership
+	// is the other half.
+	driveListingQueryUpdateGlobal({ type: "replace", uuid: result.data.uuid, replace: row => keepingColor(row, result) })
+	patchFavoritesListing(favorited, joining.item, joining.colorKnown)
 	followClipboardItem(result)
 }
 
@@ -261,7 +319,7 @@ export async function setColor(dir: DirectoryItem, color: DirColor): Promise<Act
 	}
 
 	const updated = narrowItem(colored)
-	driveListingQueryUpdateGlobal(prev => replaceIfPresent(prev, updated))
+	driveListingQueryUpdateGlobal({ type: "replace", uuid: updated.data.uuid, replace: () => updated })
 	followClipboardItem(updated)
 
 	return { status: "success", item: updated }
@@ -408,9 +466,8 @@ async function disableLinkForItem(item: DriveItem, current: DriveItemLinkStatus)
 	}
 
 	driveItemLinkStatusQueryUpdate(item.data.uuid, null)
-	queryClient.setQueryData<DriveItem[]>(driveListingQueryKey({ variant: "links", uuid: null }), prev =>
-		prev?.filter(existing => existing.data.uuid !== item.data.uuid)
-	)
+	// Through the patch path, so a read under way drops the row too and a stale mark stays set.
+	flatListingQueryUpdate("links", { type: "remove", uuid: item.data.uuid })
 
 	return { status: "success" }
 }
@@ -430,9 +487,7 @@ export function disableLinks(items: DriveItem[]): Promise<BulkOutcome<DriveItem>
 		const current = await fetchDriveItemLinkStatus(item)
 
 		if (current === null) {
-			queryClient.setQueryData<DriveItem[]>(driveListingQueryKey({ variant: "links", uuid: null }), prev =>
-				prev?.filter(existing => existing.data.uuid !== item.data.uuid)
-			)
+			flatListingQueryUpdate("links", { type: "remove", uuid: item.data.uuid })
 			return
 		}
 

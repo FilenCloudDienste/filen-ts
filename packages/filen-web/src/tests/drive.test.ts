@@ -14,6 +14,7 @@ import type {
 	SharingRole,
 	UuidStr
 } from "@filen/sdk-rs"
+import { applyMembershipPatch, removeByUuid, upsertItem } from "@filen/shared"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 
 // The real sdk client module imports a Vite `?worker`, unresolvable under node vitest — mock it
@@ -86,14 +87,17 @@ vi.mock("@tanstack/react-query", async importOriginal => {
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
 import { queryClient as testQueryClient } from "@/queries/client"
+import { socketAuthenticated } from "@/lib/sdk/socketSession"
 import {
 	LISTING_CREATE_FLUSH_MS,
+	applyListingChanges,
 	directorySizeQueryKey,
 	destinationDirectoryName,
 	discardListingPatches,
 	driveItemLinkStatusQueryKey,
 	driveItemLinkStatusQueryUpdate,
 	driveListingQueryKey,
+	driveListingQueryOptions,
 	driveListingQueryUpdate,
 	driveListingQueryUpdateGlobal,
 	driveNamesQueryKey,
@@ -110,17 +114,20 @@ import {
 	fetchSharedListing,
 	fileVersionsQueryKey,
 	findCachedListingItem,
+	findOwnedListingItem,
 	flatListingQueryUpdate,
 	flushListingCreates,
 	invalidateDirectorySize,
 	itemInfoQueryKey,
 	itemPathQueryKey,
 	markDriveListingStale,
+	markFlatListingStale,
 	normalizeParentUuid,
 	projectTreeChildren,
 	queueListingCreate,
 	toListingTarget,
-	useItemInfoQuery
+	useItemInfoQuery,
+	type ListingChange
 } from "@/features/drive/queries/drive"
 
 // Unlike account.test.ts (one call-count assertion in the whole file), several tests here assert
@@ -837,14 +844,11 @@ describe("driveListingQueryUpdateGlobal", () => {
 		testQueryClient.setQueryData(favoritesKey, [target])
 		testQueryClient.setQueryData(trashKey, [other])
 
-		driveListingQueryUpdateGlobal(items =>
-			items.map(item => {
-				if (item.type !== "directory" || item.data.uuid !== target.data.uuid) {
-					return item
-				}
-				return { ...item, data: { ...item.data, favorited: true } }
-			})
-		)
+		driveListingQueryUpdateGlobal({
+			type: "replace",
+			uuid: target.data.uuid,
+			replace: item => (item.type === "directory" ? { ...item, data: { ...item.data, favorited: true } } : item)
+		})
 
 		expect(testQueryClient.getQueryData<DriveItem[]>(driveRootKey)?.find(i => i.data.uuid === target.data.uuid)?.data.favorited).toBe(
 			true
@@ -864,7 +868,7 @@ describe("driveListingQueryUpdateGlobal", () => {
 		testQueryClient.setQueryData(namesKey, "Documents")
 		testQueryClient.setQueryData(sortKey, { mode: "global", global: "nameAsc", perDirectory: {} })
 
-		driveListingQueryUpdateGlobal(items => items)
+		driveListingQueryUpdateGlobal({ type: "remove", uuid: testUuid("absent") })
 
 		expect(testQueryClient.getQueryData(namesKey)).toBe("Documents")
 		expect(testQueryClient.getQueryData(sortKey)).toEqual({ mode: "global", global: "nameAsc", perDirectory: {} })
@@ -876,9 +880,39 @@ describe("driveListingQueryUpdateGlobal", () => {
 		// component that mounted a query that hasn't resolved yet.
 		void testQueryClient.getQueryCache().build(testQueryClient, { queryKey: unfetchedKey })
 
-		driveListingQueryUpdateGlobal(items => [...items, narrowItem(mockDir({ uuid: testUuid("new") }))])
+		driveListingQueryUpdateGlobal({
+			type: "replace",
+			uuid: testUuid("new"),
+			replace: () => narrowItem(mockDir({ uuid: testUuid("new") }))
+		})
 
 		expect(testQueryClient.getQueryData(unfetchedKey)).toBeUndefined()
+	})
+
+	it("takes the change a function picks per listing, and leaves one it picks none for as it was", () => {
+		const moved = narrowItem(mockDir({ uuid: testUuid("moved") }))
+		const renamed = narrowItem(mockDir({ uuid: testUuid("moved"), meta: { type: "decoded", data: { name: "Renamed" } } }))
+		const driveKey = driveListingQueryKey({ variant: "drive", uuid: "parent" })
+		const favoritesKey = driveListingQueryKey({ variant: "favorites", uuid: null })
+		const sharedKey = driveListingQueryKey({ variant: "sharedOut", uuid: null })
+		testQueryClient.setQueryData(driveKey, [moved])
+		testQueryClient.setQueryData(favoritesKey, [moved])
+		testQueryClient.setQueryData(sharedKey, [moved])
+
+		driveListingQueryUpdateGlobal(({ variant }) => {
+			switch (variant) {
+				case "drive":
+					return { type: "remove", uuid: moved.data.uuid }
+				case "favorites":
+					return { type: "replace", uuid: moved.data.uuid, replace: () => renamed }
+				default:
+					return undefined
+			}
+		})
+
+		expect(testQueryClient.getQueryData(driveKey)).toEqual([])
+		expect(testQueryClient.getQueryData(favoritesKey)).toEqual([renamed])
+		expect(testQueryClient.getQueryData(sharedKey)).toEqual([moved])
 	})
 
 	it("applies the same updater independently per key (a filter can remove from one listing and keep another)", () => {
@@ -889,7 +923,7 @@ describe("driveListingQueryUpdateGlobal", () => {
 		testQueryClient.setQueryData(keyA, [keep, drop])
 		testQueryClient.setQueryData(keyB, [drop])
 
-		driveListingQueryUpdateGlobal(items => items.filter(item => item.data.uuid !== drop.data.uuid))
+		driveListingQueryUpdateGlobal({ type: "remove", uuid: drop.data.uuid })
 
 		expect(testQueryClient.getQueryData(keyA)).toEqual([keep])
 		expect(testQueryClient.getQueryData(keyB)).toEqual([])
@@ -904,7 +938,7 @@ describe("driveListingQueryUpdateGlobal", () => {
 		testQueryClient.setQueryData(affected, [drop])
 		const refetch = testQueryClient.query({ queryKey: affected, queryFn: () => read.promise, staleTime: 0 })
 
-		driveListingQueryUpdateGlobal(items => items.filter(item => item.data.uuid !== drop.data.uuid))
+		driveListingQueryUpdateGlobal({ type: "remove", uuid: drop.data.uuid })
 
 		expect(testQueryClient.getQueryState(affected)?.fetchStatus).toBe("fetching")
 		expect(testQueryClient.getQueryData(affected)).toEqual([])
@@ -919,7 +953,7 @@ describe("driveListingQueryUpdateGlobal", () => {
 		testQueryClient.setQueryData(key, [drop])
 		void testQueryClient.invalidateQueries({ queryKey: key, refetchType: "none" })
 
-		driveListingQueryUpdateGlobal(items => items.filter(item => item.data.uuid !== drop.data.uuid))
+		driveListingQueryUpdateGlobal({ type: "remove", uuid: drop.data.uuid })
 
 		expect(testQueryClient.getQueryData(key)).toEqual([])
 		expect(testQueryClient.getQueryState(key)?.isInvalidated).toBe(true)
@@ -930,7 +964,8 @@ describe("driveListingQueryUpdateGlobal", () => {
 		testQueryClient.setQueryData(untouched, [narrowItem(mockDir({ uuid: testUuid("other") }))])
 		const setSpy = vi.spyOn(testQueryClient, "setQueryData")
 
-		driveListingQueryUpdateGlobal(items => items.filter(item => item.data.uuid !== testUuid("absent")))
+		driveListingQueryUpdateGlobal({ type: "remove", uuid: testUuid("absent") })
+		driveListingQueryUpdateGlobal({ type: "replace", uuid: testUuid("other"), replace: row => row })
 
 		expect(setSpy).not.toHaveBeenCalled()
 	})
@@ -966,6 +1001,250 @@ describe("listing patch lookups", () => {
 		driveListingQueryUpdate("parent", prev => [...prev, narrowItem(mockDir({ uuid: testUuid("new") }))])
 
 		expect(testQueryClient.getQueryState(key)?.isInvalidated).toBe(true)
+	})
+})
+
+// A read applies the changes that landed while it ran to what it returns.
+describe("applyListingChanges", () => {
+	function meta(name: string): File["meta"] {
+		return { type: "decoded", data: { name, mime: "text/plain", modified: 1n, size: 1n, key: "key", version: 2 } }
+	}
+
+	// A file row under the uuid of its label, named after it unless given a name.
+	function row(label: string, name: string = label): DriveItem {
+		return narrowItem(mockFile({ uuid: testUuid(label), meta: meta(name) }))
+	}
+
+	function renamed(name: string): (item: DriveItem) => DriveItem {
+		return item => (item.type === "file" ? narrowItem({ ...item.data, meta: meta(name) }) : item)
+	}
+
+	function suffixed(suffix: string): (item: DriveItem) => DriveItem {
+		return item => renamed(`${item.data.decryptedMeta?.name ?? ""}${suffix}`)(item)
+	}
+
+	function names(items: DriveItem[]): (string | undefined)[] {
+		return items.map(item => item.data.decryptedMeta?.name)
+	}
+
+	// Each change on its own, as the shared list helpers apply it.
+	function oneByOne(items: DriveItem[], changes: readonly ListingChange[]): DriveItem[] {
+		let result = items
+
+		for (const change of changes) {
+			switch (change.type) {
+				case "remove":
+					result = removeByUuid(result, change.uuid)
+					break
+				case "replace":
+					result = result.map(item => (item.data.uuid === change.uuid ? change.replace(item) : item))
+					break
+				case "upsert":
+					result = change.items.reduce(upsertItem, result)
+					break
+				case "append":
+					result = change.items.reduce((list, item) => applyMembershipPatch(list, item, true), result)
+					break
+				case "update":
+					result = change.update(result)
+					break
+			}
+		}
+
+		return result
+	}
+
+	it.each<[string, DriveItem[], ListingChange[], string[]]>([
+		[
+			"a row removed and upserted again ends last",
+			[row("a"), row("b")],
+			[
+				{ type: "remove", uuid: testUuid("a") },
+				{ type: "upsert", items: [row("a")] }
+			],
+			["b", "a"]
+		],
+		[
+			"an upserted row removed later still kept its name's row out",
+			[row("x", "n")],
+			[
+				{ type: "upsert", items: [row("y", "n")] },
+				{ type: "remove", uuid: testUuid("y") }
+			],
+			[]
+		],
+		[
+			"a row renamed after an upsert into its name stays beside it",
+			[row("x", "a")],
+			[
+				{ type: "upsert", items: [row("y", "b")] },
+				{ type: "replace", uuid: testUuid("x"), replace: renamed("b") }
+			],
+			["b", "b"]
+		],
+		[
+			"a row renamed before an upsert into its name makes way",
+			[row("x", "a")],
+			[
+				{ type: "replace", uuid: testUuid("x"), replace: renamed("b") },
+				{ type: "upsert", items: [row("y", "b")] }
+			],
+			["b"]
+		],
+		[
+			"an appended row changed later keeps its place",
+			[row("p"), row("a", "old")],
+			[
+				{ type: "append", items: [row("a", "new"), row("q")] },
+				{ type: "replace", uuid: testUuid("a"), replace: renamed("newer") }
+			],
+			["p", "newer", "q"]
+		],
+		[
+			"a row appended, removed and appended again ends last",
+			[row("a"), row("p")],
+			[
+				{ type: "append", items: [row("a", "first")] },
+				{ type: "remove", uuid: testUuid("a") },
+				{ type: "append", items: [row("a", "second")] }
+			],
+			["p", "second"]
+		],
+		[
+			"replacements of one row apply in order",
+			[row("x", "x")],
+			[
+				{ type: "replace", uuid: testUuid("x"), replace: suffixed("-one") },
+				{ type: "replace", uuid: testUuid("x"), replace: suffixed("-two") }
+			],
+			["x-one-two"]
+		],
+		[
+			"an update applies after the changes before it and before the ones after it",
+			[row("a"), row("b")],
+			[
+				{ type: "remove", uuid: testUuid("a") },
+				{ type: "update", update: items => [...items, row("c")] },
+				{ type: "remove", uuid: testUuid("c") }
+			],
+			["b"]
+		],
+		[
+			"upserts and appends keep their order",
+			[row("p")],
+			[
+				{ type: "upsert", items: [row("u")] },
+				{ type: "append", items: [row("v")] },
+				{ type: "upsert", items: [row("w")] }
+			],
+			["p", "u", "v", "w"]
+		]
+	])("%s", (_label, items, changes, expected) => {
+		expect(names(applyListingChanges(items, changes))).toEqual(expected)
+		expect(applyListingChanges(items, changes)).toEqual(oneByOne(items, changes))
+	})
+
+	it("applies only the changes from the given index", () => {
+		const changes: ListingChange[] = [
+			{ type: "remove", uuid: testUuid("a") },
+			{ type: "remove", uuid: testUuid("b") }
+		]
+
+		expect(names(applyListingChanges([row("a"), row("b")], changes, 1))).toEqual(["a"])
+	})
+
+	// Seeded, so a failing run reproduces.
+	it("lands every random burst as it would one change at a time", () => {
+		let seed = 7
+
+		const random = (): number => {
+			seed = (seed + 0x6d2b79f5) | 0
+
+			let t = Math.imul(seed ^ (seed >>> 15), 1 | seed)
+
+			t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+
+			return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+		}
+
+		const pick = <T>(values: readonly T[]): T => {
+			const value = values[Math.floor(random() * values.length)]
+
+			if (value === undefined) {
+				throw new Error("empty pool")
+			}
+
+			return value
+		}
+
+		const labels = ["a", "b", "c", "d", "e", "f"]
+		// Case and spacing variants collide as one name.
+		const pool = ["one", "One ", "two", "three"]
+		const randomRow = (): DriveItem => row(pick(labels), pick(pool))
+		const randomRows = (): DriveItem[] => (random() < 0.5 ? [randomRow()] : [randomRow(), randomRow()])
+
+		const randomChange = (): ListingChange => {
+			switch (pick(["remove", "replace", "upsert", "append", "update"])) {
+				case "remove":
+					return { type: "remove", uuid: testUuid(pick(labels)) }
+				case "replace":
+					return { type: "replace", uuid: testUuid(pick(labels)), replace: renamed(pick(pool)) }
+				case "upsert":
+					return { type: "upsert", items: randomRows() }
+				case "append":
+					return { type: "append", items: randomRows() }
+				default:
+					return { type: "update", update: items => [...items].reverse() }
+			}
+		}
+
+		for (let run = 0; run < 2000; run++) {
+			const items = labels.filter(() => random() < 0.6).map(label => row(label, pick(pool)))
+			const changes = Array.from({ length: Math.floor(random() * 10) }, randomChange)
+
+			expect(applyListingChanges(items, changes), `run ${String(run)}`).toEqual(oneByOne(items, changes))
+		}
+	})
+
+	// Each change used to take its own pass over every row: a burst of k changes to n rows cost O(k·n)
+	// in one task as the read settled.
+	it("reads each row a bounded number of times, however many changes land", () => {
+		let visits = 0
+
+		const rows = Array.from({ length: 1000 }, (_, index) => {
+			const item = row(`row${String(index)}`, `${String(index)}.txt`)
+			const data = item.data
+
+			Object.defineProperty(item, "data", {
+				enumerable: true,
+				get: () => {
+					visits++
+
+					return data
+				}
+			})
+
+			return item
+		})
+
+		const changes: ListingChange[] = []
+
+		for (let index = 0; index < 300; index++) {
+			changes.push({ type: "remove", uuid: testUuid(`row${String(index * 3)}`) })
+		}
+
+		for (let index = 0; index < 100; index++) {
+			changes.push({ type: "replace", uuid: testUuid(`row${String(index * 3 + 1)}`), replace: renamed("renamed.txt") })
+		}
+
+		for (let index = 0; index < 10; index++) {
+			changes.push({ type: "upsert", items: [row(`new${String(index)}`)] })
+		}
+
+		const result = applyListingChanges(rows, changes)
+
+		expect(visits).toBeLessThan(5 * rows.length)
+		expect(result).toHaveLength(1000 - 300 + 10)
 	})
 })
 
@@ -1051,7 +1330,7 @@ describe("queueListingCreate", () => {
 		testQueryClient.setQueryData(key, [])
 
 		queueListingCreate("parent", created)
-		driveListingQueryUpdateGlobal(items => items.filter(item => item.data.uuid !== created.data.uuid))
+		driveListingQueryUpdateGlobal({ type: "remove", uuid: created.data.uuid })
 		vi.advanceTimersByTime(LISTING_CREATE_FLUSH_MS)
 
 		expect(uuids("parent")).toEqual([])
@@ -1110,6 +1389,80 @@ describe("findCachedListingItem", () => {
 		void testQueryClient.getQueryCache().build(testQueryClient, { queryKey: driveListingQueryKey({ variant: "drive", uuid: "cold" }) })
 
 		expect(findCachedListingItem(testUuid("absent"))).toBeUndefined()
+	})
+})
+
+describe("findOwnedListingItem", () => {
+	const wanted = testUuid("wanted")
+
+	// Read from the server under the live socket, so every event since has reached its rows.
+	async function readListing(variant: "drive" | "favorites", uuid: string | null, dirs: Dir[]): Promise<void> {
+		socketAuthenticated()
+		listDirectory.mockResolvedValueOnce({ dirs, files: [] })
+
+		await testQueryClient.query(driveListingQueryOptions(variant, uuid))
+	}
+
+	it("prefers the row a current listing holds over one an unread listing, cached first, holds", async () => {
+		testQueryClient.setQueryData(driveListingQueryKey({ variant: "drive", uuid: "parent" }), [
+			narrowItem(mockDir({ uuid: wanted, color: "red" }))
+		])
+		await readListing("favorites", null, [mockDir({ uuid: wanted, color: "blue", favorited: true })])
+
+		const found = findOwnedListingItem(wanted)
+
+		expect(found?.current).toBe(true)
+		expect(found?.item.type === "directory" ? found.item.data.color : undefined).toBe("blue")
+	})
+
+	it("falls back to an unread listing's row as not current", () => {
+		const outdated = narrowItem(mockDir({ uuid: wanted }))
+
+		testQueryClient.setQueryData(driveListingQueryKey({ variant: "drive", uuid: "parent" }), [outdated])
+
+		expect(findOwnedListingItem(wanted)).toEqual({ item: outdated, current: false })
+	})
+
+	it("passes over a shared row for the owned one another listing holds", () => {
+		const owned = narrowItem(mockDir({ uuid: wanted }))
+
+		testQueryClient.setQueryData(driveListingQueryKey({ variant: "sharedOut", uuid: null }), [narrowItem(mockSharedRootDir(wanted))])
+		testQueryClient.setQueryData(driveListingQueryKey({ variant: "drive", uuid: "parent" }), [owned])
+
+		expect(findOwnedListingItem(wanted)?.item).toBe(owned)
+	})
+
+	it("finds a row still queued to land", () => {
+		testQueryClient.setQueryData(driveListingQueryKey({ variant: "drive", uuid: "parent" }), [])
+		queueListingCreate("parent", narrowItem(mockDir({ uuid: wanted })))
+
+		expect(findOwnedListingItem(wanted)?.item.data.uuid).toBe(wanted)
+	})
+
+	it("a flat listing marked stale, before or during its read, stops counting as current until a clean read", async () => {
+		await readListing("favorites", null, [mockDir({ uuid: wanted, favorited: true })])
+
+		expect(findOwnedListingItem(wanted)?.current).toBe(true)
+
+		markFlatListingStale("favorites")
+
+		expect(findOwnedListingItem(wanted)?.current).toBe(false)
+
+		const pending = deferred<NormalDirsAndFiles>()
+
+		listDirectory.mockReturnValueOnce(pending.promise)
+
+		const read = testQueryClient.query(driveListingQueryOptions("favorites", null))
+
+		markFlatListingStale("favorites")
+		pending.resolve({ dirs: [mockDir({ uuid: wanted, favorited: true })], files: [] })
+		await read
+
+		expect(findOwnedListingItem(wanted)?.current).toBe(false)
+
+		await readListing("favorites", null, [mockDir({ uuid: wanted, favorited: true })])
+
+		expect(findOwnedListingItem(wanted)?.current).toBe(true)
 	})
 })
 

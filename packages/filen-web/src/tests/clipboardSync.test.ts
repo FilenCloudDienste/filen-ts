@@ -1,41 +1,87 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { QueryClient } from "@tanstack/react-query"
-import type { Dir, File, FileMeta, FileVersion, SocketEvent, UserInfo, UuidStr } from "@filen/sdk-rs"
+import { QueryClient, QueryObserver } from "@tanstack/react-query"
+import type {
+	Dir,
+	File,
+	FileMeta,
+	FileVersion,
+	NormalDirsAndFiles,
+	SharedFile,
+	SharedRootDirsAndFiles,
+	SharingRole,
+	SocketEvent,
+	UserInfo,
+	UuidStr
+} from "@filen/sdk-rs"
+import type { ListDirectoryTarget } from "@/workers/sdk.worker"
 
 // A clipboard entry is a snapshot of the items at Copy/Cut time; this pins what keeps it current. Events
 // go in through the real drive socket handler and writes through the real drive actions, so the wiring is
 // covered along with the mapping.
 
-const { performMove, startCopyWithCard, renameFile, moveFile, trashFile, deleteFilePermanently, setDirectoryColor, restoreFileVersionOp } =
-	vi.hoisted(() => ({
-		performMove: vi.fn(),
-		startCopyWithCard: vi.fn(),
-		renameFile: vi.fn(),
-		moveFile: vi.fn(),
-		trashFile: vi.fn(),
-		deleteFilePermanently: vi.fn(),
-		setDirectoryColor: vi.fn(),
-		restoreFileVersionOp: vi.fn()
-	}))
+const {
+	performMove,
+	startCopyWithCard,
+	renameFile,
+	moveFile,
+	trashFile,
+	deleteFilePermanently,
+	setDirectoryColor,
+	restoreFileVersionOp,
+	listDirectory,
+	listSharedOutRoot,
+	toastWarning,
+	toastError
+} = vi.hoisted(() => ({
+	performMove: vi.fn(),
+	startCopyWithCard: vi.fn(),
+	renameFile: vi.fn(),
+	moveFile: vi.fn(),
+	trashFile: vi.fn(),
+	deleteFilePermanently: vi.fn(),
+	setDirectoryColor: vi.fn(),
+	restoreFileVersionOp: vi.fn(),
+	listDirectory: vi.fn<(target: ListDirectoryTarget) => Promise<NormalDirsAndFiles>>(),
+	listSharedOutRoot: vi.fn<() => Promise<SharedRootDirsAndFiles>>(),
+	toastWarning: vi.fn(),
+	toastError: vi.fn()
+}))
 
 vi.mock("@/lib/sdk/client", () => ({
-	sdkApi: { renameFile, moveFile, trashFile, deleteFilePermanently, setDirectoryColor, restoreFileVersionOp }
+	sdkApi: {
+		renameFile,
+		moveFile,
+		trashFile,
+		deleteFilePermanently,
+		setDirectoryColor,
+		restoreFileVersionOp,
+		listDirectory,
+		listSharedOutRoot
+	}
 }))
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 vi.mock("@/lib/log", () => ({ log: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() } }))
 vi.mock("@/features/drive/lib/dnd", () => ({ performMove }))
 vi.mock("@/features/transfers/lib/copyToast", () => ({ startCopyWithCard }))
-vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: toastError, warning: toastWarning } }))
 
 import "@/lib/i18n"
 import { queryClient } from "@/queries/client"
 import { ACCOUNT_QUERY_KEY } from "@/queries/account"
+import { socketAuthenticated, socketDropped } from "@/lib/sdk/socketSession"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
-import { handleDriveEvent } from "@/features/drive/lib/socketHandlers"
+import { discardListingPatches, driveListingQueryKey, driveListingQueryOptions } from "@/features/drive/queries/drive"
+import {
+	handleDriveAuthSuccess,
+	handleDriveEvent,
+	handleDriveReconnecting,
+	markDriveEventsMissed
+} from "@/features/drive/lib/socketHandlers"
 import { deleteItemsPermanently, moveItems, renameItem, restoreVersion, setColor, trashItems } from "@/features/drive/lib/actions"
 import { followClipboardItem } from "@/features/drive/lib/clipboardSync"
+import { recheckClipboard } from "@/features/drive/lib/clipboardRecheck"
 import { copyToClipboard, cutToClipboard, pasteClipboard } from "@/features/drive/lib/clipboard"
-import { useDriveClipboardStore } from "@/features/drive/store/useDriveClipboardStore"
+import { isClipboardCurrent, useDriveClipboardStore } from "@/features/drive/store/useDriveClipboardStore"
 
 function testUuid(label: string): UuidStr {
 	return `${label}-0000-0000-0000-000000000000` as UuidStr
@@ -100,9 +146,12 @@ function uuids(): string[] {
 }
 
 beforeEach(() => {
+	// Creates an earlier test's events queued would land in this one's listings.
+	discardListingPatches()
 	queryClient.clear()
 	queryClient.setQueryData<UserInfo>(ACCOUNT_QUERY_KEY, { rootDirUuid: testUuid("root") } as UserInfo)
 	useDriveClipboardStore.getState().clear()
+	socketAuthenticated()
 })
 
 describe("a cut follows its items", () => {
@@ -369,5 +418,434 @@ describe("a cut being pasted", () => {
 		await cleared
 
 		expect(entry()).toBeNull()
+	})
+})
+
+const RECEIVER: SharingRole = { Receiver: { email: "friend@filen.io", id: 7 } }
+const SHARER: SharingRole = { Sharer: { email: "owner@filen.io", id: 8 } }
+const LINEAGE = testUuid("lineage")
+
+function rawSharedFile(uuid: string, role: SharingRole, meta: FileMeta = fileMeta("report.pdf")): SharedFile {
+	return {
+		uuid: testUuid(uuid),
+		size: 1n,
+		region: "de-1",
+		bucket: "filen-1",
+		chunks: 1n,
+		timestamp: 0n,
+		meta,
+		sharingRole: role,
+		sharedTag: true,
+		canMakeThumbnail: false
+	}
+}
+
+// Shared by me rows carry no stable id, at the root and nested alike, but their owner's events arrive.
+describe("a Shared by me file follows its content saves", () => {
+	const retire = (type: "fileArchived" | "fileTrash") => {
+		drive({ type, uuid: testUuid("s1"), stableUUID: type === "fileArchived" ? LINEAGE : testUuid("fresh"), newUUID: testUuid("s2") })
+	}
+	const successor = () => {
+		drive({ type: "fileNew", file: rawFile("s2", { stableUUID: LINEAGE }) })
+	}
+
+	it("copies the saved version, root or nested, whichever of its two events lands first", async () => {
+		const root = narrowItem(rawSharedFile("s1", RECEIVER))
+		const nested = narrowItem({ ...rawFile("s1"), stableUUID: undefined, sharingRole: RECEIVER })
+
+		expect([root.type, nested.type]).toEqual(["sharedRootFile", "sharedFile"])
+
+		for (const held of [root, nested]) {
+			for (const successorFirst of [false, true]) {
+				copyToClipboard([held])
+
+				if (successorFirst) {
+					successor()
+					expect(uuids()).toEqual([testUuid("s1")])
+					retire("fileArchived")
+				} else {
+					retire("fileArchived")
+					expect(uuids()).toEqual([testUuid("s1")])
+					successor()
+				}
+
+				expect(entry()?.items).toMatchObject([{ type: "file", data: { uuid: testUuid("s2"), stableUUID: LINEAGE } }])
+			}
+		}
+
+		await pasteClipboard(DESTINATION)
+
+		expect(startCopyWithCard.mock.calls[0]?.[0]).toMatchObject([{ data: { uuid: testUuid("s2") } }])
+	})
+
+	// Without versioning the retired row is trashed under a freshly minted stable id: only the uuid pairs it.
+	it("follows a save on an account without versioning, in either order", () => {
+		for (const successorFirst of [false, true]) {
+			cutToClipboard([narrowItem(rawSharedFile("s1", RECEIVER))])
+
+			if (successorFirst) {
+				successor()
+				retire("fileTrash")
+			} else {
+				retire("fileTrash")
+				successor()
+			}
+
+			expect(uuids()).toEqual([testUuid("s2")])
+			expect([...useDriveClipboardStore.getState().cutUuids]).toEqual([testUuid("s2")])
+		}
+	})
+
+	it("keeps the state untouched by another file's save", () => {
+		copyToClipboard([narrowItem(rawSharedFile("s1", RECEIVER))])
+
+		const before = useDriveClipboardStore.getState()
+
+		drive({ type: "fileNew", file: rawFile("o2", { stableUUID: testUuid("other-lineage") }) })
+		drive({ type: "fileArchived", uuid: testUuid("o1"), stableUUID: testUuid("other-lineage"), newUUID: testUuid("o2") })
+		drive({ type: "fileArchived", uuid: testUuid("o3"), stableUUID: testUuid("third-lineage"), newUUID: testUuid("o4") })
+		drive({ type: "fileNew", file: rawFile("o4", { stableUUID: testUuid("third-lineage") }) })
+
+		expect(useDriveClipboardStore.getState()).toBe(before)
+	})
+})
+
+describe("a paste after the socket missed events", () => {
+	// A drop and the reconnect that ends it, in the order the socket bridge delivers them.
+	function socketGap(): void {
+		socketDropped()
+		handleDriveReconnecting()
+		socketAuthenticated()
+		handleDriveAuthSuccess()
+	}
+
+	function listHome(listing: Partial<NormalDirsAndFiles>): void {
+		listDirectory.mockImplementation(target =>
+			Promise.resolve(target.kind === "uuid" && target.uuid === HOME ? { dirs: [], files: [], ...listing } : { dirs: [], files: [] })
+		)
+	}
+
+	// The listing the items are copied from, read while the socket is up.
+	async function browseHome(listing: Partial<NormalDirsAndFiles>): Promise<void> {
+		listHome(listing)
+		await queryClient.query(driveListingQueryOptions("drive", HOME))
+		listDirectory.mockClear()
+	}
+
+	function homeRows(): DriveItem[] {
+		return queryClient.getQueryData<DriveItem[]>(driveListingQueryKey({ variant: "drive", uuid: HOME })) ?? []
+	}
+
+	it("looks nothing up while the socket stayed up", async () => {
+		copyToClipboard([U1, DOCS])
+
+		const before = entry()
+
+		await expect(recheckClipboard()).resolves.toBe(true)
+		expect(listDirectory).not.toHaveBeenCalled()
+		expect(entry()).toBe(before)
+	})
+
+	it("moves a cut item as the listing read since the gap shows it, reading nothing more", async () => {
+		await browseHome({ files: [rawFile("u1")] })
+		cutToClipboard([U1])
+		socketGap()
+		listHome({ files: [rawFile("u1", { meta: fileMeta("b.txt") })] })
+
+		// The listing on screen re-reads after the reconnect.
+		await queryClient.query(driveListingQueryOptions("drive", HOME))
+		await expect(recheckClipboard()).resolves.toBe(true)
+		expect(listDirectory).toHaveBeenCalledOnce()
+
+		performMove.mockResolvedValue({ succeeded: [], failed: [] })
+		await pasteClipboard(DESTINATION)
+
+		expect(performMove.mock.calls[0]?.[0]).toMatchObject([{ data: { uuid: testUuid("u1"), decryptedMeta: { name: "b.txt" } } }])
+	})
+
+	it("reads a listing the cache holds once for all its items, and leaves out what it no longer holds", async () => {
+		await browseHome({ files: [rawFile("u1")], dirs: [rawDir("docs")] })
+		copyToClipboard([U1, DOCS])
+		socketGap()
+		listHome({ dirs: [rawDir("docs", { color: "red", meta: { type: "decoded", data: { name: "papers" } } })] })
+
+		await expect(recheckClipboard()).resolves.toBe(true)
+		expect(listDirectory).toHaveBeenCalledOnce()
+		expect(entry()?.items).toMatchObject([{ data: { uuid: testUuid("docs"), color: "red", decryptedMeta: { name: "papers" } } }])
+		expect(toastWarning).toHaveBeenCalledExactlyOnceWith("1 item was moved or deleted and won't be pasted")
+
+		await pasteClipboard(DESTINATION)
+
+		expect(startCopyWithCard.mock.calls[0]?.[0]).toMatchObject([{ data: { uuid: testUuid("docs") } }])
+
+		// Current again: the next paste reads nothing.
+		await expect(recheckClipboard()).resolves.toBe(true)
+		expect(listDirectory).toHaveBeenCalledOnce()
+	})
+
+	it("follows a content save made during the gap by the file's stable id", async () => {
+		await browseHome({ files: [rawFile("u1")] })
+		cutToClipboard([U1])
+		socketGap()
+		listHome({ files: [rawFile("u2")] })
+
+		await expect(recheckClipboard()).resolves.toBe(true)
+
+		expect(uuids()).toEqual([testUuid("u2")])
+		expect([...useDriveClipboardStore.getState().cutUuids]).toEqual([testUuid("u2")])
+		expect(toastWarning).not.toHaveBeenCalled()
+	})
+
+	// Its fileNew queues the successor for the listing's next batch of creates.
+	it("finds a successor saved just before the paste in its listing", async () => {
+		await browseHome({ files: [rawFile("u1")] })
+		copyToClipboard([U1])
+		socketGap()
+		await queryClient.query(driveListingQueryOptions("drive", HOME))
+		drive({ type: "fileArchived", uuid: testUuid("u1"), stableUUID: STABLE, newUUID: testUuid("u2") })
+		drive({ type: "fileNew", file: rawFile("u2") })
+
+		await expect(recheckClipboard()).resolves.toBe(true)
+		expect(uuids()).toEqual([testUuid("u2")])
+		expect(toastWarning).not.toHaveBeenCalled()
+	})
+
+	// An undecodable event loses a change without the socket dropping.
+	it("looks again after an event that couldn't be decoded", async () => {
+		await browseHome({ files: [rawFile("u1")] })
+		copyToClipboard([U1])
+		markDriveEventsMissed()
+		listHome({ files: [rawFile("u1", { meta: fileMeta("b.txt") })] })
+
+		expect(isClipboardCurrent()).toBe(false)
+		await expect(recheckClipboard()).resolves.toBe(true)
+		expect(names()).toEqual(["b.txt"])
+		expect(isClipboardCurrent()).toBe(true)
+	})
+
+	it("refuses the paste and keeps the items when their listing can't be read", async () => {
+		await browseHome({ files: [rawFile("u1")] })
+		copyToClipboard([U1])
+		socketGap()
+		listDirectory.mockRejectedValue(new Error("network down"))
+
+		await expect(recheckClipboard()).resolves.toBe(false)
+		expect(toastError).toHaveBeenCalledOnce()
+		expect(uuids()).toEqual([testUuid("u1")])
+		expect(isClipboardCurrent()).toBe(false)
+	})
+
+	it("looks a Shared by me root row up among the Shared by me root's rows", async () => {
+		listSharedOutRoot.mockResolvedValue({ dirs: [], files: [rawSharedFile("s1", RECEIVER)] })
+		await queryClient.query(driveListingQueryOptions("sharedOut", null))
+		copyToClipboard([narrowItem(rawSharedFile("s1", RECEIVER))])
+		socketGap()
+		listSharedOutRoot.mockResolvedValue({ dirs: [], files: [rawSharedFile("s1", RECEIVER, fileMeta("renamed.pdf"))] })
+
+		await expect(recheckClipboard()).resolves.toBe(true)
+
+		expect(names()).toEqual(["renamed.pdf"])
+		expect(listDirectory).not.toHaveBeenCalled()
+	})
+
+	it("leaves an item shared with the user as it is, reading nothing", async () => {
+		const sharedIn = narrowItem(rawSharedFile("in1", SHARER))
+
+		copyToClipboard([sharedIn])
+		socketGap()
+
+		await expect(recheckClipboard()).resolves.toBe(true)
+		expect(entry()?.items).toEqual([sharedIn])
+		expect(listDirectory).not.toHaveBeenCalled()
+		expect(listSharedOutRoot).not.toHaveBeenCalled()
+	})
+
+	it("looks again at what a cut failed to move when the socket dropped while it moved", async () => {
+		let settle: (outcome: unknown) => void = () => undefined
+
+		performMove.mockReturnValue(
+			new Promise(resolve => {
+				settle = resolve
+			})
+		)
+		cutToClipboard([U1])
+
+		const pasted = pasteClipboard(DESTINATION)
+
+		socketGap()
+		settle({ succeeded: [], failed: [{ item: U1, error: new Error("no") }] })
+		await pasted
+
+		expect(uuids()).toEqual([testUuid("u1")])
+		expect(isClipboardCurrent()).toBe(false)
+	})
+
+	// A trashed directory can't be listed, and a deleted one no longer resolves.
+	it.each([
+		{ gone: "trashed", error: { species: "sdk", kind: "FolderNotFound", label: "Folder not found", message: "Folder not found" } },
+		{ gone: "deleted", error: { species: "plain", label: `directory not found: ${HOME}`, message: `directory not found: ${HOME}` } }
+	])("leaves out what a $gone directory held and pastes the rest", async ({ error }) => {
+		const elsewhere = (name: string) => rawFile("e1", { parent: ELSEWHERE, stableUUID: testUuid("e-lineage"), meta: fileMeta(name) })
+		const listHomeDirectory = vi.fn(() => Promise.resolve<NormalDirsAndFiles>({ dirs: [], files: [rawFile("u1")] }))
+		let elsewhereName = "e.txt"
+
+		listDirectory.mockImplementation(target =>
+			target.kind === "uuid" && target.uuid === HOME
+				? listHomeDirectory()
+				: Promise.resolve({ dirs: [], files: [elsewhere(elsewhereName)] })
+		)
+		await queryClient.query(driveListingQueryOptions("drive", HOME))
+		await queryClient.query(driveListingQueryOptions("drive", ELSEWHERE))
+		copyToClipboard([U1, narrowItem(elsewhere("e.txt"))])
+		socketGap()
+		listDirectory.mockClear()
+		listHomeDirectory.mockRejectedValue(error)
+		elsewhereName = "f.txt"
+
+		await expect(recheckClipboard()).resolves.toBe(true)
+		expect(names()).toEqual(["f.txt"])
+		expect(toastWarning).toHaveBeenCalledExactlyOnceWith("1 item was moved or deleted and won't be pasted")
+		expect(toastError).not.toHaveBeenCalled()
+
+		await pasteClipboard(DESTINATION)
+
+		expect(startCopyWithCard.mock.calls[0]?.[0]).toMatchObject([{ data: { uuid: testUuid("e1") } }])
+
+		await expect(recheckClipboard()).resolves.toBe(true)
+		expect(listDirectory).toHaveBeenCalledTimes(2)
+	})
+
+	// Only the reconnect's own refetch goes on to the read that replaces the one it cancels.
+	it("moves on to the read that replaced one the reconnect cancelled", async () => {
+		await browseHome({ files: [rawFile("u1")] })
+		copyToClipboard([U1])
+		socketDropped()
+		handleDriveReconnecting()
+		socketAuthenticated()
+
+		const reads: ((listing: NormalDirsAndFiles) => void)[] = []
+
+		listDirectory.mockImplementation(
+			() =>
+				new Promise(resolve => {
+					reads.push(resolve)
+				})
+		)
+
+		// The listing on screen starts re-reading, the lookup joins that read, and the authSuccess ending the
+		// drop cancels it for a read of its own.
+		const unsubscribe = new QueryObserver(queryClient, driveListingQueryOptions("drive", HOME)).subscribe(() => undefined)
+		const rechecked = recheckClipboard()
+
+		handleDriveAuthSuccess()
+
+		for (const land of reads) {
+			land({ dirs: [], files: [rawFile("u1", { meta: fileMeta("b.txt") })] })
+		}
+
+		await expect(rechecked).resolves.toBe(true)
+		expect(names()).toEqual(["b.txt"])
+		expect(toastError).not.toHaveBeenCalled()
+		expect(listDirectory).toHaveBeenCalledTimes(2)
+
+		unsubscribe()
+	})
+
+	// As logout cancels every read.
+	it("gives up quietly on a read cancelled for good", async () => {
+		await browseHome({ files: [rawFile("u1")] })
+		copyToClipboard([U1])
+		socketGap()
+		listDirectory.mockImplementation(() => new Promise(() => undefined))
+
+		const unsubscribe = new QueryObserver(queryClient, driveListingQueryOptions("drive", HOME)).subscribe(() => undefined)
+		const rechecked = recheckClipboard()
+
+		await queryClient.cancelQueries()
+
+		await expect(rechecked).resolves.toBe(false)
+		expect(toastError).not.toHaveBeenCalled()
+
+		unsubscribe()
+	})
+
+	it("reads no listing the cache doesn't hold, however many directories the items come from", async () => {
+		await browseHome({ files: [rawFile("u1")] })
+
+		// Search hits from directories never opened here.
+		const hits = ["p1", "p2", "p3"].map(label =>
+			narrowItem(rawFile(`${label}-hit`, { parent: testUuid(label), stableUUID: testUuid(`${label}-lineage`) }))
+		)
+
+		copyToClipboard([U1, ...hits])
+		socketGap()
+		listHome({ files: [rawFile("u1", { meta: fileMeta("b.txt") })] })
+
+		await expect(recheckClipboard()).resolves.toBe(true)
+		expect(listDirectory).toHaveBeenCalledExactlyOnceWith({ kind: "uuid", uuid: HOME })
+
+		for (const label of ["p1", "p2", "p3"]) {
+			expect(queryClient.getQueryData(driveListingQueryKey({ variant: "drive", uuid: testUuid(label) }))).toBeUndefined()
+		}
+
+		await pasteClipboard(DESTINATION)
+
+		expect(startCopyWithCard.mock.calls[0]?.[0]).toMatchObject([{ data: { decryptedMeta: { name: "b.txt" } } }, ...hits])
+	})
+
+	it("looks up rows copied from a listing whose read after the gap hasn't landed", async () => {
+		await browseHome({ files: [rawFile("u1")] })
+		socketGap()
+
+		let land: (listing: NormalDirsAndFiles) => void = () => undefined
+
+		listDirectory.mockImplementation(
+			() =>
+				new Promise(resolve => {
+					land = resolve
+				})
+		)
+
+		const reread = queryClient.query(driveListingQueryOptions("drive", HOME))
+
+		// The rows on screen until the read lands.
+		cutToClipboard(homeRows())
+		land({ dirs: [], files: [rawFile("u1", { meta: fileMeta("b.txt") })] })
+		await reread
+
+		await expect(recheckClipboard()).resolves.toBe(true)
+		expect(listDirectory).toHaveBeenCalledOnce()
+
+		performMove.mockResolvedValue({ succeeded: [], failed: [] })
+		await pasteClipboard(DESTINATION)
+
+		expect(performMove.mock.calls[0]?.[0]).toMatchObject([{ data: { uuid: testUuid("u1"), decryptedMeta: { name: "b.txt" } } }])
+	})
+
+	it("looks up rows restored from disk until their listing's first read", async () => {
+		// As the boot restore seeds it.
+		queryClient.setQueryData(driveListingQueryKey({ variant: "drive", uuid: HOME }), [U1])
+		copyToClipboard(homeRows())
+
+		expect(isClipboardCurrent()).toBe(false)
+
+		listHome({ files: [rawFile("u1", { meta: fileMeta("b.txt") })] })
+
+		await expect(recheckClipboard()).resolves.toBe(true)
+		expect(names()).toEqual(["b.txt"])
+		expect(listDirectory).toHaveBeenCalledOnce()
+	})
+
+	it("holds what's copied as its current listing now has it, looking nothing up", async () => {
+		await browseHome({ files: [rawFile("u1")] })
+
+		// Selected before the rename reached the listing.
+		const selected = homeRows()
+
+		drive({ type: "fileMetadataChanged", uuid: testUuid("u1"), metadata: fileMeta("b.txt") })
+		copyToClipboard(selected)
+
+		expect(names()).toEqual(["b.txt"])
+		expect(isClipboardCurrent()).toBe(true)
 	})
 })

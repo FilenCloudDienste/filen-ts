@@ -580,6 +580,49 @@ describe("a Download while the preview is still loading", () => {
 		expect(downloadLinkedFileBytesAnon).toHaveBeenCalledTimes(2)
 	})
 
+	it("buffered: a preview opened while the Download runs joins its transfer, and neither keeps the bytes", async () => {
+		const first = holdFirstTransfer()
+		const outcome = download()
+
+		await waitFor(() => {
+			expect(downloadLinkedFileBytesAnon).toHaveBeenCalledTimes(1)
+		})
+
+		const preview = renderHook(() => usePreviewBytes(photo), { wrapper: anon })
+
+		first.resolve(new Uint8Array(10).fill(5))
+
+		await expect(outcome).resolves.toEqual({ status: "success" })
+		await waitFor(() => {
+			expect(preview.result.current.status).toBe("success")
+		})
+		expect(preview.result.current.status === "success" ? preview.result.current.bytes : null).toEqual(new Uint8Array(10).fill(5))
+		expect(await savedBytes()).toEqual(new Uint8Array(10).fill(5))
+		expect(downloadLinkedFileBytesAnon).toHaveBeenCalledTimes(1)
+		expect(getPreviewBytes("anon:scope-1", photo.data.uuid)).toBeUndefined()
+	})
+
+	it("buffered: a preview that joined a Download that failed loads the file on its own", async () => {
+		const first = holdFirstTransfer()
+		const outcome = download()
+
+		await waitFor(() => {
+			expect(downloadLinkedFileBytesAnon).toHaveBeenCalledTimes(1)
+		})
+
+		const preview = renderHook(() => usePreviewBytes(photo), { wrapper: anon })
+
+		first.reject(new Error("network down"))
+
+		expect((await outcome).status).toBe("error")
+		await waitFor(() => {
+			expect(preview.result.current.status).toBe("success")
+		})
+		expect(downloadLinkedFileBytesAnon).toHaveBeenCalledTimes(2)
+		// The retry is the preview's own load, kept for its next visit.
+		expect(getPreviewBytes("anon:scope-1", photo.data.uuid)).toBeDefined()
+	})
+
 	// Uncached, its buffer is still memory: cached previews make way for it as for a preview's own load,
 	// only as far as the budget needs, so a large file never lands on top of a full cache.
 	it("buffered: a Download's own fetch makes room for its buffer", async () => {

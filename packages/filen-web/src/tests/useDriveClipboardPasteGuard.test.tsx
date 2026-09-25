@@ -17,6 +17,7 @@ vi.mock("@/features/drive/lib/clipboard", async importOriginal => ({
 	...(await importOriginal<typeof import("@/features/drive/lib/clipboard")>()),
 	pasteClipboard
 }))
+vi.mock("@/features/drive/lib/clipboardRecheck", () => ({ recheckClipboard: () => Promise.resolve(true) }))
 vi.mock("@/features/drive/queries/drive", () => ({
 	cachedDirectoryName: () => "inner",
 	destinationDirectoryName: () => Promise.resolve("inner"),

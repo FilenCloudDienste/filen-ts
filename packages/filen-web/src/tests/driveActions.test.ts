@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
-import type { Dir, DirPublicLinkRW, File, FilePublicLink, FileVersion, UserInfo, UuidStr } from "@filen/sdk-rs"
+import type { Dir, DirPublicLinkRW, File, FilePublicLink, FileVersion, NormalDirsAndFiles, UserInfo, UuidStr } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import type { ErrorDTO } from "@/lib/sdk/errors"
 
@@ -29,7 +29,8 @@ const {
 	removeDirectoryLink,
 	removeFileLink,
 	getDirectoryLinkStatus,
-	getFileLinkStatus
+	getFileLinkStatus,
+	listDirectory
 } = vi.hoisted(() => ({
 	renameDirectory: vi.fn(),
 	renameFile: vi.fn(),
@@ -53,7 +54,8 @@ const {
 	removeDirectoryLink: vi.fn(),
 	removeFileLink: vi.fn(),
 	getDirectoryLinkStatus: vi.fn(),
-	getFileLinkStatus: vi.fn()
+	getFileLinkStatus: vi.fn(),
+	listDirectory: vi.fn<(target: unknown) => Promise<NormalDirsAndFiles>>()
 }))
 
 vi.mock("@/lib/sdk/client", () => ({
@@ -80,7 +82,8 @@ vi.mock("@/lib/sdk/client", () => ({
 		removeDirectoryLink,
 		removeFileLink,
 		getDirectoryLinkStatus,
-		getFileLinkStatus
+		getFileLinkStatus,
+		listDirectory
 	}
 }))
 
@@ -91,7 +94,14 @@ vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
 import { queryClient as testQueryClient } from "@/queries/client"
 import { ACCOUNT_QUERY_KEY } from "@/queries/account"
-import { driveItemLinkStatusQueryKey, driveListingQueryKey, driveNamesQueryKey } from "@/features/drive/queries/drive"
+import { socketAuthenticated } from "@/lib/sdk/socketSession"
+import {
+	discardListingPatches,
+	driveItemLinkStatusQueryKey,
+	driveListingQueryKey,
+	driveListingQueryOptions,
+	driveNamesQueryKey
+} from "@/features/drive/queries/drive"
 import {
 	createLink,
 	deleteItemsPermanently,
@@ -117,6 +127,7 @@ import {
 beforeEach(() => {
 	vi.clearAllMocks()
 	testQueryClient.clear()
+	discardListingPatches()
 })
 
 // UuidStr is a template-literal brand requiring at least 3 dashes — pad a short readable test label
@@ -868,7 +879,7 @@ describe("setFavoritedItems", () => {
 
 describe("patchFavoritesListing", () => {
 	it("is a no-op for an unfetched favorites listing", () => {
-		patchFavoritesListing(true, dirItem({ uuid: testUuid("a"), favorited: true }))
+		patchFavoritesListing(true, dirItem({ uuid: testUuid("a"), favorited: true }), true)
 
 		expect(testQueryClient.getQueryData(favoritesListing())).toBeUndefined()
 	})
@@ -907,6 +918,135 @@ describe("setColor", () => {
 				.getQueryData<DriveItem[]>(driveListing(OTHER_PARENT_UUID))
 				?.find((i): i is DirectoryItem => i.type === "directory")?.data.color
 		).toBe("default")
+	})
+})
+
+// An action's result carries the colour of the row the action started from: a dialog may have held it while
+// the directory was recoloured elsewhere, or a listing restored from disk may have shown it outdated. Only a
+// listing read this session under the live socket vouches for a colour, which a move or restore echo keeps.
+describe("directory colour a local action writes", () => {
+	const DIR = testUuid("colored")
+	const TARGET = testUuid("target")
+	// The row the action started from, since recoloured blue elsewhere.
+	const started = dirItem({ uuid: DIR, color: "red" })
+
+	// Read from the server under the live socket, so every event since has reached its rows.
+	async function readListing(variant: "drive" | "trash" | "favorites", uuid: string | null, dirs: Dir[]): Promise<void> {
+		socketAuthenticated()
+		listDirectory.mockResolvedValueOnce({ dirs, files: [] })
+
+		await testQueryClient.query(driveListingQueryOptions(variant, uuid))
+	}
+
+	function colorIn(queryKey: ReturnType<typeof driveListingQueryKey>): string | undefined {
+		const row = testQueryClient.getQueryData<DriveItem[]>(queryKey)?.find(item => item.data.uuid === DIR)
+
+		return row?.type === "directory" ? row.data.color : undefined
+	}
+
+	function invalidated(queryKey: ReturnType<typeof driveListingQueryKey>): boolean | undefined {
+		return testQueryClient.getQueryState(queryKey)?.isInvalidated
+	}
+
+	it("a rename keeps the colour each listing holds", async () => {
+		testQueryClient.setQueryData(driveListing(OTHER_PARENT_UUID), [dirItem({ uuid: DIR, color: "blue" })])
+		renameDirectory.mockResolvedValueOnce(mockDir({ uuid: DIR, color: "red", meta: { type: "decoded", data: { name: "New" } } }))
+
+		await renameItem(started, "New")
+
+		expect(colorIn(driveListing(OTHER_PARENT_UUID))).toBe("blue")
+		expect(testQueryClient.getQueryData<DriveItem[]>(driveListing(OTHER_PARENT_UUID))?.[0]?.data.decryptedMeta?.name).toBe("New")
+	})
+
+	it("a move takes the colour a current listing holds and leaves its destination current", async () => {
+		seedRootUuid()
+		await readListing("drive", OTHER_PARENT_UUID, [mockDir({ uuid: DIR, color: "blue" })])
+		await readListing("drive", TARGET, [])
+		moveDirectory.mockResolvedValueOnce(mockDir({ uuid: DIR, parent: TARGET, color: "red" }))
+
+		await moveItems([started], TARGET)
+
+		expect(colorIn(driveListing(TARGET))).toBe("blue")
+		expect(invalidated(driveListing(TARGET))).toBe(false)
+	})
+
+	it("a move no current listing vouches for marks its destination stale, and a favorite keeps its colour", async () => {
+		seedRootUuid()
+		testQueryClient.setQueryData(driveListing(OTHER_PARENT_UUID), [started])
+		testQueryClient.setQueryData(favoritesListing(), [dirItem({ uuid: DIR, color: "blue", favorited: true })])
+		await readListing("drive", TARGET, [])
+		moveDirectory.mockResolvedValueOnce(mockDir({ uuid: DIR, parent: TARGET, color: "red" }))
+
+		await moveItems([started], TARGET)
+
+		expect(invalidated(driveListing(TARGET))).toBe(true)
+		expect(colorIn(favoritesListing())).toBe("blue")
+	})
+
+	it("a trash takes the colour a current listing holds, and the trash listing stays current", async () => {
+		await readListing("drive", OTHER_PARENT_UUID, [mockDir({ uuid: DIR, color: "blue" })])
+		await readListing("trash", null, [])
+		trashDirectory.mockResolvedValueOnce(mockDir({ uuid: DIR, parent: "trash", color: "red" }))
+
+		await trashItems([started])
+
+		expect(colorIn(trashListing())).toBe("blue")
+		expect(invalidated(trashListing())).toBe(false)
+	})
+
+	it("a trash no current listing vouches for stops the trash listing counting as current", async () => {
+		testQueryClient.setQueryData(driveListing(OTHER_PARENT_UUID), [started])
+		await readListing("trash", null, [])
+		trashDirectory.mockResolvedValueOnce(mockDir({ uuid: DIR, parent: "trash", color: "red" }))
+
+		await trashItems([started])
+
+		expect(invalidated(trashListing())).toBe(true)
+	})
+
+	it("a restore takes the colour a current trash listing holds and leaves its destination current", async () => {
+		seedRootUuid()
+		await readListing("trash", null, [mockDir({ uuid: DIR, parent: "trash", color: "blue" })])
+		await readListing("drive", OTHER_PARENT_UUID, [])
+		restoreDirectory.mockResolvedValueOnce(mockDir({ uuid: DIR, color: "red" }))
+
+		await restoreItems([started])
+
+		expect(colorIn(driveListing(OTHER_PARENT_UUID))).toBe("blue")
+		expect(invalidated(driveListing(OTHER_PARENT_UUID))).toBe(false)
+	})
+
+	it("a restore from a trash listing this session hasn't read marks its destination stale", async () => {
+		seedRootUuid()
+		testQueryClient.setQueryData(trashListing(), [started])
+		await readListing("drive", OTHER_PARENT_UUID, [])
+		restoreDirectory.mockResolvedValueOnce(mockDir({ uuid: DIR, color: "red" }))
+
+		await restoreItems([started])
+
+		expect(invalidated(driveListing(OTHER_PARENT_UUID))).toBe(true)
+	})
+
+	it("favoriting takes the colour a current listing holds, and each listing keeps its own", async () => {
+		await readListing("drive", OTHER_PARENT_UUID, [mockDir({ uuid: DIR, color: "blue" })])
+		await readListing("favorites", null, [])
+		setFavorited.mockResolvedValueOnce({ type: "dir", ...mockDir({ uuid: DIR, color: "red", favorited: true }) })
+
+		await toggleFavorite(started)
+
+		expect(colorIn(driveListing(OTHER_PARENT_UUID))).toBe("blue")
+		expect(colorIn(favoritesListing())).toBe("blue")
+		expect(invalidated(favoritesListing())).toBe(false)
+	})
+
+	it("favoriting a directory no current listing holds stops Favorites counting as current", async () => {
+		testQueryClient.setQueryData(driveListing(OTHER_PARENT_UUID), [started])
+		await readListing("favorites", null, [])
+		setFavorited.mockResolvedValueOnce({ type: "dir", ...mockDir({ uuid: DIR, color: "red", favorited: true }) })
+
+		await toggleFavorite(started)
+
+		expect(invalidated(favoritesListing())).toBe(true)
 	})
 })
 
@@ -1225,6 +1365,19 @@ describe("disableLink", () => {
 
 		const remaining = testQueryClient.getQueryData<DriveItem[]>(linksListing())
 		expect(remaining?.map(item => item.data.uuid)).toEqual([testUuid("keep")])
+	})
+
+	// A stale listing's rows don't count as current, which a plain cache write would undo.
+	it("keeps a stale links-root listing stale when it drops the item", async () => {
+		const dir = dirItem({ uuid: testUuid("a") })
+		testQueryClient.setQueryData(linksListing(), [dir, dirItem({ uuid: testUuid("keep") })])
+		void testQueryClient.invalidateQueries({ queryKey: linksListing(), refetchType: "none" })
+		removeDirectoryLink.mockResolvedValueOnce(undefined)
+
+		await disableLink(dir, { type: "directory", status: mockDirLink() })
+
+		expect(testQueryClient.getQueryData<DriveItem[]>(linksListing())?.map(item => item.data.uuid)).toEqual([testUuid("keep")])
+		expect(testQueryClient.getQueryState(linksListing())?.isInvalidated).toBe(true)
 	})
 
 	it("leaves the links-root listing untouched on rejection", async () => {

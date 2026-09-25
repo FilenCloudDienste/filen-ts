@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { QueryClient } from "@tanstack/react-query"
 import type { Dir, UuidStr } from "@filen/sdk-rs"
 
 const { performMove, startCopyWithCard, toastSuccess } = vi.hoisted(() => ({
@@ -7,6 +8,9 @@ const { performMove, startCopyWithCard, toastSuccess } = vi.hoisted(() => ({
 	toastSuccess: vi.fn()
 }))
 
+// Copying looks its items up in the cached listings, which hold none here.
+vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
+vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 vi.mock("@/features/drive/lib/dnd", () => ({ performMove }))
 vi.mock("@/features/transfers/lib/copyToast", () => ({ startCopyWithCard }))
 vi.mock("sonner", () => ({ toast: { success: toastSuccess } }))

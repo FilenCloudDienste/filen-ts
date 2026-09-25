@@ -4,17 +4,24 @@ import { type DriveItem } from "@/features/drive/lib/item"
 import { type CopyDestination } from "@/features/drive/lib/copy.logic"
 import { performMove } from "@/features/drive/lib/dnd"
 import { startCopyWithCard } from "@/features/transfers/lib/copyToast"
-import { useDriveClipboardStore } from "@/features/drive/store/useDriveClipboardStore"
+import { useDriveClipboardStore, type DriveClipboardMode } from "@/features/drive/store/useDriveClipboardStore"
+import { asListed } from "@/features/drive/lib/clipboardRecheck"
 import { type ClipboardShortcutContext } from "@/features/drive/lib/clipboard.logic"
 import { isAnyDialogOpen, isAnyMenuOpen } from "@/lib/keymap/dialogGuard"
 
+function hold(mode: DriveClipboardMode, items: readonly DriveItem[]): void {
+	const listed = asListed(items)
+
+	useDriveClipboardStore.getState().set({ mode, items: listed.items }, listed.current)
+}
+
 export function copyToClipboard(items: readonly DriveItem[]): void {
-	useDriveClipboardStore.getState().set({ mode: "copy", items: items.slice() })
+	hold("copy", items)
 	toast.success(i18n.t("drive:driveClipboardCopiedToast", { count: items.length }))
 }
 
 export function cutToClipboard(items: readonly DriveItem[]): void {
-	useDriveClipboardStore.getState().set({ mode: "cut", items: items.slice() })
+	hold("cut", items)
 	toast.success(i18n.t("drive:driveClipboardCutToast", { count: items.length }))
 }
 

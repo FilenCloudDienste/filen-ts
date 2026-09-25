@@ -31,6 +31,7 @@ import {
 	discardListingPatches,
 	driveListingQueryKey,
 	driveListingQueryUpdate,
+	driveListingQueryUpdateGlobal,
 	flushListingCreates,
 	useDirectoryListingQuery
 } from "@/features/drive/queries/drive"
@@ -626,6 +627,81 @@ describe("drive listing patches that land during a read", () => {
 		expect(reads()).toBe(2)
 	})
 
+	it("a burst of trashes, renames, recolours, moves and creates lands as it would one at a time", async () => {
+		const dir = nextDir()
+		const elsewhere = nextDir()
+		const pending = deferred<NormalDirsAndFiles>()
+
+		listDirectory.mockImplementationOnce(() => pending.promise)
+		mountListing(dir)
+		fire({ type: "fileTrash", uuid: testUuid("f1"), stableUUID: testUuid("stable-f1"), newUUID: undefined })
+		fire({
+			type: "fileMetadataChanged",
+			uuid: testUuid("f2"),
+			metadata: {
+				type: "decoded",
+				data: { name: "renamed.pdf", mime: "application/pdf", modified: 1n, size: 1n, key: "k", version: 2 }
+			}
+		})
+		fire({ type: "folderColorChanged", uuid: testUuid("d1"), color: "blue" })
+		fire({ type: "fileNew", file: mockFile("f5", dir) })
+		fire({ type: "fileMove", file: mockFile("f3", elsewhere) })
+		fire({ type: "fileMove", file: mockFile("g1", dir) })
+		fire({ type: "fileTrash", uuid: testUuid("f5"), stableUUID: testUuid("stable-f5"), newUUID: undefined })
+		pending.resolve({
+			dirs: [mockDir("d1", dir)],
+			files: [mockFile("f1", dir), mockFile("f2", dir), mockFile("f3", dir), mockFile("f4", dir)]
+		})
+		await drain()
+
+		const rows = listing(dir)?.map(item => [
+			item.data.uuid,
+			item.data.decryptedMeta?.name,
+			"color" in item.data ? item.data.color : null
+		])
+
+		expect(rows).toEqual([
+			[testUuid("d1"), "d1", "blue"],
+			[testUuid("f2"), "renamed.pdf", null],
+			[testUuid("f4"), "f4.pdf", null],
+			[testUuid("g1"), "g1.pdf", null]
+		])
+
+		await refocus()
+
+		expect(reads()).toBe(1)
+	})
+
+	// A reconnect re-reads the mounted listings, replacing any refetch under way. The replaced read still
+	// ran to its end: it used to replay every change logged meanwhile, and record its read, for a result
+	// query-core throws away.
+	it("a read another replaced neither replays its changes nor records itself", async () => {
+		const dir = nextDir()
+		const kept = mockFile("kept", dir)
+
+		listDirectory.mockImplementation(() => Promise.resolve({ dirs: [], files: [kept] }))
+		await mountRead(dir)
+
+		const replaced = deferred<NormalDirsAndFiles>()
+		const replace = vi.fn((row: DriveItem) => row)
+
+		listDirectory.mockImplementationOnce(() => replaced.promise)
+		void queryClient.invalidateQueries({ queryKey: driveListingQueryKey({ variant: "drive", uuid: dir }) })
+		driveListingQueryUpdateGlobal({ type: "replace", uuid: kept.uuid, replace })
+		dropSocket()
+		recoverSocket()
+		await drain()
+		replaced.resolve({ dirs: [], files: [kept] })
+		await drain()
+
+		expect(reads()).toBe(3)
+		expect(replace).toHaveBeenCalledOnce()
+
+		await refocus()
+
+		expect(reads()).toBe(3)
+	})
+
 	it("a shared listing's read gets a patch that landed while it ran", async () => {
 		const pending = deferred<SharedRootDirsAndFiles>()
 		const { meta, size, region, bucket, chunks, timestamp, canMakeThumbnail } = mockFile("gone", nextDir())
@@ -654,6 +730,156 @@ describe("drive listing patches that land during a read", () => {
 
 		expect(reads()).toBe(1)
 		expect(queryClient.getQueryData<DriveItem[]>(driveListingQueryKey({ variant: "sharedOut", uuid: null }))).toEqual([])
+	})
+})
+
+// A move or restore echo carries no colour, so the directory keeps the one a current row holds. A row no
+// read under the live socket has kept current may predate a recolour made elsewhere; the destination then
+// reads again rather than keep a colour the server doesn't have.
+describe("directory colour on a move or restore echo", () => {
+	function colorOf(uuid: string, item: string): string | undefined {
+		const row = listing(uuid)?.find(candidate => candidate.data.uuid === item)
+
+		return row?.type === "directory" ? row.data.color : undefined
+	}
+
+	function coloredDir(label: string, parent: UuidStr, color: string): Dir {
+		return { ...mockDir(label, parent), color }
+	}
+
+	it("a listing read this session lends its colour, and the destination stays current", async () => {
+		const source = nextDir()
+		const destination = nextDir()
+
+		listDirectory.mockImplementationOnce(() => Promise.resolve({ dirs: [coloredDir("moved", source, "red")], files: [] }))
+		await mountRead(source)
+		await mountRead(destination)
+		fire({ type: "folderMove", dir: mockDir("moved", destination) })
+
+		expect(colorOf(destination, testUuid("moved"))).toBe("red")
+
+		await refocus()
+
+		expect(reads()).toBe(2)
+	})
+
+	it("a listing restored from disk lends none: the destination's read no longer counts", async () => {
+		const source = nextDir()
+		const destination = nextDir()
+
+		const restored = [narrowItem(coloredDir("moved", source, "red"))]
+
+		queryClient.setQueryData(driveListingQueryKey({ variant: "drive", uuid: source }), restored, { updatedAt: Date.now() })
+		await mountRead(destination)
+		fire({ type: "folderMove", dir: mockDir("moved", destination) })
+
+		expect(colorOf(destination, testUuid("moved"))).toBe("default")
+		expect(isInvalidated(destination)).toBe(true)
+
+		await refocus()
+
+		expect(reads()).toBe(2)
+	})
+
+	it("a listing a socket drop left stale lends none: the destination's read no longer counts", async () => {
+		const source = nextDir()
+		const destination = nextDir()
+
+		listDirectory.mockImplementationOnce(() => Promise.resolve({ dirs: [coloredDir("moved", source, "red")], files: [] }))
+
+		const unmounted = await mountRead(source)
+
+		unmounted.unmount()
+		await mountRead(destination)
+		dropSocket()
+		recoverSocket()
+		await drain()
+
+		expect(reads()).toBe(3)
+
+		fire({ type: "folderMove", dir: mockDir("moved", destination) })
+		await refocus()
+
+		expect(reads()).toBe(4)
+	})
+
+	it("a trash listing read this session lends its colour to a restore", async () => {
+		const destination = nextDir()
+
+		listDirectory.mockImplementationOnce(() => Promise.resolve({ dirs: [coloredDir("restored", destination, "green")], files: [] }))
+		mountFlat("trash")
+		await drain()
+		await mountRead(destination)
+		fire({ type: "folderRestore", dir: mockDir("restored", destination) })
+
+		expect(colorOf(destination, testUuid("restored"))).toBe("green")
+		expect(isInvalidated(destination)).toBe(false)
+	})
+
+	it("a trash listing restored from disk lends none to a restore: the destination's read no longer counts", async () => {
+		const destination = nextDir()
+
+		const restored = [narrowItem(coloredDir("restored", destination, "green"))]
+
+		queryClient.setQueryData(driveListingQueryKey({ variant: "trash", uuid: null }), restored, { updatedAt: Date.now() })
+		await mountRead(destination)
+		fire({ type: "folderRestore", dir: mockDir("restored", destination) })
+
+		expect(colorOf(destination, testUuid("restored"))).toBe("default")
+		expect(isInvalidated(destination)).toBe(true)
+
+		await refocus()
+
+		expect(reads()).toBe(2)
+	})
+
+	// A trash echo carries only the uuid: its row came from a listing restored from disk.
+	it("a trash listing given a disk-restored row lends none to its restore: the destination's read no longer counts", async () => {
+		const source = nextDir()
+		const destination = nextDir()
+
+		const restored = [narrowItem(coloredDir("trashed", source, "red"))]
+
+		queryClient.setQueryData(driveListingQueryKey({ variant: "drive", uuid: source }), restored, { updatedAt: Date.now() })
+
+		const trash = mountFlat("trash")
+
+		await drain()
+		trash.unmount()
+		await mountRead(destination)
+		fire({ type: "folderTrash", parent: source, uuid: testUuid("trashed") })
+		fire({ type: "folderRestore", dir: mockDir("trashed", destination) })
+
+		expect(colorOf(destination, testUuid("trashed"))).toBe("default")
+
+		await refocus()
+
+		expect(reads()).toBe(3)
+	})
+
+	// The read applies the colourless move to what it returns, where the payload's default would overwrite
+	// the colour the server returned in a read that still counts.
+	it("a Favorites read under way keeps the colour it returns through a colourless move, and lends it", async () => {
+		const pending = deferred<NormalDirsAndFiles>()
+		const home = nextDir()
+		const destination = nextDir()
+
+		listDirectory.mockImplementationOnce(() => pending.promise)
+
+		const favorites = mountFlat("favorites")
+
+		fire({ type: "folderMove", dir: { ...mockDir("fav", home), favorited: true } })
+		pending.resolve({ dirs: [{ ...coloredDir("fav", home, "blue"), favorited: true }], files: [] })
+		await drain()
+		favorites.unmount()
+		await mountRead(destination)
+		fire({ type: "folderMove", dir: { ...mockDir("fav", destination), favorited: true } })
+
+		expect(colorOf(destination, testUuid("fav"))).toBe("blue")
+
+		await refocus()
+
+		expect(reads()).toBe(2)
 	})
 })
 
