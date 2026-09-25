@@ -9,7 +9,7 @@ vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
 import { narrowItem } from "@/features/drive/lib/item"
-import { buildDragSourceProps, clearDragPayload, getDragPayload } from "@/features/drive/lib/dnd"
+import { buildDragSourceProps, buildTreeDragSourceProps, clearDragPayload, getDragPayload } from "@/features/drive/lib/dnd"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
 
 function report(name: string) {
@@ -50,5 +50,22 @@ describe("dragging the selection", () => {
 		buildDragSourceProps(renamed, "drive", [renamed])?.onDragStart(dragStart())
 
 		expect(getDragPayload()).toEqual([renamed])
+	})
+})
+
+// A spring-loaded open unmounts the row a drag started from, so its own dragend never reaches React.
+describe("letting go of the payload", () => {
+	it.each(["drop", "dragend"])("lets go once the window sees the drag's %s, after that turn's handlers", type => {
+		vi.useFakeTimers()
+		vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null)
+		const dragged = report("dragged.txt")
+
+		buildTreeDragSourceProps(() => dragged).onDragStart(dragStart())
+		window.dispatchEvent(new Event(type))
+
+		expect(getDragPayload()).toEqual([dragged])
+		vi.runAllTimers()
+		expect(getDragPayload()).toEqual([])
+		vi.useRealTimers()
 	})
 })

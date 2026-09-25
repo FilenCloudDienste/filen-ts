@@ -275,3 +275,18 @@
 .notes-rich-editor .ql-editor pre {
     padding: 0.75rem;
 }
+
+/* Spring-loading's blink (features/drive/lib/springLoad.ts): the "off" phases hide the hovered
+   directory's drop highlight — its tint, move ring and copy outline — and the "on" phases show it
+   again, just before the directory opens. A directory a drag springs through without being able to
+   drop there (the payload's own parent) has no highlight, so its "on" phases tint it: the blink alone
+   is what it shows. Set on that one element only, so nothing else re-renders. */
+[data-spring-blink="off"] {
+    background-color: transparent !important;
+    box-shadow: none !important;
+    outline-color: transparent !important;
+}
+
+[data-spring-blink="on"] {
+    background-color: color-mix(in oklab, var(--primary) 10%, transparent);
+}

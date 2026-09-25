@@ -1,12 +1,13 @@
 import { Fragment } from "react"
-import { Link } from "@tanstack/react-router"
+import { Link, useNavigate } from "@tanstack/react-router"
 import { useTranslation } from "react-i18next"
 import { ChevronRightIcon } from "lucide-react"
-import { type DriveVariant } from "@/features/drive/lib/preferences"
+import { canWriteVariant, type DriveVariant } from "@/features/drive/lib/preferences"
 import { driveRouteIdFor, type DriveRouteId, splatToUuids } from "@/features/drive/lib/navigate"
 import { useDirectoryNamesQuery } from "@/features/drive/queries/drive"
 import { canDragVariant } from "@/features/drive/lib/dnd.logic"
 import { dropHighlightClass, useDriveDropTarget } from "@/features/drive/hooks/useDriveDropTarget"
+import { LISTING_SPRING } from "@/features/drive/lib/springLoad"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { cn } from "@filen/shared"
@@ -47,12 +48,22 @@ interface CrumbLinkProps {
 // — its own component so the drop hook is called once per crumb, never in a loop). The current (last)
 // segment stays a plain span, so it is never a target.
 function CrumbLink({ variant, routeId, splatValue, targetUuid, targetAncestry, label }: CrumbLinkProps) {
+	const navigate = useNavigate()
+	// A drag resting on an ancestor opens it (springLoad.ts), as the link would; files from the system
+	// dropped on it upload into it wherever the listing's dropzone would (canWriteVariant, for this crumb).
 	const drop = useDriveDropTarget({
 		targetUuid,
 		targetAncestry,
 		routeChain: { parent: undefined },
 		targetName: label,
-		disabled: !canDragVariant(variant)
+		disabled: !canDragVariant(variant),
+		spring: {
+			timing: LISTING_SPRING,
+			open: () => {
+				void navigate({ to: routeId, params: { _splat: splatValue } })
+			}
+		},
+		acceptFiles: canWriteVariant(variant, targetUuid)
 	})
 
 	return (

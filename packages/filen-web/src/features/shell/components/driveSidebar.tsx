@@ -9,6 +9,7 @@ import { useDirectoryTreeStore } from "@/features/drive/store/useDirectoryTreeSt
 import { DirectoryTree, type DirectoryTreeContext } from "@/features/drive/components/directoryTree"
 import { DirectoryTreeMenu } from "@/features/drive/components/directoryTreeMenu"
 import { dropHighlightClass, useDriveDropTarget } from "@/features/drive/hooks/useDriveDropTarget"
+import { TREE_EXPAND_SPRING } from "@/features/drive/lib/springLoad"
 import { StorageMeter } from "@/features/shell/components/storageMeter"
 import { useResizableSidebar } from "@/features/shell/hooks/useResizableSidebar"
 import { SidebarResizeHandle } from "@/features/shell/components/sidebarResizeHandle"
@@ -98,13 +99,13 @@ function SplatNavItem({ icon: Icon, label, to }: { icon: IconType; label: string
 // sidebar's stable "Cloud Drive" landmark link). Its own open flag rides ROOT_KEY.
 function CloudDriveRoot({ label, open, onToggle }: { label: string; open: boolean; onToggle: () => void }) {
 	const { t } = useTranslation("drive")
-	// The drive root as a drag-to-move drop target (empty ancestry). A collapsed root auto-expands on
-	// hover-dwell, same as any node below it.
+	// The drive root as a drag-to-move drop target (empty ancestry). A collapsed root springs open
+	// (expands) on a short rest, same as any node below it.
 	const drop = useDriveDropTarget({
 		targetUuid: null,
 		targetAncestry: [],
 		targetName: label,
-		onDwell: open ? undefined : onToggle
+		spring: open ? undefined : { timing: TREE_EXPAND_SPRING, open: onToggle }
 	})
 
 	return (

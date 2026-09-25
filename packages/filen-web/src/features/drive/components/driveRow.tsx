@@ -1,8 +1,8 @@
 import { useState, type CSSProperties, type MouseEvent } from "react"
 import { useTranslation } from "react-i18next"
 import { StarIcon, MoreHorizontalIcon } from "lucide-react"
-import { type DriveItem } from "@/features/drive/lib/item"
-import { type DriveVariant } from "@/features/drive/lib/preferences"
+import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
+import { canWriteVariant, type DriveVariant } from "@/features/drive/lib/preferences"
 import { ItemIcon } from "@/features/drive/components/itemIcon"
 import { formatItemSize, formatModifiedDate, sharedIdentityLabel } from "@/features/drive/lib/format"
 import { invalidateThumbnail } from "@/features/drive/lib/thumbnails"
@@ -17,6 +17,7 @@ import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import { useDriveClipboardStore } from "@/features/drive/store/useDriveClipboardStore"
 import { useThumbnail } from "@/features/drive/hooks/useThumbnail"
 import { dropHighlightClass, useDriveDropTarget } from "@/features/drive/hooks/useDriveDropTarget"
+import { LISTING_SPRING } from "@/features/drive/lib/springLoad"
 import { cn, driveItemName } from "@filen/shared"
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
@@ -85,12 +86,26 @@ export function DriveRow({
 	// searchParentPath is "" for a direct child of the search root and undefined outside a search.
 	const searchHit = searchParentPath !== undefined && searchParentPath.length > 0
 	const pathUuids = splatToUuids(splat)
+	const springable = asDirectoryOrFile(item).type === "directory" && !item.data.undecryptable
 	const drop = useDriveDropTarget({
 		targetUuid: item.data.uuid,
 		targetAncestry: [...pathUuids, item.data.uuid],
 		routeChain: { parent: item.data.parent },
 		targetName: name,
-		disabled: item.type !== "directory" || !canDragVariant(variant)
+		// Internal drags: owned My Drive directories only.
+		disabled: item.type !== "directory" || !canDragVariant(variant),
+		// A drag resting on a directory opens it (springLoad.ts), and files from the system upload into it
+		// wherever the listing's own dropzone would upload (canWriteVariant, judged for this directory).
+		// Neither for an undecryptable one, which doesn't open either.
+		spring: springable
+			? {
+					timing: LISTING_SPRING,
+					open: () => {
+						onOpen(index)
+					}
+				}
+			: undefined,
+		acceptFiles: springable && canWriteVariant(variant, item.data.uuid)
 	})
 	// Only the two shared variants' ROOT listing resolve a counterparty; every other variant/nested
 	// item gets null (no badge) — see sharedIdentityLabel's own doc comment.

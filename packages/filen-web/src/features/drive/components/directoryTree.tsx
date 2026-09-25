@@ -6,6 +6,7 @@ import { DirectoryGlyph } from "@/features/drive/components/itemIcon"
 import { cachedTreeDirectory, type DirectoryTreeChild } from "@/features/drive/queries/drive"
 import { dropHighlightClass, useDriveDropTarget } from "@/features/drive/hooks/useDriveDropTarget"
 import { buildTreeDragSourceProps } from "@/features/drive/lib/dnd"
+import { TREE_EXPAND_SPRING } from "@/features/drive/lib/springLoad"
 import { useDriveClipboardStore } from "@/features/drive/store/useDriveClipboardStore"
 import { Spinner } from "@/components/ui/spinner"
 
@@ -133,17 +134,20 @@ function DirectoryTreeNode({ child, path, depth, tree }: DirectoryTreeNodeProps)
 	const open = tree.isOpen(child.uuid)
 	const active = arraysEqual(path, tree.activePath)
 	const onBranch = !active && isStrictPrefix(path, tree.activePath)
-	// A drag-to-move drop target for this node's directory. A collapsed node auto-expands after a
-	// hover-dwell so the drag can descend into it; an open node needs no dwell.
+	// A drag-to-move drop target for this node's directory. A collapsed node springs open (expands) after
+	// a short rest so the drag can descend into it; an open node has nothing to spring.
 	const drop = useDriveDropTarget({
 		targetUuid: child.uuid,
 		targetAncestry: path,
 		targetName: child.name,
 		disabled: !tree.enableDrop,
-		onDwell: open
+		spring: open
 			? undefined
-			: () => {
-					tree.onToggle(child.uuid)
+			: {
+					timing: TREE_EXPAND_SPRING,
+					open: () => {
+						tree.onToggle(child.uuid)
+					}
 				}
 	})
 

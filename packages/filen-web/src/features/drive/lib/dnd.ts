@@ -156,8 +156,36 @@ export function buildDragSourceProps(item: DriveItem, variant: DriveVariant, cur
 	}
 }
 
+// A spring-loaded directory (springLoad.ts) navigates mid-drag, unmounting the row the drag started
+// from, and the source's own dragend then never reaches React. The drag still ends in a drop or a
+// dragend the window sees: the payload is let go after that turn's handlers have read it.
+// One listener pair at a time: a drag cancelled where the window never heard it leaves its pair behind
+// until the next drag replaces it.
+let releaseListener: (() => void) | null = null
+
+function stopListeningForDragEnd(): void {
+	if (releaseListener !== null) {
+		window.removeEventListener("drop", releaseListener, true)
+		window.removeEventListener("dragend", releaseListener, true)
+		releaseListener = null
+	}
+}
+
+function releasePayloadAfterDrag(): void {
+	stopListeningForDragEnd()
+
+	releaseListener = () => {
+		stopListeningForDragEnd()
+		setTimeout(clearDragPayload, 0)
+	}
+
+	window.addEventListener("drop", releaseListener, true)
+	window.addEventListener("dragend", releaseListener, true)
+}
+
 // The dragstart every drive drag source shares: the payload ref, the internal marker and the chip.
 function startInternalDrag(event: DragEvent<HTMLElement>, items: readonly DriveItem[]): void {
+	releasePayloadAfterDrag()
 	setDragPayload(items)
 	// Copy too: a drop with the copy modifier held copies (useDriveDropTarget).
 	event.dataTransfer.effectAllowed = "copyMove"

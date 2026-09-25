@@ -83,6 +83,8 @@ import { Spinner } from "@/components/ui/spinner"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { reroutedRoute, subscribeBranchChanges } from "@/features/drive/lib/branchChanges"
 import { cachedOwnParents } from "@/features/drive/lib/ownAncestry"
+import { canDragVariant } from "@/features/drive/lib/dnd.logic"
+import { ListingDropSurface } from "@/features/drive/components/listingDropSurface"
 
 // Grid-view inset between the tiles and the pane's edges. A CSS padding on the listbox, not a
 // virtualizer padding, because the marquee reads the listbox's computed paddings for its hit math.
@@ -919,7 +921,13 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 				parentUuid={uuid}
 				disabled={writeDisabled}
 			>
-				<div className="relative flex min-h-0 flex-1 flex-col pt-4">
+				<ListingDropSurface
+					uuid={uuid}
+					ancestry={pathUuids}
+					// Not over search results: they come from all over the subtree, not from the directory on
+					// screen.
+					disabled={!canDragVariant(variant) || listingQuery.status !== "success" || search.active}
+				>
 					{/* Full bleed to the content card's side and bottom edges; only the top rule separates it
 					    from the controls above. */}
 					<div className="flex min-h-0 flex-1 flex-col overflow-hidden border-t border-border/70 bg-background">
@@ -990,7 +998,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 							/>
 						</div>
 					) : null}
-				</div>
+				</ListingDropSurface>
 			</UploadDropzone>
 			{renderActiveDialog()}
 		</>

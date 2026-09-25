@@ -1,8 +1,7 @@
 import { useEffect, useState, type DragEvent, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { UploadIcon } from "lucide-react"
-import { startUploads } from "@/features/drive/lib/upload"
-import { startDirectoryUpload } from "@/features/drive/lib/uploadDirectory"
+import { uploadDroppedFiles } from "@/features/drive/lib/uploadDrop"
 import { isInternalDrag } from "@/features/drive/lib/dnd"
 import { enterDragDepth, leaveDragDepth } from "@/features/drive/components/uploadDropzone.logic"
 
@@ -104,22 +103,7 @@ export function UploadDropzone({ parentUuid, disabled = false, children }: Uploa
 			return
 		}
 
-		const entries: FileSystemEntry[] = []
-
-		for (const item of Array.from(event.dataTransfer.items)) {
-			const entry = item.webkitGetAsEntry()
-
-			if (entry !== null) {
-				entries.push(entry)
-			}
-		}
-
-		if (entries.some(entry => entry.isDirectory)) {
-			void startDirectoryUpload({ kind: "entries", entries }, parentUuid)
-			return
-		}
-
-		void startUploads(Array.from(event.dataTransfer.files), parentUuid)
+		uploadDroppedFiles(event.dataTransfer, parentUuid)
 	}
 
 	return (
@@ -128,6 +112,11 @@ export function UploadDropzone({ parentUuid, disabled = false, children }: Uploa
 			onDragEnter={handleDragEnter}
 			onDragOver={handleDragOver}
 			onDragLeave={handleDragLeave}
+			// A directory inside claims a file drop of its own (useDriveDropTarget), and the bubbling drop
+			// then never reaches this zone; its hint still has to go.
+			onDropCapture={() => {
+				setDragDepth(0)
+			}}
 			onDrop={handleDrop}
 		>
 			{children}
