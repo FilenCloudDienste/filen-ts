@@ -1125,7 +1125,8 @@ export function driveItemsQueryUpdateForPhotos({
 // them to the favorites / links / sharedIn / sharedOut virtual roots, where an un-favorited, un-shared
 // file does not belong.
 //
-// Deferred while a copy runs (see copyActivity): one invalidation at the end, a refetch only if mounted.
+// Deferred while a copy creates items (see copyActivity): one invalidation once none does, at its end or
+// once the SDK reports it paused; a refetch only if mounted.
 export function driveItemsQueryUpdateForRecents({
 	updater
 }: {

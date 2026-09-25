@@ -197,8 +197,8 @@ const choosingCancel = new Set<string>()
 // kept while one runs, or a failure it reports would find no job to keep it.
 const trashing = new Map<string, number>()
 
-// Destinations whose listings may have missed create echoes. Refetched once no copy runs: a refetch
-// while another copy still streams echoes drops the ones landing mid-fetch.
+// Destinations whose listings may have missed create echoes. Refetched once no copy creates items: a
+// refetch while one does drops the echoes landing mid-fetch.
 const socketGapDestinations = new Set<string | null>()
 
 // Runs copies as one SDK job and one transfers row each, however many items a job holds. The SDK owns
@@ -402,7 +402,40 @@ class CopyRunner {
 			useTransfersStore.getState().setTransfers(prev => prev.map(t => (t.id === id && t.paused !== paused ? { ...t, paused } : t)))
 		}
 
-		const pauseListeners = [pause.addEventListener("pause", () => setRowPaused(true)), pause.addEventListener("resume", () => setRowPaused(false))]
+		// Counted by copyActivity once the SDK reports the pause done, not at the request: in-flight work
+		// still finishing creates items.
+		let countedPaused = false
+		// A report of the pause that crossed a resume is stale.
+		let pauseRequested = false
+
+		const countPaused = (paused: boolean) => {
+			if (paused === countedPaused) {
+				return
+			}
+
+			countedPaused = paused
+
+			copyActivity.setPaused(paused)
+
+			if (paused) {
+				this.refetchSocketGaps(live)
+			}
+		}
+
+		const pauseListeners = [
+			pause.addEventListener("pause", () => {
+				pauseRequested = true
+
+				setRowPaused(true)
+			}),
+			pause.addEventListener("resume", () => {
+				pauseRequested = false
+
+				// It creates again before the SDK reports the resume.
+				countPaused(false)
+				setRowPaused(false)
+			})
+		]
 
 		useTransfersStore.getState().setTransfers(prev => [
 			...prev,
@@ -510,6 +543,8 @@ class CopyRunner {
 					collectCopyEvents(update.events, pendingEvents)
 
 					latest = update
+
+					countPaused(update.paused && pauseRequested)
 
 					if (Date.now() - lastFlushAt >= COPY_FLUSH_MS) {
 						flush()
@@ -658,19 +693,27 @@ class CopyRunner {
 				socketCreateBatcher.flushNow()
 			}
 
+			// A job dropped past its cancel grace still delivers what it queued: none of that counts.
+			pauseRequested = false
+			countPaused(false)
 			copyActivity.end()
 
-			// The last copy out refetches whatever any of them may have missed.
-			if (!copyActivity.isActive()) {
-				if (live()) {
-					for (const destinationUuid of socketGapDestinations) {
-						driveItemsQueryRefetchAfterSocketGap(destinationUuid)
-					}
-				}
+			this.refetchSocketGaps(live)
+		}
+	}
 
-				socketGapDestinations.clear()
+	private refetchSocketGaps(live: () => boolean): void {
+		if (socketGapDestinations.size === 0 || copyActivity.isCreating()) {
+			return
+		}
+
+		if (live()) {
+			for (const destinationUuid of socketGapDestinations) {
+				driveItemsQueryRefetchAfterSocketGap(destinationUuid)
 			}
 		}
+
+		socketGapDestinations.clear()
 	}
 
 	// Only top-level items; their subtrees go with them. Moved to the trash, never deleted.

@@ -1,7 +1,9 @@
-// Copies in progress. The copy engine brackets each job with begin()/end(); until it exists nothing
-// calls begin(), so every check below reads idle.
+// Copies in progress. The copy engine brackets each job with begin()/end() and flags it while the SDK
+// reports it paused.
 class CopyActivity {
 	private active = 0
+	// Running copies the SDK reports paused: nothing of theirs runs, so they create nothing until resumed.
+	private paused = 0
 	private recentsRefresh: (() => void) | null = null
 
 	public begin(): void {
@@ -15,29 +17,54 @@ class CopyActivity {
 
 		this.active--
 
-		if (this.active === 0 && this.recentsRefresh) {
-			const recentsRefresh = this.recentsRefresh
+		this.refreshRecentsOnceQuiet()
+	}
 
-			this.recentsRefresh = null
+	// A copy that ends paused is unflagged before its end().
+	public setPaused(paused: boolean): void {
+		if (!paused) {
+			if (this.paused > 0) {
+				this.paused--
+			}
 
-			recentsRefresh()
+			return
 		}
+
+		this.paused++
+
+		this.refreshRecentsOnceQuiet()
 	}
 
 	public isActive(): boolean {
 		return this.active > 0
 	}
 
-	// Every file a copy creates is a new recent, so Recents patches are dropped while one runs and the
-	// listing is refreshed once when the last one ends. Returns false when idle: the caller patches now.
+	public isCreating(): boolean {
+		return this.active > this.paused
+	}
+
+	// Every file a copy creates is a new recent, so Recents patches are dropped while one creates and the
+	// listing is refreshed once none does. Returns false then: the caller patches now.
 	public deferRecents(refresh: () => void): boolean {
-		if (this.active === 0) {
+		if (!this.isCreating()) {
 			return false
 		}
 
 		this.recentsRefresh = refresh
 
 		return true
+	}
+
+	private refreshRecentsOnceQuiet(): void {
+		if (this.isCreating() || !this.recentsRefresh) {
+			return
+		}
+
+		const recentsRefresh = this.recentsRefresh
+
+		this.recentsRefresh = null
+
+		recentsRefresh()
 	}
 }
 

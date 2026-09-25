@@ -989,37 +989,41 @@ describe("move to trash racing a prune", () => {
 	})
 })
 
-describe("the stop dialog", () => {
-	// A copy that waits mid-run until it is cancelled or let go, as the SDK does while paused.
-	function heldCopy(): { started: Promise<void>; finish: () => void } {
-		let markStarted = () => {}
-		let finish = () => {}
-		const started = new Promise<void>(resolve => {
-			markStarted = resolve
+// A copy that waits mid-run until it is cancelled or let go, as the SDK does while paused; `progress`
+// sends the state reports the SDK sends meanwhile.
+function heldCopy(): { started: Promise<void>; finish: () => void; progress: (state: Partial<CopyUpdate>) => void } {
+	let markStarted = () => {}
+	let finish = () => {}
+	let onUpdate: (next: CopyUpdate) => void = () => {}
+	const started = new Promise<void>(resolve => {
+		markStarted = resolve
+	})
+
+	scriptCopy(async (callback, managedFuture) => {
+		const abort = managedFuture.abortSignal.sdkAbortFor
+
+		onUpdate = next => callback.onUpdate(next)
+		callback.onTopLevelCreated(createdFile("made") as never)
+		markStarted()
+
+		await new Promise<void>(resolve => {
+			finish = resolve
+			abort.addEventListener("abort", () => resolve(), { once: true })
 		})
 
-		scriptCopy(async (callback, managedFuture) => {
-			const abort = managedFuture.abortSignal.sdkAbortFor
+		return abort.aborted
+			? report({ error: { kind: ErrorKind.Cancelled, message: "", serverMessage: undefined }, topLevel: [createdFile("made")] })
+			: report({ topLevel: [createdFile("made")] })
+	})
 
-			callback.onTopLevelCreated(createdFile("made") as never)
-			markStarted()
-
-			await new Promise<void>(resolve => {
-				finish = resolve
-				abort.addEventListener("abort", () => resolve(), { once: true })
-			})
-
-			return abort.aborted
-				? report({ error: { kind: ErrorKind.Cancelled, message: "", serverMessage: undefined }, topLevel: [createdFile("made")] })
-				: report({ topLevel: [createdFile("made")] })
-		})
-
-		return {
-			started,
-			finish: () => finish()
-		}
+	return {
+		started,
+		finish: () => finish(),
+		progress: state => onUpdate(update(0n, state))
 	}
+}
 
+describe("the stop dialog", () => {
 	function startJob(): string {
 		return copyRunner.start({ items: [file("a")], destination: DEST, destinationDir: DEST_DIR }) as string
 	}
@@ -1285,6 +1289,87 @@ describe("a socket gap during the copy", () => {
 		expect(h.refetchAfterSocketGap).toHaveBeenCalledExactlyOnceWith("dest")
 	})
 
+	function scriptCopyAcrossReconnect(): void {
+		scriptCopy(async () => {
+			useSocketStore.setState({ state: "reconnecting", connectedAt: 1 })
+			useSocketStore.setState({ state: "connected", connectedAt: 2 })
+
+			return report()
+		})
+	}
+
+	it("a copy the SDK reports paused holds no other copy's refetch", async () => {
+		const held = heldCopy()
+		const heldId = launchJob([file("held")])
+
+		await held.started
+
+		copyRunner.pause(heldId)
+		held.progress({ paused: true })
+		scriptCopyAcrossReconnect()
+		launchJob([file("gap")])
+		await h.tracked[1]
+
+		const beforeHeldEnds = [...h.refetchAfterSocketGap.mock.calls]
+
+		copyRunner.resume(heldId)
+		held.finish()
+		await Promise.all(h.tracked)
+
+		expect(beforeHeldEnds).toEqual([["dest"]])
+	})
+
+	it("pausing the last copy still creating items releases a held refetch once the SDK reports the pause done", async () => {
+		const held = heldCopy()
+		const heldId = launchJob([file("held")])
+
+		await held.started
+
+		scriptCopyAcrossReconnect()
+		launchJob([file("gap")])
+		await h.tracked[1]
+
+		copyRunner.pause(heldId)
+		// Its in-flight work still finishing creates items.
+		held.progress({ pausing: true })
+
+		const whilePausing = h.refetchAfterSocketGap.mock.calls.length
+
+		held.progress({ paused: true })
+
+		const oncePaused = [...h.refetchAfterSocketGap.mock.calls]
+
+		copyRunner.resume(heldId)
+		held.finish()
+		await Promise.all(h.tracked)
+
+		expect(whilePausing).toBe(0)
+		expect(oncePaused).toEqual([["dest"]])
+	})
+
+	it("a resumed copy holds the refetch again, even past a pause report that crossed the resume", async () => {
+		const held = heldCopy()
+		const heldId = launchJob([file("held")])
+
+		await held.started
+
+		copyRunner.pause(heldId)
+		held.progress({ paused: true })
+		copyRunner.resume(heldId)
+		held.progress({ paused: true })
+		scriptCopyAcrossReconnect()
+		launchJob([file("gap")])
+		await h.tracked[1]
+
+		const whileHeldRuns = h.refetchAfterSocketGap.mock.calls.length
+
+		held.finish()
+		await Promise.all(h.tracked)
+
+		expect(whileHeldRuns).toBe(0)
+		expect(h.refetchAfterSocketGap).toHaveBeenCalledExactlyOnceWith("dest")
+	})
+
 	it("a socket up the whole time, or a copy that made nothing, refetches nothing", async () => {
 		scriptCopy(async () => report())
 
@@ -1299,6 +1384,67 @@ describe("a socket gap during the copy", () => {
 		await runJob()
 
 		expect(h.refetchAfterSocketGap).not.toHaveBeenCalled()
+	})
+})
+
+describe("a copy the SDK reports paused", () => {
+	it("holds no Recents patch, and the refresh deferred while it created runs once the pause is done", async () => {
+		const copy = heldCopy()
+		const id = launchJob()
+
+		await copy.started
+
+		const refresh = vi.fn()
+		const deferred = [copyActivity.deferRecents(refresh)]
+
+		copyRunner.pause(id)
+		copy.progress({ pausing: true })
+
+		const refreshedWhilePausing = refresh.mock.calls.length
+
+		copy.progress({ paused: true })
+		deferred.push(copyActivity.deferRecents(vi.fn()))
+		copyRunner.resume(id)
+		deferred.push(copyActivity.deferRecents(vi.fn()))
+		copy.finish()
+		await Promise.all(h.tracked)
+
+		expect(refreshedWhilePausing).toBe(0)
+		// Deferred while it created, patched at once while paused, deferred again once resumed.
+		expect(deferred).toEqual([true, false, true])
+		expect(refresh).toHaveBeenCalledOnce()
+	})
+
+	it("stopped while paused, leaves no pause counted for the copies after it, a report delivered late included", async () => {
+		const copy = heldCopy()
+		const id = launchJob()
+
+		await copy.started
+
+		copyRunner.pause(id)
+		copy.progress({ paused: true })
+		h.scope.controller.abort()
+		await Promise.all(h.tracked)
+
+		h.scope.controller = new AbortController()
+
+		const next = heldCopy()
+
+		launchJob()
+		await next.started
+
+		const deferredAfterStop = copyActivity.deferRecents(vi.fn())
+
+		// Queued before the job was dropped, delivered after it.
+		copy.progress({ paused: true })
+
+		const deferredAfterLateReport = copyActivity.deferRecents(vi.fn())
+
+		next.finish()
+		await Promise.all(h.tracked)
+
+		expect(deferredAfterStop).toBe(true)
+		expect(deferredAfterLateReport).toBe(true)
 	})
 })
 
