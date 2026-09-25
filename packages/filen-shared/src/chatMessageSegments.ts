@@ -11,22 +11,25 @@
 const MENTION_SOURCE = "@[\\w.-]+@[\\w.-]+\\.\\w+|@everyone"
 // Triple-backtick fenced block, non-greedy across newlines.
 const CODE_SOURCE = "```[\\s\\S]*?```"
-// Non-ASCII characters that are no letter or digit, without the `u` flag the Unicode letter classes need: spaces,
-// Latin-1 punctuation, the punctuation of the Greek, Armenian, Hebrew, Arabic, Devanagari, Thai, Tibetan, Myanmar,
-// Ethiopic and Khmer scripts, the general punctuation and symbol blocks, CJK and fullwidth punctuation, and emoji
-// (the high surrogates of U+1F000-U+1FBFF).
+// Non-ASCII characters no apostrophe inside a word comes before, as code-unit ranges, without the `u` flag the Unicode
+// letter classes need. They are spaces, the punctuation and symbols of Latin-1, Greek, Armenian, Hebrew, Arabic,
+// Devanagari and Ethiopic, the general punctuation, symbol, fullwidth and specials blocks, and emoji (the high
+// surrogates of U+1F000-U+1FBFF). They are also the letters of the scripts that write no apostrophe inside a word and
+// often follow a closing quote with no space, with a Korean particle or the next word of a script written without
+// spaces: Thai, Lao, Tibetan, Myanmar, Khmer, Hangul, kana, Bopomofo and Han, whose supplementary planes are the high
+// surrogates of U+20000-U+33FFF.
 const NOT_LETTER =
 	"\\s\\u00a1-\\u00bf\\u00d7\\u00f7" +
 	"\\u037e\\u0387\\u055a-\\u055f\\u0589\\u058a\\u05be\\u05c0\\u05c3\\u05c6\\u05f3\\u05f4\\u0609\\u060a\\u060c\\u060d" +
-	"\\u061b\\u061d-\\u061f\\u066a-\\u066d\\u06d4\\u0964\\u0965\\u0970\\u0e4f\\u0e5a\\u0e5b\\u0f04-\\u0f12\\u0f14" +
-	"\\u0f3a-\\u0f3d\\u0f85\\u0fd0-\\u0fd4\\u0fd9\\u0fda\\u104a-\\u104f\\u1360-\\u1368\\u17d4-\\u17d6\\u17d8-\\u17da" +
-	"\\u2000-\\u2bff\\u2e00-\\u2fff\\u3000-\\u303f\\u3200-\\u33ff\\ufe10-\\ufe1f\\ufe30-\\ufe6f" +
-	"\\uff01-\\uff0f\\uff1a-\\uff20\\uff3b-\\uff40\\uff5b-\\uff65\\ud83c-\\ud83e"
+	"\\u061b\\u061d-\\u061f\\u066a-\\u066d\\u06d4\\u0964\\u0965\\u0970\\u0e00-\\u109f\\u1100-\\u11ff\\u1360-\\u1368" +
+	"\\u1780-\\u17ff\\u2000-\\u2bff\\u2e00-\\u9fff\\ua960-\\ua97f\\uac00-\\ud7ff\\uf900-\\ufaff\\ufe10-\\ufe1f" +
+	"\\ufe30-\\ufe6f\\uff01-\\uff0f\\uff1a-\\uff20\\uff3b-\\uff40\\uff5b-\\uffff\\ud83c-\\ud83e\\ud840-\\ud88f"
 // Bare http(s) URL — only http(s) auto-links; other schemes stay plain text. It ends before `<>"` and the
 // backtick, which a URL never holds unencoded, so a quoted or bracketed link leaves the closing character
-// out. An apostrophe ends it in the host, and in the path when no letter or digit follows (a closing
-// quote), so "Hitchhiker's_Guide" stays whole. Ending it here rather than cutting the match afterwards
-// keeps segmentation one linear pass.
+// out. An apostrophe ends it in the host, and in the path when what follows is no letter or digit, or one
+// of the letters NOT_LETTER holds: a closing quote. So "Hitchhiker's_Guide" stays whole, and a closing quote
+// before "를" or "を" ends the link. Ending it here rather than cutting the match afterwards keeps
+// segmentation one linear pass.
 const URL_SOURCE =
 	"https?://[^\\s<>\"'`/?#]*(?:[/?#][^\\s<>\"'`]*(?:'(?=[\\dA-Za-z\\u0080-\\uffff])(?![" + NOT_LETTER + "])[^\\s<>\"'`]*)*)?"
 // :shortcode: (optionally ::skin-tone-N:). Detected so the ordering slot exists and the emoji-only

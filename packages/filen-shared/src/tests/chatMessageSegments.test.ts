@@ -99,10 +99,43 @@ describe("segmentMessage — where a link ends", () => {
 		])
 	})
 
-	it("keeps an apostrophe any script's letter follows in the path", () => {
-		for (const path of ["d'Artagnan", "x'\u65e5\u672c", "x'\ud55c\uad6d", "x'\u0416\u0443\u043a", "x'\ud835\udc00"]) {
+	it("keeps an apostrophe in the path that a Latin, Cyrillic, Hebrew or astral letter follows", () => {
+		for (const path of ["d'Artagnan", "x'\u0416\u0443\u043a", "x'\u05d2\u05d9\u05e8", "x'\ud835\udc00"]) {
 			expect(segmentMessage(`https://example.com/${path}`)).toEqual([{ kind: "link", raw: `https://example.com/${path}` }])
 		}
+	})
+
+	// These scripts put no apostrophe inside a word, and often no space after a closing quote, so the apostrophe is one.
+	it.each([
+		["Japanese", "\u65e5\u672c"],
+		["Korean", "\ud55c\uad6d"],
+		["Chinese beyond the first plane", "\ud840\udc00"],
+		["Thai", "\u0e44\u0e17\u0e22"],
+		["halfwidth katakana", "\uff76\uff80"]
+	])("ends the link at an apostrophe that %s follows", (_name, word) => {
+		expect(segmentMessage(`https://example.com/x'${word}`)).toEqual([
+			{ kind: "link", raw: "https://example.com/x" },
+			{ kind: "text", value: `'${word}` }
+		])
+	})
+
+	it.each([
+		["\ub9c1\ud06c\ub294 'https://example.com/docs'\ub97c \ud655\uc778\ud558\uc138\uc694", "\ub9c1\ud06c\ub294 '", "https://example.com/docs", "'\ub97c \ud655\uc778\ud558\uc138\uc694"],
+		["'https://example.com/docs'\u3092\u898b\u3066\u304f\u3060\u3055\u3044", "'", "https://example.com/docs", "'\u3092\u898b\u3066\u304f\u3060\u3055\u3044"],
+		["'https://example.com/docs'\u91cc\u6709\u8bf4\u660e", "'", "https://example.com/docs", "'\u91cc\u6709\u8bf4\u660e"],
+		["'https://example.com/docs'\u0e04\u0e23\u0e31\u0e1a", "'", "https://example.com/docs", "'\u0e04\u0e23\u0e31\u0e1a"],
+		[
+			`'https://app.filen.io/d/0b0d4b5e-7c0e-4d8e-9f2a-1a2b3c4d5e6f#${"ab".repeat(32)}'\ub97c \uc5f4\uc5b4\ubd10`,
+			"'",
+			`https://app.filen.io/d/0b0d4b5e-7c0e-4d8e-9f2a-1a2b3c4d5e6f#${"ab".repeat(32)}`,
+			"'\ub97c \uc5f4\uc5b4\ubd10"
+		]
+	])("ends a quoted link the next word follows at its quote: %s", (message, before, url, after) => {
+		expect(segmentMessage(message)).toEqual([
+			{ kind: "text", value: before },
+			{ kind: "link", raw: url },
+			{ kind: "text", value: after }
+		])
 	})
 
 	// These are non-ASCII, which the check for a letter after an apostrophe otherwise accepts.
