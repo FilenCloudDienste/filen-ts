@@ -99,6 +99,35 @@ describe("segmentMessage — where a link ends", () => {
 		])
 	})
 
+	it("keeps an apostrophe any script's letter follows in the path", () => {
+		for (const path of ["d'Artagnan", "x'\u65e5\u672c", "x'\ud55c\uad6d", "x'\u0416\u0443\u043a", "x'\ud835\udc00"]) {
+			expect(segmentMessage(`https://example.com/${path}`)).toEqual([{ kind: "link", raw: `https://example.com/${path}` }])
+		}
+	})
+
+	// These are non-ASCII, which the check for a letter after an apostrophe otherwise accepts.
+	it.each([
+		["a no-break space", "\u00a0"],
+		["a narrow no-break space", "\u202f"],
+		["an ideographic space", "\u3000"],
+		["an emoji", "\ud83d\ude00"],
+		["an emoji in the symbol blocks", "\u2705"],
+		["an ideographic full stop", "\u3002"],
+		["a fullwidth comma", "\uff0c"],
+		["an ellipsis", "\u2026"],
+		["an em dash", "\u2014"],
+		["a closing double quote", "\u201d"],
+		["a closing guillemet", "\u00bb"],
+		["an Arabic question mark", "\u061f"],
+		["a danda", "\u0964"]
+	])("ends a quoted link before its closing quote when %s follows it", (_name, after) => {
+		expect(segmentMessage(`see 'https://example.com/a'${after}now`)).toEqual([
+			{ kind: "text", value: "see '" },
+			{ kind: "link", raw: "https://example.com/a" },
+			{ kind: "text", value: `'${after}now` }
+		])
+	})
+
 	it("segments what follows a link's end in the same pass, a code fence across whitespace included", () => {
 		expect(segmentMessage("[\"https://a.example.com\",\"https://b.example.com\"]:gigachad:")).toEqual([
 			{ kind: "text", value: "[\"" },

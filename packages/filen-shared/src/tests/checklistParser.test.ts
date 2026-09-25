@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest"
-import { checklistParser } from "@filen/shared"
+import { parse } from "node-html-better-parser"
+import { checklistParser, decodeHtmlEntities } from "@filen/shared"
 
 describe("ChecklistParser", () => {
 	it("should parse empty string to empty checklist", () => {
@@ -172,5 +173,206 @@ describe("ChecklistParser — rows older mobile builds stored unescaped", () => 
 		expect(parseRow("a&nbsp;b")).toEqual(["a b"])
 		expect(parseRow("it&#39;s it&#x27;s")).toEqual(["it's it's"])
 		expect(parseRow("&quot;quoted&quot;")).toEqual(["\"quoted\""])
+	})
+
+	// The parser's tag pattern tries every way of splitting the text after such a "<" into attributes, which
+	// took seconds to minutes for one sentence.
+	it.each(["Fix the bug where count<limit fails on second try", "<li then do the thing now"])(
+		"reads a row with a \"<\" that starts no tag quickly and as typed: %s",
+		row => {
+			const start = performance.now()
+			const rows = checklistParser.parse(`<ul data-checked="false"><li>Milk</li><li>${row}</li></ul>`).map(item => item.content)
+
+			expect(performance.now() - start).toBeLessThan(50)
+			expect(rows).toEqual(["Milk", row])
+		}
+	)
+
+	// Every shorter tag name and every split of the name's letters is a reading the parser's pattern backtracks into.
+	it("reads a long word after a \"<\" in linear time", () => {
+		const row = `x<${"a".repeat(20_000)}`
+		const start = performance.now()
+		const rows = checklistParser.parse(`<ul data-checked="false"><li>Milk</li><li>${row}</li></ul>`).map(item => item.content)
+
+		expect(performance.now() - start).toBeLessThan(100)
+		expect(rows).toEqual(["Milk", row])
+	})
+})
+
+describe("ChecklistParser — rows read as node-html-better-parser reads the note", () => {
+	// The rows the parser itself reads from the note as stored, on notes it reads quickly.
+	function asStored(html: string): [boolean, string][] {
+		const rows: [boolean, string][] = []
+
+		for (const ul of parse(html).querySelectorAll("ul")) {
+			const checked = ul.getAttribute("data-checked") === "true"
+
+			for (const li of ul.querySelectorAll("li")) {
+				rows.push([checked, decodeHtmlEntities(li.rawText).trim()])
+			}
+		}
+
+		return rows
+	}
+
+	function rows(html: string): [boolean, string][] {
+		return checklistParser.parse(html).map(item => [item.checked, item.content])
+	}
+
+	// A rich note switched to a checklist keeps its Quill markup, which is parsed as it is stored.
+	it("reads rows with attributes, plain lists and inline formatting as before", () => {
+		const html =
+			"<p>Intro</p><ul data-checked=\"true\"><li class=\"ql-indent-1\">Buy <strong>organic</strong> " +
+			"<a href=\"https://example.com/?a=1&amp;b=2\" rel=\"noopener noreferrer\" target=\"_blank\">milk</a></li></ul>" +
+			"<ul><li>bullet</li></ul>"
+
+		expect(rows(html)).toEqual([
+			[true, "Buy organic milk"],
+			[false, "bullet"]
+		])
+	})
+
+	// Rows older mobile builds stored unescaped. A tag the parser reads there must stay a tag: read as text, its close
+	// tag would end the list, and the next save would drop every row after it.
+	it.each([
+		["Fix <Button onPress={() => go()}>Go</Button> spacing", "Fix  go()}>Go spacing"],
+		["Set <View style={{flex: 1}}>x</View>", "Set x"],
+		["Spread <Foo {...props}>x</Foo>", "Spread x"],
+		["Link <a href=\"x\"target=\"_blank\">y</a> here", "Link y here"],
+		["Pair <x,y>z</x> end", "Pair z end"],
+		["Vue <button @click=\"save\">Save</button> ok", "Vue Save ok"],
+		["JSX <Text style={\"bold\"}>label</Text> ok", "JSX label ok"],
+		["Odd <a b=\"c>d</a> end", "Odd d end"],
+		["Use Map<String,Integer> here", "Use Map here"],
+		// Tags the parser's pattern reaches only by backtracking
+		["x <a b=\">\" c< y", "x \" c< y"],
+		["a<b'=b=/''>c", "ac"]
+	])("reads %s as the parser does and keeps the rows after it", (row, read) => {
+		const html = `<ul data-checked="false"><li>${row}</li><li>second row</li><li>third row</li></ul>`
+
+		expect(rows(html)).toEqual([
+			[false, read],
+			[false, "second row"],
+			[false, "third row"]
+		])
+		expect(rows(html)).toEqual(asStored(html))
+	})
+
+	it.each([
+		"<ul data-checked=\"false\"><li>a<pre>hidden <li>no</li></PRE >b</li><li>c</li></ul>",
+		"<ul data-checked=\"false\"><li>a<script>b</li><li>c</li></ul>",
+		"<ul data-checked=\"false\"><li>call <constructor> here</li><li>next</li></ul>",
+		// The parser drops all that follows a raw text element with no close tag, even a list
+		"<ul data-checked=\"false\"><li>a</li></ul><pre> x<y </pre a=\"b\"><ul data-checked=\"true\"><li>b</li></ul>",
+		"<ul data-checked=\"false\"><li>a</li></ul><constructor> x<y </constructor a=\"b\"><ul data-checked=\"true\"><li>b</li></ul>",
+		"<ul data-checked=\"false\"><li>a <!-- <li>no --> b</li><li>c<!--d</li></ul>"
+	])("reads %s as the parser does", html => {
+		expect(rows(html)).toEqual(asStored(html))
+	})
+
+	// The first tag ends at its ">" only because its quote never closes, so nothing read after it may add one.
+	it("keeps an unclosed quote unclosed when a later list is checked", () => {
+		const html = "<ul data-checked=\"true\"><li><a b=\"c>x count<limit</li></ul><ul data-checked=true><li>y</li></ul>"
+
+		expect(rows(html)).toEqual([
+			[true, "x count<limit"],
+			[true, "y"]
+		])
+		expect(rows(html)).toEqual(asStored(html))
+	})
+
+	// Pieces of what older builds and other editors stored, few enough per row for the parser to read quickly.
+	it("reads random legacy markup as the parser does", () => {
+		const pieces = [
+			"a",
+			" ",
+			"x<y",
+			"<",
+			"</",
+			">",
+			"\"",
+			"'",
+			"=",
+			"/",
+			"&lt;",
+			"&",
+			"<b>",
+			"</b>",
+			"<br>",
+			"<a b=\"c>",
+			"<a b=\">\" c",
+			"<i'=b=/''>",
+			"<Foo {...p}>",
+			"</Foo>",
+			"<p @x=\"y\">",
+			"<!--",
+			"-->",
+			"<pre>",
+			"</pre >",
+			"<li>",
+			"</li>",
+			"</ul>",
+			"<ul data-checked=true>",
+			"<LI>"
+		]
+		let seed = 1
+
+		function random(): number {
+			seed = (seed * 1103515245 + 12345) % 2147483648
+
+			return seed / 2147483648
+		}
+
+		for (let note = 0; note < 2000; note++) {
+			let html = ""
+
+			for (let list = 0, lists = 1 + Math.floor(random() * 2); list < lists; list++) {
+				html += random() < 0.5 ? "<ul data-checked=\"true\">" : "<ul data-checked=\"false\">"
+
+				for (let row = 0, rowCount = 1 + Math.floor(random() * 3); row < rowCount; row++) {
+					html += "<li>"
+
+					for (let piece = 0, pieceCount = Math.floor(random() * 5); piece < pieceCount; piece++) {
+						html += pieces[Math.floor(random() * pieces.length)]
+					}
+
+					html += "</li>"
+				}
+
+				html += "</ul>"
+			}
+
+			expect(rows(html), html).toEqual(asStored(html))
+		}
+	})
+})
+
+describe("ChecklistParser.firstNonEmptyContent", () => {
+	// The preview reads rows without the parser, so it must land on the row the editor shows first.
+	it.each([
+		["<ul data-checked=\"false\"><li><br></li><li>Milk</li></ul>", "Milk"],
+		[
+			"<ul data-checked=\"true\"><li>Fix the bug where count<limit fails on second try</li></ul>",
+			"Fix the bug where count<limit fails on second try"
+		],
+		["<ul data-checked=\"false\"><li>cut&copy</li></ul>", "cut&copy"],
+		["<ul data-checked=\"false\"><li>Fix <Header></li></ul>", "Fix"],
+		["<ul data-checked=\"false\"><li>Fix <Button onPress={() => go()}>Go</Button> spacing</li></ul>", "Fix  go()}>Go spacing"],
+		["<ul data-checked=\"false\"><li>Vue <button @click=\"save\">Save</button> ok</li></ul>", "Vue Save ok"],
+		["<ul data-checked=\"false\"><li><br></li><li>x <a b=\">\" c< y</li></ul>", "x \" c< y"],
+		["<ul data-checked=\"false\"><li>a<pre><li>no</li></pre>b</li></ul>", "ab"],
+		["<ul data-checked=\"false\"><li><!-- x --></li><li>a <!-- c --> b</li></ul>", "a  b"],
+		["<ul data-checked=\"false\"><li>x<!--y</li></ul>", "x<!--y"],
+		["<ul data-checked=\"false\"><li>a<li/>b</li></ul>", "ab"],
+		[
+			"<p>Intro</p><ol><li>Numbered</li></ol><ul data-checked=\"true\"><li class=\"ql-indent-1\">Buy <strong>organic</strong> " +
+				"<a href=\"https://example.com/?a=1&amp;b=2\" rel=\"noopener noreferrer\" target=\"_blank\">milk</a></li></ul>",
+			"Buy organic milk"
+		],
+		["<ol><li>Numbered</li></ol>", ""],
+		["<ul data-checked=\"false\"><li>still open", ""]
+	])("reads %s as the first row the parser returns", (html, first) => {
+		expect(checklistParser.firstNonEmptyContent(html)).toBe(first)
+		expect(checklistParser.parse(html).find(item => item.content.length > 0)?.content ?? "").toBe(first)
 	})
 })

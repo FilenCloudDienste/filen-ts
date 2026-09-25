@@ -1,5 +1,15 @@
-import { describe, it, expect } from "vitest"
+import { describe, it, expect, vi } from "vitest"
+import { parse } from "node-html-better-parser"
 import { createNotePreviewFromContentText } from "@filen/shared"
+
+vi.mock("node-html-better-parser", async importOriginal => {
+	const actual = await importOriginal<typeof import("node-html-better-parser")>()
+
+	return {
+		...actual,
+		parse: vi.fn(actual.parse)
+	}
+})
 
 describe("createNotePreviewFromContentText", () => {
 	describe("rich text", () => {
@@ -82,6 +92,25 @@ describe("createNotePreviewFromContentText", () => {
 			const html = `<ul data-checked="false"><li>${"&amp;".repeat(200)}</li></ul>`
 
 			expect(createNotePreviewFromContentText("checklist", html)).toBe("&".repeat(128))
+		})
+
+		// Previews are made for every saved or received edit, so they must not parse the whole note.
+		it("builds no document", () => {
+			const html = `<ul data-checked="false"><li><br></li><li>Milk</li>${"<li>more</li>".repeat(1000)}</ul>`
+
+			expect(createNotePreviewFromContentText("checklist", html)).toBe("Milk")
+			expect(parse).not.toHaveBeenCalled()
+		})
+
+		// Rows older mobile builds stored unescaped can hold one; the parser's tag pattern took seconds to
+		// minutes on such a row, on every received edit of the note.
+		it("previews past a row with a \"<\" that starts no tag, quickly, and shows that row as typed", () => {
+			const row = "Fix the bug where count<limit fails on second try"
+			const start = performance.now()
+
+			expect(createNotePreviewFromContentText("checklist", `<ul data-checked="false"><li>Milk</li><li>${row}</li></ul>`)).toBe("Milk")
+			expect(createNotePreviewFromContentText("checklist", `<ul data-checked="false"><li>${row}</li><li>Milk</li></ul>`)).toBe(row)
+			expect(performance.now() - start).toBeLessThan(50)
 		})
 	})
 
