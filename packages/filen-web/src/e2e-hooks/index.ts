@@ -131,7 +131,15 @@ interface E2eHooks {
 	// the safety argument is unchanged. Returns the count removed.
 	// `minAgeMs` age-gates the match against the row's own `timestamp` (server-set at creation, and
 	// unchanged by a trash, so the trash listing carries the same value) — see olderThan.
-	sweepTestDriveDebris: (target: "root" | "trash", limit: number, minAgeMs?: number) => Promise<number>
+	// `strayFileNames` also matches FILES by exact name, with no age gate: the fixture build's own file
+	// names, which belong only inside its fixture tree, so one sitting directly at the root (or trashed
+	// from there) is a misdirected upload no live run reads.
+	sweepTestDriveDebris: (
+		target: "root" | "trash",
+		limit: number,
+		minAgeMs?: number,
+		strayFileNames?: readonly string[]
+	) => Promise<number>
 	// Reads one cached thumbnail's on-disk size + write time, found by file name inside a parent
 	// directory. The only way to prove a repaint after a real page reload came from the existing OPFS
 	// cache entry rather than a fresh generation: a regenerate rewrites the file (a new
@@ -329,7 +337,7 @@ export function installE2eHooks(): void {
 
 			return matches.length
 		},
-		sweepTestDriveDebris: async (target, limit, minAgeMs) => {
+		sweepTestDriveDebris: async (target, limit, minAgeMs, strayFileNames = []) => {
 			await whenBootReady()
 
 			// A row whose meta did not decode carries no name to match, so it can never be debris by this
@@ -341,12 +349,13 @@ export function installE2eHooks(): void {
 			// trash rows the UI sweep had never been able to reach — a single unbounded call would have
 			// run for as long as that took, with the project timeout as its only limit.
 			const isOldEnough = olderThan(minAgeMs)
+			const strays = new Set(strayFileNames)
 			const matched = [
 				...listing.dirs
 					.filter(d => isScratchDebrisName(nameOf(d.meta)) && isOldEnough(d.timestamp))
 					.map(d => ({ kind: "dir" as const, item: d })),
 				...listing.files
-					.filter(f => isScratchDebrisName(nameOf(f.meta)) && isOldEnough(f.timestamp))
+					.filter(f => strays.has(nameOf(f.meta)) || (isScratchDebrisName(nameOf(f.meta)) && isOldEnough(f.timestamp)))
 					.map(f => ({ kind: "file" as const, item: f }))
 			].slice(0, limit)
 

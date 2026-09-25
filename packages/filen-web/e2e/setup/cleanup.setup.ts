@@ -2,6 +2,7 @@ import type { Page } from "@playwright/test"
 import { test as setup, expect } from "../fixtures"
 import { dismissStartupReminders } from "../helpers/listing"
 import { waitForE2eHooks } from "../helpers/e2eHooks"
+import { FIXTURE_FILES } from "../helpers/fixtures"
 import {
 	isScratchDebrisName,
 	NOTE_DEBRIS_TITLE_PREFIXES,
@@ -46,6 +47,11 @@ const MIN_NOTES_SIDE_DEBRIS_AGE_MS = 15 * 60_000
 // trips — the first live run of this cleared 1,224 rows.
 const SWEEP_BATCH = 50
 
+// The fixture build's own file names. They belong only inside its fixture tree, but a build that once
+// uploaded through the wrong file input left them directly at the account root — matched by exact name,
+// files only, never by prefix (sweepTestDriveDebris).
+const STRAY_FIXTURE_FILE_NAMES: readonly string[] = Object.values(FIXTURE_FILES).flat()
+
 // Batches, with the budget checked BETWEEN batches — the shape the old per-round check got wrong by
 // letting a round that started inside the deadline run to completion outside it. A batch of
 // SWEEP_BATCH removals is the most this can overshoot by, instead of a whole surface. Draining is
@@ -56,8 +62,8 @@ async function sweepDriveSurface(page: Page, target: "root" | "trash"): Promise<
 
 	while (Date.now() < deadline) {
 		const removed = await page.evaluate(
-			([surface, limit, minAgeMs]) => window.__filenE2E.sweepTestDriveDebris(surface, limit, minAgeMs),
-			[target, SWEEP_BATCH, MIN_DRIVE_DEBRIS_AGE_MS] as const
+			([surface, limit, minAgeMs, strays]) => window.__filenE2E.sweepTestDriveDebris(surface, limit, minAgeMs, strays),
+			[target, SWEEP_BATCH, MIN_DRIVE_DEBRIS_AGE_MS, STRAY_FIXTURE_FILE_NAMES] as const
 		)
 
 		total += removed

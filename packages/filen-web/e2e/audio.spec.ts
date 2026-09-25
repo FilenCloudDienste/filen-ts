@@ -59,7 +59,7 @@ test("drive audio double-click hands off to the persistent player and transport 
 	try {
 		const { listbox } = await enterScratchDirectory(page, scratchName)
 
-		const input = page.locator('input[type="file"]').first()
+		const input = page.getByRole("main").locator('input[type="file"]').first()
 		await input.setInputFiles([
 			{ name: nameA, mimeType: "audio/wav", buffer: WAV_A },
 			{ name: nameB, mimeType: "audio/wav", buffer: WAV_B }
@@ -212,7 +212,7 @@ test("playlists: create, add tracks via the picker, reorder, play, and delete", 
 	try {
 		const { listbox } = await enterScratchDirectory(page, scratchName)
 
-		const input = page.locator('input[type="file"]').first()
+		const input = page.getByRole("main").locator('input[type="file"]').first()
 		await input.setInputFiles([
 			{ name: nameA, mimeType: "audio/wav", buffer: WAV_A },
 			{ name: nameB, mimeType: "audio/wav", buffer: WAV_B }

@@ -38,6 +38,7 @@ test.describe("uploads", () => {
 			// present regardless of visibility, and nothing is selected yet at this point in the test, so it
 			// hasn't been swapped out for the bulk-action bar.
 			await page
+				.getByRole("main")
 				.locator('input[type="file"]')
 				.first()
 				.setInputFiles({ name: fileName, mimeType: "text/plain", buffer: Buffer.from("e2e upload probe") })
@@ -91,7 +92,7 @@ test.describe("uploads", () => {
 			// current listing's own uuid), which is this scratch directory since the picker mounts fresh on
 			// every navigation. .first(): the empty scratch listing mounts the upload menu (and its hidden
 			// inputs) twice — toolbar + the empty state's add affordance; the toolbar's is first in DOM.
-			await page.getByTestId("drive-upload-directory-input").first().setInputFiles(rootPath)
+			await page.getByRole("main").getByTestId("drive-upload-directory-input").first().setInputFiles(rootPath)
 
 			const row = listbox.getByRole("option", { name: rootName })
 			// A tree walk plus two file uploads, all on the account-wide write lease.

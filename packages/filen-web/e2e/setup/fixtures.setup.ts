@@ -131,7 +131,7 @@ async function uploadScenarioFiles(page: Page, scenario: FixtureScenario, workDi
 		throw new Error(`fixture scenario "${scenario}" mixes on-disk and in-memory payloads, which setInputFiles cannot take`)
 	}
 
-	const input = page.locator('input[type="file"]').first()
+	const input = page.getByRole("main").locator('input[type="file"]').first()
 
 	if (onDisk.length > 0) {
 		await input.setInputFiles(

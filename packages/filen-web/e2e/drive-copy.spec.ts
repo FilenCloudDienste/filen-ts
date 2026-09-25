@@ -29,6 +29,7 @@ async function openRowMenu(page: Page, listbox: ReturnType<Page["getByRole"]>, r
 
 async function uploadTextFile(page: Page, name: string): Promise<void> {
 	await page
+		.getByRole("main")
 		.locator('input[type="file"]')
 		.first()
 		.setInputFiles({ name, mimeType: "text/plain", buffer: Buffer.from(`copy probe ${name}`) })

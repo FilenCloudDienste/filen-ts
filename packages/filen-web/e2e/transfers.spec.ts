@@ -26,6 +26,7 @@ test.describe("transfers screen", () => {
 			const { listbox } = await enterScratchDirectory(page, scratchName)
 
 			await page
+				.getByRole("main")
 				.locator('input[type="file"]')
 				.first()
 				.setInputFiles({ name: fileName, mimeType: "text/plain", buffer: Buffer.from("e2e transfers screen probe") })

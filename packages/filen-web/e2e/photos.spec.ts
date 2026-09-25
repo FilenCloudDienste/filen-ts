@@ -44,6 +44,7 @@ test("photos: root pick over a mixed upload, media-only grid, viewer pager + in-
 		const { listbox: driveListbox } = await enterScratchDirectory(page, scratchName)
 
 		await page
+			.getByRole("main")
 			.locator('input[type="file"]')
 			.first()
 			.setInputFiles([

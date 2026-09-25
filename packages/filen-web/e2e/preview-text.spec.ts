@@ -141,7 +141,7 @@ test("text preview renders, edits, and guards unsaved edits against navigation, 
 		// this cannot run before the scratch directory exists.
 		await seedLeaveRouteHistory(page, scratchName)
 
-		const input = page.locator('input[type="file"]').first()
+		const input = page.getByRole("main").locator('input[type="file"]').first()
 		await input.setInputFiles([
 			{ name: nameTxt, mimeType: "text/plain", buffer: TEXT_BYTES },
 			// A sibling slot that mounts NO editor — what proves the discard actually resets the buffer.
@@ -306,7 +306,7 @@ test("markdown preview renders GFM content and its view-source toggle round-trip
 	try {
 		const { listbox } = await enterScratchDirectory(page, scratchName)
 
-		const input = page.locator('input[type="file"]').first()
+		const input = page.getByRole("main").locator('input[type="file"]').first()
 		await input.setInputFiles([{ name: nameMd, mimeType: "text/markdown", buffer: MARKDOWN_BYTES }])
 
 		const row = listbox.getByRole("option", { name: nameMd })
@@ -398,6 +398,7 @@ test("discarding after a cancelled back on the same pop still proceeds to the de
 		await seedLeaveRouteHistory(page, scratchName)
 
 		await page
+			.getByRole("main")
 			.locator('input[type="file"]')
 			.first()
 			.setInputFiles([{ name: nameTxt, mimeType: "text/plain", buffer: TEXT_BYTES }])

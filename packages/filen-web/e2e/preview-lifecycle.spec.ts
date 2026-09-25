@@ -67,7 +67,7 @@ test("editable text preview saves via its Save button, persists across reopen, a
 	try {
 		const { listbox } = await enterScratchDirectory(page, scratchName)
 
-		const input = page.locator('input[type="file"]').first()
+		const input = page.getByRole("main").locator('input[type="file"]').first()
 		await input.setInputFiles([{ name: nameTxt, mimeType: "text/plain", buffer: TEXT_BYTES }])
 
 		const row = listbox.getByRole("option", { name: nameTxt })
@@ -165,7 +165,7 @@ test("editable text preview: a long file's editor actually scrolls", async ({ pa
 	try {
 		const { listbox } = await enterScratchDirectory(page, scratchName)
 
-		const input = page.locator('input[type="file"]').first()
+		const input = page.getByRole("main").locator('input[type="file"]').first()
 		await input.setInputFiles([{ name: nameTxt, mimeType: "text/plain", buffer: LONG_TEXT_BYTES }])
 
 		const row = listbox.getByRole("option", { name: nameTxt })
@@ -231,7 +231,7 @@ test("editable preview: saving a file, paging to a sibling and back still resolv
 	try {
 		const { listbox } = await enterScratchDirectory(page, scratchName)
 
-		const input = page.locator('input[type="file"]').first()
+		const input = page.getByRole("main").locator('input[type="file"]').first()
 		await input.setInputFiles([
 			{ name: nameA, mimeType: "text/plain", buffer: TEXT_BYTES },
 			{ name: nameB, mimeType: "text/plain", buffer: TEXT_BYTES }
@@ -310,7 +310,7 @@ test("a trashed file opens its preview read-only: content renders, no save actio
 	try {
 		const { listbox } = await enterScratchDirectory(page, scratchName)
 
-		const input = page.locator('input[type="file"]').first()
+		const input = page.getByRole("main").locator('input[type="file"]').first()
 		await input.setInputFiles([{ name: nameTxt, mimeType: "text/plain", buffer: TEXT_BYTES }])
 
 		const row = listbox.getByRole("option", { name: nameTxt })
@@ -409,7 +409,7 @@ test("the preview header's own item menu: matches the row menu's set (no Downloa
 	try {
 		const { listbox } = await enterScratchDirectory(page, scratchName)
 
-		const input = page.locator('input[type="file"]').first()
+		const input = page.getByRole("main").locator('input[type="file"]').first()
 		await input.setInputFiles([
 			{ name: nameA, mimeType: "text/plain", buffer: contentA },
 			{ name: nameB, mimeType: "text/plain", buffer: contentB }

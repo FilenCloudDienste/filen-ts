@@ -38,7 +38,12 @@ interface E2eHooks {
 	// can never match (src/e2e-hooks/index.ts's olderThan).
 	sweepTestNotesByTitlePrefix: (prefix: string, minAgeMs?: number) => Promise<number>
 	sweepTestTagsByNamePrefix: (prefix: string, minAgeMs?: number) => Promise<number>
-	sweepTestDriveDebris: (target: "root" | "trash", limit: number, minAgeMs?: number) => Promise<number>
+	sweepTestDriveDebris: (
+		target: "root" | "trash",
+		limit: number,
+		minAgeMs?: number,
+		strayFileNames?: readonly string[]
+	) => Promise<number>
 	thumbnailFileStat: (parentUuid: string, name: string) => Promise<{ size: number; lastModified: number } | null>
 	createTestSelfChat: () => Promise<string>
 	deleteTestChatByUuid: (uuid: string) => Promise<void>

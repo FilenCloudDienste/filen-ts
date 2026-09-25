@@ -63,6 +63,7 @@ test("subtree search finds a nested file with its parent path, mod+f focuses it,
 
 		const { listbox: nestedListbox } = await waitForListingSettled(page)
 		await page
+			.getByRole("main")
 			.locator('input[type="file"]')
 			.first()
 			.setInputFiles({ name: targetName, mimeType: "text/plain", buffer: Buffer.from(targetContent, "utf8") })
