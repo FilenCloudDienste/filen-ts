@@ -673,7 +673,9 @@ export function Composer({
 						<Button
 							size="icon-sm"
 							className="size-8 rounded-full"
-							disabled={!canSend(draft)}
+							// No sender until the account has loaded, and submit() cannot send without one: an enabled
+							// button (or Enter) would do nothing, silently, keeping the text.
+							disabled={!canSend(draft) || sender === undefined}
 							aria-label={mode.kind === "edit" ? t("chatComposerSaveEdit") : t("chatComposerSend")}
 							onClick={() => {
 								void submit()
