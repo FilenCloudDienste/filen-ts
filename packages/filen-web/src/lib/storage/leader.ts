@@ -105,46 +105,24 @@ async function becomeLeader(): Promise<StorageApi> {
 	return remote
 }
 
-// A follower queues a BLOCKING request on the SAME lock (no `ifAvailable`) so the browser hands it
-// leadership when the current leader releases (tab close/crash). On grant it becomes a leader and
-// MUTATES the already-returned handle in place — every kv caller re-reads `.api` per call (see
-// adapter.ts), so the swap from RPC-to-leader to direct-worker takes effect on the next kv op with no
-// re-plumbing. Held for the tab's lifetime once granted (chains to the next queued follower on death).
-function requestPromotion(handle: StorageHandle): void {
-	const promoted = navigator.locks.request(LOCK, async () => {
-		const api = await becomeLeader()
-
-		handle.role = "leader"
-		handle.api = api
-		setStorageRole("leader")
-
-		return new Promise<never>(() => undefined)
-	})
-
-	// A failed promotion (e.g. OPFS open() throws) releases the lock so the next queued follower is
-	// tried; this tab stays a follower with an api pointed at the now-dead leader (its kv times out) —
-	// a degraded state, not a hang, and no worse than the pre-failover behavior.
-	void promoted.catch((e: unknown) => {
-		log.error("db.leader", "promotion failed", e)
-	})
-}
-
+// Role is decided by the LOCK GRANT (deterministic) — never by racing a timer against open().
+//
+// When the lock is taken, this tab both handshakes with the leader over the channel AND queues a
+// BLOCKING request on the same lock, and whichever settles first decides the role. A live leader
+// answers the handshake: this tab is a follower, and the queued request is its promotion — granted
+// when the leader releases (tab close/crash), it becomes a leader and MUTATES the already-returned
+// handle in place (every kv caller re-reads `.api` per call, see adapter.ts). A holder that is only
+// on its way out — the previous document of a navigation or reload, which can keep the lock after
+// the new one starts — never answers; the lock is granted first instead and this tab leads straight
+// away, rather than waiting out the handshake for a leader that no longer exists.
 export function acquireStorage(): Promise<StorageHandle> {
 	return new Promise((resolve, reject) => {
-		// Role is decided by the LOCK GRANT (deterministic) — never by racing a timer against open().
-		// `.catch(reject)` matters: without it, a rejection from followerHandle() (e.g. the 10s
-		// no-leader timeout) would throw inside this callback with nothing left listening — the
-		// callback's rejection reaches navigator.locks.request()'s own returned promise, which was
-		// otherwise being discarded, and the outer Promise here would then hang forever instead of
+		// `.catch(reject)` matters: a rejection inside a lock callback reaches navigator.locks.request()'s
+		// own returned promise, and without it the outer Promise here would hang forever instead of
 		// surfacing the error.
 		const granted = navigator.locks.request(LOCK, { ifAvailable: true }, async lock => {
 			if (lock === null) {
-				const handle = await followerHandle()
-
-				setStorageRole("follower")
-				resolve(handle)
-				// Queue for leadership so a leader death promotes this tab (reusing this same lock).
-				requestPromotion(handle)
+				contendForLeadership(resolve, reject)
 
 				return
 			}
@@ -162,6 +140,73 @@ export function acquireStorage(): Promise<StorageHandle> {
 
 		void granted.catch(reject)
 	})
+}
+
+function contendForLeadership(resolve: (handle: StorageHandle) => void, reject: (reason: unknown) => void): void {
+	const handshake = new AbortController()
+	const queue = new AbortController()
+	let handle: StorageHandle | null = null
+	let settled = false
+
+	const promoted = navigator.locks.request(LOCK, { signal: queue.signal }, async () => {
+		const api = await becomeLeader()
+
+		if (handle) {
+			handle.role = "leader"
+			handle.api = api
+		} else {
+			settled = true
+			handshake.abort()
+			resolve({ role: "leader", api })
+		}
+
+		setStorageRole("leader")
+
+		return new Promise<never>(() => undefined) // held for the tab's lifetime; chains to the next queued tab on death
+	})
+
+	// A failed promotion (e.g. OPFS open() throws) releases the lock so the next queued tab is tried.
+	// Before the handshake settled, nothing else can answer this tab: fail its storage. After it, this
+	// tab stays a follower with an api pointed at the now-dead leader (its kv times out) — a degraded
+	// state, not a hang.
+	void promoted.catch((e: unknown) => {
+		if (queue.signal.aborted) {
+			return
+		}
+
+		if (!settled) {
+			settled = true
+			handshake.abort()
+			reject(e)
+
+			return
+		}
+
+		log.error("db.leader", "promotion failed", e)
+	})
+
+	followerHandle(handshake.signal).then(
+		follower => {
+			if (settled) {
+				return
+			}
+
+			settled = true
+			handle = follower
+			setStorageRole("follower")
+			resolve(follower)
+		},
+		(e: unknown) => {
+			if (settled) {
+				return
+			}
+
+			// This tab's storage has failed; it must not take the lock later and lead unseen.
+			settled = true
+			queue.abort()
+			reject(e)
+		}
+	)
 }
 
 async function serve(msg: Msg, remote: Comlink.Remote<StorageApi>, ch: BroadcastChannel): Promise<void> {
@@ -188,7 +233,7 @@ async function serve(msg: Msg, remote: Comlink.Remote<StorageApi>, ch: Broadcast
 	}
 }
 
-async function followerHandle(): Promise<StorageHandle> {
+async function followerHandle(signal: AbortSignal): Promise<StorageHandle> {
 	const ch = new BroadcastChannel(CHANNEL)
 	const pending = new Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void }>()
 
@@ -234,9 +279,19 @@ async function followerHandle(): Promise<StorageHandle> {
 		await Promise.race([
 			ready.promise,
 			new Promise<never>((_, reject) => {
-				setTimeout(() => {
+				const timer = setTimeout(() => {
 					reject(new Error("no db leader after 10s"))
 				}, 10_000)
+
+				// Aborted when this tab took the lock itself: nothing will answer, so stop waiting.
+				signal.addEventListener(
+					"abort",
+					() => {
+						clearTimeout(timer)
+						reject(new Error("db leader handshake aborted"))
+					},
+					{ once: true }
+				)
 			})
 		])
 	} catch (e) {
@@ -244,6 +299,12 @@ async function followerHandle(): Promise<StorageHandle> {
 		throw e
 	} finally {
 		clearInterval(ping)
+	}
+
+	// The tab's own new leader channel also answers the handshake, possibly just before the abort lands.
+	if (signal.aborted) {
+		ch.close()
+		throw new Error("db leader handshake aborted")
 	}
 
 	const call =
