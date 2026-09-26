@@ -1,3 +1,4 @@
+import { useEffect } from "react"
 import { useTranslation } from "react-i18next"
 import { ChevronRightIcon } from "lucide-react"
 import type { UseQueryResult } from "@tanstack/react-query"
@@ -26,7 +27,10 @@ export interface DirectoryTreeContext {
 	// The current location's uuid chain (drive splat), for highlighting the active branch. Empty at root.
 	activePath: string[]
 	isOpen: (uuid: string) => boolean
-	onToggle: (uuid: string) => void
+	// `parentUuid` is null for a root-level node.
+	onToggle: (uuid: string, parentUuid: string | null) => void
+	// A level's children finished fetching: open state kept for directories no longer among them can go.
+	onLevelLoaded?: (parentUuid: string | null, childUuids: readonly string[]) => void
 	// Full uuid chain from the drive root down to (and including) the clicked node.
 	onNavigate: (path: string[]) => void
 	// Injected data source — named `use…` so it reads as the hook it is; called unconditionally per level.
@@ -67,8 +71,19 @@ export function DirectoryTree({ tree, parentUuid = null, parentPath = [], depth 
 	const { t } = useTranslation("drive")
 	// Bare identifier so eslint's rules-of-hooks and React Compiler both treat this as the hook it is
 	// (a member call would read as a plain function to the compiler). Called unconditionally per level.
-	const { useChildren } = tree
+	const { useChildren, onLevelLoaded } = tree
 	const query = useChildren(parentUuid)
+	// Only a settled fetch: cached data may predate a directory that was created and opened since.
+	const settledData = query.status === "success" && !query.isFetching ? query.data : undefined
+
+	useEffect(() => {
+		if (settledData !== undefined) {
+			onLevelLoaded?.(
+				parentUuid,
+				settledData.map(child => child.uuid)
+			)
+		}
+	}, [settledData, parentUuid, onLevelLoaded])
 
 	// Presentational, not a group: these lines are a status/error, not tree nodes. The role also strips
 	// the <li>'s list semantics while leaving the spinner and the error text announced.
@@ -135,6 +150,7 @@ function DirectoryTreeNode({ child, path, depth, tree }: DirectoryTreeNodeProps)
 	const open = tree.isOpen(child.uuid)
 	const active = arraysEqual(path, tree.activePath)
 	const onBranch = !active && isStrictPrefix(path, tree.activePath)
+	const parentUuid = path.at(-2) ?? null
 	// A drag-to-move drop target for this node's directory. A collapsed node springs open (expands) after
 	// a short rest so the drag can descend into it; an open node has nothing to spring.
 	const drop = useDriveDropTarget({
@@ -149,12 +165,11 @@ function DirectoryTreeNode({ child, path, depth, tree }: DirectoryTreeNodeProps)
 			: {
 					timing: TREE_EXPAND_SPRING,
 					open: () => {
-						tree.onToggle(child.uuid)
+						tree.onToggle(child.uuid, parentUuid)
 					}
 				}
 	})
 
-	const parentUuid = path.at(-2) ?? null
 	const dragSource = tree.enableDrag ? buildTreeDragSourceProps(() => cachedTreeDirectory(parentUuid, child.uuid)) : undefined
 	// Cut for a later paste: dimmed, as its listing row is, until the paste or the next copy/cut.
 	const cut = useDriveClipboardStore(state => state.cutUuids.has(child.uuid))
@@ -190,7 +205,7 @@ function DirectoryTreeNode({ child, path, depth, tree }: DirectoryTreeNodeProps)
 					aria-expanded={open}
 					aria-label={t(open ? "driveTreeCollapseNode" : "driveTreeExpandNode", { name: child.name })}
 					onClick={() => {
-						tree.onToggle(child.uuid)
+						tree.onToggle(child.uuid, parentUuid)
 					}}
 					className="flex size-5 shrink-0 items-center justify-center rounded-md text-muted-foreground focus-ring outline-none hover:text-foreground"
 				>

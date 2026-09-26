@@ -152,6 +152,7 @@ export function DriveSidebar() {
 
 	const openMap = useDirectoryTreeStore(state => state.open)
 	const toggle = useDirectoryTreeStore(state => state.toggle)
+	const reconcileLevel = useDirectoryTreeStore(state => state.reconcileLevel)
 	const rootOpen = isTreeNodeOpen(openMap, TREE_ROOT_KEY)
 
 	function navigateTo(path: string[]): void {
@@ -161,7 +162,12 @@ export function DriveSidebar() {
 	const tree: DirectoryTreeContext = {
 		activePath,
 		isOpen: uuid => isTreeNodeOpen(openMap, uuid),
-		onToggle: toggle,
+		onToggle: (uuid, parentUuid) => {
+			toggle(uuid, parentUuid ?? TREE_ROOT_KEY)
+		},
+		onLevelLoaded: (parentUuid, childUuids) => {
+			reconcileLevel(parentUuid ?? TREE_ROOT_KEY, childUuids)
+		},
 		onNavigate: navigateTo,
 		useChildren: useDirectoryTreeChildrenQuery,
 		// The sidebar tree takes drops and starts drags (the move dialog's reuse of this primitive won't).
@@ -236,7 +242,7 @@ export function DriveSidebar() {
 										label={t("driveMyDrive")}
 										open={rootOpen}
 										onToggle={() => {
-											toggle(TREE_ROOT_KEY)
+											toggle(TREE_ROOT_KEY, TREE_ROOT_KEY)
 										}}
 									/>
 									{rootOpen ? <DirectoryTree tree={tree} /> : null}

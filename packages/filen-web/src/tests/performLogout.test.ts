@@ -155,7 +155,7 @@ describe("performLogout", () => {
 	})
 
 	it("forgets the sidebar tree's expanded directories, which are this account's", async () => {
-		useDirectoryTreeStore.getState().toggle("dir-1")
+		useDirectoryTreeStore.getState().toggle("dir-1", "root")
 
 		await expect(performLogout()).resolves.toBe(true)
 

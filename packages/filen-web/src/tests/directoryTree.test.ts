@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { render, cleanup } from "@testing-library/react"
+import { render, cleanup, fireEvent } from "@testing-library/react"
 import { createElement } from "react"
 import type { UseQueryResult } from "@tanstack/react-query"
 import "@/lib/i18n"
@@ -129,5 +129,32 @@ describe("DirectoryTree — list + disclosure semantics", () => {
 		const { container } = renderTree({ isOpen: () => false, useChildren: () => pending() })
 
 		expect(container.querySelector('[role="presentation"]')).not.toBeNull()
+	})
+
+	it("toggles a node together with its parent, null at the root level", () => {
+		const onToggle = vi.fn()
+		const { container } = renderTree({ onToggle })
+
+		fireEvent.click(chevronFor(container, "Photos"))
+		fireEvent.click(chevronFor(container, "Invoices"))
+
+		expect(onToggle.mock.calls).toEqual([
+			["photos", null],
+			["invoices", "docs"]
+		])
+	})
+
+	it("reports each level's children once its fetch settles, never while one is still running", () => {
+		const onLevelLoaded = vi.fn()
+
+		renderTree({
+			onLevelLoaded,
+			useChildren: uuid =>
+				uuid === "docs"
+					? ({ status: "success", data: CHILDREN["docs"], isFetching: true } as UseQueryResult<DirectoryTreeChild[]>)
+					: resolved(CHILDREN[uuid ?? "root"] ?? [])
+		})
+
+		expect(onLevelLoaded.mock.calls).toEqual([[null, ["docs", "photos"]]])
 	})
 })

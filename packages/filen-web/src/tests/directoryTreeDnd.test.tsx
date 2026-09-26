@@ -204,7 +204,7 @@ describe("sidebar tree drag and drop", () => {
 		act(() => {
 			vi.advanceTimersByTime(1)
 		})
-		expect(onToggle).toHaveBeenCalledExactlyOnceWith(testUuid("photos"))
+		expect(onToggle).toHaveBeenCalledExactlyOnceWith(testUuid("photos"), null)
 	})
 
 	it("carries the node's root-to-node chain for the tree's menu and shortcuts", () => {
