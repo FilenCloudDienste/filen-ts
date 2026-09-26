@@ -4,6 +4,7 @@ import { SunMoonIcon } from "lucide-react"
 import { ThemeCard } from "@/features/settings/components/appearance/themeCard"
 import { DriveMemoryCard } from "@/features/settings/components/appearance/driveMemoryCard"
 import { StartScreenCard } from "@/features/settings/components/appearance/startScreenCard"
+import { RailOrderCard } from "@/features/settings/components/appearance/railOrderCard"
 import { routeHead } from "@/lib/head/routeHead"
 import { i18n } from "@/lib/i18n"
 
@@ -27,6 +28,7 @@ function AppearancePage() {
 				<div className="mx-auto flex w-full max-w-2xl flex-col gap-4">
 					<ThemeCard />
 					<StartScreenCard />
+					<RailOrderCard />
 					<DriveMemoryCard />
 				</div>
 			</div>

@@ -97,6 +97,14 @@ export const settings = {
 	settingsThemeDark: "Dark",
 	settingsThemeSystem: "System",
 
+	// ── Appearance: icon rail order ──────────────────────────────────────────
+	settingsRailTitle: "Navigation",
+	settingsRailDescription:
+		"Drag the icons in the bar on the far left to reorder them, or press Alt+Up/Down on a focused icon. The order is saved in this browser.",
+	settingsRailReset: "Reset order",
+	settingsRailResetDescription: "Put the navigation icons back in their default order",
+	settingsRailResetSuccess: "Navigation order reset",
+
 	// ── Appearance: drive sort/view memory ───────────────────────────────────
 	settingsDriveMemoryTitle: "Cloud Drive organization",
 	settingsDriveMemoryDescription: "Control how sort order and view mode are remembered across directories",

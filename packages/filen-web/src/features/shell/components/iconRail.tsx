@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState, type ReactElement } from "react"
 import { useTranslation } from "react-i18next"
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router"
 import {
@@ -29,6 +29,9 @@ import { useAccountQuery } from "@/queries/account"
 import { useHasActiveTransfers, useTransfersAggregate } from "@/features/transfers/store/useTransfersStore"
 import { shouldShowTransfersAggregate } from "@/features/transfers/screens/transfers.logic"
 import { Logo } from "@/features/shell/components/logo"
+import { useRailReorder } from "@/features/shell/hooks/useRailReorder"
+import { DEFAULT_RAIL_ORDER, railEntryActive, type RailEntryId } from "@/features/shell/lib/railOrder.logic"
+import { saveRailOrder, useRailOrderQuery } from "@/features/shell/queries/railOrder"
 import { SidebarDrawerTrigger } from "@/features/shell/components/sidebarDrawer"
 import { useTheme } from "@/providers/themeProvider"
 import { Button } from "@/components/ui/button"
@@ -61,6 +64,12 @@ function railItemClass(active: boolean): string {
 		"flex size-9 items-center justify-center rounded-lg focus-ring transition-colors outline-none app-region-no-drag [&_svg]:size-[22px] [&_svg]:shrink-0",
 		active ? "bg-rail-chip text-rail-chip-foreground shadow-sm" : "text-muted-foreground hover:bg-rail-hover hover:text-foreground"
 	)
+}
+
+interface RailEntryProps {
+	active: boolean
+	// Tooltips stay closed while an entry is being dragged.
+	reordering: boolean
 }
 
 // Help destination ships later (the real support URL is a pending product decision) — rendered inert
@@ -238,13 +247,13 @@ function AccountMenu() {
 // a slim progress sliver along the icon's own bottom edge for `percent`, and the live rolling-window
 // `speed` folded into the tooltip text — mirrors mobile's floating pill's own speed+progress readout,
 // condensed to fit this narrow rail slot instead of a separate persistent surface.
-function TransfersEntry({ active }: { active: boolean }) {
+function TransfersEntry({ active, reordering }: RailEntryProps) {
 	const { t } = useTranslation(["common", "transfers"])
 	const { activeCount, percent, speed } = useTransfersAggregate()
 	const showAggregate = shouldShowTransfersAggregate(activeCount)
 
 	return (
-		<Tooltip>
+		<Tooltip disabled={reordering}>
 			<TooltipTrigger
 				render={
 					<Link
@@ -296,11 +305,11 @@ function TransfersEntry({ active }: { active: boolean }) {
 // simple: no badge/aggregate readout to carry, unlike Transfers' active-count/speed sliver. Previously
 // playlists only lived inside the now-playing popover's Playlists tab, unreachable without a playing
 // queue — this rail entry (plus nowPlayingPanel.tsx dropping that tab) fixes that reachability gap.
-function PlaylistsEntry({ active }: { active: boolean }) {
+function PlaylistsEntry({ active, reordering }: RailEntryProps) {
 	const { t } = useTranslation("common")
 
 	return (
-		<Tooltip>
+		<Tooltip disabled={reordering}>
 			<TooltipTrigger
 				render={
 					<Link
@@ -322,11 +331,11 @@ function PlaylistsEntry({ active }: { active: boolean }) {
 // above. Placed next to the Drive entry (below) rather than beside Transfers/Playlists/Chats:
 // photos is a derived VIEW over a directory the user picks from their own drive, not an independent
 // module with its own storage the way playlists/transfers are.
-function PhotosEntry({ active }: { active: boolean }) {
+function PhotosEntry({ active, reordering }: RailEntryProps) {
 	const { t } = useTranslation("common")
 
 	return (
-		<Tooltip>
+		<Tooltip disabled={reordering}>
 			<TooltipTrigger
 				render={
 					<Link
@@ -344,38 +353,164 @@ function PhotosEntry({ active }: { active: boolean }) {
 	)
 }
 
+function DriveEntry({ active, reordering }: RailEntryProps) {
+	const { t } = useTranslation()
+
+	return (
+		<Tooltip disabled={reordering}>
+			<TooltipTrigger
+				render={
+					<Link
+						to="/drive/$"
+						params={{ _splat: "" }}
+						aria-current={active ? "page" : undefined}
+						aria-label={t("moduleDrive")}
+						className={railItemClass(active)}
+					>
+						<FolderClosedIcon />
+					</Link>
+				}
+			/>
+			<TooltipContent side="right">{t("moduleDrive")}</TooltipContent>
+		</Tooltip>
+	)
+}
+
+// Mounting the already-batched requests query here keeps the incoming-request badge current app-wide,
+// not only on /contacts.
+function ContactsEntry({ active, reordering }: RailEntryProps) {
+	const { t } = useTranslation()
+	const contactRequestsQuery = useContactRequestsQuery()
+	const incomingRequestCount = contactRequestsQuery.status === "success" ? contactRequestsQuery.data.incoming.length : 0
+
+	return (
+		<Tooltip disabled={reordering}>
+			<TooltipTrigger
+				render={
+					<Link
+						to="/contacts"
+						search={{ section: DEFAULT_CONTACTS_SECTION_FILTER }}
+						aria-current={active ? "page" : undefined}
+						aria-label={
+							incomingRequestCount > 0 ? t("contactRequestsBadge", { count: incomingRequestCount }) : t("moduleContacts")
+						}
+						className={cn(railItemClass(active), "relative")}
+					>
+						<UsersIcon />
+						{incomingRequestCount > 0 ? (
+							// aria-hidden: the count is folded into the Link's own aria-label (a labelled element
+							// ignores descendant content for its accessible name) — mirrors TransfersEntry's badge.
+							<Badge
+								aria-hidden="true"
+								className="absolute -top-1 -right-1 h-4 min-w-4 justify-center rounded-full px-1 text-[10px] tabular-nums"
+							>
+								{incomingRequestCount}
+							</Badge>
+						) : null}
+					</Link>
+				}
+			/>
+			<TooltipContent side="right">{t("moduleContacts")}</TooltipContent>
+		</Tooltip>
+	)
+}
+
+function NotesEntry({ active, reordering }: RailEntryProps) {
+	const { t } = useTranslation()
+
+	return (
+		<Tooltip disabled={reordering}>
+			<TooltipTrigger
+				render={
+					<Link
+						to="/notes"
+						aria-current={active ? "page" : undefined}
+						aria-label={t("moduleNotes")}
+						className={railItemClass(active)}
+					>
+						<NotebookPenIcon />
+					</Link>
+				}
+			/>
+			<TooltipContent side="right">{t("moduleNotes")}</TooltipContent>
+		</Tooltip>
+	)
+}
+
+// The badge counts unread messages across every chat, client-derived; the rail is always mounted with
+// the authed shell, so this hook is also what keeps that count loaded whichever module is open.
+function ChatsEntry({ active, reordering }: RailEntryProps) {
+	const { t } = useTranslation()
+	const currentUserId = useAccountQuery().data?.id
+	const unreadChatsCount = useChatsUnreadCount(currentUserId)
+
+	return (
+		<Tooltip disabled={reordering}>
+			<TooltipTrigger
+				render={
+					<Link
+						to="/chats"
+						aria-current={active ? "page" : undefined}
+						aria-label={unreadChatsCount > 0 ? t("chatsUnreadBadge", { count: unreadChatsCount }) : t("moduleChats")}
+						className={cn(railItemClass(active), "relative")}
+					>
+						<MessagesSquareIcon />
+						{unreadChatsCount > 0 ? (
+							// aria-hidden: the count is folded into the Link's own aria-label (mirrors TransfersEntry's badge).
+							<Badge
+								aria-hidden="true"
+								className="absolute -top-1 -right-1 h-4 min-w-4 justify-center rounded-full px-1 text-[10px] tabular-nums"
+							>
+								{unreadChatsCount}
+							</Badge>
+						) : null}
+					</Link>
+				}
+			/>
+			<TooltipContent side="right">{t("moduleChats")}</TooltipContent>
+		</Tooltip>
+	)
+}
+
+function SettingsEntry({ active, reordering }: RailEntryProps) {
+	const { t } = useTranslation()
+
+	return (
+		<Tooltip disabled={reordering}>
+			<TooltipTrigger
+				render={
+					<Link
+						to="/settings/account"
+						aria-current={active ? "page" : undefined}
+						aria-label={t("settings")}
+						className={railItemClass(active)}
+					>
+						<SettingsIcon />
+					</Link>
+				}
+			/>
+			<TooltipContent side="right">{t("settings")}</TooltipContent>
+		</Tooltip>
+	)
+}
+
+const RAIL_ENTRIES: Record<RailEntryId, (props: RailEntryProps) => ReactElement> = {
+	drive: DriveEntry,
+	photos: PhotosEntry,
+	transfers: TransfersEntry,
+	notes: NotesEntry,
+	chats: ChatsEntry,
+	playlists: PlaylistsEntry,
+	contacts: ContactsEntry,
+	settings: SettingsEntry
+}
+
 export function IconRail() {
 	const { t } = useTranslation()
 	const navigate = useNavigate()
-	// Same read as __root.tsx's BootGate (the app's other consumer of the current path). Drive's own
-	// route is a "/drive/$" splat, so its match also covers every nested directory, not just the bare
-	// "/drive" root — Contacts has no nested path, so an exact match is enough for it.
 	const pathname = useRouterState({ select: state => state.location.pathname })
-	const driveActive = pathname === "/drive" || pathname.startsWith("/drive/")
-	const contactsActive = pathname === "/contacts"
-	// Notes is a two-route module (/notes selection index + /notes/$uuid) — like Drive's splat, its
-	// active state must cover the nested selection path too, not just the bare root.
-	const notesActive = pathname === "/notes" || pathname.startsWith("/notes/")
-	// Chats mirrors Notes: a two-route module (/chats index + /chats/$uuid selection), so its active state
-	// covers the nested thread path too.
-	const chatsActive = pathname === "/chats" || pathname.startsWith("/chats/")
-	// Transfers is a flat page, no splat — an exact match is enough (mirrors contactsActive).
-	const transfersActive = pathname === "/transfers"
-	// Playlists mirrors Transfers: a flat page, no splat.
-	const playlistsActive = pathname === "/playlists"
-	// Photos mirrors Transfers/Playlists: a flat page, no splat.
-	const photosActive = pathname === "/photos"
-	// In-app unread signal: a numeric rail badge driven by the CLIENT-DERIVED global unread count (summed
-	// per-message across every chat, not a server scalar). Always mounted with the authed shell, so this
-	// hook is also the mount-once trigger for the bulk chat+messages refetch that makes the count possible
-	// (useChatsUnreadCount) — the badge reflects unread regardless of which module is open.
-	const currentUserId = useAccountQuery().data?.id
-	const unreadChatsCount = useChatsUnreadCount(currentUserId)
-	// Incoming contact-request count for the Contacts nav badge — mounting the already-batched requests
-	// query here (rather than only on /contacts) keeps it warm at launch and surfaces the count app-wide,
-	// mirroring how the transfers/unread badges are always-present.
-	const contactRequestsQuery = useContactRequestsQuery()
-	const incomingRequestCount = contactRequestsQuery.status === "success" ? contactRequestsQuery.data.incoming.length : 0
+	const order = useRailOrderQuery().data ?? DEFAULT_RAIL_ORDER
+	const { slotProps } = useRailReorder(order, saveRailOrder)
 
 	// Registered above at module scope (default unassigned) — this only wires the LIVE combo, which
 	// starts as "" (react-hotkeys-hook's parser treats it as "never matches") and works the instant a
@@ -461,100 +596,32 @@ export function IconRail() {
 			    Sits with the section entries it reaches, below the brand. */}
 			<SidebarDrawerTrigger className={railItemClass(false)} />
 
-			<Tooltip>
-				<TooltipTrigger
-					render={
-						<Link
-							to="/drive/$"
-							params={{ _splat: "" }}
-							aria-current={driveActive ? "page" : undefined}
-							aria-label={t("moduleDrive")}
-							className={railItemClass(driveActive)}
+			{/* The section links, in the user's order. Drag one to move it (or Alt+Arrow on a focused one):
+			    it lifts and follows the pointer while the others slide to open its landing slot. */}
+			<div className="flex flex-col items-center gap-1.5">
+				{order.map((id, index) => {
+					const Entry = RAIL_ENTRIES[id]
+					const { dragging, reordering, style, ...handlers } = slotProps(index)
+
+					return (
+						<div
+							key={id}
+							style={style}
+							className={cn(
+								"relative app-region-no-drag",
+								reordering && !dragging && "transition-transform duration-150 ease-out",
+								dragging && "z-10 cursor-grabbing *:bg-rail-chip *:text-rail-chip-foreground *:shadow-lg"
+							)}
+							{...handlers}
 						>
-							<FolderClosedIcon />
-						</Link>
-					}
-				/>
-				<TooltipContent side="right">{t("moduleDrive")}</TooltipContent>
-			</Tooltip>
-
-			<PhotosEntry active={photosActive} />
-
-			<Tooltip>
-				<TooltipTrigger
-					render={
-						<Link
-							to="/contacts"
-							search={{ section: DEFAULT_CONTACTS_SECTION_FILTER }}
-							aria-current={contactsActive ? "page" : undefined}
-							aria-label={
-								incomingRequestCount > 0 ? t("contactRequestsBadge", { count: incomingRequestCount }) : t("moduleContacts")
-							}
-							className={cn(railItemClass(contactsActive), "relative")}
-						>
-							<UsersIcon />
-							{incomingRequestCount > 0 ? (
-								// aria-hidden: the count is folded into the Link's own aria-label above (a labelled
-								// element ignores descendant content for its accessible name), so this badge is a
-								// visual cue only — mirrors TransfersEntry's badge.
-								<Badge
-									aria-hidden="true"
-									className="absolute -top-1 -right-1 h-4 min-w-4 justify-center rounded-full px-1 text-[10px] tabular-nums"
-								>
-									{incomingRequestCount}
-								</Badge>
-							) : null}
-						</Link>
-					}
-				/>
-				<TooltipContent side="right">{t("moduleContacts")}</TooltipContent>
-			</Tooltip>
-
-			<Tooltip>
-				<TooltipTrigger
-					render={
-						<Link
-							to="/notes"
-							aria-current={notesActive ? "page" : undefined}
-							aria-label={t("moduleNotes")}
-							className={railItemClass(notesActive)}
-						>
-							<NotebookPenIcon />
-						</Link>
-					}
-				/>
-				<TooltipContent side="right">{t("moduleNotes")}</TooltipContent>
-			</Tooltip>
-
-			<TransfersEntry active={transfersActive} />
-
-			<PlaylistsEntry active={playlistsActive} />
-
-			<Tooltip>
-				<TooltipTrigger
-					render={
-						<Link
-							to="/chats"
-							aria-current={chatsActive ? "page" : undefined}
-							aria-label={unreadChatsCount > 0 ? t("chatsUnreadBadge", { count: unreadChatsCount }) : t("moduleChats")}
-							className={cn(railItemClass(chatsActive), "relative")}
-						>
-							<MessagesSquareIcon />
-							{unreadChatsCount > 0 ? (
-								// aria-hidden: the count is folded into the Link's own aria-label below; the badge is a
-								// visual cue only (mirrors TransfersEntry's badge).
-								<Badge
-									aria-hidden="true"
-									className="absolute -top-1 -right-1 h-4 min-w-4 justify-center rounded-full px-1 text-[10px] tabular-nums"
-								>
-									{unreadChatsCount}
-								</Badge>
-							) : null}
-						</Link>
-					}
-				/>
-				<TooltipContent side="right">{t("moduleChats")}</TooltipContent>
-			</Tooltip>
+							<Entry
+								active={railEntryActive(id, pathname)}
+								reordering={reordering}
+							/>
+						</div>
+					)
+				})}
+			</div>
 
 			{/* Pinned footer — the rail's extensible utility slot list; future entries stack above the
 			    account menu. */}
