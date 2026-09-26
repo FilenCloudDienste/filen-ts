@@ -5,7 +5,7 @@ import { ChevronRightIcon, FolderClosedIcon, ClockIcon, StarIcon, Trash2Icon, Us
 import { cn } from "@filen/shared"
 import { type DriveRouteId, splatToUuids } from "@/features/drive/lib/navigate"
 import { useDirectoryTreeChildrenQuery } from "@/features/drive/queries/drive"
-import { useDirectoryTreeStore } from "@/features/drive/store/useDirectoryTreeStore"
+import { isTreeNodeOpen, TREE_ROOT_KEY, useDirectoryTreeStore } from "@/features/drive/store/useDirectoryTreeStore"
 import { DirectoryTree, type DirectoryTreeContext } from "@/features/drive/components/directoryTree"
 import { DirectoryTreeMenu } from "@/features/drive/components/directoryTreeMenu"
 import { dropHighlightClass, useDriveDropTarget } from "@/features/drive/hooks/useDriveDropTarget"
@@ -30,12 +30,6 @@ type DriveSidebarItem =
 	| { id: string; label: string; icon: IconType; to: DriveSidebarRoute }
 	| { id: string; label: string; icon: IconType; splatTo: DriveRouteId }
 	| { id: string; label: string; icon: IconType }
-
-// Persisted open-state key for the Cloud Drive root row. Directory uuids are real UUIDs, never the
-// literal "root", so this sentinel can share the tree's uuid-keyed open map with zero collision — and
-// keeping the root's open flag under its OWN key is what lets collapsing the root leave every
-// descendant's recorded state untouched (see useDirectoryTreeStore).
-const ROOT_KEY = "root"
 
 // Muted group header over each virtual-root cluster ("Other", "Shared").
 const GROUP_HEADER_CLASS = "px-2.5 pt-4 pb-1 text-xs font-medium text-muted-foreground/80"
@@ -96,7 +90,7 @@ function SplatNavItem({ icon: Icon, label, to }: { icon: IconType; label: string
 
 // The Cloud Drive root row: a chevron disclosing the whole tree, plus a real `<Link>` navigating to
 // the drive root (a Link, not a button, so it keeps TanStack's automatic active status and stays the
-// sidebar's stable "Cloud Drive" landmark link). Its own open flag rides ROOT_KEY.
+// sidebar's stable "Cloud Drive" landmark link). Its own open flag rides TREE_ROOT_KEY.
 function CloudDriveRoot({ label, open, onToggle }: { label: string; open: boolean; onToggle: () => void }) {
 	const { t } = useTranslation("drive")
 	// The drive root as a drag-to-move drop target (empty ancestry). A collapsed root springs open
@@ -158,8 +152,7 @@ export function DriveSidebar() {
 
 	const openMap = useDirectoryTreeStore(state => state.open)
 	const toggle = useDirectoryTreeStore(state => state.toggle)
-	// Default expanded so the tree reads as present; a persisted `false` still collapses it.
-	const rootOpen = openMap[ROOT_KEY] ?? true
+	const rootOpen = isTreeNodeOpen(openMap, TREE_ROOT_KEY)
 
 	function navigateTo(path: string[]): void {
 		void navigate({ to: "/drive/$", params: { _splat: path.join("/") } })
@@ -167,7 +160,7 @@ export function DriveSidebar() {
 
 	const tree: DirectoryTreeContext = {
 		activePath,
-		isOpen: uuid => openMap[uuid] ?? false,
+		isOpen: uuid => isTreeNodeOpen(openMap, uuid),
 		onToggle: toggle,
 		onNavigate: navigateTo,
 		useChildren: useDirectoryTreeChildrenQuery,
@@ -243,7 +236,7 @@ export function DriveSidebar() {
 										label={t("driveMyDrive")}
 										open={rootOpen}
 										onToggle={() => {
-											toggle(ROOT_KEY)
+											toggle(TREE_ROOT_KEY)
 										}}
 									/>
 									{rootOpen ? <DirectoryTree tree={tree} /> : null}

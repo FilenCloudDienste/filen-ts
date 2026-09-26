@@ -747,8 +747,8 @@ export function driveNamesQueryKey(scope: DirectoryNameScope, uuid: string) {
 }
 
 // A directory's decrypted name as a cached listing already holds it — the parent listing a
-// click-through came from always does, for owned and shared directories alike. Listings, not the
-// sidebar tree: rename and socket events patch every listing, while the tree is never patched.
+// click-through came from always does, for owned and shared directories alike. Rename and socket events
+// patch every listing (the sidebar tree reads the same entries).
 export function cachedDirectoryName(uuid: string): string | undefined {
 	const item = findCachedListingItem(uuid)
 

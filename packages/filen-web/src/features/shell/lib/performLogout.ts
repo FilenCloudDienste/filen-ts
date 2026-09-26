@@ -15,6 +15,7 @@ import { cancelActiveTransfers } from "@/features/transfers/lib/control"
 import { allowNextUnload } from "@/lib/unloadGuard"
 import { clearPreviewCache } from "@/features/preview/lib/previewCache"
 import { useDriveClipboardStore } from "@/features/drive/store/useDriveClipboardStore"
+import { clearDirectoryTreeState } from "@/features/drive/store/useDirectoryTreeStore"
 import { discardListingPatches } from "@/features/drive/queries/drive"
 import { confirmDiscardUnsavedPreview, usePreviewUnsavedGuardStore } from "@/features/preview/store/usePreviewUnsavedGuard"
 import { queryClient } from "@/queries/client"
@@ -100,8 +101,9 @@ export async function performLogout(options?: PerformLogoutOptions): Promise<boo
 	disposeAudioEngine()
 	// Decrypted preview buffers held for pager revisits.
 	clearPreviewCache()
-	// The drive clipboard's items belong to this account.
+	// The drive clipboard's items and the sidebar tree's expanded directories belong to this account.
 	useDriveClipboardStore.getState().clear()
+	clearDirectoryTreeState()
 	// Tear the realtime socket down before the client is released — unsubscribeFromSocket needs the live
 	// client. Fire-and-forget: the worker also frees the listener in releaseClient as a backstop.
 	void socketBridge.stop()

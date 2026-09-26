@@ -72,6 +72,7 @@ import { usePreviewUnsavedGuardStore } from "@/features/preview/store/usePreview
 import { performLogout } from "@/features/shell/lib/performLogout"
 import { consumeUnloadAllowance } from "@/lib/unloadGuard"
 import { useDriveClipboardStore } from "@/features/drive/store/useDriveClipboardStore"
+import { useDirectoryTreeStore } from "@/features/drive/store/useDirectoryTreeStore"
 import { getPreviewBytes, loadPreviewBytes } from "@/features/preview/lib/previewCache"
 
 // Stands in for the overlay's unsaved-changes prompt: waits for the request the guard armed, then
@@ -151,6 +152,14 @@ describe("performLogout", () => {
 		await expect(performLogout()).resolves.toBe(true)
 
 		expect(useDriveClipboardStore.getState().entry).toBeNull()
+	})
+
+	it("forgets the sidebar tree's expanded directories, which are this account's", async () => {
+		useDirectoryTreeStore.getState().toggle("dir-1")
+
+		await expect(performLogout()).resolves.toBe(true)
+
+		expect(useDirectoryTreeStore.getState().open).toEqual({})
 	})
 
 	it("a forced sign-out with a clean buffer never shows the pending notice", async () => {

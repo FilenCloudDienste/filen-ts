@@ -1,11 +1,25 @@
 import { create } from "zustand"
 
-// Persisted open/closed state for the sidebar Cloud Drive tree: a uuid-keyed map (the drive root
-// rides its own sentinel key — see directoryTree.tsx), each entry `true` when that node is expanded.
-// Persisted so expansion survives navigation and reloads. Toggling ONE node only ever flips its own
-// key — collapsing the root never wipes the descendants' recorded state (an old-web bug this design
-// forecloses): a re-expand restores exactly the branch the user last left open.
+// Persisted open/closed state for the sidebar Cloud Drive tree: a uuid-keyed map, the drive root riding
+// its own sentinel key. Persisted so expansion survives navigation and reloads. Toggling ONE node only
+// ever flips its own key — collapsing the root never wipes the descendants' recorded state (an old-web
+// bug this design forecloses): a re-expand restores exactly the branch the user last left open.
+//
+// Only states that differ from a node's default are stored (an expanded directory, a collapsed root),
+// so collapsing removes the entry again and the map stays as small as what is open.
 const STORAGE_KEY = "driveTreeOpen"
+
+// The Cloud Drive root row's key. Directory keys are real UUIDs, never the literal "root".
+export const TREE_ROOT_KEY = "root"
+
+// The root starts expanded so the tree reads as present; every directory starts collapsed.
+function defaultOpen(key: string): boolean {
+	return key === TREE_ROOT_KEY
+}
+
+export function isTreeNodeOpen(open: Readonly<Record<string, boolean>>, key: string): boolean {
+	return open[key] ?? defaultOpen(key)
+}
 
 function readInitial(): Record<string, boolean> {
 	try {
@@ -26,7 +40,8 @@ function readInitial(): Record<string, boolean> {
 		const out: Record<string, boolean> = {}
 
 		for (const [key, value] of Object.entries(parsed)) {
-			if (typeof value === "boolean") {
+			// Also sheds entries an older build saved at their default.
+			if (typeof value === "boolean" && value !== defaultOpen(key)) {
 				out[key] = value
 			}
 		}
@@ -40,14 +55,19 @@ function readInitial(): Record<string, boolean> {
 
 interface DirectoryTreeState {
 	open: Record<string, boolean>
-	toggle: (uuid: string) => void
+	toggle: (key: string) => void
 }
 
 export const useDirectoryTreeStore = create<DirectoryTreeState>(set => ({
 	open: readInitial(),
-	toggle: (uuid: string) => {
+	toggle: (key: string) => {
 		set(state => {
-			const next = { ...state.open, [uuid]: !state.open[uuid] }
+			const nextOpen = !isTreeNodeOpen(state.open, key)
+			const next = Object.fromEntries(Object.entries(state.open).filter(([entryKey]) => entryKey !== key))
+
+			if (nextOpen !== defaultOpen(key)) {
+				next[key] = nextOpen
+			}
 
 			try {
 				localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
@@ -59,3 +79,14 @@ export const useDirectoryTreeStore = create<DirectoryTreeState>(set => ({
 		})
 	}
 }))
+
+// Logout: the uuids are the signed-out account's, so the next sign-in starts from the defaults.
+export function clearDirectoryTreeState(): void {
+	try {
+		localStorage.removeItem(STORAGE_KEY)
+	} catch {
+		// Storage unavailable — nothing was persisted.
+	}
+
+	useDirectoryTreeStore.setState({ open: {} })
+}
