@@ -42,38 +42,66 @@ declare global {
 		// plus the first 4 bytes written (the zip test's magic-number check). Declared non-optional: every
 		// test that reads it called stubFsaPicker first (mirrors e2e/global.d.ts's own __filenE2E rationale).
 		__smokeSink: { bytes: number; first4: number[] }
+		// Set by stubFsaPicker alongside __smokeSink: opens a gated sink (see there). A no-op on an ungated one.
+		__releaseSmokeSink: () => void
 	}
 }
 
+// After the release, a gated sink still paces each chunk, so the rest of the file outlasts the worker
+// picking up a cancel that was dispatched just before it.
+const GATED_SINK_CHUNK_DELAY_MS = 75
+
 // Trick 1 (FSA path, Chromium's default) -- see the file-level comment above for the full rationale.
-// `throttleMs`, when positive, awaits inside write() so a caller (the cancel test) can keep a transfer
-// reliably in-flight long enough for a real Cancel click to land.
-async function stubFsaPicker(page: Page, throttleMs = 0): Promise<void> {
-	await page.addInitScript(delayMs => {
-		window.__smokeSink = { bytes: 0, first4: [] }
+// `gated` holds every write() until the test calls releaseSmokeSink, so a transfer cannot finish before
+// the test lets it, however slow the runner (the cancel test needs it still in flight at the confirm).
+async function stubFsaPicker(page: Page, gated = false): Promise<void> {
+	await page.addInitScript(
+		([isGated, delayMs]) => {
+			window.__smokeSink = { bytes: 0, first4: [] }
 
-		window.showSaveFilePicker = () =>
-			Promise.resolve({
-				createWritable: () =>
-					Promise.resolve(
-						new WritableStream<Uint8Array>({
-							async write(chunk) {
-								if (delayMs > 0) {
-									await new Promise<void>(resolve => {
-										setTimeout(resolve, delayMs)
-									})
+			let release: () => void = () => undefined
+			const released = isGated
+				? new Promise<void>(resolve => {
+						release = resolve
+					})
+				: Promise.resolve()
+
+			window.__releaseSmokeSink = () => {
+				release()
+			}
+
+			window.showSaveFilePicker = () =>
+				Promise.resolve({
+					createWritable: () =>
+						Promise.resolve(
+							new WritableStream<Uint8Array>({
+								async write(chunk) {
+									await released
+
+									if (isGated) {
+										await new Promise<void>(resolve => {
+											setTimeout(resolve, delayMs)
+										})
+									}
+
+									if (window.__smokeSink.first4.length === 0 && chunk.byteLength > 0) {
+										window.__smokeSink.first4 = Array.from(chunk.subarray(0, 4))
+									}
+
+									window.__smokeSink.bytes += chunk.byteLength
 								}
+							})
+						)
+				})
+		},
+		[gated, GATED_SINK_CHUNK_DELAY_MS] as const
+	)
+}
 
-								if (window.__smokeSink.first4.length === 0 && chunk.byteLength > 0) {
-									window.__smokeSink.first4 = Array.from(chunk.subarray(0, 4))
-								}
-
-								window.__smokeSink.bytes += chunk.byteLength
-							}
-						})
-					)
-			})
-	}, throttleMs)
+function releaseSmokeSink(page: Page): Promise<void> {
+	return page.evaluate(() => {
+		window.__releaseSmokeSink()
+	})
 }
 
 // Trick 2 (SW path, Firefox/Safari's default -- forced here on Chromium) -- see the file-level comment
@@ -240,12 +268,10 @@ test.describe("downloads", () => {
 		// budget for the fourteen read specs that never touch the tree at all.
 		test.setTimeout(600_000)
 
-		// A throttled sink (~75ms per chunk) keeps a large-enough download reliably in-flight long enough
-		// for a real Cancel click to land deterministically, rather than racing a real transfer's own,
-		// unpredictable network speed. Live-verified against this exact SDK/account: a 24 MiB file streams
-		// in ~1 MiB chunks, so the throttle alone buys several seconds of in-flight window -- comfortably
-		// under the "few MiB, well under 50MB" ceiling a real UI upload input would otherwise need.
-		await stubFsaPicker(page, 75)
+		// A gated sink holds the transfer in flight until the cancel is confirmed, however slow the runner
+		// is to reach that confirm; a throttle alone only bought a few seconds, which a slow runner's UI
+		// steps could outlast and let the download finish first.
+		await stubFsaPicker(page, true)
 
 		await bootTo(page)
 
@@ -283,6 +309,10 @@ test.describe("downloads", () => {
 		const confirmDialog = page.getByRole("alertdialog", { name: "Cancel transfer?" })
 		await expect(confirmDialog).toBeVisible()
 		await confirmDialog.getByRole("button", { name: "Cancel", exact: true }).click()
+
+		// Only now: the cancel has been dispatched, and the app's pipe cannot unwind until the write it is
+		// holding settles (a pipeTo abort waits out an in-flight write), so the row would never leave.
+		await releaseSmokeSink(page)
 
 		// Cancelled transfers keep no history (download.ts's runDownload Cancelled branch settles then
 		// immediately removes the row) -- unlike a finished row, there is no separate Dismiss step. The

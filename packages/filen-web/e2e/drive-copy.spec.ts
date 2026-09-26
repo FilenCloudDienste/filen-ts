@@ -298,7 +298,11 @@ test.describe("drive copy", () => {
 
 			await expect(listbox.getByRole("option", { name: movedName })).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 
+			// Gated on the current crumb before asserting: keptName is in both directories, and the moved row's
+			// absence would also hold for the moment between the two listings.
 			await breadcrumb.getByRole("link", { name: scratchName, exact: true }).click()
+			await expect(breadcrumb.locator('[aria-current="page"]')).toHaveText(scratchName)
+			await waitForListingSettled(page)
 			await expect(listbox.getByRole("option", { name: keptName })).toBeVisible()
 			await expect(listbox.getByRole("option", { name: movedName })).toHaveCount(0)
 		} finally {

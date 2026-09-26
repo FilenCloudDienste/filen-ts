@@ -129,12 +129,19 @@ export async function bootTo(page: Page, path = "/drive"): Promise<void> {
 }
 
 // A sidebar click can silently fail to commit under suite load, after which every later step runs
-// against the listing the spec believes it has left. Retried until the URL proves otherwise.
+// against the listing the spec believes it has left. Retried until the URL proves otherwise, then gated
+// on the breadcrumb's current crumb: the URL flips before React commits the new route (the barrier
+// descendInto documents), and until then waitForListingSettled settles on the OUTGOING listing. Every
+// sidebar link's name is its root's crumb label, so the name is the barrier. Its budget covers a cold
+// first read of that root (a trash holding every recent run's debris is the slow one).
 export async function clickSidebarLink(page: Page, name: string, urlPattern: RegExp): Promise<void> {
 	await expect(async () => {
 		await page.getByRole("complementary").getByRole("link", { name, exact: true }).click()
 		await expect(page).toHaveURL(urlPattern, { timeout: 5_000 })
 	}).toPass({ timeout: 30_000 })
+	await expect(page.getByRole("navigation", { name: "Breadcrumb" }).locator('[aria-current="page"]')).toHaveText(name, {
+		timeout: BOOT_SETTLE_TIMEOUT_MS
+	})
 }
 
 // The Transfers entry lives in the icon rail (a `navigation` landmark), not the sidebar, so
@@ -459,6 +466,10 @@ async function waitForToastsClear(page: Page): Promise<void> {
 // row that is correctly absent. Gating that return on the click (rather than checking on entry) keeps the
 // FIRST attempt waiting for a row the listing simply hasn't rendered yet instead of reporting a phantom
 // success.
+// The row action never reached its confirm click, so no write was issued: the page itself is what
+// failed (a stuck overlay, a menu or drag a failed test left behind), and a fresh document may succeed.
+export class RowActionNotConfirmedError extends Error {}
+
 async function selectAndConfirmRowAction(
 	page: Page,
 	listbox: ReturnType<Page["getByRole"]>,
@@ -503,7 +514,11 @@ async function selectAndConfirmRowAction(
 		await expect(confirm).toBeVisible()
 		await confirm.getByRole("button", { name: actionLabel, exact: true }).click()
 		confirmed = true
-	}).toPass({ timeout: INTERACTION_RETRY_TIMEOUT_MS })
+	})
+		.toPass({ timeout: INTERACTION_RETRY_TIMEOUT_MS })
+		.catch((error: unknown) => {
+			throw confirmed ? error : new RowActionNotConfirmedError(`"${actionLabel}" on "${name}" was never confirmed`, { cause: error })
+		})
 
 	// Awaited ONCE, never retried. useDriveDialogHost's runBulkDialogAction holds the confirm open and
 	// pending for the whole bulk operation and closes it either way, so the close IS the write settling
@@ -641,7 +656,20 @@ export async function trashScratchDirectory(page: Page, name: string, confirmTim
 	}
 
 	try {
-		await selectAndTrashRow(page, listbox, name, confirmTimeoutMs)
+		try {
+			await selectAndTrashRow(page, listbox, name, confirmTimeoutMs)
+		} catch (error) {
+			if (!(error instanceof RowActionNotConfirmedError)) {
+				throw error
+			}
+
+			// Nothing was written, so the page is what failed: a failed test can leave state no Escape
+			// clears (a synthetic drag's upload overlay, a sprung directory). One retry from a fresh document.
+			console.error(`trashScratchDirectory: retrying "${name}" from a fresh document`, error)
+			await page.goto("/drive")
+			listbox = await reachRootRow()
+			await selectAndTrashRow(page, listbox, name, confirmTimeoutMs)
+		}
 	} catch (error) {
 		// Distinct from the case above, and worth telling apart in the log: the row WAS there and the
 		// account still would not take the write — a rejection, or a lease that outlived the retry

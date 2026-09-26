@@ -274,6 +274,11 @@ export default defineConfig({
 			name: "firefox",
 			use: { ...devices["Desktop Firefox"] },
 			dependencies: ["cleanup-setup"],
+			// Every test here renders only after a cold SDK boot in a fresh context, and the lane starts while
+			// fixtures-setup is uploading, so on CI it runs one test at a time. It retries like the read lane:
+			// nothing in it takes a write lease (sw.spec, its one writer, skips on firefox).
+			...(process.env["CI"] ? { workers: 1 } : {}),
+			retries: process.env["CI"] ? 1 : 0,
 			testMatch: /\/(boot|keymap|no-coi|no-opfs|public-links|register|reset|shell|storage|sw)\.spec\.ts$/
 		},
 		{

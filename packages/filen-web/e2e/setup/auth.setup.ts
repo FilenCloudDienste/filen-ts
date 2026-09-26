@@ -9,6 +9,9 @@ import { waitForE2eHooks } from "../helpers/e2eHooks"
 // logins. retries: 0 guarantees a failed setup never turns into extra login attempts.
 setup.describe.configure({ retries: 0 })
 
+// The login's key derivation is CPU-bound and runs on a runner CPU several times slower than a laptop's.
+const LOGIN_TIMEOUT_MS = 60_000
+
 const email = process.env["FILEN_WEB_E2E_TEST_EMAIL"] ?? ""
 const password = process.env["FILEN_WEB_E2E_TEST_PASSWORD"] ?? ""
 
@@ -32,11 +35,21 @@ setup("sign in through the real form and harvest the session", async ({ page }) 
 	await page.getByLabel("Password", { exact: true }).fill(password)
 	await page.getByRole("button", { name: "Sign in", exact: true }).click()
 
-	// The authed shell raises a blocking startup reminder modal (master-keys export) that renders the
-	// rest of the app inert/aria-hidden until dismissed — the nav below is unreachable while it is open.
-	await dismissStartupReminders(page)
+	// One budget covers the live login (key derivation on a slow CPU, the login round trip) and the authed
+	// boot after it. It ends on whichever comes first: the authed nav, a startup reminder (which makes the
+	// rest of the app inert until dismissed, hiding the nav), or a toast, which is how a rejected or
+	// rate-limited login reports itself. A toast without the nav names the failure instead of timing out.
+	const nav = page.getByRole("navigation", { name: "Filen" })
+	const toasts = page.locator("[data-sonner-toast]")
 
-	await expect(page.getByRole("navigation", { name: "Filen" })).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
+	await expect(nav.or(toasts).or(page.getByRole("alertdialog")).first()).toBeVisible({ timeout: LOGIN_TIMEOUT_MS })
+
+	if (!(await nav.isVisible()) && (await toasts.count()) > 0) {
+		throw new Error(`Sign-in did not complete: ${JSON.stringify(await toasts.allInnerTexts())}`)
+	}
+
+	await dismissStartupReminders(page)
+	await expect(nav).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
 
 	// Harvest the now-live worker session — NOT the kv copy: a persist failure (persisted: false, a
 	// real documented outcome — see loginAttempt.ts) would leave nothing there even though the login

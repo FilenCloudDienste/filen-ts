@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs"
 import type { Page } from "@playwright/test"
 import { test, expect, SESSION_FILE } from "./fixtures"
 import { waitForE2eHooks } from "./helpers/e2eHooks"
-import { bootTo, dismissStartupReminders } from "./helpers/listing"
+import { BOOT_SETTLE_TIMEOUT_MS, bootTo, dismissStartupReminders } from "./helpers/listing"
 import { SESSION_SLOT } from "@/e2e-hooks/sessionSlot"
 
 interface SessionFile {
@@ -51,15 +51,8 @@ const SDK_HOST_RE = /(^|\.)filen(-[1-6])?\.(io|net)$/
 
 const email = process.env["FILEN_WEB_E2E_TEST_EMAIL"] ?? ""
 
-// A cold authed boot is a wasm init + rayon pool spin-up + OPFS open — the same budget
-// playwright.config.ts pins navigationTimeout to — and after a logout it additionally follows the
-// whole phased wipe plus the reload that triggers it. The 10s expect default governs UI
-// responsiveness only and was never sized for any of that. (bootTo carries the same budget for the
-// authed-shell case; this one is for the sign-in surface a logout lands on.)
-const COLD_BOOT_TIMEOUT_MS = 30_000
-
 // The wrong-password attempt is a live, un-retryable round trip: v3/auth/info, wasm key derivation,
-// v3/login, and only then the toast. Same reason as above — the expect default never covered network.
+// v3/login, and only then the toast. The 10s expect default governs UI responsiveness and never covered network.
 const LIVE_LOGIN_TIMEOUT_MS = 30_000
 
 test.describe("auth", () => {
@@ -78,7 +71,7 @@ test.describe("auth", () => {
 			test.skip(email === "", "no e2e credentials configured")
 
 			await page.goto("/login")
-			await expect(page.getByText("Sign in to Filen")).toBeVisible()
+			await expect(page.getByText("Sign in to Filen")).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
 
 			await page.getByLabel("Email", { exact: true }).fill(email)
 			// Deliberately NOT the real password — this test never reads FILEN_WEB_E2E_TEST_PASSWORD, only
@@ -135,7 +128,7 @@ test.describe("auth", () => {
 		// inert, so it is dismissed before any role-based landmark assertion — the reload re-arms it.
 		await page.reload()
 		await dismissStartupReminders(page)
-		await expect(page.getByRole("navigation", { name: "Filen" })).toBeVisible({ timeout: COLD_BOOT_TIMEOUT_MS })
+		await expect(page.getByRole("navigation", { name: "Filen" })).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
 
 		// The authed shell's own account query (IconRail's AccountMenu + the export-keys reminder) fires
 		// its normal reads (verified live: user/info, user/settings, user/account) the instant it mounts,
@@ -205,7 +198,7 @@ test.describe("auth", () => {
 		// (cancel-queries, clear-query-cache, sdk-logout, clear-session, kv-clear, wipe-service-worker,
 		// broadcast, reload — sdk-logout being a live call of its own), then a complete cold boot before
 		// the sign-in form exists at all.
-		await expect(page.getByText("Sign in to Filen")).toBeVisible({ timeout: COLD_BOOT_TIMEOUT_MS })
+		await expect(page.getByText("Sign in to Filen")).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
 
 		// The logout reload is a cold boot, and the hooks arrive on their own fire-and-forget import —
 		// a rendered sign-in form is no proof they are back.
@@ -221,7 +214,7 @@ test.describe("auth", () => {
 		// now-empty shared kv (seedOncePerPage's marker means this reload does NOT re-seed) and
 		// converges it onto sign-in too.
 		await second.reload()
-		await expect(second.getByText("Sign in to Filen")).toBeVisible({ timeout: COLD_BOOT_TIMEOUT_MS })
+		await expect(second.getByText("Sign in to Filen")).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
 
 		await second.close()
 	})

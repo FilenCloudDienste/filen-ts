@@ -273,9 +273,18 @@ test.describe("drive bulk actions", () => {
 			// listTrash() fetch against the just-completed trash write when this was first written.
 			await clickSidebarLink(page, "Trash", /\/trash$/)
 			const trashListing = await waitForListingSettled(page)
+
+			// The trash-only trigger renders once the cold listTrash has landed non-empty, and a trash holding
+			// every recent run's debris is slow to read — hence the boot budget.
+			await expect(page.getByRole("button", { name: "Empty trash", exact: true })).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
+
+			// The local name filter (menus.spec.ts documents it) collapses that debris to this test's two rows,
+			// rather than rendering hundreds of them into the tall viewport.
+			await page.getByRole("searchbox", { name: "Search", exact: true }).fill(scratchName)
+
 			const trashRowA = trashListing.listbox.getByRole("option", { name: nameA })
 			const trashRowB = trashListing.listbox.getByRole("option", { name: nameB })
-			await expect(trashRowA).toBeVisible()
+			await expect(trashRowA).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
 			await expect(trashRowB).toBeVisible()
 
 			// Toolbar's own Empty trash trigger: present because the trash listing is non-empty. Opens the
@@ -364,16 +373,12 @@ test.describe("drive bulk actions", () => {
 			await scratchTrashConfirm.getByRole("button", { name: "Trash", exact: true }).click()
 			await expect(scratchTrashConfirm).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
 
-			// A reload (not just re-checking the same live query-client state) before this LAST assertion —
-			// the app's queries refetch on window focus (queries/client.ts: staleTime 0 +
-			// refetchOnWindowFocus), and Playwright's own multi-worker automation can shift OS-level window
-			// focus across concurrently-running pages; a refetch that happens to land against a moment the
-			// backend hasn't fully caught up with the just-issued trash can overwrite the correct optimistic
-			// removal with a stale "still there" read on THIS page, without anything ever being wrong
-			// server-side. A fresh boot re-fetches once, for real, independent of that page's prior state.
-			await page.reload()
-			const rootAfterFinalCleanup = await waitForListingSettled(page, BOOT_SETTLE_TIMEOUT_MS)
-			await expect(rootAfterFinalCleanup.listbox.getByRole("option", { name: scratchName })).toHaveCount(0)
+			// On the live page, not after a reload: trashItems patches the row out only once the write
+			// succeeded (a rejection closes the confirm too, leaving the row), and a refetch already in flight
+			// replays that patch (queries/drive.ts's patchListing), so a stale read cannot resurrect it. A
+			// reload here unloads the page with the trash's lease release in flight, orphaning the lease and
+			// stalling the next write ~70s.
+			await expect(finalScratchRow).toHaveCount(0)
 
 			trashed = true
 		} finally {

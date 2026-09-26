@@ -97,19 +97,11 @@ test.describe("sidebar directory tree", () => {
 			const options = listbox.getByRole("option")
 			await expect(options).toHaveCount(2)
 
-			// Same optimistic-listing guard as drive-dnd-move.spec.ts: re-dispatched only while the dragged
-			// directory still shows, and safe to re-dispatch through.
-			await expect(async () => {
-				if ((await options.count()) > 1) {
-					await html5DragMove(
-						page,
-						{ selector: TREE_ROW_SELECTOR, text: draggedName },
-						{ selector: TREE_ROW_SELECTOR, text: targetName }
-					)
-				}
-
-				await expect(options).toHaveCount(1, { timeout: 30_000 })
-			}).toPass({ timeout: LIVE_WRITE_TIMEOUT_MS })
+			// Dispatched once, as in drive-dnd-move.spec.ts: an accepted drop always starts the move, and the
+			// row leaves only once that write settles on the account-wide lease, where a re-dispatch would
+			// only queue a second move behind the first.
+			await html5DragMove(page, { selector: TREE_ROW_SELECTOR, text: draggedName }, { selector: TREE_ROW_SELECTOR, text: targetName })
+			await expect(options).toHaveCount(1, { timeout: LIVE_WRITE_TIMEOUT_MS })
 
 			await expect(listbox.getByRole("option", { name: targetName })).toBeVisible()
 			await expect(listbox.getByRole("option", { name: draggedName })).toHaveCount(0)

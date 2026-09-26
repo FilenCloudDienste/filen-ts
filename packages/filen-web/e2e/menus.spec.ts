@@ -114,9 +114,6 @@ test.describe("context menus", () => {
 
 		try {
 			const { listbox } = await enterScratchDirectory(page, scratchName)
-			// The route the reload below has to land back on — everything from here to the /trash hop
-			// stays inside this listing.
-			const scratchUrl = page.url()
 
 			await createDirectoryViaDialog(page, dirName, listbox)
 
@@ -251,28 +248,19 @@ test.describe("context menus", () => {
 				.replace("{{failed}}", "1")
 			await expect(page.locator("[data-sonner-toast]").filter({ hasText: trashFailureToast })).toHaveCount(0, { timeout: 5_000 })
 
-			// Re-read from a fresh boot each attempt rather than trusting this page's own query state: the
-			// app refetches listings on window focus (queries/client.ts: staleTime 0 +
-			// refetchOnWindowFocus), and Playwright's multi-worker automation shifts OS window focus across
-			// concurrently-running pages — a refetch that raced this trash restores the pre-trash rows on
-			// top of the patch trashItems already made, and nothing refetches again on its own afterwards.
-			// Only a reload corrects that, which is the same mechanism drive-actions.spec.ts guards with a
-			// reload before its own final cleanup assertion.
-			await expect(async () => {
-				await page.reload()
-				// The reload stays on the deep route, so the row assertion is about THIS listing rather
-				// than whatever the app would otherwise have fallen back to.
-				await expect(page).toHaveURL(scratchUrl)
-				await waitForListingSettled(page, BOOT_SETTLE_TIMEOUT_MS)
-				await expect(dirRow).toHaveCount(0)
-			}).toPass({ timeout: LIVE_WRITE_TIMEOUT_MS })
+			// On the live page: trashItems patches the row out only after the write succeeded, and a refetch
+			// already in flight replays that patch (queries/drive.ts's patchListing). A reload proved less, not
+			// more — the persisted snapshot it restores holds only successful reads, never patches, so the
+			// pre-create listing it rendered could pass on its own — and unloading with the trash's lease
+			// release in flight orphaned the lease. The /trash leg below is the server-side proof.
+			await expect(dirRow).toHaveCount(0)
 
-			// Retried until the URL proves the route changed, then the trash-only Empty-trash trigger is
-			// required before anything else is touched, so a nav click that never committed (leaving the
-			// /drive listing mounted, whose toolbar renders the same controls) can never pass.
+			// Retried until the route commits, then the trash-only Empty-trash trigger is required before
+			// anything else is touched. It renders once the cold listTrash has landed non-empty, and a trash
+			// holding every recent run's debris is slow to read — hence the boot budget.
 			await clickSidebarLink(page, "Trash", /\/trash$/)
 			const trashListing = await waitForListingSettled(page)
-			await expect(page.getByRole("button", { name: "Empty trash", exact: true })).toBeVisible()
+			await expect(page.getByRole("button", { name: "Empty trash", exact: true })).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
 
 			// /trash's filter box is a purely LOCAL name filter — directoryListing.tsx routes every
 			// non-"drive" variant to it — applied before virtualization, so it collapses this shared

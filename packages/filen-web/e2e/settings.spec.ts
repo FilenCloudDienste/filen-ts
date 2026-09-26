@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs"
 import { test, expect } from "./fixtures"
-import { gotoSettings } from "./helpers/settings"
+import { gotoSettings, waitForAccountLoaded } from "./helpers/settings"
 import { BOOT_SETTLE_TIMEOUT_MS, LIVE_WRITE_TIMEOUT_MS } from "./helpers/listing"
 import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
@@ -40,6 +40,7 @@ test.describe("settings", () => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		await gotoSettings(page)
+		await waitForAccountLoaded(page)
 
 		// Each pattern scoped to the card that owns it, never the whole page: an unscoped email regex
 		// matches any address the shell happens to render, and an unscoped quota regex any other "… of …
@@ -59,6 +60,8 @@ test.describe("settings", () => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		await gotoSettings(page)
+		// The Security page gates on the same account read, so it renders from the settled cache.
+		await waitForAccountLoaded(page)
 
 		await page.getByRole("link", { name: "Security", exact: true }).click()
 		await page.waitForURL(/\/settings\/security$/)
@@ -125,6 +128,7 @@ test.describe("settings", () => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		await gotoSettings(page)
+		await waitForAccountLoaded(page)
 
 		await expect(page.getByText("Delete all versioned files", { exact: true })).toBeVisible()
 		await page.getByRole("button", { name: "Delete versioned files", exact: true }).click()
@@ -258,6 +262,7 @@ test.describe("settings", () => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		await gotoSettings(page)
+		await waitForAccountLoaded(page)
 
 		// The write budget, not a UI one: the export is assembled from a live getGdprInfo round trip
 		// against the shared account before a byte is offered to the browser.

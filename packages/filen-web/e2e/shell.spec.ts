@@ -1,7 +1,9 @@
 import { test, expect } from "@playwright/test"
+import { BOOT_SETTLE_TIMEOUT_MS } from "./helpers/listing"
 
 // SDK-free: asserts the shell design system + typed i18n catalog render on the pre-auth sign-in
-// surface under the hardened preview CSP, with no CSP violations reaching the console.
+// surface under the hardened preview CSP, with no CSP violations reaching the console. The sign-in and
+// 404 pages render only once the SDK has booted, so each test's first wait carries the boot budget.
 test.describe("shell", { tag: "@no-sdk" }, () => {
 	test("the sign-in shell renders localized content with no CSP violations", async ({ page }) => {
 		const consoleErrors: string[] = []
@@ -33,7 +35,7 @@ test.describe("shell", { tag: "@no-sdk" }, () => {
 
 		// Catalog strings resolve (no raw keys) across the sign-in card — the real login form (not the
 		// pre-auth placeholder this test originally shipped against).
-		await expect(page.getByText("Sign in to Filen")).toBeVisible()
+		await expect(page.getByText("Sign in to Filen")).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
 		await expect(page.getByText("Your end-to-end encrypted drive, notes and chats.")).toBeVisible()
 		await expect(page.getByText("Email", { exact: true })).toBeVisible()
 		await expect(page.getByText("Password", { exact: true })).toBeVisible()
@@ -49,7 +51,7 @@ test.describe("shell", { tag: "@no-sdk" }, () => {
 		// fallback in index.html — a unit test cannot make that claim.
 		await page.goto("/")
 
-		await expect(page.getByText("Sign in to Filen")).toBeVisible()
+		await expect(page.getByText("Sign in to Filen")).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
 		await expect(page).toHaveTitle("Sign in · Filen")
 	})
 
@@ -73,7 +75,7 @@ test.describe("shell", { tag: "@no-sdk" }, () => {
 	test("an unknown root URL renders the 404 page", async ({ page }) => {
 		await page.goto("/definitely-not-a-route")
 
-		await expect(page.getByText("Page not found")).toBeVisible()
+		await expect(page.getByText("Page not found")).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
 		await expect(page.getByRole("link", { name: "Go to Filen" })).toBeVisible()
 		await expect(page).toHaveTitle("Page not found · Filen")
 	})
@@ -84,7 +86,7 @@ test.describe("shell", { tag: "@no-sdk" }, () => {
 		// /login is chosen because it is a nested not-found URL reachable without a session.
 		await page.goto("/login/bogus")
 
-		await expect(page.getByText("Page not found")).toBeVisible()
+		await expect(page.getByText("Page not found")).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
 		await expect(page.getByRole("link", { name: "Go to Filen" })).toBeVisible()
 		await expect(page).toHaveTitle("Page not found · Filen")
 	})
@@ -98,7 +100,7 @@ test.describe("shell", { tag: "@no-sdk" }, () => {
 
 		const submit = page.getByRole("button", { name: "Sign in", exact: true })
 
-		await expect(submit).toBeVisible()
+		await expect(submit).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
 
 		// Polled, not read once: the stylesheet the reduce rule lives in is applied on first paint, and a
 		// computed read taken before it lands returns the un-reduced default. transition-all's un-reduced

@@ -1,5 +1,6 @@
 import type { Page } from "@playwright/test"
 import { test, expect } from "@playwright/test"
+import { BOOT_SETTLE_TIMEOUT_MS } from "./helpers/listing"
 
 // SDK-free: completePasswordReset() is never called (a real call would hit the live, rate-limited
 // API with a made-up token — out of budget for this suite; see auth.spec's login-budget comment).
@@ -11,9 +12,10 @@ const RESET_TOKEN = "e2e-fake-reset-token"
 const VALID_PASSWORD = "Abcdef@ghi"
 const TYPED_CONFIRM_PHRASE = "DELETE ALL MY DATA"
 
+// First render follows a cold boot (the route waits for the SDK), hence the boot budget.
 async function gotoReset(page: Page): Promise<void> {
 	await page.goto(`/reset/${RESET_TOKEN}`)
-	await expect(page.getByText("Reset your password")).toBeVisible()
+	await expect(page.getByText("Reset your password")).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
 }
 
 async function fillValidFields(page: Page): Promise<void> {

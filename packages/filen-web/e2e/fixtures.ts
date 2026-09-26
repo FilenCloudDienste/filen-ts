@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
-import { test as base, expect, type Page, type Request } from "@playwright/test"
+import { test as base, expect, type BrowserContext, type Page, type Request } from "@playwright/test"
 
 // The session blob is secret-equivalent and lives ONLY here (gitignored, mode 0600) and in the
 // sessionStorage seed — it is never typed into a page, so it cannot appear in screenshots or DOM
@@ -76,9 +76,29 @@ const LEASE_RELEASE_POLL_MS = 100
 // ours to release), so they stop counting and are named in the warning instead.
 const LEASE_ACQUIRE_ANSWER_MS = 5_000
 
+interface LeaseTracker {
+	waitForReleases: () => Promise<void>
+}
+
+// Every tracker by page, so closeTrackedPage can find the one the fixture attached.
+const leaseTrackers = new WeakMap<Page, LeaseTracker>()
+
+// Closes a page a spec opened itself only once its leases are released: closing it with a release in
+// flight orphans the lease, and the next write anywhere on the account waits ~70s for it to age out.
+export async function closeTrackedPage(page: Page): Promise<void> {
+	await leaseTrackers.get(page)?.waitForReleases()
+	await page.close()
+}
+
+// For a spec about to reload or navigate away right after a write: the SDK releases the lease
+// fire-and-forget, and unloading the page with that release in flight orphans it the same way.
+export async function settleLeases(page: Page): Promise<void> {
+	await leaseTrackers.get(page)?.waitForReleases()
+}
+
 // Watches the write leases a page takes and hands back a bounded wait for their releases. The
 // listeners attach on call, so a lease taken before that is invisible to it.
-export function trackLeaseReleases(page: Page): { waitForReleases: () => Promise<void> } {
+export function trackLeaseReleases(page: Page): LeaseTracker {
 	// uuid -> resource for every lease acquired and not released again. The SDK mints a uuid per lease,
 	// not per page, and its writes serialise on the lock anyway, so this holds one entry at a time.
 	const heldLeases = new Map<string, string>()
@@ -169,7 +189,7 @@ export function trackLeaseReleases(page: Page): { waitForReleases: () => Promise
 		pendingReleases.delete(request)
 	})
 
-	return {
+	const tracker: LeaseTracker = {
 		// Hold the context open until the server has answered the release. Killing it with one still in
 		// flight leaves the lease to age out on its own, and the next test's first write waits that out:
 		// measured at 74,683ms against 544ms, and one such orphan cost a later create 49s even after the
@@ -200,6 +220,71 @@ export function trackLeaseReleases(page: Page): { waitForReleases: () => Promise
 			}
 		}
 	}
+
+	leaseTrackers.set(page, tracker)
+
+	return tracker
+}
+
+// What a failed test's page did, attached to its report: console errors (dedicated workers' included),
+// uncaught page errors, failed or >= 400 requests and the lock timeline, each with its offset from the
+// test's start. Method and path only, never headers, query strings or bodies. Collected on every test but
+// attached only on failure, so a green run pays for nothing but the listeners.
+function collectDiagnostics(context: BrowserContext): () => string {
+	const startedAt = Date.now()
+	const lines: string[] = []
+	const log = (line: string) => {
+		lines.push(`+${String(Date.now() - startedAt).padStart(6)}ms ${line}`)
+	}
+	const path = (url: string) => {
+		try {
+			return new URL(url).pathname
+		} catch {
+			return "?"
+		}
+	}
+	const watch = (page: Page) => {
+		const tab = `tab${String(context.pages().indexOf(page))}`
+
+		page.on("console", message => {
+			if (message.type() === "error" || message.type() === "warning") {
+				log(`${tab} console.${message.type()}: ${message.text().slice(0, 500)}`)
+			}
+		})
+		page.on("pageerror", error => {
+			log(`${tab} pageerror: ${error.message.slice(0, 500)}`)
+		})
+		page.on("requestfailed", request => {
+			log(`${tab} request failed ${request.method()} ${path(request.url())}: ${request.failure()?.errorText ?? "?"}`)
+		})
+		page.on("request", request => {
+			try {
+				if (path(request.url()).endsWith(LOCK_PATH)) {
+					const body = request.postDataJSON() as LockRequestBody | null
+
+					log(`${tab} lock ${String(body?.type)} ${String(body?.resource)} ${String(body?.uuid)}`)
+				}
+			} catch {
+				// A closing page's request can no longer be read; the timeline just loses that line.
+			}
+		})
+		page.on("response", response => {
+			if (response.status() >= 400) {
+				log(`${tab} ${String(response.status())} ${response.request().method()} ${path(response.url())}`)
+			}
+		})
+		page.on("close", () => {
+			log(`${tab} closed`)
+		})
+	}
+
+	for (const page of context.pages()) {
+		watch(page)
+	}
+
+	context.on("page", watch)
+
+	return () => lines.join("\n")
 }
 
 // Opt-in only: reproduces CI's slower runners locally by slowing every Chromium renderer in the
@@ -211,7 +296,19 @@ const CPU_THROTTLE_RATE = Number(process.env["E2E_CPU_THROTTLE"] ?? "1")
 // init script; the app's own e2e hook moves it into the worker + kv and re-runs the route guards).
 // Skips cleanly when no session was minted (no credentials), so the SDK-free subset still runs for
 // contributors without credentials.
-export const test = base.extend<{ injectedSession: string }>({
+export const test = base.extend<{ injectedSession: string; failureDiagnostics: undefined }>({
+	failureDiagnostics: [
+		async ({ context }, use, testInfo) => {
+			const report = collectDiagnostics(context)
+
+			await use(undefined)
+
+			if (testInfo.status !== testInfo.expectedStatus) {
+				await testInfo.attach("diagnostics", { body: report() || "(nothing recorded)", contentType: "text/plain" })
+			}
+		},
+		{ auto: true }
+	],
 	// CDP is chromium-only, so firefox/webkit run at full speed whatever the variable says.
 	page: async ({ page, context, browserName }, use) => {
 		if (browserName === "chromium" && CPU_THROTTLE_RATE > 1) {
@@ -233,7 +330,7 @@ export const test = base.extend<{ injectedSession: string }>({
 
 		await use(page)
 	},
-	injectedSession: async ({ page }, use) => {
+	injectedSession: async ({ page, context }, use) => {
 		if (!existsSync(SESSION_FILE)) {
 			test.skip(true, "no injected session (e2e credentials not configured)")
 
@@ -249,11 +346,23 @@ export const test = base.extend<{ injectedSession: string }>({
 			[SESSION_SLOT, session] as const
 		)
 
-		const leases = trackLeaseReleases(page)
+		// Second pages a spec opens itself take leases too, and a spec closing one mid-release orphans it
+		// the same way a closed context would (closeTrackedPage avoids that).
+		trackLeaseReleases(page)
+		context.on("page", trackLeaseReleases)
 
 		await use(session)
 
-		await leases.waitForReleases()
+		await Promise.all(
+			context
+				.pages()
+				.filter(open => !open.isClosed())
+				.flatMap(open => {
+					const tracker = leaseTrackers.get(open)
+
+					return tracker === undefined ? [] : [tracker.waitForReleases()]
+				})
+		)
 	}
 })
 

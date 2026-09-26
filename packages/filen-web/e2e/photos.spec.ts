@@ -1,5 +1,6 @@
+import type { Page } from "@playwright/test"
 import { test, expect } from "./fixtures"
-import { bootTo, enterScratchDirectory, trashScratchDirectory, LIVE_WRITE_TIMEOUT_MS } from "./helpers/listing"
+import { bootTo, enterScratchDirectory, trashScratchDirectory, BOOT_SETTLE_TIMEOUT_MS, LIVE_WRITE_TIMEOUT_MS } from "./helpers/listing"
 import { PNG_BYTES } from "./helpers/fixtureBytes"
 import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
@@ -20,6 +21,17 @@ const MP4_BYTES = Buffer.from(
 	"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",
 	"base64"
 )
+
+// The rail's Photos entry, retried until the URL commits — a click that silently fails to commit under
+// suite load leaves every later step on the listing the spec believes it has left (the same reason
+// helpers/listing.ts's openTransfers retries). Callers then wait on a landmark of the photos screen
+// itself, since the URL flips before React commits the route.
+async function openPhotos(page: Page): Promise<void> {
+	await expect(async () => {
+		await page.getByRole("link", { name: "Photos", exact: true }).first().click()
+		await expect(page).toHaveURL(/\/photos$/, { timeout: 5_000 })
+	}).toPass({ timeout: 30_000 })
+}
 
 test("photos: root pick over a mixed upload, media-only grid, viewer pager + in-overlay favorite reflecting back without a reload, change-directory, and root-gone reset", async ({
 	page,
@@ -53,13 +65,13 @@ test("photos: root pick over a mixed upload, media-only grid, viewer pager + in-
 				{ name: nameDoc, mimeType: "text/plain", buffer: Buffer.from("photos grid must never show this row") }
 			])
 
-		await expect(driveListbox.getByRole("option", { name: nameImage })).toBeVisible({ timeout: 45_000 })
-		await expect(driveListbox.getByRole("option", { name: nameVideo })).toBeVisible({ timeout: 45_000 })
-		await expect(driveListbox.getByRole("option", { name: nameDoc })).toBeVisible({ timeout: 45_000 })
+		// Uploads, so each row lands on the account-wide write lease.
+		await expect(driveListbox.getByRole("option", { name: nameImage })).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
+		await expect(driveListbox.getByRole("option", { name: nameVideo })).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
+		await expect(driveListbox.getByRole("option", { name: nameDoc })).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 
 		// ---- navigate to /photos: unset hero (no root picked yet) ----
-		await page.getByRole("link", { name: "Photos", exact: true }).first().click()
-		await page.waitForURL(/\/photos$/)
+		await openPhotos(page)
 		await expect(page.getByText("Choose your photos directory")).toBeVisible()
 
 		// ---- choose the scratch directory as the photos root ----
@@ -220,10 +232,11 @@ test("photos: root pick over a mixed upload, media-only grid, viewer pager + in-
 		await trashScratchDirectory(page, scratchName)
 		trashed = true
 
-		await page.getByRole("link", { name: "Photos", exact: true }).first().click()
-		await page.waitForURL(/\/photos$/)
+		await openPhotos(page)
 
-		await expect(page.getByText("Your photos directory is no longer available.")).toBeVisible({ timeout: 20_000 })
+		// Raised once the photos listing's read of the trashed root fails — a network read, so the boot
+		// budget rather than a UI one.
+		await expect(page.getByText("Your photos directory is no longer available.")).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
 		await expect(page.getByText("Choose your photos directory")).toBeVisible()
 	} finally {
 		// The net-zero safety net for every path that threw before the in-body trash above — but ONLY

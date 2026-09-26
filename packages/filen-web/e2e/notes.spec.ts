@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs"
 import JSZip from "jszip"
 import type { Locator, Page } from "@playwright/test"
-import { test, expect } from "./fixtures"
+import { test, expect, closeTrackedPage, settleLeases } from "./fixtures"
 import { focusEditorSurface } from "./helpers/editor"
 import { waitForE2eHooks } from "./helpers/e2eHooks"
 import { BOOT_SETTLE_TIMEOUT_MS, bootTo, dismissStartupReminders, LIVE_WRITE_TIMEOUT_MS } from "./helpers/listing"
@@ -554,7 +554,7 @@ test.describe("notes", () => {
 // lives in the shared account), then opened for a render assertion. Net-zero teardown per test.
 async function createAndOpenTestNote(
 	page: Page,
-	noteType: "text" | "code" | "md" | "rich" | "checklist",
+	noteType: NoteTypeUnderTest,
 	content: string,
 	titlePrefix: string
 ): Promise<{ uuid: string; title: string }> {
@@ -576,16 +576,48 @@ async function createAndOpenTestNote(
 		title
 	})
 
-	await page.getByRole("link", { name: "Notes", exact: true }).click()
-	await page.waitForURL(/\/notes(\/|$)/)
-
-	// Clicked by href, not text: a row with no preview yet repeats its title in both the title span and
-	// the preview snippet, which makes a getByText(title) click strict-mode ambiguous.
-	await page.getByRole("searchbox", { name: "Search notes" }).fill(title)
-	await page.getByRole("complementary").locator(`a[href="/notes/${note.uuid}"]`).click()
-	await page.waitForURL(new RegExp(`/notes/${note.uuid}$`))
+	await openCreatedNote(page, noteType, title, note.uuid)
 
 	return { uuid: note.uuid, title }
+}
+
+type NoteTypeUnderTest = "text" | "code" | "md" | "rich" | "checklist"
+
+// The surface each type's editor mounts. A note opened in the wrong editor (a list row whose noteType
+// lags the server's) fails here, naming the type it expected, rather than as a missing heading or a
+// content mismatch several steps on.
+async function expectEditorFor(page: Page, noteType: NoteTypeUnderTest): Promise<void> {
+	const main = page.getByRole("main")
+	const mdSplit = main.getByRole("separator", { name: "Resize markdown preview", exact: true })
+	const surface = {
+		text: main.locator(".cm-content"),
+		code: main.locator(".cm-content"),
+		md: mdSplit,
+		rich: main.locator(".ql-editor"),
+		checklist: main.getByRole("textbox", { name: "Checklist item", exact: true }).first()
+	}[noteType]
+
+	// Boot budget: behind it are the list read and the content fetch, not UI responsiveness.
+	await expect(surface, `the ${noteType} editor did not open`).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
+
+	// CodeMirror also backs the md editor, whose split commits with it.
+	if (noteType === "text" || noteType === "code") {
+		await expect(mdSplit, `a ${noteType} note opened in the md editor`).toHaveCount(0)
+	}
+}
+
+// Everything after a create, which the caller's teardown cannot cover: it only learns the uuid from the
+// helper's return. A failure here deletes the note before rethrowing, since a leaked note is younger
+// than the cleanup sweep's age gate and the account caps at 10.
+async function openCreatedNote(page: Page, noteType: NoteTypeUnderTest, title: string, uuid: string): Promise<void> {
+	try {
+		await openNoteByTitle(page, title, uuid)
+		await expectEditorFor(page, noteType)
+	} catch (e) {
+		await deleteNoteQuietly(page, uuid)
+
+		throw e
+	}
 }
 
 // try/finally (not a trailing call) around every assertion below: the shared FREE account's note cap
@@ -711,15 +743,23 @@ test.describe("notes: read-only content renderers", () => {
 async function createEmptyNoteAndOpen(
 	page: Page,
 	noteType: "text" | "md" | "rich" | "checklist",
-	titlePrefix: string
+	titlePrefix: string,
+	options: { booted?: boolean } = {}
 ): Promise<{ uuid: string; title: string }> {
 	const title = `${titlePrefix} ${String(Date.now())}-${String(Math.floor(Math.random() * 100_000))}`
 
-	await bootTo(page)
+	// `booted`: the page sits on a shell booted a moment ago with its hooks installed (bootSecondPage),
+	// so another cold boot would buy nothing.
+	if (options.booted !== true) {
+		// A page reused by the same test may have just written; unloading it with a release in flight
+		// orphans the lease.
+		await settleLeases(page)
+		await bootTo(page)
 
-	// Same barrier as createAndOpenTestNote: an authed shell is no proof the hooks are installed on any
-	// load past a context's first.
-	await waitForE2eHooks(page)
+		// Same barrier as createAndOpenTestNote: an authed shell is no proof the hooks are installed on
+		// any load past a context's first.
+		await waitForE2eHooks(page)
+	}
 
 	// Empty content — the editor is what writes the content in these cases, not the hook.
 	const note = await page.evaluate(args => window.__filenE2E.createTestNoteWithContent(args.noteType, "", args.title), {
@@ -727,7 +767,7 @@ async function createEmptyNoteAndOpen(
 		title
 	})
 
-	await openNoteByTitle(page, title, note.uuid)
+	await openCreatedNote(page, noteType, title, note.uuid)
 
 	return { uuid: note.uuid, title }
 }
@@ -747,6 +787,9 @@ async function openNoteByTitle(page: Page, title: string, uuid: string): Promise
 // Kills the tab mid-edit and boots it again ON THE SAME NOTE — a reload keeps the /notes/<uuid> route,
 // so the editor reseeds itself and nothing has to re-find the row in the sidebar.
 async function reloadToNote(page: Page): Promise<void> {
+	// The note's create (and, on the drained paths, the edit's push) took write leases, released
+	// fire-and-forget; reloading over a release in flight orphans the lease.
+	await settleLeases(page)
 	await page.reload()
 	await dismissStartupReminders(page)
 	await expect(page.getByRole("navigation", { name: "Filen" })).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
@@ -755,6 +798,22 @@ async function reloadToNote(page: Page): Promise<void> {
 	// here reads a hook shortly after, and an evaluate that lands early rejects; inside an expect.poll
 	// that rejection aborts the poll on its first iteration rather than retrying.
 	await waitForE2eHooks(page)
+}
+
+// Shuts the tab's outbox gate: the push loop runs only while TanStack's onlineManager reads online, and
+// that moves only on the window online/offline EVENT (chats.spec's setAppOffline explains why the
+// context's own offline emulation cannot stand in). An edit typed after this stays on disk, so the 3s
+// debounce cannot race a reload or a kill to the server. The context itself stays online, and a fresh
+// boot seeds the manager from navigator.onLine, so the next boot's replay pushes.
+async function gateOutbox(page: Page): Promise<void> {
+	await page.evaluate(() => {
+		window.dispatchEvent(new Event("offline"))
+	})
+}
+
+// A fresh server read through the page's SDK, which the gate above does not stop.
+async function readServerContent(page: Page, uuid: string): Promise<string> {
+	return (await page.evaluate(id => window.__filenE2E.readTestNoteContentByUuid(id), uuid)) ?? ""
 }
 
 test.describe("notes: live editors", () => {
@@ -771,17 +830,21 @@ test.describe("notes: live editors", () => {
 		const main = page.getByRole("main")
 
 		try {
-			// Type distinctive content straight into the live CodeMirror surface.
+			// Type distinctive content straight into the live CodeMirror surface, with the outbox gated so
+			// the boot replay below is the only way it can reach the server.
 			const editor = main.locator(".cm-content")
 			await focusEditorSurface(editor)
+			await gateOutbox(page)
 			await page.keyboard.type(marker)
 
 			// Prove the immediate-persist landed on OPFS BEFORE the reload — the survives-window-close
-			// guarantee. This settles in tens of ms, far under the 3s debounce, so the reload below still
-			// beats any server push the debounce would kick.
+			// guarantee.
 			await expect
 				.poll(() => page.evaluate(id => window.__filenE2E.readPersistedInflightContent(id), uuid), { timeout: 10_000 })
 				.toBe(marker)
+
+			// ...and that nothing reached the server yet, so the push asserted after the reload is the replay's.
+			expect(await readServerContent(page, uuid)).toBe("")
 
 			// The tab dies mid-edit. On boot the outbox replays from OPFS; the editor seeds inflight-first.
 			await reloadToNote(page)
@@ -857,15 +920,17 @@ test.describe("notes: rich and checklist editors", () => {
 
 		try {
 			// Type bold content straight into the live Quill surface: focus the editor, toggle Bold, type.
+			// Gated first (gateOutbox), so the boot replay below is the only way the edit reaches the server.
 			const editor = main.locator(".ql-editor")
 			await focusEditorSurface(editor)
 			await main.getByRole("button", { name: "Bold", exact: true }).click()
+			await gateOutbox(page)
 			await page.keyboard.type(marker)
 
 			// The bold run is on screen before any reload — proves the toolbar drove quill.format.
 			await expect(main.locator("strong", { hasText: marker })).toBeVisible()
 
-			// The immediate-persist landed on OPFS (survives-window-close) well under the 3s debounce.
+			// The immediate-persist landed on OPFS (survives-window-close).
 			await expect
 				.poll(
 					async () => {
@@ -876,6 +941,9 @@ test.describe("notes: rich and checklist editors", () => {
 					{ timeout: 10_000 }
 				)
 				.toBe(true)
+
+			// Nothing reached the server yet, so the push asserted after the reload is the replay's.
+			expect(await readServerContent(page, uuid)).not.toContain(marker)
 
 			// The tab dies mid-edit; the outbox replays from OPFS on boot and the editor seeds inflight-first.
 			await reloadToNote(page)
@@ -947,6 +1015,8 @@ test.describe("notes: rich and checklist editors", () => {
 			// the WRONG element — a fill+Enter there splits nothing and the count below never reaches 2.
 			const rows = main.getByRole("textbox", { name: "Checklist item", exact: true })
 			await expect(rows.first()).toBeVisible()
+			// Gated first (gateOutbox), so the boot replay below is the only way the edit reaches the server.
+			await gateOutbox(page)
 			await rows.first().fill(first)
 			// Read the value back before pressing Enter: `fill` proves only that the DOM input was
 			// written, and the checklist editor's own model round trip lands after it — a remount inside
@@ -975,7 +1045,7 @@ test.describe("notes: rich and checklist editors", () => {
 			await toggles.nth(0).click()
 			await expect(toggles.nth(0)).toBeChecked()
 
-			// The serialized checklist landed on OPFS before the debounce — both items present.
+			// The serialized checklist landed on OPFS — both items present.
 			await expect
 				.poll(
 					async () => {
@@ -986,6 +1056,12 @@ test.describe("notes: rich and checklist editors", () => {
 					{ timeout: 10_000 }
 				)
 				.toBe(true)
+
+			// Nothing reached the server yet, so the rows back after the reload can only come from the
+			// replayed outbox.
+			const serverBeforeKill = await readServerContent(page, uuid)
+			expect(serverBeforeKill).not.toContain(first)
+			expect(serverBeforeKill).not.toContain(second)
 
 			// Kill the tab mid-edit; the outbox replays and the editor seeds inflight-first.
 			await reloadToNote(page)
@@ -1079,7 +1155,7 @@ test.describe("notes: realtime", () => {
 			// Each step guarded on its own: a throw here would replace the body's real error AND skip
 			// every statement after it — the two prefix sweeps below are precisely the backstop for the
 			// case where the uuid delete is the thing that failed.
-			await pageB.close()
+			await closeTrackedPage(pageB)
 			await deleteNoteQuietly(page, uuid)
 			// Backstop: sweep either title prefix in case a dead page skipped the uuid teardown.
 			await sweepNotesQuietly(page, "e2e realtime-meta")
@@ -1148,7 +1224,7 @@ test.describe("notes: realtime", () => {
 			await expect(main.getByText(initialContent, { exact: true })).toBeVisible()
 			await expect(main.getByText(remoteContent, { exact: true })).toHaveCount(0)
 		} finally {
-			await pageB.close()
+			await closeTrackedPage(pageB)
 			await deleteNoteQuietly(page, uuid)
 			await sweepNotesQuietly(page, "e2e realtime-content")
 		}
@@ -1310,8 +1386,9 @@ test.describe("notes: multi-tab outbox", () => {
 		let uuidZ: string | undefined
 
 		try {
-			// The leader's OWN edit drains through its push loop to the server.
-			const x = await createEmptyNoteAndOpen(leader, "text", "e2e mt-leader")
+			// The leader's OWN edit drains through its push loop to the server. bootSecondPage has just
+			// booted it, and a second boot would only hand the db lock back and forth for nothing.
+			const x = await createEmptyNoteAndOpen(leader, "text", "e2e mt-leader", { booted: true })
 
 			uuidX = x.uuid
 			await typeIntoTextEditor(leader, markerX)
@@ -1330,20 +1407,28 @@ test.describe("notes: multi-tab outbox", () => {
 
 			// ── FAILOVER ──────────────────────────────────────────────────────────
 			// A fresh note typed on the follower, forwarded to the leader, persisted on the leader's disk —
-			// then the leader is killed BEFORE its 3s debounce fires, so it never pushes Z itself.
+			// then the leader is killed without ever pushing Z itself. Its outbox is gated first (gateOutbox):
+			// a kill raced against the 3s debounce could lose to it, and then either pass on the leader's own
+			// push, proving no failover, or land mid-push and orphan the lease. Its earlier pushes' releases
+			// are settled first for the same reason.
 			const z = await createEmptyNoteAndOpen(page, "text", "e2e mt-failover")
 
 			uuidZ = z.uuid
+			await settleLeases(leader)
+			await gateOutbox(leader)
 			await typeIntoTextEditor(page, markerZ)
 
-			// Confirm the forward reached the LEADER's OPFS (proves cross-tab forward + immediate-persist) —
-			// this settles in tens of ms, far under the debounce, so the kill below still beats any push.
+			// Confirm the forward reached the LEADER's OPFS (proves cross-tab forward + immediate-persist).
 			await expect
 				.poll(() => leader.evaluate(id => window.__filenE2E.readPersistedInflightContent(id), z.uuid), { timeout: 15_000 })
 				.toBe(markerZ)
 
-			// Kill the leader inside the debounce window. The released db lock promotes the follower, which
-			// replays the persisted outbox and pushes Z with no user action — generous handoff + replay wait.
+			// Z is still empty on the server, so the push asserted below can only be the promoted follower's.
+			expect(await readServerContent(page, z.uuid)).toBe("")
+
+			// Kill the leader, raw: this is the crash under test. The released db lock promotes the follower,
+			// which replays the persisted outbox and pushes Z with no user action — generous handoff +
+			// replay wait.
 			await leader.close()
 			await expect
 				.poll(() => page.evaluate(id => window.__filenE2E.readTestNoteContentByUuid(id), z.uuid), { timeout: 60_000 })
@@ -1359,7 +1444,7 @@ test.describe("notes: multi-tab outbox", () => {
 			}
 
 			if (!leader.isClosed()) {
-				await leader.close()
+				await closeTrackedPage(leader)
 			}
 		}
 	})

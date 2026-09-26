@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test"
 import { test as setup, expect } from "../fixtures"
-import { dismissStartupReminders } from "../helpers/listing"
+import { BOOT_SETTLE_TIMEOUT_MS, dismissStartupReminders } from "../helpers/listing"
 import { waitForE2eHooks } from "../helpers/e2eHooks"
 import { FIXTURE_FILES } from "../helpers/fixtures"
 import {
@@ -185,12 +185,12 @@ setup("sweep notes, tags and chats matching a spec-minted debris prefix", async 
 	try {
 		await page.goto("/drive")
 
-		// The hooks issue authed SDK reads, which need the injected session actually resumed — the authed
-		// shell's nav landmark is the same readiness signal the notes specs themselves wait on before
-		// calling these hooks, and the blocking startup reminder has to be gone before that landmark is
-		// in the role tree at all (THE RULE, helpers/listing.ts).
+		// The hooks issue authed SDK reads, which need the injected session actually resumed: the authed
+		// shell's nav is the readiness signal, at the cold-boot budget (at the expect default a slow first
+		// boot skipped every notes-side sweep for the run, letting debris pile up against the 10-note cap).
+		// The blocking startup reminder has to be gone before that landmark is in the role tree at all.
 		await dismissStartupReminders(page)
-		await expect(page.getByRole("navigation", { name: "Filen" })).toBeVisible()
+		await expect(page.getByRole("navigation", { name: "Filen" })).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
 
 		await sweepPrefixes("note", NOTE_DEBRIS_TITLE_PREFIXES, prefix =>
 			page.evaluate(([p, minAgeMs]) => window.__filenE2E.sweepTestNotesByTitlePrefix(p, minAgeMs), [

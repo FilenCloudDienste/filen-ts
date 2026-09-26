@@ -1,5 +1,6 @@
 import type { Page, Route } from "@playwright/test"
 import { test, expect } from "@playwright/test"
+import { BOOT_SETTLE_TIMEOUT_MS } from "./helpers/listing"
 
 // SDK-free: register() itself is never called (a real call would create an account against the
 // rate-limited API — out of budget for this suite; see auth.spec's login-budget comment). Every
@@ -20,13 +21,14 @@ const BEST_PASSWORD = "Abcdef@ghijklmnop" // 17 chars, upper+lower+special
 // goto (the query fires on mount — refetchOnMount: "always" — so a route added afterwards would
 // miss it and leak a real request to the live endpoint), and the returned promise only resolves
 // once the app has actually made that request — proving the interception engaged rather than just
-// asserting a banner state that also holds before the query ever settles.
+// asserting a banner state that also holds before the query ever settles. Both waits span a cold boot
+// (the route renders, and so first queries, only once the SDK is ready), hence the boot budget.
 async function gotoRegister(page: Page, fulfillRegisterCheck: (route: Route) => Promise<void> | void): Promise<void> {
 	await page.route(REGISTER_CHECK_URL, fulfillRegisterCheck)
-	const registerCheckRequest = page.waitForRequest(req => req.url().includes(REGISTER_CHECK_PATH))
+	const registerCheckRequest = page.waitForRequest(req => req.url().includes(REGISTER_CHECK_PATH), { timeout: BOOT_SETTLE_TIMEOUT_MS })
 
 	await page.goto("/register")
-	await expect(page.getByText("Create your account")).toBeVisible()
+	await expect(page.getByText("Create your account")).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
 	await registerCheckRequest
 }
 
@@ -86,7 +88,30 @@ test.describe("register", { tag: "@no-sdk" }, () => {
 	})
 
 	test("shows nothing when registerCheck fails (collapsed failure, not a negative claim)", async ({ page }) => {
+		// A pending check renders nothing either, so absence proves nothing until the app has acted on the
+		// failure. The page marks when its own fetch settles. A zero-delay timer queued from a later task
+		// then runs after the one TanStack Query notifies observers on (notifyManager's default
+		// scheduler), and React renders that update before the notifying task ends.
+		await page.addInitScript(path => {
+			const original = window.fetch.bind(window)
+			const settle = () => {
+				document.documentElement.setAttribute("data-e2e-register-check", "settled")
+			}
+
+			window.fetch = (input, init) => {
+				const response = original(input, init)
+
+				if ((input instanceof Request ? input.url : input.toString()).includes(path)) {
+					void response.then(settle, settle)
+				}
+
+				return response
+			}
+		}, REGISTER_CHECK_PATH)
+
 		await gotoRegister(page, route => route.abort())
+		await expect(page.locator("html[data-e2e-register-check]")).toBeAttached()
+		await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 0)))
 
 		await expect(page.getByText("You are eligible for 10 GiB of free storage!")).toHaveCount(0)
 		await expect(page.getByText("You are not eligible", { exact: false })).toHaveCount(0)

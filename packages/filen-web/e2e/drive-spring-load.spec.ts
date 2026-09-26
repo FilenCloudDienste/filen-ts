@@ -81,14 +81,18 @@ test.describe("spring-loaded directories", () => {
 			await recordBlinks(page)
 			await page.mouse.move(from.x, from.y)
 			await page.mouse.down()
+
+			// Taken before the move that arms the target, so it can only precede the arming: the elapsed time
+			// then over-measures the rest and the lower bound below cannot fail on a slow runner.
+			const movedAt = Date.now()
+
 			await page.mouse.move(to.x, to.y, { steps: 10 })
 
 			// The highlight shows at once; nothing opens before the delay.
 			await expect(targetRow).toHaveClass(/ring-primary/)
-			const restedAt = Date.now()
 
 			await page.waitForURL(url => url.toString() !== scratchUrl, { timeout: SPRING_LOAD_DELAY_MS + 5_000 })
-			expect(Date.now() - restedAt).toBeGreaterThanOrEqual(SPRING_LOAD_DELAY_MS - 250)
+			expect(Date.now() - movedAt).toBeGreaterThanOrEqual(SPRING_LOAD_DELAY_MS)
 			await expect(page.getByRole("navigation", { name: "Breadcrumb" }).getByText(targetDirName, { exact: true })).toBeVisible()
 			expect(await recordedBlinks(page)).toEqual(["off", "on", "off", "on", null])
 
@@ -161,13 +165,17 @@ test.describe("spring-loaded directories", () => {
 			)
 
 			expect(dropAllowed).toBe(true)
-			await expect(listbox.getByRole("option", { name: targetDirName })).toHaveClass(/outline-dashed/)
+			// The upload overlay names the directory the drop will land in, and the row carries the upload ring.
+			await expect(page.getByText(`Drop to upload into ${targetDirName}`, { exact: true })).toBeVisible()
+			await expect(listbox.getByRole("option", { name: targetDirName })).toHaveClass(/ring-primary/)
 
 			await page.evaluate(() => {
 				const { row, dataTransfer } = (window as unknown as { __osDrop: { row: Element; dataTransfer: DataTransfer } }).__osDrop
 
 				row.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer }))
+				Reflect.deleteProperty(window, "__osDrop")
 			})
+			await expect(page.getByText(`Drop to upload into ${targetDirName}`, { exact: true })).toHaveCount(0)
 
 			// Nothing landed beside the directory; the file is inside it.
 			await expect(listbox.getByRole("option")).toHaveCount(1)
@@ -176,6 +184,17 @@ test.describe("spring-loaded directories", () => {
 			const nested = await waitForListingSettled(page, LIVE_WRITE_TIMEOUT_MS)
 			await expect(nested.listbox.getByRole("option", { name: fileName })).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 		} finally {
+			// A failure between the dragenter and the drop leaves the synthetic drag hanging: the upload
+			// overlay stays up and the resting drag springs the directory open under the teardown. End it.
+			await page
+				.evaluate(() => {
+					const pending = (window as unknown as { __osDrop?: { row: Element; dataTransfer: DataTransfer } }).__osDrop
+
+					pending?.row.dispatchEvent(
+						new DragEvent("dragleave", { bubbles: true, cancelable: true, dataTransfer: pending.dataTransfer })
+					)
+				})
+				.catch(() => undefined)
 			await trashScratchDirectory(page, scratchName)
 		}
 	})

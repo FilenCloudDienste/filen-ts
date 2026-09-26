@@ -1,8 +1,8 @@
 import { existsSync, readFileSync } from "node:fs"
-import type { BrowserContext, Page } from "@playwright/test"
-import { test, expect, SESSION_FILE, trackLeaseReleases } from "./fixtures"
+import type { BrowserContext, Locator, Page } from "@playwright/test"
+import { test, expect, SESSION_FILE, settleLeases, trackLeaseReleases } from "./fixtures"
 import { waitForE2eHooks } from "./helpers/e2eHooks"
-import { bootTo } from "./helpers/listing"
+import { bootTo, BOOT_SETTLE_TIMEOUT_MS, LIVE_WRITE_TIMEOUT_MS } from "./helpers/listing"
 import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
 // Chats shell smoke + conversation-action affordances + the send-outbox proof + link/media embeds. The rail
@@ -26,7 +26,14 @@ import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 // The setup test retries the create on a SERVER REFUSAL only, on an envelope rather than a fixed sleep —
 // the limiter's window is longer than any backoff worth hardcoding. If it stays refused,
 // `sharedChatUuid` stays undefined and every dependent test below cascades a skip carrying the server's
-// own reason; the shell/dialog tests above are unaffected (they never touch a real conversation).
+// own reason, raised as a report annotation and a CI warning so a skipped lane never passes for a green
+// one; the shell/dialog tests above are unaffected (they never touch a real conversation). A create that
+// never reached the server at all is the harness broken, not the limiter, and FAILS the setup instead.
+//
+// Every message a test acts on is picked as the LAST copy of its unique text, and every count is taken
+// against the server's: `sendChatMessage` carries no idempotency id, so an answer lost in transit is
+// retried by the SDK into a second row with the same text, whose socket echo the app appends ~3s after
+// the commit.
 //
 // Chromium-only: the ChatsSidebar fires an authenticated read (listChats) on mount — the same cross-origin
 // worker SDK path that hangs on Playwright-firefox (helpers/firefox.ts).
@@ -237,11 +244,45 @@ async function readServerChatTexts(page: Page, uuid: string): Promise<string[]> 
 	)
 }
 
-async function sendViaComposer(page: Page, text: string): Promise<void> {
+// Enter is only pressed once the Send button is enabled, which takes the draft committed AND the sender
+// known: the sender comes from the account query, and before it loads the composer cannot send, so an
+// earlier Enter is dropped with the text left in place. The composer clearing then proves the send was
+// taken. `beforeEnter` runs between the two, for a spec that needs the send itself to happen offline.
+async function sendViaComposer(page: Page, text: string, beforeEnter?: () => Promise<void>): Promise<void> {
 	const input = page.getByRole("textbox", { name: "Message" })
 	await input.click()
 	await input.fill(text)
+	await expect(page.getByRole("button", { name: "Send message", exact: true })).toBeEnabled({ timeout: BOOT_SETTLE_TIMEOUT_MS })
+	await beforeEnter?.()
 	await input.press("Enter")
+	await expect(input).toHaveValue("")
+}
+
+// Sized off UI responsiveness, not the lease: no write is in flight while the menu is re-driven.
+const MESSAGE_MENU_RETRY_TIMEOUT_MS = 40_000
+
+// Opens `target`'s context menu and clicks `item`, re-opening the menu when a re-render drops it
+// mid-sequence (the committed copy replacing the optimistic row, a late echo re-measuring the
+// virtualized thread). The item click is each attempt's LAST step, so a failed attempt never got it
+// through and re-driving cannot issue an item's write twice (helpers/listing.ts's
+// selectAndConfirmRowAction guards the same thing for the drive).
+async function clickMessageMenuItem(page: Page, target: Locator, item: string): Promise<void> {
+	let retrying = false
+
+	await expect(async () => {
+		if (retrying) {
+			// A menu the failed attempt left open would take the right-click below as an outside press.
+			await page.keyboard.press("Escape")
+		}
+
+		retrying = true
+		await target.click({ button: "right" })
+
+		const menuItem = page.getByRole("menuitem", { name: item, exact: true })
+
+		await expect(menuItem).toBeVisible()
+		await menuItem.click()
+	}).toPass({ timeout: MESSAGE_MENU_RETRY_TIMEOUT_MS })
 }
 
 test.describe("chats", () => {
@@ -321,7 +362,7 @@ test.describe("chats", () => {
 
 	// SETUP — the one and only createChat this file ever calls. Every test below reuses its uuid; none of
 	// them deletes it (the afterAll hook at the end of this describe block is the one delete).
-	test("setup: creates the one shared self-chat every test below reuses", async ({ page, injectedSession, browserName }) => {
+	test("setup: creates the one shared self-chat every test below reuses", async ({ page, injectedSession, browserName }, testInfo) => {
 		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 		expect(injectedSession.length).toBeGreaterThan(0)
 
@@ -330,6 +371,7 @@ test.describe("chats", () => {
 		appOrigin = new URL(page.url()).origin
 
 		let lastRefusal: CreateRefusal | undefined
+		let envelopeError: unknown
 
 		// Retried on the server's own schedule, not on a single hardcoded sleep: conversations/create is
 		// a hot, long-window limiter, and a 5s backoff was never more than a guess at it. A refusal that
@@ -349,7 +391,7 @@ test.describe("chats", () => {
 
 			if (!outcome.error.refused) {
 				// The create never reached the server (no hooks on this page, or a dead context), so
-				// another attempt answers the same. Ending the envelope here hands the skip below the
+				// another attempt answers the same. Ending the envelope here hands the failure below the
 				// real reason instead of burying it under a 90s timeout.
 				return
 			}
@@ -357,13 +399,30 @@ test.describe("chats", () => {
 			throw new Error(`conversations/create refused — ${describeRefusal(outcome.error)}`)
 		})
 			.toPass({ intervals: CHAT_CREATE_RETRY_INTERVALS_MS, timeout: CHAT_CREATE_RETRY_TIMEOUT_MS })
-			// The envelope expiring is a documented SKIP, not a failure: every test below cascades it.
-			.catch(() => undefined)
+			// Judged below, against the refusal the envelope last saw.
+			.catch((error: unknown) => {
+				envelopeError = error
+			})
 
-		test.skip(
-			sharedChatUuid === undefined,
-			`conversations/create never landed — last refusal: ${lastRefusal === undefined ? "none recorded" : describeRefusal(lastRefusal)}`
-		)
+		if (sharedChatUuid !== undefined) {
+			return
+		}
+
+		const reason = lastRefusal === undefined ? "none recorded" : describeRefusal(lastRefusal)
+
+		// No server refusal on record: the create never ran (no hooks, a dead context) or hung. That is
+		// the harness broken, and a skip would report the lane green with nothing under test.
+		if (lastRefusal?.refused !== true) {
+			throw new Error(`conversations/create got no server answer — ${reason}`, { cause: envelopeError })
+		}
+
+		// The limiter's refusal stays a skip (see the file header), but a skip reads as green, so it is
+		// raised in the report and, on CI, as a run-level warning.
+		const warning = `conversations/create refused for ${String(CHAT_CREATE_RETRY_TIMEOUT_MS / 1000)}s, every shared-chat test is skipped — ${reason}`
+
+		testInfo.annotations.push({ type: "warning", description: warning })
+		console.warn(`${process.env["CI"] ? "::warning::" : ""}chats-spec: ${warning}`)
+		test.skip(true, `conversations/create never landed — last refusal: ${reason}`)
 	})
 
 	// The send outbox's crown-jewel proof, against the shared self-chat. Drives the outbox transport through
@@ -427,8 +486,9 @@ test.describe("chats", () => {
 		// `online` event, and this is the only leg of the test that can prove it fires anything.
 		await setAppOffline(page, false)
 
+		// The send is a live write: a lost answer the SDK retries can take it past any UI-sized budget.
 		await expect
-			.poll(() => page.evaluate(u => window.__filenE2E.readTestChatMessageTexts(u), uuid), { timeout: 30_000 })
+			.poll(() => page.evaluate(u => window.__filenE2E.readTestChatMessageTexts(u), uuid), { timeout: LIVE_WRITE_TIMEOUT_MS })
 			.toContain(text)
 	})
 
@@ -507,9 +567,9 @@ test.describe("chats", () => {
 		// through them, and the first is an expect.poll, which a rejecting evaluate aborts outright.
 		await waitForE2eHooks(page)
 
-		// Replay delivered it...
+		// Replay delivered it (a live write, hence the write budget)...
 		await expect
-			.poll(() => page.evaluate(u => window.__filenE2E.readTestChatMessageTexts(u), uuid), { timeout: 30_000 })
+			.poll(() => page.evaluate(u => window.__filenE2E.readTestChatMessageTexts(u), uuid), { timeout: LIVE_WRITE_TIMEOUT_MS })
 			.toContain(text)
 
 		// ...and the outbox DRAINED it: the durable queue no longer holds this body, so the next boot
@@ -555,40 +615,42 @@ test.describe("chats", () => {
 		// getByText would resolve to two nodes and trip Playwright's strict mode.
 		const thread = page.getByRole("main")
 
+		const sending = thread.getByText("Sending…", { exact: true })
+
 		await sendViaComposer(page, text)
 
 		// Optimistic bubble is painted immediately...
-		await expect(thread.getByText(text, { exact: true })).toBeVisible()
-		// ...and the outbox commits it (fresh server read) — the "Sending…" marker clears on commit.
+		await expect(thread.getByText(text, { exact: true }).first()).toBeVisible()
+		// ...and the outbox commits it: the "Sending…" marker clears on commit, at the write budget since
+		// the commit IS the live write, and a fresh server read confirms it landed. The DOM wait goes
+		// first because it costs no request, and once it has cleared the read answers on its first poll.
+		await expect(sending).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
 		await expect
 			.poll(() => page.evaluate(u => window.__filenE2E.readTestChatMessageTexts(u), uuid), { timeout: 30_000 })
 			.toContain(text)
-		await expect(thread.getByText("Sending…", { exact: true })).toHaveCount(0)
 
 		// Reply via the message context menu → the reply chip → a reply that renders its reply-to line.
-		await thread.getByText(text, { exact: true }).click({ button: "right" })
-		await page.getByRole("menuitem", { name: "Reply", exact: true }).click()
+		await clickMessageMenuItem(page, thread.getByText(text, { exact: true }).last(), "Reply")
 
 		const replyText = uniqueMessage("ui-reply")
 		await sendViaComposer(page, replyText)
 
-		await expect(thread.getByText(replyText, { exact: true })).toBeVisible()
+		await expect(thread.getByText(replyText, { exact: true }).first()).toBeVisible()
 		await expect(thread.getByText(/Replying to/).first()).toBeVisible()
+		await expect(sending).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
 		await expect
 			.poll(() => page.evaluate(u => window.__filenE2E.readTestChatMessageTexts(u), uuid), { timeout: 30_000 })
 			.toContain(replyText)
 
 		// Edit that reply via the menu → the edited body + the (edited) marker.
-		await expect(thread.getByText("Sending…", { exact: true })).toHaveCount(0)
-		await thread.getByText(replyText, { exact: true }).click({ button: "right" })
-		await page.getByRole("menuitem", { name: "Edit", exact: true }).click()
+		await clickMessageMenuItem(page, thread.getByText(replyText, { exact: true }).last(), "Edit")
 
 		const editedText = uniqueMessage("ui-edited")
 		const input = page.getByRole("textbox", { name: "Message" })
 		await input.fill(editedText)
 		await input.press("Enter")
 
-		await expect(thread.getByText(editedText, { exact: true })).toBeVisible({ timeout: 30_000 })
+		await expect(thread.getByText(editedText, { exact: true })).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 		await expect(thread.getByText("(edited)", { exact: true }).first()).toBeVisible()
 	})
 
@@ -614,8 +676,9 @@ test.describe("chats", () => {
 		// Barrier before the network dies: the e2e hooks arrive via a fire-and-forget dynamic
 		// import, and a chunk request that is in flight when the page goes offline FAILS PERMANENTLY.
 		await waitForE2eHooks(page)
-		await setAppOffline(page, true)
-		await sendViaComposer(page, text)
+		// Typed online, sent offline: the composer needs the account loaded before it can send at all, and
+		// offline that read never completes on a fresh session.
+		await sendViaComposer(page, text, () => setAppOffline(page, true))
 
 		// Persisted to disk (OPFS) before any send — the survives-window-close guarantee, from a keystroke.
 		// Enveloped, not polled bare: setOffline can land while the shell is still settling a transition,
@@ -646,7 +709,7 @@ test.describe("chats", () => {
 		await waitForE2eHooks(page)
 
 		await expect
-			.poll(() => page.evaluate(u => window.__filenE2E.readTestChatMessageTexts(u), uuid), { timeout: 30_000 })
+			.poll(() => page.evaluate(u => window.__filenE2E.readTestChatMessageTexts(u), uuid), { timeout: LIVE_WRITE_TIMEOUT_MS })
 			.toContain(text)
 
 		// Delivered, then drained — same claim and same reason as the hook-driven kill-path above.
@@ -690,33 +753,57 @@ test.describe("chats", () => {
 		const linkUuid = crypto.randomUUID()
 		const embedUrl = `https://app.filen.io/#/d/${linkUuid}%23${"a".repeat(32)}`
 
+		// The plain link (MessageContent's own auto-link render) is always present regardless of embed
+		// resolution — this is what a failed/disabled embed degrades TO. The card degrades to the raw uuid
+		// (FilenLinkCard's own fallback) + its "Filen file" subtitle. All three can match once per server
+		// copy of this message (see the file header), hence the counts below rather than single matches.
+		const plainLinks = thread.getByRole("link", { name: embedUrl })
+		const cards = thread.getByText(linkUuid, { exact: true })
+		const cardSubtitles = thread.getByText("Filen file", { exact: true })
+
 		await sendViaComposer(page, embedUrl)
 
-		// The plain link (MessageContent's own auto-link render) is always present regardless of embed
-		// resolution — this is what a failed/disabled embed degrades TO.
-		await expect(thread.getByRole("link", { name: embedUrl })).toBeVisible()
+		await expect(plainLinks.first()).toBeVisible()
 
-		// The card degrades to the raw uuid (FilenLinkCard's own fallback) + its "Filen file" subtitle —
-		// proves it rendered from URL PARTS, not a hung/blank state, without ever resolving a name.
-		await expect(thread.getByText(linkUuid, { exact: true })).toBeVisible({ timeout: 15_000 })
-		await expect(thread.getByText("Filen file", { exact: true })).toBeVisible()
+		// Proves the card rendered from URL PARTS, not a hung/blank state, without ever resolving a name.
+		await expect(cards.first()).toBeVisible({ timeout: 15_000 })
+		await expect(cardSubtitles.first()).toBeVisible()
+
+		// The menu's "Disable embed" entry is sender-only AND confirmed-only (messageMenu.logic.ts), so the
+		// commit has to land first — a live write, same gate and budget as the composer test's.
+		await expect(thread.getByText("Sending…", { exact: true })).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
+
+		let serverCopies = 0
 
 		await expect
-			.poll(() => page.evaluate(u => window.__filenE2E.readTestChatMessageTexts(u), uuid), { timeout: 30_000 })
-			.toContain(embedUrl)
+			.poll(
+				async () => {
+					const texts = await page.evaluate(u => window.__filenE2E.readTestChatMessageTexts(u), uuid)
 
-		// The menu's "Disable embed" entry is sender-only AND confirmed-only (messageMenu.logic.ts) — wait
-		// for the UI's own reconciliation (not just the server read above) before opening the menu, same
-		// gate the composer test waits on before its own reply/edit menu actions.
-		await expect(thread.getByText("Sending…", { exact: true })).toHaveCount(0)
+					serverCopies = texts.filter(t => t === embedUrl).length
 
-		// Sender-only menu entry, confirm-free — collapses the card back to just the plain link.
-		await thread.getByText(linkUuid, { exact: true }).click({ button: "right" })
-		await page.getByRole("menuitem", { name: "Disable embed", exact: true }).click()
+					return serverCopies
+				},
+				{ timeout: 30_000 }
+			)
+			.toBeGreaterThan(0)
 
-		await expect(thread.getByText("Filen file", { exact: true })).toHaveCount(0)
-		await expect(thread.getByText(linkUuid, { exact: true })).toHaveCount(0)
-		await expect(thread.getByRole("link", { name: embedUrl })).toBeVisible()
+		if (serverCopies > 1) {
+			console.log(`chats-spec: the embed message landed ${String(serverCopies)} times (an SDK retry of a lost answer)`)
+		}
+
+		// A retried copy's row arrives on its socket echo, after the commit. Counting cards before the
+		// thread shows every copy would let that late row put a card back after the one below is gone.
+		await expect(plainLinks).toHaveCount(serverCopies, { timeout: 30_000 })
+		await expect(cards).toHaveCount(serverCopies)
+
+		// Sender-only menu entry, confirm-free — collapses its row's card back to just the plain link.
+		await clickMessageMenuItem(page, cards.last(), "Disable embed")
+
+		// Closes on the disableMessageEmbed round trip, a live write: the write budget.
+		await expect(cards).toHaveCount(serverCopies - 1, { timeout: LIVE_WRITE_TIMEOUT_MS })
+		await expect(cardSubtitles).toHaveCount(serverCopies - 1)
+		await expect(plainLinks).toHaveCount(serverCopies)
 	})
 
 	// Realtime receive (messageNew live-render + sidebar update + the typing indicator) needs a SECOND,
@@ -777,14 +864,15 @@ test.describe("chats", () => {
 		// conversation named for the prefix sweep — not an exception out of a hook, which Playwright
 		// reports as a failure of the whole project rather than of the cleanup.
 		let context: BrowserContext | undefined
+		let page: Page | undefined
 
 		try {
 			const { session } = JSON.parse(readFileSync(SESSION_FILE, "utf8")) as { session: string }
 
 			context = await browser.newContext({ baseURL: appOrigin })
-
-			const page = await context.newPage()
-			const leases = trackLeaseReleases(page)
+			page = await context.newPage()
+			// A hand-made context, so the fixture's own tracking never attached to it.
+			trackLeaseReleases(page)
 
 			await page.addInitScript(
 				([slot, blob]) => {
@@ -796,16 +884,19 @@ test.describe("chats", () => {
 			await bootTo(page)
 			await waitForE2eHooks(page)
 			await page.evaluate(u => window.__filenE2E.deleteTestChatByUuid(u), uuid)
-
-			// The delete takes an account-wide `chats-write` lease whose release the SDK fires and
-			// forgets; a context closed on top of one in flight leaves it to age out and the next run's
-			// create waits that out (the measurement is in e2e/fixtures.ts).
-			await leases.waitForReleases()
 		} catch (error) {
 			// Best-effort, same rationale as every other teardown in this suite — named rather than
 			// swallowed, because the prefix sweep that backstops it runs a whole suite later.
 			console.error(`chats-spec teardown: could not delete conversation ${uuid} — left for the prefix sweep`, error)
 		} finally {
+			// The delete takes an account-wide `chats-write` lease whose release the SDK fires and forgets;
+			// a context closed on top of one in flight leaves it to age out and the next run's create waits
+			// that out (the measurement is in e2e/fixtures.ts). Settled on the failure path too: a delete
+			// that threw may still have taken the lease.
+			if (page !== undefined) {
+				await settleLeases(page)
+			}
+
 			await context?.close()
 		}
 	})

@@ -1,11 +1,17 @@
 import { test, expect } from "./fixtures"
 import { waitForE2eHooks } from "./helpers/e2eHooks"
-import { bootTo } from "./helpers/listing"
+import { BOOT_SETTLE_TIMEOUT_MS, bootTo } from "./helpers/listing"
 import { SESSION_SLOT } from "@/e2e-hooks/sessionSlot"
 
 test.describe("storage", () => {
 	test("kv values persist across a reload", async ({ page }) => {
+		// The sign-in form renders only once boot is done, storage included, so it gates both kv calls:
+		// the hooks chunk alone arrives mid-boot, and reloading a document whose storage is still opening
+		// leaves the next one racing its teardown for the db lock and the OPFS pool.
+		const signIn = page.getByText("Sign in to Filen")
+
 		await page.goto("/")
+		await expect(signIn).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
 		await waitForE2eHooks(page)
 
 		await page.evaluate(() => window.__filenE2E.kvSet("e2e.storage.persist", "persisted-value"))
@@ -19,6 +25,8 @@ test.describe("storage", () => {
 			await page.reload()
 			await waitForE2eHooks(page)
 		}).toPass({ timeout: 60_000 })
+
+		await expect(signIn).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
 
 		const value = await page.evaluate(() => window.__filenE2E.kvGet("e2e.storage.persist"))
 		expect(value).toBe("persisted-value")

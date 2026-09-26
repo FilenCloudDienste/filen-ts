@@ -330,7 +330,8 @@ test("a trashed file opens its preview read-only: content renders, no save actio
 
 		// The URL commits before the trash listing does, so the trash-only Empty-trash trigger is required
 		// first: the fill below must reach the trash listing's local filter, not the outgoing drive search.
-		await expect(page.getByRole("button", { name: "Empty trash", exact: true })).toBeVisible()
+		// It renders once the cold listTrash has landed, which a debris-laden trash makes slow.
+		await expect(page.getByRole("button", { name: "Empty trash", exact: true })).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
 
 		// The shared account's trash accumulates every net-zero run's scratch items, and directories sort
 		// before files, so this just-trashed FILE mounts far below even a tall viewport's virtualization
