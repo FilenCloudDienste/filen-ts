@@ -115,6 +115,23 @@ export function withSortSelection(
 	return { ...prefs, global: next }
 }
 
+// Pure update back to the default order where the user is: in per-directory mode only this location's
+// entry goes (it then resolves to the default), otherwise the global order resets. A no-op for recents,
+// same as withSortSelection.
+export function withSortCleared(prefs: DrivePreferences<DriveSortBy>, location: DriveLocation): DrivePreferences<DriveSortBy> {
+	if (!isSortableVariant(location.variant)) {
+		return prefs
+	}
+
+	if (prefs.mode === "perDirectory") {
+		const key = getPerDirectoryKey(location)
+
+		return { ...prefs, perDirectory: Object.fromEntries(Object.entries(prefs.perDirectory).filter(([entryKey]) => entryKey !== key)) }
+	}
+
+	return { ...prefs, global: DEFAULT_SORT_PREFERENCES.global }
+}
+
 // Pure mode flip — the caller persists the result via setSortPreferences. Turning perDirectory OFF
 // deliberately leaves any existing perDirectory entries in place (only the "Reset sort" action below
 // wipes them) so re-enabling the toggle later restores what the user had before, rather than

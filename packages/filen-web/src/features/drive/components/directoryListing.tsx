@@ -7,6 +7,7 @@ import {
 	resolveEffectiveSort,
 	resolveEffectiveViewMode,
 	withSortSelection,
+	withSortCleared,
 	withViewModeSelection,
 	setSortPreferences,
 	setViewModePreferences,
@@ -57,6 +58,7 @@ import {
 } from "@/features/drive/components/directoryListing.logic"
 import { Breadcrumb } from "@/features/drive/components/breadcrumb"
 import { SortMenu } from "@/features/drive/components/sortMenu"
+import { ListColumnHeader } from "@/features/drive/components/listColumnHeader"
 import { ViewModeToggle } from "@/features/drive/components/viewModeToggle"
 import { NewDirectory } from "@/features/drive/components/newDirectory"
 import { EmptyTrashButton } from "@/features/drive/components/emptyTrashButton"
@@ -416,8 +418,11 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 		}
 	}, [hiddenUuidsKey])
 
-	async function applySortChange(next: DriveSortBy): Promise<void> {
-		await setSortPreferences(withSortSelection(sortPrefs, driveLocation, next))
+	// null (a column header's third click) clears this location back to the default order.
+	async function applySortChange(next: DriveSortBy | null): Promise<void> {
+		await setSortPreferences(
+			next === null ? withSortCleared(sortPrefs, driveLocation) : withSortSelection(sortPrefs, driveLocation, next)
+		)
 		await sortPrefsQuery.refetch()
 	}
 
@@ -672,22 +677,13 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 		return (
 			<>
 				{effectiveViewMode === "list" ? (
-					<div
-						aria-hidden="true"
-						className="flex h-8 shrink-0 items-center gap-3 border-b border-border/50 px-3 text-xs font-medium text-muted-foreground"
-					>
-						<span className="size-6 shrink-0" />
-						<span className="min-w-0 flex-1">{t("driveColumnName")}</span>
-						{/* Secondary columns step out by importance as the card narrows (size at sm, modified at lg);
-						    name keeps min-w-0 flex-1 and never yields. Modified waits for lg, not md: md is where
-						    the shell puts the sidebar back into the row, so the card is at its narrowest just above
-						    that breakpoint — the row's variant-only labels (driveRow.tsx) ride with modified for
-						    the same reason. */}
-						<span className="hidden w-20 shrink-0 text-right sm:block">{t("driveColumnSize")}</span>
-						<span className="hidden w-28 shrink-0 text-right lg:block">{t("driveColumnModified")}</span>
-						{/* Holds the row's trailing ⋯ trigger slot (driveRow.tsx), so size/modified sit over their values. */}
-						<span className="size-6 shrink-0 pointer-coarse:size-8" />
-					</div>
+					<ListColumnHeader
+						sort={effectiveSort}
+						onSortChange={next => {
+							void applySortChange(next)
+						}}
+						disabled={!isSortableVariant(variant)}
+					/>
 				) : null}
 				{withBackgroundMenu(
 					<div

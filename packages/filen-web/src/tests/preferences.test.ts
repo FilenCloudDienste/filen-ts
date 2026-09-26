@@ -35,6 +35,7 @@ import {
 	sortPreferencesSchema,
 	viewModePreferencesSchema,
 	withSortSelection,
+	withSortCleared,
 	withViewModeSelection,
 	withSortModeToggle,
 	withViewModeModeToggle,
@@ -250,6 +251,39 @@ describe("withSortSelection", () => {
 		const prefs: DrivePreferences<DriveSortBy> = { mode: "global", global: "nameAsc", perDirectory: {} }
 
 		expect(withSortSelection(prefs, location("recents"), "sizeDesc")).toBe(prefs)
+	})
+})
+
+describe("withSortCleared", () => {
+	it("resets the global order in global mode", () => {
+		const prefs: DrivePreferences<DriveSortBy> = { mode: "global", global: "sizeDesc", perDirectory: { "drive:abc": "typeAsc" } }
+
+		expect(withSortCleared(prefs, location("drive", "any"))).toEqual({
+			mode: "global",
+			global: DEFAULT_SORT_PREFERENCES.global,
+			perDirectory: { "drive:abc": "typeAsc" }
+		})
+	})
+
+	it("drops only this location's entry in perDirectory mode, which then resolves to the default", () => {
+		const here = location("drive", "dir-1")
+		const otherKey = getPerDirectoryKey(location("drive", "dir-2"))
+		const prefs: DrivePreferences<DriveSortBy> = {
+			mode: "perDirectory",
+			global: "sizeDesc",
+			perDirectory: { [getPerDirectoryKey(here)]: "nameDesc", [otherKey]: "sizeAsc" }
+		}
+		const next = withSortCleared(prefs, here)
+
+		expect(next).toEqual({ mode: "perDirectory", global: "sizeDesc", perDirectory: { [otherKey]: "sizeAsc" } })
+		expect(resolveEffectiveSort(next, here)).toBe(DEFAULT_SORT_PREFERENCES.global)
+		expect(prefs.perDirectory[getPerDirectoryKey(here)]).toBe("nameDesc")
+	})
+
+	it("is a no-op for recents", () => {
+		const prefs: DrivePreferences<DriveSortBy> = { mode: "global", global: "sizeDesc", perDirectory: {} }
+
+		expect(withSortCleared(prefs, location("recents"))).toBe(prefs)
 	})
 })
 

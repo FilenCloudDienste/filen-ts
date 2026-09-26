@@ -144,6 +144,10 @@ export const drive = {
 	driveColumnType: "Type",
 	/** Drive list view — last-modified column header */
 	driveColumnModified: "Modified",
+	/** Drive list view — screen-reader state after the sorted column header's label */
+	driveColumnSortedAscending: "sorted ascending",
+	/** Drive list view — screen-reader state after the sorted column header's label */
+	driveColumnSortedDescending: "sorted descending",
 
 	// ── New-directory dialog ─────────────────────────────────────────────────
 	/** New-directory dialog — title */

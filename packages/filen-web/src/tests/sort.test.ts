@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import type { UuidStr } from "@filen/sdk-rs"
 import { type DriveItem } from "@/features/drive/lib/item"
-import { sortDriveItems, type DriveSortBy } from "@/features/drive/lib/sort"
+import { nextColumnSort, sortDriveItems, type DriveSortBy } from "@/features/drive/lib/sort"
 
 // A fixed, validly-shaped stand-in for every item's `parent` — sort.ts never reads it.
 const PARENT_UUID = "22222222-2222-2222-2222-222222222222" as UuidStr
@@ -342,5 +342,20 @@ describe("sortDriveItems", () => {
 
 			expect(names(sortDriveItems(items, "bogus" as DriveSortBy))).toEqual(["a", "b"])
 		})
+	})
+})
+
+describe("nextColumnSort", () => {
+	it("starts another column ascending", () => {
+		expect(nextColumnSort("nameAsc", "size")).toBe("sizeAsc")
+		expect(nextColumnSort("sizeDesc", "lastModified")).toBe("lastModifiedAsc")
+		expect(nextColumnSort("uploadDateDesc", "name")).toBe("nameAsc")
+	})
+
+	it("flips the sorted column to descending, then clears it", () => {
+		expect(nextColumnSort("sizeAsc", "size")).toBe("sizeDesc")
+		expect(nextColumnSort("sizeDesc", "size")).toBeNull()
+		expect(nextColumnSort("nameAsc", "name")).toBe("nameDesc")
+		expect(nextColumnSort("nameDesc", "name")).toBeNull()
 	})
 })

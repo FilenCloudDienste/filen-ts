@@ -16,6 +16,45 @@ export type DriveSortBy =
 	| "lastModifiedAsc"
 	| "lastModifiedDesc"
 
+export type DriveSortField = "name" | "size" | "type" | "uploadDate" | "lastModified"
+export type DriveSortDirection = "asc" | "desc"
+
+// Exhaustive lookup tables instead of string-splicing "nameAsc" -> {name, asc}: a field added to
+// DriveSortBy without a matching entry here fails to compile (Record<DriveSortBy, …> / Record
+// <DriveSortField, Record<DriveSortDirection, …>> both require every key).
+export const DRIVE_SORT_PARTS: Record<DriveSortBy, { field: DriveSortField; direction: DriveSortDirection }> = {
+	nameAsc: { field: "name", direction: "asc" },
+	nameDesc: { field: "name", direction: "desc" },
+	sizeAsc: { field: "size", direction: "asc" },
+	sizeDesc: { field: "size", direction: "desc" },
+	typeAsc: { field: "type", direction: "asc" },
+	typeDesc: { field: "type", direction: "desc" },
+	uploadDateAsc: { field: "uploadDate", direction: "asc" },
+	uploadDateDesc: { field: "uploadDate", direction: "desc" },
+	lastModifiedAsc: { field: "lastModified", direction: "asc" },
+	lastModifiedDesc: { field: "lastModified", direction: "desc" }
+}
+
+export const DRIVE_SORT_FROM_PARTS: Record<DriveSortField, Record<DriveSortDirection, DriveSortBy>> = {
+	name: { asc: "nameAsc", desc: "nameDesc" },
+	size: { asc: "sizeAsc", desc: "sizeDesc" },
+	type: { asc: "typeAsc", desc: "typeDesc" },
+	uploadDate: { asc: "uploadDateAsc", desc: "uploadDateDesc" },
+	lastModified: { asc: "lastModifiedAsc", desc: "lastModifiedDesc" }
+}
+
+// A list column header click: another column starts ascending, the sorted one flips to descending, and a
+// descending one clears (null) back to the default order.
+export function nextColumnSort(current: DriveSortBy, field: DriveSortField): DriveSortBy | null {
+	const parts = DRIVE_SORT_PARTS[current]
+
+	if (parts.field !== field) {
+		return DRIVE_SORT_FROM_PARTS[field].asc
+	}
+
+	return parts.direction === "asc" ? DRIVE_SORT_FROM_PARTS[field].desc : null
+}
+
 // The index-array decorate/sort/permute engine (dirs-first partitioning, the lazy name tiebreak
 // inside the size branch, the bigint-through size handling, and the deterministic primary-key ->
 // name -> numeric-uuid -> uuid tiebreak chain guarding against unstable refetch order) lives in
