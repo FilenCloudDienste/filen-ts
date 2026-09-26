@@ -2,7 +2,7 @@ import { useTranslation } from "react-i18next"
 import { setHeicUploadConvertPreference } from "@/features/drive/lib/heicUpload"
 import { useHeicUploadConvertPreferenceQuery } from "@/features/drive/queries/drive"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
-import { PreferenceToggleRow } from "@/features/settings/components/preferenceToggleRow"
+import { PreferenceToggleRow } from "@/features/settings/components/settingRows"
 
 // Advanced → uploads. The HEIC/HEIF-to-JPG conversion applies to every upload path; uploads read the
 // stored preference themselves, so this card only writes it.

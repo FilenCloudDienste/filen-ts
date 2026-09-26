@@ -14,34 +14,8 @@ import {
 } from "@/features/drive/lib/preferences"
 import type { DriveSortBy } from "@/features/drive/lib/sort"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
-import { PreferenceToggleRow } from "@/features/settings/components/preferenceToggleRow"
-
-interface ResetRowProps {
-	title: string
-	description: string
-	onReset: () => void
-}
-
-function ResetRow({ title, description, onReset }: ResetRowProps) {
-	return (
-		<div className="flex items-center justify-between gap-4 py-2 last:pb-0">
-			<div className="flex flex-col gap-0.5">
-				<p className="text-sm font-medium">{title}</p>
-				<p className="text-sm text-muted-foreground">{description}</p>
-			</div>
-			<Button
-				type="button"
-				variant="outline"
-				size="sm"
-				onClick={onReset}
-			>
-				{title}
-			</Button>
-		</div>
-	)
-}
+import { PreferenceToggleRow, ResetRow } from "@/features/settings/components/settingRows"
 
 type ResetTarget = "sort" | "view" | null
 
