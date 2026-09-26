@@ -139,7 +139,7 @@ export function DriveRow({
 						tabIndex={active ? 0 : -1}
 						style={style}
 						className={cn(
-							"group/row flex h-10 items-center gap-3 rounded-xl px-3 text-sm focus-ring-row outline-none select-none not-aria-selected:hover:bg-accent/50 aria-selected:bg-accent aria-selected:text-accent-foreground",
+							"group/row flex h-10 items-center gap-3 px-3 text-sm focus-ring-row outline-none select-none not-aria-selected:hover:bg-accent/50 aria-selected:bg-accent aria-selected:text-accent-foreground",
 							dropHighlightClass(drop),
 							cut && "*:not-data-[slot=dropdown-menu-trigger]:opacity-50"
 						)}
