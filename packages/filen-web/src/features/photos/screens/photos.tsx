@@ -11,6 +11,7 @@ import { usePhotosListingQuery } from "@/features/photos/queries/photos"
 import { clearPhotosRoot, setPhotosRoot, shouldResetRootOnError } from "@/features/photos/lib/root"
 import { DirectoryChooserDialog } from "@/features/photos/components/directoryChooserDialog"
 import { PhotoGrid } from "@/features/photos/components/photoGrid"
+import { PhotosDensityControls } from "@/features/photos/components/densityControls"
 import { EmptyState } from "@/features/drive/components/emptyState"
 import { LoadingState } from "@/components/loadingState"
 import { Button } from "@/components/ui/button"
@@ -122,15 +123,18 @@ export function PhotosScreen() {
 		<>
 			<header className="flex h-14 shrink-0 items-center justify-between gap-3 px-4">
 				<h1 className="min-w-0 truncate text-sm font-medium">{rootName}</h1>
-				<Button
-					variant="outline"
-					size="sm"
-					onClick={() => {
-						setChooserOpen(true)
-					}}
-				>
-					{t("photosChangeDirectory")}
-				</Button>
+				<div className="flex shrink-0 items-center gap-2">
+					{listingQuery.status === "success" && listingQuery.data.length > 0 ? <PhotosDensityControls /> : null}
+					<Button
+						variant="outline"
+						size="sm"
+						onClick={() => {
+							setChooserOpen(true)
+						}}
+					>
+						{t("photosChangeDirectory")}
+					</Button>
+				</div>
 			</header>
 			<div className="flex min-h-0 flex-1 flex-col overflow-hidden">
 				{listingQuery.status === "pending" ? (

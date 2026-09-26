@@ -1,7 +1,6 @@
 import { useEffect, useState, type MouseEvent } from "react"
 import { useTranslation } from "react-i18next"
 import { useShallow } from "zustand/shallow"
-import { MinusIcon, PlusIcon } from "lucide-react"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { useAction } from "@/lib/keymap/useAction"
 import { useIsOnline } from "@/lib/useIsOnline"
@@ -18,20 +17,13 @@ import { useClickAwayDeselect } from "@/features/drive/hooks/useClickAwayDeselec
 import { usePhotosDialogHost } from "@/features/photos/hooks/usePhotosDialogHost"
 import { resolveTileClickIntent, previewOpenTarget } from "@/features/photos/components/photoGrid.logic"
 import { usePhotosGridDensityQuery } from "@/features/photos/queries/preferences"
-import { setPhotosGridDensity } from "@/features/photos/lib/gridDensity"
-import {
-	DENSITY_STEPS,
-	DEFAULT_DENSITY_INDEX,
-	clampDensityIndex,
-	tileSizeForDensity,
-	columnsForWidth
-} from "@/features/photos/lib/gridDensity"
+import { DEFAULT_DENSITY_INDEX, tileSizeForDensity, columnsForWidth } from "@/features/photos/lib/gridDensity"
 import { PhotoTile } from "@/features/photos/components/photoTile"
 import { PhotosBulkActionBar } from "@/features/photos/components/bulkActionBar"
-import { Button } from "@/components/ui/button"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 
-const GRID_GAP = 8
+// Spacer between tiles only, never along the grid's outer edges: CSS grid gap separates columns and
+// the virtualizer's gap separates rows. 2px reads as a seam, not as padding.
+const GRID_GAP = 2
 const GRID_OVERSCAN = 3
 // Bulk bar only earns its own floating UI at 2+ selected — a single selection is already fully
 // covered by that one tile's own context menu (photosItemActions), unlike drive's listing which
@@ -121,13 +113,17 @@ export function PhotoGrid({ rootUuid, items }: PhotoGridProps) {
 		}
 	}, [scrollElement])
 
+	// The density's tile size only decides how many columns fit; each tile then fills its share of the
+	// width after the gaps, and rows are that tall, so no slack is left anywhere.
 	const columns = columnsForWidth(containerWidth, tileSize, GRID_GAP)
+	const cellSize = containerWidth > 0 ? (containerWidth - GRID_GAP * (columns - 1)) / columns : tileSize
 	const rowCount = Math.ceil(items.length / columns)
 
 	const virtualizer = useVirtualizer({
 		count: rowCount,
 		getScrollElement: () => scrollElement,
-		estimateSize: () => tileSize + GRID_GAP,
+		estimateSize: () => cellSize,
+		gap: GRID_GAP,
 		overscan: GRID_OVERSCAN,
 		getItemKey: index => index
 	})
@@ -148,7 +144,7 @@ export function PhotoGrid({ rootUuid, items }: PhotoGridProps) {
 		items,
 		viewMode: "grid",
 		columns,
-		geometry: { rowHeight: tileSize + GRID_GAP, tileWidth: tileSize, gap: GRID_GAP },
+		geometry: { rowHeight: cellSize + GRID_GAP, tileWidth: cellSize, gap: GRID_GAP },
 		selection: {
 			read: () => usePhotosStore.getState().selectedItems,
 			write: next => {
@@ -233,53 +229,8 @@ export function PhotoGrid({ rootUuid, items }: PhotoGridProps) {
 		[isDialogOpen, selectedItems]
 	)
 
-	async function handleDensityChange(nextIndex: number): Promise<void> {
-		const clamped = clampDensityIndex(nextIndex)
-
-		await setPhotosGridDensity(clamped)
-		void densityQuery.refetch()
-	}
-
 	return (
 		<div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-			<div className="flex shrink-0 items-center justify-end gap-1 px-4 py-2">
-				<Tooltip>
-					<TooltipTrigger
-						render={
-							<Button
-								variant="ghost"
-								size="icon-sm"
-								aria-label={t("photos:photosDensityDecrease")}
-								disabled={densityIndex <= 0}
-								onClick={() => {
-									void handleDensityChange(densityIndex - 1)
-								}}
-							>
-								<MinusIcon />
-							</Button>
-						}
-					/>
-					<TooltipContent>{t("photos:photosDensityDecrease")}</TooltipContent>
-				</Tooltip>
-				<Tooltip>
-					<TooltipTrigger
-						render={
-							<Button
-								variant="ghost"
-								size="icon-sm"
-								aria-label={t("photos:photosDensityIncrease")}
-								disabled={densityIndex >= DENSITY_STEPS.length - 1}
-								onClick={() => {
-									void handleDensityChange(densityIndex + 1)
-								}}
-							>
-								<PlusIcon />
-							</Button>
-						}
-					/>
-					<TooltipContent>{t("photos:photosDensityIncrease")}</TooltipContent>
-				</Tooltip>
-			</div>
 			<div
 				ref={setScrollElement}
 				role="listbox"
@@ -288,7 +239,7 @@ export function PhotoGrid({ rootUuid, items }: PhotoGridProps) {
 				// Drive parity (directoryListing.tsx): the tab stop is the ACTIVE tile's own tabIndex={0},
 				// never the container.
 				tabIndex={-1}
-				className="min-h-0 flex-1 overflow-y-auto px-4"
+				className="min-h-0 flex-1 overflow-y-auto"
 				onKeyDown={handleKeyDown}
 				onPointerDown={marquee.onPointerDown}
 			>
@@ -340,7 +291,6 @@ export function PhotoGrid({ rootUuid, items }: PhotoGridProps) {
 										total={items.length}
 										selected={selectedItems.some(selected => selected.data.uuid === item.data.uuid)}
 										active={itemIndex === safeActiveIndex}
-										size={tileSize}
 										registerRef={registerRef}
 										onTileClick={handleTileClick}
 										onItemAction={handleItemAction}

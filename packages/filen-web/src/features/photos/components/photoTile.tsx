@@ -8,7 +8,7 @@ import { invalidateThumbnail } from "@/features/drive/lib/thumbnails"
 import { ItemIcon } from "@/features/drive/components/itemIcon"
 import { PhotosContextMenuContent, PhotosDropdownMenuContent } from "@/features/photos/components/itemMenu"
 import { type PhotoItem } from "@/features/photos/lib/captureSort"
-import { cn, driveItemName } from "@filen/shared"
+import { driveItemName } from "@filen/shared"
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Button } from "@/components/ui/button"
@@ -24,7 +24,6 @@ export interface PhotoTileProps {
 	// driveTile.tsx) — its face AND its ⋯ trigger, so tabbing into an unbounded virtualized grid costs
 	// one stop, not one per tile.
 	active: boolean
-	size: number
 	registerRef: (index: number, el: HTMLDivElement | null) => void
 	// Fires for every plain/modifier click on the tile's face — photoGrid.tsx's own handleTileClick
 	// decides open-vs-select (photoGrid.logic.ts's resolveTileClickIntent) before this ever runs, so by
@@ -40,18 +39,7 @@ export interface PhotoTileProps {
 // bottom-left, offline top-right (no web equivalent), video bottom-right) instead of driveTile's own
 // top-left placement, and no offline badge at all (web has no make-offline concept — see the study's
 // own honest enumeration).
-export function PhotoTile({
-	rootUuid,
-	item,
-	index,
-	total,
-	selected,
-	active,
-	size,
-	registerRef,
-	onTileClick,
-	onItemAction
-}: PhotoTileProps) {
+export function PhotoTile({ rootUuid, item, index, total, selected, active, registerRef, onTileClick, onItemAction }: PhotoTileProps) {
 	const { t } = useTranslation(["drive", "photos"])
 	const name = driveItemName(item)
 	const thumbUrl = useThumbnail(item)
@@ -71,22 +59,14 @@ export function PhotoTile({
 						aria-setsize={total}
 						tabIndex={active ? 0 : -1}
 						title={name}
-						style={{ width: size }}
-						// justify-self-center (drive parity, driveTile.tsx): with a gap-corrected column count the
-						// cell is always at least as wide as the tile, so centering distributes the slack evenly
-						// instead of piling it on each cell's right edge — which is also the geometry
-						// marquee.logic.ts encodes.
-						className="group/tile relative flex shrink-0 flex-col gap-1 justify-self-center focus-ring-row outline-none select-none"
+						// Fills its grid cell: tiles sit flush, so the focused one is raised to keep its ring above
+						// its neighbors.
+						className="group/tile relative focus-ring-row outline-none select-none focus-visible:z-10"
 						onClick={event => {
 							onTileClick(index, event)
 						}}
 					>
-						<div
-							className={cn(
-								"relative aspect-square w-full overflow-hidden rounded-xl bg-muted/40",
-								selected && "ring-2 ring-ring"
-							)}
-						>
+						<div className="relative aspect-square w-full overflow-hidden bg-muted/40">
 							{thumbUrl !== null && !thumbFailed ? (
 								<img
 									src={thumbUrl}
@@ -107,7 +87,8 @@ export function PhotoTile({
 									/>
 								</div>
 							)}
-							{selected ? <div className="absolute inset-0 rounded-xl bg-background/30" /> : null}
+							{/* Above the image, so the inset ring stays inside the tile instead of over its neighbors. */}
+							{selected ? <div className="absolute inset-0 bg-background/30 ring-2 ring-ring ring-inset" /> : null}
 							{item.data.favorited ? (
 								<div className="absolute bottom-1 left-1 flex size-6 items-center justify-center rounded-full bg-background/80 shadow-sm">
 									<StarIcon
