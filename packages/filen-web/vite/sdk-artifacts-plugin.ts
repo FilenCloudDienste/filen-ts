@@ -93,6 +93,12 @@ export function sdkArtifacts(): Plugin {
 			})
 		},
 		closeBundle() {
+			// A dev server runs this hook too, when it closes or restarts on a config change, and would then
+			// rewrite an existing build's dist/, deleting the service worker's own hashed wasm below.
+			if (config.command !== "build") {
+				return
+			}
+
 			// Prod worker resolves against `<assetsDir>` — copy the artifacts + snippets there.
 			const out = join(config.root, config.build.outDir, config.build.assetsDir)
 			for (const a of ARTIFACTS) {
