@@ -406,6 +406,19 @@ export interface ItemInfoResult {
 	ancestors: Dir[]
 }
 
+// Mobile parity (useDriveItems.query.ts's own recursive case): a walk seeded from an owned directory
+// only ever surfaces owned dirs in practice, but the wasm return type is still the cross-context
+// NonRootDirTagged union (the same shape a shared/linked walk returns through this call), so this
+// narrows defensively rather than trusting that by construction. The narrowed arm is structurally a
+// `Dir` (the `type` tag is additive), assignable straight through to NormalDirsAndFiles.
+function narrowOwnedWalk({ dirs, files }: { dirs: NonRootDirTagged[]; files: NormalDirsAndFiles["files"] }): NormalDirsAndFiles {
+	const normalDirs = dirs.filter((d): d is Extract<NonRootDirTagged, { type: "normal" }> => d.type === "normal")
+
+	cacheDirs(normalDirs)
+
+	return { dirs: normalDirs, files }
+}
+
 // Cache-first parent resolve shared by createDirectory/moveDirectory/moveFile: `null` maps to
 // client.root() (the only "parent" a create/move can target that isn't itself a real Dir); any other
 // uuid checks the in-memory dir cache before a getDirOptional round trip, same cache-first rule as
@@ -752,6 +765,13 @@ const api = {
 	// union, not a tagged wrapper — so no context wrapper is built here, unlike a shared/linked walk).
 	async listPhotosRecursive(rootUuid: string): Promise<NormalDirsAndFiles> {
 		const c = requireClient()
+		const driveRoot = c.root()
+
+		// The whole drive: the root is no Dir, so it is walked as the client's own Root, never looked up.
+		if (rootUuid === driveRoot.uuid) {
+			return narrowOwnedWalk(await c.listDirRecursive(driveRoot, () => undefined))
+		}
+
 		const dir = getCachedDir(rootUuid) ?? (await c.getDirOptional(rootUuid))
 
 		// A cached dir survives its own trashing — trashDirectory re-caches the SDK's returned Dir
@@ -766,18 +786,7 @@ const api = {
 			throw new Error(`${DIRECTORY_NOT_FOUND_PREFIX}${rootUuid}`)
 		}
 
-		const { dirs, files } = await c.listDirRecursive(dir, () => undefined)
-		// Mobile parity (useDriveItems.query.ts's own recursive case): a walk seeded from an owned Dir
-		// only ever surfaces owned dirs in practice, but the wasm return type is still the
-		// cross-context NonRootDirTagged union (the same shape a shared/linked walk would also return
-		// through this call), so this narrows defensively rather than trusting that by construction.
-		// The narrowed arm is structurally a `Dir` (the `type` tag is additive), assignable straight
-		// through to NormalDirsAndFiles without stripping it.
-		const normalDirs = dirs.filter((d): d is Extract<NonRootDirTagged, { type: "normal" }> => d.type === "normal")
-
-		cacheDirs(normalDirs)
-
-		return { dirs: normalDirs, files }
+		return narrowOwnedWalk(await c.listDirRecursive(dir, () => undefined))
 	},
 	// Photos' socket scoping: whether every dir provably sits outside `rootUuid`, judged from the dir cache
 	// alone. Deciding to skip a refetch must never cost a round trip of its own.

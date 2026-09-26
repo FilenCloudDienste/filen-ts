@@ -25,11 +25,13 @@ export function isPhotosChooserRowDisabled(row: DriveItem): boolean {
 	return row.data.undecryptable
 }
 
-// Confirm ("Choose this directory") only enables once the user has actually descended into a
-// directory — browsing the root listing itself is not a choice. Root (My Drive itself, uuid null in
-// the local pathStack) is deliberately never a pickable photos root: unlike moveTargetDialog's
-// pathStack, which can legitimately target the drive root as a move destination, a photos root is
-// meant to be a directory the user set aside for photos, not the whole drive.
-export function isPhotosChooserConfirmDisabled(targetUuid: string | null): boolean {
-	return targetUuid === null
+// What "Choose this directory" picks: the directory open in the picker, or at the top the whole drive,
+// chosen by its root uuid — null until the account that names the root is loaded, so confirm stays
+// disabled rather than saving an empty root.
+export function photosChooserChoice(targetUuid: string | null, driveRootUuid: string | undefined): string | null {
+	if (targetUuid !== null) {
+		return targetUuid
+	}
+
+	return driveRootUuid !== undefined && driveRootUuid.length > 0 ? driveRootUuid : null
 }

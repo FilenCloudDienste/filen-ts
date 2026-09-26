@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import type { Dir, File, UuidStr } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import {
-	isPhotosChooserConfirmDisabled,
+	photosChooserChoice,
 	isPhotosChooserRowDisabled,
 	photosChooserDirectories
 } from "@/features/photos/components/directoryChooserDialog.logic"
@@ -84,12 +84,17 @@ describe("isPhotosChooserRowDisabled", () => {
 	})
 })
 
-describe("isPhotosChooserConfirmDisabled", () => {
-	it("is disabled while still browsing at the drive root (no directory opened yet)", () => {
-		expect(isPhotosChooserConfirmDisabled(null)).toBe(true)
+describe("photosChooserChoice", () => {
+	it("chooses the directory open in the picker", () => {
+		expect(photosChooserChoice(testUuid("a"), testUuid("root"))).toBe(testUuid("a"))
 	})
 
-	it("is enabled once a directory has been opened", () => {
-		expect(isPhotosChooserConfirmDisabled(testUuid("a"))).toBe(false)
+	it("chooses the whole drive by its root uuid at the top", () => {
+		expect(photosChooserChoice(null, testUuid("root"))).toBe(testUuid("root"))
+	})
+
+	it("chooses nothing at the top until the root uuid is known", () => {
+		expect(photosChooserChoice(null, undefined)).toBeNull()
+		expect(photosChooserChoice(null, "")).toBeNull()
 	})
 })

@@ -5,6 +5,7 @@ import { ImagesIcon } from "lucide-react"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { useDirectoryNamesQuery } from "@/features/drive/queries/drive"
+import { useAccountQuery } from "@/queries/account"
 import { usePhotosRootQuery, invalidatePhotosRoot } from "@/features/photos/queries/root"
 import { usePhotosListingQuery } from "@/features/photos/queries/photos"
 import { clearPhotosRoot, setPhotosRoot, shouldResetRootOnError } from "@/features/photos/lib/root"
@@ -21,7 +22,7 @@ import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTi
 // addition only ever needs to swap this file's placeholder body for the real grid, never the
 // root/query plumbing around it.
 export function PhotosScreen() {
-	const { t } = useTranslation(["photos", "common"])
+	const { t } = useTranslation(["photos", "common", "drive"])
 	const isOnline = useIsOnline()
 	const rootQuery = usePhotosRootQuery()
 	const rootUuid = rootQuery.data ?? null
@@ -34,7 +35,10 @@ export function PhotosScreen() {
 	// inside an effect body also trips react-hooks/set-state-in-effect).
 	const resettingRef = useRef(false)
 
-	const namesQuery = useDirectoryNamesQuery(rootUuid !== null ? [rootUuid] : [])
+	// The whole drive is a valid photos root; it has no name to resolve, only the drive's own label.
+	const driveRootUuid = useAccountQuery().data?.rootDirUuid
+	const isWholeDrive = rootUuid !== null && rootUuid === driveRootUuid
+	const namesQuery = useDirectoryNamesQuery(rootUuid !== null && !isWholeDrive ? [rootUuid] : [])
 	const listingQuery = usePhotosListingQuery(rootUuid)
 
 	// Root-gone detection: an error whose message matches DIRECTORY_NOT_FOUND_PREFIX (isRootGoneError,
@@ -112,7 +116,7 @@ export function PhotosScreen() {
 		)
 	}
 
-	const rootName = namesQuery.data?.[rootUuid] ?? rootUuid
+	const rootName = isWholeDrive ? t("drive:driveMyDrive") : (namesQuery.data?.[rootUuid] ?? rootUuid)
 
 	return (
 		<>

@@ -3,12 +3,13 @@ import { useTranslation } from "react-i18next"
 import { ChevronRightIcon, SearchXIcon } from "lucide-react"
 import type { DialogRoot } from "@base-ui/react/dialog"
 import { useDirectoryListingQuery, useDirectoryNamesQuery } from "@/features/drive/queries/drive"
+import { useAccountQuery } from "@/queries/account"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { cn, driveItemName } from "@filen/shared"
 import { shouldForwardOpenChange } from "@/components/dialogs/dismissal.logic"
 import {
-	isPhotosChooserConfirmDisabled,
 	isPhotosChooserRowDisabled,
+	photosChooserChoice,
 	photosChooserDirectories
 } from "@/features/photos/components/directoryChooserDialog.logic"
 import { filterDriveItemsByLocalSearch } from "@/features/drive/components/directoryListing.logic"
@@ -43,6 +44,8 @@ export function DirectoryChooserDialog({ pending, onChoose, onClose }: Directory
 	const [pathStack, setPathStack] = useState<string[]>([])
 	const [filter, setFilter] = useState("")
 	const targetUuid = pathStack.at(-1) ?? null
+	const accountQuery = useAccountQuery()
+	const choice = photosChooserChoice(targetUuid, accountQuery.data?.rootDirUuid)
 
 	const listingQuery = useDirectoryListingQuery("drive", targetUuid)
 	const namesQuery = useDirectoryNamesQuery(pathStack)
@@ -205,10 +208,10 @@ export function DirectoryChooserDialog({ pending, onChoose, onClose }: Directory
 				</div>
 				<DialogFooter>
 					<Button
-						disabled={pending || isPhotosChooserConfirmDisabled(targetUuid)}
+						disabled={pending || choice === null}
 						onClick={() => {
-							if (targetUuid !== null) {
-								onChoose(targetUuid)
+							if (choice !== null) {
+								onChoose(choice)
 							}
 						}}
 					>
