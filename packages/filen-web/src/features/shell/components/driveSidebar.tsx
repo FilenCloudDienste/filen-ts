@@ -105,7 +105,8 @@ function CloudDriveRoot({ label, open, onToggle }: { label: string; open: boolea
 		targetUuid: null,
 		targetAncestry: [],
 		targetName: label,
-		spring: open ? undefined : { timing: TREE_EXPAND_SPRING, open: onToggle }
+		spring: open ? undefined : { timing: TREE_EXPAND_SPRING, open: onToggle },
+		acceptFiles: true
 	})
 
 	return (

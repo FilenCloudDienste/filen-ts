@@ -31,7 +31,8 @@ export interface DirectoryTreeContext {
 	onNavigate: (path: string[]) => void
 	// Injected data source — named `use…` so it reads as the hook it is; called unconditionally per level.
 	useChildren: (uuid: string | null) => UseQueryResult<DirectoryTreeChild[]>
-	// Opt-in: each node becomes a drag-to-move drop target (a collapsed one auto-expands on hover-dwell).
+	// Opt-in: each node becomes a drag-to-move drop target that also takes uploads from the system (a
+	// collapsed one auto-expands on hover-dwell).
 	// Off by default so a non-drive reuse of this primitive (e.g. the move dialog) stays inert.
 	enableDrop?: boolean
 	// Opt-in: each node is a drag source for its own directory (move, or copy with the copy modifier).
@@ -141,6 +142,8 @@ function DirectoryTreeNode({ child, path, depth, tree }: DirectoryTreeNodeProps)
 		targetAncestry: path,
 		targetName: child.name,
 		disabled: !tree.enableDrop,
+		// Files from the system upload into the node's directory, wherever the tree takes drops at all.
+		acceptFiles: tree.enableDrop === true,
 		spring: open
 			? undefined
 			: {
