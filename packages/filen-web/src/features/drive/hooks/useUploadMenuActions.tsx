@@ -5,8 +5,7 @@ import { startUploads } from "@/features/drive/lib/upload"
 import { startDirectoryUpload } from "@/features/drive/lib/uploadDirectory"
 import { normalizeTextFileName, runCreateTextFile } from "@/features/drive/lib/createTextFile"
 import { notifyIfNameIsHidden } from "@/features/drive/lib/hiddenNameNotice"
-import { setHeicUploadConvertPreference } from "@/features/drive/lib/heicUpload"
-import { driveListingQueryUpdate, useHeicUploadConvertPreferenceQuery } from "@/features/drive/queries/drive"
+import { driveListingQueryUpdate } from "@/features/drive/queries/drive"
 import { type PreviewSource, drivePreviewSources } from "@/features/preview/lib/previewSource"
 import { sdkApi } from "@/lib/sdk/client"
 import { errorLabel } from "@/lib/i18n/errorLabel"
@@ -26,8 +25,6 @@ export interface UploadMenuActions {
 	pickFiles: () => void
 	pickDirectory: () => void
 	newTextFile: () => void
-	heicConvert: boolean
-	setHeicConvert: (next: boolean) => void
 	// A picker or the text-file dialog is in use, so the host has to stay mounted until it settles.
 	busy: boolean
 	// The hidden pickers and the text-file name dialog. Mounted beside the menu, never inside its popup:
@@ -54,7 +51,6 @@ export function useUploadMenuActions({
 	const [textFilePending, setTextFilePending] = useState(false)
 	// From a picker's click until its change or cancel.
 	const [pickerOpen, setPickerOpen] = useState(false)
-	const heicConvertQuery = useHeicUploadConvertPreferenceQuery()
 
 	function settlePicker(): void {
 		setPickerOpen(false)
@@ -109,11 +105,6 @@ export function useUploadMenuActions({
 		settlePicker()
 	}
 
-	async function handleToggleHeicConvert(next: boolean): Promise<void> {
-		await setHeicUploadConvertPreference(next)
-		await heicConvertQuery.refetch()
-	}
-
 	async function handleTextFileSubmit(name: string): Promise<void> {
 		setTextFilePending(true)
 
@@ -157,14 +148,6 @@ export function useUploadMenuActions({
 		},
 		newTextFile: () => {
 			setTextFileDialogOpen(true)
-		},
-		// Off by default (mobile parity: DEFAULT_CONVERT_HEIC_TO_JPG_ENABLED), applied by startUploads to
-		// every HEIC/HEIF file in a picked/dropped batch. Read as a query rather than local state so a
-		// change is reflected immediately in every other mounted upload menu too (same convention as
-		// every other kv-backed preference in this app).
-		heicConvert: heicConvertQuery.data ?? false,
-		setHeicConvert: next => {
-			void handleToggleHeicConvert(next)
 		},
 		busy: pickerOpen || textFileDialogOpen || textFilePending,
 		host: (

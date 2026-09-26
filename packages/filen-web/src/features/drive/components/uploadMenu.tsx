@@ -7,20 +7,12 @@ import { useUploadMenuActions, type UploadMenuActions } from "@/features/drive/h
 import { Button } from "@/components/ui/button"
 import {
 	DropdownMenu,
-	DropdownMenuCheckboxItem,
 	DropdownMenuContent,
 	DropdownMenuItem,
 	DropdownMenuSeparator,
 	DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu"
-import {
-	ContextMenu,
-	ContextMenuCheckboxItem,
-	ContextMenuContent,
-	ContextMenuItem,
-	ContextMenuSeparator,
-	ContextMenuTrigger
-} from "@/components/ui/context-menu"
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { Kbd } from "@/lib/keymap/kbd"
 import type { DrivePasteAction } from "@/features/drive/hooks/useDriveClipboard"
 
@@ -50,19 +42,16 @@ export interface UploadMenuProps {
 interface UploadMenuFamily {
 	Item: typeof DropdownMenuItem
 	Separator: typeof DropdownMenuSeparator
-	CheckboxItem: typeof DropdownMenuCheckboxItem
 }
 
 const DROPDOWN_FAMILY: UploadMenuFamily = {
 	Item: DropdownMenuItem,
-	Separator: DropdownMenuSeparator,
-	CheckboxItem: DropdownMenuCheckboxItem
+	Separator: DropdownMenuSeparator
 }
 
 const CONTEXT_FAMILY: UploadMenuFamily = {
 	Item: ContextMenuItem,
-	Separator: ContextMenuSeparator,
-	CheckboxItem: ContextMenuCheckboxItem
+	Separator: ContextMenuSeparator
 }
 
 // The one entry list both surfaces render. "New text file" rides the same trigger/gating as the two
@@ -78,16 +67,16 @@ function UploadMenuEntries({
 	paste: DrivePasteAction | undefined
 }) {
 	const { t } = useTranslation("drive")
-	const { Item, Separator, CheckboxItem } = family
+	const { Item, Separator } = family
 
 	return (
 		<>
 			<Item onClick={actions.pickFiles}>{t("driveUploadFiles")}</Item>
 			<Item onClick={actions.pickDirectory}>{t("driveUploadDirectory")}</Item>
 			<Item onClick={actions.newTextFile}>{t("driveNewTextFile")}</Item>
-			<Separator />
 			{paste === undefined ? null : (
 				<>
+					<Separator />
 					<Item
 						disabled={!paste.enabled}
 						onClick={paste.run}
@@ -103,15 +92,8 @@ function UploadMenuEntries({
 					>
 						{t("driveClipboardClear")}
 					</Item>
-					<Separator />
 				</>
 			)}
-			<CheckboxItem
-				checked={actions.heicConvert}
-				onCheckedChange={actions.setHeicConvert}
-			>
-				{t("driveConvertHeicToJpg")}
-			</CheckboxItem>
 		</>
 	)
 }

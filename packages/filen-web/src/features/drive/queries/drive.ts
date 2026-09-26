@@ -977,7 +977,7 @@ export function useViewModePreferencesQuery(): UseQueryResult<DrivePreferences<D
 }
 
 // Same kv-backed-preference-as-a-query convention as the two above — the HEIC/HEIF-to-JPG
-// convert-on-upload toggle (features/drive/lib/heicUpload.ts), surfaced from the upload menu.
+// convert-on-upload toggle (features/drive/lib/heicUpload.ts), surfaced in Advanced settings.
 export function useHeicUploadConvertPreferenceQuery(): UseQueryResult<boolean> {
 	return useQuery({
 		queryKey: ["drive", "heicUploadConvertPreference"] as const,

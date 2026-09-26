@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router"
 import { useTranslation } from "react-i18next"
 import { SlidersHorizontalIcon } from "lucide-react"
 import { TransferConfigCard } from "@/features/settings/components/advanced/transferConfigCard"
+import { UploadsCard } from "@/features/settings/components/advanced/uploadsCard"
 import { LogsCard } from "@/features/settings/components/advanced/logsCard"
 import { AboutCard } from "@/features/settings/components/advanced/aboutCard"
 import { ThirdPartyNoticesCard } from "@/features/settings/components/advanced/thirdPartyNoticesCard"
@@ -27,6 +28,7 @@ function AdvancedPage() {
 			<div className="flex flex-1 flex-col overflow-y-auto p-6">
 				<div className="mx-auto flex w-full max-w-2xl flex-col gap-4">
 					<TransferConfigCard />
+					<UploadsCard />
 					<LogsCard />
 					<AboutCard />
 					<ThirdPartyNoticesCard />

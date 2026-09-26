@@ -259,6 +259,13 @@ export const settings = {
 	/** Shown after a preset change — the wasm client only reads these at startup, there is no live setter */
 	settingsAdvancedRestartRequired: "This takes effect the next time Filen loads in this browser tab.",
 
+	// ── Advanced: uploads ────────────────────────────────────────────────────
+	settingsAdvancedUploadsTitle: "Uploads",
+	settingsAdvancedUploadsDescription: "How files are prepared before they are uploaded",
+	/** Switch — re-encode HEIC/HEIF photos as JPG before upload; off by default */
+	settingsConvertHeicToJpg: "Convert HEIC/HEIF to JPG",
+	settingsConvertHeicToJpgDescription: "Upload HEIC and HEIF photos as JPG, so they open on devices and apps without HEIC support",
+
 	// ── Advanced: diagnostic logs ─────────────────────────────────────────────
 	settingsLogsTitle: "Diagnostic logs",
 	/** {{count}} is the ring buffer's max size (500) */

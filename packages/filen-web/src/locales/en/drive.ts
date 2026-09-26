@@ -49,8 +49,6 @@ export const drive = {
 	driveUploadDirectory: "Upload directory",
 	/** Upload menu — entry opening the new-text-file name dialog */
 	driveNewTextFile: "New text file",
-	/** Upload menu — checkbox toggling automatic HEIC/HEIF -> JPG conversion for picked/dropped uploads; off by default */
-	driveConvertHeicToJpg: "Convert HEIC/HEIF to JPG",
 
 	// ── Upload ───────────────────────────────────────────────────────────────
 	/** Drive toolbar — trigger button opening the standalone upload menu (Upload files, later Upload directory) */

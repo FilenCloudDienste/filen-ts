@@ -5,17 +5,13 @@ import { act, cleanup, createEvent, fireEvent, render, screen } from "@testing-l
 import { createElement } from "react"
 
 // The pickers' upload paths reach the SDK worker, which is unresolvable under vitest; no case here
-// starts an upload. The HEIC preference is a kv-backed query with no provider in this harness.
+// starts an upload.
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
 // The Paste entry's shortcut badge, reduced to its action id (the registry isn't loaded here).
 vi.mock("@/lib/keymap/kbd", async () => {
 	const { createElement: element } = await import("react")
 	return { Kbd: ({ action }: { action: string }) => element("span", null, ` ${action}`) }
 })
-vi.mock("@/features/drive/queries/drive", async importOriginal => ({
-	...(await importOriginal<typeof import("@/features/drive/queries/drive")>()),
-	useHeicUploadConvertPreferenceQuery: () => ({ data: false, refetch: vi.fn() })
-}))
 
 import "@/lib/i18n"
 import { UploadContextMenu, UploadMenu } from "@/features/drive/components/uploadMenu"
@@ -86,7 +82,7 @@ describe("UploadContextMenu", () => {
 
 		rightClick(screen.getByTestId("blank"))
 
-		expect(toolbarEntries).toEqual(["Upload files", "Upload directory", "New text file", "Convert HEIC/HEIF to JPG"])
+		expect(toolbarEntries).toEqual(["Upload files", "Upload directory", "New text file"])
 		expect(menuLabels()).toEqual(toolbarEntries)
 		expect(onOpen).toHaveBeenCalledOnce()
 	})
@@ -96,7 +92,7 @@ describe("UploadContextMenu", () => {
 
 		rightClick(screen.getByTestId("surface"))
 
-		expect(menuLabels()).toHaveLength(4)
+		expect(menuLabels()).toHaveLength(3)
 		expect(onOpen).toHaveBeenCalledOnce()
 	})
 
@@ -130,14 +126,7 @@ describe("UploadContextMenu", () => {
 
 		const toolbarPaste = screen.getByRole("menuitem", { name: /^Paste/ })
 
-		expect(menuLabels()).toEqual([
-			"Upload files",
-			"Upload directory",
-			"New text file",
-			"Paste drive.paste",
-			"Clear clipboard",
-			"Convert HEIC/HEIF to JPG"
-		])
+		expect(menuLabels()).toEqual(["Upload files", "Upload directory", "New text file", "Paste drive.paste", "Clear clipboard"])
 		expect(toolbarPaste.getAttribute("aria-disabled")).toBe("true")
 		expect(screen.getByRole("menuitem", { name: "Clear clipboard" }).getAttribute("aria-disabled")).toBe("true")
 
