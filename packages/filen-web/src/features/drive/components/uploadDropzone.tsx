@@ -1,9 +1,12 @@
-import { useEffect, useState, type DragEvent, type ReactNode } from "react"
+import { useEffect, useRef, useState, type DragEvent, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { UploadIcon } from "lucide-react"
+import { cn } from "@filen/shared"
 import { uploadDroppedFiles } from "@/features/drive/lib/uploadDrop"
 import { isInternalDrag } from "@/features/drive/lib/dnd"
 import { enterDragDepth, leaveDragDepth } from "@/features/drive/components/uploadDropzone.logic"
+import { useUploadDropTargetStore } from "@/features/drive/store/useUploadDropTargetStore"
+import { cachedDirectoryName } from "@/features/drive/queries/drive"
 
 export interface UploadDropzoneProps {
 	// The directory dropped files land in — the current listing's own uuid (null at My Drive's root).
@@ -33,6 +36,11 @@ export function UploadDropzone({ parentUuid, disabled = false, children }: Uploa
 	const { t } = useTranslation("drive")
 	const [dragDepth, setDragDepth] = useState(0)
 	const active = !disabled && dragDepth > 0
+	const targetName = useUploadDropTargetStore(state => state.target?.name ?? null)
+	// The bottom strip always takes a drop for the directory on screen, which rows could otherwise cover
+	// entirely when it holds nothing but directories.
+	const [overStrip, setOverStrip] = useState(false)
+	const stripRef = useRef<HTMLDivElement>(null)
 
 	useEffect(() => {
 		const preventNavigation = (event: globalThis.DragEvent) => {
@@ -53,6 +61,8 @@ export function UploadDropzone({ parentUuid, disabled = false, children }: Uploa
 	// (directory rows, tree, breadcrumb) claim it instead. Returning WITHOUT preventDefault also leaves
 	// the browser rejecting this zone as a drop target for the internal drag, so a stray internal drop
 	// on blank listing space is a harmless no-op rather than an upload.
+	// Enters and leaves are counted in the capture phase: a directory inside claims a file drag of its own
+	// (useDriveDropTarget) and stops it from bubbling, yet the overlay stays up over it, naming it.
 	function handleDragEnter(event: DragEvent<HTMLDivElement>): void {
 		if (isInternalDrag(event.dataTransfer)) {
 			return
@@ -82,8 +92,6 @@ export function UploadDropzone({ parentUuid, disabled = false, children }: Uploa
 			return
 		}
 
-		event.preventDefault()
-
 		if (disabled) {
 			return
 		}
@@ -98,6 +106,7 @@ export function UploadDropzone({ parentUuid, disabled = false, children }: Uploa
 
 		event.preventDefault()
 		setDragDepth(0)
+		setOverStrip(false)
 
 		if (disabled) {
 			return
@@ -106,16 +115,29 @@ export function UploadDropzone({ parentUuid, disabled = false, children }: Uploa
 		uploadDroppedFiles(event.dataTransfer, parentUuid)
 	}
 
+	// Read only while the overlay shows: finding a name scans the cached listings.
+	function currentDirectoryHint(): string {
+		const name = parentUuid === null ? t("driveMyDrive") : cachedDirectoryName(parentUuid)
+
+		return name === undefined || name.length === 0 ? t("driveUploadDropHereHint") : t("driveUploadDropHereHintInto", { name })
+	}
+
 	return (
 		<div
 			className="relative flex min-h-0 flex-1 flex-col overflow-hidden"
-			onDragEnter={handleDragEnter}
+			onDragEnterCapture={handleDragEnter}
 			onDragOver={handleDragOver}
-			onDragLeave={handleDragLeave}
+			onDragLeaveCapture={handleDragLeave}
 			// A directory inside claims a file drop of its own (useDriveDropTarget), and the bubbling drop
-			// then never reaches this zone; its hint still has to go.
-			onDropCapture={() => {
+			// then never reaches this zone; its hint still has to go. Not for a drop on the strip: React
+			// flushes this update before the bubble phase, and an unmounted target never bubbles to onDrop.
+			onDropCapture={event => {
+				if (event.target instanceof Node && stripRef.current?.contains(event.target)) {
+					return
+				}
+
 				setDragDepth(0)
+				setOverStrip(false)
 			}}
 			onDrop={handleDrop}
 		>
@@ -123,10 +145,32 @@ export function UploadDropzone({ parentUuid, disabled = false, children }: Uploa
 			{active ? (
 				<div
 					aria-hidden="true"
-					className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center gap-2 border-2 border-dashed border-primary bg-primary/5 text-sm font-medium text-primary"
+					className="pointer-events-none absolute inset-0 z-10 flex flex-col border-2 border-dashed border-primary bg-primary/5 text-sm font-medium text-primary"
 				>
-					<UploadIcon className="size-5" />
-					{t("driveUploadDropHint")}
+					<div className="flex min-h-0 flex-1 items-center justify-center gap-2 px-4">
+						<UploadIcon className="size-5 shrink-0" />
+						<span className="min-w-0 truncate">
+							{targetName === null ? t("driveUploadDropHint") : t("driveUploadDropHintInto", { name: targetName })}
+						</span>
+					</div>
+					{/* Not a directory row, so a drop here falls through to this zone's own upload. Its content
+					    ignores the pointer so the strip's own enter/leave pair up. */}
+					<div
+						ref={stripRef}
+						onDragEnter={() => {
+							setOverStrip(true)
+						}}
+						onDragLeave={() => {
+							setOverStrip(false)
+						}}
+						className={cn(
+							"pointer-events-auto flex h-11 shrink-0 items-center justify-center gap-2 border-t-2 border-dashed border-primary bg-background/95 px-4 transition-colors *:pointer-events-none",
+							overStrip && "bg-primary/15"
+						)}
+					>
+						<UploadIcon className="size-4 shrink-0" />
+						<span className="min-w-0 truncate">{currentDirectoryHint()}</span>
+					</div>
 				</div>
 			) : null}
 		</div>

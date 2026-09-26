@@ -55,6 +55,12 @@ export const drive = {
 	driveUploadMenuTrigger: "Upload",
 	/** Drive listing — overlay hint shown over the listing area while dragging files over it */
 	driveUploadDropHint: "Drop files to upload",
+	/** Drive listing — the same hint while the drag rests on a directory, which the drop uploads into */
+	driveUploadDropHintInto: "Drop to upload into {{name}}",
+	/** Drive listing — the upload overlay's bottom strip, a drop target for the directory on screen */
+	driveUploadDropHereHintInto: "Drop here to upload into {{name}}",
+	/** Drive listing — the same strip when the directory's name isn't known */
+	driveUploadDropHereHint: "Drop here to upload into this directory",
 
 	// ── Sidebar ──────────────────────────────────────────────────────────────
 	/** Drive sidebar — root item for the user's own drive */

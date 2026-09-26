@@ -10,6 +10,7 @@ import { isMacPlatform } from "@/lib/keymap/kbd.logic"
 import { startCopyWithCard } from "@/features/transfers/lib/copyToast"
 import { isFileDrag, uploadDroppedFiles } from "@/features/drive/lib/uploadDrop"
 import { armSpringLoad, cancelSpringLoad, type SpringTiming } from "@/features/drive/lib/springLoad"
+import { useUploadDropTargetStore } from "@/features/drive/store/useUploadDropTargetStore"
 
 const MAC = isMacPlatform()
 
@@ -44,6 +45,8 @@ export interface DriveDropTarget {
 	isOver: boolean
 	// What a drop here would do right now, following the copy modifier.
 	mode: DragDropMode
+	// The hovering drag is an OS file drag, which uploads into this directory.
+	upload: boolean
 	onDragEnter: (event: DragEvent<HTMLElement>) => void
 	onDragOver: (event: DragEvent<HTMLElement>) => void
 	onDragLeave: (event: DragEvent<HTMLElement>) => void
@@ -67,6 +70,7 @@ export function useDriveDropTarget({
 }: DriveDropTargetParams): DriveDropTarget {
 	const [isOver, setIsOver] = useState(false)
 	const [mode, setMode] = useState<DragDropMode>("move")
+	const [upload, setUpload] = useState(false)
 	// dragenter/dragleave bubble from every descendant the cursor crosses — a depth counter keeps the
 	// hover steady across inner elements (same reason as uploadDropzone.logic.ts). Two counts: every
 	// enter of a drag this target takes part in, and the enters it CLAIMED (stopped, so an enclosing
@@ -81,9 +85,29 @@ export function useDriveDropTarget({
 	// compiler-safe).
 	const springRef = useRef(spring)
 
+	const targetNameRef = useRef(targetName)
+
 	useEffect(() => {
 		springRef.current = spring
+		targetNameRef.current = targetName
 	})
+
+	// Names this directory in the listing's upload overlay while a file drag rests on it.
+	useEffect(() => {
+		if (!isOver || !upload) {
+			return
+		}
+
+		const owner = springOwnerRef.current
+		const name = targetNameRef.current
+		const { setTarget, clearTarget } = useUploadDropTargetStore.getState()
+
+		setTarget({ owner, name: typeof name === "function" ? name() : name })
+
+		return () => {
+			clearTarget(owner)
+		}
+	}, [isOver, upload])
 
 	function armSpring(element: HTMLElement): void {
 		const current = springRef.current
@@ -202,6 +226,7 @@ export function useDriveDropTarget({
 			event.stopPropagation()
 			claimedDepthRef.current += 1
 			setMode(dropMode(event))
+			setUpload(dragKind(event) === "files")
 			setIsOver(true)
 		}
 
@@ -224,6 +249,7 @@ export function useDriveDropTarget({
 			event.stopPropagation()
 			event.dataTransfer.dropEffect = next
 			setMode(next)
+			setUpload(dragKind(event) === "files")
 			setIsOver(true)
 		} else {
 			setIsOver(false)
@@ -312,14 +338,19 @@ export function useDriveDropTarget({
 		}
 	}, [])
 
-	return { isOver, mode, onDragEnter, onDragOver, onDragLeave, onDrop }
+	return { isOver, mode, upload, onDragEnter, onDragOver, onDragLeave, onDrop }
 }
 
 // The hovered target's highlight: a solid ring for a move, a dashed outline for a copy, so the mode
-// shows on the target as well as on the browser's cursor.
-export function dropHighlightClass(drop: Pick<DriveDropTarget, "isOver" | "mode">): string | false {
+// shows on the target as well as on the browser's cursor. An upload stands out more, since it sits
+// inside the listing's own dashed upload overlay.
+export function dropHighlightClass(drop: Pick<DriveDropTarget, "isOver" | "mode" | "upload">): string | false {
 	if (!drop.isOver) {
 		return false
+	}
+
+	if (drop.upload) {
+		return "bg-primary/15 ring-2 ring-primary ring-inset"
 	}
 
 	return drop.mode === "copy"
