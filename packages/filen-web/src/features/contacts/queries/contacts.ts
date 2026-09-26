@@ -2,6 +2,7 @@ import { useQuery, type QueryKey, type UseQueryResult } from "@tanstack/react-qu
 import { sdkApi } from "@/lib/sdk/client"
 import { currentSocketEpoch, socketLiveSince } from "@/lib/sdk/socketSession"
 import { queryClient } from "@/queries/client"
+import { patchQuery } from "@/queries/patch"
 import type { BlockedContact, Contact, ContactRequestIn, ContactRequestOut } from "@filen/sdk-rs"
 
 // Two independent caches, mirroring filen-mobile's own split (useContacts.query.ts /
@@ -54,29 +55,6 @@ export function useContactsQuery(options?: { enabled?: boolean }): UseQueryResul
 		staleTime: () => (contactsReadThisSession ? CONTACTS_STALE_TIME : 0),
 		refetchOnReconnect: "always"
 	})
-}
-
-// Cancel-before-patch WITH the initial-fetch carve-out (notesQueryUpdate's rule): a refetch
-// snapshotted on the server BEFORE this write would land after the patch and silently overwrite it —
-// abort anything in flight first, but only when cached data already exists. Cancelling
-// a query's INITIAL fetch would strand it on its loading state with nothing to show until the next
-// mount/focus trigger, and the overwrite hazard only applies to data a patch can lose.
-//
-// setQueryData marks the cache fresh, dropping a pending invalidation and the read cancelled here; left
-// unrestored, the change behind them would wait out the stale time.
-function patchQuery<T>(queryKey: QueryKey, updater: (prev: T | undefined) => T): void {
-	const query = queryClient.getQueryCache().find({ queryKey, exact: true })
-	const refreshPending = query !== undefined && (query.state.isInvalidated || query.state.fetchStatus !== "idle")
-
-	if (queryClient.getQueryData(queryKey) !== undefined) {
-		void queryClient.cancelQueries({ queryKey })
-	}
-
-	queryClient.setQueryData<T>(queryKey, updater)
-
-	if (refreshPending) {
-		void queryClient.invalidateQueries({ queryKey, exact: true, refetchType: "none" })
-	}
 }
 
 // Confirm-then-patch (queries/client.ts's zero-useMutation convention). A cache miss (nobody has

@@ -1,6 +1,7 @@
 import { useQuery, type UseQueryResult } from "@tanstack/react-query"
 import { sdkApi } from "@/lib/sdk/client"
 import { queryClient } from "@/queries/client"
+import { patchQuery } from "@/queries/patch"
 import type { NoteTag } from "@filen/sdk-rs"
 
 // One global tag list, mirroring NOTES_QUERY_KEY — exactly one tags cache per session, same
@@ -18,17 +19,8 @@ export function useNoteTags(): UseQueryResult<NoteTag[]> {
 	})
 }
 
-// Cancel-before-patch WITH the initial-fetch carve-out, same rule as notes.ts's
-// cancelInFlightIfCached.
-function cancelInFlightIfCached(): void {
-	if (queryClient.getQueryData(NOTE_TAGS_QUERY_KEY) !== undefined) {
-		void queryClient.cancelQueries({ queryKey: NOTE_TAGS_QUERY_KEY })
-	}
-}
-
 export function noteTagsQueryUpdate(updater: (prev: NoteTag[]) => NoteTag[]): void {
-	cancelInFlightIfCached()
-	queryClient.setQueryData<NoteTag[]>(NOTE_TAGS_QUERY_KEY, prev => updater(prev ?? []))
+	patchQuery<NoteTag[]>(NOTE_TAGS_QUERY_KEY, prev => updater(prev ?? []))
 }
 
 export function noteTagsQueryUpsert(tag: NoteTag): void {

@@ -2,6 +2,7 @@ import { useQuery, type UseQueryResult } from "@tanstack/react-query"
 import { sdkApi } from "@/lib/sdk/client"
 import { currentSocketEpoch, socketLiveSince } from "@/lib/sdk/socketSession"
 import { queryClient } from "@/queries/client"
+import { patchQuery } from "@/queries/patch"
 import type { Chat, ChatMessage } from "@filen/sdk-rs"
 import { chatsQueryGet } from "@/features/chats/queries/chats"
 
@@ -154,9 +155,10 @@ export function useChatMessages(chatUuid: string, options?: { enabled?: boolean 
 	})
 }
 
-// Cancel-before-patch WITH the initial-fetch carve-out — identical rule to chatsQueryUpdate,
-// scoped per chat uuid. A patch that creates the cache, after the gc or a leave removed it, holds none of
-// the page the thread's marker vouches for, so the thread reads again when opened.
+// Same rule as chatsQueryUpdate, scoped per chat uuid: a patch over cached data may cancel a thread read
+// (patchQuery), which must then not count as synced. A patch that creates the cache, after the gc or a
+// leave removed it, holds none of the page the thread's marker vouches for, so the thread reads again
+// when opened.
 function beforePatch(chatUuid: string): void {
 	if (queryClient.getQueryData(chatMessagesQueryKey(chatUuid)) === undefined) {
 		syncedChatEpochs.delete(chatUuid)
@@ -165,13 +167,11 @@ function beforePatch(chatUuid: string): void {
 	}
 
 	threadFetchCancels.set(chatUuid, threadCancels(chatUuid) + 1)
-
-	void queryClient.cancelQueries({ queryKey: chatMessagesQueryKey(chatUuid) })
 }
 
 export function chatMessagesQueryUpdate(chatUuid: string, updater: (prev: ChatMessage[]) => ChatMessage[]): void {
 	beforePatch(chatUuid)
-	queryClient.setQueryData<ChatMessage[]>(chatMessagesQueryKey(chatUuid), prev => updater(prev ?? []))
+	patchQuery<ChatMessage[]>(chatMessagesQueryKey(chatUuid), prev => updater(prev ?? []))
 }
 
 // Replaces (or inserts, keeping ascending order) a single message by uuid — the shape a confirmed

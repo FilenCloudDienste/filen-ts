@@ -156,21 +156,6 @@ describe("chatsQueryUpdate / chatsQueryGet", () => {
 
 		expect(chatsQueryGet()).toEqual([first, second])
 	})
-
-	it("cancels an in-flight fetch only when the query already holds cached data", () => {
-		const cancelSpy = vi.spyOn(testQueryClient, "cancelQueries")
-
-		// No cached data yet — the initial-fetch carve-out must NOT cancel.
-		chatsQueryUpdate(prev => prev)
-		expect(cancelSpy).not.toHaveBeenCalled()
-
-		testQueryClient.setQueryData(CHATS_QUERY_KEY, [mockChat()])
-		cancelSpy.mockClear()
-
-		// Cached data exists now — a patch must abort any in-flight refetch first.
-		chatsQueryUpdate(prev => prev)
-		expect(cancelSpy).toHaveBeenCalledExactlyOnceWith({ queryKey: CHATS_QUERY_KEY })
-	})
 })
 
 describe("chatsQueryUpsert", () => {
@@ -360,19 +345,6 @@ describe("chatMessagesQueryUpdate / chatMessagesQueryGet", () => {
 
 		expect(chatMessagesQueryGet("chat-a")).toEqual([messageA])
 		expect(chatMessagesQueryGet("chat-b")).toEqual([messageB])
-	})
-
-	it("cancels an in-flight fetch only when that chat's cache already holds data", () => {
-		const cancelSpy = vi.spyOn(testQueryClient, "cancelQueries")
-
-		chatMessagesQueryUpdate("chat-a", prev => prev)
-		expect(cancelSpy).not.toHaveBeenCalled()
-
-		testQueryClient.setQueryData(chatMessagesQueryKey("chat-a"), [mockMessage()])
-		cancelSpy.mockClear()
-
-		chatMessagesQueryUpdate("chat-a", prev => prev)
-		expect(cancelSpy).toHaveBeenCalledExactlyOnceWith({ queryKey: chatMessagesQueryKey("chat-a") })
 	})
 })
 

@@ -2,6 +2,7 @@ import { useQuery, type Query, type UseQueryResult } from "@tanstack/react-query
 import type { UserInfo } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
 import { queryClient } from "@/queries/client"
+import { cachedQuery, patchQuery } from "@/queries/patch"
 
 // Query key taxonomy per client.ts ([domain, entity, params?]): this resource has exactly one
 // entity per session (there is no per-account param to key on — the worker only ever holds a
@@ -55,10 +56,9 @@ export function useAccountQuery(): UseQueryResult<UserInfo> {
 // Counts this tab's writes to the cached account, patches and stale marks alike.
 let accountWrites = 0
 
-// One lookup by the key's hash: find(), cancelQueries and invalidateQueries each copy and re-hash the
-// whole query cache, and an upload batch writes once per file.
+// By the key's hash (cachedQuery): an upload batch writes once per file.
 function accountQuery(): Query<UserInfo> | undefined {
-	return queryClient.getQueryCache().get<UserInfo>(queryClient.defaultQueryOptions({ queryKey: ACCOUNT_QUERY_KEY }).queryHash)
+	return cachedQuery<UserInfo>(ACCOUNT_QUERY_KEY)
 }
 
 // A read in flight may have been answered before this tab's write and would land over it. Not an
@@ -86,25 +86,16 @@ export function markAccountStale(): void {
 }
 
 // Confirm-then-patch for a write whose whole effect is known locally. A cache miss is left alone: the
-// first read will carry the write. setQueryData marks the account fresh, dropping a pending refresh
-// and the read cancelled above; left unrestored, the change behind them would wait out the stale time.
+// first read will carry the write. A read the patch cancels, or a refresh it would clear, runs again
+// after it (patchQuery).
 export function accountQueryUpdate(updater: (prev: UserInfo) => UserInfo): void {
 	accountWrites++
 
-	const query = accountQuery()
-
-	if (query?.state.data === undefined) {
+	if (accountQuery()?.state.data === undefined) {
 		return
 	}
 
-	const refreshPending = query.state.isInvalidated || query.state.fetchStatus !== "idle"
-
-	cancelInFlightIfCached(query)
-	queryClient.setQueryData<UserInfo>(ACCOUNT_QUERY_KEY, prev => (prev === undefined ? prev : updater(prev)))
-
-	if (refreshPending) {
-		query.invalidate()
-	}
+	patchQuery<UserInfo>(ACCOUNT_QUERY_KEY, prev => (prev === undefined ? prev : updater(prev)))
 }
 
 async function readAccountFresh(writes: number): Promise<UserInfo> {

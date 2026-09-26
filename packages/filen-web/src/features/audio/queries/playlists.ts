@@ -1,6 +1,7 @@
 import { useQuery, type UseQueryResult } from "@tanstack/react-query"
 import { currentSocketEpoch, socketLiveSince } from "@/lib/sdk/socketSession"
 import { queryClient } from "@/queries/client"
+import { patchQuery } from "@/queries/patch"
 import { fetchPlaylistEntries } from "@/features/audio/lib/playlists"
 import type { Playlist } from "@filen/shared"
 
@@ -59,20 +60,9 @@ export function usePlaylistsQuery(): UseQueryResult<PlaylistEntry[]> {
 	})
 }
 
-// Cancel-before-patch WITH the initial-fetch carve-out — same rule as notesQueryUpdate: abort an
-// in-flight refetch before patching (it would otherwise land after the patch and silently overwrite
-// it), but only once cached data already exists, so a first-ever mount's initial fetch is never
-// stranded loading forever.
-function cancelInFlightIfCached(): void {
-	if (queryClient.getQueryData(PLAYLISTS_QUERY_KEY) !== undefined) {
-		void queryClient.cancelQueries({ queryKey: PLAYLISTS_QUERY_KEY })
-	}
-}
-
 export function playlistsQueryUpdate(updater: (prev: PlaylistEntry[]) => PlaylistEntry[]): void {
 	patchCount++
-	cancelInFlightIfCached()
-	queryClient.setQueryData<PlaylistEntry[]>(PLAYLISTS_QUERY_KEY, prev => updater(prev ?? []))
+	patchQuery<PlaylistEntry[]>(PLAYLISTS_QUERY_KEY, prev => updater(prev ?? []))
 }
 
 // Replaces (or appends) a single playlist's "ok" row by uuid, preserving every other row's position —

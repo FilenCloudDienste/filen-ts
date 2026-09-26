@@ -150,16 +150,13 @@ async function cancelThreadReadWithPatch() {
 	await act(async () => {
 		await Promise.resolve()
 	})
+	// The read after the patch sees the server with m3 in it.
+	listMessagesBefore.mockImplementation(() => Promise.resolve([m1, m2, m3]))
 	act(() => {
 		chatMessagesQueryUpdate(CHAT_A.uuid, prev => [...prev, m3])
 	})
 	page.resolve([m1, m2])
 	await drain()
-
-	expect(listMessagesBefore).toHaveBeenCalledTimes(1)
-	expect(chatMessagesQueryGet(CHAT_A.uuid)?.map(m => m.uuid)).toEqual([m1.uuid, m3.uuid])
-
-	listMessagesBefore.mockImplementation(() => Promise.resolve([m1, m2, m3]))
 
 	return { thread, complete: [m1, m2, m3] }
 }
@@ -321,7 +318,7 @@ describe("chat list and message request counts", () => {
 		expect(listMessagesBefore).toHaveBeenCalledTimes(1)
 	})
 
-	it("a list read a patch cancels doesn't count: a remount reads again and shows the change", async () => {
+	it("a list read a patch cancels is read again at once, and shows what it was reading for", async () => {
 		queryClient.setQueryData(["chats", "list"], CHATS)
 		const first = deferred<Chat[]>()
 		listChats.mockImplementationOnce(() => first.promise)
@@ -331,42 +328,37 @@ describe("chat list and message request counts", () => {
 		await act(async () => {
 			await Promise.resolve()
 		})
+		changeElsewhere()
 		act(() => {
 			chatsQueryUpsert({ ...CHAT_A, name: "renamed" })
 		})
 		first.resolve(CHATS)
 		await drain()
-		list.unmount()
-		changeElsewhere()
-
-		renderHook(() => useChats(), { wrapper })
-		await drain()
 
 		expect(listChats).toHaveBeenCalledTimes(2)
 		expect(chatsQueryGet()?.[0]).toMatchObject({ lastFocus: 50n, muted: true })
+		list.unmount()
 	})
 
-	it("a thread read a patch cancels doesn't count: a remount reads again and fills the gap", async () => {
+	it("a thread read a patch cancels is read again at once and fills the gap", async () => {
 		const { thread, complete } = await cancelThreadReadWithPatch()
-
-		thread.unmount()
-		renderHook(() => useChatMessages(CHAT_A.uuid), { wrapper })
-		await drain()
 
 		expect(listMessagesBefore).toHaveBeenCalledTimes(2)
 		expect(chatMessagesQueryGet(CHAT_A.uuid)?.map(m => m.uuid)).toEqual(complete.map(m => m.uuid))
+		thread.unmount()
 	})
 
-	it("a thread read a patch cancels doesn't count: a return to the tab reads it again and fills the gap", async () => {
-		const { thread, complete } = await cancelThreadReadWithPatch()
+	it("the thread read after a cancel counts: a remount and a return to the tab read nothing more", async () => {
+		const { thread } = await cancelThreadReadWithPatch()
 
+		thread.unmount()
+		const remounted = renderHook(() => useChatMessages(CHAT_A.uuid), { wrapper })
+		await drain()
 		hide()
 		await show()
 
 		expect(listMessagesBefore).toHaveBeenCalledTimes(2)
-		expect(chatMessagesQueryGet(CHAT_A.uuid)?.map(m => m.uuid)).toEqual(complete.map(m => m.uuid))
-
-		thread.unmount()
+		remounted.unmount()
 	})
 
 	it("a socket reconnect runs exactly one full pass, and a mount during the gap re-reads", async () => {

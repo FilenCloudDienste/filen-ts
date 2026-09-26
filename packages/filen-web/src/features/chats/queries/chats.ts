@@ -2,6 +2,7 @@ import { CancelledError, focusManager, useQuery, type UseQueryResult } from "@ta
 import { sdkApi } from "@/lib/sdk/client"
 import { currentSocketEpoch, socketLiveSince } from "@/lib/sdk/socketSession"
 import { queryClient } from "@/queries/client"
+import { patchQuery } from "@/queries/patch"
 import type { Chat } from "@filen/sdk-rs"
 
 // One global list query, mirroring mobile's useChatsQuery / this app's own notes/queries/notes.ts
@@ -128,26 +129,15 @@ export async function chatsQueryFetch(): Promise<Chat[]> {
 	return fetchChatsQuery()
 }
 
-// Cancel-before-patch WITH the initial-fetch carve-out (notesQueryUpdate's own rule, queries/
-// notes.ts): a refetch snapshotted on the server BEFORE this write would land after the patch and
-// silently overwrite it — abort anything in flight first, but only when cached data already
-// exists. Cancelling a query's INITIAL fetch would strand it on its loading state with nothing to
-// show until the next mount/focus trigger, and the overwrite hazard only applies to data a patch
-// can lose.
-function cancelInFlightIfCached(): void {
+// A cache miss (nobody has mounted the chats list yet) defaults to [] so the patch still lands for
+// whenever it first mounts. A patch over cached data may cancel a list read (patchQuery), which must then
+// not count as a synced read.
+export function chatsQueryUpdate(updater: (prev: Chat[]) => Chat[]): void {
 	if (queryClient.getQueryData(CHATS_QUERY_KEY) !== undefined) {
 		listFetchCancels++
-
-		void queryClient.cancelQueries({ queryKey: CHATS_QUERY_KEY })
 	}
-}
 
-// Confirm-then-patch (queries/client.ts's zero-useMutation convention). A cache miss (nobody has
-// mounted the chats list yet) defaults to [] so the patch still lands for whenever it first
-// mounts.
-export function chatsQueryUpdate(updater: (prev: Chat[]) => Chat[]): void {
-	cancelInFlightIfCached()
-	queryClient.setQueryData<Chat[]>(CHATS_QUERY_KEY, prev => updater(prev ?? []))
+	patchQuery<Chat[]>(CHATS_QUERY_KEY, prev => updater(prev ?? []))
 }
 
 // Replaces (or inserts) a single chat by uuid, preserving every other row's position — the
