@@ -8,7 +8,7 @@ import useNotesInflightStore, { isNoteEditing, endEditingSession } from "@/featu
 import { useNotesRemoteEditStore } from "@/features/notes/store/useNoteRemoteEdit"
 import { sync } from "@/features/notes/lib/sync"
 import { noteKindForPreview } from "@/features/notes/lib/sync.logic"
-import { fetchNotes, notesQueryUpdate, notesQueryRemove, notesQueryGet } from "@/features/notes/queries/notes"
+import { notesQueryUpdate, notesQueryRemove, notesQueryGet, notesQueryRefetch } from "@/features/notes/queries/notes"
 import { markNoteContentUnsynced, noteContentQueryKey } from "@/features/notes/queries/noteContent"
 
 // The realtime note event handlers — a faithful port of filen-mobile's socketHandlers.ts SEMANTICS
@@ -104,9 +104,12 @@ export function handleNoteEvent(event: NoteSocketEvent): void {
 		}
 
 		case "new": {
-			// The payload is sparse (`{ note: uuid }`, no Note), so a list fetch is the only source of the
-			// row's metadata. Fire-and-forget: a failed fetch just leaves the list until the next trigger.
-			void mergeNewNotes()
+			// The payload is sparse (`{ note: uuid }`, no Note), so a list read is the only source of the
+			// row. It runs through the query, never out of band: a write landing while it is in flight
+			// (createNote's own upsert, the type and title edits that follow a create elsewhere) replaces it
+			// with a read that starts after (notesQueryUpdate, handleContentEdited), so no snapshot older
+			// than those writes reaches the cache.
+			notesQueryRefetch()
 
 			break
 		}
@@ -126,29 +129,6 @@ export function handleNoteEvent(event: NoteSocketEvent): void {
 	}
 }
 
-// Additive, never a replace: this fetch is out-of-band (not a React Query fetch, so the patchers'
-// cancel-before-write cannot abort it) and the server serves the note in its just-created state, so a
-// replace landing after the local writes that follow a create — setNoteType applying the default-type
-// preference, import seeding its own type — would regress the row to plain text under a default title.
-// Rows that vanished server-side are dropped by their own events (deleted / participantRemoved). The
-// cost of never replacing: a row trashed, pinned or favourited on another device — states the event
-// catalog carries no variant for — is no longer corrected by a `new` event either, and relies on the
-// query's staleTime 0 plus its refetch on focus/reconnect (queries/client.ts).
-async function mergeNewNotes(): Promise<void> {
-	try {
-		const fetched = await fetchNotes()
-
-		notesQueryUpdate(prev => {
-			const known = new Set(prev.map(n => n.uuid))
-			const added = fetched.filter(n => !known.has(n.uuid))
-
-			return added.length === 0 ? prev : [...prev, ...added]
-		})
-	} catch (e) {
-		log.error("socket", "note new: list fetch failed", e)
-	}
-}
-
 function handleContentEdited(inner: Extract<NoteSocketEvent["inner"], { type: "contentEdited" }>): void {
 	// Before every early return below: whichever branch runs, the cached content may now be behind.
 	markNoteContentUnsynced(inner.note)
@@ -162,6 +142,15 @@ function handleContentEdited(inner: Extract<NoteSocketEvent["inner"], { type: "c
 	const userId = currentUserId()
 
 	if (userId !== undefined && BigInt(inner.editorId) === userId) {
+		// The row is not patched either: an echo may be older than this tab's own later change. A stale
+		// type is not cosmetic, the next content push sends it back, so an echo whose type differs from
+		// the row (a retype on another device of this account) re-reads the list instead of patching it.
+		// Otherwise only a list read in flight is replaced, as it may predate this edit: a note this
+		// account just created and retyped elsewhere arrives through the read `new` started.
+		const cached = notesQueryGet()?.find(n => n.uuid === inner.note)
+
+		notesQueryRefetch({ onlyIfFetching: cached === undefined || cached.noteType === inner.noteType })
+
 		return
 	}
 
@@ -169,6 +158,10 @@ function handleContentEdited(inner: Extract<NoteSocketEvent["inner"], { type: "c
 
 	if (note === undefined) {
 		log.warn("socket", "note contentEdited: note not in cache", inner.note)
+
+		// A note just created elsewhere: its row arrives with the read `new` started, which may predate
+		// this edit, and there is no row to patch meanwhile.
+		notesQueryRefetch({ onlyIfFetching: true })
 
 		return
 	}

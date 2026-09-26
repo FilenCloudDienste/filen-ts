@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
-import { QueryClient } from "@tanstack/react-query"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { QueryClient, QueryObserver } from "@tanstack/react-query"
 import type { Note, NoteHistory, NoteTag, UuidStr } from "@filen/sdk-rs"
 
 // UuidStr is a template-literal brand requiring at least 3 dashes (see @filen/sdk-rs) — pad a short
@@ -49,6 +49,7 @@ import {
 	fetchNotes,
 	NOTES_QUERY_KEY,
 	notesQueryGet,
+	notesQueryRefetch,
 	notesQueryRemove,
 	notesQueryUpdate,
 	notesQueryUpsert,
@@ -155,19 +156,213 @@ describe("notesQueryUpdate / notesQueryGet", () => {
 		expect(notesQueryGet()).toEqual([first, second])
 	})
 
-	it("cancels an in-flight fetch only when the query already holds cached data", () => {
-		const cancelSpy = vi.spyOn(testQueryClient, "cancelQueries")
-
-		// No cached data yet — the initial-fetch carve-out must NOT cancel.
-		notesQueryUpdate(prev => prev)
-		expect(cancelSpy).not.toHaveBeenCalled()
-
+	it("leaves the query alone when no read is in flight", () => {
 		testQueryClient.setQueryData(NOTES_QUERY_KEY, [mockNote()])
-		cancelSpy.mockClear()
+		const cancelSpy = vi.spyOn(testQueryClient, "cancelQueries")
+		const invalidateSpy = vi.spyOn(testQueryClient, "invalidateQueries")
 
-		// Cached data exists now — a patch must abort any in-flight refetch first.
 		notesQueryUpdate(prev => prev)
-		expect(cancelSpy).toHaveBeenCalledExactlyOnceWith({ queryKey: NOTES_QUERY_KEY })
+
+		expect(cancelSpy).not.toHaveBeenCalled()
+		expect(invalidateSpy).not.toHaveBeenCalled()
+	})
+})
+
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+	let resolve!: (value: T) => void
+	const promise = new Promise<T>(r => {
+		resolve = r
+	})
+
+	return { promise, resolve }
+}
+
+// Queued answers for listNotes, handed out in call order, so a test can resolve an early read AFTER a
+// later one and see which of them the cache keeps.
+function queueListNotes(count: number): { resolve: (index: number, notes: Note[]) => Promise<void> } {
+	const reads = Array.from({ length: count }, () => deferred<Note[]>())
+	let next = 0
+
+	listNotes.mockImplementation(() => {
+		const read = reads[next]
+		next++
+
+		if (read === undefined) {
+			throw new Error(`unexpected listNotes call #${String(next)}`)
+		}
+
+		return read.promise
+	})
+
+	return {
+		resolve: async (index, notes) => {
+			reads[index]?.resolve(notes)
+			await settle()
+		}
+	}
+}
+
+async function settle(): Promise<void> {
+	for (let i = 0; i < 10; i++) {
+		await new Promise(resolve => setTimeout(resolve, 0))
+	}
+}
+
+const unmounts: (() => void)[] = []
+
+// A mounted notes list without React: an observer is what makes the query active, and staleTime
+// Infinity keeps a cache the test seeded from being re-read on mount, so every read is one the code
+// under test asked for.
+function mountList(options: { refetchOnMount?: boolean } = {}): void {
+	const observer = new QueryObserver<Note[]>(testQueryClient, {
+		queryKey: NOTES_QUERY_KEY,
+		queryFn: fetchNotes,
+		staleTime: options.refetchOnMount === true ? 0 : Infinity,
+		retry: false
+	})
+
+	unmounts.push(observer.subscribe(() => undefined))
+}
+
+afterEach(() => {
+	for (const unmount of unmounts.splice(0)) {
+		unmount()
+	}
+})
+
+describe("notesQueryUpdate — a read in flight", () => {
+	it("aborts a refetch that predates the patch and reads again, so the list ends on the later read", async () => {
+		const reads = queueListNotes(2)
+		testQueryClient.setQueryData(NOTES_QUERY_KEY, [mockNote({ uuid: testUuid("a"), noteType: "text" })])
+		// The mount read of a list a socket patch seeded while nobody had it open.
+		mountList({ refetchOnMount: true })
+		await vi.waitFor(() => {
+			expect(listNotes).toHaveBeenCalledTimes(1)
+		})
+
+		notesQueryUpdate(prev => prev.map(n => ({ ...n, title: "patched" })))
+
+		expect(notesQueryGet()?.[0]?.title).toBe("patched")
+		expect(listNotes).toHaveBeenCalledTimes(2)
+
+		await reads.resolve(1, [mockNote({ uuid: testUuid("a"), noteType: "md", title: "patched" })])
+		// The aborted read answers last, with the server's state from before the patch.
+		await reads.resolve(0, [mockNote({ uuid: testUuid("a"), noteType: "text", title: "stale" })])
+
+		expect(notesQueryGet()).toEqual([mockNote({ uuid: testUuid("a"), noteType: "md", title: "patched" })])
+		expect(listNotes).toHaveBeenCalledTimes(2)
+	})
+
+	it("replaces an initial fetch with a read that starts after the patch", async () => {
+		const reads = queueListNotes(2)
+		mountList()
+		await vi.waitFor(() => {
+			expect(listNotes).toHaveBeenCalledTimes(1)
+		})
+
+		notesQueryUpdate(prev => [...prev, mockNote({ uuid: testUuid("b") })])
+
+		expect(listNotes).toHaveBeenCalledTimes(2)
+
+		await reads.resolve(0, [mockNote({ uuid: testUuid("a") })])
+		await reads.resolve(1, [mockNote({ uuid: testUuid("a") }), mockNote({ uuid: testUuid("b") })])
+
+		expect(notesQueryGet()?.map(n => n.uuid)).toEqual([testUuid("a"), testUuid("b")])
+	})
+
+	it("keeps the patch over a read that no mounted list will repeat, leaving the query stale for its next mount", async () => {
+		const reads = queueListNotes(1)
+		testQueryClient.setQueryData(NOTES_QUERY_KEY, [mockNote({ uuid: testUuid("a"), title: "old" })])
+		// An unobserved read: whoever started it gets the patched cache back, never a refetch.
+		const unobserved = testQueryClient.query({ queryKey: NOTES_QUERY_KEY, queryFn: fetchNotes, staleTime: 0 }).catch(() => undefined)
+		await vi.waitFor(() => {
+			expect(listNotes).toHaveBeenCalledTimes(1)
+		})
+
+		notesQueryUpdate(prev => prev.map(n => ({ ...n, title: "patched" })))
+		await reads.resolve(0, [mockNote({ uuid: testUuid("a"), title: "stale" })])
+
+		expect(notesQueryGet()?.[0]?.title).toBe("patched")
+		expect(listNotes).toHaveBeenCalledTimes(1)
+		expect(testQueryClient.getQueryState(NOTES_QUERY_KEY)?.isInvalidated).toBe(true)
+		await expect(unobserved).resolves.toEqual([mockNote({ uuid: testUuid("a"), title: "patched" })])
+	})
+})
+
+describe("notesQueryRefetch", () => {
+	it("reads nothing for a list that was never read — its first mount reads fresher", () => {
+		notesQueryRefetch()
+
+		expect(listNotes).not.toHaveBeenCalled()
+		expect(notesQueryGet()).toBeUndefined()
+	})
+
+	it("reads a mounted list again and replaces it", async () => {
+		const reads = queueListNotes(1)
+		testQueryClient.setQueryData(NOTES_QUERY_KEY, [mockNote({ uuid: testUuid("a"), pinned: false })])
+		mountList()
+
+		notesQueryRefetch()
+		await reads.resolve(0, [mockNote({ uuid: testUuid("a"), pinned: true }), mockNote({ uuid: testUuid("b") })])
+
+		expect(notesQueryGet()).toEqual([mockNote({ uuid: testUuid("a"), pinned: true }), mockNote({ uuid: testUuid("b") })])
+	})
+
+	it("only marks an unmounted list stale — its next mount reads", () => {
+		testQueryClient.setQueryData(NOTES_QUERY_KEY, [mockNote()])
+
+		notesQueryRefetch()
+
+		expect(listNotes).not.toHaveBeenCalled()
+		expect(testQueryClient.getQueryState(NOTES_QUERY_KEY)?.isInvalidated).toBe(true)
+	})
+
+	it("replaces a read in flight, which may predate the change", async () => {
+		const reads = queueListNotes(2)
+		testQueryClient.setQueryData(NOTES_QUERY_KEY, [mockNote({ uuid: testUuid("a") })])
+		mountList()
+		notesQueryRefetch()
+
+		notesQueryRefetch()
+
+		expect(listNotes).toHaveBeenCalledTimes(2)
+
+		await reads.resolve(1, [mockNote({ uuid: testUuid("a") }), mockNote({ uuid: testUuid("b") })])
+		await reads.resolve(0, [mockNote({ uuid: testUuid("a") })])
+
+		expect(notesQueryGet()?.map(n => n.uuid)).toEqual([testUuid("a"), testUuid("b")])
+	})
+
+	it("follows an initial fetch with one read, shared by every change queued while it was in flight", async () => {
+		const reads = queueListNotes(2)
+		mountList()
+		await vi.waitFor(() => {
+			expect(listNotes).toHaveBeenCalledTimes(1)
+		})
+
+		notesQueryRefetch()
+		notesQueryRefetch({ onlyIfFetching: true })
+
+		expect(listNotes).toHaveBeenCalledTimes(1)
+
+		await reads.resolve(0, [mockNote({ uuid: testUuid("a") })])
+
+		expect(listNotes).toHaveBeenCalledTimes(2)
+
+		await reads.resolve(1, [mockNote({ uuid: testUuid("a") }), mockNote({ uuid: testUuid("b") })])
+
+		expect(notesQueryGet()?.map(n => n.uuid)).toEqual([testUuid("a"), testUuid("b")])
+		expect(listNotes).toHaveBeenCalledTimes(2)
+	})
+
+	it("with onlyIfFetching, leaves an idle list alone", () => {
+		testQueryClient.setQueryData(NOTES_QUERY_KEY, [mockNote()])
+		mountList()
+
+		notesQueryRefetch({ onlyIfFetching: true })
+
+		expect(listNotes).not.toHaveBeenCalled()
+		expect(testQueryClient.getQueryState(NOTES_QUERY_KEY)?.isInvalidated).toBe(false)
 	})
 })
 

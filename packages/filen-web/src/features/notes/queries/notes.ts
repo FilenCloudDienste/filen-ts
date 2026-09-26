@@ -1,6 +1,7 @@
 import { useQuery, type UseQueryResult } from "@tanstack/react-query"
 import { sdkApi } from "@/lib/sdk/client"
 import { queryClient } from "@/queries/client"
+import { cachedQuery, patchQuery } from "@/queries/patch"
 import type { Note } from "@filen/sdk-rs"
 
 // One global list query, mirroring mobile's useNotesWithContent.query.ts — every variant (all
@@ -23,22 +24,56 @@ export function useNotes(): UseQueryResult<Note[]> {
 	})
 }
 
-// Cancel-before-patch WITH the initial-fetch carve-out: a refetch snapshotted on the server BEFORE this
-// write would land after the patch and silently overwrite it — abort anything in flight first, but only
-// when cached data already exists.
-// Cancelling a query's INITIAL fetch would strand it on its loading state with nothing to show until
-// the next mount/focus trigger, and the overwrite hazard only applies to data a patch can lose.
-function cancelInFlightIfCached(): void {
-	if (queryClient.getQueryData(NOTES_QUERY_KEY) !== undefined) {
-		void queryClient.cancelQueries({ queryKey: NOTES_QUERY_KEY })
-	}
+// Refetches only a mounted list: an unmounted one is stale anyway (staleTime 0) and reads on its next
+// mount. A read in flight is replaced unless `cancelRefetch` is false, for a caller that knows it began
+// late enough to join.
+function refetchNotes(cancelRefetch = true): void {
+	void queryClient.invalidateQueries({ queryKey: NOTES_QUERY_KEY, exact: true }, { cancelRefetch })
 }
 
-// Confirm-then-patch (queries/client.ts's zero-useMutation convention). A cache miss (nobody has
-// mounted the notes list yet) defaults to [] so the patch still lands for whenever it first mounts.
+// A cache miss (nobody has mounted the notes list yet) defaults to [] so the patch still lands for
+// whenever it first mounts. A read the patch cancels runs again after it (patchQuery): left at that, the
+// list would sit on the patch until the next focus, missing whatever the aborted read was for (the mount
+// read of a list a socket patch seeded, the row of a note created elsewhere).
 export function notesQueryUpdate(updater: (prev: Note[]) => Note[]): void {
-	cancelInFlightIfCached()
-	queryClient.setQueryData<Note[]>(NOTES_QUERY_KEY, prev => updater(prev ?? []))
+	patchQuery<Note[]>(NOTES_QUERY_KEY, prev => updater(prev ?? []))
+}
+
+// A list read that starts after a change the cache cannot be patched with: the row of a note created
+// elsewhere (its event carries no Note), or a write this tab applies no patch for (an echo of its own
+// account's edit). `onlyIfFetching` limits it to replacing a read already in flight, which may have
+// been snapshotted before the change. A list never read needs nothing: its first mount reads fresher.
+// An initial fetch in flight would only be joined by a refetch, so the read follows it instead, and
+// every change queued meanwhile shares that one read.
+export function notesQueryRefetch(options?: { onlyIfFetching?: boolean }): void {
+	const query = cachedQuery<Note[]>(NOTES_QUERY_KEY)
+
+	if (query === undefined) {
+		return
+	}
+
+	const fetching = query.state.fetchStatus !== "idle"
+
+	if (options?.onlyIfFetching === true && !fetching) {
+		return
+	}
+
+	if (query.state.data !== undefined) {
+		refetchNotes()
+
+		return
+	}
+
+	if (fetching) {
+		// A rejection is a failed fetch (the query retries on its own triggers) or one replaced by a read
+		// that began after this call.
+		query.promise?.then(
+			() => {
+				refetchNotes(false)
+			},
+			() => undefined
+		)
+	}
 }
 
 // Replaces (or inserts) a single note by uuid, preserving every other row's position — the common

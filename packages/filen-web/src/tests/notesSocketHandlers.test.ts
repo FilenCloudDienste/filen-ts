@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { QueryClient } from "@tanstack/react-query"
+import { QueryClient, QueryObserver } from "@tanstack/react-query"
 import type { Note, NoteParticipant, SocketEvent } from "@filen/sdk-rs"
 
-// sdkApi is mocked to the one op the "new" handler calls (list refetch).
+// sdkApi is mocked to the one op the list query reads with (the "new" handler refetches it).
 const { listNotes } = vi.hoisted(() => ({ listNotes: vi.fn<() => Promise<Note[]>>(() => Promise.resolve([])) }))
 
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: { listNotes } }))
@@ -25,7 +25,7 @@ vi.mock("@/lib/log", () => ({ log: { warn: logWarn, error: logError, info: vi.fn
 
 import { queryClient as testQueryClient } from "@/queries/client"
 import { ACCOUNT_QUERY_KEY } from "@/queries/account"
-import { NOTES_QUERY_KEY } from "@/features/notes/queries/notes"
+import { fetchNotes, NOTES_QUERY_KEY } from "@/features/notes/queries/notes"
 import { noteContentQueryKey } from "@/features/notes/queries/noteContent"
 import useNotesInflightStore, { beginEditingSession, type InflightContent } from "@/features/notes/store/useNotesInflight"
 import { useNotesRemoteEditStore } from "@/features/notes/store/useNoteRemoteEdit"
@@ -89,7 +89,41 @@ beforeEach(() => {
 	vi.clearAllMocks()
 })
 
+const unmounts: (() => void)[] = []
+
+// A mounted notes list without React: the observer makes the query active (so a refetch actually
+// reads), and staleTime Infinity keeps the seeded cache from being re-read on mount.
+function mountList(): void {
+	const observer = new QueryObserver<Note[]>(testQueryClient, {
+		queryKey: NOTES_QUERY_KEY,
+		queryFn: fetchNotes,
+		staleTime: Infinity,
+		retry: false
+	})
+
+	unmounts.push(observer.subscribe(() => undefined))
+}
+
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+	let resolve!: (value: T) => void
+	const promise = new Promise<T>(r => {
+		resolve = r
+	})
+
+	return { promise, resolve }
+}
+
+async function settle(): Promise<void> {
+	for (let i = 0; i < 10; i++) {
+		await new Promise(resolve => setTimeout(resolve, 0))
+	}
+}
+
 afterEach(() => {
+	for (const unmount of unmounts.splice(0)) {
+		unmount()
+	}
+
 	vi.restoreAllMocks()
 })
 
@@ -155,56 +189,106 @@ describe("note socket handlers — metadata", () => {
 		expect(getNotes()[0]?.participants[0]?.permissionsWrite).toBe(true)
 	})
 
-	it("new fetches the list and appends the notes the cache is missing", async () => {
+	it("new reads a mounted list through the query and takes the server's list", async () => {
 		seedNotes([makeNote("a")])
-		listNotes.mockResolvedValueOnce([makeNote("a"), makeNote("b")])
+		mountList()
+		listNotes.mockResolvedValueOnce([makeNote("a", { pinned: true }), makeNote("b")])
 
 		handleNoteEvent(noteEvt({ type: "new", note: "b" as never }))
 		await vi.waitFor(() => {
 			expect(getNotes().map(n => n.uuid)).toEqual(["a", "b"])
 		})
 
+		expect(getNotes()[0]?.pinned).toBe(true)
 		expect(listNotes).toHaveBeenCalledTimes(1)
 	})
 
-	// The create race: the fetch is snapshotted while the note is still in its just-created state
-	// ("text", default title) and resolves AFTER createNote's own setNoteType + upsert landed, so a
-	// replace would silently flip an open note back to the plain-text editor.
-	it("new leaves an already-cached row untouched when the fetch carries a staler copy of it", async () => {
-		seedNotes([makeNote("a"), makeNote("b", { noteType: "checklist", title: "Shopping list" })])
-		listNotes.mockResolvedValueOnce([makeNote("a"), makeNote("b", { noteType: "text", title: "2026-01-01 12:00:00" }), makeNote("c")])
+	// The list is only read once someone opens it, and that first read is fresher than one taken now.
+	it("new reads nothing while the list has never been read", async () => {
+		handleNoteEvent(noteEvt({ type: "new", note: "b" as never }))
+		await settle()
 
-		handleNoteEvent(noteEvt({ type: "new", note: "c" as never }))
-		await vi.waitFor(() => {
-			expect(getNotes().map(n => n.uuid)).toEqual(["a", "b", "c"])
-		})
-
-		expect(getNotes()[1]).toMatchObject({ uuid: "b", noteType: "checklist", title: "Shopping list" })
+		expect(listNotes).not.toHaveBeenCalled()
+		expect(testQueryClient.getQueryData(NOTES_QUERY_KEY)).toBeUndefined()
 	})
 
-	it("new leaves the cache untouched when the fetch adds nothing", async () => {
-		const cached = [makeNote("a")]
-		seedNotes(cached)
-		listNotes.mockResolvedValueOnce([makeNote("a")])
-
-		handleNoteEvent(noteEvt({ type: "new", note: "a" as never }))
-		await vi.waitFor(() => {
-			expect(listNotes).toHaveBeenCalledTimes(1)
-		})
-
-		expect(getNotes()).toBe(cached)
-	})
-
-	it("new logs and leaves the cache untouched when the fetch fails", async () => {
+	it("new only marks an unmounted list stale — its next mount reads", async () => {
 		seedNotes([makeNote("a")])
+
+		handleNoteEvent(noteEvt({ type: "new", note: "b" as never }))
+		await settle()
+
+		expect(listNotes).not.toHaveBeenCalled()
+		expect(testQueryClient.getQueryState(NOTES_QUERY_KEY)?.isInvalidated).toBe(true)
+	})
+
+	it("new leaves the cache as it was when the read fails", async () => {
+		seedNotes([makeNote("a")])
+		mountList()
 		listNotes.mockRejectedValueOnce(new Error("offline"))
 
 		handleNoteEvent(noteEvt({ type: "new", note: "b" as never }))
-		await vi.waitFor(() => {
-			expect(logError).toHaveBeenCalled()
-		})
+		await settle()
 
+		expect(listNotes).toHaveBeenCalledTimes(1)
 		expect(getNotes().map(n => n.uuid)).toEqual(["a"])
+	})
+
+	// The create race: the read `new` started is snapshotted while the note is still in its just-created
+	// state ("text", default title). The type and title edits that follow arrive before it lands, with no
+	// row to patch yet, and must not leave that snapshot as the cached row — the outbox pushes the cached
+	// type with the next content save.
+	it.each([
+		["an echo of this account's own setNoteType", 7],
+		["another user's setNoteType", 99]
+	])("new: a read that predates %s is replaced by one that starts after it", async (_label, editorId) => {
+		seedNotes([makeNote("a")])
+		setAccountId(7n)
+		mountList()
+		const stale = deferred<Note[]>()
+		const fresh = deferred<Note[]>()
+		listNotes.mockReturnValueOnce(stale.promise).mockReturnValueOnce(fresh.promise)
+
+		handleNoteEvent(noteEvt({ type: "new", note: "b" as never }))
+		handleNoteEvent(
+			noteEvt({
+				type: "contentEdited",
+				note: "b" as never,
+				content: { Decrypted: "" },
+				noteType: "md",
+				editorId,
+				editedTimestamp: 2n
+			})
+		)
+
+		expect(listNotes).toHaveBeenCalledTimes(2)
+
+		fresh.resolve([makeNote("a"), makeNote("b", { noteType: "md" })])
+		await settle()
+		stale.resolve([makeNote("a"), makeNote("b", { noteType: "text" })])
+		await settle()
+
+		expect(getNotes()[1]).toMatchObject({ uuid: "b", noteType: "md" })
+	})
+
+	it("new: a title edit landing before its read is patched over a read that starts after it", async () => {
+		seedNotes([makeNote("a")])
+		mountList()
+		const stale = deferred<Note[]>()
+		const fresh = deferred<Note[]>()
+		listNotes.mockReturnValueOnce(stale.promise).mockReturnValueOnce(fresh.promise)
+
+		handleNoteEvent(noteEvt({ type: "new", note: "b" as never }))
+		handleNoteEvent(noteEvt({ type: "titleEdited", note: "b" as never, newTitle: { Decrypted: "Shopping list" } }))
+
+		expect(listNotes).toHaveBeenCalledTimes(2)
+
+		stale.resolve([makeNote("a"), makeNote("b", { title: "2026-01-01 12:00:00" })])
+		await settle()
+		fresh.resolve([makeNote("a"), makeNote("b", { title: "Shopping list" })])
+		await settle()
+
+		expect(getNotes()[1]).toMatchObject({ uuid: "b", title: "Shopping list" })
 	})
 })
 
@@ -274,13 +358,38 @@ describe("note socket handlers — contentEdited", () => {
 		expect(getNotes()[0]?.editedTimestamp).toBe(1n)
 	})
 
-	it("skips silently when the note is not in the list cache", () => {
+	it("skips (and logs) a note not in the list cache without reading when no list read is in flight", async () => {
 		seedNotes([])
 		setAccountId(7n)
+		mountList()
 
 		handleNoteEvent(contentEdited("gone", 99))
+		await settle()
 
 		expect(logWarn).toHaveBeenCalled()
+		expect(listNotes).not.toHaveBeenCalled()
+	})
+
+	it("re-reads the list for an echo whose type differs from the cached row, never patching it", async () => {
+		seedNotes([makeNote("a", { noteType: "md" })])
+		setAccountId(7n)
+		mountList()
+
+		handleNoteEvent(contentEdited("a", 7))
+		await settle()
+
+		expect(listNotes).toHaveBeenCalledTimes(1)
+	})
+
+	it("reads nothing for an echo when no list read is in flight", async () => {
+		seedNotes([makeNote("a")])
+		setAccountId(7n)
+		mountList()
+
+		handleNoteEvent(contentEdited("a", 7))
+		await settle()
+
+		expect(listNotes).not.toHaveBeenCalled()
 	})
 })
 
