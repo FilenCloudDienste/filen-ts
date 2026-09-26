@@ -1,24 +1,17 @@
 import { test, expect } from "./fixtures"
 import { bootTo, openTransfers, waitForListingSettled } from "./helpers/listing"
 import { gotoSettings } from "./helpers/settings"
-import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
 // The narrow-viewport shell contract: below the layout breakpoint no module sidebar sits in the shell
 // row, the rail's one drawer trigger reaches it, picking a destination closes it again, and both drive
-// chrome rows stay inside the card. Chromium-only for the same reason every other authed spec is
-// (helpers/firefox.ts).
+// chrome rows stay inside the card.
 //
 // READ-ONLY BY CONSTRUCTION: this spec only navigates and asserts — no note/chat creates, no uploads,
 // nothing to clean up, so it is net-zero against the shared account without a teardown of its own.
 test.describe("narrow viewport", () => {
 	test.use({ viewport: { width: 390, height: 844 } })
 
-	test("no sidebar sits in the row, the rail's trigger opens it, and the drive chrome rows fit", async ({
-		page,
-		injectedSession,
-		browserName
-	}) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("no sidebar sits in the row, the rail's trigger opens it, and the drive chrome rows fit", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		await bootTo(page)
@@ -53,8 +46,7 @@ test.describe("narrow viewport", () => {
 		await expect(recents).toBeHidden()
 	})
 
-	test("every settings section is reachable, and picking one closes the drawer", async ({ page, injectedSession, browserName }) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("every settings section is reachable, and picking one closes the drawer", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		await gotoSettings(page)
@@ -86,12 +78,7 @@ test.describe("narrow viewport", () => {
 		await expect(page.getByRole("complementary")).toHaveCount(0)
 	})
 
-	test("the drive Name column survives 390px and the secondary columns return at desktop", async ({
-		page,
-		injectedSession,
-		browserName
-	}) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("the drive Name column survives 390px and the secondary columns return at desktop", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		await bootTo(page)
@@ -127,8 +114,7 @@ test.describe("narrow viewport", () => {
 		await expect(modified).toBeVisible()
 	})
 
-	test("the transfers toolbar is fully reachable", async ({ page, injectedSession, browserName }) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("the transfers toolbar is fully reachable", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		// Entered through the rail rather than a hard goto to /transfers: the rail's own link is part of

@@ -1,7 +1,6 @@
 import { test, expect } from "./fixtures"
 import { bootTo, enterScratchDirectory, trashScratchDirectory, dismissOverlays, LIVE_WRITE_TIMEOUT_MS } from "./helpers/listing"
 import { trackCspViolations } from "./helpers/csp"
-import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
 // The drive → persistent-player handoff, end to end: double-clicking a drive audio file enqueues the
 // folder's audio siblings and starts the docked player (no preview overlay), and every transport
@@ -43,8 +42,7 @@ function makeSilentWav(seconds: number): Buffer {
 const WAV_A = makeSilentWav(60)
 const WAV_B = makeSilentWav(60)
 
-test("drive audio double-click hands off to the persistent player and transport works", async ({ page, injectedSession, browserName }) => {
-	test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+test("drive audio double-click hands off to the persistent player and transport works", async ({ page, injectedSession }) => {
 	expect(injectedSession.length).toBeGreaterThan(0)
 
 	const cspViolations = trackCspViolations(page)
@@ -158,8 +156,7 @@ test("drive audio double-click hands off to the persistent player and transport 
 // everything created here (the two audio files, the playlist itself) is removed by the end — the
 // `.filen/Playlists` directory the app lazily creates is left behind, which is acceptable app
 // infrastructure (mirrors mobile leaving it too).
-test("playlists: create, add tracks via the picker, reorder, play, and delete", async ({ page, injectedSession, browserName }) => {
-	test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+test("playlists: create, add tracks via the picker, reorder, play, and delete", async ({ page, injectedSession }) => {
 	expect(injectedSession.length).toBeGreaterThan(0)
 
 	const cspViolations = trackCspViolations(page)

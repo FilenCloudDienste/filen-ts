@@ -2,7 +2,6 @@ import { test, expect } from "./fixtures"
 import { bootTo, clickSidebarLink, waitForListingSettled } from "./helpers/listing"
 import { enterFixtureRoot, FIXTURE_FILES } from "./helpers/fixtures"
 import { resolveModKey } from "./helpers/modkey"
-import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
 // Nothing here ever creates, renames, moves, or deletes anything: the new-directory flow is exercised
 // only up to dialog validation, never submitted — a live create has no net-zero counterpart yet
@@ -16,22 +15,12 @@ import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 // directory per scenario, read-only for the whole run, and its row set is therefore both stable and
 // known. Only the tests that read no rows at all (the toolbar/menu/separator ones) stay at the root.
 //
-// Every test here needs the listing's real, authenticated listDir call to settle, which hangs on
-// Playwright-firefox — see helpers/firefox.ts (FIREFOX_HANG_REASON) for the proven root cause. Live-
-// verified: on firefox the listing sits on its loading spinner forever, the toolbar stays permanently
-// disabled, and neither terminal render state is reached.
-
 // One directory per scenario, built once by the fixtures-setup project — the fixture root's exact row
 // count, which the select-all assertion below is pinned to rather than to a snapshot read at runtime.
 const FIXTURE_ROOT_ROW_COUNT = Object.keys(FIXTURE_FILES).length
 
 test.describe("drive", () => {
-	test("the Cloud Drive listing renders the shell, breadcrumb, and directory contents region", async ({
-		page,
-		injectedSession,
-		browserName
-	}) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("the Cloud Drive listing renders the shell, breadcrumb, and directory contents region", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		await bootTo(page)
@@ -52,12 +41,7 @@ test.describe("drive", () => {
 		await expect(listbox.getByRole("option").first()).toBeVisible()
 	})
 
-	test("navigating into a subdirectory grows the URL and breadcrumb and requeries the listing", async ({
-		page,
-		injectedSession,
-		browserName
-	}) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("navigating into a subdirectory grows the URL and breadcrumb and requeries the listing", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		await bootTo(page)
@@ -83,12 +67,7 @@ test.describe("drive", () => {
 		await waitForListingSettled(page)
 	})
 
-	test("an open dialog closes when a history pop changes the location under the same route", async ({
-		page,
-		injectedSession,
-		browserName
-	}) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("an open dialog closes when a history pop changes the location under the same route", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		// The axis matters: /drive and /drive/<uuid> are ONE route (routes/_app/drive.$.tsx), so a pop
@@ -127,12 +106,7 @@ test.describe("drive", () => {
 		await expect(page.getByRole("dialog")).toHaveCount(0)
 	})
 
-	test("view mode toggles between list and grid and persists across a reload", async ({ page, injectedSession, browserName }) => {
-		// Doubly chromium-only: the initial listing read already hangs on firefox (see
-		// FIREFOX_HANG_REASON above), and even past that, reloading an already-authed page hits
-		// Playwright-firefox's separate documented authed-shell-reload instability (auth.spec.ts's own
-		// reload test carries the identical gate for the identical reason).
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("view mode toggles between list and grid and persists across a reload", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		await bootTo(page)
@@ -164,8 +138,7 @@ test.describe("drive", () => {
 		await page.keyboard.press("Escape")
 	})
 
-	test("the sidebar resize separator is keyboard-operable and two presses compound", async ({ page, injectedSession, browserName }) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("the sidebar resize separator is keyboard-operable and two presses compound", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		await bootTo(page)
@@ -195,12 +168,7 @@ test.describe("drive", () => {
 		await expect(handle).toHaveAttribute("aria-valuenow", String(before))
 	})
 
-	test("the sort menu opens, a field/direction selection reflects and survives close/reopen", async ({
-		page,
-		injectedSession,
-		browserName
-	}) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("the sort menu opens, a field/direction selection reflects and survives close/reopen", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		await bootTo(page)
@@ -240,10 +208,8 @@ test.describe("drive", () => {
 
 	test("selection: click selects, Cmd/Ctrl+A selects all, Escape clears, Arrow moves the roving cursor", async ({
 		page,
-		injectedSession,
-		browserName
+		injectedSession
 	}) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		await bootTo(page)
@@ -281,10 +247,8 @@ test.describe("drive", () => {
 
 	test("the new-directory dialog opens and gates an empty/whitespace name without creating anything", async ({
 		page,
-		injectedSession,
-		browserName
+		injectedSession
 	}) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		await bootTo(page)
@@ -324,10 +288,8 @@ test.describe("drive", () => {
 	// test is about.
 	test("the sidebar Links row navigates to the /links virtual root, which renders the shell and settles with no console errors", async ({
 		page,
-		injectedSession,
-		browserName
+		injectedSession
 	}) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		await bootTo(page)

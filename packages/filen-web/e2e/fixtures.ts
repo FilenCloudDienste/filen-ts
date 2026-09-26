@@ -1,6 +1,18 @@
-import { existsSync, readFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { test as base, expect, type BrowserContext, type Page, type Request } from "@playwright/test"
+import {
+	test as base,
+	expect,
+	type Browser,
+	type BrowserContext,
+	type BrowserType,
+	type Page,
+	type PlaywrightWorkerArgs,
+	type Request,
+	type TestInfo
+} from "@playwright/test"
 
 // The session blob is secret-equivalent and lives ONLY here (gitignored, mode 0600) and in the
 // sessionStorage seed — it is never typed into a page, so it cannot appear in screenshots or DOM
@@ -287,6 +299,197 @@ function collectDiagnostics(context: BrowserContext): () => string {
 	return () => lines.join("\n")
 }
 
+// Every lane runs once per browser, but the account has one write lease per resource, and two browsers'
+// writes to the same resource only queue on it: every extra in-flight write is one more lease a timeout
+// can orphan (see playwright.config.ts). So a test in a lane that writes (its project's
+// `metadata.accountLock` names the resource: drive, notes or chats) holds a cross-process lock for that
+// resource for its whole run, page and lease settling included. Reads take none.
+const LOCK_DIR = fileURLToPath(new URL(".locks", import.meta.url))
+const LOCK_POLL_MS = 250
+// Waiting is not the test's own work, so it gets its own budget (the fixture timeout below) rather than
+// eating the test's. Sized for every other browser's writes to the same resource queued ahead of it.
+const LOCK_WAIT_TIMEOUT_MS = 60 * 60_000
+// A lock whose owner has not written its record yet is only that old for an instant.
+const LOCK_UNCLAIMED_MS = 10_000
+
+interface LockOwner {
+	pid: number
+	test: string
+}
+
+function isProcessAlive(pid: number): boolean {
+	try {
+		process.kill(pid, 0)
+
+		return true
+	} catch (error) {
+		// EPERM: alive, owned by someone else.
+		return (error as NodeJS.ErrnoException).code === "EPERM"
+	}
+}
+
+// A lock left by a worker that died (killed at its timeout, or a crashed earlier run) has no live owner.
+function isAbandoned(lock: string): boolean {
+	try {
+		const owner = JSON.parse(readFileSync(join(lock, "owner.json"), "utf8")) as LockOwner
+
+		return !isProcessAlive(owner.pid)
+	} catch {
+		try {
+			return Date.now() - statSync(lock).mtimeMs > LOCK_UNCLAIMED_MS
+		} catch {
+			return false
+		}
+	}
+}
+
+function lockOwner(testInfo: TestInfo): string {
+	return `${testInfo.project.name} › ${testInfo.titlePath.join(" › ")}`
+}
+
+// A cross-process lock shared by every worker of the run (and any other local run on this checkout).
+// mkdir is atomic, so exactly one process creates the lock. An abandoned one is renamed away before it is
+// removed, so two waiters that both find it abandoned cannot delete the lock one of them has just taken.
+async function acquireLock(name: string, test: string): Promise<() => void> {
+	const lock = join(LOCK_DIR, name)
+
+	mkdirSync(LOCK_DIR, { recursive: true })
+
+	for (;;) {
+		try {
+			mkdirSync(lock)
+			writeFileSync(join(lock, "owner.json"), JSON.stringify({ pid: process.pid, test } satisfies LockOwner))
+
+			return () => {
+				rmSync(lock, { recursive: true, force: true })
+			}
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+				throw error
+			}
+		}
+
+		if (isAbandoned(lock)) {
+			const stale = `${lock}.stale-${String(process.pid)}-${String(Date.now())}`
+
+			try {
+				renameSync(lock, stale)
+				rmSync(stale, { recursive: true, force: true })
+				console.warn(`lock "${name}" was abandoned by a dead worker, taken over`)
+			} catch {
+				// Another waiter took it over first.
+			}
+
+			continue
+		}
+
+		await new Promise(resolve => setTimeout(resolve, LOCK_POLL_MS))
+	}
+}
+
+// Playwright's WebKit keeps OPFS in one directory per origin for the whole machine (macOS:
+// ~/Library/WebKit/org.webkit.Playwright/WebsiteData), whatever profile a persistent context is given, so
+// every webkit test shares the app's storage: its session, its settings, its database files. So webkit
+// tests run one at a time under this lock, each from a wiped origin (wipeWebkitOrigin).
+const WEBKIT_STORAGE_LOCK = "webkit-storage"
+
+// Clears what outlives a profile, from a same-origin document that does not boot the app (booting would
+// open the database and lock the very files this removes).
+async function wipeWebkitOrigin(context: BrowserContext, baseURL: string): Promise<void> {
+	const page = await context.newPage()
+
+	await page.goto(new URL("/robots.txt", baseURL).toString())
+	await page.evaluate(async () => {
+		const root = await navigator.storage.getDirectory()
+		const names: string[] = []
+
+		for await (const [name] of root.entries()) {
+			names.push(name)
+		}
+
+		await Promise.all(names.map(name => root.removeEntry(name, { recursive: true })))
+		await Promise.all((await navigator.serviceWorker.getRegistrations()).map(registration => registration.unregister()))
+		await Promise.all((await caches.keys()).map(key => caches.delete(key)))
+	})
+	await page.close()
+}
+
+// A persistent webkit context over a fresh profile, its blank start page closed and its origin wiped.
+// `discard` removes the profile once the context is closed.
+async function launchWebkitContext(
+	webkit: BrowserType,
+	options: Parameters<BrowserType["launchPersistentContext"]>[1]
+): Promise<{ context: BrowserContext; discard: () => void }> {
+	const profile = mkdtempSync(join(tmpdir(), "filen-e2e-webkit-"))
+	const context = await webkit.launchPersistentContext(profile, options)
+
+	await Promise.all(context.pages().map(blank => blank.close()))
+
+	if (options?.baseURL !== undefined) {
+		await wipeWebkitOrigin(context, options.baseURL)
+	}
+
+	return {
+		context,
+		discard: () => {
+			rmSync(profile, { recursive: true, force: true })
+		}
+	}
+}
+
+// For a hook, which gets no `context` fixture: a context made the way the fixtures make one, under the
+// account lock its project writes with and, on webkit, the storage lock over a persistent wiped profile.
+export async function openHookContext(
+	{ browser, browserName, playwright }: { browser: Browser; browserName: string; playwright: PlaywrightWorkerArgs["playwright"] },
+	testInfo: TestInfo,
+	baseURL: string
+): Promise<{ context: BrowserContext; close: () => Promise<void> }> {
+	const releases: (() => void)[] = []
+	const resource: unknown = testInfo.project.metadata["accountLock"]
+	const owner = `${lockOwner(testInfo)} (hook)`
+
+	if (typeof resource === "string") {
+		releases.push(await acquireLock(resource, owner))
+	}
+
+	const release = () => {
+		for (const releaseLock of releases.reverse()) {
+			releaseLock()
+		}
+	}
+
+	try {
+		if (browserName !== "webkit") {
+			const context = await browser.newContext({ baseURL })
+
+			return {
+				context,
+				close: async () => {
+					await context.close()
+					release()
+				}
+			}
+		}
+
+		releases.push(await acquireLock(WEBKIT_STORAGE_LOCK, owner))
+
+		const { context, discard } = await launchWebkitContext(playwright.webkit, { baseURL })
+
+		return {
+			context,
+			close: async () => {
+				await context.close()
+				discard()
+				release()
+			}
+		}
+	} catch (error) {
+		release()
+
+		throw error
+	}
+}
+
 // Opt-in only: reproduces CI's slower runners locally by slowing every Chromium renderer in the
 // context by this factor. Anything but a number above 1 (unset, garbage, 1) leaves the run untouched.
 const CPU_THROTTLE_RATE = Number(process.env["E2E_CPU_THROTTLE"] ?? "1")
@@ -296,7 +499,132 @@ const CPU_THROTTLE_RATE = Number(process.env["E2E_CPU_THROTTLE"] ?? "1")
 // init script; the app's own e2e hook moves it into the worker + kv and re-runs the route guards).
 // Skips cleanly when no session was minted (no credentials), so the SDK-free subset still runs for
 // contributors without credentials.
-export const test = base.extend<{ injectedSession: string; failureDiagnostics: undefined }>({
+export const test = base.extend<{
+	injectedSession: string
+	failureDiagnostics: undefined
+	accountLock: undefined
+	webkitStorageLock: undefined
+}>({
+	accountLock: [
+		// Playwright requires a destructured first argument; browserName is a free worker-scoped one.
+		async ({ browserName: _browserName }, use, testInfo) => {
+			const resource: unknown = testInfo.project.metadata["accountLock"]
+
+			if (typeof resource !== "string") {
+				await use(undefined)
+
+				return
+			}
+
+			const release = await acquireLock(resource, lockOwner(testInfo))
+
+			try {
+				await use(undefined)
+			} finally {
+				release()
+			}
+		},
+		{ auto: true, timeout: LOCK_WAIT_TIMEOUT_MS }
+	],
+	// Taken after the account lock, always in that order, so two tests can never hold one each and wait
+	// on the other's.
+	webkitStorageLock: [
+		async ({ browserName, accountLock: _accountLock }, use, testInfo) => {
+			if (browserName !== "webkit") {
+				await use(undefined)
+
+				return
+			}
+
+			const release = await acquireLock(WEBKIT_STORAGE_LOCK, lockOwner(testInfo))
+
+			try {
+				await use(undefined)
+			} finally {
+				release()
+			}
+		},
+		{ auto: true, timeout: LOCK_WAIT_TIMEOUT_MS }
+	],
+	// WebKit backs OPFS only in a browser profile on disk, never in Playwright's default in-memory
+	// contexts (getDirectory() rejects with UnknownError there), and the app cannot boot without it. So a
+	// webkit test runs in a persistent context over a fresh profile of its own (which isolates everything
+	// but OPFS, see WEBKIT_STORAGE_LOCK), with the options the project's context would have had. The
+	// default context is still created, but no page ever opens in it. Depends on the locks so they
+	// outlive the context.
+	context: async (
+		{
+			context,
+			webkitStorageLock: _webkitStorageLock,
+			browserName,
+			playwright,
+			baseURL,
+			viewport,
+			userAgent,
+			deviceScaleFactor,
+			isMobile,
+			hasTouch,
+			colorScheme,
+			locale,
+			serviceWorkers,
+			acceptDownloads,
+			video
+		},
+		use,
+		testInfo
+	) => {
+		if (browserName !== "webkit") {
+			await use(context)
+
+			return
+		}
+
+		const videoMode = typeof video === "string" ? video : video.mode
+		const videoDir = testInfo.outputPath("webkit-video")
+		const { context: persistent, discard } = await launchWebkitContext(playwright.webkit, {
+			...(baseURL !== undefined ? { baseURL } : {}),
+			viewport,
+			...(userAgent !== undefined ? { userAgent } : {}),
+			...(deviceScaleFactor !== undefined ? { deviceScaleFactor } : {}),
+			isMobile,
+			hasTouch,
+			colorScheme,
+			...(locale !== undefined ? { locale } : {}),
+			serviceWorkers,
+			acceptDownloads,
+			...(videoMode === "off" ? {} : { recordVideo: { dir: videoDir } })
+		})
+
+		// Collected as pages open: one a test closes itself is gone from pages() by the end.
+		const videos: NonNullable<ReturnType<Page["video"]>>[] = []
+
+		persistent.on("page", opened => {
+			const recording = opened.video()
+
+			if (recording !== null) {
+				videos.push(recording)
+			}
+		})
+
+		try {
+			await use(persistent)
+		} finally {
+			await persistent.close()
+
+			if (videoMode === "retain-on-failure" && testInfo.status !== testInfo.expectedStatus) {
+				for (const [index, recording] of videos.entries()) {
+					await testInfo.attach(`video${index === 0 ? "" : `-${String(index)}`}`, {
+						path: await recording.path(),
+						contentType: "video/webm"
+					})
+				}
+			} else {
+				rmSync(videoDir, { recursive: true, force: true })
+			}
+
+			discard()
+		}
+	},
 	failureDiagnostics: [
 		async ({ context }, use, testInfo) => {
 			const report = collectDiagnostics(context)
@@ -330,7 +658,7 @@ export const test = base.extend<{ injectedSession: string; failureDiagnostics: u
 
 		await use(page)
 	},
-	injectedSession: async ({ page, context }, use) => {
+	injectedSession: async ({ page, context, accountLock: _accountLock }, use) => {
 		if (!existsSync(SESSION_FILE)) {
 			test.skip(true, "no injected session (e2e credentials not configured)")
 

@@ -2,7 +2,6 @@ import { test, expect } from "./fixtures"
 import { waitForE2eHooks } from "./helpers/e2eHooks"
 import { gotoSettings } from "./helpers/settings"
 import { isDark, pressUntilTheme } from "./helpers/theme"
-import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
 // The browser is the only real proof that the shortcuts catalog is complete WITHOUT having visited
 // every feature's lazily-imported route chunk, and that a combo recording really does suppress the
@@ -10,9 +9,6 @@ import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 //
 // Read-only and net-zero by construction: the one rebind attempted is a CONFLICTING combo, which is
 // refused and therefore persists nothing — there is no "reset to default" cleanup step to forget.
-//
-// Chromium-only: the authed shell mounts useAccountQuery, the worker cross-origin SDK path that hangs
-// on Playwright-firefox (helpers/firefox.ts).
 test.describe("keyboard shortcuts", () => {
 	// Pin the color scheme so the "system" default resolves deterministically to light.
 	test.use({ colorScheme: "light" })
@@ -27,12 +23,7 @@ test.describe("keyboard shortcuts", () => {
 		return page.locator('li[data-action-id="app.openSettings"]')
 	}
 
-	test("the overlay opens on its combo and lists groups from route chunks that were never loaded", async ({
-		page,
-		injectedSession,
-		browserName
-	}) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("the overlay opens on its combo and lists groups from route chunks that were never loaded", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		await gotoSettings(page)
@@ -61,8 +52,7 @@ test.describe("keyboard shortcuts", () => {
 		await expect(dialog).toBeHidden()
 	})
 
-	test("Settings -> Keyboard renders the same catalog", async ({ page, injectedSession, browserName }) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("Settings -> Keyboard renders the same catalog", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		await gotoKeyboardSettings(page)
@@ -72,12 +62,7 @@ test.describe("keyboard shortcuts", () => {
 		await expect(settingsRow(page)).toContainText("Not set")
 	})
 
-	test("recording suppresses every live hotkey and refuses a combo another action already holds", async ({
-		page,
-		injectedSession,
-		browserName
-	}) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("recording suppresses every live hotkey and refuses a combo another action already holds", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		await gotoKeyboardSettings(page)
@@ -102,8 +87,7 @@ test.describe("keyboard shortcuts", () => {
 		expect(await page.evaluate(() => window.__filenE2E.comboFor("app.openSettings"))).toBe("")
 	})
 
-	test("Escape cancels a recording without dismissing or navigating anything", async ({ page, injectedSession, browserName }) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("Escape cancels a recording without dismissing or navigating anything", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		await gotoKeyboardSettings(page)
@@ -122,8 +106,7 @@ test.describe("keyboard shortcuts", () => {
 		expect(new URL(page.url()).pathname).toBe("/settings/keyboard")
 	})
 
-	test("a second shortcuts list never strands the recording session", async ({ page, injectedSession, browserName }) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("a second shortcuts list never strands the recording session", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		await gotoKeyboardSettings(page)

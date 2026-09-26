@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test"
-import { test, expect } from "@playwright/test"
+import { test, expect } from "./fixtures"
 import { BOOT_SETTLE_TIMEOUT_MS } from "./helpers/listing"
 
 // SDK-free: completePasswordReset() is never called (a real call would hit the live, rate-limited

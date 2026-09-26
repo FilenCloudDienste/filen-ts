@@ -10,7 +10,6 @@ import {
 	waitForListingSettled,
 	LIVE_WRITE_TIMEOUT_MS
 } from "./helpers/listing"
-import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 import { resolveModKey } from "./helpers/modkey"
 
 // Copies land through the SDK's copy job (download + re-upload), so each leg waits on the job's own
@@ -113,10 +112,8 @@ test.describe.configure({ mode: "serial" })
 test.describe("drive copy", () => {
 	test("copies a file into another directory through the item menu's tree, leaving the source in place", async ({
 		page,
-		injectedSession,
-		browserName
+		injectedSession
 	}) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		const runId = crypto.randomUUID()
@@ -154,8 +151,10 @@ test.describe("drive copy", () => {
 
 			await expect(nested.listbox.getByRole("option", { name: fileName })).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 
-			// One transfers row for the whole copy, which reopens its card.
+			// One transfers row for the whole copy, which reopens its card. The hidden card leaves through
+			// its exit animation first; a card reopened meanwhile is a second one beside it (copyToast.ts).
 			await page.getByRole("button", { name: "Hide copy progress" }).click()
+			await expect(page.getByText(`Copied 1 item → ${targetDirName}`)).toHaveCount(0)
 			await openTransfers(page)
 			await expect(page.getByRole("button", { name: "Show copy progress" })).toHaveCount(1)
 			await page.getByRole("button", { name: "Show copy progress" }).click()
@@ -168,12 +167,7 @@ test.describe("drive copy", () => {
 		}
 	})
 
-	test("copies a selection beside itself through the destination picker, keeping both names", async ({
-		page,
-		injectedSession,
-		browserName
-	}) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("copies a selection beside itself through the destination picker, keeping both names", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		const runId = crypto.randomUUID()
@@ -217,12 +211,7 @@ test.describe("drive copy", () => {
 		}
 	})
 
-	test("copies with mod+c and cuts with mod+x, pasting by key and from the empty-space menu", async ({
-		page,
-		injectedSession,
-		browserName
-	}) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("copies with mod+c and cuts with mod+x, pasting by key and from the empty-space menu", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		const runId = crypto.randomUUID()
@@ -311,12 +300,7 @@ test.describe("drive copy", () => {
 		}
 	})
 
-	test("copies by dragging with the copy modifier held, onto a row and onto a breadcrumb", async ({
-		page,
-		injectedSession,
-		browserName
-	}) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("copies by dragging with the copy modifier held, onto a row and onto a breadcrumb", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		const runId = crypto.randomUUID()

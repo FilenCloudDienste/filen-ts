@@ -12,7 +12,6 @@ import {
 } from "./helpers/listing"
 import { resolveModKey } from "./helpers/modkey"
 import { trackCspViolations } from "./helpers/csp"
-import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
 async function createDirectory(page: Page, listbox: ReturnType<Page["getByRole"]>, name: string): Promise<void> {
 	await createDirectoryViaDialog(page, name)
@@ -28,10 +27,8 @@ async function createDirectory(page: Page, listbox: ReturnType<Page["getByRole"]
 // several seconds) without adding coverage.
 test("subtree search finds a nested file with its parent path, mod+f focuses it, hits navigate/preview per type, and Escape/no-results both resolve", async ({
 	page,
-	injectedSession,
-	browserName
+	injectedSession
 }) => {
-	test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 	expect(injectedSession.length).toBeGreaterThan(0)
 
 	const runId = crypto.randomUUID()

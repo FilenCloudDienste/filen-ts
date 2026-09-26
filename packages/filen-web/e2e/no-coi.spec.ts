@@ -3,7 +3,7 @@ import { readFileSync, statSync } from "node:fs"
 import { extname, join, normalize } from "node:path"
 import { fileURLToPath } from "node:url"
 import type { AddressInfo } from "node:net"
-import { test, expect } from "@playwright/test"
+import { test, expect } from "./fixtures"
 
 const DIST = fileURLToPath(new URL("../dist", import.meta.url))
 
@@ -63,7 +63,7 @@ function startPlainServer(): Promise<PlainServer> {
 	})
 }
 
-test.describe("no cross-origin isolation", { tag: "@capability" }, () => {
+test.describe("no cross-origin isolation", () => {
 	// Undefined until beforeAll assigns it: a rejected startPlainServer would otherwise leave afterAll
 	// closing nothing, and a throw in teardown REPLACES the beforeAll error that caused it.
 	let plain: PlainServer | undefined
@@ -105,10 +105,8 @@ test.describe("no cross-origin isolation", { tag: "@capability" }, () => {
 
 // Its own describe: this one navigates to the PREVIEW baseURL (the app served WITH the COI headers)
 // and only blocks an artifact, so it has no use for the plain server — sharing the describe above made
-// every project that collects this file start and stop one for nothing. Same @capability tag: it
-// renders the boot-error screen independently of whether the app can boot, which is exactly what the
-// webkit lane's grep selects for.
-test.describe("blocked SDK artifacts", { tag: "@capability" }, () => {
+// every project that collects this file start and stop one for nothing.
+test.describe("blocked SDK artifacts", () => {
 	test("a blocked SDK worker artifact shows the boot error with the artifacts reason", async ({ page }) => {
 		await page.route("**/filen-sdk-worker-thread.js", route => route.abort())
 

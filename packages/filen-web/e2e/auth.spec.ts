@@ -105,14 +105,7 @@ test.describe("auth", () => {
 		})
 	})
 
-	test("an authed session survives a reload without re-authenticating against the SDK API", async ({
-		page,
-		injectedSession,
-		browserName
-	}) => {
-		// Playwright-firefox's documented authed-shell-reload instability (Corrupted Content Error) when
-		// reloading an already-authed page.
-		test.skip(browserName !== "chromium", "reload-resume is chromium-gated: Playwright-firefox authed-shell-reload instability")
+	test("an authed session survives a reload without re-authenticating against the SDK API", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		await bootTo(page, "/")
@@ -151,11 +144,7 @@ test.describe("auth", () => {
 		expect(loginRequests, sdkHostRequests.join("\n")).toEqual([])
 	})
 
-	test("logout signs out, wipes the local session, and a second tab converges to sign-in", async ({ page, context, browserName }) => {
-		// Second-SDK-worker-tab crash (storage.spec's follower-tab test hits the identical rationale) plus
-		// the same authed-shell-reload instability as the test above.
-		test.skip(browserName !== "chromium", "second-tab convergence is chromium-gated: Playwright-firefox second-SDK-worker-tab crash")
-
+	test("logout signs out, wipes the local session, and a second tab converges to sign-in", async ({ page, context }) => {
 		const session = readHarvestedSession()
 
 		test.skip(session === null, "no injected session (e2e credentials not configured)")
@@ -210,10 +199,9 @@ test.describe("auth", () => {
 		const sessionStillPresent = await page.evaluate(() => window.__filenE2E.kvHas("sdk.session.v1"))
 		expect(sessionStillPresent).toBe(false)
 
-		// The second tab's own worker still holds its own live client; reloading is what re-reads the
-		// now-empty shared kv (seedOncePerPage's marker means this reload does NOT re-seed) and
-		// converges it onto sign-in too.
-		await second.reload()
+		// The second tab converges by itself: the logout broadcast reloads every other tab (__root.tsx),
+		// and that reload re-reads the now-empty shared kv (seedOncePerPage's marker means it does NOT
+		// re-seed). Reloading it here as well raced that reload, which Firefox aborts.
 		await expect(second.getByText("Sign in to Filen")).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
 
 		await second.close()

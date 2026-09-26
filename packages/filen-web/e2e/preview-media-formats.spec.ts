@@ -3,7 +3,6 @@ import { bootTo } from "./helpers/listing"
 import { enterFixtureDirectory, FIXTURE_FILES } from "./helpers/fixtures"
 import { PDF_PASSWORD_CORRECT } from "./helpers/fixtureBytes"
 import { trackCspViolations } from "./helpers/csp"
-import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
 // Format-specific preview rendering: image (the overlay's own pager loop), HEIC (client-side
 // transform), and PDF (multi-page scroll, password retry) — every leg opens a real worker/decoder
@@ -14,12 +13,7 @@ import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 // that made a teardown's root-row click retry forever against a listing whose rows kept detaching
 // under the concurrent churn.
 
-test("image preview opens, pages with the button and the arrow key, and closes with escape", async ({
-	page,
-	injectedSession,
-	browserName
-}) => {
-	test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+test("image preview opens, pages with the button and the arrow key, and closes with escape", async ({ page, injectedSession }) => {
 	expect(injectedSession.length).toBeGreaterThan(0)
 
 	// Exactly two slots, so the pager has somewhere to go and exactly one direction is enabled at each end.
@@ -64,12 +58,7 @@ test("image preview opens, pages with the button and the arrow key, and closes w
 // mediaType.test.ts, heicCodec.test.ts), an injected/mocked decoder can't prove this. Also
 // proves the buffered-not-streamed guarantee end to end (the img's own src) and zero CSP violations
 // during the WASM load + decode (the CSP concession this feature could have needed, but didn't).
-test("HEIC preview transforms client-side and renders via the buffered path, never the SW route", async ({
-	page,
-	injectedSession,
-	browserName
-}) => {
-	test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+test("HEIC preview transforms client-side and renders via the buffered path, never the SW route", async ({ page, injectedSession }) => {
 	expect(injectedSession.length).toBeGreaterThan(0)
 
 	const [nameHeic] = FIXTURE_FILES["preview-heic"]
@@ -110,10 +99,8 @@ test("HEIC preview transforms client-side and renders via the buffered path, nev
 // annotation link overlay are DOM-only too — pdf.js generates that DOM, so this is their only proof.
 test("PDF preview renders multi-page content with a selectable text layer and safe annotation links, pages via its own toolbar with a real scroll, and closes, no CSP console errors", async ({
 	page,
-	injectedSession,
-	browserName
+	injectedSession
 }) => {
-	test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 	expect(injectedSession.length).toBeGreaterThan(0)
 
 	// Two 60s canvas renders, a 30s text layer, the retried band reads and the page-2 scroll add to
@@ -252,10 +239,8 @@ test("PDF preview renders multi-page content with a selectable text layer and sa
 // through its normal label/submit affordances, exactly as a user would.
 test("PDF preview prompts for a password, retries after a wrong one, and renders once correct, no CSP console errors", async ({
 	page,
-	injectedSession,
-	browserName
+	injectedSession
 }) => {
-	test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 	expect(injectedSession.length).toBeGreaterThan(0)
 
 	const [namePdf] = FIXTURE_FILES["preview-pdf-locked"]

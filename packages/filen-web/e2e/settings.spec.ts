@@ -2,24 +2,17 @@ import { readFileSync } from "node:fs"
 import { test, expect } from "./fixtures"
 import { gotoSettings, waitForAccountLoaded } from "./helpers/settings"
 import { BOOT_SETTLE_TIMEOUT_MS, LIVE_WRITE_TIMEOUT_MS } from "./helpers/listing"
-import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
 // Every settings section here is either a plain, read-only render (Account/Appearance/Security's own
 // existing assertions) or a client-side-only preference (theme) — nothing in this spec live-mutates
 // session-invalidating or irreversible account state (changeEmail/setNickname/updatePersonalInfo/
 // uploadAvatar/deleteAll* all stay unit/render-only, never invoked against the live shared account).
 // getUserInfo/getGdprInfo are the only live network reads exercised, both read-only.
-//
-// Chromium-only: the account query (useAccountQuery -> getUserInfo) fires a real authenticated read on
-// every settings page mount — the same worker cross-origin SDK path that hangs on Playwright-firefox
-// (helpers/firefox.ts).
 test.describe("settings", () => {
 	test("the settings sidebar renders every section and Account is the index-redirect landing section", async ({
 		page,
-		injectedSession,
-		browserName
+		injectedSession
 	}) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		await gotoSettings(page)
@@ -31,12 +24,7 @@ test.describe("settings", () => {
 		await expect(page.getByRole("link", { name: "Account", exact: true })).toHaveAttribute("aria-current", "page")
 	})
 
-	test("the Account section renders live getUserInfo data (email + storage breakdown)", async ({
-		page,
-		injectedSession,
-		browserName
-	}) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("the Account section renders live getUserInfo data (email + storage breakdown)", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		await gotoSettings(page)
@@ -55,8 +43,7 @@ test.describe("settings", () => {
 		await expect(storageCard.getByText(/of .* used/)).toBeVisible()
 	})
 
-	test("security page is reachable from the sidebar and renders unchanged", async ({ page, injectedSession, browserName }) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("security page is reachable from the sidebar and renders unchanged", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		await gotoSettings(page)
@@ -75,12 +62,7 @@ test.describe("settings", () => {
 		await expect(page.getByText("Delete account", { exact: true })).toBeVisible()
 	})
 
-	test("the Events section renders live getUserEvents rows (the e2e account has login history)", async ({
-		page,
-		injectedSession,
-		browserName
-	}) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("the Events section renders live getUserEvents rows (the e2e account has login history)", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		await gotoSettings(page)
@@ -100,12 +82,7 @@ test.describe("settings", () => {
 		await expect(firstEventRow).toBeVisible()
 	})
 
-	test("the Billing section renders every table's empty state (the e2e account is FREE)", async ({
-		page,
-		injectedSession,
-		browserName
-	}) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("the Billing section renders every table's empty state (the e2e account is FREE)", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		await gotoSettings(page)
@@ -121,10 +98,8 @@ test.describe("settings", () => {
 
 	test("the destructive data-control cards render but their typed-confirm gate blocks a wrong phrase (never live-mutated)", async ({
 		page,
-		injectedSession,
-		browserName
+		injectedSession
 	}) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		await gotoSettings(page)
@@ -165,8 +140,7 @@ test.describe("settings", () => {
 		await itemsDialog.getByRole("button", { name: "Cancel", exact: true }).click()
 	})
 
-	test("the theme three-way switch round-trips through light/dark/system", async ({ page, injectedSession, browserName }) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("the theme three-way switch round-trips through light/dark/system", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		await gotoSettings(page)
@@ -203,12 +177,7 @@ test.describe("settings", () => {
 		await expect.poll(() => page.evaluate(() => localStorage.getItem("theme"))).toBe("system")
 	})
 
-	test("every settings section is reachable from the sidebar in one pass, with no console errors", async ({
-		page,
-		injectedSession,
-		browserName
-	}) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("every settings section is reachable from the sidebar in one pass, with no console errors", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		await gotoSettings(page)
@@ -257,8 +226,7 @@ test.describe("settings", () => {
 		expect(consoleErrors, consoleErrors.join("\n")).toEqual([])
 	})
 
-	test("GDPR export downloads a JSON file", async ({ page, injectedSession, browserName }) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("GDPR export downloads a JSON file", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		await gotoSettings(page)
@@ -278,12 +246,7 @@ test.describe("settings", () => {
 		expect(parsed).toMatchObject({ user: expect.any(Object), events: expect.any(Object) })
 	})
 
-	test("the Advanced section renders working Terms of Service and Privacy Policy links", async ({
-		page,
-		injectedSession,
-		browserName
-	}) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("the Advanced section renders working Terms of Service and Privacy Policy links", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		await gotoSettings(page)
@@ -306,8 +269,7 @@ test.describe("settings", () => {
 		await expect(privacy).toHaveAttribute("rel", "noopener noreferrer")
 	})
 
-	test("the Advanced section opens the lazily-loaded open source licenses dialog", async ({ page, injectedSession, browserName }) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("the Advanced section opens the lazily-loaded open source licenses dialog", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		await gotoSettings(page)

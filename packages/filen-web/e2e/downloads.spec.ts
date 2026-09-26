@@ -5,7 +5,7 @@ import { enterFixtureDirectory, FIXTURE_FILES } from "./helpers/fixtures"
 import { bootTo, clickSidebarLink, openTransfers, LIVE_WRITE_TIMEOUT_MS } from "./helpers/listing"
 import { DOWNLOAD_FSA_TEXT, DOWNLOAD_SW_TEXT } from "./helpers/fixtureBytes"
 import { MOD_KEY } from "./helpers/modkey"
-import { FIREFOX_HANG_REASON } from "./helpers/firefox"
+import { FIREFOX_SERVICE_WORKERS_BLOCKED } from "./helpers/firefox"
 
 // Neither native picker is drivable by Playwright, so every FSA-path test below stubs
 // window.showSaveFilePicker (installed via addInitScript, before the app's own first script runs, so
@@ -125,12 +125,7 @@ function readSmokeSink(page: Page): Promise<{ bytes: number; first4: number[] }>
 // appears is the download under test.
 
 test.describe("downloads", () => {
-	test("a single file downloads through the File System Access path and the transfer reaches Done", async ({
-		page,
-		injectedSession,
-		browserName
-	}) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("a single file downloads through the File System Access path and the transfer reaches Done", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		await stubFsaPicker(page)
@@ -162,12 +157,7 @@ test.describe("downloads", () => {
 		expect(sink.bytes).toBe(Buffer.byteLength(DOWNLOAD_FSA_TEXT, "utf8"))
 	})
 
-	test("a multi-select download zips into ONE archive over the File System Access path", async ({
-		page,
-		injectedSession,
-		browserName
-	}) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("a multi-select download zips into ONE archive over the File System Access path", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		await stubFsaPicker(page)
@@ -217,7 +207,7 @@ test.describe("downloads", () => {
 		injectedSession,
 		browserName
 	}) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+		test.skip(browserName === "firefox", FIREFOX_SERVICE_WORKERS_BLOCKED)
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		await deleteFsaPicker(page)
@@ -256,10 +246,8 @@ test.describe("downloads", () => {
 
 	test("cancelling a File System Access download mid-flight removes the row and leaves the source untouched", async ({
 		page,
-		injectedSession,
-		browserName
+		injectedSession
 	}) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		// The only read-lane test that enters the fixture tree TWICE — once here and again after the

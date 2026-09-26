@@ -5,16 +5,12 @@ import { test, expect, closeTrackedPage, settleLeases } from "./fixtures"
 import { focusEditorSurface } from "./helpers/editor"
 import { waitForE2eHooks } from "./helpers/e2eHooks"
 import { BOOT_SETTLE_TIMEOUT_MS, bootTo, dismissStartupReminders, LIVE_WRITE_TIMEOUT_MS } from "./helpers/listing"
-import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 import { SESSION_SLOT } from "@/e2e-hooks/sessionSlot"
 
 // Notes shell smoke: rail entry → /notes, the contextual sidebar renders, the two-view toggle switches,
 // and a UI-created note lands in the list and navigates. Net-zero on the shared FREE account — the one
 // created note is torn down through the programmatic e2e hook (this shell has no trash UI yet; that
 // lands in the actions step).
-//
-// Chromium-only: NotesSidebar fires authenticated reads (listNotes, listNoteTags) on mount — the same
-// cross-origin worker SDK path that hangs on Playwright-firefox (helpers/firefox.ts).
 //
 // Serial, not parallel (same rationale as drive-actions.spec.ts): the shared FREE account's note cap
 // is a hard 10 (server-enforced `note_limit_reached`), and several tests in this file create a real
@@ -181,8 +177,7 @@ async function withNoteLeakGuard(page: Page, body: () => Promise<void>): Promise
 }
 
 test.describe("notes", () => {
-	test("rail entry navigates to /notes and renders the contextual sidebar", async ({ page, injectedSession, browserName }) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("rail entry navigates to /notes and renders the contextual sidebar", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		await gotoNotes(page)
@@ -192,8 +187,7 @@ test.describe("notes", () => {
 		await expect(page.getByRole("button", { name: "New note", exact: true })).toBeVisible()
 	})
 
-	test("the two-view toggle switches between notes and tags", async ({ page, injectedSession, browserName }) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("the two-view toggle switches between notes and tags", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		await gotoNotes(page)
@@ -213,8 +207,7 @@ test.describe("notes", () => {
 		await expect(notesToggle).toHaveAttribute("aria-pressed", "true")
 	})
 
-	test("creating a note lands in the list and navigates to it", async ({ page, injectedSession, browserName }) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("creating a note lands in the list and navigates to it", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		await gotoNotes(page)
@@ -258,12 +251,7 @@ test.describe("notes", () => {
 	// on the previous one's live state (a rename before a pin has something to assert on, trash before
 	// restore has something to restore), so splitting would only duplicate the create+rename setup per
 	// test for no isolation gain.
-	test("action menu: rename, pin, favorite, tag assign, trash/restore, delete permanently", async ({
-		page,
-		injectedSession,
-		browserName
-	}) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("action menu: rename, pin, favorite, tag assign, trash/restore, delete permanently", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		await gotoNotes(page)
@@ -482,10 +470,8 @@ test.describe("notes", () => {
 	// click lands; no picker stub needed, unlike downloads.spec.ts's drive-file cases.
 	test("export: a checklist note downloads faithful markdown lines, and export-all zips the same content", async ({
 		page,
-		injectedSession,
-		browserName
+		injectedSession
 	}) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		const content = '<ul data-checked="false"><li>Buy milk</li></ul><ul data-checked="true"><li>Already done</li></ul>'
@@ -626,8 +612,7 @@ async function openCreatedNote(page: Page, noteType: NoteTypeUnderTest, title: s
 // This file's top-level test.describe.configure({ mode: "serial" }) already keeps every note-creating
 // test (this block's and the "notes" block's own) from stacking concurrently against that cap.
 test.describe("notes: read-only content renderers", () => {
-	test("text note renders its raw content", async ({ page, injectedSession, browserName }) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("text note renders its raw content", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		const content = "Hello from a plain text e2e note."
@@ -649,8 +634,7 @@ test.describe("notes: read-only content renderers", () => {
 		}
 	})
 
-	test("code note renders its raw content", async ({ page, injectedSession, browserName }) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("code note renders its raw content", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		const content = "const answer = 42;"
@@ -663,8 +647,7 @@ test.describe("notes: read-only content renderers", () => {
 		}
 	})
 
-	test("md note renders both the raw source split and the live preview", async ({ page, injectedSession, browserName }) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("md note renders both the raw source split and the live preview", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		const content = "# E2E Heading\n\nSome **bold** text."
@@ -682,8 +665,7 @@ test.describe("notes: read-only content renderers", () => {
 		}
 	})
 
-	test("rich note renders sanitized HTML and strips a script tag", async ({ page, injectedSession, browserName }) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("rich note renders sanitized HTML and strips a script tag", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		const content = "<p>Hello <strong>rich</strong> note</p><script>window.__e2eRichXss = true</script>"
@@ -706,8 +688,7 @@ test.describe("notes: read-only content renderers", () => {
 	// reader — the seed is parsed into faithful rows (values + checked state). The read-only ChecklistReader
 	// is now reached only by a trashed note (deriveEditorReadOnly), which this shared FREE account has no
 	// UI-free path to open; the seed-faithfulness it used to prove is covered here on the editor surface.
-	test("checklist note opens in the editor with faithful rows and checked state", async ({ page, injectedSession, browserName }) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("checklist note opens in the editor with faithful rows and checked state", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		const content = '<ul data-checked="false"><li>Buy milk</li></ul><ul data-checked="true"><li>Already done</li></ul>'
@@ -817,12 +798,7 @@ async function readServerContent(page: Page, uuid: string): Promise<string> {
 }
 
 test.describe("notes: live editors", () => {
-	test("text edit typed then reloaded before the debounce survives and reaches the server", async ({
-		page,
-		injectedSession,
-		browserName
-	}) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("text edit typed then reloaded before the debounce survives and reaches the server", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		const marker = `killpath-${String(Date.now())}-${String(Math.floor(Math.random() * 100_000))}`
@@ -863,8 +839,7 @@ test.describe("notes: live editors", () => {
 		}
 	})
 
-	test("md edit persists through the debounce and both panes reflect it after reload", async ({ page, injectedSession, browserName }) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("md edit persists through the debounce and both panes reflect it after reload", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		const headingText = `ReloadHeading-${String(Date.now())}-${String(Math.floor(Math.random() * 100_000))}`
@@ -910,8 +885,7 @@ test.describe("notes: live editors", () => {
 // Rich (Quill) + custom checklist editors wired to the same fault-tolerant outbox.
 // Serial + net-zero like every note-creating test above.
 test.describe("notes: rich and checklist editors", () => {
-	test("rich toolbar formatting survives an immediate reload and reaches the server", async ({ page, injectedSession, browserName }) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("rich toolbar formatting survives an immediate reload and reaches the server", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		const marker = `RichBold${String(Date.now())}${String(Math.floor(Math.random() * 100_000))}`
@@ -970,12 +944,7 @@ test.describe("notes: rich and checklist editors", () => {
 		}
 	})
 
-	test("a hostile-HTML rich note opens sanitized in the editor and never executes its script", async ({
-		page,
-		injectedSession,
-		browserName
-	}) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("a hostile-HTML rich note opens sanitized in the editor and never executes its script", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		const content = "<p>Safe <strong>rich</strong> body</p><script>window.__e2eEditorXss = true</script>"
@@ -995,8 +964,7 @@ test.describe("notes: rich and checklist editors", () => {
 		}
 	})
 
-	test("checklist rows added and toggled survive an immediate reload", async ({ page, injectedSession, browserName }) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("checklist rows added and toggled survive an immediate reload", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		const first = `Chk1-${String(Date.now())}-${String(Math.floor(Math.random() * 100_000))}`
@@ -1120,8 +1088,7 @@ async function bootSecondPage(page: Page, injectedSession: string): Promise<Page
 }
 
 test.describe("notes: realtime", () => {
-	test("a rename on a second page lands live on the editor header and sidebar row", async ({ page, injectedSession, browserName }) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("a rename on a second page lands live on the editor header and sidebar row", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		const { uuid, title } = await createEmptyNoteAndOpen(page, "text", "e2e realtime-meta")
@@ -1163,12 +1130,7 @@ test.describe("notes: realtime", () => {
 		}
 	})
 
-	test("a same-account content edit on a second page is echo-suppressed — no banner, no clobber", async ({
-		page,
-		injectedSession,
-		browserName
-	}) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("a same-account content edit on a second page is echo-suppressed — no banner, no clobber", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		const initialContent = `initial-${String(Date.now())}-${String(Math.floor(Math.random() * 100_000))}`
@@ -1235,12 +1197,7 @@ test.describe("notes: realtime", () => {
 // management surface (render-only past the point a second account would be needed — see below).
 // Serial + net-zero like every other note-creating block in this file.
 test.describe("notes: participants and history dialogs", () => {
-	test("history dialog lists both versions, previews the old one read-only, and restores it", async ({
-		page,
-		injectedSession,
-		browserName
-	}) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("history dialog lists both versions, previews the old one read-only, and restores it", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		const v1 = `HistV1-${String(Date.now())}-${String(Math.floor(Math.random() * 100_000))}`
@@ -1316,8 +1273,7 @@ test.describe("notes: participants and history dialogs", () => {
 	// whichever of empty/populated it turns out to be) renders without ever asserting a specific
 	// outcome past that point, mirroring contacts.spec.ts's own hasContacts-agnostic pattern. Dismissed
 	// via Escape, never submitted — no outward-facing add on the shared account.
-	test("participants dialog renders the owner management surface", async ({ page, injectedSession, browserName }) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("participants dialog renders the owner management surface", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		const { uuid } = await createEmptyNoteAndOpen(page, "text", "e2e participants")
@@ -1366,10 +1322,8 @@ async function typeIntoTextEditor(target: Page, text: string): Promise<void> {
 test.describe("notes: multi-tab outbox", () => {
 	test("a follower tab's edits reach the server, and a killed leader fails over without losing an edit", async ({
 		page,
-		injectedSession,
-		browserName
+		injectedSession
 	}) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		const stamp = `${String(Date.now())}-${String(Math.floor(Math.random() * 100_000))}`

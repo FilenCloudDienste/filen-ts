@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test"
+import { test, expect } from "./fixtures"
 import { BOOT_SETTLE_TIMEOUT_MS } from "./helpers/listing"
 
 // SDK-free: asserts the shell design system + typed i18n catalog render on the pre-auth sign-in

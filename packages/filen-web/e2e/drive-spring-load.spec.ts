@@ -9,7 +9,6 @@ import {
 	waitForListingSettled,
 	LIVE_WRITE_TIMEOUT_MS
 } from "./helpers/listing"
-import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
 // Mirrors src/features/drive/lib/springLoad.ts: how long a drag rests on a directory before it opens.
 const SPRING_LOAD_DELAY_MS = 2000
@@ -49,8 +48,7 @@ async function recordedBlinks(page: Page): Promise<(string | null)[]> {
 // whether the browser's drag survives the listing it started in being replaced by another, which only a
 // drag the browser itself runs can answer.
 test.describe("spring-loaded directories", () => {
-	test("a drag resting on a directory blinks it, opens it, and drops inside it", async ({ page, injectedSession, browserName }) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("a drag resting on a directory blinks it, opens it, and drops inside it", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		const runId = crypto.randomUUID()
@@ -124,8 +122,7 @@ test.describe("spring-loaded directories", () => {
 
 	// Files from the system dropped on a directory row upload into that directory, not beside it. The drop
 	// is dispatched with a real DataTransfer carrying a File: an OS drag can't be driven from the test.
-	test("files from the system dropped on a directory row upload into it", async ({ page, injectedSession, browserName }) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("files from the system dropped on a directory row upload into it", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		const runId = crypto.randomUUID()

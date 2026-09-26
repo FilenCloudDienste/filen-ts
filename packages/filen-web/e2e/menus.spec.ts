@@ -12,7 +12,6 @@ import {
 	BOOT_SETTLE_TIMEOUT_MS
 } from "./helpers/listing"
 import { MOD_KEY } from "./helpers/modkey"
-import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 import { ACTION_DEFS } from "@/features/drive/lib/actionDefs"
 import { drive as driveDict } from "@/locales/en/drive"
 
@@ -98,10 +97,8 @@ test.describe("context menus", () => {
 	// regardless of where this test's own assertions stop.
 	test("a file row, a directory row, the bulk bar, and the trash-variant menu render exactly the gated entries, in order", async ({
 		page,
-		injectedSession,
-		browserName
+		injectedSession
 	}) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		const runId = crypto.randomUUID()
@@ -302,10 +299,8 @@ test.describe("context menus", () => {
 	// variant), and no Move surface is reachable anywhere on the page.
 	test("links + shared-root surfaces: toolbar write-gating stands in for a per-item menu on empty listings", async ({
 		page,
-		injectedSession,
-		browserName
+		injectedSession
 	}) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		await bootTo(page)

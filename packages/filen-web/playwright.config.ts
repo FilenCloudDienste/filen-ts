@@ -1,5 +1,5 @@
 import { fileURLToPath } from "node:url"
-import { defineConfig, devices } from "@playwright/test"
+import { defineConfig, devices, type Project } from "@playwright/test"
 
 // Playwright does not auto-load .env; load the local credentials file explicitly. Node >= 24 ships
 // process.loadEnvFile, which throws when the file is missing — tolerated here because CI supplies the
@@ -42,106 +42,39 @@ const READ_SPECS =
 const NOTES_SPEC = /\/notes\.spec\.ts$/
 const CHATS_SPEC = /\/chats\.spec\.ts$/
 
-export default defineConfig({
-	testDir: "./e2e",
-	fullyParallel: true,
-	// The OVERALL pool. On CI this is a 4-vCPU runner and every page carries a Chromium renderer plus
-	// the SDK's own wasm thread pool (threadCount() = 2 there), so four pages already oversubscribe it.
-	// A project's own `workers` is an UPPER BOUND inside this pool, not a reservation — hence the read
-	// lane's CI cap of 2 below, which leaves the serial write lane a slot instead of starving it.
-	workers: process.env["CI"] ? 3 : 6,
-	forbidOnly: Boolean(process.env["CI"]),
-	// Set PER LANE, not globally — see the READ_SPECS note above for why a retry is safe on a lane that
-	// cannot take the drive lock and actively harmful on one that can.
-	retries: 0,
-	// Unconditional: a wedged LOCAL run holds the same shared account as a CI one and poisons the next
-	// run, so both get the backstop. Expiry is not a clean stop — Playwright abandons the phase loop and
-	// hands the cleanup runner the SAME already-expired deadline, so fixtures-teardown never runs and
-	// the fixture root is left behind on the live account. That leak is bounded and self-healing: the
-	// root is ONE row named `e2e-fixtures-<runId>`, which isScratchDebrisName's anchored `^(e2e-|…)`
-	// matches, so the next run's cleanup sweep drains it and its whole subtree in a single round.
-	//
-	// NOT derived from the lane ceilings below, and it cannot be: chromium-write alone is serial over
-	// 14 spec files at 900s each, more declared ceiling than any run budget could hold. Those are
-	// per-test worst cases a healthy run never spends; this is the outer bound on the run as a whole.
-	// The mandatory serial chain under it IS additive, though — 600s webServer + 120s auth-setup (suite
-	// default) + 600s cleanup-setup + 900s fixtures-setup + 420s fixtures-teardown = 44 min of budget
-	// before and after any spec at all.
-	globalTimeout: 120 * 60_000,
-	reporter: process.env["CI"] ? [["github"], ["html", { open: "never" }], ["list"]] : [["html", { open: "never" }], ["list"]],
-	// Covers auth-setup, firefox and webkit only — every real lane below sets its own. Kept tight all the
-	// same: a write that hangs holds its test open for the whole budget, and the kill at the end of it
-	// orphans a `drive-write` lease that blocks every later test (see the READ_SPECS note), so a generous
-	// default turns one stuck write into a cascade. A slow CI runner is answered with fewer workers.
-	timeout: 120_000,
-	// Governs UI responsiveness only — a live write opts into LIVE_WRITE_TIMEOUT_MS at its own call
-	// site (helpers/listing.ts), so this budget never has to cover the network.
-	expect: { timeout: 10_000 },
-	// The session blob is secret-equivalent; a trace would capture it as an addInitScript / evaluate
-	// argument, so tracing stays off. Failure screenshots are an acceptable residual: the password
-	// input always renders masked (screenshots capture pixels, not DOM values), and auth-setup /
-	// auth.spec type only the dedicated e2e test account's email — never a customer's, never the
-	// session blob.
-	use: {
-		baseURL: BASE_URL,
-		trace: "off",
-		screenshot: "only-on-failure",
-		// Same reasoning as the screenshot above — pixels only, never DOM values or call arguments — and
-		// far and away the best triage tool for a failure that only reproduces on CI.
-		video: process.env["CI"] ? "retain-on-failure" : "off",
-		// A cold authed boot is a wasm init + rayon pool spin-up + OPFS open + session resume; 30s is
-		// several times the slowest observed CI boot, and bounded so a dead preview server says so.
-		navigationTimeout: 30_000,
-		// Bounded, not Playwright's unlimited default: an action whose target silently detaches
-		// mid-interaction (a menu closed by a concurrent re-render) must FAIL with a diagnosable
-		// actionability error, not absorb the whole test budget — a menu click once hung a 240s test
-		// this way. Actionability is a LOCAL, in-page property: nothing legitimate waits a minute to
-		// become clickable, and the old 60s only ever bought a slower path to the same error. Slow
-		// STATE changes belong in expect polls / toPass envelopes, not action waits.
-		actionTimeout: 15_000
-	},
-	projects: [
-		{ name: "auth-setup", testMatch: /auth\.setup\.ts/ },
-		// Self-cleaning sweep: removes every drive-root / trash / playlist item matching a retired e2e
-		// scratch-name prefix before any spec project starts (see setup/cleanup.setup.ts). Depends on
-		// auth-setup rather than duplicating its login, and every spec project below depends on THIS
-		// instead of auth-setup directly — Playwright resolves the chain, so auth-setup still always runs
-		// first. Generous timeout above even the suite default: a debris-heavy account is swept one item
-		// per round across three surfaces, each with its own wall-clock budget — this is the outer bound
-		// those budgets sit inside, not a target.
-		{ name: "cleanup-setup", testMatch: /cleanup\.setup\.ts/, dependencies: ["auth-setup"], timeout: 600_000 },
-		// Builds the ONE shared read-only fixture tree every non-provisioning spec reads from, and names
-		// the project that removes it again (Playwright runs a `teardown` project after its owner AND
-		// everything depending on that owner has finished, so nothing is still reading the tree when it
-		// goes). Every chromium lane below depends on this — including the two that never touch the tree
-		// (notes, chats), which costs them the setup's wall-clock but guarantees the teardown cannot fire
-		// while any chromium spec is still live on the account. Same generous timeout as cleanup-setup:
-		// it does a dozen-odd creates and every upload the suite needs, serially, in one context.
-		{
-			name: "fixtures-setup",
-			testMatch: /fixtures\.setup\.ts/,
-			dependencies: ["cleanup-setup"],
-			teardown: "fixtures-teardown",
-			// Above cleanup-setup's own: this budget has to cover the root create's bounded retries (the
-			// stale-lease case, see fixtures.setup.ts) AND the whole serial build after them.
-			timeout: 900_000
-		},
-		// Above what the single trash can actually burn, because a KILL here is the expensive outcome: it
-		// orphans the `drive-write` lease the trash was holding AND skips the catch that names the leaked
-		// root for the next run's sweep. The worst case is 30s goto + trashScratchDirectory (30s
-		// overlay-reload fallback + 15s sidebar click + 30s settle + 15s row poll + 170s selectAndTrashRow,
-		// whose confirm wait this caller widens to 120s for a root holding 13 subdirectories and 26 files)
-		// = 290s. It runs once per run, so the headroom costs a healthy run nothing.
-		{ name: "fixtures-teardown", testMatch: /fixtures\.teardown\.ts/, timeout: 420_000 },
+// Every lane runs on every browser. The three share the setup projects and the one fixture tree, and the
+// writers among them share the one account: a write lane's tests hold that resource's cross-process
+// account lock (e2e/fixtures.ts, keyed by `metadata.accountLock`), so writes to a resource never overlap
+// across browsers while reads still do. Two browser builds need a different context:
+//   - Playwright's Firefox hangs every nested-worker fetch while a service worker controls the page, and
+//     the SDK's network I/O runs in nested workers, so its lanes block service workers
+//     (e2e/helpers/firefox.ts); the few tests that exercise the service worker skip there.
+//   - Playwright's WebKit backs OPFS only in an on-disk profile, so its tests run in a persistent context.
+//     It keeps that OPFS machine-wide per origin whatever the profile, so webkit tests also run one at a
+//     time from a wiped origin (e2e/fixtures.ts), and its read lane gets a single worker. Isolation and
+//     SharedArrayBuffer work as in Safari.
+type Browser = "chromium" | "firefox" | "webkit"
+
+const BROWSER_USE = {
+	chromium: { ...devices["Desktop Chrome"] },
+	firefox: { ...devices["Desktop Firefox"], serviceWorkers: "block" },
+	webkit: { ...devices["Desktop Safari"] }
+} satisfies Record<Browser, Project["use"]>
+
+function lanes(browser: Browser): Project[] {
+	const use = BROWSER_USE[browser]
+
+	return [
 		// Cannot take the drive lock, so it can neither starve nor orphan one: real concurrency, and a
 		// retry here is a genuine transient-infra retry rather than a second write against an account
 		// the first attempt already left contended.
 		{
-			name: "chromium-read",
-			use: { ...devices["Desktop Chrome"] },
+			name: `${browser}-read`,
+			use,
 			dependencies: ["fixtures-setup"],
 			testMatch: READ_SPECS,
-			workers: process.env["CI"] ? 2 : 5,
+			// WebKit's tests run one at a time anyway (its storage lock), so more workers would only wait.
+			workers: browser === "webkit" ? 1 : process.env["CI"] ? 2 : 5,
 			// ONE retry, not two. This is the only lane that retries at all and it carries most of the
 			// suite, so it is also where the signal is weakest: at two retries a test that passes one run
 			// in three still reports green. One absorbs a single blip against the live account while a
@@ -190,10 +123,11 @@ export default defineConfig({
 		// schedule a project whose dependency failed, so any single write failure silently dropped the
 		// only live coverage the cache-search engine has.
 		{
-			name: "chromium-write",
-			use: { ...devices["Desktop Chrome"] },
+			name: `${browser}-write`,
+			use,
 			dependencies: ["fixtures-setup"],
 			testIgnore: [READ_SPECS, NOTES_SPEC, CHATS_SPEC],
+			metadata: { accountLock: "drive" },
 			workers: 1,
 			retries: 0,
 			// Above the suite default because this lane, and only this lane, pays for the scratch directory
@@ -245,56 +179,122 @@ export default defineConfig({
 		// is ~175s of bounded waiting before a first assertion, and its history test pins ~555s on top.
 		// Hence 600s, and the per-test test.setTimeout calls that papered over it can go.
 		{
-			name: "chromium-notes",
+			name: `${browser}-notes`,
 			timeout: 600_000,
-			use: { ...devices["Desktop Chrome"] },
+			use,
 			dependencies: ["fixtures-setup"],
 			testMatch: NOTES_SPEC,
+			metadata: { accountLock: "notes" },
 			workers: 1,
 			retries: 0
 		},
 		{
-			name: "chromium-chats",
+			name: `${browser}-chats`,
 			timeout: 600_000,
-			use: { ...devices["Desktop Chrome"] },
+			use,
 			dependencies: ["fixtures-setup"],
 			testMatch: CHATS_SPEC,
+			metadata: { accountLock: "chats" },
 			workers: 1,
 			retries: 0
-		},
-		{
-			// Verified empirically (login-free probe, real getDirectory()/SAH-pool open against this
-			// exact Playwright build): Playwright's bundled Firefox has working OPFS-SAH storage, so it
-			// boots the app — unlike webkit below. It does NOT run the full suite: every spec whose tests
-			// need an authenticated SDK read is gated chromium-only in the test body (helpers/firefox.ts),
-			// and each of those files is gated in ALL of its tests, so scoping the lane to the files that
-			// actually have something to run here is exact rather than approximate. Without it firefox
-			// built a browser context and installed the session init script for ~113 tests that then
-			// skipped on their first line. A new spec opts in by being listed here.
-			name: "firefox",
-			use: { ...devices["Desktop Firefox"] },
-			dependencies: ["cleanup-setup"],
-			// Every test here renders only after a cold SDK boot in a fresh context, and the lane starts while
-			// fixtures-setup is uploading, so on CI it runs one test at a time. It retries like the read lane:
-			// nothing in it takes a write lease (sw.spec, its one writer, skips on firefox).
-			...(process.env["CI"] ? { workers: 1 } : {}),
-			retries: process.env["CI"] ? 1 : 0,
-			testMatch: /\/(boot|keymap|no-coi|no-opfs|public-links|register|reset|shell|storage|sw)\.spec\.ts$/
-		},
-		{
-			// Playwright's bundled WebKit cannot open OPFS-SAH storage (verified empirically: it
-			// exposes navigator.storage.getDirectory, but calling it rejects with a generic
-			// UnknownError) — with OPFS now a hard boot requirement, EVERY route boots straight to
-			// /no-opfs, so webkit can never reach the `@no-sdk` app specs (shell/keymap/register/reset)
-			// that need a real boot-to-ready. Real Safari 16.4+ has OPFS and works fine; this is a
-			// Playwright-WebKit limitation only, the same story as its lack of SharedArrayBuffer —
-			// scoped down to the capability-gate pages themselves (no-coi + no-opfs), which render
-			// independently of whether the app can boot at all, so it still needs no auth-setup
-			// dependency and stays runnable without credentials.
-			name: "webkit",
-			use: { ...devices["Desktop Safari"] },
-			grep: /@capability/
 		}
+	]
+}
+
+export default defineConfig({
+	testDir: "./e2e",
+	fullyParallel: true,
+	// The OVERALL pool. On CI this is a 4-vCPU runner and every page carries a Chromium renderer plus
+	// the SDK's own wasm thread pool (threadCount() = 2 there), so four pages already oversubscribe it.
+	// A project's own `workers` is an UPPER BOUND inside this pool, not a reservation — hence the read
+	// lanes' CI cap of 2 below, which leaves the serial write lanes a slot instead of starving them. One
+	// more than a single browser needed: a writer waiting on another browser's account lock holds its slot
+	// with no page open, so it costs the slot and nothing else.
+	workers: process.env["CI"] ? 4 : 6,
+	forbidOnly: Boolean(process.env["CI"]),
+	// Set PER LANE, not globally — see the READ_SPECS note above for why a retry is safe on a lane that
+	// cannot take the drive lock and actively harmful on one that can.
+	retries: 0,
+	// Unconditional: a wedged LOCAL run holds the same shared account as a CI one and poisons the next
+	// run, so both get the backstop. Expiry is not a clean stop — Playwright abandons the phase loop and
+	// hands the cleanup runner the SAME already-expired deadline, so fixtures-teardown never runs and
+	// the fixture root is left behind on the live account. That leak is bounded and self-healing: the
+	// root is ONE row named `e2e-fixtures-<runId>`, which isScratchDebrisName's anchored `^(e2e-|…)`
+	// matches, so the next run's cleanup sweep drains it and its whole subtree in a single round.
+	//
+	// NOT derived from the lane ceilings below, and it cannot be: chromium-write alone is serial over
+	// 14 spec files at 900s each, more declared ceiling than any run budget could hold. Those are
+	// per-test worst cases a healthy run never spends; this is the outer bound on the run as a whole.
+	// The mandatory serial chain under it IS additive, though — 600s webServer + 120s auth-setup (suite
+	// default) + 600s cleanup-setup + 900s fixtures-setup + 420s fixtures-teardown = 44 min of budget
+	// before and after any spec at all.
+	globalTimeout: 120 * 60_000,
+	reporter: process.env["CI"] ? [["github"], ["html", { open: "never" }], ["list"]] : [["html", { open: "never" }], ["list"]],
+	// Covers auth-setup only — every real lane below sets its own. Kept tight all the
+	// same: a write that hangs holds its test open for the whole budget, and the kill at the end of it
+	// orphans a `drive-write` lease that blocks every later test (see the READ_SPECS note), so a generous
+	// default turns one stuck write into a cascade. A slow CI runner is answered with fewer workers.
+	timeout: 120_000,
+	// Governs UI responsiveness only — a live write opts into LIVE_WRITE_TIMEOUT_MS at its own call
+	// site (helpers/listing.ts), so this budget never has to cover the network.
+	expect: { timeout: 10_000 },
+	// The session blob is secret-equivalent; a trace would capture it as an addInitScript / evaluate
+	// argument, so tracing stays off. Failure screenshots are an acceptable residual: the password
+	// input always renders masked (screenshots capture pixels, not DOM values), and auth-setup /
+	// auth.spec type only the dedicated e2e test account's email — never a customer's, never the
+	// session blob.
+	use: {
+		baseURL: BASE_URL,
+		trace: "off",
+		screenshot: "only-on-failure",
+		// Same reasoning as the screenshot above — pixels only, never DOM values or call arguments — and
+		// far and away the best triage tool for a failure that only reproduces on CI.
+		video: process.env["CI"] ? "retain-on-failure" : "off",
+		// A cold authed boot is a wasm init + rayon pool spin-up + OPFS open + session resume; 30s is
+		// several times the slowest observed CI boot, and bounded so a dead preview server says so.
+		navigationTimeout: 30_000,
+		// Bounded, not Playwright's unlimited default: an action whose target silently detaches
+		// mid-interaction (a menu closed by a concurrent re-render) must FAIL with a diagnosable
+		// actionability error, not absorb the whole test budget — a menu click once hung a 240s test
+		// this way. Actionability is a LOCAL, in-page property: nothing legitimate waits a minute to
+		// become clickable, and the old 60s only ever bought a slower path to the same error. Slow
+		// STATE changes belong in expect polls / toPass envelopes, not action waits.
+		actionTimeout: 15_000
+	},
+	projects: [
+		{ name: "auth-setup", testMatch: /auth\.setup\.ts/ },
+		// Self-cleaning sweep: removes every drive-root / trash / playlist item matching a retired e2e
+		// scratch-name prefix before any spec project starts (see setup/cleanup.setup.ts). Depends on
+		// auth-setup rather than duplicating its login, and every spec project below depends on THIS
+		// instead of auth-setup directly — Playwright resolves the chain, so auth-setup still always runs
+		// first. Generous timeout above even the suite default: a debris-heavy account is swept one item
+		// per round across three surfaces, each with its own wall-clock budget — this is the outer bound
+		// those budgets sit inside, not a target.
+		{ name: "cleanup-setup", testMatch: /cleanup\.setup\.ts/, dependencies: ["auth-setup"], timeout: 600_000 },
+		// Builds the ONE shared read-only fixture tree every non-provisioning spec reads from, and names
+		// the project that removes it again (Playwright runs a `teardown` project after its owner AND
+		// everything depending on that owner has finished, so nothing is still reading the tree when it
+		// goes). Every lane of every browser depends on this — including the two that never touch the tree
+		// (notes, chats), which costs them the setup's wall-clock but guarantees the teardown cannot fire
+		// while any spec is still live on the account. Same generous timeout as cleanup-setup:
+		// it does a dozen-odd creates and every upload the suite needs, serially, in one context.
+		{
+			name: "fixtures-setup",
+			testMatch: /fixtures\.setup\.ts/,
+			dependencies: ["cleanup-setup"],
+			teardown: "fixtures-teardown",
+			// Above cleanup-setup's own: this budget has to cover the root create's bounded retries (the
+			// stale-lease case, see fixtures.setup.ts) AND the whole serial build after them.
+			timeout: 900_000
+		},
+		// Above what the single trash can actually burn, because a KILL here is the expensive outcome: it
+		// orphans the `drive-write` lease the trash was holding AND skips the catch that names the leaked
+		// root for the next run's sweep. The worst case is 30s goto + trashScratchDirectory (30s
+		// overlay-reload fallback + 15s sidebar click + 30s settle + 15s row poll + 170s selectAndTrashRow,
+		// whose confirm wait this caller widens to 120s for a root holding 13 subdirectories and 26 files)
+		// = 290s. It runs once per run, so the headroom costs a healthy run nothing.
+		{ name: "fixtures-teardown", testMatch: /fixtures\.teardown\.ts/, timeout: 420_000 },
+		...(["chromium", "firefox", "webkit"] as const).flatMap(lanes)
 	],
 	webServer: {
 		// Build with the e2e hooks, then serve dist with the full COI + hardened-CSP header set. Dev

@@ -12,7 +12,6 @@ import {
 import { focusEditorSurface } from "./helpers/editor"
 import { TEXT_BYTES } from "./helpers/fixtureBytes"
 import { resolveEditorModKey } from "./helpers/modkey"
-import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
 // Preview overlay lifecycle: editable-text save/persist/dirty-guard (including cross-sibling paging),
 // and a trashed file's read-only preview variant. The edited/trashed files never leave their own
@@ -45,10 +44,8 @@ const LONG_TEXT_BYTES = Buffer.from(
 // user-facing shortcut in a real browser regardless, just not one Playwright can drive here.
 test("editable text preview saves via its Save button, persists across reopen, and prompts on unsaved close", async ({
 	page,
-	injectedSession,
-	browserName
+	injectedSession
 }) => {
-	test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 	expect(injectedSession.length).toBeGreaterThan(0)
 
 	const runId = crypto.randomUUID()
@@ -151,8 +148,7 @@ test("editable text preview saves via its Save button, persists across reopen, a
 // full mechanism). Asserts the FIX, not just the symptom's absence: the scroller's own box is taller
 // than its visible area (a container that never overflowed would trivially "not be stuck" too), and a
 // keyboard-driven scroll actually moves it.
-test("editable text preview: a long file's editor actually scrolls", async ({ page, injectedSession, browserName }) => {
-	test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+test("editable text preview: a long file's editor actually scrolls", async ({ page, injectedSession }) => {
 	expect(injectedSession.length).toBeGreaterThan(0)
 
 	const runId = crypto.randomUUID()
@@ -214,10 +210,8 @@ test("editable text preview: a long file's editor actually scrolls", async ({ pa
 // entry (keyed by A's frozen uuid, not its already-rotated one) rather than orphaning the first save.
 test("editable preview: saving a file, paging to a sibling and back still resolves its own saved content", async ({
 	page,
-	injectedSession,
-	browserName
+	injectedSession
 }) => {
-	test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 	expect(injectedSession.length).toBeGreaterThan(0)
 
 	const runId = crypto.randomUUID()
@@ -295,10 +289,8 @@ test("editable preview: saving a file, paging to a sibling and back still resolv
 // teardown, same as every other test in this file.
 test("a trashed file opens its preview read-only: content renders, no save action, no download action", async ({
 	page,
-	injectedSession,
-	browserName
+	injectedSession
 }) => {
-	test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 	expect(injectedSession.length).toBeGreaterThan(0)
 
 	const runId = crypto.randomUUID()
@@ -392,10 +384,8 @@ test("a trashed file opens its preview read-only: content renders, no save actio
 // shared-root items to open a preview on (project_filen_web_free_e2e_account).
 test("the preview header's own item menu: matches the row menu's set (no Download), favorite round-trips, trash advances to the next sibling", async ({
 	page,
-	injectedSession,
-	browserName
+	injectedSession
 }) => {
-	test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 	expect(injectedSession.length).toBeGreaterThan(0)
 
 	const runId = crypto.randomUUID()

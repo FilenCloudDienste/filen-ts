@@ -1,7 +1,6 @@
 import { test, expect } from "./fixtures"
 import { bootTo, enterScratchDirectory, trashScratchDirectory, LIVE_WRITE_TIMEOUT_MS } from "./helpers/listing"
 import { focusEditorSurface } from "./helpers/editor"
-import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
 // "New text file" (Upload menu's third entry, uploadMenu.tsx): create -> row appears instantly ->
 // editor opens automatically -> type + save round trip (the editable-preview save flow this reuses is
@@ -15,10 +14,8 @@ test.describe.configure({ mode: "default" })
 
 test("New text file: name without an extension defaults to .txt, the row appears instantly, and its editor opens for typing", async ({
 	page,
-	injectedSession,
-	browserName
+	injectedSession
 }) => {
-	test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 	expect(injectedSession.length).toBeGreaterThan(0)
 
 	const runId = crypto.randomUUID()

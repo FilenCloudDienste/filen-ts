@@ -7,7 +7,6 @@ import {
 	createDirectoryViaDialog,
 	trashScratchDirectory
 } from "./helpers/listing"
-import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
 // Sharing/unsharing are OUTWARD-FACING mutations (a share reaches ANOTHER account; unshare revokes
 // real access) and premium-gated, so every test below is render/gate-only — the contact picker is
@@ -18,12 +17,8 @@ import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 // nothing to exercise in-browser on this account (no shared items to filter or unshare, no blocked
 // contacts to unblock) — both are covered by unit tests and manual QA instead, not here.
 //
-// Every test below needs an authenticated listDir call to settle (the shared listings, or /drive
-// itself for the picker test), which hangs on Playwright-firefox — see helpers/firefox.ts.
-
 test.describe("sharing", () => {
-	test("shared surfaces render and activate from the sidebar", async ({ page, injectedSession, browserName }) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("shared surfaces render and activate from the sidebar", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		await bootTo(page)
@@ -53,8 +48,7 @@ test.describe("sharing", () => {
 	// the directory the moment anything above it throws. The picker itself is only ever driven up to
 	// its own disabled submit button, then dismissed via Escape — this suite never shares anything for
 	// real.
-	test("the bulk Share button opens the contact picker; dismissing shares nothing", async ({ page, injectedSession, browserName }) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("the bulk Share button opens the contact picker; dismissing shares nothing", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		const runId = crypto.randomUUID()

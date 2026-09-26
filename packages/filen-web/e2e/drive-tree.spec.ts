@@ -8,7 +8,6 @@ import {
 	waitForListingSettled,
 	LIVE_WRITE_TIMEOUT_MS
 } from "./helpers/listing"
-import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 import { html5DragMove } from "./helpers/dnd"
 
 const TREE_ROW_SELECTOR = "[data-tree-path]"
@@ -30,10 +29,8 @@ async function expandInTree(page: Page, name: string): Promise<void> {
 test.describe("sidebar directory tree", () => {
 	test("a tree node's context menu offers its listing row's entries under the destination entries, and opens it", async ({
 		page,
-		injectedSession,
-		browserName
+		injectedSession
 	}) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		const runId = crypto.randomUUID()
@@ -74,8 +71,7 @@ test.describe("sidebar directory tree", () => {
 		}
 	})
 
-	test("drags a tree node onto another tree node to move it", async ({ page, injectedSession, browserName }) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("drags a tree node onto another tree node to move it", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		const runId = crypto.randomUUID()

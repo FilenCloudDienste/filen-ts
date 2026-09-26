@@ -15,7 +15,7 @@ const RANDOM_UUID = "deadbeef-0000-4000-8000-0123456789ab"
 const HEX_KEY = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
 test.describe("public links (unauthenticated)", () => {
-	test("a file link renders the viewer's own invalid state, not a login redirect or boot error", async ({ page, browserName }) => {
+	test("a file link renders the viewer's own invalid state, not a login redirect or boot error", async ({ page }) => {
 		await page.goto(`/f/${RANDOM_UUID}#${HEX_KEY}`)
 
 		// Reachable with NO session: the URL stays on the viewer route (never redirected to /login), the
@@ -30,17 +30,13 @@ test.describe("public links (unauthenticated)", () => {
 			timeout: 30_000
 		})
 
-		// On engines whose SDK worker completes the cross-origin resolve, the nonexistent link lands on
-		// the shared invalid surface — proving the ANONYMOUS worker path end to end (no session, real
-		// round trip, graceful failure). Playwright-Firefox's COI worker fetch hangs (see boot.spec), so
-		// it is verified only reaching the reachable loading state above.
-		if (browserName !== "firefox") {
-			await expect(page.getByText("This link is unavailable")).toBeVisible({ timeout: 30_000 })
-			await expect(page.getByRole("link", { name: "Back to Filen" })).toBeVisible()
-		}
+		// The nonexistent link lands on the shared invalid surface — proving the ANONYMOUS worker path end
+		// to end (no session, real round trip, graceful failure).
+		await expect(page.getByText("This link is unavailable")).toBeVisible({ timeout: 30_000 })
+		await expect(page.getByRole("link", { name: "Back to Filen" })).toBeVisible()
 	})
 
-	test("a directory link renders the viewer's own invalid state, not a login redirect or boot error", async ({ page, browserName }) => {
+	test("a directory link renders the viewer's own invalid state, not a login redirect or boot error", async ({ page }) => {
 		await page.goto(`/d/${RANDOM_UUID}#${HEX_KEY}`)
 
 		await expect(page).toHaveURL(new RegExp(`/d/${RANDOM_UUID}`))
@@ -51,17 +47,14 @@ test.describe("public links (unauthenticated)", () => {
 			timeout: 30_000
 		})
 
-		if (browserName !== "firefox") {
-			await expect(page.getByText("This link is unavailable")).toBeVisible({ timeout: 30_000 })
-		}
+		await expect(page.getByText("This link is unavailable")).toBeVisible({ timeout: 30_000 })
 	})
 
 	test("renders the marketing-light chrome for a logged-out visitor — no login redirect", async ({ page }) => {
 		await page.goto(`/f/${RANDOM_UUID}#${HEX_KEY}`)
 
 		// The shared shell wraps every state, so the chrome is present the moment the route renders —
-		// independent of whether the anonymous worker round trip has completed (so this holds even on
-		// Playwright-Firefox, whose COI worker fetch hangs past boot). Never bounced to /login.
+		// independent of whether the anonymous worker round trip has completed. Never bounced to /login.
 		await expect(page).toHaveURL(new RegExp(`/f/${RANDOM_UUID}`))
 
 		const brand = page.getByRole("link", { name: "Filen home" })
@@ -79,7 +72,7 @@ test.describe("public links (unauthenticated)", () => {
 		await expect(page.getByRole("link", { name: "Report abuse" })).toHaveAttribute("href", "mailto:abuse@filen.io")
 	})
 
-	test("the reachable surfaces do not overflow a narrow phone viewport", async ({ page, browserName }) => {
+	test("the reachable surfaces do not overflow a narrow phone viewport", async ({ page }) => {
 		// Public links get opened on phones. On the reachable states (the chrome plus, on non-Firefox, the
 		// terminal invalid card) the body must never scroll horizontally at a 360px width. A protected
 		// link's password gate is not reachable without a live premium link, so its overflow is covered by
@@ -91,11 +84,8 @@ test.describe("public links (unauthenticated)", () => {
 
 		// The chrome above renders the moment the route does (see the chrome test's own note), so gating
 		// on it alone would measure the TRANSIENT loading state and let an invalid card that
-		// overflows 360px pass. Firefox's COI worker fetch hangs before that terminal state ever
-		// arrives, so there the chrome really is all there is to measure.
-		if (browserName !== "firefox") {
-			await expect(page.getByText("This link is unavailable")).toBeVisible({ timeout: 30_000 })
-		}
+		// overflows 360px pass.
+		await expect(page.getByText("This link is unavailable")).toBeVisible({ timeout: 30_000 })
 
 		// Polled, not read once: the invalid card's own mount is what settles the layout, and a read taken
 		// on the frame it commits can catch the document mid-reflow and report an overflow that is gone a

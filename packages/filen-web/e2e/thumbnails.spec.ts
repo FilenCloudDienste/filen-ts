@@ -2,9 +2,9 @@ import { test, expect } from "./fixtures"
 import { bootTo, waitForListingSettled } from "./helpers/listing"
 import { enterFixtureDirectory, FIXTURE_FILES } from "./helpers/fixtures"
 import { trackCspViolations } from "./helpers/csp"
-import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 import { waitForE2eHooks } from "./helpers/e2eHooks"
 import { waitForSwReady } from "./helpers/sw"
+import { FIREFOX_SERVICE_WORKERS_BLOCKED } from "./helpers/firefox"
 
 // The one live proof the whole thumbnail pipeline works end to end: a real SDK decode inside the sdk
 // worker (range reads against the stored file, a webp encode in wasm, nothing ever downloaded into JS),
@@ -18,10 +18,8 @@ import { waitForSwReady } from "./helpers/sw"
 // a component remount.
 test("png and bmp images render real thumbnails in both listing views, the text/svg siblings keep their icon, and a fresh reload repaints from the OPFS cache without regenerating", async ({
 	page,
-	injectedSession,
-	browserName
+	injectedSession
 }) => {
-	test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 	expect(injectedSession.length).toBeGreaterThan(0)
 
 	// The png/bmp pair that must thumbnail and the txt/svg pair that must not — provisioned once per run
@@ -153,7 +151,7 @@ test("png and bmp images render real thumbnails in both listing views, the text/
 // registered only in production builds, so this path could not run in dev at all and the failure showed
 // up as a missing image rather than an error. Asserting the rendered blob is what makes it visible.
 test("a video row renders a real thumbnail off the service worker's stream", async ({ page, injectedSession, browserName }) => {
-	test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test.skip(browserName === "firefox", FIREFOX_SERVICE_WORKERS_BLOCKED)
 	expect(injectedSession.length).toBeGreaterThan(0)
 
 	const cspViolations = trackCspViolations(page)

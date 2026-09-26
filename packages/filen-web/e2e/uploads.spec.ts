@@ -11,7 +11,6 @@ import {
 	waitForListingSettled,
 	LIVE_WRITE_TIMEOUT_MS
 } from "./helpers/listing"
-import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
 // Drag-and-drop upload — both the files dropzone and a dropped directory's FileSystemEntry walk — is
 // NOT covered anywhere in this suite: Playwright has no API to synthesize a real OS file drop (there is
@@ -21,8 +20,7 @@ import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 // automatable path through the exact same upload orchestration.
 
 test.describe("uploads", () => {
-	test("picking a file uploads it through the worker and lands a row in the listing", async ({ page, injectedSession, browserName }) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("picking a file uploads it through the worker and lands a row in the listing", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		const runId = crypto.randomUUID()
@@ -63,12 +61,7 @@ test.describe("uploads", () => {
 		}
 	})
 
-	test("picking a directory recreates its tree and lands the top-level directory in the listing", async ({
-		page,
-		injectedSession,
-		browserName
-	}) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("picking a directory recreates its tree and lands the top-level directory in the listing", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		const runId = crypto.randomUUID()

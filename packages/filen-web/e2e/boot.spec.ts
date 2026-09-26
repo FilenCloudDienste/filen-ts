@@ -19,7 +19,7 @@ test.describe("boot", () => {
 		await expect(page.getByRole("link", { name: "Privacy Policy", exact: true })).toHaveAttribute("href", "https://filen.io/privacy")
 	})
 
-	test("an injected session boots authenticated and an authed read succeeds", async ({ page, injectedSession, browserName }) => {
+	test("an injected session boots authenticated and an authed read succeeds", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		// bootTo's own nav wait is the assertion this test wants: the authed shell rendering is itself
@@ -46,16 +46,12 @@ test.describe("boot", () => {
 		await expect(page.getByRole("link", { name: "Notes", exact: true })).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
 
 		// A real authenticated read against the API settles true — proves the injected session
-		// authenticates, not merely that a Client object exists. The SDK worker's cross-origin fetch
-		// under COI hangs on Playwright-firefox, so the network read is verified on the other engines;
-		// firefox coverage stops at the authed-shell render above.
-		if (browserName !== "firefox") {
-			// The hooks arrive on a fire-and-forget dynamic import, independently of the shell's own
-			// render — an authed shell is no proof they are installed.
-			await waitForE2eHooks(page)
+		// authenticates, not merely that a Client object exists. The hooks arrive on a fire-and-forget
+		// dynamic import, independently of the shell's own render — an authed shell is no proof they are
+		// installed.
+		await waitForE2eHooks(page)
 
-			const authed = await page.evaluate(() => window.__filenE2E.probeAuthedRead())
-			expect(authed).toBe(true)
-		}
+		const authed = await page.evaluate(() => window.__filenE2E.probeAuthedRead())
+		expect(authed).toBe(true)
 	})
 })

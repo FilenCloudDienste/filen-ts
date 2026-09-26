@@ -29,6 +29,7 @@ docs/
 # e2e: injected session blob (secret-equivalent) + the per-run fixture-tree manifest + Playwright outputs
 e2e/.auth/
 e2e/.fixtures/
+e2e/.locks/
 test-results
 playwright-report
 blob-report

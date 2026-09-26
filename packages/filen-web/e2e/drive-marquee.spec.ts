@@ -3,7 +3,6 @@ import { test, expect } from "./fixtures"
 import { enterFixtureDirectory, enterFixtureRoot } from "./helpers/fixtures"
 import { bootTo, waitForListingSettled } from "./helpers/listing"
 import { MOD_KEY } from "./helpers/modkey"
-import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
 // Strict null handling (no `!`): a locator with no box on screen is a real failure, surfaced here.
 async function boxOf(locator: Locator): Promise<{ x: number; y: number; width: number; height: number }> {
@@ -17,8 +16,7 @@ async function boxOf(locator: Locator): Promise<{ x: number; y: number; width: n
 }
 
 test.describe("drive rubber-band selection", () => {
-	test("marquee selects a row band; ctrl-drag unions; Escape mid-drag restores", async ({ page, injectedSession, browserName }) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("marquee selects a row band; ctrl-drag unions; Escape mid-drag restores", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		await bootTo(page)
@@ -86,12 +84,7 @@ test.describe("drive rubber-band selection", () => {
 		await assertSelected([1, 2, 3, 4, 5])
 	})
 
-	test("a marquee dragged past a short listing's edges never scrolls it or grows its content", async ({
-		page,
-		injectedSession,
-		browserName
-	}) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("a marquee dragged past a short listing's edges never scrolls it or grows its content", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		await bootTo(page)
@@ -145,10 +138,8 @@ test.describe("drive rubber-band selection", () => {
 
 	test("a click away from the items clears the selection, a click on the sole selected row deselects it, and a double-click still opens", async ({
 		page,
-		injectedSession,
-		browserName
+		injectedSession
 	}) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		await bootTo(page)

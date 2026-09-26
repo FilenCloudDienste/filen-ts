@@ -1,5 +1,5 @@
 import type { Page, Route } from "@playwright/test"
-import { test, expect } from "@playwright/test"
+import { test, expect } from "./fixtures"
 import { BOOT_SETTLE_TIMEOUT_MS } from "./helpers/listing"
 
 // SDK-free: register() itself is never called (a real call would create an account against the

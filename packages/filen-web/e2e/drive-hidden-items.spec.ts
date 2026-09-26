@@ -1,6 +1,5 @@
 import { test, expect } from "./fixtures"
 import { bootTo, createDirectoryViaDialog, enterScratchDirectory, trashScratchDirectory } from "./helpers/listing"
-import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
 // The hide-hidden-items display filter, end to end: the Display menu's checkbox, the listing filter,
 // the footer count, and the "won't be listed" toast a create fires while the filter is on. The rules
@@ -15,10 +14,8 @@ test.describe.configure({ mode: "default" })
 
 test("Display > Show hidden items filters dot-prefixed rows, counts them in the footer, and warns when a new name would be hidden", async ({
 	page,
-	injectedSession,
-	browserName
+	injectedSession
 }) => {
-	test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 	expect(injectedSession.length).toBeGreaterThan(0)
 
 	const runId = crypto.randomUUID()

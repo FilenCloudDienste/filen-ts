@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test"
+import { test, expect } from "./fixtures"
 import { BOOT_SETTLE_TIMEOUT_MS } from "./helpers/listing"
 import { isDark, pressUntilTheme } from "./helpers/theme"
 

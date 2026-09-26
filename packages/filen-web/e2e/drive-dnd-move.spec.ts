@@ -8,15 +8,13 @@ import {
 	waitForListingSettled,
 	LIVE_WRITE_TIMEOUT_MS
 } from "./helpers/listing"
-import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 import { html5DragMove } from "./helpers/dnd"
 
 const ROW_SELECTOR = '[role="option"]'
 const BREADCRUMB_LINK_SELECTOR = 'nav[aria-label="Breadcrumb"] a'
 
 test.describe("drive drag-to-move", () => {
-	test("drags a file into a directory, then back out via the breadcrumb", async ({ page, injectedSession, browserName }) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("drags a file into a directory, then back out via the breadcrumb", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		const runId = crypto.randomUUID()

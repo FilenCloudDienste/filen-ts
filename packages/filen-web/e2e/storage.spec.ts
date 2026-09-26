@@ -35,13 +35,8 @@ test.describe("storage", () => {
 	test("a follower tab reads a value written by the leader tab through the BroadcastChannel RPC", async ({
 		page,
 		injectedSession,
-		context,
-		browserName
+		context
 	}) => {
-		// Opening a second SDK-worker tab under COI crashes navigation on Playwright-firefox; the
-		// leader/follower election is verified on chromium.
-		test.skip(browserName === "firefox", "a second SDK-worker tab is unstable on Playwright-firefox under COI")
-
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		// Leader tab: wins the Web Lock, opens OPFS directly, and writes a value into its own sqlite.
@@ -73,11 +68,8 @@ test.describe("storage", () => {
 	test("a follower is promoted to leader when the leader tab dies, and its kv keeps working", async ({
 		page,
 		injectedSession,
-		context,
-		browserName
+		context
 	}) => {
-		test.skip(browserName === "firefox", "a second SDK-worker tab is unstable on Playwright-firefox under COI")
-
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		// The LEADER is a sibling tab booted first (it wins the Web Lock, opens OPFS, writes a value). The

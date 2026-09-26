@@ -1,6 +1,5 @@
 import { test, expect } from "./fixtures"
 import { bootTo, enterScratchDirectory, openTransfers, trashScratchDirectory, LIVE_WRITE_TIMEOUT_MS } from "./helpers/listing"
-import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
 // Transfers-screen-specific affordances (transferRow.tsx/screens/transfers.tsx) that uploads.spec.ts
 // doesn't already cover: a finished row's own Remove control, and the header-wide Clear finished
@@ -10,10 +9,8 @@ import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 test.describe("transfers screen", () => {
 	test("the rail entry navigates straight to /transfers (no popover), and a finished row exposes Remove (not Cancel); Clear finished drops it from the list", async ({
 		page,
-		injectedSession,
-		browserName
+		injectedSession
 	}) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		const runId = crypto.randomUUID()

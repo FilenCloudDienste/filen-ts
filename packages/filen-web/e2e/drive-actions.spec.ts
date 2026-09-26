@@ -12,7 +12,6 @@ import {
 	trashScratchDirectory
 } from "./helpers/listing"
 import { MOD_KEY } from "./helpers/modkey"
-import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
 // Serial, not parallel: the account is shared LIVE state, and the last test creates/selects/trashes/
 // restores real items by name — running it alongside this file's own other tests (which each select
@@ -22,8 +21,7 @@ import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 test.describe.configure({ mode: "serial" })
 
 test.describe("drive bulk actions", () => {
-	test("selecting an item floats the bulk-action bar; clear-selection dismisses it", async ({ page, injectedSession, browserName }) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("selecting an item floats the bulk-action bar; clear-selection dismisses it", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		await bootTo(page)
@@ -56,8 +54,7 @@ test.describe("drive bulk actions", () => {
 		await expect(page.getByRole("button", { name: "Clear selection", exact: true })).toHaveCount(0)
 	})
 
-	test("the bulk Move button opens the destination picker without moving anything", async ({ page, injectedSession, browserName }) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("the bulk Move button opens the destination picker without moving anything", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		await bootTo(page)
@@ -112,8 +109,7 @@ test.describe("drive bulk actions", () => {
 
 	// Copy replaced the shared-in-only Import: it is offered on owned items too, as a submenu whose
 	// first entry opens the destination picker. Opening the menus mutates nothing.
-	test("the per-item menu offers Copy (and no Import) on an owned /drive item", async ({ page, injectedSession, browserName }) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("the per-item menu offers Copy (and no Import) on an owned /drive item", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		await bootTo(page)
@@ -137,10 +133,8 @@ test.describe("drive bulk actions", () => {
 
 	test("the bulk Trash button opens the trash confirm; dismissing leaves the item selected and in place", async ({
 		page,
-		injectedSession,
-		browserName
+		injectedSession
 	}) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		await bootTo(page)
@@ -181,10 +175,8 @@ test.describe("drive bulk actions", () => {
 	// live as a flaky drive.spec.ts "selection" test failure under this suite's fullyParallel config.)
 	test("net-zero round trip: create, bulk-favorite, bulk-trash, verify trash-variant gating, bulk-restore confirm, re-trash", async ({
 		page,
-		injectedSession,
-		browserName
+		injectedSession
 	}) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		// Same tall-viewport workaround as enterScratchDirectory (listing.ts): both the root and the

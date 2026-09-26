@@ -2,7 +2,6 @@ import type { Page } from "@playwright/test"
 import { test, expect } from "./fixtures"
 import { bootTo, enterScratchDirectory, trashScratchDirectory, BOOT_SETTLE_TIMEOUT_MS, LIVE_WRITE_TIMEOUT_MS } from "./helpers/listing"
 import { PNG_BYTES } from "./helpers/fixtureBytes"
-import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
 // The one live proof of the whole photos arc: root selection, the media-only grid over a mixed
 // upload, the viewer wired to the shared preview overlay, a favorite toggled FROM INSIDE that overlay
@@ -35,10 +34,8 @@ async function openPhotos(page: Page): Promise<void> {
 
 test("photos: root pick over a mixed upload, media-only grid, viewer pager + in-overlay favorite reflecting back without a reload, change-directory, and root-gone reset", async ({
 	page,
-	injectedSession,
-	browserName
+	injectedSession
 }) => {
-	test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 	expect(injectedSession.length).toBeGreaterThan(0)
 
 	const runId = crypto.randomUUID()

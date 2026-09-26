@@ -2,7 +2,6 @@ import type { Page } from "@playwright/test"
 import { test, expect } from "./fixtures"
 import { BOOT_SETTLE_TIMEOUT_MS, bootTo } from "./helpers/listing"
 import { MOD_KEY } from "./helpers/modkey"
-import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
 // Contact requests, blocks, and removals are OUTWARD-FACING: a request lands in another Filen
 // account's inbox, and a block/remove changes another account's own contact list too. Unlike drive's
@@ -11,10 +10,6 @@ import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 // dismissed via Escape instead. The injected session's own account content (contacts/requests/
 // blocked) is real, live, and unknown ahead of time — currently empty — so every test holds
 // regardless, gated on `hasContacts` wherever a row is actually needed (see waitForContactsSettled).
-//
-// Chromium-only: ContactsList fires two real authenticated reads on mount (useContactsQuery,
-// useContactRequestsQuery) — the same worker cross-origin SDK call path drive's listDir hangs on, from
-// a different call site but the same root cause (helpers/firefox.ts, FIREFOX_HANG_REASON).
 
 // Boot to the shell, then reach /contacts the way a reader does: a real in-app client-side rail click,
 // which is itself what the first test below asserts.
@@ -54,8 +49,7 @@ async function waitForContactsSettled(page: Page): Promise<{ hasContacts: boolea
 }
 
 test.describe("contacts", () => {
-	test("client-nav to /contacts renders the view and marks the rail link current", async ({ page, injectedSession, browserName }) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("client-nav to /contacts renders the view and marks the rail link current", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		await gotoContacts(page)
@@ -83,10 +77,8 @@ test.describe("contacts", () => {
 
 	test("the contacts sidebar renders every section filter, defaults to All, and switching updates the active link, URL, and heading", async ({
 		page,
-		injectedSession,
-		browserName
+		injectedSession
 	}) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		await gotoContacts(page)
@@ -122,12 +114,7 @@ test.describe("contacts", () => {
 		await expect(sidebar.getByRole("link", { name: "All", exact: true })).toHaveAttribute("aria-current", "page")
 	})
 
-	test("the add-contact dialog gates an invalid email and is dismissed without ever submitting", async ({
-		page,
-		injectedSession,
-		browserName
-	}) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("the add-contact dialog gates an invalid email and is dismissed without ever submitting", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		await gotoContacts(page)
@@ -156,8 +143,7 @@ test.describe("contacts", () => {
 		await expect(dialog).toHaveCount(0)
 	})
 
-	test("rows are permanently selectable listbox options with a roving Tab stop", async ({ page, injectedSession, browserName }) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("rows are permanently selectable listbox options with a roving Tab stop", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		await gotoContacts(page)
@@ -213,10 +199,8 @@ test.describe("contacts", () => {
 
 	test("an established contact's destructive row action opens a confirm dialog and dismisses without mutating", async ({
 		page,
-		injectedSession,
-		browserName
+		injectedSession
 	}) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		await gotoContacts(page)

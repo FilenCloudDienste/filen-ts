@@ -1,9 +1,8 @@
 import { existsSync, readFileSync } from "node:fs"
-import type { BrowserContext, Locator, Page } from "@playwright/test"
-import { test, expect, SESSION_FILE, settleLeases, trackLeaseReleases } from "./fixtures"
+import type { Locator, Page } from "@playwright/test"
+import { test, expect, openHookContext, SESSION_FILE, settleLeases, trackLeaseReleases } from "./fixtures"
 import { waitForE2eHooks } from "./helpers/e2eHooks"
 import { bootTo, BOOT_SETTLE_TIMEOUT_MS, LIVE_WRITE_TIMEOUT_MS } from "./helpers/listing"
-import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
 // Chats shell smoke + conversation-action affordances + the send-outbox proof + link/media embeds. The rail
 // entry navigates to /chats, the contextual sidebar renders, the empty-conversation state shows on the
@@ -34,9 +33,6 @@ import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 // against the server's: `sendChatMessage` carries no idempotency id, so an answer lost in transit is
 // retried by the SDK into a second row with the same text, whose socket echo the app appends ~3s after
 // the commit.
-//
-// Chromium-only: the ChatsSidebar fires an authenticated read (listChats) on mount — the same cross-origin
-// worker SDK path that hangs on Playwright-firefox (helpers/firefox.ts).
 test.describe.configure({ mode: "serial" })
 
 async function gotoChats(page: Page): Promise<void> {
@@ -286,8 +282,7 @@ async function clickMessageMenuItem(page: Page, target: Locator, item: string): 
 }
 
 test.describe("chats", () => {
-	test("rail entry navigates to /chats and renders the contextual sidebar", async ({ page, injectedSession, browserName }) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("rail entry navigates to /chats and renders the contextual sidebar", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		await gotoChats(page)
@@ -296,8 +291,7 @@ test.describe("chats", () => {
 		await expect(page.getByRole("searchbox", { name: "Search conversations" })).toBeVisible()
 	})
 
-	test("the empty-conversation state renders on the zero-contacts account", async ({ page, injectedSession, browserName }) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("the empty-conversation state renders on the zero-contacts account", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		await gotoChats(page)
@@ -312,8 +306,7 @@ test.describe("chats", () => {
 		await expect(emptyState.or(sidebar.getByRole("link").first())).toBeVisible()
 	})
 
-	test("the index route shows the select prompt (no auto-selected conversation)", async ({ page, injectedSession, browserName }) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("the index route shows the select prompt (no auto-selected conversation)", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		await gotoChats(page)
@@ -330,8 +323,7 @@ test.describe("chats", () => {
 	// share.spec.ts's own hasContacts-agnostic pattern), and is dismissed via Escape WITHOUT ever
 	// selecting a contact. createChat is UI-gated on a non-empty selection (the submit stays disabled),
 	// so this path never calls it — net-zero, no conversation exists afterward.
-	test("the New chat button opens the contact picker; dismissing creates nothing", async ({ page, injectedSession, browserName }) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("the New chat button opens the contact picker; dismissing creates nothing", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		await gotoChats(page)
@@ -362,8 +354,7 @@ test.describe("chats", () => {
 
 	// SETUP — the one and only createChat this file ever calls. Every test below reuses its uuid; none of
 	// them deletes it (the afterAll hook at the end of this describe block is the one delete).
-	test("setup: creates the one shared self-chat every test below reuses", async ({ page, injectedSession, browserName }, testInfo) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("setup: creates the one shared self-chat every test below reuses", async ({ page, injectedSession }, testInfo) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		await gotoChats(page)
@@ -431,10 +422,8 @@ test.describe("chats", () => {
 	// then reconnects and asserts the reconnect trigger delivers it.
 	test("the send outbox persists a message to disk and delivers it on reconnect (shared self-chat)", async ({
 		page,
-		injectedSession,
-		browserName
+		injectedSession
 	}) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 		test.skip(sharedChatUuid === undefined, "shared self-chat unavailable — the setup test's create was blocked")
 		expect(injectedSession.length).toBeGreaterThan(0)
 
@@ -501,10 +490,8 @@ test.describe("chats", () => {
 	// relative, never an absolute conversation count.
 	test("kill-path: a queued send survives a tab reload and replays exactly once (shared self-chat)", async ({
 		page,
-		injectedSession,
-		browserName
+		injectedSession
 	}) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 		test.skip(sharedChatUuid === undefined, "shared self-chat unavailable — the setup test's create was blocked")
 		expect(injectedSession.length).toBeGreaterThan(0)
 
@@ -597,10 +584,8 @@ test.describe("chats", () => {
 	// stamps the edited marker.
 	test("composer: type + Enter delivers through the outbox, then reply + edit render (shared self-chat)", async ({
 		page,
-		injectedSession,
-		browserName
+		injectedSession
 	}) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 		test.skip(sharedChatUuid === undefined, "shared self-chat unavailable — the setup test's create was blocked")
 		expect(injectedSession.length).toBeGreaterThan(0)
 
@@ -660,10 +645,8 @@ test.describe("chats", () => {
 	// from a real keystroke, against the shared self-chat.
 	test("composer kill-path: an offline send survives a reload and replays exactly once (shared self-chat)", async ({
 		page,
-		injectedSession,
-		browserName
+		injectedSession
 	}) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 		test.skip(sharedChatUuid === undefined, "shared self-chat unavailable — the setup test's create was blocked")
 		expect(injectedSession.length).toBeGreaterThan(0)
 
@@ -732,10 +715,8 @@ test.describe("chats", () => {
 	// resolution logic is covered unit-level only (chatsEmbeds.test.ts, chatsMessageLinks.test.ts), not e2e.
 	test("embeds: a Filen-shaped public link renders a degraded card, then Disable embed collapses it (shared self-chat)", async ({
 		page,
-		injectedSession,
-		browserName
+		injectedSession
 	}) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 		test.skip(sharedChatUuid === undefined, "shared self-chat unavailable — the setup test's create was blocked")
 		expect(injectedSession.length).toBeGreaterThan(0)
 
@@ -821,12 +802,7 @@ test.describe("chats", () => {
 
 	// The thread's arrival announcements are DOM/ARIA structure and the vitest suite is node-env, so a
 	// browser is the only possible proof. Zero creates, zero deletes — reuses the shared self-chat.
-	test("the thread exposes a polite live region for incoming messages (shared self-chat)", async ({
-		page,
-		injectedSession,
-		browserName
-	}) => {
-		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test("the thread exposes a polite live region for incoming messages (shared self-chat)", async ({ page, injectedSession }) => {
 		test.skip(sharedChatUuid === undefined, "shared self-chat unavailable — the setup test's create was blocked")
 		expect(injectedSession.length).toBeGreaterThan(0)
 
@@ -853,7 +829,7 @@ test.describe("chats", () => {
 	// seeds it, and `appOrigin` stands in for the `baseURL` option, which a hand-made context does not
 	// inherit. The cleanup-setup project's "e2e-chat-" name-prefix sweep (e2e/setup/cleanup.setup.ts)
 	// remains the backstop for a run that dies before even this.
-	test.afterAll(async ({ browser }) => {
+	test.afterAll(async ({ browser, browserName, playwright }, testInfo) => {
 		if (sharedChatUuid === undefined || appOrigin === undefined || !existsSync(SESSION_FILE)) {
 			return
 		}
@@ -863,14 +839,15 @@ test.describe("chats", () => {
 		// or a context that fails to open is a teardown failure like any other here — logged, with the
 		// conversation named for the prefix sweep — not an exception out of a hook, which Playwright
 		// reports as a failure of the whole project rather than of the cleanup.
-		let context: BrowserContext | undefined
+		let hookContext: Awaited<ReturnType<typeof openHookContext>> | undefined
 		let page: Page | undefined
 
 		try {
 			const { session } = JSON.parse(readFileSync(SESSION_FILE, "utf8")) as { session: string }
 
-			context = await browser.newContext({ baseURL: appOrigin })
-			page = await context.newPage()
+			// Made like a test's own context: under the chats lock, and on webkit over a persistent profile.
+			hookContext = await openHookContext({ browser, browserName, playwright }, testInfo, appOrigin)
+			page = await hookContext.context.newPage()
 			// A hand-made context, so the fixture's own tracking never attached to it.
 			trackLeaseReleases(page)
 
@@ -897,7 +874,7 @@ test.describe("chats", () => {
 				await settleLeases(page)
 			}
 
-			await context?.close()
+			await hookContext?.close()
 		}
 	})
 })

@@ -1,8 +1,10 @@
 import { type } from "arktype"
 import * as Comlink from "comlink"
 import { createNotePreviewFromContentText } from "@filen/shared"
-import type { StringifiedClient, File, Note, NoteType, DirMeta, FileMeta } from "@filen/sdk-rs"
+import type { StringifiedClient, File, Note, NoteType, DirMeta, FileMeta, UserInfo } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
+import { queryClient } from "@/queries/client"
+import { ACCOUNT_QUERY_KEY } from "@/queries/account"
 import { stringifyEnvelope } from "@/lib/serialize"
 import { kvGetJson, kvHas, kvSetJson } from "@/lib/storage/adapter"
 import { comboFor, setUserCombo } from "@/lib/keymap/registry"
@@ -469,7 +471,9 @@ export function installE2eHooks(): void {
 				return false
 			}
 
-			const user = await sdkApi.getUserInfo()
+			// The account the app already holds, as the composer takes its sender: the kill-paths enqueue
+			// offline, where a live read fails on every engine whose workers really go offline.
+			const user = queryClient.getQueryData<UserInfo>(ACCOUNT_QUERY_KEY) ?? (await sdkApi.getUserInfo())
 
 			return enqueueChatMessage({
 				chat,

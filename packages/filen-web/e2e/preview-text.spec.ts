@@ -12,7 +12,6 @@ import { enterFixtureDirectory, FIXTURE_FILES } from "./helpers/fixtures"
 import { focusEditorSurface } from "./helpers/editor"
 import { DOCX_BYTES, TEXT_BYTES } from "./helpers/fixtureBytes"
 import { trackCspViolations } from "./helpers/csp"
-import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
 // Document/text-format preview rendering: docx, plain text, syntax-highlighted code, and GFM markdown
 // — every leg opens a real lazy-loaded viewer chunk against a real file.
@@ -81,8 +80,7 @@ async function seedLeaveRouteHistory(page: Page, scratchName: string): Promise<v
 // fallback for a string-callback form of setImmediate — dead code (jszip only ever calls it with a
 // real function), but this run's own zero-CSP-violations assertion is the empirical proof that dead
 // path is never actually reached, not just an assumption from reading the source.
-test("docx preview renders document content and closes, no CSP console errors", async ({ page, injectedSession, browserName }) => {
-	test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+test("docx preview renders document content and closes, no CSP console errors", async ({ page, injectedSession }) => {
 	expect(injectedSession.length).toBeGreaterThan(0)
 
 	const [nameDocx] = FIXTURE_FILES["preview-docx"]
@@ -116,10 +114,8 @@ test("docx preview renders document content and closes, no CSP console errors", 
 // modal's interaction scope, and Playwright's actionability check would simply time out).
 test("text preview renders, edits, and guards unsaved edits against navigation, no CSP console errors", async ({
 	page,
-	injectedSession,
-	browserName
+	injectedSession
 }) => {
-	test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 	expect(injectedSession.length).toBeGreaterThan(0)
 
 	const runId = crypto.randomUUID()
@@ -258,8 +254,7 @@ test("text preview renders, edits, and guards unsaved edits against navigation, 
 
 // Proves language routing actually engages a real @codemirror/lang-javascript chunk (not just plain
 // text): a highlighted line wraps its tokens in <span>s, a plain one (the text leg above) doesn't.
-test("code preview renders with syntax highlighting, no CSP console errors", async ({ page, injectedSession, browserName }) => {
-	test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+test("code preview renders with syntax highlighting, no CSP console errors", async ({ page, injectedSession }) => {
 	expect(injectedSession.length).toBeGreaterThan(0)
 
 	const [nameCode] = FIXTURE_FILES["preview-code"]
@@ -289,10 +284,8 @@ test("code preview renders with syntax highlighting, no CSP console errors", asy
 // the text/code legs above prove), and toggling back — the whole read-only markdown surface end to end.
 test("markdown preview renders GFM content and its view-source toggle round-trips, no CSP console errors", async ({
 	page,
-	injectedSession,
-	browserName
+	injectedSession
 }) => {
-	test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 	expect(injectedSession.length).toBeGreaterThan(0)
 
 	const runId = crypto.randomUUID()
@@ -378,12 +371,7 @@ test("markdown preview renders GFM content and its view-source toggle round-trip
 // The blocked pop's DISCARD half — the main test above only proves Cancel/restore. Unlike that leg,
 // this one asserts the DESTINATION a proceed() lands on, which is exactly the entry
 // seedLeaveRouteHistory puts behind /drive.
-test("discarding after a cancelled back on the same pop still proceeds to the destination", async ({
-	page,
-	injectedSession,
-	browserName
-}) => {
-	test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+test("discarding after a cancelled back on the same pop still proceeds to the destination", async ({ page, injectedSession }) => {
 	expect(injectedSession.length).toBeGreaterThan(0)
 
 	const scratchName = `e2e-preview-text-${crypto.randomUUID()}`

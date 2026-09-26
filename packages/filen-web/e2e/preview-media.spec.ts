@@ -4,7 +4,7 @@ import { bootTo } from "./helpers/listing"
 import { enterFixtureDirectory, FIXTURE_FILES } from "./helpers/fixtures"
 import { waitForSwReady } from "./helpers/sw"
 import { trackCspViolations } from "./helpers/csp"
-import { FIREFOX_HANG_REASON } from "./helpers/firefox"
+import { FIREFOX_SERVICE_WORKERS_BLOCKED } from "./helpers/firefox"
 
 // The one live proof the streamed-preview architecture actually works: a service worker is PROD-only
 // (never registered under `vite dev`), so this only ever runs against
@@ -32,7 +32,7 @@ test("image/video/audio previews stream over the SW's inline route: range-seekab
 	injectedSession,
 	browserName
 }) => {
-	test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test.skip(browserName === "firefox", FIREFOX_SERVICE_WORKERS_BLOCKED)
 	expect(injectedSession.length).toBeGreaterThan(0)
 
 	// Destructured in the scenario's own nameAsc order (mp3 < mp4 < png) — that order is the reason the
@@ -163,8 +163,33 @@ test("image/video/audio previews stream over the SW's inline route: range-seekab
 
 	const timeBeforeSeek = await video.evaluate(el => (el as HTMLVideoElement).currentTime)
 
+	// The key must reach the video with its default intact on every engine. Whether the native control
+	// then seeks is the engine's own choice: Chromium's and Firefox's bind the arrow keys, Safari's inline
+	// controls do not, so there the untouched default and the pager standing still are the whole proof.
+	await video.evaluate(el => {
+		el.addEventListener(
+			"keydown",
+			event => {
+				Object.assign(window, { __videoKey: event })
+			},
+			{ once: true }
+		)
+	})
 	await page.keyboard.press("ArrowRight")
-	await expect.poll(() => video.evaluate(el => (el as HTMLVideoElement).currentTime), { timeout: 15_000 }).toBeGreaterThan(timeBeforeSeek)
+	expect(
+		await page.evaluate(() => {
+			const event = (window as unknown as { __videoKey?: KeyboardEvent }).__videoKey
+
+			return event === undefined ? null : { key: event.key, defaultPrevented: event.defaultPrevented }
+		})
+	).toEqual({ key: "ArrowRight", defaultPrevented: false })
+
+	if (browserName !== "webkit") {
+		await expect
+			.poll(() => video.evaluate(el => (el as HTMLVideoElement).currentTime), { timeout: 15_000 })
+			.toBeGreaterThan(timeBeforeSeek)
+	}
+
 	await expect(heading).toBeVisible()
 
 	// ---- a resolved stream that fails MID-CONSUMPTION (network drop, an SW-side decrypt abort, a

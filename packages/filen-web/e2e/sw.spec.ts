@@ -2,6 +2,7 @@ import { test, expect } from "./fixtures"
 import { SW_DOWNLOAD_PREFIX, SW_MSG_INIT_CLIENT, SW_MSG_LOGOUT, SW_MSG_REGISTER_ZIP_DOWNLOAD } from "@/lib/sw/protocol"
 import { bootTo, enterScratchDirectory, trashScratchDirectory, LIVE_WRITE_TIMEOUT_MS } from "./helpers/listing"
 import { waitForSwReady } from "./helpers/sw"
+import { FIREFOX_SERVICE_WORKERS_BLOCKED } from "./helpers/firefox"
 
 // Mirrors saveDownload.ts's own (non-exported) SW_REQUEST_TIMEOUT_MS — see no-coi.spec.ts for the same
 // local-redeclaration precedent. The app's budget is the right one here: this file drives the same
@@ -28,17 +29,7 @@ test.describe("service worker", () => {
 		injectedSession,
 		browserName
 	}) => {
-		// Playwright-firefox's service-worker support under COI is unreliable (registration never
-		// controls the page); this test additionally makes real authenticated worker calls
-		// (upload/trash), which independently hang on Playwright-firefox under COI too (see boot.spec.ts).
-		//
-		// It is also what keeps fixtures-teardown safe: the firefox project depends on cleanup-setup
-		// only, so nothing orders it behind the fixture tree's removal. This skip is why no firefox
-		// write is ever live on the account when that teardown fires.
-		test.skip(
-			browserName === "firefox",
-			"service workers and authenticated worker calls are unreliable on Playwright-firefox under COI"
-		)
+		test.skip(browserName === "firefox", FIREFOX_SERVICE_WORKERS_BLOCKED)
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		// The drive listing, not just the bare authed shell, so the scratch directory below has somewhere

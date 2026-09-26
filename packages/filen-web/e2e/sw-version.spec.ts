@@ -1,6 +1,7 @@
 import { test, expect } from "./fixtures"
 import { BOOT_SETTLE_TIMEOUT_MS } from "./helpers/listing"
 import { waitForSwReady } from "./helpers/sw"
+import { FIREFOX_SERVICE_WORKERS_BLOCKED } from "./helpers/firefox"
 
 // Registration is PROD-only and gated on boot ready, so this runs against preview. webkit is excluded
 // (not tagged @no-sdk) — its service-worker support under Playwright is unreliable.
@@ -11,9 +12,7 @@ import { waitForSwReady } from "./helpers/sw"
 // a transient service-worker registration blip can retry.
 test.describe("service worker version endpoint", () => {
 	test("registers and answers the version endpoint", async ({ page, browserName }) => {
-		// Playwright-firefox's service-worker support under COI is unreliable (registration never
-		// controls the page), so this is verified on chromium; webkit is excluded from the suite.
-		test.skip(browserName === "firefox", "service workers are unreliable on Playwright-firefox under COI")
+		test.skip(browserName === "firefox", FIREFOX_SERVICE_WORKERS_BLOCKED)
 
 		await page.goto("/")
 
