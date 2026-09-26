@@ -79,10 +79,9 @@
 }
 
 :root {
-    /* Page canvas the rail sits on and the two panels float above: a clearly perceivable neutral
-       gray, no hue cast — the panels stay near-white, so the canvas showing through the page
-       padding and panel gaps is what separates every zone, never a border line. */
-    --canvas: oklch(0.94 0 0);
+    /* Surfaces, lowest to highest: canvas < sidebar < content < popover. The canvas showing
+       through the page padding and panel gaps separates every zone, never a border line. */
+    --canvas: oklch(0.925 0 0);
     --background: oklch(1 0 0);
     --foreground: oklch(0.145 0 0);
     --card: oklch(1 0 0);
@@ -91,12 +90,15 @@
     --popover-foreground: oklch(0.145 0 0);
     --primary: oklch(0.205 0 0);
     --primary-foreground: oklch(0.985 0 0);
-    --secondary: oklch(0.97 0 0);
+    /* Fills and state layers are translucent ink, not fixed grays: the same token then shifts
+       every surface it lands on by the same amount, so a hover or selection reads equally on the
+       sidebar, the content panel and a popover. Hover is the selected fill at half strength. */
+    --secondary: oklch(0 0 0 / 5%);
     --secondary-foreground: oklch(0.205 0 0);
-    --muted: oklch(0.97 0 0);
-    --muted-foreground: oklch(0.556 0 0);
-    --accent: oklch(0.97 0 0);
-    --accent-foreground: oklch(0.205 0 0);
+    --muted: oklch(0 0 0 / 4.5%);
+    --muted-foreground: oklch(0.5 0 0);
+    --accent: oklch(0 0 0 / 7%);
+    --accent-foreground: oklch(0.145 0 0);
     --destructive: oklch(0.577 0.245 27.325);
     --border: oklch(0.922 0 0);
     --input: oklch(0.922 0 0);
@@ -107,42 +109,41 @@
     --chart-4: oklch(0.371 0 0);
     --chart-5: oklch(0.269 0 0);
     --radius: 0.625rem;
-    /* Sidebar is a floating near-white panel on the gray canvas (same family as the content card);
-       hover/active fills are tonal against that panel surface. */
-    --sidebar: oklch(0.985 0 0);
+    /* Sidebar is recessed a step below the white content panel. */
+    --sidebar: oklch(0.97 0 0);
     --sidebar-foreground: oklch(0.145 0 0);
     --sidebar-primary: oklch(0.205 0 0);
     --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.94 0 0);
-    --sidebar-accent-foreground: oklch(0.205 0 0);
+    --sidebar-accent: oklch(0 0 0 / 7%);
+    --sidebar-accent-foreground: oklch(0.145 0 0);
     --sidebar-border: oklch(0.922 0 0);
     --sidebar-ring: oklch(0.708 0 0);
     /* Icon rail: active section rides a white chip; inactive glyphs hover onto a canvas-darker fill. */
     --rail-chip: oklch(1 0 0);
     --rail-chip-foreground: oklch(0.205 0 0);
-    --rail-hover: oklch(0.9 0 0);
+    --rail-hover: oklch(0 0 0 / 6%);
     /* Thin overlay scrollbar thumb, tuned per theme (index.css base layer below). */
     --scrollbar-thumb: oklch(0 0 0 / 15%);
     --scrollbar-thumb-hover: oklch(0 0 0 / 28%);
 }
 
 .dark {
-    /* Same geometry as light on a dark canvas: near-black page, the two panels clearly elevated
-       above it. Popover sits one step above the card so menus read as lifted. */
-    --canvas: oklch(0.16 0 0);
-    --background: oklch(0.24 0 0);
+    /* Same ladder as light, lighter meaning higher: canvas < sidebar < content < popover, each step
+       large enough to read on its own. Fills and state layers are translucent white (see :root). */
+    --canvas: oklch(0.13 0 0);
+    --background: oklch(0.21 0 0);
     --foreground: oklch(0.985 0 0);
-    --card: oklch(0.24 0 0);
+    --card: oklch(0.21 0 0);
     --card-foreground: oklch(0.985 0 0);
-    --popover: oklch(0.26 0 0);
+    --popover: oklch(0.25 0 0);
     --popover-foreground: oklch(0.985 0 0);
     --primary: oklch(0.922 0 0);
     --primary-foreground: oklch(0.205 0 0);
-    --secondary: oklch(0.269 0 0);
+    --secondary: oklch(1 0 0 / 7%);
     --secondary-foreground: oklch(0.985 0 0);
-    --muted: oklch(0.269 0 0);
+    --muted: oklch(1 0 0 / 6%);
     --muted-foreground: oklch(0.708 0 0);
-    --accent: oklch(0.269 0 0);
+    --accent: oklch(1 0 0 / 8.5%);
     --accent-foreground: oklch(0.985 0 0);
     --destructive: oklch(0.704 0.191 22.216);
     --border: oklch(1 0 0 / 10%);
@@ -153,19 +154,19 @@
     --chart-3: oklch(0.439 0 0);
     --chart-4: oklch(0.371 0 0);
     --chart-5: oklch(0.269 0 0);
-    /* Sidebar floats clearly above the canvas (0.16 -> 0.22), same family as the card. */
-    --sidebar: oklch(0.22 0 0);
+    /* Sidebar is recessed a step below the content panel, as in light. */
+    --sidebar: oklch(0.18 0 0);
     --sidebar-foreground: oklch(0.985 0 0);
-    --sidebar-primary: oklch(0.488 0.243 264.376);
-    --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.26 0 0);
+    --sidebar-primary: oklch(0.922 0 0);
+    --sidebar-primary-foreground: oklch(0.205 0 0);
+    --sidebar-accent: oklch(1 0 0 / 8.5%);
     --sidebar-accent-foreground: oklch(0.985 0 0);
     --sidebar-border: oklch(1 0 0 / 10%);
     --sidebar-ring: oklch(0.556 0 0);
-    /* Icon rail: elevated dark chip for the active section; hover a subtle lift on the canvas. */
-    --rail-chip: oklch(0.28 0 0);
+    /* Icon rail: elevated chip for the active section; hover a subtle lift on the canvas. */
+    --rail-chip: oklch(0.27 0 0);
     --rail-chip-foreground: oklch(0.985 0 0);
-    --rail-hover: oklch(0.21 0 0);
+    --rail-hover: oklch(1 0 0 / 7%);
     --scrollbar-thumb: oklch(1 0 0 / 15%);
     --scrollbar-thumb-hover: oklch(1 0 0 / 25%);
 }

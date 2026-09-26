@@ -1,7 +1,7 @@
 // Per-sender name coloring for group-chat message headers (the Discord signal that distinguishes who
 // said what at a glance). A curated, fixed palette of hex colors — NOT the chart tokens — each verified
 // to clear a WCAG bold-text contrast ratio (>= 3:1) against BOTH the light (#ffffff) and dark
-// (oklch(0.24 0 0) ≈ #1f1f1f) --background values, so a colored name stays legible in either theme.
+// (oklch(0.21 0 0) ≈ #181818) --background values, so a colored name stays legible in either theme.
 // 16 entries so a group chat of 10+ distinct senders still mostly lands on different colors.
 export const NAME_COLOR_PALETTE: readonly string[] = [
 	"#c0392b", // red

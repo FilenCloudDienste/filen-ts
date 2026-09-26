@@ -20,7 +20,8 @@ vi.mock("@/providers/themeProvider", () => ({ useTheme: () => ({ theme: "light",
 
 // CodeMirror's own view needs layout jsdom lacks; a textarea keeps the real CodeMirrorSource buffer,
 // dirty and contentRef logic under test while standing in for the editor surface.
-vi.mock("@uiw/react-codemirror", () => ({
+vi.mock("@uiw/react-codemirror", async () => ({
+	oneDarkHighlightStyle: (await import("@codemirror/language")).HighlightStyle.define([]),
 	default: (props: { value: string; readOnly: boolean; "aria-label": string; onChange?: (value: string) => void }) =>
 		createElement("textarea", {
 			"aria-label": props["aria-label"],

@@ -1,8 +1,8 @@
 import { useEffect, useState, type RefObject } from "react"
-import CodeMirror from "@uiw/react-codemirror"
+import CodeMirror, { oneDarkHighlightStyle } from "@uiw/react-codemirror"
 import { EditorView } from "@codemirror/view"
 import { type Extension } from "@codemirror/state"
-import { StreamLanguage } from "@codemirror/language"
+import { StreamLanguage, syntaxHighlighting } from "@codemirror/language"
 import { useTheme } from "@/providers/themeProvider"
 
 // Shared CodeMirror read/write surface — extracted from textViewer.tsx so the notes reader (and the
@@ -119,6 +119,21 @@ function noopDirtyChange(): void {
 	// callback was even passed.
 }
 
+// The editor chrome reads the app's color tokens, so it follows the palette in both themes; only
+// the syntax colors differ per theme (the bundled dark theme would also paint its own background).
+const TOKEN_CHROME = EditorView.theme({
+	"&": { backgroundColor: "transparent", color: "var(--foreground)" },
+	".cm-gutters": { backgroundColor: "transparent", color: "var(--muted-foreground)", border: "none" },
+	".cm-activeLine, .cm-activeLineGutter": { backgroundColor: "var(--muted)" },
+	".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--foreground)" },
+	"&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection": {
+		backgroundColor: "color-mix(in oklab, var(--foreground) 18%, transparent)"
+	}
+})
+
+const LIGHT_THEME: Extension = [TOKEN_CHROME]
+const DARK_THEME: Extension = [TOKEN_CHROME, syntaxHighlighting(oneDarkHighlightStyle)]
+
 // The actual CodeMirror surface. `text` seeds `content` ONCE, at mount (useState's initial argument is
 // only ever consumed on the first render) — the EDITOR INVARIANT: a genuinely different piece of
 // content (a different file, a different note) must remount this component (key by its identity) —
@@ -178,7 +193,7 @@ export function CodeMirrorSource({
 				extensions={extensions}
 				editable={editable}
 				readOnly={!editable}
-				theme={resolvedTheme}
+				theme={resolvedTheme === "dark" ? DARK_THEME : LIGHT_THEME}
 				height="100%"
 				aria-label={alt}
 				// exactOptionalPropertyTypes rejects an explicit onChange={undefined} — omit the key entirely
