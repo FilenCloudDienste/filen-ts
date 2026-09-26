@@ -132,7 +132,7 @@ export function AddPlaylistTracksDialog({ playlist, onClose }: AddPlaylistTracks
 							setPathStack([])
 						}}
 						className={cn(
-							"shrink-0 disabled:cursor-default",
+							"shrink-0",
 							pathStack.length === 0
 								? "font-medium text-foreground"
 								: "text-muted-foreground hover:text-foreground hover:underline"
@@ -156,7 +156,7 @@ export function AddPlaylistTracksDialog({ playlist, onClose }: AddPlaylistTracks
 										setPathStack(prev => prev.slice(0, index + 1))
 									}}
 									className={cn(
-										"min-w-0 shrink-0 truncate disabled:cursor-default",
+										"min-w-0 shrink-0 truncate",
 										isLast
 											? "font-medium text-foreground"
 											: "text-muted-foreground hover:text-foreground hover:underline"
