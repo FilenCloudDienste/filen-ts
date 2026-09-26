@@ -174,8 +174,14 @@
 @layer base {
   * {
     @apply border-border outline-ring/50;
-    scrollbar-width: thin;
-    scrollbar-color: var(--scrollbar-thumb) transparent;
+    }
+  /* The standard scrollbar properties override every ::-webkit-scrollbar rule where both exist, and
+     they cannot inset the track, so they are left to Firefox, the one engine without the pseudo. */
+  @supports not selector(::-webkit-scrollbar) {
+    * {
+      scrollbar-width: thin;
+      scrollbar-color: var(--scrollbar-thumb) transparent;
+      }
     }
   body {
     @apply bg-canvas text-foreground select-none;
@@ -223,13 +229,21 @@
   .cn-toast [data-description] {
     @apply select-text;
     }
-  /* Thin overlay-style scrollbars, consistent across themes — no thick native gutter. */
+  /* Thin scrollbars, consistent across themes: a 6px rounded thumb in a 10px gutter. */
   *::-webkit-scrollbar {
     width: 10px;
     height: 10px;
     }
+  /* The track stops short of both ends, so the thumb clears a rounded corner of the scroll container
+     or of the panel clipping it: 10px clears radii up to 18px (the menus') at the thumb's 2px inset. */
   *::-webkit-scrollbar-track {
     background: transparent;
+    }
+  *::-webkit-scrollbar-track:vertical {
+    margin-block: 10px;
+    }
+  *::-webkit-scrollbar-track:horizontal {
+    margin-inline: 10px;
     }
   *::-webkit-scrollbar-thumb {
     background-color: var(--scrollbar-thumb);
