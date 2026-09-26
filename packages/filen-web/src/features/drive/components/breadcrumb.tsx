@@ -70,6 +70,9 @@ function CrumbLink({ variant, routeId, splatValue, targetUuid, targetAncestry, l
 		<Link
 			to={routeId}
 			params={{ _splat: splatValue }}
+			// A crumb link is always an ancestor (the current segment is a plain span), yet the router's
+			// default prefix match marks it active, handing it aria-current="page" alongside the real one.
+			activeOptions={{ exact: true }}
 			onDragEnter={drop.onDragEnter}
 			onDragOver={drop.onDragOver}
 			onDragLeave={drop.onDragLeave}
