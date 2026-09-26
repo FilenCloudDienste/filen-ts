@@ -32,7 +32,7 @@ Unit tests are Vitest in `src/**/*.test.{ts,tsx}`, node by default (DOM tests op
 
 ### Response headers
 
-Send these on **every** response:
+Send these on **every** response, `304 Not Modified` included: Safari judges a revalidated worker script by the 304's own headers, so a bare 304 blocks the SDK worker on reload.
 
 | Header                         | Value                                      |
 | ------------------------------ | ------------------------------------------ |

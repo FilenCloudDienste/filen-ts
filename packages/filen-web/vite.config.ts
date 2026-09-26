@@ -1,9 +1,27 @@
-import { defineConfig } from "vite"
+import { defineConfig, type Plugin } from "vite"
 import react from "@vitejs/plugin-react"
 import tailwindcss from "@tailwindcss/vite"
 import { tanstackRouter } from "@tanstack/router-plugin/vite"
 import babel from "@rolldown/plugin-babel"
 import { sdkArtifacts } from "./vite/sdk-artifacts-plugin"
+
+// preview.headers only reaches the responses the static handler serves with a body: its 304 Not
+// Modified goes out bare, and WebKit then refuses a worker script revalidated on reload for want of
+// COEP. Every response carries them, as the deployment must (README § Deployment).
+function previewHeaders(): Plugin {
+	return {
+		name: "filen:preview-headers",
+		configurePreviewServer(server) {
+			server.middlewares.use((_request, response, next) => {
+				for (const [name, value] of Object.entries(PREVIEW_HEADERS)) {
+					response.setHeader(name, value)
+				}
+
+				next()
+			})
+		}
+	}
+}
 
 const COI_HEADERS = {
 	"Cross-Origin-Opener-Policy": "same-origin",
@@ -53,8 +71,17 @@ const CSP = [
 	"frame-ancestors 'none'"
 ].join("; ")
 
+const PREVIEW_HEADERS = {
+	...COI_HEADERS,
+	"Content-Security-Policy": CSP,
+	"X-Content-Type-Options": "nosniff",
+	"Referrer-Policy": "no-referrer",
+	"Permissions-Policy": "camera=(), microphone=(), geolocation=()"
+}
+
 export default defineConfig({
 	plugins: [
+		previewHeaders(),
 		tanstackRouter({ target: "react", autoCodeSplitting: true }),
 		// @rolldown/plugin-babel's real API (verified against the installed 0.2.3 package:
 		// README + dist/index.d.mts) is a DEFAULT export taking flat `presets`/`plugins`/`include`
@@ -114,14 +141,6 @@ export default defineConfig({
 			"Service-Worker-Allowed": "/"
 		}
 	},
-	preview: {
-		headers: {
-			...COI_HEADERS,
-			"Content-Security-Policy": CSP,
-			"X-Content-Type-Options": "nosniff",
-			"Referrer-Policy": "no-referrer",
-			"Permissions-Policy": "camera=(), microphone=(), geolocation=()"
-		}
-	},
+	// The preview headers are set by previewHeaders() (plugins above), not preview.headers.
 	worker: { format: "es" }
 })
