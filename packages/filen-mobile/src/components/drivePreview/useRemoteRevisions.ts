@@ -13,8 +13,8 @@ import type { AnyDirWithContext } from "@filen/sdk-rs"
 import { galleryItemKey, type GalleryItemTagged } from "@/components/drivePreview/gallery"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
 import { onSocketReconnected } from "@/stores/useSocket.store"
-import { driveItemsQueryFindFileInNormalParent } from "@/features/drive/queries/useDriveItems.query"
-import { whenUnlockedForeground } from "@/lib/unlockedForeground"
+import { driveItemsQueryFindFileInNormalParent, type FileInNormalParent } from "@/features/drive/queries/useDriveItems.query"
+import { unlockedForegroundGate, whenUnlockedForeground } from "@/lib/unlockedForeground"
 import {
 	isCovered,
 	lineageState,
@@ -256,7 +256,7 @@ export default function useRemoteRevisions({
 						destructiveText: t("remote_change_load_theirs"),
 						cancelText: t("remote_change_keep_mine"),
 						// The app can lock while this waits for its turn.
-						gate: whenUnlockedForeground
+						gate: unlockedForegroundGate
 					})
 				)
 
@@ -421,7 +421,7 @@ export default function useRemoteRevisions({
 						primaryText: t("remote_deleted_save_new"),
 						destructiveText: t("remote_deleted_discard"),
 						cancelText: t("cancel"),
-						gate: whenUnlockedForeground
+						gate: unlockedForegroundGate
 					})
 				)
 
@@ -520,23 +520,63 @@ export default function useRemoteRevisions({
 			// Not overtaken by an event of this file, which the socket, back since, handled itself.
 			const fresh = () => answerable(key) && changes.current === seen
 
-			// A read for this connection an editor torn down did not act on is used; with the socket down, every
-			// check reads (what changes until it is back reaches nothing else).
-			if (state.read === null || connection === null || state.read.connection !== connection) {
-				state.read = {
-					connection,
-					lookup: driveItemsQueryFindFileInNormalParent(parentUuid, stableUuid, displayed.data.decryptedMeta?.name)
+			// A read for this connection an editor torn down did not act on is used, unless the file changed
+			// since it began (a newer version, a rename or move, a deletion). With the socket down, every check
+			// reads (what changes until it is back reaches nothing else). A read the file changed under is made
+			// again, once.
+			let lookedUp: Awaited<ReturnType<typeof run<FileInNormalParent>>> | null = null
+			let epoch = state.epoch
+
+			for (let attempt = 0; attempt < 2 && lookedUp === null; attempt++) {
+				if (
+					state.read === null ||
+					state.read.answered ||
+					connection === null ||
+					state.read.connection !== connection ||
+					state.read.epoch !== state.epoch
+				) {
+					const started = {
+						connection,
+						epoch: state.epoch,
+						lookup: driveItemsQueryFindFileInNormalParent(parentUuid, stableUuid, displayed.data.decryptedMeta?.name),
+						answered: false
+					}
+
+					void started.lookup.then(
+						() => {
+							started.answered = true
+						},
+						() => {
+							started.answered = true
+						}
+					)
+
+					state.read = started
 				}
-			}
 
-			const read = state.read
-			const lookedUp = await run(async () => await read.lookup)
+				const read = state.read
+				const result = await run(async () => await read.lookup)
 
-			if (!lookedUp.success) {
-				if (state.read === read) {
+				if (state.read === read && (!result.success || read.epoch !== state.epoch)) {
 					state.read = null
 				}
 
+				// Torn down meanwhile: nothing here to act on it, and nothing to read again for.
+				if (!answerable(key)) {
+					return { kind: "unknown" }
+				}
+
+				if (!result.success || read.epoch === state.epoch) {
+					lookedUp = result
+					epoch = read.epoch
+				}
+			}
+
+			if (lookedUp === null) {
+				return { kind: "unknown" }
+			}
+
+			if (!lookedUp.success) {
 				logger.warn("drivePreview", "checking the open file after a socket gap failed", { error: lookedUp.error })
 
 				return { kind: "unknown", error: lookedUp.error }
@@ -546,19 +586,24 @@ export default function useRemoteRevisions({
 				return { kind: "unknown" }
 			}
 
-			// Acted on here: covered below for its connection, and the next check reads anew.
-			if (state.read === read) {
-				state.read = null
-			}
-
+			// Acted on here, and the next check reads anew.
+			state.read = null
 			state.recheck = false
 
-			const result = await answerCheck(displayed, parentUuid, lookedUp.data, fresh)
-			// The newest version the read found (a version kept over included), or what the save goes over.
-			const newest = lookedUp.data.lineage?.data.uuid ?? (result.kind === "current" ? result.file.data.uuid : undefined)
+			const found = lookedUp.data.lineage
 
-			if (result.kind !== "unknown" && newest !== undefined) {
-				markCovered(stableUuid, connection, newest)
+			// Newest for certain, as nothing of the file changed since the read began: marked before acting on it,
+			// which may itself change what is known (a follow).
+			if (found !== undefined) {
+				markCovered(stableUuid, connection, found.data.uuid)
+			}
+
+			const result = await answerCheck(displayed, parentUuid, lookedUp.data, fresh)
+
+			// Not in its directory, still the file to save over (moved there, or a version kept over), and still
+			// nothing changed since: that version is the newest.
+			if (found === undefined && result.kind === "current" && state.epoch === epoch) {
+				markCovered(stableUuid, connection, result.file.data.uuid)
 			}
 
 			return result

@@ -68,6 +68,7 @@ vi.mock("@/lib/unlockedForeground", async () => {
 
 	return {
 		whenUnlockedForeground: () => unlocked.current,
+		unlockedForegroundGate: { isOpen: () => true, whenOpen: () => unlocked.current },
 		// The real toaster, waiting on this file's unlock instead of the app's.
 		createUnlockedToaster: (show: (message: string) => void) => {
 			const toaster = real.createUnlockedToaster(show)
@@ -1148,6 +1149,115 @@ describe("useRemoteRevisions", () => {
 
 			expect(findFile).toHaveBeenCalledTimes(1)
 			expect(second.updated).toHaveBeenCalledWith({ previousUuid: "mine", item: file("theirs") })
+		})
+
+		it("a read under way when the file got a newer version is never handed to the next editor, nor followed back", async () => {
+			markCovered("lineage", liveConnection(), "v1")
+
+			const stale = deferred<unknown>()
+
+			findFile.mockReturnValueOnce(stale.promise).mockResolvedValue({ lineage: file("theirs"), sameName: undefined })
+
+			const first = mountOn("v1", true)
+
+			await startSave(first.hook, first.savingRef)
+			socketReconnected()
+			await flush()
+
+			first.savingRef.current = false
+			currentItem.current = galleryItem("mine")
+			act(() => {
+				first.hook.result.current.saveSettled(file("mine"))
+			})
+
+			expect(findFile).toHaveBeenCalledTimes(1)
+
+			// Saved elsewhere while the read is in flight: the clean editor follows it, and is torn down.
+			emit("driveFileRevised", { item: file("theirs") })
+			first.hook.unmount()
+
+			const second = mountOn("theirs", true)
+
+			// Answered from before "theirs": it says "mine".
+			stale.resolve({ lineage: file("mine"), sameName: undefined })
+			await flush()
+
+			expect(second.updated).not.toHaveBeenCalledWith({ previousUuid: "theirs", item: file("mine") })
+
+			// "mine" is never taken for the newest: a save over it checks, and saving over "theirs" needs none.
+			expect(await startSave(second.hook, second.savingRef)).toEqual(file("theirs"))
+		})
+
+		it("a read answered with no editor left to act on it is not reused by a later one", async () => {
+			const read = deferred<unknown>()
+
+			findFile.mockReturnValueOnce(read.promise).mockResolvedValue({ lineage: file("v2"), sameName: undefined })
+			confirm3.mockResolvedValue("cancel")
+
+			const first = mountOn("v1", false)
+
+			socketReconnected()
+			await flush()
+			// Closed before the read returns.
+			first.hook.unmount()
+			read.resolve({ lineage: file("v1"), sameName: undefined })
+			await flush()
+
+			const second = mountOn("v2", true)
+
+			expect(await startSave(second.hook, second.savingRef)).toEqual(file("v2"))
+			expect(findFile).toHaveBeenCalledTimes(2)
+			expect(confirm3).not.toHaveBeenCalled()
+		})
+
+		it("a rename elsewhere after a read drops it: the next check reads anew and keeps the new name", async () => {
+			const read = deferred<unknown>()
+
+			findFile
+				.mockReturnValueOnce(read.promise)
+				.mockResolvedValue({ lineage: file("v1", { name: "renamed.md" }), sameName: undefined })
+
+			const first = mountOn("v1", false)
+
+			socketReconnected()
+			await flush()
+			first.hook.unmount()
+			emit("driveItemUpdated", { previousUuid: "v1", item: file("v1", { name: "renamed.md" }) })
+			read.resolve({ lineage: file("v1"), sameName: undefined })
+			await flush()
+
+			const savingRef = { current: false }
+			const updated = vi.fn()
+
+			emitter.current.on("driveItemUpdated", updated)
+			currentItem.current = { type: "drive", data: file("v1", { name: "renamed.md" }) }
+
+			const hook = renderHook(() =>
+				useRemoteRevisions({
+					item: { type: "drive", data: file("v1", { name: "renamed.md" }) } as never,
+					itemToUse: file("v1", { name: "renamed.md" }),
+					resolveParent: () => Promise.resolve(null as never),
+					hasEdits: true,
+					savingRef,
+					saveAsNewFile: (() => Promise.resolve(null)) as never
+				})
+			)
+
+			expect(await startSave(hook, savingRef)).toEqual(file("v1", { name: "renamed.md" }))
+			expect(findFile).toHaveBeenCalledTimes(2)
+			expect(updated).not.toHaveBeenCalledWith({ previousUuid: "v1", item: file("v1") })
+		})
+
+		it("a drive event the socket could not read makes every file's next save check", async () => {
+			markCovered("lineage", liveConnection(), "v1")
+			findFile.mockResolvedValue({ lineage: file("v1"), sameName: undefined })
+
+			const { hook, savingRef } = mountOn("v1", true)
+
+			emit("driveChangesMissed", undefined)
+
+			expect(await startSave(hook, savingRef)).toEqual(file("v1"))
+			expect(findFile).toHaveBeenCalledTimes(1)
 		})
 
 		it("an editor off screen at the reconnect reads nothing then, and checks before its first save", async () => {

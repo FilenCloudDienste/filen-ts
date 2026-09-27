@@ -7,6 +7,12 @@ export function isUnlockedForeground(): boolean {
 	return useAppStore.getState().biometricUnlocked === true && AppState.currentState === "active"
 }
 
+// For prompts: an alert that must not draw over the biometric lock shows only while this holds.
+export const unlockedForegroundGate = {
+	isOpen: () => isUnlockedForeground(),
+	whenOpen: () => whenUnlockedForeground()
+}
+
 // Resolves once isUnlockedForeground() holds, at once when it already does.
 export function whenUnlockedForeground(): Promise<void> {
 	if (isUnlockedForeground()) {

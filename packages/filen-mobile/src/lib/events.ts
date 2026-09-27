@@ -52,6 +52,8 @@ export type Events = {
 	driveFileRestored: {
 		uuid: string
 	}
+	// A drive event arrived that the SDK could not read: some change happened that nothing was told of.
+	driveChangesMissed: void
 	// The drive preview's unsaved-changes guard blocked a route pop (user chose Cancel, or the
 	// save failed): the gallery must unwind its one-shot navigate-back latch so the close
 	// button works again.

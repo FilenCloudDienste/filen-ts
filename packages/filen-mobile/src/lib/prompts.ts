@@ -19,8 +19,8 @@ export type AlertPromptOptions = {
 	destructive?: boolean
 	// When true, render only the OK button (an informational acknowledgement, no cancel).
 	singleButton?: boolean
-	// Awaited once this alert's turn has come, right before it shows (see ThreeButtonPromptOptions.gate).
-	gate?: () => Promise<void>
+	// See ThreeButtonPromptOptions.gate.
+	gate?: PromptGate
 }
 
 // Which button the user chose in a three-button alert (primary affirmative / destructive / cancel).
@@ -33,10 +33,15 @@ export type ThreeButtonPromptOptions = {
 	destructiveText: string
 	cancelText?: string
 	cancellable?: boolean
-	// Awaited once this alert's turn has come (the alerts ahead of it answered), right before it shows: an
-	// alert that must not draw over the biometric lock waits here for the unlock, as the app can lock while
-	// it waits for its turn.
-	gate?: () => Promise<void>
+	// A condition the alert shows under only (an alert that must not draw over the biometric lock waits for
+	// the unlock). Waited for without holding the prompts queue, so the lock's own PIN prompt is never stuck
+	// behind it, and checked again once the alert's turn comes, as the app can lock while it waits.
+	gate?: PromptGate
+}
+
+export type PromptGate = {
+	isOpen: () => boolean
+	whenOpen: () => Promise<void>
 }
 
 export type InputPromptResult =
@@ -75,6 +80,24 @@ export type InputPromptOptions = {
 
 // Serializes native dialogs (one at a time) so concurrent callers do not stack alerts.
 const promptsMutex = new Semaphore(1)
+
+// Takes the prompts queue for an alert, with its gate open. The queue is never held while the gate is
+// closed: waiting for the gate first, and letting the queue go again if it closed meanwhile.
+async function acquireOpen(gate: PromptGate | undefined): Promise<void> {
+	for (;;) {
+		if (gate !== undefined && !gate.isOpen()) {
+			await gate.whenOpen()
+		}
+
+		await promptsMutex.acquire()
+
+		if (gate === undefined || gate.isOpen()) {
+			return
+		}
+
+		promptsMutex.release()
+	}
+}
 
 const prompts = {
 	async alert(options?: AlertPromptOptions): Promise<AlertPromptResult> {
@@ -151,13 +174,11 @@ const prompts = {
 	// red, so the affirmative goes first. A dismiss (tap-outside / back) resolves to "cancel".
 	async confirm3(options: ThreeButtonPromptOptions): Promise<ThreeButtonPromptResult> {
 		const result = await run(async defer => {
-			await promptsMutex.acquire()
+			await acquireOpen(options.gate)
 
 			defer(() => {
 				promptsMutex.release()
 			})
-
-			await options.gate?.()
 
 			return await new Promise<ThreeButtonPromptResult>(resolve => {
 				const primaryButton = {
@@ -213,13 +234,11 @@ const prompts = {
 
 	async info(options?: AlertPromptOptions): Promise<void> {
 		const result = await run(async defer => {
-			await promptsMutex.acquire()
+			await acquireOpen(options?.gate)
 
 			defer(() => {
 				promptsMutex.release()
 			})
-
-			await options?.gate?.()
 
 			return await new Promise<void>(resolve => {
 				Alert.alert(

@@ -1,9 +1,10 @@
 import useSocketStore from "@/stores/useSocket.store"
-import { createUnlockedNotices, createUnlockedToaster, whenUnlockedForeground } from "@/lib/unlockedForeground"
+import { createUnlockedNotices, createUnlockedToaster, unlockedForegroundGate } from "@/lib/unlockedForeground"
 import type { FileInNormalParent } from "@/features/drive/queries/useDriveItems.query"
 import alerts from "@/lib/alerts"
 import prompts from "@/lib/prompts"
 import events from "@/lib/events"
+import type { DriveItem } from "@/types"
 
 // What the drive preview knows of a file across its editors: an editor remounts on each save of its own and
 // each newer version it follows (the file queries re-key on the new uuid), so what must outlive one mount is
@@ -32,9 +33,13 @@ export type LineageState = {
 	// A check for changes missed while the socket was down, that no editor could act on (its own save was
 	// uploading, or it was torn down): run by the next editor of the file on screen.
 	recheck: boolean
-	// The check's directory read for a connection, until an editor acted on it: an editor torn down meanwhile
-	// hands it to the next instead of reading again.
-	read: { connection: number | null; lookup: Promise<FileInNormalParent> } | null
+	// Counts what changed the file since (an event of it: a newer version, a rename or move, a deletion or
+	// restore), so a read begun before one is never taken for what the file is now.
+	epoch: number
+	// The check's directory read for a connection while it is under way: an editor torn down meanwhile hands
+	// it to the next instead of reading again, unless the file changed since it began. Once answered, it is no
+	// one's to reuse: what it saw ages.
+	read: { connection: number | null; epoch: number; lookup: Promise<FileInNormalParent>; answered: boolean } | null
 	// Remote-change prompts about the file, pending or on screen: no save goes over what they ask about.
 	asking: number
 }
@@ -45,7 +50,7 @@ export function lineageState(stableUuid: string): LineageState {
 	let state = lineages.get(stableUuid)
 
 	if (state === undefined) {
-		state = { covered: null, newest: null, recheck: false, read: null, asking: 0 }
+		state = { covered: null, newest: null, recheck: false, epoch: 0, read: null, asking: 0 }
 
 		lineages.set(stableUuid, state)
 	}
@@ -74,20 +79,58 @@ export function markCovered(stableUuid: string, connection: number | null, uuid:
 	state.newest = uuid
 }
 
+// The file changed: a read begun before is no longer what it is.
+function changed(state: LineageState): void {
+	state.epoch++
+	state.read = null
+}
+
+function lineageOfItem(item: DriveItem): LineageState | undefined {
+	return item.type === "file" && item.data.stableUuid !== undefined ? lineages.get(item.data.stableUuid) : undefined
+}
+
 // A file's events keep what is known of it current, whether or not an editor of it is open.
 events.subscribe("driveFileRevised", ({ item }) => {
-	const state = item.type === "file" && item.data.stableUuid !== undefined ? lineages.get(item.data.stableUuid) : undefined
+	const state = lineageOfItem(item)
 
 	if (state !== undefined) {
+		changed(state)
 		state.newest = item.data.uuid
 	}
 })
 
+// A rename or move (and a version followed or saved here): the name and directory a read saw are gone.
+events.subscribe("driveItemUpdated", ({ item }) => {
+	const state = lineageOfItem(item)
+
+	if (state !== undefined) {
+		changed(state)
+	}
+})
+
+// These name a version only, of whichever file: every read goes.
 events.subscribe("driveFileGone", ({ uuid }) => {
 	for (const state of lineages.values()) {
+		changed(state)
+
 		if (state.newest === uuid) {
 			state.newest = null
 		}
+	}
+})
+
+events.subscribe("driveFileRestored", () => {
+	for (const state of lineages.values()) {
+		changed(state)
+	}
+})
+
+// A drive event the socket could not read: nothing known of any file can be trusted, so every save checks.
+events.subscribe("driveChangesMissed", () => {
+	for (const state of lineages.values()) {
+		changed(state)
+		state.covered = null
+		state.newest = null
 	}
 })
 
@@ -106,7 +149,7 @@ export function previewToast(fileKey: string, kind: string, message: string): vo
 
 // A notice about a save already made that must be read whole: an alert, kept even after the preview closes.
 export const previewNotice = createUnlockedNotices(async (title, message) => {
-	await prompts.info({ title, message, gate: whenUnlockedForeground })
+	await prompts.info({ title, message, gate: unlockedForegroundGate })
 })
 
 // The preview closed: its toasts still waiting go with it.

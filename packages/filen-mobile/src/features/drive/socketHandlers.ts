@@ -43,6 +43,8 @@ const BATCHED_CREATE_TAGS = new Set<DriveEvent_Tags>([DriveEvent_Tags.FileNew, D
 // listing got, so every listing reads again on its next mount.
 export function handleDriveMalformedEvent(): void {
 	driveItemsQueryMarkAllStale()
+	// An open editor, too, can no longer take its file for current: its next save checks.
+	events.emit("driveChangesMissed")
 }
 
 export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): Promise<void> {

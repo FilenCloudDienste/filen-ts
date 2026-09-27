@@ -69,6 +69,7 @@ import { QueryObserver } from "@tanstack/react-query"
 import { queryClient } from "@/queries/client"
 import { driveItemsQueryKey } from "@/features/drive/queries/useDriveItems.query"
 import { handleDriveEvent, handleDriveMalformedEvent, type DriveSocketEvent } from "@/features/drive/socketHandlers"
+import events from "@/lib/events"
 import { socketCoveredRefetchOnMount, trackServerReads } from "@/queries/socketSession"
 import useSocketStore from "@/stores/useSocket.store"
 
@@ -186,5 +187,15 @@ describe("a drive event the SDK couldn't read", () => {
 		await settle()
 
 		expect(fetches.get("drive:sub")).toBe(2)
+	})
+
+	it("tells an open editor its file may have changed unseen", () => {
+		const missed = vi.fn()
+		const subscription = events.subscribe("driveChangesMissed", missed)
+
+		handleDriveMalformedEvent()
+		subscription.remove()
+
+		expect(missed).toHaveBeenCalledTimes(1)
 	})
 })
