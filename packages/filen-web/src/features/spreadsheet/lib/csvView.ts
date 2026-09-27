@@ -189,7 +189,7 @@ const WIN1252_SPECIALS: Record<number, number> = {
 	0x0178: 0x9f
 }
 
-// null when the text holds a character windows-1252 cannot represent — the caller falls back to UTF-8.
+// null when the text holds a character windows-1252 cannot represent; edits that would need one are refused.
 // Loops by UTF-16 code unit rather than code point: every representable codepoint is in the BMP, so a
 // surrogate half can only belong to a character outside it, which is unrepresentable anyway.
 function encodeWindows1252(text: string): Uint8Array | null {

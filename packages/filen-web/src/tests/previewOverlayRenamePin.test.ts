@@ -23,7 +23,15 @@ vi.mock("@/lib/keymap/useAction", () => ({ useAction: vi.fn(), IN_EDITORS: {}, I
 vi.mock("@/lib/useIsOnline", () => ({ useIsOnline: () => true }))
 
 function viewerStub(kind: "text" | "spreadsheet") {
-	return function Viewer({ editable, readOnlyReason }: { editable?: boolean; readOnlyReason?: string }) {
+	return function Viewer({
+		editable,
+		readOnlyReason,
+		neverEditable
+	}: {
+		editable?: boolean
+		readOnlyReason?: string
+		neverEditable?: boolean
+	}) {
 		useEffect(() => {
 			mounts[kind]++
 		}, [])
@@ -31,7 +39,8 @@ function viewerStub(kind: "text" | "spreadsheet") {
 		return createElement("div", {
 			"data-testid": kind,
 			"data-editable": String(editable === true),
-			"data-reason": readOnlyReason ?? ""
+			"data-reason": readOnlyReason ?? "",
+			"data-never-editable": String(neverEditable === true)
 		})
 	}
 }
@@ -61,9 +70,9 @@ function named(name: string, uuid = "file") {
 }
 
 // A second slot to step to and back from, when `index` is given.
-function overlay(name: string, index = 0) {
+function overlay(name: string, index = 0, variant: "drive" | "recents" = "drive") {
 	return createElement(PreviewOverlay, {
-		variant: "drive" as const,
+		variant,
 		items: [
 			{ type: "drive" as const, item: named(name) },
 			{ type: "drive" as const, item: named("other.pdf", "other") }
@@ -165,5 +174,16 @@ describe("PreviewOverlay — a rename of the open file", () => {
 		rerender(overlay("data.csv", 0))
 
 		expect((await screen.findByTestId("spreadsheet")).dataset["editable"]).toBe("true")
+	})
+
+	it("opens a spreadsheet outside the drive as never editable, so it keeps only what it shows", async () => {
+		const { unmount } = render(overlay("budget.xlsx", 0, "recents"))
+
+		expect((await screen.findByTestId("spreadsheet")).dataset["neverEditable"]).toBe("true")
+
+		unmount()
+		render(overlay("budget.xlsx"))
+
+		expect((await screen.findByTestId("spreadsheet")).dataset["neverEditable"]).toBe("false")
 	})
 })

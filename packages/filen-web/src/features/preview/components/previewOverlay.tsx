@@ -1137,6 +1137,7 @@ export function PreviewOverlay({
 									documentKey={currentDocumentKey}
 									editable={editable}
 									renamedReadOnly={renamedReadOnly}
+									neverEditable={variant !== "drive"}
 									locked={saving}
 									onDirtyChange={setPreviewDirty}
 									contentRef={contentRef}
@@ -1284,6 +1285,8 @@ interface PreviewBodyProps {
 	editable: boolean
 	// Read-only because a rename changed the save format: the spreadsheet grid says so.
 	renamedReadOnly: boolean
+	// Outside the drive nothing is ever editable, so a spreadsheet keeps only what it shows.
+	neverEditable: boolean
 	// A save in flight: text editors go read-only until it settles.
 	locked: boolean
 	onDirtyChange: (dirty: boolean) => void
@@ -1344,6 +1347,7 @@ function PreviewBody({
 	documentKey,
 	editable,
 	renamedReadOnly,
+	neverEditable,
 	locked,
 	onDirtyChange,
 	contentRef,
@@ -1428,6 +1432,7 @@ function PreviewBody({
 						alt={alt}
 						editable={editable}
 						{...(renamedReadOnly ? { readOnlyReason: "renamed" as const } : {})}
+						neverEditable={neverEditable}
 						onDirtyChange={onDirtyChange}
 						saveRef={spreadsheetRef}
 					/>

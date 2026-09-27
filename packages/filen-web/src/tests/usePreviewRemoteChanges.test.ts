@@ -511,7 +511,8 @@ describe("usePreviewRemoteChanges", () => {
 		expect(onItemRemoved).toHaveBeenCalledExactlyOnceWith(testUuid("a"))
 	})
 
-	it("drops a deleted file kept on screen once its edits are gone, but not once it was restored", () => {
+	it("keeps a deleted file kept on screen through an undo back to clean, and forgets it once restored", () => {
+		const b = file("b", { stableUUID: "other" as File["stableUUID"] })
 		const { hook, onItemRemoved } = setup()
 
 		act(() => {
@@ -520,24 +521,18 @@ describe("usePreviewRemoteChanges", () => {
 		act(() => {
 			hook.result.current.keepMine()
 		})
+		// An undo back to the saved content reports clean; the slot, and its redo history, stay.
 		act(() => {
 			setPreviewDirty(false)
 		})
 
-		expect(onItemRemoved).toHaveBeenCalledExactlyOnceWith(testUuid("a"))
-
-		onItemRemoved.mockClear()
-		setPreviewDirty(true)
+		expect(onItemRemoved).not.toHaveBeenCalled()
 
 		act(() => {
-			emitPreviewItemRemoved(testUuid("a"))
-		})
-		act(() => {
-			hook.result.current.keepMine()
 			emitPreviewItemRestored(testUuid("a"))
 		})
 		act(() => {
-			setPreviewDirty(false)
+			hook.rerender({ items: [file("a"), b], index: 1 })
 		})
 
 		expect(onItemRemoved).not.toHaveBeenCalled()

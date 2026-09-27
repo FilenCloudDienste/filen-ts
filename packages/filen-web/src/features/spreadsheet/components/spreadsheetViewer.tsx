@@ -160,8 +160,9 @@ function SpreadsheetBody({
 	const doc = edits.doc
 	const writability = useSpreadsheetWritability(id, doc, editable && !unnamed, neverEditable)
 	const canEdit = editable && writability === "writable" && !unnamed && !renamed
-	// Editing waits on the worker's proof: the toolbar holds its place meanwhile, disabled.
-	const toolbarShown = canEdit || (editable && !unnamed && !renamed && writability === "checking")
+	// Editing waits on the worker's proof: the toolbar holds its place meanwhile, disabled, and stays so
+	// when the proof fails, so the grid never moves as the verdict lands.
+	const toolbarShown = canEdit || (editable && !unnamed && !renamed && (writability === "checking" || doc.kind === "xlsx"))
 	const readOnlyNote = !editable
 		? readOnlyReason === "renamed"
 			? t("previewSpreadsheetReadOnlyRenamed")

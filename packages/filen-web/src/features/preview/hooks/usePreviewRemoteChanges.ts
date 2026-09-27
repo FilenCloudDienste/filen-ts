@@ -86,7 +86,7 @@ interface RemoteChangeContext {
 	held: RefObject<PreviewRevision[]>
 	heldLeaving: RefObject<HeldLeaving[]>
 	// Slots (frozen uuid → the gone file's uuid) kept on screen for their unsaved edits: the pager, which
-	// skipped removing them while dirty, drops them once they are clean or left.
+	// skipped removing them while dirty, drops them once the user leaves them.
 	keptGone: RefObject<Map<string, string>>
 	// Displayed uuids this overlay is trashing or deleting, moving, or restoring a version of: their echoes
 	// are the user's own doing, never a change made elsewhere.
@@ -507,14 +507,14 @@ export function usePreviewRemoteChanges({
 		}
 	}, [ctx, currentFrozenUuid])
 
-	// A gone file kept on screen leaves the pager once its edits are discarded, or the user steps away
-	// (which asks first). After the render that steps, so the pager keeps the slot the user went to. A slot
-	// that shows another file by then (saved as a new one) stays.
-	const dirty = usePreviewUnsavedGuardStore(state => state.dirty)
-
+	// A gone file kept on screen leaves the pager once the user steps away from it (with unsaved edits,
+	// only through the discard prompt), after the render that steps, so the pager keeps the slot the user
+	// went to. Never while it stays on screen: an undo back to the saved text reads as clean too, and must
+	// not drop the slot and its redo history. A slot that shows another file by then (saved as a new one)
+	// stays.
 	useEffect(() => {
 		for (const [frozenUuid, goneUuid] of keptGone.current) {
-			if (frozenUuid === currentFrozenUuid && dirty) {
+			if (frozenUuid === currentFrozenUuid) {
 				continue
 			}
 
@@ -524,7 +524,7 @@ export function usePreviewRemoteChanges({
 				latest.current.onItemRemoved(frozenUuid)
 			}
 		}
-	}, [ctx, currentFrozenUuid, dirty])
+	}, [ctx, currentFrozenUuid])
 
 	function saveStarted(): void {
 		saving.current = true
