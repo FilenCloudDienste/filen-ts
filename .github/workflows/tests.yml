@@ -227,6 +227,14 @@ jobs:
           else
             pnpm exec playwright install --with-deps chromium firefox webkit
           fi
+      # Firefox on Linux advances a playing media element's clock only against a live audio sink, and the
+      # runner has no sound server: playback reports playing with its position stuck at 0.
+      - name: Start a null audio sink
+        run: |
+          sudo apt-get install -y --no-install-recommends pulseaudio
+          pulseaudio --start --exit-idle-time=-1
+          pactl load-module module-null-sink sink_name=e2e
+          pactl set-default-sink e2e
       - name: E2E tests
         working-directory: packages/filen-web
         run: VITE_E2E=1 pnpm run test:e2e
