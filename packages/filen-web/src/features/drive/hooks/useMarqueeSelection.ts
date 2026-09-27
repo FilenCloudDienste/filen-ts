@@ -24,27 +24,45 @@ export interface MarqueeItem {
 	data: { uuid: string }
 }
 
-// The item geometry the hit-test needs, injected rather than read from drive's gridLayout constants so
-// the photos grid (its own tile size + an 8px gap) can use the same machinery. Drive computes it from
-// its viewMode at the call site, keeping gridLayout.ts its own source of truth.
+// The item geometry the hit-test needs, injected rather than read from drive's gridLayout constants.
+// Drive computes it from its viewMode at the call site, keeping gridLayout.ts its own source of truth.
 export interface MarqueeGeometry {
 	rowHeight: number
 	tileWidth: number
 	gap: number
 }
 
-interface MarqueeParams<T extends MarqueeItem> {
-	items: T[]
-	// Photos passes "grid" — it has no list mode; only the hit-test branch reads this.
+// A layout whose rows are not uniform (the photos timeline's month headers) hit-tests itself. Both
+// take content-space coordinates and the content box width.
+export interface MarqueeHitTest {
+	indices: (rect: MarqueeContentRect, contentWidth: number) => number[]
+	indexAtPoint: (x: number, y: number, contentWidth: number) => number
+}
+
+// Uniform rows: a list, or a grid of equal rows.
+interface MarqueeUniformLayout {
 	viewMode: DriveViewMode
 	columns: number
 	// Replaces the rowHeightFor(viewMode) lookup this hook used to do against drive's own constants.
 	geometry: MarqueeGeometry
+}
+
+type MarqueeParams<T extends MarqueeItem> = {
+	items: T[]
 	// The selection store this marquee drives — drive's useDriveStore, photos' usePhotosStore.
 	selection: { read: () => T[]; write: (items: T[]) => void }
 	scrollElement: HTMLDivElement | null
 	// Moves the roving cursor to the drag-end item, mirroring how a click sets it.
 	setCursor: (index: number) => void
+} & (MarqueeUniformLayout | { hitTest: MarqueeHitTest })
+
+function uniformHitTest(itemCount: number, { viewMode, columns, geometry }: MarqueeUniformLayout): MarqueeHitTest {
+	return {
+		indices: (rect, contentWidth) =>
+			marqueeIndices(rect, itemCount, viewMode, columns, contentWidth, geometry.tileWidth, geometry.rowHeight, geometry.gap),
+		indexAtPoint: (x, y, contentWidth) =>
+			marqueeIndexAtPoint(x, y, itemCount, viewMode, columns, contentWidth, geometry.tileWidth, geometry.rowHeight, geometry.gap)
+	}
 }
 
 // Live per-drag state. Kept entirely in a ref (not React state): it mutates on every pointermove/frame
@@ -91,15 +109,9 @@ export interface MarqueeSelection {
 // rectangle and continuously replaces (or, under ctrl/cmd, unions) the selection with the items it
 // covers — hit-tested in item space so scrolled-away rows count. Auto-scrolls near the edges; Escape
 // cancels and restores the arm-time selection.
-export function useMarqueeSelection<T extends MarqueeItem>({
-	items,
-	viewMode,
-	columns,
-	geometry,
-	selection,
-	scrollElement,
-	setCursor
-}: MarqueeParams<T>): MarqueeSelection {
+export function useMarqueeSelection<T extends MarqueeItem>(params: MarqueeParams<T>): MarqueeSelection {
+	const { items, selection, scrollElement, setCursor } = params
+	const hitTest = "hitTest" in params ? params.hitTest : uniformHitTest(items.length, params)
 	const [rect, setRect] = useState<MarqueeContentRect | null>(null)
 	const dragRef = useRef<MarqueeDrag<T> | null>(null)
 	const rafRef = useRef(0)
@@ -109,18 +121,14 @@ export function useMarqueeSelection<T extends MarqueeItem>({
 	// Synced in a post-commit effect (writing refs during render is disallowed) — pointer events are
 	// user-driven and always fire after commit, so the listeners never read a pre-commit value.
 	const itemsRef = useRef(items)
-	const viewModeRef = useRef(viewMode)
-	const columnsRef = useRef(columns)
-	const geometryRef = useRef(geometry)
+	const hitTestRef = useRef(hitTest)
 	const selectionRef = useRef(selection)
 	const scrollElementRef = useRef(scrollElement)
 	const setCursorRef = useRef(setCursor)
 
 	useEffect(() => {
 		itemsRef.current = items
-		viewModeRef.current = viewMode
-		columnsRef.current = columns
-		geometryRef.current = geometry
+		hitTestRef.current = hitTest
 		selectionRef.current = selection
 		scrollElementRef.current = scrollElement
 		setCursorRef.current = setCursor
@@ -154,17 +162,7 @@ export function useMarqueeSelection<T extends MarqueeItem>({
 			marqueeScrollBounds(box, el.clientLeft, el.clientTop, el.clientWidth, el.scrollHeight)
 		)
 		const items = itemsRef.current
-		const geometry = geometryRef.current
-		const indices = marqueeIndices(
-			marqueeRect,
-			items.length,
-			viewModeRef.current,
-			columnsRef.current,
-			box.width,
-			geometry.tileWidth,
-			geometry.rowHeight,
-			geometry.gap
-		)
+		const indices = hitTestRef.current.indices(marqueeRect, box.width)
 
 		drag.lastHitIndex = indices.length > 0 ? (indices[indices.length - 1] ?? -1) : -1
 
@@ -209,18 +207,7 @@ export function useMarqueeSelection<T extends MarqueeItem>({
 		const box = contentBoxFor(el, drag)
 		const contentX = drag.lastClientX - bounds.left - box.insetLeft
 		const contentY = drag.lastClientY - bounds.top - box.insetTop + el.scrollTop
-		const geometry = geometryRef.current
-		const index = marqueeIndexAtPoint(
-			contentX,
-			contentY,
-			itemsRef.current.length,
-			viewModeRef.current,
-			columnsRef.current,
-			box.width,
-			geometry.tileWidth,
-			geometry.rowHeight,
-			geometry.gap
-		)
+		const index = hitTestRef.current.indexAtPoint(contentX, contentY, box.width)
 
 		if (index >= 0) {
 			setCursorRef.current(index)
