@@ -361,18 +361,31 @@ describe("note socket handlers — contentEdited", () => {
 	it("takes a push's echo once: the same content saved again on another device of this account is its edit", () => {
 		seedNotes([makeNote("a", { editedTimestamp: 1n })])
 		setAccountId(7n)
+		rememberNotePush("a", hashNoteContent("server text"))
+
+		handleNoteEvent(contentEdited("a", 7))
+
+		// An echo patches no row.
+		expect(getNotes()[0]?.editedTimestamp).toBe(1n)
+
+		handleNoteEvent(contentEdited("a", 7))
+
+		expect(getNotes()[0]?.editedTimestamp).toBe(999n)
+	})
+
+	it("a save elsewhere of the version this tab's typing builds on is no news", () => {
+		seedNotes([makeNote("a", { editedTimestamp: 1n })])
+		setAccountId(7n)
 		showEditor("a", "old", "old", "server text")
 		rememberNotePush("a", hashNoteContent("server text"))
 		tabEditorPushed("a", hashNoteContent("server text"))
 		tabEditorChanged("a", "server text, and more")
 
 		handleNoteEvent(contentEdited("a", 7))
+		handleNoteEvent(contentEdited("a", 99))
 
 		expect(useNotesRemoteEditStore.getState().remoteEdited["a"]).toBeUndefined()
-
-		handleNoteEvent(contentEdited("a", 7))
-
-		expect(useNotesRemoteEditStore.getState().remoteEdited["a"]).toEqual({ theirs: "server text" })
+		expect(tabEditorDirty("a")).toBe(true)
 	})
 
 	it("takes this account's edit of content this browser never pushed for another device's, and asks", () => {

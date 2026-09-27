@@ -91,7 +91,7 @@ describe("importNoteFromFile", () => {
 
 		await importNoteFromFile(mockFile("notes.md", "# hi"))
 
-		expect(setNoteTypeOp).toHaveBeenCalledExactlyOnceWith(created, "md")
+		expect(setNoteTypeOp).toHaveBeenCalledExactlyOnceWith(created, "md", "")
 	})
 
 	it("skips the setNoteType round trip when the SDK already created the right type", async () => {

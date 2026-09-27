@@ -14,7 +14,7 @@ import { queryClient } from "@/queries/client"
 import { i18n } from "@/lib/i18n"
 import { forgetNotePushes, rememberNotePush } from "@/features/notes/lib/pushEchoes"
 import { heldNotes, releaseAllNoteHolds } from "@/features/notes/lib/remoteEditHolds"
-import { forgetTabEditors, tabEditorPushed, tabEditorSynced } from "@/features/notes/lib/tabEditors"
+import { forgetTabEditors, tabEditorLanded, tabEditorPushed, tabEditorSynced } from "@/features/notes/lib/tabEditors"
 import { log } from "@/lib/log"
 import { toast } from "sonner"
 import { asErrorDTO } from "@/lib/sdk/errors"
@@ -306,6 +306,16 @@ export class Sync {
 
 		if (origin === this.tabId) {
 			tabEditorPushed(noteUuid, hash)
+		}
+	}
+
+	// ANY ROLE: the cloud holds `hash` for the note, pushed (or found there) by the leader. This tab's own
+	// text is synced then, echo or not.
+	public heardLanded(noteUuid: string, hash: string, origin: string | undefined): void {
+		this.lastPushedHashes.set(noteUuid, hash)
+
+		if (origin === this.tabId) {
+			tabEditorLanded(noteUuid, hash)
 		}
 	}
 
@@ -745,10 +755,12 @@ export class Sync {
 					this.answeredNotes.delete(noteUuid)
 
 					// This tab's text is in the cloud now, and not before: a push the outbox gives up on
-					// leaves it unsaved on screen.
+					// leaves it unsaved on screen. The other tabs hear it too, also when nothing was sent.
 					if (own) {
 						tabEditorSynced(noteUuid, mostRecentContent.content, pushedContentHash)
 					}
+
+					this.transport?.broadcastPushed(noteUuid, pushedContentHash, mostRecentContent.origin, true)
 
 					// The pushed content IS the cloud content now — write it into the per-note content
 					// query cache so an editor reseed after the queue drains paints what the user typed,

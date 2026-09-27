@@ -147,9 +147,23 @@ describe("createNote", () => {
 
 		const outcome = await createNoteAction()
 
-		expect(setNoteTypeOp).toHaveBeenCalledExactlyOnceWith(created, "md")
+		// The new note's content ("") is written again, as this browser's own write.
+		expect(setNoteTypeOp).toHaveBeenCalledExactlyOnceWith(created, "md", "")
+		expect(isOwnNotePush(created.uuid, hashNoteContent(""))).toBe(true)
 		expect(outcome).toEqual({ status: "success", item: retyped })
 		expect(notesQueryGet()).toEqual([retyped])
+	})
+
+	it("takes the new note's own write back when its retype fails", async () => {
+		const created = mockNote({ noteType: "text" })
+		createNote.mockResolvedValueOnce(created)
+		getDefaultNoteTypeMock.mockResolvedValueOnce("md")
+		setNoteTypeOp.mockRejectedValueOnce(new Error("offline"))
+
+		const outcome = await createNoteAction()
+
+		expect(outcome.status).toBe("error")
+		expect(isOwnNotePush(created.uuid, hashNoteContent(""))).toBe(false)
 	})
 
 	it("returns an error outcome on rejection, without touching the cache", async () => {

@@ -5,6 +5,7 @@ import { queryClient } from "@/queries/client"
 import { notesQueryUpsert } from "@/features/notes/queries/notes"
 import { noteContentQueryKey } from "@/features/notes/queries/noteContent"
 import { sync } from "@/features/notes/lib/sync"
+import { retypeNewNote } from "@/features/notes/lib/actions"
 import { detectImportNoteType, sanitizeImportedContent, titleFromFilename } from "@/features/notes/lib/import.logic"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { runOp, type ActionOutcome } from "@/lib/actions/outcome"
@@ -42,7 +43,7 @@ export async function importNoteFromFile(file: File): Promise<ActionOutcome<Note
 		note = await runOp(sdkApi.createNote(title))
 
 		if (note.noteType !== noteType) {
-			note = await runOp(sdkApi.setNoteType(note, noteType))
+			note = await retypeNewNote(note, noteType)
 		}
 	} catch (e) {
 		return { status: "error", dto: asErrorDTO(e) }

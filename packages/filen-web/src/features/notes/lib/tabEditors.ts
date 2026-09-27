@@ -1,12 +1,15 @@
+import { hashNoteContent } from "@filen/shared"
 import { localNoteContent } from "@/features/notes/lib/localContent"
 
 // What the note editor in THIS tab shows and has typed, per note. The outbox is shared by every tab (the
 // leader's queue, mirrored in the followers), so its entries can be another tab's typing; this records
 // whether this tab's editor holds text the cloud does not, or is behind it. Which pushes are this tab's
-// own the outbox tells exactly, by entry (Sync.ownsEntry).
+// own the outbox tells exactly, by the entry's origin (Sync).
 interface TabEditor {
 	// The editor's remount key when it was seeded; a new key is a new editor surface.
 	key: string | null
+	// The text the surface was seeded with.
+	seed: string
 	// The editor's text: its seed, then every change it queued.
 	buffer: string
 	// What the buffer builds on and the cloud holds, as far as this tab knows.
@@ -41,6 +44,7 @@ export function seedTabEditor(uuid: string, key: string, seed: string, synced: s
 
 	editors.set(uuid, {
 		key,
+		seed,
 		buffer: seed,
 		synced,
 		baseHash: undefined,
@@ -80,15 +84,29 @@ export function tabEditorChanged(uuid: string, value: string): void {
 	editor.typed = true
 }
 
-// A push of text this tab queued (hashed `hash`) goes out. It is not synced until it lands: a push the
-// outbox gives up on leaves the text unsaved on screen. A new session builds on it meanwhile, as the
-// cloud will hold it (a follower's cache is only written by the echo).
+// A push of text this tab queued (hashed `hash`) goes out: its echo is this tab's. It is not synced
+// until it lands: a push the outbox gives up on leaves the text unsaved on screen.
 export function tabEditorPushed(uuid: string, hash: string): void {
 	const editor = editors.get(uuid)
 
 	if (editor !== undefined) {
 		editor.authored = [...editor.authored, hash].slice(-MAX_AUTHORED)
-		editor.baseHash = hash
+	}
+}
+
+// A push of text this tab queued (hashed `hash`) landed, heard from the leader tab: a new session builds
+// on it, and the editor is synced when it still holds that text. One hash per landed push.
+export function tabEditorLanded(uuid: string, hash: string): void {
+	const editor = shown(uuid)
+
+	if (editor === undefined) {
+		return
+	}
+
+	editor.baseHash = hash
+
+	if (editor.typed && editor.buffer !== editor.synced && hashNoteContent(editor.buffer) === hash) {
+		editor.synced = editor.buffer
 	}
 }
 
@@ -114,6 +132,14 @@ export function tabEditorSynced(uuid: string, content: string, hash: string | un
 		editor.synced = content
 		editor.baseHash = hash
 	}
+}
+
+// The cloud holding `content` is no news to this tab's editor: its text builds on it (it was seeded
+// with it, or last knew the cloud to hold it).
+export function tabEditorBuildsOn(uuid: string, content: string): boolean {
+	const editor = shown(uuid)
+
+	return editor !== undefined && (editor.synced === content || editor.seed === content)
 }
 
 export function tabEditorBuffer(uuid: string): string | undefined {

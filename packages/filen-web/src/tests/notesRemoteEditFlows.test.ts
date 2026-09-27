@@ -4,15 +4,21 @@ import type { Note, SocketEvent } from "@filen/sdk-rs"
 
 // End to end over the real outbox (sync.ts), socket handlers and tab editor record: a note edited here
 // while another device or tab saves it. Only the SDK, the disk and the toasts are mocked.
-const { setNoteContent, getNoteContent, listNotes } = vi.hoisted(() => ({
-	setNoteContent: vi.fn<(note: Note, content: string, preview: string) => Promise<Note>>(),
-	getNoteContent: vi.fn<(note: Note) => Promise<string | undefined>>(),
-	listNotes: vi.fn<() => Promise<Note[]>>(() => Promise.resolve([]))
-}))
+const { setNoteContent, getNoteContent, listNotes, persisted } = vi.hoisted(() => {
+	// The outbox an earlier page load left on disk.
+	const disk: { value: unknown } = { value: null }
+
+	return {
+		setNoteContent: vi.fn<(note: Note, content: string, preview: string) => Promise<Note>>(),
+		getNoteContent: vi.fn<(note: Note) => Promise<string | undefined>>(),
+		listNotes: vi.fn<() => Promise<Note[]>>(() => Promise.resolve([])),
+		persisted: disk
+	}
+})
 
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: { setNoteContent, getNoteContent, listNotes } }))
 vi.mock("@/lib/storage/adapter", () => ({
-	kvGetJson: () => Promise.resolve(null),
+	kvGetJson: () => Promise.resolve(persisted.value),
 	kvSetJson: () => Promise.resolve(),
 	kvDelete: () => Promise.resolve()
 }))
@@ -33,7 +39,8 @@ import useNotesInflightStore, { beginEditingSession } from "@/features/notes/sto
 import { useNotesRemoteEditStore } from "@/features/notes/store/useNoteRemoteEdit"
 import { handleNoteEvent, keepMineOverRemoteEdit, reloadRemoteEdit } from "@/features/notes/lib/socketHandlers"
 import { heldNotes, releaseAllNoteHolds } from "@/features/notes/lib/remoteEditHolds"
-import { seedTabEditor, tabEditorBaseHash, tabEditorBuffer, tabEditorChanged } from "@/features/notes/lib/tabEditors"
+import { seedTabEditor, tabEditorBaseHash, tabEditorBuffer, tabEditorChanged, tabEditorDirty } from "@/features/notes/lib/tabEditors"
+import { deriveEditorSeed, deriveSessionBaseHash, latestInflightContent } from "@/features/notes/hooks/useNoteEditor.logic"
 
 const ME = 7
 const ELSEWHERE = 99
@@ -139,6 +146,7 @@ beforeEach(async () => {
 	useNotesRemoteEditStore.setState({ remoteEdited: {}, openNote: null })
 	releaseAllNoteHolds()
 	vi.clearAllMocks()
+	persisted.value = null
 	queryClient.setQueryData(ACCOUNT_QUERY_KEY, { id: BigInt(ME) })
 	queryClient.setQueryData(NOTES_QUERY_KEY, [note])
 	sync.start()
@@ -323,5 +331,182 @@ describe("notes — a clean editor and a save elsewhere", () => {
 		expect(remountKey()).toBe(1)
 		expect(toast).not.toHaveBeenCalled()
 		expect(tabEditorBuffer(note.uuid)).toBe("same")
+	})
+})
+
+describe("notes — a clean tab when the question is answered in another tab", () => {
+	it("the leader tab takes theirs when the answer sends nothing, so its next edit does not bury theirs unseen", async () => {
+		openNote()
+
+		const cloud = cloudOf("old")
+
+		// A follower's typing reached the leader's queue; another device saves: this tab is asked too.
+		sync.ingestRemoteEnqueue({ note, content: "B text", timestamp: 1, baseContentHash: hashNoteContent("old"), origin: "tab-B" })
+		cloud.set("theirs")
+		handleNoteEvent(contentEdited("theirs", ELSEWHERE))
+
+		expect(question()).toBeDefined()
+
+		// The follower answers Load theirs: already in the cloud, nothing is sent and nothing echoes.
+		sync.ingestRemoteEnqueue({
+			note,
+			content: "theirs",
+			timestamp: Date.now(),
+			baseContentHash: hashNoteContent("theirs"),
+			origin: "tab-B",
+			answer: true
+		})
+		useNotesRemoteEditStore.getState().dropRemoteEdited(note.uuid)
+		sync.executeNow()
+		await tick()
+
+		expect(setNoteContent).not.toHaveBeenCalled()
+		expect(queuedContents()).toBeUndefined()
+		expect(question()).toBeUndefined()
+		// Reseeded from theirs, and said so.
+		expect(queryClient.getQueryData(noteContentQueryKey(note.uuid))).toBe("theirs")
+		expect(remountKey()).not.toBe(1)
+		expect(toast).toHaveBeenCalledExactlyOnceWith("notes:noteUpdatedElsewhere")
+
+		// The editor remounts on theirs; the next edit is typed on it.
+		seedTabEditor(note.uuid, "a:2", "theirs", "theirs")
+
+		const seed = deriveEditorSeed({
+			inflightLatest: latestInflightContent(undefined),
+			queryContent: queryClient.getQueryData<string>(noteContentQueryKey(note.uuid))
+		})
+
+		beginEditingSession(note.uuid)
+		tabEditorChanged(note.uuid, "theirs + A")
+		await sync.enqueue(
+			note,
+			"theirs + A",
+			tabEditorBaseHash(note.uuid) ?? deriveSessionBaseHash({ seed, hasInflight: false, current: null })
+		)
+		sync.executeNow()
+		await tick()
+
+		expect(cloud.get()).toBe("theirs + A")
+	})
+
+	it("a clean follower, asked only because another tab's typing is queued, takes theirs", () => {
+		openNote()
+		useNotesInflightStore.setState({
+			inflightContent: { a: [{ timestamp: 1, content: "B text", note, baseContentHash: hashNoteContent("old"), origin: "tab-B" }] }
+		})
+		handleNoteEvent(contentEdited("theirs", ELSEWHERE))
+
+		expect(question()).toBeDefined()
+
+		useNotesInflightStore.setState({ inflightContent: {} })
+		useNotesRemoteEditStore.getState().dropRemoteEdited(note.uuid)
+
+		expect(question()).toBeUndefined()
+		expect(queryClient.getQueryData(noteContentQueryKey(note.uuid))).toBe("theirs")
+		expect(remountKey()).not.toBe(1)
+	})
+})
+
+describe("notes — this browser's own writes outside the typing", () => {
+	it("a late echo of the new note's own create-time write after the first keystroke asks nothing and holds nothing", async () => {
+		queryClient.setQueryData(noteContentQueryKey(note.uuid), "", { updatedAt: 1 })
+		useNotesRemoteEditStore.getState().setOpenNote(note.uuid)
+		seedTabEditor(note.uuid, "a:1", "", "")
+
+		const cloud = cloudOf("")
+
+		beginEditingSession(note.uuid)
+		tabEditorChanged(note.uuid, "# Heading")
+		await sync.enqueue(note, "# Heading", tabEditorBaseHash(note.uuid) ?? hashNoteContent(""))
+		// Not recorded as this browser's (a write made past the notes feature): the version the typing is on.
+		handleNoteEvent(contentEdited("", ME))
+		sync.executeNow()
+		await tick()
+
+		expect(question()).toBeUndefined()
+		expect(cloud.get()).toBe("# Heading")
+	})
+
+	it("an import's create-time echo leaves no standing question once the import's own push is heard back", async () => {
+		const cloud = cloudOf("")
+
+		await sync.enqueue(note, "# imported", null)
+		sync.executeNow()
+		queryClient.setQueryData(noteContentQueryKey(note.uuid), "# imported")
+		handleNoteEvent(contentEdited("", ME))
+		await tick()
+
+		expect(cloud.get()).toBe("# imported")
+
+		handleNoteEvent(contentEdited("# imported", ME))
+
+		expect(question()).toBeUndefined()
+	})
+
+	it("a draft restored from this browser's outbox is its own: typing during its push raises no question", async () => {
+		persisted.value = { a: [{ timestamp: 1, content: "A", note, baseContentHash: hashNoteContent("old") }] }
+		sync.cancel()
+		queryClient.setQueryData(noteContentQueryKey(note.uuid), "old", { updatedAt: 1 })
+		listNotes.mockResolvedValue([note])
+		getNoteContent.mockResolvedValue("old")
+
+		const response = deferred<Note>()
+
+		setNoteContent.mockImplementationOnce(() => response.promise)
+		setNoteContent.mockImplementation(n => Promise.resolve(n))
+		useNotesRemoteEditStore.getState().setOpenNote(note.uuid)
+		// The page reloads: restore, reconcile, push the draft.
+		sync.start()
+		await tick()
+		await tick()
+
+		expect(setNoteContent).toHaveBeenCalledWith(note, "A", expect.any(String))
+
+		// The editor mounted on the restored draft; the user types on.
+		seedTabEditor(note.uuid, "a:1", "A", "old")
+		type("AB")
+		handleNoteEvent(contentEdited("A", ME))
+		response.resolve(note)
+		await tick()
+
+		expect(question()).toBeUndefined()
+		expect((await heldNotes()).has(note.uuid)).toBe(false)
+	})
+})
+
+describe("notes — what the other tabs hear of a push", () => {
+	it("a follower's own text is synced when the leader says it landed, without its echo", () => {
+		openNote()
+		sync.startAsFollower()
+		type("mine")
+
+		const origin = useNotesInflightStore.getState().inflightContent[note.uuid]?.[0]?.origin
+
+		expect(tabEditorDirty(note.uuid)).toBe(true)
+
+		sync.heardPush(note.uuid, hashNoteContent("mine"), origin)
+		// Still in flight.
+		expect(tabEditorDirty(note.uuid)).toBe(true)
+
+		sync.heardLanded(note.uuid, hashNoteContent("mine"), origin)
+
+		expect(tabEditorDirty(note.uuid)).toBe(false)
+		expect(tabEditorBaseHash(note.uuid)).toBe(hashNoteContent("mine"))
+	})
+
+	it("a push the outbox gives up on leaves no base that never landed", async () => {
+		openNote()
+		type("unsaved work")
+		getNoteContent.mockResolvedValue("old")
+		setNoteContent.mockRejectedValue({ species: "sdk", kind: "Server", label: "Server", message: "Server" })
+
+		for (let i = 0; i < 3; i++) {
+			sync.executeNow()
+			await tick()
+		}
+
+		expect(queuedContents()).toBeUndefined()
+		expect(tabEditorBaseHash(note.uuid)).toBeUndefined()
+		expect(tabEditorDirty(note.uuid)).toBe(true)
 	})
 })

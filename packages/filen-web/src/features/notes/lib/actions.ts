@@ -48,7 +48,7 @@ export async function createNote(title?: string): Promise<ActionOutcome<Note>> {
 		const preferredType = await getDefaultNoteType()
 
 		if (preferredType !== DEFAULT_NOTE_TYPE) {
-			note = await runOp(sdkApi.setNoteType(note, preferredType))
+			note = await retypeNewNote(note, preferredType)
 		}
 	} catch (e) {
 		return { status: "error", dto: asErrorDTO(e) }
@@ -57,6 +57,20 @@ export async function createNote(title?: string): Promise<ActionOutcome<Note>> {
 	notesQueryUpsert(note)
 
 	return { status: "success", item: note }
+}
+
+// A just-created note's retype, which writes its content ("" for a new note) again: recorded as this
+// browser's own write before it is sent, so a late echo never reads as a save made elsewhere.
+export async function retypeNewNote(note: Note, noteType: NoteType): Promise<Note> {
+	const forget = recordNotePush(note.uuid, "")
+
+	try {
+		return await runOp(sdkApi.setNoteType(note, noteType, ""))
+	} catch (e) {
+		forget()
+
+		throw e
+	}
 }
 
 // ── Copy content ─────────────────────────────────────────────────────────

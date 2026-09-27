@@ -31,7 +31,7 @@ import { queryClient } from "@/queries/client"
 import { useNotesInflightStore } from "@/features/notes/store/useNotesInflight"
 import { noteContentQueryKey } from "@/features/notes/queries/noteContent"
 import { useNoteEditor } from "@/features/notes/hooks/useNoteEditor"
-import { forgetTabEditors, tabEditorBuffer, tabEditorDirty, tabEditorPushed } from "@/features/notes/lib/tabEditors"
+import { forgetTabEditors, tabEditorBuffer, tabEditorDirty, tabEditorLanded } from "@/features/notes/lib/tabEditors"
 import { hashNoteContent } from "@filen/shared"
 
 const NOTE: Note = {
@@ -147,7 +147,7 @@ describe("useNoteEditor — what this tab's editor shows", () => {
 			result.current.onChange("mine")
 		})
 
-		tabEditorPushed(NOTE.uuid, hashNoteContent("mine"))
+		tabEditorLanded(NOTE.uuid, hashNoteContent("mine"))
 
 		act(() => {
 			result.current.onChange("mine, more")

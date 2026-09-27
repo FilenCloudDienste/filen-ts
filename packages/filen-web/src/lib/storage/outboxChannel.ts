@@ -13,8 +13,8 @@ import { log } from "@/lib/log"
 
 // follower → leader: forward one edit (envelope-encoded feature payload) / request a flush / request state.
 // leader → followers: authoritative state (envelope-encoded) + a takeover announcement + the hash of what
-// was just pushed for an item (and the id of the tab that queued it, so that tab knows the push for its
-// own), so a follower knows the item's socket echo for its own. Any tab → any tab: a
+// is being pushed for an item (and the id of the tab that queued it, so that tab knows the push for its
+// own), then again once the cloud holds it (`landed`, also when nothing had to be sent), so a follower knows the item's socket echo for its own. Any tab → any tab: a
 // question about an item's newer version was answered, so the other tabs stop asking it.
 export type OutboxChannelMsg =
 	| { kind: "enqueue"; payload: string }
@@ -22,7 +22,7 @@ export type OutboxChannelMsg =
 	| { kind: "stateRequest" }
 	| { kind: "state"; payload: string }
 	| { kind: "leaderHello" }
-	| { kind: "pushed"; id: string; hash: string; origin?: string }
+	| { kind: "pushed"; id: string; hash: string; origin?: string; landed?: true }
 	| { kind: "answered"; id: string }
 
 // The domain-agnostic transport a Sync class depends on: E is the follower's forwarded-edit shape, S the
@@ -36,7 +36,7 @@ export interface OutboxChannelTransport<E, S> {
 	// leader → followers
 	broadcastState: (state: S) => void
 	broadcastLeaderHello: () => void
-	broadcastPushed: (id: string, hash: string, origin?: string) => void
+	broadcastPushed: (id: string, hash: string, origin?: string, landed?: true) => void
 	// any tab → any tab
 	broadcastAnswered: (id: string) => void
 	// Terminal teardown (logout/shutdown): detach the handler and close the channel so no late cross-tab
@@ -67,8 +67,18 @@ export function makeOutboxChannelTransport<E, S>(channel: BroadcastChannel): Out
 		broadcastLeaderHello: () => {
 			post({ kind: "leaderHello" })
 		},
-		broadcastPushed: (id, hash, origin) => {
-			post(origin === undefined ? { kind: "pushed", id, hash } : { kind: "pushed", id, hash, origin })
+		broadcastPushed: (id, hash, origin, landed) => {
+			const msg: OutboxChannelMsg = { kind: "pushed", id, hash }
+
+			if (origin !== undefined) {
+				msg.origin = origin
+			}
+
+			if (landed !== undefined) {
+				msg.landed = landed
+			}
+
+			post(msg)
 		},
 		broadcastAnswered: id => {
 			post({ kind: "answered", id })

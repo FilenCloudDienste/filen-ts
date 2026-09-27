@@ -1,6 +1,7 @@
 import { create } from "zustand"
 import { holdNoteForRemoteEdit, releaseNoteHold } from "@/features/notes/lib/remoteEditHolds"
 import { tabEditorDirty } from "@/features/notes/lib/tabEditors"
+import { takeRemoteContent } from "@/features/notes/lib/remoteContent"
 
 // Per note, "the server's content moved while you have unsynced changes", set by the realtime ContentEdited
 // handler ONLY while the note has them — a note without reloads instead. Surfaced as the
@@ -17,9 +18,13 @@ export interface NotesRemoteEditStore {
 	setRemoteEdited: (uuid: string, edit: NoteRemoteEdit) => void
 	// The question was answered in this tab: the other tabs are told.
 	clearRemoteEdited: (uuid: string) => void
-	// The question was answered in another tab, or has nothing left to ask. Kept while this tab's editor
-	// holds typing of its own the cloud does not: its question, on screen here, is still open.
+	// The question was answered in another tab. Kept while this tab's editor holds typing of its own the
+	// cloud does not: its question, on screen here, is still open. Otherwise this tab takes their version
+	// as for any save elsewhere: the answer may send nothing (theirs already in the cloud), so no echo
+	// would bring it.
 	dropRemoteEdited: (uuid: string) => void
+	// The question has nothing left to ask.
+	retireRemoteEdited: (uuid: string) => void
 	setOpenNote: (uuid: string | null) => void
 }
 
@@ -67,10 +72,16 @@ export const useNotesRemoteEditStore = create<NotesRemoteEditStore>((set, get) =
 			broadcastAnswered?.(uuid)
 		},
 		dropRemoteEdited(uuid) {
-			if (!tabEditorDirty(uuid)) {
-				drop(uuid)
+			const edit = get().remoteEdited[uuid]
+
+			if (edit === undefined || tabEditorDirty(uuid)) {
+				return
 			}
+
+			drop(uuid)
+			takeRemoteContent(uuid, edit.theirs, get().openNote === uuid)
 		},
+		retireRemoteEdited: drop,
 		setOpenNote(uuid) {
 			set({ openNote: uuid })
 		}

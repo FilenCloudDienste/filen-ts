@@ -40,8 +40,12 @@ const HYDRATION_BACKSTOP_MS = 5000
 function handleMessage(msg: OutboxChannelMsg): void {
 	// Every tab keeps the list of what the leader pushed, whichever role it holds by the time it hears.
 	if (msg.kind === "pushed") {
-		rememberNotePush(msg.id, msg.hash)
-		sync.heardPush(msg.id, msg.hash, msg.origin)
+		if (msg.landed === true) {
+			sync.heardLanded(msg.id, msg.hash, msg.origin)
+		} else {
+			rememberNotePush(msg.id, msg.hash)
+			sync.heardPush(msg.id, msg.hash, msg.origin)
+		}
 
 		return
 	}

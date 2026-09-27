@@ -1,20 +1,26 @@
-import { toast } from "sonner"
 import { createNotePreviewFromContentText, hashNoteContent, run } from "@filen/shared"
 import type { SocketEvent, UserInfo, Note } from "@filen/sdk-rs"
 import { registerSocketHandler, decryptedOrSkip } from "@/lib/sdk/socket"
 import { queryClient } from "@/queries/client"
 import { log } from "@/lib/log"
 import { ACCOUNT_QUERY_KEY } from "@/queries/account"
-import useNotesInflightStore, { endEditingSession } from "@/features/notes/store/useNotesInflight"
+import useNotesInflightStore, { endEditingSession, type InflightEntry } from "@/features/notes/store/useNotesInflight"
 import { useNotesRemoteEditStore } from "@/features/notes/store/useNoteRemoteEdit"
 import { sync } from "@/features/notes/lib/sync"
 import { noteKindForPreview } from "@/features/notes/lib/sync.logic"
 import { notesQueryUpdate, notesQueryRemove, notesQueryGet, notesQueryRefetch, notesQueryUpsert } from "@/features/notes/queries/notes"
 import { markNoteContentUnsynced, noteContentQueryKey, readNoteContent } from "@/features/notes/queries/noteContent"
 import { isOwnNotePush, recordNotePush } from "@/features/notes/lib/pushEchoes"
-import { takeTabEditorAuthored, tabEditorBuffer, tabEditorDirty, tabEditorSynced, tabNoteContent } from "@/features/notes/lib/tabEditors"
+import {
+	takeTabEditorAuthored,
+	tabEditorBuffer,
+	tabEditorBuildsOn,
+	tabEditorDirty,
+	tabEditorSynced,
+	tabNoteContent
+} from "@/features/notes/lib/tabEditors"
+import { followContent, takeRemoteContent } from "@/features/notes/lib/remoteContent"
 import { sdkApi } from "@/lib/sdk/client"
-import { i18n } from "@/lib/i18n"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { runOp, type ActionOutcome } from "@/lib/actions/outcome"
 
@@ -187,6 +193,12 @@ function handleContentEdited(inner: Extract<NoteSocketEvent["inner"], { type: "c
 	// asked about the newest, retired once there is nothing left to ask (one left on a note not on screen
 	// would otherwise offer an outdated version when the note is opened).
 	if (noteIsDirty(inner.note)) {
+		// The version every unsynced change builds on: no news (a late echo of this browser's own write
+		// that was never recorded, or a save of the same text elsewhere).
+		if (content !== undefined && unsyncedChangesBuildOn(inner.note, content)) {
+			return
+		}
+
 		if (content === undefined || content !== tabNoteContent(inner.note)) {
 			useNotesRemoteEditStore.getState().setRemoteEdited(inner.note, { theirs: content })
 
@@ -198,31 +210,16 @@ function handleContentEdited(inner: Extract<NoteSocketEvent["inner"], { type: "c
 			followContent(inner.note, content)
 		}
 
-		useNotesRemoteEditStore.getState().dropRemoteEdited(inner.note)
+		useNotesRemoteEditStore.getState().retireRemoteEdited(inner.note)
 
 		return
 	}
 
-	useNotesRemoteEditStore.getState().dropRemoteEdited(inner.note)
+	useNotesRemoteEditStore.getState().retireRemoteEdited(inner.note)
 	// Patch the row (editedTimestamp, noteType, and a fresh preview when the content decrypted), then
 	// reseed from their content, saying so when that editor is on screen.
 	patchRowFromContentEdited(inner, content)
-	takeRemoteContent(inner.note, content, true)
-}
-
-// The content cache follows `content` without a new dataUpdatedAt, so a shown editor that already holds it
-// stays mounted.
-function followContent(uuid: string, content: string): void {
-	const contentKey = noteContentQueryKey(uuid)
-
-	if (queryClient.getQueryData<string>(contentKey) === content) {
-		return
-	}
-
-	const updatedAt = queryClient.getQueryState<string | undefined>(contentKey)?.dataUpdatedAt
-
-	void queryClient.cancelQueries({ queryKey: contentKey, exact: true })
-	queryClient.setQueryData<string>(contentKey, content, updatedAt !== undefined ? { updatedAt } : undefined)
+	takeRemoteContent(inner.note, content, useNotesRemoteEditStore.getState().openNote === inner.note)
 }
 
 // The row is not patched for an echo: it may be older than this tab's own later change. A stale type is
@@ -238,40 +235,28 @@ function refetchRowForEcho(inner: Extract<NoteSocketEvent["inner"], { type: "con
 
 // Unsynced local changes of a note, in any tab's queue or in this tab's editor.
 function noteIsDirty(uuid: string): boolean {
-	return (useNotesInflightStore.getState().inflightContent[uuid] ?? []).length > 0 || tabEditorDirty(uuid)
+	return queuedFor(uuid).length > 0 || tabEditorDirty(uuid)
 }
 
-// A note's new version, taken in this tab: written straight into the content cache when it came with the
-// event (a new dataUpdatedAt reseeds a shown editor, even while its session keeps the query disabled),
-// otherwise read again. A note with no editor here is only invalidated: a mounted query reads it, and an
-// unmounted one on its next open. `announce`: a save from elsewhere, not from another tab of this browser,
-// which would toast at every pause of the typing there.
-function takeRemoteContent(uuid: string, content: string | undefined, announce: boolean): void {
-	const contentKey = noteContentQueryKey(uuid)
-	const buffer = tabEditorBuffer(uuid)
+function queuedFor(uuid: string): InflightEntry[] {
+	return useNotesInflightStore.getState().inflightContent[uuid] ?? []
+}
 
-	// Nothing changes on screen.
-	if (buffer !== undefined && buffer === content) {
-		tabEditorSynced(uuid, content, undefined)
-		followContent(uuid, content)
-
-		return
+// Every unsynced change of the note (queued, and typed in this tab) was made on `content`.
+function unsyncedChangesBuildOn(uuid: string, content: string): boolean {
+	if (tabEditorDirty(uuid) && !tabEditorBuildsOn(uuid, content)) {
+		return false
 	}
 
-	if (buffer === undefined) {
-		void queryClient.invalidateQueries({ queryKey: contentKey })
-	} else if (content === undefined) {
-		// Re-enables the query, so the invalidation reads.
-		endEditingSession(uuid)
-		void queryClient.invalidateQueries({ queryKey: contentKey })
-	} else {
-		void queryClient.cancelQueries({ queryKey: contentKey, exact: true })
-		queryClient.setQueryData<string>(contentKey, content)
+	const queued = queuedFor(uuid)
+
+	if (queued.length === 0) {
+		return true
 	}
 
-	if (announce && useNotesRemoteEditStore.getState().openNote === uuid) {
-		toast(i18n.t("notes:noteUpdatedElsewhere"))
-	}
+	const hash = hashNoteContent(content)
+
+	return queued.every(entry => entry.baseContentHash === hash)
 }
 
 // An echo of content this browser pushed, from this tab or another. The tab that typed it now builds on
@@ -281,11 +266,18 @@ function takeRemoteContent(uuid: string, content: string | undefined, announce: 
 function followOwnPush(uuid: string, content: string, hash: string): void {
 	const buffer = tabEditorBuffer(uuid)
 
+	// Nothing on screen here: a question left standing is superseded once nothing is left unsynced.
 	if (buffer === undefined) {
+		if (queuedFor(uuid).length === 0) {
+			useNotesRemoteEditStore.getState().retireRemoteEdited(uuid)
+		}
+
 		return
 	}
 
-	if (takeTabEditorAuthored(uuid, hash) || buffer === content) {
+	// This tab's own push, its text, or the text it was seeded with (a draft restored from this browser's
+	// outbox, pushed as no live tab's): its editor builds on it.
+	if (takeTabEditorAuthored(uuid, hash) || buffer === content || tabEditorBuildsOn(uuid, content)) {
 		tabEditorSynced(uuid, content, hash)
 		// The leader tab's push already wrote it; a follower's is written here.
 		followContent(uuid, content)
