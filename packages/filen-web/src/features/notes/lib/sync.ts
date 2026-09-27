@@ -45,6 +45,13 @@ import {
 } from "@/features/notes/lib/sync.logic"
 
 const OUTBOX_KV_KEY = "inflightNoteContent"
+// Waits before re-sending pushes that failed, then every 10 minutes (Sync.scheduleResend).
+const RESEND_BACKOFF_MS = [30_000, 120_000, 600_000]
+
+// A failed push is re-sent on its own only in a visible tab that is online.
+function resendMayRun(): boolean {
+	return onlineManager.isOnline() && (typeof document === "undefined" || document.visibilityState === "visible")
+}
 // Held by every tab while it lives (released with the tab): whether the tab a push came from is still there
 // to tell its user.
 const TAB_LOCK_PREFIX = "filen-web-notes-tab:"
@@ -105,6 +112,11 @@ export class Sync {
 	// transient error never loses the first edit, while a genuine permission rejection still
 	// un-wedges the content query after N attempts.
 	private readonly nonRetryableRejections: Map<string, number> = new Map<string, number>()
+	// LEADER: the notes whose last push failed on the network (or an equally transient error), and the one
+	// timer that sends them again (scheduleResend), with how many waits of the backoff it has used.
+	private readonly failedNotes: Set<string> = new Set<string>()
+	private resendTimer: ReturnType<typeof setTimeout> | null = null
+	private resendStep = 0
 	// Per note, the hash of the content this tab last pushed. For an answer to the remote-edit dialog
 	// (answeredNotes), the cloud still holding it is no newer work to warn about: a "Load theirs" queues
 	// their content over a push of the local edits that landed after their save. For any other edit it is:
@@ -191,6 +203,9 @@ export class Sync {
 		this.answeredNotes.clear()
 		this.landed.clear()
 		this.unacked = {}
+		this.pauseResend()
+		this.failedNotes.clear()
+		this.resendStep = 0
 	}
 
 	// Drop a note's consecutive-rejection strike count. For the editor's use when it clears a
@@ -955,10 +970,11 @@ export class Sync {
 					if (!push.success) {
 						// KEEP-for-retry on a network-class error, a retryable-auth error, or any non-SDK
 						// throw — re-throw so allSettled records it and the entry survives to the next pass
-						// (offline-safe, never counted toward the drop). For any OTHER SDK error bound the
-						// drop: increment a per-note consecutive-rejection counter and only drop once it
-						// reaches MAX_NON_RETRYABLE_REJECTIONS — a one-off transient keeps the edit, a
-						// genuine read-only/permission rejection un-wedges the query after N attempts.
+						// (offline-safe, never counted toward the drop). The SDK owns retries, with one
+						// exception: scheduleResend sends such an entry again on a slow timer. For any OTHER
+						// SDK error bound the drop: increment a per-note consecutive-rejection counter and only
+						// drop once it reaches MAX_NON_RETRYABLE_REJECTIONS — a one-off transient keeps the
+						// edit, a genuine read-only/permission rejection un-wedges the query after N attempts.
 						const e = push.error
 						const dto = asErrorDTO(e)
 
@@ -968,8 +984,13 @@ export class Sync {
 								kind: dto.species === "sdk" ? dto.kind : undefined
 							})
 						) {
+							this.failedNotes.add(noteUuid)
+
 							throw e
 						}
+
+						// Rejected, not failed: only the count above sends it again.
+						this.failedNotes.delete(noteUuid)
 
 						const rejections = (this.nonRetryableRejections.get(noteUuid) ?? 0) + 1
 
@@ -1001,6 +1022,8 @@ export class Sync {
 
 					// A successful push clears any accumulated rejection count for this note.
 					this.nonRetryableRejections.delete(noteUuid)
+					this.failedNotes.delete(noteUuid)
+					this.resendStep = 0
 					this.lastPushedHashes.set(noteUuid, pushedContentHash)
 					this.answeredNotes.delete(noteUuid)
 
@@ -1107,6 +1130,7 @@ export class Sync {
 				await this.flushToDisk(useNotesInflightStore.getState().inflightContent)
 				// Followers learn a note drained (spinner clears) only from this post-push broadcast.
 				this.broadcastState()
+				this.scheduleResend()
 			}
 		})
 
@@ -1116,6 +1140,59 @@ export class Sync {
 			}
 
 			log.error("notes-sync", "sync pass failed unexpectedly", result.error)
+		}
+	}
+
+	// LEADER: after a pass, sends the notes whose push failed again on one timer for the whole outbox:
+	// 30 s, 2 min, 10 min, then every 10 min, from the last attempt. Reset by any push that lands and once
+	// nothing has failed; paused while the tab is hidden or offline (resumeResend, or the visibility and
+	// reconnect triggers, carry on). Never for a rejected push: its rejection count decides.
+	private scheduleResend(): void {
+		this.pauseResend()
+
+		const queued = useNotesInflightStore.getState().inflightContent
+
+		for (const noteUuid of this.failedNotes) {
+			if ((queued[noteUuid] ?? []).length === 0) {
+				this.failedNotes.delete(noteUuid)
+			}
+		}
+
+		if (this.failedNotes.size === 0) {
+			this.resendStep = 0
+
+			return
+		}
+
+		if (this.role !== "leader" || !resendMayRun()) {
+			return
+		}
+
+		const delay = RESEND_BACKOFF_MS[Math.min(this.resendStep, RESEND_BACKOFF_MS.length - 1)] ?? 600_000
+
+		this.resendStep++
+		this.resendTimer = setTimeout(() => {
+			this.resendTimer = null
+
+			if (this.role === "leader" && resendMayRun()) {
+				this.executeNow()
+			}
+		}, delay)
+	}
+
+	// The tab went hidden or offline: the schedule waits.
+	public pauseResend(): void {
+		if (this.resendTimer !== null) {
+			clearTimeout(this.resendTimer)
+			this.resendTimer = null
+		}
+	}
+
+	// The tab is visible again: the schedule carries on where it was.
+	public resumeResend(): void {
+		if (this.resendTimer === null) {
+			this.resendStep = Math.max(0, this.resendStep - 1)
+			this.scheduleResend()
 		}
 	}
 

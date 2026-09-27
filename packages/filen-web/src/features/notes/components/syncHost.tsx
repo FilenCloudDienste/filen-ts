@@ -15,9 +15,13 @@ export function SyncHost(): null {
 	useEffect(() => {
 		void startOutbox()
 
+		// Hidden: flush now, and the re-send of failed pushes waits; visible again, it carries on.
 		const onVisibilityChange = (): void => {
 			if (document.hidden) {
 				sync.executeNow()
+				sync.pauseResend()
+			} else {
+				sync.resumeResend()
 			}
 		}
 
@@ -26,6 +30,8 @@ export function SyncHost(): null {
 		const unsubscribeOnline = onlineManager.subscribe(isOnline => {
 			if (isOnline) {
 				sync.executeNow()
+			} else {
+				sync.pauseResend()
 			}
 		})
 

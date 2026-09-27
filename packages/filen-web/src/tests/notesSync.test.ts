@@ -928,3 +928,146 @@ describe("cancel() — TERMINAL shutdown", () => {
 		expect(kvSetJson.mock.calls.length + kvDelete.mock.calls.length).toBeGreaterThan(0)
 	})
 })
+
+// A failed push waits for no keystroke: one timer sends it again, 30 s, 2 min, 10 min, then every 10 min.
+describe("push loop — failed pushes are sent again on a slow timer", () => {
+	async function failingNote(): Promise<Sync> {
+		vi.useFakeTimers()
+
+		const s = new Sync()
+
+		s.start()
+		await vi.advanceTimersByTimeAsync(0)
+		setNoteContent.mockRejectedValue(new Error("fetch failed"))
+		await s.enqueue(makeNote("a"), "typed")
+		// The debounce fires; the push fails.
+		await vi.advanceTimersByTimeAsync(3000)
+
+		expect(setNoteContent).toHaveBeenCalledTimes(1)
+
+		return s
+	}
+
+	// Attempts after `ms` more of fake time.
+	async function after(ms: number): Promise<number> {
+		await vi.advanceTimersByTimeAsync(ms)
+
+		return setNoteContent.mock.calls.length
+	}
+
+	it("backs off 30 s, 2 min, 10 min, then every 10 min", async () => {
+		const s = await failingNote()
+
+		expect(await after(29_999)).toBe(1)
+		expect(await after(1)).toBe(2)
+		expect(await after(119_999)).toBe(2)
+		expect(await after(1)).toBe(3)
+		expect(await after(599_999)).toBe(3)
+		expect(await after(1)).toBe(4)
+		expect(await after(600_000)).toBe(5)
+		s.cancel()
+	})
+
+	it("starts over at 30 s once a push lands", async () => {
+		const s = await failingNote()
+
+		expect(await after(30_000)).toBe(2)
+		expect(await after(120_000)).toBe(3)
+
+		// This attempt lands; the next failure waits 30 s again.
+		setNoteContent.mockResolvedValueOnce(makeNote("a"))
+
+		expect(await after(600_000)).toBe(4)
+		expect(queued("a")).toBe(false)
+
+		await s.enqueue(makeNote("a"), "typed again")
+
+		expect(await after(3000)).toBe(5)
+		expect(await after(30_000)).toBe(6)
+		s.cancel()
+	})
+
+	it("sets no timer while nothing failed", async () => {
+		vi.useFakeTimers()
+
+		const s = new Sync()
+
+		s.start()
+		await vi.advanceTimersByTimeAsync(0)
+		setNoteContent.mockResolvedValue(makeNote("a"))
+		await s.enqueue(makeNote("a"), "typed")
+		await vi.advanceTimersByTimeAsync(3000)
+
+		expect(vi.getTimerCount()).toBe(0)
+		s.cancel()
+	})
+
+	it("sends nothing again for a push the server rejected: its rejection count decides", async () => {
+		vi.useFakeTimers()
+
+		const s = new Sync()
+
+		s.start()
+		await vi.advanceTimersByTimeAsync(0)
+		setNoteContent.mockRejectedValue(sdkError("Server"))
+		await s.enqueue(makeNote("a"), "typed")
+		await vi.advanceTimersByTimeAsync(3000)
+
+		expect(queued("a")).toBe(true)
+		expect(vi.getTimerCount()).toBe(0)
+		s.cancel()
+	})
+
+	it("waits while offline, and the reconnect sends it", async () => {
+		const s = await failingNote()
+
+		onlineManager.setOnline(false)
+		s.pauseResend()
+
+		expect(await after(3_600_000)).toBe(1)
+
+		onlineManager.setOnline(true)
+		s.executeNow()
+
+		expect(await after(0)).toBe(2)
+		expect(await after(120_000)).toBe(3)
+		s.cancel()
+	})
+
+	it("waits while the tab is hidden, and carries on when it is visible again", async () => {
+		const s = await failingNote()
+
+		vi.stubGlobal("document", { visibilityState: "hidden" })
+		s.pauseResend()
+
+		expect(await after(3_600_000)).toBe(1)
+
+		vi.stubGlobal("document", { visibilityState: "visible" })
+		s.resumeResend()
+
+		expect(await after(30_000)).toBe(2)
+		vi.unstubAllGlobals()
+		s.cancel()
+	})
+
+	it("a timer that comes due in a hidden tab sends nothing", async () => {
+		const s = await failingNote()
+
+		vi.stubGlobal("document", { visibilityState: "hidden" })
+
+		expect(await after(3_600_000)).toBe(1)
+		vi.unstubAllGlobals()
+		s.cancel()
+	})
+
+	it("is cleared on cancel (logout)", async () => {
+		const s = await failingNote()
+
+		expect(vi.getTimerCount()).toBe(1)
+
+		s.cancel()
+
+		expect(vi.getTimerCount()).toBe(0)
+		expect(await after(3_600_000)).toBe(1)
+	})
+})
