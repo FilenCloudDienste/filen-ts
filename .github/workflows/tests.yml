@@ -2,6 +2,15 @@ name: Tests
 
 on:
   workflow_dispatch:
+    inputs:
+      spec:
+        description: 'Web e2e only: spec file(s) to run, e.g. e2e/downloads.spec.ts (all when empty)'
+        required: false
+        default: ''
+      project:
+        description: 'Web e2e only: Playwright project, e.g. webkit-read (all when empty)'
+        required: false
+        default: ''
 
   # The web e2e suite runs here only (and on dispatch), never per push: with all three browsers it takes
   # hours on the one shared live account.
@@ -236,8 +245,22 @@ jobs:
           pactl set-default-sink e2e
       - name: E2E tests
         working-directory: packages/filen-web
-        run: VITE_E2E=1 pnpm run test:e2e
+        # A dispatch can narrow the run to a spec and a project; both arrive through env, never inlined into
+        # the script, and are refused unless they are plain paths and names.
+        run: |
+          args=()
+          if [ -n "$E2E_SPEC" ]; then
+            [[ "$E2E_SPEC" =~ ^[A-Za-z0-9_./:-]+$ ]] || { echo "invalid spec: $E2E_SPEC"; exit 1; }
+            args+=("$E2E_SPEC")
+          fi
+          if [ -n "$E2E_PROJECT" ]; then
+            [[ "$E2E_PROJECT" =~ ^[a-z0-9-]+$ ]] || { echo "invalid project: $E2E_PROJECT"; exit 1; }
+            args+=("--project=$E2E_PROJECT")
+          fi
+          VITE_E2E=1 pnpm run test:e2e "${args[@]}"
         env:
+          E2E_SPEC: ${{ inputs.spec }}
+          E2E_PROJECT: ${{ inputs.project }}
           FILEN_WEB_E2E_TEST_EMAIL: ${{ secrets.FILEN_WEB_E2E_TEST_EMAIL }}
           FILEN_WEB_E2E_TEST_PASSWORD: ${{ secrets.FILEN_WEB_E2E_TEST_PASSWORD }}
       - name: Upload Playwright report
