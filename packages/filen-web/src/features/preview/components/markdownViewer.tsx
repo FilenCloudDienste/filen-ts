@@ -107,16 +107,17 @@ function MarkdownViewer({ item, alt, editable, onDirtyChange, contentRef, locked
 	// definition the overlay's own Save button reads too.
 	const dirty = usePreviewUnsavedGuardStore(state => state.dirty)
 
-	// Locked while dirty, like the toolbar's own toggle (see above), and then the key keeps its default
-	// (Ctrl+Shift+V pastes as plain text). Works with the cursor in the editor too.
+	// Locked while dirty, like the toolbar's own toggle (see above). The key is swallowed even then:
+	// left to the browser, Ctrl+Shift+V pastes the clipboard over the selection, which is not what
+	// pressing the toggle asks for. Works with the cursor in the editor too.
 	useAction(
 		"editor.togglePreview",
 		keyboardEvent => {
+			keyboardEvent.preventDefault()
+
 			if (dirty) {
 				return
 			}
-
-			keyboardEvent.preventDefault()
 
 			const focusInside = containerRef.current?.contains(document.activeElement) ?? false
 
