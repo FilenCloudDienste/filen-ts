@@ -1,16 +1,19 @@
-import { currentSocketEpoch } from "@/lib/sdk/socketSession"
+import { hashNoteContent } from "@filen/shared"
 import { localNoteContent } from "@/features/notes/lib/localContent"
+import useNotesInflightStore from "@/features/notes/store/useNotesInflight"
 
 // What the note editor in THIS tab shows and has typed, per note. The outbox is shared by every tab (the
 // leader's queue, mirrored in the followers), so its entries can be another tab's typing; this records
 // whether this tab's editor holds text the cloud does not, or is behind it. Which pushes are this tab's
-// own the outbox tells exactly, by the entry's origin (Sync).
+// own the outbox tells exactly, by the entry's origin (Sync), and by the orphan draft this editor showed.
 interface TabEditor {
 	// The editor's remount key when it was seeded; a new key is a new editor surface.
 	key: string | null
-	// The text the surface was seeded with, and whether that was an unsynced draft from the outbox.
+	// The text the surface was seeded with, and whether that was an unsynced draft from the outbox (and its
+	// hash, once asked).
 	seed: string
 	draft: boolean
+	draftHash: string | undefined
 	// The editor's text: its seed, then every change it queued.
 	buffer: string
 	// What the buffer builds on and the cloud holds, as far as this tab knows.
@@ -19,11 +22,13 @@ interface TabEditor {
 	baseHash: string | undefined
 	// Typed into since it was seeded.
 	typed: boolean
-	// Hashes of this tab's pushes, not yet heard back: their echoes are this tab's.
-	authored: string[]
-	// This tab's pushes that landed before their echo came, with the socket session they landed in.
-	landedUnheard: { hash: string; epoch: number | null }[]
+	// This tab's pushes not yet heard back, oldest first, one per entry (by its stamp) however often it
+	// was sent: their echoes are this tab's.
+	pushes: { hash: string; stamp: number; landed: boolean }[]
 }
+
+// How an echo of this browser's write relates to this tab's pushes.
+export type EchoOrigin = "this tab" | "this tab, superseded" | "elsewhere"
 
 const MAX_AUTHORED = 8
 
@@ -45,17 +50,22 @@ export function seedTabEditor(uuid: string, key: string, seed: string, synced: s
 		return
 	}
 
+	const draft = seed !== synced
+
 	editors.set(uuid, {
 		key,
 		seed,
-		draft: seed !== synced,
+		draft,
+		draftHash: undefined,
 		buffer: seed,
 		synced,
-		baseHash: undefined,
+		// A session on a draft builds on what the draft was typed on, whatever the cache holds.
+		baseHash: draft
+			? (useNotesInflightStore.getState().inflightContent[uuid] ?? []).find(entry => entry.content === seed)?.baseContentHash
+			: undefined,
 		typed: false,
 		// Echoes of this tab's pushes can still arrive after a reseed.
-		authored: editor?.authored ?? [],
-		landedUnheard: editor?.landedUnheard ?? []
+		pushes: editor?.pushes ?? []
 	})
 }
 
@@ -89,28 +99,49 @@ export function tabEditorChanged(uuid: string, value: string): void {
 	editor.typed = true
 }
 
-// A push of text this tab queued (hashed `hash`) goes out: its echo is this tab's. It is not synced
-// until it lands: a push the outbox gives up on leaves the text unsaved on screen.
-export function tabEditorPushed(uuid: string, hash: string): void {
+// Whether the outbox entry `content` (or hashed `hash`) is the orphan draft this editor showed: this tab
+// continues it, and its push is this tab's.
+export function tabEditorAdopts(uuid: string, content: string | undefined, hash?: string): boolean {
+	const editor = shown(uuid)
+
+	if (editor?.draft !== true) {
+		return false
+	}
+
+	if (content !== undefined) {
+		return editor.seed === content
+	}
+
+	editor.draftHash ??= hashNoteContent(editor.seed)
+
+	return editor.draftHash === hash
+}
+
+// A push of this tab's entry `stamp` (hashed `hash`) goes out: its echo is this tab's. Once per entry, so a
+// retry leaves no second record. It is not synced until it lands: a push the outbox gives up on leaves the
+// text unsaved on screen.
+export function tabEditorPushed(uuid: string, hash: string, stamp: number): void {
 	const editor = editors.get(uuid)
 
-	if (editor !== undefined) {
-		editor.authored = [...editor.authored, hash].slice(-MAX_AUTHORED)
+	if (editor !== undefined && !editor.pushes.some(push => push.stamp === stamp)) {
+		editor.pushes = [...editor.pushes, { hash, stamp, landed: false }].slice(-MAX_AUTHORED)
 	}
 }
 
-// A push of text this tab queued (hashed `hash`, `content` when this tab still holds it) landed: this
+export function tabEditorHasPush(uuid: string, stamp: number): boolean {
+	return editors.get(uuid)?.pushes.some(push => push.stamp === stamp) === true
+}
+
+// The push of this tab's entry `stamp` (hashed `hash`, `content` when this tab still holds it) landed: this
 // tab's text builds on it, and so does a new session.
-export function tabEditorLanded(uuid: string, hash: string, content: string | undefined): void {
+export function tabEditorLanded(uuid: string, hash: string, stamp: number, content: string | undefined): void {
 	const editor = editors.get(uuid)
 
 	if (editor === undefined) {
 		return
 	}
 
-	if (editor.authored.includes(hash)) {
-		editor.landedUnheard = [...editor.landedUnheard, { hash, epoch: currentSocketEpoch() }].slice(-MAX_AUTHORED)
-	}
+	editor.pushes = editor.pushes.map(push => (push.stamp === stamp ? { ...push, landed: true } : push))
 
 	if (editor.key === null) {
 		return
@@ -123,36 +154,20 @@ export function tabEditorLanded(uuid: string, hash: string, content: string | un
 	}
 }
 
-// Whether an echo of this browser's arrives while a push of this tab's that landed has not echoed yet.
-// Within one socket session events come in the order the server applied them, so that echo is of a write
-// before this tab's push: stale. Across a drop an echo may be lost, so only the current session counts.
-export function tabEditorEchoIsStale(uuid: string): boolean {
+// Takes an echo of this browser's write hashed `hash`: this tab's own push (consumed, with every older one:
+// echoes come in order), superseded when a later push of this tab's already landed (the echo is of text
+// before it: nothing to take), or a write made elsewhere. Only this tab's own text is ever superseded.
+export function takeTabEditorEcho(uuid: string, hash: string): EchoOrigin {
 	const editor = editors.get(uuid)
-
-	if (editor === undefined) {
-		return false
-	}
-
-	const epoch = currentSocketEpoch()
-
-	editor.landedUnheard = editor.landedUnheard.filter(landed => landed.epoch === epoch)
-
-	return editor.landedUnheard.length > 0
-}
-
-// Whether an echo of `hash` is of this tab's own text; consumes it.
-export function takeTabEditorAuthored(uuid: string, hash: string): boolean {
-	const editor = editors.get(uuid)
-	const at = editor?.authored.indexOf(hash) ?? -1
+	const at = editor?.pushes.findIndex(push => push.hash === hash) ?? -1
 
 	if (editor === undefined || at === -1) {
-		return false
+		return "elsewhere"
 	}
 
-	editor.authored = editor.authored.slice(at + 1)
-	editor.landedUnheard = editor.landedUnheard.filter(landed => editor.authored.includes(landed.hash))
+	editor.pushes = editor.pushes.slice(at + 1)
 
-	return true
+	return editor.pushes.some(push => push.landed) ? "this tab, superseded" : "this tab"
 }
 
 // The cloud holds `content` (hashed `hash`, when known), and this tab's text builds on it.

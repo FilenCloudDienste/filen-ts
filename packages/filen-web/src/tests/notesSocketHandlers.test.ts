@@ -379,7 +379,7 @@ describe("note socket handlers — contentEdited", () => {
 		setAccountId(7n)
 		showEditor("a", "old", "old", "server text")
 		rememberNotePush("a", hashNoteContent("server text"))
-		tabEditorPushed("a", hashNoteContent("server text"))
+		tabEditorPushed("a", hashNoteContent("server text"), 1)
 		tabEditorChanged("a", "server text, and more")
 
 		handleNoteEvent(contentEdited("a", 7))
@@ -639,7 +639,7 @@ describe("note socket handlers — this browser's pushes, heard by the tabs show
 		showEditor("a", "old", "old", "mine")
 		rememberNotePush("a", hashNoteContent("mine"))
 		// A follower hears the leader's push by hash.
-		tabEditorPushed("a", hashNoteContent("mine"))
+		tabEditorPushed("a", hashNoteContent("mine"), 1)
 		tabEditorChanged("a", "mine, and more")
 
 		handleNoteEvent(echo("mine"))

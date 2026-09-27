@@ -49,7 +49,12 @@ import {
 } from "@/features/notes/lib/tabEditors"
 import { rememberNotePush } from "@/features/notes/lib/pushEchoes"
 import { buildInflightEntries } from "@/features/notes/lib/sync.logic"
-import { deriveEditorSeed, deriveSessionBaseHash, latestInflightContent } from "@/features/notes/hooks/useNoteEditor.logic"
+import {
+	deriveEditorSeed,
+	deriveSessionBaseHash,
+	latestInflightContent,
+	latestShowableContent
+} from "@/features/notes/hooks/useNoteEditor.logic"
 
 const ME = 7
 const ELSEWHERE = 99
@@ -494,7 +499,7 @@ describe("notes — what the other tabs hear of a push", () => {
 
 		expect(tabEditorDirty(note.uuid)).toBe(true)
 
-		sync.heardPush(note.uuid, hashNoteContent("mine"), origin)
+		sync.heardPush(note.uuid, hashNoteContent("mine"), { origin: origin ?? "", stamp: entry?.timestamp ?? 0 })
 		// Still in flight.
 		expect(tabEditorDirty(note.uuid)).toBe(true)
 
@@ -607,7 +612,7 @@ describe("notes — a follower's keystroke typed before it heard its push land",
 			timestamp: 2000,
 			baseContentHash: hashNoteContent("old"),
 			origin: "tab-F",
-			carried: true
+			carriedFrom: "tab-F"
 		})
 		tabEditorChanged(note.uuid, "old+AB")
 		tabEditorSynced(note.uuid, "old+A", hashNoteContent("old+A"))
@@ -850,5 +855,217 @@ describe("notes — a push's base, and who hears of an overwrite", () => {
 
 		expect(queryClient.getQueryData(noteContentQueryKey(note.uuid))).toBe("A")
 		expect(remountKey()).toBe(1)
+	})
+})
+
+describe("notes — what a tab's editor shows, and which echoes are its own", () => {
+	function showsWhatAnEditorWould(key: string): void {
+		const cache = queryClient.getQueryData<string>(noteContentQueryKey(note.uuid))
+		const seed = deriveEditorSeed({
+			inflightLatest: latestShowableContent(useNotesInflightStore.getState().inflightContent[note.uuid]),
+			queryContent: cache
+		})
+
+		seedTabEditor(note.uuid, key, seed, cache)
+	}
+
+	it("an editor never shows another live tab's queued draft; one it was shown anyway still warns when typed on", () => {
+		openNote()
+		sync.startAsFollower()
+		sync.applyLeaderState({ a: [{ timestamp: 1000, content: "X", note, baseContentHash: hashNoteContent("B0"), origin: "tab-T2" }] })
+		handleNoteEvent(contentEdited("C", ELSEWHERE))
+		// T2 answered Load theirs; its drop reaches the leader after the answer reaches this tab.
+		useNotesRemoteEditStore.getState().dropRemoteEdited(note.uuid, "theirs")
+		showsWhatAnEditorWould("a:2")
+
+		expect(tabEditorBuffer(note.uuid)).toBe("C")
+
+		// Shown T2's draft regardless: typing on it keeps the draft's base, so its push warns.
+		seedTabEditor(note.uuid, "a:3", "X", "C")
+
+		expect(tabEditorBaseHash(note.uuid)).toBe(hashNoteContent("B0"))
+	})
+
+	it("an editor shows an orphan draft (a closed tab's, an earlier page load's) and its own", () => {
+		expect(
+			latestShowableContent([
+				{ timestamp: 1, content: "orphan", note, origin: "gone", orphan: true },
+				{ timestamp: 2, content: "live", note, origin: "tab-T2" }
+			])
+		).toBe("orphan")
+		expect(latestShowableContent([{ timestamp: 1, content: "older build", note }])).toBe("older build")
+		expect(latestShowableContent([{ timestamp: 1, content: "live", note, origin: "tab-T2" }])).toBeNull()
+	})
+
+	it("a restore's echo reaching this tab before the restoring tab's drop does not show its draft", () => {
+		openNote()
+		cloudOf("B0")
+		sync.ingestRemoteEnqueue({ note, content: "X", timestamp: Date.now(), baseContentHash: hashNoteContent("B0"), origin: "tab-T2" })
+		rememberNotePush(note.uuid, hashNoteContent("R"))
+		handleNoteEvent(contentEdited("R", ME))
+		showsWhatAnEditorWould("a:2")
+
+		expect(tabEditorBuffer(note.uuid)).toBe("R")
+	})
+
+	it("a restore's entry marks a closed tab's queued typing an orphan, and keeps a live tab's as it is", async () => {
+		sync.cancel()
+		persisted.value = {
+			a: [{ timestamp: 1, content: "closed", note, origin: "a closed tab" }],
+			b: [{ timestamp: 1, content: "live", note: makeNote("b"), origin: "tab-live" }]
+		}
+
+		listNotes.mockResolvedValue([note, makeNote("b")])
+		getNoteContent.mockResolvedValue("cloud")
+
+		let release = (): void => undefined
+
+		void navigator.locks.request(
+			"filen-web-notes-tab:tab-live",
+			() =>
+				new Promise<void>(resolve => {
+					release = resolve
+				})
+		)
+		// The pushes stay out, so the queue can be looked at.
+		const pushes = deferred<Note>()
+
+		setNoteContent.mockImplementation(() => pushes.promise)
+		sync.start()
+		await tick()
+		await tick()
+
+		expect(useNotesInflightStore.getState().inflightContent["a"]?.[0]?.orphan).toBe(true)
+		expect(useNotesInflightStore.getState().inflightContent["b"]?.[0]?.orphan).toBeUndefined()
+		release()
+		pushes.resolve(note)
+		await tick()
+	})
+
+	it("typing on a restored draft during its push is rebased onto it: no false overwrite", async () => {
+		queryClient.setQueryData(noteContentQueryKey(note.uuid), "B0", { updatedAt: 1 })
+		useNotesRemoteEditStore.getState().setOpenNote(note.uuid)
+		useNotesInflightStore.setState({
+			inflightContent: {
+				a: [{ timestamp: 1, content: "D", note, baseContentHash: hashNoteContent("B0"), origin: "old-page", orphan: true }]
+			}
+		})
+		seedTabEditor(note.uuid, "a:1", "D", "B0")
+
+		const cloud = cloudOf("B0")
+		const response = deferred<Note>()
+
+		setNoteContent.mockImplementationOnce((_n, content) => {
+			cloud.set(content)
+
+			return response.promise
+		})
+		sync.executeNow()
+		await tick()
+		beginEditingSession(note.uuid)
+		tabEditorChanged(note.uuid, "D+x")
+		await sync.enqueue(note, "D+x", tabEditorBaseHash(note.uuid) ?? hashNoteContent("D"))
+
+		expect(useNotesInflightStore.getState().inflightContent[note.uuid]?.[0]?.carriedFrom).toBe("old-page")
+
+		response.resolve(note)
+		await tick()
+		handleNoteEvent(contentEdited("D", ME))
+		sync.executeNow()
+		await tick()
+
+		expect(cloud.get()).toBe("D+x")
+		expect(toast).not.toHaveBeenCalled()
+	})
+
+	async function pushOwnThenAnotherTabs(failFirst: boolean, loseEcho: boolean): Promise<void> {
+		openNote()
+		seedTabEditor(note.uuid, "a:1", "B0", "B0")
+
+		const cloud = cloudOf("B0")
+		const response = deferred<Note>()
+
+		if (failFirst) {
+			setNoteContent.mockImplementationOnce(() => Promise.reject(new Error("fetch failed")))
+		}
+
+		setNoteContent.mockImplementationOnce((_n, content) => {
+			cloud.set(content)
+
+			return response.promise
+		})
+		type("A")
+		sync.executeNow()
+		await tick()
+
+		if (failFirst) {
+			sync.executeNow()
+			await tick()
+		}
+
+		response.resolve(note)
+		await tick()
+
+		expect(cloud.get()).toBe("A")
+
+		if (!loseEcho) {
+			handleNoteEvent(contentEdited("A", ME))
+		}
+
+		// Another tab of this browser types on A; this leader pushes it.
+		sync.ingestRemoteEnqueue({
+			note,
+			content: "Q",
+			timestamp: Date.now() + 5000,
+			baseContentHash: hashNoteContent("A"),
+			origin: "tab-T2"
+		})
+		sync.executeNow()
+		await tick()
+
+		expect(cloud.get()).toBe("Q")
+	}
+
+	it("a retried push is one record: its one echo leaves nothing to hold back another tab's later write", async () => {
+		await pushOwnThenAnotherTabs(true, false)
+
+		const key = remountKey()
+
+		handleNoteEvent(contentEdited("Q", ME))
+
+		expect(remountKey()).not.toBe(key)
+		expect(queryClient.getQueryData(noteContentQueryKey(note.uuid))).toBe("Q")
+	})
+
+	it("a lost echo never holds back a write this tab did not make", async () => {
+		await pushOwnThenAnotherTabs(false, true)
+
+		const key = remountKey()
+
+		handleNoteEvent(contentEdited("Q", ME))
+
+		expect(remountKey()).not.toBe(key)
+	})
+
+	it("a follower promoted right after its push landed pushes its continuation without a false overwrite", async () => {
+		openNote()
+		sync.startAsFollower()
+		type("A")
+
+		const first = useNotesInflightStore.getState().inflightContent[note.uuid]?.[0]
+
+		sync.heardLanded(note.uuid, hashNoteContent("A"), { origin: first?.origin ?? "", stamp: first?.timestamp ?? 0, landed: true })
+		type("A+x")
+
+		expect(useNotesInflightStore.getState().inflightContent[note.uuid]?.[0]?.baseContentHash).toBe(hashNoteContent("A"))
+
+		const cloud = cloudOf("A")
+
+		sync.promoteToLeader()
+		await tick()
+		await tick()
+
+		expect(cloud.get()).toBe("A+x")
+		expect(toast).not.toHaveBeenCalled()
 	})
 })

@@ -52,7 +52,7 @@ import useNotesInflightStore, {
 import { reconcileFollower, hashNoteContent, type RemoteEnqueue } from "@/features/notes/lib/sync.logic"
 import { isOwnNotePush } from "@/features/notes/lib/pushEchoes"
 import type { PushDetail } from "@/lib/storage/outboxChannel"
-import { forgetTabEditors, seedTabEditor, takeTabEditorAuthored, tabEditorChanged } from "@/features/notes/lib/tabEditors"
+import { forgetTabEditors, seedTabEditor, takeTabEditorEcho, tabEditorChanged } from "@/features/notes/lib/tabEditors"
 
 function makeNote(uuid: string, overrides: Partial<Note> = {}): Note {
 	return {
@@ -419,20 +419,20 @@ describe("a follower hears the leader's pushes", () => {
 
 		await s.enqueue(note, "mine", hashNoteContent("old"))
 
-		const origin = firstEnqueue(transport).origin
+		const { origin, timestamp } = firstEnqueue(transport)
 
 		expect(origin).toEqual(expect.any(String))
 
 		// Another tab's entry, pushed; then one persisted by an earlier page load, with no origin.
-		s.heardPush("a", hashNoteContent("other"), "another tab")
-		s.heardPush("a", hashNoteContent("restored"), undefined)
+		s.heardPush("a", hashNoteContent("other"), { origin: "another tab", stamp: timestamp })
+		s.heardPush("a", hashNoteContent("restored"), { stamp: 1 })
 
-		expect(takeTabEditorAuthored("a", hashNoteContent("other"))).toBe(false)
-		expect(takeTabEditorAuthored("a", hashNoteContent("restored"))).toBe(false)
+		expect(takeTabEditorEcho("a", hashNoteContent("other"))).toBe("elsewhere")
+		expect(takeTabEditorEcho("a", hashNoteContent("restored"))).toBe("elsewhere")
 
-		s.heardPush("a", hashNoteContent("mine"), origin)
+		s.heardPush("a", hashNoteContent("mine"), { origin: origin ?? "", stamp: timestamp })
 
-		expect(takeTabEditorAuthored("a", hashNoteContent("mine"))).toBe(true)
+		expect(takeTabEditorEcho("a", hashNoteContent("mine"))).toBe("this tab")
 		forgetTabEditors()
 	})
 
@@ -481,12 +481,12 @@ describe("a follower hears the leader's pushes", () => {
 		expect(origin).toBeDefined()
 		expect(origin).not.toBe(forwarded.origin)
 		// The leader tab's own push, told to its editor.
-		expect(takeTabEditorAuthored("a", hashNoteContent("leader text"))).toBe(true)
+		expect(takeTabEditorEcho("a", hashNoteContent("leader text"))).toBe("this tab")
 
 		// The follower hears it: not its own, although its entry has the same stamp.
-		follower.heardPush("a", hash ?? "", origin)
+		follower.heardPush("a", hash ?? "", detail ?? {})
 
-		expect(takeTabEditorAuthored("a", hashNoteContent("leader text"))).toBe(false)
+		expect(takeTabEditorEcho("a", hashNoteContent("leader text"))).toBe("elsewhere")
 		forgetTabEditors()
 	})
 
@@ -550,7 +550,7 @@ describe("a follower hears the leader's pushes", () => {
 
 		const note = makeNote("a")
 
-		s.heardPush("a", hashNoteContent("mine"), undefined)
+		s.heardPush("a", hashNoteContent("mine"), {})
 		await s.enqueueAnswer(note, "theirs", hashNoteContent("theirs"))
 		listNotes.mockResolvedValue([note])
 		getNoteContent.mockResolvedValue("mine")

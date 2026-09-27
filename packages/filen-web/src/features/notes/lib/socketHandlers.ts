@@ -12,12 +12,11 @@ import { notesQueryUpdate, notesQueryRemove, notesQueryGet, notesQueryRefetch, n
 import { markNoteContentUnsynced, noteContentQueryKey, readNoteContent } from "@/features/notes/queries/noteContent"
 import { isOwnNotePush, recordNotePush } from "@/features/notes/lib/pushEchoes"
 import {
-	takeTabEditorAuthored,
+	takeTabEditorEcho,
 	tabEditorBuffer,
 	tabEditorBuildsOn,
 	tabEditorSeededWithDraft,
 	tabEditorDirty,
-	tabEditorEchoIsStale,
 	tabEditorSynced,
 	tabNoteContent
 } from "@/features/notes/lib/tabEditors"
@@ -284,14 +283,14 @@ function followOwnPush(uuid: string, content: string, hash: string): void {
 	// restored from this browser's outbox and pushed as no live tab's, while its typing on top of it is
 	// still queued; any other write of that text (another tab restoring it from history) is news.
 	const restoredDraft = tabEditorSeededWithDraft(uuid, content) && newestEntry(queuedFor(uuid))?.content === buffer
-	const authored = takeTabEditorAuthored(uuid, hash)
+	const echo = takeTabEditorEcho(uuid, hash)
 
-	// Written before a push of this tab's that already landed: stale, nothing to take or ask.
-	if (!authored && tabEditorEchoIsStale(uuid)) {
+	// This tab's own text, written before a later push of this tab's that already landed: nothing to take.
+	if (echo === "this tab, superseded") {
 		return
 	}
 
-	if (authored || buffer === content || restoredDraft) {
+	if (echo === "this tab" || buffer === content || restoredDraft) {
 		tabEditorSynced(uuid, content, hash)
 		// The leader tab's push already wrote it; a follower's is written here.
 		followContent(uuid, content)

@@ -8,10 +8,21 @@ import type { InflightEntry as SharedInflightEntry } from "@filen/shared"
 // synced. Kept as a list (not a single latest value) so the push loop can prune by LOCAL author-time —
 // only entries typed DURING a round trip survive a successful push, the ones it actually sent die
 // (see sync.ts). `origin` is the id of the tab that queued the entry (Sync's tabId): which push is a tab's
-// own. An entry persisted by an earlier page load has none, or another tab's, and is no tab's own now.
-// `carried`: typed on top of that tab's own previous entry, whose base it carries; only such an entry may
-// be rebased onto that previous entry's push when it lands.
-export type InflightEntry = SharedInflightEntry<Note> & { origin?: string; carried?: true }
+// own. `orphan`: that tab is gone (an earlier page load, a closed leader), so any tab may show and continue
+// it. An entry of an older build has no origin and is an orphan too. `carriedFrom`: typed on top of the
+// previous entry (this tab's own, or the orphan draft its editor showed), whose base it carries, and that
+// entry's origin ("" for none); only such an entry is rebased onto that entry's push when it lands.
+export type InflightEntry = SharedInflightEntry<Note> & { origin?: string; orphan?: true; carriedFrom?: string }
+
+// This tab's id, the origin of every entry it queues.
+export const TAB_ID: string = crypto.randomUUID()
+
+// Whether this tab's editor may show the entry: its own typing, or an orphan's. Never another live tab's:
+// that tab may be throwing it away (a history restore, Load theirs), and a tab that showed it would type on
+// text that is no version at all.
+export function entryIsShowable(entry: InflightEntry): boolean {
+	return entry.origin === undefined || entry.origin === TAB_ID || entry.orphan === true
+}
 
 export type InflightContent = Record<string, InflightEntry[]>
 
@@ -86,10 +97,11 @@ export const useNotesInflightStore = create<NotesInflightStore>((set, get) => ({
 // editor's remount key) still — a pending outbox entry OR a live editor session. The queue alone answers a
 // narrower question ("is something queued"), which stops being true at every push. Whether an edit made
 // elsewhere may reseed the editor is a different question: whether it holds unsynced changes
-// (socketHandlers.ts). Exported in state form too, for a caller that already holds a store snapshot
-// (useNoteSearchBodies).
+// (socketHandlers.ts). Only the entries this tab may show count: another live tab's typing is not this
+// tab's editing, and must not keep this tab's content from loading. Exported in state form too, for a
+// caller that already holds a store snapshot (useNoteSearchBodies).
 export function noteIsEditing(state: NotesInflightStore, uuid: string): boolean {
-	return (state.inflightContent[uuid] ?? []).length > 0 || state.editingSessions[uuid] === true
+	return (state.inflightContent[uuid] ?? []).some(entryIsShowable) || state.editingSessions[uuid] === true
 }
 
 // Reactive subscription to the QUEUE alone — the header spinner and menu suppression, which mean "a

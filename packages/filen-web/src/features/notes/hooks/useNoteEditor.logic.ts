@@ -1,5 +1,5 @@
 import type { Note } from "@filen/sdk-rs"
-import type { InflightEntry } from "@/features/notes/store/useNotesInflight"
+import { entryIsShowable, type InflightEntry } from "@/features/notes/store/useNotesInflight"
 import { hashNoteContent, newestEntry } from "@/features/notes/lib/sync.logic"
 import { hasNoteWriteAccess } from "@/features/notes/lib/sort"
 
@@ -26,6 +26,11 @@ export function exceedsNoteSizeCap(value: string): boolean {
 // the newest by LOCAL author-time, the same entry the push loop sends.
 export function latestInflightContent(entries: InflightEntry[] | undefined): string | null {
 	return newestEntry(entries ?? [])?.content ?? null
+}
+
+// The same, over the entries this tab's editor may show (entryIsShowable): never another live tab's.
+export function latestShowableContent(entries: InflightEntry[] | undefined): string | null {
+	return latestInflightContent(entries?.filter(entryIsShowable))
 }
 
 // THE seed-priority rule (mobile content/index.tsx editorSeed): an unsynced inflight edit wins over the

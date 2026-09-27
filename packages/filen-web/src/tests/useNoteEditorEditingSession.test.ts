@@ -28,7 +28,7 @@ vi.mock("@/queries/client", () => ({ queryClient: new QueryClient({ defaultOptio
 
 import "@/lib/i18n"
 import { queryClient } from "@/queries/client"
-import { useNotesInflightStore } from "@/features/notes/store/useNotesInflight"
+import { TAB_ID, useNotesInflightStore } from "@/features/notes/store/useNotesInflight"
 import { noteContentQueryKey } from "@/features/notes/queries/noteContent"
 import { useNoteEditor } from "@/features/notes/hooks/useNoteEditor"
 import { forgetTabEditors, tabEditorBuffer, tabEditorDirty, tabEditorLanded } from "@/features/notes/lib/tabEditors"
@@ -147,7 +147,7 @@ describe("useNoteEditor — what this tab's editor shows", () => {
 			result.current.onChange("mine")
 		})
 
-		tabEditorLanded(NOTE.uuid, hashNoteContent("mine"), undefined)
+		tabEditorLanded(NOTE.uuid, hashNoteContent("mine"), 1, undefined)
 
 		act(() => {
 			result.current.onChange("mine, more")
@@ -156,5 +156,48 @@ describe("useNoteEditor — what this tab's editor shows", () => {
 		expect(enqueue).toHaveBeenLastCalledWith(NOTE, "mine, more", hashNoteContent("mine"))
 
 		unmount()
+	})
+})
+
+describe("useNoteEditor — which queued entries it shows", () => {
+	beforeEach(() => {
+		forgetTabEditors()
+		queryClient.clear()
+	})
+
+	it("loads and shows the note, not another live tab's queued draft", async () => {
+		getNoteContent.mockResolvedValue("cloud")
+		useNotesInflightStore.setState({
+			inflightContent: { [NOTE.uuid]: [{ timestamp: 1, content: "another tab's draft", note: NOTE, origin: "tab-T2" }] }
+		})
+
+		const { result, unmount } = renderHook(() => useNoteEditor(NOTE, 1n), { wrapper })
+
+		await waitFor(() => {
+			expect(result.current.status).toBe("ready")
+		})
+
+		expect(result.current.seed).toBe("cloud")
+		unmount()
+	})
+
+	it("shows its own queued typing, and an orphan draft", () => {
+		for (const origin of [TAB_ID, undefined]) {
+			useNotesInflightStore.setState({
+				inflightContent: {
+					[NOTE.uuid]: [
+						origin === undefined
+							? { timestamp: 1, content: "draft", note: NOTE, origin: "closed", orphan: true }
+							: { timestamp: 1, content: "draft", note: NOTE, origin }
+					]
+				}
+			})
+
+			const { result, unmount } = renderHook(() => useNoteEditor(NOTE, 1n), { wrapper })
+
+			expect(result.current.status).toBe("ready")
+			expect(result.current.seed).toBe("draft")
+			unmount()
+		}
 	})
 })

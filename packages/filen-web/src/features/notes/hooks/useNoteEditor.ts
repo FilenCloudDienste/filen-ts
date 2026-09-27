@@ -20,7 +20,7 @@ import {
 	deriveEditorLoadState,
 	deriveSessionBaseHash,
 	reducePersistFailureNotice,
-	latestInflightContent,
+	latestShowableContent,
 	exceedsNoteSizeCap,
 	type EditorLoadState,
 	type QueryLoadState
@@ -57,21 +57,23 @@ export function useNoteEditor(note: Note, currentUserId: bigint | undefined): No
 	const outboxHydrated = useOutboxHydrated()
 	const [sizeReached, setSizeReached] = useState(false)
 
+	// Reactive read of the freshest inflight content for the seed — a zustand selector (not a plain
+	// getState() read during render) so React Compiler treats its return value as always-fresh and a
+	// disk-restored edit that hydrates AFTER first render still reaches the seed. Collapsed to the
+	// content string, so a keystroke on ANOTHER note never re-renders this one; a keystroke on THIS note
+	// does, but the editor freezes `seed` at mount (remountKey) and ignores the churn.
+	// Only an entry this tab may show seeds it: another live tab's may be on its way out (entryIsShowable).
+	const inflightLatest = useNotesInflightStore(state => latestShowableContent(state.inflightContent[note.uuid]))
+	const showsInflight = inflightLatest !== null
 	const queryStatus: QueryLoadState = query.isPending ? "pending" : query.isError ? "error" : "ready"
 	const status = deriveEditorLoadState({
-		hasInflight: isInflight,
+		hasInflight: showsInflight,
 		outboxHydrated,
 		queryStatus,
 		isUndecryptable: query.isError && isUndecryptableContentError(query.error)
 	})
 	const readOnly = deriveEditorReadOnly(note, currentUserId)
 
-	// Reactive read of the freshest inflight content for the seed — a zustand selector (not a plain
-	// getState() read during render) so React Compiler treats its return value as always-fresh and a
-	// disk-restored edit that hydrates AFTER first render still reaches the seed. Collapsed to the
-	// content string, so a keystroke on ANOTHER note never re-renders this one; a keystroke on THIS note
-	// does, but the editor freezes `seed` at mount (remountKey) and ignores the churn.
-	const inflightLatest = useNotesInflightStore(state => latestInflightContent(state.inflightContent[note.uuid]))
 	const seed = deriveEditorSeed({ inflightLatest, queryContent: query.data })
 	const remountKey = deriveEditorRemountKey({ uuid: note.uuid, dataUpdatedAt: query.dataUpdatedAt })
 	const errorDto = query.isError ? asErrorDTO(query.error) : undefined

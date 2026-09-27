@@ -23,7 +23,7 @@ const remoteEnqueueSchema = type({
 	timestamp: "number",
 	"baseContentHash?": "string",
 	"origin?": "string",
-	"carried?": "true",
+	"carriedFrom?": "string",
 	"answer?": "true"
 }).as<RemoteEnqueue>()
 
@@ -45,7 +45,7 @@ function handleMessage(msg: OutboxChannelMsg): void {
 			sync.heardLanded(msg.id, msg.hash, msg)
 		} else {
 			rememberNotePush(msg.id, msg.hash)
-			sync.heardPush(msg.id, msg.hash, msg.origin)
+			sync.heardPush(msg.id, msg.hash, msg)
 		}
 
 		return

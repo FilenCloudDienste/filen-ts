@@ -33,7 +33,8 @@ const inflightEntrySchema = type({
 	note: "object",
 	"baseContentHash?": "string",
 	"origin?": "string",
-	"carried?": "true"
+	"orphan?": "true",
+	"carriedFrom?": "string"
 })
 
 export const inflightContentSchema = type({
@@ -60,7 +61,7 @@ export interface RemoteEnqueue {
 	// The id of the tab that queued it, and whether it was typed on that tab's previous entry
 	// (InflightEntry).
 	origin?: string
-	carried?: true
+	carriedFrom?: string
 	// An answer to the remote-edit dialog (Sync.enqueueAnswer).
 	answer?: true
 }
@@ -113,8 +114,8 @@ export function remoteEnqueueToPatch(msg: RemoteEnqueue): InflightContent {
 		entry.origin = msg.origin
 	}
 
-	if (msg.carried !== undefined) {
-		entry.carried = msg.carried
+	if (msg.carriedFrom !== undefined) {
+		entry.carriedFrom = msg.carriedFrom
 	}
 
 	return { [msg.note.uuid]: [entry] }

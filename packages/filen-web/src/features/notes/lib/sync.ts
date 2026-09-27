@@ -14,7 +14,7 @@ import { queryClient } from "@/queries/client"
 import { i18n } from "@/lib/i18n"
 import { forgetNotePushes, rememberNotePush } from "@/features/notes/lib/pushEchoes"
 import { heldNotes, releaseAllNoteHolds } from "@/features/notes/lib/remoteEditHolds"
-import { forgetTabEditors, tabEditorLanded, tabEditorPushed } from "@/features/notes/lib/tabEditors"
+import { forgetTabEditors, tabEditorAdopts, tabEditorHasPush, tabEditorLanded, tabEditorPushed } from "@/features/notes/lib/tabEditors"
 import { followContent } from "@/features/notes/lib/remoteContent"
 import { log } from "@/lib/log"
 import { toast } from "sonner"
@@ -24,6 +24,7 @@ import { type OutboxChannelTransport, type OutboxRole, type PushDetail } from "@
 import { noteContentQueryKey, readNoteContent } from "@/features/notes/queries/noteContent"
 import { fetchNotes, notesQueryGet } from "@/features/notes/queries/notes"
 import useNotesInflightStore, {
+	TAB_ID,
 	setOutboxHydrated,
 	clearEditingSessions,
 	type InflightContent,
@@ -117,8 +118,8 @@ export class Sync {
 	// that base never saw the push, and its overwrite must still be told).
 	private readonly landed = new Map<string, { origin: string | undefined; from: string; to: string; upTo: number }>()
 	// This tab's id, the origin of every entry it queues: which push is this tab's own, exactly, whatever
-	// else it or another tab typed meanwhile, in whichever millisecond.
-	private readonly tabId: string = crypto.randomUUID()
+	// else it or another tab typed meanwhile, in whichever millisecond. The app's outbox is TAB_ID's.
+	private readonly tabId: string
 	private releaseTabLock: (() => void) | null = null
 
 	// Multi-tab state. `role` defaults to "leader" so a lone tab and every unit test are the unchanged
@@ -130,7 +131,8 @@ export class Sync {
 	private transport: NotesOutboxTransport | null = null
 	private unacked: InflightContent = {}
 
-	public constructor() {
+	public constructor(tabId: string = crypto.randomUUID()) {
+		this.tabId = tabId
 		this.initPromise = new Promise(resolve => {
 			this.resolveInit = resolve
 		})
@@ -182,6 +184,7 @@ export class Sync {
 		this.lastPushedHashes.clear()
 		this.answeredNotes.clear()
 		this.landed.clear()
+		this.unacked = {}
 	}
 
 	// Drop a note's consecutive-rejection strike count. For the editor's use when it clears a
@@ -233,6 +236,31 @@ export class Sync {
 		void this.flushToDisk(useNotesInflightStore.getState().inflightContent).then(() => {
 			this.broadcastState()
 		})
+	}
+
+	// Marks the entries whose tab is gone (an earlier page load, a closed leader, an older build's with no
+	// origin) as orphans, which any tab may show and continue. Read once per restore, before the editors'
+	// hydration gate opens.
+	private async orphanMarker(): Promise<(content: InflightContent) => InflightContent> {
+		const snapshot = await run(async () => navigator.locks.query())
+		const live = new Set((snapshot.success ? (snapshot.data.held ?? []) : []).map(lock => lock.name))
+		const gone = (entry: InflightEntry): boolean =>
+			entry.orphan !== true &&
+			entry.origin !== this.tabId &&
+			(entry.origin === undefined || !live.has(`${TAB_LOCK_PREFIX}${entry.origin}`))
+
+		return content => {
+			if (!Object.values(content).some(entries => entries.some(gone))) {
+				return content
+			}
+
+			return Object.fromEntries(
+				Object.entries(content).map(([noteUuid, entries]) => [
+					noteUuid,
+					entries.map(entry => (gone(entry) ? { ...entry, orphan: true as const } : entry))
+				])
+			)
+		}
 	}
 
 	private holdTabLock(): void {
@@ -335,8 +363,12 @@ export class Sync {
 		})
 		const own = newestEntry(entries)
 		const previous = newestEntry(useNotesInflightStore.getState().inflightContent[note.uuid] ?? [])
-		const tag: Pick<InflightEntry, "origin" | "carried"> =
-			previous?.origin === this.tabId ? { origin: this.tabId, carried: true } : { origin: this.tabId }
+		// Typed on this tab's own previous entry, or on the orphan draft its editor showed: it carries that
+		// entry's base.
+		const continues = previous !== undefined && (previous.origin === this.tabId || tabEditorAdopts(note.uuid, previous.content))
+		const tag: Pick<InflightEntry, "origin" | "carriedFrom"> = continues
+			? { origin: this.tabId, carriedFrom: previous.origin ?? "" }
+			: { origin: this.tabId }
 
 		return entries.map(entry => (entry === own ? { ...entry, ...tag } : entry))
 	}
@@ -353,8 +385,8 @@ export class Sync {
 			msg.origin = entry.origin
 		}
 
-		if (entry.carried !== undefined) {
-			msg.carried = entry.carried
+		if (entry.carriedFrom !== undefined) {
+			msg.carriedFrom = entry.carriedFrom
 		}
 
 		if (this.answeredNotes.has(entry.note.uuid)) {
@@ -364,13 +396,14 @@ export class Sync {
 		return msg
 	}
 
-	// ANY ROLE: the leader announced a push of `hash` for the note, queued by the tab `origin`. Kept as this
-	// note's last push, and told to this tab's editor when the entry was this tab's own.
-	public heardPush(noteUuid: string, hash: string, origin: string | undefined): void {
+	// ANY ROLE: the leader announced a push of `hash` for the note, from the entry `detail.stamp` of the tab
+	// `detail.origin`. Kept as this note's last push, and told to this tab's editor when the entry was this
+	// tab's own, or the orphan draft it showed.
+	public heardPush(noteUuid: string, hash: string, detail: PushDetail = {}): void {
 		this.lastPushedHashes.set(noteUuid, hash)
 
-		if (origin === this.tabId) {
-			tabEditorPushed(noteUuid, hash)
+		if (detail.stamp !== undefined && (detail.origin === this.tabId || tabEditorAdopts(noteUuid, undefined, hash))) {
+			tabEditorPushed(noteUuid, hash, detail.stamp)
 		}
 	}
 
@@ -382,26 +415,27 @@ export class Sync {
 	public heardLanded(noteUuid: string, hash: string, detail: PushDetail): void {
 		this.lastPushedHashes.set(noteUuid, hash)
 
-		if (detail.origin !== this.tabId) {
+		const stamp = detail.stamp
+
+		if (stamp === undefined || (detail.origin !== this.tabId && !tabEditorHasPush(noteUuid, stamp))) {
 			return
 		}
 
-		const stamp = detail.stamp ?? Number.POSITIVE_INFINITY
-		const find = (entries: InflightEntry[] | undefined): InflightEntry | undefined =>
-			entries?.find(entry => entry.origin === this.tabId && entry.timestamp === stamp)
-		const pushed = find(this.unacked[noteUuid]) ?? find(useNotesInflightStore.getState().inflightContent[noteUuid])
+		const origin = detail.origin ?? ""
+		const isPushed = (entry: InflightEntry): boolean => (entry.origin ?? "") === origin && entry.timestamp === stamp
+		const pushed = this.unacked[noteUuid]?.find(isPushed) ?? useNotesInflightStore.getState().inflightContent[noteUuid]?.find(isPushed)
 
 		if (pushed !== undefined) {
 			followContent(noteUuid, pushed.content)
 		}
 
-		tabEditorLanded(noteUuid, hash, pushed?.content)
+		tabEditorLanded(noteUuid, hash, stamp, pushed?.content)
 
+		// The landed entry itself, too: a keystroke typed after this, before the leader's pruned state
+		// arrives, carries its base, and a leader promoted meanwhile pushes it as it stands.
 		const rebase = (entries: InflightEntry[] | undefined): InflightEntry[] | undefined =>
 			entries?.map(entry =>
-				entry.origin === this.tabId && entry.carried === true && entry.timestamp > stamp
-					? { ...entry, baseContentHash: hash }
-					: entry
+				isPushed(entry) || (entry.carriedFrom === origin && entry.timestamp > stamp) ? { ...entry, baseContentHash: hash } : entry
 			)
 		const unacked = rebase(this.unacked[noteUuid])
 
@@ -450,9 +484,8 @@ export class Sync {
 		const landed = this.landed.get(msg.note.uuid)
 		const rebased =
 			landed !== undefined &&
-			msg.carried === true &&
-			msg.origin !== undefined &&
-			msg.origin === landed.origin &&
+			msg.carriedFrom !== undefined &&
+			msg.carriedFrom === (landed.origin ?? "") &&
 			msg.baseContentHash === landed.from &&
 			msg.timestamp > landed.upTo
 				? { ...msg, baseContentHash: landed.to }
@@ -624,11 +657,17 @@ export class Sync {
 				this.mutex.release()
 			})
 
-			const fromDisk = await kvGetJson(OUTBOX_KV_KEY, inflightContentSchema)
+			const read = await kvGetJson(OUTBOX_KV_KEY, inflightContentSchema)
+			const orphan = await this.orphanMarker()
 
-			if (!fromDisk || Object.keys(fromDisk).length === 0) {
+			// A promoted leader's store holds the closed leader's entries too.
+			useNotesInflightStore.getState().setInflightContent(prev => orphan(prev))
+
+			if (!read || Object.keys(read).length === 0) {
 				return false
 			}
+
+			const fromDisk = orphan(read)
 
 			// (1) Hydrate before any network call, merging into the current store.
 			useNotesInflightStore.getState().setInflightContent(prev => mergeInflight(prev, fromDisk))
@@ -770,7 +809,7 @@ export class Sync {
 					// local clock — never the server's editedTimestamp, which would silently discard
 					// every keystroke typed during the in-flight round trip.
 					const syncedUpTo = mostRecentContent.timestamp
-					const own = mostRecentContent.origin === this.tabId
+					const own = mostRecentContent.origin === this.tabId || tabEditorAdopts(noteUuid, mostRecentContent.content)
 
 					// Conflict DETECTION, never prevention — local edits always win and the push is
 					// unconditional. When the entry carries its session base hash, peek at the note's
@@ -819,7 +858,7 @@ export class Sync {
 						)
 
 						if (own) {
-							tabEditorPushed(noteUuid, pushedContentHash)
+							tabEditorPushed(noteUuid, pushedContentHash, syncedUpTo)
 						}
 					}
 
@@ -898,7 +937,7 @@ export class Sync {
 					// This tab's text is in the cloud now, and not before: a push the outbox gives up on
 					// leaves it unsaved on screen. The other tabs hear it too, also when nothing was sent.
 					if (own) {
-						tabEditorLanded(noteUuid, pushedContentHash, mostRecentContent.content)
+						tabEditorLanded(noteUuid, pushedContentHash, syncedUpTo, mostRecentContent.content)
 					}
 
 					// An overwrite is told by the tab whose typing was pushed, or here when that is this tab,
@@ -958,7 +997,7 @@ export class Sync {
 							updated[noteUuid],
 							syncedUpTo,
 							pushedContentHash,
-							entry => entry.origin === mostRecentContent.origin && entry.carried === true
+							entry => entry.carriedFrom !== undefined && entry.carriedFrom === (mostRecentContent.origin ?? "")
 						)
 
 						if (remaining === undefined) {
@@ -1034,4 +1073,4 @@ export class Sync {
 	}
 }
 
-export const sync = new Sync()
+export const sync = new Sync(TAB_ID)
