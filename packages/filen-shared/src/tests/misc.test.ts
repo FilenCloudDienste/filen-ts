@@ -17,6 +17,7 @@ import {
 	fastLocaleCompare,
 	bpsToReadable,
 	formatBytes,
+	formatBytesFixed,
 	isAbortError,
 	trimmedOrUndefined
 } from "@filen/shared"
@@ -527,6 +528,19 @@ describe("formatBytes", () => {
 
 	it("should handle negative decimals as 0", () => {
 		expect(formatBytes(1536, -1)).toBe("2 KiB")
+	})
+})
+
+describe("formatBytesFixed", () => {
+	it("keeps its decimals, so a live figure keeps its length", () => {
+		expect(formatBytesFixed(5 * 1048576)).toBe("5.0 MiB")
+		expect(formatBytesFixed(5.25 * 1048576)).toBe("5.3 MiB")
+		expect(formatBytesFixed(1536, 2)).toBe("1.50 KiB")
+	})
+
+	it("shows whole bytes without a fraction", () => {
+		expect(formatBytesFixed(0)).toBe("0 B")
+		expect(formatBytesFixed(500)).toBe("500 B")
 	})
 })
 

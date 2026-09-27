@@ -436,31 +436,51 @@ export const FORMAT_BYTES_SIZES = ["B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB"
 
 export const POWERS_1024 = [1, 1024, 1048576, 1073741824, 1099511627776, 1125899906842624] as const
 
+function bytesUnitIndex(bytes: number): number {
+	if (bytes >= POWERS_1024[5]) {
+		return 5
+	}
+
+	if (bytes >= POWERS_1024[4]) {
+		return 4
+	}
+
+	if (bytes >= POWERS_1024[3]) {
+		return 3
+	}
+
+	if (bytes >= POWERS_1024[2]) {
+		return 2
+	}
+
+	return bytes >= POWERS_1024[1] ? 1 : 0
+}
+
 export function formatBytes(bytes: number, decimals: number = 2): string {
 	if (bytes === 0) {
 		return "0 B"
 	}
 
 	const dm = decimals < 0 ? 0 : decimals
-	let i = 0
-
-	if (bytes >= POWERS_1024[5]) {
-		i = 5
-	} else if (bytes >= POWERS_1024[4]) {
-		i = 4
-	} else if (bytes >= POWERS_1024[3]) {
-		i = 3
-	} else if (bytes >= POWERS_1024[2]) {
-		i = 2
-	} else if (bytes >= POWERS_1024[1]) {
-		i = 1
-	}
-
+	const i = bytesUnitIndex(bytes)
 	const value = bytes / POWERS_1024[i]!
 	const multiplier = Math.pow(10, dm)
 	const rounded = Math.round(value * multiplier) / multiplier
 
 	return rounded + " " + FORMAT_BYTES_SIZES[i]
+}
+
+// formatBytes with its decimals kept ("5.0 MiB", never "5 MiB"), for a figure that updates live: a
+// decimal part that comes and goes would move everything after it on every tick. Whole bytes have no
+// fraction to keep.
+export function formatBytesFixed(bytes: number, decimals: number = 1): string {
+	const i = bytesUnitIndex(bytes)
+
+	if (i === 0) {
+		return `${String(Math.round(bytes))} B`
+	}
+
+	return `${(bytes / POWERS_1024[i]!).toFixed(Math.max(0, decimals))} ${FORMAT_BYTES_SIZES[i] ?? ""}`
 }
 
 export function isAbortError(error: unknown): boolean {

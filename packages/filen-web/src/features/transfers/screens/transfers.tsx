@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next"
 import { useShallow } from "zustand/shallow"
 import { useNavigate } from "@tanstack/react-router"
 import { ArrowDownUpIcon, BrushCleaningIcon, PauseIcon, PlayIcon, XIcon } from "lucide-react"
-import { formatBytes } from "@filen/shared"
+import { formatBytesFixed } from "@filen/shared"
 import { isActiveTransfer, useTransfersAggregate, useTransfersStore, type Transfer } from "@/features/transfers/store/useTransfersStore"
 import { useCopyJobsStore } from "@/features/transfers/store/useCopyJobsStore"
 import { pruneSettledCopyJobs } from "@/features/drive/lib/copy"
@@ -19,6 +19,7 @@ import {
 } from "@/features/transfers/screens/transfers.logic"
 import { cancelTransfer, pauseTransfer, resumeTransfer } from "@/features/transfers/lib/control"
 import { TransferRow } from "@/features/transfers/components/transferRow"
+import { percentFormat } from "@/features/transfers/components/transferRow.logic"
 import { defaultRevealDeps, runOpenContainingDirectory } from "@/features/drive/lib/reveal"
 import type { DriveItem } from "@/features/drive/lib/item"
 import { Button } from "@/components/ui/button"
@@ -95,12 +96,14 @@ export function TransfersScreen() {
 			    keeping it as its accessible name. */}
 			<header className="flex h-14 shrink-0 items-center gap-3 px-4">
 				<h1 className="shrink-0 text-sm font-medium">{t("common:moduleTransfers")}</h1>
+				{/* The same order as a row's line, for the same reason: the speed, the one figure that keeps
+				    changing length, goes last. */}
 				<p className="hidden min-w-0 flex-1 truncate text-xs text-muted-foreground tabular-nums sm:block">
 					{showAggregate
 						? [
 								t("transfersScreenActiveCount", { count: activeCount }),
-								t("transfersAggregateSpeed", { speed: formatBytes(speed) }),
-								new Intl.NumberFormat(i18n.language, { style: "percent" }).format(percent / 100)
+								percentFormat(i18n.language).format(percent / 100),
+								t("transfersAggregateSpeed", { speed: formatBytesFixed(speed) })
 							].join(" · ")
 						: null}
 				</p>

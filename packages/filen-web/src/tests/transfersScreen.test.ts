@@ -65,11 +65,13 @@ describe("TransfersScreen — aggregate readout", () => {
 		vi.useFakeTimers()
 		vi.setSystemTime(1000)
 
-		render(createElement(TransfersScreen))
+		const { container } = render(createElement(TransfersScreen))
+		const header = within(container.querySelector("header") ?? container)
 
-		// transfersAggregateSpeed's own "{{speed}}/s" shape — formatBytes(1_000_000 bytes over the 1s
-		// window) rendered as text, not just the pure computeTransfersSpeed number.
-		expect(screen.getByText(/^1 active · .+\/s · 50%$/)).toBeTruthy()
+		// transfersAggregateSpeed's own "{{speed}}/s" shape — 1_000_000 bytes over the 1s window, with
+		// its decimal kept — rendered as text, not just the pure computeTransfersSpeed number.
+		// The speed last: the one figure that keeps changing length, with nothing after it to push.
+		expect(header.getByText("1 active · 50% · 976.6 KiB/s")).toBeTruthy()
 	})
 
 	it("renders no summary while nothing is active", () => {
@@ -77,7 +79,7 @@ describe("TransfersScreen — aggregate readout", () => {
 
 		render(createElement(TransfersScreen))
 
-		expect(screen.queryByText(/active ·/)).toBeNull()
+		expect(screen.queryByText(/ active$/)).toBeNull()
 	})
 })
 

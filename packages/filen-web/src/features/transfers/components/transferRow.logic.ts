@@ -107,3 +107,16 @@ export function transferRate(transfer: Transfer, samples: readonly SpeedSample[]
 export function transferIconKey(transfer: Transfer): FileIconKey {
 	return fileIconKey(transfer.name)
 }
+
+const percentFormats = new Map<string, Intl.NumberFormat>()
+
+export function percentFormat(locale: string): Intl.NumberFormat {
+	let format = percentFormats.get(locale)
+
+	if (format === undefined) {
+		format = new Intl.NumberFormat(locale, { style: "percent" })
+		percentFormats.set(locale, format)
+	}
+
+	return format
+}

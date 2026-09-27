@@ -13,7 +13,7 @@ import {
 	UploadIcon,
 	XIcon
 } from "lucide-react"
-import { copyJobRate, formatBytes, formatSecondsToMediaClock, isCopyJobRunning, cn } from "@filen/shared"
+import { copyJobRate, formatBytes, formatBytesFixed, formatSecondsToMediaClock, isCopyJobRunning, cn } from "@filen/shared"
 import { isActiveTransfer, useTransfersStore, type Transfer } from "@/features/transfers/store/useTransfersStore"
 import {
 	transferProgress,
@@ -21,6 +21,7 @@ import {
 	finishedStatusLabelKey,
 	transferIconKey,
 	transferRate,
+	percentFormat,
 	type TransferRate
 } from "@/features/transfers/components/transferRow.logic"
 import { pauseTransfer, resumeTransfer } from "@/features/transfers/lib/control"
@@ -79,7 +80,7 @@ function TransferGlyph({
 	} else if (transfer.status === "done") {
 		badge = <CheckIcon />
 	} else {
-		badge = <span className="text-xs leading-none font-bold">!</span>
+		badge = <span className="text-[11px] leading-none font-bold">!</span>
 	}
 
 	return (
@@ -130,7 +131,7 @@ function TransferGlyph({
 			<div
 				aria-hidden="true"
 				className={cn(
-					"absolute -right-1 -bottom-1 flex size-5 items-center justify-center rounded-full ring-2 ring-background [&_svg]:size-3 [&_svg]:stroke-[2.75]",
+					"absolute -right-0.5 -bottom-0.5 flex size-[18px] items-center justify-center rounded-full ring-2 ring-background [&_svg]:size-2.5 [&_svg]:stroke-[3]",
 					badgeTone(transfer, trashing)
 				)}
 			>
@@ -197,10 +198,15 @@ export function TransferRow({ transfer, onRequestCancel, onShowInDirectory }: Tr
 	const revealItem =
 		transfer.status === "done" || transfer.status === "completedWithErrors" ? (transfer.item ?? job?.created[0]) : undefined
 
+	// The running line keeps its figures still without reserving space for them. Live figures keep their
+	// decimals (formatBytesFixed), so a tick never changes their length, and tabular digits their width;
+	// what still changes length does so rarely (9% to 10%, 10:00 to 9:59). The speed is the exception, as
+	// it rises and falls across a digit or a unit all the time, so it goes last, where it has nothing to
+	// push. A finished row's figures no longer move, so they read plainly.
 	const bytes =
 		transfer.size > 0
-			? t("transfersRowBytesProgress", { done: formatBytes(transfer.bytesTransferred), total: formatBytes(transfer.size) })
-			: formatBytes(transfer.bytesTransferred)
+			? t("transfersRowBytesProgress", { done: formatBytesFixed(transfer.bytesTransferred), total: formatBytesFixed(transfer.size) })
+			: formatBytesFixed(transfer.bytesTransferred)
 	let details: (string | null)[]
 
 	if (trashing) {
@@ -210,9 +216,9 @@ export function TransferRow({ transfer, onRequestCancel, onShowInDirectory }: Tr
 	} else if (active) {
 		details = [
 			bytes,
-			transfer.size > 0 ? new Intl.NumberFormat(i18n.language, { style: "percent" }).format(progress / 100) : null,
-			rate === null ? null : t("transfersAggregateSpeed", { speed: formatBytes(rate.bytesPerSecond) }),
-			rate?.etaSeconds == null ? null : t("transfersRowTimeLeft", { eta: formatSecondsToMediaClock(rate.etaSeconds) })
+			transfer.size > 0 ? percentFormat(i18n.language).format(progress / 100) : null,
+			rate?.etaSeconds == null ? null : t("transfersRowTimeLeft", { eta: formatSecondsToMediaClock(rate.etaSeconds) }),
+			rate === null ? null : t("transfersAggregateSpeed", { speed: formatBytesFixed(rate.bytesPerSecond) })
 		]
 	} else if (transfer.status === "error") {
 		details = [
