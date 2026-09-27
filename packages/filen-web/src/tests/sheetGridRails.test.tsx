@@ -56,4 +56,18 @@ describe("SheetGrid header rails", () => {
 			expect(rail?.classList.contains("bg-background")).toBe(true)
 		}
 	})
+
+	it("paints the select-all corner opaque too", () => {
+		const { container } = render(
+			<SheetGrid
+				sheet={gridSheet(sheet())}
+				styles={[]}
+				selection={{ anchor: { row: 0, col: 0 }, focus: { row: 0, col: 0 } }}
+				onSelectionChange={() => undefined}
+				label="test.xlsx"
+			/>
+		)
+
+		expect(container.querySelector(".grid > .sticky.top-0.left-0")?.classList.contains("bg-background")).toBe(true)
+	})
 })

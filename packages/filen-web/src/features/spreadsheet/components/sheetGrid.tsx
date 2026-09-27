@@ -208,6 +208,8 @@ export function SheetGrid({
 	const gestureRef = useRef<ResizeGesture | null>(null)
 	const pendingDraft = useRef<ResizeDraft | null>(null)
 	const frameRef = useRef(0)
+	// Removes the live gesture's window listeners.
+	const detachRef = useRef<(() => void) | null>(null)
 	// While a rail edge is dragged, everything lays out at the draft's sizes.
 	const sheet = draft === null ? sheetProp : sheetWithSizes(sheetProp, draft.axis, draft.entries)
 
@@ -282,6 +284,8 @@ export function SheetGrid({
 			if (event.key === "Escape" && gestureRef.current !== null) {
 				event.preventDefault()
 				event.stopPropagation()
+				detachRef.current?.()
+				detachRef.current = null
 				cancelAnimationFrame(frameRef.current)
 				frameRef.current = 0
 				pendingDraft.current = null
@@ -299,6 +303,7 @@ export function SheetGrid({
 
 	useEffect(
 		() => () => {
+			detachRef.current?.()
 			cancelAnimationFrame(frameRef.current)
 		},
 		[]
@@ -780,17 +785,20 @@ export function SheetGrid({
 		return axis === "cols" ? cols.size(index) : rows.size(index)
 	}
 
-	// A drag on a column or row inside a selection of whole columns or rows resizes all of them.
+	// A drag on a column or row inside a selection of whole columns or rows resizes all of them. A header
+	// click selects to the last used row or column, never the grid's blank tail, so "whole" means that.
 	function targetsFor(axis: SizeAxis, index: number): number[] {
 		const whole =
 			axis === "cols"
-				? range.startRow === 0 && range.endRow >= rows.count - 1
-				: range.startCol === 0 && range.endCol >= cols.count - 1
+				? range.startRow === 0 && range.endRow >= Math.max(0, sheet.rowCount - 1)
+				: range.startCol === 0 && range.endCol >= Math.max(0, sheet.colCount - 1)
 
 		return resizeTargets(axis, index, range, whole, at => sizeAt(axis, at) === 0)
 	}
 
 	function clearDraft(): void {
+		detachRef.current?.()
+		detachRef.current = null
 		cancelAnimationFrame(frameRef.current)
 		frameRef.current = 0
 		pendingDraft.current = null
@@ -812,18 +820,39 @@ export function SheetGrid({
 			return
 		}
 
+		detachRef.current?.()
 		event.currentTarget.setPointerCapture(event.pointerId)
+
+		const pointerId = event.pointerId
+
 		gestureRef.current = {
 			axis,
 			targets: targetsFor(axis, index),
 			start: sizeAt(axis, index),
 			origin: axis === "cols" ? event.clientX : event.clientY,
-			pointerId: event.pointerId
+			pointerId
+		}
+
+		// Followed on the window, not the handle: dragging several columns moves the handle's own header,
+		// which can leave the drawn window and unmount, taking its pointer capture along.
+		function cancel(cancelled: globalThis.PointerEvent): void {
+			if (cancelled.pointerId === pointerId) {
+				clearDraft()
+			}
+		}
+
+		window.addEventListener("pointermove", moveResize)
+		window.addEventListener("pointerup", endResize)
+		window.addEventListener("pointercancel", cancel)
+		detachRef.current = () => {
+			window.removeEventListener("pointermove", moveResize)
+			window.removeEventListener("pointerup", endResize)
+			window.removeEventListener("pointercancel", cancel)
 		}
 	}
 
 	// At most one layout per frame, however fast the pointer moves.
-	function moveResize(event: PointerEvent<HTMLDivElement>): void {
+	function moveResize(event: globalThis.PointerEvent): void {
 		const gesture = gestureRef.current
 
 		if (gesture?.pointerId !== event.pointerId) {
@@ -840,7 +869,7 @@ export function SheetGrid({
 		}
 	}
 
-	function endResize(event: PointerEvent<HTMLDivElement>): void {
+	function endResize(event: globalThis.PointerEvent): void {
 		const gesture = gestureRef.current
 
 		if (gesture?.pointerId !== event.pointerId || onResize === undefined) {
@@ -849,19 +878,25 @@ export function SheetGrid({
 
 		const final = draftAt(gesture, event.clientX, event.clientY)
 
-		cancelAnimationFrame(frameRef.current)
-		frameRef.current = 0
-		gestureRef.current = null
-
-		if (final.size === gesture.start && gesture.targets.length === 1) {
+		// A press that never moved (a click, or the first half of a double-click) resizes nothing.
+		if (final.size === gesture.start) {
 			clearDraft()
 
 			return
 		}
 
-		// Held until the new sizes are the sheet's, so an answer from the worker never flickers back.
+		detachRef.current?.()
+		detachRef.current = null
+		cancelAnimationFrame(frameRef.current)
+		frameRef.current = 0
+		pendingDraft.current = null
+		gestureRef.current = null
+		// Held until the new sizes are the sheet's, so an answer from the worker never flickers back; a drag
+		// started meanwhile has its own draft, which this never clears.
 		setDraft(final)
-		void onResize(final.axis, final.entries).finally(clearDraft)
+		void onResize(final.axis, final.entries).finally(() => {
+			setDraft(current => (current === final ? null : current))
+		})
 	}
 
 	function autofit(event: MouseEvent<HTMLDivElement>, axis: SizeAxis, index: number): void {
@@ -900,9 +935,6 @@ export function SheetGrid({
 				onPointerDown={event => {
 					startResize(event, axis, index)
 				}}
-				onPointerMove={moveResize}
-				onPointerUp={endResize}
-				onPointerCancel={clearDraft}
 				onDoubleClick={event => {
 					autofit(event, axis, index)
 				}}
@@ -1004,8 +1036,10 @@ export function SheetGrid({
 					{/* The select-all corner */}
 					<div
 						aria-hidden="true"
-						className="sticky top-0 left-0 z-40 border-r border-b border-border bg-muted"
-					/>
+						className="sticky top-0 left-0 z-40 border-r border-b border-border bg-background"
+					>
+						<div className="size-full bg-muted" />
+					</div>
 					{/* Rail layers are opaque: their cells' tint is translucent. */}
 					<div
 						className="sticky top-0 z-30 overflow-hidden bg-background"

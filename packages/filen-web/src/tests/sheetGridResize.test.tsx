@@ -239,6 +239,105 @@ describe("SheetGrid resize", () => {
 		expect(container.querySelector<HTMLElement>("[data-cell-editor]")?.style.minWidth).toBe(`${String(DEFAULT_COL_WIDTH + 44)}px`)
 	})
 
+	// Clicking a column header selects its used rows only (to the last filled row), never the grid's blank tail.
+	it("resizes every column of a header selection, which spans the used rows", async () => {
+		const onResize = vi.fn(() => Promise.resolve())
+		const selection: Selection = { anchor: { row: 0, col: 1 }, focus: { row: 4, col: 3 } }
+		const { container } = renderGrid(onResize, sheet(), selection)
+		const handle = handleOf(columnHeader(container, 2))
+
+		drag(handle, 0, 20)
+		await act(() => {
+			fireEvent.pointerUp(handle, { pointerId: 1, clientX: 20, clientY: 0 })
+
+			return Promise.resolve()
+		})
+
+		expect(onResize).toHaveBeenCalledWith("cols", [
+			[1, DEFAULT_COL_WIDTH + 20],
+			[2, DEFAULT_COL_WIDTH + 20],
+			[3, DEFAULT_COL_WIDTH + 20]
+		])
+	})
+
+	// A multi-column drag moves the dragged header itself, which can scroll out of the drawn window and
+	// unmount, taking pointer capture with it: the gesture must still finish from wherever the pointer is.
+	it("finishes a drag whose pointer events reach only the window", async () => {
+		const onResize = vi.fn(() => Promise.resolve())
+		const { container } = renderGrid(onResize)
+
+		fireEvent.pointerDown(handleOf(columnHeader(container, 1)), { pointerId: 1, clientX: 0, clientY: 0, button: 0 })
+		fireEvent.pointerMove(window, { pointerId: 1, clientX: 30, clientY: 0 })
+		act(() => {
+			vi.advanceTimersToNextFrame()
+		})
+		await act(() => {
+			fireEvent.pointerUp(window, { pointerId: 1, clientX: 30, clientY: 0 })
+
+			return Promise.resolve()
+		})
+
+		expect(onResize).toHaveBeenCalledWith("cols", [[1, DEFAULT_COL_WIDTH + 30]])
+	})
+
+	it("commits nothing for a click that never moved, even on a whole selection", async () => {
+		const onResize = vi.fn(() => Promise.resolve())
+		const selection: Selection = { anchor: { row: 0, col: 1 }, focus: { row: 4, col: 3 } }
+		const { container } = renderGrid(onResize, sheet(), selection)
+		const handle = handleOf(columnHeader(container, 2))
+
+		await act(() => {
+			fireEvent.pointerDown(handle, { pointerId: 1, clientX: 10, clientY: 0, button: 0 })
+			fireEvent.pointerUp(handle, { pointerId: 1, clientX: 10, clientY: 0 })
+
+			return Promise.resolve()
+		})
+
+		expect(onResize).not.toHaveBeenCalled()
+	})
+
+	it("lets a drag started while an earlier resize settles run to its end", async () => {
+		let settle: () => void = () => undefined
+		const onResize = vi
+			.fn<(axis: string, sizes: readonly (readonly [number, number | null])[]) => Promise<void>>()
+			.mockImplementationOnce(
+				() =>
+					new Promise<void>(resolve => {
+						settle = resolve
+					})
+			)
+			.mockImplementation(() => Promise.resolve())
+		const { container } = renderGrid(onResize)
+		const first = handleOf(columnHeader(container, 1))
+
+		drag(first, 0, 10)
+		await act(() => {
+			fireEvent.pointerUp(first, { pointerId: 1, clientX: 10, clientY: 0 })
+
+			return Promise.resolve()
+		})
+
+		const second = handleOf(columnHeader(container, 2))
+
+		fireEvent.pointerDown(second, { pointerId: 2, clientX: 0, clientY: 0, button: 0 })
+		await act(() => {
+			settle()
+
+			return Promise.resolve()
+		})
+		fireEvent.pointerMove(second, { pointerId: 2, clientX: 25, clientY: 0 })
+		act(() => {
+			vi.advanceTimersToNextFrame()
+		})
+		await act(() => {
+			fireEvent.pointerUp(second, { pointerId: 2, clientX: 25, clientY: 0 })
+
+			return Promise.resolve()
+		})
+
+		expect(onResize).toHaveBeenLastCalledWith("cols", [[2, DEFAULT_COL_WIDTH + 25]])
+	})
+
 	it("has no handles without onResize", () => {
 		const { container } = render(
 			<SheetGrid
