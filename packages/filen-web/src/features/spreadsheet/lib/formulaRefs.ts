@@ -376,7 +376,7 @@ function areaText(area: RefArea): string {
 	}
 }
 
-const PLAIN_NAME = /^[A-Za-z_¡-￿][A-Za-z0-9_.¡-￿]*$/
+const PLAIN_NAME = /^[\p{L}_][\p{L}\p{N}_.]*$/u
 const R1C1 = /^[Rr][0-9]*[Cc][0-9]*$/
 
 function needsQuotes(name: string): boolean {
@@ -593,6 +593,95 @@ export function renameSheetInFormula(formula: string, from: string, to: string):
 	})
 }
 
+// Functions newer than the file format's first version, which a file names with a prefix (Excel reads the
+// bare name as unknown, #NAME?). FILTER and SORT belong to the worksheet-function namespace besides.
+const FUTURE_FUNCTIONS = new Set(
+	(
+		"ACOT ACOTH AGGREGATE ARABIC ARRAYTOTEXT BASE BETA.DIST BETA.INV BINOM.DIST BINOM.DIST.RANGE BINOM.INV BITAND " +
+		"BITLSHIFT BITOR BITRSHIFT BITXOR BYCOL BYROW CEILING.MATH CEILING.PRECISE CHISQ.DIST CHISQ.DIST.RT CHISQ.INV " +
+		"CHISQ.INV.RT CHISQ.TEST CHOOSECOLS CHOOSEROWS COMBINA CONCAT CONFIDENCE.NORM CONFIDENCE.T COT COTH " +
+		"COVARIANCE.P COVARIANCE.S CSC CSCH DAYS DECIMAL DROP ENCODEURL ERF.PRECISE ERFC.PRECISE EXPAND EXPON.DIST " +
+		"F.DIST F.DIST.RT F.INV F.INV.RT F.TEST FILTERXML FLOOR.MATH FLOOR.PRECISE FORECAST.ETS FORECAST.ETS.CONFINT " +
+		"FORECAST.ETS.SEASONALITY FORECAST.ETS.STAT FORECAST.LINEAR FORMULATEXT GAMMA GAMMA.DIST GAMMA.INV " +
+		"GAMMALN.PRECISE GAUSS GROUPBY HSTACK HYPGEOM.DIST IFNA IFS IMAGE IMCOSH IMCOT IMCSC IMCSCH IMSEC IMSECH " +
+		"IMSINH IMTAN ISFORMULA ISOMITTED ISOWEEKNUM LAMBDA LET LOGNORM.DIST LOGNORM.INV MAKEARRAY MAP MAXIFS MINIFS " +
+		"MODE.MULT MODE.SNGL MUNIT NEGBINOM.DIST NORM.DIST NORM.INV NORM.S.DIST NORM.S.INV NUMBERVALUE PDURATION " +
+		"PERCENTILE.EXC PERCENTILE.INC PERCENTOF PERCENTRANK.EXC PERCENTRANK.INC PERMUTATIONA PHI PIVOTBY " +
+		"POISSON.DIST QUARTILE.EXC QUARTILE.INC RANDARRAY RANK.AVG RANK.EQ REDUCE REGEXEXTRACT REGEXREPLACE " +
+		"REGEXTEST RRI SCAN SEC SECH SEQUENCE SHEET SHEETS SINGLE SKEW.P SORTBY STDEV.P STDEV.S SWITCH T.DIST " +
+		"T.DIST.2T T.DIST.RT T.INV T.INV.2T T.TEST TAKE TEXTAFTER TEXTBEFORE TEXTJOIN TEXTSPLIT TOCOL TOROW " +
+		"TRIMRANGE UNICHAR UNICODE UNIQUE VALUETOTEXT VAR.P VAR.S VSTACK WEBSERVICE WEIBULL.DIST WRAPCOLS WRAPROWS " +
+		"XLOOKUP XMATCH XOR Z.TEST"
+	).split(" ")
+)
+const WORKSHEET_FUNCTIONS = new Set(["FILTER", "SORT"])
+
+function prefixOf(name: string): string | null {
+	const upper = name.toUpperCase()
+
+	if (WORKSHEET_FUNCTIONS.has(upper)) return "_xlfn._xlws."
+	if (FUTURE_FUNCTIONS.has(upper)) return "_xlfn."
+
+	return null
+}
+
+// Rewrites each function name in a formula (outside strings, quoted sheet names and brackets).
+function mapFunctionNames(formula: string, map: (name: string) => string): string {
+	let text = ""
+	let index = 0
+
+	while (index < formula.length) {
+		const code = formula.charCodeAt(index)
+
+		if (code === QUOTE || code === APOSTROPHE) {
+			const end = skipQuoted(formula, index, code)
+
+			text += formula.slice(index, end)
+			index = end
+		} else if (code === BRACKET_OPEN) {
+			const end = skipBracket(formula, index)
+
+			text += formula.slice(index, end)
+			index = end
+		} else if (isWordChar(code)) {
+			const end = readWord(formula, index)
+			const word = formula.slice(index, end)
+
+			text += formula.charCodeAt(end) === 40 ? map(word) : word
+			index = end
+		} else {
+			text += formula[index] ?? ""
+			index++
+		}
+	}
+
+	return text
+}
+
+// A typed formula as a file stores it: newer functions with the prefix Excel requires.
+export function storedFormula(formula: string): string {
+	return mapFunctionNames(formula, name => {
+		if (name.startsWith("_")) return name
+
+		const prefix = prefixOf(name)
+
+		return prefix === null ? name : `${prefix}${name.toUpperCase()}`
+	})
+}
+
+// A stored formula as the user reads and edits it: known prefixes left out (storedFormula puts them back).
+// A prefix on a function it does not know stays, so nothing is lost by editing.
+export function shownFormula(formula: string): string {
+	if (!formula.includes("_xl")) return formula
+
+	return mapFunctionNames(formula, name => {
+		const bare = name.replace(/^(?:_xlfn\.)?(?:_xlws\.)?/i, "")
+		const prefix = prefixOf(bare)
+
+		return prefix !== null && name.toLowerCase() === `${prefix}${bare}`.toLowerCase() ? bare : name
+	})
+}
+
 // Parentheses past this depth overflow HyperFormula's recursive parser (Excel stops at 64 levels).
 const MAX_DEPTH = 100
 
@@ -685,6 +774,95 @@ function arrayTooLarge(formula: string): boolean {
 	})
 }
 
+const SIZED = /^(SEQUENCE|RANDARRAY|MUNIT)$/i
+
+// The end of the call whose "(" is at `open`, and its top-level argument texts.
+function callArguments(text: string, open: number): { end: number; args: string[] } | null {
+	const args: string[] = []
+	let depth = 0
+	let start = open + 1
+	let index = open
+
+	while (index < text.length) {
+		const code = text.charCodeAt(index)
+
+		if (code === QUOTE || code === APOSTROPHE) {
+			index = skipQuoted(text, index, code)
+
+			continue
+		}
+
+		if (code === 40 || code === 123) depth++
+
+		if (code === 41 || code === 125) {
+			depth--
+
+			if (depth === 0) {
+				args.push(text.slice(start, index))
+
+				return { end: index + 1, args }
+			}
+		}
+
+		if (code === 44 && depth === 1) {
+			args.push(text.slice(start, index))
+			start = index + 1
+		}
+
+		index++
+	}
+
+	return null
+}
+
+// Array sizes the engine could otherwise be asked for from cell values (SEQUENCE(B1,B1)): past
+// MAX_ARRAY_CELLS the size becomes #N/A, before the engine builds anything.
+function boundArraySizes(text: string): string {
+	let out = ""
+	let index = 0
+
+	while (index < text.length) {
+		const code = text.charCodeAt(index)
+
+		if (code === QUOTE || code === APOSTROPHE) {
+			const end = skipQuoted(text, index, code)
+
+			out += text.slice(index, end)
+			index = end
+
+			continue
+		}
+
+		if (isWordChar(code)) {
+			const end = readWord(text, index)
+			const word = text.slice(index, end)
+			const call = SIZED.test(word) && text.charCodeAt(end) === 40 ? callArguments(text, end) : null
+
+			if (call === null) {
+				out += word
+				index = end
+
+				continue
+			}
+
+			const args = call.args.map(boundArraySizes)
+			const rows = args[0]?.trim() === "" || args[0] === undefined ? "1" : args[0]
+			const cols = args[1]?.trim() === "" || args[1] === undefined ? (word.toUpperCase() === "MUNIT" ? rows : "1") : args[1]
+			const bounded = `IF((${rows})*(${cols})>${String(MAX_ARRAY_CELLS)},NA(),${rows})`
+
+			out += `${word}(${[bounded, ...args.slice(1)].join(",")})`
+			index = call.end
+
+			continue
+		}
+
+		out += text[index] ?? ""
+		index++
+	}
+
+	return out
+}
+
 // A cell's formula as HyperFormula takes it (with its "="), or null when it cannot be given to it: nested
 // past its parser's depth, or building an array too large to hold. Evaluated as Excel reads an ordinary
 // formula: an array result gives its first value (INDEX), and nothing spills.
@@ -693,7 +871,7 @@ export function engineCellFormula(formula: string): string | null {
 		return null
 	}
 
-	const text = engineFormula(formula)
+	const text = boundArraySizes(engineFormula(formula))
 	const upper = text.toUpperCase()
 
 	for (const name of ARRAY_RESULTS) {

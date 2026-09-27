@@ -1,5 +1,6 @@
 import { formatValue, type Cell, type CellStyle, type CellValue, type Sheet, type Workbook } from "hucre"
 import { cellKey, type CellView, type SheetView, type SpreadsheetDoc } from "@/features/spreadsheet/lib/model"
+import { shownFormula } from "@/features/spreadsheet/lib/formulaRefs"
 import { StyleTable, styleView } from "@/features/spreadsheet/lib/styleTable"
 
 // Column widths are in characters of the default font, row heights in points.
@@ -37,7 +38,7 @@ export function displayText(value: CellValue | undefined, numFmt: string | undef
 // The text editing a cell starts from: its formula, or the value as typed rather than as formatted.
 export function inputText(value: CellValue | undefined, cell: Cell | undefined): string {
 	if (cell?.formula !== undefined) {
-		return `=${cell.formula}`
+		return `=${shownFormula(cell.formula)}`
 	}
 
 	if (value === null || value === undefined) {

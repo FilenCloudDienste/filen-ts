@@ -43,15 +43,14 @@ describe("CSV", () => {
 		expect(Array.from(serializeCsv(rows, format))).toEqual([0x63, 0x61, 0x66, 0xe9, 0x2c, 0x80])
 	})
 
-	it("falls back to UTF-8 with a BOM when windows-1252 can no longer hold the content", () => {
+	it("throws rather than fall back to UTF-8 when asked to write a character windows-1252 cannot hold", () => {
+		// serializeCsv no longer falls back to UTF-8: CsvDocument.apply refuses such an edit before it ever
+		// reaches here (see spreadsheetCsv.test.ts), so this only guards the direct call staying loud.
 		const { rows, format } = parseCsvFile(new Uint8Array([0x63, 0x61, 0x66, 0xe9]), false)
 
 		rows[0]?.push("日本語")
 
-		const written = serializeCsv(rows, format)
-
-		expect(Array.from(written.subarray(0, 3))).toEqual([0xef, 0xbb, 0xbf])
-		expect(new TextDecoder("utf-8").decode(written)).toBe("café,日本語")
+		expect(() => serializeCsv(rows, format)).toThrow()
 	})
 
 	it("reads tab-separated files as such", () => {

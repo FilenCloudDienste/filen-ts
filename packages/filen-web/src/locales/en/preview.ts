@@ -196,6 +196,9 @@ export const preview = {
 	previewSpreadsheetSheetNameInvalid: "That sheet name is already used or isn't allowed.",
 	/** Toast — an edit covers only part of an array formula's range */
 	previewSpreadsheetArrayFormula: "Part of an array formula can't be changed. Select its whole range to replace it.",
+	/** Toast — the file keeps a legacy text encoding that can't hold a character in the edit */
+	previewSpreadsheetEncodingUnsupported:
+		"This file uses an older text encoding that can't hold one of those characters, so the change wasn't made.",
 	/** Toast — an edit would change the text of a table's header cell */
 	previewSpreadsheetTableHeader: "A table's header can't be renamed here: formulas that refer to the column by name would break.",
 	/** Toast — an edit reaches past what can be changed at once, or past a sheet's size */

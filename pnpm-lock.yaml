@@ -184,7 +184,7 @@ patchedDependencies:
   expo-media-library@57.0.4: f0e7b253437935c2f7fd711697f764fbcf4e19aa6eab5b81e57650ebb31e9700
   expo-sharing@57.0.18: 7f36d9a0aaa805bc1d3661d3d031e44475253d0de750cfdd554662f634d7549d
   expo-video@57.0.3: a965f0ed856f445e2658e0d75a99cffeb166b282a011d14edc97484b32cc27b9
-  hucre@1.1.0: a2851ec255e2bb8b9add926e480e701d850359c621c4e9e715b499e8dd387e21
+  hucre@1.1.0: 96609024615e7ea7af14d75f8f29b83b15d51d38c0434f6a365b4a81f5f9c575
   react-native-ios-utilities@5.2.0: 50810ccfaab08edcc9b10d2d9954a68946befef7a2ff41af4d01f4e330c8eb37
   react-native-notify-kit@10.7.0: e50f154dc03e063750242f005b8b3e69fb3f5b7d3205aff30fc4b7d5acd5f7cf
   react-native-reorderable-list@0.18.1: 0a36670b2fd8f244d408305cb14b7e428b496c9c0b3c5b81e41585f01af2416d
@@ -829,7 +829,7 @@ importers:
         version: 3.4.15
       hucre:
         specifier: 1.1.0
-        version: 1.1.0(patch_hash=a2851ec255e2bb8b9add926e480e701d850359c621c4e9e715b499e8dd387e21)
+        version: 1.1.0(patch_hash=96609024615e7ea7af14d75f8f29b83b15d51d38c0434f6a365b4a81f5f9c575)
       hyperformula:
         specifier: 3.4.0
         version: 3.4.0
@@ -16311,7 +16311,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  hucre@1.1.0(patch_hash=a2851ec255e2bb8b9add926e480e701d850359c621c4e9e715b499e8dd387e21): {}
+  hucre@1.1.0(patch_hash=96609024615e7ea7af14d75f8f29b83b15d51d38c0434f6a365b4a81f5f9c575): {}
 
   human-signals@2.1.0: {}
 

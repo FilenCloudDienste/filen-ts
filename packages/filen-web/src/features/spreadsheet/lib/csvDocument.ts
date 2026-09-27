@@ -1,4 +1,4 @@
-import { csvCellView, csvDoc, serializeCsv, type CsvFormat } from "@/features/spreadsheet/lib/csvView"
+import { canEncodeWindows1252, csvCellView, csvDoc, serializeCsv, type CsvFormat } from "@/features/spreadsheet/lib/csvView"
 import {
 	MAX_COLS,
 	MAX_EDIT_CELLS,
@@ -50,6 +50,14 @@ export class CsvDocument {
 	}
 
 	apply(op: EditOp): EditResult {
+		// A windows-1252 file's saved encoding never changes behind the user's back (see serializeCsv): a
+		// cell that would hold a character the table cannot represent is refused outright, before any row is
+		// touched, rather than silently reformatting the whole file to UTF-8 and corrupting every untouched
+		// cell's bytes on the next save.
+		if (op.type === "setCells" && this.format.encoding === "windows-1252" && op.cells.some(cell => !canEncodeWindows1252(cell.input))) {
+			return { type: "refused", reason: "encoding", state: this.state() }
+		}
+
 		const step = this.run(op)
 
 		if (step === null) {

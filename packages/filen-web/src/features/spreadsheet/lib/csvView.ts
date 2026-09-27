@@ -2,10 +2,14 @@ import { detectDelimiter, parseCsv, writeCsv, type CellValue } from "hucre"
 import { cellKey, type CellView, type SpreadsheetDoc } from "@/features/spreadsheet/lib/model"
 
 // How a CSV file was written, so a save writes it back the same way: its separator, its line ends, a byte
-// order mark, a final line end, and the byte encoding it was read as (a legacy Windows-1252 export is
-// decoded and re-written as Windows-1252; only content it truly cannot hold falls back to UTF-8 with a BOM).
-// `writable` is false when the source bytes are some other single-byte encoding (Shift-JIS, GBK, ...)
-// that windows-1252 happened to decode without throwing but cannot be told apart or written back safely.
+// order mark, a final line end, and the byte encoding it was read as. A legacy windows-1252 export is
+// decoded and ALWAYS re-written as windows-1252, never re-encoded to another encoding behind the user's
+// back: decode-then-encode is a bijection on every byte the table defines, so an untouched cell comes back
+// byte-identical even when the true source encoding was really 1250, 1251, GBK, or another single-byte
+// encoding windows-1252 happened to decode without throwing. An edit that types a character the table
+// cannot hold is refused outright (see CsvDocument and canEncodeWindows1252), not silently reformatted.
+// `writable` is false when the source bytes hold a byte windows-1252 leaves undefined, or when they read
+// as confidently non-Western text — both cases where editing would show confusing mojibake.
 export interface CsvFormat {
 	delimiter: string
 	lineSeparator: "\r\n" | "\n" | "\r"
@@ -212,6 +216,12 @@ function encodeWindows1252(text: string): Uint8Array | null {
 	return bytes
 }
 
+// Whether `text` can be written back as windows-1252 without loss — used by CsvDocument to refuse an edit
+// before it ever reaches serializeCsv, rather than letting the file's saved encoding change silently.
+export function canEncodeWindows1252(text: string): boolean {
+	return encodeWindows1252(text) !== null
+}
+
 // A JS string is already UTF-16 code units; writing UTF-16 bytes is just splitting each one in the given
 // byte order, surrogate pairs included (they are two code units, written as two units here too).
 function encodeUtf16(text: string, littleEndian: boolean): Uint8Array {
@@ -259,16 +269,19 @@ export function serializeCsv(rows: readonly (readonly string[])[], format: CsvFo
 	if (format.encoding === "windows-1252") {
 		const encoded = encodeWindows1252(text)
 
-		if (encoded !== null) {
-			return encoded
+		if (encoded === null) {
+			// CsvDocument refuses any edit that would introduce a character this table cannot hold, so a
+			// reachable document's text is always fully encodable here — this file never silently changes
+			// encoding on save. Reaching this is a bug upstream, not a case to paper over with UTF-8.
+			throw new Error("spreadsheet: windows-1252 CSV holds a character it cannot represent")
 		}
-		// Content windows-1252 cannot hold (typed in since the file was opened): the only encoding left
-		// that both keeps it and that every reader can identify is UTF-8 with a BOM.
+
+		return encoded
 	}
 
 	const body = new TextEncoder().encode(text)
 
-	if (!format.bom && format.encoding !== "windows-1252") {
+	if (!format.bom) {
 		return body
 	}
 

@@ -48,9 +48,14 @@ export type EditResult =
 	// is the whole style table.
 	| { type: "sheets"; sheets: (SheetView | null)[]; styles: CellStyleView[]; state: DocState }
 	// The edit could not be made: the sheet's structure is locked, a sheet name is taken or invalid, it
-	// would reach past a sheet's limits, it would change part of an array formula's range, or it would
-	// rename a table column by editing its header.
-	| { type: "refused"; reason: "structureLocked" | "sheetName" | "tooLarge" | "arrayFormula" | "tableHeader"; state: DocState }
+	// would reach past a sheet's limits, it would change part of an array formula's range, it would
+	// rename a table column by editing its header, or (CSV only) it types a character the file's fixed
+	// legacy encoding cannot hold.
+	| {
+			type: "refused"
+			reason: "structureLocked" | "sheetName" | "tooLarge" | "arrayFormula" | "tableHeader" | "encoding"
+			state: DocState
+	  }
 	// Nothing to undo or redo.
 	| { type: "none"; state: DocState }
 

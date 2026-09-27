@@ -185,7 +185,7 @@ describe("XlsxDocument formulas", () => {
 		const inserted = document.apply({ type: "insert", sheet: 0, axis: "rows", at: 0, count: 1 })
 
 		expect(view(inserted, 2, 2)).toMatchObject({ text: "10", input: "=SUM(A2:A3 A2:C2)" })
-		expect(view(inserted, 1, 1)).toMatchObject({ input: '=_xlfn.CONCAT("a","b")' })
+		expect(view(inserted, 1, 1)).toMatchObject({ input: '=CONCAT("a","b")' })
 	})
 
 	it("keeps a legacy array formula's stored result rather than the engine's #SPILL!", async () => {

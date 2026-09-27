@@ -112,7 +112,8 @@ const REFUSED_MESSAGES = {
 	sheetName: "previewSpreadsheetSheetNameInvalid",
 	tooLarge: "previewSpreadsheetTooLarge",
 	arrayFormula: "previewSpreadsheetArrayFormula",
-	tableHeader: "previewSpreadsheetTableHeader"
+	tableHeader: "previewSpreadsheetTableHeader",
+	encoding: "previewSpreadsheetEncodingUnsupported"
 } as const satisfies Record<Extract<EditResult, { type: "refused" }>["reason"], string>
 
 type Move = "down" | "up" | "right" | "left" | "none"

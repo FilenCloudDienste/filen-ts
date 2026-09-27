@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { parseCsvFile, serializeCsv, type CsvFormat } from "@/features/spreadsheet/lib/csvView"
+import { canEncodeWindows1252, parseCsvFile, serializeCsv, type CsvFormat } from "@/features/spreadsheet/lib/csvView"
 import { CsvDocument } from "@/features/spreadsheet/lib/csvDocument"
 import { MAX_SHEET_CELLS } from "@/features/spreadsheet/lib/edits"
 
@@ -73,15 +73,15 @@ describe("CSV encodings", () => {
 		expect(Array.from(serializeCsv(rows, format))).toEqual(Array.from(bytes))
 	})
 
-	it("falls back to UTF-8 with a BOM once an edit adds a character windows-1252 cannot hold", () => {
+	it("throws rather than fall back to UTF-8 when asked to write a character windows-1252 cannot hold", () => {
+		// serializeCsv no longer has a UTF-8 fallback: CsvDocument.apply is the one guarding this in
+		// practice (see below), so reaching this directly is only possible by bypassing that guard —
+		// which must fail loudly, not silently re-encode the rest of the file as UTF-8.
 		const { rows, format } = parseCsvFile(new Uint8Array([0x63, 0x61, 0x66, 0xe9]), false)
 
 		rows[0]?.push("日本語")
 
-		const written = serializeCsv(rows, format)
-
-		expect(Array.from(written.subarray(0, 3))).toEqual([0xef, 0xbb, 0xbf])
-		expect(new TextDecoder("utf-8").decode(written)).toBe("café,日本語")
+		expect(() => serializeCsv(rows, format)).toThrow()
 	})
 
 	it("keeps a genuine windows-1252 export writable across German, French and Spanish text", () => {
@@ -124,6 +124,93 @@ describe("CSV encodings", () => {
 		expect(withoutBom.format.bom).toBe(false)
 		expect(Array.from(serializeCsv(withBom.rows, withBom.format).subarray(0, 3))).toEqual([0xef, 0xbb, 0xbf])
 		expect(serializeCsv(withoutBom.rows, withoutBom.format)[0]).not.toBe(0xef)
+	})
+})
+
+// A file the heuristic misdetects as writable windows-1252 (its true source encoding is really
+// windows-1250, windows-1251 or GBK) is never re-encoded on save: decode-then-encode is a bijection on
+// every byte these sources use, so an untouched cell must come back byte-identical, and an edit typing a
+// character windows-1252 cannot hold must be refused rather than silently reformatting the whole file.
+describe("CSV legacy-encoding edits", () => {
+	// "Jméno,Město\nJiří,Brno\nZdeněk,Ústí\n" encoded as windows-1250.
+	const WINDOWS_1250 = "4a6de96e6f2c4dec73746f0a4a69f8ed2c42726e6f0a5a64656eec6b2cda7374ed0a"
+	// "id,unit,qty\n1,шт,5\n2,кг,3\n" encoded as windows-1251.
+	const WINDOWS_1251 = "69642c756e69742c7174790a312cf8f22c350a322ceae32c330a"
+	// "id,name,qty\n1,A,5\n2,B,3\n3,C,4\n4,D,1\n5,表,9\n" encoded as GBK.
+	const GBK = "69642c6e616d652c7174790a312c412c350a322c422c330a332c432c340a342c442c310a352cb1ed2c390a"
+
+	it("keeps a misdetected windows-1250, windows-1251 or GBK source byte-exact past the edited row after a representable edit", () => {
+		for (const hex of [WINDOWS_1250, WINDOWS_1251, GBK]) {
+			const bytes = hexBytes(hex)
+			const { rows, format } = parseCsvFile(bytes, false)
+
+			// All three pass the run/ratio heuristic as ordinary Western text, despite not being one.
+			expect(format.encoding).toBe("windows-1252")
+			expect(format.writable).toBe(true)
+
+			const doc = new CsvDocument(rows, format)
+			const result = doc.apply({ type: "setCells", sheet: 0, cells: [{ row: 0, col: 0, input: "ID!" }] })
+
+			expect(result.type).not.toBe("refused")
+
+			const out = doc.serialize().bytes
+			const originalFirstBreak = bytes.indexOf(0x0a)
+			const outFirstBreak = out.indexOf(0x0a)
+
+			// Only the header row's first cell was touched: every byte from the first line break onward
+			// (every other row, untouched) must match the source file exactly.
+			expect(Array.from(out.subarray(outFirstBreak))).toEqual(Array.from(bytes.subarray(originalFirstBreak)))
+			expect(parseCsvFile(out, false).format.encoding).toBe("windows-1252")
+		}
+	})
+
+	it("refuses an edit typing a character windows-1252 cannot hold, leaving the file's bytes unchanged", () => {
+		const cases: [string, number, number, string][] = [
+			// Polish/Czech Ł is outside windows-1252 even though the file passed the heuristic.
+			[WINDOWS_1250, 1, 0, "Łódź"],
+			// Cyrillic is outside windows-1252.
+			[WINDOWS_1251, 1, 1, "шт"],
+			// Han is outside windows-1252.
+			[GBK, 1, 1, "新"]
+		]
+
+		for (const [hex, row, col, typed] of cases) {
+			const bytes = hexBytes(hex)
+			const { rows, format } = parseCsvFile(bytes, false)
+			const doc = new CsvDocument(rows, format)
+			const before = doc.serialize().bytes
+
+			expect(canEncodeWindows1252(typed)).toBe(false)
+
+			const result = doc.apply({ type: "setCells", sheet: 0, cells: [{ row, col, input: typed }] })
+
+			expect(result).toMatchObject({ type: "refused", reason: "encoding" })
+
+			const after = doc.serialize().bytes
+
+			// Nothing was written: the saved bytes are exactly what they were before the refused edit, and
+			// in particular there is no UTF-8 BOM — the old fallback path is gone, not just unreachable.
+			expect(Array.from(after)).toEqual(Array.from(before))
+			expect(Array.from(after.subarray(0, 3))).not.toEqual([0xef, 0xbb, 0xbf])
+		}
+	})
+
+	it("still allows a representable edit on a misdetected source even though its true encoding differs", () => {
+		const { rows, format } = parseCsvFile(hexBytes(WINDOWS_1250), false)
+		const doc = new CsvDocument(rows, format)
+
+		// "Nové" is entirely within windows-1252's Latin-1 range, unlike "Łódź".
+		const result = doc.apply({ type: "setCells", sheet: 0, cells: [{ row: 1, col: 2, input: "Nové" }] })
+
+		expect(result.type).toBe("cells")
+		expect(result.type === "cells" ? result.patches[0]?.cells[0]?.[1]?.text : undefined).toBe("Nové")
+	})
+
+	it("canEncodeWindows1252 accepts Latin-1 text and the windows-1252 special block, rejects Cyrillic, Han and Ł", () => {
+		expect(canEncodeWindows1252("Müller — 100%")).toBe(true)
+		expect(canEncodeWindows1252("Łódź")).toBe(false)
+		expect(canEncodeWindows1252("шт")).toBe(false)
+		expect(canEncodeWindows1252("新")).toBe(false)
 	})
 })
 

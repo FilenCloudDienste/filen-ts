@@ -40,6 +40,7 @@ import {
 	namesSheet,
 	renameSheetInFormula,
 	shiftFormula,
+	storedFormula,
 	type AxisEdit
 } from "@/features/spreadsheet/lib/formulaRefs"
 import { cellKey, type CellView, type SpreadsheetDoc } from "@/features/spreadsheet/lib/model"
@@ -666,11 +667,15 @@ export class XlsxDocument {
 				await this.prepareSave()
 
 				// Closed meanwhile: every buffer below is dropped unused.
-				const saved = closed() ? null : await readZip(await saveXlsx(this.workbook), closed)
+				const saved = closed() ? null : await this.unzippedSave(raw, closed)
+
 				const losses =
 					saved === null || closed()
 						? null
-						: await saveLosses({ original, saved, sheetPaths: this.savePlan.sheets, dropped: this.savePlan.drop }, closed)
+						: await saveLosses(
+								{ original, saved, sheetPaths: this.savePlan.sheets, dropped: this.savePlan.drop, release: true },
+								closed
+							)
 
 				if (losses !== null && !closed()) {
 					this.losses = losses
@@ -684,6 +689,19 @@ export class XlsxDocument {
 		this.releaseRaw(raw)
 
 		return proven
+	}
+
+	// The workbook saved as it stands, unzipped. Saving has read what it needs of the file's parts by the
+	// time it returns: the ones it writes anew go then (the comparison holds its own references, which it
+	// lets go sheet by sheet), and the zip goes once unzipped.
+	private async unzippedSave(raw: Map<string, Uint8Array>, closed: () => boolean): Promise<Map<string, Uint8Array> | null> {
+		const bytes = await saveXlsx(this.workbook)
+
+		for (const path of [...raw.keys()]) {
+			if (REGENERATED.test(path)) raw.delete(path)
+		}
+
+		return closed() ? null : await readZip(bytes, closed)
 	}
 
 	private untouched(): boolean {
@@ -1156,7 +1174,13 @@ export class XlsxDocument {
 						: { ...base, value: null, type: "empty" }
 				)
 			} else if (parsed.type === "formula") {
-				this.write(sheet, row, col, null, { ...base, value: null, type: "formula", formula: parsed.formula, formulaResult: null })
+				this.write(sheet, row, col, null, {
+					...base,
+					value: null,
+					type: "formula",
+					formula: storedFormula(parsed.formula),
+					formulaResult: null
+				})
 			} else {
 				const cell: Cell = { ...base, value: parsed.value, type: typeOf(parsed.value) }
 

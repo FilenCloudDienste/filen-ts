@@ -15,6 +15,8 @@ interface XmlNode {
 	text: string
 }
 
+const decoder = new TextDecoder()
+
 const ENTITY = /&(#x[0-9a-f]+|#[0-9]+|amp|lt|gt|quot|apos);/gi
 
 function decode(text: string): string {
@@ -204,38 +206,111 @@ const DEFAULTS: Readonly<Record<string, string>> = {
 	"tableStyleInfo@showFirstColumn": "0",
 	"tableStyleInfo@showLastColumn": "0",
 	"tableStyleInfo@showRowStripes": "0",
-	"tableStyleInfo@showColumnStripes": "0"
+	"tableStyleInfo@showColumnStripes": "0",
+	"workbookView@activeTab": "0",
+	"workbookView@showHorizontalScroll": "1",
+	"workbookView@showVerticalScroll": "1",
+	"workbookView@showSheetTabs": "1",
+	"workbookView@autoFilterDateGrouping": "1",
+	"workbookView@visibility": "visible",
+	"workbookView@minimized": "0",
+	"calcPr@calcMode": "auto",
+	"calcPr@fullPrecision": "1",
+	"calcPr@refMode": "A1",
+	"calcPr@iterate": "0",
+	"calcPr@iterateCount": "100",
+	"calcPr@iterateDelta": "0.001",
+	"calcPr@calcCompleted": "1",
+	"calcPr@calcOnSave": "1",
+	"calcPr@concurrentCalc": "1",
+	"calcPr@forceFullCalc": "0"
 }
 
 function isDefault(element: string, name: string, value: string): boolean {
 	return DEFAULTS[`${element}@${name}`] === value || (DEFAULTS[`*@${name}`] === value && DEFAULTS[`${element}@${name}`] === undefined)
 }
 
-// Elements (by path) that carry no content: the window's geometry and selection, the Excel version that
-// saved last, the calculation settings (checked apart: saving drops them, iterative calculation makes a
-// workbook view-only), the file's own used-range note, a document's revision counter and spell-check
-// language, the recently used colours.
+// Elements (by path) that carry no content: the window's selection, the Excel version that saved last and
+// its co-authoring revision pointer, the file's own used-range note, a document's revision counter,
+// spell-check language and last printing time, the recently used colours, and the statistics and
+// application name a writer puts in app.xml.
 const IGNORED_ELEMENTS = new Set([
 	"worksheet/dimension",
 	"worksheet/sheetViews/sheetView/selection",
 	"workbook/fileVersion",
-	"workbook/calcPr",
 	"workbook/fileRecoveryPr",
-	"workbook/bookViews",
+	"workbook/revisionPtr",
 	"coreProperties/revision",
 	// Set by saving, as any save does.
 	"coreProperties/modified",
 	"coreProperties/language",
-	"styleSheet/colors/mruColors"
+	"coreProperties/lastPrinted",
+	"styleSheet/colors/mruColors",
+	...[
+		"Application",
+		"AppVersion",
+		"DocSecurity",
+		"ScaleCrop",
+		"HeadingPairs",
+		"TitlesOfParts",
+		"LinksUpToDate",
+		"SharedDoc",
+		"HyperlinksChanged",
+		"TotalTime",
+		"Pages",
+		"Words",
+		"Characters",
+		"CharactersWithSpaces",
+		"Lines",
+		"Paragraphs"
+	].map(name => `Properties/${name}`)
 ])
 
-// Extensions other programs write for themselves: LibreOffice's formula syntax setting.
-const IGNORED_EXTENSIONS = new Set(["{7626C862-2A13-11E5-B345-FEFF819CDC9F}"])
+const LIBREOFFICE_CALC = "{7626C862-2A13-11E5-B345-FEFF819CDC9F}"
+const CALC_FEATURES = "{B58B0392-4F1F-4190-BB64-5DF3571DCE5F}"
+const X15_WORKBOOK = "{140A7094-0E35-4892-8432-C4D2E57EDEB5}"
+const SLICER_STYLES = "{EB79DEF2-80B8-43E5-95BD-54CBDDF9020C}"
+const TIMELINE_STYLES = "{9260A510-F301-46A8-8635-F512D64BE5F5}"
+
+// Extensions (and the like) that say nothing about the workbook's content:
+// - LibreOffice's formula syntax setting;
+// - the calculation features the saving Excel had (formulas carry their own dynamic-array marks);
+// - Excel 2013's chart-tracking preference;
+// - the default slicer and timeline styles, with no styles of the file's own (a file with slicers or
+//   timelines opens view-only anyway);
+// - mc:AlternateContent holding only the folder the file was last saved in (the author's local path).
+function meaningless(node: XmlNode): boolean {
+	const uri = (node.attrs.get("uri") ?? "").toUpperCase()
+
+	if (node.name === "ext") {
+		if (uri === LIBREOFFICE_CALC || uri === CALC_FEATURES) return true
+		if (uri === X15_WORKBOOK)
+			return node.children.every(
+				child => child.name === "workbookPr" && [...child.attrs.keys()].every(name => name === "chartTrackingRefBase")
+			)
+		if (uri === SLICER_STYLES || uri === TIMELINE_STYLES) return node.children.every(child => child.children.length === 0)
+
+		return false
+	}
+
+	if (node.name === "AlternateContent") {
+		const only = (child: XmlNode): boolean =>
+			child.name === "Choice" || child.name === "Fallback" ? child.children.every(only) : child.name === "absPath"
+
+		return node.children.every(only)
+	}
+
+	return false
+}
 
 // Attributes ignored on one element only.
 const IGNORED_ELEMENT_ATTRIBUTES: Record<string, readonly string[]> = {
 	"workbook/workbookPr": ["defaultThemeVersion", "filterPrivacy", "codeName"],
 	"workbook/sheets/sheet": ["sheetId", "r:id"],
+	// The window's place and size, where the tab bar starts, how wide it is.
+	"workbook/bookViews/workbookView": ["xWindow", "yWindow", "windowWidth", "windowHeight", "firstSheet", "tabRatio"],
+	// The calculation engine that saved last; a save has the file calculated in full on load.
+	"workbook/calcPr": ["calcId", "fullCalcOnLoad"],
 	// Whether a table's totals row was ever shown: Excel's memory for toggling it.
 	table: ["totalsRowShown"],
 	// The view's scroll position, like its selection.
@@ -276,7 +351,11 @@ function canon(node: XmlNode, path = node.name, context?: Context): string {
 			continue
 		if (isDefault(node.name, name, normalizeValue(value)) || (autoHeight && name === "ht")) continue
 
-		const resolved = name === "dxfId" && context !== undefined ? (context.dxfs[Number(value)] ?? value) : normalizeValue(value)
+		// A differential format by what it is, not by its number (dxfId, dataDxfId, headerRowDxfId, …).
+		const resolved =
+			(name === "dxfId" || name.endsWith("DxfId")) && context !== undefined
+				? (context.dxfs[Number(value)] ?? value)
+				: normalizeValue(value)
 
 		attrs.push(`${name}=${resolved}`)
 	}
@@ -288,7 +367,7 @@ function canon(node: XmlNode, path = node.name, context?: Context): string {
 	for (const child of node.children) {
 		const childPath = `${path}/${child.name}`
 
-		if (IGNORED_ELEMENTS.has(childPath) || IGNORED_EXTENSIONS.has(child.attrs.get("uri") ?? "")) continue
+		if (IGNORED_ELEMENTS.has(childPath) || meaningless(child)) continue
 		if (
 			FLAG_ELEMENTS.has(child.name) &&
 			(child.attrs.get("val") === "0" || child.attrs.get("val") === "false" || child.attrs.get("val") === "none")
@@ -332,8 +411,7 @@ function elementSet(node: XmlNode, into: Map<string, number>, context: Context |
 	for (const child of node.children) {
 		const childPath = `${path}/${child.name}`
 
-		if (!IGNORED_ELEMENTS.has(childPath) && !IGNORED_EXTENSIONS.has(child.attrs.get("uri") ?? ""))
-			elementSet(child, into, context, childPath)
+		if (!IGNORED_ELEMENTS.has(childPath) && !meaningless(child)) elementSet(child, into, context, childPath)
 	}
 }
 
@@ -384,7 +462,7 @@ function styleContext(stylesXml: string | undefined, stringsXml: string | undefi
 			.map(([name, value]) => `${name}=${normalizeValue(value)}`)
 
 		return [
-			formats.get(id) ?? `builtin:${id}`,
+			formats.get(id) ?? SAME_EVERYWHERE[id] ?? `builtin:${id}`,
 			fonts[Number(xf.attrs.get("fontId") ?? 0)] ?? "",
 			fills[Number(xf.attrs.get("fillId") ?? 0)] ?? "",
 			borders[Number(xf.attrs.get("borderId") ?? 0)] ?? "",
@@ -406,7 +484,16 @@ function styleContext(stylesXml: string | undefined, stringsXml: string | undefi
 		}
 	}
 
-	return { styles: cellStyles, defaultStyle: cellStyles[0] ?? "", dxfs: section("dxfs").map(node => canon(node)), strings }
+	// A differential format's number format is its code; its number there is only a label.
+	const dxfs = section("dxfs").map(node => {
+		for (const child of node.children) {
+			if (child.name === "numFmt") child.attrs.delete("numFmtId")
+		}
+
+		return canon(node)
+	})
+
+	return { styles: cellStyles, defaultStyle: cellStyles[0] ?? "", dxfs, strings }
 }
 
 function standardPalette(node: XmlNode): boolean {
@@ -415,6 +502,24 @@ function standardPalette(node: XmlNode): boolean {
 
 		return rgb.slice(-6) === INDEXED_COLORS[index]
 	})
+}
+
+// Built-in number formats that read the same in every locale, as a custom format of the same code would:
+// a file may name either. The others (dates, times, currencies) follow the reader's locale, so the
+// built-in and the custom code differ.
+const SAME_EVERYWHERE: Readonly<Record<string, string>> = {
+	"0": "General",
+	"1": "0",
+	"2": "0.00",
+	"3": "#,##0",
+	"4": "#,##0.00",
+	"9": "0%",
+	"10": "0.00%",
+	"11": "0.00E+00",
+	"12": "# ?/?",
+	"13": "# ??/??",
+	"48": "##0.0E+0",
+	"49": "@"
 }
 
 // A string item (shared, inline or a note's text) as one string: its text alone when it has no runs.
@@ -724,7 +829,13 @@ function sheetElements(xml: string, context: Context, links: Map<string, string>
 
 		const path = `worksheet/${child.name}`
 
-		if (!IGNORED_ELEMENTS.has(path)) elementSet(child, set, context, path)
+		if (!IGNORED_ELEMENTS.has(path) && !meaningless(child)) elementSet(child, set, context, path)
+	}
+
+	// Conditional-format blocks over the same range are one block, however many the file splits it into
+	// (each rule keeps its type, priority and format, compared on its own).
+	for (const record of set.keys()) {
+		if (record.startsWith("worksheet/conditionalFormatting|")) set.set(record, 1)
 	}
 
 	return set
@@ -779,7 +890,6 @@ interface Package {
 
 function packageOf(raw: Map<string, Uint8Array>): Package {
 	const entries = new Map<string, Uint8Array>()
-	const decoder = new TextDecoder()
 
 	for (const [path, bytes] of raw) entries.set(path.toLowerCase(), bytes)
 
@@ -824,6 +934,43 @@ function sameBytes(a: Uint8Array | undefined, b: Uint8Array | undefined): boolea
 	return true
 }
 
+const NOTE_SHAPE = /<(?:[\w.-]+:)?shape\b([^>]*)>([\s\S]*?)<\/(?:[\w.-]+:)?shape>/g
+
+// Notes whose box saving would not draw as the file does. Saving writes every note's box anew as a hidden
+// note of the default size and colour: one shown all the time, coloured, or sized by hand is lost. A box
+// within a few points of the default (Excel's and LibreOffice's) and anchored over the default few cells is
+// the default.
+function notePresentation(vml: string): string[] {
+	const lost: string[] = []
+
+	for (const [, attrs = "", inner = ""] of vml.matchAll(NOTE_SHAPE)) {
+		if (!/ObjectType\s*=\s*["']Note["']/.test(inner)) continue
+
+		const shape = attributes(attrs)
+		const style = shape.get("style") ?? ""
+		const size = (name: string) => {
+			const match = new RegExp(`(?:^|;)\\s*${name}\\s*:\\s*([\\d.]+)pt`).exec(style)
+
+			return match === null ? null : Number(match[1])
+		}
+		const width = size("width")
+		const height = size("height")
+		const fill = (shape.get("fillcolor") ?? "#ffffe1").trim().toLowerCase()
+		const shown = /visibility\s*:\s*visible/.test(style) || /<(?:[\w.-]+:)?Visible\b/.test(inner)
+		const anchor = /<(?:[\w.-]+:)?Anchor>([^<]*)</.exec(inner)?.[1]?.split(",").map(Number)
+		const wide = anchor?.length === 8 && ((anchor[4] ?? 0) - (anchor[0] ?? 0) > 4 || (anchor[6] ?? 0) - (anchor[2] ?? 0) > 6)
+		const where = `${/<(?:[\w.-]+:)?Row>(\d+)</.exec(inner)?.[1] ?? "?"},${/<(?:[\w.-]+:)?Column>(\d+)</.exec(inner)?.[1] ?? "?"}`
+
+		if (shown) lost.push(`note ${where} shown all the time`)
+		if (!fill.startsWith("#ffffe1") && !fill.startsWith("infobackground")) lost.push(`note ${where} coloured ${fill}`)
+		if ((width !== null && (width < 90 || width > 130)) || (height !== null && (height < 45 || height > 80)) || wide) {
+			lost.push(`note ${where} sized ${String(width)}x${String(height)}`)
+		}
+	}
+
+	return lost
+}
+
 function commentRecords(xml: string | undefined): Map<string, number> {
 	const set = new Map<string, number>()
 
@@ -842,7 +989,7 @@ function commentRecords(xml: string | undefined): Map<string, number> {
 	return set
 }
 
-function tableRecords(pkg: Package, paths: readonly string[]): Map<string, number> {
+function tableRecords(pkg: Package, paths: readonly string[], context: Context): Map<string, number> {
 	const set = new Map<string, number>()
 
 	for (const path of paths) {
@@ -856,7 +1003,7 @@ function tableRecords(pkg: Package, paths: readonly string[]): Map<string, numbe
 
 		for (const column of tree.children.find(child => child.name === "tableColumns")?.children ?? []) column.attrs.delete("id")
 
-		elementSet(tree, set, undefined)
+		elementSet(tree, set, context)
 	}
 
 	return set
@@ -894,6 +1041,11 @@ function drawingRecords(pkg: Package, paths: readonly string[]): Map<string, num
 const REWRITTEN =
 	/^(\[content_types\]\.xml|_rels\/\.rels|xl\/_rels\/workbook\.xml\.rels|docprops\/app\.xml|xl\/calcchain\.xml|xl\/sharedstrings\.xml|xl\/styles\.xml|xl\/workbook\.xml|docprops\/core\.xml)$/
 
+// Style-table numbers a part saving copies as it was may name: saving numbers custom number formats and
+// differential formats afresh (in the order cells and rules use them), and an edit may again, so the
+// copy would point at other formats. Built-in number formats (below 164) keep their numbers.
+const STYLE_REFERENCE = /\b(\w*numFmtId|\w*[dD]xfId|xfId)="(\d+)"/g
+
 export interface VerifyInput {
 	original: Map<string, Uint8Array>
 	saved: Map<string, Uint8Array>
@@ -901,12 +1053,19 @@ export interface VerifyInput {
 	sheetPaths: readonly string[]
 	// Parts the save plan drops on purpose (a thumbnail, empty custom properties, printer settings).
 	dropped: readonly string[]
+	// Empties `original` and `saved` once read, so each part can go as soon as it is compared.
+	release?: boolean
 }
 
 // What saving loses, as readable records; empty when it loses nothing, null when `cancelled` said to stop.
 export async function saveLosses(input: VerifyInput, cancelled: () => boolean = () => false): Promise<string[] | null> {
 	const original = packageOf(input.original)
 	const saved = packageOf(input.saved)
+
+	if (input.release === true) {
+		input.original.clear()
+		input.saved.clear()
+	}
 	const lost: string[] = []
 	const originalContext = styleContext(original.text("xl/styles.xml"), original.text("xl/sharedStrings.xml"))
 	const savedContext = styleContext(saved.text("xl/styles.xml"), saved.text("xl/sharedStrings.xml"))
@@ -936,8 +1095,7 @@ export async function saveLosses(input: VerifyInput, cancelled: () => boolean = 
 			elementSet(section, set, context, `styleSheet/${section.name}`)
 		}
 
-		for (const dxf of context.dxfs) set.set(`dxf|${dxf}`, (set.get(`dxf|${dxf}`) ?? 0) + 1)
-
+		// Differential formats are compared where rules and tables use them: saving keeps only those.
 		return set
 	}
 
@@ -946,7 +1104,7 @@ export async function saveLosses(input: VerifyInput, cancelled: () => boolean = 
 		missing(styleSections(original.text("xl/styles.xml"), originalContext), styleSections(saved.text("xl/styles.xml"), savedContext))
 	)
 
-	for (const part of ["xl/workbook.xml", "docProps/core.xml"]) {
+	for (const part of ["xl/workbook.xml", "docProps/core.xml", "docProps/app.xml"]) {
 		const before = original.text(part)
 		const after = saved.text(part)
 
@@ -987,6 +1145,10 @@ export async function saveLosses(input: VerifyInput, cancelled: () => boolean = 
 			path,
 			missing(sheetElements(before, originalContext, beforeParts.links), sheetElements(after, savedContext, afterParts.links))
 		)
+		// The sheets are the bulk of a file: each is let go once compared.
+		original.entries.delete(path.toLowerCase())
+		saved.entries.delete(savedPath)
+
 		const cells = await compareSheetData(
 			SHEET_DATA.exec(before)?.[1] ?? "",
 			SHEET_DATA.exec(after)?.[1] ?? "",
@@ -1002,7 +1164,10 @@ export async function saveLosses(input: VerifyInput, cancelled: () => boolean = 
 		const partsOf = (parts: Map<string, string[]>, type: string) => parts.get(type) ?? []
 
 		for (const comments of partsOf(beforeParts.parts, "comments")) handled.add(comments)
-		for (const vml of partsOf(beforeParts.parts, "vmlDrawing")) handled.add(vml)
+		for (const vml of partsOf(beforeParts.parts, "vmlDrawing")) {
+			handled.add(vml)
+			report(`${path} notes`, notePresentation(original.text(vml) ?? ""))
+		}
 		for (const printer of partsOf(beforeParts.parts, "printerSettings")) handled.add(printer)
 
 		report(
@@ -1017,7 +1182,10 @@ export async function saveLosses(input: VerifyInput, cancelled: () => boolean = 
 
 		report(
 			`${path} tables`,
-			missing(tableRecords(original, partsOf(beforeParts.parts, "table")), tableRecords(saved, partsOf(afterParts.parts, "table")))
+			missing(
+				tableRecords(original, partsOf(beforeParts.parts, "table"), originalContext),
+				tableRecords(saved, partsOf(afterParts.parts, "table"), savedContext)
+			)
 		)
 
 		// A drawing saving copies (it holds a chart) is compared byte for byte below; one it writes anew
@@ -1044,7 +1212,21 @@ export async function saveLosses(input: VerifyInput, cancelled: () => boolean = 
 	for (const [path, bytes] of original.entries) {
 		if (handled.has(path) || REWRITTEN.test(path) || path.endsWith("/")) continue
 
-		if (!sameBytes(bytes, saved.entries.get(path))) lost.push(`${path}: not copied`)
+		if (!sameBytes(bytes, saved.entries.get(path))) {
+			lost.push(`${path}: not copied`)
+
+			continue
+		}
+
+		if (path.endsWith(".xml")) {
+			for (const [, name = "", id = ""] of decoder.decode(bytes).matchAll(STYLE_REFERENCE)) {
+				if (!(name.toLowerCase().endsWith("numfmtid") && Number(id) < 164)) {
+					lost.push(`${path}: names style-table entry ${name}=${id}, which saving renumbers`)
+
+					break
+				}
+			}
+		}
 	}
 
 	return lost
