@@ -147,7 +147,7 @@ describe("useNoteEditor — what this tab's editor shows", () => {
 			result.current.onChange("mine")
 		})
 
-		tabEditorLanded(NOTE.uuid, hashNoteContent("mine"))
+		tabEditorLanded(NOTE.uuid, hashNoteContent("mine"), undefined)
 
 		act(() => {
 			result.current.onChange("mine, more")

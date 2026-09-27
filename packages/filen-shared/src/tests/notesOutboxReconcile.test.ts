@@ -21,6 +21,23 @@ describe("pruneAndRebaseNoteOutboxAfterPush", () => {
 		expect(pruneAndRebaseNoteOutboxAfterPush(entries, 100, "hash")).toBeUndefined()
 	})
 
+	it("rebases only the survivors the caller says were typed on the push; the others keep their base", () => {
+		const entries = [
+			{ timestamp: 150, content: "same tab", note, baseContentHash: "old", origin: "t1" },
+			{ timestamp: 160, content: "other tab", note, baseContentHash: "old", origin: "t2" }
+		]
+
+		const remaining = pruneAndRebaseNoteOutboxAfterPush(entries, 100, "pushed", entry => entry.origin === "t1")
+
+		expect(remaining?.map(entry => entry.baseContentHash)).toEqual(["pushed", "old"])
+	})
+
+	it("rebases every survivor by default", () => {
+		const entries = [{ timestamp: 150, content: "typed", note, baseContentHash: "old" }]
+
+		expect(pruneAndRebaseNoteOutboxAfterPush(entries, 100, "pushed")?.[0]?.baseContentHash).toBe("pushed")
+	})
+
 	it("keeps entries typed strictly after the pushed entry's LOCAL timestamp", () => {
 		const entries = [
 			{ timestamp: 100, content: "pushed", note },

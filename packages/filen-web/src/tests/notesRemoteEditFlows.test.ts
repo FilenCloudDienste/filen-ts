@@ -489,7 +489,8 @@ describe("notes — what the other tabs hear of a push", () => {
 		sync.startAsFollower()
 		type("mine")
 
-		const origin = useNotesInflightStore.getState().inflightContent[note.uuid]?.[0]?.origin
+		const entry = useNotesInflightStore.getState().inflightContent[note.uuid]?.[0]
+		const origin = entry?.origin
 
 		expect(tabEditorDirty(note.uuid)).toBe(true)
 
@@ -497,7 +498,7 @@ describe("notes — what the other tabs hear of a push", () => {
 		// Still in flight.
 		expect(tabEditorDirty(note.uuid)).toBe(true)
 
-		sync.heardLanded(note.uuid, hashNoteContent("mine"), origin)
+		sync.heardLanded(note.uuid, hashNoteContent("mine"), { origin: origin ?? "", stamp: entry?.timestamp ?? 0, landed: true })
 
 		expect(tabEditorDirty(note.uuid)).toBe(false)
 		expect(tabEditorBaseHash(note.uuid)).toBe(hashNoteContent("mine"))
@@ -600,7 +601,14 @@ describe("notes — a follower's keystroke typed before it heard its push land",
 
 		expect(next[0]?.baseContentHash).toBe(hashNoteContent("old"))
 
-		sync.ingestRemoteEnqueue({ note, content: "old+AB", timestamp: 2000, baseContentHash: hashNoteContent("old"), origin: "tab-F" })
+		sync.ingestRemoteEnqueue({
+			note,
+			content: "old+AB",
+			timestamp: 2000,
+			baseContentHash: hashNoteContent("old"),
+			origin: "tab-F",
+			carried: true
+		})
 		tabEditorChanged(note.uuid, "old+AB")
 		tabEditorSynced(note.uuid, "old+A", hashNoteContent("old+A"))
 
@@ -646,11 +654,11 @@ describe("notes — a follower's keystroke typed before it heard its push land",
 		openNote()
 		sync.startAsFollower()
 		type("mine")
+
+		const pushed = useNotesInflightStore.getState().inflightContent[note.uuid]?.[0]
+
 		type("mine, more")
-
-		const origin = useNotesInflightStore.getState().inflightContent[note.uuid]?.[0]?.origin
-
-		sync.heardLanded(note.uuid, hashNoteContent("mine"), origin)
+		sync.heardLanded(note.uuid, hashNoteContent("mine"), { origin: pushed?.origin ?? "", stamp: pushed?.timestamp ?? 0, landed: true })
 
 		expect(useNotesInflightStore.getState().inflightContent[note.uuid]?.[0]?.baseContentHash).toBe(hashNoteContent("mine"))
 	})
@@ -698,5 +706,149 @@ describe("notes — how the question was answered in another tab", () => {
 		useNotesRemoteEditStore.getState().dropRemoteEdited(note.uuid)
 
 		expect(queryClient.getQueryData(noteContentQueryKey(note.uuid))).toBe("old")
+	})
+})
+
+describe("notes — a push's base, and who hears of an overwrite", () => {
+	it("a fresh session on text older than this tab's landed push is not rebased onto it: its push warns", async () => {
+		const cloud = cloudOf("B0")
+
+		sync.ingestRemoteEnqueue({ note, content: "A", timestamp: 1000, baseContentHash: hashNoteContent("B0"), origin: "tab-F" })
+		sync.executeNow()
+		await tick()
+
+		expect(cloud.get()).toBe("A")
+
+		// F came back to the note on a stale seed and typed at once: a fresh session, based on B0.
+		sync.ingestRemoteEnqueue({ note, content: "B0 + c", timestamp: 9000, baseContentHash: hashNoteContent("B0"), origin: "tab-F" })
+
+		expect(useNotesInflightStore.getState().inflightContent[note.uuid]?.[0]?.baseContentHash).toBe(hashNoteContent("B0"))
+
+		sync.executeNow()
+		await tick()
+
+		expect(toast).toHaveBeenCalledWith("notes:noteOverwroteNewerRemoteChanges")
+	})
+
+	it("a fresh session on a history restore of the landed push's base warns of nothing", async () => {
+		const cloud = cloudOf("B0")
+
+		sync.ingestRemoteEnqueue({ note, content: "A", timestamp: 1000, baseContentHash: hashNoteContent("B0"), origin: "tab-F" })
+		sync.executeNow()
+		await tick()
+		cloud.set("B0")
+		sync.ingestRemoteEnqueue({ note, content: "B0+c", timestamp: 5000, baseContentHash: hashNoteContent("B0"), origin: "tab-F" })
+		sync.executeNow()
+		await tick()
+
+		expect(cloud.get()).toBe("B0+c")
+		expect(toast).not.toHaveBeenCalled()
+	})
+
+	it("the prune rebases only the pushing tab's own continuation: another tab's entry still warns", async () => {
+		openNote()
+		seedTabEditor(note.uuid, "a:1", "B0", "B0")
+
+		const cloud = cloudOf("B0")
+		const response = deferred<Note>()
+
+		setNoteContent.mockImplementationOnce((_n, content) => {
+			cloud.set(content)
+
+			return response.promise
+		})
+		type("A")
+		sync.executeNow()
+		await tick()
+		// Another tab, since closed, typed on B0 while the push was out.
+		sync.ingestRemoteEnqueue({
+			note,
+			content: "B0+z",
+			timestamp: Date.now() + 1000,
+			baseContentHash: hashNoteContent("B0"),
+			origin: "tab-F2"
+		})
+		response.resolve(note)
+		await tick()
+
+		expect(useNotesInflightStore.getState().inflightContent[note.uuid]?.[0]?.baseContentHash).toBe(hashNoteContent("B0"))
+
+		sync.executeNow()
+		await tick()
+
+		// Its tab is gone: the leader tells.
+		expect(cloud.get()).toBe("B0+z")
+		expect(toast).toHaveBeenCalledWith("notes:noteOverwroteNewerRemoteChanges")
+	})
+
+	it("a follower's history restore drops its queued typing in the leader too", async () => {
+		const cloud = cloudOf("B")
+
+		sync.ingestRemoteEnqueue({ note, content: "B+x", timestamp: 1000, baseContentHash: hashNoteContent("B"), origin: "tab-T2" })
+		// The restore in the follower: its dropEntry reaches the leader.
+		sync.ingestDrop(note.uuid)
+		cloud.set("R")
+		sync.executeNow()
+		await tick()
+
+		expect(queuedContents()).toBeUndefined()
+		expect(setNoteContent).not.toHaveBeenCalled()
+		expect(cloud.get()).toBe("R")
+	})
+
+	it("an echo of a restored draft arriving after this tab's own later push landed is stale: no reseed, no question", async () => {
+		queryClient.setQueryData(noteContentQueryKey(note.uuid), "B0", { updatedAt: 1 })
+		useNotesRemoteEditStore.getState().setOpenNote(note.uuid)
+		useNotesInflightStore.setState({
+			inflightContent: { a: [{ timestamp: 1, content: "D", note, baseContentHash: hashNoteContent("B0"), origin: "old-page" }] }
+		})
+		seedTabEditor(note.uuid, "a:1", "D", "B0")
+
+		const cloud = cloudOf("B0")
+		const response = deferred<Note>()
+
+		setNoteContent.mockImplementationOnce((_n, content) => {
+			cloud.set(content)
+
+			return response.promise
+		})
+		sync.executeNow()
+		await tick()
+		beginEditingSession(note.uuid)
+		tabEditorChanged(note.uuid, "D+x")
+		await sync.enqueue(note, "D+x", tabEditorBaseHash(note.uuid) ?? hashNoteContent("D"))
+		sync.executeNow()
+		response.resolve(note)
+		await tick()
+		await tick()
+
+		expect(cloud.get()).toBe("D+x")
+
+		const key = remountKey()
+
+		handleNoteEvent(contentEdited("D", ME))
+
+		expect(remountKey()).toBe(key)
+		expect(question()).toBeUndefined()
+		expect(tabEditorDirty(note.uuid)).toBe(false)
+
+		// D+x's own echo still counts as this tab's.
+		handleNoteEvent(contentEdited("D+x", ME))
+
+		expect(remountKey()).toBe(key)
+		expect(question()).toBeUndefined()
+	})
+
+	it("a follower with no editor on screen follows its own landed text into its content cache", () => {
+		queryClient.setQueryData(noteContentQueryKey(note.uuid), "B0", { updatedAt: 1 })
+		sync.startAsFollower()
+		void sync.enqueue(note, "A", hashNoteContent("B0"))
+
+		const entry = useNotesInflightStore.getState().inflightContent[note.uuid]?.[0]
+
+		sync.heardLanded(note.uuid, hashNoteContent("A"), { origin: entry?.origin ?? "", stamp: entry?.timestamp ?? 0, landed: true })
+
+		expect(queryClient.getQueryData(noteContentQueryKey(note.uuid))).toBe("A")
+		expect(remountKey()).toBe(1)
 	})
 })

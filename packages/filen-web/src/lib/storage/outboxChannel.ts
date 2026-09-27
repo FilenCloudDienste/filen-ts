@@ -11,22 +11,34 @@ import { log } from "@/lib/log"
 // (message routing + arktype schemas) and its own Sync class — only the shapes flowing over the channel
 // differ; the plumbing is identical. This channel NEVER touches the db RPC protocol.
 
-// follower → leader: forward one edit (envelope-encoded feature payload) / request a flush / request state.
-// leader → followers: authoritative state (envelope-encoded) + a takeover announcement + the hash of what
-// is being pushed for an item (and the id of the tab that queued it, so that tab knows the push for its
-// own), then again once the cloud holds it (`landed`, also when nothing had to be sent), so a follower knows the item's socket echo for its own. Any tab → any tab: a
-// question about an item's newer version was answered, so the other tabs stop asking it.
+// follower → leader: forward one edit (envelope-encoded feature payload) / drop an item's queued edits /
+// request a flush / request state. leader → followers: authoritative state (envelope-encoded) + a takeover
+// announcement + what is being pushed for an item, and again once the cloud holds it (`landed`, also when
+// nothing had to be sent): the hash, and the tab and entry it came from (`origin`, `stamp`), so a follower
+// knows the item's socket echo, and its own push, for what they are. Any tab → any tab: a question about an
+// item's newer version was answered (and how), so the other tabs stop asking it.
+
 // How a question about an item's newer version was answered: their version, mine kept over it, or mine
 // saved beside it as a copy (theirs stays).
 export type AnswerChoice = "theirs" | "mine" | "copy"
 
+// What a "pushed" post says beyond the item and hash.
+export interface PushDetail {
+	origin?: string
+	stamp?: number
+	landed?: true
+	// The push buried a newer version: the tab it came from says so.
+	overwrote?: true
+}
+
 export type OutboxChannelMsg =
 	| { kind: "enqueue"; payload: string }
+	| { kind: "drop"; id: string }
 	| { kind: "executeNow" }
 	| { kind: "stateRequest" }
 	| { kind: "state"; payload: string }
 	| { kind: "leaderHello" }
-	| { kind: "pushed"; id: string; hash: string; origin?: string; landed?: true }
+	| ({ kind: "pushed"; id: string; hash: string } & PushDetail)
 	| { kind: "answered"; id: string; choice?: AnswerChoice }
 
 // The domain-agnostic transport a Sync class depends on: E is the follower's forwarded-edit shape, S the
@@ -35,12 +47,14 @@ export type OutboxChannelMsg =
 export interface OutboxChannelTransport<E, S> {
 	// follower → leader
 	sendEnqueue: (msg: E) => void
+	// Optional: only an outbox whose tabs can discard queued edits (notes) sends it.
+	sendDrop?: (id: string) => void
 	sendExecuteNow: () => void
 	requestState: () => void
 	// leader → followers
 	broadcastState: (state: S) => void
 	broadcastLeaderHello: () => void
-	broadcastPushed: (id: string, hash: string, origin?: string, landed?: true) => void
+	broadcastPushed: (id: string, hash: string, detail?: PushDetail) => void
 	// any tab → any tab
 	broadcastAnswered: (id: string, choice: AnswerChoice) => void
 	// Terminal teardown (logout/shutdown): detach the handler and close the channel so no late cross-tab
@@ -59,6 +73,9 @@ export function makeOutboxChannelTransport<E, S>(channel: BroadcastChannel): Out
 		sendEnqueue: msg => {
 			post({ kind: "enqueue", payload: stringifyEnvelope(msg) })
 		},
+		sendDrop: id => {
+			post({ kind: "drop", id })
+		},
 		sendExecuteNow: () => {
 			post({ kind: "executeNow" })
 		},
@@ -71,18 +88,8 @@ export function makeOutboxChannelTransport<E, S>(channel: BroadcastChannel): Out
 		broadcastLeaderHello: () => {
 			post({ kind: "leaderHello" })
 		},
-		broadcastPushed: (id, hash, origin, landed) => {
-			const msg: OutboxChannelMsg = { kind: "pushed", id, hash }
-
-			if (origin !== undefined) {
-				msg.origin = origin
-			}
-
-			if (landed !== undefined) {
-				msg.landed = landed
-			}
-
-			post(msg)
+		broadcastPushed: (id, hash, detail) => {
+			post({ kind: "pushed", id, hash, ...detail })
 		},
 		broadcastAnswered: (id, choice) => {
 			post({ kind: "answered", id, choice })

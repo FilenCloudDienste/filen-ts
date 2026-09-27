@@ -9,7 +9,9 @@ import type { InflightEntry as SharedInflightEntry } from "@filen/shared"
 // only entries typed DURING a round trip survive a successful push, the ones it actually sent die
 // (see sync.ts). `origin` is the id of the tab that queued the entry (Sync's tabId): which push is a tab's
 // own. An entry persisted by an earlier page load has none, or another tab's, and is no tab's own now.
-export type InflightEntry = SharedInflightEntry<Note> & { origin?: string }
+// `carried`: typed on top of that tab's own previous entry, whose base it carries; only such an entry may
+// be rebased onto that previous entry's push when it lands.
+export type InflightEntry = SharedInflightEntry<Note> & { origin?: string; carried?: true }
 
 export type InflightContent = Record<string, InflightEntry[]>
 

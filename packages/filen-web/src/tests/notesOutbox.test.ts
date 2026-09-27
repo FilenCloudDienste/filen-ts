@@ -51,6 +51,7 @@ import useNotesInflightStore, {
 } from "@/features/notes/store/useNotesInflight"
 import { reconcileFollower, hashNoteContent, type RemoteEnqueue } from "@/features/notes/lib/sync.logic"
 import { isOwnNotePush } from "@/features/notes/lib/pushEchoes"
+import type { PushDetail } from "@/lib/storage/outboxChannel"
 import { forgetTabEditors, seedTabEditor, takeTabEditorAuthored, tabEditorChanged } from "@/features/notes/lib/tabEditors"
 
 function makeNote(uuid: string, overrides: Partial<Note> = {}): Note {
@@ -82,7 +83,8 @@ function mockTransport() {
 		requestState: vi.fn<() => void>(),
 		broadcastState: vi.fn<(state: InflightContent) => void>(),
 		broadcastLeaderHello: vi.fn<() => void>(),
-		broadcastPushed: vi.fn<(id: string, hash: string, origin?: string) => void>(),
+		sendDrop: vi.fn<(id: string) => void>(),
+		broadcastPushed: vi.fn<(id: string, hash: string, detail?: PushDetail) => void>(),
 		broadcastAnswered: vi.fn<(id: string) => void>(),
 		close: vi.fn<() => void>()
 	}
@@ -473,7 +475,8 @@ describe("a follower hears the leader's pushes", () => {
 
 		expect(setNoteContent).toHaveBeenCalledExactlyOnceWith(note, "leader text", expect.any(String))
 
-		const [, hash, origin] = leaderTransport.broadcastPushed.mock.calls[0] ?? []
+		const [, hash, detail] = leaderTransport.broadcastPushed.mock.calls[0] ?? []
+		const origin = detail?.origin
 
 		expect(origin).toBeDefined()
 		expect(origin).not.toBe(forwarded.origin)
@@ -485,6 +488,56 @@ describe("a follower hears the leader's pushes", () => {
 
 		expect(takeTabEditorAuthored("a", hashNoteContent("leader text"))).toBe(false)
 		forgetTabEditors()
+	})
+
+	it("the overwrite a follower's push made is told in that tab, not the leader's", async () => {
+		const leader = new Sync()
+		const leaderTransport = mockTransport()
+		const follower = new Sync()
+		const followerTransport = mockTransport()
+
+		leader.attachTransport(leaderTransport)
+		leader.start()
+		await flushAsync()
+		follower.attachTransport(followerTransport)
+		follower.startAsFollower()
+
+		const note = makeNote("a", { title: "Plan" })
+
+		await follower.enqueue(note, "mine", hashNoteContent("old"))
+		leader.ingestRemoteEnqueue(firstEnqueue(followerTransport))
+		getNoteContent.mockResolvedValue("newer elsewhere")
+		setNoteContent.mockResolvedValue(note)
+		leader.executeNow()
+		await flushAsync()
+
+		expect(toast).not.toHaveBeenCalled()
+
+		const landed = leaderTransport.broadcastPushed.mock.calls.find(call => call[2]?.landed === true)
+
+		expect(landed?.[2]?.overwrote).toBe(true)
+
+		follower.heardLanded("a", landed?.[1] ?? "", landed?.[2] ?? {})
+
+		expect(toast).toHaveBeenCalledExactlyOnceWith("notes:noteOverwroteNewerRemoteChanges")
+		follower.cancel()
+		leader.cancel()
+	})
+
+	it("a follower's drop reaches the leader, and a follower writes no durable outbox", async () => {
+		const s = new Sync()
+		const transport = mockTransport()
+
+		s.attachTransport(transport)
+		s.startAsFollower()
+		await s.enqueue(makeNote("a"), "typed", hashNoteContent("old"))
+		s.dropEntry("a")
+
+		expect(transport.sendDrop).toHaveBeenCalledExactlyOnceWith("a")
+		expect(queued("a")).toBe(false)
+		expect(await s.flushToDisk({ a: [{ timestamp: 1, content: "x", note: makeNote("a") }] })).toBe(true)
+		expect(kvSetJson).not.toHaveBeenCalled()
+		s.cancel()
 	})
 
 	// The answer and the push it answers over outlive the leader that knew them.
@@ -554,7 +607,8 @@ describe("promoteToLeader — a follower wins the lock and pushes carried-over w
 		// The echo can beat the response: by the time the request is made, the push is already known.
 		setNoteContent.mockImplementation(() => {
 			expect(isOwnNotePush("p", hashNoteContent("p-edit"))).toBe(true)
-			expect(transport.broadcastPushed).toHaveBeenCalledWith("p", hashNoteContent("p-edit"))
+			expect(transport.broadcastPushed.mock.calls[0]?.slice(0, 2)).toEqual(["p", hashNoteContent("p-edit")])
+			expect(typeof transport.broadcastPushed.mock.calls[0]?.[2]?.stamp).toBe("number")
 
 			return Promise.resolve(note)
 		})

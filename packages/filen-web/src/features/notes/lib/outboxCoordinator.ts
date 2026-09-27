@@ -23,6 +23,7 @@ const remoteEnqueueSchema = type({
 	timestamp: "number",
 	"baseContentHash?": "string",
 	"origin?": "string",
+	"carried?": "true",
 	"answer?": "true"
 }).as<RemoteEnqueue>()
 
@@ -41,7 +42,7 @@ function handleMessage(msg: OutboxChannelMsg): void {
 	// Every tab keeps the list of what the leader pushed, whichever role it holds by the time it hears.
 	if (msg.kind === "pushed") {
 		if (msg.landed === true) {
-			sync.heardLanded(msg.id, msg.hash, msg.origin)
+			sync.heardLanded(msg.id, msg.hash, msg)
 		} else {
 			rememberNotePush(msg.id, msg.hash)
 			sync.heardPush(msg.id, msg.hash, msg.origin)
@@ -66,6 +67,11 @@ function handleMessage(msg: OutboxChannelMsg): void {
 				if (decoded !== null) {
 					sync.ingestRemoteEnqueue(decoded)
 				}
+
+				return
+			}
+			case "drop": {
+				sync.ingestDrop(msg.id)
 
 				return
 			}

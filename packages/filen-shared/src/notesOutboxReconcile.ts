@@ -5,20 +5,22 @@ import { type InflightContent } from "./notesOutbox"
 // survivor's baseContentHash onto the hash of the content just pushed — otherwise the next pass
 // would compare those entries against their stale session base and flag the app's OWN push as a
 // conflict. Never compares local and server clocks. `undefined` (both for absent input and an
-// emptied result) tells the caller to delete the outbox key entirely rather than store `[]`.
+// emptied result) tells the caller to delete the outbox key entirely rather than store `[]`. `typedOnPush`
+// picks the survivors typed on top of the push; one that was not (another tab's, in an outbox shared by
+// several, which never saw it) keeps its base. By default every survivor is.
 export function pruneAndRebaseNoteOutboxAfterPush<T extends { timestamp: number; baseContentHash?: string }>(
 	entries: T[] | undefined,
 	syncedUpTo: number,
-	pushedContentHash: string
+	pushedContentHash: string,
+	typedOnPush: (entry: T) => boolean = () => true
 ): T[] | undefined {
 	if (!entries) {
 		return undefined
 	}
 
-	const remaining = entries.filter(c => c.timestamp > syncedUpTo).map(c => ({
-		...c,
-		baseContentHash: pushedContentHash
-	}))
+	const remaining = entries
+		.filter(c => c.timestamp > syncedUpTo)
+		.map(c => (typedOnPush(c) ? { ...c, baseContentHash: pushedContentHash } : c))
 
 	return remaining.length > 0 ? remaining : undefined
 }

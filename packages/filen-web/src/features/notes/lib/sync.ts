@@ -14,12 +14,13 @@ import { queryClient } from "@/queries/client"
 import { i18n } from "@/lib/i18n"
 import { forgetNotePushes, rememberNotePush } from "@/features/notes/lib/pushEchoes"
 import { heldNotes, releaseAllNoteHolds } from "@/features/notes/lib/remoteEditHolds"
-import { forgetTabEditors, tabEditorLanded, tabEditorPushed, tabEditorSynced } from "@/features/notes/lib/tabEditors"
+import { forgetTabEditors, tabEditorLanded, tabEditorPushed } from "@/features/notes/lib/tabEditors"
+import { followContent } from "@/features/notes/lib/remoteContent"
 import { log } from "@/lib/log"
 import { toast } from "sonner"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { kvGetJson, kvSetJson, kvDelete } from "@/lib/storage/adapter"
-import { type OutboxChannelTransport, type OutboxRole } from "@/lib/storage/outboxChannel"
+import { type OutboxChannelTransport, type OutboxRole, type PushDetail } from "@/lib/storage/outboxChannel"
 import { noteContentQueryKey, readNoteContent } from "@/features/notes/queries/noteContent"
 import { fetchNotes, notesQueryGet } from "@/features/notes/queries/notes"
 import useNotesInflightStore, {
@@ -42,6 +43,20 @@ import {
 } from "@/features/notes/lib/sync.logic"
 
 const OUTBOX_KV_KEY = "inflightNoteContent"
+// Held by every tab while it lives (released with the tab): whether the tab a push came from is still there
+// to tell its user.
+const TAB_LOCK_PREFIX = "filen-web-notes-tab:"
+
+async function tabIsLive(tabId: string): Promise<boolean> {
+	const snapshot = await navigator.locks.query()
+
+	return snapshot.held?.some(lock => lock.name === `${TAB_LOCK_PREFIX}${tabId}`) === true
+}
+
+// The name a toast about the note uses.
+function noteName(note: Note): string {
+	return note.title !== undefined && note.title.length > 0 ? note.title : i18n.t("notes:noteUntitled")
+}
 const SYNC_DEBOUNCE_MS = 3000
 
 // Multi-tab transport: a follower forwards edits to the leader and asks it to flush; the leader
@@ -104,6 +119,7 @@ export class Sync {
 	// This tab's id, the origin of every entry it queues: which push is this tab's own, exactly, whatever
 	// else it or another tab typed meanwhile, in whichever millisecond.
 	private readonly tabId: string = crypto.randomUUID()
+	private releaseTabLock: (() => void) | null = null
 
 	// Multi-tab state. `role` defaults to "leader" so a lone tab and every unit test are the unchanged
 	// single-tab path. `transport` is null until the coordinator wires a channel (single-tab: stays null,
@@ -138,6 +154,7 @@ export class Sync {
 	public start(): void {
 		this.role = "leader"
 		this.abortController = new AbortController()
+		this.holdTabLock()
 
 		void this.restoreFromDisk()
 	}
@@ -152,6 +169,8 @@ export class Sync {
 		this.syncTimeout = null
 		this.abortController.abort()
 		this.transport?.close()
+		this.releaseTabLock?.()
+		this.releaseTabLock = null
 		// The store no longer reflects any account's outbox — an editor still mounted through the teardown
 		// must hold its loading state rather than seed from a wiped store, and no note is being edited
 		// any more (a session surviving the wipe would gate the next account's content query).
@@ -180,6 +199,15 @@ export class Sync {
 	// so the discard is durable and the next session starts with a clean strike count. Functional update:
 	// a no-op when the note has no entry.
 	public dropEntry(noteUuid: string): void {
+		// A follower's store only mirrors the leader's queue: the leader must drop it, or it pushes it.
+		if (this.role === "follower") {
+			const unacked = { ...this.unacked }
+
+			Reflect.deleteProperty(unacked, noteUuid)
+			this.unacked = unacked
+			this.transport?.sendDrop?.(noteUuid)
+		}
+
 		useNotesInflightStore.getState().setInflightContent(prev => {
 			if (!(noteUuid in prev)) {
 				return prev
@@ -193,6 +221,30 @@ export class Sync {
 
 			return updated
 		})
+	}
+
+	// LEADER: a follower dropped the note's queued edits (a history restore, a reload of theirs there).
+	public ingestDrop(noteUuid: string): void {
+		if (this.role !== "leader" || isAborted(this.abortController.signal)) {
+			return
+		}
+
+		this.dropEntry(noteUuid)
+		void this.flushToDisk(useNotesInflightStore.getState().inflightContent).then(() => {
+			this.broadcastState()
+		})
+	}
+
+	private holdTabLock(): void {
+		if (this.releaseTabLock !== null) {
+			return
+		}
+
+		const held = new Promise<void>(resolve => {
+			this.releaseTabLock = resolve
+		})
+
+		void navigator.locks.request(`${TAB_LOCK_PREFIX}${this.tabId}`, () => held)
 	}
 
 	// Edit intake. Writes the outbox entry AND persists the WHOLE outbox to disk IMMEDIATELY, before
@@ -282,8 +334,11 @@ export class Sync {
 			sessionBaseHash
 		})
 		const own = newestEntry(entries)
+		const previous = newestEntry(useNotesInflightStore.getState().inflightContent[note.uuid] ?? [])
+		const tag: Pick<InflightEntry, "origin" | "carried"> =
+			previous?.origin === this.tabId ? { origin: this.tabId, carried: true } : { origin: this.tabId }
 
-		return entries.map(entry => (entry === own ? { ...entry, origin: this.tabId } : entry))
+		return entries.map(entry => (entry === own ? { ...entry, ...tag } : entry))
 	}
 
 	// exactOptionalPropertyTypes: omit the optional keys entirely when unset.
@@ -296,6 +351,10 @@ export class Sync {
 
 		if (entry.origin !== undefined) {
 			msg.origin = entry.origin
+		}
+
+		if (entry.carried !== undefined) {
+			msg.carried = entry.carried
 		}
 
 		if (this.answeredNotes.has(entry.note.uuid)) {
@@ -315,20 +374,35 @@ export class Sync {
 		}
 	}
 
-	// ANY ROLE: the cloud holds `hash` for the note, pushed (or found there) by the leader. This tab's own
-	// text is synced then, echo or not, and its own entries still here (typed during the push, or before
-	// the leader's pruned state arrives) build on it: the leader's prune rebased its copies the same way.
-	public heardLanded(noteUuid: string, hash: string, origin: string | undefined): void {
+	// ANY ROLE: the cloud holds `hash` for the note, pushed (or found there) by the leader from the entry
+	// `detail.stamp` of the tab `detail.origin`. When that tab is this one: its text is synced, echo or not,
+	// its content cache follows it (no editor needed, no read: this tab has the text), its entries typed on
+	// top of it build on it (the leader's prune rebased its copies the same way), and an overwrite it made
+	// is told here.
+	public heardLanded(noteUuid: string, hash: string, detail: PushDetail): void {
 		this.lastPushedHashes.set(noteUuid, hash)
 
-		if (origin !== this.tabId) {
+		if (detail.origin !== this.tabId) {
 			return
 		}
 
-		tabEditorLanded(noteUuid, hash)
+		const stamp = detail.stamp ?? Number.POSITIVE_INFINITY
+		const find = (entries: InflightEntry[] | undefined): InflightEntry | undefined =>
+			entries?.find(entry => entry.origin === this.tabId && entry.timestamp === stamp)
+		const pushed = find(this.unacked[noteUuid]) ?? find(useNotesInflightStore.getState().inflightContent[noteUuid])
+
+		if (pushed !== undefined) {
+			followContent(noteUuid, pushed.content)
+		}
+
+		tabEditorLanded(noteUuid, hash, pushed?.content)
 
 		const rebase = (entries: InflightEntry[] | undefined): InflightEntry[] | undefined =>
-			entries?.map(entry => (entry.origin === this.tabId ? { ...entry, baseContentHash: hash } : entry))
+			entries?.map(entry =>
+				entry.origin === this.tabId && entry.carried === true && entry.timestamp > stamp
+					? { ...entry, baseContentHash: hash }
+					: entry
+			)
 		const unacked = rebase(this.unacked[noteUuid])
 
 		if (unacked !== undefined) {
@@ -340,6 +414,16 @@ export class Sync {
 
 			return entries === undefined ? prev : { ...prev, [noteUuid]: entries }
 		})
+
+		if (detail.overwrote === true) {
+			const note = notesQueryGet()?.find(n => n.uuid === noteUuid) ?? pushed?.note
+
+			toast(
+				i18n.t("notes:noteOverwroteNewerRemoteChanges", {
+					name: note === undefined ? i18n.t("notes:noteUntitled") : noteName(note)
+				})
+			)
+		}
 	}
 
 	// LEADER: ingest an edit a follower forwarded. Merge it by its (follower-local) timestamp —
@@ -361,9 +445,12 @@ export class Sync {
 			this.answeredNotes.add(msg.note.uuid)
 		}
 
+		// Only a keystroke typed on that tab's own previous entry carries the pushed entry's base; a fresh
+		// session on the same text (a stale seed, a history restore) is news to the push, and stays so.
 		const landed = this.landed.get(msg.note.uuid)
 		const rebased =
 			landed !== undefined &&
+			msg.carried === true &&
 			msg.origin !== undefined &&
 			msg.origin === landed.origin &&
 			msg.baseContentHash === landed.from &&
@@ -436,6 +523,7 @@ export class Sync {
 	// never runs the loop — the leader owns both.
 	public startAsFollower(): void {
 		this.role = "follower"
+		this.holdTabLock()
 
 		if (this.transport === null) {
 			// No channel attached: nobody can ever answer, so this tab is as hydrated as it will get —
@@ -478,6 +566,11 @@ export class Sync {
 		// refuses to persist at all once a terminal shutdown has landed.
 		if (isAborted(this.abortController.signal)) {
 			return false
+		}
+
+		// Only the leader owns the durable outbox; a follower's store is a mirror, nothing of it to keep.
+		if (this.role === "follower") {
+			return true
 		}
 
 		await this.initPromise
@@ -717,7 +810,13 @@ export class Sync {
 
 					if (!alreadyInCloud) {
 						rememberNotePush(noteUuid, pushedContentHash)
-						this.transport?.broadcastPushed(noteUuid, pushedContentHash, mostRecentContent.origin)
+						this.transport?.broadcastPushed(
+							noteUuid,
+							pushedContentHash,
+							mostRecentContent.origin === undefined
+								? { stamp: syncedUpTo }
+								: { origin: mostRecentContent.origin, stamp: syncedUpTo }
+						)
 
 						if (own) {
 							tabEditorPushed(noteUuid, pushedContentHash)
@@ -799,10 +898,33 @@ export class Sync {
 					// This tab's text is in the cloud now, and not before: a push the outbox gives up on
 					// leaves it unsaved on screen. The other tabs hear it too, also when nothing was sent.
 					if (own) {
-						tabEditorSynced(noteUuid, mostRecentContent.content, pushedContentHash)
+						tabEditorLanded(noteUuid, pushedContentHash, mostRecentContent.content)
 					}
 
-					this.transport?.broadcastPushed(noteUuid, pushedContentHash, mostRecentContent.origin, true)
+					// An overwrite is told by the tab whose typing was pushed, or here when that is this tab,
+					// an earlier page load's (a restored draft), or a tab since closed. Once per note per
+					// pass, and never for an aborted pass (logout stays silent).
+					const overwrote = overwritesNewerRemoteContent && !isAborted(signal) && !toastedConflicts.has(noteUuid)
+					const authorTells =
+						overwrote && mostRecentContent.origin !== undefined && mostRecentContent.origin !== this.tabId
+							? await tabIsLive(mostRecentContent.origin)
+							: false
+
+					if (overwrote) {
+						toastedConflicts.add(noteUuid)
+					}
+
+					const detail: PushDetail = { stamp: syncedUpTo, landed: true }
+
+					if (mostRecentContent.origin !== undefined) {
+						detail.origin = mostRecentContent.origin
+					}
+
+					if (authorTells) {
+						detail.overwrote = true
+					}
+
+					this.transport?.broadcastPushed(noteUuid, pushedContentHash, detail)
 
 					// The pushed content IS the cloud content now — write it into the per-note content
 					// query cache so an editor reseed after the queue drains paints what the user typed,
@@ -831,7 +953,13 @@ export class Sync {
 							...prev
 						}
 
-						const remaining = pruneAndRebaseNoteOutboxAfterPush(updated[noteUuid], syncedUpTo, pushedContentHash)
+						// Only the pushing tab's own continuations were typed on the push; another tab's never saw it.
+						const remaining = pruneAndRebaseNoteOutboxAfterPush(
+							updated[noteUuid],
+							syncedUpTo,
+							pushedContentHash,
+							entry => entry.origin === mostRecentContent.origin && entry.carried === true
+						)
 
 						if (remaining === undefined) {
 							Reflect.deleteProperty(updated, noteUuid)
@@ -842,15 +970,9 @@ export class Sync {
 						return updated
 					})
 
-					// Toast only AFTER the push landed (a failed push overwrites nothing and is retried),
-					// once per note per pass, and never for an aborted pass (logout stays silent).
-					if (overwritesNewerRemoteContent && !isAborted(signal) && !toastedConflicts.has(noteUuid)) {
-						toastedConflicts.add(noteUuid)
-
-						const name =
-							liveNote.title !== undefined && liveNote.title.length > 0 ? liveNote.title : i18n.t("notes:noteUntitled")
-
-						toast(i18n.t("notes:noteOverwroteNewerRemoteChanges", { name }))
+					// Only AFTER the push landed: a failed push overwrites nothing and is retried.
+					if (overwrote && !authorTells) {
+						toast(i18n.t("notes:noteOverwroteNewerRemoteChanges", { name: noteName(liveNote) }))
 					}
 				})
 			)

@@ -17,6 +17,7 @@ import {
 	tabEditorBuildsOn,
 	tabEditorSeededWithDraft,
 	tabEditorDirty,
+	tabEditorEchoIsStale,
 	tabEditorSynced,
 	tabNoteContent
 } from "@/features/notes/lib/tabEditors"
@@ -283,8 +284,14 @@ function followOwnPush(uuid: string, content: string, hash: string): void {
 	// restored from this browser's outbox and pushed as no live tab's, while its typing on top of it is
 	// still queued; any other write of that text (another tab restoring it from history) is news.
 	const restoredDraft = tabEditorSeededWithDraft(uuid, content) && newestEntry(queuedFor(uuid))?.content === buffer
+	const authored = takeTabEditorAuthored(uuid, hash)
 
-	if (takeTabEditorAuthored(uuid, hash) || buffer === content || restoredDraft) {
+	// Written before a push of this tab's that already landed: stale, nothing to take or ask.
+	if (!authored && tabEditorEchoIsStale(uuid)) {
+		return
+	}
+
+	if (authored || buffer === content || restoredDraft) {
 		tabEditorSynced(uuid, content, hash)
 		// The leader tab's push already wrote it; a follower's is written here.
 		followContent(uuid, content)
