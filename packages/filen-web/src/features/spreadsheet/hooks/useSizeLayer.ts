@@ -3,7 +3,6 @@ import {
 	EMPTY_LAYER,
 	followShift,
 	loadLayer,
-	mergeLayers,
 	saveLayer,
 	updateLayer,
 	type LayerKey,
@@ -20,34 +19,55 @@ export interface SizeLayerHandle {
 	follow: (sheet: number, shift: AxisShift & { revert: boolean }) => void
 }
 
-// The local size layer of the file on show: loaded once per key, saved once per change.
+function persist(key: LayerKey, layer: SizeLayer): void {
+	saveLayer(key, layer).catch((e: unknown) => {
+		log.error("spreadsheet", "keeping column and row sizes failed", e)
+	})
+}
+
+// A change to the layer, with the stash an undone delete takes its sizes back from.
+type LayerChange = (current: { layer: SizeLayer; stash: StashedSizes[] }) => { layer: SizeLayer; stash: StashedSizes[] }
+
+// The local size layer of the file on show: loaded once per key, saved once per change. The layer of
+// record is held in a ref, so two changes before a re-render both land; changes made before the stored
+// sizes have loaded are replayed onto them, and nothing is saved until then (a save would replace them).
 export function useSizeLayer(key: LayerKey): SizeLayerHandle {
 	const { kind, id } = key
 	const keyId = `${kind}:${id}`
-	// The layer belongs to the file it was loaded for: another file starts from nothing.
-	const [held, setHeld] = useState<{ keyId: string; layer: SizeLayer }>({ keyId, layer: EMPTY_LAYER })
-	const stash = useRef<StashedSizes[]>([])
+	const [shown, setShown] = useState<{ keyId: string; layer: SizeLayer }>({ keyId, layer: EMPTY_LAYER })
+	const current = useRef<{ layer: SizeLayer; stash: StashedSizes[] }>({ layer: EMPTY_LAYER, stash: [] })
+	// Changes made before the stored sizes loaded; null once they have.
+	const pending = useRef<LayerChange[] | null>([])
 
-	if (held.keyId !== keyId) {
-		setHeld({ keyId, layer: EMPTY_LAYER })
+	// Another file starts from nothing (its refs are reset by the effect below, before its load).
+	if (shown.keyId !== keyId) {
+		setShown({ keyId, layer: EMPTY_LAYER })
 	}
-
-	const layer = held.keyId === keyId ? held.layer : EMPTY_LAYER
 
 	useEffect(() => {
 		let live = true
 
-		stash.current = []
+		current.current = { layer: EMPTY_LAYER, stash: [] }
+		pending.current = []
 
 		loadLayer({ kind, id }).then(
 			loaded => {
-				if (live) {
-					// Sizes set while it loaded (none, almost always) win.
-					setHeld(since => {
-						const loadedFor = `${kind}:${id}`
+				if (!live) {
+					return
+				}
 
-						return { keyId: loadedFor, layer: mergeLayers(loaded, since.keyId === loadedFor ? since.layer : EMPTY_LAYER) }
-					})
+				const replayed = (pending.current ?? []).reduce((state, change) => change(state), {
+					layer: loaded,
+					stash: [] as StashedSizes[]
+				})
+				const changed = (pending.current?.length ?? 0) > 0
+
+				pending.current = null
+				current.current = replayed
+				setShown({ keyId: `${kind}:${id}`, layer: replayed.layer })
+
+				if (changed) {
+					persist({ kind, id }, replayed.layer)
 				}
 			},
 			(e: unknown) => {
@@ -60,26 +80,30 @@ export function useSizeLayer(key: LayerKey): SizeLayerHandle {
 		}
 	}, [kind, id])
 
-	function commit(next: SizeLayer): void {
-		setHeld({ keyId, layer: next })
-		saveLayer({ kind, id }, next).catch((e: unknown) => {
-			log.error("spreadsheet", "keeping column and row sizes failed", e)
-		})
+	function change(apply: LayerChange): void {
+		const before = current.current.layer
+
+		current.current = apply(current.current)
+		pending.current?.push(apply)
+
+		if (current.current.layer === before) {
+			return
+		}
+
+		setShown({ keyId, layer: current.current.layer })
+
+		if (pending.current === null) {
+			persist({ kind, id }, current.current.layer)
+		}
 	}
 
 	return {
-		layer,
+		layer: shown.keyId === keyId ? shown.layer : EMPTY_LAYER,
 		update: (sheet, axis, entries) => {
-			commit(updateLayer(layer, sheet, axis, entries))
+			change(state => ({ layer: updateLayer(state.layer, sheet, axis, entries), stash: state.stash }))
 		},
 		follow: (sheet, shift) => {
-			const next = followShift(layer, sheet, shift, stash.current)
-
-			stash.current = next.stash
-
-			if (next.layer !== layer) {
-				commit(next.layer)
-			}
+			change(state => followShift(state.layer, sheet, shift, state.stash))
 		}
 	}
 }

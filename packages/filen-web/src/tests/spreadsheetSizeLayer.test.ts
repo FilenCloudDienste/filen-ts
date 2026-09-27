@@ -22,7 +22,6 @@ import {
 	followShift,
 	layeredSheet,
 	loadLayer,
-	mergeLayers,
 	saveLayer,
 	updateLayer
 } from "@/features/spreadsheet/lib/sizeLayer"
@@ -89,21 +88,7 @@ describe("persistence", () => {
 	})
 })
 
-describe("mergeLayers / layeredSheet", () => {
-	it("lets sizes set before the load landed win over the loaded ones", () => {
-		const loaded = updateLayer(EMPTY_LAYER, 0, "cols", [
-			[0, 50],
-			[1, 60]
-		])
-		const since = updateLayer(EMPTY_LAYER, 0, "cols", [[1, 90]])
-		const merged = mergeLayers(loaded, since)
-
-		expect([...(merged.get(0)?.cols ?? [])]).toEqual([
-			[0, 50],
-			[1, 90]
-		])
-	})
-
+describe("layeredSheet", () => {
 	it("lays local sizes over the file's, and returns the sheet itself with none", () => {
 		const sheet = { colWidths: new Map([[0, 40]]), rowHeights: new Map<number, number>() }
 

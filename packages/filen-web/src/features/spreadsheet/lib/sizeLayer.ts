@@ -93,18 +93,6 @@ export function updateLayer(layer: SizeLayer, sheet: number, axis: SizeAxis, ent
 	return layers
 }
 
-// A layer loaded after sizes were already set this session: those win, index by index.
-export function mergeLayers(loaded: SizeLayer, since: SizeLayer): SizeLayer {
-	let merged = loaded
-
-	for (const [sheet, sizes] of since) {
-		merged = updateLayer(merged, sheet, "cols", [...sizes.cols])
-		merged = updateLayer(merged, sheet, "rows", [...sizes.rows])
-	}
-
-	return merged
-}
-
 // Last result per layer entry: sheetRows/sheetCols memoize by map identity, so an unchanged sheet and
 // layer must give the same sheet back, or every render would rebuild both axes.
 const layered = new WeakMap<SheetSizes, { sheet: object; result: object }>()
