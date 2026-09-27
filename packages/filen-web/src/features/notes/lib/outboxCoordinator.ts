@@ -53,7 +53,7 @@ function handleMessage(msg: OutboxChannelMsg): void {
 	// Answered in another tab: this one stops asking, and stops holding the note's pushes (unless its own
 	// typing is still unsaved, see dropRemoteEdited).
 	if (msg.kind === "answered") {
-		useNotesRemoteEditStore.getState().dropRemoteEdited(msg.id)
+		useNotesRemoteEditStore.getState().dropRemoteEdited(msg.id, msg.choice)
 
 		return
 	}

@@ -1,4 +1,7 @@
 import { create } from "zustand"
+import type { AnswerChoice } from "@/lib/storage/outboxChannel"
+import useNotesInflightStore from "@/features/notes/store/useNotesInflight"
+import { newestEntry } from "@/features/notes/lib/sync.logic"
 import { holdNoteForRemoteEdit, releaseNoteHold } from "@/features/notes/lib/remoteEditHolds"
 import { tabEditorDirty } from "@/features/notes/lib/tabEditors"
 import { takeRemoteContent } from "@/features/notes/lib/remoteContent"
@@ -17,21 +20,22 @@ export interface NotesRemoteEditStore {
 	openNote: string | null
 	setRemoteEdited: (uuid: string, edit: NoteRemoteEdit) => void
 	// The question was answered in this tab: the other tabs are told.
-	clearRemoteEdited: (uuid: string) => void
+	clearRemoteEdited: (uuid: string, choice: AnswerChoice) => void
 	// The question was answered in another tab. Kept while this tab's editor holds typing of its own the
-	// cloud does not: its question, on screen here, is still open. Otherwise this tab takes their version
-	// as for any save elsewhere: the answer may send nothing (theirs already in the cloud), so no echo
-	// would bring it.
-	dropRemoteEdited: (uuid: string) => void
+	// cloud does not: its question, on screen here, is still open. Otherwise, for their version (loaded, or
+	// kept beside a copy), this tab takes it as for any save elsewhere: the answer may send nothing (theirs
+	// already in the cloud), so no echo would bring it. For mine kept, the push of mine brings it. A choice
+	// not told (an older tab) is read off the queue: another version queued over theirs is mine kept.
+	dropRemoteEdited: (uuid: string, choice?: AnswerChoice) => void
 	// The question has nothing left to ask.
 	retireRemoteEdited: (uuid: string) => void
 	setOpenNote: (uuid: string | null) => void
 }
 
 // The outbox channel's "answered" post, wired by outboxCoordinator.ts (none in a single-tab install).
-let broadcastAnswered: ((uuid: string) => void) | null = null
+let broadcastAnswered: ((uuid: string, choice: AnswerChoice) => void) | null = null
 
-export function setNoteAnswerBroadcast(fn: ((uuid: string) => void) | null): void {
+export function setNoteAnswerBroadcast(fn: ((uuid: string, choice: AnswerChoice) => void) | null): void {
 	broadcastAnswered = fn
 }
 
@@ -67,11 +71,11 @@ export const useNotesRemoteEditStore = create<NotesRemoteEditStore>((set, get) =
 
 			set(state => ({ remoteEdited: { ...state.remoteEdited, [uuid]: edit } }))
 		},
-		clearRemoteEdited(uuid) {
+		clearRemoteEdited(uuid, choice) {
 			drop(uuid)
-			broadcastAnswered?.(uuid)
+			broadcastAnswered?.(uuid, choice)
 		},
-		dropRemoteEdited(uuid) {
+		dropRemoteEdited(uuid, choice) {
 			const edit = get().remoteEdited[uuid]
 
 			if (edit === undefined || tabEditorDirty(uuid)) {
@@ -79,7 +83,13 @@ export const useNotesRemoteEditStore = create<NotesRemoteEditStore>((set, get) =
 			}
 
 			drop(uuid)
-			takeRemoteContent(uuid, edit.theirs, get().openNote === uuid)
+
+			const queued = newestEntry(useNotesInflightStore.getState().inflightContent[uuid] ?? [])
+			const mineKept = choice === undefined ? queued !== undefined && queued.content !== edit.theirs : choice === "mine"
+
+			if (!mineKept) {
+				takeRemoteContent(uuid, edit.theirs, get().openNote === uuid)
+			}
 		},
 		retireRemoteEdited: drop,
 		setOpenNote(uuid) {

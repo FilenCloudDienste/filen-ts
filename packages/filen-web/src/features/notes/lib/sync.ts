@@ -96,6 +96,11 @@ export class Sync {
 	// Notes whose queued edit answers the remote-edit dialog, until it is pushed. A follower keeps its own
 	// (and hears the leader's pushes into lastPushedHashes), so a promoted leader still knows them.
 	private readonly answeredNotes: Set<string> = new Set<string>()
+	// Per note, the last push that landed: its entry's origin, base and stamp, and the hash it landed as. A
+	// follower's keystroke typed before it heard the push carries the pushed entry's base; ingested after
+	// the prune, it is rebased here as the prune would have (only the same tab's: another tab's entry on
+	// that base never saw the push, and its overwrite must still be told).
+	private readonly landed = new Map<string, { origin: string | undefined; from: string; to: string; upTo: number }>()
 	// This tab's id, the origin of every entry it queues: which push is this tab's own, exactly, whatever
 	// else it or another tab typed meanwhile, in whichever millisecond.
 	private readonly tabId: string = crypto.randomUUID()
@@ -157,6 +162,7 @@ export class Sync {
 		releaseAllNoteHolds()
 		this.lastPushedHashes.clear()
 		this.answeredNotes.clear()
+		this.landed.clear()
 	}
 
 	// Drop a note's consecutive-rejection strike count. For the editor's use when it clears a
@@ -310,13 +316,30 @@ export class Sync {
 	}
 
 	// ANY ROLE: the cloud holds `hash` for the note, pushed (or found there) by the leader. This tab's own
-	// text is synced then, echo or not.
+	// text is synced then, echo or not, and its own entries still here (typed during the push, or before
+	// the leader's pruned state arrives) build on it: the leader's prune rebased its copies the same way.
 	public heardLanded(noteUuid: string, hash: string, origin: string | undefined): void {
 		this.lastPushedHashes.set(noteUuid, hash)
 
-		if (origin === this.tabId) {
-			tabEditorLanded(noteUuid, hash)
+		if (origin !== this.tabId) {
+			return
 		}
+
+		tabEditorLanded(noteUuid, hash)
+
+		const rebase = (entries: InflightEntry[] | undefined): InflightEntry[] | undefined =>
+			entries?.map(entry => (entry.origin === this.tabId ? { ...entry, baseContentHash: hash } : entry))
+		const unacked = rebase(this.unacked[noteUuid])
+
+		if (unacked !== undefined) {
+			this.unacked = { ...this.unacked, [noteUuid]: unacked }
+		}
+
+		useNotesInflightStore.getState().setInflightContent(prev => {
+			const entries = rebase(prev[noteUuid])
+
+			return entries === undefined ? prev : { ...prev, [noteUuid]: entries }
+		})
 	}
 
 	// LEADER: ingest an edit a follower forwarded. Merge it by its (follower-local) timestamp —
@@ -338,7 +361,17 @@ export class Sync {
 			this.answeredNotes.add(msg.note.uuid)
 		}
 
-		useNotesInflightStore.getState().setInflightContent(prev => mergeInflight(prev, remoteEnqueueToPatch(msg)))
+		const landed = this.landed.get(msg.note.uuid)
+		const rebased =
+			landed !== undefined &&
+			msg.origin !== undefined &&
+			msg.origin === landed.origin &&
+			msg.baseContentHash === landed.from &&
+			msg.timestamp > landed.upTo
+				? { ...msg, baseContentHash: landed.to }
+				: msg
+
+		useNotesInflightStore.getState().setInflightContent(prev => mergeInflight(prev, remoteEnqueueToPatch(rebased)))
 
 		void this.flushToDisk(useNotesInflightStore.getState().inflightContent).then(() => {
 			this.broadcastState()
@@ -753,6 +786,15 @@ export class Sync {
 					this.nonRetryableRejections.delete(noteUuid)
 					this.lastPushedHashes.set(noteUuid, pushedContentHash)
 					this.answeredNotes.delete(noteUuid)
+
+					if (mostRecentContent.baseContentHash !== undefined) {
+						this.landed.set(noteUuid, {
+							origin: mostRecentContent.origin,
+							from: mostRecentContent.baseContentHash,
+							to: pushedContentHash,
+							upTo: syncedUpTo
+						})
+					}
 
 					// This tab's text is in the cloud now, and not before: a push the outbox gives up on
 					// leaves it unsaved on screen. The other tabs hear it too, also when nothing was sent.

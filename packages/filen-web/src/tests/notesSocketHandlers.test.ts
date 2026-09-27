@@ -58,6 +58,7 @@ import {
 	tabEditorSynced
 } from "@/features/notes/lib/tabEditors"
 import { hashNoteContent } from "@filen/shared"
+import type { AnswerChoice } from "@/lib/storage/outboxChannel"
 
 function makeNote(uuid: string, overrides: Partial<Note> = {}): Note {
 	return {
@@ -673,7 +674,7 @@ describe("note socket handlers — this browser's pushes, heard by the tabs show
 
 describe("note socket handlers — reload/keep actions", () => {
 	it("a pending remote edit on the open note holds its pushes until it is answered, and tells the other tabs", async () => {
-		const broadcast = vi.fn<(uuid: string) => void>()
+		const broadcast = vi.fn<(uuid: string, choice: AnswerChoice) => void>()
 
 		setNoteAnswerBroadcast(broadcast)
 		useNotesRemoteEditStore.getState().setOpenNote("a")
@@ -681,11 +682,11 @@ describe("note socket handlers — reload/keep actions", () => {
 
 		expect((await heldNotes()).has("a")).toBe(true)
 
-		useNotesRemoteEditStore.getState().clearRemoteEdited("a")
+		useNotesRemoteEditStore.getState().clearRemoteEdited("a", "theirs")
 		await settle()
 
 		expect((await heldNotes()).has("a")).toBe(false)
-		expect(broadcast).toHaveBeenCalledWith("a")
+		expect(broadcast).toHaveBeenCalledWith("a", "theirs")
 		setNoteAnswerBroadcast(null)
 		useNotesRemoteEditStore.getState().setOpenNote(null)
 	})
@@ -700,7 +701,7 @@ describe("note socket handlers — reload/keep actions", () => {
 	})
 
 	it("an answer from another tab drops the question and the hold without echoing it back", async () => {
-		const broadcast = vi.fn<(uuid: string) => void>()
+		const broadcast = vi.fn<(uuid: string, choice: AnswerChoice) => void>()
 
 		setNoteAnswerBroadcast(broadcast)
 		useNotesRemoteEditStore.getState().setOpenNote("a")

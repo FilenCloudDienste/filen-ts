@@ -8,8 +8,9 @@ import { localNoteContent } from "@/features/notes/lib/localContent"
 interface TabEditor {
 	// The editor's remount key when it was seeded; a new key is a new editor surface.
 	key: string | null
-	// The text the surface was seeded with.
+	// The text the surface was seeded with, and whether that was an unsynced draft from the outbox.
 	seed: string
+	draft: boolean
 	// The editor's text: its seed, then every change it queued.
 	buffer: string
 	// What the buffer builds on and the cloud holds, as far as this tab knows.
@@ -45,6 +46,7 @@ export function seedTabEditor(uuid: string, key: string, seed: string, synced: s
 	editors.set(uuid, {
 		key,
 		seed,
+		draft: seed !== synced,
 		buffer: seed,
 		synced,
 		baseHash: undefined,
@@ -134,12 +136,17 @@ export function tabEditorSynced(uuid: string, content: string, hash: string | un
 	}
 }
 
-// The cloud holding `content` is no news to this tab's editor: its text builds on it (it was seeded
-// with it, or last knew the cloud to hold it).
+// The cloud holding `content` is no news to this tab's editor: its text builds on it.
 export function tabEditorBuildsOn(uuid: string, content: string): boolean {
+	return shown(uuid)?.synced === content
+}
+
+// The editor was seeded with the unsynced draft `content` from the outbox (one restored from this
+// browser's earlier page load).
+export function tabEditorSeededWithDraft(uuid: string, content: string): boolean {
 	const editor = shown(uuid)
 
-	return editor !== undefined && (editor.synced === content || editor.seed === content)
+	return editor !== undefined && editor.draft && editor.seed === content
 }
 
 export function tabEditorBuffer(uuid: string): string | undefined {

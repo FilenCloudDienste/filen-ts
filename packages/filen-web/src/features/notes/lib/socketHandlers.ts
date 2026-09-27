@@ -7,7 +7,7 @@ import { ACCOUNT_QUERY_KEY } from "@/queries/account"
 import useNotesInflightStore, { endEditingSession, type InflightEntry } from "@/features/notes/store/useNotesInflight"
 import { useNotesRemoteEditStore } from "@/features/notes/store/useNoteRemoteEdit"
 import { sync } from "@/features/notes/lib/sync"
-import { noteKindForPreview } from "@/features/notes/lib/sync.logic"
+import { newestEntry, noteKindForPreview } from "@/features/notes/lib/sync.logic"
 import { notesQueryUpdate, notesQueryRemove, notesQueryGet, notesQueryRefetch, notesQueryUpsert } from "@/features/notes/queries/notes"
 import { markNoteContentUnsynced, noteContentQueryKey, readNoteContent } from "@/features/notes/queries/noteContent"
 import { isOwnNotePush, recordNotePush } from "@/features/notes/lib/pushEchoes"
@@ -15,6 +15,7 @@ import {
 	takeTabEditorAuthored,
 	tabEditorBuffer,
 	tabEditorBuildsOn,
+	tabEditorSeededWithDraft,
 	tabEditorDirty,
 	tabEditorSynced,
 	tabNoteContent
@@ -23,6 +24,7 @@ import { followContent, takeRemoteContent } from "@/features/notes/lib/remoteCon
 import { sdkApi } from "@/lib/sdk/client"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { runOp, type ActionOutcome } from "@/lib/actions/outcome"
+import type { AnswerChoice } from "@/lib/storage/outboxChannel"
 
 // The realtime note event handlers — a faithful port of filen-mobile's socketHandlers.ts SEMANTICS
 // onto the wasm surface (flat discriminated `event.inner.type`, string-union noteType, MaybeEncrypted
@@ -196,6 +198,8 @@ function handleContentEdited(inner: Extract<NoteSocketEvent["inner"], { type: "c
 		// The version every unsynced change builds on: no news (a late echo of this browser's own write
 		// that was never recorded, or a save of the same text elsewhere).
 		if (content !== undefined && unsyncedChangesBuildOn(inner.note, content)) {
+			useNotesRemoteEditStore.getState().retireRemoteEdited(inner.note)
+
 			return
 		}
 
@@ -275,9 +279,12 @@ function followOwnPush(uuid: string, content: string, hash: string): void {
 		return
 	}
 
-	// This tab's own push, its text, or the text it was seeded with (a draft restored from this browser's
-	// outbox, pushed as no live tab's): its editor builds on it.
-	if (takeTabEditorAuthored(uuid, hash) || buffer === content || tabEditorBuildsOn(uuid, content)) {
+	// This tab's own push, or its text: its editor builds on it. So it does on the draft it was seeded with,
+	// restored from this browser's outbox and pushed as no live tab's, while its typing on top of it is
+	// still queued; any other write of that text (another tab restoring it from history) is news.
+	const restoredDraft = tabEditorSeededWithDraft(uuid, content) && newestEntry(queuedFor(uuid))?.content === buffer
+
+	if (takeTabEditorAuthored(uuid, hash) || buffer === content || restoredDraft) {
 		tabEditorSynced(uuid, content, hash)
 		// The leader tab's push already wrote it; a follower's is written here.
 		followContent(uuid, content)
@@ -302,6 +309,10 @@ function followOwnPush(uuid: string, content: string, hash: string): void {
 // remount key). Content that did not come with the event, or could not be decrypted, is read first; when
 // that fails too, the content query refetches instead.
 export async function reloadRemoteEdit(note: Note): Promise<void> {
+	await loadTheirs(note, "theirs")
+}
+
+async function loadTheirs(note: Note, choice: AnswerChoice): Promise<void> {
 	const theirs = useNotesRemoteEditStore.getState().remoteEdited[note.uuid]?.theirs ?? (await readTheirs(note))
 
 	sync.dropEntry(note.uuid)
@@ -319,7 +330,7 @@ export async function reloadRemoteEdit(note: Note): Promise<void> {
 
 		void queryClient.cancelQueries({ queryKey: contentKey, exact: true })
 		queryClient.setQueryData<string>(contentKey, theirs)
-		useNotesRemoteEditStore.getState().clearRemoteEdited(note.uuid)
+		useNotesRemoteEditStore.getState().clearRemoteEdited(note.uuid, choice)
 
 		return
 	}
@@ -330,7 +341,7 @@ export async function reloadRemoteEdit(note: Note): Promise<void> {
 		log.warn("notes", "remote-edit reload: outbox flush failed", note.uuid)
 	}
 
-	useNotesRemoteEditStore.getState().clearRemoteEdited(note.uuid)
+	useNotesRemoteEditStore.getState().clearRemoteEdited(note.uuid, choice)
 
 	void queryClient.invalidateQueries({ queryKey: contentKey })
 }
@@ -353,14 +364,15 @@ export async function keepMineOverRemoteEdit(note: Note): Promise<void> {
 	const theirs = edit === undefined ? undefined : (edit.theirs ?? (await readTheirs(note)))
 
 	if (mine === undefined || edit === undefined || mine === theirs) {
-		useNotesRemoteEditStore.getState().clearRemoteEdited(note.uuid)
+		// Nothing of mine to send: everywhere takes theirs.
+		useNotesRemoteEditStore.getState().clearRemoteEdited(note.uuid, "theirs")
 
 		return
 	}
 
 	sync.dropEntry(note.uuid)
 	await sync.enqueueAnswer(note, mine, theirs === undefined ? null : hashNoteContent(theirs))
-	useNotesRemoteEditStore.getState().clearRemoteEdited(note.uuid)
+	useNotesRemoteEditStore.getState().clearRemoteEdited(note.uuid, "mine")
 	sync.executeNow()
 }
 
@@ -395,7 +407,7 @@ export async function saveRemoteEditMineAsCopy(note: Note, title: string): Promi
 
 	queryClient.setQueryData(noteContentQueryKey(copy.uuid), mine)
 	notesQueryUpsert(copy)
-	await reloadRemoteEdit(note)
+	await loadTheirs(note, "copy")
 
 	return { status: "success", item: copy }
 }

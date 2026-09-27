@@ -16,6 +16,10 @@ import { log } from "@/lib/log"
 // is being pushed for an item (and the id of the tab that queued it, so that tab knows the push for its
 // own), then again once the cloud holds it (`landed`, also when nothing had to be sent), so a follower knows the item's socket echo for its own. Any tab → any tab: a
 // question about an item's newer version was answered, so the other tabs stop asking it.
+// How a question about an item's newer version was answered: their version, mine kept over it, or mine
+// saved beside it as a copy (theirs stays).
+export type AnswerChoice = "theirs" | "mine" | "copy"
+
 export type OutboxChannelMsg =
 	| { kind: "enqueue"; payload: string }
 	| { kind: "executeNow" }
@@ -23,7 +27,7 @@ export type OutboxChannelMsg =
 	| { kind: "state"; payload: string }
 	| { kind: "leaderHello" }
 	| { kind: "pushed"; id: string; hash: string; origin?: string; landed?: true }
-	| { kind: "answered"; id: string }
+	| { kind: "answered"; id: string; choice?: AnswerChoice }
 
 // The domain-agnostic transport a Sync class depends on: E is the follower's forwarded-edit shape, S the
 // leader's broadcast-state shape. Both cross the channel as $bigint envelopes. A single-tab install attaches
@@ -38,7 +42,7 @@ export interface OutboxChannelTransport<E, S> {
 	broadcastLeaderHello: () => void
 	broadcastPushed: (id: string, hash: string, origin?: string, landed?: true) => void
 	// any tab → any tab
-	broadcastAnswered: (id: string) => void
+	broadcastAnswered: (id: string, choice: AnswerChoice) => void
 	// Terminal teardown (logout/shutdown): detach the handler and close the channel so no late cross-tab
 	// message can reach an outbox that is tearing down — the invariant that gates the plaintext-queue wipe.
 	close: () => void
@@ -80,8 +84,8 @@ export function makeOutboxChannelTransport<E, S>(channel: BroadcastChannel): Out
 
 			post(msg)
 		},
-		broadcastAnswered: id => {
-			post({ kind: "answered", id })
+		broadcastAnswered: (id, choice) => {
+			post({ kind: "answered", id, choice })
 		},
 		close: () => {
 			closeOutbox(channel)
