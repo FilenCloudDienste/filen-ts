@@ -125,11 +125,7 @@ function readSmokeSink(page: Page): Promise<{ bytes: number; first4: number[] }>
 // appears is the download under test.
 
 test.describe("downloads", () => {
-	test("a single file downloads through the File System Access path and the transfer reaches Done", async ({
-		page,
-		injectedSession,
-		browserName
-	}, testInfo) => {
+	test("a single file downloads through the File System Access path and the transfer reaches Done", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		await stubFsaPicker(page)
@@ -144,54 +140,6 @@ test.describe("downloads", () => {
 		await expect(row).toBeVisible({ timeout: 20_000 })
 
 		await row.click()
-
-		// TEMPORARY: Linux WebKit never finds this button "stable" (it passes on macOS WebKit). Records what
-		// moves it, or keeps it disabled, frame by frame, before the click that times out there.
-		if (browserName === "webkit") {
-			const frames = await page.getByRole("button", { name: "Download", exact: true }).evaluate(async button => {
-				const records: unknown[] = []
-
-				for (let frame = 0; frame < 20; frame++) {
-					await new Promise(requestAnimationFrame)
-
-					const chain: Element[] = []
-
-					for (let node: Element | null = button; node !== null && chain.length < 6; node = node.parentElement) {
-						chain.push(node)
-					}
-
-					const rect = button.getBoundingClientRect()
-
-					records.push({
-						t: Math.round(performance.now()),
-						rect: [rect.x, rect.y, rect.width, rect.height],
-						disabled: (button as HTMLButtonElement).disabled,
-						ariaDisabled: button.getAttribute("aria-disabled"),
-						pointerEvents: getComputedStyle(button).pointerEvents,
-						visibility: getComputedStyle(button).visibility,
-						animations: chain.flatMap((node, depth) =>
-							node.getAnimations().map(animation => ({
-								depth,
-								tag: node.tagName,
-								type: animation.constructor.name,
-								name:
-									animation instanceof CSSAnimation
-										? animation.animationName
-										: animation instanceof CSSTransition
-											? animation.transitionProperty
-											: "",
-								playState: animation.playState
-							}))
-						)
-					})
-				}
-
-				return records
-			})
-
-			await testInfo.attach("download-button-frames", { body: JSON.stringify(frames, null, 1), contentType: "application/json" })
-		}
-
 		await page.getByRole("button", { name: "Download", exact: true }).click()
 
 		await openTransfers(page)
