@@ -46,6 +46,31 @@ async function typeInto(page: Page, grid: Locator, row: number, col: number, tex
 	await page.keyboard.press("Enter")
 }
 
+function columnHeader(grid: Locator, col: number): Locator {
+	return grid.locator(`[role="columnheader"][aria-colindex="${String(col + 1)}"]`)
+}
+
+// Drags column `col`'s right edge by `dx` pixels (`col` as the sheet numbers it, A = 1).
+async function dragColumnEdge(page: Page, grid: Locator, col: number, dx: number): Promise<void> {
+	const handle = columnHeader(grid, col).locator("[data-resize-handle]")
+	const box = await handle.boundingBox()
+
+	if (box === null) throw new Error("no resize handle")
+
+	const x = box.x + box.width / 2
+	const y = box.y + box.height / 2
+
+	await page.mouse.move(x, y)
+	await page.mouse.down()
+	await page.mouse.move(x + dx / 2, y, { steps: 4 })
+	await page.mouse.move(x + dx, y, { steps: 4 })
+	await page.mouse.up()
+}
+
+async function columnWidth(grid: Locator, col: number): Promise<number> {
+	return (await columnHeader(grid, col).boundingBox())?.width ?? 0
+}
+
 test("csv and xlsx open as grids, edit, recalculate and save, no CSP console errors", async ({ page, injectedSession }) => {
 	expect(injectedSession.length).toBeGreaterThan(0)
 
@@ -140,6 +165,93 @@ test("csv and xlsx open as grids, edit, recalculate and save, no CSP console err
 		await expect(dialog).toHaveCount(0)
 
 		expect(cspViolations).toEqual([])
+	} finally {
+		await trashScratchDirectory(page, scratchName)
+	}
+})
+
+test("rails resize: an xlsx keeps a width in the file, a csv beside it, and the rails hide what scrolls under them", async ({
+	page,
+	injectedSession
+}) => {
+	expect(injectedSession.length).toBeGreaterThan(0)
+
+	const runId = crypto.randomUUID()
+	const scratchName = `e2e-preview-spreadsheet-resize-${runId}`
+	const nameCsv = `e2e-sheet-resize-${runId}.csv`
+	const nameXlsx = `e2e-sheet-resize-${runId}.xlsx`
+	const dialog = page.getByRole("dialog")
+	const grid = dialog.getByRole("grid")
+	const saveButton = dialog.getByRole("button", { name: "Save", exact: true })
+
+	await bootTo(page)
+
+	try {
+		const { listbox } = await enterScratchDirectory(page, scratchName)
+
+		await page
+			.getByRole("main")
+			.locator('input[type="file"]')
+			.first()
+			.setInputFiles([
+				{ name: nameCsv, mimeType: "text/csv", buffer: CSV_BYTES },
+				{ name: nameXlsx, mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", buffer: await xlsxBytes() }
+			])
+		await expect(listbox.getByRole("option", { name: nameXlsx })).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
+
+		// XLSX: once editable, a drag is an edit; saved, the width is the file's.
+		await listbox.getByRole("option", { name: nameXlsx }).dblclick()
+		await expect(dialog.getByRole("button", { name: "Bold", exact: true })).toBeEnabled({ timeout: 60_000 })
+
+		const before = await columnWidth(grid, 2)
+
+		await dragColumnEdge(page, grid, 2, 80)
+		await expect.poll(() => columnWidth(grid, 2)).toBeGreaterThan(before + 70)
+		await expect(saveButton).toBeEnabled()
+		await saveButton.click()
+		await expect(saveButton).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
+		await page.keyboard.press("Escape")
+		await expect(dialog).toHaveCount(0)
+
+		await page.reload()
+		await expect(listbox.getByRole("option", { name: nameXlsx })).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
+		await listbox.getByRole("option", { name: nameXlsx }).dblclick()
+		await expect(gridCell(grid, 1, 1)).toHaveText("Item", { timeout: 60_000 })
+		await expect.poll(() => columnWidth(grid, 2)).toBeGreaterThan(before + 70)
+		await page.keyboard.press("Escape")
+		await expect(dialog).toHaveCount(0)
+
+		// CSV: sizes live beside the file and survive closing it.
+		await listbox.getByRole("option", { name: nameCsv }).dblclick()
+		await expect(gridCell(grid, 2, 1)).toHaveText("Apples", { timeout: 60_000 })
+
+		const csvBefore = await columnWidth(grid, 1)
+
+		await dragColumnEdge(page, grid, 1, 60)
+		await expect.poll(() => columnWidth(grid, 1)).toBeGreaterThan(csvBefore + 50)
+		// Resizing a CSV is not an edit.
+		await expect(saveButton).toHaveCount(0)
+		await page.keyboard.press("Escape")
+		await expect(dialog).toHaveCount(0)
+		await listbox.getByRole("option", { name: nameCsv }).dblclick()
+		await expect(gridCell(grid, 2, 1)).toHaveText("Apples", { timeout: 60_000 })
+		await expect.poll(() => columnWidth(grid, 1)).toBeGreaterThan(csvBefore + 50)
+
+		// Opaque rails: a cell scrolled under the column rail is not what the rail's centre hits.
+		await grid.evaluate(element => {
+			element.scrollTop = 4
+		})
+
+		const rail = await columnHeader(grid, 1).boundingBox()
+
+		if (rail === null) throw new Error("no rail")
+
+		const hit = await page.evaluate(
+			([x, y]) => document.elementFromPoint(x, y)?.closest('[role="columnheader"], [role="gridcell"]')?.getAttribute("role"),
+			[rail.x + rail.width / 2, rail.y + rail.height - 2] as const
+		)
+
+		expect(hit).toBe("columnheader")
 	} finally {
 		await trashScratchDirectory(page, scratchName)
 	}
