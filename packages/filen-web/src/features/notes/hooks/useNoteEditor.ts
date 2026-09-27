@@ -10,6 +10,7 @@ import useNotesInflightStore, {
 	endEditingSession
 } from "@/features/notes/store/useNotesInflight"
 import { sync } from "@/features/notes/lib/sync"
+import { forgetTabEditor, seedTabEditor, tabEditorBaseHash, tabEditorChanged, unseedTabEditor } from "@/features/notes/lib/tabEditors"
 import { queryClient } from "@/queries/client"
 import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
 import {
@@ -98,8 +99,21 @@ export function useNoteEditor(note: Note, currentUserId: bigint | undefined): No
 	useEffect(() => {
 		return () => {
 			endEditingSession(note.uuid)
+			forgetTabEditor(note.uuid)
 		}
 	}, [note.uuid])
+
+	// What this tab's editor shows, told apart from other tabs' edits (tabEditors.ts). A no-op until the
+	// remount key moves, so the per-keystroke seed churn costs a string compare.
+	const shownContent = query.data
+
+	useEffect(() => {
+		if (status === "ready") {
+			seedTabEditor(note.uuid, remountKey, seed, shownContent)
+		} else {
+			unseedTabEditor(note.uuid)
+		}
+	}, [note.uuid, status, remountKey, seed, shownContent])
 
 	// Coalesced per-note warning that a durable persist failed (the edit lives in memory + is still
 	// pushed when online, but is not safely on this device's disk). One warning per failure streak;
@@ -140,7 +154,9 @@ export function useNoteEditor(note: Note, currentUserId: bigint | undefined): No
 		// The outbox persists immediately (survives-window-close) and arms the 3s debounce. Surface a
 		// coalesced warning if that disk write failed — mirrors the chat composer's persist-failure toast,
 		// debounced across keystrokes so a sustained failure warns once, not per character.
-		void sync.enqueue(note, value, sessionBaseHashRef.current).then(persisted => {
+		tabEditorChanged(note.uuid, value)
+
+		void sync.enqueue(note, value, tabEditorBaseHash(note.uuid) ?? sessionBaseHashRef.current).then(persisted => {
 			const notice = reducePersistFailureNotice({
 				persisted,
 				alreadyNotified: persistFailureNotifiedRef.current

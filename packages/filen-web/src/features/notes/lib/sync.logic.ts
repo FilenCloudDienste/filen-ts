@@ -55,6 +55,8 @@ export interface RemoteEnqueue {
 	content: string
 	timestamp: number
 	baseContentHash?: string
+	// An answer to the remote-edit dialog (Sync.enqueueAnswer).
+	answer?: true
 }
 
 // Newest local author timestamp across a note's entry list (NEGATIVE_INFINITY for an empty list).

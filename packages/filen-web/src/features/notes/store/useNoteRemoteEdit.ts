@@ -1,8 +1,8 @@
 import { create } from "zustand"
 import { holdNoteForRemoteEdit, releaseNoteHold } from "@/features/notes/lib/remoteEditHolds"
 
-// Per note, "the server's content moved while you are editing it", set by the realtime ContentEdited
-// handler ONLY while the note is being edited — a note not being edited reloads instead. Surfaced as the
+// Per note, "the server's content moved while you have unsynced changes", set by the realtime ContentEdited
+// handler ONLY while the note has them — a note without reloads instead. Surfaced as the
 // editor's remote-change dialog, and the note's pushes wait for the answer (remoteEditHolds.ts). `theirs` is the content that arrived (undefined when it could not be
 // decrypted), what the dialog's comparison shows against the local edits.
 export interface NoteRemoteEdit {

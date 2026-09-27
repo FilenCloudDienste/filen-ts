@@ -62,6 +62,7 @@ import {
 import { deriveSessionBaseHash } from "@/features/notes/hooks/useNoteEditor.logic"
 import { holdNoteForRemoteEdit, releaseAllNoteHolds } from "@/features/notes/lib/remoteEditHolds"
 import { isOwnNotePush } from "@/features/notes/lib/pushEchoes"
+import { forgetTabEditors, seedTabEditor, tabEditorBaseHash, tabEditorChanged, tabEditorDirty } from "@/features/notes/lib/tabEditors"
 
 function makeNote(uuid: string, overrides: Partial<Note> = {}): Note {
 	const note: Note = {
@@ -496,7 +497,8 @@ describe("push loop — remote-edit dialog and a cloud already holding the conte
 		await flushAsync()
 
 		// "Load theirs" queued their content; the cloud holds this tab's push of "mine".
-		setStore({ a: [{ timestamp: 2, content: "theirs", note, baseContentHash: hashNoteContent("theirs") }] })
+		s.dropEntry("a")
+		await s.enqueueAnswer(note, "theirs", hashNoteContent("theirs"))
 		getNoteContent.mockResolvedValue("mine")
 
 		s.executeNow()
@@ -504,6 +506,50 @@ describe("push loop — remote-edit dialog and a cloud already holding the conte
 
 		expect(setNoteContent).toHaveBeenLastCalledWith(note, "theirs", expect.any(String))
 		expect(toast).not.toHaveBeenCalled()
+	})
+
+	it("reports an edit typed on the version before this browser's last push as burying it", async () => {
+		const s = await startedSync()
+		const note = makeNote("a")
+
+		setStore({ a: [{ timestamp: 1, content: "tab 2 text", note, baseContentHash: hashNoteContent("old") }] })
+		setNoteContent.mockResolvedValue(note)
+		getNoteContent.mockResolvedValue("old")
+
+		s.executeNow()
+		await flushAsync()
+
+		// Another tab typed on "old" too, never having seen tab 2's text.
+		await s.enqueue(note, "tab 1 text", hashNoteContent("old"))
+		getNoteContent.mockResolvedValue("tab 2 text")
+
+		s.executeNow()
+		await flushAsync()
+
+		expect(setNoteContent).toHaveBeenLastCalledWith(note, "tab 1 text", expect.any(String))
+		expect(toast).toHaveBeenCalledExactlyOnceWith("notes:noteOverwroteNewerRemoteChanges")
+	})
+
+	it("the tab that typed the pushed text builds on it: clean once drained, and its next session is based on it", async () => {
+		const s = await startedSync()
+		const note = makeNote("a")
+
+		forgetTabEditors()
+		seedTabEditor("a", "a:1", "old", "old")
+		tabEditorChanged("a", "mine")
+		await s.enqueue(note, "mine", hashNoteContent("old"))
+		getNoteContent.mockResolvedValue("old")
+		setNoteContent.mockResolvedValue(note)
+
+		expect(tabEditorDirty("a")).toBe(true)
+
+		s.executeNow()
+		await flushAsync()
+
+		expect(queued("a")).toBe(false)
+		expect(tabEditorDirty("a")).toBe(false)
+		expect(tabEditorBaseHash("a")).toBe(hashNoteContent("mine"))
+		forgetTabEditors()
 	})
 })
 

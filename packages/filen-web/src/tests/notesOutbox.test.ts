@@ -215,6 +215,21 @@ describe("follower enqueue — optimistic local apply + forward, no disk", () =>
 		expect(kvSetJson).not.toHaveBeenCalled()
 	})
 
+	it("marks a forwarded answer to the remote-edit dialog, and only that", async () => {
+		const s = new Sync()
+		const transport = mockTransport()
+
+		s.attachTransport(transport)
+		s.startAsFollower()
+
+		const note = makeNote("a")
+
+		await s.enqueueAnswer(note, "theirs", hashNoteContent("theirs"))
+		await s.enqueue(note, "theirs, typed on", hashNoteContent("seed"))
+
+		expect(transport.sendEnqueue.mock.calls.map(c => c[0].answer)).toEqual([true, undefined])
+	})
+
 	it("forwards a flush request on executeNow instead of running a pass", () => {
 		const s = new Sync()
 		const transport = mockTransport()
@@ -340,6 +355,25 @@ describe("leader ingest — apply forwarded edit, persist, broadcast", () => {
 		// Persisted to disk (the durability point) and broadcast to followers.
 		expect(kvSetJson).toHaveBeenCalledWith("inflightNoteContent", expect.any(Object))
 		expect(transport.broadcastState).toHaveBeenCalled()
+	})
+
+	// A follower's "Load theirs" over a push of the local edits that landed after their save.
+	it("a forwarded answer puts their content back over this browser's own push without an overwrite warning", async () => {
+		const { s } = await startedLeader()
+		const note = makeNote("a")
+
+		setNoteContent.mockResolvedValue(note)
+		setStore({ a: [{ timestamp: 1, content: "mine", note }] })
+		s.executeNow()
+		await flushAsync()
+
+		getNoteContent.mockResolvedValue("mine")
+		s.ingestRemoteEnqueue({ note, content: "theirs", timestamp: 500, baseContentHash: hashNoteContent("theirs"), answer: true })
+		s.executeNow()
+		await flushAsync()
+
+		expect(setNoteContent).toHaveBeenLastCalledWith(note, "theirs", expect.any(String))
+		expect(toast).not.toHaveBeenCalled()
 	})
 
 	it("last-enqueue-wins per note by timestamp (an older forward loses to the current entry)", async () => {

@@ -79,10 +79,12 @@ export const useNotesInflightStore = create<NotesInflightStore>((set, get) => ({
 	}
 }))
 
-// THE "is the user editing this note right now" test, and the one every reseed decision must ask —
-// a pending outbox entry OR a live editor session. The queue alone answers a narrower question ("is
-// something queued"), which stops being true at every push. Exported in state form too, for a
-// caller that already holds a store snapshot (useNoteSearchBodies).
+// THE "is the user editing this note right now" test, the one that keeps the content query (and so the
+// editor's remount key) still — a pending outbox entry OR a live editor session. The queue alone answers a
+// narrower question ("is something queued"), which stops being true at every push. Whether an edit made
+// elsewhere may reseed the editor is a different question: whether it holds unsynced changes
+// (socketHandlers.ts). Exported in state form too, for a caller that already holds a store snapshot
+// (useNoteSearchBodies).
 export function noteIsEditing(state: NotesInflightStore, uuid: string): boolean {
 	return (state.inflightContent[uuid] ?? []).length > 0 || state.editingSessions[uuid] === true
 }

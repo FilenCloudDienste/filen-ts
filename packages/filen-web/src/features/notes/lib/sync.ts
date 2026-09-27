@@ -14,6 +14,7 @@ import { queryClient } from "@/queries/client"
 import { i18n } from "@/lib/i18n"
 import { forgetNotePushes, rememberNotePush } from "@/features/notes/lib/pushEchoes"
 import { heldNotes, releaseAllNoteHolds } from "@/features/notes/lib/remoteEditHolds"
+import { forgetTabEditors, tabEditorPushed } from "@/features/notes/lib/tabEditors"
 import { log } from "@/lib/log"
 import { toast } from "sonner"
 import { asErrorDTO } from "@/lib/sdk/errors"
@@ -87,10 +88,13 @@ export class Sync {
 	// transient error never loses the first edit, while a genuine permission rejection still
 	// un-wedges the content query after N attempts.
 	private readonly nonRetryableRejections: Map<string, number> = new Map<string, number>()
-	// Per note, the hash of the content this tab last pushed. The cloud still holding it is no newer work
-	// to warn about: a "Load theirs" queues their content over a push of the local edits that landed after
-	// their save.
+	// Per note, the hash of the content this tab last pushed. For an answer to the remote-edit dialog
+	// (answeredNotes), the cloud still holding it is no newer work to warn about: a "Load theirs" queues
+	// their content over a push of the local edits that landed after their save. For any other edit it is:
+	// another tab's push is news to a tab that typed on the version before it.
 	private readonly lastPushedHashes: Map<string, string> = new Map<string, string>()
+	// Notes whose queued edit answers the remote-edit dialog, until it is pushed.
+	private readonly answeredNotes: Set<string> = new Set<string>()
 
 	// Multi-tab state. `role` defaults to "leader" so a lone tab and every unit test are the unchanged
 	// single-tab path. `transport` is null until the coordinator wires a channel (single-tab: stays null,
@@ -145,8 +149,10 @@ export class Sync {
 		setOutboxHydrated(false)
 		clearEditingSessions()
 		forgetNotePushes()
+		forgetTabEditors()
 		releaseAllNoteHolds()
 		this.lastPushedHashes.clear()
+		this.answeredNotes.clear()
 	}
 
 	// Drop a note's consecutive-rejection strike count. For the editor's use when it clears a
@@ -186,8 +192,22 @@ export class Sync {
 	// memory only). `sessionBaseHash` is the hash of the editor's mount seed for a FRESH session;
 	// omitting it takes the legacy no-conflict-check grace (see buildInflightEntries).
 	public enqueue(note: Note, content: string, sessionBaseHash?: string | null): Promise<boolean> {
+		return this.enqueueEdit(note, content, sessionBaseHash ?? null, false)
+	}
+
+	// The remote-edit dialog's answer: `content` over their version (hashed `theirsHash`), the user's choice,
+	// so the push warns of no overwrite of this browser's own earlier push either.
+	public enqueueAnswer(note: Note, content: string, theirsHash: string | null): Promise<boolean> {
+		return this.enqueueEdit(note, content, theirsHash, true)
+	}
+
+	private enqueueEdit(note: Note, content: string, sessionBaseHash: string | null, answer: boolean): Promise<boolean> {
 		if (this.role === "follower") {
-			return this.followerEnqueue(note, content, sessionBaseHash ?? null)
+			return this.followerEnqueue(note, content, sessionBaseHash, answer)
+		}
+
+		if (answer) {
+			this.answeredNotes.add(note.uuid)
 		}
 
 		useNotesInflightStore.getState().setInflightContent(prev => ({
@@ -197,7 +217,7 @@ export class Sync {
 				note,
 				content,
 				now: Date.now(),
-				sessionBaseHash: sessionBaseHash ?? null
+				sessionBaseHash
 			})
 		}))
 
@@ -220,7 +240,7 @@ export class Sync {
 	// round trip), track it as unacked, and forward the newest entry to the leader. No disk write and no
 	// debounce here — the leader owns both. Returns true: the optimistic apply cannot fail locally, and
 	// durability is the leader's immediate-persist (a lost forward is re-sent on the next takeover).
-	private followerEnqueue(note: Note, content: string, sessionBaseHash: string | null): Promise<boolean> {
+	private followerEnqueue(note: Note, content: string, sessionBaseHash: string | null, answer: boolean): Promise<boolean> {
 		const entries = buildInflightEntries({
 			previous: useNotesInflightStore.getState().inflightContent[note.uuid],
 			note,
@@ -242,7 +262,7 @@ export class Sync {
 		const latest = newestEntry(entries)
 
 		if (latest !== undefined) {
-			this.transport?.sendEnqueue(this.toRemoteEnqueue(latest))
+			this.transport?.sendEnqueue(answer ? { ...this.toRemoteEnqueue(latest), answer: true } : this.toRemoteEnqueue(latest))
 		}
 
 		return Promise.resolve(true)
@@ -268,6 +288,10 @@ export class Sync {
 		// re-persist an edit onto a wiping tab. Never ingest once aborted.
 		if (isAborted(this.abortController.signal)) {
 			return
+		}
+
+		if (msg.answer === true) {
+			this.answeredNotes.add(msg.note.uuid)
 		}
 
 		useNotesInflightStore.getState().setInflightContent(prev => mergeInflight(prev, remoteEnqueueToPatch(msg)))
@@ -590,7 +614,7 @@ export class Sync {
 							overwritesNewerRemoteContent =
 								!alreadyInCloud &&
 								remoteHash !== mostRecentContent.baseContentHash &&
-								remoteHash !== this.lastPushedHashes.get(noteUuid)
+								!(this.answeredNotes.has(noteUuid) && remoteHash === this.lastPushedHashes.get(noteUuid))
 						} else {
 							log.warn(
 								"notes-sync",
@@ -607,6 +631,7 @@ export class Sync {
 
 					if (!alreadyInCloud) {
 						rememberNotePush(noteUuid, pushedContentHash)
+						tabEditorPushed(noteUuid, pushedContentHash, mostRecentContent.content)
 						this.transport?.broadcastPushed(noteUuid, pushedContentHash)
 					}
 
@@ -651,6 +676,7 @@ export class Sync {
 						}
 
 						this.nonRetryableRejections.delete(noteUuid)
+						this.answeredNotes.delete(noteUuid)
 
 						useNotesInflightStore.getState().setInflightContent(prev => {
 							const updated: InflightContent = {
@@ -670,6 +696,7 @@ export class Sync {
 					// A successful push clears any accumulated rejection count for this note.
 					this.nonRetryableRejections.delete(noteUuid)
 					this.lastPushedHashes.set(noteUuid, pushedContentHash)
+					this.answeredNotes.delete(noteUuid)
 
 					// The pushed content IS the cloud content now — write it into the per-note content
 					// query cache so an editor reseed after the queue drains paints what the user typed,

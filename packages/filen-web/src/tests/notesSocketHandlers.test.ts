@@ -20,15 +20,15 @@ vi.mock("@/lib/sdk/client", () => ({
 
 // The sync outbox singleton — mocked so the reload action's seam calls are observable and sync.ts's heavy
 // deps stay out of node. The store it reads (useNotesInflight) is NOT mocked (the editing test is real).
-const { dropEntry, clearRejections, flushToDisk, enqueue, executeNow } = vi.hoisted(() => ({
+const { dropEntry, clearRejections, flushToDisk, enqueueAnswer, executeNow } = vi.hoisted(() => ({
 	dropEntry: vi.fn<(uuid: string) => void>(),
 	clearRejections: vi.fn<(uuid: string) => void>(),
 	flushToDisk: vi.fn<() => Promise<boolean>>(() => Promise.resolve(true)),
-	enqueue: vi.fn<(note: Note, content: string, sessionBaseHash?: string | null) => Promise<boolean>>(() => Promise.resolve(true)),
+	enqueueAnswer: vi.fn<(note: Note, content: string, theirsHash: string | null) => Promise<boolean>>(() => Promise.resolve(true)),
 	executeNow: vi.fn<() => void>()
 }))
 
-vi.mock("@/features/notes/lib/sync", () => ({ sync: { dropEntry, clearRejections, flushToDisk, enqueue, executeNow } }))
+vi.mock("@/features/notes/lib/sync", () => ({ sync: { dropEntry, clearRejections, flushToDisk, enqueueAnswer, executeNow } }))
 
 const { toast } = vi.hoisted(() => ({ toast: vi.fn() }))
 
@@ -49,6 +49,7 @@ import { setNoteAnswerBroadcast, useNotesRemoteEditStore } from "@/features/note
 import { handleNoteEvent, keepMineOverRemoteEdit, reloadRemoteEdit, saveRemoteEditMineAsCopy } from "@/features/notes/lib/socketHandlers"
 import { forgetNotePushes, isOwnNotePush, rememberNotePush, setNotePushBroadcast } from "@/features/notes/lib/pushEchoes"
 import { heldNotes, releaseAllNoteHolds } from "@/features/notes/lib/remoteEditHolds"
+import { forgetTabEditors, seedTabEditor, tabEditorChanged, tabEditorDirty, tabEditorPushed } from "@/features/notes/lib/tabEditors"
 import { hashNoteContent } from "@filen/shared"
 
 function makeNote(uuid: string, overrides: Partial<Note> = {}): Note {
@@ -108,8 +109,19 @@ beforeEach(() => {
 	useNotesRemoteEditStore.setState({ remoteEdited: {}, openNote: null })
 	releaseAllNoteHolds()
 	forgetNotePushes()
+	forgetTabEditors()
 	vi.clearAllMocks()
 })
+
+// This tab's editor for the note shows `seed`, built on the cloud's `synced`, and was typed into.
+function showEditor(uuid: string, seed: string, synced: string | undefined, ...typed: string[]): void {
+	seedTabEditor(uuid, `${uuid}:1`, seed, synced)
+
+	for (const value of typed) {
+		beginEditingSession(uuid)
+		tabEditorChanged(uuid, value)
+	}
+}
 
 const unmounts: (() => void)[] = []
 
@@ -342,8 +354,10 @@ describe("note socket handlers — contentEdited", () => {
 	it("takes a push's echo once: the same content saved again on another device of this account is its edit", () => {
 		seedNotes([makeNote("a", { editedTimestamp: 1n })])
 		setAccountId(7n)
-		beginEditingSession("a")
+		showEditor("a", "old", "old", "server text")
 		rememberNotePush("a", hashNoteContent("server text"))
+		tabEditorPushed("a", hashNoteContent("server text"))
+		tabEditorChanged("a", "server text, and more")
 
 		handleNoteEvent(contentEdited("a", 7))
 
@@ -357,7 +371,7 @@ describe("note socket handlers — contentEdited", () => {
 	it("takes this account's edit of content this browser never pushed for another device's, and asks", () => {
 		seedNotes([makeNote("a", { editedTimestamp: 1n })])
 		setAccountId(7n)
-		beginEditingSession("a")
+		showEditor("a", "old", "old", "typed")
 
 		handleNoteEvent(contentEdited("a", 7))
 
@@ -442,21 +456,66 @@ describe("note socket handlers — contentEdited", () => {
 		expect(getNotes()[0]?.editedTimestamp).toBe(1n)
 	})
 
-	it("dirty note (editor session, outbox already drained): prompts instead of invalidating", () => {
-		// The regression this guards: a push empties the outbox entry, so a note the user is still typing
-		// into reads as inflight-free. Invalidating there refetches, advances the content query's
-		// dataUpdatedAt and remounts the live editor — the caret goes with it, and every keystroke after
-		// that lands on document.body.
+	it("dirty note (typed text the cloud does not hold, outbox already drained): prompts instead of reseeding", () => {
+		// A push empties the outbox entry, so the queue alone reads a note still being typed into as clean.
+		// Reseeding there remounts the live editor under the caret and drops the text typed since.
 		seedNotes([makeNote("a", { editedTimestamp: 1n })])
 		setAccountId(7n)
-		beginEditingSession("a")
+		testQueryClient.setQueryData(noteContentQueryKey("a"), "old", { updatedAt: 1 })
+		showEditor("a", "old", "old", "typed")
 		const invalidate = vi.spyOn(testQueryClient, "invalidateQueries")
 
 		handleNoteEvent(contentEdited("a", 99))
 
 		expect(useNotesRemoteEditStore.getState().remoteEdited["a"]).toEqual({ theirs: "server text" })
 		expect(invalidate).not.toHaveBeenCalled()
+		expect(testQueryClient.getQueryState(noteContentQueryKey("a"))?.dataUpdatedAt).toBe(1)
 		expect(getNotes()[0]?.editedTimestamp).toBe(1n)
+	})
+
+	it("clean note under an open editing session (its typing pushed): takes their version and says so", () => {
+		seedNotes([makeNote("a", { editedTimestamp: 1n })])
+		setAccountId(7n)
+		useNotesRemoteEditStore.getState().setOpenNote("a")
+		testQueryClient.setQueryData(noteContentQueryKey("a"), "old", { updatedAt: 1 })
+		showEditor("a", "old", "old", "x")
+		tabEditorPushed("a", hashNoteContent("x"), "x")
+		const invalidate = vi.spyOn(testQueryClient, "invalidateQueries")
+
+		handleNoteEvent(contentEdited("a", 99))
+
+		expect(useNotesRemoteEditStore.getState().remoteEdited["a"]).toBeUndefined()
+		expect(getNotes()[0]?.editedTimestamp).toBe(999n)
+		// Written from the event, no read: the new dataUpdatedAt reseeds the editor although the session
+		// keeps the query disabled.
+		expect(testQueryClient.getQueryData(noteContentQueryKey("a"))).toBe("server text")
+		expect(testQueryClient.getQueryState(noteContentQueryKey("a"))?.dataUpdatedAt).toBeGreaterThan(1)
+		expect(invalidate).not.toHaveBeenCalled()
+		expect(getNoteContent).not.toHaveBeenCalled()
+		expect(toast).toHaveBeenCalledTimes(1)
+	})
+
+	it("clean note under an open session whose content did not decrypt: ends the session and reads it", () => {
+		seedNotes([makeNote("a", { editedTimestamp: 1n })])
+		setAccountId(7n)
+		showEditor("a", "old", "old")
+		beginEditingSession("a")
+		const invalidate = vi.spyOn(testQueryClient, "invalidateQueries")
+
+		handleNoteEvent(
+			noteEvt({
+				type: "contentEdited",
+				note: "a" as never,
+				content: { Encrypted: "x" },
+				noteType: "text",
+				editorId: 99,
+				editedTimestamp: 999n
+			})
+		)
+
+		expect(useNotesRemoteEditStore.getState().remoteEdited["a"]).toBeUndefined()
+		expect(useNotesInflightStore.getState().editingSessions["a"]).toBeUndefined()
+		expect(invalidate).toHaveBeenCalledWith({ queryKey: noteContentQueryKey("a") })
 	})
 
 	it("skips (and logs) a note not in the list cache without reading when no list read is in flight", async () => {
@@ -493,6 +552,102 @@ describe("note socket handlers — contentEdited", () => {
 		await settle()
 
 		expect(listNotes).not.toHaveBeenCalled()
+	})
+})
+
+// Two tabs of this browser on one note: the leader pushes for both, and each hears the echo as its own.
+describe("note socket handlers — this browser's pushes, heard by the tabs showing the note", () => {
+	const echo = (content: string) =>
+		noteEvt({
+			type: "contentEdited",
+			note: "a" as never,
+			content: { Decrypted: content },
+			noteType: "text",
+			editorId: 7,
+			editedTimestamp: 999n
+		})
+
+	beforeEach(() => {
+		seedNotes([makeNote("a", { editedTimestamp: 1n })])
+		setAccountId(7n)
+		useNotesRemoteEditStore.getState().setOpenNote("a")
+	})
+
+	it("a tab with nothing typed takes another tab's push and reseeds its editor, silently", () => {
+		testQueryClient.setQueryData(noteContentQueryKey("a"), "old", { updatedAt: 1 })
+		showEditor("a", "old", "old")
+		rememberNotePush("a", hashNoteContent("tab 2 text"))
+
+		handleNoteEvent(echo("tab 2 text"))
+
+		expect(testQueryClient.getQueryData(noteContentQueryKey("a"))).toBe("tab 2 text")
+		expect(testQueryClient.getQueryState(noteContentQueryKey("a"))?.dataUpdatedAt).toBeGreaterThan(1)
+		expect(useNotesRemoteEditStore.getState().remoteEdited["a"]).toBeUndefined()
+		// This browser's own typing: a toast at every pause of it would only be noise.
+		expect(toast).not.toHaveBeenCalled()
+	})
+
+	it("the leader tab reseeds too, though its push already wrote the content into its cache", () => {
+		// The push loop writes the pushed text into the leader's cache keeping dataUpdatedAt, so the leader's
+		// editor, seeded before, still shows the older text.
+		testQueryClient.setQueryData(noteContentQueryKey("a"), "tab 2 text", { updatedAt: 1 })
+		showEditor("a", "old", "old", "old, typed", "old")
+		tabEditorPushed("a", hashNoteContent("old"), "old")
+		rememberNotePush("a", hashNoteContent("tab 2 text"))
+
+		handleNoteEvent(echo("tab 2 text"))
+
+		expect(testQueryClient.getQueryState(noteContentQueryKey("a"))?.dataUpdatedAt).toBeGreaterThan(1)
+		expect(useNotesRemoteEditStore.getState().remoteEdited["a"]).toBeUndefined()
+	})
+
+	it("a tab that typed something else is asked, as for another device's edit", () => {
+		testQueryClient.setQueryData(noteContentQueryKey("a"), "old", { updatedAt: 1 })
+		showEditor("a", "old", "old", "tab 1 text")
+		rememberNotePush("a", hashNoteContent("tab 2 text"))
+
+		handleNoteEvent(echo("tab 2 text"))
+
+		expect(useNotesRemoteEditStore.getState().remoteEdited["a"]).toEqual({ theirs: "tab 2 text" })
+		expect(testQueryClient.getQueryState(noteContentQueryKey("a"))?.dataUpdatedAt).toBe(1)
+		expect(tabEditorDirty("a")).toBe(true)
+	})
+
+	it("the tab that typed it builds on it, typing on meanwhile: no question, the cache follows, the editor stays", () => {
+		testQueryClient.setQueryData(noteContentQueryKey("a"), "old", { updatedAt: 1 })
+		showEditor("a", "old", "old", "mine")
+		rememberNotePush("a", hashNoteContent("mine"))
+		// A follower hears the leader's push by hash.
+		tabEditorPushed("a", hashNoteContent("mine"))
+		tabEditorChanged("a", "mine, and more")
+
+		handleNoteEvent(echo("mine"))
+
+		expect(useNotesRemoteEditStore.getState().remoteEdited["a"]).toBeUndefined()
+		expect(testQueryClient.getQueryData(noteContentQueryKey("a"))).toBe("mine")
+		expect(testQueryClient.getQueryState(noteContentQueryKey("a"))?.dataUpdatedAt).toBe(1)
+		expect(toast).not.toHaveBeenCalled()
+		expect(tabEditorDirty("a")).toBe(true)
+	})
+
+	it("the tab that typed it is clean once it is heard back", () => {
+		testQueryClient.setQueryData(noteContentQueryKey("a"), "old", { updatedAt: 1 })
+		showEditor("a", "old", "old", "mine")
+		rememberNotePush("a", hashNoteContent("mine"))
+
+		handleNoteEvent(echo("mine"))
+
+		expect(tabEditorDirty("a")).toBe(false)
+		expect(testQueryClient.getQueryState(noteContentQueryKey("a"))?.dataUpdatedAt).toBe(1)
+	})
+
+	it("a tab not showing the note leaves its cache to the next open", () => {
+		testQueryClient.setQueryData(noteContentQueryKey("a"), "old", { updatedAt: 1 })
+		rememberNotePush("a", hashNoteContent("tab 2 text"))
+
+		handleNoteEvent(echo("tab 2 text"))
+
+		expect(testQueryClient.getQueryData(noteContentQueryKey("a"))).toBe("old")
 	})
 })
 
@@ -550,7 +705,7 @@ describe("note socket handlers — reload/keep actions", () => {
 
 		expect(dropEntry).toHaveBeenCalledWith("a")
 		expect(clearRejections).toHaveBeenCalledWith("a")
-		expect(enqueue).toHaveBeenCalledWith(expect.objectContaining({ uuid: "a" }), "server text", hashNoteContent("server text"))
+		expect(enqueueAnswer).toHaveBeenCalledWith(expect.objectContaining({ uuid: "a" }), "server text", hashNoteContent("server text"))
 		expect(getNoteContent).not.toHaveBeenCalled()
 		expect(testQueryClient.getQueryData(noteContentQueryKey("a"))).toBe("server text")
 		expect(testQueryClient.getQueryState(noteContentQueryKey("a"))?.dataUpdatedAt).toBeGreaterThan(1)
@@ -566,7 +721,7 @@ describe("note socket handlers — reload/keep actions", () => {
 
 		await reloadRemoteEdit(makeNote("a"))
 
-		expect(enqueue).toHaveBeenCalledWith(expect.objectContaining({ uuid: "a" }), "read text", hashNoteContent("read text"))
+		expect(enqueueAnswer).toHaveBeenCalledWith(expect.objectContaining({ uuid: "a" }), "read text", hashNoteContent("read text"))
 		expect(testQueryClient.getQueryData(noteContentQueryKey("a"))).toBe("read text")
 	})
 
@@ -577,7 +732,7 @@ describe("note socket handlers — reload/keep actions", () => {
 
 		await reloadRemoteEdit(makeNote("a"))
 
-		expect(enqueue).not.toHaveBeenCalled()
+		expect(enqueueAnswer).not.toHaveBeenCalled()
 		expect(dropEntry).toHaveBeenCalledWith("a")
 		expect(flushToDisk).toHaveBeenCalledTimes(1)
 		expect(useNotesRemoteEditStore.getState().remoteEdited["a"]).toBeUndefined()
@@ -601,19 +756,34 @@ describe("note socket handlers — reload/keep actions", () => {
 
 		expect(useNotesRemoteEditStore.getState().remoteEdited["a"]).toBeUndefined()
 		expect(dropEntry).toHaveBeenCalledWith("a")
-		expect(enqueue).toHaveBeenCalledWith(expect.objectContaining({ uuid: "a" }), "local", hashNoteContent("server text"))
-		expect(dropEntry.mock.invocationCallOrder[0]).toBeLessThan(enqueue.mock.invocationCallOrder[0] ?? 0)
+		expect(enqueueAnswer).toHaveBeenCalledWith(expect.objectContaining({ uuid: "a" }), "local", hashNoteContent("server text"))
+		expect(dropEntry.mock.invocationCallOrder[0]).toBeLessThan(enqueueAnswer.mock.invocationCallOrder[0] ?? 0)
 		expect(executeNow).toHaveBeenCalledTimes(1)
 	})
 
-	it("keep with edits already pushed queues them again, based on their content so no overwrite is reported", async () => {
-		testQueryClient.setQueryData(noteContentQueryKey("a"), "mine")
+	it("keep with typed text the cloud does not hold queues this tab's text, whatever the content cache holds", async () => {
+		// A follower tab's cache is only written by the push's echo: it can still hold the text before.
+		testQueryClient.setQueryData(noteContentQueryKey("a"), "old")
+		showEditor("a", "old", "old", "mine")
 		useNotesRemoteEditStore.getState().setRemoteEdited("a", { theirs: "server text" })
 
 		await keepMineOverRemoteEdit(makeNote("a"))
 
-		expect(enqueue).toHaveBeenCalledWith(expect.objectContaining({ uuid: "a" }), "mine", hashNoteContent("server text"))
+		expect(enqueueAnswer).toHaveBeenCalledWith(expect.objectContaining({ uuid: "a" }), "mine", hashNoteContent("server text"))
 		expect(executeNow).toHaveBeenCalledTimes(1)
+	})
+
+	it("keep with nothing unsynced left queues nothing: the synced text again would revert their save", async () => {
+		testQueryClient.setQueryData(noteContentQueryKey("a"), "mine")
+		showEditor("a", "old", "old", "mine")
+		tabEditorPushed("a", hashNoteContent("mine"), "mine")
+		useNotesRemoteEditStore.getState().setRemoteEdited("a", { theirs: "server text" })
+
+		await keepMineOverRemoteEdit(makeNote("a"))
+
+		expect(enqueueAnswer).not.toHaveBeenCalled()
+		expect(executeNow).not.toHaveBeenCalled()
+		expect(useNotesRemoteEditStore.getState().remoteEdited["a"]).toBeUndefined()
 	})
 })
 
@@ -640,7 +810,7 @@ describe("note socket handlers — save mine as copy", () => {
 		})
 		expect(testQueryClient.getQueryData(noteContentQueryKey("c"))).toBe("mine")
 		expect(isOwnNotePush("c", hashNoteContent("mine"))).toBe(true)
-		expect(enqueue).toHaveBeenCalledWith(expect.objectContaining({ uuid: "a" }), "server text", hashNoteContent("server text"))
+		expect(enqueueAnswer).toHaveBeenCalledWith(expect.objectContaining({ uuid: "a" }), "server text", hashNoteContent("server text"))
 		expect(trashNote).not.toHaveBeenCalled()
 	})
 
@@ -660,7 +830,7 @@ describe("note socket handlers — save mine as copy", () => {
 		expect(trashNote).toHaveBeenCalledWith(expect.objectContaining({ uuid: "c", title: "copy" }))
 		expect(deleteNote).toHaveBeenCalledWith(expect.objectContaining({ uuid: "c", trash: true }))
 		expect(getNotes().map(n => n.uuid)).toEqual(["a"])
-		expect(enqueue).not.toHaveBeenCalled()
+		expect(enqueueAnswer).not.toHaveBeenCalled()
 		expect(useNotesRemoteEditStore.getState().remoteEdited["a"]).toEqual({ theirs: "server text" })
 	})
 

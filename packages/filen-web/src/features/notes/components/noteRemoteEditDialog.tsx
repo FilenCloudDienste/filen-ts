@@ -5,7 +5,7 @@ import type { Note } from "@filen/sdk-rs"
 import { conflictCopyStamp } from "@filen/shared"
 import { useNoteRemoteEdit } from "@/features/notes/store/useNoteRemoteEdit"
 import { keepMineOverRemoteEdit, reloadRemoteEdit, saveRemoteEditMineAsCopy } from "@/features/notes/lib/socketHandlers"
-import { localNoteContent } from "@/features/notes/lib/localContent"
+import { tabNoteContent } from "@/features/notes/lib/tabEditors"
 import { holdNoteForRemoteEdit, releaseNoteHold } from "@/features/notes/lib/remoteEditHolds"
 import { codeMirrorTagForNote } from "@/features/notes/components/reader/reader.logic"
 import { RemoteChangeDialog } from "@/features/preview/components/remoteChangeDialog"
@@ -84,7 +84,7 @@ export function NoteRemoteEditDialog({ note }: { note: Note }) {
 						)
 					: undefined
 			}
-			readMine={() => localNoteContent(note.uuid)}
+			readMine={() => tabNoteContent(note.uuid)}
 			pending={pending}
 			onKeepMine={() => {
 				void keepMineOverRemoteEdit(note)

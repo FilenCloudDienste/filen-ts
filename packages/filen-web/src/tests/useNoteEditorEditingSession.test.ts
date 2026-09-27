@@ -2,7 +2,7 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { createElement, type ReactNode } from "react"
-import { act, renderHook } from "@testing-library/react"
+import { act, renderHook, waitFor } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import type { Note } from "@filen/sdk-rs"
 
@@ -15,7 +15,11 @@ const { getNoteContent } = vi.hoisted(() => ({ getNoteContent: vi.fn<() => Promi
 
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: { getNoteContent } }))
 // The outbox is a disk-backed loop; onChange only needs its enqueue to resolve.
-vi.mock("@/features/notes/lib/sync", () => ({ sync: { enqueue: vi.fn(() => Promise.resolve(true)), cancel: vi.fn() } }))
+const { enqueue } = vi.hoisted(() => ({
+	enqueue: vi.fn<(note: Note, content: string, sessionBaseHash?: string | null) => Promise<boolean>>(() => Promise.resolve(true))
+}))
+
+vi.mock("@/features/notes/lib/sync", () => ({ sync: { enqueue, cancel: vi.fn() } }))
 
 // The app's singleton IS the client behind <QueryClientProvider> (routes/__root.tsx), so the hook's
 // cancel and its own query must run against ONE client here too — the bare client below stands in for
@@ -27,6 +31,8 @@ import { queryClient } from "@/queries/client"
 import { useNotesInflightStore } from "@/features/notes/store/useNotesInflight"
 import { noteContentQueryKey } from "@/features/notes/queries/noteContent"
 import { useNoteEditor } from "@/features/notes/hooks/useNoteEditor"
+import { forgetTabEditors, tabEditorBuffer, tabEditorDirty, tabEditorPushed } from "@/features/notes/lib/tabEditors"
+import { hashNoteContent } from "@filen/shared"
 
 const NOTE: Note = {
 	uuid: "22222222-2222-2222-2222-222222222222",
@@ -95,5 +101,60 @@ describe("useNoteEditor — editing session lifecycle", () => {
 		unmount()
 
 		expect(useNotesInflightStore.getState().editingSessions[NOTE.uuid]).toBeUndefined()
+	})
+})
+
+// This tab's editor, told apart from other tabs' edits in the shared outbox (tabEditors.ts).
+describe("useNoteEditor — what this tab's editor shows", () => {
+	beforeEach(() => {
+		forgetTabEditors()
+		queryClient.clear()
+	})
+
+	it("records its seed once shown, its typing, and forgets it on unmount", async () => {
+		getNoteContent.mockResolvedValue("seed")
+
+		const { result, unmount } = renderHook(() => useNoteEditor(NOTE, 1n), { wrapper })
+
+		await waitFor(() => {
+			expect(result.current.status).toBe("ready")
+		})
+
+		expect(tabEditorBuffer(NOTE.uuid)).toBe("seed")
+		expect(tabEditorDirty(NOTE.uuid)).toBe(false)
+
+		act(() => {
+			result.current.onChange("seed, typed")
+		})
+
+		expect(tabEditorDirty(NOTE.uuid)).toBe(true)
+
+		unmount()
+
+		expect(tabEditorBuffer(NOTE.uuid)).toBeUndefined()
+	})
+
+	it("bases a new session on this tab's own pushed text, which a follower's cache may not hold yet", async () => {
+		getNoteContent.mockResolvedValue("seed")
+
+		const { result, unmount } = renderHook(() => useNoteEditor(NOTE, 1n), { wrapper })
+
+		await waitFor(() => {
+			expect(result.current.status).toBe("ready")
+		})
+
+		act(() => {
+			result.current.onChange("mine")
+		})
+
+		tabEditorPushed(NOTE.uuid, hashNoteContent("mine"))
+
+		act(() => {
+			result.current.onChange("mine, more")
+		})
+
+		expect(enqueue).toHaveBeenLastCalledWith(NOTE, "mine, more", hashNoteContent("mine"))
+
+		unmount()
 	})
 })
