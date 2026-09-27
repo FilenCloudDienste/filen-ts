@@ -31,6 +31,7 @@ import { errorLabel } from "@/lib/i18n/errorLabel"
 import { IN_EDITORS_AND_FIELDS, useAction } from "@/lib/keymap/useAction"
 import { log } from "@/lib/log"
 import { useIsOnline } from "@/lib/useIsOnline"
+import { holdUnload } from "@/lib/unloadGuard"
 import { cn, driveItemName } from "@filen/shared"
 import { ImageViewer, RawImageViewer, ZoomableImage } from "@/features/preview/components/imageViewer"
 import { MediaViewer, MediaElement } from "@/features/preview/components/mediaViewer"
@@ -650,17 +651,20 @@ export function PreviewOverlay({
 	}, [])
 
 	// Browser-level guard for the two vectors the in-app requestOrRun path cannot see: a tab
-	// refresh/close (enableBeforeUnload — the router's own history owns that listener) and any
-	// navigation that unmounts this overlay's route body. Registered ONLY while the buffer is dirty AND
-	// a slot is actually rendered: without the second term a vanished slot (early return below → no
-	// ConfirmDialog in the tree) could block a navigation nothing can then resolve, leaving the
-	// blocker's own promise unsettled after the popstate already moved the URL.
+	// refresh/close (the app's one leave-page listener, which excuses its own downloads — the router's
+	// would prompt on them) and any navigation that unmounts this overlay's route body. Armed ONLY while
+	// the buffer is dirty AND a slot is actually rendered: without the second term a vanished slot (early
+	// return below → no ConfirmDialog in the tree) could block a navigation nothing can then resolve,
+	// leaving the blocker's own promise unsettled after the popstate already moved the URL.
+	const guardsUnsaved = dirty && currentSource !== undefined
 	const blocker = useBlocker({
 		shouldBlockFn: blockWhenLeavingRoute,
-		enableBeforeUnload: true,
-		disabled: !dirty || currentSource === undefined,
+		enableBeforeUnload: false,
+		disabled: !guardsUnsaved,
 		withResolver: true
 	})
+
+	useEffect(() => (guardsUnsaved ? holdUnload() : undefined), [guardsUnsaved])
 
 	// A save in flight must never reach the prompt: Discard would release the navigation while the
 	// un-cancellable upload still lands and patches the listing with exactly the content the user just

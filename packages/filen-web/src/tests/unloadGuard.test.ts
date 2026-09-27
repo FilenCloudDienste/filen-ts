@@ -1,5 +1,7 @@
+// @vitest-environment jsdom
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { allowNextUnload, blockUnloadUnlessAllowed, consumeUnloadAllowance } from "@/lib/unloadGuard"
+import { allowNextUnload, blockUnloadUnlessAllowed, consumeUnloadAllowance, holdUnload } from "@/lib/unloadGuard"
 
 function fakeEvent() {
 	return { preventDefault: vi.fn() }
@@ -53,5 +55,57 @@ describe("blockUnloadUnlessAllowed", () => {
 
 		expect(allowed.preventDefault).not.toHaveBeenCalled()
 		expect(next.preventDefault).toHaveBeenCalledTimes(1)
+	})
+})
+
+// Whether a beforeunload dispatched now would make the browser ask before leaving.
+function unloadIsBlocked(): boolean {
+	const event = new Event("beforeunload", { cancelable: true })
+
+	window.dispatchEvent(event)
+
+	return event.defaultPrevented
+}
+
+describe("holdUnload", () => {
+	it("blocks while held and stops once every hold is released", () => {
+		const first = holdUnload()
+		const second = holdUnload()
+
+		expect(unloadIsBlocked()).toBe(true)
+
+		first()
+
+		expect(unloadIsBlocked()).toBe(true)
+
+		second()
+
+		expect(unloadIsBlocked()).toBe(false)
+	})
+
+	// A download started while an editor is dirty and a transfer runs: both hold, and neither may ask.
+	it("lets one allowed navigation through every hold at once", () => {
+		const release = [holdUnload(), holdUnload()]
+
+		allowNextUnload()
+
+		expect(unloadIsBlocked()).toBe(false)
+		expect(unloadIsBlocked()).toBe(true)
+
+		for (const releaseHold of release) {
+			releaseHold()
+		}
+	})
+
+	it("counts a released hold only once", () => {
+		const first = holdUnload()
+		const second = holdUnload()
+
+		first()
+		first()
+
+		expect(unloadIsBlocked()).toBe(true)
+
+		second()
 	})
 })
