@@ -11,3 +11,9 @@ export function sizesInFile(kind: SpreadsheetKind, writability: Writability, can
 export function layerKeyFor(stable: string | undefined, documentKey: string): LayerKey {
 	return stable === undefined ? { kind: "session", id: documentKey } : { kind: "stable", id: stable }
 }
+
+// Whether the rails can be resized now: not while a workbook that may become editable is still being
+// proven, as its sizes may yet belong in the file (a size set meanwhile would snap back on the verdict).
+export function resizable(kind: SpreadsheetKind, writability: Writability, mayEdit: boolean): boolean {
+	return !(kind === "xlsx" && writability === "checking" && mayEdit)
+}

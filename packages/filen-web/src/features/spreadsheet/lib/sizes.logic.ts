@@ -156,3 +156,19 @@ export function fitSize(axis: SizeAxis, contents: readonly number[]): number | n
 
 	return height <= DEFAULT_ROW_HEIGHT ? null : height
 }
+
+// What a Reset of the selected columns or rows applies to: the selection cut at the used area (select-all
+// resets what is on the sheet, not a million rows), never a hidden one (its size is kept for when it is
+// shown again), at most the cap.
+export function resetTargets(start: number, end: number, used: number, isHidden: (index: number) => boolean): number[] {
+	const last = Math.min(end, Math.max(start, used - 1))
+	const targets: number[] = []
+
+	for (let index = start; index <= last && targets.length < MAX_RESIZE_TARGETS; index++) {
+		if (!isHidden(index)) {
+			targets.push(index)
+		}
+	}
+
+	return targets
+}

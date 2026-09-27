@@ -25,8 +25,8 @@ import {
 	snapToMerge
 } from "@/features/spreadsheet/lib/navigation.logic"
 import { layeredSheet, type LayerKey } from "@/features/spreadsheet/lib/sizeLayer"
-import { layerKeyFor, sizesInFile } from "@/features/spreadsheet/lib/sizeRouting.logic"
-import { MAX_RESIZE_TARGETS, type SizeAxis, type SizeEntry } from "@/features/spreadsheet/lib/sizes.logic"
+import { layerKeyFor, resizable, sizesInFile } from "@/features/spreadsheet/lib/sizeRouting.logic"
+import { resetTargets, type SizeAxis, type SizeEntry } from "@/features/spreadsheet/lib/sizes.logic"
 import { parseTsv, rangeToTsv } from "@/features/spreadsheet/lib/tsv.logic"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { LoadingState } from "@/components/loadingState"
@@ -173,6 +173,7 @@ function SpreadsheetBody({
 	const writability = useSpreadsheetWritability(id, doc, editable && !unnamed, neverEditable)
 	const canEdit = editable && writability === "writable" && !unnamed && !renamed
 	const inFile = sizesInFile(doc.kind, writability, canEdit)
+	const canResize = resizable(doc.kind, writability, editable && !unnamed && !renamed)
 	// Editing waits on the worker's proof: the toolbar holds its place meanwhile, disabled, and stays so
 	// when the proof fails, so the grid never moves as the verdict lands.
 	const toolbarShown = canEdit || (editable && !unnamed && !renamed && (writability === "checking" || doc.kind === "xlsx"))
@@ -592,19 +593,6 @@ function SpreadsheetBody({
 		return Promise.resolve()
 	}
 
-	// The selected columns or rows, back to the default size (in the file) or the file's (beside it). Capped
-	// like a drag and cut at the sheet's used area, so select-all resets what is on the sheet, not a million rows.
-	function resetEntries(axis: SizeAxis): SizeEntry[] {
-		const [start, end] = axis === "cols" ? [range.startCol, range.endCol] : [range.startRow, range.endRow]
-		const used = axis === "cols" ? laidOutSheet.colCount : laidOutSheet.rowCount
-		const last = Math.min(end, Math.max(start, used - 1), start + MAX_RESIZE_TARGETS - 1)
-
-		return Array.from({ length: last - start + 1 }, (_, offset): SizeEntry => [start + offset, null])
-	}
-
-	const resetCols = resetEntries("cols")
-	const resetRows = resetEntries("rows")
-
 	const grid = (
 		<SheetGrid
 			sheet={laidOutSheet}
@@ -628,7 +616,7 @@ function SpreadsheetBody({
 				}
 			}}
 			gridRef={gridRef}
-			onResize={resize}
+			{...(canResize ? { onResize: resize } : {})}
 			editor={
 				editing?.from === "cell"
 					? {
@@ -791,20 +779,14 @@ function SpreadsheetBody({
 							<ContextMenuSeparator />
 						</>
 					) : null}
-					<ContextMenuItem
-						onClick={() => {
-							void resize("cols", resetCols)
+					<ResetSizeItems
+						sheet={laidOutSheet}
+						range={range}
+						disabled={!canResize}
+						onReset={(axis, entries) => {
+							void resize(axis, entries)
 						}}
-					>
-						{t("previewSpreadsheetResetColumnWidth", { count: resetCols.length })}
-					</ContextMenuItem>
-					<ContextMenuItem
-						onClick={() => {
-							void resize("rows", resetRows)
-						}}
-					>
-						{t("previewSpreadsheetResetRowHeight", { count: resetRows.length })}
-					</ContextMenuItem>
+					/>
 				</ContextMenuContent>
 			</ContextMenu>
 			{doc.kind !== "csv" ? (
@@ -851,6 +833,55 @@ function SpreadsheetBody({
 				}}
 			/>
 		</div>
+	)
+}
+
+// The grid menu's size resets: the selected columns or rows back to the default size (in the file) or the
+// file's own (beside it). Its own component so the targets are worked out only while the menu is open.
+function ResetSizeItems({
+	sheet,
+	range,
+	disabled,
+	onReset
+}: {
+	sheet: GridSheet
+	range: CellRange
+	disabled: boolean
+	onReset: (axis: SizeAxis, entries: SizeEntry[]) => void
+}) {
+	const { t } = useTranslation("preview")
+
+	function entries(axis: SizeAxis): SizeEntry[] {
+		const [start, end] = axis === "cols" ? [range.startCol, range.endCol] : [range.startRow, range.endRow]
+		const hidden = new Set(axis === "cols" ? sheet.hiddenCols : sheet.hiddenRows)
+
+		return resetTargets(start, end, axis === "cols" ? sheet.colCount : sheet.rowCount, index => hidden.has(index)).map(
+			(index): SizeEntry => [index, null]
+		)
+	}
+
+	const cols = entries("cols")
+	const rows = entries("rows")
+
+	return (
+		<>
+			<ContextMenuItem
+				disabled={disabled || cols.length === 0}
+				onClick={() => {
+					onReset("cols", cols)
+				}}
+			>
+				{t("previewSpreadsheetResetColumnWidth", { count: cols.length })}
+			</ContextMenuItem>
+			<ContextMenuItem
+				disabled={disabled || rows.length === 0}
+				onClick={() => {
+					onReset("rows", rows)
+				}}
+			>
+				{t("previewSpreadsheetResetRowHeight", { count: rows.length })}
+			</ContextMenuItem>
+		</>
 	)
 }
 

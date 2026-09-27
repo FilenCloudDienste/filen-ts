@@ -9,6 +9,7 @@ import {
 	fitSize,
 	pxToColWidth,
 	pxToRowHeight,
+	resetTargets,
 	resizeTargets,
 	restoreSizes,
 	rowHeightToPx,
@@ -141,5 +142,19 @@ describe("fitSize", () => {
 	it("goes back to the default with nothing to measure", () => {
 		expect(fitSize("cols", [])).toBeNull()
 		expect(fitSize("rows", [])).toBeNull()
+	})
+})
+
+describe("resetTargets", () => {
+	it("is the selected indices within the used area, skipping hidden ones", () => {
+		expect(resetTargets(2, 9, 6, index => index === 3)).toEqual([2, 4, 5])
+	})
+
+	it("keeps the first selected index when the selection starts past the used area", () => {
+		expect(resetTargets(8, 12, 5, () => false)).toEqual([8])
+	})
+
+	it("stops at the cap", () => {
+		expect(resetTargets(0, 1_048_575, 1_048_576, () => false)).toHaveLength(MAX_RESIZE_TARGETS)
 	})
 })
