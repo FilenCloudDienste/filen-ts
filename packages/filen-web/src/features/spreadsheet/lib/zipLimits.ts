@@ -80,8 +80,9 @@ async function inflate(data: Uint8Array): Promise<Uint8Array> {
 	return new Uint8Array(await new Response(stream).arrayBuffer())
 }
 
-// The entries of a zip saveXlsx wrote (no ZIP64, sizes in the central directory), by path.
-export async function readZip(bytes: Uint8Array): Promise<Map<string, Uint8Array>> {
+// The entries of a zip saveXlsx wrote (no ZIP64, sizes in the central directory), by path; null when
+// `cancelled` said to stop (checked between entries).
+export async function readZip(bytes: Uint8Array, cancelled: () => boolean = () => false): Promise<Map<string, Uint8Array> | null> {
 	const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
 	const entries = new Map<string, Uint8Array>()
 	const decoder = new TextDecoder()
@@ -116,6 +117,9 @@ export async function readZip(bytes: Uint8Array): Promise<Map<string, Uint8Array
 		const data = bytes.subarray(start, start + compressed)
 
 		entries.set(name, method === 8 ? await inflate(data) : data)
+
+		if (cancelled()) return null
+
 		position += 46 + nameLength + view.getUint16(position + 30, true) + view.getUint16(position + 32, true)
 	}
 

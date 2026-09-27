@@ -77,23 +77,48 @@ describe("proof that saving loses nothing", () => {
 		const workbook = await fixture("shared.xlsx")
 		const plan = xlsxSavePlan(workbook)
 		const original = new Map(rawEntries(workbook))
-		const saved = await readZip(await saveXlsx(workbook))
+		const saved = (await readZip(await saveXlsx(workbook))) ?? new Map<string, Uint8Array>()
 		const sheet = new TextDecoder().decode(saved.get("xl/worksheets/sheet1.xml"))
-		const losses = (edit: (xml: string) => string) =>
-			saveLosses({
+		const losses = async (edit: (xml: string) => string) =>
+			(await saveLosses({
 				original,
 				saved: new Map([...saved, ["xl/worksheets/sheet1.xml", new TextEncoder().encode(edit(sheet))]]),
 				sheetPaths: plan.sheets,
 				dropped: plan.drop
-			})
+			})) ?? []
 
-		expect(losses(xml => xml.replace("<v>3</v>", "<v>4</v>")).some(loss => loss.includes("cell 3,1"))).toBe(true)
+		expect((await losses(xml => xml.replace("<v>3</v>", "<v>4</v>"))).some(loss => loss.includes("cell 3,1"))).toBe(true)
 		expect(
-			losses(xml => xml.replace("</sheetData>", '</sheetData><mergeCells count="1"><mergeCell ref="D1:E2"/></mergeCells>')).some(
-				loss => loss.includes("added")
-			)
+			(
+				await losses(xml => xml.replace("</sheetData>", '</sheetData><mergeCells count="1"><mergeCell ref="D1:E2"/></mergeCells>'))
+			).some(loss => loss.includes("added"))
 		).toBe(true)
-		expect(losses(xml => xml.replace(/<pageMargins[^>]*\/>/, ""))).not.toEqual([])
+		expect(await losses(xml => xml.replace(/<pageMargins[^>]*\/>/, ""))).not.toEqual([])
+	})
+
+	it("stops a proof when its workbook closes, resolving false and letting go of the file's parts", async () => {
+		const rows = Array.from({ length: 20_000 }, (_, row) => Array.from({ length: 10 }, (_, col) => row * 10 + col))
+		const workbook = await openXlsx(await writeXlsx({ sheets: [{ name: "S", rows }] }), { readStyles: true })
+		const document = new XlsxDocument(workbook)
+		const proof = document.verifyWritable()
+
+		document.close()
+
+		expect(await proof).toBe(false)
+		expect(document.writable).toBe(false)
+		expect(rawEntries(workbook)?.size).toBe(0)
+		expect(document.losses).toEqual([])
+
+		// Closed during the comparison: abandoned there too.
+		const other = await openXlsx(await writeXlsx({ sheets: [{ name: "S", rows }] }), { readStyles: true })
+		const second = new XlsxDocument(other)
+		const later = second.verifyWritable()
+
+		await new Promise(resolve => setTimeout(resolve, 5))
+		second.close()
+
+		expect(await later).toBe(false)
+		expect(rawEntries(other)?.size).toBe(0)
 	})
 
 	it("proves only the file as opened: an edit made first leaves it view-only", async () => {

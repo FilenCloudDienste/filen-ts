@@ -12,6 +12,14 @@ export function spreadsheetWorker(): Comlink.Remote<SpreadsheetWorkerApi> {
 	return worker
 }
 
+// The format a name promises, for telling whether a rename changed it: its kind, except that .xlsm
+// (macros kept) and .xlsx (none allowed) open alike but are different files.
+export function spreadsheetSaveFormat(extension: string): string | null {
+	const kind = spreadsheetFileKind(extension)
+
+	return kind === "xlsx" ? extension : kind
+}
+
 export function spreadsheetFileKind(extension: string): SpreadsheetFileKind | null {
 	switch (extension) {
 		case "xlsx":

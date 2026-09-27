@@ -93,11 +93,13 @@ function ColorButton({
 	label,
 	icon,
 	current,
+	disabled,
 	onPick
 }: {
 	label: string
 	icon: ReactNode
 	current: string | undefined
+	disabled: boolean
 	onPick: (color: string | null) => void
 }) {
 	const { t } = useTranslation("preview")
@@ -113,6 +115,7 @@ function ColorButton({
 									variant="ghost"
 									size="icon-sm"
 									aria-label={label}
+									disabled={disabled}
 									className="flex-col gap-0"
 								>
 									{icon}
@@ -160,8 +163,10 @@ function ColorButton({
 	)
 }
 
-// Undo and redo for every editable sheet; the formats too for a workbook (a CSV holds none).
+// Undo and redo for every editable sheet; the formats too for a workbook (a CSV holds none). Shown
+// `disabled` while editing waits to become possible, so the grid below does not move when it does.
 export function FormatToolbar({
+	disabled,
 	style,
 	formats,
 	canUndo,
@@ -170,6 +175,7 @@ export function FormatToolbar({
 	onRedo,
 	onFormat
 }: {
+	disabled: boolean
 	style: CellStyleView | undefined
 	formats: boolean
 	canUndo: boolean
@@ -186,14 +192,14 @@ export function FormatToolbar({
 		<div className="flex h-10 shrink-0 items-center gap-0.5 overflow-x-auto border-b border-border px-2">
 			<ToolbarButton
 				label={t("previewSpreadsheetUndo")}
-				disabled={!canUndo}
+				disabled={disabled || !canUndo}
 				onClick={onUndo}
 			>
 				<Undo2Icon />
 			</ToolbarButton>
 			<ToolbarButton
 				label={t("previewSpreadsheetRedo")}
-				disabled={!canRedo}
+				disabled={disabled || !canRedo}
 				onClick={onRedo}
 			>
 				<Redo2Icon />
@@ -206,6 +212,7 @@ export function FormatToolbar({
 					/>
 					<ToolbarButton
 						label={t("previewSpreadsheetBold")}
+						disabled={disabled}
 						active={style?.bold === true}
 						onClick={() => {
 							onFormat({ bold: style?.bold !== true })
@@ -215,6 +222,7 @@ export function FormatToolbar({
 					</ToolbarButton>
 					<ToolbarButton
 						label={t("previewSpreadsheetItalic")}
+						disabled={disabled}
 						active={style?.italic === true}
 						onClick={() => {
 							onFormat({ italic: style?.italic !== true })
@@ -224,6 +232,7 @@ export function FormatToolbar({
 					</ToolbarButton>
 					<ToolbarButton
 						label={t("previewSpreadsheetUnderline")}
+						disabled={disabled}
 						active={style?.underline === true}
 						onClick={() => {
 							onFormat({ underline: style?.underline !== true })
@@ -233,6 +242,7 @@ export function FormatToolbar({
 					</ToolbarButton>
 					<ToolbarButton
 						label={t("previewSpreadsheetStrikethrough")}
+						disabled={disabled}
 						active={style?.strike === true}
 						onClick={() => {
 							onFormat({ strike: style?.strike !== true })
@@ -246,6 +256,7 @@ export function FormatToolbar({
 					/>
 					<ColorButton
 						label={t("previewSpreadsheetTextColor")}
+						disabled={disabled}
 						icon={<BaselineIcon />}
 						current={style?.color}
 						onPick={color => {
@@ -254,6 +265,7 @@ export function FormatToolbar({
 					/>
 					<ColorButton
 						label={t("previewSpreadsheetFillColor")}
+						disabled={disabled}
 						icon={<PaintBucketIcon />}
 						current={style?.fill}
 						onPick={fill => {
@@ -266,6 +278,7 @@ export function FormatToolbar({
 					/>
 					<ToolbarButton
 						label={t("previewSpreadsheetAlignLeft")}
+						disabled={disabled}
 						active={style?.align === "left"}
 						onClick={() => {
 							onFormat({ align: style?.align === "left" ? null : "left" })
@@ -275,6 +288,7 @@ export function FormatToolbar({
 					</ToolbarButton>
 					<ToolbarButton
 						label={t("previewSpreadsheetAlignCenter")}
+						disabled={disabled}
 						active={style?.align === "center"}
 						onClick={() => {
 							onFormat({ align: style?.align === "center" ? null : "center" })
@@ -284,6 +298,7 @@ export function FormatToolbar({
 					</ToolbarButton>
 					<ToolbarButton
 						label={t("previewSpreadsheetAlignRight")}
+						disabled={disabled}
 						active={style?.align === "right"}
 						onClick={() => {
 							onFormat({ align: style?.align === "right" ? null : "right" })
@@ -301,6 +316,7 @@ export function FormatToolbar({
 							{ value: CUSTOM, label: t("previewSpreadsheetFormatCustom") }
 						]}
 						value={formatValue}
+						disabled={disabled}
 						onValueChange={value => {
 							if (value !== null && value !== CUSTOM) {
 								onFormat({ numFmt: value })

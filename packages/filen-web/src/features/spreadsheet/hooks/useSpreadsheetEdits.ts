@@ -85,25 +85,32 @@ export function useSpreadsheetEdits(id: number, initial: GridDoc): SpreadsheetEd
 
 export type Writability = "checking" | "writable" | "readOnly"
 
-// Whether the open document may be edited and saved. A workbook opens unproven: the worker checks in the
-// background that saving it loses nothing, and until that answers nothing may be sent to it (an edit
-// before the verdict would make it view-only). Asked only when editing could follow (`wanted`); an
-// answer arriving after the viewer has gone is ignored, as the document is closed by then.
-export function useSpreadsheetWritability(id: number, doc: Pick<GridDoc, "kind" | "writable">, wanted: boolean): Writability {
+// Whether the open document may be edited and saved. A workbook opens unproven: the worker proves that
+// saving it loses nothing, and until that answers nothing may be sent to it (an edit before the verdict
+// would make it view-only). Asked once editing could follow (`wanted`, which may turn true later); a file
+// that will never be edited here (`neverEditable`) tells the worker to skip the proof instead. An answer
+// arriving after the viewer has gone is ignored, as the document is closed by then.
+export function useSpreadsheetWritability(
+	id: number,
+	doc: Pick<GridDoc, "kind" | "writable">,
+	wanted: boolean,
+	neverEditable: boolean
+): Writability {
 	const proven = doc.kind === "xlsx"
 	const [verdict, setVerdict] = useState<boolean | null>(null)
 
 	useEffect(() => {
-		if (!proven || verdict !== null) {
-			return undefined
+		if (!proven || !neverEditable) {
+			return
 		}
 
-		// Nothing here will edit it: no proof, and the worker lets go of what only a save would need.
-		if (!wanted) {
-			void spreadsheetWorker()
-				.viewOnly(id)
-				.catch(() => undefined)
+		void spreadsheetWorker()
+			.viewOnly(id)
+			.catch(() => undefined)
+	}, [id, proven, neverEditable])
 
+	useEffect(() => {
+		if (!proven || neverEditable || !wanted || verdict !== null) {
 			return undefined
 		}
 
@@ -127,7 +134,7 @@ export function useSpreadsheetWritability(id: number, doc: Pick<GridDoc, "kind" 
 		return () => {
 			live = false
 		}
-	}, [id, proven, wanted, verdict])
+	}, [id, proven, neverEditable, wanted, verdict])
 
 	if (!proven) {
 		return doc.writable ? "writable" : "readOnly"

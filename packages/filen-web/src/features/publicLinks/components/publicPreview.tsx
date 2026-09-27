@@ -102,6 +102,7 @@ function PublicPreviewBody({ item, category, alt }: { item: DriveItem; category:
 					<SpreadsheetViewer
 						item={item}
 						documentKey={item.data.uuid}
+						neverEditable
 						alt={alt}
 					/>
 				</Suspense>

@@ -5,7 +5,12 @@ import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import { extensionOf } from "@/features/drive/lib/preview.logic"
 import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
 import { gridDoc, type GridDoc } from "@/features/spreadsheet/lib/cellStore.logic"
-import { sniffSpreadsheetKind, spreadsheetFileKind, spreadsheetWorker } from "@/features/spreadsheet/lib/spreadsheetClient"
+import {
+	sniffSpreadsheetKind,
+	spreadsheetFileKind,
+	spreadsheetSaveFormat,
+	spreadsheetWorker
+} from "@/features/spreadsheet/lib/spreadsheetClient"
 import { type ErrorDTO } from "@/lib/sdk/errors"
 
 export type SpreadsheetDocState =
@@ -25,13 +30,8 @@ function extension(item: DriveItem): string {
 	return extensionOf(base.type === "file" ? driveItemName(base) : "")
 }
 
-// The format a name promises: its kind, except that .xlsm (macros kept) and .xlsx (none allowed) open
-// alike but are different files, so a rename between them is a change of format too.
 function nameFormat(item: DriveItem): string | null {
-	const ext = extension(item)
-	const kind = spreadsheetFileKind(ext)
-
-	return kind === "xlsx" ? ext : kind
+	return spreadsheetSaveFormat(extension(item))
 }
 
 // Downloads the file (the preview's shared byte load and cache) and opens it in the spreadsheet worker,

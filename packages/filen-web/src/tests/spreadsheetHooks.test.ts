@@ -15,10 +15,9 @@ const { open, close, undo, redo, apply, writability, viewOnly } = vi.hoisted(() 
 	apply: vi.fn()
 }))
 
-vi.mock("@/features/spreadsheet/lib/spreadsheetClient", () => ({
-	spreadsheetWorker: () => ({ open, close, undo, redo, apply, writability, viewOnly }),
-	spreadsheetFileKind: (extension: string) =>
-		(({ xlsx: "xlsx", xlsm: "xlsx", xls: "xls", csv: "csv", tsv: "tsv" }) as Record<string, string>)[extension] ?? null,
+vi.mock(import("@/features/spreadsheet/lib/spreadsheetClient"), async importOriginal => ({
+	...(await importOriginal()),
+	spreadsheetWorker: () => ({ open, close, undo, redo, apply, writability, viewOnly }) as never,
 	sniffSpreadsheetKind: () => "csv"
 }))
 
@@ -134,7 +133,7 @@ describe("useSpreadsheetWritability", () => {
 			})
 		)
 
-		const { result } = renderHook(() => useSpreadsheetWritability(3, XLSX, true))
+		const { result } = renderHook(() => useSpreadsheetWritability(3, XLSX, true, false))
 
 		expect(result.current).toBe("checking")
 		expect(writability).toHaveBeenCalledWith(3)
@@ -149,8 +148,8 @@ describe("useSpreadsheetWritability", () => {
 	it("stays read-only when the proof fails or the check throws", async () => {
 		writability.mockResolvedValueOnce(false).mockRejectedValueOnce(new Error("closed"))
 
-		const refused = renderHook(() => useSpreadsheetWritability(4, XLSX, true))
-		const failed = renderHook(() => useSpreadsheetWritability(5, XLSX, true))
+		const refused = renderHook(() => useSpreadsheetWritability(4, XLSX, true, false))
+		const failed = renderHook(() => useSpreadsheetWritability(5, XLSX, true, false))
 
 		await waitFor(() => {
 			expect(refused.result.current).toBe("readOnly")
@@ -161,11 +160,18 @@ describe("useSpreadsheetWritability", () => {
 	it("asks nothing for text, or when editing could not follow, and ignores an answer after unmount", async () => {
 		writability.mockClear()
 
-		expect(renderHook(() => useSpreadsheetWritability(6, { kind: "csv", writable: true }, true)).result.current).toBe("writable")
-		expect(renderHook(() => useSpreadsheetWritability(7, XLSX, false)).result.current).toBe("checking")
+		viewOnly.mockClear()
+
+		expect(renderHook(() => useSpreadsheetWritability(6, { kind: "csv", writable: true }, true, false)).result.current).toBe("writable")
+		expect(renderHook(() => useSpreadsheetWritability(7, XLSX, false, false)).result.current).toBe("checking")
 		expect(writability).not.toHaveBeenCalled()
-		// Nothing there will edit: the worker skips the proof and drops what only saving needs.
-		expect(viewOnly).toHaveBeenCalledWith(7)
+		// Not editable for now is not "never": the proof stays possible.
+		expect(viewOnly).not.toHaveBeenCalled()
+
+		// A public link: nothing will edit it, so the worker skips the proof.
+		renderHook(() => useSpreadsheetWritability(9, XLSX, false, true))
+		expect(viewOnly).toHaveBeenCalledWith(9)
+		expect(writability).not.toHaveBeenCalled()
 
 		let answer: (writable: boolean) => void = () => undefined
 
@@ -175,7 +181,7 @@ describe("useSpreadsheetWritability", () => {
 			})
 		)
 
-		const gone = renderHook(() => useSpreadsheetWritability(8, XLSX, true))
+		const gone = renderHook(() => useSpreadsheetWritability(8, XLSX, true, false))
 
 		gone.unmount()
 		await act(async () => {
@@ -183,5 +189,23 @@ describe("useSpreadsheetWritability", () => {
 			await Promise.resolve()
 		})
 		expect(gone.result.current).toBe("checking")
+	})
+
+	it("asks once editing becomes possible later, as after a rename back", async () => {
+		writability.mockReset()
+		viewOnly.mockClear()
+		writability.mockResolvedValue(true)
+
+		const { result, rerender } = renderHook(({ wanted }) => useSpreadsheetWritability(10, XLSX, wanted, false), {
+			initialProps: { wanted: false }
+		})
+
+		expect(writability).not.toHaveBeenCalled()
+		rerender({ wanted: true })
+		await waitFor(() => {
+			expect(result.current).toBe("writable")
+		})
+		expect(writability).toHaveBeenCalledWith(10)
+		expect(viewOnly).not.toHaveBeenCalled()
 	})
 })

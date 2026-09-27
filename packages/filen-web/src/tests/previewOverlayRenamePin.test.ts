@@ -23,12 +23,16 @@ vi.mock("@/lib/keymap/useAction", () => ({ useAction: vi.fn(), IN_EDITORS: {}, I
 vi.mock("@/lib/useIsOnline", () => ({ useIsOnline: () => true }))
 
 function viewerStub(kind: "text" | "spreadsheet") {
-	return function Viewer({ editable }: { editable?: boolean }) {
+	return function Viewer({ editable, readOnlyReason }: { editable?: boolean; readOnlyReason?: string }) {
 		useEffect(() => {
 			mounts[kind]++
 		}, [])
 
-		return createElement("div", { "data-testid": kind, "data-editable": String(editable === true) })
+		return createElement("div", {
+			"data-testid": kind,
+			"data-editable": String(editable === true),
+			"data-reason": readOnlyReason ?? ""
+		})
 	}
 }
 
@@ -40,9 +44,9 @@ import { narrowItem } from "@/features/drive/lib/item"
 import { usePreviewUnsavedGuardStore } from "@/features/preview/store/usePreviewUnsavedGuard"
 import { PreviewOverlay } from "@/features/preview/components/previewOverlay"
 
-function named(name: string) {
+function named(name: string, uuid = "file") {
 	return narrowItem({
-		uuid: "file-0000-0000-0000-000000000000",
+		uuid: `${uuid}-0000-0000-0000-000000000000`,
 		stableUUID: "lineage" as File["stableUUID"],
 		parent: "parent-0000-0000-0000-000000000000" as UuidStr,
 		size: 1n,
@@ -56,11 +60,15 @@ function named(name: string) {
 	})
 }
 
-function overlay(name: string) {
+// A second slot to step to and back from, when `index` is given.
+function overlay(name: string, index = 0) {
 	return createElement(PreviewOverlay, {
 		variant: "drive" as const,
-		items: [{ type: "drive" as const, item: named(name) }],
-		index: 0,
+		items: [
+			{ type: "drive" as const, item: named(name) },
+			{ type: "drive" as const, item: named("other.pdf", "other") }
+		],
+		index,
 		onStep: vi.fn(),
 		onClose: vi.fn(),
 		onItemRemoved: vi.fn()
@@ -108,5 +116,54 @@ describe("PreviewOverlay — a rename of the open file", () => {
 
 		expect(screen.getByTestId("text")).toBe(viewer)
 		expect(viewer.dataset["editable"]).toBe("true")
+	})
+
+	it("says why a spreadsheet renamed to another format went read-only, macro workbooks included", async () => {
+		const { rerender } = render(overlay("budget.xlsx"))
+		const viewer = await screen.findByTestId("spreadsheet")
+
+		// .xlsm keeps macros, .xlsx allows none: a save under the other name would mislabel the file.
+		rerender(overlay("budget.xlsm"))
+
+		expect(viewer.dataset["editable"]).toBe("false")
+		expect(viewer.dataset["reason"]).toBe("renamed")
+
+		rerender(overlay("budget.xlsx"))
+
+		expect(viewer.dataset["editable"]).toBe("true")
+		expect(viewer.dataset["reason"]).toBe("")
+
+		rerender(overlay("budget.csv"))
+
+		expect(viewer.dataset["editable"]).toBe("false")
+		expect(viewer.dataset["reason"]).toBe("renamed")
+	})
+
+	it("opens a clean slot stepped back to by the name it has then", async () => {
+		const { rerender } = render(overlay("budget.xlsx"))
+
+		await screen.findByTestId("spreadsheet")
+		rerender(overlay("budget.csv"))
+		rerender(overlay("budget.csv", 1))
+		rerender(overlay("budget.csv", 0))
+
+		const viewer = await screen.findByTestId("spreadsheet")
+
+		expect(viewer.dataset["editable"]).toBe("true")
+		expect(viewer.dataset["reason"]).toBe("")
+	})
+
+	it("opens a text file renamed to a spreadsheet name as one once stepped back to", async () => {
+		const { rerender } = render(overlay("data.txt"))
+
+		await screen.findByTestId("text")
+		rerender(overlay("data.csv"))
+
+		expect(screen.getByTestId("text")).toBeDefined()
+
+		rerender(overlay("data.csv", 1))
+		rerender(overlay("data.csv", 0))
+
+		expect((await screen.findByTestId("spreadsheet")).dataset["editable"]).toBe("true")
 	})
 })

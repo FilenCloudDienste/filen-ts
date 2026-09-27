@@ -95,8 +95,9 @@ test("csv and xlsx open as grids, edit, recalculate and save, no CSP console err
 		await xlsxRow.dblclick()
 		await expect(gridCell(grid, 4, 2)).toHaveText("1500", { timeout: 60_000 })
 		await expect(dialog.getByRole("tab", { name: "Notes" })).toBeVisible()
-		// A workbook opens view-only until the worker has proven it saves intact; typing waits for that.
-		await expect(dialog.getByRole("button", { name: "Undo", exact: true })).toBeVisible({ timeout: 60_000 })
+		// A workbook opens view-only (its toolbar disabled) until the worker has proven it saves intact; typing
+		// waits for that.
+		await expect(dialog.getByRole("button", { name: "Bold", exact: true })).toBeEnabled({ timeout: 60_000 })
 		await expect(dialog.getByText("Checking this file can be saved…")).toHaveCount(0)
 
 		await typeInto(page, grid, 3, 2, "500")

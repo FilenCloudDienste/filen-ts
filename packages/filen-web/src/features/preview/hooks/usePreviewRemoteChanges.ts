@@ -85,6 +85,9 @@ interface RemoteChangeContext {
 	saving: RefObject<boolean>
 	held: RefObject<PreviewRevision[]>
 	heldLeaving: RefObject<HeldLeaving[]>
+	// Slots (frozen uuid → the gone file's uuid) kept on screen for their unsaved edits: the pager, which
+	// skipped removing them while dirty, drops them once they are clean or left.
+	keptGone: RefObject<Map<string, string>>
 	// Displayed uuids this overlay is trashing or deleting, moving, or restoring a version of: their echoes
 	// are the user's own doing, never a change made elsewhere.
 	ownChanges: RefObject<Map<string, OwnChangeKind>>
@@ -338,6 +341,13 @@ function handleEvent(ctx: RemoteChangeContext, event: PreviewReconcileEvent): vo
 		case "restored":
 			// The file whose deletion is being asked about, or held until a save settles, is back.
 			ctx.heldLeaving.current = ctx.heldLeaving.current.filter(held => held.moved !== null || held.uuid !== event.uuid)
+
+			for (const [frozenUuid, goneUuid] of ctx.keptGone.current) {
+				if (goneUuid === event.uuid) {
+					ctx.keptGone.current.delete(frozenUuid)
+				}
+			}
+
 			ctx.setPrompt(prev => (prev?.kind === "deleted" && displayedUuid(ctx, prev.frozenUuid) === event.uuid ? null : prev))
 
 			break
@@ -424,6 +434,7 @@ export function usePreviewRemoteChanges({
 	const saving = useRef(false)
 	const held = useRef<PreviewRevision[]>([])
 	const heldLeaving = useRef<HeldLeaving[]>([])
+	const keptGone = useRef(new Map<string, string>())
 	const ownChanges = useRef(new Map<string, OwnChangeKind>())
 	const slots = useRef<SlotIndex | null>(null)
 	const reconnects = useRef(0)
@@ -437,6 +448,7 @@ export function usePreviewRemoteChanges({
 		saving,
 		held,
 		heldLeaving,
+		keptGone,
 		ownChanges,
 		reconnects,
 		checkedAt,
@@ -495,6 +507,25 @@ export function usePreviewRemoteChanges({
 		}
 	}, [ctx, currentFrozenUuid])
 
+	// A gone file kept on screen leaves the pager once its edits are discarded, or the user steps away
+	// (which asks first). After the render that steps, so the pager keeps the slot the user went to. A slot
+	// that shows another file by then (saved as a new one) stays.
+	const dirty = usePreviewUnsavedGuardStore(state => state.dirty)
+
+	useEffect(() => {
+		for (const [frozenUuid, goneUuid] of keptGone.current) {
+			if (frozenUuid === currentFrozenUuid && dirty) {
+				continue
+			}
+
+			keptGone.current.delete(frozenUuid)
+
+			if (displayedUuid(ctx, frozenUuid) === goneUuid) {
+				latest.current.onItemRemoved(frozenUuid)
+			}
+		}
+	}, [ctx, currentFrozenUuid, dirty])
+
 	function saveStarted(): void {
 		saving.current = true
 	}
@@ -539,6 +570,8 @@ export function usePreviewRemoteChanges({
 	function keepMine(): void {
 		if (prompt?.kind === "revised") {
 			keptOver.current.set(prompt.frozenUuid, prompt.theirs.data.uuid)
+		} else if (prompt?.kind === "deleted") {
+			keptGone.current.set(prompt.frozenUuid, displayedUuid(ctx, prompt.frozenUuid))
 		}
 
 		setPrompt(null)

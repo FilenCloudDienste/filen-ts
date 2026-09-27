@@ -40,6 +40,10 @@ interface SpreadsheetViewerProps {
 	documentKey: string
 	alt: string
 	editable?: boolean
+	// Why a file the user could otherwise edit is read-only, for the note beside the cell contents.
+	readOnlyReason?: "renamed"
+	// Nothing will ever edit this file here (a public link): the worker can drop what only a save needs.
+	neverEditable?: boolean
 	onDirtyChange?: (dirty: boolean) => void
 	saveRef?: RefObject<SpreadsheetSaveSource | null>
 }
@@ -134,6 +138,8 @@ function SpreadsheetBody({
 	editable,
 	unnamed,
 	renamed,
+	readOnlyReason,
+	neverEditable,
 	onDirtyChange,
 	saveRef
 }: {
@@ -143,16 +149,22 @@ function SpreadsheetBody({
 	editable: boolean
 	unnamed: boolean
 	renamed: boolean
+	readOnlyReason: "renamed" | undefined
+	neverEditable: boolean
 	onDirtyChange: ((dirty: boolean) => void) | undefined
 	saveRef: RefObject<SpreadsheetSaveSource | null> | undefined
 }) {
 	const { t } = useTranslation("preview")
 	const edits = useSpreadsheetEdits(id, initial)
 	const doc = edits.doc
-	const writability = useSpreadsheetWritability(id, doc, editable && !unnamed)
+	const writability = useSpreadsheetWritability(id, doc, editable && !unnamed, neverEditable)
 	const canEdit = editable && writability === "writable" && !unnamed && !renamed
+	// Editing waits on the worker's proof: the toolbar holds its place meanwhile, disabled.
+	const toolbarShown = canEdit || (editable && !unnamed && !renamed && writability === "checking")
 	const readOnlyNote = !editable
-		? null
+		? readOnlyReason === "renamed"
+			? t("previewSpreadsheetReadOnlyRenamed")
+			: null
 		: unnamed
 			? t("previewSpreadsheetReadOnlyUnnamed")
 			: renamed
@@ -192,6 +204,11 @@ function SpreadsheetBody({
 
 	if (sheetCount !== doc.sheets.length) {
 		setSheetCount(doc.sheets.length)
+
+		// The sheet on show went too: the one now shown is the one chosen, so the next "add" stays put.
+		if (chosenSheet > doc.sheets.length - 1) {
+			setChosenSheet(Math.max(0, doc.sheets.length - 1))
+		}
 
 		if (doc.sheets.length < sheetCount) {
 			setSelections(prev => new Map([...prev].filter(([index]) => index < doc.sheets.length)))
@@ -494,6 +511,16 @@ function SpreadsheetBody({
 		onDirtyChange?.(dirty)
 	}, [dirty, onDirtyChange])
 
+	// Another sheet on show (a tab, or an undone "add sheet" taking the shown one away) starts at its top.
+	const shownSheet = useRef(sheetIndex)
+
+	useLayoutEffect(() => {
+		if (shownSheet.current !== sheetIndex) {
+			shownSheet.current = sheetIndex
+			gridRef.current?.scrollTo({ top: 0, left: 0 })
+		}
+	}, [sheetIndex])
+
 	// The latest handlers, for callers outside React's events.
 	useEffect(() => {
 		clipboardRef.current = handleClipboard
@@ -592,8 +619,9 @@ function SpreadsheetBody({
 			data-preview-surface
 			className="flex size-full flex-col"
 		>
-			{canEdit ? (
+			{toolbarShown ? (
 				<FormatToolbar
+					disabled={!canEdit}
 					style={activeStyle}
 					formats={doc.kind === "xlsx"}
 					canUndo={edits.state.canUndo}
@@ -657,7 +685,18 @@ function SpreadsheetBody({
 			</div>
 			{/* One tree whether editable or not, so the grid (its scroll and focus) outlives a switch to read-only. */}
 			<ContextMenu disabled={!canEdit}>
-				<ContextMenuTrigger className="flex min-h-0 flex-1 flex-col">{grid}</ContextMenuTrigger>
+				<ContextMenuTrigger
+					className="flex min-h-0 flex-1 flex-col"
+					// Read-only, no menu at all: the browser's own offers nothing for a grid (no text selection
+					// to copy; copying is mod+C).
+					onContextMenu={event => {
+						if (!canEdit) {
+							event.preventDefault()
+						}
+					}}
+				>
+					{grid}
+				</ContextMenuTrigger>
 				<ContextMenuContent>
 					<ContextMenuItem
 						disabled={structureDisabled || !canEdit}
@@ -724,7 +763,6 @@ function SpreadsheetBody({
 					onSelect={index => {
 						commit("none")
 						setChosenSheet(index)
-						gridRef.current?.scrollTo({ top: 0, left: 0 })
 					}}
 					onAdd={
 						canEdit
@@ -771,7 +809,16 @@ function SpreadsheetBody({
 // recalculate, rows and columns, sheets, formats, undo. The file is parsed and edited in the spreadsheet
 // worker, which keeps it (useSpreadsheetDoc, useSpreadsheetEdits); `saveRef` hands the overlay its bytes
 // as edited.
-function SpreadsheetViewer({ item, documentKey, alt, editable, onDirtyChange, saveRef }: SpreadsheetViewerProps) {
+function SpreadsheetViewer({
+	item,
+	documentKey,
+	alt,
+	editable,
+	readOnlyReason,
+	neverEditable,
+	onDirtyChange,
+	saveRef
+}: SpreadsheetViewerProps) {
 	const { t } = useTranslation("preview")
 	const state = useSpreadsheetDoc(item, documentKey)
 
@@ -810,6 +857,8 @@ function SpreadsheetViewer({ item, documentKey, alt, editable, onDirtyChange, sa
 					editable={editable === true}
 					unnamed={state.unnamed}
 					renamed={state.renamed}
+					readOnlyReason={readOnlyReason}
+					neverEditable={neverEditable === true}
 					onDirtyChange={onDirtyChange}
 					saveRef={saveRef}
 				/>

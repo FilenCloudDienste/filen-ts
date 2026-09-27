@@ -52,7 +52,7 @@ import {
 	workbookStructureLocked,
 	WorkbookViews
 } from "@/features/spreadsheet/lib/xlsxView"
-import { saveLosses } from "@/features/spreadsheet/lib/xlsxVerify"
+import { pause, saveLosses } from "@/features/spreadsheet/lib/xlsxVerify"
 import { rawEntries, xlsxSavePlan, type SavePlan } from "@/features/spreadsheet/lib/xlsxWritable"
 import { readZip } from "@/features/spreadsheet/lib/zipLimits"
 
@@ -336,6 +336,7 @@ export class XlsxDocument {
 	private styleMark = 0
 	private readonly historyBudget: number
 	private prepared = false
+	private closed = false
 
 	constructor(workbook: RoundtripWorkbook, historyBudget = HISTORY_CELLS) {
 		this.workbook = workbook
@@ -647,23 +648,35 @@ export class XlsxDocument {
 
 	private async verify(): Promise<boolean> {
 		const raw = rawEntries(this.workbook)
+		const closed = () => this.closed
 		let proven = false
 
-		if (raw !== null && this.savePlan.writable && this.untouched()) {
-			const original = new Map(raw)
+		// Yields first, so a close already on its way is seen before any work.
+		await pause()
+
+		if (raw !== null && this.savePlan.writable && this.untouched() && !closed()) {
 			let size = 0
 
-			for (const bytes of original.values()) size += bytes.length
+			for (const bytes of raw.values()) size += bytes.length
 
 			// Too large to prove without holding the file twice over: view-only.
 			if (size <= VERIFY_LIMIT) {
+				const original = new Map(raw)
+
 				await this.prepareSave()
 
-				const saved = await readZip(await saveXlsx(this.workbook))
+				// Closed meanwhile: every buffer below is dropped unused.
+				const saved = closed() ? null : await readZip(await saveXlsx(this.workbook), closed)
+				const losses =
+					saved === null || closed()
+						? null
+						: await saveLosses({ original, saved, sheetPaths: this.savePlan.sheets, dropped: this.savePlan.drop }, closed)
 
-				this.losses = saveLosses({ original, saved, sheetPaths: this.savePlan.sheets, dropped: this.savePlan.drop })
-				// An edit that came in while it saved would be read as the file.
-				proven = this.losses.length === 0 && this.untouched()
+				if (losses !== null && !closed()) {
+					this.losses = losses
+					// An edit that came in while it saved would be read as the file.
+					proven = losses.length === 0 && this.untouched()
+				}
 			}
 		}
 
@@ -684,7 +697,7 @@ export class XlsxDocument {
 			return
 		}
 
-		if (!this.proven) {
+		if (!this.proven || this.closed) {
 			raw.clear()
 
 			return
@@ -743,9 +756,13 @@ export class XlsxDocument {
 		return this.state()
 	}
 
+	// Stops a proof still running (it resolves false) and lets go of the engine and the file's parts.
 	close(): void {
+		this.closed = true
+		this.proven = false
 		this.engine?.destroy()
 		this.engine = null
+		rawEntries(this.workbook)?.clear()
 	}
 
 	private revert(step: Step): EditResult {

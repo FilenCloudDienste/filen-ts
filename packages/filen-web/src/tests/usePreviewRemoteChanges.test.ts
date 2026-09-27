@@ -489,4 +489,57 @@ describe("usePreviewRemoteChanges", () => {
 
 		expect(getPreviewBytes("authed", testUuid("copy"))).toBeUndefined()
 	})
+
+	it("drops a deleted file kept on screen from the pager once the user steps away from it", () => {
+		const { hook, onItemRemoved } = setup()
+
+		act(() => {
+			emitPreviewItemRemoved(testUuid("a"))
+		})
+		act(() => {
+			hook.result.current.keepMine()
+		})
+
+		expect(onItemRemoved).not.toHaveBeenCalled()
+
+		// Stepping away asks first, and a discard clears the edits with the step.
+		act(() => {
+			setPreviewDirty(false)
+			hook.rerender({ items: [file("a"), file("b", { stableUUID: "other" as File["stableUUID"] })], index: 1 })
+		})
+
+		expect(onItemRemoved).toHaveBeenCalledExactlyOnceWith(testUuid("a"))
+	})
+
+	it("drops a deleted file kept on screen once its edits are gone, but not once it was restored", () => {
+		const { hook, onItemRemoved } = setup()
+
+		act(() => {
+			emitPreviewItemRemoved(testUuid("a"))
+		})
+		act(() => {
+			hook.result.current.keepMine()
+		})
+		act(() => {
+			setPreviewDirty(false)
+		})
+
+		expect(onItemRemoved).toHaveBeenCalledExactlyOnceWith(testUuid("a"))
+
+		onItemRemoved.mockClear()
+		setPreviewDirty(true)
+
+		act(() => {
+			emitPreviewItemRemoved(testUuid("a"))
+		})
+		act(() => {
+			hook.result.current.keepMine()
+			emitPreviewItemRestored(testUuid("a"))
+		})
+		act(() => {
+			setPreviewDirty(false)
+		})
+
+		expect(onItemRemoved).not.toHaveBeenCalled()
+	})
 })

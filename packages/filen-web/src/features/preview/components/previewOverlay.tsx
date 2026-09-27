@@ -54,6 +54,7 @@ import { clearVideoPlaybackStates } from "@/features/preview/lib/videoContinuity
 import { clearPreviewCache, loadPreviewBytes } from "@/features/preview/lib/previewCache"
 import { usePreviewCacheScope } from "@/features/preview/lib/accessMode"
 import type { SpreadsheetSaveSource } from "@/features/spreadsheet/components/spreadsheetViewer"
+import { spreadsheetSaveFormat } from "@/features/spreadsheet/lib/spreadsheetClient"
 import { usePreviewRemoteChanges } from "@/features/preview/hooks/usePreviewRemoteChanges"
 import { RemoteChangeDialog } from "@/features/preview/components/remoteChangeDialog"
 import { DriveDropdownMenuContent } from "@/features/drive/components/itemMenu"
@@ -232,8 +233,8 @@ export function PreviewOverlay({
 	const [documentKeys, setDocumentKeys] = useState<ReadonlyMap<string, string>>(() => new Map<string, string>())
 	const documentKeysRef = useRef(documentKeys)
 	const documentGeneration = useRef(0)
-	// Per document key, the slot's pinned renderer and save format (slotPin).
-	const [pins, setPins] = useState<ReadonlyMap<string, SlotPin>>(() => new Map<string, SlotPin>())
+	// The slot on screen's pinned renderer and save format (slotPin), and the document it was taken for.
+	const [pinned, setPinned] = useState<{ documentKey: string; pin: SlotPin } | null>(null)
 	// Single-slot (unlike `saved` above): keyed to the CURRENT pager slot only, so navigating away and
 	// back can forget an earlier slot's lock (accepted — the guarded failure re-asserts on the next
 	// failed save). Mirrors mobile parity's "a failed save locks the file read-only" rule; cleared by a
@@ -283,13 +284,14 @@ export function PreviewOverlay({
 				? rawSource
 				: { type: "drive", item: driveItem ?? rawSource.item }
 	const currentDocumentKey = rawDriveItem === undefined ? "" : (documentKeys.get(rawDriveItem.data.uuid) ?? rawDriveItem.data.uuid)
-	// The drive slot's renderer and save format, as it opened: a rename never swaps the viewer (and with it
-	// the unsaved edits) out from under the user. Taken again only for a new document (see documentKeys).
-	const derivedPin = driveItem === undefined ? null : slotPin(driveItem)
-	const pin = derivedPin === null ? null : (pins.get(currentDocumentKey) ?? derivedPin)
+	// The drive slot's renderer and save format, as it mounted: a rename never swaps the viewer (and with it
+	// the unsaved edits) out from under the user. Taken again whenever the slot mounts anew, which is only
+	// ever clean (stepping to it, or a new document, see documentKeys): its name as it stands then decides.
+	const derivedPin = driveItem === undefined ? null : slotPin(driveItem, variant)
+	const pin = derivedPin === null ? null : pinned?.documentKey === currentDocumentKey ? pinned.pin : derivedPin
 
-	if (derivedPin !== null && !pins.has(currentDocumentKey)) {
-		setPins(new Map(pins).set(currentDocumentKey, derivedPin))
+	if (derivedPin !== null && pinned?.documentKey !== currentDocumentKey) {
+		setPinned({ documentKey: currentDocumentKey, pin: derivedPin })
 	}
 
 	// Editable is intrinsically drive-only: the external arm never carries an editable buffer. Compared
@@ -303,6 +305,8 @@ export function PreviewOverlay({
 		isEditable(driveItem, variant) &&
 		saveFormat(driveItem) === pin.format &&
 		lockedReadOnly?.forUuid !== rawDriveItem.data.uuid
+	// Read-only only because a rename changed the format the open edits would be saved in.
+	const renamedReadOnly = driveItem !== undefined && pin?.editable === true && saveFormat(driveItem) !== pin.format
 
 	// `ownSave`: `item` is what this overlay's own save of the slot made.
 	function commitSaved(frozenUuid: string, item: DriveItem, ownSave?: boolean): void {
@@ -1132,6 +1136,7 @@ export function PreviewOverlay({
 									category={pin?.category}
 									documentKey={currentDocumentKey}
 									editable={editable}
+									renamedReadOnly={renamedReadOnly}
 									locked={saving}
 									onDirtyChange={setPreviewDirty}
 									contentRef={contentRef}
@@ -1238,10 +1243,12 @@ function PreviewName({ name }: { name: string }) {
 interface SlotPin {
 	category: PreviewCategory
 	format: string
+	// Whether the slot was editable as it mounted.
+	editable: boolean
 }
 
-// The format edits are written in: text for every text category, the extension for a spreadsheet (its
-// writer follows the extension it opened with).
+// The format edits are written in: text for every text category, the file kind for a spreadsheet (its
+// writer follows the kind it opened as, the same judgement the grid's own rename note makes).
 function saveFormat(item: DriveItem): string {
 	const category = previewType(item)
 
@@ -1249,11 +1256,17 @@ function saveFormat(item: DriveItem): string {
 		return "text"
 	}
 
-	return category === "spreadsheet" ? `spreadsheet:${extensionOf(driveItemName(item))}` : ""
+	if (category !== "spreadsheet") {
+		return ""
+	}
+
+	const extension = extensionOf(driveItemName(item))
+
+	return `spreadsheet:${spreadsheetSaveFormat(extension) ?? extension}`
 }
 
-function slotPin(item: DriveItem): SlotPin {
-	return { category: previewType(item), format: saveFormat(item) }
+function slotPin(item: DriveItem, variant: DriveVariant): SlotPin {
+	return { category: previewType(item), format: saveFormat(item), editable: isEditable(item, variant) }
 }
 
 // What remounts the body. A spreadsheet follows its document (see documentKeys), so the user's own save
@@ -1269,6 +1282,8 @@ interface PreviewBodyProps {
 	category: PreviewCategory | undefined
 	documentKey: string
 	editable: boolean
+	// Read-only because a rename changed the save format: the spreadsheet grid says so.
+	renamedReadOnly: boolean
 	// A save in flight: text editors go read-only until it settles.
 	locked: boolean
 	onDirtyChange: (dirty: boolean) => void
@@ -1328,6 +1343,7 @@ function PreviewBody({
 	category: pinnedCategory,
 	documentKey,
 	editable,
+	renamedReadOnly,
 	locked,
 	onDirtyChange,
 	contentRef,
@@ -1411,6 +1427,7 @@ function PreviewBody({
 						documentKey={documentKey}
 						alt={alt}
 						editable={editable}
+						{...(renamedReadOnly ? { readOnlyReason: "renamed" as const } : {})}
 						onDirtyChange={onDirtyChange}
 						saveRef={spreadsheetRef}
 					/>

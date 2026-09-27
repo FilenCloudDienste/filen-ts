@@ -584,8 +584,25 @@ function numbersClose(a: string, b: string): boolean {
 }
 
 // What of a sheet's rows and cells saving lost, walking both in order (cells come by row, then column).
-function compareSheetData(original: string, saved: string, originalContext: Context, savedContext: Context): string[] {
+// Lets the worker take other messages (a close) in a long comparison.
+export function pause(): Promise<void> {
+	return new Promise(resolve => {
+		setTimeout(resolve, 0)
+	})
+}
+
+// Rows and cells compared between pauses.
+const PAUSE_EVERY = 50_000
+
+async function compareSheetData(
+	original: string,
+	saved: string,
+	originalContext: Context,
+	savedContext: Context,
+	cancelled: () => boolean
+): Promise<string[] | null> {
 	const lost: string[] = []
+	let walked = 0
 	const out = sheetItems(saved, savedContext)
 	let next = out.next()
 	let lastRow = -1
@@ -595,6 +612,12 @@ function compareSheetData(original: string, saved: string, originalContext: Cont
 	const position = (item: SheetItem) => (item.kind === "row" ? item.row * 20_000 - 1 : item.row * 20_000 + item.col)
 
 	for (const item of sheetItems(original, originalContext)) {
+		if (++walked % PAUSE_EVERY === 0) {
+			await pause()
+
+			if (cancelled()) return null
+		}
+
 		// Out of order: not walked side by side, so not proven.
 		if (item.row < lastRow || (item.kind === "cell" && item.row === lastRow && item.col <= lastCol)) {
 			return ["unordered sheet data"]
@@ -880,8 +903,8 @@ export interface VerifyInput {
 	dropped: readonly string[]
 }
 
-// What saving loses, as readable records; empty when it loses nothing.
-export function saveLosses(input: VerifyInput): string[] {
+// What saving loses, as readable records; empty when it loses nothing, null when `cancelled` said to stop.
+export async function saveLosses(input: VerifyInput, cancelled: () => boolean = () => false): Promise<string[] | null> {
 	const original = packageOf(input.original)
 	const saved = packageOf(input.saved)
 	const lost: string[] = []
@@ -939,7 +962,11 @@ export function saveLosses(input: VerifyInput): string[] {
 		report(part, missing(beforeSet, afterSet))
 	}
 
-	input.sheetPaths.forEach((path, index) => {
+	for (const [index, path] of input.sheetPaths.entries()) {
+		await pause()
+
+		if (cancelled()) return null
+
 		const savedPath = `xl/worksheets/sheet${String(index + 1)}.xml`
 		const before = original.text(path)
 		const after = saved.text(savedPath) ?? ""
@@ -950,7 +977,7 @@ export function saveLosses(input: VerifyInput): string[] {
 		if (before === undefined) {
 			lost.push(`${path}: missing`)
 
-			return
+			continue
 		}
 
 		const beforeParts = sheetParts(original, path.toLowerCase())
@@ -960,7 +987,17 @@ export function saveLosses(input: VerifyInput): string[] {
 			path,
 			missing(sheetElements(before, originalContext, beforeParts.links), sheetElements(after, savedContext, afterParts.links))
 		)
-		report(path, compareSheetData(SHEET_DATA.exec(before)?.[1] ?? "", SHEET_DATA.exec(after)?.[1] ?? "", originalContext, savedContext))
+		const cells = await compareSheetData(
+			SHEET_DATA.exec(before)?.[1] ?? "",
+			SHEET_DATA.exec(after)?.[1] ?? "",
+			originalContext,
+			savedContext,
+			cancelled
+		)
+
+		if (cells === null) return null
+
+		report(path, cells)
 
 		const partsOf = (parts: Map<string, string[]>, type: string) => parts.get(type) ?? []
 
@@ -1002,7 +1039,7 @@ export function saveLosses(input: VerifyInput): string[] {
 				missing(drawingRecords(original, drawings), drawingRecords(saved, partsOf(afterParts.parts, "drawing")))
 			)
 		}
-	})
+	}
 
 	for (const [path, bytes] of original.entries) {
 		if (handled.has(path) || REWRITTEN.test(path) || path.endsWith("/")) continue
