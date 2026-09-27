@@ -27,6 +27,8 @@ export interface CodeMirrorSourceProps {
 	// dirty edge — the notes editor's immediate-persist rule enqueues on every keystroke, unlike the
 	// preview save path that reads on demand via contentRef. Read-only callers omit it (never fires).
 	onValueChange?: (value: string) => void
+	// Focus the editor once it is created.
+	autoFocus?: boolean
 }
 
 const BASIC_SETUP = { searchKeymap: false }
@@ -34,7 +36,8 @@ const BASIC_SETUP = { searchKeymap: false }
 function noopDirtyChange(): void {
 	// Default for every read-only caller — CodeMirrorSource always calls onDirtyChange, so a real
 	// no-op keeps that call unconditional rather than every render site branching on whether a
-	// callback was even passed.
+	// callback was even passed. Applied in the body: the React Compiler skips a component with
+	// parameter defaults, and its unmemoized `extensions` would reconfigure CodeMirror on every render.
 }
 
 // The actual CodeMirror surface. `text` seeds `content` ONCE, at mount (useState's initial argument is
@@ -47,11 +50,14 @@ export function CodeMirrorSource({
 	text,
 	tag,
 	alt,
-	editable = false,
-	onDirtyChange = noopDirtyChange,
+	editable: editableProp,
+	onDirtyChange: onDirtyChangeProp,
 	contentRef,
-	onValueChange
+	onValueChange,
+	autoFocus
 }: CodeMirrorSourceProps) {
+	const editable = editableProp ?? false
+	const onDirtyChange = onDirtyChangeProp ?? noopDirtyChange
 	const codeMirrorTheme = useCodeMirrorTheme()
 	const languageExtension = useLanguageExtension(tag)
 	// Find, replace and (in markdown) formatting, on the user's own shortcuts.
@@ -102,6 +108,7 @@ export function CodeMirrorSource({
 				basicSetup={BASIC_SETUP}
 				height="100%"
 				aria-label={alt}
+				autoFocus={autoFocus ?? false}
 				// exactOptionalPropertyTypes rejects an explicit onChange={undefined} — omit the key entirely
 				// in read-only mode instead.
 				{...(editable ? { onChange: handleChange } : {})}

@@ -3,7 +3,7 @@ import { type OutboxChannelMsg, makeOutboxChannelTransport, decodeOutboxPayload,
 import { sync } from "@/features/notes/lib/sync"
 import { inflightContentSchema, type RemoteEnqueue } from "@/features/notes/lib/sync.logic"
 import { setOutboxHydrated, type InflightContent } from "@/features/notes/store/useNotesInflight"
-import { rememberNotePush } from "@/features/notes/lib/pushEchoes"
+import { rememberNotePush, setNotePushBroadcast } from "@/features/notes/lib/pushEchoes"
 
 // Binds the leader-owned notes outbox (sync.ts) to a dedicated cross-tab channel + the db-lock leadership
 // signal, via the shared coordinator core (outboxChannel.ts). The leader tab (whoever holds the db lock) runs
@@ -102,7 +102,10 @@ export async function startOutbox(): Promise<void> {
 	}, HYDRATION_BACKSTOP_MS)
 
 	await bindOutboxLeadership(OUTBOX_CHANNEL, sync, channel => {
-		sync.attachTransport(makeOutboxChannelTransport<RemoteEnqueue, InflightContent>(channel))
+		const transport = makeOutboxChannelTransport<RemoteEnqueue, InflightContent>(channel)
+
+		sync.attachTransport(transport)
+		setNotePushBroadcast(transport.broadcastPushed)
 		channel.onmessage = (ev: MessageEvent<OutboxChannelMsg>) => {
 			handleMessage(ev.data)
 		}

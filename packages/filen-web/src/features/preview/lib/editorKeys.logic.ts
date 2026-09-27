@@ -13,16 +13,39 @@ const MODIFIERS: Readonly<Record<string, string>> = {
 	command: "Meta"
 }
 
+// react-hotkeys-hook's tokens (its aliases, and the recorder's lowercased event.code with "key",
+// "digit" and "numpad" stripped) as KeyboardEvent.key names, which CodeMirror matches on. Letters,
+// digits and names that only need a capital ("enter", "f5") fall through to codeMirrorKey.
 const KEYS: Readonly<Record<string, string>> = {
-	slash: "/",
-	comma: ",",
-	period: ".",
-	space: "Space",
 	esc: "Escape",
+	return: "Enter",
 	up: "ArrowUp",
 	down: "ArrowDown",
 	left: "ArrowLeft",
-	right: "ArrowRight"
+	right: "ArrowRight",
+	arrowup: "ArrowUp",
+	arrowdown: "ArrowDown",
+	arrowleft: "ArrowLeft",
+	arrowright: "ArrowRight",
+	pageup: "PageUp",
+	pagedown: "PageDown",
+	space: "Space",
+	slash: "/",
+	backslash: "\\",
+	comma: ",",
+	period: ".",
+	semicolon: ";",
+	quote: "'",
+	backquote: "`",
+	bracketleft: "[",
+	bracketright: "]",
+	minus: "-",
+	equal: "=",
+	add: "+",
+	subtract: "-",
+	multiply: "*",
+	divide: "/",
+	decimal: "."
 }
 
 function codeMirrorKey(key: string): string {

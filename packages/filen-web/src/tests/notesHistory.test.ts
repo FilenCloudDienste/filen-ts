@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
 import type { Note, NoteHistory, UuidStr } from "@filen/sdk-rs"
+import { hashNoteContent } from "@filen/shared"
 
 function testUuid(label: string): UuidStr {
 	return `${label}-0000-0000-0000-000000000000` as UuidStr
@@ -27,6 +28,7 @@ const { logWarn } = vi.hoisted(() => ({ logWarn: vi.fn() }))
 
 vi.mock("@/lib/log", () => ({ log: { warn: logWarn, error: vi.fn(), info: vi.fn(), debug: vi.fn() } }))
 
+import { isOwnNotePush } from "@/features/notes/lib/pushEchoes"
 import { queryClient as testQueryClient } from "@/queries/client"
 import { NOTES_QUERY_KEY, notesQueryGet } from "@/features/notes/queries/notes"
 import { noteContentQueryKey } from "@/features/notes/queries/noteContent"
@@ -108,6 +110,20 @@ describe("restoreNoteFromHistory", () => {
 		expect(dropEntry).toHaveBeenCalledExactlyOnceWith(updated.uuid)
 		expect(clearRejections).toHaveBeenCalledExactlyOnceWith(updated.uuid)
 		expect(callOrder).toEqual(["dropEntry", "clearRejections", "flushToDisk"])
+	})
+
+	it("records the restored content as this browser's own write before sending it, so its echo is no remote edit", async () => {
+		const note = mockNote()
+		const recordedBeforeSend: boolean[] = []
+		restoreNoteFromHistoryOp.mockImplementationOnce(() => {
+			recordedBeforeSend.push(isOwnNotePush(note.uuid, hashNoteContent("restored")))
+
+			return Promise.resolve(note)
+		})
+
+		await restoreNoteFromHistory(note, mockHistory({ content: "restored" }))
+
+		expect(recordedBeforeSend).toEqual([true])
 	})
 
 	it("ends the editing session so the re-enabled content query takes the restored version", async () => {

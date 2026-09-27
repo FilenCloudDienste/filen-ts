@@ -6,7 +6,8 @@ import type { ActionScope, ResolvedAction } from "@/lib/keymap/registry"
 // `audio` (the player bar runs its useAction calls before its early return) are always mounted.
 // drive/notes/chats/photos/contacts are mutually exclusive by route. `editor` co-mounts with drive,
 // photos and chats because the preview overlay is hosted by the drive and photos dialog hosts and
-// by the chat embeds — it opens ON TOP of those surfaces rather than replacing them.
+// by the chat embeds — it opens ON TOP of those surfaces rather than replacing them — and with notes,
+// whose editors bind the editor.* actions.
 export const CO_MOUNTABLE: readonly (readonly [ActionScope, ActionScope])[] = [
 	["global", "drive"],
 	["global", "editor"],
@@ -23,7 +24,8 @@ export const CO_MOUNTABLE: readonly (readonly [ActionScope, ActionScope])[] = [
 	["audio", "contacts"],
 	["editor", "drive"],
 	["editor", "photos"],
-	["editor", "chats"]
+	["editor", "chats"],
+	["editor", "notes"]
 ]
 
 // Collisions that already exist in the shipped defaults and are resolved by an explicit runtime
@@ -31,7 +33,8 @@ export const CO_MOUNTABLE: readonly (readonly [ActionScope, ActionScope])[] = [
 // its dialog host's `isDialogOpen`, which is true exactly while the preview overlay is the open
 // dialog, so only one of the two ever does real work. The listings' searches and `editor.find` share
 // mod+f: the listing handlers ignore editable content, and the editor binds its find inside CodeMirror
-// alone, so focus decides which one runs.
+// alone, so focus decides which one runs. `notes.saveNow` and `preview.save` share mod+s only at scope
+// level: the preview overlay never mounts on the notes route, so the two never run together.
 //
 // The ONLY consumer is the defaults-level invariant test. `conflictingActions` deliberately does not
 // consult it: honoring it in the rebind UI would let a user create a SECOND, unguarded mod+s binding
@@ -39,7 +42,8 @@ export const CO_MOUNTABLE: readonly (readonly [ActionScope, ActionScope])[] = [
 export const RESOLVED_COLLISIONS: readonly (readonly [string, string])[] = [
 	["drive.download", "preview.save"],
 	["drive.search", "editor.find"],
-	["photos.search", "editor.find"]
+	["photos.search", "editor.find"],
+	["notes.saveNow", "preview.save"]
 ]
 
 export function scopesCanCollide(a: ActionScope, b: ActionScope): boolean {

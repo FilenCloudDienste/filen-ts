@@ -384,6 +384,13 @@ export function handleDriveEvent(event: DriveSocketEvent): void {
 			useDriveStore.getState().removeFromSelection([inner.uuid])
 			driveListingQueryUpdateGlobal({ type: "remove", uuid: inner.uuid })
 
+			// Without a successor the lineage is retired (another file moved in over it): the preview drops the
+			// file, or asks about its unsaved edits, as for a delete, so a later save never lands as a version
+			// of the file that replaced it.
+			if (inner.newUUID === undefined) {
+				emitPreviewItemRemoved(inner.uuid)
+			}
+
 			break
 		}
 

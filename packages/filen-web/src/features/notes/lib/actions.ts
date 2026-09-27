@@ -6,6 +6,7 @@ import { ACCOUNT_QUERY_KEY } from "@/queries/account"
 import { notesQueryUpsert, notesQueryRemove } from "@/features/notes/queries/notes"
 import { noteContentQueryKey, readNoteContent } from "@/features/notes/queries/noteContent"
 import { localNoteContent } from "@/features/notes/lib/localContent"
+import { recordNotePush } from "@/features/notes/lib/pushEchoes"
 import { isNoteOwner } from "@/features/notes/lib/sort"
 import { getDefaultNoteType, DEFAULT_NOTE_TYPE } from "@/features/notes/lib/preferences"
 import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
@@ -319,6 +320,12 @@ export async function setNoteType(note: Note, noteType: NoteType): Promise<Actio
 	const knownContent = queryClient.getQueryData<string | undefined>(noteContentQueryKey(note.uuid))
 
 	let updated: Note
+
+	// The retype writes the content again; its echo is this browser's own write. Content the SDK reads
+	// itself is not known here.
+	if (knownContent !== undefined) {
+		recordNotePush(note.uuid, knownContent)
+	}
 
 	try {
 		updated = await runOp(sdkApi.setNoteType(note, noteType, knownContent))

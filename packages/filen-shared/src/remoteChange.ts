@@ -114,7 +114,8 @@ export async function conflictCopyName(
 // socket to every session of the account, the pushing one included, and the only way to tell a client's
 // own push from the same account editing on another device is to recognise the content. Record before
 // the push is sent: its echo can arrive before the push returns. A few per item: pushes a debounce apart
-// can echo back after one another, and anything older has long had its echo.
+// can echo back after one another, and anything older has long had its echo. Per tab or device: each
+// copy consumes the echoes it hears.
 export class PushEchoes {
 	private readonly pushes = new Map<string, string[]>()
 	private readonly maxPerItem: number
@@ -130,8 +131,23 @@ export class PushEchoes {
 		this.pushes.set(id, hashes.slice(-this.maxPerItem))
 	}
 
+	// Consumes the match and every older push of the item: each push echoes once, in order, so content
+	// pushed here earlier and saved again on another device (a revert) is that device's edit.
 	public isOwn(id: string, hash: string): boolean {
-		return this.pushes.get(id)?.includes(hash) ?? false
+		const hashes = this.pushes.get(id)
+		const index = hashes?.indexOf(hash) ?? -1
+
+		if (hashes === undefined || index === -1) {
+			return false
+		}
+
+		if (index === hashes.length - 1) {
+			this.pushes.delete(id)
+		} else {
+			this.pushes.set(id, hashes.slice(index + 1))
+		}
+
+		return true
 	}
 
 	// Sign-out: nothing of the next account's is ours yet.

@@ -101,11 +101,47 @@ describe("PushEchoes", () => {
 		echoes.remember("a", "h3")
 
 		expect(echoes.isOwn("a", "h1")).toBe(false)
-		expect(echoes.isOwn("a", "h3")).toBe(true)
 		expect(echoes.isOwn("b", "h3")).toBe(false)
+		expect(echoes.isOwn("a", "h3")).toBe(true)
 
+		echoes.remember("a", "h4")
 		echoes.clear()
 
-		expect(echoes.isOwn("a", "h3")).toBe(false)
+		expect(echoes.isOwn("a", "h4")).toBe(false)
+	})
+
+	it("takes each push's echo once, so a revert saved on another device to content pushed here is not an echo", () => {
+		const echoes = new PushEchoes()
+
+		echoes.remember("a", "c1")
+		echoes.remember("a", "c0")
+
+		expect(echoes.isOwn("a", "c1")).toBe(true)
+		expect(echoes.isOwn("a", "c0")).toBe(true)
+		// Another device of the account saves c1 again.
+		expect(echoes.isOwn("a", "c1")).toBe(false)
+	})
+
+	it("consumes the pushes older than the echo that matched, whose own echoes never came", () => {
+		const echoes = new PushEchoes()
+
+		echoes.remember("a", "c0")
+		echoes.remember("a", "c1")
+		echoes.remember("a", "c2")
+
+		expect(echoes.isOwn("a", "c1")).toBe(true)
+		expect(echoes.isOwn("a", "c0")).toBe(false)
+		expect(echoes.isOwn("a", "c2")).toBe(true)
+	})
+
+	it("matches the oldest of two identical pushes first, leaving the newer one for its own echo", () => {
+		const echoes = new PushEchoes()
+
+		echoes.remember("a", "c1")
+		echoes.remember("a", "c1")
+
+		expect(echoes.isOwn("a", "c1")).toBe(true)
+		expect(echoes.isOwn("a", "c1")).toBe(true)
+		expect(echoes.isOwn("a", "c1")).toBe(false)
 	})
 })

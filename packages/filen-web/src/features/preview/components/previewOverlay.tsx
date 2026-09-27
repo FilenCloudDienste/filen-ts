@@ -308,7 +308,10 @@ export function PreviewOverlay({
 		}
 
 		setMenuPending(true)
+		// Its echo can beat the response back: the user's own trash, not one made elsewhere.
+		remote.expectOwnChange(driveItem.data.uuid, "remove")
 		const outcome = await trashItems([driveItem])
+		remote.forgetOwnChange(driveItem.data.uuid)
 		setMenuPending(false)
 		setMenuDialogKind(null)
 		toastBulkOutcome(outcome)
@@ -324,7 +327,9 @@ export function PreviewOverlay({
 		}
 
 		setMenuPending(true)
+		remote.expectOwnChange(driveItem.data.uuid, "remove")
 		const outcome = await deleteItemsPermanently([driveItem])
+		remote.forgetOwnChange(driveItem.data.uuid)
 		setMenuPending(false)
 		setMenuDialogKind(null)
 		toastBulkOutcome(outcome)
@@ -628,7 +633,18 @@ export function PreviewOverlay({
 		const targetItem = driveItem
 		const targetRawItem = rawDriveItem
 
-		if (!editable || !dirty || saving || targetItem === undefined || targetRawItem === undefined) {
+		// Nor under a dialog: over the remote-change question it would decide it for the user, and a save
+		// from the unsaved-changes prompt or a menu dialog would act behind it.
+		if (
+			!editable ||
+			!dirty ||
+			saving ||
+			targetItem === undefined ||
+			targetRawItem === undefined ||
+			remote.prompt !== null ||
+			unsavedPromptOpen(pendingIntent, blocker.status === "blocked", logoutRequest !== null) ||
+			menuDialogKind !== null
+		) {
 			return
 		}
 
@@ -686,7 +702,7 @@ export function PreviewOverlay({
 			void performSave()
 		},
 		IN_EDITORS,
-		[editable, dirty, saving, driveItem, rawDriveItem]
+		[editable, dirty, saving, driveItem, rawDriveItem, remote.prompt, pendingIntent, blocker.status, logoutRequest, menuDialogKind]
 	)
 
 	// Routes a close/prev/next intent through the unsaved-changes prompt whenever the buffer is dirty;
@@ -981,6 +997,13 @@ export function PreviewOverlay({
 									item={driveItem}
 									variant={variant}
 									onItemAction={kind => {
+										// The move and version-restore dialogs report no outcome, so their echo, whenever it
+										// comes, takes the mark; a mark left by a cancelled dialog only quiets a later
+										// notice of the same kind.
+										if (kind === "move" || kind === "versions") {
+											remote.expectOwnChange(driveItem.data.uuid, kind === "move" ? "move" : "restore")
+										}
+
 										setMenuDialogKind(kind)
 									}}
 									onFavoriteToggled={handleMenuFavoriteToggled}

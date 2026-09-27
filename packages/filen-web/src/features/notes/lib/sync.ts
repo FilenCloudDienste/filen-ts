@@ -13,6 +13,7 @@ import { sdkApi } from "@/lib/sdk/client"
 import { queryClient } from "@/queries/client"
 import { i18n } from "@/lib/i18n"
 import { forgetNotePushes, rememberNotePush } from "@/features/notes/lib/pushEchoes"
+import { heldNotes, releaseAllNoteHolds } from "@/features/notes/lib/remoteEditHolds"
 import { log } from "@/lib/log"
 import { toast } from "sonner"
 import { asErrorDTO } from "@/lib/sdk/errors"
@@ -86,6 +87,10 @@ export class Sync {
 	// transient error never loses the first edit, while a genuine permission rejection still
 	// un-wedges the content query after N attempts.
 	private readonly nonRetryableRejections: Map<string, number> = new Map<string, number>()
+	// Per note, the hash of the content this tab last pushed. The cloud still holding it is no newer work
+	// to warn about: a "Load theirs" queues their content over a push of the local edits that landed after
+	// their save.
+	private readonly lastPushedHashes: Map<string, string> = new Map<string, string>()
 
 	// Multi-tab state. `role` defaults to "leader" so a lone tab and every unit test are the unchanged
 	// single-tab path. `transport` is null until the coordinator wires a channel (single-tab: stays null,
@@ -140,6 +145,8 @@ export class Sync {
 		setOutboxHydrated(false)
 		clearEditingSessions()
 		forgetNotePushes()
+		releaseAllNoteHolds()
+		this.lastPushedHashes.clear()
 	}
 
 	// Drop a note's consecutive-rejection strike count. For the editor's use when it clears a
@@ -528,6 +535,8 @@ export class Sync {
 
 			// One overwrite toast per note per pass (belt-and-braces: each note is pushed at most once).
 			const toastedConflicts = new Set<string>()
+			// Notes whose remote-edit dialog is open in some tab keep their entries until it is answered.
+			const held = await heldNotes()
 
 			// SINGLE-TAB SEAM: this loop is not yet gated behind the leader election used elsewhere in this
 			// class (broadcastState/followerEnqueue) — that gating (only the elected tab flushes) is future
@@ -538,7 +547,7 @@ export class Sync {
 						return
 					}
 
-					if (contents.length === 0) {
+					if (contents.length === 0 || held.has(noteUuid)) {
 						return
 					}
 
@@ -567,15 +576,21 @@ export class Sync {
 					// Entries without a base hash push unchecked (legacy grace); a failed or undecryptable
 					// peek also pushes unchecked (availability beats the toast).
 					let overwritesNewerRemoteContent = false
+					// The peek found the content already in the cloud: nothing to send.
+					let alreadyInCloud = false
 
 					if (mostRecentContent.baseContentHash !== undefined) {
 						const peek = await run(async () => readNoteContent(liveNote))
 
 						if (peek.success && peek.data.status === "ok") {
 							const remote = peek.data.content
+							const remoteHash = hashNoteContent(remote)
 
+							alreadyInCloud = remote === mostRecentContent.content
 							overwritesNewerRemoteContent =
-								hashNoteContent(remote) !== mostRecentContent.baseContentHash && remote !== mostRecentContent.content
+								!alreadyInCloud &&
+								remoteHash !== mostRecentContent.baseContentHash &&
+								remoteHash !== this.lastPushedHashes.get(noteUuid)
 						} else {
 							log.warn(
 								"notes-sync",
@@ -590,14 +605,21 @@ export class Sync {
 					// and must never read as an edit made elsewhere (pushEchoes.ts).
 					const pushedContentHash = hashNoteContent(mostRecentContent.content)
 
-					rememberNotePush(noteUuid, pushedContentHash)
-					this.transport?.broadcastPushed(noteUuid, pushedContentHash)
+					if (!alreadyInCloud) {
+						rememberNotePush(noteUuid, pushedContentHash)
+						this.transport?.broadcastPushed(noteUuid, pushedContentHash)
+					}
 
-					const push = await run(async () => {
-						const preview = createNotePreviewFromContentText(noteKindForPreview(liveNote.noteType), mostRecentContent.content)
+					const push = alreadyInCloud
+						? ({ success: true } as const)
+						: await run(async () => {
+								const preview = createNotePreviewFromContentText(
+									noteKindForPreview(liveNote.noteType),
+									mostRecentContent.content
+								)
 
-						await sdkApi.setNoteContent(liveNote, mostRecentContent.content, preview)
-					})
+								await sdkApi.setNoteContent(liveNote, mostRecentContent.content, preview)
+							})
 
 					if (!push.success) {
 						// KEEP-for-retry on a network-class error, a retryable-auth error, or any non-SDK
@@ -647,6 +669,7 @@ export class Sync {
 
 					// A successful push clears any accumulated rejection count for this note.
 					this.nonRetryableRejections.delete(noteUuid)
+					this.lastPushedHashes.set(noteUuid, pushedContentHash)
 
 					// The pushed content IS the cloud content now — write it into the per-note content
 					// query cache so an editor reseed after the queue drains paints what the user typed,

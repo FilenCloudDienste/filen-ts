@@ -60,6 +60,8 @@ import {
 	noteKindForPreview
 } from "@/features/notes/lib/sync.logic"
 import { deriveSessionBaseHash } from "@/features/notes/hooks/useNoteEditor.logic"
+import { holdNoteForRemoteEdit, releaseAllNoteHolds } from "@/features/notes/lib/remoteEditHolds"
+import { isOwnNotePush } from "@/features/notes/lib/pushEchoes"
 
 function makeNote(uuid: string, overrides: Partial<Note> = {}): Note {
 	const note: Note = {
@@ -157,6 +159,7 @@ beforeEach(() => {
 
 afterEach(() => {
 	vi.useRealTimers()
+	releaseAllNoteHolds()
 })
 
 // ── Pure helpers ────────────────────────────────────────────────────────────
@@ -436,6 +439,70 @@ describe("push loop — conflict DETECTION: local wins, one toast per note per p
 		await flushAsync()
 
 		expect(setNoteContent).toHaveBeenCalledTimes(1)
+		expect(toast).not.toHaveBeenCalled()
+	})
+})
+
+describe("push loop — remote-edit dialog and a cloud already holding the content", () => {
+	it("skips a note whose remote-edit dialog is open, keeping its entries, and pushes it once released", async () => {
+		const s = await startedSync()
+		const note = makeNote("a")
+
+		setStore({ a: [{ timestamp: 1, content: "mine", note }], b: [{ timestamp: 1, content: "other", note: makeNote("b") }] })
+		setNoteContent.mockImplementation(n => Promise.resolve(n))
+		holdNoteForRemoteEdit("a")
+
+		s.executeNow()
+		await flushAsync()
+
+		expect(setNoteContent).toHaveBeenCalledTimes(1)
+		expect(setNoteContent).toHaveBeenCalledWith(expect.objectContaining({ uuid: "b" }), "other", expect.any(String))
+		expect(queued("a")).toBe(true)
+
+		releaseAllNoteHolds()
+		await flushAsync()
+		s.executeNow()
+		await flushAsync()
+
+		expect(setNoteContent).toHaveBeenCalledWith(note, "mine", expect.any(String))
+		expect(queued("a")).toBe(false)
+	})
+
+	it("sends nothing when the peek finds the content already in the cloud, and drains the entry", async () => {
+		const s = await startedSync()
+		const note = makeNote("a")
+
+		setStore({ a: [{ timestamp: 1, content: "theirs", note, baseContentHash: hashNoteContent("theirs") }] })
+		getNoteContent.mockResolvedValue("theirs")
+
+		s.executeNow()
+		await flushAsync()
+
+		expect(setNoteContent).not.toHaveBeenCalled()
+		expect(queued("a")).toBe(false)
+		expect(testQueryClient.getQueryData(noteContentQueryKey("a"))).toBe("theirs")
+		expect(isOwnNotePush("a", hashNoteContent("theirs"))).toBe(false)
+		expect(toast).not.toHaveBeenCalled()
+	})
+
+	it("puts their content back over this tab's own push that landed after it, without an overwrite warning", async () => {
+		const s = await startedSync()
+		const note = makeNote("a")
+
+		setStore({ a: [{ timestamp: 1, content: "mine", note }] })
+		setNoteContent.mockResolvedValue(note)
+
+		s.executeNow()
+		await flushAsync()
+
+		// "Load theirs" queued their content; the cloud holds this tab's push of "mine".
+		setStore({ a: [{ timestamp: 2, content: "theirs", note, baseContentHash: hashNoteContent("theirs") }] })
+		getNoteContent.mockResolvedValue("mine")
+
+		s.executeNow()
+		await flushAsync()
+
+		expect(setNoteContent).toHaveBeenLastCalledWith(note, "theirs", expect.any(String))
 		expect(toast).not.toHaveBeenCalled()
 	})
 })

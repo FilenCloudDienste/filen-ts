@@ -6,6 +6,7 @@ import { notesQueryUpsert } from "@/features/notes/queries/notes"
 import { noteContentQueryKey } from "@/features/notes/queries/noteContent"
 import useNotesInflightStore, { endEditingSession } from "@/features/notes/store/useNotesInflight"
 import { sync } from "@/features/notes/lib/sync"
+import { recordNotePush } from "@/features/notes/lib/pushEchoes"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { runOp, type ActionOutcome } from "@/lib/actions/outcome"
 
@@ -18,6 +19,11 @@ export type { ActionOutcome }
 // socketHandlers.ts's reloadRemoteEdit already uses for the analogous "server wins" case.
 export async function restoreNoteFromHistory(note: Note, history: NoteHistory): Promise<ActionOutcome<Note>> {
 	let updated: Note
+
+	// Its echo is this browser's own write, not an edit made elsewhere.
+	if (history.content !== undefined) {
+		recordNotePush(note.uuid, history.content)
+	}
 
 	try {
 		updated = await runOp(sdkApi.restoreNoteFromHistory(note, history))

@@ -2,12 +2,13 @@ import { useEffect, useRef, useState, type Dispatch, type RefObject, type SetSta
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { conflictCopyName, decideRevision, driveItemName } from "@filen/shared"
-import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
+import { asDirectoryOrFile, narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { runPreviewSave } from "@/features/drive/lib/previewSave.logic"
 import { currentRootUuid } from "@/features/drive/lib/actions"
 import { driveListingQueryOptions, driveListingQueryUpdate, normalizeParentUuid } from "@/features/drive/queries/drive"
 import { subscribePreviewReconcile, type PreviewReconcileEvent } from "@/features/preview/lib/previewReconcile"
+import type { FileMeta } from "@filen/sdk-rs"
 import { isRevisionOf, settleHeldRevisions, type PreviewRevision } from "@/features/preview/lib/remoteChange.logic"
 import { type PreviewSource } from "@/features/preview/lib/previewSource"
 import { setPreviewDirty, usePreviewUnsavedGuardStore } from "@/features/preview/store/usePreviewUnsavedGuard"
@@ -19,6 +20,9 @@ import { i18n } from "@/lib/i18n"
 
 // What the overlay asks while the file on screen holds unsaved edits: a newer version of it was saved
 // elsewhere (`theirs`), or it was trashed or deleted.
+// The overlay's own changes to the file on screen, whose echoes are not changes made elsewhere.
+export type OwnChangeKind = "remove" | "move" | "restore"
+
 export type RemoteChangePrompt = { kind: "revised"; frozenUuid: string; theirs: DriveItem } | { kind: "deleted"; frozenUuid: string }
 
 interface UsePreviewRemoteChangesParams {
@@ -54,6 +58,9 @@ interface RemoteChangeContext {
 	keptOver: RefObject<Map<string, string>>
 	saving: RefObject<boolean>
 	held: RefObject<PreviewRevision[]>
+	// Displayed uuids this overlay is trashing or deleting, moving, or restoring a version of: their echoes
+	// are the user's own doing, never a change made elsewhere.
+	ownChanges: RefObject<Map<string, OwnChangeKind>>
 	setPrompt: Dispatch<SetStateAction<RemoteChangePrompt | null>>
 }
 
@@ -71,6 +78,16 @@ function displayedUuid(ctx: RemoteChangeContext, frozenUuid: string): string {
 	return ctx.savedRef.current.get(frozenUuid)?.data.uuid ?? frozenUuid
 }
 
+function takeOwnChange(ctx: RemoteChangeContext, uuid: string, kind: OwnChangeKind): boolean {
+	if (ctx.ownChanges.current.get(uuid) !== kind) {
+		return false
+	}
+
+	ctx.ownChanges.current.delete(uuid)
+
+	return true
+}
+
 function handleRevision(ctx: RemoteChangeContext, revision: PreviewRevision): void {
 	const latest = ctx.latest.current
 
@@ -81,6 +98,9 @@ function handleRevision(ctx: RemoteChangeContext, revision: PreviewRevision): vo
 			return
 		}
 
+		// A version the user restored here is shown unannounced; over unsaved edits it still asks, as
+		// taking it would drop them.
+		const ownRestore = revision.previousUuid !== undefined && takeOwnChange(ctx, revision.previousUuid, "restore")
 		const decision = decideRevision({
 			current: sourceIndex === latest.index,
 			dirty: isDirty(),
@@ -103,7 +123,7 @@ function handleRevision(ctx: RemoteChangeContext, revision: PreviewRevision): vo
 			case "show":
 				latest.commitSaved(slot.frozenUuid, revision.item)
 
-				if (decision.announce) {
+				if (decision.announce && !ownRestore) {
 					toast(i18n.t("preview:previewUpdatedElsewhere"))
 				}
 
@@ -125,13 +145,21 @@ function handleLeaving(ctx: RemoteChangeContext, uuid: string, moved: DriveItem 
 			return
 		}
 
+		const own = takeOwnChange(ctx, uuid, moved === null ? "remove" : "move")
+
 		if (sourceIndex === latest.index && isDirty()) {
 			if (moved === null) {
-				ctx.setPrompt({ kind: "deleted", frozenUuid: slot.frozenUuid })
+				// The user's own trash or delete removes the slot once it returns (onItemRemoved).
+				if (!own) {
+					ctx.setPrompt({ kind: "deleted", frozenUuid: slot.frozenUuid })
+				}
 			} else {
 				// Same uuid, so the editor stays mounted; a save now lands in the new directory.
 				latest.commitSaved(slot.frozenUuid, moved)
-				toast(i18n.t("preview:previewMovedElsewhere"))
+
+				if (!own) {
+					toast(i18n.t("preview:previewMovedElsewhere"))
+				}
 			}
 
 			return
@@ -141,6 +169,17 @@ function handleLeaving(ctx: RemoteChangeContext, uuid: string, moved: DriveItem 
 			latest.onItemRemoved(slot.frozenUuid)
 		}
 	})
+}
+
+// A rename reaches the pager's frozen items (reconcilePreviewSources), but a slot a save or a newer
+// version re-pointed shows its override, which is patched here, or a later save would upload under the
+// old name as a new file. The owned-file arm only, like the pager's own patch.
+function handleFileMeta(ctx: RemoteChangeContext, uuid: string, meta: FileMeta): void {
+	for (const [frozenUuid, item] of ctx.savedRef.current) {
+		if (item.type === "file" && item.data.uuid === uuid) {
+			ctx.latest.current.commitSaved(frozenUuid, narrowItem({ ...item.data, meta }))
+		}
+	}
 }
 
 // After a socket drop, the file on screen is looked up once in its directory's listing, which the
@@ -183,19 +222,38 @@ export function usePreviewRemoteChanges({
 	onItemRemoved
 }: UsePreviewRemoteChangesParams) {
 	const { t } = useTranslation("preview")
-	const [prompt, setPrompt] = useState<RemoteChangePrompt | null>(null)
+	const [prompt, setPromptState] = useState<RemoteChangePrompt | null>(null)
+	// The prompt as last set, for code that awaits: a newer revision can replace it meanwhile.
+	const promptRef = useRef<RemoteChangePrompt | null>(null)
 	const [pending, setPending] = useState(false)
 	const keptOver = useRef(new Map<string, string>())
 	const saving = useRef(false)
 	const held = useRef<PreviewRevision[]>([])
+	const ownChanges = useRef(new Map<string, OwnChangeKind>())
 	const latest = useRef<OverlaySnapshot>({ variant, items, index, commitSaved, onItemRemoved })
 
 	useEffect(() => {
 		latest.current = { variant, items, index, commitSaved, onItemRemoved }
 	})
 
+	const setPrompt: Dispatch<SetStateAction<RemoteChangePrompt | null>> = action => {
+		const next = typeof action === "function" ? action(promptRef.current) : action
+
+		promptRef.current = next
+		setPromptState(next)
+	}
+
+	// A prompt belongs to the slot it asks about. One left behind when that slot went (the user's own
+	// trash racing its echo, say) is dropped, never shown over the next file, whose buffer it cannot save.
+	const currentSource = items[index]
+	const currentFrozenUuid = currentSource?.type === "drive" ? currentSource.item.data.uuid : null
+
+	if (prompt !== null && prompt.frozenUuid !== currentFrozenUuid) {
+		setPrompt(null)
+	}
+
 	useEffect(() => {
-		const ctx: RemoteChangeContext = { latest, savedRef, keptOver, saving, held, setPrompt }
+		const ctx: RemoteChangeContext = { latest, savedRef, keptOver, saving, held, ownChanges, setPrompt }
 
 		return subscribePreviewReconcile((event: PreviewReconcileEvent) => {
 			switch (event.type) {
@@ -221,6 +279,9 @@ export function usePreviewRemoteChanges({
 
 					break
 				case "fileMeta":
+					handleFileMeta(ctx, event.uuid, event.meta)
+
+					break
 				case "folderMeta":
 					break
 			}
@@ -245,7 +306,7 @@ export function usePreviewRemoteChanges({
 		}
 
 		for (const revision of settled.newer) {
-			handleRevision({ latest, savedRef, keptOver, saving, held, setPrompt }, revision)
+			handleRevision({ latest, savedRef, keptOver, saving, held, ownChanges, setPrompt }, revision)
 		}
 	}
 
@@ -328,8 +389,11 @@ export function usePreviewRemoteChanges({
 				return
 			}
 
+			// The newest question about the slot, as a revision may have arrived during the upload.
+			const newest = promptRef.current?.frozenUuid === prompt.frozenUuid ? promptRef.current : prompt
+
 			dropBuffer()
-			commitSaved(prompt.frozenUuid, prompt.kind === "revised" ? prompt.theirs : outcome.item)
+			commitSaved(prompt.frozenUuid, newest.kind === "revised" ? newest.theirs : outcome.item)
 			setPrompt(null)
 			toast.success(t("previewSavedAsNewFile", { name }))
 		} catch (e) {
@@ -340,5 +404,26 @@ export function usePreviewRemoteChanges({
 		}
 	}
 
-	return { prompt, pending, saveStarted, saveSettled, keepMine, loadTheirs, discardMine, saveMineAsNewFile }
+	// Around the overlay's own trash, delete, move or version restore of the file on screen (its displayed
+	// uuid). The mark is taken by that change's echo, or dropped by the caller when nothing changed.
+	function expectOwnChange(uuid: string, kind: OwnChangeKind): void {
+		ownChanges.current.set(uuid, kind)
+	}
+
+	function forgetOwnChange(uuid: string): void {
+		ownChanges.current.delete(uuid)
+	}
+
+	return {
+		prompt,
+		pending,
+		saveStarted,
+		saveSettled,
+		keepMine,
+		loadTheirs,
+		discardMine,
+		saveMineAsNewFile,
+		expectOwnChange,
+		forgetOwnChange
+	}
 }

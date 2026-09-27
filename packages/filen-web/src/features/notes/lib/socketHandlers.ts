@@ -1,5 +1,5 @@
 import { toast } from "sonner"
-import { createNotePreviewFromContentText, hashNoteContent } from "@filen/shared"
+import { createNotePreviewFromContentText, hashNoteContent, run } from "@filen/shared"
 import type { SocketEvent, UserInfo, Note } from "@filen/sdk-rs"
 import { registerSocketHandler, decryptedOrSkip } from "@/lib/sdk/socket"
 import { queryClient } from "@/queries/client"
@@ -10,9 +10,9 @@ import { useNotesRemoteEditStore } from "@/features/notes/store/useNoteRemoteEdi
 import { sync } from "@/features/notes/lib/sync"
 import { noteKindForPreview } from "@/features/notes/lib/sync.logic"
 import { notesQueryUpdate, notesQueryRemove, notesQueryGet, notesQueryRefetch, notesQueryUpsert } from "@/features/notes/queries/notes"
-import { markNoteContentUnsynced, noteContentQueryKey } from "@/features/notes/queries/noteContent"
+import { markNoteContentUnsynced, noteContentQueryKey, readNoteContent } from "@/features/notes/queries/noteContent"
 import { localNoteContent } from "@/features/notes/lib/localContent"
-import { isOwnNotePush } from "@/features/notes/lib/pushEchoes"
+import { isOwnNotePush, recordNotePush } from "@/features/notes/lib/pushEchoes"
 import { sdkApi } from "@/lib/sdk/client"
 import { i18n } from "@/lib/i18n"
 import { asErrorDTO } from "@/lib/sdk/errors"
@@ -203,17 +203,35 @@ function handleContentEdited(inner: Extract<NoteSocketEvent["inner"], { type: "c
 	}
 }
 
-// The dialog's "Load theirs": discard the unsynced local edit and take the server's version. dropEntry
-// plus closing the editing session re-enable the note's content query (enabled: !editing) so its remount
-// key can advance and the editor reseeds with fresh content — a reseed is the whole point here, so this
-// is the one place that ends a session an editor is still mounted on; clearRejections + flushToDisk make
-// the discard durable with a clean strike count; invalidate marks the content stale so the re-enabled
-// query refetches. Extracted (not inlined in the dialog) so this project's node-environment tests
-// exercise it against a mocked sync + queryClient.
+// The dialog's "Load theirs": discard the unsynced local edit and take the server's version. Their content
+// is queued as the note's newest edit rather than only reseeded: a push of the local edits may have landed
+// after their save (in flight when it arrived, or sent by the leader tab before it heard of the dialog),
+// the leader tab's queue still holds the local edits when this runs in a follower, and the push pass
+// sends nothing when the cloud already holds it. The editor reseeds from the cache write (it advances the
+// remount key). Content that did not come with the event, or could not be decrypted, is read first; when
+// that fails too, the content query refetches instead.
 export async function reloadRemoteEdit(note: Note): Promise<void> {
+	const theirs = useNotesRemoteEditStore.getState().remoteEdited[note.uuid]?.theirs ?? (await readTheirs(note))
+
 	sync.dropEntry(note.uuid)
 	sync.clearRejections(note.uuid)
 	endEditingSession(note.uuid)
+
+	const contentKey = noteContentQueryKey(note.uuid)
+
+	if (theirs !== undefined) {
+		const flushed = await sync.enqueue(note, theirs, hashNoteContent(theirs))
+
+		if (!flushed) {
+			log.warn("notes", "remote-edit reload: outbox flush failed", note.uuid)
+		}
+
+		void queryClient.cancelQueries({ queryKey: contentKey, exact: true })
+		queryClient.setQueryData<string>(contentKey, theirs)
+		useNotesRemoteEditStore.getState().clearRemoteEdited(note.uuid)
+
+		return
+	}
 
 	const flushed = await sync.flushToDisk(useNotesInflightStore.getState().inflightContent)
 
@@ -223,33 +241,38 @@ export async function reloadRemoteEdit(note: Note): Promise<void> {
 
 	useNotesRemoteEditStore.getState().clearRemoteEdited(note.uuid)
 
-	void queryClient.invalidateQueries({ queryKey: noteContentQueryKey(note.uuid) })
+	void queryClient.invalidateQueries({ queryKey: contentKey })
 }
 
-// The dialog's "Keep mine": the local edits become the newest version. An unsynced edit is pushed anyway;
-// edits already pushed (the other device's save went over them) are queued again. Queued against their
-// content as the base, so the push, which the user chose, raises no overwrite warning.
+async function readTheirs(note: Note): Promise<string | undefined> {
+	const read = await run(async () => readNoteContent(note))
+
+	return read.success && read.data.status === "ok" ? read.data.content : undefined
+}
+
+// The dialog's "Keep mine": the local edits become the newest version, queued afresh against their
+// content as the base, so the push, which the user chose, raises no overwrite warning. Afresh rather than
+// left as they are: unsynced entries carry the base they were typed on, and in a follower tab only a new
+// edit reaches the leader's queue. The hold is released once the edit is queued.
 export async function keepMineOverRemoteEdit(note: Note): Promise<void> {
 	const edit = useNotesRemoteEditStore.getState().remoteEdited[note.uuid]
-
-	useNotesRemoteEditStore.getState().clearRemoteEdited(note.uuid)
-
 	const mine = localNoteContent(note.uuid)
-	const hasUnsynced = (useNotesInflightStore.getState().inflightContent[note.uuid] ?? []).length > 0
 
 	if (mine === undefined || edit === undefined) {
+		useNotesRemoteEditStore.getState().clearRemoteEdited(note.uuid)
+
 		return
 	}
 
-	if (!hasUnsynced) {
-		await sync.enqueue(note, mine, edit.theirs === undefined ? null : hashNoteContent(edit.theirs))
-	}
-
+	sync.dropEntry(note.uuid)
+	await sync.enqueue(note, mine, edit.theirs === undefined ? null : hashNoteContent(edit.theirs))
+	useNotesRemoteEditStore.getState().clearRemoteEdited(note.uuid)
 	sync.executeNow()
 }
 
 // The dialog's "Save mine as copy": the local edits go to a new note beside this one, titled as a
-// conflicted copy, and this note takes the server's version.
+// conflicted copy, and this note takes the server's version. A copy that fails partway is deleted again,
+// so no half-made copy (their content under this note's title) is left behind.
 export async function saveRemoteEditMineAsCopy(note: Note, title: string): Promise<ActionOutcome<Note>> {
 	const mine = localNoteContent(note.uuid)
 
@@ -259,19 +282,39 @@ export async function saveRemoteEditMineAsCopy(note: Note, title: string): Promi
 		return { status: "error", dto: { species: "plain", message, label: message } }
 	}
 
+	let copy: Note | null = null
+
 	try {
-		const { duplicated } = await runOp(sdkApi.duplicateNote(note))
-		const retitled = await runOp(sdkApi.setNoteTitle(duplicated, title))
+		copy = (await runOp(sdkApi.duplicateNote(note))).duplicated
+		copy = await runOp(sdkApi.setNoteTitle(copy, title))
 
-		await runOp(sdkApi.setNoteContent(retitled, mine, createNotePreviewFromContentText(noteKindForPreview(retitled.noteType), mine)))
+		recordNotePush(copy.uuid, mine)
 
-		queryClient.setQueryData(noteContentQueryKey(retitled.uuid), mine)
-		notesQueryUpsert(retitled)
-		await reloadRemoteEdit(note)
-
-		return { status: "success", item: retitled }
+		copy = await runOp(sdkApi.setNoteContent(copy, mine, createNotePreviewFromContentText(noteKindForPreview(copy.noteType), mine)))
 	} catch (e) {
+		if (copy !== null) {
+			await discardPartialCopy(copy)
+		}
+
 		return { status: "error", dto: asErrorDTO(e) }
+	}
+
+	queryClient.setQueryData(noteContentQueryKey(copy.uuid), mine)
+	notesQueryUpsert(copy)
+	await reloadRemoteEdit(note)
+
+	return { status: "success", item: copy }
+}
+
+// Best effort: a copy that cannot be deleted is listed, rather than left for the next list read to surface.
+async function discardPartialCopy(copy: Note): Promise<void> {
+	const discarded = await run(async () => {
+		await sdkApi.deleteNote(await sdkApi.trashNote(copy))
+	})
+
+	if (!discarded.success) {
+		log.warn("notes", "conflicted copy: could not delete the partial copy", copy.uuid, discarded.error)
+		notesQueryUpsert(copy)
 	}
 }
 

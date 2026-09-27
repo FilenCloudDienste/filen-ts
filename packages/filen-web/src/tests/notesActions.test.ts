@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
 import type { Note, NoteType, UserInfo, UuidStr } from "@filen/sdk-rs"
+import { hashNoteContent } from "@filen/shared"
 
 function testUuid(label: string): UuidStr {
 	return `${label}-0000-0000-0000-000000000000` as UuidStr
@@ -68,6 +69,7 @@ import { queryClient as testQueryClient } from "@/queries/client"
 import { ACCOUNT_QUERY_KEY } from "@/queries/account"
 import { NOTES_QUERY_KEY, notesQueryGet } from "@/features/notes/queries/notes"
 import { noteContentQueryKey } from "@/features/notes/queries/noteContent"
+import { isOwnNotePush } from "@/features/notes/lib/pushEchoes"
 import useNotesInflightStore from "@/features/notes/store/useNotesInflight"
 import {
 	createNote as createNoteAction,
@@ -492,6 +494,16 @@ describe("setNoteType", () => {
 
 		expect(setNoteTypeOp).toHaveBeenCalledExactlyOnceWith(note, "md", "cached body")
 		expect(outcome).toEqual({ status: "success", item: updated })
+	})
+
+	it("records the known content as this browser's own write, so the retype's echo is no remote edit", async () => {
+		const note = mockNote({ noteType: "text" })
+		testQueryClient.setQueryData(noteContentQueryKey(note.uuid), "retyped body")
+		setNoteTypeOp.mockResolvedValueOnce({ ...note, noteType: "md" as const })
+
+		await setNoteType(note, "md")
+
+		expect(isOwnNotePush(note.uuid, hashNoteContent("retyped body"))).toBe(true)
 	})
 
 	it("passes undefined knownContent when the content cache is cold", async () => {

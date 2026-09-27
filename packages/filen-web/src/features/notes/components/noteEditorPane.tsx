@@ -1,4 +1,4 @@
-import { useEffect } from "react"
+import { useEffect, useRef } from "react"
 import { useTranslation } from "react-i18next"
 import { useNavigate } from "@tanstack/react-router"
 import { StickyNoteIcon, MoreHorizontalIcon, EyeIcon } from "lucide-react"
@@ -51,7 +51,9 @@ function leaveNoteEditor(uuid: string): void {
 	}
 }
 
-export function NoteEditorPane({ note, loading = false }: NoteEditorPaneProps) {
+const COMPOSITION_ESCAPE_WINDOW_MS = 100
+
+export function NoteEditorPane({ note, loading }: NoteEditorPaneProps) {
 	// ["notes", "common"] so the header can reach the shared cannot-decrypt label; notes stays the
 	// default namespace, so every bare t("notes…") key below is unaffected.
 	const { t } = useTranslation(["notes", "common"])
@@ -72,6 +74,8 @@ export function NoteEditorPane({ note, loading = false }: NoteEditorPaneProps) {
 	const hideCompletedQuery = useHideCompletedChecklistQuery(note?.uuid ?? "")
 	const hideCompleted = hideCompletedQuery.data ?? false
 
+	const compositionEndedAtRef = useRef(Number.NEGATIVE_INFINITY)
+
 	// Which note is on screen, so a reload of it with changes saved elsewhere is announced (socketHandlers).
 	const openNoteUuid = note?.uuid ?? null
 
@@ -85,11 +89,14 @@ export function NoteEditorPane({ note, loading = false }: NoteEditorPaneProps) {
 
 	// Registered before the early return (hook order). Dialog-guarded like every other action: a Cmd+S
 	// with a note-action dialog open returns before preventDefault so the browser default runs, never
-	// flushing behind the modal.
+	// flushing behind the modal. The remote-edit dialog too: the push would decide it for the user.
 	useAction(
 		"notes.saveNow",
 		keyboardEvent => {
-			if (dialogHost.isDialogOpen) {
+			if (
+				dialogHost.isDialogOpen ||
+				(note !== undefined && useNotesRemoteEditStore.getState().remoteEdited[note.uuid] !== undefined)
+			) {
 				return
 			}
 
@@ -97,11 +104,11 @@ export function NoteEditorPane({ note, loading = false }: NoteEditorPaneProps) {
 			sync.executeNow()
 		},
 		IN_EDITORS,
-		[dialogHost.isDialogOpen]
+		[dialogHost.isDialogOpen, note?.uuid]
 	)
 
 	if (note === undefined) {
-		if (loading) {
+		if (loading === true) {
 			return <LoadingState size="lg" />
 		}
 
@@ -218,11 +225,21 @@ export function NoteEditorPane({ note, loading = false }: NoteEditorPaneProps) {
 				<CannotDecryptState className="min-h-0 flex-1" />
 			) : (
 				// Escape leaves the editor for the note's row in the sidebar, where the list keys work again —
-				// unless something in the editor took it (the find panel closing, say).
+				// unless something in the editor took it (the find panel closing, say) or it ends an IME
+				// composition. Safari fires that Escape's keydown just after compositionend, no longer composing;
+				// the time since is CodeMirror's own test (keyCode 229 is deprecated).
 				<div
 					className="flex min-h-0 flex-1 flex-col"
+					onCompositionEnd={event => {
+						compositionEndedAtRef.current = event.timeStamp
+					}}
 					onKeyDown={event => {
-						if (event.key === "Escape" && !event.defaultPrevented) {
+						if (
+							event.key === "Escape" &&
+							!event.defaultPrevented &&
+							!event.nativeEvent.isComposing &&
+							event.timeStamp - compositionEndedAtRef.current > COMPOSITION_ESCAPE_WINDOW_MS
+						) {
 							leaveNoteEditor(note.uuid)
 						}
 					}}

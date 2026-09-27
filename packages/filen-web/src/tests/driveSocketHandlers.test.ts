@@ -1074,6 +1074,12 @@ describe("drive socket handlers — open-preview reconcile signals", () => {
 		expect(captureReconcile({ type: "fileArchived", uuid: testUuid("file"), stableUUID: STABLE_FILE, newUUID: NEW_FILE })).toEqual([])
 	})
 
+	it("fileArchived without a successor (move-with-replace retired the lineage) emits a removal", () => {
+		expect(captureReconcile({ type: "fileArchived", uuid: testUuid("file"), stableUUID: STABLE_FILE, newUUID: undefined })).toEqual([
+			{ type: "removed", uuid: testUuid("file") }
+		])
+	})
+
 	it("fileRestore emits a restored signal (the item leaves the trash preview)", () => {
 		expect(captureReconcile({ type: "fileRestore", file: mockFile() })).toEqual([{ type: "restored", uuid: testUuid("file") }])
 	})

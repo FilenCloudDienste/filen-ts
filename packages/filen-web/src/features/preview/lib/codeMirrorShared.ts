@@ -5,7 +5,7 @@ import { Prec, type Extension } from "@codemirror/state"
 import { openSearchPanel, searchKeymap } from "@codemirror/search"
 import { useComboFor } from "@/lib/keymap/registry"
 import { codeMirrorKeys } from "@/features/preview/lib/editorKeys.logic"
-import { insertLink, MARKDOWN_MARKERS, toggleInlineMarker } from "@/features/preview/lib/markdownCommands"
+import { insertLink, MARKDOWN_MARKERS, toggleInlineMarker, toggleItalic } from "@/features/preview/lib/markdownCommands"
 import { StreamLanguage, syntaxHighlighting } from "@codemirror/language"
 import { useTheme } from "@/providers/themeProvider"
 
@@ -179,6 +179,9 @@ const openReplacePanel: Command = view => {
 // switched off where this is used).
 const SEARCH_BINDINGS: readonly KeyBinding[] = searchKeymap.filter(binding => binding.key !== "Mod-f")
 
+const EDITOR_SCOPE = "editor"
+const SEARCH_SCOPE = "editor search-panel"
+
 // The editor shortcuts (features/preview/lib/keymap.ts), bound inside CodeMirror so they act on the
 // focused editor only, and follow whatever the user rebound them to. The markdown ones only in a markdown
 // editor.
@@ -192,21 +195,22 @@ export function useEditorKeymap(markdown: boolean): Extension {
 	const link = useComboFor("editor.link")
 	const bindings: KeyBinding[] = []
 
-	function bind(combo: string, run: Command): void {
+	function bind(combo: string, run: Command, scope: string): void {
 		for (const key of codeMirrorKeys(combo)) {
-			bindings.push({ key, run })
+			bindings.push({ key, run, scope })
 		}
 	}
 
-	bind(find, openSearchPanel)
-	bind(replace, openReplacePanel)
+	// Find and replace also answer with focus in the search panel's own fields.
+	bind(find, openSearchPanel, SEARCH_SCOPE)
+	bind(replace, openReplacePanel, SEARCH_SCOPE)
 
 	if (markdown) {
-		bind(bold, toggleInlineMarker(MARKDOWN_MARKERS.bold))
-		bind(italic, toggleInlineMarker(MARKDOWN_MARKERS.italic))
-		bind(strikethrough, toggleInlineMarker(MARKDOWN_MARKERS.strikethrough))
-		bind(code, toggleInlineMarker(MARKDOWN_MARKERS.code))
-		bind(link, insertLink)
+		bind(bold, toggleInlineMarker(MARKDOWN_MARKERS.bold), EDITOR_SCOPE)
+		bind(italic, toggleItalic, EDITOR_SCOPE)
+		bind(strikethrough, toggleInlineMarker(MARKDOWN_MARKERS.strikethrough), EDITOR_SCOPE)
+		bind(code, toggleInlineMarker(MARKDOWN_MARKERS.code), EDITOR_SCOPE)
+		bind(link, insertLink, EDITOR_SCOPE)
 	}
 
 	bindings.push(...SEARCH_BINDINGS)

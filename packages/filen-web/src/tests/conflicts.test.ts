@@ -22,11 +22,12 @@ describe("scopesCanCollide", () => {
 		expect(scopesCanCollide("contacts", "drive")).toBe(false)
 	})
 
-	it("co-mounts editor with the surfaces that host the preview overlay", () => {
+	it("co-mounts editor with the surfaces that host the preview overlay, and with the notes editors", () => {
 		expect(scopesCanCollide("editor", "drive")).toBe(true)
 		expect(scopesCanCollide("editor", "photos")).toBe(true)
 		expect(scopesCanCollide("editor", "chats")).toBe(true)
-		expect(scopesCanCollide("editor", "notes")).toBe(false)
+		expect(scopesCanCollide("editor", "notes")).toBe(true)
+		expect(scopesCanCollide("notes", "editor")).toBe(true)
 	})
 
 	it("co-mounts global and audio with everything, in either argument order", () => {
