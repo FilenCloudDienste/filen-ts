@@ -179,6 +179,14 @@ export const preview = {
 	previewSpreadsheetDeleteColumns_other: "Delete {{count}} columns",
 	/** Spreadsheet grid menu — empty the selected cells (formats stay) */
 	previewSpreadsheetClearCells: "Clear contents",
+	/** Spreadsheet grid — the size tip shown while dragging a column's edge */
+	previewSpreadsheetWidthPx: "Width: {{size}} px",
+	/** Spreadsheet grid — the size tip shown while dragging a row's edge */
+	previewSpreadsheetHeightPx: "Height: {{size}} px",
+	/** Spreadsheet grid — tooltip of a column header's resize edge */
+	previewSpreadsheetResizeColumn: "Resize column",
+	/** Spreadsheet grid — tooltip of a row header's resize edge */
+	previewSpreadsheetResizeRow: "Resize row",
 	/** Spreadsheet sheet tabs — adds a new empty sheet */
 	previewSpreadsheetAddSheet: "Add sheet",
 	/** Name given to a newly added sheet; {{number}} is its position */

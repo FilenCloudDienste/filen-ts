@@ -10,6 +10,7 @@ import {
 	type ReactNode,
 	type RefObject
 } from "react"
+import { createPortal } from "react-dom"
 import { useTranslation } from "react-i18next"
 import { cn } from "@filen/shared"
 import type { Axis } from "@/features/spreadsheet/lib/axis.logic"
@@ -25,6 +26,8 @@ import {
 import type { GridSheet } from "@/features/spreadsheet/lib/cellStore.logic"
 import { gridMove, mergeAt, sheetBounds, sheetCols, sheetRows } from "@/features/spreadsheet/lib/navigation.logic"
 import { cellKey, DEFAULT_ROW_HEIGHT, type CellRange, type CellStyleView, type CellView } from "@/features/spreadsheet/lib/model"
+import { measureContents } from "@/features/spreadsheet/lib/autofit"
+import { clampSize, fitSize, resizeTargets, sheetWithSizes, type SizeAxis, type SizeEntry } from "@/features/spreadsheet/lib/sizes.logic"
 
 const ROW_HEADER_WIDTH = 52
 const COL_HEADER_HEIGHT = 24
@@ -44,6 +47,26 @@ export interface SheetGridProps {
 	editor?: { row: number; col: number; node: ReactNode } | null
 	// Lets the parent hand focus back to the grid after an edit.
 	gridRef?: RefObject<HTMLDivElement | null>
+	// Columns or rows resized by dragging a rail edge (or autofit): the grid shows its draft until this
+	// settles. Without it the rails cannot be resized.
+	onResize?: (axis: SizeAxis, sizes: readonly SizeEntry[]) => Promise<void>
+}
+
+// A rail edge being dragged, as the pointer left it.
+interface ResizeDraft {
+	axis: SizeAxis
+	entries: SizeEntry[]
+	size: number
+	x: number
+	y: number
+}
+
+interface ResizeGesture {
+	axis: SizeAxis
+	targets: number[]
+	start: number
+	origin: number
+	pointerId: number
 }
 
 interface Viewport {
@@ -163,13 +186,30 @@ function cellStyle(view: CellView, style: CellStyleView | undefined): CSSPropert
 // mouse or keyboard. Rows and columns are windowed on both axes (only what is on screen, and a few past it,
 // is in the DOM), and the headers and frozen panes are sticky regions of one scrolling box, so they stay put
 // with the browser's own scrolling rather than following it a frame late.
-export function SheetGrid({ sheet, styles, selection, onSelectionChange, label, onKey, onCellActivate, editor, gridRef }: SheetGridProps) {
+export function SheetGrid({
+	sheet: sheetProp,
+	styles,
+	selection,
+	onSelectionChange,
+	label,
+	onKey,
+	onCellActivate,
+	editor,
+	gridRef,
+	onResize
+}: SheetGridProps) {
 	const { t } = useTranslation("preview")
 	const ownRef = useRef<HTMLDivElement>(null)
 	const scrollRef = gridRef ?? ownRef
 	const idPrefix = useId()
 	const [viewport, setViewport] = useState<Viewport>({ top: 0, left: 0, width: 0, height: 0 })
 	const draggingRef = useRef(false)
+	const [draft, setDraft] = useState<ResizeDraft | null>(null)
+	const gestureRef = useRef<ResizeGesture | null>(null)
+	const pendingDraft = useRef<ResizeDraft | null>(null)
+	const frameRef = useRef(0)
+	// While a rail edge is dragged, everything lays out at the draft's sizes.
+	const sheet = draft === null ? sheetProp : sheetWithSizes(sheetProp, draft.axis, draft.entries)
 
 	const { axis: rows, truncated } = sheetRows(sheet)
 	const cols = sheetCols(sheet)
@@ -229,6 +269,40 @@ export function SheetGrid({ sheet, styles, selection, onSelectionChange, label, 
 		layoutRef.current = layout
 		remeasureRef.current?.()
 	})
+
+	// Escape while dragging a rail edge cancels the drag and nothing else (the preview would close on it).
+	const resizing = draft !== null
+
+	useEffect(() => {
+		if (!resizing) {
+			return undefined
+		}
+
+		function cancelOnEscape(event: globalThis.KeyboardEvent): void {
+			if (event.key === "Escape" && gestureRef.current !== null) {
+				event.preventDefault()
+				event.stopPropagation()
+				cancelAnimationFrame(frameRef.current)
+				frameRef.current = 0
+				pendingDraft.current = null
+				gestureRef.current = null
+				setDraft(null)
+			}
+		}
+
+		window.addEventListener("keydown", cancelOnEscape, true)
+
+		return () => {
+			window.removeEventListener("keydown", cancelOnEscape, true)
+		}
+	}, [resizing])
+
+	useEffect(
+		() => () => {
+			cancelAnimationFrame(frameRef.current)
+		},
+		[]
+	)
 
 	useEffect(() => {
 		const element = scrollRef.current
@@ -589,6 +663,7 @@ export function SheetGrid({ sheet, styles, selection, onSelectionChange, label, 
 					id={isActive ? activeId : undefined}
 					role="gridcell"
 					aria-colindex={col + 2}
+					data-merged={merge === undefined ? undefined : ""}
 					aria-selected={rangeContains(range, row, col)}
 					aria-describedby={isActive ? nameId : undefined}
 					className={cn(
@@ -701,6 +776,140 @@ export function SheetGrid({ sheet, styles, selection, onSelectionChange, label, 
 		return nodes
 	}
 
+	function sizeAt(axis: SizeAxis, index: number): number {
+		return axis === "cols" ? cols.size(index) : rows.size(index)
+	}
+
+	// A drag on a column or row inside a selection of whole columns or rows resizes all of them.
+	function targetsFor(axis: SizeAxis, index: number): number[] {
+		const whole =
+			axis === "cols"
+				? range.startRow === 0 && range.endRow >= rows.count - 1
+				: range.startCol === 0 && range.endCol >= cols.count - 1
+
+		return resizeTargets(axis, index, range, whole, at => sizeAt(axis, at) === 0)
+	}
+
+	function clearDraft(): void {
+		cancelAnimationFrame(frameRef.current)
+		frameRef.current = 0
+		pendingDraft.current = null
+		gestureRef.current = null
+		setDraft(null)
+	}
+
+	function draftAt(gesture: ResizeGesture, x: number, y: number): ResizeDraft {
+		const size = clampSize(gesture.axis, gesture.start + (gesture.axis === "cols" ? x : y) - gesture.origin)
+
+		return { axis: gesture.axis, entries: gesture.targets.map((at): SizeEntry => [at, size]), size, x, y }
+	}
+
+	function startResize(event: PointerEvent<HTMLDivElement>, axis: SizeAxis, index: number): void {
+		// Never the grid's own pointerdown, which would start a selection.
+		event.stopPropagation()
+
+		if (event.button !== 0) {
+			return
+		}
+
+		event.currentTarget.setPointerCapture(event.pointerId)
+		gestureRef.current = {
+			axis,
+			targets: targetsFor(axis, index),
+			start: sizeAt(axis, index),
+			origin: axis === "cols" ? event.clientX : event.clientY,
+			pointerId: event.pointerId
+		}
+	}
+
+	// At most one layout per frame, however fast the pointer moves.
+	function moveResize(event: PointerEvent<HTMLDivElement>): void {
+		const gesture = gestureRef.current
+
+		if (gesture?.pointerId !== event.pointerId) {
+			return
+		}
+
+		pendingDraft.current = draftAt(gesture, event.clientX, event.clientY)
+
+		if (frameRef.current === 0) {
+			frameRef.current = requestAnimationFrame(() => {
+				frameRef.current = 0
+				setDraft(pendingDraft.current)
+			})
+		}
+	}
+
+	function endResize(event: PointerEvent<HTMLDivElement>): void {
+		const gesture = gestureRef.current
+
+		if (gesture?.pointerId !== event.pointerId || onResize === undefined) {
+			return
+		}
+
+		const final = draftAt(gesture, event.clientX, event.clientY)
+
+		cancelAnimationFrame(frameRef.current)
+		frameRef.current = 0
+		gestureRef.current = null
+
+		if (final.size === gesture.start && gesture.targets.length === 1) {
+			clearDraft()
+
+			return
+		}
+
+		// Held until the new sizes are the sheet's, so an answer from the worker never flickers back.
+		setDraft(final)
+		void onResize(final.axis, final.entries).finally(clearDraft)
+	}
+
+	function autofit(event: MouseEvent<HTMLDivElement>, axis: SizeAxis, index: number): void {
+		// Never the grid's own double-click, which opens the cell editor.
+		event.stopPropagation()
+
+		const root = scrollRef.current
+
+		if (root === null || onResize === undefined) {
+			return
+		}
+
+		// Only what is drawn can be measured: the rest keep their size.
+		const drawn = new Set(axis === "cols" ? [...frozenColIndices, ...bodyColIndices] : [...frozenRowIndices, ...bodyRowIndices])
+		const entries = targetsFor(axis, index)
+			.filter(at => drawn.has(at))
+			.map((at): SizeEntry => [at, fitSize(axis, measureContents(root, axis, at))])
+
+		if (entries.length > 0) {
+			void onResize(axis, entries)
+		}
+	}
+
+	function resizeHandle(axis: SizeAxis, index: number): ReactNode {
+		return onResize === undefined ? null : (
+			<div
+				data-resize-handle
+				aria-hidden="true"
+				title={t(axis === "cols" ? "previewSpreadsheetResizeColumn" : "previewSpreadsheetResizeRow")}
+				className={cn(
+					"absolute z-10 touch-none",
+					axis === "cols"
+						? "top-0 right-0 h-full w-1.5 translate-x-1/2 cursor-col-resize"
+						: "bottom-0 left-0 h-1.5 w-full translate-y-1/2 cursor-row-resize"
+				)}
+				onPointerDown={event => {
+					startResize(event, axis, index)
+				}}
+				onPointerMove={moveResize}
+				onPointerUp={endResize}
+				onPointerCancel={clearDraft}
+				onDoubleClick={event => {
+					autofit(event, axis, index)
+				}}
+			/>
+		)
+	}
+
 	function columnHeaders(colIndices: number[], origin: number): ReactNode {
 		return (
 			<div
@@ -723,6 +932,7 @@ export function SheetGrid({ sheet, styles, selection, onSelectionChange, label, 
 							style={{ left: cols.offset(col) - origin, width, height: COL_HEADER_HEIGHT }}
 						>
 							{columnName(col)}
+							{resizeHandle("cols", col)}
 						</div>
 					)
 				})}
@@ -751,6 +961,7 @@ export function SheetGrid({ sheet, styles, selection, onSelectionChange, label, 
 						style={{ top: rows.offset(row) - origin, height, width: ROW_HEADER_WIDTH }}
 					>
 						{row + 1}
+						{resizeHandle("rows", row)}
 					</div>
 				</div>
 			)
@@ -848,6 +1059,18 @@ export function SheetGrid({ sheet, styles, selection, onSelectionChange, label, 
 					{t("previewSpreadsheetRowsTruncated", { rows: rows.count.toLocaleString() })}
 				</p>
 			) : null}
+			{draft === null
+				? null
+				: createPortal(
+						<div
+							role="status"
+							className="pointer-events-none fixed z-50 rounded-md bg-popover px-2 py-1 text-xs text-popover-foreground shadow-md"
+							style={{ left: draft.x + 12, top: draft.y + 12 }}
+						>
+							{t(draft.axis === "cols" ? "previewSpreadsheetWidthPx" : "previewSpreadsheetHeightPx", { size: draft.size })}
+						</div>,
+						document.body
+					)}
 		</>
 	)
 }
