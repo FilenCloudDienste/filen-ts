@@ -156,13 +156,31 @@ export const drivePreview = {
 	/** Toast when a save from this device landed right after a version saved elsewhere, which it replaced */
 	remote_change_save_replaced:
 		"Your save replaced changes saved elsewhere moments before. With file versioning on, they're in the file's version history.",
-	/** Toast when this device's save landed after its file was deleted, or replaced by another file under its name, elsewhere while it uploaded; {{name}} is the file name */
-	remote_change_save_other_lineage:
-		"{{name}} was deleted or replaced elsewhere while you saved. Your changes are now the latest version of {{name}}. With file versioning on, what it held before is in its version history.",
+	/** Alert title when a save from this device landed right after a version saved elsewhere, which it replaced (its message is remote_change_save_replaced) */
+	remote_change_save_replaced_title: "Your save replaced newer changes",
+	/** Alert title when this device's save could not go into the file it was editing, which changed elsewhere while it uploaded */
+	remote_change_saved_elsewhere_title: "Your changes were saved elsewhere",
+	/** Alert message: another file replaced the one being saved while the save uploaded, so the save became a version of that file; {{name}} is the file name */
+	remote_change_saved_over_replacement:
+		"While you saved, another file replaced {{name}}. Your changes are now the newest version of that file. With file versioning on, what it held before is in its version history.",
+	/** Alert message: the file being saved was trashed or deleted elsewhere while the save uploaded, so the save made a new file; {{name}} is the file name */
+	remote_change_saved_after_deletion:
+		"{{name}} was deleted elsewhere while you saved, so your changes were saved as a new file named {{name}}.",
+	/** Alert message: the file being saved was moved to another directory elsewhere while the save uploaded, so the save made a new file where it was; {{name}} is the file name */
+	remote_change_saved_after_move:
+		"{{name}} was moved to another directory while you saved, so your changes were saved as a new file named {{name}} in the directory it was in.",
+	/** Alert message: the file being saved changed elsewhere in some way this device did not learn while the save uploaded; {{name}} is the file name */
+	remote_change_saved_as_other_file:
+		"{{name}} changed elsewhere while you saved. Your changes are now the newest version of the file named {{name}}.",
 	/** Remote-deletion alert — title, shown while an open file has unsaved edits and it is trashed or deleted elsewhere */
 	remote_deleted_title: "This file was deleted elsewhere",
 	/** Remote-deletion alert — message; {{name}} is the file name */
 	remote_deleted_message: "{{name}} was moved to the trash or deleted while you were editing it. Your changes are still here.",
+	/** Remote-replacement alert — title, shown while an open file has unsaved edits and another file replaces it under its name elsewhere */
+	remote_replaced_title: "This file was replaced elsewhere",
+	/** Remote-replacement alert — message; {{name}} is the file name */
+	remote_replaced_message:
+		"Another file replaced {{name}} while you were editing it. Your changes are still here; saving them makes them the newest version of that file.",
 	/** Remote-deletion alert — writes the unsaved changes to a new file in the same directory */
 	remote_deleted_save_new: "Save as new file",
 	/** Remote-deletion alert — discards the unsaved changes and closes the file */

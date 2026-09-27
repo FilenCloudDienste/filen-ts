@@ -611,7 +611,7 @@ describe("handleDriveEvent — drive socket handler", () => {
 				await handleDriveEvent({ event: makeEvent(DriveEvent_Tags.FileArchived, { uuid: "replaced" }) })
 			})
 
-			expect(gone).toEqual([{ uuid: "replaced" }])
+			expect(gone).toEqual([{ uuid: "replaced", reason: "replaced" }])
 		})
 
 		it("says nothing of a version archived by an edit: the paired FileNew revises the editor", async () => {

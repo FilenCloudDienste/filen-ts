@@ -5,6 +5,8 @@ import type { DriveItem } from "@/types"
 import type { AudioStatus } from "expo-audio"
 import type { QueueItem, PlaylistWithItems } from "@/features/audio/audio"
 
+export type DriveFileGoneReason = "trashed" | "deleted" | "replaced"
+
 export type Events = {
 	secureStoreChange: {
 		key: string
@@ -40,10 +42,11 @@ export type Events = {
 		item: DriveItem
 		previousUuid?: string
 	}
-	// A file was trashed or deleted for good on the server, from any client. An open editor holding
-	// unsaved edits of it asks what to do with them.
+	// A file was trashed, deleted for good, or replaced by another file under its name (its lineage ended) on
+	// the server, from any client. An open editor holding unsaved edits of it asks what to do with them.
 	driveFileGone: {
 		uuid: string
+		reason: DriveFileGoneReason
 	}
 	// A trashed file was restored from the trash, from any client: an open editor no longer treats it as gone.
 	driveFileRestored: {

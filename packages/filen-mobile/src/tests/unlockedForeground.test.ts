@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const { appState } = vi.hoisted(() => ({
 	appState: { current: "active", listeners: new Set<(state: string) => void>() }
@@ -17,7 +17,7 @@ vi.mock("react-native", () => ({
 	}
 }))
 
-import { createUnlockedToaster, isUnlockedForeground, whenUnlockedForeground } from "@/lib/unlockedForeground"
+import { createUnlockedNotices, createUnlockedToaster, isUnlockedForeground, whenUnlockedForeground } from "@/lib/unlockedForeground"
 import useAppStore from "@/stores/useApp.store"
 
 function setAppState(next: string): void {
@@ -64,38 +64,80 @@ describe("whenUnlockedForeground", () => {
 })
 
 describe("createUnlockedToaster", () => {
-	it("keeps the latest of each kind held under the lock, and shows them in order once unlocked", async () => {
-		useAppStore.setState({ biometricUnlocked: false })
-
-		const shown: string[] = []
-		const toaster = createUnlockedToaster(message => shown.push(message))
-
-		toaster.notify("saveReplaced", "your save replaced theirs")
-		toaster.notify("updated", "updated once")
-		toaster.notify("updated", "updated twice")
-		await Promise.resolve()
-
-		expect(shown).toEqual([])
-
-		useAppStore.getState().setBiometricUnlocked(true)
-		await Promise.resolve()
-		await Promise.resolve()
-
-		expect(shown).toEqual(["your save replaced theirs", "updated twice"])
+	afterEach(() => {
+		vi.useRealTimers()
 	})
 
-	it("shows nothing once disposed", async () => {
+	it("keeps the latest of each kind held under the lock, and shows them one after another once unlocked", async () => {
+		vi.useFakeTimers()
 		useAppStore.setState({ biometricUnlocked: false })
 
 		const shown: string[] = []
 		const toaster = createUnlockedToaster(message => shown.push(message))
 
-		toaster.notify("updated", "stale")
-		toaster.dispose()
+		toaster.notify("savedAsNew", "saved as a copy")
+		toaster.notify("updated", "updated once")
+		toaster.notify("updated", "updated twice")
+		await vi.advanceTimersByTimeAsync(0)
+
+		expect(shown).toEqual([])
+
 		useAppStore.getState().setBiometricUnlocked(true)
-		await Promise.resolve()
+		await vi.advanceTimersByTimeAsync(0)
+
+		// iOS keeps no toast queue: the next one waits for the one before to go.
+		expect(shown).toEqual(["saved as a copy"])
+
+		await vi.advanceTimersByTimeAsync(3200)
+
+		expect(shown).toEqual(["saved as a copy", "updated twice"])
+	})
+
+	it("shows nothing once disposed, even what was already queued", async () => {
+		vi.useFakeTimers()
+
+		const shown: string[] = []
+		const toaster = createUnlockedToaster(message => shown.push(message))
+
+		toaster.notify("a", "first")
+		toaster.notify("b", "second")
+		await vi.advanceTimersByTimeAsync(0)
+		toaster.dispose()
+		await vi.advanceTimersByTimeAsync(5000)
+
+		expect(shown).toEqual(["first"])
+	})
+})
+
+describe("createUnlockedNotices", () => {
+	it("shows each kind's latest notice as an alert once unlocked, one at a time", async () => {
+		useAppStore.setState({ biometricUnlocked: false })
+
+		const shown: string[] = []
+		let dismiss: () => void = () => undefined
+		const announce = createUnlockedNotices(
+			(title, message) =>
+				new Promise<void>(resolve => {
+					shown.push(`${title}: ${message}`)
+					dismiss = resolve
+				})
+		)
+
+		announce("saveReplaced", "Replaced", "your save replaced theirs")
+		announce("savedElsewhere", "Elsewhere", "old")
+		announce("savedElsewhere", "Elsewhere", "new")
 		await Promise.resolve()
 
 		expect(shown).toEqual([])
+
+		useAppStore.getState().setBiometricUnlocked(true)
+		await new Promise(resolve => setTimeout(resolve, 0))
+
+		expect(shown).toEqual(["Replaced: your save replaced theirs"])
+
+		dismiss()
+		await new Promise(resolve => setTimeout(resolve, 0))
+
+		expect(shown).toEqual(["Replaced: your save replaced theirs", "Elsewhere: new"])
 	})
 })

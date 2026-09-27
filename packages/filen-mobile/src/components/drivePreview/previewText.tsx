@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react"
 import View, { CrossGlassContainerView } from "@/components/ui/view"
 import Text from "@/components/ui/text"
-import { unwrapFileMeta, unwrappedFileIntoDriveItem } from "@/lib/sdkUnwrap"
+import { unwrapFileMeta, unwrappedFileIntoDriveItem, unwrapParentUuid } from "@/lib/sdkUnwrap"
 import { getPreviewType } from "@/lib/previewType"
 import TextEditor, { backgroundColors, type TextEditorDocumentStatus } from "@/components/textEditor"
 import { MAX_TEXT_BYTES } from "@/components/textEditor/constants"
@@ -75,22 +75,38 @@ const PreviewTextInner = ({
 
 		savingRef.current = true
 
+		let saved: DriveItemFileExtracted | null = null
+
 		try {
-			return await runSave()
+			// A version saved elsewhere while the socket was down is asked about before this save goes over it.
+			const target = await remote.beforeSave()
+
+			if (target === null) {
+				return false
+			}
+
+			const result = await runSave(target)
+
+			saved = result.saved
+
+			return result.ok
 		} finally {
 			savingRef.current = false
+			// Judged with the save slot released, so a check the save held back runs now.
+			remote.saveSettled(saved)
 		}
 	}
 
 	// Uploads the editor's content under `name` beside the file: the file's own name makes a new version
 	// of it, any other a new file.
-	const uploadEdits = async (name: string) =>
+	const uploadEdits = async (name: string, target: DriveItemFileExtracted | null = itemToUse) =>
 		await runWithLoading(async defer => {
-			if (!itemToUse?.data.decryptedMeta) {
+			if (!target?.data.decryptedMeta) {
 				throw new Error("Missing decryptedMeta")
 			}
 
-			const parent = await resolveParent()
+			// The target's own directory: it may have moved elsewhere, found by the check before this save.
+			const parent = await resolveParent(target.type === "file" ? (unwrapParentUuid(target.data.parent) ?? undefined) : undefined)
 
 			if (!parent || parent === "sharedInRoot" || parent.tag !== AnyDirWithContext_Tags.Normal) {
 				throw new Error("Missing parent directory")
@@ -114,19 +130,20 @@ const PreviewTextInner = ({
 				parent: parent.inner[0],
 				name,
 				modified: Date.now(),
-				created: itemToUse.data.decryptedMeta.created != null ? Number(itemToUse.data.decryptedMeta.created) : undefined,
-				mime: itemToUse.data.decryptedMeta.mime
+				created: target.data.decryptedMeta.created != null ? Number(target.data.decryptedMeta.created) : undefined,
+				mime: target.data.decryptedMeta.mime
 			})
 		})
 
-	const runSave = async (): Promise<boolean> => {
-		const name = itemToUse?.data.decryptedMeta?.name
+	// Writes the edits over `target`, under its name: what the save made, when it made a file.
+	const runSave = async (target: DriveItemFileExtracted): Promise<{ ok: boolean; saved: DriveItemFileExtracted | null }> => {
+		const name = target.data.decryptedMeta?.name
 
 		if (name === undefined) {
-			return false
+			return { ok: false, saved: null }
 		}
 
-		const result = await uploadEdits(name)
+		const result = await uploadEdits(name, target)
 
 		if (!result.success) {
 			logger.error("drivePreview", "Text file save failed", {
@@ -134,15 +151,12 @@ const PreviewTextInner = ({
 			})
 
 			alerts.error(result.error)
-			remote.saveSettled(null)
 
-			return false
+			return { ok: false, saved: null }
 		}
 
 		if (!result.data) {
-			remote.saveSettled(null)
-
-			return false
+			return { ok: false, saved: null }
 		}
 
 		setHasEdits(false)
@@ -150,14 +164,13 @@ const PreviewTextInner = ({
 		const newFile = result.data.files[0]
 		const newDriveItem = newFile ? unwrappedFileIntoDriveItem(unwrapFileMeta(newFile)) : null
 
-		if (newDriveItem?.type === "file") {
-			applySaved(newDriveItem)
-			remote.saveSettled(newDriveItem)
-		} else {
-			remote.saveSettled(null)
+		if (newDriveItem?.type !== "file") {
+			return { ok: true, saved: null }
 		}
 
-		return true
+		applySaved(newDriveItem)
+
+		return { ok: true, saved: newDriveItem }
 	}
 
 	// The unsaved edits written to a new file beside this one, for the remote-change prompts.

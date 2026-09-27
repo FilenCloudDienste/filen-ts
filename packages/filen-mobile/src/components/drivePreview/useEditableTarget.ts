@@ -1,7 +1,7 @@
 import { useRecyclingState } from "@shopify/flash-list"
 import { useEffect } from "react"
 import { useShallow } from "zustand/shallow"
-import { AnyDirWithContext } from "@filen/sdk-rs"
+import { AnyDirWithContext, AnyNormalDir } from "@filen/sdk-rs"
 import { getRealDriveItemParent, unwrapDirMeta, unwrappedDirIntoDriveItem, unwrapParentUuid } from "@/lib/sdkUnwrap"
 import { galleryItemKey, type GalleryItemTagged } from "@/components/drivePreview/gallery"
 import { galleryItemFollowing } from "@/components/drivePreview/galleryRenderName"
@@ -20,8 +20,11 @@ export type EditableTarget = {
 	itemToUse: DriveItemFileExtracted | null
 	/** The directory to write into, null while an own file's directory is not yet known (resolveParent). */
 	parent: Parent
-	/** The directory to write into, looked up now when it is not yet known. */
-	resolveParent: () => Promise<Parent>
+	/**
+	 * The directory to write into, looked up now when it is not yet known. `movedTo` names the directory an own
+	 * file moved to elsewhere, found before a save and not yet rendered.
+	 */
+	resolveParent: (movedTo?: string) => Promise<Parent>
 	/** True when this preview must not offer to write anything back. */
 	readOnly: boolean
 	/** Records the replacement produced by a save, and republishes the rotated identity. */
@@ -154,7 +157,17 @@ export default function useEditableTarget(item: GalleryItemTagged): EditableTarg
 	return {
 		itemToUse,
 		parent,
-		resolveParent: async () => {
+		resolveParent: async (movedTo?: string) => {
+			if (ownParentUuid !== null && movedTo !== undefined && movedTo !== ownParentUuid) {
+				if (cache.rootUuid && movedTo === cache.rootUuid) {
+					return new AnyDirWithContext.Normal(new AnyNormalDir.Root({ uuid: cache.rootUuid }))
+				}
+
+				const cached = cache.directoryUuidToAnyNormalDir.get(movedTo)
+
+				return cached ? new AnyDirWithContext.Normal(cached) : await warmParent(movedTo)
+			}
+
 			if (parent !== null || ownParentUuid === null) {
 				return parent
 			}

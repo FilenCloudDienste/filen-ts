@@ -177,7 +177,7 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 				// Without a stableUuid only an old version went, not the file.
 				if (inner.stableUuid) {
 					dropDriveItem(inner.uuid)
-					events.emit("driveFileGone", { uuid: inner.uuid })
+					events.emit("driveFileGone", { uuid: inner.uuid, reason: "deleted" })
 				}
 			} else {
 				const [archived] = eventInner.inner.inner
@@ -186,7 +186,7 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 				// and an open editor follow the paired FileNew instead.
 				if (!archived.newUuid) {
 					dropDriveItem(archived.uuid)
-					events.emit("driveFileGone", { uuid: archived.uuid })
+					events.emit("driveFileGone", { uuid: archived.uuid, reason: "replaced" })
 				}
 			}
 
@@ -420,7 +420,7 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 			// paired FileNew.
 			if (!inner.newUuid) {
 				dropDriveItem(inner.uuid)
-				events.emit("driveFileGone", { uuid: inner.uuid })
+				events.emit("driveFileGone", { uuid: inner.uuid, reason: "trashed" })
 			}
 
 			const fromCache = cache.fileUuidToNormalFile.get(inner.uuid)

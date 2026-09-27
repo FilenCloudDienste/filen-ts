@@ -1,14 +1,22 @@
 import { useEffect, useRef } from "react"
 import { useTranslation } from "react-i18next"
-import { conflictCopyName, decideRevision, isRevisionOf, run, settleHeldRevisions, type RevisionIdentity } from "@filen/shared"
+import {
+	conflictCopyName,
+	decideRevision,
+	isRevisionOf,
+	run,
+	settleHeldRevisions,
+	type RevisionDecision,
+	type RevisionIdentity
+} from "@filen/shared"
 import type { AnyDirWithContext } from "@filen/sdk-rs"
 import { galleryItemKey, type GalleryItemTagged } from "@/components/drivePreview/gallery"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
-import { onSocketReconnected } from "@/stores/useSocket.store"
+import useSocketStore, { onSocketReconnected } from "@/stores/useSocket.store"
 import { driveItemsQueryFindFileInNormalParent } from "@/features/drive/queries/useDriveItems.query"
-import { createUnlockedToaster, whenUnlockedForeground } from "@/lib/unlockedForeground"
+import { createUnlockedNotices, createUnlockedToaster, whenUnlockedForeground } from "@/lib/unlockedForeground"
 import { isTrashParent, unwrapFileMeta, unwrapParentUuid, unwrappedFileIntoDriveItem } from "@/lib/sdkUnwrap"
-import events from "@/lib/events"
+import events, { type DriveFileGoneReason } from "@/lib/events"
 import alerts from "@/lib/alerts"
 import prompts from "@/lib/prompts"
 import auth from "@/lib/auth"
@@ -16,6 +24,23 @@ import logger from "@/lib/logger"
 import type { DriveItem, DriveItemFileExtracted } from "@/types"
 
 type Revision = { item: DriveItem; previousUuid?: string }
+
+type Gone = { uuid: string; reason: DriveFileGoneReason }
+
+// What a check for changes missed during a socket gap found. `current`: nothing newer, and `file` is the file to
+// save over (renamed or moved elsewhere, it is followed). `answered`: something was, and the usual prompt or
+// follow took it over. `deferred`: the editor's own save was uploading, so it runs once that settles.
+// `unknown`: the check could not be made or was overtaken, so nothing is known.
+type GapCheck =
+	{ kind: "current"; file: DriveItemFileExtracted } | { kind: "answered" } | { kind: "deferred" } | { kind: "unknown"; error?: unknown }
+
+// The socket connection a check covers: none while the socket is down, as changes made until it reconnects
+// reach neither the check nor the socket.
+function socketConnection(): number | null {
+	const socket = useSocketStore.getState()
+
+	return socket.state === "connected" ? socket.connectedAt : null
+}
 
 interface UseRemoteRevisionsParams {
 	item: GalleryItemTagged
@@ -57,16 +82,16 @@ export default function useRemoteRevisions({
 	const keptOver = useRef<string | undefined>(undefined)
 	const held = useRef<Revision[]>([])
 	// A deletion that arrived while the editor's own save was uploading, judged once it settles.
-	const heldGone = useRef<string | null>(null)
+	const heldGone = useRef<Gone | null>(null)
 	// True from a prompt opening until its answer is carried out, a copy upload included.
 	const asking = useRef(false)
 	// The newest revision and deletion that arrived meanwhile, acted on after.
-	const pending = useRef<{ revision: Revision | null; gone: string | null }>({ revision: null, gone: null })
+	const pending = useRef<{ revision: Revision | null; gone: Gone | null }>({ revision: null, gone: null })
 	// The revision the open prompt asks about.
 	const askedAbout = useRef<string | undefined>(undefined)
 	// A deletion of the file while it had no edits: asked about once it gets some, as saving them would make
 	// the file anew (or, after a replacement, a version of the file now holding its name).
-	const goneWhileClean = useRef<string | null>(null)
+	const goneWhileClean = useRef<Gone | null>(null)
 	// The last file restored from the trash, so a deletion prompt still waiting to show is dropped.
 	const restoredSince = useRef<string | null>(null)
 	// Counts what changed the file's known versions (revisions and deletions of it, saves), so a re-read
@@ -74,9 +99,17 @@ export default function useRemoteRevisions({
 	const changes = useRef(0)
 	// A socket-gap re-check the editor's own save got in the way of, run once that save settles.
 	const recheckAfterSave = useRef(false)
+	// The socket connection the last completed gap check covered (null: none), and the check under way, shared
+	// by the reconnect and a save waiting on it: one read per gap.
+	const gapChecked = useRef<number | null>(socketConnection())
+	const gapCheck = useRef<{ connection: number | null; outcome: Promise<GapCheck> } | null>(null)
+	// How the file on screen ended while this editor had it (its lineage), so a save that then lands on
+	// another lineage is explained truthfully; `acknowledged` once the user answered the prompt about it.
+	const lineageEnded = useRef<{ lineage: string | undefined; reason: DriveFileGoneReason | "moved"; acknowledged: boolean } | null>(null)
 	// Set by the subscription below, which holds everything the settlement needs.
 	const settleRef = useRef<(savedItem: DriveItemFileExtracted | null) => void>(() => undefined)
 	const askIfGoneRef = useRef<() => void>(() => undefined)
+	const beforeSaveRef = useRef<() => Promise<DriveItemFileExtracted | null>>(() => Promise.resolve(null))
 
 	useEffect(() => {
 		latest.current = { item, itemToUse, resolveParent, hasEdits, saveAsNewFile, t }
@@ -100,9 +133,15 @@ export default function useRemoteRevisions({
 			toaster.notify(kind, message)
 		}
 
-		function show(from: DriveItemFileExtracted, to: DriveItem, announce: boolean): void {
+		// A notice that must be read whole: a native alert rather than a one-line toast.
+		const announce = createUnlockedNotices(async (title, message) => {
+			await prompts.info({ title, message })
+		})
+
+		function show(from: DriveItemFileExtracted, to: DriveItem, toast: boolean): void {
 			keptOver.current = undefined
 			goneWhileClean.current = null
+			lineageEnded.current = null
 
 			events.emit("driveItemUpdated", { previousUuid: from.data.uuid, item: to })
 
@@ -111,7 +150,7 @@ export default function useRemoteRevisions({
 				latest.current = { ...latest.current, item: { type: "drive", data: to }, itemToUse: to, hasEdits: false }
 			}
 
-			if (announce) {
+			if (toast) {
 				notify("updated", latest.current.t("remote_change_updated"))
 			}
 		}
@@ -155,6 +194,8 @@ export default function useRemoteRevisions({
 				return saved
 			} finally {
 				savingRef.current = false
+				// What arrived during the copy is judged now: the copy is another file, none of it its echo.
+				settleRef.current(null)
 			}
 		}
 
@@ -265,15 +306,16 @@ export default function useRemoteRevisions({
 			)
 		}
 
-		// `saving` overrides the editor's own flag while its settlement runs, still inside that save.
-		function handleRevision(revision: Revision, saving = savingRef.current): void {
+		// `saving` overrides the editor's own flag while its settlement runs, still inside that save, or before its
+		// upload starts. Answers what became of the revision.
+		function handleRevision(revision: Revision, saving = savingRef.current): "unrelated" | "pending" | RevisionDecision["type"] {
 			const { itemToUse: displayed, hasEdits: dirty } = latest.current
 
 			if (
 				displayed === null ||
 				!isRevisionOf(identityOf(displayed), { ...identityOf(revision.item), previousUuid: revision.previousUuid })
 			) {
-				return
+				return "unrelated"
 			}
 
 			changes.current++
@@ -281,7 +323,7 @@ export default function useRemoteRevisions({
 			if (asking.current) {
 				pending.current.revision = revision
 
-				return
+				return "pending"
 			}
 
 			const decision = decideRevision({
@@ -294,25 +336,28 @@ export default function useRemoteRevisions({
 
 			switch (decision.type) {
 				case "ignore":
-					return
+					break
 				case "hold":
 					held.current.push(revision)
 
-					return
+					break
 				case "ask":
 					void ask(displayed, revision)
 
-					return
+					break
 				case "show":
 					show(displayed, revision.item, decision.announce)
 
-					return
+					break
 			}
+
+			return decision.type
 		}
 
 		// `saving` as in handleRevision.
-		async function handleGone(uuid: string, saving = savingRef.current): Promise<void> {
+		async function handleGone(gone: Gone, saving = savingRef.current): Promise<void> {
 			const { itemToUse: displayed, hasEdits: dirty, t } = latest.current
+			const { uuid, reason } = gone
 
 			if (displayed === null || !isOfShownFile(displayed, uuid) || !isCurrent()) {
 				return
@@ -320,9 +365,10 @@ export default function useRemoteRevisions({
 
 			changes.current++
 			restoredSince.current = null
+			lineageEnded.current = { lineage: identityOf(displayed).stableUuid, reason, acknowledged: false }
 
 			if (!dirty) {
-				goneWhileClean.current = uuid
+				goneWhileClean.current = gone
 
 				return
 			}
@@ -330,14 +376,14 @@ export default function useRemoteRevisions({
 			goneWhileClean.current = null
 
 			if (asking.current) {
-				pending.current.gone = uuid
+				pending.current.gone = gone
 
 				return
 			}
 
 			// Judged against what the save made, once it settles.
 			if (saving) {
-				heldGone.current = uuid
+				heldGone.current = gone
 
 				return
 			}
@@ -357,8 +403,8 @@ export default function useRemoteRevisions({
 
 				const answer = await run(async () =>
 					prompts.confirm3({
-						title: t("remote_deleted_title"),
-						message: t("remote_deleted_message", { name }),
+						title: t(reason === "replaced" ? "remote_replaced_title" : "remote_deleted_title"),
+						message: t(reason === "replaced" ? "remote_replaced_message" : "remote_deleted_message", { name }),
 						primaryText: t("remote_deleted_save_new"),
 						destructiveText: t("remote_deleted_discard"),
 						cancelText: t("cancel")
@@ -373,6 +419,11 @@ export default function useRemoteRevisions({
 					alerts.error(answer.error)
 
 					return
+				}
+
+				// Told, the user keeps editing: a save then going to a new file, or into the replacing one, is no news.
+				if (lineageEnded.current !== null) {
+					lineageEnded.current.acknowledged = true
 				}
 
 				if (answer.data === "destructive") {
@@ -405,62 +456,69 @@ export default function useRemoteRevisions({
 			}
 		}
 
-		// After a socket gap (a background on iOS or Android, a reconnect), the file on screen is looked up once
-		// in its directory's listing, and anything newer or gone is answered as if its event had arrived.
-		async function recheck(): Promise<void> {
-			const { itemToUse: displayed } = latest.current
-			const stableUuid = displayed?.type === "file" ? displayed.data.stableUuid : undefined
-			const parentUuid = displayed?.type === "file" ? unwrapParentUuid(displayed.data.parent) : null
+		// Whether `from` and `to` are the same version of a file in different directories: a move elsewhere.
+		function isMove(from: DriveItemFileExtracted, to: DriveItem): to is DriveItemFileExtracted {
+			return (
+				isFile(to) &&
+				to.data.uuid === from.data.uuid &&
+				from.type === "file" &&
+				to.type === "file" &&
+				unwrapParentUuid(to.data.parent) !== unwrapParentUuid(from.data.parent)
+			)
+		}
 
-			if (displayed === null || stableUuid === undefined || parentUuid === null || !isCurrent()) {
-				return
+		// Looks the file on screen up once in its directory (changes a socket gap hid never arrive as events), and
+		// answers anything newer or gone as if its event had arrived, with no upload of this editor under way:
+		// it runs ahead of the editor's own upload, or after it settled.
+		async function check(): Promise<GapCheck> {
+			const { itemToUse: displayed } = latest.current
+
+			if (displayed === null) {
+				return { kind: "unknown" }
 			}
 
-			if (savingRef.current) {
-				recheckAfterSave.current = true
+			const stableUuid = displayed.type === "file" ? displayed.data.stableUuid : undefined
+			const parentUuid = displayed.type === "file" ? unwrapParentUuid(displayed.data.parent) : null
 
-				return
+			// Only an own file's directory can be looked in, and only such a file is saved.
+			if (stableUuid === undefined || parentUuid === null || !isCurrent()) {
+				return { kind: "current", file: displayed }
 			}
 
 			const key = galleryItemKey(latest.current.item)
 			const seen = changes.current
-			const fresh = () => {
-				if (answerable(key) && !savingRef.current && changes.current === seen) {
-					return true
-				}
-
-				// Overtaken by the editor's own save: judged again against what it made, once it settles.
-				if (savingRef.current) {
-					recheckAfterSave.current = true
-				}
-
-				return false
-			}
+			// Not overtaken by an event of this file, which the socket, back since, handled itself.
+			const fresh = () => answerable(key) && changes.current === seen
 
 			const lookedUp = await run(
 				async () => await driveItemsQueryFindFileInNormalParent(parentUuid, stableUuid, displayed.data.decryptedMeta?.name)
 			)
 
 			if (!lookedUp.success) {
-				logger.warn("drivePreview", "re-checking the open file after a socket gap failed", { error: lookedUp.error })
+				logger.warn("drivePreview", "checking the open file after a socket gap failed", { error: lookedUp.error })
 
-				return
+				return { kind: "unknown", error: lookedUp.error }
 			}
 
 			if (!fresh()) {
-				return
+				return { kind: "unknown" }
 			}
 
 			const { lineage: found, sameName } = lookedUp.data
 
-			if (found !== undefined) {
-				if (found.data.uuid !== displayed.data.uuid) {
-					handleRevision({ item: found })
-				} else if (found.data.decryptedMeta?.name !== displayed.data.decryptedMeta?.name) {
-					events.emit("driveItemUpdated", { previousUuid: found.data.uuid, item: found })
+			if (found !== undefined && isFile(found)) {
+				if (found.data.uuid === displayed.data.uuid) {
+					// Renamed elsewhere: followed, and a save writes under the new name.
+					if (found.data.decryptedMeta?.name !== displayed.data.decryptedMeta?.name) {
+						events.emit("driveItemUpdated", { previousUuid: found.data.uuid, item: found })
+					}
+
+					return { kind: "current", file: found }
 				}
 
-				return
+				// A newer version: asked about over unsaved edits, followed otherwise. The user already kept their
+				// edits over this one: saving goes over it, as they chose.
+				return handleRevision({ item: found }, false) === "ignore" ? { kind: "current", file: displayed } : { kind: "answered" }
 			}
 
 			// Gone from its directory: trashed, deleted, moved, or replaced by another file under its name. The
@@ -473,100 +531,205 @@ export default function useRemoteRevisions({
 			})
 
 			if (!lookup.success) {
-				logger.warn("drivePreview", "re-checking the open file after a socket gap failed", { error: lookup.error })
+				logger.warn("drivePreview", "checking the open file after a socket gap failed", { error: lookup.error })
 
-				return
+				return { kind: "unknown", error: lookup.error }
 			}
 
 			if (!fresh()) {
-				return
+				return { kind: "unknown" }
 			}
 
 			if (lookup.data === undefined || isTrashParent(lookup.data.parent)) {
-				void handleGone(serverUuid)
+				void handleGone({ uuid: serverUuid, reason: lookup.data === undefined ? "deleted" : "trashed" }, false)
 
-				return
+				return { kind: "answered" }
 			}
 
 			const movedTo = unwrapParentUuid(lookup.data.parent)
 
-			// Same uuid, so the editor stays mounted, and its save now lands in the new directory.
-			if (lookup.data.uuid === displayed.data.uuid && movedTo !== null && movedTo !== parentUuid) {
+			// Moved elsewhere: a save lands in the new directory. The version on screen is followed there (same
+			// uuid, so the editor stays mounted); a version the edits were kept over is not shown, only saved over.
+			if (movedTo !== null && movedTo !== parentUuid) {
 				const moved = unwrappedFileIntoDriveItem(unwrapFileMeta(lookup.data))
 
-				events.emit("driveItemUpdated", { previousUuid: displayed.data.uuid, item: moved })
+				if (!isFile(moved)) {
+					return { kind: "unknown" }
+				}
 
-				return
+				if (moved.data.uuid === displayed.data.uuid) {
+					events.emit("driveItemUpdated", { previousUuid: displayed.data.uuid, item: moved })
+				}
+
+				return { kind: "current", file: moved }
 			}
 
 			// Still in its directory by the lookup, yet absent from its listing: an archived version, as a
 			// replacement leaves it (nothing on the SDK's JS surface marks one archived). Another file holding
 			// its name confirms it, and a save under that name would be a version of that other file.
 			if (sameName !== undefined && movedTo === parentUuid) {
-				void handleGone(serverUuid)
+				void handleGone({ uuid: serverUuid, reason: "replaced" }, false)
+
+				return { kind: "answered" }
 			}
+
+			return { kind: "current", file: displayed }
+		}
+
+		// One gap check per socket connection: the reconnect and a save waiting on it share it, and a completed
+		// check marks the connection covered, until the socket drops and comes back. While the editor's own save
+		// uploads, it waits for that save to settle, and is judged against what the save made.
+		function checkGap(saving: boolean): Promise<GapCheck> {
+			if (saving) {
+				recheckAfterSave.current = true
+
+				return Promise.resolve({ kind: "deferred" })
+			}
+
+			const connection = socketConnection()
+			const running = gapCheck.current
+
+			if (running !== null && running.connection === connection) {
+				return running.outcome
+			}
+
+			const outcome = check().then(result => {
+				if (connection !== null && (result.kind === "current" || result.kind === "answered")) {
+					gapChecked.current = connection
+				}
+
+				return result
+			})
+
+			gapCheck.current = { connection, outcome }
+
+			void outcome.finally(() => {
+				if (gapCheck.current?.outcome === outcome) {
+					gapCheck.current = null
+				}
+			})
+
+			return outcome
 		}
 
 		const revised = events.subscribe("driveFileRevised", revision => {
 			handleRevision(revision)
 		})
-		const gone = events.subscribe("driveFileGone", ({ uuid }) => {
-			void handleGone(uuid)
+		const gone = events.subscribe("driveFileGone", payload => {
+			void handleGone(payload)
 		})
 		// Back from the trash before anything was asked: no longer gone.
 		const restored = events.subscribe("driveFileRestored", ({ uuid }) => {
 			restoredSince.current = uuid
 
-			if (goneWhileClean.current === uuid) {
+			if (goneWhileClean.current?.uuid === uuid) {
 				goneWhileClean.current = null
 			}
 
-			if (heldGone.current === uuid) {
+			if (heldGone.current?.uuid === uuid) {
 				heldGone.current = null
 			}
 
-			if (pending.current.gone === uuid) {
+			if (pending.current.gone?.uuid === uuid) {
 				pending.current.gone = null
+			}
+
+			if (lineageEnded.current !== null && latest.current.itemToUse?.data.uuid === uuid) {
+				lineageEnded.current = null
+			}
+		})
+		// A move elsewhere of the file on screen (the gallery follows it): a save already uploading lands where the
+		// file was, as a new file, which the settlement then says.
+		const updated = events.subscribe("driveItemUpdated", ({ previousUuid, item: next }) => {
+			const displayed = latest.current.itemToUse
+
+			if (displayed !== null && previousUuid === displayed.data.uuid && isMove(displayed, next) && savingRef.current) {
+				lineageEnded.current = { lineage: identityOf(displayed).stableUuid, reason: "moved", acknowledged: false }
 			}
 		})
 		const unsubscribeReconnected = onSocketReconnected(() => {
-			void recheck()
+			void checkGap(savingRef.current)
 		})
 
 		// Edits begun on a file deleted elsewhere meanwhile: asked about now, before a save recreates it.
 		askIfGoneRef.current = () => {
-			const uuid = goneWhileClean.current
+			const gone = goneWhileClean.current
 
-			if (uuid !== null && latest.current.hasEdits) {
+			if (gone !== null && latest.current.hasEdits) {
 				goneWhileClean.current = null
 
-				void handleGone(uuid)
+				void handleGone(gone)
 			}
+		}
+
+		// Before the editor's own upload (its save slot already taken): after a socket gap not yet checked (the
+		// socket down, or back but not looked at since), the one check runs first, so a version saved elsewhere
+		// meanwhile is asked about before the save goes over it. The file to save over, or null to not upload.
+		beforeSaveRef.current = async () => {
+			const displayed = latest.current.itemToUse
+
+			if (displayed === null) {
+				return null
+			}
+
+			const connection = socketConnection()
+
+			if (connection !== null && connection === gapChecked.current) {
+				return displayed
+			}
+
+			const result = await checkGap(false)
+
+			if (result.kind === "current") {
+				return result.file
+			}
+
+			// Nothing written over a version not known to be the newest: offline, the upload would fail too.
+			if (result.kind === "unknown" && result.error !== undefined) {
+				alerts.error(result.error)
+			}
+
+			return null
 		}
 
 		settleRef.current = (savedItem: DriveItemFileExtracted | null) => {
 			const settled = settleHeldRevisions(held.current, savedItem?.data.uuid ?? null, revision => revision.item.data.uuid)
 			const gone = heldGone.current
 			const savedOver = latest.current.itemToUse
-			const lineageBefore = savedOver?.type === "file" ? savedOver.data.stableUuid : undefined
-			const lineageAfter = savedItem?.type === "file" ? savedItem.data.stableUuid : undefined
+			const lineageBefore = savedOver !== null ? identityOf(savedOver).stableUuid : undefined
+			const lineageAfter = savedItem !== null ? identityOf(savedItem).stableUuid : undefined
+			const { t } = latest.current
 
 			held.current = []
 			heldGone.current = null
 			changes.current++
 
 			if (settled.replaced) {
-				notify("saveReplaced", latest.current.t("remote_change_save_replaced"))
+				announce("saveReplaced", t("remote_change_save_replaced_title"), t("remote_change_save_replaced"))
 			}
 
-			// The save landed on another lineage: the file was deleted, or replaced by another under its name,
-			// while it uploaded, and the save made the file anew or a version of that other file. Said once;
-			// the editor follows what the save made either way (below).
-			if (lineageBefore !== undefined && lineageAfter !== undefined && lineageBefore !== lineageAfter && savedItem !== null) {
-				notify(
-					"saveOtherLineage",
-					latest.current.t("remote_change_save_other_lineage", { name: savedItem.data.decryptedMeta?.name ?? "" })
-				)
+			// The save landed on another lineage: the file on screen ended while it uploaded (deleted, replaced
+			// under its name, moved away), and the save made a new file or a version of the replacing one. Said
+			// once, as it was, unless the user was already told and saved anyway; the editor follows what the
+			// save made either way (below).
+			if (savedItem !== null && lineageBefore !== undefined && lineageAfter !== undefined && lineageBefore !== lineageAfter) {
+				const ended = lineageEnded.current?.lineage === lineageBefore ? lineageEnded.current : null
+				const reason = gone?.reason ?? ended?.reason
+				const name = savedItem.data.decryptedMeta?.name ?? ""
+
+				if (ended?.acknowledged !== true) {
+					announce(
+						"savedElsewhere",
+						t("remote_change_saved_elsewhere_title"),
+						reason === "replaced"
+							? t("remote_change_saved_over_replacement", { name })
+							: reason === "moved"
+								? t("remote_change_saved_after_move", { name })
+								: reason === "trashed" || reason === "deleted"
+									? t("remote_change_saved_after_deletion", { name })
+									: t("remote_change_saved_as_other_file", { name })
+					)
+				}
 			}
 
 			// Judged against the saved version: this editor, and the gallery's current item, follow it (applySaved).
@@ -574,6 +737,7 @@ export default function useRemoteRevisions({
 				latest.current = { ...latest.current, item: { type: "drive", data: savedItem }, itemToUse: savedItem, hasEdits: false }
 				keptOver.current = undefined
 				goneWhileClean.current = null
+				lineageEnded.current = null
 			}
 
 			for (const revision of settled.newer) {
@@ -587,7 +751,7 @@ export default function useRemoteRevisions({
 			if (recheckAfterSave.current) {
 				recheckAfterSave.current = false
 
-				void recheck()
+				void checkGap(false)
 			}
 		}
 
@@ -597,6 +761,7 @@ export default function useRemoteRevisions({
 			revised.remove()
 			gone.remove()
 			restored.remove()
+			updated.remove()
 			unsubscribeReconnected()
 		}
 	}, [savingRef])
@@ -608,9 +773,13 @@ export default function useRemoteRevisions({
 	}, [hasEdits])
 
 	return {
-		// Call after each save of the editor's own settles, with what it made (null when it failed), so
-		// the revisions that arrived meanwhile are judged: its own echo dropped, and a version saved
-		// elsewhere in between reported.
+		// Call inside the editor's own save, its slot taken, before uploading: the file to write over (followed
+		// through a rename or move elsewhere), or null to not upload, as a prompt about a change made elsewhere
+		// took over (or none could be ruled out).
+		beforeSave: async (): Promise<DriveItemFileExtracted | null> => await beforeSaveRef.current(),
+		// Call after each save of the editor's own settles, its slot released, with what it made (null when it
+		// failed or did not upload), so the revisions that arrived meanwhile are judged: its own echo dropped,
+		// and a version saved elsewhere in between reported.
 		saveSettled: (savedItem: DriveItemFileExtracted | null) => {
 			settleRef.current(savedItem)
 		}
