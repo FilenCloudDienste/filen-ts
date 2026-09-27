@@ -150,6 +150,24 @@ export class PushEchoes {
 		return true
 	}
 
+	// A write that failed: its content, should another device save the same, is that device's edit.
+	public forget(id: string, hash: string): void {
+		const hashes = this.pushes.get(id)
+		const index = hashes?.lastIndexOf(hash) ?? -1
+
+		if (hashes === undefined || index === -1) {
+			return
+		}
+
+		const rest = hashes.filter((_, at) => at !== index)
+
+		if (rest.length === 0) {
+			this.pushes.delete(id)
+		} else {
+			this.pushes.set(id, rest)
+		}
+	}
+
 	// Sign-out: nothing of the next account's is ours yet.
 	public clear(): void {
 		this.pushes.clear()

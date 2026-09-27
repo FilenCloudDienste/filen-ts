@@ -482,6 +482,11 @@ describe("bpsToReadable", () => {
 		expect(result).toBe("512.0 B/s")
 	})
 
+	it("shows a value that rounds up to 1024 as 1 of the next unit", () => {
+		expect(bpsToReadable(1023.97)).toBe("1.0 KiB/s")
+		expect(bpsToReadable(1024 * 1024 - 20)).toBe("1.0 MiB/s")
+	})
+
 	it("should format KiB range values", () => {
 		const result = bpsToReadable(1024)
 

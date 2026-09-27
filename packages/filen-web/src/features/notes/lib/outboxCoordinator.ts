@@ -4,6 +4,7 @@ import { sync } from "@/features/notes/lib/sync"
 import { inflightContentSchema, type RemoteEnqueue } from "@/features/notes/lib/sync.logic"
 import { setOutboxHydrated, type InflightContent } from "@/features/notes/store/useNotesInflight"
 import { rememberNotePush, setNotePushBroadcast } from "@/features/notes/lib/pushEchoes"
+import { setNoteAnswerBroadcast, useNotesRemoteEditStore } from "@/features/notes/store/useNoteRemoteEdit"
 
 // Binds the leader-owned notes outbox (sync.ts) to a dedicated cross-tab channel + the db-lock leadership
 // signal, via the shared coordinator core (outboxChannel.ts). The leader tab (whoever holds the db lock) runs
@@ -38,6 +39,13 @@ function handleMessage(msg: OutboxChannelMsg): void {
 	// Every tab keeps the list of what the leader pushed, whichever role it holds by the time it hears.
 	if (msg.kind === "pushed") {
 		rememberNotePush(msg.id, msg.hash)
+
+		return
+	}
+
+	// Answered in another tab: this one stops asking, and stops holding the note's pushes.
+	if (msg.kind === "answered") {
+		useNotesRemoteEditStore.getState().dropRemoteEdited(msg.id)
 
 		return
 	}
@@ -106,6 +114,7 @@ export async function startOutbox(): Promise<void> {
 
 		sync.attachTransport(transport)
 		setNotePushBroadcast(transport.broadcastPushed)
+		setNoteAnswerBroadcast(transport.broadcastAnswered)
 		channel.onmessage = (ev: MessageEvent<OutboxChannelMsg>) => {
 			handleMessage(ev.data)
 		}

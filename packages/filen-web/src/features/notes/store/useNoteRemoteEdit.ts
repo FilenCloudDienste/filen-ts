@@ -14,18 +14,22 @@ export interface NotesRemoteEditStore {
 	// The note the editor pane shows, so a reload of it, and of no other, is announced.
 	openNote: string | null
 	setRemoteEdited: (uuid: string, edit: NoteRemoteEdit) => void
+	// The question was answered in this tab: the other tabs are told.
 	clearRemoteEdited: (uuid: string) => void
+	// The question was answered in another tab.
+	dropRemoteEdited: (uuid: string) => void
 	setOpenNote: (uuid: string | null) => void
 }
 
-export const useNotesRemoteEditStore = create<NotesRemoteEditStore>(set => ({
-	remoteEdited: {},
-	openNote: null,
-	setRemoteEdited(uuid, edit) {
-		holdNoteForRemoteEdit(uuid)
-		set(state => ({ remoteEdited: { ...state.remoteEdited, [uuid]: edit } }))
-	},
-	clearRemoteEdited(uuid) {
+// The outbox channel's "answered" post, wired by outboxCoordinator.ts (none in a single-tab install).
+let broadcastAnswered: ((uuid: string) => void) | null = null
+
+export function setNoteAnswerBroadcast(fn: ((uuid: string) => void) | null): void {
+	broadcastAnswered = fn
+}
+
+export const useNotesRemoteEditStore = create<NotesRemoteEditStore>((set, get) => {
+	function drop(uuid: string): void {
 		releaseNoteHold(uuid)
 		set(state => {
 			if (state.remoteEdited[uuid] === undefined) {
@@ -40,11 +44,32 @@ export const useNotesRemoteEditStore = create<NotesRemoteEditStore>(set => ({
 
 			return { remoteEdited: next }
 		})
-	},
-	setOpenNote(uuid) {
-		set({ openNote: uuid })
 	}
-}))
+
+	return {
+		remoteEdited: {},
+		openNote: null,
+		setRemoteEdited(uuid, edit) {
+			// Held at once for the note on screen, whose dialog is about to show (a push pass may start
+			// before it mounts); the dialog holds it from then on, and only while it shows (NoteRemoteEditDialog).
+			// A note edited but not on screen is not held: nothing there could answer, and its edits would
+			// wait unsent until it was opened again.
+			if (get().openNote === uuid) {
+				holdNoteForRemoteEdit(uuid)
+			}
+
+			set(state => ({ remoteEdited: { ...state.remoteEdited, [uuid]: edit } }))
+		},
+		clearRemoteEdited(uuid) {
+			drop(uuid)
+			broadcastAnswered?.(uuid)
+		},
+		dropRemoteEdited: drop,
+		setOpenNote(uuid) {
+			set({ openNote: uuid })
+		}
+	}
+})
 
 // Reactive per-note subscription for the editor's dialog.
 export function useNoteRemoteEdit(uuid: string): NoteRemoteEdit | undefined {

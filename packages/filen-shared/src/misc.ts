@@ -425,6 +425,12 @@ export function bpsToReadable(bps: number): string {
 		value = 0.1
 	}
 
+	// A value that rounds up to 1024 shows as 1 of the next unit, as formatBytes does.
+	if (Number(value.toFixed(1)) >= 1024 && i < BPS_TO_READABLE_UNITS.length - 1) {
+		value /= 1024
+		i++
+	}
+
 	if (i < 0) {
 		return value.toFixed(1) + " B/s"
 	}

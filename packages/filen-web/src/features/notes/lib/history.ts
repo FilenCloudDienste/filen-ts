@@ -21,13 +21,13 @@ export async function restoreNoteFromHistory(note: Note, history: NoteHistory): 
 	let updated: Note
 
 	// Its echo is this browser's own write, not an edit made elsewhere.
-	if (history.content !== undefined) {
-		recordNotePush(note.uuid, history.content)
-	}
+	const forget = history.content === undefined ? undefined : recordNotePush(note.uuid, history.content)
 
 	try {
 		updated = await runOp(sdkApi.restoreNoteFromHistory(note, history))
 	} catch (e) {
+		forget?.()
+
 		return { status: "error", dto: asErrorDTO(e) }
 	}
 

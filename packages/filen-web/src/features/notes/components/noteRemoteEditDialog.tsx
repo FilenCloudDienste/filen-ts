@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState } from "react"
+import { lazy, Suspense, useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import type { Note } from "@filen/sdk-rs"
@@ -6,6 +6,7 @@ import { conflictCopyStamp } from "@filen/shared"
 import { useNoteRemoteEdit } from "@/features/notes/store/useNoteRemoteEdit"
 import { keepMineOverRemoteEdit, reloadRemoteEdit, saveRemoteEditMineAsCopy } from "@/features/notes/lib/socketHandlers"
 import { localNoteContent } from "@/features/notes/lib/localContent"
+import { holdNoteForRemoteEdit, releaseNoteHold } from "@/features/notes/lib/remoteEditHolds"
 import { codeMirrorTagForNote } from "@/features/notes/components/reader/reader.logic"
 import { RemoteChangeDialog } from "@/features/preview/components/remoteChangeDialog"
 import { errorLabel } from "@/lib/i18n/errorLabel"
@@ -21,6 +22,21 @@ export function NoteRemoteEditDialog({ note }: { note: Note }) {
 	const { t } = useTranslation("notes")
 	const edit = useNoteRemoteEdit(note.uuid)
 	const [pending, setPending] = useState(false)
+	const shown = edit !== undefined
+
+	// The note's pushes wait while the question is on screen; a note left unanswered sends its edits again
+	// (the push's own overwrite check still reports burying their version), and asks again when reopened.
+	useEffect(() => {
+		if (!shown) {
+			return undefined
+		}
+
+		holdNoteForRemoteEdit(note.uuid)
+
+		return () => {
+			releaseNoteHold(note.uuid)
+		}
+	}, [shown, note.uuid])
 
 	if (edit === undefined) {
 		return null

@@ -18,12 +18,17 @@ export function rememberNotePush(uuid: string, hash: string): void {
 }
 
 // A content write made outside the push loop (retype, history restore, a conflicted copy), recorded in
-// every tab before it is sent, like the loop's own pushes.
-export function recordNotePush(uuid: string, content: string): void {
+// every tab before it is sent, like the loop's own pushes. The returned function takes it back when the
+// write fails, in this tab (another tab only holds it until a later echo of the note consumes it).
+export function recordNotePush(uuid: string, content: string): () => void {
 	const hash = hashNoteContent(content)
 
 	pushes.remember(uuid, hash)
 	broadcast?.(uuid, hash)
+
+	return () => {
+		pushes.forget(uuid, hash)
+	}
 }
 
 export function isOwnNotePush(uuid: string, hash: string): boolean {

@@ -93,6 +93,18 @@ describe("conflictCopyName", () => {
 })
 
 describe("PushEchoes", () => {
+	it("forgets a push whose write failed, and only that one", () => {
+		const echoes = new PushEchoes()
+
+		echoes.remember("a", "h1")
+		echoes.remember("a", "h2")
+		echoes.forget("a", "h2")
+		echoes.forget("b", "h1")
+
+		expect(echoes.isOwn("a", "h2")).toBe(false)
+		expect(echoes.isOwn("a", "h1")).toBe(true)
+	})
+
 	it("recognises what was pushed, per item, and forgets the oldest past the cap", () => {
 		const echoes = new PushEchoes(2)
 

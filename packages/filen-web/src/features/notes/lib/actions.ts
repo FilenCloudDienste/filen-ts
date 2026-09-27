@@ -323,13 +323,13 @@ export async function setNoteType(note: Note, noteType: NoteType): Promise<Actio
 
 	// The retype writes the content again; its echo is this browser's own write. Content the SDK reads
 	// itself is not known here.
-	if (knownContent !== undefined) {
-		recordNotePush(note.uuid, knownContent)
-	}
+	const forget = knownContent === undefined ? undefined : recordNotePush(note.uuid, knownContent)
 
 	try {
 		updated = await runOp(sdkApi.setNoteType(note, noteType, knownContent))
 	} catch (e) {
+		forget?.()
+
 		return { status: "error", dto: asErrorDTO(e) }
 	}
 

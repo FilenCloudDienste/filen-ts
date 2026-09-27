@@ -45,7 +45,7 @@ import { ACCOUNT_QUERY_KEY } from "@/queries/account"
 import { fetchNotes, NOTES_QUERY_KEY } from "@/features/notes/queries/notes"
 import { noteContentQueryKey } from "@/features/notes/queries/noteContent"
 import useNotesInflightStore, { beginEditingSession, type InflightContent } from "@/features/notes/store/useNotesInflight"
-import { useNotesRemoteEditStore } from "@/features/notes/store/useNoteRemoteEdit"
+import { setNoteAnswerBroadcast, useNotesRemoteEditStore } from "@/features/notes/store/useNoteRemoteEdit"
 import { handleNoteEvent, keepMineOverRemoteEdit, reloadRemoteEdit, saveRemoteEditMineAsCopy } from "@/features/notes/lib/socketHandlers"
 import { forgetNotePushes, isOwnNotePush, rememberNotePush, setNotePushBroadcast } from "@/features/notes/lib/pushEchoes"
 import { heldNotes, releaseAllNoteHolds } from "@/features/notes/lib/remoteEditHolds"
@@ -497,7 +497,11 @@ describe("note socket handlers — contentEdited", () => {
 })
 
 describe("note socket handlers — reload/keep actions", () => {
-	it("a pending remote edit holds the note's pushes until it is answered", async () => {
+	it("a pending remote edit on the open note holds its pushes until it is answered, and tells the other tabs", async () => {
+		const broadcast = vi.fn<(uuid: string) => void>()
+
+		setNoteAnswerBroadcast(broadcast)
+		useNotesRemoteEditStore.getState().setOpenNote("a")
 		useNotesRemoteEditStore.getState().setRemoteEdited("a", { theirs: "server text" })
 
 		expect((await heldNotes()).has("a")).toBe(true)
@@ -506,6 +510,34 @@ describe("note socket handlers — reload/keep actions", () => {
 		await settle()
 
 		expect((await heldNotes()).has("a")).toBe(false)
+		expect(broadcast).toHaveBeenCalledWith("a")
+		setNoteAnswerBroadcast(null)
+		useNotesRemoteEditStore.getState().setOpenNote(null)
+	})
+
+	it("a remote edit on a note not on screen holds nothing: no dialog there could release it", async () => {
+		useNotesRemoteEditStore.getState().setOpenNote("b")
+		useNotesRemoteEditStore.getState().setRemoteEdited("a", { theirs: "server text" })
+
+		expect(useNotesRemoteEditStore.getState().remoteEdited["a"]).toEqual({ theirs: "server text" })
+		expect((await heldNotes()).has("a")).toBe(false)
+		useNotesRemoteEditStore.getState().setOpenNote(null)
+	})
+
+	it("an answer from another tab drops the question and the hold without echoing it back", async () => {
+		const broadcast = vi.fn<(uuid: string) => void>()
+
+		setNoteAnswerBroadcast(broadcast)
+		useNotesRemoteEditStore.getState().setOpenNote("a")
+		useNotesRemoteEditStore.getState().setRemoteEdited("a", { theirs: "server text" })
+		useNotesRemoteEditStore.getState().dropRemoteEdited("a")
+		await settle()
+
+		expect(useNotesRemoteEditStore.getState().remoteEdited["a"]).toBeUndefined()
+		expect((await heldNotes()).has("a")).toBe(false)
+		expect(broadcast).not.toHaveBeenCalled()
+		setNoteAnswerBroadcast(null)
+		useNotesRemoteEditStore.getState().setOpenNote(null)
 	})
 
 	it("load theirs queues their content from the event over the local edits and reseeds the editor from it", async () => {
