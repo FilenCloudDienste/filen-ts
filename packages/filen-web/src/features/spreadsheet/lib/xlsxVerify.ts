@@ -437,6 +437,8 @@ function missing(original: Map<string, number>, saved: Map<string, number>): str
 // A workbook's styles, resolved so that a cell's style reads the same however the styles are numbered.
 interface Context {
 	styles: string[]
+	// A named style's own format by its number (xfId), Normal's left out.
+	definition: (xfId: string) => string
 	defaultStyle: string
 	dxfs: string[]
 	strings: string[]
@@ -460,9 +462,17 @@ function styleContext(stylesXml: string | undefined, stringsXml: string | undefi
 	const bases = section("cellStyleXfs")
 	const parts = (xf: XmlNode): string => {
 		const id = xf.attrs.get("numFmtId") ?? "0"
+		const code = formats.get(id)
+		// A built-in the file spells in its locale is a built-in still (Accounting, not custom).
+		const format =
+			code === undefined
+				? (SAME_EVERYWHERE[id] ?? `builtin:${id}`)
+				: Number(id) < 164 && SAME_EVERYWHERE[id] !== code
+					? `builtin:${id}:${code}`
+					: code
 
 		return [
-			formats.get(id) ?? SAME_EVERYWHERE[id] ?? `builtin:${id}`,
+			format,
 			fonts[Number(xf.attrs.get("fontId") ?? 0)] ?? "",
 			fills[Number(xf.attrs.get("fillId") ?? 0)] ?? "",
 			borders[Number(xf.attrs.get("borderId") ?? 0)] ?? "",
@@ -475,9 +485,9 @@ function styleContext(stylesXml: string | undefined, stringsXml: string | undefi
 	}
 	// A named style by its name and its own format, with the parts of it the style carries. Normal by name:
 	// every writer spells its own, and cells show their format, not Normal's.
-	const namedStyles = new Map<string, string>([["0", "Normal"]])
-	const namedStyle = (xfId: string): string => {
-		const known = namedStyles.get(xfId)
+	const definitions = new Map<string, string>([["0", ""]])
+	const definition = (xfId: string): string => {
+		const known = definitions.get(xfId)
 
 		if (known !== undefined) return known
 
@@ -486,13 +496,13 @@ function styleContext(stylesXml: string | undefined, stringsXml: string | undefi
 			.filter(([name]) => name.startsWith("apply"))
 			.map(([name, value]) => `${name}=${normalizeValue(value)}`)
 			.sort()
+		const text = `${base === undefined ? "" : parts(base)}/${applies.join(" ")}`
 
-		const signature = [named.get(xfId) ?? `#${xfId}`, base === undefined ? "" : parts(base), applies.join(" ")].join("/")
+		definitions.set(xfId, text)
 
-		namedStyles.set(xfId, signature)
-
-		return signature
+		return text
 	}
+	const namedStyle = (xfId: string): string => (xfId === "0" ? "Normal" : `${named.get(xfId) ?? `#${xfId}`}/${definition(xfId)}`)
 	const signature = (xf: XmlNode): string => {
 		const extras = [...xf.attrs]
 			.filter(([name, value]) => ["quotePrefix", "pivotButton"].includes(name) && !isDefault("xf", name, normalizeValue(value)))
@@ -518,7 +528,7 @@ function styleContext(stylesXml: string | undefined, stringsXml: string | undefi
 		return canon(node)
 	})
 
-	return { styles: cellStyles, defaultStyle: cellStyles[0] ?? "", dxfs, strings }
+	return { styles: cellStyles, definition, defaultStyle: cellStyles[0] ?? "", dxfs, strings }
 }
 
 function standardPalette(node: XmlNode): boolean {
@@ -1108,9 +1118,10 @@ export async function saveLosses(input: VerifyInput, cancelled: () => boolean = 
 		for (const section of xml === undefined ? [] : parseXml(xml).children) {
 			if (["numFmts", "fonts", "fills", "borders", "cellXfs", "cellStyleXfs", "dxfs"].includes(section.name)) continue
 
-			// Built-in named styles Excel recreates as needed (cells using one are compared by name);
-			// custom ones are content.
-			if (section.name === "cellStyles") section.children = section.children.filter(style => !style.attrs.has("builtinId"))
+			// Named styles by name and what each is, however the file numbers them.
+			if (section.name === "cellStyles") {
+				for (const style of section.children) style.attrs.set("xfId", context.definition(style.attrs.get("xfId") ?? "0"))
+			}
 
 			// The default styles for new tables and pivot tables, with no styles of the file's own.
 			if (section.name === "tableStyles" && section.children.length === 0) continue

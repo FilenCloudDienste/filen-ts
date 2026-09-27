@@ -81,7 +81,7 @@ export class FormulaEngine {
 	// Grid sheet index (worksheets only, as the grid lists them) → engine sheet id.
 	private readonly sheetIds: number[] = []
 
-	constructor(sheets: readonly EngineSheet[], names: readonly EngineName[]) {
+	constructor(sheets: readonly EngineSheet[], names: readonly EngineName[], date1904 = false) {
 		// A null-prototype record: a sheet named "__proto__" is a key like any other.
 		const contents = Object.create(null) as Record<string, RawCellContent[][]>
 
@@ -96,9 +96,10 @@ export class FormulaEngine {
 			useArrayArithmetic: false,
 			maxRows: 1_048_576,
 			maxColumns: 16_384,
-			// Excel's serial dates (1900-02-29 included), whitespace and empty-cell arithmetic.
-			leapYear1900: true,
-			nullDate: { year: 1899, month: 12, day: 31 },
+			// Excel's serial dates (1900-02-29 included, or counted from 1904), whitespace and empty-cell
+			// arithmetic.
+			leapYear1900: !date1904,
+			nullDate: date1904 ? { year: 1904, month: 1, day: 1 } : { year: 1899, month: 12, day: 31 },
 			ignoreWhiteSpace: "any",
 			evaluateNullToZero: true,
 			// Undo is the document's own; the engine's would hold copies of what each operation replaced.

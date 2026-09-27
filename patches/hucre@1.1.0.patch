@@ -1,5 +1,5 @@
 diff --git a/dist/_types.d.mts b/dist/_types.d.mts
-index 0106cd5a6d4550a57f4669754d72accd7c946bce..954f83019af45b363b6783570fcea8ebd602be94 100644
+index 0106cd5a6d4550a57f4669754d72accd7c946bce..01ef08f77519219f47118420886ac0dc829bc57f 100644
 --- a/dist/_types.d.mts
 +++ b/dist/_types.d.mts
 @@ -15,7 +15,8 @@ export interface FontStyle {
@@ -126,7 +126,7 @@ index 0106cd5a6d4550a57f4669754d72accd7c946bce..954f83019af45b363b6783570fcea8eb
  	merges?: MergeRange[];
  	dataValidations?: DataValidation[];
  	conditionalRules?: ConditionalRule[];
-@@ -1074,6 +1123,10 @@ export interface Workbook {
+@@ -1074,6 +1123,12 @@ export interface Workbook {
  	activeSheet?: number;
  	/** Theme color palette (resolved from xl/theme/theme1.xml) */
  	themeColors?: string[];
@@ -134,10 +134,12 @@ index 0106cd5a6d4550a57f4669754d72accd7c946bce..954f83019af45b363b6783570fcea8eb
 +	calcProperties?: Record<string, string>;
 +	/** The workbook's name for VBA (`<workbookPr codeName>`) */
 +	codeName?: string;
++	/** The file's named styles but Normal, in its order, cells using them or not */
++	namedStyles?: NamedCellStyle[];
  	/** Workbook-level protection */
  	workbookProtection?: {
  		lockStructure?: boolean;
-@@ -1366,6 +1419,14 @@ export interface WriteSheet {
+@@ -1366,6 +1421,14 @@ export interface WriteSheet {
  	* Excel picks its own from the default font.
  	*/
  	defaultColWidth?: number;
@@ -360,9 +362,18 @@ index 5892e7a16a80149177b56fe77ad32b273d86110b..0f6654ae0358c6d472060054dd6a7f7c
  		if (titleParts.length > 0) {
  			result.push({
 diff --git a/dist/xlsx/reader.mjs b/dist/xlsx/reader.mjs
-index 8d11fc8828e051c0560e66f792c7d04ca3e302cf..b675001fe9cd75272c7b5ebeb69a063bc5091d78 100644
+index 8d11fc8828e051c0560e66f792c7d04ca3e302cf..a40eb9aee40a668faf8838a758c07fe60ac59261 100644
 --- a/dist/xlsx/reader.mjs
 +++ b/dist/xlsx/reader.mjs
+@@ -13,7 +13,7 @@ import { parseXml } from "../xml/parser.mjs";
+ import { parseContentTypes } from "./content-types.mjs";
+ import { dirname, findRIdAttr, parseRelationships, resolvePath } from "./relationships.mjs";
+ import { parseSharedStrings } from "./shared-strings.mjs";
+-import { parseStyles } from "./styles.mjs";
++import { parseStyles, namedStylesOf } from "./styles.mjs";
+ import { parseWorksheet, parseWorksheetStream } from "./worksheet.mjs";
+ import { parseDynamicArrayCellMetadata } from "./metadata.mjs";
+ import { parseComments } from "./comments-reader.mjs";
 @@ -101,7 +101,7 @@ export async function readXlsx(input, options) {
  		throw new ParseError(`Invalid XLSX: missing workbook at ${workbookPath}`);
  	}
@@ -381,7 +392,7 @@ index 8d11fc8828e051c0560e66f792c7d04ca3e302cf..b675001fe9cd75272c7b5ebeb69a063b
  						if (tableDef) {
  							tables.push(tableDef);
  						}
-@@ -556,6 +556,12 @@ export async function readXlsx(input, options) {
+@@ -556,6 +556,16 @@ export async function readXlsx(input, options) {
  	if (activeSheet !== undefined) {
  		workbook.activeSheet = activeSheet;
  	}
@@ -391,10 +402,14 @@ index 8d11fc8828e051c0560e66f792c7d04ca3e302cf..b675001fe9cd75272c7b5ebeb69a063b
 +	if (codeName) {
 +		workbook.codeName = codeName;
 +	}
++	if (parsedStyles) {
++		const namedStyles = namedStylesOf(parsedStyles);
++		if (namedStyles.length > 0) workbook.namedStyles = namedStyles;
++	}
  	
  	
  	
-@@ -1177,11 +1183,14 @@ function parseWorkbookXml(xml, options) {
+@@ -1177,11 +1187,14 @@ function parseWorkbookXml(xml, options) {
  	}
  	let wbProtection;
  	let activeSheet;
@@ -409,7 +424,7 @@ index 8d11fc8828e051c0560e66f792c7d04ca3e302cf..b675001fe9cd75272c7b5ebeb69a063b
  			
  			if (child.attrs["date1904"] === "1" || child.attrs["date1904"] === "true") {
  				
-@@ -1190,6 +1199,9 @@ function parseWorkbookXml(xml, options) {
+@@ -1190,6 +1203,9 @@ function parseWorkbookXml(xml, options) {
  				}
  			}
  		}
@@ -419,7 +434,7 @@ index 8d11fc8828e051c0560e66f792c7d04ca3e302cf..b675001fe9cd75272c7b5ebeb69a063b
  		if (local === "workbookProtection") {
  			const lockStructure = child.attrs["lockStructure"] === "1" || child.attrs["lockStructure"] === "true";
  			const lockWindows = child.attrs["lockWindows"] === "1" || child.attrs["lockWindows"] === "true";
-@@ -1280,6 +1292,9 @@ function parseWorkbookXml(xml, options) {
+@@ -1280,6 +1296,9 @@ function parseWorkbookXml(xml, options) {
  						if (dnChild.attrs["comment"]) {
  							nr.comment = dnChild.attrs["comment"];
  						}
@@ -429,7 +444,7 @@ index 8d11fc8828e051c0560e66f792c7d04ca3e302cf..b675001fe9cd75272c7b5ebeb69a063b
  						namedRanges.push(nr);
  					}
  				}
-@@ -1292,7 +1307,9 @@ function parseWorkbookXml(xml, options) {
+@@ -1292,7 +1311,9 @@ function parseWorkbookXml(xml, options) {
  		namedRanges,
  		workbookProtection: wbProtection,
  		activeSheet,
@@ -440,7 +455,7 @@ index 8d11fc8828e051c0560e66f792c7d04ca3e302cf..b675001fe9cd75272c7b5ebeb69a063b
  	};
  }
  
-@@ -1328,7 +1345,7 @@ function filterSheets(allSheets, filter) {
+@@ -1328,7 +1349,7 @@ function filterSheets(allSheets, filter) {
  }
  
  
@@ -449,7 +464,7 @@ index 8d11fc8828e051c0560e66f792c7d04ca3e302cf..b675001fe9cd75272c7b5ebeb69a063b
  	const doc = parseXml(xml);
  	
  	const name = doc.attrs["name"] ?? "";
-@@ -1357,6 +1374,9 @@ function parseTableXml(xml) {
+@@ -1357,6 +1378,9 @@ function parseTableXml(xml) {
  				const colLocal = colChild.local || colChild.tag;
  				if (colLocal === "tableColumn") {
  					const col = { name: colChild.attrs["name"] ?? "" };
@@ -460,7 +475,7 @@ index 8d11fc8828e051c0560e66f792c7d04ca3e302cf..b675001fe9cd75272c7b5ebeb69a063b
  						col.totalFunction = colChild.attrs["totalsRowFunction"];
  					}
 diff --git a/dist/xlsx/roundtrip.mjs b/dist/xlsx/roundtrip.mjs
-index ad31ffaa4777b8ad9bbccfe450718b0df7eac412..9264acbd165230e6ab03a2c651e9415615a51659 100644
+index ad31ffaa4777b8ad9bbccfe450718b0df7eac412..ed4254e7502f27a6500ce4ecc73483b34901f6f8 100644
 --- a/dist/xlsx/roundtrip.mjs
 +++ b/dist/xlsx/roundtrip.mjs
 @@ -135,6 +135,15 @@ export async function saveXlsx(workbook, saveOptions) {
@@ -479,7 +494,16 @@ index ad31ffaa4777b8ad9bbccfe450718b0df7eac412..9264acbd165230e6ab03a2c651e94156
  		
  		
  		
-@@ -711,7 +720,9 @@ export async function saveXlsx(workbook, saveOptions) {
+@@ -148,6 +157,8 @@ export async function saveXlsx(workbook, saveOptions) {
+ 	}));
+ 	
+ 	const styles = createStylesCollector(defaultFont);
++	// The file's named styles in its order, cells using them or not.
++	for (const named of workbook.namedStyles ?? []) styles.addNamedStyle(named);
+ 	const sharedStrings = createSharedStrings();
+ 	
+ 	let globalTableCounter = 1;
+@@ -711,7 +722,9 @@ export async function saveXlsx(workbook, saveOptions) {
  		externalLinkRels.length > 0 ? externalLinkRels : undefined,
  		pivotCacheRefs.length > 0 ? pivotCacheRefs : undefined,
  		slicerCacheRels.length > 0 ? slicerCacheRels : undefined,
@@ -490,7 +514,7 @@ index ad31ffaa4777b8ad9bbccfe450718b0df7eac412..9264acbd165230e6ab03a2c651e94156
  	)));
  	
  	zip.add("xl/_rels/workbook.xml.rels", encoder.encode(writeWorkbookRels(writeSheets.length, hasSharedStrings, workbook.hasMacros, hasFeaturePropertyBag, hasPersons, externalLinkRels.length > 0 ? externalLinkRels : undefined, pivotCacheRels.length > 0 ? pivotCacheRels : undefined, slicerCacheRels.length > 0 ? slicerCacheRels : undefined, timelineCacheRels.length > 0 ? timelineCacheRels : undefined, hasCellImages, hasMetadata)));
-@@ -948,7 +959,7 @@ export async function saveXlsx(workbook, saveOptions) {
+@@ -948,7 +961,7 @@ export async function saveXlsx(workbook, saveOptions) {
  					...tableDef,
  					range: tableRange
  				};
@@ -513,7 +537,7 @@ index a6787f3e88ae3feee22cd9e8c0d2be8cccbdf77b..680149f693c82d5508c629cf8bdc7451
  	const rElements = [];
  	let simpleText = null;
 diff --git a/dist/xlsx/styles-writer.mjs b/dist/xlsx/styles-writer.mjs
-index fc9290935c395334b397c89a6dc83b8fac53e49a..3a9be7017aab4bb4027b6d216bc443d66249fd11 100644
+index fc9290935c395334b397c89a6dc83b8fac53e49a..3d4e03cfdaa31948b3ab6048390fc73bd69ae17c 100644
 --- a/dist/xlsx/styles-writer.mjs
 +++ b/dist/xlsx/styles-writer.mjs
 @@ -1,6 +1,11 @@
@@ -564,7 +588,7 @@ index fc9290935c395334b397c89a6dc83b8fac53e49a..3a9be7017aab4bb4027b6d216bc443d6
  	if (f.color) parts.push(`c:${colorKey(f.color)}`);
  	if (f.vertAlign) parts.push(`va:${f.vertAlign}`);
  	if (f.family !== undefined) parts.push(`fam:${f.family}`);
-@@ -191,6 +200,28 @@ export function createStylesCollector(defaultFont, options) {
+@@ -191,7 +200,30 @@ export function createStylesCollector(defaultFont, options) {
  	
  	const numFmts = [];
  	const numFmtMap = new Map();
@@ -591,9 +615,11 @@ index fc9290935c395334b397c89a6dc83b8fac53e49a..3a9be7017aab4bb4027b6d216bc443d6
 +		return id;
 +	}
  	let nextNumFmtId = 164;
++	const localeSpellings = new Map();
  	
  	const defaultXfKey = "nf:0|f:0|fl:0|b:0|a:|p:";
-@@ -248,7 +279,11 @@ export function createStylesCollector(defaultFont, options) {
+ 	const xfs = [{
+@@ -248,7 +280,24 @@ export function createStylesCollector(defaultFont, options) {
  		borderMap.set(key, id);
  		return id;
  	}
@@ -601,12 +627,25 @@ index fc9290935c395334b397c89a6dc83b8fac53e49a..3a9be7017aab4bb4027b6d216bc443d6
 +	function addNumFmt(format, preferredId) {
 +		// A file's own code stays its own even where it spells a built-in; a built-in stays built-in.
 +		if (preferredId !== undefined && preferredId < 164 && BUILTIN_NUM_FMTS[preferredId] === format) return preferredId;
++		// A built-in number the file spells in its own locale (Accounting with €): kept, with the spelling.
++		if (preferredId !== undefined && preferredId > 0 && preferredId < 164) {
++			const spelled = localeSpellings.get(preferredId);
++			if (spelled === undefined) {
++				localeSpellings.set(preferredId, format);
++				numFmts.push({
++					id: preferredId,
++					formatCode: format
++				});
++				return preferredId;
++			}
++			if (spelled === format) return preferredId;
++		}
 +		const builtin = preferredId !== undefined && preferredId >= 164 ? undefined : BUILTIN_NUM_FMT_IDS.get(format);
 +		if (builtin !== undefined) return builtin;
  		const existing = numFmtMap.get(format);
  		if (existing !== undefined) return existing;
  		const id = nextNumFmtId++;
-@@ -286,7 +321,7 @@ export function createStylesCollector(defaultFont, options) {
+@@ -286,7 +335,7 @@ export function createStylesCollector(defaultFont, options) {
  		if (style.font) parts.push(`f:${fontKey(style.font)}`);
  		if (style.fill) parts.push(`fl:${fillKey(style.fill)}`);
  		if (style.border) parts.push(`b:${borderKey(style.border)}`);
@@ -615,7 +654,7 @@ index fc9290935c395334b397c89a6dc83b8fac53e49a..3a9be7017aab4bb4027b6d216bc443d6
  		if (style.alignment) parts.push(`a:${alignmentKey(style.alignment)}`);
  		return parts.join("|");
  	}
-@@ -323,9 +358,12 @@ export function createStylesCollector(defaultFont, options) {
+@@ -323,9 +372,12 @@ export function createStylesCollector(defaultFont, options) {
  		const fontId = style.font ? addFont(style.font) : 0;
  		const fillId = style.fill ? addFill(style.fill) : 0;
  		const borderId = style.border ? addBorder(style.border) : 0;
@@ -629,7 +668,7 @@ index fc9290935c395334b397c89a6dc83b8fac53e49a..3a9be7017aab4bb4027b6d216bc443d6
  			`f:${fontId}`,
  			`fl:${fillId}`,
  			`b:${borderId}`,
-@@ -347,7 +385,9 @@ export function createStylesCollector(defaultFont, options) {
+@@ -347,7 +399,9 @@ export function createStylesCollector(defaultFont, options) {
  			borderId,
  			alignment: style.alignment ? { ...style.alignment } : undefined,
  			protection: style.protection ? { ...style.protection } : undefined,
@@ -640,7 +679,7 @@ index fc9290935c395334b397c89a6dc83b8fac53e49a..3a9be7017aab4bb4027b6d216bc443d6
  		});
  		xfMap.set(key, id);
  		if (xfByStyleIdentity && !checkbox) xfByStyleIdentity.set(style, id);
-@@ -401,12 +441,29 @@ export function createStylesCollector(defaultFont, options) {
+@@ -401,12 +455,29 @@ export function createStylesCollector(defaultFont, options) {
  		const borderChildren = borders.map((b) => serializeBorder(b.border));
  		parts.push(xmlElement("borders", { count: borders.length }, borderChildren));
  		
@@ -672,7 +711,7 @@ index fc9290935c395334b397c89a6dc83b8fac53e49a..3a9be7017aab4bb4027b6d216bc443d6
  		
  		const xfChildren = xfs.map((xf) => {
  			const attrs = {
-@@ -414,8 +471,9 @@ export function createStylesCollector(defaultFont, options) {
+@@ -414,8 +485,9 @@ export function createStylesCollector(defaultFont, options) {
  				fontId: xf.fontId,
  				fillId: xf.fillId,
  				borderId: xf.borderId,
@@ -683,7 +722,7 @@ index fc9290935c395334b397c89a6dc83b8fac53e49a..3a9be7017aab4bb4027b6d216bc443d6
  			if (xf.numFmtId !== 0) attrs["applyNumberFormat"] = true;
  			if (xf.fontId !== 0) attrs["applyFont"] = true;
  			if (xf.fillId !== 0) attrs["applyFill"] = true;
-@@ -441,18 +499,27 @@ export function createStylesCollector(defaultFont, options) {
+@@ -441,18 +513,27 @@ export function createStylesCollector(defaultFont, options) {
  		});
  		parts.push(xmlElement("cellXfs", { count: xfs.length }, xfChildren));
  		
@@ -714,8 +753,16 @@ index fc9290935c395334b397c89a6dc83b8fac53e49a..3a9be7017aab4bb4027b6d216bc443d6
  					children.push(xmlSelfClose("numFmt", {
  						numFmtId,
  						formatCode: style.numFmt
+@@ -478,6 +559,7 @@ export function createStylesCollector(defaultFont, options) {
+ 	return {
+ 		addStyle,
+ 		addCheckboxStyle,
++		addNamedStyle,
+ 		addNumFmt,
+ 		addDxf,
+ 		hasCheckboxFeature,
 diff --git a/dist/xlsx/styles.mjs b/dist/xlsx/styles.mjs
-index a9fe34e10b85d0344c473fa36ea1ee042bc9816c..b92d1ba0028b0aa815df028b3c26dc0cb8aeaf6a 100644
+index a9fe34e10b85d0344c473fa36ea1ee042bc9816c..c492b6e203dce1c09e3398258060f399356c15f4 100644
 --- a/dist/xlsx/styles.mjs
 +++ b/dist/xlsx/styles.mjs
 @@ -3,7 +3,7 @@ import { isBuiltinDateFormatId, isDateFormat } from "../_date.mjs";
@@ -861,17 +908,30 @@ index a9fe34e10b85d0344c473fa36ea1ee042bc9816c..b92d1ba0028b0aa815df028b3c26dc0c
  				break;
  			case "border":
  				style.border = parseBorder(child);
-@@ -496,14 +529,30 @@ function parseAlignment(el) {
+@@ -496,14 +529,43 @@ function parseAlignment(el) {
  export function resolveStyle(styles, styleIndex) {
  	const xf = styles.cellXfs[styleIndex];
  	if (!xf) return {};
 +	const result = resolveXf(styles, xf);
 +	// The named style the format is based on (Hyperlink, Currency, a style of the file's own).
-+	const named = xf.xfId > 0 ? styles.cellStyles?.get(xf.xfId) : undefined;
-+	const base = xf.xfId > 0 ? styles.cellStyleXfs?.[xf.xfId] : undefined;
-+	if (named && base) {
-+		result.namedStyle = { ...named, style: resolveXf(styles, base) };
-+		if (base.applies) result.namedStyle.applies = base.applies;
++	const namedStyle = xf.xfId > 0 ? resolveNamedStyle(styles, xf.xfId) : undefined;
++	if (namedStyle) result.namedStyle = namedStyle;
++	return result;
++}
++function resolveNamedStyle(styles, xfId) {
++	const named = styles.cellStyles?.get(xfId);
++	const base = styles.cellStyleXfs?.[xfId];
++	if (!named || !base) return undefined;
++	const namedStyle = { ...named, style: resolveXf(styles, base) };
++	if (base.applies) namedStyle.applies = base.applies;
++	return namedStyle;
++}
++/** Every named style of the file but Normal, in the file's order: used by cells or not. */
++export function namedStylesOf(styles) {
++	const result = [];
++	for (const xfId of styles.cellStyles?.keys() ?? []) {
++		const namedStyle = xfId > 0 ? resolveNamedStyle(styles, xfId) : undefined;
++		if (namedStyle) result.push(namedStyle);
 +	}
 +	return result;
 +}

@@ -64,7 +64,8 @@ describe("Excel 365 files", () => {
 			"x365_namedstyles.xlsx",
 			"x365_filtered.xlsx",
 			"x365_cfoff.xlsx",
-			"x365_breaks.xlsx"
+			"x365_breaks.xlsx",
+			"x365_localestyles.xlsx"
 		]) {
 			const document = await proven(await fixture(name))
 
@@ -162,12 +163,19 @@ describe("Excel 365 files", () => {
 			sheet: 0,
 			cells: [
 				{ row: 4, col: 0, input: "12.5" },
-				{ row: 4, col: 1, input: "12" }
+				// Into a Text column: text, a formula too; a leading apostrophe sets the quote prefix, a plain
+				// entry into a cell with one clears it.
+				{ row: 4, col: 1, input: "12" },
+				{ row: 5, col: 1, input: "=1+1" },
+				{ row: 6, col: 1, input: "'7" },
+				{ row: 1, col: 7, input: "8" }
 			]
 		})
 
 		expect(view(typed, 4, 0)?.text).not.toBe("12.5")
 		expect(view(typed, 4, 1)).toMatchObject({ text: "12" })
+		expect(view(typed, 4, 1)?.numeric).not.toBe(true)
+		expect(view(typed, 5, 1)).toMatchObject({ text: "=1+1" })
 
 		const bolded = accounts.apply({
 			type: "format",
@@ -184,7 +192,12 @@ describe("Excel 365 files", () => {
 		const format = (ref: string) => xfs[Number(new RegExp(`<c r="${ref}"[^>]* s="(\\d+)"`).exec(sheet)?.[1] ?? -1)] ?? ""
 
 		expect(format("A5")).toMatch(/numFmtId="42"/)
-		expect(format("B5")).toMatch(/numFmtId="49"[^>]*quotePrefix="1"/)
+		expect(format("B5")).toMatch(/numFmtId="49"/)
+		expect(format("B5")).not.toMatch(/quotePrefix/)
+		expect(format("B7")).toMatch(/numFmtId="49"[^>]*quotePrefix="1"/)
+		expect(format("H2")).not.toMatch(/quotePrefix/)
+
+		for (const ref of ["B5", "B6", "B7", "H2"]) expect(sheet).toMatch(new RegExp(`<c r="${ref}"[^>]*t="s"`))
 		expect(format("A6")).toMatch(/numFmtId="42"[^>]*fontId="[1-9]/)
 
 		const rows = await proven(await fixture("x365_emptyrows.xlsx"))
@@ -197,6 +210,60 @@ describe("Excel 365 files", () => {
 
 		columns.apply({ type: "setCells", sheet: 0, cells: [{ row: 0, col: 0, input: "Renamed" }] })
 		expect((await savedParts(columns)).get("xl/worksheets/sheet1.xml")).not.toMatch(/<c r="A1"[^>]* s="/)
+	})
+
+	it("keeps a built-in format spelled in the file's locale, and named styles no cell uses", async () => {
+		const styles = (await savedParts(await proven(await fixture("x365_localestyles.xlsx")))).get("xl/styles.xml") ?? ""
+
+		expect(styles).toMatch(/<numFmt numFmtId="44" formatCode="[^"]*€/)
+		expect(styles).toMatch(/<xf numFmtId="44"/)
+		expect(styles).toContain('<cellStyle name="Good" xfId="3" builtinId="26" customBuiltin="1"/>')
+		expect(styles).toContain('<cellStyle name="Mine" xfId="4"/>')
+
+		const name = "x365_localestyles.xlsx"
+		const part = "xl/styles.xml"
+		const alpha = '<xf numFmtId="0" fontId="1" fillId="0" borderId="0" applyNumberFormat="0"/>'
+		const beta = '<xf numFmtId="0" fontId="2" fillId="0" borderId="0" applyNumberFormat="0"/>'
+
+		// Named styles numbered the other way round read the same.
+		expect(
+			await lossesIf(name, part, xml =>
+				xml
+					.replace(alpha + beta, beta + alpha)
+					.replace(
+						'<cellStyle name="Alpha" xfId="1"/><cellStyle name="Beta" xfId="2"/>',
+						'<cellStyle name="Alpha" xfId="2"/><cellStyle name="Beta" xfId="1"/>'
+					)
+					.replace(/xfId="([12])" applyFont/g, (_, id: string) => `xfId="${id === "1" ? "2" : "1"}" applyFont`)
+			)
+		).toEqual([])
+		// A named style given another's format, a customised built-in style dropped, the locale's Accounting
+		// saved as a custom format: each is caught.
+		expect(
+			await lossesIf(name, part, xml => xml.replace('<cellStyle name="Alpha" xfId="1"/>', '<cellStyle name="Alpha" xfId="2"/>'))
+		).not.toEqual([])
+		expect(await lossesIf(name, part, xml => xml.replace(/<cellStyle name="Good"[^>]*>/, ""))).not.toEqual([])
+		expect(await lossesIf(name, part, xml => xml.replaceAll('numFmtId="44"', 'numFmtId="164"'))).not.toEqual([])
+	})
+
+	it("counts serial dates from 1904 in a workbook that does, in results and cached values", async () => {
+		const document = await proven(
+			await openXlsx(await writeXlsx({ dateSystem: "1904", sheets: [{ name: "S", rows: [[new Date(Date.UTC(2024, 0, 15))]] }] }), {
+				readStyles: true
+			})
+		)
+		const result = document.apply({
+			type: "setCells",
+			sheet: 0,
+			cells: [
+				{ row: 0, col: 1, input: "=A1" },
+				{ row: 0, col: 2, input: "=DATE(2024,1,15)" },
+				{ row: 0, col: 3, input: "=YEAR(A1+1)" }
+			]
+		})
+
+		expect([view(result, 0, 1)?.text, view(result, 0, 2)?.text, view(result, 0, 3)?.text]).toEqual(["43844", "43844", "2024"])
+		expect((await savedParts(document)).get("xl/worksheets/sheet1.xml")).toMatch(/<c r="B1"><f>A1<\/f><v>43844<\/v>/)
 	})
 
 	it("moves manual page breaks with their rows and columns, drops one whose row goes, and puts them back on undo", async () => {
@@ -264,6 +331,17 @@ describe("formula text", () => {
 		expect(storedFormula("_xlfn.LET(_xlpm.x,1,_xlpm.x)")).toBe("_xlfn.LET(_xlpm.x,1,_xlpm.x)")
 		expect(storedFormula('LET(x,"x",x&y)')).toBe('_xlfn.LET(_xlpm.x,"x",_xlpm.x&y)')
 		expect(shownFormula("_xlfn.LET(_xlpm.f,_xlfn.LAMBDA(_xlpm.v,_xlpm.v+1),_xlpm.f(2))")).toBe("LET(f,LAMBDA(v,v+1),f(2))")
+		// Not a name: a whole column's ends, or a function sharing the name; a name holding a LAMBDA is called.
+		expect(storedFormula("LET(a,SUM(A:A),n,COUNT(Sheet1!N:N),a/n)")).toBe(
+			"_xlfn.LET(_xlpm.a,SUM(A:A),_xlpm.n,COUNT(Sheet1!N:N),_xlpm.a/_xlpm.n)"
+		)
+		expect(storedFormula("LET(sum,5,SUM(sum,1))")).toBe("_xlfn.LET(_xlpm.sum,5,SUM(_xlpm.sum,1))")
+		expect(storedFormula("LET(f,LAMBDA(v,v+1),g,f,g(2))")).toBe(
+			"_xlfn.LET(_xlpm.f,_xlfn.LAMBDA(_xlpm.v,_xlpm.v+1),_xlpm.g,_xlpm.f,_xlpm.g(2))"
+		)
+		// A name is in scope after its own value, and past line breaks and tabs.
+		expect(storedFormula("LET(x,x+1,x)")).toBe("_xlfn.LET(_xlpm.x,x+1,_xlpm.x)")
+		expect(storedFormula("LET(\n\tx, 1,\n\tx + 1\n)")).toBe("_xlfn.LET(\n\t_xlpm.x, 1,\n\t_xlpm.x + 1\n)")
 
 		const document = await proven(await openXlsx(await writeXlsx({ sheets: [{ name: "S", rows: [[1, "a"]] }] }), { readStyles: true }))
 		const typed = document.apply({ type: "setCells", sheet: 0, cells: [{ row: 0, col: 2, input: '=TEXTJOIN("-",TRUE,A1:B1)' }] })

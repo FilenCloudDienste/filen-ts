@@ -101,29 +101,47 @@ function startingStyle(sheet: Sheet, row: number, col: number, existing: Cell | 
 	return sheet.rowDefs?.get(row)?.style ?? sheet.columns?.[col]?.style
 }
 
+// What is typed into a cell, read as Excel reads it there: into a Text ("@") cell, as text, a formula too.
+function parseTyped(input: string, style: CellStyle | undefined): ParsedInput {
+	return style?.numFmt === "@" && input !== "" && !input.startsWith("'") ? { type: "value", value: input } : parseCellInput(input)
+}
+
+// A format with the quote prefix (typed with a leading apostrophe) set or cleared.
+function quoted(style: CellStyle | undefined, prefixed: boolean): CellStyle | undefined {
+	if (prefixed === (style?.quotePrefix === true)) return style
+
+	const next: CellStyle = { ...style }
+
+	if (prefixed) next.quotePrefix = true
+	else delete next.quotePrefix
+
+	return next
+}
+
 // A value as the engine reads it: text stays text whatever it looks like ('007, '=1+1, 'TRUE), and a date
-// is its serial number, never a Date the engine would read in the viewer's timezone.
-function engineValue(value: CellValue): RawCellContent {
+// is its serial number in the workbook's date system, never a Date the engine would read in the viewer's
+// timezone.
+function engineValue(value: CellValue, date1904: boolean): RawCellContent {
 	if (typeof value === "string") return `'${value}`
-	if (value instanceof Date) return dateToSerial(value, false)
+	if (value instanceof Date) return dateToSerial(value, date1904)
 
 	return value
 }
 
 // What a formula cell stored for its result, as the engine takes it in place of a formula it cannot read.
-function storedResult(cell: Cell): RawCellContent | undefined {
+function storedResult(cell: Cell, date1904: boolean): RawCellContent | undefined {
 	const result = cell.formulaResult
 
 	if (result === undefined || result === null) return undefined
 	if (typeof result === "string" && ERROR_VALUE.test(result)) return result
 
-	return engineValue(result)
+	return engineValue(result, date1904)
 }
 
 // A formula as the engine gets it, with its stored result to fall back on; one the engine cannot be given
 // (nested too deep, building too large an array) holds its stored result.
-function formulaCell(row: number, col: number, formula: string, cell: Cell): EngineCell {
-	const fallback = storedResult(cell)
+function formulaCell(row: number, col: number, formula: string, cell: Cell, date1904: boolean): EngineCell {
+	const fallback = storedResult(cell, date1904)
 
 	// An array formula (legacy or spilling) keeps the result the file stored: the engine calculates ordinary
 	// formulas only, as Excel reads them.
@@ -326,6 +344,8 @@ function stepCells(step: Step): number {
 // history. Worker-side only.
 export class XlsxDocument {
 	private readonly workbook: RoundtripWorkbook
+	// Serial dates count from 1904 (older Mac files), which the engine and its cached results follow.
+	private readonly date1904: boolean
 	private readonly views: WorkbookViews
 	private readonly savePlan: SavePlan
 	// Settled by verifyWritable: until then, and after it finds a loss, the workbook is view-only.
@@ -352,6 +372,7 @@ export class XlsxDocument {
 
 	constructor(workbook: RoundtripWorkbook, historyBudget = HISTORY_CELLS) {
 		this.workbook = workbook
+		this.date1904 = workbook.dateSystem === "1904"
 		this.historyBudget = historyBudget
 		this.views = new WorkbookViews(workbook.themeColors)
 		this.savePlan = xlsxSavePlan(workbook)
@@ -427,7 +448,7 @@ export class XlsxDocument {
 	private buildEngine(): FormulaEngine {
 		const worksheets = this.worksheets()
 		const sheets: EngineSheet[] = worksheets.map(sheet => {
-			const rows = sheet.rows.map(values => values.map(engineValue))
+			const rows = sheet.rows.map(values => values.map(value => engineValue(value, this.date1904)))
 			const formulas: EngineCell[] = []
 
 			for (const [cellId, cell] of sheet.cells ?? []) {
@@ -439,7 +460,7 @@ export class XlsxDocument {
 				}
 
 				if (cell.formula !== undefined) {
-					const engineCell = formulaCell(row, col, cell.formula, cell)
+					const engineCell = formulaCell(row, col, cell.formula, cell, this.date1904)
 
 					values[col] = engineCell.content
 					formulas.push(engineCell)
@@ -462,7 +483,7 @@ export class XlsxDocument {
 			}
 		}
 
-		return new FormulaEngine(sheets, names)
+		return new FormulaEngine(sheets, names, this.date1904)
 	}
 
 	private engineCell(sheet: Sheet, row: number, col: number): EngineCell {
@@ -470,10 +491,10 @@ export class XlsxDocument {
 		const value = sheet.rows[row]?.[col] ?? null
 
 		if (cell?.formula !== undefined) {
-			return formulaCell(row, col, cell.formula, cell)
+			return formulaCell(row, col, cell.formula, cell, this.date1904)
 		}
 
-		return { row, col, content: cell?.type === "error" ? value : engineValue(value) }
+		return { row, col, content: cell?.type === "error" ? value : engineValue(value, this.date1904) }
 	}
 
 	// A formula's result stored in its cell: a number shown as a date is kept as the date it is.
@@ -484,7 +505,7 @@ export class XlsxDocument {
 			value === CYCLE
 				? 0
 				: typeof value === "number" && numFmt !== undefined && isDateFormat(numFmt)
-					? serialToDate(value, false)
+					? serialToDate(value, this.date1904)
 					: value
 		const values = sheet.rows[row]
 
@@ -548,7 +569,7 @@ export class XlsxDocument {
 						sheet: sheet === undefined ? -1 : worksheets.indexOf(sheet),
 						row,
 						col,
-						value: value instanceof Date ? dateToSerial(value, false) : value
+						value: value instanceof Date ? dateToSerial(value, this.date1904) : value
 					}
 				})
 			} catch {
@@ -1136,7 +1157,10 @@ export class XlsxDocument {
 			return this.refused("tooLarge")
 		}
 
-		const parsedCells = cells.map(cell => ({ ...cell, parsed: parseCellInput(cell.input) }))
+		const parsedCells = cells.map(cell => ({
+			...cell,
+			parsed: parseTyped(cell.input, startingStyle(sheet, cell.row, cell.col, sheet.cells?.get(key(cell.row, cell.col))))
+		}))
 
 		if (splitsArray(sheet, cells)) {
 			return this.refused("arrayFormula")
@@ -1159,7 +1183,7 @@ export class XlsxDocument {
 
 		const extent = { rows: sheet.rows.length, cols: sheet.rows[0]?.length ?? 0 }
 
-		for (const { row, col, parsed } of parsedCells) {
+		for (const { row, col, input, parsed } of parsedCells) {
 			const cellId = key(row, col)
 			const existing = sheet.cells?.get(cellId)
 
@@ -1168,7 +1192,9 @@ export class XlsxDocument {
 			}
 
 			const base: Partial<Cell> = { ...existing }
-			const style = parsed.type === "empty" ? existing?.style : startingStyle(sheet, row, col, existing)
+			// A plain entry clears the quote prefix; one typed with a leading apostrophe sets it.
+			const style =
+				parsed.type === "empty" ? existing?.style : quoted(startingStyle(sheet, row, col, existing), input.startsWith("'"))
 
 			if (style !== undefined) base.style = style
 
@@ -1441,7 +1467,7 @@ export class XlsxDocument {
 
 				if (
 					(FormulaEngine.unsupported(value) && hasStoredResult(cell)) ||
-					(stored instanceof Date ? typeof value === "number" && dateToSerial(stored, false) === value : stored === value)
+					(stored instanceof Date ? typeof value === "number" && dateToSerial(stored, this.date1904) === value : stored === value)
 				) {
 					continue
 				}

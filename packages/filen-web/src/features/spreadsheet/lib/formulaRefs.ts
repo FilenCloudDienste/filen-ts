@@ -668,22 +668,48 @@ function withoutPrefix(name: string): string {
 		: name
 }
 
+// Space, tab, line feed, carriage return: what may stand between a formula's tokens.
+function isSpace(code: number): boolean {
+	return code === 32 || code === 9 || code === 10 || code === 13
+}
+
 function nextCode(text: string, from: number): number {
 	let index = from
 
-	while (text.charCodeAt(index) === 32) index++
+	while (isSpace(text.charCodeAt(index))) index++
 
 	return text.charCodeAt(index)
 }
 
+interface Scope {
+	binds: "LET" | "LAMBDA" | null
+	argument: number
+	// Whether a word here would be a whole argument so far.
+	fresh: boolean
+	// The names in scope, each with whether it holds a LAMBDA (and may be called).
+	names: Map<string, boolean>
+	// A LET name whose value is being read: in scope once the value ends.
+	pending: string | null
+	callable: boolean
+}
+
 // The names LET and LAMBDA bind, where declared and where used within their call, with the prefix a file
 // stores them with (Excel reads the bare name as a defined name). A name already prefixed stays as it is.
+// A word beside ":" is a range's end, and one before "(" a function, unless the name holds a LAMBDA.
 function prefixParameters(formula: string): string {
 	if (!SCOPES.test(formula)) return formula
 
-	// One frame per open parenthesis or array constant: the parameters the call binds so far, and its
-	// argument (whether a word would start it).
-	const frames: { binds: "LET" | "LAMBDA" | null; argument: number; fresh: boolean; names: Set<string> }[] = []
+	// One scope per open parenthesis or array constant.
+	const frames: Scope[] = []
+	const lookup = (name: string): boolean | undefined => {
+		for (let depth = frames.length - 1; depth >= 0; depth--) {
+			const callable = frames[depth]?.names.get(name)
+
+			if (callable !== undefined) return callable
+		}
+
+		return undefined
+	}
 	let binds: "LET" | "LAMBDA" | null = null
 	let text = ""
 	let index = 0
@@ -707,25 +733,41 @@ function prefixParameters(formula: string): string {
 			const end = readWord(formula, index)
 			const word = formula.slice(index, end)
 			const name = withoutPrefix(word)
+			const key = name.toLowerCase()
 			const after = formula.charCodeAt(end)
-			const qualified = after === 33 || formula.charCodeAt(index - 1) === 33
+			const before = formula.charCodeAt(index - 1)
+			const called = after === 40
+			const reference = after === 33 || before === 33 || after === 58 || before === 58
 			const bare = name.replace(/^(?:_xlfn\.)?(?:_xlws\.)?/i, "").toUpperCase()
 			let bound = false
 
-			binds = after === 40 && (bare === "LET" || bare === "LAMBDA") ? bare : null
+			binds = called && (bare === "LET" || bare === "LAMBDA") ? bare : null
 
-			if (frame !== undefined && !qualified) {
+			if (frame !== undefined && !reference) {
+				const ends = nextCode(formula, end)
+
+				// The first word of a LET value: a LAMBDA, or a name holding one, makes the name callable.
+				if (frame.pending !== null && frame.fresh) {
+					frame.callable = binds === "LAMBDA" || (lookup(key) === true && (ends === 44 || ends === 41))
+				}
+
 				// A whole argument in a name's place: every one but LAMBDA's last, every other one of LET's.
 				if (
 					frame.binds !== null &&
 					frame.fresh &&
-					(frame.binds === "LAMBDA" || frame.argument % 2 === 0) &&
-					nextCode(formula, end) === 44
+					!called &&
+					ends === 44 &&
+					(frame.binds === "LAMBDA" || frame.argument % 2 === 0)
 				) {
-					frame.names.add(name.toLowerCase())
-				}
+					if (frame.binds === "LAMBDA") frame.names.set(key, false)
+					else frame.pending = key
 
-				bound = frames.some(candidate => candidate.names.has(name.toLowerCase()))
+					bound = true
+				} else {
+					const callable = lookup(key)
+
+					bound = called ? callable === true : callable !== undefined
+				}
 			}
 
 			text += bound ? `${PARAMETER}${name}` : word
@@ -737,13 +779,19 @@ function prefixParameters(formula: string): string {
 		}
 
 		if (code === 40 || code === 123) {
-			frames.push({ binds: code === 40 ? binds : null, argument: 0, fresh: true, names: new Set() })
+			frames.push({ binds: code === 40 ? binds : null, argument: 0, fresh: true, names: new Map(), pending: null, callable: false })
 		} else if (code === 41 || code === 125) {
 			frames.pop()
 		} else if (code === 44 && frame !== undefined) {
+			// A LET value ends: its name is in scope from the next argument on.
+			if (frame.pending !== null && frame.argument % 2 === 1) {
+				frame.names.set(frame.pending, frame.callable)
+				frame.pending = null
+			}
+
 			frame.argument++
 			frame.fresh = true
-		} else if (code !== 32 && frame !== undefined) {
+		} else if (!isSpace(code) && frame !== undefined) {
 			frame.fresh = false
 		}
 
