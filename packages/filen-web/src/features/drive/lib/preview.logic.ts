@@ -5,7 +5,8 @@ import { CODE_FILE_EXTENSIONS } from "@filen/shared"
 
 // Every previewable file resolves to one of these; "other" is the download-only fallback (no viewer,
 // ever — canPreview excludes it unconditionally).
-export type PreviewCategory = "image" | "rawImage" | "video" | "audio" | "pdf" | "docx" | "text" | "code" | "markdown" | "other"
+export type PreviewCategory =
+	"image" | "rawImage" | "video" | "audio" | "pdf" | "docx" | "spreadsheet" | "text" | "code" | "markdown" | "other"
 
 // Whole-buffer preview memory ceiling (old-web's MAX_PREVIEW_SIZE_WEB precedent): pdf/docx/text/code/
 // markdown download fully into RAM before rendering, so an oversize file is excluded from canPreview
@@ -19,6 +20,9 @@ export type PreviewCategory = "image" | "rawImage" | "video" | "audio" | "pdf" |
 // whole-file stream inside wasm), so a 90 MB NEF costs this heap nothing and has no reason to be
 // gated by a JS-memory ceiling.
 export const PREVIEW_MAX_BYTES = 268_435_456n // 256 MiB
+// A grid holds every cell's view in memory, several times the file's own size (an .xlsx is zipped), so
+// spreadsheets stop well below the other whole-buffer previews.
+export const SPREADSHEET_MAX_BYTES = 67_108_864n // 64 MiB
 
 // Exported so icon.logic's file-type routing classifies image/video/audio identically to preview — a
 // file's type icon and its preview category can never disagree.
@@ -64,6 +68,14 @@ export const RAW_IMAGE_EXTENSIONS = new Set([
 export const VIDEO_EXTENSIONS = new Set(["mp4", "webm", "mkv", "mov", "m4v"])
 export const AUDIO_EXTENSIONS = new Set(["mp3", "m4a", "aac", "wav", "ogg", "flac", "opus"])
 const MARKDOWN_EXTENSIONS = new Set(["md", "markdown"])
+export const SPREADSHEET_EXTENSIONS = new Set(["csv", "tsv", "xlsx", "xlsm", "xls"])
+const SPREADSHEET_MIMES = new Set([
+	"text/csv",
+	"text/tab-separated-values",
+	"application/vnd.ms-excel",
+	"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+	"application/vnd.ms-excel.sheet.macroenabled.12"
+])
 const TEXT_EXTENSIONS = new Set(["txt", "log"])
 // @filen/shared's CODE_FILE_EXTENSIONS minus the two extensions this app buckets into their own,
 // richer-rendered category instead: .md (-> markdown) and .log (-> text).
@@ -104,6 +116,10 @@ function categoryForExtension(ext: string): PreviewCategory | null {
 
 	if (ext === "docx") {
 		return "docx"
+	}
+
+	if (SPREADSHEET_EXTENSIONS.has(ext)) {
+		return "spreadsheet"
 	}
 
 	if (MARKDOWN_EXTENSIONS.has(ext)) {
@@ -149,6 +165,11 @@ function categoryForMime(mime: string): PreviewCategory | null {
 
 	if (normalized === "text/markdown") {
 		return "markdown"
+	}
+
+	// Before the generic text/* arm: text/csv is a table, not prose.
+	if (SPREADSHEET_MIMES.has(normalized)) {
+		return "spreadsheet"
 	}
 
 	if (normalized.startsWith("text/")) {
@@ -255,7 +276,7 @@ export function canPreview(item: DriveItem, _variant: DriveVariant): boolean {
 		return true
 	}
 
-	return base.data.size <= PREVIEW_MAX_BYTES
+	return base.data.size <= (category === "spreadsheet" ? SPREADSHEET_MAX_BYTES : PREVIEW_MAX_BYTES)
 }
 
 // Decision for a streamed viewer's POST-resolution failure (network drop mid-seek, an SW-side decrypt

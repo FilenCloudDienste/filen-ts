@@ -34,6 +34,8 @@ interface UsePreviewRemoteChangesParams {
 	savedRef: RefObject<ReadonlyMap<string, DriveItem>>
 	commitSaved: (frozenUuid: string, item: DriveItem) => void
 	contentRef: RefObject<string | null>
+	// The unsaved edits as they stand: a text buffer, or a spreadsheet's file as edited.
+	readEdits: () => Promise<string | Uint8Array | null>
 	onItemRemoved: (frozenUuid: string) => void
 }
 
@@ -219,6 +221,7 @@ export function usePreviewRemoteChanges({
 	savedRef,
 	commitSaved,
 	contentRef,
+	readEdits,
 	onItemRemoved
 }: UsePreviewRemoteChangesParams) {
 	const { t } = useTranslation("preview")
@@ -354,7 +357,7 @@ export function usePreviewRemoteChanges({
 	// that name is free (the preview then shows the new file).
 	async function saveMineAsNewFile(): Promise<void> {
 		const item = prompt === null ? undefined : slotItem(prompt.frozenUuid)
-		const content = contentRef.current
+		const content = await readEdits().catch(() => null)
 
 		if (prompt === null || item === undefined || content === null) {
 			return

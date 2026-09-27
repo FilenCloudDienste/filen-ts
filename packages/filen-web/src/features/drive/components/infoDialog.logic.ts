@@ -18,6 +18,8 @@ export function previewKindLabelKey(category: PreviewCategory): DriveKey | null 
 			return "drivePreviewKindPdf"
 		case "docx":
 			return "drivePreviewKindDocx"
+		case "spreadsheet":
+			return "drivePreviewKindSpreadsheet"
 		case "text":
 			return "drivePreviewKindText"
 		case "code":

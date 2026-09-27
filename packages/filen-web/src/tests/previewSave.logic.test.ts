@@ -83,6 +83,12 @@ describe("isEditable", () => {
 		expect(isEditable(fileItem({ meta: decodedMeta("photo.png") }), "drive")).toBe(false)
 	})
 
+	it("is true for a spreadsheet, but a legacy .xls only opens to be looked at", () => {
+		expect(isEditable(fileItem({ meta: decodedMeta("budget.xlsx") }), "drive")).toBe(true)
+		expect(isEditable(fileItem({ meta: decodedMeta("list.csv") }), "drive")).toBe(true)
+		expect(isEditable(fileItem({ meta: decodedMeta("old.xls") }), "drive")).toBe(false)
+	})
+
 	it("is true for markdown — edited through the viewer's own source mode", () => {
 		expect(isEditable(fileItem({ meta: decodedMeta("readme.md") }), "drive")).toBe(true)
 	})

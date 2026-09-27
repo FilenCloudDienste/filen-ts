@@ -1,5 +1,5 @@
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
-import { previewType, PREVIEW_MAX_BYTES } from "@/features/drive/lib/preview.logic"
+import { previewType, PREVIEW_MAX_BYTES, SPREADSHEET_MAX_BYTES } from "@/features/drive/lib/preview.logic"
 
 // Pure decisions behind the public-link download + preview surface — no worker, no DOM, no React, so
 // every cap and branch is directly unit-testable. The service worker cannot serve an anonymous
@@ -54,7 +54,9 @@ export function anonPreviewability(item: DriveItem, cap: bigint = PREVIEW_MAX_BY
 		return "previewable"
 	}
 
-	return base.data.size <= cap ? "previewable" : "too-large"
+	return base.data.size <= (category === "spreadsheet" && SPREADSHEET_MAX_BYTES < cap ? SPREADSHEET_MAX_BYTES : cap)
+		? "previewable"
+		: "too-large"
 }
 
 // The in-memory sink for a non-FSA zip download: the SDK streams the archive into `writable`, chunks

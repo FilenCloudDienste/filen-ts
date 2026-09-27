@@ -55,7 +55,7 @@ describe("isTextEditingTarget", () => {
 		expect(isTextEditingTarget(fakeTarget({}))).toBe(true)
 	})
 
-	it("queries exactly .cm-editor, not a broader or unrelated selector", () => {
+	it("queries CodeMirror, text fields and marked surfaces", () => {
 		let queried: string | undefined
 		const target = {
 			closest: (selector: string) => {
@@ -66,7 +66,7 @@ describe("isTextEditingTarget", () => {
 
 		isTextEditingTarget(target)
 
-		expect(queried).toBe(".cm-editor")
+		expect(queried).toBe(".cm-editor, input, textarea, [data-preview-surface]")
 	})
 })
 

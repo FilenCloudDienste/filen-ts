@@ -20,7 +20,7 @@ import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { previewCategoryForName, previewType } from "@/features/drive/lib/preview.logic"
 import { startDownloads } from "@/features/drive/lib/download"
-import { isEditable, isUnresolvableParentError, runPreviewSave } from "@/features/drive/lib/previewSave.logic"
+import { isEditable, isTextCategory, isUnresolvableParentError, runPreviewSave } from "@/features/drive/lib/previewSave.logic"
 import { currentRootUuid, renameItem, trashItems, deleteItemsPermanently } from "@/features/drive/lib/actions"
 import { followClipboardItem } from "@/features/drive/lib/clipboardSync"
 import { unshareItems } from "@/features/drive/lib/share/actions"
@@ -37,6 +37,7 @@ import { MediaViewer, MediaElement } from "@/features/preview/components/mediaVi
 import { PreviewDownloadableProvider } from "@/features/preview/lib/accessMode"
 import {
 	isTextEditingTarget,
+	PREVIEW_SURFACE,
 	previewMenuVisible,
 	previewNavigationUnmountsOverlay,
 	previewMenuHiddenActionIds,
@@ -50,7 +51,9 @@ import {
 import { setPreviewDirty, usePreviewUnsavedGuardStore } from "@/features/preview/store/usePreviewUnsavedGuard"
 import { type PreviewSource, previewSourceKey, previewSourceName } from "@/features/preview/lib/previewSource"
 import { clearVideoPlaybackStates } from "@/features/preview/lib/videoContinuity"
-import { clearPreviewCache } from "@/features/preview/lib/previewCache"
+import { clearPreviewCache, loadPreviewBytes } from "@/features/preview/lib/previewCache"
+import { usePreviewCacheScope } from "@/features/preview/lib/accessMode"
+import type { SpreadsheetSaveSource } from "@/features/spreadsheet/components/spreadsheetViewer"
 import { usePreviewRemoteChanges } from "@/features/preview/hooks/usePreviewRemoteChanges"
 import { RemoteChangeDialog } from "@/features/preview/components/remoteChangeDialog"
 import { DriveDropdownMenuContent } from "@/features/drive/components/itemMenu"
@@ -79,6 +82,7 @@ const PdfViewer = lazy(() => import("@/features/preview/components/pdfViewer"))
 const DocxViewer = lazy(() => import("@/features/preview/components/docxViewer"))
 const TextViewer = lazy(() => import("@/features/preview/components/textViewer"))
 const MarkdownViewer = lazy(() => import("@/features/preview/components/markdownViewer"))
+const SpreadsheetViewer = lazy(() => import("@/features/spreadsheet/components/spreadsheetViewer"))
 // @codemirror/merge, for the remote-change dialog's comparison only.
 const RemoteFileCompare = lazy(() => import("@/features/preview/components/remoteCompare"))
 
@@ -198,6 +202,14 @@ export function PreviewOverlay({
 	// Write-only side channel for performSave to read the live buffer without this component
 	// re-rendering on every keystroke — see TextViewer's own contentRef prop doc.
 	const contentRef = useRef<string | null>(null)
+	// The spreadsheet editor's side channel: its bytes as edited, serialised when a save asks for them.
+	const spreadsheetRef = useRef<SpreadsheetSaveSource | null>(null)
+	const cacheScope = usePreviewCacheScope()
+
+	// The open editor's unsaved edits: a text editor's buffer, or the spreadsheet's file as edited.
+	async function readEdits(): Promise<string | Uint8Array | null> {
+		return spreadsheetRef.current === null ? contentRef.current : await spreadsheetRef.current()
+	}
 
 	// Override for the currently-displayed item, accumulated per pager slot across the whole overlay
 	// session (never reset on navigation, only on remount) — `items` is a FROZEN pager snapshot that a
@@ -275,7 +287,7 @@ export function PreviewOverlay({
 
 	// Newer versions of the pager's files saved elsewhere, and a trash, delete or move of the file on
 	// screen while it holds unsaved edits: shown in place, or asked about (RemoteChangeDialog below).
-	const remote = usePreviewRemoteChanges({ variant, items, index, savedRef, commitSaved, contentRef, onItemRemoved })
+	const remote = usePreviewRemoteChanges({ variant, items, index, savedRef, commitSaved, contentRef, readEdits, onItemRemoved })
 
 	// Header item-menu action handlers — every one below only ever runs against `driveItem`/`rawDriveItem`
 	// at the CURRENT slot (the menu is only ever mounted for it, see the header JSX). Rename/favorite
@@ -648,14 +660,27 @@ export function PreviewOverlay({
 			return
 		}
 
-		const content = contentRef.current
+		setSaving(true)
+		remote.saveStarted()
 
-		if (content === null) {
+		const edits = await readEdits().catch((e: unknown) => {
+			log.error("preview", "reading the edits to save failed", e)
+
+			return null
+		})
+
+		if (edits === null) {
+			setSaving(false)
+			remote.saveSettled(null)
+			toast.error(t("previewSaveFailed"))
+
 			return
 		}
 
-		setSaving(true)
-		remote.saveStarted()
+		const content = typeof edits === "string" ? new TextEncoder().encode(edits) : edits
+		// The upload hands the buffer to the SDK worker; the copy seeds the saved version's preview, so the
+		// editor reopens on it without downloading what it just sent.
+		const saved = content.slice()
 
 		const outcome = await runPreviewSave(
 			{
@@ -680,6 +705,7 @@ export function PreviewOverlay({
 			return
 		}
 
+		void loadPreviewBytes(cacheScope, outcome.item.data.uuid, saved.byteLength, () => Promise.resolve(saved))
 		// Keyed by the FROZEN slot uuid (targetRawItem), never targetItem's own uuid — see `saved`'s own
 		// comment on why that's what makes a chained re-save of the same slot collapse onto one entry.
 		commitSaved(targetRawItem.data.uuid, outcome.item)
@@ -754,12 +780,17 @@ export function PreviewOverlay({
 	// area at all.
 	function handleBodyClick(event: ReactMouseEvent<HTMLDivElement>): void {
 		const target = event.target
+
+		// A viewer's menus and dialogs portal out of the body, while React still bubbles their clicks here.
+		if (!(target instanceof Node) || !event.currentTarget.contains(target)) {
+			return
+		}
 		// `.pdf-text-layer` joins `.cm-editor` as a whole text-SELECTION surface excluded from the toggle:
 		// pdf.js's layer covers the entire page with no pointer-events opt-out, so once it exists every
 		// click on a PDF page — including the one that concludes a drag-selection — lands on it.
 		const isInteractive =
 			hasClosest(target) &&
-			target.closest("button, a, [role='button'], .cm-editor, .pdf-text-layer, input, select, textarea") !== null
+			target.closest(`button, a, [role='button'], .cm-editor, .pdf-text-layer, input, select, textarea, ${PREVIEW_SURFACE}`) !== null
 		const isMedia = isMediaTarget(target)
 		let mediaControlsBandHit = false
 
@@ -1035,6 +1066,7 @@ export function PreviewOverlay({
 									editable={editable}
 									onDirtyChange={setPreviewDirty}
 									contentRef={contentRef}
+									spreadsheetRef={spreadsheetRef}
 								/>
 							</PreviewDownloadableProvider>
 						</PreviewErrorBoundary>
@@ -1079,7 +1111,7 @@ export function PreviewOverlay({
 							title={t(remote.prompt.kind === "revised" ? "previewRemoteChangedTitle" : "previewRemoteDeletedTitle")}
 							body={t(remote.prompt.kind === "revised" ? "previewRemoteChangedBody" : "previewRemoteDeletedBody", { name })}
 							renderCompare={
-								remoteTheirs !== undefined && isEditable(driveItem, variant)
+								remoteTheirs !== undefined && isEditable(driveItem, variant) && isTextCategory(previewType(driveItem))
 									? mine => (
 											<Suspense fallback={<LoadingState size="lg" />}>
 												<RemoteFileCompare
@@ -1133,6 +1165,7 @@ interface PreviewBodyProps {
 	editable: boolean
 	onDirtyChange: (dirty: boolean) => void
 	contentRef: RefObject<string | null>
+	spreadsheetRef: RefObject<SpreadsheetSaveSource | null>
 }
 
 // The external arm's body — a bare url with no drive item, so no SW range route, byte-buffering, HEIC
@@ -1182,7 +1215,7 @@ function ExternalPreviewBody({ url, name }: { url: string; name: string }) {
 //
 // A missing category arm cannot ship as a silently blank overlay: the `default` arm at the bottom of
 // the switch is the guard (a return-type annotation is not — `ReactNode` includes `undefined`).
-function PreviewBody({ source, editable, onDirtyChange, contentRef }: PreviewBodyProps): ReactNode {
+function PreviewBody({ source, editable, onDirtyChange, contentRef, spreadsheetRef }: PreviewBodyProps): ReactNode {
 	const { t } = useTranslation("preview")
 
 	if (source.type === "external") {
@@ -1242,6 +1275,25 @@ function PreviewBody({ source, editable, onDirtyChange, contentRef }: PreviewBod
 					<PdfViewer
 						item={item}
 						alt={alt}
+					/>
+				</Suspense>
+			)
+		case "spreadsheet":
+			return (
+				<Suspense
+					fallback={
+						<LoadingState
+							size="lg"
+							className="text-inherit"
+						/>
+					}
+				>
+					<SpreadsheetViewer
+						item={item}
+						alt={alt}
+						editable={editable}
+						onDirtyChange={onDirtyChange}
+						saveRef={spreadsheetRef}
 					/>
 				</Suspense>
 			)

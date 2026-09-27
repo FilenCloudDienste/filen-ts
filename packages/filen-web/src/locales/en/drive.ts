@@ -530,6 +530,8 @@ export const drive = {
 	drivePreviewKindPdf: "PDF document",
 	/** Info panel — Kind row value: a Word document */
 	drivePreviewKindDocx: "Word document",
+	/** Info panel — Kind row value for a CSV, TSV or Excel file */
+	drivePreviewKindSpreadsheet: "Spreadsheet",
 	/** Info panel — Kind row value: a plain-text file */
 	drivePreviewKindText: "Text",
 	/** Info panel — Kind row value: a source-code file */

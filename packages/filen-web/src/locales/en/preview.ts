@@ -50,6 +50,8 @@ export const preview = {
 	/** Unsaved-changes confirm dialog — the destructive confirm button, discards the buffer and proceeds */
 	previewDiscardAction: "Discard",
 	/** Toast shown after a save fails because the file's own parent directory no longer exists — the editor locks read-only for the rest of this session (mobile parity: retrying against the same broken parent would only fail again); every other save failure keeps the editor open for a retry instead */
+	/** Toast — the editor's content could not be read for saving (the spreadsheet could not be written out) */
+	previewSaveFailed: "This file couldn't be saved.",
 	previewReadOnlyAfterSaveFailure: "This file is now read-only — saving failed and can't be retried until you reopen it.",
 
 	// ── Changes made elsewhere ───────────────────────────────────────────────
@@ -97,6 +99,101 @@ export const preview = {
 	/** Toast when a save from this editor landed right after a version saved elsewhere, which it replaced */
 	previewSaveReplacedNewer:
 		"Your save replaced changes saved elsewhere moments before. With file versioning on, they're in the file's version history.",
+
+	// ── Spreadsheet ──────────────────────────────────────────────────────────
+	/** Spreadsheet viewer — a workbook with no sheet to show */
+	previewSpreadsheetEmpty: "This spreadsheet has no sheets.",
+	/** Spreadsheet viewer — the file could not be read as a spreadsheet (damaged, encrypted with a password, or too large to open) */
+	previewSpreadsheetUnreadable: "This spreadsheet couldn't be opened. It may be damaged, password-protected or too large.",
+	/** Spreadsheet viewer — accessible label for the box showing the selected cell or range, e.g. "B2:D7" */
+	previewSpreadsheetSelectedCells: "Selected cells",
+	/** Spreadsheet viewer — accessible label for the bar showing the active cell's contents or formula */
+	previewSpreadsheetCellContents: "Cell contents",
+	/** Spreadsheet viewer — accessible label for the row of sheet tabs */
+	previewSpreadsheetSheets: "Sheets",
+	/** Spreadsheet viewer — toast when the selection is too large to copy */
+	previewSpreadsheetCopyTooLarge: "That selection is too large to copy.",
+	/** Spreadsheet toolbar — undo the last edit (also Cmd/Ctrl+Z in the grid) */
+	previewSpreadsheetUndo: "Undo",
+	/** Spreadsheet toolbar — redo the last undone edit (also Cmd/Ctrl+Shift+Z or Cmd/Ctrl+Y) */
+	previewSpreadsheetRedo: "Redo",
+	/** Spreadsheet toolbar — toggle bold on the selected cells */
+	previewSpreadsheetBold: "Bold",
+	/** Spreadsheet toolbar — toggle italic on the selected cells */
+	previewSpreadsheetItalic: "Italic",
+	/** Spreadsheet toolbar — toggle underline on the selected cells */
+	previewSpreadsheetUnderline: "Underline",
+	/** Spreadsheet toolbar — toggle strikethrough on the selected cells */
+	previewSpreadsheetStrikethrough: "Strikethrough",
+	/** Spreadsheet toolbar — opens the palette for the selected cells' text colour */
+	previewSpreadsheetTextColor: "Text colour",
+	/** Spreadsheet toolbar — opens the palette for the selected cells' fill (background) colour */
+	previewSpreadsheetFillColor: "Fill colour",
+	/** Spreadsheet toolbar colour palette — removes the colour */
+	previewSpreadsheetColorNone: "No colour",
+	/** Spreadsheet toolbar — align the selected cells' content left */
+	previewSpreadsheetAlignLeft: "Align left",
+	/** Spreadsheet toolbar — centre the selected cells' content */
+	previewSpreadsheetAlignCenter: "Centre",
+	/** Spreadsheet toolbar — align the selected cells' content right */
+	previewSpreadsheetAlignRight: "Align right",
+	/** Spreadsheet toolbar — accessible label of the number format menu */
+	previewSpreadsheetNumberFormat: "Number format",
+	/** Number format menu — no particular format */
+	previewSpreadsheetFormatGeneral: "General",
+	/** Number format menu — 1,234.56 */
+	previewSpreadsheetFormatNumber: "Number",
+	/** Number format menu — $1,234.56 */
+	previewSpreadsheetFormatDollar: "Currency ($)",
+	/** Number format menu — 1,234.56 € */
+	previewSpreadsheetFormatEuro: "Currency (€)",
+	/** Number format menu — 12.34% */
+	previewSpreadsheetFormatPercent: "Percent",
+	/** Number format menu — 2026-09-27 */
+	previewSpreadsheetFormatDate: "Date",
+	/** Number format menu — the value kept as text */
+	previewSpreadsheetFormatText: "Text",
+	/** Number format menu — the cell carries a format not in this list */
+	previewSpreadsheetFormatCustom: "Custom",
+	/** Spreadsheet grid menu — insert as many rows as are selected, above them */
+	previewSpreadsheetInsertRowsAbove_one: "Insert row above",
+	previewSpreadsheetInsertRowsAbove_other: "Insert {{count}} rows above",
+	/** Spreadsheet grid menu — insert as many rows as are selected, below them */
+	previewSpreadsheetInsertRowsBelow_one: "Insert row below",
+	previewSpreadsheetInsertRowsBelow_other: "Insert {{count}} rows below",
+	/** Spreadsheet grid menu — delete the selected rows */
+	previewSpreadsheetDeleteRows_one: "Delete row",
+	previewSpreadsheetDeleteRows_other: "Delete {{count}} rows",
+	/** Spreadsheet grid menu — insert as many columns as are selected, to their left */
+	previewSpreadsheetInsertColumnsLeft_one: "Insert column left",
+	previewSpreadsheetInsertColumnsLeft_other: "Insert {{count}} columns left",
+	/** Spreadsheet grid menu — insert as many columns as are selected, to their right */
+	previewSpreadsheetInsertColumnsRight_one: "Insert column right",
+	previewSpreadsheetInsertColumnsRight_other: "Insert {{count}} columns right",
+	/** Spreadsheet grid menu — delete the selected columns */
+	previewSpreadsheetDeleteColumns_one: "Delete column",
+	previewSpreadsheetDeleteColumns_other: "Delete {{count}} columns",
+	/** Spreadsheet grid menu — empty the selected cells (formats stay) */
+	previewSpreadsheetClearCells: "Clear contents",
+	/** Spreadsheet sheet tabs — adds a new empty sheet */
+	previewSpreadsheetAddSheet: "Add sheet",
+	/** Name given to a newly added sheet; {{number}} is its position */
+	previewSpreadsheetNewSheetName: "Sheet {{number}}",
+	/** Rename-sheet dialog — title and submit button */
+	previewSpreadsheetRenameSheet: "Rename sheet",
+	/** Rename-sheet dialog — body */
+	previewSpreadsheetRenameSheetBody: "Formulas that refer to this sheet are updated to the new name.",
+	/** Rename-sheet dialog — field label */
+	previewSpreadsheetSheetName: "Sheet name",
+	/** Toast — rows or columns can't be inserted or deleted in this sheet */
+	previewSpreadsheetStructureLocked:
+		"Rows and columns can't be inserted or deleted in this sheet: it has tables, conditional formats, validations, images or named ranges that refer to cell ranges.",
+	/** Toast — a sheet name is taken or has characters Excel doesn't allow (\ / ? * [ ] :, at most 31 characters) */
+	previewSpreadsheetSheetNameInvalid: "That sheet name is already used or isn't allowed.",
+	/** Toast — an edit reaches past what can be changed at once, or past a sheet's size */
+	previewSpreadsheetTooLarge: "That's more than can be changed at once.",
+	/** Toast — an edit failed unexpectedly */
+	previewSpreadsheetEditFailed: "That change couldn't be made.",
 
 	// ── PDF ──────────────────────────────────────────────────────────────────
 	/** PDF viewer — password dialog title, shown both on the first prompt and on a wrong-password retry */

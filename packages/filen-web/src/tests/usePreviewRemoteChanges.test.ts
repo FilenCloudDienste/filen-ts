@@ -86,6 +86,7 @@ function setup(items = [file("a"), file("b", { stableUUID: "other" as File["stab
 				savedRef,
 				commitSaved,
 				contentRef,
+				readEdits: () => Promise.resolve(contentRef.current),
 				onItemRemoved
 			}),
 		{ initialProps: { items, index } }

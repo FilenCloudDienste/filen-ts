@@ -60,8 +60,14 @@ export function hasClosest(target: EventTarget | null): target is EventTarget & 
 // navigation once focus is inside it too — the pager buttons (or stepping back out to the listing)
 // remain how you page one of those instead, exactly like a focused <video>/<audio> scrubber already
 // claims Left/Right for seeking (see previewOverlay.tsx's own isMediaTarget).
+//
+// Any text field too (a caret moves there as well), and a surface marked `data-preview-surface`: one that
+// takes its own clicks and arrow keys, as the spreadsheet grid does, where an arrow at the sheet's edge
+// stays put rather than paging away.
+export const PREVIEW_SURFACE = "[data-preview-surface]"
+
 export function isTextEditingTarget(target: EventTarget | null): boolean {
-	return hasClosest(target) && target.closest(".cm-editor") !== null
+	return hasClosest(target) && target.closest(`.cm-editor, input, textarea, ${PREVIEW_SURFACE}`) !== null
 }
 
 // Native <video>/<audio> controls (scrubber, play/pause, volume, ...) render inside the element's own

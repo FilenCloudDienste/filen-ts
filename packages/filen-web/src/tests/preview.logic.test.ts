@@ -216,7 +216,15 @@ describe("previewType — extension category map", () => {
 		expect(previewType(fileNamed("blob3.bin", { mime: "audio/mpeg" }))).toBe("audio")
 		expect(previewType(fileNamed("blob4.bin", { mime: "application/pdf" }))).toBe("pdf")
 		expect(previewType(fileNamed("blob5.bin", { mime: "text/markdown" }))).toBe("markdown")
-		expect(previewType(fileNamed("blob6.bin", { mime: "text/csv" }))).toBe("text")
+		expect(previewType(fileNamed("blob6.bin", { mime: "text/csv" }))).toBe("spreadsheet")
+		// Before the generic text/* arm, and the mime Excel registers for .csv on Windows too.
+		expect(previewType(fileNamed("blob7.bin", { mime: "application/vnd.ms-excel" }))).toBe("spreadsheet")
+	})
+
+	it("recognises spreadsheets by extension", () => {
+		for (const name of ["a.csv", "b.TSV", "c.xlsx", "d.xlsm", "e.xls"]) {
+			expect(previewType(fileNamed(name))).toBe("spreadsheet")
+		}
 	})
 
 	it("extension always wins over a conflicting mime", () => {

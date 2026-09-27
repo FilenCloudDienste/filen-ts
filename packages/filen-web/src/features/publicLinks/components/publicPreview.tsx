@@ -13,6 +13,7 @@ const PdfViewer = lazy(() => import("@/features/preview/components/pdfViewer"))
 const DocxViewer = lazy(() => import("@/features/preview/components/docxViewer"))
 const TextViewer = lazy(() => import("@/features/preview/components/textViewer"))
 const MarkdownViewer = lazy(() => import("@/features/preview/components/markdownViewer"))
+const SpreadsheetViewer = lazy(() => import("@/features/spreadsheet/components/spreadsheetViewer"))
 
 function ViewerFallback() {
 	return (
@@ -90,6 +91,15 @@ function PublicPreviewBody({ item, category, alt }: { item: DriveItem; category:
 			return (
 				<Suspense fallback={<ViewerFallback />}>
 					<DocxViewer
+						item={item}
+						alt={alt}
+					/>
+				</Suspense>
+			)
+		case "spreadsheet":
+			return (
+				<Suspense fallback={<ViewerFallback />}>
+					<SpreadsheetViewer
 						item={item}
 						alt={alt}
 					/>

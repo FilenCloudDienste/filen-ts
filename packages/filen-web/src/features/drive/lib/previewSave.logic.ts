@@ -2,12 +2,12 @@ import * as Comlink from "comlink"
 import type { File as SdkFile } from "@filen/sdk-rs"
 import { driveItemName } from "@filen/shared"
 import { asDirectoryOrFile, narrowItem, upsertDriveItem, type DriveItem } from "@/features/drive/lib/item"
-import { previewType } from "@/features/drive/lib/preview.logic"
+import { extensionOf, previewType, type PreviewCategory } from "@/features/drive/lib/preview.logic"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { runOp, type ActionOutcome } from "@/lib/actions/outcome"
 import { asErrorDTO, PARENT_NOT_FOUND_PREFIX, type ErrorDTO } from "@/lib/sdk/errors"
 
-// Editable-preview eligibility gate (mobile parity): only a decryptable text/code/markdown file
+// Editable-preview eligibility gate (mobile parity): only a decryptable text/code/markdown file or spreadsheet
 // inside the navigable "drive" variant — never trash/recents/favorites/sharedIn/sharedOut (no
 // writable parent context, or a variant this app never lets a write reach), never an undecryptable
 // row (nothing to encode a diff against). Markdown is edited through the viewer's own source mode,
@@ -26,6 +26,16 @@ export function isEditable(item: DriveItem, variant: DriveVariant): boolean {
 
 	const category = previewType(item)
 
+	// A spreadsheet edits in its grid; a legacy .xls only opens to be looked at.
+	if (category === "spreadsheet") {
+		return extensionOf(driveItemName(base)) !== "xls"
+	}
+
+	return isTextCategory(category)
+}
+
+// Whether the preview is text an editor holds as a string (a line diff can compare two versions of it).
+export function isTextCategory(category: PreviewCategory): boolean {
 	return category === "text" || category === "code" || category === "markdown"
 }
 
@@ -64,7 +74,7 @@ function dropUuid(items: DriveItem[], uuid: string): DriveItem[] {
 // must be free: the same upload onto a taken name would make a new version of that file.
 export async function runPreviewSave(
 	deps: PreviewSaveDeps,
-	args: { item: DriveItem; content: string; asNewFile?: string }
+	args: { item: DriveItem; content: string | Uint8Array; asNewFile?: string }
 ): Promise<ActionOutcome<DriveItem>> {
 	const { item, content, asNewFile } = args
 	const base = asDirectoryOrFile(item)
@@ -78,7 +88,7 @@ export async function runPreviewSave(
 
 	const name = asNewFile ?? driveItemName(base)
 	const mime = base.data.decryptedMeta?.mime ?? ""
-	const bytes = new TextEncoder().encode(content)
+	const bytes = typeof content === "string" ? new TextEncoder().encode(content) : content
 	// Root-sentinel collapse inlined rather than importing normalizeParentUuid (queries/drive.ts): the
 	// .logic.ts split keeps this file framework-free (no queryClient import anywhere in it, direct or
 	// transitive) — the one-line uuid compare isn't worth crossing that boundary for.
