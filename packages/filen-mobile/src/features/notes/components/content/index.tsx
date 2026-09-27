@@ -1,7 +1,7 @@
 import { NoteType, type NoteContentEdited } from "@filen/sdk-rs"
 import { type Note, type NoteHistory } from "@/types"
 import View from "@/components/ui/view"
-import useNoteContentQuery, { noteContentQueryGet } from "@/features/notes/queries/useNoteContent.query"
+import useNoteContentQuery, { noteContentQueryGet, noteContentQueryUpdate } from "@/features/notes/queries/useNoteContent.query"
 import Checklist from "@/features/notes/components/content/checklist"
 import { noteCodeTitleExtension, noteTypeToEditorType } from "@/features/notes/utils"
 import { FadeOut } from "react-native-reanimated"
@@ -394,72 +394,111 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 			const editing = (getInflightContentForNote(note.uuid) ?? []).length > 0 || editedThisMount.current
 
 			if (!editing) {
-				await reloadFromServer()
+				if (info.content === undefined) {
+					await reloadFromServer()
+				} else {
+					// Seeded from the event in this same tick: no request, and no await for a keystroke to land in
+					// before the editor reseeds (a fresh dataUpdatedAt remounts it on this content).
+					noteContentQueryUpdate({
+						params: {
+							uuid: note.uuid
+						},
+						updater: info.content
+					})
+				}
 
 				alerts.normal(t("remote_change_updated"))
 
 				return
 			}
 
-			const promptResponse = await run(async () => {
-				return await prompts.confirm3({
-					title: t("note_edited"),
-					message: t("note_edited_message"),
-					primaryText: t("remote_change_save_copy"),
-					destructiveText: t("remote_change_load_theirs"),
-					cancelText: t("remote_change_keep_mine")
+			// Until answered, no pass pushes this note: a push under the prompt would put mine over theirs
+			// before the user chose.
+			const held = sync.hold(note.uuid)
+
+			try {
+				const promptResponse = await run(async () => {
+					return await prompts.confirm3({
+						title: t("note_edited"),
+						message: t("note_edited_message"),
+						primaryText: t("remote_change_save_copy"),
+						destructiveText: t("remote_change_load_theirs"),
+						cancelText: t("remote_change_keep_mine")
+					})
 				})
-			})
 
-			if (!promptResponse.success) {
-				logger.error("notes", "remote-edit prompt failed", { error: promptResponse.error })
-				alerts.error(promptResponse.error)
-
-				return
-			}
-
-			if (promptResponse.data === "cancel") {
-				// The edits become the newest version. An unsynced one is pushed anyway; edits already pushed
-				// (this version went over them) are queued again, against its content as the base so the
-				// push, which the user chose, raises no overwrite warning.
-				if (mine !== undefined && (getInflightContentForNote(note.uuid) ?? []).length === 0) {
-					useNotesInflightStore.getState().setInflightContent(prev => ({
-						...prev,
-						[note.uuid]: buildInflightEntries({
-							previous: prev[note.uuid],
-							note,
-							content: mine,
-							now: Date.now(),
-							sessionBaseHash: info.content === undefined ? null : hashNoteContent(info.content)
-						})
-					}))
-
-					await flushInflightContentWithAlert()
-				}
-
-				sync.syncDebounced()
-
-				return
-			}
-
-			if (promptResponse.data === "primary" && mine !== undefined) {
-				const title = t("note_conflict_copy_title", {
-					title: noteDisplayTitle(note),
-					date: conflictCopyStamp(new Date())
-				})
-				const copied = await runWithLoading(async () => notes.create({ title, content: mine, type: note.noteType }))
-
-				if (!copied.success) {
-					logger.error("notes", "saving remote-edit conflict copy failed", { error: copied.error, noteUuid: note.uuid })
-					alerts.error(copied.error)
+				if (!promptResponse.success) {
+					logger.error("notes", "remote-edit prompt failed", { error: promptResponse.error })
+					alerts.error(promptResponse.error)
 
 					return
 				}
 
-				alerts.normal(t("note_saved_as_copy", { title }))
-			}
+				if (promptResponse.data === "cancel") {
+					// The edits become the newest version, pushed once released, against this version's content
+					// as the base so the push, which the user chose, raises no overwrite warning. Edits already
+					// pushed (this version went over them) are queued again.
+					const theirsHash = info.content === undefined ? undefined : hashNoteContent(info.content)
 
-			await reloadFromServer()
+					if ((getInflightContentForNote(note.uuid) ?? []).length > 0) {
+						useNotesInflightStore.getState().setInflightContent(prev => {
+							const entries = prev[note.uuid]
+
+							if (!entries) {
+								return prev
+							}
+
+							return {
+								...prev,
+								[note.uuid]: entries.map(({ baseContentHash: _stale, ...entry }) =>
+									theirsHash === undefined ? entry : { ...entry, baseContentHash: theirsHash }
+								)
+							}
+						})
+					} else if (mine !== undefined) {
+						useNotesInflightStore.getState().setInflightContent(prev => ({
+							...prev,
+							[note.uuid]: buildInflightEntries({
+								previous: prev[note.uuid],
+								note,
+								content: mine,
+								now: Date.now(),
+								sessionBaseHash: theirsHash ?? null
+							})
+						}))
+					} else {
+						return
+					}
+
+					await flushInflightContentWithAlert()
+
+					return
+				}
+
+				if (promptResponse.data === "primary" && mine !== undefined) {
+					const title = t("note_conflict_copy_title", {
+						title: noteDisplayTitle(note),
+						date: conflictCopyStamp(new Date())
+					})
+					const copied = await runWithLoading(async () => notes.create({ title, content: mine, type: note.noteType }))
+
+					if (!copied.success) {
+						logger.error("notes", "saving remote-edit conflict copy failed", { error: copied.error, noteUuid: note.uuid })
+						alerts.error(copied.error)
+
+						return
+					}
+
+					alerts.normal(t("note_saved_as_copy", { title }))
+				}
+
+				// A push sent before the prompt opened lands first, so the reload reads what it left and its cache
+				// write cannot follow the reload's.
+				await held.settled
+				await reloadFromServer()
+			} finally {
+				held.release()
+			}
 		},
 		[note, history, reloadFromServer, t]
 	)

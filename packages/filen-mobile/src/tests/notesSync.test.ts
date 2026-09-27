@@ -1461,6 +1461,127 @@ describe("Sync (Notes)", () => {
 		})
 	})
 
+	describe("hold (remote-edit prompt open)", () => {
+		it("a pass leaves a held note alone and pushes the others; releasing schedules its push", async () => {
+			const sync = await createSync()
+
+			notesState.inflightContent = {
+				"note-1": [{ timestamp: 1000, content: "mine", note: mockNote("note-1") }],
+				"note-2": [{ timestamp: 1000, content: "other", note: mockNote("note-2") }]
+			}
+
+			const held = sync.hold("note-1")
+
+			sync.executeNow()
+
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			expect(mockNotesSetContent).toHaveBeenCalledTimes(1)
+			expect(mockNotesSetContent).toHaveBeenCalledWith(expect.objectContaining({ content: "other" }))
+			expect(notesState.inflightContent["note-1"]).toHaveLength(1)
+
+			mockCreateExecutableTimeout.mockClear()
+			held.release()
+			held.release()
+
+			expect(mockCreateExecutableTimeout).toHaveBeenCalledTimes(1)
+		})
+
+		it("a hold taken during the conflict peek stops the push", async () => {
+			const sync = await createSync()
+			let peeked: (value: string) => void = () => undefined
+
+			mockNotesGetContent.mockImplementationOnce(() => new Promise<string>(resolve => (peeked = resolve)))
+
+			notesState.inflightContent = {
+				"note-1": [{ timestamp: 1000, content: "mine", note: mockNote("note-1"), baseContentHash: hashNoteContent("base") }]
+			}
+
+			sync.executeNow()
+
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			const held = sync.hold("note-1")
+
+			peeked("theirs")
+
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			expect(mockNotesSetContent).not.toHaveBeenCalled()
+			expect(notesState.inflightContent["note-1"]).toHaveLength(1)
+
+			held.release()
+		})
+
+		it("settled waits for a push already sent, and its cache write, before resolving", async () => {
+			const sync = await createSync()
+			let landed: (value: unknown) => void = () => undefined
+
+			mockNotesSetContent.mockImplementationOnce(() => new Promise(resolve => (landed = resolve)))
+
+			notesState.inflightContent = {
+				"note-1": [{ timestamp: 1000, content: "mine", note: mockNote("note-1") }]
+			}
+
+			sync.executeNow()
+
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			expect(mockNotesSetContent).toHaveBeenCalledTimes(1)
+
+			const held = sync.hold("note-1")
+			let settled = false
+
+			void held.settled.then(() => {
+				settled = true
+			})
+
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			expect(settled).toBe(false)
+
+			landed({ editedTimestamp: BigInt(2000) })
+
+			await held.settled
+
+			expect(settled).toBe(true)
+			expect(mockNoteContentQueryUpdate).toHaveBeenCalledWith(expect.objectContaining({ updater: "mine" }))
+			expect(notesState.inflightContent["note-1"]).toBeUndefined()
+
+			held.release()
+		})
+
+		it("settled resolves at once when nothing is being pushed, and after a failed push too", async () => {
+			const sync = await createSync()
+			const idle = sync.hold("note-1")
+
+			await idle.settled
+			idle.release()
+
+			let failed: (error: Error) => void = () => undefined
+
+			mockNotesSetContent.mockImplementationOnce(() => new Promise((_, reject) => (failed = reject)))
+
+			notesState.inflightContent = {
+				"note-2": [{ timestamp: 1000, content: "mine", note: mockNote("note-2") }]
+			}
+
+			sync.executeNow()
+
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			const held = sync.hold("note-2")
+
+			failed(new Error("offline"))
+
+			await held.settled
+
+			expect(notesState.inflightContent["note-2"]).toHaveLength(1)
+
+			held.release()
+		})
+	})
+
 	describe("syncDebounced / executeNow", () => {
 		it("cancels previous timeout on new call", async () => {
 			const cancelFn = vi.fn()

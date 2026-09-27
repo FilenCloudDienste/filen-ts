@@ -56,6 +56,11 @@ export class Sync {
 	// inflight is dropped/drained. Bounds the #40 drop so a one-off `Server` error never loses
 	// the first edit, while a genuine permission rejection still un-wedges after N attempts.
 	private readonly nonRetryableRejections: Map<string, number> = new Map<string, number>()
+	// Notes whose remote-edit prompt is open, by open prompt count: passes leave them alone, so the answer
+	// decides what the cloud holds rather than a debounce firing under the prompt.
+	private readonly holds: Map<string, number> = new Map<string, number>()
+	// The setContent of each note the running pass has sent.
+	private readonly pushes: Map<string, Promise<unknown>> = new Map<string, Promise<unknown>>()
 
 	public constructor() {
 		this.initPromise = new Promise(resolve => {
@@ -84,6 +89,42 @@ export class Sync {
 	// dropping a fresh edit after a single failure instead of MAX_NON_RETRYABLE_REJECTIONS.
 	public clearRejections(noteUuid: string): void {
 		this.nonRetryableRejections.delete(noteUuid)
+	}
+
+	// Keeps passes off a note until release(). `settled` resolves once a push of it already sent has landed
+	// and been recorded, so what is read after it is what the server ended with.
+	public hold(noteUuid: string): { settled: Promise<void>; release: () => void } {
+		this.holds.set(noteUuid, (this.holds.get(noteUuid) ?? 0) + 1)
+
+		let released = false
+		const ignore = () => undefined
+
+		return {
+			// Chained after the pass's own await of the push, whose bookkeeping after it is synchronous.
+			settled: (this.pushes.get(noteUuid) ?? Promise.resolve()).then(ignore, ignore),
+			release: () => {
+				if (released) {
+					return
+				}
+
+				released = true
+
+				const count = (this.holds.get(noteUuid) ?? 1) - 1
+
+				if (count > 0) {
+					this.holds.set(noteUuid, count)
+
+					return
+				}
+
+				this.holds.delete(noteUuid)
+
+				// A pass skipped the note meanwhile: its edits would otherwise wait for the next keystroke.
+				if ((useNotesInflightStore.getState().inflightContent[noteUuid] ?? []).length > 0) {
+					this.syncDebounced()
+				}
+			}
+		}
 	}
 
 	private async restoreFromDisk() {
@@ -272,7 +313,7 @@ export class Sync {
 
 			const results = await Promise.allSettled(
 				Object.entries(inflightContent).map(async ([noteUuid, contents]) => {
-					if (signal.aborted) {
+					if (signal.aborted || this.holds.has(noteUuid)) {
 						return
 					}
 
@@ -334,12 +375,21 @@ export class Sync {
 						}
 					}
 
+					// A prompt opened during the peek.
+					if (this.holds.has(noteUuid)) {
+						return
+					}
+
+					const push = notes.setContent({
+						note: liveNote,
+						content: mostRecentContent.content,
+						signal
+					})
+
+					this.pushes.set(noteUuid, push)
+
 					try {
-						await notes.setContent({
-							note: liveNote,
-							content: mostRecentContent.content,
-							signal
-						})
+						await push
 					} catch (e) {
 						// #40 hardening: a read-only / shared / history note whose edit
 						// reaches sync (e.g. Quill failed to enforce readOnly) is rejected
@@ -407,6 +457,8 @@ export class Sync {
 						})
 
 						return
+					} finally {
+						this.pushes.delete(noteUuid)
 					}
 
 					// A successful push clears any accumulated rejection count for this note.
