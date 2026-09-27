@@ -144,3 +144,20 @@ describe("CsvDocument resize", () => {
 		expect(csvDocument("a,b\n").apply({ type: "resize", sheet: 0, axis: "cols", sizes: [[0, 80]] }).type).not.toBe("sizes")
 	})
 })
+
+describe("CsvDocument structural shifts", () => {
+	it("names the shift of an insert, its undo and its redo", () => {
+		const document = csvDocument("a,b\nc,d\n")
+		const inserted = document.apply({ type: "insert", sheet: 0, axis: "rows", at: 1, count: 2 })
+
+		expect(inserted).toMatchObject({ type: "sheets", shift: { axis: "rows", kind: "insert", at: 1, count: 2, revert: false } })
+		expect(document.undo()).toMatchObject({ type: "sheets", shift: { axis: "rows", kind: "insert", at: 1, count: 2, revert: true } })
+		expect(document.redo()).toMatchObject({ type: "sheets", shift: { kind: "insert", revert: false } })
+	})
+
+	it("names the clamped position an insert past the end actually used", () => {
+		const document = csvDocument("a\n")
+
+		expect(document.apply({ type: "insert", sheet: 0, axis: "rows", at: 50, count: 1 })).toMatchObject({ shift: { at: 1 } })
+	})
+})

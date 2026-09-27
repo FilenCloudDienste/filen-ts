@@ -1,5 +1,5 @@
 import type { CellRange, CellStyleView, CellView, SheetView } from "@/features/spreadsheet/lib/model"
-import type { SizeAxis, SizeEntry } from "@/features/spreadsheet/lib/sizes.logic"
+import type { AxisShift, SizeAxis, SizeEntry } from "@/features/spreadsheet/lib/sizes.logic"
 
 // What the grid asks the worker to change, and what comes back. Sheet indices are the grid's (worksheets
 // only, in order).
@@ -50,7 +50,15 @@ export type EditResult =
 	// Sheets were added, renamed, or had rows or columns moved: one entry per sheet, the new count of them,
 	// a full view of each sheet that changed and null for one that did not (keep the view held). `styles`
 	// is the whole style table.
-	| { type: "sheets"; sheets: (SheetView | null)[]; styles: CellStyleView[]; state: DocState }
+	| {
+			type: "sheets"
+			sheets: (SheetView | null)[]
+			styles: CellStyleView[]
+			state: DocState
+			// A CSV's rows or columns moved (applied, redone, or undone when `revert`): where, so sizes kept
+			// beside the file follow them.
+			shift?: AxisShift & { revert: boolean }
+	  }
 	// Columns or rows were resized: their sizes as the sheet now reads them (null: none of their own).
 	| { type: "sizes"; sheet: number; axis: SizeAxis; sizes: SizeEntry[]; state: DocState }
 	// The edit could not be made: the sheet's structure is locked, a sheet name is taken or invalid, it

@@ -9,6 +9,7 @@ import {
 	type EditResult
 } from "@/features/spreadsheet/lib/edits"
 import { cellKey, keyCol, keyRow, type CellView, type SpreadsheetDoc } from "@/features/spreadsheet/lib/model"
+import type { AxisShift } from "@/features/spreadsheet/lib/sizes.logic"
 
 const HISTORY_LIMIT = 100
 
@@ -91,7 +92,7 @@ export class CsvDocument {
 		if (last.step.type === "structure") {
 			this.revertStructure(last.step)
 
-			return this.sheetsResult()
+			return this.sheetsResult(shiftOf(last.step, true))
 		}
 
 		const touched: number[] = []
@@ -288,7 +289,11 @@ export class CsvDocument {
 	}
 
 	private result(op: EditOp, step: Step): EditResult {
-		return step.type === "structure" || op.type !== "setCells" ? this.sheetsResult() : this.cellsResult([...step.before.keys()])
+		if (step.type === "structure") {
+			return this.sheetsResult(shiftOf(step, false))
+		}
+
+		return op.type !== "setCells" ? this.sheetsResult() : this.cellsResult([...step.before.keys()])
 	}
 
 	private cellsResult(keys: readonly number[]): EditResult {
@@ -307,7 +312,12 @@ export class CsvDocument {
 		}
 	}
 
-	private sheetsResult(): EditResult {
-		return { type: "sheets", sheets: this.doc().sheets, styles: [], state: this.state() }
+	// `shift`: where the edit moved rows or columns, for the sizes kept beside the file.
+	private sheetsResult(shift?: AxisShift & { revert: boolean }): EditResult {
+		return { type: "sheets", sheets: this.doc().sheets, styles: [], state: this.state(), ...(shift === undefined ? {} : { shift }) }
 	}
+}
+
+function shiftOf(step: Extract<Step, { type: "structure" }>, revert: boolean): AxisShift & { revert: boolean } {
+	return { axis: step.axis, kind: step.kind, at: step.at, count: step.count, revert }
 }
