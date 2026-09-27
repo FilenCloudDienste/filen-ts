@@ -1,17 +1,20 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { act, renderHook } from "@testing-library/react"
+import { act, cleanup, renderHook } from "@testing-library/react"
 import { EventEmitter } from "eventemitter3"
 
-const { emitter, confirm3, alertNormal, alertError, currentItem, setHasUnsavedEdits, findItemInDir } = vi.hoisted(() => ({
-	emitter: { current: null as EventEmitter | null },
-	confirm3: vi.fn<() => Promise<"primary" | "destructive" | "cancel">>(),
-	alertNormal: vi.fn(),
-	alertError: vi.fn(),
-	currentItem: { current: null as unknown },
-	setHasUnsavedEdits: vi.fn(),
-	findItemInDir: vi.fn()
-}))
+const { emitter, confirm3, alertNormal, alertError, currentItem, setHasUnsavedEdits, findItemInDir, readListing, getFileOptional } =
+	vi.hoisted(() => ({
+		emitter: { current: null as EventEmitter | null },
+		confirm3: vi.fn<() => Promise<"primary" | "destructive" | "cancel">>(),
+		alertNormal: vi.fn(),
+		alertError: vi.fn(),
+		currentItem: { current: null as unknown },
+		setHasUnsavedEdits: vi.fn(),
+		findItemInDir: vi.fn(),
+		readListing: vi.fn<(parentUuid: string) => Promise<unknown[]>>(),
+		getFileOptional: vi.fn<(uuid: string) => Promise<unknown>>()
+	}))
 
 vi.mock("@/lib/events", () => ({
 	default: {
@@ -25,7 +28,17 @@ vi.mock("@/lib/events", () => ({
 }))
 vi.mock("@/lib/prompts", () => ({ default: { confirm3 } }))
 vi.mock("@/lib/alerts", () => ({ default: { normal: alertNormal, error: alertError } }))
-vi.mock("@/lib/auth", () => ({ default: { getSdkClients: () => Promise.resolve({ authedSdkClient: { findItemInDir } }) } }))
+vi.mock("@/lib/auth", () => ({
+	default: { getSdkClients: () => Promise.resolve({ authedSdkClient: { findItemInDir, getFileOptional } }) }
+}))
+vi.mock("@/features/drive/queries/useDriveItems.query", () => ({ driveItemsQueryReadForNormalParent: readListing }))
+// Raw files here carry their parent as a plain uuid, "trash" for the trash.
+vi.mock("@/lib/sdkUnwrap", () => ({
+	unwrapParentUuid: (parent: string) => (parent === "trash" ? null : parent),
+	isTrashParent: (parent: string) => parent === "trash",
+	unwrapFileMeta: (file: unknown) => file,
+	unwrappedFileIntoDriveItem: (file: unknown) => ({ type: "file", data: file })
+}))
 vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string) => key }) }))
 vi.mock("@/components/drivePreview/gallery", () => ({
@@ -36,9 +49,21 @@ vi.mock("@/stores/useDrivePreview.store", () => ({
 }))
 
 import useRemoteRevisions from "@/components/drivePreview/useRemoteRevisions"
+import useSocketStore from "@/stores/useSocket.store"
 
-function file(uuid: string): never {
-	return { type: "file", data: { uuid, stableUuid: "lineage", decryptedMeta: { name: "notes.md" } } } as never
+function file(
+	uuid: string,
+	{ name = "notes.md", parent = "dir", stableUuid = "lineage" }: { name?: string; parent?: string; stableUuid?: string } = {}
+): never {
+	return { type: "file", data: { uuid, stableUuid, parent, decryptedMeta: { name } } } as never
+}
+
+// A background (or a dropped connection) and the socket coming back.
+function socketReconnected(): void {
+	act(() => {
+		useSocketStore.getState().setState("disconnected")
+		useSocketStore.getState().setState("connected")
+	})
 }
 
 function galleryItem(uuid: string): never {
@@ -60,15 +85,17 @@ function mount({
 	emitter.current?.on("driveItemUpdated", updated)
 	currentItem.current = galleryItem("v1")
 
-	const hook = renderHook(() =>
-		useRemoteRevisions({
-			item: galleryItem("v1"),
-			itemToUse: file("v1"),
-			parent: parent as never,
-			hasEdits,
-			savingRef,
-			saveAsNewFile: saveAsNewFile as never
-		})
+	const hook = renderHook(
+		({ edits }: { edits: boolean }) =>
+			useRemoteRevisions({
+				item: galleryItem("v1"),
+				itemToUse: file("v1"),
+				parent: parent as never,
+				hasEdits: edits,
+				savingRef,
+				saveAsNewFile: saveAsNewFile as never
+			}),
+		{ initialProps: { edits: hasEdits } }
 	)
 
 	return { hook, savingRef, updated }
@@ -98,9 +125,11 @@ async function flush(): Promise<void> {
 beforeEach(() => {
 	emitter.current = new EventEmitter()
 	vi.clearAllMocks()
+	useSocketStore.setState({ state: "connected", connectedAt: 1 })
 })
 
 afterEach(() => {
+	cleanup()
 	emitter.current = null
 })
 
@@ -381,5 +410,147 @@ describe("useRemoteRevisions", () => {
 		expect(saveAsNewFile).not.toHaveBeenCalled()
 		expect(alertError).toHaveBeenCalledTimes(1)
 		expect(updated).not.toHaveBeenCalled()
+	})
+	it("asks about a deletion of the version its open prompt asks about, once Keep mine is answered", async () => {
+		const first = deferred<"cancel">()
+
+		confirm3.mockReturnValueOnce(first.promise).mockResolvedValueOnce("cancel")
+
+		mount({ hasEdits: true })
+
+		emit("driveFileRevised", { item: file("v2") })
+		// Trashing the file now names its newest version, not the one on screen.
+		emit("driveFileGone", { uuid: "v2" })
+		first.resolve("cancel")
+		await flush()
+
+		expect(confirm3).toHaveBeenCalledTimes(2)
+		expect(confirm3).toHaveBeenLastCalledWith(expect.objectContaining({ title: "remote_deleted_title" }))
+	})
+
+	it("asks about a deletion of a version kept over", async () => {
+		confirm3.mockResolvedValue("cancel")
+
+		mount({ hasEdits: true })
+
+		emit("driveFileRevised", { item: file("v2") })
+		await flush()
+		emit("driveFileGone", { uuid: "v2" })
+		await flush()
+
+		expect(confirm3).toHaveBeenCalledTimes(2)
+		expect(confirm3).toHaveBeenLastCalledWith(expect.objectContaining({ title: "remote_deleted_title" }))
+	})
+
+	it("a deletion while clean is asked about once edits begin, before a save could recreate the file", async () => {
+		confirm3.mockResolvedValue("cancel")
+
+		const { hook } = mount({ hasEdits: false })
+
+		emit("driveFileGone", { uuid: "v1" })
+		await flush()
+
+		expect(confirm3).not.toHaveBeenCalled()
+
+		hook.rerender({ edits: true })
+		await flush()
+
+		expect(confirm3).toHaveBeenCalledTimes(1)
+		expect(confirm3).toHaveBeenLastCalledWith(expect.objectContaining({ title: "remote_deleted_title" }))
+	})
+
+	it("after a socket gap, follows a newer version found in the file's directory, with one listing read", async () => {
+		readListing.mockResolvedValue([file("other-file", { name: "other.md", stableUuid: "other" }), file("v2")])
+
+		const { updated } = mount({ hasEdits: false })
+
+		socketReconnected()
+		await flush()
+
+		expect(readListing).toHaveBeenCalledTimes(1)
+		expect(readListing).toHaveBeenCalledWith("dir")
+		expect(getFileOptional).not.toHaveBeenCalled()
+		expect(updated).toHaveBeenCalledWith({ previousUuid: "v1", item: file("v2") })
+		expect(alertNormal).toHaveBeenCalledWith("remote_change_updated")
+	})
+
+	it("after a socket gap, asks over unsaved edits about a newer version", async () => {
+		readListing.mockResolvedValue([file("v2")])
+		confirm3.mockResolvedValue("cancel")
+
+		mount({ hasEdits: true })
+
+		socketReconnected()
+		await flush()
+
+		expect(confirm3).toHaveBeenCalledWith(expect.objectContaining({ title: "remote_change_title" }))
+	})
+
+	it("after a socket gap, follows a rename", async () => {
+		readListing.mockResolvedValue([file("v1", { name: "renamed.md" })])
+
+		const { updated } = mount({ hasEdits: true })
+
+		socketReconnected()
+		await flush()
+
+		expect(updated).toHaveBeenCalledWith({ previousUuid: "v1", item: file("v1", { name: "renamed.md" }) })
+		expect(confirm3).not.toHaveBeenCalled()
+	})
+
+	it("after a socket gap, asks over unsaved edits when the file was trashed", async () => {
+		readListing.mockResolvedValue([])
+		getFileOptional.mockResolvedValue((file("v1", { parent: "trash" }) as { data: unknown }).data)
+		confirm3.mockResolvedValue("cancel")
+
+		mount({ hasEdits: true })
+
+		socketReconnected()
+		await flush()
+
+		expect(getFileOptional).toHaveBeenCalledWith("v1")
+		expect(confirm3).toHaveBeenCalledWith(expect.objectContaining({ title: "remote_deleted_title" }))
+	})
+
+	it("after a socket gap, follows a move to another directory", async () => {
+		readListing.mockResolvedValue([])
+		getFileOptional.mockResolvedValue((file("v1", { parent: "elsewhere" }) as { data: unknown }).data)
+
+		const { updated } = mount({ hasEdits: true })
+
+		socketReconnected()
+		await flush()
+
+		expect(updated).toHaveBeenCalledWith({ previousUuid: "v1", item: file("v1", { parent: "elsewhere" }) })
+		expect(confirm3).not.toHaveBeenCalled()
+	})
+
+	it("after a socket gap, drops a listing read that a revision event overtook", async () => {
+		const listing = deferred<unknown[]>()
+
+		readListing.mockReturnValue(listing.promise)
+
+		const { updated } = mount({ hasEdits: false })
+
+		socketReconnected()
+		emit("driveFileRevised", { item: file("v3") })
+		listing.resolve([file("v2")])
+		await flush()
+
+		expect(updated).toHaveBeenCalledTimes(1)
+		expect(updated).toHaveBeenCalledWith({ previousUuid: "v1", item: file("v3") })
+	})
+
+	it("after a socket gap, reads nothing for a file off screen or mid-save", async () => {
+		const { savingRef } = mount({ hasEdits: true })
+
+		savingRef.current = true
+		socketReconnected()
+		savingRef.current = false
+		currentItem.current = galleryItem("elsewhere")
+		socketReconnected()
+		await flush()
+
+		expect(readListing).not.toHaveBeenCalled()
 	})
 })

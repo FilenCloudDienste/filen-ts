@@ -8,12 +8,14 @@ import { vi, describe, it, expect, beforeEach, afterEach } from "vitest"
 import { EventEmitter } from "eventemitter3"
 vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 
-const { emitter, state, confirm3, refetch, contentUpdate, hold, release, settled, syncDebounced } = vi.hoisted(() => ({
+const { emitter, state, confirm3, refetch, contentUpdate, hold, release, settled, syncDebounced, getContent, editor } = vi.hoisted(() => ({
 	emitter: { current: null as EventEmitter | null },
 	state: {
 		inflight: {} as Record<string, { timestamp: number; content: string; note: unknown; baseContentHash?: string }[]>,
 		cached: "old" as string | undefined
 	},
+	getContent: vi.fn<() => Promise<string | undefined>>(),
+	editor: { onValueChange: null as ((value: string) => Promise<void>) | null },
 	confirm3: vi.fn<() => Promise<"primary" | "destructive" | "cancel">>(),
 	refetch: vi.fn(() => Promise.resolve({})),
 	contentUpdate: vi.fn(),
@@ -38,11 +40,17 @@ vi.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ t
 vi.mock("uniwind", () => ({ useResolveClassNames: () => ({ color: "#000" }) }))
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string) => key }) }))
 vi.mock("zustand/shallow", () => ({ useShallow: (selector: unknown) => selector }))
-vi.mock("@/components/ui/view", () => ({ default: () => null }))
+vi.mock("@/components/ui/view", () => ({ default: ({ children }: { children?: unknown }) => children ?? null }))
 vi.mock("@/components/ui/listEmpty", () => ({ default: () => null }))
 vi.mock("@/components/ui/button", () => ({ default: () => null }))
 vi.mock("@/components/ui/animated", () => ({ AnimatedView: () => null }))
-vi.mock("@/components/textEditor", () => ({ default: () => null }))
+vi.mock("@/components/textEditor", () => ({
+	default: (props: { onValueChange: (value: string) => Promise<void> }) => {
+		editor.onValueChange = props.onValueChange
+
+		return null
+	}
+}))
 vi.mock("@/features/notes/components/content/checklist", () => ({ default: () => null }))
 vi.mock("@/features/notes/utils", () => ({ noteTypeToEditorType: () => "text", noteCodeTitleExtension: () => null }))
 vi.mock("@/features/notes/checklistView", () => ({ useChecklistHideCompleted: () => [false] }))
@@ -61,7 +69,8 @@ vi.mock("@/features/notes/components/sync", async () => ({
 	hashNoteContent: (content: string) => `h(${content})`,
 	buildInflightEntries: (await vi.importActual<typeof import("@filen/shared")>("@filen/shared")).buildInflightEntries
 }))
-vi.mock("@/lib/auth", () => ({ useStringifiedClient: () => null }))
+vi.mock("@/lib/auth", () => ({ useStringifiedClient: () => ({ userId: 1 }) }))
+vi.mock("@/features/notes/queries/useNotesQuery", () => ({ notesQueryGet: () => [] }))
 vi.mock("@/features/notes/store/useNotesInflight.store", () => {
 	const getState = () => ({
 		inflightContent: state.inflight,
@@ -90,7 +99,7 @@ vi.mock("@/lib/events", () => ({
 vi.mock("@/lib/alerts", async () => await import("@/tests/mocks/alerts"))
 vi.mock("@/lib/i18n", () => ({ default: { t: (key: string) => key }, t: (key: string) => key }))
 vi.mock("@/lib/prompts", () => ({ default: { confirm3 } }))
-vi.mock("@/features/notes/notes", () => ({ default: { create: vi.fn() } }))
+vi.mock("@/features/notes/notes", () => ({ default: { create: vi.fn(), getContent } }))
 vi.mock("@/components/ui/fullScreenLoadingModal", () => ({ runWithLoading: vi.fn() }))
 vi.mock("@/lib/decryption", () => ({ noteDisplayTitle: () => "" }))
 vi.mock("@/hooks/useIsOnline", () => ({ default: () => true }))
@@ -110,12 +119,30 @@ import { act, cleanup, render } from "@testing-library/react"
 import { createElement } from "react"
 import Content from "@/features/notes/components/content"
 import alerts from "@/lib/alerts"
+import useSocketStore from "@/stores/useSocket.store"
 import type { Note } from "@/types"
 
 const note = { uuid: "n1", noteType: "text", title: "t", ownerId: 1, participants: [] } as unknown as Note
 
 function edited(content: string | undefined): void {
 	emitter.current?.emit("noteContentEdited", { noteUuid: "n1", contentEdited: {}, content })
+}
+
+function deferred<T>() {
+	let resolve: (value: T) => void = () => undefined
+	const promise = new Promise<T>(r => {
+		resolve = r
+	})
+
+	return { promise, resolve }
+}
+
+// A background (or a dropped connection) and the socket coming back.
+function socketReconnected(): void {
+	act(() => {
+		useSocketStore.getState().setState("disconnected")
+		useSocketStore.getState().setState("connected")
+	})
 }
 
 async function flush(): Promise<void> {
@@ -130,6 +157,7 @@ beforeEach(() => {
 	state.cached = "old"
 	settled.current = Promise.resolve()
 	vi.clearAllMocks()
+	useSocketStore.setState({ state: "connected", connectedAt: 1 })
 	hold.mockImplementation(() => ({ settled: settled.current, release }))
 	render(createElement(Content, { note }))
 })
@@ -223,5 +251,112 @@ describe("a note edited elsewhere while open", () => {
 		await flush()
 
 		expect(state.inflight["n1"]).toEqual([{ timestamp: 1, content: "mine", note }])
+	})
+
+	it("edits already synced leave the editor clean: takes theirs with no prompt", async () => {
+		await act(async () => {
+			await editor.onValueChange?.("typed")
+		})
+
+		expect(state.inflight["n1"]).toHaveLength(1)
+
+		// The push landed: sync pruned the outbox and wrote the pushed content into the cache.
+		state.inflight = {}
+		state.cached = "typed"
+
+		edited("theirs")
+		await flush()
+
+		expect(confirm3).not.toHaveBeenCalled()
+		expect(contentUpdate).toHaveBeenCalledWith({ params: { uuid: "n1" }, updater: "theirs" })
+		expect(alerts.normal).toHaveBeenCalledWith("remote_change_updated")
+	})
+
+	it("a prompt queued behind Load theirs finds the editor clean: takes theirs, re-queuing nothing", async () => {
+		state.inflight = { n1: [{ timestamp: 1, content: "mine", note, baseContentHash: "h(old)" }] }
+
+		const first = deferred<"destructive">()
+
+		confirm3.mockReturnValueOnce(first.promise)
+
+		edited("theirs 1")
+		await flush()
+		edited("theirs 2")
+		await flush()
+
+		first.resolve("destructive")
+		await flush()
+		await flush()
+
+		expect(confirm3).toHaveBeenCalledTimes(1)
+		expect(state.inflight["n1"]).toBeUndefined()
+		expect(contentUpdate).toHaveBeenCalledWith({ params: { uuid: "n1" }, updater: "theirs 2" })
+	})
+
+	it("an edit superseded while it waited is never asked about: the newest one is", async () => {
+		state.inflight = { n1: [{ timestamp: 1, content: "mine", note, baseContentHash: "h(old)" }] }
+
+		const first = deferred<"cancel">()
+
+		confirm3.mockReturnValueOnce(first.promise).mockResolvedValueOnce("cancel")
+
+		edited("theirs 1")
+		await flush()
+		edited("theirs 2")
+		edited("theirs 3")
+		await flush()
+
+		first.resolve("cancel")
+		await flush()
+		await flush()
+
+		expect(confirm3).toHaveBeenCalledTimes(2)
+		expect(state.inflight["n1"]?.map(entry => entry.baseContentHash)).toEqual(["h(theirs 3)"])
+	})
+
+	it("after a socket gap, re-reads a clean note once and takes an edit made meanwhile", async () => {
+		getContent.mockResolvedValue("theirs")
+
+		socketReconnected()
+		await flush()
+
+		expect(getContent).toHaveBeenCalledTimes(1)
+		expect(hold).toHaveBeenCalledWith("n1")
+		expect(release).toHaveBeenCalledTimes(1)
+		expect(contentUpdate).toHaveBeenCalledWith({ params: { uuid: "n1" }, updater: "theirs" })
+		expect(alerts.normal).toHaveBeenCalledWith("remote_change_updated")
+	})
+
+	it("after a socket gap, an unchanged note is left alone", async () => {
+		getContent.mockResolvedValue("old")
+
+		socketReconnected()
+		await flush()
+
+		expect(getContent).toHaveBeenCalledTimes(1)
+		expect(contentUpdate).not.toHaveBeenCalled()
+		expect(alerts.normal).not.toHaveBeenCalled()
+	})
+
+	it("after a socket gap, asks when the note moved past the base of unsynced edits", async () => {
+		state.inflight = { n1: [{ timestamp: 1, content: "mine", note, baseContentHash: "h(old)" }] }
+		getContent.mockResolvedValue("theirs")
+		confirm3.mockResolvedValue("cancel")
+
+		socketReconnected()
+		await flush()
+
+		expect(confirm3).toHaveBeenCalledTimes(1)
+		expect(state.inflight["n1"]?.map(entry => entry.baseContentHash)).toEqual(["h(theirs)"])
+	})
+
+	it("after a socket gap, unsynced edits on an unchanged base are not asked about", async () => {
+		state.inflight = { n1: [{ timestamp: 1, content: "mine", note, baseContentHash: "h(old)" }] }
+		getContent.mockResolvedValue("old")
+
+		socketReconnected()
+		await flush()
+
+		expect(confirm3).not.toHaveBeenCalled()
 	})
 })

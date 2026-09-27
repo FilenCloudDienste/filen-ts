@@ -181,9 +181,10 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 				const [archived] = eventInner.inner.inner
 
 				// Without newUuid another file replaced this one and its lineage ended; with it, the clipboard
-				// follows the paired FileNew instead.
+				// and an open editor follow the paired FileNew instead.
 				if (!archived.newUuid) {
 					dropDriveItem(archived.uuid)
+					events.emit("driveFileGone", { uuid: archived.uuid })
 				}
 			}
 
@@ -234,7 +235,10 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 				const held = heldDriveItem(inner.uuid)
 
 				if (held?.type === "file") {
-					followDriveItem(inner.uuid, unwrappedFileIntoDriveItem(unwrapFileMeta({ ...held.data, meta: inner.metadata })))
+					events.emit("driveItemUpdated", {
+						previousUuid: inner.uuid,
+						item: unwrappedFileIntoDriveItem(unwrapFileMeta({ ...held.data, meta: inner.metadata }))
+					})
 				}
 			}
 
@@ -260,7 +264,9 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 					})
 				}
 
-				followDriveItem(inner.uuid, driveItem)
+				// The clipboard, a search and an open preview follow the new name; the preview's next save
+				// writes under it.
+				events.emit("driveItemUpdated", { previousUuid: inner.uuid, item: driveItem })
 			}
 
 			break
@@ -305,7 +311,8 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 				})
 			}
 
-			followDriveItem(inner.file.uuid, driveItem)
+			// As a rename: an open preview's next save lands in the new directory.
+			events.emit("driveItemUpdated", { previousUuid: inner.file.uuid, item: driveItem })
 
 			break
 		}

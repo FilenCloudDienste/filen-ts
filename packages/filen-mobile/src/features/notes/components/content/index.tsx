@@ -1,4 +1,4 @@
-import { NoteType, type NoteContentEdited } from "@filen/sdk-rs"
+import { NoteType } from "@filen/sdk-rs"
 import { type Note, type NoteHistory } from "@/types"
 import View from "@/components/ui/view"
 import useNoteContentQuery, { noteContentQueryGet, noteContentQueryUpdate } from "@/features/notes/queries/useNoteContent.query"
@@ -15,7 +15,7 @@ import useNotesOfflineStore from "@/features/notes/store/useNotesOffline.store"
 import useTextEditorStore from "@/stores/useTextEditor.store"
 import { useShallow } from "zustand/shallow"
 import { useEffect, useCallback, useRef } from "react"
-import { runEffect, run, conflictCopyStamp } from "@filen/shared"
+import { run, conflictCopyStamp } from "@filen/shared"
 import events from "@/lib/events"
 import alerts from "@/lib/alerts"
 import i18n from "@/lib/i18n"
@@ -26,6 +26,8 @@ import { sync, hashNoteContent, buildInflightEntries } from "@/features/notes/co
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import { useHeaderHeight } from "expo-router/react-navigation"
 import useIsOnline from "@/hooks/useIsOnline"
+import { onSocketReconnected } from "@/stores/useSocket.store"
+import { notesQueryGet } from "@/features/notes/queries/useNotesQuery"
 import logger from "@/lib/logger"
 import { noteDisplayTitle } from "@/lib/decryption"
 import { useTranslation } from "react-i18next"
@@ -147,24 +149,43 @@ const Loading = ({ children, loading, noteType }: { children: React.ReactNode; l
 	)
 }
 
-// A note's newest local content: its newest unsynced edit, else what its content query holds (the last push
-// or the seed).
-function latestLocalNoteContent(noteUuid: string): string | undefined {
-	const newest = (getInflightContentForNote(noteUuid) ?? []).reduce<InflightContent[string][number] | undefined>(
-		(latest, entry) => (latest === undefined || entry.timestamp > latest.timestamp ? entry : latest),
-		undefined
-	)
-	const cached: unknown = noteContentQueryGet({
-		uuid: noteUuid
-	})
-
-	return newest?.content ?? (typeof cached === "string" ? cached : undefined)
-}
-
 function getInflightContentForNote(noteUuid: string): InflightContent[string] | undefined {
 	const inflightContent = useNotesInflightStore.getState().inflightContent
 
 	return inflightContent[noteUuid]
+}
+
+function newestInflightEntry(noteUuid: string): InflightContent[string][number] | undefined {
+	return (getInflightContentForNote(noteUuid) ?? []).reduce<InflightContent[string][number] | undefined>(
+		(latest, entry) => (latest === undefined || entry.timestamp > latest.timestamp ? entry : latest),
+		undefined
+	)
+}
+
+// A note's newest local content: its newest unsynced edit, else what its content query holds (the last push
+// or the seed).
+function latestLocalNoteContent(noteUuid: string): string | undefined {
+	const cached: unknown = noteContentQueryGet({
+		uuid: noteUuid
+	})
+
+	return newestInflightEntry(noteUuid)?.content ?? (typeof cached === "string" ? cached : undefined)
+}
+
+// Whether `cloud` differs from what this device last knew the note to hold: its unsynced edits' base, else
+// the content cache (the last push or read).
+export function movedPastBase(noteUuid: string, cloud: string): boolean {
+	const newest = newestInflightEntry(noteUuid)
+
+	if (newest?.baseContentHash !== undefined) {
+		return hashNoteContent(cloud) !== newest.baseContentHash
+	}
+
+	const cached: unknown = noteContentQueryGet({
+		uuid: noteUuid
+	})
+
+	return typeof cached === "string" && cached !== cloud
 }
 
 const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }) => {
@@ -174,9 +195,6 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 	const headerHeight = useHeaderHeight()
 	const isOnline = useIsOnline()
 	const hasInflightContent = useNotesInflightStore(useShallow(state => (state.inflightContent[note.uuid] ?? []).length > 0))
-	// Whether the user has edited since this editor opened: a remote edit then asks rather than reloads,
-	// even once the edits are synced.
-	const editedThisMount = useRef(false)
 	const [hideCompleted] = useChecklistHideCompleted(note.uuid)
 
 	// Gate the query on three conditions to make editing race-free:
@@ -311,8 +329,6 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 			return
 		}
 
-		editedThisMount.current = true
-
 		const now = Date.now()
 
 		// D3: stamp a NEW session's base from the content cache at this exact instant (see
@@ -364,8 +380,6 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 
 			await sync.flushToDisk(useNotesInflightStore.getState().inflightContent)
 
-			editedThisMount.current = false
-
 			return await refetch()
 		})
 
@@ -376,34 +390,31 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 	}, [note.uuid, refetch])
 
 	// A newer version of this note, saved by someone else or on another device (the socket handler drops
-	// this device's own pushes). Not being edited: reload, and say so. Being edited — an unsynced edit, or
-	// any edit since the editor opened, as a reload would also drop the caret mid-typing — ask: Keep mine
-	// (also what dismissing does), Load theirs, or Save mine as copy, a new note beside this one.
-	const onContentEditedRemotely = useCallback(
-		async (info: { contentEdited: NoteContentEdited; noteUuid: string; content: string | undefined }) => {
-			if (note.uuid !== info.noteUuid || history) {
+	// this device's own pushes), or found by a re-read after the socket was down. Decided on the local state
+	// of the moment, as an earlier prompt's answer can have changed it. Clean (no unsynced edits): take it,
+	// and say so. Unsynced edits: ask Keep mine (also what dismissing does), Load theirs, or Save mine as
+	// copy, a new note beside this one.
+	const answerRemoteContent = useCallback(
+		async (content: string | undefined) => {
+			if (history) {
 				return
 			}
 
-			const mine = latestLocalNoteContent(note.uuid)
-
-			if (info.content !== undefined && info.content === mine) {
+			if (content !== undefined && content === latestLocalNoteContent(note.uuid)) {
 				return
 			}
 
-			const editing = (getInflightContentForNote(note.uuid) ?? []).length > 0 || editedThisMount.current
-
-			if (!editing) {
-				if (info.content === undefined) {
+			if ((getInflightContentForNote(note.uuid) ?? []).length === 0) {
+				if (content === undefined) {
 					await reloadFromServer()
 				} else {
-					// Seeded from the event in this same tick: no request, and no await for a keystroke to land in
+					// Seeded from the content in this same tick: no request, and no await for a keystroke to land in
 					// before the editor reseeds (a fresh dataUpdatedAt remounts it on this content).
 					noteContentQueryUpdate({
 						params: {
 							uuid: note.uuid
 						},
-						updater: info.content
+						updater: content
 					})
 				}
 
@@ -434,11 +445,14 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 					return
 				}
 
+				// A push sent before the prompt opened lands first: what it left, and its cache write, are what
+				// the answer builds on.
+				await held.settled
+
 				if (promptResponse.data === "cancel") {
 					// The edits become the newest version, pushed once released, against this version's content
-					// as the base so the push, which the user chose, raises no overwrite warning. Edits already
-					// pushed (this version went over them) are queued again.
-					const theirsHash = info.content === undefined ? undefined : hashNoteContent(info.content)
+					// as the base so the push, which the user chose, raises no overwrite warning.
+					const theirsHash = content === undefined ? undefined : hashNoteContent(content)
 
 					if ((getInflightContentForNote(note.uuid) ?? []).length > 0) {
 						useNotesInflightStore.getState().setInflightContent(prev => {
@@ -455,7 +469,14 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 								)
 							}
 						})
-					} else if (mine !== undefined) {
+					} else {
+						// That push drained the edits meanwhile, possibly under their version: queue them again.
+						const mine = latestLocalNoteContent(note.uuid)
+
+						if (mine === undefined || mine === content) {
+							return
+						}
+
 						useNotesInflightStore.getState().setInflightContent(prev => ({
 							...prev,
 							[note.uuid]: buildInflightEntries({
@@ -466,14 +487,14 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 								sessionBaseHash: theirsHash ?? null
 							})
 						}))
-					} else {
-						return
 					}
 
 					await flushInflightContentWithAlert()
 
 					return
 				}
+
+				const mine = latestLocalNoteContent(note.uuid)
 
 				if (promptResponse.data === "primary" && mine !== undefined) {
 					const title = t("note_conflict_copy_title", {
@@ -492,9 +513,6 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 					alerts.normal(t("note_saved_as_copy", { title }))
 				}
 
-				// A push sent before the prompt opened lands first, so the reload reads what it left and its cache
-				// write cannot follow the reload's.
-				await held.settled
 				await reloadFromServer()
 			} finally {
 				held.release()
@@ -503,19 +521,99 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 		[note, history, reloadFromServer, t]
 	)
 
-	useEffect(() => {
-		const { cleanup } = runEffect(defer => {
-			const noteContentEditedSubscription = events.subscribe("noteContentEdited", onContentEditedRemotely)
+	const answerRemoteContentRef = useRef(answerRemoteContent)
 
-			defer(() => {
-				noteContentEditedSubscription.remove()
+	useEffect(() => {
+		answerRemoteContentRef.current = answerRemoteContent
+	})
+
+	// Remote changes are answered one at a time, in arrival order. `latest` numbers the newest socket event:
+	// an older one still waiting behind a prompt is dropped, the newer one answers for both.
+	const remoteQueue = useRef({ tail: Promise.resolve(), latest: 0, closed: false })
+
+	useEffect(() => {
+		const queue = remoteQueue.current
+
+		queue.closed = false
+
+		return () => {
+			queue.closed = true
+		}
+	}, [])
+
+	useEffect(() => {
+		if (history) {
+			return
+		}
+
+		const uuid = note.uuid
+		const queue = remoteQueue.current
+
+		const enqueue = (task: () => Promise<void>) => {
+			queue.tail = queue.tail
+				.then(async () => {
+					if (!queue.closed) {
+						await task()
+					}
+				})
+				.catch((e: unknown) => {
+					logger.error("notes", "answering a remote edit failed", { error: e, noteUuid: uuid })
+				})
+		}
+
+		const noteContentEditedSubscription = events.subscribe("noteContentEdited", info => {
+			if (info.noteUuid !== uuid) {
+				return
+			}
+
+			const sequence = ++queue.latest
+
+			enqueue(async () => {
+				if (sequence === queue.latest) {
+					await answerRemoteContentRef.current(info.content)
+				}
+			})
+		})
+
+		// While the socket was down (a background tears it down, on iOS and Android alike) an edit made
+		// elsewhere reached no event: read the content once and answer it like one when it moved past the base.
+		const unsubscribeReconnected = onSocketReconnected(() => {
+			const sequence = queue.latest
+
+			enqueue(async () => {
+				// No pass pushes under the read, so a difference is someone else's edit, never this device's push.
+				const held = sync.hold(uuid)
+
+				try {
+					await held.settled
+
+					const read = await run(async () =>
+						notes.getContent({ note: notesQueryGet()?.find(listed => listed.uuid === uuid) ?? note })
+					)
+
+					if (!read.success) {
+						logger.warn("notes", "re-reading an open note after a socket gap failed", { error: read.error, noteUuid: uuid })
+
+						return
+					}
+
+					// An event arrived since, and answers after this.
+					if (read.data === undefined || sequence !== queue.latest || !movedPastBase(uuid, read.data)) {
+						return
+					}
+
+					await answerRemoteContentRef.current(read.data)
+				} finally {
+					held.release()
+				}
 			})
 		})
 
 		return () => {
-			cleanup()
+			noteContentEditedSubscription.remove()
+			unsubscribeReconnected()
 		}
-	}, [note.uuid, onContentEditedRemotely])
+	}, [note, history])
 
 	// Announce that a content view for this note is mounted, so the offline sync pass knows not to
 	// replace the body under it. The route pathname cannot answer this: pushing /noteHistory or

@@ -835,6 +835,33 @@ export function driveItemsQueryIsReadForNormalParent(parentUuid: string): boolea
 	)
 }
 
+// One read of a normal directory's listing: through its query when one was read (so its screen gets the
+// fresh rows, and a read already under way is joined), else directly, leaving no listing behind.
+export async function driveItemsQueryReadForNormalParent(parentUuid: string): Promise<DriveItem[]> {
+	const own: UseDriveItemsQueryParams = { path: { type: "drive", uuid: parentUuid } }
+	const keyed: UseDriveItemsQueryParams[] = [own]
+
+	if (cache.rootUuid && parentUuid === cache.rootUuid) {
+		keyed.push({ path: { type: "drive", uuid: null } })
+	}
+
+	const read = keyed.find(params => driveItemsQueryIsRead(params))
+
+	if (read === undefined) {
+		return await fetchData(own)
+	}
+
+	return await queryClient.fetchQuery({
+		queryKey: driveItemsQueryKey(read),
+		queryFn: ({ signal: querySignal }) =>
+			fetchData({
+				...read,
+				signal: querySignal
+			}),
+		staleTime: 0
+	})
+}
+
 // Upsert many items into one normal parent's listing in a single write. The caller caches the items
 // itself; the listing's existing rows are not re-cached.
 export function driveItemsQueryUpsertManyForNormalParent({ parentUuid, items }: { parentUuid: string; items: readonly DriveItem[] }): void {

@@ -4,6 +4,9 @@ import { conflictCopyName, decideRevision, isRevisionOf, run, settleHeldRevision
 import type { AnyDirWithContext } from "@filen/sdk-rs"
 import { galleryItemKey, type GalleryItemTagged } from "@/components/drivePreview/gallery"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
+import { onSocketReconnected } from "@/stores/useSocket.store"
+import { driveItemsQueryReadForNormalParent } from "@/features/drive/queries/useDriveItems.query"
+import { isTrashParent, unwrapFileMeta, unwrapParentUuid, unwrappedFileIntoDriveItem } from "@/lib/sdkUnwrap"
 import events from "@/lib/events"
 import alerts from "@/lib/alerts"
 import prompts from "@/lib/prompts"
@@ -50,8 +53,17 @@ export default function useRemoteRevisions({ item, itemToUse, parent, hasEdits, 
 	const asking = useRef(false)
 	// The newest revision and deletion that arrived meanwhile, acted on after.
 	const pending = useRef<{ revision: Revision | null; gone: string | null }>({ revision: null, gone: null })
+	// The revision the open prompt asks about.
+	const askedAbout = useRef<string | undefined>(undefined)
+	// A deletion of the file while it had no edits: asked about once it gets some, as saving them would make
+	// the file anew (or, after a replacement, a version of the file now holding its name).
+	const goneWhileClean = useRef<string | null>(null)
+	// Counts what changed the file's known versions (revisions and deletions of it, saves), so a re-read
+	// that raced one is dropped rather than taken for news.
+	const changes = useRef(0)
 	// Set by the subscription below, which holds everything the settlement needs.
 	const settleRef = useRef<(savedItem: DriveItemFileExtracted | null) => void>(() => undefined)
+	const askIfGoneRef = useRef<() => void>(() => undefined)
 
 	useEffect(() => {
 		latest.current = { item, itemToUse, parent, hasEdits, saveAsNewFile, t }
@@ -67,6 +79,9 @@ export default function useRemoteRevisions({ item, itemToUse, parent, hasEdits, 
 		}
 
 		function show(from: DriveItemFileExtracted, to: DriveItem, announce: boolean): void {
+			keptOver.current = undefined
+			goneWhileClean.current = null
+
 			events.emit("driveItemUpdated", { previousUuid: from.data.uuid, item: to })
 
 			// What the editor follows now, until it re-renders on it.
@@ -151,6 +166,7 @@ export default function useRemoteRevisions({ item, itemToUse, parent, hasEdits, 
 			const key = galleryItemKey(latest.current.item)
 
 			asking.current = true
+			askedAbout.current = theirs.item.data.uuid
 
 			try {
 				const answer = await run(async () =>
@@ -204,8 +220,20 @@ export default function useRemoteRevisions({ item, itemToUse, parent, hasEdits, 
 				show(displayed, newest.item, false)
 			} finally {
 				asking.current = false
+				askedAbout.current = undefined
 				resumePending()
 			}
+		}
+
+		// Whether `uuid` names the file on screen as the server has it: the version shown, a newer one kept
+		// over or asked about, or one waiting for that answer.
+		function isOfShownFile(displayed: DriveItemFileExtracted, uuid: string): boolean {
+			return (
+				uuid === displayed.data.uuid ||
+				uuid === keptOver.current ||
+				uuid === askedAbout.current ||
+				uuid === pending.current.revision?.item.data.uuid
+			)
 		}
 
 		// `saving` overrides the editor's own flag while its settlement runs, still inside that save.
@@ -218,6 +246,8 @@ export default function useRemoteRevisions({ item, itemToUse, parent, hasEdits, 
 			) {
 				return
 			}
+
+			changes.current++
 
 			if (asking.current) {
 				pending.current.revision = revision
@@ -255,9 +285,19 @@ export default function useRemoteRevisions({ item, itemToUse, parent, hasEdits, 
 		async function handleGone(uuid: string, saving = savingRef.current): Promise<void> {
 			const { itemToUse: displayed, hasEdits: dirty, t } = latest.current
 
-			if (displayed?.data.uuid !== uuid || !dirty || !isCurrent()) {
+			if (displayed === null || !isOfShownFile(displayed, uuid) || !isCurrent()) {
 				return
 			}
+
+			changes.current++
+
+			if (!dirty) {
+				goneWhileClean.current = uuid
+
+				return
+			}
+
+			goneWhileClean.current = null
 
 			if (asking.current) {
 				pending.current.gone = uuid
@@ -276,6 +316,7 @@ export default function useRemoteRevisions({ item, itemToUse, parent, hasEdits, 
 			const key = galleryItemKey(latest.current.item)
 
 			asking.current = true
+			askedAbout.current = uuid
 
 			try {
 				const answer = await run(async () =>
@@ -323,7 +364,81 @@ export default function useRemoteRevisions({ item, itemToUse, parent, hasEdits, 
 				}
 			} finally {
 				asking.current = false
+				askedAbout.current = undefined
 				resumePending()
+			}
+		}
+
+		// After a socket gap (a background on iOS or Android, a reconnect), the file on screen is looked up once
+		// in its directory's listing, and anything newer or gone is answered as if its event had arrived.
+		async function recheck(): Promise<void> {
+			const { itemToUse: displayed } = latest.current
+			const stableUuid = displayed?.type === "file" ? displayed.data.stableUuid : undefined
+			const parentUuid = displayed?.type === "file" ? unwrapParentUuid(displayed.data.parent) : null
+
+			if (displayed === null || stableUuid === undefined || parentUuid === null || !isCurrent() || savingRef.current) {
+				return
+			}
+
+			const key = galleryItemKey(latest.current.item)
+			const seen = changes.current
+			const fresh = () => answerable(key) && !savingRef.current && changes.current === seen
+
+			const listing = await run(async () => await driveItemsQueryReadForNormalParent(parentUuid))
+
+			if (!listing.success) {
+				logger.warn("drivePreview", "re-checking the open file after a socket gap failed", { error: listing.error })
+
+				return
+			}
+
+			if (!fresh()) {
+				return
+			}
+
+			const found = listing.data.find(entry => entry.type === "file" && entry.data.stableUuid === stableUuid)
+
+			if (found !== undefined) {
+				if (found.data.uuid !== displayed.data.uuid) {
+					handleRevision({ item: found })
+				} else if (found.data.decryptedMeta?.name !== displayed.data.decryptedMeta?.name) {
+					events.emit("driveItemUpdated", { previousUuid: found.data.uuid, item: found })
+				}
+
+				return
+			}
+
+			// Gone from its directory: trashed, deleted, or moved. The server's current version is the one kept over.
+			const serverUuid = keptOver.current ?? displayed.data.uuid
+			const lookup = await run(async () => {
+				const { authedSdkClient } = await auth.getSdkClients()
+
+				return await authedSdkClient.getFileOptional(serverUuid)
+			})
+
+			if (!lookup.success) {
+				logger.warn("drivePreview", "re-checking the open file after a socket gap failed", { error: lookup.error })
+
+				return
+			}
+
+			if (!fresh()) {
+				return
+			}
+
+			if (lookup.data === undefined || isTrashParent(lookup.data.parent)) {
+				void handleGone(serverUuid)
+
+				return
+			}
+
+			const movedTo = unwrapParentUuid(lookup.data.parent)
+
+			// Same uuid, so the editor stays mounted, and its save now lands in the new directory.
+			if (lookup.data.uuid === displayed.data.uuid && movedTo !== null && movedTo !== parentUuid) {
+				const moved = unwrappedFileIntoDriveItem(unwrapFileMeta(lookup.data))
+
+				events.emit("driveItemUpdated", { previousUuid: displayed.data.uuid, item: moved })
 			}
 		}
 
@@ -333,6 +448,20 @@ export default function useRemoteRevisions({ item, itemToUse, parent, hasEdits, 
 		const gone = events.subscribe("driveFileGone", ({ uuid }) => {
 			void handleGone(uuid)
 		})
+		const unsubscribeReconnected = onSocketReconnected(() => {
+			void recheck()
+		})
+
+		// Edits begun on a file deleted elsewhere meanwhile: asked about now, before a save recreates it.
+		askIfGoneRef.current = () => {
+			const uuid = goneWhileClean.current
+
+			if (uuid !== null && latest.current.hasEdits) {
+				goneWhileClean.current = null
+
+				void handleGone(uuid)
+			}
+		}
 
 		settleRef.current = (savedItem: DriveItemFileExtracted | null) => {
 			const settled = settleHeldRevisions(held.current, savedItem?.data.uuid ?? null, revision => revision.item.data.uuid)
@@ -340,6 +469,7 @@ export default function useRemoteRevisions({ item, itemToUse, parent, hasEdits, 
 
 			held.current = []
 			heldGone.current = null
+			changes.current++
 
 			if (settled.replaced) {
 				alerts.normal(latest.current.t("remote_change_save_replaced"))
@@ -348,6 +478,8 @@ export default function useRemoteRevisions({ item, itemToUse, parent, hasEdits, 
 			// Judged against the saved version: this editor, and the gallery's current item, follow it (applySaved).
 			if (savedItem !== null) {
 				latest.current = { ...latest.current, item: { type: "drive", data: savedItem }, itemToUse: savedItem, hasEdits: false }
+				keptOver.current = undefined
+				goneWhileClean.current = null
 			}
 
 			for (const revision of settled.newer) {
@@ -363,8 +495,15 @@ export default function useRemoteRevisions({ item, itemToUse, parent, hasEdits, 
 			unmounted = true
 			revised.remove()
 			gone.remove()
+			unsubscribeReconnected()
 		}
 	}, [savingRef])
+
+	useEffect(() => {
+		if (hasEdits) {
+			askIfGoneRef.current()
+		}
+	}, [hasEdits])
 
 	return {
 		// Call after each save of the editor's own settles, with what it made (null when it failed), so

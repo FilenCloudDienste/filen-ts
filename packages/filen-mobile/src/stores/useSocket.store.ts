@@ -26,3 +26,13 @@ export const useSocketStore = create<SocketStore>(set => ({
 }))
 
 export default useSocketStore
+
+// Calls `listener` each time the socket connects again after this call: whatever it sent while down, a
+// background included (which tears the listener down), was missed. Returns the unsubscribe.
+export function onSocketReconnected(listener: () => void): () => void {
+	return useSocketStore.subscribe((state, prev) => {
+		if (state.connectedAt !== prev.connectedAt) {
+			listener()
+		}
+	})
+}

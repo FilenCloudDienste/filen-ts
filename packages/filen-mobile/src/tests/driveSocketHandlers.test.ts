@@ -159,6 +159,23 @@ vi.mock("@filen/sdk-rs", () => ({
 import { handleDriveEvent, type DriveSocketEvent } from "@/features/drive/socketHandlers"
 import { DriveEvent_Tags, AnyNormalDir_Tags, NonRootItem_Tags, SocketEvent_Tags } from "@filen/sdk-rs"
 import logger from "@/lib/logger"
+import events from "@/lib/events"
+
+// Collects one app event's payloads for the length of `run`.
+async function collect(name: "driveItemUpdated" | "driveFileGone", run: () => Promise<void>): Promise<unknown[]> {
+	const payloads: unknown[] = []
+	const subscription = events.subscribe(name, payload => {
+		payloads.push(payload)
+	})
+
+	try {
+		await run()
+	} finally {
+		subscription.remove()
+	}
+
+	return payloads
+}
 
 // ---------------------------------------------------------------------------
 // Helpers — build minimal socket-event shapes matching the handler's destructure:
@@ -568,6 +585,26 @@ describe("handleDriveEvent — drive socket handler", () => {
 			expect(mockDriveItemsQueryUpdateGlobal).not.toHaveBeenCalled()
 			expect(mockCacheForgetItem).not.toHaveBeenCalled()
 		})
+
+		it("tells an open editor its file is gone when another file replaced it", async () => {
+			mockCacheFileUuidToNormalFileGet.mockReturnValue(undefined)
+
+			const gone = await collect("driveFileGone", async () => {
+				await handleDriveEvent({ event: makeEvent(DriveEvent_Tags.FileArchived, { uuid: "replaced" }) })
+			})
+
+			expect(gone).toEqual([{ uuid: "replaced" }])
+		})
+
+		it("says nothing of a version archived by an edit: the paired FileNew revises the editor", async () => {
+			mockCacheFileUuidToNormalFileGet.mockReturnValue(undefined)
+
+			const gone = await collect("driveFileGone", async () => {
+				await handleDriveEvent({ event: makeEvent(DriveEvent_Tags.FileArchived, { uuid: "old-version", newUuid: "new-version" }) })
+			})
+
+			expect(gone).toEqual([])
+		})
 	})
 
 	describe("DriveEvent_Tags.FileMetadataChanged", () => {
@@ -603,9 +640,26 @@ describe("handleDriveEvent — drive socket handler", () => {
 		it("no-op when file is not in cache", async () => {
 			mockCacheFileUuidToNormalFileGet.mockReturnValue(undefined)
 
-			await handleDriveEvent({ event: makeFileMetadataChangedEvent("file-not-cached", {}) })
+			const updated = await collect("driveItemUpdated", async () => {
+				await handleDriveEvent({ event: makeFileMetadataChangedEvent("file-not-cached", {}) })
+			})
 
 			expect(mockDriveItemsQueryUpdateGlobal).not.toHaveBeenCalled()
+			expect(updated).toEqual([])
+		})
+
+		it("announces the renamed file, which an open preview follows", async () => {
+			const updatedDriveItem = { type: "file", data: { uuid: "file-meta", decryptedMeta: { name: "renamed.txt" } } }
+
+			mockCacheFileUuidToNormalFileGet.mockReturnValue({ uuid: "file-meta", parent: {}, meta: {} })
+			mockUnwrapFileMeta.mockReturnValue({ file: { uuid: "file-meta" }, meta: { name: "renamed.txt" } })
+			mockUnwrappedFileIntoDriveItem.mockReturnValue(updatedDriveItem)
+
+			const updated = await collect("driveItemUpdated", async () => {
+				await handleDriveEvent({ event: makeFileMetadataChangedEvent("file-meta", { name: "renamed.txt" }) })
+			})
+
+			expect(updated).toEqual([{ previousUuid: "file-meta", item: updatedDriveItem }])
 		})
 	})
 
@@ -668,6 +722,19 @@ describe("handleDriveEvent — drive socket handler", () => {
 			expect(mockDriveItemsQueryUpdateForNormalParent).toHaveBeenCalledWith(expect.objectContaining({ parentUuid: "new-parent" }))
 			// Write-through to the caches is unconditional on the payload.
 			expect(mockCacheNewFile).toHaveBeenCalledOnce()
+		})
+
+		it("announces the moved file, which an open preview follows", async () => {
+			mockCacheFileUuidToNormalFileGet.mockReturnValue(rawFileOld)
+			mockUnwrapParentUuid.mockReturnValueOnce("old-parent").mockReturnValueOnce("new-parent")
+			mockUnwrapFileMeta.mockReturnValue({ file: { uuid: "file-move" }, meta: { name: "moved.txt" } })
+			mockUnwrappedFileIntoDriveItem.mockReturnValue(movedDriveItem)
+
+			const updated = await collect("driveItemUpdated", async () => {
+				await handleDriveEvent({ event: makeFileMoveEvent(rawFileNew) })
+			})
+
+			expect(updated).toEqual([{ previousUuid: "file-move", item: movedDriveItem }])
 		})
 
 		it("downgrades the cold-cache miss to logger.debug (not warn)", async () => {

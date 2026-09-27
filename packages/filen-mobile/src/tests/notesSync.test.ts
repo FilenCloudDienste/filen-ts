@@ -1551,6 +1551,97 @@ describe("Sync (Notes)", () => {
 			held.release()
 		})
 
+		it("settled waits for a pass still in its conflict peek, which then pushes nothing", async () => {
+			const sync = await createSync()
+			let peeked: (value: string) => void = () => undefined
+
+			mockNotesGetContent.mockImplementationOnce(() => new Promise<string>(resolve => (peeked = resolve)))
+
+			notesState.inflightContent = {
+				"note-1": [{ timestamp: 1000, content: "mine", note: mockNote("note-1"), baseContentHash: hashNoteContent("base") }]
+			}
+
+			sync.executeNow()
+
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			const held = sync.hold("note-1")
+			let settled = false
+
+			void held.settled.then(() => {
+				settled = true
+			})
+
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			expect(settled).toBe(false)
+
+			peeked("theirs")
+
+			await held.settled
+
+			expect(mockNotesSetContent).not.toHaveBeenCalled()
+
+			held.release()
+		})
+
+		it("Keep mine over a pass caught in its peek: the next pass pushes on the new base, with no overwrite warning", async () => {
+			const sync = await createSync()
+			let peeked: (value: string) => void = () => undefined
+
+			mockNotesGetContent.mockImplementationOnce(() => new Promise<string>(resolve => (peeked = resolve)))
+
+			notesState.inflightContent = {
+				"note-1": [{ timestamp: 1000, content: "mine", note: mockNote("note-1"), baseContentHash: hashNoteContent("base") }]
+			}
+
+			sync.executeNow()
+
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			const held = sync.hold("note-1")
+
+			peeked("theirs")
+
+			await held.settled
+
+			// Keep mine: the edits rebase onto their version.
+			notesState.inflightContent = {
+				"note-1": [{ timestamp: 1000, content: "mine", note: mockNote("note-1"), baseContentHash: hashNoteContent("theirs") }]
+			}
+			mockNotesGetContent.mockResolvedValue("theirs")
+			held.release()
+			sync.executeNow()
+
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			expect(mockNotesSetContent).toHaveBeenCalledTimes(1)
+			expect(mockNotesSetContent).toHaveBeenCalledWith(expect.objectContaining({ content: "mine" }))
+			expect(alerts.normal).not.toHaveBeenCalled()
+		})
+
+		it("an entry its outbox no longer holds after the peek (discarded, rebased or retyped) is not pushed", async () => {
+			const sync = await createSync()
+			let peeked: (value: string) => void = () => undefined
+
+			mockNotesGetContent.mockImplementationOnce(() => new Promise<string>(resolve => (peeked = resolve)))
+
+			notesState.inflightContent = {
+				"note-1": [{ timestamp: 1000, content: "mine", note: mockNote("note-1"), baseContentHash: hashNoteContent("base") }]
+			}
+
+			sync.executeNow()
+
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			notesState.inflightContent = {}
+			peeked("theirs")
+
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			expect(mockNotesSetContent).not.toHaveBeenCalled()
+		})
+
 		it("settled resolves at once when nothing is being pushed, and after a failed push too", async () => {
 			const sync = await createSync()
 			const idle = sync.hold("note-1")

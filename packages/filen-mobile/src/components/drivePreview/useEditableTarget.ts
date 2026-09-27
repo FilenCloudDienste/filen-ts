@@ -34,11 +34,13 @@ export default function useEditableTarget(item: GalleryItemTagged): EditableTarg
 	// Parent directory resolved by the background warm below for a cross-directory search hit whose
 	// parent isn't cached. Preferred over reading the cache directly so `readOnly` recomputes the
 	// moment the warm lands — the React Compiler memoizes `parent`, and getRealDriveItemParent reads a
-	// non-reactive Map.
-	const [warmedParent, setWarmedParent] = useRecyclingState<AnyDirWithContext | null>(null, [galleryItemKey(item)])
+	// non-reactive Map. Kept with the uuid it is for: a move elsewhere changes the file's parent under
+	// the same key.
+	const [warmedParent, setWarmedParent] = useRecyclingState<{ uuid: string; dir: AnyDirWithContext } | null>(null, [galleryItemKey(item)])
+	const parentUuid = item.type === "drive" && item.data.type === "file" ? unwrapParentUuid(item.data.data.parent) : null
 
 	const parent =
-		warmedParent ??
+		(warmedParent !== null && warmedParent.uuid === parentUuid ? warmedParent.dir : null) ??
 		(item.type === "drive" && drivePath
 			? getRealDriveItemParent({
 					item: item.data,
@@ -53,6 +55,12 @@ export default function useEditableTarget(item: GalleryItemTagged): EditableTarg
 		// and only `file` carries a parent uuid.
 		if (item.type !== "drive" || item.data.type !== "file") {
 			return
+		}
+
+		// The drive socket patches a rename or move of a cached file only: a search hit is cached here, so
+		// this preview follows one made elsewhere (driveItemUpdated).
+		if (!cache.fileUuidToNormalFile.get(item.data.data.uuid)) {
+			cache.cacheDriveItem(item.data)
 		}
 
 		const parentUuid = unwrapParentUuid(item.data.data.parent)
@@ -82,7 +90,7 @@ export default function useEditableTarget(item: GalleryItemTagged): EditableTarg
 				const normalDir = cache.directoryUuidToAnyNormalDir.get(parentUuid)
 
 				if (normalDir && !controller.signal.aborted) {
-					setWarmedParent(new AnyDirWithContext.Normal(normalDir))
+					setWarmedParent({ uuid: parentUuid, dir: new AnyDirWithContext.Normal(normalDir) })
 				}
 			} catch (e) {
 				logger.warn("drivePreview", "Failed to warm parent directory for preview", {
@@ -96,9 +104,12 @@ export default function useEditableTarget(item: GalleryItemTagged): EditableTarg
 		}
 	}, [item, setWarmedParent])
 
+	// The saved version until the gallery shows it; from then on the gallery's item, which follows a rename
+	// or move made elsewhere.
 	const itemToUse =
 		item.type === "drive"
 			? itemEdited &&
+				itemEdited.data.uuid !== item.data.data.uuid &&
 				itemEdited.data.decryptedMeta?.name.toLowerCase().trim() === item.data.data.decryptedMeta?.name.toLowerCase().trim()
 				? itemEdited
 				: item.data

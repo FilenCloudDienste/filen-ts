@@ -1,0 +1,128 @@
+// @vitest-environment happy-dom
+import { beforeEach, describe, expect, it, vi } from "vitest"
+import { act, renderHook, waitFor } from "@testing-library/react"
+
+// Raw files carry their parent as a plain uuid here; directories are cached as { uuid } stand-ins.
+const { cacheState, getDirOptional } = vi.hoisted(() => ({
+	cacheState: {
+		files: new Map<string, unknown>(),
+		dirs: new Map<string, { uuid: string }>()
+	},
+	getDirOptional: vi.fn<(uuid: string) => Promise<unknown>>()
+}))
+
+vi.mock("@shopify/flash-list", async () => {
+	const { useState } = await import("react")
+
+	return { useRecyclingState: (initial: unknown) => useState(initial) }
+})
+vi.mock("zustand/shallow", () => ({ useShallow: (selector: unknown) => selector }))
+vi.mock("@/stores/useDrivePreview.store", () => {
+	const state = { drivePath: { type: "drive", uuid: null }, setCurrentItem: vi.fn() }
+
+	return { default: Object.assign((selector: (s: typeof state) => unknown) => selector(state), { getState: () => state }) }
+})
+vi.mock("@/components/drivePreview/gallery", () => ({
+	galleryItemKey: (item: { data: { data: { uuid: string } } }) => item.data.data.uuid
+}))
+vi.mock("@filen/sdk-rs", () => ({
+	AnyDirWithContext: {
+		Normal: class {
+			public readonly tag = "Normal"
+			public readonly inner: unknown[]
+
+			public constructor(dir: unknown) {
+				this.inner = [dir]
+			}
+		}
+	}
+}))
+vi.mock("@/lib/sdkUnwrap", () => ({
+	unwrapParentUuid: (parent: string) => parent,
+	unwrapDirMeta: (dir: unknown) => dir,
+	unwrappedDirIntoDriveItem: (dir: unknown) => ({ type: "directory", data: dir }),
+	getRealDriveItemParent: ({ item }: { item: { data: { parent: string } } }) => {
+		const dir = cacheState.dirs.get(item.data.parent)
+
+		return dir ? { tag: "Normal", inner: [dir] } : null
+	}
+}))
+vi.mock("@/lib/cache", () => ({
+	default: {
+		rootUuid: "root",
+		fileUuidToNormalFile: cacheState.files,
+		directoryUuidToAnyNormalDir: cacheState.dirs,
+		cacheDriveItem: (item: { data: { uuid: string } }) => cacheState.files.set(item.data.uuid, item.data),
+		cacheNewNormalDir: (dir: { uuid: string }) => cacheState.dirs.set(dir.uuid, dir),
+		forgetItem: vi.fn()
+	}
+}))
+vi.mock("@/lib/auth", () => ({ default: { getSdkClients: () => Promise.resolve({ authedSdkClient: { getDirOptional } }) } }))
+vi.mock("@/lib/events", () => ({ default: { emit: vi.fn() } }))
+vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
+
+import useEditableTarget from "@/components/drivePreview/useEditableTarget"
+
+function galleryItem(uuid: string, parent: string, name = "notes.md"): never {
+	return { type: "drive", data: { type: "file", data: { uuid, parent, decryptedMeta: { name } } } } as never
+}
+
+beforeEach(() => {
+	cacheState.files.clear()
+	cacheState.dirs.clear()
+	vi.clearAllMocks()
+})
+
+describe("useEditableTarget", () => {
+	it("caches an open file it finds uncached, so the socket's rename and move reach it", () => {
+		cacheState.dirs.set("dir", { uuid: "dir" })
+
+		renderHook(() => useEditableTarget(galleryItem("v1", "dir")))
+
+		expect(cacheState.files.has("v1")).toBe(true)
+	})
+
+	it("follows a move elsewhere: a parent warmed for the old directory no longer applies", async () => {
+		getDirOptional.mockImplementation(uuid => Promise.resolve({ uuid }))
+
+		const hook = renderHook(({ item }: { item: never }) => useEditableTarget(item), {
+			initialProps: { item: galleryItem("v1", "search-dir") }
+		})
+
+		await waitFor(() => {
+			expect(hook.result.current.parent).toEqual({ tag: "Normal", inner: [{ uuid: "search-dir" }] })
+		})
+
+		cacheState.dirs.set("moved-to", { uuid: "moved-to" })
+
+		act(() => {
+			hook.rerender({ item: galleryItem("v1", "moved-to") })
+		})
+
+		expect(hook.result.current.parent).toEqual({ tag: "Normal", inner: [{ uuid: "moved-to" }] })
+		expect(hook.result.current.readOnly).toBe(false)
+	})
+
+	it("writes back to the gallery's item once it shows the saved version, renamed or moved since", () => {
+		cacheState.dirs.set("dir", { uuid: "dir" })
+		cacheState.dirs.set("moved-to", { uuid: "moved-to" })
+
+		const hook = renderHook(({ item }: { item: never }) => useEditableTarget(item), {
+			initialProps: { item: galleryItem("v1", "dir") }
+		})
+		const saved = (galleryItem("v2", "dir") as { data: unknown }).data as never
+
+		act(() => {
+			hook.result.current.applySaved(saved)
+		})
+
+		// Until the gallery swaps its item, the saved version.
+		expect(hook.result.current.itemToUse?.data.uuid).toBe("v2")
+
+		act(() => {
+			hook.rerender({ item: galleryItem("v2", "moved-to") })
+		})
+
+		expect((hook.result.current.itemToUse?.data as { parent?: string } | undefined)?.parent).toBe("moved-to")
+	})
+})

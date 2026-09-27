@@ -88,6 +88,7 @@ vi.mock("@/features/notes/components/sync", async () => ({
 	buildInflightEntries: (await vi.importActual<typeof import("@filen/shared")>("@filen/shared")).buildInflightEntries
 }))
 vi.mock("@/lib/auth", () => ({ useStringifiedClient: () => null }))
+vi.mock("@/features/notes/queries/useNotesQuery", () => ({ notesQueryGet: () => [] }))
 vi.mock("@/features/notes/store/useNotesInflight.store", () => ({ default: { getState: () => ({ inflightContent: {} }) } }))
 vi.mock("@/stores/useTextEditor.store", () => ({ default: () => false }))
 vi.mock("@/lib/events", () => ({ default: { subscribe: () => ({ remove: () => {} }) } }))

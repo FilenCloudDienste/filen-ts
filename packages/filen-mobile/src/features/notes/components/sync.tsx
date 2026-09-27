@@ -38,6 +38,14 @@ export { hashNoteContent, mergeInflight, buildInflightEntries }
 // non-network, non-auth SDK rejections for the same note do we discard its inflight content.
 export { MAX_NON_RETRYABLE_REJECTIONS }
 
+// Whether the note's outbox still holds this exact entry, base included.
+function isEntryCurrent(noteUuid: string, entry: InflightContent[string][number]): boolean {
+	return (useNotesInflightStore.getState().inflightContent[noteUuid] ?? []).some(
+		current =>
+			current.timestamp === entry.timestamp && current.content === entry.content && current.baseContentHash === entry.baseContentHash
+	)
+}
+
 export class Sync {
 	private readonly mutex: Semaphore = new Semaphore(1)
 	private syncTimeout: ReturnType<typeof createExecutableTimeout> | null = null
@@ -59,8 +67,8 @@ export class Sync {
 	// Notes whose remote-edit prompt is open, by open prompt count: passes leave them alone, so the answer
 	// decides what the cloud holds rather than a debounce firing under the prompt.
 	private readonly holds: Map<string, number> = new Map<string, number>()
-	// The setContent of each note the running pass has sent.
-	private readonly pushes: Map<string, Promise<unknown>> = new Map<string, Promise<unknown>>()
+	// Each note the running pass is working on, from its conflict peek until its push is recorded.
+	private readonly passes: Map<string, Promise<void>> = new Map<string, Promise<void>>()
 
 	public constructor() {
 		this.initPromise = new Promise(resolve => {
@@ -91,8 +99,9 @@ export class Sync {
 		this.nonRetryableRejections.delete(noteUuid)
 	}
 
-	// Keeps passes off a note until release(). `settled` resolves once a push of it already sent has landed
-	// and been recorded, so what is read after it is what the server ended with.
+	// Keeps passes off a note until release(). `settled` resolves once a pass already working on it (its
+	// conflict peek, then its push) has finished and been recorded, so what is read after it is what the
+	// server ended with.
 	public hold(noteUuid: string): { settled: Promise<void>; release: () => void } {
 		this.holds.set(noteUuid, (this.holds.get(noteUuid) ?? 0) + 1)
 
@@ -100,8 +109,7 @@ export class Sync {
 		const ignore = () => undefined
 
 		return {
-			// Chained after the pass's own await of the push, whose bookkeeping after it is synchronous.
-			settled: (this.pushes.get(noteUuid) ?? Promise.resolve()).then(ignore, ignore),
+			settled: (this.passes.get(noteUuid) ?? Promise.resolve()).then(ignore, ignore),
 			release: () => {
 				if (released) {
 					return
@@ -327,195 +335,20 @@ export class Sync {
 						return
 					}
 
-					// #34 fix: resolve the live note from the query cache so that any
-					// metadata changes (type, participants, encryptionKey) that arrived
-					// via socket between the render-time snapshot and the debounce flush
-					// are reflected in the setContent call. Fall back to the snapshot
-					// if the note is no longer in the cache (e.g. concurrently deleted).
-					const cachedNotes = notesQueryGet()
-					const liveNote = cachedNotes?.find(n => n.uuid === noteUuid) ?? mostRecentContent.note
+					let finishPass: () => void = () => undefined
 
-					// #4 fix: capture the LOCAL author-time of the entry we are about to
-					// push BEFORE the await. The prune below must remove exactly the
-					// content we actually sent (and strictly-older entries), never use the
-					// server's `editedTimestamp`. The two are different clocks in the same
-					// unit (`timestamp` is local Date.now() author-time; `editedTimestamp`
-					// is the server's response time), so pruning by the server clock
-					// silently discards every keystroke typed during the in-flight
-					// setContent round trip (their local timestamp falls below the server
-					// time). Comparing local-vs-local preserves those edits for the
-					// rescheduled debounce and is immune to device-clock skew.
-					const syncedUpTo = mostRecentContent.timestamp
-
-					// D3: conflict DETECTION, never prevention — local edits always win and the
-					// push below is unconditional (user decision: no prompts, no blocking). When
-					// the entry carries its session's base hash, peek at the note's current cloud
-					// content first: if the cloud moved past our base AND past what we are about
-					// to write, this push buries someone else's newer work in the note's history,
-					// and the user must hear about it once — a silent overwrite ("users won't
-					// know history has it") is the failure being prevented. Entries WITHOUT a
-					// base hash (persisted by older app versions) push unchecked — a one-time
-					// grace instead of migration machinery. A failed peek also pushes unchecked:
-					// availability beats the toast.
-					let overwritesNewerRemoteContent = false
-
-					if (mostRecentContent.baseContentHash !== undefined) {
-						try {
-							const cloudContent = (await notes.getContent({ note: liveNote, signal })) ?? ""
-
-							overwritesNewerRemoteContent =
-								hashNoteContent(cloudContent) !== mostRecentContent.baseContentHash &&
-								cloudContent !== mostRecentContent.content
-						} catch (e) {
-							// Availability beats the toast — push without the check.
-							logger.warn("notes-sync", "conflict-detection peek failed; pushing without overwrite check", {
-								noteUuid,
-								error: e
-							})
-						}
-					}
-
-					// A prompt opened during the peek.
-					if (this.holds.has(noteUuid)) {
-						return
-					}
-
-					const push = notes.setContent({
-						note: liveNote,
-						content: mostRecentContent.content,
-						signal
-					})
-
-					this.pushes.set(noteUuid, push)
+					this.passes.set(
+						noteUuid,
+						new Promise<void>(resolve => {
+							finishPass = resolve
+						})
+					)
 
 					try {
-						await push
-					} catch (e) {
-						// #40 hardening: a read-only / shared / history note whose edit
-						// reaches sync (e.g. Quill failed to enforce readOnly) is rejected
-						// by the server with a permanent error. The old behaviour kept the
-						// entry forever, so every sync re-attempted it and `hasInflightContent`
-						// stayed true — permanently DISABLING the note's content query
-						// (`enabled: !hasInflightContent`) and wedging the editor.
-						//
-						// VC3 (data-loss fix): the previous drop fired on ANY non-network SDK
-						// error, so a TRANSIENT `Server` (the catch-all for non-`internal_error`
-						// API errors) or an `Unauthenticated` (re-auth-recoverable, e.g. right
-						// after a password change) silently destroyed a real edit on a WRITABLE
-						// note. The SDK exposes only `kind()`/`message()` (no permission code),
-						// so we cannot positively identify a permission rejection — `Server` is
-						// the only signal and it is a catch-all. We therefore:
-						//   1. KEEP-for-retry on a network-class error (re-throw, existing path).
-						//   2. KEEP-for-retry on an `Unauthenticated` error (re-throw — it resolves
-						//      once the session refreshes; never count it toward the drop bound).
-						//   3. For any OTHER non-network SDK error (incl. the `Server` catch-all),
-						//      BOUND the drop: increment a per-note consecutive-rejection counter
-						//      and only drop once it reaches MAX_NON_RETRYABLE_REJECTIONS. A
-						//      one-off transient error keeps the edit (re-throw to retry); a
-						//      genuine read-only/permission rejection still un-wedges the query
-						//      after N attempts.
-						//   4. Any non-SDK error (e.g. abort) is re-thrown unchanged.
-						const unwrapped = unwrapSdkError(e)
-						const kind = unwrapped !== null ? ErrorKind[unwrapped.kind()] : undefined
-
-						if (!isPermanentRejection({ hasSdkError: unwrapped !== null, kind })) {
-							throw e
-						}
-
-						const previousRejections = this.nonRetryableRejections.get(noteUuid) ?? 0
-						const rejections = previousRejections + 1
-
-						if (rejections < MAX_NON_RETRYABLE_REJECTIONS) {
-							this.nonRetryableRejections.set(noteUuid, rejections)
-
-							logger.warn("notes-sync", "non-retryable SDK rejection on setContent; will retry", {
-								noteUuid,
-								rejections,
-								maxRejections: MAX_NON_RETRYABLE_REJECTIONS,
-								error: e
-							})
-
-							throw e
-						}
-
-						this.nonRetryableRejections.delete(noteUuid)
-
-						useNotesInflightStore.getState().setInflightContent(prev => {
-							const updated = {
-								...prev
-							}
-
-							delete updated[noteUuid]
-
-							return updated
-						})
-
-						logger.error("notes-sync", "dropping inflight content after max non-retryable rejections; edit lost", {
-							noteUuid,
-							rejections,
-							error: e
-						})
-
-						return
+						await this.pushNote(noteUuid, mostRecentContent, signal, toastedConflicts)
 					} finally {
-						this.pushes.delete(noteUuid)
-					}
-
-					// A successful push clears any accumulated rejection count for this note.
-					this.nonRetryableRejections.delete(noteUuid)
-
-					// The pushed content IS the cloud content now — write it into the per-note
-					// content query cache so any editor reseed after the inflight queue drains
-					// paints exactly what the user typed, never the stale pre-edit cache (the
-					// query is disabled while inflight and staleTime: Infinity, so nothing else
-					// refreshes it after a push). dataUpdatedAt is PRESERVED: the editor's
-					// remount key is this timestamp, so advancing it would remount the WebView
-					// (cursor reset) after every push — preserving it updates the data invisibly.
-					// A never-fetched note has no mounted editor keyed on it, so the fresh
-					// timestamp fallback there is safe.
-					noteContentQueryUpdate({
-						params: {
-							uuid: noteUuid
-						},
-						updater: mostRecentContent.content,
-						dataUpdatedAt: noteContentQueryDataUpdatedAt({
-							uuid: noteUuid
-						})
-					})
-
-					// D3: the content we just pushed IS the cloud content now, so it becomes the
-					// base for every entry typed during the round trip (they survive the prune
-					// below). Without this refresh the next pass would compare those entries
-					// against their stale session base and flag our OWN push as a conflict.
-					const pushedContentHash = hashNoteContent(mostRecentContent.content)
-
-					useNotesInflightStore.getState().setInflightContent(prev => {
-						const updated = {
-							...prev
-						}
-
-						const remaining = pruneAndRebaseNoteOutboxAfterPush(updated[noteUuid], syncedUpTo, pushedContentHash)
-
-						if (remaining === undefined) {
-							delete updated[noteUuid]
-						} else {
-							updated[noteUuid] = remaining
-						}
-
-						return updated
-					})
-
-					// D3: toast only AFTER the push landed (a failed push overwrites nothing and
-					// is retried — the next pass re-detects), once per note per pass, and never
-					// for an aborted pass (logout must stay silent).
-					if (overwritesNewerRemoteContent && !signal.aborted && !toastedConflicts.has(noteUuid)) {
-						toastedConflicts.add(noteUuid)
-
-						alerts.normal(
-							i18n.t("note_overwrote_newer_remote_changes", {
-								name: noteDisplayTitle(liveNote)
-							})
-						)
+						this.passes.delete(noteUuid)
+						finishPass()
 					}
 				})
 			)
@@ -542,6 +375,199 @@ export class Sync {
 
 			logger.error("notes-sync", "sync pass failed unexpectedly", { error: result.error })
 			alerts.error(result.error)
+		}
+	}
+
+	// One note's share of a pass: its conflict peek, then its push. Registered in `passes` by the caller.
+	private async pushNote(
+		noteUuid: string,
+		mostRecentContent: InflightContent[string][number],
+		signal: AbortSignal,
+		toastedConflicts: Set<string>
+	): Promise<void> {
+		// #34 fix: resolve the live note from the query cache so that any
+		// metadata changes (type, participants, encryptionKey) that arrived
+		// via socket between the render-time snapshot and the debounce flush
+		// are reflected in the setContent call. Fall back to the snapshot
+		// if the note is no longer in the cache (e.g. concurrently deleted).
+		const cachedNotes = notesQueryGet()
+		const liveNote = cachedNotes?.find(n => n.uuid === noteUuid) ?? mostRecentContent.note
+
+		// #4 fix: capture the LOCAL author-time of the entry we are about to
+		// push BEFORE the await. The prune below must remove exactly the
+		// content we actually sent (and strictly-older entries), never use the
+		// server's `editedTimestamp`. The two are different clocks in the same
+		// unit (`timestamp` is local Date.now() author-time; `editedTimestamp`
+		// is the server's response time), so pruning by the server clock
+		// silently discards every keystroke typed during the in-flight
+		// setContent round trip (their local timestamp falls below the server
+		// time). Comparing local-vs-local preserves those edits for the
+		// rescheduled debounce and is immune to device-clock skew.
+		const syncedUpTo = mostRecentContent.timestamp
+
+		// D3: conflict DETECTION, never prevention — local edits always win and the
+		// push below is unconditional (user decision: no prompts, no blocking). When
+		// the entry carries its session's base hash, peek at the note's current cloud
+		// content first: if the cloud moved past our base AND past what we are about
+		// to write, this push buries someone else's newer work in the note's history,
+		// and the user must hear about it once — a silent overwrite ("users won't
+		// know history has it") is the failure being prevented. Entries WITHOUT a
+		// base hash (persisted by older app versions) push unchecked — a one-time
+		// grace instead of migration machinery. A failed peek also pushes unchecked:
+		// availability beats the toast.
+		let overwritesNewerRemoteContent = false
+
+		if (mostRecentContent.baseContentHash !== undefined) {
+			try {
+				const cloudContent = (await notes.getContent({ note: liveNote, signal })) ?? ""
+
+				overwritesNewerRemoteContent =
+					hashNoteContent(cloudContent) !== mostRecentContent.baseContentHash && cloudContent !== mostRecentContent.content
+			} catch (e) {
+				// Availability beats the toast — push without the check.
+				logger.warn("notes-sync", "conflict-detection peek failed; pushing without overwrite check", {
+					noteUuid,
+					error: e
+				})
+			}
+		}
+
+		// A prompt opened during the peek, or its answer already replaced this entry (Load theirs cleared it,
+		// Keep mine rebased it) or a keystroke superseded it: the release or keystroke schedules a new pass.
+		if (this.holds.has(noteUuid) || !isEntryCurrent(noteUuid, mostRecentContent)) {
+			return
+		}
+
+		try {
+			await notes.setContent({
+				note: liveNote,
+				content: mostRecentContent.content,
+				signal
+			})
+		} catch (e) {
+			// #40 hardening: a read-only / shared / history note whose edit
+			// reaches sync (e.g. Quill failed to enforce readOnly) is rejected
+			// by the server with a permanent error. The old behaviour kept the
+			// entry forever, so every sync re-attempted it and `hasInflightContent`
+			// stayed true — permanently DISABLING the note's content query
+			// (`enabled: !hasInflightContent`) and wedging the editor.
+			//
+			// VC3 (data-loss fix): the previous drop fired on ANY non-network SDK
+			// error, so a TRANSIENT `Server` (the catch-all for non-`internal_error`
+			// API errors) or an `Unauthenticated` (re-auth-recoverable, e.g. right
+			// after a password change) silently destroyed a real edit on a WRITABLE
+			// note. The SDK exposes only `kind()`/`message()` (no permission code),
+			// so we cannot positively identify a permission rejection — `Server` is
+			// the only signal and it is a catch-all. We therefore:
+			//   1. KEEP-for-retry on a network-class error (re-throw, existing path).
+			//   2. KEEP-for-retry on an `Unauthenticated` error (re-throw — it resolves
+			//      once the session refreshes; never count it toward the drop bound).
+			//   3. For any OTHER non-network SDK error (incl. the `Server` catch-all),
+			//      BOUND the drop: increment a per-note consecutive-rejection counter
+			//      and only drop once it reaches MAX_NON_RETRYABLE_REJECTIONS. A
+			//      one-off transient error keeps the edit (re-throw to retry); a
+			//      genuine read-only/permission rejection still un-wedges the query
+			//      after N attempts.
+			//   4. Any non-SDK error (e.g. abort) is re-thrown unchanged.
+			const unwrapped = unwrapSdkError(e)
+			const kind = unwrapped !== null ? ErrorKind[unwrapped.kind()] : undefined
+
+			if (!isPermanentRejection({ hasSdkError: unwrapped !== null, kind })) {
+				throw e
+			}
+
+			const previousRejections = this.nonRetryableRejections.get(noteUuid) ?? 0
+			const rejections = previousRejections + 1
+
+			if (rejections < MAX_NON_RETRYABLE_REJECTIONS) {
+				this.nonRetryableRejections.set(noteUuid, rejections)
+
+				logger.warn("notes-sync", "non-retryable SDK rejection on setContent; will retry", {
+					noteUuid,
+					rejections,
+					maxRejections: MAX_NON_RETRYABLE_REJECTIONS,
+					error: e
+				})
+
+				throw e
+			}
+
+			this.nonRetryableRejections.delete(noteUuid)
+
+			useNotesInflightStore.getState().setInflightContent(prev => {
+				const updated = {
+					...prev
+				}
+
+				delete updated[noteUuid]
+
+				return updated
+			})
+
+			logger.error("notes-sync", "dropping inflight content after max non-retryable rejections; edit lost", {
+				noteUuid,
+				rejections,
+				error: e
+			})
+
+			return
+		}
+
+		// A successful push clears any accumulated rejection count for this note.
+		this.nonRetryableRejections.delete(noteUuid)
+
+		// The pushed content IS the cloud content now — write it into the per-note
+		// content query cache so any editor reseed after the inflight queue drains
+		// paints exactly what the user typed, never the stale pre-edit cache (the
+		// query is disabled while inflight and staleTime: Infinity, so nothing else
+		// refreshes it after a push). dataUpdatedAt is PRESERVED: the editor's
+		// remount key is this timestamp, so advancing it would remount the WebView
+		// (cursor reset) after every push — preserving it updates the data invisibly.
+		// A never-fetched note has no mounted editor keyed on it, so the fresh
+		// timestamp fallback there is safe.
+		noteContentQueryUpdate({
+			params: {
+				uuid: noteUuid
+			},
+			updater: mostRecentContent.content,
+			dataUpdatedAt: noteContentQueryDataUpdatedAt({
+				uuid: noteUuid
+			})
+		})
+
+		// D3: the content we just pushed IS the cloud content now, so it becomes the
+		// base for every entry typed during the round trip (they survive the prune
+		// below). Without this refresh the next pass would compare those entries
+		// against their stale session base and flag our OWN push as a conflict.
+		const pushedContentHash = hashNoteContent(mostRecentContent.content)
+
+		useNotesInflightStore.getState().setInflightContent(prev => {
+			const updated = {
+				...prev
+			}
+
+			const remaining = pruneAndRebaseNoteOutboxAfterPush(updated[noteUuid], syncedUpTo, pushedContentHash)
+
+			if (remaining === undefined) {
+				delete updated[noteUuid]
+			} else {
+				updated[noteUuid] = remaining
+			}
+
+			return updated
+		})
+
+		// D3: toast only AFTER the push landed (a failed push overwrites nothing and
+		// is retried — the next pass re-detects), once per note per pass, and never
+		// for an aborted pass (logout must stay silent).
+		if (overwritesNewerRemoteContent && !signal.aborted && !toastedConflicts.has(noteUuid)) {
+			toastedConflicts.add(noteUuid)
+
+			alerts.normal(
+				i18n.t("note_overwrote_newer_remote_changes", {
+					name: noteDisplayTitle(liveNote)
+				})
+			)
 		}
 	}
 
