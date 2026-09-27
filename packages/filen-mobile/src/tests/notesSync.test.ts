@@ -178,6 +178,7 @@ import { Sync, SyncHost, hashNoteContent, MAX_NON_RETRYABLE_REJECTIONS } from "@
 import sqlite from "@/lib/sqlite"
 import alerts from "@/lib/alerts"
 import events from "@/lib/events"
+import useAppStore from "@/stores/useApp.store"
 import { AppState } from "react-native"
 import { render } from "@testing-library/react"
 import React from "react"
@@ -221,6 +222,8 @@ describe("Sync (Notes)", () => {
 		vi.mocked(sqlite.kvAsync.set).mockClear()
 		vi.mocked(sqlite.kvAsync.remove).mockClear()
 		;(AppState as unknown as { _reset: () => void })._reset()
+		;(AppState as unknown as { currentState: string }).currentState = "active"
+		useAppStore.setState({ biometricUnlocked: true })
 	})
 
 	describe("restoreFromDisk", () => {
@@ -1701,6 +1704,76 @@ describe("Sync (Notes)", () => {
 			expect(alerts.normal).toHaveBeenCalledTimes(1)
 
 			subscription.remove()
+		})
+
+		it("the overwrite toast waits for the unlock, and never shows from the lock screen", async () => {
+			const sync = await createSync()
+
+			useAppStore.setState({ biometricUnlocked: false })
+			mockNotesGetContent.mockResolvedValue("theirs")
+			notesState.inflightContent = {
+				"note-1": [{ timestamp: 1000, content: "mine", note: mockNote("note-1"), baseContentHash: hashNoteContent("base") }]
+			}
+
+			sync.executeNow()
+
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			expect(mockNotesSetContent).toHaveBeenCalledTimes(1)
+			expect(alerts.normal).not.toHaveBeenCalled()
+
+			useAppStore.getState().setBiometricUnlocked(true)
+
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			expect(alerts.normal).toHaveBeenCalledTimes(1)
+		})
+
+		it("the last editor closing over an unanswered hand-off schedules a pass, which pushes over it", async () => {
+			const sync = await createSync()
+			const detachFirst = sync.attachEditor("note-1")
+			const detachSecond = sync.attachEditor("note-1")
+
+			mockNotesGetContent.mockResolvedValue("theirs")
+			notesState.inflightContent = {
+				"note-1": [{ timestamp: 1000, content: "mine", note: mockNote("note-1"), baseContentHash: hashNoteContent("base") }]
+			}
+
+			sync.executeNow()
+
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			expect(mockNotesSetContent).not.toHaveBeenCalled()
+
+			mockCreateExecutableTimeout.mockClear()
+
+			detachFirst()
+
+			expect(mockCreateExecutableTimeout).not.toHaveBeenCalled()
+
+			detachSecond()
+			detachSecond()
+
+			expect(mockCreateExecutableTimeout).toHaveBeenCalledTimes(1)
+		})
+
+		it("remembers when a note's conflict peek began", async () => {
+			const sync = await createSync()
+			const before = Date.now()
+
+			notesState.inflightContent = {
+				"note-1": [{ timestamp: 1000, content: "mine", note: mockNote("note-1"), baseContentHash: hashNoteContent("base") }]
+			}
+			mockNotesGetContent.mockResolvedValue("base")
+
+			expect(sync.peekedSince("note-1", 0)).toBe(false)
+
+			sync.executeNow()
+
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			expect(sync.peekedSince("note-1", before)).toBe(true)
+			expect(sync.peekedSince("note-1", Date.now() + 1000)).toBe(false)
 		})
 
 		it("settled resolves at once when nothing is being pushed, and after a failed push too", async () => {

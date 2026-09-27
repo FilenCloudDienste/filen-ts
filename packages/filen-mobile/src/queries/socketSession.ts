@@ -112,19 +112,15 @@ export function queryReadInCurrentSocketSession<TQueryFnData, TError, TData, TQu
 	)
 }
 
-// A cached value a socket gap cannot have left behind: a read of it is under way, or began after the socket
-// last went down. What an editor re-checks after the reconnect reuses such a read instead of repeating it.
-export function queryReadDuringOrAfterSocketGap<TQueryFnData, TError, TData, TQueryKey extends QueryKey>(
+// A read of the query began since the socket last connected, finished or still under way: it reflects every
+// change a gap before the connection hid. A read begun during the gap does not: a version saved between it
+// and the reconnect reached neither it nor the socket.
+export function queryReadSinceSocketReconnect<TQueryFnData, TError, TData, TQueryKey extends QueryKey>(
 	query: Query<TQueryFnData, TError, TData, TQueryKey>
 ): boolean {
-	if (query.state.fetchStatus === "fetching") {
-		return true
-	}
+	const startedAt = query.state.fetchStatus === "fetching" ? pendingReads.get(query)?.startedAt : readStartedAt.get(query)
 
-	const startedAt = readStartedAt.get(query)
-	const { disconnectedAt } = useSocketStore.getState()
-
-	return startedAt !== undefined && disconnectedAt > 0 && startedAt > disconnectedAt && query.state.status !== "error"
+	return startedAt !== undefined && query.state.status !== "error" && readStartedInCurrentSocketSession(startedAt)
 }
 
 /**

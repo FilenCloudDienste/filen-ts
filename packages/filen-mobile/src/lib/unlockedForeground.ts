@@ -32,3 +32,42 @@ export function whenUnlockedForeground(): Promise<void> {
 		const appState = AppState.addEventListener("change", check)
 	})
 }
+
+// One editor's toasts: shown once the app is unlocked and in front, only the latest while it waits, and none
+// after dispose() (the editor went away), so a lock does not end in a burst of stale toasts.
+export function createUnlockedToaster(show: (message: string) => void): { notify: (message: string) => void; dispose: () => void } {
+	let pending: string | null = null
+	let waiting = false
+	let disposed = false
+
+	return {
+		notify: message => {
+			if (disposed) {
+				return
+			}
+
+			pending = message
+
+			if (waiting) {
+				return
+			}
+
+			waiting = true
+
+			void whenUnlockedForeground().then(() => {
+				const next = pending
+
+				waiting = false
+				pending = null
+
+				if (!disposed && next !== null) {
+					show(next)
+				}
+			})
+		},
+		dispose: () => {
+			disposed = true
+			pending = null
+		}
+	}
+}

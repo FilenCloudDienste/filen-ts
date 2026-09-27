@@ -17,7 +17,7 @@ vi.mock("react-native", () => ({
 	}
 }))
 
-import { isUnlockedForeground, whenUnlockedForeground } from "@/lib/unlockedForeground"
+import { createUnlockedToaster, isUnlockedForeground, whenUnlockedForeground } from "@/lib/unlockedForeground"
 import useAppStore from "@/stores/useApp.store"
 
 function setAppState(next: string): void {
@@ -60,5 +60,41 @@ describe("whenUnlockedForeground", () => {
 
 		expect(resolved).toBe(true)
 		expect(appState.listeners.size).toBe(0)
+	})
+})
+
+describe("createUnlockedToaster", () => {
+	it("shows only the latest toast held under the lock, once unlocked", async () => {
+		useAppStore.setState({ biometricUnlocked: false })
+
+		const shown: string[] = []
+		const toaster = createUnlockedToaster(message => shown.push(message))
+
+		toaster.notify("first")
+		toaster.notify("second")
+		await Promise.resolve()
+
+		expect(shown).toEqual([])
+
+		useAppStore.getState().setBiometricUnlocked(true)
+		await Promise.resolve()
+		await Promise.resolve()
+
+		expect(shown).toEqual(["second"])
+	})
+
+	it("shows nothing once disposed", async () => {
+		useAppStore.setState({ biometricUnlocked: false })
+
+		const shown: string[] = []
+		const toaster = createUnlockedToaster(message => shown.push(message))
+
+		toaster.notify("stale")
+		toaster.dispose()
+		useAppStore.getState().setBiometricUnlocked(true)
+		await Promise.resolve()
+		await Promise.resolve()
+
+		expect(shown).toEqual([])
 	})
 })

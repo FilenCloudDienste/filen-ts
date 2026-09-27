@@ -26,6 +26,7 @@ import { unwrapSdkError } from "@/lib/sdkErrors"
 import { ErrorKind } from "@filen/sdk-rs"
 import logger from "@/lib/logger"
 import events from "@/lib/events"
+import { whenUnlockedForeground } from "@/lib/unlockedForeground"
 
 // D3/#41/M1: content hash, disk-restore merge, and the monotonic-timestamp entry builder now live in
 // a shared module (web's outbox uses the identical algorithms). Re-exported here so every existing
@@ -74,6 +75,10 @@ export class Sync {
 	private readonly passes: Map<string, Promise<void>> = new Map<string, Promise<void>>()
 	// Notes open in an editor, by editor count: one of them answers an edit made elsewhere that a pass finds.
 	private readonly editors: Map<string, number> = new Map<string, number>()
+	// Notes a pass handed an edit made elsewhere to their editor, until a push of them lands.
+	private readonly handedOff: Set<string> = new Set<string>()
+	// When each note's last successful conflict peek began.
+	private readonly peeks: Map<string, number> = new Map<string, number>()
 
 	public constructor() {
 		this.initPromise = new Promise(resolve => {
@@ -122,10 +127,24 @@ export class Sync {
 
 			if (count > 0) {
 				this.editors.set(noteUuid, count)
-			} else {
-				this.editors.delete(noteUuid)
+
+				return
+			}
+
+			this.editors.delete(noteUuid)
+
+			// An edit made elsewhere a pass handed over may have gone unanswered: the next pass pushes over it,
+			// with the overwrite toast, rather than the edits waiting for an unrelated trigger.
+			if (this.handedOff.has(noteUuid) && (useNotesInflightStore.getState().inflightContent[noteUuid] ?? []).length > 0) {
+				this.syncDebounced()
 			}
 		}
+	}
+
+	// Whether a conflict peek of the note began at or after `since` and read the cloud: a check after a
+	// socket reconnect has nothing to add then (the peek found no edit, or handed it to the editor).
+	public peekedSince(noteUuid: string, since: number): boolean {
+		return (this.peeks.get(noteUuid) ?? -1) >= since
 	}
 
 	// Keeps passes off a note until release(). `settled` resolves once a pass already working on it (its
@@ -440,10 +459,13 @@ export class Sync {
 
 		if (snapshot.baseContentHash !== undefined) {
 			try {
+				const peekStartedAt = Date.now()
 				const peeked = await notes.getContent({ note: liveNote, signal })
 
 				cloudContent = peeked ?? ""
 				cloudDecrypted = typeof peeked === "string"
+
+				this.peeks.set(noteUuid, peekStartedAt)
 			} catch (e) {
 				// Availability beats the toast — push without the check.
 				logger.warn("notes-sync", "conflict-detection peek failed; pushing without overwrite check", {
@@ -489,6 +511,8 @@ export class Sync {
 		// The note is open in an editor: its user decides, as over an edit the socket reported (the socket
 		// was down, say, while the app was in the background). Nothing is pushed until they answer.
 		if (overwritesNewerRemoteContent && cloudDecrypted && cloudContent !== undefined && this.editors.has(noteUuid)) {
+			this.handedOff.add(noteUuid)
+
 			events.emit("noteContentEdited", {
 				noteUuid,
 				content: cloudContent
@@ -574,6 +598,7 @@ export class Sync {
 
 		// A successful push clears any accumulated rejection count for this note.
 		this.nonRetryableRejections.delete(noteUuid)
+		this.handedOff.delete(noteUuid)
 
 		// The pushed content IS the cloud content now — write it into the per-note
 		// content query cache so any editor reseed after the inflight queue drains
@@ -622,11 +647,16 @@ export class Sync {
 		if (overwritesNewerRemoteContent && !signal.aborted && !toastedConflicts.has(noteUuid)) {
 			toastedConflicts.add(noteUuid)
 
-			alerts.normal(
-				i18n.t("note_overwrote_newer_remote_changes", {
-					name: noteDisplayTitle(liveNote)
-				})
-			)
+			const message = i18n.t("note_overwrote_newer_remote_changes", {
+				name: noteDisplayTitle(liveNote)
+			})
+
+			// Never over the biometric lock, nor from the background (Android toasts show over other apps).
+			void whenUnlockedForeground().then(() => {
+				if (!signal.aborted) {
+					alerts.normal(message)
+				}
+			})
 		}
 	}
 

@@ -33,7 +33,24 @@ vi.mock("@/lib/auth", () => ({
 	default: { getSdkClients: () => Promise.resolve({ authedSdkClient: { findItemInDir, getFileOptional } }) }
 }))
 vi.mock("@/features/drive/queries/useDriveItems.query", () => ({ driveItemsQueryFindFileInNormalParent: findFile }))
-vi.mock("@/lib/unlockedForeground", () => ({ whenUnlockedForeground: () => unlocked.current }))
+vi.mock("@/lib/unlockedForeground", async () => {
+	const real = await vi.importActual<typeof import("@/lib/unlockedForeground")>("@/lib/unlockedForeground")
+
+	return {
+		whenUnlockedForeground: () => unlocked.current,
+		// The real toaster, waiting on this file's unlock instead of the app's.
+		createUnlockedToaster: (show: (message: string) => void) => {
+			const toaster = real.createUnlockedToaster(show)
+
+			return {
+				notify: (message: string) => {
+					void unlocked.current.then(() => toaster.notify(message))
+				},
+				dispose: toaster.dispose
+			}
+		}
+	}
+})
 // Raw files here carry their parent as a plain uuid, "trash" for the trash.
 vi.mock("@/lib/sdkUnwrap", () => ({
 	unwrapParentUuid: (parent: string) => (parent === "trash" ? null : parent),
@@ -52,6 +69,7 @@ vi.mock("@/stores/useDrivePreview.store", () => ({
 
 import useRemoteRevisions from "@/components/drivePreview/useRemoteRevisions"
 import useSocketStore from "@/stores/useSocket.store"
+import useAppStore from "@/stores/useApp.store"
 
 function file(
 	uuid: string,
@@ -128,6 +146,7 @@ beforeEach(() => {
 	emitter.current = new EventEmitter()
 	vi.clearAllMocks()
 	unlocked.current = Promise.resolve()
+	useAppStore.setState({ biometricUnlocked: true })
 	useSocketStore.setState({ state: "connected", connectedAt: 1 })
 })
 
@@ -466,7 +485,7 @@ describe("useRemoteRevisions", () => {
 	})
 
 	it("after a socket gap, follows a newer version found in the file's directory, with one listing read", async () => {
-		findFile.mockResolvedValue(file("v2"))
+		findFile.mockResolvedValue({ lineage: file("v2"), sameName: undefined })
 
 		const { updated } = mount({ hasEdits: false })
 
@@ -474,14 +493,14 @@ describe("useRemoteRevisions", () => {
 		await flush()
 
 		expect(findFile).toHaveBeenCalledTimes(1)
-		expect(findFile).toHaveBeenCalledWith("dir", "lineage")
+		expect(findFile).toHaveBeenCalledWith("dir", "lineage", "notes.md")
 		expect(getFileOptional).not.toHaveBeenCalled()
 		expect(updated).toHaveBeenCalledWith({ previousUuid: "v1", item: file("v2") })
 		expect(alertNormal).toHaveBeenCalledWith("remote_change_updated")
 	})
 
 	it("after a socket gap, asks over unsaved edits about a newer version", async () => {
-		findFile.mockResolvedValue(file("v2"))
+		findFile.mockResolvedValue({ lineage: file("v2"), sameName: undefined })
 		confirm3.mockResolvedValue("cancel")
 
 		mount({ hasEdits: true })
@@ -493,7 +512,7 @@ describe("useRemoteRevisions", () => {
 	})
 
 	it("after a socket gap, follows a rename", async () => {
-		findFile.mockResolvedValue(file("v1", { name: "renamed.md" }))
+		findFile.mockResolvedValue({ lineage: file("v1", { name: "renamed.md" }), sameName: undefined })
 
 		const { updated } = mount({ hasEdits: true })
 
@@ -505,7 +524,7 @@ describe("useRemoteRevisions", () => {
 	})
 
 	it("after a socket gap, asks over unsaved edits when the file was trashed", async () => {
-		findFile.mockResolvedValue(undefined)
+		findFile.mockResolvedValue({ lineage: undefined, sameName: undefined })
 		getFileOptional.mockResolvedValue((file("v1", { parent: "trash" }) as { data: unknown }).data)
 		confirm3.mockResolvedValue("cancel")
 
@@ -519,7 +538,7 @@ describe("useRemoteRevisions", () => {
 	})
 
 	it("after a socket gap, follows a move to another directory", async () => {
-		findFile.mockResolvedValue(undefined)
+		findFile.mockResolvedValue({ lineage: undefined, sameName: undefined })
 		getFileOptional.mockResolvedValue((file("v1", { parent: "elsewhere" }) as { data: unknown }).data)
 
 		const { updated } = mount({ hasEdits: true })
@@ -540,7 +559,7 @@ describe("useRemoteRevisions", () => {
 
 		socketReconnected()
 		emit("driveFileRevised", { item: file("v3") })
-		listing.resolve(file("v2"))
+		listing.resolve({ lineage: file("v2"), sameName: undefined })
 		await flush()
 
 		expect(updated).toHaveBeenCalledTimes(1)
@@ -621,5 +640,50 @@ describe("useRemoteRevisions", () => {
 		await flush()
 
 		expect(confirm3).not.toHaveBeenCalled()
+	})
+
+	it("after a socket gap, treats a file replaced under its name as gone", async () => {
+		findFile.mockResolvedValue({ lineage: undefined, sameName: file("r1", { stableUuid: "else" }) })
+		// The replaced version is archived where it was: nothing but the listing tells it apart.
+		getFileOptional.mockResolvedValue((file("v1") as { data: unknown }).data)
+		confirm3.mockResolvedValue("cancel")
+
+		mount({ hasEdits: true })
+
+		socketReconnected()
+		await flush()
+
+		expect(confirm3).toHaveBeenCalledWith(expect.objectContaining({ title: "remote_deleted_title" }))
+	})
+
+	it("keeps only the latest toast waiting for the unlock", async () => {
+		const unlock = deferred<undefined>()
+
+		unlocked.current = unlock.promise
+
+		mount({ hasEdits: false })
+
+		emit("driveFileRevised", { item: file("v2") })
+		emit("driveFileRevised", { item: file("v3") })
+		unlock.resolve(undefined)
+		await flush()
+
+		expect(alertNormal).toHaveBeenCalledTimes(1)
+	})
+
+	it("drops a toast waiting for the unlock once the editor is gone", async () => {
+		const unlock = deferred<undefined>()
+
+		unlocked.current = unlock.promise
+
+		const first = mount({ hasEdits: false })
+
+		emit("driveFileRevised", { item: file("v2") })
+		emit("driveFileRevised", { item: file("v3") })
+		first.hook.unmount()
+		unlock.resolve(undefined)
+		await flush()
+
+		expect(alertNormal).not.toHaveBeenCalled()
 	})
 })

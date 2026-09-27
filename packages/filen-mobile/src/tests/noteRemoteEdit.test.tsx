@@ -15,6 +15,7 @@ const { emitter, state, confirm3, refetch, contentUpdate, hold, release, settled
 			inflight: {} as Record<string, { timestamp: number; content: string; note: unknown; baseContentHash?: string }[]>,
 			cached: "old" as string | undefined,
 			readSinceGap: false,
+			peekedSinceReconnect: false,
 			unlocked: Promise.resolve() as Promise<void>
 		},
 		getContent: vi.fn<() => Promise<string | undefined>>(),
@@ -62,16 +63,34 @@ vi.mock("@/features/notes/queries/useNoteContent.query", () => ({
 	default: () => ({ isFetching: false, isPending: false, isError: false, dataUpdatedAt: 1, refetch }),
 	noteContentQueryGet: () => state.cached,
 	noteContentQueryUpdate: contentUpdate,
-	noteContentQueryReadSinceSocketGap: () => state.readSinceGap
+	noteContentQueryReadSinceSocketReconnect: () => state.readSinceGap
 }))
-vi.mock("@/lib/unlockedForeground", () => ({ whenUnlockedForeground: () => state.unlocked }))
+vi.mock("@/lib/unlockedForeground", async () => {
+	const real = await vi.importActual<typeof import("@/lib/unlockedForeground")>("@/lib/unlockedForeground")
+
+	return {
+		whenUnlockedForeground: () => state.unlocked,
+		// The real toaster, waiting on this file's unlock instead of the app's.
+		createUnlockedToaster: (show: (message: string) => void) => {
+			const toaster = real.createUnlockedToaster(show)
+
+			return {
+				notify: (message: string) => {
+					void state.unlocked.then(() => toaster.notify(message))
+				},
+				dispose: toaster.dispose
+			}
+		}
+	}
+})
 vi.mock("@/features/notes/components/sync", async () => ({
 	sync: {
 		flushToDisk: () => Promise.resolve(true),
 		clearRejections: vi.fn(),
 		syncDebounced,
 		hold,
-		attachEditor
+		attachEditor,
+		peekedSince: () => state.peekedSinceReconnect
 	},
 	hashNoteContent: (content: string) => `h(${content})`,
 	buildInflightEntries: (await vi.importActual<typeof import("@filen/shared")>("@filen/shared")).buildInflightEntries
@@ -127,6 +146,7 @@ import { createElement } from "react"
 import Content from "@/features/notes/components/content"
 import alerts from "@/lib/alerts"
 import useSocketStore from "@/stores/useSocket.store"
+import useAppStore from "@/stores/useApp.store"
 import type { Note } from "@/types"
 
 const note = { uuid: "n1", noteType: "text", title: "t", ownerId: 1, participants: [] } as unknown as Note
@@ -163,10 +183,12 @@ beforeEach(() => {
 	state.inflight = {}
 	state.cached = "old"
 	state.readSinceGap = false
+	state.peekedSinceReconnect = false
 	state.unlocked = Promise.resolve()
 	settled.current = Promise.resolve()
 	vi.clearAllMocks()
 	useSocketStore.setState({ state: "connected", connectedAt: 1 })
+	useAppStore.setState({ biometricUnlocked: true })
 	hold.mockImplementation(() => ({ settled: settled.current, release }))
 	attachEditor.mockImplementation(() => () => undefined)
 	render(createElement(Content, { note }))
@@ -427,5 +449,32 @@ describe("a note edited elsewhere while open", () => {
 
 		expect(getContent).not.toHaveBeenCalled()
 		expect(hold).not.toHaveBeenCalled()
+	})
+
+	it("after a socket gap, reuses a pass's peek begun since the reconnect instead of reading again", async () => {
+		state.inflight = { n1: [{ timestamp: 1, content: "mine", note, baseContentHash: "h(old)" }] }
+		state.peekedSinceReconnect = true
+
+		socketReconnected()
+		await flush()
+
+		expect(getContent).not.toHaveBeenCalled()
+		expect(release).toHaveBeenCalledTimes(1)
+	})
+
+	it("a prompt waiting for the unlock is dropped when the editor closes meanwhile", async () => {
+		let unlock: () => void = () => undefined
+
+		state.unlocked = new Promise(resolve => (unlock = resolve))
+		state.inflight = { n1: [{ timestamp: 1, content: "mine", note, baseContentHash: "h(old)" }] }
+
+		edited("theirs")
+		await flush()
+		cleanup()
+		unlock()
+		await flush()
+
+		expect(confirm3).not.toHaveBeenCalled()
+		expect(release).toHaveBeenCalledTimes(1)
 	})
 })

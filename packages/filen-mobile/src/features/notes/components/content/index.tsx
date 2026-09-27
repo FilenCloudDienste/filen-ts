@@ -4,7 +4,7 @@ import View from "@/components/ui/view"
 import useNoteContentQuery, {
 	noteContentQueryGet,
 	noteContentQueryUpdate,
-	noteContentQueryReadSinceSocketGap
+	noteContentQueryReadSinceSocketReconnect
 } from "@/features/notes/queries/useNoteContent.query"
 import Checklist from "@/features/notes/components/content/checklist"
 import { noteCodeTitleExtension, noteTypeToEditorType } from "@/features/notes/utils"
@@ -30,8 +30,8 @@ import { sync, hashNoteContent, buildInflightEntries } from "@/features/notes/co
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import { useHeaderHeight } from "expo-router/react-navigation"
 import useIsOnline from "@/hooks/useIsOnline"
-import { onSocketReconnected } from "@/stores/useSocket.store"
-import { whenUnlockedForeground } from "@/lib/unlockedForeground"
+import useSocketStore, { onSocketReconnected } from "@/stores/useSocket.store"
+import { createUnlockedToaster, whenUnlockedForeground } from "@/lib/unlockedForeground"
 import { notesQueryGet } from "@/features/notes/queries/useNotesQuery"
 import logger from "@/lib/logger"
 import { noteDisplayTitle } from "@/lib/decryption"
@@ -152,13 +152,6 @@ const Loading = ({ children, loading, noteType }: { children: React.ReactNode; l
 			{children}
 		</View>
 	)
-}
-
-// A toast waits for the app to be in front and unlocked, never drawing over the biometric lock.
-function notifyWhenUnlocked(message: string): void {
-	void whenUnlockedForeground().then(() => {
-		alerts.normal(message)
-	})
 }
 
 function getInflightContentForNote(noteUuid: string): InflightContent[string] | undefined {
@@ -401,6 +394,15 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 		}
 	}, [note.uuid, refetch])
 
+	// Remote changes are answered one at a time, in arrival order. `latest` numbers the newest socket event:
+	// an older one still waiting behind a prompt is dropped, the newer one answers for both.
+	const remoteQueue = useRef<{
+		tail: Promise<void>
+		latest: number
+		closed: boolean
+		toaster: ReturnType<typeof createUnlockedToaster> | null
+	}>({ tail: Promise.resolve(), latest: 0, closed: false, toaster: null })
+
 	// A newer version of this note, saved by someone else or on another device (the socket handler drops
 	// this device's own pushes), or found by a re-read after the socket was down. Decided on the local state
 	// of the moment, as an earlier prompt's answer can have changed it. Clean (no unsynced edits): take it,
@@ -435,7 +437,7 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 					})
 				}
 
-				notifyWhenUnlocked(t("remote_change_updated"))
+				remoteQueue.current.toaster?.notify(t("remote_change_updated"))
 
 				return
 			}
@@ -534,7 +536,7 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 						return
 					}
 
-					notifyWhenUnlocked(t("note_saved_as_copy", { title }))
+					remoteQueue.current.toaster?.notify(t("note_saved_as_copy", { title }))
 				}
 
 				await reloadFromServer()
@@ -551,17 +553,19 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 		answerRemoteContentRef.current = answerRemoteContent
 	})
 
-	// Remote changes are answered one at a time, in arrival order. `latest` numbers the newest socket event:
-	// an older one still waiting behind a prompt is dropped, the newer one answers for both.
-	const remoteQueue = useRef({ tail: Promise.resolve(), latest: 0, closed: false })
-
 	useEffect(() => {
 		const queue = remoteQueue.current
 
 		queue.closed = false
+		// Toasts wait for the unlock, the latest only, and none once the editor is gone.
+		queue.toaster = createUnlockedToaster(message => {
+			alerts.normal(message)
+		})
 
 		return () => {
 			queue.closed = true
+			queue.toaster?.dispose()
+			queue.toaster = null
 		}
 	}, [])
 
@@ -594,7 +598,8 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 			}
 
 			const sequence = ++queue.latest
-			const superseded = () => sequence !== queue.latest
+			// Also once the editor closed while this waited for the unlock: nothing here can answer it then.
+			const superseded = () => queue.closed || sequence !== queue.latest
 
 			enqueue(async () => {
 				if (!superseded()) {
@@ -607,12 +612,12 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 		// elsewhere reached no event: read the content once and answer it like one when it moved past the base.
 		const unsubscribeReconnected = onSocketReconnected(() => {
 			const sequence = queue.latest
-			const superseded = () => sequence !== queue.latest
+			const superseded = () => queue.closed || sequence !== queue.latest
 
 			enqueue(async () => {
-				// The content query's own read since the gap (a reconnect refetch of a clean note) already
+				// The content query's own read since the reconnect (a reconnect refetch of a clean note) already
 				// brought the note up to date.
-				if (noteContentQueryReadSinceSocketGap({ uuid })) {
+				if (noteContentQueryReadSinceSocketReconnect({ uuid })) {
 					return
 				}
 
@@ -622,8 +627,9 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 				try {
 					await held.settled
 
-					// A pass that ran meanwhile handed its finding over, and that answers after this.
-					if (superseded()) {
+					// A pass that ran meanwhile handed its finding over, and that answers after this; or its peek,
+					// begun since the reconnect, found nothing to hand over.
+					if (superseded() || sync.peekedSince(uuid, useSocketStore.getState().connectedAt)) {
 						return
 					}
 

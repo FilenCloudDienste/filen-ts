@@ -6,7 +6,7 @@ import { galleryItemKey, type GalleryItemTagged } from "@/components/drivePrevie
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
 import { onSocketReconnected } from "@/stores/useSocket.store"
 import { driveItemsQueryFindFileInNormalParent } from "@/features/drive/queries/useDriveItems.query"
-import { whenUnlockedForeground } from "@/lib/unlockedForeground"
+import { createUnlockedToaster, whenUnlockedForeground } from "@/lib/unlockedForeground"
 import { isTrashParent, unwrapFileMeta, unwrapParentUuid, unwrappedFileIntoDriveItem } from "@/lib/sdkUnwrap"
 import events from "@/lib/events"
 import alerts from "@/lib/alerts"
@@ -89,11 +89,13 @@ export default function useRemoteRevisions({
 			return current !== null && galleryItemKey(current) === galleryItemKey(latest.current.item)
 		}
 
-		// A toast waits for the app to be in front and unlocked, never drawing over the biometric lock.
+		// Toasts wait for the unlock, the latest only, and none once this editor is gone.
+		const toaster = createUnlockedToaster(message => {
+			alerts.normal(message)
+		})
+
 		function notify(message: string): void {
-			void whenUnlockedForeground().then(() => {
-				alerts.normal(message)
-			})
+			toaster.notify(message)
 		}
 
 		function show(from: DriveItemFileExtracted, to: DriveItem, announce: boolean): void {
@@ -416,7 +418,9 @@ export default function useRemoteRevisions({
 			const seen = changes.current
 			const fresh = () => answerable(key) && !savingRef.current && changes.current === seen
 
-			const lookedUp = await run(async () => await driveItemsQueryFindFileInNormalParent(parentUuid, stableUuid))
+			const lookedUp = await run(
+				async () => await driveItemsQueryFindFileInNormalParent(parentUuid, stableUuid, displayed.data.decryptedMeta?.name)
+			)
 
 			if (!lookedUp.success) {
 				logger.warn("drivePreview", "re-checking the open file after a socket gap failed", { error: lookedUp.error })
@@ -428,7 +432,7 @@ export default function useRemoteRevisions({
 				return
 			}
 
-			const found = lookedUp.data
+			const { lineage: found, sameName } = lookedUp.data
 
 			if (found !== undefined) {
 				if (found.data.uuid !== displayed.data.uuid) {
@@ -440,7 +444,8 @@ export default function useRemoteRevisions({
 				return
 			}
 
-			// Gone from its directory: trashed, deleted, or moved. The server's current version is the one kept over.
+			// Gone from its directory: trashed, deleted, moved, or replaced by another file under its name. The
+			// server's current version is the one kept over.
 			const serverUuid = keptOver.current ?? displayed.data.uuid
 			const lookup = await run(async () => {
 				const { authedSdkClient } = await auth.getSdkClients()
@@ -471,6 +476,15 @@ export default function useRemoteRevisions({
 				const moved = unwrappedFileIntoDriveItem(unwrapFileMeta(lookup.data))
 
 				events.emit("driveItemUpdated", { previousUuid: displayed.data.uuid, item: moved })
+
+				return
+			}
+
+			// Still in its directory by the lookup, yet absent from its listing: an archived version, as a
+			// replacement leaves it (nothing on the SDK's JS surface marks one archived). Another file holding
+			// its name confirms it, and a save under that name would be a version of that other file.
+			if (sameName !== undefined) {
+				void handleGone(serverUuid)
 			}
 		}
 
@@ -541,6 +555,7 @@ export default function useRemoteRevisions({
 
 		return () => {
 			unmounted = true
+			toaster.dispose()
 			revised.remove()
 			gone.remove()
 			restored.remove()

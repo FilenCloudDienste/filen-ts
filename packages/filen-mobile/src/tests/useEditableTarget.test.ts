@@ -6,7 +6,8 @@ import { act, renderHook, waitFor } from "@testing-library/react"
 const { cacheState, getDirOptional } = vi.hoisted(() => ({
 	cacheState: {
 		files: new Map<string, unknown>(),
-		dirs: new Map<string, { uuid: string }>()
+		dirs: new Map<string, { uuid: string }>(),
+		linkedDirs: new Map<string, unknown>()
 	},
 	getDirOptional: vi.fn<(uuid: string) => Promise<unknown>>()
 }))
@@ -52,6 +53,7 @@ vi.mock("@/lib/cache", () => ({
 		rootUuid: "root",
 		fileUuidToNormalFile: cacheState.files,
 		directoryUuidToAnyNormalDir: cacheState.dirs,
+		directoryUuidToAnyLinkedDirWithMeta: cacheState.linkedDirs,
 		cacheDriveItem: (item: { data: { uuid: string } }) => cacheState.files.set(item.data.uuid, item.data),
 		cacheNewNormalDir: (dir: { uuid: string }) => cacheState.dirs.set(dir.uuid, dir),
 		forgetItem: vi.fn()
@@ -64,13 +66,16 @@ vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 import useEditableTarget from "@/components/drivePreview/useEditableTarget"
 import useSocketStore from "@/stores/useSocket.store"
 
-function galleryItem(uuid: string, parent: string, name = "notes.md"): never {
-	return { type: "drive", data: { type: "file", data: { uuid, parent, decryptedMeta: { name } } } } as never
+// A file of the user's own drive carries its lineage's stable id; one listed through a public link or a share
+// does not.
+function galleryItem(uuid: string, parent: string, name = "notes.md", stableUuid: string | undefined = "lineage"): never {
+	return { type: "drive", data: { type: "file", data: { uuid, parent, stableUuid, decryptedMeta: { name } } } } as never
 }
 
 beforeEach(() => {
 	cacheState.files.clear()
 	cacheState.dirs.clear()
+	cacheState.linkedDirs.clear()
 	vi.clearAllMocks()
 	useSocketStore.setState({ state: "connected", connectedAt: 1 })
 })
@@ -167,5 +172,24 @@ describe("useEditableTarget", () => {
 		await waitFor(() => {
 			expect(getDirOptional).toHaveBeenCalledWith("unlisted", expect.anything())
 		})
+	})
+
+	it("a file listed through a public link or a share stays read-only, and its parent is never looked up", async () => {
+		cacheState.linkedDirs.set("link-dir", {})
+
+		const linked = renderHook(() => useEditableTarget(galleryItem("l1", "link-dir", "notes.md", undefined)))
+		const linkedCachedParent = renderHook(() => useEditableTarget(galleryItem("l2", "link-dir")))
+
+		expect(linked.result.current.readOnly).toBe(true)
+		expect(linkedCachedParent.result.current.readOnly).toBe(true)
+		await expect(linked.result.current.resolveParent()).resolves.toBeNull()
+
+		act(() => {
+			useSocketStore.getState().setState("disconnected")
+			useSocketStore.getState().setState("connected")
+		})
+
+		expect(getDirOptional).not.toHaveBeenCalled()
+		expect(cacheState.files.has("l1")).toBe(false)
 	})
 })

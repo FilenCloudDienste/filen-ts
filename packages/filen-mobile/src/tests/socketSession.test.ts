@@ -42,12 +42,7 @@ vi.mock("@/features/chats/chatsWrap", () => ({
 	wrapMessage: (message: unknown) => message
 }))
 
-import {
-	noteSocketDataEvent,
-	socketCoveredRefetchOnMount,
-	trackServerReads,
-	queryReadDuringOrAfterSocketGap
-} from "@/queries/socketSession"
+import { noteSocketDataEvent, socketCoveredRefetchOnMount, trackServerReads, queryReadSinceSocketReconnect } from "@/queries/socketSession"
 import useSocketStore from "@/stores/useSocket.store"
 import useChatsQuery, { CHATS_LIST_REUSE_MS, BASE_QUERY_KEY as CHATS_KEY } from "@/features/chats/queries/useChats.query"
 import useChatMessagesQuery from "@/features/chats/queries/useChatMessages.query"
@@ -261,7 +256,7 @@ describe("chats — reopen request counts", () => {
 	})
 })
 
-describe("queryReadDuringOrAfterSocketGap", () => {
+describe("queryReadSinceSocketReconnect", () => {
 	function gapQuery() {
 		const query = holder.client.getQueryCache().find({ queryKey: ["gap"], exact: true })
 
@@ -274,34 +269,61 @@ describe("queryReadDuringOrAfterSocketGap", () => {
 
 	it("a read from before the gap does not cover it", async () => {
 		await holder.client.fetchQuery({ queryKey: ["gap"], queryFn: async () => "before" })
+		await tick()
 		await reconnect()
 
-		expect(queryReadDuringOrAfterSocketGap(gapQuery())).toBe(false)
+		expect(queryReadSinceSocketReconnect(gapQuery())).toBe(false)
 	})
 
-	it("a read begun while the socket was down covers the gap", async () => {
+	it("nor does a read begun during the gap: a version saved before the reconnect reached neither", async () => {
 		useSocketStore.getState().setState("disconnected")
 		await tick()
 		await holder.client.fetchQuery({ queryKey: ["gap"], queryFn: async () => "during" })
+		await tick()
 		useSocketStore.getState().setState("connected")
 
-		expect(queryReadDuringOrAfterSocketGap(gapQuery())).toBe(true)
+		expect(queryReadSinceSocketReconnect(gapQuery())).toBe(false)
 	})
 
-	it("a read under way covers it", async () => {
+	it("a read begun since the reconnect covers it, finished or under way", async () => {
 		let release = () => {}
 
 		await reconnect()
+		await tick()
 
 		const reading = holder.client.fetchQuery({
 			queryKey: ["gap"],
 			queryFn: () =>
 				new Promise<string>(resolve => {
-					release = () => resolve("reading")
+					release = () => resolve("after")
 				})
 		})
 
-		expect(queryReadDuringOrAfterSocketGap(gapQuery())).toBe(true)
+		expect(queryReadSinceSocketReconnect(gapQuery())).toBe(true)
+
+		release()
+		await reading
+
+		expect(queryReadSinceSocketReconnect(gapQuery())).toBe(true)
+	})
+
+	it("a read still under way from before the reconnect does not", async () => {
+		let release = () => {}
+
+		useSocketStore.getState().setState("disconnected")
+
+		const reading = holder.client.fetchQuery({
+			queryKey: ["gap"],
+			queryFn: () =>
+				new Promise<string>(resolve => {
+					release = () => resolve("during")
+				})
+		})
+
+		await tick()
+		useSocketStore.getState().setState("connected")
+
+		expect(queryReadSinceSocketReconnect(gapQuery())).toBe(false)
 
 		release()
 		await reading

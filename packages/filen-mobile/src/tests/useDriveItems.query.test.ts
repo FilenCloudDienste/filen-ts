@@ -5,6 +5,7 @@ const {
 	mockQueryUpdaterSet,
 	mockQueryCacheFind,
 	mockFetchQuery,
+	mockCancelQueries,
 	mockGetQueryState,
 	mockQueryUpdaterGet,
 	mockGetSdkClients,
@@ -29,6 +30,7 @@ const {
 		mockQueryUpdaterSet: vi.fn(),
 		mockQueryCacheFind: vi.fn((): unknown => undefined),
 		mockFetchQuery: vi.fn(),
+		mockCancelQueries: vi.fn(),
 		mockQueryUpdaterGet: vi.fn().mockReturnValue(undefined),
 		// Defaults to "the listing row already exists and holds []" — the pre-existing baseline for
 		// every optimistic-update test here. The row-creation skip is pinned by its own tests below,
@@ -101,7 +103,8 @@ vi.mock("@/queries/client", () => ({
 	queryClient: {
 		getQueryState: mockGetQueryState,
 		getQueryCache: () => ({ find: mockQueryCacheFind }),
-		fetchQuery: mockFetchQuery
+		fetchQuery: mockFetchQuery,
+		cancelQueries: mockCancelQueries
 	},
 	// Real implementation, not a passthrough: driveItemsQueryUpdate returns through it, so a stub
 	// would let these updater-forwarding assertions pass against behaviour production never runs.
@@ -289,6 +292,7 @@ vi.mock("@/lib/sdkErrors", () => ({
 }))
 
 vi.mock("@filen/sdk-rs", () => ({
+	FileMeta_Tags: { Decoded: "Decoded" },
 	AnyNormalDir: {
 		Root: class {
 			tag = "Root"
@@ -1493,31 +1497,48 @@ describe("fetchData — fetchSharedDir resolution ladder", () => {
 })
 
 describe("driveItemsQueryFindFileInNormalParent — one read of the open file's directory", () => {
-	const head = { type: "file", data: { uuid: "v2", stableUuid: "lineage" } }
-	const other = { type: "file", data: { uuid: "o1", stableUuid: "other" } }
+	const head = { type: "file", data: { uuid: "v2", stableUuid: "lineage", decryptedMeta: { name: "notes.md" } } }
+	const other = { type: "file", data: { uuid: "o1", stableUuid: "other", decryptedMeta: { name: "other.md" } } }
 
 	beforeEach(() => {
 		mockQueryCacheFind.mockReset()
 		mockQueryCacheFind.mockReturnValue(undefined)
 		mockFetchQuery.mockReset()
+		mockCancelQueries.mockReset()
 		cacheDirectoryUuidToAnyNormalDir.clear()
 		mockCacheRootUuid.value = "root-uuid"
 	})
 
-	it("refreshes a held listing through its query, which joins a read already under way", async () => {
+	it("refreshes a held listing through its query, cancelling a read begun before the reconnect", async () => {
 		mockQueryCacheFind.mockReturnValue({ state: { data: [other], fetchStatus: "fetching", status: "success" } })
 		mockFetchQuery.mockResolvedValue([other, head])
 
-		await expect(driveItemsQueryFindFileInNormalParent("dir-1", "lineage")).resolves.toBe(head)
+		await expect(driveItemsQueryFindFileInNormalParent("dir-1", "lineage", "notes.md")).resolves.toEqual({
+			lineage: head,
+			sameName: undefined
+		})
+		expect(mockCancelQueries).toHaveBeenCalledTimes(1)
 		expect(mockFetchQuery).toHaveBeenCalledTimes(1)
 	})
 
-	it("without a held listing, lists the directory bare and unwraps only the match", async () => {
+	it("reports a file of another lineage now holding the name, whatever its case", async () => {
+		const replacement = { type: "file", data: { uuid: "r1", stableUuid: "else", decryptedMeta: { name: "Notes.MD" } } }
+
+		mockQueryCacheFind.mockReturnValue({ state: { data: [other], fetchStatus: "idle", status: "success" } })
+		mockFetchQuery.mockResolvedValue([other, replacement])
+
+		await expect(driveItemsQueryFindFileInNormalParent("dir-1", "lineage", "notes.md")).resolves.toEqual({
+			lineage: undefined,
+			sameName: replacement
+		})
+	})
+
+	it("without a held listing, lists the directory bare and unwraps only the matches", async () => {
 		const listDir = vi.fn().mockResolvedValue({
 			dirs: [],
 			files: [
-				{ uuid: "o1", stableUuid: "other" },
-				{ uuid: "v2", stableUuid: "lineage" }
+				{ uuid: "o1", stableUuid: "other", meta: { tag: "Decoded", inner: [{ name: "other.md" }] } },
+				{ uuid: "v2", stableUuid: "lineage", meta: { tag: "Decoded", inner: [{ name: "notes.md" }] } }
 			]
 		})
 
@@ -1525,19 +1546,23 @@ describe("driveItemsQueryFindFileInNormalParent — one read of the open file's 
 		cacheDirectoryUuidToAnyNormalDir.set("dir-1", { tag: "Dir" })
 		vi.mocked(unwrapFileMeta).mockClear()
 
-		const found = await driveItemsQueryFindFileInNormalParent("dir-1", "lineage")
+		const found = await driveItemsQueryFindFileInNormalParent("dir-1", "lineage", "notes.md")
 
-		expect(found?.data.uuid).toBe("v2")
+		expect(found.lineage?.data.uuid).toBe("v2")
+		expect(found.sameName).toBeUndefined()
 		expect(listDir).toHaveBeenCalledTimes(1)
 		expect(unwrapFileMeta).toHaveBeenCalledTimes(1)
 		expect(mockFetchQuery).not.toHaveBeenCalled()
 		expect(mockQueryUpdaterSet).not.toHaveBeenCalled()
 	})
 
-	it("answers undefined when the lineage is no longer in the directory", async () => {
+	it("answers nothing when the lineage left the directory and its name is free", async () => {
 		mockGetSdkClients.mockResolvedValue({ authedSdkClient: { listDir: vi.fn().mockResolvedValue({ dirs: [], files: [] }) } })
 		cacheDirectoryUuidToAnyNormalDir.set("dir-1", { tag: "Dir" })
 
-		await expect(driveItemsQueryFindFileInNormalParent("dir-1", "lineage")).resolves.toBeUndefined()
+		await expect(driveItemsQueryFindFileInNormalParent("dir-1", "lineage", "notes.md")).resolves.toEqual({
+			lineage: undefined,
+			sameName: undefined
+		})
 	})
 })

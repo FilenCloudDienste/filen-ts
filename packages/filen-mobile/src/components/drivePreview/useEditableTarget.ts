@@ -60,10 +60,18 @@ export default function useEditableTarget(item: GalleryItemTagged): EditableTarg
 	// reads a non-reactive Map. Kept with the uuid it is for: a move elsewhere changes the file's parent
 	// under the same key.
 	const [warmedParent, setWarmedParent] = useRecyclingState<{ uuid: string; dir: AnyDirWithContext } | null>(null, [galleryItemKey(item)])
-	const parentUuid = item.type === "drive" && item.data.type === "file" ? unwrapParentUuid(item.data.data.parent) : null
+	// The directory of a file of the user's own drive, the only kind whose directory can be looked up and
+	// written into. A file listed through a public link or a share carries no stable id, and its parent lives
+	// in another cache: it stays read-only, and is never looked up.
+	const ownFile = item.type === "drive" && item.data.type === "file" ? item.data : null
+	const parentUuid =
+		ownFile !== null && ownFile.data.stableUuid !== undefined && drivePath?.type !== "linked" && drivePath?.type !== "sharedIn"
+			? unwrapParentUuid(ownFile.data.parent)
+			: null
+	const ownParentUuid = parentUuid !== null && !cache.directoryUuidToAnyLinkedDirWithMeta.has(parentUuid) ? parentUuid : null
 
 	const parent =
-		(warmedParent !== null && warmedParent.uuid === parentUuid ? warmedParent.dir : null) ??
+		(warmedParent !== null && warmedParent.uuid === ownParentUuid ? warmedParent.dir : null) ??
 		(item.type === "drive" && drivePath
 			? getRealDriveItemParent({
 					item: item.data,
@@ -74,23 +82,22 @@ export default function useEditableTarget(item: GalleryItemTagged): EditableTarg
 	// Warm the parent-directory cache for an own file whose directory is not cached (a deep search hit, a
 	// move elsewhere into a directory not listed yet), again after a socket gap if it failed.
 	useEffect(() => {
-		// Only the plain-drive `file` case: shared files resolve their parent from a different cache,
-		// and only `file` carries a parent uuid.
-		if (item.type !== "drive" || item.data.type !== "file") {
+		const uuid = ownParentUuid
+
+		if (ownFile === null || uuid === null) {
 			return
 		}
 
 		// The drive socket patches a rename or move of a cached file only: a search hit is cached here, so
 		// this preview follows one made elsewhere (driveItemUpdated).
-		if (!cache.fileUuidToNormalFile.get(item.data.data.uuid)) {
-			cache.cacheDriveItem(item.data)
+		if (!cache.fileUuidToNormalFile.get(ownFile.data.uuid)) {
+			cache.cacheDriveItem(ownFile)
 		}
 
-		const uuid = unwrapParentUuid(item.data.data.parent)
 		// A root parent resolves without the cache, and an already-cached parent needs no warm.
-		const needed = () => uuid !== null && !(cache.rootUuid && uuid === cache.rootUuid) && !cache.directoryUuidToAnyNormalDir.get(uuid)
+		const needed = () => !(cache.rootUuid && uuid === cache.rootUuid) && !cache.directoryUuidToAnyNormalDir.get(uuid)
 
-		if (uuid === null || !needed()) {
+		if (!needed()) {
 			return
 		}
 
@@ -122,7 +129,7 @@ export default function useEditableTarget(item: GalleryItemTagged): EditableTarg
 			controller.abort()
 			unsubscribeReconnected()
 		}
-	}, [item, setWarmedParent])
+	}, [ownFile, ownParentUuid, setWarmedParent])
 
 	// The saved version until the gallery shows it; from then on the gallery's item, which follows a rename
 	// or move made elsewhere.
@@ -142,20 +149,20 @@ export default function useEditableTarget(item: GalleryItemTagged): EditableTarg
 			? true
 			: itemToUse.type !== "file" ||
 				!itemToUse.data.decryptedMeta ||
-				(parent === null ? parentUuid === null : parent === "sharedInRoot")
+				(parent === null ? ownParentUuid === null : parent === "sharedInRoot")
 
 	return {
 		itemToUse,
 		parent,
 		resolveParent: async () => {
-			if (parent !== null || parentUuid === null) {
+			if (parent !== null || ownParentUuid === null) {
 				return parent
 			}
 
-			const dir = await warmParent(parentUuid)
+			const dir = await warmParent(ownParentUuid)
 
 			if (dir) {
-				setWarmedParent({ uuid: parentUuid, dir })
+				setWarmedParent({ uuid: ownParentUuid, dir })
 			}
 
 			return dir
