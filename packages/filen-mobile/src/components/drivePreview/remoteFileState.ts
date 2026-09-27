@@ -108,9 +108,20 @@ events.subscribe("driveItemUpdated", ({ item }) => {
 	}
 })
 
-// These name a version only, of whichever file: every read goes.
-events.subscribe("driveFileGone", ({ uuid }) => {
-	for (const state of lineages.values()) {
+// The file's lineage when the event (or the cache) told it; otherwise the event names a version only, of
+// whichever file, and every read goes.
+function lineagesOf(stableUuid: string | undefined): Iterable<LineageState> {
+	if (stableUuid === undefined) {
+		return lineages.values()
+	}
+
+	const state = lineages.get(stableUuid)
+
+	return state !== undefined ? [state] : []
+}
+
+events.subscribe("driveFileGone", ({ uuid, stableUuid }) => {
+	for (const state of lineagesOf(stableUuid)) {
 		changed(state)
 
 		if (state.newest === uuid) {
@@ -119,8 +130,8 @@ events.subscribe("driveFileGone", ({ uuid }) => {
 	}
 })
 
-events.subscribe("driveFileRestored", () => {
-	for (const state of lineages.values()) {
+events.subscribe("driveFileRestored", ({ stableUuid }) => {
+	for (const state of lineagesOf(stableUuid)) {
 		changed(state)
 	}
 })

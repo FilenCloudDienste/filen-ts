@@ -70,6 +70,7 @@ vi.mock("@/lib/unlockedForeground", async () => {
 
 	return {
 		whenUnlockedForeground: () => state.unlocked,
+		unlockedForegroundGate: { isOpen: () => true, whenOpen: () => state.unlocked },
 		// The real toaster, waiting on this file's unlock instead of the app's.
 		createUnlockedToaster: (show: (message: string) => void) => {
 			const toaster = real.createUnlockedToaster(show)
@@ -476,5 +477,17 @@ describe("a note edited elsewhere while open", () => {
 
 		expect(confirm3).not.toHaveBeenCalled()
 		expect(release).toHaveBeenCalledTimes(1)
+	})
+
+	it("asks through the unlock gate, so the prompt never shows over the lock while it waits its turn", async () => {
+		state.inflight = { n1: [{ timestamp: 1, content: "mine", note, baseContentHash: "h(old)" }] }
+		confirm3.mockResolvedValue("cancel")
+
+		edited("theirs")
+		await flush()
+
+		expect(confirm3).toHaveBeenCalledWith(
+			expect.objectContaining({ gate: expect.objectContaining({ isOpen: expect.any(Function), whenOpen: expect.any(Function) }) })
+		)
 	})
 })

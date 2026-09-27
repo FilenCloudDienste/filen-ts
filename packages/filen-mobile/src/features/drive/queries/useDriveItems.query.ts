@@ -34,6 +34,7 @@ import { listCameraUploadRemote, remoteWalkDropsEntries } from "@/features/camer
 import logger from "@/lib/logger"
 import events from "@/lib/events"
 import copyActivity from "@/features/drive/copyActivity"
+import socketCreateBatcher from "@/features/drive/socketCreateBatcher"
 
 export const BASE_QUERY_KEY = "useDriveItemsQuery"
 
@@ -873,6 +874,10 @@ export async function driveItemsQueryFindFileInNormalParent(
 	if (cache.rootUuid && parentUuid === cache.rootUuid) {
 		keyed.push({ path: { type: "drive", uuid: null } })
 	}
+
+	// A new version the socket announced lands in its listing up to a batch window later: written first, so a
+	// cached listing never shows the version before it.
+	socketCreateBatcher.flushNow()
 
 	for (const params of keyed) {
 		const queryKey = driveItemsQueryKey(params)

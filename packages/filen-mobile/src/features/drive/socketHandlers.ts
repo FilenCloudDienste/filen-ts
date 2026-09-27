@@ -132,7 +132,7 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 
 			// A restore leaves mtime unchanged, so it is not surfaced in Recents (a new file is, via the batcher).
 			if (eventInner.inner.tag === DriveEvent_Tags.FileRestore) {
-				events.emit("driveFileRestored", { uuid: inner.file.uuid })
+				events.emit("driveFileRestored", { uuid: inner.file.uuid, stableUuid: inner.file.stableUuid })
 
 				// In case of a restore from trash, we need to remove the item from the trash list
 				driveItemsQueryUpdate({
@@ -179,7 +179,7 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 				// Without a stableUuid only an old version went, not the file.
 				if (inner.stableUuid) {
 					dropDriveItem(inner.uuid)
-					events.emit("driveFileGone", { uuid: inner.uuid, reason: "deleted" })
+					events.emit("driveFileGone", { uuid: inner.uuid, reason: "deleted", stableUuid: inner.stableUuid })
 				}
 			} else {
 				const [archived] = eventInner.inner.inner
@@ -188,7 +188,7 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 				// and an open editor follow the paired FileNew instead.
 				if (!archived.newUuid) {
 					dropDriveItem(archived.uuid)
-					events.emit("driveFileGone", { uuid: archived.uuid, reason: "replaced" })
+					events.emit("driveFileGone", { uuid: archived.uuid, reason: "replaced", stableUuid: fromCache?.stableUuid })
 				}
 			}
 
@@ -422,7 +422,11 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 			// paired FileNew.
 			if (!inner.newUuid) {
 				dropDriveItem(inner.uuid)
-				events.emit("driveFileGone", { uuid: inner.uuid, reason: "trashed" })
+				events.emit("driveFileGone", {
+					uuid: inner.uuid,
+					reason: "trashed",
+					stableUuid: cache.fileUuidToNormalFile.get(inner.uuid)?.stableUuid
+				})
 			}
 
 			const fromCache = cache.fileUuidToNormalFile.get(inner.uuid)

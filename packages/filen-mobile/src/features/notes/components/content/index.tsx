@@ -31,7 +31,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context"
 import { useHeaderHeight } from "expo-router/react-navigation"
 import useIsOnline from "@/hooks/useIsOnline"
 import useSocketStore, { onSocketReconnected } from "@/stores/useSocket.store"
-import { createUnlockedToaster, whenUnlockedForeground } from "@/lib/unlockedForeground"
+import { createUnlockedToaster, unlockedForegroundGate, whenUnlockedForeground } from "@/lib/unlockedForeground"
 import { notesQueryGet } from "@/features/notes/queries/useNotesQuery"
 import logger from "@/lib/logger"
 import { noteDisplayTitle } from "@/lib/decryption"
@@ -460,7 +460,9 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 						message: t("note_edited_message"),
 						primaryText: t("remote_change_save_copy"),
 						destructiveText: t("remote_change_load_theirs"),
-						cancelText: t("remote_change_keep_mine")
+						cancelText: t("remote_change_keep_mine"),
+						// The app can lock while this waits for its turn.
+						gate: unlockedForegroundGate
 					})
 				})
 

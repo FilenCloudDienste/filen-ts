@@ -307,6 +307,18 @@ describe("queryReadSinceSocketReconnect", () => {
 		expect(queryReadSinceSocketReconnect(gapQuery())).toBe(true)
 	})
 
+	it("nor does a read invalidated since, by a change nothing was told of", async () => {
+		await reconnect()
+		await tick()
+		await holder.client.fetchQuery({ queryKey: ["gap"], queryFn: async () => "after" })
+
+		expect(queryReadSinceSocketReconnect(gapQuery())).toBe(true)
+
+		await holder.client.invalidateQueries({ queryKey: ["gap"], refetchType: "none" })
+
+		expect(queryReadSinceSocketReconnect(gapQuery())).toBe(false)
+	})
+
 	it("a read still under way from before the reconnect does not", async () => {
 		let release = () => {}
 

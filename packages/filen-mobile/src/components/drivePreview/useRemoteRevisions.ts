@@ -38,7 +38,9 @@ type Gone = { uuid: string; reason: DriveFileGoneReason }
 // What a check for changes the socket may have missed found. `current`: nothing newer, and `file` is the file to
 // save over (renamed or moved elsewhere, it is followed). `answered`: something was, and the usual prompt or
 // follow took it over. `unknown`: the check could not be made or was overtaken, so nothing is known.
-type GapCheck = { kind: "current"; file: DriveItemFileExtracted } | { kind: "answered" } | { kind: "unknown"; error?: unknown }
+// `unknown` with `changing`: the file kept changing under the check's reads, so nothing could be concluded.
+type GapCheck =
+	{ kind: "current"; file: DriveItemFileExtracted } | { kind: "answered" } | { kind: "unknown"; error?: unknown; changing?: boolean }
 
 interface UseRemoteRevisionsParams {
 	item: GalleryItemTagged
@@ -573,7 +575,7 @@ export default function useRemoteRevisions({
 			}
 
 			if (lookedUp === null) {
-				return { kind: "unknown" }
+				return { kind: "unknown", changing: true }
 			}
 
 			if (!lookedUp.success) {
@@ -746,6 +748,12 @@ export default function useRemoteRevisions({
 				void checkGap(savingRef.current)
 			}
 		})
+		// A drive event the socket could not read: the file on screen, too, may have changed unseen.
+		const missed = events.subscribe("driveChangesMissed", () => {
+			if (isCurrent()) {
+				void checkGap(savingRef.current)
+			}
+		})
 
 		// A check a save or a teardown left undone for this file: run by this editor, now that it is here.
 		const lineageOnMount = lineageOf(latest.current.itemToUse)
@@ -801,8 +809,11 @@ export default function useRemoteRevisions({
 
 				if (result.kind !== "current") {
 					// Nothing written over a version not known to be the newest: offline, the upload would fail too.
+					// Never silently: the user is told the save did not happen, and why.
 					if (result.kind === "unknown" && result.error !== undefined) {
 						alerts.error(result.error)
+					} else if (result.kind === "unknown" && result.changing === true) {
+						alerts.error(latest.current.t("remote_change_save_not_checked"))
 					}
 
 					return null
@@ -900,6 +911,7 @@ export default function useRemoteRevisions({
 			gone.remove()
 			restored.remove()
 			updated.remove()
+			missed.remove()
 			unsubscribeReconnected()
 		}
 	}, [savingRef])

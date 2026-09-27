@@ -386,6 +386,7 @@ import {
 } from "@/features/drive/queries/useDriveItems.query"
 import { unwrapDirMeta, unwrapFileMeta, type UnwrapDirMetaResult, type UnwrapFileMetaResult } from "@/lib/sdkUnwrap"
 import { unwrapSdkError } from "@/lib/sdkErrors"
+import socketCreateBatcher from "@/features/drive/socketCreateBatcher"
 import { type DriveItem } from "@/types"
 
 beforeEach(() => {
@@ -1527,6 +1528,18 @@ describe("driveItemsQueryFindFileInNormalParent — one read of the open file's 
 			sameName: undefined
 		})
 		expect(mockFetchQuery).toHaveBeenCalledTimes(1)
+	})
+
+	it("writes the socket's pending creates before reading a cached listing, so a new version is in it", async () => {
+		const flushNow = vi.spyOn(socketCreateBatcher, "flushNow")
+
+		mockQueryCacheFind.mockReturnValue({ state: { data: [other], fetchStatus: "idle", status: "success" } })
+		mockFetchQuery.mockResolvedValue([other])
+
+		await driveItemsQueryFindFileInNormalParent("dir-1", "lineage", "notes.md")
+
+		expect(flushNow).toHaveBeenCalledTimes(1)
+		flushNow.mockRestore()
 	})
 
 	it("reports a file of another lineage now holding the name, whatever its case", async () => {

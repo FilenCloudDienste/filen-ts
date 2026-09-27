@@ -1248,6 +1248,79 @@ describe("useRemoteRevisions", () => {
 			expect(updated).not.toHaveBeenCalledWith({ previousUuid: "v1", item: file("v1") })
 		})
 
+		it("a clean editor is re-checked after a drive event the socket could not read, and follows what changed", async () => {
+			markCovered("lineage", liveConnection(), "v1")
+			findFile.mockResolvedValue({ lineage: file("v2"), sameName: undefined })
+
+			const { updated } = mountOn("v1", false)
+
+			emit("driveChangesMissed", undefined)
+			await flush()
+
+			expect(findFile).toHaveBeenCalledTimes(1)
+			expect(updated).toHaveBeenCalledWith({ previousUuid: "v1", item: file("v2") })
+		})
+
+		it("deletions of other files during the check's read leave it standing", async () => {
+			const read = deferred<unknown>()
+
+			findFile.mockReturnValue(read.promise)
+
+			const { hook, savingRef } = mountOn("v1", true)
+			let target: unknown = "unset"
+			let saving: Promise<void> = Promise.resolve()
+
+			act(() => {
+				savingRef.current = true
+				saving = hook.result.current.beforeSave().then(result => {
+					target = result
+				})
+			})
+
+			emit("driveFileGone", { uuid: "x1", reason: "trashed", stableUuid: "other" })
+			emit("driveFileRestored", { uuid: "x1", stableUuid: "other" })
+			read.resolve({ lineage: file("v1"), sameName: undefined })
+
+			await act(async () => {
+				await saving
+			})
+
+			expect(target).toEqual(file("v1"))
+			expect(findFile).toHaveBeenCalledTimes(1)
+		})
+
+		it("a save the file kept changing under says it did not happen", async () => {
+			const first = deferred<unknown>()
+			const second = deferred<unknown>()
+
+			findFile.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise)
+
+			const { hook, savingRef } = mountOn("v1", true)
+			let target: unknown = "unset"
+			let saving: Promise<void> = Promise.resolve()
+
+			act(() => {
+				savingRef.current = true
+				saving = hook.result.current.beforeSave().then(result => {
+					target = result
+				})
+			})
+
+			// Renamed twice elsewhere, each during a read.
+			emit("driveItemUpdated", { previousUuid: "v1", item: file("v1", { name: "a.md" }) })
+			first.resolve({ lineage: file("v1"), sameName: undefined })
+			await flush()
+			emit("driveItemUpdated", { previousUuid: "v1", item: file("v1", { name: "b.md" }) })
+			second.resolve({ lineage: file("v1", { name: "a.md" }), sameName: undefined })
+
+			await act(async () => {
+				await saving
+			})
+
+			expect(target).toBeNull()
+			expect(alertError).toHaveBeenCalledWith("remote_change_save_not_checked")
+		})
+
 		it("a drive event the socket could not read makes every file's next save check", async () => {
 			markCovered("lineage", liveConnection(), "v1")
 			findFile.mockResolvedValue({ lineage: file("v1"), sameName: undefined })

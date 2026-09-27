@@ -47,10 +47,13 @@ export type Events = {
 	driveFileGone: {
 		uuid: string
 		reason: DriveFileGoneReason
+		// The file's stable id, when the event or the cache tells it.
+		stableUuid?: string | undefined
 	}
 	// A trashed file was restored from the trash, from any client: an open editor no longer treats it as gone.
 	driveFileRestored: {
 		uuid: string
+		stableUuid?: string | undefined
 	}
 	// A drive event arrived that the SDK could not read: some change happened that nothing was told of.
 	driveChangesMissed: void

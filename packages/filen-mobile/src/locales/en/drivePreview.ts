@@ -176,6 +176,8 @@ export const drivePreview = {
 	remote_deleted_title: "This file was deleted elsewhere",
 	/** Remote-deletion alert — message; {{name}} is the file name */
 	remote_deleted_message: "{{name}} was moved to the trash or deleted while you were editing it. Your changes are still here.",
+	/** Error banner when a save did not happen because the file kept changing elsewhere while it was checked */
+	remote_change_save_not_checked: "The file kept changing elsewhere, so it wasn't saved. Try again.",
 	/** Remote-replacement alert — title, shown while an open file has unsaved edits and another file replaces it under its name elsewhere */
 	remote_replaced_title: "This file was replaced elsewhere",
 	/** Remote-replacement alert — message; {{name}} is the file name */
