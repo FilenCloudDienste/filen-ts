@@ -43,8 +43,8 @@ vi.mock("@/lib/unlockedForeground", async () => {
 			const toaster = real.createUnlockedToaster(show)
 
 			return {
-				notify: (message: string) => {
-					void unlocked.current.then(() => toaster.notify(message))
+				notify: (kind: string, message: string) => {
+					void unlocked.current.then(() => toaster.notify(kind, message))
 				},
 				dispose: toaster.dispose
 			}
@@ -685,5 +685,76 @@ describe("useRemoteRevisions", () => {
 		await flush()
 
 		expect(alertNormal).not.toHaveBeenCalled()
+	})
+
+	it("says so when the editor's own save landed on another lineage, and follows it", async () => {
+		const { hook, savingRef } = mount({ hasEdits: true })
+
+		savingRef.current = true
+		// Another file took its name while the save uploaded: the save became a version of that file.
+		emit("driveFileGone", { uuid: "v1" })
+
+		act(() => {
+			hook.result.current.saveSettled(file("theirs-v2", { stableUuid: "their-lineage" }))
+		})
+		await flush()
+
+		expect(alertNormal).toHaveBeenCalledWith("remote_change_save_other_lineage")
+		expect(confirm3).not.toHaveBeenCalled()
+	})
+
+	it("says nothing more when the save stayed on its lineage", async () => {
+		const { hook, savingRef } = mount({ hasEdits: true })
+
+		savingRef.current = true
+
+		act(() => {
+			hook.result.current.saveSettled(file("mine"))
+		})
+		await flush()
+
+		expect(alertNormal).not.toHaveBeenCalled()
+	})
+
+	it("runs a socket-gap re-check the editor's own save got in the way of, once the save settles", async () => {
+		findFile.mockResolvedValue({ lineage: file("mine"), sameName: undefined })
+
+		const { hook, savingRef } = mount({ hasEdits: true })
+
+		savingRef.current = true
+		socketReconnected()
+		await flush()
+
+		expect(findFile).not.toHaveBeenCalled()
+
+		savingRef.current = false
+		// applySaved made the saved version the gallery's current item.
+		currentItem.current = galleryItem("mine")
+
+		act(() => {
+			hook.result.current.saveSettled(file("mine"))
+		})
+		await flush()
+
+		expect(findFile).toHaveBeenCalledTimes(1)
+	})
+
+	it("never takes a file moved elsewhere for one replaced under its name", async () => {
+		findFile.mockResolvedValue({ lineage: undefined, sameName: file("r1", { stableUuid: "else" }) })
+		// The version kept over now sits in another directory.
+		getFileOptional.mockResolvedValue((file("v2", { parent: "elsewhere" }) as { data: unknown }).data)
+		confirm3.mockResolvedValue("cancel")
+
+		mount({ hasEdits: true })
+
+		emit("driveFileRevised", { item: file("v2") })
+		await flush()
+
+		confirm3.mockClear()
+		socketReconnected()
+		await flush()
+
+		expect(getFileOptional).toHaveBeenCalledWith("v2")
+		expect(confirm3).not.toHaveBeenCalled()
 	})
 })

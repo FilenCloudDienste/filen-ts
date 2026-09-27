@@ -75,8 +75,8 @@ vi.mock("@/lib/unlockedForeground", async () => {
 			const toaster = real.createUnlockedToaster(show)
 
 			return {
-				notify: (message: string) => {
-					void state.unlocked.then(() => toaster.notify(message))
+				notify: (kind: string, message: string) => {
+					void state.unlocked.then(() => toaster.notify(kind, message))
 				},
 				dispose: toaster.dispose
 			}

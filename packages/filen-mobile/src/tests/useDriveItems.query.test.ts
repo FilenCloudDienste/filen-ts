@@ -5,7 +5,6 @@ const {
 	mockQueryUpdaterSet,
 	mockQueryCacheFind,
 	mockFetchQuery,
-	mockCancelQueries,
 	mockGetQueryState,
 	mockQueryUpdaterGet,
 	mockGetSdkClients,
@@ -30,7 +29,6 @@ const {
 		mockQueryUpdaterSet: vi.fn(),
 		mockQueryCacheFind: vi.fn((): unknown => undefined),
 		mockFetchQuery: vi.fn(),
-		mockCancelQueries: vi.fn(),
 		mockQueryUpdaterGet: vi.fn().mockReturnValue(undefined),
 		// Defaults to "the listing row already exists and holds []" — the pre-existing baseline for
 		// every optimistic-update test here. The row-creation skip is pinned by its own tests below,
@@ -103,8 +101,7 @@ vi.mock("@/queries/client", () => ({
 	queryClient: {
 		getQueryState: mockGetQueryState,
 		getQueryCache: () => ({ find: mockQueryCacheFind }),
-		fetchQuery: mockFetchQuery,
-		cancelQueries: mockCancelQueries
+		fetchQuery: mockFetchQuery
 	},
 	// Real implementation, not a passthrough: driveItemsQueryUpdate returns through it, so a stub
 	// would let these updater-forwarding assertions pass against behaviour production never runs.
@@ -1504,20 +1501,31 @@ describe("driveItemsQueryFindFileInNormalParent — one read of the open file's 
 		mockQueryCacheFind.mockReset()
 		mockQueryCacheFind.mockReturnValue(undefined)
 		mockFetchQuery.mockReset()
-		mockCancelQueries.mockReset()
 		cacheDirectoryUuidToAnyNormalDir.clear()
 		mockCacheRootUuid.value = "root-uuid"
 	})
 
-	it("refreshes a held listing through its query, cancelling a read begun before the reconnect", async () => {
-		mockQueryCacheFind.mockReturnValue({ state: { data: [other], fetchStatus: "fetching", status: "success" } })
+	it("replaces a held listing's read begun before the reconnect, silently, so its callers get the new one", async () => {
+		const fetch = vi.fn().mockResolvedValue([other, head])
+
+		mockQueryCacheFind.mockReturnValue({ state: { data: [other], fetchStatus: "fetching", status: "success" }, fetch })
+
+		await expect(driveItemsQueryFindFileInNormalParent("dir-1", "lineage", "notes.md")).resolves.toEqual({
+			lineage: head,
+			sameName: undefined
+		})
+		expect(fetch).toHaveBeenCalledWith(undefined, { cancelRefetch: true })
+		expect(mockFetchQuery).not.toHaveBeenCalled()
+	})
+
+	it("refreshes a held listing read before the gap through its query", async () => {
+		mockQueryCacheFind.mockReturnValue({ state: { data: [other], fetchStatus: "idle", status: "success" } })
 		mockFetchQuery.mockResolvedValue([other, head])
 
 		await expect(driveItemsQueryFindFileInNormalParent("dir-1", "lineage", "notes.md")).resolves.toEqual({
 			lineage: head,
 			sameName: undefined
 		})
-		expect(mockCancelQueries).toHaveBeenCalledTimes(1)
 		expect(mockFetchQuery).toHaveBeenCalledTimes(1)
 	})
 

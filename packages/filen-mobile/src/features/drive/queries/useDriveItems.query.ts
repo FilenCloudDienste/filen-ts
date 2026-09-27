@@ -887,8 +887,9 @@ export async function driveItemsQueryFindFileInNormalParent(
 				return find(query.state.data)
 			}
 		} else if (query.state.fetchStatus === "fetching") {
-			// Begun before the reconnect: it may miss a version saved since, so a new read replaces it.
-			await queryClient.cancelQueries({ queryKey, exact: true })
+			// Begun before the reconnect: it may miss a version saved since, so a new read replaces it. The
+			// cancel is silent, so whoever awaited the old read gets the new one's result, not stale data.
+			return find(await query.fetch(undefined, { cancelRefetch: true }))
 		}
 
 		// Joins a read begun since the reconnect rather than starting another.

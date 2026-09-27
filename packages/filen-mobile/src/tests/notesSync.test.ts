@@ -1757,6 +1757,29 @@ describe("Sync (Notes)", () => {
 			expect(mockCreateExecutableTimeout).toHaveBeenCalledTimes(1)
 		})
 
+		it("a peek abandoned under a hold is not remembered", async () => {
+			const sync = await createSync()
+			let peeked: (value: string) => void = () => undefined
+
+			mockNotesGetContent.mockImplementationOnce(() => new Promise<string>(resolve => (peeked = resolve)))
+			notesState.inflightContent = {
+				"note-1": [{ timestamp: 1000, content: "mine", note: mockNote("note-1"), baseContentHash: hashNoteContent("base") }]
+			}
+
+			sync.executeNow()
+
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			const held = sync.hold("note-1")
+
+			peeked("theirs")
+			await held.settled
+
+			expect(sync.peekedSince("note-1", 0)).toBe(false)
+
+			held.release()
+		})
+
 		it("remembers when a note's conflict peek began", async () => {
 			const sync = await createSync()
 			const before = Date.now()

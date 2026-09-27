@@ -156,6 +156,9 @@ export const drivePreview = {
 	/** Toast when a save from this device landed right after a version saved elsewhere, which it replaced */
 	remote_change_save_replaced:
 		"Your save replaced changes saved elsewhere moments before. With file versioning on, they're in the file's version history.",
+	/** Toast when this device's save landed after its file was deleted, or replaced by another file under its name, elsewhere while it uploaded; {{name}} is the file name */
+	remote_change_save_other_lineage:
+		"{{name}} was deleted or replaced elsewhere while you saved. Your changes are now the latest version of {{name}}. With file versioning on, what it held before is in its version history.",
 	/** Remote-deletion alert — title, shown while an open file has unsaved edits and it is trashed or deleted elsewhere */
 	remote_deleted_title: "This file was deleted elsewhere",
 	/** Remote-deletion alert — message; {{name}} is the file name */

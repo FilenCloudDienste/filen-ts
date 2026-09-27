@@ -72,6 +72,8 @@ export default function useRemoteRevisions({
 	// Counts what changed the file's known versions (revisions and deletions of it, saves), so a re-read
 	// that raced one is dropped rather than taken for news.
 	const changes = useRef(0)
+	// A socket-gap re-check the editor's own save got in the way of, run once that save settles.
+	const recheckAfterSave = useRef(false)
 	// Set by the subscription below, which holds everything the settlement needs.
 	const settleRef = useRef<(savedItem: DriveItemFileExtracted | null) => void>(() => undefined)
 	const askIfGoneRef = useRef<() => void>(() => undefined)
@@ -94,8 +96,8 @@ export default function useRemoteRevisions({
 			alerts.normal(message)
 		})
 
-		function notify(message: string): void {
-			toaster.notify(message)
+		function notify(kind: string, message: string): void {
+			toaster.notify(kind, message)
 		}
 
 		function show(from: DriveItemFileExtracted, to: DriveItem, announce: boolean): void {
@@ -110,7 +112,7 @@ export default function useRemoteRevisions({
 			}
 
 			if (announce) {
-				notify(latest.current.t("remote_change_updated"))
+				notify("updated", latest.current.t("remote_change_updated"))
 			}
 		}
 
@@ -147,7 +149,7 @@ export default function useRemoteRevisions({
 				const saved = await latest.current.saveAsNewFile(name)
 
 				if (saved !== null) {
-					notify(t("remote_change_saved_as_new", { name }))
+					notify("savedAsNew", t("remote_change_saved_as_new", { name }))
 				}
 
 				return saved
@@ -410,13 +412,30 @@ export default function useRemoteRevisions({
 			const stableUuid = displayed?.type === "file" ? displayed.data.stableUuid : undefined
 			const parentUuid = displayed?.type === "file" ? unwrapParentUuid(displayed.data.parent) : null
 
-			if (displayed === null || stableUuid === undefined || parentUuid === null || !isCurrent() || savingRef.current) {
+			if (displayed === null || stableUuid === undefined || parentUuid === null || !isCurrent()) {
+				return
+			}
+
+			if (savingRef.current) {
+				recheckAfterSave.current = true
+
 				return
 			}
 
 			const key = galleryItemKey(latest.current.item)
 			const seen = changes.current
-			const fresh = () => answerable(key) && !savingRef.current && changes.current === seen
+			const fresh = () => {
+				if (answerable(key) && !savingRef.current && changes.current === seen) {
+					return true
+				}
+
+				// Overtaken by the editor's own save: judged again against what it made, once it settles.
+				if (savingRef.current) {
+					recheckAfterSave.current = true
+				}
+
+				return false
+			}
 
 			const lookedUp = await run(
 				async () => await driveItemsQueryFindFileInNormalParent(parentUuid, stableUuid, displayed.data.decryptedMeta?.name)
@@ -483,7 +502,7 @@ export default function useRemoteRevisions({
 			// Still in its directory by the lookup, yet absent from its listing: an archived version, as a
 			// replacement leaves it (nothing on the SDK's JS surface marks one archived). Another file holding
 			// its name confirms it, and a save under that name would be a version of that other file.
-			if (sameName !== undefined) {
+			if (sameName !== undefined && movedTo === parentUuid) {
 				void handleGone(serverUuid)
 			}
 		}
@@ -528,13 +547,26 @@ export default function useRemoteRevisions({
 		settleRef.current = (savedItem: DriveItemFileExtracted | null) => {
 			const settled = settleHeldRevisions(held.current, savedItem?.data.uuid ?? null, revision => revision.item.data.uuid)
 			const gone = heldGone.current
+			const savedOver = latest.current.itemToUse
+			const lineageBefore = savedOver?.type === "file" ? savedOver.data.stableUuid : undefined
+			const lineageAfter = savedItem?.type === "file" ? savedItem.data.stableUuid : undefined
 
 			held.current = []
 			heldGone.current = null
 			changes.current++
 
 			if (settled.replaced) {
-				notify(latest.current.t("remote_change_save_replaced"))
+				notify("saveReplaced", latest.current.t("remote_change_save_replaced"))
+			}
+
+			// The save landed on another lineage: the file was deleted, or replaced by another under its name,
+			// while it uploaded, and the save made the file anew or a version of that other file. Said once;
+			// the editor follows what the save made either way (below).
+			if (lineageBefore !== undefined && lineageAfter !== undefined && lineageBefore !== lineageAfter && savedItem !== null) {
+				notify(
+					"saveOtherLineage",
+					latest.current.t("remote_change_save_other_lineage", { name: savedItem.data.decryptedMeta?.name ?? "" })
+				)
 			}
 
 			// Judged against the saved version: this editor, and the gallery's current item, follow it (applySaved).
@@ -550,6 +582,12 @@ export default function useRemoteRevisions({
 
 			if (gone !== null) {
 				void handleGone(gone, false)
+			}
+
+			if (recheckAfterSave.current) {
+				recheckAfterSave.current = false
+
+				void recheck()
 			}
 		}
 

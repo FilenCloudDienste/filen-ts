@@ -458,14 +458,13 @@ export class Sync {
 		let cloudDecrypted = false
 
 		if (snapshot.baseContentHash !== undefined) {
+			const peekStartedAt = Date.now()
+
 			try {
-				const peekStartedAt = Date.now()
 				const peeked = await notes.getContent({ note: liveNote, signal })
 
 				cloudContent = peeked ?? ""
 				cloudDecrypted = typeof peeked === "string"
-
-				this.peeks.set(noteUuid, peekStartedAt)
 			} catch (e) {
 				// Availability beats the toast — push without the check.
 				logger.warn("notes-sync", "conflict-detection peek failed; pushing without overwrite check", {
@@ -477,6 +476,11 @@ export class Sync {
 			// A prompt opened during the peek.
 			if (this.holds.has(noteUuid)) {
 				return
+			}
+
+			// Only a peek this pass acted on counts: one abandoned under a hold found nothing out.
+			if (cloudContent !== undefined) {
+				this.peeks.set(noteUuid, peekStartedAt)
 			}
 
 			// Its answer, or typing, may have changed the outbox meanwhile. Typing on the same base leaves the

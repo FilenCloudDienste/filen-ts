@@ -64,14 +64,15 @@ describe("whenUnlockedForeground", () => {
 })
 
 describe("createUnlockedToaster", () => {
-	it("shows only the latest toast held under the lock, once unlocked", async () => {
+	it("keeps the latest of each kind held under the lock, and shows them in order once unlocked", async () => {
 		useAppStore.setState({ biometricUnlocked: false })
 
 		const shown: string[] = []
 		const toaster = createUnlockedToaster(message => shown.push(message))
 
-		toaster.notify("first")
-		toaster.notify("second")
+		toaster.notify("saveReplaced", "your save replaced theirs")
+		toaster.notify("updated", "updated once")
+		toaster.notify("updated", "updated twice")
 		await Promise.resolve()
 
 		expect(shown).toEqual([])
@@ -80,7 +81,7 @@ describe("createUnlockedToaster", () => {
 		await Promise.resolve()
 		await Promise.resolve()
 
-		expect(shown).toEqual(["second"])
+		expect(shown).toEqual(["your save replaced theirs", "updated twice"])
 	})
 
 	it("shows nothing once disposed", async () => {
@@ -89,7 +90,7 @@ describe("createUnlockedToaster", () => {
 		const shown: string[] = []
 		const toaster = createUnlockedToaster(message => shown.push(message))
 
-		toaster.notify("stale")
+		toaster.notify("updated", "stale")
 		toaster.dispose()
 		useAppStore.getState().setBiometricUnlocked(true)
 		await Promise.resolve()

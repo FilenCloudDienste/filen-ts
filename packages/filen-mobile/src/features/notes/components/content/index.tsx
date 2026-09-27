@@ -437,7 +437,7 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 					})
 				}
 
-				remoteQueue.current.toaster?.notify(t("remote_change_updated"))
+				remoteQueue.current.toaster?.notify("updated", t("remote_change_updated"))
 
 				return
 			}
@@ -536,7 +536,7 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 						return
 					}
 
-					remoteQueue.current.toaster?.notify(t("note_saved_as_copy", { title }))
+					remoteQueue.current.toaster?.notify("savedAsCopy", t("note_saved_as_copy", { title }))
 				}
 
 				await reloadFromServer()

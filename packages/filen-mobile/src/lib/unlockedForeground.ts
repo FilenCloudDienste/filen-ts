@@ -33,20 +33,26 @@ export function whenUnlockedForeground(): Promise<void> {
 	})
 }
 
-// One editor's toasts: shown once the app is unlocked and in front, only the latest while it waits, and none
-// after dispose() (the editor went away), so a lock does not end in a burst of stale toasts.
-export function createUnlockedToaster(show: (message: string) => void): { notify: (message: string) => void; dispose: () => void } {
-	let pending: string | null = null
+// One editor's toasts: shown once the app is unlocked and in front, in the order they came, keeping only the
+// latest of each kind while it waits (so a routine notice never displaces a more important one), and none after
+// dispose() (the editor went away), so a lock does not end in a burst of stale toasts.
+export function createUnlockedToaster(show: (message: string) => void): {
+	notify: (kind: string, message: string) => void
+	dispose: () => void
+} {
+	const pending = new Map<string, string>()
 	let waiting = false
 	let disposed = false
 
 	return {
-		notify: message => {
+		notify: (kind, message) => {
 			if (disposed) {
 				return
 			}
 
-			pending = message
+			// Re-inserted, so the order is that of each kind's latest notice.
+			pending.delete(kind)
+			pending.set(kind, message)
 
 			if (waiting) {
 				return
@@ -55,19 +61,23 @@ export function createUnlockedToaster(show: (message: string) => void): { notify
 			waiting = true
 
 			void whenUnlockedForeground().then(() => {
-				const next = pending
+				const messages = [...pending.values()]
 
 				waiting = false
-				pending = null
+				pending.clear()
 
-				if (!disposed && next !== null) {
-					show(next)
+				if (disposed) {
+					return
+				}
+
+				for (const message of messages) {
+					show(message)
 				}
 			})
 		},
 		dispose: () => {
 			disposed = true
-			pending = null
+			pending.clear()
 		}
 	}
 }
