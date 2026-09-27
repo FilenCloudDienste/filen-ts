@@ -116,6 +116,7 @@ describe("runUpload (injected deps, no worker or query client)", () => {
 		const setProgress = vi.fn<(id: string, bytesTransferred: number) => void>()
 		const settle = vi.fn<(id: string, status: TerminalStatus, error?: ErrorDTO) => void>()
 		const remove = vi.fn<(id: string) => void>()
+		const setItem = vi.fn<(id: string, item: DriveItem) => void>()
 		const patchCreated = vi.fn<(parentUuid: string | null, item: DriveItem) => void>()
 		const invalidateDirectorySize = vi.fn<(parentUuid: string | null) => void>()
 		const warmThumbnail = vi.fn<(uploaded: SdkFile, file: File) => void>()
@@ -123,7 +124,7 @@ describe("runUpload (injected deps, no worker or query client)", () => {
 		const addStorageUsed = vi.fn<(bytes: bigint) => void>()
 		const deps: RunUploadDeps = {
 			upload,
-			store: { add, setProgress, settle, remove },
+			store: { add, setProgress, settle, setItem, remove },
 			patchCreated,
 			invalidateDirectorySize,
 			markAccountStale,
@@ -136,6 +137,7 @@ describe("runUpload (injected deps, no worker or query client)", () => {
 			add,
 			setProgress,
 			settle,
+			setItem,
 			remove,
 			patchCreated,
 			invalidateDirectorySize,
@@ -173,6 +175,11 @@ describe("runUpload (injected deps, no worker or query client)", () => {
 
 		expect(outcome).toEqual({ status: "success" })
 		expect(h.settle).toHaveBeenCalledWith(expect.any(String), "done")
+		// Kept on the finished row, whose "Show in directory" reveals it.
+		const [landedId, landed] = h.setItem.mock.calls[0] ?? []
+
+		expect(landedId).toBe(h.add.mock.calls[0]?.[0].id)
+		expect(landed).toMatchObject({ type: "file", data: { uuid: testUuid("new") } })
 		expect(h.patchCreated).toHaveBeenCalledOnce()
 
 		const [parentUuid, created] = h.patchCreated.mock.calls[0] ?? []

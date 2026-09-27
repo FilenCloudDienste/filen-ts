@@ -18,13 +18,10 @@ export const transfers = {
 	transfersActiveBadge_other: "Transfers, {{count}} active",
 
 	// ── Aggregate speed/progress ──────────────────────────────────────
-	// Shared by the icon-rail Transfers entry's tooltip and the /transfers screen header — both render
-	// the same live rolling-window {percent, speed} useTransfersAggregate computes, gated on
-	// shouldShowTransfersAggregate (transfers.logic.ts).
+	// The /transfers screen header's live summary and the transfer rows' own speed — the rolling-window
+	// speed useTransfersAggregate and transferRate compute.
 	/** Live aggregate transfer speed readout — {{speed}} is a pre-formatted byte-rate string (e.g. "3.2 MB"); appends the per-second unit */
 	transfersAggregateSpeed: "{{speed}}/s",
-	/** Accessible label on the aggregate progress bar (icon-rail tooltip context + the /transfers screen header) */
-	transfersAggregateProgressLabel: "Overall transfer progress",
 
 	// ── Panel ────────────────────────────────────────────────────────────────
 	/** Empty-state title shown when there are no transfers (rail entry's accessible summary + the /transfers screen) */
@@ -41,6 +38,10 @@ export const transfers = {
 	transfersScreenSectionActive: "Active",
 	/** Transfers screen — heading above the section listing finished (done/error) transfers */
 	transfersScreenSectionFinished: "Finished",
+	/** Transfers screen header — how many transfers are running; singular */
+	transfersScreenActiveCount_one: "{{count}} active",
+	/** Transfers screen header — how many transfers are running; plural */
+	transfersScreenActiveCount_other: "{{count}} active",
 	/** Transfers screen — header button pausing every active, not-yet-paused transfer; disabled when none qualify */
 	transfersScreenPauseAll: "Pause all",
 	/** Transfers screen — header button resuming every active, paused transfer; disabled when none qualify */
@@ -63,8 +64,20 @@ export const transfers = {
 	transfersStatusDownloading: "Downloading",
 	/** Transfer row — status label while a copy job runs (one row per copy, however many items it holds) */
 	transfersStatusCopying: "Copying",
-	/** Transfer row — status label once a file finished uploading */
+	/** Transfer row — status label once a transfer finished, where no direction-specific word applies */
 	transfersStatusDone: "Done",
+	/** Transfer row — status label once an upload finished */
+	transfersStatusUploaded: "Uploaded",
+	/** Transfer row — status label once a download finished */
+	transfersStatusDownloaded: "Downloaded",
+	/** Transfer row — status label once a copy finished with every item copied */
+	transfersStatusCopied: "Copied",
+	/** Transfer row — bytes moved so far out of the total; both pre-formatted sizes */
+	transfersRowBytesProgress: "{{done}} of {{total}}",
+	/** Transfer row — estimated time left; {{eta}} = a pre-formatted m:ss (or h:mm:ss) duration */
+	transfersRowTimeLeft: "{{eta}} left",
+	/** Transfer row — button opening the directory a finished upload or copy landed in, with the item selected */
+	transfersRowShowInDirectory: "Show in directory",
 	/** Transfer row — status label when a file failed to upload; the row also surfaces the failing outcome's own error label */
 	transfersStatusError: "Failed",
 	/** Transfer row — status label for a copy that finished with some of its items failed; the rest were copied */

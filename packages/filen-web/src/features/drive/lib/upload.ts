@@ -71,7 +71,7 @@ export const PROGRESS_THROTTLE_MS = 100
 export interface RunUploadDeps {
 	upload: (parentUuid: string | null, transferId: string, file: File, onProgress: (bytes: bigint) => void) => Promise<SdkFile>
 	cancel?: (transferId: string) => void
-	store: Pick<TransfersStore, "add" | "setProgress" | "settle" | "remove">
+	store: Pick<TransfersStore, "add" | "setProgress" | "settle" | "setItem" | "remove">
 	// Splices the landed file into its parent listing (queueListingCreate: batched with the other
 	// creates, its own socket echo included).
 	patchCreated: (parentUuid: string | null, item: DriveItem) => void
@@ -139,6 +139,7 @@ export async function runUpload(deps: RunUploadDeps, args: { parentUuid: string 
 	}
 
 	deps.store.settle(id, "done")
+	deps.store.setItem(id, narrowItem(uploaded))
 	// BEFORE the listing patch, and that ordering is the whole point: patching the row in makes its
 	// tile ask for a thumbnail on the very next commit, so the warm has to have claimed the uuid by
 	// then or the tile starts downloading the file this upload just sent. Sequenced after the upload

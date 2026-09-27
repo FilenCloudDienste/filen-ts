@@ -54,7 +54,7 @@ afterEach(() => {
 // itself actually renders their output: a refactor that stripped this header block while leaving the
 // predicate intact would pass every other persisted test.
 describe("TransfersScreen — aggregate readout", () => {
-	it("renders the live speed + progress bar once at least one transfer is active", () => {
+	it("summarizes the active count, live speed and overall percent once at least one transfer is active", () => {
 		useTransfersStore.setState({
 			transfers: [transfer({ id: "a", status: "uploading", bytesTransferred: 50, size: 100 })],
 			speedSamples: [
@@ -67,19 +67,17 @@ describe("TransfersScreen — aggregate readout", () => {
 
 		render(createElement(TransfersScreen))
 
-		const progress = screen.getByRole("progressbar", { name: "Overall transfer progress" })
-		expect(progress.getAttribute("aria-valuenow")).toBe("50")
 		// transfersAggregateSpeed's own "{{speed}}/s" shape — formatBytes(1_000_000 bytes over the 1s
 		// window) rendered as text, not just the pure computeTransfersSpeed number.
-		expect(screen.getByText(/\/s$/)).toBeTruthy()
+		expect(screen.getByText(/^1 active · .+\/s · 50%$/)).toBeTruthy()
 	})
 
-	it("renders neither the aggregate speed nor its progress bar while nothing is active", () => {
+	it("renders no summary while nothing is active", () => {
 		useTransfersStore.setState({ transfers: [transfer({ id: "a", status: "done" })], speedSamples: [] })
 
 		render(createElement(TransfersScreen))
 
-		expect(screen.queryByRole("progressbar", { name: "Overall transfer progress" })).toBeNull()
+		expect(screen.queryByText(/active ·/)).toBeNull()
 	})
 })
 

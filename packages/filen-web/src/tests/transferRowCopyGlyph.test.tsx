@@ -37,6 +37,7 @@ function renderRow(name: string, glyph: CopyJobGlyph | null): HTMLElement {
 		<TransferRow
 			transfer={copyRow(name)}
 			onRequestCancel={vi.fn()}
+			onShowInDirectory={vi.fn()}
 		/>
 	)
 
@@ -101,6 +102,7 @@ describe("TransferRow — a stopped copy moving its copies to the trash", () => 
 			<TransferRow
 				transfer={{ ...copyRow("3 items"), status: "copying", bytesTransferred: 4 }}
 				onRequestCancel={vi.fn()}
+				onShowInDirectory={vi.fn()}
 			/>
 		)
 
@@ -129,6 +131,7 @@ describe("TransferRow — a stopped copy moving its copies to the trash", () => 
 			<TransferRow
 				transfer={{ ...copyRow("3 items"), status: "copying", bytesTransferred: 4 }}
 				onRequestCancel={vi.fn()}
+				onShowInDirectory={vi.fn()}
 			/>
 		)
 

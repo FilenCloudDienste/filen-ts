@@ -1,10 +1,11 @@
-import { describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { type Transfer } from "@/features/transfers/store/useTransfersStore"
 import {
 	transferProgress,
 	activeStatusLabelKey,
 	finishedStatusLabelKey,
-	transferIconKey
+	transferIconKey,
+	transferRate
 } from "@/features/transfers/components/transferRow.logic"
 
 function transfer(overrides: Partial<Transfer> = {}): Transfer {
@@ -77,10 +78,48 @@ describe("activeStatusLabelKey", () => {
 })
 
 describe("finishedStatusLabelKey", () => {
+	it("says what a finished transfer did, in its direction", () => {
+		expect(finishedStatusLabelKey("done", "upload")).toBe("transfersStatusUploaded")
+		expect(finishedStatusLabelKey("done", "download")).toBe("transfersStatusDownloaded")
+		expect(finishedStatusLabelKey("done", "copy")).toBe("transfersStatusCopied")
+	})
+
 	it("tells a partly failed copy apart from a failed transfer", () => {
-		expect(finishedStatusLabelKey("done")).toBe("transfersStatusDone")
-		expect(finishedStatusLabelKey("completedWithErrors")).toBe("transfersStatusCompletedWithErrors")
-		expect(finishedStatusLabelKey("error")).toBe("transfersStatusError")
+		expect(finishedStatusLabelKey("completedWithErrors", "copy")).toBe("transfersStatusCompletedWithErrors")
+		expect(finishedStatusLabelKey("error", "upload")).toBe("transfersStatusError")
+	})
+})
+
+describe("transferRate", () => {
+	const NOW = 1_000_000
+
+	beforeEach(() => {
+		vi.useFakeTimers()
+		vi.setSystemTime(NOW)
+	})
+
+	afterEach(() => {
+		vi.useRealTimers()
+	})
+
+	// 400 bytes over 2s: 200 B/s, and 600 bytes of 1000 left is 3s.
+	const samples = [
+		{ timestamp: NOW - 2000, totalBytes: 0 },
+		{ timestamp: NOW, totalBytes: 400 }
+	]
+
+	it("reads the transfer's own speed off its window and the time left at that speed", () => {
+		expect(transferRate(transfer({ size: 1000, bytesTransferred: 400 }), samples)).toEqual({ bytesPerSecond: 200, etaSeconds: 3 })
+	})
+
+	it("has no time left for a transfer of unknown size", () => {
+		expect(transferRate(transfer({ size: 0, bytesTransferred: 400 }), samples)).toEqual({ bytesPerSecond: 200, etaSeconds: null })
+	})
+
+	it("is null while paused, once finished, or before the window holds two samples", () => {
+		expect(transferRate(transfer({ size: 1000, paused: true }), samples)).toBeNull()
+		expect(transferRate(transfer({ size: 1000, status: "done" }), samples)).toBeNull()
+		expect(transferRate(transfer({ size: 1000 }), samples.slice(1))).toBeNull()
 	})
 })
 

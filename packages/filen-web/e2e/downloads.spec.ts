@@ -120,7 +120,7 @@ function readSmokeSink(page: Page): Promise<{ bytes: number; first4: number[] }>
 // builds once per run (helpers/fixtures.ts), so nothing here uploads. That also retires the
 // "Clear finished" round trip every test used to make first: a transfer row's accessible name is just
 // its bare file name regardless of direction (transferRow.tsx), so an upload done IN THIS CONTEXT left
-// a finished row that collided with the download's own row on every progressbar/"Done" locator below.
+// a finished row that collided with the download's own row on every row/status locator below.
 // With the upload gone from the context, the transfers list starts empty and the only row that ever
 // appears is the download under test.
 
@@ -144,14 +144,11 @@ test.describe("downloads", () => {
 
 		await openTransfers(page)
 
-		// The transfer row's accessible name lives on its progressbar, not the row's outer container --
-		// the Pause/Cancel buttons are exact-named siblings (vs. the screen's own header
-		// "Pause all"/"Cancel all"), located independently below since only one row is ever active here.
-		// The status label is a sibling of that progressbar inside the same row div, so stepping up to the
-		// row pins "Done" to THIS transfer rather than to the first one anywhere on the screen.
-		const progressbar = page.getByRole("progressbar", { name: fileName })
-		await expect(progressbar).toBeVisible()
-		await expect(progressbar.locator("xpath=..").getByText("Done", { exact: true })).toBeVisible({ timeout: 20_000 })
+		// The transfer row is a list item named after the file (transferRow.tsx), which pins its status line
+		// to THIS transfer rather than to the first one anywhere on the screen.
+		const transferRow = page.getByRole("listitem", { name: fileName })
+		await expect(transferRow).toBeVisible()
+		await expect(transferRow.getByText(/^Downloaded · /)).toBeVisible({ timeout: 20_000 })
 
 		const sink = await readSmokeSink(page)
 		expect(sink.bytes).toBe(Buffer.byteLength(DOWNLOAD_FSA_TEXT, "utf8"))
@@ -187,13 +184,12 @@ test.describe("downloads", () => {
 		// the shared generic archive name (downloadZip.ts's resolveSuggestedZipName). exact: true guards
 		// against Playwright's default substring/case-insensitive accessible-name matching picking up an
 		// unrelated row that merely CONTAINS this literal name.
-		const zipProgressbar = page.getByRole("progressbar", { name: "Filen.zip", exact: true })
-		await expect(zipProgressbar).toBeVisible({ timeout: 10_000 })
-		await expect(zipProgressbar).toHaveCount(1)
+		const zipRow = page.getByRole("listitem", { name: "Filen.zip", exact: true })
+		await expect(zipRow).toBeVisible({ timeout: 10_000 })
+		await expect(zipRow).toHaveCount(1)
 
-		// Scoped to the archive's own row (the status label is that progressbar's sibling), not the first
-		// "Done" anywhere on the screen.
-		await expect(zipProgressbar.locator("xpath=..").getByText("Done", { exact: true })).toBeVisible({ timeout: 20_000 })
+		// Scoped to the archive's own row, not the first status line anywhere on the screen.
+		await expect(zipRow.getByText(/^Downloaded · /)).toBeVisible({ timeout: 20_000 })
 
 		const sink = await readSmokeSink(page)
 		// ZIP local-file-header magic (PK\x03\x04) -- proves a real, complete archive streamed through,
@@ -237,11 +233,10 @@ test.describe("downloads", () => {
 		// still reaches Done for a file this size, so that is what this asserts, not an invented
 		// intermediate state.
 		await openTransfers(page)
-		// Scoped to this transfer's own row (the status label is the progressbar's sibling), not the first
-		// "Done" anywhere on the screen.
-		const swProgressbar = page.getByRole("progressbar", { name: fileName })
-		await expect(swProgressbar).toBeVisible()
-		await expect(swProgressbar.locator("xpath=..").getByText("Done", { exact: true })).toBeVisible({ timeout: 20_000 })
+		// Scoped to this transfer's own row, not the first status line anywhere on the screen.
+		const swRow = page.getByRole("listitem", { name: fileName })
+		await expect(swRow).toBeVisible()
+		await expect(swRow.getByText(/^Downloaded · /)).toBeVisible({ timeout: 20_000 })
 	})
 
 	test("cancelling a File System Access download mid-flight removes the row and leaves the source untouched", async ({

@@ -301,7 +301,7 @@ describe("runDirectoryUpload (injected deps, real runCreateDirectory/runUpload)"
 
 		const deps: RunDirectoryUploadDeps = {
 			createDirectory: { createDirectory: create, patchListing: patchDirListing },
-			upload: { upload, store: { add, setProgress, settle, remove }, patchCreated: patchFileCreated },
+			upload: { upload, store: { add, setProgress, settle, setItem: vi.fn(), remove }, patchCreated: patchFileCreated },
 			heic: { convert: { transform }, readPreference }
 		}
 

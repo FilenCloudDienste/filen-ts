@@ -31,7 +31,7 @@ function sdkDto(kind: string): ErrorDTO {
 }
 
 beforeEach(() => {
-	useTransfersStore.setState({ transfers: [], speedSamples: [] })
+	useTransfersStore.setState({ transfers: [], speedSamples: [], rowSpeedSamples: {} })
 })
 
 afterEach(() => {
@@ -437,6 +437,44 @@ describe("setProgress (speed sample recording)", () => {
 
 		expect(useTransfersStore.getState().speedSamples).toHaveLength(1)
 		expect(useTransfersStore.getState().speedSamples[0]?.totalBytes).toBe(200)
+	})
+})
+
+describe("per-transfer speed samples", () => {
+	it("records each transfer's own bytes, apart from the others", () => {
+		vi.useFakeTimers()
+		vi.setSystemTime(10_000)
+		useTransfersStore.setState({ transfers: [makeTransfer({ id: "a" }), makeTransfer({ id: "b" })] })
+
+		useTransfersStore.getState().setProgress("a", 100)
+		useTransfersStore.getState().setProgress("b", 700)
+
+		expect(useTransfersStore.getState().rowSpeedSamples).toEqual({
+			a: [{ timestamp: 10_000, totalBytes: 100 }],
+			b: [{ timestamp: 10_000, totalBytes: 700 }]
+		})
+	})
+
+	it("drops a transfer's samples once it settles or is removed", () => {
+		useTransfersStore.setState({ transfers: [makeTransfer({ id: "a" }), makeTransfer({ id: "b" })] })
+		useTransfersStore.getState().setProgress("a", 100)
+		useTransfersStore.getState().setProgress("b", 100)
+
+		useTransfersStore.getState().settle("a", "done")
+		useTransfersStore.getState().remove("b")
+
+		expect(useTransfersStore.getState().rowSpeedSamples).toEqual({})
+	})
+})
+
+describe("setItem", () => {
+	it("keeps the landed item on its row only", () => {
+		const item = { type: "file" } as unknown as NonNullable<Transfer["item"]>
+
+		useTransfersStore.setState({ transfers: [makeTransfer({ id: "a" }), makeTransfer({ id: "b" })] })
+		useTransfersStore.getState().setItem("a", item)
+
+		expect(useTransfersStore.getState().transfers.map(transfer => transfer.item)).toEqual([item, undefined])
 	})
 })
 

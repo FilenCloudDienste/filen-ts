@@ -2,12 +2,12 @@ import { test, expect } from "./fixtures"
 import { bootTo, enterScratchDirectory, openTransfers, trashScratchDirectory, LIVE_WRITE_TIMEOUT_MS } from "./helpers/listing"
 
 // Transfers-screen-specific affordances (transferRow.tsx/screens/transfers.tsx) that uploads.spec.ts
-// doesn't already cover: a finished row's own Remove control, and the header-wide Clear finished
-// action. Net-zero on the shared drive like every other upload spec (scratch directory, trashed in
+// doesn't already cover: a finished row's own Show in directory and Remove controls, and the
+// header-wide Clear finished action. Net-zero on the shared drive like every other upload spec (scratch directory, trashed in
 // finally) — the transfer itself is real (the SDK worker has no fake/dry-run mode), only its target
 // directory is disposable.
 test.describe("transfers screen", () => {
-	test("the rail entry navigates straight to /transfers (no popover), and a finished row exposes Remove (not Cancel); Clear finished drops it from the list", async ({
+	test("the rail entry navigates straight to /transfers (no popover), a finished row reveals its file and exposes Remove (not Cancel); Clear finished drops it from the list", async ({
 		page,
 		injectedSession
 	}) => {
@@ -41,6 +41,17 @@ test.describe("transfers screen", () => {
 			const removeButton = page.getByRole("button", { name: "Remove", exact: true })
 			await expect(removeButton).toBeVisible()
 			await expect(page.getByRole("button", { name: "Cancel", exact: true })).toHaveCount(0)
+
+			// "Show in directory" opens the directory the upload landed in, with the file selected.
+			const row = page.getByRole("listitem", { name: fileName })
+			await row.getByRole("button", { name: "Show in directory", exact: true }).click()
+			await expect(page.getByRole("navigation", { name: "Breadcrumb" }).locator('[aria-current="page"]')).toHaveText(scratchName, {
+				timeout: 30_000
+			})
+			await expect(listbox.getByRole("option", { name: fileName })).toHaveAttribute("aria-selected", "true", { timeout: 15_000 })
+
+			await openTransfers(page)
+			await expect(removeButton).toBeVisible()
 
 			// Enabled, not merely visible: screens/transfers.tsx renders this disabled whenever nothing is
 			// clearable, and a click on a disabled control is a silent no-op — which would surface only as

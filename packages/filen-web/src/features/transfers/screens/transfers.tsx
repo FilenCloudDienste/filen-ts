@@ -1,7 +1,8 @@
-import { useState } from "react"
+import { useState, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { useShallow } from "zustand/shallow"
-import { ArrowDownUpIcon, PauseIcon, PlayIcon, Trash2Icon, XIcon } from "lucide-react"
+import { useNavigate } from "@tanstack/react-router"
+import { ArrowDownUpIcon, BrushCleaningIcon, PauseIcon, PlayIcon, XIcon } from "lucide-react"
 import { formatBytes } from "@filen/shared"
 import { isActiveTransfer, useTransfersAggregate, useTransfersStore, type Transfer } from "@/features/transfers/store/useTransfersStore"
 import { useCopyJobsStore } from "@/features/transfers/store/useCopyJobsStore"
@@ -18,18 +19,19 @@ import {
 } from "@/features/transfers/screens/transfers.logic"
 import { cancelTransfer, pauseTransfer, resumeTransfer } from "@/features/transfers/lib/control"
 import { TransferRow } from "@/features/transfers/components/transferRow"
+import { defaultRevealDeps, runOpenContainingDirectory } from "@/features/drive/lib/reveal"
+import type { DriveItem } from "@/features/drive/lib/item"
 import { Button } from "@/components/ui/button"
-import { Progress } from "@/components/ui/progress"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription } from "@/components/ui/empty"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 
-// Full-page transfers surface (header+actionbar+content shell mirrors ContactsList) — the rail entry
-// (iconRail.tsx's TransfersEntry) navigates straight here now (its popover was dropped). TransferRow is
-// the exact same component the rail entry's own tooltip/badge summary is built alongside, so a row
-// looks and behaves identically wherever it appears; only the surrounding chrome (sections, bulk
-// header actions) differs.
+// Full-page transfers surface, reached from the rail entry (iconRail.tsx's TransfersEntry). One header
+// row carries the live summary and the bulk actions; below it, the active transfers, then the finished
+// ones.
 export function TransfersScreen() {
-	const { t } = useTranslation(["transfers", "common"])
+	const { t, i18n } = useTranslation(["transfers", "common"])
+	const navigate = useNavigate()
 	const transfers = useTransfersStore(useShallow(state => state.transfers))
 	// Changes when a copy's job ends, which takes its row out of the bulk actions.
 	const endedCopies = useCopyJobsStore(useShallow(state => endedCopyIds(state.jobs)))
@@ -69,6 +71,12 @@ export function TransfersScreen() {
 		setCancelTargetId(transfer.id)
 	}
 
+	function handleShowInDirectory(item: DriveItem): void {
+		void runOpenContainingDirectory(defaultRevealDeps, item, target => {
+			void navigate(target)
+		})
+	}
+
 	function handlePauseAll(): void {
 		for (const id of pausable) {
 			pauseTransfer(id)
@@ -83,80 +91,61 @@ export function TransfersScreen() {
 
 	return (
 		<>
-			<header className="flex h-14 shrink-0 items-center justify-between gap-3 px-4">
-				<h1 className="text-sm font-medium">{t("common:moduleTransfers")}</h1>
-				{showAggregate ? (
-					// The aggregate {percent, speed} computeTransfersAggregate already produces, finally
-					// rendered: mirrors mobile's floating pill's own live rolling-window speed + progress bar,
-					// condensed into this header row.
-					<div className="flex min-w-0 flex-1 items-center justify-end gap-2">
-						<span className="shrink-0 text-xs text-muted-foreground tabular-nums">
-							{t("transfersAggregateSpeed", { speed: formatBytes(speed) })}
-						</span>
-						{/* Narrower bar below sm: the speed label beside it does not shrink either, so at phone
-						    widths the two together overflow this row. */}
-						<Progress
-							value={percent}
-							aria-label={t("transfersAggregateProgressLabel")}
-							className="h-1.5 w-20 shrink-0 gap-0 sm:w-32"
-						/>
-					</div>
-				) : null}
+			{/* One row at every width: below sm the summary goes and the buttons shed their labels, each
+			    keeping it as its accessible name. */}
+			<header className="flex h-14 shrink-0 items-center gap-3 px-4">
+				<h1 className="shrink-0 text-sm font-medium">{t("common:moduleTransfers")}</h1>
+				<p className="hidden min-w-0 flex-1 truncate text-xs text-muted-foreground tabular-nums sm:block">
+					{showAggregate
+						? [
+								t("transfersScreenActiveCount", { count: activeCount }),
+								t("transfersAggregateSpeed", { speed: formatBytes(speed) }),
+								new Intl.NumberFormat(i18n.language, { style: "percent" }).format(percent / 100)
+							].join(" · ")
+						: null}
+				</p>
+				<div className="ml-auto flex shrink-0 items-center gap-1">
+					<HeaderAction
+						label={t("transfersScreenPauseAll")}
+						disabled={pausable.length === 0}
+						onClick={handlePauseAll}
+					>
+						<PauseIcon />
+					</HeaderAction>
+					<HeaderAction
+						label={t("transfersScreenResumeAll")}
+						disabled={resumable.length === 0}
+						onClick={handleResumeAll}
+					>
+						<PlayIcon />
+					</HeaderAction>
+					<HeaderAction
+						label={t("transfersScreenCancelAll")}
+						disabled={cancellable.length === 0}
+						onClick={() => {
+							setCancelAllConfirmOpen(true)
+						}}
+					>
+						<XIcon />
+					</HeaderAction>
+					<Button
+						variant="outline"
+						size="sm"
+						className="ml-1"
+						aria-label={t("transfersClearFinished")}
+						disabled={!clearable}
+						onClick={() => {
+							// .getState() idiom — the exact store call, outside render (mirrors directoryListing.tsx's
+							// own convention for every store mutation triggered from an event handler).
+							useTransfersStore.getState().clearFinished()
+							pruneSettledCopyJobs()
+						}}
+					>
+						<BrushCleaningIcon aria-hidden="true" />
+						<span className="hidden sm:inline">{t("transfersClearFinished")}</span>
+					</Button>
+				</div>
 			</header>
-			{/* Shed labels below sm, then wrap — never scroll, never clip. Each button keeps its visible label
-			    as a permanent aria-label, so its accessible name is the same at every width; min-h + symmetric
-			    padding replaces the fixed height so a wrapped second line has somewhere to go (this row sits
-			    inside the shell's overflow-hidden main). flex-wrap is the valve for longer locales — icon-only
-			    en-US fits on one line well below 390px. */}
-			<div className="flex min-h-12 shrink-0 flex-wrap items-center justify-end gap-2 px-4 py-2">
-				<Button
-					variant="outline"
-					size="sm"
-					aria-label={t("transfersScreenPauseAll")}
-					disabled={pausable.length === 0}
-					onClick={handlePauseAll}
-				>
-					<PauseIcon aria-hidden="true" />
-					<span className="hidden sm:inline">{t("transfersScreenPauseAll")}</span>
-				</Button>
-				<Button
-					variant="outline"
-					size="sm"
-					aria-label={t("transfersScreenResumeAll")}
-					disabled={resumable.length === 0}
-					onClick={handleResumeAll}
-				>
-					<PlayIcon aria-hidden="true" />
-					<span className="hidden sm:inline">{t("transfersScreenResumeAll")}</span>
-				</Button>
-				<Button
-					variant="outline"
-					size="sm"
-					aria-label={t("transfersScreenCancelAll")}
-					disabled={cancellable.length === 0}
-					onClick={() => {
-						setCancelAllConfirmOpen(true)
-					}}
-				>
-					<XIcon aria-hidden="true" />
-					<span className="hidden sm:inline">{t("transfersScreenCancelAll")}</span>
-				</Button>
-				<Button
-					variant="outline"
-					size="sm"
-					aria-label={t("transfersClearFinished")}
-					disabled={!clearable}
-					onClick={() => {
-						// .getState() idiom — the exact store call, outside render (mirrors directoryListing.tsx's
-						// own convention for every store mutation triggered from an event handler).
-						useTransfersStore.getState().clearFinished()
-						pruneSettledCopyJobs()
-					}}
-				>
-					<Trash2Icon aria-hidden="true" />
-					<span className="hidden sm:inline">{t("transfersClearFinished")}</span>
-				</Button>
-			</div>
 			<div className="flex min-h-0 flex-1 flex-col overflow-hidden">
 				{active.length === 0 && finished.length === 0 ? (
 					<div className="flex flex-1 overflow-y-auto">
@@ -171,45 +160,37 @@ export function TransfersScreen() {
 						</Empty>
 					</div>
 				) : (
-					<div className="flex-1 overflow-y-auto p-2">
+					<div className="flex-1 overflow-y-auto px-2 pb-4">
 						{active.length > 0 ? (
-							<section>
-								<h2 className="px-2 pt-3 pb-1 text-xs font-medium text-muted-foreground">
-									{t("transfersScreenSectionActive")}
-								</h2>
-								<div className="flex flex-col gap-1">
-									{active.map(transfer => (
-										<TransferRow
-											key={transfer.id}
-											transfer={transfer}
-											onRequestCancel={() => {
-												requestRowCancel(transfer)
-											}}
-										/>
-									))}
-								</div>
-							</section>
+							<TransfersSection title={t("transfersScreenSectionActive")}>
+								{active.map(transfer => (
+									<TransferRow
+										key={transfer.id}
+										transfer={transfer}
+										onRequestCancel={() => {
+											requestRowCancel(transfer)
+										}}
+										onShowInDirectory={handleShowInDirectory}
+									/>
+								))}
+							</TransfersSection>
 						) : null}
 						{finished.length > 0 ? (
-							<section>
-								<h2 className="px-2 pt-3 pb-1 text-xs font-medium text-muted-foreground">
-									{t("transfersScreenSectionFinished")}
-								</h2>
-								<div className="flex flex-col gap-1">
-									{finished.map(transfer => (
-										<TransferRow
-											key={transfer.id}
-											transfer={transfer}
-											// A finished row never renders the Cancel button (only active rows do — see
-											// TransferRow's own finished/active branch), so this is never actually
-											// invoked here; still required for the prop's type.
-											onRequestCancel={() => {
-												requestRowCancel(transfer)
-											}}
-										/>
-									))}
-								</div>
-							</section>
+							<TransfersSection title={t("transfersScreenSectionFinished")}>
+								{finished.map(transfer => (
+									<TransferRow
+										key={transfer.id}
+										transfer={transfer}
+										// A finished row never renders the Cancel button (only active rows do — see
+										// TransferRow's own finished/active branch), so this is never actually
+										// invoked here; still required for the prop's type.
+										onRequestCancel={() => {
+											requestRowCancel(transfer)
+										}}
+										onShowInDirectory={handleShowInDirectory}
+									/>
+								))}
+							</TransfersSection>
 						) : null}
 					</div>
 				)}
@@ -255,5 +236,45 @@ export function TransfersScreen() {
 				}}
 			/>
 		</>
+	)
+}
+
+function TransfersSection({ title, children }: { title: string; children: ReactNode }) {
+	return (
+		<section>
+			<h2 className="px-3 pt-4 pb-1 text-xs font-medium text-muted-foreground">{title}</h2>
+			<ul className="flex flex-col gap-0.5">{children}</ul>
+		</section>
+	)
+}
+
+function HeaderAction({
+	label,
+	disabled,
+	onClick,
+	children
+}: {
+	label: string
+	disabled: boolean
+	onClick: () => void
+	children: ReactNode
+}) {
+	return (
+		<Tooltip>
+			<TooltipTrigger
+				render={
+					<Button
+						variant="ghost"
+						size="icon-sm"
+						aria-label={label}
+						disabled={disabled}
+						onClick={onClick}
+					>
+						{children}
+					</Button>
+				}
+			/>
+			<TooltipContent>{label}</TooltipContent>
+		</Tooltip>
 	)
 }

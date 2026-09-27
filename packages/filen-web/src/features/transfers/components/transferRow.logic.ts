@@ -1,4 +1,4 @@
-import { type Transfer } from "@/features/transfers/store/useTransfersStore"
+import { computeTransfersSpeed, isActiveTransfer, type SpeedSample, type Transfer } from "@/features/transfers/store/useTransfersStore"
 import { fileIconKey, type FileIconKey } from "@/features/drive/lib/icon.logic"
 import { clampedRatio } from "@filen/shared"
 
@@ -44,15 +44,58 @@ export function activeStatusLabelKey(
 	}
 }
 
-// A finished row's status word. A copy that finished with some items failed is not a failed copy.
+// A finished row's status word: what happened, in the transfer's own direction. A copy that finished
+// with some items failed is not a failed copy.
 export function finishedStatusLabelKey(
-	status: Transfer["status"]
-): "transfersStatusDone" | "transfersStatusCompletedWithErrors" | "transfersStatusError" {
-	if (status === "done") {
-		return "transfersStatusDone"
+	status: Transfer["status"],
+	direction: Transfer["direction"]
+):
+	| "transfersStatusUploaded"
+	| "transfersStatusDownloaded"
+	| "transfersStatusCopied"
+	| "transfersStatusCompletedWithErrors"
+	| "transfersStatusError" {
+	if (status === "completedWithErrors") {
+		return "transfersStatusCompletedWithErrors"
 	}
 
-	return status === "completedWithErrors" ? "transfersStatusCompletedWithErrors" : "transfersStatusError"
+	if (status !== "done") {
+		return "transfersStatusError"
+	}
+
+	switch (direction) {
+		case "upload":
+			return "transfersStatusUploaded"
+		case "download":
+			return "transfersStatusDownloaded"
+		case "copy":
+			return "transfersStatusCopied"
+	}
+}
+
+export interface TransferRate {
+	bytesPerSecond: number
+	etaSeconds: number | null
+}
+
+// A running transfer's speed over its own rolling window, and the time left at that speed. Null while
+// paused, finished, or before two samples span the window (nothing honest to show yet). A copy reads
+// its rate off its job instead (copyJobRate), which also counts the files it has not reached.
+export function transferRate(transfer: Transfer, samples: readonly SpeedSample[]): TransferRate | null {
+	if (!isActiveTransfer(transfer.status) || transfer.paused) {
+		return null
+	}
+
+	const bytesPerSecond = computeTransfersSpeed(samples)
+
+	if (bytesPerSecond <= 0) {
+		return null
+	}
+
+	return {
+		bytesPerSecond,
+		etaSeconds: transfer.size > 0 ? Math.ceil(Math.max(0, transfer.size - transfer.bytesTransferred) / bytesPerSecond) : null
+	}
 }
 
 // The row's leading type-icon key, resolved straight from the transfer's own file name — reuses

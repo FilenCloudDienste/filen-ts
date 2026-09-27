@@ -1,36 +1,37 @@
+import { type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import {
-	CircleAlertIcon,
-	CircleCheckIcon,
+	CheckIcon,
 	CopyIcon,
 	DownloadIcon,
 	FilesIcon,
+	FolderSearchIcon,
 	PanelBottomOpenIcon,
-	PauseCircleIcon,
 	PauseIcon,
 	PlayIcon,
 	Trash2Icon,
 	UploadIcon,
 	XIcon
 } from "lucide-react"
-import { formatBytes, isCopyJobRunning } from "@filen/shared"
+import { copyJobRate, formatBytes, formatSecondsToMediaClock, isCopyJobRunning, cn } from "@filen/shared"
 import { isActiveTransfer, useTransfersStore, type Transfer } from "@/features/transfers/store/useTransfersStore"
 import {
 	transferProgress,
 	activeStatusLabelKey,
 	finishedStatusLabelKey,
-	transferIconKey
+	transferIconKey,
+	transferRate,
+	type TransferRate
 } from "@/features/transfers/components/transferRow.logic"
 import { pauseTransfer, resumeTransfer } from "@/features/transfers/lib/control"
 import { showCopyToast } from "@/features/transfers/lib/copyToast"
 import { pruneSettledCopyJobs } from "@/features/drive/lib/copy"
 import { useCopyJobsStore } from "@/features/transfers/store/useCopyJobsStore"
 import { DirectoryGlyph, FileTypeIcon } from "@/features/drive/components/itemIcon"
+import type { DriveItem } from "@/features/drive/lib/item"
 import { errorLabel } from "@/lib/i18n/errorLabel"
-import { cn } from "@filen/shared"
 import { Button } from "@/components/ui/button"
-import { Progress } from "@/components/ui/progress"
-import { Spinner } from "@/components/ui/spinner"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 
 export interface TransferRowProps {
 	transfer: Transfer
@@ -43,210 +44,251 @@ export interface TransferRowProps {
 	// a transfer that settles naturally while its confirm is open closes the dialog gracefully instead
 	// of losing it. This callback is only ever wired to the active-row branch below.
 	onRequestCancel: () => void
+	// Opens the directory `item` landed in, with it selected. Navigation is the screen's.
+	onShowInDirectory: (item: DriveItem) => void
 }
 
-// Leading status icon — aria-hidden in the "done"/"error" branches since the row's own trailing text
-// (TransferRow below) already spells out "Done"/"Failed" as real accessible text; only the active
-// (uploading/downloading) branch gets a companion sr-only label, resolved direction-and-pause-aware
-// via activeStatusLabelKey, because its trailing text is a bare percentage (or, while paused, the word
-// "Paused") with no other accessible mention of the transfer's direction anywhere in the row. A paused
-// row swaps the spinner for a static pause glyph — a spinner reads as "still moving", which a
-// suspended-in-place transfer is not (mirrors mobile's own icon swap while paused). Mirrors DriveRow's
-// StarIcon (aria-hidden + a separate sr-only announcement) rather than relying on an aria-label on the
-// icon itself.
-function TransferStatusIcon({
-	status,
-	direction,
-	paused
+const RING_RADIUS = 18
+const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS
+
+// The leading glyph: the item's own type icon inside a ring that fills with the transfer's progress, and
+// a badge on its corner for what is happening to it — its direction while it runs, a pause, a check, an
+// alert. A finished row drops the ring: a full circle beside every done row would only be noise. The
+// ring is the row's progressbar, named after the item, while it runs.
+function TransferGlyph({
+	transfer,
+	progress,
+	icon,
+	trashing
 }: {
-	status: Transfer["status"]
-	direction: Transfer["direction"]
-	paused: boolean
+	transfer: Transfer
+	progress: number
+	icon: ReactNode
+	trashing: boolean
 }) {
 	const { t } = useTranslation("transfers")
+	const active = isActiveTransfer(transfer.status)
+	const DirectionIcon = transfer.direction === "upload" ? UploadIcon : transfer.direction === "download" ? DownloadIcon : CopyIcon
 
-	if (status === "done") {
-		return (
-			<CircleCheckIcon
-				aria-hidden="true"
-				className="size-4 shrink-0 text-muted-foreground"
-			/>
-		)
-	}
+	let badge: ReactNode
 
-	if (status === "error") {
-		return (
-			<CircleAlertIcon
-				aria-hidden="true"
-				className="size-4 shrink-0 text-destructive"
-			/>
-		)
-	}
-
-	if (status === "completedWithErrors") {
-		return (
-			<CircleAlertIcon
-				aria-hidden="true"
-				className="size-4 shrink-0 text-muted-foreground"
-			/>
-		)
-	}
-
-	return (
-		<>
-			{paused ? (
-				<PauseCircleIcon
-					aria-hidden="true"
-					className="size-4 shrink-0 text-muted-foreground"
-				/>
-			) : (
-				<Spinner
-					aria-hidden="true"
-					className="size-4 text-muted-foreground"
-				/>
-			)}
-			<span className="sr-only">{t(activeStatusLabelKey(direction, paused))}</span>
-		</>
-	)
-}
-
-// Small decorative direction glyph (upload, download or copy), aria-hidden — purely an at-a-glance visual
-// cue; the accessible direction distinction lives in TransferStatusIcon's own sr-only label above.
-// Reuses the same icons the rest of the app already associates with each direction (uploadMenu.tsx/
-// uploadDropzone.tsx's UploadIcon, bulkActionBar.logic.ts's DownloadIcon) rather than a generic
-// arrow pair.
-const DIRECTION_ICONS = { upload: UploadIcon, download: DownloadIcon, copy: CopyIcon } as const
-
-function TransferDirectionIcon({ direction }: { direction: Transfer["direction"] }) {
-	const Icon = DIRECTION_ICONS[direction]
-
-	return (
-		<Icon
-			aria-hidden="true"
-			className="size-3.5 shrink-0 text-muted-foreground"
-		/>
-	)
-}
-
-// One row: type icon + name + live progress bar, mirroring DriveRow's icon+truncate+trailing idiom
-// (drive/driveRow.tsx) scaled down for this narrower surface. Active (uploading/downloading) rows get
-// a pause/resume toggle wired straight to features/transfers/lib/control.ts's pauseTransfer/
-// resumeTransfer (pause/resume never reject, so the toggle flips the store's `paused` flag itself)
-// plus a Cancel button (X glyph) that only REQUESTS a cancel via onRequestCancel — the screen owns the
-// actual confirm dialog and the cancelTransfer call (see onRequestCancel's own doc comment for
-// why). A finished row (isActiveTransfer false — done/error/completedWithErrors) gets a Remove button
-// instead (trash glyph, deliberately distinct from Cancel's X — a finished transfer can't be
-// "cancelled", only dismissed from the list), wired straight to the store with no confirm — a finished
-// transfer is already done, so removing just clears its row.
-export function TransferRow({ transfer, onRequestCancel }: TransferRowProps) {
-	const { t, i18n } = useTranslation("transfers")
-	const progress = transferProgress(transfer)
-	const finished = !isActiveTransfer(transfer.status)
-	// A copy's row reopens its progress card for as long as the job's detail is kept.
-	const hasCopyCard = useCopyJobsStore(state => transfer.direction === "copy" && transfer.id in state.jobs)
-	// A copy row's name may be a directory's or "N items", which no file glyph fits; the job knows which.
-	const copyGlyph = useCopyJobsStore(state => (transfer.direction === "copy" ? state.jobs[transfer.id]?.glyph : undefined))
-	// A stopped copy's row stays active past its job while its copies move to the trash, which can't be
-	// paused or stopped.
-	const copyTrashing = useCopyJobsStore(state => {
-		const job = transfer.direction === "copy" ? state.jobs[transfer.id] : undefined
-
-		return !finished && job !== undefined && !isCopyJobRunning(job)
-	})
-
-	// Never renders bytesTransferred for a "done" row (only its final size) — settle()/setProgress()
-	// are separate store writes, so a just-finished row's bytesTransferred can still briefly trail
-	// size; showing it here would contradict the "Done" label next to it. errorLabel needs a real
-	// ErrorDTO, which the type allows to be absent even on an "error" row (exactOptionalPropertyTypes
-	// — see stores/transfers.ts's `error?` comment), hence the fallback to the plain status word.
-	let secondary: string
-	if (transfer.status === "error") {
-		secondary = transfer.error !== undefined ? errorLabel(transfer.error) : t("transfersStatusError")
+	if (trashing) {
+		badge = <Trash2Icon />
+	} else if (active) {
+		badge = transfer.paused ? <PauseIcon /> : <DirectionIcon />
 	} else if (transfer.status === "done") {
-		secondary = formatBytes(transfer.size)
+		badge = <CheckIcon strokeWidth={3} />
 	} else {
-		secondary = `${formatBytes(transfer.bytesTransferred)} / ${formatBytes(transfer.size)}`
-	}
-
-	// Active-and-running shows a live percentage (the one number that actually changes tick to tick);
-	// paused shows the word instead — the percentage is frozen while suspended, so re-displaying it
-	// would misleadingly suggest progress is still happening. Once finished, the word carries more
-	// information than a stale/redundant "100%" would. Intl.NumberFormat (not a hand-rolled `${n}%`
-	// template) so the symbol/rounding follow the active locale — some locales space or place "%"
-	// differently, and percent's default maximumFractionDigits is 0, which is also what rounds the
-	// value for display.
-	let trailingLabel: string
-	if (copyTrashing) {
-		trailingLabel = t("transfersStatusMovingToTrash")
-	} else if (isActiveTransfer(transfer.status) && !transfer.paused) {
-		trailingLabel = new Intl.NumberFormat(i18n.language, { style: "percent" }).format(progress / 100)
-	} else {
-		trailingLabel = t(isActiveTransfer(transfer.status) ? "transfersStatusPaused" : finishedStatusLabelKey(transfer.status))
+		badge = <span className="text-[11px] leading-none font-bold">!</span>
 	}
 
 	return (
-		<div className="flex flex-col gap-1.5 rounded-xl px-1 py-1.5 hover:bg-accent/50">
-			<div className="flex items-center gap-2">
-				{/* The row used to show only the generic direction arrow below; this is the item's
-				actual type glyph (itemIcon.tsx's own FileTypeIcon/fileIconKey, reused verbatim so a
-				transfer row's icon matches the one the same file shows once it lands in the listing). A
-				transfer row carries no DriveItem to derive a directory glyph or a real download thumbnail
-				from (see transferIconKey's own comment) — every row here is file-shaped, including a zip
-				download, whose name already routes to the "archive" glyph. */}
-				{copyGlyph === "directory" ? (
-					<DirectoryGlyph
-						color="default"
-						className="size-4 shrink-0"
-					/>
-				) : copyGlyph === "items" ? (
-					<FilesIcon
+		<div className="relative size-10 shrink-0">
+			{active ? (
+				<div
+					role="progressbar"
+					aria-label={transfer.name}
+					aria-valuemin={0}
+					aria-valuemax={100}
+					aria-valuenow={Math.round(progress)}
+					aria-valuetext={t(activeStatusLabelKey(transfer.direction, transfer.paused))}
+					className="absolute inset-0"
+				>
+					<svg
+						viewBox="0 0 40 40"
 						aria-hidden="true"
-						className="size-4 shrink-0 text-muted-foreground"
-					/>
-				) : (
-					<FileTypeIcon
-						iconKey={transferIconKey(transfer)}
-						className="size-4 shrink-0"
-					/>
+						className="size-full -rotate-90"
+					>
+						<circle
+							cx="20"
+							cy="20"
+							r={RING_RADIUS}
+							fill="none"
+							strokeWidth="2.5"
+							className="stroke-muted"
+						/>
+						<circle
+							cx="20"
+							cy="20"
+							r={RING_RADIUS}
+							fill="none"
+							strokeWidth="2.5"
+							strokeLinecap="round"
+							strokeDasharray={RING_CIRCUMFERENCE}
+							strokeDashoffset={RING_CIRCUMFERENCE * (1 - progress / 100)}
+							className={cn(
+								"transition-[stroke-dashoffset] duration-300 ease-out",
+								transfer.paused || trashing ? "stroke-muted-foreground/50" : "stroke-primary"
+							)}
+						/>
+					</svg>
+				</div>
+			) : (
+				<div className="absolute inset-0 rounded-full bg-muted" />
+			)}
+			<div className="absolute inset-0 flex items-center justify-center">{icon}</div>
+			<div
+				aria-hidden="true"
+				className={cn(
+					"absolute -right-0.5 -bottom-0.5 flex size-[18px] items-center justify-center rounded-full ring-2 ring-background [&_svg]:size-2.5",
+					transfer.status === "error"
+						? "bg-destructive text-white"
+						: transfer.status === "done"
+							? "bg-primary text-primary-foreground"
+							: "bg-muted text-muted-foreground"
 				)}
-				<TransferStatusIcon
-					status={transfer.status}
-					direction={transfer.direction}
-					paused={transfer.paused}
-				/>
-				<TransferDirectionIcon direction={transfer.direction} />
-				<span className="min-w-0 flex-1 truncate text-sm">{transfer.name}</span>
-				<span className="shrink-0 text-xs text-muted-foreground tabular-nums">{trailingLabel}</span>
-				{hasCopyCard ? (
+			>
+				{badge}
+			</div>
+		</div>
+	)
+}
+
+function RowAction({ label, onClick, children }: { label: string; onClick: () => void; children: ReactNode }) {
+	return (
+		<Tooltip>
+			<TooltipTrigger
+				render={
 					<Button
 						variant="ghost"
-						size="icon-xs"
-						aria-label={t("transfersRowCopyDetails")}
+						size="icon-sm"
+						aria-label={label}
+						className="text-muted-foreground hover:text-foreground"
+						onClick={onClick}
+					>
+						{children}
+					</Button>
+				}
+			/>
+			<TooltipContent>{label}</TooltipContent>
+		</Tooltip>
+	)
+}
+
+// One transfer: the glyph, the item's name over a single line of details, and its controls. An active
+// row reads "312 MiB of 842 MiB · 37% · 4.2 MB/s · 2:05 left" (or "Paused · …"); a finished one says
+// what happened, "Uploaded · 6 MiB", or in red why it failed. Active rows pause/resume and cancel (the
+// screen confirms the cancel, see onRequestCancel); finished rows can open where the item landed and
+// be removed from the list, which touches nothing but the list.
+export function TransferRow({ transfer, onRequestCancel, onShowInDirectory }: TransferRowProps) {
+	const { t, i18n } = useTranslation("transfers")
+	const progress = transferProgress(transfer)
+	const active = isActiveTransfer(transfer.status)
+	const job = useCopyJobsStore(state => (transfer.direction === "copy" ? state.jobs[transfer.id] : undefined))
+	const rowSamples = useTransfersStore(state => state.rowSpeedSamples[transfer.id])
+	// A stopped copy's row stays active past its job while its copies move to the trash, which can't be
+	// paused or stopped.
+	const trashing = active && job !== undefined && !isCopyJobRunning(job)
+	// A copy's rate comes off its job, which knows the files it has not reached yet.
+	const rate: TransferRate | null =
+		transfer.direction === "copy" ? (job === undefined ? null : copyJobRate(job)) : transferRate(transfer, rowSamples ?? [])
+	// What "Show in directory" opens: a landed upload's file, or the first item a copy created.
+	const revealItem =
+		transfer.status === "done" || transfer.status === "completedWithErrors" ? (transfer.item ?? job?.created[0]) : undefined
+
+	const bytes =
+		transfer.size > 0
+			? t("transfersRowBytesProgress", { done: formatBytes(transfer.bytesTransferred), total: formatBytes(transfer.size) })
+			: formatBytes(transfer.bytesTransferred)
+	let details: (string | null)[]
+
+	if (trashing) {
+		details = [t("transfersStatusMovingToTrash")]
+	} else if (active && transfer.paused) {
+		details = [t("transfersStatusPaused"), bytes]
+	} else if (active) {
+		details = [
+			bytes,
+			transfer.size > 0 ? new Intl.NumberFormat(i18n.language, { style: "percent" }).format(progress / 100) : null,
+			rate === null ? null : t("transfersAggregateSpeed", { speed: formatBytes(rate.bytesPerSecond) }),
+			rate?.etaSeconds == null ? null : t("transfersRowTimeLeft", { eta: formatSecondsToMediaClock(rate.etaSeconds) })
+		]
+	} else if (transfer.status === "error") {
+		details = [
+			t(finishedStatusLabelKey(transfer.status, transfer.direction)),
+			transfer.error === undefined ? null : errorLabel(transfer.error)
+		]
+	} else {
+		details = [t(finishedStatusLabelKey(transfer.status, transfer.direction)), formatBytes(transfer.size)]
+	}
+
+	const icon =
+		job?.glyph === "directory" ? (
+			<DirectoryGlyph
+				color="default"
+				className="size-5"
+			/>
+		) : job?.glyph === "items" ? (
+			<FilesIcon
+				aria-hidden="true"
+				className="size-5 text-muted-foreground"
+			/>
+		) : (
+			<FileTypeIcon
+				iconKey={transferIconKey(transfer)}
+				className="size-5"
+			/>
+		)
+
+	return (
+		<li
+			aria-label={transfer.name}
+			className="flex items-center gap-3 rounded-xl px-3 py-2 transition-colors hover:bg-accent/40"
+		>
+			<TransferGlyph
+				transfer={transfer}
+				progress={progress}
+				icon={icon}
+				trashing={trashing}
+			/>
+			<div className="min-w-0 flex-1">
+				<p className="truncate text-sm font-medium">{transfer.name}</p>
+				<p
+					className={cn(
+						"truncate text-xs tabular-nums",
+						transfer.status === "error" ? "text-destructive" : "text-muted-foreground"
+					)}
+				>
+					{details.filter(part => part !== null).join(" · ")}
+				</p>
+			</div>
+			<div className="flex shrink-0 items-center gap-0.5">
+				{job !== undefined ? (
+					<RowAction
+						label={t("transfersRowCopyDetails")}
 						onClick={() => {
 							showCopyToast(transfer.id)
 						}}
 					>
 						<PanelBottomOpenIcon />
-					</Button>
+					</RowAction>
 				) : null}
-				{finished ? (
-					<Button
-						variant="ghost"
-						size="icon-xs"
-						aria-label={t("transfersRowRemove")}
-						onClick={() => {
-							useTransfersStore.getState().remove(transfer.id)
-							pruneSettledCopyJobs()
-						}}
-					>
-						<Trash2Icon />
-					</Button>
-				) : copyTrashing ? null : (
+				{!active ? (
 					<>
-						<Button
-							variant="ghost"
-							size="icon-xs"
-							aria-label={t(transfer.paused ? "transfersRowResume" : "transfersRowPause")}
+						{revealItem !== undefined ? (
+							<RowAction
+								label={t("transfersRowShowInDirectory")}
+								onClick={() => {
+									onShowInDirectory(revealItem)
+								}}
+							>
+								<FolderSearchIcon />
+							</RowAction>
+						) : null}
+						<RowAction
+							label={t("transfersRowRemove")}
+							onClick={() => {
+								useTransfersStore.getState().remove(transfer.id)
+								pruneSettledCopyJobs()
+							}}
+						>
+							<XIcon />
+						</RowAction>
+					</>
+				) : trashing ? null : (
+					<>
+						<RowAction
+							label={t(transfer.paused ? "transfersRowResume" : "transfersRowPause")}
 							onClick={() => {
 								if (transfer.paused) {
 									resumeTransfer(transfer.id)
@@ -256,25 +298,16 @@ export function TransferRow({ transfer, onRequestCancel }: TransferRowProps) {
 							}}
 						>
 							{transfer.paused ? <PlayIcon /> : <PauseIcon />}
-						</Button>
-						<Button
-							variant="ghost"
-							size="icon-xs"
-							aria-label={t("transfersRowCancel")}
+						</RowAction>
+						<RowAction
+							label={t("transfersRowCancel")}
 							onClick={onRequestCancel}
 						>
 							<XIcon />
-						</Button>
+						</RowAction>
 					</>
 				)}
 			</div>
-			<Progress
-				value={progress}
-				aria-label={transfer.name}
-			/>
-			<p className={cn("truncate text-xs", transfer.status === "error" ? "text-destructive" : "text-muted-foreground")}>
-				{secondary}
-			</p>
-		</div>
+		</li>
 	)
 }

@@ -50,12 +50,10 @@ test.describe("uploads", () => {
 			// it patches the listing (features/drive/lib/upload.ts), so the row above already being visible
 			// guarantees the store side already settled too.
 			await openTransfers(page)
-			// Scoped to THIS transfer's own row rather than the first "Done" anywhere on the screen: the
-			// row is a plain div with no role of its own, so its progressbar (the one element carrying the
-			// transfer's name — transferRow.tsx) is what identifies it, and the status label is that
-			// progressbar's sibling.
-			const transferRow = page.getByRole("progressbar", { name: fileName }).locator("xpath=..")
-			await expect(transferRow.getByText("Done", { exact: true })).toBeVisible()
+			// Scoped to THIS transfer's own row (a list item named after the file, transferRow.tsx) rather
+			// than the first status line anywhere on the screen.
+			const transferRow = page.getByRole("listitem", { name: fileName })
+			await expect(transferRow.getByText(/^Uploaded · /)).toBeVisible()
 		} finally {
 			await trashScratchDirectory(page, scratchName)
 		}

@@ -1,6 +1,7 @@
 import { create } from "zustand"
 import { useShallow } from "zustand/shallow"
 import type { ErrorDTO } from "@/lib/sdk/errors"
+import type { DriveItem } from "@/features/drive/lib/item"
 import { clampedRatio } from "@filen/shared"
 
 // One row per in-flight or finished transfer, in-memory only (no persistence — mirrors
@@ -27,6 +28,8 @@ export interface Transfer {
 	error?: ErrorDTO
 	parentUuid: string | null
 	startedAt: number
+	// A landed upload's own file, which its row's "Show in directory" reveals.
+	item?: DriveItem
 }
 
 // Every terminal state settle() can drive a transfer to. Kept separate from Transfer["status"]
@@ -123,6 +126,9 @@ export interface TransfersStore {
 	// Rolling-window input for computeTransfersSpeed — store-owned since setProgress is the only
 	// place bytesTransferred actually changes over time; never written to directly by a consumer.
 	speedSamples: SpeedSample[]
+	// The same rolling window per active transfer, over its own bytesTransferred, for the row's speed and
+	// time left. Dropped once the transfer settles.
+	rowSpeedSamples: Readonly<Record<string, SpeedSample[]>>
 	// Omits `paused` — every newly added transfer starts unpaused, enforced here rather than trusted
 	// to each call site (features/drive/lib/upload.ts's runUpload, features/drive/lib/download.ts's runDownload).
 	add: (transfer: Omit<Transfer, "paused">) => void
@@ -138,15 +144,26 @@ export interface TransfersStore {
 	// (features/transfers/lib/control.ts's pauseTransfer/resumeTransfer).
 	setPaused: (id: string, paused: boolean) => void
 	settle: (id: string, status: TerminalStatus, error?: ErrorDTO) => void
+	setItem: (id: string, item: DriveItem) => void
 	remove: (id: string) => void
 	// Drops every finished (non-active) row; active transfers are left untouched. Backs the
 	// transfers panel's "clear finished" control.
 	clearFinished: () => void
 }
 
+// The same object when the key is absent, so a settle that had no samples writes nothing new.
+function withoutKey<T>(record: Readonly<Record<string, T>>, key: string): Readonly<Record<string, T>> {
+	if (!(key in record)) {
+		return record
+	}
+
+	return Object.fromEntries(Object.entries(record).filter(([entryKey]) => entryKey !== key))
+}
+
 export const useTransfersStore = create<TransfersStore>(set => ({
 	transfers: [],
 	speedSamples: [],
+	rowSpeedSamples: {},
 	add: transfer => {
 		set(state => ({ transfers: [...state.transfers, { ...transfer, paused: false }] }))
 	},
@@ -170,8 +187,11 @@ export const useTransfersStore = create<TransfersStore>(set => ({
 			const speedSamples = [...state.speedSamples, { timestamp: now, totalBytes }].filter(
 				sample => sample.timestamp >= now - SPEED_WINDOW_MS
 			)
+			const rowSamples = [...(state.rowSpeedSamples[id] ?? []), { timestamp: now, totalBytes: bytesTransferred }].filter(
+				sample => sample.timestamp >= now - SPEED_WINDOW_MS
+			)
 
-			return { transfers, speedSamples }
+			return { transfers, speedSamples, rowSpeedSamples: { ...state.rowSpeedSamples, [id]: rowSamples } }
 		})
 	},
 	setSize: (id, size) => {
@@ -189,11 +209,22 @@ export const useTransfersStore = create<TransfersStore>(set => ({
 			// (runDownload/runZipDownload/runUpload's own Cancelled branch) — so it must never count toward
 			// the finished cap either, or that transient row can evict an OLDER, still-legitimate finished
 			// row an instant before it is itself removed.
-			return { transfers: status === "cancelled" ? transfers : capFinishedTransfers(transfers) }
+			return {
+				transfers: status === "cancelled" ? transfers : capFinishedTransfers(transfers),
+				rowSpeedSamples: withoutKey(state.rowSpeedSamples, id)
+			}
 		})
 	},
+	setItem: (id, item) => {
+		set(state => ({
+			transfers: state.transfers.map(transfer => (transfer.id === id ? { ...transfer, item } : transfer))
+		}))
+	},
 	remove: id => {
-		set(state => ({ transfers: state.transfers.filter(transfer => transfer.id !== id) }))
+		set(state => ({
+			transfers: state.transfers.filter(transfer => transfer.id !== id),
+			rowSpeedSamples: withoutKey(state.rowSpeedSamples, id)
+		}))
 	},
 	clearFinished: () => {
 		set(state => ({ transfers: state.transfers.filter(transfer => isActiveTransfer(transfer.status)) }))
