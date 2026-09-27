@@ -242,7 +242,49 @@ export function trackLeaseReleases(page: Page): LeaseTracker {
 // uncaught page errors, failed or >= 400 requests and the lock timeline, each with its offset from the
 // test's start. Method and path only, never headers, query strings or bodies. Collected on every test but
 // attached only on failure, so a green run pays for nothing but the listeners.
-function collectDiagnostics(context: BrowserContext): () => string {
+// Runs in every page: reports main-thread long tasks, stalled timers (script blocked) and frames that do
+// not come (rendering paused) to the diagnostics. An action stuck on "waiting for element to be …" with
+// no reason logged is Playwright's in-page check never answering, which otherwise leaves no trace.
+function stallProbe(): void {
+	const report = (line: string): void => {
+		void (window as unknown as { __e2eStall?: (line: string) => Promise<void> }).__e2eStall?.(line)
+	}
+
+	if (PerformanceObserver.supportedEntryTypes.includes("longtask")) {
+		new PerformanceObserver(list => {
+			for (const entry of list.getEntries()) {
+				if (entry.duration >= 500) {
+					report(`long task ${String(Math.round(entry.duration))}ms`)
+				}
+			}
+		}).observe({ type: "longtask" })
+	}
+
+	let last = performance.now()
+
+	setInterval(() => {
+		const now = performance.now()
+		const late = now - last - 1000
+
+		last = now
+
+		if (late >= 1000) {
+			report(`timers stalled ${String(Math.round(late))}ms`)
+		}
+
+		if (document.visibilityState === "visible") {
+			requestAnimationFrame(() => {
+				const waited = performance.now() - now
+
+				if (waited >= 1000) {
+					report(`frame stalled ${String(Math.round(waited))}ms`)
+				}
+			})
+		}
+	}, 1000)
+}
+
+async function collectDiagnostics(context: BrowserContext): Promise<() => string> {
 	const startedAt = Date.now()
 	const lines: string[] = []
 	const log = (line: string) => {
@@ -295,6 +337,11 @@ function collectDiagnostics(context: BrowserContext): () => string {
 	}
 
 	context.on("page", watch)
+
+	await context.exposeBinding("__e2eStall", ({ page }, line: string) => {
+		log(`tab${String(context.pages().indexOf(page))} ${line}`)
+	})
+	await context.addInitScript(stallProbe)
 
 	return () => lines.join("\n")
 }
@@ -627,7 +674,7 @@ export const test = base.extend<{
 	},
 	failureDiagnostics: [
 		async ({ context }, use, testInfo) => {
-			const report = collectDiagnostics(context)
+			const report = await collectDiagnostics(context)
 
 			await use(undefined)
 
