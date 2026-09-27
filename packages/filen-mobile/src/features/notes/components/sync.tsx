@@ -50,6 +50,9 @@ function newestEntryOnBase(noteUuid: string, base: string): InflightContent[stri
 	return newest?.baseContentHash === base ? newest : undefined
 }
 
+// Waits between re-drives of a failed push: 30s, 2m, then every 10m.
+export const PUSH_RETRY_DELAYS_MS = [30_000, 120_000, 600_000] as const
+
 export class Sync {
 	private readonly mutex: Semaphore = new Semaphore(1)
 	private syncTimeout: ReturnType<typeof createExecutableTimeout> | null = null
@@ -79,6 +82,14 @@ export class Sync {
 	private readonly handedOff: Set<string> = new Set<string>()
 	// When each note's last successful conflict peek began.
 	private readonly peeks: Map<string, number> = new Map<string, number>()
+	// Notes whose last push failed in a way the next attempt can fix (network, session), re-driven on a
+	// backoff timer (scheduleRetry): the one exception to the SDK owning retries, so an edit does not wait
+	// for the next keystroke, foreground or reconnect. A rejection counted toward the drop bound is not.
+	private readonly failed: Set<string> = new Set<string>()
+	private retryTimer: ReturnType<typeof setTimeout> | null = null
+	// Which of PUSH_RETRY_DELAYS_MS the next re-drive waits; back to the first after any push lands.
+	private retryStep = 0
+	private pushLanded = false
 
 	public constructor() {
 		this.initPromise = new Promise(resolve => {
@@ -97,6 +108,58 @@ export class Sync {
 		this.syncTimeout = null
 		this.abortController.abort()
 		this.abortController = new AbortController()
+		this.failed.clear()
+		this.retryStep = 0
+		this.pushLanded = false
+		this.pauseRetry()
+	}
+
+	// No re-drive pending: in the background, offline, or on the way out. What resumes it (foreground,
+	// reconnect) runs a pass, which schedules again.
+	public pauseRetry(): void {
+		if (this.retryTimer !== null) {
+			clearTimeout(this.retryTimer)
+			this.retryTimer = null
+		}
+	}
+
+	// After a pass: one timer for the whole sync, and only while a push failed, the app is in front and online.
+	private scheduleRetry(): void {
+		const inflightContent = useNotesInflightStore.getState().inflightContent
+
+		// A failed note whose edits went since (loaded over, deleted) needs nothing more.
+		for (const noteUuid of this.failed) {
+			if ((inflightContent[noteUuid] ?? []).length === 0) {
+				this.failed.delete(noteUuid)
+			}
+		}
+
+		if (this.pushLanded || this.failed.size === 0) {
+			this.retryStep = 0
+		}
+
+		this.pushLanded = false
+		this.pauseRetry()
+
+		if (this.failed.size === 0 || AppState.currentState !== "active" || !onlineManager.isOnline()) {
+			return
+		}
+
+		const delay = PUSH_RETRY_DELAYS_MS[Math.min(this.retryStep, PUSH_RETRY_DELAYS_MS.length - 1)] ?? 600_000
+
+		this.retryTimer = setTimeout(() => {
+			this.retryTimer = null
+
+			// Backgrounded or offline meanwhile (Android keeps JS timers running): the foreground or reconnect
+			// re-drives it.
+			if (AppState.currentState !== "active" || !onlineManager.isOnline()) {
+				return
+			}
+
+			this.retryStep++
+			// The normal mutexed pass (a pending debounce runs now instead): never a second push of a note.
+			this.executeNow()
+		}, delay)
 	}
 
 	// VC3: drop a note's consecutive-rejection strike count. MUST be called whenever a note's
@@ -416,6 +479,10 @@ export class Sync {
 			}
 		})
 
+		if (!signal.aborted) {
+			this.scheduleRetry()
+		}
+
 		if (!result.success) {
 			if (signal.aborted) {
 				return
@@ -560,8 +627,16 @@ export class Sync {
 			const kind = unwrapped !== null ? ErrorKind[unwrapped.kind()] : undefined
 
 			if (!isPermanentRejection({ hasSdkError: unwrapped !== null, kind })) {
+				// Re-driven on the backoff timer; an aborted pass (logout) is not a failure.
+				if (!signal.aborted) {
+					this.failed.add(noteUuid)
+				}
+
 				throw e
 			}
+
+			// Counted toward the drop bound: never re-driven by the timer, which would only hasten the drop.
+			this.failed.delete(noteUuid)
 
 			const previousRejections = this.nonRetryableRejections.get(noteUuid) ?? 0
 			const rejections = previousRejections + 1
@@ -603,6 +678,8 @@ export class Sync {
 		// A successful push clears any accumulated rejection count for this note.
 		this.nonRetryableRejections.delete(noteUuid)
 		this.handedOff.delete(noteUuid)
+		this.failed.delete(noteUuid)
+		this.pushLanded = true
 
 		// The pushed content IS the cloud content now — write it into the per-note
 		// content query cache so any editor reseed after the inflight queue drains
@@ -700,6 +777,11 @@ export const SyncHost = () => {
 
 		const appStateListener = AppState.addEventListener("change", nextAppState => {
 			if (nextAppState === "background" || nextAppState === "active") {
+				// No re-drive waits out the background; the pass on return schedules one again.
+				if (nextAppState === "background") {
+					sync.pauseRetry()
+				}
+
 				sync.executeNow()
 
 				return
@@ -708,6 +790,7 @@ export const SyncHost = () => {
 
 		return () => {
 			appStateListener.remove()
+			sync.pauseRetry()
 		}
 	}, [])
 

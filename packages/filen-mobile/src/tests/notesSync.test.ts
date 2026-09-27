@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { vi, describe, it, expect, beforeEach } from "vitest"
+import { vi, describe, it, expect, beforeEach, afterEach } from "vitest"
 import logger from "@/lib/logger"
 vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 
@@ -174,7 +174,7 @@ function asSdkError<E>(error: E, kind: string): E {
 	return error
 }
 
-import { Sync, SyncHost, hashNoteContent, MAX_NON_RETRYABLE_REJECTIONS } from "@/features/notes/components/sync"
+import { Sync, SyncHost, hashNoteContent, MAX_NON_RETRYABLE_REJECTIONS, sync as singletonSync } from "@/features/notes/components/sync"
 import sqlite from "@/lib/sqlite"
 import alerts from "@/lib/alerts"
 import events from "@/lib/events"
@@ -1827,6 +1827,173 @@ describe("Sync (Notes)", () => {
 			expect(notesState.inflightContent["note-2"]).toHaveLength(1)
 
 			held.release()
+		})
+	})
+
+	describe("re-driving a failed push (backoff timer)", () => {
+		let sync: Sync
+
+		beforeEach(async () => {
+			sync = await createSync()
+			vi.useFakeTimers()
+			notesState.inflightContent = {
+				"note-1": [{ timestamp: 1000, content: "mine", note: mockNote("note-1") }]
+			}
+		})
+
+		afterEach(async () => {
+			sync.cancel()
+			vi.useRealTimers()
+			;(AppState as unknown as { currentState: string }).currentState = "active"
+			const { onlineManager } = await import("@tanstack/react-query")
+
+			onlineManager.setOnline(true)
+		})
+
+		async function pass(): Promise<void> {
+			sync.executeNow()
+			await vi.advanceTimersByTimeAsync(0)
+		}
+
+		it("waits 30s, 2m, then every 10m between re-drives", async () => {
+			mockNotesSetContent.mockRejectedValue(new Error("network"))
+
+			await pass()
+
+			expect(mockNotesSetContent).toHaveBeenCalledTimes(1)
+
+			await vi.advanceTimersByTimeAsync(29_999)
+			expect(mockNotesSetContent).toHaveBeenCalledTimes(1)
+			await vi.advanceTimersByTimeAsync(1)
+			expect(mockNotesSetContent).toHaveBeenCalledTimes(2)
+
+			await vi.advanceTimersByTimeAsync(119_999)
+			expect(mockNotesSetContent).toHaveBeenCalledTimes(2)
+			await vi.advanceTimersByTimeAsync(1)
+			expect(mockNotesSetContent).toHaveBeenCalledTimes(3)
+
+			await vi.advanceTimersByTimeAsync(599_999)
+			expect(mockNotesSetContent).toHaveBeenCalledTimes(3)
+			await vi.advanceTimersByTimeAsync(1)
+			expect(mockNotesSetContent).toHaveBeenCalledTimes(4)
+
+			await vi.advanceTimersByTimeAsync(600_000)
+			expect(mockNotesSetContent).toHaveBeenCalledTimes(5)
+			// One timer for the whole sync.
+			expect(vi.getTimerCount()).toBe(1)
+		})
+
+		it("goes back to 30s after any push lands, and stops once nothing failed", async () => {
+			mockNotesSetContent.mockImplementation(({ note }: { note: { uuid: string } }) =>
+				note.uuid === "note-1" ? Promise.reject(new Error("network")) : Promise.resolve({ editedTimestamp: BigInt(0) })
+			)
+
+			await pass()
+			await vi.advanceTimersByTimeAsync(30_000)
+			// Now at 2m. Another note's push lands meanwhile.
+			notesState.inflightContent = {
+				...notesState.inflightContent,
+				"note-2": [{ timestamp: 1000, content: "other", note: mockNote("note-2") }]
+			}
+			await pass()
+			mockNotesSetContent.mockClear()
+
+			await vi.advanceTimersByTimeAsync(30_000)
+			expect(mockNotesSetContent).toHaveBeenCalledTimes(1)
+			expect(mockNotesSetContent).toHaveBeenCalledWith(expect.objectContaining({ content: "mine" }))
+
+			// note-1 lands: nothing failed, no timer.
+			mockNotesSetContent.mockResolvedValue({ editedTimestamp: BigInt(0) })
+			await pass()
+			expect(vi.getTimerCount()).toBe(0)
+		})
+
+		it("never runs while the app is in the background", async () => {
+			mockNotesSetContent.mockRejectedValue(new Error("network"))
+
+			await pass()
+			;(AppState as unknown as { currentState: string }).currentState = "background"
+			await vi.advanceTimersByTimeAsync(30_000)
+
+			expect(mockNotesSetContent).toHaveBeenCalledTimes(1)
+
+			// A pass run from the background schedules nothing.
+			await pass()
+			expect(vi.getTimerCount()).toBe(0)
+		})
+
+		it("never runs while offline", async () => {
+			const { onlineManager } = await import("@tanstack/react-query")
+
+			mockNotesSetContent.mockRejectedValue(new Error("network"))
+
+			await pass()
+			onlineManager.setOnline(false)
+			await vi.advanceTimersByTimeAsync(30_000)
+
+			expect(mockNotesSetContent).toHaveBeenCalledTimes(1)
+			expect(vi.getTimerCount()).toBe(0)
+		})
+
+		it("sets no timer when nothing failed", async () => {
+			await pass()
+
+			expect(mockNotesSetContent).toHaveBeenCalledTimes(1)
+			expect(vi.getTimerCount()).toBe(0)
+		})
+
+		it("never re-drives a rejection counted toward the drop bound", async () => {
+			mockNotesSetContent.mockRejectedValue(asSdkError(new Error("forbidden"), ErrorKindMock.Server))
+
+			await pass()
+
+			expect(vi.getTimerCount()).toBe(0)
+		})
+
+		it("is cleared when the app goes to the background, and when the sync host unmounts", async () => {
+			vi.useRealTimers()
+
+			const host = render(React.createElement(SyncHost))
+
+			await (singletonSync as unknown as { initPromise: Promise<void> }).initPromise
+			vi.useFakeTimers()
+			mockNotesSetContent.mockRejectedValue(new Error("network"))
+
+			singletonSync.executeNow()
+			await vi.advanceTimersByTimeAsync(0)
+
+			expect(vi.getTimerCount()).toBe(1)
+
+			;(AppState as unknown as { currentState: string }).currentState = "background"
+			;(AppState as unknown as { _emit: (type: string, state: string) => void })._emit("change", "background")
+			await vi.advanceTimersByTimeAsync(0)
+
+			expect(vi.getTimerCount()).toBe(0)
+
+			;(AppState as unknown as { currentState: string }).currentState = "active"
+			;(AppState as unknown as { _emit: (type: string, state: string) => void })._emit("change", "active")
+			await vi.advanceTimersByTimeAsync(0)
+
+			expect(vi.getTimerCount()).toBe(1)
+
+			host.unmount()
+
+			expect(vi.getTimerCount()).toBe(0)
+
+			singletonSync.cancel()
+		})
+
+		it("is cleared on logout", async () => {
+			mockNotesSetContent.mockRejectedValue(new Error("network"))
+
+			await pass()
+			expect(vi.getTimerCount()).toBe(1)
+
+			sync.cancel()
+			expect(vi.getTimerCount()).toBe(0)
+
+			await vi.advanceTimersByTimeAsync(600_000)
+			expect(mockNotesSetContent).toHaveBeenCalledTimes(1)
 		})
 	})
 

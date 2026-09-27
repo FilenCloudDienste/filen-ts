@@ -814,6 +814,7 @@ export const DEFAULT_QUERY_OPTIONS: Omit<UseQueryOptions<any, any, any, any>, "q
 	// failures by ~31s of backoff before the error surfaced. Recovery is owned by
 	// refetchOnMount/Reconnect ("always" above), socket invalidations, and reconnect.ts — not by
 	// queryFn re-runs. Non-SDK queryFns (local FS, permissions) fail deterministically anyway.
+	// One exception, outside queries: the notes sync re-drives a failed push on a backoff timer.
 	retry: false,
 	retryOnMount: true,
 	networkMode: "offlineFirst",
