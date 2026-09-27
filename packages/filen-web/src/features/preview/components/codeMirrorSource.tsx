@@ -95,6 +95,7 @@ export function CodeMirrorSource({
 		}
 	}
 	const [content, setContent] = useState(text)
+	const [seed] = useState(text)
 	// `text` itself never changes across this component's own lifetime (a genuinely different item
 	// forces a remount, not a prop update — see the invariant above), so comparing against it directly
 	// doubles as "compare against the frozen original" with no extra ref of its own.
@@ -129,7 +130,10 @@ export function CodeMirrorSource({
 				// unreachable. The parent `size-full` div above must already be height-bounded by the caller.
 				ref={editorRef}
 				className="size-full"
-				value={content}
+				// The seed, never `content`: the view's doc is the buffer of record, and `content` only mirrors
+				// it. A changing value is written back into the doc, and one committed mid-typing is held
+				// until typing pauses and then written over whatever was typed since.
+				value={seed}
 				extensions={extensions}
 				editable={editable}
 				readOnly={!editable}

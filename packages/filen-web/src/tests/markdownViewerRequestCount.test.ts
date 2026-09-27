@@ -19,13 +19,14 @@ vi.mock("@/lib/sdk/client", () => ({
 vi.mock("@/providers/themeProvider", () => ({ useTheme: () => ({ theme: "light", setTheme: vi.fn() }) }))
 
 // CodeMirror's own view needs layout jsdom lacks; a textarea keeps the real CodeMirrorSource buffer,
-// dirty and contentRef logic under test while standing in for the editor surface.
+// dirty and contentRef logic under test while standing in for the editor surface. Uncontrolled, like the
+// editor: `value` seeds it, and the typed buffer lives in it.
 vi.mock("@uiw/react-codemirror", async () => ({
 	oneDarkHighlightStyle: (await import("@codemirror/language")).HighlightStyle.define([]),
 	default: (props: { value: string; readOnly: boolean; "aria-label": string; onChange?: (value: string) => void }) =>
 		createElement("textarea", {
 			"aria-label": props["aria-label"],
-			value: props.value,
+			defaultValue: props.value,
 			readOnly: props.readOnly,
 			onChange: (event: ChangeEvent<HTMLTextAreaElement>) => props.onChange?.(event.target.value)
 		})
