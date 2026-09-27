@@ -278,6 +278,8 @@ export function structureLocked(sheet: Sheet): boolean {
 		(sheet.dataValidations?.length ?? 0) > 0 ||
 		(sheet.images?.length ?? 0) > 0 ||
 		sheet.autoFilter !== undefined ||
+		// Kept by range as read (a number stored as text Excel is told not to flag).
+		(sheet.ignoredErrors?.length ?? 0) > 0 ||
 		(sheet.sparklines?.length ?? 0) > 0 ||
 		(sheet.charts?.length ?? 0) > 0 ||
 		// Kept in their own part, which saving copies as read while the notes they pair with move.

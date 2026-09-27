@@ -1,8 +1,18 @@
 diff --git a/dist/_types.d.mts b/dist/_types.d.mts
-index 0106cd5a6d4550a57f4669754d72accd7c946bce..f0f4c90cfc3753d6b09d0fd9614c2bec07b7322d 100644
+index 0106cd5a6d4550a57f4669754d72accd7c946bce..954f83019af45b363b6783570fcea8ebd602be94 100644
 --- a/dist/_types.d.mts
 +++ b/dist/_types.d.mts
-@@ -26,7 +26,8 @@ export interface FontStyle {
+@@ -15,7 +15,8 @@ export interface FontStyle {
+ 	size?: number;
+ 	bold?: boolean;
+ 	italic?: boolean;
+-	underline?: boolean | "single" | "double" | "singleAccounting" | "doubleAccounting";
++	/** "none": explicitly not underlined (a differential format's override) */
++	underline?: boolean | "single" | "double" | "singleAccounting" | "doubleAccounting" | "none";
+ 	strikethrough?: boolean;
+ 	color?: Color;
+ 	vertAlign?: "superscript" | "subscript";
+@@ -26,7 +27,8 @@ export interface FontStyle {
  export type FillPattern = "none" | "solid" | "darkDown" | "darkGray" | "darkGrid" | "darkHorizontal" | "darkTrellis" | "darkUp" | "darkVertical" | "gray0625" | "gray125" | "lightDown" | "lightGray" | "lightGrid" | "lightHorizontal" | "lightTrellis" | "lightUp" | "lightVertical" | "mediumGray";
  export interface PatternFill {
  	type: "pattern";
@@ -12,7 +22,32 @@ index 0106cd5a6d4550a57f4669754d72accd7c946bce..f0f4c90cfc3753d6b09d0fd9614c2bec
  	fgColor?: Color;
  	bgColor?: Color;
  }
-@@ -192,6 +193,8 @@ export interface DataValidation {
+@@ -68,7 +70,24 @@ export interface CellStyle {
+ 	border?: BorderStyle;
+ 	alignment?: AlignmentStyle;
+ 	numFmt?: string;
++	/** The number `numFmt` had in the file: under 164 a built-in (shown in the reader's locale), else the file's own code */
++	numFmtId?: number;
+ 	protection?: CellProtection;
++	/** The cell shows its text as typed (`quotePrefix`: typed with a leading apostrophe) */
++	quotePrefix?: boolean;
++	/** The named style the format is based on (`xfId`: Normal when absent) */
++	namedStyle?: NamedCellStyle;
++}
++export interface NamedCellStyle {
++	name: string;
++	builtinId?: number;
++	iLevel?: number;
++	customBuiltin?: boolean;
++	hidden?: boolean;
++	/** The named style's own format */
++	style?: CellStyle;
++	/** Which parts of the format the named style carries, as its `apply…` attributes */
++	applies?: Record<string, string>;
+ }
+ export interface CellProtection {
+ 	locked?: boolean;
+@@ -192,6 +211,8 @@ export interface DataValidation {
  	/** List values (for type: "list") */
  	values?: string[];
  	allowBlank?: boolean;
@@ -21,7 +56,7 @@ index 0106cd5a6d4550a57f4669754d72accd7c946bce..f0f4c90cfc3753d6b09d0fd9614c2bec
  	showInputMessage?: boolean;
  	showErrorMessage?: boolean;
  	inputTitle?: string;
-@@ -202,11 +205,21 @@ export interface DataValidation {
+@@ -202,11 +223,21 @@ export interface DataValidation {
  	/** Cell range (e.g. "A1:A100") */
  	range: string;
  }
@@ -45,7 +80,7 @@ index 0106cd5a6d4550a57f4669754d72accd7c946bce..f0f4c90cfc3753d6b09d0fd9614c2bec
  	formula?: string | string[];
  	style?: CellStyle;
  	stopIfTrue?: boolean;
-@@ -270,6 +283,8 @@ export interface NamedRange {
+@@ -270,6 +301,8 @@ export interface NamedRange {
  	/** Scope: undefined = workbook level, string = sheet name */
  	scope?: string;
  	comment?: string;
@@ -54,7 +89,7 @@ index 0106cd5a6d4550a57f4669754d72accd7c946bce..f0f4c90cfc3753d6b09d0fd9614c2bec
  }
  /**
  * A paper size, either by name or by its raw OOXML `paperSize` code.
-@@ -577,6 +592,10 @@ export interface TableDefinition {
+@@ -577,6 +610,10 @@ export interface TableDefinition {
  export interface TableColumn {
  	/** Column header name */
  	name: string;
@@ -65,7 +100,7 @@ index 0106cd5a6d4550a57f4669754d72accd7c946bce..f0f4c90cfc3753d6b09d0fd9614c2bec
  	/** Total row function (sum, count, average, min, max, countNums, stdDev, var, custom) */
  	totalFunction?: string;
  	/** Total row formula (for custom) */
-@@ -593,6 +612,8 @@ export interface RowDef {
+@@ -593,6 +630,8 @@ export interface RowDef {
  	outlineLevel?: number;
  	/** Whether this outline group is collapsed */
  	collapsed?: boolean;
@@ -74,7 +109,7 @@ index 0106cd5a6d4550a57f4669754d72accd7c946bce..f0f4c90cfc3753d6b09d0fd9614c2bec
  }
  /**
  * What kind of sheet a tab holds.
-@@ -655,6 +676,12 @@ export interface Sheet {
+@@ -655,6 +694,16 @@ export interface Sheet {
  	* Excel picks its own from the default font.
  	*/
  	defaultColWidth?: number;
@@ -84,19 +119,25 @@ index 0106cd5a6d4550a57f4669754d72accd7c946bce..f0f4c90cfc3753d6b09d0fd9614c2bec
 +	baseColWidth?: number;
 +	/** The sheet's name for VBA (`<sheetPr codeName>`) */
 +	codeName?: string;
++	/** An autofilter has rows filtered out (`<sheetPr filterMode>`) */
++	filterMode?: boolean;
++	/** Errors Excel is told not to flag, as `<ignoredError>` attributes (sqref and the kinds) */
++	ignoredErrors?: Array<Record<string, string>>;
  	merges?: MergeRange[];
  	dataValidations?: DataValidation[];
  	conditionalRules?: ConditionalRule[];
-@@ -1074,6 +1101,8 @@ export interface Workbook {
+@@ -1074,6 +1123,10 @@ export interface Workbook {
  	activeSheet?: number;
  	/** Theme color palette (resolved from xl/theme/theme1.xml) */
  	themeColors?: string[];
 +	/** The file's calculation settings, as `<calcPr>` attributes */
 +	calcProperties?: Record<string, string>;
++	/** The workbook's name for VBA (`<workbookPr codeName>`) */
++	codeName?: string;
  	/** Workbook-level protection */
  	workbookProtection?: {
  		lockStructure?: boolean;
-@@ -1366,6 +1395,12 @@ export interface WriteSheet {
+@@ -1366,6 +1419,14 @@ export interface WriteSheet {
  	* Excel picks its own from the default font.
  	*/
  	defaultColWidth?: number;
@@ -104,6 +145,8 @@ index 0106cd5a6d4550a57f4669754d72accd7c946bce..f0f4c90cfc3753d6b09d0fd9614c2bec
 +	defaultRowHeightCustom?: boolean;
 +	baseColWidth?: number;
 +	codeName?: string;
++	filterMode?: boolean;
++	ignoredErrors?: Array<Record<string, string>>;
 +	/** Write each cell with only its own format, not its column's (a workbook written back as read). */
 +	keepCellStyles?: boolean;
  	/**
@@ -317,7 +360,7 @@ index 5892e7a16a80149177b56fe77ad32b273d86110b..0f6654ae0358c6d472060054dd6a7f7c
  		if (titleParts.length > 0) {
  			result.push({
 diff --git a/dist/xlsx/reader.mjs b/dist/xlsx/reader.mjs
-index 8d11fc8828e051c0560e66f792c7d04ca3e302cf..12256cc3e664dd9f5888ff3217dee78d1fc42c54 100644
+index 8d11fc8828e051c0560e66f792c7d04ca3e302cf..b675001fe9cd75272c7b5ebeb69a063bc5091d78 100644
 --- a/dist/xlsx/reader.mjs
 +++ b/dist/xlsx/reader.mjs
 @@ -101,7 +101,7 @@ export async function readXlsx(input, options) {
@@ -325,7 +368,7 @@ index 8d11fc8828e051c0560e66f792c7d04ca3e302cf..12256cc3e664dd9f5888ff3217dee78d
  	}
  	const workbookXml = decodeUtf8(await zip.extract(workbookPath), workbookPath);
 -	const { sheets: sheetInfos, dateSystem, namedRanges, workbookProtection, activeSheet, pivotCacheRefs } = parseWorkbookXml(workbookXml, options);
-+	const { sheets: sheetInfos, dateSystem, namedRanges, workbookProtection, activeSheet, pivotCacheRefs, calcProperties } = parseWorkbookXml(workbookXml, options);
++	const { sheets: sheetInfos, dateSystem, namedRanges, workbookProtection, activeSheet, pivotCacheRefs, calcProperties, codeName } = parseWorkbookXml(workbookXml, options);
  	
  	let sharedStrings = [];
  	const ssRel = workbookRels.find((r) => matchesRelType(r.type, "sharedStrings"));
@@ -338,25 +381,35 @@ index 8d11fc8828e051c0560e66f792c7d04ca3e302cf..12256cc3e664dd9f5888ff3217dee78d
  						if (tableDef) {
  							tables.push(tableDef);
  						}
-@@ -556,6 +556,9 @@ export async function readXlsx(input, options) {
+@@ -556,6 +556,12 @@ export async function readXlsx(input, options) {
  	if (activeSheet !== undefined) {
  		workbook.activeSheet = activeSheet;
  	}
 +	if (calcProperties) {
 +		workbook.calcProperties = calcProperties;
 +	}
++	if (codeName) {
++		workbook.codeName = codeName;
++	}
  	
  	
  	
-@@ -1177,6 +1180,7 @@ function parseWorkbookXml(xml, options) {
+@@ -1177,11 +1183,14 @@ function parseWorkbookXml(xml, options) {
  	}
  	let wbProtection;
  	let activeSheet;
 +	let calcProperties;
++	let codeName;
  	
  	for (const child of doc.children) {
  		if (typeof child === "string") continue;
-@@ -1190,6 +1194,9 @@ function parseWorkbookXml(xml, options) {
+ 		const local = child.local || child.tag;
+ 		if (local === "workbookPr") {
++			if (child.attrs["codeName"]) codeName = child.attrs["codeName"];
+ 			
+ 			if (child.attrs["date1904"] === "1" || child.attrs["date1904"] === "true") {
+ 				
+@@ -1190,6 +1199,9 @@ function parseWorkbookXml(xml, options) {
  				}
  			}
  		}
@@ -366,7 +419,7 @@ index 8d11fc8828e051c0560e66f792c7d04ca3e302cf..12256cc3e664dd9f5888ff3217dee78d
  		if (local === "workbookProtection") {
  			const lockStructure = child.attrs["lockStructure"] === "1" || child.attrs["lockStructure"] === "true";
  			const lockWindows = child.attrs["lockWindows"] === "1" || child.attrs["lockWindows"] === "true";
-@@ -1280,6 +1287,9 @@ function parseWorkbookXml(xml, options) {
+@@ -1280,6 +1292,9 @@ function parseWorkbookXml(xml, options) {
  						if (dnChild.attrs["comment"]) {
  							nr.comment = dnChild.attrs["comment"];
  						}
@@ -376,17 +429,18 @@ index 8d11fc8828e051c0560e66f792c7d04ca3e302cf..12256cc3e664dd9f5888ff3217dee78d
  						namedRanges.push(nr);
  					}
  				}
-@@ -1292,7 +1302,8 @@ function parseWorkbookXml(xml, options) {
+@@ -1292,7 +1307,9 @@ function parseWorkbookXml(xml, options) {
  		namedRanges,
  		workbookProtection: wbProtection,
  		activeSheet,
 -		pivotCacheRefs
 +		pivotCacheRefs,
-+		calcProperties
++		calcProperties,
++		codeName
  	};
  }
  
-@@ -1328,7 +1339,7 @@ function filterSheets(allSheets, filter) {
+@@ -1328,7 +1345,7 @@ function filterSheets(allSheets, filter) {
  }
  
  
@@ -395,7 +449,7 @@ index 8d11fc8828e051c0560e66f792c7d04ca3e302cf..12256cc3e664dd9f5888ff3217dee78d
  	const doc = parseXml(xml);
  	
  	const name = doc.attrs["name"] ?? "";
-@@ -1357,6 +1368,9 @@ function parseTableXml(xml) {
+@@ -1357,6 +1374,9 @@ function parseTableXml(xml) {
  				const colLocal = colChild.local || colChild.tag;
  				if (colLocal === "tableColumn") {
  					const col = { name: colChild.attrs["name"] ?? "" };
@@ -406,10 +460,10 @@ index 8d11fc8828e051c0560e66f792c7d04ca3e302cf..12256cc3e664dd9f5888ff3217dee78d
  						col.totalFunction = colChild.attrs["totalsRowFunction"];
  					}
 diff --git a/dist/xlsx/roundtrip.mjs b/dist/xlsx/roundtrip.mjs
-index ad31ffaa4777b8ad9bbccfe450718b0df7eac412..5d1a15d7673d9d09d5a930f62e58b3645504e440 100644
+index ad31ffaa4777b8ad9bbccfe450718b0df7eac412..9264acbd165230e6ab03a2c651e9415615a51659 100644
 --- a/dist/xlsx/roundtrip.mjs
 +++ b/dist/xlsx/roundtrip.mjs
-@@ -135,6 +135,13 @@ export async function saveXlsx(workbook, saveOptions) {
+@@ -135,6 +135,15 @@ export async function saveXlsx(workbook, saveOptions) {
  		veryHidden: sheet.veryHidden,
  		tables: sheet.tables,
  		rowDefs: sheet.rowDefs,
@@ -418,22 +472,25 @@ index ad31ffaa4777b8ad9bbccfe450718b0df7eac412..5d1a15d7673d9d09d5a930f62e58b364
 +		defaultColWidth: sheet.defaultColWidth,
 +		baseColWidth: sheet.baseColWidth,
 +		codeName: sheet.codeName,
++		filterMode: sheet.filterMode,
++		ignoredErrors: sheet.ignoredErrors,
 +		// A cell written back keeps exactly its own format: a column's format fills only cells the file has not.
 +		keepCellStyles: true,
  		
  		
  		
-@@ -711,7 +718,8 @@ export async function saveXlsx(workbook, saveOptions) {
+@@ -711,7 +720,9 @@ export async function saveXlsx(workbook, saveOptions) {
  		externalLinkRels.length > 0 ? externalLinkRels : undefined,
  		pivotCacheRefs.length > 0 ? pivotCacheRefs : undefined,
  		slicerCacheRels.length > 0 ? slicerCacheRels : undefined,
 -		timelineCacheRels.length > 0 ? timelineCacheRels : undefined
 +		timelineCacheRels.length > 0 ? timelineCacheRels : undefined,
-+		workbook.calcProperties
++		workbook.calcProperties,
++		workbook.codeName
  	)));
  	
  	zip.add("xl/_rels/workbook.xml.rels", encoder.encode(writeWorkbookRels(writeSheets.length, hasSharedStrings, workbook.hasMacros, hasFeaturePropertyBag, hasPersons, externalLinkRels.length > 0 ? externalLinkRels : undefined, pivotCacheRels.length > 0 ? pivotCacheRels : undefined, slicerCacheRels.length > 0 ? slicerCacheRels : undefined, timelineCacheRels.length > 0 ? timelineCacheRels : undefined, hasCellImages, hasMetadata)));
-@@ -948,7 +956,7 @@ export async function saveXlsx(workbook, saveOptions) {
+@@ -948,7 +959,7 @@ export async function saveXlsx(workbook, saveOptions) {
  					...tableDef,
  					range: tableRange
  				};
@@ -456,7 +513,7 @@ index a6787f3e88ae3feee22cd9e8c0d2be8cccbdf77b..680149f693c82d5508c629cf8bdc7451
  	const rElements = [];
  	let simpleText = null;
 diff --git a/dist/xlsx/styles-writer.mjs b/dist/xlsx/styles-writer.mjs
-index fc9290935c395334b397c89a6dc83b8fac53e49a..eed71e9f07de286366f98c4760bf89edf433cf98 100644
+index fc9290935c395334b397c89a6dc83b8fac53e49a..3a9be7017aab4bb4027b6d216bc443d66249fd11 100644
 --- a/dist/xlsx/styles-writer.mjs
 +++ b/dist/xlsx/styles-writer.mjs
 @@ -1,6 +1,11 @@
@@ -471,17 +528,194 @@ index fc9290935c395334b397c89a6dc83b8fac53e49a..eed71e9f07de286366f98c4760bf89ed
  const NS_SPREADSHEET = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
  
  function serializeColor(tagName, color) {
-@@ -249,6 +254,8 @@ export function createStylesCollector(defaultFont, options) {
+@@ -24,8 +29,11 @@ function serializeFont(font) {
+ 	
+ 	
+ 	const children = [];
++	// An explicit off (<b val="0"/>) is kept: in a differential format it overrides the cell's own.
+ 	if (font.bold) children.push(xmlSelfClose("b"));
++	else if (font.bold === false) children.push(xmlSelfClose("b", { val: 0 }));
+ 	if (font.italic) children.push(xmlSelfClose("i"));
++	else if (font.italic === false) children.push(xmlSelfClose("i", { val: 0 }));
+ 	if (font.underline !== undefined && font.underline !== false) {
+ 		if (font.underline === true || font.underline === "single") {
+ 			children.push(xmlSelfClose("u"));
+@@ -34,6 +42,7 @@ function serializeFont(font) {
+ 		}
+ 	}
+ 	if (font.strikethrough) children.push(xmlSelfClose("strike"));
++	else if (font.strikethrough === false) children.push(xmlSelfClose("strike", { val: 0 }));
+ 	
+ 	if (font.charset !== undefined) {
+ 		children.push(xmlSelfClose("charset", { val: font.charset }));
+@@ -118,12 +127,12 @@ function fontKey(f) {
+ 	const parts = [];
+ 	if (f.name) parts.push(`n:${f.name}`);
+ 	if (f.size !== undefined) parts.push(`s:${f.size}`);
+-	if (f.bold) parts.push("b");
+-	if (f.italic) parts.push("i");
++	if (f.bold !== undefined) parts.push(f.bold ? "b" : "b0");
++	if (f.italic !== undefined) parts.push(f.italic ? "i" : "i0");
+ 	if (f.underline !== undefined && f.underline !== false) {
+ 		parts.push(`u:${f.underline}`);
+ 	}
+-	if (f.strikethrough) parts.push("st");
++	if (f.strikethrough !== undefined) parts.push(f.strikethrough ? "st" : "st0");
+ 	if (f.color) parts.push(`c:${colorKey(f.color)}`);
+ 	if (f.vertAlign) parts.push(`va:${f.vertAlign}`);
+ 	if (f.family !== undefined) parts.push(`fam:${f.family}`);
+@@ -191,6 +200,28 @@ export function createStylesCollector(defaultFont, options) {
+ 	
+ 	const numFmts = [];
+ 	const numFmtMap = new Map();
++	// Named styles cells are based on: their style format goes in cellStyleXfs (after Normal's) and
++	// their name in cellStyles.
++	const namedStyles = [];
++	const namedStyleMap = new Map();
++	function addNamedStyle(named) {
++		const existing = namedStyleMap.get(named.name);
++		if (existing !== undefined) return existing;
++		const base = named.style ?? {};
++		const xf = {
++			numFmtId: base.numFmt ? addNumFmt(base.numFmt, base.numFmtId) : 0,
++			fontId: base.font ? addFont(base.font) : 0,
++			fillId: base.fill ? addFill(base.fill) : 0,
++			borderId: base.border ? addBorder(base.border) : 0,
++			alignment: base.alignment,
++			protection: base.protection,
++			applies: named.applies
++		};
++		const id = namedStyles.length + 1;
++		namedStyles.push({ named, xf });
++		namedStyleMap.set(named.name, id);
++		return id;
++	}
+ 	let nextNumFmtId = 164;
+ 	
+ 	const defaultXfKey = "nf:0|f:0|fl:0|b:0|a:|p:";
+@@ -248,7 +279,11 @@ export function createStylesCollector(defaultFont, options) {
+ 		borderMap.set(key, id);
  		return id;
  	}
- 	function addNumFmt(format) {
-+		const builtin = BUILTIN_NUM_FMT_IDS.get(format);
+-	function addNumFmt(format) {
++	function addNumFmt(format, preferredId) {
++		// A file's own code stays its own even where it spells a built-in; a built-in stays built-in.
++		if (preferredId !== undefined && preferredId < 164 && BUILTIN_NUM_FMTS[preferredId] === format) return preferredId;
++		const builtin = preferredId !== undefined && preferredId >= 164 ? undefined : BUILTIN_NUM_FMT_IDS.get(format);
 +		if (builtin !== undefined) return builtin;
  		const existing = numFmtMap.get(format);
  		if (existing !== undefined) return existing;
  		const id = nextNumFmtId++;
+@@ -286,7 +321,7 @@ export function createStylesCollector(defaultFont, options) {
+ 		if (style.font) parts.push(`f:${fontKey(style.font)}`);
+ 		if (style.fill) parts.push(`fl:${fillKey(style.fill)}`);
+ 		if (style.border) parts.push(`b:${borderKey(style.border)}`);
+-		if (style.numFmt) parts.push(`nf:${style.numFmt}`);
++		if (style.numFmt) parts.push(`nf:${style.numFmt}#${style.numFmtId ?? ""}`);
+ 		if (style.alignment) parts.push(`a:${alignmentKey(style.alignment)}`);
+ 		return parts.join("|");
+ 	}
+@@ -323,9 +358,12 @@ export function createStylesCollector(defaultFont, options) {
+ 		const fontId = style.font ? addFont(style.font) : 0;
+ 		const fillId = style.fill ? addFill(style.fill) : 0;
+ 		const borderId = style.border ? addBorder(style.border) : 0;
+-		const numFmtId = style.numFmt ? addNumFmt(style.numFmt) : 0;
++		const numFmtId = style.numFmt ? addNumFmt(style.numFmt, style.numFmtId) : 0;
++		const xfId = style.namedStyle ? addNamedStyle(style.namedStyle) : 0;
+ 		const key = [
+ 			`nf:${numFmtId}`,
++			`xf:${xfId}`,
++			style.quotePrefix ? "qp:1" : "qp:0",
+ 			`f:${fontId}`,
+ 			`fl:${fillId}`,
+ 			`b:${borderId}`,
+@@ -347,7 +385,9 @@ export function createStylesCollector(defaultFont, options) {
+ 			borderId,
+ 			alignment: style.alignment ? { ...style.alignment } : undefined,
+ 			protection: style.protection ? { ...style.protection } : undefined,
+-			hasCheckboxFeature: checkbox || undefined
++			hasCheckboxFeature: checkbox || undefined,
++			xfId,
++			quotePrefix: style.quotePrefix || undefined
+ 		});
+ 		xfMap.set(key, id);
+ 		if (xfByStyleIdentity && !checkbox) xfByStyleIdentity.set(style, id);
+@@ -401,12 +441,29 @@ export function createStylesCollector(defaultFont, options) {
+ 		const borderChildren = borders.map((b) => serializeBorder(b.border));
+ 		parts.push(xmlElement("borders", { count: borders.length }, borderChildren));
+ 		
+-		parts.push(xmlElement("cellStyleXfs", { count: 1 }, [xmlSelfClose("xf", {
++		const styleXfChildren = [xmlSelfClose("xf", {
+ 			numFmtId: 0,
+ 			fontId: 0,
+ 			fillId: 0,
+ 			borderId: 0
+-		})]));
++		})];
++		for (const { xf } of namedStyles) {
++			const xfChildren = [];
++			if (xf.alignment) xfChildren.push(serializeAlignment(xf.alignment));
++			if (xf.protection) xfChildren.push(xmlSelfClose("protection", {
++				...xf.protection.locked !== undefined ? { locked: xf.protection.locked ? 1 : 0 } : {},
++				...xf.protection.hidden !== undefined ? { hidden: xf.protection.hidden ? 1 : 0 } : {}
++			}));
++			const attrs = {
++				numFmtId: xf.numFmtId,
++				fontId: xf.fontId,
++				fillId: xf.fillId,
++				borderId: xf.borderId,
++				...xf.applies
++			};
++			styleXfChildren.push(xfChildren.length > 0 ? xmlElement("xf", attrs, xfChildren) : xmlSelfClose("xf", attrs));
++		}
++		parts.push(xmlElement("cellStyleXfs", { count: styleXfChildren.length }, styleXfChildren));
+ 		
+ 		const xfChildren = xfs.map((xf) => {
+ 			const attrs = {
+@@ -414,8 +471,9 @@ export function createStylesCollector(defaultFont, options) {
+ 				fontId: xf.fontId,
+ 				fillId: xf.fillId,
+ 				borderId: xf.borderId,
+-				xfId: 0
++				xfId: xf.xfId ?? 0
+ 			};
++			if (xf.quotePrefix) attrs["quotePrefix"] = 1;
+ 			if (xf.numFmtId !== 0) attrs["applyNumberFormat"] = true;
+ 			if (xf.fontId !== 0) attrs["applyFont"] = true;
+ 			if (xf.fillId !== 0) attrs["applyFill"] = true;
+@@ -441,18 +499,27 @@ export function createStylesCollector(defaultFont, options) {
+ 		});
+ 		parts.push(xmlElement("cellXfs", { count: xfs.length }, xfChildren));
+ 		
+-		parts.push(xmlElement("cellStyles", { count: 1 }, [xmlSelfClose("cellStyle", {
++		const cellStyleChildren = [xmlSelfClose("cellStyle", {
+ 			name: "Normal",
+ 			xfId: 0,
+ 			builtinId: 0
+-		})]));
++		})];
++		namedStyles.forEach(({ named }, index) => {
++			const attrs = { name: named.name, xfId: index + 1 };
++			if (named.builtinId !== undefined) attrs["builtinId"] = named.builtinId;
++			if (named.iLevel !== undefined) attrs["iLevel"] = named.iLevel;
++			if (named.hidden) attrs["hidden"] = 1;
++			if (named.customBuiltin) attrs["customBuiltin"] = 1;
++			cellStyleChildren.push(xmlSelfClose("cellStyle", attrs));
++		});
++		parts.push(xmlElement("cellStyles", { count: cellStyleChildren.length }, cellStyleChildren));
+ 		
+ 		if (dxfs.length > 0) {
+ 			const dxfChildren = dxfs.map((style) => {
+ 				const children = [];
+ 				if (style.font) children.push(serializeFont(style.font));
+ 				if (style.numFmt) {
+-					const numFmtId = addNumFmt(style.numFmt);
++					const numFmtId = addNumFmt(style.numFmt, style.numFmtId);
+ 					children.push(xmlSelfClose("numFmt", {
+ 						numFmtId,
+ 						formatCode: style.numFmt
 diff --git a/dist/xlsx/styles.mjs b/dist/xlsx/styles.mjs
-index a9fe34e10b85d0344c473fa36ea1ee042bc9816c..1cc86f95235fe627da9c6e2e9b010f8137f83d75 100644
+index a9fe34e10b85d0344c473fa36ea1ee042bc9816c..b92d1ba0028b0aa815df028b3c26dc0cb8aeaf6a 100644
 --- a/dist/xlsx/styles.mjs
 +++ b/dist/xlsx/styles.mjs
 @@ -3,7 +3,7 @@ import { isBuiltinDateFormatId, isDateFormat } from "../_date.mjs";
@@ -493,7 +727,73 @@ index a9fe34e10b85d0344c473fa36ea1ee042bc9816c..1cc86f95235fe627da9c6e2e9b010f81
  	0: "General",
  	1: "0",
  	2: "0.00",
-@@ -228,12 +228,12 @@ function parseFills(el, fills) {
+@@ -33,6 +33,10 @@ const BUILTIN_NUM_FMTS = {
+ 	40: "#,##0.00;[Red](#,##0.00)",
+ 	45: "mm:ss",
+ 	46: "[h]:mm:ss",
++	41: "_(* #,##0_);_(* \\(#,##0\\);_(* \"-\"_);_(@_)",
++	42: "_(\"$\"* #,##0_);_(\"$\"* \\(#,##0\\);_(\"$\"* \"-\"_);_(@_)",
++	43: "_(* #,##0.00_);_(* \\(#,##0.00\\);_(* \"-\"??_);_(@_)",
++	44: "_(\"$\"* #,##0.00_);_(\"$\"* \\(#,##0.00\\);_(\"$\"* \"-\"??_);_(@_)",
+ 	47: "mmss.0",
+ 	48: "##0.0E+0",
+ 	49: "@"
+@@ -46,6 +50,8 @@ export function parseStyles(xml) {
+ 	const fills = [];
+ 	const borders = [];
+ 	const cellXfs = [];
++	const cellStyleXfs = [];
++	const cellStyles = new Map();
+ 	const dxfs = [];
+ 	for (const child of doc.children) {
+ 		if (typeof child === "string") continue;
+@@ -66,6 +72,26 @@ export function parseStyles(xml) {
+ 			case "cellXfs":
+ 				parseCellXfs(child, cellXfs);
+ 				break;
++			case "cellStyleXfs":
++				parseCellXfs(child, cellStyleXfs);
++				// Which parts of its format a named style carries (the rest it leaves as the cell has it).
++				child.children.filter((xf) => typeof xf !== "string" && (xf.local || xf.tag) === "xf").forEach((xf, index) => {
++					const applies = Object.entries(xf.attrs).filter(([name]) => name.startsWith("apply"));
++					if (applies.length > 0 && cellStyleXfs[index]) cellStyleXfs[index].applies = Object.fromEntries(applies);
++				});
++				break;
++			case "cellStyles":
++				// Named styles by the style format they name (cellStyleXfs index).
++				for (const cs of child.children) {
++					if (typeof cs === "string" || (cs.local || cs.tag) !== "cellStyle") continue;
++					const named = { name: cs.attrs["name"] ?? "" };
++					if (cs.attrs["builtinId"] !== undefined) named.builtinId = Number(cs.attrs["builtinId"]);
++					if (cs.attrs["iLevel"] !== undefined) named.iLevel = Number(cs.attrs["iLevel"]);
++					if (cs.attrs["customBuiltin"] === "1" || cs.attrs["customBuiltin"] === "true") named.customBuiltin = true;
++					if (cs.attrs["hidden"] === "1" || cs.attrs["hidden"] === "true") named.hidden = true;
++					cellStyles.set(Number(cs.attrs["xfId"] ?? "0"), named);
++				}
++				break;
+ 			case "dxfs":
+ 				parseDxfs(child, dxfs);
+ 				break;
+@@ -88,6 +114,8 @@ export function parseStyles(xml) {
+ 		fills,
+ 		borders,
+ 		cellXfs,
++		cellStyleXfs,
++		cellStyles,
+ 		dxfs
+ 	};
+ }
+@@ -167,7 +195,8 @@ function parseFont(el) {
+ 				break;
+ 			case "u": {
+ 				const val = child.attrs["val"];
+-				if (val === "double") font.underline = "double";
++				if (val === "none") font.underline = "none";
++				else if (val === "double") font.underline = "double";
+ 				else if (val === "singleAccounting") font.underline = "singleAccounting";
+ 				else if (val === "doubleAccounting") font.underline = "doubleAccounting";
+ 				else font.underline = true;
+@@ -228,12 +257,12 @@ function parseFills(el, fills) {
  		}
  	}
  }
@@ -508,7 +808,7 @@ index a9fe34e10b85d0344c473fa36ea1ee042bc9816c..1cc86f95235fe627da9c6e2e9b010f81
  		}
  		if (local === "gradientFill") {
  			return parseGradientFill(child);
-@@ -245,12 +245,11 @@ function parseFill(el) {
+@@ -245,12 +274,11 @@ function parseFill(el) {
  		pattern: "none"
  	};
  }
@@ -526,7 +826,33 @@ index a9fe34e10b85d0344c473fa36ea1ee042bc9816c..1cc86f95235fe627da9c6e2e9b010f81
  	for (const child of el.children) {
  		if (typeof child === "string") continue;
  		const local = child.local || child.tag;
-@@ -430,7 +429,7 @@ function parseDxf(el) {
+@@ -359,8 +387,12 @@ function parseCellXf(el) {
+ 		numFmtId: Number(el.attrs["numFmtId"] ?? "0"),
+ 		fontId: Number(el.attrs["fontId"] ?? "0"),
+ 		fillId: Number(el.attrs["fillId"] ?? "0"),
+-		borderId: Number(el.attrs["borderId"] ?? "0")
++		borderId: Number(el.attrs["borderId"] ?? "0"),
++		xfId: Number(el.attrs["xfId"] ?? "0")
+ 	};
++	if (el.attrs["quotePrefix"] === "1" || el.attrs["quotePrefix"] === "true") {
++		xf.quotePrefix = true;
++	}
+ 	if (el.attrs["applyNumberFormat"] === "1" || el.attrs["applyNumberFormat"] === "true") {
+ 		xf.applyNumberFormat = true;
+ 	}
+@@ -420,17 +452,18 @@ function parseDxf(el) {
+ 				
+ 				
+ 				const formatCode = child.attrs["formatCode"];
++				const id = Number(child.attrs["numFmtId"]);
+ 				if (formatCode) {
+ 					style.numFmt = formatCode;
+ 				} else {
+-					const id = Number(child.attrs["numFmtId"]);
+ 					const builtin = Number.isNaN(id) ? undefined : BUILTIN_NUM_FMTS[id];
+ 					if (builtin) style.numFmt = builtin;
+ 				}
++				if (style.numFmt && !Number.isNaN(id)) style.numFmtId = id;
  				break;
  			}
  			case "fill":
@@ -535,6 +861,37 @@ index a9fe34e10b85d0344c473fa36ea1ee042bc9816c..1cc86f95235fe627da9c6e2e9b010f81
  				break;
  			case "border":
  				style.border = parseBorder(child);
+@@ -496,14 +529,30 @@ function parseAlignment(el) {
+ export function resolveStyle(styles, styleIndex) {
+ 	const xf = styles.cellXfs[styleIndex];
+ 	if (!xf) return {};
++	const result = resolveXf(styles, xf);
++	// The named style the format is based on (Hyperlink, Currency, a style of the file's own).
++	const named = xf.xfId > 0 ? styles.cellStyles?.get(xf.xfId) : undefined;
++	const base = xf.xfId > 0 ? styles.cellStyleXfs?.[xf.xfId] : undefined;
++	if (named && base) {
++		result.namedStyle = { ...named, style: resolveXf(styles, base) };
++		if (base.applies) result.namedStyle.applies = base.applies;
++	}
++	return result;
++}
++function resolveXf(styles, xf) {
+ 	const result = {};
+ 	
+ 	if (xf.numFmtId !== 0) {
+ 		const fmt = styles.numFmts.get(xf.numFmtId) ?? BUILTIN_NUM_FMTS[xf.numFmtId];
+ 		if (fmt) {
+ 			result.numFmt = fmt;
++			// Which number the file gave it: a built-in (shown in the reader's locale) or its own code.
++			result.numFmtId = xf.numFmtId;
+ 		}
+ 	}
++	if (xf.quotePrefix) {
++		result.quotePrefix = true;
++	}
+ 	
+ 	
+ 	
 diff --git a/dist/xlsx/table-writer.mjs b/dist/xlsx/table-writer.mjs
 index cb34e8194804745585c34bca55d07f352f4cb9eb..33ab65e5c74d25b02579c62848b65f35c9eaaa04 100644
 --- a/dist/xlsx/table-writer.mjs
@@ -558,7 +915,7 @@ index cb34e8194804745585c34bca55d07f352f4cb9eb..33ab65e5c74d25b02579c62848b65f35
  			colAttrs["totalsRowFunction"] = col.totalFunction;
  		}
 diff --git a/dist/xlsx/workbook-writer.mjs b/dist/xlsx/workbook-writer.mjs
-index 8852c8d7b0b94c0c1dfa0cf927a05c7df33d89c4..e0afe6c0698dd9a6eeeec21767fc600d9eeb65bb 100644
+index 8852c8d7b0b94c0c1dfa0cf927a05c7df33d89c4..a1c88c84f40593aa350a972a741ddb7f04fa665f 100644
 --- a/dist/xlsx/workbook-writer.mjs
 +++ b/dist/xlsx/workbook-writer.mjs
 @@ -11,7 +11,7 @@ const REL_THEME = "http://schemas.openxmlformats.org/officeDocument/2006/relatio
@@ -566,11 +923,26 @@ index 8852c8d7b0b94c0c1dfa0cf927a05c7df33d89c4..e0afe6c0698dd9a6eeeec21767fc600d
  const NS_RELATIONSHIPS = "http://schemas.openxmlformats.org/package/2006/relationships";
  
 -export function writeWorkbookXml(sheets, namedRanges, dateSystem, activeSheet, workbookProtection, externalLinkRels, pivotCacheRefs, slicerCacheRels, timelineCacheRels) {
-+export function writeWorkbookXml(sheets, namedRanges, dateSystem, activeSheet, workbookProtection, externalLinkRels, pivotCacheRefs, slicerCacheRels, timelineCacheRels, calcProperties) {
++export function writeWorkbookXml(sheets, namedRanges, dateSystem, activeSheet, workbookProtection, externalLinkRels, pivotCacheRefs, slicerCacheRels, timelineCacheRels, calcProperties, codeName) {
  	const sheetElements = [];
  	for (let i = 0; i < sheets.length; i++) {
  		const sheet = sheets[i];
-@@ -86,13 +86,19 @@ export function writeWorkbookXml(sheets, namedRanges, dateSystem, activeSheet, w
+@@ -29,8 +29,12 @@ export function writeWorkbookXml(sheets, namedRanges, dateSystem, activeSheet, w
+ 	}
+ 	const parts = [];
+ 	
+-	if (dateSystem === "1904") {
+-		parts.push(xmlSelfClose("workbookPr", { date1904: 1 }));
++	// codeName: what VBA calls the workbook.
++	if (dateSystem === "1904" || codeName) {
++		parts.push(xmlSelfClose("workbookPr", {
++			...codeName ? { codeName } : {},
++			...dateSystem === "1904" ? { date1904: 1 } : {}
++		}));
+ 	}
+ 	
+ 	
+@@ -86,13 +90,19 @@ export function writeWorkbookXml(sheets, namedRanges, dateSystem, activeSheet, w
  			if (nr.comment) {
  				attrs["comment"] = nr.comment;
  			}
@@ -591,7 +963,7 @@ index 8852c8d7b0b94c0c1dfa0cf927a05c7df33d89c4..e0afe6c0698dd9a6eeeec21767fc600d
  	}));
  	
 diff --git a/dist/xlsx/worksheet-writer.mjs b/dist/xlsx/worksheet-writer.mjs
-index 2b9ee5c2b80b989625934e8d57272c7a268910c5..b9ccf17d7d9ac71a4e5a478e5408f63a4d251572 100644
+index 2b9ee5c2b80b989625934e8d57272c7a268910c5..1bc1bf2f40b4d9df5114ff205e9ac9a5498817ba 100644
 --- a/dist/xlsx/worksheet-writer.mjs
 +++ b/dist/xlsx/worksheet-writer.mjs
 @@ -32,8 +32,12 @@ export function colToLetter(col) {
@@ -632,12 +1004,13 @@ index 2b9ee5c2b80b989625934e8d57272c7a268910c5..b9ccf17d7d9ac71a4e5a478e5408f63a
  	
  	let maxCols = 0;
  	for (const row of resolvedRows) {
-@@ -171,8 +181,12 @@ export function writeWorksheetXml(sheet, styles, sharedStrings, dateSystem, glob
+@@ -171,8 +181,13 @@ export function writeWorksheetXml(sheet, styles, sharedStrings, dateSystem, glob
  		if (sheet.pageSetup?.fitToPage) {
  			sheetPrChildren.push(xmlSelfClose("pageSetUpPr", { fitToPage: 1 }));
  		}
 +		// codeName: what VBA calls the sheet.
-+		const sheetPrAttrs = sheet.codeName ? { codeName: sheet.codeName } : undefined;
++		// filterMode: an autofilter has rows filtered out.
++		const sheetPrAttrs = sheet.codeName || sheet.filterMode ? { ...sheet.codeName ? { codeName: sheet.codeName } : {}, ...sheet.filterMode ? { filterMode: 1 } : {} } : undefined;
  		if (sheetPrChildren.length > 0) {
 -			parts.push(xmlElement("sheetPr", undefined, sheetPrChildren));
 +			parts.push(xmlElement("sheetPr", sheetPrAttrs, sheetPrChildren));
@@ -646,7 +1019,7 @@ index 2b9ee5c2b80b989625934e8d57272c7a268910c5..b9ccf17d7d9ac71a4e5a478e5408f63a
  		}
  	}
  	
-@@ -242,12 +256,15 @@ export function writeWorksheetXml(sheet, styles, sharedStrings, dateSystem, glob
+@@ -242,12 +257,15 @@ export function writeWorksheetXml(sheet, styles, sharedStrings, dateSystem, glob
  	
  	
  	const formatPrAttrs = { defaultRowHeight: sheet.defaultRowHeight ?? 15 };
@@ -663,7 +1036,7 @@ index 2b9ee5c2b80b989625934e8d57272c7a268910c5..b9ccf17d7d9ac71a4e5a478e5408f63a
  		for (let i = 0; i < sheet.columns.length; i++) {
  			const col = sheet.columns[i];
  			
-@@ -297,9 +314,16 @@ export function writeWorksheetXml(sheet, styles, sharedStrings, dateSystem, glob
+@@ -297,9 +315,16 @@ export function writeWorksheetXml(sheet, styles, sharedStrings, dateSystem, glob
  				if (col.collapsed) {
  					colAttrs["collapsed"] = true;
  				}
@@ -681,7 +1054,7 @@ index 2b9ee5c2b80b989625934e8d57272c7a268910c5..b9ccf17d7d9ac71a4e5a478e5408f63a
  		if (colElements.length > 0) {
  			parts.push(xmlElement("cols", undefined, colElements));
  		}
-@@ -310,7 +334,7 @@ export function writeWorksheetXml(sheet, styles, sharedStrings, dateSystem, glob
+@@ -310,7 +335,7 @@ export function writeWorksheetXml(sheet, styles, sharedStrings, dateSystem, glob
  	for (let r = 0; r < rowCount; r++) {
  		const row = resolvedRows[r];
  		const rowDef = sheet.rowDefs?.get(r);
@@ -690,7 +1063,7 @@ index 2b9ee5c2b80b989625934e8d57272c7a268910c5..b9ccf17d7d9ac71a4e5a478e5408f63a
  		if ((!row || row.length === 0) && !hasRowDef) continue;
  		const cellElements = [];
  		let hasAnyCells = false;
-@@ -337,7 +361,7 @@ export function writeWorksheetXml(sheet, styles, sharedStrings, dateSystem, glob
+@@ -337,7 +362,7 @@ export function writeWorksheetXml(sheet, styles, sharedStrings, dateSystem, glob
  			
  			
  			
@@ -699,7 +1072,19 @@ index 2b9ee5c2b80b989625934e8d57272c7a268910c5..b9ccf17d7d9ac71a4e5a478e5408f63a
  			if (hasAnyCells) {
  				rowElements.push(xmlElement("row", rowAttrs, cellElements));
  			} else {
-@@ -489,9 +513,12 @@ export function writeWorksheetXml(sheet, styles, sharedStrings, dateSystem, glob
+@@ -434,6 +459,11 @@ export function writeWorksheetXml(sheet, styles, sharedStrings, dateSystem, glob
+ 		}, brkElements));
+ 	}
+ 	
++	// Errors the user told Excel to stop flagging (a number stored as text, …), by range.
++	if (sheet.ignoredErrors && sheet.ignoredErrors.length > 0) {
++		parts.push(xmlElement("ignoredErrors", undefined, sheet.ignoredErrors.map((attrs) => xmlSelfClose("ignoredError", attrs))));
++	}
++	
+ 	let drawingRId = null;
+ 	let nextRId = hyperlinkRelationships.length + 1;
+ 	const hasImages = sheet.images && sheet.images.length > 0;
+@@ -489,9 +519,12 @@ export function writeWorksheetXml(sheet, styles, sharedStrings, dateSystem, glob
  			const tableRId = `rId${nextRId}`;
  			nextRId++;
  			const globalIdx = globalTableStartIndex + t;
@@ -713,7 +1098,7 @@ index 2b9ee5c2b80b989625934e8d57272c7a268910c5..b9ccf17d7d9ac71a4e5a478e5408f63a
  			});
  			tablePartElements.push(xmlSelfClose("tablePart", { "r:id": tableRId }));
  		}
-@@ -590,7 +617,7 @@ function resolveRows(sheet) {
+@@ -590,7 +623,7 @@ function resolveRows(sheet) {
  				
  				
  				const value = toCellValue(row[c]);
@@ -722,7 +1107,7 @@ index 2b9ee5c2b80b989625934e8d57272c7a268910c5..b9ccf17d7d9ac71a4e5a478e5408f63a
  				resolvedRow.push(style ? {
  					value,
  					style
-@@ -851,6 +878,9 @@ function serializeDataValidations(validations) {
+@@ -851,6 +884,9 @@ function serializeDataValidations(validations) {
  		if (dv.operator) {
  			attrs["operator"] = dv.operator;
  		}
@@ -732,7 +1117,7 @@ index 2b9ee5c2b80b989625934e8d57272c7a268910c5..b9ccf17d7d9ac71a4e5a478e5408f63a
  		if (dv.allowBlank) {
  			attrs["allowBlank"] = 1;
  		}
-@@ -1052,13 +1082,11 @@ function serializePageSetup(ps) {
+@@ -1052,13 +1088,11 @@ function serializePageSetup(ps) {
  	if (ps.scale !== undefined) {
  		attrs["scale"] = ps.scale;
  	}
@@ -751,7 +1136,7 @@ index 2b9ee5c2b80b989625934e8d57272c7a268910c5..b9ccf17d7d9ac71a4e5a478e5408f63a
  	}
  	
  	
-@@ -1148,7 +1176,7 @@ function serializeColorAttrs(color) {
+@@ -1148,7 +1182,7 @@ function serializeColorAttrs(color) {
  }
  
  
@@ -760,7 +1145,7 @@ index 2b9ee5c2b80b989625934e8d57272c7a268910c5..b9ccf17d7d9ac71a4e5a478e5408f63a
  	const elements = [];
  	for (const run of runs) {
  		const runChildren = [];
-@@ -1246,6 +1274,13 @@ function serializeCfRule(rule, styles) {
+@@ -1246,6 +1280,13 @@ function serializeCfRule(rule, styles) {
  	if (rule.stopIfTrue) {
  		attrs["stopIfTrue"] = true;
  	}
@@ -775,20 +1160,22 @@ index 2b9ee5c2b80b989625934e8d57272c7a268910c5..b9ccf17d7d9ac71a4e5a478e5408f63a
  	if (rule.text !== undefined) {
  		attrs["text"] = rule.text;
 diff --git a/dist/xlsx/worksheet.mjs b/dist/xlsx/worksheet.mjs
-index 2da07a93c6d60d1b9f2092a99edfd43446677dbb..2a8d72d3f245a6611a005752177be76b1c94f40a 100644
+index 2da07a93c6d60d1b9f2092a99edfd43446677dbb..b83d709178783239c241f45087f844a07038b2a1 100644
 --- a/dist/xlsx/worksheet.mjs
 +++ b/dist/xlsx/worksheet.mjs
-@@ -147,6 +147,9 @@ function worksheetParser(name, ctx) {
+@@ -147,6 +147,11 @@ function worksheetParser(name, ctx) {
  	
  	const columnDefs = [];
  	let defaultRowHeight;
 +	let defaultRowHeightCustom;
 +	let baseColWidth;
 +	let codeName;
++	let filterMode = false;
++	const ignoredErrors = [];
  	let defaultColWidth;
  	let inCols = false;
  	
-@@ -267,14 +270,17 @@ function worksheetParser(name, ctx) {
+@@ -267,14 +272,17 @@ function worksheetParser(name, ctx) {
  				case "sheetFormatPr": {
  					const dh = attrs["defaultRowHeight"];
  					const dw = attrs["defaultColWidth"];
@@ -807,7 +1194,7 @@ index 2da07a93c6d60d1b9f2092a99edfd43446677dbb..2a8d72d3f245a6611a005752177be76b
  						}
  					}
  					if (dw !== undefined) {
-@@ -332,6 +338,16 @@ function worksheetParser(name, ctx) {
+@@ -332,6 +340,16 @@ function worksheetParser(name, ctx) {
  								rowDefs.set(rowNum, existing);
  							}
  						}
@@ -824,15 +1211,26 @@ index 2da07a93c6d60d1b9f2092a99edfd43446677dbb..2a8d72d3f245a6611a005752177be76b
  					}
  					break;
  				case "c":
-@@ -404,6 +420,7 @@ function worksheetParser(name, ctx) {
+@@ -404,6 +422,8 @@ function worksheetParser(name, ctx) {
  					break;
  				case "sheetPr":
  					inSheetPr = true;
 +					if (attrs["codeName"]) codeName = attrs["codeName"];
++					if (attrs["filterMode"] === "1" || attrs["filterMode"] === "true") filterMode = true;
  					break;
  				case "outlinePr":
  					
-@@ -1090,7 +1107,10 @@ function worksheetParser(name, ctx) {
+@@ -666,6 +686,9 @@ function worksheetParser(name, ctx) {
+ 				case "colBreaks":
+ 					inColBreaks = true;
+ 					break;
++				case "ignoredError":
++					ignoredErrors.push({ ...attrs });
++					break;
+ 				case "brk":
+ 					if (inRowBreaks || inColBreaks) {
+ 						const brkId = attrs["id"];
+@@ -1090,7 +1113,10 @@ function worksheetParser(name, ctx) {
  			sheet.cells = cells;
  		}
  		
@@ -844,16 +1242,18 @@ index 2da07a93c6d60d1b9f2092a99edfd43446677dbb..2a8d72d3f245a6611a005752177be76b
  		if (defaultColWidth !== undefined) sheet.defaultColWidth = defaultColWidth;
  		if (columnDefs.some((c) => Object.keys(c).length > 0)) {
  			sheet.columns = columnDefs;
-@@ -1154,6 +1174,8 @@ function worksheetParser(name, ctx) {
+@@ -1154,6 +1180,10 @@ function worksheetParser(name, ctx) {
  		if (outlineProperties) {
  			sheet.outlineProperties = outlineProperties;
  		}
 +		if (baseColWidth !== undefined) sheet.baseColWidth = baseColWidth;
 +		if (codeName !== undefined) sheet.codeName = codeName;
++		if (filterMode) sheet.filterMode = true;
++		if (ignoredErrors.length > 0) sheet.ignoredErrors = ignoredErrors;
  		return sheet;
  	}
  	return {
-@@ -1255,6 +1277,9 @@ function buildDataValidation(attrs, formula1Text, formula2Text) {
+@@ -1255,6 +1285,9 @@ function buildDataValidation(attrs, formula1Text, formula2Text) {
  		dv.operator = operatorStr;
  	}
  	
@@ -863,7 +1263,7 @@ index 2da07a93c6d60d1b9f2092a99edfd43446677dbb..2a8d72d3f245a6611a005752177be76b
  	if (attrs["allowBlank"] === "1" || attrs["allowBlank"] === "true") {
  		dv.allowBlank = true;
  	}
-@@ -1312,8 +1337,12 @@ const VALID_CF_TYPES = new Set([
+@@ -1312,8 +1345,12 @@ const VALID_CF_TYPES = new Set([
  	"beginsWith",
  	"endsWith",
  	"containsBlanks",
@@ -877,7 +1277,7 @@ index 2da07a93c6d60d1b9f2092a99edfd43446677dbb..2a8d72d3f245a6611a005752177be76b
  function buildConditionalRule(attrs, sqref, formulas, csCfvos, csColors, dbCfvos, dbColor, isCfvos, isAttrsObj, dxfs, ctx) {
  	const typeStr = attrs["type"];
  	if (!typeStr || !VALID_CF_TYPES.has(typeStr)) return null;
-@@ -1325,9 +1354,17 @@ function buildConditionalRule(attrs, sqref, formulas, csCfvos, csColors, dbCfvos
+@@ -1325,9 +1362,17 @@ function buildConditionalRule(attrs, sqref, formulas, csCfvos, csColors, dbCfvos
  	};
  	
  	const operatorStr = attrs["operator"];
@@ -896,7 +1296,7 @@ index 2da07a93c6d60d1b9f2092a99edfd43446677dbb..2a8d72d3f245a6611a005752177be76b
  	
  	
  	
-@@ -1763,8 +1800,8 @@ function parsePageSetupAttrs(attrs, ctx) {
+@@ -1763,8 +1808,8 @@ function parsePageSetupAttrs(attrs, ctx) {
  	if (attrs["scale"]) {
  		ps.scale = Number(attrs["scale"]);
  	}

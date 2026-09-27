@@ -305,7 +305,7 @@ function meaningless(node: XmlNode): boolean {
 
 // Attributes ignored on one element only.
 const IGNORED_ELEMENT_ATTRIBUTES: Record<string, readonly string[]> = {
-	"workbook/workbookPr": ["defaultThemeVersion", "filterPrivacy", "codeName"],
+	"workbook/workbookPr": ["defaultThemeVersion", "filterPrivacy"],
 	"workbook/sheets/sheet": ["sheetId", "r:id"],
 	// The window's place and size, where the tab bar starts, how wide it is.
 	"workbook/bookViews/workbookView": ["xWindow", "yWindow", "windowWidth", "windowHeight", "firstSheet", "tabRatio"],
@@ -321,7 +321,9 @@ const IGNORED_ELEMENT_ATTRIBUTES: Record<string, readonly string[]> = {
 }
 
 // Boolean elements whose absence means false: <b/> and <b val="1"/> are one thing, <b val="0"/> is none.
+// Not in a differential format: there <b val="0"/> turns bold off, where absence leaves it as it is.
 const FLAG_ELEMENTS = new Set(["b", "i", "strike", "outline", "shadow", "condense", "extend", "u"])
+const IN_DXF = /(?:^|\/)dxf(?:\/|$)/
 
 function normalizeColor(node: XmlNode): void {
 	const rgb = node.attrs.get("rgb")
@@ -370,7 +372,8 @@ function canon(node: XmlNode, path = node.name, context?: Context): string {
 		if (IGNORED_ELEMENTS.has(childPath) || meaningless(child)) continue
 		if (
 			FLAG_ELEMENTS.has(child.name) &&
-			(child.attrs.get("val") === "0" || child.attrs.get("val") === "false" || child.attrs.get("val") === "none")
+			(child.attrs.get("val") === "0" || child.attrs.get("val") === "false" || child.attrs.get("val") === "none") &&
+			!IN_DXF.test(path)
 		)
 			continue
 
@@ -389,7 +392,7 @@ function canon(node: XmlNode, path = node.name, context?: Context): string {
 				: node.name === "definedName"
 					? node.text
 							.trim()
-							.replace(/'([A-Za-z_][A-Za-z0-9_.]*)'!/g, (quoted, name: string) =>
+							.replace(/'([\p{L}_][\p{L}\p{N}_.]*)'!/gu, (quoted, name: string) =>
 								/^([A-Za-z]{1,3}\d+|R\d*C\d*|TRUE|FALSE)$/i.test(name) ? quoted : `${name}!`
 							)
 					: node.text.trim()
@@ -454,26 +457,48 @@ function styleContext(stylesXml: string | undefined, stringsXml: string | undefi
 	})
 	const borders = section("borders").map(node => canon(node))
 	const named = new Map(section("cellStyles").map(node => [node.attrs.get("xfId") ?? "", node.attrs.get("name") ?? ""]))
-	const signature = (xf: XmlNode): string => {
+	const bases = section("cellStyleXfs")
+	const parts = (xf: XmlNode): string => {
 		const id = xf.attrs.get("numFmtId") ?? "0"
-		const xfId = xf.attrs.get("xfId") ?? "0"
-		const extras = [...xf.attrs]
-			.filter(([name, value]) => ["quotePrefix", "pivotButton"].includes(name) && !isDefault("xf", name, normalizeValue(value)))
-			.map(([name, value]) => `${name}=${normalizeValue(value)}`)
 
 		return [
 			formats.get(id) ?? SAME_EVERYWHERE[id] ?? `builtin:${id}`,
 			fonts[Number(xf.attrs.get("fontId") ?? 0)] ?? "",
 			fills[Number(xf.attrs.get("fillId") ?? 0)] ?? "",
 			borders[Number(xf.attrs.get("borderId") ?? 0)] ?? "",
-			xfId === "0" ? "Normal" : (named.get(xfId) ?? `#${xfId}`),
 			xf.children
 				.map(child => canon(child))
 				.filter(text => !/^<\w+ ><\/\w+>$/.test(text))
 				.sort()
-				.join(""),
-			extras.join(" ")
+				.join("")
 		].join("|")
+	}
+	// A named style by its name and its own format, with the parts of it the style carries. Normal by name:
+	// every writer spells its own, and cells show their format, not Normal's.
+	const namedStyles = new Map<string, string>([["0", "Normal"]])
+	const namedStyle = (xfId: string): string => {
+		const known = namedStyles.get(xfId)
+
+		if (known !== undefined) return known
+
+		const base = bases[Number(xfId)]
+		const applies = [...(base?.attrs ?? [])]
+			.filter(([name]) => name.startsWith("apply"))
+			.map(([name, value]) => `${name}=${normalizeValue(value)}`)
+			.sort()
+
+		const signature = [named.get(xfId) ?? `#${xfId}`, base === undefined ? "" : parts(base), applies.join(" ")].join("/")
+
+		namedStyles.set(xfId, signature)
+
+		return signature
+	}
+	const signature = (xf: XmlNode): string => {
+		const extras = [...xf.attrs]
+			.filter(([name, value]) => ["quotePrefix", "pivotButton"].includes(name) && !isDefault("xf", name, normalizeValue(value)))
+			.map(([name, value]) => `${name}=${normalizeValue(value)}`)
+
+		return [parts(xf), namedStyle(xf.attrs.get("xfId") ?? "0"), extras.join(" ")].join("|")
 	}
 	const cellStyles = section("cellXfs").map(signature)
 	const strings: string[] = []
@@ -776,8 +801,9 @@ async function compareSheetData(
 	return lost
 }
 
-// A sheet's columns as runs of equal settings, however the file splits them into <col> elements.
-function columnRuns(node: XmlNode): string[] {
+// A sheet's columns as runs of equal settings, however the file splits them into <col> elements; their
+// style resolved, as a cell's is.
+function columnRuns(node: XmlNode, context: Context): string[] {
 	const runs: string[] = []
 	let current: { start: number; end: number; signature: string } | null = null
 
@@ -788,7 +814,8 @@ function columnRuns(node: XmlNode): string[] {
 			...col,
 			attrs: new Map([...col.attrs].filter(([name]) => name !== "min" && name !== "max" && name !== "style"))
 		}
-		const signature = canon(shallow)
+		const style = context.styles[Number(col.attrs.get("style") ?? 0)] ?? `#${col.attrs.get("style") ?? ""}`
+		const signature = `${canon(shallow)}${style}`
 
 		if (current !== null && current.signature === signature && current.end + 1 === min) {
 			current.end = max
@@ -814,7 +841,7 @@ function sheetElements(xml: string, context: Context, links: Map<string, string>
 
 	for (const child of tree.children) {
 		if (child.name === "cols") {
-			for (const run of columnRuns(child)) set.set(`cols|${run}`, (set.get(`cols|${run}`) ?? 0) + 1)
+			for (const run of columnRuns(child, context)) set.set(`cols|${run}`, (set.get(`cols|${run}`) ?? 0) + 1)
 
 			continue
 		}

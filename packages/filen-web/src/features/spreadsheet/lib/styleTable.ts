@@ -131,7 +131,7 @@ export function styleView(
 
 	if (font?.bold === true) view.bold = true
 	if (font?.italic === true) view.italic = true
-	if (font?.underline !== undefined && font.underline !== false) view.underline = true
+	if (font?.underline !== undefined && font.underline !== false && font.underline !== "none") view.underline = true
 	if (font?.strikethrough === true) view.strike = true
 	if (font?.size !== undefined && font.size !== defaultSize) view.size = font.size
 

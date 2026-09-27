@@ -4,10 +4,12 @@ import { cellKey, type CellView, type SpreadsheetDoc } from "@/features/spreadsh
 // How a CSV file was written, so a save writes it back the same way: its separator, its line ends, a byte
 // order mark, a final line end, and the byte encoding it was read as. A legacy windows-1252 export is
 // decoded and ALWAYS re-written as windows-1252, never re-encoded to another encoding behind the user's
-// back: decode-then-encode is a bijection on every byte the table defines, so an untouched cell comes back
-// byte-identical even when the true source encoding was really 1250, 1251, GBK, or another single-byte
-// encoding windows-1252 happened to decode without throwing. An edit that types a character the table
-// cannot hold is refused outright (see CsvDocument and canEncodeWindows1252), not silently reformatted.
+// back: decode-then-encode is a bijection on every byte the table defines, so an untouched cell's characters
+// come back as the same bytes even when the true source encoding was really 1250, 1251, GBK, or another
+// single-byte encoding windows-1252 happened to decode without throwing. The rows are written anew, not
+// copied: quotes a field did not need go, and line ends all become the first one read. An edit that types
+// a character the table cannot hold is refused outright (see CsvDocument and canEncodeWindows1252), not
+// silently reformatted.
 // `writable` is false when the source bytes hold a byte windows-1252 leaves undefined, or when they read
 // as confidently non-Western text — both cases where editing would show confusing mojibake.
 export interface CsvFormat {

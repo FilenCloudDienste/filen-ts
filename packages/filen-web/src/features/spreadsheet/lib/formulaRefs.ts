@@ -625,8 +625,9 @@ function prefixOf(name: string): string | null {
 	return null
 }
 
-// Rewrites each function name in a formula (outside strings, quoted sheet names and brackets).
-function mapFunctionNames(formula: string, map: (name: string) => string): string {
+// Rewrites each word in a formula (outside strings, quoted sheet names and brackets), told whether it
+// calls a function.
+function mapWords(formula: string, map: (word: string, called: boolean) => string): string {
 	let text = ""
 	let index = 0
 
@@ -647,7 +648,7 @@ function mapFunctionNames(formula: string, map: (name: string) => string): strin
 			const end = readWord(formula, index)
 			const word = formula.slice(index, end)
 
-			text += formula.charCodeAt(end) === 40 ? map(word) : word
+			text += map(word, formula.charCodeAt(end) === 40)
 			index = end
 		} else {
 			text += formula[index] ?? ""
@@ -658,10 +659,107 @@ function mapFunctionNames(formula: string, map: (name: string) => string): strin
 	return text
 }
 
-// A typed formula as a file stores it: newer functions with the prefix Excel requires.
+const PARAMETER = "_xlpm."
+const SCOPES = /\b(?:LET|LAMBDA)\(/i
+
+function withoutPrefix(name: string): string {
+	return name.length > PARAMETER.length && name.slice(0, PARAMETER.length).toLowerCase() === PARAMETER
+		? name.slice(PARAMETER.length)
+		: name
+}
+
+function nextCode(text: string, from: number): number {
+	let index = from
+
+	while (text.charCodeAt(index) === 32) index++
+
+	return text.charCodeAt(index)
+}
+
+// The names LET and LAMBDA bind, where declared and where used within their call, with the prefix a file
+// stores them with (Excel reads the bare name as a defined name). A name already prefixed stays as it is.
+function prefixParameters(formula: string): string {
+	if (!SCOPES.test(formula)) return formula
+
+	// One frame per open parenthesis or array constant: the parameters the call binds so far, and its
+	// argument (whether a word would start it).
+	const frames: { binds: "LET" | "LAMBDA" | null; argument: number; fresh: boolean; names: Set<string> }[] = []
+	let binds: "LET" | "LAMBDA" | null = null
+	let text = ""
+	let index = 0
+
+	while (index < formula.length) {
+		const code = formula.charCodeAt(index)
+		const frame = frames.at(-1)
+
+		if (code === QUOTE || code === APOSTROPHE || code === BRACKET_OPEN) {
+			const end = code === BRACKET_OPEN ? skipBracket(formula, index) : skipQuoted(formula, index, code)
+
+			text += formula.slice(index, end)
+			index = end
+
+			if (frame !== undefined) frame.fresh = false
+
+			continue
+		}
+
+		if (isWordChar(code)) {
+			const end = readWord(formula, index)
+			const word = formula.slice(index, end)
+			const name = withoutPrefix(word)
+			const after = formula.charCodeAt(end)
+			const qualified = after === 33 || formula.charCodeAt(index - 1) === 33
+			const bare = name.replace(/^(?:_xlfn\.)?(?:_xlws\.)?/i, "").toUpperCase()
+			let bound = false
+
+			binds = after === 40 && (bare === "LET" || bare === "LAMBDA") ? bare : null
+
+			if (frame !== undefined && !qualified) {
+				// A whole argument in a name's place: every one but LAMBDA's last, every other one of LET's.
+				if (
+					frame.binds !== null &&
+					frame.fresh &&
+					(frame.binds === "LAMBDA" || frame.argument % 2 === 0) &&
+					nextCode(formula, end) === 44
+				) {
+					frame.names.add(name.toLowerCase())
+				}
+
+				bound = frames.some(candidate => candidate.names.has(name.toLowerCase()))
+			}
+
+			text += bound ? `${PARAMETER}${name}` : word
+			index = end
+
+			if (frame !== undefined) frame.fresh = false
+
+			continue
+		}
+
+		if (code === 40 || code === 123) {
+			frames.push({ binds: code === 40 ? binds : null, argument: 0, fresh: true, names: new Set() })
+		} else if (code === 41 || code === 125) {
+			frames.pop()
+		} else if (code === 44 && frame !== undefined) {
+			frame.argument++
+			frame.fresh = true
+		} else if (code !== 32 && frame !== undefined) {
+			frame.fresh = false
+		}
+
+		binds = null
+		text += formula[index] ?? ""
+		index++
+	}
+
+	return text
+}
+
+// A typed formula as a file stores it: newer functions with the prefix Excel requires, and the names LET
+// and LAMBDA bind with theirs.
 export function storedFormula(formula: string): string {
-	return mapFunctionNames(formula, name => {
-		if (name.startsWith("_")) return name
+	return mapWords(prefixParameters(formula), (name, called) => {
+		if (!called || name.startsWith("_")) return name
 
 		const prefix = prefixOf(name)
 
@@ -674,7 +772,11 @@ export function storedFormula(formula: string): string {
 export function shownFormula(formula: string): string {
 	if (!formula.includes("_xl")) return formula
 
-	return mapFunctionNames(formula, name => {
+	return mapWords(formula, (name, called) => {
+		const unbound = withoutPrefix(name)
+
+		if (unbound !== name || !called) return unbound
+
 		const bare = name.replace(/^(?:_xlfn\.)?(?:_xlws\.)?/i, "")
 		const prefix = prefixOf(bare)
 

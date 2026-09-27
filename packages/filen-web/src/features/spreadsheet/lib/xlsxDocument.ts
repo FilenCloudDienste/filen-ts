@@ -92,6 +92,15 @@ function typeOf(value: CellValue): Cell["type"] {
 	return "string"
 }
 
+// The format a cell starts from where the file has none, as Excel gives it: its row's (a row formatted as a
+// whole), else its column's. A cell the file holds keeps its own, even the default.
+function startingStyle(sheet: Sheet, row: number, col: number, existing: Cell | undefined): CellStyle | undefined {
+	if (existing !== undefined) return existing.style
+	if ((sheet.rows[row]?.[col] ?? null) !== null) return undefined
+
+	return sheet.rowDefs?.get(row)?.style ?? sheet.columns?.[col]?.style
+}
+
 // A value as the engine reads it: text stays text whatever it looks like ('007, '=1+1, 'TRUE), and a date
 // is its serial number, never a Date the engine would read in the viewer's timezone.
 function engineValue(value: CellValue): RawCellContent {
@@ -251,6 +260,8 @@ type Step =
 			sheet: number
 			edit: AxisEdit
 			merges: MergeRange[] | undefined
+			// The manual page breaks across the edited axis.
+			breaks: number[] | undefined
 			// What a deletion took out, or the row and column formats an insertion pushed off the sheet.
 			removed: Removed
 			formulas: TextEdit[]
@@ -986,6 +997,9 @@ export class XlsxDocument {
 		if (step.merges === undefined) delete sheet.merges
 		else sheet.merges = step.merges
 
+		// Breaks the sheet had none of, shifting made none of either.
+		if (step.breaks !== undefined) sheet[BREAKS[edit.axis]] = step.breaks
+
 		this.restoreText(step.formulas, (cell, text) => {
 			cell.formula = text
 		})
@@ -1154,6 +1168,9 @@ export class XlsxDocument {
 			}
 
 			const base: Partial<Cell> = { ...existing }
+			const style = parsed.type === "empty" ? existing?.style : startingStyle(sheet, row, col, existing)
+
+			if (style !== undefined) base.style = style
 
 			delete base.formula
 			delete base.formulaResult
@@ -1252,7 +1269,7 @@ export class XlsxDocument {
 				before.set(cellId, { value, cell: existing === undefined ? undefined : { ...existing } })
 				this.write(sheet, row, col, value, {
 					...(existing ?? { value, type: typeOf(value) }),
-					style: patchStyle(existing?.style, op.patch)
+					style: patchStyle(startingStyle(sheet, row, col, existing), op.patch)
 				})
 				touched.push({ row, col })
 			}
@@ -1347,6 +1364,8 @@ export class XlsxDocument {
 			return this.refused("structureLocked")
 		}
 		const merges = sheet.merges?.map(merge => ({ ...merge }))
+		// shiftSheet replaces the list, never changes it.
+		const breaks = sheet[BREAKS[edit.axis]]
 		const { formulas, links } = this.shiftReferences(sheet, edit)
 		const removed = shiftSheet(sheet, edit)
 
@@ -1359,7 +1378,7 @@ export class XlsxDocument {
 		for (const cell of recalculated) changed.add(cell.sheet)
 
 		return {
-			step: { type: "structure", sheet: op.sheet, edit, merges, removed, formulas, links },
+			step: { type: "structure", sheet: op.sheet, edit, merges, breaks, removed, formulas, links },
 			result: () => this.sheetsResult(changed)
 		}
 	}
@@ -1586,10 +1605,15 @@ export function patchStyle(style: CellStyle | undefined, patch: FormatPatch): Ce
 	const font = { ...style?.font }
 	const alignment = { ...style?.alignment }
 
-	if (patch.bold !== undefined) font.bold = patch.bold
-	if (patch.italic !== undefined) font.italic = patch.italic
-	if (patch.underline !== undefined) font.underline = patch.underline
-	if (patch.strike !== undefined) font.strikethrough = patch.strike
+	// A cell's font is whole: off is absent (a written false would read as an override).
+	if (patch.bold === true) font.bold = true
+	else if (patch.bold === false) delete font.bold
+	if (patch.italic === true) font.italic = true
+	else if (patch.italic === false) delete font.italic
+	if (patch.underline === true) font.underline = true
+	else if (patch.underline === false) delete font.underline
+	if (patch.strike === true) font.strikethrough = true
+	else if (patch.strike === false) delete font.strikethrough
 
 	if (patch.color === null) delete font.color
 	else if (patch.color !== undefined) font.color = hexColor(patch.color)
@@ -1600,6 +1624,8 @@ export function patchStyle(style: CellStyle | undefined, patch: FormatPatch): Ce
 	if (patch.align === null) delete alignment.horizontal
 	else if (patch.align !== undefined) alignment.horizontal = patch.align
 
+	// The number the file gave the old format goes with it.
+	if (patch.numFmt !== undefined) delete next.numFmtId
 	if (patch.numFmt === "General") delete next.numFmt
 	else if (patch.numFmt !== undefined) next.numFmt = patch.numFmt
 
@@ -1659,8 +1685,11 @@ function moveDetails(sheet: Sheet, rowsAxis: boolean, at: number, shift: number)
 	return { cells: removedCells, rowDefs: removedRowDefs }
 }
 
-// Moves a sheet's cells, merges and row/column formats for an inserted or deleted run of rows or
-// columns. A merge the deletion cuts through shrinks; one it swallows goes. Returns what a deletion took
+// Where a sheet keeps its manual page breaks along each axis, as the last row (column) before each.
+const BREAKS = { rows: "rowBreaks", cols: "colBreaks" } as const
+
+// Moves a sheet's cells, merges, page breaks and row/column formats for an inserted or deleted run of rows
+// or columns. A merge the deletion cuts through shrinks; one it swallows goes. Returns what a deletion took
 // out, or the row and column formats an insertion pushed past the sheet's edge, for undoing it.
 export function shiftSheet(sheet: Sheet, op: AxisEdit): Removed {
 	const rowsAxis = op.axis === "rows"
@@ -1726,6 +1755,23 @@ export function shiftSheet(sheet: Sheet, op: AxisEdit): Removed {
 
 	if (merges !== undefined) {
 		sheet.merges = merges
+	}
+
+	// A manual page break is the edge above the row (left of the column) that starts a page, and moves with
+	// that row; it goes with it when deleted.
+	const breaks = sheet[BREAKS[op.axis]]
+
+	if (breaks !== undefined) {
+		const limit = rowsAxis ? MAX_ROWS : MAX_COLS
+
+		sheet[BREAKS[op.axis]] = breaks.flatMap(last => {
+			const start = last + 1
+
+			if (op.type === "insert") return start < op.at ? [last] : start + op.count < limit ? [last + op.count] : []
+			if (start < op.at) return [last]
+
+			return start >= op.at + op.count && start - op.count > 0 ? [last - op.count] : []
+		})
 	}
 
 	if (!rowsAxis && sheet.columns !== undefined) {

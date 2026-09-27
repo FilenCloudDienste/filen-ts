@@ -1,10 +1,13 @@
 import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
-import { openXlsx, writeXlsx, type RoundtripWorkbook } from "hucre/xlsx"
+import { openXlsx, saveXlsx, writeXlsx, type RoundtripWorkbook } from "hucre/xlsx"
 import type { EditResult } from "@/features/spreadsheet/lib/edits"
 import { shownFormula, storedFormula } from "@/features/spreadsheet/lib/formulaRefs"
 import { cellKey, type CellView } from "@/features/spreadsheet/lib/model"
 import type { XlsxDocument } from "@/features/spreadsheet/lib/xlsxDocument"
+import { saveLosses } from "@/features/spreadsheet/lib/xlsxVerify"
+import { structureLocked } from "@/features/spreadsheet/lib/xlsxView"
+import { rawEntries, xlsxSavePlan } from "@/features/spreadsheet/lib/xlsxWritable"
 import { readZip } from "@/features/spreadsheet/lib/zipLimits"
 import { proven } from "@/tests/spreadsheetProven"
 
@@ -20,6 +23,25 @@ async function savedParts(document: XlsxDocument): Promise<Map<string, string>> 
 	const decoder = new TextDecoder()
 
 	return new Map([...parts].map(([path, bytes]) => [path, decoder.decode(bytes)]))
+}
+
+// What the proof finds when a save differed from the real one in `part` as `edit` changes it.
+async function lossesIf(name: string, part: string, edit: (xml: string) => string): Promise<string[]> {
+	const workbook = await fixture(name)
+	const plan = xlsxSavePlan(workbook)
+	const saved = (await readZip(await saveXlsx(workbook))) ?? new Map<string, Uint8Array>()
+	const xml = new TextDecoder().decode(saved.get(part))
+
+	expect(edit(xml)).not.toBe(xml)
+
+	return (
+		(await saveLosses({
+			original: new Map(rawEntries(workbook)),
+			saved: new Map([...saved, [part, new TextEncoder().encode(edit(xml))]]),
+			sheetPaths: plan.sheets,
+			dropped: plan.drop
+		})) ?? []
+	)
 }
 
 function view(result: EditResult, row: number, col: number, sheet = 0): CellView | null | undefined {
@@ -38,7 +60,11 @@ describe("Excel 365 files", () => {
 			"x365_cfsplit.xlsx",
 			"x365_codename.xlsx",
 			"x365_tabledxf.xlsx",
-			"x365_calcpr.xlsx"
+			"x365_calcpr.xlsx",
+			"x365_namedstyles.xlsx",
+			"x365_filtered.xlsx",
+			"x365_cfoff.xlsx",
+			"x365_breaks.xlsx"
 		]) {
 			const document = await proven(await fixture(name))
 
@@ -88,6 +114,130 @@ describe("Excel 365 files", () => {
 		expect((await proven(await fixture("x365_hlbase.xlsx"))).writable).toBe(false)
 	})
 
+	it("writes back named styles, built-in formats 41 to 44, the file's own codes and a column's quote prefix", async () => {
+		const styles = (await savedParts(await proven(await fixture("x365_namedstyles.xlsx")))).get("xl/styles.xml") ?? ""
+
+		for (const style of ["Comma", "Currency", "Percent", "Hyperlink"])
+			expect(styles).toMatch(new RegExp(`<cellStyle name="${style}" xfId="[1-9]`))
+		for (const id of [41, 42, 43, 44]) expect(styles).toMatch(new RegExp(`<xf numFmtId="${String(id)}"`))
+		expect(styles).toContain('<numFmt numFmtId="164" formatCode="m/d/yyyy"/>')
+		expect(styles).toContain('<numFmt numFmtId="165" formatCode="h:mm"/>')
+		expect(styles).toMatch(/<xf numFmtId="0" fontId="\d+" fillId="0" borderId="0" applyNumberFormat="0"/)
+		expect(styles).toMatch(/<xf numFmtId="49"[^>]*quotePrefix="1"/)
+	})
+
+	it("writes back a filtered list, errors Excel is told not to flag, the workbook's VBA name, and formats turning bold off", async () => {
+		const filtered = await savedParts(await proven(await fixture("x365_filtered.xlsx")))
+
+		expect(filtered.get("xl/worksheets/sheet1.xml")).toMatch(/<sheetPr filterMode="1"\/>/)
+		expect(filtered.get("xl/worksheets/sheet1.xml")).toContain('<ignoredError sqref="A2:A3" numberStoredAsText="1"/>')
+		expect(filtered.get("xl/workbook.xml")).toMatch(/<workbookPr codeName="ThisWorkbook"/)
+
+		const off = (await savedParts(await proven(await fixture("x365_cfoff.xlsx")))).get("xl/styles.xml")
+
+		expect(off).toMatch(/<dxf><font><b val="0"\/><i val="0"\/><u val="none"\/><strike val="0"\/>/)
+	})
+
+	it("proves column formats, named styles, formats turning bold off and the VBA name, not skipping them", async () => {
+		const edits: [string, string, (xml: string) => string][] = [
+			// A column's format read as another: the quote prefix, or accounting as currency.
+			["x365_namedstyles.xlsx", "xl/styles.xml", xml => xml.replace(' quotePrefix="1"', "")],
+			["x365_namedstyles.xlsx", "xl/styles.xml", xml => xml.replace('<xf numFmtId="42"', '<xf numFmtId="44"')],
+			// What a named style carries.
+			["x365_namedstyles.xlsx", "xl/styles.xml", xml => xml.replace(' applyNumberFormat="0"', "")],
+			["x365_cfoff.xlsx", "xl/styles.xml", xml => xml.replace('<b val="0"/>', "")],
+			["x365_cfoff.xlsx", "xl/styles.xml", xml => xml.replace('<u val="none"/>', "")],
+			["x365_filtered.xlsx", "xl/workbook.xml", xml => xml.replace(' codeName="ThisWorkbook"', "")]
+		]
+
+		for (const [name, part, edit] of edits) {
+			expect([name, (await lossesIf(name, part, edit)).length > 0]).toEqual([name, true])
+		}
+	})
+
+	it("gives a new cell its row's format, else its column's, and leaves a cell the file holds as it is", async () => {
+		const accounts = await proven(await fixture("x365_namedstyles.xlsx"))
+		const typed = accounts.apply({
+			type: "setCells",
+			sheet: 0,
+			cells: [
+				{ row: 4, col: 0, input: "12.5" },
+				{ row: 4, col: 1, input: "12" }
+			]
+		})
+
+		expect(view(typed, 4, 0)?.text).not.toBe("12.5")
+		expect(view(typed, 4, 1)).toMatchObject({ text: "12" })
+
+		const bolded = accounts.apply({
+			type: "format",
+			sheet: 0,
+			range: { startRow: 5, startCol: 0, endRow: 5, endCol: 0 },
+			patch: { bold: true }
+		})
+
+		expect(bolded.type).toBe("cells")
+
+		const parts = await savedParts(accounts)
+		const sheet = parts.get("xl/worksheets/sheet1.xml") ?? ""
+		const xfs = /<cellXfs[^>]*>([\s\S]*?)<\/cellXfs>/.exec(parts.get("xl/styles.xml") ?? "")?.[1]?.match(/<xf [^>]*>/g) ?? []
+		const format = (ref: string) => xfs[Number(new RegExp(`<c r="${ref}"[^>]* s="(\\d+)"`).exec(sheet)?.[1] ?? -1)] ?? ""
+
+		expect(format("A5")).toMatch(/numFmtId="42"/)
+		expect(format("B5")).toMatch(/numFmtId="49"[^>]*quotePrefix="1"/)
+		expect(format("A6")).toMatch(/numFmtId="42"[^>]*fontId="[1-9]/)
+
+		const rows = await proven(await fixture("x365_emptyrows.xlsx"))
+
+		rows.apply({ type: "setCells", sheet: 0, cells: [{ row: 6, col: 3, input: "5" }] })
+		expect((await savedParts(rows)).get("xl/worksheets/sheet1.xml")).toMatch(/<c r="D7" s="[1-9]/)
+
+		// A1 is in the file without a format of its own: it stays without one.
+		const columns = await proven(await fixture("x365_colstyle.xlsx"))
+
+		columns.apply({ type: "setCells", sheet: 0, cells: [{ row: 0, col: 0, input: "Renamed" }] })
+		expect((await savedParts(columns)).get("xl/worksheets/sheet1.xml")).not.toMatch(/<c r="A1"[^>]* s="/)
+	})
+
+	it("moves manual page breaks with their rows and columns, drops one whose row goes, and puts them back on undo", async () => {
+		const document = await proven(await fixture("x365_breaks.xlsx"))
+		const breaks = async () => {
+			const sheet = (await savedParts(document)).get("xl/worksheets/sheet1.xml") ?? ""
+
+			return [
+				/<rowBreaks[\s\S]*?<\/rowBreaks>/.exec(sheet)?.[0].match(/id="\d+"/g),
+				/<colBreaks[\s\S]*?<\/colBreaks>/.exec(sheet)?.[0].match(/id="\d+"/g)
+			]
+		}
+
+		expect(await breaks()).toEqual([['id="5"'], ['id="2"']])
+
+		document.apply({ type: "insert", sheet: 0, axis: "rows", at: 2, count: 2 })
+		document.apply({ type: "insert", sheet: 0, axis: "cols", at: 0, count: 1 })
+		expect(await breaks()).toEqual([['id="7"'], ['id="3"']])
+
+		document.apply({ type: "delete", sheet: 0, axis: "rows", at: 7, count: 1 })
+		expect(await breaks()).toEqual([undefined, ['id="3"']])
+
+		document.undo()
+		document.undo()
+		document.undo()
+		expect(await breaks()).toEqual([['id="5"'], ['id="2"']])
+	})
+
+	it("locks rows and columns on a sheet with errors told not to flag, which are kept by range", async () => {
+		const sheet = (await fixture("x365_filtered.xlsx")).sheets[0]
+
+		expect(sheet).toBeDefined()
+
+		if (sheet !== undefined) {
+			delete sheet.autoFilter
+			expect(structureLocked(sheet)).toBe(true)
+			delete sheet.ignoredErrors
+			expect(structureLocked(sheet)).toBe(false)
+		}
+	})
+
 	it("writes whole-sheet column formats as one range", async () => {
 		const parts = await savedParts(await proven(await fixture("hidecols.xlsx")))
 
@@ -105,6 +255,15 @@ describe("formula text", () => {
 		)
 		expect(shownFormula("_xlfn._xlws.FILTER(A:A,A:A>1)+_xlfn.NEWTHING(1)")).toBe("FILTER(A:A,A:A>1)+_xlfn.NEWTHING(1)")
 		expect(storedFormula(shownFormula("_xlfn.CONCAT(A1)"))).toBe("_xlfn.CONCAT(A1)")
+
+		// The names LET and LAMBDA bind, where declared and used, never twice; a sheet's own name stays.
+		expect(storedFormula("LET(x,1,y,x*2,SUM(x,y,Sheet1!x))")).toBe(
+			"_xlfn.LET(_xlpm.x,1,_xlpm.y,_xlpm.x*2,SUM(_xlpm.x,_xlpm.y,Sheet1!x))"
+		)
+		expect(storedFormula("LET(f,LAMBDA(v,v+1),f(2))")).toBe("_xlfn.LET(_xlpm.f,_xlfn.LAMBDA(_xlpm.v,_xlpm.v+1),_xlpm.f(2))")
+		expect(storedFormula("_xlfn.LET(_xlpm.x,1,_xlpm.x)")).toBe("_xlfn.LET(_xlpm.x,1,_xlpm.x)")
+		expect(storedFormula('LET(x,"x",x&y)')).toBe('_xlfn.LET(_xlpm.x,"x",_xlpm.x&y)')
+		expect(shownFormula("_xlfn.LET(_xlpm.f,_xlfn.LAMBDA(_xlpm.v,_xlpm.v+1),_xlpm.f(2))")).toBe("LET(f,LAMBDA(v,v+1),f(2))")
 
 		const document = await proven(await openXlsx(await writeXlsx({ sheets: [{ name: "S", rows: [[1, "a"]] }] }), { readStyles: true }))
 		const typed = document.apply({ type: "setCells", sheet: 0, cells: [{ row: 0, col: 2, input: '=TEXTJOIN("-",TRUE,A1:B1)' }] })
