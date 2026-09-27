@@ -14,17 +14,20 @@ import useNotesInflightStore, { type InflightContent } from "@/features/notes/st
 import useNotesOfflineStore from "@/features/notes/store/useNotesOffline.store"
 import useTextEditorStore from "@/stores/useTextEditor.store"
 import { useShallow } from "zustand/shallow"
-import { useEffect, useCallback } from "react"
-import { runEffect, run } from "@filen/shared"
+import { useEffect, useCallback, useRef } from "react"
+import { runEffect, run, conflictCopyStamp } from "@filen/shared"
 import events from "@/lib/events"
 import alerts from "@/lib/alerts"
 import i18n from "@/lib/i18n"
 import prompts from "@/lib/prompts"
+import notes from "@/features/notes/notes"
+import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import { sync, hashNoteContent, buildInflightEntries } from "@/features/notes/components/sync"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import { useHeaderHeight } from "expo-router/react-navigation"
 import useIsOnline from "@/hooks/useIsOnline"
 import logger from "@/lib/logger"
+import { noteDisplayTitle } from "@/lib/decryption"
 import { useTranslation } from "react-i18next"
 import { useChecklistHideCompleted } from "@/features/notes/checklistView"
 import ListEmpty from "@/components/ui/listEmpty"
@@ -144,6 +147,20 @@ const Loading = ({ children, loading, noteType }: { children: React.ReactNode; l
 	)
 }
 
+// A note's newest local content: its newest unsynced edit, else what its content query holds (the last push
+// or the seed).
+function latestLocalNoteContent(noteUuid: string): string | undefined {
+	const newest = (getInflightContentForNote(noteUuid) ?? []).reduce<InflightContent[string][number] | undefined>(
+		(latest, entry) => (latest === undefined || entry.timestamp > latest.timestamp ? entry : latest),
+		undefined
+	)
+	const cached: unknown = noteContentQueryGet({
+		uuid: noteUuid
+	})
+
+	return newest?.content ?? (typeof cached === "string" ? cached : undefined)
+}
+
 function getInflightContentForNote(noteUuid: string): InflightContent[string] | undefined {
 	const inflightContent = useNotesInflightStore.getState().inflightContent
 
@@ -157,6 +174,9 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 	const headerHeight = useHeaderHeight()
 	const isOnline = useIsOnline()
 	const hasInflightContent = useNotesInflightStore(useShallow(state => (state.inflightContent[note.uuid] ?? []).length > 0))
+	// Whether the user has edited since this editor opened: a remote edit then asks rather than reloads,
+	// even once the edits are synced.
+	const editedThisMount = useRef(false)
 	const [hideCompleted] = useChecklistHideCompleted(note.uuid)
 
 	// Gate the query on three conditions to make editing race-free:
@@ -291,6 +311,8 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 			return
 		}
 
+		editedThisMount.current = true
+
 		const now = Date.now()
 
 		// D3: stamp a NEW session's base from the content cache at this exact instant (see
@@ -321,67 +343,125 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 		sync.syncDebounced()
 	}
 
+	// Reload the note from the server, dropping any unsynced local content first — otherwise sync.tsx would
+	// later push it back over the version being loaded. Clearing inflight also re-enables the query
+	// (enabled gate above) so refetch() can remount the editor with the fresh server content.
+	const reloadFromServer = useCallback(async () => {
+		const result = await run(async () => {
+			useNotesInflightStore.getState().setInflightContent(prev => {
+				const updated = {
+					...prev
+				}
+
+				delete updated[note.uuid]
+
+				return updated
+			})
+
+			// VC3: this clear happens outside a sync pass, so reset the note's strike count
+			// too — otherwise a stale count leaks into the next editing session.
+			sync.clearRejections(note.uuid)
+
+			await sync.flushToDisk(useNotesInflightStore.getState().inflightContent)
+
+			editedThisMount.current = false
+
+			return await refetch()
+		})
+
+		if (!result.success) {
+			logger.error("notes", "reload remote edit failed", { error: result.error, noteUuid: note.uuid })
+			alerts.error(result.error)
+		}
+	}, [note.uuid, refetch])
+
+	// A newer version of this note, saved by someone else or on another device (the socket handler drops
+	// this device's own pushes). Not being edited: reload, and say so. Being edited — an unsynced edit, or
+	// any edit since the editor opened, as a reload would also drop the caret mid-typing — ask: Keep mine
+	// (also what dismissing does), Load theirs, or Save mine as copy, a new note beside this one.
 	const onContentEditedRemotely = useCallback(
-		async (info: { contentEdited: NoteContentEdited; noteUuid: string }) => {
-			if (note.uuid !== info.noteUuid || info.contentEdited.editorId === stringifiedClient?.userId) {
+		async (info: { contentEdited: NoteContentEdited; noteUuid: string; content: string | undefined }) => {
+			if (note.uuid !== info.noteUuid || history) {
+				return
+			}
+
+			const mine = latestLocalNoteContent(note.uuid)
+
+			if (info.content !== undefined && info.content === mine) {
+				return
+			}
+
+			const editing = (getInflightContentForNote(note.uuid) ?? []).length > 0 || editedThisMount.current
+
+			if (!editing) {
+				await reloadFromServer()
+
+				alerts.normal(t("remote_change_updated"))
+
 				return
 			}
 
 			const promptResponse = await run(async () => {
-				return await prompts.alert({
+				return await prompts.confirm3({
 					title: t("note_edited"),
 					message: t("note_edited_message"),
-					cancelText: t("cancel"),
-					okText: t("reload"),
-					destructive: true
+					primaryText: t("remote_change_save_copy"),
+					destructiveText: t("remote_change_load_theirs"),
+					cancelText: t("remote_change_keep_mine")
 				})
 			})
 
 			if (!promptResponse.success) {
-				logger.error("notes", "reload-remote-edit prompt failed", { error: promptResponse.error })
+				logger.error("notes", "remote-edit prompt failed", { error: promptResponse.error })
 				alerts.error(promptResponse.error)
 
 				return
 			}
 
-			if (promptResponse.data.cancelled) {
+			if (promptResponse.data === "cancel") {
+				// The edits become the newest version. An unsynced one is pushed anyway; edits already pushed
+				// (this version went over them) are queued again, against its content as the base so the
+				// push, which the user chose, raises no overwrite warning.
+				if (mine !== undefined && (getInflightContentForNote(note.uuid) ?? []).length === 0) {
+					useNotesInflightStore.getState().setInflightContent(prev => ({
+						...prev,
+						[note.uuid]: buildInflightEntries({
+							previous: prev[note.uuid],
+							note,
+							content: mine,
+							now: Date.now(),
+							sessionBaseHash: info.content === undefined ? null : hashNoteContent(info.content)
+						})
+					}))
+
+					await flushInflightContentWithAlert()
+				}
+
+				sync.syncDebounced()
+
 				return
 			}
 
-			// The user accepted loading the remote edit. Drop any unsynced local
-			// content for this note first — otherwise sync.tsx would later push the
-			// stale inflight content back to the server, overwriting the remote edit
-			// the user just chose to load. Clearing inflight also re-enables the
-			// query (enabled gate at line 83) so refetch() can remount the editor
-			// with the fresh server content.
-			const result = await run(async () => {
-				useNotesInflightStore.getState().setInflightContent(prev => {
-					const updated = {
-						...prev
-					}
-
-					delete updated[note.uuid]
-
-					return updated
+			if (promptResponse.data === "primary" && mine !== undefined) {
+				const title = t("note_conflict_copy_title", {
+					title: noteDisplayTitle(note),
+					date: conflictCopyStamp(new Date())
 				})
+				const copied = await runWithLoading(async () => notes.create({ title, content: mine, type: note.noteType }))
 
-				// VC3: this clear happens outside a sync pass, so reset the note's strike count
-				// too — otherwise a stale count leaks into the next editing session.
-				sync.clearRejections(note.uuid)
+				if (!copied.success) {
+					logger.error("notes", "saving remote-edit conflict copy failed", { error: copied.error, noteUuid: note.uuid })
+					alerts.error(copied.error)
 
-				await sync.flushToDisk(useNotesInflightStore.getState().inflightContent)
+					return
+				}
 
-				return await refetch()
-			})
-
-			if (!result.success) {
-				logger.error("notes", "reload remote edit failed", { error: result.error, noteUuid: note.uuid })
-				alerts.error(result.error)
-
-				return
+				alerts.normal(t("note_saved_as_copy", { title }))
 			}
+
+			await reloadFromServer()
 		},
-		[note.uuid, stringifiedClient, refetch, t]
+		[note, history, reloadFromServer, t]
 	)
 
 	useEffect(() => {

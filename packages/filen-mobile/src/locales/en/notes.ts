@@ -85,10 +85,14 @@ export const notes = {
 	// enter_new_name lives in common.ts.
 
 	// ── Remote-edit reload prompt (note/content) ──────────────────────────────
-	/** Dialog title shown when another participant edited the open note */
-	note_edited: "Note edited",
-	/** Dialog message shown when another participant edited the open note, offering to reload */
-	note_edited_message: "This note was edited by someone else. Reload to see the latest changes? Any unsynced local edits will be lost.",
+	/** Remote-change alert title, shown while the open note is being edited and a newer version of it is saved elsewhere (another participant, or this account on another device); the buttons are Save mine as copy / Load theirs / Keep mine */
+	note_edited: "This note changed elsewhere",
+	/** Remote-change alert message for the open note */
+	note_edited_message: "A newer version of this note was saved while you were editing it. What should happen to your changes?",
+	/** Title of the note the local changes are written to by the remote-change alert's "Save mine as copy"; {{title}} is the note's title, {{date}} the current date and time */
+	note_conflict_copy_title: "{{title}} (conflicted copy {{date}})",
+	/** Toast after the local changes were written to a new note; {{title}} is its title */
+	note_saved_as_copy: "Saved your changes as “{{title}}”.",
 	/** Confirm button that reloads the note's content from the server */
 	reload: "Reload",
 

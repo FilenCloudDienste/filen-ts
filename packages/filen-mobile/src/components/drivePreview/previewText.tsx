@@ -22,11 +22,13 @@ import { useRecyclingState } from "@shopify/flash-list"
 import { AnyDirWithContext_Tags } from "@filen/sdk-rs"
 import { type GalleryItemTagged, galleryItemKey } from "@/components/drivePreview/gallery"
 import useEditableTarget from "@/components/drivePreview/useEditableTarget"
+import useRemoteRevisions from "@/components/drivePreview/useRemoteRevisions"
 import PreviewLoadFailedNotice from "@/components/drivePreview/previewLoadFailedNotice"
 import { isUnavailableOffline } from "@/components/drivePreview/previewAvailability"
 import useIsOnline from "@/hooks/useIsOnline"
 import logger from "@/lib/logger"
 import type { File } from "expo-file-system"
+import type { DriveItemFileExtracted } from "@/types"
 
 const PreviewTextInner = ({
 	previewType,
@@ -77,8 +79,10 @@ const PreviewTextInner = ({
 		}
 	}
 
-	const runSave = async (): Promise<boolean> => {
-		const result = await runWithLoading(async defer => {
+	// Uploads the editor's content under `name` beside the file: the file's own name makes a new version
+	// of it, any other a new file.
+	const uploadEdits = async (name: string) =>
+		await runWithLoading(async defer => {
 			if (!itemToUse?.data.decryptedMeta) {
 				throw new Error("Missing decryptedMeta")
 			}
@@ -103,12 +107,57 @@ const PreviewTextInner = ({
 			return await transfers.upload({
 				localFileOrDir: savedFile,
 				parent: parent.inner[0],
-				name: itemToUse.data.decryptedMeta.name,
+				name,
 				modified: Date.now(),
 				created: itemToUse.data.decryptedMeta.created != null ? Number(itemToUse.data.decryptedMeta.created) : undefined,
 				mime: itemToUse.data.decryptedMeta.mime
 			})
 		})
+
+	const runSave = async (): Promise<boolean> => {
+		const name = itemToUse?.data.decryptedMeta?.name
+
+		if (name === undefined) {
+			return false
+		}
+
+		const result = await uploadEdits(name)
+
+		if (!result.success) {
+			logger.error("drivePreview", "Text file save failed", {
+				error: result.error
+			})
+
+			alerts.error(result.error)
+			remote.saveSettled(null)
+
+			return false
+		}
+
+		if (!result.data) {
+			remote.saveSettled(null)
+
+			return false
+		}
+
+		setHasEdits(false)
+
+		const newFile = result.data.files[0]
+		const newDriveItem = newFile ? unwrappedFileIntoDriveItem(unwrapFileMeta(newFile)) : null
+
+		if (newDriveItem?.type === "file") {
+			applySaved(newDriveItem)
+			remote.saveSettled(newDriveItem)
+		} else {
+			remote.saveSettled(null)
+		}
+
+		return true
+	}
+
+	// The unsaved edits written to a new file beside this one, for the remote-change prompts.
+	const saveAsNewFile = async (name: string): Promise<DriveItemFileExtracted | null> => {
+		const result = await uploadEdits(name)
 
 		if (!result.success) {
 			logger.error("drivePreview", "Text file save failed", {
@@ -117,27 +166,22 @@ const PreviewTextInner = ({
 
 			alerts.error(result.error)
 
-			return false
+			return null
 		}
 
-		if (!result.data) {
-			return false
+		const newFile = result.data?.files[0]
+		const newDriveItem = newFile ? unwrappedFileIntoDriveItem(unwrapFileMeta(newFile)) : null
+
+		if (newDriveItem?.type !== "file") {
+			return null
 		}
 
 		setHasEdits(false)
 
-		const newFile = result.data.files[0]
-
-		if (newFile) {
-			const newDriveItem = unwrappedFileIntoDriveItem(unwrapFileMeta(newFile))
-
-			if (newDriveItem.type === "file") {
-				applySaved(newDriveItem)
-			}
-		}
-
-		return true
+		return newDriveItem
 	}
+
+	const remote = useRemoteRevisions({ item, itemToUse, parent, hasEdits, savingRef, saveAsNewFile })
 
 	// Publish the dirty flag so the route-level unsaved-changes guard can prompt on navigate-away.
 	useEffect(() => {

@@ -3,7 +3,8 @@ import { NoteType } from "@filen/sdk-rs"
 import { type Note } from "@/types"
 import { wrapSdkNote } from "@/features/notes/utils"
 import { noteContentQueryUpdate } from "@/features/notes/queries/useNoteContent.query"
-import { createNotePreviewFromContentText } from "@filen/shared"
+import { createNotePreviewFromContentText, hashNoteContent } from "@filen/shared"
+import { rememberNotePush } from "@/features/notes/pushEchoes"
 import { notesQueryUpdate } from "@/features/notes/queries/useNotesQuery"
 
 export async function getContent({ note, signal }: { note: Note; signal?: AbortSignal }) {
@@ -31,6 +32,10 @@ export async function setContent({
 	updateQuery?: boolean
 }) {
 	const { authedSdkClient } = await auth.getSdkClients()
+
+	// Before the push goes out: its socket echo can beat the response back, and must never read as an
+	// edit made elsewhere.
+	rememberNotePush(note.uuid, hashNoteContent(content))
 
 	note = wrapSdkNote(
 		await authedSdkClient.setNoteContent(
@@ -80,6 +85,11 @@ export async function setType({
 	}
 
 	const { authedSdkClient } = await auth.getSdkClients()
+
+	// A type change re-sends the content it was given, which echoes back like any content push.
+	if (knownContent !== undefined) {
+		rememberNotePush(note.uuid, hashNoteContent(knownContent))
+	}
 
 	note = wrapSdkNote(
 		await authedSdkClient.setNoteType(

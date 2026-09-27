@@ -121,6 +121,8 @@ vi.mock("@filen/sdk-rs", () => ({
 import loggerMock from "@/tests/mocks/logger"
 import { handleNoteEvent, type NoteSocketEvent } from "@/features/notes/socketHandlers"
 import { NoteEvent_Tags, SocketEvent_Tags } from "@filen/sdk-rs"
+import { hashNoteContent } from "@filen/shared"
+import { rememberNotePush } from "@/features/notes/pushEchoes"
 
 // ---------------------------------------------------------------------------
 // Helpers — build minimal socket-event shapes matching the handler's destructure:
@@ -249,7 +251,7 @@ function makeContentEditedEvent(noteUuid: string, contentEdited: Record<string, 
 			{
 				inner: {
 					tag: NoteEvent_Tags.ContentEdited,
-					inner: [{ note: noteUuid, ...contentEdited }]
+					inner: [{ note: noteUuid, content: { tag: "Decrypted", inner: ["server text"] }, ...contentEdited }]
 				}
 			}
 		]
@@ -768,8 +770,42 @@ describe("handleNoteEvent — notes socket handler", () => {
 			expect(mockEventsEmit).toHaveBeenCalledOnce()
 			expect(mockEventsEmit).toHaveBeenCalledWith("noteContentEdited", {
 				noteUuid: "uuid-1",
-				contentEdited: expect.objectContaining({ note: "uuid-1" })
+				contentEdited: expect.objectContaining({ note: "uuid-1" }),
+				content: "server text"
 			})
+		})
+
+		// The server sends this device's own push back; the open editor must not hear about it.
+		it("does not emit this device's own push coming back", async () => {
+			mockCurrentUserId.mockReturnValue(999n)
+			// Its own content: the registry is module state, which the other tests must not inherit.
+			rememberNotePush("uuid-1", hashNoteContent("pushed here"))
+			mockNotesWithContentQueryGet.mockReturnValueOnce([{ uuid: "uuid-1", title: "My Note", editedTimestamp: 10n }])
+
+			await handleNoteEvent({
+				event: makeContentEditedEvent("uuid-1", {
+					content: { tag: "Decrypted", inner: ["pushed here"] },
+					editorId: 999n,
+					editedTimestamp: 20n
+				})
+			})
+
+			expect(mockEventsEmit).not.toHaveBeenCalled()
+		})
+
+		it("takes this account's content it cannot decrypt for its own push, and another user's for theirs", async () => {
+			mockCurrentUserId.mockReturnValue(999n)
+			mockNotesWithContentQueryGet.mockReturnValue([{ uuid: "uuid-2", title: "My Note", editedTimestamp: 10n }])
+
+			const encrypted = { content: { tag: "Encrypted", inner: ["x"] }, editedTimestamp: 20n }
+
+			await handleNoteEvent({ event: makeContentEditedEvent("uuid-2", { ...encrypted, editorId: 999n }) })
+
+			expect(mockEventsEmit).not.toHaveBeenCalled()
+
+			await handleNoteEvent({ event: makeContentEditedEvent("uuid-2", { ...encrypted, editorId: 5n }) })
+
+			expect(mockEventsEmit).toHaveBeenCalledWith("noteContentEdited", expect.objectContaining({ noteUuid: "uuid-2", content: undefined }))
 		})
 
 		it("does NOT emit when the note is not found in the cache", async () => {

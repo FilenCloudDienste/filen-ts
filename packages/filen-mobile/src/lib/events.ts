@@ -33,13 +33,29 @@ export type Events = {
 	driveItemRemoved: {
 		uuid: string
 	}
+	// A newer version of a file was saved (a FileNew of the same lineage, whoever saved it: this device's
+	// own save included) or restored (FileArchiveRestored, naming the version it replaced). An open
+	// editor of the file follows it, or asks first over unsaved edits (useRemoteRevisions).
+	driveFileRevised: {
+		item: DriveItem
+		previousUuid?: string
+	}
+	// A file was trashed or deleted for good on the server, from any client. An open editor holding
+	// unsaved edits of it asks what to do with them.
+	driveFileGone: {
+		uuid: string
+	}
 	// The drive preview's unsaved-changes guard blocked a route pop (user chose Cancel, or the
 	// save failed): the gallery must unwind its one-shot navigate-back latch so the close
 	// button works again.
 	drivePreviewDismissBlocked: void
+	// A note's content was edited by someone else or on another device (never this device's own push
+	// coming back: the notes socket handler drops those). `content` is what arrived, undefined when it
+	// could not be decrypted.
 	noteContentEdited: {
 		noteUuid: string
 		contentEdited: NoteContentEdited
+		content: string | undefined
 	}
 	focusChatInput: {
 		chatUuid: string

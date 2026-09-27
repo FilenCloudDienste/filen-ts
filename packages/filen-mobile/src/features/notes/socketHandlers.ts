@@ -11,6 +11,9 @@ import notesOffline from "@/features/notes/notesOffline"
 import { noteContentQueryKey, noteContentRemoteEditSeen } from "@/features/notes/queries/useNoteContent.query"
 import { removeQueryEverywhere } from "@/queries/client"
 import logger from "@/lib/logger"
+import auth from "@/lib/auth"
+import { hashNoteContent } from "@filen/shared"
+import { isOwnNotePush } from "@/features/notes/pushEchoes"
 
 export type NoteSocketEvent = Extract<SocketEvent, { tag: typeof SocketEvent_Tags.Note }>
 
@@ -222,18 +225,30 @@ export async function handleNoteEvent({ event }: { event: NoteSocketEvent }): Pr
 				break
 			}
 
-			events.emit("noteContentEdited", {
-				noteUuid: inner.note,
-				contentEdited: inner
-			})
+			const content = inner.content.tag === MaybeEncryptedUniffi_Tags.Decrypted ? inner.content.inner[0] : undefined
+			// Echo suppression for the open editor. The server sends an edit back to every session of its
+			// author, this device's own pushes included. Another user's edit is never ours; one of this
+			// account's is ours only when its content is something this device pushed (pushEchoes.ts): the
+			// same account editing on another device is an edit like anyone else's. Content that can't be
+			// decrypted can't be recognised, and is taken for ours.
+			const ownEcho =
+				inner.editorId === auth.currentUserId() && (content === undefined || isOwnNotePush(inner.note, hashNoteContent(content)))
+
+			if (!ownEcho) {
+				events.emit("noteContentEdited", {
+					noteUuid: inner.note,
+					contentEdited: inner,
+					content
+				})
+			}
 
 			// Refresh the body we hold for this note, so a copy we now KNOW to be wrong doesn't sit
 			// on disk being served to the user the next time they are offline. Deliberately fire-and-
 			// forget and never awaited — the socket dispatcher must not block on a fetch.
 			//
-			// The note the user is currently viewing is excluded inside refreshAfterRemoteEdit: that
-			// one keeps the reload prompt the event above raises, which is the whole point of the
-			// prompt — the user decides when their editor is replaced, not the network. The event
+			// The note the user is currently viewing is excluded inside refreshAfterRemoteEdit: its editor
+			// answers the event above itself — reloading when nothing is being edited, asking otherwise —
+			// so the user decides when their edits are replaced, not the network. The event
 			// carries the new content, but as MaybeEncryptedStatic, so the refresh re-fetches through
 			// the SDK rather than opening a second decryption path here.
 			//
@@ -246,8 +261,8 @@ export async function handleNoteEvent({ event }: { event: NoteSocketEvent }): Pr
 			// The cost of not filtering is one redundant fetch after the pushing device's own editing
 			// session (while it is still typing the note is open, so nothing fires), and commitContent
 			// no-ops an identical body — it even advances the ledger stamp early, saving a fetch on the
-			// next pass. The reload PROMPT above keeps its own-user filter: that one is about not
-			// interrupting the person typing.
+			// next pass. The event above keeps its own-echo filter: that one is about not interrupting
+			// the person typing with their own push.
 			notesOffline
 				.refreshAfterRemoteEdit({
 					// The event's OWN edit stamp, not the cached note's. The list entry still carries

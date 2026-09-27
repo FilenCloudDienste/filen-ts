@@ -57,7 +57,7 @@ export const createExecutableTimeout = vi.fn()
 
 // InFlight, the drive-listing splice rules, isHiddenName, fileIconKey, the notes outbox helpers,
 // partitionNotesByBucket, shareIdentityFromRole, the chat message segmentation pipeline and the copy
-// job, progress and quota helpers are plain data helpers with no timing-sensitive behavior (unlike
+// job, progress and quota helpers and the remote-change rules are plain data helpers with no timing-sensitive behavior (unlike
 // Semaphore's no-op above), so there is nothing to fake — pull them through vi.importActual, bypassing
 // this factory's own interception of the bare specifier.
 export const {
@@ -98,5 +98,11 @@ export const {
 	freeBytes,
 	quotaVerdict,
 	resolveQuotaVerdict,
-	sumBytes
+	sumBytes,
+	PushEchoes,
+	isRevisionOf,
+	decideRevision,
+	settleHeldRevisions,
+	conflictCopyStamp,
+	conflictCopyName
 } = await vi.importActual<typeof import("@filen/shared")>("@filen/shared")

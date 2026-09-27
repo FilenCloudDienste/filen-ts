@@ -23,6 +23,7 @@ import {
 	heldDriveItem
 } from "@/features/drive/clipboardFollow"
 import logger from "@/lib/logger"
+import events from "@/lib/events"
 
 export type DriveSocketEvent = Extract<SocketEvent, { tag: typeof SocketEvent_Tags.Drive }>
 
@@ -80,6 +81,10 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 			// A content edit arrives as a new file of the same lineage.
 			followFileSuccessor(driveItem)
 
+			if (driveItem.type === "file") {
+				events.emit("driveFileRevised", { item: driveItem })
+			}
+
 			break
 		}
 
@@ -117,6 +122,10 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 				const [archiveRestored] = eventInner.inner.inner
 
 				followDriveItem(archiveRestored.currentUuid, driveItem)
+
+				if (driveItem.type === "file") {
+					events.emit("driveFileRevised", { item: driveItem, previousUuid: archiveRestored.currentUuid })
+				}
 			}
 
 			// A restore leaves mtime unchanged, so it is not surfaced in Recents (a new file is, via the batcher).
@@ -166,6 +175,7 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 				// Without a stableUuid only an old version went, not the file.
 				if (inner.stableUuid) {
 					dropDriveItem(inner.uuid)
+					events.emit("driveFileGone", { uuid: inner.uuid })
 				}
 			} else {
 				const [archived] = eventInner.inner.inner
@@ -397,9 +407,11 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 			// the count / select-all toggle / bulk ops never target a ghost.
 			useDriveStore.getState().removeFromSelection([inner.uuid])
 
-			// With newUuid it was an edit (see below), which the clipboard follows through the paired FileNew.
+			// With newUuid it was an edit (see below), which the clipboard and an open editor follow through the
+			// paired FileNew.
 			if (!inner.newUuid) {
 				dropDriveItem(inner.uuid)
+				events.emit("driveFileGone", { uuid: inner.uuid })
 			}
 
 			const fromCache = cache.fileUuidToNormalFile.get(inner.uuid)

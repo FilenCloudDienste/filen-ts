@@ -134,5 +134,34 @@ export const drivePreview = {
 	/** File versions — empty-state subtitle when the file has no previous versions */
 	no_file_versions_description: "Older versions of this file will appear here as you change it.",
 	/** Public link — error-state title shown when the link status could not be loaded */
-	could_not_load_link: "Couldn't load this link"
+	could_not_load_link: "Couldn't load this link",
+
+	// ── Changes made elsewhere (useRemoteRevisions.ts) ──────────────────────────
+	/** Remote-change alert — title, shown while an open text/code/PDF file has unsaved edits and a newer version of it is saved elsewhere (another device, the web app, or a version restore) */
+	remote_change_title: "This file changed elsewhere",
+	/** Remote-change alert — message; {{name}} is the file name */
+	remote_change_message: "A newer version of {{name}} was saved while you were editing it. What should happen to your unsaved changes?",
+	/** Remote-change alert — keeps editing the unsaved changes; saving them then makes them the newest version. Also what dismissing the alert does */
+	remote_change_keep_mine: "Keep mine",
+	/** Remote-change alert — discards the unsaved changes and shows the newer version */
+	remote_change_load_theirs: "Load theirs",
+	/** Remote-change alert — writes the unsaved changes to a new file next to this one, then shows the newer version */
+	remote_change_save_copy: "Save mine as copy",
+	/** Name of the file the unsaved changes are written to; {{base}} is the original name without its extension, {{ext}} the extension with its dot (may be empty), {{date}} the current date and time */
+	remote_change_copy_name: "{{base}} (conflicted copy {{date}}){{ext}}",
+	/** Toast after the unsaved changes were written to a new file; {{name}} is its name */
+	remote_change_saved_as_new: "Saved your changes as {{name}}.",
+	/** Toast when the open file, with no unsaved edits, now shows a newer version saved elsewhere */
+	remote_change_updated: "Updated with changes saved elsewhere.",
+	/** Toast when a save from this device landed right after a version saved elsewhere, which it replaced */
+	remote_change_save_replaced:
+		"Your save replaced changes saved elsewhere moments before. With file versioning on, they're in the file's version history.",
+	/** Remote-deletion alert — title, shown while an open file has unsaved edits and it is trashed or deleted elsewhere */
+	remote_deleted_title: "This file was deleted elsewhere",
+	/** Remote-deletion alert — message; {{name}} is the file name */
+	remote_deleted_message: "{{name}} was moved to the trash or deleted while you were editing it. Your changes are still here.",
+	/** Remote-deletion alert — writes the unsaved changes to a new file in the same directory */
+	remote_deleted_save_new: "Save as new file",
+	/** Remote-deletion alert — discards the unsaved changes and closes the file */
+	remote_deleted_discard: "Discard my changes"
 } as const

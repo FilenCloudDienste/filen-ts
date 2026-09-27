@@ -97,6 +97,9 @@ vi.mock("@/lib/i18n", () => ({
 	t: (key: string) => key
 }))
 vi.mock("@/lib/prompts", () => ({ default: {} }))
+vi.mock("@/features/notes/notes", () => ({ default: {} }))
+vi.mock("@/components/ui/fullScreenLoadingModal", () => ({ runWithLoading: vi.fn() }))
+vi.mock("@/lib/decryption", () => ({ noteDisplayTitle: () => "" }))
 vi.mock("@/hooks/useIsOnline", () => ({ default: () => true }))
 vi.mock("@filen/shared", async () => ({
 	...(await import("@/tests/mocks/filenShared")),
