@@ -87,6 +87,24 @@ describe("prepareSvgThumb — refusals", () => {
 		expect(prepareSvgThumb(bomb, MAX)).toEqual({ type: "rejected", reason: "unsupported" })
 	})
 
+	it("refuses an entity chain hidden behind a quoted ']>' that fakes the subset's end", () => {
+		const bomb = '<!DOCTYPE svg [ <!ENTITY a "]><!--"> <!ENTITY l0 "ha"> <!ENTITY l1 "&l0;&l0;"> ]><!-- x --><svg>&l1;</svg>'
+
+		expect(prepareSvgThumb(bomb, MAX)).toEqual({ type: "rejected", reason: "unsupported" })
+	})
+
+	it("refuses a fake root quoted inside the subset", () => {
+		const bomb = '<!DOCTYPE svg [ <!ENTITY a "]><svg>"> <!ENTITY l0 "ha"> <!ENTITY l1 "&l0;&l0;"> ]><svg>&l1;</svg>'
+
+		expect(prepareSvgThumb(bomb, MAX)).toEqual({ type: "rejected", reason: "unsupported" })
+	})
+
+	it("reads past quotes, comments and processing instructions to the subset's real end", () => {
+		const safe = `<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "a>b.dtd" [ <!-- don't ]> --> <?pi ]> ?> <!ENTITY ns "x]>y"> ]><svg viewBox="0 0 2 1"/>`
+
+		expect(prepareSvgThumb(safe, MAX)).toMatchObject({ type: "ok", width: 384, height: 192 })
+	})
+
 	it("refuses parameter and external entities", () => {
 		expect(prepareSvgThumb('<!DOCTYPE svg [<!ENTITY % p "x">]><svg/>', MAX)).toEqual({ type: "rejected", reason: "unsupported" })
 		expect(prepareSvgThumb('<!DOCTYPE svg [<!ENTITY e SYSTEM "file:///etc/passwd">]><svg>&e;</svg>', MAX)).toEqual({
