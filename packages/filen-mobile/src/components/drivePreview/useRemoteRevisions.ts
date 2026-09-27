@@ -12,9 +12,17 @@ import {
 import type { AnyDirWithContext } from "@filen/sdk-rs"
 import { galleryItemKey, type GalleryItemTagged } from "@/components/drivePreview/gallery"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
-import useSocketStore, { onSocketReconnected } from "@/stores/useSocket.store"
+import { onSocketReconnected } from "@/stores/useSocket.store"
 import { driveItemsQueryFindFileInNormalParent } from "@/features/drive/queries/useDriveItems.query"
-import { createUnlockedNotices, createUnlockedToaster, whenUnlockedForeground } from "@/lib/unlockedForeground"
+import { whenUnlockedForeground } from "@/lib/unlockedForeground"
+import {
+	isCovered,
+	lineageState,
+	liveConnection,
+	markCovered,
+	previewNotice,
+	previewToast
+} from "@/components/drivePreview/remoteFileState"
 import { isTrashParent, unwrapFileMeta, unwrapParentUuid, unwrappedFileIntoDriveItem } from "@/lib/sdkUnwrap"
 import events, { type DriveFileGoneReason } from "@/lib/events"
 import alerts from "@/lib/alerts"
@@ -27,27 +35,17 @@ type Revision = { item: DriveItem; previousUuid?: string }
 
 type Gone = { uuid: string; reason: DriveFileGoneReason }
 
-// What a check for changes missed during a socket gap found. `current`: nothing newer, and `file` is the file to
+// What a check for changes the socket may have missed found. `current`: nothing newer, and `file` is the file to
 // save over (renamed or moved elsewhere, it is followed). `answered`: something was, and the usual prompt or
-// follow took it over. `deferred`: the editor's own save was uploading, so it runs once that settles.
-// `unknown`: the check could not be made or was overtaken, so nothing is known.
-type GapCheck =
-	{ kind: "current"; file: DriveItemFileExtracted } | { kind: "answered" } | { kind: "deferred" } | { kind: "unknown"; error?: unknown }
-
-// The socket connection a check covers: none while the socket is down, as changes made until it reconnects
-// reach neither the check nor the socket.
-function socketConnection(): number | null {
-	const socket = useSocketStore.getState()
-
-	return socket.state === "connected" ? socket.connectedAt : null
-}
+// follow took it over. `unknown`: the check could not be made or was overtaken, so nothing is known.
+type GapCheck = { kind: "current"; file: DriveItemFileExtracted } | { kind: "answered" } | { kind: "unknown"; error?: unknown }
 
 interface UseRemoteRevisionsParams {
 	item: GalleryItemTagged
 	// The file the editor writes back to (useEditableTarget), null for anything not editable.
 	itemToUse: DriveItemFileExtracted | null
 	// The directory the editor writes into (useEditableTarget), looked up when not yet known.
-	resolveParent: () => Promise<AnyDirWithContext | "sharedInRoot" | null>
+	resolveParent: (movedTo?: string) => Promise<AnyDirWithContext | "sharedInRoot" | null>
 	hasEdits: boolean
 	// True while the editor's own save is uploading.
 	savingRef: { current: boolean }
@@ -97,12 +95,8 @@ export default function useRemoteRevisions({
 	// Counts what changed the file's known versions (revisions and deletions of it, saves), so a re-read
 	// that raced one is dropped rather than taken for news.
 	const changes = useRef(0)
-	// A socket-gap re-check the editor's own save got in the way of, run once that save settles.
-	const recheckAfterSave = useRef(false)
-	// The socket connection the last completed gap check covered (null: none), and the check under way, shared
-	// by the reconnect and a save waiting on it: one read per gap.
-	const gapChecked = useRef<number | null>(socketConnection())
-	const gapCheck = useRef<{ connection: number | null; outcome: Promise<GapCheck> } | null>(null)
+	// The socket connection the editor's own upload began under, to judge what its result covers.
+	const uploadedUnder = useRef<number | null>(null)
 	// How the file on screen ended while this editor had it (its lineage), so a save that then lands on
 	// another lineage is explained truthfully; `acknowledged` once the user answered the prompt about it.
 	const lineageEnded = useRef<{ lineage: string | undefined; reason: DriveFileGoneReason | "moved"; acknowledged: boolean } | null>(null)
@@ -124,19 +118,31 @@ export default function useRemoteRevisions({
 			return current !== null && galleryItemKey(current) === galleryItemKey(latest.current.item)
 		}
 
-		// Toasts wait for the unlock, the latest only, and none once this editor is gone.
-		const toaster = createUnlockedToaster(message => {
-			alerts.normal(message)
-		})
-
-		function notify(kind: string, message: string): void {
-			toaster.notify(kind, message)
+		// The lineage of a file, for an own file (the only kind this editor writes).
+		function lineageOf(file: DriveItemFileExtracted | null): string | undefined {
+			return file !== null ? identityOf(file).stableUuid : undefined
 		}
 
-		// A notice that must be read whole: a native alert rather than a one-line toast.
-		const announce = createUnlockedNotices(async (title, message) => {
-			await prompts.info({ title, message })
-		})
+		// Toasts live with the preview, not this editor, which a follow tears down.
+		function notify(kind: string, message: string): void {
+			previewToast(lineageOf(latest.current.itemToUse) ?? galleryItemKey(latest.current.item), kind, message)
+		}
+
+		// Counts this editor's remote-change prompt, pending or on screen, for its file: saves wait for it.
+		function promptOpened(): () => void {
+			const lineage = lineageOf(latest.current.itemToUse)
+			const state = lineage !== undefined ? lineageState(lineage) : null
+
+			if (state !== null) {
+				state.asking++
+			}
+
+			return () => {
+				if (state !== null) {
+					state.asking = Math.max(0, state.asking - 1)
+				}
+			}
+		}
 
 		function show(from: DriveItemFileExtracted, to: DriveItem, toast: boolean): void {
 			keptOver.current = undefined
@@ -231,6 +237,8 @@ export default function useRemoteRevisions({
 			asking.current = true
 			askedAbout.current = theirs.item.data.uuid
 
+			const promptClosed = promptOpened()
+
 			try {
 				// A native alert, with the file's name, would draw over the biometric lock.
 				await whenUnlockedForeground()
@@ -246,7 +254,9 @@ export default function useRemoteRevisions({
 						message: t("remote_change_message", { name }),
 						primaryText: t("remote_change_save_copy"),
 						destructiveText: t("remote_change_load_theirs"),
-						cancelText: t("remote_change_keep_mine")
+						cancelText: t("remote_change_keep_mine"),
+						// The app can lock while this waits for its turn.
+						gate: whenUnlockedForeground
 					})
 				)
 
@@ -289,6 +299,7 @@ export default function useRemoteRevisions({
 				pending.current.revision = null
 				show(displayed, newest.item, false)
 			} finally {
+				promptClosed()
 				asking.current = false
 				askedAbout.current = undefined
 				resumePending()
@@ -394,6 +405,8 @@ export default function useRemoteRevisions({
 			asking.current = true
 			askedAbout.current = uuid
 
+			const promptClosed = promptOpened()
+
 			try {
 				await whenUnlockedForeground()
 
@@ -407,7 +420,8 @@ export default function useRemoteRevisions({
 						message: t(reason === "replaced" ? "remote_replaced_message" : "remote_deleted_message", { name }),
 						primaryText: t("remote_deleted_save_new"),
 						destructiveText: t("remote_deleted_discard"),
-						cancelText: t("cancel")
+						cancelText: t("cancel"),
+						gate: whenUnlockedForeground
 					})
 				)
 
@@ -447,9 +461,17 @@ export default function useRemoteRevisions({
 
 					if (saved.data !== null) {
 						show(displayed, saved.data, false)
+
+						// A new file of this device's, uploaded while the socket is up.
+						const copied = lineageOf(saved.data)
+
+						if (copied !== undefined) {
+							markCovered(copied, liveConnection(), saved.data.data.uuid)
+						}
 					}
 				}
 			} finally {
+				promptClosed()
 				asking.current = false
 				askedAbout.current = undefined
 				resumePending()
@@ -467,9 +489,10 @@ export default function useRemoteRevisions({
 			)
 		}
 
-		// Looks the file on screen up once in its directory (changes a socket gap hid never arrive as events), and
-		// answers anything newer or gone as if its event had arrived, with no upload of this editor under way:
-		// it runs ahead of the editor's own upload, or after it settled.
+		// Looks the file on screen up once in its directory (changes the socket may have missed never arrive as
+		// events) and answers anything newer or gone as if its event had arrived, with no upload of this editor
+		// under way. The read is kept for the file until an editor acts on it, so one torn down meanwhile (by a
+		// save or a follow) hands it to the next; a completed check covers the file for the connection it ran in.
 		async function check(): Promise<GapCheck> {
 			const { itemToUse: displayed } = latest.current
 
@@ -481,20 +504,39 @@ export default function useRemoteRevisions({
 			const parentUuid = displayed.type === "file" ? unwrapParentUuid(displayed.data.parent) : null
 
 			// Only an own file's directory can be looked in, and only such a file is saved.
-			if (stableUuid === undefined || parentUuid === null || !isCurrent()) {
+			if (stableUuid === undefined || parentUuid === null) {
 				return { kind: "current", file: displayed }
 			}
 
+			// Off screen: nothing here can ask. Its first save checks.
+			if (!isCurrent()) {
+				return { kind: "unknown" }
+			}
+
+			const state = lineageState(stableUuid)
+			const connection = liveConnection()
 			const key = galleryItemKey(latest.current.item)
 			const seen = changes.current
 			// Not overtaken by an event of this file, which the socket, back since, handled itself.
 			const fresh = () => answerable(key) && changes.current === seen
 
-			const lookedUp = await run(
-				async () => await driveItemsQueryFindFileInNormalParent(parentUuid, stableUuid, displayed.data.decryptedMeta?.name)
-			)
+			// A read for this connection an editor torn down did not act on is used; with the socket down, every
+			// check reads (what changes until it is back reaches nothing else).
+			if (state.read === null || connection === null || state.read.connection !== connection) {
+				state.read = {
+					connection,
+					lookup: driveItemsQueryFindFileInNormalParent(parentUuid, stableUuid, displayed.data.decryptedMeta?.name)
+				}
+			}
+
+			const read = state.read
+			const lookedUp = await run(async () => await read.lookup)
 
 			if (!lookedUp.success) {
+				if (state.read === read) {
+					state.read = null
+				}
+
 				logger.warn("drivePreview", "checking the open file after a socket gap failed", { error: lookedUp.error })
 
 				return { kind: "unknown", error: lookedUp.error }
@@ -504,7 +546,32 @@ export default function useRemoteRevisions({
 				return { kind: "unknown" }
 			}
 
-			const { lineage: found, sameName } = lookedUp.data
+			// Acted on here: covered below for its connection, and the next check reads anew.
+			if (state.read === read) {
+				state.read = null
+			}
+
+			state.recheck = false
+
+			const result = await answerCheck(displayed, parentUuid, lookedUp.data, fresh)
+			// The newest version the read found (a version kept over included), or what the save goes over.
+			const newest = lookedUp.data.lineage?.data.uuid ?? (result.kind === "current" ? result.file.data.uuid : undefined)
+
+			if (result.kind !== "unknown" && newest !== undefined) {
+				markCovered(stableUuid, connection, newest)
+			}
+
+			return result
+		}
+
+		// Acts on what a check's directory read found.
+		async function answerCheck(
+			displayed: DriveItemFileExtracted,
+			parentUuid: string,
+			lookedUp: Awaited<ReturnType<typeof driveItemsQueryFindFileInNormalParent>>,
+			fresh: () => boolean
+		): Promise<GapCheck> {
+			const { lineage: found, sameName } = lookedUp
 
 			if (found !== undefined && isFile(found)) {
 				if (found.data.uuid === displayed.data.uuid) {
@@ -576,40 +643,20 @@ export default function useRemoteRevisions({
 			return { kind: "current", file: displayed }
 		}
 
-		// One gap check per socket connection: the reconnect and a save waiting on it share it, and a completed
-		// check marks the connection covered, until the socket drops and comes back. While the editor's own save
-		// uploads, it waits for that save to settle, and is judged against what the save made.
+		// A check, unless this editor's own save is uploading: then the file is marked to be checked once the save
+		// settles, by this editor or, torn down by the save's follow, the next one.
 		function checkGap(saving: boolean): Promise<GapCheck> {
+			const lineage = lineageOf(latest.current.itemToUse)
+
 			if (saving) {
-				recheckAfterSave.current = true
-
-				return Promise.resolve({ kind: "deferred" })
-			}
-
-			const connection = socketConnection()
-			const running = gapCheck.current
-
-			if (running !== null && running.connection === connection) {
-				return running.outcome
-			}
-
-			const outcome = check().then(result => {
-				if (connection !== null && (result.kind === "current" || result.kind === "answered")) {
-					gapChecked.current = connection
+				if (lineage !== undefined) {
+					lineageState(lineage).recheck = true
 				}
 
-				return result
-			})
+				return Promise.resolve({ kind: "unknown" })
+			}
 
-			gapCheck.current = { connection, outcome }
-
-			void outcome.finally(() => {
-				if (gapCheck.current?.outcome === outcome) {
-					gapCheck.current = null
-				}
-			})
-
-			return outcome
+			return check()
 		}
 
 		const revised = events.subscribe("driveFileRevised", revision => {
@@ -647,9 +694,20 @@ export default function useRemoteRevisions({
 				lineageEnded.current = { lineage: identityOf(displayed).stableUuid, reason: "moved", acknowledged: false }
 			}
 		})
+		// Back after a gap: the file on screen is checked now, a clean editor following what changed and one with
+		// edits asking. One off screen is checked by its first save.
 		const unsubscribeReconnected = onSocketReconnected(() => {
-			void checkGap(savingRef.current)
+			if (isCurrent()) {
+				void checkGap(savingRef.current)
+			}
 		})
+
+		// A check a save or a teardown left undone for this file: run by this editor, now that it is here.
+		const lineageOnMount = lineageOf(latest.current.itemToUse)
+
+		if (lineageOnMount !== undefined && lineageState(lineageOnMount).recheck && isCurrent() && !savingRef.current) {
+			void checkGap(false)
+		}
 
 		// Edits begun on a file deleted elsewhere meanwhile: asked about now, before a save recreates it.
 		askIfGoneRef.current = () => {
@@ -662,34 +720,55 @@ export default function useRemoteRevisions({
 			}
 		}
 
-		// Before the editor's own upload (its save slot already taken): after a socket gap not yet checked (the
-		// socket down, or back but not looked at since), the one check runs first, so a version saved elsewhere
-		// meanwhile is asked about before the save goes over it. The file to save over, or null to not upload.
+		// Before the editor's own upload (its save slot already taken). Nothing goes over what a remote-change
+		// prompt about the file is (or is about to be) asking. A copy of the file not known to include every
+		// change of the live socket connection (read before it, a gap since, or no socket yet) is checked first,
+		// with at most the one read of its directory (none when its listing is fresh), so a version saved
+		// elsewhere meanwhile is asked about before the save goes over it. The file to save over, or null to not
+		// upload.
 		beforeSaveRef.current = async () => {
 			const displayed = latest.current.itemToUse
 
-			if (displayed === null) {
+			if (displayed === null || unmounted) {
 				return null
 			}
 
-			const connection = socketConnection()
+			const lineage = lineageOf(displayed)
 
-			if (connection !== null && connection === gapChecked.current) {
-				return displayed
+			if (asking.current || (lineage !== undefined && lineageState(lineage).asking > 0)) {
+				return null
 			}
 
-			const result = await checkGap(false)
+			const connection = liveConnection()
+			let target: DriveItemFileExtracted = displayed
 
-			if (result.kind === "current") {
-				return result.file
+			// Told the file was deleted or replaced, the user saves anyway: the prompt said what that does.
+			const toldEnded = lineageEnded.current?.acknowledged === true && lineageEnded.current.lineage === lineage
+
+			// A version the edits were kept over is what the save goes over: known newest, it needs no check either.
+			if (lineage !== undefined && !toldEnded && !isCovered(lineage, keptOver.current ?? displayed.data.uuid)) {
+				const result = await check()
+
+				// Discarded or closed meanwhile: nothing is saved.
+				if (unmounted) {
+					return null
+				}
+
+				if (result.kind !== "current") {
+					// Nothing written over a version not known to be the newest: offline, the upload would fail too.
+					if (result.kind === "unknown" && result.error !== undefined) {
+						alerts.error(result.error)
+					}
+
+					return null
+				}
+
+				target = result.file
 			}
 
-			// Nothing written over a version not known to be the newest: offline, the upload would fail too.
-			if (result.kind === "unknown" && result.error !== undefined) {
-				alerts.error(result.error)
-			}
+			uploadedUnder.current = connection
 
-			return null
+			return target
 		}
 
 		settleRef.current = (savedItem: DriveItemFileExtracted | null) => {
@@ -698,27 +777,31 @@ export default function useRemoteRevisions({
 			const savedOver = latest.current.itemToUse
 			const lineageBefore = savedOver !== null ? identityOf(savedOver).stableUuid : undefined
 			const lineageAfter = savedItem !== null ? identityOf(savedItem).stableUuid : undefined
+			const lineageChanged = lineageBefore !== undefined && lineageAfter !== undefined && lineageBefore !== lineageAfter
 			const { t } = latest.current
+			const connection = uploadedUnder.current
 
 			held.current = []
 			heldGone.current = null
+			uploadedUnder.current = null
 			changes.current++
 
-			if (settled.replaced) {
-				announce("saveReplaced", t("remote_change_save_replaced_title"), t("remote_change_save_replaced"))
+			// Only a save into the same file goes over its versions: one that made another file replaced nothing.
+			if (settled.replaced && !lineageChanged) {
+				previewNotice("saveReplaced", t("remote_change_save_replaced_title"), t("remote_change_save_replaced"))
 			}
 
 			// The save landed on another lineage: the file on screen ended while it uploaded (deleted, replaced
 			// under its name, moved away), and the save made a new file or a version of the replacing one. Said
 			// once, as it was, unless the user was already told and saved anyway; the editor follows what the
 			// save made either way (below).
-			if (savedItem !== null && lineageBefore !== undefined && lineageAfter !== undefined && lineageBefore !== lineageAfter) {
+			if (savedItem !== null && lineageChanged) {
 				const ended = lineageEnded.current?.lineage === lineageBefore ? lineageEnded.current : null
 				const reason = gone?.reason ?? ended?.reason
 				const name = savedItem.data.decryptedMeta?.name ?? ""
 
 				if (ended?.acknowledged !== true) {
-					announce(
+					previewNotice(
 						"savedElsewhere",
 						t("remote_change_saved_elsewhere_title"),
 						reason === "replaced"
@@ -748,16 +831,26 @@ export default function useRemoteRevisions({
 				void handleGone(gone, false)
 			}
 
-			if (recheckAfterSave.current) {
-				recheckAfterSave.current = false
+			// What the save made is the newest there is, if the socket stayed up through the upload, events after
+			// it arriving live. After a gap during the upload, it is checked: here, or by the editor its follow
+			// mounts.
+			if (savedItem !== null && lineageAfter !== undefined) {
+				if (connection !== null && connection === liveConnection()) {
+					markCovered(lineageAfter, connection, savedItem.data.uuid)
+				} else {
+					lineageState(lineageAfter).recheck = true
+				}
+			}
 
+			const pendingCheck = lineageAfter ?? lineageBefore
+
+			if (pendingCheck !== undefined && lineageState(pendingCheck).recheck && isCurrent()) {
 				void checkGap(false)
 			}
 		}
 
 		return () => {
 			unmounted = true
-			toaster.dispose()
 			revised.remove()
 			gone.remove()
 			restored.remove()

@@ -25,6 +25,7 @@ import Button from "@/components/ui/button"
 import { type External } from "@/routes/drivePreview"
 import { FlashList, type FlashListRef } from "@shopify/flash-list"
 import galleryVideoPlayers from "@/components/drivePreview/galleryVideoPlayers"
+import { endPreviewNotices } from "@/components/drivePreview/remoteFileState"
 import logger from "@/lib/logger"
 
 const DISMISS_POSITION_RATIO = 0.22
@@ -607,6 +608,8 @@ const Gallery = () => {
 			// synchronously open the next preview (a tap parked during the pop animation), and this
 			// session's teardown must not run against it.
 			galleryVideoPlayers.releaseAll()
+			// The preview's toasts still waiting close with it (the editors' notices of a save made are kept).
+			endPreviewNotices()
 
 			ScreenOrientation.unlockAsync().catch(e => logger.warn("gallery", "unlockAsync failed on unmount", { error: e }))
 

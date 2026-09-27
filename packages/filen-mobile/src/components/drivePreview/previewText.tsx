@@ -53,6 +53,16 @@ const PreviewTextInner = ({
 	const { itemToUse, resolveParent, readOnly, applySaved } = useEditableTarget(item)
 	const saveHandleRef = useRef<(() => Promise<File | null>) | null>(null)
 	const savingRef = useRef<boolean>(false)
+	// False once this editor unmounted: a save still in its check then uploads nothing.
+	const mountedRef = useRef<boolean>(true)
+
+	useEffect(() => {
+		mountedRef.current = true
+
+		return () => {
+			mountedRef.current = false
+		}
+	}, [])
 
 	// The editor's mode and highlighting follow the name the page opened with (galleryItemRenderName), never a
 	// rename that would remount it under unsaved edits.
@@ -79,9 +89,12 @@ const PreviewTextInner = ({
 
 		try {
 			// A version saved elsewhere while the socket was down is asked about before this save goes over it.
-			const target = await remote.beforeSave()
+			// The check may read the file's directory: the loading state shows meanwhile.
+			const checked = await runWithLoading(async () => await remote.beforeSave())
+			const target = checked.success ? checked.data : null
 
-			if (target === null) {
+			// Discarded or closed during the check: nothing to save into.
+			if (target === null || !mountedRef.current) {
 				return false
 			}
 

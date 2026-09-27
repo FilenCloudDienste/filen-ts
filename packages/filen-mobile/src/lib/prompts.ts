@@ -19,6 +19,8 @@ export type AlertPromptOptions = {
 	destructive?: boolean
 	// When true, render only the OK button (an informational acknowledgement, no cancel).
 	singleButton?: boolean
+	// Awaited once this alert's turn has come, right before it shows (see ThreeButtonPromptOptions.gate).
+	gate?: () => Promise<void>
 }
 
 // Which button the user chose in a three-button alert (primary affirmative / destructive / cancel).
@@ -31,6 +33,10 @@ export type ThreeButtonPromptOptions = {
 	destructiveText: string
 	cancelText?: string
 	cancellable?: boolean
+	// Awaited once this alert's turn has come (the alerts ahead of it answered), right before it shows: an
+	// alert that must not draw over the biometric lock waits here for the unlock, as the app can lock while
+	// it waits for its turn.
+	gate?: () => Promise<void>
 }
 
 export type InputPromptResult =
@@ -151,6 +157,8 @@ const prompts = {
 				promptsMutex.release()
 			})
 
+			await options.gate?.()
+
 			return await new Promise<ThreeButtonPromptResult>(resolve => {
 				const primaryButton = {
 					text: options.primaryText,
@@ -210,6 +218,8 @@ const prompts = {
 			defer(() => {
 				promptsMutex.release()
 			})
+
+			await options?.gate?.()
 
 			return await new Promise<void>(resolve => {
 				Alert.alert(

@@ -1,7 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, renderHook } from "@testing-library/react"
-import { EventEmitter } from "eventemitter3"
 
 const {
 	emitter,
@@ -16,7 +15,26 @@ const {
 	getFileOptional,
 	info
 } = vi.hoisted(() => ({
-	emitter: { current: null as EventEmitter | null },
+	// One bus for the whole file: the preview's module-level state subscribes to it once, at import.
+	emitter: {
+		current: (() => {
+			const listeners = new Map<string, Set<(payload: unknown) => void>>()
+
+			return {
+				on: (name: string, listener: (payload: unknown) => void) => {
+					listeners.set(name, (listeners.get(name) ?? new Set()).add(listener))
+				},
+				off: (name: string, listener: (payload: unknown) => void) => {
+					listeners.get(name)?.delete(listener)
+				},
+				emit: (name: string, payload?: unknown) => {
+					for (const listener of [...(listeners.get(name) ?? [])]) {
+						listener(payload)
+					}
+				}
+			}
+		})()
+	},
 	confirm3: vi.fn<() => Promise<"primary" | "destructive" | "cancel">>(),
 	alertNormal: vi.fn(),
 	alertError: vi.fn(),
@@ -31,11 +49,11 @@ const {
 
 vi.mock("@/lib/events", () => ({
 	default: {
-		emit: (name: string, payload: unknown) => emitter.current?.emit(name, payload),
+		emit: (name: string, payload: unknown) => emitter.current.emit(name, payload),
 		subscribe: (name: string, listener: (payload: unknown) => void) => {
-			emitter.current?.on(name, listener)
+			emitter.current.on(name, listener)
 
-			return { remove: () => emitter.current?.off(name, listener) }
+			return { remove: () => emitter.current.off(name, listener) }
 		}
 	}
 }))
@@ -85,6 +103,7 @@ vi.mock("@/stores/useDrivePreview.store", () => ({
 }))
 
 import useRemoteRevisions from "@/components/drivePreview/useRemoteRevisions"
+import { endPreviewNotices, liveConnection, markCovered } from "@/components/drivePreview/remoteFileState"
 import useSocketStore from "@/stores/useSocket.store"
 import useAppStore from "@/stores/useApp.store"
 
@@ -119,7 +138,7 @@ function mount({
 	const savingRef = { current: false }
 	const updated = vi.fn()
 
-	emitter.current?.on("driveItemUpdated", updated)
+	emitter.current.on("driveItemUpdated", updated)
 	currentItem.current = galleryItem("v1")
 
 	const hook = renderHook(
@@ -149,7 +168,7 @@ function deferred<T>() {
 
 function emit(name: string, payload: unknown): void {
 	act(() => {
-		emitter.current?.emit(name, payload)
+		emitter.current.emit(name, payload)
 	})
 }
 
@@ -160,24 +179,40 @@ async function flush(): Promise<void> {
 }
 
 beforeEach(() => {
-	emitter.current = new EventEmitter()
+	// Forgets what the preview knew of any file, and its toasts.
+	emitter.current.emit("logout")
 	vi.clearAllMocks()
 	unlocked.current = Promise.resolve()
 	useAppStore.setState({ biometricUnlocked: true })
 	useSocketStore.setState({ state: "connected", connectedAt: 1 })
+	// The file on screen was read during this connection (its listing, say): no check before a save.
+	markCovered("lineage", liveConnection(), "v1")
 })
 
 afterEach(() => {
 	cleanup()
-	emitter.current = null
 })
+
+// The editor's own save, as previewText/previewPdf run it: the slot taken, then the pre-save check. The upload
+// is the test's to settle (savingRef released first, then saveSettled).
+async function startSave(hook: { result: { current: { beforeSave: () => Promise<unknown> } } }, savingRef: { current: boolean }) {
+	savingRef.current = true
+
+	let target: unknown = null
+
+	await act(async () => {
+		target = await hook.result.current.beforeSave()
+	})
+
+	return target
+}
 
 describe("useRemoteRevisions", () => {
 	it("follows a newer version of a clean file, and says so", async () => {
 		const { updated } = mount({ hasEdits: false })
 
 		act(() => {
-			emitter.current?.emit("driveFileRevised", { item: file("v2") })
+			emitter.current.emit("driveFileRevised", { item: file("v2") })
 		})
 		await flush()
 
@@ -191,7 +226,7 @@ describe("useRemoteRevisions", () => {
 		const { updated } = mount({ hasEdits: true })
 
 		act(() => {
-			emitter.current?.emit("driveFileRevised", { item: file("v2") })
+			emitter.current.emit("driveFileRevised", { item: file("v2") })
 		})
 		await flush()
 
@@ -199,7 +234,7 @@ describe("useRemoteRevisions", () => {
 		expect(updated).not.toHaveBeenCalled()
 
 		act(() => {
-			emitter.current?.emit("driveFileRevised", { item: file("v2") })
+			emitter.current.emit("driveFileRevised", { item: file("v2") })
 		})
 		await flush()
 
@@ -212,20 +247,20 @@ describe("useRemoteRevisions", () => {
 		const { updated } = mount({ hasEdits: true })
 
 		act(() => {
-			emitter.current?.emit("driveFileRevised", { item: file("v2") })
+			emitter.current.emit("driveFileRevised", { item: file("v2") })
 		})
 		await flush()
 
 		expect(updated).toHaveBeenCalledWith({ previousUuid: "v1", item: file("v2") })
 	})
 
-	it("never asks about this editor's own save, even when its echo arrives mid-upload", () => {
+	it("never asks about this editor's own save, even when its echo arrives mid-upload", async () => {
 		const { hook, savingRef, updated } = mount({ hasEdits: true })
 
-		savingRef.current = true
+		await startSave(hook, savingRef)
 
 		act(() => {
-			emitter.current?.emit("driveFileRevised", { item: file("mine") })
+			emitter.current.emit("driveFileRevised", { item: file("mine") })
 		})
 
 		act(() => {
@@ -240,12 +275,12 @@ describe("useRemoteRevisions", () => {
 	it("reports a version its save went over, and follows one saved after it", async () => {
 		const { hook, savingRef, updated } = mount({ hasEdits: true })
 
-		savingRef.current = true
+		await startSave(hook, savingRef)
 
 		act(() => {
-			emitter.current?.emit("driveFileRevised", { item: file("theirs") })
-			emitter.current?.emit("driveFileRevised", { item: file("mine") })
-			emitter.current?.emit("driveFileRevised", { item: file("later") })
+			emitter.current.emit("driveFileRevised", { item: file("theirs") })
+			emitter.current.emit("driveFileRevised", { item: file("mine") })
+			emitter.current.emit("driveFileRevised", { item: file("later") })
 		})
 
 		act(() => {
@@ -253,7 +288,9 @@ describe("useRemoteRevisions", () => {
 		})
 		await flush()
 
-		expect(info).toHaveBeenCalledWith({ title: "remote_change_save_replaced_title", message: "remote_change_save_replaced" })
+		expect(info).toHaveBeenCalledWith(
+			expect.objectContaining({ title: "remote_change_save_replaced_title", message: "remote_change_save_replaced" })
+		)
 		expect(updated).toHaveBeenCalledWith({ previousUuid: "mine", item: file("later") })
 		expect(confirm3).not.toHaveBeenCalled()
 	})
@@ -266,11 +303,11 @@ describe("useRemoteRevisions", () => {
 			expect(setHasUnsavedEdits).toHaveBeenCalledWith(false)
 		})
 
-		emitter.current?.on("driveItemRemoved", removed)
+		emitter.current.on("driveItemRemoved", removed)
 		mount({ hasEdits: true })
 
 		act(() => {
-			emitter.current?.emit("driveFileGone", { uuid: "v1" })
+			emitter.current.emit("driveFileGone", { uuid: "v1" })
 		})
 		await flush()
 
@@ -282,7 +319,7 @@ describe("useRemoteRevisions", () => {
 
 		const { hook, savingRef } = mount({ hasEdits: true })
 
-		savingRef.current = true
+		await startSave(hook, savingRef)
 		emit("driveFileGone", { uuid: "v1" })
 		await flush()
 
@@ -299,7 +336,7 @@ describe("useRemoteRevisions", () => {
 	it("drops a deletion held over a save that landed: the save made the file anew", async () => {
 		const { hook, savingRef } = mount({ hasEdits: true })
 
-		savingRef.current = true
+		await startSave(hook, savingRef)
 		emit("driveFileGone", { uuid: "v1" })
 
 		act(() => {
@@ -424,7 +461,7 @@ describe("useRemoteRevisions", () => {
 	it("announces a version saved after this editor's own save, which the gallery now shows", async () => {
 		const { hook, savingRef, updated } = mount({ hasEdits: true })
 
-		savingRef.current = true
+		await startSave(hook, savingRef)
 		emit("driveFileRevised", { item: file("mine") })
 		emit("driveFileRevised", { item: file("later") })
 
@@ -688,7 +725,7 @@ describe("useRemoteRevisions", () => {
 		expect(alertNormal).toHaveBeenCalledTimes(1)
 	})
 
-	it("drops a toast waiting for the unlock once the editor is gone", async () => {
+	it("keeps a toast waiting for the unlock through the editor's teardown by the follow", async () => {
 		const unlock = deferred<undefined>()
 
 		unlocked.current = unlock.promise
@@ -696,8 +733,24 @@ describe("useRemoteRevisions", () => {
 		const first = mount({ hasEdits: false })
 
 		emit("driveFileRevised", { item: file("v2") })
-		emit("driveFileRevised", { item: file("v3") })
+		// The follow re-keys the file query: this editor unmounts, the toast is the preview's.
 		first.hook.unmount()
+		unlock.resolve(undefined)
+		await flush()
+
+		expect(alertNormal).toHaveBeenCalledWith("remote_change_updated")
+	})
+
+	it("drops a toast waiting for the unlock once the preview closes", async () => {
+		const unlock = deferred<undefined>()
+
+		unlocked.current = unlock.promise
+
+		const first = mount({ hasEdits: false })
+
+		emit("driveFileRevised", { item: file("v2") })
+		first.hook.unmount()
+		endPreviewNotices()
 		unlock.resolve(undefined)
 		await flush()
 
@@ -707,7 +760,7 @@ describe("useRemoteRevisions", () => {
 	it("says so when the editor's own save landed on another lineage, and follows it", async () => {
 		const { hook, savingRef } = mount({ hasEdits: true })
 
-		savingRef.current = true
+		await startSave(hook, savingRef)
 		// Another file took its name while the save uploaded: the save became a version of that file.
 		emit("driveFileGone", { uuid: "v1", reason: "replaced" })
 
@@ -716,17 +769,16 @@ describe("useRemoteRevisions", () => {
 		})
 		await flush()
 
-		expect(info).toHaveBeenCalledWith({
-			title: "remote_change_saved_elsewhere_title",
-			message: "remote_change_saved_over_replacement"
-		})
+		expect(info).toHaveBeenCalledWith(
+			expect.objectContaining({ title: "remote_change_saved_elsewhere_title", message: "remote_change_saved_over_replacement" })
+		)
 		expect(confirm3).not.toHaveBeenCalled()
 	})
 
 	it("says nothing more when the save stayed on its lineage", async () => {
 		const { hook, savingRef } = mount({ hasEdits: true })
 
-		savingRef.current = true
+		await startSave(hook, savingRef)
 
 		act(() => {
 			hook.result.current.saveSettled(file("mine"))
@@ -742,7 +794,7 @@ describe("useRemoteRevisions", () => {
 
 		const { hook, savingRef } = mount({ hasEdits: true })
 
-		savingRef.current = true
+		await startSave(hook, savingRef)
 		socketReconnected()
 		await flush()
 
@@ -899,7 +951,7 @@ describe("useRemoteRevisions", () => {
 	it("explains a save made after a deletion it was not told about as a new file", async () => {
 		const { hook, savingRef } = mount({ hasEdits: true })
 
-		savingRef.current = true
+		await startSave(hook, savingRef)
 		emit("driveFileGone", { uuid: "v1", reason: "trashed" })
 		savingRef.current = false
 
@@ -908,13 +960,15 @@ describe("useRemoteRevisions", () => {
 		})
 		await flush()
 
-		expect(info).toHaveBeenCalledWith({ title: "remote_change_saved_elsewhere_title", message: "remote_change_saved_after_deletion" })
+		expect(info).toHaveBeenCalledWith(
+			expect.objectContaining({ title: "remote_change_saved_elsewhere_title", message: "remote_change_saved_after_deletion" })
+		)
 	})
 
 	it("explains a save made after a move elsewhere as a new file where the file was", async () => {
 		const { hook, savingRef } = mount({ hasEdits: true })
 
-		savingRef.current = true
+		await startSave(hook, savingRef)
 		emit("driveItemUpdated", { previousUuid: "v1", item: file("v1", { parent: "elsewhere" }) })
 		savingRef.current = false
 
@@ -923,18 +977,28 @@ describe("useRemoteRevisions", () => {
 		})
 		await flush()
 
-		expect(info).toHaveBeenCalledWith({ title: "remote_change_saved_elsewhere_title", message: "remote_change_saved_after_move" })
+		expect(info).toHaveBeenCalledWith(
+			expect.objectContaining({ title: "remote_change_saved_elsewhere_title", message: "remote_change_saved_after_move" })
+		)
 	})
 
 	it("says nothing of a save after a deletion the user was already asked about", async () => {
 		confirm3.mockResolvedValue("cancel")
 
-		const { hook } = mount({ hasEdits: true })
+		const { hook, savingRef } = mount({ hasEdits: true })
 
 		emit("driveFileGone", { uuid: "v1", reason: "trashed" })
 		await flush()
 
 		expect(confirm3).toHaveBeenCalledTimes(1)
+
+		// Saving anyway: nothing to check (the prompt said what it does), and nothing more to say after.
+		const target = await startSave(hook, savingRef)
+
+		expect(target).toEqual(file("v1"))
+		expect(findFile).not.toHaveBeenCalled()
+
+		savingRef.current = false
 
 		act(() => {
 			hook.result.current.saveSettled(file("new", { stableUuid: "new-lineage" }))
@@ -973,5 +1037,181 @@ describe("useRemoteRevisions", () => {
 		expect(savingRef.current).toBe(false)
 		// Not left waiting for the next save: checked now.
 		expect(findFile).toHaveBeenCalledTimes(1)
+	})
+
+	describe("what is known of a file outlives its editors", () => {
+		// An editor of `uuid`, as the gallery mounts one (the pager, a follow, or a save's re-key).
+		function mountOn(uuid: string, hasEdits: boolean) {
+			const savingRef = { current: false }
+			const updated = vi.fn()
+
+			emitter.current.on("driveItemUpdated", updated)
+			currentItem.current = galleryItem(uuid)
+
+			const hook = renderHook(() =>
+				useRemoteRevisions({
+					item: galleryItem(uuid),
+					itemToUse: file(uuid),
+					resolveParent: () => Promise.resolve(null as never),
+					hasEdits,
+					savingRef,
+					saveAsNewFile: (() => Promise.resolve(null)) as never
+				})
+			)
+
+			return { hook, savingRef, updated }
+		}
+
+		beforeEach(() => {
+			// Nothing known of the file: opened from a listing read before this connection.
+			emitter.current.emit("logout")
+		})
+
+		it("an editor mounted on data from before the connection checks before its first save, and not again", async () => {
+			findFile.mockResolvedValue({ lineage: file("v1"), sameName: undefined })
+
+			const { hook, savingRef } = mountOn("v1", true)
+
+			expect(await startSave(hook, savingRef)).toEqual(file("v1"))
+			expect(findFile).toHaveBeenCalledTimes(1)
+
+			savingRef.current = false
+			act(() => {
+				hook.result.current.saveSettled(null)
+			})
+
+			expect(await startSave(hook, savingRef)).toEqual(file("v1"))
+			expect(findFile).toHaveBeenCalledTimes(1)
+		})
+
+		it("an editor mounted on a version older than one the socket reported checks, and asks", async () => {
+			markCovered("lineage", liveConnection(), "v1")
+			// Saved elsewhere while no editor of it was open: the listing it opens from may lag behind.
+			emit("driveFileRevised", { item: file("v2") })
+			findFile.mockResolvedValue({ lineage: file("v2"), sameName: undefined })
+			confirm3.mockResolvedValue("cancel")
+
+			const { hook, savingRef } = mountOn("v1", true)
+
+			expect(await startSave(hook, savingRef)).toBeNull()
+			expect(findFile).toHaveBeenCalledTimes(1)
+			expect(confirm3).toHaveBeenCalledWith(expect.objectContaining({ title: "remote_change_title" }))
+		})
+
+		it("the editor remounted on its own save saves again without a read", async () => {
+			markCovered("lineage", liveConnection(), "v1")
+
+			const first = mountOn("v1", true)
+
+			await startSave(first.hook, first.savingRef)
+			first.savingRef.current = false
+			currentItem.current = galleryItem("mine")
+			act(() => {
+				first.hook.result.current.saveSettled(file("mine"))
+			})
+			first.hook.unmount()
+
+			const second = mountOn("mine", true)
+
+			expect(await startSave(second.hook, second.savingRef)).toEqual(file("mine"))
+			expect(findFile).not.toHaveBeenCalled()
+		})
+
+		it("a check a reconnect during the upload left undone reaches the editor the save's follow mounts, with one read", async () => {
+			markCovered("lineage", liveConnection(), "v1")
+
+			const read = deferred<unknown>()
+
+			findFile.mockReturnValue(read.promise)
+			confirm3.mockResolvedValue("cancel")
+
+			const first = mountOn("v1", true)
+
+			await startSave(first.hook, first.savingRef)
+			// Back after a gap while the upload runs.
+			socketReconnected()
+			await flush()
+
+			expect(findFile).not.toHaveBeenCalled()
+
+			first.savingRef.current = false
+			currentItem.current = galleryItem("mine")
+			act(() => {
+				first.hook.result.current.saveSettled(file("mine"))
+			})
+			first.hook.unmount()
+
+			const second = mountOn("mine", false)
+
+			read.resolve({ lineage: file("theirs"), sameName: undefined })
+			await flush()
+
+			expect(findFile).toHaveBeenCalledTimes(1)
+			expect(second.updated).toHaveBeenCalledWith({ previousUuid: "mine", item: file("theirs") })
+		})
+
+		it("an editor off screen at the reconnect reads nothing then, and checks before its first save", async () => {
+			markCovered("lineage", liveConnection(), "v1")
+			findFile.mockResolvedValue({ lineage: file("theirs"), sameName: undefined })
+			confirm3.mockResolvedValue("cancel")
+
+			const { hook, savingRef } = mountOn("v1", true)
+
+			currentItem.current = galleryItem("some-photo")
+			socketReconnected()
+			await flush()
+
+			expect(findFile).not.toHaveBeenCalled()
+
+			currentItem.current = galleryItem("v1")
+
+			expect(await startSave(hook, savingRef)).toBeNull()
+			expect(findFile).toHaveBeenCalledTimes(1)
+			expect(confirm3).toHaveBeenCalledTimes(1)
+		})
+	})
+
+	it("uploads nothing while a remote-change prompt about the file is still to be answered", async () => {
+		confirm3.mockReturnValue(new Promise(() => undefined))
+
+		const { hook, savingRef } = mount({ hasEdits: true })
+
+		emit("driveFileRevised", { item: file("theirs") })
+		await flush()
+
+		expect(await startSave(hook, savingRef)).toBeNull()
+	})
+
+	it("reports only the move when the file moved and was edited elsewhere while the save uploaded", async () => {
+		const { hook, savingRef } = mount({ hasEdits: true })
+
+		await startSave(hook, savingRef)
+		emit("driveItemUpdated", { previousUuid: "v1", item: file("v1", { parent: "elsewhere" }) })
+		emit("driveFileRevised", { item: file("theirs", { parent: "elsewhere" }) })
+		savingRef.current = false
+
+		act(() => {
+			hook.result.current.saveSettled(file("mine", { stableUuid: "new-lineage" }))
+		})
+		await flush()
+
+		expect(info.mock.calls.map(call => call[0].message)).toEqual(["remote_change_saved_after_move"])
+	})
+
+	it("a check that failed is made again by the next save, which uploads nothing meanwhile", async () => {
+		emitter.current.emit("logout")
+		findFile.mockRejectedValue(new Error("offline"))
+
+		const { hook, savingRef } = mount({ hasEdits: true })
+
+		socketReconnected()
+		await flush()
+
+		expect(findFile).toHaveBeenCalledTimes(1)
+		expect(alertError).not.toHaveBeenCalled()
+
+		expect(await startSave(hook, savingRef)).toBeNull()
+		expect(findFile).toHaveBeenCalledTimes(2)
+		expect(alertError).toHaveBeenCalledTimes(1)
 	})
 })

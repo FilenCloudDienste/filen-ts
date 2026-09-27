@@ -95,6 +95,7 @@ vi.mock("@/components/drivePreview/galleryItem", () => ({
 	default: () => null
 }))
 
+vi.mock("@/components/drivePreview/remoteFileState", () => ({ endPreviewNotices: vi.fn() }))
 vi.mock("@/components/drivePreview/galleryVideoPlayers", () => ({
 	default: {
 		acquire: vi.fn(),
