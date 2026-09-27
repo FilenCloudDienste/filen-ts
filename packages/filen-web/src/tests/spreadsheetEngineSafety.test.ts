@@ -5,6 +5,7 @@ import type { Cell, CellValue } from "hucre"
 import type { EditResult } from "@/features/spreadsheet/lib/edits"
 import { cellKey, type CellView } from "@/features/spreadsheet/lib/model"
 import { XlsxDocument } from "@/features/spreadsheet/lib/xlsxDocument"
+import { proven } from "@/tests/spreadsheetProven"
 import { rawEntries } from "@/features/spreadsheet/lib/xlsxWritable"
 
 const FIXTURES = new URL("./fixtures/spreadsheet/", import.meta.url)
@@ -14,7 +15,7 @@ async function fixture(name: string): Promise<RoundtripWorkbook> {
 }
 
 async function open(sheets: { name: string; rows: CellValue[][]; cells?: Map<string, Cell> }[]): Promise<XlsxDocument> {
-	return new XlsxDocument(await openXlsx(await writeXlsx({ sheets }), { readStyles: true }))
+	return await proven(await openXlsx(await writeXlsx({ sheets }), { readStyles: true }))
 }
 
 async function saved(document: XlsxDocument): Promise<RoundtripWorkbook> {
@@ -39,7 +40,7 @@ function shown(document: XlsxDocument, row: number, col: number, sheet = 0): Cel
 
 describe("XlsxDocument, what saving cannot move", () => {
 	it("locks rows around array formulas and refuses edits to part of one", async () => {
-		const document = new XlsxDocument(await fixture("array.xlsx"))
+		const document = await proven(await fixture("array.xlsx"))
 
 		expect(document.doc().sheets[0]?.structureLocked).toBe(true)
 		expect(document.apply({ type: "insert", sheet: 0, axis: "rows", at: 0, count: 1 })).toMatchObject({ reason: "structureLocked" })
@@ -60,7 +61,7 @@ describe("XlsxDocument, what saving cannot move", () => {
 	})
 
 	it("locks rows on a sheet with threaded comments, and saves it", async () => {
-		const document = new XlsxDocument(await fixture("threaded.xlsx"))
+		const document = await proven(await fixture("threaded.xlsx"))
 
 		expect(document.writable).toBe(true)
 		expect(document.doc().sheets[0]?.structureLocked).toBe(true)
@@ -72,13 +73,13 @@ describe("XlsxDocument, what saving cannot move", () => {
 	})
 
 	it("opens view-only what saving would drop: shapes, form controls, iterative calculation", async () => {
-		expect(new XlsxDocument(await fixture("shape.xlsx")).writable).toBe(false)
-		expect(new XlsxDocument(await fixture("ctrl.xlsx")).writable).toBe(false)
-		expect(new XlsxDocument(await fixture("calc.xlsx")).writable).toBe(false)
+		expect((await proven(await fixture("shape.xlsx"))).writable).toBe(false)
+		expect((await proven(await fixture("ctrl.xlsx"))).writable).toBe(false)
+		expect((await proven(await fixture("calc.xlsx"))).writable).toBe(false)
 	})
 
 	it("keeps column formats within the sheet when columns are inserted, and restores them on undo", async () => {
-		const document = new XlsxDocument(await fixture("hidecols.xlsx"))
+		const document = await proven(await fixture("hidecols.xlsx"))
 
 		document.apply({ type: "insert", sheet: 0, axis: "cols", at: 1, count: 2 })
 
@@ -93,7 +94,7 @@ describe("XlsxDocument, what saving cannot move", () => {
 	})
 
 	it("refuses to rename a table column by editing its header, and allows the rest", async () => {
-		const document = new XlsxDocument(await fixture("table.xlsx"))
+		const document = await proven(await fixture("table.xlsx"))
 
 		expect(document.apply({ type: "setCells", sheet: 0, cells: [{ row: 0, col: 1, input: "Quantity" }] })).toMatchObject({
 			reason: "tableHeader"
@@ -109,7 +110,7 @@ describe("XlsxDocument, what saving cannot move", () => {
 describe("XlsxDocument, LibreOffice files", () => {
 	it("saves a LibreOffice workbook, adding the theme it lacks and dropping its empty custom properties", async () => {
 		for (const name of ["lo-plain.xlsx", "lo-array.xlsx"]) {
-			const document = new XlsxDocument(await fixture(name))
+			const document = await proven(await fixture(name))
 
 			expect(document.writable).toBe(true)
 
@@ -121,7 +122,7 @@ describe("XlsxDocument, LibreOffice files", () => {
 			expect(raw?.has("docProps/custom.xml")).toBe(false)
 		}
 
-		expect(shown(new XlsxDocument(await saved(new XlsxDocument(await fixture("lo-plain.xlsx")))), 3, 1)).toMatchObject({ text: "1500" })
+		expect(shown(await proven(await saved(await proven(await fixture("lo-plain.xlsx")))), 3, 1)).toMatchObject({ text: "1500" })
 	})
 
 	it("opens view-only a workbook whose custom properties hold something", async () => {
@@ -135,7 +136,7 @@ describe("XlsxDocument, LibreOffice files", () => {
 			)
 		)
 
-		expect(new XlsxDocument(workbook).writable).toBe(false)
+		expect((await proven(workbook)).writable).toBe(false)
 	})
 })
 

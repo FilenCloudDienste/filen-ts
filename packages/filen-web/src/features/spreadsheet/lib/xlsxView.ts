@@ -281,6 +281,10 @@ export function structureLocked(sheet: Sheet): boolean {
 		(sheet.charts?.length ?? 0) > 0 ||
 		// Kept in their own part, which saving copies as read while the notes they pair with move.
 		(sheet.threadedComments?.length ?? 0) > 0 ||
+		// Print ranges (kept in the page setup) are written back as read.
+		sheet.pageSetup?.printArea !== undefined ||
+		sheet.pageSetup?.printTitlesRow !== undefined ||
+		sheet.pageSetup?.printTitlesColumn !== undefined ||
 		hasArrayFormulas(sheet)
 	)
 }

@@ -34,7 +34,7 @@ import {
 	type RecalculatedCell
 } from "@/features/spreadsheet/lib/formulaEngine"
 import {
-	engineCanParse,
+	engineCellFormula,
 	engineFormula,
 	formulaTranslator,
 	namesSheet,
@@ -52,7 +52,9 @@ import {
 	workbookStructureLocked,
 	WorkbookViews
 } from "@/features/spreadsheet/lib/xlsxView"
+import { saveLosses } from "@/features/spreadsheet/lib/xlsxVerify"
 import { rawEntries, xlsxSavePlan, type SavePlan } from "@/features/spreadsheet/lib/xlsxWritable"
+import { readZip } from "@/features/spreadsheet/lib/zipLimits"
 
 // Excel's own limits.
 const HISTORY_LIMIT = 100
@@ -60,6 +62,12 @@ const SHEET_NAME = /^[^\\/?*[\]:]{1,31}$/
 // Undo keeps what each step replaced; past this many cells in all, the oldest steps go.
 const HISTORY_CELLS = MAX_SHEET_CELLS
 const THEME_PART = "xl/theme/theme1.xml"
+// The most file bytes (inflated) proven by an unedited save; a larger workbook opens view-only.
+const VERIFY_LIMIT = 192 * 1024 * 1024
+// Parts saveXlsx writes anew from the model and never reads: dropped once the workbook is proven. Sheet
+// relationships stay (it reads them for the parts it re-attaches), and so does every drawing it keeps.
+const REGENERATED =
+	/^(\[Content_Types\]\.xml|_rels\/\.rels|xl\/_rels\/workbook\.xml\.rels|xl\/workbook\.xml|xl\/styles\.xml|xl\/sharedStrings\.xml|xl\/calcChain\.xml|docProps\/(app|core)\.xml|xl\/worksheets\/sheet\d+\.xml|xl\/comments[^/]*\.xml|xl\/comments\/.*|xl\/tables\/.*|xl\/drawings\/vmlDrawing\d+\.vml)$/i
 const ERROR_VALUE = /^#[A-Z0-9/!?_]+$/
 
 type NamedRange = NonNullable<RoundtripWorkbook["namedRanges"]>[number]
@@ -102,16 +110,22 @@ function storedResult(cell: Cell): RawCellContent | undefined {
 	return engineValue(result)
 }
 
-// A formula as the engine gets it, with its stored result to fall back on; one too deeply nested for the
-// engine's parser is not given to it at all.
+// A formula as the engine gets it, with its stored result to fall back on; one the engine cannot be given
+// (nested too deep, building too large an array) holds its stored result.
 function formulaCell(row: number, col: number, formula: string, cell: Cell): EngineCell {
 	const fallback = storedResult(cell)
 
-	if (!engineCanParse(formula)) {
-		return { row, col, content: fallback ?? UNPARSEABLE }
+	// An array formula (legacy or spilling) keeps the result the file stored: the engine calculates ordinary
+	// formulas only, as Excel reads them.
+	if (cell.formulaType === "array" && fallback !== undefined) {
+		return { row, col, content: fallback }
 	}
 
-	const content = `=${engineFormula(formula)}`
+	const content = engineCellFormula(formula)
+
+	if (content === null) {
+		return { row, col, content: fallback ?? UNPARSEABLE }
+	}
 
 	return fallback === undefined ? { row, col, content } : { row, col, content, fallback }
 }
@@ -229,7 +243,8 @@ interface Removed {
 // What undoing one step needs. Sheet numbers are workbook indices except in "structure", which keeps the
 // grid's.
 type Step =
-	| { type: "cells"; sheet: number; before: Map<string, CellBefore> }
+	// `extent`: the sheet's value rectangle before the edit, which writing past its edge grows.
+	| { type: "cells"; sheet: number; before: Map<string, CellBefore>; extent: { rows: number; cols: number } }
 	| {
 			type: "structure"
 			sheet: number
@@ -300,9 +315,12 @@ function stepCells(step: Step): number {
 export class XlsxDocument {
 	private readonly workbook: RoundtripWorkbook
 	private readonly views: WorkbookViews
-	// Whether saving can write the file back intact (xlsxWritable.ts): a workbook that cannot is view-only.
-	readonly writable: boolean
 	private readonly savePlan: SavePlan
+	// Settled by verifyWritable: until then, and after it finds a loss, the workbook is view-only.
+	private proven = false
+	private verification: Promise<boolean> | null = null
+	// What the check found saving would lose (for diagnosis).
+	losses: string[] = []
 	// Built from the workbook as it stands the first time a formula needs calculating, then kept in step
 	// with every edit. Once the workbook has had a formula, every edit that changes cells goes through it.
 	private engine: FormulaEngine | null = null
@@ -324,7 +342,6 @@ export class XlsxDocument {
 		this.historyBudget = historyBudget
 		this.views = new WorkbookViews(workbook.themeColors)
 		this.savePlan = xlsxSavePlan(workbook)
-		this.writable = this.savePlan.writable
 
 		const worksheets = this.worksheets()
 
@@ -491,6 +508,50 @@ export class XlsxDocument {
 		return applied
 	}
 
+	// Runs engine work and stores what it recalculated. Should the engine fail part-way (it throws, for one,
+	// when a spill would land on occupied cells), the workbook is still right: the engine is built again
+	// from it and every result read back.
+	private recalculate(work: (engine: FormulaEngine) => RecalculatedCell[]): RecalculatedCell[] {
+		const engine = this.engine
+
+		if (engine === null) {
+			return []
+		}
+
+		try {
+			return this.applyRecalculated(work(engine))
+		} catch {
+			this.dropEngine()
+
+			try {
+				const worksheets = this.worksheets()
+
+				return this.syncResults(this.ensureEngine()).map(before => {
+					const sheet = this.workbook.sheets[before.sheet]
+					const [row, col] = parseKey(before.key)
+					const value = sheet?.rows[row]?.[col] ?? null
+
+					return {
+						sheet: sheet === undefined ? -1 : worksheets.indexOf(sheet),
+						row,
+						col,
+						value: value instanceof Date ? dateToSerial(value, false) : value
+					}
+				})
+			} catch {
+				// Built again when next needed.
+				this.dropEngine()
+
+				return []
+			}
+		}
+	}
+
+	private dropEngine(): void {
+		this.engine?.destroy()
+		this.engine = null
+	}
+
 	private pushStep(entry: Entry): void {
 		this.undoSteps.push(entry)
 		this.historyCells += entry.cells
@@ -521,45 +582,122 @@ export class XlsxDocument {
 	undo(): EditResult {
 		this.styleMark = this.views.styles.styles.length
 
-		const last = this.undoSteps.pop()
+		const last = this.undoSteps.at(-1)
 
 		if (last === undefined) {
 			return { type: "none", state: this.state() }
 		}
 
+		// The history moves only once the step is reverted.
+		const result = this.revert(last.step)
+
+		this.undoSteps.pop()
 		this.historyCells -= last.cells
 		this.redoSteps.push({ op: last.op, after: last.after })
 		this.current = last.before
 
-		return this.revert(last.step)
+		return { ...result, state: this.state() }
 	}
 
 	redo(): EditResult {
 		this.styleMark = this.views.styles.styles.length
 
-		const redone = this.redoSteps.pop()
+		const redone = this.redoSteps.at(-1)
 
 		if (redone === undefined) {
 			return { type: "none", state: this.state() }
 		}
 
-		const redoSteps = this.redoSteps
 		const result = this.run(redone.op)
 
 		if (result.step !== null) {
+			this.redoSteps.pop()
 			this.pushStep({ step: result.step, op: redone.op, before: this.current, after: redone.after, cells: stepCells(result.step) })
 			this.current = redone.after
 		}
 
-		this.redoSteps = redoSteps
-
 		return result.result()
 	}
 
-	// The file's bytes as edited, and the state they hold. saveXlsx reads the workbook before its first
-	// await, so an edit arriving while it compresses is not in the bytes.
+	// Whether saving can write the file back intact: the structural checks (xlsxWritable.ts) first, then
+	// proof, an unedited save compared with the file part by part (xlsxVerify.ts). View-only until proven.
+	get writable(): boolean {
+		return this.proven
+	}
+
+	// For a page that will not edit: settles the workbook as view-only without proving it, and lets go of
+	// the parts only a save would need.
+	viewOnly(): void {
+		if (this.verification !== null) {
+			return
+		}
+
+		this.verification = Promise.resolve(false)
+		this.proven = false
+		this.releaseRaw(rawEntries(this.workbook))
+	}
+
+	// Proves (once) whether saving loses anything. Must run before any edit: an edit made first would read
+	// as a loss, so a workbook edited first stays view-only.
+	verifyWritable(): Promise<boolean> {
+		this.verification ??= this.verify()
+
+		return this.verification
+	}
+
+	private async verify(): Promise<boolean> {
+		const raw = rawEntries(this.workbook)
+		let proven = false
+
+		if (raw !== null && this.savePlan.writable && this.untouched()) {
+			const original = new Map(raw)
+			let size = 0
+
+			for (const bytes of original.values()) size += bytes.length
+
+			// Too large to prove without holding the file twice over: view-only.
+			if (size <= VERIFY_LIMIT) {
+				await this.prepareSave()
+
+				const saved = await readZip(await saveXlsx(this.workbook))
+
+				this.losses = saveLosses({ original, saved, sheetPaths: this.savePlan.sheets, dropped: this.savePlan.drop })
+				// An edit that came in while it saved would be read as the file.
+				proven = this.losses.length === 0 && this.untouched()
+			}
+		}
+
+		this.proven = proven
+		this.releaseRaw(raw)
+
+		return proven
+	}
+
+	private untouched(): boolean {
+		return this.current === 0 && this.undoSteps.length === 0
+	}
+
+	// Keeps of the file's parts only what saving copies as it was: saving writes the rest anew, and a
+	// view-only workbook saves nothing.
+	private releaseRaw(raw: Map<string, Uint8Array> | null): void {
+		if (raw === null) {
+			return
+		}
+
+		if (!this.proven) {
+			raw.clear()
+
+			return
+		}
+
+		for (const path of [...raw.keys()]) {
+			if (REGENERATED.test(path)) raw.delete(path)
+		}
+	}
+
+	// The file's bytes as edited, and the state they hold.
 	async serialize(): Promise<{ bytes: Uint8Array; version: number }> {
-		if (!this.writable) {
+		if (!(await this.verifyWritable())) {
 			throw new Error("spreadsheet: this workbook cannot be saved")
 		}
 
@@ -618,7 +756,11 @@ export class XlsxDocument {
 				return this.revertStructure(step)
 			case "addSheet": {
 				this.workbook.sheets.pop()
-				this.engine?.removeLastSheet()
+				this.recalculate(engine => {
+					engine.removeLastSheet()
+
+					return []
+				})
 				// The engine's copies are what they were before the sheet came too (references to a missing
 				// sheet).
 				this.restoreResults(step.results)
@@ -630,7 +772,11 @@ export class XlsxDocument {
 
 				if (sheet !== undefined) {
 					sheet.name = step.name
-					this.engine?.renameSheet(this.worksheets().indexOf(sheet), step.name)
+					this.recalculate(engine => {
+						engine.renameSheet(this.worksheets().indexOf(sheet), step.name)
+
+						return []
+					})
 				}
 
 				this.restoreText(step.formulas, (cell, text) => {
@@ -644,9 +790,11 @@ export class XlsxDocument {
 				else this.workbook.namedRanges = step.names
 
 				// Formulas that named the new name name a missing sheet again: the engine reads them anew.
-				if (this.engine !== null) {
-					this.resetFormulas(this.engine, step.placeholders)
-				}
+				this.recalculate(engine => {
+					this.resetFormulas(engine, step.placeholders)
+
+					return []
+				})
 
 				this.restoreResults(step.results)
 
@@ -748,7 +896,9 @@ export class XlsxDocument {
 		}
 
 		// Built before the cells go back, so putting them back is what it recalculates.
-		const engine = this.hasFormulas ? this.ensureEngine() : null
+		if (this.hasFormulas) {
+			this.ensureEngine()
+		}
 
 		for (const [cellId, before] of step.before) {
 			const [row, col] = parseKey(cellId)
@@ -757,15 +907,21 @@ export class XlsxDocument {
 			touched.push({ row, col })
 		}
 
-		const recalculated =
-			engine === null
-				? []
-				: this.applyRecalculated(
-						engine.set(
-							gridIndex,
-							touched.map(({ row, col }) => this.engineCell(sheet, row, col))
-						)
-					)
+		// Writing past the sheet's edge grew it; it shrinks back.
+		if (sheet.rows.length > step.extent.rows) {
+			sheet.rows.length = step.extent.rows
+		}
+
+		if ((sheet.rows[0]?.length ?? 0) > step.extent.cols) {
+			for (const values of sheet.rows) values.length = step.extent.cols
+		}
+
+		const recalculated = this.recalculate(engine =>
+			engine.set(
+				gridIndex,
+				touched.map(({ row, col }) => this.engineCell(sheet, row, col))
+			)
+		)
 
 		return this.cellsResult(gridIndex, touched, recalculated)
 	}
@@ -778,7 +934,11 @@ export class XlsxDocument {
 		}
 
 		const { edit } = step
-		const engine = this.hasFormulas ? this.ensureEngine() : null
+
+		if (this.hasFormulas) {
+			this.ensureEngine()
+		}
+
 		const changed = this.gridSheets([...step.formulas, ...step.links]).add(step.sheet)
 
 		if (edit.type === "insert") {
@@ -798,71 +958,67 @@ export class XlsxDocument {
 			if (cell.hyperlink !== undefined) cell.hyperlink = { ...cell.hyperlink, location: text }
 		})
 
-		if (engine !== null) {
-			let recalculated: RecalculatedCell[]
-
+		const recalculated = this.recalculate(engine => {
 			if (edit.type === "insert") {
-				recalculated = engine.remove(step.sheet, edit.axis, edit.at, edit.count)
-			} else {
-				recalculated = engine.insert(step.sheet, edit.axis, edit.at, edit.count)
-
-				// What came back, and the formulas the deletion had cut, as they were: the engine moves every
-				// other reference back itself, but its copies of cut ones stay cut.
-				const worksheets = this.worksheets()
-				const cells = new Map<number, Map<string, EngineCell>>()
-				const add = (gridIndex: number, row: number, col: number) => {
-					const target = worksheets[gridIndex]
-
-					if (target === undefined) {
-						return
-					}
-
-					let targetCells = cells.get(gridIndex)
-
-					if (targetCells === undefined) {
-						targetCells = new Map()
-						cells.set(gridIndex, targetCells)
-					}
-
-					targetCells.set(key(row, col), this.engineCell(target, row, col))
-				}
-
-				step.removed.values.forEach((values, index) => {
-					values.forEach((value, offset) => {
-						if (value !== null) {
-							add(
-								step.sheet,
-								edit.axis === "rows" ? edit.at + index : index,
-								edit.axis === "rows" ? offset : edit.at + offset
-							)
-						}
-					})
-				})
-
-				for (const [cellId] of step.removed.cells) {
-					const [row, col] = parseKey(cellId)
-
-					add(step.sheet, row, col)
-				}
-
-				for (const formula of step.formulas) {
-					if (formula.cut !== true) {
-						continue
-					}
-
-					const target = this.workbook.sheets[formula.sheet]
-					const [row, col] = parseKey(formula.key)
-
-					if (target !== undefined) add(worksheets.indexOf(target), row, col)
-				}
-
-				for (const [gridIndex, targetCells] of cells) {
-					recalculated = recalculated.concat(engine.set(gridIndex, [...targetCells.values()]))
-				}
+				return engine.remove(step.sheet, edit.axis, edit.at, edit.count)
 			}
 
-			for (const cell of this.applyRecalculated(recalculated)) changed.add(cell.sheet)
-		}
+			let recalculatedCells = engine.insert(step.sheet, edit.axis, edit.at, edit.count)
+
+			// What came back, and the formulas the deletion had cut, as they were: the engine moves every
+			// other reference back itself, but its copies of cut ones stay cut.
+			const worksheets = this.worksheets()
+			const cells = new Map<number, Map<string, EngineCell>>()
+			const add = (gridIndex: number, row: number, col: number) => {
+				const target = worksheets[gridIndex]
+
+				if (target === undefined) {
+					return
+				}
+
+				let targetCells = cells.get(gridIndex)
+
+				if (targetCells === undefined) {
+					targetCells = new Map()
+					cells.set(gridIndex, targetCells)
+				}
+
+				targetCells.set(key(row, col), this.engineCell(target, row, col))
+			}
+
+			step.removed.values.forEach((values, index) => {
+				values.forEach((value, offset) => {
+					if (value !== null) {
+						add(step.sheet, edit.axis === "rows" ? edit.at + index : index, edit.axis === "rows" ? offset : edit.at + offset)
+					}
+				})
+			})
+
+			for (const [cellId] of step.removed.cells) {
+				const [row, col] = parseKey(cellId)
+
+				add(step.sheet, row, col)
+			}
+
+			for (const formula of step.formulas) {
+				if (formula.cut !== true) {
+					continue
+				}
+
+				const target = this.workbook.sheets[formula.sheet]
+				const [row, col] = parseKey(formula.key)
+
+				if (target !== undefined) add(worksheets.indexOf(target), row, col)
+			}
+
+			for (const [gridIndex, targetCells] of cells) {
+				recalculatedCells = recalculatedCells.concat(engine.set(gridIndex, [...targetCells.values()]))
+			}
+
+			return recalculatedCells
+		})
+
+		for (const cell of recalculated) changed.add(cell.sheet)
 
 		return this.sheetsResult(changed)
 	}
@@ -948,7 +1104,11 @@ export class XlsxDocument {
 		}
 
 		// Built from the workbook as it stands before this edit, so the edit itself is what it recalculates.
-		const engine = this.hasFormulas ? this.ensureEngine() : null
+		if (this.hasFormulas) {
+			this.ensureEngine()
+		}
+
+		const extent = { rows: sheet.rows.length, cols: sheet.rows[0]?.length ?? 0 }
 
 		for (const { row, col, parsed } of parsedCells) {
 			const cellId = key(row, col)
@@ -993,38 +1153,19 @@ export class XlsxDocument {
 			}
 		}
 
-		let recalculated: RecalculatedCell[] = []
+		const recalculated = this.recalculate(engine =>
+			engine.set(
+				sheetIndex,
+				[...before.keys()].map(cellId => {
+					const [row, col] = parseKey(cellId)
 
-		try {
-			if (engine !== null) {
-				recalculated = this.applyRecalculated(
-					engine.set(
-						sheetIndex,
-						[...before.keys()].map(cellId => {
-							const [row, col] = parseKey(cellId)
-
-							return this.engineCell(sheet, row, col)
-						})
-					)
-				)
-			}
-		} catch (error) {
-			// The edit does not happen: its cells go back, and the engine, which may hold part of it, is
-			// built afresh when next needed.
-			for (const [cellId, previous] of before) {
-				const [row, col] = parseKey(cellId)
-
-				this.write(sheet, row, col, previous.value, previous.cell)
-			}
-
-			this.engine?.destroy()
-			this.engine = null
-
-			throw error
-		}
+					return this.engineCell(sheet, row, col)
+				})
+			)
+		)
 
 		return {
-			step: { type: "cells", sheet: this.workbook.sheets.indexOf(sheet), before },
+			step: { type: "cells", sheet: this.workbook.sheets.indexOf(sheet), before, extent },
 			result: () => this.cellsResult(sheetIndex, cells, recalculated)
 		}
 	}
@@ -1057,6 +1198,7 @@ export class XlsxDocument {
 			}
 		}
 
+		const extent = { rows: sheet.rows.length, cols: sheet.rows[0]?.length ?? 0 }
 		const before = new Map<string, CellBefore>()
 		const touched: { row: number; col: number }[] = []
 
@@ -1076,7 +1218,7 @@ export class XlsxDocument {
 		}
 
 		return {
-			step: { type: "cells", sheet: this.workbook.sheets.indexOf(sheet), before },
+			step: { type: "cells", sheet: this.workbook.sheets.indexOf(sheet), before, extent },
 			result: () => this.cellsResult(sheetIndex, touched, [])
 		}
 	}
@@ -1156,21 +1298,24 @@ export class XlsxDocument {
 		}
 
 		const edit: AxisEdit = { type: op.type, axis: op.axis, at: op.at, count: op.count }
-		// Built before anything moves, as it moves its own copy.
+		// Built before anything moves, as it moves its own copy; asked first whether it can move it (a spilled
+		// array on the way cannot be moved), so nothing changes when it cannot.
 		const engine = this.hasFormulas ? this.ensureEngine() : null
+
+		if (engine !== null && !engine.canMove(op.sheet, edit)) {
+			return this.refused("structureLocked")
+		}
 		const merges = sheet.merges?.map(merge => ({ ...merge }))
 		const { formulas, links } = this.shiftReferences(sheet, edit)
 		const removed = shiftSheet(sheet, edit)
 
 		const changed = this.gridSheets([...formulas, ...links]).add(op.sheet)
 
-		if (engine !== null) {
-			const recalculated = this.applyRecalculated(
-				op.type === "insert" ? engine.insert(op.sheet, op.axis, op.at, op.count) : engine.remove(op.sheet, op.axis, op.at, op.count)
-			)
+		const recalculated = this.recalculate(current =>
+			op.type === "insert" ? current.insert(op.sheet, op.axis, op.at, op.count) : current.remove(op.sheet, op.axis, op.at, op.count)
+		)
 
-			for (const cell of recalculated) changed.add(cell.sheet)
-		}
+		for (const cell of recalculated) changed.add(cell.sheet)
 
 		return {
 			step: { type: "structure", sheet: op.sheet, edit, merges, removed, formulas, links },
@@ -1191,10 +1336,12 @@ export class XlsxDocument {
 			return this.refused("sheetName")
 		}
 
-		const built = this.engine
-
 		this.workbook.sheets.push({ name, rows: [] })
-		built?.addSheet(name)
+		this.recalculate(engine => {
+			engine.addSheet(name)
+
+			return []
+		})
 
 		// Formulas that already named it now reach it: the engine relinks them without reporting what that
 		// changed, so their results are read back.
@@ -1309,17 +1456,24 @@ export class XlsxDocument {
 		}
 
 		sheet.name = name
-		this.engine?.renameSheet(sheetIndex, name)
+		this.recalculate(engine => {
+			engine.renameSheet(sheetIndex, name)
+
+			return []
+		})
 
 		// The engine reads formulas that named the new name afresh; what that changes is read back, as for
 		// an added sheet.
 		let results: ResultBefore[] = []
 
 		if (this.hasFormulas && placeholders.length > 0) {
-			const engine = this.ensureEngine()
+			this.ensureEngine()
+			this.recalculate(engine => {
+				this.resetFormulas(engine, placeholders)
 
-			this.resetFormulas(engine, placeholders)
-			results = this.syncResults(engine)
+				return []
+			})
+			results = this.engine === null ? [] : this.syncResults(this.engine)
 		}
 
 		const changed = this.gridSheets([...formulas, ...links, ...results]).add(sheetIndex)

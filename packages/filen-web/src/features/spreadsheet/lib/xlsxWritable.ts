@@ -184,9 +184,11 @@ export interface SavePlan {
 	writable: boolean
 	drop: string[]
 	addTheme: boolean
+	// The worksheet parts, in the workbook's order.
+	sheets: string[]
 }
 
-const VIEW_ONLY: SavePlan = { writable: false, drop: [], addTheme: false }
+const VIEW_ONLY: SavePlan = { writable: false, drop: [], addTheme: false, sheets: [] }
 
 export function xlsxSavePlan(workbook: RoundtripWorkbook): SavePlan {
 	const raw = rawEntries(workbook)
@@ -420,5 +422,5 @@ export function xlsxSavePlan(workbook: RoundtripWorkbook): SavePlan {
 		return VIEW_ONLY
 	}
 
-	return { writable: true, drop, addTheme: theme === undefined }
+	return { writable: true, drop, addTheme: theme === undefined, sheets: paths.map(path => stored.get(path) ?? path) }
 }

@@ -86,6 +86,10 @@ export const preview = {
 	previewRemoteDiscardMine: "Discard my changes",
 	/** Remote-deletion dialog — writes the unsaved changes to a new file in the same directory */
 	previewRemoteSaveAsNew: "Save as new file",
+	/** Remote-change dialog, when the open viewer is read-only (the file was renamed to another type, or can't be saved): why no save is offered */
+	previewRemoteSaveUnavailable: "Your changes can't be saved from this preview. Keep them on screen to copy them, or discard them.",
+	/** Remote-deletion dialog, when the changes can't be saved: closes the dialog and leaves the changes on screen */
+	previewRemoteKeepOpen: "Keep on screen",
 	/** Name of the file the unsaved changes are written to when the original moved on; {{base}} is the original name without its extension, {{ext}} the extension with its dot (may be empty), {{date}} the current date and time */
 	previewConflictCopyName: "{{base}} (conflicted copy {{date}}){{ext}}",
 	/** Toast after the unsaved changes were written to a new file; {{name}} is its name */
@@ -204,6 +208,10 @@ export const preview = {
 	previewSpreadsheetReadOnlyUnnamed: "Read-only here: the file name doesn't say which spreadsheet format it is.",
 	/** Spreadsheet viewer — note beside the cell contents when an open file was renamed to another format's extension, so saving it under that name would mislabel it */
 	previewSpreadsheetReadOnlyRenamed: "Read-only here: the file name no longer matches its format.",
+	/** Spreadsheet viewer — status beside the cell contents while an Excel file opens view-only until it is confirmed that saving it keeps everything in it */
+	previewSpreadsheetCheckingWritable: "Checking this file can be saved…",
+	/** Spreadsheet viewer — note beside the cell contents when an Excel file stays read-only because saving it here would lose some of its content */
+	previewSpreadsheetReadOnlyLossy: "Read-only here: this file has content this app can't save without losing it.",
 	/** Spreadsheet grid — below a sheet too tall to show whole; {{rows}} is the number of rows shown, already formatted */
 	previewSpreadsheetRowsTruncated: "Showing the first {{rows}} rows. Rows further down can't be shown here.",
 

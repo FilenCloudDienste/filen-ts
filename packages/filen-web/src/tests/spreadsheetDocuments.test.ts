@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import { openXlsx, writeXlsx } from "hucre/xlsx"
 import type { EditResult } from "@/features/spreadsheet/lib/edits"
 import { XlsxDocument } from "@/features/spreadsheet/lib/xlsxDocument"
+import { proven } from "@/tests/spreadsheetProven"
 import { CsvDocument } from "@/features/spreadsheet/lib/csvDocument"
 import { parseCsvFile } from "@/features/spreadsheet/lib/csvView"
 import { cellKey, type CellView } from "@/features/spreadsheet/lib/model"
@@ -30,7 +31,7 @@ async function workbook(): Promise<XlsxDocument> {
 		]
 	})
 
-	return new XlsxDocument(await openXlsx(bytes, { readStyles: true }))
+	return await proven(await openXlsx(bytes, { readStyles: true }))
 }
 
 function cell(result: EditResult, row: number, col: number, sheet = 0): CellView | null | undefined {
@@ -125,7 +126,7 @@ describe("XlsxDocument", () => {
 		document.apply({ type: "setCells", sheet: 0, cells: [{ row: 2, col: 1, input: "400" }] })
 
 		const { bytes } = await document.serialize()
-		const reopened = new XlsxDocument(await openXlsx(bytes, { readStyles: true })).doc()
+		const reopened = (await proven(await openXlsx(bytes, { readStyles: true }))).doc()
 		const sheet = reopened.sheets[0]
 		const header = sheet?.cells.get(cellKey(0, 0))
 
@@ -165,7 +166,7 @@ describe("XlsxDocument, as other programs write files", () => {
 				}
 			]
 		})
-		const document = new XlsxDocument(await openXlsx(bytes, { readStyles: true }))
+		const document = await proven(await openXlsx(bytes, { readStyles: true }))
 
 		expect(document.doc().sheets[0]?.cells.get(cellKey(0, 2))).toMatchObject({ text: "6", input: "=A1*B1" })
 		expect(document.undo()).toMatchObject({ type: "none", state: { dirty: false, canUndo: false } })
@@ -188,7 +189,7 @@ describe("XlsxDocument, as other programs write files", () => {
 		workbook.sheets.unshift({ name: "Chart", rows: [], kind: "chartsheet" })
 		workbook.activeSheet = 1
 
-		const document = new XlsxDocument(workbook)
+		const document = await proven(workbook)
 
 		expect(document.doc().activeSheet).toBe(0)
 

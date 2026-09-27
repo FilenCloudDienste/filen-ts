@@ -5,6 +5,16 @@ import { MAX_SHEET_CELLS } from "@/features/spreadsheet/lib/edits"
 
 const encoder = new TextEncoder()
 
+function hexBytes(hex: string): Uint8Array {
+	const bytes = new Uint8Array(hex.length / 2)
+
+	for (let i = 0; i < bytes.length; i++) {
+		bytes[i] = Number.parseInt(hex.slice(i * 2, i * 2 + 2), 16)
+	}
+
+	return bytes
+}
+
 function utf16Bytes(text: string, littleEndian: boolean, bom: readonly number[]): Uint8Array {
 	const body = new Uint8Array(text.length * 2)
 
@@ -72,6 +82,38 @@ describe("CSV encodings", () => {
 
 		expect(Array.from(written.subarray(0, 3))).toEqual([0xef, 0xbb, 0xbf])
 		expect(new TextDecoder("utf-8").decode(written)).toBe("café,日本語")
+	})
+
+	it("keeps a genuine windows-1252 export writable across German, French and Spanish text", () => {
+		// "Größe,Gewicht\nKäfer,Öl\nMüller,Fön\n" and "Name,City\nJosé,Málaga\nFrançois,Genève\n" in
+		// windows-1252: accented letters sit isolated inside otherwise-ASCII words, well under the
+		// CJK/Cyrillic run and ratio thresholds below.
+		for (const hex of [
+			"4772f6df652c476577696368740a4be46665722cd66c0a4dfc6c6c65722c46f66e0a",
+			"4e616d652c436974790a4a6f73e92c4de16c6167610a4672616ee76f69732c47656ee876650a"
+		]) {
+			const { format } = parseCsvFile(hexBytes(hex), false)
+
+			expect(format.encoding).toBe("windows-1252")
+			expect(format.writable).toBe(true)
+		}
+	})
+
+	it("opens read-only when non-UTF-8 bytes are CJK or Cyrillic text that windows-1252 decodes without error", () => {
+		// Excel's default export encoding for "name,city" + one data row in a CJK/Cyrillic locale: GBK,
+		// EUC-KR, windows-1251 and Shift-JIS. None of these bytes are undefined in windows-1252, so only
+		// the run/ratio heuristic — not hasWin1252UndefinedByte — tells them apart from genuine Western text.
+		for (const hex of [
+			"d0d5c3fb2cb3c7cad00ad5c5c8fd2cb1b1bea90a",
+			"c0ccb8a72cb5b5bdc30ab1e8c3b6bcf62cbcadbfef0a",
+			"c8ecff2cc3eef0eee40ac8e2e0ed2ccceef1eae2e00a",
+			"96bc914f2c93738e730a936392862c938c8b9e0a"
+		]) {
+			const { format } = parseCsvFile(hexBytes(hex), false)
+
+			expect(format.encoding).toBe("windows-1252")
+			expect(format.writable).toBe(false)
+		}
 	})
 
 	it("keeps a UTF-8 file's BOM presence as read", () => {
@@ -186,6 +228,55 @@ describe("CsvDocument structural edits", () => {
 		document.undo()
 
 		expect(new TextDecoder().decode(document.serialize().bytes)).toBe("a,b\n1,2\n")
+	})
+
+	it("undoes a setCells past the grid's edge back to the original extent, leaving no phantom rows or columns", () => {
+		const { rows, format } = parseCsvFile(encoder.encode("a,b\n1,2\n"), false)
+		const document = new CsvDocument(rows, format)
+
+		document.apply({ type: "setCells", sheet: 0, cells: [{ row: 5, col: 4, input: "x" }] })
+
+		expect(document.doc().sheets[0]?.rowCount).toBe(6)
+		expect(document.doc().sheets[0]?.colCount).toBe(5)
+
+		document.undo()
+
+		expect(document.doc().sheets[0]?.rowCount).toBe(2)
+		expect(document.doc().sheets[0]?.colCount).toBe(2)
+
+		document.apply({ type: "setCells", sheet: 0, cells: [{ row: 0, col: 0, input: "z" }] })
+
+		expect(new TextDecoder().decode(document.serialize().bytes)).toBe("z,b\n1,2\n")
+	})
+
+	it("re-grows the grid on redo after undoing a setCells past the edge", () => {
+		const { rows, format } = parseCsvFile(encoder.encode("a,b\n1,2\n"), false)
+		const document = new CsvDocument(rows, format)
+
+		document.apply({ type: "setCells", sheet: 0, cells: [{ row: 5, col: 4, input: "x" }] })
+		document.undo()
+		document.redo()
+
+		expect(document.doc().sheets[0]?.rowCount).toBe(6)
+		expect(document.doc().sheets[0]?.colCount).toBe(5)
+	})
+
+	it("only truncates rows a setCells step actually widened, leaving an already-wider row untouched", () => {
+		const { rows, format } = parseCsvFile(encoder.encode("a,b,c,d\n1,2\n"), false)
+		const document = new CsvDocument(rows, format)
+
+		// Row 0 is already 4 wide; this only widens row 1 (2 -> 3) and adds row 2.
+		document.apply({
+			type: "setCells",
+			sheet: 0,
+			cells: [
+				{ row: 1, col: 2, input: "x" },
+				{ row: 2, col: 0, input: "y" }
+			]
+		})
+		document.undo()
+
+		expect(new TextDecoder().decode(document.serialize().bytes)).toBe("a,b,c,d\n1,2\n")
 	})
 
 	it("redoes a structural edit after undoing it", () => {

@@ -1,4 +1,4 @@
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { spreadsheetWorker } from "@/features/spreadsheet/lib/spreadsheetClient"
 import { applyEditResult, type GridDoc } from "@/features/spreadsheet/lib/cellStore.logic"
 import type { DocState, EditOp, EditResult } from "@/features/spreadsheet/lib/edits"
@@ -81,4 +81,57 @@ export function useSpreadsheetEdits(id: number, initial: GridDoc): SpreadsheetEd
 		redo: () => step(state.canRedo, () => spreadsheetWorker().redo(id)),
 		snapshot
 	}
+}
+
+export type Writability = "checking" | "writable" | "readOnly"
+
+// Whether the open document may be edited and saved. A workbook opens unproven: the worker checks in the
+// background that saving it loses nothing, and until that answers nothing may be sent to it (an edit
+// before the verdict would make it view-only). Asked only when editing could follow (`wanted`); an
+// answer arriving after the viewer has gone is ignored, as the document is closed by then.
+export function useSpreadsheetWritability(id: number, doc: Pick<GridDoc, "kind" | "writable">, wanted: boolean): Writability {
+	const proven = doc.kind === "xlsx"
+	const [verdict, setVerdict] = useState<boolean | null>(null)
+
+	useEffect(() => {
+		if (!proven || verdict !== null) {
+			return undefined
+		}
+
+		// Nothing here will edit it: no proof, and the worker lets go of what only a save would need.
+		if (!wanted) {
+			void spreadsheetWorker()
+				.viewOnly(id)
+				.catch(() => undefined)
+
+			return undefined
+		}
+
+		let live = true
+
+		spreadsheetWorker()
+			.writability(id)
+			.then(
+				writable => {
+					if (live) {
+						setVerdict(writable)
+					}
+				},
+				() => {
+					if (live) {
+						setVerdict(false)
+					}
+				}
+			)
+
+		return () => {
+			live = false
+		}
+	}, [id, proven, wanted, verdict])
+
+	if (!proven) {
+		return doc.writable ? "writable" : "readOnly"
+	}
+
+	return verdict === null ? "checking" : verdict ? "writable" : "readOnly"
 }

@@ -8,7 +8,7 @@ import { FormatToolbar } from "@/features/spreadsheet/components/formatToolbar"
 import { SheetGrid } from "@/features/spreadsheet/components/sheetGrid"
 import { SheetTabs } from "@/features/spreadsheet/components/sheetTabs"
 import { useSpreadsheetDoc } from "@/features/spreadsheet/hooks/useSpreadsheetDoc"
-import { useSpreadsheetEdits, type SpreadsheetSnapshot } from "@/features/spreadsheet/hooks/useSpreadsheetEdits"
+import { useSpreadsheetEdits, useSpreadsheetWritability, type SpreadsheetSnapshot } from "@/features/spreadsheet/hooks/useSpreadsheetEdits"
 import { rangeName, selectionRange, type CellPosition, type Selection } from "@/features/spreadsheet/lib/cellRef.logic"
 import { CellStore, type GridDoc, type GridSheet } from "@/features/spreadsheet/lib/cellStore.logic"
 import { MAX_EDIT_CELLS, type EditOp, type EditResult, type FormatPatch } from "@/features/spreadsheet/lib/edits"
@@ -149,16 +149,21 @@ function SpreadsheetBody({
 	const { t } = useTranslation("preview")
 	const edits = useSpreadsheetEdits(id, initial)
 	const doc = edits.doc
-	const canEdit = editable && doc.writable && !unnamed && !renamed
+	const writability = useSpreadsheetWritability(id, doc, editable && !unnamed)
+	const canEdit = editable && writability === "writable" && !unnamed && !renamed
 	const readOnlyNote = !editable
 		? null
 		: unnamed
 			? t("previewSpreadsheetReadOnlyUnnamed")
 			: renamed
 				? t("previewSpreadsheetReadOnlyRenamed")
-				: !doc.writable && doc.kind !== "xls"
-					? t("previewSpreadsheetReadOnlyUnsafe")
-					: null
+				: writability === "checking"
+					? t("previewSpreadsheetCheckingWritable")
+					: writability === "readOnly" && doc.kind === "xlsx"
+						? t("previewSpreadsheetReadOnlyLossy")
+						: writability === "readOnly" && doc.kind !== "xls"
+							? t("previewSpreadsheetReadOnlyUnsafe")
+							: null
 	const [chosenSheet, setChosenSheet] = useState(doc.activeSheet)
 	// An undone "add sheet" can take away the sheet on show.
 	const sheetIndex = Math.max(0, Math.min(chosenSheet, doc.sheets.length - 1))
@@ -173,9 +178,24 @@ function SpreadsheetBody({
 	const barRef = useRef<HTMLInputElement>(null)
 	const alive = useRef(true)
 	const clipboardRef = useRef<((event: ClipboardEvent) => void) | null>(null)
-	// An entry open when editing stops being possible (the file renamed meanwhile) could not be saved.
-	if (!canEdit && editing !== null) {
-		setEditing(null)
+	// Editing stopped being possible while it was open (the file renamed meanwhile): nothing renames a sheet
+	// now. An open entry is committed instead (see the effect below), never dropped unseen.
+	const wasEditable = useRef(canEdit)
+
+	if (!canEdit && renaming !== null) {
+		setRenaming(null)
+	}
+
+	// A selection belongs to the sheet it was made on: a sheet removed (an undone "add sheet") takes its
+	// selection with it, so a sheet added again at that place starts afresh.
+	const [sheetCount, setSheetCount] = useState(doc.sheets.length)
+
+	if (sheetCount !== doc.sheets.length) {
+		setSheetCount(doc.sheets.length)
+
+		if (doc.sheets.length < sheetCount) {
+			setSelections(prev => new Map([...prev].filter(([index]) => index < doc.sheets.length)))
+		}
 	}
 
 	const sheet = doc.sheets[sheetIndex] ?? NO_SHEET
@@ -478,6 +498,12 @@ function SpreadsheetBody({
 	useEffect(() => {
 		clipboardRef.current = handleClipboard
 
+		if (wasEditable.current && !canEdit) {
+			commit("none")
+		}
+
+		wasEditable.current = canEdit
+
 		if (saveRef === undefined) {
 			return undefined
 		}
@@ -513,7 +539,6 @@ function SpreadsheetBody({
 
 	const grid = (
 		<SheetGrid
-			key={sheetIndex}
 			sheet={sheet}
 			styles={doc.styles}
 			selection={selection}
@@ -622,6 +647,7 @@ function SpreadsheetBody({
 				)}
 				{readOnlyNote === null ? null : (
 					<span
+						role="status"
 						title={readOnlyNote}
 						className="max-w-1/2 shrink truncate text-xs text-muted-foreground"
 					>
@@ -629,66 +655,68 @@ function SpreadsheetBody({
 					</span>
 				)}
 			</div>
-			{canEdit ? (
-				<ContextMenu>
-					<ContextMenuTrigger className="flex min-h-0 flex-1 flex-col">{grid}</ContextMenuTrigger>
-					<ContextMenuContent>
-						<ContextMenuItem
-							disabled={structureDisabled}
-							onClick={() => {
-								apply({ type: "insert", sheet: sheetIndex, axis: "rows", at: range.startRow, count: rowsSelected })
-							}}
-						>
-							{t("previewSpreadsheetInsertRowsAbove", { count: rowsSelected })}
-						</ContextMenuItem>
-						<ContextMenuItem
-							disabled={structureDisabled}
-							onClick={() => {
-								apply({ type: "insert", sheet: sheetIndex, axis: "rows", at: range.endRow + 1, count: rowsSelected })
-							}}
-						>
-							{t("previewSpreadsheetInsertRowsBelow", { count: rowsSelected })}
-						</ContextMenuItem>
-						<ContextMenuItem
-							disabled={structureDisabled}
-							onClick={() => {
-								apply({ type: "delete", sheet: sheetIndex, axis: "rows", at: range.startRow, count: rowsSelected })
-							}}
-						>
-							{t("previewSpreadsheetDeleteRows", { count: rowsSelected })}
-						</ContextMenuItem>
-						<ContextMenuSeparator />
-						<ContextMenuItem
-							disabled={structureDisabled}
-							onClick={() => {
-								apply({ type: "insert", sheet: sheetIndex, axis: "cols", at: range.startCol, count: colsSelected })
-							}}
-						>
-							{t("previewSpreadsheetInsertColumnsLeft", { count: colsSelected })}
-						</ContextMenuItem>
-						<ContextMenuItem
-							disabled={structureDisabled}
-							onClick={() => {
-								apply({ type: "insert", sheet: sheetIndex, axis: "cols", at: range.endCol + 1, count: colsSelected })
-							}}
-						>
-							{t("previewSpreadsheetInsertColumnsRight", { count: colsSelected })}
-						</ContextMenuItem>
-						<ContextMenuItem
-							disabled={structureDisabled}
-							onClick={() => {
-								apply({ type: "delete", sheet: sheetIndex, axis: "cols", at: range.startCol, count: colsSelected })
-							}}
-						>
-							{t("previewSpreadsheetDeleteColumns", { count: colsSelected })}
-						</ContextMenuItem>
-						<ContextMenuSeparator />
-						<ContextMenuItem onClick={clear}>{t("previewSpreadsheetClearCells")}</ContextMenuItem>
-					</ContextMenuContent>
-				</ContextMenu>
-			) : (
-				grid
-			)}
+			{/* One tree whether editable or not, so the grid (its scroll and focus) outlives a switch to read-only. */}
+			<ContextMenu disabled={!canEdit}>
+				<ContextMenuTrigger className="flex min-h-0 flex-1 flex-col">{grid}</ContextMenuTrigger>
+				<ContextMenuContent>
+					<ContextMenuItem
+						disabled={structureDisabled || !canEdit}
+						onClick={() => {
+							apply({ type: "insert", sheet: sheetIndex, axis: "rows", at: range.startRow, count: rowsSelected })
+						}}
+					>
+						{t("previewSpreadsheetInsertRowsAbove", { count: rowsSelected })}
+					</ContextMenuItem>
+					<ContextMenuItem
+						disabled={structureDisabled || !canEdit}
+						onClick={() => {
+							apply({ type: "insert", sheet: sheetIndex, axis: "rows", at: range.endRow + 1, count: rowsSelected })
+						}}
+					>
+						{t("previewSpreadsheetInsertRowsBelow", { count: rowsSelected })}
+					</ContextMenuItem>
+					<ContextMenuItem
+						disabled={structureDisabled || !canEdit}
+						onClick={() => {
+							apply({ type: "delete", sheet: sheetIndex, axis: "rows", at: range.startRow, count: rowsSelected })
+						}}
+					>
+						{t("previewSpreadsheetDeleteRows", { count: rowsSelected })}
+					</ContextMenuItem>
+					<ContextMenuSeparator />
+					<ContextMenuItem
+						disabled={structureDisabled || !canEdit}
+						onClick={() => {
+							apply({ type: "insert", sheet: sheetIndex, axis: "cols", at: range.startCol, count: colsSelected })
+						}}
+					>
+						{t("previewSpreadsheetInsertColumnsLeft", { count: colsSelected })}
+					</ContextMenuItem>
+					<ContextMenuItem
+						disabled={structureDisabled || !canEdit}
+						onClick={() => {
+							apply({ type: "insert", sheet: sheetIndex, axis: "cols", at: range.endCol + 1, count: colsSelected })
+						}}
+					>
+						{t("previewSpreadsheetInsertColumnsRight", { count: colsSelected })}
+					</ContextMenuItem>
+					<ContextMenuItem
+						disabled={structureDisabled || !canEdit}
+						onClick={() => {
+							apply({ type: "delete", sheet: sheetIndex, axis: "cols", at: range.startCol, count: colsSelected })
+						}}
+					>
+						{t("previewSpreadsheetDeleteColumns", { count: colsSelected })}
+					</ContextMenuItem>
+					<ContextMenuSeparator />
+					<ContextMenuItem
+						disabled={!canEdit}
+						onClick={clear}
+					>
+						{t("previewSpreadsheetClearCells")}
+					</ContextMenuItem>
+				</ContextMenuContent>
+			</ContextMenu>
 			{doc.kind !== "csv" ? (
 				<SheetTabs
 					sheets={doc.sheets}
@@ -696,6 +724,7 @@ function SpreadsheetBody({
 					onSelect={index => {
 						commit("none")
 						setChosenSheet(index)
+						gridRef.current?.scrollTo({ top: 0, left: 0 })
 					}}
 					onAdd={
 						canEdit
@@ -711,7 +740,7 @@ function SpreadsheetBody({
 				/>
 			) : null}
 			<InputDialog
-				open={renaming !== null}
+				open={canEdit && renaming !== null}
 				pending={false}
 				title={t("previewSpreadsheetRenameSheet")}
 				body={t("previewSpreadsheetRenameSheetBody")}
@@ -725,7 +754,7 @@ function SpreadsheetBody({
 					}
 				}}
 				onSubmit={value => {
-					if (renaming !== null) {
+					if (canEdit && renaming !== null) {
 						apply({ type: "renameSheet", sheet: renaming, name: value })
 					}
 

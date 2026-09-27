@@ -73,3 +73,51 @@ export function checkZipLimits(bytes: Uint8Array, limits: { maxEntries: number; 
 		position += 46 + view.getUint16(position + 28, true) + view.getUint16(position + 30, true) + view.getUint16(position + 32, true)
 	}
 }
+
+async function inflate(data: Uint8Array): Promise<Uint8Array> {
+	const stream = new Blob([data as Uint8Array<ArrayBuffer>]).stream().pipeThrough(new DecompressionStream("deflate-raw"))
+
+	return new Uint8Array(await new Response(stream).arrayBuffer())
+}
+
+// The entries of a zip saveXlsx wrote (no ZIP64, sizes in the central directory), by path.
+export async function readZip(bytes: Uint8Array): Promise<Map<string, Uint8Array>> {
+	const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+	const entries = new Map<string, Uint8Array>()
+	const decoder = new TextDecoder()
+	let eocd = -1
+
+	for (let offset = bytes.length - 22; offset >= Math.max(0, bytes.length - 65557); offset--) {
+		if (view.getUint32(offset, true) === EOCD) {
+			eocd = offset
+
+			break
+		}
+	}
+
+	if (eocd < 0) {
+		throw new ZipLimitError("spreadsheet: not a zip")
+	}
+
+	const count = view.getUint16(eocd + 10, true)
+	let position = view.getUint32(eocd + 16, true)
+
+	for (let entry = 0; entry < count; entry++) {
+		if (position + 46 > bytes.length || view.getUint32(position, true) !== CENTRAL) {
+			throw new ZipLimitError("spreadsheet: bad zip directory")
+		}
+
+		const method = view.getUint16(position + 10, true)
+		const compressed = view.getUint32(position + 20, true)
+		const nameLength = view.getUint16(position + 28, true)
+		const local = view.getUint32(position + 42, true)
+		const name = decoder.decode(bytes.subarray(position + 46, position + 46 + nameLength))
+		const start = local + 30 + view.getUint16(local + 26, true) + view.getUint16(local + 28, true)
+		const data = bytes.subarray(start, start + compressed)
+
+		entries.set(name, method === 8 ? await inflate(data) : data)
+		position += 46 + nameLength + view.getUint16(position + 30, true) + view.getUint16(position + 32, true)
+	}
+
+	return entries
+}

@@ -6,7 +6,6 @@ import { extensionOf } from "@/features/drive/lib/preview.logic"
 import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
 import { gridDoc, type GridDoc } from "@/features/spreadsheet/lib/cellStore.logic"
 import { sniffSpreadsheetKind, spreadsheetFileKind, spreadsheetWorker } from "@/features/spreadsheet/lib/spreadsheetClient"
-import type { SpreadsheetFileKind } from "@/features/spreadsheet/workers/spreadsheet.worker"
 import { type ErrorDTO } from "@/lib/sdk/errors"
 
 export type SpreadsheetDocState =
@@ -18,12 +17,21 @@ export type SpreadsheetDocState =
 	// renamed to another format's extension, which a save would mislabel, so it is read-only too.
 	| { status: "ready"; id: number; doc: GridDoc; unnamed: boolean; renamed: boolean }
 
-type Opened = { status: "unreadable" } | { status: "ready"; id: number; doc: GridDoc; unnamed: boolean; kind: SpreadsheetFileKind | null }
+type Opened = { status: "unreadable" } | { status: "ready"; id: number; doc: GridDoc; unnamed: boolean; format: string | null }
 
-function nameKind(item: DriveItem): SpreadsheetFileKind | null {
+function extension(item: DriveItem): string {
 	const base = asDirectoryOrFile(item)
 
-	return spreadsheetFileKind(extensionOf(base.type === "file" ? driveItemName(base) : ""))
+	return extensionOf(base.type === "file" ? driveItemName(base) : "")
+}
+
+// The format a name promises: its kind, except that .xlsm (macros kept) and .xlsx (none allowed) open
+// alike but are different files, so a rename between them is a change of format too.
+function nameFormat(item: DriveItem): string | null {
+	const ext = extension(item)
+	const kind = spreadsheetFileKind(ext)
+
+	return kind === "xlsx" ? ext : kind
 }
 
 // Downloads the file (the preview's shared byte load and cache) and opens it in the spreadsheet worker,
@@ -39,7 +47,8 @@ export function useSpreadsheetDoc(item: DriveItem, documentKey: string): Spreads
 
 	const opening = pinned.key === documentKey ? pinned.item : item
 	const bytes = usePreviewBytes(opening)
-	const named = nameKind(opening)
+	const named = spreadsheetFileKind(extension(opening))
+	const format = nameFormat(opening)
 	const [opened, setOpened] = useState<{ bytes: Uint8Array; state: Opened } | null>(null)
 	const source = bytes.status === "success" ? bytes.bytes : null
 
@@ -65,7 +74,7 @@ export function useSpreadsheetDoc(item: DriveItem, documentKey: string): Spreads
 				id = result.id
 				setOpened({
 					bytes: source,
-					state: { status: "ready", id: result.id, doc: gridDoc(result.doc), unnamed: named === null, kind: named }
+					state: { status: "ready", id: result.id, doc: gridDoc(result.doc), unnamed: named === null, format }
 				})
 			})
 			.catch(() => {
@@ -81,7 +90,7 @@ export function useSpreadsheetDoc(item: DriveItem, documentKey: string): Spreads
 				void spreadsheetWorker().close(id)
 			}
 		}
-	}, [source, named])
+	}, [source, named, format])
 
 	if (bytes.status === "error") {
 		return { status: "error", dto: bytes.dto, retry: bytes.refetch }
@@ -96,7 +105,7 @@ export function useSpreadsheetDoc(item: DriveItem, documentKey: string): Spreads
 		return opened.state
 	}
 
-	const { id, doc, unnamed, kind } = opened.state
+	const { id, doc, unnamed, format: openedAs } = opened.state
 
-	return { status: "ready", id, doc, unnamed, renamed: !unnamed && nameKind(item) !== kind }
+	return { status: "ready", id, doc, unnamed, renamed: !unnamed && nameFormat(item) !== openedAs }
 }

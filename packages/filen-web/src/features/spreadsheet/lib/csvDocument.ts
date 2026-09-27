@@ -13,7 +13,9 @@ import { cellKey, keyCol, keyRow, type CellView, type SpreadsheetDoc } from "@/f
 const HISTORY_LIMIT = 100
 
 type Step =
-	| { type: "cells"; before: Map<number, string> }
+	// `rowCount`/`rowWidths` are the sheet's extent just before this step's writes grew it — a setCells past
+	// the current edge grows `rows` (see write()), and nothing else shrinks it back on undo.
+	| { type: "cells"; before: Map<number, string>; rowCount: number; rowWidths: Map<number, number> }
 	| { type: "structure"; axis: "rows" | "cols"; kind: "insert" | "delete"; at: number; count: number; removed: string[][] }
 
 // How many cells a step's snapshot holds, for the history's total memory budget.
@@ -91,6 +93,8 @@ export class CsvDocument {
 			touched.push(key)
 		}
 
+		this.shrinkTo(last.step.rowCount, last.step.rowWidths)
+
 		return this.cellsResult(touched)
 	}
 
@@ -160,6 +164,23 @@ export class CsvDocument {
 		this.rows[row] = values
 	}
 
+	// Undoes exactly the growth write() performed for one "cells" step: rows a setCells pushed past the old
+	// edge are dropped entirely, and rows it only widened are truncated back to their old width. A row
+	// untouched by the step, or already at least this wide beforehand, is left alone.
+	private shrinkTo(rowCount: number, rowWidths: ReadonlyMap<number, number>): void {
+		for (const [row, width] of rowWidths) {
+			const values = this.rows[row]
+
+			if (values !== undefined && values.length > width) {
+				values.length = width
+			}
+		}
+
+		if (this.rows.length > rowCount) {
+			this.rows.length = rowCount
+		}
+	}
+
 	private run(op: EditOp): Step | null {
 		switch (op.type) {
 			case "setCells": {
@@ -168,6 +189,8 @@ export class CsvDocument {
 				}
 
 				const before = new Map<number, string>()
+				const rowWidths = new Map<number, number>()
+				const rowCount = this.rows.length
 
 				for (const { row, col, input } of op.cells) {
 					const key = cellKey(row, col)
@@ -176,10 +199,14 @@ export class CsvDocument {
 						before.set(key, this.rows[row]?.[col] ?? "")
 					}
 
+					if (!rowWidths.has(row)) {
+						rowWidths.set(row, this.rows[row]?.length ?? 0)
+					}
+
 					this.write(row, col, input)
 				}
 
-				return { type: "cells", before }
+				return { type: "cells", before, rowCount, rowWidths }
 			}
 			case "insert":
 			case "delete": {

@@ -356,7 +356,7 @@ function handleEvent(ctx: RemoteChangeContext, event: PreviewReconcileEvent): vo
 }
 
 // The upload behind the hook's saveMineAsNewFile; null when there was nothing to write or the upload
-// failed (the failure already told). Module scope: the React Compiler cannot lower an await inside a
+// failed (either already told). Module scope: the React Compiler cannot lower an await inside a
 // conditional expression, and would skip the whole hook. `bytes`: a copy of what was uploaded (the upload
 // hands its buffer to the SDK worker), kept only where the preview goes on to show the new file.
 async function writeAsNewFile(
@@ -368,7 +368,10 @@ async function writeAsNewFile(
 	const edits = await readEdits()
 	const base = asDirectoryOrFile(item)
 
+	// Not offered without a save source; never silent if it gets here anyway.
 	if (edits === null || base.type !== "file") {
+		toast.error(t("previewSaveAsNewFileFailed"))
+
 		return null
 	}
 

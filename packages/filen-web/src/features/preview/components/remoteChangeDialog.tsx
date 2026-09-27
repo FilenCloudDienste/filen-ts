@@ -26,7 +26,8 @@ interface RemoteChangeDialogProps {
 	pending: boolean
 	onKeepMine: () => void
 	onLoadTheirs: () => void
-	onSaveMineAsNew: () => void
+	// Omitted where the edits have no save source (a read-only viewer): the dialog says why instead.
+	onSaveMineAsNew?: (() => void) | undefined
 	onDiscardMine?: (() => void) | undefined
 }
 
@@ -34,7 +35,8 @@ interface RemoteChangeDialogProps {
 // and notes. A newer version was saved: keep mine, load theirs, or save mine as a copy, after an optional
 // side-by-side comparison; Keep mine is the default and what Escape means, as it loses nothing. It was
 // deleted: save mine as a new file, the default, or discard; Escape does nothing there, as both answers
-// matter. Mount it keyed by what it asks about, so a new question starts outside the comparison.
+// matter; without a save, keeping the edits on screen replaces it as the default. Mount it keyed by what
+// it asks about, so a new question starts outside the comparison.
 export function RemoteChangeDialog({
 	kind,
 	title,
@@ -79,6 +81,9 @@ export function RemoteChangeDialog({
 					<AlertDialogTitle>{title}</AlertDialogTitle>
 					{/* A file name is one long word as far as line breaking goes. */}
 					<AlertDialogDescription className="wrap-anywhere">{body}</AlertDialogDescription>
+					{onSaveMineAsNew === undefined ? (
+						<AlertDialogDescription>{t("previewRemoteSaveUnavailable")}</AlertDialogDescription>
+					) : null}
 				</AlertDialogHeader>
 				{comparing !== null && renderCompare !== undefined ? renderCompare(comparing) : null}
 				{/* Wraps rather than overflowing the card when the labels run long (translations). */}
@@ -109,25 +114,36 @@ export function RemoteChangeDialog({
 							>
 								{t("previewRemoteDiscardMine")}
 							</Button>
-							<Button
-								autoFocus
-								disabled={pending}
-								onClick={onSaveMineAsNew}
-							>
-								{pending ? <Spinner data-icon="inline-start" /> : null}
-								{t("previewRemoteSaveAsNew")}
-							</Button>
+							{onSaveMineAsNew === undefined ? (
+								<Button
+									autoFocus
+									onClick={onKeepMine}
+								>
+									{t("previewRemoteKeepOpen")}
+								</Button>
+							) : (
+								<Button
+									autoFocus
+									disabled={pending}
+									onClick={onSaveMineAsNew}
+								>
+									{pending ? <Spinner data-icon="inline-start" /> : null}
+									{t("previewRemoteSaveAsNew")}
+								</Button>
+							)}
 						</>
 					) : (
 						<>
-							<Button
-								variant="outline"
-								disabled={pending}
-								onClick={onSaveMineAsNew}
-							>
-								{pending ? <Spinner data-icon="inline-start" /> : null}
-								{t("previewRemoteSaveCopy")}
-							</Button>
+							{onSaveMineAsNew === undefined ? null : (
+								<Button
+									variant="outline"
+									disabled={pending}
+									onClick={onSaveMineAsNew}
+								>
+									{pending ? <Spinner data-icon="inline-start" /> : null}
+									{t("previewRemoteSaveCopy")}
+								</Button>
+							)}
 							<Button
 								variant="outline"
 								disabled={pending}

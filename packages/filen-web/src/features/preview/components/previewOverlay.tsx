@@ -18,7 +18,7 @@ import { XIcon, ChevronLeftIcon, ChevronRightIcon, DownloadIcon, SaveIcon, MoreH
 import { toast } from "sonner"
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
-import { previewCategoryForName, previewType } from "@/features/drive/lib/preview.logic"
+import { extensionOf, previewCategoryForName, previewType, type PreviewCategory } from "@/features/drive/lib/preview.logic"
 import { startDownloads } from "@/features/drive/lib/download"
 import { isEditable, isTextCategory, isUnresolvableParentError, runPreviewSave } from "@/features/drive/lib/previewSave.logic"
 import { currentRootUuid, renameItem, trashItems, deleteItemsPermanently } from "@/features/drive/lib/actions"
@@ -232,6 +232,8 @@ export function PreviewOverlay({
 	const [documentKeys, setDocumentKeys] = useState<ReadonlyMap<string, string>>(() => new Map<string, string>())
 	const documentKeysRef = useRef(documentKeys)
 	const documentGeneration = useRef(0)
+	// Per document key, the slot's pinned renderer and save format (slotPin).
+	const [pins, setPins] = useState<ReadonlyMap<string, SlotPin>>(() => new Map<string, SlotPin>())
 	// Single-slot (unlike `saved` above): keyed to the CURRENT pager slot only, so navigating away and
 	// back can forget an earlier slot's lock (accepted — the guarded failure re-asserts on the next
 	// failed save). Mirrors mobile parity's "a failed save locks the file read-only" rule; cleared by a
@@ -280,13 +282,26 @@ export function PreviewOverlay({
 			: rawSource.type === "external"
 				? rawSource
 				: { type: "drive", item: driveItem ?? rawSource.item }
+	const currentDocumentKey = rawDriveItem === undefined ? "" : (documentKeys.get(rawDriveItem.data.uuid) ?? rawDriveItem.data.uuid)
+	// The drive slot's renderer and save format, as it opened: a rename never swaps the viewer (and with it
+	// the unsaved edits) out from under the user. Taken again only for a new document (see documentKeys).
+	const derivedPin = driveItem === undefined ? null : slotPin(driveItem)
+	const pin = derivedPin === null ? null : (pins.get(currentDocumentKey) ?? derivedPin)
+
+	if (derivedPin !== null && !pins.has(currentDocumentKey)) {
+		setPins(new Map(pins).set(currentDocumentKey, derivedPin))
+	}
+
 	// Editable is intrinsically drive-only: the external arm never carries an editable buffer. Compared
 	// against the FROZEN pre-save uuid (rawDriveItem), never the possibly-rotated override's uuid — see
-	// `saved`'s own comment on why that's the stable key.
+	// `saved`'s own comment on why that's the stable key. A rename to another format leaves the open
+	// viewer read-only: what it holds would be saved under a name that says otherwise.
 	const editable =
 		rawDriveItem !== undefined &&
 		driveItem !== undefined &&
+		pin !== null &&
 		isEditable(driveItem, variant) &&
+		saveFormat(driveItem) === pin.format &&
 		lockedReadOnly?.forUuid !== rawDriveItem.data.uuid
 
 	// `ownSave`: `item` is what this overlay's own save of the slot made.
@@ -617,8 +632,7 @@ export function PreviewOverlay({
 	// overlay still mounted, so neither the unmount cleanup nor the vanished-slot effect above runs, and a
 	// neighbour that mounts no editor at all (an image, a PDF, a rendered markdown) would strand the flag
 	// on a buffer that no longer exists — a prompt about nothing, an armed route block and beforeunload.
-	const currentDocumentKey = rawDriveItem === undefined ? "" : (documentKeys.get(rawDriveItem.data.uuid) ?? rawDriveItem.data.uuid)
-	const slotKey = currentSource === undefined ? null : bodyKey(currentSource, currentDocumentKey)
+	const slotKey = currentSource === undefined ? null : bodyKey(currentSource, currentDocumentKey, pin)
 
 	useEffect(() => {
 		setPreviewDirty(false)
@@ -1115,6 +1129,7 @@ export function PreviewOverlay({
 							<PreviewDownloadableProvider downloadable={downloadable}>
 								<PreviewBody
 									source={currentSource}
+									category={pin?.category}
 									documentKey={currentDocumentKey}
 									editable={editable}
 									locked={saving}
@@ -1165,7 +1180,7 @@ export function PreviewOverlay({
 							title={t(remote.prompt.kind === "revised" ? "previewRemoteChangedTitle" : "previewRemoteDeletedTitle")}
 							body={t(remote.prompt.kind === "revised" ? "previewRemoteChangedBody" : "previewRemoteDeletedBody", { name })}
 							renderCompare={
-								remoteTheirs !== undefined && isEditable(driveItem, variant) && isTextCategory(previewType(driveItem))
+								remoteTheirs !== undefined && editable && isTextCategory(pin.category)
 									? mine => (
 											<Suspense fallback={<LoadingState size="lg" />}>
 												<RemoteFileCompare
@@ -1181,9 +1196,14 @@ export function PreviewOverlay({
 							pending={remote.pending}
 							onKeepMine={remote.keepMine}
 							onLoadTheirs={remote.loadTheirs}
-							onSaveMineAsNew={() => {
-								void remote.saveMineAsNewFile()
-							}}
+							// Without a save source (a read-only viewer) there is nothing to write: not offered.
+							onSaveMineAsNew={
+								editable
+									? () => {
+											void remote.saveMineAsNewFile()
+										}
+									: undefined
+							}
 							onDiscardMine={remote.discardMine}
 						/>
 					) : null}
@@ -1214,15 +1234,39 @@ function PreviewName({ name }: { name: string }) {
 	)
 }
 
+// What a drive slot renders with, and the format its edits are saved in: fixed when the slot opens.
+interface SlotPin {
+	category: PreviewCategory
+	format: string
+}
+
+// The format edits are written in: text for every text category, the extension for a spreadsheet (its
+// writer follows the extension it opened with).
+function saveFormat(item: DriveItem): string {
+	const category = previewType(item)
+
+	if (isTextCategory(category)) {
+		return "text"
+	}
+
+	return category === "spreadsheet" ? `spreadsheet:${extensionOf(driveItemName(item))}` : ""
+}
+
+function slotPin(item: DriveItem): SlotPin {
+	return { category: previewType(item), format: saveFormat(item) }
+}
+
 // What remounts the body. A spreadsheet follows its document (see documentKeys), so the user's own save
 // keeps the grid; every other viewer follows the version shown, and a saved text file reopens on what was
-// uploaded.
-function bodyKey(source: PreviewSource, documentKey: string): string {
-	return source.type === "drive" && previewType(source.item) === "spreadsheet" ? `spreadsheet:${documentKey}` : previewSourceKey(source)
+// uploaded. By the pinned renderer, so a rename never remounts.
+function bodyKey(source: PreviewSource, documentKey: string, pin: SlotPin | null): string {
+	return pin?.category === "spreadsheet" ? `spreadsheet:${documentKey}` : previewSourceKey(source)
 }
 
 interface PreviewBodyProps {
 	source: PreviewSource
+	// The drive slot's pinned renderer (SlotPin).
+	category: PreviewCategory | undefined
 	documentKey: string
 	editable: boolean
 	// A save in flight: text editors go read-only until it settles.
@@ -1279,7 +1323,16 @@ function ExternalPreviewBody({ url, name }: { url: string; name: string }) {
 //
 // A missing category arm cannot ship as a silently blank overlay: the `default` arm at the bottom of
 // the switch is the guard (a return-type annotation is not — `ReactNode` includes `undefined`).
-function PreviewBody({ source, documentKey, editable, locked, onDirtyChange, contentRef, spreadsheetRef }: PreviewBodyProps): ReactNode {
+function PreviewBody({
+	source,
+	category: pinnedCategory,
+	documentKey,
+	editable,
+	locked,
+	onDirtyChange,
+	contentRef,
+	spreadsheetRef
+}: PreviewBodyProps): ReactNode {
 	const { t } = useTranslation("preview")
 
 	if (source.type === "external") {
@@ -1304,10 +1357,11 @@ function PreviewBody({ source, documentKey, editable, locked, onDirtyChange, con
 	}
 
 	const alt = driveItemName(base)
+	// The pinned renderer (SlotPin) where the overlay has one.
 	// Stored once (rather than switching on the previewType(item) call directly) so the "video"/"audio"
 	// case below can pass it straight through as MediaViewer's own narrower category prop without a
 	// second, redundant resolution — a raw switch on the call expression doesn't narrow across cases.
-	const category = previewType(item)
+	const category = pinnedCategory ?? previewType(item)
 
 	switch (category) {
 		case "image":

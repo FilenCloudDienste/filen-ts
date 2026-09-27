@@ -4,7 +4,7 @@ import type { CellStyleView, HorizontalAlign, VerticalAlign } from "@/features/s
 
 // Excel's legacy indexed palette, the first 64 entries (0-7 repeat 8-15); newer files use rgb or theme
 // colours, older ones still index into this.
-const INDEXED_COLORS = [
+export const INDEXED_COLORS = [
 	"000000",
 	"FFFFFF",
 	"FF0000",

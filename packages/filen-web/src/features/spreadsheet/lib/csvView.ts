@@ -44,6 +44,39 @@ function hasWin1252UndefinedByte(bytes: Uint8Array): boolean {
 	return false
 }
 
+// Excel's default CSV encoding in CJK and Cyrillic locales (GBK, EUC-KR, windows-1251, Shift-JIS) leaves
+// none of the bytes above undefined, so it passes hasWin1252UndefinedByte and must be told apart another
+// way. Real Western windows-1252 text keeps its non-ASCII letters mostly isolated inside ASCII words
+// ("Größe", "café"): a short run of high bytes and a low overall share of them. Those other encodings
+// decode as long runs of consecutive high bytes and a high overall share, since most or all of every
+// multi-byte character's bytes are >=0x80. The ratio check is skipped on very short bodies, where a single
+// accented word can cross it by chance; the run check has no such floor, since it takes 3 in a row.
+const HIGH_BYTE_RUN_LIMIT = 3
+const HIGH_BYTE_RATIO_LIMIT = 0.3
+const HIGH_BYTE_RATIO_MIN_LENGTH = 16
+
+function looksWesternWindows1252(bytes: Uint8Array): boolean {
+	let high = 0
+	let run = 0
+	let maxRun = 0
+
+	for (const byte of bytes) {
+		if (byte >= 0x80) {
+			high++
+			run++
+			maxRun = maxRun < run ? run : maxRun
+		} else {
+			run = 0
+		}
+	}
+
+	if (maxRun >= HIGH_BYTE_RUN_LIMIT) {
+		return false
+	}
+
+	return bytes.length < HIGH_BYTE_RATIO_MIN_LENGTH || high / bytes.length <= HIGH_BYTE_RATIO_LIMIT
+}
+
 export function decodeCsv(bytes: Uint8Array): { text: string; bom: boolean; encoding: CsvFormat["encoding"]; writable: boolean } {
 	// Excel's "Save as Unicode Text" writes UTF-16LE with a BOM; decoded as UTF-8 it would come back as
 	// NUL-interleaved garbage rather than throwing, so it must be checked before the UTF-8 BOM/fallback below.
@@ -65,7 +98,7 @@ export function decodeCsv(bytes: Uint8Array): { text: string; bom: boolean; enco
 			text: new TextDecoder("windows-1252").decode(body),
 			bom,
 			encoding: "windows-1252",
-			writable: !hasWin1252UndefinedByte(body)
+			writable: !hasWin1252UndefinedByte(body) && looksWesternWindows1252(body)
 		}
 	}
 }

@@ -91,7 +91,9 @@ export class FormulaEngine {
 
 		this.engine = HyperFormula.buildFromSheets(contents, {
 			licenseKey: LICENSE_KEY,
-			useArrayArithmetic: true,
+			// Ordinary formulas as Excel calculates them: a range where one value is expected meets the
+			// formula's row or column. Array-evaluating calls are marked with ARRAYFORMULA (formulaRefs.ts).
+			useArrayArithmetic: false,
 			maxRows: 1_048_576,
 			maxColumns: 16_384,
 			// Excel's serial dates (1900-02-29 included), whitespace and empty-cell arithmetic.
@@ -256,6 +258,24 @@ export class FormulaEngine {
 	// read, an array it spills where Excel does not): the file's own result is kept.
 	static unsupported(value: unknown): boolean {
 		return value === "#NAME?" || value === PARSE_ERROR || value === "#SPILL!" || value === CYCLE
+	}
+
+	// Whether the engine can insert or delete these rows or columns (it cannot move a spilled array onto
+	// cells it would cover, nor grow a sheet past its size).
+	canMove(sheet: number, edit: { type: "insert" | "delete"; axis: "rows" | "cols"; at: number; count: number }): boolean {
+		const id = this.sheetIds[sheet]
+
+		if (id === undefined) {
+			return true
+		}
+
+		const span: [number, number] = [edit.at, edit.count]
+
+		if (edit.type === "insert") {
+			return edit.axis === "rows" ? this.engine.isItPossibleToAddRows(id, span) : this.engine.isItPossibleToAddColumns(id, span)
+		}
+
+		return edit.axis === "rows" ? this.engine.isItPossibleToRemoveRows(id, span) : this.engine.isItPossibleToRemoveColumns(id, span)
 	}
 
 	insert(sheet: number, axis: "rows" | "cols", at: number, count: number): RecalculatedCell[] {

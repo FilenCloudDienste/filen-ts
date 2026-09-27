@@ -1,0 +1,609 @@
+diff --git a/dist/_types.d.mts b/dist/_types.d.mts
+index 0106cd5a6d4550a57f4669754d72accd7c946bce..36e67b6e1f601fb32b6c43b2b2970ab0d7b91ad6 100644
+--- a/dist/_types.d.mts
++++ b/dist/_types.d.mts
+@@ -26,7 +26,8 @@ export interface FontStyle {
+ export type FillPattern = "none" | "solid" | "darkDown" | "darkGray" | "darkGrid" | "darkHorizontal" | "darkTrellis" | "darkUp" | "darkVertical" | "gray0625" | "gray125" | "lightDown" | "lightGray" | "lightGrid" | "lightHorizontal" | "lightTrellis" | "lightUp" | "lightVertical" | "mediumGray";
+ export interface PatternFill {
+ 	type: "pattern";
+-	pattern: FillPattern;
++	/** Absent only in a differential format read from a file, where it means solid. */
++	pattern?: FillPattern;
+ 	fgColor?: Color;
+ 	bgColor?: Color;
+ }
+@@ -192,6 +193,8 @@ export interface DataValidation {
+ 	/** List values (for type: "list") */
+ 	values?: string[];
+ 	allowBlank?: boolean;
++	/** Hides the in-cell drop-down of a list (`<dataValidation showDropDown>`, named backwards in the file format). */
++	showDropDown?: boolean;
+ 	showInputMessage?: boolean;
+ 	showErrorMessage?: boolean;
+ 	inputTitle?: string;
+@@ -202,11 +205,21 @@ export interface DataValidation {
+ 	/** Cell range (e.g. "A1:A100") */
+ 	range: string;
+ }
+-export type ConditionalRuleType = "cellIs" | "expression" | "colorScale" | "dataBar" | "iconSet" | "top10" | "aboveAverage" | "duplicateValues" | "uniqueValues" | "containsText" | "notContainsText" | "beginsWith" | "endsWith" | "containsBlanks" | "notContainsBlanks";
++export type ConditionalRuleType = "cellIs" | "expression" | "colorScale" | "dataBar" | "iconSet" | "top10" | "aboveAverage" | "duplicateValues" | "uniqueValues" | "containsText" | "notContainsText" | "beginsWith" | "endsWith" | "containsBlanks" | "notContainsBlanks" | "timePeriod" | "containsErrors" | "notContainsErrors";
+ export interface ConditionalRule {
+ 	type: ConditionalRuleType;
+ 	priority: number;
+-	operator?: ValidationOperator;
++	operator?: ValidationOperator | "containsText" | "notContains" | "beginsWith" | "endsWith";
++	/** top10: how many (or what percent, with `percent`) of the top, or of the bottom with `bottom`. */
++	rank?: number;
++	percent?: boolean;
++	bottom?: boolean;
++	/** aboveAverage: below the average when false; `equalAverage` counts the average itself; `stdDev` standard deviations off it. */
++	aboveAverage?: boolean;
++	equalAverage?: boolean;
++	stdDev?: number;
++	/** timePeriod: which one ("today", "lastWeek", …). */
++	timePeriod?: string;
+ 	formula?: string | string[];
+ 	style?: CellStyle;
+ 	stopIfTrue?: boolean;
+@@ -270,6 +283,8 @@ export interface NamedRange {
+ 	/** Scope: undefined = workbook level, string = sheet name */
+ 	scope?: string;
+ 	comment?: string;
++	/** Hidden from the name manager (`<definedName hidden>`), as Excel's own `_xlnm._FilterDatabase` is. */
++	hidden?: boolean;
+ }
+ /**
+ * A paper size, either by name or by its raw OOXML `paperSize` code.
+@@ -593,6 +608,8 @@ export interface RowDef {
+ 	outlineLevel?: number;
+ 	/** Whether this outline group is collapsed */
+ 	collapsed?: boolean;
++	/** The row's own format (`<row s customFormat>`), for its cells without one */
++	style?: CellStyle;
+ }
+ /**
+ * What kind of sheet a tab holds.
+@@ -655,6 +672,8 @@ export interface Sheet {
+ 	* Excel picks its own from the default font.
+ 	*/
+ 	defaultColWidth?: number;
++	/** Whether `defaultRowHeight` is set by hand (`<sheetFormatPr customHeight>`); defaults to whether it is set at all. */
++	defaultRowHeightCustom?: boolean;
+ 	merges?: MergeRange[];
+ 	dataValidations?: DataValidation[];
+ 	conditionalRules?: ConditionalRule[];
+@@ -1366,6 +1385,8 @@ export interface WriteSheet {
+ 	* Excel picks its own from the default font.
+ 	*/
+ 	defaultColWidth?: number;
++	/** Whether `defaultRowHeight` is set by hand (`<sheetFormatPr customHeight>`); defaults to whether it is set at all. */
++	defaultRowHeightCustom?: boolean;
+ 	/**
+ 	* Merged ranges, as coordinates or as A1 strings — `"A1:C1"` and
+ 	* `{ startRow: 0, startCol: 0, endRow: 0, endCol: 2 }` mean the same
+diff --git a/dist/xlsx/comments-reader.mjs b/dist/xlsx/comments-reader.mjs
+index 5789f148386d398652231118fa623d7ed647419b..06b9a28e054b1124c9a2139f98fe26b1247c3d6c 100644
+--- a/dist/xlsx/comments-reader.mjs
++++ b/dist/xlsx/comments-reader.mjs
+@@ -1,107 +1,36 @@
+-import { parseSax } from "../xml/parser.mjs";
++import { parseXml } from "../xml/parser.mjs";
++import { parseSiElement } from "./shared-strings.mjs";
+ 
++// A note's text keeps its runs (their fonts), as a shared string's do.
+ export function parseComments(xml) {
+ 	const comments = new Map();
+ 	const authors = [];
+-	
+-	let inAuthors = false;
+-	let inAuthor = false;
+-	let inCommentList = false;
+-	let inComment = false;
+-	let inText = false;
+-	let _inR = false;
+-	let inT = false;
+-	let authorText = "";
+-	let currentRef = "";
+-	let currentAuthorId = -1;
+-	let currentText = "";
+-	parseSax(xml, {
+-		onOpenTag(tag, attrs) {
+-			const local = tag.includes(":") ? tag.slice(tag.indexOf(":") + 1) : tag;
+-			switch (local) {
+-				case "authors":
+-					inAuthors = true;
+-					break;
+-				case "author":
+-					if (inAuthors) {
+-						inAuthor = true;
+-						authorText = "";
+-					}
+-					break;
+-				case "commentList":
+-					inCommentList = true;
+-					break;
+-				case "comment":
+-					if (inCommentList) {
+-						inComment = true;
+-						currentRef = attrs["ref"] ?? "";
+-						currentAuthorId = attrs["authorId"] ? Number(attrs["authorId"]) : -1;
+-						currentText = "";
+-					}
+-					break;
+-				case "text":
+-					if (inComment) {
+-						inText = true;
+-					}
+-					break;
+-				case "r":
+-					if (inText) {
+-						_inR = true;
+-					}
+-					break;
+-				case "t":
+-					if (inText) {
+-						inT = true;
+-					}
+-					break;
++	const doc = parseXml(xml);
++	for (const section of doc.children) {
++		if (typeof section === "string") continue;
++		const sectionName = section.local || section.tag;
++		if (sectionName === "authors") {
++			for (const author of section.children) {
++				if (typeof author === "string") continue;
++				authors.push(author.children.filter((c) => typeof c === "string").join("") || author.text || "");
+ 			}
+-		},
+-		onText(text) {
+-			if (inAuthor) {
+-				authorText += text;
+-			} else if (inT) {
+-				currentText += text;
+-			}
+-		},
+-		onCloseTag(tag) {
+-			const local = tag.includes(":") ? tag.slice(tag.indexOf(":") + 1) : tag;
+-			switch (local) {
+-				case "authors":
+-					inAuthors = false;
+-					break;
+-				case "author":
+-					if (inAuthor) {
+-						authors.push(authorText);
+-						inAuthor = false;
+-					}
+-					break;
+-				case "commentList":
+-					inCommentList = false;
+-					break;
+-				case "comment":
+-					if (inComment && currentRef) {
+-						const comment = { text: currentText };
+-						if (currentAuthorId >= 0 && currentAuthorId < authors.length) {
+-							const authorName = authors[currentAuthorId];
+-							if (authorName) {
+-								comment.author = authorName;
+-							}
+-						}
+-						comments.set(currentRef, comment);
+-						inComment = false;
+-					}
+-					break;
+-				case "text":
+-					inText = false;
+-					break;
+-				case "r":
+-					_inR = false;
+-					break;
+-				case "t":
+-					inT = false;
+-					break;
++		} else if (sectionName === "commentList") {
++			for (const commentEl of section.children) {
++				if (typeof commentEl === "string") continue;
++				if ((commentEl.local || commentEl.tag) !== "comment") continue;
++				const ref = commentEl.attrs["ref"] ?? "";
++				if (!ref) continue;
++				const textEl = commentEl.children.find((c) => typeof c !== "string" && (c.local || c.tag) === "text");
++				const parsed = textEl ? parseSiElement(textEl) : { text: "" };
++				const comment = { text: parsed.text };
++				if (parsed.richText && parsed.richText.some((run) => run.font)) comment.richText = parsed.richText;
++				const authorId = commentEl.attrs["authorId"] ? Number(commentEl.attrs["authorId"]) : -1;
++				if (authorId >= 0 && authorId < authors.length && authors[authorId]) {
++					comment.author = authors[authorId];
++				}
++				comments.set(ref, comment);
+ 			}
+ 		}
+-	});
++	}
+ 	return comments;
+ }
+diff --git a/dist/xlsx/comments-writer.mjs b/dist/xlsx/comments-writer.mjs
+index 75efd21a32cc639a4f5e1c47358b2c309808be07..b531d7bfea2d75736e0a79510ba4632f0a82c3e4 100644
+--- a/dist/xlsx/comments-writer.mjs
++++ b/dist/xlsx/comments-writer.mjs
+@@ -1,5 +1,5 @@
+ import { xmlDocument, xmlElement, xmlEscape } from "../xml/writer.mjs";
+-import { cellRef } from "./worksheet-writer.mjs";
++import { cellRef, serializeRichTextRuns } from "./worksheet-writer.mjs";
+ 
+ const NS_SPREADSHEET = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+ 
+@@ -20,7 +20,8 @@ export function writeComments(cells, sheetIndex) {
+ 			row,
+ 			col,
+ 			author,
+-			text
++			text,
++			richText: cell.comment.richText
+ 		});
+ 	}
+ 	if (commentEntries.length === 0) return null;
+@@ -55,7 +56,8 @@ function buildCommentsXml(entries, authorMap) {
+ 	const commentElements = [];
+ 	for (const entry of entries) {
+ 		const authorId = authorMap.get(entry.author) ?? 0;
+-		const textXml = xmlElement("text", undefined, [xmlElement("r", undefined, [xmlElement("t", undefined, xmlEscape(entry.text))])]);
++		const runs = entry.richText && entry.richText.length > 0 ? serializeRichTextRuns(entry.richText) : [xmlElement("r", undefined, [xmlElement("t", undefined, xmlEscape(entry.text))])];
++		const textXml = xmlElement("text", undefined, runs);
+ 		commentElements.push(xmlElement("comment", {
+ 			ref: entry.ref,
+ 			authorId
+diff --git a/dist/xlsx/derived-ranges.mjs b/dist/xlsx/derived-ranges.mjs
+index 5892e7a16a80149177b56fe77ad32b273d86110b..a1a261013005797fa89f7c7c043a7c9bf4d5a1c0 100644
+--- a/dist/xlsx/derived-ranges.mjs
++++ b/dist/xlsx/derived-ranges.mjs
+@@ -1,5 +1,11 @@
+ import { colToLetter } from "./worksheet-writer.mjs";
+ 
++// A sheet name as a formula names it: quoted unless it is a plain name that reads as nothing else.
++function sheetRef(name) {
++	const plain = /^[A-Za-z_\u00A1-\uFFFF][A-Za-z0-9_.\u00A1-\uFFFF]*$/.test(name) && !/^[A-Za-z]{1,3}\d+$/.test(name) && !/^R\d*C\d*$/i.test(name) && !/^(TRUE|FALSE)$/i.test(name);
++	return plain ? name : `'${name.replace(/'/g, "''")}'`;
++}
++
+ export function buildNamedRanges(sheets, userRanges) {
+ 	const result = userRanges ? [...userRanges] : [];
+ 	for (const sheet of sheets) {
+@@ -9,17 +15,17 @@ export function buildNamedRanges(sheets, userRanges) {
+ 		if (ps.printArea) {
+ 			result.push({
+ 				name: "_xlnm.Print_Area",
+-				range: `${sheet.name}!${ps.printArea}`,
++				range: `${sheetRef(sheet.name)}!${ps.printArea}`,
+ 				scope: sheet.name
+ 			});
+ 		}
+ 		
+ 		const titleParts = [];
+ 		if (ps.printTitlesRow) {
+-			titleParts.push(`${sheet.name}!${ps.printTitlesRow}`);
++			titleParts.push(`${sheetRef(sheet.name)}!${ps.printTitlesRow}`);
+ 		}
+ 		if (ps.printTitlesColumn) {
+-			titleParts.push(`${sheet.name}!${ps.printTitlesColumn}`);
++			titleParts.push(`${sheetRef(sheet.name)}!${ps.printTitlesColumn}`);
+ 		}
+ 		if (titleParts.length > 0) {
+ 			result.push({
+diff --git a/dist/xlsx/reader.mjs b/dist/xlsx/reader.mjs
+index 8d11fc8828e051c0560e66f792c7d04ca3e302cf..4395ffebbee38ba9a8d1ba63d1b7f99b77395666 100644
+--- a/dist/xlsx/reader.mjs
++++ b/dist/xlsx/reader.mjs
+@@ -1280,6 +1280,9 @@ function parseWorkbookXml(xml, options) {
+ 						if (dnChild.attrs["comment"]) {
+ 							nr.comment = dnChild.attrs["comment"];
+ 						}
++						if (dnChild.attrs["hidden"] === "1" || dnChild.attrs["hidden"] === "true") {
++							nr.hidden = true;
++						}
+ 						namedRanges.push(nr);
+ 					}
+ 				}
+diff --git a/dist/xlsx/roundtrip.mjs b/dist/xlsx/roundtrip.mjs
+index ad31ffaa4777b8ad9bbccfe450718b0df7eac412..80ff2828b071d8f38c2c186601a088c44cc154d4 100644
+--- a/dist/xlsx/roundtrip.mjs
++++ b/dist/xlsx/roundtrip.mjs
+@@ -135,6 +135,9 @@ export async function saveXlsx(workbook, saveOptions) {
+ 		veryHidden: sheet.veryHidden,
+ 		tables: sheet.tables,
+ 		rowDefs: sheet.rowDefs,
++		defaultRowHeight: sheet.defaultRowHeight,
++		defaultRowHeightCustom: sheet.defaultRowHeightCustom,
++		defaultColWidth: sheet.defaultColWidth,
+ 		
+ 		
+ 		
+diff --git a/dist/xlsx/shared-strings.mjs b/dist/xlsx/shared-strings.mjs
+index a6787f3e88ae3feee22cd9e8c0d2be8cccbdf77b..680149f693c82d5508c629cf8bdc74515f7c3adc 100644
+--- a/dist/xlsx/shared-strings.mjs
++++ b/dist/xlsx/shared-strings.mjs
+@@ -13,7 +13,7 @@ export function parseSharedStrings(xml) {
+ 	return strings;
+ }
+ 
+-function parseSiElement(si) {
++export function parseSiElement(si) {
+ 	
+ 	const rElements = [];
+ 	let simpleText = null;
+diff --git a/dist/xlsx/styles.mjs b/dist/xlsx/styles.mjs
+index a9fe34e10b85d0344c473fa36ea1ee042bc9816c..d77249f7e1135769712e172782f236f45b910322 100644
+--- a/dist/xlsx/styles.mjs
++++ b/dist/xlsx/styles.mjs
+@@ -228,12 +228,12 @@ function parseFills(el, fills) {
+ 		}
+ 	}
+ }
+-function parseFill(el) {
++function parseFill(el, differential) {
+ 	for (const child of el.children) {
+ 		if (typeof child === "string") continue;
+ 		const local = child.local || child.tag;
+ 		if (local === "patternFill") {
+-			return parsePatternFill(child);
++			return parsePatternFill(child, differential);
+ 		}
+ 		if (local === "gradientFill") {
+ 			return parseGradientFill(child);
+@@ -245,12 +245,11 @@ function parseFill(el) {
+ 		pattern: "none"
+ 	};
+ }
+-function parsePatternFill(el) {
+-	const pattern = el.attrs["patternType"] ?? "none";
+-	const result = {
+-		type: "pattern",
+-		pattern
+-	};
++function parsePatternFill(el, differential) {
++	// In a differential format (conditional formatting) an absent patternType means solid, and stays absent.
++	const pattern = el.attrs["patternType"] ?? (differential ? undefined : "none");
++	const result = { type: "pattern" };
++	if (pattern !== undefined) result.pattern = pattern;
+ 	for (const child of el.children) {
+ 		if (typeof child === "string") continue;
+ 		const local = child.local || child.tag;
+@@ -430,7 +429,7 @@ function parseDxf(el) {
+ 				break;
+ 			}
+ 			case "fill":
+-				style.fill = parseFill(child);
++				style.fill = parseFill(child, true);
+ 				break;
+ 			case "border":
+ 				style.border = parseBorder(child);
+diff --git a/dist/xlsx/workbook-writer.mjs b/dist/xlsx/workbook-writer.mjs
+index 8852c8d7b0b94c0c1dfa0cf927a05c7df33d89c4..7baf9717872055a0ad4edc22de8d75e75e349c8c 100644
+--- a/dist/xlsx/workbook-writer.mjs
++++ b/dist/xlsx/workbook-writer.mjs
+@@ -86,6 +86,9 @@ export function writeWorkbookXml(sheets, namedRanges, dateSystem, activeSheet, w
+ 			if (nr.comment) {
+ 				attrs["comment"] = nr.comment;
+ 			}
++			if (nr.hidden) {
++				attrs["hidden"] = 1;
++			}
+ 			dnElements.push(xmlElement("definedName", attrs, xmlEscape(nr.range)));
+ 		}
+ 		parts.push(xmlElement("definedNames", undefined, dnElements));
+diff --git a/dist/xlsx/worksheet-writer.mjs b/dist/xlsx/worksheet-writer.mjs
+index 2b9ee5c2b80b989625934e8d57272c7a268910c5..bda926760b5d07e5f9131d3955bb56c4a95f37c1 100644
+--- a/dist/xlsx/worksheet-writer.mjs
++++ b/dist/xlsx/worksheet-writer.mjs
+@@ -32,8 +32,12 @@ export function colToLetter(col) {
+ }
+ 
+ 
+-export function rowAttributes(rowIndex, rowDef) {
++export function rowAttributes(rowIndex, rowDef, styles) {
+ 	const attrs = { r: rowIndex + 1 };
++	if (rowDef?.style && styles) {
++		attrs["s"] = styles.addStyle(rowDef.style);
++		attrs["customFormat"] = 1;
++	}
+ 	if (rowDef?.height !== undefined) {
+ 		attrs["ht"] = rowDef.height;
+ 		attrs["customHeight"] = 1;
+@@ -45,7 +49,7 @@ export function rowAttributes(rowIndex, rowDef) {
+ }
+ 
+ export function hasRowAttributes(rowDef) {
+-	return rowDef !== undefined && (rowDef.height !== undefined || Boolean(rowDef.hidden) || Boolean(rowDef.outlineLevel) || Boolean(rowDef.collapsed));
++	return rowDef !== undefined && (rowDef.height !== undefined || Boolean(rowDef.hidden) || Boolean(rowDef.outlineLevel) || Boolean(rowDef.collapsed) || rowDef.style !== undefined);
+ }
+ export function cellRef(row, col) {
+ 	return colToLetter(col) + (row + 1);
+@@ -242,7 +246,7 @@ export function writeWorksheetXml(sheet, styles, sharedStrings, dateSystem, glob
+ 	
+ 	
+ 	const formatPrAttrs = { defaultRowHeight: sheet.defaultRowHeight ?? 15 };
+-	if (sheet.defaultRowHeight !== undefined) formatPrAttrs["customHeight"] = 1;
++	if (sheet.defaultRowHeightCustom ?? sheet.defaultRowHeight !== undefined) formatPrAttrs["customHeight"] = 1;
+ 	if (sheet.defaultColWidth !== undefined) formatPrAttrs["defaultColWidth"] = sheet.defaultColWidth;
+ 	parts.push(xmlSelfClose("sheetFormatPr", formatPrAttrs));
+ 	
+@@ -310,7 +314,7 @@ export function writeWorksheetXml(sheet, styles, sharedStrings, dateSystem, glob
+ 	for (let r = 0; r < rowCount; r++) {
+ 		const row = resolvedRows[r];
+ 		const rowDef = sheet.rowDefs?.get(r);
+-		const hasRowDef = rowDef && (rowDef.height !== undefined || rowDef.hidden || rowDef.outlineLevel || rowDef.collapsed);
++		const hasRowDef = rowDef && (rowDef.height !== undefined || rowDef.hidden || rowDef.outlineLevel || rowDef.collapsed || rowDef.style !== undefined);
+ 		if ((!row || row.length === 0) && !hasRowDef) continue;
+ 		const cellElements = [];
+ 		let hasAnyCells = false;
+@@ -337,7 +341,7 @@ export function writeWorksheetXml(sheet, styles, sharedStrings, dateSystem, glob
+ 			
+ 			
+ 			
+-			const rowAttrs = rowAttributes(r, rowDef);
++			const rowAttrs = rowAttributes(r, rowDef, styles);
+ 			if (hasAnyCells) {
+ 				rowElements.push(xmlElement("row", rowAttrs, cellElements));
+ 			} else {
+@@ -851,6 +855,9 @@ function serializeDataValidations(validations) {
+ 		if (dv.operator) {
+ 			attrs["operator"] = dv.operator;
+ 		}
++		if (dv.showDropDown) {
++			attrs["showDropDown"] = 1;
++		}
+ 		if (dv.allowBlank) {
+ 			attrs["allowBlank"] = 1;
+ 		}
+@@ -1052,13 +1059,11 @@ function serializePageSetup(ps) {
+ 	if (ps.scale !== undefined) {
+ 		attrs["scale"] = ps.scale;
+ 	}
+-	if (ps.fitToPage) {
+-		if (ps.fitToWidth !== undefined) {
+-			attrs["fitToWidth"] = ps.fitToWidth;
+-		}
+-		if (ps.fitToHeight !== undefined) {
+-			attrs["fitToHeight"] = ps.fitToHeight;
+-		}
++	if (ps.fitToWidth !== undefined) {
++		attrs["fitToWidth"] = ps.fitToWidth;
++	}
++	if (ps.fitToHeight !== undefined) {
++		attrs["fitToHeight"] = ps.fitToHeight;
+ 	}
+ 	
+ 	
+@@ -1148,7 +1153,7 @@ function serializeColorAttrs(color) {
+ }
+ 
+ 
+-function serializeRichTextRuns(runs) {
++export function serializeRichTextRuns(runs) {
+ 	const elements = [];
+ 	for (const run of runs) {
+ 		const runChildren = [];
+@@ -1246,6 +1251,13 @@ function serializeCfRule(rule, styles) {
+ 	if (rule.stopIfTrue) {
+ 		attrs["stopIfTrue"] = true;
+ 	}
++	if (rule.rank !== undefined) attrs["rank"] = rule.rank;
++	if (rule.percent) attrs["percent"] = 1;
++	if (rule.bottom) attrs["bottom"] = 1;
++	if (rule.aboveAverage === false) attrs["aboveAverage"] = 0;
++	if (rule.equalAverage) attrs["equalAverage"] = 1;
++	if (rule.stdDev !== undefined) attrs["stdDev"] = rule.stdDev;
++	if (rule.timePeriod !== undefined) attrs["timePeriod"] = rule.timePeriod;
+ 	
+ 	if (rule.text !== undefined) {
+ 		attrs["text"] = rule.text;
+diff --git a/dist/xlsx/worksheet.mjs b/dist/xlsx/worksheet.mjs
+index 2da07a93c6d60d1b9f2092a99edfd43446677dbb..8dfb55cc5320a9fd9532998b76d07230309425d7 100644
+--- a/dist/xlsx/worksheet.mjs
++++ b/dist/xlsx/worksheet.mjs
+@@ -147,6 +147,7 @@ function worksheetParser(name, ctx) {
+ 	
+ 	const columnDefs = [];
+ 	let defaultRowHeight;
++	let defaultRowHeightCustom;
+ 	let defaultColWidth;
+ 	let inCols = false;
+ 	
+@@ -267,14 +268,16 @@ function worksheetParser(name, ctx) {
+ 				case "sheetFormatPr": {
+ 					const dh = attrs["defaultRowHeight"];
+ 					const dw = attrs["defaultColWidth"];
++					const customHeight = attrs["customHeight"] === "1" || attrs["customHeight"] === "true";
+ 					
+ 					
+ 					
+ 					
+ 					if (dh !== undefined) {
+ 						const height = Number(dh);
+-						if (Number.isFinite(height) && height > 0 && height !== 15) {
++						if (Number.isFinite(height) && height > 0 && (height !== 15 || customHeight)) {
+ 							defaultRowHeight = height;
++							defaultRowHeightCustom = customHeight;
+ 						}
+ 					}
+ 					if (dw !== undefined) {
+@@ -332,6 +335,16 @@ function worksheetParser(name, ctx) {
+ 								rowDefs.set(rowNum, existing);
+ 							}
+ 						}
++						// A row's own format, applied to its empty cells: only where customFormat says so.
++						if ((attrs["customFormat"] === "1" || attrs["customFormat"] === "true") && attrs["s"] !== undefined && ctx.readStyles && ctx.styles) {
++							const rowNum = Number(attrs["r"]) - 1;
++							const styleIndex = Number(attrs["s"]);
++							if (!Number.isNaN(rowNum) && !Number.isNaN(styleIndex)) {
++								const existing = rowDefs.get(rowNum) ?? {};
++								existing.style = resolveStyle(ctx.styles, styleIndex);
++								rowDefs.set(rowNum, existing);
++							}
++						}
+ 					}
+ 					break;
+ 				case "c":
+@@ -1090,7 +1103,10 @@ function worksheetParser(name, ctx) {
+ 			sheet.cells = cells;
+ 		}
+ 		
+-		if (defaultRowHeight !== undefined) sheet.defaultRowHeight = defaultRowHeight;
++		if (defaultRowHeight !== undefined) {
++			sheet.defaultRowHeight = defaultRowHeight;
++			sheet.defaultRowHeightCustom = defaultRowHeightCustom;
++		}
+ 		if (defaultColWidth !== undefined) sheet.defaultColWidth = defaultColWidth;
+ 		if (columnDefs.some((c) => Object.keys(c).length > 0)) {
+ 			sheet.columns = columnDefs;
+@@ -1255,6 +1271,9 @@ function buildDataValidation(attrs, formula1Text, formula2Text) {
+ 		dv.operator = operatorStr;
+ 	}
+ 	
++	if (attrs["showDropDown"] === "1" || attrs["showDropDown"] === "true") {
++		dv.showDropDown = true;
++	}
+ 	if (attrs["allowBlank"] === "1" || attrs["allowBlank"] === "true") {
+ 		dv.allowBlank = true;
+ 	}
+@@ -1312,8 +1331,12 @@ const VALID_CF_TYPES = new Set([
+ 	"beginsWith",
+ 	"endsWith",
+ 	"containsBlanks",
+-	"notContainsBlanks"
++	"notContainsBlanks",
++	"timePeriod",
++	"containsErrors",
++	"notContainsErrors"
+ ]);
++const VALID_CF_OPERATORS = new Set([...VALID_OPERATORS, "containsText", "notContains", "beginsWith", "endsWith"]);
+ function buildConditionalRule(attrs, sqref, formulas, csCfvos, csColors, dbCfvos, dbColor, isCfvos, isAttrsObj, dxfs, ctx) {
+ 	const typeStr = attrs["type"];
+ 	if (!typeStr || !VALID_CF_TYPES.has(typeStr)) return null;
+@@ -1325,9 +1348,17 @@ function buildConditionalRule(attrs, sqref, formulas, csCfvos, csColors, dbCfvos
+ 	};
+ 	
+ 	const operatorStr = attrs["operator"];
+-	if (operatorStr && VALID_OPERATORS.has(operatorStr)) {
++	if (operatorStr && VALID_CF_OPERATORS.has(operatorStr)) {
+ 		rule.operator = operatorStr;
+ 	}
++	const flag = (name) => attrs[name] === "1" || attrs[name] === "true";
++	if (attrs["rank"] !== undefined) rule.rank = Number(attrs["rank"]);
++	if (flag("percent")) rule.percent = true;
++	if (flag("bottom")) rule.bottom = true;
++	if (attrs["aboveAverage"] !== undefined) rule.aboveAverage = flag("aboveAverage");
++	if (flag("equalAverage")) rule.equalAverage = true;
++	if (attrs["stdDev"] !== undefined) rule.stdDev = Number(attrs["stdDev"]);
++	if (attrs["timePeriod"] !== undefined) rule.timePeriod = attrs["timePeriod"];
+ 	
+ 	
+ 	
+@@ -1763,8 +1794,8 @@ function parsePageSetupAttrs(attrs, ctx) {
+ 	if (attrs["scale"]) {
+ 		ps.scale = Number(attrs["scale"]);
+ 	}
++	// Fitting to pages is <sheetPr><pageSetUpPr fitToPage>; these only size it.
+ 	if (attrs["fitToWidth"] !== undefined || attrs["fitToHeight"] !== undefined) {
+-		ps.fitToPage = true;
+ 		if (attrs["fitToWidth"]) ps.fitToWidth = Number(attrs["fitToWidth"]);
+ 		if (attrs["fitToHeight"]) ps.fitToHeight = Number(attrs["fitToHeight"]);
+ 	}

@@ -7,6 +7,7 @@ import { engineFormula, formulaTranslator, renameSheetInFormula, shiftFormula } 
 import { cellKey, type CellView } from "@/features/spreadsheet/lib/model"
 import { sniffSpreadsheetKind } from "@/features/spreadsheet/lib/spreadsheetClient"
 import { XlsxDocument } from "@/features/spreadsheet/lib/xlsxDocument"
+import { proven } from "@/tests/spreadsheetProven"
 import { checkZipLimits } from "@/features/spreadsheet/lib/zipLimits"
 
 const FIXTURES = new URL("./fixtures/spreadsheet/", import.meta.url)
@@ -16,11 +17,11 @@ type Sheets = { name: string; rows: CellValue[][]; cells?: Map<string, Cell> }[]
 async function open(sheets: Sheets, namedRanges?: Workbook["namedRanges"]): Promise<XlsxDocument> {
 	const bytes = await writeXlsx(namedRanges === undefined ? { sheets } : { sheets, namedRanges })
 
-	return new XlsxDocument(await openXlsx(bytes, { readStyles: true }))
+	return await proven(await openXlsx(bytes, { readStyles: true }))
 }
 
 async function reopen(document: XlsxDocument): Promise<XlsxDocument> {
-	return new XlsxDocument(await openXlsx((await document.serialize()).bytes, { readStyles: true }))
+	return await proven(await openXlsx((await document.serialize()).bytes, { readStyles: true }))
 }
 
 function formula(formula: string, result: CellValue = null): Cell {
@@ -90,7 +91,7 @@ describe("formula references", () => {
 describe("XlsxDocument formulas", () => {
 	it("expands shared formulas into ordinary ones, keeping their results, and saves them valid", async () => {
 		// B1 stores A1*2 for B1:B10 (as Excel writes a fill-down); B2:B10 hold only their results.
-		const document = new XlsxDocument(await openXlsx(readFileSync(new URL("shared.xlsx", FIXTURES)), { readStyles: true }))
+		const document = await proven(await openXlsx(readFileSync(new URL("shared.xlsx", FIXTURES)), { readStyles: true }))
 
 		expect(shown(document, 2, 1)).toMatchObject({ text: "6", input: "=A3*2" })
 		expect(shown(document, 1, 0, 1)).toMatchObject({ text: "10", input: "=S1!B5" })
@@ -435,7 +436,7 @@ describe("XlsxDocument edits", () => {
 		const rows = Array.from({ length: 10 }, (_, row) => Array.from({ length: 10 }, (_, col) => row * 10 + col))
 		const workbook = await openXlsx(await writeXlsx({ sheets: [{ name: "S", rows }] }))
 		// Room for two deletions of 30 cells, not three.
-		const document = new XlsxDocument(workbook, 70)
+		const document = await proven(workbook, 70)
 
 		for (let step = 0; step < 3; step++) {
 			document.apply({ type: "delete", sheet: 0, axis: "rows", at: 0, count: 3 })
@@ -475,7 +476,7 @@ describe("XlsxDocument edits", () => {
 describe("XlsxDocument locks", () => {
 	it("opens a workbook with a chart sheet view-only, and locks rows and renames around its charts", async () => {
 		const workbook = await openXlsx(readFileSync(new URL("chartsheet.xlsx", FIXTURES)), { readStyles: true })
-		const document = new XlsxDocument(workbook)
+		const document = await proven(workbook)
 		const doc = document.doc()
 
 		expect(doc.writable).toBe(false)
@@ -487,7 +488,7 @@ describe("XlsxDocument locks", () => {
 	})
 
 	it("opens a workbook whose tab order is not its part order view-only when parts ride on positions", async () => {
-		const reordered = new XlsxDocument(await openXlsx(readFileSync(new URL("reordered.xlsx", FIXTURES)), { readStyles: true }))
+		const reordered = await proven(await openXlsx(readFileSync(new URL("reordered.xlsx", FIXTURES)), { readStyles: true }))
 
 		expect(reordered.writable).toBe(false)
 
@@ -520,7 +521,7 @@ describe("XlsxDocument locks", () => {
 			)
 		)
 
-		expect(new XlsxDocument(workbook).writable).toBe(false)
+		expect((await proven(workbook)).writable).toBe(false)
 	})
 })
 

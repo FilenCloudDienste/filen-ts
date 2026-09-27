@@ -619,16 +619,106 @@ export function engineCanParse(formula: string): boolean {
 	return true
 }
 
+// Functions Excel evaluates over whole arrays even in an ordinary formula; the engine, calculating
+// ordinary formulas as Excel does (a range in a single-value place meets the formula's row or column),
+// is told so with ARRAYFORMULA.
+const ARRAY_ARGUMENTS = new Set(["SUMPRODUCT", "SUMX2MY2", "SUMX2PY2", "SUMXMY2", "MDETERM"])
+
+// Functions returning an array. Excel reads an ordinary formula holding one as taking the array's first
+// value; the engine would spill it over the cells below and beside instead.
+const ARRAY_RESULTS = new Set([
+	"SEQUENCE",
+	"MMULT",
+	"TRANSPOSE",
+	"SORT",
+	"SORTBY",
+	"UNIQUE",
+	"FILTER",
+	"VSTACK",
+	"HSTACK",
+	"ARRAY_CONSTRAIN",
+	"MAXPOOL",
+	"MEDIANPOOL",
+	"MINVERSE",
+	"RANDARRAY",
+	"MUNIT",
+	"FREQUENCY",
+	"XLOOKUP"
+])
+
+// The most cells an array a formula builds may hold: the engine keeps every value of it, a few hundred
+// bytes each.
+const MAX_ARRAY_CELLS = 200_000
+
+// Whether the formula calls an array-returning function over more cells than MAX_ARRAY_CELLS, going by
+// its literal sizes (SEQUENCE(1000,1000)) and the largest range it names.
+function arrayTooLarge(formula: string): boolean {
+	const upper = formula.toUpperCase()
+	let calls = false
+
+	for (const name of ARRAY_RESULTS) {
+		if (name !== "XLOOKUP" && upper.includes(`${name}(`)) {
+			calls = true
+
+			break
+		}
+	}
+
+	if (!calls) {
+		return false
+	}
+
+	for (const [, name, rows = "1", cols = "1"] of upper.matchAll(/(SEQUENCE|RANDARRAY|MUNIT)\(\s*(\d+)\s*(?:,\s*(\d+))?/g)) {
+		const size = name === "MUNIT" ? Number(rows) ** 2 : Number(rows) * Number(cols)
+
+		if (size > MAX_ARRAY_CELLS) return true
+	}
+
+	return formulaParts(formula).some(part => {
+		if (typeof part === "string" || part.ref.area === null) return false
+
+		const area = part.ref.area
+		const rows = area.kind === "cols" ? MAX_ROWS : Math.abs(area.endRow - area.startRow) + 1
+		const cols = area.kind === "rows" ? MAX_COLS : Math.abs(area.endCol - area.startCol) + 1
+
+		return rows * cols > MAX_ARRAY_CELLS
+	})
+}
+
+// A cell's formula as HyperFormula takes it (with its "="), or null when it cannot be given to it: nested
+// past its parser's depth, or building an array too large to hold. Evaluated as Excel reads an ordinary
+// formula: an array result gives its first value (INDEX), and nothing spills.
+export function engineCellFormula(formula: string): string | null {
+	if (!engineCanParse(formula) || arrayTooLarge(formula)) {
+		return null
+	}
+
+	const text = engineFormula(formula)
+	const upper = text.toUpperCase()
+
+	for (const name of ARRAY_RESULTS) {
+		if (upper.includes(`${name}(`)) {
+			return `=INDEX((${text}),1,1)`
+		}
+	}
+
+	return `=${text}`
+}
+
 // Excel formula text as HyperFormula reads it, where only the spelling differs: function names lose the
 // _xlfn./_xlws. prefixes files store for newer functions, TRUE and FALSE become the functions HyperFormula
-// has for them, exponents take a lower-case "e", and a string literal with a doubled quote is spelled
-// with CHAR(34) (HyperFormula has no escape for it; inside an array constant it is left to fail). What
-// HyperFormula still cannot read (intersections, unions, structured and external references) fails to
-// parse there, and the caller keeps the file's own result.
+// has for them, exponents take a lower-case "e", a string literal with a doubled quote is spelled with
+// CHAR(34) (HyperFormula has no escape for it; inside an array constant it is left to fail), and calls
+// that evaluate arrays are wrapped in ARRAYFORMULA. What HyperFormula still cannot read (intersections,
+// unions, structured and external references) fails to parse there, and the caller keeps the file's own
+// result.
 export function engineFormula(formula: string): string {
 	let text = ""
 	let braces = 0
 	let index = 0
+	// Per open parenthesis: whether it opened a call wrapped in ARRAYFORMULA, which closes with it.
+	const opened: boolean[] = []
+	let wrapNext = false
 
 	while (index < formula.length) {
 		const code = formula.charCodeAt(index)
@@ -667,7 +757,10 @@ export function engineFormula(formula: string): string {
 			const next = formula.charCodeAt(end)
 
 			if (next === 40) {
-				text += word.replace(/^(?:_xlfn\.|_xlws\.)+/i, "")
+				const name = word.replace(/^(?:_xlfn\.|_xlws\.)+/i, "")
+
+				wrapNext = ARRAY_ARGUMENTS.has(name.toUpperCase())
+				text += wrapNext ? `ARRAYFORMULA(${name}` : name
 			} else if (/^(\d+\.?\d*|\.\d+)E$/i.test(word) && (next === 43 || next === 45)) {
 				text += `${word.slice(0, -1)}e`
 			} else if (/^(\d+\.?\d*|\.\d+)E\d+$/i.test(word)) {
@@ -687,6 +780,14 @@ export function engineFormula(formula: string): string {
 			if (code === 125) braces--
 
 			text += formula[index] ?? ""
+
+			if (code === 40) {
+				opened.push(wrapNext)
+				wrapNext = false
+			} else if (code === 41 && opened.pop() === true) {
+				text += ")"
+			}
+
 			index++
 		}
 	}
