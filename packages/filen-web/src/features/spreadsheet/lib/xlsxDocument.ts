@@ -53,6 +53,16 @@ import {
 	workbookStructureLocked,
 	WorkbookViews
 } from "@/features/spreadsheet/lib/xlsxView"
+import {
+	clampSize,
+	colWidthToPx,
+	MAX_RESIZE_TARGETS,
+	pxToColWidth,
+	pxToRowHeight,
+	rowHeightToPx,
+	type SizeAxis,
+	type SizeEntry
+} from "@/features/spreadsheet/lib/sizes.logic"
 import { pause, saveLosses } from "@/features/spreadsheet/lib/xlsxVerify"
 import { rawEntries, xlsxSavePlan, type SavePlan } from "@/features/spreadsheet/lib/xlsxWritable"
 import { readZip } from "@/features/spreadsheet/lib/zipLimits"
@@ -286,6 +296,8 @@ type Step =
 			links: TextEdit[]
 	  }
 	| { type: "addSheet"; results: ResultBefore[] }
+	// Each resized index's size before the edit, in the file's units (undefined: none of its own).
+	| { type: "sizes"; sheet: number; axis: SizeAxis; before: [number, number | undefined][] }
 	| {
 			type: "rename"
 			sheet: number
@@ -334,6 +346,8 @@ function stepCells(step: Step): number {
 			)
 		case "addSheet":
 			return 1 + step.results.length
+		case "sizes":
+			return step.before.length
 		case "rename":
 			return 1 + step.formulas.length + step.links.length + (step.names?.length ?? 0) + step.placeholders.length + step.results.length
 	}
@@ -817,6 +831,8 @@ export class XlsxDocument {
 
 	private revert(step: Step): EditResult {
 		switch (step.type) {
+			case "sizes":
+				return this.revertSizes(step)
 			case "cells":
 				return this.revertCells(step)
 			case "structure":
@@ -1106,6 +1122,8 @@ export class XlsxDocument {
 				return this.addSheet(op.name)
 			case "renameSheet":
 				return this.renameSheet(op.sheet, op.name)
+			case "resize":
+				return this.resize(op)
 		}
 	}
 
@@ -1251,6 +1269,73 @@ export class XlsxDocument {
 		return {
 			step: { type: "cells", sheet: this.workbook.sheets.indexOf(sheet), before, extent },
 			result: () => this.cellsResult(sheetIndex, cells, recalculated)
+		}
+	}
+
+	private resize(op: Extract<EditOp, { type: "resize" }>): { step: Step | null; result: () => EditResult } {
+		const sheet = this.workbook.sheets[this.workbookIndex(op.sheet)]
+
+		if (sheet === undefined || op.sizes.length === 0) {
+			return { step: null, result: () => ({ type: "none", state: this.state() }) }
+		}
+
+		if (op.sizes.length > MAX_RESIZE_TARGETS) {
+			return { step: null, result: () => ({ type: "refused", reason: "tooLarge", state: this.state() }) }
+		}
+
+		const before = op.sizes.map(([at]): [number, number | undefined] => [at, fileSize(sheet, op.axis, at)])
+
+		for (const [at, px] of op.sizes) {
+			setFileSize(
+				sheet,
+				op.axis,
+				at,
+				px === null ? undefined : op.axis === "cols" ? pxToColWidth(clampSize("cols", px)) : pxToRowHeight(clampSize("rows", px))
+			)
+		}
+
+		return {
+			step: { type: "sizes", sheet: this.workbook.sheets.indexOf(sheet), axis: op.axis, before },
+			result: () =>
+				this.sizesResult(
+					op.sheet,
+					sheet,
+					op.axis,
+					op.sizes.map(([at]) => at)
+				)
+		}
+	}
+
+	private revertSizes(step: Extract<Step, { type: "sizes" }>): EditResult {
+		const sheet = this.workbook.sheets[step.sheet]
+
+		if (sheet === undefined) {
+			return { type: "none", state: this.state() }
+		}
+
+		for (const [at, size] of step.before) {
+			setFileSize(sheet, step.axis, at, size)
+		}
+
+		return this.sizesResult(
+			this.worksheets().indexOf(sheet),
+			sheet,
+			step.axis,
+			step.before.map(([at]) => at)
+		)
+	}
+
+	private sizesResult(gridSheet: number, sheet: Sheet, axis: SizeAxis, indices: readonly number[]): EditResult {
+		return {
+			type: "sizes",
+			sheet: gridSheet,
+			axis,
+			sizes: indices.map((at): SizeEntry => {
+				const size = fileSize(sheet, axis, at)
+
+				return [at, size === undefined ? null : axis === "cols" ? colWidthToPx(size) : rowHeightToPx(size)]
+			}),
+			state: this.state()
 		}
 	}
 
@@ -1620,6 +1705,40 @@ export class XlsxDocument {
 
 		return { type: "sheets", sheets, styles: this.views.styles.styles, state: this.state() }
 	}
+}
+
+// A column's width in characters or a row's height in points, as the file holds it.
+function fileSize(sheet: Sheet, axis: SizeAxis, at: number): number | undefined {
+	return axis === "cols" ? sheet.columns?.[at]?.width : sheet.rowDefs?.get(at)?.height
+}
+
+// Sets or clears one size, keeping everything else the column or row carries (style, hidden, outline).
+function setFileSize(sheet: Sheet, axis: SizeAxis, at: number, size: number | undefined): void {
+	if (axis === "cols") {
+		const columns = (sheet.columns ??= [])
+
+		while (columns.length <= at) {
+			columns.push({})
+		}
+
+		const column = { ...columns[at] }
+
+		if (size === undefined) delete column.width
+		else column.width = size
+
+		columns[at] = column
+
+		return
+	}
+
+	const rowDefs = (sheet.rowDefs ??= new Map())
+	const def = { ...rowDefs.get(at) }
+
+	if (size === undefined) delete def.height
+	else def.height = size
+
+	if (Object.keys(def).length === 0) rowDefs.delete(at)
+	else rowDefs.set(at, def)
 }
 
 function hexColor(css: string): { rgb: string } {

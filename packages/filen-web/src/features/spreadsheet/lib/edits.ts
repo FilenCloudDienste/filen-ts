@@ -1,4 +1,5 @@
 import type { CellRange, CellStyleView, CellView, SheetView } from "@/features/spreadsheet/lib/model"
+import type { SizeAxis, SizeEntry } from "@/features/spreadsheet/lib/sizes.logic"
 
 // What the grid asks the worker to change, and what comes back. Sheet indices are the grid's (worksheets
 // only, in order).
@@ -22,6 +23,9 @@ export type EditOp =
 	| { type: "addSheet"; name: string }
 	| { type: "renameSheet"; sheet: number; name: string }
 	| { type: "format"; sheet: number; range: CellRange; patch: FormatPatch }
+	// Column widths or row heights, in pixels (null: back to the default). Editable workbooks only: every
+	// other view keeps sizes beside the file (lib/sizeLayer.ts).
+	| { type: "resize"; sheet: number; axis: SizeAxis; sizes: readonly SizeEntry[] }
 
 export interface DocState {
 	// Differs from what was opened or last saved.
@@ -47,6 +51,8 @@ export type EditResult =
 	// a full view of each sheet that changed and null for one that did not (keep the view held). `styles`
 	// is the whole style table.
 	| { type: "sheets"; sheets: (SheetView | null)[]; styles: CellStyleView[]; state: DocState }
+	// Columns or rows were resized: their sizes as the sheet now reads them (null: none of their own).
+	| { type: "sizes"; sheet: number; axis: SizeAxis; sizes: SizeEntry[]; state: DocState }
 	// The edit could not be made: the sheet's structure is locked, a sheet name is taken or invalid, it
 	// would reach past a sheet's limits, it would change part of an array formula's range, it would
 	// rename a table column by editing its header, or (CSV only) it types a character the file's fixed

@@ -1,5 +1,6 @@
 import type { CellPatch, EditResult } from "@/features/spreadsheet/lib/edits"
 import type { CellView, SheetView, SpreadsheetDoc } from "@/features/spreadsheet/lib/model"
+import { sheetWithSizes } from "@/features/spreadsheet/lib/sizes.logic"
 
 // A sheet's cells on the page, changed without copying them: the worker's Map as it arrived, plus the
 // cells edited since (null: emptied). An edit copies only that patch, which folds into a new base once it
@@ -134,6 +135,19 @@ export function applyEditResult(doc: GridDoc, result: EditResult): GridDoc {
 				sheets: result.sheets.map((sheet, index) => kept(doc, sheet, index)),
 				styles: result.styles.length > 0 ? result.styles : doc.styles
 			}
+		case "sizes": {
+			const sheet = doc.sheets[result.sheet]
+
+			if (sheet === undefined) {
+				return doc
+			}
+
+			const sheets = [...doc.sheets]
+
+			sheets[result.sheet] = sheetWithSizes(sheet, result.axis, result.sizes)
+
+			return { ...doc, sheets }
+		}
 		case "refused":
 		case "none":
 			return doc

@@ -255,10 +255,11 @@ export class CsvDocument {
 
 				return { type: "structure", axis: "cols", kind: op.type, at: op.at, count: op.count, removed }
 			}
-			// A CSV is one sheet, and holds no formats.
+			// A CSV is one sheet, and holds no formats or sizes (its sizes live beside it: lib/sizeLayer.ts).
 			case "addSheet":
 			case "renameSheet":
 			case "format":
+			case "resize":
 				return null
 		}
 	}
