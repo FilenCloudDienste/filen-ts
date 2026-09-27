@@ -795,15 +795,16 @@ export function SheetGrid({ sheet, styles, selection, onSelectionChange, label, 
 						aria-hidden="true"
 						className="sticky top-0 left-0 z-40 border-r border-b border-border bg-muted"
 					/>
+					{/* Rail layers are opaque: their cells' tint is translucent. */}
 					<div
-						className="sticky top-0 z-30 overflow-hidden"
+						className="sticky top-0 z-30 overflow-hidden bg-background"
 						style={{ left: ROW_HEADER_WIDTH }}
 					>
 						{columnHeaders(frozenColIndices, 0)}
 					</div>
-					<div className="sticky top-0 z-20 overflow-hidden">{columnHeaders(bodyColIndices, frozenWidth)}</div>
+					<div className="sticky top-0 z-20 overflow-hidden bg-background">{columnHeaders(bodyColIndices, frozenWidth)}</div>
 					<div
-						className="sticky left-0 z-30 overflow-hidden"
+						className="sticky left-0 z-30 overflow-hidden bg-background"
 						style={{ top: COL_HEADER_HEIGHT }}
 					>
 						{rowHeaders(frozenRowIndices, 0)}
@@ -824,7 +825,7 @@ export function SheetGrid({ sheet, styles, selection, onSelectionChange, label, 
 					>
 						{layer(frozenRowIndices, bodyColIndices, frozenRowDomain, allCols, 0, frozenWidth)}
 					</div>
-					<div className="sticky left-0 z-20 overflow-hidden">{rowHeaders(bodyRowIndices, frozenHeight)}</div>
+					<div className="sticky left-0 z-20 overflow-hidden bg-background">{rowHeaders(bodyRowIndices, frozenHeight)}</div>
 					<div
 						className={cn("sticky z-10 overflow-hidden bg-background", frozenCols > 0 && "border-r-2 border-border")}
 						style={{ left: ROW_HEADER_WIDTH }}
