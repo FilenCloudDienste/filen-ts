@@ -502,6 +502,15 @@ describe("computeTransfersAggregate", () => {
 		expect(computeTransfersAggregate(transfers)).toEqual({ activeCount: 2, percent: 25, speed: 0 })
 	})
 
+	it("leaves a transfer of unknown size out of the percent, but still counts it as active", () => {
+		const transfers = [
+			makeTransfer({ id: "a", size: 1_000, bytesTransferred: 500 }),
+			makeTransfer({ id: "zip", direction: "download", status: "downloading", size: 0, bytesTransferred: 5_000 })
+		]
+
+		expect(computeTransfersAggregate(transfers)).toMatchObject({ activeCount: 2, percent: 50 })
+	})
+
 	it("sums bytesTransferred/size across every active transfer", () => {
 		const transfers = [
 			makeTransfer({ id: "a", status: "uploading", size: 100, bytesTransferred: 50 }),

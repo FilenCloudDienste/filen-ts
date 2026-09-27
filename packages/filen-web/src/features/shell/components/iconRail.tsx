@@ -279,10 +279,10 @@ function TransfersEntry({ active, reordering }: RailEntryProps) {
 						{showAggregate ? (
 							<span
 								aria-hidden="true"
-								className="absolute inset-x-1.5 bottom-1 h-0.5 overflow-hidden rounded-full bg-foreground/15"
+								className="absolute inset-x-2 bottom-1 h-[3px] overflow-hidden rounded-full bg-foreground/20"
 							>
 								<span
-									className="block h-full rounded-full bg-primary transition-[width]"
+									className="block h-full rounded-full bg-primary transition-[width] duration-300 ease-out"
 									style={{ width: `${String(percent)}%` }}
 								/>
 							</span>

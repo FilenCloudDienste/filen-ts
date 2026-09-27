@@ -252,8 +252,13 @@ export function computeTransfersAggregate(
 		}
 
 		activeCount++
-		transferred += transfer.bytesTransferred
-		total += transfer.size
+
+		// A transfer whose size is not known yet (a zip still walking its tree) has no share of the whole
+		// to report; its bytes alone would push the percent past what is actually done.
+		if (transfer.size > 0) {
+			transferred += transfer.bytesTransferred
+			total += transfer.size
+		}
 	}
 
 	return {

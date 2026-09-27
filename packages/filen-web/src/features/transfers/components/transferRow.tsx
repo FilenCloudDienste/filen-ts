@@ -77,9 +77,9 @@ function TransferGlyph({
 	} else if (active) {
 		badge = transfer.paused ? <PauseIcon /> : <DirectionIcon />
 	} else if (transfer.status === "done") {
-		badge = <CheckIcon strokeWidth={3} />
+		badge = <CheckIcon />
 	} else {
-		badge = <span className="text-[11px] leading-none font-bold">!</span>
+		badge = <span className="text-xs leading-none font-bold">!</span>
 	}
 
 	return (
@@ -130,18 +130,29 @@ function TransferGlyph({
 			<div
 				aria-hidden="true"
 				className={cn(
-					"absolute -right-0.5 -bottom-0.5 flex size-[18px] items-center justify-center rounded-full ring-2 ring-background [&_svg]:size-2.5",
-					transfer.status === "error"
-						? "bg-destructive text-white"
-						: transfer.status === "done"
-							? "bg-primary text-primary-foreground"
-							: "bg-muted text-muted-foreground"
+					"absolute -right-1 -bottom-1 flex size-5 items-center justify-center rounded-full ring-2 ring-background [&_svg]:size-3 [&_svg]:stroke-[2.75]",
+					badgeTone(transfer, trashing)
 				)}
 			>
 				{badge}
 			</div>
 		</div>
 	)
+}
+
+// Solid fills only: the badge sits over the ring and the icon, where a translucent one reads as a smudge.
+// Running and done are the strong fill; a stalled state (paused, moving to the trash, finished with
+// some items failed) the quieter one; a failure the destructive one.
+function badgeTone(transfer: Transfer, trashing: boolean): string {
+	if (transfer.status === "error") {
+		return "bg-destructive text-white"
+	}
+
+	if (trashing || transfer.paused || transfer.status === "completedWithErrors") {
+		return "bg-muted-foreground text-background"
+	}
+
+	return "bg-primary text-primary-foreground"
 }
 
 function RowAction({ label, onClick, children }: { label: string; onClick: () => void; children: ReactNode }) {
