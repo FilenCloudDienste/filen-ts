@@ -18,10 +18,7 @@ import { Button } from "@/components/ui/button"
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 
 // Root selection + persistence + unset/ready/gone states, reachable from the icon rail's own
-// /photos entry (iconRail.tsx). The media grid itself is a later addition — READY renders a
-// listing-agnostic placeholder body wired to usePhotosListingQuery's own key/status, so that
-// addition only ever needs to swap this file's placeholder body for the real grid, never the
-// root/query plumbing around it.
+// /photos entry (iconRail.tsx). READY renders the grid (search, filters and timeline live there).
 export function PhotosScreen() {
 	const { t } = useTranslation(["photos", "common", "drive"])
 	const isOnline = useIsOnline()
@@ -117,14 +114,28 @@ export function PhotosScreen() {
 		)
 	}
 
-	const rootName = isWholeDrive ? t("drive:driveMyDrive") : (namesQuery.data?.[rootUuid] ?? rootUuid)
+	// Unknown until the name lookup settles; the header then shows the module name alone.
+	const rootName = isWholeDrive ? t("drive:driveMyDrive") : namesQuery.data?.[rootUuid]
 
 	return (
 		<>
 			<header className="flex h-14 shrink-0 items-center justify-between gap-3 px-4">
-				<h1 className="min-w-0 truncate text-sm font-medium">{rootName}</h1>
+				<h1 className="flex min-w-0 items-baseline gap-1.5 text-sm font-medium">
+					<span className="shrink-0">{t("common:modulePhotos")}</span>
+					{rootName === undefined ? null : (
+						<>
+							<span
+								aria-hidden="true"
+								className="text-muted-foreground"
+							>
+								·
+							</span>
+							<span className="truncate font-normal text-muted-foreground">{rootName}</span>
+						</>
+					)}
+				</h1>
 				<div className="flex shrink-0 items-center gap-2">
-					{listingQuery.status === "success" && listingQuery.data.length > 0 ? <PhotosDensityControls /> : null}
+					{listingQuery.status === "success" && listingQuery.data.photos.length > 0 ? <PhotosDensityControls /> : null}
 					<Button
 						variant="outline"
 						size="sm"
@@ -147,7 +158,7 @@ export function PhotosScreen() {
 							void listingQuery.refetch()
 						}}
 					/>
-				) : listingQuery.data.length === 0 ? (
+				) : listingQuery.data.photos.length === 0 ? (
 					<div className="flex flex-1 overflow-y-auto">
 						<Empty>
 							<EmptyHeader>
@@ -161,8 +172,10 @@ export function PhotosScreen() {
 					</div>
 				) : (
 					<PhotoGrid
+						// A new root starts with an empty search and a fresh scroll position.
+						key={rootUuid}
 						rootUuid={rootUuid}
-						items={listingQuery.data}
+						listing={listingQuery.data}
 					/>
 				)}
 			</div>

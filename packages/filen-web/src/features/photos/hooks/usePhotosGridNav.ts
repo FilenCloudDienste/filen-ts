@@ -3,6 +3,7 @@ import { type Virtualizer } from "@tanstack/react-virtual"
 import { clampListboxIndex, listboxKeyTargetIsInteractive, resolveCursorIndex } from "@/features/drive/lib/listbox"
 import { photosGridKeyAction, photosRangeSelection } from "@/features/photos/components/photoGrid.logic"
 import { type PhotoItem } from "@/features/photos/lib/captureSort"
+import { type PhotosTimeline } from "@/features/photos/lib/timeline"
 import { usePhotosStore } from "@/features/photos/store/usePhotosStore"
 
 // Bounds the rAF poll moveActive() uses to focus a cursor target that scrollToIndex just brought into
@@ -11,7 +12,7 @@ const FOCUS_RETRY_FRAMES = 10
 
 interface UsePhotosGridNavParams {
 	items: PhotoItem[]
-	columns: number
+	timeline: PhotosTimeline
 	virtualizer: Virtualizer<HTMLDivElement, Element>
 	anchorUuid: string | null
 	setAnchorUuid: (uuid: string | null) => void
@@ -29,14 +30,14 @@ export interface PhotosGridNav {
 	resetCursor: () => void
 }
 
-// Roving-tabindex keyboard operability for the photos grid: the cursor, arrow/Home/End movement,
-// Space toggle, Enter open and Shift+Arrow range extension. Purpose-built and grid-only — photos has
+// Roving-tabindex keyboard operability for the photos grid: the cursor, arrow/Home/End movement over
+// the month timeline, Space toggle, Enter open and Shift+Arrow range extension. Purpose-built and grid-only — photos has
 // no list mode, no nested navigation, no drag-and-drop ancestry guard and no per-variant reset, so
 // this is deliberately not a port of useDriveListboxNav. Select-all/clear-selection are NOT handled
 // here — they are registered keymap commands (photoGrid.tsx).
 export function usePhotosGridNav({
 	items,
-	columns,
+	timeline,
 	virtualizer,
 	anchorUuid,
 	setAnchorUuid,
@@ -75,7 +76,7 @@ export function usePhotosGridNav({
 		const next = clampListboxIndex(nextIndexRaw, items.length)
 
 		setActiveUuid(items[next]?.data.uuid ?? null)
-		virtualizer.scrollToIndex(Math.floor(next / columns), { align: "auto" })
+		virtualizer.scrollToIndex(timeline.rowOfItem[next] ?? 0, { align: "auto" })
 		focusRequestRef.current = next
 
 		const attemptFocus = (attemptsLeft: number) => {
@@ -117,7 +118,7 @@ export function usePhotosGridNav({
 			return
 		}
 
-		const action = photosGridKeyAction(event.key, safeActiveIndex, items.length, columns)
+		const action = photosGridKeyAction(event.key, safeActiveIndex, items.length, timeline)
 
 		if (action.kind === "none") {
 			return

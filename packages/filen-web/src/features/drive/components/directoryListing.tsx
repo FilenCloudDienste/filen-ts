@@ -901,6 +901,8 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 					Same component either way (mod+f focuses it, Escape/the X button clears it) — only which
 					state it's bound to differs. */}
 				<SearchInput
+					action="drive.search"
+					label={t("driveSearch")}
 					value={variant === "drive" ? search.input : localFilter}
 					onChange={variant === "drive" ? search.setInput : setLocalFilter}
 					onClear={

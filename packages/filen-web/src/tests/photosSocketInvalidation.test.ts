@@ -59,7 +59,7 @@ function driveEvt(inner: Extract<SocketEvent, { type: "drive" }>["inner"]): Extr
 }
 
 function seedPhotosQuery(): void {
-	testQueryClient.setQueryData(photosListingQueryKey(ROOT_UUID), [])
+	testQueryClient.setQueryData(photosListingQueryKey(ROOT_UUID), { photos: [], folders: {} })
 }
 
 function isPhotosQueryInvalidated(): boolean {

@@ -2,6 +2,7 @@ import type { Page } from "@playwright/test"
 import { test, expect } from "./fixtures"
 import { bootTo, enterScratchDirectory, trashScratchDirectory, BOOT_SETTLE_TIMEOUT_MS, LIVE_WRITE_TIMEOUT_MS } from "./helpers/listing"
 import { PNG_BYTES } from "./helpers/fixtureBytes"
+import { resolveModKey } from "./helpers/modkey"
 
 // The one live proof of the whole photos arc: root selection, the media-only grid over a mixed
 // upload, the viewer wired to the shared preview overlay, a favorite toggled FROM INSIDE that overlay
@@ -92,6 +93,51 @@ test("photos: root pick over a mixed upload, media-only grid, viewer pager + in-
 		await expect(videoTile).toBeVisible({ timeout: 45_000 })
 		await expect(grid.getByRole("option")).toHaveCount(2)
 		await expect(grid.locator(`[title="${nameDoc}"]`)).toHaveCount(0)
+
+		// ---- the header names the module, then the chosen root ----
+		const heading = page.getByRole("heading", { level: 1 })
+		await expect(heading).toContainText("Photos")
+		await expect(heading).toContainText(scratchName)
+
+		// ---- month header: both uploads were captured (uploaded) this month ----
+		const thisMonth = new Intl.DateTimeFormat("en", { month: "long", year: "numeric" }).format(new Date())
+		await expect(page.getByText(thisMonth, { exact: true })).toBeVisible()
+
+		// ---- search over names, folders and dates, plus the kind chips; nothing is fetched to search ----
+		const search = page.getByRole("searchbox", { name: "Search photos", exact: true })
+		const results = page.getByRole("status").filter({ hasText: /results?$/ })
+
+		await search.fill(".mp4")
+		await expect(grid.getByRole("option")).toHaveCount(1)
+		await expect(videoTile).toBeVisible()
+		await expect(results).toHaveText("1 result")
+
+		await search.fill(String(new Date().getFullYear()))
+		await expect(grid.getByRole("option")).toHaveCount(2)
+
+		await search.fill("no-such-photo-anywhere")
+		await expect(page.getByText("No matching photos")).toBeVisible()
+		await page.getByRole("button", { name: "Clear search and filters", exact: true }).click()
+		await expect(search).toHaveValue("")
+		await expect(grid.getByRole("option")).toHaveCount(2)
+
+		const filters = page.getByRole("group", { name: "Filter photos" })
+		await filters.getByRole("button", { name: "Videos", exact: true }).click()
+		await expect(grid.getByRole("option")).toHaveCount(1)
+		await expect(videoTile).toBeVisible()
+		await filters.getByRole("button", { name: "All", exact: true }).click()
+		await expect(grid.getByRole("option")).toHaveCount(2)
+		await expect(results).toHaveCount(0)
+
+		// mod+f focuses the box; Escape inside it clears it.
+		await grid.getByRole("option").first().focus()
+		await page.keyboard.press(`${await resolveModKey(page)}+f`)
+		await expect(search).toBeFocused()
+		await search.fill("png")
+		await expect(grid.getByRole("option")).toHaveCount(1)
+		await page.keyboard.press("Escape")
+		await expect(search).toHaveValue("")
+		await expect(grid.getByRole("option")).toHaveCount(2)
 
 		// ---- click opens the overlay on the RIGHT item; the pager steps to the other one ----
 		await imageTile.click()

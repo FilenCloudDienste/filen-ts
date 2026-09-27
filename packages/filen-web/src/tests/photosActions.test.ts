@@ -16,7 +16,7 @@ vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 import { queryClient as testQueryClient } from "@/queries/client"
 import { narrowItem } from "@/features/drive/lib/item"
 import { toggleFavorite, trashItems } from "@/features/drive/lib/actions"
-import { photosListingQueryKey } from "@/features/photos/queries/photos"
+import { photosListingQueryKey, type PhotosListing } from "@/features/photos/queries/photos"
 import {
 	toggleFavoritePhoto,
 	setFavoritedPhotos,
@@ -63,11 +63,11 @@ function photoItem(overrides: Partial<File> = {}): PhotoItem {
 }
 
 function seedPhotosListing(items: PhotoItem[]): void {
-	testQueryClient.setQueryData(photosListingQueryKey(ROOT_UUID), items)
+	testQueryClient.setQueryData(photosListingQueryKey(ROOT_UUID), { photos: items, folders: {} })
 }
 
 function getPhotosListing(): PhotoItem[] | undefined {
-	return testQueryClient.getQueryData<PhotoItem[]>(photosListingQueryKey(ROOT_UUID))
+	return testQueryClient.getQueryData<PhotosListing>(photosListingQueryKey(ROOT_UUID))?.photos
 }
 
 beforeEach(() => {

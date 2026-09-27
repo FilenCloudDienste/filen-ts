@@ -9,25 +9,29 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 
 export interface SearchInputProps {
+	// The registered action that focuses this box (mod+f by default), shown as its hint.
+	action: string
+	// Placeholder and accessible name.
+	label: string
 	value: string
 	onChange: (value: string) => void
 	onClear: () => void
-	// directoryListing.tsx's own useDriveDialogHost().isDialogOpen — see newDirectory.tsx's identical
+	// The host's own dialog-open flag (useDriveDialogHost, usePhotosDialogHost) — see newDirectory.tsx's identical
 	// prop for the full rationale (covers the preview overlay too). Without this, mod+f while a
 	// dialog/preview is open would steal focus onto this input, sitting behind the dialog's own focus
 	// trap.
 	dialogOpen: boolean
 }
 
-export function SearchInput({ value, onChange, onClear, dialogOpen }: SearchInputProps) {
+export function SearchInput({ action, label, value, onChange, onClear, dialogOpen }: SearchInputProps) {
 	const { t } = useTranslation("drive")
 	const inputRef = useRef<HTMLInputElement>(null)
 
 	// Registered above at module scope. preventDefault unconditionally — every browser intercepts
-	// mod+f for its own find-in-page, which must never fire while a drive listing has this mounted;
+	// mod+f for its own find-in-page, which must never fire while a listing has this mounted;
 	// the focus steal itself is guarded on dialogOpen (see its own prop comment).
 	useAction(
-		"drive.search",
+		action,
 		keyboardEvent => {
 			keyboardEvent.preventDefault()
 
@@ -60,8 +64,8 @@ export function SearchInput({ value, onChange, onClear, dialogOpen }: SearchInpu
 			<Input
 				ref={inputRef}
 				type="search"
-				aria-label={t("driveSearch")}
-				placeholder={t("driveSearch")}
+				aria-label={label}
+				placeholder={label}
 				value={value}
 				onChange={event => {
 					onChange(event.target.value)
@@ -74,7 +78,8 @@ export function SearchInput({ value, onChange, onClear, dialogOpen }: SearchInpu
 						onClear()
 					}
 				}}
-				className="pr-8 pl-8"
+				// The engine's own cancel glyph would sit beside the clear button below.
+				className="pr-8 pl-8 [&::-webkit-search-cancel-button]:appearance-none"
 			/>
 			<div className="absolute top-1/2 right-1.5 -translate-y-1/2">
 				{value.length > 0 ? (
@@ -87,7 +92,7 @@ export function SearchInput({ value, onChange, onClear, dialogOpen }: SearchInpu
 						<XIcon />
 					</Button>
 				) : (
-					<Kbd action="drive.search" />
+					<Kbd action={action} />
 				)}
 			</div>
 		</div>

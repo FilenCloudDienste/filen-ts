@@ -39,5 +39,31 @@ export const photos = {
 	/** Density stepper — shrinks tiles (more columns fit); disabled at the smallest step */
 	photosDensityDecrease: "Smaller tiles",
 	/** Density stepper — grows tiles (fewer columns fit); disabled at the largest step */
-	photosDensityIncrease: "Larger tiles"
+	photosDensityIncrease: "Larger tiles",
+
+	// ── Search and filters ─────────────────────────────────────────────────────────
+	/** Search box placeholder + accessible label; matches file names, directory names and capture dates */
+	photosSearch: "Search photos",
+	/** Accessible label of the filter chip group */
+	photosFilterLabel: "Filter photos",
+	/** Filter chip — every kind of media */
+	photosFilterAll: "All",
+	/** Filter chip — still images only (not RAW, not video) */
+	photosFilterImages: "Photos",
+	/** Filter chip — videos only */
+	photosFilterVideos: "Videos",
+	/** Filter chip — camera RAW files only */
+	photosFilterRaw: "RAW",
+	/** Filter chip — favorited items only; combines with the kind chips */
+	photosFilterFavorites: "Favorites",
+	/** How many items match the search and filters (singular) */
+	photosResultCount_one: "{{count}} result",
+	/** How many items match the search and filters (plural) */
+	photosResultCount_other: "{{count}} results",
+	/** Empty state — nothing matches the search and filters */
+	photosNoMatchesTitle: "No matching photos",
+	/** Empty state body — what the search looks at */
+	photosNoMatchesBody: "Search looks at file names, directory names and dates like 2023, July or July 2023.",
+	/** Empty state action — clears the search text and every filter chip */
+	photosClearFilters: "Clear search and filters"
 } as const

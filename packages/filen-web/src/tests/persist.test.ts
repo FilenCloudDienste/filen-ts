@@ -201,4 +201,21 @@ describe("per-query persister (Map-backed fake kv)", () => {
 		expect(target.getQueryData(["legacy"])).toBeUndefined()
 		expect(fakeStore.has(legacyKey)).toBe(false)
 	})
+
+	it("deletes a retired version's rows on restore, never restoring them, and leaves other kv keys alone", async () => {
+		const { quotaKey } = await seedTwoQueries()
+		const retiredKey = 'rq.v1-["photos","listing","root"]'
+
+		fakeStore.set(retiredKey, "[]")
+		fakeStore.set("photos.rootUuid.v1", '"root"')
+
+		const target = new QueryClient()
+
+		await restorePersistedQueries(target)
+
+		expect(fakeStore.has(retiredKey)).toBe(false)
+		expect(fakeStore.has("photos.rootUuid.v1")).toBe(true)
+		expect(fakeStore.has(quotaKey)).toBe(true)
+		expect(target.getQueryData(["drive", "quota"])).toEqual({ usedBytes: 123456789012345678n })
+	})
 })

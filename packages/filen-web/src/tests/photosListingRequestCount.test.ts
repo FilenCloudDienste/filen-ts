@@ -31,10 +31,10 @@ import {
 	markPhotosListingStale,
 	photosListingQueryKey,
 	photosListingQueryUpdate,
-	usePhotosListingQuery
+	usePhotosListingQuery,
+	type PhotosListing
 } from "@/features/photos/queries/photos"
 import { handleDriveEvent } from "@/features/drive/lib/socketHandlers"
-import type { PhotoItem } from "@/features/photos/lib/captureSort"
 import { socketAuthenticated, socketDropped } from "@/lib/sdk/socketSession"
 
 function testUuid(label: string): UuidStr {
@@ -191,7 +191,7 @@ describe("photos listing request counts", () => {
 	})
 
 	it("a listing restored from disk is walked on its first mount of the session", async () => {
-		queryClient.setQueryData(photosListingQueryKey(root), [], { updatedAt: Date.now() })
+		queryClient.setQueryData(photosListingQueryKey(root), { photos: [], folders: {} }, { updatedAt: Date.now() })
 
 		const view = mountListing()
 		await drain()
@@ -314,7 +314,8 @@ describe("photos listing request counts", () => {
 // socket echo; a flag flip, so never a walk.
 describe("photos listing favorites", () => {
 	function favorited(uuid: string): boolean | undefined {
-		return queryClient.getQueryData<PhotoItem[]>(photosListingQueryKey(root))?.find(photo => photo.data.uuid === uuid)?.data.favorited
+		return queryClient.getQueryData<PhotosListing>(photosListingQueryKey(root))?.photos.find(photo => photo.data.uuid === uuid)?.data
+			.favorited
 	}
 
 	it("a favorite set elsewhere flips the listed photo's flag in place, without walking", async () => {

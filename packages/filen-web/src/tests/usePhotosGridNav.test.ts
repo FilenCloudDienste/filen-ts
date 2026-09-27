@@ -15,6 +15,7 @@ import { narrowItem } from "@/features/drive/lib/item"
 import { type PhotoItem } from "@/features/photos/lib/captureSort"
 import { usePhotosStore } from "@/features/photos/store/usePhotosStore"
 import { usePhotosGridNav } from "@/features/photos/hooks/usePhotosGridNav"
+import { buildPhotosTimeline } from "@/features/photos/lib/timeline"
 
 const COLUMNS = 4
 
@@ -94,7 +95,13 @@ function renderNav(items: PhotoItem[] = ITEMS) {
 		(props: { items: PhotoItem[] }) =>
 			usePhotosGridNav({
 				items: props.items,
-				columns: COLUMNS,
+				// Every fixture shares one capture month: a header row, then rows of COLUMNS.
+				timeline: buildPhotosTimeline(
+					props.items.map(() => ({ year: 2023, month: 10 })),
+					COLUMNS,
+					100,
+					2
+				),
 				virtualizer,
 				anchorUuid: anchor.uuid,
 				setAnchorUuid,
@@ -139,13 +146,14 @@ describe("usePhotosGridNav — cursor movement", () => {
 		})
 
 		expect(result.current.safeActiveIndex).toBe(COLUMNS)
-		expect(scrollToIndex).toHaveBeenLastCalledWith(1, { align: "auto" })
+		// Row 0 is the month header; item COLUMNS starts the second tile row.
+		expect(scrollToIndex).toHaveBeenLastCalledWith(2, { align: "auto" })
 
 		act(() => {
 			result.current.handleKeyDown(keyEvent("End"))
 		})
 
-		expect(scrollToIndex).toHaveBeenLastCalledWith(Math.floor((ITEMS.length - 1) / COLUMNS), { align: "auto" })
+		expect(scrollToIndex).toHaveBeenLastCalledWith(1 + Math.floor((ITEMS.length - 1) / COLUMNS), { align: "auto" })
 	})
 
 	it("keeps the cursor on its own photo after a reorder", () => {

@@ -10,7 +10,7 @@ vi.mock("@/lib/sdk/client", () => ({ sdkApi: { listPhotosRecursive } }))
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
 import { queryClient as testQueryClient } from "@/queries/client"
-import { fetchPhotosListing, photosListingQueryKey, photosListingQueryUpdate } from "@/features/photos/queries/photos"
+import { fetchPhotosListing, photosListingQueryKey, photosListingQueryUpdate, type PhotosListing } from "@/features/photos/queries/photos"
 import { narrowItem } from "@/features/drive/lib/item"
 import { type PhotoItem } from "@/features/photos/lib/captureSort"
 
@@ -100,8 +100,24 @@ describe("fetchPhotosListing", () => {
 
 		const result = await fetchPhotosListing("root-uuid")
 
-		expect(result).toHaveLength(1)
-		expect(result[0]?.data.uuid).toBe(testUuid("photo"))
+		expect(result.photos).toHaveLength(1)
+		expect(result.photos[0]?.data.uuid).toBe(testUuid("photo"))
+	})
+
+	it("keeps the path below the root of each directory holding a photo, and only those", async () => {
+		const root = testUuid("root")
+		const italy = mockDir({ uuid: testUuid("italy"), parent: root, meta: { type: "decoded", data: { name: "Italy 2023" } } })
+		const rome = mockDir({ uuid: testUuid("rome"), parent: italy.uuid, meta: { type: "decoded", data: { name: "Rome" } } })
+		const empty = mockDir({ uuid: testUuid("empty"), parent: root, meta: { type: "decoded", data: { name: "Docs" } } })
+
+		listPhotosRecursive.mockResolvedValueOnce({
+			dirs: [italy, rome, empty],
+			files: [mockFile({ uuid: testUuid("deep"), parent: rome.uuid }), mockFile({ uuid: testUuid("top"), parent: root })]
+		})
+
+		const result = await fetchPhotosListing(root)
+
+		expect(result.folders).toEqual({ [rome.uuid]: "Italy 2023/Rome" })
 	})
 
 	it("sorts the filtered set capture-descending (a buried-deep photo isn't just included, it's sorted alongside the rest)", async () => {
@@ -112,7 +128,7 @@ describe("fetchPhotosListing", () => {
 
 		const result = await fetchPhotosListing("root-uuid")
 
-		expect(result.map(item => item.data.uuid)).toEqual([testUuid("newer"), testUuid("older")])
+		expect(result.photos.map(item => item.data.uuid)).toEqual([testUuid("newer"), testUuid("older")])
 	})
 
 	it("propagates a rejection unchanged (a gone root's error reaches the caller intact)", async () => {
@@ -124,11 +140,11 @@ describe("fetchPhotosListing", () => {
 })
 
 function seedListing(rootUuid: string, items: PhotoItem[]): void {
-	testQueryClient.setQueryData(photosListingQueryKey(rootUuid), items)
+	testQueryClient.setQueryData<PhotosListing>(photosListingQueryKey(rootUuid), { photos: items, folders: {} })
 }
 
 function getListing(rootUuid: string): PhotoItem[] | undefined {
-	return testQueryClient.getQueryData<PhotoItem[]>(photosListingQueryKey(rootUuid))
+	return testQueryClient.getQueryData<PhotosListing>(photosListingQueryKey(rootUuid))?.photos
 }
 
 describe("photosListingQueryUpdate", () => {

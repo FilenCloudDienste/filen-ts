@@ -34,7 +34,9 @@ import { REGISTER_CHECK_QUERY_KEY } from "@/features/auth/queries/registerCheck"
 // fresh key family and makes the persister's own expired-or-busted check drop any older-versioned
 // row on read — deliberately a single constant so the two can never drift apart. Bump on ANY
 // change to the persisted shape (mobile's client.ts:13 flags this as the easy-to-forget step).
-export const PERSIST_PREFIX = "rq.v2"
+// Rows of a retired version are deleted by the next boot's restore (kvStorage.entries).
+const PERSIST_FAMILY = "rq."
+export const PERSIST_PREFIX = `${PERSIST_FAMILY}v3`
 
 // ON-DISK expiry: a persisted row whose `state.dataUpdatedAt` is older than this is dropped (and
 // its kv row deleted) by the persister's own expired-or-busted check on read/restore. This is the
@@ -165,10 +167,19 @@ const kvStorage: AsyncStorage<string | undefined> = {
 	},
 	entries: async () => {
 		const { api } = await storage()
-		const keys = await api.kvKeys(KV_KEY_PREFIX)
+		const keys = await api.kvKeys(PERSIST_FAMILY)
+		const retired = keys.filter(key => !key.startsWith(KV_KEY_PREFIX))
 		const out: [string, string][] = []
 
+		if (retired.length > 0) {
+			await Promise.allSettled(retired.map(key => api.kvDelete(key)))
+		}
+
 		for (const key of keys) {
+			if (!key.startsWith(KV_KEY_PREFIX)) {
+				continue
+			}
+
 			const value = await api.kvGet(key)
 
 			if (value !== null) {

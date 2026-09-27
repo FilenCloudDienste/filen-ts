@@ -5,6 +5,7 @@ import { queryClient } from "@/queries/client"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { isPhotoItem } from "@/features/photos/lib/predicate"
 import { sortPhotosByCaptureDesc, type PhotoItem } from "@/features/photos/lib/captureSort"
+import { photoFolderPaths } from "@/features/photos/lib/search"
 
 // Owns the photos query-key namespace (["photos", …], per client.ts's [domain, entity, params?]
 // taxonomy) — separate from ["drive", "listing", …] because a local mutation (favorite/trash/rename)
@@ -13,6 +14,12 @@ import { sortPhotosByCaptureDesc, type PhotoItem } from "@/features/photos/lib/c
 // wraps drive's shared mutations with the extra patch this key needs).
 export function photosListingQueryKey(rootUuid: string) {
 	return ["photos", "listing", rootUuid] as const
+}
+
+export interface PhotosListing {
+	photos: PhotoItem[]
+	// Path below the root of each directory directly holding a photo, for search (photoFolderPaths).
+	folders: Record<string, string>
 }
 
 // Roots whose latest walk ran entirely under a live socket. A persisted listing restores with its
@@ -49,7 +56,7 @@ function withFavoriteFlips(photos: PhotoItem[], flips: ReadonlyMap<string, boole
 // The recursive walk (listPhotosRecursive) plus the media predicate and capture-date sort, all in one
 // queryFn — a photos listing has exactly one consumer shape (the grid), so there is no separate
 // selector layer filtering/sorting on every render the way a multi-mode drive listing would need.
-export async function fetchPhotosListing(rootUuid: string): Promise<PhotoItem[]> {
+export async function fetchPhotosListing(rootUuid: string): Promise<PhotosListing> {
 	const epoch = currentSocketEpoch()
 	const flips = new Map<string, boolean>()
 
@@ -64,10 +71,12 @@ export async function fetchPhotosListing(rootUuid: string): Promise<PhotoItem[]>
 			readThisSession.delete(rootUuid)
 		}
 
-		const items: DriveItem[] = [...dirs.map(narrowItem), ...files.map(narrowItem)]
-		const photos = items.filter(isPhotoItem) as PhotoItem[]
+		const photos = files.map(narrowItem).filter(isPhotoItem) as PhotoItem[]
 
-		return withFavoriteFlips(sortPhotosByCaptureDesc(photos), flips)
+		return {
+			photos: withFavoriteFlips(sortPhotosByCaptureDesc(photos), flips),
+			folders: photoFolderPaths(dirs, photos, rootUuid)
+		}
 	} finally {
 		flipsDuringWalks.delete(flips)
 	}
@@ -79,7 +88,7 @@ export async function fetchPhotosListing(rootUuid: string): Promise<PhotoItem[]>
 // may have been missed meanwhile.
 export const PHOTOS_LISTING_STALE_TIME = 15 * 60 * 1000
 
-export function usePhotosListingQuery(rootUuid: string | null): UseQueryResult<PhotoItem[]> {
+export function usePhotosListingQuery(rootUuid: string | null): UseQueryResult<PhotosListing> {
 	return useQuery({
 		queryKey: photosListingQueryKey(rootUuid ?? ""),
 		queryFn: () => fetchPhotosListing(rootUuid ?? ""),
@@ -99,7 +108,7 @@ export function usePhotosListingQuery(rootUuid: string | null): UseQueryResult<P
 export function photosListingQueryUpdate(rootUuid: string, updater: (prev: PhotoItem[]) => PhotoItem[]): void {
 	const queryKey = photosListingQueryKey(rootUuid)
 	// One lookup by the key's hash: a filter find() copies and re-hashes the whole query cache per call.
-	const query = queryClient.getQueryCache().get<PhotoItem[]>(queryClient.defaultQueryOptions({ queryKey }).queryHash)
+	const query = queryClient.getQueryCache().get<PhotosListing>(queryClient.defaultQueryOptions({ queryKey }).queryHash)
 
 	if (query?.state.data === undefined) {
 		return
@@ -110,7 +119,7 @@ export function photosListingQueryUpdate(rootUuid: string, updater: (prev: Photo
 	const refreshPending = query.state.isInvalidated || query.state.fetchStatus !== "idle"
 
 	void query.cancel({ revert: true })
-	queryClient.setQueryData<PhotoItem[]>(queryKey, prev => (prev === undefined ? prev : updater(prev)))
+	queryClient.setQueryData<PhotosListing>(queryKey, prev => (prev === undefined ? prev : { ...prev, photos: updater(prev.photos) }))
 
 	if (refreshPending) {
 		query.invalidate()
@@ -134,22 +143,22 @@ export function patchPhotosFavorite(item: DriveItem): void {
 	}
 
 	for (const query of queryClient.getQueryCache().findAll({ queryKey: ["photos", "listing"] })) {
-		const photos = query.state.data as PhotoItem[] | undefined
+		const listing = query.state.data as PhotosListing | undefined
 
-		if (photos === undefined) {
+		if (listing === undefined) {
 			continue
 		}
 
-		const next = withFavoriteFlips(photos, flip)
+		const next = withFavoriteFlips(listing.photos, flip)
 
-		if (next === photos) {
+		if (next === listing.photos) {
 			continue
 		}
 
 		// No cancel: the walk under way returns the flip too. setQueryData drops a pending invalidation.
 		const invalidated = query.state.isInvalidated
 
-		queryClient.setQueryData<PhotoItem[]>(query.queryKey, next)
+		queryClient.setQueryData<PhotosListing>(query.queryKey, { ...listing, photos: next })
 
 		if (invalidated) {
 			query.invalidate()
@@ -176,7 +185,7 @@ export function invalidatePhotosListing(scope: PhotosEventScope | null): void {
 	for (const query of queryClient.getQueryCache().findAll({ queryKey: ["photos", "listing"] })) {
 		const queryKey = query.queryKey
 		const rootUuid = queryKey[2]
-		const photos = queryClient.getQueryData<PhotoItem[]>(queryKey)
+		const photos = queryClient.getQueryData<PhotosListing>(queryKey)?.photos
 
 		// Read at call time: a scope check resolving later may find a walk already under way. An inactive
 		// listing is only marked, on the query itself rather than through a filter that scans the cache.

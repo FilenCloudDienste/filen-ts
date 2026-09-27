@@ -1,6 +1,7 @@
-import { listboxKeyTarget, listboxRange } from "@/features/drive/lib/listbox"
+import { listboxRange } from "@/features/drive/lib/listbox"
 import { drivePreviewSources, type PreviewSource } from "@/features/preview/lib/previewSource"
 import type { PhotoItem } from "@/features/photos/lib/captureSort"
+import { timelineKeyTarget, type PhotosTimeline } from "@/features/photos/lib/timeline"
 
 export interface TileClickIntent {
 	kind: "open" | "select"
@@ -66,11 +67,10 @@ export function photosRangeSelection(items: readonly PhotoItem[], anchorUuid: st
 
 export type PhotosGridKeyAction = { kind: "move"; target: number } | { kind: "toggle" } | { kind: "open" } | { kind: "none" }
 
-// The photos grid's key semantics, composed from the shared cursor table: Space toggles the cursor
-// item's selection, Enter opens the viewer, arrows/Home/End move the cursor. Always a grid (photos has
-// no list mode), so the vertical step is always `columns` and the horizontal axis is always live.
-// Select-all/clear-selection are NOT here — they stay registered keymap commands (photoGrid.tsx).
-export function photosGridKeyAction(key: string, activeIndex: number, itemCount: number, columns: number): PhotosGridKeyAction {
+// The photos grid's key semantics: Space toggles the cursor item's selection, Enter opens the viewer,
+// arrows/Home/End move the cursor over the month timeline (timelineKeyTarget). Select-all/clear-selection
+// are NOT here — they stay registered keymap commands (photoGrid.tsx).
+export function photosGridKeyAction(key: string, activeIndex: number, itemCount: number, timeline: PhotosTimeline): PhotosGridKeyAction {
 	if (itemCount === 0) {
 		return { kind: "none" }
 	}
@@ -83,7 +83,7 @@ export function photosGridKeyAction(key: string, activeIndex: number, itemCount:
 		return { kind: "open" }
 	}
 
-	const target = listboxKeyTarget(key, activeIndex, itemCount, columns, true)
+	const target = timelineKeyTarget(key, activeIndex, itemCount, timeline)
 
 	return target === null ? { kind: "none" } : { kind: "move", target }
 }

@@ -26,6 +26,7 @@ vi.mock("@/lib/useIsOnline", () => ({ useIsOnline: () => true }))
 vi.mock("@/features/photos/queries/preferences", () => ({ usePhotosGridDensityQuery: () => ({ data: undefined, refetch: vi.fn() }) }))
 vi.mock("@/features/drive/hooks/useMarqueeSelection", () => ({ useMarqueeSelection: () => ({ rect: null, onPointerDown: vi.fn() }) }))
 vi.mock("@/features/photos/components/photoTile", () => ({ PhotoTile: () => null }))
+vi.mock("@/features/drive/components/searchInput", () => ({ SearchInput: () => null }))
 vi.mock("@/components/ui/tooltip", () => ({
 	Tooltip: (props: { children: ReactNode }) => props.children,
 	TooltipTrigger: (props: { render: ReactNode }) => props.render,
@@ -96,13 +97,18 @@ afterEach(cleanup)
 describe("PhotoGrid — selection reconcile", () => {
 	it("hands the bulk bar and the dialogs a selected photo as the grid now holds it", () => {
 		const selected = [photo("p1", "old.jpg"), photo("p2", "beach.jpg")]
-		const { rerender } = render(createElement(PhotoGrid, { rootUuid: ROOT, items: selected }))
+		const { rerender } = render(createElement(PhotoGrid, { rootUuid: ROOT, listing: { photos: selected, folders: {} } }))
 
 		// After the grid's own reset on mount, as a click would.
 		act(() => {
 			usePhotosStore.setState({ selectedItems: selected })
 		})
-		rerender(createElement(PhotoGrid, { rootUuid: ROOT, items: [photo("p1", "new.jpg"), photo("p2", "beach.jpg")] }))
+		rerender(
+			createElement(PhotoGrid, {
+				rootUuid: ROOT,
+				listing: { photos: [photo("p1", "new.jpg"), photo("p2", "beach.jpg")], folders: {} }
+			})
+		)
 
 		expect(screen.getByTestId("bulk-bar").textContent).toBe("new.jpg|beach.jpg")
 		expect(names(dialogHostSelection.current)).toBe("new.jpg|beach.jpg")
