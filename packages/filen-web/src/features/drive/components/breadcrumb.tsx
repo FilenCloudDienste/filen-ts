@@ -1,5 +1,5 @@
 import { Fragment } from "react"
-import { Link, useNavigate } from "@tanstack/react-router"
+import { useLinkProps, useNavigate } from "@tanstack/react-router"
 import { useTranslation } from "react-i18next"
 import { ChevronRightIcon } from "lucide-react"
 import { canWriteVariant, type DriveVariant } from "@/features/drive/lib/preferences"
@@ -66,13 +66,15 @@ function CrumbLink({ variant, routeId, splatValue, targetUuid, targetAncestry, l
 		acceptFiles: canWriteVariant(variant, targetUuid)
 	})
 
+	const linkProps = useLinkProps({ to: routeId, params: { _splat: splatValue } })
+
 	return (
-		<Link
-			to={routeId}
-			params={{ _splat: splatValue }}
-			// A crumb link is always an ancestor (the current segment is a plain span), yet the router's
-			// default prefix match marks it active, handing it aria-current="page" alongside the real one.
-			activeOptions={{ exact: true }}
+		<a
+			{...linkProps}
+			// A crumb link is always an ancestor (the current segment is a plain span), yet the router marks
+			// it current whenever its location matches: by prefix, and exactly for the moment a navigation to
+			// it has started but this breadcrumb still shows the old path. Link always sets the attribute.
+			aria-current={undefined}
 			onDragEnter={drop.onDragEnter}
 			onDragOver={drop.onDragOver}
 			onDragLeave={drop.onDragLeave}
@@ -80,7 +82,7 @@ function CrumbLink({ variant, routeId, splatValue, targetUuid, targetAncestry, l
 			className={cn(CRUMB_LINK_CLASS, "rounded-sm px-1", drop.isOver && "text-foreground", dropHighlightClass(drop))}
 		>
 			{label}
-		</Link>
+		</a>
 	)
 }
 
