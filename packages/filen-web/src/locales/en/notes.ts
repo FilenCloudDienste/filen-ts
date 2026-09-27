@@ -305,15 +305,17 @@ export const notes = {
 	/** Delete-tag confirm dialog — body */
 	noteTagDeleteDialogBody: "Notes carrying this tag are not deleted — they only lose the tag. This cannot be undone.",
 
-	// ── Realtime remote-edit banner ──────────────────────────────────────────────
-	/** Reload-vs-keep banner — title (the note changed on the server while you have unsaved edits) */
-	noteRemoteEditTitle: "Updated elsewhere",
-	/** Reload-vs-keep banner — body */
-	noteRemoteEditBody: "This note changed on another device.",
-	/** Reload-vs-keep banner — take the server version, discarding local edits */
-	noteRemoteEditReload: "Reload",
-	/** Reload-vs-keep banner — dismiss and keep the local edits */
-	noteRemoteEditKeep: "Keep mine",
+	// ── Changes made elsewhere ───────────────────────────────────────────────────
+	/** Remote-change dialog — title, shown while this note is being edited and a newer version of it is saved elsewhere (another device, another tab, or another participant) */
+	noteRemoteEditTitle: "This note changed elsewhere",
+	/** Remote-change dialog — body */
+	noteRemoteEditBody: "A newer version of this note was saved while you were editing it. What should happen to your changes?",
+	/** Title of the note the local changes are written to by the remote-change dialog's "Save mine as copy"; {{title}} is the note's title, {{date}} the current date and time */
+	noteRemoteEditCopyTitle: "{{title}} (conflicted copy {{date}})",
+	/** Toast after the local changes were written to a new note; {{title}} is its title */
+	noteRemoteEditSavedAsCopy: 'Saved your changes as "{{title}}".',
+	/** Toast when the open note, with no local changes, now shows a newer version saved elsewhere */
+	noteUpdatedElsewhere: "Updated with changes saved elsewhere.",
 
 	// ── Participants dialog ────────────────────────────────────────────────────
 	/** Participants dialog — title */

@@ -875,6 +875,14 @@ const api = {
 		const parent = await resolveNormalDirParent(c, parentUuid)
 		return c.uploadFile(data, { parent, name, ...(mime ? { mime } : {}) })
 	},
+	// Whether `name` is taken in the directory. uploadFileBytes onto a taken file name makes a new
+	// version of THAT file, so a caller writing a fresh file checks here first.
+	async nameExistsInDirectory(parentUuid: string | null, name: string): Promise<boolean> {
+		const c = requireClient()
+		const parent = await resolveNormalDirParent(c, parentUuid)
+
+		return (await c.findItemInDir(parent, name)) !== undefined
+	},
 	// ── Download ───────────────────────────────────────────────────────────────
 	// The reverse of uploadFile: the WritableStream SINK arrives via Comlink.transfer (a transferable
 	// stream, moved once — the decrypted bytes stream through it and are pulled on the main side, never

@@ -8,6 +8,7 @@ import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
 import { MarkdownRenderer } from "@/features/preview/components/markdownRenderer"
 import { usePreviewUnsavedGuardStore } from "@/features/preview/store/usePreviewUnsavedGuard"
 import { errorLabel } from "@/lib/i18n/errorLabel"
+import { IN_EDITORS, useAction } from "@/lib/keymap/useAction"
 import { Button } from "@/components/ui/button"
 import { LoadingState } from "@/components/loadingState"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
@@ -86,6 +87,20 @@ function MarkdownViewer({ item, alt, editable = false, onDirtyChange, contentRef
 	// discard the buffer and strand the overlay's dirty flag. Read from the guard store, the single
 	// definition the overlay's own Save button reads too.
 	const dirty = usePreviewUnsavedGuardStore(state => state.dirty)
+
+	// Locked while dirty, like the toolbar's own toggle (see above). Works with the cursor in the editor too.
+	useAction(
+		"editor.togglePreview",
+		keyboardEvent => {
+			keyboardEvent.preventDefault()
+
+			if (!dirty) {
+				setMode(prev => (prev === "rendered" ? "source" : "rendered"))
+			}
+		},
+		IN_EDITORS,
+		[dirty]
+	)
 
 	if (result.status === "pending") {
 		return (

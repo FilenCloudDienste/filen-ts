@@ -81,6 +81,7 @@ function mockTransport() {
 		requestState: vi.fn<() => void>(),
 		broadcastState: vi.fn<(state: InflightChatMessages) => void>(),
 		broadcastLeaderHello: vi.fn<() => void>(),
+		broadcastPushed: vi.fn<(id: string, hash: string) => void>(),
 		close: vi.fn<() => void>()
 	}
 }

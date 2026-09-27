@@ -12,13 +12,15 @@ import { log } from "@/lib/log"
 // differ; the plumbing is identical. This channel NEVER touches the db RPC protocol.
 
 // follower → leader: forward one edit (envelope-encoded feature payload) / request a flush / request state.
-// leader → followers: authoritative state (envelope-encoded) + a takeover announcement.
+// leader → followers: authoritative state (envelope-encoded) + a takeover announcement + the hash of what
+// was just pushed for an item, so a follower knows the item's socket echo for its own.
 export type OutboxChannelMsg =
 	| { kind: "enqueue"; payload: string }
 	| { kind: "executeNow" }
 	| { kind: "stateRequest" }
 	| { kind: "state"; payload: string }
 	| { kind: "leaderHello" }
+	| { kind: "pushed"; id: string; hash: string }
 
 // The domain-agnostic transport a Sync class depends on: E is the follower's forwarded-edit shape, S the
 // leader's broadcast-state shape. Both cross the channel as $bigint envelopes. A single-tab install attaches
@@ -31,6 +33,7 @@ export interface OutboxChannelTransport<E, S> {
 	// leader → followers
 	broadcastState: (state: S) => void
 	broadcastLeaderHello: () => void
+	broadcastPushed: (id: string, hash: string) => void
 	// Terminal teardown (logout/shutdown): detach the handler and close the channel so no late cross-tab
 	// message can reach an outbox that is tearing down — the invariant that gates the plaintext-queue wipe.
 	close: () => void
@@ -58,6 +61,9 @@ export function makeOutboxChannelTransport<E, S>(channel: BroadcastChannel): Out
 		},
 		broadcastLeaderHello: () => {
 			post({ kind: "leaderHello" })
+		},
+		broadcastPushed: (id, hash) => {
+			post({ kind: "pushed", id, hash })
 		},
 		close: () => {
 			closeOutbox(channel)

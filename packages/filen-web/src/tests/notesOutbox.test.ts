@@ -50,6 +50,7 @@ import useNotesInflightStore, {
 	type InflightContent
 } from "@/features/notes/store/useNotesInflight"
 import { reconcileFollower, hashNoteContent, type RemoteEnqueue } from "@/features/notes/lib/sync.logic"
+import { isOwnNotePush } from "@/features/notes/lib/pushEchoes"
 
 function makeNote(uuid: string, overrides: Partial<Note> = {}): Note {
 	return {
@@ -80,6 +81,7 @@ function mockTransport() {
 		requestState: vi.fn<() => void>(),
 		broadcastState: vi.fn<(state: InflightContent) => void>(),
 		broadcastLeaderHello: vi.fn<() => void>(),
+		broadcastPushed: vi.fn<(id: string, hash: string) => void>(),
 		close: vi.fn<() => void>()
 	}
 }
@@ -379,6 +381,33 @@ describe("promoteToLeader — a follower wins the lock and pushes carried-over w
 		// Z reaches the server without any user action, and this tab announced its takeover.
 		expect(setNoteContent).toHaveBeenCalledWith(note, "z-edit", expect.any(String))
 		expect(transport.broadcastLeaderHello).toHaveBeenCalledTimes(1)
+	})
+
+	it("records what it pushes and tells the other tabs, before the push goes out", async () => {
+		const s = new Sync()
+		const transport = mockTransport()
+
+		s.attachTransport(transport)
+		s.startAsFollower()
+
+		const note = makeNote("p")
+
+		await s.enqueue(note, "p-edit", null)
+
+		listNotes.mockResolvedValue([note])
+		getNoteContent.mockResolvedValue("")
+		// The echo can beat the response: by the time the request is made, the push is already known.
+		setNoteContent.mockImplementation(() => {
+			expect(isOwnNotePush("p", hashNoteContent("p-edit"))).toBe(true)
+			expect(transport.broadcastPushed).toHaveBeenCalledWith("p", hashNoteContent("p-edit"))
+
+			return Promise.resolve(note)
+		})
+
+		s.promoteToLeader()
+		await flushAsync()
+
+		expect(setNoteContent).toHaveBeenCalledTimes(1)
 	})
 
 	it("merges disk state persisted by the dead leader with the follower's local store, then pushes", async () => {

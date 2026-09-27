@@ -10,7 +10,7 @@ import { toastBulkOutcome } from "@/features/drive/lib/bulkToast"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { usePhotosStore } from "@/features/photos/store/usePhotosStore"
 import { type PreviewSource, previewSourceKey, stepPreviewSourceIndex } from "@/features/preview/lib/previewSource"
-import { reconcilePreviewSources, subscribePreviewReconcile } from "@/features/preview/lib/previewReconcile"
+import { previewProtectedUuid, reconcilePreviewSources, subscribePreviewReconcile } from "@/features/preview/lib/previewReconcile"
 import { PreviewOverlay } from "@/features/preview/components/previewOverlay"
 import { PHOTOS_PREVIEW_HIDDEN_ACTION_IDS } from "@/features/photos/lib/itemActions"
 import { VersionsDialog } from "@/features/drive/components/versionsDialog"
@@ -81,7 +81,8 @@ export function usePhotosDialogHost({ rootUuid, selectedItems }: UsePhotosDialog
 					return prev
 				}
 
-				const next = reconcilePreviewSources({ sources: prev.previewSources, index: prev.index }, event)
+				const state = { sources: prev.previewSources, index: prev.index }
+				const next = reconcilePreviewSources(state, event, previewProtectedUuid(state))
 
 				if (next === null) {
 					return null

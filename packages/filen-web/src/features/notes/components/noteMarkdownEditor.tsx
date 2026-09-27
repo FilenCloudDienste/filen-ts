@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { IN_EDITORS, useAction } from "@/lib/keymap/useAction"
 import { CodeMirrorSource } from "@/features/preview/components/codeMirrorSource"
 import { MarkdownRenderer } from "@/features/preview/components/markdownRenderer"
 import { MarkdownSplitPane } from "@/features/notes/components/markdownSplitPane"
@@ -10,8 +11,20 @@ import type { Note } from "@filen/sdk-rs"
 // types — `previewValue` seeds from the controller seed and advances on every change alongside the
 // outbox enqueue. The CALLER keys this on controller.remountKey, so both the editor buffer and this
 // previewValue re-seed together on a real reseed and never mid-edit (EDITOR INVARIANT).
+//
+// editor.togglePreview hides the preview pane, giving the editor the whole width, and brings it back.
 export function NoteMarkdownEditor({ note, controller }: { note: Note; controller: NoteEditorController }) {
 	const [previewValue, setPreviewValue] = useState(controller.seed)
+	const [previewHidden, setPreviewHidden] = useState(false)
+
+	useAction(
+		"editor.togglePreview",
+		keyboardEvent => {
+			keyboardEvent.preventDefault()
+			setPreviewHidden(prev => !prev)
+		},
+		IN_EDITORS
+	)
 
 	function handleChange(value: string): void {
 		setPreviewValue(value)
@@ -35,6 +48,7 @@ export function NoteMarkdownEditor({ note, controller }: { note: Note; controlle
 					alt={note.title ?? ""}
 				/>
 			}
+			rightHidden={previewHidden}
 		/>
 	)
 }

@@ -28,7 +28,7 @@ import { driveListingQueryUpdate } from "@/features/drive/queries/drive"
 import { toastBulkOutcome } from "@/features/drive/lib/bulkToast"
 import { sdkApi } from "@/lib/sdk/client"
 import { errorLabel } from "@/lib/i18n/errorLabel"
-import { useAction } from "@/lib/keymap/useAction"
+import { IN_EDITORS, useAction } from "@/lib/keymap/useAction"
 import { log } from "@/lib/log"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { cn, driveItemName } from "@filen/shared"
@@ -51,6 +51,8 @@ import { setPreviewDirty, usePreviewUnsavedGuardStore } from "@/features/preview
 import { type PreviewSource, previewSourceKey, previewSourceName } from "@/features/preview/lib/previewSource"
 import { clearVideoPlaybackStates } from "@/features/preview/lib/videoContinuity"
 import { clearPreviewCache } from "@/features/preview/lib/previewCache"
+import { usePreviewRemoteChanges } from "@/features/preview/hooks/usePreviewRemoteChanges"
+import { RemoteChangeDialog } from "@/features/preview/components/remoteChangeDialog"
 import { DriveDropdownMenuContent } from "@/features/drive/components/itemMenu"
 import { type ItemActionDialogKind, type ItemActionId } from "@/features/drive/components/itemMenu.logic"
 import { MoveTargetDialog } from "@/features/drive/components/moveTargetDialog"
@@ -59,6 +61,8 @@ import { LinkDialog } from "@/features/drive/components/linkDialog"
 import { ContactPickerDialog } from "@/features/drive/components/contactPickerDialog"
 import { VersionsDialog } from "@/features/drive/components/versionsDialog"
 import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { Kbd } from "@/lib/keymap/kbd"
 import { Spinner } from "@/components/ui/spinner"
 import { LoadingState } from "@/components/loadingState"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
@@ -75,6 +79,8 @@ const PdfViewer = lazy(() => import("@/features/preview/components/pdfViewer"))
 const DocxViewer = lazy(() => import("@/features/preview/components/docxViewer"))
 const TextViewer = lazy(() => import("@/features/preview/components/textViewer"))
 const MarkdownViewer = lazy(() => import("@/features/preview/components/markdownViewer"))
+// @codemirror/merge, for the remote-change dialog's comparison only.
+const RemoteFileCompare = lazy(() => import("@/features/preview/components/remoteCompare"))
 
 // Module scope, not an inline arrow: useBlocker's registration effect lists shouldBlockFn in its own
 // deps, so a per-render identity would unregister/re-register the history blocker on every render.
@@ -200,6 +206,9 @@ export function PreviewOverlay({
 	// (never the already-overridden `driveItem.data.uuid`), so a repeat save of the same slot overwrites
 	// the same entry instead of chaining a new key. Drive arm only — the external arm has no save.
 	const [saved, setSaved] = useState<ReadonlyMap<string, DriveItem>>(() => new Map<string, DriveItem>())
+	// The same map for code running outside a render (the remote-change handlers), which may apply two
+	// overrides before the next render. Every write goes through commitSaved, keeping the two equal.
+	const savedRef = useRef(saved)
 	// Single-slot (unlike `saved` above): keyed to the CURRENT pager slot only, so navigating away and
 	// back can forget an earlier slot's lock (accepted — the guarded failure re-asserts on the next
 	// failed save). Mirrors mobile parity's "a failed save locks the file read-only" rule; cleared by a
@@ -257,6 +266,17 @@ export function PreviewOverlay({
 		isEditable(driveItem, variant) &&
 		lockedReadOnly?.forUuid !== rawDriveItem.data.uuid
 
+	function commitSaved(frozenUuid: string, item: DriveItem): void {
+		const next = new Map(savedRef.current).set(frozenUuid, item)
+
+		savedRef.current = next
+		setSaved(next)
+	}
+
+	// Newer versions of the pager's files saved elsewhere, and a trash, delete or move of the file on
+	// screen while it holds unsaved edits: shown in place, or asked about (RemoteChangeDialog below).
+	const remote = usePreviewRemoteChanges({ variant, items, index, savedRef, commitSaved, contentRef, onItemRemoved })
+
 	// Header item-menu action handlers — every one below only ever runs against `driveItem`/`rawDriveItem`
 	// at the CURRENT slot (the menu is only ever mounted for it, see the header JSX). Rename/favorite
 	// write into the same per-slot `saved` override map performSave already uses, so the header title and
@@ -278,7 +298,7 @@ export function PreviewOverlay({
 			return
 		}
 
-		setSaved(prev => new Map(prev).set(rawDriveItem.data.uuid, outcome.item))
+		commitSaved(rawDriveItem.data.uuid, outcome.item)
 		setMenuDialogKind(null)
 	}
 
@@ -343,7 +363,7 @@ export function PreviewOverlay({
 			return
 		}
 
-		setSaved(prev => new Map(prev).set(rawDriveItem.data.uuid, item))
+		commitSaved(rawDriveItem.data.uuid, item)
 		onFavoriteToggled?.(item)
 	}
 
@@ -619,6 +639,7 @@ export function PreviewOverlay({
 		}
 
 		setSaving(true)
+		remote.saveStarted()
 
 		const outcome = await runPreviewSave(
 			{
@@ -633,6 +654,7 @@ export function PreviewOverlay({
 
 		if (outcome.status === "error") {
 			toast.error(errorLabel(outcome.dto))
+			remote.saveSettled(null)
 
 			if (isUnresolvableParentError(outcome.dto)) {
 				setLockedReadOnly({ forUuid: targetRawItem.data.uuid })
@@ -644,13 +666,15 @@ export function PreviewOverlay({
 
 		// Keyed by the FROZEN slot uuid (targetRawItem), never targetItem's own uuid — see `saved`'s own
 		// comment on why that's what makes a chained re-save of the same slot collapse onto one entry.
-		setSaved(prev => new Map(prev).set(targetRawItem.data.uuid, outcome.item))
+		commitSaved(targetRawItem.data.uuid, outcome.item)
 		// A cut of the file now moves the saved version, not the one archived under the old uuid.
 		followClipboardItem(outcome.item, targetItem.data.uuid)
 		setPreviewDirty(false)
 		// The remounted viewer re-seeds this itself when it mounts an editor; markdown returns in RENDERED
 		// mode and mounts none, so a stale buffer would otherwise stay readable to a second save.
 		contentRef.current = null
+		// Last, so a version saved elsewhere after this one is judged against it, and as clean.
+		remote.saveSettled(outcome.item)
 	}
 
 	useAction(
@@ -661,7 +685,7 @@ export function PreviewOverlay({
 			keyboardEvent.preventDefault()
 			void performSave()
 		},
-		{ enableOnContentEditable: true },
+		IN_EDITORS,
 		[editable, dirty, saving, driveItem, rawDriveItem]
 	)
 
@@ -688,7 +712,15 @@ export function PreviewOverlay({
 		run()
 	}
 
-	function handleOpenChange(next: boolean): void {
+	function handleOpenChange(next: boolean, details: DialogPrimitive.Root.ChangeEventDetails): void {
+		// An Escape something inside took already, the editor's find panel closing say, is not a close:
+		// Base UI hears it at the document, after the editor.
+		if (!next && details.reason === "escape-key" && details.event.defaultPrevented) {
+			details.cancel()
+
+			return
+		}
+
 		if (!next) {
 			// Chrome always returns on the Escape/backdrop/X close path — unconditionally, even if
 			// requestOrRun below ends up only opening the unsaved-changes prompt rather than actually
@@ -833,6 +865,8 @@ export function PreviewOverlay({
 	}
 
 	const name = previewSourceName(currentSource)
+	// The newer version the remote-change dialog asks about, for its comparison.
+	const remoteTheirs = remote.prompt?.kind === "revised" ? remote.prompt.theirs : undefined
 
 	return (
 		<DialogPrimitive.Root
@@ -862,17 +896,27 @@ export function PreviewOverlay({
 					>
 						<PreviewName name={name} />
 						{editable && dirty ? (
-							<Button
-								variant="ghost"
-								size="icon-sm"
-								disabled={saving}
-								aria-label={t("previewSaveAction")}
-								onClick={() => {
-									void performSave()
-								}}
-							>
-								{saving ? <Spinner className="size-4" /> : <SaveIcon />}
-							</Button>
+							<Tooltip>
+								<TooltipTrigger
+									render={
+										<Button
+											variant="ghost"
+											size="icon-sm"
+											disabled={saving}
+											aria-label={t("previewSaveAction")}
+											onClick={() => {
+												void performSave()
+											}}
+										>
+											{saving ? <Spinner className="size-4" /> : <SaveIcon />}
+										</Button>
+									}
+								/>
+								<TooltipContent>
+									{t("previewSaveAction")}
+									<Kbd action="preview.save" />
+								</TooltipContent>
+							</Tooltip>
 						) : null}
 						<Button
 							variant="ghost"
@@ -1005,6 +1049,35 @@ export function PreviewOverlay({
 					{/* The header item-menu's own secondary dialog (rename/move/trash/etc.) — same nesting
 					precedent as the unsaved-changes ConfirmDialog above. */}
 					{renderMenuDialog()}
+					{remote.prompt !== null && driveItem !== undefined ? (
+						<RemoteChangeDialog
+							key={remote.prompt.kind === "revised" ? remote.prompt.theirs.data.uuid : `deleted:${remote.prompt.frozenUuid}`}
+							kind={remote.prompt.kind}
+							title={t(remote.prompt.kind === "revised" ? "previewRemoteChangedTitle" : "previewRemoteDeletedTitle")}
+							body={t(remote.prompt.kind === "revised" ? "previewRemoteChangedBody" : "previewRemoteDeletedBody", { name })}
+							renderCompare={
+								remoteTheirs !== undefined && isEditable(driveItem, variant)
+									? mine => (
+											<Suspense fallback={<LoadingState size="lg" />}>
+												<RemoteFileCompare
+													theirs={remoteTheirs}
+													mine={mine}
+													name={name}
+												/>
+											</Suspense>
+										)
+									: undefined
+							}
+							readMine={() => contentRef.current ?? undefined}
+							pending={remote.pending}
+							onKeepMine={remote.keepMine}
+							onLoadTheirs={remote.loadTheirs}
+							onSaveMineAsNew={() => {
+								void remote.saveMineAsNewFile()
+							}}
+							onDiscardMine={remote.discardMine}
+						/>
+					) : null}
 				</DialogPrimitive.Popup>
 			</DialogPrimitive.Portal>
 		</DialogPrimitive.Root>

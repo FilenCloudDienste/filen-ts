@@ -1,4 +1,5 @@
-import { createNotePreviewFromContentText } from "@filen/shared"
+import { toast } from "sonner"
+import { createNotePreviewFromContentText, hashNoteContent } from "@filen/shared"
 import type { SocketEvent, UserInfo, Note } from "@filen/sdk-rs"
 import { registerSocketHandler, decryptedOrSkip } from "@/lib/sdk/socket"
 import { queryClient } from "@/queries/client"
@@ -8,8 +9,14 @@ import useNotesInflightStore, { isNoteEditing, endEditingSession } from "@/featu
 import { useNotesRemoteEditStore } from "@/features/notes/store/useNoteRemoteEdit"
 import { sync } from "@/features/notes/lib/sync"
 import { noteKindForPreview } from "@/features/notes/lib/sync.logic"
-import { notesQueryUpdate, notesQueryRemove, notesQueryGet, notesQueryRefetch } from "@/features/notes/queries/notes"
+import { notesQueryUpdate, notesQueryRemove, notesQueryGet, notesQueryRefetch, notesQueryUpsert } from "@/features/notes/queries/notes"
 import { markNoteContentUnsynced, noteContentQueryKey } from "@/features/notes/queries/noteContent"
+import { localNoteContent } from "@/features/notes/lib/localContent"
+import { isOwnNotePush } from "@/features/notes/lib/pushEchoes"
+import { sdkApi } from "@/lib/sdk/client"
+import { i18n } from "@/lib/i18n"
+import { asErrorDTO } from "@/lib/sdk/errors"
+import { runOp, type ActionOutcome } from "@/lib/actions/outcome"
 
 // The realtime note event handlers — a faithful port of filen-mobile's socketHandlers.ts SEMANTICS
 // onto the wasm surface (flat discriminated `event.inner.type`, string-union noteType, MaybeEncrypted
@@ -133,15 +140,18 @@ function handleContentEdited(inner: Extract<NoteSocketEvent["inner"], { type: "c
 	// Before every early return below: whichever branch runs, the cached content may now be behind.
 	markNoteContentUnsynced(inner.note)
 
-	// Echo suppression — mobile keys on editorId === own userId (screens content/index.tsx): the server
-	// echoes a note author's OWN edit back to them, and applying it would clobber the editor. All our
-	// tabs share one userId, so cross-TAB echoes are suppressed too — correct as long as tabs stay
-	// uncoordinated by a per-tab leader (there is none today). A missing account id (cache not warm) can't
-	// suppress; it falls through to the dirty/clean branch below, which is safe (a clean note refetches
-	// server-authoritative content anyway).
-	const userId = currentUserId()
+	const content = decryptedOrSkip(inner.content, "note contentEdited")
 
-	if (userId !== undefined && BigInt(inner.editorId) === userId) {
+	// Echo suppression. The server sends an edit back to every session of its author, this browser's own
+	// pushes included, and applying one would clobber the editor. Another user's edit is never ours. One
+	// of this account's is ours only when its content is something this browser pushed (pushEchoes.ts,
+	// shared by every tab): the same account editing on another device is an edit like anyone else's.
+	// Content that can't be decrypted can't be recognised, and is taken for ours, as is every edit of
+	// this account's while the account id is not known yet (cache not warm).
+	const userId = currentUserId()
+	const ownAccount = userId === undefined || BigInt(inner.editorId) === userId
+
+	if (ownAccount && (content === undefined || isOwnNotePush(inner.note, hashNoteContent(content)))) {
 		// The row is not patched either: an echo may be older than this tab's own later change. A stale
 		// type is not cosmetic, the next content push sends it back, so an echo whose type differs from
 		// the row (a retype on another device of this account) re-reads the list instead of patching it.
@@ -170,27 +180,35 @@ function handleContentEdited(inner: Extract<NoteSocketEvent["inner"], { type: "c
 	// is the wrong test — a push empties it, so a note being typed into reads as clean for the gap
 	// between the debounce flush and the next keystroke, and invalidating there refetches, advances the
 	// content query's dataUpdatedAt and remounts the live editor, dropping the caret mid-word. Dirty →
-	// PROMPT (banner); never invalidate while editing (the query is disabled, so it would only defer).
+	// ASK (the editor's remote-change dialog); never invalidate while editing (the query is disabled, so
+	// it would only defer). Content equal to the local edits is no change at all.
 	if (isNoteEditing(inner.note)) {
-		useNotesRemoteEditStore.getState().setRemoteEdited(inner.note)
+		if (content === undefined || content !== localNoteContent(inner.note)) {
+			useNotesRemoteEditStore.getState().setRemoteEdited(inner.note, { theirs: content })
+		}
 
 		return
 	}
 
 	// Clean → patch the row (editedTimestamp, noteType, and a fresh preview when the content decrypted)
-	// then invalidate the content query so a mounted editor reseeds with the server's version. The query
-	// is enabled (not inflight) so invalidation refetches immediately.
-	patchRowFromContentEdited(inner)
+	// then invalidate the content query so a mounted editor reseeds with the server's version, saying so
+	// when that editor is on screen. The query is enabled (not inflight) so invalidation refetches
+	// immediately.
+	patchRowFromContentEdited(inner, content)
 
 	void queryClient.invalidateQueries({ queryKey: noteContentQueryKey(inner.note) })
+
+	if (useNotesRemoteEditStore.getState().openNote === inner.note) {
+		toast(i18n.t("notes:noteUpdatedElsewhere"))
+	}
 }
 
-// The banner's "Reload" action: discard the unsynced local edit and take the server's version. dropEntry
+// The dialog's "Load theirs": discard the unsynced local edit and take the server's version. dropEntry
 // plus closing the editing session re-enable the note's content query (enabled: !editing) so its remount
 // key can advance and the editor reseeds with fresh content — a reseed is the whole point here, so this
 // is the one place that ends a session an editor is still mounted on; clearRejections + flushToDisk make
 // the discard durable with a clean strike count; invalidate marks the content stale so the re-enabled
-// query refetches. Extracted (not inlined in the banner) so this project's node-environment tests
+// query refetches. Extracted (not inlined in the dialog) so this project's node-environment tests
 // exercise it against a mocked sync + queryClient.
 export async function reloadRemoteEdit(note: Note): Promise<void> {
 	sync.dropEntry(note.uuid)
@@ -208,14 +226,56 @@ export async function reloadRemoteEdit(note: Note): Promise<void> {
 	void queryClient.invalidateQueries({ queryKey: noteContentQueryKey(note.uuid) })
 }
 
-// The banner's "Keep mine" action: dismiss the prompt, leave the outbox untouched (local wins on the
-// next push — a conflict toast may still fire, correct mobile behavior).
-export function dismissRemoteEdit(uuid: string): void {
-	useNotesRemoteEditStore.getState().clearRemoteEdited(uuid)
+// The dialog's "Keep mine": the local edits become the newest version. An unsynced edit is pushed anyway;
+// edits already pushed (the other device's save went over them) are queued again. Queued against their
+// content as the base, so the push, which the user chose, raises no overwrite warning.
+export async function keepMineOverRemoteEdit(note: Note): Promise<void> {
+	const edit = useNotesRemoteEditStore.getState().remoteEdited[note.uuid]
+
+	useNotesRemoteEditStore.getState().clearRemoteEdited(note.uuid)
+
+	const mine = localNoteContent(note.uuid)
+	const hasUnsynced = (useNotesInflightStore.getState().inflightContent[note.uuid] ?? []).length > 0
+
+	if (mine === undefined || edit === undefined) {
+		return
+	}
+
+	if (!hasUnsynced) {
+		await sync.enqueue(note, mine, edit.theirs === undefined ? null : hashNoteContent(edit.theirs))
+	}
+
+	sync.executeNow()
 }
 
-function patchRowFromContentEdited(inner: Extract<NoteSocketEvent["inner"], { type: "contentEdited" }>): void {
-	const content = decryptedOrSkip(inner.content, "note contentEdited")
+// The dialog's "Save mine as copy": the local edits go to a new note beside this one, titled as a
+// conflicted copy, and this note takes the server's version.
+export async function saveRemoteEditMineAsCopy(note: Note, title: string): Promise<ActionOutcome<Note>> {
+	const mine = localNoteContent(note.uuid)
+
+	if (mine === undefined) {
+		const message = "saveRemoteEditMineAsCopy: no local content"
+
+		return { status: "error", dto: { species: "plain", message, label: message } }
+	}
+
+	try {
+		const { duplicated } = await runOp(sdkApi.duplicateNote(note))
+		const retitled = await runOp(sdkApi.setNoteTitle(duplicated, title))
+
+		await runOp(sdkApi.setNoteContent(retitled, mine, createNotePreviewFromContentText(noteKindForPreview(retitled.noteType), mine)))
+
+		queryClient.setQueryData(noteContentQueryKey(retitled.uuid), mine)
+		notesQueryUpsert(retitled)
+		await reloadRemoteEdit(note)
+
+		return { status: "success", item: retitled }
+	} catch (e) {
+		return { status: "error", dto: asErrorDTO(e) }
+	}
+}
+
+function patchRowFromContentEdited(inner: Extract<NoteSocketEvent["inner"], { type: "contentEdited" }>, content: string | undefined): void {
 	const preview = content !== undefined ? createNotePreviewFromContentText(noteKindForPreview(inner.noteType), content) : undefined
 
 	notesQueryUpdate(prev =>

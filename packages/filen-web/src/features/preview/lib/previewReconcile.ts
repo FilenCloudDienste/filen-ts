@@ -1,6 +1,8 @@
 import type { DirMeta, FileMeta } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { type PreviewSource } from "@/features/preview/lib/previewSource"
+import { type PreviewRevision } from "@/features/preview/lib/remoteChange.logic"
+import { usePreviewUnsavedGuardStore } from "@/features/preview/store/usePreviewUnsavedGuard"
 import { log } from "@/lib/log"
 
 // The seam that keeps an OPEN preview pager in sync with realtime drive mutations from ANOTHER device.
@@ -11,15 +13,22 @@ import { log } from "@/lib/log"
 // filen-mobile's gallery driveItemUpdated / driveItemRemoved subscribers, over the web's frozen-snapshot
 // pager instead of a live store. Emitting with no open preview is a silent no-op (zero listeners).
 
-// Removed: the item left this listing (trash / move-out / permanent-delete / restore-from-trash) — drop
-// it from the pager (advance to a neighbour, or close once it was the only slot). Replaced: a version
-// restore rotated the item's uuid — swap the whole item so the page reseeds fresh content. FileMeta /
-// FolderMeta: a rename (or other metadata change) — merge the new meta into the frozen item so the header
-// title updates in place. The two meta arms stay split because FileMeta and DirMeta are indistinguishable
-// at runtime (same `{ type: "decoded", … }` wrapper) — the emitter knows which family fired.
+// Removed: the item left this listing (trash / move-out / permanent-delete) — drop
+// it from the pager (advance to a neighbour, or close once it was the only slot). Moved: a file left for
+// another directory; the same, except that the overlay keeps a file with unsaved edits open on its new
+// location. Restored: an item came back out of the trash, which the trash's own pager drops like a
+// removal. FileMeta / FolderMeta: a rename (or other metadata change) — merge the new meta into the
+// frozen item so the header title updates in place. The two meta arms stay split because FileMeta and
+// DirMeta are indistinguishable at runtime (same `{ type: "decoded", … }` wrapper) — the emitter knows
+// which family fired. Revised (a newer version of a file, saved elsewhere or restored) and resync (the
+// socket came back after a drop, so revisions may have been missed) leave the pager alone: the overlay
+// answers them itself (usePreviewRemoteChanges), as the answer depends on its unsaved edits.
 export type PreviewReconcileEvent =
 	| { type: "removed"; uuid: string }
-	| { type: "replaced"; previousUuid: string; item: DriveItem }
+	| { type: "restored"; uuid: string }
+	| { type: "moved"; item: DriveItem }
+	| { type: "revised"; revision: PreviewRevision }
+	| { type: "resync" }
 	| { type: "fileMeta"; uuid: string; meta: FileMeta }
 	| { type: "folderMeta"; uuid: string; meta: DirMeta }
 
@@ -59,8 +68,22 @@ export function emitPreviewItemRemoved(uuid: string): void {
 	emit({ type: "removed", uuid })
 }
 
-export function emitPreviewItemReplaced(previousUuid: string, item: DriveItem): void {
-	emit({ type: "replaced", previousUuid, item })
+// A restore out of the trash: the trash's pager drops the item, and an overlay asking about the file's
+// deletion can stop asking.
+export function emitPreviewItemRestored(uuid: string): void {
+	emit({ type: "restored", uuid })
+}
+
+export function emitPreviewItemMoved(item: DriveItem): void {
+	emit({ type: "moved", item })
+}
+
+export function emitPreviewFileRevised(revision: PreviewRevision): void {
+	emit({ type: "revised", revision })
+}
+
+export function emitPreviewResync(): void {
+	emit({ type: "resync" })
 }
 
 export function emitPreviewFileMetaChanged(uuid: string, meta: FileMeta): void {
@@ -94,13 +117,6 @@ function removeSource(state: PreviewPagerState, uuid: string): PreviewPagerState
 	return { sources: remaining, index: Math.max(0, Math.min(anchored, remaining.length - 1)) }
 }
 
-// Swaps the whole item on every drive source matching `previousUuid` (a version restore rotates the uuid,
-// so the frozen snapshot's stale copy would otherwise stream a uuid the backend no longer serves). Index
-// is unchanged — the slot stays in place, only its content reseeds.
-function replaceSource(sources: PreviewSource[], previousUuid: string, item: DriveItem): PreviewSource[] {
-	return sources.map(source => (source.type === "drive" && source.item.data.uuid === previousUuid ? { type: "drive", item } : source))
-}
-
 // Merges fresh file meta into the matching OWNED-file source and re-narrows so the derived name /
 // undecryptable flag reflect the rename. Only the base "file" arm is rebuildable from `{ ...data, meta }`
 // (a shared arm carries extra sharing context this sparse event can't reconstruct) — the same arm
@@ -122,15 +138,31 @@ function patchFolderMeta(sources: PreviewSource[], uuid: string, meta: DirMeta):
 	)
 }
 
+// The uuid of the slot on screen while it holds unsaved edits. A removal of that slot is the overlay's to
+// answer (it asks what to do with the edits, or follows a moved file), so the pager keeps it meanwhile.
+export function previewProtectedUuid(state: PreviewPagerState): string | null {
+	const source = state.sources[state.index]
+
+	return usePreviewUnsavedGuardStore.getState().dirty && source?.type === "drive" ? source.item.data.uuid : null
+}
+
 // Pure fold of one reconcile event into the pager state — the dialog host runs this inside its
-// setActiveDialog updater. Returns null only when a removal emptied the pager (close the preview);
-// otherwise the (possibly unchanged) next state.
-export function reconcilePreviewSources(state: PreviewPagerState, event: PreviewReconcileEvent): PreviewPagerState | null {
+// setActiveDialog updater, with previewProtectedUuid's answer. Returns null only when a removal emptied
+// the pager (close the preview); otherwise the (possibly unchanged) next state.
+export function reconcilePreviewSources(
+	state: PreviewPagerState,
+	event: PreviewReconcileEvent,
+	protectedUuid: string | null = null
+): PreviewPagerState | null {
 	switch (event.type) {
 		case "removed":
-			return removeSource(state, event.uuid)
-		case "replaced":
-			return { sources: replaceSource(state.sources, event.previousUuid, event.item), index: state.index }
+		case "restored":
+			return event.uuid === protectedUuid ? state : removeSource(state, event.uuid)
+		case "moved":
+			return event.item.data.uuid === protectedUuid ? state : removeSource(state, event.item.data.uuid)
+		case "revised":
+		case "resync":
+			return state
 		case "fileMeta":
 			return { sources: patchFileMeta(state.sources, event.uuid, event.meta), index: state.index }
 		case "folderMeta":

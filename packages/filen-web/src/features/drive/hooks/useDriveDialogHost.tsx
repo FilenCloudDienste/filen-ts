@@ -21,7 +21,7 @@ import { VersionsDialog } from "@/features/drive/components/versionsDialog"
 import { InfoDialog } from "@/features/drive/components/infoDialog"
 import { LinkDialog } from "@/features/drive/components/linkDialog"
 import { PreviewOverlay } from "@/features/preview/components/previewOverlay"
-import { reconcilePreviewSources, subscribePreviewReconcile } from "@/features/preview/lib/previewReconcile"
+import { previewProtectedUuid, reconcilePreviewSources, subscribePreviewReconcile } from "@/features/preview/lib/previewReconcile"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { TypedConfirmDialog } from "@/components/dialogs/typedConfirmDialog"
 import { InputDialog } from "@/components/dialogs/inputDialog"
@@ -83,8 +83,9 @@ export function useDriveDialogHost({ variant, selectedItems, hiddenNoticeApplies
 	// Keeps an OPEN preview in sync with realtime drive mutations from ANOTHER device. The pager steps a
 	// frozen previewSources snapshot the socket handler's listing-cache patch can't reach, so the drive
 	// handler emits a reconcile signal instead: a remote trash/move/delete advances the pager (or closes it
-	// once the last slot goes), a version restore reseeds the slot, and a rename re-derives the header
-	// title — the remote-event twin of removeCurrentPreviewItem's same-client sync. A no-op while no
+	// once the last slot goes) unless the slot on screen holds unsaved edits, which the overlay answers
+	// itself, and a rename re-derives the header title — the remote-event twin of
+	// removeCurrentPreviewItem's same-client sync. Newer versions are the overlay's alone. A no-op while no
 	// preview is open (the updater short-circuits on any non-preview dialog). setActiveDialog is a stable
 	// setState, so the subscription is set up once.
 	useEffect(() => {
@@ -94,7 +95,8 @@ export function useDriveDialogHost({ variant, selectedItems, hiddenNoticeApplies
 					return prev
 				}
 
-				const next = reconcilePreviewSources({ sources: prev.previewSources, index: prev.index }, event)
+				const state = { sources: prev.previewSources, index: prev.index }
+				const next = reconcilePreviewSources(state, event, previewProtectedUuid(state))
 
 				if (next === null) {
 					return null

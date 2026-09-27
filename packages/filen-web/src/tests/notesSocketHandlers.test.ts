@@ -9,13 +9,19 @@ vi.mock("@/lib/sdk/client", () => ({ sdkApi: { listNotes } }))
 
 // The sync outbox singleton — mocked so the reload action's seam calls are observable and sync.ts's heavy
 // deps stay out of node. The store it reads (useNotesInflight) is NOT mocked (the editing test is real).
-const { dropEntry, clearRejections, flushToDisk } = vi.hoisted(() => ({
+const { dropEntry, clearRejections, flushToDisk, enqueue, executeNow } = vi.hoisted(() => ({
 	dropEntry: vi.fn<(uuid: string) => void>(),
 	clearRejections: vi.fn<(uuid: string) => void>(),
-	flushToDisk: vi.fn<() => Promise<boolean>>(() => Promise.resolve(true))
+	flushToDisk: vi.fn<() => Promise<boolean>>(() => Promise.resolve(true)),
+	enqueue: vi.fn<(note: Note, content: string, sessionBaseHash?: string | null) => Promise<boolean>>(() => Promise.resolve(true)),
+	executeNow: vi.fn<() => void>()
 }))
 
-vi.mock("@/features/notes/lib/sync", () => ({ sync: { dropEntry, clearRejections, flushToDisk } }))
+vi.mock("@/features/notes/lib/sync", () => ({ sync: { dropEntry, clearRejections, flushToDisk, enqueue, executeNow } }))
+
+const { toast } = vi.hoisted(() => ({ toast: vi.fn() }))
+
+vi.mock("sonner", () => ({ toast }))
 
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
@@ -29,7 +35,9 @@ import { fetchNotes, NOTES_QUERY_KEY } from "@/features/notes/queries/notes"
 import { noteContentQueryKey } from "@/features/notes/queries/noteContent"
 import useNotesInflightStore, { beginEditingSession, type InflightContent } from "@/features/notes/store/useNotesInflight"
 import { useNotesRemoteEditStore } from "@/features/notes/store/useNoteRemoteEdit"
-import { handleNoteEvent, reloadRemoteEdit, dismissRemoteEdit } from "@/features/notes/lib/socketHandlers"
+import { handleNoteEvent, keepMineOverRemoteEdit, reloadRemoteEdit } from "@/features/notes/lib/socketHandlers"
+import { forgetNotePushes, rememberNotePush } from "@/features/notes/lib/pushEchoes"
+import { hashNoteContent } from "@filen/shared"
 
 function makeNote(uuid: string, overrides: Partial<Note> = {}): Note {
 	return {
@@ -85,7 +93,8 @@ beforeEach(() => {
 	testQueryClient.clear()
 	setStore({})
 	useNotesInflightStore.setState({ editingSessions: {} })
-	useNotesRemoteEditStore.setState({ remoteEdited: {} })
+	useNotesRemoteEditStore.setState({ remoteEdited: {}, openNote: null })
+	forgetNotePushes()
 	vi.clearAllMocks()
 })
 
@@ -303,9 +312,11 @@ describe("note socket handlers — contentEdited", () => {
 			editedTimestamp: 999n
 		})
 
-	it("suppresses an echo authored by the current user (editorId === own id)", () => {
+	it("suppresses the echo of this browser's own push", () => {
 		seedNotes([makeNote("a", { editedTimestamp: 1n })])
 		setAccountId(7n)
+		beginEditingSession("a")
+		rememberNotePush("a", hashNoteContent("server text"))
 		const invalidate = vi.spyOn(testQueryClient, "invalidateQueries")
 
 		handleNoteEvent(contentEdited("a", 7))
@@ -313,6 +324,68 @@ describe("note socket handlers — contentEdited", () => {
 		expect(getNotes()[0]?.editedTimestamp).toBe(1n)
 		expect(useNotesRemoteEditStore.getState().remoteEdited["a"]).toBeUndefined()
 		expect(invalidate).not.toHaveBeenCalled()
+	})
+
+	it("takes this account's edit of content this browser never pushed for another device's, and asks", () => {
+		seedNotes([makeNote("a", { editedTimestamp: 1n })])
+		setAccountId(7n)
+		beginEditingSession("a")
+
+		handleNoteEvent(contentEdited("a", 7))
+
+		expect(useNotesRemoteEditStore.getState().remoteEdited["a"]).toEqual({ theirs: "server text" })
+	})
+
+	it("reloads a clean note edited on another device of this account, announcing it when on screen", () => {
+		seedNotes([makeNote("a", { editedTimestamp: 1n })])
+		setAccountId(7n)
+		useNotesRemoteEditStore.getState().setOpenNote("a")
+		const invalidate = vi.spyOn(testQueryClient, "invalidateQueries")
+
+		handleNoteEvent(contentEdited("a", 7))
+
+		expect(getNotes()[0]?.editedTimestamp).toBe(999n)
+		expect(invalidate).toHaveBeenCalledWith({ queryKey: noteContentQueryKey("a") })
+		expect(toast).toHaveBeenCalledTimes(1)
+	})
+
+	it("reloads a clean note that is not on screen without a word", () => {
+		seedNotes([makeNote("a", { editedTimestamp: 1n })])
+		setAccountId(7n)
+		useNotesRemoteEditStore.getState().setOpenNote("b")
+
+		handleNoteEvent(contentEdited("a", 99))
+
+		expect(toast).not.toHaveBeenCalled()
+	})
+
+	it("takes this account's content it cannot decrypt for its own echo", () => {
+		seedNotes([makeNote("a", { editedTimestamp: 1n })])
+		setAccountId(7n)
+		beginEditingSession("a")
+
+		handleNoteEvent(
+			noteEvt({
+				type: "contentEdited",
+				note: "a" as never,
+				content: { Encrypted: "x" },
+				noteType: "text",
+				editorId: 7,
+				editedTimestamp: 999n
+			})
+		)
+
+		expect(useNotesRemoteEditStore.getState().remoteEdited["a"]).toBeUndefined()
+	})
+
+	it("does not ask when the content that arrived is what the editor already holds", () => {
+		seedNotes([makeNote("a", { editedTimestamp: 1n })])
+		setAccountId(7n)
+		setStore({ a: [{ timestamp: Date.now(), content: "server text", note: makeNote("a") }] })
+
+		handleNoteEvent(contentEdited("a", 99))
+
+		expect(useNotesRemoteEditStore.getState().remoteEdited["a"]).toBeUndefined()
 	})
 
 	it("clean note (no inflight): patches the row and invalidates the content query", () => {
@@ -336,7 +409,7 @@ describe("note socket handlers — contentEdited", () => {
 
 		handleNoteEvent(contentEdited("a", 99))
 
-		expect(useNotesRemoteEditStore.getState().remoteEdited["a"]).toBe(true)
+		expect(useNotesRemoteEditStore.getState().remoteEdited["a"]).toEqual({ theirs: "server text" })
 		expect(invalidate).not.toHaveBeenCalled()
 		expect(getNotes()[0]?.editedTimestamp).toBe(1n)
 	})
@@ -353,7 +426,7 @@ describe("note socket handlers — contentEdited", () => {
 
 		handleNoteEvent(contentEdited("a", 99))
 
-		expect(useNotesRemoteEditStore.getState().remoteEdited["a"]).toBe(true)
+		expect(useNotesRemoteEditStore.getState().remoteEdited["a"]).toEqual({ theirs: "server text" })
 		expect(invalidate).not.toHaveBeenCalled()
 		expect(getNotes()[0]?.editedTimestamp).toBe(1n)
 	})
@@ -373,6 +446,7 @@ describe("note socket handlers — contentEdited", () => {
 	it("re-reads the list for an echo whose type differs from the cached row, never patching it", async () => {
 		seedNotes([makeNote("a", { noteType: "md" })])
 		setAccountId(7n)
+		rememberNotePush("a", hashNoteContent("server text"))
 		mountList()
 
 		handleNoteEvent(contentEdited("a", 7))
@@ -384,6 +458,7 @@ describe("note socket handlers — contentEdited", () => {
 	it("reads nothing for an echo when no list read is in flight", async () => {
 		seedNotes([makeNote("a")])
 		setAccountId(7n)
+		rememberNotePush("a", hashNoteContent("server text"))
 		mountList()
 
 		handleNoteEvent(contentEdited("a", 7))
@@ -396,7 +471,7 @@ describe("note socket handlers — contentEdited", () => {
 describe("note socket handlers — reload/keep actions", () => {
 	it("reload drops the entry, clears rejections, flushes, clears the flag, and invalidates content", async () => {
 		setStore({ a: [{ timestamp: Date.now(), content: "local", note: makeNote("a") }] })
-		useNotesRemoteEditStore.getState().setRemoteEdited("a")
+		useNotesRemoteEditStore.getState().setRemoteEdited("a", { theirs: "server text" })
 		const invalidate = vi.spyOn(testQueryClient, "invalidateQueries")
 
 		await reloadRemoteEdit(makeNote("a"))
@@ -416,12 +491,25 @@ describe("note socket handlers — reload/keep actions", () => {
 		expect(useNotesInflightStore.getState().editingSessions["a"]).toBeUndefined()
 	})
 
-	it("keep clears the flag and leaves the outbox untouched", () => {
-		useNotesRemoteEditStore.getState().setRemoteEdited("a")
+	it("keep with unsynced edits clears the flag and pushes them as they are", async () => {
+		setStore({ a: [{ timestamp: Date.now(), content: "local", note: makeNote("a") }] })
+		useNotesRemoteEditStore.getState().setRemoteEdited("a", { theirs: "server text" })
 
-		dismissRemoteEdit("a")
+		await keepMineOverRemoteEdit(makeNote("a"))
 
 		expect(useNotesRemoteEditStore.getState().remoteEdited["a"]).toBeUndefined()
 		expect(dropEntry).not.toHaveBeenCalled()
+		expect(enqueue).not.toHaveBeenCalled()
+		expect(executeNow).toHaveBeenCalledTimes(1)
+	})
+
+	it("keep with edits already pushed queues them again, based on their content so no overwrite is reported", async () => {
+		testQueryClient.setQueryData(noteContentQueryKey("a"), "mine")
+		useNotesRemoteEditStore.getState().setRemoteEdited("a", { theirs: "server text" })
+
+		await keepMineOverRemoteEdit(makeNote("a"))
+
+		expect(enqueue).toHaveBeenCalledWith(expect.objectContaining({ uuid: "a" }), "mine", hashNoteContent("server text"))
+		expect(executeNow).toHaveBeenCalledTimes(1)
 	})
 })

@@ -3,6 +3,7 @@ import { type OutboxChannelMsg, makeOutboxChannelTransport, decodeOutboxPayload,
 import { sync } from "@/features/notes/lib/sync"
 import { inflightContentSchema, type RemoteEnqueue } from "@/features/notes/lib/sync.logic"
 import { setOutboxHydrated, type InflightContent } from "@/features/notes/store/useNotesInflight"
+import { rememberNotePush } from "@/features/notes/lib/pushEchoes"
 
 // Binds the leader-owned notes outbox (sync.ts) to a dedicated cross-tab channel + the db-lock leadership
 // signal, via the shared coordinator core (outboxChannel.ts). The leader tab (whoever holds the db lock) runs
@@ -34,6 +35,13 @@ const HYDRATION_BACKSTOP_MS = 5000
 // follower forwards, the follower half handles leader broadcasts. A message meant for the other role is
 // ignored — a tab never acts on its own category.
 function handleMessage(msg: OutboxChannelMsg): void {
+	// Every tab keeps the list of what the leader pushed, whichever role it holds by the time it hears.
+	if (msg.kind === "pushed") {
+		rememberNotePush(msg.id, msg.hash)
+
+		return
+	}
+
 	if (sync.outboxRole === "leader") {
 		switch (msg.kind) {
 			case "enqueue": {

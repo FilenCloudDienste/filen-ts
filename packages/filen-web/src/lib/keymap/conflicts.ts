@@ -29,12 +29,18 @@ export const CO_MOUNTABLE: readonly (readonly [ActionScope, ActionScope])[] = [
 // Collisions that already exist in the shipped defaults and are resolved by an explicit runtime
 // guard, not by luck. `drive.download` and `preview.save` share mod+s; the listing's handler checks
 // its dialog host's `isDialogOpen`, which is true exactly while the preview overlay is the open
-// dialog, so only one of the two ever does real work.
+// dialog, so only one of the two ever does real work. The listings' searches and `editor.find` share
+// mod+f: the listing handlers ignore editable content, and the editor binds its find inside CodeMirror
+// alone, so focus decides which one runs.
 //
 // The ONLY consumer is the defaults-level invariant test. `conflictingActions` deliberately does not
 // consult it: honoring it in the rebind UI would let a user create a SECOND, unguarded mod+s binding
 // and have it silently accepted.
-export const RESOLVED_COLLISIONS: readonly (readonly [string, string])[] = [["drive.download", "preview.save"]]
+export const RESOLVED_COLLISIONS: readonly (readonly [string, string])[] = [
+	["drive.download", "preview.save"],
+	["drive.search", "editor.find"],
+	["photos.search", "editor.find"]
+]
 
 export function scopesCanCollide(a: ActionScope, b: ActionScope): boolean {
 	// A scope always co-mounts with itself — binding drive.rename to mod+a while drive.selectAll holds

@@ -112,14 +112,31 @@ describe("reconcilePreviewSources — removed", () => {
 	})
 })
 
-describe("reconcilePreviewSources — replaced", () => {
-	it("swaps the item on the matching slot and holds the index", () => {
-		const sources = [fileSourceAt("old"), fileSourceAt("b")]
-		const replacement = narrowItem(mockFile({ uuid: testUuid("new") }))
-		const next = reconcilePreviewSources({ sources, index: 0 }, { type: "replaced", previousUuid: testUuid("old"), item: replacement })
+describe("reconcilePreviewSources — moved, revised, resync", () => {
+	it("drops a moved file like a removal", () => {
+		const sources = [fileSourceAt("a"), fileSourceAt("b")]
+		const moved = narrowItem(mockFile({ uuid: testUuid("a"), parent: testUuid("elsewhere") }))
+		const next = reconcilePreviewSources({ sources, index: 0 }, { type: "moved", item: moved })
 
-		expect(next?.index).toBe(0)
-		expect(next?.sources[0]?.type === "drive" ? next.sources[0].item.data.uuid : "").toBe(testUuid("new"))
+		expect(next?.sources.map(s => (s.type === "drive" ? s.item.data.uuid : ""))).toEqual([testUuid("b")])
+	})
+
+	it("keeps the protected slot through a removal, a move or a restore", () => {
+		const state = { sources: [fileSourceAt("a"), fileSourceAt("b")], index: 0 }
+		const moved = narrowItem(mockFile({ uuid: testUuid("a"), parent: testUuid("elsewhere") }))
+
+		expect(reconcilePreviewSources(state, { type: "removed", uuid: testUuid("a") }, testUuid("a"))).toBe(state)
+		expect(reconcilePreviewSources(state, { type: "moved", item: moved }, testUuid("a"))).toBe(state)
+		expect(reconcilePreviewSources(state, { type: "restored", uuid: testUuid("a") }, testUuid("a"))).toBe(state)
+		expect(reconcilePreviewSources(state, { type: "removed", uuid: testUuid("b") }, testUuid("a"))?.sources).toHaveLength(1)
+	})
+
+	it("leaves the pager alone for a revision or a resync — the overlay answers those", () => {
+		const state = { sources: [fileSourceAt("a")], index: 0 }
+		const revision = { item: narrowItem(mockFile({ uuid: testUuid("a2") })) }
+
+		expect(reconcilePreviewSources(state, { type: "revised", revision })).toBe(state)
+		expect(reconcilePreviewSources(state, { type: "resync" })).toBe(state)
 	})
 })
 

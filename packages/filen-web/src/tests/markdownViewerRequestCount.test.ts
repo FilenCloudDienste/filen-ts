@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { createElement, type ChangeEvent } from "react"
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import type { File, UuidStr } from "@filen/sdk-rs"
@@ -34,6 +34,8 @@ vi.mock("@uiw/react-codemirror", async () => ({
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { setPreviewDirty, usePreviewUnsavedGuardStore } from "@/features/preview/store/usePreviewUnsavedGuard"
 import MarkdownViewer from "@/features/preview/components/markdownViewer"
+import { PREVIEW_ACTIONS } from "@/features/preview/lib/keymap"
+import { registerAction } from "@/lib/keymap/registry"
 
 const ALT = "readme.md"
 const ORIGINAL = "# Original heading\n\nbody"
@@ -71,6 +73,13 @@ function toggle(name: "View source" | "View rendered"): void {
 async function sourceEditor(): Promise<HTMLTextAreaElement> {
 	return await screen.findByRole("textbox", { name: ALT })
 }
+
+// The viewer and its editor bind the editor shortcuts, which the app registers at boot.
+beforeAll(() => {
+	for (const def of PREVIEW_ACTIONS) {
+		registerAction(def)
+	}
+})
 
 beforeEach(() => {
 	downloadFileBytes.mockReset()

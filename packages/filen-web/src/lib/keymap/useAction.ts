@@ -52,6 +52,11 @@ const DEFAULT_OPTIONS: Options = {
 // The returned ref scopes the action to one element: attached, the listener moves off the document onto
 // that element and only fires while focus is inside it. Unattached (every caller ignoring it), the action
 // stays document-wide.
+// For a shortcut that must also fire with the cursor in an editor. CodeMirror's content is
+// contenteditable AND carries role="textbox", which react-hotkeys-hook counts as a form field and drops
+// unless it is listed; Quill's editor is contenteditable too.
+export const IN_EDITORS: Options = { enableOnContentEditable: true, enableOnFormTags: ["option", "textbox"] }
+
 export function useAction(
 	id: string,
 	handler: HotkeyCallback,

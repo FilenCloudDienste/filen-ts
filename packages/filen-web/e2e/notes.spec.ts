@@ -3,6 +3,7 @@ import JSZip from "jszip"
 import type { Locator, Page } from "@playwright/test"
 import { test, expect, closeTrackedPage, settleLeases } from "./fixtures"
 import { focusEditorSurface } from "./helpers/editor"
+import { resolveEditorModKey, resolveModKey } from "./helpers/modkey"
 import { waitForE2eHooks } from "./helpers/e2eHooks"
 import { BOOT_SETTLE_TIMEOUT_MS, bootTo, dismissStartupReminders, LIVE_WRITE_TIMEOUT_MS } from "./helpers/listing"
 import { SESSION_SLOT } from "@/e2e-hooks/sessionSlot"
@@ -797,6 +798,58 @@ async function readServerContent(page: Page, uuid: string): Promise<string> {
 	return (await page.evaluate(id => window.__filenE2E.readTestNoteContentByUuid(id), uuid)) ?? ""
 }
 
+// The editor shortcuts in a markdown note: formatting (bound inside CodeMirror), save now and the preview
+// toggle (app shortcuts that must reach an editor whose content is contenteditable with role="textbox"),
+// and Escape leaving the editor for the note's row. The editor keys go through CodeMirror, whose "mod"
+// can differ from the app's under Playwright's device emulation (helpers/modkey.ts).
+test.describe("notes: editor shortcuts", () => {
+	test("a markdown note formats, saves, hides its preview and leaves the editor on its shortcuts", async ({ page, injectedSession }) => {
+		expect(injectedSession.length).toBeGreaterThan(0)
+
+		const { uuid } = await createEmptyNoteAndOpen(page, "md", "e2e md-keys")
+		const main = page.getByRole("main")
+		const content = main.locator(".cm-content")
+		const bold = main.locator("strong", { hasText: "bold" })
+		const appMod = await resolveModKey(page)
+		const editorMod = await resolveEditorModKey(page)
+
+		try {
+			await focusEditorSurface(content)
+			await page.keyboard.type("make this bold")
+
+			for (let step = 0; step < 4; step++) {
+				await page.keyboard.press("Shift+ArrowLeft")
+			}
+
+			await page.keyboard.press(`${editorMod}+B`)
+			await expect(content).toContainText("make this **bold**")
+			await expect(bold).toBeVisible()
+
+			await page.keyboard.press(`${appMod}+S`)
+			await expect.poll(() => readServerContent(page, uuid), { timeout: 30_000 }).toBe("make this **bold**")
+
+			// The preview pane goes and comes back; the editor keeps its text throughout (never remounted).
+			await page.keyboard.press(`${appMod}+Shift+V`)
+			await expect(bold).toHaveCount(0)
+			await expect(content).toContainText("make this **bold**")
+			await expect(content).toBeFocused()
+			await page.keyboard.press(`${appMod}+Shift+V`)
+			await expect(bold).toBeVisible()
+
+			// The first Escape is the editor's own, collapsing the selection the formatting left; the next
+			// one leaves the editor.
+			const row = page.getByRole("complementary").locator(`a[href="/notes/${uuid}"]`)
+
+			await page.keyboard.press("Escape")
+			await expect(content).toBeFocused()
+			await page.keyboard.press("Escape")
+			await expect(row).toBeFocused()
+		} finally {
+			await deleteNoteQuietly(page, uuid)
+		}
+	})
+})
+
 test.describe("notes: live editors", () => {
 	test("text edit typed then reloaded before the debounce survives and reaches the server", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
@@ -1059,12 +1112,10 @@ test.describe("notes: rich and checklist editors", () => {
 // broadcasts back to page A's live socket. Two facts are proven:
 //   1. A metadata event (titleEdited) lands LIVE on page A — no reload — patching both the editor header
 //      and the sidebar row. Metadata events carry no echo suppression, so a same-account edit shows.
-//   2. A ContentEdited event authored by the SAME account is ECHO-SUPPRESSED (mobile keys suppression on
-//      editorId === own userId; all our tabs share one userId as long as tabs stay uncoordinated by a
-//      per-tab leader, which there is none of today). A
-//      same-account e2e therefore CANNOT observe the un-suppressed ContentEdited path — that (clean→
-//      invalidate, dirty→banner) is unit-covered in src/tests/notesSocketHandlers.test.ts. Here we prove
-//      the suppressed path: page A shows NO reload banner and its editor is NOT clobbered.
+//   2. A ContentEdited event authored by the SAME account but not pushed by this browser (page B writes
+//      past every outbox, as another device would) is a real change: a clean editor reloads with a
+//      toast, one being edited asks, and the page's own push that "Keep mine" makes comes back as an
+//      echo that asks nothing (features/notes/lib/pushEchoes.ts).
 
 // A second authed page in the same context, booted to the shell (its own SDK worker + socket). The
 // injected-session fixture only seeds the fixture's own `page`; a sibling page re-seeds sessionStorage
@@ -1130,15 +1181,20 @@ test.describe("notes: realtime", () => {
 		}
 	})
 
-	test("a same-account content edit on a second page is echo-suppressed — no banner, no clobber", async ({ page, injectedSession }) => {
+	test("a content edit from another client of the same account reloads a clean note, and asks over edits in progress", async ({
+		page,
+		injectedSession
+	}) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
-		const initialContent = `initial-${String(Date.now())}-${String(Math.floor(Math.random() * 100_000))}`
-		const remoteContent = `remote-${String(Date.now())}-${String(Math.floor(Math.random() * 100_000))}`
-		const title = `e2e realtime-content ${String(Date.now())}-${String(Math.floor(Math.random() * 100_000))}`
-		// Keeps the debris prefix the teardown sweeps on — a renamed note must stay sweepable.
-		const renamedTitle = `${title} renamed`
+		const stamp = `${String(Date.now())}-${String(Math.floor(Math.random() * 100_000))}`
+		const initialContent = `initial-${stamp}`
+		const remoteContent = `remote-${stamp}`
+		const secondRemoteContent = `remote-again-${stamp}`
+		const mine = ` mine-${stamp}`
+		const title = `e2e realtime-content ${stamp}`
 		const main = page.getByRole("main")
+		const prompt = page.getByRole("alertdialog", { name: "This note changed elsewhere" })
 
 		// Create the content-bearing note through the hook, then open it BY HREF (openNoteByTitle) rather
 		// than by text — a short single-line content can equal the row's own preview snippet, which would
@@ -1154,37 +1210,43 @@ test.describe("notes: realtime", () => {
 		await openNoteByTitle(page, title, note.uuid)
 
 		const uuid = note.uuid
+		// Page B writes through its own client straight to the server, past every outbox: to page A that is
+		// the same account editing on another device, which is not an echo of anything page A pushed.
 		const pageB = await bootSecondPage(page, injectedSession)
 
 		try {
-			// Page A's editor is showing the initial content (clean, not editing).
 			await expect(main.getByText(initialContent, { exact: true })).toBeVisible()
 
-			// Page B writes different content through its own client.
+			// Clean: the editor reloads with the other client's content, and says so.
 			await pageB.evaluate(args => window.__filenE2E.setTestNoteContentByUuid(args.uuid, args.content), {
 				uuid,
 				content: remoteContent
 			})
+			await expect(main.getByText(remoteContent, { exact: true })).toBeVisible({ timeout: 30_000 })
+			await expect(page.getByText("Updated with changes saved elsewhere.", { exact: true })).toBeVisible()
+			await expect(prompt).toHaveCount(0)
 
-			// Confirm the write reached the server (and was therefore broadcast) — read straight from page B.
+			// Editing: the other client's content asks what to do with the edits in progress.
+			await typeIntoTextEditor(page, mine)
+			await pageB.evaluate(args => window.__filenE2E.setTestNoteContentByUuid(args.uuid, args.content), {
+				uuid,
+				content: secondRemoteContent
+			})
+			await expect(prompt).toBeVisible({ timeout: 30_000 })
+
+			await prompt.getByRole("button", { name: "Compare", exact: true }).click()
+			await expect(prompt.locator(".cm-mergeView")).toContainText(secondRemoteContent)
+			await expect(prompt.locator(".cm-mergeView")).toContainText(mine.trim())
+
+			// Keep mine: the edits become the newest version on the server, and their echo, this page's own
+			// push, asks nothing.
+			await prompt.getByRole("button", { name: "Keep mine", exact: true }).click()
+			await expect(prompt).toHaveCount(0)
 			await expect
 				.poll(() => pageB.evaluate(id => window.__filenE2E.readTestNoteContentByUuid(id), uuid), { timeout: 30_000 })
-				.toBe(remoteContent)
-
-			// A rename from page B AFTER that write, landing live on page A's header, is what makes the
-			// negatives below mean something: it proves page A's socket is connected, subscribed and
-			// delivering — and delivering an event the server broadcast strictly after the content edit, so
-			// the content event has demonstrably had its chance. A fixed wait proves none of that (every
-			// negative also holds on a page whose socket never connected). titleEdited only patches the
-			// notes list cache (features/notes/lib/socketHandlers.ts), so it cannot itself reseed the editor.
-			await pageB.evaluate(args => window.__filenE2E.renameTestNoteByUuid(args.uuid, args.title), { uuid, title: renamedTitle })
-			await expect(main.getByRole("heading", { level: 1, name: renamedTitle, exact: true })).toBeVisible({ timeout: 30_000 })
-
-			// Suppression held: the reload banner never appeared and the editor still shows the initial
-			// content (never refetched/clobbered).
-			await expect(page.getByText("Updated elsewhere", { exact: true })).toHaveCount(0)
-			await expect(main.getByText(initialContent, { exact: true })).toBeVisible()
-			await expect(main.getByText(remoteContent, { exact: true })).toHaveCount(0)
+				.toContain(mine.trim())
+			await expect(main.locator(".cm-content")).toContainText(mine.trim())
+			await expect(prompt).toHaveCount(0)
 		} finally {
 			await closeTrackedPage(pageB)
 			await deleteNoteQuietly(page, uuid)

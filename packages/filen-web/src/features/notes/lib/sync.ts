@@ -12,6 +12,7 @@ import type { Note } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
 import { queryClient } from "@/queries/client"
 import { i18n } from "@/lib/i18n"
+import { forgetNotePushes, rememberNotePush } from "@/features/notes/lib/pushEchoes"
 import { log } from "@/lib/log"
 import { toast } from "sonner"
 import { asErrorDTO } from "@/lib/sdk/errors"
@@ -138,6 +139,7 @@ export class Sync {
 		// any more (a session surviving the wipe would gate the next account's content query).
 		setOutboxHydrated(false)
 		clearEditingSessions()
+		forgetNotePushes()
 	}
 
 	// Drop a note's consecutive-rejection strike count. For the editor's use when it clears a
@@ -584,6 +586,13 @@ export class Sync {
 						}
 					}
 
+					// Recorded before the push goes out, in every tab: its socket echo can beat the response back,
+					// and must never read as an edit made elsewhere (pushEchoes.ts).
+					const pushedContentHash = hashNoteContent(mostRecentContent.content)
+
+					rememberNotePush(noteUuid, pushedContentHash)
+					this.transport?.broadcastPushed(noteUuid, pushedContentHash)
+
 					const push = await run(async () => {
 						const preview = createNotePreviewFromContentText(noteKindForPreview(liveNote.noteType), mostRecentContent.content)
 
@@ -661,8 +670,6 @@ export class Sync {
 					// The content we just pushed IS the cloud content now, so it becomes the base for
 					// every entry typed during the round trip (they survive the prune). Without this the
 					// next pass would flag our OWN push as a conflict against their stale session base.
-					const pushedContentHash = hashNoteContent(mostRecentContent.content)
-
 					useNotesInflightStore.getState().setInflightContent(prev => {
 						const updated: InflightContent = {
 							...prev

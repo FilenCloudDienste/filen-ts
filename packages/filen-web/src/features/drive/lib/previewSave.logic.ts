@@ -58,8 +58,15 @@ function dropUuid(items: DriveItem[], uuid: string): DriveItem[] {
 // class isUnresolvableParentError below identifies (e.g. the containing directory was deleted from
 // another session mid-edit) — retrying against a parent that will only ever fail again is pointless
 // (mobile parity). Every other rejection leaves the buffer editable for a retry.
-export async function runPreviewSave(deps: PreviewSaveDeps, args: { item: DriveItem; content: string }): Promise<ActionOutcome<DriveItem>> {
-	const { item, content } = args
+//
+// `asNewFile` writes the buffer beside the file under that name instead (a copy of unsaved edits the
+// file itself moved on from, or of a file deleted meanwhile), leaving the file's own row alone. The name
+// must be free: the same upload onto a taken name would make a new version of that file.
+export async function runPreviewSave(
+	deps: PreviewSaveDeps,
+	args: { item: DriveItem; content: string; asNewFile?: string }
+): Promise<ActionOutcome<DriveItem>> {
+	const { item, content, asNewFile } = args
 	const base = asDirectoryOrFile(item)
 
 	if (base.type !== "file") {
@@ -69,7 +76,7 @@ export async function runPreviewSave(deps: PreviewSaveDeps, args: { item: DriveI
 		return { status: "error", dto: { species: "plain", message, label: message } }
 	}
 
-	const name = driveItemName(base)
+	const name = asNewFile ?? driveItemName(base)
 	const mime = base.data.decryptedMeta?.mime ?? ""
 	const bytes = new TextEncoder().encode(content)
 	// Root-sentinel collapse inlined rather than importing normalizeParentUuid (queries/drive.ts): the
@@ -87,7 +94,9 @@ export async function runPreviewSave(deps: PreviewSaveDeps, args: { item: DriveI
 	const newItem = narrowItem(uploaded)
 	const oldUuid = base.data.uuid
 
-	deps.patchListing(targetParent, prev => dropUuid(upsertDriveItem(prev, newItem), oldUuid))
+	deps.patchListing(targetParent, prev =>
+		asNewFile === undefined ? dropUuid(upsertDriveItem(prev, newItem), oldUuid) : upsertDriveItem(prev, newItem)
+	)
 
 	return { status: "success", item: newItem }
 }

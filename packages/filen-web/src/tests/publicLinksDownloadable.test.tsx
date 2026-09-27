@@ -28,7 +28,7 @@ vi.mock("@tanstack/react-router", () => ({
 	useNavigate: () => vi.fn(),
 	useRouterState: () => "/chats"
 }))
-vi.mock("@/lib/keymap/useAction", () => ({ useAction: vi.fn() }))
+vi.mock("@/lib/keymap/useAction", () => ({ useAction: vi.fn(), IN_EDITORS: {} }))
 vi.mock("@/lib/useIsOnline", () => ({ useIsOnline: () => true }))
 
 import { queryClient } from "@/queries/client"

@@ -21,7 +21,13 @@ import { ACCOUNT_QUERY_KEY } from "@/queries/account"
 import { discardListingPatches, driveListingQueryKey, driveListingQueryOptions, flushListingCreates } from "@/features/drive/queries/drive"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
-import { flushDeferredRecents, handleDriveEvent, markDriveEventsMissed } from "@/features/drive/lib/socketHandlers"
+import {
+	flushDeferredRecents,
+	handleDriveAuthSuccess,
+	handleDriveEvent,
+	handleDriveReconnecting,
+	markDriveEventsMissed
+} from "@/features/drive/lib/socketHandlers"
 import { socketAuthenticated } from "@/lib/sdk/socketSession"
 import { useTransfersStore, type Transfer } from "@/features/transfers/store/useTransfersStore"
 import { subscribePreviewReconcile, type PreviewReconcileEvent } from "@/features/preview/lib/previewReconcile"
@@ -1032,10 +1038,19 @@ describe("drive socket handlers — open-preview reconcile signals", () => {
 		expect(captureReconcile({ type: "fileTrash", uuid: testUuid("file"), stableUUID: RETIRED_STABLE, newUUID: NEW_FILE })).toEqual([])
 	})
 
-	it("fileMove emits a removed signal so a preview open on it advances or closes", () => {
-		expect(captureReconcile({ type: "fileMove", file: mockFile({ parent: PARENT_B }) })).toEqual([
-			{ type: "removed", uuid: testUuid("file") }
-		])
+	it("fileMove emits a moved signal carrying the file at its new location", () => {
+		const events = captureReconcile({ type: "fileMove", file: mockFile({ parent: PARENT_B }) })
+
+		expect(events.map(event => event.type)).toEqual(["moved"])
+		expect(events[0]?.type === "moved" ? events[0].item.data.uuid : "").toBe(testUuid("file"))
+	})
+
+	it("fileNew emits a revised signal, so a preview of the same lineage can follow it", () => {
+		const events = captureReconcile({ type: "fileNew", file: mockFile({ uuid: NEW_FILE }) })
+
+		expect(events.map(event => event.type)).toEqual(["revised"])
+		expect(events[0]?.type === "revised" ? events[0].revision.item.data.uuid : "").toBe(NEW_FILE)
+		expect(events[0]?.type === "revised" ? events[0].revision.previousUuid : "").toBeUndefined()
 	})
 
 	it("fileDeletedPermanent emits a removed signal", () => {
@@ -1059,12 +1074,12 @@ describe("drive socket handlers — open-preview reconcile signals", () => {
 		expect(captureReconcile({ type: "fileArchived", uuid: testUuid("file"), stableUUID: STABLE_FILE, newUUID: NEW_FILE })).toEqual([])
 	})
 
-	it("fileRestore emits a removed signal (the item leaves the trash preview)", () => {
-		expect(captureReconcile({ type: "fileRestore", file: mockFile() })).toEqual([{ type: "removed", uuid: testUuid("file") }])
+	it("fileRestore emits a restored signal (the item leaves the trash preview)", () => {
+		expect(captureReconcile({ type: "fileRestore", file: mockFile() })).toEqual([{ type: "restored", uuid: testUuid("file") }])
 	})
 
-	it("folderRestore emits a removed signal (the directory leaves the trash listing)", () => {
-		expect(captureReconcile({ type: "folderRestore", dir: mockDir() })).toEqual([{ type: "removed", uuid: testUuid("dir") }])
+	it("folderRestore emits a restored signal (the directory leaves the trash listing)", () => {
+		expect(captureReconcile({ type: "folderRestore", dir: mockDir() })).toEqual([{ type: "restored", uuid: testUuid("dir") }])
 	})
 
 	it("folderDeletedPermanent emits a removed signal", () => {
@@ -1073,15 +1088,15 @@ describe("drive socket handlers — open-preview reconcile signals", () => {
 		])
 	})
 
-	it("fileArchiveRestored emits a replaced signal keyed by the superseded uuid", () => {
+	it("fileArchiveRestored emits a revised signal naming the superseded uuid", () => {
 		const events = captureReconcile({ type: "fileArchiveRestored", currentUuid: testUuid("old-current"), file: mockFile() })
 
 		expect(events.length).toBe(1)
 		const event = events[0]
 
-		expect(event?.type).toBe("replaced")
-		expect(event?.type === "replaced" ? event.previousUuid : "").toBe(testUuid("old-current"))
-		expect(event?.type === "replaced" ? event.item.data.uuid : "").toBe(testUuid("file"))
+		expect(event?.type).toBe("revised")
+		expect(event?.type === "revised" ? event.revision.previousUuid : "").toBe(testUuid("old-current"))
+		expect(event?.type === "revised" ? event.revision.item.data.uuid : "").toBe(testUuid("file"))
 	})
 
 	it("fileMetadataChanged emits a fileMeta signal carrying the fresh meta (rename title)", () => {
@@ -1099,6 +1114,22 @@ describe("drive socket handlers — open-preview reconcile signals", () => {
 		expect(
 			captureReconcile({ type: "folderMetadataChanged", uuid: testUuid("dir"), meta: { type: "decoded", data: { name: "Renamed" } } })
 		).toEqual([{ type: "folderMeta", uuid: testUuid("dir"), meta: { type: "decoded", data: { name: "Renamed" } } }])
+	})
+
+	it("the authSuccess ending a drop emits a resync signal; one with no drop before it emits nothing", () => {
+		const events: PreviewReconcileEvent[] = []
+		const unsubscribe = subscribePreviewReconcile(event => events.push(event))
+
+		try {
+			handleDriveAuthSuccess()
+			expect(events).toEqual([])
+
+			handleDriveReconnecting()
+			handleDriveAuthSuccess()
+			expect(events).toEqual([{ type: "resync" }])
+		} finally {
+			unsubscribe()
+		}
 	})
 
 	it("an attribute-only change (itemFavorite) emits no preview signal", () => {

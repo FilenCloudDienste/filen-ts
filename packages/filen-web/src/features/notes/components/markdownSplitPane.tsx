@@ -14,7 +14,9 @@ import {
 // (editable left) — extracted so the ratio-persistence + drag logic lives in exactly one place and the
 // editor is literally "the reader's split with an editable left pane". `left`
 // and `right` are rendered as-is; this owns only the geometry.
-export function MarkdownSplitPane({ left, right }: { left: ReactNode; right: ReactNode }) {
+// `rightHidden` gives the left pane the whole width. The right pane and the separator leave the tree,
+// but the left one keeps its place in it, so a live editor there is not remounted (and re-seeded).
+export function MarkdownSplitPane({ left, right, rightHidden = false }: { left: ReactNode; right: ReactNode; rightHidden?: boolean }) {
 	const { t } = useTranslation("notes")
 	const ratioQuery = useMdSplitRatioQuery()
 	const persistedRatio = ratioQuery.data ?? DEFAULT_MD_SPLIT_RATIO
@@ -126,36 +128,40 @@ export function MarkdownSplitPane({ left, right }: { left: ReactNode; right: Rea
 		>
 			<div
 				className="min-h-0 min-w-0 overflow-hidden"
-				style={{ width: `${String(ratio * 100)}%` }}
+				style={{ width: rightHidden ? "100%" : `${String(ratio * 100)}%` }}
 			>
 				{left}
 			</div>
-			<div
-				role="separator"
-				aria-orientation="vertical"
-				aria-label={t("noteMdSplitResize")}
-				// A percentage, not the raw 0–1 ratio: aria-valuenow shares its unit with min/max, and
-				// "0.5" between "0.2" and "0.8" announces as a fraction nobody can act on.
-				aria-valuenow={Math.round(ratio * 100)}
-				aria-valuemin={Math.round(MD_SPLIT_RATIO_MIN * 100)}
-				aria-valuemax={Math.round(MD_SPLIT_RATIO_MAX * 100)}
-				tabIndex={0}
-				onPointerDown={handlePointerDown}
-				onPointerMove={handlePointerMove}
-				onPointerUp={handlePointerUp}
-				onPointerCancel={handlePointerCancel}
-				onKeyDown={handleKeyDown}
-				onKeyUp={handleRelease}
-				onBlur={handleRelease}
-				// touch-none keeps the browser from reclaiming a touch drag as a scroll in the first place.
-				className="w-1 shrink-0 cursor-col-resize touch-none bg-border/50 transition-colors outline-none hover:bg-border focus-visible:bg-ring/50"
-			/>
-			<div
-				className="min-h-0 min-w-0 flex-1 overflow-hidden"
-				style={{ width: `${String((1 - ratio) * 100)}%` }}
-			>
-				{right}
-			</div>
+			{rightHidden ? null : (
+				<>
+					<div
+						role="separator"
+						aria-orientation="vertical"
+						aria-label={t("noteMdSplitResize")}
+						// A percentage, not the raw 0–1 ratio: aria-valuenow shares its unit with min/max, and
+						// "0.5" between "0.2" and "0.8" announces as a fraction nobody can act on.
+						aria-valuenow={Math.round(ratio * 100)}
+						aria-valuemin={Math.round(MD_SPLIT_RATIO_MIN * 100)}
+						aria-valuemax={Math.round(MD_SPLIT_RATIO_MAX * 100)}
+						tabIndex={0}
+						onPointerDown={handlePointerDown}
+						onPointerMove={handlePointerMove}
+						onPointerUp={handlePointerUp}
+						onPointerCancel={handlePointerCancel}
+						onKeyDown={handleKeyDown}
+						onKeyUp={handleRelease}
+						onBlur={handleRelease}
+						// touch-none keeps the browser from reclaiming a touch drag as a scroll in the first place.
+						className="w-1 shrink-0 cursor-col-resize touch-none bg-border/50 transition-colors outline-none hover:bg-border focus-visible:bg-ring/50"
+					/>
+					<div
+						className="min-h-0 min-w-0 flex-1 overflow-hidden"
+						style={{ width: `${String((1 - ratio) * 100)}%` }}
+					>
+						{right}
+					</div>
+				</>
+			)}
 		</div>
 	)
 }

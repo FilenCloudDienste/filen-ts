@@ -1,96 +1,12 @@
 import { useEffect, useState, type RefObject } from "react"
-import CodeMirror, { oneDarkHighlightStyle } from "@uiw/react-codemirror"
+import CodeMirror from "@uiw/react-codemirror"
 import { EditorView } from "@codemirror/view"
-import { type Extension } from "@codemirror/state"
-import { StreamLanguage, syntaxHighlighting } from "@codemirror/language"
-import { useTheme } from "@/providers/themeProvider"
+import { useCodeMirrorTheme, useEditorKeymap, useLanguageExtension } from "@/features/preview/lib/codeMirrorShared"
 
 // Shared CodeMirror read/write surface — extracted from textViewer.tsx so the notes reader (and the
-// notes editor) reuses the SAME language-loader/theme plumbing as file preview rather than a
-// second copy. Preview's own textViewer.tsx is this module's regression net (its e2e/unit coverage did
+// notes editor) reuses the SAME language-loader/theme plumbing (lib/codeMirrorShared.ts) as file preview
+// rather than a second copy. Preview's own textViewer.tsx is this module's regression net (its e2e/unit coverage did
 // not change shape, only its import path did).
-
-// tag -> a loader for the matching CodeMirror language Extension, one dynamic import() per entry so
-// each grammar (and, for the legacy StreamParser ones, its own @codemirror/legacy-modes/mode/* submodule)
-// becomes its own chunk — opening one text file only ever fetches the ONE language it actually needs,
-// never the other ~35. @codemirror/language itself (StreamLanguage) is a static import above: it's
-// core CodeMirror machinery every language needs, not a per-language grammar, so splitting it out would
-// buy nothing. Keys mirror preview.logic.ts's codeMirrorLanguageFor tags exactly.
-const LANGUAGE_LOADERS: Readonly<Record<string, () => Promise<Extension>>> = {
-	javascript: async () => (await import("@codemirror/lang-javascript")).javascript(),
-	jsx: async () => (await import("@codemirror/lang-javascript")).javascript({ jsx: true }),
-	typescript: async () => (await import("@codemirror/lang-javascript")).javascript({ typescript: true }),
-	tsx: async () => (await import("@codemirror/lang-javascript")).javascript({ jsx: true, typescript: true }),
-	json: async () => (await import("@codemirror/lang-json")).json(),
-	html: async () => (await import("@codemirror/lang-html")).html(),
-	css: async () => (await import("@codemirror/lang-css")).css(),
-	xml: async () => (await import("@codemirror/lang-xml")).xml(),
-	sql: async () => (await import("@codemirror/lang-sql")).sql(),
-	python: async () => (await import("@codemirror/lang-python")).python(),
-	rust: async () => (await import("@codemirror/lang-rust")).rust(),
-	cpp: async () => (await import("@codemirror/lang-cpp")).cpp(),
-	java: async () => (await import("@codemirror/lang-java")).java(),
-	php: async () => (await import("@codemirror/lang-php")).php(),
-	markdown: async () => (await import("@codemirror/lang-markdown")).markdown(),
-	yaml: async () => (await import("@codemirror/lang-yaml")).yaml(),
-	sass: async () => (await import("@codemirror/lang-sass")).sass({ indented: true }),
-	less: async () => (await import("@codemirror/lang-less")).less(),
-	go: async () => (await import("@codemirror/lang-go")).go(),
-	coffeescript: async () => StreamLanguage.define((await import("@codemirror/legacy-modes/mode/coffeescript")).coffeeScript),
-	shell: async () => StreamLanguage.define((await import("@codemirror/legacy-modes/mode/shell")).shell),
-	ruby: async () => StreamLanguage.define((await import("@codemirror/legacy-modes/mode/ruby")).ruby),
-	lua: async () => StreamLanguage.define((await import("@codemirror/legacy-modes/mode/lua")).lua),
-	toml: async () => StreamLanguage.define((await import("@codemirror/legacy-modes/mode/toml")).toml),
-	dockerfile: async () => StreamLanguage.define((await import("@codemirror/legacy-modes/mode/dockerfile")).dockerFile),
-	cmake: async () => StreamLanguage.define((await import("@codemirror/legacy-modes/mode/cmake")).cmake),
-	swift: async () => StreamLanguage.define((await import("@codemirror/legacy-modes/mode/swift")).swift),
-	cobol: async () => StreamLanguage.define((await import("@codemirror/legacy-modes/mode/cobol")).cobol),
-	vbscript: async () => StreamLanguage.define((await import("@codemirror/legacy-modes/mode/vbscript")).vbScript),
-	protobuf: async () => StreamLanguage.define((await import("@codemirror/legacy-modes/mode/protobuf")).protobuf),
-	ini: async () => StreamLanguage.define((await import("@codemirror/legacy-modes/mode/properties")).properties),
-	powershell: async () => StreamLanguage.define((await import("@codemirror/legacy-modes/mode/powershell")).powerShell),
-	groovy: async () => StreamLanguage.define((await import("@codemirror/legacy-modes/mode/groovy")).groovy),
-	csharp: async () => StreamLanguage.define((await import("@codemirror/legacy-modes/mode/clike")).csharp),
-	kotlin: async () => StreamLanguage.define((await import("@codemirror/legacy-modes/mode/clike")).kotlin),
-	dart: async () => StreamLanguage.define((await import("@codemirror/legacy-modes/mode/clike")).dart)
-}
-
-// Resolves `tag` (from codeMirrorLanguageFor) to a loaded Extension, or null while pending / for a tag
-// with no wired grammar ("" or an unmapped one — the content still renders, just unhighlighted). The
-// `loaded.tag === tag` guard is a render-time derivation, not a second effect: it discards a
-// still-resolving or already-resolved extension from a PREVIOUS tag rather than flashing stale
-// highlighting, with no extra commit for what both branches ultimately return synchronously anyway.
-function useLanguageExtension(tag: string): Extension | null {
-	const [loaded, setLoaded] = useState<{ tag: string; extension: Extension } | null>(null)
-
-	useEffect(() => {
-		const loader = LANGUAGE_LOADERS[tag]
-
-		if (!loader) {
-			return undefined
-		}
-
-		let live = true
-
-		loader()
-			.then(extension => {
-				if (live) {
-					setLoaded({ tag, extension })
-				}
-			})
-			.catch(() => {
-				// A language chunk failing to fetch (offline mid-load, CDN hiccup) degrades to
-				// unhighlighted plain text via the stale-guard below — never blocks the content, which
-				// is already decoded and rendering.
-			})
-
-		return () => {
-			live = false
-		}
-	}, [tag])
-
-	return loaded?.tag === tag ? loaded.extension : null
-}
 
 export interface CodeMirrorSourceProps {
 	text: string
@@ -113,26 +29,13 @@ export interface CodeMirrorSourceProps {
 	onValueChange?: (value: string) => void
 }
 
+const BASIC_SETUP = { searchKeymap: false }
+
 function noopDirtyChange(): void {
 	// Default for every read-only caller — CodeMirrorSource always calls onDirtyChange, so a real
 	// no-op keeps that call unconditional rather than every render site branching on whether a
 	// callback was even passed.
 }
-
-// The editor chrome reads the app's color tokens, so it follows the palette in both themes; only
-// the syntax colors differ per theme (the bundled dark theme would also paint its own background).
-const TOKEN_CHROME = EditorView.theme({
-	"&": { backgroundColor: "transparent", color: "var(--foreground)" },
-	".cm-gutters": { backgroundColor: "transparent", color: "var(--muted-foreground)", border: "none" },
-	".cm-activeLine, .cm-activeLineGutter": { backgroundColor: "var(--muted)" },
-	".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--foreground)" },
-	"&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection": {
-		backgroundColor: "color-mix(in oklab, var(--foreground) 18%, transparent)"
-	}
-})
-
-const LIGHT_THEME: Extension = [TOKEN_CHROME]
-const DARK_THEME: Extension = [TOKEN_CHROME, syntaxHighlighting(oneDarkHighlightStyle)]
 
 // The actual CodeMirror surface. `text` seeds `content` ONCE, at mount (useState's initial argument is
 // only ever consumed on the first render) — the EDITOR INVARIANT: a genuinely different piece of
@@ -149,12 +52,13 @@ export function CodeMirrorSource({
 	contentRef,
 	onValueChange
 }: CodeMirrorSourceProps) {
-	const { theme } = useTheme()
-	// "system" resolves once per render against the live media query — cheap, and consistent with this
-	// being a low-stakes styling read rather than a value anything else depends on.
-	const resolvedTheme = theme === "system" ? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light") : theme
+	const codeMirrorTheme = useCodeMirrorTheme()
 	const languageExtension = useLanguageExtension(tag)
-	const extensions = languageExtension ? [languageExtension, EditorView.lineWrapping] : [EditorView.lineWrapping]
+	// Find, replace and (in markdown) formatting, on the user's own shortcuts.
+	const editorKeymap = useEditorKeymap(tag === "markdown")
+	const extensions = languageExtension
+		? [languageExtension, EditorView.lineWrapping, editorKeymap]
+		: [EditorView.lineWrapping, editorKeymap]
 	const [content, setContent] = useState(text)
 	// `text` itself never changes across this component's own lifetime (a genuinely different item
 	// forces a remount, not a prop update — see the invariant above), so comparing against it directly
@@ -193,7 +97,9 @@ export function CodeMirrorSource({
 				extensions={extensions}
 				editable={editable}
 				readOnly={!editable}
-				theme={resolvedTheme === "dark" ? DARK_THEME : LIGHT_THEME}
+				theme={codeMirrorTheme}
+				// Its Mod-f would shadow a rebound editor.find; useEditorKeymap carries the rest of it.
+				basicSetup={BASIC_SETUP}
 				height="100%"
 				aria-label={alt}
 				// exactOptionalPropertyTypes rejects an explicit onChange={undefined} — omit the key entirely

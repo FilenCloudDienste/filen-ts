@@ -1,3 +1,4 @@
+import { useEffect } from "react"
 import { useTranslation } from "react-i18next"
 import { useNavigate } from "@tanstack/react-router"
 import { StickyNoteIcon, MoreHorizontalIcon, EyeIcon } from "lucide-react"
@@ -6,15 +7,16 @@ import { noteIcon } from "@/features/notes/lib/icon.logic"
 import { isNoteUndecryptable, hasNoteWriteAccess } from "@/features/notes/lib/sort"
 import { NoteContentBody } from "@/features/notes/components/noteContentBody"
 import { CannotDecryptState } from "@/components/cannotDecryptState"
-import { NoteRemoteEditBanner } from "@/features/notes/components/noteRemoteEditBanner"
+import { NoteRemoteEditDialog } from "@/features/notes/components/noteRemoteEditDialog"
 import { NoteDropdownMenuContent } from "@/features/notes/components/noteMenu"
 import { useNoteDialogHost } from "@/features/notes/hooks/useNoteDialogHost"
 import { useNoteTags } from "@/features/notes/queries/noteTags"
 import { useNoteInflight } from "@/features/notes/store/useNotesInflight"
+import { useNotesRemoteEditStore } from "@/features/notes/store/useNoteRemoteEdit"
 import { sync } from "@/features/notes/lib/sync"
 import { useHideCompletedChecklistQuery } from "@/features/notes/queries/preferences"
 import { setHideCompletedChecklist } from "@/features/notes/lib/preferences"
-import { useAction } from "@/lib/keymap/useAction"
+import { IN_EDITORS, useAction } from "@/lib/keymap/useAction"
 import { useAccountQuery } from "@/queries/account"
 import { Separator } from "@/components/ui/separator"
 import { Spinner } from "@/components/ui/spinner"
@@ -33,6 +35,22 @@ export interface NoteEditorPaneProps {
 // sync spinner + the ⋮ menu, sharing noteMenu.logic.ts's descriptor list with the sidebar row's menu)
 // plus the per-type content body (NoteContentBody) — live CodeMirror editors for text/code/md, wired to
 // the fault-tolerant outbox; read-only readers for trashed/rich/checklist.
+// Focus moves from the editor to the note's own row in the sidebar; with the row filtered out of the
+// list, focus just leaves the editor.
+function leaveNoteEditor(uuid: string): void {
+	const row = document.querySelector<HTMLElement>(`a[aria-current="page"][href$="/notes/${uuid}"]`)
+
+	if (row !== null) {
+		row.focus()
+
+		return
+	}
+
+	if (document.activeElement instanceof HTMLElement) {
+		document.activeElement.blur()
+	}
+}
+
 export function NoteEditorPane({ note, loading = false }: NoteEditorPaneProps) {
 	// ["notes", "common"] so the header can reach the shared cannot-decrypt label; notes stays the
 	// default namespace, so every bare t("notes…") key below is unaffected.
@@ -54,6 +72,17 @@ export function NoteEditorPane({ note, loading = false }: NoteEditorPaneProps) {
 	const hideCompletedQuery = useHideCompletedChecklistQuery(note?.uuid ?? "")
 	const hideCompleted = hideCompletedQuery.data ?? false
 
+	// Which note is on screen, so a reload of it with changes saved elsewhere is announced (socketHandlers).
+	const openNoteUuid = note?.uuid ?? null
+
+	useEffect(() => {
+		useNotesRemoteEditStore.getState().setOpenNote(openNoteUuid)
+
+		return () => {
+			useNotesRemoteEditStore.getState().setOpenNote(null)
+		}
+	}, [openNoteUuid])
+
 	// Registered before the early return (hook order). Dialog-guarded like every other action: a Cmd+S
 	// with a note-action dialog open returns before preventDefault so the browser default runs, never
 	// flushing behind the modal.
@@ -67,7 +96,7 @@ export function NoteEditorPane({ note, loading = false }: NoteEditorPaneProps) {
 			keyboardEvent.preventDefault()
 			sync.executeNow()
 		},
-		{ enableOnContentEditable: true },
+		IN_EDITORS,
 		[dialogHost.isDialogOpen]
 	)
 
@@ -179,21 +208,32 @@ export function NoteEditorPane({ note, loading = false }: NoteEditorPaneProps) {
 				</DropdownMenu>
 			</header>
 			<Separator className="bg-border/50" />
-			{/* Realtime reload-vs-keep prompt — shown only when this note is dirty AND the server's content
-			    moved (a clean note refetches silently). Sits above the editor, never blocks it. */}
-			<NoteRemoteEditBanner note={note} />
+			{/* Realtime remote-change prompt — shown only while this note is being edited AND a newer version
+			    of it was saved elsewhere (a note not being edited reloads instead). */}
+			<NoteRemoteEditDialog note={note} />
 			{/* An undecryptable note never mounts the editor (NoteContentBody would only fetch a body it
 			    can't decrypt); the shared explainer stands in its place. Otherwise the per-type editor,
 			    keyed by uuid so switching the selected note rebuilds the content controller fresh. */}
 			{undecryptable ? (
 				<CannotDecryptState className="min-h-0 flex-1" />
 			) : (
-				<NoteContentBody
-					key={note.uuid}
-					note={note}
-					currentUserId={accountQuery.data?.id}
-					hideCompletedChecklist={showHideCompletedToggle && hideCompleted}
-				/>
+				// Escape leaves the editor for the note's row in the sidebar, where the list keys work again —
+				// unless something in the editor took it (the find panel closing, say).
+				<div
+					className="flex min-h-0 flex-1 flex-col"
+					onKeyDown={event => {
+						if (event.key === "Escape" && !event.defaultPrevented) {
+							leaveNoteEditor(note.uuid)
+						}
+					}}
+				>
+					<NoteContentBody
+						key={note.uuid}
+						note={note}
+						currentUserId={accountQuery.data?.id}
+						hideCompletedChecklist={showHideCompletedToggle && hideCompleted}
+					/>
+				</div>
 			)}
 			{dialogHost.renderActiveDialog()}
 		</div>

@@ -37,11 +37,7 @@ const LONG_TEXT_BYTES = Buffer.from(
 // unlike previewSave.logic.test.ts's injected-deps unit coverage, none of that is provable without a
 // real worker. Net-zero via the same scratch-directory convention every other leg in this file uses
 // (enterScratchDirectory/trashScratchDirectory) — the edited file never leaves the scratch directory,
-// which the teardown trashes whole. Drives the Save button, not Cmd/Ctrl+S itself — mirrors
-// downloads.spec.ts's own documented choice for this exact "mod+s" combo (a reserved browser shortcut;
-// Chromium never delivers it to page JS under CDP-simulated keypresses, headless or not, live-verified
-// while building this leg) — the keymap registration (preview.save, "mod+s", scope "editor") is a real
-// user-facing shortcut in a real browser regardless, just not one Playwright can drive here.
+// which the teardown trashes whole. Drives the Save button; editor-shortcuts.spec.ts drives mod+s.
 test("editable text preview saves via its Save button, persists across reopen, and prompts on unsaved close", async ({
 	page,
 	injectedSession

@@ -34,9 +34,12 @@ import { markClipboardEventsMissed } from "@/features/drive/store/useDriveClipbo
 import { hasActiveCopies, useTransfersStore } from "@/features/transfers/store/useTransfersStore"
 import {
 	emitPreviewFileMetaChanged,
+	emitPreviewFileRevised,
 	emitPreviewFolderMetaChanged,
+	emitPreviewItemMoved,
 	emitPreviewItemRemoved,
-	emitPreviewItemReplaced
+	emitPreviewItemRestored,
+	emitPreviewResync
 } from "@/features/preview/lib/previewReconcile"
 import { emitBranchChange } from "@/features/drive/lib/branchChanges"
 
@@ -103,6 +106,8 @@ export function handleDriveAuthSuccess(): void {
 	sawReconnecting = false
 
 	invalidateDriveListings()
+	// An open preview may have missed a newer version of its file meanwhile.
+	emitPreviewResync()
 }
 
 // Recents is a flat, cross-directory aggregation with its own key, which a new file joins with the batch
@@ -260,6 +265,9 @@ export function handleDriveEvent(event: DriveSocketEvent): void {
 
 			queueListingCreate(normalizeParentUuid(inner.file.parent, rootUuid), item, { recent: newFileJoinsRecents() })
 			rejoinFavorites(item, true)
+			// A save anywhere, this editor's own included, lands as a new file of the same lineage: an open
+			// preview of that lineage decides what to do with it.
+			emitPreviewFileRevised({ item })
 
 			break
 		}
@@ -269,7 +277,7 @@ export function handleDriveEvent(event: DriveSocketEvent): void {
 
 			rejoinFavorites(item, true)
 			// The item left the trash listing — a trash preview open on it advances to a neighbour or closes.
-			emitPreviewItemRemoved(item.data.uuid)
+			emitPreviewItemRestored(item.data.uuid)
 
 			break
 		}
@@ -283,8 +291,8 @@ export function handleDriveEvent(event: DriveSocketEvent): void {
 			driveListingQueryUpdateGlobal({ type: "remove", uuid: inner.currentUuid })
 			driveListingQueryUpdate(normalizeParentUuid(inner.file.parent, rootUuid), { type: "upsert", items: [item] })
 			rejoinFavorites(item, true)
-			// A preview open on the superseded uuid reseeds with the restored file (same slot, fresh content).
-			emitPreviewItemReplaced(inner.currentUuid, item)
+			// A preview open on the superseded uuid moves to the restored file, asking first over unsaved edits.
+			emitPreviewFileRevised({ item, previousUuid: inner.currentUuid })
 
 			break
 		}
@@ -301,7 +309,7 @@ export function handleDriveEvent(event: DriveSocketEvent): void {
 			const { item, colorKnown } = patchRestoredItem(narrowItem(inner.dir), rootUuid)
 
 			rejoinFavorites(item, colorKnown)
-			emitPreviewItemRemoved(item.data.uuid)
+			emitPreviewItemRestored(item.data.uuid)
 
 			break
 		}
@@ -312,8 +320,9 @@ export function handleDriveEvent(event: DriveSocketEvent): void {
 			// The File carries its NEW parent; web keeps no item cache to look up the OLD parent, so the patch
 			// fans out to wherever the row was cached.
 			patchMovedItem(item, rootUuid)
-			// The item left this listing for another directory — a preview open on it advances or closes.
-			emitPreviewItemRemoved(item.data.uuid)
+			// The item left this listing for another directory — a preview open on it advances or closes, or
+			// follows it there while it holds unsaved edits.
+			emitPreviewItemMoved(item)
 
 			break
 		}
@@ -369,11 +378,9 @@ export function handleDriveEvent(event: DriveSocketEvent): void {
 		case "fileArchived": {
 			// A content save rotates the file's uuid: the OLD uuid is archived into version history and the
 			// successor arrives as its own fileNew. The file itself lives on, so an open preview KEEPS its
-			// frozen slot — a same-device save already resolves fresh bytes through the editor's saved-uuid
-			// aliases (removing the slot here would yank the just-saved file out from under the user and
-			// collapse the pager), and a cross-device edit merely leaves the frozen snapshot's
-			// stale-but-still-downloadable version on screen (a preview is a static snapshot, never a live
-			// mirror). Only the LISTING drops the superseded row; its fileNew replacement splices in beside it.
+			// slot (removing it here would yank the just-saved file out from under the user and collapse the
+			// pager); the successor's fileNew is what moves the preview on to the new version. Only the
+			// LISTING drops the superseded row; its fileNew replacement splices in beside it.
 			useDriveStore.getState().removeFromSelection([inner.uuid])
 			driveListingQueryUpdateGlobal({ type: "remove", uuid: inner.uuid })
 
