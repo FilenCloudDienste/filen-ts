@@ -2,11 +2,8 @@ import { formatValue, type Cell, type CellStyle, type CellValue, type Sheet, typ
 import { cellKey, type CellView, type SheetView, type SpreadsheetDoc } from "@/features/spreadsheet/lib/model"
 import { shownFormula } from "@/features/spreadsheet/lib/formulaRefs"
 import { StyleTable, styleView } from "@/features/spreadsheet/lib/styleTable"
+import { colWidthToPx, rowHeightToPx } from "@/features/spreadsheet/lib/sizes.logic"
 
-// Column widths are in characters of the default font, row heights in points.
-const PX_PER_CHAR = 7
-const CHAR_PADDING = 5
-const PX_PER_POINT = 4 / 3
 const DEFAULT_FONT_SIZE = 11
 
 function pad(value: number): string {
@@ -219,7 +216,7 @@ function sheetView(sheet: Sheet, views: WorkbookViews, lockStructure: boolean): 
 
 	sheet.columns?.forEach((column, index) => {
 		if (column.width !== undefined) {
-			colWidths.set(index, Math.round(column.width * PX_PER_CHAR + CHAR_PADDING))
+			colWidths.set(index, colWidthToPx(column.width))
 		}
 
 		if (column.hidden === true) {
@@ -232,7 +229,7 @@ function sheetView(sheet: Sheet, views: WorkbookViews, lockStructure: boolean): 
 
 	sheet.rowDefs?.forEach((def, index) => {
 		if (def.height !== undefined) {
-			rowHeights.set(index, Math.round(def.height * PX_PER_POINT))
+			rowHeights.set(index, rowHeightToPx(def.height))
 		}
 
 		if (def.hidden === true) {
