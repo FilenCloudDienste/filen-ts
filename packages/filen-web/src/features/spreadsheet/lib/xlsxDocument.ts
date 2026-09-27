@@ -1275,23 +1275,34 @@ export class XlsxDocument {
 	private resize(op: Extract<EditOp, { type: "resize" }>): { step: Step | null; result: () => EditResult } {
 		const sheet = this.workbook.sheets[this.workbookIndex(op.sheet)]
 
-		if (sheet === undefined || op.sizes.length === 0) {
-			return { step: null, result: () => ({ type: "none", state: this.state() }) }
-		}
-
 		if (op.sizes.length > MAX_RESIZE_TARGETS) {
 			return { step: null, result: () => ({ type: "refused", reason: "tooLarge", state: this.state() }) }
 		}
 
-		const before = op.sizes.map(([at]): [number, number | undefined] => [at, fileSize(sheet, op.axis, at)])
+		// Only what changes: a reset of a size the file never had, or a size it already holds, is no edit
+		// (nothing to undo, and the file stays clean).
+		const changes =
+			sheet === undefined
+				? []
+				: op.sizes.flatMap(([at, px]): [number, number | undefined][] => {
+						const size =
+							px === null
+								? undefined
+								: op.axis === "cols"
+									? pxToColWidth(clampSize("cols", px))
+									: pxToRowHeight(clampSize("rows", px))
 
-		for (const [at, px] of op.sizes) {
-			setFileSize(
-				sheet,
-				op.axis,
-				at,
-				px === null ? undefined : op.axis === "cols" ? pxToColWidth(clampSize("cols", px)) : pxToRowHeight(clampSize("rows", px))
-			)
+						return size === fileSize(sheet, op.axis, at) ? [] : [[at, size]]
+					})
+
+		if (sheet === undefined || changes.length === 0) {
+			return { step: null, result: () => ({ type: "none", state: this.state() }) }
+		}
+
+		const before = changes.map(([at]): [number, number | undefined] => [at, fileSize(sheet, op.axis, at)])
+
+		for (const [at, size] of changes) {
+			setFileSize(sheet, op.axis, at, size)
 		}
 
 		return {
@@ -1301,7 +1312,7 @@ export class XlsxDocument {
 					op.sheet,
 					sheet,
 					op.axis,
-					op.sizes.map(([at]) => at)
+					changes.map(([at]) => at)
 				)
 		}
 	}

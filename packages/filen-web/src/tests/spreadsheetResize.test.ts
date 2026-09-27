@@ -87,6 +87,39 @@ describe("XlsxDocument resize", () => {
 		expect((await reopened(document)).doc().sheets[0]?.colWidths.has(0)).toBe(false)
 	})
 
+	it("changes nothing, and leaves the file clean, when no size would change", async () => {
+		const document = await workbook()
+
+		// Column B has no width of its own; A is already 20 characters (145 px).
+		expect(
+			document.apply({
+				type: "resize",
+				sheet: 0,
+				axis: "cols",
+				sizes: [
+					[1, null],
+					[0, 145]
+				]
+			})
+		).toEqual({ type: "none", state: { dirty: false, canUndo: false, canRedo: false } })
+	})
+
+	it("records only the sizes that change", async () => {
+		const document = await workbook()
+
+		document.apply({
+			type: "resize",
+			sheet: 0,
+			axis: "cols",
+			sizes: [
+				[1, null],
+				[2, 90]
+			]
+		})
+
+		expect(document.undo()).toMatchObject({ type: "sizes", sizes: [[2, null]] })
+	})
+
 	it("clamps sizes to Excel's limits", async () => {
 		const document = await workbook()
 
