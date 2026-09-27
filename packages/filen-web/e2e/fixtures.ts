@@ -414,16 +414,16 @@ async function wipeWebkitOrigin(context: BrowserContext, baseURL: string): Promi
 	await page.close()
 }
 
-// A persistent webkit context over a fresh profile, its blank start page closed and its origin wiped.
-// `discard` removes the profile once the context is closed.
+// A persistent webkit context over a fresh profile, its origin wiped. `discard` removes the profile once
+// the context is closed. Its blank start page stays open: on Linux, MiniBrowser opens every later page
+// in that page's web context through a pointer it holds no reference to, so closing it frees the context
+// and the next newPage() aborts the browser.
 async function launchWebkitContext(
 	webkit: BrowserType,
 	options: Parameters<BrowserType["launchPersistentContext"]>[1]
 ): Promise<{ context: BrowserContext; discard: () => void }> {
 	const profile = mkdtempSync(join(tmpdir(), "filen-e2e-webkit-"))
 	const context = await webkit.launchPersistentContext(profile, options)
-
-	await Promise.all(context.pages().map(blank => blank.close()))
 
 	if (options?.baseURL !== undefined) {
 		await wipeWebkitOrigin(context, options.baseURL)
