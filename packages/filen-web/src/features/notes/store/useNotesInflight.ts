@@ -1,16 +1,17 @@
 import { create } from "zustand"
 import type { Note } from "@filen/sdk-rs"
-import type { InflightEntry as SharedInflightEntry, InflightContent as SharedInflightContent } from "@filen/shared"
+import type { InflightEntry as SharedInflightEntry } from "@filen/shared"
 
 // The sync outbox's per-entry shape and in-memory shape live in @filen/shared (mobile's InflightContent
 // is the identical generic type instantiated with its own Note), generic over each app's own generated
 // Note type: per-note, a time-ordered list of the content the user has typed but not yet confirmed
 // synced. Kept as a list (not a single latest value) so the push loop can prune by LOCAL author-time —
 // only entries typed DURING a round trip survive a successful push, the ones it actually sent die
-// (see sync.ts).
-export type InflightEntry = SharedInflightEntry<Note>
+// (see sync.ts). `origin` is the id of the tab that queued the entry (Sync's tabId): which push is a tab's
+// own. An entry persisted by an earlier page load has none, or another tab's, and is no tab's own now.
+export type InflightEntry = SharedInflightEntry<Note> & { origin?: string }
 
-export type InflightContent = SharedInflightContent<Note>
+export type InflightContent = Record<string, InflightEntry[]>
 
 export interface NotesInflightStore {
 	inflightContent: InflightContent

@@ -14,7 +14,7 @@ import { queryClient } from "@/queries/client"
 import { i18n } from "@/lib/i18n"
 import { forgetNotePushes, rememberNotePush } from "@/features/notes/lib/pushEchoes"
 import { heldNotes, releaseAllNoteHolds } from "@/features/notes/lib/remoteEditHolds"
-import { forgetTabEditors, tabEditorPushed } from "@/features/notes/lib/tabEditors"
+import { forgetTabEditors, tabEditorPushed, tabEditorSynced } from "@/features/notes/lib/tabEditors"
 import { log } from "@/lib/log"
 import { toast } from "sonner"
 import { asErrorDTO } from "@/lib/sdk/errors"
@@ -93,8 +93,12 @@ export class Sync {
 	// their content over a push of the local edits that landed after their save. For any other edit it is:
 	// another tab's push is news to a tab that typed on the version before it.
 	private readonly lastPushedHashes: Map<string, string> = new Map<string, string>()
-	// Notes whose queued edit answers the remote-edit dialog, until it is pushed.
+	// Notes whose queued edit answers the remote-edit dialog, until it is pushed. A follower keeps its own
+	// (and hears the leader's pushes into lastPushedHashes), so a promoted leader still knows them.
 	private readonly answeredNotes: Set<string> = new Set<string>()
+	// This tab's id, the origin of every entry it queues: which push is this tab's own, exactly, whatever
+	// else it or another tab typed meanwhile, in whichever millisecond.
+	private readonly tabId: string = crypto.randomUUID()
 
 	// Multi-tab state. `role` defaults to "leader" so a lone tab and every unit test are the unchanged
 	// single-tab path. `transport` is null until the coordinator wires a channel (single-tab: stays null,
@@ -210,15 +214,11 @@ export class Sync {
 			this.answeredNotes.add(note.uuid)
 		}
 
+		const entries = this.buildOwnEntries(note, content, sessionBaseHash)
+
 		useNotesInflightStore.getState().setInflightContent(prev => ({
 			...prev,
-			[note.uuid]: buildInflightEntries({
-				previous: prev[note.uuid],
-				note,
-				content,
-				now: Date.now(),
-				sessionBaseHash
-			})
+			[note.uuid]: entries
 		}))
 
 		// Persist FIRST (durability), then arm the debounce.
@@ -241,13 +241,7 @@ export class Sync {
 	// debounce here — the leader owns both. Returns true: the optimistic apply cannot fail locally, and
 	// durability is the leader's immediate-persist (a lost forward is re-sent on the next takeover).
 	private followerEnqueue(note: Note, content: string, sessionBaseHash: string | null, answer: boolean): Promise<boolean> {
-		const entries = buildInflightEntries({
-			previous: useNotesInflightStore.getState().inflightContent[note.uuid],
-			note,
-			content,
-			now: Date.now(),
-			sessionBaseHash
-		})
+		const entries = this.buildOwnEntries(note, content, sessionBaseHash)
 
 		useNotesInflightStore.getState().setInflightContent(prev => ({
 			...prev,
@@ -259,20 +253,60 @@ export class Sync {
 			[note.uuid]: entries
 		}
 
+		if (answer) {
+			this.answeredNotes.add(note.uuid)
+		}
+
 		const latest = newestEntry(entries)
 
 		if (latest !== undefined) {
-			this.transport?.sendEnqueue(answer ? { ...this.toRemoteEnqueue(latest), answer: true } : this.toRemoteEnqueue(latest))
+			this.transport?.sendEnqueue(this.toRemoteEnqueue(latest))
 		}
 
 		return Promise.resolve(true)
 	}
 
-	// exactOptionalPropertyTypes: omit the base-hash key entirely when the entry carries none.
+	// The note's entries after a keystroke of this tab's, the new one tagged with this tab's id.
+	private buildOwnEntries(note: Note, content: string, sessionBaseHash: string | null): InflightEntry[] {
+		const entries: InflightEntry[] = buildInflightEntries({
+			previous: useNotesInflightStore.getState().inflightContent[note.uuid],
+			note,
+			content,
+			now: Date.now(),
+			sessionBaseHash
+		})
+		const own = newestEntry(entries)
+
+		return entries.map(entry => (entry === own ? { ...entry, origin: this.tabId } : entry))
+	}
+
+	// exactOptionalPropertyTypes: omit the optional keys entirely when unset.
 	private toRemoteEnqueue(entry: InflightEntry): RemoteEnqueue {
-		return entry.baseContentHash !== undefined
-			? { note: entry.note, content: entry.content, timestamp: entry.timestamp, baseContentHash: entry.baseContentHash }
-			: { note: entry.note, content: entry.content, timestamp: entry.timestamp }
+		const msg: RemoteEnqueue = { note: entry.note, content: entry.content, timestamp: entry.timestamp }
+
+		if (entry.baseContentHash !== undefined) {
+			msg.baseContentHash = entry.baseContentHash
+		}
+
+		if (entry.origin !== undefined) {
+			msg.origin = entry.origin
+		}
+
+		if (this.answeredNotes.has(entry.note.uuid)) {
+			msg.answer = true
+		}
+
+		return msg
+	}
+
+	// ANY ROLE: the leader announced a push of `hash` for the note, queued by the tab `origin`. Kept as this
+	// note's last push, and told to this tab's editor when the entry was this tab's own.
+	public heardPush(noteUuid: string, hash: string, origin: string | undefined): void {
+		this.lastPushedHashes.set(noteUuid, hash)
+
+		if (origin === this.tabId) {
+			tabEditorPushed(noteUuid, hash)
+		}
 	}
 
 	// LEADER: ingest an edit a follower forwarded. Merge it by its (follower-local) timestamp —
@@ -315,6 +349,14 @@ export class Sync {
 
 		this.unacked = reconciled.unacked
 		useNotesInflightStore.getState().setInflightContent(() => reconciled.store)
+
+		// A drained note's answer went out with it.
+		for (const noteUuid of [...this.answeredNotes]) {
+			if ((reconciled.store[noteUuid] ?? []).length === 0) {
+				this.answeredNotes.delete(noteUuid)
+			}
+		}
+
 		// A follower owns no disk: the leader's first broadcast IS its hydration, and any content read a
 		// note in that state has in flight would land on top of the edit it just learned about.
 		this.markHydrated(Object.keys(reconciled.store))
@@ -592,6 +634,7 @@ export class Sync {
 					// local clock — never the server's editedTimestamp, which would silently discard
 					// every keystroke typed during the in-flight round trip.
 					const syncedUpTo = mostRecentContent.timestamp
+					const own = mostRecentContent.origin === this.tabId
 
 					// Conflict DETECTION, never prevention — local edits always win and the push is
 					// unconditional. When the entry carries its session base hash, peek at the note's
@@ -631,8 +674,11 @@ export class Sync {
 
 					if (!alreadyInCloud) {
 						rememberNotePush(noteUuid, pushedContentHash)
-						tabEditorPushed(noteUuid, pushedContentHash, mostRecentContent.content)
-						this.transport?.broadcastPushed(noteUuid, pushedContentHash)
+						this.transport?.broadcastPushed(noteUuid, pushedContentHash, mostRecentContent.origin)
+
+						if (own) {
+							tabEditorPushed(noteUuid, pushedContentHash)
+						}
 					}
 
 					const push = alreadyInCloud
@@ -697,6 +743,12 @@ export class Sync {
 					this.nonRetryableRejections.delete(noteUuid)
 					this.lastPushedHashes.set(noteUuid, pushedContentHash)
 					this.answeredNotes.delete(noteUuid)
+
+					// This tab's text is in the cloud now, and not before: a push the outbox gives up on
+					// leaves it unsaved on screen.
+					if (own) {
+						tabEditorSynced(noteUuid, mostRecentContent.content, pushedContentHash)
+					}
 
 					// The pushed content IS the cloud content now — write it into the per-note content
 					// query cache so an editor reseed after the queue drains paints what the user typed,

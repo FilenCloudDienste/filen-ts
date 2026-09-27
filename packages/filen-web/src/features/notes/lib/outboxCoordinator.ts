@@ -5,7 +5,6 @@ import { inflightContentSchema, type RemoteEnqueue } from "@/features/notes/lib/
 import { setOutboxHydrated, type InflightContent } from "@/features/notes/store/useNotesInflight"
 import { rememberNotePush, setNotePushBroadcast } from "@/features/notes/lib/pushEchoes"
 import { setNoteAnswerBroadcast, useNotesRemoteEditStore } from "@/features/notes/store/useNoteRemoteEdit"
-import { tabEditorPushed } from "@/features/notes/lib/tabEditors"
 
 // Binds the leader-owned notes outbox (sync.ts) to a dedicated cross-tab channel + the db-lock leadership
 // signal, via the shared coordinator core (outboxChannel.ts). The leader tab (whoever holds the db lock) runs
@@ -23,6 +22,7 @@ const remoteEnqueueSchema = type({
 	content: "string",
 	timestamp: "number",
 	"baseContentHash?": "string",
+	"origin?": "string",
 	"answer?": "true"
 }).as<RemoteEnqueue>()
 
@@ -41,12 +41,13 @@ function handleMessage(msg: OutboxChannelMsg): void {
 	// Every tab keeps the list of what the leader pushed, whichever role it holds by the time it hears.
 	if (msg.kind === "pushed") {
 		rememberNotePush(msg.id, msg.hash)
-		tabEditorPushed(msg.id, msg.hash)
+		sync.heardPush(msg.id, msg.hash, msg.origin)
 
 		return
 	}
 
-	// Answered in another tab: this one stops asking, and stops holding the note's pushes.
+	// Answered in another tab: this one stops asking, and stops holding the note's pushes (unless its own
+	// typing is still unsaved, see dropRemoteEdited).
 	if (msg.kind === "answered") {
 		useNotesRemoteEditStore.getState().dropRemoteEdited(msg.id)
 

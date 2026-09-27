@@ -51,6 +51,7 @@ import useNotesInflightStore, {
 } from "@/features/notes/store/useNotesInflight"
 import { reconcileFollower, hashNoteContent, type RemoteEnqueue } from "@/features/notes/lib/sync.logic"
 import { isOwnNotePush } from "@/features/notes/lib/pushEchoes"
+import { forgetTabEditors, seedTabEditor, takeTabEditorAuthored, tabEditorChanged } from "@/features/notes/lib/tabEditors"
 
 function makeNote(uuid: string, overrides: Partial<Note> = {}): Note {
 	return {
@@ -81,7 +82,7 @@ function mockTransport() {
 		requestState: vi.fn<() => void>(),
 		broadcastState: vi.fn<(state: InflightContent) => void>(),
 		broadcastLeaderHello: vi.fn<() => void>(),
-		broadcastPushed: vi.fn<(id: string, hash: string) => void>(),
+		broadcastPushed: vi.fn<(id: string, hash: string, origin?: string) => void>(),
 		broadcastAnswered: vi.fn<(id: string) => void>(),
 		close: vi.fn<() => void>()
 	}
@@ -215,7 +216,7 @@ describe("follower enqueue — optimistic local apply + forward, no disk", () =>
 		expect(kvSetJson).not.toHaveBeenCalled()
 	})
 
-	it("marks a forwarded answer to the remote-edit dialog, and only that", async () => {
+	it("marks forwarded edits as an answer to the remote-edit dialog until the note drains, re-sends included", async () => {
 		const s = new Sync()
 		const transport = mockTransport()
 
@@ -224,10 +225,20 @@ describe("follower enqueue — optimistic local apply + forward, no disk", () =>
 
 		const note = makeNote("a")
 
+		await s.enqueue(note, "typed", hashNoteContent("seed"))
 		await s.enqueueAnswer(note, "theirs", hashNoteContent("theirs"))
 		await s.enqueue(note, "theirs, typed on", hashNoteContent("seed"))
+		// A new leader: the re-sent edit is still an answer, so it warns of no overwrite of the last push.
+		s.resendUnacked()
 
-		expect(transport.sendEnqueue.mock.calls.map(c => c[0].answer)).toEqual([true, undefined])
+		expect(transport.sendEnqueue.mock.calls.map(c => c[0].answer)).toEqual([undefined, true, true, true])
+
+		// The leader caught up, then drained the note: the answer went out.
+		s.applyLeaderState({ a: getStore()["a"] ?? [] })
+		s.applyLeaderState({})
+		await s.enqueue(note, "later", hashNoteContent("seed"))
+
+		expect(transport.sendEnqueue.mock.calls.at(-1)?.[0].answer).toBeUndefined()
 	})
 
 	it("forwards a flush request on executeNow instead of running a pass", () => {
@@ -390,6 +401,115 @@ describe("leader ingest — apply forwarded edit, persist, broadcast", () => {
 })
 
 // ── Leadership-change replay (failover) ─────────────────────────────────────
+
+describe("a follower hears the leader's pushes", () => {
+	it("knows a push of an entry it queued for its own, by the entry's origin, and no other", async () => {
+		const s = new Sync()
+		const transport = mockTransport()
+
+		s.attachTransport(transport)
+		s.startAsFollower()
+		forgetTabEditors()
+		seedTabEditor("a", "a:1", "old", "old")
+		tabEditorChanged("a", "mine")
+
+		const note = makeNote("a")
+
+		await s.enqueue(note, "mine", hashNoteContent("old"))
+
+		const origin = firstEnqueue(transport).origin
+
+		expect(origin).toEqual(expect.any(String))
+
+		// Another tab's entry, pushed; then one persisted by an earlier page load, with no origin.
+		s.heardPush("a", hashNoteContent("other"), "another tab")
+		s.heardPush("a", hashNoteContent("restored"), undefined)
+
+		expect(takeTabEditorAuthored("a", hashNoteContent("other"))).toBe(false)
+		expect(takeTabEditorAuthored("a", hashNoteContent("restored"))).toBe(false)
+
+		s.heardPush("a", hashNoteContent("mine"), origin)
+
+		expect(takeTabEditorAuthored("a", hashNoteContent("mine"))).toBe(true)
+		forgetTabEditors()
+	})
+
+	// Same-millisecond entries carry the same timestamp: only the origin tells whose was pushed.
+	it("two tabs queuing the note in the same millisecond: each knows exactly whether the push was its own", async () => {
+		const now = vi.spyOn(Date, "now").mockReturnValue(1000)
+		const leader = new Sync()
+		const leaderTransport = mockTransport()
+		const follower = new Sync()
+		const followerTransport = mockTransport()
+
+		leader.attachTransport(leaderTransport)
+		leader.start()
+		await flushAsync()
+		follower.attachTransport(followerTransport)
+		follower.startAsFollower()
+		forgetTabEditors()
+		seedTabEditor("a", "a:1", "old", "old")
+		tabEditorChanged("a", "typed here")
+
+		const note = makeNote("a")
+
+		// The follower queues first, into its own view of the queue (one store stands in for both tabs here).
+		await follower.enqueue(note, "follower text", hashNoteContent("old"))
+
+		const forwarded = firstEnqueue(followerTransport)
+
+		setStore({})
+		await leader.enqueue(note, "leader text", hashNoteContent("old"))
+
+		expect(getStore()["a"]?.[0]?.timestamp).toBe(forwarded.timestamp)
+
+		// Same stamp: the leader keeps its own entry.
+		leader.ingestRemoteEnqueue(forwarded)
+		getNoteContent.mockResolvedValue("old")
+		setNoteContent.mockResolvedValue(note)
+		leader.executeNow()
+		await flushAsync()
+		now.mockRestore()
+
+		expect(setNoteContent).toHaveBeenCalledExactlyOnceWith(note, "leader text", expect.any(String))
+
+		const [, hash, origin] = leaderTransport.broadcastPushed.mock.calls[0] ?? []
+
+		expect(origin).toBeDefined()
+		expect(origin).not.toBe(forwarded.origin)
+		// The leader tab's own push, told to its editor.
+		expect(takeTabEditorAuthored("a", hashNoteContent("leader text"))).toBe(true)
+
+		// The follower hears it: not its own, although its entry has the same stamp.
+		follower.heardPush("a", hash ?? "", origin)
+
+		expect(takeTabEditorAuthored("a", hashNoteContent("leader text"))).toBe(false)
+		forgetTabEditors()
+	})
+
+	// The answer and the push it answers over outlive the leader that knew them.
+	it("a promoted follower puts their content back over this browser's last push without an overwrite warning", async () => {
+		const s = new Sync()
+		const transport = mockTransport()
+
+		s.attachTransport(transport)
+		s.startAsFollower()
+
+		const note = makeNote("a")
+
+		s.heardPush("a", hashNoteContent("mine"), undefined)
+		await s.enqueueAnswer(note, "theirs", hashNoteContent("theirs"))
+		listNotes.mockResolvedValue([note])
+		getNoteContent.mockResolvedValue("mine")
+		setNoteContent.mockResolvedValue(note)
+
+		s.promoteToLeader()
+		await flushAsync()
+
+		expect(setNoteContent).toHaveBeenCalledWith(note, "theirs", expect.any(String))
+		expect(toast).not.toHaveBeenCalled()
+	})
+})
 
 describe("promoteToLeader — a follower wins the lock and pushes carried-over work", () => {
 	it("pushes an optimistic edit the follower held locally even when disk was empty", async () => {

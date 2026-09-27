@@ -1,9 +1,9 @@
-import { hashNoteContent } from "@filen/shared"
 import { localNoteContent } from "@/features/notes/lib/localContent"
 
 // What the note editor in THIS tab shows and has typed, per note. The outbox is shared by every tab (the
-// leader's queue, mirrored in the followers), so its entries can be another tab's typing; this is the
-// only record of which edits are this tab's own, and of whether its editor is behind the cloud.
+// leader's queue, mirrored in the followers), so its entries can be another tab's typing; this records
+// whether this tab's editor holds text the cloud does not, or is behind it. Which pushes are this tab's
+// own the outbox tells exactly, by entry (Sync.ownsEntry).
 interface TabEditor {
 	// The editor's remount key when it was seeded; a new key is a new editor surface.
 	key: string | null
@@ -11,18 +11,14 @@ interface TabEditor {
 	buffer: string
 	// What the buffer builds on and the cloud holds, as far as this tab knows.
 	synced: string | undefined
-	// Hash of `synced`, when a push of this tab's text set it.
-	syncedHash: string | undefined
+	// The base of a new editing session: the hash of this tab's text last pushed, or of `synced`.
+	baseHash: string | undefined
 	// Typed into since it was seeded.
 	typed: boolean
-	// The buffers before the current one, oldest first: a push picks its content before a peek round
-	// trip, and the user may type on meanwhile.
-	recent: string[]
-	// Hashes of this tab's text that this browser pushed, not yet heard back: their echoes are this tab's.
+	// Hashes of this tab's pushes, not yet heard back: their echoes are this tab's.
 	authored: string[]
 }
 
-const MAX_RECENT = 4
 const MAX_AUTHORED = 8
 
 const editors = new Map<string, TabEditor>()
@@ -47,9 +43,8 @@ export function seedTabEditor(uuid: string, key: string, seed: string, synced: s
 		key,
 		buffer: seed,
 		synced,
-		syncedHash: undefined,
+		baseHash: undefined,
 		typed: false,
-		recent: [],
 		// Echoes of this tab's pushes can still arrive after a reseed.
 		authored: editor?.authored ?? []
 	})
@@ -62,7 +57,6 @@ export function unseedTabEditor(uuid: string): void {
 	if (editor !== undefined) {
 		editor.key = null
 		editor.typed = false
-		editor.recent = []
 	}
 }
 
@@ -82,43 +76,19 @@ export function tabEditorChanged(uuid: string, value: string): void {
 		return
 	}
 
-	if (editor.typed) {
-		editor.recent.push(editor.buffer)
-
-		if (editor.recent.length > MAX_RECENT) {
-			editor.recent.shift()
-		}
-	}
-
 	editor.buffer = value
 	editor.typed = true
 }
 
-// The leader pushes `hash` for the note (`content` in the leader tab itself, compared without hashing).
-// When it is text this tab typed, that text is what the tab builds on from now: the push is still in
-// flight, but its entry stays queued until it lands, and the queue counts as unsynced meanwhile.
-export function tabEditorPushed(uuid: string, hash: string, content?: string): void {
-	const editor = shown(uuid)
+// A push of text this tab queued (hashed `hash`) goes out. It is not synced until it lands: a push the
+// outbox gives up on leaves the text unsaved on screen. A new session builds on it meanwhile, as the
+// cloud will hold it (a follower's cache is only written by the echo).
+export function tabEditorPushed(uuid: string, hash: string): void {
+	const editor = editors.get(uuid)
 
-	if (editor?.typed !== true) {
-		return
-	}
-
-	const candidates = [...editor.recent, editor.buffer]
-
-	for (let at = candidates.length - 1; at >= 0; at--) {
-		const candidate = candidates[at]
-
-		if (candidate === undefined || (content !== undefined ? candidate !== content : hashNoteContent(candidate) !== hash)) {
-			continue
-		}
-
-		editor.synced = candidate
-		editor.syncedHash = hash
-		editor.recent = editor.recent.slice(at + 1)
+	if (editor !== undefined) {
 		editor.authored = [...editor.authored, hash].slice(-MAX_AUTHORED)
-
-		return
+		editor.baseHash = hash
 	}
 }
 
@@ -136,13 +106,13 @@ export function takeTabEditorAuthored(uuid: string, hash: string): boolean {
 	return true
 }
 
-// The cloud holds `content` (hashed `hash`), and this tab's text builds on it.
-export function tabEditorSynced(uuid: string, content: string, hash: string): void {
+// The cloud holds `content` (hashed `hash`, when known), and this tab's text builds on it.
+export function tabEditorSynced(uuid: string, content: string, hash: string | undefined): void {
 	const editor = shown(uuid)
 
 	if (editor !== undefined) {
 		editor.synced = content
-		editor.syncedHash = hash
+		editor.baseHash = hash
 	}
 }
 
@@ -157,10 +127,9 @@ export function tabEditorDirty(uuid: string): boolean {
 	return editor !== undefined && editor.typed && editor.buffer !== editor.synced
 }
 
-// The base of a new editing session, when this tab's own push says more than the content cache: in a
-// follower tab the cache is only written by the push's echo.
+// The base of a new editing session, when this tab's own push says more than the content cache.
 export function tabEditorBaseHash(uuid: string): string | undefined {
-	return shown(uuid)?.syncedHash
+	return shown(uuid)?.baseHash
 }
 
 // "Mine" in the remote-edit dialog: what this tab typed, else the note as this browser knows it.

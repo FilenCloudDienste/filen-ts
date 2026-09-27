@@ -31,7 +31,8 @@ const inflightEntrySchema = type({
 	timestamp: "number",
 	content: "string",
 	note: "object",
-	"baseContentHash?": "string"
+	"baseContentHash?": "string",
+	"origin?": "string"
 })
 
 export const inflightContentSchema = type({
@@ -55,6 +56,8 @@ export interface RemoteEnqueue {
 	content: string
 	timestamp: number
 	baseContentHash?: string
+	// The id of the tab that queued it (InflightEntry.origin).
+	origin?: string
 	// An answer to the remote-edit dialog (Sync.enqueueAnswer).
 	answer?: true
 }
@@ -94,13 +97,18 @@ export function reconcileFollower(
 }
 
 // Build the leader-side one-note patch for an ingested follower edit: `{ [uuid]: [entry] }`, ready to
-// mergeInflight into the leader store. exactOptionalPropertyTypes: the base hash key is OMITTED, never
-// set to undefined, when the forward carried none (legacy no-hash grace).
+// mergeInflight into the leader store. exactOptionalPropertyTypes: the base hash and origin keys are
+// OMITTED, never set to undefined, when the forward carried none (legacy no-hash grace).
 export function remoteEnqueueToPatch(msg: RemoteEnqueue): InflightContent {
-	const entry: InflightEntry =
-		msg.baseContentHash !== undefined
-			? { timestamp: msg.timestamp, note: msg.note, content: msg.content, baseContentHash: msg.baseContentHash }
-			: { timestamp: msg.timestamp, note: msg.note, content: msg.content }
+	const entry: InflightEntry = { timestamp: msg.timestamp, note: msg.note, content: msg.content }
+
+	if (msg.baseContentHash !== undefined) {
+		entry.baseContentHash = msg.baseContentHash
+	}
+
+	if (msg.origin !== undefined) {
+		entry.origin = msg.origin
+	}
 
 	return { [msg.note.uuid]: [entry] }
 }

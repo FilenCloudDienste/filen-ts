@@ -183,21 +183,46 @@ function handleContentEdited(inner: Extract<NoteSocketEvent["inner"], { type: "c
 	// does not hold yet. Dirty → ASK (the editor's remote-change dialog), never reseed: the user may be
 	// typing between debounce flushes, and a reseed remounts the editor under the caret. Content equal to
 	// the local edits is no change at all. Clean → take their version: the editor holds nothing that is
-	// not in the cloud, so a reseed loses nothing.
+	// not in the cloud, so a reseed loses nothing. A question already asked follows each newer version:
+	// asked about the newest, retired once there is nothing left to ask (one left on a note not on screen
+	// would otherwise offer an outdated version when the note is opened).
 	if (noteIsDirty(inner.note)) {
 		if (content === undefined || content !== tabNoteContent(inner.note)) {
 			useNotesRemoteEditStore.getState().setRemoteEdited(inner.note, { theirs: content })
-		} else if (tabEditorBuffer(inner.note) === content) {
-			tabEditorSynced(inner.note, content, hashNoteContent(content))
+
+			return
 		}
+
+		if (tabEditorBuffer(inner.note) === content) {
+			tabEditorSynced(inner.note, content, undefined)
+			followContent(inner.note, content)
+		}
+
+		useNotesRemoteEditStore.getState().dropRemoteEdited(inner.note)
 
 		return
 	}
 
+	useNotesRemoteEditStore.getState().dropRemoteEdited(inner.note)
 	// Patch the row (editedTimestamp, noteType, and a fresh preview when the content decrypted), then
 	// reseed from their content, saying so when that editor is on screen.
 	patchRowFromContentEdited(inner, content)
 	takeRemoteContent(inner.note, content, true)
+}
+
+// The content cache follows `content` without a new dataUpdatedAt, so a shown editor that already holds it
+// stays mounted.
+function followContent(uuid: string, content: string): void {
+	const contentKey = noteContentQueryKey(uuid)
+
+	if (queryClient.getQueryData<string>(contentKey) === content) {
+		return
+	}
+
+	const updatedAt = queryClient.getQueryState<string | undefined>(contentKey)?.dataUpdatedAt
+
+	void queryClient.cancelQueries({ queryKey: contentKey, exact: true })
+	queryClient.setQueryData<string>(contentKey, content, updatedAt !== undefined ? { updatedAt } : undefined)
 }
 
 // The row is not patched for an echo: it may be older than this tab's own later change. A stale type is
@@ -223,8 +248,17 @@ function noteIsDirty(uuid: string): boolean {
 // which would toast at every pause of the typing there.
 function takeRemoteContent(uuid: string, content: string | undefined, announce: boolean): void {
 	const contentKey = noteContentQueryKey(uuid)
+	const buffer = tabEditorBuffer(uuid)
 
-	if (tabEditorBuffer(uuid) === undefined) {
+	// Nothing changes on screen.
+	if (buffer !== undefined && buffer === content) {
+		tabEditorSynced(uuid, content, undefined)
+		followContent(uuid, content)
+
+		return
+	}
+
+	if (buffer === undefined) {
 		void queryClient.invalidateQueries({ queryKey: contentKey })
 	} else if (content === undefined) {
 		// Re-enables the query, so the invalidation reads.
@@ -253,17 +287,8 @@ function followOwnPush(uuid: string, content: string, hash: string): void {
 
 	if (takeTabEditorAuthored(uuid, hash) || buffer === content) {
 		tabEditorSynced(uuid, content, hash)
-
-		// The cache follows without a new dataUpdatedAt, so the editor stays mounted. The leader tab's push
-		// already wrote it; a follower's is written here.
-		const contentKey = noteContentQueryKey(uuid)
-
-		if (queryClient.getQueryData<string>(contentKey) !== content) {
-			const updatedAt = queryClient.getQueryState<string | undefined>(contentKey)?.dataUpdatedAt
-
-			void queryClient.cancelQueries({ queryKey: contentKey, exact: true })
-			queryClient.setQueryData<string>(contentKey, content, updatedAt !== undefined ? { updatedAt } : undefined)
-		}
+		// The leader tab's push already wrote it; a follower's is written here.
+		followContent(uuid, content)
 
 		return
 	}
@@ -327,21 +352,22 @@ async function readTheirs(note: Note): Promise<string | undefined> {
 // The dialog's "Keep mine": the local edits become the newest version, queued afresh against their
 // content as the base, so the push, which the user chose, raises no overwrite warning. Afresh rather than
 // left as they are: unsynced entries carry the base they were typed on, and in a follower tab only a new
-// edit reaches the leader's queue. The hold is released once the edit is queued. With nothing unsynced
-// left (a push of the local edits landed after their save), the cloud already holds mine: queueing the
-// older synced text again would revert their save.
+// edit reaches the leader's queue. Queued even when nothing is unsynced: this tab's push may have landed
+// before their save, its response after their event. Only mine equal to the version asked about (read
+// when the event carried none) needs nothing. The hold is released once the edit is queued.
 export async function keepMineOverRemoteEdit(note: Note): Promise<void> {
 	const edit = useNotesRemoteEditStore.getState().remoteEdited[note.uuid]
 	const mine = tabNoteContent(note.uuid)
+	const theirs = edit === undefined ? undefined : (edit.theirs ?? (await readTheirs(note)))
 
-	if (mine === undefined || edit === undefined || !noteIsDirty(note.uuid)) {
+	if (mine === undefined || edit === undefined || mine === theirs) {
 		useNotesRemoteEditStore.getState().clearRemoteEdited(note.uuid)
 
 		return
 	}
 
 	sync.dropEntry(note.uuid)
-	await sync.enqueueAnswer(note, mine, edit.theirs === undefined ? null : hashNoteContent(edit.theirs))
+	await sync.enqueueAnswer(note, mine, theirs === undefined ? null : hashNoteContent(theirs))
 	useNotesRemoteEditStore.getState().clearRemoteEdited(note.uuid)
 	sync.executeNow()
 }

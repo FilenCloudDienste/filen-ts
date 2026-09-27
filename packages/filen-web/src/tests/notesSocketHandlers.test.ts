@@ -49,7 +49,14 @@ import { setNoteAnswerBroadcast, useNotesRemoteEditStore } from "@/features/note
 import { handleNoteEvent, keepMineOverRemoteEdit, reloadRemoteEdit, saveRemoteEditMineAsCopy } from "@/features/notes/lib/socketHandlers"
 import { forgetNotePushes, isOwnNotePush, rememberNotePush, setNotePushBroadcast } from "@/features/notes/lib/pushEchoes"
 import { heldNotes, releaseAllNoteHolds } from "@/features/notes/lib/remoteEditHolds"
-import { forgetTabEditors, seedTabEditor, tabEditorChanged, tabEditorDirty, tabEditorPushed } from "@/features/notes/lib/tabEditors"
+import {
+	forgetTabEditors,
+	seedTabEditor,
+	tabEditorChanged,
+	tabEditorDirty,
+	tabEditorPushed,
+	tabEditorSynced
+} from "@/features/notes/lib/tabEditors"
 import { hashNoteContent } from "@filen/shared"
 
 function makeNote(uuid: string, overrides: Partial<Note> = {}): Note {
@@ -479,7 +486,7 @@ describe("note socket handlers — contentEdited", () => {
 		useNotesRemoteEditStore.getState().setOpenNote("a")
 		testQueryClient.setQueryData(noteContentQueryKey("a"), "old", { updatedAt: 1 })
 		showEditor("a", "old", "old", "x")
-		tabEditorPushed("a", hashNoteContent("x"), "x")
+		tabEditorSynced("a", "x", hashNoteContent("x"))
 		const invalidate = vi.spyOn(testQueryClient, "invalidateQueries")
 
 		handleNoteEvent(contentEdited("a", 99))
@@ -592,7 +599,7 @@ describe("note socket handlers — this browser's pushes, heard by the tabs show
 		// editor, seeded before, still shows the older text.
 		testQueryClient.setQueryData(noteContentQueryKey("a"), "tab 2 text", { updatedAt: 1 })
 		showEditor("a", "old", "old", "old, typed", "old")
-		tabEditorPushed("a", hashNoteContent("old"), "old")
+		tabEditorSynced("a", "old", hashNoteContent("old"))
 		rememberNotePush("a", hashNoteContent("tab 2 text"))
 
 		handleNoteEvent(echo("tab 2 text"))
@@ -773,17 +780,39 @@ describe("note socket handlers — reload/keep actions", () => {
 		expect(executeNow).toHaveBeenCalledTimes(1)
 	})
 
-	it("keep with nothing unsynced left queues nothing: the synced text again would revert their save", async () => {
+	// This tab's push can land before their save and its response arrive after their event: nothing is
+	// unsynced, yet the cloud holds theirs.
+	it("keep with nothing unsynced left still makes mine the newest version", async () => {
 		testQueryClient.setQueryData(noteContentQueryKey("a"), "mine")
 		showEditor("a", "old", "old", "mine")
-		tabEditorPushed("a", hashNoteContent("mine"), "mine")
+		tabEditorSynced("a", "mine", hashNoteContent("mine"))
+		useNotesRemoteEditStore.getState().setRemoteEdited("a", { theirs: "server text" })
+
+		await keepMineOverRemoteEdit(makeNote("a"))
+
+		expect(enqueueAnswer).toHaveBeenCalledWith(expect.objectContaining({ uuid: "a" }), "mine", hashNoteContent("server text"))
+		expect(executeNow).toHaveBeenCalledTimes(1)
+	})
+
+	it("keep with mine equal to the version asked about queues nothing", async () => {
+		showEditor("a", "old", "old", "server text")
 		useNotesRemoteEditStore.getState().setRemoteEdited("a", { theirs: "server text" })
 
 		await keepMineOverRemoteEdit(makeNote("a"))
 
 		expect(enqueueAnswer).not.toHaveBeenCalled()
-		expect(executeNow).not.toHaveBeenCalled()
 		expect(useNotesRemoteEditStore.getState().remoteEdited["a"]).toBeUndefined()
+	})
+
+	it("keep reads the version asked about when the event carried none, and queues nothing when mine equals it", async () => {
+		showEditor("a", "old", "old", "same")
+		useNotesRemoteEditStore.getState().setRemoteEdited("a", { theirs: undefined })
+		getNoteContent.mockResolvedValueOnce("same")
+
+		await keepMineOverRemoteEdit(makeNote("a"))
+
+		expect(getNoteContent).toHaveBeenCalledTimes(1)
+		expect(enqueueAnswer).not.toHaveBeenCalled()
 	})
 })
 
