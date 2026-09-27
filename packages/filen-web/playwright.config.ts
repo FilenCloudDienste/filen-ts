@@ -227,8 +227,9 @@ export default defineConfig({
 	// per-test worst cases a healthy run never spends; this is the outer bound on the run as a whole.
 	// The mandatory serial chain under it IS additive, though — 600s webServer + 120s auth-setup (suite
 	// default) + 600s cleanup-setup + 900s fixtures-setup + 420s fixtures-teardown = 44 min of budget
-	// before and after any spec at all.
-	globalTimeout: 120 * 60_000,
+	// before and after any spec at all. WebKit's lanes run one test at a time (its storage lock), which is
+	// most of a full run: this is sized for all three browsers (CI runs it nightly, not per push).
+	globalTimeout: 300 * 60_000,
 	reporter: process.env["CI"] ? [["github"], ["html", { open: "never" }], ["list"]] : [["html", { open: "never" }], ["list"]],
 	// Covers auth-setup only — every real lane below sets its own. Kept tight all the
 	// same: a write that hangs holds its test open for the whole budget, and the kill at the end of it

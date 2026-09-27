@@ -3,6 +3,11 @@ name: Tests
 on:
   workflow_dispatch:
 
+  # The web e2e suite runs here only (and on dispatch), never per push: with all three browsers it takes
+  # hours on the one shared live account.
+  schedule:
+    - cron: '17 2 * * *'
+
   push:
     paths:
       - 'packages/filen-shared/**'
@@ -25,6 +30,8 @@ on:
 
 jobs:
   changes:
+    # The nightly run is the e2e suite alone: skipping this skips every job gated on it.
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     outputs:
       filen-shared: ${{ steps.filter.outputs.filen-shared }}
@@ -156,21 +163,13 @@ jobs:
           fi
 
   test-web:
-    needs: changes
-    # `push` is filtered to the default branch on purpose. For a same-repo branch `push` and
-    # `pull_request` BOTH fire for the same commit, and because they carry different refs neither the
-    # workflow nor the constant group below dedupes them — so one commit queued two full ~35-minute
-    # live-account runs back to back. Worse, GitHub keeps only ONE pending job per group, so the run
-    # dropped while pending was usually a NEWER commit's. The PR event stays the branch signal; push
-    # covers main, where there is no PR event.
-    if: |
-      (needs.changes.outputs.filen-web == 'true' || github.event_name == 'workflow_dispatch')
-      && (github.event_name != 'push' || github.ref == 'refs/heads/main')
+    # Nightly and on dispatch only (see `schedule` above); pushes and PRs get web-checks.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    # Playwright's globalTimeout bounds the e2e step alone; the install, both production builds and the
-    # browser install are unbounded, and a hang in any of them would hold the non-cancelling
+    # Playwright's globalTimeout (300 min) bounds the e2e step alone; the install, both production builds
+    # and the browser install are unbounded, and a hang in any of them would hold the non-cancelling
     # `filen-web-e2e` group below for GitHub's 6h job default.
-    timeout-minutes: 150
+    timeout-minutes: 340
     # ONE constant group, and scoped to this job because it is the only one that touches the shared live
     # Filen test account — there is exactly one, and setup/cleanup.setup.ts trashes then PERMANENTLY
     # DELETES every row matching the e2e debris prefixes, which includes a concurrently running suite's
