@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { QueryClient } from "@tanstack/react-query"
+import { QueryClient, onlineManager } from "@tanstack/react-query"
 import type { Note, SocketEvent } from "@filen/sdk-rs"
 
 // End to end over the real outbox (sync.ts), socket handlers and tab editor record: a note edited here
@@ -105,6 +105,23 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
 
 async function tick(): Promise<void> {
 	await new Promise(resolve => setTimeout(resolve, 15))
+}
+
+// Another tab of this browser, alive until the returned function is called (it holds its tab lock).
+function liveTab(origin: string): () => void {
+	let release = (): void => undefined
+
+	void navigator.locks.request(
+		`filen-web-notes-tab:${origin}`,
+		() =>
+			new Promise<void>(resolve => {
+				release = resolve
+			})
+	)
+
+	return () => {
+		release()
+	}
 }
 
 // What the editor's onChange does.
@@ -350,6 +367,8 @@ describe("notes — a clean editor and a save elsewhere", () => {
 
 describe("notes — a clean tab when the question is answered in another tab", () => {
 	it("the leader tab takes theirs when the answer sends nothing, so its next edit does not bury theirs unseen", async () => {
+		const closeB = liveTab("tab-B")
+
 		openNote()
 
 		const cloud = cloudOf("old")
@@ -401,6 +420,7 @@ describe("notes — a clean tab when the question is answered in another tab", (
 		await tick()
 
 		expect(cloud.get()).toBe("theirs + A")
+		closeB()
 	})
 
 	it("a clean follower, asked only because another tab's typing is queued, takes theirs", () => {
@@ -1067,5 +1087,126 @@ describe("notes — what a tab's editor shows, and which echoes are its own", ()
 
 		expect(cloud.get()).toBe("A+x")
 		expect(toast).not.toHaveBeenCalled()
+	})
+})
+
+describe("notes — another tab's draft whose tab is gone", () => {
+	async function pendingWaits(): Promise<string[]> {
+		const snapshot = await navigator.locks.query()
+
+		return (snapshot.pending ?? []).flatMap(lock => (lock.name?.startsWith("filen-web-notes-tab:") === true ? [lock.name] : []))
+	}
+
+	it("becomes an orphan once its tab closes, and the leader stops waiting once it drains", async () => {
+		const closeF1 = liveTab("tab-F1")
+
+		await tick()
+		sync.ingestRemoteEnqueue({
+			note,
+			content: "old+mine",
+			timestamp: Date.now(),
+			baseContentHash: hashNoteContent("old"),
+			origin: "tab-F1"
+		})
+		await tick()
+
+		expect(useNotesInflightStore.getState().inflightContent[note.uuid]?.[0]?.orphan).toBeUndefined()
+		expect(await pendingWaits()).toEqual(["filen-web-notes-tab:tab-F1"])
+
+		closeF1()
+		await tick()
+
+		expect(useNotesInflightStore.getState().inflightContent[note.uuid]?.[0]?.orphan).toBe(true)
+		expect(latestShowableContent(useNotesInflightStore.getState().inflightContent[note.uuid])).toBe("old+mine")
+		expect(await pendingWaits()).toEqual([])
+	})
+
+	it("a live tab's wait is withdrawn when its entries drain", async () => {
+		const closeF1 = liveTab("tab-F1")
+		const withdrawn = vi.spyOn(AbortController.prototype, "abort")
+
+		cloudOf("old")
+		await tick()
+		sync.ingestRemoteEnqueue({
+			note,
+			content: "old+mine",
+			timestamp: Date.now(),
+			baseContentHash: hashNoteContent("old"),
+			origin: "tab-F1"
+		})
+		await tick()
+
+		expect(await pendingWaits()).toEqual(["filen-web-notes-tab:tab-F1"])
+		expect(withdrawn).not.toHaveBeenCalled()
+
+		sync.executeNow()
+		await tick()
+
+		expect(queuedContents()).toBeUndefined()
+		expect(withdrawn).toHaveBeenCalledTimes(1)
+		closeF1()
+	})
+
+	it("typing over another tab's draft this tab never showed is based on that draft: its push warns", async () => {
+		const closeF1 = liveTab("tab-F1")
+
+		await tick()
+		onlineManager.setOnline(false)
+		sync.ingestRemoteEnqueue({
+			note,
+			content: "old+mine",
+			timestamp: Date.now(),
+			baseContentHash: hashNoteContent("old"),
+			origin: "tab-F1"
+		})
+		openNote()
+		type("old!")
+
+		expect(useNotesInflightStore.getState().inflightContent[note.uuid]?.[0]?.baseContentHash).toBe(hashNoteContent("old+mine"))
+
+		const cloud = cloudOf("old")
+
+		onlineManager.setOnline(true)
+		sync.executeNow()
+		await tick()
+
+		expect(cloud.get()).toBe("old!")
+		expect(toast).toHaveBeenCalledWith("notes:noteOverwroteNewerRemoteChanges")
+		closeF1()
+	})
+
+	it("an orphan under an editor on screen with nothing typed is taken: the editor seeds again, and says so", () => {
+		openNote()
+		sync.startAsFollower()
+		sync.applyLeaderState({
+			a: [{ timestamp: 1000, content: "old+L", note, baseContentHash: hashNoteContent("old"), origin: "tab-L" }]
+		})
+
+		expect(remountKey()).toBe(1)
+
+		sync.applyLeaderState({
+			a: [{ timestamp: 1000, content: "old+L", note, baseContentHash: hashNoteContent("old"), origin: "tab-L", orphan: true }]
+		})
+
+		expect(remountKey()).not.toBe(1)
+		expect(queryClient.getQueryData(noteContentQueryKey(note.uuid))).toBe("old")
+		expect(toast).toHaveBeenCalledExactlyOnceWith("notes:noteUpdatedElsewhere")
+		expect(latestShowableContent(useNotesInflightStore.getState().inflightContent[note.uuid])).toBe("old+L")
+	})
+
+	it("an orphan under an editor with typing of its own asks", () => {
+		openNote()
+		sync.startAsFollower()
+		sync.applyLeaderState({
+			a: [{ timestamp: 1000, content: "old+L", note, baseContentHash: hashNoteContent("old"), origin: "tab-L" }]
+		})
+		beginEditingSession(note.uuid)
+		tabEditorChanged(note.uuid, "old!")
+		sync.applyLeaderState({
+			a: [{ timestamp: 1000, content: "old+L", note, baseContentHash: hashNoteContent("old"), origin: "tab-L", orphan: true }]
+		})
+
+		expect(question()).toEqual({ theirs: "old+L" })
+		expect(remountKey()).toBe(1)
 	})
 })

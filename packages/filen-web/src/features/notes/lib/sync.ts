@@ -121,6 +121,10 @@ export class Sync {
 	// else it or another tab typed meanwhile, in whichever millisecond. The app's outbox is TAB_ID's.
 	private readonly tabId: string
 	private releaseTabLock: (() => void) | null = null
+	// LEADER: per other tab with entries queued here, a request for that tab's lock, granted when the tab is
+	// gone (closed, reloaded): its entries become orphans then, which every tab may show. One per origin,
+	// withdrawn once its entries drain.
+	private readonly tabWaits = new Map<string, AbortController>()
 
 	// Multi-tab state. `role` defaults to "leader" so a lone tab and every unit test are the unchanged
 	// single-tab path. `transport` is null until the coordinator wires a channel (single-tab: stays null,
@@ -173,6 +177,7 @@ export class Sync {
 		this.transport?.close()
 		this.releaseTabLock?.()
 		this.releaseTabLock = null
+		this.watchOrigins(new Set())
 		// The store no longer reflects any account's outbox — an editor still mounted through the teardown
 		// must hold its loading state rather than seed from a wiped store, and no note is being edited
 		// any more (a session surviving the wipe would gate the next account's content query).
@@ -261,6 +266,71 @@ export class Sync {
 				])
 			)
 		}
+	}
+
+	// LEADER: waits on the lock of every other live tab with entries queued here (`origins`, all of them
+	// when omitted), and withdraws the waits of tabs with none left.
+	private watchOrigins(origins?: Set<string>): void {
+		const queued =
+			origins ??
+			new Set(
+				Object.values(useNotesInflightStore.getState().inflightContent).flatMap(entries =>
+					entries.flatMap(entry =>
+						entry.origin !== undefined && entry.origin !== this.tabId && entry.orphan !== true ? [entry.origin] : []
+					)
+				)
+			)
+
+		for (const [origin, wait] of this.tabWaits) {
+			if (!queued.has(origin)) {
+				wait.abort()
+				this.tabWaits.delete(origin)
+			}
+		}
+
+		if (this.role !== "leader") {
+			return
+		}
+
+		for (const origin of queued) {
+			if (this.tabWaits.has(origin)) {
+				continue
+			}
+
+			const wait = new AbortController()
+
+			this.tabWaits.set(origin, wait)
+			navigator.locks
+				.request(`${TAB_LOCK_PREFIX}${origin}`, { signal: wait.signal }, () => {
+					this.tabWaits.delete(origin)
+					this.orphanOrigin(origin)
+				})
+				.catch(() => undefined)
+		}
+	}
+
+	// LEADER: the tab `origin` is gone. Its entries become orphans, told to every tab.
+	private orphanOrigin(origin: string): void {
+		if (this.role !== "leader" || isAborted(this.abortController.signal)) {
+			return
+		}
+
+		useNotesInflightStore
+			.getState()
+			.setInflightContent(prev =>
+				Object.fromEntries(
+					Object.entries(prev).map(([noteUuid, entries]) => [
+						noteUuid,
+						entries.map(entry =>
+							entry.origin === origin && entry.orphan !== true ? { ...entry, orphan: true as const } : entry
+						)
+					])
+				)
+			)
+
+		void this.flushToDisk(useNotesInflightStore.getState().inflightContent).then(() => {
+			this.broadcastState()
+		})
 	}
 
 	private holdTabLock(): void {
@@ -366,9 +436,14 @@ export class Sync {
 		// Typed on this tab's own previous entry, or on the orphan draft its editor showed: it carries that
 		// entry's base.
 		const continues = previous !== undefined && (previous.origin === this.tabId || tabEditorAdopts(note.uuid, previous.content))
-		const tag: Pick<InflightEntry, "origin" | "carriedFrom"> = continues
+		// Typed over another tab's draft this tab never showed: it replaces that draft, so it is based on it
+		// (not on that draft's own base, as buildInflightEntries carries). Its push then warns unless the
+		// cloud already holds the draft: the text it discards is told, never lost unseen.
+		const tag: Pick<InflightEntry, "origin" | "carriedFrom" | "baseContentHash"> = continues
 			? { origin: this.tabId, carriedFrom: previous.origin ?? "" }
-			: { origin: this.tabId }
+			: previous !== undefined
+				? { origin: this.tabId, baseContentHash: hashNoteContent(previous.content) }
+				: { origin: this.tabId }
 
 		return entries.map(entry => (entry === own ? { ...entry, ...tag } : entry))
 	}
@@ -547,6 +622,9 @@ export class Sync {
 		if (this.role !== "leader") {
 			return
 		}
+
+		// Every durable change of the leader's queue passes here: keep one wait per other tab queued.
+		this.watchOrigins()
 
 		this.transport?.broadcastState(useNotesInflightStore.getState().inflightContent)
 	}

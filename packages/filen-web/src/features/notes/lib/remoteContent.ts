@@ -38,6 +38,25 @@ export function takeRemoteContent(uuid: string, content: string | undefined, ann
 	}
 }
 
+// The editor on screen seeds again, from the outbox entry it may now show (useNoteEditor): a new
+// dataUpdatedAt remounts it, the cached content unchanged.
+export function reseedTabEditor(uuid: string, announce: boolean): void {
+	const contentKey = noteContentQueryKey(uuid)
+	const cached = queryClient.getQueryData<string>(contentKey)
+
+	if (cached === undefined) {
+		return
+	}
+
+	const previous = queryClient.getQueryState<string | undefined>(contentKey)?.dataUpdatedAt ?? 0
+
+	queryClient.setQueryData<string>(contentKey, cached, { updatedAt: Math.max(Date.now(), previous + 1) })
+
+	if (announce) {
+		toast(i18n.t("notes:noteUpdatedElsewhere"))
+	}
+}
+
 // The content cache follows `content` without a new dataUpdatedAt, so a shown editor that already holds it
 // stays mounted.
 export function followContent(uuid: string, content: string): void {

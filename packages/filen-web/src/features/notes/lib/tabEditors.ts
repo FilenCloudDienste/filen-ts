@@ -193,6 +193,11 @@ export function tabEditorSeededWithDraft(uuid: string, content: string): boolean
 	return editor !== undefined && editor.draft && editor.seed === content
 }
 
+// The notes whose editor this tab shows.
+export function shownTabEditors(): string[] {
+	return [...editors].flatMap(([uuid, editor]) => (editor.key === null ? [] : [uuid]))
+}
+
 export function tabEditorBuffer(uuid: string): string | undefined {
 	return shown(uuid)?.buffer
 }
