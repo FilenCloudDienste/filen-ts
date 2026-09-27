@@ -16,6 +16,7 @@ import { forgetNotePushes, rememberNotePush } from "@/features/notes/lib/pushEch
 import { heldNotes, releaseAllNoteHolds } from "@/features/notes/lib/remoteEditHolds"
 import { forgetTabEditors, tabEditorAdopts, tabEditorHasPush, tabEditorLanded, tabEditorPushed } from "@/features/notes/lib/tabEditors"
 import { followContent } from "@/features/notes/lib/remoteContent"
+import { followShowableDrafts } from "@/features/notes/lib/showableDrafts"
 import { log } from "@/lib/log"
 import { toast } from "sonner"
 import { asErrorDTO } from "@/lib/sdk/errors"
@@ -1152,3 +1153,7 @@ export class Sync {
 }
 
 export const sync = new Sync(TAB_ID)
+
+// This tab's editors follow the orphan drafts they may now show (showableDrafts.ts), whoever changed the
+// queue: this outbox's own marking, or a state from the leader.
+followShowableDrafts()

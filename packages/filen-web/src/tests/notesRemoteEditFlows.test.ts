@@ -173,7 +173,7 @@ beforeEach(async () => {
 	// A clean outbox (cancel forgets pushes, tab editors and holds) re-armed as the only tab.
 	sync.cancel()
 	queryClient.clear()
-	useNotesInflightStore.setState({ inflightContent: {}, editingSessions: {} })
+	useNotesInflightStore.setState({ inflightContent: {}, editingSessions: {}, editorReseeds: {} })
 	useNotesRemoteEditStore.setState({ remoteEdited: {}, openNote: null })
 	releaseAllNoteHolds()
 	vi.clearAllMocks()
@@ -1188,7 +1188,9 @@ describe("notes — another tab's draft whose tab is gone", () => {
 			a: [{ timestamp: 1000, content: "old+L", note, baseContentHash: hashNoteContent("old"), origin: "tab-L", orphan: true }]
 		})
 
-		expect(remountKey()).not.toBe(1)
+		// Seeded again, the content cache (what the cloud holds) untouched.
+		expect(useNotesInflightStore.getState().editorReseeds[note.uuid]).toBe(1)
+		expect(remountKey()).toBe(1)
 		expect(queryClient.getQueryData(noteContentQueryKey(note.uuid))).toBe("old")
 		expect(toast).toHaveBeenCalledExactlyOnceWith("notes:noteUpdatedElsewhere")
 		expect(latestShowableContent(useNotesInflightStore.getState().inflightContent[note.uuid])).toBe("old+L")
@@ -1206,7 +1208,78 @@ describe("notes — another tab's draft whose tab is gone", () => {
 			a: [{ timestamp: 1000, content: "old+L", note, baseContentHash: hashNoteContent("old"), origin: "tab-L", orphan: true }]
 		})
 
-		expect(question()).toEqual({ theirs: "old+L" })
+		// Asked with what the orphan was typed on: it never reached the cloud.
+		expect(question()).toEqual({ theirs: "old+L", base: hashNoteContent("old") })
 		expect(remountKey()).toBe(1)
+	})
+})
+
+describe("notes — answering about an orphan draft", () => {
+	async function askedAboutAnOrphan(): Promise<{ get: () => string; set: (content: string) => void }> {
+		openNote()
+
+		const cloud = cloudOf("old")
+
+		onlineManager.setOnline(false)
+		type("old!")
+
+		const closeF = liveTab("tab-F")
+
+		await tick()
+		sync.ingestRemoteEnqueue({
+			note,
+			content: "old+f",
+			timestamp: Date.now() + 5,
+			baseContentHash: hashNoteContent("old"),
+			origin: "tab-F"
+		})
+		await tick()
+		closeF()
+		await tick()
+
+		expect(question()).toEqual({ theirs: "old+f", base: hashNoteContent("old") })
+
+		onlineManager.setOnline(true)
+
+		return cloud
+	}
+
+	it("Keep mine over it warns of no overwrite: the cloud never held it", async () => {
+		const cloud = await askedAboutAnOrphan()
+
+		await keepMineOverRemoteEdit(note)
+		await tick()
+		await tick()
+
+		expect(cloud.get()).toBe("old!")
+		expect(toast).not.toHaveBeenCalledWith("notes:noteOverwroteNewerRemoteChanges")
+	})
+
+	it("Load theirs of it warns of no overwrite", async () => {
+		const cloud = await askedAboutAnOrphan()
+
+		await reloadRemoteEdit(note)
+		sync.executeNow()
+		await tick()
+		await tick()
+
+		expect(cloud.get()).toBe("old+f")
+		expect(toast).not.toHaveBeenCalledWith("notes:noteOverwroteNewerRemoteChanges")
+	})
+
+	it("a clean editor on a note never read is seeded again with a newer orphan, and says so", () => {
+		useNotesRemoteEditStore.getState().setOpenNote(note.uuid)
+		sync.startAsFollower()
+		sync.applyLeaderState({
+			a: [{ timestamp: 1000, content: "O1", note, baseContentHash: hashNoteContent(""), origin: "tab-X", orphan: true }]
+		})
+		seedTabEditor(note.uuid, "a:0", "O1", undefined)
+		sync.applyLeaderState({
+			a: [{ timestamp: 2000, content: "O1+y", note, baseContentHash: hashNoteContent(""), origin: "tab-Y", orphan: true }]
+		})
+
+		expect(queryClient.getQueryData(noteContentQueryKey(note.uuid))).toBeUndefined()
+		expect(useNotesInflightStore.getState().editorReseeds[note.uuid]).toBe(1)
+		expect(toast).toHaveBeenCalledExactlyOnceWith("notes:noteUpdatedElsewhere")
 	})
 })

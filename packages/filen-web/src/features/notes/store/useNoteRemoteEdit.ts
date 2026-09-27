@@ -12,6 +12,9 @@ import { takeRemoteContent } from "@/features/notes/lib/remoteContent"
 // decrypted), what the dialog's comparison shows against the local edits.
 export interface NoteRemoteEdit {
 	theirs: string | undefined
+	// The hash of the version an answer builds on, when that is not theirs itself: an orphan draft was never
+	// in the cloud, so an answer is based on what that draft was typed on.
+	base?: string
 }
 
 export interface NotesRemoteEditStore {

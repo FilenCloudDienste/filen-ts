@@ -4,12 +4,7 @@ import { registerSocketHandler, decryptedOrSkip } from "@/lib/sdk/socket"
 import { queryClient } from "@/queries/client"
 import { log } from "@/lib/log"
 import { ACCOUNT_QUERY_KEY } from "@/queries/account"
-import useNotesInflightStore, {
-	TAB_ID,
-	endEditingSession,
-	entryIsShowable,
-	type InflightEntry
-} from "@/features/notes/store/useNotesInflight"
+import useNotesInflightStore, { endEditingSession, type InflightEntry } from "@/features/notes/store/useNotesInflight"
 import { useNotesRemoteEditStore } from "@/features/notes/store/useNoteRemoteEdit"
 import { sync } from "@/features/notes/lib/sync"
 import { newestEntry, noteKindForPreview } from "@/features/notes/lib/sync.logic"
@@ -18,7 +13,6 @@ import { markNoteContentUnsynced, noteContentQueryKey, readNoteContent } from "@
 import { isOwnNotePush, recordNotePush } from "@/features/notes/lib/pushEchoes"
 import {
 	takeTabEditorEcho,
-	shownTabEditors,
 	tabEditorBuffer,
 	tabEditorBuildsOn,
 	tabEditorSeededWithDraft,
@@ -26,7 +20,7 @@ import {
 	tabEditorSynced,
 	tabNoteContent
 } from "@/features/notes/lib/tabEditors"
-import { followContent, reseedTabEditor, takeRemoteContent } from "@/features/notes/lib/remoteContent"
+import { followContent, takeRemoteContent } from "@/features/notes/lib/remoteContent"
 import { sdkApi } from "@/lib/sdk/client"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { runOp, type ActionOutcome } from "@/lib/actions/outcome"
@@ -39,37 +33,6 @@ import type { AnswerChoice } from "@/lib/storage/outboxChannel"
 // sync outbox + the editor's reload-vs-keep banner.
 
 type NoteSocketEvent = Extract<SocketEvent, { type: "note" }>
-
-// An entry that becomes showable (an orphan: its tab is gone) under an editor already on screen is a version
-// of the note from elsewhere, which that editor never showed: a clean editor takes it, one with typing of
-// its own is asked. Otherwise the next keystroke there would replace it unseen.
-useNotesInflightStore.subscribe((state, prev) => {
-	for (const uuid of shownTabEditors()) {
-		const next = newestShowable(state.inflightContent[uuid])
-		const before = newestShowable(prev.inflightContent[uuid])
-
-		if (
-			next === undefined ||
-			next === before ||
-			next.origin === TAB_ID ||
-			next.orphan !== true ||
-			next.content === before?.content ||
-			next.content === tabEditorBuffer(uuid)
-		) {
-			continue
-		}
-
-		if (tabEditorDirty(uuid)) {
-			useNotesRemoteEditStore.getState().setRemoteEdited(uuid, { theirs: next.content })
-		} else {
-			reseedTabEditor(uuid, useNotesRemoteEditStore.getState().openNote === uuid)
-		}
-	}
-})
-
-function newestShowable(entries: InflightEntry[] | undefined): InflightEntry | undefined {
-	return newestEntry((entries ?? []).filter(entryIsShowable))
-}
 
 // Registers the note handler on the generic bridge; returns the unregister fn. Called once by the
 // authed shell's socket host. Only "note" events reach handleNoteEvent — the registry routes by type.
@@ -356,7 +319,8 @@ export async function reloadRemoteEdit(note: Note): Promise<void> {
 }
 
 async function loadTheirs(note: Note, choice: AnswerChoice): Promise<void> {
-	const theirs = useNotesRemoteEditStore.getState().remoteEdited[note.uuid]?.theirs ?? (await readTheirs(note))
+	const edit = useNotesRemoteEditStore.getState().remoteEdited[note.uuid]
+	const theirs = edit?.theirs ?? (await readTheirs(note))
 
 	sync.dropEntry(note.uuid)
 	sync.clearRejections(note.uuid)
@@ -365,7 +329,7 @@ async function loadTheirs(note: Note, choice: AnswerChoice): Promise<void> {
 	const contentKey = noteContentQueryKey(note.uuid)
 
 	if (theirs !== undefined) {
-		const flushed = await sync.enqueueAnswer(note, theirs, hashNoteContent(theirs))
+		const flushed = await sync.enqueueAnswer(note, theirs, edit?.base ?? hashNoteContent(theirs))
 
 		if (!flushed) {
 			log.warn("notes", "remote-edit reload: outbox flush failed", note.uuid)
@@ -414,7 +378,7 @@ export async function keepMineOverRemoteEdit(note: Note): Promise<void> {
 	}
 
 	sync.dropEntry(note.uuid)
-	await sync.enqueueAnswer(note, mine, theirs === undefined ? null : hashNoteContent(theirs))
+	await sync.enqueueAnswer(note, mine, edit.base ?? (theirs === undefined ? null : hashNoteContent(theirs)))
 	useNotesRemoteEditStore.getState().clearRemoteEdited(note.uuid, "mine")
 	sync.executeNow()
 }

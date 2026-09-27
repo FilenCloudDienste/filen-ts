@@ -118,20 +118,28 @@ describe("size cap gating", () => {
 })
 
 describe("deriveEditorRemountKey", () => {
-	it("composes uuid and dataUpdatedAt so either change forces a reseed", () => {
-		expect(deriveEditorRemountKey({ uuid: "abc", dataUpdatedAt: 42 })).toBe("abc:42")
+	it("composes uuid, dataUpdatedAt and reseeds so any change forces a reseed", () => {
+		expect(deriveEditorRemountKey({ uuid: "abc", dataUpdatedAt: 42, reseeds: 0 })).toBe("abc:42:0")
 	})
 
 	it("is stable for a fixed uuid + dataUpdatedAt (the frozen-mid-session case)", () => {
-		const a = deriveEditorRemountKey({ uuid: "u", dataUpdatedAt: 100 })
-		const b = deriveEditorRemountKey({ uuid: "u", dataUpdatedAt: 100 })
+		const a = deriveEditorRemountKey({ uuid: "u", dataUpdatedAt: 100, reseeds: 0 })
+		const b = deriveEditorRemountKey({ uuid: "u", dataUpdatedAt: 100, reseeds: 0 })
 
 		expect(a).toBe(b)
 	})
 
 	it("changes when the fetch generation (dataUpdatedAt) advances for the same note", () => {
-		expect(deriveEditorRemountKey({ uuid: "u", dataUpdatedAt: 100 })).not.toBe(
-			deriveEditorRemountKey({ uuid: "u", dataUpdatedAt: 200 })
+		expect(deriveEditorRemountKey({ uuid: "u", dataUpdatedAt: 100, reseeds: 0 })).not.toBe(
+			deriveEditorRemountKey({ uuid: "u", dataUpdatedAt: 200, reseeds: 0 })
+		)
+	})
+})
+
+describe("deriveEditorRemountKey — reseeds", () => {
+	it("changes when the editor is told to seed again, with nothing read", () => {
+		expect(deriveEditorRemountKey({ uuid: "u", dataUpdatedAt: 0, reseeds: 1 })).not.toBe(
+			deriveEditorRemountKey({ uuid: "u", dataUpdatedAt: 0, reseeds: 0 })
 		)
 	})
 })

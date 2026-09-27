@@ -58,8 +58,10 @@ export function deriveEditorSeed({
 // content query is disabled-while-inflight, noteContent.ts), so this key is FROZEN across an editing
 // session and the editor never remounts mid-edit and wipes the cursor. It only changes on a real
 // reseed event: a different note (uuid) or a completed fetch for a note with no pending edits.
-export function deriveEditorRemountKey({ uuid, dataUpdatedAt }: { uuid: string; dataUpdatedAt: number }): string {
-	return `${uuid}:${String(dataUpdatedAt)}`
+// `reseeds`: how often the editor was told to seed again without a content read (an orphan draft it may
+// now show).
+export function deriveEditorRemountKey({ uuid, dataUpdatedAt, reseeds }: { uuid: string; dataUpdatedAt: number; reseeds: number }): string {
+	return `${uuid}:${String(dataUpdatedAt)}:${String(reseeds)}`
 }
 
 // Read-only when the note is trashed, or when this user has no write access to it (a shared note

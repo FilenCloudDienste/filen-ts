@@ -44,6 +44,9 @@ export interface NotesInflightStore {
 	// is already open — the caller's signal for once-per-session work (useNoteEditor's in-flight cancel).
 	beginEditingSession: (uuid: string) => boolean
 	endEditingSession: (uuid: string) => void
+	// Per note, how often the editor on screen was told to seed again (from an outbox entry it may now
+	// show), part of its remount key: the content cache may hold nothing to advance.
+	editorReseeds: Record<string, number>
 }
 
 export const useNotesInflightStore = create<NotesInflightStore>((set, get) => ({
@@ -58,6 +61,7 @@ export const useNotesInflightStore = create<NotesInflightStore>((set, get) => ({
 		set({ outboxHydrated: hydrated })
 	},
 	editingSessions: {},
+	editorReseeds: {},
 	beginEditingSession(uuid) {
 		const { editingSessions } = get()
 
@@ -131,6 +135,31 @@ export function beginEditingSession(uuid: string): boolean {
 
 export function endEditingSession(uuid: string): void {
 	useNotesInflightStore.getState().endEditingSession(uuid)
+}
+
+export function reseedEditor(uuid: string): void {
+	useNotesInflightStore.setState(state => ({
+		editorReseeds: { ...state.editorReseeds, [uuid]: (state.editorReseeds[uuid] ?? 0) + 1 }
+	}))
+}
+
+// The editor left the note: its count goes with it.
+export function forgetEditorReseeds(uuid: string): void {
+	useNotesInflightStore.setState(state => {
+		if (state.editorReseeds[uuid] === undefined) {
+			return state
+		}
+
+		const next = { ...state.editorReseeds }
+
+		Reflect.deleteProperty(next, uuid)
+
+		return { editorReseeds: next }
+	})
+}
+
+export function useEditorReseeds(uuid: string): number {
+	return useNotesInflightStore(state => state.editorReseeds[uuid] ?? 0)
 }
 
 // Teardown counterpart to setOutboxHydrated(false) (sync.cancel, before the logout wipe): no note

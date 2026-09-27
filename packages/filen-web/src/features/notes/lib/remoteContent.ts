@@ -2,7 +2,7 @@ import { toast } from "sonner"
 import { queryClient } from "@/queries/client"
 import { i18n } from "@/lib/i18n"
 import { noteContentQueryKey } from "@/features/notes/queries/noteContent"
-import { endEditingSession } from "@/features/notes/store/useNotesInflight"
+import { endEditingSession, reseedEditor } from "@/features/notes/store/useNotesInflight"
 import { tabEditorBuffer, tabEditorSynced } from "@/features/notes/lib/tabEditors"
 
 // A note's new version, taken in this tab: written straight into the content cache when it came with the
@@ -38,19 +38,10 @@ export function takeRemoteContent(uuid: string, content: string | undefined, ann
 	}
 }
 
-// The editor on screen seeds again, from the outbox entry it may now show (useNoteEditor): a new
-// dataUpdatedAt remounts it, the cached content unchanged.
+// The editor on screen seeds again, from the outbox entry it may now show (useNoteEditor): its remount key
+// moves, the content cache untouched (it may hold nothing: the note is never read while a draft is shown).
 export function reseedTabEditor(uuid: string, announce: boolean): void {
-	const contentKey = noteContentQueryKey(uuid)
-	const cached = queryClient.getQueryData<string>(contentKey)
-
-	if (cached === undefined) {
-		return
-	}
-
-	const previous = queryClient.getQueryState<string | undefined>(contentKey)?.dataUpdatedAt ?? 0
-
-	queryClient.setQueryData<string>(contentKey, cached, { updatedAt: Math.max(Date.now(), previous + 1) })
+	reseedEditor(uuid)
 
 	if (announce) {
 		toast(i18n.t("notes:noteUpdatedElsewhere"))

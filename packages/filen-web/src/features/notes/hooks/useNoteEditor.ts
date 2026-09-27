@@ -7,7 +7,9 @@ import useNotesInflightStore, {
 	useNoteInflight,
 	useOutboxHydrated,
 	beginEditingSession,
-	endEditingSession
+	endEditingSession,
+	forgetEditorReseeds,
+	useEditorReseeds
 } from "@/features/notes/store/useNotesInflight"
 import { sync } from "@/features/notes/lib/sync"
 import { forgetTabEditor, seedTabEditor, tabEditorBaseHash, tabEditorChanged, unseedTabEditor } from "@/features/notes/lib/tabEditors"
@@ -75,7 +77,8 @@ export function useNoteEditor(note: Note, currentUserId: bigint | undefined): No
 	const readOnly = deriveEditorReadOnly(note, currentUserId)
 
 	const seed = deriveEditorSeed({ inflightLatest, queryContent: query.data })
-	const remountKey = deriveEditorRemountKey({ uuid: note.uuid, dataUpdatedAt: query.dataUpdatedAt })
+	const reseeds = useEditorReseeds(note.uuid)
+	const remountKey = deriveEditorRemountKey({ uuid: note.uuid, dataUpdatedAt: query.dataUpdatedAt, reseeds })
 	const errorDto = query.isError ? asErrorDTO(query.error) : undefined
 
 	// Session base hash: the hash of the content THIS editing session was seeded from, stamped onto
@@ -102,6 +105,7 @@ export function useNoteEditor(note: Note, currentUserId: bigint | undefined): No
 		return () => {
 			endEditingSession(note.uuid)
 			forgetTabEditor(note.uuid)
+			forgetEditorReseeds(note.uuid)
 		}
 	}, [note.uuid])
 
