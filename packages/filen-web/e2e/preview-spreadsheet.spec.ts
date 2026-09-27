@@ -33,8 +33,10 @@ async function xlsxBytes(): Promise<Buffer> {
 	)
 }
 
+// `row` and `col` as the sheet numbers them (A1 = 1, 1); the grid's ARIA indices count its header row
+// and column first.
 function gridCell(grid: Locator, row: number, col: number): Locator {
-	return grid.locator(`[role="gridcell"][aria-rowindex="${String(row)}"][aria-colindex="${String(col)}"]`)
+	return grid.locator(`[role="row"][aria-rowindex="${String(row + 1)}"] [role="gridcell"][aria-colindex="${String(col + 1)}"]`)
 }
 
 async function typeInto(page: Page, grid: Locator, row: number, col: number, text: string): Promise<void> {

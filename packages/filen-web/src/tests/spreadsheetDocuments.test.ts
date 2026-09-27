@@ -33,13 +33,13 @@ async function workbook(): Promise<XlsxDocument> {
 	return new XlsxDocument(await openXlsx(bytes, { readStyles: true }))
 }
 
-function cell(result: EditResult, row: number, col: number): CellView | null | undefined {
+function cell(result: EditResult, row: number, col: number, sheet = 0): CellView | null | undefined {
 	if (result.type === "cells") {
-		return result.cells.find(([key]) => key === cellKey(row, col))?.[1]
+		return result.patches.find(patch => patch.sheet === sheet)?.cells.find(([key]) => key === cellKey(row, col))?.[1]
 	}
 
 	if (result.type === "sheets") {
-		return result.sheets[0]?.cells.get(cellKey(row, col)) ?? null
+		return result.sheets[sheet]?.cells.get(cellKey(row, col)) ?? null
 	}
 
 	return undefined
@@ -50,9 +50,10 @@ describe("XlsxDocument", () => {
 		const document = await workbook()
 		const edited = document.apply({ type: "setCells", sheet: 0, cells: [{ row: 2, col: 1, input: "500" }] })
 
-		// The total on this sheet and the reference on the other both moved: the whole workbook comes back.
-		expect(edited.type).toBe("sheets")
+		// The total on this sheet and the reference on the other both moved: a patch for each sheet.
+		expect(edited.type).toBe("cells")
 		expect(cell(edited, 3, 1)).toMatchObject({ text: "1700", input: "=SUM(B2:B3)" })
+		expect(cell(edited, 0, 0, 1)).toMatchObject({ text: "1700", input: "=Budget!B4" })
 		expect(edited.state).toEqual({ dirty: true, canUndo: true, canRedo: false })
 
 		const undone = document.undo()
@@ -123,7 +124,7 @@ describe("XlsxDocument", () => {
 		})
 		document.apply({ type: "setCells", sheet: 0, cells: [{ row: 2, col: 1, input: "400" }] })
 
-		const bytes = await document.serialize()
+		const { bytes } = await document.serialize()
 		const reopened = new XlsxDocument(await openXlsx(bytes, { readStyles: true })).doc()
 		const sheet = reopened.sheets[0]
 		const header = sheet?.cells.get(cellKey(0, 0))
@@ -144,11 +145,11 @@ describe("CsvDocument", () => {
 		document.apply({ type: "setCells", sheet: 0, cells: [{ row: 1, col: 1, input: "=A2" }] })
 		document.apply({ type: "insert", sheet: 0, axis: "cols", at: 1, count: 1 })
 
-		expect(new TextDecoder().decode(document.serialize())).toBe("a;;b\r\n1;;=A2\r\n")
+		expect(new TextDecoder().decode(document.serialize().bytes)).toBe("a;;b\r\n1;;=A2\r\n")
 
 		document.undo()
 
-		expect(new TextDecoder().decode(document.serialize())).toBe("a;b\r\n1;=A2\r\n")
+		expect(new TextDecoder().decode(document.serialize().bytes)).toBe("a;b\r\n1;=A2\r\n")
 		expect(document.apply({ type: "addSheet", name: "x" })).toMatchObject({ type: "refused" })
 	})
 })

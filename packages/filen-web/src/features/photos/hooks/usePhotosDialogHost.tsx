@@ -88,6 +88,11 @@ export function usePhotosDialogHost({ rootUuid, selectedItems }: UsePhotosDialog
 					return null
 				}
 
+				// Most events are about files the pager does not hold: no new dialog state, no re-render.
+				if (next === state) {
+					return prev
+				}
+
 				return { ...prev, previewSources: next.sources, index: next.index }
 			})
 		})

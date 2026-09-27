@@ -44,21 +44,22 @@ export function useRawPreview(item: DriveItem): UseRawPreviewResult {
 			return preview
 		}
 
-		async function load(): Promise<void> {
-			try {
-				const preview = getRawPreview(cacheScope, item.data.uuid) ?? (await fetchPreview())
+		// Promise handlers, not try/catch: the React Compiler cannot lower one around a logical expression
+		// and would skip the hook.
+		const cached = getRawPreview(cacheScope, item.data.uuid)
 
+		void (cached === undefined ? fetchPreview() : Promise.resolve(cached)).then(
+			preview => {
 				if (live) {
 					setResult(prev => (prev.status === "success" && prev.preview === preview ? prev : { status: "success", preview }))
 				}
-			} catch (e) {
+			},
+			(e: unknown) => {
 				if (live) {
 					setResult({ status: "error", dto: asErrorDTO(e) })
 				}
 			}
-		}
-
-		void load()
+		)
 
 		return () => {
 			live = false

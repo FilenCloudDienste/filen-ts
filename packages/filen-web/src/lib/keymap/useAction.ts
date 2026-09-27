@@ -57,6 +57,15 @@ const DEFAULT_OPTIONS: Options = {
 // unless it is listed; Quill's editor is contenteditable too.
 export const IN_EDITORS: Options = { enableOnContentEditable: true, enableOnFormTags: ["option", "textbox"] }
 
+// IN_EDITORS plus plain <input>/<textarea> fields, whose role is null, so "textbox" never matches them
+// (a spreadsheet's cell editor and formula bar). Only for a save, whose combo means nothing to a text
+// field but opens the browser's "Save page as": a text-editing shortcut (editor.togglePreview's
+// Ctrl+Shift+V pastes as plain text) must stay the field's own, including in a dialog's input.
+export const IN_EDITORS_AND_FIELDS: Options = {
+	enableOnContentEditable: true,
+	enableOnFormTags: ["option", "textbox", "input", "textarea"]
+}
+
 export function useAction(
 	id: string,
 	handler: HotkeyCallback,

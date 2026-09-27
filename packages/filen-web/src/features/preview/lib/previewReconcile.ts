@@ -121,21 +121,26 @@ function removeSource(state: PreviewPagerState, uuid: string): PreviewPagerState
 // undecryptable flag reflect the rename. Only the base "file" arm is rebuildable from `{ ...data, meta }`
 // (a shared arm carries extra sharing context this sparse event can't reconstruct) — the same arm
 // restriction the listing-cache patch uses, so a shared item's rename updates neither surface, staying
-// consistent.
-function patchFileMeta(sources: PreviewSource[], uuid: string, meta: FileMeta): PreviewSource[] {
-	return sources.map(source =>
-		source.type === "drive" && source.item.type === "file" && source.item.data.uuid === uuid
-			? { type: "drive", item: narrowItem({ ...source.item.data, meta }) }
-			: source
-	)
-}
+// consistent. The state itself comes back when no slot matched, so the host skips its re-render.
+function patchMeta(
+	state: PreviewPagerState,
+	uuid: string,
+	patch: (source: Extract<PreviewSource, { type: "drive" }>) => PreviewSource | null
+): PreviewPagerState {
+	const matched = state.sources.findIndex(source => source.type === "drive" && source.item.data.uuid === uuid)
+	const current = state.sources[matched]
 
-function patchFolderMeta(sources: PreviewSource[], uuid: string, meta: DirMeta): PreviewSource[] {
-	return sources.map(source =>
-		source.type === "drive" && source.item.type === "directory" && source.item.data.uuid === uuid
-			? { type: "drive", item: narrowItem({ ...source.item.data, meta }) }
-			: source
-	)
+	if (current?.type !== "drive") {
+		return state
+	}
+
+	const next = patch(current)
+
+	if (next === null) {
+		return state
+	}
+
+	return { sources: state.sources.with(matched, next), index: state.index }
 }
 
 // The uuid of the slot on screen while it holds unsaved edits. A removal of that slot is the overlay's to
@@ -148,7 +153,8 @@ export function previewProtectedUuid(state: PreviewPagerState): string | null {
 
 // Pure fold of one reconcile event into the pager state — the dialog host runs this inside its
 // setActiveDialog updater, with previewProtectedUuid's answer. Returns null only when a removal emptied
-// the pager (close the preview); otherwise the (possibly unchanged) next state.
+// the pager (close the preview); otherwise the next state, which is `state` itself when the event
+// changes nothing here (most events are about files the pager does not hold).
 export function reconcilePreviewSources(
 	state: PreviewPagerState,
 	event: PreviewReconcileEvent,
@@ -164,8 +170,12 @@ export function reconcilePreviewSources(
 		case "resync":
 			return state
 		case "fileMeta":
-			return { sources: patchFileMeta(state.sources, event.uuid, event.meta), index: state.index }
+			return patchMeta(state, event.uuid, source =>
+				source.item.type === "file" ? { type: "drive", item: narrowItem({ ...source.item.data, meta: event.meta }) } : null
+			)
 		case "folderMeta":
-			return { sources: patchFolderMeta(state.sources, event.uuid, event.meta), index: state.index }
+			return patchMeta(state, event.uuid, source =>
+				source.item.type === "directory" ? { type: "drive", item: narrowItem({ ...source.item.data, meta: event.meta }) } : null
+			)
 	}
 }

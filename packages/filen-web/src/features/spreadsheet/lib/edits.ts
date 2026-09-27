@@ -30,16 +30,19 @@ export interface DocState {
 	canRedo: boolean
 }
 
+// The cells of one sheet an edit changed, recalculated ones included (null: the cell is now empty), and
+// the sheet's extent after it.
+export interface CellPatch {
+	sheet: number
+	cells: [number, CellView | null][]
+	rowCount: number
+	colCount: number
+}
+
 export type EditResult =
-	| {
-			type: "cells"
-			sheet: number
-			cells: [number, CellView | null][]
-			rowCount: number
-			colCount: number
-			styles: CellStyleView[]
-			state: DocState
-	  }
+	// Cells changed, on the edited sheet and on any sheet whose formulas read it. `styles` is the whole
+	// style table when it grew, empty otherwise.
+	| { type: "cells"; patches: CellPatch[]; styles: CellStyleView[]; state: DocState }
 	| { type: "sheets"; sheets: SheetView[]; styles: CellStyleView[]; state: DocState }
 	// The edit could not be made: the sheet's structure is locked, a sheet name is taken or invalid, or it
 	// would reach past a sheet's limits.

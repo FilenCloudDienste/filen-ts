@@ -1,7 +1,6 @@
 import { useTranslation } from "react-i18next"
 import { PlusIcon } from "lucide-react"
 import { cn } from "@filen/shared"
-import type { SheetView } from "@/features/spreadsheet/lib/model"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 
@@ -15,7 +14,7 @@ export function SheetTabs({
 	onAdd,
 	onRename
 }: {
-	sheets: readonly SheetView[]
+	sheets: readonly { name: string }[]
 	active: number
 	onSelect: (index: number) => void
 	onAdd?: (() => void) | undefined

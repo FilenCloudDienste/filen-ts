@@ -13,7 +13,7 @@ describe("CSV", () => {
 		const bytes = encoder.encode(source)
 		const { rows, format } = parseCsvFile(bytes, false)
 
-		expect(format).toEqual({ delimiter: ";", lineSeparator: "\r\n", bom: true, trailingNewline: true, utf8: true })
+		expect(format).toEqual({ delimiter: ";", lineSeparator: "\r\n", bom: true, trailingNewline: true, encoding: "utf-8" })
 		expect(rows).toEqual([
 			["name", "amount"],
 			["Smith; J", "012"]
@@ -27,11 +27,23 @@ describe("CSV", () => {
 		expect(doc.sheets[0]?.cells.get(cellKey(1, 1))).toEqual({ text: "007", numeric: true })
 	})
 
-	it("decodes a legacy Windows-1252 export", () => {
+	it("decodes a legacy Windows-1252 export and writes it back in the same encoding", () => {
+		const { rows, format } = parseCsvFile(new Uint8Array([0x63, 0x61, 0x66, 0xe9, 0x2c, 0x80]), false)
+
+		expect(rows).toEqual([["café", "€"]])
+		expect(format.encoding).toBe("windows-1252")
+		expect(Array.from(serializeCsv(rows, format))).toEqual([0x63, 0x61, 0x66, 0xe9, 0x2c, 0x80])
+	})
+
+	it("falls back to UTF-8 with a BOM when windows-1252 can no longer hold the content", () => {
 		const { rows, format } = parseCsvFile(new Uint8Array([0x63, 0x61, 0x66, 0xe9]), false)
 
-		expect(rows).toEqual([["café"]])
-		expect(format.utf8).toBe(false)
+		rows[0]?.push("日本語")
+
+		const written = serializeCsv(rows, format)
+
+		expect(Array.from(written.subarray(0, 3))).toEqual([0xef, 0xbb, 0xbf])
+		expect(new TextDecoder("utf-8").decode(written)).toBe("café,日本語")
 	})
 
 	it("reads tab-separated files as such", () => {

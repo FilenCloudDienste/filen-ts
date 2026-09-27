@@ -170,3 +170,34 @@ describe("reconcilePreviewSources — metadata", () => {
 		expect(reconcilePreviewSources(state, { type: "folderMeta", uuid: testUuid("dir"), meta })?.sources[0]).toBe(external)
 	})
 })
+
+// The dialog host skips its re-render when the fold hands its state back.
+describe("reconcilePreviewSources — unchanged state", () => {
+	it("returns the same state for an event about a file the pager does not hold", () => {
+		const state = { sources: [fileSourceAt("a"), fileSourceAt("b")], index: 1 }
+		const meta: FileMeta = {
+			type: "decoded",
+			data: { name: "x.pdf", mime: "application/pdf", modified: 0n, size: 1n, key: "k", version: 2 }
+		}
+
+		expect(reconcilePreviewSources(state, { type: "removed", uuid: testUuid("elsewhere") })).toBe(state)
+		expect(reconcilePreviewSources(state, { type: "fileMeta", uuid: testUuid("elsewhere"), meta })).toBe(state)
+		expect(
+			reconcilePreviewSources(state, { type: "folderMeta", uuid: testUuid("a"), meta: { type: "decoded", data: { name: "d" } } })
+		).toBe(state)
+		expect(reconcilePreviewSources(state, { type: "resync" })).toBe(state)
+	})
+
+	it("replaces only the renamed slot", () => {
+		const state = { sources: [fileSourceAt("a"), fileSourceAt("b")], index: 0 }
+		const meta: FileMeta = {
+			type: "decoded",
+			data: { name: "renamed.pdf", mime: "application/pdf", modified: 0n, size: 1n, key: "k", version: 2 }
+		}
+		const next = reconcilePreviewSources(state, { type: "fileMeta", uuid: testUuid("b"), meta })
+
+		expect(next).not.toBe(state)
+		expect(next?.sources[0]).toBe(state.sources[0])
+		expect(next?.sources[1]?.type === "drive" ? next.sources[1].item.data.decryptedMeta?.name : "").toBe("renamed.pdf")
+	})
+})

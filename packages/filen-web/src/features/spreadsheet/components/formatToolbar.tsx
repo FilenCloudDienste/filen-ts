@@ -128,7 +128,10 @@ function ColorButton({
 				/>
 				<TooltipContent>{label}</TooltipContent>
 			</Tooltip>
-			<PopoverContent className="w-auto gap-2 p-3">
+			<PopoverContent
+				data-preview-surface
+				className="w-auto gap-2 p-3"
+			>
 				<div className="grid grid-cols-8 gap-1.5">
 					{PALETTE.map(color => (
 						<button
@@ -311,7 +314,7 @@ export function FormatToolbar({
 						>
 							<SelectValue />
 						</SelectTrigger>
-						<SelectContent>
+						<SelectContent data-preview-surface>
 							<SelectGroup>
 								{NUMBER_FORMATS.map(format => (
 									<SelectItem

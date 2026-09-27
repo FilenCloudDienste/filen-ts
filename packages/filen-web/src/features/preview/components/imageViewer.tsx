@@ -311,10 +311,12 @@ function TransformedImageBytes({ bytes, alt }: { bytes: Uint8Array; alt: string 
 		let live = true
 		let objectUrl: string | null = null
 
-		async function run(): Promise<void> {
-			try {
-				const blob = heicJpegs.get(bytes) ?? (await transformHeicBytes(bytes))
+		// Promise handlers, not try/catch: the React Compiler skips a component whose try block holds a
+		// conditional or logical expression.
+		const cached = heicJpegs.get(bytes)
 
+		void (cached === undefined ? transformHeicBytes(bytes) : Promise.resolve(cached)).then(
+			blob => {
 				heicJpegs.set(bytes, blob)
 
 				if (!live) {
@@ -323,16 +325,15 @@ function TransformedImageBytes({ bytes, alt }: { bytes: Uint8Array; alt: string 
 
 				objectUrl = URL.createObjectURL(blob)
 				setState({ status: "success", url: objectUrl })
-			} catch {
+			},
+			() => {
 				if (live) {
 					const message = t("previewTransformFailed")
 
 					setState({ status: "error", dto: { species: "plain", message, label: message } })
 				}
 			}
-		}
-
-		void run()
+		)
 
 		return () => {
 			live = false

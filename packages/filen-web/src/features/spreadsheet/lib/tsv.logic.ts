@@ -1,4 +1,4 @@
-import { cellKey, type CellRange, type SheetView } from "@/features/spreadsheet/lib/model"
+import { cellKey, type CellRange, type CellView } from "@/features/spreadsheet/lib/model"
 
 // How far a copy reaches: past this the clipboard text would run to hundreds of megabytes.
 export const MAX_COPY_CELLS = 1_000_000
@@ -9,7 +9,7 @@ function tsvField(text: string): string {
 
 // A range as the tab-separated text other spreadsheets paste: what each cell shows, quoted where a tab, a
 // line end or a quote would break the layout. Null past MAX_COPY_CELLS.
-export function rangeToTsv(sheet: SheetView, range: CellRange): string | null {
+export function rangeToTsv(sheet: { cells: { get: (key: number) => CellView | undefined } }, range: CellRange): string | null {
 	const rows = range.endRow - range.startRow + 1
 	const cols = range.endCol - range.startCol + 1
 

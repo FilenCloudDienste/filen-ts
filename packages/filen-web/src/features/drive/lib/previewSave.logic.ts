@@ -7,6 +7,8 @@ import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { runOp, type ActionOutcome } from "@/lib/actions/outcome"
 import { asErrorDTO, PARENT_NOT_FOUND_PREFIX, type ErrorDTO } from "@/lib/sdk/errors"
 
+const EDITABLE_SPREADSHEET_EXTENSIONS: ReadonlySet<string> = new Set(["csv", "tsv", "xlsx", "xlsm"])
+
 // Editable-preview eligibility gate (mobile parity): only a decryptable text/code/markdown file or spreadsheet
 // inside the navigable "drive" variant — never trash/recents/favorites/sharedIn/sharedOut (no
 // writable parent context, or a variant this app never lets a write reach), never an undecryptable
@@ -26,9 +28,10 @@ export function isEditable(item: DriveItem, variant: DriveVariant): boolean {
 
 	const category = previewType(item)
 
-	// A spreadsheet edits in its grid; a legacy .xls only opens to be looked at.
+	// A spreadsheet edits in its grid, and saves in the format its extension names; a legacy .xls, or one
+	// known only by its mime type, only opens to be looked at.
 	if (category === "spreadsheet") {
-		return extensionOf(driveItemName(base)) !== "xls"
+		return EDITABLE_SPREADSHEET_EXTENSIONS.has(extensionOf(driveItemName(base)))
 	}
 
 	return isTextCategory(category)

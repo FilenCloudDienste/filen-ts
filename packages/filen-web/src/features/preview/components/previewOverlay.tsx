@@ -28,7 +28,7 @@ import { driveListingQueryUpdate } from "@/features/drive/queries/drive"
 import { toastBulkOutcome } from "@/features/drive/lib/bulkToast"
 import { sdkApi } from "@/lib/sdk/client"
 import { errorLabel } from "@/lib/i18n/errorLabel"
-import { IN_EDITORS, useAction } from "@/lib/keymap/useAction"
+import { IN_EDITORS_AND_FIELDS, useAction } from "@/lib/keymap/useAction"
 import { log } from "@/lib/log"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { cn, driveItemName } from "@filen/shared"
@@ -123,6 +123,7 @@ export interface PreviewOverlayProps {
 	// (Photos hides Move).
 	hiddenMenuActionIds?: ReadonlySet<ItemActionId> | undefined
 	// False for a public link's file whose owner disallows downloads: nothing here offers to save it.
+	// Downloadable when omitted.
 	downloadable?: boolean
 }
 
@@ -189,8 +190,10 @@ export function PreviewOverlay({
 	onItemRemoved,
 	onFavoriteToggled,
 	hiddenMenuActionIds,
-	downloadable = true
+	downloadable: downloadableProp
 }: PreviewOverlayProps) {
+	// Not a parameter default: the React Compiler skips a component that has one.
+	const downloadable = downloadableProp !== false
 	const { t } = useTranslation(["preview", "common", "drive"])
 	const isOnline = useIsOnline()
 	const rawSource = items[index]
@@ -208,7 +211,9 @@ export function PreviewOverlay({
 
 	// The open editor's unsaved edits: a text editor's buffer, or the spreadsheet's file as edited.
 	async function readEdits(): Promise<string | Uint8Array | null> {
-		return spreadsheetRef.current === null ? contentRef.current : await spreadsheetRef.current()
+		const source = spreadsheetRef.current
+
+		return source === null ? contentRef.current : (await source()).bytes
 	}
 
 	// Override for the currently-displayed item, accumulated per pager slot across the whole overlay
@@ -221,6 +226,12 @@ export function PreviewOverlay({
 	// The same map for code running outside a render (the remote-change handlers), which may apply two
 	// overrides before the next render. Every write goes through commitSaved, keeping the two equal.
 	const savedRef = useRef(saved)
+	// Per slot (frozen uuid), which content its spreadsheet grid holds: unchanged by the user's own saves,
+	// which rotate the uuid but leave the grid (sheet, scroll, undo) as it is, and new for any other
+	// version shown (one saved elsewhere, a restore). Absent until then: the frozen uuid itself.
+	const [documentKeys, setDocumentKeys] = useState<ReadonlyMap<string, string>>(() => new Map<string, string>())
+	const documentKeysRef = useRef(documentKeys)
+	const documentGeneration = useRef(0)
 	// Single-slot (unlike `saved` above): keyed to the CURRENT pager slot only, so navigating away and
 	// back can forget an earlier slot's lock (accepted — the guarded failure re-asserts on the next
 	// failed save). Mirrors mobile parity's "a failed save locks the file read-only" rule; cleared by a
@@ -278,7 +289,19 @@ export function PreviewOverlay({
 		isEditable(driveItem, variant) &&
 		lockedReadOnly?.forUuid !== rawDriveItem.data.uuid
 
-	function commitSaved(frozenUuid: string, item: DriveItem): void {
+	// `ownSave`: `item` is what this overlay's own save of the slot made.
+	function commitSaved(frozenUuid: string, item: DriveItem, ownSave?: boolean): void {
+		const shownUuid = savedRef.current.get(frozenUuid)?.data.uuid ?? frozenUuid
+
+		if (ownSave !== true && item.data.uuid !== shownUuid) {
+			documentGeneration.current++
+
+			const keys = new Map(documentKeysRef.current).set(frozenUuid, `${frozenUuid}:${String(documentGeneration.current)}`)
+
+			documentKeysRef.current = keys
+			setDocumentKeys(keys)
+		}
+
 		const next = new Map(savedRef.current).set(frozenUuid, item)
 
 		savedRef.current = next
@@ -594,7 +617,8 @@ export function PreviewOverlay({
 	// overlay still mounted, so neither the unmount cleanup nor the vanished-slot effect above runs, and a
 	// neighbour that mounts no editor at all (an image, a PDF, a rendered markdown) would strand the flag
 	// on a buffer that no longer exists — a prompt about nothing, an armed route block and beforeunload.
-	const slotKey = currentSource === undefined ? null : previewSourceKey(currentSource)
+	const currentDocumentKey = rawDriveItem === undefined ? "" : (documentKeys.get(rawDriveItem.data.uuid) ?? rawDriveItem.data.uuid)
+	const slotKey = currentSource === undefined ? null : bodyKey(currentSource, currentDocumentKey)
 
 	useEffect(() => {
 		setPreviewDirty(false)
@@ -663,7 +687,7 @@ export function PreviewOverlay({
 		setSaving(true)
 		remote.saveStarted()
 
-		const edits = await readEdits().catch((e: unknown) => {
+		const edits = await readSaveEdits().catch((e: unknown) => {
 			log.error("preview", "reading the edits to save failed", e)
 
 			return null
@@ -677,7 +701,7 @@ export function PreviewOverlay({
 			return
 		}
 
-		const content = typeof edits === "string" ? new TextEncoder().encode(edits) : edits
+		const content = edits.bytes
 		// The upload hands the buffer to the SDK worker; the copy seeds the saved version's preview, so the
 		// editor reopens on it without downloading what it just sent.
 		const saved = content.slice()
@@ -706,17 +730,36 @@ export function PreviewOverlay({
 		}
 
 		void loadPreviewBytes(cacheScope, outcome.item.data.uuid, saved.byteLength, () => Promise.resolve(saved))
+		// A spreadsheet stays mounted (keyed by its document, see bodyKey) and reports its own dirty bit:
+		// edits made during the upload are still unsaved.
+		edits.commit?.()
 		// Keyed by the FROZEN slot uuid (targetRawItem), never targetItem's own uuid — see `saved`'s own
 		// comment on why that's what makes a chained re-save of the same slot collapse onto one entry.
-		commitSaved(targetRawItem.data.uuid, outcome.item)
+		commitSaved(targetRawItem.data.uuid, outcome.item, true)
 		// A cut of the file now moves the saved version, not the one archived under the old uuid.
 		followClipboardItem(outcome.item, targetItem.data.uuid)
-		setPreviewDirty(false)
-		// The remounted viewer re-seeds this itself when it mounts an editor; markdown returns in RENDERED
-		// mode and mounts none, so a stale buffer would otherwise stay readable to a second save.
-		contentRef.current = null
-		// Last, so a version saved elsewhere after this one is judged against it, and as clean.
+
+		// A text editor was read-only through the upload, so it holds exactly what was saved.
+		if (edits.commit === null) {
+			setPreviewDirty(false)
+			// The remounted viewer re-seeds this itself when it mounts an editor; markdown returns in
+			// RENDERED mode and mounts none, so a stale buffer would otherwise stay readable to a second save.
+			contentRef.current = null
+		}
+
+		// Last, so a version saved elsewhere after this one is judged against it.
 		remote.saveSettled(outcome.item)
+	}
+
+	// What a save uploads, and for a spreadsheet the call that marks that version saved once it landed.
+	async function readSaveEdits(): Promise<{ bytes: Uint8Array; commit: (() => void) | null } | null> {
+		const source = spreadsheetRef.current
+
+		if (source !== null) {
+			return await source()
+		}
+
+		return contentRef.current === null ? null : { bytes: new TextEncoder().encode(contentRef.current), commit: null }
 	}
 
 	useAction(
@@ -725,9 +768,18 @@ export function PreviewOverlay({
 			// Unconditional, mirroring drive.download's own mod+s handler — the browser's native
 			// Save-Page-As must never fire here regardless of whether a save is actually possible right now.
 			keyboardEvent.preventDefault()
+
+			// Typed in a dialog over the preview (a viewer's own, say a sheet's rename): not a save of the file.
+			const target = keyboardEvent.target
+			const layer = target instanceof Element ? target.closest("[role='dialog'], [role='alertdialog']") : null
+
+			if (layer !== null && layer !== popupRef.current) {
+				return
+			}
+
 			void performSave()
 		},
-		IN_EDITORS,
+		IN_EDITORS_AND_FIELDS,
 		[editable, dirty, saving, driveItem, rawDriveItem, remote.prompt, pendingIntent, blocker.status, logoutRequest, menuDialogKind]
 	)
 
@@ -1059,11 +1111,13 @@ export function PreviewOverlay({
 						className="min-h-0 flex-1"
 						onClick={handleBodyClick}
 					>
-						<PreviewErrorBoundary key={previewSourceKey(currentSource)}>
+						<PreviewErrorBoundary key={slotKey}>
 							<PreviewDownloadableProvider downloadable={downloadable}>
 								<PreviewBody
 									source={currentSource}
+									documentKey={currentDocumentKey}
 									editable={editable}
+									locked={saving}
 									onDirtyChange={setPreviewDirty}
 									contentRef={contentRef}
 									spreadsheetRef={spreadsheetRef}
@@ -1160,9 +1214,19 @@ function PreviewName({ name }: { name: string }) {
 	)
 }
 
+// What remounts the body. A spreadsheet follows its document (see documentKeys), so the user's own save
+// keeps the grid; every other viewer follows the version shown, and a saved text file reopens on what was
+// uploaded.
+function bodyKey(source: PreviewSource, documentKey: string): string {
+	return source.type === "drive" && previewType(source.item) === "spreadsheet" ? `spreadsheet:${documentKey}` : previewSourceKey(source)
+}
+
 interface PreviewBodyProps {
 	source: PreviewSource
+	documentKey: string
 	editable: boolean
+	// A save in flight: text editors go read-only until it settles.
+	locked: boolean
 	onDirtyChange: (dirty: boolean) => void
 	contentRef: RefObject<string | null>
 	spreadsheetRef: RefObject<SpreadsheetSaveSource | null>
@@ -1215,7 +1279,7 @@ function ExternalPreviewBody({ url, name }: { url: string; name: string }) {
 //
 // A missing category arm cannot ship as a silently blank overlay: the `default` arm at the bottom of
 // the switch is the guard (a return-type annotation is not — `ReactNode` includes `undefined`).
-function PreviewBody({ source, editable, onDirtyChange, contentRef, spreadsheetRef }: PreviewBodyProps): ReactNode {
+function PreviewBody({ source, documentKey, editable, locked, onDirtyChange, contentRef, spreadsheetRef }: PreviewBodyProps): ReactNode {
 	const { t } = useTranslation("preview")
 
 	if (source.type === "external") {
@@ -1290,6 +1354,7 @@ function PreviewBody({ source, editable, onDirtyChange, contentRef, spreadsheetR
 				>
 					<SpreadsheetViewer
 						item={item}
+						documentKey={documentKey}
 						alt={alt}
 						editable={editable}
 						onDirtyChange={onDirtyChange}
@@ -1328,6 +1393,7 @@ function PreviewBody({ source, editable, onDirtyChange, contentRef, spreadsheetR
 						item={item}
 						alt={alt}
 						editable={editable}
+						locked={locked}
 						onDirtyChange={onDirtyChange}
 						contentRef={contentRef}
 					/>
@@ -1347,6 +1413,7 @@ function PreviewBody({ source, editable, onDirtyChange, contentRef, spreadsheetR
 						item={item}
 						alt={alt}
 						editable={editable}
+						locked={locked}
 						onDirtyChange={onDirtyChange}
 						contentRef={contentRef}
 					/>

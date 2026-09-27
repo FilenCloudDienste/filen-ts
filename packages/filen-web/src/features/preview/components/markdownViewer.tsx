@@ -22,6 +22,8 @@ export interface MarkdownViewerProps {
 	editable?: boolean
 	onDirtyChange?: (dirty: boolean) => void
 	contentRef?: RefObject<string | null>
+	// Read-only while the overlay saves: see CodeMirrorSource's own prop.
+	locked?: boolean
 }
 
 // "View source" mounts the SAME CodeMirror surface TextViewer renders — a nested lazy() (not a plain
@@ -91,7 +93,7 @@ function MarkdownToolbar({
 // editor seeds from `text` at mount, which is safe to repeat: the toggle is locked while dirty, and a
 // save rotates the uuid, remounting this whole viewer onto the new bytes.
 // No parameter defaults: the React Compiler skips a component that has them.
-function MarkdownViewer({ item, alt, editable, onDirtyChange, contentRef }: MarkdownViewerProps) {
+function MarkdownViewer({ item, alt, editable, onDirtyChange, contentRef, locked }: MarkdownViewerProps) {
 	const result = usePreviewBytes(item)
 	const [mode, setMode] = useState<"rendered" | "source">("rendered")
 	// Where focus goes after a keyboard toggle: into the source editor, or onto the toolbar toggle when
@@ -180,6 +182,7 @@ function MarkdownViewer({ item, alt, editable, onDirtyChange, contentRef }: Mark
 							tag={codeMirrorLanguageFor(extensionOf(driveItemName(item)))}
 							alt={alt}
 							editable={editable ?? false}
+							locked={locked ?? false}
 							autoFocus={focusAfterToggle === "editor"}
 							// exactOptionalPropertyTypes: an unset optional prop must omit the key entirely
 							// rather than forward an explicit `undefined`.

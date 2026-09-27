@@ -1,10 +1,25 @@
 import { csvCellView, csvDoc, serializeCsv, type CsvFormat } from "@/features/spreadsheet/lib/csvView"
-import { MAX_COLS, MAX_EDIT_CELLS, MAX_ROWS, type DocState, type EditOp, type EditResult } from "@/features/spreadsheet/lib/edits"
-import { cellKey, keyCol, keyRow, type SpreadsheetDoc } from "@/features/spreadsheet/lib/model"
+import {
+	MAX_COLS,
+	MAX_EDIT_CELLS,
+	MAX_ROWS,
+	MAX_SHEET_CELLS,
+	type DocState,
+	type EditOp,
+	type EditResult
+} from "@/features/spreadsheet/lib/edits"
+import { cellKey, keyCol, keyRow, type CellView, type SpreadsheetDoc } from "@/features/spreadsheet/lib/model"
 
 const HISTORY_LIMIT = 100
 
-type Step = { type: "cells"; before: Map<number, string> } | { type: "rows"; rows: string[][] }
+type Step =
+	| { type: "cells"; before: Map<number, string> }
+	| { type: "structure"; axis: "rows" | "cols"; kind: "insert" | "delete"; at: number; count: number; removed: string[][] }
+
+// How many cells a step's snapshot holds, for the history's total memory budget.
+function stepWeight(step: Step): number {
+	return step.type === "cells" ? step.before.size : step.removed.reduce((total, row) => total + row.length, 0)
+}
 
 // An open CSV or TSV: its rows of text (a CSV holds no formulas or formats: what is typed is what is
 // stored, a leading "=" included), the way the file was written, and an undo history. Worker-side only.
@@ -13,6 +28,7 @@ export class CsvDocument {
 	private readonly format: CsvFormat
 	private undoSteps: { step: Step; op: EditOp }[] = []
 	private redoOps: EditOp[] = []
+	private historyWeight = 0
 	private version = 0
 	private saved = 0
 
@@ -41,11 +57,8 @@ export class CsvDocument {
 		}
 
 		this.undoSteps.push({ step, op })
-
-		if (this.undoSteps.length > HISTORY_LIMIT) {
-			this.undoSteps.shift()
-			this.saved = this.saved === this.version - HISTORY_LIMIT ? -1 : this.saved
-		}
+		this.historyWeight += stepWeight(step)
+		this.trimHistory()
 
 		this.redoOps = []
 		this.version++
@@ -62,9 +75,10 @@ export class CsvDocument {
 
 		this.redoOps.push(last.op)
 		this.version--
+		this.historyWeight -= stepWeight(last.step)
 
-		if (last.step.type === "rows") {
-			this.rows = last.step.rows
+		if (last.step.type === "structure") {
+			this.revertStructure(last.step)
 
 			return this.sheetsResult()
 		}
@@ -94,15 +108,40 @@ export class CsvDocument {
 		}
 
 		this.undoSteps.push({ step, op })
+		this.historyWeight += stepWeight(step)
 		this.version++
 		this.redoOps = redoOps
 
 		return this.result(op, step)
 	}
 
-	// The file's bytes as edited (nothing is marked saved: see XlsxDocument.serialize).
-	serialize(): Uint8Array {
-		return serializeCsv(this.rows, this.format)
+	// The file's bytes as edited, and the version they were taken at.
+	serialize(): { bytes: Uint8Array; version: number } {
+		return { bytes: serializeCsv(this.rows, this.format), version: this.version }
+	}
+
+	// A save at `version` landed: dirty only if an edit was applied since (undoing back to a version whose
+	// step has since fallen out of history never reads as clean again — see trimHistory).
+	markSaved(version: number): DocState {
+		this.saved = version
+
+		return this.state()
+	}
+
+	// Drops the oldest undo steps once they pass HISTORY_LIMIT steps or MAX_SHEET_CELLS of snapshotted
+	// cells, always keeping at least the step just pushed. The save point becomes permanently unreachable
+	// (-1) once the step that would undo back to it is evicted.
+	private trimHistory(): void {
+		while (this.undoSteps.length > 1 && (this.undoSteps.length > HISTORY_LIMIT || this.historyWeight > MAX_SHEET_CELLS)) {
+			const boundary = this.version - this.undoSteps.length + 1
+			const evicted = this.undoSteps.shift()
+
+			if (evicted !== undefined) {
+				this.historyWeight -= stepWeight(evicted.step)
+			}
+
+			this.saved = this.saved === boundary ? -1 : this.saved
+		}
 	}
 
 	private write(row: number, col: number, text: string): void {
@@ -147,25 +186,36 @@ export class CsvDocument {
 					return null
 				}
 
-				const rows = this.rows.map(row => row.slice())
-
 				if (op.axis === "rows") {
+					let removed: string[][] = []
+
 					if (op.type === "insert") {
-						this.rows.splice(Math.min(op.at, this.rows.length), 0, ...Array.from({ length: op.count }, (): string[] => []))
+						// concat, not splice(...spread): inserting past ~125k rows spreads that many arguments
+						// into one call and throws RangeError.
+						const at = Math.min(op.at, this.rows.length)
+						const empty = Array.from({ length: op.count }, (): string[] => [])
+
+						this.rows = this.rows.slice(0, at).concat(empty, this.rows.slice(at))
 					} else {
-						this.rows.splice(op.at, op.count)
+						removed = this.rows.splice(op.at, op.count)
 					}
+
+					return { type: "structure", axis: "rows", kind: op.type, at: op.at, count: op.count, removed }
+				}
+
+				const removed: string[][] = []
+
+				if (op.type === "insert") {
+					const empty = new Array<string>(op.count).fill("")
+
+					this.rows = this.rows.map(row => (op.at < row.length ? row.slice(0, op.at).concat(empty, row.slice(op.at)) : row))
 				} else {
 					for (const row of this.rows) {
-						if (op.type === "insert") {
-							if (op.at < row.length) row.splice(op.at, 0, ...new Array<string>(op.count).fill(""))
-						} else {
-							row.splice(op.at, op.count)
-						}
+						removed.push(row.splice(op.at, op.count))
 					}
 				}
 
-				return { type: "rows", rows }
+				return { type: "structure", axis: "cols", kind: op.type, at: op.at, count: op.count, removed }
 			}
 			// A CSV is one sheet, and holds no formats.
 			case "addSheet":
@@ -175,17 +225,44 @@ export class CsvDocument {
 		}
 	}
 
+	// Reverses a structural step without re-copying the sheet: an insert's undo just deletes the same run
+	// back out, and a delete's undo re-inserts exactly the cells it removed (touched rows only, on cols).
+	private revertStructure(step: Extract<Step, { type: "structure" }>): void {
+		if (step.axis === "rows") {
+			this.rows =
+				step.kind === "insert"
+					? this.rows.slice(0, step.at).concat(this.rows.slice(step.at + step.count))
+					: this.rows.slice(0, step.at).concat(step.removed, this.rows.slice(step.at))
+
+			return
+		}
+
+		this.rows = this.rows.map((row, index) => {
+			if (step.kind === "insert") {
+				return row.length > step.at + step.count ? row.slice(0, step.at).concat(row.slice(step.at + step.count)) : row
+			}
+
+			const removedRow = step.removed[index]
+
+			return removedRow === undefined ? row : row.slice(0, step.at).concat(removedRow, row.slice(step.at))
+		})
+	}
+
 	private result(op: EditOp, step: Step): EditResult {
-		return step.type === "rows" || op.type !== "setCells" ? this.sheetsResult() : this.cellsResult([...step.before.keys()])
+		return step.type === "structure" || op.type !== "setCells" ? this.sheetsResult() : this.cellsResult([...step.before.keys()])
 	}
 
 	private cellsResult(keys: readonly number[]): EditResult {
 		return {
 			type: "cells",
-			sheet: 0,
-			cells: keys.map(key => [key, csvCellView(this.rows[keyRow(key)]?.[keyCol(key)] ?? "")]),
-			rowCount: this.rows.length,
-			colCount: this.rows.reduce((width, row) => Math.max(width, row.length), 0),
+			patches: [
+				{
+					sheet: 0,
+					cells: keys.map((key): [number, CellView | null] => [key, csvCellView(this.rows[keyRow(key)]?.[keyCol(key)] ?? "")]),
+					rowCount: this.rows.length,
+					colCount: this.rows.reduce((width, row) => Math.max(width, row.length), 0)
+				}
+			],
 			styles: [],
 			state: this.state()
 		}

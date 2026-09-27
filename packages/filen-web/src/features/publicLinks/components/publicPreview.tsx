@@ -101,6 +101,7 @@ function PublicPreviewBody({ item, category, alt }: { item: DriveItem; category:
 				<Suspense fallback={<ViewerFallback />}>
 					<SpreadsheetViewer
 						item={item}
+						documentKey={item.data.uuid}
 						alt={alt}
 					/>
 				</Suspense>

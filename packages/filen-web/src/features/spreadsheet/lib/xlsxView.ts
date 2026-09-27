@@ -59,11 +59,32 @@ export function inputText(value: CellValue | undefined, cell: Cell | undefined):
 // hands out stay valid for every later patch of the same workbook.
 export class WorkbookViews {
 	readonly styles = new StyleTable()
-	private readonly styleIds = new WeakMap<CellStyle, number | undefined>()
+	// The reader hands each cell a style object of its own, sharing the font, fill and alignment objects of
+	// its format: those, by identity, and the number format key the drawn part of a style.
+	private readonly partIds = new WeakMap<object, number>()
+	private nextPartId = 1
+	private readonly structuralIds = new Map<string, number | undefined>()
+	// Neighbouring cells mostly share a format: the last one looked up is checked first.
+	private last: { style: CellStyle; id: number | undefined } | null = null
 	private readonly themeColors: readonly string[] | undefined
 
 	constructor(themeColors: readonly string[] | undefined) {
 		this.themeColors = themeColors
+	}
+
+	private partId(part: object | undefined): number {
+		if (part === undefined) {
+			return 0
+		}
+
+		let id = this.partIds.get(part)
+
+		if (id === undefined) {
+			id = this.nextPartId++
+			this.partIds.set(part, id)
+		}
+
+		return id
 	}
 
 	private styleId(style: CellStyle | undefined): number | undefined {
@@ -71,13 +92,30 @@ export class WorkbookViews {
 			return undefined
 		}
 
-		if (this.styleIds.has(style)) {
-			return this.styleIds.get(style)
+		const last = this.last
+
+		if (
+			last !== null &&
+			last.style.font === style.font &&
+			last.style.fill === style.fill &&
+			last.style.alignment === style.alignment &&
+			last.style.numFmt === style.numFmt
+		) {
+			return last.id
 		}
 
-		const id = this.styles.add(styleView(style, this.themeColors, DEFAULT_FONT_SIZE))
+		const key = `${String(this.partId(style.font))},${String(this.partId(style.fill))},${String(this.partId(style.alignment))},${style.numFmt ?? ""}`
 
-		this.styleIds.set(style, id)
+		let id: number | undefined
+
+		if (this.structuralIds.has(key)) {
+			id = this.structuralIds.get(key)
+		} else {
+			id = this.styles.add(styleView(style, this.themeColors, DEFAULT_FONT_SIZE))
+			this.structuralIds.set(key, id)
+		}
+
+		this.last = { style, id }
 
 		return id
 	}
@@ -115,7 +153,6 @@ export class WorkbookViews {
 // A workbook's cells, one view per non-empty or formatted cell.
 function sheetView(sheet: Sheet, views: WorkbookViews, lockStructure: boolean): SheetView {
 	const cells = new Map<number, CellView>()
-	let rowCount = sheet.rows.length
 	let colCount = 0
 
 	for (let row = 0; row < sheet.rows.length; row++) {
@@ -138,11 +175,7 @@ function sheetView(sheet: Sheet, views: WorkbookViews, lockStructure: boolean): 
 		endRow: merge.endRow,
 		endCol: merge.endCol
 	}))
-
-	for (const merge of merges) {
-		rowCount = Math.max(rowCount, merge.endRow + 1)
-		colCount = Math.max(colCount, merge.endCol + 1)
-	}
+	const extent = sheetExtent(sheet)
 
 	const colWidths = new Map<number, number>()
 	const hiddenCols: number[] = []
@@ -172,8 +205,8 @@ function sheetView(sheet: Sheet, views: WorkbookViews, lockStructure: boolean): 
 
 	return {
 		name: sheet.name,
-		rowCount,
-		colCount,
+		rowCount: extent.rowCount,
+		colCount: Math.max(colCount, extent.colCount),
 		cells,
 		merges,
 		colWidths,
@@ -186,6 +219,19 @@ function sheetView(sheet: Sheet, views: WorkbookViews, lockStructure: boolean): 
 	}
 }
 
+// The used area: the value rectangle and every merge.
+export function sheetExtent(sheet: Sheet): { rowCount: number; colCount: number } {
+	let rowCount = sheet.rows.length
+	let colCount = sheet.rows[0]?.length ?? 0
+
+	for (const merge of sheet.merges ?? []) {
+		rowCount = Math.max(rowCount, merge.endRow + 1)
+		colCount = Math.max(colCount, merge.endCol + 1)
+	}
+
+	return { rowCount, colCount }
+}
+
 // Whether anything in the sheet names cell ranges the workbook model would not shift with an inserted or
 // deleted row or column.
 export function structureLocked(sheet: Sheet): boolean {
@@ -195,12 +241,29 @@ export function structureLocked(sheet: Sheet): boolean {
 		(sheet.dataValidations?.length ?? 0) > 0 ||
 		(sheet.images?.length ?? 0) > 0 ||
 		sheet.autoFilter !== undefined ||
-		(sheet.sparklines?.length ?? 0) > 0
+		(sheet.sparklines?.length ?? 0) > 0 ||
+		(sheet.charts?.length ?? 0) > 0
+	)
+}
+
+// Whether something names ranges on any sheet, so no sheet's rows or columns may move: defined names, and
+// charts, pivot tables, slicers and timelines, whose source ranges can sit on any sheet.
+export function workbookStructureLocked(workbook: Workbook): boolean {
+	return (
+		(workbook.namedRanges?.length ?? 0) > 0 ||
+		workbook.sheets.some(
+			sheet =>
+				!isWorksheet(sheet) ||
+				(sheet.charts?.length ?? 0) > 0 ||
+				(sheet.pivotTables?.length ?? 0) > 0 ||
+				(sheet.slicers?.length ?? 0) > 0 ||
+				(sheet.timelines?.length ?? 0) > 0
+		)
 	)
 }
 
 export function workbookDoc(workbook: Workbook, views: WorkbookViews, writable: boolean): SpreadsheetDoc {
-	const lockStructure = (workbook.namedRanges?.length ?? 0) > 0
+	const lockStructure = workbookStructureLocked(workbook)
 	const sheets = workbook.sheets.filter(isWorksheet).map(sheet => views.sheet(sheet, lockStructure))
 	// The file names its active tab among all of them; the grid counts worksheets only.
 	const active = workbook.sheets.slice(0, (workbook.activeSheet ?? 0) + 1).filter(isWorksheet).length - 1

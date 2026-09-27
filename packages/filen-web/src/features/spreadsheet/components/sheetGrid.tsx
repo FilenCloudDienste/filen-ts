@@ -1,5 +1,6 @@
 import {
 	useEffect,
+	useId,
 	useRef,
 	useState,
 	type CSSProperties,
@@ -9,41 +10,28 @@ import {
 	type ReactNode,
 	type RefObject
 } from "react"
+import { useTranslation } from "react-i18next"
 import { cn } from "@filen/shared"
-import { createAxis, type Axis } from "@/features/spreadsheet/lib/axis.logic"
+import type { Axis } from "@/features/spreadsheet/lib/axis.logic"
 import {
 	cellName,
 	columnName,
 	expandToMerges,
 	rangeContains,
-	rangesIntersect,
 	selectionRange,
 	type CellPosition,
 	type Selection
 } from "@/features/spreadsheet/lib/cellRef.logic"
-import { gridMove } from "@/features/spreadsheet/lib/navigation.logic"
-import {
-	cellKey,
-	DEFAULT_COL_WIDTH,
-	DEFAULT_ROW_HEIGHT,
-	type CellRange,
-	type CellStyleView,
-	type CellView,
-	type SheetView
-} from "@/features/spreadsheet/lib/model"
+import type { GridSheet } from "@/features/spreadsheet/lib/cellStore.logic"
+import { gridMove, mergeAt, sheetBounds, sheetCols, sheetRows } from "@/features/spreadsheet/lib/navigation.logic"
+import { cellKey, DEFAULT_ROW_HEIGHT, type CellRange, type CellStyleView, type CellView } from "@/features/spreadsheet/lib/model"
 
 const ROW_HEADER_WIDTH = 52
 const COL_HEADER_HEIGHT = 24
-// Blank rows and columns past the used area, as a spreadsheet shows.
-const EXTRA_ROWS = 100
-const EXTRA_COLS = 20
-const MIN_COLS = 26
-// Browsers cap an element's height (Firefox near 17.9 million pixels); rows past it cannot be scrolled to.
-const MAX_GRID_PIXELS = 15_000_000
 const OVERSCAN = 4
 
 export interface SheetGridProps {
-	sheet: SheetView
+	sheet: GridSheet
 	styles: readonly CellStyleView[]
 	selection: Selection
 	onSelectionChange: (selection: Selection) => void
@@ -65,8 +53,22 @@ interface Viewport {
 	height: number
 }
 
+interface Layout {
+	rows: Axis
+	cols: Axis
+	frozenRows: number
+	frozenCols: number
+	frozenHeight: number
+	frozenWidth: number
+}
+
+interface Span {
+	first: number
+	last: number
+}
+
 // The visible indices of one axis's scrolling part, plus a few past each edge.
-function visibleRange(axis: Axis, frozen: number, frozenSize: number, scroll: number, extent: number): { first: number; last: number } {
+function visibleRange(axis: Axis, frozen: number, frozenSize: number, scroll: number, extent: number): Span {
 	if (axis.count <= frozen) {
 		return { first: frozen, last: frozen - 1 }
 	}
@@ -77,6 +79,38 @@ function visibleRange(axis: Axis, frozen: number, frozenSize: number, scroll: nu
 	return { first, last }
 }
 
+// The rows and columns drawn for a scroll position. State follows this, not every scrolled pixel, so a
+// scroll frame that draws the same cells renders nothing.
+function gridWindow(layout: Layout, viewport: Viewport): { rows: Span; cols: Span } {
+	return {
+		rows: visibleRange(
+			layout.rows,
+			layout.frozenRows,
+			layout.frozenHeight,
+			viewport.top,
+			Math.max(0, viewport.height - COL_HEADER_HEIGHT - layout.frozenHeight)
+		),
+		cols: visibleRange(
+			layout.cols,
+			layout.frozenCols,
+			layout.frozenWidth,
+			viewport.left,
+			Math.max(0, viewport.width - ROW_HEADER_WIDTH - layout.frozenWidth)
+		)
+	}
+}
+
+function sameWindow(layout: Layout, a: Viewport, b: Viewport): boolean {
+	if (a.width !== b.width || a.height !== b.height) {
+		return false
+	}
+
+	const x = gridWindow(layout, a)
+	const y = gridWindow(layout, b)
+
+	return x.rows.first === y.rows.first && x.rows.last === y.rows.last && x.cols.first === y.cols.first && x.cols.last === y.cols.last
+}
+
 function span(first: number, last: number): number[] {
 	const indices: number[] = []
 
@@ -85,6 +119,10 @@ function span(first: number, last: number): number[] {
 	}
 
 	return indices
+}
+
+function overlaps(start: number, end: number, spans: readonly Span[]): boolean {
+	return spans.some(part => start <= part.last && end >= part.first)
 }
 
 const SPILL_COLUMNS = 32
@@ -126,38 +164,71 @@ function cellStyle(view: CellView, style: CellStyleView | undefined): CSSPropert
 // is in the DOM), and the headers and frozen panes are sticky regions of one scrolling box, so they stay put
 // with the browser's own scrolling rather than following it a frame late.
 export function SheetGrid({ sheet, styles, selection, onSelectionChange, label, onKey, onCellActivate, editor, gridRef }: SheetGridProps) {
+	const { t } = useTranslation("preview")
 	const ownRef = useRef<HTMLDivElement>(null)
 	const scrollRef = gridRef ?? ownRef
+	const idPrefix = useId()
 	const [viewport, setViewport] = useState<Viewport>({ top: 0, left: 0, width: 0, height: 0 })
 	const draggingRef = useRef(false)
 
-	const rowCap = createAxis(sheet.rowCount + EXTRA_ROWS, DEFAULT_ROW_HEIGHT, sheet.rowHeights, sheet.hiddenRows)
-	const rowCount = rowCap.total > MAX_GRID_PIXELS ? rowCap.indexAt(MAX_GRID_PIXELS) : rowCap.count
-	const rows = rowCount === rowCap.count ? rowCap : createAxis(rowCount, DEFAULT_ROW_HEIGHT, sheet.rowHeights, sheet.hiddenRows)
-	const cols = createAxis(Math.max(sheet.colCount + EXTRA_COLS, MIN_COLS), DEFAULT_COL_WIDTH, sheet.colWidths, sheet.hiddenCols)
+	const { axis: rows, truncated } = sheetRows(sheet)
+	const cols = sheetCols(sheet)
 	const frozenRows = Math.min(sheet.frozenRows, rows.count)
 	const frozenCols = Math.min(sheet.frozenCols, cols.count)
 	const frozenHeight = rows.offset(frozenRows)
 	const frozenWidth = cols.offset(frozenCols)
+	const layout: Layout = { rows, cols, frozenRows, frozenCols, frozenHeight, frozenWidth }
+	const layoutRef = useRef(layout)
+	const committedRef = useRef(viewport)
+	const remeasureRef = useRef<(() => void) | null>(null)
 	const bodyHeight = rows.total - frozenHeight
 	const bodyWidth = cols.total - frozenWidth
 	const visibleHeight = Math.max(0, viewport.height - COL_HEADER_HEIGHT - frozenHeight)
 	const visibleWidth = Math.max(0, viewport.width - ROW_HEADER_WIDTH - frozenWidth)
-	const rowWindow = visibleRange(rows, frozenRows, frozenHeight, viewport.top, visibleHeight)
-	const colWindow = visibleRange(cols, frozenCols, frozenWidth, viewport.left, visibleWidth)
+	const { rows: rowWindow, cols: colWindow } = gridWindow(layout, viewport)
 	const frozenRowIndices = span(0, frozenRows - 1)
 	const frozenColIndices = span(0, frozenCols - 1)
 	const bodyRowIndices = span(rowWindow.first, rowWindow.last)
 	const bodyColIndices = span(colWindow.first, colWindow.last)
 	const range = selectionRange(selection)
-	const windowRange: CellRange = {
-		startRow: Math.min(0, rowWindow.first),
-		startCol: Math.min(0, colWindow.first),
-		endRow: Math.max(frozenRows - 1, rowWindow.last),
-		endCol: Math.max(frozenCols - 1, colWindow.last)
+	const { focus } = selection
+	// Text spilling into view can start this far left of the drawn columns.
+	const spillFirst = Math.max(frozenCols, colWindow.first - SPILL_COLUMNS)
+	const rowSpans: Span[] = [{ first: 0, last: frozenRows - 1 }, rowWindow]
+	const colSpans: Span[] = [
+		{ first: 0, last: frozenCols - 1 },
+		{ first: spillFirst, last: colWindow.last }
+	]
+	const visibleMerges = sheet.merges.filter(
+		merge => overlaps(merge.startRow, merge.endRow, rowSpans) && overlaps(merge.startCol, merge.endCol, colSpans)
+	)
+	// Every drawn cell a merge covers, for O(1) lookups while drawing: bounded by the drawn area.
+	const mergeIndex = new Map<number, CellRange>()
+
+	for (const merge of visibleMerges) {
+		for (const rowPart of rowSpans) {
+			for (let row = Math.max(merge.startRow, rowPart.first); row <= Math.min(merge.endRow, rowPart.last); row++) {
+				for (const colPart of colSpans) {
+					for (let col = Math.max(merge.startCol, colPart.first); col <= Math.min(merge.endCol, colPart.last); col++) {
+						mergeIndex.set(cellKey(row, col), merge)
+					}
+				}
+			}
+		}
 	}
-	const visibleMerges = sheet.merges.filter(merge => rangesIntersect(merge, windowRange))
-	const activeId = `sheet-cell-${String(selection.focus.row)}-${String(selection.focus.col)}`
+
+	const activeMerge = mergeAt(sheet.merges, focus.row, focus.col)
+	const activeWidth = activeMerge === undefined ? cols.size(focus.col) : cols.offset(activeMerge.endCol + 1) - cols.offset(focus.col)
+	const activeHeight = activeMerge === undefined ? rows.size(focus.row) : rows.offset(activeMerge.endRow + 1) - rows.offset(focus.row)
+	// The active cell is always drawn (see layer), unless it has no size.
+	const activeShown = focus.row < rows.count && focus.col < cols.count && activeWidth > 0 && activeHeight > 0
+	const activeId = `${idPrefix}-active`
+	const nameId = `${idPrefix}-name`
+
+	useEffect(() => {
+		layoutRef.current = layout
+		remeasureRef.current?.()
+	})
 
 	useEffect(() => {
 		const element = scrollRef.current
@@ -171,22 +242,33 @@ export function SheetGrid({ sheet, styles, selection, onSelectionChange, label, 
 		function measure(): void {
 			frame = 0
 
-			if (element !== null) {
-				setViewport({ top: element.scrollTop, left: element.scrollLeft, width: element.clientWidth, height: element.clientHeight })
+			if (element === null) {
+				return
+			}
+
+			const next = { top: element.scrollTop, left: element.scrollLeft, width: element.clientWidth, height: element.clientHeight }
+
+			if (!sameWindow(layoutRef.current, committedRef.current, next)) {
+				committedRef.current = next
+				setViewport(next)
 			}
 		}
 
 		function schedule(): void {
-			frame ||= requestAnimationFrame(measure)
+			if (frame === 0) {
+				frame = requestAnimationFrame(measure)
+			}
 		}
 
 		const observer = new ResizeObserver(schedule)
 
+		remeasureRef.current = schedule
 		observer.observe(element)
 		element.addEventListener("scroll", schedule, { passive: true })
 		measure()
 
 		return () => {
+			remeasureRef.current = null
 			observer.disconnect()
 			element.removeEventListener("scroll", schedule)
 			cancelAnimationFrame(frame)
@@ -259,8 +341,8 @@ export function SheetGrid({ sheet, styles, selection, onSelectionChange, label, 
 	const lastUsedRow = Math.max(0, sheet.rowCount - 1)
 	const lastUsedCol = Math.max(0, sheet.colCount - 1)
 
-	function select(anchor: CellPosition, focus: CellPosition): void {
-		onSelectionChange({ anchor, focus })
+	function select(anchor: CellPosition, next: CellPosition): void {
+		onSelectionChange({ anchor, focus: next })
 	}
 
 	// Clicks inside the cell editor are the editor's (placing the caret), not a new selection.
@@ -277,7 +359,11 @@ export function SheetGrid({ sheet, styles, selection, onSelectionChange, label, 
 
 		// A right-click acts on the selection it lands in, or on the cell it lands on.
 		if (event.button === 2) {
-			if (target.row !== null && target.col !== null && !rangeContains(range, target.row, target.col)) {
+			if (
+				target.row !== null &&
+				target.col !== null &&
+				!rangeContains(expandToMerges(range, visibleMerges), target.row, target.col)
+			) {
 				select({ row: target.row, col: target.col }, { row: target.row, col: target.col })
 			}
 
@@ -320,8 +406,16 @@ export function SheetGrid({ sheet, styles, selection, onSelectionChange, label, 
 
 		const target = hit(event.clientX, event.clientY)
 
-		if (target?.row != null && target.col != null && (target.row !== selection.focus.row || target.col !== selection.focus.col)) {
-			select(selection.anchor, { row: target.row, col: target.col })
+		if (target?.row == null || target.col == null) {
+			return
+		}
+
+		const merge = mergeIndex.get(cellKey(target.row, target.col))
+		const row = merge?.startRow ?? target.row
+		const col = merge?.startCol ?? target.col
+
+		if (row !== focus.row || col !== focus.col) {
+			select(selection.anchor, { row, col })
 		}
 	}
 
@@ -346,10 +440,7 @@ export function SheetGrid({ sheet, styles, selection, onSelectionChange, label, 
 		}
 
 		const move = gridMove(event, selection, {
-			rowCount: rows.count,
-			colCount: cols.count,
-			lastUsedRow,
-			lastUsedCol,
+			...sheetBounds(sheet, rows, cols),
 			pageRows: Math.max(1, Math.floor(visibleHeight / DEFAULT_ROW_HEIGHT) - 1)
 		})
 
@@ -362,18 +453,18 @@ export function SheetGrid({ sheet, styles, selection, onSelectionChange, label, 
 		reveal(move.focus)
 	}
 
-	// The selection's rectangle clipped to one region, in that region's own coordinates.
+	// The selection's rectangle clipped to what one region draws, in that region's own coordinates.
 	function selectionRect(
-		rowDomain: [number, number],
-		colDomain: [number, number],
+		rowsDrawn: [number, number],
+		colsDrawn: [number, number],
 		rowOrigin: number,
 		colOrigin: number
 	): CSSProperties | null {
 		const grown = expandToMerges(range, visibleMerges)
-		const startRow = Math.max(grown.startRow, rowDomain[0])
-		const endRow = Math.min(grown.endRow, rowDomain[1])
-		const startCol = Math.max(grown.startCol, colDomain[0])
-		const endCol = Math.min(grown.endCol, colDomain[1])
+		const startRow = Math.max(grown.startRow, rowsDrawn[0])
+		const endRow = Math.min(grown.endRow, rowsDrawn[1])
+		const startCol = Math.max(grown.startCol, colsDrawn[0])
+		const endCol = Math.min(grown.endCol, colsDrawn[1])
 
 		if (startRow > endRow || startCol > endCol) {
 			return null
@@ -387,7 +478,8 @@ export function SheetGrid({ sheet, styles, selection, onSelectionChange, label, 
 		}
 	}
 
-	// One region's cells: its rows by its columns, merges anchored in it, gridlines and the selection.
+	// One region's cells: its rows by its columns, merges anchored in it, gridlines and the selection. Cells
+	// are grouped into rows (display: contents), as the grid role needs.
 	function layer(
 		rowIndices: number[],
 		colIndices: number[],
@@ -397,10 +489,12 @@ export function SheetGrid({ sheet, styles, selection, onSelectionChange, label, 
 		colOrigin: number
 	): ReactNode {
 		const nodes: ReactNode[] = []
+		const rowCells = new Map<number, ReactNode[]>()
+		// Cells already drawn: a spill source, a merge's anchor and the active cell can be the same one.
+		const done = new Set<number>()
 		const width = colIndices.length === 0 ? 0 : cols.offset((colIndices.at(-1) ?? 0) + 1) - colOrigin
 
 		for (const row of rowIndices) {
-			const top = rows.offset(row) - rowOrigin
 			const height = rows.size(row)
 
 			if (height === 0) {
@@ -412,7 +506,7 @@ export function SheetGrid({ sheet, styles, selection, onSelectionChange, label, 
 					key={`h${String(row)}`}
 					aria-hidden="true"
 					className="pointer-events-none absolute border-b border-border/60"
-					style={{ top, left: 0, width, height }}
+					style={{ top: rows.offset(row) - rowOrigin, left: 0, width, height }}
 				/>
 			)
 		}
@@ -440,7 +534,9 @@ export function SheetGrid({ sheet, styles, selection, onSelectionChange, label, 
 			let spilled = 0
 
 			for (let next = col + 1; next <= Math.min(end, col + SPILL_COLUMNS); next++) {
-				if (sheet.cells.has(cellKey(row, next)) || visibleMerges.some(candidate => rangeContains(candidate, row, next))) {
+				const key = cellKey(row, next)
+
+				if (sheet.cells.has(key) || mergeIndex.has(key)) {
 					break
 				}
 
@@ -451,12 +547,15 @@ export function SheetGrid({ sheet, styles, selection, onSelectionChange, label, 
 		}
 
 		function cell(row: number, col: number, merge: CellRange | undefined): void {
-			const view = sheet.cells.get(cellKey(row, col))
-			const isActive = row === selection.focus.row && col === selection.focus.col
+			const key = cellKey(row, col)
+			const view = sheet.cells.get(key)
+			const isActive = row === focus.row && col === focus.col
 
-			if (view === undefined && merge === undefined && !isActive) {
+			if ((view === undefined && merge === undefined && !isActive) || done.has(key)) {
 				return
 			}
+
+			done.add(key)
 
 			const width = merge === undefined ? cols.size(col) : cols.offset(merge.endCol + 1) - cols.offset(col)
 			const height = merge === undefined ? rows.size(row) : rows.offset(merge.endRow + 1) - rows.offset(row)
@@ -466,6 +565,7 @@ export function SheetGrid({ sheet, styles, selection, onSelectionChange, label, 
 			}
 
 			const style = view?.style === undefined ? undefined : styles[view.style]
+			const editing = isActive && editor?.row === row && editor.col === col
 			const spill =
 				merge === undefined &&
 				view !== undefined &&
@@ -476,18 +576,25 @@ export function SheetGrid({ sheet, styles, selection, onSelectionChange, label, 
 				(style?.align === undefined || style.align === "left")
 					? spillWidth(row, col, colDomain[1])
 					: 0
+			let list = rowCells.get(row)
 
-			nodes.push(
+			if (list === undefined) {
+				list = []
+				rowCells.set(row, list)
+			}
+
+			list.push(
 				<div
-					key={`c${String(row)}:${String(col)}`}
+					key={`c${String(col)}`}
 					id={isActive ? activeId : undefined}
 					role="gridcell"
-					aria-rowindex={row + 1}
-					aria-colindex={col + 1}
+					aria-colindex={col + 2}
 					aria-selected={rangeContains(range, row, col)}
+					aria-describedby={isActive ? nameId : undefined}
 					className={cn(
 						"absolute flex px-1.5 text-[13px] leading-tight",
-						spill > 0 ? "overflow-visible" : "overflow-hidden",
+						spill > 0 || editing ? "overflow-visible" : "overflow-hidden",
+						editing && "z-10",
 						merge !== undefined && "bg-background",
 						view?.error === true && "text-destructive"
 					)}
@@ -508,6 +615,15 @@ export function SheetGrid({ sheet, styles, selection, onSelectionChange, label, 
 					>
 						{view?.text ?? ""}
 					</span>
+					{editing ? (
+						<div
+							data-cell-editor
+							className="absolute top-0 left-0 font-normal text-foreground not-italic"
+							style={{ minWidth: width, height }}
+						>
+							{editor.node}
+						</div>
+					) : null}
 				</div>
 			)
 		}
@@ -516,10 +632,27 @@ export function SheetGrid({ sheet, styles, selection, onSelectionChange, label, 
 		const lastRow = rowIndices.at(-1) ?? -1
 		const firstCol = colIndices[0] ?? 0
 		const lastCol = colIndices.at(-1) ?? -1
+		const inDomain = (row: number, col: number): boolean =>
+			row >= rowDomain[0] && row <= rowDomain[1] && col >= colDomain[0] && col <= colDomain[1]
 
 		for (const row of rowIndices) {
+			// Text that starts left of the drawn columns may still spill into them: its cell is drawn too.
+			for (let col = firstCol - 1; col >= Math.max(colDomain[0], firstCol - SPILL_COLUMNS); col--) {
+				const key = cellKey(row, col)
+
+				if (mergeIndex.has(key)) {
+					break
+				}
+
+				if (sheet.cells.has(key)) {
+					cell(row, col, undefined)
+
+					break
+				}
+			}
+
 			for (const col of colIndices) {
-				const merge = visibleMerges.find(candidate => rangeContains(candidate, row, col))
+				const merge = mergeIndex.get(cellKey(row, col))
 
 				if (merge === undefined || (merge.startRow === row && merge.startCol === col)) {
 					cell(row, col, merge)
@@ -529,46 +662,30 @@ export function SheetGrid({ sheet, styles, selection, onSelectionChange, label, 
 
 		// A merge whose anchor has scrolled out of the window still shows the part of it that has not.
 		for (const merge of visibleMerges) {
-			const anchorInDomain =
-				merge.startRow >= rowDomain[0] &&
-				merge.startRow <= rowDomain[1] &&
-				merge.startCol >= colDomain[0] &&
-				merge.startCol <= colDomain[1]
-			const anchorRendered =
-				merge.startRow >= firstRow && merge.startRow <= lastRow && merge.startCol >= firstCol && merge.startCol <= lastCol
-
-			if (anchorInDomain && !anchorRendered) {
+			if (inDomain(merge.startRow, merge.startCol)) {
 				cell(merge.startRow, merge.startCol, merge)
 			}
 		}
 
-		if (
-			editor != null &&
-			editor.row >= rowDomain[0] &&
-			editor.row <= rowDomain[1] &&
-			editor.col >= colDomain[0] &&
-			editor.col <= colDomain[1]
-		) {
-			const merge = visibleMerges.find(candidate => candidate.startRow === editor.row && candidate.startCol === editor.col)
+		// The active cell is drawn wherever it is: aria-activedescendant and the cell editor live on it.
+		if (inDomain(focus.row, focus.col)) {
+			cell(focus.row, focus.col, activeMerge)
+		}
 
+		for (const row of [...rowCells.keys()].sort((a, b) => a - b)) {
 			nodes.push(
 				<div
-					key="editor"
-					data-cell-editor
-					className="absolute z-10"
-					style={{
-						top: rows.offset(editor.row) - rowOrigin,
-						left: cols.offset(editor.col) - colOrigin,
-						minWidth: merge === undefined ? cols.size(editor.col) : cols.offset(merge.endCol + 1) - cols.offset(editor.col),
-						height: merge === undefined ? rows.size(editor.row) : rows.offset(merge.endRow + 1) - rows.offset(editor.row)
-					}}
+					key={`r${String(row)}`}
+					role="row"
+					aria-rowindex={row + 2}
+					className="contents"
 				>
-					{editor.node}
+					{rowCells.get(row)}
 				</div>
 			)
 		}
 
-		const rect = selectionRect(rowDomain, colDomain, rowOrigin, colOrigin)
+		const rect = selectionRect([firstRow, lastRow], [firstCol, lastCol], rowOrigin, colOrigin)
 
 		if (rect !== null) {
 			nodes.push(
@@ -585,23 +702,32 @@ export function SheetGrid({ sheet, styles, selection, onSelectionChange, label, 
 	}
 
 	function columnHeaders(colIndices: number[], origin: number): ReactNode {
-		return colIndices.map(col => {
-			const width = cols.size(col)
+		return (
+			<div
+				role="row"
+				aria-rowindex={1}
+				className="contents"
+			>
+				{colIndices.map(col => {
+					const width = cols.size(col)
 
-			return width === 0 ? null : (
-				<div
-					key={col}
-					role="columnheader"
-					className={cn(
-						"absolute top-0 flex items-center justify-center border-r border-b border-border text-xs text-muted-foreground",
-						col >= range.startCol && col <= range.endCol ? "bg-accent font-medium text-foreground" : "bg-muted"
-					)}
-					style={{ left: cols.offset(col) - origin, width, height: COL_HEADER_HEIGHT }}
-				>
-					{columnName(col)}
-				</div>
-			)
-		})
+					return width === 0 ? null : (
+						<div
+							key={col}
+							role="columnheader"
+							aria-colindex={col + 2}
+							className={cn(
+								"absolute top-0 flex items-center justify-center border-r border-b border-border text-xs text-muted-foreground",
+								col >= range.startCol && col <= range.endCol ? "bg-accent font-medium text-foreground" : "bg-muted"
+							)}
+							style={{ left: cols.offset(col) - origin, width, height: COL_HEADER_HEIGHT }}
+						>
+							{columnName(col)}
+						</div>
+					)
+				})}
+			</div>
+		)
 	}
 
 	function rowHeaders(rowIndices: number[], origin: number): ReactNode {
@@ -611,14 +737,21 @@ export function SheetGrid({ sheet, styles, selection, onSelectionChange, label, 
 			return height === 0 ? null : (
 				<div
 					key={row}
-					role="rowheader"
-					className={cn(
-						"absolute left-0 flex items-center justify-center border-r border-b border-border text-xs text-muted-foreground tabular-nums",
-						row >= range.startRow && row <= range.endRow ? "bg-accent font-medium text-foreground" : "bg-muted"
-					)}
-					style={{ top: rows.offset(row) - origin, height, width: ROW_HEADER_WIDTH }}
+					role="row"
+					aria-rowindex={row + 2}
+					className="contents"
 				>
-					{row + 1}
+					<div
+						role="rowheader"
+						aria-colindex={1}
+						className={cn(
+							"absolute left-0 flex items-center justify-center border-r border-b border-border text-xs text-muted-foreground tabular-nums",
+							row >= range.startRow && row <= range.endRow ? "bg-accent font-medium text-foreground" : "bg-muted"
+						)}
+						style={{ top: rows.offset(row) - origin, height, width: ROW_HEADER_WIDTH }}
+					>
+						{row + 1}
+					</div>
 				</div>
 			)
 		})
@@ -630,75 +763,90 @@ export function SheetGrid({ sheet, styles, selection, onSelectionChange, label, 
 	const frozenColDomain: [number, number] = [0, frozenCols - 1]
 
 	return (
-		<div
-			ref={scrollRef}
-			role="grid"
-			aria-label={label}
-			aria-rowcount={rows.count}
-			aria-colcount={cols.count}
-			aria-multiselectable="true"
-			aria-activedescendant={activeId}
-			tabIndex={0}
-			className="relative min-h-0 flex-1 overflow-auto bg-background outline-none select-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset"
-			onPointerDown={handlePointerDown}
-			onPointerMove={handlePointerMove}
-			onPointerUp={handlePointerUp}
-			onPointerCancel={handlePointerUp}
-			onDoubleClick={handleDoubleClick}
-			onKeyDown={handleKeyDown}
-		>
+		<>
 			<div
-				className="grid"
-				style={{
-					gridTemplateColumns: `${String(ROW_HEADER_WIDTH)}px ${String(frozenWidth)}px ${String(bodyWidth)}px`,
-					gridTemplateRows: `${String(COL_HEADER_HEIGHT)}px ${String(frozenHeight)}px ${String(bodyHeight)}px`,
-					width: ROW_HEADER_WIDTH + cols.total,
-					height: COL_HEADER_HEIGHT + rows.total
-				}}
+				ref={scrollRef}
+				role="grid"
+				aria-label={label}
+				aria-rowcount={rows.count + 1}
+				aria-colcount={cols.count + 1}
+				aria-multiselectable="true"
+				aria-activedescendant={activeShown ? activeId : undefined}
+				tabIndex={0}
+				className="relative min-h-0 flex-1 overflow-auto bg-background outline-none select-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset"
+				onPointerDown={handlePointerDown}
+				onPointerMove={handlePointerMove}
+				onPointerUp={handlePointerUp}
+				onPointerCancel={handlePointerUp}
+				onDoubleClick={handleDoubleClick}
+				onKeyDown={handleKeyDown}
 			>
-				{/* The select-all corner */}
-				<div className="sticky top-0 left-0 z-40 border-r border-b border-border bg-muted" />
 				<div
-					className="sticky top-0 z-30 overflow-hidden"
-					style={{ left: ROW_HEADER_WIDTH }}
+					className="grid"
+					style={{
+						gridTemplateColumns: `${String(ROW_HEADER_WIDTH)}px ${String(frozenWidth)}px ${String(bodyWidth)}px`,
+						gridTemplateRows: `${String(COL_HEADER_HEIGHT)}px ${String(frozenHeight)}px ${String(bodyHeight)}px`,
+						width: ROW_HEADER_WIDTH + cols.total,
+						height: COL_HEADER_HEIGHT + rows.total
+					}}
 				>
-					{columnHeaders(frozenColIndices, 0)}
+					{/* The select-all corner */}
+					<div
+						aria-hidden="true"
+						className="sticky top-0 left-0 z-40 border-r border-b border-border bg-muted"
+					/>
+					<div
+						className="sticky top-0 z-30 overflow-hidden"
+						style={{ left: ROW_HEADER_WIDTH }}
+					>
+						{columnHeaders(frozenColIndices, 0)}
+					</div>
+					<div className="sticky top-0 z-20 overflow-hidden">{columnHeaders(bodyColIndices, frozenWidth)}</div>
+					<div
+						className="sticky left-0 z-30 overflow-hidden"
+						style={{ top: COL_HEADER_HEIGHT }}
+					>
+						{rowHeaders(frozenRowIndices, 0)}
+					</div>
+					<div
+						className={cn(
+							"sticky z-30 overflow-hidden bg-background",
+							frozenRows > 0 && "border-b-2 border-border",
+							frozenCols > 0 && "border-r-2 border-border"
+						)}
+						style={{ top: COL_HEADER_HEIGHT, left: ROW_HEADER_WIDTH }}
+					>
+						{layer(frozenRowIndices, frozenColIndices, frozenRowDomain, frozenColDomain, 0, 0)}
+					</div>
+					<div
+						className={cn("sticky z-20 overflow-hidden bg-background", frozenRows > 0 && "border-b-2 border-border")}
+						style={{ top: COL_HEADER_HEIGHT }}
+					>
+						{layer(frozenRowIndices, bodyColIndices, frozenRowDomain, allCols, 0, frozenWidth)}
+					</div>
+					<div className="sticky left-0 z-20 overflow-hidden">{rowHeaders(bodyRowIndices, frozenHeight)}</div>
+					<div
+						className={cn("sticky z-10 overflow-hidden bg-background", frozenCols > 0 && "border-r-2 border-border")}
+						style={{ left: ROW_HEADER_WIDTH }}
+					>
+						{layer(bodyRowIndices, frozenColIndices, allRows, frozenColDomain, frozenHeight, 0)}
+					</div>
+					<div className="relative overflow-hidden">
+						{layer(bodyRowIndices, bodyColIndices, allRows, allCols, frozenHeight, frozenWidth)}
+					</div>
 				</div>
-				<div className="sticky top-0 z-20 overflow-hidden">{columnHeaders(bodyColIndices, frozenWidth)}</div>
-				<div
-					className="sticky left-0 z-30 overflow-hidden"
-					style={{ top: COL_HEADER_HEIGHT }}
+				<span
+					id={nameId}
+					hidden
 				>
-					{rowHeaders(frozenRowIndices, 0)}
-				</div>
-				<div
-					className={cn(
-						"sticky z-30 overflow-hidden bg-background",
-						frozenRows > 0 && "border-b-2 border-border",
-						frozenCols > 0 && "border-r-2 border-border"
-					)}
-					style={{ top: COL_HEADER_HEIGHT, left: ROW_HEADER_WIDTH }}
-				>
-					{layer(frozenRowIndices, frozenColIndices, frozenRowDomain, frozenColDomain, 0, 0)}
-				</div>
-				<div
-					className={cn("sticky z-20 overflow-hidden bg-background", frozenRows > 0 && "border-b-2 border-border")}
-					style={{ top: COL_HEADER_HEIGHT }}
-				>
-					{layer(frozenRowIndices, bodyColIndices, frozenRowDomain, allCols, 0, frozenWidth)}
-				</div>
-				<div className="sticky left-0 z-20 overflow-hidden">{rowHeaders(bodyRowIndices, frozenHeight)}</div>
-				<div
-					className={cn("sticky z-10 overflow-hidden bg-background", frozenCols > 0 && "border-r-2 border-border")}
-					style={{ left: ROW_HEADER_WIDTH }}
-				>
-					{layer(bodyRowIndices, frozenColIndices, allRows, frozenColDomain, frozenHeight, 0)}
-				</div>
-				<div className="relative overflow-hidden">
-					{layer(bodyRowIndices, bodyColIndices, allRows, allCols, frozenHeight, frozenWidth)}
-				</div>
+					{cellName(focus.row, focus.col)}
+				</span>
 			</div>
-			<span className="sr-only">{cellName(selection.focus.row, selection.focus.col)}</span>
-		</div>
+			{truncated ? (
+				<p className="shrink-0 border-t border-border px-2 py-1 text-xs text-muted-foreground">
+					{t("previewSpreadsheetRowsTruncated", { rows: rows.count.toLocaleString() })}
+				</p>
+			) : null}
+		</>
 	)
 }

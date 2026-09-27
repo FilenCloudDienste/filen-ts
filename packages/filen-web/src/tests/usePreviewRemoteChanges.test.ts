@@ -29,6 +29,8 @@ const { narrowItem } = await import("@/features/drive/lib/item")
 const { emitPreviewFileMetaChanged, emitPreviewFileRevised, emitPreviewItemMoved, emitPreviewItemRemoved } =
 	await import("@/features/preview/lib/previewReconcile")
 const { setPreviewDirty, usePreviewUnsavedGuardStore } = await import("@/features/preview/store/usePreviewUnsavedGuard")
+const { emitPreviewItemRestored, emitPreviewResync, subscribePreviewReconcile } = await import("@/features/preview/lib/previewReconcile")
+const { driveListingQueryOptions } = await import("@/features/drive/queries/drive")
 
 type DriveItem = ReturnType<typeof narrowItem>
 
@@ -93,6 +95,33 @@ function setup(items = [file("a"), file("b", { stableUUID: "other" as File["stab
 	)
 
 	return { hook, savedRef, commitSaved, onItemRemoved }
+}
+
+// The listing a reconnect's lookup reads, counting the reads.
+function serveListing(listing: DriveItem[]): { reads: () => number } {
+	let reads = 0
+
+	vi.mocked(driveListingQueryOptions).mockImplementation(
+		(_variant, uuid) =>
+			({
+				queryKey: ["drive", "listing", { variant: "drive", uuid }],
+				queryFn: () => {
+					reads++
+
+					return Promise.resolve(listing)
+				}
+			}) as unknown as ReturnType<typeof driveListingQueryOptions>
+	)
+
+	return { reads: () => reads }
+}
+
+async function flush(): Promise<void> {
+	await act(async () => {
+		for (let i = 0; i < 5; i++) {
+			await new Promise(resolve => setTimeout(resolve, 0))
+		}
+	})
 }
 
 beforeEach(() => {
@@ -219,5 +248,202 @@ describe("usePreviewRemoteChanges", () => {
 
 		expect(commitSaved).toHaveBeenCalledTimes(1)
 		expect(nameOf(savedRef.current.get(testUuid("a")))).toBe("renamed.txt")
+	})
+
+	it("holds a trash made elsewhere during its own save, and asks about it only once the save failed", () => {
+		const { hook, onItemRemoved } = setup()
+
+		hook.result.current.saveStarted()
+
+		act(() => {
+			emitPreviewItemRemoved(testUuid("a"))
+		})
+
+		expect(hook.result.current.prompt).toBeNull()
+
+		act(() => {
+			hook.result.current.saveSettled(null)
+		})
+
+		expect(hook.result.current.prompt).toEqual({ kind: "deleted", frozenUuid: testUuid("a") })
+		expect(onItemRemoved).not.toHaveBeenCalled()
+	})
+
+	it("drops a trash held during its own save once the save landed: the slot shows the saved file", () => {
+		const { hook, commitSaved, onItemRemoved } = setup()
+
+		hook.result.current.saveStarted()
+
+		act(() => {
+			emitPreviewItemRemoved(testUuid("a"))
+		})
+
+		act(() => {
+			commitSaved(testUuid("a"), file("a1"))
+			setPreviewDirty(false)
+			hook.result.current.saveSettled(file("a1"))
+		})
+
+		expect(hook.result.current.prompt).toBeNull()
+		expect(onItemRemoved).not.toHaveBeenCalled()
+	})
+
+	it("forgets a held trash when the file is restored before the save settles", () => {
+		const { hook } = setup()
+
+		hook.result.current.saveStarted()
+
+		act(() => {
+			emitPreviewItemRemoved(testUuid("a"))
+			emitPreviewItemRestored(testUuid("a"))
+			hook.result.current.saveSettled(null)
+		})
+
+		expect(hook.result.current.prompt).toBeNull()
+	})
+
+	it("shows a newer version saved elsewhere once a spreadsheet reports its saved edits clean", () => {
+		const { hook, commitSaved } = setup()
+
+		hook.result.current.saveStarted()
+
+		act(() => {
+			emitPreviewFileRevised({ item: file("a1") })
+			emitPreviewFileRevised({ item: file("a2") })
+		})
+
+		// The save made a1; a2 came after it. The spreadsheet has not reported its dirty bit yet.
+		act(() => {
+			commitSaved(testUuid("a"), file("a1"))
+			hook.result.current.saveSettled(file("a1"))
+		})
+
+		expect(hook.result.current.prompt).toMatchObject({ kind: "revised", afterSave: true, theirs: { data: { uuid: testUuid("a2") } } })
+
+		act(() => {
+			setPreviewDirty(false)
+		})
+
+		expect(hook.result.current.prompt).toBeNull()
+		expect(commitSaved.mock.lastCall?.[1].data.uuid).toBe(testUuid("a2"))
+		expect(toast).toHaveBeenCalledWith("preview:previewUpdatedElsewhere")
+	})
+
+	it("loading theirs does not also show them through the clean-after-save path", () => {
+		const { hook, commitSaved } = setup()
+
+		hook.result.current.saveStarted()
+
+		act(() => {
+			emitPreviewFileRevised({ item: file("a1") })
+			emitPreviewFileRevised({ item: file("a2") })
+			commitSaved(testUuid("a"), file("a1"))
+			hook.result.current.saveSettled(file("a1"))
+		})
+		expect(hook.result.current.prompt).toMatchObject({ kind: "revised", afterSave: true })
+		commitSaved.mockClear()
+
+		act(() => {
+			hook.result.current.loadTheirs()
+		})
+
+		expect(commitSaved).toHaveBeenCalledTimes(1)
+		expect(toast).not.toHaveBeenCalledWith("preview:previewUpdatedElsewhere")
+	})
+
+	it("uploads a new file once however often it is asked while the first upload runs", async () => {
+		const { hook } = setup()
+		const upload = deferred<{ status: "success"; item: DriveItem }>()
+
+		runPreviewSave.mockReturnValue(upload.promise)
+
+		act(() => {
+			emitPreviewItemRemoved(testUuid("a"))
+		})
+
+		let first: Promise<void> = Promise.resolve()
+
+		act(() => {
+			first = hook.result.current.saveMineAsNewFile()
+			void hook.result.current.saveMineAsNewFile()
+		})
+
+		await act(async () => {
+			upload.resolve({ status: "success", item: file("copy", { stableUUID: "copy" as File["stableUUID"] }) })
+			await first
+		})
+
+		expect(runPreviewSave).toHaveBeenCalledTimes(1)
+	})
+
+	it("after a reconnect, applies a rename made meanwhile to the pager", async () => {
+		const events: string[] = []
+		const unsubscribe = subscribePreviewReconcile(event => {
+			events.push(event.type)
+		})
+
+		serveListing([file("a", { meta: meta("renamed.txt") })])
+		setup()
+
+		act(() => {
+			emitPreviewResync()
+		})
+		await flush()
+
+		expect(events).toContain("fileMeta")
+		unsubscribe()
+	})
+
+	it("after a reconnect, asks about a file no longer in its directory", async () => {
+		serveListing([])
+		const { hook } = setup()
+
+		act(() => {
+			emitPreviewResync()
+		})
+		await flush()
+
+		expect(hook.result.current.prompt).toEqual({ kind: "deleted", frozenUuid: testUuid("a") })
+	})
+
+	it("after a reconnect, drops a clean slot no longer in its directory from the pager", async () => {
+		setPreviewDirty(false)
+		serveListing([])
+		const { onItemRemoved } = setup()
+
+		act(() => {
+			emitPreviewResync()
+		})
+		await flush()
+
+		expect(onItemRemoved).toHaveBeenCalledWith(testUuid("a"))
+	})
+
+	it("looks a slot up once per reconnect, an off-screen one when it comes on screen", async () => {
+		setPreviewDirty(false)
+		const b = file("b", { stableUUID: "other" as File["stableUUID"] })
+		const listing = serveListing([file("a"), file("b2", { stableUUID: "other" as File["stableUUID"] })])
+		const { hook, commitSaved } = setup([file("a"), b])
+
+		act(() => {
+			emitPreviewResync()
+		})
+		await flush()
+
+		expect(listing.reads()).toBe(1)
+		expect(commitSaved).not.toHaveBeenCalled()
+
+		hook.rerender({ items: [file("a"), b], index: 1 })
+		await flush()
+
+		expect(listing.reads()).toBe(2)
+		expect(commitSaved.mock.lastCall?.[0]).toBe(testUuid("b"))
+		expect(commitSaved.mock.lastCall?.[1].data.uuid).toBe(testUuid("b2"))
+
+		hook.rerender({ items: [file("a"), b], index: 0 })
+		hook.rerender({ items: [file("a"), b], index: 1 })
+		await flush()
+
+		expect(listing.reads()).toBe(2)
 	})
 })

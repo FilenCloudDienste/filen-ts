@@ -89,6 +89,23 @@ describe("isEditable", () => {
 		expect(isEditable(fileItem({ meta: decodedMeta("old.xls") }), "drive")).toBe(false)
 	})
 
+	it("is true for tsv and xlsm, and false for a spreadsheet known only by its mime type", () => {
+		const byMime = (name: string, mime: string): SdkFile["meta"] => ({
+			type: "decoded",
+			data: { name, mime, modified: 1_700_000_000_000n, size: 1_024n, key: "key", version: 2 }
+		})
+
+		expect(isEditable(fileItem({ meta: decodedMeta("list.tsv") }), "drive")).toBe(true)
+		expect(isEditable(fileItem({ meta: decodedMeta("macros.xlsm") }), "drive")).toBe(true)
+		expect(isEditable(fileItem({ meta: byMime("export", "text/csv") }), "drive")).toBe(false)
+		expect(
+			isEditable(
+				fileItem({ meta: byMime("sheet.bin", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") }),
+				"drive"
+			)
+		).toBe(false)
+	})
+
 	it("is true for markdown — edited through the viewer's own source mode", () => {
 		expect(isEditable(fileItem({ meta: decodedMeta("readme.md") }), "drive")).toBe(true)
 	})

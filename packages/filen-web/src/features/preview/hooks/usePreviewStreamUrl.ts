@@ -41,25 +41,30 @@ export function usePreviewStreamUrl(item: DriveItem, name: string, contentType: 
 		let live = true
 		const epoch = previewCacheEpoch()
 
-		async function register(): Promise<void> {
-			try {
-				const file = narrowToAnyFile(item)
-				const id = getPreviewStreamId(cacheScope, item.data.uuid, contentType) ?? crypto.randomUUID()
-				const url = await previewStreamUrl(file, name, contentType, id)
+		// A throw anywhere in here rejects: promise handlers below, not try/catch, which the React Compiler
+		// cannot lower around a logical expression and would skip the hook for.
+		async function register(): Promise<string> {
+			const file = narrowToAnyFile(item)
+			const id = getPreviewStreamId(cacheScope, item.data.uuid, contentType) ?? crypto.randomUUID()
+			const url = await previewStreamUrl(file, name, contentType, id)
 
-				setPreviewStreamId(cacheScope, item.data.uuid, contentType, id, epoch)
+			setPreviewStreamId(cacheScope, item.data.uuid, contentType, id, epoch)
 
+			return url
+		}
+
+		void register().then(
+			url => {
 				if (live) {
 					setResult({ status: "success", url })
 				}
-			} catch {
+			},
+			() => {
 				if (live) {
 					setResult({ status: "error" })
 				}
 			}
-		}
-
-		void register()
+		)
 
 		return () => {
 			live = false

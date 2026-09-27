@@ -1,5 +1,6 @@
-import { useEffect, useState, type RefObject } from "react"
-import CodeMirror from "@uiw/react-codemirror"
+import { useEffect, useRef, useState, type RefObject } from "react"
+import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror"
+import { Compartment, EditorState, type Extension } from "@codemirror/state"
 import { EditorView } from "@codemirror/view"
 import { useCodeMirrorTheme, useEditorKeymap, useLanguageExtension } from "@/features/preview/lib/codeMirrorShared"
 
@@ -29,6 +30,19 @@ export interface CodeMirrorSourceProps {
 	onValueChange?: (value: string) => void
 	// Focus the editor once it is created.
 	autoFocus?: boolean
+	// Read-only for now, keeping the buffer: the preview's save in flight, which remounts the editor on
+	// what it uploaded, so anything typed meanwhile would be lost.
+	locked?: boolean
+}
+
+const LOCKED: Extension = [EditorState.readOnly.of(true), EditorView.editable.of(false)]
+
+// Its own compartment, swapped alone: the editable/readOnly props would rebuild the whole configuration.
+// Compartment contents survive the wrapper's own full reconfigures (theme, language).
+function lockCompartment(): { compartment: Compartment; initial: Extension } {
+	const compartment = new Compartment()
+
+	return { compartment, initial: compartment.of([]) }
 }
 
 const BASIC_SETUP = { searchKeymap: false }
@@ -54,7 +68,8 @@ export function CodeMirrorSource({
 	onDirtyChange: onDirtyChangeProp,
 	contentRef,
 	onValueChange,
-	autoFocus
+	autoFocus,
+	locked
 }: CodeMirrorSourceProps) {
 	const editable = editableProp ?? false
 	const onDirtyChange = onDirtyChangeProp ?? noopDirtyChange
@@ -62,9 +77,23 @@ export function CodeMirrorSource({
 	const languageExtension = useLanguageExtension(tag)
 	// Find, replace and (in markdown) formatting, on the user's own shortcuts.
 	const editorKeymap = useEditorKeymap(tag === "markdown")
+	const [lock] = useState(lockCompartment)
+	const editorRef = useRef<ReactCodeMirrorRef>(null)
 	const extensions = languageExtension
-		? [languageExtension, EditorView.lineWrapping, editorKeymap]
-		: [EditorView.lineWrapping, editorKeymap]
+		? [languageExtension, EditorView.lineWrapping, editorKeymap, lock.initial]
+		: [EditorView.lineWrapping, editorKeymap, lock.initial]
+	const isLocked = locked === true
+
+	// A lock change on the live view; a view created while locked takes it in handleCreateEditor.
+	useEffect(() => {
+		editorRef.current?.view?.dispatch({ effects: lock.compartment.reconfigure(isLocked ? LOCKED : []) })
+	}, [lock, isLocked])
+
+	function handleCreateEditor(view: EditorView): void {
+		if (isLocked) {
+			view.dispatch({ effects: lock.compartment.reconfigure(LOCKED) })
+		}
+	}
 	const [content, setContent] = useState(text)
 	// `text` itself never changes across this component's own lifetime (a genuinely different item
 	// forces a remount, not a prop update — see the invariant above), so comparing against it directly
@@ -98,6 +127,7 @@ export function CodeMirrorSource({
 				// `height="100%"` prop below only reaches `.cm-editor`/`.cm-scroller` INSIDE that wrapper, so
 				// without this the wrapper collapses to content height and everything past the fold is
 				// unreachable. The parent `size-full` div above must already be height-bounded by the caller.
+				ref={editorRef}
 				className="size-full"
 				value={content}
 				extensions={extensions}
@@ -109,6 +139,7 @@ export function CodeMirrorSource({
 				height="100%"
 				aria-label={alt}
 				autoFocus={autoFocus ?? false}
+				onCreateEditor={handleCreateEditor}
 				// exactOptionalPropertyTypes rejects an explicit onChange={undefined} — omit the key entirely
 				// in read-only mode instead.
 				{...(editable ? { onChange: handleChange } : {})}
