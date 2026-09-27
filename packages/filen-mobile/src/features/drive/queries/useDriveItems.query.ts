@@ -23,6 +23,7 @@ import {
 import { type DrivePath, type DrivePathType, type SharedNavContext, DRIVE_PATH_TYPES } from "@/hooks/useDrivePath"
 import { linkPasswordState, linkedRootOf } from "@/features/drive/utils"
 import { ancestryHits } from "@/features/drive/clipboard"
+import { queryReadDuringOrAfterSocketGap } from "@/queries/socketSession"
 import { unwrapFileMeta, unwrapDirMeta, unwrappedDirIntoDriveItem, unwrappedFileIntoDriveItem, unwrapParentUuid } from "@/lib/sdkUnwrap"
 import { unwrapSdkError } from "@/lib/sdkErrors"
 import type { DriveItem } from "@/types"
@@ -835,31 +836,66 @@ export function driveItemsQueryIsReadForNormalParent(parentUuid: string): boolea
 	)
 }
 
-// One read of a normal directory's listing: through its query when one was read (so its screen gets the
-// fresh rows, and a read already under way is joined), else directly, leaving no listing behind.
-export async function driveItemsQueryReadForNormalParent(parentUuid: string): Promise<DriveItem[]> {
-	const own: UseDriveItemsQueryParams = { path: { type: "drive", uuid: parentUuid } }
-	const keyed: UseDriveItemsQueryParams[] = [own]
+// The current version of a file lineage in an own directory, from at most one read of that directory: the
+// listing's own read when one is under way or began since the last socket gap, a refetch of the listing when
+// it is held (its screen gets the fresh rows too), else a bare listing of which only the match is unwrapped
+// and cached. The SDK's JS surface has no by-lineage file lookup (v3/file/stable), and getFileOptional of a
+// superseded uuid answers that archived version, so one directory read is the cheapest way to see a newer one.
+export async function driveItemsQueryFindFileInNormalParent(parentUuid: string, stableUuid: string): Promise<DriveItem | undefined> {
+	const find = (items: DriveItem[]) => items.find(item => item.type === "file" && item.data.stableUuid === stableUuid)
+	const keyed: UseDriveItemsQueryParams[] = [{ path: { type: "drive", uuid: parentUuid } }]
 
 	if (cache.rootUuid && parentUuid === cache.rootUuid) {
 		keyed.push({ path: { type: "drive", uuid: null } })
 	}
 
-	const read = keyed.find(params => driveItemsQueryIsRead(params))
+	for (const params of keyed) {
+		const queryKey = driveItemsQueryKey(params)
+		const query = queryClient.getQueryCache().find<Awaited<ReturnType<typeof fetchData>>>({ queryKey, exact: true })
 
-	if (read === undefined) {
-		return await fetchData(own)
+		if (query?.state.data === undefined) {
+			continue
+		}
+
+		if (query.state.fetchStatus !== "fetching" && queryReadDuringOrAfterSocketGap(query)) {
+			return find(query.state.data)
+		}
+
+		// Joins a read under way rather than starting another.
+		return find(
+			await queryClient.fetchQuery({
+				queryKey,
+				queryFn: ({ signal }) =>
+					fetchData({
+						...params,
+						signal
+					}),
+				staleTime: 0
+			})
+		)
 	}
 
-	return await queryClient.fetchQuery({
-		queryKey: driveItemsQueryKey(read),
-		queryFn: ({ signal: querySignal }) =>
-			fetchData({
-				...read,
-				signal: querySignal
-			}),
-		staleTime: 0
-	})
+	const { authedSdkClient } = await auth.getSdkClients()
+	const dir =
+		cache.rootUuid && parentUuid === cache.rootUuid
+			? new AnyNormalDir.Root(authedSdkClient.root())
+			: cache.directoryUuidToAnyNormalDir.get(parentUuid)
+
+	if (dir === undefined) {
+		return find(await fetchData({ path: { type: "drive", uuid: parentUuid } }))
+	}
+
+	const file = (await authedSdkClient.listDir(dir)).files.find(entry => entry.stableUuid === stableUuid)
+
+	if (file === undefined) {
+		return undefined
+	}
+
+	const item = unwrappedFileIntoDriveItem(unwrapFileMeta(file))
+
+	cache.cacheNewFile(file, item)
+
+	return item
 }
 
 // Upsert many items into one normal parent's listing in a single write. The caller caches the items

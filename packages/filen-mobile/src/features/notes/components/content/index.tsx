@@ -1,7 +1,11 @@
 import { NoteType } from "@filen/sdk-rs"
 import { type Note, type NoteHistory } from "@/types"
 import View from "@/components/ui/view"
-import useNoteContentQuery, { noteContentQueryGet, noteContentQueryUpdate } from "@/features/notes/queries/useNoteContent.query"
+import useNoteContentQuery, {
+	noteContentQueryGet,
+	noteContentQueryUpdate,
+	noteContentQueryReadSinceSocketGap
+} from "@/features/notes/queries/useNoteContent.query"
 import Checklist from "@/features/notes/components/content/checklist"
 import { noteCodeTitleExtension, noteTypeToEditorType } from "@/features/notes/utils"
 import { FadeOut } from "react-native-reanimated"
@@ -27,6 +31,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context"
 import { useHeaderHeight } from "expo-router/react-navigation"
 import useIsOnline from "@/hooks/useIsOnline"
 import { onSocketReconnected } from "@/stores/useSocket.store"
+import { whenUnlockedForeground } from "@/lib/unlockedForeground"
 import { notesQueryGet } from "@/features/notes/queries/useNotesQuery"
 import logger from "@/lib/logger"
 import { noteDisplayTitle } from "@/lib/decryption"
@@ -147,6 +152,13 @@ const Loading = ({ children, loading, noteType }: { children: React.ReactNode; l
 			{children}
 		</View>
 	)
+}
+
+// A toast waits for the app to be in front and unlocked, never drawing over the biometric lock.
+function notifyWhenUnlocked(message: string): void {
+	void whenUnlockedForeground().then(() => {
+		alerts.normal(message)
+	})
 }
 
 function getInflightContentForNote(noteUuid: string): InflightContent[string] | undefined {
@@ -395,12 +407,17 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 	// and say so. Unsynced edits: ask Keep mine (also what dismissing does), Load theirs, or Save mine as
 	// copy, a new note beside this one.
 	const answerRemoteContent = useCallback(
-		async (content: string | undefined) => {
+		async (content: string | undefined, superseded: () => boolean) => {
 			if (history) {
 				return
 			}
 
 			if (content !== undefined && content === latestLocalNoteContent(note.uuid)) {
+				return
+			}
+
+			// Already answered: the unsynced edits were kept over exactly this content.
+			if (content !== undefined && newestInflightEntry(note.uuid)?.baseContentHash === hashNoteContent(content)) {
 				return
 			}
 
@@ -418,7 +435,7 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 					})
 				}
 
-				alerts.normal(t("remote_change_updated"))
+				notifyWhenUnlocked(t("remote_change_updated"))
 
 				return
 			}
@@ -428,6 +445,13 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 			const held = sync.hold(note.uuid)
 
 			try {
+				// The native alert, note title and all, would draw over the biometric lock.
+				await whenUnlockedForeground()
+
+				if (superseded()) {
+					return
+				}
+
 				const promptResponse = await run(async () => {
 					return await prompts.confirm3({
 						title: t("note_edited"),
@@ -510,7 +534,7 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 						return
 					}
 
-					alerts.normal(t("note_saved_as_copy", { title }))
+					notifyWhenUnlocked(t("note_saved_as_copy", { title }))
 				}
 
 				await reloadFromServer()
@@ -561,16 +585,20 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 				})
 		}
 
+		// A pass that finds an edit made elsewhere under unsynced edits hands it here instead of pushing.
+		const detachEditor = sync.attachEditor(uuid)
+
 		const noteContentEditedSubscription = events.subscribe("noteContentEdited", info => {
 			if (info.noteUuid !== uuid) {
 				return
 			}
 
 			const sequence = ++queue.latest
+			const superseded = () => sequence !== queue.latest
 
 			enqueue(async () => {
-				if (sequence === queue.latest) {
-					await answerRemoteContentRef.current(info.content)
+				if (!superseded()) {
+					await answerRemoteContentRef.current(info.content, superseded)
 				}
 			})
 		})
@@ -579,13 +607,25 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 		// elsewhere reached no event: read the content once and answer it like one when it moved past the base.
 		const unsubscribeReconnected = onSocketReconnected(() => {
 			const sequence = queue.latest
+			const superseded = () => sequence !== queue.latest
 
 			enqueue(async () => {
+				// The content query's own read since the gap (a reconnect refetch of a clean note) already
+				// brought the note up to date.
+				if (noteContentQueryReadSinceSocketGap({ uuid })) {
+					return
+				}
+
 				// No pass pushes under the read, so a difference is someone else's edit, never this device's push.
 				const held = sync.hold(uuid)
 
 				try {
 					await held.settled
+
+					// A pass that ran meanwhile handed its finding over, and that answers after this.
+					if (superseded()) {
+						return
+					}
 
 					const read = await run(async () =>
 						notes.getContent({ note: notesQueryGet()?.find(listed => listed.uuid === uuid) ?? note })
@@ -598,11 +638,11 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 					}
 
 					// An event arrived since, and answers after this.
-					if (read.data === undefined || sequence !== queue.latest || !movedPastBase(uuid, read.data)) {
+					if (read.data === undefined || superseded() || !movedPastBase(uuid, read.data)) {
 						return
 					}
 
-					await answerRemoteContentRef.current(read.data)
+					await answerRemoteContentRef.current(read.data, superseded)
 				} finally {
 					held.release()
 				}
@@ -610,6 +650,7 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 		})
 
 		return () => {
+			detachEditor()
 			noteContentEditedSubscription.remove()
 			unsubscribeReconnected()
 		}

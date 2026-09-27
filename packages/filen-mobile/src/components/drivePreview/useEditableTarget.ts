@@ -4,21 +4,45 @@ import { useShallow } from "zustand/shallow"
 import { AnyDirWithContext } from "@filen/sdk-rs"
 import { getRealDriveItemParent, unwrapDirMeta, unwrappedDirIntoDriveItem, unwrapParentUuid } from "@/lib/sdkUnwrap"
 import { galleryItemKey, type GalleryItemTagged } from "@/components/drivePreview/gallery"
+import { galleryItemFollowing } from "@/components/drivePreview/galleryRenderName"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
+import { onSocketReconnected } from "@/stores/useSocket.store"
 import cache from "@/lib/cache"
 import auth from "@/lib/auth"
 import events from "@/lib/events"
 import logger from "@/lib/logger"
 import type { DriveItemFileExtracted } from "@/types"
 
+type Parent = AnyDirWithContext | "sharedInRoot" | null
+
 export type EditableTarget = {
 	/** The file to write back to — the freshly uploaded one once a save has happened, else the original. */
 	itemToUse: DriveItemFileExtracted | null
-	parent: AnyDirWithContext | "sharedInRoot" | null
+	/** The directory to write into, null while an own file's directory is not yet known (resolveParent). */
+	parent: Parent
+	/** The directory to write into, looked up now when it is not yet known. */
+	resolveParent: () => Promise<Parent>
 	/** True when this preview must not offer to write anything back. */
 	readOnly: boolean
 	/** Records the replacement produced by a save, and republishes the rotated identity. */
 	applySaved: (newItem: DriveItemFileExtracted) => void
+}
+
+// Looks an own directory up by uuid and caches it: a file opened from a directory listing has its parent
+// cached, a search hit or a file moved elsewhere into an unlisted directory may not.
+async function warmParent(parentUuid: string, signal?: AbortSignal): Promise<AnyDirWithContext | null> {
+	const { authedSdkClient } = await auth.getSdkClients()
+	const dir = await authedSdkClient.getDirOptional(parentUuid, signal ? { signal } : undefined)
+
+	if (!dir || signal?.aborted) {
+		return null
+	}
+
+	cache.cacheNewNormalDir(dir, unwrappedDirIntoDriveItem(unwrapDirMeta(dir)))
+
+	const normalDir = cache.directoryUuidToAnyNormalDir.get(parentUuid)
+
+	return normalDir ? new AnyDirWithContext.Normal(normalDir) : null
 }
 
 /**
@@ -31,11 +55,10 @@ export type EditableTarget = {
 export default function useEditableTarget(item: GalleryItemTagged): EditableTarget {
 	const drivePath = useDrivePreviewStore(useShallow(state => state.drivePath))
 	const [itemEdited, setItemEdited] = useRecyclingState<DriveItemFileExtracted | null>(null, [galleryItemKey(item)])
-	// Parent directory resolved by the background warm below for a cross-directory search hit whose
-	// parent isn't cached. Preferred over reading the cache directly so `readOnly` recomputes the
-	// moment the warm lands — the React Compiler memoizes `parent`, and getRealDriveItemParent reads a
-	// non-reactive Map. Kept with the uuid it is for: a move elsewhere changes the file's parent under
-	// the same key.
+	// Parent directory resolved by the warm below. Preferred over reading the cache directly so `parent`
+	// recomputes the moment the warm lands — the React Compiler memoizes it, and getRealDriveItemParent
+	// reads a non-reactive Map. Kept with the uuid it is for: a move elsewhere changes the file's parent
+	// under the same key.
 	const [warmedParent, setWarmedParent] = useRecyclingState<{ uuid: string; dir: AnyDirWithContext } | null>(null, [galleryItemKey(item)])
 	const parentUuid = item.type === "drive" && item.data.type === "file" ? unwrapParentUuid(item.data.data.parent) : null
 
@@ -48,8 +71,8 @@ export default function useEditableTarget(item: GalleryItemTagged): EditableTarg
 				})
 			: null)
 
-	// Warm the parent-directory cache for a deep search result: editability needs the parent dir in
-	// cache, and a file opened from a directory listing already has it while a search hit may not.
+	// Warm the parent-directory cache for an own file whose directory is not cached (a deep search hit, a
+	// move elsewhere into a directory not listed yet), again after a socket gap if it failed.
 	useEffect(() => {
 		// Only the plain-drive `file` case: shared files resolve their parent from a different cache,
 		// and only `file` carries a parent uuid.
@@ -63,44 +86,41 @@ export default function useEditableTarget(item: GalleryItemTagged): EditableTarg
 			cache.cacheDriveItem(item.data)
 		}
 
-		const parentUuid = unwrapParentUuid(item.data.data.parent)
-
+		const uuid = unwrapParentUuid(item.data.data.parent)
 		// A root parent resolves without the cache, and an already-cached parent needs no warm.
-		if (!parentUuid || (cache.rootUuid && parentUuid === cache.rootUuid) || cache.directoryUuidToAnyNormalDir.get(parentUuid)) {
+		const needed = () => uuid !== null && !(cache.rootUuid && uuid === cache.rootUuid) && !cache.directoryUuidToAnyNormalDir.get(uuid)
+
+		if (uuid === null || !needed()) {
 			return
 		}
 
 		const controller = new AbortController()
 
-		;(async () => {
-			try {
-				const { authedSdkClient } = await auth.getSdkClients()
-				const dir = await authedSdkClient.getDirOptional(parentUuid, {
-					signal: controller.signal
+		const warm = () => {
+			warmParent(uuid, controller.signal)
+				.then(dir => {
+					if (dir && !controller.signal.aborted) {
+						setWarmedParent({ uuid, dir })
+					}
 				})
-
-				if (!dir || controller.signal.aborted) {
-					return
-				}
-
-				const dirItem = unwrappedDirIntoDriveItem(unwrapDirMeta(dir))
-
-				cache.cacheNewNormalDir(dir, dirItem)
-
-				const normalDir = cache.directoryUuidToAnyNormalDir.get(parentUuid)
-
-				if (normalDir && !controller.signal.aborted) {
-					setWarmedParent({ uuid: parentUuid, dir: new AnyDirWithContext.Normal(normalDir) })
-				}
-			} catch (e) {
-				logger.warn("drivePreview", "Failed to warm parent directory for preview", {
-					error: e
+				.catch((e: unknown) => {
+					logger.warn("drivePreview", "Failed to warm parent directory for preview", {
+						error: e
+					})
 				})
+		}
+
+		warm()
+
+		const unsubscribeReconnected = onSocketReconnected(() => {
+			if (needed()) {
+				warm()
 			}
-		})()
+		})
 
 		return () => {
 			controller.abort()
+			unsubscribeReconnected()
 		}
 	}, [item, setWarmedParent])
 
@@ -115,14 +135,31 @@ export default function useEditableTarget(item: GalleryItemTagged): EditableTarg
 				: item.data
 			: null
 
+	// An own file stays writable while its directory is being looked up: read-only there would also disarm
+	// the unsaved-edits guard over edits already typed. The save resolves the directory itself.
 	const readOnly =
 		!itemToUse || item.type !== "drive"
 			? true
-			: itemToUse.type !== "file" || !itemToUse.data.decryptedMeta || !parent || parent === "sharedInRoot"
+			: itemToUse.type !== "file" ||
+				!itemToUse.data.decryptedMeta ||
+				(parent === null ? parentUuid === null : parent === "sharedInRoot")
 
 	return {
 		itemToUse,
 		parent,
+		resolveParent: async () => {
+			if (parent !== null || parentUuid === null) {
+				return parent
+			}
+
+			const dir = await warmParent(parentUuid)
+
+			if (dir) {
+				setWarmedParent({ uuid: parentUuid, dir })
+			}
+
+			return dir
+		},
 		readOnly,
 		applySaved: (newItem: DriveItemFileExtracted) => {
 			// An upload rotates the uuid because the content changed. The new item is already cached by
@@ -132,10 +169,7 @@ export default function useEditableTarget(item: GalleryItemTagged): EditableTarg
 
 			setItemEdited(newItem)
 
-			useDrivePreviewStore.getState().setCurrentItem({
-				type: "drive",
-				data: newItem
-			})
+			useDrivePreviewStore.getState().setCurrentItem(galleryItemFollowing(item, newItem))
 
 			if (!oldUuid) {
 				return

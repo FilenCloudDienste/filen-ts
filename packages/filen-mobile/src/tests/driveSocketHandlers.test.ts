@@ -531,6 +531,24 @@ describe("handleDriveEvent — drive socket handler", () => {
 			expect(result[0]?.data.uuid).toBe("other")
 		})
 
+		it("FileRestore tells an open editor its file is back", async () => {
+			mockUnwrapFileMeta.mockReturnValue({ file: { uuid: "file-restore" }, meta: { name: "file.txt" } })
+			mockUnwrappedFileIntoDriveItem.mockReturnValue({ type: "file", data: { uuid: "file-restore" } })
+
+			const restored: unknown[] = []
+			const subscription = events.subscribe("driveFileRestored", payload => {
+				restored.push(payload)
+			})
+
+			await handleDriveEvent({
+				event: makeFileWithParentEvent(DriveEvent_Tags.FileRestore, { uuid: "file-restore", parent: {}, meta: {} })
+			})
+
+			subscription.remove()
+
+			expect(restored).toEqual([{ uuid: "file-restore" }])
+		})
+
 		it("FileArchiveRestored: adds item to parent but does NOT touch trash query", async () => {
 			mockUnwrapFileMeta.mockReturnValue({
 				file: { uuid: "file-archived", meta: null },

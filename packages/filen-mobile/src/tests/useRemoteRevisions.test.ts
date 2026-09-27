@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, renderHook } from "@testing-library/react"
 import { EventEmitter } from "eventemitter3"
 
-const { emitter, confirm3, alertNormal, alertError, currentItem, setHasUnsavedEdits, findItemInDir, readListing, getFileOptional } =
+const { emitter, confirm3, alertNormal, alertError, currentItem, setHasUnsavedEdits, findItemInDir, findFile, unlocked, getFileOptional } =
 	vi.hoisted(() => ({
 		emitter: { current: null as EventEmitter | null },
 		confirm3: vi.fn<() => Promise<"primary" | "destructive" | "cancel">>(),
@@ -12,7 +12,8 @@ const { emitter, confirm3, alertNormal, alertError, currentItem, setHasUnsavedEd
 		currentItem: { current: null as unknown },
 		setHasUnsavedEdits: vi.fn(),
 		findItemInDir: vi.fn(),
-		readListing: vi.fn<(parentUuid: string) => Promise<unknown[]>>(),
+		findFile: vi.fn<(parentUuid: string, stableUuid: string) => Promise<unknown>>(),
+		unlocked: { current: Promise.resolve() as Promise<void> },
 		getFileOptional: vi.fn<(uuid: string) => Promise<unknown>>()
 	}))
 
@@ -31,7 +32,8 @@ vi.mock("@/lib/alerts", () => ({ default: { normal: alertNormal, error: alertErr
 vi.mock("@/lib/auth", () => ({
 	default: { getSdkClients: () => Promise.resolve({ authedSdkClient: { findItemInDir, getFileOptional } }) }
 }))
-vi.mock("@/features/drive/queries/useDriveItems.query", () => ({ driveItemsQueryReadForNormalParent: readListing }))
+vi.mock("@/features/drive/queries/useDriveItems.query", () => ({ driveItemsQueryFindFileInNormalParent: findFile }))
+vi.mock("@/lib/unlockedForeground", () => ({ whenUnlockedForeground: () => unlocked.current }))
 // Raw files here carry their parent as a plain uuid, "trash" for the trash.
 vi.mock("@/lib/sdkUnwrap", () => ({
 	unwrapParentUuid: (parent: string) => (parent === "trash" ? null : parent),
@@ -90,7 +92,7 @@ function mount({
 			useRemoteRevisions({
 				item: galleryItem("v1"),
 				itemToUse: file("v1"),
-				parent: parent as never,
+				resolveParent: () => Promise.resolve(parent as never),
 				hasEdits: edits,
 				savingRef,
 				saveAsNewFile: saveAsNewFile as never
@@ -125,6 +127,7 @@ async function flush(): Promise<void> {
 beforeEach(() => {
 	emitter.current = new EventEmitter()
 	vi.clearAllMocks()
+	unlocked.current = Promise.resolve()
 	useSocketStore.setState({ state: "connected", connectedAt: 1 })
 })
 
@@ -134,12 +137,13 @@ afterEach(() => {
 })
 
 describe("useRemoteRevisions", () => {
-	it("follows a newer version of a clean file, and says so", () => {
+	it("follows a newer version of a clean file, and says so", async () => {
 		const { updated } = mount({ hasEdits: false })
 
 		act(() => {
 			emitter.current?.emit("driveFileRevised", { item: file("v2") })
 		})
+		await flush()
 
 		expect(updated).toHaveBeenCalledWith({ previousUuid: "v1", item: file("v2") })
 		expect(alertNormal).toHaveBeenCalledWith("remote_change_updated")
@@ -197,7 +201,7 @@ describe("useRemoteRevisions", () => {
 		expect(alertNormal).not.toHaveBeenCalled()
 	})
 
-	it("reports a version its save went over, and follows one saved after it", () => {
+	it("reports a version its save went over, and follows one saved after it", async () => {
 		const { hook, savingRef, updated } = mount({ hasEdits: true })
 
 		savingRef.current = true
@@ -211,6 +215,7 @@ describe("useRemoteRevisions", () => {
 		act(() => {
 			hook.result.current.saveSettled(file("mine"))
 		})
+		await flush()
 
 		expect(alertNormal).toHaveBeenCalledWith("remote_change_save_replaced")
 		expect(updated).toHaveBeenCalledWith({ previousUuid: "mine", item: file("later") })
@@ -380,7 +385,7 @@ describe("useRemoteRevisions", () => {
 		expect(updated).not.toHaveBeenCalled()
 	})
 
-	it("announces a version saved after this editor's own save, which the gallery now shows", () => {
+	it("announces a version saved after this editor's own save, which the gallery now shows", async () => {
 		const { hook, savingRef, updated } = mount({ hasEdits: true })
 
 		savingRef.current = true
@@ -393,6 +398,7 @@ describe("useRemoteRevisions", () => {
 		act(() => {
 			hook.result.current.saveSettled(file("mine"))
 		})
+		await flush()
 
 		expect(updated).toHaveBeenCalledWith({ previousUuid: "mine", item: file("later") })
 		expect(alertNormal).toHaveBeenCalledWith("remote_change_updated")
@@ -460,22 +466,22 @@ describe("useRemoteRevisions", () => {
 	})
 
 	it("after a socket gap, follows a newer version found in the file's directory, with one listing read", async () => {
-		readListing.mockResolvedValue([file("other-file", { name: "other.md", stableUuid: "other" }), file("v2")])
+		findFile.mockResolvedValue(file("v2"))
 
 		const { updated } = mount({ hasEdits: false })
 
 		socketReconnected()
 		await flush()
 
-		expect(readListing).toHaveBeenCalledTimes(1)
-		expect(readListing).toHaveBeenCalledWith("dir")
+		expect(findFile).toHaveBeenCalledTimes(1)
+		expect(findFile).toHaveBeenCalledWith("dir", "lineage")
 		expect(getFileOptional).not.toHaveBeenCalled()
 		expect(updated).toHaveBeenCalledWith({ previousUuid: "v1", item: file("v2") })
 		expect(alertNormal).toHaveBeenCalledWith("remote_change_updated")
 	})
 
 	it("after a socket gap, asks over unsaved edits about a newer version", async () => {
-		readListing.mockResolvedValue([file("v2")])
+		findFile.mockResolvedValue(file("v2"))
 		confirm3.mockResolvedValue("cancel")
 
 		mount({ hasEdits: true })
@@ -487,7 +493,7 @@ describe("useRemoteRevisions", () => {
 	})
 
 	it("after a socket gap, follows a rename", async () => {
-		readListing.mockResolvedValue([file("v1", { name: "renamed.md" })])
+		findFile.mockResolvedValue(file("v1", { name: "renamed.md" }))
 
 		const { updated } = mount({ hasEdits: true })
 
@@ -499,7 +505,7 @@ describe("useRemoteRevisions", () => {
 	})
 
 	it("after a socket gap, asks over unsaved edits when the file was trashed", async () => {
-		readListing.mockResolvedValue([])
+		findFile.mockResolvedValue(undefined)
 		getFileOptional.mockResolvedValue((file("v1", { parent: "trash" }) as { data: unknown }).data)
 		confirm3.mockResolvedValue("cancel")
 
@@ -513,7 +519,7 @@ describe("useRemoteRevisions", () => {
 	})
 
 	it("after a socket gap, follows a move to another directory", async () => {
-		readListing.mockResolvedValue([])
+		findFile.mockResolvedValue(undefined)
 		getFileOptional.mockResolvedValue((file("v1", { parent: "elsewhere" }) as { data: unknown }).data)
 
 		const { updated } = mount({ hasEdits: true })
@@ -526,15 +532,15 @@ describe("useRemoteRevisions", () => {
 	})
 
 	it("after a socket gap, drops a listing read that a revision event overtook", async () => {
-		const listing = deferred<unknown[]>()
+		const listing = deferred<unknown>()
 
-		readListing.mockReturnValue(listing.promise)
+		findFile.mockReturnValue(listing.promise)
 
 		const { updated } = mount({ hasEdits: false })
 
 		socketReconnected()
 		emit("driveFileRevised", { item: file("v3") })
-		listing.resolve([file("v2")])
+		listing.resolve(file("v2"))
 		await flush()
 
 		expect(updated).toHaveBeenCalledTimes(1)
@@ -551,6 +557,69 @@ describe("useRemoteRevisions", () => {
 		socketReconnected()
 		await flush()
 
-		expect(readListing).not.toHaveBeenCalled()
+		expect(findFile).not.toHaveBeenCalled()
+	})
+
+	it("asks only once the app is unlocked and in front, and toasts no earlier", async () => {
+		const unlock = deferred<undefined>()
+
+		unlocked.current = unlock.promise
+		confirm3.mockResolvedValue("cancel")
+
+		mount({ hasEdits: true })
+		emit("driveFileRevised", { item: file("v2") })
+		await flush()
+
+		expect(confirm3).not.toHaveBeenCalled()
+
+		unlock.resolve(undefined)
+		await flush()
+
+		expect(confirm3).toHaveBeenCalledTimes(1)
+	})
+
+	it("a clean editor follows at once, and says so once unlocked", async () => {
+		const unlock = deferred<undefined>()
+
+		unlocked.current = unlock.promise
+
+		const { updated } = mount({ hasEdits: false })
+
+		emit("driveFileRevised", { item: file("v2") })
+		await flush()
+
+		expect(updated).toHaveBeenCalledTimes(1)
+		expect(alertNormal).not.toHaveBeenCalled()
+
+		unlock.resolve(undefined)
+		await flush()
+
+		expect(alertNormal).toHaveBeenCalledWith("remote_change_updated")
+	})
+
+	it("forgets a deletion while clean once the file is restored from the trash", async () => {
+		const { hook } = mount({ hasEdits: false })
+
+		emit("driveFileGone", { uuid: "v1" })
+		emit("driveFileRestored", { uuid: "v1" })
+		hook.rerender({ edits: true })
+		await flush()
+
+		expect(confirm3).not.toHaveBeenCalled()
+	})
+
+	it("drops a deletion prompt still waiting for the unlock once the file is restored", async () => {
+		const unlock = deferred<undefined>()
+
+		unlocked.current = unlock.promise
+
+		mount({ hasEdits: true })
+		emit("driveFileGone", { uuid: "v1" })
+		await flush()
+		emit("driveFileRestored", { uuid: "v1" })
+		unlock.resolve(undefined)
+		await flush()
+
+		expect(confirm3).not.toHaveBeenCalled()
 	})
 })

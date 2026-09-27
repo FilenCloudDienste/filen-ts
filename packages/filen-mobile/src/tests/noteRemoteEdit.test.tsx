@@ -8,22 +8,26 @@ import { vi, describe, it, expect, beforeEach, afterEach } from "vitest"
 import { EventEmitter } from "eventemitter3"
 vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 
-const { emitter, state, confirm3, refetch, contentUpdate, hold, release, settled, syncDebounced, getContent, editor } = vi.hoisted(() => ({
-	emitter: { current: null as EventEmitter | null },
-	state: {
-		inflight: {} as Record<string, { timestamp: number; content: string; note: unknown; baseContentHash?: string }[]>,
-		cached: "old" as string | undefined
-	},
-	getContent: vi.fn<() => Promise<string | undefined>>(),
-	editor: { onValueChange: null as ((value: string) => Promise<void>) | null },
-	confirm3: vi.fn<() => Promise<"primary" | "destructive" | "cancel">>(),
-	refetch: vi.fn(() => Promise.resolve({})),
-	contentUpdate: vi.fn(),
-	hold: vi.fn(),
-	release: vi.fn(),
-	settled: { current: Promise.resolve() },
-	syncDebounced: vi.fn()
-}))
+const { emitter, state, confirm3, refetch, contentUpdate, hold, release, settled, syncDebounced, getContent, editor, attachEditor } =
+	vi.hoisted(() => ({
+		emitter: { current: null as EventEmitter | null },
+		state: {
+			inflight: {} as Record<string, { timestamp: number; content: string; note: unknown; baseContentHash?: string }[]>,
+			cached: "old" as string | undefined,
+			readSinceGap: false,
+			unlocked: Promise.resolve() as Promise<void>
+		},
+		getContent: vi.fn<() => Promise<string | undefined>>(),
+		attachEditor: vi.fn(() => () => undefined),
+		editor: { onValueChange: null as ((value: string) => Promise<void>) | null },
+		confirm3: vi.fn<() => Promise<"primary" | "destructive" | "cancel">>(),
+		refetch: vi.fn(() => Promise.resolve({})),
+		contentUpdate: vi.fn(),
+		hold: vi.fn(),
+		release: vi.fn(),
+		settled: { current: Promise.resolve() },
+		syncDebounced: vi.fn()
+	}))
 
 vi.mock("@filen/sdk-rs", () => ({
 	NoteType: {
@@ -57,14 +61,17 @@ vi.mock("@/features/notes/checklistView", () => ({ useChecklistHideCompleted: ()
 vi.mock("@/features/notes/queries/useNoteContent.query", () => ({
 	default: () => ({ isFetching: false, isPending: false, isError: false, dataUpdatedAt: 1, refetch }),
 	noteContentQueryGet: () => state.cached,
-	noteContentQueryUpdate: contentUpdate
+	noteContentQueryUpdate: contentUpdate,
+	noteContentQueryReadSinceSocketGap: () => state.readSinceGap
 }))
+vi.mock("@/lib/unlockedForeground", () => ({ whenUnlockedForeground: () => state.unlocked }))
 vi.mock("@/features/notes/components/sync", async () => ({
 	sync: {
 		flushToDisk: () => Promise.resolve(true),
 		clearRejections: vi.fn(),
 		syncDebounced,
-		hold
+		hold,
+		attachEditor
 	},
 	hashNoteContent: (content: string) => `h(${content})`,
 	buildInflightEntries: (await vi.importActual<typeof import("@filen/shared")>("@filen/shared")).buildInflightEntries
@@ -155,10 +162,13 @@ beforeEach(() => {
 	emitter.current = new EventEmitter()
 	state.inflight = {}
 	state.cached = "old"
+	state.readSinceGap = false
+	state.unlocked = Promise.resolve()
 	settled.current = Promise.resolve()
 	vi.clearAllMocks()
 	useSocketStore.setState({ state: "connected", connectedAt: 1 })
 	hold.mockImplementation(() => ({ settled: settled.current, release }))
+	attachEditor.mockImplementation(() => () => undefined)
 	render(createElement(Content, { note }))
 })
 
@@ -358,5 +368,64 @@ describe("a note edited elsewhere while open", () => {
 		await flush()
 
 		expect(confirm3).not.toHaveBeenCalled()
+	})
+
+	it("registers as the note's editor, so a pass hands it an edit found under unsynced edits", () => {
+		expect(attachEditor).toHaveBeenCalledWith("n1")
+	})
+
+	it("asks only once the app is unlocked and in front, and toasts no earlier", async () => {
+		let unlock: () => void = () => undefined
+
+		state.unlocked = new Promise(resolve => (unlock = resolve))
+		state.inflight = { n1: [{ timestamp: 1, content: "mine", note, baseContentHash: "h(old)" }] }
+		confirm3.mockResolvedValue("cancel")
+
+		edited("theirs")
+		await flush()
+
+		expect(hold).toHaveBeenCalledWith("n1")
+		expect(confirm3).not.toHaveBeenCalled()
+
+		unlock()
+		await flush()
+
+		expect(confirm3).toHaveBeenCalledTimes(1)
+	})
+
+	it("a clean note takes theirs at once and says so once unlocked", async () => {
+		let unlock: () => void = () => undefined
+
+		state.unlocked = new Promise(resolve => (unlock = resolve))
+
+		edited("theirs")
+		await flush()
+
+		expect(contentUpdate).toHaveBeenCalledWith({ params: { uuid: "n1" }, updater: "theirs" })
+		expect(alerts.normal).not.toHaveBeenCalled()
+
+		unlock()
+		await flush()
+
+		expect(alerts.normal).toHaveBeenCalledWith("remote_change_updated")
+	})
+
+	it("never asks twice about content the unsynced edits were already kept over", async () => {
+		state.inflight = { n1: [{ timestamp: 1, content: "mine", note, baseContentHash: "h(theirs)" }] }
+
+		edited("theirs")
+		await flush()
+
+		expect(confirm3).not.toHaveBeenCalled()
+	})
+
+	it("after a socket gap, reuses the content query's own read instead of reading again", async () => {
+		state.readSinceGap = true
+
+		socketReconnected()
+		await flush()
+
+		expect(getContent).not.toHaveBeenCalled()
+		expect(hold).not.toHaveBeenCalled()
 	})
 })

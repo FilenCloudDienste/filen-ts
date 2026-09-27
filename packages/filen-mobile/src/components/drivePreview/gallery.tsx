@@ -14,9 +14,9 @@ import { useSharedValue, useAnimatedStyle, type SharedValue, withSpring, interpo
 import { type DrivePath } from "@/hooks/useDrivePath"
 import GalleryHeader from "@/components/drivePreview/header"
 import GalleryItem from "@/components/drivePreview/galleryItem"
+import { galleryItemFollowing, galleryItemRenderName } from "@/components/drivePreview/galleryRenderName"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
 import events from "@/lib/events"
-import { driveItemDisplayName } from "@/lib/decryption"
 import { runOnJS } from "react-native-worklets"
 import { useShallow } from "zustand/shallow"
 import * as ScreenOrientation from "expo-screen-orientation"
@@ -101,6 +101,8 @@ export type GalleryItemTagged =
 	| {
 			type: "drive"
 			data: DriveItemFileExtracted
+			// The name the page opened with, once the file it shows was renamed or replaced (galleryRenderName.ts).
+			openedName?: string
 	  }
 	| {
 			type: "external"
@@ -492,9 +494,7 @@ const Gallery = () => {
 				}
 			}
 
-			const previewType = getPreviewType(
-				state.currentItem.type === "drive" ? driveItemDisplayName(state.currentItem.data) : state.currentItem.data.name
-			)
+			const previewType = getPreviewType(galleryItemRenderName(state.currentItem))
 
 			return {
 				isImage: isImagePreviewType(previewType),
@@ -625,20 +625,21 @@ const Gallery = () => {
 				return
 			}
 
-			const replacement: GalleryItemTagged = {
-				type: "drive",
-				data: item
-			}
-
 			useDrivePreviewStore
 				.getState()
 				.setCurrentItems(prev =>
-					prev.map(existing => (existing.type === "drive" && existing.data.data.uuid === previousUuid ? replacement : existing))
+					prev.map(existing =>
+						existing.type === "drive" && existing.data.data.uuid === previousUuid
+							? galleryItemFollowing(existing, item)
+							: existing
+					)
 				)
 
 			useDrivePreviewStore
 				.getState()
-				.setCurrentItem(prev => (prev && prev.type === "drive" && prev.data.data.uuid === previousUuid ? replacement : prev))
+				.setCurrentItem(prev =>
+					prev && prev.type === "drive" && prev.data.data.uuid === previousUuid ? galleryItemFollowing(prev, item) : prev
+				)
 		})
 
 		// A blocked pop (unsaved-changes guard: Cancel, or a failed save) leaves the route

@@ -25,6 +25,7 @@ import { noteContentQueryUpdate, noteContentQueryDataUpdatedAt } from "@/feature
 import { unwrapSdkError } from "@/lib/sdkErrors"
 import { ErrorKind } from "@filen/sdk-rs"
 import logger from "@/lib/logger"
+import events from "@/lib/events"
 
 // D3/#41/M1: content hash, disk-restore merge, and the monotonic-timestamp entry builder now live in
 // a shared module (web's outbox uses the identical algorithms). Re-exported here so every existing
@@ -38,12 +39,14 @@ export { hashNoteContent, mergeInflight, buildInflightEntries }
 // non-network, non-auth SDK rejections for the same note do we discard its inflight content.
 export { MAX_NON_RETRYABLE_REJECTIONS }
 
-// Whether the note's outbox still holds this exact entry, base included.
-function isEntryCurrent(noteUuid: string, entry: InflightContent[string][number]): boolean {
-	return (useNotesInflightStore.getState().inflightContent[noteUuid] ?? []).some(
-		current =>
-			current.timestamp === entry.timestamp && current.content === entry.content && current.baseContentHash === entry.baseContentHash
+// The note's newest outbox entry, when it was typed on `base` (none left, or rebased: undefined).
+function newestEntryOnBase(noteUuid: string, base: string): InflightContent[string][number] | undefined {
+	const newest = (useNotesInflightStore.getState().inflightContent[noteUuid] ?? []).reduce<InflightContent[string][number] | undefined>(
+		(latest, entry) => (latest === undefined || entry.timestamp > latest.timestamp ? entry : latest),
+		undefined
 	)
+
+	return newest?.baseContentHash === base ? newest : undefined
 }
 
 export class Sync {
@@ -69,6 +72,8 @@ export class Sync {
 	private readonly holds: Map<string, number> = new Map<string, number>()
 	// Each note the running pass is working on, from its conflict peek until its push is recorded.
 	private readonly passes: Map<string, Promise<void>> = new Map<string, Promise<void>>()
+	// Notes open in an editor, by editor count: one of them answers an edit made elsewhere that a pass finds.
+	private readonly editors: Map<string, number> = new Map<string, number>()
 
 	public constructor() {
 		this.initPromise = new Promise(resolve => {
@@ -97,6 +102,30 @@ export class Sync {
 	// dropping a fresh edit after a single failure instead of MAX_NON_RETRYABLE_REJECTIONS.
 	public clearRejections(noteUuid: string): void {
 		this.nonRetryableRejections.delete(noteUuid)
+	}
+
+	// The note is open in an editor until the returned detach(), which answers edits made elsewhere that a
+	// pass's conflict peek finds (noteContentEdited) instead of the pass pushing over them.
+	public attachEditor(noteUuid: string): () => void {
+		this.editors.set(noteUuid, (this.editors.get(noteUuid) ?? 0) + 1)
+
+		let detached = false
+
+		return () => {
+			if (detached) {
+				return
+			}
+
+			detached = true
+
+			const count = (this.editors.get(noteUuid) ?? 1) - 1
+
+			if (count > 0) {
+				this.editors.set(noteUuid, count)
+			} else {
+				this.editors.delete(noteUuid)
+			}
+		}
 	}
 
 	// Keeps passes off a note until release(). `settled` resolves once a pass already working on it (its
@@ -381,7 +410,7 @@ export class Sync {
 	// One note's share of a pass: its conflict peek, then its push. Registered in `passes` by the caller.
 	private async pushNote(
 		noteUuid: string,
-		mostRecentContent: InflightContent[string][number],
+		snapshot: InflightContent[string][number],
 		signal: AbortSignal,
 		toastedConflicts: Set<string>
 	): Promise<void> {
@@ -391,7 +420,54 @@ export class Sync {
 		// are reflected in the setContent call. Fall back to the snapshot
 		// if the note is no longer in the cache (e.g. concurrently deleted).
 		const cachedNotes = notesQueryGet()
-		const liveNote = cachedNotes?.find(n => n.uuid === noteUuid) ?? mostRecentContent.note
+		const liveNote = cachedNotes?.find(n => n.uuid === noteUuid) ?? snapshot.note
+
+		// D3: conflict DETECTION, never prevention — local edits win and the push below
+		// goes out (user decision: no blocking), except for a note open in an editor,
+		// whose user is asked instead, as over an edit the socket reported. When
+		// the entry carries its session's base hash, peek at the note's current cloud
+		// content first: if the cloud moved past our base AND past what we are about
+		// to write, this push buries someone else's newer work in the note's history,
+		// and the user must hear about it once — a silent overwrite ("users won't
+		// know history has it") is the failure being prevented. Entries WITHOUT a
+		// base hash (persisted by older app versions) push unchecked — a one-time
+		// grace instead of migration machinery. A failed peek also pushes unchecked:
+		// availability beats the toast.
+		let mostRecentContent = snapshot
+		// What the peek read (undecryptable reads as ""), undefined when there was no peek or it failed.
+		let cloudContent: string | undefined
+		let cloudDecrypted = false
+
+		if (snapshot.baseContentHash !== undefined) {
+			try {
+				const peeked = await notes.getContent({ note: liveNote, signal })
+
+				cloudContent = peeked ?? ""
+				cloudDecrypted = typeof peeked === "string"
+			} catch (e) {
+				// Availability beats the toast — push without the check.
+				logger.warn("notes-sync", "conflict-detection peek failed; pushing without overwrite check", {
+					noteUuid,
+					error: e
+				})
+			}
+
+			// A prompt opened during the peek.
+			if (this.holds.has(noteUuid)) {
+				return
+			}
+
+			// Its answer, or typing, may have changed the outbox meanwhile. Typing on the same base leaves the
+			// peek valid, so the newest entry goes out; a discard (Load theirs) or a rebase (Keep mine) leaves
+			// nothing to push here, and the release schedules the pass that pushes on the new base.
+			const newest = newestEntryOnBase(noteUuid, snapshot.baseContentHash)
+
+			if (newest === undefined) {
+				return
+			}
+
+			mostRecentContent = newest
+		}
 
 		// #4 fix: capture the LOCAL author-time of the entry we are about to
 		// push BEFORE the await. The prune below must remove exactly the
@@ -402,39 +478,22 @@ export class Sync {
 		// silently discards every keystroke typed during the in-flight
 		// setContent round trip (their local timestamp falls below the server
 		// time). Comparing local-vs-local preserves those edits for the
-		// rescheduled debounce and is immune to device-clock skew.
+		// rescheduled debounce and is immune to device-clock skew. Captured once the entry to push is
+		// settled: typing during the peek pushes the newest.
 		const syncedUpTo = mostRecentContent.timestamp
+		const overwritesNewerRemoteContent =
+			cloudContent !== undefined &&
+			hashNoteContent(cloudContent) !== mostRecentContent.baseContentHash &&
+			cloudContent !== mostRecentContent.content
 
-		// D3: conflict DETECTION, never prevention — local edits always win and the
-		// push below is unconditional (user decision: no prompts, no blocking). When
-		// the entry carries its session's base hash, peek at the note's current cloud
-		// content first: if the cloud moved past our base AND past what we are about
-		// to write, this push buries someone else's newer work in the note's history,
-		// and the user must hear about it once — a silent overwrite ("users won't
-		// know history has it") is the failure being prevented. Entries WITHOUT a
-		// base hash (persisted by older app versions) push unchecked — a one-time
-		// grace instead of migration machinery. A failed peek also pushes unchecked:
-		// availability beats the toast.
-		let overwritesNewerRemoteContent = false
+		// The note is open in an editor: its user decides, as over an edit the socket reported (the socket
+		// was down, say, while the app was in the background). Nothing is pushed until they answer.
+		if (overwritesNewerRemoteContent && cloudDecrypted && cloudContent !== undefined && this.editors.has(noteUuid)) {
+			events.emit("noteContentEdited", {
+				noteUuid,
+				content: cloudContent
+			})
 
-		if (mostRecentContent.baseContentHash !== undefined) {
-			try {
-				const cloudContent = (await notes.getContent({ note: liveNote, signal })) ?? ""
-
-				overwritesNewerRemoteContent =
-					hashNoteContent(cloudContent) !== mostRecentContent.baseContentHash && cloudContent !== mostRecentContent.content
-			} catch (e) {
-				// Availability beats the toast — push without the check.
-				logger.warn("notes-sync", "conflict-detection peek failed; pushing without overwrite check", {
-					noteUuid,
-					error: e
-				})
-			}
-		}
-
-		// A prompt opened during the peek, or its answer already replaced this entry (Load theirs cleared it,
-		// Keep mine rebased it) or a keystroke superseded it: the release or keystroke schedules a new pass.
-		if (this.holds.has(noteUuid) || !isEntryCurrent(noteUuid, mostRecentContent)) {
 			return
 		}
 

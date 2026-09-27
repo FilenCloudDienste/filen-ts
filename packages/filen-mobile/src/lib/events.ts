@@ -45,16 +45,21 @@ export type Events = {
 	driveFileGone: {
 		uuid: string
 	}
+	// A trashed file was restored from the trash, from any client: an open editor no longer treats it as gone.
+	driveFileRestored: {
+		uuid: string
+	}
 	// The drive preview's unsaved-changes guard blocked a route pop (user chose Cancel, or the
 	// save failed): the gallery must unwind its one-shot navigate-back latch so the close
 	// button works again.
 	drivePreviewDismissBlocked: void
 	// A note's content was edited by someone else or on another device (never this device's own push
-	// coming back: the notes socket handler drops those). `content` is what arrived, undefined when it
-	// could not be decrypted.
+	// coming back: the notes socket handler drops those), or a sync pass found such an edit under an open
+	// editor's unsynced edits (no `contentEdited` then). `content` is what arrived, undefined when it could
+	// not be decrypted.
 	noteContentEdited: {
 		noteUuid: string
-		contentEdited: NoteContentEdited
+		contentEdited?: NoteContentEdited
 		content: string | undefined
 	}
 	focusChatInput: {

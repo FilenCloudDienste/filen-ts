@@ -5,7 +5,8 @@ import type { AnyDirWithContext } from "@filen/sdk-rs"
 import { galleryItemKey, type GalleryItemTagged } from "@/components/drivePreview/gallery"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
 import { onSocketReconnected } from "@/stores/useSocket.store"
-import { driveItemsQueryReadForNormalParent } from "@/features/drive/queries/useDriveItems.query"
+import { driveItemsQueryFindFileInNormalParent } from "@/features/drive/queries/useDriveItems.query"
+import { whenUnlockedForeground } from "@/lib/unlockedForeground"
 import { isTrashParent, unwrapFileMeta, unwrapParentUuid, unwrappedFileIntoDriveItem } from "@/lib/sdkUnwrap"
 import events from "@/lib/events"
 import alerts from "@/lib/alerts"
@@ -20,7 +21,8 @@ interface UseRemoteRevisionsParams {
 	item: GalleryItemTagged
 	// The file the editor writes back to (useEditableTarget), null for anything not editable.
 	itemToUse: DriveItemFileExtracted | null
-	parent: AnyDirWithContext | "sharedInRoot" | null
+	// The directory the editor writes into (useEditableTarget), looked up when not yet known.
+	resolveParent: () => Promise<AnyDirWithContext | "sharedInRoot" | null>
 	hasEdits: boolean
 	// True while the editor's own save is uploading.
 	savingRef: { current: boolean }
@@ -42,9 +44,16 @@ function isFile(item: DriveItem): item is DriveItemFileExtracted {
 // Save mine as copy; over a deletion elsewhere, Save as new file / Discard. Following swaps the gallery's
 // item exactly as a save does (driveItemUpdated), which reloads the editor on the new version. The editor
 // reports its own saves (saveSettled), so a save from this device never reads as someone else's.
-export default function useRemoteRevisions({ item, itemToUse, parent, hasEdits, savingRef, saveAsNewFile }: UseRemoteRevisionsParams) {
+export default function useRemoteRevisions({
+	item,
+	itemToUse,
+	resolveParent,
+	hasEdits,
+	savingRef,
+	saveAsNewFile
+}: UseRemoteRevisionsParams) {
 	const { t } = useTranslation()
-	const latest = useRef({ item, itemToUse, parent, hasEdits, saveAsNewFile, t })
+	const latest = useRef({ item, itemToUse, resolveParent, hasEdits, saveAsNewFile, t })
 	const keptOver = useRef<string | undefined>(undefined)
 	const held = useRef<Revision[]>([])
 	// A deletion that arrived while the editor's own save was uploading, judged once it settles.
@@ -58,6 +67,8 @@ export default function useRemoteRevisions({ item, itemToUse, parent, hasEdits, 
 	// A deletion of the file while it had no edits: asked about once it gets some, as saving them would make
 	// the file anew (or, after a replacement, a version of the file now holding its name).
 	const goneWhileClean = useRef<string | null>(null)
+	// The last file restored from the trash, so a deletion prompt still waiting to show is dropped.
+	const restoredSince = useRef<string | null>(null)
 	// Counts what changed the file's known versions (revisions and deletions of it, saves), so a re-read
 	// that raced one is dropped rather than taken for news.
 	const changes = useRef(0)
@@ -66,7 +77,7 @@ export default function useRemoteRevisions({ item, itemToUse, parent, hasEdits, 
 	const askIfGoneRef = useRef<() => void>(() => undefined)
 
 	useEffect(() => {
-		latest.current = { item, itemToUse, parent, hasEdits, saveAsNewFile, t }
+		latest.current = { item, itemToUse, resolveParent, hasEdits, saveAsNewFile, t }
 	})
 
 	useEffect(() => {
@@ -76,6 +87,13 @@ export default function useRemoteRevisions({ item, itemToUse, parent, hasEdits, 
 			const current = useDrivePreviewStore.getState().currentItem
 
 			return current !== null && galleryItemKey(current) === galleryItemKey(latest.current.item)
+		}
+
+		// A toast waits for the app to be in front and unlocked, never drawing over the biometric lock.
+		function notify(message: string): void {
+			void whenUnlockedForeground().then(() => {
+				alerts.normal(message)
+			})
 		}
 
 		function show(from: DriveItemFileExtracted, to: DriveItem, announce: boolean): void {
@@ -90,14 +108,14 @@ export default function useRemoteRevisions({ item, itemToUse, parent, hasEdits, 
 			}
 
 			if (announce) {
-				alerts.normal(latest.current.t("remote_change_updated"))
+				notify(latest.current.t("remote_change_updated"))
 			}
 		}
 
 		// "Is this name free beside the file?" A save onto a taken name would make a new version of that
 		// other file instead.
 		async function nameTaken(name: string): Promise<boolean> {
-			const { parent } = latest.current
+			const parent = await latest.current.resolveParent()
 
 			// No name can be judged free without a directory to look in, and conflictCopyName would try forever.
 			if (parent === null || parent === "sharedInRoot") {
@@ -127,7 +145,7 @@ export default function useRemoteRevisions({ item, itemToUse, parent, hasEdits, 
 				const saved = await latest.current.saveAsNewFile(name)
 
 				if (saved !== null) {
-					alerts.normal(t("remote_change_saved_as_new", { name }))
+					notify(t("remote_change_saved_as_new", { name }))
 				}
 
 				return saved
@@ -169,6 +187,13 @@ export default function useRemoteRevisions({ item, itemToUse, parent, hasEdits, 
 			askedAbout.current = theirs.item.data.uuid
 
 			try {
+				// A native alert, with the file's name, would draw over the biometric lock.
+				await whenUnlockedForeground()
+
+				if (!answerable(key)) {
+					return
+				}
+
 				const answer = await run(async () =>
 					// Dismissing the alert is its cancel, so Keep mine, which loses nothing, sits there.
 					prompts.confirm3({
@@ -290,6 +315,7 @@ export default function useRemoteRevisions({ item, itemToUse, parent, hasEdits, 
 			}
 
 			changes.current++
+			restoredSince.current = null
 
 			if (!dirty) {
 				goneWhileClean.current = uuid
@@ -319,6 +345,12 @@ export default function useRemoteRevisions({ item, itemToUse, parent, hasEdits, 
 			askedAbout.current = uuid
 
 			try {
+				await whenUnlockedForeground()
+
+				if (!answerable(key) || restoredSince.current === uuid) {
+					return
+				}
+
 				const answer = await run(async () =>
 					prompts.confirm3({
 						title: t("remote_deleted_title"),
@@ -384,10 +416,10 @@ export default function useRemoteRevisions({ item, itemToUse, parent, hasEdits, 
 			const seen = changes.current
 			const fresh = () => answerable(key) && !savingRef.current && changes.current === seen
 
-			const listing = await run(async () => await driveItemsQueryReadForNormalParent(parentUuid))
+			const lookedUp = await run(async () => await driveItemsQueryFindFileInNormalParent(parentUuid, stableUuid))
 
-			if (!listing.success) {
-				logger.warn("drivePreview", "re-checking the open file after a socket gap failed", { error: listing.error })
+			if (!lookedUp.success) {
+				logger.warn("drivePreview", "re-checking the open file after a socket gap failed", { error: lookedUp.error })
 
 				return
 			}
@@ -396,7 +428,7 @@ export default function useRemoteRevisions({ item, itemToUse, parent, hasEdits, 
 				return
 			}
 
-			const found = listing.data.find(entry => entry.type === "file" && entry.data.stableUuid === stableUuid)
+			const found = lookedUp.data
 
 			if (found !== undefined) {
 				if (found.data.uuid !== displayed.data.uuid) {
@@ -448,6 +480,22 @@ export default function useRemoteRevisions({ item, itemToUse, parent, hasEdits, 
 		const gone = events.subscribe("driveFileGone", ({ uuid }) => {
 			void handleGone(uuid)
 		})
+		// Back from the trash before anything was asked: no longer gone.
+		const restored = events.subscribe("driveFileRestored", ({ uuid }) => {
+			restoredSince.current = uuid
+
+			if (goneWhileClean.current === uuid) {
+				goneWhileClean.current = null
+			}
+
+			if (heldGone.current === uuid) {
+				heldGone.current = null
+			}
+
+			if (pending.current.gone === uuid) {
+				pending.current.gone = null
+			}
+		})
 		const unsubscribeReconnected = onSocketReconnected(() => {
 			void recheck()
 		})
@@ -472,7 +520,7 @@ export default function useRemoteRevisions({ item, itemToUse, parent, hasEdits, 
 			changes.current++
 
 			if (settled.replaced) {
-				alerts.normal(latest.current.t("remote_change_save_replaced"))
+				notify(latest.current.t("remote_change_save_replaced"))
 			}
 
 			// Judged against the saved version: this editor, and the gallery's current item, follow it (applySaved).
@@ -495,6 +543,7 @@ export default function useRemoteRevisions({ item, itemToUse, parent, hasEdits, 
 			unmounted = true
 			revised.remove()
 			gone.remove()
+			restored.remove()
 			unsubscribeReconnected()
 		}
 	}, [savingRef])

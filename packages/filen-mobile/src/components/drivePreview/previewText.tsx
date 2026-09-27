@@ -21,6 +21,7 @@ import alerts from "@/lib/alerts"
 import { useRecyclingState } from "@shopify/flash-list"
 import { AnyDirWithContext_Tags } from "@filen/sdk-rs"
 import { type GalleryItemTagged, galleryItemKey } from "@/components/drivePreview/gallery"
+import { galleryItemRenderName } from "@/components/drivePreview/galleryRenderName"
 import useEditableTarget from "@/components/drivePreview/useEditableTarget"
 import useRemoteRevisions from "@/components/drivePreview/useRemoteRevisions"
 import PreviewLoadFailedNotice from "@/components/drivePreview/previewLoadFailedNotice"
@@ -49,18 +50,20 @@ const PreviewTextInner = ({
 	const [status, setStatus] = useRecyclingState<TextEditorDocumentStatus | "loading">("loading", [galleryItemKey(item)])
 	const textPrimary = useResolveClassNames("text-primary")
 	const isOnline = useIsOnline()
-	const { itemToUse, parent, readOnly, applySaved } = useEditableTarget(item)
+	const { itemToUse, resolveParent, readOnly, applySaved } = useEditableTarget(item)
 	const saveHandleRef = useRef<(() => Promise<File | null>) | null>(null)
 	const savingRef = useRef<boolean>(false)
 
-	const fileName = item.type === "drive" ? item.data.data.decryptedMeta?.name : item.data.name
+	// The editor's mode and highlighting follow the name the page opened with (galleryItemRenderName), never a
+	// rename that would remount it under unsaved edits.
+	const fileName = galleryItemRenderName(item)
 
 	// Rendered-markdown parity with notes (Play review request): markdown files get the
 	// markdown editor + the floating preview toggle instead of the plain code editor. One
 	// shared toggle id for ALL drive markdown files — per-file ids would grow the persisted
 	// toggle record with every file ever previewed, and "show rendered markdown" is a mode
 	// preference, not a per-file one.
-	const isMarkdownFile = /\.(md|markdown)$/i.test(fileName ?? "")
+	const isMarkdownFile = /\.(md|markdown)$/i.test(fileName)
 
 	const save = async (): Promise<boolean> => {
 		// See previewPdf: the loading overlay presents asynchronously and the unsaved-changes prompt
@@ -86,6 +89,8 @@ const PreviewTextInner = ({
 			if (!itemToUse?.data.decryptedMeta) {
 				throw new Error("Missing decryptedMeta")
 			}
+
+			const parent = await resolveParent()
 
 			if (!parent || parent === "sharedInRoot" || parent.tag !== AnyDirWithContext_Tags.Normal) {
 				throw new Error("Missing parent directory")
@@ -181,7 +186,7 @@ const PreviewTextInner = ({
 		return newDriveItem
 	}
 
-	const remote = useRemoteRevisions({ item, itemToUse, parent, hasEdits, savingRef, saveAsNewFile })
+	const remote = useRemoteRevisions({ item, itemToUse, resolveParent, hasEdits, savingRef, saveAsNewFile })
 
 	// Publish the dirty flag so the route-level unsaved-changes guard can prompt on navigate-away.
 	useEffect(() => {
@@ -293,7 +298,7 @@ const PreviewText = ({ item }: { item: GalleryItemTagged }) => {
 	const { theme } = useUniwind()
 
 	const isOnline = useIsOnline()
-	const previewType = getPreviewType(item.type === "drive" ? (item.data.data.decryptedMeta?.name ?? "") : item.data.name)
+	const previewType = getPreviewType(galleryItemRenderName(item))
 
 	const query = useFileUriQuery(
 		item.type === "external"

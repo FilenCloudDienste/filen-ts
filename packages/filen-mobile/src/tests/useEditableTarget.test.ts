@@ -62,6 +62,7 @@ vi.mock("@/lib/events", () => ({ default: { emit: vi.fn() } }))
 vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 
 import useEditableTarget from "@/components/drivePreview/useEditableTarget"
+import useSocketStore from "@/stores/useSocket.store"
 
 function galleryItem(uuid: string, parent: string, name = "notes.md"): never {
 	return { type: "drive", data: { type: "file", data: { uuid, parent, decryptedMeta: { name } } } } as never
@@ -71,6 +72,7 @@ beforeEach(() => {
 	cacheState.files.clear()
 	cacheState.dirs.clear()
 	vi.clearAllMocks()
+	useSocketStore.setState({ state: "connected", connectedAt: 1 })
 })
 
 describe("useEditableTarget", () => {
@@ -124,5 +126,46 @@ describe("useEditableTarget", () => {
 		})
 
 		expect((hook.result.current.itemToUse?.data as { parent?: string } | undefined)?.parent).toBe("moved-to")
+	})
+
+	it("stays writable while the file's directory is looked up, so unsaved edits stay guarded", () => {
+		getDirOptional.mockReturnValue(new Promise(() => undefined))
+
+		const hook = renderHook(() => useEditableTarget(galleryItem("v1", "unlisted")))
+
+		expect(hook.result.current.parent).toBeNull()
+		expect(hook.result.current.readOnly).toBe(false)
+	})
+
+	it("a save resolves a directory the warm could not, and a socket reconnect warms it again", async () => {
+		getDirOptional.mockRejectedValueOnce(new Error("offline"))
+
+		const hook = renderHook(() => useEditableTarget(galleryItem("v1", "unlisted")))
+
+		await waitFor(() => {
+			expect(getDirOptional).toHaveBeenCalledTimes(1)
+		})
+
+		getDirOptional.mockImplementation(uuid => Promise.resolve({ uuid }))
+
+		let resolved: unknown = null
+
+		await act(async () => {
+			resolved = await hook.result.current.resolveParent()
+		})
+
+		expect(resolved).toEqual({ tag: "Normal", inner: [{ uuid: "unlisted" }] })
+
+		cacheState.dirs.delete("unlisted")
+		getDirOptional.mockClear()
+
+		act(() => {
+			useSocketStore.getState().setState("disconnected")
+			useSocketStore.getState().setState("connected")
+		})
+
+		await waitFor(() => {
+			expect(getDirOptional).toHaveBeenCalledWith("unlisted", expect.anything())
+		})
 	})
 })

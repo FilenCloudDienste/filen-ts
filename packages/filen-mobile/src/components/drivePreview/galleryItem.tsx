@@ -17,6 +17,7 @@ import PreviewSlot from "@/components/drivePreview/previewSlot"
 import View from "@/components/ui/view"
 import { type ListRenderItemInfo } from "@shopify/flash-list"
 import { type GalleryItemTagged, galleryItemKey } from "@/components/drivePreview/gallery"
+import { galleryItemRenderName } from "@/components/drivePreview/galleryRenderName"
 
 const GalleryItem = ({
 	info,
@@ -36,7 +37,8 @@ const GalleryItem = ({
 	const dimensions = useWindowDimensions()
 	const isActive = useDrivePreviewStore(useShallow(state => state.currentIndex === info.index))
 
-	const previewType = getPreviewType(info.item.type === "drive" ? (info.item.data.data.decryptedMeta?.name ?? "") : info.item.data.name)
+	// By the name the page opened with: a rename elsewhere keeps the renderer, and an editor's unsaved edits.
+	const previewType = getPreviewType(galleryItemRenderName(info.item))
 	const rendersFromUrl = previewType === "image" || previewType === "video"
 
 	const fileUrlQuery = useFileUrlQuery(

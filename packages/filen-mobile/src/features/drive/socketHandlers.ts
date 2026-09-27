@@ -130,6 +130,8 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 
 			// A restore leaves mtime unchanged, so it is not surfaced in Recents (a new file is, via the batcher).
 			if (eventInner.inner.tag === DriveEvent_Tags.FileRestore) {
+				events.emit("driveFileRestored", { uuid: inner.file.uuid })
+
 				// In case of a restore from trash, we need to remove the item from the trash list
 				driveItemsQueryUpdate({
 					params: {

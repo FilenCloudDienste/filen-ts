@@ -35,7 +35,7 @@ const PreviewPdf = ({ item }: { item: GalleryItemTagged }) => {
 	const insets = useSafeAreaInsets()
 	const isOnline = useIsOnline()
 	const textPrimary = useResolveClassNames("text-primary")
-	const { itemToUse, parent, readOnly, applySaved } = useEditableTarget(item)
+	const { itemToUse, resolveParent, readOnly, applySaved } = useEditableTarget(item)
 	const [hasEdits, setHasEdits] = useRecyclingState<boolean>(false, [galleryItemKey(item)])
 	const saveHandleRef = useRef<(() => Promise<File | null>) | null>(null)
 	const savingRef = useRef<boolean>(false)
@@ -90,6 +90,8 @@ const PreviewPdf = ({ item }: { item: GalleryItemTagged }) => {
 			if (!itemToUse?.data.decryptedMeta) {
 				throw new Error("Missing decryptedMeta")
 			}
+
+			const parent = await resolveParent()
 
 			if (!parent || parent === "sharedInRoot" || parent.tag !== AnyDirWithContext_Tags.Normal) {
 				throw new Error("Missing parent directory")
@@ -185,7 +187,7 @@ const PreviewPdf = ({ item }: { item: GalleryItemTagged }) => {
 		return newDriveItem
 	}
 
-	const remote = useRemoteRevisions({ item, itemToUse, parent, hasEdits, savingRef, saveAsNewFile })
+	const remote = useRemoteRevisions({ item, itemToUse, resolveParent, hasEdits, savingRef, saveAsNewFile })
 
 	// Publish the dirty flag so the route-level unsaved-changes guard can prompt on navigate-away.
 	useEffect(() => {

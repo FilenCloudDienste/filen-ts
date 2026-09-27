@@ -42,7 +42,12 @@ vi.mock("@/features/chats/chatsWrap", () => ({
 	wrapMessage: (message: unknown) => message
 }))
 
-import { noteSocketDataEvent, socketCoveredRefetchOnMount, trackServerReads } from "@/queries/socketSession"
+import {
+	noteSocketDataEvent,
+	socketCoveredRefetchOnMount,
+	trackServerReads,
+	queryReadDuringOrAfterSocketGap
+} from "@/queries/socketSession"
 import useSocketStore from "@/stores/useSocket.store"
 import useChatsQuery, { CHATS_LIST_REUSE_MS, BASE_QUERY_KEY as CHATS_KEY } from "@/features/chats/queries/useChats.query"
 import useChatMessagesQuery from "@/features/chats/queries/useChatMessages.query"
@@ -253,5 +258,52 @@ describe("chats — reopen request counts", () => {
 		await mountAndSettle(() => useChatsQuery())
 
 		expect(mockListChats).toHaveBeenCalledTimes(2)
+	})
+})
+
+describe("queryReadDuringOrAfterSocketGap", () => {
+	function gapQuery() {
+		const query = holder.client.getQueryCache().find({ queryKey: ["gap"], exact: true })
+
+		if (query === undefined) {
+			throw new Error("no query")
+		}
+
+		return query
+	}
+
+	it("a read from before the gap does not cover it", async () => {
+		await holder.client.fetchQuery({ queryKey: ["gap"], queryFn: async () => "before" })
+		await reconnect()
+
+		expect(queryReadDuringOrAfterSocketGap(gapQuery())).toBe(false)
+	})
+
+	it("a read begun while the socket was down covers the gap", async () => {
+		useSocketStore.getState().setState("disconnected")
+		await tick()
+		await holder.client.fetchQuery({ queryKey: ["gap"], queryFn: async () => "during" })
+		useSocketStore.getState().setState("connected")
+
+		expect(queryReadDuringOrAfterSocketGap(gapQuery())).toBe(true)
+	})
+
+	it("a read under way covers it", async () => {
+		let release = () => {}
+
+		await reconnect()
+
+		const reading = holder.client.fetchQuery({
+			queryKey: ["gap"],
+			queryFn: () =>
+				new Promise<string>(resolve => {
+					release = () => resolve("reading")
+				})
+		})
+
+		expect(queryReadDuringOrAfterSocketGap(gapQuery())).toBe(true)
+
+		release()
+		await reading
 	})
 })

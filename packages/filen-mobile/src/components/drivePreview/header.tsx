@@ -21,6 +21,7 @@ import Menu from "@/components/ui/menu"
 import useOpenExternalLink from "@/hooks/useOpenExternalLink"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import HeaderScrim, { drivePreviewHeaderNeedsScrim, SCRIM_FADE_DURATION_MS } from "@/components/drivePreview/headerScrim"
+import { galleryItemRenderName } from "@/components/drivePreview/galleryRenderName"
 import logger from "@/lib/logger"
 
 const GalleryHeader = ({
@@ -44,9 +45,7 @@ const GalleryHeader = ({
 	const currentItem = useDrivePreviewStore(useShallow(state => state.currentItem))
 	const drivePath = useDrivePreviewStore(useShallow(state => state.drivePath))
 
-	const currentItemPreviewType = getPreviewType(
-		currentItem ? (currentItem.type === "drive" ? driveItemDisplayName(currentItem.data) : currentItem.data.name) : ""
-	)
+	const currentItemPreviewType = getPreviewType(currentItem ? galleryItemRenderName(currentItem) : "")
 
 	const solidHeader = Platform.select({
 		android:

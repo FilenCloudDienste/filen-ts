@@ -4,7 +4,7 @@ import { sortParams } from "@filen/shared"
 import auth from "@/lib/auth"
 import logger from "@/lib/logger"
 import { notesQueryGet } from "@/features/notes/queries/useNotesQuery"
-import { readStartedInCurrentSocketSession } from "@/queries/socketSession"
+import { readStartedInCurrentSocketSession, queryReadDuringOrAfterSocketGap } from "@/queries/socketSession"
 
 export const BASE_QUERY_KEY = "useNoteContentQuery"
 
@@ -125,6 +125,14 @@ export function useNoteContentQuery(
 // back into noteContentQueryUpdate to keep the key stable.
 export function noteContentQueryDataUpdatedAt(params: UseNoteContentQueryParams): number | undefined {
 	return queryClient.getQueryState(noteContentQueryKey(params))?.dataUpdatedAt
+}
+
+// Whether the cached body was read (or is being read) since the socket last went down, so a re-check after
+// the reconnect has nothing to add.
+export function noteContentQueryReadSinceSocketGap(params: UseNoteContentQueryParams): boolean {
+	const query = queryClient.getQueryCache().find({ queryKey: noteContentQueryKey(params), exact: true })
+
+	return query !== undefined && queryReadDuringOrAfterSocketGap(query)
 }
 
 // Non-reactive read of the cached per-note content (undefined when never fetched/written).

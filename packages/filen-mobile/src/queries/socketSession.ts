@@ -112,6 +112,21 @@ export function queryReadInCurrentSocketSession<TQueryFnData, TError, TData, TQu
 	)
 }
 
+// A cached value a socket gap cannot have left behind: a read of it is under way, or began after the socket
+// last went down. What an editor re-checks after the reconnect reuses such a read instead of repeating it.
+export function queryReadDuringOrAfterSocketGap<TQueryFnData, TError, TData, TQueryKey extends QueryKey>(
+	query: Query<TQueryFnData, TError, TData, TQueryKey>
+): boolean {
+	if (query.state.fetchStatus === "fetching") {
+		return true
+	}
+
+	const startedAt = readStartedAt.get(query)
+	const { disconnectedAt } = useSocketStore.getState()
+
+	return startedAt !== undefined && disconnectedAt > 0 && startedAt > disconnectedAt && query.state.status !== "error"
+}
+
 /**
  * refetchOnMount for a query the socket patches: a mount reuses a read from the current socket
  * session and reads otherwise. Reconnect refetches (refetchOnReconnect) are untouched.

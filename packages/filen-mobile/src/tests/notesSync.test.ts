@@ -177,6 +177,7 @@ function asSdkError<E>(error: E, kind: string): E {
 import { Sync, SyncHost, hashNoteContent, MAX_NON_RETRYABLE_REJECTIONS } from "@/features/notes/components/sync"
 import sqlite from "@/lib/sqlite"
 import alerts from "@/lib/alerts"
+import events from "@/lib/events"
 import { AppState } from "react-native"
 import { render } from "@testing-library/react"
 import React from "react"
@@ -1620,7 +1621,7 @@ describe("Sync (Notes)", () => {
 			expect(alerts.normal).not.toHaveBeenCalled()
 		})
 
-		it("an entry its outbox no longer holds after the peek (discarded, rebased or retyped) is not pushed", async () => {
+		it("an entry its outbox no longer holds after the peek (discarded) is not pushed", async () => {
 			const sync = await createSync()
 			let peeked: (value: string) => void = () => undefined
 
@@ -1640,6 +1641,66 @@ describe("Sync (Notes)", () => {
 			await new Promise(resolve => setTimeout(resolve, 0))
 
 			expect(mockNotesSetContent).not.toHaveBeenCalled()
+		})
+
+		it("typing during the peek on the same base pushes the newest entry, with no second peek", async () => {
+			const sync = await createSync()
+			let peeked: (value: string) => void = () => undefined
+
+			mockNotesGetContent.mockImplementationOnce(() => new Promise<string>(resolve => (peeked = resolve)))
+
+			notesState.inflightContent = {
+				"note-1": [{ timestamp: 1000, content: "mine", note: mockNote("note-1"), baseContentHash: hashNoteContent("base") }]
+			}
+
+			sync.executeNow()
+
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			notesState.inflightContent = {
+				"note-1": [{ timestamp: 1001, content: "mine, more", note: mockNote("note-1"), baseContentHash: hashNoteContent("base") }]
+			}
+			peeked("base")
+
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			expect(mockNotesGetContent).toHaveBeenCalledTimes(1)
+			expect(mockNotesSetContent).toHaveBeenCalledTimes(1)
+			expect(mockNotesSetContent).toHaveBeenCalledWith(expect.objectContaining({ content: "mine, more" }))
+			expect(notesState.inflightContent["note-1"]).toBeUndefined()
+		})
+
+		it("an edit made elsewhere under an open editor's edits goes to that editor, never pushed over", async () => {
+			const sync = await createSync()
+			const handedOver = vi.fn()
+			const subscription = events.subscribe("noteContentEdited", handedOver)
+			const detach = sync.attachEditor("note-1")
+
+			mockNotesGetContent.mockResolvedValue("theirs")
+
+			notesState.inflightContent = {
+				"note-1": [{ timestamp: 1000, content: "mine", note: mockNote("note-1"), baseContentHash: hashNoteContent("base") }]
+			}
+
+			sync.executeNow()
+
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			expect(handedOver).toHaveBeenCalledWith({ noteUuid: "note-1", content: "theirs" })
+			expect(mockNotesSetContent).not.toHaveBeenCalled()
+			expect(alerts.normal).not.toHaveBeenCalled()
+			expect(notesState.inflightContent["note-1"]).toHaveLength(1)
+
+			// Closed, the note is pushed over it with the overwrite toast, as before.
+			detach()
+			sync.executeNow()
+
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			expect(mockNotesSetContent).toHaveBeenCalledTimes(1)
+			expect(alerts.normal).toHaveBeenCalledTimes(1)
+
+			subscription.remove()
 		})
 
 		it("settled resolves at once when nothing is being pushed, and after a failed push too", async () => {
