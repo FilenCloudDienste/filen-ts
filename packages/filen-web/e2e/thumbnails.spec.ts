@@ -16,14 +16,14 @@ import { FIREFOX_SERVICE_WORKERS_BLOCKED } from "./helpers/firefox"
 // as the png does. It is the proof that the swap did not quietly narrow format coverage. It also boots
 // a second, fresh document mid-test: the proof that the OPFS cache survives a real cold boot, not just
 // a component remount.
-test("png and bmp images render real thumbnails in both listing views, the text/svg siblings keep their icon, and a fresh reload repaints from the OPFS cache without regenerating", async ({
+test("png, bmp and svg files render real thumbnails in both listing views, the text sibling keeps its icon, and a fresh reload repaints from the OPFS cache without regenerating", async ({
 	page,
 	injectedSession
 }) => {
 	expect(injectedSession.length).toBeGreaterThan(0)
 
-	// The png/bmp pair that must thumbnail and the txt/svg pair that must not — provisioned once per run
-	// by the fixtures-setup project, in that exact set (helpers/fixtures.ts).
+	// The png/bmp/svg that must thumbnail and the txt that must not — provisioned once per run by the
+	// fixtures-setup project, in that exact set (helpers/fixtures.ts).
 	const [namePng, nameBmp, nameTxt, nameSvg] = FIXTURE_FILES.thumbnails
 
 	const cspViolations = trackCspViolations(page)
@@ -68,17 +68,15 @@ test("png and bmp images render real thumbnails in both listing views, the text/
 	await expect(bmpThumbList).toBeVisible({ timeout: 30_000 })
 	await expect(bmpThumbList).toHaveAttribute("src", /^blob:/)
 
-	// The other two siblings are never swapped to a thumbnail, each for its own reason, and each keeps
-	// its file-type icon — itself an <img> of a static asset (not a blob: object URL like a real
-	// thumbnail), so the proof is that the src stays a non-blob asset URL.
-	//
-	//   txt — no extension routes it to any thumbnail category and the SDK claims nothing for it.
-	//   svg — refused outright regardless of the flag (sanitization posture; and the wasm build carries
-	//         no SVG rasteriser either, so the flag agrees — this is defense in depth, not redundancy).
+	// The svg is rasterised in the browser, not by the SDK, after a whole-document download: the
+	// drive-side arm (svg-thumbnails.spec.ts proves the upload-time arm, on hostile markup).
+	const svgThumbList = rowSvg.locator("img")
+	await expect(svgThumbList).toHaveAttribute("src", /^blob:/, { timeout: 30_000 })
+
+	// No extension routes the txt to any thumbnail category and the SDK claims nothing for it, so it
+	// keeps its file-type icon — itself an <img> of a static asset, not a blob: object URL.
 	await expect(rowTxt.locator("img")).toHaveCount(1)
 	await expect(rowTxt.locator("img")).not.toHaveAttribute("src", /^blob:/)
-	await expect(rowSvg.locator("img")).toHaveCount(1)
-	await expect(rowSvg.locator("img")).not.toHaveAttribute("src", /^blob:/)
 
 	// Grid view renders the identical thumbnail through a different slot (DriveTile, not DriveRow) —
 	// the service's own uuid-keyed url cache makes this a render-path proof, not a second generation.

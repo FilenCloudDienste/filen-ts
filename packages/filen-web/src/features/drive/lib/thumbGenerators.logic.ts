@@ -1,4 +1,4 @@
-// Pure sizing/encoding helpers shared by the client-side thumbnail generators (video, pdf) — the two
+// Pure sizing/encoding helpers shared by the client-side thumbnail generators (video, pdf, svg) — the
 // categories the Rust SDK cannot decode and this app therefore still draws to a canvas itself. Zero
 // dependencies of its own, so it can be imported from anywhere without risking a cycle.
 
@@ -52,9 +52,12 @@ async function attemptEncode(canvas: OffscreenCanvas | HTMLCanvasElement, type: 
 }
 
 // webp-first, jpeg-0.85 fallback — the on-disk format policy the canvas-drawing generators share. The
-// SDK arm needs none of this: it encodes webp itself, inside wasm.
-export async function encodeCanvasThumb(canvas: OffscreenCanvas | HTMLCanvasElement): Promise<Blob> {
+// SDK arm needs none of this: it encodes webp itself, inside wasm. A drawing with transparency (an
+// svg) falls back to png instead, since jpeg has no alpha and would paint it black.
+export async function encodeCanvasThumb(canvas: OffscreenCanvas | HTMLCanvasElement, options: { alpha?: boolean } = {}): Promise<Blob> {
 	const webp = await attemptEncode(canvas, "image/webp")
 
-	return await selectWebpOrFallback(webp, () => attemptEncode(canvas, "image/jpeg", JPEG_FALLBACK_QUALITY))
+	return await selectWebpOrFallback(webp, () =>
+		options.alpha === true ? attemptEncode(canvas, "image/png") : attemptEncode(canvas, "image/jpeg", JPEG_FALLBACK_QUALITY)
+	)
 }

@@ -2,7 +2,13 @@ import { describe, expect, it } from "vitest"
 import type { Dir, File, SharedDir, SharedFile, SharedRootDir, UuidStr } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { RAW_IMAGE_EXTENSIONS } from "@/features/drive/lib/preview.logic"
-import { thumbnailCategory, THUMB_MAX_DIM, THUMB_SDK_MAX_HEIGHT, THUMB_SIZE_GATE } from "@/features/drive/lib/thumbnails.logic"
+import {
+	thumbnailCategory,
+	THUMB_MAX_DIM,
+	THUMB_SDK_MAX_HEIGHT,
+	THUMB_SIZE_GATE,
+	THUMB_SVG_SIZE_GATE
+} from "@/features/drive/lib/thumbnails.logic"
 
 // Mirrors item.test.ts's own fixture helpers — this file needs the same six-arm coverage to prove
 // thumbnailCategory routes the "file" arm only.
@@ -131,12 +137,12 @@ describe("thumbnailCategory", () => {
 		expect(thumbnailCategory(fileNamed("SHOT.NEF"))).toBe("sdk")
 	})
 
-	// svg is refused even when the flag says otherwise — defense in depth on the long-standing
-	// "never feed an untrusted svg to a decoder" posture (the wasm build has no SVG rasteriser
-	// anyway, so this can only ever be belt-and-braces).
-	it("svg -> none even with canMakeThumbnail true", () => {
-		expect(thumbnailCategory(fileNamed("vector.svg"))).toBe("none")
-		expect(thumbnailCategory(fileNamed("vector.svg", { canMakeThumbnail: false }))).toBe("none")
+	// svg is rasterised client-side whatever the flag says, and never handed to the SDK's decoders.
+	it("svg -> svg regardless of canMakeThumbnail, up to its own size gate", () => {
+		expect(thumbnailCategory(fileNamed("vector.svg"))).toBe("svg")
+		expect(thumbnailCategory(fileNamed("VECTOR.SVG", { canMakeThumbnail: false }))).toBe("svg")
+		expect(thumbnailCategory(fileNamed("vector.svg", { size: THUMB_SVG_SIZE_GATE }))).toBe("svg")
+		expect(thumbnailCategory(fileNamed("vector.svg", { size: THUMB_SVG_SIZE_GATE + 1n }))).toBe("none")
 	})
 
 	// Order guard: video and pdf both carry canMakeThumbnail false (Rust decodes neither), so they

@@ -41,7 +41,7 @@ export const FIXTURE_FILES = {
 	"preview-media": ["preview-media.mp3", "preview-media.mp4", "preview-media.png"],
 	"preview-docx": ["preview-docx.docx"],
 	"preview-code": ["preview-code.ts"],
-	// png + bmp both thumbnail; txt + svg must keep their file-type icon.
+	// png + bmp + svg all thumbnail; txt must keep its file-type icon.
 	thumbnails: ["thumbnails.png", "thumbnails.bmp", "thumbnails.txt", "thumbnails.svg"],
 	"download-fsa": ["download-fsa.txt"],
 	"download-zip": ["download-zip-a.txt", "download-zip-b.txt"],

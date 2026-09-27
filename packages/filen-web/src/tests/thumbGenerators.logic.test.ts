@@ -97,6 +97,24 @@ describe("encodeCanvasThumb — OffscreenCanvas (convertToBlob) path", () => {
 	})
 })
 
+describe("encodeCanvasThumb — a drawing with transparency", () => {
+	it("falls back to png, never jpeg, which would paint the transparency black", async () => {
+		const types: (string | undefined)[] = []
+		const fake: FakeOffscreenCanvas = {
+			convertToBlob: options => {
+				types.push(options?.type)
+
+				return Promise.resolve(options?.type === "image/webp" ? new Blob([], { type: "image/png" }) : typedBlob(options?.type))
+			}
+		}
+
+		const blob = await encodeCanvasThumb(fake as unknown as OffscreenCanvas, { alpha: true })
+
+		expect(blob.type).toBe("image/png")
+		expect(types).toEqual(["image/webp", "image/png"])
+	})
+})
+
 describe("encodeCanvasThumb — HTMLCanvasElement (toBlob) path", () => {
 	it("uses the callback-based toBlob API when convertToBlob is absent", async () => {
 		const fake: FakeHtmlCanvas = {

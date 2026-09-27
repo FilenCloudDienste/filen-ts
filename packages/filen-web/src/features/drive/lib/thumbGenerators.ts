@@ -13,12 +13,13 @@ import {
 	thumbnailCategory
 } from "@/features/drive/lib/thumbnails.logic"
 import { fitWithin, encodeCanvasThumb } from "@/features/drive/lib/thumbGenerators.logic"
+import { prepareSvgThumb } from "@/features/drive/lib/svgThumb.logic"
 import { previewStreamUrl, waitForMediaStream } from "@/features/preview/lib/previewStream"
 import { allowedMediaContentType } from "@/features/preview/lib/mediaType"
 import { narrowItem, type BaseFileItem } from "@/features/drive/lib/item"
 import type { SdkThumbnailResult } from "@/workers/sdk.worker"
 
-// pdf is the one generator left that pulls a whole file into JS memory, through the same buffered
+// pdf and svg are the generators that pull a whole file into JS memory, through the same buffered
 // download the preview overlay uses (usePreviewBytes). There is no unmount to hook a cancellation
 // into here (a generator is a one-shot promise the service's own Semaphore/dedupe gate around, not a
 // component) so the minted token only ever satisfies downloadFileBytes' own signature — the worker's
@@ -78,8 +79,8 @@ export const generateSdkThumb: ThumbGenerator = async item => {
 // production instead of racing it with a server-side one.
 //
 // Gated on thumbnailCategory of the uploaded file, not on a local extension guess — that keeps the
-// SDK's own canMakeThumbnail as the single source of truth here too, and drops video/pdf/svg (whose
-// thumbnails are somebody else's job) for free.
+// SDK's own canMakeThumbnail as the single source of truth here too, and drops video/pdf (whose
+// thumbnails are somebody else's job) for free. An svg is rasterised here too, from the local text.
 //
 // Sequenced AFTER the upload resolves, never overlapped with it. Both legs read the same browser File
 // through their own `.stream()`, and a Blob hands out a FRESH ReadableStream per call, so an overlap
@@ -88,8 +89,21 @@ export const generateSdkThumb: ThumbGenerator = async item => {
 // in the listing, so blocking either on a cache warm would only delay the upload summary toast.
 export function warmUploadThumbnail(uploaded: SdkFile, file: File): void {
 	const item = narrowItem(uploaded)
+	const category = thumbnailCategory(item)
 
-	if (thumbnailCategory(item) !== "sdk") {
+	// Its size gate is already in the category. The rasteriser's verdicts are about the markup itself,
+	// which the drive-side arm would read identically; only a failure leaves the uuid to it.
+	if (category === "svg") {
+		seedThumbnail(item, async () => {
+			const result = await rasterizeSvgThumb(await file.text())
+
+			return result.type === "bytes" ? result : { type: result.type === "unavailable" ? "none" : "unanswered" }
+		})
+
+		return
+	}
+
+	if (category !== "sdk") {
 		return
 	}
 
@@ -227,6 +241,87 @@ export const generateVideoThumb: ThumbGenerator = async item => {
 	return { type: "bytes", bytes: result.data }
 }
 
+const SVG_RENDER_TIMEOUT_MS = 10_000
+
+// Rasterises an svg document into a thumbnail. Only ever through an <img>: the SVG spec's secure mode
+// for images runs no script, fires no event handler and fetches no external resource, so the markup
+// never has to be sanitised to be safe (prepareSvgThumb refuses the entity bombs that mode does not
+// cover). The blob URL is same-origin, so the canvas stays readable, except where an engine taints it
+// for an svg anyway (Safari, for a <foreignObject>): that is a settled "unsupported", not a failure.
+// Drawn at the thumbnail's own size, so the vector is rasterised once, crisply, at the size shown.
+export async function rasterizeSvgThumb(text: string): Promise<ThumbGenerationResult> {
+	const prepared = prepareSvgThumb(text, THUMB_MAX_DIM)
+
+	if (prepared.type === "rejected") {
+		return { type: "unavailable", reason: prepared.reason }
+	}
+
+	const result = await runTimeout<ThumbGenerationResult>(async defer => {
+		const url = URL.createObjectURL(new Blob([prepared.markup], { type: "image/svg+xml" }))
+
+		defer(() => {
+			URL.revokeObjectURL(url)
+		})
+
+		const image = new Image(prepared.width, prepared.height)
+
+		image.src = url
+
+		try {
+			await image.decode()
+		} catch {
+			return { type: "unavailable", reason: "corrupt" }
+		}
+
+		const canvas = new OffscreenCanvas(prepared.width, prepared.height)
+		const ctx = canvas.getContext("2d")
+
+		if (ctx === null) {
+			throw new Error("could not create an OffscreenCanvas 2D context")
+		}
+
+		ctx.drawImage(image, 0, 0, prepared.width, prepared.height)
+
+		let blob: Blob
+
+		try {
+			blob = await encodeCanvasThumb(canvas, { alpha: true })
+		} catch (e) {
+			if (e instanceof DOMException && e.name === "SecurityError") {
+				return { type: "unavailable", reason: "unsupported" }
+			}
+
+			throw e
+		}
+
+		return { type: "bytes", bytes: new Uint8Array(await blob.arrayBuffer()) }
+	}, SVG_RENDER_TIMEOUT_MS)
+
+	if (!result.success) {
+		log.warn("thumb-generators", "rasterizeSvgThumb failed", result.error)
+
+		return { type: "failed" }
+	}
+
+	return result.data
+}
+
+// Small by construction (THUMB_SVG_SIZE_GATE), so the whole document is read like a pdf's: the
+// rasteriser needs the markup, not a stream.
+export const generateSvgThumb: ThumbGenerator = async item => {
+	let bytes: Uint8Array
+
+	try {
+		bytes = await downloadWholeFile(item)
+	} catch (e) {
+		log.warn("thumb-generators", "generateSvgThumb: download failed", item.data.uuid, e)
+
+		return { type: "failed" }
+	}
+
+	return await rasterizeSvgThumb(new TextDecoder().decode(bytes))
+}
+
 export const generatePdfThumb: ThumbGenerator = async item => {
 	let bytes: Uint8Array
 
@@ -286,9 +381,10 @@ export const generatePdfThumb: ThumbGenerator = async item => {
 // the drive.newDirectory def in features/drive/lib/keymap.ts). features/drive/lib/thumbnails.ts (the service)
 // deliberately never imports this module itself — it already exposes registerThumbGenerator as a
 // seam specifically so it doesn't need to know these generators exist, and importing back would cycle
-// — so whichever consumer wants thumbnails (sdk/video/pdf) must import this module at least once,
+// — so whichever consumer wants thumbnails (sdk/video/pdf/svg) must import this module at least once,
 // even just for this side effect, before requesting one; until then getThumbnailUrl's own
 // unregistered-category path (a clean null, never a throw) is all any item resolves to.
 registerThumbGenerator("sdk", generateSdkThumb)
 registerThumbGenerator("video", generateVideoThumb)
 registerThumbGenerator("pdf", generatePdfThumb)
+registerThumbGenerator("svg", generateSvgThumb)

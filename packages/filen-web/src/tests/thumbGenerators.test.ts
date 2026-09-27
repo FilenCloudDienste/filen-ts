@@ -63,7 +63,14 @@ const { allowedMediaContentTypeMock } = vi.hoisted(() => ({ allowedMediaContentT
 
 vi.mock("@/features/preview/lib/mediaType", () => ({ allowedMediaContentType: allowedMediaContentTypeMock }))
 
-import { generateSdkThumb, generateVideoThumb, generatePdfThumb, warmUploadThumbnail } from "@/features/drive/lib/thumbGenerators"
+import {
+	generateSdkThumb,
+	generateVideoThumb,
+	generatePdfThumb,
+	generateSvgThumb,
+	rasterizeSvgThumb,
+	warmUploadThumbnail
+} from "@/features/drive/lib/thumbGenerators"
 
 // Captured immediately after import: registerThumbGenerator only ever runs once, as a module-scope
 // side effect at import time (see thumbGenerators.ts's own closing comment) — this must be read
@@ -142,12 +149,13 @@ beforeEach(() => {
 })
 
 describe("registration", () => {
-	// sdk/video/pdf only: the old image and heic arms are gone, both folded into the single sdk arm.
-	it("registers sdk/video/pdf generators exactly once, at import", () => {
+	// The old image and heic arms are gone, both folded into the single sdk arm.
+	it("registers sdk/video/pdf/svg generators exactly once, at import", () => {
 		expect(registrationCallsAtImport).toEqual([
 			["sdk", generateSdkThumb],
 			["video", generateVideoThumb],
-			["pdf", generatePdfThumb]
+			["pdf", generatePdfThumb],
+			["svg", generateSvgThumb]
 		])
 	})
 })
@@ -294,8 +302,7 @@ describe("warmUploadThumbnail", () => {
 
 	it.each([
 		["clip.mp4", "video/mp4"],
-		["doc.pdf", "application/pdf"],
-		["vector.svg", "image/svg+xml"]
+		["doc.pdf", "application/pdf"]
 	])("does nothing for %s — not the sdk category", (name, mime) => {
 		warmUploadThumbnail(namedFile(name, mime, { canMakeThumbnail: true }), browserFile(name))
 
@@ -359,6 +366,48 @@ describe("warmUploadThumbnail", () => {
 		}
 
 		await expect(produce()).resolves.toEqual({ type: "unanswered" })
+	})
+
+	// An svg is rasterised from the local text, never handed to the SDK. A rejected document is a
+	// verdict about its markup, which the drive-side arm would read the same.
+	it("seeds an svg from the local file and settles a rejected document as 'none'", async () => {
+		warmUploadThumbnail(namedFile("logo.svg", "image/svg+xml"), new File(["<html></html>"], "logo.svg"))
+
+		const produce = seedThumbnailMock.mock.calls[0]?.[1]
+
+		if (produce === undefined) {
+			throw new Error("expected a seeded production")
+		}
+
+		await expect(produce()).resolves.toEqual({ type: "none" })
+		expect(makeSdkThumbnailFromFileMock).not.toHaveBeenCalled()
+	})
+})
+
+// The branches reachable before an <img> is created; the rasterising itself is proven live (the e2e leg).
+describe("rasterizeSvgThumb — refusals (no DOM element ever created)", () => {
+	it("refuses a document whose root is not <svg>", async () => {
+		await expect(rasterizeSvgThumb("<html><body/></html>")).resolves.toEqual({ type: "unavailable", reason: "unsupported" })
+	})
+
+	it("refuses an entity-expansion bomb", async () => {
+		const bomb = '<?xml version="1.0"?><!DOCTYPE svg [<!ENTITY a "lol"><!ENTITY b "&a;&a;&a;">]><svg>&b;</svg>'
+
+		await expect(rasterizeSvgThumb(bomb)).resolves.toEqual({ type: "unavailable", reason: "unsupported" })
+	})
+
+	it("calls an unterminated root tag corrupt", async () => {
+		await expect(rasterizeSvgThumb('<svg width="10')).resolves.toEqual({ type: "unavailable", reason: "corrupt" })
+	})
+})
+
+describe("generateSvgThumb", () => {
+	it("fails, counting toward the blacklist, when the download fails", async () => {
+		downloadFileBytesMock.mockRejectedValue(new Error("network"))
+
+		await expect(generateSvgThumb(itemAsBaseFile(narrowItem(namedFile("logo.svg", "image/svg+xml"))))).resolves.toEqual({
+			type: "failed"
+		})
 	})
 })
 

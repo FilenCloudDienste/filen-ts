@@ -10,11 +10,11 @@ import { type DriveViewMode } from "@/features/drive/lib/preferences"
 import { createThumbnailUrlCache, computeThumbnailCapacity } from "@/features/drive/lib/thumbnailUrlCache"
 
 // No declared mime on rendered thumbnail blobs: the format genuinely varies by producer. The SDK arm
-// always encodes webp in wasm, while the video/pdf canvas encodes are webp where the browser supports
-// it and legally fall back to jpeg where it doesn't — so a hardcoded label would lie for some of these
-// bytes, and the OPFS cache-hit path (a raw File for a .thumb extension) carries no reliable type
-// either. <img> sources are content-sniffed regardless, so untyped is the one consistent, honest
-// option for every path.
+// always encodes webp in wasm, while the video/pdf/svg canvas encodes are webp where the browser
+// supports it and legally fall back to jpeg (png for svg) where it doesn't — so a hardcoded label
+// would lie for some of these bytes, and the OPFS cache-hit path (a raw File for a .thumb extension)
+// carries no reliable type either. <img> sources are content-sniffed regardless, so untyped is the
+// one consistent, honest option for every path.
 
 // How many generation attempts (OPFS read + generator) run at once, app-wide — shapes DEMAND on the
 // CPU/SDK-download layer, never a limit the SDK itself needs (never reimplement SDK-side
@@ -27,7 +27,7 @@ const CONCURRENT_GENERATIONS = 3
 // unimplemented category). A SETTLED verdict is NOT one of these; see `unavailable` below.
 const BLACKLIST_LIMIT = 3
 
-// Every non-"none" category routes through the generator registry — sdk/video/pdf alike. The service
+// Every non-"none" category routes through the generator registry — sdk/video/pdf/svg alike. The service
 // itself stays producer-agnostic: whether a category's bytes come out of the Rust SDK or a browser
 // decode is entirely the registered generator's business.
 export type ThumbGeneratorCategory = Exclude<ThumbnailCategory, "none">

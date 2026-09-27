@@ -1,16 +1,17 @@
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import { extensionOf } from "@/features/drive/lib/preview.logic"
 
-// Every category this app can produce a cached thumbnail for. "sdk" is every STILL image — plain
-// raster, HEIC and camera RAW alike — decoded by the Rust SDK, which is the only decoder any of them
-// ever sees now. "video" and "pdf" stay client-side because Rust decodes neither. "none" covers every
-// directory arm, an undecryptable file, svg, a pdf over the size gate, and anything the SDK itself
-// says it cannot thumbnail.
-export type ThumbnailCategory = "sdk" | "video" | "pdf" | "none"
+// Every category this app can produce a cached thumbnail for. "sdk" is every STILL raster image —
+// plain raster, HEIC and camera RAW alike — decoded by the Rust SDK, which is the only decoder any of
+// them ever sees now. "video", "pdf" and "svg" stay client-side because Rust decodes none of them.
+// "none" covers every directory arm, an undecryptable file, a pdf or svg over its size gate, and
+// anything the SDK itself says it cannot thumbnail.
+export type ThumbnailCategory = "sdk" | "video" | "pdf" | "svg" | "none"
 
 // The thumbnail's width bound, shared by every producer — one target keeps every cached .thumb file
-// roughly the same size. The video and pdf generators use it for both dimensions (a square fit); the
-// SDK arm pairs it with THUMB_SDK_MAX_HEIGHT below instead, for the reason documented there.
+// roughly the same size. The video and pdf generators use it for both dimensions (a square fit), the
+// svg one for its long side, and the SDK arm pairs it with THUMB_SDK_MAX_HEIGHT below instead, for the
+// reason documented there.
 //
 // 384 is sized to the largest tile this app renders, not the smallest: the photos grid's density
 // steps top out at a 320px tile (gridDensity.ts), which is 640 real pixels at 2x DPR. The old 256
@@ -37,6 +38,11 @@ export const THUMB_SDK_MAX_HEIGHT = THUMB_MAX_DIM * 2
 // except to throw away the one case that matters most: a 90 MB RAW whose camera already embedded a
 // full-size JPEG the SDK can lift out with a couple of range reads.
 export const THUMB_SIZE_GATE = 67_108_864n
+
+// Whole-document ceiling (4 MiB) for an svg, which is read whole and parsed and rasterised on the main
+// thread (only a DOM <img> renders one). Real icons and illustrations sit far below it; past it lies
+// map or plot data whose parse and paint would stall the page for a tile-sized picture.
+export const THUMB_SVG_SIZE_GATE = 4_194_304n
 
 // The working memory the SDK allots one thumbnail decode (microthumb's APP_PROCESS_MEM_BUDGET). A
 // different axis from THUMB_SIZE_GATE above — bytes of MEMORY, not bytes of source — that happens to
@@ -105,9 +111,8 @@ const VIDEO_EXTENSIONS = new Set(["mp4", "mov", "webm", "m4v", "mkv"])
 // the client-side generators that DO handle them — they have to be claimed by extension first.
 //
 //   1. directory / undecryptable -> none   (nothing to route on)
-//   2. svg                       -> none   (defense in depth; the wasm build has no SVG rasteriser
-//                                           either way, so this is belt-and-braces on the long-standing
-//                                           "never feed an untrusted svg to a decoder" posture)
+//   2. svg, at/under the gate    -> svg    (client-side: rasterised through an <img>, whose secure
+//                                           mode runs no script; never handed to the SDK's decoders)
 //   3. video extension           -> video  (client-side: one frame off the SW's Range stream)
 //   4. pdf, at/under the gate    -> pdf    (client-side: pdf.js, the one whole-buffer decode left)
 //   5. canMakeThumbnail === true -> sdk    (every still image; the SDK's own answer, never guessed)
@@ -128,7 +133,7 @@ export function thumbnailCategory(item: DriveItem): ThumbnailCategory {
 	const ext = name !== undefined ? extensionOf(name) : ""
 
 	if (ext === "svg") {
-		return "none"
+		return base.data.size <= THUMB_SVG_SIZE_GATE ? "svg" : "none"
 	}
 
 	if (VIDEO_EXTENSIONS.has(ext)) {
