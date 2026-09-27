@@ -13,7 +13,14 @@ describe("CSV", () => {
 		const bytes = encoder.encode(source)
 		const { rows, format } = parseCsvFile(bytes, false)
 
-		expect(format).toEqual({ delimiter: ";", lineSeparator: "\r\n", bom: true, trailingNewline: true, encoding: "utf-8" })
+		expect(format).toEqual({
+			delimiter: ";",
+			lineSeparator: "\r\n",
+			bom: true,
+			trailingNewline: true,
+			encoding: "utf-8",
+			writable: true
+		})
 		expect(rows).toEqual([
 			["name", "amount"],
 			["Smith; J", "012"]
@@ -22,7 +29,8 @@ describe("CSV", () => {
 	})
 
 	it("keeps values as their text, leading zeros and all", () => {
-		const doc = csvDoc(parseCsvFile(encoder.encode("id,zip\n1,007\n"), false).rows)
+		const { rows, format } = parseCsvFile(encoder.encode("id,zip\n1,007\n"), false)
+		const doc = csvDoc(rows, format.writable)
 
 		expect(doc.sheets[0]?.cells.get(cellKey(1, 1))).toEqual({ text: "007", numeric: true })
 	})
@@ -48,6 +56,33 @@ describe("CSV", () => {
 
 	it("reads tab-separated files as such", () => {
 		expect(parseCsvFile(encoder.encode("a\tb,c\n"), true).rows).toEqual([["a", "b,c"]])
+	})
+
+	it("opens a non-windows-1252 legacy encoding read-only instead of mangling it on save", () => {
+		// 0x81 is undefined in windows-1252; a non-fatal decode still returns it rather than throwing, so
+		// this is the only signal that the bytes are some other single-byte encoding (Shift-JIS, GBK, ...).
+		const { format } = parseCsvFile(new Uint8Array([0x63, 0x61, 0x81, 0x2c, 0x62]), false)
+
+		expect(format.encoding).toBe("windows-1252")
+		expect(format.writable).toBe(false)
+	})
+
+	it("keeps a genuine windows-1252 export writable", () => {
+		const { format } = parseCsvFile(new Uint8Array([0x63, 0x61, 0x66, 0xe9, 0x2c, 0x80]), false)
+
+		expect(format.encoding).toBe("windows-1252")
+		expect(format.writable).toBe(true)
+	})
+
+	it("does not mistake a newline inside a quoted field for the row separator", () => {
+		const source = '"x\ny",b\r\n1,2\r\n'
+		const { rows, format } = parseCsvFile(encoder.encode(source), false)
+
+		expect(format.lineSeparator).toBe("\r\n")
+		expect(rows).toEqual([
+			["x\ny", "b"],
+			["1", "2"]
+		])
 	})
 })
 

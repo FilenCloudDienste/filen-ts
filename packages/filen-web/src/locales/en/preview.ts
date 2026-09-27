@@ -190,6 +190,10 @@ export const preview = {
 		"This can't be changed here: the workbook has charts, tables, conditional formats, validations or named ranges that depend on its rows, columns and sheet names.",
 	/** Toast — a sheet name is taken or has characters Excel doesn't allow (\ / ? * [ ] :, at most 31 characters) */
 	previewSpreadsheetSheetNameInvalid: "That sheet name is already used or isn't allowed.",
+	/** Toast — an edit covers only part of an array formula's range */
+	previewSpreadsheetArrayFormula: "Part of an array formula can't be changed. Select its whole range to replace it.",
+	/** Toast — an edit would change the text of a table's header cell */
+	previewSpreadsheetTableHeader: "A table's header can't be renamed here: formulas that refer to the column by name would break.",
 	/** Toast — an edit reaches past what can be changed at once, or past a sheet's size */
 	previewSpreadsheetTooLarge: "That's more than can be changed at once.",
 	/** Toast — an edit failed unexpectedly */
@@ -198,6 +202,8 @@ export const preview = {
 	previewSpreadsheetReadOnlyUnsafe: "Read-only here: this file has parts that can't be saved safely.",
 	/** Spreadsheet viewer — note beside the cell contents when a file opens read-only because its name has no spreadsheet extension */
 	previewSpreadsheetReadOnlyUnnamed: "Read-only here: the file name doesn't say which spreadsheet format it is.",
+	/** Spreadsheet viewer — note beside the cell contents when an open file was renamed to another format's extension, so saving it under that name would mislabel it */
+	previewSpreadsheetReadOnlyRenamed: "Read-only here: the file name no longer matches its format.",
 	/** Spreadsheet grid — below a sheet too tall to show whole; {{rows}} is the number of rows shown, already formatted */
 	previewSpreadsheetRowsTruncated: "Showing the first {{rows}} rows. Rows further down can't be shown here.",
 

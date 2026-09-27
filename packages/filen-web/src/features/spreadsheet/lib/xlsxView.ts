@@ -122,9 +122,10 @@ export class WorkbookViews {
 
 	// One cell's view, or null for a cell with nothing to show.
 	cell(sheet: Sheet, row: number, col: number): CellView | null {
-		const value = sheet.rows[row]?.[col]
-		const cell = sheet.cells?.get(`${String(row)},${String(col)}`)
+		return this.view(sheet.rows[row]?.[col], sheet.cells?.get(`${String(row)},${String(col)}`))
+	}
 
+	view(value: CellValue | undefined, cell: Cell | undefined): CellView | null {
 		if ((value === null || value === undefined) && cell === undefined) {
 			return null
 		}
@@ -154,6 +155,29 @@ export class WorkbookViews {
 function sheetView(sheet: Sheet, views: WorkbookViews, lockStructure: boolean): SheetView {
 	const cells = new Map<number, CellView>()
 	let colCount = 0
+	// Cells with details are read from their map once, rather than looked up by a string key at every
+	// position; the positions they cover are skipped when the plain values are read.
+	const detailed = new Set<number>()
+
+	for (const [cellId, cell] of sheet.cells ?? []) {
+		const comma = cellId.indexOf(",")
+		const row = Number(cellId.slice(0, comma))
+		const col = Number(cellId.slice(comma + 1))
+		const values = sheet.rows[row]
+
+		if (values === undefined || col >= values.length) {
+			continue
+		}
+
+		const at = cellKey(row, col)
+		const view = views.view(values[col], cell)
+
+		detailed.add(at)
+
+		if (view !== null) {
+			cells.set(at, view)
+		}
+	}
 
 	for (let row = 0; row < sheet.rows.length; row++) {
 		const values = sheet.rows[row] ?? []
@@ -161,10 +185,22 @@ function sheetView(sheet: Sheet, views: WorkbookViews, lockStructure: boolean): 
 		colCount = Math.max(colCount, values.length)
 
 		for (let col = 0; col < values.length; col++) {
-			const view = views.cell(sheet, row, col)
+			const value = values[col]
+
+			if (value === null || value === undefined) {
+				continue
+			}
+
+			const at = cellKey(row, col)
+
+			if (detailed.size > 0 && detailed.has(at)) {
+				continue
+			}
+
+			const view = views.view(value, undefined)
 
 			if (view !== null) {
-				cells.set(cellKey(row, col), view)
+				cells.set(at, view)
 			}
 		}
 	}
@@ -242,8 +278,36 @@ export function structureLocked(sheet: Sheet): boolean {
 		(sheet.images?.length ?? 0) > 0 ||
 		sheet.autoFilter !== undefined ||
 		(sheet.sparklines?.length ?? 0) > 0 ||
-		(sheet.charts?.length ?? 0) > 0
+		(sheet.charts?.length ?? 0) > 0 ||
+		// Kept in their own part, which saving copies as read while the notes they pair with move.
+		(sheet.threadedComments?.length ?? 0) > 0 ||
+		hasArrayFormulas(sheet)
 	)
+}
+
+const arraySheets = new WeakMap<Sheet, boolean>()
+
+// Whether the sheet holds array formulas (legacy or spilling), whose ranges saving writes as read: they
+// cannot move with inserted or deleted rows. Looked up once per sheet, at its first view: edits never add
+// one, and a sheet that loses its last stays locked.
+export function hasArrayFormulas(sheet: Sheet): boolean {
+	let found = arraySheets.get(sheet)
+
+	if (found === undefined) {
+		found = false
+
+		for (const cell of sheet.cells?.values() ?? []) {
+			if (cell.formulaType === "array") {
+				found = true
+
+				break
+			}
+		}
+
+		arraySheets.set(sheet, found)
+	}
+
+	return found
 }
 
 // Whether something names ranges on any sheet, so no sheet's rows or columns may move: defined names, and

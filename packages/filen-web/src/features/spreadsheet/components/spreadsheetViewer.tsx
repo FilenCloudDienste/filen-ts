@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type RefObject } from "react"
+import { useEffect, useLayoutEffect, useRef, useState, type FocusEvent, type KeyboardEvent, type RefObject } from "react"
 import { flushSync } from "react-dom"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
@@ -77,7 +77,7 @@ function CellEditor({
 	value: string
 	onChange: (text: string) => void
 	onKeyDown: (event: KeyboardEvent<HTMLInputElement>) => void
-	onBlur: () => void
+	onBlur: (event: FocusEvent<HTMLInputElement>) => void
 }) {
 	const inputRef = useRef<HTMLInputElement>(null)
 
@@ -103,6 +103,14 @@ function CellEditor({
 	)
 }
 
+const REFUSED_MESSAGES = {
+	structureLocked: "previewSpreadsheetStructureLocked",
+	sheetName: "previewSpreadsheetSheetNameInvalid",
+	tooLarge: "previewSpreadsheetTooLarge",
+	arrayFormula: "previewSpreadsheetArrayFormula",
+	tableHeader: "previewSpreadsheetTableHeader"
+} as const satisfies Record<Extract<EditResult, { type: "refused" }>["reason"], string>
+
 type Move = "down" | "up" | "right" | "left" | "none"
 
 const MOVE_KEYS = { down: "ArrowDown", up: "ArrowUp", right: "ArrowRight", left: "ArrowLeft" } as const
@@ -125,6 +133,7 @@ function SpreadsheetBody({
 	alt,
 	editable,
 	unnamed,
+	renamed,
 	onDirtyChange,
 	saveRef
 }: {
@@ -133,20 +142,23 @@ function SpreadsheetBody({
 	alt: string
 	editable: boolean
 	unnamed: boolean
+	renamed: boolean
 	onDirtyChange: ((dirty: boolean) => void) | undefined
 	saveRef: RefObject<SpreadsheetSaveSource | null> | undefined
 }) {
 	const { t } = useTranslation("preview")
 	const edits = useSpreadsheetEdits(id, initial)
 	const doc = edits.doc
-	const canEdit = editable && doc.writable && !unnamed
+	const canEdit = editable && doc.writable && !unnamed && !renamed
 	const readOnlyNote = !editable
 		? null
 		: unnamed
 			? t("previewSpreadsheetReadOnlyUnnamed")
-			: !doc.writable && doc.kind !== "xls"
-				? t("previewSpreadsheetReadOnlyUnsafe")
-				: null
+			: renamed
+				? t("previewSpreadsheetReadOnlyRenamed")
+				: !doc.writable && doc.kind !== "xls"
+					? t("previewSpreadsheetReadOnlyUnsafe")
+					: null
 	const [chosenSheet, setChosenSheet] = useState(doc.activeSheet)
 	// An undone "add sheet" can take away the sheet on show.
 	const sheetIndex = Math.max(0, Math.min(chosenSheet, doc.sheets.length - 1))
@@ -158,8 +170,14 @@ function SpreadsheetBody({
 	// in, and that blur's handler still sees the same entry: without this it would be committed again.
 	const finished = useRef<Editing | null>(null)
 	const gridRef = useRef<HTMLDivElement | null>(null)
+	const barRef = useRef<HTMLInputElement>(null)
 	const alive = useRef(true)
 	const clipboardRef = useRef<((event: ClipboardEvent) => void) | null>(null)
+	// An entry open when editing stops being possible (the file renamed meanwhile) could not be saved.
+	if (!canEdit && editing !== null) {
+		setEditing(null)
+	}
+
 	const sheet = doc.sheets[sheetIndex] ?? NO_SHEET
 	const selection = selections.get(sheetIndex) ?? ORIGIN
 	const range = selectionRange(selection)
@@ -189,15 +207,7 @@ function SpreadsheetBody({
 			return
 		}
 
-		toast.error(
-			t(
-				result.reason === "structureLocked"
-					? "previewSpreadsheetStructureLocked"
-					: result.reason === "sheetName"
-						? "previewSpreadsheetSheetNameInvalid"
-						: "previewSpreadsheetTooLarge"
-			)
-		)
+		toast.error(t(REFUSED_MESSAGES[result.reason]))
 	}
 
 	function apply(op: EditOp): void {
@@ -538,8 +548,11 @@ function SpreadsheetBody({
 										setEditing({ ...editing, text })
 									}}
 									onKeyDown={handleEditorKey}
-									onBlur={() => {
-										commit("none")
+									onBlur={event => {
+										// Into the formula bar, the entry carries on there.
+										if (event.relatedTarget !== barRef.current) {
+											commit("none")
+										}
 									}}
 								/>
 							)
@@ -578,6 +591,7 @@ function SpreadsheetBody({
 				</span>
 				{canEdit ? (
 					<input
+						ref={barRef}
 						aria-label={t("previewSpreadsheetCellContents")}
 						value={editing === null ? activeInput : editing.text}
 						className="h-7 min-w-0 flex-1 rounded-md bg-transparent px-2 font-mono text-xs outline-none focus-visible:bg-muted/60"
@@ -766,6 +780,7 @@ function SpreadsheetViewer({ item, documentKey, alt, editable, onDirtyChange, sa
 					alt={alt}
 					editable={editable === true}
 					unnamed={state.unnamed}
+					renamed={state.renamed}
 					onDirtyChange={onDirtyChange}
 					saveRef={saveRef}
 				/>

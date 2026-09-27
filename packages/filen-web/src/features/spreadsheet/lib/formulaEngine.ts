@@ -39,6 +39,9 @@ export interface EngineName {
 	scope?: number
 }
 
+// A circular reference. Excel, not iterating, shows 0 for it; iterating, the result it stored.
+export const CYCLE = "#CYCLE!"
+
 // Excel's own error texts, which the files store and the grid shows.
 const ERROR_TEXT: Readonly<Partial<Record<ErrorType, string>>> = {
 	[ErrorType.DIV_BY_ZERO]: "#DIV/0!",
@@ -47,7 +50,7 @@ const ERROR_TEXT: Readonly<Partial<Record<ErrorType, string>>> = {
 	[ErrorType.NUM]: "#NUM!",
 	[ErrorType.NA]: "#N/A",
 	[ErrorType.REF]: "#REF!",
-	[ErrorType.CYCLE]: "#REF!",
+	[ErrorType.CYCLE]: CYCLE,
 	[ErrorType.SPILL]: "#SPILL!"
 }
 
@@ -55,6 +58,9 @@ const INSERT_RUN = 10_000
 
 // What the engine gives back for a formula it could not read at all.
 const PARSE_ERROR = "#ERROR!"
+
+// Content standing in for a formula the engine cannot be given: text reading as its parse error.
+export const UNPARSEABLE = `'${PARSE_ERROR}`
 
 function exported(value: unknown): RecalculatedCell["value"] {
 	if (value instanceof DetailedCellError) {
@@ -226,7 +232,14 @@ export class FormulaEngine {
 		this.collect(
 			this.engine.batch(() => {
 				for (const cell of cells) {
-					this.engine.setCellContents({ sheet: id, row: cell.row, col: cell.col }, cell.content)
+					const address = { sheet: id, row: cell.row, col: cell.col }
+
+					try {
+						this.engine.setCellContents(address, cell.content)
+					} catch {
+						// A formula the parser overflows on: it holds what it stored, or reads as unparseable.
+						this.engine.setCellContents(address, cell.fallback ?? UNPARSEABLE)
+					}
 				}
 			}),
 			changes
@@ -242,7 +255,7 @@ export class FormulaEngine {
 	// Whether a result is the engine failing rather than the formula (a function it lacks, syntax it cannot
 	// read, an array it spills where Excel does not): the file's own result is kept.
 	static unsupported(value: unknown): boolean {
-		return value === "#NAME?" || value === PARSE_ERROR || value === "#SPILL!"
+		return value === "#NAME?" || value === PARSE_ERROR || value === "#SPILL!" || value === CYCLE
 	}
 
 	insert(sheet: number, axis: "rows" | "cols", at: number, count: number): RecalculatedCell[] {

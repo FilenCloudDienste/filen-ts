@@ -12,6 +12,8 @@ import { emitPreviewFileMetaChanged, subscribePreviewReconcile, type PreviewReco
 import type { FileMeta } from "@filen/sdk-rs"
 import { isRevisionOf, settleHeldRevisions, type PreviewRevision } from "@/features/preview/lib/remoteChange.logic"
 import { type PreviewSource } from "@/features/preview/lib/previewSource"
+import { usePreviewCacheScope } from "@/features/preview/lib/accessMode"
+import { loadPreviewBytes } from "@/features/preview/lib/previewCache"
 import { setPreviewDirty, usePreviewUnsavedGuardStore } from "@/features/preview/store/usePreviewUnsavedGuard"
 import { queryClient } from "@/queries/client"
 import { sdkApi } from "@/lib/sdk/client"
@@ -355,19 +357,23 @@ function handleEvent(ctx: RemoteChangeContext, event: PreviewReconcileEvent): vo
 
 // The upload behind the hook's saveMineAsNewFile; null when there was nothing to write or the upload
 // failed (the failure already told). Module scope: the React Compiler cannot lower an await inside a
-// conditional expression, and would skip the whole hook.
+// conditional expression, and would skip the whole hook. `bytes`: a copy of what was uploaded (the upload
+// hands its buffer to the SDK worker), kept only where the preview goes on to show the new file.
 async function writeAsNewFile(
 	asked: RemoteChangePrompt,
 	item: DriveItem,
 	readEdits: () => Promise<string | Uint8Array | null>,
 	t: TFunction<"preview">
-): Promise<{ item: DriveItem; name: string } | null> {
-	const content = await readEdits()
+): Promise<{ item: DriveItem; name: string; bytes: Uint8Array | null } | null> {
+	const edits = await readEdits()
 	const base = asDirectoryOrFile(item)
 
-	if (content === null || base.type !== "file") {
+	if (edits === null || base.type !== "file") {
 		return null
 	}
+
+	const content = typeof edits === "string" ? new TextEncoder().encode(edits) : edits
+	const bytes = asked.kind === "deleted" ? content.slice() : null
 
 	const rootUuid = currentRootUuid()
 	const parent = normalizeParentUuid(base.data.parent, rootUuid)
@@ -388,7 +394,7 @@ async function writeAsNewFile(
 		return null
 	}
 
-	return { item: outcome.item, name }
+	return { item: outcome.item, name, bytes }
 }
 
 // Keeps an open preview on the latest version of its files, and asks before that would lose unsaved
@@ -405,6 +411,7 @@ export function usePreviewRemoteChanges({
 	onItemRemoved
 }: UsePreviewRemoteChangesParams) {
 	const { t } = useTranslation("preview")
+	const cacheScope = usePreviewCacheScope()
 	const [prompt, setPromptState] = useState<RemoteChangePrompt | null>(null)
 	const promptRef = useRef<RemoteChangePrompt | null>(null)
 	const [pending, setPending] = useState(false)
@@ -588,7 +595,20 @@ export function usePreviewRemoteChanges({
 
 		setPrompt(null)
 		dropBuffer()
-		commitSaved(asked.frozenUuid, newest.kind === "revised" ? newest.theirs : outcome.item)
+
+		if (newest.kind === "revised") {
+			commitSaved(asked.frozenUuid, newest.theirs)
+		} else {
+			// The preview reopens on the new file without downloading what it just uploaded.
+			if (outcome.bytes !== null) {
+				const bytes = outcome.bytes
+
+				void loadPreviewBytes(cacheScope, outcome.item.data.uuid, bytes.byteLength, () => Promise.resolve(bytes))
+			}
+
+			commitSaved(asked.frozenUuid, outcome.item)
+		}
+
 		toast.success(t("previewSavedAsNewFile", { name: outcome.name }))
 	}
 

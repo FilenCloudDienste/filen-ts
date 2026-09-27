@@ -116,6 +116,39 @@ describe("applyEditResult", () => {
 	})
 })
 
+describe("applyEditResult for structural edits", () => {
+	const doc: SpreadsheetDoc = {
+		kind: "xlsx",
+		activeSheet: 0,
+		styles: [],
+		writable: true,
+		sheets: [sheetView("One", [[cellKey(0, 0), view("1")]]), sheetView("Two", [[cellKey(0, 0), view("2")]])]
+	}
+
+	it("keeps the sheets sent as unchanged, and replaces the rest", () => {
+		const before = gridDoc(doc)
+		const after = applyEditResult(before, {
+			type: "sheets",
+			sheets: [null, sheetView("Two", [[cellKey(1, 0), view("x")]]), sheetView("Three", [])],
+			styles: [],
+			state: STATE
+		})
+
+		expect(after.sheets).toHaveLength(3)
+		expect(after.sheets[0]).toBe(before.sheets[0])
+		expect(after.sheets[1]?.cells.get(cellKey(1, 0))?.text).toBe("x")
+		expect(after.sheets[2]?.name).toBe("Three")
+	})
+
+	it("drops a sheet when the count shrinks, as undoing an added sheet does", () => {
+		const before = gridDoc({ ...doc, sheets: [...doc.sheets, sheetView("Three", [])] })
+		const after = applyEditResult(before, { type: "sheets", sheets: [null, null], styles: [], state: STATE })
+
+		expect(after.sheets).toEqual([before.sheets[0], before.sheets[1]])
+		expect(after.sheets[1]).toBe(before.sheets[1])
+	})
+})
+
 describe("gridMove over hidden rows, columns and merges", () => {
 	const at = (row: number, col: number) => ({ anchor: { row, col }, focus: { row, col } })
 	const key = (name: string, extra: Partial<{ shiftKey: boolean; ctrlKey: boolean; metaKey: boolean; altKey: boolean }> = {}) => ({
@@ -169,6 +202,20 @@ describe("sheetRows", () => {
 		expect(tall.axis.total).toBeLessThanOrEqual(15_000_000)
 		expect(short.truncated).toBe(false)
 		expect(short.axis.count).toBe(1100)
+	})
+})
+
+describe("sheet axes", () => {
+	it("are reused after a cell edit, which keeps the sizes, and rebuilt when the sizes change", () => {
+		const sheet = sheetView("S", [], { rowHeights: new Map([[3, 40]]), colWidths: new Map([[1, 10]]) })
+		const edited = { ...sheet, cells: new Map([[0, view("x")]]) }
+		const resized = { ...sheet, rowHeights: new Map([[3, 50]]) }
+
+		expect(sheetRows(edited)).toBe(sheetRows(sheet))
+		expect(sheetCols(edited)).toBe(sheetCols(sheet))
+		expect(sheetRows(resized)).not.toBe(sheetRows(sheet))
+		expect(sheetRows(resized).axis.size(3)).toBe(50)
+		expect(sheetRows({ ...sheet, rowCount: 500 }).axis.count).toBe(600)
 	})
 })
 

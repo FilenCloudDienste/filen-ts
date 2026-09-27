@@ -3,10 +3,11 @@ import { isWorksheet } from "@/features/spreadsheet/lib/xlsxView"
 
 // Whether saveXlsx can write this workbook back without breaking it. It rewrites the workbook and every
 // worksheet from the model but keeps the parts it does not model (charts' drawings, pivot tables, threaded
-// comments, slicers) as the file had them, and re-attaches those to sheets by POSITION: the n-th sheet
-// gets xl/worksheets/sheet{n}.xml's relationships and threadedComment{n}.xml. It also writes a chart sheet
-// as an empty worksheet, and keeps only the workbook relationships it knows. Where any of that would move,
-// drop or orphan a part, the workbook opens view-only. When in doubt, it does.
+// comments) as the file had them, and re-attaches those to sheets by POSITION: the n-th sheet gets
+// xl/worksheets/sheet{n}.xml's relationships and threadedComment{n}.xml. It writes a chart sheet as an
+// empty worksheet, and only the relationships it knows. So every relationship must be of a kind it writes
+// back whole (a whitelist, with drawings and VML checked for what they hold), or the workbook opens
+// view-only. When in doubt, it does.
 
 interface Relationship {
 	id: string
@@ -91,7 +92,7 @@ function typeName(type: string): string {
 	return type.slice(type.lastIndexOf("/") + 1)
 }
 
-function rawEntries(workbook: RoundtripWorkbook): Map<string, Uint8Array> | null {
+export function rawEntries(workbook: RoundtripWorkbook): Map<string, Uint8Array> | null {
 	for (const symbol of Object.getOwnPropertySymbols(workbook)) {
 		if (symbol.description !== "hucre.xlsx.roundtripState") {
 			continue
@@ -107,11 +108,12 @@ function rawEntries(workbook: RoundtripWorkbook): Map<string, Uint8Array> | null
 	return null
 }
 
-// The package relationships saveXlsx writes again (it writes no others, and no content type for their parts).
-const ROOT_TYPES = new Set(["officeDocument", "core-properties", "extended-properties"])
+// The package relationships saveXlsx writes again. A thumbnail it would orphan is dropped (a preview
+// picture, nothing of the workbook), and so are custom properties while they hold none (as LibreOffice
+// writes them); saveXlsx cannot write back ones that hold something.
+const ROOT_TYPES = new Set(["officeDocument", "core-properties", "extended-properties", "thumbnail", "custom-properties"])
 
-// The workbook relationships saveXlsx writes again (calcChain it drops, which Excel rebuilds). Slicer and
-// timeline caches it writes too, but not the workbook's references to them.
+// The workbook relationships saveXlsx writes again (calcChain it drops, which Excel rebuilds).
 const WORKBOOK_TYPES = new Set([
 	"worksheet",
 	"styles",
@@ -127,12 +129,46 @@ const WORKBOOK_TYPES = new Set([
 	"calcChain"
 ])
 
+// The sheet relationships saveXlsx writes again or keeps: drawings and legacy VML only as checked below,
+// printer settings dropped (saveXlsx no longer points at them).
+const SHEET_TYPES = new Set([
+	"hyperlink",
+	"drawing",
+	"vmlDrawing",
+	"comments",
+	"table",
+	"image",
+	"threadedComment",
+	"pivotTable",
+	"printerSettings"
+])
+
 // Sheet relationships to parts saveXlsx keeps rather than writes.
-const PRESERVED_SHEET_TYPES = new Set(["drawing", "pivotTable", "slicer", "timeline", "threadedComment"])
+const PRESERVED_SHEET_TYPES = new Set(["drawing", "pivotTable", "threadedComment"])
 
 // A drawing that holds a chart, as saveXlsx tells (a c:chart element).
-function hasChart(bytes: Uint8Array | undefined): boolean {
-	return bytes !== undefined && /:chart[\s>/]/.test(decoder.decode(bytes))
+function hasChart(xml: string | undefined): boolean {
+	return xml !== undefined && /:chart[\s>/]/.test(xml)
+}
+
+function count(xml: string, pattern: RegExp): number {
+	return xml.match(pattern)?.length ?? 0
+}
+
+// A drawing without charts is written anew from the sheet's pictures: it must hold nothing else (shapes,
+// connectors, groups, text boxes, which it would lose), and no picture detail it would lose (a crop, a
+// rotation, a link).
+function picturesOnly(xml: string, pictures: number): boolean {
+	const anchors = count(xml, /<(?:[\w.-]+:)?(?:twoCellAnchor|oneCellAnchor|absoluteAnchor)\b/g)
+
+	return (
+		anchors === pictures &&
+		count(xml, /<(?:[\w.-]+:)?pic\b/g) === pictures &&
+		!/<(?:[\w.-]+:)?(?:sp|cxnSp|grpSp|graphicFrame|contentPart|AlternateContent)\b/.test(xml) &&
+		!/<(?:[\w.-]+:)?srcRect\s+[a-z]/i.test(xml) &&
+		!/\brot="-?[1-9]/.test(xml) &&
+		!/hlinkClick|hlinkHover/.test(xml)
+	)
 }
 
 function numbered(path: string, pattern: RegExp): number | null {
@@ -141,24 +177,44 @@ function numbered(path: string, pattern: RegExp): number | null {
 	return match === null ? null : Number(match[1])
 }
 
-export function xlsxWritable(workbook: RoundtripWorkbook): boolean {
+// What saving needs to know: whether the workbook can be written back intact, the parts to drop from what
+// saveXlsx copies (it would leave them orphaned), and whether the workbook lacks the theme saveXlsx always
+// points it at.
+export interface SavePlan {
+	writable: boolean
+	drop: string[]
+	addTheme: boolean
+}
+
+const VIEW_ONLY: SavePlan = { writable: false, drop: [], addTheme: false }
+
+export function xlsxSavePlan(workbook: RoundtripWorkbook): SavePlan {
 	const raw = rawEntries(workbook)
 
 	if (raw === null) {
-		return false
+		return VIEW_ONLY
 	}
 
-	// Part names compare case-insensitively.
+	// Part names compare case-insensitively; `paths` gives back each one as stored.
 	const entries = new Map<string, Uint8Array>()
+	const stored = new Map<string, string>()
 
 	for (const [path, bytes] of raw) {
 		entries.set(path.toLowerCase(), bytes)
+		stored.set(path.toLowerCase(), path)
 	}
 
 	const text = (path: string): string | undefined => {
 		const bytes = entries.get(path.toLowerCase())
 
 		return bytes === undefined ? undefined : decoder.decode(bytes)
+	}
+
+	const drop: string[] = []
+	const dropPart = (path: string) => {
+		const original = stored.get(path.toLowerCase())
+
+		if (original !== undefined) drop.push(original)
 	}
 
 	const rootRels = relationships(text("_rels/.rels"))
@@ -169,28 +225,53 @@ export function xlsxWritable(workbook: RoundtripWorkbook): boolean {
 		resolve("", office.target).toLowerCase() !== "xl/workbook.xml" ||
 		rootRels.some(rel => !ROOT_TYPES.has(typeName(rel.type)))
 	) {
-		return false
+		return VIEW_ONLY
+	}
+
+	for (const rel of rootRels) {
+		const type = typeName(rel.type)
+		const path = resolve("", rel.target)
+
+		if (type === "custom-properties" && /<(?:[\w.-]+:)?property\b/.test(text(path) ?? "")) {
+			return VIEW_ONLY
+		}
+
+		if (type === "custom-properties" || type === "thumbnail") {
+			dropPart(path)
+		}
 	}
 
 	const workbookXml = text("xl/workbook.xml")
 	const workbookRels = relationships(text("xl/_rels/workbook.xml.rels"))
 
 	if (workbookXml === undefined || workbookRels.some(rel => !WORKBOOK_TYPES.has(typeName(rel.type)))) {
-		return false
+		return VIEW_ONLY
+	}
+
+	// saveXlsx drops calcPr: iterative calculation (and a workbook set to calculate by hand) would be lost.
+	const calc = elements(workbookXml, "calcPr")[0]
+	const iterate = calc?.get("iterate")
+
+	if (iterate === "1" || iterate === "true" || calc?.get("calcMode") === "manual") {
+		return VIEW_ONLY
 	}
 
 	const byId = new Map(workbookRels.map(rel => [rel.id, rel]))
 	const theme = workbookRels.find(rel => typeName(rel.type) === "theme")
 
-	// saveXlsx always points the workbook at theme/theme1.xml.
-	if (theme === undefined || resolve("xl", theme.target).toLowerCase() !== "xl/theme/theme1.xml" || !entries.has("xl/theme/theme1.xml")) {
-		return false
+	// saveXlsx always points the workbook at theme/theme1.xml; one without a theme (LibreOffice writes
+	// none) gets a default one added.
+	if (
+		theme !== undefined &&
+		(resolve("xl", theme.target).toLowerCase() !== "xl/theme/theme1.xml" || !entries.has("xl/theme/theme1.xml"))
+	) {
+		return VIEW_ONLY
 	}
 
 	const sheets = elements(workbookXml, "sheet")
 
 	if (sheets.length !== workbook.sheets.length || workbook.sheets.some(sheet => !isWorksheet(sheet))) {
-		return false
+		return VIEW_ONLY
 	}
 
 	const paths: string[] = []
@@ -200,7 +281,7 @@ export function xlsxWritable(workbook: RoundtripWorkbook): boolean {
 		const rel = id === undefined ? undefined : byId.get(id)
 
 		if (rel === undefined || typeName(rel.type) !== "worksheet") {
-			return false
+			return VIEW_ONLY
 		}
 
 		paths.push(resolve("xl", rel.target).toLowerCase())
@@ -214,39 +295,89 @@ export function xlsxWritable(workbook: RoundtripWorkbook): boolean {
 	})
 	const preserved =
 		[...entries.keys()].some(path => path.startsWith("xl/threadedcomments/")) ||
-		[...entries.keys()].some(
-			path =>
-				/^xl\/worksheets\/_rels\/[^/]+\.rels$/.test(path) &&
-				relationships(text(path)).some(rel => PRESERVED_SHEET_TYPES.has(typeName(rel.type)))
-		)
+		sheetRels.some(rels => rels.some(rel => PRESERVED_SHEET_TYPES.has(typeName(rel.type))))
 
 	if (preserved && !positional) {
-		return false
+		return VIEW_ONLY
 	}
 
 	for (const [index, rels] of sheetRels.entries()) {
 		const sheet = workbook.sheets[index]
 		const path = paths[index] ?? ""
 		const base = path.slice(0, path.lastIndexOf("/"))
+		const pictures = sheet?.images?.length ?? 0
 
-		// Threaded comments come back as threadedComment{n}.xml of the n-th sheet only.
+		if ((sheet?.textBoxes?.length ?? 0) > 0) {
+			return VIEW_ONLY
+		}
+
 		for (const rel of rels) {
-			if (
-				typeName(rel.type) === "threadedComment" &&
-				resolve(base, rel.target).toLowerCase() !== `xl/threadedcomments/threadedcomment${String(index + 1)}.xml`
-			) {
-				return false
+			const type = typeName(rel.type)
+			const target = resolve(base, rel.target).toLowerCase()
+
+			if (!SHEET_TYPES.has(type)) {
+				return VIEW_ONLY
+			}
+
+			switch (type) {
+				// Written anew from the model: the file's own parts go, whatever they were named.
+				case "printerSettings":
+				case "comments":
+					dropPart(target)
+					break
+				// Threaded comments come back as threadedComment{n}.xml of the n-th sheet only.
+				case "threadedComment":
+					if (target !== `xl/threadedcomments/threadedcomment${String(index + 1)}.xml`) return VIEW_ONLY
+					break
+				// Legacy VML is written anew from the cell notes: it may hold nothing but notes (no form
+				// controls, no header or footer pictures).
+				case "vmlDrawing": {
+					const vml = text(target) ?? ""
+
+					if (count(vml, /<(?:[\w.-]+:)?shape\b/g) !== count(vml, /ObjectType\s*=\s*["']Note["']/g)) return VIEW_ONLY
+					dropPart(target)
+					break
+				}
+				case "drawing": {
+					const drawing = text(target)
+
+					if (drawing === undefined) return VIEW_ONLY
+
+					if (hasChart(drawing)) {
+						// Kept as it is, with its charts: nothing either points at may be one of the parts
+						// saveXlsx writes anew (pictures, drawings).
+						if (pictures > 0) return VIEW_ONLY
+
+						const slash = target.lastIndexOf("/")
+						const drawingRels = relationships(text(`${target.slice(0, slash)}/_rels/${target.slice(slash + 1)}.rels`))
+
+						for (const drawingRel of drawingRels) {
+							const part = resolve(target.slice(0, slash), drawingRel.target).toLowerCase()
+
+							if (typeName(drawingRel.type) !== "chart") return VIEW_ONLY
+
+							const partSlash = part.lastIndexOf("/")
+
+							for (const chartRel of relationships(
+								text(`${part.slice(0, partSlash)}/_rels/${part.slice(partSlash + 1)}.rels`)
+							)) {
+								if (/^xl\/(media|drawings)\//.test(resolve(part.slice(0, partSlash), chartRel.target).toLowerCase()))
+									return VIEW_ONLY
+							}
+						}
+					} else if (!picturesOnly(drawing, pictures)) {
+						return VIEW_ONLY
+					}
+
+					break
+				}
 			}
 		}
 
-		// A sheet with pictures gets its drawing written anew as drawing{n}.xml: charts in its own drawing
-		// would be rewritten from the model, and another sheet's chart drawing of that number dropped.
-		if (sheet !== undefined && ((sheet.images?.length ?? 0) > 0 || (sheet.textBoxes?.length ?? 0) > 0)) {
-			const own = rels.filter(rel => typeName(rel.type) === "drawing").map(rel => resolve(base, rel.target).toLowerCase())
-
-			if (hasChart(entries.get(`xl/drawings/drawing${String(index + 1)}.xml`)) || own.some(path => hasChart(entries.get(path)))) {
-				return false
-			}
+		// A sheet with pictures gets its drawing written anew as drawing{n}.xml: another sheet's chart
+		// drawing of that number would be dropped.
+		if (pictures > 0 && hasChart(text(`xl/drawings/drawing${String(index + 1)}.xml`))) {
+			return VIEW_ONLY
 		}
 	}
 
@@ -254,12 +385,12 @@ export function xlsxWritable(workbook: RoundtripWorkbook): boolean {
 		const comment = numbered(path, /^xl\/threadedcomments\/threadedcomment(\d+)\.xml$/)
 
 		if (comment !== null && !sheetRels[comment - 1]?.some(rel => typeName(rel.type) === "threadedComment")) {
-			return false
+			return VIEW_ONLY
 		}
 
 		// Slicers and timelines lose the workbook's reference to their caches.
 		if (/^xl\/(slicers|slicercaches|timelines|timelinecaches)\//.test(path)) {
-			return false
+			return VIEW_ONLY
 		}
 	}
 
@@ -282,8 +413,12 @@ export function xlsxWritable(workbook: RoundtripWorkbook): boolean {
 		)
 	}
 
-	return (
-		ordered("pivotCache", /^xl\/pivotcache\/pivotcachedefinition(\d+)\.xml$/, "cacheId") &&
-		ordered("externalReference", /^xl\/externallinks\/externallink(\d+)\.xml$/)
-	)
+	if (
+		!ordered("pivotCache", /^xl\/pivotcache\/pivotcachedefinition(\d+)\.xml$/, "cacheId") ||
+		!ordered("externalReference", /^xl\/externallinks\/externallink(\d+)\.xml$/)
+	) {
+		return VIEW_ONLY
+	}
+
+	return { writable: true, drop, addTheme: theme === undefined }
 }

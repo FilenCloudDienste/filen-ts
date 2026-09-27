@@ -43,10 +43,14 @@ export type EditResult =
 	// Cells changed, on the edited sheet and on any sheet whose formulas read it. `styles` is the whole
 	// style table when it grew, empty otherwise.
 	| { type: "cells"; patches: CellPatch[]; styles: CellStyleView[]; state: DocState }
-	| { type: "sheets"; sheets: SheetView[]; styles: CellStyleView[]; state: DocState }
-	// The edit could not be made: the sheet's structure is locked, a sheet name is taken or invalid, or it
-	// would reach past a sheet's limits.
-	| { type: "refused"; reason: "structureLocked" | "sheetName" | "tooLarge"; state: DocState }
+	// Sheets were added, renamed, or had rows or columns moved: one entry per sheet, the new count of them,
+	// a full view of each sheet that changed and null for one that did not (keep the view held). `styles`
+	// is the whole style table.
+	| { type: "sheets"; sheets: (SheetView | null)[]; styles: CellStyleView[]; state: DocState }
+	// The edit could not be made: the sheet's structure is locked, a sheet name is taken or invalid, it
+	// would reach past a sheet's limits, it would change part of an array formula's range, or it would
+	// rename a table column by editing its header.
+	| { type: "refused"; reason: "structureLocked" | "sheetName" | "tooLarge" | "arrayFormula" | "tableHeader"; state: DocState }
 	// Nothing to undo or redo.
 	| { type: "none"; state: DocState }
 

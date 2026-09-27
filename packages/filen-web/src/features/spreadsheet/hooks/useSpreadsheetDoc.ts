@@ -6,6 +6,7 @@ import { extensionOf } from "@/features/drive/lib/preview.logic"
 import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
 import { gridDoc, type GridDoc } from "@/features/spreadsheet/lib/cellStore.logic"
 import { sniffSpreadsheetKind, spreadsheetFileKind, spreadsheetWorker } from "@/features/spreadsheet/lib/spreadsheetClient"
+import type { SpreadsheetFileKind } from "@/features/spreadsheet/workers/spreadsheet.worker"
 import { type ErrorDTO } from "@/lib/sdk/errors"
 
 export type SpreadsheetDocState =
@@ -13,10 +14,17 @@ export type SpreadsheetDocState =
 	| { status: "error"; dto: ErrorDTO; retry: () => void }
 	| { status: "unreadable" }
 	// `unnamed`: the file's name does not say it is a spreadsheet, so its kind was read from its bytes and
-	// it opens read-only (saving could rewrite it as the wrong format).
-	| { status: "ready"; id: number; doc: GridDoc; unnamed: boolean }
+	// it opens read-only (saving could rewrite it as the wrong format). `renamed`: the file has since been
+	// renamed to another format's extension, which a save would mislabel, so it is read-only too.
+	| { status: "ready"; id: number; doc: GridDoc; unnamed: boolean; renamed: boolean }
 
-type Opened = { status: "unreadable" } | { status: "ready"; id: number; doc: GridDoc; unnamed: boolean }
+type Opened = { status: "unreadable" } | { status: "ready"; id: number; doc: GridDoc; unnamed: boolean; kind: SpreadsheetFileKind | null }
+
+function nameKind(item: DriveItem): SpreadsheetFileKind | null {
+	const base = asDirectoryOrFile(item)
+
+	return spreadsheetFileKind(extensionOf(base.type === "file" ? driveItemName(base) : ""))
+}
 
 // Downloads the file (the preview's shared byte load and cache) and opens it in the spreadsheet worker,
 // closing it there again when the viewer goes. The worker gets a copy: the preview cache keeps the bytes.
@@ -31,8 +39,7 @@ export function useSpreadsheetDoc(item: DriveItem, documentKey: string): Spreads
 
 	const opening = pinned.key === documentKey ? pinned.item : item
 	const bytes = usePreviewBytes(opening)
-	const base = asDirectoryOrFile(opening)
-	const named = spreadsheetFileKind(extensionOf(base.type === "file" ? driveItemName(base) : ""))
+	const named = nameKind(opening)
 	const [opened, setOpened] = useState<{ bytes: Uint8Array; state: Opened } | null>(null)
 	const source = bytes.status === "success" ? bytes.bytes : null
 
@@ -56,7 +63,10 @@ export function useSpreadsheetDoc(item: DriveItem, documentKey: string): Spreads
 				}
 
 				id = result.id
-				setOpened({ bytes: source, state: { status: "ready", id: result.id, doc: gridDoc(result.doc), unnamed: named === null } })
+				setOpened({
+					bytes: source,
+					state: { status: "ready", id: result.id, doc: gridDoc(result.doc), unnamed: named === null, kind: named }
+				})
 			})
 			.catch(() => {
 				if (live) {
@@ -78,5 +88,15 @@ export function useSpreadsheetDoc(item: DriveItem, documentKey: string): Spreads
 	}
 
 	// A state from an earlier buffer is not this one's.
-	return opened !== null && opened.bytes === source ? opened.state : { status: "pending" }
+	if (opened?.bytes !== source) {
+		return { status: "pending" }
+	}
+
+	if (opened.state.status === "unreadable") {
+		return opened.state
+	}
+
+	const { id, doc, unnamed, kind } = opened.state
+
+	return { status: "ready", id, doc, unnamed, renamed: !unnamed && nameKind(item) !== kind }
 }

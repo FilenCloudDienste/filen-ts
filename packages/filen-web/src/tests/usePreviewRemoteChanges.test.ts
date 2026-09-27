@@ -31,6 +31,7 @@ const { emitPreviewFileMetaChanged, emitPreviewFileRevised, emitPreviewItemMoved
 const { setPreviewDirty, usePreviewUnsavedGuardStore } = await import("@/features/preview/store/usePreviewUnsavedGuard")
 const { emitPreviewItemRestored, emitPreviewResync, subscribePreviewReconcile } = await import("@/features/preview/lib/previewReconcile")
 const { driveListingQueryOptions } = await import("@/features/drive/queries/drive")
+const { clearPreviewCache, getPreviewBytes } = await import("@/features/preview/lib/previewCache")
 
 type DriveItem = ReturnType<typeof narrowItem>
 
@@ -72,7 +73,11 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
 	return { promise, resolve }
 }
 
-function setup(items = [file("a"), file("b", { stableUUID: "other" as File["stableUUID"] })], index = 0) {
+function setup(
+	items = [file("a"), file("b", { stableUUID: "other" as File["stableUUID"] })],
+	index = 0,
+	readEdits?: () => Promise<string | Uint8Array | null>
+) {
 	const savedRef = { current: new Map<string, DriveItem>() as ReadonlyMap<string, DriveItem> }
 	const commitSaved = vi.fn((frozenUuid: string, item: DriveItem) => {
 		savedRef.current = new Map(savedRef.current).set(frozenUuid, item)
@@ -88,7 +93,7 @@ function setup(items = [file("a"), file("b", { stableUUID: "other" as File["stab
 				savedRef,
 				commitSaved,
 				contentRef,
-				readEdits: () => Promise.resolve(contentRef.current),
+				readEdits: readEdits ?? (() => Promise.resolve(contentRef.current)),
 				onItemRemoved
 			}),
 		{ initialProps: { items, index } }
@@ -445,5 +450,43 @@ describe("usePreviewRemoteChanges", () => {
 		await flush()
 
 		expect(listing.reads()).toBe(2)
+	})
+
+	it("reopens on a file saved anew from its own upload, not a download of it", async () => {
+		clearPreviewCache()
+		// A spreadsheet's bytes: jsdom's TextEncoder returns another realm's Uint8Array, which the cache
+		// refuses.
+		const { hook, commitSaved } = setup(undefined, undefined, () => Promise.resolve(Uint8Array.of(1, 2, 3)))
+		const saved = file("new", { stableUUID: "new" as File["stableUUID"] })
+
+		runPreviewSave.mockResolvedValueOnce({ status: "success", item: saved })
+
+		act(() => {
+			emitPreviewItemRemoved(testUuid("a"))
+		})
+
+		await act(async () => {
+			await hook.result.current.saveMineAsNewFile()
+		})
+
+		expect(commitSaved.mock.lastCall?.[1].data.uuid).toBe(testUuid("new"))
+		expect(getPreviewBytes("authed", testUuid("new"))).toEqual(Uint8Array.of(1, 2, 3))
+	})
+
+	it("keeps no copy of a conflicted copy the preview does not go on to show", async () => {
+		clearPreviewCache()
+		const { hook } = setup()
+
+		runPreviewSave.mockResolvedValueOnce({ status: "success", item: file("copy", { stableUUID: "copy" as File["stableUUID"] }) })
+
+		act(() => {
+			emitPreviewFileRevised({ item: file("a1") })
+		})
+
+		await act(async () => {
+			await hook.result.current.saveMineAsNewFile()
+		})
+
+		expect(getPreviewBytes("authed", testUuid("copy"))).toBeUndefined()
 	})
 })

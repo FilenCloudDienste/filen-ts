@@ -178,6 +178,16 @@ describe("CsvDocument structural edits", () => {
 		expect(new TextDecoder().decode(document.serialize().bytes)).toBe("a,b\n1,2\n3,4\n")
 	})
 
+	it("undoes an insert clamped past the last row without leaving empty rows behind", () => {
+		const { rows, format } = parseCsvFile(encoder.encode("a,b\n1,2\n"), false)
+		const document = new CsvDocument(rows, format)
+
+		document.apply({ type: "insert", sheet: 0, axis: "rows", at: 1000, count: 5 })
+		document.undo()
+
+		expect(new TextDecoder().decode(document.serialize().bytes)).toBe("a,b\n1,2\n")
+	})
+
 	it("redoes a structural edit after undoing it", () => {
 		const { rows, format } = parseCsvFile(encoder.encode("a,b\n1,2\n"), false)
 		const document = new CsvDocument(rows, format)
@@ -217,6 +227,33 @@ describe("CsvDocument saving", () => {
 		expect(second.state.dirty).toBe(true)
 		expect(document.undo().state.dirty).toBe(false)
 	})
+
+	it("stays dirty after undoing a saved edit and typing a new one, though the depth returns to the saved one", () => {
+		const { rows, format } = parseCsvFile(encoder.encode("a,b\n"), false)
+		const document = new CsvDocument(rows, format)
+
+		document.apply({ type: "setCells", sheet: 0, cells: [{ row: 0, col: 0, input: "X" }] })
+		document.markSaved(document.serialize().version)
+		document.undo()
+
+		const after = document.apply({ type: "setCells", sheet: 0, cells: [{ row: 0, col: 0, input: "Y" }] })
+
+		expect(after.state.dirty).toBe(true)
+	})
+
+	it("is clean again once redo lands back on the exact state that was saved", () => {
+		const { rows, format } = parseCsvFile(encoder.encode("a,b\n"), false)
+		const document = new CsvDocument(rows, format)
+
+		document.apply({ type: "setCells", sheet: 0, cells: [{ row: 0, col: 0, input: "X" }] })
+		document.apply({ type: "setCells", sheet: 0, cells: [{ row: 0, col: 1, input: "Y" }] })
+		document.markSaved(document.serialize().version)
+		document.undo()
+
+		const redone = document.redo()
+
+		expect(redone.state.dirty).toBe(false)
+	})
 })
 
 describe("CsvDocument undo-history memory budget", () => {
@@ -243,7 +280,14 @@ describe("CsvDocument undo-history memory budget", () => {
 		// once the second is applied, leaving only one step to undo.
 		const chunk = Math.ceil(MAX_SHEET_CELLS / 2) + 1
 		const bigRow = new Array<string>(chunk * 2).fill("")
-		const format: CsvFormat = { delimiter: ",", lineSeparator: "\n", bom: false, trailingNewline: false, encoding: "utf-8" }
+		const format: CsvFormat = {
+			delimiter: ",",
+			lineSeparator: "\n",
+			bom: false,
+			trailingNewline: false,
+			encoding: "utf-8",
+			writable: true
+		}
 		const document = new CsvDocument([bigRow], format)
 
 		document.apply({ type: "delete", sheet: 0, axis: "cols", at: 0, count: chunk })
@@ -258,7 +302,14 @@ describe("CsvDocument undo-history memory budget", () => {
 	it("keeps a save point permanently dirty once its undo step falls out of the history budget", () => {
 		const chunk = Math.ceil(MAX_SHEET_CELLS / 2) + 1
 		const bigRow = new Array<string>(chunk * 2).fill("")
-		const format: CsvFormat = { delimiter: ",", lineSeparator: "\n", bom: false, trailingNewline: false, encoding: "utf-8" }
+		const format: CsvFormat = {
+			delimiter: ",",
+			lineSeparator: "\n",
+			bom: false,
+			trailingNewline: false,
+			encoding: "utf-8",
+			writable: true
+		}
 		const document = new CsvDocument([bigRow], format)
 
 		// The document's opened state (version 0) is implicitly "saved" and is never re-marked.

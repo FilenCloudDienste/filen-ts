@@ -26,10 +26,12 @@ function stepWeight(step: Step): number {
 export class CsvDocument {
 	private rows: string[][]
 	private readonly format: CsvFormat
-	private undoSteps: { step: Step; op: EditOp }[] = []
-	private redoOps: EditOp[] = []
+	private undoSteps: { step: Step; op: EditOp; before: number; after: number }[] = []
+	private redoSteps: { op: EditOp; after: number }[] = []
 	private historyWeight = 0
-	private version = 0
+	// Identifies the current state; `saved` is the state last written to the file (0: as opened).
+	private current = 0
+	private nextState = 1
 	private saved = 0
 
 	constructor(rows: string[][], format: CsvFormat) {
@@ -38,11 +40,11 @@ export class CsvDocument {
 	}
 
 	doc(): SpreadsheetDoc {
-		return csvDoc(this.rows)
+		return csvDoc(this.rows, this.format.writable)
 	}
 
 	private state(): DocState {
-		return { dirty: this.version !== this.saved, canUndo: this.undoSteps.length > 0, canRedo: this.redoOps.length > 0 }
+		return { dirty: this.current !== this.saved, canUndo: this.undoSteps.length > 0, canRedo: this.redoSteps.length > 0 }
 	}
 
 	apply(op: EditOp): EditResult {
@@ -56,12 +58,11 @@ export class CsvDocument {
 			}
 		}
 
-		this.undoSteps.push({ step, op })
-		this.historyWeight += stepWeight(step)
-		this.trimHistory()
+		const after = this.nextState++
 
-		this.redoOps = []
-		this.version++
+		this.pushStep({ step, op, before: this.current, after })
+		this.redoSteps = []
+		this.current = after
 
 		return this.result(op, step)
 	}
@@ -73,9 +74,9 @@ export class CsvDocument {
 			return { type: "none", state: this.state() }
 		}
 
-		this.redoOps.push(last.op)
-		this.version--
 		this.historyWeight -= stepWeight(last.step)
+		this.redoSteps.push({ op: last.op, after: last.after })
+		this.current = last.before
 
 		if (last.step.type === "structure") {
 			this.revertStructure(last.step)
@@ -94,34 +95,36 @@ export class CsvDocument {
 	}
 
 	redo(): EditResult {
-		const op = this.redoOps.pop()
+		const redone = this.redoSteps.pop()
 
-		if (op === undefined) {
+		if (redone === undefined) {
 			return { type: "none", state: this.state() }
 		}
 
-		const redoOps = this.redoOps
-		const step = this.run(op)
+		const redoSteps = this.redoSteps
+		const step = this.run(redone.op)
 
 		if (step === null) {
 			return { type: "none", state: this.state() }
 		}
 
-		this.undoSteps.push({ step, op })
-		this.historyWeight += stepWeight(step)
-		this.version++
-		this.redoOps = redoOps
+		this.pushStep({ step, op: redone.op, before: this.current, after: redone.after })
+		this.current = redone.after
+		this.redoSteps = redoSteps
 
-		return this.result(op, step)
+		return this.result(redone.op, step)
 	}
 
-	// The file's bytes as edited, and the version they were taken at.
+	// The file's bytes as edited, and the state they hold.
 	serialize(): { bytes: Uint8Array; version: number } {
-		return { bytes: serializeCsv(this.rows, this.format), version: this.version }
+		if (!this.format.writable) {
+			throw new Error("spreadsheet: this CSV cannot be saved")
+		}
+
+		return { bytes: serializeCsv(this.rows, this.format), version: this.current }
 	}
 
-	// A save at `version` landed: dirty only if an edit was applied since (undoing back to a version whose
-	// step has since fallen out of history never reads as clean again — see trimHistory).
+	// The state `version` names is now the file's: the document is clean exactly while it is back there.
 	markSaved(version: number): DocState {
 		this.saved = version
 
@@ -129,18 +132,16 @@ export class CsvDocument {
 	}
 
 	// Drops the oldest undo steps once they pass HISTORY_LIMIT steps or MAX_SHEET_CELLS of snapshotted
-	// cells, always keeping at least the step just pushed. The save point becomes permanently unreachable
-	// (-1) once the step that would undo back to it is evicted.
-	private trimHistory(): void {
+	// cells, always keeping at least the step just pushed. Unique state ids are never reused, so a save
+	// point whose step falls out of history stays unreachable, and dirty stays true, without bookkeeping.
+	private pushStep(entry: { step: Step; op: EditOp; before: number; after: number }): void {
+		this.undoSteps.push(entry)
+		this.historyWeight += stepWeight(entry.step)
+
 		while (this.undoSteps.length > 1 && (this.undoSteps.length > HISTORY_LIMIT || this.historyWeight > MAX_SHEET_CELLS)) {
-			const boundary = this.version - this.undoSteps.length + 1
-			const evicted = this.undoSteps.shift()
+			const dropped = this.undoSteps.shift()
 
-			if (evicted !== undefined) {
-				this.historyWeight -= stepWeight(evicted.step)
-			}
-
-			this.saved = this.saved === boundary ? -1 : this.saved
+			this.historyWeight -= dropped === undefined ? 0 : stepWeight(dropped.step)
 		}
 	}
 
@@ -188,11 +189,13 @@ export class CsvDocument {
 
 				if (op.axis === "rows") {
 					let removed: string[][] = []
+					let at = op.at
 
 					if (op.type === "insert") {
 						// concat, not splice(...spread): inserting past ~125k rows spreads that many arguments
-						// into one call and throws RangeError.
-						const at = Math.min(op.at, this.rows.length)
+						// into one call and throws RangeError. Clamped here, so the step below must record the
+						// clamped `at`, not op.at — revertStructure() undoes exactly the range actually written.
+						at = Math.min(op.at, this.rows.length)
 						const empty = Array.from({ length: op.count }, (): string[] => [])
 
 						this.rows = this.rows.slice(0, at).concat(empty, this.rows.slice(at))
@@ -200,7 +203,7 @@ export class CsvDocument {
 						removed = this.rows.splice(op.at, op.count)
 					}
 
-					return { type: "structure", axis: "rows", kind: op.type, at: op.at, count: op.count, removed }
+					return { type: "structure", axis: "rows", kind: op.type, at, count: op.count, removed }
 				}
 
 				const removed: string[][] = []

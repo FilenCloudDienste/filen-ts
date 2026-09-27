@@ -593,6 +593,32 @@ export function renameSheetInFormula(formula: string, from: string, to: string):
 	})
 }
 
+// Parentheses past this depth overflow HyperFormula's recursive parser (Excel stops at 64 levels).
+const MAX_DEPTH = 100
+
+// Whether HyperFormula can be handed the formula at all: its parser recurses once per nesting level.
+export function engineCanParse(formula: string): boolean {
+	let depth = 0
+	let index = 0
+
+	while (index < formula.length) {
+		const code = formula.charCodeAt(index)
+
+		if (code === QUOTE || code === APOSTROPHE) {
+			index = skipQuoted(formula, index, code)
+
+			continue
+		}
+
+		if (code === 40 && ++depth > MAX_DEPTH) return false
+		if (code === 41) depth--
+
+		index++
+	}
+
+	return true
+}
+
 // Excel formula text as HyperFormula reads it, where only the spelling differs: function names lose the
 // _xlfn./_xlws. prefixes files store for newer functions, TRUE and FALSE become the functions HyperFormula
 // has for them, exponents take a lower-case "e", and a string literal with a doubled quote is spelled
@@ -646,7 +672,10 @@ export function engineFormula(formula: string): string {
 				text += `${word.slice(0, -1)}e`
 			} else if (/^(\d+\.?\d*|\.\d+)E\d+$/i.test(word)) {
 				text += word.replace(/E/i, "e")
-			} else if (next !== 33 && next !== 58 && /^(TRUE|FALSE)$/i.test(word)) {
+			} else if (next === 33) {
+				// HyperFormula reads only plain ASCII sheet names unquoted (not 数据!A1, not Q1.2024!A1).
+				text += `'${word.replaceAll("'", "''")}'`
+			} else if (next !== 58 && /^(TRUE|FALSE)$/i.test(word)) {
 				text += `${word}()`
 			} else {
 				text += word

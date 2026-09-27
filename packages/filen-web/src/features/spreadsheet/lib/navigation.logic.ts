@@ -56,22 +56,56 @@ export interface NavigableSheet {
 	merges: readonly CellRange[]
 }
 
+interface AxisMemo<T> {
+	hidden: readonly number[]
+	count: number
+	value: T
+}
+
+// Axes by the size map they were built from: a cell edit keeps a sheet's sizes and hidden lists, so it
+// reuses the axes rather than sorting every custom size again.
+const rowAxes = new WeakMap<ReadonlyMap<number, number>, AxisMemo<{ axis: Axis; truncated: boolean }>>()
+const colAxes = new WeakMap<ReadonlyMap<number, number>, AxisMemo<Axis>>()
+
+function memo<T>(
+	cache: WeakMap<ReadonlyMap<number, number>, AxisMemo<T>>,
+	sizes: ReadonlyMap<number, number>,
+	hidden: readonly number[],
+	count: number,
+	build: () => T
+): T {
+	const hit = cache.get(sizes)
+
+	if (hit?.hidden === hidden && hit.count === count) {
+		return hit.value
+	}
+
+	const value = build()
+
+	cache.set(sizes, { hidden, count, value })
+
+	return value
+}
+
 // A sheet's rows as the grid shows them, cut off at MAX_GRID_PIXELS (`truncated`).
 export function sheetRows(sheet: NavigableSheet): { axis: Axis; truncated: boolean } {
-	const full = createAxis(sheet.rowCount + EXTRA_ROWS, DEFAULT_ROW_HEIGHT, sheet.rowHeights, sheet.hiddenRows)
+	return memo(rowAxes, sheet.rowHeights, sheet.hiddenRows, sheet.rowCount, () => {
+		const full = createAxis(sheet.rowCount + EXTRA_ROWS, DEFAULT_ROW_HEIGHT, sheet.rowHeights, sheet.hiddenRows)
 
-	if (full.total <= MAX_GRID_PIXELS) {
-		return { axis: full, truncated: false }
-	}
+		if (full.total <= MAX_GRID_PIXELS) {
+			return { axis: full, truncated: false }
+		}
 
-	return {
-		axis: createAxis(full.indexAt(MAX_GRID_PIXELS), DEFAULT_ROW_HEIGHT, sheet.rowHeights, sheet.hiddenRows),
-		truncated: sheet.rowCount > full.indexAt(MAX_GRID_PIXELS)
-	}
+		const shown = full.indexAt(MAX_GRID_PIXELS)
+
+		return { axis: createAxis(shown, DEFAULT_ROW_HEIGHT, sheet.rowHeights, sheet.hiddenRows), truncated: sheet.rowCount > shown }
+	})
 }
 
 export function sheetCols(sheet: NavigableSheet): Axis {
-	return createAxis(Math.max(sheet.colCount + EXTRA_COLS, MIN_COLS), DEFAULT_COL_WIDTH, sheet.colWidths, sheet.hiddenCols)
+	return memo(colAxes, sheet.colWidths, sheet.hiddenCols, sheet.colCount, () =>
+		createAxis(Math.max(sheet.colCount + EXTRA_COLS, MIN_COLS), DEFAULT_COL_WIDTH, sheet.colWidths, sheet.hiddenCols)
+	)
 }
 
 // The bounds a sheet's grid moves within, bar the page size, which depends on the viewport.

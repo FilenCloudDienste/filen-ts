@@ -66,13 +66,19 @@ export function useSpreadsheetEdits(id: number, initial: GridDoc): SpreadsheetEd
 		}
 	}
 
+	// An undo or redo with nothing to undo or redo (none queued before it either) changes nothing: it is
+	// not sent, so it never shows as a pending change.
+	function step(possible: boolean, call: () => Promise<EditResult>): Promise<EditResult> {
+		return possible || pending > 0 ? run(call) : Promise.resolve({ type: "none", state })
+	}
+
 	return {
 		doc,
 		state,
 		pending: pending > 0,
 		apply: op => run(() => spreadsheetWorker().apply(id, op)),
-		undo: () => run(() => spreadsheetWorker().undo(id)),
-		redo: () => run(() => spreadsheetWorker().redo(id)),
+		undo: () => step(state.canUndo, () => spreadsheetWorker().undo(id)),
+		redo: () => step(state.canRedo, () => spreadsheetWorker().redo(id)),
 		snapshot
 	}
 }

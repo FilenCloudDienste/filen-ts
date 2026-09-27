@@ -95,8 +95,24 @@ function patched(sheet: GridSheet, patch: CellPatch): GridSheet {
 	}
 }
 
+// A sheet after a structural edit: the one sent, or (null) the one held, kept as it is so its cells and
+// axes are not rebuilt. The result's length is the new sheet count, so an undone "add sheet" drops one.
+function kept(doc: GridDoc, sheet: SheetView | null, index: number): GridSheet {
+	if (sheet !== null) {
+		return gridSheet(sheet)
+	}
+
+	const held = doc.sheets[index]
+
+	if (held === undefined) {
+		throw new Error(`spreadsheet: no sheet ${String(index)} to keep`)
+	}
+
+	return held
+}
+
 // Folds an edit's result into the view: patched cells for a cell edit (one patch per sheet it reached),
-// whole sheets for anything structural.
+// the changed sheets for anything structural.
 export function applyEditResult(doc: GridDoc, result: EditResult): GridDoc {
 	switch (result.type) {
 		case "cells": {
@@ -113,7 +129,11 @@ export function applyEditResult(doc: GridDoc, result: EditResult): GridDoc {
 			return { ...doc, sheets, styles: result.styles.length > 0 ? result.styles : doc.styles }
 		}
 		case "sheets":
-			return { ...doc, sheets: result.sheets.map(gridSheet), styles: result.styles.length > 0 ? result.styles : doc.styles }
+			return {
+				...doc,
+				sheets: result.sheets.map((sheet, index) => kept(doc, sheet, index)),
+				styles: result.styles.length > 0 ? result.styles : doc.styles
+			}
 		case "refused":
 		case "none":
 			return doc
