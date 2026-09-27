@@ -4,7 +4,13 @@ import { useShallow } from "zustand/shallow"
 import { useNavigate } from "@tanstack/react-router"
 import { ArrowDownUpIcon, BrushCleaningIcon, PauseIcon, PlayIcon, XIcon } from "lucide-react"
 import { formatBytesFixed } from "@filen/shared"
-import { isActiveTransfer, useTransfersAggregate, useTransfersStore, type Transfer } from "@/features/transfers/store/useTransfersStore"
+import {
+	isActiveTransfer,
+	useSpeedSampleAging,
+	useTransfersAggregate,
+	useTransfersStore,
+	type Transfer
+} from "@/features/transfers/store/useTransfersStore"
 import { useCopyJobsStore } from "@/features/transfers/store/useCopyJobsStore"
 import { pruneSettledCopyJobs } from "@/features/drive/lib/copy"
 import {
@@ -19,7 +25,7 @@ import {
 } from "@/features/transfers/screens/transfers.logic"
 import { cancelTransfer, pauseTransfer, resumeTransfer } from "@/features/transfers/lib/control"
 import { TransferRow } from "@/features/transfers/components/transferRow"
-import { percentFormat } from "@/features/transfers/components/transferRow.logic"
+import { percentFormat, runningPercentFraction } from "@/features/transfers/components/transferRow.logic"
 import { defaultRevealDeps, runOpenContainingDirectory } from "@/features/drive/lib/reveal"
 import type { DriveItem } from "@/features/drive/lib/item"
 import { Button } from "@/components/ui/button"
@@ -38,6 +44,9 @@ export function TransfersScreen() {
 	const endedCopies = useCopyJobsStore(useShallow(state => endedCopyIds(state.jobs)))
 	const { active, finished } = buildTransfersDisplayList(transfers)
 	const { activeCount, percent, speed } = useTransfersAggregate()
+
+	useSpeedSampleAging()
+
 	const cancellable = cancellableTransferIds(transfers, endedCopies)
 	const pausable = pausableTransferIds(transfers, endedCopies)
 	const resumable = resumableTransferIds(transfers, endedCopies)
@@ -102,7 +111,7 @@ export function TransfersScreen() {
 					{showAggregate
 						? [
 								t("transfersScreenActiveCount", { count: activeCount }),
-								percentFormat(i18n.language).format(percent / 100),
+								percentFormat(i18n.language).format(runningPercentFraction(percent)),
 								t("transfersAggregateSpeed", { speed: formatBytesFixed(speed) })
 							].join(" · ")
 						: null}

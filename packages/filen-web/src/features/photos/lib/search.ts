@@ -208,8 +208,9 @@ export function parsePhotosQuery(query: string, months: MonthNameTable): PhotosQ
 	const tokens: PhotosQueryToken[] = []
 
 	for (const raw of normalizeSearchText(query).split(/\s+/)) {
-		// "July 15, 2024": separators trailing a word are punctuation, not part of what is searched.
-		const word = raw.replace(/[,;]+$/, "")
+		// "July 15, 2024", "15. Juli", "janv.": separators and ordinal or abbreviation dots trailing a word
+		// are punctuation, not part of what is searched.
+		const word = raw.replace(/[,;.]+$/, "")
 
 		if (word.length === 0) {
 			continue

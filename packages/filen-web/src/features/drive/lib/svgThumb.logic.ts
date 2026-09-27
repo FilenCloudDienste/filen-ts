@@ -212,7 +212,12 @@ export function prepareSvgThumb(text: string, maxDim: number): SvgThumbSource {
 	const width = Math.max(1, Math.round(aspect >= 1 ? maxDim : maxDim * aspect))
 	const height = Math.max(1, Math.round(aspect >= 1 ? maxDim / aspect : maxDim))
 
-	let rootAttributes = attributes.replace(/(^|\s)(?:width|height)\s*=\s*(?:"[^"]*"|'[^']*')/g, "$1").trimEnd()
+	// A derived viewBox replaces an unusable one: a second viewBox attribute would make the document malformed.
+	const replaced =
+		derivedViewBox === undefined
+			? /(^|\s)(?:width|height)\s*=\s*(?:"[^"]*"|'[^']*')/g
+			: /(^|\s)(?:width|height|viewBox)\s*=\s*(?:"[^"]*"|'[^']*')/g
+	let rootAttributes = attributes.replace(replaced, "$1").trimEnd()
 
 	rootAttributes += ` width="${String(width)}" height="${String(height)}"`
 

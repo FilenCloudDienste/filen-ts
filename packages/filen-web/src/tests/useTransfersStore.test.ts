@@ -5,6 +5,7 @@ import {
 	computeTransfersAggregate,
 	computeTransfersSpeed,
 	hasActiveTransfers,
+	hasSpeedSamples,
 	isActiveTransfer,
 	useTransfersStore,
 	type SpeedSample,
@@ -464,6 +465,97 @@ describe("per-transfer speed samples", () => {
 		useTransfersStore.getState().remove("b")
 
 		expect(useTransfersStore.getState().rowSpeedSamples).toEqual({})
+	})
+})
+
+describe("speed samples never outlive their transfer", () => {
+	beforeEach(() => {
+		vi.useFakeTimers()
+		vi.setSystemTime(10_000)
+	})
+
+	it("writes nothing for a trailing tick after its transfer settled, or for an unknown id", () => {
+		useTransfersStore.setState({ transfers: [makeTransfer({ id: "a", status: "done" })] })
+		const before = useTransfersStore.getState()
+
+		useTransfersStore.getState().setProgress("a", 500)
+		useTransfersStore.getState().setProgress("missing", 500)
+
+		expect(useTransfersStore.getState()).toBe(before)
+	})
+
+	it("keeps no row samples for a copy, whose row reads its job's rate", () => {
+		useTransfersStore.setState({ transfers: [makeTransfer({ id: "c", direction: "copy", status: "copying" })] })
+
+		useTransfersStore.getState().setProgress("c", 100)
+
+		expect(useTransfersStore.getState().rowSpeedSamples).toEqual({})
+		expect(useTransfersStore.getState().speedSamples).toEqual([{ timestamp: 10_000, totalBytes: 100 }])
+	})
+
+	it("drops the samples of every row the settle leaves inactive, including rows the cap evicts", () => {
+		useTransfersStore.setState({
+			transfers: [makeTransfer({ id: "old", status: "done" }), makeTransfer({ id: "a" }), makeTransfer({ id: "b" })],
+			rowSpeedSamples: {
+				old: [{ timestamp: 1, totalBytes: 1 }],
+				a: [{ timestamp: 1, totalBytes: 1 }],
+				b: [{ timestamp: 1, totalBytes: 1 }]
+			}
+		})
+
+		useTransfersStore.getState().settle("a", "done")
+
+		expect(Object.keys(useTransfersStore.getState().rowSpeedSamples)).toEqual(["b"])
+	})
+
+	it("clearFinished drops the samples of the rows it clears", () => {
+		useTransfersStore.setState({
+			transfers: [makeTransfer({ id: "done", status: "done" }), makeTransfer({ id: "a" })],
+			rowSpeedSamples: { done: [{ timestamp: 1, totalBytes: 1 }], a: [{ timestamp: 1, totalBytes: 1 }] }
+		})
+
+		useTransfersStore.getState().clearFinished()
+
+		expect(Object.keys(useTransfersStore.getState().rowSpeedSamples)).toEqual(["a"])
+	})
+})
+
+describe("pruneSpeedSamples", () => {
+	beforeEach(() => {
+		vi.useFakeTimers()
+		vi.setSystemTime(10_000)
+	})
+
+	it("ages a stalled transfer's samples out of the window, until it has none", () => {
+		useTransfersStore.setState({ transfers: [makeTransfer({ id: "a" })] })
+		useTransfersStore.getState().setProgress("a", 100)
+		vi.setSystemTime(11_000)
+		useTransfersStore.getState().setProgress("a", 200)
+
+		vi.setSystemTime(15_500)
+		useTransfersStore.getState().pruneSpeedSamples()
+
+		expect(useTransfersStore.getState().rowSpeedSamples).toEqual({ a: [{ timestamp: 11_000, totalBytes: 200 }] })
+		expect(useTransfersStore.getState().speedSamples).toEqual([{ timestamp: 11_000, totalBytes: 200 }])
+
+		vi.setSystemTime(16_500)
+		useTransfersStore.getState().pruneSpeedSamples()
+
+		expect(useTransfersStore.getState().rowSpeedSamples).toEqual({})
+		expect(useTransfersStore.getState().speedSamples).toEqual([])
+		expect(hasSpeedSamples(useTransfersStore.getState())).toBe(false)
+	})
+
+	it("writes nothing when no sample has aged out", () => {
+		useTransfersStore.setState({ transfers: [makeTransfer({ id: "a" })] })
+		useTransfersStore.getState().setProgress("a", 100)
+		const before = useTransfersStore.getState()
+
+		vi.setSystemTime(12_000)
+		useTransfersStore.getState().pruneSpeedSamples()
+
+		expect(useTransfersStore.getState()).toBe(before)
+		expect(hasSpeedSamples(before)).toBe(true)
 	})
 })
 

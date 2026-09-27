@@ -5,7 +5,8 @@ import {
 	activeStatusLabelKey,
 	finishedStatusLabelKey,
 	transferIconKey,
-	transferRate
+	transferRate,
+	runningPercentFraction
 } from "@/features/transfers/components/transferRow.logic"
 
 function transfer(overrides: Partial<Transfer> = {}): Transfer {
@@ -146,5 +147,18 @@ describe("transferIconKey", () => {
 
 		expect(upload).toBe("video")
 		expect(download).toBe("video")
+	})
+})
+
+describe("runningPercentFraction", () => {
+	it("floors, so a transfer never reads 100% before it is done", () => {
+		expect(runningPercentFraction(99.5)).toBe(0.99)
+		expect(runningPercentFraction(99.99)).toBe(0.99)
+		expect(runningPercentFraction(100)).toBe(1)
+		expect(runningPercentFraction(0)).toBe(0)
+	})
+
+	it("does not floor a whole percent a step down on float error", () => {
+		expect(runningPercentFraction((29 / 100) * 100)).toBe(0.29)
 	})
 })

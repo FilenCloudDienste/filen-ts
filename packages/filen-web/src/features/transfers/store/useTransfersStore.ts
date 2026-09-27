@@ -1,3 +1,4 @@
+import { useEffect } from "react"
 import { create } from "zustand"
 import { useShallow } from "zustand/shallow"
 import type { ErrorDTO } from "@/lib/sdk/errors"
@@ -127,7 +128,7 @@ export interface TransfersStore {
 	// place bytesTransferred actually changes over time; never written to directly by a consumer.
 	speedSamples: SpeedSample[]
 	// The same rolling window per active transfer, over its own bytesTransferred, for the row's speed and
-	// time left. Dropped once the transfer settles.
+	// time left. Dropped once the transfer settles or its window empties; a copy's row reads its job instead.
 	rowSpeedSamples: Readonly<Record<string, SpeedSample[]>>
 	// Omits `paused` — every newly added transfer starts unpaused, enforced here rather than trusted
 	// to each call site (features/drive/lib/upload.ts's runUpload, features/drive/lib/download.ts's runDownload).
@@ -149,6 +150,9 @@ export interface TransfersStore {
 	// Drops every finished (non-active) row; active transfers are left untouched. Backs the
 	// transfers panel's "clear finished" control.
 	clearFinished: () => void
+	// Drops every sample that has left the window (useSpeedSampleAging's tick). Writes nothing when
+	// nothing aged out.
+	pruneSpeedSamples: () => void
 }
 
 // The same object when the key is absent, so a settle that had no samples writes nothing new.
@@ -158,6 +162,38 @@ function withoutKey<T>(record: Readonly<Record<string, T>>, key: string): Readon
 	}
 
 	return Object.fromEntries(Object.entries(record).filter(([entryKey]) => entryKey !== key))
+}
+
+// The samples still inside the window starting at `windowStart`; the same array when none aged out.
+// Samples are appended in time order, so the aged ones are a prefix.
+function samplesSince(samples: SpeedSample[], windowStart: number): SpeedSample[] {
+	const firstKept = samples.findIndex(sample => sample.timestamp >= windowStart)
+
+	if (firstKept === 0) {
+		return samples
+	}
+
+	return firstKept === -1 ? [] : samples.slice(firstKept)
+}
+
+// Keeps only the samples of transfers that are still active; the same object when nothing goes.
+function rowSamplesOfActive(
+	record: Readonly<Record<string, SpeedSample[]>>,
+	transfers: readonly Transfer[]
+): Readonly<Record<string, SpeedSample[]>> {
+	let out = record
+
+	for (const id in record) {
+		if (!transfers.some(transfer => transfer.id === id && isActiveTransfer(transfer.status))) {
+			out = withoutKey(out, id)
+		}
+	}
+
+	return out
+}
+
+export function hasSpeedSamples(state: Pick<TransfersStore, "speedSamples" | "rowSpeedSamples">): boolean {
+	return state.speedSamples.length > 0 || Object.keys(state.rowSpeedSamples).length > 0
 }
 
 export const useTransfersStore = create<TransfersStore>(set => ({
@@ -174,7 +210,15 @@ export const useTransfersStore = create<TransfersStore>(set => ({
 	},
 	setProgress: (id, bytesTransferred) => {
 		set(state => {
-			const transfers = state.transfers.map(transfer => (transfer.id === id ? { ...transfer, bytesTransferred } : transfer))
+			const target = state.transfers.find(transfer => transfer.id === id)
+
+			// A throttled trailing tick can land after its transfer settled or was removed: nothing to update,
+			// and a sample written for it would never be dropped.
+			if (target === undefined || !isActiveTransfer(target.status)) {
+				return state
+			}
+
+			const transfers = state.transfers.map(transfer => (transfer === target ? { ...transfer, bytesTransferred } : transfer))
 			const now = Date.now()
 			let totalBytes = 0
 
@@ -184,11 +228,16 @@ export const useTransfersStore = create<TransfersStore>(set => ({
 				}
 			}
 
-			const speedSamples = [...state.speedSamples, { timestamp: now, totalBytes }].filter(
-				sample => sample.timestamp >= now - SPEED_WINDOW_MS
-			)
-			const rowSamples = [...(state.rowSpeedSamples[id] ?? []), { timestamp: now, totalBytes: bytesTransferred }].filter(
-				sample => sample.timestamp >= now - SPEED_WINDOW_MS
+			const windowStart = now - SPEED_WINDOW_MS
+			const speedSamples = samplesSince([...state.speedSamples, { timestamp: now, totalBytes }], windowStart)
+
+			if (target.direction === "copy") {
+				return { transfers, speedSamples }
+			}
+
+			const rowSamples = samplesSince(
+				[...(state.rowSpeedSamples[id] ?? []), { timestamp: now, totalBytes: bytesTransferred }],
+				windowStart
 			)
 
 			return { transfers, speedSamples, rowSpeedSamples: { ...state.rowSpeedSamples, [id]: rowSamples } }
@@ -211,7 +260,7 @@ export const useTransfersStore = create<TransfersStore>(set => ({
 			// row an instant before it is itself removed.
 			return {
 				transfers: status === "cancelled" ? transfers : capFinishedTransfers(transfers),
-				rowSpeedSamples: withoutKey(state.rowSpeedSamples, id)
+				rowSpeedSamples: rowSamplesOfActive(state.rowSpeedSamples, transfers)
 			}
 		})
 	},
@@ -227,9 +276,55 @@ export const useTransfersStore = create<TransfersStore>(set => ({
 		}))
 	},
 	clearFinished: () => {
-		set(state => ({ transfers: state.transfers.filter(transfer => isActiveTransfer(transfer.status)) }))
+		set(state => {
+			const transfers = state.transfers.filter(transfer => isActiveTransfer(transfer.status))
+
+			return { transfers, rowSpeedSamples: rowSamplesOfActive(state.rowSpeedSamples, transfers) }
+		})
+	},
+	pruneSpeedSamples: () => {
+		set(state => {
+			const windowStart = Date.now() - SPEED_WINDOW_MS
+			const speedSamples = samplesSince(state.speedSamples, windowStart)
+			let rowSpeedSamples = state.rowSpeedSamples
+
+			for (const [id, samples] of Object.entries(state.rowSpeedSamples)) {
+				const kept = samplesSince(samples, windowStart)
+
+				if (kept !== samples) {
+					rowSpeedSamples = kept.length === 0 ? withoutKey(rowSpeedSamples, id) : { ...rowSpeedSamples, [id]: kept }
+				}
+			}
+
+			return speedSamples === state.speedSamples && rowSpeedSamples === state.rowSpeedSamples
+				? state
+				: { speedSamples, rowSpeedSamples }
+		})
 	}
 }))
+
+const SPEED_SAMPLE_AGING_INTERVAL_MS = 1_000
+
+// A speed is recomputed only when its samples change, and a stalled transfer sends no progress, so
+// without this its last speed and time left would stand forever. One tick for the whole screen, and
+// only while some window holds samples, which a stall or a pause empties within the window's length.
+export function useSpeedSampleAging(): void {
+	const sampling = useTransfersStore(hasSpeedSamples)
+
+	useEffect(() => {
+		if (!sampling) {
+			return
+		}
+
+		const timer = setInterval(() => {
+			useTransfersStore.getState().pruneSpeedSamples()
+		}, SPEED_SAMPLE_AGING_INTERVAL_MS)
+
+		return () => {
+			clearInterval(timer)
+		}
+	}, [sampling])
+}
 
 // Plain, testable aggregate math — mirrors fetchDirectoryListing/useDirectoryListingQuery's split
 // (queries/drive.ts): the hook below is a one-line wrapper this project's node-environment unit

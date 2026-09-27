@@ -72,6 +72,16 @@ describe("parsePhotosQuery", () => {
 		expect(parsePhotosQuery("ju", MONTHS)).toEqual([{ text: "ju" }])
 	})
 
+	it("drops ordinal and abbreviation dots trailing a word", () => {
+		expect(parsePhotosQuery("15. Juli 2024", monthNameTable("de"))).toEqual([
+			{ text: "15", day: 15 },
+			{ text: "juli", month: 6 },
+			{ text: "2024", year: 2024 }
+		])
+		expect(parsePhotosQuery("janv.", monthNameTable("fr"))).toEqual([{ text: "janv", month: 0 }])
+		expect(parsePhotosQuery("jul. ...", MONTHS)).toEqual([{ text: "jul", month: 6 }])
+	})
+
 	it("treats out-of-range numbers as plain text", () => {
 		expect(parsePhotosQuery("0001 99", MONTHS)).toEqual([{ text: "0001" }, { text: "99" }])
 	})

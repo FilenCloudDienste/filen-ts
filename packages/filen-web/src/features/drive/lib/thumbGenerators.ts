@@ -1,4 +1,4 @@
-import { runTimeout, driveItemName } from "@filen/shared"
+import { runTimeout, driveItemName, Semaphore } from "@filen/shared"
 import type { File as SdkFile } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
 import { runOp } from "@/lib/actions/outcome"
@@ -243,6 +243,20 @@ export const generateVideoThumb: ThumbGenerator = async item => {
 
 const SVG_RENDER_TIMEOUT_MS = 10_000
 
+// One render at a time: an svg's layout and paint run on the main thread, where nothing can interrupt
+// them, so a costly document never has another one stacked beside it.
+const svgRenderGate = new Semaphore(1)
+
+async function inSvgRenderSlot<T>(render: () => Promise<T>): Promise<T> {
+	await svgRenderGate.acquire()
+
+	try {
+		return await render()
+	} finally {
+		svgRenderGate.release()
+	}
+}
+
 // Rasterises an svg document into a thumbnail. Only ever through an <img>: the SVG spec's secure mode
 // for images runs no script, fires no event handler and fetches no external resource, so the markup
 // never has to be sanitised to be safe (prepareSvgThumb refuses the entity bombs that mode does not
@@ -256,46 +270,48 @@ export async function rasterizeSvgThumb(text: string): Promise<ThumbGenerationRe
 		return { type: "unavailable", reason: prepared.reason }
 	}
 
-	const result = await runTimeout<ThumbGenerationResult>(async defer => {
-		const url = URL.createObjectURL(new Blob([prepared.markup], { type: "image/svg+xml" }))
+	const result = await inSvgRenderSlot(() =>
+		runTimeout<ThumbGenerationResult>(async defer => {
+			const url = URL.createObjectURL(new Blob([prepared.markup], { type: "image/svg+xml" }))
 
-		defer(() => {
-			URL.revokeObjectURL(url)
-		})
+			defer(() => {
+				URL.revokeObjectURL(url)
+			})
 
-		const image = new Image(prepared.width, prepared.height)
+			const image = new Image(prepared.width, prepared.height)
 
-		image.src = url
+			image.src = url
 
-		try {
-			await image.decode()
-		} catch {
-			return { type: "unavailable", reason: "corrupt" }
-		}
-
-		const canvas = new OffscreenCanvas(prepared.width, prepared.height)
-		const ctx = canvas.getContext("2d")
-
-		if (ctx === null) {
-			throw new Error("could not create an OffscreenCanvas 2D context")
-		}
-
-		ctx.drawImage(image, 0, 0, prepared.width, prepared.height)
-
-		let blob: Blob
-
-		try {
-			blob = await encodeCanvasThumb(canvas, { alpha: true })
-		} catch (e) {
-			if (e instanceof DOMException && e.name === "SecurityError") {
-				return { type: "unavailable", reason: "unsupported" }
+			try {
+				await image.decode()
+			} catch {
+				return { type: "unavailable", reason: "corrupt" }
 			}
 
-			throw e
-		}
+			const canvas = new OffscreenCanvas(prepared.width, prepared.height)
+			const ctx = canvas.getContext("2d")
 
-		return { type: "bytes", bytes: new Uint8Array(await blob.arrayBuffer()) }
-	}, SVG_RENDER_TIMEOUT_MS)
+			if (ctx === null) {
+				throw new Error("could not create an OffscreenCanvas 2D context")
+			}
+
+			ctx.drawImage(image, 0, 0, prepared.width, prepared.height)
+
+			let blob: Blob
+
+			try {
+				blob = await encodeCanvasThumb(canvas, { alpha: true })
+			} catch (e) {
+				if (e instanceof DOMException && e.name === "SecurityError") {
+					return { type: "unavailable", reason: "unsupported" }
+				}
+
+				throw e
+			}
+
+			return { type: "bytes", bytes: new Uint8Array(await blob.arrayBuffer()) }
+		}, SVG_RENDER_TIMEOUT_MS)
+	)
 
 	if (!result.success) {
 		log.warn("thumb-generators", "rasterizeSvgThumb failed", result.error)

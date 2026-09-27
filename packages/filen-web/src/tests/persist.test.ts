@@ -148,6 +148,16 @@ describe("per-query persister (Map-backed fake kv)", () => {
 		expect(fakeStore.has(notesKey)).toBe(false)
 	})
 
+	it("purgePersistedQueries also wipes a retired version's rows, which no restore runs to drop", async () => {
+		fakeStore.set('rq.v2-["drive","quota"]', "old")
+		fakeStore.set("other.key", "kept")
+
+		await purgePersistedQueries()
+
+		expect(fakeStore.has('rq.v2-["drive","quota"]')).toBe(false)
+		expect(fakeStore.get("other.key")).toBe("kept")
+	})
+
 	it("drops ONE corrupted row (warn + self-heal) while the others restore fine", async () => {
 		const { notesKey } = await seedTwoQueries()
 		const warnSpy = vi.spyOn(log, "warn").mockImplementation(() => undefined)

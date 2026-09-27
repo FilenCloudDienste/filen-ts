@@ -529,6 +529,11 @@ describe("formatBytes", () => {
 	it("should handle negative decimals as 0", () => {
 		expect(formatBytes(1536, -1)).toBe("2 KiB")
 	})
+
+	it("moves to the next unit when rounding reaches 1024 of this one", () => {
+		expect(formatBytes(1048575)).toBe("1 MiB")
+		expect(formatBytes(1048575, 3)).toBe("1023.999 KiB")
+	})
 })
 
 describe("formatBytesFixed", () => {
@@ -541,6 +546,14 @@ describe("formatBytesFixed", () => {
 	it("shows whole bytes without a fraction", () => {
 		expect(formatBytesFixed(0)).toBe("0 B")
 		expect(formatBytesFixed(500)).toBe("500 B")
+	})
+
+	it("moves to the next unit when rounding reaches 1024 of this one", () => {
+		expect(formatBytesFixed(1023.6)).toBe("1.0 KiB")
+		expect(formatBytesFixed(1048575)).toBe("1.0 MiB")
+		expect(formatBytesFixed(1048575, 2)).toBe("1.00 MiB")
+		expect(formatBytesFixed(1023 * 1024)).toBe("1023.0 KiB")
+		expect(formatBytesFixed(1023)).toBe("1023 B")
 	})
 })
 

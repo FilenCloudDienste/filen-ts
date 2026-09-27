@@ -108,6 +108,13 @@ export function transferIconKey(transfer: Transfer): FileIconKey {
 	return fileIconKey(transfer.name)
 }
 
+// A running transfer's 0-100 percent as the fraction percentFormat takes, floored: rounded, 99.5% would
+// read "100%" before it is done. The epsilon keeps float error from flooring a whole value a step down
+// (29 of 100 is 28.999…).
+export function runningPercentFraction(percent: number): number {
+	return Math.floor(percent + 1e-9) / 100
+}
+
 const percentFormats = new Map<string, Intl.NumberFormat>()
 
 export function percentFormat(locale: string): Intl.NumberFormat {

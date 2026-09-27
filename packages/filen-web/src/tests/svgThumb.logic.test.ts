@@ -46,6 +46,13 @@ describe("prepareSvgThumb — sizing", () => {
 		expect(rootTag(result.markup)).toContain('viewBox="0 0 40 20"')
 	})
 
+	it("replaces an unusable viewBox with the derived one rather than adding a second", () => {
+		const tag = rootTag(prepared('<svg viewBox="0 0 0 0" width="40" height="20"/>').markup)
+
+		expect(tag.match(/viewBox=/g)).toHaveLength(1)
+		expect(tag).toContain('viewBox="0 0 40 20"')
+	})
+
 	it("falls back to a square when the drawing states no extent", () => {
 		expect(prepared('<svg width="100%" height="100%"></svg>')).toMatchObject({ width: 384, height: 384 })
 	})

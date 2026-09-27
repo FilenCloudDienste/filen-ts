@@ -456,16 +456,27 @@ function bytesUnitIndex(bytes: number): number {
 	return bytes >= POWERS_1024[1] ? 1 : 0
 }
 
+// Rounding can land a value on 1024 of its unit ("1024 KiB" just below 1 MiB), which reads as 1 of the next.
+const MAX_BYTES_UNIT_INDEX = POWERS_1024.length - 1
+
+function bytesInUnit(bytes: number, unitIndex: number): number {
+	return bytes / (POWERS_1024[unitIndex] ?? 1)
+}
+
 export function formatBytes(bytes: number, decimals: number = 2): string {
 	if (bytes === 0) {
 		return "0 B"
 	}
 
-	const dm = decimals < 0 ? 0 : decimals
-	const i = bytesUnitIndex(bytes)
-	const value = bytes / POWERS_1024[i]!
-	const multiplier = Math.pow(10, dm)
-	const rounded = Math.round(value * multiplier) / multiplier
+	const multiplier = Math.pow(10, decimals < 0 ? 0 : decimals)
+	const roundedIn = (unitIndex: number): number => Math.round(bytesInUnit(bytes, unitIndex) * multiplier) / multiplier
+	let i = bytesUnitIndex(bytes)
+	let rounded = roundedIn(i)
+
+	if (rounded >= 1024 && i < MAX_BYTES_UNIT_INDEX) {
+		i++
+		rounded = roundedIn(i)
+	}
 
 	return rounded + " " + FORMAT_BYTES_SIZES[i]
 }
@@ -474,13 +485,18 @@ export function formatBytes(bytes: number, decimals: number = 2): string {
 // decimal part that comes and goes would move everything after it on every tick. Whole bytes have no
 // fraction to keep.
 export function formatBytesFixed(bytes: number, decimals: number = 1): string {
-	const i = bytesUnitIndex(bytes)
+	const places = Math.max(0, decimals)
+	const shownIn = (unitIndex: number): string =>
+		unitIndex === 0 ? String(Math.round(bytes)) : bytesInUnit(bytes, unitIndex).toFixed(places)
+	let i = bytesUnitIndex(bytes)
+	let shown = shownIn(i)
 
-	if (i === 0) {
-		return `${String(Math.round(bytes))} B`
+	if (Number(shown) >= 1024 && i < MAX_BYTES_UNIT_INDEX) {
+		i++
+		shown = shownIn(i)
 	}
 
-	return `${(bytes / POWERS_1024[i]!).toFixed(Math.max(0, decimals))} ${FORMAT_BYTES_SIZES[i] ?? ""}`
+	return `${shown} ${FORMAT_BYTES_SIZES[i] ?? ""}`
 }
 
 export function isAbortError(error: unknown): boolean {

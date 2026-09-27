@@ -401,6 +401,52 @@ describe("rasterizeSvgThumb — refusals (no DOM element ever created)", () => {
 	})
 })
 
+describe("rasterizeSvgThumb — one render at a time", () => {
+	it("starts a second document's render only once the first has settled", async () => {
+		const decodes: { reject: (reason: unknown) => void }[] = []
+
+		vi.stubGlobal(
+			"Image",
+			class {
+				src = ""
+				decode(): Promise<void> {
+					return new Promise((_resolve, reject) => {
+						decodes.push({ reject })
+					})
+				}
+			}
+		)
+		vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:svg")
+		vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined)
+
+		try {
+			const svg = '<svg viewBox="0 0 10 10"></svg>'
+			const first = rasterizeSvgThumb(svg)
+			const second = rasterizeSvgThumb(svg)
+
+			await vi.waitFor(() => {
+				expect(decodes).toHaveLength(1)
+			})
+			await Promise.resolve()
+			expect(decodes).toHaveLength(1)
+
+			decodes[0]?.reject(new Error("bad"))
+
+			await expect(first).resolves.toEqual({ type: "unavailable", reason: "corrupt" })
+			await vi.waitFor(() => {
+				expect(decodes).toHaveLength(2)
+			})
+
+			decodes[1]?.reject(new Error("bad"))
+
+			await expect(second).resolves.toEqual({ type: "unavailable", reason: "corrupt" })
+		} finally {
+			vi.unstubAllGlobals()
+			vi.restoreAllMocks()
+		}
+	})
+})
+
 describe("generateSvgThumb", () => {
 	it("fails, counting toward the blacklist, when the download fails", async () => {
 		downloadFileBytesMock.mockRejectedValue(new Error("network"))

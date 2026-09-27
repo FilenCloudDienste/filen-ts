@@ -22,6 +22,7 @@ import {
 	transferIconKey,
 	transferRate,
 	percentFormat,
+	runningPercentFraction,
 	type TransferRate
 } from "@/features/transfers/components/transferRow.logic"
 import { pauseTransfer, resumeTransfer } from "@/features/transfers/lib/control"
@@ -216,7 +217,7 @@ export function TransferRow({ transfer, onRequestCancel, onShowInDirectory }: Tr
 	} else if (active) {
 		details = [
 			bytes,
-			transfer.size > 0 ? percentFormat(i18n.language).format(progress / 100) : null,
+			transfer.size > 0 ? percentFormat(i18n.language).format(runningPercentFraction(progress)) : null,
 			rate?.etaSeconds == null ? null : t("transfersRowTimeLeft", { eta: formatSecondsToMediaClock(rate.etaSeconds) }),
 			rate === null ? null : t("transfersAggregateSpeed", { speed: formatBytesFixed(rate.bytesPerSecond) })
 		]
