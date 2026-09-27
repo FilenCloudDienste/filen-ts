@@ -29,9 +29,13 @@ import { layerKeyFor, resizable, sizesInFile } from "@/features/spreadsheet/lib/
 import { resetTargets, type SizeAxis, type SizeEntry } from "@/features/spreadsheet/lib/sizes.logic"
 import { parseTsv, rangeToTsv } from "@/features/spreadsheet/lib/tsv.logic"
 import { errorLabel } from "@/lib/i18n/errorLabel"
+import { log } from "@/lib/log"
 import { LoadingState } from "@/components/loadingState"
 import { InputDialog } from "@/components/dialogs/inputDialog"
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from "@/components/ui/context-menu"
+import { Button } from "@/components/ui/button"
+import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
+import { saveAsXlsx } from "@/features/spreadsheet/lib/saveAsXlsx"
 
 // The overlay's handle on the open file's bytes as edited, read when it saves: an open cell entry is
 // committed first, and the bytes come after every edit already made. `commit` marks them saved once
@@ -51,6 +55,10 @@ interface SpreadsheetViewerProps {
 	neverEditable?: boolean
 	onDirtyChange?: (dirty: boolean) => void
 	saveRef?: RefObject<SpreadsheetSaveSource | null>
+	// Shows another file in this preview's place: the .xlsx an .xls was just saved as.
+	onOpenFile?: (item: DriveItem) => void
+	// A converted copy may be written beside this file (an .xls offers Save as .xlsx).
+	canSaveCopy?: boolean
 }
 
 const ORIGIN: Selection = { anchor: { row: 0, col: 0 }, focus: { row: 0, col: 0 } }
@@ -148,7 +156,8 @@ function SpreadsheetBody({
 	neverEditable,
 	onDirtyChange,
 	saveRef,
-	layerKey
+	layerKey,
+	onSaveAsXlsx
 }: {
 	id: number
 	initial: GridDoc
@@ -161,8 +170,10 @@ function SpreadsheetBody({
 	onDirtyChange: ((dirty: boolean) => void) | undefined
 	saveRef: RefObject<SpreadsheetSaveSource | null> | undefined
 	layerKey: LayerKey
+	// An .xls the user may write beside: converts it to an .xlsx next to it. Resolves once done or failed.
+	onSaveAsXlsx: (() => Promise<void>) | undefined
 }) {
-	const { t } = useTranslation("preview")
+	const { t } = useTranslation(["preview", "common"])
 	// Loaded whatever the file: CSV shifts reach it from the edits below, and only an editable workbook,
 	// which keeps its sizes in the file, leaves it unapplied.
 	const local = useSizeLayer(layerKey)
@@ -192,6 +203,9 @@ function SpreadsheetBody({
 						: writability === "readOnly" && doc.kind !== "xls"
 							? t("previewSpreadsheetReadOnlyUnsafe")
 							: null
+	const shownNote = readOnlyNote ?? (doc.kind === "xls" ? t("previewSpreadsheetReadOnlyXls") : null)
+	const [xlsxAsked, setXlsxAsked] = useState(false)
+	const [xlsxSaving, setXlsxSaving] = useState(false)
 	const [chosenSheet, setChosenSheet] = useState(doc.activeSheet)
 	// An undone "add sheet" can take away the sheet on show.
 	const sheetIndex = Math.max(0, Math.min(chosenSheet, doc.sheets.length - 1))
@@ -703,14 +717,26 @@ function SpreadsheetBody({
 						{activeInput}
 					</span>
 				)}
-				{readOnlyNote === null ? null : (
+				{shownNote === null ? null : (
 					<span
 						role="status"
-						title={readOnlyNote}
+						title={shownNote}
 						className="max-w-1/2 shrink truncate text-xs text-muted-foreground"
 					>
-						{readOnlyNote}
+						{shownNote}
 					</span>
+				)}
+				{onSaveAsXlsx === undefined ? null : (
+					<Button
+						variant="outline"
+						size="xs"
+						className="shrink-0"
+						onClick={() => {
+							setXlsxAsked(true)
+						}}
+					>
+						{t("previewSpreadsheetSaveAsXlsx")}
+					</Button>
 				)}
 			</div>
 			{/* One tree whether editable or not, so the grid (its scroll and focus) outlives a switch to read-only.
@@ -789,6 +815,26 @@ function SpreadsheetBody({
 					/>
 				</ContextMenuContent>
 			</ContextMenu>
+			{onSaveAsXlsx === undefined ? null : (
+				<ConfirmDialog
+					open={xlsxAsked}
+					pending={xlsxSaving}
+					title={t("previewSpreadsheetSaveAsXlsxTitle")}
+					body={t("previewSpreadsheetSaveAsXlsxBody")}
+					confirmLabel={t("previewSpreadsheetSaveAsXlsx")}
+					cancelLabel={t("common:cancel")}
+					onOpenChange={setXlsxAsked}
+					onConfirm={() => {
+						setXlsxSaving(true)
+						void onSaveAsXlsx().finally(() => {
+							if (alive.current) {
+								setXlsxSaving(false)
+								setXlsxAsked(false)
+							}
+						})
+					}}
+				/>
+			)}
 			{doc.kind !== "csv" ? (
 				<SheetTabs
 					sheets={doc.sheets}
@@ -899,7 +945,9 @@ function SpreadsheetViewer({
 	readOnlyReason,
 	neverEditable,
 	onDirtyChange,
-	saveRef
+	saveRef,
+	onOpenFile,
+	canSaveCopy
 }: SpreadsheetViewerProps) {
 	const { t } = useTranslation("preview")
 	const state = useSpreadsheetDoc(item, documentKey)
@@ -944,6 +992,29 @@ function SpreadsheetViewer({
 					onDirtyChange={onDirtyChange}
 					saveRef={saveRef}
 					layerKey={layerKeyFor(stableUuidOf(item), documentKey)}
+					onSaveAsXlsx={
+						state.doc.kind === "xls" && canSaveCopy === true
+							? async () => {
+									const bytes = state.bytes
+									const outcome = await saveAsXlsx(item, bytes).catch((e: unknown) => {
+										log.error("spreadsheet", "saving an .xls as .xlsx failed", e)
+
+										return { status: "error", dto: null } as const
+									})
+
+									if (outcome.status === "error") {
+										toast.error(
+											outcome.dto === null ? t("previewSpreadsheetSaveAsXlsxFailed") : errorLabel(outcome.dto)
+										)
+
+										return
+									}
+
+									toast.success(t("previewSpreadsheetSavedAsXlsx", { name: outcome.name }))
+									onOpenFile?.(outcome.item)
+								}
+							: undefined
+					}
 				/>
 			)
 	}

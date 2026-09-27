@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from "vitest"
 import type { File as SdkFile, UuidStr } from "@filen/sdk-rs"
-import { isEditable, isUnresolvableParentError, runPreviewSave, type PreviewSaveDeps } from "@/features/drive/lib/previewSave.logic"
+import {
+	canSaveCopyBeside,
+	isEditable,
+	isUnresolvableParentError,
+	runPreviewSave,
+	type PreviewSaveDeps
+} from "@/features/drive/lib/previewSave.logic"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import type { ErrorDTO } from "@/lib/sdk/errors"
 
@@ -65,6 +71,20 @@ function sdkDto(kind: string): ErrorDTO {
 function decodedMeta(name: string): SdkFile["meta"] {
 	return { type: "decoded", data: { name, mime: "text/plain", modified: 1_700_000_000_000n, size: 1_024n, key: "key", version: 2 } }
 }
+
+describe("canSaveCopyBeside", () => {
+	it("is a readable file in the user's own drive, whatever its format", () => {
+		expect(canSaveCopyBeside(fileItem({ meta: decodedMeta("budget.xls") }), "drive")).toBe(true)
+	})
+
+	it("is never a file seen outside the drive (trash, shares, links)", () => {
+		expect(canSaveCopyBeside(fileItem({ meta: decodedMeta("budget.xls") }), "trash")).toBe(false)
+	})
+
+	it("is never an undecryptable file", () => {
+		expect(canSaveCopyBeside(fileItem({ meta: { type: "encrypted", data: "cipher" } }), "drive")).toBe(false)
+	})
+})
 
 describe("isEditable", () => {
 	it("is true for a decryptable text file in the drive variant", () => {

@@ -20,7 +20,13 @@ import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { extensionOf, previewCategoryForName, previewType, type PreviewCategory } from "@/features/drive/lib/preview.logic"
 import { startDownloads } from "@/features/drive/lib/download"
-import { isEditable, isTextCategory, isUnresolvableParentError, runPreviewSave } from "@/features/drive/lib/previewSave.logic"
+import {
+	canSaveCopyBeside,
+	isEditable,
+	isTextCategory,
+	isUnresolvableParentError,
+	runPreviewSave
+} from "@/features/drive/lib/previewSave.logic"
 import { currentRootUuid, renameItem, trashItems, deleteItemsPermanently } from "@/features/drive/lib/actions"
 import { followClipboardItem } from "@/features/drive/lib/clipboardSync"
 import { unshareItems } from "@/features/drive/lib/share/actions"
@@ -1146,6 +1152,12 @@ export function PreviewOverlay({
 									onDirtyChange={setPreviewDirty}
 									contentRef={contentRef}
 									spreadsheetRef={spreadsheetRef}
+									canSaveCopy={driveItem !== undefined && canSaveCopyBeside(driveItem, variant)}
+									onOpenFile={opened => {
+										if (rawDriveItem !== undefined) {
+											commitSaved(rawDriveItem.data.uuid, opened)
+										}
+									}}
 								/>
 							</PreviewDownloadableProvider>
 						</PreviewErrorBoundary>
@@ -1296,6 +1308,10 @@ interface PreviewBodyProps {
 	onDirtyChange: (dirty: boolean) => void
 	contentRef: RefObject<string | null>
 	spreadsheetRef: RefObject<SpreadsheetSaveSource | null>
+	// Shows another file in this slot's place (the .xlsx an .xls was just saved as).
+	onOpenFile: (item: DriveItem) => void
+	// A converted copy may be written beside the file (its own drive, however read-only its format).
+	canSaveCopy: boolean
 }
 
 // The external arm's body — a bare url with no drive item, so no SW range route, byte-buffering, HEIC
@@ -1355,7 +1371,9 @@ function PreviewBody({
 	locked,
 	onDirtyChange,
 	contentRef,
-	spreadsheetRef
+	spreadsheetRef,
+	onOpenFile,
+	canSaveCopy
 }: PreviewBodyProps): ReactNode {
 	const { t } = useTranslation("preview")
 
@@ -1439,6 +1457,8 @@ function PreviewBody({
 						neverEditable={neverEditable}
 						onDirtyChange={onDirtyChange}
 						saveRef={spreadsheetRef}
+						onOpenFile={onOpenFile}
+						canSaveCopy={canSaveCopy}
 					/>
 				</Suspense>
 			)

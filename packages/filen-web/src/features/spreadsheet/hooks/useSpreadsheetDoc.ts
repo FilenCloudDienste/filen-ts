@@ -20,7 +20,8 @@ export type SpreadsheetDocState =
 	// `unnamed`: the file's name does not say it is a spreadsheet, so its kind was read from its bytes and
 	// it opens read-only (saving could rewrite it as the wrong format). `renamed`: the file has since been
 	// renamed to another format's extension, which a save would mislabel, so it is read-only too.
-	| { status: "ready"; id: number; doc: GridDoc; unnamed: boolean; renamed: boolean }
+	// `bytes`: the file as opened (the preview cache's own buffer: read it, never transfer it).
+	| { status: "ready"; id: number; doc: GridDoc; unnamed: boolean; renamed: boolean; bytes: Uint8Array }
 
 type Opened = { status: "unreadable" } | { status: "ready"; id: number; doc: GridDoc; unnamed: boolean; format: string | null }
 
@@ -107,5 +108,5 @@ export function useSpreadsheetDoc(item: DriveItem, documentKey: string): Spreads
 
 	const { id, doc, unnamed, format: openedAs } = opened.state
 
-	return { status: "ready", id, doc, unnamed, renamed: !unnamed && nameFormat(item) !== openedAs }
+	return { status: "ready", id, doc, unnamed, renamed: !unnamed && nameFormat(item) !== openedAs, bytes: opened.bytes }
 }

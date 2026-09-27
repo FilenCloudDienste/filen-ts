@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs"
+import { fileURLToPath } from "node:url"
 import type { Locator, Page } from "@playwright/test"
 import { writeXlsx } from "hucre/xlsx"
 import { test, expect } from "./fixtures"
@@ -10,6 +12,8 @@ import { trackCspViolations } from "./helpers/csp"
 // into cells, and saving. The xlsx leg reloads the page after its save, so what it reads back is the file
 // the drive now holds, not the bytes the overlay kept.
 test.describe.configure({ mode: "default" })
+
+const XLS_FIXTURE = fileURLToPath(new URL("../src/tests/fixtures/spreadsheet/budget.xls", import.meta.url))
 
 const CSV_BYTES = Buffer.from("Name;Qty\r\nApples;3\r\nPears;5\r\n", "utf8")
 
@@ -252,6 +256,55 @@ test("rails resize: an xlsx keeps a width in the file, a csv beside it, and the 
 		)
 
 		expect(hit).toBe("columnheader")
+	} finally {
+		await trashScratchDirectory(page, scratchName)
+	}
+})
+
+test("an .xls opens read-only and saves as an editable .xlsx beside it", async ({ page, injectedSession }) => {
+	expect(injectedSession.length).toBeGreaterThan(0)
+
+	const runId = crypto.randomUUID()
+	const scratchName = `e2e-preview-spreadsheet-xls-${runId}`
+	const nameXls = `e2e-sheet-${runId}.xls`
+	const nameXlsx = `e2e-sheet-${runId}.xlsx`
+	// A row's name holds more than the file name, and the .xls's is a prefix of the .xlsx's.
+	const xlsRowName = new RegExp(`${runId}\\.xls(?!x)`)
+	const dialog = page.getByRole("dialog")
+	const grid = dialog.getByRole("grid")
+
+	await bootTo(page)
+
+	try {
+		const { listbox } = await enterScratchDirectory(page, scratchName)
+
+		await page
+			.getByRole("main")
+			.locator('input[type="file"]')
+			.first()
+			.setInputFiles([{ name: nameXls, mimeType: "application/vnd.ms-excel", buffer: readFileSync(XLS_FIXTURE) }])
+		await expect(listbox.getByRole("option", { name: xlsRowName })).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
+
+		await listbox.getByRole("option", { name: xlsRowName }).dblclick()
+		await expect(gridCell(grid, 2, 1)).toHaveText("Rent", { timeout: 60_000 })
+		await expect(dialog.getByText("Old .xls format — view only.")).toBeVisible()
+
+		await dialog.getByRole("button", { name: "Save as .xlsx", exact: true }).click()
+
+		const confirm = page.getByRole("alertdialog", { name: "Save as .xlsx?" })
+
+		await confirm.getByRole("button", { name: "Save as .xlsx", exact: true }).click()
+		await expect(confirm).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
+
+		// The copy takes the preview's place, with the same values, and becomes editable once proven.
+		await expect(dialog.getByText(nameXlsx)).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
+		await expect(gridCell(grid, 2, 2)).toHaveText("1200", { timeout: 60_000 })
+		await expect(dialog.getByRole("button", { name: "Bold", exact: true })).toBeEnabled({ timeout: 60_000 })
+
+		await page.keyboard.press("Escape")
+		await expect(dialog).toHaveCount(0)
+		await expect(listbox.getByRole("option", { name: nameXlsx })).toBeVisible()
+		await expect(listbox.getByRole("option", { name: xlsRowName })).toBeVisible()
 	} finally {
 		await trashScratchDirectory(page, scratchName)
 	}

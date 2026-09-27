@@ -185,6 +185,19 @@ export const preview = {
 	/** Spreadsheet grid menu — give the selected rows back their default (or file's own) height */
 	previewSpreadsheetResetRowHeight_one: "Reset row height",
 	previewSpreadsheetResetRowHeight_other: "Reset {{count}} row heights",
+	/** Spreadsheet viewer note — a legacy .xls opens read-only */
+	previewSpreadsheetReadOnlyXls: "Old .xls format — view only.",
+	/** Spreadsheet viewer — converts a read-only .xls into an editable .xlsx copy beside it */
+	previewSpreadsheetSaveAsXlsx: "Save as .xlsx",
+	/** Spreadsheet viewer — confirm dialog title before converting an .xls */
+	previewSpreadsheetSaveAsXlsxTitle: "Save as .xlsx?",
+	/** Spreadsheet viewer — confirm dialog body: what the .xls to .xlsx conversion keeps and loses */
+	previewSpreadsheetSaveAsXlsxBody:
+		"An editable .xlsx copy is saved in the same directory, and the .xls stays as it is. Only the values come along: formulas become their results, and formatting, column widths, row heights and named ranges are not kept.",
+	/** Spreadsheet viewer — toast once the .xlsx copy is saved */
+	previewSpreadsheetSavedAsXlsx: "Saved as {{name}}",
+	/** Spreadsheet viewer — toast when the .xls could not be converted */
+	previewSpreadsheetSaveAsXlsxFailed: "This file could not be saved as .xlsx",
 	/** Spreadsheet grid — the size tip shown while dragging a column's edge */
 	previewSpreadsheetWidthPx: "Width: {{size}} px",
 	/** Spreadsheet grid — the size tip shown while dragging a row's edge */

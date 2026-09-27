@@ -15,6 +15,14 @@ const EDITABLE_SPREADSHEET_EXTENSIONS: ReadonlySet<string> = new Set(["csv", "ts
 // row (nothing to encode a diff against). Markdown is edited through the viewer's own source mode,
 // which mounts the same CodeMirror surface text/code use; its rendered arm is never an editing
 // surface.
+// Whether a new file may be written beside this one (a converted copy): any readable file in the user's
+// own drive, whatever its format — unlike isEditable, which also needs the file's own format to save.
+export function canSaveCopyBeside(item: DriveItem, variant: DriveVariant): boolean {
+	const base = asDirectoryOrFile(item)
+
+	return variant === "drive" && base.type === "file" && !base.data.undecryptable
+}
+
 export function isEditable(item: DriveItem, variant: DriveVariant): boolean {
 	if (variant !== "drive") {
 		return false

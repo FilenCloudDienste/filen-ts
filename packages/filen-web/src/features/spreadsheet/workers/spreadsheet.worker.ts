@@ -7,6 +7,7 @@ import { parseCsvFile } from "@/features/spreadsheet/lib/csvView"
 import { XlsxDocument } from "@/features/spreadsheet/lib/xlsxDocument"
 import { CsvDocument } from "@/features/spreadsheet/lib/csvDocument"
 import { checkZipLimits } from "@/features/spreadsheet/lib/zipLimits"
+import { xlsToXlsx } from "@/features/spreadsheet/lib/xlsConvert"
 
 // Owns every open spreadsheet: the parsed workbook stays here, with its edits and undo history, and the
 // page gets views of it (model.ts) and patches after each edit (edits.ts). A file is untrusted input, so
@@ -103,6 +104,12 @@ const api = {
 		if (found instanceof XlsxDocument) {
 			found.viewOnly()
 		}
+	},
+	// An .xls converted to an .xlsx (values and merges only: lib/xlsConvert.ts), handed over.
+	xlsToXlsx: async (bytes: Uint8Array): Promise<Uint8Array> => {
+		const converted = await xlsToXlsx(bytes, CELL_LIMIT)
+
+		return Comlink.transfer(converted, [converted.buffer as ArrayBuffer])
 	},
 	// The bytes serialize returned at `version` are now the file's.
 	markSaved: (id: number, version: number): DocState => document(id).markSaved(version),
