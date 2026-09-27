@@ -3,10 +3,12 @@ import { flushSync } from "react-dom"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { type DriveItem } from "@/features/drive/lib/item"
+import { stableUuidOf } from "@/features/drive/store/useDriveClipboardStore"
 import { PreviewErrorState } from "@/features/preview/components/previewErrorState"
 import { FormatToolbar } from "@/features/spreadsheet/components/formatToolbar"
 import { SheetGrid } from "@/features/spreadsheet/components/sheetGrid"
 import { SheetTabs } from "@/features/spreadsheet/components/sheetTabs"
+import { useSizeLayer } from "@/features/spreadsheet/hooks/useSizeLayer"
 import { useSpreadsheetDoc } from "@/features/spreadsheet/hooks/useSpreadsheetDoc"
 import { useSpreadsheetEdits, useSpreadsheetWritability, type SpreadsheetSnapshot } from "@/features/spreadsheet/hooks/useSpreadsheetEdits"
 import { rangeName, selectionRange, type CellPosition, type Selection } from "@/features/spreadsheet/lib/cellRef.logic"
@@ -22,6 +24,9 @@ import {
 	sheetRows,
 	snapToMerge
 } from "@/features/spreadsheet/lib/navigation.logic"
+import { layeredSheet, type LayerKey } from "@/features/spreadsheet/lib/sizeLayer"
+import { layerKeyFor, sizesInFile } from "@/features/spreadsheet/lib/sizeRouting.logic"
+import { MAX_RESIZE_TARGETS, type SizeAxis, type SizeEntry } from "@/features/spreadsheet/lib/sizes.logic"
 import { parseTsv, rangeToTsv } from "@/features/spreadsheet/lib/tsv.logic"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { LoadingState } from "@/components/loadingState"
@@ -142,7 +147,8 @@ function SpreadsheetBody({
 	readOnlyReason,
 	neverEditable,
 	onDirtyChange,
-	saveRef
+	saveRef,
+	layerKey
 }: {
 	id: number
 	initial: GridDoc
@@ -154,12 +160,19 @@ function SpreadsheetBody({
 	neverEditable: boolean
 	onDirtyChange: ((dirty: boolean) => void) | undefined
 	saveRef: RefObject<SpreadsheetSaveSource | null> | undefined
+	layerKey: LayerKey
 }) {
 	const { t } = useTranslation("preview")
-	const edits = useSpreadsheetEdits(id, initial)
+	// Loaded whatever the file: CSV shifts reach it from the edits below, and only an editable workbook,
+	// which keeps its sizes in the file, leaves it unapplied.
+	const local = useSizeLayer(layerKey)
+	const edits = useSpreadsheetEdits(id, initial, (sheetAt, shift) => {
+		local.follow(sheetAt, shift)
+	})
 	const doc = edits.doc
 	const writability = useSpreadsheetWritability(id, doc, editable && !unnamed, neverEditable)
 	const canEdit = editable && writability === "writable" && !unnamed && !renamed
+	const inFile = sizesInFile(doc.kind, writability, canEdit)
 	// Editing waits on the worker's proof: the toolbar holds its place meanwhile, disabled, and stays so
 	// when the proof fails, so the grid never moves as the verdict lands.
 	const toolbarShown = canEdit || (editable && !unnamed && !renamed && (writability === "checking" || doc.kind === "xlsx"))
@@ -218,6 +231,8 @@ function SpreadsheetBody({
 	}
 
 	const sheet = doc.sheets[sheetIndex] ?? NO_SHEET
+	// The sheet as laid out: its own sizes, with the ones kept beside the file over them.
+	const laidOutSheet = inFile ? sheet : layeredSheet(sheet, local.layer.get(sheetIndex))
 	const selection = selections.get(sheetIndex) ?? ORIGIN
 	const range = selectionRange(selection)
 	const active = sheet.cells.get(cellKey(selection.focus.row, selection.focus.col))
@@ -274,7 +289,7 @@ function SpreadsheetBody({
 		const next = gridMove(
 			{ key: MOVE_KEYS[move], shiftKey: false, ctrlKey: false, metaKey: false, altKey: false },
 			{ anchor: position, focus: position },
-			{ ...sheetBounds(sheet, sheetRows(sheet).axis, sheetCols(sheet)), pageRows: 1 }
+			{ ...sheetBounds(laidOutSheet, sheetRows(laidOutSheet).axis, sheetCols(laidOutSheet)), pageRows: 1 }
 		)
 
 		return next?.focus ?? position
@@ -566,9 +581,33 @@ function SpreadsheetBody({
 	const colsSelected = range.endCol - range.startCol + 1
 	const structureDisabled = sheet.structureLocked
 
+	// Into the file for an editable workbook (an undoable edit), beside it for everything else.
+	function resize(axis: SizeAxis, sizes: readonly SizeEntry[]): Promise<void> {
+		if (inFile) {
+			return edits.apply({ type: "resize", sheet: sheetIndex, axis, sizes }).then(() => undefined)
+		}
+
+		local.update(sheetIndex, axis, sizes)
+
+		return Promise.resolve()
+	}
+
+	// The selected columns or rows, back to the default size (in the file) or the file's (beside it). Capped
+	// like a drag and cut at the sheet's used area, so select-all resets what is on the sheet, not a million rows.
+	function resetEntries(axis: SizeAxis): SizeEntry[] {
+		const [start, end] = axis === "cols" ? [range.startCol, range.endCol] : [range.startRow, range.endRow]
+		const used = axis === "cols" ? laidOutSheet.colCount : laidOutSheet.rowCount
+		const last = Math.min(end, Math.max(start, used - 1), start + MAX_RESIZE_TARGETS - 1)
+
+		return Array.from({ length: last - start + 1 }, (_, offset): SizeEntry => [start + offset, null])
+	}
+
+	const resetCols = resetEntries("cols")
+	const resetRows = resetEntries("rows")
+
 	const grid = (
 		<SheetGrid
-			sheet={sheet}
+			sheet={laidOutSheet}
 			styles={doc.styles}
 			selection={selection}
 			onSelectionChange={next => {
@@ -589,6 +628,7 @@ function SpreadsheetBody({
 				}
 			}}
 			gridRef={gridRef}
+			onResize={resize}
 			editor={
 				editing?.from === "cell"
 					? {
@@ -685,76 +725,85 @@ function SpreadsheetBody({
 					</span>
 				)}
 			</div>
-			{/* One tree whether editable or not, so the grid (its scroll and focus) outlives a switch to read-only. */}
-			<ContextMenu disabled={!canEdit}>
-				<ContextMenuTrigger
-					className="flex min-h-0 flex-1 flex-col"
-					// Read-only, no menu at all: the browser's own offers nothing for a grid (no text selection
-					// to copy; copying is mod+C).
-					onContextMenu={event => {
-						if (!canEdit) {
-							event.preventDefault()
-						}
-					}}
-				>
-					{grid}
-				</ContextMenuTrigger>
+			{/* One tree whether editable or not, so the grid (its scroll and focus) outlives a switch to read-only.
+			Read-only, the menu holds only the size resets. */}
+			<ContextMenu>
+				<ContextMenuTrigger className="flex min-h-0 flex-1 flex-col">{grid}</ContextMenuTrigger>
 				<ContextMenuContent>
+					{canEdit ? (
+						<>
+							<ContextMenuItem
+								disabled={structureDisabled || !canEdit}
+								onClick={() => {
+									apply({ type: "insert", sheet: sheetIndex, axis: "rows", at: range.startRow, count: rowsSelected })
+								}}
+							>
+								{t("previewSpreadsheetInsertRowsAbove", { count: rowsSelected })}
+							</ContextMenuItem>
+							<ContextMenuItem
+								disabled={structureDisabled || !canEdit}
+								onClick={() => {
+									apply({ type: "insert", sheet: sheetIndex, axis: "rows", at: range.endRow + 1, count: rowsSelected })
+								}}
+							>
+								{t("previewSpreadsheetInsertRowsBelow", { count: rowsSelected })}
+							</ContextMenuItem>
+							<ContextMenuItem
+								disabled={structureDisabled || !canEdit}
+								onClick={() => {
+									apply({ type: "delete", sheet: sheetIndex, axis: "rows", at: range.startRow, count: rowsSelected })
+								}}
+							>
+								{t("previewSpreadsheetDeleteRows", { count: rowsSelected })}
+							</ContextMenuItem>
+							<ContextMenuSeparator />
+							<ContextMenuItem
+								disabled={structureDisabled || !canEdit}
+								onClick={() => {
+									apply({ type: "insert", sheet: sheetIndex, axis: "cols", at: range.startCol, count: colsSelected })
+								}}
+							>
+								{t("previewSpreadsheetInsertColumnsLeft", { count: colsSelected })}
+							</ContextMenuItem>
+							<ContextMenuItem
+								disabled={structureDisabled || !canEdit}
+								onClick={() => {
+									apply({ type: "insert", sheet: sheetIndex, axis: "cols", at: range.endCol + 1, count: colsSelected })
+								}}
+							>
+								{t("previewSpreadsheetInsertColumnsRight", { count: colsSelected })}
+							</ContextMenuItem>
+							<ContextMenuItem
+								disabled={structureDisabled || !canEdit}
+								onClick={() => {
+									apply({ type: "delete", sheet: sheetIndex, axis: "cols", at: range.startCol, count: colsSelected })
+								}}
+							>
+								{t("previewSpreadsheetDeleteColumns", { count: colsSelected })}
+							</ContextMenuItem>
+							<ContextMenuSeparator />
+							<ContextMenuItem
+								disabled={!canEdit}
+								onClick={clear}
+							>
+								{t("previewSpreadsheetClearCells")}
+							</ContextMenuItem>
+							<ContextMenuSeparator />
+						</>
+					) : null}
 					<ContextMenuItem
-						disabled={structureDisabled || !canEdit}
 						onClick={() => {
-							apply({ type: "insert", sheet: sheetIndex, axis: "rows", at: range.startRow, count: rowsSelected })
+							void resize("cols", resetCols)
 						}}
 					>
-						{t("previewSpreadsheetInsertRowsAbove", { count: rowsSelected })}
+						{t("previewSpreadsheetResetColumnWidth", { count: resetCols.length })}
 					</ContextMenuItem>
 					<ContextMenuItem
-						disabled={structureDisabled || !canEdit}
 						onClick={() => {
-							apply({ type: "insert", sheet: sheetIndex, axis: "rows", at: range.endRow + 1, count: rowsSelected })
+							void resize("rows", resetRows)
 						}}
 					>
-						{t("previewSpreadsheetInsertRowsBelow", { count: rowsSelected })}
-					</ContextMenuItem>
-					<ContextMenuItem
-						disabled={structureDisabled || !canEdit}
-						onClick={() => {
-							apply({ type: "delete", sheet: sheetIndex, axis: "rows", at: range.startRow, count: rowsSelected })
-						}}
-					>
-						{t("previewSpreadsheetDeleteRows", { count: rowsSelected })}
-					</ContextMenuItem>
-					<ContextMenuSeparator />
-					<ContextMenuItem
-						disabled={structureDisabled || !canEdit}
-						onClick={() => {
-							apply({ type: "insert", sheet: sheetIndex, axis: "cols", at: range.startCol, count: colsSelected })
-						}}
-					>
-						{t("previewSpreadsheetInsertColumnsLeft", { count: colsSelected })}
-					</ContextMenuItem>
-					<ContextMenuItem
-						disabled={structureDisabled || !canEdit}
-						onClick={() => {
-							apply({ type: "insert", sheet: sheetIndex, axis: "cols", at: range.endCol + 1, count: colsSelected })
-						}}
-					>
-						{t("previewSpreadsheetInsertColumnsRight", { count: colsSelected })}
-					</ContextMenuItem>
-					<ContextMenuItem
-						disabled={structureDisabled || !canEdit}
-						onClick={() => {
-							apply({ type: "delete", sheet: sheetIndex, axis: "cols", at: range.startCol, count: colsSelected })
-						}}
-					>
-						{t("previewSpreadsheetDeleteColumns", { count: colsSelected })}
-					</ContextMenuItem>
-					<ContextMenuSeparator />
-					<ContextMenuItem
-						disabled={!canEdit}
-						onClick={clear}
-					>
-						{t("previewSpreadsheetClearCells")}
+						{t("previewSpreadsheetResetRowHeight", { count: resetRows.length })}
 					</ContextMenuItem>
 				</ContextMenuContent>
 			</ContextMenu>
@@ -863,6 +912,7 @@ function SpreadsheetViewer({
 					neverEditable={neverEditable === true}
 					onDirtyChange={onDirtyChange}
 					saveRef={saveRef}
+					layerKey={layerKeyFor(stableUuidOf(item), documentKey)}
 				/>
 			)
 	}

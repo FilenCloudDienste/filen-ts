@@ -179,6 +179,12 @@ export const preview = {
 	previewSpreadsheetDeleteColumns_other: "Delete {{count}} columns",
 	/** Spreadsheet grid menu — empty the selected cells (formats stay) */
 	previewSpreadsheetClearCells: "Clear contents",
+	/** Spreadsheet grid menu — give the selected columns back their default (or file's own) width */
+	previewSpreadsheetResetColumnWidth_one: "Reset column width",
+	previewSpreadsheetResetColumnWidth_other: "Reset {{count}} column widths",
+	/** Spreadsheet grid menu — give the selected rows back their default (or file's own) height */
+	previewSpreadsheetResetRowHeight_one: "Reset row height",
+	previewSpreadsheetResetRowHeight_other: "Reset {{count}} row heights",
 	/** Spreadsheet grid — the size tip shown while dragging a column's edge */
 	previewSpreadsheetWidthPx: "Width: {{size}} px",
 	/** Spreadsheet grid — the size tip shown while dragging a row's edge */

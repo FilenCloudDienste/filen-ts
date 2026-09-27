@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react"
 import { spreadsheetWorker } from "@/features/spreadsheet/lib/spreadsheetClient"
 import { applyEditResult, type GridDoc } from "@/features/spreadsheet/lib/cellStore.logic"
 import type { DocState, EditOp, EditResult } from "@/features/spreadsheet/lib/edits"
+import type { AxisShift } from "@/features/spreadsheet/lib/sizes.logic"
 
 export interface SpreadsheetSnapshot {
 	bytes: Uint8Array
@@ -21,12 +22,23 @@ export interface SpreadsheetEdits {
 }
 
 // The grid's side of editing: every call to the worker goes through one queue (a later one never
-// overtakes an earlier one, a save included), and each result folds into the view.
-export function useSpreadsheetEdits(id: number, initial: GridDoc): SpreadsheetEdits {
+// overtakes an earlier one, a save included), and each result folds into the view. `onShift` hears where a
+// CSV's rows or columns moved (edit, undo or redo), for the sizes kept beside it.
+export function useSpreadsheetEdits(
+	id: number,
+	initial: GridDoc,
+	onShift?: (sheet: number, shift: AxisShift & { revert: boolean }) => void
+): SpreadsheetEdits {
 	const [doc, setDoc] = useState(initial)
 	const [state, setState] = useState<DocState>({ dirty: false, canUndo: false, canRedo: false })
 	const [pending, setPending] = useState(0)
 	const queue = useRef<Promise<unknown>>(Promise.resolve())
+	// The latest, for results that land after the render that asked for them.
+	const onShiftRef = useRef(onShift)
+
+	useEffect(() => {
+		onShiftRef.current = onShift
+	})
 
 	function enqueue<T>(call: () => Promise<T>): Promise<T> {
 		const next = queue.current.then(call)
@@ -44,6 +56,11 @@ export function useSpreadsheetEdits(id: number, initial: GridDoc): SpreadsheetEd
 				setDoc(prev => applyEditResult(prev, result))
 				setState(result.state)
 				setPending(count => count - 1)
+
+				// A CSV is one sheet.
+				if (result.type === "sheets" && result.shift !== undefined) {
+					onShiftRef.current?.(0, result.shift)
+				}
 
 				return result
 			},
