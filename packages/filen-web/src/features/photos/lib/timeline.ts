@@ -266,3 +266,17 @@ export function formatTimelineMonth(locale: string, year: number, month: number)
 
 	return format.format(new Date(year, month, 1))
 }
+
+const monthNameFormats = new Map<string, Intl.DateTimeFormat>()
+
+// "July" in the UI language, for the scrubber's pill, which sets the year apart.
+export function formatTimelineMonthName(locale: string, month: number): string {
+	let format = monthNameFormats.get(locale)
+
+	if (format === undefined) {
+		format = new Intl.DateTimeFormat(locale, { month: "long" })
+		monthNameFormats.set(locale, format)
+	}
+
+	return format.format(new Date(2000, month, 1))
+}

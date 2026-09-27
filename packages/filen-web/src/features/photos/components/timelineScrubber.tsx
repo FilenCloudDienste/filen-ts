@@ -1,15 +1,21 @@
 import { useEffect, useRef, useState, type PointerEvent } from "react"
 import { useTranslation } from "react-i18next"
 import { KEEP_SELECTION_PROPS } from "@/features/drive/lib/clickAway.logic"
-import { formatTimelineMonth, timelineHeaderAt, timelineYearMarks, type PhotosTimeline } from "@/features/photos/lib/timeline"
+import { cn } from "@filen/shared"
+import { formatTimelineMonthName, timelineHeaderAt, timelineYearMarks, type PhotosTimeline } from "@/features/photos/lib/timeline"
 
 // Vertical room one year label needs; a year closer to the previous label than this goes unlabeled.
 const LABEL_MIN_GAP_PX = 18
+// Keeps the handle and the end labels clear of the rail's ends.
+const TRACK_INSET_PX = 12
+// How long the month pill stays up after the last scroll event.
+const SCROLL_PILL_LINGER_MS = 900
 
-// Stands in for the grid's scrollbar (hidden while this rail is shown): the rail is the whole scroll
-// range, years are marked where they begin, and a press or drag jumps there while a bubble names the
-// month under the pointer. Mouse and pen only; keyboard users keep the grid's own keys and the scroll
-// container's Page Up/Down, and touch keeps native scrolling.
+// Stands in for the grid's scrollbar (hidden while this rail is shown): a track spanning the whole
+// scroll range, a tick where each year begins, and a handle at the current position. While the grid
+// scrolls, or the rail is hovered or dragged, a pill beside the handle (or the pointer) names the
+// month there. A press or drag jumps. Mouse and pen only; keyboard users keep the grid's own keys and
+// the scroll container's Page Up/Down, and touch keeps native scrolling.
 export function TimelineScrubber({ timeline, scrollElement }: { timeline: PhotosTimeline; scrollElement: HTMLDivElement }) {
 	const { i18n } = useTranslation()
 	const railRef = useRef<HTMLDivElement>(null)
@@ -18,11 +24,19 @@ export function TimelineScrubber({ timeline, scrollElement }: { timeline: Photos
 	const [viewportHeight, setViewportHeight] = useState(scrollElement.clientHeight)
 	const [pointerY, setPointerY] = useState<number | null>(null)
 	const [dragging, setDragging] = useState(false)
+	const [scrolling, setScrolling] = useState(false)
 
 	useEffect(() => {
 		let frame = 0
+		let linger = 0
 
 		const onScroll = (): void => {
+			setScrolling(true)
+			window.clearTimeout(linger)
+			linger = window.setTimeout(() => {
+				setScrolling(false)
+			}, SCROLL_PILL_LINGER_MS)
+
 			if (frame !== 0) {
 				return
 			}
@@ -44,6 +58,7 @@ export function TimelineScrubber({ timeline, scrollElement }: { timeline: Photos
 		return () => {
 			scrollElement.removeEventListener("scroll", onScroll)
 			observer.disconnect()
+			window.clearTimeout(linger)
 
 			if (frame !== 0) {
 				cancelAnimationFrame(frame)
@@ -52,20 +67,22 @@ export function TimelineScrubber({ timeline, scrollElement }: { timeline: Photos
 	}, [scrollElement])
 
 	const maxScroll = Math.max(0, timeline.totalSize - viewportHeight)
+	const trackLength = railHeight - TRACK_INSET_PX * 2
 
-	if (maxScroll <= 0 || railHeight <= 0) {
+	if (maxScroll <= 0 || trackLength <= 0) {
 		return (
 			<div
 				ref={railRef}
 				aria-hidden="true"
-				className="w-10 shrink-0"
+				className="w-14 shrink-0"
 			/>
 		)
 	}
 
-	const railY = (offset: number): number => (Math.min(Math.max(offset, 0), maxScroll) / maxScroll) * railHeight
-	const offsetAtY = (y: number): number => (Math.min(Math.max(y, 0), railHeight) / railHeight) * maxScroll
+	const railY = (offset: number): number => TRACK_INSET_PX + (Math.min(Math.max(offset, 0), maxScroll) / maxScroll) * trackLength
+	const offsetAtY = (y: number): number => (Math.min(Math.max(y - TRACK_INSET_PX, 0), trackLength) / trackLength) * maxScroll
 
+	const currentHeader = timelineHeaderAt(timeline, scrollTop)
 	const labels: { year: number; y: number }[] = []
 
 	for (const mark of timelineYearMarks(timeline)) {
@@ -77,7 +94,11 @@ export function TimelineScrubber({ timeline, scrollElement }: { timeline: Photos
 		}
 	}
 
-	const bubbleHeader = pointerY === null ? null : timelineHeaderAt(timeline, offsetAtY(pointerY))
+	// Hovering previews where a press would jump; otherwise the pill rides the handle.
+	const handleY = railY(scrollTop)
+	const pillY = pointerY !== null && !dragging ? Math.min(Math.max(pointerY, TRACK_INSET_PX), railHeight - TRACK_INSET_PX) : handleY
+	const pillHeader = pointerY !== null && !dragging ? timelineHeaderAt(timeline, offsetAtY(pointerY)) : currentHeader
+	const pillVisible = pillHeader !== null && (dragging || scrolling || pointerY !== null)
 
 	function yWithin(event: PointerEvent<HTMLDivElement>): number {
 		return event.clientY - event.currentTarget.getBoundingClientRect().top
@@ -92,7 +113,7 @@ export function TimelineScrubber({ timeline, scrollElement }: { timeline: Photos
 			ref={railRef}
 			aria-hidden="true"
 			{...KEEP_SELECTION_PROPS}
-			className="relative w-10 shrink-0 cursor-pointer touch-none select-none"
+			className="group relative w-14 shrink-0 cursor-pointer touch-none select-none"
 			onPointerDown={event => {
 				if (event.pointerType === "touch" || event.button !== 0) {
 					return
@@ -128,25 +149,48 @@ export function TimelineScrubber({ timeline, scrollElement }: { timeline: Photos
 				}
 			}}
 		>
-			{labels.map(label => (
-				<span
-					key={label.year}
-					className="absolute right-1.5 -translate-y-1/2 text-[10px] font-medium text-muted-foreground tabular-nums"
-					style={{ top: Math.min(Math.max(label.y, 6), railHeight - 6) }}
-				>
-					{label.year}
-				</span>
-			))}
 			<div
-				className="absolute right-0 h-6 w-1 -translate-y-1/2 rounded-full bg-foreground/40"
-				style={{ top: Math.min(Math.max(railY(scrollTop), 12), railHeight - 12) }}
+				className="absolute right-[11px] w-px bg-border transition-colors group-hover:bg-muted-foreground/40"
+				style={{ top: TRACK_INSET_PX, bottom: TRACK_INSET_PX }}
 			/>
-			{bubbleHeader !== null && pointerY !== null ? (
+			{labels.map(label => {
+				const current = label.year === currentHeader?.year
+
+				return (
+					<div
+						key={label.year}
+						className="absolute right-[11px] flex -translate-y-1/2 items-center gap-1"
+						style={{ top: label.y }}
+					>
+						<span
+							className={cn(
+								"text-[11px] tabular-nums",
+								current ? "font-semibold text-foreground" : "font-medium text-muted-foreground"
+							)}
+						>
+							{label.year}
+						</span>
+						<span className={cn("h-px w-1.5", current ? "bg-foreground" : "bg-muted-foreground/50")} />
+					</div>
+				)
+			})}
+			<div
+				className={cn(
+					"absolute right-[9px] w-[5px] -translate-y-1/2 rounded-full shadow-sm transition-[height,background-color] duration-150",
+					dragging ? "h-8 bg-foreground" : "h-5 bg-foreground/55 group-hover:bg-foreground/80"
+				)}
+				style={{ top: handleY }}
+			/>
+			{pillHeader !== null ? (
 				<div
-					className="pointer-events-none absolute right-full z-20 mr-2 -translate-y-1/2 rounded-md bg-popover px-2 py-1 text-xs font-medium whitespace-nowrap text-popover-foreground shadow-md ring-1 ring-foreground/10"
-					style={{ top: Math.min(Math.max(pointerY, 14), railHeight - 14) }}
+					className={cn(
+						"pointer-events-none absolute right-5 z-20 flex -translate-y-1/2 items-baseline gap-1 rounded-full bg-popover py-1 pr-2.5 pl-3 text-xs whitespace-nowrap text-popover-foreground shadow-md ring-1 ring-foreground/10 transition-opacity duration-200",
+						pillVisible ? "opacity-100" : "opacity-0"
+					)}
+					style={{ top: pillY }}
 				>
-					{formatTimelineMonth(i18n.language, bubbleHeader.year, bubbleHeader.month)}
+					<span className="font-semibold">{formatTimelineMonthName(i18n.language, pillHeader.month)}</span>
+					<span className="text-muted-foreground tabular-nums">{pillHeader.year}</span>
 				</div>
 			) : null}
 		</div>
