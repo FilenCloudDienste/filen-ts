@@ -21,23 +21,27 @@ afterEach(() => {
 
 describe("formatRelativeTime", () => {
 	it("uses web's camelCase keys", () => {
-		expect(formatRelativeTime(NOW, t)).toBe("relativeJustNow")
-		expect(formatRelativeTime(NOW - 5 * 60 * 1000, t)).toBe("relativeMinutesAgo:5")
-		expect(formatRelativeTime(NOW - 3 * 60 * 60 * 1000, t)).toBe("relativeHoursAgo:3")
-		expect(formatRelativeTime(NOW - 2 * DAY, t)).toBe("relativeDaysAgo:2")
+		expect(formatRelativeTime(NOW, t, NOW)).toBe("relativeJustNow")
+		expect(formatRelativeTime(NOW - 5 * 60 * 1000, t, NOW)).toBe("relativeMinutesAgo:5")
+		expect(formatRelativeTime(NOW - 3 * 60 * 60 * 1000, t, NOW)).toBe("relativeHoursAgo:3")
+		expect(formatRelativeTime(NOW - 2 * DAY, t, NOW)).toBe("relativeDaysAgo:2")
+	})
+
+	it("measures against the passed clock, not the system time", () => {
+		expect(formatRelativeTime(NOW, t, NOW + 2 * 60 * 60 * 1000)).toBe("relativeHoursAgo:2")
 	})
 
 	it("falls back to a custom absolute formatter at and beyond the cutoff", () => {
 		const absolute = vi.fn((timestamp: number) => `abs:${String(timestamp)}`)
 		const old = NOW - 7 * DAY
 
-		expect(formatRelativeTime(old, t, { absolute })).toBe(`abs:${String(old)}`)
+		expect(formatRelativeTime(old, t, NOW, { absolute })).toBe(`abs:${String(old)}`)
 		expect(absolute).toHaveBeenCalledWith(old)
 	})
 
 	it("uses the built-in locale date (no time) when no absolute formatter is provided", () => {
 		const old = NOW - 30 * DAY
-		const result = formatRelativeTime(old, t)
+		const result = formatRelativeTime(old, t, NOW)
 
 		// Not one of the relative keys — the default absolute branch produced a real date string.
 		expect(result).not.toContain("relative")

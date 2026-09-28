@@ -8,6 +8,7 @@ import { chatDisplayName, isChatUndecryptable, chatMessagePreview, chatAvatarUrl
 import { useChatUnreadCount } from "@/features/chats/hooks/useChatUnreadCount"
 import { useChatTypingLabel } from "@/features/chats/hooks/useChatTyping"
 import { formatRelativeTime } from "@/lib/relativeTime"
+import { useNowMinute } from "@/lib/useNowMinute"
 import { ChatContextMenuContent, ChatDropdownMenuContent } from "@/features/chats/components/chatMenu"
 import { type ChatActionDialogKind } from "@/features/chats/components/chatMenu.logic"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -59,6 +60,7 @@ export function ChatRow({
 }: ChatRowProps) {
 	const { t } = useTranslation("chats")
 	const { t: tCommon } = useTranslation("common")
+	const now = useNowMinute()
 	const undecryptable = isChatUndecryptable(chat)
 	const name = undecryptable
 		? t("chatUndecryptable")
@@ -141,7 +143,7 @@ export function ChatRow({
 									</span>
 									{timestamp !== undefined ? (
 										<span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">
-											{formatRelativeTime(Number(timestamp), tCommon)}
+											{formatRelativeTime(Number(timestamp), tCommon, now)}
 										</span>
 									) : null}
 								</div>

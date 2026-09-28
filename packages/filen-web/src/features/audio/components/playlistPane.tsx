@@ -15,6 +15,7 @@ import { useKnownCoverUrl, useTrackMetadata } from "@/features/audio/hooks/useTr
 import { trackDisplayTitle } from "@/features/audio/lib/trackTags.logic"
 import type { Playlist, PlaylistFile } from "@filen/shared"
 import { formatRelativeTime } from "@/lib/relativeTime"
+import { useNowMinute } from "@/lib/useNowMinute"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { useIsOnline } from "@/lib/useIsOnline"
@@ -322,8 +323,9 @@ function TrackTableBody({
 function PlaylistUpdated({ updated }: { updated: number }) {
 	const { t } = useTranslation("audio")
 	const { t: tCommon } = useTranslation("common")
+	const now = useNowMinute()
 
-	return t("playlistUpdated", { time: formatRelativeTime(updated, tCommon) })
+	return t("playlistUpdated", { time: formatRelativeTime(updated, tCommon, now) })
 }
 
 interface TrackRowProps {

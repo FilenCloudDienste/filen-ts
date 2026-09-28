@@ -5,6 +5,7 @@ import { PinIcon, HeartIcon, MoreHorizontalIcon } from "lucide-react"
 import type { Note, NoteTag } from "@filen/sdk-rs"
 import { cn } from "@filen/shared"
 import { formatRelativeTime } from "@/lib/relativeTime"
+import { useNowMinute } from "@/lib/useNowMinute"
 import { noteIcon } from "@/features/notes/lib/icon.logic"
 import { noteDisplayTitle } from "@/features/notes/lib/displayTitle"
 import {
@@ -78,6 +79,7 @@ export function NoteRow({
 	// The relative-time + shared-by wording live in the shared "common"/"notes" catalogs; the row's
 	// own namespace is "notes", so the relative label uses a common-bound t.
 	const { t: tCommon } = useTranslation("common")
+	const now = useNowMinute()
 	const { icon: Icon, colorClass } = noteIcon(note)
 	const title = noteDisplayTitle(note, t)
 	const preview = noteRowPreview(note)
@@ -152,7 +154,7 @@ export function NoteRow({
 									<span className="line-clamp-2 text-xs text-muted-foreground">{preview}</span>
 								) : null}
 								<span className="truncate text-xs text-muted-foreground">
-									{formatRelativeTime(Number(note.editedTimestamp), tCommon)}
+									{formatRelativeTime(Number(note.editedTimestamp), tCommon, now)}
 								</span>
 								{sharedByEmail !== null ? (
 									<span className="truncate text-xs text-muted-foreground">

@@ -19,14 +19,15 @@ function event(timestamp: bigint): UserEvent {
 // The row used to render an absolute `toLocaleString` timestamp; it now goes through the same
 // shared lib/relativeTime.ts helper as the note/chat rows, so a recent event reads as a relative
 // label instead of a fixed date/time.
+// The fixed clock is minute-aligned: the row measures against the shared minute tick, which truncates.
 describe("EventRow — relative timestamp", () => {
 	it("renders a relative label for a recent event, not an absolute date/time", () => {
 		vi.useFakeTimers()
-		vi.setSystemTime(1_700_000_000_000)
+		vi.setSystemTime(1_700_000_040_000)
 
 		render(
 			createElement(EventRow, {
-				event: event(1_700_000_000_000n - BigInt(5 * 60 * 1000)),
+				event: event(1_700_000_040_000n - BigInt(5 * 60 * 1000)),
 				onOpen: vi.fn()
 			})
 		)
@@ -36,10 +37,10 @@ describe("EventRow — relative timestamp", () => {
 
 	it("falls back to an absolute date once the event is older than the relative cutoff", () => {
 		vi.useFakeTimers()
-		vi.setSystemTime(1_700_000_000_000)
+		vi.setSystemTime(1_700_000_040_000)
 
 		const tenDaysMs = 10 * 24 * 60 * 60 * 1000
-		const timestamp = 1_700_000_000_000n - BigInt(tenDaysMs)
+		const timestamp = 1_700_000_040_000n - BigInt(tenDaysMs)
 
 		render(
 			createElement(EventRow, {

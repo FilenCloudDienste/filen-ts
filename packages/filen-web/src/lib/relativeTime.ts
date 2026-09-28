@@ -16,7 +16,16 @@ function defaultAbsolute(timestamp: number): string {
 // `t` must resolve the shared `relative*` keys (locales/en/common.ts) — callers on a feature namespace
 // pass a common-bound `t` (useTranslation("common")). Clock skew / future timestamps collapse to
 // "Just now" rather than a negative count.
-export function formatRelativeTime(timestamp: number, t: TFunction, options?: { absolute?: (timestamp: number) => string }): string {
+//
+// `now` is required: every caller renders, and a clock read inside this call is invisible to the React
+// Compiler's memo keys, so the label would freeze. Pass useNowMinute() so the label follows the shared
+// minute tick.
+export function formatRelativeTime(
+	timestamp: number,
+	t: TFunction,
+	now: number,
+	options?: { absolute?: (timestamp: number) => string }
+): string {
 	return formatRelativeTimeCore(
 		timestamp,
 		// TFunction's overloaded signature isn't itself assignable to a plain (key, options?) => string
@@ -29,6 +38,7 @@ export function formatRelativeTime(timestamp: number, t: TFunction, options?: { 
 			hoursAgo: "relativeHoursAgo",
 			daysAgo: "relativeDaysAgo"
 		},
-		options?.absolute ?? defaultAbsolute
+		options?.absolute ?? defaultAbsolute,
+		now
 	)
 }

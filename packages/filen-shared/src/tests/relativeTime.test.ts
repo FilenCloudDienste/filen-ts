@@ -65,4 +65,11 @@ describe("formatRelativeTimeCore", () => {
 
 		expect(formatRelativeTimeCore(old, t, keys, timestampMs => `abs:${String(timestampMs)}`)).toBe(`abs:${String(old)}`)
 	})
+
+	it("measures against an explicit clock instead of the system time", () => {
+		const later = NOW + 3 * HOUR
+
+		expect(formatRelativeTimeCore(NOW, t, keys, String, later)).toBe("hoursAgo:3")
+		expect(formatRelativeTimeCore(NOW, t, keys, String, NOW + 30 * SECOND)).toBe("justNow")
+	})
 })

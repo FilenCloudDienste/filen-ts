@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { render, cleanup } from "@testing-library/react"
+import { render, cleanup, act, screen } from "@testing-library/react"
 import { createElement, type ReactNode } from "react"
 import type { Note, NoteTag, UuidStr } from "@filen/sdk-rs"
 import "@/lib/i18n"
@@ -56,10 +56,10 @@ function mockTag(): NoteTag {
 	}
 }
 
-function renderNoteRow(selected: boolean, multiSelected: boolean) {
+function renderNoteRow(selected: boolean, multiSelected: boolean, note: Note = mockNote()) {
 	return render(
 		createElement(NoteRow, {
-			note: mockNote(),
+			note,
 			selected,
 			multiSelected,
 			allTags: [],
@@ -94,6 +94,7 @@ function toggleOf(container: HTMLElement): HTMLButtonElement {
 
 afterEach(() => {
 	cleanup()
+	vi.useRealTimers()
 })
 
 // Deliberately NOT the ARIA tree/listbox patterns: both owe a roving-tabindex/arrow-key focus model
@@ -137,5 +138,25 @@ describe("notes sidebar rows — list + disclosure semantics", () => {
 
 		expect(toggleOf(expanded.container).getAttribute("aria-expanded")).toBe("true")
 		expect(toggleOf(expanded.container).getAttribute("aria-label")).toBe("Collapse Recipes")
+	})
+})
+
+describe("note row — relative edited time", () => {
+	it("follows the shared minute tick while the row stays mounted", () => {
+		// Minute-aligned, so the tick lands exactly on the labels asserted below.
+		const base = 1_700_000_040_000
+
+		vi.useFakeTimers()
+		vi.setSystemTime(base)
+
+		renderNoteRow(false, false, { ...mockNote(), editedTimestamp: BigInt(base) })
+
+		expect(screen.getByText("Just now")).toBeTruthy()
+
+		act(() => {
+			vi.advanceTimersByTime(5 * 60_000)
+		})
+
+		expect(screen.getByText("5 minutes ago")).toBeTruthy()
 	})
 })

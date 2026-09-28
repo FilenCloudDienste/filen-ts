@@ -9,6 +9,7 @@ import { PlaylistArtwork } from "@/features/audio/components/playlistArtwork"
 import { PlaylistMenuContent } from "@/features/audio/components/playlistMenu"
 import { useKnownCoverUrl } from "@/features/audio/hooks/useTrackMetadata"
 import { formatRelativeTime } from "@/lib/relativeTime"
+import { useNowMinute } from "@/lib/useNowMinute"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { useIsOnline } from "@/lib/useIsOnline"
@@ -120,6 +121,7 @@ function PlaylistSidebarRow({ entry, selected }: { entry: PlaylistEntry; selecte
 function PlaylistLinkRow({ playlist, selected }: { playlist: Playlist; selected: boolean }) {
 	const { t } = useTranslation("audio")
 	const { t: tCommon } = useTranslation("common")
+	const now = useNowMinute()
 	const coverUrl = useKnownCoverUrl(playlist.files[0])
 
 	return (
@@ -145,7 +147,7 @@ function PlaylistLinkRow({ playlist, selected }: { playlist: Playlist; selected:
 						{playlist.name}
 					</span>
 					<span className="block truncate text-xs text-muted-foreground">
-						{t("playlistTrackCount", { count: playlist.files.length })} · {formatRelativeTime(playlist.updated, tCommon)}
+						{t("playlistTrackCount", { count: playlist.files.length })} · {formatRelativeTime(playlist.updated, tCommon, now)}
 					</span>
 				</span>
 			</Link>

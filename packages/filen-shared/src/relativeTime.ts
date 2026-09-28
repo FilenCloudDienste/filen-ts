@@ -8,6 +8,8 @@ export const RELATIVE_TIME_CUTOFF_DAYS = 7
 // platform-specific default, so each app supplies its own key casing and its own absolute-date
 // output. `K` is inferred from `keys`, so an app's own typed translator (whose accepted keys are
 // a literal union, not `string`) stays assignable without widening to `(key: string, ...) => string`.
+// `now` is an input so a memoized caller can key the label on a reactive clock; the default suits
+// one-shot callers.
 export function formatRelativeTimeCore<K extends string>(
 	timestampMs: number,
 	t: (key: K, options?: { count: number }) => string,
@@ -17,9 +19,10 @@ export function formatRelativeTimeCore<K extends string>(
 		hoursAgo: K
 		daysAgo: K
 	},
-	absolute: (timestampMs: number) => string
+	absolute: (timestampMs: number) => string,
+	now: number = Date.now()
 ): string {
-	const diffSeconds = Math.floor((Date.now() - timestampMs) / 1000)
+	const diffSeconds = Math.floor((now - timestampMs) / 1000)
 
 	// Clock skew / future timestamps collapse to "just now" rather than a negative count.
 	if (diffSeconds < 60) {

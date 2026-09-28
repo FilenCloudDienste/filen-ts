@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next"
 import type { UserEvent } from "@filen/sdk-rs"
 import { formatRelativeTime } from "@/lib/relativeTime"
+import { useNowMinute } from "@/lib/useNowMinute"
 import { eventKindMeta } from "@/features/settings/lib/eventKind"
 
 export interface EventRowProps {
@@ -16,6 +17,7 @@ export interface EventRowProps {
 export function EventRow({ event, onOpen }: EventRowProps) {
 	const { t } = useTranslation("settings")
 	const { t: tCommon } = useTranslation("common")
+	const now = useNowMinute()
 	const { labelKey, icon: Icon } = eventKindMeta(event.kind.type)
 	const label = labelKey === "settingsEventUnknown" ? t(labelKey, { type: event.kind.type }) : t(labelKey)
 
@@ -32,7 +34,7 @@ export function EventRow({ event, onOpen }: EventRowProps) {
 			</span>
 			<span className="min-w-0 flex-1 truncate text-sm">{label}</span>
 			<span className="shrink-0 text-xs text-muted-foreground tabular-nums">
-				{formatRelativeTime(Number(event.timestamp), tCommon)}
+				{formatRelativeTime(Number(event.timestamp), tCommon, now)}
 			</span>
 		</button>
 	)
