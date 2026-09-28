@@ -9,6 +9,8 @@ import {
 	seedRichEditor,
 	applyRichReadOnly,
 	reflectRichFormats,
+	sameRichFormats,
+	serializeRichEditor,
 	nextHeaderValue,
 	nextListValue,
 	nextToggleValue,
@@ -46,6 +48,23 @@ describe("seedRichEditor — sanitize-before-seed", () => {
 	})
 })
 
+describe("serializeRichEditor — save egress", () => {
+	it("hands Quill 2 lists and code blocks out in Quill 1's on-disk form", () => {
+		const innerHTML =
+			'<p>x</p><ol><li data-list="checked"><span class="ql-ui" contenteditable="false"></span>A</li><li data-list="bullet"><span class="ql-ui" contenteditable="false"></span>B</li></ol><div class="ql-code-block-container" spellcheck="false"><div class="ql-code-block">a &lt; b</div></div>'
+
+		expect(serializeRichEditor({ innerHTML })).toBe(
+			'<p>x</p><ul data-checked="true"><li>A</li></ul><ul><li>B</li></ul><pre class="ql-syntax" spellcheck="false">a &lt; b\n</pre>'
+		)
+	})
+
+	it("returns content without lists or code blocks unchanged", () => {
+		const innerHTML = "<p>hello <strong>world</strong></p>"
+
+		expect(serializeRichEditor({ innerHTML })).toBe(innerHTML)
+	})
+})
+
 describe("applyRichReadOnly — #40 enforcement", () => {
 	it("enables the editor when writable and disables it when read-only", () => {
 		const enable = vi.fn<(enabled: boolean) => void>()
@@ -76,6 +95,15 @@ describe("reflectRichFormats — narrowing Quill's format map", () => {
 
 	it("falls back to inactive for absent / unknown-shaped values", () => {
 		expect(reflectRichFormats({ header: 9, list: "weird", link: 42 })).toEqual(EMPTY_RICH_FORMATS)
+	})
+})
+
+describe("sameRichFormats", () => {
+	it("compares every reflected field", () => {
+		expect(sameRichFormats(EMPTY_RICH_FORMATS, { ...EMPTY_RICH_FORMATS })).toBe(true)
+		expect(sameRichFormats(EMPTY_RICH_FORMATS, { ...EMPTY_RICH_FORMATS, list: "bullet" })).toBe(false)
+		expect(sameRichFormats(EMPTY_RICH_FORMATS, { ...EMPTY_RICH_FORMATS, link: "https://a.b" })).toBe(false)
+		expect(sameRichFormats(EMPTY_RICH_FORMATS, { ...EMPTY_RICH_FORMATS, header: 1 })).toBe(false)
 	})
 })
 

@@ -1,3 +1,4 @@
+import { quillV2ToLegacyV1 } from "@filen/shared/dom"
 import { sanitizeRichTextHtml } from "@/features/notes/lib/sanitizeRichText"
 
 // Pure, Quill-free logic for the rich-text editor — kept out of the .tsx so the propagation gate, the
@@ -60,6 +61,13 @@ export interface RichSeedTarget {
 // hostile seed is neutralized here, once, at mount — the editor never sees raw untrusted HTML.
 export function seedRichEditor(target: RichSeedTarget, seed: string): void {
 	target.clipboard.dangerouslyPasteHTML(sanitizeRichTextHtml(seed), "silent")
+}
+
+// The single save egress. Quill 2 serializes lists and code blocks in a form Quill 1 clients (old web,
+// desktop) misread, so the document leaves the editor in Quill 1's exact on-disk form, as mobile's does.
+// Only called for propagated user edits; the seed is never serialized.
+export function serializeRichEditor(root: { innerHTML: string }): string {
+	return quillV2ToLegacyV1(root.innerHTML)
 }
 
 // The enable surface applyRichReadOnly drives.
@@ -137,6 +145,19 @@ function narrowList(value: unknown): RichListValue | null {
 	}
 
 	return null
+}
+
+export function sameRichFormats(a: RichActiveFormats, b: RichActiveFormats): boolean {
+	return (
+		a.bold === b.bold &&
+		a.italic === b.italic &&
+		a.underline === b.underline &&
+		a.blockquote === b.blockquote &&
+		a.codeBlock === b.codeBlock &&
+		a.header === b.header &&
+		a.list === b.list &&
+		a.link === b.link
+	)
 }
 
 // Narrow Quill's getFormat map into the toolbar's typed active-format model (mobile's postFormatUpdates

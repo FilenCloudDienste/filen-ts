@@ -1,6 +1,6 @@
 import "quill/dist/quill.snow.css"
 
-import { useEffect, useRef, useState, type RefObject, type ReactNode } from "react"
+import { useEffect, useRef, useState, type Dispatch, type RefObject, type ReactNode, type SetStateAction } from "react"
 import { useTranslation } from "react-i18next"
 import Quill, { Range } from "quill"
 import {
@@ -27,6 +27,8 @@ import {
 	shouldPropagateRichChange,
 	seedRichEditor,
 	applyRichReadOnly,
+	serializeRichEditor,
+	sameRichFormats,
 	cycleHeaderValue,
 	nextListValue,
 	nextToggleValue,
@@ -36,8 +38,9 @@ import {
 // Reflect the live selection's formats into React state (mobile's postFormatUpdates, sans the bridge).
 // Keeps the last non-null range for toolbar actions that fire after the editor loses focus (the link
 // popover), and — like mobile — does NOT clear the toolbar when there is no selection (returns early),
-// so a blur does not flicker every active mark off.
-function pullFormats(quill: Quill, lastRange: RefObject<Range | null>, setFormats: (formats: RichActiveFormats) => void): void {
+// so a blur does not flicker every active mark off. Keeps the previous object when nothing changed so
+// plain typing does not re-render the toolbar on every keystroke.
+function pullFormats(quill: Quill, lastRange: RefObject<Range | null>, setFormats: Dispatch<SetStateAction<RichActiveFormats>>): void {
 	const range = quill.getSelection()
 
 	if (!range) {
@@ -46,16 +49,19 @@ function pullFormats(quill: Quill, lastRange: RefObject<Range | null>, setFormat
 
 	lastRange.current = range
 
-	setFormats(reflectRichFormats(quill.getFormat(range)))
+	const next = reflectRichFormats(quill.getFormat(range))
+
+	setFormats(prev => (sameRichFormats(prev, next) ? prev : next))
 }
 
 // A single toolbar control: an icon button reflecting active state, with a tooltip carrying its label.
 // onMouseDown is prevented so clicking it never blurs the editor and drops the selection the format
-// applies to (the standard custom-toolbar technique).
+// applies to (the standard custom-toolbar technique). No destructuring defaults: the React Compiler
+// bails on a props pattern that carries one.
 function ToolbarButton({
 	label,
-	active = false,
-	disabled = false,
+	active,
+	disabled,
 	onPress,
 	children
 }: {
@@ -65,16 +71,18 @@ function ToolbarButton({
 	onPress: () => void
 	children: ReactNode
 }) {
+	const pressed = active === true
+
 	return (
 		<Tooltip>
 			<TooltipTrigger
 				render={
 					<Button
-						variant={active ? "secondary" : "ghost"}
+						variant={pressed ? "secondary" : "ghost"}
 						size="icon-sm"
-						disabled={disabled}
+						disabled={disabled === true}
 						aria-label={label}
-						aria-pressed={active}
+						aria-pressed={pressed}
 						onMouseDown={event => {
 							event.preventDefault()
 						}}
@@ -124,9 +132,8 @@ export function RichTextEditor({ controller }: { controller: NoteEditorControlle
 		}
 	}, [controller.readOnly])
 
-	// Mount-once construction + seed. Guarded so React's dev double-invoke never builds a second Quill
-	// into the same node. All references are module imports, refs or the stable state setter, so the
-	// empty dep array is intentional and lint-clean — reseeding is the remount key's job.
+	// Mount-once construction + seed. Guarded so neither React's dev double-invoke nor a `t` change
+	// (placeholder only) ever builds a second Quill into the same node — reseeding is the remount key's job.
 	useEffect(() => {
 		const el = editorRef.current
 
@@ -151,7 +158,7 @@ export function RichTextEditor({ controller }: { controller: NoteEditorControlle
 			pullFormats(quill, lastRangeRef, setFormats)
 
 			if (shouldPropagateRichChange(source)) {
-				onChangeRef.current(quill.root.innerHTML)
+				onChangeRef.current(serializeRichEditor(quill.root))
 			}
 		})
 
@@ -162,8 +169,7 @@ export function RichTextEditor({ controller }: { controller: NoteEditorControlle
 		// Sanitize-before-seed, pasted "silent" so it never propagates (richText/dom.tsx). Never focus a
 		// read-only editor (#40) — web does not autofocus at all, so there is no caret placement to guard.
 		seedRichEditor(quill, seedRef.current)
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [])
+	}, [t])
 
 	// Restore the editor selection (lost to a focus shift for the popover), run the format, reflect it.
 	function runFormat(action: (quill: Quill) => void): void {

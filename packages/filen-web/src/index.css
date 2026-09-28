@@ -315,6 +315,101 @@
     padding: 0.75rem;
 }
 
+/* Read-only rich notes (features/notes/components/reader/richReader.tsx). Quill 1 stores nesting as a
+   ql-indent-N class on a flat <li>, and numbers each level with its own counter (decimal, then
+   lower-alpha, lower-roman, repeating), restarting the deeper levels under every item above them. */
+.notes-rich-reader ol {
+    counter-reset: rich-list-0;
+    list-style: none;
+}
+
+.notes-rich-reader ol > li {
+    counter-increment: rich-list-0;
+    counter-reset: rich-list-1 rich-list-2 rich-list-3 rich-list-4 rich-list-5 rich-list-6 rich-list-7 rich-list-8;
+}
+
+.notes-rich-reader ol > li::before {
+    content: counter(rich-list-0, decimal) ". ";
+    display: inline-block;
+    width: 1.5em;
+    margin-left: -1.5em;
+    padding-right: 0.3em;
+    text-align: right;
+    white-space: nowrap;
+}
+
+.notes-rich-reader ol > li.ql-indent-1 {
+    counter-increment: rich-list-1;
+    counter-reset: rich-list-2 rich-list-3 rich-list-4 rich-list-5 rich-list-6 rich-list-7 rich-list-8;
+}
+
+.notes-rich-reader ol > li.ql-indent-1::before {
+    content: counter(rich-list-1, lower-alpha) ". ";
+}
+
+.notes-rich-reader ol > li.ql-indent-2 {
+    counter-increment: rich-list-2;
+    counter-reset: rich-list-3 rich-list-4 rich-list-5 rich-list-6 rich-list-7 rich-list-8;
+}
+
+.notes-rich-reader ol > li.ql-indent-2::before {
+    content: counter(rich-list-2, lower-roman) ". ";
+}
+
+.notes-rich-reader ol > li.ql-indent-3 {
+    counter-increment: rich-list-3;
+    counter-reset: rich-list-4 rich-list-5 rich-list-6 rich-list-7 rich-list-8;
+}
+
+.notes-rich-reader ol > li.ql-indent-3::before {
+    content: counter(rich-list-3, decimal) ". ";
+}
+
+.notes-rich-reader ol > li.ql-indent-4 {
+    counter-increment: rich-list-4;
+    counter-reset: rich-list-5 rich-list-6 rich-list-7 rich-list-8;
+}
+
+.notes-rich-reader ol > li.ql-indent-4::before {
+    content: counter(rich-list-4, lower-alpha) ". ";
+}
+
+.notes-rich-reader ol > li.ql-indent-5 {
+    counter-increment: rich-list-5;
+    counter-reset: rich-list-6 rich-list-7 rich-list-8;
+}
+
+.notes-rich-reader ol > li.ql-indent-5::before {
+    content: counter(rich-list-5, lower-roman) ". ";
+}
+
+.notes-rich-reader ol > li.ql-indent-6 {
+    counter-increment: rich-list-6;
+    counter-reset: rich-list-7 rich-list-8;
+}
+
+.notes-rich-reader ol > li.ql-indent-6::before {
+    content: counter(rich-list-6, decimal) ". ";
+}
+
+.notes-rich-reader ol > li.ql-indent-7 {
+    counter-increment: rich-list-7;
+    counter-reset: rich-list-8;
+}
+
+.notes-rich-reader ol > li.ql-indent-7::before {
+    content: counter(rich-list-7, lower-alpha) ". ";
+}
+
+.notes-rich-reader ol > li.ql-indent-8 {
+    counter-increment: rich-list-8;
+    counter-reset: none;
+}
+
+.notes-rich-reader ol > li.ql-indent-8::before {
+    content: counter(rich-list-8, lower-roman) ". ";
+}
+
 /* Spring-loading's blink (features/drive/lib/springLoad.ts): the "off" phases hide the hovered
    directory's drop highlight — its tint, move ring and copy outline — and the "on" phases show it
    again, just before the directory opens. A directory a drag springs through without being able to
