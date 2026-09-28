@@ -48,6 +48,7 @@ import {
 	handleAuthSuccess,
 	resetSocketReconnectState
 } from "@/features/chats/lib/socketHandlers"
+import { sync } from "@/features/chats/lib/sync"
 
 function makeChat(uuid: string, overrides: Partial<Chat> = {}): Chat {
 	return {
@@ -176,6 +177,68 @@ describe("chat socket handlers — messages", () => {
 		// Past the reconcile delay (3s).
 		vi.advanceTimersByTime(3_100)
 		expect(getMessages("c1")).toHaveLength(1)
+	})
+
+	// A follower tab holds no optimistic copy to reconcile: its pending bubble drops when the leader's drain
+	// broadcast lands, so a parked echo would leave the thread without the message for the whole delay.
+	it("messageNew for an OWN message on an outbox follower applies without the reconcile delay", () => {
+		vi.useFakeTimers()
+		const role = vi.spyOn(sync, "outboxRole", "get").mockReturnValue("follower")
+
+		try {
+			testQueryClient.setQueryData(ACCOUNT_QUERY_KEY, { id: 2n })
+			seedChats([makeChat("c1")])
+			seedMessages("c1", [])
+
+			handleChatEvent({ inner: { type: "messageNew", msg: makeMessage("m1", "c1", { senderId: 2 }) }, chatMessageId: 0n })
+			vi.advanceTimersByTime(10)
+
+			expect(getMessages("c1").map(m => m.uuid)).toEqual([testUuid("m1")])
+		} finally {
+			role.mockRestore()
+		}
+	})
+
+	it("messageEdited inside the reconcile window lands on the parked own-message echo", () => {
+		vi.useFakeTimers()
+		testQueryClient.setQueryData(ACCOUNT_QUERY_KEY, { id: 2n })
+		seedChats([makeChat("c1")])
+		seedMessages("c1", [])
+
+		handleChatEvent({
+			inner: { type: "messageNew", msg: makeMessage("m1", "c1", { senderId: 2, message: "helo" }) },
+			chatMessageId: 0n
+		})
+		vi.advanceTimersByTime(100)
+		handleChatEvent({
+			inner: {
+				type: "messageEdited",
+				chat: testUuid("c1"),
+				uuid: testUuid("m1"),
+				newContent: { Decrypted: "hello" },
+				editedTimestamp: 9n
+			},
+			chatMessageId: 0n
+		})
+		vi.advanceTimersByTime(5_000)
+
+		expect(getMessages("c1")).toHaveLength(1)
+		expect(getMessages("c1")[0]).toMatchObject({ message: "hello", edited: true, editedTimestamp: 9n })
+		expect(getChats()[0]?.lastMessage).toMatchObject({ message: "hello", edited: true })
+	})
+
+	it("messageEmbedDisabled inside the reconcile window lands on the parked own-message echo", () => {
+		vi.useFakeTimers()
+		testQueryClient.setQueryData(ACCOUNT_QUERY_KEY, { id: 2n })
+		seedChats([makeChat("c1")])
+		seedMessages("c1", [])
+
+		handleChatEvent({ inner: { type: "messageNew", msg: makeMessage("m1", "c1", { senderId: 2 }) }, chatMessageId: 0n })
+		vi.advanceTimersByTime(100)
+		handleChatEvent({ inner: { type: "messageEmbedDisabled", uuid: testUuid("m1") }, chatMessageId: 0n })
+		vi.advanceTimersByTime(5_000)
+
+		expect(getMessages("c1")[0]?.embedDisabled).toBe(true)
 	})
 
 	// The own echo is parked for the reconcile delay, so a reply can land before it does.

@@ -4,7 +4,7 @@ import { log } from "@/lib/log"
 import { sync } from "@/features/chats/lib/sync"
 import { deleteDraft } from "@/features/chats/lib/drafts"
 import { chatMessagesQueryUpdate } from "@/features/chats/queries/chatMessages"
-import useChatsInflightStore, { type ChatMessageWithInflightId } from "@/features/chats/store/useChatsInflight"
+import useChatsInflightStore, { dropChatSendState, type ChatMessageWithInflightId } from "@/features/chats/store/useChatsInflight"
 
 // Failed-send helpers + per-chat outbox purge — a port of mobile's chatsInflight.ts. All are
 // best-effort and silent (callers own UX / must not fail a succeeded removal over cleanup).
@@ -17,29 +17,7 @@ export async function purgeChatInflightState(chatUuid: string): Promise<void> {
 	// Drop the persisted draft (best-effort, never throws).
 	await deleteDraft(chatUuid)
 
-	useChatsInflightStore.getState().setInflightMessages(prev => {
-		if (!prev[chatUuid]) {
-			return prev
-		}
-
-		const updated = {
-			...prev
-		}
-
-		Reflect.deleteProperty(updated, chatUuid)
-
-		return updated
-	})
-
-	useChatsInflightStore.getState().setInflightErrors(prev => {
-		const remaining = Object.entries(prev).filter(([, entry]) => entry.message.chat !== chatUuid)
-
-		if (remaining.length === Object.keys(prev).length) {
-			return prev
-		}
-
-		return Object.fromEntries(remaining)
-	})
+	dropChatSendState(chatUuid)
 
 	// Best-effort: flushToDisk reports failure as `false` and logs internally; the run() guard
 	// additionally keeps even an unexpected throw from failing a succeeded removal (this purge must

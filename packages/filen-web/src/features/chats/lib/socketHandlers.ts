@@ -5,7 +5,12 @@ import { queryClient } from "@/queries/client"
 import { ACCOUNT_QUERY_KEY } from "@/queries/account"
 import { log } from "@/lib/log"
 import { chatsQueryUpdate, chatsQueryUpsert, chatsQueryGet, markChatsListUnsynced } from "@/features/chats/queries/chats"
-import { chatMessagesQueryUpdate, chatMessagesQueryGet, markChatMessagesUnsynced } from "@/features/chats/queries/chatMessages"
+import {
+	chatMessagesQueryUpdate,
+	chatMessagesQueryAppend,
+	chatMessagesQueryGet,
+	markChatMessagesUnsynced
+} from "@/features/chats/queries/chatMessages"
 import { refetchChatsAndMessages } from "@/features/chats/lib/refetchChatsAndMessages"
 import { newestMessage } from "@/features/chats/lib/sort"
 import { useSocketStatusStore } from "@/features/chats/store/useSocketStatus"
@@ -17,9 +22,11 @@ import { chatLastFocus } from "@/features/chats/lib/unread.logic"
 import {
 	parkOwnMessageEcho,
 	releaseOwnMessageEcho,
+	amendOwnMessageEcho,
 	cancelOwnMessageEcho,
 	cancelOwnMessageEchoesForChat
 } from "@/features/chats/lib/parkedOwnMessages"
+import { sync } from "@/features/chats/lib/sync"
 
 // The realtime CHAT event handlers — a faithful port of filen-mobile's chats socketHandlers.ts semantics
 // onto the flat wasm surface, registered on the generic socket bridge (a pure consumer; the bridge itself
@@ -63,7 +70,10 @@ interface TypedChatSocketEvent {
 // Own messages: hold the socket-echo cache patch this long so the send outbox's commit reconciles the
 // optimistic copy (uuid === inflightId) into its server uuid FIRST — otherwise an echo landing before the
 // commit would double-render (optimistic bubble + server bubble) until the commit prunes the optimistic
-// one. Mobile's exact value; foreign messages patch effectively immediately.
+// one. Mobile's exact value; foreign messages patch effectively immediately. A follower tab of the outbox
+// never paints an optimistic copy into its cache (its pending bubble is a mirror of the leader's queue),
+// so it has nothing to reconcile: parking there would only hide the message between the leader's drain
+// broadcast and the park's expiry.
 const OWN_MESSAGE_RECONCILE_DELAY_MS = 3_000
 const FOREIGN_MESSAGE_DELAY_MS = 1
 
@@ -114,6 +124,9 @@ export function handleChatEvent(event: TypedChatSocketEvent): void {
 				return
 			}
 
+			// An edit of a message whose own echo is still parked matches nothing in the cache below.
+			amendOwnMessageEcho(inner.uuid, { message: newContent, edited: true, editedTimestamp: inner.editedTimestamp })
+
 			chatMessagesQueryUpdate(inner.chat, prev =>
 				prev.map(m =>
 					m.uuid === inner.uuid ? { ...m, message: newContent, edited: true, editedTimestamp: inner.editedTimestamp } : m
@@ -144,6 +157,8 @@ export function handleChatEvent(event: TypedChatSocketEvent): void {
 		}
 
 		case "messageEmbedDisabled": {
+			amendOwnMessageEcho(inner.uuid, { embedDisabled: true })
+
 			const chatUuid = findChatUuidForMessage(inner.uuid)
 
 			if (chatUuid === undefined) {
@@ -232,6 +247,7 @@ function handleMessageNew(msg: ChatMessage): void {
 	const senderId = BigInt(msg.senderId)
 	const userId = currentUserId()
 	const isOwn = userId !== undefined && senderId === userId
+	const park = isOwn && sync.outboxRole !== "follower"
 	// Snapshot focus NOW (at event time) — the delayed patch below runs later, by when the user may have
 	// navigated away; the unread decision must reflect where they were when the message arrived.
 	const focused = isChatFocused(msg.chat)
@@ -241,9 +257,8 @@ function handleMessageNew(msg: ChatMessage): void {
 
 	const timeoutId = setTimeout(
 		() => {
-			if (isOwn) {
-				releaseOwnMessageEcho(msg.uuid)
-			}
+			// The parked copy carries any edit or embed-disable that arrived while it waited.
+			const message = (park ? releaseOwnMessageEcho(msg.uuid) : undefined) ?? msg
 
 			// One notify batch, so observers render both writes together: a render between them counts the
 			// new message against the chat's old lastFocus, flashing an unread badge and the thread's New
@@ -252,8 +267,8 @@ function handleMessageNew(msg: ChatMessage): void {
 				// Dedup by SERVER uuid against the thread cache AND the reconciled outbox: if the message is
 				// already present (our own send's commit reconciled the optimistic copy, or a prior echo
 				// landed), leave it untouched instead of re-appending a duplicate.
-				chatMessagesQueryUpdate(msg.chat, prev =>
-					prev.some(m => m.uuid === msg.uuid) ? prev : [...prev, msg].sort(bySentTimestampAsc)
+				chatMessagesQueryAppend(msg.chat, prev =>
+					prev.some(m => m.uuid === msg.uuid) ? prev : [...prev, message].sort(bySentTimestampAsc)
 				)
 
 				// Always refresh lastMessage/timestamp; for a FOREIGN message in the FOCUSED chat, advance
@@ -269,7 +284,7 @@ function handleMessageNew(msg: ChatMessage): void {
 
 						return {
 							...c,
-							lastMessage: newestMessage(c.lastMessage, msg),
+							lastMessage: newestMessage(c.lastMessage, message),
 							...(advanceFocus ? { lastFocus: msg.sentTimestamp } : {})
 						}
 					})
@@ -280,11 +295,11 @@ function handleMessageNew(msg: ChatMessage): void {
 				// chat now satisfies isMessageUnread on its own, with no scalar to invalidate.
 			})
 		},
-		isOwn ? OWN_MESSAGE_RECONCILE_DELAY_MS : FOREIGN_MESSAGE_DELAY_MS
+		park ? OWN_MESSAGE_RECONCILE_DELAY_MS : FOREIGN_MESSAGE_DELAY_MS
 	)
 
-	if (isOwn) {
-		parkOwnMessageEcho(msg.uuid, msg.chat, timeoutId)
+	if (park) {
+		parkOwnMessageEcho(msg, timeoutId)
 	}
 }
 

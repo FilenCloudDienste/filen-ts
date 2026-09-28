@@ -12,7 +12,7 @@ const { sendChatMessage, markChatRead, updateLastChatFocusTimesNow, listChats, g
 	listChats: vi.fn(() => Promise.resolve([] as Chat[])),
 	// The push loop resolves a LIVE chat per uuid (never the disk-restored snapshot). With an empty list
 	// cache the loop falls back to getChat; the default returns a valid live chat so every send resolves.
-	getChat: vi.fn((uuid: string) =>
+	getChat: vi.fn((uuid: string): Promise<Chat | undefined> =>
 		Promise.resolve({ uuid, ownerId: 7n, participants: [], muted: false, created: 0n, lastFocus: 0n } as Chat)
 	)
 }))
@@ -189,6 +189,65 @@ describe("replay-on-launch — the send resolves a LIVE chat, never the disk-res
 		expect(queue()["chat-c-c-c"]).toBeUndefined()
 	})
 })
+
+describe("a chat deleted while its socket event was missed", () => {
+	it("drops the chat's queue, failed sends and draft once getChat says it is gone and the list lacks it", async () => {
+		chatsQueryUpsert(makeChat("chat-other-1"))
+		seed("chat-gone-1", [opt("chat-gone-1", "inf-1-1-1", 1n, "hi")])
+		useChatsInflightStore.setState(prev => ({
+			inflightErrors: {
+				...prev.inflightErrors,
+				"inf-2-2-2": { error: sdkError("Server"), permanentRejections: 3, message: opt("chat-gone-1", "inf-2-2-2", 2n, "old") }
+			}
+		}))
+		getChat.mockResolvedValueOnce(undefined)
+
+		sync.syncNow()
+		await tick()
+		await tick()
+
+		expect(sendChatMessage).not.toHaveBeenCalled()
+		expect(queue()["chat-gone-1"]).toBeUndefined()
+		expect(useChatsInflightStore.getState().inflightErrors).toEqual({})
+		expect(kvDelete).toHaveBeenCalledWith(expect.stringContaining("chat-gone-1"))
+		// Persisted, so a reload does not restore it either.
+		expect(kvStore.get("inflightChatMessages")).toBeUndefined()
+
+		// The next pass has nothing to re-read.
+		sync.syncNow()
+		await tick()
+		await tick()
+
+		expect(getChat).toHaveBeenCalledTimes(1)
+	})
+
+	it("keeps the queue for a later pass while the list has not loaded", async () => {
+		seed("chat-gone-1", [opt("chat-gone-1", "inf-1-1-1", 1n, "hi")])
+		getChat.mockResolvedValueOnce(undefined)
+
+		sync.syncNow()
+		await tick()
+		await tick()
+
+		expect(inflightIdsIn("chat-gone-1")).toEqual(["inf-1-1-1"])
+	})
+
+	it("keeps the queue when getChat fails", async () => {
+		chatsQueryUpsert(makeChat("chat-other-1"))
+		seed("chat-gone-1", [opt("chat-gone-1", "inf-1-1-1", 1n, "hi")])
+		getChat.mockRejectedValueOnce(new Error("network down"))
+
+		sync.syncNow()
+		await tick()
+		await tick()
+
+		expect(inflightIdsIn("chat-gone-1")).toEqual(["inf-1-1-1"])
+	})
+})
+
+function inflightIdsIn(chatUuid: string): string[] {
+	return (queue()[chatUuid]?.messages ?? []).map(m => m.inflightId)
+}
 
 describe("commit — dequeue + reconcile the message cache off the returned chat", () => {
 	it("replaces the optimistic copy (uuid === inflightId) with the confirmed server message and drains the queue", async () => {

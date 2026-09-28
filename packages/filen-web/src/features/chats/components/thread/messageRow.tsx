@@ -11,6 +11,7 @@ import { senderNameColor } from "@/features/chats/lib/nameColor"
 import { deleteMessage } from "@/features/chats/lib/messageActions"
 import { MessageContextMenuContent } from "@/features/chats/components/thread/messageMenu"
 import { MessageActionBar } from "@/features/chats/components/thread/messageActionBar"
+import { useMessageActions } from "@/features/chats/components/thread/useMessageActions"
 import { MessageContent } from "@/features/chats/components/thread/messageContent"
 import { MessageEmbeds } from "@/features/chats/components/thread/messageEmbeds"
 import { extractMessageLinks, embedCandidatesForLinks } from "@/features/chats/lib/embeds.logic"
@@ -106,6 +107,18 @@ export function MessageRow({ chat, message, showHeader, currentUserId, blocked }
 		}
 	}
 
+	// One action model per row, shared by the hover bar, its overflow and the right-click menu: their
+	// bodies render with every menu closed, so a call in each would triple the subscriptions per row.
+	const actions = useMessageActions({
+		chat,
+		message,
+		currentUserId,
+		sendState,
+		hasEmbeds,
+		blocked,
+		onRequestDelete: requestDelete
+	})
+
 	// Placed after every hook above (including the two useStates) — an earlier return would change hook
 	// order the moment "Show" flips this to false on a mounted row. Replaces the whole ContextMenu subtree:
 	// no avatar, no sender name, no reply reference, no body, no embeds, no send state, no action bar and
@@ -143,7 +156,7 @@ export function MessageRow({ chat, message, showHeader, currentUserId, blocked }
 								showHeader ? "pt-[17px] pb-0.5" : "py-0.5"
 							)}
 						>
-							<div className="flex w-9 shrink-0 justify-center">
+							<div className="relative flex w-9 shrink-0 justify-center">
 								{showHeader ? (
 									<Avatar>
 										{/* crossOrigin: require-corp COEP needs a CORS-mode request for this
@@ -160,8 +173,10 @@ export function MessageRow({ chat, message, showHeader, currentUserId, blocked }
 									// Continuation rows keep the avatar gutter empty at rest, revealing this exact line's
 									// own timestamp on hover/focus — a precise time is always a hover away without adding
 									// noise to the dense run. Hover alone would leave it permanently unreachable on a
-									// coarse pointer (Tailwind's hover: variant is (hover: hover)-gated).
-									<span className="mt-0.5 text-[10px] leading-5 text-muted-foreground tabular-nums opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100 pointer-coarse:opacity-100">
+									// coarse pointer (Tailwind's hover: variant is (hover: hover)-gated). Out of flow and
+									// unwrapped: a 12-hour time is wider than the gutter, and wrapping it would make a
+									// one-line row twice as tall.
+									<span className="absolute top-0.5 left-1/2 -translate-x-1/2 text-[10px] leading-5 whitespace-nowrap text-muted-foreground tabular-nums opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100 pointer-coarse:opacity-100">
 										{formatClockTime(message.sentTimestamp)}
 									</span>
 								)}
@@ -189,7 +204,14 @@ export function MessageRow({ chat, message, showHeader, currentUserId, blocked }
 								{undecryptable ? (
 									<span className="text-sm text-muted-foreground italic">{t("chatMessageUndecryptable")}</span>
 								) : (
-									<span className={cn("min-w-0", (sendState === "pending" || sendState === "sending") && "opacity-60")}>
+									// text-sm here too: the body is inline, and this block's inherited line height would
+									// otherwise set every line's minimum height (24px rather than 20px).
+									<span
+										className={cn(
+											"min-w-0 text-sm",
+											(sendState === "pending" || sendState === "sending") && "opacity-60"
+										)}
+									>
 										<MessageContent
 											chat={chat}
 											text={message.message}
@@ -216,27 +238,11 @@ export function MessageRow({ chat, message, showHeader, currentUserId, blocked }
 									</span>
 								) : null}
 							</div>
-							<MessageActionBar
-								chat={chat}
-								message={message}
-								currentUserId={currentUserId}
-								sendState={sendState}
-								hasEmbeds={hasEmbeds}
-								blocked={blocked}
-								onRequestDelete={requestDelete}
-							/>
+							<MessageActionBar {...actions} />
 						</div>
 					}
 				/>
-				<MessageContextMenuContent
-					chat={chat}
-					message={message}
-					currentUserId={currentUserId}
-					sendState={sendState}
-					hasEmbeds={hasEmbeds}
-					blocked={blocked}
-					onRequestDelete={requestDelete}
-				/>
+				<MessageContextMenuContent {...actions} />
 			</ContextMenu>
 			<ConfirmDialog
 				open={confirmingDelete}

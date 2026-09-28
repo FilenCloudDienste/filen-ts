@@ -8,7 +8,7 @@ import { MailOpenIcon, Volume2Icon, VolumeOffIcon, Trash2Icon, LogOutIcon } from
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
-import { chatBulkActions } from "@/features/chats/components/chatsBulkActionBar.logic"
+import { chatBulkActions, isChatBulkActionOfflineDisabled } from "@/features/chats/components/chatsBulkActionBar.logic"
 import { type ChatSelectionFlags } from "@/features/chats/lib/selectionFlags"
 
 function flags(overrides: Partial<ChatSelectionFlags> = {}): ChatSelectionFlags {
@@ -114,5 +114,23 @@ describe("chatBulkActions — returns a fresh array each call", () => {
 
 		expect(first).not.toBe(second)
 		expect(first).toEqual(second)
+	})
+})
+
+describe("isChatBulkActionOfflineDisabled", () => {
+	it("disables the SDK-writing actions offline, like the per-chat menu", () => {
+		expect(isChatBulkActionOfflineDisabled("mute", false)).toBe(true)
+		expect(isChatBulkActionOfflineDisabled("delete", false)).toBe(true)
+		expect(isChatBulkActionOfflineDisabled("leave", false)).toBe(true)
+	})
+
+	it("leaves mark-as-read enabled offline, as the per-chat menu does", () => {
+		expect(isChatBulkActionOfflineDisabled("markRead", false)).toBe(false)
+	})
+
+	it("disables nothing online", () => {
+		for (const id of ["markRead", "mute", "delete", "leave"] as const) {
+			expect(isChatBulkActionOfflineDisabled(id, true)).toBe(false)
+		}
 	})
 })

@@ -4,7 +4,7 @@ import { test, expect, openHookContext, SESSION_FILE, settleLeases, trackLeaseRe
 import { waitForE2eHooks } from "./helpers/e2eHooks"
 import { bootTo, BOOT_SETTLE_TIMEOUT_MS, LIVE_WRITE_TIMEOUT_MS } from "./helpers/listing"
 
-// Chats shell smoke + conversation-action affordances + the send-outbox proof + link/media embeds. The rail
+// Chats shell smoke + conversation-action affordances + the send-outbox proof + Filen-link embeds. The rail
 // entry navigates to /chats, the contextual sidebar renders, the empty-conversation state shows on the
 // zero-contacts FREE account, the index/thread route shows its select prompt, and the New chat button
 // opens the contact picker up to (never past) its own disabled submit — those four tests create nothing
@@ -710,9 +710,7 @@ test.describe("chats", () => {
 	// the URL'S OWN PARTS (its uuid) rather than hanging or erroring, since getLinkedFile rejects for a link
 	// nobody owns; (2) the sender-only "Disable embed" menu entry (gated on classification alone, not
 	// resolution success — embeds.logic.ts's hasEmbeds is pure/offline) collapses the card back to a plain
-	// link. Direct image/video embed RENDERING has no CORS-safe external host reachable from this harness
-	// (queries/chatMessageLinks.ts's own honest browser-SSRF-posture comment) — that leg's classification +
-	// resolution logic is covered unit-level only (chatsEmbeds.test.ts, chatsMessageLinks.test.ts), not e2e.
+	// link. Third-party image/video urls never embed (embeds.logic.ts); chatsEmbeds.test.ts pins that.
 	test("embeds: a Filen-shaped public link renders a degraded card, then Disable embed collapses it (shared self-chat)", async ({
 		page,
 		injectedSession

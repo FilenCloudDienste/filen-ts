@@ -3,9 +3,12 @@ import type { BlockedContact, ChatMessage, UuidStr } from "@filen/sdk-rs"
 import {
 	announcementSubject,
 	buildThreadRows,
-	computeScrollAfterPrepend,
 	countNewTailMessages,
 	isScrollNearBottom,
+	isScrollNearTop,
+	scrollDistanceFromBottom,
+	scrollDistanceFromTop,
+	toBottomUpRows,
 	nextAnnouncement,
 	nextScrollAffordanceState,
 	INITIAL_SCROLL_AFFORDANCE,
@@ -117,16 +120,26 @@ describe("buildThreadRows — burst grouping (dense grouped flat rows)", () => {
 	})
 })
 
-describe("computeScrollAfterPrepend", () => {
-	it("grows scrollTop by exactly the height the prepended content added", () => {
-		// content grew 400px (1000 → 1400); a viewport at scrollTop 0 must move to 400 to stay put.
-		expect(computeScrollAfterPrepend(1000, 0, 1400)).toBe(400)
-		// preserves an existing offset too.
-		expect(computeScrollAfterPrepend(1000, 120, 1400)).toBe(520)
+describe("toBottomUpRows", () => {
+	it("puts the newest message at index 0 and each separator right after the message it heads", () => {
+		const lastFocus = ts(2021, 1, 2, 8, 0)
+		const a = mockMessage({ senderId: 2, sentTimestamp: ts(2021, 1, 1, 12, 0) })
+		const b = mockMessage({ senderId: 2, sentTimestamp: ts(2021, 1, 2, 12, 0) })
+		const c = mockMessage({ senderId: 2, sentTimestamp: ts(2021, 1, 2, 12, 1) })
+
+		const rows = toBottomUpRows(buildThreadRows([a, b, c], { lastFocus, currentUserId: 1n }))
+
+		expect(rows.map(row => row.kind)).toEqual(["message", "message", "unread", "day", "message", "day"])
+		expect(messageHeaderFlags(rows).map(row => row.key)).toEqual([c.uuid, b.uuid, a.uuid])
 	})
 
-	it("is a no-op when nothing was prepended", () => {
-		expect(computeScrollAfterPrepend(1000, 250, 1000)).toBe(250)
+	it("leaves the ascending input untouched", () => {
+		const rows = buildThreadRows([mockMessage(), mockMessage()])
+		const keys = rows.map(row => row.key)
+
+		toBottomUpRows(rows)
+
+		expect(rows.map(row => row.key)).toEqual(keys)
 	})
 })
 
@@ -367,15 +380,35 @@ describe("countNewTailMessages — real arrival vs. older-history prepend (revie
 	})
 })
 
-describe("isScrollNearBottom", () => {
-	it("is true once the gap to the true bottom is within the threshold", () => {
-		// scrollHeight 1000, clientHeight 400 → true bottom scrollTop is 600.
-		expect(isScrollNearBottom(600, 1000, 400, 80)).toBe(true)
-		expect(isScrollNearBottom(530, 1000, 400, 80)).toBe(true)
+// column-reverse geometry: scrollTop is 0 at the bottom and negative going up.
+describe("column-reverse scroll geometry", () => {
+	it("measures the distance from the bottom edge", () => {
+		expect(scrollDistanceFromBottom(0)).toBe(0)
+		expect(scrollDistanceFromBottom(-250)).toBe(250)
 	})
 
-	it("is false once scrolled further up than the threshold", () => {
-		expect(isScrollNearBottom(400, 1000, 400, 80)).toBe(false)
+	it("reads rubber-band overscroll past the bottom as the bottom", () => {
+		expect(scrollDistanceFromBottom(12)).toBe(0)
+	})
+
+	it("measures the distance from the top edge", () => {
+		// scrollHeight 1000, clientHeight 400 → the top sits at scrollTop -600.
+		expect(scrollDistanceFromTop(0, 1000, 400)).toBe(600)
+		expect(scrollDistanceFromTop(-600, 1000, 400)).toBe(0)
+		expect(scrollDistanceFromTop(-500, 1000, 400)).toBe(100)
+	})
+
+	it("is near the bottom within the threshold", () => {
+		expect(isScrollNearBottom(0, 80)).toBe(true)
+		expect(isScrollNearBottom(-80, 80)).toBe(true)
+		expect(isScrollNearBottom(-81, 80)).toBe(false)
+	})
+
+	it("is near the top within the threshold", () => {
+		expect(isScrollNearTop(-480, 1000, 400, 120)).toBe(true)
+		expect(isScrollNearTop(-479, 1000, 400, 120)).toBe(false)
+		// Content shorter than the viewport is at both edges at once.
+		expect(isScrollNearTop(0, 300, 400, 120)).toBe(true)
 	})
 })
 

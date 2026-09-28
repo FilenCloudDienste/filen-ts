@@ -58,3 +58,11 @@ export function chatBulkActions(flags: ChatSelectionFlags): ChatBulkActionDescri
 
 	return descriptors
 }
+
+// Mirrors the per-chat menu's offline gate (chatMenu.logic.ts's OFFLINE_GATED_IDS): mute/delete/leave
+// write to the SDK and can only fail offline; markRead stays ungated, as it does per chat.
+const OFFLINE_GATED_BULK_IDS: ReadonlySet<ChatBulkActionDescriptor["id"]> = new Set(["mute", "delete", "leave"])
+
+export function isChatBulkActionOfflineDisabled(id: ChatBulkActionDescriptor["id"], isOnline: boolean): boolean {
+	return !isOnline && OFFLINE_GATED_BULK_IDS.has(id)
+}

@@ -75,7 +75,7 @@ function LinkCardShell({
 
 // A resolved Filen file link's rich card (pdf/docx/text/code/markdown, and the fallback for a failed
 // image/video/audio inline stream below) — click opens the SAME PreviewOverlay every owned drive file
-// uses, fed the fabricated linked-file item via its "drive" arm (linkedFileIntoDriveItem, item.ts) —
+// uses, fed the fabricated linked-file item (linkedFileIntoDriveItem, item.ts) —
 // zero new viewer code for any of these categories. `variant="links"` (not "drive"): the item is
 // neither owned nor a real tree member, so this keeps the overlay's inline-editor save path inert
 // (isEditable gates on variant==="drive") on top of previewMenuVisible's own isLinkedEmbedItem check.
@@ -190,8 +190,8 @@ function FilenStreamedInlineMedia({
 		)
 	}
 
-	// image — click opens the full overlay (zoom/pager chrome), same affordance as MediaEmbed's own
-	// external-image branch; video/audio above stay inline-only, native controls cover play/seek/fullscreen.
+	// image — click opens the full overlay (zoom/pager chrome); video/audio above stay inline-only, native
+	// controls cover play/seek/fullscreen.
 	return (
 		<>
 			<button
@@ -288,7 +288,7 @@ export function FilenLinkCard({
 }) {
 	const { t } = useTranslation("chats")
 
-	if (resolution?.kind !== "filenLink" || !resolution.success) {
+	if (!resolution?.success) {
 		const Icon = link.kind === "directory" ? FolderIcon : FileIcon
 
 		return (

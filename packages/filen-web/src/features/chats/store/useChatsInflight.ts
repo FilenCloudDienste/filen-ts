@@ -103,4 +103,30 @@ export function useChatSendState(messageUuid: string): ChatSendState {
 	})
 }
 
+// Drops a removed chat's queued sends and failed-send records from memory. Persisting the queue is the
+// caller's (the removal paths flush it, a sync pass flushes at its end).
+export function dropChatSendState(chatUuid: string): void {
+	const store = useChatsInflightStore.getState()
+
+	store.setInflightMessages(prev => {
+		if (!prev[chatUuid]) {
+			return prev
+		}
+
+		const updated = {
+			...prev
+		}
+
+		Reflect.deleteProperty(updated, chatUuid)
+
+		return updated
+	})
+
+	store.setInflightErrors(prev => {
+		const remaining = Object.entries(prev).filter(([, entry]) => entry.message.chat !== chatUuid)
+
+		return remaining.length === Object.keys(prev).length ? prev : Object.fromEntries(remaining)
+	})
+}
+
 export default useChatsInflightStore

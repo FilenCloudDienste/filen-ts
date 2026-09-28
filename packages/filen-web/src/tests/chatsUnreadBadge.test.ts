@@ -4,21 +4,25 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { createElement, Fragment, useLayoutEffect, type ReactNode } from "react"
 import { act, render, renderHook, waitFor } from "@testing-library/react"
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query"
-import type { Chat, ChatMessage, UuidStr } from "@filen/sdk-rs"
+import type { BlockedContact, Chat, ChatMessage, Contact, UuidStr } from "@filen/sdk-rs"
 import { EMPTY_BLOCKED_USERS } from "@filen/shared"
 
 function testUuid(label: string): UuidStr {
 	return `${label}-0000-0000-0000-000000000000` as UuidStr
 }
 
-const { listChats, listMessagesBefore, leaveChatOp, purgeChatInflightState } = vi.hoisted(() => ({
+const { listChats, listMessagesBefore, leaveChatOp, purgeChatInflightState, getContacts, getBlockedContacts } = vi.hoisted(() => ({
 	listChats: vi.fn<() => Promise<Chat[]>>(),
 	listMessagesBefore: vi.fn<(chat: Chat, before: bigint) => Promise<ChatMessage[]>>(),
 	leaveChatOp: vi.fn<(chat: Chat) => Promise<void>>(),
-	purgeChatInflightState: vi.fn<(chatUuid: string) => Promise<void>>(() => Promise.resolve())
+	purgeChatInflightState: vi.fn<(chatUuid: string) => Promise<void>>(() => Promise.resolve()),
+	getContacts: vi.fn<() => Promise<Contact[]>>(() => Promise.resolve([])),
+	getBlockedContacts: vi.fn<() => Promise<BlockedContact[]>>(() => Promise.resolve([]))
 }))
 
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: { listChats, listMessagesBefore, leaveChat: leaveChatOp } }))
+vi.mock("@/lib/sdk/client", () => ({
+	sdkApi: { listChats, listMessagesBefore, leaveChat: leaveChatOp, getContacts, getBlockedContacts }
+}))
 
 // The production defaults minus the persister (sqlite, unavailable under vitest).
 vi.mock("@/queries/client", () => ({
@@ -43,6 +47,7 @@ import { setFocusedChat } from "@/features/chats/lib/focusedChat"
 import { leaveChat } from "@/features/chats/lib/actions"
 import { refetchChatsAndMessages } from "@/features/chats/lib/refetchChatsAndMessages"
 import { socketAuthenticated, socketDropped } from "@/lib/sdk/socketSession"
+import { CONTACTS_QUERY_KEY } from "@/features/contacts/queries/contacts"
 
 const USER_ID = 7n
 
@@ -207,6 +212,8 @@ beforeEach(() => {
 	listChats.mockReset()
 	listMessagesBefore.mockReset()
 	leaveChatOp.mockReset()
+	getContacts.mockReset().mockResolvedValue([])
+	getBlockedContacts.mockReset().mockResolvedValue([])
 	committed.length = 0
 })
 
@@ -215,6 +222,47 @@ afterEach(() => {
 })
 
 describe("rail unread badge", () => {
+	it("stops counting a blocked sender's messages on a session with no contacts row yet", async () => {
+		const blockedMessage = peerMessage("a1", "a", 150n)
+		listChats.mockResolvedValue([mockChat("a", blockedMessage)])
+		listMessagesBefore.mockResolvedValue([blockedMessage])
+		getBlockedContacts.mockResolvedValue([{ uuid: testUuid("blk"), userId: 2n, email: "p@x.io", nickName: "P", timestamp: 0n }])
+
+		const { result, unmount } = renderBadge()
+		await drain()
+
+		expect(getBlockedContacts).toHaveBeenCalledTimes(1)
+		expect(result.current).toBe(0)
+
+		unmount()
+	})
+
+	it("reads contacts only when something is unread and no contacts row exists", async () => {
+		const read = peerMessage("a0", "a", 50n)
+		listChats.mockResolvedValue([mockChat("a", read)])
+		listMessagesBefore.mockResolvedValue([read])
+
+		const { unmount } = renderBadge()
+		await drain()
+
+		expect(getContacts).not.toHaveBeenCalled()
+
+		unmount()
+
+		const unread = peerMessage("b1", "b", 150n)
+		queryClient.setQueryData(CONTACTS_QUERY_KEY, { contacts: [], blocked: [] })
+		listChats.mockResolvedValue([mockChat("b", unread)])
+		listMessagesBefore.mockResolvedValue([unread])
+
+		const second = renderBadge()
+		await drain()
+
+		expect(second.result.current).toBe(1)
+		expect(getContacts).not.toHaveBeenCalled()
+
+		second.unmount()
+	})
+
 	it("counts what a boot's resync brings in for a restored list whose message caches are missing or old", async () => {
 		const aRead = peerMessage("a0", "a", 50n)
 		const bRead = peerMessage("b0", "b", 50n)

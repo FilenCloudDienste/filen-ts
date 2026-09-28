@@ -5,7 +5,12 @@ import { sdkApi } from "@/lib/sdk/client"
 import { runOp } from "@/lib/actions/outcome"
 import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
 import { narrowItem, upsertDriveItem, type DriveItem } from "@/features/drive/lib/item"
-import { driveListingQueryUpdate, fetchDriveItemLinkStatus, driveItemLinkStatusQueryUpdate } from "@/features/drive/queries/drive"
+import {
+	driveListingQueryUpdate,
+	fetchDriveItemLinkStatus,
+	driveItemLinkStatusQueryUpdate,
+	type DriveItemLinkStatus
+} from "@/features/drive/queries/drive"
 import { createLink } from "@/features/drive/lib/actions"
 import { buildPublicLinkUrl } from "@/features/drive/components/linkDialog.logic"
 import { useTransfersStore } from "@/features/transfers/store/useTransfersStore"
@@ -35,39 +40,85 @@ export type AttachmentOutcome = { status: "success"; url: string } | { status: "
 // mobile land in the one place. `createDirectory` is idempotent by name under a parent (verified —
 // features/drive/lib/createDirectory.ts's own comment: a name clash against an existing DIRECTORY
 // returns THAT directory, never errors), so this needs no separate list-then-find step the way mobile's
-// uniffi surface does — create IS the find-or-create here. Memoized for the tab's lifetime: every
-// attachment after the first skips the two round trips.
-let cachedUploadsDirUuid: string | null = null
+// uniffi surface does — create IS the find-or-create here. Memoized for the tab's lifetime as the
+// PROMISE, so a multi-file pick's concurrent uploads share one lookup instead of each creating the pair.
+let uploadsDirPromise: Promise<string> | null = null
 
 // The memo above is keyed on nothing but the tab, so it MUST be dropped when the account behind it
 // changes: a uuid minted under the signed-out account names a directory the next one cannot write to,
 // and every attachment would upload into a directory that is not theirs until the tab reloaded.
-// performLogout calls this alongside its other per-session teardowns.
+// performLogout calls this alongside its other per-session teardowns. A lookup still in flight keeps
+// resolving for its own callers only; it can no longer re-seed the memo.
 export function resetChatUploadsDirCache(): void {
-	cachedUploadsDirUuid = null
+	uploadsDirPromise = null
 }
 
-async function chatUploadsDirUuid(): Promise<string> {
-	if (cachedUploadsDirUuid !== null) {
-		return cachedUploadsDirUuid
+function chatUploadsDirUuid(): Promise<string> {
+	if (uploadsDirPromise !== null) {
+		return uploadsDirPromise
 	}
 
-	const dotFilen = await sdkApi.createDirectory(null, ".filen")
-	const uploads = await sdkApi.createDirectory(dotFilen.uuid, "Chat Uploads")
+	const promise = (async () => {
+		const dotFilen = await sdkApi.createDirectory(null, ".filen")
+		const uploads = await sdkApi.createDirectory(dotFilen.uuid, "Chat Uploads")
 
-	cachedUploadsDirUuid = uploads.uuid
+		return uploads.uuid
+	})()
 
-	return uploads.uuid
+	uploadsDirPromise = promise
+
+	// A failure is not memoized: the next attachment tries again.
+	promise.catch(() => {
+		if (uploadsDirPromise === promise) {
+			uploadsDirPromise = null
+		}
+	})
+
+	return promise
 }
 
-// The shared "item → public link URL" tail, GET-then-CREATE (not blind create): an item the drive
-// picker selected may already carry a link from earlier drive use, and re-creating one it already owns
-// would be a needless round trip at best — reuse it. `buildPublicLinkUrl` returning null (the item's
-// own decrypted key/the link's own linkKey isn't available) is the one case with no SDK error to
-// surface, so it gets a plain synthetic one — this should not be reachable for an item this call just
-// resolved or uploaded itself, but the outcome type has no "impossible" arm to fall back to instead.
+let lastAttachmentStamp = 0
+
+// The name an attachment uploads under — mobile's `${name}.${Date.now()}${ext}` — so every upload is a
+// brand-new file: a repeated name (image.png from a paste) would otherwise version the earlier
+// attachment whose link is already posted in a chat. The stamp only ever increases, since a multi-file
+// pick names all its uploads within one millisecond. A leading or trailing dot is not an extension.
+function uniqueAttachmentName(name: string): string {
+	lastAttachmentStamp = Math.max(Date.now(), lastAttachmentStamp + 1)
+
+	const dot = name.lastIndexOf(".")
+	const ext = dot > 0 && dot < name.length - 1 ? name.slice(dot) : ""
+
+	return `${name.slice(0, name.length - ext.length)}.${String(lastAttachmentStamp)}${ext}`
+}
+
+function linkUrlOutcome(item: DriveItem, link: DriveItemLinkStatus, which: "created" | "existing"): AttachmentOutcome {
+	const url = buildPublicLinkUrl(item, link)
+
+	return url !== null
+		? { status: "success", url }
+		: { status: "error", dto: asErrorDTO(new Error(`chat attachment: ${which} link carries no usable key`)) }
+}
+
+// Creates the item's link and builds its url. `buildPublicLinkUrl` returning null (the item's own
+// decrypted key/the link's own linkKey isn't available) is the one case with no SDK error to surface, so
+// it gets a plain synthetic one — this should not be reachable for an item this call just resolved or
+// uploaded itself, but the outcome type has no "impossible" arm to fall back to instead.
+async function createPublicLinkUrl(item: DriveItem): Promise<AttachmentOutcome> {
+	const outcome = await createLink(item, noop)
+
+	if (outcome.status === "error") {
+		return outcome
+	}
+
+	return linkUrlOutcome(item, outcome.link, "created")
+}
+
+// GET-then-CREATE (not blind create) for an item the drive picker selected: it may already carry a link
+// from earlier drive use, and re-creating one it already owns would be a needless round trip at best —
+// reuse it.
 async function ensurePublicLinkUrl(item: DriveItem): Promise<AttachmentOutcome> {
-	let existing: Awaited<ReturnType<typeof fetchDriveItemLinkStatus>>
+	let existing: DriveItemLinkStatus | null
 
 	try {
 		existing = await runOp(fetchDriveItemLinkStatus(item))
@@ -77,27 +128,14 @@ async function ensurePublicLinkUrl(item: DriveItem): Promise<AttachmentOutcome> 
 
 	if (existing !== null) {
 		driveItemLinkStatusQueryUpdate(item.data.uuid, existing)
-		const url = buildPublicLinkUrl(item, existing)
 
-		return url !== null
-			? { status: "success", url }
-			: { status: "error", dto: asErrorDTO(new Error("chat attachment: existing link carries no usable key")) }
+		return linkUrlOutcome(item, existing, "existing")
 	}
 
-	const outcome = await createLink(item, noop)
-
-	if (outcome.status === "error") {
-		return outcome
-	}
-
-	const url = buildPublicLinkUrl(item, outcome.link)
-
-	return url !== null
-		? { status: "success", url }
-		: { status: "error", dto: asErrorDTO(new Error("chat attachment: created link carries no usable key")) }
+	return createPublicLinkUrl(item)
 }
 
-// An EXISTING drive item (the drive-file picker path) — no upload, straight to the shared link tail.
+// An EXISTING drive item (the drive-file picker path) — no upload, straight to the get-or-create link tail.
 export async function attachExistingDriveItem(item: DriveItem): Promise<AttachmentOutcome> {
 	return ensurePublicLinkUrl(item)
 }
@@ -112,7 +150,8 @@ export function preflightAttachments(files: readonly File[]): Promise<boolean> {
 // transfers panel like any other upload, so it shows real progress there — mirrors features/drive/lib/upload.ts's
 // runUpload registration exactly, but this needs the resulting DriveItem back to build the link, which
 // runUpload's own VoidActionOutcome doesn't carry — a thin sibling rather than a signature change to
-// that shared, separately-tested helper), then the shared link tail.
+// that shared, separately-tested helper), then a straight link create: the upload is a fresh file under
+// a unique name, so it cannot already carry a link and the status read would be a wasted round trip.
 export async function uploadAttachment(file: File, onProgress: (bytesTransferred: number) => void): Promise<AttachmentOutcome> {
 	let parentUuid: string
 
@@ -143,9 +182,11 @@ export async function uploadAttachment(file: File, onProgress: (bytesTransferred
 	}, PROGRESS_THROTTLE_MS)
 
 	let uploaded: SdkFile
+	// Wraps the same bytes (no copy) under the unique name.
+	const named = new File([file], uniqueAttachmentName(file.name), { type: file.type, lastModified: file.lastModified })
 
 	try {
-		uploaded = await runOp<SdkFile>(sdkApi.uploadFile(parentUuid, transferId, file, Comlink.proxy(reportProgress)))
+		uploaded = await runOp<SdkFile>(sdkApi.uploadFile(parentUuid, transferId, named, Comlink.proxy(reportProgress)))
 	} catch (e) {
 		const dto = asErrorDTO(e)
 
@@ -168,5 +209,5 @@ export async function uploadAttachment(file: File, onProgress: (bytesTransferred
 	markAccountStale()
 	addAccountStorageUsed(uploaded.size)
 
-	return ensurePublicLinkUrl(item)
+	return createPublicLinkUrl(item)
 }

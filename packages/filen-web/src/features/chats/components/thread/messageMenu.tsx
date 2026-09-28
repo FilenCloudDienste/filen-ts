@@ -1,12 +1,10 @@
 import { createElement, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import type { TFunction } from "i18next"
-import { useMessageActions, type UseMessageActionsArgs } from "@/features/chats/components/thread/useMessageActions"
+import type { MessageActionsHandle } from "@/features/chats/components/thread/useMessageActions"
 import type { MessageActionDescriptor } from "@/features/chats/components/thread/messageMenu.logic"
 import { ContextMenuContent, ContextMenuItem } from "@/components/ui/context-menu"
 import { DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu"
-
-export type MessageMenuContentProps = UseMessageActionsArgs
 
 // One descriptor → one menu row, shared by the right-click context menu and the ⋯-overflow dropdown. The
 // `Item` param is typed against DropdownMenuItem but ContextMenuItem is structurally assignable to it
@@ -39,10 +37,10 @@ function renderMenuItems(
 }
 
 // Right-click surface for one message row — rendered inside a per-row <ContextMenu> (messageRow.tsx).
-// Returns null (no popup) when the message has no applicable actions.
-export function MessageContextMenuContent(props: MessageMenuContentProps) {
+// Returns null (no popup) when the message has no applicable actions. Takes the row's useMessageActions
+// result rather than calling the hook: this body renders even while the menu is closed.
+export function MessageContextMenuContent({ descriptors, runAction }: MessageActionsHandle) {
 	const { t } = useTranslation(["chats", "common"])
-	const { descriptors, runAction } = useMessageActions(props)
 
 	if (descriptors.length === 0) {
 		return null
@@ -53,10 +51,9 @@ export function MessageContextMenuContent(props: MessageMenuContentProps) {
 
 // ⋯-overflow surface — rendered inside a <DropdownMenu> mounted by the hover action bar's overflow
 // trigger (messageActionBar.tsx). Left-click-opened, so it uses the dropdown family; the descriptor list
-// + dispatch are the SAME useMessageActions as the right-click menu above (zero duplication).
-export function MessageDropdownMenuContent(props: MessageMenuContentProps) {
+// + dispatch are the row's one useMessageActions result, the same one the right-click menu above gets.
+export function MessageDropdownMenuContent({ descriptors, runAction }: MessageActionsHandle) {
 	const { t } = useTranslation(["chats", "common"])
-	const { descriptors, runAction } = useMessageActions(props)
 
 	if (descriptors.length === 0) {
 		return null

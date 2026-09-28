@@ -1,23 +1,22 @@
 import { createElement } from "react"
 import { useTranslation } from "react-i18next"
 import { MoreHorizontalIcon } from "lucide-react"
-import { useMessageActions } from "@/features/chats/components/thread/useMessageActions"
-import { MessageDropdownMenuContent, type MessageMenuContentProps } from "@/features/chats/components/thread/messageMenu"
+import type { MessageActionsHandle } from "@/features/chats/components/thread/useMessageActions"
+import { MessageDropdownMenuContent } from "@/features/chats/components/thread/messageMenu"
 import { inlinePrimaryActions } from "@/features/chats/components/thread/messageActionBar.logic"
 import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Button } from "@/components/ui/button"
 
 // Floating hover action bar pinned to a row's top-right (Discord placement) — a SECOND renderer of the
-// same useMessageActions descriptor list the right-click menu uses, as inline icon buttons plus a ⋯
+// row's one useMessageActions result the right-click menu also gets, as inline icon buttons plus a ⋯
 // overflow that opens the identical full menu (MessageDropdownMenuContent). Visible on the row's
 // group-hover / focus-within (the parent row owns the `group` + `focus-within` class); at rest it is
 // opacity-0 and pointer-events-none so it never intercepts clicks on the message beneath it. No new
 // action wiring — this is a presentation of the existing model, not a new one. NO reactions feature
 // (the app has no reaction backend on any platform); the react-slot surfaces Reply as the primary
 // action instead.
-export function MessageActionBar(props: MessageMenuContentProps) {
+export function MessageActionBar({ descriptors, runAction }: MessageActionsHandle) {
 	const { t } = useTranslation(["chats", "common"])
-	const { descriptors, runAction } = useMessageActions(props)
 
 	if (descriptors.length === 0) {
 		return null
@@ -62,7 +61,10 @@ export function MessageActionBar(props: MessageMenuContentProps) {
 						</Button>
 					}
 				/>
-				<MessageDropdownMenuContent {...props} />
+				<MessageDropdownMenuContent
+					descriptors={descriptors}
+					runAction={runAction}
+				/>
 			</DropdownMenu>
 		</div>
 	)

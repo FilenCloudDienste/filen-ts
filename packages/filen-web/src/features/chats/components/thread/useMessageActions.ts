@@ -14,6 +14,7 @@ import { blockContactByEmail } from "@/features/contacts/lib/actions"
 import type { BlockedUsers } from "@filen/shared"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { useChatComposerStore } from "@/features/chats/store/useChatComposer"
+import { beginMessageEdit, endMessageEdit } from "@/features/chats/lib/composerEdit"
 import type { ChatSendState } from "@/features/chats/store/useChatsInflight"
 
 export interface UseMessageActionsArgs {
@@ -57,7 +58,6 @@ export function useMessageActions({
 	const { t } = useTranslation("chats")
 	const isOnline = useIsOnline()
 	const beginReply = useChatComposerStore(state => state.beginReply)
-	const beginEdit = useChatComposerStore(state => state.beginEdit)
 	const descriptors = applyMessageOfflineGate(messageMenuActions(message, currentUserId, sendState, hasEmbeds, blocked), isOnline)
 
 	async function handleCopy(): Promise<void> {
@@ -107,6 +107,9 @@ export function useMessageActions({
 		}
 
 		if (descriptor.id === "reply") {
+			// An edit in progress ends first: its loaded body isn't a draft to reply with, and ending it brings
+			// back what was typed before.
+			endMessageEdit(chat.uuid)
 			beginReply(chat.uuid, { kind: "reply", message })
 
 			return
@@ -125,8 +128,9 @@ export function useMessageActions({
 		}
 
 		if (descriptor.id === "edit") {
-			// Load the message body into the draft and pin edit mode in one write (mobile parity).
-			beginEdit(chat.uuid, { kind: "edit", message }, message.message ?? "")
+			// Load the message body into the draft and pin edit mode (mobile parity); the typed draft is kept
+			// aside until the edit ends.
+			beginMessageEdit(chat.uuid, message)
 
 			return
 		}

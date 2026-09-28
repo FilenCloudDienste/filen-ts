@@ -283,6 +283,29 @@ describe("mergeNewestPage", () => {
 		expect(mergeNewestPage([inPage, raced], [inPage]).map(m => m.uuid)).toEqual([inPage.uuid, raced.uuid])
 	})
 
+	it("drops older cached history the page does not reach, so no gap is left behind it", () => {
+		const oldHistory = mockMessage({ uuid: testUuid("old"), sentTimestamp: 1n })
+		const oldNewest = mockMessage({ uuid: testUuid("old-newest"), sentTimestamp: 2n })
+		const pageOldest = mockMessage({ uuid: testUuid("page-oldest"), sentTimestamp: 50n })
+		const pageNewest = mockMessage({ uuid: testUuid("page-newest"), sentTimestamp: 60n })
+		const raced = mockMessage({ uuid: testUuid("raced"), sentTimestamp: 70n })
+
+		expect(mergeNewestPage([oldHistory, oldNewest, raced], [pageOldest, pageNewest]).map(m => m.uuid)).toEqual([
+			pageOldest.uuid,
+			pageNewest.uuid,
+			raced.uuid
+		])
+	})
+
+	it("drops older cached history when only a message delivered live after a reconnect overlaps the page", () => {
+		const oldHistory = mockMessage({ uuid: testUuid("old"), sentTimestamp: 1n })
+		const oldNewest = mockMessage({ uuid: testUuid("old-newest"), sentTimestamp: 2n })
+		const pageOldest = mockMessage({ uuid: testUuid("page-oldest"), sentTimestamp: 50n })
+		const live = mockMessage({ uuid: testUuid("live"), sentTimestamp: 70n })
+
+		expect(mergeNewestPage([oldHistory, oldNewest, live], [pageOldest, live]).map(m => m.uuid)).toEqual([pageOldest.uuid, live.uuid])
+	})
+
 	it("empties the slice when the page is empty (every message is gone server-side)", () => {
 		expect(mergeNewestPage([mockMessage()], [])).toEqual([])
 	})

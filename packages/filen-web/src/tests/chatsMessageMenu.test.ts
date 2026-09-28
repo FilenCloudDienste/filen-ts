@@ -281,8 +281,7 @@ describe("deleteMessage", () => {
 			const message = mockMessage()
 			const echo = vi.fn()
 			parkOwnMessageEcho(
-				message.uuid,
-				chat.uuid,
+				message,
 				setTimeout(() => {
 					echo()
 				}, 3_000)

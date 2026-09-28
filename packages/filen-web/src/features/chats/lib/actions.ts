@@ -2,6 +2,7 @@ import type { Chat, Contact, UserInfo } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
 import { i18n } from "@/lib/i18n"
 import { queryClient } from "@/queries/client"
+import { removeQueriesAndPersisted } from "@/queries/persist"
 import { ACCOUNT_QUERY_KEY } from "@/queries/account"
 import { chatsQueryUpsert, chatsQueryRemove } from "@/features/chats/queries/chats"
 import { chatMessagesQueryKey } from "@/features/chats/queries/chatMessages"
@@ -131,7 +132,7 @@ export async function leaveChat(chat: Chat, opts?: LeaveOrDeleteChatOptions): Pr
 
 	opts?.beforeCacheRemoval?.()
 	chatsQueryRemove(chat.uuid)
-	queryClient.removeQueries({ queryKey: chatMessagesQueryKey(chat.uuid) })
+	removeQueriesAndPersisted(queryClient, chatMessagesQueryKey(chat.uuid))
 
 	return { status: "success" }
 }
@@ -152,7 +153,7 @@ export async function deleteChat(chat: Chat, opts?: LeaveOrDeleteChatOptions): P
 
 	opts?.beforeCacheRemoval?.()
 	chatsQueryRemove(chat.uuid)
-	queryClient.removeQueries({ queryKey: chatMessagesQueryKey(chat.uuid) })
+	removeQueriesAndPersisted(queryClient, chatMessagesQueryKey(chat.uuid))
 
 	return { status: "success" }
 }

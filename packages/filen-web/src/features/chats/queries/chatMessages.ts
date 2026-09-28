@@ -2,7 +2,7 @@ import { useQuery, type UseQueryResult } from "@tanstack/react-query"
 import { sdkApi } from "@/lib/sdk/client"
 import { currentSocketEpoch, socketLiveSince } from "@/lib/sdk/socketSession"
 import { queryClient } from "@/queries/client"
-import { patchQuery } from "@/queries/patch"
+import { cachedQuery, patchQuery } from "@/queries/patch"
 import type { Chat, ChatMessage } from "@filen/sdk-rs"
 import { chatsQueryGet } from "@/features/chats/queries/chats"
 
@@ -76,7 +76,8 @@ export async function fetchMessagesForChat(chat: Chat): Promise<ChatMessage[]> {
 
 // The bulk resync's per-chat read. Merge, never replace: this pulls only the newest page, and the open
 // thread may have older pages scrolled in (mergeNewestPage). The merge always lands, cancelling any mount
-// read it overlaps, so the thread's marker is this read's.
+// read it overlaps: that read's older snapshot would otherwise revert what this one reconciled. patchQuery
+// issues it again, and whichever lands last marks the thread.
 export async function refreshNewestChatMessages(chat: Chat): Promise<void> {
 	const epoch = currentSocketEpoch()
 	const page = await fetchMessagesForChat(chat)
@@ -89,10 +90,14 @@ export async function refreshNewestChatMessages(chat: Chat): Promise<void> {
 // remount, socket reconnect) only ever returns that newest page, so replacing the slice would throw away
 // every older page `loadOlderChatMessages` merged in — the history the user scrolled up to reads as gone
 // and the virtualizer collapses under their scroll position. The page is authoritative over ITS OWN
-// window only: cached messages older than its oldest survive (the paged-in scrollback) and so do any
-// newer than its newest (a socket delivery that raced the fetch), while everything inside the window
-// comes from the page, so a server-side delete or edit still reconciles. An EMPTY page means the thread
-// genuinely has no messages — nothing outside the window to keep.
+// window only: cached messages newer than its newest survive (a socket delivery that raced the fetch),
+// and so do those older than its oldest (the paged-in scrollback) when the page reaches them, while
+// everything inside the window comes from the page, so a server-side delete or edit still reconciles. The
+// page reaches the cache only if the cache already holds the page's OLDEST message: sharing any message is
+// not enough, since one delivered live after a reconnect sits at the top of both while more than a page
+// is missing below it. Otherwise keeping the older cache would leave a gap that load-older, paging from
+// the oldest message, never fills; it is dropped and scrolling up reloads it contiguously. An EMPTY page
+// means the thread genuinely has no messages — nothing outside the window to keep.
 export function mergeNewestPage(cached: readonly ChatMessage[], page: readonly ChatMessage[]): ChatMessage[] {
 	const sortedPage = sortAscending(page)
 	const oldest = sortedPage.at(0)
@@ -102,7 +107,10 @@ export function mergeNewestPage(cached: readonly ChatMessage[], page: readonly C
 		return sortedPage
 	}
 
-	const outsideWindow = cached.filter(m => m.sentTimestamp < oldest.sentTimestamp || m.sentTimestamp > newest.sentTimestamp)
+	const reachesCache = cached.some(m => m.uuid === oldest.uuid)
+	const outsideWindow = cached.filter(
+		m => m.sentTimestamp > newest.sentTimestamp || (reachesCache && m.sentTimestamp < oldest.sentTimestamp)
+	)
 
 	return sortAscending([...outsideWindow, ...sortedPage])
 }
@@ -172,6 +180,24 @@ function beforePatch(chatUuid: string): void {
 export function chatMessagesQueryUpdate(chatUuid: string, updater: (prev: ChatMessage[]) => ChatMessage[]): void {
 	beforePatch(chatUuid)
 	patchQuery<ChatMessage[]>(chatMessagesQueryKey(chatUuid), prev => updater(prev ?? []))
+}
+
+// For a write that only adds a message newer than any in-flight read's page (a socket delivery, a send's
+// commit): that read merges it on landing (fetchChatMessages reads the cache after its fetch and keeps
+// what is newer than the page), so it is written without the cancel patchQuery would make, which would
+// only issue the same read again. An idle query takes the regular patch, and so does one with no messages
+// yet: a page answered before the message existed is empty, and an empty page replaces the whole slice.
+export function chatMessagesQueryAppend(chatUuid: string, updater: (prev: ChatMessage[]) => ChatMessage[]): void {
+	const queryKey = chatMessagesQueryKey(chatUuid)
+	const query = cachedQuery<ChatMessage[]>(queryKey)
+
+	if (query === undefined || query.state.fetchStatus === "idle" || (query.state.data?.length ?? 0) === 0) {
+		chatMessagesQueryUpdate(chatUuid, updater)
+
+		return
+	}
+
+	queryClient.setQueryData<ChatMessage[]>(queryKey, prev => updater(prev ?? []))
 }
 
 // Replaces (or inserts, keeping ascending order) a single message by uuid — the shape a confirmed

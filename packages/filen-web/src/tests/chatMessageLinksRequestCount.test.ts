@@ -23,8 +23,7 @@ import {
 const UUID = "11111111-1111-4111-8111-111111111111"
 const KEY_PLAINTEXT = "0123456789abcdef0123456789abcdef"
 const FILE_LINK_URL = `https://app.filen.io/#/d/${UUID}%23${Buffer.from(KEY_PLAINTEXT, "utf-8").toString("hex")}`
-const IMAGE_URL = "https://example.com/photo.jpg"
-const URLS = [FILE_LINK_URL, IMAGE_URL]
+const URLS = [FILE_LINK_URL]
 
 const LINKED_FILE: LinkedFile = {
 	uuid: UUID,
@@ -41,8 +40,6 @@ const LINKED_FILE: LinkedFile = {
 	linkedTag: true,
 	canMakeThumbnail: false
 }
-
-const fetchSpy = vi.fn(() => Promise.resolve({ ok: true, headers: { get: () => "image/jpeg" } }))
 
 // The production defaults minus the persister (sqlite, unavailable under vitest).
 let queryClient: QueryClient
@@ -71,7 +68,6 @@ beforeEach(() => {
 		}
 	})
 	getLinkedFile.mockResolvedValue(LINKED_FILE)
-	vi.stubGlobal("fetch", fetchSpy)
 })
 
 afterEach(() => {
@@ -79,7 +75,6 @@ afterEach(() => {
 	focusManager.setFocused(undefined)
 	vi.useRealTimers()
 	vi.clearAllMocks()
-	vi.unstubAllGlobals()
 })
 
 describe("chat message link embed request counts", () => {
@@ -89,12 +84,11 @@ describe("chat message link embed request counts", () => {
 		first.unmount()
 
 		expect(getLinkedFile).toHaveBeenCalledTimes(1)
-		expect(fetchSpy).toHaveBeenCalledTimes(1)
 
 		const row = mountEmbeds()
 		await drain()
 
-		expect(row.result.current.data).toHaveLength(2)
+		expect(row.result.current.data).toHaveLength(1)
 
 		act(() => {
 			focusManager.setFocused(false)
@@ -103,7 +97,6 @@ describe("chat message link embed request counts", () => {
 		await drain()
 
 		expect(getLinkedFile).toHaveBeenCalledTimes(1)
-		expect(fetchSpy).toHaveBeenCalledTimes(1)
 
 		row.unmount()
 	})
@@ -128,7 +121,6 @@ describe("chat message link embed request counts", () => {
 			row.unmount()
 
 			counts.push(getLinkedFile.mock.calls.length)
-			expect(fetchSpy).toHaveBeenCalledTimes(getLinkedFile.mock.calls.length)
 		}
 
 		return counts

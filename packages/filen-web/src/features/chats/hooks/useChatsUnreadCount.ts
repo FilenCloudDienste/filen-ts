@@ -4,6 +4,9 @@ import { useChats } from "@/features/chats/queries/chats"
 import { chatMessagesQueryGet } from "@/features/chats/queries/chatMessages"
 import { getMessagesVersion, subscribeMessagesVersion } from "@/features/chats/lib/messagesVersion"
 import { useBlockedUsers } from "@/features/contacts/hooks/useBlockedUsers"
+import { CONTACTS_QUERY_KEY, contactsQueryGet, fetchContacts } from "@/features/contacts/queries/contacts"
+import { queryClient } from "@/queries/client"
+import { noop } from "@/lib/utils"
 import { refetchChatsAndMessages } from "@/features/chats/lib/refetchChatsAndMessages"
 import { countUnreadMessages } from "@/features/chats/hooks/useChatUnreadCount"
 import type { BlockedUsers } from "@filen/shared"
@@ -74,6 +77,18 @@ export function useChatsUnreadCount(userId: bigint | undefined): number {
 			void refetchChatsAndMessages({ onlyMissing: true })
 		}
 	}, [hasMissingMessages])
+
+	// The blocked set comes from a disabled observer (an enabled one here would refetch contacts on every
+	// focus app-wide), so on a session with no contacts row yet it is empty and blocked senders' unread
+	// messages would count. Fetch the row once, only when there is something to count; the observer picks
+	// it up and it persists for later boots.
+	const hasUnread = count > 0
+
+	useEffect(() => {
+		if (hasUnread && contactsQueryGet() === undefined) {
+			queryClient.query({ queryKey: CONTACTS_QUERY_KEY, queryFn: fetchContacts }).catch(noop)
+		}
+	}, [hasUnread])
 
 	return count
 }

@@ -109,18 +109,32 @@ export function buildThreadRows(
 	return rows
 }
 
-// Scroll-position preservation when older messages are PREPENDED. After a prepend the content above the
-// viewport grows by (nextScrollHeight - prevScrollHeight); to keep the same messages under the user's eye
-// the scrollTop must grow by that same delta. Returns the scrollTop to apply after the DOM has the taller
-// content. Extracted pure so the (easy-to-get-wrong) arithmetic is unit-tested without a DOM.
-export function computeScrollAfterPrepend(prevScrollHeight: number, prevScrollTop: number, nextScrollHeight: number): number {
-	return prevScrollTop + (nextScrollHeight - prevScrollHeight)
+// The thread renders bottom-up: index 0 is the newest row, so a virtualizer laid out from the scroller's
+// bottom edge keeps its offsets stable when older pages land at the other end. Day separators and the
+// unread divider precede their message in `buildThreadRows`' ascending order, so here they follow it,
+// which is still directly above it on screen.
+export function toBottomUpRows(rows: readonly ThreadRow[]): ThreadRow[] {
+	return rows.toReversed()
 }
 
-// True once the scroll container's bottom edge is within `threshold` px of the content's true bottom —
-// the "at bottom" test the scroll-to-bottom affordance and the jump-on-own-send behavior both key off.
-export function isScrollNearBottom(scrollTop: number, scrollHeight: number, clientHeight: number, threshold: number): boolean {
-	return scrollHeight - scrollTop - clientHeight <= threshold
+// Scroll geometry of a `flex-direction: column-reverse` scroller. Its scroll origin is the bottom edge:
+// scrollTop is 0 there and negative going up, in Chromium, Firefox and WebKit alike. Clamped at 0 so
+// WebKit's rubber-band overscroll past the bottom (a positive scrollTop) reads as the bottom itself.
+export function scrollDistanceFromBottom(scrollTop: number): number {
+	return Math.max(0, 0 - scrollTop)
+}
+
+export function scrollDistanceFromTop(scrollTop: number, scrollHeight: number, clientHeight: number): number {
+	return scrollHeight - clientHeight - scrollDistanceFromBottom(scrollTop)
+}
+
+// The "at bottom" test the scroll-to-bottom affordance and tail-following both key off.
+export function isScrollNearBottom(scrollTop: number, threshold: number): boolean {
+	return scrollDistanceFromBottom(scrollTop) <= threshold
+}
+
+export function isScrollNearTop(scrollTop: number, scrollHeight: number, clientHeight: number, threshold: number): boolean {
+	return scrollDistanceFromTop(scrollTop, scrollHeight, clientHeight) <= threshold
 }
 
 // Counts messages newly appended at the TAIL between two ascending snapshots of the same chat. Raw

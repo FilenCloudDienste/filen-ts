@@ -37,6 +37,7 @@ import { contactDisplayName, contactInitials } from "@/features/contacts/compone
 import type { EmojiSuggestion } from "@/features/chats/lib/emoji"
 import { useChatComposerEntry, useChatComposerStore } from "@/features/chats/store/useChatComposer"
 import { loadDraft, saveDraftDebounced } from "@/features/chats/lib/drafts"
+import { beginMessageEdit, endMessageEdit } from "@/features/chats/lib/composerEdit"
 import { AttachDriveDialog } from "@/features/chats/components/thread/attachDriveDialog"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { toastObstructionRef } from "@/lib/toastClearance"
@@ -88,7 +89,6 @@ export function Composer({
 
 	const setDraft = useChatComposerStore(state => state.setDraft)
 	const setMode = useChatComposerStore(state => state.setMode)
-	const beginEdit = useChatComposerStore(state => state.beginEdit)
 	const reset = useChatComposerStore(state => state.reset)
 
 	const textareaRef = useRef<HTMLTextAreaElement | null>(null)
@@ -128,6 +128,9 @@ export function Composer({
 	const safeIndex = suggestCount > 0 ? Math.min(activeIndex, suggestCount - 1) : 0
 
 	const overLimit = isOverLimit(draft)
+	// Why attaching is refused (trigger tooltip, drop toast). Offline wins when both apply: going online fixes
+	// that one, while reconnecting alone can't fix a non-Pro rejection.
+	const attachGateReason = !isOnline ? t("common:offlineActionDisabled") : !isPremium ? t("chatComposerAttachPremiumRequired") : undefined
 
 	// Hydrate the draft from disk once per chat, but never clobber a live draft already in the store (the
 	// user may have typed during the async read, or a menu may have loaded an edit body).
@@ -221,6 +224,8 @@ export function Composer({
 		}
 	}, [chatUuid])
 
+	// Emptying the input keeps an edit open (unlike mobile): ending it would put the pre-edit draft back
+	// into the field under the key still deleting, and an empty edit cannot be saved anyway.
 	function onChange(event: React.ChangeEvent<HTMLTextAreaElement>): void {
 		setManualClose(false)
 		setDraft(chatUuid, event.target.value)
@@ -228,11 +233,6 @@ export function Composer({
 
 		// Fire the throttled typing signal on every keystroke (the controller owns the throttle + idle "up").
 		signalTyping(chat)
-
-		// Emptying the input while editing cancels the edit (mobile: onChangeText empty clears edit).
-		if (event.target.value.length === 0 && mode.kind === "edit") {
-			setMode(chatUuid, NEW_MODE)
-		}
 	}
 
 	function applyReplacement(next: { value: string; caret: number }): void {
@@ -308,13 +308,21 @@ export function Composer({
 		// Copied before the await: the input's FileList empties once its value is reset.
 		const picked = Array.from(files)
 
-		if (picked.length === 0 || !(await preflightAttachments(picked))) {
+		if (picked.length === 0) {
 			return
 		}
 
-		for (const file of picked) {
-			void attachLocalFile(file)
+		// The pre-flight's quota read counts as an upload in flight, so a second drop during it is refused
+		// too. Each file's own count is taken before this one is released.
+		setUploadingCount(count => count + 1)
+
+		if (await preflightAttachments(picked)) {
+			for (const file of picked) {
+				void attachLocalFile(file)
+			}
 		}
+
+		setUploadingCount(count => count - 1)
 	}
 
 	function onDrop(event: React.DragEvent<HTMLDivElement>): void {
@@ -322,7 +330,16 @@ export function Composer({
 			return
 		}
 
+		// Prevented even when refused, so the browser never navigates to the dropped file.
 		event.preventDefault()
+
+		// Same gate as the attach menu trigger: a drop is the one path to an upload that bypasses it.
+		if (isAttachDisabled(uploadingCount, isOnline, isPremium)) {
+			toast.error(attachGateReason ?? t("chatComposerAttachInProgress"))
+
+			return
+		}
+
 		void attachLocalFiles(event.dataTransfer.files)
 	}
 
@@ -345,7 +362,7 @@ export function Composer({
 				return
 			}
 
-			reset(chatUuid)
+			endMessageEdit(chatUuid, mode.message.uuid)
 
 			return
 		}
@@ -391,8 +408,8 @@ export function Composer({
 
 	function cancelMode(): void {
 		if (mode.kind === "edit") {
-			// Discard the loaded body (it isn't a resumable draft).
-			reset(chatUuid)
+			// Discard the loaded body (it isn't a resumable draft) and bring back what was typed before.
+			endMessageEdit(chatUuid)
 
 			return
 		}
@@ -454,7 +471,7 @@ export function Composer({
 
 			if (last !== undefined) {
 				event.preventDefault()
-				beginEdit(chatUuid, { kind: "edit", message: last }, last.message ?? "")
+				beginMessageEdit(chatUuid, last)
 			}
 		}
 	}
@@ -612,17 +629,10 @@ export function Composer({
 									// Attach-menu pre-gate — both entries need network right away (an upload/
 									// drive-attach start, not a durably-queued send), unlike the send button below,
 									// which stays enabled offline by design (its outbox queues and flushes later).
-									// Also pre-gated on Pro status — offline wins the tooltip when both apply, since
-									// reconnecting alone can't fix a non-Pro rejection but going online can.
+									// Also pre-gated on Pro status.
 									disabled={isAttachDisabled(uploadingCount, isOnline, isPremium)}
 									aria-label={t("chatComposerAttach")}
-									title={
-										!isOnline
-											? t("common:offlineActionDisabled")
-											: !isPremium
-												? t("chatComposerAttachPremiumRequired")
-												: undefined
-									}
+									title={attachGateReason}
 								>
 									<PaperclipIcon />
 								</Button>

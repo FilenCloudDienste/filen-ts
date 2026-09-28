@@ -389,3 +389,152 @@ describe("promoteToLeader — a follower wins the lock and pushes carried-over w
 		expect(pushedChatUuids()).toEqual(["chat-d-d-d", "chat-l-l-l"])
 	})
 })
+
+describe("promoteToLeader — the dead leader's mirrored queue is never re-sent", () => {
+	it("sends only what disk holds plus this tab's own unconfirmed sends, not the stale mirror", async () => {
+		const s = new Sync()
+		const transport = mockTransport()
+
+		s.attachTransport(transport)
+		s.startAsFollower()
+
+		// The dead leader's last broadcast listed 1-3; it then committed 1 and 2 and persisted only 3.
+		s.applyLeaderState(
+			group(
+				"chat-a-a-a",
+				optimistic("chat-a-a-a", "inf-1-1-1", 1n),
+				optimistic("chat-a-a-a", "inf-2-2-2", 2n),
+				optimistic("chat-a-a-a", "inf-3-3-3", 3n)
+			)
+		)
+		kvStore.set("inflightChatMessages", group("chat-a-a-a", optimistic("chat-a-a-a", "inf-3-3-3", 3n)))
+		// This tab's own send, never confirmed by the dead leader.
+		await s.enqueue({ chat: makeChat("chat-b-b-b"), content: "b", sender: SENDER })
+		listChats.mockResolvedValue([makeChat("chat-a-a-a"), makeChat("chat-b-b-b")])
+
+		s.promoteToLeader()
+		await tick()
+
+		expect(pushedChatUuids()).toEqual(["chat-a-a-a", "chat-b-b-b"])
+		expect(getStore()).toEqual({})
+	})
+})
+
+describe("leader broadcasts — followers learn each commit as it lands", () => {
+	async function startedLeader(): Promise<{ s: Sync; transport: ReturnType<typeof mockTransport> }> {
+		const s = new Sync()
+		const transport = mockTransport()
+
+		s.attachTransport(transport)
+		s.start()
+		await tick()
+		transport.broadcastState.mockClear()
+
+		return { s, transport }
+	}
+
+	it("broadcasts the queue after every commit, not only at the end of the pass", async () => {
+		const { s, transport } = await startedLeader()
+		let releaseSecond: () => void = () => undefined
+		const second = new Promise<void>(resolve => {
+			releaseSecond = resolve
+		})
+
+		sendChatMessage.mockImplementationOnce((chat: Chat) =>
+			Promise.resolve({ ...chat, lastMessage: { ...optimistic(chat.uuid, "srv-1-1-1", 1n), uuid: "srv-1-1-1" } })
+		)
+		sendChatMessage.mockImplementationOnce(async (chat: Chat) => {
+			await second
+
+			return { ...chat, lastMessage: { ...optimistic(chat.uuid, "srv-2-2-2", 2n), uuid: "srv-2-2-2" } }
+		})
+
+		s.ingestRemoteEnqueue({ chat: makeChat("chat-a-a-a"), message: optimistic("chat-a-a-a", "inf-1-1-1", 1n) })
+		s.ingestRemoteEnqueue({ chat: makeChat("chat-a-a-a"), message: optimistic("chat-a-a-a", "inf-2-2-2", 2n) })
+		await tick()
+
+		// The second send is still in flight, and a follower already knows the first one committed.
+		const latest = transport.broadcastState.mock.calls.at(-1)?.[0] ?? {}
+
+		expect(inflightIdsOf(latest, "chat-a-a-a")).toEqual(["inf-2-2-2"])
+
+		releaseSecond()
+		await tick()
+
+		expect(transport.broadcastState.mock.calls.at(-1)?.[0]).toEqual({})
+	})
+
+	it("confirms a forwarded send even when it commits before the ingest write lands", async () => {
+		const { s, transport } = await startedLeader()
+		let releaseWrite: () => void = () => undefined
+
+		kvSetJson.mockImplementationOnce((key: string, value: unknown) => {
+			kvStore.set(key, value)
+
+			return new Promise<void>(resolve => {
+				releaseWrite = resolve
+			})
+		})
+
+		s.ingestRemoteEnqueue({ chat: makeChat("chat-a-a-a"), message: optimistic("chat-a-a-a", "inf-1-1-1", 1n) })
+		await tick()
+
+		// Committed and dequeued while the ingest write is still pending.
+		expect(sendChatMessage).toHaveBeenCalledTimes(1)
+		expect(inflightIds("chat-a-a-a")).toEqual([])
+
+		releaseWrite()
+		await tick()
+
+		const states = transport.broadcastState.mock.calls.map(call => inflightIdsOf(call[0], "chat-a-a-a"))
+
+		expect(states).toContainEqual(["inf-1-1-1"])
+	})
+
+	// A follower acks what a broadcast lists and a promoted leader rebuilds from disk, so a send listed before
+	// its write lands would be lost with the leader.
+	it("never lists a forwarded send in a broadcast before its write lands", async () => {
+		const { s, transport } = await startedLeader()
+		let releaseWrite: () => void = () => undefined
+
+		onlineManager.setOnline(false)
+		kvSetJson.mockImplementationOnce((key: string, value: unknown) => {
+			kvStore.set(key, value)
+
+			return new Promise<void>(resolve => {
+				releaseWrite = resolve
+			})
+		})
+
+		s.ingestRemoteEnqueue({ chat: makeChat("chat-a-a-a"), message: optimistic("chat-a-a-a", "inf-1-1-1", 1n) })
+		// A follower's state request, answered while the write is pending.
+		s.broadcastState()
+		await tick()
+
+		expect(transport.broadcastState.mock.calls.map(call => inflightIdsOf(call[0], "chat-a-a-a"))).toEqual([[]])
+
+		releaseWrite()
+		await tick()
+
+		expect(inflightIdsOf(transport.broadcastState.mock.calls.at(-1)?.[0] ?? {}, "chat-a-a-a")).toEqual(["inf-1-1-1"])
+	})
+
+	it("a promoted leader persists its own unconfirmed sends before it broadcasts them", async () => {
+		const s = new Sync()
+		const transport = mockTransport()
+
+		s.attachTransport(transport)
+		s.startAsFollower()
+		onlineManager.setOnline(false)
+		await s.enqueue({ chat: makeChat("chat-a-a-a"), content: "a", sender: SENDER })
+
+		s.promoteToLeader()
+		await tick()
+
+		const ownId = inflightIds("chat-a-a-a")
+
+		expect(ownId).toHaveLength(1)
+		expect(kvStore.get("inflightChatMessages")).toMatchObject({ "chat-a-a-a": { messages: [{ inflightId: ownId[0] }] } })
+		expect(inflightIdsOf(transport.broadcastState.mock.calls.at(-1)?.[0] ?? {}, "chat-a-a-a")).toEqual(ownId)
+	})
+})

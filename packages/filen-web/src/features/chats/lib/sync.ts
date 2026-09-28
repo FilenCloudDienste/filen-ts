@@ -7,9 +7,14 @@ import { asErrorDTO } from "@/lib/sdk/errors"
 import { kvGetJson, kvSetJson, kvDelete } from "@/lib/storage/adapter"
 import { type OutboxChannelTransport, type OutboxRole } from "@/lib/storage/outboxChannel"
 import { chatsQueryUpdate, chatsQueryGet, chatsQueryFetch } from "@/features/chats/queries/chats"
-import { chatMessagesQueryUpdate } from "@/features/chats/queries/chatMessages"
+import { chatMessagesQueryUpdate, chatMessagesQueryAppend } from "@/features/chats/queries/chatMessages"
 import { newestMessage } from "@/features/chats/lib/sort"
-import useChatsInflightStore, { type ChatMessageWithInflightId, type InflightChatMessages } from "@/features/chats/store/useChatsInflight"
+import { deleteDraft } from "@/features/chats/lib/drafts"
+import useChatsInflightStore, {
+	dropChatSendState,
+	type ChatMessageWithInflightId,
+	type InflightChatMessages
+} from "@/features/chats/store/useChatsInflight"
 import {
 	reconcileChatFollower,
 	buildOptimisticMessage,
@@ -79,6 +84,10 @@ export class Sync {
 	// committed + dequeued is dropped here instead of re-sent — chat sends carry no client id, so a second push
 	// is a peer-visible duplicate. Bounded (FIFO past capacity), so it never grows without limit.
 	private readonly committedIds: CommittedIdLedger = new CommittedIdLedger()
+	// The queue as last written to disk (leader-only). Broadcasts carry this, never the live store: a follower
+	// treats what a broadcast lists as confirmed, and a promoted leader rebuilds from disk plus its own
+	// unconfirmed sends, so a send broadcast before its write landed would die with the leader.
+	private durable: InflightChatMessages = {}
 
 	public constructor() {
 		this.initPromise = new Promise(resolve => {
@@ -105,6 +114,7 @@ export class Sync {
 	public start(): void {
 		this.role = "leader"
 		this.abortController = new AbortController()
+		this.durable = {}
 
 		void this.restoreFromDisk()
 	}
@@ -117,10 +127,14 @@ export class Sync {
 	}
 
 	// Promotion (this follower just won the db lock after the leader died). Flip to leader, announce so any
-	// OTHER followers re-send their unacked, then run the EXISTING replay-on-launch machinery: our optimistic
-	// sends already live in the store, and restoreFromDisk merges them with whatever the dead leader persisted
-	// (mergeInflightQueuesByUnion), prunes gone chats, and sends. restoreFromDisk only kicks a pass when DISK had
-	// content, so force one when the store holds carried-over optimistic work the dead leader never persisted.
+	// OTHER followers re-send their unacked, then run the EXISTING replay-on-launch machinery: restoreFromDisk
+	// merges our own unconfirmed sends with whatever the dead leader persisted (mergeInflightQueuesByUnion),
+	// prunes gone chats, and sends. restoreFromDisk only kicks a pass when DISK had content, so force one when
+	// the store holds carried-over optimistic work the dead leader never persisted.
+	//
+	// The rest of the store is only a mirror of the dead leader's last broadcast, which can still list a send
+	// it committed after that broadcast; adopting it would re-send that message. Disk holds everything the
+	// dead leader confirmed (a broadcast only ever lists what was written), so the mirror is dropped.
 	//
 	// Handoff window (documented, mobile-parity residual): the dead leader dequeues a committed send from the
 	// in-memory store and THEN persists (sync() flushes per commit). A crash BETWEEN server-commit and
@@ -130,7 +144,8 @@ export class Sync {
 	// one is gone (the db lock is released on death), never concurrently.
 	public promoteToLeader(): void {
 		this.role = "leader"
-		// Our optimistic sends are authoritative now (they live in the store); clear the follower ledger.
+		// Keep only our own unconfirmed sends; the restore unions disk back in. Clear the follower ledger.
+		useChatsInflightStore.getState().setInflightMessages(() => this.unacked)
 		this.unacked = {}
 		this.transport?.broadcastLeaderHello()
 
@@ -168,6 +183,8 @@ export class Sync {
 
 		this.applyLeaderOptimistic(msg.chat, msg.message)
 
+		// The broadcast carries the queue this write persisted: a fast send can commit and dequeue the forwarded
+		// message before the write lands, and a broadcast without it would never confirm the follower's copy.
 		void this.flushToDisk(useChatsInflightStore.getState().inflightMessages).then(() => {
 			this.broadcastState()
 		})
@@ -203,14 +220,14 @@ export class Sync {
 		}
 	}
 
-	// Broadcast the leader's current authoritative queue to followers (no-op unless leader with a transport).
-	// Called after every durable state change and on a follower's state request.
+	// Broadcast the leader's queue as last written to disk to followers (no-op unless leader with a
+	// transport). Called after every durable state change and on a follower's state request.
 	public broadcastState(): void {
 		if (this.role !== "leader") {
 			return
 		}
 
-		this.transport?.broadcastState(useChatsInflightStore.getState().inflightMessages)
+		this.transport?.broadcastState(this.durable)
 	}
 
 	// Paint the optimistic bubble into the leader's own message cache (belt-and-braces — composeMessageList
@@ -302,6 +319,7 @@ export class Sync {
 	public cancel(): void {
 		this.role = "shutdown"
 		this.abortController.abort()
+		this.durable = {}
 		this.transport?.close()
 	}
 
@@ -322,7 +340,9 @@ export class Sync {
 		// A terminal shutdown (logout) aborts the loop then wipes kv; a flush landing after the wipe would
 		// re-write this account's plaintext queue onto disk. Refuse to persist once aborted — the callers'
 		// own abort guards are the first line, this is the defense-in-depth backstop at the disk boundary.
-		if (isAborted(this.abortController.signal)) {
+		const signal = this.abortController.signal
+
+		if (isAborted(signal)) {
 			return false
 		}
 
@@ -342,9 +362,17 @@ export class Sync {
 
 		if (!result.success) {
 			log.error("chats-sync", "flushToDisk failed; queued message not persisted", result.error)
+
+			return false
 		}
 
-		return result.success
+		// db-worker writes land in order, so the last to resolve is what disk holds. A write that straddled a
+		// logout must not hand the wiped queue back to memory.
+		if (!isAborted(signal)) {
+			this.durable = inflightChatMessages
+		}
+
+		return true
 	}
 
 	// Replay-on-launch: the ONLY disk→store bridge, so it MUST hydrate the store even with no network.
@@ -416,6 +444,12 @@ export class Sync {
 
 		this.resolveInit()
 
+		// Persist what the restore settled on (the prune, and on a promotion this tab's own unconfirmed sends,
+		// which only ever lived in its memory) so the broadcast below can list it.
+		if (result.data === true || Object.keys(useChatsInflightStore.getState().inflightMessages).length > 0) {
+			await this.flushToDisk(useChatsInflightStore.getState().inflightMessages)
+		}
+
 		// Publish the restored/reconciled queue so any follower already present reflects it (no-op single-tab).
 		// A follower that joins later drives its own catch-up via requestState().
 		this.broadcastState()
@@ -475,7 +509,7 @@ export class Sync {
 					? prev.map(c => (c.uuid === chat.uuid ? { ...c, lastMessage: newestMessage(c.lastMessage, lastMessage) } : c))
 					: [...prev, updatedChat]
 			)
-			chatMessagesQueryUpdate(chat.uuid, prev => [
+			chatMessagesQueryAppend(chat.uuid, prev => [
 				...prev.filter(m => m.uuid !== lastMessage.uuid && m.uuid !== inflightId),
 				lastMessage
 			])
@@ -523,8 +557,14 @@ export class Sync {
 					}
 
 					if (!chat) {
-						// Unresolvable right now (list not yet fetched / transient miss). Keep the queue for a
-						// later trigger; a genuinely deleted chat is pruned at restore, never dropped here.
+						// getChat answered that the chat does not exist (a failed read throws past this). With the
+						// list loaded and lacking it too, the chat was deleted while this tab missed its socket
+						// event: nothing else would ever drop its queue, and every pass would read it again.
+						// Before the list loads, keep the queue for a later trigger.
+						if (chatsQueryGet() !== undefined) {
+							this.dropGoneChat(chatUuid)
+						}
+
 						return
 					}
 
@@ -626,6 +666,12 @@ export class Sync {
 
 						await this.flushToDisk(useChatsInflightStore.getState().inflightMessages)
 
+						// Followers drop the committed send now, not at the end of the pass: until then their mirror
+						// lists it, and a follower promoted meanwhile must not mistake it for queued work.
+						if (!isAborted(signal)) {
+							this.broadcastState()
+						}
+
 						// Fired OUTSIDE the try so a rejection can never be read as a send failure (which would
 						// retry an already-committed message); allSettled keeps it unhandled-safe.
 						void Promise.allSettled([sdkApi.markChatRead(committedChat), sdkApi.updateLastChatFocusTimesNow([committedChat])])
@@ -688,6 +734,17 @@ export class Sync {
 
 			return updated
 		})
+	}
+
+	// A chat deleted while its conversationDeleted event was missed: drop what the removal paths
+	// (purgeChatInflightState) would — its queue, its failed sends and its draft. The pass's closing flush
+	// persists the queue.
+	private dropGoneChat(chatUuid: string): void {
+		log.warn("chats-sync", "dropping the queue of a chat that no longer exists", chatUuid)
+
+		dropChatSendState(chatUuid)
+
+		void deleteDraft(chatUuid)
 	}
 
 	// Toggles the store's unrecallable-send marker for one inflightId (useChatSendState's "sending" tier —

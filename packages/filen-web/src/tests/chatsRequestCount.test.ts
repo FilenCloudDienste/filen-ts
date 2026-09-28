@@ -48,7 +48,12 @@ vi.mock("@/features/chats/lib/inflight", () => ({ purgeChatInflightState: () => 
 
 import { queryClient } from "@/queries/client"
 import { CHATS_LIST_REREAD_MS, chatsQueryGet, chatsQueryUpsert, useChats } from "@/features/chats/queries/chats"
-import { chatMessagesQueryGet, chatMessagesQueryUpdate, useChatMessages } from "@/features/chats/queries/chatMessages"
+import {
+	chatMessagesQueryAppend,
+	chatMessagesQueryGet,
+	chatMessagesQueryUpdate,
+	useChatMessages
+} from "@/features/chats/queries/chatMessages"
 import { useChatsUnreadCount } from "@/features/chats/hooks/useChatsUnreadCount"
 import { handleAuthSuccess, handleChatEvent, handleReconnecting, resetSocketReconnectState } from "@/features/chats/lib/socketHandlers"
 import { Sync } from "@/features/chats/lib/sync"
@@ -345,6 +350,62 @@ describe("chat list and message request counts", () => {
 
 		expect(listMessagesBefore).toHaveBeenCalledTimes(2)
 		expect(chatMessagesQueryGet(CHAT_A.uuid)?.map(m => m.uuid)).toEqual(complete.map(m => m.uuid))
+		thread.unmount()
+	})
+
+	// A read merges the cache as it lands and keeps what is newer than its page, so an append needs no
+	// cancel and no second read.
+	it("an append during a thread read lets that read land, keeps the appended message, and counts it", async () => {
+		const [m1, m2, m3] = [threadMessage("m1", 10n), threadMessage("m2", 20n), threadMessage("m3", 30n)]
+		const page = deferred<ChatMessage[]>()
+		queryClient.setQueryData(["chats", "list"], CHATS)
+		chatMessagesQueryUpdate(CHAT_A.uuid, () => [m1])
+		listMessagesBefore.mockImplementationOnce(() => page.promise)
+
+		const thread = renderHook(() => useChatMessages(CHAT_A.uuid), { wrapper })
+
+		await act(async () => {
+			await Promise.resolve()
+		})
+		act(() => {
+			chatMessagesQueryAppend(CHAT_A.uuid, prev => [...prev, m3])
+		})
+		page.resolve([m1, m2])
+		await drain()
+
+		expect(listMessagesBefore).toHaveBeenCalledTimes(1)
+		expect(chatMessagesQueryGet(CHAT_A.uuid)?.map(m => m.uuid)).toEqual([m1.uuid, m2.uuid, m3.uuid])
+
+		thread.unmount()
+		const remounted = renderHook(() => useChatMessages(CHAT_A.uuid), { wrapper })
+		await drain()
+
+		expect(listMessagesBefore).toHaveBeenCalledTimes(1)
+		remounted.unmount()
+	})
+
+	// A page answered before the first message existed is empty, and an empty page replaces the slice: that
+	// read must not land over the append.
+	it("an append to an empty thread during its read re-reads instead of letting the empty page erase it", async () => {
+		const m1 = threadMessage("m1", 10n)
+		const page = deferred<ChatMessage[]>()
+		queryClient.setQueryData(["chats", "list"], CHATS)
+		chatMessagesQueryUpdate(CHAT_A.uuid, () => [])
+		listMessagesBefore.mockImplementationOnce(() => page.promise).mockResolvedValueOnce([m1])
+
+		const thread = renderHook(() => useChatMessages(CHAT_A.uuid), { wrapper })
+
+		await act(async () => {
+			await Promise.resolve()
+		})
+		act(() => {
+			chatMessagesQueryAppend(CHAT_A.uuid, prev => [...prev, m1])
+		})
+		page.resolve([])
+		await drain()
+
+		expect(listMessagesBefore).toHaveBeenCalledTimes(2)
+		expect(chatMessagesQueryGet(CHAT_A.uuid)?.map(m => m.uuid)).toEqual([m1.uuid])
 		thread.unmount()
 	})
 

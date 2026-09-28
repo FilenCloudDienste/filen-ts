@@ -11,10 +11,12 @@ import { toastChatsBulkOutcome } from "@/features/chats/lib/bulkToast"
 import { useChatsSelectionStore } from "@/features/chats/store/useChatsSelectionStore"
 import {
 	chatBulkActions,
+	isChatBulkActionOfflineDisabled,
 	type ChatBulkActionDescriptor,
 	type ChatBulkDialogActionKind
 } from "@/features/chats/components/chatsBulkActionBar.logic"
 import { Kbd } from "@/lib/keymap/kbd"
+import { useIsOnline } from "@/lib/useIsOnline"
 import { toastObstructionRef } from "@/lib/toastClearance"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
@@ -37,6 +39,7 @@ export interface ChatsBulkActionBarProps {
 // have no submenu-driven bulk action, so every descriptor renders as a single tooltip'd icon button.
 export function ChatsBulkActionBar({ selectedChats, currentUserId, blocked, onDialogAction }: ChatsBulkActionBarProps) {
 	const { t } = useTranslation(["chats", "common"])
+	const isOnline = useIsOnline()
 	const flags = aggregateChatSelectionFlags(selectedChats, currentUserId, blocked, chatMessagesQueryGet)
 	const descriptors = chatBulkActions(flags)
 
@@ -90,6 +93,9 @@ export function ChatsBulkActionBar({ selectedChats, currentUserId, blocked, onDi
 			</div>
 			<div className="flex items-center gap-2">
 				{descriptors.map(descriptor => {
+					const offlineDisabled = isChatBulkActionOfflineDisabled(descriptor.id, isOnline)
+					const tooltip = offlineDisabled ? t("common:offlineActionDisabled") : t(descriptor.labelKey)
+
 					if (descriptor.run === "dialog") {
 						return (
 							<Tooltip key={descriptor.id}>
@@ -98,7 +104,9 @@ export function ChatsBulkActionBar({ selectedChats, currentUserId, blocked, onDi
 										<Button
 											variant={descriptor.destructive ? "destructive" : "outline"}
 											size="icon-sm"
+											disabled={offlineDisabled}
 											aria-label={t(descriptor.labelKey)}
+											title={offlineDisabled ? tooltip : undefined}
 											onClick={() => {
 												onDialogAction(descriptor.dialogKind, selectedChats)
 											}}
@@ -107,7 +115,7 @@ export function ChatsBulkActionBar({ selectedChats, currentUserId, blocked, onDi
 										</Button>
 									}
 								/>
-								<TooltipContent>{t(descriptor.labelKey)}</TooltipContent>
+								<TooltipContent>{tooltip}</TooltipContent>
 							</Tooltip>
 						)
 					}
@@ -119,7 +127,9 @@ export function ChatsBulkActionBar({ selectedChats, currentUserId, blocked, onDi
 									<Button
 										variant="outline"
 										size="icon-sm"
+										disabled={offlineDisabled}
 										aria-label={t(descriptor.labelKey)}
+										title={offlineDisabled ? tooltip : undefined}
 										onClick={() => {
 											runDescriptor(descriptor)
 										}}
@@ -128,7 +138,7 @@ export function ChatsBulkActionBar({ selectedChats, currentUserId, blocked, onDi
 									</Button>
 								}
 							/>
-							<TooltipContent>{t(descriptor.labelKey)}</TooltipContent>
+							<TooltipContent>{tooltip}</TooltipContent>
 						</Tooltip>
 					)
 				})}

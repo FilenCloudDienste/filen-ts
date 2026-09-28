@@ -289,7 +289,7 @@ export const chats = {
 	chatEmbedFilenDirectory: "Filen directory",
 	/** Filen-link embed card — subtitle under the name for a file link before it resolves (or on resolution failure) */
 	chatEmbedFilenFile: "Filen file",
-	/** Media embed / Filen-link previewable-card — accessible label on the click-to-open-preview control */
+	/** Filen-link previewable card — accessible label on the click-to-open-preview control */
 	chatEmbedOpenPreview: "Open preview of {{name}}",
 	/** Filen-link card — accessible label for a non-previewable file / directory link's new-tab open control */
 	chatEmbedOpenNewTab: "Open {{name}} in a new tab",
@@ -297,6 +297,8 @@ export const chats = {
 	chatComposerAttach: "Attach",
 	/** Composer attach menu — trigger tooltip when disabled for a non-Pro account (pre-gated) */
 	chatComposerAttachPremiumRequired: "Attachments require a Pro subscription",
+	/** Composer — toast when files are dropped on the composer while an earlier attachment is still uploading */
+	chatComposerAttachInProgress: "Wait for the current attachment to finish uploading",
 	/** Composer attach menu — uploads a local file */
 	chatComposerAttachUpload: "Upload a file",
 	/** Composer attach menu — opens the Drive picker */

@@ -154,7 +154,6 @@ describe("uploadAttachment", () => {
 		createDirectory.mockResolvedValueOnce(mockDir("dot-filen")).mockResolvedValueOnce(mockDir("chat-uploads"))
 		const uploaded = mockSdkFile()
 		uploadFile.mockResolvedValueOnce(uploaded)
-		getFileLinkStatus.mockResolvedValueOnce(undefined)
 		const link = mockFilePublicLink()
 		createFileLink.mockResolvedValueOnce(link)
 
@@ -174,23 +173,115 @@ describe("uploadAttachment", () => {
 		expect(queryClient.getQueryData(driveListingQueryKey({ variant: "drive", uuid: testUuid("chat-uploads") }))).toBeUndefined()
 	})
 
-	it("reuses an EXISTING link rather than creating a second one, when the just-uploaded item already has one", async () => {
-		// Realistically rare for a brand-new upload, but the shared ensurePublicLinkUrl tail is get-then-
-		// create regardless of caller — this proves the "get" half actually short-circuits "create".
+	it("creates the link straight away, with no link-status read, for the just-uploaded file", async () => {
 		createDirectory.mockResolvedValueOnce(mockDir("dot-filen")).mockResolvedValueOnce(mockDir("chat-uploads"))
 		uploadFile.mockResolvedValueOnce(mockSdkFile())
-		getFileLinkStatus.mockResolvedValueOnce(mockFilePublicLink())
+		createFileLink.mockResolvedValueOnce(mockFilePublicLink())
 
 		const outcome = await uploadAttachment(mockBrowserFile(), noop)
 
-		expect(createFileLink).not.toHaveBeenCalled()
+		expect(getFileLinkStatus).not.toHaveBeenCalled()
+		expect(createFileLink).toHaveBeenCalledOnce()
 		expect(outcome.status).toBe("success")
+	})
+
+	it("uploads under a unique name so a repeated name never versions an earlier attachment", async () => {
+		createDirectory.mockResolvedValueOnce(mockDir("dot-filen")).mockResolvedValueOnce(mockDir("chat-uploads"))
+		uploadFile.mockResolvedValueOnce(mockSdkFile())
+		createFileLink.mockResolvedValueOnce(mockFilePublicLink())
+		// Past any stamp an earlier test issued, so the stamp is exactly this clock.
+		vi.spyOn(Date, "now").mockReturnValue(9_000_000_000_123)
+
+		try {
+			await uploadAttachment(mockBrowserFile("image.png", 2_048), noop)
+		} finally {
+			vi.mocked(Date.now).mockRestore()
+		}
+
+		const sent = uploadFile.mock.calls[0]?.[2]
+
+		expect(sent?.name).toBe("image.9000000000123.png")
+		expect(sent?.size).toBe(2_048)
+		// The transfers panel keeps the name the user picked.
+		expect(useTransfersStore.getState().transfers[0]?.name).toBe("image.png")
+	})
+
+	it("gives same-name uploads started in one millisecond distinct names", async () => {
+		createDirectory.mockResolvedValueOnce(mockDir("dot-filen")).mockResolvedValueOnce(mockDir("chat-uploads"))
+		uploadFile.mockResolvedValueOnce(mockSdkFile()).mockResolvedValueOnce(mockSdkFile())
+		createFileLink.mockResolvedValueOnce(mockFilePublicLink()).mockResolvedValueOnce(mockFilePublicLink())
+
+		await Promise.all([uploadAttachment(mockBrowserFile("image.png"), noop), uploadAttachment(mockBrowserFile("image.png"), noop)])
+
+		const names = uploadFile.mock.calls.map(call => call[2].name)
+
+		expect(new Set(names).size).toBe(2)
+	})
+
+	it("shares one directory lookup across a multi-file pick's concurrent uploads", async () => {
+		createDirectory.mockResolvedValueOnce(mockDir("dot-filen")).mockResolvedValueOnce(mockDir("chat-uploads"))
+		uploadFile.mockResolvedValueOnce(mockSdkFile()).mockResolvedValueOnce(mockSdkFile()).mockResolvedValueOnce(mockSdkFile())
+		createFileLink
+			.mockResolvedValueOnce(mockFilePublicLink())
+			.mockResolvedValueOnce(mockFilePublicLink())
+			.mockResolvedValueOnce(mockFilePublicLink())
+
+		const outcomes = await Promise.all([
+			uploadAttachment(mockBrowserFile("a.jpg"), noop),
+			uploadAttachment(mockBrowserFile("b.jpg"), noop),
+			uploadAttachment(mockBrowserFile("c.jpg"), noop)
+		])
+
+		expect(createDirectory).toHaveBeenCalledTimes(2)
+		expect(uploadFile.mock.calls.map(call => call[0])).toEqual([
+			testUuid("chat-uploads"),
+			testUuid("chat-uploads"),
+			testUuid("chat-uploads")
+		])
+		expect(outcomes.every(outcome => outcome.status === "success")).toBe(true)
+	})
+
+	it("retries the directory lookup after a failed one instead of memoizing the failure", async () => {
+		createDirectory
+			.mockRejectedValueOnce(new Error("network down"))
+			.mockResolvedValueOnce(mockDir("dot-filen"))
+			.mockResolvedValueOnce(mockDir("chat-uploads"))
+		uploadFile.mockResolvedValueOnce(mockSdkFile())
+		createFileLink.mockResolvedValueOnce(mockFilePublicLink())
+
+		expect((await uploadAttachment(mockBrowserFile(), noop)).status).toBe("error")
+		expect((await uploadAttachment(mockBrowserFile(), noop)).status).toBe("success")
+		expect(createDirectory).toHaveBeenCalledTimes(3)
+	})
+
+	it("never lets a lookup that resolves after a reset re-seed the memo", async () => {
+		let resolveDotFilen: (dir: Dir) => void = noop
+		createDirectory
+			.mockReturnValueOnce(
+				new Promise<Dir>(resolve => {
+					resolveDotFilen = resolve
+				})
+			)
+			.mockResolvedValueOnce(mockDir("old-uploads"))
+			.mockResolvedValueOnce(mockDir("dot-filen"))
+			.mockResolvedValueOnce(mockDir("new-uploads"))
+		uploadFile.mockResolvedValueOnce(mockSdkFile()).mockResolvedValueOnce(mockSdkFile())
+		createFileLink.mockResolvedValueOnce(mockFilePublicLink()).mockResolvedValueOnce(mockFilePublicLink())
+
+		const stale = uploadAttachment(mockBrowserFile(), noop)
+
+		resetChatUploadsDirCache()
+		resolveDotFilen(mockDir("old-dot-filen"))
+		await stale
+
+		await uploadAttachment(mockBrowserFile(), noop)
+
+		expect(uploadFile.mock.calls.map(call => call[0])).toEqual([testUuid("old-uploads"), testUuid("new-uploads")])
 	})
 
 	it("surfaces the SERVER's own error label, unaltered, when link creation is premium-gated (the FREE e2e account's expected path)", async () => {
 		createDirectory.mockResolvedValueOnce(mockDir("dot-filen")).mockResolvedValueOnce(mockDir("chat-uploads"))
 		uploadFile.mockResolvedValueOnce(mockSdkFile())
-		getFileLinkStatus.mockResolvedValueOnce(undefined)
 		createFileLink.mockRejectedValueOnce({ species: "sdk", label: "Please upgrade to premium.", message: "premium required" })
 
 		const outcome = await uploadAttachment(mockBrowserFile(), noop)

@@ -69,14 +69,6 @@ function mockDirPublicInfo(name: string | null, overrides: { timestamp?: bigint;
 	}
 }
 
-function stubFetch(impl: () => Promise<unknown>): void {
-	vi.stubGlobal("fetch", vi.fn(impl))
-}
-
-function fakeHeadResponse(contentType: string | null, ok = true): unknown {
-	return { ok, headers: { get: (key: string) => (key === "content-type" ? contentType : null) } }
-}
-
 afterEach(() => {
 	vi.clearAllMocks()
 	vi.unstubAllGlobals()
@@ -189,61 +181,38 @@ describe("fetchChatMessageLinks — Filen directory links", () => {
 	})
 })
 
-describe("fetchChatMessageLinks — direct media probe (browser CORS-gated HEAD)", () => {
-	const IMAGE_URL = "https://example.com/photo.jpg"
-
-	it("succeeds when the HEAD probe returns a matching, allowlisted content-type", async () => {
-		stubFetch(() => Promise.resolve(fakeHeadResponse("image/jpeg")))
-
-		const results = await fetchChatMessageLinks([IMAGE_URL])
-
-		expect(results).toEqual([{ url: IMAGE_URL, kind: "media", category: "image", success: true, contentType: "image/jpeg" }])
-	})
-
-	it("degrades to success:false when the content-type doesn't match the url's own extension category", async () => {
-		// e.g. an .jpg url actually serving an html error/login page — never rendered as an image.
-		stubFetch(() => Promise.resolve(fakeHeadResponse("text/html")))
-
-		const results = await fetchChatMessageLinks([IMAGE_URL])
-
-		expect(results).toEqual([{ url: IMAGE_URL, kind: "media", category: "image", success: false }])
-	})
-
-	it("degrades to success:false on a non-ok response", async () => {
-		stubFetch(() => Promise.resolve(fakeHeadResponse("image/jpeg", false)))
-
-		const results = await fetchChatMessageLinks([IMAGE_URL])
-
-		expect(results).toEqual([{ url: IMAGE_URL, kind: "media", category: "image", success: false }])
-	})
-
-	it("degrades to success:false when fetch itself rejects — the common real-world case (no CORS headers on the target)", async () => {
-		stubFetch(() => Promise.reject(new Error("CORS blocked")))
-
-		const results = await fetchChatMessageLinks([IMAGE_URL])
-
-		expect(results).toEqual([{ url: IMAGE_URL, kind: "media", category: "image", success: false }])
-	})
-})
-
 describe("fetchChatMessageLinks — classification passthrough", () => {
-	it("returns [] for a message with no in-scope links (out-of-scope urls never reach the network)", async () => {
-		const results = await fetchChatMessageLinks(["https://youtube.com/watch?v=x"])
+	it("returns [] for a message with no in-scope links, and never fetches a remote image or video url", async () => {
+		const fetchSpy = vi.fn()
+		vi.stubGlobal("fetch", fetchSpy)
+
+		const results = await fetchChatMessageLinks([
+			"https://youtube.com/watch?v=x",
+			"https://example.com/photo.jpg",
+			"https://example.com/clip.mp4"
+		])
 
 		expect(results).toEqual([])
+		expect(fetchSpy).not.toHaveBeenCalled()
 		expect(getLinkedFile).not.toHaveBeenCalled()
 		expect(getDirPublicLinkInfo).not.toHaveBeenCalled()
 	})
 
 	it("resolves multiple distinct links independently (one rejection doesn't affect the others)", async () => {
-		stubFetch(() => Promise.resolve(fakeHeadResponse("image/jpeg")))
 		getLinkedFile.mockRejectedValueOnce(new Error("fail"))
+		getDirPublicLinkInfo.mockResolvedValueOnce(mockDirPublicInfo("Shared Folder", { timestamp: 1n }))
 
-		const results = await fetchChatMessageLinks([FILE_LINK_URL, "https://example.com/photo.jpg"])
+		const results = await fetchChatMessageLinks([FILE_LINK_URL, "https://example.com/photo.jpg", DIR_LINK_URL])
 
 		expect(results).toEqual([
 			{ url: FILE_LINK_URL, kind: "filenLink", link: { kind: "file", linkUuid: UUID, key: KEY_PLAINTEXT }, success: false },
-			{ url: "https://example.com/photo.jpg", kind: "media", category: "image", success: true, contentType: "image/jpeg" }
+			{
+				url: DIR_LINK_URL,
+				kind: "filenLink",
+				link: { kind: "directory", linkUuid: UUID, key: KEY_PLAINTEXT },
+				success: true,
+				data: { type: "directory", name: "Shared Folder", timestamp: 1n }
+			}
 		])
 	})
 })
