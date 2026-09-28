@@ -1,3 +1,5 @@
+import { fnv1a } from "@/lib/fnv1a"
+
 // Per-sender name coloring for group-chat message headers (the Discord signal that distinguishes who
 // said what at a glance). A curated, fixed palette of hex colors — NOT the chart tokens — each verified
 // to clear a WCAG bold-text contrast ratio (>= 3:1) against BOTH the light (#ffffff) and dark
@@ -22,27 +24,14 @@ export const NAME_COLOR_PALETTE: readonly string[] = [
 	"#c0396b" // pink
 ]
 
-// Deterministic FNV-1a string hash → a palette bucket. Same seed always maps to the same color, across
-// reloads and sessions (the seed is the stable numeric senderId, not a mutable nickname). Kept unsigned
-// via `>>> 0` so the modulo is always a non-negative index.
-function hashSeed(seed: string): number {
-	let hash = 0x811c9dc5
-
-	for (let i = 0; i < seed.length; i++) {
-		hash ^= seed.charCodeAt(i)
-		hash = Math.imul(hash, 0x01000193)
-	}
-
-	return hash >>> 0
-}
-
-// Resolve a sender's name color. Returns undefined in a 1:1 chat — coloring only carries meaning when
-// there are 3+ possible authors, so a direct conversation keeps the single default foreground color
-// (the caller applies no inline color when this is undefined).
+// Resolve a sender's name color. The seed is the stable numeric senderId, not a mutable nickname, so a
+// sender keeps their color across reloads and sessions. Returns undefined in a 1:1 chat — coloring only
+// carries meaning when there are 3+ possible authors, so a direct conversation keeps the single default
+// foreground color (the caller applies no inline color when this is undefined).
 export function senderNameColor(seed: string, oneToOne: boolean): string | undefined {
 	if (oneToOne) {
 		return undefined
 	}
 
-	return NAME_COLOR_PALETTE[hashSeed(seed) % NAME_COLOR_PALETTE.length]
+	return NAME_COLOR_PALETTE[fnv1a(seed) % NAME_COLOR_PALETTE.length]
 }
