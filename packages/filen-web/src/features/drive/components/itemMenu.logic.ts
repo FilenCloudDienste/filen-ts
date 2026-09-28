@@ -1,7 +1,7 @@
 import { type LucideIcon } from "lucide-react"
 import { ACTION_DEFS } from "@/features/drive/lib/actionDefs"
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
-import { canMoveVariant, type DriveVariant } from "@/features/drive/lib/preferences"
+import { canMoveVariant, canWriteVariant, type DriveVariant } from "@/features/drive/lib/preferences"
 import { canShareVariant, isReadOnlySharedVariant } from "@/features/drive/lib/share/gating"
 import { buildPublicLinkUrl } from "@/features/drive/components/linkDialog.logic"
 import { resolveDriveNavigationTarget } from "@/features/drive/lib/navigate"
@@ -114,6 +114,13 @@ export function canOpenItem(item: DriveItem, variant: DriveVariant): boolean {
 	}
 
 	return canPreview(item, variant) && !(variant === "trash" && previewType(item) === "audio")
+}
+
+// Whether the item is a directory things can be created in, uploaded into or pasted into from this
+// listing — the same gate a file dropped on the row uploads by. Offline doesn't count against it: the
+// menu shows those entries disabled then.
+export function canWriteIntoItem(item: DriveItem, variant: DriveVariant): boolean {
+	return asDirectoryOrFile(item).type === "directory" && !item.data.undecryptable && canWriteVariant(variant, item.data.uuid)
 }
 
 function openDescriptor(item: DriveItem): ItemActionDescriptor {

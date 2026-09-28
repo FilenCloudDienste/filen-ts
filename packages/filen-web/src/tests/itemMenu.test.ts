@@ -54,6 +54,7 @@ vi.mock("@/features/drive/lib/saveDownload", async importOriginal => {
 import {
 	applyOfflineGate,
 	canOpenItem,
+	canWriteIntoItem,
 	driveItemActions,
 	resolveCopyLinkAction,
 	startItemDownload,
@@ -748,6 +749,22 @@ describe("driveItemActions — Open (listing rows and tiles only)", () => {
 			icon: EyeIcon,
 			run: "direct"
 		})
+	})
+})
+
+describe("canWriteIntoItem (the New submenu and a directory row's Paste)", () => {
+	it("holds for a decryptable directory wherever the listing can write into it", () => {
+		expect(canWriteIntoItem(dirItem(), "drive")).toBe(true)
+		expect(canWriteIntoItem(sharedRootDirItem(), "sharedOut")).toBe(true)
+	})
+
+	it("never holds for a file, an undecryptable directory, or a listing without writes", () => {
+		expect(canWriteIntoItem(fileItem(), "drive")).toBe(false)
+		expect(canWriteIntoItem(dirItem({ meta: { type: "encrypted", data: "ciphertext" } }), "drive")).toBe(false)
+
+		for (const variant of ["recents", "favorites", "trash", "links", "sharedIn"] as const) {
+			expect(canWriteIntoItem(dirItem(), variant)).toBe(false)
+		}
 	})
 })
 

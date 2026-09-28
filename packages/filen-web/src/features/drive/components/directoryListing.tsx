@@ -80,6 +80,7 @@ import { useMarqueeSelection } from "@/features/drive/hooks/useMarqueeSelection"
 import { useClickAwayDeselect } from "@/features/drive/hooks/useClickAwayDeselect"
 import { useDriveDialogHost } from "@/features/drive/hooks/useDriveDialogHost"
 import { useDriveClipboard } from "@/features/drive/hooks/useDriveClipboard"
+import { useDirectoryDestination } from "@/features/drive/hooks/useDirectoryDestination"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { Spinner } from "@/components/ui/spinner"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
@@ -215,6 +216,16 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 			selectedItems: reconciledSelectedItems,
 			hiddenNoticeApplies: hideHidden
 		})
+
+	// What the empty-space menu and every directory row's New submenu create or upload into. Only offline
+	// disables its pickers: the current directory may not be writable while its rows are (a sharedOut
+	// root), and each menu gates its own entries.
+	const destination = useDirectoryDestination({
+		disabled: !isOnline,
+		openPreview,
+		hiddenNotice: hideHidden,
+		testIdPrefix: "drive-listing-upload"
+	})
 
 	const { setScrollElement, scrollElement, columns, listVirtualizer, gridVirtualizer, activeVirtualizer, registerRef, itemRefs } =
 		useDriveVirtualizer(sortedItems, effectiveViewMode)
@@ -596,15 +607,13 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	}
 
 	// Right-clicking the listing's own empty space — between tiles, below the last row, an empty
-	// directory's placeholder — opens the toolbar's upload menu there and drops the selection, as a
-	// file manager's background menu does. Rows and tiles keep their own item menu.
+	// directory's placeholder — opens what the directory offers as a destination (destinationMenu.tsx) and
+	// drops the selection, as a file manager's background menu does. Rows and tiles keep their own item menu.
 	function withBackgroundMenu(surface: ReactElement): ReactNode {
 		return (
 			<UploadContextMenu
-				parentUuid={uuid}
+				actions={destination.actionsFor(uuid)}
 				disabled={writeDisabled}
-				openPreview={openPreview}
-				hiddenNotice={hideHidden}
 				paste={paste}
 				onOpen={clearSelection}
 				render={surface}
@@ -741,6 +750,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 												onCursorMove={setCursor}
 												onOpen={handleOpen}
 												onItemAction={handleItemAction}
+												destinationActions={destination.actionsFor}
 												onBulkAction={handleBulkDialogAction}
 												registerRef={registerRef}
 											/>
@@ -788,6 +798,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 														onCursorMove={setCursor}
 														onOpen={handleOpen}
 														onItemAction={handleItemAction}
+														destinationActions={destination.actionsFor}
 														onBulkAction={handleBulkDialogAction}
 														registerRef={registerRef}
 													/>
@@ -985,6 +996,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 					) : null}
 				</ListingDropSurface>
 			</UploadDropzone>
+			{destination.host}
 			{renderActiveDialog()}
 		</>
 	)

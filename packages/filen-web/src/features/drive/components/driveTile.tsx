@@ -11,7 +11,8 @@ import { canDragVariant } from "@/features/drive/lib/dnd.logic"
 import { buildDragSourceProps } from "@/features/drive/lib/dnd"
 import { type ItemActionDialogKind } from "@/features/drive/components/itemMenu.logic"
 import { type BulkDialogActionKind } from "@/features/drive/components/bulkActionBar.logic"
-import { DriveContextMenuContent, DriveDropdownMenuContent } from "@/features/drive/components/itemMenu"
+import { DriveContextMenuContent, DriveDropdownMenuContent, type ItemDestination } from "@/features/drive/components/itemMenu"
+import { type DestinationActions } from "@/features/drive/components/destinationMenu"
 import { DriveBulkContextMenuContent } from "@/features/drive/components/bulkMenu"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import { useDriveClipboardStore } from "@/features/drive/store/useDriveClipboardStore"
@@ -45,6 +46,8 @@ export interface DriveTileProps {
 	onCursorMove: (index: number) => void
 	onOpen: (index: number) => void
 	onItemAction: (kind: ItemActionDialogKind, item: DriveItem) => void
+	// The listing's create/upload host (useDirectoryDestination), for a directory tile's New submenu.
+	destinationActions: (uuid: string | null) => DestinationActions
 	onBulkAction: (kind: BulkDialogActionKind) => void
 	registerRef: (index: number, el: HTMLDivElement | null) => void
 }
@@ -65,6 +68,7 @@ export function DriveTile({
 	onCursorMove,
 	onOpen,
 	onItemAction,
+	destinationActions,
 	onBulkAction,
 	registerRef
 }: DriveTileProps) {
@@ -76,10 +80,13 @@ export function DriveTile({
 	// See DriveRow's identical derivation.
 	const searchHit = searchParentPath !== undefined && searchParentPath.length > 0
 	const pathUuids = splatToUuids(splat)
+	const targetAncestry = [...pathUuids, item.data.uuid]
+	// ⌘V pastes into the listing on screen, not into this tile, so the tile's Paste shows no shortcut.
+	const destination: ItemDestination = { actionsFor: destinationActions, ancestry: targetAncestry, pasteShortcut: false }
 	const springable = asDirectoryOrFile(item).type === "directory" && !item.data.undecryptable
 	const drop = useDriveDropTarget({
 		targetUuid: item.data.uuid,
-		targetAncestry: [...pathUuids, item.data.uuid],
+		targetAncestry,
 		routeChain: { parent: item.data.parent },
 		targetName: name,
 		// Internal drags: owned My Drive directories only.
@@ -254,6 +261,7 @@ export function DriveTile({
 									onOpen={() => {
 										onOpen(index)
 									}}
+									destination={destination}
 								/>
 							</DropdownMenu>
 						</div>
@@ -289,6 +297,7 @@ export function DriveTile({
 					onOpen={() => {
 						onOpen(index)
 					}}
+					destination={destination}
 				/>
 			)}
 		</ContextMenu>

@@ -14,7 +14,7 @@
 // components later. "directory" never "folder" — binding across every key here.
 export const drive = {
 	// ── Toolbar ──────────────────────────────────────────────────────────────
-	/** Drive toolbar — button opening the new/upload menu */
+	/** Directory item menu — submenu holding New directory, New text file, Upload files and Upload directory for that directory */
 	driveNew: "New",
 	/** Drive toolbar — search input placeholder/aria-label, shared by every listing variant: the
 	 * cache-backed recursive search on "drive" itself, and the local name filter on every other variant

@@ -89,7 +89,9 @@ vi.mock("@/components/loadingState", () => ({ LoadingState: () => null }))
 vi.mock("@/features/drive/components/emptyState", () => ({ EmptyState: () => null }))
 vi.mock("@/features/drive/components/newDirectory", () => ({
 	NewDirectory: (props: { disabled?: boolean }) =>
-		createElement("div", { "data-testid": "new-directory", "data-disabled": String(props.disabled === true) })
+		createElement("div", { "data-testid": "new-directory", "data-disabled": String(props.disabled === true) }),
+	// The listing's destination host mounts its name dialog; closed, it renders nothing.
+	NewDirectoryDialog: () => null
 }))
 vi.mock("@/features/drive/components/uploadMenu", () => ({
 	UploadMenu: (props: { disabled?: boolean }) =>

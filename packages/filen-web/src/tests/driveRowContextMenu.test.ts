@@ -3,7 +3,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { render, cleanup, fireEvent, screen, act } from "@testing-library/react"
 import { createElement } from "react"
-import type { Dir, UuidStr } from "@filen/sdk-rs"
+import type { Dir, File, UuidStr } from "@filen/sdk-rs"
 import "@/lib/i18n"
 
 // The row/tile pull the SDK surface in transitively (item menu -> actions); a Vite `?worker` import is
@@ -57,6 +57,24 @@ function dirItem(label: string): DriveItem {
 	return narrowItem(dir)
 }
 
+function fileItem(): DriveItem {
+	const file: File = {
+		uuid: testUuid("file"),
+		stableUUID: undefined,
+		parent: testUuid("parent"),
+		size: 1n,
+		favorited: false,
+		region: "de-1",
+		bucket: "filen-1",
+		timestamp: 1_700_000_000_000n,
+		chunks: 1n,
+		canMakeThumbnail: false,
+		meta: { type: "decoded", data: { name: "notes.txt", mime: "text/plain", modified: 0n, size: 1n, key: "key", version: 2 } }
+	}
+
+	return narrowItem(file)
+}
+
 const ROW_INDEX = 4
 
 function sharedProps(
@@ -78,6 +96,12 @@ function sharedProps(
 		onCursorMove,
 		onOpen: () => undefined,
 		onItemAction: () => undefined,
+		destinationActions: () => ({
+			newDirectory: () => undefined,
+			newTextFile: () => undefined,
+			pickFiles: () => undefined,
+			pickDirectory: () => undefined
+		}),
 		onBulkAction: () => undefined,
 		registerRef: () => undefined,
 		...handlers
@@ -143,6 +167,66 @@ describe("right-click retarget", () => {
 
 		expect(useDriveStore.getState().selectedItems).toEqual([])
 		expect(onCursorMove).not.toHaveBeenCalled()
+	})
+})
+
+describe("New submenu", () => {
+	function renderWith(item: DriveItem, variant: DriveRowProps["variant"], destinationActions: DriveRowProps["destinationActions"]) {
+		return render(
+			createElement(DriveRow, {
+				...sharedProps(item, false, () => undefined),
+				variant,
+				destinationActions,
+				style: {},
+				directorySizes: new Map()
+			})
+		)
+	}
+
+	function labels(): string[] {
+		return screen.getAllByRole("menuitem").map(entry => entry.textContent.trim())
+	}
+
+	it("sits under Open, beside Paste, on a directory row, and points each entry at that directory", async () => {
+		const actions = { newDirectory: vi.fn(), newTextFile: vi.fn(), pickFiles: vi.fn(), pickDirectory: vi.fn() }
+		const destinationActions = vi.fn(() => actions)
+		const item = dirItem("target")
+		const { container } = renderWith(item, "drive", destinationActions)
+
+		rightClick(container)
+
+		// No shortcut on the row's Paste: mod+v pastes into the listing on screen, not into this row.
+		expect(labels().slice(0, 3)).toEqual(["Open", "New", "Paste"])
+
+		const trigger = screen.getByRole("menuitem", { name: "New" })
+
+		await act(async () => {
+			trigger.focus()
+			fireEvent.keyDown(trigger, { key: "ArrowRight" })
+			await Promise.resolve()
+		})
+		fireEvent.click(screen.getByRole("menuitem", { name: "Upload files" }))
+
+		expect(destinationActions).toHaveBeenCalledWith(item.data.uuid)
+		expect(actions.pickFiles).toHaveBeenCalledOnce()
+	})
+
+	it("is absent where the directory can never be written into, and on files", () => {
+		const destinationActions = vi.fn()
+
+		for (const variant of ["favorites", "recents", "trash", "links", "sharedIn"] as const) {
+			const { container } = renderWith(dirItem("target"), variant, destinationActions)
+
+			rightClick(container)
+			expect(labels()).not.toContain("New")
+			cleanup()
+		}
+
+		const { container } = renderWith(fileItem(), "drive", destinationActions)
+
+		rightClick(container)
+		expect(labels()).not.toContain("New")
+		expect(labels()).not.toContain("Paste")
 	})
 })
 

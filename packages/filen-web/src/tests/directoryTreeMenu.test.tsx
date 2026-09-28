@@ -101,8 +101,10 @@ const REPORT = narrowItem({
 	meta: { type: "decoded", data: { name: "report.txt", mime: "text/plain", modified: 0n, size: 1n, key: "key", version: 2 } }
 } satisfies File)
 
-// The destination entries a tree node's menu opens with, ahead of the row's own.
-const TARGET_ENTRIES = ["Open", "New directory", "Upload files", "Upload directory", "New text file", "Paste drive.paste"]
+// The Cloud Drive root's menu: it is no item, so Open and what it offers as a destination, flat.
+const ROOT_ENTRIES = ["Open", "New directory", "New text file", "Upload files", "Upload directory", "Paste drive.paste"]
+// A node's New submenu.
+const NEW_ENTRIES = ["New directory", "New text file", "Upload files", "Upload directory"]
 
 const LISTINGS = new Map<string | null, DriveItem[]>([
 	[null, [DOCS, REPORT]],
@@ -175,6 +177,16 @@ function entry(name: string): HTMLElement {
 	return match
 }
 
+async function openSubmenu(name: string): Promise<void> {
+	const trigger = screen.getByRole("menuitem", { name })
+
+	await act(async () => {
+		trigger.focus()
+		fireEvent.keyDown(trigger, { key: "ArrowRight" })
+		await Promise.resolve()
+	})
+}
+
 function isDisabled(element: HTMLElement): boolean {
 	return element.hasAttribute("data-disabled")
 }
@@ -202,7 +214,7 @@ afterEach(() => {
 })
 
 describe("sidebar tree menu", () => {
-	it("opens on a node with the destination entries, then the entries its listing row offers bar its Open", async () => {
+	it("opens on a node with exactly the entries its listing row offers, Paste with the tree's own shortcut", async () => {
 		render(
 			createElement(DriveRow, {
 				item: DOCS,
@@ -219,6 +231,12 @@ describe("sidebar tree menu", () => {
 				onCursorMove: () => undefined,
 				onOpen: () => undefined,
 				onItemAction: () => undefined,
+				destinationActions: () => ({
+					newDirectory: () => undefined,
+					newTextFile: () => undefined,
+					pickFiles: () => undefined,
+					pickDirectory: () => undefined
+				}),
 				onBulkAction: () => undefined,
 				registerRef: () => undefined
 			})
@@ -230,17 +248,38 @@ describe("sidebar tree menu", () => {
 		renderTree()
 		await openMenuOn(rowButton("Docs"))
 
-		// The destination entries lead with the tree's own Open, so the row's is not repeated.
-		expect(rowEntries[0]).toBe("Open")
+		// The listing's mod+v pastes into the listing on screen, the tree's into the focused node.
+		expect(rowEntries.slice(0, 3)).toEqual(["Open", "New", "Paste"])
 		expect(rowEntries).toContain("Rename")
-		expect(menuEntries()).toEqual([...TARGET_ENTRIES, ...rowEntries.slice(1)])
+		expect(menuEntries()).toEqual(rowEntries.map(label => (label === "Paste" ? "Paste drive.paste" : label)))
+	})
+
+	it("collapses a node's create and upload entries into its New submenu", async () => {
+		renderTree()
+		await openMenuOn(rowButton("Docs"))
+		await openSubmenu("New")
+
+		expect(menuEntries().filter(label => NEW_ENTRIES.includes(label))).toEqual(NEW_ENTRIES)
+	})
+
+	it("disables the New submenu and the root's create and upload entries offline", async () => {
+		onlineManager.setOnline(false)
+		renderTree()
+		const root = rowButton("Cloud Drive")
+
+		await openMenuOn(rowButton("Docs"))
+		expect(isDisabled(screen.getByRole("menuitem", { name: "New" }))).toBe(true)
+
+		await openMenuOn(root)
+		expect(NEW_ENTRIES.map(label => isDisabled(entry(label)))).toEqual([true, true, true, true])
+		onlineManager.setOnline(true)
 	})
 
 	it("opens on the Cloud Drive root with the destination entries alone", async () => {
 		renderTree()
 		await openMenuOn(rowButton("Cloud Drive"))
 
-		expect(menuEntries()).toEqual(TARGET_ENTRIES)
+		expect(menuEntries()).toEqual(ROOT_ENTRIES)
 	})
 
 	it("keeps the browser's own menu off every row", async () => {
@@ -347,6 +386,7 @@ describe("sidebar tree menu", () => {
 		expect(document.querySelectorAll('input[type="file"]')).toHaveLength(0)
 
 		await openMenuOn(docs)
+		await openSubmenu("New")
 		expect(screen.getByTestId("drive-tree-upload-files-input")).toBeTruthy()
 		expect(screen.getByTestId("drive-tree-upload-directory-input")).toBeTruthy()
 		expect(screen.queryByTestId("drive-upload-directory-input")).toBeNull()

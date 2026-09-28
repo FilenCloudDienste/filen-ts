@@ -3,17 +3,12 @@ import { useTranslation } from "react-i18next"
 import { UploadIcon } from "lucide-react"
 import { isEmptySpaceTarget } from "@/features/drive/lib/clickAway.logic"
 import { type PreviewSource } from "@/features/preview/lib/previewSource"
-import { useUploadMenuActions, type UploadMenuActions } from "@/features/drive/hooks/useUploadMenuActions"
+import { useUploadMenuActions } from "@/features/drive/hooks/useUploadMenuActions"
+import { DestinationEntries, type DestinationActions } from "@/features/drive/components/destinationMenu"
+import { CONTEXT_TREE_MENU_FAMILY, DROPDOWN_TREE_MENU_FAMILY } from "@/features/drive/components/directoryTreeSubmenu"
 import { Button } from "@/components/ui/button"
-import {
-	DropdownMenu,
-	DropdownMenuContent,
-	DropdownMenuItem,
-	DropdownMenuSeparator,
-	DropdownMenuTrigger
-} from "@/components/ui/dropdown-menu"
-import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from "@/components/ui/context-menu"
-import { Kbd } from "@/lib/keymap/kbd"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/components/ui/context-menu"
 import type { DrivePasteAction } from "@/features/drive/hooks/useDriveClipboard"
 
 export interface UploadMenuProps {
@@ -37,65 +32,14 @@ export interface UploadMenuProps {
 	paste?: DrivePasteAction | undefined
 }
 
-// Base UI's DropdownMenu and ContextMenu are separate Root families whose rows are not
-// interchangeable across triggers — see itemMenu.tsx's identical split.
-interface UploadMenuFamily {
-	Item: typeof DropdownMenuItem
-	Separator: typeof DropdownMenuSeparator
-}
-
-const DROPDOWN_FAMILY: UploadMenuFamily = {
-	Item: DropdownMenuItem,
-	Separator: DropdownMenuSeparator
-}
-
-const CONTEXT_FAMILY: UploadMenuFamily = {
-	Item: ContextMenuItem,
-	Separator: ContextMenuSeparator
-}
-
-// The one entry list both surfaces render. "New text file" rides the same trigger/gating as the two
-// upload pickers rather than a separate button, since it's the same "put a new file into this
-// directory" family (mobile nests it under its own create menu for the identical reason).
-function UploadMenuEntries({
-	actions,
-	family,
-	paste
-}: {
-	actions: UploadMenuActions
-	family: UploadMenuFamily
-	paste: DrivePasteAction | undefined
-}) {
-	const { t } = useTranslation("drive")
-	const { Item, Separator } = family
-
-	return (
-		<>
-			<Item onClick={actions.pickFiles}>{t("driveUploadFiles")}</Item>
-			<Item onClick={actions.pickDirectory}>{t("driveUploadDirectory")}</Item>
-			<Item onClick={actions.newTextFile}>{t("driveNewTextFile")}</Item>
-			{paste === undefined ? null : (
-				<>
-					<Separator />
-					<Item
-						disabled={!paste.enabled}
-						onClick={paste.run}
-					>
-						{t("driveClipboardPaste")}
-						<span className="ml-auto pl-4">
-							<Kbd action="drive.paste" />
-						</span>
-					</Item>
-					<Item
-						disabled={!paste.clearable}
-						onClick={paste.clear}
-					>
-						{t("driveClipboardClear")}
-					</Item>
-				</>
-			)}
-		</>
-	)
+// The listing's paste: its mod+v pastes into the same directory, and its menus alone offer Clear.
+function pasteEntries(paste: DrivePasteAction | undefined) {
+	return paste === undefined
+		? {}
+		: {
+				paste: { enabled: paste.enabled, run: paste.run, shortcut: true },
+				clear: { enabled: paste.clearable, run: paste.clear }
+			}
 }
 
 // Toolbar entry point for starting an upload.
@@ -128,10 +72,11 @@ export function UploadMenu({ parentUuid, disabled = false, openPreview, offline 
 					align="end"
 					className="w-max max-w-72 min-w-(--anchor-width)"
 				>
-					<UploadMenuEntries
+					{/* No New directory: the toolbar has its own button beside this one. */}
+					<DestinationEntries
+						family={DROPDOWN_TREE_MENU_FAMILY}
 						actions={actions}
-						family={DROPDOWN_FAMILY}
-						paste={paste}
+						{...pasteEntries(paste)}
 					/>
 				</DropdownMenuContent>
 			</DropdownMenu>
@@ -139,7 +84,11 @@ export function UploadMenu({ parentUuid, disabled = false, openPreview, offline 
 	)
 }
 
-export interface UploadContextMenuProps extends Omit<UploadMenuProps, "offline"> {
+export interface UploadContextMenuProps {
+	// The listing's own destination host (useDirectoryDestination), pointed at the directory on screen.
+	actions: DestinationActions
+	disabled?: boolean
+	paste?: DrivePasteAction | undefined
 	// The listing surface whose empty space opens the menu. Merged onto as the trigger rather than
 	// wrapped, so the listbox keeps its own element, ref, focus and scroll container.
 	render: ReactElement
@@ -152,17 +101,7 @@ export interface UploadContextMenuProps extends Omit<UploadMenuProps, "offline">
 // the surface are passed over: a row's own ContextMenu stops the event before it gets here, and
 // anything else (an empty state's buttons, a portalled popup bubbling through the React tree) is
 // declined via preventBaseUIHandler.
-export function UploadContextMenu({
-	parentUuid,
-	disabled = false,
-	openPreview,
-	hiddenNotice = false,
-	paste,
-	render,
-	onOpen
-}: UploadContextMenuProps) {
-	const actions = useUploadMenuActions({ parentUuid, disabled, openPreview, hiddenNotice })
-
+export function UploadContextMenu({ actions, disabled = false, paste, render, onOpen }: UploadContextMenuProps) {
 	function isEmptySpace(event: SyntheticEvent<HTMLDivElement>, clientX: number, clientY: number): boolean {
 		const bounds = event.currentTarget.getBoundingClientRect()
 
@@ -170,48 +109,45 @@ export function UploadContextMenu({
 	}
 
 	return (
-		<>
-			{actions.host}
-			<ContextMenu
-				disabled={disabled}
-				onOpenChange={open => {
-					if (open) {
-						onOpen()
+		<ContextMenu
+			disabled={disabled}
+			onOpenChange={open => {
+				if (open) {
+					onOpen()
+				}
+			}}
+		>
+			<ContextMenuTrigger
+				render={render}
+				onContextMenu={event => {
+					if (isEmptySpace(event, event.clientX, event.clientY)) {
+						return
+					}
+
+					event.preventBaseUIHandler()
+
+					// Keeps the event from Base UI's document-level listener, which would still cancel the
+					// browser's own menu over a control here. Portalled targets are left alone: their
+					// own menu's listener must still see them.
+					if (event.target instanceof Node && event.currentTarget.contains(event.target)) {
+						event.stopPropagation()
 					}
 				}}
-			>
-				<ContextMenuTrigger
-					render={render}
-					onContextMenu={event => {
-						if (isEmptySpace(event, event.clientX, event.clientY)) {
-							return
-						}
+				onTouchStart={event => {
+					const touch = event.touches[0]
 
+					if (!touch || !isEmptySpace(event, touch.clientX, touch.clientY)) {
 						event.preventBaseUIHandler()
-
-						// Keeps the event from Base UI's document-level listener, which would still cancel the
-						// browser's own menu over a control here. Portalled targets are left alone: their
-						// own menu's listener must still see them.
-						if (event.target instanceof Node && event.currentTarget.contains(event.target)) {
-							event.stopPropagation()
-						}
-					}}
-					onTouchStart={event => {
-						const touch = event.touches[0]
-
-						if (!touch || !isEmptySpace(event, touch.clientX, touch.clientY)) {
-							event.preventBaseUIHandler()
-						}
-					}}
+					}
+				}}
+			/>
+			<ContextMenuContent>
+				<DestinationEntries
+					family={CONTEXT_TREE_MENU_FAMILY}
+					actions={actions}
+					{...pasteEntries(paste)}
 				/>
-				<ContextMenuContent>
-					<UploadMenuEntries
-						actions={actions}
-						family={CONTEXT_FAMILY}
-						paste={paste}
-					/>
-				</ContextMenuContent>
-			</ContextMenu>
-		</>
+			</ContextMenuContent>
+		</ContextMenu>
 	)
 }

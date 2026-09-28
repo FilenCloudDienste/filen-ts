@@ -38,19 +38,19 @@ function surface() {
 
 function renderContextMenu(options: { disabled?: boolean; paste?: DrivePasteAction } = {}) {
 	const onOpen = vi.fn()
+	const actions = { newDirectory: vi.fn(), newTextFile: vi.fn(), pickFiles: vi.fn(), pickDirectory: vi.fn() }
 
 	render(
 		createElement(UploadContextMenu, {
-			parentUuid: null,
+			actions,
 			disabled: options.disabled ?? false,
-			openPreview: vi.fn(),
 			paste: options.paste,
 			onOpen,
 			render: surface()
 		})
 	)
 
-	return { onOpen }
+	return { onOpen, actions }
 }
 
 // fireEvent returns only whether the default survived; the event itself is what shows whether the
@@ -70,7 +70,7 @@ function menuLabels(): string[] {
 }
 
 describe("UploadContextMenu", () => {
-	it("opens on the surface's empty space with exactly the toolbar menu's entries", () => {
+	it("opens on the surface's empty space with the toolbar menu's entries plus New directory", () => {
 		render(createElement(UploadMenu, { parentUuid: null, openPreview: vi.fn() }))
 		fireEvent.click(screen.getByRole("button", { name: "Upload" }))
 
@@ -82,9 +82,26 @@ describe("UploadContextMenu", () => {
 
 		rightClick(screen.getByTestId("blank"))
 
-		expect(toolbarEntries).toEqual(["Upload files", "Upload directory", "New text file"])
-		expect(menuLabels()).toEqual(toolbarEntries)
+		// The toolbar has its own New directory button beside its Upload menu.
+		expect(toolbarEntries).toEqual(["New text file", "Upload files", "Upload directory"])
+		expect(menuLabels()).toEqual(["New directory", ...toolbarEntries])
 		expect(onOpen).toHaveBeenCalledOnce()
+	})
+
+	it("runs each entry against the directory the listing pointed it at", () => {
+		const { actions } = renderContextMenu()
+
+		for (const [label, action] of [
+			["New directory", actions.newDirectory],
+			["New text file", actions.newTextFile],
+			["Upload files", actions.pickFiles],
+			["Upload directory", actions.pickDirectory]
+		] as const) {
+			rightClick(screen.getByTestId("blank"))
+			fireEvent.click(screen.getByRole("menuitem", { name: label }))
+
+			expect(action).toHaveBeenCalledOnce()
+		}
 	})
 
 	it("opens on the surface element itself (the space below the last row)", () => {
@@ -92,7 +109,7 @@ describe("UploadContextMenu", () => {
 
 		rightClick(screen.getByTestId("surface"))
 
-		expect(menuLabels()).toHaveLength(3)
+		expect(menuLabels()).toHaveLength(4)
 		expect(onOpen).toHaveBeenCalledOnce()
 	})
 
@@ -126,7 +143,7 @@ describe("UploadContextMenu", () => {
 
 		const toolbarPaste = screen.getByRole("menuitem", { name: /^Paste/ })
 
-		expect(menuLabels()).toEqual(["Upload files", "Upload directory", "New text file", "Paste drive.paste", "Clear clipboard"])
+		expect(menuLabels()).toEqual(["New text file", "Upload files", "Upload directory", "Paste drive.paste", "Clear clipboard"])
 		expect(toolbarPaste.getAttribute("aria-disabled")).toBe("true")
 		expect(screen.getByRole("menuitem", { name: "Clear clipboard" }).getAttribute("aria-disabled")).toBe("true")
 

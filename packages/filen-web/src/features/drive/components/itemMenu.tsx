@@ -1,7 +1,8 @@
-import { createElement, Fragment, type ReactNode } from "react"
+import { createElement, Fragment } from "react"
 import { useTranslation } from "react-i18next"
 import { useNavigate } from "@tanstack/react-router"
 import { toast } from "sonner"
+import { driveItemName } from "@filen/shared"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { toggleFavorite, restoreItems } from "@/features/drive/lib/actions"
@@ -15,6 +16,7 @@ import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import { useIsOnline } from "@/lib/useIsOnline"
 import {
 	applyOfflineGate,
+	canWriteIntoItem,
 	driveItemActions,
 	resolveCopyLinkAction,
 	startItemDownload,
@@ -29,6 +31,7 @@ import {
 } from "@/features/drive/components/directoryTreeSubmenu"
 import { MoveSubmenu } from "@/features/drive/components/moveSubmenu"
 import { CopySubmenu } from "@/features/drive/components/copySubmenu"
+import { DirectoryDestinationEntries, type DestinationActions } from "@/features/drive/components/destinationMenu"
 import { ContextMenuContent } from "@/components/ui/context-menu"
 import { DropdownMenuContent } from "@/components/ui/dropdown-menu"
 
@@ -50,12 +53,21 @@ export interface ItemMenuContentProps {
 	// True for a search hit whose parent is not the directory on screen — the only case
 	// "Open containing directory" is offered for. Omitted by every non-listing caller.
 	searchHit?: boolean | undefined
-	// Entries above the item's own, closed by a separator — the sidebar tree's actions on the directory
-	// as a destination (open, create, upload, paste). Omitted by every row/tile caller.
-	leading?: ReactNode
-	// The listing's own open (the row's double-click). Present, it puts Open at the top for any item that
-	// opens; the preview overlay and the sidebar tree omit it.
+	// The surface's own open (a row's double-click, a tree node's navigation). Present, it puts Open at
+	// the top for any item that opens; the preview overlay omits it.
 	onOpen?: (() => void) | undefined
+	// The surface's create/upload host. Present, a directory the variant can write into gets a New
+	// submenu and Paste right under Open; the preview overlay omits it.
+	destination?: ItemDestination | undefined
+}
+
+export interface ItemDestination {
+	actionsFor: (uuid: string | null) => DestinationActions
+	// The directory's root-to-directory uuid chain as far as the route proves it, itself last.
+	ancestry: readonly string[]
+	// mod+v pastes into this directory where the menu was opened (a focused tree node), not into the
+	// listing on screen (a row).
+	pasteShortcut: boolean
 }
 
 // Groups the flat descriptor list for readability: a rule after Open, before the reference/reveal
@@ -79,8 +91,8 @@ function ItemMenuEntries({
 	onRestored,
 	hiddenActionIds,
 	searchHit,
-	leading,
 	onOpen,
+	destination,
 	family
 }: ItemMenuContentProps & { family: DirectoryTreeMenuFamily }) {
 	const { t } = useTranslation(["drive", "common"])
@@ -91,6 +103,7 @@ function ItemMenuEntries({
 		isOnline
 	).filter(descriptor => !hiddenActionIds?.has(descriptor.id))
 	const { Item, Separator } = family
+	const writableDestination = destination !== undefined && canWriteIntoItem(item, variant) ? destination : undefined
 
 	async function runDirect(descriptor: Extract<ItemActionDescriptor, { run: "direct" }>): Promise<void> {
 		// Checked FIRST, before any `await` below — startItemDownload's FSA save picker needs this
@@ -174,12 +187,6 @@ function ItemMenuEntries({
 
 	return (
 		<>
-			{leading === undefined ? null : (
-				<>
-					{leading}
-					<Separator />
-				</>
-			)}
 			{descriptors.map((descriptor, index) => (
 				<Fragment key={descriptor.id}>
 					{index > 0 && (SEPARATOR_BEFORE.has(descriptor.id) || descriptors[index - 1]?.id === "open") ? <Separator /> : null}
@@ -238,6 +245,14 @@ function ItemMenuEntries({
 							{t(descriptor.labelKey)}
 						</Item>
 					)}
+					{descriptor.id === "open" && writableDestination !== undefined ? (
+						<DirectoryDestinationEntries
+							family={family}
+							directory={{ variant, uuid: item.data.uuid, ancestry: writableDestination.ancestry, name: driveItemName(item) }}
+							actions={writableDestination.actionsFor(item.data.uuid)}
+							pasteShortcut={writableDestination.pasteShortcut}
+						/>
+					) : null}
 				</Fragment>
 			))}
 		</>
@@ -245,7 +260,7 @@ function ItemMenuEntries({
 }
 
 // Right-click surface — rendered inside a per-row/tile <ContextMenu> (see driveRow.tsx/driveTile.tsx)
-// and the sidebar tree's one menu (directoryTreeMenu.tsx).
+// and the sidebar tree's one menu (directoryTreeMenu.tsx), which gives a node exactly its row's menu.
 export function DriveContextMenuContent({
 	item,
 	variant,
@@ -254,8 +269,8 @@ export function DriveContextMenuContent({
 	onRestored,
 	hiddenActionIds,
 	searchHit,
-	leading,
-	onOpen
+	onOpen,
+	destination
 }: ItemMenuContentProps) {
 	return (
 		<ContextMenuContent>
@@ -267,8 +282,8 @@ export function DriveContextMenuContent({
 				onRestored={onRestored}
 				hiddenActionIds={hiddenActionIds}
 				searchHit={searchHit}
-				leading={leading}
 				onOpen={onOpen}
+				destination={destination}
 				family={CONTEXT_TREE_MENU_FAMILY}
 			/>
 		</ContextMenuContent>
@@ -285,7 +300,8 @@ export function DriveDropdownMenuContent({
 	onRestored,
 	hiddenActionIds,
 	searchHit,
-	onOpen
+	onOpen,
+	destination
 }: ItemMenuContentProps) {
 	return (
 		<DropdownMenuContent align="end">
@@ -298,6 +314,7 @@ export function DriveDropdownMenuContent({
 				hiddenActionIds={hiddenActionIds}
 				searchHit={searchHit}
 				onOpen={onOpen}
+				destination={destination}
 				family={DROPDOWN_TREE_MENU_FAMILY}
 			/>
 		</DropdownMenuContent>

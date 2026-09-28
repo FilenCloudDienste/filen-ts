@@ -64,6 +64,12 @@ function renderRow(item: DriveItem, variant: DriveVariant) {
 			onCursorMove: () => undefined,
 			onOpen: () => undefined,
 			onItemAction: () => undefined,
+			destinationActions: () => ({
+				newDirectory: () => undefined,
+				newTextFile: () => undefined,
+				pickFiles: () => undefined,
+				pickDirectory: () => undefined
+			}),
 			onBulkAction: () => undefined,
 			registerRef: () => undefined
 		})

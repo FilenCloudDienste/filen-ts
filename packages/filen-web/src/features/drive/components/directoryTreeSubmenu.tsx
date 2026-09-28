@@ -1,7 +1,8 @@
-import { type MouseEvent, type ReactNode } from "react"
+import { type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { type LucideIcon } from "lucide-react"
 import { useDirectoryTreeChildrenQuery } from "@/features/drive/queries/drive"
+import { stopRowPropagation } from "@/features/drive/lib/rowPropagation"
 import { DirectoryGlyph } from "@/features/drive/components/itemIcon"
 import { Spinner } from "@/components/ui/spinner"
 import {
@@ -83,13 +84,6 @@ export interface DirectoryTreeSubmenuProps extends DirectoryTreeActions {
 	title?: string | undefined
 	// Entries above the tree (e.g. the full destination picker).
 	leading?: ReactNode
-}
-
-// A row's ⋯ dropdown is a React descendant of the row, so clicks in any popup here bubble through the
-// React tree into the row's own select/open handlers (see itemMenu.tsx). Unlike an item, a submenu
-// trigger never closes the menu, so its click and double-click must not reach the row either.
-function stopRowPropagation(event: MouseEvent): void {
-	event.stopPropagation()
 }
 
 // A recursive, hover-to-open submenu over the Cloud Drive directory tree: every level offers the action
