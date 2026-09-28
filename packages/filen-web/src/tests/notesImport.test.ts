@@ -35,6 +35,7 @@ import { queryClient as testQueryClient } from "@/queries/client"
 import { NOTES_QUERY_KEY, notesQueryGet } from "@/features/notes/queries/notes"
 import { noteContentQueryKey } from "@/features/notes/queries/noteContent"
 import { importNoteFromFile } from "@/features/notes/lib/import"
+import { MAX_NOTE_SIZE } from "@/features/notes/hooks/useNoteEditor.logic"
 
 beforeEach(() => {
 	vi.clearAllMocks()
@@ -71,6 +72,14 @@ describe("importNoteFromFile", () => {
 
 		expect(outcome.status).toBe("error")
 		expect(createNoteOp).not.toHaveBeenCalled()
+	})
+
+	it("rejects content past the note size cap WITHOUT creating a note or queueing it", async () => {
+		const outcome = await importNoteFromFile(mockFile("huge.txt", "x".repeat(MAX_NOTE_SIZE + 1)))
+
+		expect(outcome.status).toBe("error")
+		expect(createNoteOp).not.toHaveBeenCalled()
+		expect(enqueueMock).not.toHaveBeenCalled()
 	})
 
 	it("creates the note titled from the file name (extension stripped)", async () => {

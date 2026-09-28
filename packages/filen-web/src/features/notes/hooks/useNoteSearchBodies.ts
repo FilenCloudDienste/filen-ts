@@ -1,6 +1,7 @@
 import { useQueries } from "@tanstack/react-query"
+import { useShallow } from "zustand/shallow"
 import type { Note } from "@filen/sdk-rs"
-import { fetchNoteContentOrThrow, noteContentQueryKey } from "@/features/notes/queries/noteContent"
+import { fetchTrackedNoteContent, noteContentQueryKey } from "@/features/notes/queries/noteContent"
 import useNotesInflightStore, { noteIsEditing } from "@/features/notes/store/useNotesInflight"
 import { noteSearchBodyCandidates, buildNoteBodiesMap } from "@/features/notes/hooks/useNoteSearchBodies.logic"
 
@@ -8,9 +9,9 @@ import { noteSearchBodyCandidates, buildNoteBodiesMap } from "@/features/notes/h
 // fetched at all (noteSearchBodyCandidates' own doc comment), and the whole set stays empty — no
 // queries, no fetches — the instant the search box is blank, so this never runs a single extra request
 // outside an active search. Reuses the EXACT SAME query key/fetcher the note editor's own
-// useNoteContentQuery (noteContent.ts) reads, so a note opened right after a search that matched its
-// body is a cache hit, not a second fetch — and, going the other way, a note already open in the editor
-// (its content already cached) never re-fetches here either.
+// useNoteContentQuery (noteContent.ts) reads, tracked the same way, so a note opened right after a
+// search that matched its body is a cache hit, not a second fetch — and, going the other way, a note
+// already open in the editor (its content already cached) never re-fetches here either.
 //
 // Excludes any note the user is EDITING — a pending outbox entry or an open editor session: firing a
 // fresh read into that SAME cache key mid-edit would advance `dataUpdatedAt` behind the editor's back
@@ -19,15 +20,15 @@ import { noteSearchBodyCandidates, buildNoteBodiesMap } from "@/features/notes/h
 // alone is not that test — a push empties it while the user keeps typing. An edited note simply falls
 // back to its `preview` snippet for the duration — see filterNotesBySearch's own fallback.
 export function useNoteSearchBodies(notes: readonly Note[], search: string): ReadonlyMap<string, string | undefined> {
-	// The whole store, not one slice: the editing test spans both `inflightContent` and `editingSessions`,
-	// and the former already changes identity on every keystroke.
-	const editState = useNotesInflightStore()
-	const candidates = noteSearchBodyCandidates(notes, search).filter(note => !noteIsEditing(editState, note.uuid))
+	// Shallow-compared slice, not the whole store: `inflightContent` changes identity on every keystroke,
+	// but this only changes when a candidate's editing edge flips (and is a stable [] with no search).
+	const searchCandidates = noteSearchBodyCandidates(notes, search)
+	const candidates = useNotesInflightStore(useShallow(state => searchCandidates.filter(note => !noteIsEditing(state, note.uuid))))
 
 	const bodies = useQueries({
 		queries: candidates.map(note => ({
 			queryKey: noteContentQueryKey(note.uuid),
-			queryFn: () => fetchNoteContentOrThrow(note),
+			queryFn: () => fetchTrackedNoteContent(note),
 			staleTime: Infinity
 		})),
 		combine: results => results.map(result => result.data)

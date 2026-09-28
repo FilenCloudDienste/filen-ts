@@ -7,6 +7,7 @@ import { noteContentQueryKey } from "@/features/notes/queries/noteContent"
 import { sync } from "@/features/notes/lib/sync"
 import { retypeNewNote } from "@/features/notes/lib/actions"
 import { detectImportNoteType, sanitizeImportedContent, titleFromFilename } from "@/features/notes/lib/import.logic"
+import { exceedsNoteSizeCap } from "@/features/notes/hooks/useNoteEditor.logic"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { runOp, type ActionOutcome } from "@/lib/actions/outcome"
 
@@ -35,6 +36,15 @@ export async function importNoteFromFile(file: File): Promise<ActionOutcome<Note
 	}
 
 	const content = sanitizeImportedContent(noteType, rawText)
+
+	// The editor's own cap: a push past it is rejected server-side, so the note would stay empty on
+	// every device while this tab's cache showed the text. Checked before anything is created.
+	if (exceedsNoteSizeCap(content)) {
+		const message = i18n.t("notes:noteImportTooLarge")
+
+		return { status: "error", dto: { species: "plain", message, label: message } }
+	}
+
 	const title = titleFromFilename(file.name)
 
 	let note: Note

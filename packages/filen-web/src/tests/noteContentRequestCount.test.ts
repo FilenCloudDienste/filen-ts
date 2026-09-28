@@ -29,6 +29,8 @@ import { ACCOUNT_QUERY_KEY } from "@/queries/account"
 import { NOTES_QUERY_KEY } from "@/features/notes/queries/notes"
 import { noteContentQueryKey, useNoteContentQuery } from "@/features/notes/queries/noteContent"
 import { handleNoteEvent } from "@/features/notes/lib/socketHandlers"
+import { useNoteSearchBodies } from "@/features/notes/hooks/useNoteSearchBodies"
+import useNotesInflightStore from "@/features/notes/store/useNotesInflight"
 import { socketAuthenticated, socketDropped } from "@/lib/sdk/socketSession"
 
 const USER_ID = 7n
@@ -110,6 +112,7 @@ beforeEach(() => {
 	socketAuthenticated()
 	queryClient.setQueryData(ACCOUNT_QUERY_KEY, { id: USER_ID })
 	queryClient.setQueryData(NOTES_QUERY_KEY, NOTES)
+	useNotesInflightStore.setState({ inflightContent: {}, editingSessions: {} })
 	getNoteContent.mockReset()
 	getNoteContent.mockImplementation(note => Promise.resolve(`body ${note.uuid}`))
 })
@@ -244,5 +247,41 @@ describe("note content request counts", () => {
 		await visit(NOTE_A)
 
 		expect(getNoteContent).toHaveBeenCalledTimes(2)
+	})
+
+	it("opening a note whose body a search read reuses that read", async () => {
+		const { unmount } = renderHook(() => useNoteSearchBodies(NOTES, "body"), { wrapper })
+		await drain()
+		unmount()
+
+		expect(getNoteContent).toHaveBeenCalledTimes(NOTES.length)
+
+		await visit(NOTE_A)
+
+		expect(getNoteContent).toHaveBeenCalledTimes(NOTES.length)
+	})
+})
+
+describe("useNoteSearchBodies", () => {
+	it("doesn't re-render on outbox writes that flip no candidate's editing state", async () => {
+		let renders = 0
+		renderHook(
+			({ search }: { search: string }) => {
+				renders++
+
+				return useNoteSearchBodies(NOTES, search)
+			},
+			{ wrapper, initialProps: { search: "" } }
+		)
+		await drain()
+		const settled = renders
+
+		act(() => {
+			for (let i = 0; i < 5; i++) {
+				useNotesInflightStore.getState().setInflightContent(prev => ({ ...prev, [NOTE_A.uuid]: [] }))
+			}
+		})
+
+		expect(renders).toBe(settled)
 	})
 })

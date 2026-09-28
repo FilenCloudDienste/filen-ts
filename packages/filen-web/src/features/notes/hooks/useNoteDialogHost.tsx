@@ -5,7 +5,8 @@ import { toast } from "sonner"
 import type { Note, NoteTag } from "@filen/sdk-rs"
 import { useDialogHost } from "@/lib/useDialogHost"
 import { setNoteTitle, deleteNote, leaveNote } from "@/features/notes/lib/actions"
-import { createNoteTag, addTagToNote, renameNoteTag, deleteNoteTag } from "@/features/notes/lib/tags"
+import { createNoteTag, renameNoteTag, deleteNoteTag } from "@/features/notes/lib/tags"
+import { createTagForNote, type CreatedTag } from "@/features/notes/lib/createTagForNote"
 import { trashNotes, deleteNotesPermanently, leaveNotes } from "@/features/notes/lib/bulk"
 import { type BulkOutcome } from "@/features/drive/lib/bulk"
 import { toastNotesBulkOutcome } from "@/features/notes/lib/bulkToast"
@@ -23,9 +24,10 @@ import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 // exactly the payload its own kinds need without a separate discriminant field. "createStandaloneTag"
 // is its own fourth kind, disjoint from the note-scoped "createTag" above: it carries no note at all —
 // a user with zero notes can still reach it (the sidebar header's "..." menu and the tags empty-state
-// button, neither of which has a note to tag along the way).
+// button, neither of which has a note to tag along the way). `createdTag` is createTag's retry memory:
+// the tag an attempt created before tagging the note failed, gone with the dialog.
 type ActiveNoteDialog =
-	| { kind: NoteActionDialogKind; note: Note }
+	| { kind: NoteActionDialogKind; note: Note; createdTag?: CreatedTag }
 	| { kind: NoteTagDialogKind; tag: NoteTag }
 	| { kind: NoteBulkDialogActionKind; notes: Note[] }
 	| { kind: "createStandaloneTag" }
@@ -180,23 +182,22 @@ export function useNoteDialogHost({ currentUuid }: UseNoteDialogHostParams): Not
 		closeActiveDialog()
 	}
 
-	async function handleCreateTagSubmit(note: Note, name: string): Promise<void> {
+	// old-web parity: creating a tag from a note's own menu immediately tags that note too, saving the
+	// user a second interaction.
+	async function handleCreateTagSubmit(dialog: { note: Note; createdTag?: CreatedTag }, name: string): Promise<void> {
 		setDialogPending(true)
-		const tagOutcome = await createNoteTag(name)
-
-		if (tagOutcome.status === "error") {
-			setDialogPending(false)
-			toast.error(errorLabel(tagOutcome.dto))
-			return
-		}
-
-		// old-web parity: creating a tag from a note's own menu immediately tags that
-		// note too, saving the user a second interaction.
-		const tagged = await addTagToNote(note, tagOutcome.item)
+		const outcome = await createTagForNote(dialog.note, name, dialog.createdTag)
 		setDialogPending(false)
 
-		if (tagged.status === "error") {
-			toast.error(errorLabel(tagged.dto))
+		if (outcome.status === "error") {
+			const { created } = outcome
+
+			if (created !== undefined) {
+				// Only onto this same dialog: one closed meanwhile must not reopen.
+				setActiveDialog(prev => (prev === dialog ? { ...dialog, kind: "createTag", createdTag: created } : prev))
+			}
+
+			toast.error(errorLabel(outcome.dto))
 			return
 		}
 
@@ -302,7 +303,7 @@ export function useNoteDialogHost({ currentUuid }: UseNoteDialogHostParams): Not
 							}
 						}}
 						onSubmit={value => {
-							void handleCreateTagSubmit(activeDialog.note, value)
+							void handleCreateTagSubmit(activeDialog, value)
 						}}
 					/>
 				)

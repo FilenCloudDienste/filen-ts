@@ -160,7 +160,7 @@ function handleContentEdited(inner: Extract<NoteSocketEvent["inner"], { type: "c
 
 	if (userId === undefined || BigInt(inner.editorId) === userId) {
 		if (content === undefined) {
-			refetchRowForEcho(inner)
+			refetchRowForEcho(inner, cachedRow(inner.note))
 
 			return
 		}
@@ -169,7 +169,11 @@ function handleContentEdited(inner: Extract<NoteSocketEvent["inner"], { type: "c
 
 		if (isOwnNotePush(inner.note, hash)) {
 			followOwnPush(inner.note, content, hash)
-			refetchRowForEcho(inner)
+
+			const cached = cachedRow(inner.note)
+
+			patchRowFromOwnEcho(inner, content, cached)
+			refetchRowForEcho(inner, cached)
 
 			return
 		}
@@ -226,15 +230,40 @@ function handleContentEdited(inner: Extract<NoteSocketEvent["inner"], { type: "c
 	takeRemoteContent(inner.note, content, useNotesRemoteEditStore.getState().openNote === inner.note)
 }
 
-// The row is not patched for an echo: it may be older than this tab's own later change. A stale type is
-// not cosmetic, the next content push sends it back, so an echo whose type differs from the row (a
+function cachedRow(uuid: string): Note | undefined {
+	return notesQueryGet()?.find(n => n.uuid === uuid)
+}
+
+// An echo never patches the row's type: it may be older than this tab's own later change. A stale type
+// is not cosmetic, the next content push sends it back, so an echo whose type differs from the row (a
 // retype on another device of this account) re-reads the list instead of patching it. Otherwise only a
 // list read in flight is replaced, as it may predate this edit: a note this account just created and
 // retyped elsewhere arrives through the read `new` started.
-function refetchRowForEcho(inner: Extract<NoteSocketEvent["inner"], { type: "contentEdited" }>): void {
-	const cached = notesQueryGet()?.find(n => n.uuid === inner.note)
-
+function refetchRowForEcho(inner: Extract<NoteSocketEvent["inner"], { type: "contentEdited" }>, cached: Note | undefined): void {
 	notesQueryRefetch({ onlyIfFetching: cached === undefined || cached.noteType === inner.noteType })
+}
+
+// The echo is the only news a tab that did not push gets of the push, so its row takes the pushed
+// preview and edited time here (the pushing tab already has them from the push response). Only forward
+// in time: the echo can arrive after a later change landed. A differing type is left to the full read.
+function patchRowFromOwnEcho(
+	inner: Extract<NoteSocketEvent["inner"], { type: "contentEdited" }>,
+	content: string,
+	cached: Note | undefined
+): void {
+	if (cached?.noteType !== inner.noteType || inner.editedTimestamp <= cached.editedTimestamp) {
+		return
+	}
+
+	const preview = createNotePreviewFromContentText(noteKindForPreview(cached.noteType), content)
+
+	notesQueryUpdate(prev =>
+		prev.map(n =>
+			n.uuid === inner.note && inner.editedTimestamp > n.editedTimestamp
+				? { ...n, editedTimestamp: inner.editedTimestamp, preview }
+				: n
+		)
+	)
 }
 
 // Unsynced local changes of a note, in any tab's queue or in this tab's editor.

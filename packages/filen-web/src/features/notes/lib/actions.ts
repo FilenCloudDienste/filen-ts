@@ -2,6 +2,7 @@ import type { Note, NoteType, UserInfo } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
 import { i18n } from "@/lib/i18n"
 import { queryClient } from "@/queries/client"
+import { removeQueriesAndPersisted } from "@/queries/persist"
 import { ACCOUNT_QUERY_KEY } from "@/queries/account"
 import { notesQueryUpsert, notesQueryRemove } from "@/features/notes/queries/notes"
 import { noteContentQueryKey, readNoteContent } from "@/features/notes/queries/noteContent"
@@ -118,7 +119,12 @@ export async function duplicateNote(note: Note): Promise<ActionOutcome<Note>> {
 		const cachedContent = queryClient.getQueryData<string | undefined>(noteContentQueryKey(original.uuid))
 		const content = cachedContent ?? (await runOp(sdkApi.getNoteContent(original)))
 
-		queryClient.setQueryData(noteContentQueryKey(original.uuid), content)
+		// A warm cache already holds exactly this value, and rewriting it would still move dataUpdatedAt,
+		// which remounts the original's open editor (caret, scroll and undo lost).
+		if (cachedContent === undefined) {
+			queryClient.setQueryData(noteContentQueryKey(original.uuid), content)
+		}
+
 		queryClient.setQueryData(noteContentQueryKey(duplicated.uuid), content)
 	} catch (e) {
 		return { status: "error", dto: asErrorDTO(e) }
@@ -271,7 +277,7 @@ export async function deleteNote(note: Note, opts?: DeleteNoteOptions): Promise<
 
 	opts?.beforeCacheRemoval?.()
 	notesQueryRemove(note.uuid)
-	queryClient.removeQueries({ queryKey: noteContentQueryKey(note.uuid) })
+	removeQueriesAndPersisted(queryClient, noteContentQueryKey(note.uuid))
 
 	return { status: "success" }
 }
@@ -294,7 +300,7 @@ export async function leaveNote(note: Note, opts?: DeleteNoteOptions): Promise<V
 
 	opts?.beforeCacheRemoval?.()
 	notesQueryRemove(note.uuid)
-	queryClient.removeQueries({ queryKey: noteContentQueryKey(note.uuid) })
+	removeQueriesAndPersisted(queryClient, noteContentQueryKey(note.uuid))
 
 	return { status: "success" }
 }

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import type { Note, NoteParticipant } from "@filen/sdk-rs"
 import type { InflightEntry } from "@/features/notes/store/useNotesInflight"
 import {
@@ -114,6 +114,27 @@ describe("size cap gating", () => {
 
 		expect(chars.length).toBeLessThan(MAX_NOTE_SIZE)
 		expect(exceedsNoteSizeCap(chars)).toBe(true)
+	})
+
+	it("decides by length alone when the bounds settle it, encoding only in between", () => {
+		const encode = vi.spyOn(TextEncoder.prototype, "encode")
+
+		// At most 3 bytes per code unit: this many can never exceed the cap.
+		expect(exceedsNoteSizeCap("€".repeat(MAX_NOTE_SIZE / 3))).toBe(false)
+		// At least 1 byte per code unit: this many always do.
+		expect(exceedsNoteSizeCap("a".repeat(MAX_NOTE_SIZE + 1))).toBe(true)
+		expect(encode).not.toHaveBeenCalled()
+
+		expect(exceedsNoteSizeCap("€".repeat(MAX_NOTE_SIZE / 3 + 1))).toBe(true)
+		expect(encode).toHaveBeenCalledTimes(1)
+	})
+
+	it("agrees with the byte length for surrogate pairs and lone surrogates at the cap", () => {
+		// A pair is 2 units and 4 bytes; a lone surrogate encodes as the 3-byte replacement character.
+		expect(exceedsNoteSizeCap("😀".repeat(MAX_NOTE_SIZE / 4))).toBe(false)
+		expect(exceedsNoteSizeCap("😀".repeat(MAX_NOTE_SIZE / 4 + 1))).toBe(true)
+		expect(exceedsNoteSizeCap("\uD800".repeat(MAX_NOTE_SIZE / 3))).toBe(false)
+		expect(exceedsNoteSizeCap("\uD800".repeat(MAX_NOTE_SIZE / 3) + "a")).toBe(true)
 	})
 })
 

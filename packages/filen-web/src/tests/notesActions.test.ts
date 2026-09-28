@@ -192,6 +192,17 @@ describe("duplicateNote", () => {
 		expect(notesQueryGet()).toEqual(expect.arrayContaining([original, duplicated]))
 	})
 
+	it("leaves a warm original's content entry untouched, so its open editor does not remount", async () => {
+		const original = mockNote({ uuid: testUuid("orig") })
+		const duplicated = mockNote({ uuid: testUuid("dup") })
+		testQueryClient.setQueryData(noteContentQueryKey(original.uuid), "existing content", { updatedAt: 1 })
+		duplicateNoteOp.mockResolvedValueOnce({ original, duplicated })
+
+		await duplicateNote(original)
+
+		expect(testQueryClient.getQueryState(noteContentQueryKey(original.uuid))?.dataUpdatedAt).toBe(1)
+	})
+
 	it("fetches content when the original's cache is cold", async () => {
 		const original = mockNote({ uuid: testUuid("orig") })
 		const duplicated = mockNote({ uuid: testUuid("dup") })
@@ -201,6 +212,7 @@ describe("duplicateNote", () => {
 		await duplicateNote(original)
 
 		expect(getNoteContent).toHaveBeenCalledExactlyOnceWith(original)
+		expect(testQueryClient.getQueryData(noteContentQueryKey(original.uuid))).toBe("fetched content")
 		expect(testQueryClient.getQueryData(noteContentQueryKey(duplicated.uuid))).toBe("fetched content")
 	})
 

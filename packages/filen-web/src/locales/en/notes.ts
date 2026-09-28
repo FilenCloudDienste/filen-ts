@@ -28,6 +28,8 @@ export const notes = {
 	notesImportAction: "Import note",
 	/** importNoteFromFile — the picked file's extension doesn't match any recognized note type */
 	noteImportUnsupportedType: "This file type isn't supported for import.",
+	/** importNoteFromFile — the file's text is past the note size cap, so no note is created */
+	noteImportTooLarge: "This file is too large to import as a note.",
 
 	// ── View toggle ────────────────────────────────────────────────────────────
 	/** Notes sidebar — toggle option showing the flat note list */

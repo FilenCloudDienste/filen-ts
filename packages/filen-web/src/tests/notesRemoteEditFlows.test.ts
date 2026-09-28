@@ -215,7 +215,12 @@ describe("notes — this tab's own push", () => {
 		sync.executeNow()
 		await tick()
 
-		expect(setNoteContent).toHaveBeenLastCalledWith(note, "v6", expect.any(String))
+		// The live row, which the echo moved on to the pushed version.
+		expect(setNoteContent).toHaveBeenLastCalledWith(
+			expect.objectContaining({ uuid: note.uuid, preview: "v1" }),
+			"v6",
+			expect.any(String)
+		)
 		expect(toast).not.toHaveBeenCalled()
 	})
 

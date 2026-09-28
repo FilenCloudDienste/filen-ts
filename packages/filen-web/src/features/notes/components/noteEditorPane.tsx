@@ -5,6 +5,7 @@ import { StickyNoteIcon, MoreHorizontalIcon, EyeIcon } from "lucide-react"
 import type { Note } from "@filen/sdk-rs"
 import { noteIcon } from "@/features/notes/lib/icon.logic"
 import { isNoteUndecryptable, hasNoteWriteAccess } from "@/features/notes/lib/sort"
+import { noteDisplayTitle } from "@/features/notes/lib/displayTitle"
 import { NoteContentBody } from "@/features/notes/components/noteContentBody"
 import { CannotDecryptState } from "@/components/cannotDecryptState"
 import { NoteRemoteEditDialog } from "@/features/notes/components/noteRemoteEditDialog"
@@ -68,10 +69,13 @@ export function NoteEditorPane({ note, loading }: NoteEditorPaneProps) {
 	// header sync spinner + menu suppression, mirroring mobile's header (screens/noteEditor.tsx) and
 	// note-menu (components/note/menu.tsx) inflight gating.
 	const isInflight = useNoteInflight(note?.uuid ?? "")
-	// The checklist "hide completed items" view preference, keyed by uuid so switching notes never
-	// carries the previous note's toggle state over. Query-disabled (and this menu toggle absent) for
-	// every non-checklist note — see the hideCompletedChecklist prop passed below.
-	const hideCompletedQuery = useHideCompletedChecklistQuery(note?.uuid ?? "")
+	// The "hide completed items" menu toggle and the checklist filter itself are both checklist-only and
+	// editor-origin only: an undecryptable checklist never reaches the editor (its content can't be
+	// parsed anyway), and every other note type simply never sees the prop.
+	const showHideCompletedToggle = note !== undefined && !isNoteUndecryptable(note) && note.noteType === "checklist"
+	// That view preference, keyed by uuid so switching notes never carries the previous note's toggle
+	// state over. Every other note passes "" and so never reads it (the hook skips an empty uuid).
+	const hideCompletedQuery = useHideCompletedChecklistQuery(showHideCompletedToggle ? note.uuid : "")
 	const hideCompleted = hideCompletedQuery.data ?? false
 
 	const compositionEndedAtRef = useRef(Number.NEGATIVE_INFINITY)
@@ -125,15 +129,11 @@ export function NoteEditorPane({ note, loading }: NoteEditorPaneProps) {
 
 	const { icon: Icon, colorClass } = noteIcon(note)
 	// An undecryptable note has no readable title/body — its metadata stayed ciphertext (no key for
-	// this account). The header shows a "cannot decrypt" label (never the misleading "Untitled note"),
-	// the ⋮ menu is already reduced to its uuid-only actions (noteMenuActions), and the body is the
-	// shared explainer instead of an editor that could only fail to load.
+	// this account). The header shows a "cannot decrypt" label (noteDisplayTitle), the ⋮ menu is
+	// already reduced to its uuid-only actions (noteMenuActions), and the body is the shared explainer
+	// instead of an editor that could only fail to load.
 	const undecryptable = isNoteUndecryptable(note)
-	const title = undecryptable
-		? t("common:cannotDecryptTitle")
-		: note.title !== undefined && note.title.length > 0
-			? note.title
-			: t("noteUntitled")
+	const title = noteDisplayTitle(note, t)
 
 	async function handleDuplicated(duplicated: Note): Promise<void> {
 		await navigate({ to: "/notes/$uuid", params: { uuid: duplicated.uuid } })
@@ -146,11 +146,6 @@ export function NoteEditorPane({ note, loading }: NoteEditorPaneProps) {
 		await setHideCompletedChecklist(note.uuid, !hideCompleted)
 		await hideCompletedQuery.refetch()
 	}
-
-	// The "hide completed items" menu toggle and the checklist filter itself are both checklist-only and
-	// editor-origin only: an undecryptable checklist never reaches this branch (its content can't be
-	// parsed anyway), and every other note type simply never sees the prop.
-	const showHideCompletedToggle = !undecryptable && note.noteType === "checklist"
 
 	// A shared note this user may only read. Trashed notes are excluded deliberately: the Trashed bucket
 	// header and the restore/delete-only menu already announce that state.

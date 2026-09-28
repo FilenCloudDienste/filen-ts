@@ -66,7 +66,8 @@ export function markNoteContentUnsynced(uuid: string): void {
 	contentReads.delete(uuid)
 }
 
-async function fetchTrackedNoteContent(note: Note): Promise<string> {
+// Every reader of noteContentQueryKey fetches through this, so any read can mark the cache current.
+export async function fetchTrackedNoteContent(note: Note): Promise<string> {
 	const epoch = currentSocketEpoch()
 	const editEvents = contentEditEvents
 	const content = await fetchNoteContentOrThrow(note)

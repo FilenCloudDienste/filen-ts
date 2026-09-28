@@ -16,7 +16,17 @@ import {
 // and `right` are rendered as-is; this owns only the geometry.
 // `rightHidden` gives the left pane the whole width. The right pane and the separator leave the tree,
 // but the left one keeps its place in it, so a live editor there is not remounted (and re-seeded).
-export function MarkdownSplitPane({ left, right, rightHidden = false }: { left: ReactNode; right: ReactNode; rightHidden?: boolean }) {
+export function MarkdownSplitPane({
+	left,
+	right,
+	rightHidden: rightHiddenProp
+}: {
+	left: ReactNode
+	right: ReactNode
+	rightHidden?: boolean
+}) {
+	// Not a destructuring default, which the React Compiler cannot lower.
+	const rightHidden = rightHiddenProp ?? false
 	const { t } = useTranslation("notes")
 	const ratioQuery = useMdSplitRatioQuery()
 	const persistedRatio = ratioQuery.data ?? DEFAULT_MD_SPLIT_RATIO

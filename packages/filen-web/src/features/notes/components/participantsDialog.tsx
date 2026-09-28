@@ -55,6 +55,9 @@ export function ParticipantsDialog({ note: initialNote, onClose }: ParticipantsD
 	const owner = isNoteOwner(note, currentUserId)
 
 	const [mode, setMode] = useState<"list" | "add">("list")
+	// The one participant operation in flight. A single slot, so every row's controls lock while it
+	// runs: a second operation started meanwhile would share it, and the first to finish would clear it
+	// under the other (re-enabling that row mid-write and letting the dialog close).
 	const [pendingUserId, setPendingUserId] = useState<bigint | null>(null)
 	const [removing, setRemoving] = useState<NoteParticipant | null>(null)
 	const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set())
@@ -68,8 +71,10 @@ export function ParticipantsDialog({ note: initialNote, onClose }: ParticipantsD
 	const contactsQuery = useContactsQuery({ enabled: true })
 	const blockedUsers = deriveBlockedUsers(contactsQuery.data?.blocked ?? [])
 
+	const dialogPending = pendingUserId !== null || addPending
+
 	function handleOpenChange(next: boolean, details: DialogRoot.ChangeEventDetails): void {
-		if (!shouldForwardOpenChange(next, pendingUserId !== null || addPending)) {
+		if (!shouldForwardOpenChange(next, dialogPending)) {
 			details.cancel()
 			return
 		}
@@ -184,6 +189,7 @@ export function ParticipantsDialog({ note: initialNote, onClose }: ParticipantsD
 			<ul className="flex max-h-80 flex-col gap-0.5 overflow-y-auto">
 				{rows.map(({ participant, canManage, blocked }) => {
 					const displayName = contactDisplayName(participant)
+					// Only picks the row that shows the spinner; every row is disabled while anything is pending.
 					const rowPending = pendingUserId === participant.userId
 
 					return (
@@ -219,7 +225,7 @@ export function ParticipantsDialog({ note: initialNote, onClose }: ParticipantsD
 									<>
 										<Switch
 											checked={participant.permissionsWrite}
-											disabled={rowPending || !isOnline}
+											disabled={dialogPending || !isOnline}
 											title={!isOnline ? t("common:offlineActionDisabled") : undefined}
 											aria-label={t("noteParticipantsCanEditLabel", { email: participant.email })}
 											onCheckedChange={checked => {
@@ -229,7 +235,7 @@ export function ParticipantsDialog({ note: initialNote, onClose }: ParticipantsD
 										<Button
 											variant="ghost"
 											size="icon-sm"
-											disabled={rowPending || !isOnline}
+											disabled={dialogPending || !isOnline}
 											title={!isOnline ? t("common:offlineActionDisabled") : undefined}
 											aria-label={t("noteParticipantsRemoveAction", { email: participant.email })}
 											onClick={() => {
@@ -244,7 +250,7 @@ export function ParticipantsDialog({ note: initialNote, onClose }: ParticipantsD
 								<Button
 									variant="ghost"
 									size="icon-sm"
-									disabled={rowPending || !isOnline}
+									disabled={dialogPending || !isOnline}
 									title={!isOnline ? t("common:offlineActionDisabled") : undefined}
 									aria-label={t(blocked ? "noteParticipantsUnblockAction" : "noteParticipantsBlockAction", {
 										email: participant.email
@@ -371,8 +377,6 @@ export function ParticipantsDialog({ note: initialNote, onClose }: ParticipantsD
 			</div>
 		)
 	}
-
-	const dialogPending = pendingUserId !== null || addPending
 
 	return (
 		<Dialog

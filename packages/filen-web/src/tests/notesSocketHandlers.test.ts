@@ -354,7 +354,6 @@ describe("note socket handlers — contentEdited", () => {
 
 		handleNoteEvent(contentEdited("a", 7))
 
-		expect(getNotes()[0]?.editedTimestamp).toBe(1n)
 		expect(useNotesRemoteEditStore.getState().remoteEdited["a"]).toBeUndefined()
 		expect(invalidate).not.toHaveBeenCalled()
 	})
@@ -363,15 +362,46 @@ describe("note socket handlers — contentEdited", () => {
 		seedNotes([makeNote("a", { editedTimestamp: 1n })])
 		setAccountId(7n)
 		rememberNotePush("a", hashNoteContent("server text"))
+		const invalidate = vi.spyOn(testQueryClient, "invalidateQueries")
 
 		handleNoteEvent(contentEdited("a", 7))
 
-		// An echo patches no row.
-		expect(getNotes()[0]?.editedTimestamp).toBe(1n)
+		// The echo reseeds nothing.
+		expect(invalidate).not.toHaveBeenCalled()
 
 		handleNoteEvent(contentEdited("a", 7))
 
-		expect(getNotes()[0]?.editedTimestamp).toBe(999n)
+		expect(invalidate).toHaveBeenCalledWith({ queryKey: noteContentQueryKey("a") })
+	})
+
+	// The only news a tab that did not push gets of the push: its sidebar row follows the typing.
+	it("patches the row's preview and edited time from the echo, keeping every other field", () => {
+		seedNotes([makeNote("a", { editedTimestamp: 1n, preview: "old preview", pinned: true })])
+		setAccountId(7n)
+		rememberNotePush("a", hashNoteContent("server text"))
+
+		handleNoteEvent(contentEdited("a", 7))
+
+		expect(getNotes()[0]).toEqual(makeNote("a", { editedTimestamp: 999n, preview: "server text", pinned: true }))
+	})
+
+	it("never rolls the row back to an echo older than a change it already holds", () => {
+		seedNotes([makeNote("a", { editedTimestamp: 2000n, preview: "newer" })])
+		setAccountId(7n)
+		rememberNotePush("a", hashNoteContent("server text"))
+
+		handleNoteEvent(contentEdited("a", 7))
+
+		expect(getNotes()[0]).toEqual(makeNote("a", { editedTimestamp: 2000n, preview: "newer" }))
+	})
+
+	it("seeds no list that was never read from an echo", () => {
+		setAccountId(7n)
+		rememberNotePush("a", hashNoteContent("server text"))
+
+		handleNoteEvent(contentEdited("a", 7))
+
+		expect(testQueryClient.getQueryData(NOTES_QUERY_KEY)).toBeUndefined()
 	})
 
 	it("a save elsewhere of the version this tab's typing builds on is no news", () => {
@@ -558,6 +588,9 @@ describe("note socket handlers — contentEdited", () => {
 		mountList()
 
 		handleNoteEvent(contentEdited("a", 7))
+
+		expect(getNotes()[0]).toEqual(makeNote("a", { noteType: "md" }))
+
 		await settle()
 
 		expect(listNotes).toHaveBeenCalledTimes(1)

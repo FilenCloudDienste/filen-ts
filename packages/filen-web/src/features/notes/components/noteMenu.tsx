@@ -19,6 +19,7 @@ import {
 import { exportNote } from "@/features/notes/lib/export"
 import { addTagToNote, removeTagFromNote, setNoteTagFavorited } from "@/features/notes/lib/tags"
 import { useIsOnline } from "@/lib/useIsOnline"
+import { useNoteInflight } from "@/features/notes/store/useNotesInflight"
 import {
 	noteMenuActions,
 	noteTagSubmenuEntries,
@@ -96,7 +97,12 @@ function NoteMenuEntries({
 }: NoteMenuContentProps & { family: MenuFamily }) {
 	const { t } = useTranslation(["notes", "common"])
 	const isOnline = useIsOnline()
-	const descriptors = applyNoteOfflineGate(noteMenuActions(note, currentUserId), isOnline)
+	// Every action waits while the note's own edits are still queued (mobile parity): the content cache
+	// and the server copy both predate them, so a retype, duplicate or export would act on stale text.
+	// Subscribed only while the menu is open (its content mounts on open).
+	const isInflight = useNoteInflight(note.uuid)
+	const offlineGated = applyNoteOfflineGate(noteMenuActions(note, currentUserId), isOnline)
+	const descriptors = isInflight ? offlineGated.map(descriptor => ({ ...descriptor, enabled: false })) : offlineGated
 	const { Item, Separator, Sub, SubTrigger, SubContent, CheckboxItem } = family
 
 	async function runDirect(descriptor: Extract<NoteActionDescriptor, { run: "direct" }>): Promise<void> {
@@ -213,7 +219,13 @@ function NoteMenuEntries({
 	function renderDescriptor(descriptor: NoteActionDescriptor, index: number) {
 		const separator = index > 0 && SEPARATOR_BEFORE.has(descriptor.id) ? <Separator /> : null
 		const disabled = descriptor.enabled === false
-		const disabledTitle = disabled && !isOnline ? t("common:offlineActionDisabled") : undefined
+		const disabledTitle = !disabled
+			? undefined
+			: isInflight
+				? t("noteSyncing")
+				: !isOnline
+					? t("common:offlineActionDisabled")
+					: undefined
 
 		if (descriptor.run === "submenu") {
 			if (descriptor.submenu === "tags") {

@@ -50,6 +50,7 @@ vi.mock("@/lib/i18n", () => ({ i18n: { t: (key: string) => key } }))
 
 import { queryClient as testQueryClient } from "@/queries/client"
 import { Sync } from "@/features/notes/lib/sync"
+import { NOTES_QUERY_KEY, notesQueryUpdate } from "@/features/notes/queries/notes"
 import { noteContentQueryKey } from "@/features/notes/queries/noteContent"
 import useNotesInflightStore, { type InflightContent } from "@/features/notes/store/useNotesInflight"
 import {
@@ -641,6 +642,25 @@ describe("cancel() — suppresses the disk flush of an in-flight pass", () => {
 	})
 })
 
+describe("flushToDisk — a snapshot keeps the session it was taken in", () => {
+	it("never writes a pre-shutdown snapshot once a fresh start() replaced the session during init", async () => {
+		const s = new Sync()
+		const note = makeNote("a")
+
+		// Init is still pending (no start yet), so the flush parks on it.
+		const flushed = s.flushToDisk({ a: [{ timestamp: 1, content: "previous-account", note }] })
+
+		s.cancel()
+		s.start()
+
+		await expect(flushed).resolves.toBe(false)
+		await flushAsync()
+
+		expect(kvSetJson).not.toHaveBeenCalled()
+		expect(kvStore.has("inflightNoteContent")).toBe(false)
+	})
+})
+
 describe("restoreFromDisk — replay-on-launch hydrates before any network, drops synced/gone (adaptation C)", () => {
 	it("hydrates the store from disk and drops an entry whose content equals the cloud", async () => {
 		const noteA = makeNote("a")
@@ -1034,28 +1054,26 @@ describe("push loop — failed pushes are sent again on a slow timer", () => {
 		s.cancel()
 	})
 
-	it("waits while the tab is hidden, and carries on when it is visible again", async () => {
+	// The leader is often the hidden tab while the user types in a visible follower.
+	it("keeps sending while the tab is hidden: the hide trigger's flush carries the schedule on", async () => {
 		const s = await failingNote()
 
 		vi.stubGlobal("document", { visibilityState: "hidden" })
-		s.pauseResend()
+		// SyncHost's hidden trigger.
+		s.executeNow()
 
-		expect(await after(3_600_000)).toBe(1)
-
-		vi.stubGlobal("document", { visibilityState: "visible" })
-		s.resumeResend()
-
-		expect(await after(30_000)).toBe(2)
+		expect(await after(0)).toBe(2)
+		expect(await after(120_000)).toBe(3)
 		vi.unstubAllGlobals()
 		s.cancel()
 	})
 
-	it("a timer that comes due in a hidden tab sends nothing", async () => {
+	it("a timer that comes due in a hidden tab still sends", async () => {
 		const s = await failingNote()
 
 		vi.stubGlobal("document", { visibilityState: "hidden" })
 
-		expect(await after(3_600_000)).toBe(1)
+		expect(await after(30_000)).toBe(2)
 		vi.unstubAllGlobals()
 		s.cancel()
 	})
@@ -1069,5 +1087,158 @@ describe("push loop — failed pushes are sent again on a slow timer", () => {
 
 		expect(vi.getTimerCount()).toBe(0)
 		expect(await after(3_600_000)).toBe(1)
+	})
+})
+
+describe("push loop — the pushed note's sidebar row", () => {
+	it("takes the preview and edited time the push returns, keeping its other fields", async () => {
+		const note = makeNote("a", { preview: "old", editedTimestamp: 10n })
+
+		testQueryClient.setQueryData(NOTES_QUERY_KEY, [note])
+		setStore({ a: [{ timestamp: 1, content: "new text", note }] })
+		// A socket patch moved the row on while the push was out.
+		setNoteContent.mockImplementation(() => {
+			testQueryClient.setQueryData(NOTES_QUERY_KEY, [{ ...note, favorite: true }])
+
+			return Promise.resolve({ ...note, preview: "new text", editedTimestamp: 20n })
+		})
+
+		const s = await startedSync()
+		s.executeNow()
+		await flushAsync()
+
+		expect(testQueryClient.getQueryData(NOTES_QUERY_KEY)).toEqual([
+			{ ...note, favorite: true, preview: "new text", editedTimestamp: 20n }
+		])
+	})
+
+	it("never rolls a row back past a newer edit it already shows", async () => {
+		const note = makeNote("a", { preview: "newer", editedTimestamp: 30n })
+
+		testQueryClient.setQueryData(NOTES_QUERY_KEY, [note])
+		setStore({ a: [{ timestamp: 1, content: "older", note }] })
+		setNoteContent.mockResolvedValue({ ...note, preview: "older", editedTimestamp: 20n })
+
+		const s = await startedSync()
+		s.executeNow()
+		await flushAsync()
+
+		expect(testQueryClient.getQueryData(NOTES_QUERY_KEY)).toEqual([note])
+	})
+
+	it("seeds no list that was never read", async () => {
+		const note = makeNote("a")
+
+		setStore({ a: [{ timestamp: 1, content: "text", note }] })
+		setNoteContent.mockResolvedValue({ ...note, editedTimestamp: 20n })
+
+		const s = await startedSync()
+		s.executeNow()
+		await flushAsync()
+
+		expect(testQueryClient.getQueryData(NOTES_QUERY_KEY)).toBeUndefined()
+	})
+})
+
+describe("flushToDisk — one write at a time", () => {
+	it("coalesces the flushes asked for during a write into one write of the newest snapshot", async () => {
+		const s = await startedSync()
+		const note = makeNote("a")
+		const first = deferred<undefined>()
+
+		kvSetJson.mockClear()
+		kvSetJson.mockImplementationOnce((key: string, value: unknown) => {
+			kvStore.set(key, value)
+
+			return first.promise
+		})
+
+		const flushes = [s.enqueue(note, "a"), s.enqueue(note, "ab"), s.enqueue(note, "abc"), s.enqueue(note, "abcd")]
+
+		await flushAsync()
+		expect(kvSetJson).toHaveBeenCalledTimes(1)
+
+		first.resolve(undefined)
+
+		await expect(Promise.all(flushes)).resolves.toEqual([true, true, true, true])
+		expect(kvSetJson).toHaveBeenCalledTimes(2)
+		expect((kvStore.get("inflightNoteContent") as InflightContent)["a"]?.at(-1)?.content).toBe("abcd")
+		s.cancel()
+	})
+
+	it("drops a write queued behind one in flight when the shutdown lands first", async () => {
+		const s = await startedSync()
+		const note = makeNote("a")
+		const first = deferred<undefined>()
+
+		kvSetJson.mockClear()
+		kvSetJson.mockImplementationOnce(() => first.promise)
+
+		void s.enqueue(note, "a")
+		await flushAsync()
+
+		const queuedFlush = s.enqueue(note, "ab")
+
+		s.cancel()
+		first.resolve(undefined)
+
+		await expect(queuedFlush).resolves.toBe(false)
+		expect(kvSetJson).toHaveBeenCalledTimes(1)
+	})
+})
+
+describe("restoreFromDisk — the reconcile's own reads", () => {
+	it("reads the pending notes' contents concurrently", async () => {
+		const noteA = makeNote("a")
+		const noteB = makeNote("b")
+		const contents = { a: deferred<string>(), b: deferred<string>() }
+
+		kvStore.set("inflightNoteContent", {
+			a: [{ timestamp: 1, content: "a-draft", note: noteA }],
+			b: [{ timestamp: 1, content: "b-draft", note: noteB }]
+		})
+		listNotes.mockResolvedValue([noteA, noteB])
+		getNoteContent.mockImplementation((n: Note) => (n.uuid === noteA.uuid ? contents.a.promise : contents.b.promise))
+		setNoteContent.mockImplementation((n: Note) => Promise.resolve(n))
+
+		const s = new Sync()
+		s.start()
+		await flushAsync()
+
+		expect(getNoteContent).toHaveBeenCalledTimes(2)
+
+		contents.a.resolve("a-draft")
+		contents.b.resolve("b-cloud")
+
+		await vi.waitFor(() => {
+			expect(queued("b")).toBe(false)
+		})
+		expect(setNoteContent).toHaveBeenCalledTimes(1)
+		s.cancel()
+	})
+
+	// A socket patch cancels a list query read in flight and reverts it to the older list the cache held,
+	// which lacks a note created since: the reconcile must not take that list as the cloud's and drop the
+	// draft as orphaned.
+	it("never reconciles against a list the query reverted to", async () => {
+		const note = makeNote("a")
+		const cloud = deferred<Note[]>()
+
+		kvStore.set("inflightNoteContent", { a: [{ timestamp: 1, content: "draft", note }] })
+		testQueryClient.setQueryData(NOTES_QUERY_KEY, [])
+		listNotes.mockReturnValue(cloud.promise)
+		getNoteContent.mockResolvedValue("cloud")
+		setNoteContent.mockImplementation((n: Note) => Promise.resolve(n))
+
+		const s = new Sync()
+		s.start()
+		await flushAsync()
+		notesQueryUpdate(prev => prev)
+		cloud.resolve([note])
+
+		await vi.waitFor(() => {
+			expect(setNoteContent).toHaveBeenCalledWith(note, "draft", expect.any(String))
+		})
+		s.cancel()
 	})
 })

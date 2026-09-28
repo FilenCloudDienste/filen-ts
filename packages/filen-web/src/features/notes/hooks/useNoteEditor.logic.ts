@@ -17,7 +17,17 @@ export function noteContentByteSize(value: string): number {
 	return encoder.encode(value).length
 }
 
+// Runs per keystroke, so the length bounds decide it without encoding whenever they can: a UTF-16 code
+// unit is 1 to 3 UTF-8 bytes (a surrogate pair is 2 units and 4 bytes, a lone surrogate encodes as 3).
 export function exceedsNoteSizeCap(value: string): boolean {
+	if (value.length * 3 <= MAX_NOTE_SIZE) {
+		return false
+	}
+
+	if (value.length > MAX_NOTE_SIZE) {
+		return true
+	}
+
 	return noteContentByteSize(value) > MAX_NOTE_SIZE
 }
 

@@ -41,6 +41,7 @@ import {
 	addTagToNote,
 	removeTagFromNote
 } from "@/features/notes/lib/tags"
+import { createTagForNote } from "@/features/notes/lib/createTagForNote"
 
 beforeEach(() => {
 	vi.clearAllMocks()
@@ -245,5 +246,49 @@ describe("removeTagFromNote — idempotent", () => {
 		expect(removeTagFromNoteOp).toHaveBeenCalledExactlyOnceWith(note, tag)
 		expect(outcome).toEqual({ status: "success", item: updated })
 		expect(notesQueryGet()).toEqual([updated])
+	})
+})
+
+describe("createTagForNote", () => {
+	it("retrying after the tagging half failed reuses the created tag instead of creating a duplicate", async () => {
+		const note = mockNote()
+		const tag = mockTag({ uuid: testUuid("t"), name: "work" })
+		createNoteTagOp.mockResolvedValueOnce(tag)
+		addTagToNoteOp.mockRejectedValueOnce(new Error("offline"))
+
+		const first = await createTagForNote(note, " work ", undefined)
+
+		expect(first.status).toBe("error")
+		expect(first.status === "error" ? first.created : undefined).toEqual({ name: "work", tag })
+
+		addTagToNoteOp.mockResolvedValueOnce({ note: { ...note, tags: [tag] }, tag })
+
+		const retry = await createTagForNote(note, "work", first.status === "error" ? first.created : undefined)
+
+		expect(retry).toEqual({ status: "success" })
+		expect(createNoteTagOp).toHaveBeenCalledTimes(1)
+		expect(addTagToNoteOp).toHaveBeenCalledTimes(2)
+		expect(addTagToNoteOp).toHaveBeenLastCalledWith(note, tag)
+	})
+
+	it("creates a new tag when the name changed or the earlier tag is gone", async () => {
+		const note = mockNote()
+		const tag = mockTag({ uuid: testUuid("t"), name: "work" })
+		const renamed = mockTag({ uuid: testUuid("r"), name: "home" })
+		createNoteTagOp.mockResolvedValueOnce(renamed)
+		addTagToNoteOp.mockResolvedValueOnce({ note: { ...note, tags: [renamed] }, tag: renamed })
+
+		await createTagForNote(note, "home", { name: "work", tag })
+
+		expect(createNoteTagOp).toHaveBeenCalledExactlyOnceWith("home")
+
+		const again = mockTag({ uuid: testUuid("x"), name: "work" })
+		createNoteTagOp.mockResolvedValueOnce(again)
+		addTagToNoteOp.mockResolvedValueOnce({ note: { ...note, tags: [again] }, tag: again })
+
+		await createTagForNote(note, "work", { name: "work", tag })
+
+		expect(createNoteTagOp).toHaveBeenLastCalledWith("work")
+		expect(createNoteTagOp).toHaveBeenCalledTimes(2)
 	})
 })

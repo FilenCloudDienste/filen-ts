@@ -78,7 +78,7 @@ function BodyByType({
 export function NoteContentBody({
 	note,
 	currentUserId,
-	hideCompletedChecklist = false
+	hideCompletedChecklist: hideCompletedChecklistProp
 }: {
 	note: Note
 	// Threaded as a prop rather than read from the account query here, matching NoteRow and
@@ -88,6 +88,8 @@ export function NoteContentBody({
 	// threaded down to the checklist branch only; every other type ignores it.
 	hideCompletedChecklist?: boolean
 }) {
+	// Not a destructuring default, which the React Compiler cannot lower.
+	const hideCompletedChecklist = hideCompletedChecklistProp ?? false
 	const { t } = useTranslation("notes")
 	const controller = useNoteEditor(note, currentUserId)
 

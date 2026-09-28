@@ -1,4 +1,4 @@
-import { createElement } from "react"
+import { createElement, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { XIcon } from "lucide-react"
@@ -19,6 +19,7 @@ import {
 import { exportAllNotes } from "@/features/notes/lib/export"
 import { toastNotesBulkOutcome } from "@/features/notes/lib/bulkToast"
 import { useNotesSelectionStore } from "@/features/notes/store/useNotesSelectionStore"
+import { useNotesInflightStore } from "@/features/notes/store/useNotesInflight"
 import {
 	noteBulkActions,
 	noteBulkTagSubmenuEntries,
@@ -66,25 +67,58 @@ export function NotesBulkActionBar({ selectedNotes, allTags, currentUserId, onDi
 	const isOnline = useIsOnline()
 	const flags = aggregateNoteSelectionFlags(selectedNotes, currentUserId, isNoteUndecryptable)
 	const descriptors = noteBulkActions(flags)
+	// Same gate as the per-note menu: a selected note whose edits are still queued would be retyped,
+	// duplicated or exported from content that predates them. Boolean-collapsed, so a keystroke re-renders
+	// this bar only on the edge.
+	const anyInflight = useNotesInflightStore(state => selectedNotes.some(note => (state.inflightContent[note.uuid] ?? []).length > 0))
+	// One bulk run at a time: the bar stays up until a run's outcome prunes the selection, and a second
+	// click meanwhile would run it again (a duplicate twice over). The ref shuts the gate synchronously,
+	// the state disables the controls.
+	const runningRef = useRef(false)
+	const [running, setRunning] = useState(false)
+	const blocked = running || anyInflight
 
-	async function runOutcome(pending: Promise<BulkOutcome<Note>>): Promise<void> {
-		const outcome = await pending
+	async function runExclusive(task: () => Promise<void>): Promise<void> {
+		// anyInflight too: a submenu opened before the gate closed still holds live items.
+		if (runningRef.current || anyInflight) {
+			return
+		}
 
-		toastNotesBulkOutcome(outcome)
-		// Mirrors the dialog-routed bulk actions' own cleanup — a succeeded note is pruned from the
-		// selection, a failed one stays selected so the user can retry.
-		useNotesSelectionStore.getState().removeFromSelection(outcome.succeeded.map(note => note.uuid))
+		runningRef.current = true
+		setRunning(true)
+
+		try {
+			await task()
+		} finally {
+			runningRef.current = false
+			setRunning(false)
+		}
+	}
+
+	async function runOutcome(start: () => Promise<BulkOutcome<Note>>): Promise<void> {
+		await runExclusive(async () => {
+			const outcome = await start()
+
+			toastNotesBulkOutcome(outcome)
+			// Mirrors the dialog-routed bulk actions' own cleanup — a succeeded note is pruned from the
+			// selection, a failed one stays selected so the user can retry.
+			useNotesSelectionStore.getState().removeFromSelection(outcome.succeeded.map(note => note.uuid))
+		})
 	}
 
 	async function handleTypeSelect(noteType: NoteType): Promise<void> {
-		await runOutcome(setTypeNotes(selectedNotes, noteType))
+		await runOutcome(() => setTypeNotes(selectedNotes, noteType))
 	}
 
 	async function handleTagToggle(tag: NoteTag, checked: boolean): Promise<void> {
-		await runOutcome(setTagOnNotes(selectedNotes, tag, checked))
+		await runOutcome(() => setTagOnNotes(selectedNotes, tag, checked))
 	}
 
 	async function handleExportSelected(): Promise<void> {
+		await runExclusive(exportSelected)
+	}
+
+	async function exportSelected(): Promise<void> {
 		const outcome = await exportAllNotes(selectedNotes)
 
 		if (outcome.status === "error") {
@@ -101,22 +135,22 @@ export function NotesBulkActionBar({ selectedNotes, allTags, currentUserId, onDi
 	function runDescriptor(descriptor: Extract<NoteBulkActionDescriptor, { run: "direct" }>): void {
 		switch (descriptor.id) {
 			case "pin":
-				void runOutcome(setPinnedNotes(selectedNotes, !flags.includesPinned))
+				void runOutcome(() => setPinnedNotes(selectedNotes, !flags.includesPinned))
 				return
 			case "favorite":
-				void runOutcome(setFavoritedNotes(selectedNotes, !flags.includesFavorited))
+				void runOutcome(() => setFavoritedNotes(selectedNotes, !flags.includesFavorited))
 				return
 			case "duplicate":
-				void runOutcome(duplicateNotes(selectedNotes))
+				void runOutcome(() => duplicateNotes(selectedNotes))
 				return
 			case "export":
 				void handleExportSelected()
 				return
 			case "archive":
-				void runOutcome(archiveNotes(selectedNotes))
+				void runOutcome(() => archiveNotes(selectedNotes))
 				return
 			case "restore":
-				void runOutcome(restoreNotes(selectedNotes))
+				void runOutcome(() => restoreNotes(selectedNotes))
 				return
 		}
 	}
@@ -152,6 +186,8 @@ export function NotesBulkActionBar({ selectedNotes, allTags, currentUserId, onDi
 			<div className="flex items-center gap-2">
 				{descriptors.map(descriptor => {
 					const offlineDisabled = isNoteBulkActionOfflineDisabled(descriptor.id, isOnline)
+					const disabled = offlineDisabled || blocked
+					const disabledReason = offlineDisabled ? t("common:offlineActionDisabled") : anyInflight ? t("noteSyncing") : undefined
 					const keymapAction = KEYMAP_ACTION_FOR[descriptor.id]
 
 					if (descriptor.run === "submenu") {
@@ -186,9 +222,9 @@ export function NotesBulkActionBar({ selectedNotes, allTags, currentUserId, onDi
 										<Button
 											variant="outline"
 											size="icon-sm"
-											disabled={offlineDisabled}
+											disabled={disabled}
 											aria-label={t(descriptor.labelKey)}
-											title={offlineDisabled ? t("common:offlineActionDisabled") : undefined}
+											title={disabledReason}
 										>
 											{createElement(descriptor.icon, { "aria-hidden": true })}
 										</Button>
@@ -213,9 +249,9 @@ export function NotesBulkActionBar({ selectedNotes, allTags, currentUserId, onDi
 										<Button
 											variant={descriptor.destructive ? "destructive" : "outline"}
 											size="icon-sm"
-											disabled={offlineDisabled}
+											disabled={disabled}
 											aria-label={t(descriptor.labelKey)}
-											title={offlineDisabled ? t("common:offlineActionDisabled") : undefined}
+											title={disabledReason}
 											onClick={() => {
 												onDialogAction(descriptor.dialogKind, selectedNotes)
 											}}
@@ -225,7 +261,7 @@ export function NotesBulkActionBar({ selectedNotes, allTags, currentUserId, onDi
 									}
 								/>
 								<TooltipContent>
-									{offlineDisabled ? t("common:offlineActionDisabled") : t(descriptor.labelKey)}
+									{disabledReason ?? t(descriptor.labelKey)}
 									{keymapAction === undefined ? null : <Kbd action={keymapAction} />}
 								</TooltipContent>
 							</Tooltip>
@@ -239,9 +275,9 @@ export function NotesBulkActionBar({ selectedNotes, allTags, currentUserId, onDi
 									<Button
 										variant="outline"
 										size="icon-sm"
-										disabled={offlineDisabled}
+										disabled={disabled}
 										aria-label={t(descriptor.labelKey)}
-										title={offlineDisabled ? t("common:offlineActionDisabled") : undefined}
+										title={disabledReason}
 										onClick={() => {
 											runDescriptor(descriptor)
 										}}
@@ -250,7 +286,7 @@ export function NotesBulkActionBar({ selectedNotes, allTags, currentUserId, onDi
 									</Button>
 								}
 							/>
-							<TooltipContent>{offlineDisabled ? t("common:offlineActionDisabled") : t(descriptor.labelKey)}</TooltipContent>
+							<TooltipContent>{disabledReason ?? t(descriptor.labelKey)}</TooltipContent>
 						</Tooltip>
 					)
 				})}

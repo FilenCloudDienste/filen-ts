@@ -15,13 +15,11 @@ export function SyncHost(): null {
 	useEffect(() => {
 		void startOutbox()
 
-		// Hidden: flush now, and the re-send of failed pushes waits; visible again, it carries on.
+		// Hidden: flush now. The re-send of failed pushes runs regardless of visibility (the leader is often
+		// the hidden tab); only going offline pauses it.
 		const onVisibilityChange = (): void => {
 			if (document.hidden) {
 				sync.executeNow()
-				sync.pauseResend()
-			} else {
-				sync.resumeResend()
 			}
 		}
 

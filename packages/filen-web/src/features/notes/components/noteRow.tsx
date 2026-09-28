@@ -6,6 +6,7 @@ import type { Note, NoteTag } from "@filen/sdk-rs"
 import { cn } from "@filen/shared"
 import { formatRelativeTime } from "@/lib/relativeTime"
 import { noteIcon } from "@/features/notes/lib/icon.logic"
+import { noteDisplayTitle } from "@/features/notes/lib/displayTitle"
 import {
 	noteRowPreview,
 	noteRowSharedByEmail,
@@ -72,12 +73,13 @@ export function NoteRow({
 	onDuplicated,
 	onPointerSelect
 }: NoteRowProps) {
-	const { t } = useTranslation("notes")
+	// ["notes", "common"] for the shared cannot-decrypt title; notes stays the default namespace.
+	const { t } = useTranslation(["notes", "common"])
 	// The relative-time + shared-by wording live in the shared "common"/"notes" catalogs; the row's
 	// own namespace is "notes", so the relative label uses a common-bound t.
 	const { t: tCommon } = useTranslation("common")
 	const { icon: Icon, colorClass } = noteIcon(note)
-	const title = note.title !== undefined && note.title.length > 0 ? note.title : t("noteUntitled")
+	const title = noteDisplayTitle(note, t)
 	const preview = noteRowPreview(note)
 	const sharedByEmail = noteRowSharedByEmail(note, currentUserId)
 	const tags = noteRowTags(note)

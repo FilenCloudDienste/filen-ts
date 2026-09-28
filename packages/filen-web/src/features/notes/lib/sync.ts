@@ -23,7 +23,7 @@ import { asErrorDTO } from "@/lib/sdk/errors"
 import { kvGetJson, kvSetJson, kvDelete } from "@/lib/storage/adapter"
 import { type OutboxChannelTransport, type OutboxRole, type PushDetail } from "@/lib/storage/outboxChannel"
 import { noteContentQueryKey, readNoteContent } from "@/features/notes/queries/noteContent"
-import { fetchNotes, notesQueryGet } from "@/features/notes/queries/notes"
+import { fetchNotes, notesQueryGet, notesQueryUpdate } from "@/features/notes/queries/notes"
 import useNotesInflightStore, {
 	TAB_ID,
 	setOutboxHydrated,
@@ -48,9 +48,10 @@ const OUTBOX_KV_KEY = "inflightNoteContent"
 // Waits before re-sending pushes that failed, then every 10 minutes (Sync.scheduleResend).
 const RESEND_BACKOFF_MS = [30_000, 120_000, 600_000]
 
-// A failed push is re-sent on its own only in a visible tab that is online.
+// A failed push is re-sent on its own only while online. Not gated on this tab being visible: the leader is
+// whichever tab took the lock first, so the user is often typing in a visible follower while it is hidden.
 function resendMayRun(): boolean {
-	return onlineManager.isOnline() && (typeof document === "undefined" || document.visibilityState === "visible")
+	return onlineManager.isOnline()
 }
 // Held by every tab while it lives (released with the tab): whether the tab a push came from is still there
 // to tell its user.
@@ -67,6 +68,30 @@ function noteName(note: Note): string {
 	return note.title !== undefined && note.title.length > 0 ? note.title : i18n.t("notes:noteUntitled")
 }
 const SYNC_DEBOUNCE_MS = 3000
+
+// The sidebar row reads the pushed preview and edited time (its text, sort position and date group), and
+// the socket echo of this tab's own push leaves the row alone. Only those two fields: the Note the push
+// returns carries the metadata of the pre-push snapshot, which a socket patch may have moved on since.
+// Never rolls a row back past a newer edit it already shows.
+function patchRowAfterPush(pushed: Note): void {
+	const row = notesQueryGet()?.find(n => n.uuid === pushed.uuid)
+
+	if (row === undefined || pushed.editedTimestamp <= row.editedTimestamp) {
+		return
+	}
+
+	notesQueryUpdate(prev =>
+		prev.map(n =>
+			n.uuid === pushed.uuid && pushed.editedTimestamp > n.editedTimestamp
+				? {
+						...n,
+						editedTimestamp: pushed.editedTimestamp,
+						...(pushed.preview !== undefined ? { preview: pushed.preview } : {})
+					}
+				: n
+		)
+	)
+}
 
 // Multi-tab transport: a follower forwards edits to the leader and asks it to flush; the leader
 // broadcasts authoritative state + a hello on takeover, and a terminal shutdown closes the channel. The
@@ -147,6 +172,14 @@ export class Sync {
 	private role: OutboxRole = "leader"
 	private transport: NotesOutboxTransport | null = null
 	private unacked: InflightContent = {}
+	// flushToDisk's single write in flight, and the one follow-up write the flushes asked for meanwhile share.
+	private writingOutbox = false
+	private queuedWrite: {
+		content: InflightContent
+		signal: AbortSignal
+		result: Promise<boolean>
+		resolve: (success: boolean) => void
+	} | null = null
 
 	public constructor(tabId: string = crypto.randomUUID()) {
 		this.tabId = tabId
@@ -690,8 +723,11 @@ export class Sync {
 	// re-flushes); the enqueue call site surfaces a `false`.
 	public async flushToDisk(inflightContent: InflightContent): Promise<boolean> {
 		// Defense-in-depth at the disk boundary: the callers' own abort guards are the first line, this
-		// refuses to persist at all once a terminal shutdown has landed.
-		if (isAborted(this.abortController.signal)) {
+		// refuses to persist at all once a terminal shutdown has landed. Captured before any await: a
+		// shutdown plus a fresh start() while init is pending must not hand this snapshot the new session.
+		const signal = this.abortController.signal
+
+		if (isAborted(signal)) {
 			return false
 		}
 
@@ -702,21 +738,75 @@ export class Sync {
 
 		await this.initPromise
 
-		const result = await run(async () => {
-			if (Object.keys(inflightContent).length === 0) {
-				await kvDelete(OUTBOX_KV_KEY)
-
-				return
-			}
-
-			await kvSetJson(OUTBOX_KV_KEY, inflightContent)
-		})
-
-		if (!result.success) {
-			log.error("notes-sync", "flushToDisk failed; in-flight edit not persisted", result.error)
+		if (isAborted(signal)) {
+			return false
 		}
 
-		return result.success
+		return this.writeOutbox(inflightContent, signal)
+	}
+
+	// One outbox write at a time. Every write is a full overwrite, so the flushes asked for while one runs
+	// share ONE follow-up write of the newest snapshot, and all resolve with its result: a burst of
+	// keystrokes costs two writes, not one per keystroke, and each caller still resolves only once its
+	// snapshot (or a newer one) is on disk.
+	private writeOutbox(inflightContent: InflightContent, signal: AbortSignal): Promise<boolean> {
+		if (this.queuedWrite !== null) {
+			this.queuedWrite.content = inflightContent
+			this.queuedWrite.signal = signal
+
+			return this.queuedWrite.result
+		}
+
+		if (!this.writingOutbox) {
+			return this.runOutboxWrite(inflightContent, signal)
+		}
+
+		let resolve!: (success: boolean) => void
+		const result = new Promise<boolean>(r => {
+			resolve = r
+		})
+
+		this.queuedWrite = { content: inflightContent, signal, result, resolve }
+
+		return result
+	}
+
+	// `signal`: the session the snapshot belongs to, so a write queued across a shutdown and a fresh start()
+	// still sees that shutdown.
+	private async runOutboxWrite(inflightContent: InflightContent, signal: AbortSignal): Promise<boolean> {
+		this.writingOutbox = true
+
+		try {
+			// A write queued behind one in flight may start after a terminal shutdown: never after the wipe.
+			if (isAborted(signal)) {
+				return false
+			}
+
+			const result = await run(async () => {
+				if (Object.keys(inflightContent).length === 0) {
+					await kvDelete(OUTBOX_KV_KEY)
+
+					return
+				}
+
+				await kvSetJson(OUTBOX_KV_KEY, inflightContent)
+			})
+
+			if (!result.success) {
+				log.error("notes-sync", "flushToDisk failed; in-flight edit not persisted", result.error)
+			}
+
+			return result.success
+		} finally {
+			this.writingOutbox = false
+
+			const next = this.queuedWrite
+
+			if (next !== null) {
+				this.queuedWrite = null
+				void this.runOutboxWrite(next.content, next.signal).then(next.resolve)
+			}
+		}
 	}
 
 	// The hydration edge the editor waits on: the store now reflects this tab's authoritative pending
@@ -775,6 +865,9 @@ export class Sync {
 			}
 
 			const reconcile = await run(async () => {
+				// A read of its own, never through the list query: an entry is dropped as orphaned when its note
+				// is missing here, and the query can answer with an older list (a persisted row restored in
+				// place of a read, or the data a socket patch's cancel reverts to).
 				const cloudNotes = await fetchNotes()
 				const cloudByUuid = new Map<string, Note>()
 
@@ -784,22 +877,24 @@ export class Sync {
 
 				// Drop a disk-seeded entry already synced with the cloud or orphaned (note gone) — see
 				// notesOutboxReconcile.ts for the full rule. The web list query carries no content, so cloud
-				// content is fetched per inflight note.
+				// content is fetched per inflight note, all at once (the SDK schedules them).
 				const cloudContentByUuid = new Map<string, string>()
 
-				for (const noteUuid of Object.keys(fromDisk)) {
-					const cloudNote = cloudByUuid.get(noteUuid)
+				await Promise.all(
+					Object.keys(fromDisk).map(async noteUuid => {
+						const cloudNote = cloudByUuid.get(noteUuid)
 
-					if (!cloudNote) {
-						continue
-					}
+						if (!cloudNote) {
+							return
+						}
 
-					const cloudContent = await readNoteContent(cloudNote)
+						const cloudContent = await readNoteContent(cloudNote)
 
-					if (cloudContent.status === "ok") {
-						cloudContentByUuid.set(noteUuid, cloudContent.content)
-					}
-				}
+						if (cloudContent.status === "ok") {
+							cloudContentByUuid.set(noteUuid, cloudContent.content)
+						}
+					})
+				)
 
 				// Applied as a functional update so any edit made during the fetch is preserved.
 				useNotesInflightStore
@@ -957,14 +1052,14 @@ export class Sync {
 					}
 
 					const push = alreadyInCloud
-						? ({ success: true } as const)
+						? ({ success: true, data: undefined } as const)
 						: await run(async () => {
 								const preview = createNotePreviewFromContentText(
 									noteKindForPreview(liveNote.noteType),
 									mostRecentContent.content
 								)
 
-								await sdkApi.setNoteContent(liveNote, mostRecentContent.content, preview)
+								return sdkApi.setNoteContent(liveNote, mostRecentContent.content, preview)
 							})
 
 					if (!push.success) {
@@ -1018,6 +1113,10 @@ export class Sync {
 						log.error("notes-sync", "dropping inflight content after max non-retryable rejections; edit lost", noteUuid, e)
 
 						return
+					}
+
+					if (push.data !== undefined) {
+						patchRowAfterPush(push.data)
 					}
 
 					// A successful push clears any accumulated rejection count for this note.
@@ -1145,8 +1244,8 @@ export class Sync {
 
 	// LEADER: after a pass, sends the notes whose push failed again on one timer for the whole outbox:
 	// 30 s, 2 min, 10 min, then every 10 min, from the last attempt. Reset by any push that lands and once
-	// nothing has failed; paused while the tab is hidden or offline (resumeResend, or the visibility and
-	// reconnect triggers, carry on). Never for a rejected push: its rejection count decides.
+	// nothing has failed; paused while offline (the reconnect trigger carries on). Never
+	// for a rejected push: its rejection count decides.
 	private scheduleResend(): void {
 		this.pauseResend()
 
@@ -1180,19 +1279,11 @@ export class Sync {
 		}, delay)
 	}
 
-	// The tab went hidden or offline: the schedule waits.
+	// The tab went offline: the schedule waits.
 	public pauseResend(): void {
 		if (this.resendTimer !== null) {
 			clearTimeout(this.resendTimer)
 			this.resendTimer = null
-		}
-	}
-
-	// The tab is visible again: the schedule carries on where it was.
-	public resumeResend(): void {
-		if (this.resendTimer === null) {
-			this.resendStep = Math.max(0, this.resendStep - 1)
-			this.scheduleResend()
 		}
 	}
 
