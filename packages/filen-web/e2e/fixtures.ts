@@ -297,6 +297,7 @@ async function collectDiagnostics(context: BrowserContext): Promise<() => string
 			return "?"
 		}
 	}
+	const inFlight = new Map<Request, { tab: string; startedAt: number }>()
 	const watch = (page: Page) => {
 		const tab = `tab${String(context.pages().indexOf(page))}`
 
@@ -330,6 +331,17 @@ async function collectDiagnostics(context: BrowserContext): Promise<() => string
 		page.on("close", () => {
 			log(`${tab} closed`)
 		})
+		// Requests still unanswered when the test ends: a listing or a stream that never arrives shows up
+		// as a request left hanging, or as none at all.
+		page.on("request", request => {
+			inFlight.set(request, { tab, startedAt: Date.now() })
+		})
+		page.on("requestfinished", request => {
+			inFlight.delete(request)
+		})
+		page.on("requestfailed", request => {
+			inFlight.delete(request)
+		})
 	}
 
 	for (const page of context.pages()) {
@@ -343,7 +355,15 @@ async function collectDiagnostics(context: BrowserContext): Promise<() => string
 	})
 	await context.addInitScript(stallProbe)
 
-	return () => lines.join("\n")
+	return () => {
+		const now = Date.now()
+		const pending = [...inFlight].map(
+			([request, { tab, startedAt }]) =>
+				`+${String(now - startedAt).padStart(6)}ms ago ${tab} still in flight ${request.method()} ${path(request.url())}`
+		)
+
+		return [...lines, ...(pending.length === 0 ? [] : ["-- in flight at the end --", ...pending])].join("\n")
+	}
 }
 
 // Every lane runs once per browser, but the account has one write lease per resource, and two browsers'
