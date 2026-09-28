@@ -12,8 +12,9 @@ import { InputDialog } from "@/components/dialogs/inputDialog"
 // Self-contained trigger + dialog, mirroring drive/newDirectory.tsx's shape exactly (a toolbar-level
 // action with no per-item target, so it owns its own open/pending state rather than routing through
 // contactsList.tsx's per-row confirm-dialog host). The dialog itself IS the confirm — sending a
-// request needs no separate ConfirmDialog, matching every other "type a value, submit" flow.
-export function AddContactDialog() {
+// request needs no separate ConfirmDialog, matching every other "type a value, submit" flow. The empty
+// state mounts a second, primary-styled instance as its call to action.
+export function AddContactDialog({ variant = "outline" }: { variant?: "outline" | "default" }) {
 	const { t } = useTranslation(["contacts", "common"])
 	const isOnline = useIsOnline()
 	const [open, setOpen] = useState(false)
@@ -37,7 +38,7 @@ export function AddContactDialog() {
 	return (
 		<>
 			<Button
-				variant="outline"
+				variant={variant}
 				size="sm"
 				disabled={!isOnline}
 				title={!isOnline ? t("common:offlineActionDisabled") : undefined}

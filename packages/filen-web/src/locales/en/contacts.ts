@@ -54,14 +54,13 @@ export const contacts = {
 	/** Floating selection bar — total selected row count across every section, plural */
 	contactsSelectionCount_other: "{{count}} selected",
 
-	// ── Stats strip ──────────────────────────────────────────────────────────
-	// Web-only summary row pinned above the section list (contacts/requests/blocked counts) — no
-	// mobile equivalent, see contactsList.tsx's own doc comment. The three counts reuse
-	// contactsSectionContacts/contactsSectionRequests/contactsSectionBlocked below rather than a
-	// separate set of labels, so the strip and the section headers can never drift out of sync on
-	// wording.
-	/** Stats strip — accessible group label for the contacts/requests/blocked count tiles */
-	contactsStatsSummaryLabel: "Contacts summary",
+	// ── Section groups ───────────────────────────────────────────────────────
+	/** Contacts page — header of the highlighted incoming-requests panel atop the "All" view, singular */
+	contactsRequestsCalloutTitle_one: "{{count}} contact request",
+	/** Contacts page — header of the highlighted incoming-requests panel atop the "All" view, plural */
+	contactsRequestsCalloutTitle_other: "{{count}} contact requests",
+	/** Contacts page — group heading in the "All" view; {{section}} = the section's own header label (contactsSectionPending/Contacts/Blocked), {{count}} = rows in it */
+	contactsSectionHeading: "{{section}} · {{count}}",
 
 	// ── Add-contact dialog ───────────────────────────────────────────────────
 	// contactsActionAdd doubles as the triggering action label (header/menu button) AND the

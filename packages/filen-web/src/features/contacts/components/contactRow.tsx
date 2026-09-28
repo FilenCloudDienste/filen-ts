@@ -1,6 +1,6 @@
 import { type KeyboardEvent, type MouseEvent, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
-import { CheckIcon, XIcon, MoreHorizontalIcon, RotateCcwIcon } from "lucide-react"
+import { CheckIcon, XIcon, MoreHorizontalIcon, RotateCcwIcon, MessagesSquareIcon } from "lucide-react"
 import type { BlockedContact, Contact, ContactRequestIn, ContactRequestOut } from "@filen/sdk-rs"
 import { contactDisplayName, contactInitials } from "@/features/contacts/components/contactsList.logic"
 import { ContactMenuContent } from "@/features/contacts/components/contactMenu"
@@ -79,7 +79,11 @@ function ContactRowShell({
 			onClick={onSelect ?? onToggleSelect}
 			onKeyDown={onToggleSelect === undefined ? undefined : handleKeyDown}
 			className={cn(
-				"flex h-14 items-center gap-3 rounded-xl px-2 text-sm",
+				"flex h-14 items-center gap-3 text-sm",
+				// Contract B rows tile a rounded, hairline-divided panel (contactsList.tsx) — square, and ringed
+				// inset so the panel's overflow clip cannot cut the focus ring. Everywhere else a row is its
+				// own rounded pill.
+				roving ? "group/row px-3 focus-visible:ring-inset" : "rounded-xl px-2",
 				selectable
 					? "cursor-pointer focus-ring-row outline-none select-none not-aria-selected:hover:bg-accent/50 aria-selected:bg-accent aria-selected:text-accent-foreground"
 					: "hover:bg-accent/50"
@@ -102,7 +106,7 @@ function ContactRowShell({
 			</div>
 			{roving ? (
 				<div
-					className="flex shrink-0 items-center gap-2"
+					className="flex shrink-0 items-center gap-1.5"
 					onClick={event => {
 						// Acting on a row must not also select it — the same guard driveRow.tsx puts on its own
 						// menu trigger, hoisted to the whole slot since contacts has four different ones. A
@@ -228,12 +232,10 @@ export function IncomingRequestActions({ request, onAccept, onDeny, disabled, ti
 	const { t } = useTranslation("contacts")
 
 	return (
-		<div className="flex shrink-0 items-center gap-2">
+		<>
 			<Button
-				variant="outline"
-				size="icon-sm"
+				size="sm"
 				disabled={disabled}
-				aria-label={t("contactsActionAccept")}
 				title={title}
 				tabIndex={tabIndex}
 				onClick={() => {
@@ -241,13 +243,14 @@ export function IncomingRequestActions({ request, onAccept, onDeny, disabled, ti
 				}}
 			>
 				<CheckIcon aria-hidden="true" />
+				{t("contactsActionAccept")}
 			</Button>
 			<Button
-				variant="outline"
+				variant="ghost"
 				size="icon-sm"
 				disabled={disabled}
 				aria-label={t("contactsActionDeny")}
-				title={title}
+				title={title ?? t("contactsActionDeny")}
 				tabIndex={tabIndex}
 				onClick={() => {
 					onDeny(request)
@@ -255,7 +258,7 @@ export function IncomingRequestActions({ request, onAccept, onDeny, disabled, ti
 			>
 				<XIcon aria-hidden="true" />
 			</Button>
-		</div>
+		</>
 	)
 }
 
@@ -273,9 +276,8 @@ export function OutgoingRequestActions({ request, onCancel, disabled, title, tab
 	return (
 		<Button
 			variant="outline"
-			size="icon-sm"
+			size="sm"
 			disabled={disabled}
-			aria-label={t("contactsActionCancelRequest")}
 			title={title}
 			tabIndex={tabIndex}
 			onClick={() => {
@@ -283,6 +285,7 @@ export function OutgoingRequestActions({ request, onCancel, disabled, title, tab
 			}}
 		>
 			<XIcon aria-hidden="true" />
+			{t("contactsActionCancelRequest")}
 		</Button>
 	)
 }
@@ -299,6 +302,12 @@ export interface ContactActionsProps {
 	tabIndex?: number
 }
 
+// Message is a contact row's everyday action, so it sits beside the ⋯ menu (which still lists it, for
+// keyboard and context parity). Both reveal with the row — hover, keyboard focus, selection or an open
+// menu — the same quiet-until-wanted treatment as driveRow.tsx's ⋯ trigger; a coarse pointer cannot
+// hover, so there they always show. Revealed as one group so a disabled button's own opacity stays
+// relative to it instead of outranking the hidden state.
+//
 // DropdownMenu Root > Trigger + Content, mirroring driveRow.tsx's exact nesting for its own ⋯
 // dropdown: Trigger is a render-prop'd Button (not a child), Content (ContactMenuContent, which
 // already wraps Portal>Positioner>Popup) is the Root's other direct child.
@@ -306,28 +315,43 @@ export function ContactActions({ contact, onMessage, onRemove, onBlock, disabled
 	const { t } = useTranslation("contacts")
 
 	return (
-		<DropdownMenu>
-			<DropdownMenuTrigger
-				render={
-					<Button
-						variant="ghost"
-						size="icon-sm"
-						aria-label={t("contactsRowMenuTrigger")}
-						tabIndex={tabIndex}
-					>
-						<MoreHorizontalIcon aria-hidden="true" />
-					</Button>
-				}
-			/>
-			<ContactMenuContent
-				contact={contact}
-				onMessage={onMessage}
-				onRemove={onRemove}
-				onBlock={onBlock}
+		<div className="flex items-center gap-1 opacity-0 transition-opacity group-focus-within/row:opacity-100 group-hover/row:opacity-100 group-aria-selected/row:opacity-100 has-aria-expanded:opacity-100 pointer-coarse:opacity-100">
+			<Button
+				variant="ghost"
+				size="sm"
 				disabled={disabled}
 				title={title}
-			/>
-		</DropdownMenu>
+				tabIndex={tabIndex}
+				onClick={() => {
+					onMessage(contact)
+				}}
+			>
+				<MessagesSquareIcon aria-hidden="true" />
+				{t("contactsActionMessage")}
+			</Button>
+			<DropdownMenu>
+				<DropdownMenuTrigger
+					render={
+						<Button
+							variant="ghost"
+							size="icon-sm"
+							aria-label={t("contactsRowMenuTrigger")}
+							tabIndex={tabIndex}
+						>
+							<MoreHorizontalIcon aria-hidden="true" />
+						</Button>
+					}
+				/>
+				<ContactMenuContent
+					contact={contact}
+					onMessage={onMessage}
+					onRemove={onRemove}
+					onBlock={onBlock}
+					disabled={disabled}
+					title={title}
+				/>
+			</DropdownMenu>
+		</div>
 	)
 }
 

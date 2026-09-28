@@ -6,22 +6,21 @@ import { type ContactsKey } from "@/lib/i18n"
 // resolving contactDisplayName here — its home moved to @filen/shared.
 export { contactDisplayName }
 
-// Web-only stats-strip counts pinned above the section list (see contactsList.tsx) — a small honest
-// polish surface, not a mobile port (mobile has no equivalent). `requests` is INCOMING requests only,
+// Per-section counts for the contacts sidebar's filter badges. `requests` is INCOMING requests only,
 // matching the icon-rail nav badge's own count (shell/iconRail.tsx's incomingRequestCount) so the two
 // surfaces never disagree on what "requests" means for this account.
-export interface ContactsStats {
-	contacts: number
-	requests: number
-	blocked: number
-}
-
-export function contactsStatsCounts(input: {
-	contacts: Contact[]
-	incoming: ContactRequestIn[]
-	blocked: BlockedContact[]
-}): ContactsStats {
-	return { contacts: input.contacts.length, requests: input.incoming.length, blocked: input.blocked.length }
+export function contactsSectionCounts(input: {
+	contacts: readonly Contact[]
+	blocked: readonly BlockedContact[]
+	incoming: readonly ContactRequestIn[]
+	outgoing: readonly ContactRequestOut[]
+}): Record<ContactSection["key"], number> {
+	return {
+		requests: input.incoming.length,
+		pending: input.outgoing.length,
+		contacts: input.contacts.length,
+		blocked: input.blocked.length
+	}
 }
 
 // First character of the display name, uppercased — AvatarFallback content when no avatar image

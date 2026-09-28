@@ -14,7 +14,6 @@ import { isAnyDialogOpen } from "@/lib/keymap/dialogGuard"
 import {
 	buildContactSections,
 	filterContactSections,
-	contactsStatsCounts,
 	CONTACTS_SECTION_HEADER_KEY,
 	type ContactSection,
 	type ContactsSectionFilter
@@ -49,21 +48,15 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { LoadingState } from "@/components/loadingState"
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
+import { cn } from "@filen/shared"
 
 // The floating bulk bar mounts at this many selected — a single selection is already fully served by
 // that row's own action buttons.
 const BULK_BAR_MIN_SELECTION = 2
 
-// One stat tile in the summary strip above the list — count + label, no drill-down (see the strip's
-// own render-site doc comment below for why a lightweight strip beats an invented detail pane).
-function ContactsStatTile({ count, label }: { count: number; label: string }) {
-	return (
-		<div className="flex flex-col items-center gap-0.5 rounded-xl bg-muted/50 py-3 ring-1 ring-foreground/5 dark:ring-foreground/10">
-			<span className="text-lg font-semibold tabular-nums">{count}</span>
-			<span className="text-xs text-muted-foreground">{label}</span>
-		</div>
-	)
-}
+// Every section's rows sit in one of these: a rounded, ringed panel (ui/card.tsx's ring language) with
+// hairline dividers between rows.
+const SECTION_PANEL_CLASS = "flex flex-col divide-y overflow-hidden rounded-2xl ring-1"
 
 // The per-kind dialog payload threaded through useDialogHost, widened with a `bulk` flag: every kind
 // here can be reached either from a single row's own action (bulk: false, a 1-length items array) or
@@ -110,7 +103,6 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 	const blockedData = contactsQuery.data?.blocked ?? []
 	const incomingData = requestsQuery.data?.incoming ?? []
 	const outgoingData = requestsQuery.data?.outgoing ?? []
-	const stats = contactsStatsCounts({ contacts: contactsData, incoming: incomingData, blocked: blockedData })
 
 	// search-filtered, every section — the base every the sidebar's "all" view renders, and also what
 	// tells the empty branch below whether the account genuinely has nothing (searchedSections empty
@@ -543,181 +535,198 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 		}
 	}
 
+	// "all" stacks every section, so each one carries its own heading: incoming requests as a tinted
+	// callout (they wait on the reader), the rest as a quiet labelled group. A single-section view is
+	// already named by the page's <h1>, so it gets the bare panel.
+	function renderSection(contactSection: ContactSection): ReactNode {
+		// One array identity per render, shared by the container's key handler and its rows.
+		const uuids = contactSection.items.map(item => item.uuid)
+		const label = t(CONTACTS_SECTION_HEADER_KEY[contactSection.key])
+		const callout = section === "all" && contactSection.key === "requests"
+		const listbox = (
+			<div
+				role="listbox"
+				aria-multiselectable="true"
+				aria-label={label}
+				// One roving Tab stop per section: the cursor row (and only its controls) is tabbable,
+				// Arrow/Home/End move it, Space/Enter toggle it. Same contract as drive's listbox —
+				// contacts renders every row of every section at once, so a Tab stop per row would scale
+				// with the account.
+				onKeyDown={event => {
+					selection.handleKeyDown(contactSection.key, uuids, event)
+				}}
+				className={
+					callout
+						? "flex flex-col divide-y divide-primary/10"
+						: cn(SECTION_PANEL_CLASS, "divide-border ring-foreground/5 dark:ring-foreground/10")
+				}
+			>
+				{renderSectionItems(contactSection, uuids)}
+			</div>
+		)
+
+		if (callout) {
+			return (
+				<section
+					key={contactSection.key}
+					className={cn(SECTION_PANEL_CLASS, "bg-primary/3 ring-primary/15 dark:bg-primary/5")}
+				>
+					<h2 className="px-3 pt-3 pb-2 text-sm font-medium">
+						{t("contactsRequestsCalloutTitle", { count: contactSection.items.length })}
+					</h2>
+					{listbox}
+				</section>
+			)
+		}
+
+		return (
+			<section key={contactSection.key}>
+				{section === "all" ? (
+					<h2 className="px-1 pb-2 text-xs font-medium tracking-wide text-muted-foreground uppercase">
+						{t("contactsSectionHeading", { section: label, count: contactSection.items.length })}
+					</h2>
+				) : null}
+				{listbox}
+			</section>
+		)
+	}
+
+	const searching = search.trim().length > 0
+
 	return (
 		<>
+			{/* Header, search and list share one centred column; the scroller itself stays full-width so its
+			scrollbar sits at the pane's edge rather than the column's. */}
 			<header className="flex h-14 shrink-0 items-center px-4">
-				<h1 className="text-sm font-medium">
-					{section === "all" ? t("common:moduleContacts") : t(CONTACTS_SECTION_HEADER_KEY[section])}
-				</h1>
+				<div className="mx-auto flex w-full max-w-3xl items-center justify-between gap-4">
+					<h1 className="truncate text-sm font-medium">
+						{section === "all" ? t("common:moduleContacts") : t(CONTACTS_SECTION_HEADER_KEY[section])}
+					</h1>
+					<AddContactDialog />
+				</div>
 			</header>
-			{/* Centers the whole card at a comfortable reading width (mirrors EventsList's own max-w-2xl
-			mx-auto treatment) — a short contact list reads as an intentional, room-to-grow card instead
-			of a full-bleed panel stranded in blank space. Web-only polish, no mobile equivalent. */}
-			<div className="mx-auto flex min-h-0 w-full max-w-2xl flex-1 flex-col">
-				{!isPending && queryError === null ? (
-					<div
-						role="group"
-						aria-label={t("contactsStatsSummaryLabel")}
-						className="grid shrink-0 grid-cols-3 gap-2 px-4 pt-3"
-					>
-						<ContactsStatTile
-							count={stats.contacts}
-							label={t(CONTACTS_SECTION_HEADER_KEY.contacts)}
-						/>
-						<ContactsStatTile
-							count={stats.requests}
-							label={t(CONTACTS_SECTION_HEADER_KEY.requests)}
-						/>
-						<ContactsStatTile
-							count={stats.blocked}
-							label={t(CONTACTS_SECTION_HEADER_KEY.blocked)}
+			<div className="shrink-0 px-4 pb-4">
+				<div className="relative mx-auto w-full max-w-3xl">
+					<SearchIcon
+						aria-hidden="true"
+						className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
+					/>
+					<Input
+						type="search"
+						aria-label={t("contactsSearchPlaceholder")}
+						placeholder={t("contactsSearchPlaceholder")}
+						value={search}
+						onChange={event => {
+							setSearch(event.target.value)
+						}}
+						className="h-9 pl-9"
+					/>
+				</div>
+			</div>
+			<div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+				{/* Bottom-anchored floating selection bar — overlays the list, replacing nothing in the
+				toolbar. Mirrors notesSidebar.tsx / directoryListing.tsx placement. */}
+				{selected.total >= BULK_BAR_MIN_SELECTION ? (
+					<div className="pointer-events-none absolute inset-x-2 bottom-2 z-10 flex justify-center">
+						<ContactsBulkBar
+							selected={selected}
+							disabled={!isOnline}
+							title={offlineTitle}
+							onClear={selection.clearSelection}
+							onAccept={items => {
+								void handleBulkAccept(items)
+							}}
+							onDeny={items => {
+								setActiveDialog({ kind: "deny", bulk: true, items })
+							}}
+							onCancel={items => {
+								setActiveDialog({ kind: "cancel", bulk: true, items })
+							}}
+							onRemove={items => {
+								setActiveDialog({ kind: "remove", bulk: true, items })
+							}}
+							onBlock={items => {
+								setActiveDialog({ kind: "block", bulk: true, items })
+							}}
+							onUnblock={items => {
+								setActiveDialog({ kind: "unblock", bulk: true, items })
+							}}
 						/>
 					</div>
 				) : null}
-				<div className="flex h-12 shrink-0 items-center justify-between gap-4 px-4">
-					<div className="relative max-w-xs flex-1">
-						<SearchIcon
-							aria-hidden="true"
-							className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground"
-						/>
-						<Input
-							type="search"
-							aria-label={t("contactsSearchPlaceholder")}
-							placeholder={t("contactsSearchPlaceholder")}
-							value={search}
-							onChange={event => {
-								setSearch(event.target.value)
-							}}
-							className="pl-8"
-						/>
+				{isPending ? (
+					<LoadingState size="md" />
+				) : queryError !== null ? (
+					<div className="flex flex-1 overflow-y-auto">
+						{/* Assertive: this replaces the spinner the reader was waiting on, and it carries the
+						retry they need. Same treatment as drive's EmptyState error variant. */}
+						<Empty role="alert">
+							<EmptyHeader>
+								<EmptyMedia variant="icon">
+									<UsersIcon />
+								</EmptyMedia>
+								<EmptyTitle>{t("contactsLoadError")}</EmptyTitle>
+								<EmptyDescription>{errorLabel(asErrorDTO(queryError))}</EmptyDescription>
+							</EmptyHeader>
+							<EmptyContent>
+								<Button
+									variant="outline"
+									onClick={handleRetry}
+								>
+									{t("common:tryAgain")}
+								</Button>
+							</EmptyContent>
+						</Empty>
 					</div>
-					<AddContactDialog />
-				</div>
-				<div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-					{/* Bottom-anchored floating selection bar — overlays the list, replacing nothing in the
-				    toolbar. Mirrors notesSidebar.tsx / directoryListing.tsx placement. */}
-					{selected.total >= BULK_BAR_MIN_SELECTION ? (
-						<div className="pointer-events-none absolute inset-x-2 bottom-2 z-10 flex justify-center">
-							<ContactsBulkBar
-								selected={selected}
-								disabled={!isOnline}
-								title={offlineTitle}
-								onClear={selection.clearSelection}
-								onAccept={items => {
-									void handleBulkAccept(items)
-								}}
-								onDeny={items => {
-									setActiveDialog({ kind: "deny", bulk: true, items })
-								}}
-								onCancel={items => {
-									setActiveDialog({ kind: "cancel", bulk: true, items })
-								}}
-								onRemove={items => {
-									setActiveDialog({ kind: "remove", bulk: true, items })
-								}}
-								onBlock={items => {
-									setActiveDialog({ kind: "block", bulk: true, items })
-								}}
-								onUnblock={items => {
-									setActiveDialog({ kind: "unblock", bulk: true, items })
-								}}
-							/>
-						</div>
-					) : null}
-					{isPending ? (
-						<LoadingState size="md" />
-					) : queryError !== null ? (
-						<div className="flex flex-1 overflow-y-auto">
-							{/* Assertive: this replaces the spinner the reader was waiting on, and it carries the
-							retry they need. Same treatment as drive's EmptyState error variant. */}
-							<Empty role="alert">
-								<EmptyHeader>
-									<EmptyMedia variant="icon">
-										<UsersIcon />
-									</EmptyMedia>
-									<EmptyTitle>{t("contactsLoadError")}</EmptyTitle>
-									<EmptyDescription>{errorLabel(asErrorDTO(queryError))}</EmptyDescription>
-								</EmptyHeader>
+				) : sections.length === 0 ? (
+					// A non-matching SEARCH query always gets its own "no results" state, checked first —
+					// otherwise an account with plenty of contacts, none matching, would fall through to the
+					// add-a-contact onboarding copy. searchedSections is search-filtered but NOT
+					// section-filtered, so (with no search active) empty here means genuinely nothing
+					// anywhere (onboarding, with its Add contact call to action); non-empty means the account
+					// has data, just none in the selected section (the narrower "nothing HERE" copy, no CTA —
+					// adding a contact isn't the answer to e.g. an empty Blocked view).
+					<div className="flex flex-1 overflow-y-auto">
+						<Empty>
+							<EmptyHeader>
+								<EmptyMedia variant="icon">{searching ? <SearchIcon /> : <UsersIcon />}</EmptyMedia>
+								{searching ? (
+									<>
+										<EmptyTitle>{t("contactsSearchNoResultsTitle")}</EmptyTitle>
+										<EmptyDescription>{t("contactsSearchNoResultsBody")}</EmptyDescription>
+									</>
+								) : searchedSections.length === 0 ? (
+									<>
+										<EmptyTitle>{t("contactsEmptyTitle")}</EmptyTitle>
+										<EmptyDescription>{t("contactsEmptyBody")}</EmptyDescription>
+									</>
+								) : (
+									<>
+										<EmptyTitle>{t("contactsEmptySectionTitle")}</EmptyTitle>
+										<EmptyDescription>{t("contactsEmptySectionBody")}</EmptyDescription>
+									</>
+								)}
+							</EmptyHeader>
+							{!searching && searchedSections.length === 0 ? (
 								<EmptyContent>
-									<Button
-										variant="outline"
-										onClick={handleRetry}
-									>
-										{t("common:tryAgain")}
-									</Button>
+									<AddContactDialog variant="default" />
 								</EmptyContent>
-							</Empty>
+							) : null}
+						</Empty>
+					</div>
+				) : (
+					<div className="flex-1 overflow-y-auto px-4">
+						<div
+							className={cn(
+								"mx-auto flex w-full max-w-3xl flex-col gap-6 pt-1",
+								// Room for the floating bulk bar, so it never covers the last row.
+								selected.total >= BULK_BAR_MIN_SELECTION ? "pb-16" : "pb-6"
+							)}
+						>
+							{sections.map(renderSection)}
 						</div>
-					) : sections.length === 0 ? (
-						// A non-matching SEARCH query always gets its own "no results" state, checked
-						// first — searchedSections/sections both collapse to zero the moment a query matches
-						// nothing, which previously fell through to the "genuinely no contacts" branch below and
-						// showed the add-a-contact onboarding copy even on an account that has plenty of
-						// contacts, just none matching. searchedSections is search-filtered but NOT
-						// section-filtered, so (with no search active) empty here means genuinely nothing
-						// matches anywhere (the generic empty state); non-empty means the account has data, just
-						// none in the currently selected section (the narrower "nothing HERE" copy, no
-						// add-contact CTA — that action isn't relevant to e.g. an empty Blocked view).
-						<div className="flex flex-1 overflow-y-auto">
-							<Empty>
-								<EmptyHeader>
-									<EmptyMedia variant="icon">{search.trim().length > 0 ? <SearchIcon /> : <UsersIcon />}</EmptyMedia>
-									{search.trim().length > 0 ? (
-										<>
-											<EmptyTitle>{t("contactsSearchNoResultsTitle")}</EmptyTitle>
-											<EmptyDescription>{t("contactsSearchNoResultsBody")}</EmptyDescription>
-										</>
-									) : searchedSections.length === 0 ? (
-										<>
-											<EmptyTitle>{t("contactsEmptyTitle")}</EmptyTitle>
-											<EmptyDescription>{t("contactsEmptyBody")}</EmptyDescription>
-										</>
-									) : (
-										<>
-											<EmptyTitle>{t("contactsEmptySectionTitle")}</EmptyTitle>
-											<EmptyDescription>{t("contactsEmptySectionBody")}</EmptyDescription>
-										</>
-									)}
-								</EmptyHeader>
-							</Empty>
-						</div>
-					) : (
-						<div className="flex-1 overflow-y-auto p-2">
-							{sections.map(contactSection => {
-								// One array identity per render, shared by the container's key handler and its rows.
-								const uuids = contactSection.items.map(item => item.uuid)
-
-								return (
-									<section key={contactSection.key}>
-										{/* Only "all" stacks more than one section at once — a single filtered section
-									already names itself via the page's own <h1> above, so its inline header would be
-									pure redundancy. */}
-										{section === "all" ? (
-											<h2 className="px-2 pt-3 pb-1 text-xs font-medium text-muted-foreground">
-												{t(CONTACTS_SECTION_HEADER_KEY[contactSection.key])}
-											</h2>
-										) : null}
-										<div
-											role="listbox"
-											aria-multiselectable="true"
-											aria-label={t(CONTACTS_SECTION_HEADER_KEY[contactSection.key])}
-											// One roving Tab stop per section: the cursor row (and only its controls) is
-											// tabbable, Arrow/Home/End move it, Space/Enter toggle it. Same contract as
-											// drive's listbox — contacts renders every row of every section at once, so a
-											// Tab stop per row would scale with the account.
-											onKeyDown={event => {
-												selection.handleKeyDown(contactSection.key, uuids, event)
-											}}
-											className="flex flex-col gap-0.5"
-										>
-											{renderSectionItems(contactSection, uuids)}
-										</div>
-									</section>
-								)
-							})}
-						</div>
-					)}
-				</div>
+					</div>
+				)}
 			</div>
 			{renderActiveDialog()}
 		</>

@@ -6,8 +6,10 @@ import { cn } from "@filen/shared"
 import {
 	CONTACTS_SECTION_FILTERS,
 	CONTACTS_SECTION_HEADER_KEY,
+	contactsSectionCounts,
 	type ContactsSectionFilter
 } from "@/features/contacts/components/contactsList.logic"
+import { useContactsQuery, useContactRequestsQuery } from "@/features/contacts/queries/contacts"
 import { type ContactsKey } from "@/lib/i18n"
 
 type IconType = ComponentType<{ className?: string }>
@@ -48,6 +50,16 @@ const NAV_ITEM_CLASS = cn(
 // pathname/search comparison here, same as every sibling sidebar.
 export function ContactsSidebar() {
 	const { t } = useTranslation(["contacts", "common"])
+	// The same two caches ContactsList (and the rail, for requests) already subscribe to — reading them
+	// here costs no request of its own.
+	const contactsQuery = useContactsQuery()
+	const requestsQuery = useContactRequestsQuery()
+	const counts = contactsSectionCounts({
+		contacts: contactsQuery.data?.contacts ?? [],
+		blocked: contactsQuery.data?.blocked ?? [],
+		incoming: requestsQuery.data?.incoming ?? [],
+		outgoing: requestsQuery.data?.outgoing ?? []
+	})
 
 	return (
 		<aside
@@ -61,16 +73,34 @@ export function ContactsSidebar() {
 				<div className="flex flex-col gap-0.5">
 					{CONTACTS_SECTION_FILTERS.map(filter => {
 						const Icon = FILTER_ICON[filter]
+						// "all" carries no count: it would only restate the sum of the rows below it.
+						const count = filter === "all" ? 0 : counts[filter]
 
 						return (
 							<Link
 								key={filter}
 								to="/contacts"
 								search={{ section: filter }}
+								// Described, not named: the link's accessible name stays its bare label.
+								aria-description={count > 0 ? String(count) : undefined}
 								className={NAV_ITEM_CLASS}
 							>
 								<Icon className="text-muted-foreground group-data-[status=active]:text-primary" />
-								<span className="truncate">{t(FILTER_LABEL_KEY[filter])}</span>
+								<span className="flex-1 truncate">{t(FILTER_LABEL_KEY[filter])}</span>
+								{count > 0 ? (
+									<span
+										aria-hidden="true"
+										className={cn(
+											"shrink-0 text-xs tabular-nums",
+											// Incoming requests await the reader's answer; every other count is inventory.
+											filter === "requests"
+												? "flex h-5 min-w-5 items-center justify-center rounded-full bg-primary/10 px-1.5 font-medium text-primary"
+												: "text-muted-foreground"
+										)}
+									>
+										{count}
+									</span>
+								) : null}
 							</Link>
 						)
 					})}

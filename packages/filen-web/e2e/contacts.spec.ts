@@ -23,8 +23,9 @@ async function gotoContacts(page: Page): Promise<void> {
 	await page.waitForURL(/\/contacts\?section=all$/)
 }
 
-// The content region below the search/Add-contact toolbar has exactly one of three terminal states —
-// loading spinner, load error, or settled (the "No contacts" empty state, or >=1 rendered section).
+// The content region below the search field has exactly one of three terminal states — loading
+// spinner, load error, or settled (the "No contacts" empty state, or >=1 rendered section, each of
+// which carries a level-2 heading in the "all" view).
 // All three are raced, the same way helpers/listing.ts races the drive listing's: losing to the error
 // state throws immediately, carrying the SDK's own decrypted message (contactsList.tsx renders
 // errorLabel(...) under the "Couldn't load contacts" title), instead of spending the whole budget and
@@ -57,14 +58,6 @@ test.describe("contacts", () => {
 		await expect(page.getByRole("searchbox", { name: "Search contacts" })).toBeVisible()
 		// Throws on the load-error state, so reaching here is itself the proof the queries resolved.
 		await waitForContactsSettled(page)
-
-		// The stats strip (new, web-only — see contactsList.tsx) renders three count tiles once the
-		// queries settle; a render/count-visibility check only, the live counts are unknown ahead of time.
-		const statsStrip = page.getByRole("group", { name: "Contacts summary" })
-		await expect(statsStrip).toBeVisible()
-		await expect(statsStrip.getByText("Contacts", { exact: true })).toBeVisible()
-		await expect(statsStrip.getByText("Requests", { exact: true })).toBeVisible()
-		await expect(statsStrip.getByText("Blocked", { exact: true })).toBeVisible()
 
 		// Scoped to the rail's own "Filen" nav landmark — the contacts sidebar's own "Contacts" section
 		// filter link (see the sidebar test below) shares this exact accessible name, so an unscoped
@@ -119,7 +112,9 @@ test.describe("contacts", () => {
 
 		await gotoContacts(page)
 
-		await page.getByRole("button", { name: "Add contact", exact: true }).click()
+		// .first(): the header's own trigger, which always renders — an account with no contacts at all
+		// also shows a second one as the empty state's call to action.
+		await page.getByRole("button", { name: "Add contact", exact: true }).first().click()
 
 		const dialog = page.getByRole("dialog")
 		await expect(dialog).toBeVisible()

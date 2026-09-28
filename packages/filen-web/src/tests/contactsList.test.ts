@@ -4,7 +4,7 @@ import {
 	buildContactSections,
 	contactDisplayName,
 	contactInitials,
-	contactsStatsCounts,
+	contactsSectionCounts,
 	filterContactSections,
 	filterContactsBySearch,
 	isContactsSectionFilter,
@@ -88,29 +88,37 @@ describe("contactInitials", () => {
 	})
 })
 
-describe("contactsStatsCounts", () => {
-	it("counts each category by its own array length", () => {
-		const stats = contactsStatsCounts({
+describe("contactsSectionCounts", () => {
+	it("counts each section by its own array length", () => {
+		const counts = contactsSectionCounts({
 			contacts: [mockContact(), mockContact({ uuid: "55555555-5555-5555-5555-555555555555" })],
+			blocked: [],
 			incoming: [mockIncoming()],
-			blocked: []
+			outgoing: [mockOutgoing()]
 		})
 
-		expect(stats).toEqual({ contacts: 2, requests: 1, blocked: 0 })
+		expect(counts).toEqual({ requests: 1, pending: 1, contacts: 2, blocked: 0 })
 	})
 
-	it("counts only INCOMING requests, never outgoing — outgoing has no `incoming` field to read from", () => {
-		const stats = contactsStatsCounts({
+	it("counts only INCOMING requests under `requests` — outgoing ones are `pending`", () => {
+		const counts = contactsSectionCounts({
 			contacts: [],
+			blocked: [],
 			incoming: [mockIncoming(), mockIncoming({ uuid: "66666666-6666-6666-6666-666666666666" })],
-			blocked: []
+			outgoing: []
 		})
 
-		expect(stats.requests).toBe(2)
+		expect(counts.requests).toBe(2)
+		expect(counts.pending).toBe(0)
 	})
 
-	it("returns all zeros for an account with nothing in any category", () => {
-		expect(contactsStatsCounts({ contacts: [], incoming: [], blocked: [] })).toEqual({ contacts: 0, requests: 0, blocked: 0 })
+	it("returns all zeros for an account with nothing in any section", () => {
+		expect(contactsSectionCounts({ contacts: [], blocked: [], incoming: [], outgoing: [] })).toEqual({
+			requests: 0,
+			pending: 0,
+			contacts: 0,
+			blocked: 0
+		})
 	})
 })
 
