@@ -28,12 +28,15 @@ function SelectValue({ className, ...props }: SelectPrimitive.Value.Props) {
 
 function SelectTrigger({
 	className,
-	size = "default",
+	size: sizeProp,
 	children,
 	...props
 }: SelectPrimitive.Trigger.Props & {
 	size?: "sm" | "default"
 }) {
+	// Not a destructuring default, which the React Compiler cannot lower.
+	const size = sizeProp ?? "default"
+
 	return (
 		<SelectPrimitive.Trigger
 			data-slot="select-trigger"
@@ -53,14 +56,21 @@ function SelectTrigger({
 function SelectContent({
 	className,
 	children,
-	side = "bottom",
-	sideOffset = 4,
-	align = "center",
-	alignOffset = 0,
-	alignItemWithTrigger = true,
+	side: sideProp,
+	sideOffset: sideOffsetProp,
+	align: alignProp,
+	alignOffset: alignOffsetProp,
+	alignItemWithTrigger: alignItemWithTriggerProp,
 	...props
 }: SelectPrimitive.Popup.Props &
 	Pick<SelectPrimitive.Positioner.Props, "align" | "alignOffset" | "side" | "sideOffset" | "alignItemWithTrigger">) {
+	// Not destructuring defaults, which the React Compiler cannot lower.
+	const side = sideProp ?? "bottom"
+	const sideOffset = sideOffsetProp ?? 4
+	const align = alignProp ?? "center"
+	const alignOffset = alignOffsetProp ?? 0
+	const alignItemWithTrigger = alignItemWithTriggerProp ?? true
+
 	return (
 		<SelectPrimitive.Portal>
 			<SelectPrimitive.Positioner

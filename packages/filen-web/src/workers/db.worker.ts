@@ -109,6 +109,26 @@ async function open(): Promise<void> {
 	})
 }
 
+// A prefix scan as a range on the primary key: no LIKE, so "_" and "%" in a prefix match literally and the
+// index serves it. The upper bound is the prefix with its last code point incremented (the smallest string
+// above every extension of it); an empty prefix matches every key.
+function prefixRange(prefix: string): { where: string; bind: string[] } {
+	const points = Array.from(prefix)
+
+	for (let i = points.length - 1; i >= 0; i--) {
+		const code = points[i]?.codePointAt(0) ?? 0
+
+		if (code < 0x10ffff) {
+			// 0xD800-0xDFFF are surrogates, never a character of their own.
+			const next = code === 0xd7ff ? 0xe000 : code + 1
+
+			return { where: "key >= ? AND key < ?", bind: [prefix, points.slice(0, i).join("") + String.fromCodePoint(next)] }
+		}
+	}
+
+	return { where: "key >= ?", bind: [prefix] }
+}
+
 const api = {
 	open,
 	kvGet: (key: string): string | null => {
@@ -153,6 +173,32 @@ const api = {
 		})
 
 		return out
+	},
+	// Every row under a prefix in one statement, so a bulk read (the boot restore) is one round trip instead
+	// of one per row.
+	kvEntries: (prefix: string): [string, string][] => {
+		const out: [string, string][] = []
+		const { where, bind } = prefixRange(prefix)
+
+		requireDb().exec({
+			sql: `SELECT key, value FROM kv WHERE ${where}`,
+			bind,
+			callback: row => {
+				const [key, value] = row
+
+				if (typeof key === "string" && typeof value === "string") {
+					out.push([key, value])
+				}
+			}
+		})
+
+		return out
+	},
+	// One statement, so one transaction, however many rows it drops.
+	kvDeletePrefix: (prefix: string): void => {
+		const { where, bind } = prefixRange(prefix)
+
+		requireDb().exec({ sql: `DELETE FROM kv WHERE ${where}`, bind })
 	}
 }
 

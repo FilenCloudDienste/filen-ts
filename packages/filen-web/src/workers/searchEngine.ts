@@ -63,8 +63,17 @@ export const CEILING = 1_000n
 // this path, backs every search this worker ever opens).
 const CACHE_PATH = "filen-web-cache"
 
+// Outlives its open(): the installed window keeps it, so a later open() or close() can silence that
+// window's listener too, not just an open still in flight.
 interface OpenToken {
 	cancelled: boolean
+	// Rejects an open() still waiting on its window's first delivery, which a silenced listener never makes.
+	abandon?: () => void
+}
+
+function cancelToken(token: OpenToken): void {
+	token.cancelled = true
+	token.abandon?.()
 }
 
 // Reads the flag through a call boundary rather than a direct `token.cancelled` property read.
@@ -133,7 +142,7 @@ export function createSearchEngine() {
 	// (no full reload) would have to reset this explicitly, or the new session silently inherits the
 	// previous account's cache configuration.
 	let configured = false
-	let active: { search: CacheSearch; searchWindow: CacheSearchWindow } | null = null
+	let active: { search: CacheSearch; searchWindow: CacheSearchWindow; token: OpenToken } | null = null
 	let currentToken: OpenToken | null = null
 	let activeRootUuid: string | null = null
 	let activePush: ((p: SearchPush) => void) | null = null
@@ -219,9 +228,15 @@ export function createSearchEngine() {
 		push: (p: SearchPush) => void
 	): Promise<SearchSnapshotDTO> {
 		// Supersede synchronously, before any await, so a close() or a newer open() racing this call
-		// always observes the flip.
+		// always observes the flip. The installed window is superseded too: its deliveries are dropped
+		// main-side from here on, so its listener stops building them now rather than when this open
+		// reaches its install.
 		if (currentToken) {
-			currentToken.cancelled = true
+			cancelToken(currentToken)
+		}
+
+		if (active) {
+			cancelToken(active.token)
 		}
 
 		const token: OpenToken = { cancelled: false }
@@ -322,7 +337,7 @@ export function createSearchEngine() {
 		// this reopen on.
 		const previous = active
 
-		active = { search, searchWindow }
+		active = { search, searchWindow, token }
 
 		if (previous) {
 			void safeClose(previous.search, previous.searchWindow)
@@ -338,8 +353,11 @@ export function createSearchEngine() {
 			return toSnapshotDTO(eager)
 		}
 
-		return new Promise<SearchSnapshotDTO>(resolve => {
+		return new Promise<SearchSnapshotDTO>((resolve, reject) => {
 			firstSnapshotResolve = resolve
+			token.abandon = () => {
+				reject(new SearchSupersededError())
+			}
 		})
 	}
 
@@ -363,11 +381,15 @@ export function createSearchEngine() {
 
 	async function close(): Promise<void> {
 		if (currentToken) {
-			currentToken.cancelled = true
+			cancelToken(currentToken)
 			currentToken = null
 		}
 
 		const current = active
+
+		if (current) {
+			cancelToken(current.token)
+		}
 
 		active = null
 		activeRootUuid = null

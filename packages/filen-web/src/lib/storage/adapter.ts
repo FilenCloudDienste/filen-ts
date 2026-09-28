@@ -59,6 +59,37 @@ export async function kvGetJson<T>(key: string, schema: Type<T>): Promise<T | nu
 	return out as T
 }
 
+// Every row under a prefix in one round trip, each validated like kvGetJson; a row that fails to parse
+// or validate is dropped (and logged), never allowed to fail the whole read.
+export async function kvEntriesJson<T>(prefix: string, schema: Type<T>): Promise<[string, T][]> {
+	const { api } = await storage()
+	const rows = await api.kvEntries(prefix)
+	const out: [string, T][] = []
+
+	for (const [key, raw] of rows) {
+		let parsed: unknown
+
+		try {
+			parsed = parseEnvelope(raw)
+		} catch {
+			log.warn("kv", `dropping unparseable value at ${key}`)
+			continue
+		}
+
+		const value = schema(parsed)
+
+		if (value instanceof type.errors) {
+			log.warn("kv", `dropping invalid value at ${key}`, value.summary)
+			continue
+		}
+
+		// Same arktype generic bridge as kvGetJson's.
+		out.push([key, value as T])
+	}
+
+	return out
+}
+
 export async function kvSetJson(key: string, value: unknown): Promise<void> {
 	const { api } = await storage()
 	await api.kvSet(key, stringifyEnvelope(value))
@@ -80,28 +111,61 @@ export async function kvHas(key: string): Promise<boolean> {
 	return (await api.kvGet(key)) !== null
 }
 
+// A leader tab still on an older build has no kvDeletePrefix: its db worker rejects the unknown Comlink
+// method with a TypeError, and leader forwarding keeps the error's name. Tabs run different builds only
+// while an update waits for the user to confirm it.
+function isMissingStorageMethod(e: unknown): boolean {
+	return e instanceof Error && e.name === "TypeError"
+}
+
+// The per-key wipe every build's leader serves. Every delete runs even when one fails, since on a
+// follower each is an independent RPC with its own timeout.
+async function kvDeleteEach(api: StorageHandle["api"]): Promise<void> {
+	const keys = await api.kvKeys("")
+	const failed = (await Promise.allSettled(keys.map(key => api.kvDelete(key)))).find(result => result.status === "rejected")
+
+	if (failed !== undefined) {
+		throw failed.reason
+	}
+}
+
 // Wipes every kv row — query-persist rows and keymap overrides included, the full local wipe
-// logout needs. Composed from the two primitives already leader-routed (kvKeys/kvDelete) rather
-// than adding a third worker op: an empty prefix matches every key (db.worker's `LIKE ? || '%'`),
-// so nothing new needs registering in STORAGE_METHODS.
+// logout needs. One prefix delete per pass (an empty prefix covers every key): a single statement
+// and a single follower RPC, rather than an enumeration plus one autocommit delete per row.
 export async function kvClear(): Promise<void> {
 	const { api } = await storage()
+	let prefixDelete = true
+	let failure: { reason: unknown } | null = null
 
-	// Sweep TWICE. A single snapshot-then-delete leaves a hole: a write that lands AFTER the key
-	// enumeration but before its delete completes — e.g. an outbox flush already past its own abort gate,
-	// or any other in-flight persist racing logout — is never revisited and survives the "full wipe" as a
-	// decrypted row that replays on the next boot. A second sweep after the first drained catches that
-	// straggler. Bounded at two passes: the outbox channel is closed before logout reaches here, so no NEW
-	// write can originate; only an already-in-flight one remains, and it completes within the first pass.
+	// Sweep TWICE. A write already in flight when the wipe starts — e.g. an outbox flush past its own
+	// abort gate, or any other persist racing logout — can land after the first delete and would survive
+	// the "full wipe" as a decrypted row that replays on the next boot. A second sweep after the first
+	// drained catches that straggler. Bounded at two passes: the outbox channel is closed before logout
+	// reaches here, so no NEW write can originate; only an already-in-flight one remains, and it completes
+	// within the first pass. A failed pass (e.g. a follower RPC timeout) still runs the other one.
 	for (let pass = 0; pass < 2; pass++) {
-		const keys = await api.kvKeys("")
+		try {
+			if (prefixDelete) {
+				try {
+					await api.kvDeletePrefix("")
+				} catch (e) {
+					if (!isMissingStorageMethod(e)) {
+						throw e
+					}
 
-		if (keys.length === 0) {
-			return
+					prefixDelete = false
+				}
+			}
+
+			if (!prefixDelete) {
+				await kvDeleteEach(api)
+			}
+		} catch (e) {
+			failure = { reason: e }
 		}
+	}
 
-		// allSettled, not all: on a follower each delete is an independent RPC with its own timeout;
-		// one slow delete must not abort the rest of the wipe.
-		await Promise.allSettled(keys.map(key => api.kvDelete(key)))
+	if (failure !== null) {
+		throw failure.reason
 	}
 }

@@ -63,10 +63,12 @@ function TypedConfirmDialog({
 	matchValue,
 	confirmLabel,
 	cancelLabel,
-	destructive = false,
+	destructive: destructiveProp,
 	onOpenChange,
 	onConfirm
 }: TypedConfirmDialogProps) {
+	// Not a destructuring default, which the React Compiler cannot lower.
+	const destructive = destructiveProp ?? false
 	// Re-armed dialogs must never resurrect a previous attempt's typed value — adjusting state during
 	// render (React's documented "reset state when a prop changes" pattern) rather than an effect,
 	// which would commit an extra render pass. Mirrors the forgot-password dialog's re-seed pattern.

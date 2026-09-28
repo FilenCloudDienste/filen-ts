@@ -58,8 +58,8 @@ function DialogOverlay({ className, ...props }: DialogPrimitive.Backdrop.Props) 
 function DialogContent({
 	className,
 	children,
-	showCloseButton = true,
-	closeButtonDisabled = false,
+	showCloseButton: showCloseButtonProp,
+	closeButtonDisabled: closeButtonDisabledProp,
 	...props
 }: DialogPrimitive.Popup.Props & {
 	showCloseButton?: boolean
@@ -67,6 +67,9 @@ function DialogContent({
 	// disable the X while their operation runs.
 	closeButtonDisabled?: boolean
 }) {
+	// Not destructuring defaults, which the React Compiler cannot lower.
+	const showCloseButton = showCloseButtonProp ?? true
+	const closeButtonDisabled = closeButtonDisabledProp ?? false
 	// Localized: src/locales/en/common.ts `close` key — a shadcn regen of this registry file must
 	// keep this call, not revert it to the literal "Close" string.
 	const { t } = useTranslation("common")
@@ -115,12 +118,14 @@ function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
 
 function DialogFooter({
 	className,
-	showCloseButton = false,
+	showCloseButton: showCloseButtonProp,
 	children,
 	...props
 }: React.ComponentProps<"div"> & {
 	showCloseButton?: boolean
 }) {
+	// Not a destructuring default, which the React Compiler cannot lower.
+	const showCloseButton = showCloseButtonProp ?? false
 	// Localized: src/locales/en/common.ts `close` key — a shadcn regen of this registry file must
 	// keep this call, not revert it to the literal "Close" string.
 	const { t } = useTranslation("common")

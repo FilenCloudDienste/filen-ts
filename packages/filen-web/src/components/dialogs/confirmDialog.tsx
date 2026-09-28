@@ -46,10 +46,12 @@ function ConfirmDialog({
 	body,
 	confirmLabel,
 	cancelLabel,
-	destructive = false,
+	destructive: destructiveProp,
 	onOpenChange,
 	onConfirm
 }: ConfirmDialogProps) {
+	// Not a destructuring default, which the React Compiler cannot lower.
+	const destructive = destructiveProp ?? false
 	const initialFocus = confirmInitialFocus(destructive)
 
 	function handleOpenChange(next: boolean, details: AlertDialogRoot.ChangeEventDetails): void {

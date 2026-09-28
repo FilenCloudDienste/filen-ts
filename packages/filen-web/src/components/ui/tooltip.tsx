@@ -2,7 +2,10 @@ import { Tooltip as TooltipPrimitive } from "@base-ui/react/tooltip"
 
 import { cn } from "@filen/shared"
 
-function TooltipProvider({ delay = 0, ...props }: TooltipPrimitive.Provider.Props) {
+function TooltipProvider({ delay: delayProp, ...props }: TooltipPrimitive.Provider.Props) {
+	// Not a destructuring default, which the React Compiler cannot lower.
+	const delay = delayProp ?? 0
+
 	return (
 		<TooltipPrimitive.Provider
 			data-slot="tooltip-provider"
@@ -32,13 +35,19 @@ function TooltipTrigger({ ...props }: TooltipPrimitive.Trigger.Props) {
 
 function TooltipContent({
 	className,
-	side = "top",
-	sideOffset = 4,
-	align = "center",
-	alignOffset = 0,
+	side: sideProp,
+	sideOffset: sideOffsetProp,
+	align: alignProp,
+	alignOffset: alignOffsetProp,
 	children,
 	...props
 }: TooltipPrimitive.Popup.Props & Pick<TooltipPrimitive.Positioner.Props, "align" | "alignOffset" | "side" | "sideOffset">) {
+	// Not destructuring defaults, which the React Compiler cannot lower.
+	const side = sideProp ?? "top"
+	const sideOffset = sideOffsetProp ?? 4
+	const align = alignProp ?? "center"
+	const alignOffset = alignOffsetProp ?? 0
+
 	return (
 		<TooltipPrimitive.Portal>
 			<TooltipPrimitive.Positioner

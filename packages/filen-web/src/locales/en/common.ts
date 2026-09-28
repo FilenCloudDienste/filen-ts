@@ -18,6 +18,8 @@ export const common = {
 	reset: "Reset",
 	/** Generic retry button for a failed data load (e.g. the security settings page's account query) — shared by any future error-state view */
 	tryAgain: "Try again",
+	/** Shared list filter box (ListFilterInput) — screen-reader label on the icon-only button clearing the typed filter */
+	clearFilter: "Clear filter",
 	/** Shared in-progress announcement: the spinner primitive's default screen-reader label */
 	loading: "Loading",
 	/** Toast primitive — screen-reader label on the dismiss button every toast carries */

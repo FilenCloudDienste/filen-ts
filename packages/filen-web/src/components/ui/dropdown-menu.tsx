@@ -34,13 +34,19 @@ function DropdownMenuTrigger({ ...props }: MenuPrimitive.Trigger.Props) {
 }
 
 function DropdownMenuContent({
-	align = "start",
-	alignOffset = 0,
-	side = "bottom",
-	sideOffset = 4,
+	align: alignProp,
+	alignOffset: alignOffsetProp,
+	side: sideProp,
+	sideOffset: sideOffsetProp,
 	className,
 	...props
 }: MenuPrimitive.Popup.Props & Pick<MenuPrimitive.Positioner.Props, "align" | "alignOffset" | "side" | "sideOffset">) {
+	// Not destructuring defaults, which the React Compiler cannot lower.
+	const align = alignProp ?? "start"
+	const alignOffset = alignOffsetProp ?? 0
+	const side = sideProp ?? "bottom"
+	const sideOffset = sideOffsetProp ?? 4
+
 	return (
 		<MenuPrimitive.Portal>
 			<MenuPrimitive.Positioner
@@ -92,12 +98,15 @@ function DropdownMenuLabel({
 function DropdownMenuItem({
 	className,
 	inset,
-	variant = "default",
+	variant: variantProp,
 	...props
 }: MenuPrimitive.Item.Props & {
 	inset?: boolean
 	variant?: "default" | "destructive"
 }) {
+	// Not a destructuring default, which the React Compiler cannot lower.
+	const variant = variantProp ?? "default"
+
 	return (
 		<MenuPrimitive.Item
 			data-slot="dropdown-menu-item"
@@ -146,13 +155,19 @@ function DropdownMenuSubTrigger({
 }
 
 function DropdownMenuSubContent({
-	align = "start",
-	alignOffset = -3,
-	side = "right",
-	sideOffset = 0,
+	align: alignProp,
+	alignOffset: alignOffsetProp,
+	side: sideProp,
+	sideOffset: sideOffsetProp,
 	className,
 	...props
 }: React.ComponentProps<typeof DropdownMenuContent>) {
+	// Not destructuring defaults, which the React Compiler cannot lower.
+	const align = alignProp ?? "start"
+	const alignOffset = alignOffsetProp ?? -3
+	const side = sideProp ?? "right"
+	const sideOffset = sideOffsetProp ?? 0
+
 	return (
 		<DropdownMenuContent
 			data-slot="dropdown-menu-sub-content"

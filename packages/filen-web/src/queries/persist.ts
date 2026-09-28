@@ -1,6 +1,6 @@
 import { type } from "arktype"
 import { experimental_createQueryPersister, type AsyncStorage, type PersistedQuery } from "@tanstack/react-query-persist-client"
-import type { QueryClient } from "@tanstack/react-query"
+import { hashKey, type QueryClient, type QueryKey } from "@tanstack/react-query"
 import { storage } from "@/lib/storage/adapter"
 import { parseEnvelope, stringifyEnvelope } from "@/lib/serialize"
 import { log } from "@/lib/log"
@@ -28,7 +28,7 @@ import { REGISTER_CHECK_QUERY_KEY } from "@/features/auth/queries/registerCheck"
 //   SUCCESSFUL queryFn run by construction, so nothing needs filtering yet — and when the first
 //   genuinely non-persistable query appears, the API's first-class `filters` option is the
 //   sanctioned tool, not the serialize-undefined trick. Our `serialize` below returns `undefined`
-//   ONLY on serialization failure (error path, not policy — see its comment).
+//   only on serialization failure and for a removed query's late write (see removedStates).
 
 // Versioned kv-key prefix AND cache-buster in one: bumping this moves every persisted row to a
 // fresh key family and makes the persister's own expired-or-busted check drop any older-versioned
@@ -65,6 +65,13 @@ const persistedQuerySchema = type({
 	state: "object"
 })
 
+// The state each query held when removeQueriesAndPersisted dropped it. A fetch in flight then still
+// resolves (destroy's silent cancel stops neither the SDK call nor the library's follow-up persistQuery)
+// and would write that state back under the deleted row, for every later boot to restore. The silent
+// cancel dispatches nothing, so that late write carries this very object. By identity: a query built
+// again under the same key has its own state and persists as usual.
+const removedStates = new WeakSet<object>()
+
 // The WRITE side of the log-and-degrade policy. `stringifyEnvelope` can throw (circular refs; a
 // root `undefined` cannot happen — the library always passes a PersistedQuery object), and the
 // library calls `storage.setItem(key, await serialize(...))` inside an unawaited, uncaught
@@ -77,6 +84,10 @@ const persistedQuerySchema = type({
 // previously-persisted still-valid row with junk and never wastes the write: the old row stays
 // (stale-but-valid, bounded by PERSIST_MAX_AGE), and the next successful update replaces it.
 function serialize(persistedQuery: PersistedQuery): string | undefined {
+	if (removedStates.has(persistedQuery.state)) {
+		return undefined
+	}
+
 	try {
 		return stringifyEnvelope(persistedQuery)
 	} catch (e) {
@@ -120,6 +131,16 @@ function deserialize(cached: string | undefined): PersistedQuery {
 	return out as PersistedQuery
 }
 
+// Best-effort row delete (see removeItem below), shared with removeQueriesAndPersisted.
+async function removeRow(key: string): Promise<void> {
+	try {
+		const { api } = await storage()
+		await api.kvDelete(key)
+	} catch (e) {
+		log.warn("query.persist", "kv delete failed", e)
+	}
+}
+
 // AsyncStorage-shaped bridge over RAW strings straight to the kv worker api — NOT
 // `kvGetJson`/`kvSetJson` (those run the envelope serializer themselves; `serialize`/`deserialize`
 // here already do that job for the persister's payload — both would double-envelope every row).
@@ -157,34 +178,25 @@ const kvStorage: AsyncStorage<string | undefined> = {
 			log.error("query.persist", "kv write failed — query row not persisted", e)
 		}
 	},
-	removeItem: async key => {
-		try {
-			const { api } = await storage()
-			await api.kvDelete(key)
-		} catch (e) {
-			log.warn("query.persist", "kv delete failed", e)
-		}
-	},
+	removeItem: removeRow,
+	// One bulk read, not a round trip per row: this sits on the boot critical path, and on a follower tab
+	// every round trip also waits on the leader tab's main thread.
 	entries: async () => {
 		const { api } = await storage()
-		const keys = await api.kvKeys(PERSIST_FAMILY)
-		const retired = keys.filter(key => !key.startsWith(KV_KEY_PREFIX))
+		const rows = await api.kvEntries(PERSIST_FAMILY)
 		const out: [string, string][] = []
+		const retired: string[] = []
+
+		for (const row of rows) {
+			if (row[0].startsWith(KV_KEY_PREFIX)) {
+				out.push(row)
+			} else {
+				retired.push(row[0])
+			}
+		}
 
 		if (retired.length > 0) {
 			await Promise.allSettled(retired.map(key => api.kvDelete(key)))
-		}
-
-		for (const key of keys) {
-			if (!key.startsWith(KV_KEY_PREFIX)) {
-				continue
-			}
-
-			const value = await api.kvGet(key)
-
-			if (value !== null) {
-				out.push([key, value])
-			}
 		}
 
 		return out
@@ -235,15 +247,33 @@ export async function restorePersistedQueries(client: QueryClient): Promise<void
 // restore runs to drop those — the not-authed counterpart to restorePersistedQueries, called instead of
 // it whenever a boot's resumeSession() comes back false.
 // Closes a cross-tab race: a floating persister write (fire-and-forget, see kvStorage.setItem above)
-// can land after another tab's logout wipe, leaving an orphan row this tab must not adopt. Same
-// allSettled-over-independent-RPCs shape as kvClear (adapter.ts) — one slow/failed delete must not
-// abort the rest.
+// can land after another tab's logout wipe, leaving an orphan row this tab must not adopt. One
+// statement drops the whole family, however many rows it holds.
 export async function purgePersistedQueries(): Promise<void> {
 	try {
 		const { api } = await storage()
-		const keys = await api.kvKeys(PERSIST_FAMILY)
-		await Promise.allSettled(keys.map(key => api.kvDelete(key)))
+		await api.kvDeletePrefix(PERSIST_FAMILY)
 	} catch (e) {
 		log.error("query.persist", "purging persisted queries failed", e)
+	}
+}
+
+// removeQueries alone frees only memory: nothing maps an in-memory removal to the persister, so the row
+// would come back into the cache on every later boot. For data that is gone for good (a deleted note, a
+// left chat), drop both. Rows are keyed by queryHash, so every matching cached query's row goes, plus the
+// exact key's own row, which another tab may have persisted without this tab ever holding it. Best-effort:
+// removeRow logs and swallows.
+export function removeQueriesAndPersisted(client: QueryClient, queryKey: QueryKey): void {
+	const rows = new Set([`${KV_KEY_PREFIX}${hashKey(queryKey)}`])
+
+	for (const query of client.getQueryCache().findAll({ queryKey })) {
+		rows.add(`${KV_KEY_PREFIX}${query.queryHash}`)
+		removedStates.add(query.state)
+	}
+
+	client.removeQueries({ queryKey })
+
+	for (const key of rows) {
+		void removeRow(key)
 	}
 }

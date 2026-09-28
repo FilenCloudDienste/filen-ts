@@ -14,8 +14,9 @@ export const ACCOUNT_QUERY_KEY = ["account"] as const
 // Narrowed success-state alias, mirrors filen-mobile's `useAccount.query.ts` consumers: every
 // security card takes this exact type as a prop instead of re-deriving its own narrowing or
 // re-subscribing with its own `useAccountQuery()` call for data it can receive from the page that
-// already gated on `status === "success"`.
-export type AccountQuerySuccess = Extract<UseQueryResult<UserInfo>, { status: "success" }>
+// already gated on the account being loaded. A failed background refresh keeps the account it had, so
+// it counts too: a row must never unmount over a transient read error.
+export type AccountQuerySuccess = Extract<UseQueryResult<UserInfo>, { data: UserInfo }>
 
 // A persisted account restores with its original read time, and nothing on the socket reports a
 // change made elsewhere while the app was closed.

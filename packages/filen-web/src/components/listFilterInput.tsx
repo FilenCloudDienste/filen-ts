@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next"
 import { SearchIcon, XIcon } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -16,6 +17,8 @@ export interface ListFilterInputProps {
 // instead. Same visual chrome (icon-left, clear-button-right Input), no keymap registration, no
 // dialogOpen prop — a dialog's own focus trap already keeps this the only focusable search box in play.
 export function ListFilterInput({ value, onChange, placeholder, ariaLabel }: ListFilterInputProps) {
+	const { t } = useTranslation("common")
+
 	return (
 		<div className="relative w-full shrink-0">
 			<SearchIcon
@@ -43,7 +46,7 @@ export function ListFilterInput({ value, onChange, placeholder, ariaLabel }: Lis
 				<Button
 					variant="ghost"
 					size="icon-xs"
-					aria-label={ariaLabel}
+					aria-label={t("clearFilter")}
 					className="absolute top-1/2 right-1.5 -translate-y-1/2"
 					onClick={() => {
 						onChange("")

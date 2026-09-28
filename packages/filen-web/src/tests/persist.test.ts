@@ -2,21 +2,28 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
 import { stringifyEnvelope } from "@/lib/serialize"
 import { log } from "@/lib/log"
-import { persister, restorePersistedQueries, purgePersistedQueries, PERSIST_PREFIX } from "@/queries/persist"
+import { persister, restorePersistedQueries, purgePersistedQueries, removeQueriesAndPersisted, PERSIST_PREFIX } from "@/queries/persist"
 
 // Map-backed fake of the kv worker api (mirrors src/lib/storage/adapter.test.ts), mocked at
 // `@/lib/storage/adapter`'s `storage()` — the persister's kv bridge calls that directly with RAW
 // strings (kvGet/kvSet/kvDelete/kvKeys, never kvGetJson/kvSetJson: the persister owns its own
 // envelope, so the JSON-aware helpers would double-envelope every row). `writes` records every
 // kvSet key so tests can assert per-query write isolation (the point of this architecture).
-const { fakeStore, writes } = vi.hoisted(() => ({ fakeStore: new Map<string, string>(), writes: [] as string[] }))
+const { fakeStore, writes, reads } = vi.hoisted(() => ({
+	fakeStore: new Map<string, string>(),
+	writes: [] as string[],
+	reads: { count: 0 }
+}))
 
 vi.mock("@/lib/storage/adapter", () => ({
 	storage: () =>
 		Promise.resolve({
 			role: "leader" as const,
 			api: {
-				kvGet: (key: string) => Promise.resolve(fakeStore.get(key) ?? null),
+				kvGet: (key: string) => {
+					reads.count++
+					return Promise.resolve(fakeStore.get(key) ?? null)
+				},
 				kvSet: (key: string, value: string) => {
 					fakeStore.set(key, value)
 					writes.push(key)
@@ -26,7 +33,16 @@ vi.mock("@/lib/storage/adapter", () => ({
 					fakeStore.delete(key)
 					return Promise.resolve()
 				},
-				kvKeys: (prefix: string) => Promise.resolve([...fakeStore.keys()].filter(k => k.startsWith(prefix)))
+				kvKeys: (prefix: string) => Promise.resolve([...fakeStore.keys()].filter(k => k.startsWith(prefix))),
+				kvEntries: (prefix: string) => Promise.resolve([...fakeStore.entries()].filter(([k]) => k.startsWith(prefix))),
+				kvDeletePrefix: (prefix: string) => {
+					for (const k of [...fakeStore.keys()]) {
+						if (k.startsWith(prefix)) {
+							fakeStore.delete(k)
+						}
+					}
+					return Promise.resolve()
+				}
 			}
 		})
 }))
@@ -62,6 +78,7 @@ async function seedTwoQueries(): Promise<{ quotaKey: string; notesKey: string; c
 beforeEach(() => {
 	fakeStore.clear()
 	writes.length = 0
+	reads.count = 0
 	vi.restoreAllMocks()
 })
 
@@ -137,6 +154,94 @@ describe("per-query persister (Map-backed fake kv)", () => {
 
 		expect(target.getQueryData(["drive", "quota"])).toEqual({ usedBytes: 123456789012345678n })
 		expect(target.getQueryData(["notes", "list"])).toEqual([{ uuid: "n1", size: 42n }])
+	})
+
+	it("restore reads every row in one bulk call, never one kvGet per row", async () => {
+		await seedTwoQueries()
+
+		reads.count = 0
+
+		const target = new QueryClient()
+
+		await restorePersistedQueries(target)
+
+		expect(reads.count).toBe(0)
+		expect(target.getQueryData(["drive", "quota"])).toEqual({ usedBytes: 123456789012345678n })
+	})
+
+	it("removeQueriesAndPersisted drops the query from memory AND its kv row, so no later boot restores it", async () => {
+		const { quotaKey, notesKey, client } = await seedTwoQueries()
+
+		removeQueriesAndPersisted(client, ["notes", "list"])
+
+		expect(client.getQueryData(["notes", "list"])).toBeUndefined()
+
+		await vi.waitFor(() => {
+			expect(fakeStore.has(notesKey)).toBe(false)
+		})
+
+		expect(fakeStore.has(quotaKey)).toBe(true)
+
+		const target = new QueryClient()
+
+		await restorePersistedQueries(target)
+
+		expect(target.getQueryData(["notes", "list"])).toBeUndefined()
+		expect(target.getQueryData(["drive", "quota"])).toEqual({ usedBytes: 123456789012345678n })
+	})
+
+	it("removeQueriesAndPersisted keeps the row gone when a refetch in flight resolves after it", async () => {
+		const { notesKey, client } = await seedTwoQueries()
+		let finish!: (notes: { uuid: string; size: bigint }[]) => void
+		const refetch = client
+			.query({
+				queryKey: ["notes", "list"],
+				queryFn: () =>
+					new Promise<{ uuid: string; size: bigint }[]>(resolve => {
+						finish = resolve
+					})
+			})
+			.catch(() => undefined)
+
+		removeQueriesAndPersisted(client, ["notes", "list"])
+
+		await vi.waitFor(() => {
+			expect(fakeStore.has(notesKey)).toBe(false)
+		})
+
+		writes.length = 0
+		finish([{ uuid: "n1", size: 43n }])
+		await refetch
+		await new Promise(resolve => setTimeout(resolve, 10))
+
+		expect(writes).not.toContain(notesKey)
+		expect(fakeStore.has(notesKey)).toBe(false)
+	})
+
+	it("persists a query built again under a removed key", async () => {
+		const { notesKey, client } = await seedTwoQueries()
+
+		removeQueriesAndPersisted(client, ["notes", "list"])
+
+		await vi.waitFor(() => {
+			expect(fakeStore.has(notesKey)).toBe(false)
+		})
+
+		await client.query({ queryKey: ["notes", "list"], queryFn: () => [{ uuid: "n2", size: 1n }] })
+
+		await vi.waitFor(() => {
+			expect(fakeStore.has(notesKey)).toBe(true)
+		})
+	})
+
+	it("removeQueriesAndPersisted also drops a row this client never held (persisted by another tab)", async () => {
+		const { notesKey } = await seedTwoQueries()
+
+		removeQueriesAndPersisted(new QueryClient(), ["notes", "list"])
+
+		await vi.waitFor(() => {
+			expect(fakeStore.has(notesKey)).toBe(false)
+		})
 	})
 
 	it("purgePersistedQueries wipes every persisted row without restoring any of them", async () => {

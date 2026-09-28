@@ -38,10 +38,14 @@ const buttonVariants = cva(
 
 function Button({
 	className,
-	variant = "default",
-	size = "default",
+	variant: variantProp,
+	size: sizeProp,
 	...props
 }: ButtonPrimitive.Props & VariantProps<typeof buttonVariants>) {
+	// Not destructuring defaults, which the React Compiler cannot lower.
+	const variant = variantProp === undefined ? "default" : variantProp
+	const size = sizeProp === undefined ? "default" : sizeProp
+
 	return (
 		<ButtonPrimitive
 			data-slot="button"

@@ -4,11 +4,14 @@ import { cn } from "@filen/shared"
 
 function Switch({
 	className,
-	size = "default",
+	size: sizeProp,
 	...props
 }: SwitchPrimitive.Root.Props & {
 	size?: "sm" | "default"
 }) {
+	// Not a destructuring default, which the React Compiler cannot lower.
+	const size = sizeProp ?? "default"
+
 	return (
 		<SwitchPrimitive.Root
 			data-slot="switch"

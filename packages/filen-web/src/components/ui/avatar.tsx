@@ -7,11 +7,14 @@ import { cn } from "@filen/shared"
 
 function Avatar({
 	className,
-	size = "default",
+	size: sizeProp,
 	...props
 }: AvatarPrimitive.Root.Props & {
 	size?: "default" | "sm" | "lg"
 }) {
+	// Not a destructuring default, which the React Compiler cannot lower.
+	const size = sizeProp ?? "default"
+
 	return (
 		<AvatarPrimitive.Root
 			data-slot="avatar"

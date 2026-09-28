@@ -2,7 +2,10 @@ import { Separator as SeparatorPrimitive } from "@base-ui/react/separator"
 
 import { cn } from "@filen/shared"
 
-function Separator({ className, orientation = "horizontal", ...props }: SeparatorPrimitive.Props) {
+function Separator({ className, orientation: orientationProp, ...props }: SeparatorPrimitive.Props) {
+	// Not a destructuring default, which the React Compiler cannot lower.
+	const orientation = orientationProp ?? "horizontal"
+
 	return (
 		<SeparatorPrimitive
 			data-slot="separator"

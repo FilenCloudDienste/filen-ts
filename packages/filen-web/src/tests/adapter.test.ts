@@ -7,26 +7,36 @@ import { log } from "@/lib/log"
 // election machinery), so the whole leader module is replaced with a Map-backed fake StorageApi —
 // this tests the adapter facade only (envelope + arktype validation), never leader election itself
 // (that needs a manual two-tab dev smoke test, plus a scripted e2e spec later).
-const { fakeStore } = vi.hoisted(() => ({ fakeStore: new Map<string, string>() }))
+const { fakeStore, fakeApi } = vi.hoisted(() => {
+	const fakeStore = new Map<string, string>()
+	const fakeApi = {
+		open: () => Promise.resolve(undefined),
+		kvGet: (key: string) => Promise.resolve(fakeStore.get(key) ?? null),
+		kvSet: (key: string, value: string) => {
+			fakeStore.set(key, value)
+			return Promise.resolve()
+		},
+		kvDelete: (key: string) => {
+			fakeStore.delete(key)
+			return Promise.resolve()
+		},
+		kvKeys: (prefix: string) => Promise.resolve([...fakeStore.keys()].filter(k => k.startsWith(prefix))),
+		kvDeletePrefix: (prefix: string) => {
+			for (const key of [...fakeStore.keys()]) {
+				if (key.startsWith(prefix)) {
+					fakeStore.delete(key)
+				}
+			}
+
+			return Promise.resolve()
+		}
+	}
+
+	return { fakeStore, fakeApi }
+})
 
 vi.mock("@/lib/storage/leader", () => ({
-	acquireStorage: () =>
-		Promise.resolve({
-			role: "leader" as const,
-			api: {
-				open: () => Promise.resolve(undefined),
-				kvGet: (key: string) => Promise.resolve(fakeStore.get(key) ?? null),
-				kvSet: (key: string, value: string) => {
-					fakeStore.set(key, value)
-					return Promise.resolve()
-				},
-				kvDelete: (key: string) => {
-					fakeStore.delete(key)
-					return Promise.resolve()
-				},
-				kvKeys: (prefix: string) => Promise.resolve([...fakeStore.keys()].filter(k => k.startsWith(prefix)))
-			}
-		})
+	acquireStorage: () => Promise.resolve({ role: "leader" as const, api: fakeApi })
 }))
 
 beforeEach(() => {
@@ -76,32 +86,87 @@ describe("storage adapter (Map-backed fake StorageApi)", () => {
 		expect(fakeStore.size).toBe(0)
 	})
 
+	it("kvClear is two prefix deletes over every key, never a per-row enumeration", async () => {
+		await kvSetJson("rq.v1.a", { n: 1n })
+		await kvSetJson("session", { n: 2n })
+		const deletePrefix = vi.spyOn(fakeApi, "kvDeletePrefix")
+		const keys = vi.spyOn(fakeApi, "kvKeys")
+		const del = vi.spyOn(fakeApi, "kvDelete")
+
+		await kvClear()
+
+		expect(deletePrefix.mock.calls).toEqual([[""], [""]])
+		expect(keys).not.toHaveBeenCalled()
+		expect(del).not.toHaveBeenCalled()
+	})
+
 	it("kvClear leaves no row behind when a straggler write lands mid-wipe (logout resurrection guard)", async () => {
 		await kvSetJson("session", { n: 1n })
 
-		// Model a write that races the wipe: the first key enumeration snapshots ["session"], then — as that
-		// pass deletes — an in-flight persist (e.g. an outbox flush already past its own abort gate) re-adds a
-		// decrypted row the already-snapshotted delete list would never revisit. A single snapshot-then-delete
-		// leaves that row on disk to replay next boot; the second sweep must catch it. The one-shot delete hook
-		// injects exactly that post-snapshot straggler.
+		// Model a write that races the wipe: an in-flight persist (e.g. an outbox flush already past its own
+		// abort gate) re-adds a decrypted row right after the first delete ran. A single sweep leaves that
+		// row on disk to replay next boot; the second sweep must catch it.
+		const origDeletePrefix = fakeApi.kvDeletePrefix
 		let injected = false
-		const origDelete = fakeStore.delete.bind(fakeStore)
 
-		vi.spyOn(fakeStore, "delete").mockImplementation((key: string) => {
-			const result = origDelete(key)
+		vi.spyOn(fakeApi, "kvDeletePrefix").mockImplementation(async (prefix: string) => {
+			await origDeletePrefix(prefix)
 
 			if (!injected) {
 				injected = true
 				fakeStore.set("inflightChatMessages", "straggler")
 			}
-
-			return result
 		})
 
 		await kvClear()
 
 		expect(fakeStore.has("inflightChatMessages")).toBe(false)
 		expect(fakeStore.size).toBe(0)
+	})
+
+	it("kvClear still runs the second pass when the first rejects, then rejects itself", async () => {
+		await kvSetJson("session", { n: 1n })
+		const timeout = new Error("db rpc timeout: kvDeletePrefix")
+		const origDeletePrefix = fakeApi.kvDeletePrefix
+		const deletePrefix = vi
+			.spyOn(fakeApi, "kvDeletePrefix")
+			.mockRejectedValueOnce(timeout)
+			.mockImplementation(prefix => origDeletePrefix(prefix))
+
+		await expect(kvClear()).rejects.toBe(timeout)
+		expect(deletePrefix).toHaveBeenCalledTimes(2)
+		expect(fakeStore.size).toBe(0)
+	})
+
+	it("kvClear wipes through a leader on an older build that has no kvDeletePrefix", async () => {
+		await kvSetJson("rq.v1.a", { n: 1n })
+		await kvSetJson("session", { n: 2n })
+
+		// What a follower receives from such a leader: Comlink's TypeError for the unknown method, rebuilt
+		// by leader forwarding as a plain Error that keeps the name.
+		const unknownMethod = new Error("Cannot read properties of undefined (reading 'apply')")
+
+		unknownMethod.name = "TypeError"
+
+		const deletePrefix = vi.spyOn(fakeApi, "kvDeletePrefix").mockRejectedValue(unknownMethod)
+		const keys = vi.spyOn(fakeApi, "kvKeys")
+
+		await kvClear()
+
+		expect(fakeStore.size).toBe(0)
+		expect(deletePrefix).toHaveBeenCalledTimes(1)
+		expect(keys).toHaveBeenCalledTimes(2)
+	})
+
+	it("kvClear does not fall back to a per-key wipe when the prefix delete times out", async () => {
+		await kvSetJson("session", { n: 1n })
+		const timeout = new Error("db rpc timeout: kvDeletePrefix")
+
+		vi.spyOn(fakeApi, "kvDeletePrefix").mockRejectedValue(timeout)
+		const keys = vi.spyOn(fakeApi, "kvKeys")
+
+		await expect(kvClear()).rejects.toBe(timeout)
+		expect(keys).not.toHaveBeenCalled()
 	})
 
 	it("kvHas reports existence independent of schema — even a mismatched value counts as present", async () => {

@@ -2,7 +2,10 @@ import * as React from "react"
 
 import { cn } from "@filen/shared"
 
-function Card({ className, size = "default", ...props }: React.ComponentProps<"div"> & { size?: "default" | "sm" }) {
+function Card({ className, size: sizeProp, ...props }: React.ComponentProps<"div"> & { size?: "default" | "sm" }) {
+	// Not a destructuring default, which the React Compiler cannot lower.
+	const size = sizeProp ?? "default"
+
 	return (
 		<div
 			data-slot="card"

@@ -25,12 +25,18 @@ function PopoverTrigger({ ...props }: PopoverPrimitive.Trigger.Props) {
 
 function PopoverContent({
 	className,
-	align = "center",
-	alignOffset = 0,
-	side = "bottom",
-	sideOffset = 4,
+	align: alignProp,
+	alignOffset: alignOffsetProp,
+	side: sideProp,
+	sideOffset: sideOffsetProp,
 	...props
 }: PopoverPrimitive.Popup.Props & Pick<PopoverPrimitive.Positioner.Props, "align" | "alignOffset" | "side" | "sideOffset">) {
+	// Not destructuring defaults, which the React Compiler cannot lower.
+	const align = alignProp ?? "center"
+	const alignOffset = alignOffsetProp ?? 0
+	const side = sideProp ?? "bottom"
+	const sideOffset = sideOffsetProp ?? 4
+
 	return (
 		<PopoverPrimitive.Portal>
 			<PopoverPrimitive.Positioner

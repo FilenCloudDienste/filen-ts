@@ -60,7 +60,15 @@ interface Res {
 type Hello = { kind: "leader-ready" } | { kind: "leader?" }
 type Msg = Req | Res | Hello
 
-const STORAGE_METHODS = ["open", "kvGet", "kvSet", "kvDelete", "kvKeys"] as const satisfies readonly (keyof StorageApi)[]
+const STORAGE_METHODS = [
+	"open",
+	"kvGet",
+	"kvSet",
+	"kvDelete",
+	"kvKeys",
+	"kvEntries",
+	"kvDeletePrefix"
+] as const satisfies readonly (keyof StorageApi)[]
 
 // A promise plus its externally-exposed settle functions — lets a listener registered before the
 // promise exists (e.g. inside the promise's own executor) settle it later without a self-reference

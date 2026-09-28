@@ -48,11 +48,14 @@ function AlertDialogOverlay({ className, ...props }: AlertDialogPrimitive.Backdr
 
 function AlertDialogContent({
 	className,
-	size = "default",
+	size: sizeProp,
 	...props
 }: AlertDialogPrimitive.Popup.Props & {
 	size?: "default" | "sm"
 }) {
+	// Not a destructuring default, which the React Compiler cannot lower.
+	const size = sizeProp ?? "default"
+
 	return (
 		<AlertDialogPortal>
 			<AlertDialogOverlay />
@@ -146,10 +149,14 @@ function AlertDialogAction({ className, ...props }: React.ComponentProps<typeof 
 
 function AlertDialogCancel({
 	className,
-	variant = "outline",
-	size = "default",
+	variant: variantProp,
+	size: sizeProp,
 	...props
 }: AlertDialogPrimitive.Close.Props & Pick<React.ComponentProps<typeof Button>, "variant" | "size">) {
+	// Not destructuring defaults, which the React Compiler cannot lower.
+	const variant = variantProp === undefined ? "outline" : variantProp
+	const size = sizeProp === undefined ? "default" : sizeProp
+
 	return (
 		<AlertDialogPrimitive.Close
 			data-slot="alert-dialog-cancel"

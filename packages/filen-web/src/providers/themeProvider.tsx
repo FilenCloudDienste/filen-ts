@@ -48,11 +48,15 @@ function disableTransitionsTemporarily() {
 
 export function ThemeProvider({
 	children,
-	defaultTheme = DEFAULT_THEME_SETTING,
-	storageKey = "theme",
-	disableTransitionOnChange = true,
+	defaultTheme: defaultThemeProp,
+	storageKey: storageKeyProp,
+	disableTransitionOnChange: disableTransitionOnChangeProp,
 	...props
 }: ThemeProviderProps) {
+	// Not destructuring defaults, which the React Compiler cannot lower.
+	const defaultTheme = defaultThemeProp ?? DEFAULT_THEME_SETTING
+	const storageKey = storageKeyProp ?? "theme"
+	const disableTransitionOnChange = disableTransitionOnChangeProp ?? true
 	const [theme, setThemeState] = React.useState<Theme>(() => {
 		const storedTheme = localStorage.getItem(storageKey)
 		if (isThemeSetting(storedTheme)) {

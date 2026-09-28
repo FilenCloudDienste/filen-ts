@@ -15,7 +15,10 @@ function FieldSet({ className, ...props }: React.ComponentProps<"fieldset">) {
 	)
 }
 
-function FieldLegend({ className, variant = "legend", ...props }: React.ComponentProps<"legend"> & { variant?: "legend" | "label" }) {
+function FieldLegend({ className, variant: variantProp, ...props }: React.ComponentProps<"legend"> & { variant?: "legend" | "label" }) {
+	// Not a destructuring default, which the React Compiler cannot lower.
+	const variant = variantProp ?? "legend"
+
 	return (
 		<legend
 			data-slot="field-legend"
@@ -54,7 +57,10 @@ const fieldVariants = cva("group/field flex w-full gap-3 data-[invalid=true]:tex
 	}
 })
 
-function Field({ className, orientation = "vertical", ...props }: React.ComponentProps<"div"> & VariantProps<typeof fieldVariants>) {
+function Field({ className, orientation: orientationProp, ...props }: React.ComponentProps<"div"> & VariantProps<typeof fieldVariants>) {
+	// Not a destructuring default, which the React Compiler cannot lower.
+	const orientation = orientationProp === undefined ? "vertical" : orientationProp
+
 	return (
 		<div
 			role="group"

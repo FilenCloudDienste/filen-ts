@@ -22,6 +22,7 @@ import {
 } from "@/lib/sw/protocol"
 import { PendingRegistry } from "@/lib/sw/pendingRegistry"
 import { contentDispositionAttachment } from "@/lib/filename"
+import { log } from "@/lib/log"
 
 // ── SW-hosted trimmed SDK (single-threaded — no COI, no rayon pool) ─────────────────────────────
 // Lazy: only fetch+compile the 2 MB wasm and reconstruct the Client when a session is handed over, so
@@ -68,11 +69,68 @@ function ensureSdkInit(): Promise<void> {
 	return sdkReady
 }
 
+// One worker serves every tab of the origin, so a handover (another tab's or a reloaded tab's INIT_CLIENT)
+// or a logout can replace the Client while a stream still borrows it. Freeing it then either throws
+// (leaving a dead Client installed and every later stream failing) or cuts the running stream off, so a
+// replaced Client is only retired, and freed once its last stream ends.
+const clientStreams = new Map<SwClient, number>()
+const retiredClients = new Set<SwClient>()
+// Bumped by every logout, so an adoption suspended across one cannot reinstall the logged-out session.
+let logoutEpoch = 0
+
+function freeClient(client: SwClient): void {
+	try {
+		client.free()
+	} catch (e) {
+		log.error("sw", "freeing a Client failed", e)
+	}
+}
+
+function retireClient(client: SwClient | null): void {
+	if (client === null) {
+		return
+	}
+
+	if (clientStreams.has(client)) {
+		retiredClients.add(client)
+	} else {
+		freeClient(client)
+	}
+}
+
+function retainClient(client: SwClient): void {
+	clientStreams.set(client, (clientStreams.get(client) ?? 0) + 1)
+}
+
+function releaseClient(client: SwClient): void {
+	const remaining = (clientStreams.get(client) ?? 1) - 1
+
+	if (remaining > 0) {
+		clientStreams.set(client, remaining)
+
+		return
+	}
+
+	clientStreams.delete(client)
+
+	if (retiredClients.delete(client)) {
+		freeClient(client)
+	}
+}
+
 async function adoptSwClient(blob: SwStringifiedClient): Promise<void> {
+	const epoch = logoutEpoch
+
 	await ensureSdkInit()
-	const next = fromStringified(blob)
-	swClient?.free()
-	swClient = next
+
+	if (epoch !== logoutEpoch) {
+		throw new Error("logged out during the session handover")
+	}
+
+	const previous = swClient
+
+	swClient = fromStringified(blob)
+	retireClient(previous)
 }
 
 // Parse a single-range `bytes=` header against the known total; null = unsatisfiable/absent.
@@ -126,6 +184,7 @@ function handleZipDownload(event: FetchEvent, id: string, pending: PendingZipDow
 	})
 
 	downloads.beginStream(id)
+	retainClient(client)
 	// On failure, abort the writable so the Response readable ERRORS (never hangs) — same contract as
 	// the file branch. progress is a no-op: nothing page-side reads it, the browser's own download manager
 	// owns the save from here. This route carries no Content-Length (a generated archive's total isn't
@@ -138,6 +197,7 @@ function handleZipDownload(event: FetchEvent, id: string, pending: PendingZipDow
 				await writable.abort().catch(() => undefined)
 			} finally {
 				downloads.endStream(id)
+				releaseClient(client)
 			}
 		})()
 	)
@@ -203,6 +263,7 @@ function streamFileRange(
 	}
 
 	downloads.beginStream(id)
+	retainClient(client)
 	// Stream the decrypted bytes straight into the Response body's writable end. `end` is EXCLUSIVE on
 	// the SDK's `{start,end}` (Rust range convention) — an HTTP inclusive `bytes=0-99` maps to
 	// `{start:0,end:100}`. On failure, abort the writable so the Response readable ERRORS (never hangs).
@@ -231,6 +292,7 @@ function streamFileRange(
 				await writable.abort().catch(() => undefined)
 			} finally {
 				downloads.endStream(id)
+				releaseClient(client)
 			}
 		})()
 	)
@@ -353,10 +415,13 @@ self.addEventListener("message", (event: ExtendableMessageEvent) => {
 		// Logout must leave no decrypted key material resident in the worker: free the reconstructed
 		// Client and drop every pending download (each holds a decrypted AnyFile/AnyItemWithContext). The
 		// page sends this before its reload; the SW keeps running independently of that navigation, so the
-		// wipe lands regardless of reload timing.
-		swClient?.free()
+		// wipe lands regardless of reload timing. A stream still running keeps its Client until it ends.
+		const previous = swClient
+
+		logoutEpoch++
 		swClient = null
 		downloads.clear()
+		retireClient(previous)
 		port?.postMessage({ ok: true })
 	}
 })

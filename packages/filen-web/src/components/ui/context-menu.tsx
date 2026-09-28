@@ -34,12 +34,18 @@ function ContextMenuTrigger({ className, ...props }: ContextMenuPrimitive.Trigge
 
 function ContextMenuContent({
 	className,
-	align = "start",
-	alignOffset = 4,
-	side = "right",
-	sideOffset = 0,
+	align: alignProp,
+	alignOffset: alignOffsetProp,
+	side: sideProp,
+	sideOffset: sideOffsetProp,
 	...props
 }: ContextMenuPrimitive.Popup.Props & Pick<ContextMenuPrimitive.Positioner.Props, "align" | "alignOffset" | "side" | "sideOffset">) {
+	// Not destructuring defaults, which the React Compiler cannot lower.
+	const align = alignProp ?? "start"
+	const alignOffset = alignOffsetProp ?? 4
+	const side = sideProp ?? "right"
+	const sideOffset = sideOffsetProp ?? 0
+
 	return (
 		<ContextMenuPrimitive.Portal>
 			<ContextMenuPrimitive.Positioner
@@ -91,12 +97,15 @@ function ContextMenuLabel({
 function ContextMenuItem({
 	className,
 	inset,
-	variant = "default",
+	variant: variantProp,
 	...props
 }: ContextMenuPrimitive.Item.Props & {
 	inset?: boolean
 	variant?: "default" | "destructive"
 }) {
+	// Not a destructuring default, which the React Compiler cannot lower.
+	const variant = variantProp ?? "default"
+
 	return (
 		<ContextMenuPrimitive.Item
 			data-slot="context-menu-item"

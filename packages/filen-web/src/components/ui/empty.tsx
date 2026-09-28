@@ -37,7 +37,10 @@ const emptyMediaVariants = cva("mb-2 flex shrink-0 items-center justify-center [
 	}
 })
 
-function EmptyMedia({ className, variant = "default", ...props }: React.ComponentProps<"div"> & VariantProps<typeof emptyMediaVariants>) {
+function EmptyMedia({ className, variant: variantProp, ...props }: React.ComponentProps<"div"> & VariantProps<typeof emptyMediaVariants>) {
+	// Not a destructuring default, which the React Compiler cannot lower.
+	const variant = variantProp === undefined ? "default" : variantProp
+
 	return (
 		<div
 			data-slot="empty-icon"

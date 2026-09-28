@@ -463,6 +463,69 @@ describe("createSearchEngine — open", () => {
 
 		expect(pushes).toEqual([{ type: "snapshot", hits: [], total: 4n, live: true }])
 	})
+
+	it("silences the installed window's listener as soon as a reopen starts, before that reopen installs", async () => {
+		let listenerA: SnapshotListener | undefined
+		const searchA = fakeSearchResolving(makeFakeWindow(snapshot()), listener => {
+			listenerA = listener
+		})
+		const pendingSearchB = deferredPromise<ReturnType<typeof fakeSearchResolving>>()
+		const createSearch = vi.fn().mockResolvedValueOnce(searchA).mockReturnValueOnce(pendingSearchB.promise)
+		const { client } = makeFakeClient(createSearch)
+		const engine = createSearchEngine()
+		const { push, pushes } = collectPushes()
+
+		await engine.open(client, { rootUuid: null, name: "a" }, push)
+
+		const reopen = engine.open(client, { rootUuid: null, name: "b" }, push)
+
+		listenerA?.(snapshot({ total: 9n }))
+
+		expect(pushes).toEqual([])
+
+		pendingSearchB.resolve(fakeSearchResolving(makeFakeWindow(snapshot())))
+		await reopen
+	})
+
+	it("rejects an open still waiting on its first delivery once a newer open supersedes it", async () => {
+		const searchA = fakeSearchResolving(makeFakeWindow(undefined))
+		const createSearch = vi
+			.fn()
+			.mockResolvedValueOnce(searchA)
+			.mockResolvedValueOnce(fakeSearchResolving(makeFakeWindow(snapshot())))
+		const { client } = makeFakeClient(createSearch)
+		const engine = createSearchEngine()
+		const { push } = collectPushes()
+
+		const first = engine.open(client, { rootUuid: null, name: "a" }, push)
+
+		await vi.waitFor(() => {
+			expect(searchA.getRange).toHaveBeenCalled()
+		})
+
+		const second = engine.open(client, { rootUuid: null, name: "b" }, push)
+
+		await expect(first).rejects.toBeInstanceOf(SearchSupersededError)
+		await expect(second).resolves.toEqual({ hits: [], total: 0n, live: true })
+	})
+
+	it("rejects an open still waiting on its first delivery once the engine is closed", async () => {
+		const searchA = fakeSearchResolving(makeFakeWindow(undefined))
+		const createSearch = vi.fn(() => Promise.resolve(searchA))
+		const { client } = makeFakeClient(createSearch)
+		const engine = createSearchEngine()
+		const { push } = collectPushes()
+
+		const first = engine.open(client, { rootUuid: null, name: "a" }, push)
+
+		await vi.waitFor(() => {
+			expect(searchA.getRange).toHaveBeenCalled()
+		})
+
+		await engine.close()
+
+		await expect(first).rejects.toBeInstanceOf(SearchSupersededError)
+	})
 })
 
 describe("createSearchEngine — status listener routing", () => {

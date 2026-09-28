@@ -26,10 +26,13 @@ const badgeVariants = cva(
 
 function Badge({
 	className,
-	variant = "default",
+	variant: variantProp,
 	render,
 	...props
 }: useRender.ComponentProps<"span"> & VariantProps<typeof badgeVariants>) {
+	// Not a destructuring default, which the React Compiler cannot lower.
+	const variant = variantProp === undefined ? "default" : variantProp
+
 	return useRender({
 		defaultTagName: "span",
 		props: mergeProps<"span">(
