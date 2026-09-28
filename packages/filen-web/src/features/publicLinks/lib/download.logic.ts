@@ -67,12 +67,17 @@ export function anonPreviewability(item: DriveItem, cap: bigint = PREVIEW_MAX_BY
 // as ordinary state.
 export interface CollectingSink {
 	writable: WritableStream<Uint8Array>
+	// Awaited only once the pipe succeeds, so a failed pipe leaves its rejection handled here.
 	done: Promise<Blob>
+	// Whether the stream errored at the cap: the pipe then fails with the SDK's own write error, which
+	// cannot tell a zip too large for this browser from any other failure.
+	capExceeded: () => boolean
 }
 
 export function createCollectingSink(cap: bigint = PUBLIC_BUFFERED_DOWNLOAD_MAX_BYTES): CollectingSink {
 	const chunks: Uint8Array[] = []
 	let total = 0n
+	let exceeded = false
 	let resolve: (blob: Blob) => void
 	let reject: (reason: unknown) => void
 
@@ -81,11 +86,15 @@ export function createCollectingSink(cap: bigint = PUBLIC_BUFFERED_DOWNLOAD_MAX_
 		reject = rej
 	})
 
+	done.catch(() => undefined)
+
 	const writable = new WritableStream<Uint8Array>({
 		write(chunk) {
 			total += BigInt(chunk.byteLength)
 
 			if (total > cap) {
+				exceeded = true
+
 				const error = new Error("public-link zip exceeds the in-memory download cap")
 
 				reject(error)
@@ -105,5 +114,5 @@ export function createCollectingSink(cap: bigint = PUBLIC_BUFFERED_DOWNLOAD_MAX_
 		}
 	})
 
-	return { writable, done }
+	return { writable, done, capExceeded: () => exceeded }
 }

@@ -41,7 +41,7 @@ function mockDir(overrides: Partial<Dir> = {}): Dir {
 }
 
 function driveSource(item: DriveItem): PreviewSource {
-	return { type: "drive", item }
+	return { item }
 }
 
 function fileSourceAt(label: string): PreviewSource {
@@ -54,7 +54,7 @@ describe("reconcilePreviewSources — removed", () => {
 		const next = reconcilePreviewSources({ sources, index: 2 }, { type: "removed", uuid: testUuid("a") })
 
 		expect(next).not.toBeNull()
-		expect(next?.sources.map(s => (s.type === "drive" ? s.item.data.uuid : ""))).toEqual([testUuid("b"), testUuid("c")])
+		expect(next?.sources.map(s => s.item.data.uuid)).toEqual([testUuid("b"), testUuid("c")])
 		// index steps back one so the same item (c) stays under the anchor.
 		expect(next?.index).toBe(1)
 	})
@@ -64,7 +64,7 @@ describe("reconcilePreviewSources — removed", () => {
 		const next = reconcilePreviewSources({ sources, index: 1 }, { type: "removed", uuid: testUuid("b") })
 
 		expect(next?.index).toBe(1)
-		expect(next?.sources.map(s => (s.type === "drive" ? s.item.data.uuid : ""))).toEqual([testUuid("a"), testUuid("c")])
+		expect(next?.sources.map(s => s.item.data.uuid)).toEqual([testUuid("a"), testUuid("c")])
 	})
 
 	it("clamps to the new last slot when the removed current item was last", () => {
@@ -100,7 +100,7 @@ describe("reconcilePreviewSources — removed", () => {
 		)
 
 		expect(first).not.toBeNull()
-		expect(first?.sources.map(s => (s.type === "drive" ? s.item.data.uuid : ""))).toEqual([testUuid("b")])
+		expect(first?.sources.map(s => s.item.data.uuid)).toEqual([testUuid("b")])
 
 		if (first === null) {
 			throw new Error("unreachable")
@@ -118,7 +118,7 @@ describe("reconcilePreviewSources — moved, revised, resync", () => {
 		const moved = narrowItem(mockFile({ uuid: testUuid("a"), parent: testUuid("elsewhere") }))
 		const next = reconcilePreviewSources({ sources, index: 0 }, { type: "moved", item: moved })
 
-		expect(next?.sources.map(s => (s.type === "drive" ? s.item.data.uuid : ""))).toEqual([testUuid("b")])
+		expect(next?.sources.map(s => s.item.data.uuid)).toEqual([testUuid("b")])
 	})
 
 	it("keeps the protected slot through a removal, a move or a restore", () => {
@@ -150,7 +150,7 @@ describe("reconcilePreviewSources — metadata", () => {
 
 		const next = reconcilePreviewSources({ sources, index: 0 }, { type: "fileMeta", uuid: testUuid("file"), meta })
 
-		expect(next?.sources[0]?.type === "drive" ? next.sources[0].item.data.decryptedMeta?.name : "").toBe("renamed.pdf")
+		expect(next?.sources[0]?.item.data.decryptedMeta?.name).toBe("renamed.pdf")
 	})
 
 	it("re-derives an owned directory's title from the fresh meta", () => {
@@ -159,15 +159,7 @@ describe("reconcilePreviewSources — metadata", () => {
 
 		const next = reconcilePreviewSources({ sources, index: 0 }, { type: "folderMeta", uuid: testUuid("dir"), meta })
 
-		expect(next?.sources[0]?.type === "drive" ? next.sources[0].item.data.decryptedMeta?.name : "").toBe("Renamed")
-	})
-
-	it("leaves an external source untouched on any event", () => {
-		const external: PreviewSource = { type: "external", url: "https://example.com/x", name: "x" }
-		const state = { sources: [external], index: 0 }
-		const meta: DirMeta = { type: "decoded", data: { name: "Renamed" } }
-
-		expect(reconcilePreviewSources(state, { type: "folderMeta", uuid: testUuid("dir"), meta })?.sources[0]).toBe(external)
+		expect(next?.sources[0]?.item.data.decryptedMeta?.name).toBe("Renamed")
 	})
 })
 
@@ -198,6 +190,6 @@ describe("reconcilePreviewSources — unchanged state", () => {
 
 		expect(next).not.toBe(state)
 		expect(next?.sources[0]).toBe(state.sources[0])
-		expect(next?.sources[1]?.type === "drive" ? next.sources[1].item.data.decryptedMeta?.name : "").toBe("renamed.pdf")
+		expect(next?.sources[1]?.item.data.decryptedMeta?.name).toBe("renamed.pdf")
 	})
 })

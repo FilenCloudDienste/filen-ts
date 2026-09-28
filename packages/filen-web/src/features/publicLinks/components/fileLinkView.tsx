@@ -45,6 +45,14 @@ export function FileLinkView({ uuid, linkKey }: { uuid: string; linkKey: string 
 			<PasswordGate
 				state={access}
 				onSubmit={next => {
+					// The same string again keys the same query, which would not run: check it once more, so
+					// the gate goes through checking and back instead of looking dead.
+					if (submitted && next === password) {
+						void query.refetch()
+
+						return
+					}
+
 					setSubmitted(true)
 					setPassword(next)
 				}}

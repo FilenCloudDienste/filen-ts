@@ -1,6 +1,7 @@
 import type { File as SdkFile, LinkedDir, LinkedDirsAndFiles, AnyLinkedDir, DirPublicInfo } from "@filen/sdk-rs"
 import { driveItemName } from "@filen/shared"
-import { asDirectoryOrFile, narrowItem, type DriveItem } from "@/features/drive/lib/item"
+import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
+import { DRIVE_SORT_FROM_PARTS, sortByDriveItem, type DriveSortField } from "@/features/drive/lib/sort"
 
 // Pure client-side model for browsing a linked directory. Navigation is a VIRTUAL stack (old-web
 // parity): entering a subfolder pushes a crumb, breadcrumb clicks truncate it — the route's own uuid
@@ -29,7 +30,7 @@ export interface PublicSort {
 	direction: SortDirection
 }
 
-// Name ascending — the drive's own default. Folders always precede files regardless (see sortEntries).
+// Name ascending — the drive's own default. Directories always precede files regardless (see sortEntries).
 export const DEFAULT_PUBLIC_SORT: PublicSort = { field: "name", direction: "asc" }
 
 // Root crumb from the resolved link info: the linked root dir plus its decrypted name (uuid fallback
@@ -72,24 +73,6 @@ export function entryName(entry: BrowseEntry): string {
 	return driveItemName(entry.item)
 }
 
-// File size in bytes; a directory has no cheap size at this layer (getDirSize is a separate call), so
-// it sorts as 0 — folders stay grouped ahead of files anyway (see sortEntries).
-function entrySize(entry: BrowseEntry): number {
-	return entry.kind === "file" ? Number(entry.file.size) : 0
-}
-
-// Modified time in ms — the file's decrypted `modified` (its own raw timestamp as fallback), or a
-// directory's decrypted `created` / raw timestamp. Mirrors formatModifiedDate's field choice.
-function entryDate(entry: BrowseEntry): number {
-	const base = asDirectoryOrFile(entry.item)
-	const ts =
-		base.type === "file"
-			? (base.data.decryptedMeta?.modified ?? base.data.timestamp)
-			: (base.data.decryptedMeta?.created ?? base.data.timestamp)
-
-	return Number(ts)
-}
-
 // Case-insensitive substring filter over the current level's already-fetched entries — no server round
 // trip (old-web parity). A blank/whitespace query returns the list unchanged.
 export function filterEntries(entries: readonly BrowseEntry[], query: string): BrowseEntry[] {
@@ -102,43 +85,11 @@ export function filterEntries(entries: readonly BrowseEntry[], query: string): B
 	return entries.filter(entry => entryName(entry).toLowerCase().includes(needle))
 }
 
-// Folders always precede files (drive convention); the chosen field orders within each group, so a
-// size/date sort never interleaves a folder among files. Name comparison is locale-aware; a stable
-// order is guaranteed by falling back to a name compare on equal size/date.
+// The drive listing's own order (@/features/drive/lib/sort): directories before files, the chosen field
+// within each group, and the same deterministic tie order. A directory has no cheap size at this layer
+// (getDirSize is a separate call), so a size sort orders directories by name alone.
+const DRIVE_SORT_FIELD: Record<PublicSortField, DriveSortField> = { name: "name", size: "size", date: "lastModified" }
+
 export function sortEntries(entries: readonly BrowseEntry[], sort: PublicSort): BrowseEntry[] {
-	const dirs: BrowseEntry[] = []
-	const files: BrowseEntry[] = []
-
-	for (const entry of entries) {
-		if (entry.kind === "dir") {
-			dirs.push(entry)
-		} else {
-			files.push(entry)
-		}
-	}
-
-	const factor = sort.direction === "asc" ? 1 : -1
-
-	function compare(a: BrowseEntry, b: BrowseEntry): number {
-		const byName = entryName(a).localeCompare(entryName(b), undefined, { numeric: true, sensitivity: "base" })
-
-		if (sort.field === "size") {
-			const bySize = entrySize(a) - entrySize(b)
-
-			return (bySize !== 0 ? bySize : byName) * factor
-		}
-
-		if (sort.field === "date") {
-			const byDate = entryDate(a) - entryDate(b)
-
-			return (byDate !== 0 ? byDate : byName) * factor
-		}
-
-		return byName * factor
-	}
-
-	dirs.sort(compare)
-	files.sort(compare)
-
-	return [...dirs, ...files]
+	return sortByDriveItem([...entries], entry => entry.item, DRIVE_SORT_FROM_PARTS[DRIVE_SORT_FIELD[sort.field]][sort.direction])
 }

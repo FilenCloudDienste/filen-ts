@@ -39,7 +39,7 @@ vi.mock("@/features/drive/lib/saveDownload", () => ({
 	isFsaAvailable: () => typeof window.showSaveFilePicker === "function",
 	isPickerCancelled: () => false
 }))
-vi.mock("@/features/preview/lib/heicTransform", () => ({ transformHeicBytes }))
+vi.mock("@/features/preview/lib/heicTransform", () => ({ transformHeicBytes, transformHeicBytesOwned: transformHeicBytes }))
 
 const createObjectURL = vi.fn<(object: Blob | MediaSource) => string>(() => "blob:test")
 

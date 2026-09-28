@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useEffectEvent, useState } from "react"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { narrowToAnyFile } from "@/features/drive/lib/download"
 import { sdkApi } from "@/lib/sdk/client"
@@ -17,9 +17,13 @@ export type UsePreviewBytesResult =
 	| { status: "error"; dto: ErrorDTO; refetch: () => void }
 
 // Loads one file's whole decrypted buffer for the preview overlay. Mints a fresh token per load and
-// cancels the in-flight worker download (previewAborts registry, sdk.worker.ts) on unmount AND on
-// `item` changing, so arrow-stepping away from a still-loading file never lets its bytes land after the
-// fact. Previews are never registered as transfers (ephemeral, own spinner, no row).
+// cancels the in-flight worker download (previewAborts registry, sdk.worker.ts) on unmount AND on the
+// item's uuid changing, so arrow-stepping away from a still-loading file never lets its bytes land after
+// the fact. Previews are never registered as transfers (ephemeral, own spinner, no row).
+//
+// Keyed on the uuid, never on the `item` object: the overlay hands over a new object for the same file
+// after a favorite toggle or rename, and the uuid rotates whenever the content changes, so a
+// metadata-only update must leave an in-flight download running rather than restart it from zero.
 //
 // The caller is expected to key its host element by the item's uuid (previewOverlay.tsx's
 // PreviewBody) so a genuine item change remounts this hook fresh — the initial "pending" state then
@@ -29,7 +33,7 @@ export type UsePreviewBytesResult =
 //
 // `reloadToken` is the retry mechanism: `refetch` bumps it (and resets to "pending" synchronously, an
 // ordinary event-handler setState, not an effect one) to re-run the SAME effect against the SAME item
-// without needing a remount — an item change already gets a fresh load via `item` itself changing, so
+// without needing a remount — an item change already gets a fresh load via its uuid changing, so
 // `reloadToken` only ever needs to move on an explicit user retry.
 //
 // A buffer already loaded this session (previewCache.ts) is served without a download: the initial
@@ -52,6 +56,10 @@ export function usePreviewBytes(item: DriveItem): UsePreviewBytesResult {
 		return bytes === undefined ? { status: "pending" } : { status: "success", bytes }
 	})
 	const [reloadToken, setReloadToken] = useState(0)
+	const uuid = item.data.uuid
+	// The latest item's file, read when a load starts: its content fields are the same for every
+	// object sharing this uuid.
+	const currentFile = useEffectEvent(() => narrowToAnyFile(item))
 
 	useEffect(() => {
 		let live = true
@@ -62,10 +70,10 @@ export function usePreviewBytes(item: DriveItem): UsePreviewBytesResult {
 
 		async function load(): Promise<void> {
 			try {
-				const file = narrowToAnyFile(item)
+				const file = currentFile()
 				const bytes = await loadPreviewBytes(
 					cacheScope,
-					item.data.uuid,
+					uuid,
 					Number(file.size),
 					() =>
 						runOp(
@@ -94,7 +102,7 @@ export function usePreviewBytes(item: DriveItem): UsePreviewBytesResult {
 			gone.abort()
 			void sdkApi.cancelPreviewDownload(token)
 		}
-	}, [item, reloadToken, accessMode, cacheScope])
+	}, [uuid, reloadToken, accessMode, cacheScope])
 
 	function refetch(): void {
 		setResult({ status: "pending" })

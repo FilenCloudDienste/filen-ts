@@ -26,7 +26,7 @@ export interface ImageViewerProps {
 // pointer-drag pan while zoomed, double-click zoom toggle, and wheel-zoom-toward-cursor — all pure math
 // lives in imageViewer.logic.ts, this component only wires DOM events to it. No pan/zoom library:
 // identical rendering regardless of whether `url` is a blob: URL or the SW's inline-preview route.
-export function ZoomableImage({
+function ZoomableImage({
 	url,
 	alt,
 	onError

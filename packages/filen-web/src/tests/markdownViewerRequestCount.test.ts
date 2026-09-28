@@ -4,6 +4,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { createElement, type ChangeEvent } from "react"
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import type { File, UuidStr } from "@filen/sdk-rs"
+import type { Extension } from "@codemirror/state"
 import "@/lib/i18n"
 
 const { downloadFileBytes, cancelPreviewDownload } = vi.hoisted(() => ({
@@ -18,19 +19,54 @@ vi.mock("@/lib/sdk/client", () => ({
 
 vi.mock("@/providers/themeProvider", () => ({ useTheme: () => ({ theme: "light", setTheme: vi.fn() }) }))
 
-// CodeMirror's own view needs layout jsdom lacks; a textarea keeps the real CodeMirrorSource buffer,
-// dirty and contentRef logic under test while standing in for the editor surface. Uncontrolled, like the
-// editor: `value` seeds it, and the typed buffer lives in it.
-vi.mock("@uiw/react-codemirror", async () => ({
-	oneDarkHighlightStyle: (await import("@codemirror/language")).HighlightStyle.define([]),
-	default: (props: { value: string; readOnly: boolean; "aria-label": string; onChange?: (value: string) => void }) =>
-		createElement("textarea", {
+// CodeMirror's own view needs layout jsdom lacks; a textarea stands in for the editor surface over a
+// detached EditorView carrying CodeMirrorSource's real extensions, so its buffer, dirty and contentRef
+// logic stays under test. Uncontrolled, like the editor: `value` seeds it, and the typed buffer lives in
+// it. The view is handed over once, as @uiw does.
+vi.mock("@uiw/react-codemirror", async () => {
+	const { Annotation, EditorState } = await import("@codemirror/state")
+	const { EditorView } = await import("@codemirror/view")
+	const { useEffectEvent, useLayoutEffect, useState } = await import("react")
+
+	interface FakeProps {
+		value: string
+		readOnly: boolean
+		"aria-label": string
+		extensions: Extension[]
+		onCreateEditor?: (view: InstanceType<typeof EditorView>) => void
+	}
+
+	function FakeCodeMirror(props: FakeProps) {
+		const [view] = useState(() => new EditorView({ state: EditorState.create({ doc: props.value, extensions: props.extensions }) }))
+		const created = useEffectEvent(() => {
+			props.onCreateEditor?.(view)
+		})
+
+		useLayoutEffect(() => {
+			created()
+
+			return () => {
+				view.destroy()
+			}
+		}, [view])
+
+		return createElement("textarea", {
 			"aria-label": props["aria-label"],
 			defaultValue: props.value,
 			readOnly: props.readOnly,
-			onChange: (event: ChangeEvent<HTMLTextAreaElement>) => props.onChange?.(event.target.value)
+			onChange: (event: ChangeEvent<HTMLTextAreaElement>) => {
+				view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: event.target.value } })
+			}
 		})
-}))
+	}
+
+	return {
+		// The source's update listener skips @uiw's own value-sync transactions by this annotation.
+		ExternalChange: Annotation.define<boolean>(),
+		oneDarkHighlightStyle: (await import("@codemirror/language")).HighlightStyle.define([]),
+		default: FakeCodeMirror
+	}
+})
 
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { setPreviewDirty, usePreviewUnsavedGuardStore } from "@/features/preview/store/usePreviewUnsavedGuard"
@@ -114,7 +150,7 @@ describe("MarkdownViewer request count", () => {
 		downloadFileBytes.mockImplementation(file =>
 			Promise.resolve(bytes((file as { uuid: string }).uuid.startsWith("after") ? SAVED : ORIGINAL))
 		)
-		const contentRef = { current: null as string | null }
+		const contentRef = { current: null as (() => string) | null }
 		const props = { alt: ALT, editable: true, onDirtyChange: setPreviewDirty, contentRef }
 		const { rerender } = render(createElement(MarkdownViewer, { key: "before", item: mdFile("before"), ...props }))
 
@@ -123,7 +159,7 @@ describe("MarkdownViewer request count", () => {
 		const editor = await sourceEditor()
 		expect(editor.readOnly).toBe(false)
 		await waitFor(() => {
-			expect(contentRef.current).toBe(ORIGINAL)
+			expect(contentRef.current?.()).toBe(ORIGINAL)
 		})
 		expect(usePreviewUnsavedGuardStore.getState().dirty).toBe(false)
 
@@ -131,7 +167,7 @@ describe("MarkdownViewer request count", () => {
 		await waitFor(() => {
 			expect(usePreviewUnsavedGuardStore.getState().dirty).toBe(true)
 		})
-		expect(contentRef.current).toBe(SAVED)
+		expect(contentRef.current?.()).toBe(SAVED)
 
 		// Locked while dirty: the unsaved buffer stays mounted.
 		toggle("View rendered")

@@ -22,16 +22,17 @@ export function clampImageScale(scale: number): number {
 	return Math.min(IMAGE_MAX_SCALE, Math.max(IMAGE_MIN_SCALE, scale))
 }
 
-// object-fit:contain's own sizing recipe — the rendered (unscaled, i.e. at ZoomTransform.scale === 1)
-// box of `natural` fitted inside `container`, letterboxed on whichever axis has slack. Falls back to
-// the container's own size when either input is degenerate (a pre-layout 0×0 rect, or an image whose
-// naturalWidth/Height hasn't resolved yet) rather than dividing by zero.
+// The rendered (unscaled, i.e. at ZoomTransform.scale === 1) box of `natural` inside `container`:
+// the <img> is only bounded by max-width/max-height, so it shrinks to fit but never grows, and an image
+// smaller than the container keeps its natural size. Falls back to the container's own size when either
+// input is degenerate (a pre-layout 0×0 rect, or an image whose naturalWidth/Height hasn't resolved
+// yet) rather than dividing by zero.
 export function containSize(container: Size, natural: Size): Size {
 	if (container.width <= 0 || container.height <= 0 || natural.width <= 0 || natural.height <= 0) {
 		return container
 	}
 
-	const fit = Math.min(container.width / natural.width, container.height / natural.height)
+	const fit = Math.min(1, container.width / natural.width, container.height / natural.height)
 
 	return { width: natural.width * fit, height: natural.height * fit }
 }

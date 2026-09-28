@@ -70,11 +70,7 @@ describe("previewOpenTarget", () => {
 
 		expect(target).not.toBeNull()
 		expect(target?.index).toBe(1)
-		expect(target?.sources).toEqual([
-			{ type: "drive", item: a },
-			{ type: "drive", item: b },
-			{ type: "drive", item: c }
-		])
+		expect(target?.sources).toEqual([{ item: a }, { item: b }, { item: c }])
 	})
 
 	it("opens at index 0 for the first tile", () => {

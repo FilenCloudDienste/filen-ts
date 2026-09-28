@@ -21,7 +21,7 @@ export interface MarkdownViewerProps {
 	// rendered arm is never an editing surface.
 	editable?: boolean
 	onDirtyChange?: (dirty: boolean) => void
-	contentRef?: RefObject<string | null>
+	contentRef?: RefObject<(() => string) | null>
 	// Read-only while the overlay saves: see CodeMirrorSource's own prop.
 	locked?: boolean
 }

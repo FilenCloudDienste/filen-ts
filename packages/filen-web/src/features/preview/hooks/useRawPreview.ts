@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useEffectEvent, useState } from "react"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { narrowToAnyFile } from "@/features/drive/lib/download"
 import { sdkApi } from "@/lib/sdk/client"
@@ -13,9 +13,10 @@ export type UseRawPreviewResult =
 	| { status: "success"; preview: RawPreviewResult; refetch: () => void }
 	| { status: "error"; dto: ErrorDTO; refetch: () => void }
 
-// usePreviewBytes's lifecycle (fresh token per load, cancel on unmount/item change, reloadToken
+// usePreviewBytes's lifecycle (fresh token per load, cancel on unmount/uuid change, reloadToken
 // retry, the same authed/anon seam, the same session cache) for a RAW's embedded preview instead of the
-// file's own bytes.
+// file's own bytes. Keyed on the uuid for the same reason: a favorite toggle or rename hands over a new
+// item object for the same content and must not restart an in-flight fetch.
 export function useRawPreview(item: DriveItem): UseRawPreviewResult {
 	const accessMode = usePreviewAccessMode()
 	const cacheScope = usePreviewCacheScope()
@@ -27,6 +28,8 @@ export function useRawPreview(item: DriveItem): UseRawPreviewResult {
 		return preview === undefined ? { status: "pending" } : { status: "success", preview }
 	})
 	const [reloadToken, setReloadToken] = useState(0)
+	const uuid = item.data.uuid
+	const currentFile = useEffectEvent(() => narrowToAnyFile(item))
 
 	useEffect(() => {
 		let live = true
@@ -34,19 +37,19 @@ export function useRawPreview(item: DriveItem): UseRawPreviewResult {
 		const epoch = previewCacheEpoch()
 
 		async function fetchPreview(): Promise<RawPreviewResult> {
-			const file = narrowToAnyFile(item)
+			const file = currentFile()
 			const preview = await runOp<RawPreviewResult>(
 				accessMode === "anon" ? sdkApi.fetchLinkedRawPreviewAnon(file, token) : sdkApi.fetchRawPreview(file, token)
 			)
 
-			setRawPreview(cacheScope, item.data.uuid, preview, epoch)
+			setRawPreview(cacheScope, uuid, preview, epoch)
 
 			return preview
 		}
 
 		// Promise handlers, not try/catch: the React Compiler cannot lower one around a logical expression
 		// and would skip the hook.
-		const cached = getRawPreview(cacheScope, item.data.uuid)
+		const cached = getRawPreview(cacheScope, uuid)
 
 		void (cached === undefined ? fetchPreview() : Promise.resolve(cached)).then(
 			preview => {
@@ -65,7 +68,7 @@ export function useRawPreview(item: DriveItem): UseRawPreviewResult {
 			live = false
 			void sdkApi.cancelPreviewDownload(token)
 		}
-	}, [item, reloadToken, accessMode, cacheScope])
+	}, [uuid, reloadToken, accessMode, cacheScope])
 
 	function refetch(): void {
 		setResult({ status: "pending" })

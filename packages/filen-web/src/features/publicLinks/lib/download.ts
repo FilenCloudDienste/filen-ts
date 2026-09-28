@@ -3,7 +3,7 @@ import type { AnyFile, AnyLinkedDirWithContext } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
 import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
 import { isFsaAvailable, isPickerCancelled } from "@/features/drive/lib/saveDownload"
-import { chooseDownloadStrategy, createCollectingSink } from "@/features/publicLinks/lib/download.logic"
+import { chooseDownloadStrategy, createCollectingSink, type CollectingSink } from "@/features/publicLinks/lib/download.logic"
 import { previewCacheScope } from "@/features/preview/lib/accessMode"
 import { joinPreviewBytes, loadPreviewBytes } from "@/features/preview/lib/previewCache"
 
@@ -13,8 +13,9 @@ import { joinPreviewBytes, loadPreviewBytes } from "@/features/preview/lib/previ
 // buffered in memory and saved via an anchor. Progress is reported to a caller-owned callback so the
 // page renders its own inline indicator.
 
-// loaded/total in bytes; `total` is null only for the brief pre-first-progress window of a zip whose
-// size the SDK hasn't reported yet.
+// loaded/total in bytes; `total` is null while there is no share to show: a zip whose size the SDK
+// hasn't reported yet. A buffered file download reports nothing until it is done, since the bytes call
+// behind it has no progress callback.
 export type AnonDownloadProgress = (loaded: number, total: number | null) => void
 
 export type AnonDownloadOutcome =
@@ -142,10 +143,6 @@ export async function startAnonFileDownload(args: {
 	const scope = previewCacheScope("anon", linkScope)
 
 	try {
-		if (writable === null) {
-			onProgress(0, Number(size))
-		}
-
 		const previewed = await joinPreviewBytes(scope, file.uuid)
 
 		if (previewed !== undefined) {
@@ -194,7 +191,8 @@ export async function startAnonFileDownload(args: {
 
 // Whole linked directory → a single zip. FSA streams the archive to the picked file; the non-FSA
 // fallback collects it in memory (createCollectingSink, cap-enforced incrementally since a zip's total
-// isn't known up front) then saves one Blob. `<name>.zip` mirrors old-web's naming.
+// isn't known up front, reported as "too-large" once it trips) then saves one Blob. `<name>.zip` mirrors
+// old-web's naming.
 export async function startAnonDirZipDownload(args: {
 	dir: AnyLinkedDirWithContext
 	name: string
@@ -205,6 +203,7 @@ export async function startAnonDirZipDownload(args: {
 	const transferId = crypto.randomUUID()
 
 	let fsaWritable: FileSystemWritableFileStream | null = null
+	let sink: CollectingSink | null = null
 
 	if (isFsaAvailable()) {
 		try {
@@ -230,15 +229,21 @@ export async function startAnonDirZipDownload(args: {
 				sdkApi.downloadLinkedDirToZipAnon(dir, transferId, transferred, reportProgress)
 			)
 		} else {
-			const sink = createCollectingSink()
+			const buffered = createCollectingSink()
 
-			await pipeWorkerToSink(sink.writable, transferred =>
+			sink = buffered
+
+			await pipeWorkerToSink(buffered.writable, transferred =>
 				sdkApi.downloadLinkedDirToZipAnon(dir, transferId, transferred, reportProgress)
 			)
 
-			saveBlob(await sink.done, fileName)
+			saveBlob(await buffered.done, fileName)
 		}
 	} catch (e) {
+		if (sink?.capExceeded() === true) {
+			return { status: "too-large" }
+		}
+
 		const dto = asErrorDTO(e)
 
 		return dto.kind === "Cancelled" ? { status: "cancelled" } : { status: "error", dto }

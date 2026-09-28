@@ -177,13 +177,9 @@ describe("previewMenuActions (preview header item-menu derivation)", () => {
 	})
 })
 
-describe("previewMenuVisible (drive-sourced items only)", () => {
-	it("is true for the drive arm", () => {
-		expect(previewMenuVisible({ type: "drive", item: fileItem() })).toBe(true)
-	})
-
-	it("is false for the external arm — no DriveItem for driveItemActions to gate against", () => {
-		expect(previewMenuVisible({ type: "external", url: "https://example.com/a.png", name: "a.png" })).toBe(false)
+describe("previewMenuVisible", () => {
+	it("is true for an owned drive item", () => {
+		expect(previewMenuVisible({ item: fileItem() })).toBe(true)
 	})
 
 	it("is false for a chat/note embed's fabricated linked-file item — neither owned nor a real tree member", () => {
@@ -203,7 +199,7 @@ describe("previewMenuVisible (drive-sourced items only)", () => {
 			canMakeThumbnail: false
 		})
 
-		expect(previewMenuVisible({ type: "drive", item: linkedItem })).toBe(false)
+		expect(previewMenuVisible({ item: linkedItem })).toBe(false)
 	})
 })
 

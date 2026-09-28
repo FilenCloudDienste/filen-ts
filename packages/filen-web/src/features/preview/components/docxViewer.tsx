@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next"
 import { renderAsync } from "docx-preview"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
-import { isSafeLinkHref } from "@/features/preview/components/docxViewer.logic"
+import { collectBlobUrls, sanitizeDocxLinks } from "@/features/preview/lib/docxDom"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { LoadingState } from "@/components/loadingState"
 import { PreviewErrorState } from "@/features/preview/components/previewErrorState"
@@ -11,6 +11,12 @@ import { PreviewErrorState } from "@/features/preview/components/previewErrorSta
 export interface DocxViewerProps {
 	item: DriveItem
 	alt: string
+}
+
+function revokeAll(urls: readonly string[]): void {
+	for (const url of urls) {
+		URL.revokeObjectURL(url)
+	}
 }
 
 // renderAsync feeds `bytes` straight into JSZip.loadAsync (verified against the installed 0.4.0
@@ -30,28 +36,8 @@ export interface DocxViewerProps {
 // file).
 //
 // renderHyperlink (same source) copies a relationship's target straight into `href` with no scheme
-// check of its own — sanitizeLinks below is the closing sweep for that, run once per render.
-function sanitizeLinks(container: HTMLElement): void {
-	for (const anchor of container.querySelectorAll("a[href]")) {
-		if (!(anchor instanceof HTMLAnchorElement)) {
-			continue
-		}
-
-		if (!isSafeLinkHref(anchor.href)) {
-			anchor.removeAttribute("href")
-
-			continue
-		}
-
-		// docx-preview emits no target/rel at all, so a click would otherwise navigate this app's own
-		// tab away to whatever the document links to. target="_blank" + rel="noreferrer" (this app's
-		// external-link convention, registerForm.tsx) keeps the preview in place and drops the new
-		// tab's window.opener access.
-		anchor.target = "_blank"
-		anchor.rel = "noreferrer"
-	}
-}
-
+// check of its own — sanitizeDocxLinks (lib/docxDom.ts) is the closing sweep for that, run once per
+// render.
 function DocxRender({ bytes, alt }: { bytes: Uint8Array; alt: string }) {
 	const { t } = useTranslation("preview")
 	const containerRef = useRef<HTMLDivElement | null>(null)
@@ -69,14 +55,19 @@ function DocxRender({ bytes, alt }: { bytes: Uint8Array; alt: string }) {
 			return
 		}
 
-		async function render(target: HTMLDivElement): Promise<void> {
+		// Each run renders into its own host: a run still in flight when the next one starts (a retry, a
+		// new buffer) can then only write into its own host, which the newer run has already detached.
+		const host = document.createElement("div")
+		// The object URLs this run's render minted; revoked on teardown, not right after renderAsync,
+		// since @font-face rules and images keep reading them while the document is shown.
+		let urls: string[] = []
+
+		container.replaceChildren(host)
+
+		async function render(): Promise<void> {
 			try {
-				// A retry re-runs renderAsync into the SAME persistent container div — clearing it first
-				// keeps a re-render from appending a second copy alongside whatever a failed prior attempt
-				// may have already painted before throwing.
-				target.replaceChildren()
-				await renderAsync(bytes, target, undefined, { renderAltChunks: false, experimental: true })
-				sanitizeLinks(target)
+				await renderAsync(bytes, host, undefined, { renderAltChunks: false, experimental: true })
+				sanitizeDocxLinks(host)
 
 				if (live) {
 					setStatus("success")
@@ -85,13 +76,21 @@ function DocxRender({ bytes, alt }: { bytes: Uint8Array; alt: string }) {
 				if (live) {
 					setStatus("error")
 				}
+			} finally {
+				urls = collectBlobUrls(host)
+
+				// Torn down mid-render: the cleanup below has already run with nothing to revoke.
+				if (!live) {
+					revokeAll(urls)
+				}
 			}
 		}
 
-		void render(container)
+		void render()
 
 		return () => {
 			live = false
+			revokeAll(urls)
 		}
 	}, [bytes, retryToken])
 

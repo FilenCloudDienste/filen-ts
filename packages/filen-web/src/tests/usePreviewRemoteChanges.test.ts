@@ -82,18 +82,18 @@ function setup(
 	const commitSaved = vi.fn((frozenUuid: string, item: DriveItem) => {
 		savedRef.current = new Map(savedRef.current).set(frozenUuid, item)
 	})
-	const contentRef = { current: "mine" as string | null }
+	const contentRef = { current: (() => "mine") as (() => string) | null }
 	const onItemRemoved = vi.fn()
 	const hook = renderHook(
 		(props: { items: DriveItem[]; index: number }) =>
 			usePreviewRemoteChanges({
 				variant: "drive",
-				items: props.items.map(item => ({ type: "drive" as const, item })),
+				items: props.items.map(item => ({ item })),
 				index: props.index,
 				savedRef,
 				commitSaved,
 				contentRef,
-				readEdits: readEdits ?? (() => Promise.resolve(contentRef.current)),
+				readEdits: readEdits ?? (() => Promise.resolve(contentRef.current?.() ?? null)),
 				onItemRemoved
 			}),
 		{ initialProps: { items, index } }

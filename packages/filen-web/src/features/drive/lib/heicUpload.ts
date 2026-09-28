@@ -1,7 +1,8 @@
 import { type, type Type } from "arktype"
+import { Semaphore } from "@filen/shared"
 import { kvGetJson, kvSetJson } from "@/lib/storage/adapter"
 import { extensionOf, HEIC_EXTENSIONS } from "@/features/drive/lib/preview.logic"
-import { transformHeicBytes } from "@/features/preview/lib/heicTransform"
+import { transformHeicBytesOwned } from "@/features/preview/lib/heicTransform"
 import { log } from "@/lib/log"
 
 // ── Preference ───────────────────────────────────────────────────────────
@@ -38,10 +39,17 @@ export function renameToJpg(name: string): string {
 }
 
 export interface HeicUploadConvertDeps {
+	// Takes ownership of `bytes`: the buffer may come back detached.
 	transform: (bytes: Uint8Array) => Promise<Blob>
 }
 
-export const defaultHeicUploadConvertDeps: HeicUploadConvertDeps = { transform: transformHeicBytes }
+export const defaultHeicUploadConvertDeps: HeicUploadConvertDeps = { transform: transformHeicBytesOwned }
+
+// Both upload entry points start every file's conversion at once. Without a bound, a large HEIC batch
+// would read every source file into memory together while the single worker decodes them one by one.
+// Two keeps the worker fed (the next file is read while the current one decodes); SDK upload
+// concurrency is untouched.
+const heicConvertLock = new Semaphore(2)
 
 // Re-encodes a picked HEIC/HEIF File to JPEG before it reaches the upload pipeline, when the user's
 // preference is on — mirrors filen-mobile's maybeConvertHeicForUpload (useDriveUpload.ts). A non-HEIC
@@ -53,6 +61,8 @@ export async function maybeConvertHeicUpload(deps: HeicUploadConvertDeps, file: 
 		return file
 	}
 
+	await heicConvertLock.acquire()
+
 	try {
 		const bytes = new Uint8Array(await file.arrayBuffer())
 		const jpeg = await deps.transform(bytes)
@@ -62,6 +72,8 @@ export async function maybeConvertHeicUpload(deps: HeicUploadConvertDeps, file: 
 		log.error("heic-upload-convert", e)
 
 		return file
+	} finally {
+		heicConvertLock.release()
 	}
 }
 
@@ -80,7 +92,18 @@ export const defaultHeicUploadDeps: HeicUploadDeps = {
 // preference again. The kv read happens ONCE per batch and only when the batch actually holds a
 // candidate — every other batch skips the storage round trip entirely. Deliberately only the GATE: the
 // conversion itself stays per file inside each caller's own fan-out, so the first converted file starts
-// uploading (and shows a transfer row) while the rest are still decoding.
+// uploading (and shows a transfer row) while the rest are still decoding. A failed read counts as off:
+// the batch then uploads its originals, as a failed conversion would.
 export async function heicUploadConversionEnabled(deps: HeicUploadDeps, files: readonly File[]): Promise<boolean> {
-	return files.some(isHeicUploadCandidate) ? await deps.readPreference() : false
+	if (!files.some(isHeicUploadCandidate)) {
+		return false
+	}
+
+	try {
+		return await deps.readPreference()
+	} catch (e) {
+		log.error("heic-upload-pref", e)
+
+		return false
+	}
 }

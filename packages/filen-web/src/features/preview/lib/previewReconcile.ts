@@ -94,13 +94,13 @@ export function emitPreviewFolderMetaChanged(uuid: string, meta: DirMeta): void 
 	emit({ type: "folderMeta", uuid, meta })
 }
 
-// Drops the drive source carrying `uuid` and keeps the same item visible: an earlier slot's removal
+// Drops the source carrying `uuid` and keeps the same item visible: an earlier slot's removal
 // shifts everything left by one, so the anchor steps back one; removing the current (or a later) slot
 // leaves the anchor where it is, clamped to the new last slot. Returns null when the removed slot was the
 // only one left (the host closes the preview). An absent uuid leaves the state untouched — this event is
 // for a different listing's item. Mirrors filen-mobile's driveItemRemoved anchor math.
 function removeSource(state: PreviewPagerState, uuid: string): PreviewPagerState | null {
-	const removedIndex = state.sources.findIndex(source => source.type === "drive" && source.item.data.uuid === uuid)
+	const removedIndex = state.sources.findIndex(source => source.item.data.uuid === uuid)
 
 	if (removedIndex === -1) {
 		return state
@@ -122,15 +122,11 @@ function removeSource(state: PreviewPagerState, uuid: string): PreviewPagerState
 // (a shared arm carries extra sharing context this sparse event can't reconstruct) — the same arm
 // restriction the listing-cache patch uses, so a shared item's rename updates neither surface, staying
 // consistent. The state itself comes back when no slot matched, so the host skips its re-render.
-function patchMeta(
-	state: PreviewPagerState,
-	uuid: string,
-	patch: (source: Extract<PreviewSource, { type: "drive" }>) => PreviewSource | null
-): PreviewPagerState {
-	const matched = state.sources.findIndex(source => source.type === "drive" && source.item.data.uuid === uuid)
+function patchMeta(state: PreviewPagerState, uuid: string, patch: (source: PreviewSource) => PreviewSource | null): PreviewPagerState {
+	const matched = state.sources.findIndex(source => source.item.data.uuid === uuid)
 	const current = state.sources[matched]
 
-	if (current?.type !== "drive") {
+	if (current === undefined) {
 		return state
 	}
 
@@ -148,7 +144,7 @@ function patchMeta(
 export function previewProtectedUuid(state: PreviewPagerState): string | null {
 	const source = state.sources[state.index]
 
-	return usePreviewUnsavedGuardStore.getState().dirty && source?.type === "drive" ? source.item.data.uuid : null
+	return usePreviewUnsavedGuardStore.getState().dirty && source !== undefined ? source.item.data.uuid : null
 }
 
 // Pure fold of one reconcile event into the pager state — the dialog host runs this inside its
@@ -171,11 +167,11 @@ export function reconcilePreviewSources(
 			return state
 		case "fileMeta":
 			return patchMeta(state, event.uuid, source =>
-				source.item.type === "file" ? { type: "drive", item: narrowItem({ ...source.item.data, meta: event.meta }) } : null
+				source.item.type === "file" ? { item: narrowItem({ ...source.item.data, meta: event.meta }) } : null
 			)
 		case "folderMeta":
 			return patchMeta(state, event.uuid, source =>
-				source.item.type === "directory" ? { type: "drive", item: narrowItem({ ...source.item.data, meta: event.meta }) } : null
+				source.item.type === "directory" ? { item: narrowItem({ ...source.item.data, meta: event.meta }) } : null
 			)
 	}
 }

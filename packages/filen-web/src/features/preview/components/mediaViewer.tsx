@@ -22,13 +22,11 @@ export interface MediaViewerProps {
 // Video-only: loops, autoplays on mount (the overlay's own open is itself a user gesture, so audible
 // autoplay is generally permitted — a rejected play() promise is swallowed, leaving the element in its
 // normal paused state with no error UI, never an unhandled rejection), and restores/persists playback
-// position across a pager remount via videoContinuity.ts. `positionKey` (the drive item's own uuid) is
-// undefined only for the external preview arm (previewOverlay.tsx's ExternalPreviewBody — no drive
-// item exists there to key a persisted position against); loop/autoplay still apply either way since
-// both arms render inside the SAME full-screen preview surface — only the raw, un-chromed <video> the
-// chat thread's own inline mini-player renders directly (filenLinkCard.tsx, bypassing this component
-// entirely) is deliberately excluded, per the mobile-parity decision that loop/autoplay belong to the
-// full preview experience, not a glanceable inline embed.
+// position across a pager remount via videoContinuity.ts, keyed by `positionKey` (the drive item's own
+// uuid). The raw, un-chromed <video> the chat thread's own inline mini-player renders directly
+// (filenLinkCard.tsx, bypassing this component entirely) is deliberately left without loop/autoplay,
+// per the mobile-parity decision that they belong to the full preview experience, not a glanceable
+// inline embed.
 function VideoElement({
 	url,
 	alt,
@@ -40,7 +38,7 @@ function VideoElement({
 	alt: string
 	controlsList: "nodownload" | undefined
 	onError?: () => void
-	positionKey?: string
+	positionKey: string
 }) {
 	const videoRef = useRef<HTMLVideoElement | null>(null)
 
@@ -56,7 +54,7 @@ function VideoElement({
 				return
 			}
 
-			const saved = positionKey !== undefined ? getVideoPlaybackState(positionKey) : undefined
+			const saved = getVideoPlaybackState(positionKey)
 
 			if (saved !== undefined) {
 				video.currentTime = saved.currentTime
@@ -80,7 +78,7 @@ function VideoElement({
 		}
 
 		function handlePause(): void {
-			if (positionKey !== undefined && video) {
+			if (video) {
 				setVideoPlaybackState(positionKey, { currentTime: video.currentTime })
 			}
 		}
@@ -94,9 +92,7 @@ function VideoElement({
 			// Covers stepping away WHILE still playing — the "pause" listener above only fires for an
 			// explicit pause, never for an unmount, so this is the only place that captures a mid-playback
 			// step-away's own position.
-			if (positionKey !== undefined) {
-				setVideoPlaybackState(positionKey, { currentTime: video.currentTime })
-			}
+			setVideoPlaybackState(positionKey, { currentTime: video.currentTime })
 		}
 	}, [positionKey])
 
@@ -136,7 +132,7 @@ export function MediaElement({
 	// Video-only continuity key (the drive item's own uuid) — see VideoElement's own doc comment.
 	// Ignored for category "audio" (mobile's own "3 warm players" precedent is video-specific — audio
 	// continuity belongs to the persistent player, not the preview).
-	positionKey?: string
+	positionKey: string
 }) {
 	const controlsList = mediaControlsList(usePreviewDownloadable())
 
@@ -148,7 +144,7 @@ export function MediaElement({
 					alt={alt}
 					controlsList={controlsList}
 					{...(onError !== undefined ? { onError } : {})}
-					{...(positionKey !== undefined ? { positionKey } : {})}
+					positionKey={positionKey}
 				/>
 			</div>
 		)

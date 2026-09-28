@@ -18,7 +18,7 @@ import { XIcon, ChevronLeftIcon, ChevronRightIcon, DownloadIcon, SaveIcon, MoreH
 import { toast } from "sonner"
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
-import { extensionOf, previewCategoryForName, previewType, type PreviewCategory } from "@/features/drive/lib/preview.logic"
+import { extensionOf, previewType, type PreviewCategory } from "@/features/drive/lib/preview.logic"
 import { startDownloads } from "@/features/drive/lib/download"
 import {
 	canSaveCopyBeside,
@@ -32,15 +32,17 @@ import { followClipboardItem } from "@/features/drive/lib/clipboardSync"
 import { unshareItems } from "@/features/drive/lib/share/actions"
 import { driveListingQueryUpdate } from "@/features/drive/queries/drive"
 import { toastBulkOutcome } from "@/features/drive/lib/bulkToast"
+import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import { sdkApi } from "@/lib/sdk/client"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { IN_EDITORS_AND_FIELDS, useAction } from "@/lib/keymap/useAction"
 import { log } from "@/lib/log"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { holdUnload } from "@/lib/unloadGuard"
+import { previewTitleSplitIndex } from "@/features/preview/lib/previewTitle"
 import { cn, driveItemName } from "@filen/shared"
-import { ImageViewer, RawImageViewer, ZoomableImage } from "@/features/preview/components/imageViewer"
-import { MediaViewer, MediaElement } from "@/features/preview/components/mediaViewer"
+import { ImageViewer, RawImageViewer } from "@/features/preview/components/imageViewer"
+import { MediaViewer } from "@/features/preview/components/mediaViewer"
 import { PreviewDownloadableProvider } from "@/features/preview/lib/accessMode"
 import {
 	isTextEditingTarget,
@@ -101,9 +103,7 @@ const blockWhenLeavingRoute: ShouldBlockFn = ({ current, next }) => previewNavig
 export interface PreviewOverlayProps {
 	variant: DriveVariant
 	// Frozen previewable-sibling snapshot taken at open time (directoryListing.tsx's handleOpen) — the
-	// pager's whole candidate list, not just the opened item. A PreviewSource[] so the overlay is agnostic
-	// to where each slot came from: today every caller emits the drive arm (behaviorally identical to the
-	// prior DriveItem[] flow), the external arm is the seam for future chat/note attachments.
+	// pager's whole candidate list, not just the opened item.
 	items: PreviewSource[]
 	index: number
 	onStep: (delta: 1 | -1) => void
@@ -154,7 +154,7 @@ interface PreviewErrorBoundaryState {
 // even while this is showing its fallback. A synchronous viewer throw (e.g. the markdown parser, which
 // runs during render, not inside an effect) would otherwise propagate past this dialog uncaught and
 // white-screen the whole app — no boundary exists anywhere else in this tree. Keyed by the source key
-// at its call site below (drive uuid / external url, the same key PreviewBody itself remounts on) so a
+// at its call site below (the drive uuid, the same key PreviewBody itself remounts on) so a
 // crash on one slot can never stick once the user steps to a different one — getDerivedStateFromError has no other way back to a
 // clean state.
 class PreviewErrorBoundary extends Component<{ children: ReactNode }, PreviewErrorBoundaryState> {
@@ -205,14 +205,13 @@ export function PreviewOverlay({
 	const { t } = useTranslation(["preview", "common", "drive"])
 	const isOnline = useIsOnline()
 	const rawSource = items[index]
-	// The drive item at this slot BEFORE any per-slot save override — undefined for the external arm (and
-	// for an out-of-range index). The save/uuid-rotation/read-only machinery below is drive-only; the
-	// external arm carries no drive item so all of it stays inert for it.
-	const rawDriveItem = rawSource?.type === "drive" ? rawSource.item : undefined
+	// The drive item at this slot BEFORE any per-slot save override — undefined only for an out-of-range
+	// index.
+	const rawDriveItem = rawSource?.item
 	const popupRef = useRef<HTMLDivElement>(null)
-	// Write-only side channel for performSave to read the live buffer without this component
+	// Reader for performSave to pull the live buffer without this component
 	// re-rendering on every keystroke — see TextViewer's own contentRef prop doc.
-	const contentRef = useRef<string | null>(null)
+	const contentRef = useRef<(() => string) | null>(null)
 	// The spreadsheet editor's side channel: its bytes as edited, serialised when a save asks for them.
 	const spreadsheetRef = useRef<SpreadsheetSaveSource | null>(null)
 	const cacheScope = usePreviewCacheScope()
@@ -221,7 +220,7 @@ export function PreviewOverlay({
 	async function readEdits(): Promise<string | Uint8Array | null> {
 		const source = spreadsheetRef.current
 
-		return source === null ? contentRef.current : (await source()).bytes
+		return source === null ? (contentRef.current?.() ?? null) : (await source()).bytes
 	}
 
 	// Override for the currently-displayed item, accumulated per pager slot across the whole overlay
@@ -229,7 +228,7 @@ export function PreviewOverlay({
 	// save's uuid rotation can't update in place, and a single-slot override would drop every other
 	// already-saved sibling's override. Keyed by each slot's frozen pre-save `rawDriveItem.data.uuid`
 	// (never the already-overridden `driveItem.data.uuid`), so a repeat save of the same slot overwrites
-	// the same entry instead of chaining a new key. Drive arm only — the external arm has no save.
+	// the same entry instead of chaining a new key.
 	const [saved, setSaved] = useState<ReadonlyMap<string, DriveItem>>(() => new Map<string, DriveItem>())
 	// The same map for code running outside a render (the remote-change handlers), which may apply two
 	// overrides before the next render. Every write goes through commitSaved, keeping the two equal.
@@ -279,17 +278,11 @@ export function PreviewOverlay({
 		setChromeVisible(true)
 	}
 
-	// Applies the per-slot save override (drive arm only) — for the external arm there is nothing to
-	// override, so it passes straight through untouched.
+	// Applies the per-slot save override.
 	const driveItem = rawDriveItem !== undefined ? (saved.get(rawDriveItem.data.uuid) ?? rawDriveItem) : undefined
-	// The resolved slot the body actually renders: the drive arm carries its override; the external arm is
-	// its raw source. Undefined only for an out-of-range index.
-	const currentSource: PreviewSource | undefined =
-		rawSource === undefined
-			? undefined
-			: rawSource.type === "external"
-				? rawSource
-				: { type: "drive", item: driveItem ?? rawSource.item }
+	// The resolved slot the body actually renders, carrying its override. Undefined only for an
+	// out-of-range index.
+	const currentSource: PreviewSource | undefined = driveItem === undefined ? undefined : { item: driveItem }
 	const currentDocumentKey = rawDriveItem === undefined ? "" : (documentKeys.get(rawDriveItem.data.uuid) ?? rawDriveItem.data.uuid)
 	// The drive slot's renderer and save format, as it mounted: a rename never swaps the viewer (and with it
 	// the unsaved edits) out from under the user. Taken again whenever the slot mounts anew, which is only
@@ -301,8 +294,7 @@ export function PreviewOverlay({
 		setPinned({ documentKey: currentDocumentKey, pin: derivedPin })
 	}
 
-	// Editable is intrinsically drive-only: the external arm never carries an editable buffer. Compared
-	// against the FROZEN pre-save uuid (rawDriveItem), never the possibly-rotated override's uuid — see
+	// Compared against the FROZEN pre-save uuid (rawDriveItem), never the possibly-rotated override's uuid — see
 	// `saved`'s own comment on why that's the stable key. A rename to another format leaves the open
 	// viewer read-only: what it holds would be saved under a name that says otherwise.
 	const editable =
@@ -416,6 +408,9 @@ export function PreviewOverlay({
 		toastBulkOutcome(outcome)
 
 		if (outcome.succeeded.length > 0) {
+			// Only this receiver's row leaves the listing, and no echo prunes a selected row the way
+			// trash and delete echoes do.
+			useDriveStore.getState().removeRowsFromSelection(outcome.succeeded)
 			onClose()
 		}
 	}
@@ -787,7 +782,9 @@ export function PreviewOverlay({
 			return await source()
 		}
 
-		return contentRef.current === null ? null : { bytes: new TextEncoder().encode(contentRef.current), commit: null }
+		const text = contentRef.current?.()
+
+		return text === undefined ? null : { bytes: new TextEncoder().encode(text), commit: null }
 	}
 
 	useAction(
@@ -1071,7 +1068,7 @@ export function PreviewOverlay({
 						>
 							<ChevronRightIcon />
 						</Button>
-						{currentSource.type === "drive" && variant !== "trash" && downloadable ? (
+						{variant !== "trash" && downloadable ? (
 							<Button
 								variant="ghost"
 								size="icon-sm"
@@ -1085,9 +1082,8 @@ export function PreviewOverlay({
 								<DownloadIcon />
 							</Button>
 						) : null}
-						{/* Drive-sourced items only — the external arm (chat/note attachments) has no drive item
-						for driveItemActions to gate against, so it shows no menu at all, same as the tile/row
-						faces' own ⋯ trigger. Same descriptor list + dropdown renderer those use (itemMenu.tsx),
+						{/* Never for a chat/note embed's fabricated linked-file item (previewMenuVisible). Same
+						descriptor list + dropdown renderer the tile/row faces' own ⋯ trigger uses (itemMenu.tsx),
 						just with "download" hidden (the button above already covers it) and the two extra
 						"direct"-outcome hooks wired into this overlay's own per-slot `saved` override / pager
 						housekeeping — see previewMenuHiddenActionIds and the handleMenu* functions above. */}
@@ -1214,7 +1210,7 @@ export function PreviewOverlay({
 										)
 									: undefined
 							}
-							readMine={() => contentRef.current ?? undefined}
+							readMine={() => contentRef.current?.()}
 							pending={remote.pending}
 							onKeepMine={remote.keepMine}
 							onLoadTheirs={remote.loadTheirs}
@@ -1240,7 +1236,7 @@ export function PreviewOverlay({
 // swallowing it. Also carries the dialog's required accessible title.
 function PreviewName({ name }: { name: string }) {
 	const TAIL_LENGTH = 16
-	const splitAt = name.length - TAIL_LENGTH
+	const splitAt = previewTitleSplitIndex(name, TAIL_LENGTH)
 
 	return (
 		<DialogPrimitive.Title className="flex min-w-0 flex-1 font-heading text-sm font-medium">
@@ -1306,47 +1302,12 @@ interface PreviewBodyProps {
 	// A save in flight: text editors go read-only until it settles.
 	locked: boolean
 	onDirtyChange: (dirty: boolean) => void
-	contentRef: RefObject<string | null>
+	contentRef: RefObject<(() => string) | null>
 	spreadsheetRef: RefObject<SpreadsheetSaveSource | null>
 	// Shows another file in this slot's place (the .xlsx an .xls was just saved as).
 	onOpenFile: (item: DriveItem) => void
 	// A converted copy may be written beside the file (its own drive, however read-only its format).
 	canSaveCopy: boolean
-}
-
-// The external arm's body — a bare url with no drive item, so no SW range route, byte-buffering, HEIC
-// transform, editability or save exists for it (external urls load natively in the browser). Renders
-// only the url-loadable kinds through the media viewers' own plain-url render paths (ZoomableImage /
-// MediaElement); everything else shows the standard unsupported state. This is the minimal-but-real
-// seam for future chat/note attachment sources.
-function ExternalPreviewBody({ url, name }: { url: string; name: string }) {
-	const { t } = useTranslation("preview")
-	const category = previewCategoryForName(name)
-
-	switch (category) {
-		case "image":
-			return (
-				<ZoomableImage
-					url={url}
-					alt={name}
-				/>
-			)
-		case "video":
-		case "audio":
-			return (
-				<MediaElement
-					category={category}
-					url={url}
-					alt={name}
-				/>
-			)
-		default:
-			return (
-				<div className="flex size-full items-center justify-center px-6 text-center text-sm text-muted-foreground">
-					{t("previewUnsupportedType")}
-				</div>
-			)
-	}
 }
 
 // Dispatches to the right viewer by category — remounted (keyed by uuid, see the error boundary one
@@ -1376,16 +1337,6 @@ function PreviewBody({
 	canSaveCopy
 }: PreviewBodyProps): ReactNode {
 	const { t } = useTranslation("preview")
-
-	if (source.type === "external") {
-		return (
-			<ExternalPreviewBody
-				url={source.url}
-				name={source.name}
-			/>
-		)
-	}
-
 	const item = source.item
 
 	// Narrows `data.decryptedMeta` to the file-arm's DecryptedFileMeta (which alone carries `.mime`) —

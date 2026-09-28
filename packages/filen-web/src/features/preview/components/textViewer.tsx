@@ -19,11 +19,11 @@ export interface TextViewerProps {
 	// own state to gate the Save button/Cmd+S/close+nav confirm, none of which this component renders
 	// itself (the header lives in previewOverlay.tsx).
 	onDirtyChange?: (dirty: boolean) => void
-	// Write-only side channel for the overlay's Save handler to read the CURRENT buffer on demand
-	// (Cmd+S/button click) without this component re-rendering the overlay on every keystroke — a
-	// plain reactive callback would force that; a ref lets the overlay pull, not push. Kept up to date
-	// from an effect (never during render — refs are an event-handler/effect-only escape hatch).
-	contentRef?: RefObject<string | null>
+	// Side channel for the overlay's Save handler to read the CURRENT buffer on demand (Cmd+S/button
+	// click) without this component re-rendering the overlay on every keystroke — a plain reactive
+	// callback would force that; a ref lets the overlay pull, not push. It holds a reader, so the buffer
+	// is flattened into a string only when read. See CodeMirrorSource's own prop.
+	contentRef?: RefObject<(() => string) | null>
 	// Read-only while the overlay saves: see CodeMirrorSource's own prop.
 	locked?: boolean
 }

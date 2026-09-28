@@ -3,6 +3,7 @@
 import { describe, expect, it, vi, beforeEach } from "vitest"
 import { createElement, type ReactNode } from "react"
 import { act, renderHook, waitFor } from "@testing-library/react"
+import type { LinkedFile } from "@filen/sdk-rs"
 
 const preview = { type: "noPreview" } as const
 const fetchRawPreview = vi.fn(() => Promise.resolve(preview))
@@ -19,21 +20,25 @@ const { PreviewAccessModeProvider } = await import("@/features/preview/lib/acces
 const { linkedFileIntoDriveItem } = await import("@/features/drive/lib/item")
 const { clearPreviewCache } = await import("@/features/preview/lib/previewCache")
 
-const item = linkedFileIntoDriveItem({
-	uuid: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
-	name: { Decrypted: "shot.NEF" },
-	mime: { Decrypted: "image/x-nikon-nef" },
-	size: 90_000_000n,
-	chunks: 90n,
-	region: "",
-	bucket: "",
-	version: 2,
-	timestamp: 0n,
-	fileKey: "k",
-	downloadable: true,
-	linkedTag: true,
-	canMakeThumbnail: true
-})
+function makeItem(uuid: LinkedFile["uuid"], name: string) {
+	return linkedFileIntoDriveItem({
+		uuid,
+		name: { Decrypted: name },
+		mime: { Decrypted: "image/x-nikon-nef" },
+		size: 90_000_000n,
+		chunks: 90n,
+		region: "",
+		bucket: "",
+		version: 2,
+		timestamp: 0n,
+		fileKey: "k",
+		downloadable: true,
+		linkedTag: true,
+		canMakeThumbnail: true
+	})
+}
+
+const item = makeItem("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", "shot.NEF")
 
 describe("useRawPreview", () => {
 	beforeEach(() => {
@@ -80,6 +85,43 @@ describe("useRawPreview", () => {
 		unmount()
 
 		expect(cancelPreviewDownload).toHaveBeenCalledWith(token)
+	})
+
+	// A favorite toggle or rename hands over a new object for the same uuid mid-fetch.
+	it("keeps the in-flight extraction running when the same file arrives renamed", async () => {
+		let finish: (value: typeof preview) => void = () => undefined
+		fetchRawPreview.mockImplementationOnce(
+			() =>
+				new Promise(resolve => {
+					finish = resolve
+				})
+		)
+
+		const { result, rerender } = renderHook(({ current }) => useRawPreview(current), { initialProps: { current: item } })
+
+		rerender({ current: makeItem(item.data.uuid, "renamed.NEF") })
+		finish(preview)
+
+		await waitFor(() => {
+			expect(result.current.status).toBe("success")
+		})
+
+		expect(fetchRawPreview).toHaveBeenCalledTimes(1)
+		expect(cancelPreviewDownload).not.toHaveBeenCalled()
+	})
+
+	it("cancels and refetches when the uuid changes", async () => {
+		fetchRawPreview.mockImplementationOnce(() => new Promise(() => undefined))
+
+		const { rerender } = renderHook(({ current }) => useRawPreview(current), { initialProps: { current: item } })
+
+		rerender({ current: makeItem("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", "other.NEF") })
+
+		await waitFor(() => {
+			expect(fetchRawPreview).toHaveBeenCalledTimes(2)
+		})
+
+		expect(cancelPreviewDownload).toHaveBeenCalledTimes(1)
 	})
 
 	it("surfaces a worker rejection as the error state with a working retry", async () => {

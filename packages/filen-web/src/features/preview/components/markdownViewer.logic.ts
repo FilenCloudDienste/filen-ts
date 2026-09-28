@@ -13,6 +13,10 @@ import { isSafeLinkHref } from "@/features/preview/components/docxViewer.logic"
 // intentionally drops react-markdown's own `key`/`node` params (unneeded — every url-bearing attribute
 // gets the same scheme check) — TS allows assigning a shorter-arity function where its `UrlTransform`
 // type is expected.
+//
+// Only an absolute URL survives: a relative ("docs/setup.md") or fragment-only ("#install") one would
+// resolve against the app's own route and open a copy of the app in a new tab, and there is no
+// heading-slug plugin for a fragment to target anyway.
 export function markdownUrlTransform(url: string): string | undefined {
-	return isSafeLinkHref(url) ? url : undefined
+	return URL.canParse(url) && isSafeLinkHref(url) ? url : undefined
 }

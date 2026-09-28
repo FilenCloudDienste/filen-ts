@@ -7,11 +7,13 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 // transfer of a private copy, pass-through of the transform result/opts), so both the `?worker` constructor and
 // Comlink.wrap are replaced with plain fakes rather than a second real worker boundary.
 
-const { WorkerCtor, wrap, transformMock, transferSpy } = vi.hoisted(() => ({
+const { WorkerCtor, wrap, transformMock, transferSpy, terminateMock, releaseMock } = vi.hoisted(() => ({
 	WorkerCtor: vi.fn(),
 	wrap: vi.fn(),
 	transformMock: vi.fn(),
-	transferSpy: vi.fn()
+	transferSpy: vi.fn(),
+	terminateMock: vi.fn(),
+	releaseMock: vi.fn()
 }))
 
 vi.mock("@/features/preview/workers/heic.worker.ts?worker", () => ({ default: WorkerCtor }))
@@ -39,14 +41,16 @@ async function freshModule() {
 	wrap.mockReset()
 	transformMock.mockReset()
 	WorkerCtor.mockImplementation(function FakeWorker() {
-		return { fake: "worker-instance" }
+		return { fake: "worker-instance", terminate: terminateMock }
 	})
-	wrap.mockImplementation(() => ({ transform: transformMock }))
+	const { releaseProxy } = await import("comlink")
+	wrap.mockImplementation(() => ({ transform: transformMock, [releaseProxy]: releaseMock }))
 	return import("@/features/preview/lib/heicTransform")
 }
 
 afterEach(() => {
 	vi.clearAllMocks()
+	vi.useRealTimers()
 })
 
 describe("transformHeicBytes", () => {
@@ -144,5 +148,65 @@ describe("transformHeicBytes", () => {
 		// call reuses it rather than respawning.
 		await expect(transformHeicBytes(new Uint8Array([2]))).rejects.toThrow("heic transform failed")
 		expect(WorkerCtor).toHaveBeenCalledTimes(1)
+	})
+
+	// The upload path reads each file fresh and never touches the buffer again, so no copy is made.
+	it("transfers an owned buffer as is, without copying it", async () => {
+		const { transformHeicBytesOwned } = await freshModule()
+		transformMock.mockResolvedValue(new Blob())
+		const bytes = new Uint8Array([1, 2, 3])
+
+		await transformHeicBytesOwned(bytes)
+
+		expect(transformMock.mock.calls[0]?.[0]).toBe(bytes)
+		expect(transferSpy).toHaveBeenCalledWith(bytes, [bytes.buffer])
+	})
+})
+
+// libheif's wasm heap only ever grows, so an idle worker is torn down rather than kept for the session.
+describe("heic worker lifetime", () => {
+	it("terminates the worker once idle, and spins up a fresh one for the next transform", async () => {
+		const { transformHeicBytes } = await freshModule()
+		vi.useFakeTimers()
+		transformMock.mockResolvedValue(new Blob())
+
+		await transformHeicBytes(new Uint8Array([1]))
+		await vi.advanceTimersByTimeAsync(29_999)
+
+		expect(terminateMock).not.toHaveBeenCalled()
+
+		await vi.advanceTimersByTimeAsync(1)
+
+		expect(releaseMock).toHaveBeenCalledTimes(1)
+		expect(terminateMock).toHaveBeenCalledTimes(1)
+
+		await transformHeicBytes(new Uint8Array([2]))
+
+		expect(WorkerCtor).toHaveBeenCalledTimes(2)
+	})
+
+	it("never terminates while a transform is still running", async () => {
+		const { transformHeicBytes, releaseHeicWorker } = await freshModule()
+		vi.useFakeTimers()
+		let finish: (blob: Blob) => void = () => undefined
+		transformMock.mockImplementation(
+			() =>
+				new Promise<Blob>(resolve => {
+					finish = resolve
+				})
+		)
+
+		const running = transformHeicBytes(new Uint8Array([1]))
+
+		await vi.advanceTimersByTimeAsync(60_000)
+		releaseHeicWorker()
+
+		expect(terminateMock).not.toHaveBeenCalled()
+
+		finish(new Blob())
+		await running
+		releaseHeicWorker()
+
+		expect(terminateMock).toHaveBeenCalledTimes(1)
 	})
 })

@@ -20,7 +20,9 @@ export interface SaveToDriveButtonProps {
 // Copies what a public link points at into the signed-in visitor's own drive, through drive's own
 // destination picker and copy card. The caller renders it only when the link is saveable
 // (useLinkSaveable: signed in, not the visitor's own link, downloads allowed).
-export function SaveToDriveButton({ item, name, glyph, compact = false }: SaveToDriveButtonProps) {
+export function SaveToDriveButton({ item, name, glyph, compact: compactProp }: SaveToDriveButtonProps) {
+	// Not a destructuring default, which the React Compiler cannot lower.
+	const compact = compactProp ?? false
 	const { t } = useTranslation(["publicLinks", "common"])
 	const isOnline = useIsOnline()
 	const [open, setOpen] = useState(false)

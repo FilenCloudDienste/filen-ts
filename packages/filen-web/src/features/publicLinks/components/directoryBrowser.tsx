@@ -21,6 +21,8 @@ import {
 	type PublicSortField
 } from "@/features/publicLinks/lib/browse.logic"
 import { startAnonDirZipDownload } from "@/features/publicLinks/lib/download"
+import type { ErrorDTO } from "@/lib/sdk/errors"
+import { errorLabel } from "@/lib/i18n/errorLabel"
 import { secretFingerprint, passwordStatePart } from "@/features/publicLinks/lib/queryKey.logic"
 import { FileHero } from "@/features/publicLinks/components/fileHero"
 import { SaveToDriveButton } from "@/features/publicLinks/components/saveToDrive"
@@ -33,7 +35,13 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectVa
 import { PublicLinkError } from "@/features/publicLinks/components/publicLinkStates"
 import { cn } from "@filen/shared"
 
-type ZipUiState = { status: "idle" } | { status: "running"; loaded: number; total: number | null } | { status: "error" }
+type ZipUiState =
+	| { status: "idle" }
+	| { status: "running"; loaded: number; total: number | null }
+	// `forUuid`: the crumb the zip was started on, so an outcome landing after navigation stays off another
+	// directory's header.
+	| { status: "too-large"; forUuid: string }
+	| { status: "error"; dto: ErrorDTO; forUuid: string }
 
 const SORT_FIELDS: PublicSortField[] = ["name", "size", "date"]
 
@@ -59,11 +67,17 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 
 	const entries = listing.data === undefined ? [] : sortEntries(filterEntries(toBrowseEntries(listing.data), filter), sort)
 
+	// Navigating clears a finished zip's notice; a running one keeps its progress.
+	function dropZipNotice(): void {
+		setZip(prev => (prev.status === "running" ? prev : { status: "idle" }))
+	}
+
 	function openEntry(entry: BrowseEntry): void {
 		if (entry.kind === "dir") {
 			setStack(prev => enterCrumb(prev, entry))
 			setFilter("")
 			setSelected(null)
+			dropZipNotice()
 		} else {
 			setSelected({ item: entry.item, file: entry.file })
 		}
@@ -73,9 +87,12 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 		setStack(prev => jumpToCrumb(prev, index))
 		setFilter("")
 		setSelected(null)
+		dropZipNotice()
 	}
 
 	function handleZip(): void {
+		const forUuid = current.uuid
+
 		setZip({ status: "running", loaded: 0, total: null })
 
 		void startAnonDirZipDownload({
@@ -85,7 +102,13 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 				setZip(prev => (prev.status === "running" ? { status: "running", loaded, total } : prev))
 			}
 		}).then(outcome => {
-			setZip(outcome.status === "error" ? { status: "error" } : { status: "idle" })
+			setZip(
+				outcome.status === "error"
+					? { status: "error", dto: outcome.dto, forUuid }
+					: outcome.status === "too-large"
+						? { status: "too-large", forUuid }
+						: { status: "idle" }
+			)
 		})
 	}
 
@@ -171,6 +194,12 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 
 			{zip.status === "running" && (
 				<Progress value={zip.total !== null && zip.total > 0 ? Math.round((zip.loaded / zip.total) * 100) : null} />
+			)}
+			{zip.status === "too-large" && zip.forUuid === current.uuid && (
+				<p className="text-sm text-destructive">{t("downloadDirectoryTooLarge")}</p>
+			)}
+			{zip.status === "error" && zip.forUuid === current.uuid && (
+				<p className="text-sm text-destructive">{`${t("downloadFailed")} ${errorLabel(zip.dto)}`}</p>
 			)}
 
 			<div className="flex flex-wrap items-center gap-2">

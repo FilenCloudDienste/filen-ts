@@ -9,12 +9,17 @@ import { MiddleEllipsis } from "@/components/middleEllipsis"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { Spinner } from "@/components/ui/spinner"
+import type { ErrorDTO } from "@/lib/sdk/errors"
+import { errorLabel } from "@/lib/i18n/errorLabel"
 import { anonPreviewability } from "@/features/publicLinks/lib/download.logic"
 import { startAnonFileDownload } from "@/features/publicLinks/lib/download"
 import { PublicPreview } from "@/features/publicLinks/components/publicPreview"
 
 type DownloadUiState =
-	{ status: "idle" } | { status: "running"; loaded: number; total: number | null } | { status: "too-large" } | { status: "error" }
+	| { status: "idle" }
+	| { status: "running"; loaded: number; total: number | null }
+	| { status: "too-large" }
+	| { status: "error"; dto: ErrorDTO }
 
 // The file surface, shared by the /f/ route and the in-directory child file view. Given a resolved
 // DriveItem (fabricated from a LinkedFile or narrowed from a listing File) it shows a hero card —
@@ -47,8 +52,14 @@ export function FileHero({
 	const [showPreview, setShowPreview] = useState(previewability === "previewable")
 	const [download, setDownload] = useState<DownloadUiState>({ status: "idle" })
 
+	function downloadError(dto: ErrorDTO): string {
+		return `${t("downloadFailed")} ${errorLabel(dto)}`
+	}
+
+	// No bar until the download reports a share: a buffered one reports none before it is done, and an
+	// empty bar standing there the whole time reads as stuck.
 	function handleDownload(): void {
-		setDownload({ status: "running", loaded: 0, total: Number(size) })
+		setDownload({ status: "running", loaded: 0, total: null })
 
 		void startAnonFileDownload({
 			file: narrowToAnyFile(item),
@@ -62,7 +73,7 @@ export function FileHero({
 			if (outcome.status === "too-large") {
 				setDownload({ status: "too-large" })
 			} else if (outcome.status === "error") {
-				setDownload({ status: "error" })
+				setDownload({ status: "error", dto: outcome.dto })
 			} else {
 				// success OR a picker cancel — both return to the resting state (a cancel is a clean no-op).
 				setDownload({ status: "idle" })
@@ -102,7 +113,11 @@ export function FileHero({
 							end={12}
 							className="truncate text-sm font-medium"
 						/>
-						<span className="text-xs text-muted-foreground">{formatBytes(Number(size))}</span>
+						{download.status === "error" ? (
+							<span className="truncate text-xs text-destructive">{downloadError(download.dto)}</span>
+						) : (
+							<span className="text-xs text-muted-foreground">{formatBytes(Number(size))}</span>
+						)}
 					</div>
 					<Button
 						variant="ghost"
@@ -191,14 +206,11 @@ export function FileHero({
 				)}
 				{!downloadEnabled && <p className="text-sm text-muted-foreground">{t("downloadDisabled")}</p>}
 				{download.status === "too-large" && <p className="text-sm text-destructive">{t("downloadTooLarge")}</p>}
+				{download.status === "error" && <p className="text-sm text-destructive">{downloadError(download.dto)}</p>}
 
-				{download.status === "running" && (
+				{download.status === "running" && download.total !== null && download.total > 0 && (
 					<div className="flex w-full max-w-xs flex-col gap-1">
-						<Progress
-							value={
-								download.total !== null && download.total > 0 ? Math.round((download.loaded / download.total) * 100) : null
-							}
-						/>
+						<Progress value={Math.round((download.loaded / download.total) * 100)} />
 					</div>
 				)}
 			</div>

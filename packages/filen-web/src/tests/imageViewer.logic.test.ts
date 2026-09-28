@@ -36,6 +36,19 @@ describe("containSize", () => {
 		expect(containSize({ width: 200, height: 200 }, { width: 100, height: 400 })).toEqual({ width: 50, height: 200 })
 	})
 
+	// The <img> is never scaled up, so a small image's box is its own natural size.
+	it("keeps an image smaller than the container at its natural size", () => {
+		expect(containSize({ width: 1400, height: 800 }, { width: 300, height: 200 })).toEqual({ width: 300, height: 200 })
+	})
+
+	it("keeps a small image draggable only as far as its own zoomed edges", () => {
+		// 300x200 at 8x is 2400x1600: at most (2400 - 1400) / 2 = 500 of horizontal pan.
+		expect(dragPan({ x: 0, y: 0 }, { x: 5000, y: 5000 }, 8, { width: 1400, height: 800 }, { width: 300, height: 200 })).toEqual({
+			x: 500,
+			y: 400
+		})
+	})
+
 	it("falls back to the container size when the natural size is degenerate", () => {
 		expect(containSize({ width: 200, height: 200 }, { width: 0, height: 0 })).toEqual({ width: 200, height: 200 })
 	})

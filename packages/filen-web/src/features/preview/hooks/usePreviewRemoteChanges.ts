@@ -38,7 +38,7 @@ interface UsePreviewRemoteChangesParams {
 	// two revisions can arrive before the overlay renders again.
 	savedRef: RefObject<ReadonlyMap<string, DriveItem>>
 	commitSaved: (frozenUuid: string, item: DriveItem) => void
-	contentRef: RefObject<string | null>
+	contentRef: RefObject<(() => string) | null>
 	// The unsaved edits as they stand: a text buffer, or a spreadsheet's file as edited.
 	readEdits: () => Promise<string | Uint8Array | null>
 	onItemRemoved: (frozenUuid: string) => void
@@ -100,7 +100,7 @@ interface RemoteChangeContext {
 }
 
 function displayedOf(ctx: RemoteChangeContext, source: PreviewSource | undefined): { frozenUuid: string; displayed: DriveItem } | null {
-	if (source?.type !== "drive") {
+	if (source === undefined) {
 		return null
 	}
 
@@ -126,10 +126,6 @@ function slotIndex(ctx: RemoteChangeContext): SlotIndex {
 	const byStable = new Map<string, number>()
 
 	items.forEach((source, sourceIndex) => {
-		if (source.type !== "drive") {
-			return
-		}
-
 		const displayed = saved.get(source.item.data.uuid) ?? source.item
 
 		byUuid.set(displayed.data.uuid, sourceIndex)
@@ -469,7 +465,7 @@ export function usePreviewRemoteChanges({
 	// A prompt belongs to the slot it asks about. One left behind when that slot went (the user's own
 	// trash racing its echo, say) is dropped, never shown over the next file, whose buffer it cannot save.
 	const currentSource = items[index]
-	const currentFrozenUuid = currentSource?.type === "drive" ? currentSource.item.data.uuid : null
+	const currentFrozenUuid = currentSource?.item.data.uuid ?? null
 
 	if (prompt !== null && prompt.frozenUuid !== currentFrozenUuid) {
 		setPrompt(null)
@@ -557,9 +553,9 @@ export function usePreviewRemoteChanges({
 	}
 
 	function slotItem(frozenUuid: string): DriveItem | undefined {
-		const source = items.find(candidate => candidate.type === "drive" && candidate.item.data.uuid === frozenUuid)
+		const source = items.find(candidate => candidate.item.data.uuid === frozenUuid)
 
-		return source?.type === "drive" ? (savedRef.current.get(frozenUuid) ?? source.item) : undefined
+		return source === undefined ? undefined : (savedRef.current.get(frozenUuid) ?? source.item)
 	}
 
 	function dropBuffer(): void {

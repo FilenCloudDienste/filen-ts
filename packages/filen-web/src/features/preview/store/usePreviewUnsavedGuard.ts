@@ -4,10 +4,10 @@ import { create } from "zustand"
 // function, not a component — can ask about it and, if it is set, wait for the user's answer BEFORE
 // runLogout's wipe touches anything. This is the ONE definition of "a preview has unsaved edits":
 // previewOverlay reads `dirty` straight off this store rather than keeping a second copy in useState.
-// Single-instance by construction: PreviewOverlay has five render sites (the drive and photos dialog
-// hosts, and three chat embed sites), and only one can ever hold an editable buffer — the drive/photos
-// hosts are mutually exclusive, while every chat site mounts an external source or the "links" variant,
-// neither of which is ever editable. So one flag needs no per-overlay keying.
+// Single-instance by construction: PreviewOverlay has four render sites (the drive and photos dialog
+// hosts, and two chat embed sites), and only one can ever hold an editable buffer — the drive/photos
+// hosts are mutually exclusive, while every chat site mounts the "links" variant, which is never
+// editable. So one flag needs no per-overlay keying.
 export interface PreviewUnsavedGuardStore {
 	dirty: boolean
 	// Set only while a sign-out is waiting on the user; the overlay renders its existing

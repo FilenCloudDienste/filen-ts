@@ -11,6 +11,7 @@ import {
 	DEFAULT_PUBLIC_SORT,
 	type BrowseEntry
 } from "@/features/publicLinks/lib/browse.logic"
+import { DRIVE_SORT_FROM_PARTS, sortDriveItems } from "@/features/drive/lib/sort"
 
 function makeFile(uuid: `${string}-${string}-${string}-${string}`, name: string, size: bigint, modified: bigint): SdkFile {
 	return {
@@ -123,6 +124,36 @@ describe("sortEntries", () => {
 
 		// banana modified 200 < apricot modified 500
 		expect(files.map(entryName)).toEqual(["banana.txt", "apricot.txt"])
+	})
+
+	it("orders names that compare equal the drive listing's way, whatever order the listing came in", () => {
+		const tied: LinkedDirsAndFiles = {
+			dirs: [],
+			files: [
+				makeFile("40000000-0000-0000-0000-000000000000", "a.txt", 1n, 1n),
+				makeFile("30000000-0000-0000-0000-000000000000", "A.txt", 1n, 1n),
+				makeFile("20000000-0000-0000-0000-000000000000", "file10.txt", 1n, 1n),
+				makeFile("10000000-0000-0000-0000-000000000000", "file9.txt", 1n, 1n)
+			]
+		}
+		const forward = toBrowseEntries(tied)
+		const reversed = [...forward].reverse()
+
+		for (const sort of [
+			DEFAULT_PUBLIC_SORT,
+			{ field: "size", direction: "asc" } as const,
+			{ field: "date", direction: "desc" } as const
+		]) {
+			const expected = sortDriveItems(
+				forward.map(entry => entry.item),
+				DRIVE_SORT_FROM_PARTS[sort.field === "date" ? "lastModified" : sort.field][sort.direction]
+			).map(item => item.data.uuid)
+
+			expect(sortEntries(forward, sort).map(entry => entry.item.data.uuid)).toEqual(expected)
+			expect(sortEntries(reversed, sort).map(entry => entry.item.data.uuid)).toEqual(expected)
+		}
+
+		expect(sortEntries(forward, DEFAULT_PUBLIC_SORT).map(entryName).slice(2)).toEqual(["file9.txt", "file10.txt"])
 	})
 })
 

@@ -201,13 +201,6 @@ export function previewType(item: DriveItem): PreviewCategory {
 	return byMime ?? "other"
 }
 
-// Category for a bare filename, extension-only — the external preview arm (a url with no drive item,
-// hence no mime) resolves what it can render this way. Mirrors previewType's extension-first path
-// without the file-arm/mime machinery; an unmapped extension is "other" (the unsupported state).
-export function previewCategoryForName(name: string): PreviewCategory {
-	return categoryForExtension(extensionOf(name)) ?? "other"
-}
-
 // image joins video/audio here: all three prefer the SW's inline Range route
 // (features/preview/lib/previewStream.ts) and fall whole-buffer only as a capability fallback (dev / SW absent / registration
 // failure) — see PREVIEW_MAX_BYTES's own comment on the tradeoff that fallback accepts. HEIC/HEIF are
@@ -295,9 +288,8 @@ export function streamFailureAction(item: DriveItem): "buffer" | "error" {
 // sorted order (no re-sort of its own; the caller's array is already in display order). Audio is
 // deliberately excluded: a drive-hosted audio file hands off to the persistent player instead of the
 // preview overlay (see directoryListing's open handler), so the overlay never renders or pages to it —
-// stepping through a mixed folder skips audio and the pager's count reflects that. The external/embed
-// audio arm (ExternalPreviewBody) and the public-link page keep their own audio surfaces, neither of
-// which routes through this helper.
+// stepping through a mixed folder skips audio and the pager's count reflects that. The public-link page
+// keeps its own audio surface, which does not route through this helper.
 export function previewableSiblings(items: DriveItem[], variant: DriveVariant): DriveItem[] {
 	return items.filter(item => canPreview(item, variant) && previewType(item) !== "audio")
 }

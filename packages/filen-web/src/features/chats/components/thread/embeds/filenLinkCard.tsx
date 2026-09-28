@@ -110,7 +110,7 @@ function FilenPreviewCard({
 			{previewOpen ? (
 				<PreviewOverlay
 					variant="links"
-					items={[{ type: "drive", item }]}
+					items={[{ item }]}
 					index={0}
 					onStep={noop}
 					onClose={() => {
@@ -212,7 +212,7 @@ function FilenStreamedInlineMedia({
 			{previewOpen ? (
 				<PreviewOverlay
 					variant="links"
-					items={[{ type: "drive", item }]}
+					items={[{ item }]}
 					index={0}
 					onStep={noop}
 					onClose={() => {

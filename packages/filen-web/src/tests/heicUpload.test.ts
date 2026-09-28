@@ -101,6 +101,55 @@ describe("maybeConvertHeicUpload", () => {
 		expect(result.lastModified).toBe(1_700_000_000_000)
 	})
 
+	// A batch starts every conversion at once; only two may hold a source buffer at a time.
+	it("converts at most two files at a time, reading the next only as one finishes", async () => {
+		const pending: (() => void)[] = []
+		const transform = vi.fn<HeicUploadConvertDeps["transform"]>(
+			() =>
+				new Promise<Blob>(resolve => {
+					pending.push(() => {
+						resolve(new Blob([new Uint8Array([9])]))
+					})
+				})
+		)
+		const files = ["a", "b", "c", "d", "e"].map(name => mockFile(`${name}.heic`))
+
+		const all = Promise.all(files.map(file => maybeConvertHeicUpload({ transform }, file, true)))
+
+		await vi.waitFor(() => {
+			expect(transform).toHaveBeenCalledTimes(2)
+		})
+		await new Promise(resolve => setTimeout(resolve, 10))
+		expect(transform).toHaveBeenCalledTimes(2)
+
+		pending.shift()?.()
+
+		await vi.waitFor(() => {
+			expect(transform).toHaveBeenCalledTimes(3)
+		})
+
+		while (pending.length > 0 || transform.mock.calls.length < files.length) {
+			pending.shift()?.()
+			await new Promise(resolve => setTimeout(resolve, 0))
+		}
+
+		const results = await all
+
+		expect(results.map(file => file.name)).toEqual(["a.jpg", "b.jpg", "c.jpg", "d.jpg", "e.jpg"])
+	})
+
+	it("releases its slot when the transform rejects, so later files still convert", async () => {
+		const h = harness()
+		h.transform
+			.mockRejectedValueOnce(new Error("a"))
+			.mockRejectedValueOnce(new Error("b"))
+			.mockResolvedValue(new Blob([new Uint8Array([1])]))
+
+		const results = await Promise.all(["a", "b", "c"].map(name => maybeConvertHeicUpload(h.deps, mockFile(`${name}.heic`), true)))
+
+		expect(results.map(file => file.name)).toEqual(["a.heic", "b.heic", "c.jpg"])
+	})
+
 	it("falls back to the original File when the transform rejects — an upload must never be blocked by a failed opportunistic re-encode", async () => {
 		const h = harness()
 		h.transform.mockRejectedValue(new Error("decode failed"))
@@ -145,6 +194,13 @@ describe("heicUploadConversionEnabled", () => {
 		await heicUploadConversionEnabled(h.deps, [mockFile("a.heic"), mockFile("b.heic"), mockFile("c.heic")])
 
 		expect(h.readPreference).toHaveBeenCalledTimes(1)
+	})
+
+	it("is false, not a rejection, when the preference read fails", async () => {
+		const h = harness(true)
+		h.readPreference.mockRejectedValue(new Error("db rpc timeout: kvGet"))
+
+		expect(await heicUploadConversionEnabled(h.deps, [mockFile("a.heic")])).toBe(false)
 	})
 
 	it("never reads the preference for an empty batch", async () => {

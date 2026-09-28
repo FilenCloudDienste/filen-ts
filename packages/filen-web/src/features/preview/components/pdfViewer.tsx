@@ -186,21 +186,22 @@ function viewportPoint(point: unknown[]): { x: number; y: number } {
 }
 
 // One page's canvas — resolves its own PDFPageProxy on mount (cheap: already-parsed doc structure,
-// not rasterization), then renders once metadata is ready AND the parent's lazy gate opens. The gate
-// keeps a many-page document from rasterizing every page up front (each canvas allocates
+// not rasterization), then renders once metadata is ready AND its lazy gate (shouldRender) opens. The
+// gate keeps a many-page document from rasterizing every page up front (each canvas allocates
 // width*height*4 bytes — the same tab-crashing-allocation concern PREVIEW_MAX_BYTES already guards at
 // the whole-file level, just at per-page granularity here). A page's canvas is also released once it
 // scrolls past the wider PDF_PAGE_EVICT_MARGIN_PX zone (pdfPageAction below) — without that, a long,
 // low-byte-size document could still accumulate hundreds of full-res canvases over one scroll-through
-// and exhaust the tab despite never approaching the whole-file byte cap. Re-entering the render
-// margin re-renders from scratch; the wrapper div's own size (from the already-resolved `page`, never
-// reset by eviction) keeps scroll position stable across an evict/re-render cycle.
+// and exhaust the tab despite never approaching the whole-file byte cap. Eviction also releases the
+// page's decoded images and operator list (page.cleanup()), which pdf.js otherwise keeps on the proxy
+// for the document's whole life. Re-entering the render margin re-renders from scratch; the wrapper
+// div's own size (from the already-resolved `page`, never reset by eviction) keeps scroll position
+// stable across an evict/re-render cycle.
 function PdfPage({
 	doc,
 	pageNumber,
 	label,
 	root,
-	shouldRender,
 	scale,
 	onIntersect,
 	wrapperRef
@@ -209,12 +210,11 @@ function PdfPage({
 	pageNumber: number
 	label: string
 	root: RefObject<HTMLDivElement | null>
-	shouldRender: boolean
 	// The user's current zoom level (PdfPageList's own state) — every page re-renders at this scale;
 	// see the render effect below for how a scale change (without a fresh page or visibility change)
 	// still triggers a re-render at the new size.
 	scale: number
-	onIntersect: (pageNumber: number, ratio: number, isIntersecting: boolean) => void
+	onIntersect: (pageNumber: number, ratio: number) => void
 	wrapperRef: (el: HTMLDivElement | null) => void
 }) {
 	const divRef = useRef<HTMLDivElement | null>(null)
@@ -222,6 +222,13 @@ function PdfPage({
 	const textLayerRef = useRef<HTMLDivElement | null>(null)
 	const [links, setLinks] = useState<PdfLinkAnnotation[]>([])
 	const [page, setPage] = useState<PDFPageProxy | null>(null)
+	// The same proxy, for the eviction observer's callback, which outlives any one render.
+	const pageRef = useRef<PDFPageProxy | null>(null)
+	// Monotonic: set the first time this page enters the render margin, and never cleared — the lazy
+	// gate that keeps a long document from rasterizing every page up front. Page 1 starts open so the
+	// first paint needs no observer round trip. Local to the page, so reaching a new page re-renders only
+	// that page, not the whole list.
+	const [shouldRender, setShouldRender] = useState(pageNumber === 1)
 	// The proxy whose annotations have already been requested — the lazy fetch below must fire once per
 	// page, not once per re-entry into the extended view.
 	const annotationsRequestedFor = useRef<PDFPageProxy | null>(null)
@@ -232,14 +239,13 @@ function PdfPage({
 	// render pass, no extra round-trip needed.
 	const [renderedAtScale, setRenderedAtScale] = useState<number | null>(null)
 	const rendered = renderedAtScale === scale
-	// Live (non-monotonic, unlike the parent's renderSet) membership in the wider eviction margin —
+	// Live (non-monotonic, unlike shouldRender) membership in the wider eviction margin —
 	// gates the render effect below (see pdfPageAction) and is itself set from the eviction observer.
 	const [withinExtendedView, setWithinExtendedView] = useState(false)
 
 	// Latest onIntersect, read (never as a dependency) from the observer callback below — keeps that
-	// effect from tearing down and recreating its IntersectionObserver on every ancestor re-render
-	// (currentPage/renderSet change on nearly every scroll frame), which a raw `onIntersect` dependency
-	// would otherwise force on every one of those renders.
+	// effect from tearing down and recreating its IntersectionObserver on every ancestor re-render,
+	// which a raw `onIntersect` dependency would otherwise force on every one of those renders.
 	const onIntersectRef = useRef(onIntersect)
 
 	useEffect(() => {
@@ -251,12 +257,14 @@ function PdfPage({
 
 		void doc.getPage(pageNumber).then(resolved => {
 			if (live) {
+				pageRef.current = resolved
 				setPage(resolved)
 			}
 		})
 
 		return () => {
 			live = false
+			pageRef.current = null
 		}
 	}, [doc, pageNumber])
 
@@ -273,7 +281,11 @@ function PdfPage({
 				const entry = entries[0]
 
 				if (entry) {
-					onIntersectRef.current(pageNumber, entry.intersectionRatio, entry.isIntersecting)
+					if (entry.isIntersecting) {
+						setShouldRender(true)
+					}
+
+					onIntersectRef.current(pageNumber, entry.intersectionRatio)
 				}
 			},
 			{ root: container, rootMargin: `${String(PDF_PAGE_RENDER_MARGIN_PX)}px 0px`, threshold: [0, 0.25, 0.5, 0.75, 1] }
@@ -323,6 +335,9 @@ function PdfPage({
 						canvas.height = 0
 					}
 
+					// Safe with a render in flight: pdf.js defers the release until that task (cancelled by the
+					// render effect's cleanup) has settled. A re-entry re-fetches the operator list.
+					pageRef.current?.cleanup()
 					setRenderedAtScale(null)
 				}
 			},
@@ -522,16 +537,11 @@ function PdfPageList({ doc, alt }: { doc: PDFDocumentProxy; alt: string }) {
 	const containerRef = useRef<HTMLDivElement | null>(null)
 	const pageRefs = useRef<Map<number, HTMLDivElement>>(new Map())
 	const ratiosRef = useRef<Map<number, number>>(new Map())
-	const [renderSet, setRenderSet] = useState<ReadonlySet<number>>(() => new Set([1]))
 	const [currentPage, setCurrentPage] = useState(1)
 	const [scale, setScale] = useState(BASE_SCALE)
 
-	function handleIntersect(pageNumber: number, ratio: number, isIntersecting: boolean): void {
+	function handleIntersect(pageNumber: number, ratio: number): void {
 		ratiosRef.current.set(pageNumber, ratio)
-
-		if (isIntersecting) {
-			setRenderSet(prev => (prev.has(pageNumber) ? prev : new Set(prev).add(pageNumber)))
-		}
 
 		const entries: PageVisibility[] = Array.from(ratiosRef.current, ([page, r]) => ({ page, ratio: r }))
 
@@ -648,7 +658,6 @@ function PdfPageList({ doc, alt }: { doc: PDFDocumentProxy; alt: string }) {
 							pageNumber={pageNumber}
 							label={`${alt} — ${t("previewPdfPageIndicator", { current: pageNumber, total: numPages })}`}
 							root={containerRef}
-							shouldRender={renderSet.has(pageNumber)}
 							scale={scale}
 							onIntersect={handleIntersect}
 							wrapperRef={el => {

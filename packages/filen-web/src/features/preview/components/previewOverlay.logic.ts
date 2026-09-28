@@ -30,14 +30,11 @@ export function previewMenuHiddenActionIds(extra?: ReadonlySet<ItemActionId>): R
 	return extra === undefined ? PREVIEW_MENU_HIDDEN_ACTION_IDS : new Set([...PREVIEW_MENU_HIDDEN_ACTION_IDS, ...extra])
 }
 
-// The header's ⋯ trigger only ever mounts for a drive-sourced slot — the external arm (the seam for
-// future chat/note attachments) carries no DriveItem for driveItemActions to gate against, so it shows
-// no menu at all, matching the previous step's identical rule for the download button beside it. A
-// chat/note embed's fabricated linked-file item (isLinkedEmbedItem, item.ts) is drive-sourced but
-// neither owned nor a real tree member — rename/move/trash/share/versions must never be offered for
-// it, so it's excluded here too, alongside the external arm.
+// The header's ⋯ trigger is hidden for a chat/note embed's fabricated linked-file item
+// (isLinkedEmbedItem, item.ts): it is neither owned nor a real tree member, so
+// rename/move/trash/share/versions must never be offered for it.
 export function previewMenuVisible(source: PreviewSource): boolean {
-	return source.type === "drive" && !isLinkedEmbedItem(source.item)
+	return !isLinkedEmbedItem(source.item)
 }
 
 // Duck-typed rather than `target instanceof Element` — this module's own unit test has no real DOM

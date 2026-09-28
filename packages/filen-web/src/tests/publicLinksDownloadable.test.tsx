@@ -111,7 +111,7 @@ describe("PreviewOverlay — a chat embed's linked file", () => {
 		render(
 			createElement(PreviewOverlay, {
 				variant: "links" as const,
-				items: [{ type: "drive" as const, item: linkedFileIntoDriveItem(linkedFile(downloadable)) }],
+				items: [{ item: linkedFileIntoDriveItem(linkedFile(downloadable)) }],
 				index: 0,
 				onStep: vi.fn(),
 				onClose: vi.fn(),
@@ -146,13 +146,13 @@ describe("media controls", () => {
 		const { container, rerender } = render(
 			createElement(PreviewDownloadableProvider, {
 				downloadable: false,
-				children: createElement(MediaElement, { category: "audio", url: "blob:audio", alt: "a" })
+				children: createElement(MediaElement, { category: "audio", url: "blob:audio", alt: "a", positionKey: "a" })
 			})
 		)
 
 		expect(container.querySelector("audio")?.getAttribute("controlslist")).toBe("nodownload")
 
-		rerender(createElement(MediaElement, { category: "video", url: "blob:video", alt: "v" }))
+		rerender(createElement(MediaElement, { category: "video", url: "blob:video", alt: "v", positionKey: "v" }))
 
 		expect(container.querySelector("video")?.hasAttribute("controlslist")).toBe(false)
 	})
