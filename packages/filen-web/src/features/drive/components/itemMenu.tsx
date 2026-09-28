@@ -53,12 +53,15 @@ export interface ItemMenuContentProps {
 	// Entries above the item's own, closed by a separator — the sidebar tree's actions on the directory
 	// as a destination (open, create, upload, paste). Omitted by every row/tile caller.
 	leading?: ReactNode
+	// The listing's own open (the row's double-click). Present, it puts Open at the top for any item that
+	// opens; the preview overlay and the sidebar tree omit it.
+	onOpen?: (() => void) | undefined
 }
 
-// Groups the flat descriptor list for readability: a rule before the reference/reveal action (info)
-// and before whichever removal action closes the list (trash in the normal menu, deletePermanently in
-// the trash/undecryptable-reduced menus) — a pure presentation concern the gating builder itself
-// shouldn't own.
+// Groups the flat descriptor list for readability: a rule after Open, before the reference/reveal
+// action (info) and before whichever removal action closes the list (trash in the normal menu,
+// deletePermanently in the trash/undecryptable-reduced menus) — a pure presentation concern the gating
+// builder itself shouldn't own.
 const SEPARATOR_BEFORE = new Set<ItemActionId>(["info", "trash", "deletePermanently"])
 
 // Shared per-item action list, rendered by BOTH the right-click context menu and the ⋯ dropdown (see
@@ -77,14 +80,16 @@ function ItemMenuEntries({
 	hiddenActionIds,
 	searchHit,
 	leading,
+	onOpen,
 	family
 }: ItemMenuContentProps & { family: DirectoryTreeMenuFamily }) {
 	const { t } = useTranslation(["drive", "common"])
 	const navigate = useNavigate()
 	const isOnline = useIsOnline()
-	const descriptors = applyOfflineGate(driveItemActions(item, variant, { searchHit: searchHit === true }), isOnline).filter(
-		descriptor => !hiddenActionIds?.has(descriptor.id)
-	)
+	const descriptors = applyOfflineGate(
+		driveItemActions(item, variant, { searchHit: searchHit === true, open: onOpen !== undefined }),
+		isOnline
+	).filter(descriptor => !hiddenActionIds?.has(descriptor.id))
 	const { Item, Separator } = family
 
 	async function runDirect(descriptor: Extract<ItemActionDescriptor, { run: "direct" }>): Promise<void> {
@@ -177,7 +182,7 @@ function ItemMenuEntries({
 			)}
 			{descriptors.map((descriptor, index) => (
 				<Fragment key={descriptor.id}>
-					{index > 0 && SEPARATOR_BEFORE.has(descriptor.id) ? <Separator /> : null}
+					{index > 0 && (SEPARATOR_BEFORE.has(descriptor.id) || descriptors[index - 1]?.id === "open") ? <Separator /> : null}
 					{/* The Move and Copy submenus open offline too, for their clipboard entries; each gates its own
 					    destinations, so their descriptors' offline flag is not applied to the trigger. */}
 					{descriptor.id === "move" ? (
@@ -208,6 +213,13 @@ function ItemMenuEntries({
 								// bubble through the REACT tree (not the DOM tree), so without this an item click
 								// would also fire the row's onClick and reselect it.
 								event.stopPropagation()
+
+								// Synchronous off the click, like the double-click it mirrors: audio starts
+								// playback from here.
+								if (descriptor.id === "open") {
+									onOpen?.()
+									return
+								}
 
 								if (descriptor.id === "copyLink") {
 									void runCopyLink()
@@ -242,7 +254,8 @@ export function DriveContextMenuContent({
 	onRestored,
 	hiddenActionIds,
 	searchHit,
-	leading
+	leading,
+	onOpen
 }: ItemMenuContentProps) {
 	return (
 		<ContextMenuContent>
@@ -255,6 +268,7 @@ export function DriveContextMenuContent({
 				hiddenActionIds={hiddenActionIds}
 				searchHit={searchHit}
 				leading={leading}
+				onOpen={onOpen}
 				family={CONTEXT_TREE_MENU_FAMILY}
 			/>
 		</ContextMenuContent>
@@ -270,7 +284,8 @@ export function DriveDropdownMenuContent({
 	onFavoriteToggled,
 	onRestored,
 	hiddenActionIds,
-	searchHit
+	searchHit,
+	onOpen
 }: ItemMenuContentProps) {
 	return (
 		<DropdownMenuContent align="end">
@@ -282,6 +297,7 @@ export function DriveDropdownMenuContent({
 				onRestored={onRestored}
 				hiddenActionIds={hiddenActionIds}
 				searchHit={searchHit}
+				onOpen={onOpen}
 				family={DROPDOWN_TREE_MENU_FAMILY}
 			/>
 		</DropdownMenuContent>

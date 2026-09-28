@@ -4,6 +4,8 @@ import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import { canMoveVariant, type DriveVariant } from "@/features/drive/lib/preferences"
 import { canShareVariant, isReadOnlySharedVariant } from "@/features/drive/lib/share/gating"
 import { buildPublicLinkUrl } from "@/features/drive/components/linkDialog.logic"
+import { resolveDriveNavigationTarget } from "@/features/drive/lib/navigate"
+import { canPreview, previewType } from "@/features/drive/lib/preview.logic"
 import { type DriveItemLinkStatus } from "@/features/drive/queries/drive"
 import { type DriveKey } from "@/lib/i18n"
 import { startDownloads } from "@/features/drive/lib/download"
@@ -16,6 +18,7 @@ export type ItemActionDialogKind =
 	"rename" | "move" | "copy" | "color" | "versions" | "info" | "link" | "share" | "unshare" | "trash" | "delete"
 
 export type ItemActionId =
+	| "open"
 	| "rename"
 	| "move"
 	| "copy"
@@ -101,6 +104,24 @@ const DELETE_PERMANENTLY: ItemActionDescriptor = {
 // item menus (copySubmenu.tsx); "dialog" opens the full destination picker in its copy mode.
 export const COPY: ItemActionDescriptor = { id: "copy", ...ACTION_DEFS.copy, run: "dialog", dialogKind: "copy" }
 
+// Whether opening the item (double-click, Enter, the menu's Open) does anything: a directory the listing
+// can navigate into (never a trashed or undecryptable one), or a file with a preview. Audio opens the
+// player rather than a preview, which a trashed track never does. directoryListing.tsx's open handler
+// gates on this too, so the menu entry can never offer an inert open.
+export function canOpenItem(item: DriveItem, variant: DriveVariant): boolean {
+	if (asDirectoryOrFile(item).type === "directory") {
+		return resolveDriveNavigationTarget(item, variant, "") !== null
+	}
+
+	return canPreview(item, variant) && !(variant === "trash" && previewType(item) === "audio")
+}
+
+function openDescriptor(item: DriveItem): ItemActionDescriptor {
+	return asDirectoryOrFile(item).type === "directory"
+		? { id: "open", ...ACTION_DEFS.openDirectory, run: "direct" }
+		: { id: "open", ...ACTION_DEFS.openFile, run: "direct" }
+}
+
 export function favoriteDescriptor(item: DriveItem): ItemActionDescriptor {
 	return item.data.favorited
 		? { id: "favorite", ...ACTION_DEFS.unfavorite, run: "direct" }
@@ -127,9 +148,21 @@ export function startItemDownload(item: DriveItem): void {
 // stays trivially testable without rendering anything. Operates on a SINGLE item; bulk multi-select
 // actions are the selection bar's own concern, not this menu's.
 // `searchHit` is true only for a row whose parent is NOT the directory on screen (driveRow.tsx's own
-// searchParentPath), which is exactly when "Open containing directory" has somewhere to go. Optional,
-// so every existing two-argument call site is unaffected.
-export function driveItemActions(item: DriveItem, variant: DriveVariant, options?: { searchHit?: boolean }): ItemActionDescriptor[] {
+// searchParentPath), which is exactly when "Open containing directory" has somewhere to go. `open` is
+// true only for a caller that can open the item (a listing row or tile); the preview overlay has it
+// open already and the sidebar tree renders its own Open. Both optional, so every existing
+// two-argument call site is unaffected.
+export function driveItemActions(
+	item: DriveItem,
+	variant: DriveVariant,
+	options?: { searchHit?: boolean; open?: boolean }
+): ItemActionDescriptor[] {
+	const actions = itemActionsFor(item, variant, options?.searchHit === true)
+
+	return options?.open === true && canOpenItem(item, variant) ? [openDescriptor(item), ...actions] : actions
+}
+
+function itemActionsFor(item: DriveItem, variant: DriveVariant, searchHit: boolean): ItemActionDescriptor[] {
 	// Trash's own menu is already the maximally-reduced set (no rename/move/color/versions/link/
 	// download regardless), so an undecryptable item here needs no further reduction — checked first
 	// so that case never has to be special-cased below.
@@ -184,7 +217,7 @@ export function driveItemActions(item: DriveItem, variant: DriveVariant, options
 	// Right after Info, the other reference/reveal action. Deliberately absent from the trash branch
 	// above (search is drive-variant only) and from the undecryptable branch (its ancestor walk
 	// resolves nothing the user could act on).
-	if (options?.searchHit === true) {
+	if (searchHit) {
 		actions.push(OPEN_CONTAINING_DIRECTORY)
 	}
 

@@ -25,7 +25,7 @@ import { hiddenFilterAppliesTo } from "@/features/drive/lib/hiddenItems"
 import { type DriveSortBy } from "@/features/drive/lib/sort"
 import { resolveDriveNavigationTarget, splatToUuids } from "@/features/drive/lib/navigate"
 import { asDirectoryOrFile } from "@/features/drive/lib/item"
-import { canPreview, previewableSiblings } from "@/features/drive/lib/preview.logic"
+import { previewableSiblings } from "@/features/drive/lib/preview.logic"
 import { selectableForSelectAll } from "@/features/drive/lib/selectionFlags"
 import { drivePreviewSources } from "@/features/preview/lib/previewSource"
 import { deriveAudioHandoff, isAudioItem } from "@/features/audio/lib/handoff"
@@ -43,7 +43,7 @@ import { isAnyMenuOpen } from "@/lib/keymap/dialogGuard"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { useAction } from "@/lib/keymap/useAction"
 import { useBlockedUsers } from "@/features/contacts/hooks/useBlockedUsers"
-import { driveItemActions } from "@/features/drive/components/itemMenu.logic"
+import { canOpenItem, driveItemActions } from "@/features/drive/components/itemMenu.logic"
 import { isBulkDownloadEnabled } from "@/features/drive/components/bulkActionBar.logic"
 import {
 	filterDriveItemsByLocalSearch,
@@ -222,20 +222,19 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	function handleOpen(index: number) {
 		const item = sortedItems[index]
 
-		if (!item) {
+		// The same gate the item menu's Open is offered by: a file without a preview, an undecryptable or
+		// trashed directory and a trashed audio file all open to nothing.
+		if (!item || !canOpenItem(item, variant)) {
 			return
 		}
 
-		// A file opens the preview overlay when previewable, else no-ops (mirrors the prior behavior:
-		// resolveDriveNavigationTarget already returns null for every file arm — see its own comment).
-		// A directory falls through to the unchanged navigation path below.
+		// A file opens the preview overlay; a directory falls through to the navigation path below.
 		if (asDirectoryOrFile(item).type === "file") {
 			// Drive-hosted audio hands off to the persistent player instead of the preview overlay: opening
 			// one audio file enqueues the folder's audio siblings (in this listing's current sort order,
-			// positioned at the opened track) and starts playback. deriveAudioHandoff returns null for a
-			// trash listing and for an undecryptable audio file — a trashed/undecryptable track stays
-			// non-playable, like mobile — in which case the open is simply inert (audio never opens the
-			// overlay, whose pager already excludes it via previewableSiblings).
+			// positioned at the opened track) and starts playback. A trashed/undecryptable track stays
+			// non-playable, like mobile — canOpenItem already turned those away, and deriveAudioHandoff
+			// agrees (audio never opens the overlay, whose pager already excludes it via previewableSiblings).
 			if (isAudioItem(item)) {
 				const handoff = deriveAudioHandoff(sortedItems, item.data.uuid, variant === "trash")
 
@@ -246,23 +245,11 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 				return
 			}
 
-			if (!canPreview(item, variant)) {
-				return
-			}
-
 			const siblings = previewableSiblings(sortedItems, variant)
 			const siblingIndex = siblings.findIndex(sibling => sibling.data.uuid === item.data.uuid)
 
 			openPreview(drivePreviewSources(siblings), siblingIndex === -1 ? 0 : siblingIndex)
 
-			return
-		}
-
-		// An undecryptable directory is inert — its metadata (name, and the keys its children decrypt
-		// with) never decrypted for this account, so descending into it would only list rows that can't
-		// decrypt either. Gate navigation the same way the file branch above gates preview on canPreview,
-		// mirroring drive's own menu reduction (driveItemActions omits every mutating action here too).
-		if (item.data.undecryptable) {
 			return
 		}
 

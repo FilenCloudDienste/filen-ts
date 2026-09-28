@@ -202,7 +202,7 @@ afterEach(() => {
 })
 
 describe("sidebar tree menu", () => {
-	it("opens on a node with the destination entries, then exactly the entries its listing row offers", async () => {
+	it("opens on a node with the destination entries, then the entries its listing row offers bar its Open", async () => {
 		render(
 			createElement(DriveRow, {
 				item: DOCS,
@@ -230,8 +230,10 @@ describe("sidebar tree menu", () => {
 		renderTree()
 		await openMenuOn(rowButton("Docs"))
 
+		// The destination entries lead with the tree's own Open, so the row's is not repeated.
+		expect(rowEntries[0]).toBe("Open")
 		expect(rowEntries).toContain("Rename")
-		expect(menuEntries()).toEqual([...TARGET_ENTRIES, ...rowEntries])
+		expect(menuEntries()).toEqual([...TARGET_ENTRIES, ...rowEntries.slice(1)])
 	})
 
 	it("opens on the Cloud Drive root with the destination entries alone", async () => {

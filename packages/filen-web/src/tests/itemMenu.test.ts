@@ -15,7 +15,9 @@ import {
 	Trash2Icon,
 	RotateCcwIcon,
 	DownloadIcon,
-	CopyPlusIcon
+	CopyPlusIcon,
+	EyeIcon,
+	FolderOpenIcon
 } from "lucide-react"
 import type { Dir, File, SharedDir, SharedFile, SharedRootDir, SharingRole, UuidStr } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
@@ -51,6 +53,7 @@ vi.mock("@/features/drive/lib/saveDownload", async importOriginal => {
 
 import {
 	applyOfflineGate,
+	canOpenItem,
 	driveItemActions,
 	resolveCopyLinkAction,
 	startItemDownload,
@@ -673,6 +676,81 @@ describe("driveItemActions — Open containing directory (search hits only)", ()
 	})
 })
 
+describe("driveItemActions — Open (listing rows and tiles only)", () => {
+	function openIds(item: DriveItem, variant: DriveVariant): string[] {
+		return driveItemActions(item, variant, { open: true }).map(descriptor => descriptor.id)
+	}
+
+	it("leads the menu for a navigable directory and a previewable file", () => {
+		expect(openIds(dirItem(), "drive")[0]).toBe("open")
+		expect(openIds(fileItem(), "drive")[0]).toBe("open")
+		expect(openIds(sharedDirItem(), "sharedIn")[0]).toBe("open")
+		expect(openIds(sharedRootFileItem(), "sharedIn")[0]).toBe("open")
+	})
+
+	it("is absent unless the caller can open the item", () => {
+		expect(ids(dirItem(), "drive")).not.toContain("open")
+		expect(driveItemActions(fileItem(), "drive", { open: false }).map(d => d.id)).not.toContain("open")
+	})
+
+	it("is never offered for a trashed directory, which can't be browsed", () => {
+		expect(openIds(dirItem(), "trash")).not.toContain("open")
+	})
+
+	it("is offered for a trashed file that still previews", () => {
+		expect(openIds(fileItem(), "trash")[0]).toBe("open")
+	})
+
+	it("is never offered for a trashed audio file, which never plays", () => {
+		const track = fileItem({
+			meta: {
+				type: "decoded",
+				data: { name: "song.mp3", mime: "audio/mpeg", modified: 1_700_000_000_000n, size: 1_024n, key: "key", version: 2 }
+			}
+		})
+
+		expect(openIds(track, "drive")[0]).toBe("open")
+		expect(openIds(track, "trash")).not.toContain("open")
+	})
+
+	it("is never offered for a file without a preview", () => {
+		const binary = fileItem({
+			meta: {
+				type: "decoded",
+				data: {
+					name: "archive.bin",
+					mime: "application/octet-stream",
+					modified: 1_700_000_000_000n,
+					size: 1_024n,
+					key: "key",
+					version: 2
+				}
+			}
+		})
+
+		expect(canOpenItem(binary, "drive")).toBe(false)
+		expect(openIds(binary, "drive")).not.toContain("open")
+	})
+
+	it("is never offered for an undecryptable item", () => {
+		expect(openIds(dirItem({ meta: { type: "encrypted", data: "ciphertext" } }), "drive")).not.toContain("open")
+		expect(openIds(fileItem({ meta: { type: "encrypted", data: "ciphertext" } }), "drive")).not.toContain("open")
+	})
+
+	it("uses the folder icon for a directory and the eye for a file, both labelled Open", () => {
+		expect(driveItemActions(dirItem(), "drive", { open: true })[0]).toMatchObject({
+			labelKey: "driveActionOpen",
+			icon: FolderOpenIcon,
+			run: "direct"
+		})
+		expect(driveItemActions(fileItem(), "drive", { open: true })[0]).toMatchObject({
+			labelKey: "driveActionOpen",
+			icon: EyeIcon,
+			run: "direct"
+		})
+	})
+})
+
 describe("applyOfflineGate", () => {
 	it("leaves every descriptor untouched while online", () => {
 		const actions = driveItemActions(dirItem(), "drive")
@@ -687,6 +765,9 @@ describe("applyOfflineGate", () => {
 	// against what the REAL builders offer, so an entry that claims "gated" but is missing from
 	// OFFLINE_GATED_IDS fails rather than shipping ungated.
 	const OFFLINE_EXPECTATION: Record<ItemActionId, "gated" | "readOnly"> = {
+		// Mirrors the double-click, which isn't gated either: a cached listing or the preview's own error
+		// state takes over offline.
+		open: "readOnly",
 		rename: "gated",
 		move: "gated",
 		favorite: "gated",
@@ -717,7 +798,7 @@ describe("applyOfflineGate", () => {
 		() => fileItem({ meta: { type: "encrypted", data: "ciphertext" } })
 	]
 	const EVERY_DESCRIPTOR = VARIANTS.flatMap(variant =>
-		ITEMS.flatMap(item => [true, false].flatMap(searchHit => driveItemActions(item(), variant, { searchHit })))
+		ITEMS.flatMap(item => [true, false].flatMap(searchHit => driveItemActions(item(), variant, { searchHit, open: true })))
 	)
 
 	it("offers every classified id somewhere, so the table cannot drift away from the builders", () => {

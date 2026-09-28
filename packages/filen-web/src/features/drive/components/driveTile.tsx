@@ -251,6 +251,9 @@ export function DriveTile({
 									variant={variant}
 									onItemAction={onItemAction}
 									searchHit={searchHit}
+									onOpen={() => {
+										onOpen(index)
+									}}
 								/>
 							</DropdownMenu>
 						</div>
@@ -283,6 +286,9 @@ export function DriveTile({
 					variant={variant}
 					onItemAction={onItemAction}
 					searchHit={searchHit}
+					onOpen={() => {
+						onOpen(index)
+					}}
 				/>
 			)}
 		</ContextMenu>

@@ -2,6 +2,7 @@ import {
 	CopyIcon,
 	CopyPlusIcon,
 	DownloadIcon,
+	EyeIcon,
 	FolderInputIcon,
 	FolderOpenIcon,
 	HistoryIcon,
@@ -33,6 +34,9 @@ export interface ActionDef {
 // facts are common. Favorite is two entries; each toggle picks by the item's/selection's favorited
 // state.
 export const ACTION_DEFS = {
+	// Open is two entries, picked by item type like favorite: a directory navigates, a file previews.
+	openDirectory: { labelKey: "driveActionOpen", icon: FolderOpenIcon },
+	openFile: { labelKey: "driveActionOpen", icon: EyeIcon },
 	rename: { labelKey: "driveActionRename", icon: PencilIcon },
 	move: { labelKey: "driveActionMove", icon: FolderInputIcon },
 	// Not CopyIcon: that one already means "Copy link".

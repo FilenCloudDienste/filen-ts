@@ -253,6 +253,9 @@ export function DriveRow({
 								variant={variant}
 								onItemAction={onItemAction}
 								searchHit={searchHit}
+								onOpen={() => {
+									onOpen(index)
+								}}
 							/>
 						</DropdownMenu>
 					</div>
@@ -270,6 +273,9 @@ export function DriveRow({
 					variant={variant}
 					onItemAction={onItemAction}
 					searchHit={searchHit}
+					onOpen={() => {
+						onOpen(index)
+					}}
 				/>
 			)}
 		</ContextMenu>
