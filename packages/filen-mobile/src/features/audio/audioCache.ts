@@ -1,6 +1,6 @@
 import * as FileSystem from "expo-file-system"
 import { AppState } from "react-native"
-import { Semaphore, run, planSizeCapEviction } from "@filen/shared"
+import { Semaphore, run, planSizeCapEviction, normalizeTrackTags } from "@filen/shared"
 import { debounce } from "es-toolkit/function"
 import { ClearBarrier } from "@/lib/clearBarrier"
 import { MUSIC_METADATA_SUPPORTED_EXTENSIONS, AUDIO_METADATA_MAX_PARSE_SIZE_BYTES, AUDIO_METADATA_MAX_CONCURRENT_PARSES } from "@/constants"
@@ -318,14 +318,16 @@ export class AudioCache {
 							}
 						}
 
+						const tags = normalizeTrackTags(parsedMetadata)
+
 						metadata = {
 							pictureUri,
 							pictureBlurhash,
-							artist: parsedMetadata.common?.artist ?? null,
-							title: parsedMetadata.common?.title ?? null,
-							album: parsedMetadata.common?.album ?? null,
-							date: parsedMetadata.common?.date ?? null,
-							duration: parsedMetadata.format?.duration ? Math.round(parsedMetadata.format.duration) : null,
+							artist: tags.artist,
+							title: tags.title,
+							album: tags.album,
+							date: tags.date,
+							duration: tags.durationSec,
 							cachedAt: Date.now()
 						}
 
