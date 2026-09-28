@@ -1,0 +1,13 @@
+{
+	"extends": "./tsconfig.json",
+	"include": ["src/dom", "src/tests/dom"],
+	"exclude": [],
+	"compilerOptions": {
+		"lib": ["ESNext", "DOM"],
+		"noEmit": true,
+		"baseUrl": ".",
+		"paths": {
+			"@filen/shared/dom": ["./src/dom/index.ts"]
+		}
+	}
+}

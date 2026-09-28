@@ -15,10 +15,14 @@
 		".": {
 			"types": "./src/index.ts",
 			"default": "./src/index.ts"
+		},
+		"./dom": {
+			"types": "./src/dom/index.ts",
+			"default": "./src/dom/index.ts"
 		}
 	},
 	"scripts": {
-		"typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
+		"typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json && tsc --noEmit -p tsconfig.dom.json",
 		"dev": "tsx src/dev.ts",
 		"test": "vitest run",
 		"test:watch": "vitest",
@@ -34,6 +38,7 @@
 		"@eslint/js": "^9.39.3",
 		"@types/node": "^24.0.0",
 		"eslint": "^9.39.3",
+		"happy-dom": "^20.14.0",
 		"tsx": "^4.20.6",
 		"typescript": "^5.9.3",
 		"typescript-eslint": "^8.56.1",

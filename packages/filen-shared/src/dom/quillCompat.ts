@@ -1,5 +1,5 @@
-// Quill format backward-compat shim (mobile-side): translate this app's Quill 2.0.3 editor output to
-// the Quill 1.3.7 on-disk form that web + desktop (and @filen/shared) read.
+// Quill format backward-compat shim: translate Quill 2.0.3 editor output (mobile, web) to the Quill
+// 1.3.7 on-disk form that the old web client and desktop (and checklistParser) read.
 //
 // Notes are stored as raw Quill HTML (root.innerHTML), shared byte-for-byte across clients. Two
 // constructs serialize incompatibly between the versions:
@@ -12,15 +12,18 @@
 //     v2  <div class="ql-code-block-container"><div class="ql-code-block">line1</div><div class="ql-code-block">line2</div></div>
 //
 // Quill v1 derives lists from the container (it ignores <li data-list>) and code blocks from <pre>, so
-// a note saved in v2 form is read by web/desktop as a plain numbered list / plain paragraphs with the
-// code's indentation collapsed. Quill v2's importer understands BOTH forms, so this app renders
-// web-authored notes correctly on open; the corruption only happens on SAVE. This shim rewrites the v2
+// a note saved in v2 form is read by old web/desktop as a plain numbered list / plain paragraphs with
+// the code's indentation collapsed. Quill v2's importer understands BOTH forms, so a v2 editor renders
+// v1-authored notes correctly on open; the corruption only happens on SAVE. This shim rewrites the v2
 // output back to the exact v1 form before it leaves the editor, leaving all other markup untouched, so
 // the on-disk format stays v1 — the format every client supports.
 //
 // The output reproduces Quill v1's exact getHTML() form (verified byte-for-byte against real Quill
-// 1.3.7): web's react-quill re-fires onChange on load whenever getHTML(convert(stored)) !== stored, so
-// a non-canonical v1 dialect would make web re-save the note once on open.
+// 1.3.7): old web's react-quill re-fires onChange on load whenever getHTML(convert(stored)) !== stored,
+// so a non-canonical v1 dialect would make old web re-save the note once on open.
+//
+// Needs a DOM (document.createElement), so it lives behind "@filen/shared/dom" and must never be
+// re-exported from the platform-free main barrel.
 
 type LegacyContainer = {
 	tag: "ul" | "ol"
@@ -171,9 +174,7 @@ export function quillV2ToLegacyV1(html: string): string {
 	// and <ol>/<ul> only ever come from lists — so each <ol|ul>…</ol|ul> is a self-contained block with an
 	// unambiguous close (user "<" is escaped to &lt; inside, so no literal </ol> can appear in item text).
 	// Rewrite only the blocks that actually carry data-list; leave already-v1 containers untouched.
-	out = out.replace(/<(ol|ul)\b[^>]*>[\s\S]*?<\/\1>/gi, block =>
-		/\bdata-list\s*=/.test(block) ? convertListContainer(block) : block
-	)
+	out = out.replace(/<(ol|ul)\b[^>]*>[\s\S]*?<\/\1>/gi, block => (/\bdata-list\s*=/.test(block) ? convertListContainer(block) : block))
 
 	// Code blocks: a <div class="ql-code-block-container"> wraps per-line <div class="ql-code-block">
 	// children with no deeper nesting (CodeBlockContainer.allowedChildren = [CodeBlock]), so the block

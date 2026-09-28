@@ -1,10 +1,10 @@
 // @vitest-environment happy-dom
 
 import { describe, it, expect } from "vitest"
-import { quillV2ToLegacyV1 } from "@/components/textEditor/richText/quillCompat"
+import { quillV2ToLegacyV1 } from "@filen/shared/dom"
 
 // Realistic Quill v2 markup. The expected outputs below are Quill v1's exact getHTML() form — captured
-// from real Quill 1.3.7 — i.e. the bytes web/desktop (Quill 1.3.7) and @filen/shared read.
+// from real Quill 1.3.7 — i.e. the bytes old web/desktop (Quill 1.3.7) and checklistParser read.
 function v2Item(dataList: string, inner: string, className?: string): string {
 	const cls = className ? ` class="${className}"` : ""
 
@@ -28,17 +28,17 @@ describe("quillV2ToLegacyV1", () => {
 		})
 
 		it("returns already-v1 list markup unchanged (no data-list present)", () => {
-			const html = '<ul data-checked="true"><li>A</li></ul><ol><li>B</li></ol><ul><li>C</li></ul>'
+			const html = "<ul data-checked=\"true\"><li>A</li></ul><ol><li>B</li></ol><ul><li>C</li></ul>"
 
 			expect(quillV2ToLegacyV1(html)).toBe(html)
 		})
 
 		it("converts a single checked item and strips the ql-ui span", () => {
-			expect(quillV2ToLegacyV1(`<ol>${v2Item("checked", "A")}</ol>`)).toBe('<ul data-checked="true"><li>A</li></ul>')
+			expect(quillV2ToLegacyV1(`<ol>${v2Item("checked", "A")}</ol>`)).toBe("<ul data-checked=\"true\"><li>A</li></ul>")
 		})
 
 		it("converts a single unchecked item", () => {
-			expect(quillV2ToLegacyV1(`<ol>${v2Item("unchecked", "A")}</ol>`)).toBe('<ul data-checked="false"><li>A</li></ul>')
+			expect(quillV2ToLegacyV1(`<ol>${v2Item("unchecked", "A")}</ol>`)).toBe("<ul data-checked=\"false\"><li>A</li></ul>")
 		})
 
 		it("converts a bullet item", () => {
@@ -51,13 +51,13 @@ describe("quillV2ToLegacyV1", () => {
 
 		it("merges consecutive same-state items into one container", () => {
 			expect(quillV2ToLegacyV1(`<ol>${v2Item("checked", "A")}${v2Item("checked", "B")}</ol>`)).toBe(
-				'<ul data-checked="true"><li>A</li><li>B</li></ul>'
+				"<ul data-checked=\"true\"><li>A</li><li>B</li></ul>"
 			)
 		})
 
 		it("splits a checked run from an unchecked run into separate containers", () => {
 			expect(quillV2ToLegacyV1(`<ol>${v2Item("checked", "A")}${v2Item("unchecked", "B")}</ol>`)).toBe(
-				'<ul data-checked="true"><li>A</li></ul><ul data-checked="false"><li>B</li></ul>'
+				"<ul data-checked=\"true\"><li>A</li></ul><ul data-checked=\"false\"><li>B</li></ul>"
 			)
 		})
 
@@ -65,60 +65,61 @@ describe("quillV2ToLegacyV1", () => {
 			const html = `<ol>${v2Item("checked", "A")}${v2Item("unchecked", "B")}${v2Item("bullet", "C")}${v2Item("ordered", "D")}</ol>`
 
 			expect(quillV2ToLegacyV1(html)).toBe(
-				'<ul data-checked="true"><li>A</li></ul><ul data-checked="false"><li>B</li></ul><ul><li>C</li></ul><ol><li>D</li></ol>'
+				"<ul data-checked=\"true\"><li>A</li></ul><ul data-checked=\"false\"><li>B</li></ul><ul><li>C</li></ul><ol><li>D</li></ol>"
 			)
 		})
 
 		it("normalizes an empty item to <li><br></li>", () => {
-			expect(quillV2ToLegacyV1(`<ol>${v2Item("unchecked", "")}</ol>`)).toBe('<ul data-checked="false"><li><br></li></ul>')
+			expect(quillV2ToLegacyV1(`<ol>${v2Item("unchecked", "")}</ol>`)).toBe("<ul data-checked=\"false\"><li><br></li></ul>")
 		})
 
 		it("preserves inline formatting inside an item", () => {
-			const html = `<ol>${v2Item("checked", 'Buy <strong>organic</strong> <a href="https://x.test">milk</a>')}</ol>`
+			const html = `<ol>${v2Item("checked", "Buy <strong>organic</strong> <a href=\"https://x.test\">milk</a>")}</ol>`
 
 			expect(quillV2ToLegacyV1(html)).toBe(
-				'<ul data-checked="true"><li>Buy <strong>organic</strong> <a href="https://x.test">milk</a></li></ul>'
+				"<ul data-checked=\"true\"><li>Buy <strong>organic</strong> <a href=\"https://x.test\">milk</a></li></ul>"
 			)
 		})
 
 		it("strips only the ql-ui span, preserving any other inline span", () => {
-			const html = '<ol><li data-list="ordered"><span class="ql-ui" contenteditable="false"></span>see <span class="mention">@bob</span></li></ol>'
+			const html =
+				"<ol><li data-list=\"ordered\"><span class=\"ql-ui\" contenteditable=\"false\"></span>see <span class=\"mention\">@bob</span></li></ol>"
 
-			expect(quillV2ToLegacyV1(html)).toBe('<ol><li>see <span class="mention">@bob</span></li></ol>')
+			expect(quillV2ToLegacyV1(html)).toBe("<ol><li>see <span class=\"mention\">@bob</span></li></ol>")
 		})
 
 		it("preserves ql-indent-N classes on the <li> without splitting the container", () => {
 			const html = `<ol>${v2Item("bullet", "Top")}${v2Item("bullet", "Sub", "ql-indent-1")}</ol>`
 
-			expect(quillV2ToLegacyV1(html)).toBe('<ul><li>Top</li><li class="ql-indent-1">Sub</li></ul>')
+			expect(quillV2ToLegacyV1(html)).toBe("<ul><li>Top</li><li class=\"ql-indent-1\">Sub</li></ul>")
 		})
 
 		it("only rewrites v2 containers in a mixed v1+v2 document", () => {
 			const html = `<ul data-checked="true"><li>old</li></ul><ol>${v2Item("bullet", "new")}</ol>`
 
-			expect(quillV2ToLegacyV1(html)).toBe('<ul data-checked="true"><li>old</li></ul><ul><li>new</li></ul>')
+			expect(quillV2ToLegacyV1(html)).toBe("<ul data-checked=\"true\"><li>old</li></ul><ul><li>new</li></ul>")
 		})
 	})
 
 	describe("code blocks", () => {
 		it("collapses per-line divs into one <pre> with a trailing newline", () => {
 			expect(quillV2ToLegacyV1(v2CodeBlock(["const x = 1;", "const y = 2;"]))).toBe(
-				'<pre class="ql-syntax" spellcheck="false">const x = 1;\nconst y = 2;\n</pre>'
+				"<pre class=\"ql-syntax\" spellcheck=\"false\">const x = 1;\nconst y = 2;\n</pre>"
 			)
 		})
 
 		it("re-escapes special characters and preserves leading indentation", () => {
 			expect(quillV2ToLegacyV1(v2CodeBlock(["if (a &lt; b) {", "  return;"]))).toBe(
-				'<pre class="ql-syntax" spellcheck="false">if (a &lt; b) {\n  return;\n</pre>'
+				"<pre class=\"ql-syntax\" spellcheck=\"false\">if (a &lt; b) {\n  return;\n</pre>"
 			)
 		})
 
 		it("converts a single-line code block", () => {
-			expect(quillV2ToLegacyV1(v2CodeBlock(["hello"]))).toBe('<pre class="ql-syntax" spellcheck="false">hello\n</pre>')
+			expect(quillV2ToLegacyV1(v2CodeBlock(["hello"]))).toBe("<pre class=\"ql-syntax\" spellcheck=\"false\">hello\n</pre>")
 		})
 
 		it("preserves empty lines inside a code block", () => {
-			expect(quillV2ToLegacyV1(v2CodeBlock(["a", "", "b"]))).toBe('<pre class="ql-syntax" spellcheck="false">a\n\nb\n</pre>')
+			expect(quillV2ToLegacyV1(v2CodeBlock(["a", "", "b"]))).toBe("<pre class=\"ql-syntax\" spellcheck=\"false\">a\n\nb\n</pre>")
 		})
 	})
 
@@ -126,14 +127,14 @@ describe("quillV2ToLegacyV1", () => {
 		it("leaves surrounding paragraphs byte-identical", () => {
 			const html = `<p>Intro</p><ol>${v2Item("checked", "A")}</ol><p>Outro</p>`
 
-			expect(quillV2ToLegacyV1(html)).toBe('<p>Intro</p><ul data-checked="true"><li>A</li></ul><p>Outro</p>')
+			expect(quillV2ToLegacyV1(html)).toBe("<p>Intro</p><ul data-checked=\"true\"><li>A</li></ul><p>Outro</p>")
 		})
 
 		it("converts lists and code blocks together in one document", () => {
 			const html = `<p>x</p><ol>${v2Item("checked", "A")}</ol>${v2CodeBlock(["run();"])}`
 
 			expect(quillV2ToLegacyV1(html)).toBe(
-				'<p>x</p><ul data-checked="true"><li>A</li></ul><pre class="ql-syntax" spellcheck="false">run();\n</pre>'
+				"<p>x</p><ul data-checked=\"true\"><li>A</li></ul><pre class=\"ql-syntax\" spellcheck=\"false\">run();\n</pre>"
 			)
 		})
 

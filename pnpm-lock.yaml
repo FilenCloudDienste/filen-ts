@@ -695,6 +695,9 @@ importers:
       eslint:
         specifier: ^9.39.3
         version: 9.39.5(jiti@2.7.0)(supports-color@8.1.1)
+      happy-dom:
+        specifier: ^20.14.0
+        version: 20.14.5
       tsx:
         specifier: ^4.20.6
         version: 4.23.13
