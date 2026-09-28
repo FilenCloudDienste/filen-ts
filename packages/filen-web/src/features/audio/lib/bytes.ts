@@ -14,19 +14,36 @@ import type { ElementSample } from "@/features/audio/store/audioQueue"
 // public-link page keeps its own surface), so this never branches on an anon access mode. The SW route
 // is preferred when a service worker controls the tab AND the file has an allowlisted inline
 // content-type (Range/206-seekable, decrypt-in-SW); otherwise a whole-buffer decrypted download is
-// played back from an object URL the engine revokes on the next track switch.
-export async function resolveTrackSource(track: QueueTrack): Promise<TrackSource> {
+// played back from an object URL the engine revokes on the next track switch. Aborting `signal`
+// cancels that whole-file download in the worker, and a download that already finished is dropped
+// before it is copied into a Blob.
+export async function resolveTrackSource(track: QueueTrack, signal: AbortSignal): Promise<TrackSource> {
 	if (isMediaStreamAvailable() && track.contentType !== null) {
 		const url = await previewStreamUrl(track.file, track.name, track.contentType)
 
 		return { kind: "stream", url }
 	}
 
-	const token = crypto.randomUUID()
-	const bytes = await runOp(sdkApi.downloadFileBytes(track.file, token))
-	const url = URL.createObjectURL(new Blob([bytes as Uint8Array<ArrayBuffer>], { type: track.mime || "application/octet-stream" }))
+	signal.throwIfAborted()
 
-	return { kind: "blob", url }
+	const token = crypto.randomUUID()
+	const cancel = (): void => {
+		void sdkApi.cancelPreviewDownload(token)
+	}
+
+	signal.addEventListener("abort", cancel, { once: true })
+
+	try {
+		const bytes = await runOp(sdkApi.downloadFileBytes(track.file, token))
+
+		signal.throwIfAborted()
+
+		const blob = new Blob([bytes as Uint8Array<ArrayBuffer>], { type: track.mime || "application/octet-stream" })
+
+		return { kind: "blob", url: URL.createObjectURL(blob), blob }
+	} finally {
+		signal.removeEventListener("abort", cancel)
+	}
 }
 
 // The shared element builder. `events` is mutable (via `rebind`) rather than captured once in the

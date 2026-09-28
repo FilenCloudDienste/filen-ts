@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest"
 import { CoverArtCache, COVER_CACHE_MAX_ENTRIES } from "@/features/audio/lib/coverCache"
 
-function picture(tag: string): { data: Uint8Array; format: string } {
-	return { data: new Uint8Array([tag.charCodeAt(0)]), format: "image/jpeg" }
+function picture(tag: string): Blob {
+	return new Blob([tag], { type: "image/webp" })
 }
 
 function makeFns(): {
@@ -30,9 +30,11 @@ describe("CoverArtCache", () => {
 	it("mints a fresh blob url per uuid and returns it from get", () => {
 		const fns = makeFns()
 		const cache = new CoverArtCache(fns)
+		const cover = picture("a")
 
-		const url = cache.set("a", picture("a"))
+		const url = cache.set("a", cover)
 
+		expect(fns.createObjectUrl).toHaveBeenCalledWith(cover)
 		expect(url).toBe("blob:1")
 		expect(cache.get("a")).toBe("blob:1")
 		expect(cache.get("missing")).toBeNull()

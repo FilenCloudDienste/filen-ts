@@ -1,26 +1,11 @@
-// Native HTML5 drag-and-drop for playlist track rows — the SAME idiom as features/drive/lib/dnd.ts
-// (a module-level ref carries the live payload because dataTransfer only carries strings; the value on
-// the transfer key is a marker, not the payload) applied to an in-list reorder instead of a cross-
-// directory move. Deliberately its own tiny module rather than importing dnd.ts's internal-move
-// machinery: that module's payload is a DriveItem[] destined for moveItems' worker round trip, while
-// this one only ever carries a same-list array index and never leaves the client. No dnd-kit / no new
-// dependency — package.json ships neither, and a single reorder list does not justify introducing one.
+// Native HTML5 drag-and-drop for playlist track rows. The payload is the dragged track's uuid, carried in
+// dataTransfer under TRACK_DRAG_TYPE: a plain string, so unlike features/drive/lib/dnd.ts (whose
+// DriveItem[] payload needs a module-level ref) no shared state is kept here. A uuid rather than an index
+// because the reorder resolves both ends against the freshest playlist copy, which may already differ from
+// the rendered one. No dnd-kit / no new dependency — a single reorder list does not justify one.
 export const TRACK_DRAG_TYPE = "application/x-filen-track-reorder"
 
-let draggedIndex: number | null = null
-
-export function setDraggedTrackIndex(index: number): void {
-	draggedIndex = index
-}
-
-export function getDraggedTrackIndex(): number | null {
-	return draggedIndex
-}
-
-export function clearDraggedTrackIndex(): void {
-	draggedIndex = null
-}
-
+// dataTransfer.getData is empty until drop, but the type list is readable throughout the drag.
 export function isTrackReorderDrag(dataTransfer: DataTransfer | null): boolean {
 	return dataTransfer?.types.includes(TRACK_DRAG_TYPE) ?? false
 }

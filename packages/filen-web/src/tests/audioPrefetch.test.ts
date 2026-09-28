@@ -35,8 +35,13 @@ import {
 	type AudioEngineDeps,
 	type TrackSource
 } from "@/features/audio/lib/engine"
-import { EMPTY_TRACK_TAGS, type TrackTags } from "@/features/audio/lib/metadata"
+import { backfillTrackDuration, getTrackTags, putTrackTags, resetTrackTags } from "@/features/audio/store/useTrackTagsStore"
+import type { TrackTagRecord } from "@/features/audio/lib/trackTags.logic"
 import type { ElementSample, QueueTrack } from "@/features/audio/store/audioQueue"
+
+function record(title: string, cover: boolean): TrackTagRecord {
+	return { title, artist: null, album: null, durationSec: null, cover, parsed: true, at: 0 }
+}
 
 function track(uuid: string): QueueTrack {
 	return { uuid, name: uuid, mime: "audio/mpeg", contentType: "audio/mpeg", file: {} as unknown as AnyFile }
@@ -104,15 +109,22 @@ interface Harness {
 	engine: AudioEngine
 	mainFakes: FakeElement[]
 	prefetchFakes: FakeElement[]
-	resolveSource: ReturnType<typeof vi.fn<(t: QueueTrack) => Promise<TrackSource>>>
-	extractMetadata: ReturnType<typeof vi.fn<(t: QueueTrack, s: TrackSource) => Promise<TrackTags>>>
+	resolveSource: ReturnType<typeof vi.fn<(t: QueueTrack, signal: AbortSignal) => Promise<TrackSource>>>
+	resolveCover: ReturnType<typeof vi.fn<(t: QueueTrack, s: TrackSource) => Promise<{ cover: Blob | null } | null>>>
 }
 
 function makeHarness(): Harness {
 	const mainFakes: FakeElement[] = []
 	const prefetchFakes: FakeElement[] = []
-	const resolveSource = vi.fn<(t: QueueTrack) => Promise<TrackSource>>(t => Promise.resolve({ kind: "blob", url: `blob:${t.uuid}` }))
-	const extractMetadata = vi.fn<(t: QueueTrack, s: TrackSource) => Promise<TrackTags>>(() => Promise.resolve(EMPTY_TRACK_TAGS))
+	const resolveSource = vi.fn<(t: QueueTrack, signal: AbortSignal) => Promise<TrackSource>>(t =>
+		Promise.resolve({ kind: "blob", url: `blob:${t.uuid}`, blob: new Blob() })
+	)
+	// The real service records the track's tags as part of reading its cover; the fake does the same.
+	const resolveCover = vi.fn<(t: QueueTrack, s: TrackSource) => Promise<{ cover: Blob | null } | null>>(t => {
+		putTrackTags(t.uuid, record(t.uuid, false))
+
+		return Promise.resolve({ cover: null })
+	})
 
 	const deps: AudioEngineDeps = {
 		createElement: events => {
@@ -130,10 +142,10 @@ function makeHarness(): Harness {
 			return fake.adapter
 		},
 		resolveSource,
-		extractMetadata
+		resolveCover
 	}
 
-	return { engine: new AudioEngine(deps), mainFakes, prefetchFakes, resolveSource, extractMetadata }
+	return { engine: new AudioEngine(deps), mainFakes, prefetchFakes, resolveSource, resolveCover }
 }
 
 function resetStore(): void {
@@ -147,7 +159,6 @@ function resetStore(): void {
 		loopMode: "off",
 		shuffleOrder: [],
 		lastError: null,
-		tagsByUuid: {},
 		coverUrlsByUuid: {}
 	})
 }
@@ -155,6 +166,7 @@ function resetStore(): void {
 beforeEach(() => {
 	fakeStore.clear()
 	resetStore()
+	resetTrackTags()
 })
 
 describe("prefetch — one-ahead warm-up", () => {
@@ -165,7 +177,7 @@ describe("prefetch — one-ahead warm-up", () => {
 		await flush()
 
 		expect(h.resolveSource).toHaveBeenCalledTimes(2)
-		expect(h.resolveSource).toHaveBeenNthCalledWith(2, track("b"))
+		expect(h.resolveSource).toHaveBeenNthCalledWith(2, track("b"), expect.any(AbortSignal))
 		expect(h.prefetchFakes).toHaveLength(1)
 		expect(h.prefetchFakes[0]?.calls.load).toEqual(["blob:b"])
 		// Never played while merely warming.
@@ -183,7 +195,9 @@ describe("prefetch — one-ahead warm-up", () => {
 	})
 
 	it("is a no-op when no prefetch dep is supplied — zero extra resolves, zero extra elements", async () => {
-		const resolveSource = vi.fn<(t: QueueTrack) => Promise<TrackSource>>(t => Promise.resolve({ kind: "blob", url: `blob:${t.uuid}` }))
+		const resolveSource = vi.fn<(t: QueueTrack) => Promise<TrackSource>>(t =>
+			Promise.resolve({ kind: "blob", url: `blob:${t.uuid}`, blob: new Blob() })
+		)
 		const engine = new AudioEngine({ createElement: events => makeFakeElement(events).adapter, resolveSource })
 
 		await engine.enqueueAndPlay([track("a"), track("b")], 0)
@@ -207,7 +221,7 @@ describe("prefetch — promote on advance", () => {
 
 		// Only ONE new resolveSource — the fresh one-ahead prefetch for "c" — not a re-resolve of "b".
 		expect(h.resolveSource.mock.calls.length).toBe(callsBeforeSkip + 1)
-		expect(h.resolveSource).toHaveBeenLastCalledWith(track("c"))
+		expect(h.resolveSource).toHaveBeenLastCalledWith(track("c"), expect.any(AbortSignal))
 
 		// The element that warmed "b" is the one now playing, rebound exactly once, never reloaded.
 		expect(h.prefetchFakes[0]?.calls.play).toBe(1)
@@ -267,7 +281,7 @@ describe("prefetch — teardown on jump / rebuild", () => {
 		expect(h.prefetchFakes[0]?.calls.dispose).toBe(1)
 	})
 
-	it("tears down and reschedules on a shuffle toggle", async () => {
+	it("a shuffle toggle re-warms only when the next track changed", async () => {
 		const h = makeHarness()
 
 		await h.engine.enqueueAndPlay([track("a"), track("b"), track("c")], 0)
@@ -277,8 +291,102 @@ describe("prefetch — teardown on jump / rebuild", () => {
 		h.engine.setShuffleEnabled(true)
 		await flush()
 
-		expect(h.prefetchFakes[0]?.calls.dispose).toBe(1)
-		expect(h.prefetchFakes.length).toBeGreaterThanOrEqual(2)
+		const { queue, shuffleOrder } = useAudioStore.getState()
+		const next = queue[shuffleOrder[1] ?? -1]?.uuid
+		const live = h.prefetchFakes.filter(fake => fake.calls.dispose === 0)
+
+		expect(live).toHaveLength(1)
+		expect(live[0]?.calls.load).toEqual([`blob:${String(next)}`])
+		// "b" still next keeps the warm element; "c" next re-warms once.
+		expect(h.resolveSource).toHaveBeenCalledTimes(next === "b" ? 2 : 3)
+	})
+
+	it("a loop toggle mid-queue keeps the warmed next track instead of re-resolving it", async () => {
+		const h = makeHarness()
+
+		await h.engine.enqueueAndPlay([track("a"), track("b"), track("c")], 0)
+		await flush()
+
+		h.engine.setLoopMode("all")
+		h.engine.setLoopMode("one")
+		h.engine.setLoopMode("off")
+		await flush()
+
+		expect(h.resolveSource).toHaveBeenCalledTimes(2)
+		expect(h.prefetchFakes).toHaveLength(1)
+		expect(h.prefetchFakes[0]?.calls.dispose).toBe(0)
+	})
+
+	it("a loop toggle while the next track is still resolving lets that warm-up finish", async () => {
+		const h = makeHarness()
+		const signals: AbortSignal[] = []
+		let finishB: (source: TrackSource) => void = () => undefined
+
+		h.resolveSource.mockImplementation((t, signal) => {
+			if (t.uuid !== "b") {
+				return Promise.resolve({ kind: "blob", url: `blob:${t.uuid}`, blob: new Blob() })
+			}
+
+			signals.push(signal)
+
+			return new Promise<TrackSource>(resolve => {
+				finishB = resolve
+			})
+		})
+
+		await h.engine.enqueueAndPlay([track("a"), track("b"), track("c")], 0)
+		await flush()
+
+		h.engine.setLoopMode("all")
+		await flush()
+
+		expect(signals).toHaveLength(1)
+		expect(signals[0]?.aborted).toBe(false)
+
+		finishB({ kind: "blob", url: "blob:b", blob: new Blob() })
+		await flush()
+
+		expect(h.prefetchFakes).toHaveLength(1)
+		expect(h.prefetchFakes[0]?.calls.load).toEqual(["blob:b"])
+	})
+
+	it("shuffle-play sets shuffle inside the queue swap, never warming the outgoing queue's next track", async () => {
+		const h = makeHarness()
+
+		await h.engine.enqueueAndPlay([track("a"), track("b"), track("c")], 0)
+		await flush()
+		h.resolveSource.mockClear()
+
+		await h.engine.enqueueAndPlay([track("x"), track("y"), track("z")], 0, { shuffle: true })
+		await flush()
+
+		const state = useAudioStore.getState()
+
+		expect(state.shuffleEnabled).toBe(true)
+		expect(state.shuffleOrder).toHaveLength(3)
+		expect(h.resolveSource.mock.calls.map(call => call[0].uuid).every(uuid => ["x", "y", "z"].includes(uuid))).toBe(true)
+	})
+
+	it("tearing a warm-up down aborts its in-flight resolve", async () => {
+		const h = makeHarness()
+		const signals = new Map<string, AbortSignal>()
+
+		h.resolveSource.mockImplementation((t, signal) => {
+			signals.set(t.uuid, signal)
+
+			return t.uuid === "b"
+				? new Promise<TrackSource>(() => undefined)
+				: Promise.resolve({ kind: "blob", url: `blob:${t.uuid}`, blob: new Blob() })
+		})
+
+		await h.engine.enqueueAndPlay([track("a"), track("b"), track("c")], 0)
+		await flush()
+		expect(signals.get("b")?.aborted).toBe(false)
+
+		await h.engine.playIndex(2)
+		await flush()
+
+		expect(signals.get("b")?.aborted).toBe(true)
 	})
 
 	it("tears down on clearQueue and dispose", async () => {
@@ -330,7 +438,7 @@ describe("prefetch — teardown on jump / rebuild", () => {
 				})
 			}
 
-			return Promise.resolve({ kind: "blob", url: `blob:${t.uuid}` })
+			return Promise.resolve({ kind: "blob", url: `blob:${t.uuid}`, blob: new Blob() })
 		})
 
 		// Old queue: "a" plays instantly; its warm-up for "b" is left IN FLIGHT (no element created yet —
@@ -346,7 +454,7 @@ describe("prefetch — teardown on jump / rebuild", () => {
 		const second = h.engine.enqueueAndPlay([track("x"), track("y"), track("z")], 1)
 
 		await flush()
-		deferred.get("b")?.({ kind: "blob", url: "blob:b" })
+		deferred.get("b")?.({ kind: "blob", url: "blob:b", blob: new Blob() })
 		await flush()
 
 		// The superseded continuation must bail at the staleness guard instead of resurrecting the slot
@@ -354,12 +462,36 @@ describe("prefetch — teardown on jump / rebuild", () => {
 		expect(h.prefetchFakes.flatMap(fake => fake.calls.load)).not.toContain("blob:b")
 
 		// Releasing the new track lets playback and the new queue's own warm-up proceed normally.
-		deferred.get("y")?.({ kind: "blob", url: "blob:y" })
+		deferred.get("y")?.({ kind: "blob", url: "blob:y", blob: new Blob() })
 		await second
 		await flush()
 
 		expect(h.mainFakes.some(fake => fake.calls.load.includes("blob:y") && fake.calls.play > 0)).toBe(true)
 		expect(h.prefetchFakes.flatMap(fake => fake.calls.load)).toContain("blob:z")
+	})
+})
+
+describe("prefetch — single-track loop all", () => {
+	it("never warms the track already playing, and replays it in place at the end", async () => {
+		const h = makeHarness()
+
+		useAudioStore.setState({ loopMode: "all" })
+		await h.engine.enqueueAndPlay([track("a")], 0)
+		await flush()
+
+		expect(h.prefetchFakes).toHaveLength(0)
+		expect(h.resolveSource).toHaveBeenCalledTimes(1)
+
+		h.mainFakes[0]?.setSample({ durationMs: 90_000 })
+		await h.engine.handleTrackEnd()
+		await flush()
+
+		expect(h.resolveSource).toHaveBeenCalledTimes(1)
+		expect(h.mainFakes).toHaveLength(1)
+		expect(h.mainFakes[0]?.calls.play).toBe(2)
+		expect(h.prefetchFakes).toHaveLength(0)
+		expect(useAudioStore.getState().status).toBe("playing")
+		expect(useAudioStore.getState().durationMs).toBe(90_000)
 	})
 })
 
@@ -380,21 +512,100 @@ describe("prefetch — warm-up failure", () => {
 })
 
 describe("metadata extraction — current + one-ahead only", () => {
-	it("extracts for exactly the current and prefetched track, never the rest of the queue", async () => {
+	it("reads covers for exactly the current and prefetched track, never the rest of the queue", async () => {
 		const h = makeHarness()
 
 		await h.engine.enqueueAndPlay([track("a"), track("b"), track("c"), track("d")], 0)
 		await flush()
 
-		const extracted = h.extractMetadata.mock.calls.map(call => call[0].uuid).sort()
+		const read = h.resolveCover.mock.calls.map(call => call[0].uuid).sort()
 
-		expect(extracted).toEqual(["a", "b"])
+		expect(read).toEqual(["a", "b"])
 	})
 
-	it("is a no-op when no extractMetadata dep is supplied", async () => {
+	it("skips the read for a track whose tags say it has no cover", async () => {
+		const h = makeHarness()
+
+		putTrackTags("a", record("A", false))
+
+		await h.engine.enqueueAndPlay([track("a")], 0)
+		await flush()
+
+		expect(h.resolveCover).not.toHaveBeenCalled()
+	})
+
+	it("reads again a cover the LRU evicted", async () => {
+		const h = makeHarness()
+
+		h.resolveCover.mockImplementation(t => {
+			putTrackTags(t.uuid, record(t.uuid, true))
+
+			return Promise.resolve({ cover: new Blob([t.uuid], { type: "image/webp" }) })
+		})
+
+		const tracks = Array.from({ length: 11 }, (_, i) => track(`t${String(i)}`))
+
+		await h.engine.enqueueAndPlay(tracks, 0)
+		await flush()
+
+		expect(useAudioStore.getState().coverUrlsByUuid["t0"]).toBeDefined()
+
+		for (let i = 1; i < 10; i++) {
+			await h.engine.skipNext()
+			await flush()
+		}
+
+		// Ten tracks later t0's cover URL has left the 8-entry LRU.
+		expect(useAudioStore.getState().coverUrlsByUuid["t0"]).toBeUndefined()
+		h.resolveCover.mockClear()
+
+		await h.engine.playIndex(0)
+		await flush()
+
+		expect(h.resolveCover.mock.calls.map(call => call[0].uuid)).toContain("t0")
+		expect(useAudioStore.getState().coverUrlsByUuid["t0"]).toBeDefined()
+	})
+
+	it("asks again on the next load when a read could not complete", async () => {
+		const h = makeHarness()
+
+		h.resolveCover.mockResolvedValueOnce(null)
+
+		await h.engine.enqueueAndPlay([track("a")], 0)
+		await flush()
+
+		expect(getTrackTags("a")).toBeUndefined()
+
+		await h.engine.playIndex(0)
+		await flush()
+
+		expect(h.resolveCover.mock.calls.filter(call => call[0].uuid === "a")).toHaveLength(2)
+		expect(getTrackTags("a")).toEqual(record("a", false))
+	})
+
+	it("fills a missing duration from the media element, never overriding a tagged one", async () => {
+		const h = makeHarness()
+
+		putTrackTags("a", record("A", false))
+		putTrackTags("b", { ...record("B", false), durationSec: 100 })
+
+		await h.engine.enqueueAndPlay([track("a"), track("b")], 0)
+		await flush()
+
+		h.mainFakes[0]?.setSample({ durationMs: 212_400 })
+		h.mainFakes[0]?.fire("onDurationChange")
+
+		expect(getTrackTags("a")?.durationSec).toBe(212)
+
+		backfillTrackDuration("b", 55)
+
+		expect(getTrackTags("b")?.durationSec).toBe(100)
+	})
+
+	it("is a no-op when no resolveCover dep is supplied", async () => {
 		const engine = new AudioEngine({
 			createElement: events => makeFakeElement(events).adapter,
-			resolveSource: t => Promise.resolve({ kind: "blob", url: `blob:${t.uuid}` })
+			resolveSource: t => Promise.resolve({ kind: "blob", url: `blob:${t.uuid}`, blob: new Blob() })
 		})
 
 		await expect(engine.enqueueAndPlay([track("a"), track("b")], 0)).resolves.toBeUndefined()

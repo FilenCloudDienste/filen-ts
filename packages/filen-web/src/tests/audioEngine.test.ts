@@ -130,7 +130,7 @@ interface Harness {
 	engine: AudioEngine
 	fake: FakeElement
 	revoke: ReturnType<typeof vi.fn>
-	resolveSource: ReturnType<typeof vi.fn<(track: QueueTrack) => Promise<TrackSource>>>
+	resolveSource: ReturnType<typeof vi.fn<(track: QueueTrack, signal: AbortSignal) => Promise<TrackSource>>>
 	setNow: (value: number) => void
 	events: () => AudioElementEvents
 }
@@ -138,7 +138,9 @@ interface Harness {
 function makeHarness(): Harness {
 	const fake = makeFakeElement()
 	const revoke = vi.fn<(url: string) => void>()
-	const resolveSource = vi.fn<(t: QueueTrack) => Promise<TrackSource>>(t => Promise.resolve({ kind: "blob", url: `blob:${t.uuid}` }))
+	const resolveSource = vi.fn<(t: QueueTrack, signal: AbortSignal) => Promise<TrackSource>>(t =>
+		Promise.resolve({ kind: "blob", url: `blob:${t.uuid}`, blob: new Blob() })
+	)
 	let nowValue = 1_000
 	let captured: AudioElementEvents | null = null
 
@@ -386,7 +388,7 @@ describe("transport", () => {
 		h.engine.pause()
 		expect(useAudioStore.getState().status).toBe("paused")
 
-		release?.({ kind: "blob", url: "blob:a" })
+		release?.({ kind: "blob", url: "blob:a", blob: new Blob() })
 		await flush()
 
 		expect(useAudioStore.getState().status).toBe("paused")
@@ -415,7 +417,7 @@ describe("transport", () => {
 		await flush()
 
 		h.engine.pause()
-		release?.({ kind: "blob", url: "blob:b" })
+		release?.({ kind: "blob", url: "blob:b", blob: new Blob() })
 		await flush()
 
 		expect(h.fake.calls.load).toEqual(["blob:a", "blob:b"])
@@ -546,7 +548,7 @@ describe("transport", () => {
 		// The element still holds track a — resuming it here would audibly restart the previous track.
 		expect(h.fake.calls.play).toBe(1)
 
-		release?.({ kind: "blob", url: "blob:b" })
+		release?.({ kind: "blob", url: "blob:b", blob: new Blob() })
 		await flush()
 		expect(useAudioStore.getState().status).toBe("paused")
 
@@ -630,6 +632,87 @@ describe("output prefs", () => {
 		await flush()
 
 		await expect(kvGetJson("audio.v1.output", audioOutputPrefsSchema)).resolves.toEqual({ volume: 0.4, muted: true })
+	})
+
+	it("raising the volume while muted unmutes, so the slider does not snap back to 0", async () => {
+		const h = makeHarness()
+
+		await h.engine.enqueueAndPlay([track("a")], 0)
+		h.engine.setMuted(true)
+		h.engine.setVolume(0.6)
+		await flush()
+
+		expect(useAudioStore.getState()).toMatchObject({ volume: 0.6, muted: false })
+		expect(h.fake.calls.muted.at(-1)).toBe(false)
+		await expect(kvGetJson("audio.v1.output", audioOutputPrefsSchema)).resolves.toEqual({ volume: 0.6, muted: false })
+	})
+
+	it("setting the volume to 0 while muted stays muted", () => {
+		const h = makeHarness()
+
+		h.engine.setMuted(true)
+		h.engine.setVolume(0)
+
+		expect(useAudioStore.getState()).toMatchObject({ volume: 0, muted: true })
+	})
+})
+
+describe("source download cancellation", () => {
+	it("aborts a superseded load's resolve so its whole-file download stops", async () => {
+		const h = makeHarness()
+		const signals: AbortSignal[] = []
+
+		h.resolveSource.mockImplementation((t, signal) => {
+			signals.push(signal)
+
+			return t.uuid === "a"
+				? new Promise<TrackSource>(() => undefined)
+				: Promise.resolve({ kind: "blob", url: `blob:${t.uuid}`, blob: new Blob() })
+		})
+
+		void h.engine.enqueueAndPlay([track("a"), track("b")], 0)
+		await flush()
+		expect(signals[0]?.aborted).toBe(false)
+
+		await h.engine.skipNext()
+		await flush()
+
+		expect(signals[0]?.aborted).toBe(true)
+		expect(signals[1]?.aborted).toBe(false)
+	})
+
+	it("a pause does not abort the in-flight load", async () => {
+		const h = makeHarness()
+		const signals: AbortSignal[] = []
+
+		h.resolveSource.mockImplementation((_t, signal) => {
+			signals.push(signal)
+
+			return new Promise<TrackSource>(() => undefined)
+		})
+
+		void h.engine.enqueueAndPlay([track("a")], 0)
+		await flush()
+		h.engine.pause()
+
+		expect(signals[0]?.aborted).toBe(false)
+	})
+
+	it("clearQueue aborts the in-flight load", async () => {
+		const h = makeHarness()
+		const signals: AbortSignal[] = []
+
+		h.resolveSource.mockImplementation((_t, signal) => {
+			signals.push(signal)
+
+			return new Promise<TrackSource>(() => undefined)
+		})
+
+		void h.engine.enqueueAndPlay([track("a")], 0)
+		await flush()
+		h.engine.clearQueue()
+
+		expect(signals[0]?.aborted).toBe(true)
 	})
 })
 

@@ -7,6 +7,7 @@ import { resolveSelectedPlaylist } from "@/features/audio/lib/playlistSelection"
 import { openPlaylistDialog } from "@/features/audio/store/usePlaylistDialogStore"
 import { PlaylistArtwork } from "@/features/audio/components/playlistArtwork"
 import { PlaylistMenuContent } from "@/features/audio/components/playlistMenu"
+import { useKnownCoverUrl } from "@/features/audio/hooks/useTrackMetadata"
 import { formatRelativeTime } from "@/lib/relativeTime"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { asErrorDTO } from "@/lib/sdk/errors"
@@ -119,6 +120,7 @@ function PlaylistSidebarRow({ entry, selected }: { entry: PlaylistEntry; selecte
 function PlaylistLinkRow({ playlist, selected }: { playlist: Playlist; selected: boolean }) {
 	const { t } = useTranslation("audio")
 	const { t: tCommon } = useTranslation("common")
+	const coverUrl = useKnownCoverUrl(playlist.files[0])
 
 	return (
 		<li className="group/prow relative">
@@ -130,6 +132,7 @@ function PlaylistLinkRow({ playlist, selected }: { playlist: Playlist; selected:
 			>
 				<PlaylistArtwork
 					uuid={playlist.uuid}
+					coverUrl={coverUrl}
 					className="size-8 rounded-lg"
 					iconClassName="size-4"
 				/>

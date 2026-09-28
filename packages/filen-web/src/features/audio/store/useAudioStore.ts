@@ -5,7 +5,7 @@ import { kvGetJson, kvSetJson } from "@/lib/storage/adapter"
 import { log } from "@/lib/log"
 import type { ErrorDTO } from "@/lib/sdk/errors"
 import type { AudioPlaybackStatus, LoopMode, QueueTrack } from "@/features/audio/store/audioQueue"
-import type { TrackTags } from "@/features/audio/lib/metadata"
+import { useTrackTagsStore } from "@/features/audio/store/useTrackTagsStore"
 
 // The reactive surface the audio module drives its UI through — the zustand mirror of the engine
 // singleton, following useTransfersStore's conventions exactly: an in-memory-only store (the queue is
@@ -39,11 +39,6 @@ interface AudioStore {
 	// it). Cleared on the next successful play. Never a spinner-forever state — a failure that exhausts
 	// the auto-skip budget settles the status AND leaves this set.
 	lastError: ErrorDTO | null
-	// Resolved tag reads, keyed by track uuid — populated by the engine as metadata extraction resolves
-	// for the current + one-ahead prefetched track (never a bulk scan). A present-but-empty entry
-	// (EMPTY_TRACK_TAGS) still means "attempted this session", so the engine never re-parses a tag-less
-	// file every time it's revisited.
-	tagsByUuid: Record<string, TrackTags>
 	// Cover-art blob URLs, keyed by track uuid — a live mirror of the engine's CoverArtCache (the LRU
 	// itself lives in the engine; this is purely the reactive read side for the bar/panel). A missing key
 	// means "no cached cover", never triggers a fetch on read.
@@ -67,15 +62,12 @@ interface AudioStore {
 	setShuffle: (shuffleEnabled: boolean, shuffleOrder: number[]) => void
 	// Persists (fire-and-forget).
 	setLoop: (loopMode: LoopMode) => void
-	// Merges one track's resolved tags in. Called once per track per session (memoized by the engine on
-	// this map's own presence).
-	setTrackTags: (uuid: string, tags: TrackTags) => void
 	// Replaces the whole cover-url mirror with the engine's CoverArtCache's current snapshot.
 	setCoverUrls: (coverUrlsByUuid: Record<string, string>) => void
 	// Engine dispose (logout): clears queue+playback but preserves the persisted shuffle/loop prefs.
 	reset: () => void
-	// Engine dispose (logout) only: clears the tag/cover mirrors. NOT called by a plain clearQueue — the
-	// engine's cover cache (and these mirrors) intentionally survive a manual queue clear.
+	// Engine dispose (logout) only: clears the cover mirror. NOT called by a plain clearQueue — the
+	// engine's cover cache (and this mirror) intentionally survive a manual queue clear.
 	resetMetadata: () => void
 }
 
@@ -91,7 +83,6 @@ export const useAudioStore = create<AudioStore>(set => ({
 	volume: 1,
 	muted: false,
 	lastError: null,
-	tagsByUuid: {},
 	coverUrlsByUuid: {},
 	loadQueue: (queue, currentIndex, shuffleOrder) => {
 		set({ queue, currentIndex, shuffleOrder, positionMs: 0, durationMs: 0, lastError: null })
@@ -127,9 +118,6 @@ export const useAudioStore = create<AudioStore>(set => ({
 		set({ loopMode })
 		void persistPrefs()
 	},
-	setTrackTags: (uuid, tags) => {
-		set(state => ({ tagsByUuid: { ...state.tagsByUuid, [uuid]: tags } }))
-	},
 	setCoverUrls: coverUrlsByUuid => {
 		set({ coverUrlsByUuid })
 	},
@@ -137,7 +125,7 @@ export const useAudioStore = create<AudioStore>(set => ({
 		set({ queue: [], currentIndex: 0, status: "idle", positionMs: 0, durationMs: 0, shuffleOrder: [], lastError: null })
 	},
 	resetMetadata: () => {
-		set({ tagsByUuid: {}, coverUrlsByUuid: {} })
+		set({ coverUrlsByUuid: {} })
 	}
 }))
 
@@ -181,9 +169,11 @@ async function persistPrefs(): Promise<void> {
 
 // Now-playing selector for the mini-player / now-playing bar — a stable-identity slice of the transport
 // state plus the resolved current track's display fields. `title` falls back to the filename until tags
-// resolve (or forever, for a tag-less file); `artist`/`album`/`coverUrl` stay null until then. useShallow
-// keeps the returned object's identity stable across store updates that don't touch these fields (same
-// rationale as useTransfersAggregate).
+// resolve (or forever, for a tag-less file); `artist`/`album`/`coverUrl` stay null until then. Tags come
+// from the persisted track-tag store, the one source every surface reads. useShallow keeps the transport
+// slice from re-rendering on store updates that don't touch it (same rationale as
+// useTransfersAggregate); the returned object merges in the tag fields and is not identity-stable, so
+// callers destructure it rather than depend on it.
 export function useAudioNowPlaying(): {
 	status: AudioPlaybackStatus
 	positionMs: number
@@ -194,23 +184,28 @@ export function useAudioNowPlaying(): {
 	album: string | null
 	coverUrl: string | null
 } {
-	return useAudioStore(
+	const playback = useAudioStore(
 		useShallow(state => {
 			const track = state.queue[state.currentIndex] ?? null
-			const tags = track ? state.tagsByUuid[track.uuid] : undefined
 
 			return {
 				status: state.status,
 				positionMs: state.positionMs,
 				durationMs: state.durationMs,
 				track,
-				title: tags?.title ?? track?.name ?? "",
-				artist: tags?.artist ?? null,
-				album: tags?.album ?? null,
 				coverUrl: track ? (state.coverUrlsByUuid[track.uuid] ?? null) : null
 			}
 		})
 	)
+	const uuid = playback.track?.uuid
+	const tags = useTrackTagsStore(state => (uuid !== undefined ? state.byUuid[uuid] : undefined))
+
+	return {
+		...playback,
+		title: tags?.title ?? playback.track?.name ?? "",
+		artist: tags?.artist ?? null,
+		album: tags?.album ?? null
+	}
 }
 
 // The shuffle/loop toggle state plus whether anything is queued — for the transport controls.

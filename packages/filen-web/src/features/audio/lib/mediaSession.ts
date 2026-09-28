@@ -1,4 +1,5 @@
 import type { ElementSample, QueueTrack } from "@/features/audio/store/audioQueue"
+import { THUMB_MAX_DIM } from "@/features/drive/lib/thumbnails.logic"
 
 // The Media Session bridge — wires OS media keys / lock-screen controls (navigator.mediaSession) to the
 // audio engine, both directions, entirely feature-detected so Safari/Firefox gaps degrade to no-ops.
@@ -8,17 +9,16 @@ import type { ElementSample, QueueTrack } from "@/features/audio/store/audioQueu
 // MediaSessionPublisher (engine → OS), and the action binder is handed a plain action target
 // (OS → engine); both are injected from audioEngine.ts, so the two modules never import each other.
 
-// Resolved title/artist/album for the OS metadata surface — a structural subset of metadata.ts's
-// TrackTags (this module deliberately has no import from metadata.ts; the engine passes a TrackTags
-// value in directly, which satisfies this shape without conversion).
+// Resolved title/artist/album for the OS metadata surface — a structural subset of the persisted
+// track-tag record, which the engine passes in directly without conversion.
 export interface TrackDisplayTags {
 	title: string | null
 	artist: string | null
 	album: string | null
 }
 
-// A resolved cover-art blob URL plus its real mime type (from the embedded picture), so the OS artwork
-// entry carries an accurate `type` hint.
+// A resolved cover-art blob URL plus its mime type, so the OS artwork entry carries an accurate `type`
+// hint.
 export interface TrackArtwork {
 	url: string
 	type: string
@@ -164,19 +164,19 @@ function resolveMediaSession(explicit?: MediaSessionLike | null): MediaSessionLi
 // during playback stays consistent with the rest of the app's iconography instead of going blank.
 const FALLBACK_ARTWORK_URL = "/apple-touch-icon.png"
 const FALLBACK_ARTWORK_SIZES = "180x180"
+const COVER_ARTWORK_SIZES = `${String(THUMB_MAX_DIM)}x${String(THUMB_MAX_DIM)}`
 
 // Constructs a MediaMetadata when the global is available, else returns undefined so the publisher
-// assigns nothing (never throws under a partial implementation). An embedded cover is declared at a
-// nominal "512x512" — the real pixel dimensions are unknown without decoding it, and browsers don't
-// strictly validate `sizes` against the actual decoded image, so a nominal square is exactly as usable
-// as an accurate one for this optional MediaImage hint.
+// assigns nothing (never throws under a partial implementation). A cover is the square-bounded cover
+// thumbnail, declared at that bound; browsers treat `sizes` as a hint and never validate it against the
+// decoded image.
 function makeMetadata(fields: { title: string; artist: string; album: string }, artwork: TrackArtwork | null): unknown {
 	if (typeof MediaMetadata === "undefined") {
 		return undefined
 	}
 
 	const entry = artwork
-		? { src: artwork.url, sizes: "512x512", type: artwork.type }
+		? { src: artwork.url, sizes: COVER_ARTWORK_SIZES, type: artwork.type }
 		: { src: FALLBACK_ARTWORK_URL, sizes: FALLBACK_ARTWORK_SIZES, type: "image/png" }
 
 	return new MediaMetadata({ ...fields, artwork: [entry] })

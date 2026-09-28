@@ -88,9 +88,10 @@ import {
 	type SharedPathInFlight
 } from "@/features/drive/lib/sharedPath"
 import { lookupDirectoryName } from "@/features/drive/lib/directoryName"
-import { THUMB_CACHE_CAP } from "@/features/drive/lib/thumbnails.logic"
+import { THUMB_CACHE_CAP, THUMB_MAX_DIM, THUMB_SDK_LOSSY_QUALITY } from "@/features/drive/lib/thumbnails.logic"
 import { removeStaleThumbGenerations, sweepThumbs, writeThumb } from "@/workers/thumbStore"
 import { createSearchEngine, type SearchPush, type SearchSnapshotDTO } from "@/workers/searchEngine"
+import type { AudioMetadataDeps, AudioMetadataResult } from "@/workers/audioMetadata"
 import { createMemorySink, toRawPreviewResult, type RawPreviewResult } from "@/features/preview/lib/rawPreview.logic"
 
 // NEITHER a fixed `/` nor `/assets/`: the wasm holds a RELATIVE `./filen-sdk-worker-thread.js`
@@ -296,6 +297,71 @@ function armThumbSweep(): void {
 	void sweepThumbs(THUMB_CACHE_CAP).catch((e: unknown) => {
 		log.warn("sdk.worker", "sweepThumbs failed", e)
 	})
+}
+
+// One range of a file's decrypted bytes, written straight into a buffer of the known size.
+async function readFileRange(c: Client, file: AnyFile, start: number, end: number, signal: AbortSignal): Promise<Uint8Array> {
+	const out = new Uint8Array(end - start)
+	let offset = 0
+	const writer = new WritableStream<Uint8Array>({
+		write(chunk) {
+			if (offset + chunk.length > out.length) {
+				throw new Error("range read overran its window")
+			}
+
+			out.set(chunk, offset)
+			offset += chunk.length
+		}
+	})
+
+	await c.downloadFileToWriter({
+		file,
+		writer,
+		// Required at runtime despite `progress?:` in the .d.ts.
+		progress: () => undefined,
+		start: BigInt(start),
+		end: BigInt(end),
+		managedFuture: { abortSignal: signal }
+	})
+
+	return offset === out.length ? out : out.subarray(0, offset)
+}
+
+// The shared frame of both audio-metadata entry points: the abort registry, the lazily loaded parser
+// module, the cover thumbnail's decode and persist, and the transfer of the thumbnail back.
+async function runAudioMetadata(
+	c: Client,
+	uuid: string,
+	previewToken: string,
+	run: (module: typeof import("@/workers/audioMetadata"), deps: AudioMetadataDeps) => Promise<AudioMetadataResult>
+): Promise<AudioMetadataResult> {
+	const controller = new AbortController()
+	previewAborts.set(previewToken, controller)
+	try {
+		const module = await import("@/workers/audioMetadata")
+		const result = await run(module, {
+			signal: controller.signal,
+			makeThumbnail: async cover => {
+				const thumbnail = await c.makeThumbnailFromStream({
+					reader: new Blob([cover as Uint8Array<ArrayBuffer>]).stream(),
+					maxWidth: THUMB_MAX_DIM,
+					maxHeight: THUMB_MAX_DIM,
+					knownSize: cover.length,
+					lossyQuality: THUMB_SDK_LOSSY_QUALITY
+				})
+
+				return thumbnail.type === "thumbnail" ? thumbnail.thumbnail.webpData : null
+			},
+			storeThumbnail: bytes => {
+				armThumbSweep()
+				return writeThumb(uuid, bytes)
+			}
+		})
+
+		return result.type === "parsed" && result.thumbnail !== null ? Comlink.transfer(result, [result.thumbnail.buffer]) : result
+	} finally {
+		previewAborts.delete(previewToken)
+	}
 }
 
 // Every authed op reads the live Client through this guard. Post-logout `client` is null, so a
@@ -1635,6 +1701,25 @@ const api = {
 	async storeThumbnail(uuid: string, bytes: Uint8Array): Promise<void> {
 		armThumbSweep()
 		await writeThumb(uuid, bytes)
+	},
+	// ── Audio metadata ───────────────────────────────────────────────────────
+	// Tags plus a cover thumbnail for one audio file, parsed here so the parser's reads go straight to
+	// the SDK by range and the full-size cover never crosses to the page. The thumbnail is stored in the
+	// thumbnail cache under the file's uuid and also handed back, so the caller need not read it again.
+	// Cancelled through cancelPreviewDownload(previewToken), like the other preview reads.
+	async readAudioMetadata(file: AnyFile, uuid: string, mime: string, previewToken: string): Promise<AudioMetadataResult> {
+		const c = requireClient()
+
+		return runAudioMetadata(c, uuid, previewToken, (module, deps) =>
+			module.readAudioMetadata(Number(file.size), mime, (start, end) => readFileRange(c, file, start, end, deps.signal), deps)
+		)
+	},
+	// The same for bytes the page already holds (the player's whole-file fallback source): the Blob
+	// crosses as a handle, so nothing is copied and nothing is downloaded.
+	async readAudioMetadataFromBlob(blob: Blob, uuid: string, previewToken: string): Promise<AudioMetadataResult> {
+		const c = requireClient()
+
+		return runAudioMetadata(c, uuid, previewToken, (module, deps) => module.readAudioMetadataFromBlob(blob, deps))
 	},
 	// ── Search ───────────────────────────────────────────────────────────────
 	// Thin pass-throughs onto the single searchEngine instance (searchEngine.ts owns the actual

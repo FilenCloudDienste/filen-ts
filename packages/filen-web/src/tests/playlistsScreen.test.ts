@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
-import { afterEach, describe, expect, it, vi } from "vitest"
-import { render, screen, cleanup, within } from "@testing-library/react"
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest"
+import { render, screen, cleanup, within, waitFor } from "@testing-library/react"
 import { createElement, type ReactNode } from "react"
 import "@/lib/i18n"
 import type { PlaylistEntry } from "@/features/audio/queries/playlists"
@@ -17,11 +17,13 @@ vi.mock("@/features/audio/queries/playlists", () => ({ usePlaylistsQuery }))
 
 // The pane's AddPlaylistTracksDialog import pulls in drive queries that reach the same real sdk client
 // transitively — same mock boundary as transfersScreen.test.ts's own.
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
+// A row with no known tags asks for a read; left unanswered here, so it stays pending.
+vi.mock("@/lib/sdk/client", () => ({ sdkApi: { readAudioMetadata: () => new Promise(() => undefined), cancelPreviewDownload: vi.fn() } }))
 
 // The dialog host's create/rename/delete and the pane's remove/reorder transitively reach the same sdk
 // client — side-effect-free stubs; the flows themselves are playlists.test.ts's job.
 vi.mock("@/features/audio/lib/playlists", () => ({
+	playlistFileTrack: (entry: PlaylistFile) => ({ uuid: entry.uuid, name: entry.name, mime: entry.mime, contentType: null, file: {} }),
 	createPlaylist: vi.fn(),
 	deletePlaylistAction: vi.fn(),
 	renamePlaylistAction: vi.fn(),
@@ -34,6 +36,36 @@ vi.mock("@/features/audio/lib/playlists", () => ({
 vi.mock("@/features/audio/lib/playlistPlayback", () => ({
 	startPlaylist: vi.fn(),
 	startShuffledPlaylist: vi.fn()
+}))
+
+// Persisted track tags are read from kv through the storage leader; a map stands in for it.
+const { fakeKv } = vi.hoisted(() => ({ fakeKv: new Map<string, string>() }))
+
+vi.mock("@/lib/storage/leader", () => ({
+	acquireStorage: () =>
+		Promise.resolve({
+			role: "leader" as const,
+			api: {
+				kvGet: (key: string) => Promise.resolve(fakeKv.get(key) ?? null),
+				kvSet: (key: string, value: string) => {
+					fakeKv.set(key, value)
+
+					return Promise.resolve()
+				},
+				kvDelete: (key: string) => {
+					fakeKv.delete(key)
+
+					return Promise.resolve()
+				},
+				kvEntries: (prefix: string) => Promise.resolve([...fakeKv.entries()].filter(([key]) => key.startsWith(prefix)))
+			}
+		})
+}))
+
+// Cover thumbnails are read from the OPFS thumbnail cache; only f1 has one.
+vi.mock("@/features/drive/lib/thumbCache", () => ({
+	readThumbnailBlob: (uuid: string) => Promise.resolve(uuid === "f1" ? new Blob(["cover"], { type: "image/webp" }) : null),
+	deleteThumbnail: vi.fn()
 }))
 
 // Router boundary, same shape as notesSidebarRows.test.ts's: Link renders a plain anchor carrying its
@@ -51,6 +83,26 @@ vi.mock("@tanstack/react-router", () => ({
 const { PlaylistsScreen } = await import("@/features/audio/screens/playlists")
 const { PlaylistsSidebar } = await import("@/features/audio/components/playlistsSidebar")
 const { useAudioStore } = await import("@/features/audio/store/useAudioStore")
+const { resetTrackTags } = await import("@/features/audio/store/useTrackTagsStore")
+const { stringifyEnvelope } = await import("@/lib/serialize")
+const { trackTagsKey } = await import("@/features/audio/lib/trackTags.logic")
+
+function seedTags(
+	uuid: string,
+	record: {
+		title?: string | null
+		artist?: string | null
+		album?: string | null
+		durationSec?: number | null
+		cover?: boolean
+		parsed?: boolean
+	}
+): void {
+	fakeKv.set(
+		trackTagsKey(uuid),
+		stringifyEnvelope({ title: null, artist: null, album: null, durationSec: null, cover: false, parsed: true, at: 0, ...record })
+	)
+}
 
 function playlist(overrides: Partial<Playlist> = {}): Playlist {
 	return { uuid: "p1", name: "Road trip", created: 0, updated: Date.now(), files: [], ...overrides }
@@ -74,10 +126,42 @@ function renderSplitView(selectedUuid?: string) {
 	return render(createElement("div", null, createElement(PlaylistsSidebar), createElement(PlaylistsScreen, { selectedUuid })))
 }
 
+// jsdom lays nothing out and mints no object URLs: the pane's header observer only needs to exist.
+beforeEach(() => {
+	vi.stubGlobal(
+		"ResizeObserver",
+		class {
+			public observe = vi.fn()
+			public unobserve = vi.fn()
+			public disconnect = vi.fn()
+		}
+	)
+	// The virtualizer sizes its viewport off offsetHeight, which jsdom leaves at 0: a 600px pane.
+	const original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetHeight")
+
+	onTestFinished(() => {
+		if (original === undefined) {
+			Reflect.deleteProperty(HTMLElement.prototype, "offsetHeight")
+		} else {
+			Object.defineProperty(HTMLElement.prototype, "offsetHeight", original)
+		}
+	})
+	Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+		configurable: true,
+		get(this: HTMLElement) {
+			return this.classList.contains("overflow-y-auto") ? 600 : 0
+		}
+	})
+	vi.spyOn(URL, "createObjectURL").mockImplementation(blob => `blob:${String((blob as Blob).size)}`)
+	vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined)
+})
+
 afterEach(() => {
 	cleanup()
 	vi.clearAllMocks()
 	useAudioStore.setState({ queue: [], currentIndex: 0 })
+	resetTrackTags()
+	fakeKv.clear()
 })
 
 const TWO: PlaylistEntry[] = [
@@ -169,6 +253,69 @@ describe("playlists split view", () => {
 
 		expect(first && within(first).queryByText("Now playing")).toBeNull()
 		expect(second && within(second).getByText("Now playing")).toBeTruthy()
+	})
+
+	it("shows a known track's title, artist, album and duration in its row", async () => {
+		usePlaylistsQuery.mockReturnValue(success(TWO))
+		seedTags("f2", { title: "Night Drive", artist: "The Band", album: "Roads", durationSec: 245 })
+
+		renderSplitView("p2")
+
+		const pane = screen.getByRole("region", { name: "Focus" })
+		const row = within(await within(pane).findByRole("button", { name: /Night Drive/ }))
+			.getByText("The Band")
+			.closest("tr")
+
+		expect(row && within(row).getByText("Roads")).toBeTruthy()
+		expect(row && within(row).getByText("4:05")).toBeTruthy()
+	})
+
+	it("falls back to the file name and an unknown artist for a file the parser could not read", async () => {
+		usePlaylistsQuery.mockReturnValue(success(TWO))
+		seedTags("f3", { parsed: false })
+
+		renderSplitView("p2")
+
+		const pane = screen.getByRole("region", { name: "Focus" })
+
+		const button = await within(pane).findByRole("button", { name: /^Outro\.mp3/ })
+
+		await waitFor(() => {
+			expect(within(button).getByText("Unknown artist")).toBeTruthy()
+		})
+	})
+
+	it("shows skeletons, never a fallback, while a track's tags are still to be read", async () => {
+		usePlaylistsQuery.mockReturnValue(success(TWO))
+		seedTags("f3", { title: "Known" })
+
+		const { container } = renderSplitView("p2")
+
+		await within(screen.getByRole("region", { name: "Focus" })).findByRole("button", { name: /Known/ })
+
+		// Highway.flac has no record: its artist, album and duration are skeletons.
+		const row = screen.getByRole("button", { name: "Highway.flac" }).closest("tr")
+
+		expect(row?.querySelectorAll('[data-slot="skeleton"]')).toHaveLength(3)
+		expect(container.querySelectorAll('[data-slot="skeleton"]')).toHaveLength(3)
+	})
+
+	it("paints the hero with the first track's cover only once it is known, else the gradient", async () => {
+		usePlaylistsQuery.mockReturnValue(success(TWO))
+		seedTags("f1", { title: "Intro", cover: true })
+
+		renderSplitView("p1")
+
+		const hero = screen.getByRole("region", { name: "Road trip" }).querySelector("header")
+
+		await waitFor(() => {
+			expect(hero?.querySelector("img")?.getAttribute("src")).toMatch(/^blob:/)
+		})
+
+		cleanup()
+		renderSplitView("p2")
+
+		expect(screen.getByRole("region", { name: "Focus" }).querySelector("header img")).toBeNull()
 	})
 
 	it("shows loading spinners in both panes while the query is pending, not the empty state", () => {

@@ -20,18 +20,13 @@ export function playPlaylistFrom(playlist: Playlist, startIndex: number): Promis
 }
 
 // "Shuffle play" — an explicit action distinct from the global shuffle toggle: turns shuffle ON (if it
-// wasn't already) THEN replaces the queue from the top, so the resulting play order is shuffled
-// regardless of whatever the toggle was set to beforehand.
+// wasn't already) as part of replacing the queue from the top, so the resulting play order is shuffled
+// regardless of whatever the toggle was set to beforehand. Not setShuffleEnabled first: that would warm
+// the next track of the queue about to be replaced.
 export function shufflePlayPlaylist(playlist: Playlist): Promise<void> {
 	const tracks = queueTracksFromPlaylist(playlist)
 
-	if (tracks.length === 0) {
-		return Promise.resolve()
-	}
-
-	audioEngine.setShuffleEnabled(true)
-
-	return audioEngine.enqueueAndPlay(tracks, 0)
+	return tracks.length === 0 ? Promise.resolve() : audioEngine.enqueueAndPlay(tracks, 0, { shuffle: true })
 }
 
 // Fire-and-forget forms of the two above for click handlers, a failure surfacing as a toast.

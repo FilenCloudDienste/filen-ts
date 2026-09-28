@@ -133,7 +133,7 @@ describe("createMediaSessionPublisher — feature detection", () => {
 			)
 
 			expect(session.metadata).toBeInstanceOf(FakeMediaMetadata)
-			expect((session.metadata as FakeMediaMetadata).artwork).toEqual([{ src: "blob:cover", sizes: "512x512", type: "image/jpeg" }])
+			expect((session.metadata as FakeMediaMetadata).artwork).toEqual([{ src: "blob:cover", sizes: "384x384", type: "image/jpeg" }])
 
 			publisher.setMetadata(track("song.mp3"), { title: "Real Title", artist: "Real Artist", album: "Real Album" })
 

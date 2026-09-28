@@ -2,6 +2,9 @@ import { Shuffle, Repeat, Repeat1, Trash2, X, AlertCircle } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { audioEngine } from "@/features/audio/lib/audioEngine"
 import { useAudioQueue, useAudioQueueControls, useAudioNowPlaying, useAudioError } from "@/features/audio/store/useAudioStore"
+import { useTrackTagsStore } from "@/features/audio/store/useTrackTagsStore"
+import { trackDisplayTitle } from "@/features/audio/lib/trackTags.logic"
+import type { QueueTrack } from "@/features/audio/store/audioQueue"
 import { nextLoopMode } from "@/features/audio/components/audioTransport.logic"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
@@ -101,12 +104,10 @@ export function NowPlayingPanel() {
 									{index + 1}
 								</span>
 							)}
-							<span
-								title={queueTrack.name}
-								className={cn("min-w-0 flex-1 truncate text-sm", index === currentIndex && "font-medium text-primary")}
-							>
-								{queueTrack.name}
-							</span>
+							<QueueTrackTitle
+								track={queueTrack}
+								current={index === currentIndex}
+							/>
 						</button>
 						<Button
 							variant="ghost"
@@ -123,5 +124,21 @@ export function NowPlayingPanel() {
 				))}
 			</ul>
 		</div>
+	)
+}
+
+// Its own component so a track's tags landing re-renders that one row. Reads only tags already known:
+// the queue is not virtualized, so reading on mount here would read the whole queue.
+function QueueTrackTitle({ track, current }: { track: QueueTrack; current: boolean }) {
+	const record = useTrackTagsStore(state => state.byUuid[track.uuid])
+	const title = trackDisplayTitle(record, track.name)
+
+	return (
+		<span
+			title={title}
+			className={cn("min-w-0 flex-1 truncate text-sm", current && "font-medium text-primary")}
+		>
+			{title}
+		</span>
 	)
 }

@@ -41,7 +41,6 @@ function resetStore(): void {
 		loopMode: "off",
 		shuffleOrder: [],
 		lastError: null,
-		tagsByUuid: {},
 		coverUrlsByUuid: {}
 	})
 }
@@ -87,26 +86,12 @@ describe("useAudioStore setters", () => {
 		expect(state.loopMode).toBe("all")
 	})
 
-	it("reset does NOT clear the tag/cover mirrors (a manual queue clear keeps the cover cache alive)", () => {
-		useAudioStore.getState().setTrackTags("a", { title: "T", artist: null, album: null, picture: null })
+	it("reset does NOT clear the cover mirror (a manual queue clear keeps the cover cache alive)", () => {
 		useAudioStore.getState().setCoverUrls({ a: "blob:a" })
 
 		useAudioStore.getState().reset()
 
-		const state = useAudioStore.getState()
-
-		expect(state.tagsByUuid).toEqual({ a: { title: "T", artist: null, album: null, picture: null } })
-		expect(state.coverUrlsByUuid).toEqual({ a: "blob:a" })
-	})
-
-	it("setTrackTags merges by uuid without disturbing other entries", () => {
-		useAudioStore.getState().setTrackTags("a", { title: "A", artist: null, album: null, picture: null })
-		useAudioStore.getState().setTrackTags("b", { title: "B", artist: null, album: null, picture: null })
-
-		expect(useAudioStore.getState().tagsByUuid).toEqual({
-			a: { title: "A", artist: null, album: null, picture: null },
-			b: { title: "B", artist: null, album: null, picture: null }
-		})
+		expect(useAudioStore.getState().coverUrlsByUuid).toEqual({ a: "blob:a" })
 	})
 
 	it("setCoverUrls replaces the whole mirror (the engine passes the cache's full live snapshot)", () => {
@@ -116,13 +101,11 @@ describe("useAudioStore setters", () => {
 		expect(useAudioStore.getState().coverUrlsByUuid).toEqual({ b: "blob:b" })
 	})
 
-	it("resetMetadata (logout only) clears both mirrors", () => {
-		useAudioStore.getState().setTrackTags("a", { title: "A", artist: null, album: null, picture: null })
+	it("resetMetadata (logout only) clears the cover mirror", () => {
 		useAudioStore.getState().setCoverUrls({ a: "blob:a" })
 
 		useAudioStore.getState().resetMetadata()
 
-		expect(useAudioStore.getState().tagsByUuid).toEqual({})
 		expect(useAudioStore.getState().coverUrlsByUuid).toEqual({})
 	})
 })

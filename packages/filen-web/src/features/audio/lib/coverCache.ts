@@ -1,11 +1,9 @@
-import type { TrackPicture } from "@/features/audio/lib/metadata"
-
 // A small LRU of recently-seen cover-art blob URLs, keyed by track uuid. Owned by the audio engine
 // (never a component) so every surface that shows cover art — the player bar, the now-playing panel's
 // queue thumbnails, MediaSession artwork — shares exactly one mint per track, with revoke-on-evict and
 // revoke-all-on-logout discipline (mirrors mediaViewer.tsx's blob lifecycle, scaled to a small bounded
-// set instead of a single current item). Metadata extraction only ever runs for the current + one-ahead
-// prefetched track (never a bulk scan), so this cap is generous headroom for a short listening
+// set instead of a single current item). The engine only fills it for the current + one-ahead prefetched
+// track, each a small cover thumbnail, so this cap is generous headroom for a short listening
 // back/forward history, not a real memory concern.
 export const COVER_CACHE_MAX_ENTRIES = 8
 
@@ -29,9 +27,9 @@ export class CoverArtCache {
 		this.fns = fns
 	}
 
-	// Mints (or re-mints) the blob URL for `uuid`'s embedded picture, moving it to the most-recently-used
-	// position and evicting the oldest entry once the cap is exceeded. Returns the live URL.
-	public set(uuid: string, picture: TrackPicture): string {
+	// Mints (or re-mints) the blob URL for `uuid`'s cover, moving it to the most-recently-used position and
+	// evicting the oldest entry once the cap is exceeded. Returns the live URL.
+	public set(uuid: string, cover: Blob): string {
 		const existing = this.urls.get(uuid)
 
 		if (existing !== undefined) {
@@ -39,7 +37,7 @@ export class CoverArtCache {
 			this.urls.delete(uuid)
 		}
 
-		const url = this.fns.createObjectUrl(new Blob([picture.data as Uint8Array<ArrayBuffer>], { type: picture.format }))
+		const url = this.fns.createObjectUrl(cover)
 
 		this.urls.set(uuid, url)
 

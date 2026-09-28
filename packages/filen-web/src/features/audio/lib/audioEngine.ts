@@ -1,11 +1,11 @@
 import { AudioEngine } from "@/features/audio/lib/engine"
 import { createDomAudioAdapter, createDomPrefetchAdapter, resolveTrackSource } from "@/features/audio/lib/bytes"
 import { bindMediaSessionActions, createMediaSessionPublisher } from "@/features/audio/lib/mediaSession"
-import { resolveTrackTags } from "@/features/audio/lib/metadata"
+import { trackMetadata } from "@/features/audio/lib/trackMetadata"
 import { hydrateAudioPrefs, useAudioStore } from "@/features/audio/store/useAudioStore"
 
 // The app-lifetime audio engine singleton, wired with the real DOM element adapter + SW/blob source
-// resolver + OS Media Session bridge + one-track-ahead prefetch + tag/cover extraction. One instance
+// resolver + OS Media Session bridge + one-track-ahead prefetch + the track-metadata service's covers. One instance
 // owns playback for the whole session — same pattern as sdkApi. Import this from UI/handoff code; import
 // the class directly from engine.ts only in tests (with injected fakes). The publisher (engine → OS
 // metadata/state) feature-detects internally, so this stays a no-op wherever Media Session is
@@ -15,7 +15,7 @@ export const audioEngine = new AudioEngine({
 	createPrefetchElement: createDomPrefetchAdapter,
 	resolveSource: resolveTrackSource,
 	mediaSession: createMediaSessionPublisher(),
-	extractMetadata: (track, source) => resolveTrackTags(track, source, Number(track.file.size))
+	resolveCover: (track, source) => trackMetadata.playbackCover(track, source.kind === "blob" ? source.blob : undefined)
 })
 
 // Restore persisted prefs and bind the foreground-reconcile lifecycle once, at first import. All
@@ -49,7 +49,9 @@ bindMediaSessionActions(
 )
 
 // Logout teardown (wired into performLogout): stop playback, revoke the live blob URL, tear down the
-// element, clear the queue. Nothing leaks across sessions.
+// element, clear the queue, and abort every track-metadata read with its cover URLs and tags in memory.
+// Nothing leaks across sessions.
 export function disposeAudioEngine(): void {
 	audioEngine.dispose()
+	trackMetadata.reset()
 }

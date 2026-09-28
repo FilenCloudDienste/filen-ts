@@ -183,30 +183,40 @@ function safeJsonParse(bytes: Uint8Array): unknown {
 // cache in this feature (the audio store's own prefs-load memo, the engine's output-prefs memo).
 const prunedThisSession = new Set<string>()
 
-async function pruneDeadTracksOnce(playlist: Playlist): Promise<Playlist> {
+// One read's existence checks by track uuid, so a track shared by several playlists (or listed twice in
+// one) costs one getFile. Scoped to the read rather than the session: a later read checking a newly
+// seen playlist asks afresh instead of trusting an answer that may have gone stale.
+type TrackExistence = Map<string, Promise<boolean>>
+
+function trackIsDead(uuid: string, existence: TrackExistence): Promise<boolean> {
+	let check = existence.get(uuid)
+
+	if (check === undefined) {
+		check = runOp(sdkApi.getFile(uuid)).then(
+			found => found === undefined,
+			(error: unknown) => {
+				// A transient existence-check failure is NOT a definitive not-found — keep the track rather
+				// than risk pruning a live file over a flaky read (mirrors mobile's identical caution).
+				log.warn("audio", "playlist dead-track check failed; keeping the track", { uuid, error })
+
+				return false
+			}
+		)
+		existence.set(uuid, check)
+	}
+
+	return check
+}
+
+async function pruneDeadTracksOnce(playlist: Playlist, existence: TrackExistence): Promise<Playlist> {
 	if (prunedThisSession.has(playlist.uuid) || playlist.files.length === 0) {
 		return playlist
 	}
 
 	prunedThisSession.add(playlist.uuid)
 
-	const checks = await Promise.all(
-		playlist.files.map(async file => {
-			try {
-				const found = await runOp(sdkApi.getFile(file.uuid))
-
-				return { uuid: file.uuid, dead: found === undefined }
-			} catch (error) {
-				// A transient existence-check failure is NOT a definitive not-found — keep the track rather
-				// than risk pruning a live file over a flaky read (mirrors mobile's identical caution).
-				log.warn("audio", "playlist dead-track check failed; keeping the track", { uuid: file.uuid, error })
-
-				return { uuid: file.uuid, dead: false }
-			}
-		})
-	)
-
-	const deadUuids = new Set(checks.filter(check => check.dead).map(check => check.uuid))
+	const dead = await Promise.all(playlist.files.map(file => trackIsDead(file.uuid, existence)))
+	const deadUuids = new Set(playlist.files.filter((_file, index) => dead[index] === true).map(file => file.uuid))
 	const cleaned = pruneDeadTracksPure(playlist, deadUuids)
 
 	if (cleaned === null) {
@@ -214,15 +224,23 @@ async function pruneDeadTracksOnce(playlist: Playlist): Promise<Playlist> {
 	}
 
 	// Fire-and-forget persist through the write-lock, recomposed against the freshest copy — a
-	// concurrent user edit landing in the same tick is never clobbered by this cleanup.
-	void mutatePlaylist(playlist.uuid, playlist, current => pruneDeadTracksPure(current, deadUuids)).catch((error: unknown) => {
+	// concurrent user edit landing in the same tick is never clobbered by this cleanup. The cache is not
+	// patched: the read running this prune returns `cleaned` for the row itself, and a patch landing
+	// mid-read would cancel that read and start another full one. A cached copy older than the one just
+	// downloaded (restored from a previous session) is not a base to write back over it.
+	void mutatePlaylist(
+		playlist.uuid,
+		playlist,
+		current => pruneDeadTracksPure(current.updated > playlist.updated ? current : playlist, deadUuids),
+		{ patchCache: false }
+	).catch((error: unknown) => {
 		log.warn("audio", "playlist dead-track cleanup persist failed", { uuid: playlist.uuid, error })
 	})
 
 	return cleaned
 }
 
-async function readOnePlaylistEntry(file: SdkFile): Promise<PlaylistEntry> {
+async function readOnePlaylistEntry(file: SdkFile, existence: TrackExistence): Promise<PlaylistEntry> {
 	const item = narrowItem(file)
 	const base = asDirectoryOrFile(item)
 	const fallbackName = fallbackDisplayName(item)
@@ -239,7 +257,7 @@ async function readOnePlaylistEntry(file: SdkFile): Promise<PlaylistEntry> {
 			return { status: "degraded", fileUuid: base.data.uuid, name: fallbackName }
 		}
 
-		return { status: "ok", playlist: await pruneDeadTracksOnce(parsed) }
+		return { status: "ok", playlist: await pruneDeadTracksOnce(parsed, existence) }
 	} catch (error) {
 		// AU-05 parity: an isolated per-playlist read failure never collapses the whole screen — skip
 		// just this row, keep the rest.
@@ -263,7 +281,9 @@ export async function fetchPlaylistEntries(): Promise<PlaylistEntry[]> {
 		knownPlaylistFileUuids.add(file.uuid)
 	}
 
-	return Promise.all(files.map(readOnePlaylistEntry))
+	const existence: TrackExistence = new Map()
+
+	return Promise.all(files.map(file => readOnePlaylistEntry(file, existence)))
 }
 
 // Whether a drive event may have changed the Playlists directory's contents behind the query cache. A
@@ -301,13 +321,16 @@ export function isPlaylistsDriveEvent(inner: DriveEvent): boolean {
 	}
 }
 
-async function savePlaylist(playlist: Playlist): Promise<void> {
+async function savePlaylist(playlist: Playlist, patchCache: boolean): Promise<void> {
 	const dirUuid = await getPlaylistsDirectoryUuid()
 	const bytes = new TextEncoder().encode(serializePlaylist(playlist))
 	const file = await runPlaylistsDirectoryOp(sdkApi.uploadFileBytes(dirUuid, bytes, `${playlist.uuid}.json`, "application/json"))
 
 	knownPlaylistFileUuids.add(file.uuid)
-	playlistsQueryUpsert(playlist)
+
+	if (patchCache) {
+		playlistsQueryUpsert(playlist)
+	}
 }
 
 const writeLocks = new Map<string, Semaphore>()
@@ -335,7 +358,12 @@ function freshestPlaylist(uuid: string, fallback: Playlist): Playlist {
 // read/write) as the merge base instead of the caller's possibly-stale snapshot — two edits that
 // overlap in flight compose instead of the second clobbering the first's change with a stale full-file
 // overwrite. `mutate` returning `null` means "no-op" and skips the upload entirely.
-async function mutatePlaylist(uuid: string, fallback: Playlist, mutate: (current: Playlist) => Playlist | null): Promise<Playlist | null> {
+async function mutatePlaylist(
+	uuid: string,
+	fallback: Playlist,
+	mutate: (current: Playlist) => Playlist | null,
+	{ patchCache = true }: { patchCache?: boolean } = {}
+): Promise<Playlist | null> {
 	const lock = lockFor(uuid)
 
 	await lock.acquire()
@@ -347,7 +375,7 @@ async function mutatePlaylist(uuid: string, fallback: Playlist, mutate: (current
 			return null
 		}
 
-		await savePlaylist(next)
+		await savePlaylist(next, patchCache)
 
 		return next
 	} finally {
@@ -360,7 +388,7 @@ async function mutatePlaylist(uuid: string, fallback: Playlist, mutate: (current
 export async function createPlaylist(name: string): Promise<Playlist> {
 	const playlist = createPlaylistPure(crypto.randomUUID(), name, Date.now())
 
-	await savePlaylist(playlist)
+	await savePlaylist(playlist, true)
 
 	return playlist
 }
@@ -393,8 +421,16 @@ export function removeTracksFromPlaylistAction(playlist: Playlist, uuids: string
 	return mutatePlaylist(playlist.uuid, playlist, current => removeTracksPure(current, uuids, Date.now()))
 }
 
-export function reorderPlaylistFileAction(playlist: Playlist, from: number, to: number): Promise<Playlist | null> {
-	return mutatePlaylist(playlist.uuid, playlist, current => reorderPure(current, from, to, Date.now()))
+// Addressed by uuid, not index: the caller's indices come from the list it displays, while the move
+// applies to the freshest copy after waiting on the write lock, which an earlier edit may have
+// reordered. `targetUuid` is the track whose slot the moved one takes.
+export function reorderPlaylistFileAction(playlist: Playlist, movedUuid: string, targetUuid: string): Promise<Playlist | null> {
+	return mutatePlaylist(playlist.uuid, playlist, current => {
+		const from = current.files.findIndex(file => file.uuid === movedUuid)
+		const to = current.files.findIndex(file => file.uuid === targetUuid)
+
+		return from === -1 || to === -1 ? null : reorderPure(current, from, to, Date.now())
+	})
 }
 
 // Deletes the playlist's own `${uuid}.json` file from the Playlists directory. Re-lists rather than
@@ -498,5 +534,10 @@ function driveItemFromPlaylistFile(entry: PlaylistFile): DriveItem {
 // that does): that module boots real playback/media-session/kv-prefs side effects at import time,
 // which this data-layer module must stay free of so it stays trivially unit-testable in node.
 export function queueTracksFromPlaylist(playlist: Playlist): QueueTrack[] {
-	return playlist.files.map(entry => buildQueueTrack(driveItemFromPlaylistFile(entry)))
+	return playlist.files.map(playlistFileTrack)
+}
+
+// One stored entry as a playable track, for anything that reads the file itself (metadata included).
+export function playlistFileTrack(entry: PlaylistFile): QueueTrack {
+	return buildQueueTrack(driveItemFromPlaylistFile(entry))
 }

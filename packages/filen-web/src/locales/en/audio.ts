@@ -125,8 +125,12 @@ export const audio = {
 	removeFromPlaylist: "Remove from playlist",
 	/** Track-table column header: position in the playlist */
 	trackColumnNumber: "#",
-	/** Track-table column header: track name */
+	/** Track-table column header: track title (with its cover and artist) */
 	trackColumnTitle: "Title",
+	/** Track-table column header: album name from the track's tags */
+	trackColumnAlbum: "Album",
+	/** Track-table column header: track length */
+	trackColumnDuration: "Duration",
 	/** Track-table column header: file size */
 	trackColumnSize: "Size",
 	/** Track-table column header for the per-row actions (visually hidden) */

@@ -543,3 +543,157 @@ describe("the remembered Playlists directory", () => {
 		expect(count).toBe(expected)
 	})
 })
+
+function playlistFile(uuid: string, playlistUuid: string) {
+	return {
+		uuid,
+		name: `${uuid}.mp3`,
+		mime: "audio/mpeg",
+		size: 1,
+		bucket: "b",
+		key: "k",
+		version: 2,
+		chunks: 1,
+		region: "r",
+		playlist: playlistUuid
+	}
+}
+
+function playlistWith(uuid: string, trackUuids: string[], updated = 1000) {
+	return { uuid, name: uuid, created: 1000, updated, files: trackUuids.map(trackUuid => playlistFile(trackUuid, uuid)) }
+}
+
+function uploadedPlaylist(call: number): { files: { uuid: string }[] } {
+	const bytes = uploadFileBytes.mock.calls[call]?.[1] as Uint8Array
+
+	return JSON.parse(new TextDecoder().decode(bytes)) as { files: { uuid: string }[] }
+}
+
+describe("reorderPlaylistFileAction", () => {
+	it("moves the dragged track by uuid, even when an earlier save reordered the list it was dragged in", async () => {
+		mockDirectoryResolve()
+		uploadFileBytes.mockResolvedValue(fakeJsonFile(testUuid("saved"), "saved.json"))
+
+		const { reorderPlaylistFileAction, playlistsQueryUpsert, playlistsQueryGet } = await freshPlaylists()
+
+		// The displayed snapshot still shows A..E; the cache already holds the first drag's E-first order.
+		const displayed = playlistWith("p-1", ["A", "B", "C", "D", "E"])
+
+		playlistsQueryUpsert(playlistWith("p-1", ["E", "A", "B", "C", "D"], 2000))
+
+		// D dropped onto B's row.
+		const next = await reorderPlaylistFileAction(displayed, "D", "B")
+
+		expect(next?.files.map(file => file.uuid)).toEqual(["E", "A", "D", "B", "C"])
+		expect(playlistsQueryGet()).toEqual([{ status: "ok", playlist: next }])
+	})
+
+	it("is a no-op when either track has left the playlist", async () => {
+		mockDirectoryResolve()
+
+		const { reorderPlaylistFileAction } = await freshPlaylists()
+
+		await expect(reorderPlaylistFileAction(playlistWith("p-1", ["A", "B"]), "gone", "A")).resolves.toBeNull()
+		expect(uploadFileBytes).not.toHaveBeenCalled()
+	})
+})
+
+describe("dead-track prune during a list read", () => {
+	it("checks a track shared by several playlists once per read", async () => {
+		mockDirectoryResolve()
+
+		listDirectory.mockResolvedValue({
+			dirs: [],
+			files: [fakeJsonFile(testUuid("pl1"), "p-1.json"), fakeJsonFile(testUuid("pl2"), "p-2.json")]
+		})
+		downloadFileBytes.mockImplementation((file: SdkFile) =>
+			Promise.resolve(
+				playlistJsonBytes(
+					file.uuid === testUuid("pl1") ? playlistWith("p-1", ["a", "b", "a"]) : playlistWith("p-2", ["b", "a", "c"])
+				)
+			)
+		)
+		getFile.mockResolvedValue(fakeDir(testUuid("exists")))
+
+		const { fetchPlaylistEntries } = await freshPlaylists()
+
+		await fetchPlaylistEntries()
+
+		expect(getFile.mock.calls.map(call => call[0] as string).sort()).toEqual(["a", "b", "c"])
+	})
+
+	it("persists the prune without patching the cache the read has not filled yet", async () => {
+		mockDirectoryResolve()
+
+		let releaseSlowCheck: () => void = () => undefined
+
+		listDirectory.mockResolvedValue({
+			dirs: [],
+			files: [fakeJsonFile(testUuid("pl1"), "p-1.json"), fakeJsonFile(testUuid("pl2"), "p-2.json")]
+		})
+		downloadFileBytes.mockImplementation((file: SdkFile) =>
+			Promise.resolve(
+				playlistJsonBytes(file.uuid === testUuid("pl1") ? playlistWith("p-1", ["alive", "dead"]) : playlistWith("p-2", ["slow"]))
+			)
+		)
+		getFile.mockImplementation((uuid: string) => {
+			if (uuid === "dead") {
+				return Promise.resolve(undefined)
+			}
+
+			if (uuid === "slow") {
+				return new Promise(resolve => {
+					releaseSlowCheck = () => {
+						resolve(fakeDir(testUuid("exists")))
+					}
+				})
+			}
+
+			return Promise.resolve(fakeDir(testUuid("exists")))
+		})
+		uploadFileBytes.mockResolvedValue(fakeJsonFile(testUuid("saved"), "saved.json"))
+
+		const { fetchPlaylistEntries, playlistsQueryGet } = await freshPlaylists()
+		const read = fetchPlaylistEntries()
+
+		await vi.waitFor(() => {
+			expect(uploadFileBytes).toHaveBeenCalledTimes(1)
+		})
+		await Promise.resolve()
+
+		// The small playlist's prune landed while the other is still being checked: a patch here would
+		// collapse the list to one row and restart the read.
+		expect(playlistsQueryGet()).toBeUndefined()
+		expect(uploadedPlaylist(0).files.map(file => file.uuid)).toEqual(["alive"])
+
+		releaseSlowCheck()
+
+		const entries = await read
+
+		expect(entries.map(entry => (entry.status === "ok" ? entry.playlist.files.map(file => file.uuid) : null))).toEqual([
+			["alive"],
+			["slow"]
+		])
+	})
+
+	it("prunes the downloaded copy, not an older cached one restored from a previous session", async () => {
+		mockDirectoryResolve()
+
+		listDirectory.mockResolvedValue({ dirs: [], files: [fakeJsonFile(testUuid("pl1"), "p-1.json")] })
+		downloadFileBytes.mockResolvedValue(playlistJsonBytes(playlistWith("p-1", ["new", "dead"], 2000)))
+		getFile.mockImplementation((uuid: string) => Promise.resolve(uuid === "dead" ? undefined : fakeDir(testUuid("exists"))))
+		uploadFileBytes.mockResolvedValue(fakeJsonFile(testUuid("saved"), "saved.json"))
+
+		const { fetchPlaylistEntries, playlistsQueryUpsert } = await freshPlaylists()
+
+		playlistsQueryUpsert(playlistWith("p-1", ["old", "dead"], 1000))
+		uploadFileBytes.mockClear()
+
+		await fetchPlaylistEntries()
+		await vi.waitFor(() => {
+			expect(uploadFileBytes).toHaveBeenCalledTimes(1)
+		})
+
+		expect(uploadedPlaylist(0).files.map(file => file.uuid)).toEqual(["new"])
+	})
+})

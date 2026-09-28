@@ -19,7 +19,8 @@ import {
 } from "@/features/audio/store/audioQueue"
 import type { MediaSessionPublisher } from "@/features/audio/lib/mediaSession"
 import { CoverArtCache } from "@/features/audio/lib/coverCache"
-import type { TrackTags } from "@/features/audio/lib/metadata"
+import { backfillTrackDuration, getTrackTags } from "@/features/audio/store/useTrackTagsStore"
+import { COVER_THUMBNAIL_TYPE } from "@/features/audio/lib/trackTags.logic"
 
 // The module-level playback engine — a singleton lib (constructed in audioEngine.ts with the real DOM
 // adapter + SW/blob source resolver), NOT a React component, mirroring sdkApi and the mobile Audio
@@ -70,12 +71,16 @@ export interface AudioElementAdapter {
 export type AudioElementFactory = (events: AudioElementEvents) => AudioElementAdapter
 
 // A resolved playable source. A "blob" url is an object URL the engine owns and must revoke on the next
-// track switch / dispose; a "stream" url is an SW-served route that needs no page-side cleanup.
-export type TrackSource = { kind: "stream"; url: string } | { kind: "blob"; url: string }
+// track switch / dispose; a "stream" url is an SW-served route that needs no page-side cleanup. A blob
+// source carries its Blob so a local read uses the bytes already in memory: fetching a blob: URL is
+// refused by the CSP's connect-src.
+export type TrackSource = { kind: "stream"; url: string } | { kind: "blob"; url: string; blob: Blob }
 
 export interface AudioEngineDeps {
 	createElement: AudioElementFactory
-	resolveSource: (track: QueueTrack) => Promise<TrackSource>
+	// `signal` aborts once the engine no longer wants the source (superseded load, torn-down prefetch),
+	// so a whole-file download still in flight stops instead of finishing for nothing.
+	resolveSource: (track: QueueTrack, signal: AbortSignal) => Promise<TrackSource>
 	// Injectable purely so tests can spy on blob revocation; production uses URL.revokeObjectURL.
 	revokeObjectUrl?: (url: string) => void
 	// Injectable clock for the position throttle, so a test can drive it deterministically.
@@ -89,9 +94,11 @@ export interface AudioEngineDeps {
 	// doesn't care) means schedulePrefetch is a permanent no-op and playback behaves exactly as it did
 	// before prefetch existed — zero behavioral change for callers that don't provide it.
 	createPrefetchElement?: AudioElementFactory
-	// Tag/cover extraction for the current + one-ahead prefetched track. Same opt-in-by-presence pattern
-	// as createPrefetchElement — absent in tests that don't care about metadata.
-	extractMetadata?: (track: QueueTrack, source: TrackSource) => Promise<TrackTags>
+	// The cover thumbnail for the current + one-ahead prefetched track; reading it also records the track's
+	// tags in the track-tag store, which is where the engine reads them from. Same opt-in-by-presence
+	// pattern as createPrefetchElement — absent in tests that don't care about metadata. `null` means the
+	// track could not be read this time (not "no cover"), so a later load asks again.
+	resolveCover?: (track: QueueTrack, source: TrackSource) => Promise<{ cover: Blob | null } | null>
 }
 
 function defaultRevoke(url: string): void {
@@ -120,6 +127,8 @@ export class AudioEngine {
 	// Bumped on every load attempt so an older in-flight resolve/play can detect it was superseded and
 	// bail (the user skipped, the queue was replaced, dispose ran) rather than stomping newer state.
 	private loadGeneration = 0
+	// Aborts the in-flight load's source resolve; replaced on every bump of loadGeneration.
+	private loadAbort: AbortController | null = null
 	// Bumped on every pause. A pause refuses PLAYBACK, not the load: the track is still the one the user
 	// wants, so an in-flight load finishes onto the element, but every play() tail started before the bump
 	// must abandon itself — never starting audio behind the pause, and never mistaking the play() the
@@ -141,6 +150,10 @@ export class AudioEngine {
 	// landed before the previous prefetch resolved) detects it and discards its result instead of
 	// warming a now-stale target.
 	private prefetchGeneration = 0
+	private prefetchAbort: AbortController | null = null
+	// The index whose warm-up is still resolving, so a reschedule that lands on the same next track (a
+	// loop/shuffle toggle right after a track starts) lets it finish instead of restarting it.
+	private prefetchPendingIndex: number | null = null
 	private readonly coverCache = new CoverArtCache()
 
 	public constructor(deps: AudioEngineDeps) {
@@ -159,6 +172,14 @@ export class AudioEngine {
 	// meanwhile — either way it must not settle the store, start audio, or report a failure.
 	private superseded(loadGeneration: number, pauseGeneration: number): boolean {
 		return loadGeneration !== this.loadGeneration || pauseGeneration !== this.pauseGeneration
+	}
+
+	// Every supersede of the current load goes through here, so its source download stops with it.
+	private bumpLoadGeneration(): number {
+		this.loadAbort?.abort()
+		this.loadAbort = null
+
+		return ++this.loadGeneration
 	}
 
 	private nav(): QueueNav {
@@ -234,6 +255,9 @@ export class AudioEngine {
 	// coincidence would play the wrong track's bytes.
 	private teardownPrefetch(): void {
 		this.prefetchGeneration++
+		this.prefetchAbort?.abort()
+		this.prefetchAbort = null
+		this.prefetchPendingIndex = null
 		this.prefetchElement?.pause()
 		this.prefetchElement?.clear()
 		this.prefetchElement?.dispose()
@@ -264,28 +288,38 @@ export class AudioEngine {
 			return
 		}
 
-		if (advance.index === this.prefetchIndex) {
+		if (advance.index === this.prefetchIndex || advance.index === this.prefetchPendingIndex) {
 			return
 		}
 
 		this.teardownPrefetch()
 
+		const track = useAudioStore.getState().queue[advance.index]
+
+		// Next is the file already loaded (a one-track queue on loop "all"): handleTrackEnd replays it in
+		// place, so warming a second copy would only re-resolve it every lap.
+		if (!track || track.uuid === this.loadedTrackUuid) {
+			return
+		}
+
 		// Snapshot AFTER the teardown's own bump: any teardown that runs while resolveSource below is
 		// in flight (queue replace, jump, shuffle rebuild, dispose) moves the counter past this value,
 		// so the continuation bails at the staleness guard instead of resurrecting a torn-down slot.
 		const generation = this.prefetchGeneration
+		const abort = new AbortController()
 
-		const track = useAudioStore.getState().queue[advance.index]
-
-		if (!track) {
-			return
-		}
+		this.prefetchAbort = abort
+		this.prefetchPendingIndex = advance.index
 
 		let source: TrackSource
 
 		try {
-			source = await this.deps.resolveSource(track)
+			source = await this.deps.resolveSource(track, abort.signal)
 		} catch {
+			if (generation === this.prefetchGeneration) {
+				this.prefetchPendingIndex = null
+			}
+
 			return
 		}
 
@@ -296,6 +330,8 @@ export class AudioEngine {
 
 			return
 		}
+
+		this.prefetchPendingIndex = null
 
 		this.scheduleMetadata(track, source)
 
@@ -313,7 +349,7 @@ export class AudioEngine {
 	// retires the outgoing main element, and plays. Preserves whatever the browser already
 	// buffered/decoded for the promoted element instead of resolving+loading from scratch.
 	private async promotePrefetch(index: number): Promise<void> {
-		const generation = ++this.loadGeneration
+		const generation = this.bumpLoadGeneration()
 		const pauseGeneration = this.pauseGeneration
 		const track = useAudioStore.getState().queue[index]
 		const promoted = this.prefetchElement
@@ -322,7 +358,9 @@ export class AudioEngine {
 			return
 		}
 
-		this.deps.mediaSession?.setMetadata(track)
+		// The warm-up already extracted this track's tags while it was not yet current, so they are
+		// published from what is known rather than waiting on an extraction that will not run again.
+		this.publishMetadata(track)
 		useAudioStore.getState().setStatus("loading")
 
 		// Detach bookkeeping from the prefetch slot before touching the element — teardownPrefetch would
@@ -331,6 +369,7 @@ export class AudioEngine {
 		const promotedBlobUrl = this.prefetchIndex === index ? this.prefetchBlobUrl : null
 		this.prefetchIndex = null
 		this.prefetchBlobUrl = null
+		this.prefetchAbort = null
 
 		promoted.rebind({
 			onTimeUpdate: () => {
@@ -399,42 +438,61 @@ export class AudioEngine {
 		void this.schedulePrefetch()
 	}
 
-	// Kicks off tag/cover extraction for `track` against the SAME source the engine resolved for
-	// playback — never a second byte fetch of its own. Memoized per uuid via tagsByUuid's presence (an
-	// EMPTY_TRACK_TAGS result still counts as "attempted", so a tag-less file is never re-parsed every
-	// time it's revisited). A no-op when no extractMetadata dep was supplied.
+	// Kicks off the cover (and, with it, tag) read for `track`. Skipped when the track's tags are known and
+	// either it has no cover or its cover is still in the cache; a cover the LRU evicted is read again,
+	// from the thumbnail cache when it is there, so a revisit normally costs no download. A no-op when no
+	// resolveCover dep was supplied.
 	private scheduleMetadata(track: QueueTrack, source: TrackSource): void {
-		if (!this.deps.extractMetadata) {
+		if (!this.deps.resolveCover) {
 			return
 		}
 
-		if (useAudioStore.getState().tagsByUuid[track.uuid] !== undefined) {
+		const known = getTrackTags(track.uuid)
+
+		if (known !== undefined && (!known.cover || this.coverCache.get(track.uuid) !== null)) {
 			return
 		}
 
-		void this.deps.extractMetadata(track, source).then(tags => {
-			useAudioStore.getState().setTrackTags(track.uuid, tags)
+		void this.deps.resolveCover(track, source).then(result => {
+			if (result === null) {
+				return
+			}
 
-			const coverUrl = tags.picture ? this.applyCover(track.uuid, tags.picture) : null
+			if (result.cover !== null) {
+				this.applyCover(track.uuid, result.cover)
+			}
+
 			const state = useAudioStore.getState()
 			const current = state.queue[state.currentIndex]
 
 			// Only refresh the OS surface if this uuid is STILL the current track — a slow resolve for a
 			// track the user has since skipped past must not stomp fresher metadata.
 			if (current?.uuid === track.uuid) {
-				this.deps.mediaSession?.setMetadata(
-					current,
-					{ title: tags.title, artist: tags.artist, album: tags.album },
-					coverUrl && tags.picture ? { url: coverUrl, type: tags.picture.format } : null
-				)
+				this.publishMetadata(current)
 			}
 		})
 	}
 
+	// Publishes `track` to the OS surface with whatever tags and cover are already known for it.
+	private publishMetadata(track: QueueTrack): void {
+		if (!this.deps.mediaSession) {
+			return
+		}
+
+		const tags = getTrackTags(track.uuid)
+		const coverUrl = this.coverCache.get(track.uuid)
+
+		this.deps.mediaSession.setMetadata(
+			track,
+			tags ? { title: tags.title, artist: tags.artist, album: tags.album } : null,
+			coverUrl !== null ? { url: coverUrl, type: COVER_THUMBNAIL_TYPE } : null
+		)
+	}
+
 	// Mints/evicts the cover into the shared LRU and mirrors the cache's live key set into the store so
 	// every reactive surface (bar, panel thumbnails) sees it. Returns the freshly-minted URL.
-	private applyCover(uuid: string, picture: NonNullable<TrackTags["picture"]>): string {
-		const url = this.coverCache.set(uuid, picture)
+	private applyCover(uuid: string, cover: Blob): string {
+		const url = this.coverCache.set(uuid, cover)
 
 		useAudioStore.getState().setCoverUrls(this.coverCache.snapshot())
 
@@ -466,8 +524,13 @@ export class AudioEngine {
 		}
 
 		const durationMs = this.element.sample().durationMs
+		const known = Number.isFinite(durationMs) && durationMs > 0
 
-		useAudioStore.getState().setDuration(Number.isFinite(durationMs) && durationMs > 0 ? durationMs : 0)
+		useAudioStore.getState().setDuration(known ? durationMs : 0)
+
+		if (known && this.loadedTrackUuid !== null) {
+			backfillTrackDuration(this.loadedTrackUuid, durationMs / 1000)
+		}
 	}
 
 	// Move to `index` and start it. If it is already warmed by the prefetch element, promote it instead
@@ -483,7 +546,7 @@ export class AudioEngine {
 			return
 		}
 
-		const generation = ++this.loadGeneration
+		const generation = this.bumpLoadGeneration()
 		const pauseGeneration = this.pauseGeneration
 		const track = useAudioStore.getState().queue[index]
 
@@ -493,13 +556,17 @@ export class AudioEngine {
 
 		// Publish OS metadata as soon as the track is known (before bytes resolve) so the lock-screen /
 		// media-key surface names the loading track rather than lagging a beat behind.
-		this.deps.mediaSession?.setMetadata(track)
+		this.publishMetadata(track)
 		useAudioStore.getState().setStatus("loading")
+
+		const abort = new AbortController()
+
+		this.loadAbort = abort
 
 		let source: TrackSource
 
 		try {
-			source = await this.deps.resolveSource(track)
+			source = await this.deps.resolveSource(track, abort.signal)
 		} catch (error) {
 			// A pause abandons the failure too, not just the playback: the retry when the user asks for
 			// audio again is what should surface it, rather than an error the paused user never provoked.
@@ -607,7 +674,7 @@ export class AudioEngine {
 	// terminal status (idle when the queue is empty, otherwise paused at the start). Any lastError set
 	// by the failure path stays visible.
 	private settleStopped(): void {
-		this.loadGeneration++
+		this.bumpLoadGeneration()
 		this.element?.pause()
 		this.teardownPrefetch()
 
@@ -645,6 +712,17 @@ export class AudioEngine {
 		}
 
 		this.applyAdvance(advance)
+
+		// Next is the file already on the element (a one-track queue on loop "all"): replay it in place
+		// like loop "one" instead of re-resolving it. setCurrent zeroed the duration and the element will
+		// not re-announce it.
+		if (useAudioStore.getState().queue[advance.index]?.uuid === this.loadedTrackUuid) {
+			this.onDurationChange()
+			await this.repeatCurrent(advance.index)
+
+			return
+		}
+
 		await this.loadAndPlay(advance.index)
 	}
 
@@ -663,7 +741,7 @@ export class AudioEngine {
 			return
 		}
 
-		const generation = ++this.loadGeneration
+		const generation = this.bumpLoadGeneration()
 		const pauseGeneration = this.pauseGeneration
 
 		element.seek(0)
@@ -692,12 +770,18 @@ export class AudioEngine {
 	// entry point. Supersedes the outgoing track's end-handling before swapping the queue. The old queue's
 	// warmed prefetch (if any) is keyed to an index into an array that no longer exists after this swap —
 	// torn down unconditionally so loadAndPlay never mistakes it for warm by raw index coincidence.
-	public async enqueueAndPlay(tracks: QueueTrack[], startIndex: number): Promise<void> {
-		const load = replaceQueueAtIndex(tracks, startIndex, useAudioStore.getState().shuffleEnabled)
+	// `shuffle` sets the shuffle toggle as part of the swap (shuffle-play), rather than through
+	// setShuffleEnabled, which would first re-arm a prefetch against the queue being replaced.
+	public async enqueueAndPlay(tracks: QueueTrack[], startIndex: number, options: { shuffle?: boolean } = {}): Promise<void> {
+		const load = replaceQueueAtIndex(tracks, startIndex, options.shuffle ?? useAudioStore.getState().shuffleEnabled)
 
-		this.loadGeneration++
+		this.bumpLoadGeneration()
 		this.teardownPrefetch()
 		useAudioStore.getState().loadQueue(load.queue, load.currentIndex, load.shuffleOrder)
+
+		if (options.shuffle !== undefined) {
+			useAudioStore.getState().setShuffle(options.shuffle, load.shuffleOrder)
+		}
 
 		if (load.queue.length === 0) {
 			this.settleStopped()
@@ -839,7 +923,7 @@ export class AudioEngine {
 		}
 
 		if (mutation.currentRemoved) {
-			this.loadGeneration++
+			this.bumpLoadGeneration()
 			useAudioStore.getState().loadQueue(mutation.queue, mutation.currentIndex, mutation.shuffleOrder)
 			await this.loadAndPlay(mutation.currentIndex)
 
@@ -854,7 +938,7 @@ export class AudioEngine {
 	// queue). Supersedes any in-flight load, revokes the live blob URL, and clears the OS metadata; the
 	// persisted shuffle/loop/output prefs survive (store.reset keeps them).
 	public clearQueue(): void {
-		this.loadGeneration++
+		this.bumpLoadGeneration()
 		this.element?.pause()
 		this.element?.clear()
 		this.loadedTrackUuid = null
@@ -872,28 +956,35 @@ export class AudioEngine {
 		this.deps.mediaSession?.setPlaybackState("none")
 	}
 
-	// Rebuilding the shuffle order changes what "next" means, so the previously-warmed prefetch (if any)
-	// is stale — tear it down and re-arm against the fresh order.
+	// Rebuilding the shuffle order can change what "next" means. schedulePrefetch re-derives it and tears
+	// the warm-up down only when the next index moved: the queue itself is unchanged, so the same index
+	// still names the same track and its warm buffer stays valid.
 	public setShuffleEnabled(enabled: boolean): void {
 		const state = useAudioStore.getState()
 		const order = enabled && state.queue.length > 0 ? buildShuffleOrder(state.queue.length, state.currentIndex) : []
 
 		state.setShuffle(enabled, order)
-		this.teardownPrefetch()
 		void this.schedulePrefetch()
 	}
 
-	// A loop-mode change also changes what "next" means (off/all/one all resolve differently at the
-	// queue boundary) — same reschedule as setShuffleEnabled.
+	// A loop-mode change can change what "next" means at the queue boundary (off/all/one resolve
+	// differently there) — same reschedule as setShuffleEnabled.
 	public setLoopMode(mode: LoopMode): void {
 		useAudioStore.getState().setLoop(mode)
-		this.teardownPrefetch()
 		void this.schedulePrefetch()
 	}
 
+	// Raising the volume while muted unmutes, as in any player: otherwise the slider (which shows 0 while
+	// muted) snaps back on every move and nothing becomes audible.
 	public setVolume(volume: number): void {
 		this.volume = clampVolume(volume)
 		this.element?.setVolume(this.volume)
+
+		if (this.muted && this.volume > 0) {
+			this.muted = false
+			this.element?.setMuted(false)
+		}
+
 		useAudioStore.getState().setOutput(this.volume, this.muted)
 		void this.persistOutputPrefs()
 	}
@@ -981,7 +1072,7 @@ export class AudioEngine {
 	// Full teardown on logout: supersede any in-flight load, stop + tear down the element, revoke the
 	// live blob URL, and clear the store. Nothing leaks across sessions.
 	public dispose(): void {
-		this.loadGeneration++
+		this.bumpLoadGeneration()
 
 		if (this.visibilityHandler && typeof document !== "undefined") {
 			document.removeEventListener("visibilitychange", this.visibilityHandler)
