@@ -9,6 +9,7 @@ import { asErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { useDialogHost } from "@/lib/useDialogHost"
 import { useIsOnline } from "@/lib/useIsOnline"
+import { blockingQueryError } from "@/queries/blockingError"
 import { useAction } from "@/lib/keymap/useAction"
 import { isAnyDialogOpen } from "@/lib/keymap/dialogGuard"
 import {
@@ -32,6 +33,7 @@ import {
 import { toastContactsBulkOutcome } from "@/features/contacts/lib/bulkToast"
 import { resolveSelectedContacts, type ContactSectionKey } from "@/features/contacts/lib/selection"
 import { useContactsListSelection } from "@/features/contacts/hooks/useContactsListSelection"
+import { useInFlightKeys } from "@/features/contacts/hooks/useInFlightKeys"
 import {
 	ContactRow,
 	ContactRequestRow,
@@ -80,24 +82,25 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 	const { t } = useTranslation(["contacts", "common"])
 	const navigate = useNavigate()
 	const isOnline = useIsOnline()
-	// Every per-row/bulk action below is disabled SOLELY by `!isOnline` (no other reason ever
-	// disables them), so this single string doubles as both the "why" and the disabled condition's own
-	// explanation — computed once rather than re-deriving `t("common:offlineActionDisabled")` at each
-	// of the 6 call sites below.
+	// Offline is the one disabled reason worth telling (an accept in flight clears itself a moment
+	// later), so this single string is the "why" — computed once rather than re-deriving
+	// `t("common:offlineActionDisabled")` at each of the 6 call sites below.
 	const offlineTitle = !isOnline ? t("common:offlineActionDisabled") : undefined
 	const [search, setSearch] = useState("")
 	const selection = useContactsListSelection({ resetKey: section })
 	const { activeDialog, setActiveDialog, dialogPending, setDialogPending, closeActiveDialog } = useDialogHost<ActiveContactDialog>()
+	// Accept has no confirm dialog to carry a pending state, and its row stays until the op resolves: a
+	// second click meanwhile would send a duplicate accept for a request the first is consuming.
+	const accepting = useInFlightKeys()
 
 	const contactsQuery = useContactsQuery()
 	const requestsQuery = useContactRequestsQuery()
 
 	const isPending = contactsQuery.status === "pending" || requestsQuery.status === "pending"
-	// At most one of these can be an actual Error at a time in practice, but either query can fail
-	// independently — check contacts first, requests second; a retry always refetches both regardless
-	// of which one is shown, so which one "wins" the display only affects the error copy.
-	const queryError =
-		contactsQuery.status === "error" ? contactsQuery.error : requestsQuery.status === "error" ? requestsQuery.error : null
+	// Either query can fail independently — check contacts first, requests second; a retry always
+	// refetches both regardless of which one is shown, so which one "wins" the display only affects the
+	// error copy. A failed background refresh of loaded data never replaces the list.
+	const queryError = blockingQueryError(contactsQuery) ?? blockingQueryError(requestsQuery)
 
 	const contactsData = contactsQuery.data?.contacts ?? []
 	const blockedData = contactsQuery.data?.blocked ?? []
@@ -149,7 +152,13 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 	// No confirm (mirrors mobile) — silent success, LABEL-FIRST toast on failure, matching every
 	// other singular contact action's convention (see runSingleDialogAction below).
 	async function handleAccept(request: ContactRequestIn): Promise<void> {
+		if (accepting.claim([request.uuid]).length === 0) {
+			return
+		}
+
 		const outcome = await acceptRequest(request.uuid)
+
+		accepting.release([request.uuid])
 
 		if (outcome.status === "error") {
 			toast.error(errorLabel(outcome.dto))
@@ -176,7 +185,18 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 	}
 
 	async function handleBulkAccept(items: ContactRequestIn[]): Promise<void> {
-		const outcome = await runContactsBulk(items, request => acceptRequest(request.uuid))
+		const claimed = new Set(accepting.claim(items.map(request => request.uuid)))
+
+		if (claimed.size === 0) {
+			return
+		}
+
+		const outcome = await runContactsBulk(
+			items.filter(request => claimed.has(request.uuid)),
+			request => acceptRequest(request.uuid)
+		)
+
+		accepting.release([...claimed])
 		toastContactsBulkOutcome(outcome)
 		selection.pruneSelection(
 			"requests",
@@ -460,7 +480,7 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 					>
 						<IncomingRequestActions
 							request={request}
-							disabled={!isOnline}
+							disabled={!isOnline || accepting.inFlight.has(request.uuid)}
 							title={offlineTitle}
 							tabIndex={index === activeIndex ? 0 : -1}
 							onAccept={item => {

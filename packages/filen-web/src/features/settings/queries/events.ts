@@ -2,6 +2,8 @@ import { useQuery, type UseQueryResult } from "@tanstack/react-query"
 import type { UserEventResult } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
 import { queryClient } from "@/queries/client"
+import { cachedQuery } from "@/queries/patch"
+import { persister } from "@/queries/persist"
 import { currentSocketEpoch, socketLiveSince } from "@/lib/sdk/socketSession"
 import { computeNextEventsPage, mergeFirstEventsPage, selectEventsView, type EventsView } from "@/features/settings/lib/eventsPagination"
 
@@ -17,6 +19,22 @@ export const EVENTS_QUERY_KEY = ["settings", "events"] as const
 // closed or the socket was down, and a read it wasn't up for may predate an event it never delivered.
 let readEpoch: number | null = null
 
+// Events the slice keeps past a mounted list's own scrolling: the slice is persisted whole and restored
+// at every boot, so pages scrolled in once must not ride along forever. A return to the page reuses up
+// to this many, and scrolling past them pages the rest in again.
+export const EVENTS_SLICE_CAP = 300
+
+// Whether the mounted list has scrolled older pages in. Its slice is left whole until it unmounts: a
+// trim under it would cut rows out from under the scroll position.
+let listPaged = false
+
+// The newest `cap` events, or the first page whole when it alone is longer. The slice is newest first.
+export function capEventsSlice(slice: UserEventResult[], cap: number, keep = 0): UserEventResult[] {
+	const limit = Math.max(cap, keep)
+
+	return slice.length <= limit ? slice : slice.slice(0, limit)
+}
+
 // Testable fetch — mirrors fetchAccount/fetchChatMessages: no filter/timestamp on the first page
 // fetches the most recent events (wasm defaults per sdk-rs.d.ts's `getUserEvents(filter?,
 // timestamp?)`). Merged into the slice read AFTER the await, so a page loadOlderEvents appended
@@ -27,7 +45,9 @@ export async function fetchEvents(): Promise<UserEventResult[]> {
 
 	readEpoch = socketLiveSince(epoch) ? epoch : null
 
-	return mergeFirstEventsPage(eventsQueryGet(), page)
+	const merged = mergeFirstEventsPage(eventsQueryGet(), page)
+
+	return listPaged ? merged : capEventsSlice(merged, EVENTS_SLICE_CAP, page.length)
 }
 
 // The socket's newEvent marks the slice stale (generalSocketHandlers.ts), so a return to the page or a
@@ -51,21 +71,70 @@ export function eventsQueryGet(): UserEventResult[] | undefined {
 	return queryClient.getQueryData<UserEventResult[]>(EVENTS_QUERY_KEY)
 }
 
+// The oldest Ok event's timestamp: the cursor the next older page is read from.
+function oldestOkTimestamp(slice: UserEventResult[]): bigint | undefined {
+	let oldest: bigint | undefined
+
+	for (const event of slice) {
+		if (event.type === "ok" && (oldest === undefined || event.timestamp < oldest)) {
+			oldest = event.timestamp
+		}
+	}
+
+	return oldest
+}
+
 // Fetches one older page via getUserEvents(undefined, oldestTimestamp) and appends the new Ok items
 // (Err entries are discarded — see eventsPagination.ts) into the single cache slice, deduped by id.
 // Returns the pagination step's own result so the caller (EventsList) can flip its local `hasMore`
 // flag off on `terminate` without re-deriving the dedup logic itself. A first-page refresh in flight
 // is left running: it merges into the slice as it stands when it lands, this page included, and
-// cancelling it would drop the new event that triggered it.
+// cancelling it would drop the new event that triggered it. A page whose cursor is no longer the slice's
+// end (a trim or a replacing first page landed meanwhile) is dropped: appended, it would leave a gap.
 export async function loadOlderEvents(oldestTimestamp: bigint): Promise<{ newCount: number; terminate: boolean }> {
 	const page = await sdkApi.getUserEvents(undefined, oldestTimestamp)
 	const current = eventsQueryGet() ?? []
+
+	if (oldestOkTimestamp(current) !== oldestTimestamp) {
+		return { newCount: 0, terminate: false }
+	}
+
 	const existingOkIds = new Set(current.filter(e => e.type === "ok").map(e => e.id))
 	const { newOk, terminate } = computeNextEventsPage(existingOkIds, page)
 
 	if (newOk.length > 0) {
+		listPaged = true
 		queryClient.setQueryData<UserEventResult[]>(EVENTS_QUERY_KEY, prev => [...(prev ?? []), ...newOk])
 	}
 
 	return { newCount: newOk.length, terminate }
+}
+
+// The list unmounting: what it scrolled in is trimmed back to the cap, in memory and on disk. Only a
+// first-page read persists by itself, and until the next one the row on disk would still be restored
+// whole at every boot. Keeps the read time and any pending invalidation, so the trim doesn't pass for a
+// fresh read.
+export function releaseEventsSlice(): void {
+	if (!listPaged) {
+		return
+	}
+
+	listPaged = false
+
+	const query = cachedQuery(EVENTS_QUERY_KEY)
+	const slice = eventsQueryGet()
+
+	if (query === undefined || slice === undefined || slice.length <= EVENTS_SLICE_CAP) {
+		return
+	}
+
+	const { dataUpdatedAt, isInvalidated } = query.state
+
+	queryClient.setQueryData(EVENTS_QUERY_KEY, capEventsSlice(slice, EVENTS_SLICE_CAP), { updatedAt: dataUpdatedAt })
+
+	if (isInvalidated) {
+		query.invalidate()
+	}
+
+	void persister.persistQuery(query)
 }

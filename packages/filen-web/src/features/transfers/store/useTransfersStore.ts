@@ -87,10 +87,12 @@ export function capFinishedTransfers(transfers: Transfer[]): Transfer[] {
 	return kept
 }
 
-// One (timestamp, totalBytes-across-active-transfers) sample — the raw material for the rolling-
-// window speed below. `setProgress` appends a sample on every progress tick and trims anything
-// outside the window, so the array itself never grows past a handful of entries during an active
-// transfer, and stops growing at all once everything settles.
+// One (timestamp, totalBytes) sample — the raw material for the rolling-window speed below. For the
+// aggregate, totalBytes counts every byte moved since the window last emptied, never the live sum over
+// active rows: a transfer that settles or is removed would take its bytes out of that sum, and a batch
+// of many small files would read as no speed at all. `setProgress` appends a sample on every progress
+// tick and trims anything outside the window, so the array itself never grows past a handful of
+// entries during an active transfer, and stops growing at all once everything settles.
 export interface SpeedSample {
 	timestamp: number
 	totalBytes: number
@@ -220,14 +222,8 @@ export const useTransfersStore = create<TransfersStore>(set => ({
 
 			const transfers = state.transfers.map(transfer => (transfer === target ? { ...transfer, bytesTransferred } : transfer))
 			const now = Date.now()
-			let totalBytes = 0
-
-			for (const transfer of transfers) {
-				if (isActiveTransfer(transfer.status)) {
-					totalBytes += transfer.bytesTransferred
-				}
-			}
-
+			// A restarted transfer reporting fewer bytes moved none.
+			const totalBytes = (state.speedSamples.at(-1)?.totalBytes ?? 0) + Math.max(0, bytesTransferred - target.bytesTransferred)
 			const windowStart = now - SPEED_WINDOW_MS
 			const speedSamples = samplesSince([...state.speedSamples, { timestamp: now, totalBytes }], windowStart)
 

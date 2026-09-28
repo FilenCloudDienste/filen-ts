@@ -9,7 +9,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { render, renderHook, act, screen, cleanup, fireEvent } from "@testing-library/react"
 import { createElement } from "react"
 import "@/lib/i18n"
-import type { AccountQuerySuccess } from "@/queries/account"
 import { useCapsLock } from "@/features/auth/lib/useCapsLock"
 import { CapsLockWarning } from "@/features/auth/components/capsLockWarning"
 
@@ -20,12 +19,9 @@ vi.mock("@/lib/sdk/session", () => ({ persistSession: vi.fn(), clearSession: vi.
 
 const { ChangePasswordRow } = await import("@/features/settings/components/security/changePassword")
 
-// Only refetch() is ever read, and only on the success path these cases never reach.
-const accountQuery = { refetch: vi.fn() } as unknown as AccountQuerySuccess
-
 // The form lives in the row's dialog, portaled to document.body — hence `screen` below.
 function renderPasswordForm(): void {
-	render(createElement(ChangePasswordRow, { accountQuery }))
+	render(createElement(ChangePasswordRow))
 	fireEvent.click(screen.getByRole("button", { name: "Change password" }))
 }
 

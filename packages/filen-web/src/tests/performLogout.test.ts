@@ -16,8 +16,10 @@ const {
 	clearAllTyping,
 	detachUnreadBadges,
 	disposeAudioEngine,
+	releaseHeicWorker,
 	socketStop,
-	toastWarning
+	toastWarning,
+	wipeThumbnailStore
 } = vi.hoisted(() => {
 	const calls: string[] = []
 	const record =
@@ -37,8 +39,10 @@ const {
 		clearAllTyping: vi.fn(record("clearAllTyping", () => undefined)),
 		detachUnreadBadges: vi.fn(record("detachUnreadBadges", () => undefined)),
 		disposeAudioEngine: vi.fn(record("disposeAudioEngine", () => undefined)),
+		releaseHeicWorker: vi.fn(record("releaseHeicWorker", () => undefined)),
 		socketStop: vi.fn(record("socketBridge.stop", () => Promise.resolve())),
-		toastWarning: vi.fn()
+		toastWarning: vi.fn(),
+		wipeThumbnailStore: vi.fn(() => Promise.resolve())
 	}
 })
 
@@ -50,6 +54,7 @@ const TEARDOWN_STEPS = [
 	"clearAllTyping",
 	"detachUnreadBadges",
 	"disposeAudioEngine",
+	"releaseHeicWorker",
 	"socketBridge.stop"
 ]
 
@@ -64,7 +69,9 @@ vi.mock("@/lib/sdk/client", () => ({ sdkApi: { logout: vi.fn() } }))
 vi.mock("@/features/drive/lib/saveDownload", () => ({ wipeSwClient: vi.fn() }))
 vi.mock("@/lib/sdk/session", () => ({ clearSession: vi.fn(), broadcastAuth: vi.fn() }))
 vi.mock("@/lib/storage/adapter", () => ({ kvClear: vi.fn() }))
+vi.mock("@/features/drive/lib/thumbCache", () => ({ wipeThumbnailStore, readThumbnailBlob: vi.fn(), deleteThumbnail: vi.fn() }))
 vi.mock("@/features/audio/lib/audioEngine", () => ({ disposeAudioEngine }))
+vi.mock("@/features/preview/lib/heicTransform", () => ({ releaseHeicWorker, transformHeicBytesOwned: vi.fn() }))
 vi.mock("@/queries/client", () => ({ queryClient: { cancelQueries: vi.fn(), clear: vi.fn() } }))
 vi.mock("sonner", () => ({ toast: { warning: toastWarning } }))
 
@@ -104,6 +111,12 @@ describe("performLogout", () => {
 	it("runs the wipe straight away when no preview buffer is dirty", async () => {
 		await expect(performLogout()).resolves.toBe(true)
 		expect(runLogout).toHaveBeenCalledTimes(1)
+	})
+
+	it("hands the wipe the OPFS thumbnail-cache wipe", async () => {
+		await performLogout()
+
+		expect(runLogout.mock.calls[0]?.[0].wipeThumbnails).toBe(wipeThumbnailStore)
 	})
 
 	it("a user-initiated sign-out is genuinely cancelled at the unsaved-changes prompt", async () => {
@@ -169,7 +182,7 @@ describe("performLogout", () => {
 	})
 })
 
-// ★ SECURITY: the five pre-wipe teardown steps exist so no plaintext producer can outlive the wipe —
+// ★ SECURITY: the pre-wipe teardown steps exist so no plaintext producer can outlive the wipe —
 // an outbox flush, a typing timer or a live socket that fires AFTER kv-clear resurrects this account's
 // decrypted queue on disk. That the steps run, run once, and run BEFORE runLogout is the property; the
 // wipe itself is runLogout's own test.
@@ -186,6 +199,7 @@ describe("performLogout — pre-wipe teardown", () => {
 			clearAllTyping,
 			detachUnreadBadges,
 			disposeAudioEngine,
+			releaseHeicWorker,
 			socketStop
 		]) {
 			expect(step).toHaveBeenCalledTimes(1)

@@ -1,15 +1,17 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import QRCode from "react-qr-code"
 import { type DialogRoot } from "@base-ui/react/dialog"
+import { useBlocker, type ShouldBlockFn } from "@tanstack/react-router"
 import { sdkApi } from "@/lib/sdk/client"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { downloadTextFile } from "@/features/settings/lib/downloadTextFile"
-import type { AccountQuerySuccess } from "@/queries/account"
+import { accountQueryUpdate, type AccountQuerySuccess } from "@/queries/account"
 import { buildOtpauthUri, canDismissRecoveryKeyPanel } from "@/features/settings/components/security/twoFactor.logic"
 import { useIsOnline } from "@/lib/useIsOnline"
+import { holdUnload } from "@/lib/unloadGuard"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
@@ -19,6 +21,9 @@ import { SettingsRow } from "@/features/settings/components/settingsLayout"
 interface TwoFactorRowProps {
 	accountQuery: AccountQuerySuccess
 }
+
+// Module scope, not an inline arrow: useBlocker's registration effect lists shouldBlockFn in its deps.
+const blockEveryNavigation: ShouldBlockFn = () => true
 
 interface RecoveryKeyPanelProps {
 	recoveryKey: string
@@ -30,10 +35,14 @@ interface RecoveryKeyPanelProps {
 // enable2FA's return value, and lives ONLY in this component's state — it is never persisted,
 // logged, or refetched. It can only be dismissed via the explicit "I've saved it" confirm; every
 // other dismissal route is blocked (canDismissRecoveryKeyPanel, twoFactor.logic.ts) so a stray
-// Escape or outside-click can never lose it before the user has acknowledged saving it.
+// Escape or outside-click can never lose it before the user has acknowledged saving it. Navigation is
+// held the same way: a Back gesture or a closing tab would unmount it just as surely.
 function RecoveryKeyPanel({ recoveryKey, onClose }: RecoveryKeyPanelProps) {
 	const { t } = useTranslation("auth")
 	const [saved, setSaved] = useState(false)
+
+	useBlocker({ shouldBlockFn: blockEveryNavigation, enableBeforeUnload: false, withResolver: false })
+	useEffect(() => holdUnload(), [])
 
 	function handleOpenChange(next: boolean, details: DialogRoot.ChangeEventDetails): void {
 		if (!canDismissRecoveryKeyPanel(next, saved)) {
@@ -150,7 +159,9 @@ function TwoFactorRow({ accountQuery }: TwoFactorRowProps) {
 			const key = await sdkApi.enable2FA(code)
 			setEnableCodeOpen(false)
 			setRecoveryKey(key)
-			void accountQuery.refetch()
+			// A patch, not a read: a failed read would put the page in its error state and unmount the
+			// only copy of the key. getUserInfo withholds the setup key while 2FA is on; mirror that.
+			accountQueryUpdate(prev => ({ ...prev, twoFactorEnabled: true, twoFactorKey: undefined }))
 		} catch (e) {
 			toast.error(errorLabel(asErrorDTO(e)))
 		} finally {

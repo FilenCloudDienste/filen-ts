@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest"
 import { act, render, screen, cleanup, fireEvent, within } from "@testing-library/react"
 import { createElement } from "react"
 import "@/lib/i18n"
@@ -187,5 +187,41 @@ describe("TransfersScreen — a copy whose job has ended", () => {
 		expect(button("Pause all").disabled).toBe(true)
 		expect(button("Resume all").disabled).toBe(true)
 		expect(button("Cancel all").disabled).toBe(true)
+	})
+})
+
+// A dropped directory adds a row per file up front, and every progress tick re-renders the screen.
+describe("TransfersScreen — a large batch", () => {
+	it("mounts only the rows in view, not one per transfer", () => {
+		// The virtualizer sizes its viewport off offsetHeight, which jsdom leaves at 0: a 600px list.
+		const original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetHeight")
+
+		Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+			configurable: true,
+			get(this: HTMLElement) {
+				return this.classList.contains("overflow-y-auto") ? 600 : 0
+			}
+		})
+		onTestFinished(() => {
+			if (original === undefined) {
+				Reflect.deleteProperty(HTMLElement.prototype, "offsetHeight")
+			} else {
+				Object.defineProperty(HTMLElement.prototype, "offsetHeight", original)
+			}
+		})
+
+		useTransfersStore.setState({
+			transfers: Array.from({ length: 2_000 }, (_, index) =>
+				transfer({ id: `t${String(index)}`, name: `file${String(index)}.txt`, startedAt: index })
+			)
+		})
+
+		const { container } = render(createElement(TransfersScreen))
+		const rows = container.querySelectorAll("li")
+
+		expect(rows.length).toBeGreaterThan(0)
+		expect(rows.length).toBeLessThan(50)
+		expect(screen.getByText("file0.txt")).toBeTruthy()
+		expect(screen.getByText("Active")).toBeTruthy()
 	})
 })

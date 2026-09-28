@@ -14,7 +14,9 @@ import { InputDialog } from "@/components/dialogs/inputDialog"
 // contactsList.tsx's per-row confirm-dialog host). The dialog itself IS the confirm — sending a
 // request needs no separate ConfirmDialog, matching every other "type a value, submit" flow. The empty
 // state mounts a second, primary-styled instance as its call to action.
-export function AddContactDialog({ variant = "outline" }: { variant?: "outline" | "default" }) {
+export function AddContactDialog({ variant: variantProp }: { variant?: "outline" | "default" }) {
+	// Not a destructuring default, which the React Compiler cannot lower.
+	const variant = variantProp ?? "outline"
 	const { t } = useTranslation(["contacts", "common"])
 	const isOnline = useIsOnline()
 	const [open, setOpen] = useState(false)

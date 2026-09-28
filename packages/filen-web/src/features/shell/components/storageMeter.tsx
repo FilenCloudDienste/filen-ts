@@ -23,8 +23,8 @@ const BLOCK_HEIGHT = "h-9"
 
 // Sidebar bottom-block storage usage: a slim progress bar plus one caption line, read straight from
 // the account query's UserInfo (storageUsed / maxStorage bigints — see queries/account.ts). Formatted
-// with the shared byte formatter. Pending renders a same-height spinner; an errored or zero-quota
-// account renders an empty same-height slot rather than a broken bar — no layout shift either way.
+// with the shared byte formatter. Pending renders a same-height spinner; a first read that failed, or
+// a zero-quota account, renders an empty same-height slot rather than a broken bar — no layout shift.
 export function StorageMeter() {
 	const { t } = useTranslation("common")
 	const accountQuery = useAccountQuery()
@@ -32,10 +32,11 @@ export function StorageMeter() {
 	return (
 		<div>
 			<p className="mb-2 text-xs font-medium text-muted-foreground/80">{t("usage")}</p>
-			{accountQuery.status === "pending" ? (
-				<LoadingState
-					size="sm"
-					className={BLOCK_HEIGHT}
+			{/* Cached data wins over a failed background refetch: the meter keeps its last known value. */}
+			{accountQuery.data !== undefined ? (
+				<StorageRow
+					used={Number(accountQuery.data.storageUsed)}
+					max={Number(accountQuery.data.maxStorage)}
 				/>
 			) : accountQuery.status === "error" ? (
 				<div
@@ -43,9 +44,9 @@ export function StorageMeter() {
 					aria-hidden="true"
 				/>
 			) : (
-				<StorageRow
-					used={Number(accountQuery.data.storageUsed)}
-					max={Number(accountQuery.data.maxStorage)}
+				<LoadingState
+					size="sm"
+					className={BLOCK_HEIGHT}
 				/>
 			)}
 		</div>

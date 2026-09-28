@@ -10,10 +10,12 @@ import { sdkApi } from "@/lib/sdk/client"
 import { wipeSwClient } from "@/features/drive/lib/saveDownload"
 import { clearSession, broadcastAuth } from "@/lib/sdk/session"
 import { kvClear } from "@/lib/storage/adapter"
+import { wipeThumbnailStore } from "@/features/drive/lib/thumbCache"
 import { disposeAudioEngine } from "@/features/audio/lib/audioEngine"
 import { cancelActiveTransfers } from "@/features/transfers/lib/control"
 import { allowNextUnload } from "@/lib/unloadGuard"
 import { clearPreviewCache } from "@/features/preview/lib/previewCache"
+import { releaseHeicWorker } from "@/features/preview/lib/heicTransform"
 import { useDriveClipboardStore } from "@/features/drive/store/useDriveClipboardStore"
 import { clearDirectoryTreeState } from "@/features/drive/store/useDirectoryTreeStore"
 import { discardListingPatches } from "@/features/drive/queries/drive"
@@ -99,8 +101,10 @@ export async function performLogout(options?: PerformLogoutOptions): Promise<boo
 	// Stop playback, revoke the live blob URL, tear down the media element and clear the queue so no
 	// audio from this account survives into the next session.
 	disposeAudioEngine()
-	// Decrypted preview buffers held for pager revisits.
+	// Decrypted preview buffers held for pager revisits, and an idle HEIC worker whose heap still holds
+	// this account's decoded photos.
 	clearPreviewCache()
+	releaseHeicWorker()
 	// The drive clipboard's items and the sidebar tree's expanded directories belong to this account.
 	useDriveClipboardStore.getState().clear()
 	clearDirectoryTreeState()
@@ -118,6 +122,7 @@ export async function performLogout(options?: PerformLogoutOptions): Promise<boo
 		sdkLogout: () => sdkApi.logout(),
 		clearSession,
 		kvClear,
+		wipeThumbnails: wipeThumbnailStore,
 		wipeServiceWorker: wipeSwClient,
 		broadcast: () => {
 			broadcastAuth("logout")

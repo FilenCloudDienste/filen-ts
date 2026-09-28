@@ -19,8 +19,9 @@ import { routeHead } from "@/lib/head/routeHead"
 import { i18n } from "@/lib/i18n"
 
 // Same one-top-level-gate shape as the Security page: every row independently reads
-// useAccountQuery (dedupe via the shared ["account"] key), but the page gates on ONE
-// pending/error branch so every row mounts only once the account has genuinely loaded.
+// useAccountQuery (dedupe via the shared ["account"] key), but the page gates on ONE branch so every
+// row mounts only once the account has genuinely loaded. The gate is on the data, not the status: a
+// failed background read keeps the cached account, so the page stays up over it.
 export const Route = createFileRoute("/_app/settings/account")({
 	head: routeHead({ title: () => [i18n.t("settings:settingsSectionAccount"), i18n.t("common:settings")] }),
 	component: AccountPage
@@ -35,28 +36,7 @@ function AccountPage() {
 			icon={UserIcon}
 			title={t("settingsSectionAccount")}
 		>
-			{accountQuery.status === "pending" ? (
-				<LoadingState size="lg" />
-			) : accountQuery.status === "error" ? (
-				<Empty>
-					<EmptyHeader>
-						<EmptyMedia variant="icon">
-							<UserIcon />
-						</EmptyMedia>
-						<EmptyTitle>{t("settingsAccountLoadError")}</EmptyTitle>
-					</EmptyHeader>
-					<EmptyContent>
-						<Button
-							variant="outline"
-							onClick={() => {
-								void accountQuery.refetch()
-							}}
-						>
-							{t("common:tryAgain")}
-						</Button>
-					</EmptyContent>
-				</Empty>
-			) : (
+			{accountQuery.data !== undefined ? (
 				<>
 					<ProfileHeader accountQuery={accountQuery} />
 					<SettingsGroup title={t("settingsGroupProfile")}>
@@ -81,6 +61,27 @@ function AccountPage() {
 						<DeleteAllItemsRow accountQuery={accountQuery} />
 					</SettingsGroup>
 				</>
+			) : accountQuery.status === "error" ? (
+				<Empty>
+					<EmptyHeader>
+						<EmptyMedia variant="icon">
+							<UserIcon />
+						</EmptyMedia>
+						<EmptyTitle>{t("settingsAccountLoadError")}</EmptyTitle>
+					</EmptyHeader>
+					<EmptyContent>
+						<Button
+							variant="outline"
+							onClick={() => {
+								void accountQuery.refetch()
+							}}
+						>
+							{t("common:tryAgain")}
+						</Button>
+					</EmptyContent>
+				</Empty>
+			) : (
+				<LoadingState size="lg" />
 			)}
 		</SettingsPage>
 	)

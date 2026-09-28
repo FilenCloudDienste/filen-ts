@@ -1,17 +1,19 @@
 import { useContactsQuery } from "@/features/contacts/queries/contacts"
-import { deriveBlockedUsers, type BlockedUsers } from "@filen/shared"
+import { deriveBlockedUsers, EMPTY_BLOCKED_USERS, type BlockedUsers } from "@filen/shared"
 
 // Reactive blocked-user lookup — mirrors filen-mobile's useBlockedUsers. React Compiler memoizes the
 // derivation, keyed on the query's blocked array reference, so this needs no hand-written useMemo. An
-// unsettled/empty/disabled query derives to EMPTY_BLOCKED_USERS via deriveBlockedUsers's own empty-array
-// behavior — no separate pending branch needed.
+// unsettled/empty/disabled query returns the shared EMPTY_BLOCKED_USERS: a fresh `[]` fallback would miss
+// that memo every render and hand consumers keyed on this value a new object each time.
 //
 // `enabled` gates the underlying contacts fetch itself (queries/contacts.ts's useContactsQuery), not just
 // this derivation. Each surface that needs a live blocked set enables it once at its own top level —
 // directoryListing for the sharedIn variant, notesSidebar, chatsSidebar, messageThread — and threads the
 // value down as props, so no row or menu opens its own observer. Multiple enabled surfaces share one
 // query key: the fetch is deduped, so an extra observer is not an extra request. A disabled query's data
-// is undefined, which still derives to the fail-open EMPTY_BLOCKED_USERS above.
+// is undefined, which still yields the fail-open EMPTY_BLOCKED_USERS above.
 export function useBlockedUsers(enabled: boolean): BlockedUsers {
-	return deriveBlockedUsers(useContactsQuery({ enabled }).data?.blocked ?? [])
+	const blocked = useContactsQuery({ enabled }).data?.blocked
+
+	return blocked === undefined || blocked.length === 0 ? EMPTY_BLOCKED_USERS : deriveBlockedUsers(blocked)
 }

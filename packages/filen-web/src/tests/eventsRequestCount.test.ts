@@ -6,8 +6,9 @@ import { act, renderHook, waitFor } from "@testing-library/react"
 import { QueryClient, QueryClientProvider, focusManager, onlineManager } from "@tanstack/react-query"
 import type { SocketEvent, UserEventResult } from "@filen/sdk-rs"
 
-const { getUserEvents } = vi.hoisted(() => ({
-	getUserEvents: vi.fn<(filter?: unknown, timestamp?: bigint) => Promise<UserEventResult[]>>()
+const { getUserEvents, persistQuery } = vi.hoisted(() => ({
+	getUserEvents: vi.fn<(filter?: unknown, timestamp?: bigint) => Promise<UserEventResult[]>>(),
+	persistQuery: vi.fn<(query: unknown) => Promise<void>>()
 }))
 
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: { getUserEvents } }))
@@ -21,11 +22,20 @@ vi.mock("@/queries/client", () => ({
 	})
 }))
 
+vi.mock("@/queries/persist", () => ({ persister: { persistQuery } }))
+
 vi.mock("@/lib/log", () => ({ log: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() } }))
 vi.mock("@/features/shell/lib/performLogout", () => ({ performLogout: vi.fn() }))
 
 import { queryClient } from "@/queries/client"
-import { EVENTS_QUERY_KEY, loadOlderEvents, useEventsQuery } from "@/features/settings/queries/events"
+import {
+	EVENTS_QUERY_KEY,
+	EVENTS_SLICE_CAP,
+	capEventsSlice,
+	loadOlderEvents,
+	releaseEventsSlice,
+	useEventsQuery
+} from "@/features/settings/queries/events"
 import { handleGeneralEvent } from "@/features/shell/lib/generalSocketHandlers"
 import { socketAuthenticated, socketDropped } from "@/lib/sdk/socketSession"
 
@@ -112,6 +122,8 @@ async function mountWithTwoPages() {
 // A fresh epoch per test, so no earlier test's read still counts.
 beforeEach(() => {
 	queryClient.clear()
+	// No list is mounted here to release what an earlier test paged in.
+	releaseEventsSlice()
 	socketAuthenticated()
 	getUserEvents.mockResolvedValue(PAGE_ONE)
 })
@@ -247,5 +259,113 @@ describe("account events reads the socket didn't cover", () => {
 		await drain()
 
 		expect(reads()).toBe(2)
+	})
+})
+
+// Newest first, `count` events counting down from `newest`.
+function okRun(newest: bigint, count: number): UserEventResult[] {
+	return Array.from({ length: count }, (_, i) => ok(newest - BigInt(i)))
+}
+
+describe("capEventsSlice", () => {
+	it("keeps the newest events up to the cap", () => {
+		expect(capEventsSlice(okRun(10n, 5), 3)).toEqual(okRun(10n, 3))
+	})
+
+	it("returns a slice within the cap as it is", () => {
+		const slice = okRun(10n, 3)
+
+		expect(capEventsSlice(slice, 3)).toBe(slice)
+	})
+
+	it("never cuts into a first page longer than the cap", () => {
+		expect(capEventsSlice(okRun(10n, 5), 3, 4)).toEqual(okRun(10n, 4))
+	})
+})
+
+describe("account events slice bound", () => {
+	const FIRST = okRun(5000n, 3)
+	const OLDER = okRun(4997n, EVENTS_SLICE_CAP + 100)
+
+	async function mountPagedPastCap() {
+		getUserEvents.mockResolvedValueOnce(FIRST).mockResolvedValueOnce(OLDER)
+
+		const view = mountEvents()
+		await drain()
+		await act(async () => {
+			await loadOlderEvents(4998n)
+		})
+
+		expect(cachedIds()).toHaveLength(FIRST.length + OLDER.length)
+
+		return view
+	}
+
+	it("a refresh while the list is paging keeps every page it scrolled in", async () => {
+		await mountPagedPastCap()
+
+		getUserEvents.mockResolvedValueOnce([ok(5001n), ...FIRST])
+		handleGeneralEvent(newEvent())
+		await drain()
+
+		expect(cachedIds()).toHaveLength(1 + FIRST.length + OLDER.length)
+	})
+
+	it("leaving the page trims the slice to the cap, in memory and on disk, keeping its read time", async () => {
+		const view = await mountPagedPastCap()
+		const readAt = queryClient.getQueryState(EVENTS_QUERY_KEY)?.dataUpdatedAt
+
+		persistQuery.mockClear()
+		view.unmount()
+		releaseEventsSlice()
+
+		expect(cachedIds()).toEqual(okRun(5000n, EVENTS_SLICE_CAP).flatMap(e => (e.type === "ok" ? [e.id] : [])))
+		expect(queryClient.getQueryState(EVENTS_QUERY_KEY)?.dataUpdatedAt).toBe(readAt)
+		expect(persistQuery).toHaveBeenCalledTimes(1)
+	})
+
+	it("leaving without having paged writes nothing", async () => {
+		const view = mountEvents()
+		await drain()
+
+		persistQuery.mockClear()
+		view.unmount()
+		releaseEventsSlice()
+
+		expect(persistQuery).not.toHaveBeenCalled()
+	})
+
+	it("a restored slice past the cap is trimmed by its first read", async () => {
+		queryClient.setQueryData(EVENTS_QUERY_KEY, [...FIRST, ...OLDER], { updatedAt: Date.now() })
+		getUserEvents.mockResolvedValueOnce(FIRST)
+
+		mountEvents()
+		await drain()
+
+		expect(cachedIds()).toHaveLength(EVENTS_SLICE_CAP)
+	})
+
+	it("an older page read from a cursor that is no longer the slice's end is dropped", async () => {
+		getUserEvents.mockResolvedValueOnce(PAGE_ONE)
+		mountEvents()
+		await drain()
+
+		const older = deferred<UserEventResult[]>()
+		getUserEvents.mockImplementationOnce(() => older.promise).mockResolvedValueOnce([ok(40n), ok(39n)])
+
+		let result: { newCount: number; terminate: boolean } | undefined
+		const loading = loadOlderEvents(28n).then(r => {
+			result = r
+		})
+
+		handleGeneralEvent(newEvent())
+		await drain()
+		older.resolve(PAGE_TWO)
+		await act(async () => {
+			await loading
+		})
+
+		expect(result).toEqual({ newCount: 0, terminate: false })
+		expect(cachedIds()).toEqual([40n, 39n])
 	})
 })

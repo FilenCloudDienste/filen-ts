@@ -9,7 +9,7 @@ import { errorLabel } from "@/lib/i18n/errorLabel"
 import { runChangePasswordAttempt } from "@/features/settings/components/security/changePassword.logic"
 import { useCapsLock } from "@/features/auth/lib/useCapsLock"
 import { useIsOnline } from "@/lib/useIsOnline"
-import type { AccountQuerySuccess } from "@/queries/account"
+import { markAccountStale } from "@/queries/account"
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -18,15 +18,11 @@ import { CapsLockWarning } from "@/features/auth/components/capsLockWarning"
 import { SettingsRow } from "@/features/settings/components/settingsLayout"
 import { FormDialog } from "@/components/dialogs/formDialog"
 
-interface ChangePasswordRowProps {
-	accountQuery: AccountQuerySuccess
-}
-
 // Current + new + confirm in a dialog, gated on the same minimum-strength rule as register/reset
 // (isPasswordStrongEnough — weak is the only blocked tier). Submit runs runChangePasswordAttempt
 // (changePassword.logic.ts), which owns the fingerprint re-sync law: it persists the
 // RETURNED, post-mutation session blob before this component does anything else with the result.
-function ChangePasswordRow({ accountQuery }: ChangePasswordRowProps) {
+function ChangePasswordRow() {
 	const { t } = useTranslation(["auth", "settings", "common"])
 	const isOnline = useIsOnline()
 	const [open, setOpen] = useState(false)
@@ -79,12 +75,10 @@ function ChangePasswordRow({ accountQuery }: ChangePasswordRowProps) {
 					}
 					toast.success(t("changePasswordSuccess"))
 					close()
-					// Best-effort: the API can transiently report Unauthenticated right after a password
-					// change (a known SDK-side race, not a real failure). A genuine, lasting failure
-					// surfaces through this SAME query's own error state elsewhere on the page via the
-					// global query-cache error log (queries/client.ts) — never an auto-logout triggered
-					// from here.
-					void accountQuery.refetch()
+					// Stale, not read now: the API can transiently report Unauthenticated right after a
+					// password change (a known SDK-side race), and a failed read here would put the whole
+					// page in its error state. The next focus or mount reads whatever the change touched.
+					markAccountStale()
 					break
 				case "error":
 					toast.error(errorLabel(outcome.dto))

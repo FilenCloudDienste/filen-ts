@@ -1,12 +1,13 @@
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { HistoryIcon } from "lucide-react"
 import { toast } from "sonner"
 import type { UserEvent } from "@filen/sdk-rs"
-import { useEventsQuery, loadOlderEvents } from "@/features/settings/queries/events"
+import { useEventsQuery, loadOlderEvents, releaseEventsSlice } from "@/features/settings/queries/events"
 import { shouldSkipEventsScroll, fetchEventsPageSafely, type OkEventResult } from "@/features/settings/lib/eventsPagination"
 import { useIsOnline } from "@/lib/useIsOnline"
+import { blockingQueryError } from "@/queries/blockingError"
 import { log } from "@/lib/log"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { EventRow } from "@/features/settings/components/events/eventRow"
@@ -36,7 +37,9 @@ export function EventsList() {
 	const inflightRef = useRef(false)
 
 	const events = eventsQuery.data?.ok ?? EMPTY_EVENTS
-	const firstPageErrCount = eventsQuery.status === "success" && events.length === 0 ? eventsQuery.data.errCount : 0
+	const firstPageErrCount = eventsQuery.data !== undefined && events.length === 0 ? eventsQuery.data.errCount : 0
+
+	useEffect(() => releaseEventsSlice, [])
 
 	const virtualizer = useVirtualizer({
 		count: events.length,
@@ -51,7 +54,7 @@ export function EventsList() {
 			shouldSkipEventsScroll({
 				inflight: inflightRef.current,
 				hasMore,
-				queryReady: eventsQuery.status === "success",
+				queryReady: eventsQuery.data !== undefined,
 				isOnline
 			})
 		) {
@@ -93,7 +96,8 @@ export function EventsList() {
 		return <LoadingState size="md" />
 	}
 
-	if (eventsQuery.status === "error") {
+	// Never over loaded rows: replacing the list would drop the reader's place in it.
+	if (blockingQueryError(eventsQuery) !== null) {
 		return (
 			<div className="flex flex-1 flex-col p-6">
 				<Empty>

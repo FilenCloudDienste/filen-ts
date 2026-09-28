@@ -420,7 +420,7 @@ describe("setProgress (speed sample recording)", () => {
 		vi.setSystemTime(1_700_000_010_000)
 	})
 
-	it("appends a sample summing bytesTransferred across active transfers only", () => {
+	it("appends a sample of the bytes moved, counting only active transfers' progress", () => {
 		useTransfersStore.getState().add(makeTransfer({ id: "a", status: "uploading" }))
 		useTransfersStore.getState().add(makeTransfer({ id: "b", status: "done" }))
 
@@ -438,6 +438,42 @@ describe("setProgress (speed sample recording)", () => {
 
 		expect(useTransfersStore.getState().speedSamples).toHaveLength(1)
 		expect(useTransfersStore.getState().speedSamples[0]?.totalBytes).toBe(200)
+	})
+
+	it("keeps counting the bytes of transfers that settle or are removed within the window", () => {
+		const store = useTransfersStore.getState()
+
+		// Many small files, a few in flight at a time: each settles well inside the window.
+		for (let i = 0; i < 10; i++) {
+			store.add(makeTransfer({ id: `f${String(i)}`, size: 1_000 }))
+		}
+
+		for (let i = 0; i < 10; i++) {
+			vi.advanceTimersByTime(100)
+			store.setProgress(`f${String(i)}`, 500)
+			vi.advanceTimersByTime(100)
+			store.setProgress(`f${String(i)}`, 1_000)
+
+			if (i % 2 === 0) {
+				store.settle(`f${String(i)}`, "done")
+			} else {
+				store.remove(`f${String(i)}`)
+			}
+		}
+
+		// 9_500 bytes moved between the first sample and the last, 1.9s apart.
+		expect(computeTransfersSpeed(useTransfersStore.getState().speedSamples)).toBeCloseTo((9_500 / 1_900) * 1_000)
+	})
+
+	it("counts nothing for a transfer that restarts from fewer bytes", () => {
+		const store = useTransfersStore.getState()
+
+		store.add(makeTransfer({ id: "a" }))
+		store.setProgress("a", 800)
+		store.setProgress("a", 100)
+		store.setProgress("a", 300)
+
+		expect(useTransfersStore.getState().speedSamples.map(sample => sample.totalBytes)).toEqual([800, 800, 1_000])
 	})
 })
 

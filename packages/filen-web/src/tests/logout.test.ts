@@ -28,6 +28,10 @@ function makeHarness() {
 		calls.push("kvClear")
 		return Promise.resolve()
 	})
+	const wipeThumbnails = vi.fn<() => Promise<void>>().mockImplementation(() => {
+		calls.push("wipeThumbnails")
+		return Promise.resolve()
+	})
 	const wipeServiceWorker = vi.fn<() => Promise<void>>().mockImplementation(() => {
 		calls.push("wipeServiceWorker")
 		return Promise.resolve()
@@ -39,9 +43,31 @@ function makeHarness() {
 		calls.push("reload")
 	})
 
-	const deps: LogoutDeps = { cancelQueries, clearQueryCache, sdkLogout, clearSession, kvClear, wipeServiceWorker, broadcast, reload }
+	const deps: LogoutDeps = {
+		cancelQueries,
+		clearQueryCache,
+		sdkLogout,
+		clearSession,
+		kvClear,
+		wipeThumbnails,
+		wipeServiceWorker,
+		broadcast,
+		reload
+	}
 
-	return { deps, calls, cancelQueries, clearQueryCache, sdkLogout, clearSession, kvClear, wipeServiceWorker, broadcast, reload }
+	return {
+		deps,
+		calls,
+		cancelQueries,
+		clearQueryCache,
+		sdkLogout,
+		clearSession,
+		kvClear,
+		wipeThumbnails,
+		wipeServiceWorker,
+		broadcast,
+		reload
+	}
 }
 
 beforeEach(() => {
@@ -49,7 +75,7 @@ beforeEach(() => {
 })
 
 describe("runLogout (injected deps, no worker)", () => {
-	it("runs every phase in order: cancel+clear cache, sdk logout, clear session, kv clear, broadcast, reload", async () => {
+	it("runs every phase in order: cancel+clear cache, sdk logout, clear session, kv clear, thumbnail wipe, broadcast, reload", async () => {
 		const h = makeHarness()
 
 		await runLogout(h.deps)
@@ -60,10 +86,35 @@ describe("runLogout (injected deps, no worker)", () => {
 			"sdkLogout",
 			"clearSession",
 			"kvClear",
+			"wipeThumbnails",
 			"wipeServiceWorker",
 			"broadcast",
 			"reload"
 		])
+	})
+
+	it("wipes the thumbnail cache after the client is dropped and before other tabs are told to reload", async () => {
+		const h = makeHarness()
+
+		await runLogout(h.deps)
+
+		const wipeThumbs = h.calls.indexOf("wipeThumbnails")
+
+		expect(wipeThumbs).toBeGreaterThan(h.calls.indexOf("sdkLogout"))
+		expect(wipeThumbs).toBeLessThan(h.calls.indexOf("broadcast"))
+	})
+
+	it("a failing thumbnail wipe is isolated and never blocks the rest of the sign-out", async () => {
+		const errorSpy = vi.spyOn(log, "error").mockImplementation(() => undefined)
+		const h = makeHarness()
+		h.wipeThumbnails.mockRejectedValue(new Error("entry locked"))
+
+		await runLogout(h.deps)
+
+		expect(h.wipeServiceWorker).toHaveBeenCalledTimes(1)
+		expect(h.broadcast).toHaveBeenCalledTimes(1)
+		expect(h.reload).toHaveBeenCalledTimes(1)
+		expect(errorSpy).toHaveBeenCalledWith("logout", expect.stringContaining("wipe-thumbnails"), expect.anything())
 	})
 
 	it("wipes the service worker AFTER the local store wipe and BEFORE the broadcast+reload", async () => {
@@ -127,6 +178,7 @@ describe("runLogout (injected deps, no worker)", () => {
 		h.sdkLogout.mockRejectedValue(new Error("c"))
 		h.clearSession.mockRejectedValue(new Error("d"))
 		h.kvClear.mockRejectedValue(new Error("e"))
+		h.wipeThumbnails.mockRejectedValue(new Error("e2"))
 		h.wipeServiceWorker.mockRejectedValue(new Error("f"))
 		h.broadcast.mockImplementation(() => {
 			throw new Error("g")
@@ -142,6 +194,7 @@ describe("runLogout (injected deps, no worker)", () => {
 		expect(h.sdkLogout).toHaveBeenCalledTimes(1)
 		expect(h.clearSession).toHaveBeenCalledTimes(1)
 		expect(h.kvClear).toHaveBeenCalledTimes(1)
+		expect(h.wipeThumbnails).toHaveBeenCalledTimes(1)
 		expect(h.wipeServiceWorker).toHaveBeenCalledTimes(1)
 		expect(h.broadcast).toHaveBeenCalledTimes(1)
 		expect(h.reload).toHaveBeenCalledTimes(1)

@@ -26,7 +26,7 @@ import { logoutConfirmBodyKey } from "@/features/shell/hooks/useUnsyncedWork.log
 import { useChatsUnreadCount } from "@/features/chats/hooks/useChatsUnreadCount"
 import { useContactRequestsQuery } from "@/features/contacts/queries/contacts"
 import { useAccountQuery } from "@/queries/account"
-import { useHasActiveTransfers, useTransfersAggregate } from "@/features/transfers/store/useTransfersStore"
+import { useHasActiveTransfers, useSpeedSampleAging, useTransfersAggregate } from "@/features/transfers/store/useTransfersStore"
 import { shouldShowTransfersAggregate } from "@/features/transfers/screens/transfers.logic"
 import { Logo } from "@/features/shell/components/logo"
 import { useRailReorder } from "@/features/shell/hooks/useRailReorder"
@@ -251,6 +251,10 @@ function TransfersEntry({ active, reordering }: RailEntryProps) {
 	const { t } = useTranslation(["common", "transfers"])
 	const { activeCount, percent, speed } = useTransfersAggregate()
 	const showAggregate = shouldShowTransfersAggregate(activeCount)
+
+	// Ticks in the always-mounted rail, not only on /transfers: a paused or stalled transfer writes
+	// nothing more, so without the tick this tooltip would keep its last speed on every other screen.
+	useSpeedSampleAging()
 
 	return (
 		<Tooltip disabled={reordering}>

@@ -2,15 +2,10 @@ import { useState, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { useShallow } from "zustand/shallow"
 import { useNavigate } from "@tanstack/react-router"
+import { useVirtualizer } from "@tanstack/react-virtual"
 import { ArrowDownUpIcon, BrushCleaningIcon, PauseIcon, PlayIcon, XIcon } from "lucide-react"
 import { formatBytesFixed } from "@filen/shared"
-import {
-	isActiveTransfer,
-	useSpeedSampleAging,
-	useTransfersAggregate,
-	useTransfersStore,
-	type Transfer
-} from "@/features/transfers/store/useTransfersStore"
+import { isActiveTransfer, useTransfersAggregate, useTransfersStore, type Transfer } from "@/features/transfers/store/useTransfersStore"
 import { useCopyJobsStore } from "@/features/transfers/store/useCopyJobsStore"
 import { pruneSettledCopyJobs } from "@/features/drive/lib/copy"
 import {
@@ -43,10 +38,8 @@ export function TransfersScreen() {
 	// Changes when a copy's job ends, which takes its row out of the bulk actions.
 	const endedCopies = useCopyJobsStore(useShallow(state => endedCopyIds(state.jobs)))
 	const { active, finished } = buildTransfersDisplayList(transfers)
+	// Samples age out through the rail's own tick (iconRail.tsx's TransfersEntry), mounted beside this.
 	const { activeCount, percent, speed } = useTransfersAggregate()
-
-	useSpeedSampleAging()
-
 	const cancellable = cancellableTransferIds(transfers, endedCopies)
 	const pausable = pausableTransferIds(transfers, endedCopies)
 	const resumable = resumableTransferIds(transfers, endedCopies)
@@ -172,39 +165,12 @@ export function TransfersScreen() {
 						</Empty>
 					</div>
 				) : (
-					<div className="flex-1 overflow-y-auto px-2 pb-4">
-						{active.length > 0 ? (
-							<TransfersSection title={t("transfersScreenSectionActive")}>
-								{active.map(transfer => (
-									<TransferRow
-										key={transfer.id}
-										transfer={transfer}
-										onRequestCancel={() => {
-											requestRowCancel(transfer)
-										}}
-										onShowInDirectory={handleShowInDirectory}
-									/>
-								))}
-							</TransfersSection>
-						) : null}
-						{finished.length > 0 ? (
-							<TransfersSection title={t("transfersScreenSectionFinished")}>
-								{finished.map(transfer => (
-									<TransferRow
-										key={transfer.id}
-										transfer={transfer}
-										// A finished row never renders the Cancel button (only active rows do — see
-										// TransferRow's own finished/active branch), so this is never actually
-										// invoked here; still required for the prop's type.
-										onRequestCancel={() => {
-											requestRowCancel(transfer)
-										}}
-										onShowInDirectory={handleShowInDirectory}
-									/>
-								))}
-							</TransfersSection>
-						) : null}
-					</div>
+					<TransfersList
+						active={active}
+						finished={finished}
+						onRequestCancel={requestRowCancel}
+						onShowInDirectory={handleShowInDirectory}
+					/>
 				)}
 			</div>
 			<ConfirmDialog
@@ -251,12 +217,92 @@ export function TransfersScreen() {
 	)
 }
 
-function TransfersSection({ title, children }: { title: string; children: ReactNode }) {
+// Laid-out heights the virtualizer counts in: a section heading, and a row plus the gap after it. A row
+// is one line of fixed-size content, so this stays exact.
+const SECTION_HEADING_HEIGHT = 36
+const ROW_GAP = 2
+const ROW_STRIDE = 56 + ROW_GAP
+const LIST_OVERSCAN = 8
+
+// Only the rows in view mount: a dropped directory adds a row per file up front, and every progress tick
+// re-renders the screen. The rows stay in flow inside each section's list, the ones out of view standing
+// as padding, so each row is still an <li> of its own <ul>. The virtualizer counts both sections as one
+// run of heading, rows, heading, rows.
+function TransfersList({
+	active,
+	finished,
+	onRequestCancel,
+	onShowInDirectory
+}: {
+	active: Transfer[]
+	finished: Transfer[]
+	onRequestCancel: (transfer: Transfer) => void
+	onShowInDirectory: (item: DriveItem) => void
+}) {
+	const { t } = useTranslation("transfers")
+	const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null)
+	const sections = [
+		{ key: "active", title: t("transfersScreenSectionActive"), rows: active },
+		{ key: "finished", title: t("transfersScreenSectionFinished"), rows: finished }
+	].filter(section => section.rows.length > 0)
+	// Each section's heading index in the virtualizer's run.
+	const headings: number[] = []
+	let count = 0
+
+	for (const section of sections) {
+		headings.push(count)
+		count += 1 + section.rows.length
+	}
+
+	const virtualizer = useVirtualizer({
+		count,
+		getScrollElement: () => scrollElement,
+		estimateSize: index => (headings.includes(index) ? SECTION_HEADING_HEIGHT : ROW_STRIDE),
+		overscan: LIST_OVERSCAN
+	})
+	const virtualItems = virtualizer.getVirtualItems()
+	const first = virtualItems[0]?.index ?? 0
+	const last = virtualItems.at(-1)?.index ?? -1
+
 	return (
-		<section>
-			<h2 className="px-3 pt-4 pb-1 text-xs font-medium text-muted-foreground">{title}</h2>
-			<ul className="flex flex-col gap-0.5">{children}</ul>
-		</section>
+		<div
+			ref={setScrollElement}
+			className="flex-1 overflow-y-auto px-2 pb-4"
+		>
+			{sections.map((section, sectionIndex) => {
+				const rowsStart = (headings[sectionIndex] ?? 0) + 1
+				const total = section.rows.length
+				const from = Math.min(total, Math.max(0, first - rowsStart))
+				const to = Math.max(from, Math.min(total, last - rowsStart + 1))
+
+				return (
+					<section key={section.key}>
+						<h2
+							className="px-3 pt-4 pb-1 text-xs font-medium text-muted-foreground"
+							style={{ height: SECTION_HEADING_HEIGHT }}
+						>
+							{section.title}
+						</h2>
+						<ul
+							className="flex flex-col"
+							style={{ gap: ROW_GAP, paddingTop: from * ROW_STRIDE, paddingBottom: (total - to) * ROW_STRIDE }}
+						>
+							{section.rows.slice(from, to).map(transfer => (
+								<TransferRow
+									key={transfer.id}
+									transfer={transfer}
+									// Only an active row renders its Cancel button (TransferRow's active branch).
+									onRequestCancel={() => {
+										onRequestCancel(transfer)
+									}}
+									onShowInDirectory={onShowInDirectory}
+								/>
+							))}
+						</ul>
+					</section>
+				)
+			})}
+		</div>
 	)
 }
 

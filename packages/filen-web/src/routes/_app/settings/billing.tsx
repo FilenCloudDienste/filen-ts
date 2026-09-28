@@ -32,28 +32,7 @@ function BillingPage() {
 			icon={CreditCardIcon}
 			title={t("settingsSectionBilling")}
 		>
-			{accountQuery.status === "pending" ? (
-				<LoadingState size="lg" />
-			) : accountQuery.status === "error" ? (
-				<Empty>
-					<EmptyHeader>
-						<EmptyMedia variant="icon">
-							<CreditCardIcon />
-						</EmptyMedia>
-						<EmptyTitle>{t("settingsAccountLoadError")}</EmptyTitle>
-					</EmptyHeader>
-					<EmptyContent>
-						<Button
-							variant="outline"
-							onClick={() => {
-								void accountQuery.refetch()
-							}}
-						>
-							{t("common:tryAgain")}
-						</Button>
-					</EmptyContent>
-				</Empty>
-			) : (
+			{accountQuery.data !== undefined ? (
 				<>
 					<SettingsGroup title={t("settingsGroupPlan")}>
 						<CurrentPlanRow accountQuery={accountQuery} />
@@ -74,6 +53,27 @@ function BillingPage() {
 						<ReferralRow accountQuery={accountQuery} />
 					</SettingsGroup>
 				</>
+			) : accountQuery.status === "error" ? (
+				<Empty>
+					<EmptyHeader>
+						<EmptyMedia variant="icon">
+							<CreditCardIcon />
+						</EmptyMedia>
+						<EmptyTitle>{t("settingsAccountLoadError")}</EmptyTitle>
+					</EmptyHeader>
+					<EmptyContent>
+						<Button
+							variant="outline"
+							onClick={() => {
+								void accountQuery.refetch()
+							}}
+						>
+							{t("common:tryAgain")}
+						</Button>
+					</EmptyContent>
+				</Empty>
+			) : (
+				<LoadingState size="lg" />
 			)}
 		</SettingsPage>
 	)
