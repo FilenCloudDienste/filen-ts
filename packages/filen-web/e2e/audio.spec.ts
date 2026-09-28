@@ -236,13 +236,14 @@ test("playlists: create, add tracks via the picker, reorder, play, and delete", 
 		// createDirectory calls plus the JSON upload — a real write chain on the account-wide lease.
 		await expect(createDialog).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
 
-		// Open the new playlist's detail dialog.
-		await playlistRow.first().getByRole("button", { name: playlistName }).click()
-		const detailDialog = page.getByRole("dialog", { name: playlistName })
-		await expect(detailDialog).toBeVisible()
+		// Creating selects the new playlist; its sidebar row is the selected one and the main pane is its
+		// page, labelled by the name heading.
+		await expect(playlistRow.first().getByRole("link", { name: playlistName })).toHaveAttribute("aria-current", "page")
+		const detailPane = page.getByRole("region", { name: playlistName })
+		await expect(detailPane.getByRole("heading", { level: 1, name: playlistName })).toBeVisible()
 
 		// Add both scratch tracks via the picker.
-		await detailDialog.getByRole("button", { name: "Add tracks" }).click()
+		await detailPane.getByRole("button", { name: "Add tracks" }).click()
 		const pickerDialog = page.getByRole("dialog", { name: "Add tracks" })
 		await expect(pickerDialog).toBeVisible()
 		await pickerDialog.getByRole("button", { name: scratchName }).click()
@@ -258,28 +259,22 @@ test("playlists: create, add tracks via the picker, reorder, play, and delete", 
 		// Same shape as the create above: the add re-uploads the playlist JSON and the dialog closes on it.
 		await expect(pickerDialog).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
 
-		const trackRowA = detailDialog.getByText(nameA)
-		const trackRowB = detailDialog.getByText(nameB)
+		const trackRowA = detailPane.getByText(nameA)
+		const trackRowB = detailPane.getByText(nameB)
 		await expect(trackRowA).toBeVisible()
 		await expect(trackRowB).toBeVisible()
 
 		// Drag B above A — the reordered list feeds "Play" below, proving the reorder actually persisted
 		// (not just a local optimistic reshuffle). Re-dragged on a miss rather than dispatched once: a
-		// single dragTo can land on a row the dialog re-rendered underneath and move nothing at all. The
+		// single dragTo can land on a row the pane re-rendered underneath and move nothing at all. The
 		// gesture means "put B first" either way, so a repeat is idempotent — and the inner budget is
 		// wide enough to ride an ordinary write out, so a slow-but-landing reorder is never re-issued.
 		await expect(async () => {
 			await trackRowB.dragTo(trackRowA)
-			await expect(detailDialog.locator("li").first().getByText(nameB)).toBeVisible({ timeout: 30_000 })
+			await expect(detailPane.locator("tbody tr").first().getByText(nameB)).toBeVisible({ timeout: 30_000 })
 		}).toPass({ timeout: LIVE_WRITE_TIMEOUT_MS })
 
-		await detailDialog.getByRole("button", { name: "Play", exact: true }).click()
-
-		// The detail dialog's modal focus trap marks the rest of the page (including the player bar)
-		// `aria-hidden` while it's open — playback genuinely starts underneath, but role-based queries
-		// can't see it until the dialog closes. Close it first, then assert on the bar.
-		await page.keyboard.press("Escape")
-		await expect(detailDialog).toHaveCount(0)
+		await detailPane.getByRole("button", { name: "Play", exact: true }).click()
 		await expect(bar.locator(`[title="${nameB}"]`)).toBeVisible({ timeout: 30_000 })
 
 		// The row must still be there, so the idempotent delete below cannot no-op into a false pass.

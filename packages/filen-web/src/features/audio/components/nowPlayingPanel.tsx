@@ -9,8 +9,8 @@ import { cn } from "@filen/shared"
 
 // The now-playing panel body (rendered inside the player bar's queue popover): the live queue (current
 // track highlighted, click-to-jump, per-row remove, clear-queue, shuffle/loop toggles) — queue only.
-// Playlists moved to their own rail-routed screen (features/audio/screens/playlists.tsx, reusing
-// playlistsPanel.tsx's CRUD body) so they're reachable without a playing queue first; this popover no
+// Playlists moved to their own rail-routed split view (features/audio/screens/playlists.tsx plus the
+// shell's PlaylistsSidebar) so they're reachable without a playing queue first; this popover no
 // longer carries a tab bar at all. Reads the queue reactively; every queue mutation goes straight to the
 // engine singleton, which drives the store.
 export function NowPlayingPanel() {

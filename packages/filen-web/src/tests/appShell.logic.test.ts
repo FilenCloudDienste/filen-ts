@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { resolveSidebarKind, SIDEBAR_LABEL_KEY, type SidebarKind } from "@/features/shell/lib/appShell.logic"
 
-const ALL_KINDS: SidebarKind[] = ["chats", "notes", "settings", "contacts", "drive"]
+const ALL_KINDS: SidebarKind[] = ["chats", "notes", "settings", "contacts", "playlists", "drive"]
 
 describe("resolveSidebarKind", () => {
 	it("matches the bare /chats index", () => {
@@ -32,6 +32,10 @@ describe("resolveSidebarKind", () => {
 		expect(resolveSidebarKind("/contacts")).toBe("contacts")
 	})
 
+	it("matches /playlists", () => {
+		expect(resolveSidebarKind("/playlists")).toBe("playlists")
+	})
+
 	it("matches the drive root and a nested directory", () => {
 		expect(resolveSidebarKind("/drive")).toBe("drive")
 		expect(resolveSidebarKind("/drive/a/b")).toBe("drive")
@@ -39,9 +43,8 @@ describe("resolveSidebarKind", () => {
 
 	// The routes with no contextual sidebar of their own all fall through to the drive panel together —
 	// asserted in ONE case so flipping that product decision touches one line here and one in the resolver.
-	it("falls through to the drive panel on /transfers, /playlists and /photos", () => {
+	it("falls through to the drive panel on /transfers and /photos", () => {
 		expect(resolveSidebarKind("/transfers")).toBe("drive")
-		expect(resolveSidebarKind("/playlists")).toBe("drive")
 		expect(resolveSidebarKind("/photos")).toBe("drive")
 	})
 
@@ -53,7 +56,7 @@ describe("resolveSidebarKind", () => {
 
 	// Exact-or-slash, never a bare prefix: a future "/notes-archive" route must not steal the notes panel.
 	it("does not match on a bare name prefix", () => {
-		for (const pathname of ["/notes-archive", "/chatsomething", "/settingsx", "/contacts-list"]) {
+		for (const pathname of ["/notes-archive", "/chatsomething", "/settingsx", "/contacts-list", "/playlists-old"]) {
 			expect(resolveSidebarKind(pathname)).toBe("drive")
 		}
 	})

@@ -70,11 +70,7 @@ export const audio = {
 	playbackFailed: "Couldn't play this track",
 
 	// ── Playlists ────────────────────────────────────────────────────────────
-	/** Sub-count under the playlists panel heading, singular */
-	playlistsCount_one: "{{count}} playlist",
-	/** Sub-count under the playlists panel heading, plural */
-	playlistsCount_other: "{{count}} playlists",
-	/** New-playlist button */
+	/** New-playlist control in the playlists sidebar header (its accessible name) */
 	newPlaylist: "New playlist",
 	/** New-playlist dialog title */
 	newPlaylistTitle: "New playlist",
@@ -102,6 +98,12 @@ export const audio = {
 	playlistsEmptyTitle: "No playlists yet",
 	/** Empty-state body when no playlists exist yet */
 	playlistsEmptyBody: "Create a playlist to start organizing your tracks.",
+	/** Empty-state action creating the first playlist (distinct from the sidebar's "New playlist" control) */
+	playlistsEmptyAction: "Create playlist",
+	/** Small label above a playlist's name in its page header */
+	playlistEyebrow: "Playlist",
+	/** Last-modified part of a playlist's page-header meta line; `time` is a relative label ("2 hours ago") */
+	playlistUpdated: "Updated {{time}}",
 	/** A playlist row whose file failed to download/parse — isolated, shown degraded rather than
 	 *  dropping the whole list */
 	playlistDegraded: "Couldn't load",
@@ -113,7 +115,7 @@ export const audio = {
 	playlistItemMenuTrigger: "Playlist options",
 	/** Play the whole queue/playlist from the top */
 	shufflePlay: "Shuffle play",
-	/** Add-tracks button on a playlist's detail dialog */
+	/** Add-tracks button in a playlist's page header */
 	addTracks: "Add tracks",
 	/** Empty-state heading inside an empty playlist's track list */
 	playlistTracksEmptyTitle: "No tracks yet",
@@ -121,6 +123,16 @@ export const audio = {
 	playlistTracksEmptyBody: "Add tracks from your drive to get started.",
 	/** Per-row action removing one track from a playlist */
 	removeFromPlaylist: "Remove from playlist",
+	/** Track-table column header: position in the playlist */
+	trackColumnNumber: "#",
+	/** Track-table column header: track name */
+	trackColumnTitle: "Title",
+	/** Track-table column header: file size */
+	trackColumnSize: "Size",
+	/** Track-table column header for the per-row actions (visually hidden) */
+	trackColumnActions: "Actions",
+	/** Screen-reader text replacing a track's position while it is the one playing */
+	trackNowPlaying: "Now playing",
 	/** Add-tracks picker dialog title */
 	addTracksDialogTitle: "Add tracks",
 	/** Add-tracks picker filter placeholder */

@@ -1,23 +1,62 @@
 import { useTranslation } from "react-i18next"
-import { PlaylistsPanel } from "@/features/audio/components/playlistsPanel"
+import { ListMusicIcon, PlusIcon } from "lucide-react"
+import { usePlaylistsQuery } from "@/features/audio/queries/playlists"
+import { resolveSelectedPlaylist } from "@/features/audio/lib/playlistSelection"
+import { openPlaylistDialog } from "@/features/audio/store/usePlaylistDialogStore"
+import { PlaylistPane } from "@/features/audio/components/playlistPane"
+import { PlaylistDialogsHost } from "@/features/audio/components/playlistDialogsHost"
+import { errorLabel } from "@/lib/i18n/errorLabel"
+import { asErrorDTO } from "@/lib/sdk/errors"
+import { useIsOnline } from "@/lib/useIsOnline"
+import { Button } from "@/components/ui/button"
+import { LoadingState } from "@/components/loadingState"
+import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription, EmptyContent } from "@/components/ui/empty"
 
-// Full-page playlists surface — the rail's dedicated entry (iconRail.tsx) routes straight here, fixing
-// the old reachability gap where playlists only lived inside the now-playing popover's Playlists tab and
-// so needed a queue playing first to even open. Header shape mirrors TransfersScreen's own
-// (transfers/screens/transfers.tsx): a plain h-14 title row, no contextual sidebar. PlaylistsPanel
-// supplies the actual CRUD body (list/create/rename/delete/detail), restructured for a full screen
-// rather than its old popover-constrained max-height box.
-export function PlaylistsScreen() {
-	const { t } = useTranslation("common")
+// The main pane of the /playlists split view; the list is the shell's PlaylistsSidebar. `selectedUuid`
+// is the route's raw `playlist` param, resolved here exactly as the sidebar resolves its highlight
+// (resolveSelectedPlaylist) — both read the one playlists query, so neither costs a request.
+export function PlaylistsScreen({ selectedUuid }: { selectedUuid: string | undefined }) {
+	const { t } = useTranslation("audio")
+	const isOnline = useIsOnline()
+	const playlistsQuery = usePlaylistsQuery()
+	const playlist = resolveSelectedPlaylist(playlistsQuery.data ?? [], selectedUuid)
 
 	return (
 		<>
-			<header className="flex h-14 shrink-0 items-center px-4">
-				<h1 className="text-sm font-medium">{t("modulePlaylists")}</h1>
-			</header>
-			<div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-				<PlaylistsPanel />
-			</div>
+			{playlistsQuery.status === "pending" ? (
+				<LoadingState size="lg" />
+			) : playlistsQuery.status === "error" ? (
+				<p className="px-4 py-10 text-center text-sm text-destructive">{errorLabel(asErrorDTO(playlistsQuery.error))}</p>
+			) : playlist !== null ? (
+				<PlaylistPane
+					// A different playlist is a different page: drag/remove state never carries across.
+					key={playlist.uuid}
+					playlist={playlist}
+				/>
+			) : (
+				// None exist, or every one is degraded (those still list, muted, in the sidebar).
+				<Empty className="flex-1 border-none p-10">
+					<EmptyHeader>
+						<EmptyMedia variant="icon">
+							<ListMusicIcon />
+						</EmptyMedia>
+						<EmptyTitle>{t("playlistsEmptyTitle")}</EmptyTitle>
+						<EmptyDescription>{t("playlistsEmptyBody")}</EmptyDescription>
+					</EmptyHeader>
+					<EmptyContent>
+						<Button
+							disabled={!isOnline}
+							onClick={() => {
+								openPlaylistDialog({ kind: "create" })
+							}}
+						>
+							<PlusIcon />
+							{t("playlistsEmptyAction")}
+						</Button>
+					</EmptyContent>
+				</Empty>
+			)}
+			<PlaylistDialogsHost selectedUuid={selectedUuid} />
 		</>
 	)
 }

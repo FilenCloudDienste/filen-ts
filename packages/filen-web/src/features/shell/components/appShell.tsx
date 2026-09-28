@@ -12,6 +12,7 @@ import { NotesSidebar } from "@/features/notes/components/notesSidebar"
 import { ChatsSidebar } from "@/features/chats/components/chatsSidebar"
 import { SettingsSidebar } from "@/features/settings/components/settingsSidebar"
 import { ContactsSidebar } from "@/features/contacts/components/contactsSidebar"
+import { PlaylistsSidebar } from "@/features/audio/components/playlistsSidebar"
 import { SystemStrip } from "@/features/shell/components/systemStrip"
 import { AccountReminders } from "@/features/shell/components/accountReminders"
 import { SyncHost } from "@/features/notes/components/syncHost"
@@ -34,10 +35,10 @@ import { AudioPlayerBar } from "@/features/audio/components/audioPlayerBar"
 // page padding — the row gets `min-h-0 flex-1` so it never has to know the strip exists.
 export function AppShell() {
 	// The sidebar panel is contextual: /chats* gets the ChatsSidebar, /notes* the NotesSidebar,
-	// /settings* the SettingsSidebar, /contacts the ContactsSidebar, everything else the DriveSidebar.
-	// All five share the same panel styling (rounded-xl, borderless); drive, notes and chats are
-	// user-resizable (useResizableSidebar) and render a trailing drag-handle sibling — settings/contacts
-	// stay fixed at w-52.
+	// /settings* the SettingsSidebar, /contacts the ContactsSidebar, /playlists the PlaylistsSidebar,
+	// everything else the DriveSidebar. All six share the same panel styling (rounded-xl, borderless);
+	// drive, notes and chats are user-resizable (useResizableSidebar) and render a trailing drag-handle
+	// sibling — settings/contacts/playlists stay fixed at w-52.
 	const { t } = useTranslation("common")
 	const router = useRouter()
 	const pathname = useRouterState({ select: state => state.location.pathname })
@@ -57,6 +58,8 @@ export function AppShell() {
 				<SettingsSidebar />
 			) : sidebarKind === "contacts" ? (
 				<ContactsSidebar />
+			) : sidebarKind === "playlists" ? (
+				<PlaylistsSidebar />
 			) : (
 				<DriveSidebar />
 			)}

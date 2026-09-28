@@ -1,10 +1,10 @@
 import { type CommonKey } from "@/lib/i18n"
 
-export type SidebarKind = "chats" | "notes" | "settings" | "contacts" | "drive"
+export type SidebarKind = "chats" | "notes" | "settings" | "contacts" | "playlists" | "drive"
 
 // The drive panel is the app's PERSISTENT navigation, not a drive-only accessory: every route without
-// a contextual sidebar of its own (/transfers, /playlists, /photos, and every drive variant —
-// /recents, /favorites, /trash, /links, /shared-in, /shared-out) keeps it, so the shell's geometry
+// a contextual sidebar of its own (/transfers, /photos, and every drive variant — /recents,
+// /favorites, /trash, /links, /shared-in, /shared-out) keeps it, so the shell's geometry
 // never jumps width between rail destinations and the storage meter stays reachable app-wide.
 export function resolveSidebarKind(pathname: string): SidebarKind {
 	if (pathname === "/chats" || pathname.startsWith("/chats/")) {
@@ -23,6 +23,10 @@ export function resolveSidebarKind(pathname: string): SidebarKind {
 		return "contacts"
 	}
 
+	if (pathname === "/playlists") {
+		return "playlists"
+	}
+
 	return "drive"
 }
 
@@ -33,5 +37,6 @@ export const SIDEBAR_LABEL_KEY: Record<SidebarKind, CommonKey> = {
 	notes: "moduleNotes",
 	settings: "settings",
 	contacts: "moduleContacts",
+	playlists: "modulePlaylists",
 	drive: "moduleDrive"
 }

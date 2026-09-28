@@ -83,7 +83,7 @@ async function sweepDriveSurface(page: Page, target: "root" | "trash"): Promise<
 // Playlists live in the app-created `.filen/Playlists` directory, which the listing sweeps never
 // descend into — audio.spec.ts deletes its own from a finally, but a context killed outright leaks one
 // permanently. Rows here are plain list items, not listbox options; the name is read off the title
-// attribute the row puts on its name span (playlistsPanel.tsx) and matched by the same anchored
+// attribute the row puts on its name span (playlistsSidebar.tsx) and matched by the same anchored
 // predicate as every other surface.
 async function sweepPlaylistDebris(page: Page): Promise<void> {
 	// Through the proven nav, like every other surface here: a bare click can silently fail to commit
