@@ -157,7 +157,11 @@ test.describe("settings", () => {
 			// — a bare role lookup there is a strict-mode violation, not a useful failure. Waited out first,
 			// and `.last()` as the backstop for the page's other select (Start Screen).
 			await expect(page.getByRole("listbox")).toHaveCount(0)
-			await trigger.click()
+			// Opened from the keyboard, not a click: Base UI opens the list with the selected item under the
+			// pointer and, 400ms after opening, lets a mouse release commit it. On a slow runner a click's
+			// release lands past that and re-selects the current theme, closing the list.
+			await trigger.focus()
+			await page.keyboard.press("Enter")
 
 			const options = page.getByRole("listbox").last()
 
