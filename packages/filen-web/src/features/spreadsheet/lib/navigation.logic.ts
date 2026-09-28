@@ -2,6 +2,9 @@ import { createAxis, type Axis } from "@/features/spreadsheet/lib/axis.logic"
 import { rangeContains, type CellPosition, type Selection } from "@/features/spreadsheet/lib/cellRef.logic"
 import { DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT, type CellRange } from "@/features/spreadsheet/lib/model"
 
+// Lives in lib (the notes checklist needs it too); re-exported for the grid's own callers.
+export { isImeKeydown } from "@/lib/ime"
+
 // Blank rows and columns past the used area, as a spreadsheet shows.
 const EXTRA_ROWS = 100
 const EXTRA_COLS = 20
@@ -240,10 +243,4 @@ export function isTypedCharacter(event: TypedKey): boolean {
 
 	// One character, which may be a surrogate pair.
 	return event.key.length === 1 || (event.key.length === 2 && event.key.codePointAt(0) !== event.key.charCodeAt(0))
-}
-
-// A keydown that belongs to an input method rather than to the page: during a composition, or (Safari)
-// the one confirming it, which only its legacy keyCode 229 tells apart from a plain Enter.
-export function isImeKeydown(event: { key: string; isComposing: boolean; keyCode: number }): boolean {
-	return event.isComposing || event.key === "Process" || event.keyCode === 229
 }

@@ -1,13 +1,16 @@
-import { describe, expect, it } from "vitest"
+import { beforeEach, describe, expect, it } from "vitest"
 import { openXlsx, writeXlsx } from "hucre/xlsx"
 import { csvDoc, parseCsvFile, serializeCsv } from "@/features/spreadsheet/lib/csvView"
 import { cellKey } from "@/features/spreadsheet/lib/model"
 import { displayText, workbookDoc, WorkbookViews } from "@/features/spreadsheet/lib/xlsxView"
 import { cssColor } from "@/features/spreadsheet/lib/styleTable"
+import { standardWindows1252Decoding } from "@/tests/whatwgWindows1252"
 
 const encoder = new TextEncoder()
 
 describe("CSV", () => {
+	beforeEach(standardWindows1252Decoding)
+
 	it("reads the separator, line ends, BOM and final line end, and writes them back byte for byte", () => {
 		const source = '﻿name;amount\r\n"Smith; J";012\r\n'
 		const bytes = encoder.encode(source)

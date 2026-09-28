@@ -188,9 +188,9 @@ describe("CsvDocument structural shifts", () => {
 		expect(document.redo()).toMatchObject({ type: "sheets", shift: { kind: "insert", revert: false } })
 	})
 
-	it("names the clamped position an insert past the end actually used", () => {
+	it("moves nothing for an insert past the end", () => {
 		const document = csvDocument("a\n")
 
-		expect(document.apply({ type: "insert", sheet: 0, axis: "rows", at: 50, count: 1 })).toMatchObject({ shift: { at: 1 } })
+		expect(document.apply({ type: "insert", sheet: 0, axis: "rows", at: 50, count: 1 })).not.toHaveProperty("shift")
 	})
 })

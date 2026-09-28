@@ -27,7 +27,12 @@ export async function saveAsXlsx(item: DriveItem, bytes: Uint8Array): Promise<Sa
 	const parent = normalizeParentUuid(base.data.parent, rootUuid)
 	const name = await xlsxCopyName(driveItemName(base), candidate => sdkApi.nameExistsInDirectory(parent, candidate))
 	const outcome = await runPreviewSave(
-		{ uploadFileBytes: (...args) => sdkApi.uploadFileBytes(...args), patchListing: driveListingQueryUpdate, rootUuid },
+		{
+			// The .xls's own type is not the copy's: an empty one lets the SDK take it from the .xlsx name.
+			uploadFileBytes: (parentUuid, data, uploadName) => sdkApi.uploadFileBytes(parentUuid, data, uploadName, ""),
+			patchListing: driveListingQueryUpdate,
+			rootUuid
+		},
 		{ item, content: converted, asNewFile: name }
 	)
 

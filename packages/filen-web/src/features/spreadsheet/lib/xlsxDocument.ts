@@ -111,9 +111,45 @@ function startingStyle(sheet: Sheet, row: number, col: number, existing: Cell | 
 	return sheet.rowDefs?.get(row)?.style ?? sheet.columns?.[col]?.style
 }
 
+const DATE_TIME = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?$/
+const TIME = /^(\d{1,2}):(\d{2})(?::(\d{2}))?$/
+
+// A date with a time ("2024-03-05 14:30"), or a time alone ("14:30", on the workbook's epoch day), as
+// editing a date-time or time cell starts from (xlsxView's inputText). Null for anything else.
+function parseDateTime(input: string, date1904: boolean): ParsedInput | null {
+	const trimmed = input.trim()
+	const dateTime = DATE_TIME.exec(trimmed)
+	const time = dateTime === null ? TIME.exec(trimmed) : null
+	const [hours, minutes, seconds] = (dateTime === null ? time?.slice(1, 4) : dateTime.slice(4, 7)) ?? []
+
+	if (hours === undefined || minutes === undefined || Number(hours) > 23 || Number(minutes) > 59 || Number(seconds ?? 0) > 59) {
+		return null
+	}
+
+	const ofDay = ((Number(hours) * 60 + Number(minutes)) * 60 + Number(seconds ?? 0)) * 1000
+	const format = seconds === undefined ? "h:mm" : "h:mm:ss"
+
+	if (dateTime === null) {
+		return { type: "value", value: serialToDate(ofDay / 86_400_000, date1904), impliedFormat: format }
+	}
+
+	const [, year = "", month = "", day = ""] = dateTime
+	const value = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)) + ofDay)
+
+	if (value.getUTCMonth() !== Number(month) - 1 || value.getUTCDate() !== Number(day)) {
+		return null
+	}
+
+	return { type: "value", value, impliedFormat: `yyyy-mm-dd ${format.replace("h", "hh")}` }
+}
+
 // What is typed into a cell, read as Excel reads it there: into a Text ("@") cell, as text, a formula too.
-function parseTyped(input: string, style: CellStyle | undefined): ParsedInput {
-	return style?.numFmt === "@" && input !== "" && !input.startsWith("'") ? { type: "value", value: input } : parseCellInput(input)
+function parseTyped(input: string, style: CellStyle | undefined, date1904: boolean): ParsedInput {
+	if (style?.numFmt === "@" && input !== "" && !input.startsWith("'")) {
+		return { type: "value", value: input }
+	}
+
+	return parseDateTime(input, date1904) ?? parseCellInput(input)
 }
 
 // A format with the quote prefix (typed with a leading apostrophe) set or cleared.
@@ -388,7 +424,7 @@ export class XlsxDocument {
 		this.workbook = workbook
 		this.date1904 = workbook.dateSystem === "1904"
 		this.historyBudget = historyBudget
-		this.views = new WorkbookViews(workbook.themeColors)
+		this.views = new WorkbookViews(workbook.themeColors, this.date1904)
 		this.savePlan = xlsxSavePlan(workbook)
 
 		const worksheets = this.worksheets()
@@ -683,6 +719,8 @@ export class XlsxDocument {
 		this.verification = Promise.resolve(false)
 		this.proven = false
 		this.releaseRaw(rawEntries(this.workbook))
+		// Only edits read it (calculating what the file left out is done by now).
+		this.dropEngine()
 	}
 
 	// Proves (once) whether saving loses anything. Must run before any edit: an edit made first would read
@@ -733,6 +771,11 @@ export class XlsxDocument {
 
 		this.proven = proven
 		this.releaseRaw(raw)
+
+		// Never edited, so the engine the opening calculation built is not needed.
+		if (!proven && this.untouched()) {
+			this.dropEngine()
+		}
 
 		return proven
 	}
@@ -1177,7 +1220,11 @@ export class XlsxDocument {
 
 		const parsedCells = cells.map(cell => ({
 			...cell,
-			parsed: parseTyped(cell.input, startingStyle(sheet, cell.row, cell.col, sheet.cells?.get(key(cell.row, cell.col))))
+			parsed: parseTyped(
+				cell.input,
+				startingStyle(sheet, cell.row, cell.col, sheet.cells?.get(key(cell.row, cell.col))),
+				this.date1904
+			)
 		}))
 
 		if (splitsArray(sheet, cells)) {
@@ -1381,6 +1428,7 @@ export class XlsxDocument {
 		const extent = { rows: sheet.rows.length, cols: sheet.rows[0]?.length ?? 0 }
 		const before = new Map<string, CellBefore>()
 		const touched: { row: number; col: number }[] = []
+		const patch = stylePatcher(op.patch)
 
 		for (let row = startRow; row <= lastRow; row++) {
 			for (let col = startCol; col <= lastCol; col++) {
@@ -1391,7 +1439,7 @@ export class XlsxDocument {
 				before.set(cellId, { value, cell: existing === undefined ? undefined : { ...existing } })
 				this.write(sheet, row, col, value, {
 					...(existing ?? { value, type: typeOf(value) }),
-					style: patchStyle(startingStyle(sheet, row, col, existing), op.patch)
+					style: patch(startingStyle(sheet, row, col, existing))
 				})
 				touched.push({ row, col })
 			}
@@ -1756,10 +1804,47 @@ function hexColor(css: string): { rgb: string } {
 	return { rgb: css.replace("#", "").toUpperCase() }
 }
 
-export function patchStyle(style: CellStyle | undefined, patch: FormatPatch): CellStyle {
-	const next: CellStyle = { ...style }
-	const font = { ...style?.font }
-	const alignment = { ...style?.alignment }
+// Applies one patch to many cells' formats. Cells sharing a font or an alignment (as the reader and
+// earlier patches leave them) share the patched one too, so the views key them as one format rather
+// than one per cell. Each cell still gets a format object of its own.
+function stylePatcher(patch: FormatPatch): (style: CellStyle | undefined) => CellStyle {
+	const fonts = new Map<CellStyle["font"], NonNullable<CellStyle["font"]>>()
+	const alignments = new Map<CellStyle["alignment"], NonNullable<CellStyle["alignment"]>>()
+	const fill: CellStyle["fill"] =
+		patch.fill === undefined || patch.fill === null ? undefined : { type: "pattern", pattern: "solid", fgColor: hexColor(patch.fill) }
+
+	return style => {
+		const next: CellStyle = { ...style }
+		let font = fonts.get(style?.font)
+		let alignment = alignments.get(style?.alignment)
+
+		if (font === undefined) {
+			font = patchedFont(style?.font, patch)
+			fonts.set(style?.font, font)
+		}
+
+		if (alignment === undefined) {
+			alignment = patchedAlignment(style?.alignment, patch)
+			alignments.set(style?.alignment, alignment)
+		}
+
+		if (patch.fill === null) delete next.fill
+		else if (fill !== undefined) next.fill = fill
+
+		// The number the file gave the old format goes with it.
+		if (patch.numFmt !== undefined) delete next.numFmtId
+		if (patch.numFmt === "General") delete next.numFmt
+		else if (patch.numFmt !== undefined) next.numFmt = patch.numFmt
+
+		next.font = font
+		next.alignment = alignment
+
+		return next
+	}
+}
+
+function patchedFont(source: CellStyle["font"], patch: FormatPatch): NonNullable<CellStyle["font"]> {
+	const font = { ...source }
 
 	// A cell's font is whole: off is absent (a written false would read as an override).
 	if (patch.bold === true) font.bold = true
@@ -1774,21 +1859,16 @@ export function patchStyle(style: CellStyle | undefined, patch: FormatPatch): Ce
 	if (patch.color === null) delete font.color
 	else if (patch.color !== undefined) font.color = hexColor(patch.color)
 
-	if (patch.fill === null) delete next.fill
-	else if (patch.fill !== undefined) next.fill = { type: "pattern", pattern: "solid", fgColor: hexColor(patch.fill) }
+	return font
+}
+
+function patchedAlignment(source: CellStyle["alignment"], patch: FormatPatch): NonNullable<CellStyle["alignment"]> {
+	const alignment = { ...source }
 
 	if (patch.align === null) delete alignment.horizontal
 	else if (patch.align !== undefined) alignment.horizontal = patch.align
 
-	// The number the file gave the old format goes with it.
-	if (patch.numFmt !== undefined) delete next.numFmtId
-	if (patch.numFmt === "General") delete next.numFmt
-	else if (patch.numFmt !== undefined) next.numFmt = patch.numFmt
-
-	next.font = font
-	next.alignment = alignment
-
-	return next
+	return alignment
 }
 
 // Puts `items` into `array` at `at`, without spreading them into one call (a large run would overflow

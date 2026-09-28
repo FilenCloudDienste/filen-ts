@@ -1,4 +1,4 @@
-import { formatValue, type Cell, type CellStyle, type CellValue, type Sheet, type Workbook } from "hucre"
+import { dateToSerial, formatValue, type Cell, type CellStyle, type CellValue, type Sheet, type Workbook } from "hucre"
 import { cellKey, type CellView, type SheetView, type SpreadsheetDoc } from "@/features/spreadsheet/lib/model"
 import { shownFormula } from "@/features/spreadsheet/lib/formulaRefs"
 import { StyleTable, styleView } from "@/features/spreadsheet/lib/styleTable"
@@ -15,8 +15,24 @@ function isoDate(date: Date): string {
 	return `${String(date.getUTCFullYear())}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())}`
 }
 
-// What a value shows through `numFmt`, the formatter's own rendering except where it has none.
-export function displayText(value: CellValue | undefined, numFmt: string | undefined): string {
+// A date as typed: its time too when it has one ("2024-03-05 14:30"), the time alone for one on the
+// workbook's epoch day (a time-only cell, "14:30"), to the second.
+function typedDate(date: Date, is1904: boolean): string {
+	const shown = new Date(Math.round(date.getTime() / 1000) * 1000)
+	const seconds = shown.getUTCSeconds()
+	const time = `${pad(shown.getUTCHours())}:${pad(shown.getUTCMinutes())}${seconds === 0 ? "" : `:${pad(seconds)}`}`
+	const serial = dateToSerial(shown, is1904)
+
+	if (serial >= 0 && serial < 1) {
+		return time
+	}
+
+	return shown.getUTCHours() === 0 && shown.getUTCMinutes() === 0 && seconds === 0 ? isoDate(shown) : `${isoDate(shown)} ${time}`
+}
+
+// What a value shows through `numFmt`, the formatter's own rendering except where it has none. A number
+// under a date format counts its days from the workbook's epoch.
+export function displayText(value: CellValue | undefined, numFmt: string | undefined, is1904 = false): string {
 	if (value === null || value === undefined) {
 		return ""
 	}
@@ -29,11 +45,11 @@ export function displayText(value: CellValue | undefined, numFmt: string | undef
 		return value ? "TRUE" : "FALSE"
 	}
 
-	return formatValue(value, numFmt ?? "General")
+	return formatValue(value, numFmt ?? "General", { is1904 })
 }
 
 // The text editing a cell starts from: its formula, or the value as typed rather than as formatted.
-export function inputText(value: CellValue | undefined, cell: Cell | undefined): string {
+export function inputText(value: CellValue | undefined, cell: Cell | undefined, is1904 = false): string {
 	if (cell?.formula !== undefined) {
 		return `=${shownFormula(cell.formula)}`
 	}
@@ -43,7 +59,7 @@ export function inputText(value: CellValue | undefined, cell: Cell | undefined):
 	}
 
 	if (value instanceof Date) {
-		return isoDate(value)
+		return typedDate(value, is1904)
 	}
 
 	if (typeof value === "boolean") {
@@ -65,9 +81,12 @@ export class WorkbookViews {
 	// Neighbouring cells mostly share a format: the last one looked up is checked first.
 	private last: { style: CellStyle; id: number | undefined } | null = null
 	private readonly themeColors: readonly string[] | undefined
+	// Serial dates count from 1904 (older Mac files).
+	private readonly is1904: boolean
 
-	constructor(themeColors: readonly string[] | undefined) {
+	constructor(themeColors: readonly string[] | undefined, is1904 = false) {
 		this.themeColors = themeColors
+		this.is1904 = is1904
 	}
 
 	private partId(part: object | undefined): number {
@@ -129,8 +148,11 @@ export class WorkbookViews {
 		}
 
 		const shown = cell?.formula !== undefined ? (cell.formulaResult ?? value) : value
-		const text = cell?.richText !== undefined ? cell.richText.map(run => run.text).join("") : displayText(shown, cell?.style?.numFmt)
-		const input = inputText(cell?.formula !== undefined ? shown : value, cell)
+		const text =
+			cell?.richText !== undefined
+				? cell.richText.map(run => run.text).join("")
+				: displayText(shown, cell?.style?.numFmt, this.is1904)
+		const input = inputText(cell?.formula !== undefined ? shown : value, cell, this.is1904)
 		const styleId = this.styleId(cell?.style)
 		const view: CellView = { text }
 

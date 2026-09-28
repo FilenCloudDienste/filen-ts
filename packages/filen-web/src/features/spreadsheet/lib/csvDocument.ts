@@ -59,6 +59,11 @@ export class CsvDocument {
 			return { type: "refused", reason: "encoding", state: this.state() }
 		}
 
+		// Rows or columns inserted past the data move nothing: the file stays as it is.
+		if (op.type === "insert" && this.pastData(op.axis, op.at)) {
+			return { type: "none", state: this.state() }
+		}
+
 		const step = this.run(op)
 
 		if (step === null) {
@@ -158,6 +163,14 @@ export class CsvDocument {
 		}
 	}
 
+	private width(): number {
+		return this.rows.reduce((width, row) => Math.max(width, row.length), 0)
+	}
+
+	private pastData(axis: "rows" | "cols", at: number): boolean {
+		return at >= (axis === "rows" ? this.rows.length : this.width())
+	}
+
 	private write(row: number, col: number, text: string): void {
 		while (this.rows.length <= row) {
 			this.rows.push([])
@@ -229,8 +242,8 @@ export class CsvDocument {
 
 					if (op.type === "insert") {
 						// concat, not splice(...spread): inserting past ~125k rows spreads that many arguments
-						// into one call and throws RangeError. Clamped here, so the step below must record the
-						// clamped `at`, not op.at — revertStructure() undoes exactly the range actually written.
+						// into one call and throws RangeError. Only ever inside the data (apply() drops an insert
+						// past it).
 						at = Math.min(op.at, this.rows.length)
 						const empty = Array.from({ length: op.count }, (): string[] => [])
 
@@ -245,6 +258,11 @@ export class CsvDocument {
 				const removed: string[][] = []
 
 				if (op.type === "insert") {
+					// Past the grid's last column, cells would take the keys of the next row's (cellKey).
+					if (this.width() + op.count > MAX_COLS) {
+						return null
+					}
+
 					const empty = new Array<string>(op.count).fill("")
 
 					this.rows = this.rows.map(row => (op.at < row.length ? row.slice(0, op.at).concat(empty, row.slice(op.at)) : row))
@@ -304,7 +322,7 @@ export class CsvDocument {
 					sheet: 0,
 					cells: keys.map((key): [number, CellView | null] => [key, csvCellView(this.rows[keyRow(key)]?.[keyCol(key)] ?? "")]),
 					rowCount: this.rows.length,
-					colCount: this.rows.reduce((width, row) => Math.max(width, row.length), 0)
+					colCount: this.width()
 				}
 			],
 			styles: [],

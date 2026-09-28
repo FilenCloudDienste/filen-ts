@@ -14,7 +14,8 @@ import { useSpreadsheetEdits, useSpreadsheetWritability, type SpreadsheetSnapsho
 import { rangeName, selectionRange, type CellPosition, type Selection } from "@/features/spreadsheet/lib/cellRef.logic"
 import { CellStore, type GridDoc, type GridSheet } from "@/features/spreadsheet/lib/cellStore.logic"
 import { MAX_EDIT_CELLS, type EditOp, type EditResult, type FormatPatch } from "@/features/spreadsheet/lib/edits"
-import { cellKey, keyCol, keyRow, type CellRange } from "@/features/spreadsheet/lib/model"
+import { clearedCells, newSheetName } from "@/features/spreadsheet/lib/gridEdits.logic"
+import { cellKey, type CellRange } from "@/features/spreadsheet/lib/model"
 import {
 	gridMove,
 	isImeKeydown,
@@ -27,7 +28,7 @@ import {
 import { layeredSheet, type LayerKey } from "@/features/spreadsheet/lib/sizeLayer"
 import { layerKeyFor, resizable, sizesInFile } from "@/features/spreadsheet/lib/sizeRouting.logic"
 import { resetTargets, type SizeAxis, type SizeEntry } from "@/features/spreadsheet/lib/sizes.logic"
-import { parseTsv, rangeToTsv } from "@/features/spreadsheet/lib/tsv.logic"
+import { endedCut, pastedCells, rangeToClip, rangeToTsv, type GridClip } from "@/features/spreadsheet/lib/tsv.logic"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { log } from "@/lib/log"
 import { LoadingState } from "@/components/loadingState"
@@ -181,7 +182,8 @@ function SpreadsheetBody({
 		local.follow(sheetAt, shift)
 	})
 	const doc = edits.doc
-	const writability = useSpreadsheetWritability(id, doc, editable && !unnamed, neverEditable)
+	// A file without a spreadsheet extension is never edited, whatever it may say.
+	const writability = useSpreadsheetWritability(id, doc, editable && !unnamed, neverEditable || unnamed)
 	const canEdit = editable && writability === "writable" && !unnamed && !renamed
 	const inFile = sizesInFile(doc.kind, writability, canEdit)
 	const canResize = resizable(doc.kind, writability, editable && !unnamed && !renamed)
@@ -220,6 +222,8 @@ function SpreadsheetBody({
 	const barRef = useRef<HTMLInputElement>(null)
 	const alive = useRef(true)
 	const clipboardRef = useRef<((event: ClipboardEvent) => void) | null>(null)
+	// The range last copied or cut here, while it holds entries its clipboard text does not.
+	const clipRef = useRef<GridClip | null>(null)
 	// Editing stopped being possible while it was open (the file renamed meanwhile): nothing renames a sheet
 	// now. An open entry is committed instead (see the effect below), never dropped unseen.
 	const wasEditable = useRef(canEdit)
@@ -279,12 +283,23 @@ function SpreadsheetBody({
 		toast.error(t(REFUSED_MESSAGES[result.reason]))
 	}
 
+	// Any change to the sheet ends a held cut; the cut's own clear restores it after.
+	function endCut(): void {
+		clipRef.current = endedCut(clipRef.current)
+	}
+
 	function apply(op: EditOp): void {
+		endCut()
 		edits.apply(op).then(report, () => {
 			if (alive.current) {
 				toast.error(t("previewSpreadsheetEditFailed"))
 			}
 		})
+	}
+
+	function history(undo: boolean): void {
+		endCut()
+		void (undo ? edits.undo() : edits.redo())
 	}
 
 	function startEditing(from: Editing["from"], text: string): void {
@@ -334,42 +349,21 @@ function SpreadsheetBody({
 		focusGrid()
 	}
 
-	// The cells a clear touches: those in the range holding anything. Whichever is smaller is walked, the
-	// range or the sheet's filled cells, so selecting whole columns costs what the sheet holds.
-	function filledIn(target: CellRange): { row: number; col: number; input: string }[] {
-		const cleared: { row: number; col: number; input: string }[] = []
-		const area = (target.endRow - target.startRow + 1) * (target.endCol - target.startCol + 1)
+	// Whether the selection's cells are (being) emptied: false when there are too many for one edit.
+	function clear(): boolean {
+		const cleared = clearedCells(sheet.cells, range, MAX_EDIT_CELLS)
 
-		if (area <= sheet.cells.size) {
-			for (let row = target.startRow; row <= target.endRow; row++) {
-				for (let col = target.startCol; col <= target.endCol; col++) {
-					if (sheet.cells.has(cellKey(row, col))) {
-						cleared.push({ row, col, input: "" })
-					}
-				}
-			}
+		if (cleared === null) {
+			toast.error(t("previewSpreadsheetTooLarge"))
 
-			return cleared
+			return false
 		}
-
-		for (const key of sheet.cells.keys()) {
-			const row = keyRow(key)
-			const col = keyCol(key)
-
-			if (row >= target.startRow && row <= target.endRow && col >= target.startCol && col <= target.endCol) {
-				cleared.push({ row, col, input: "" })
-			}
-		}
-
-		return cleared
-	}
-
-	function clear(): void {
-		const cleared = filledIn(range)
 
 		if (cleared.length > 0) {
 			apply({ type: "setCells", sheet: sheetIndex, cells: cleared })
 		}
+
+		return true
 	}
 
 	function format(patch: FormatPatch): void {
@@ -391,7 +385,7 @@ function SpreadsheetBody({
 
 			if (undo || redo) {
 				event.preventDefault()
-				void (undo ? edits.undo() : edits.redo())
+				history(undo)
 
 				return true
 			}
@@ -459,8 +453,13 @@ function SpreadsheetBody({
 		}
 	}
 
-	function copyRange(event: ClipboardEvent): boolean {
-		const text = rangeToTsv(sheet, range)
+	function copyRange(event: ClipboardEvent, cut: boolean): boolean {
+		// Past what one edit takes, pasting it here is refused anyway: nothing is kept beside the text.
+		const clip =
+			(range.endRow - range.startRow + 1) * (range.endCol - range.startCol + 1) <= MAX_EDIT_CELLS
+				? rangeToClip(sheet, range, cut)
+				: null
+		const text = clip?.tsv ?? rangeToTsv(sheet, range)
 
 		event.preventDefault()
 
@@ -471,6 +470,8 @@ function SpreadsheetBody({
 		}
 
 		event.clipboardData?.setData("text/plain", text)
+		// Only worth keeping while a paste would write something other than the text.
+		clipRef.current = clip !== null && clip.inputs.size > 0 ? clip : null
 
 		return true
 	}
@@ -482,31 +483,31 @@ function SpreadsheetBody({
 
 		event.preventDefault()
 
-		const rows = parseTsv(event.clipboardData?.getData("text/plain") ?? "")
-		const cells: { row: number; col: number; input: string }[] = []
-		let width = 0
+		const text = event.clipboardData?.getData("text/plain") ?? ""
+		const to = { row: range.startRow, col: range.startCol }
 
-		for (const [rowOffset, values] of rows.entries()) {
-			width = Math.max(width, values.length)
-
-			for (const [colOffset, input] of values.entries()) {
-				cells.push({ row: range.startRow + rowOffset, col: range.startCol + colOffset, input })
-			}
+		// The clipboard moved on to something else.
+		if (clipRef.current !== null && clipRef.current.tsv !== text) {
+			clipRef.current = null
 		}
 
-		if (cells.length > MAX_EDIT_CELLS) {
+		const block = pastedCells(text, clipRef.current, to, sheet.name, MAX_EDIT_CELLS)
+
+		if (block === null) {
 			toast.error(t("previewSpreadsheetTooLarge"))
 
 			return
 		}
 
-		if (cells.length > 0) {
-			apply({ type: "setCells", sheet: sheetIndex, cells })
+		if (block.cells.length > 0) {
+			apply({ type: "setCells", sheet: sheetIndex, cells: block.cells })
 			select({
-				anchor: { row: range.startRow, col: range.startCol },
-				focus: { row: range.startRow + rows.length - 1, col: range.startCol + Math.max(0, width - 1) }
+				anchor: to,
+				focus: { row: to.row + block.rows - 1, col: to.col + Math.max(0, block.cols - 1) }
 			})
 		}
+
+		clipRef.current = block.clip
 	}
 
 	// Clipboard events while the grid has focus. Listened for on the document: Firefox sends them to the
@@ -519,14 +520,20 @@ function SpreadsheetBody({
 
 		switch (event.type) {
 			case "copy":
-				copyRange(event)
+				copyRange(event, false)
 				break
-			case "cut":
-				if (canEdit && copyRange(event)) {
-					clear()
+			case "cut": {
+				if (!canEdit || !copyRange(event, true)) {
+					break
 				}
 
+				const cut = clipRef.current
+
+				// Not emptied (too many cells): what was copied stays where it is, a copy.
+				clipRef.current = clear() ? cut : endedCut(cut)
+
 				break
+			}
 			case "paste":
 				paste(event)
 				break
@@ -645,8 +652,9 @@ function SpreadsheetBody({
 									}}
 									onKeyDown={handleEditorKey}
 									onBlur={event => {
-										// Into the formula bar, the entry carries on there.
-										if (event.relatedTarget !== barRef.current) {
+										// Into the formula bar, the entry carries on there. The window or tab losing
+										// focus leaves it open: focus comes back to it.
+										if (event.relatedTarget !== barRef.current && document.hasFocus()) {
 											commit("none")
 										}
 									}}
@@ -671,10 +679,10 @@ function SpreadsheetBody({
 					canUndo={edits.state.canUndo}
 					canRedo={edits.state.canRedo}
 					onUndo={() => {
-						void edits.undo()
+						history(true)
 					}}
 					onRedo={() => {
-						void edits.redo()
+						history(false)
 					}}
 					onFormat={format}
 				/>
@@ -704,7 +712,7 @@ function SpreadsheetBody({
 						}}
 						onKeyDown={handleEditorKey}
 						onBlur={() => {
-							if (editing?.from === "bar") {
+							if (editing?.from === "bar" && document.hasFocus()) {
 								commit("none")
 							}
 						}}
@@ -798,7 +806,9 @@ function SpreadsheetBody({
 							<ContextMenuSeparator />
 							<ContextMenuItem
 								disabled={!canEdit}
-								onClick={clear}
+								onClick={() => {
+									clear()
+								}}
 							>
 								{t("previewSpreadsheetClearCells")}
 							</ContextMenuItem>
@@ -848,7 +858,10 @@ function SpreadsheetBody({
 							? () => {
 									apply({
 										type: "addSheet",
-										name: t("previewSpreadsheetNewSheetName", { number: doc.sheets.length + 1 })
+										name: newSheetName(
+											doc.sheets.map(shown => shown.name),
+											number => t("previewSpreadsheetNewSheetName", { number })
+										)
 									})
 								}
 							: undefined

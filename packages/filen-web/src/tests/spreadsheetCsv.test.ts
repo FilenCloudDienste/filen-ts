@@ -1,7 +1,9 @@
-import { describe, expect, it } from "vitest"
+import { beforeEach, describe, expect, it } from "vitest"
 import { canEncodeWindows1252, parseCsvFile, serializeCsv, type CsvFormat } from "@/features/spreadsheet/lib/csvView"
 import { CsvDocument } from "@/features/spreadsheet/lib/csvDocument"
-import { MAX_SHEET_CELLS } from "@/features/spreadsheet/lib/edits"
+import { MAX_COLS, MAX_SHEET_CELLS } from "@/features/spreadsheet/lib/edits"
+import { MAX_COLUMNS } from "@/features/spreadsheet/lib/model"
+import { standardWindows1252Decoding } from "@/tests/whatwgWindows1252"
 
 const encoder = new TextEncoder()
 
@@ -41,6 +43,8 @@ function utf16Bytes(text: string, littleEndian: boolean, bom: readonly number[])
 }
 
 describe("CSV encodings", () => {
+	beforeEach(standardWindows1252Decoding)
+
 	it("reads and writes back a UTF-16LE file with its BOM", () => {
 		const source = "name,city\r\ncafé,björk\r\n"
 		const bytes = utf16Bytes(source, true, [0xff, 0xfe])
@@ -278,16 +282,42 @@ describe("CsvDocument structural edits", () => {
 		const { rows, format } = parseCsvFile(encoder.encode("a,b\n"), false)
 		const document = new CsvDocument(rows, format)
 
-		expect(() => document.apply({ type: "insert", sheet: 0, axis: "rows", at: 1, count: 150_000 })).not.toThrow()
+		expect(() => document.apply({ type: "insert", sheet: 0, axis: "rows", at: 0, count: 150_000 })).not.toThrow()
 		expect(document.doc().sheets[0]?.rowCount).toBe(150_001)
 	})
 
-	it("inserts far past the splice argument-count ceiling on columns without throwing", () => {
+	it("inserts columns up to the grid's last column, and refuses past it", () => {
 		const { rows, format } = parseCsvFile(encoder.encode("a,b\n1,2\n"), false)
 		const document = new CsvDocument(rows, format)
 
-		expect(() => document.apply({ type: "insert", sheet: 0, axis: "cols", at: 1, count: 150_000 })).not.toThrow()
-		expect(document.doc().sheets[0]?.colCount).toBe(150_002)
+		expect(document.apply({ type: "insert", sheet: 0, axis: "cols", at: 1, count: MAX_COLS - 1 })).toMatchObject({
+			type: "refused",
+			reason: "tooLarge"
+		})
+		expect(document.apply({ type: "insert", sheet: 0, axis: "cols", at: 1, count: MAX_COLS - 2 }).type).toBe("sheets")
+		expect(document.doc().sheets[0]?.colCount).toBe(MAX_COLS)
+	})
+
+	it("leaves the file alone for rows or columns inserted past its data", () => {
+		const { rows, format } = parseCsvFile(encoder.encode("a,b\n1,2\n"), false)
+		const document = new CsvDocument(rows, format)
+
+		expect(document.apply({ type: "insert", sheet: 0, axis: "rows", at: 50, count: 1 })).toEqual({
+			type: "none",
+			state: { dirty: false, canUndo: false, canRedo: false }
+		})
+		expect(document.apply({ type: "insert", sheet: 0, axis: "rows", at: 2, count: 3 }).type).toBe("none")
+		expect(document.apply({ type: "insert", sheet: 0, axis: "cols", at: 2, count: 1 }).type).toBe("none")
+		expect(new TextDecoder().decode(document.serialize().bytes)).toBe("a,b\n1,2\n")
+	})
+
+	it("refuses to open a row wider than the grid's last column", () => {
+		const wide = new Array<string>(MAX_COLUMNS + 1).fill("x").join(",")
+
+		expect(() => parseCsvFile(encoder.encode(`${wide}\n`), false)).toThrow("too many columns")
+		expect(parseCsvFile(encoder.encode(`${new Array<string>(MAX_COLUMNS).fill("x").join(",")}\n`), false).rows[0]).toHaveLength(
+			MAX_COLUMNS
+		)
 	})
 
 	it("undoes a row insert, row delete, column insert and column delete back to the original grid", () => {

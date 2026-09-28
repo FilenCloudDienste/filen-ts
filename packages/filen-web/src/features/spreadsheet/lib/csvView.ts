@@ -1,5 +1,5 @@
 import { detectDelimiter, parseCsv, writeCsv, type CellValue } from "hucre"
-import { cellKey, type CellView, type SpreadsheetDoc } from "@/features/spreadsheet/lib/model"
+import { cellKey, MAX_COLUMNS, type CellView, type SpreadsheetDoc } from "@/features/spreadsheet/lib/model"
 
 // How a CSV file was written, so a save writes it back the same way: its separator, its line ends, a byte
 // order mark, a final line end, and the byte encoding it was read as. A legacy windows-1252 export is
@@ -149,7 +149,14 @@ export function parseCsvFile(bytes: Uint8Array, tabSeparated: boolean): { rows: 
 	const lineSeparator = detectLineSeparator(text)
 	// Every value stays the text it was: a CSV's "007" or "1e5" is not a number until someone says so.
 	const parsed = text.length === 0 ? [] : parseCsv(text, { delimiter, typeInference: false, skipBom: false })
-	const rows = parsed.map(row => row.map(value => (value === null ? "" : String(value))))
+	const rows = parsed.map(row => {
+		// Past the grid's last column, cells would take the keys of the next row's (cellKey).
+		if (row.length > MAX_COLUMNS) {
+			throw new Error("spreadsheet: too many columns")
+		}
+
+		return row.map(value => (value === null ? "" : String(value)))
+	})
 
 	return {
 		rows,
