@@ -4,6 +4,7 @@ import { type DriveItem } from "@/features/drive/lib/item"
 import { type DriveViewMode } from "@/features/drive/lib/preferences"
 import { GRID_INSET, ROW_HEIGHT, TILE_WIDTH, TILE_ROW_HEIGHT } from "@/features/drive/lib/gridLayout"
 import { setThumbnailViewport } from "@/features/drive/lib/thumbnails"
+import { driveRowKey } from "@/features/drive/lib/rowKey"
 
 const LIST_OVERSCAN = 8
 const GRID_OVERSCAN = 3
@@ -59,7 +60,12 @@ export function useDriveVirtualizer(items: DriveItem[], viewMode: DriveViewMode)
 		getScrollElement: () => scrollElement,
 		estimateSize: () => ROW_HEIGHT,
 		overscan: LIST_OVERSCAN,
-		getItemKey: index => items[index]?.data.uuid ?? index
+		// By row, not uuid: the Shared by me root lists one item once per receiver.
+		getItemKey: index => {
+			const item = items[index]
+
+			return item ? driveRowKey(item) : index
+		}
 	})
 
 	const gridVirtualizer = useVirtualizer({

@@ -1,6 +1,7 @@
 import { create } from "zustand"
 import { toggleInArray, removeSelectedIds } from "@filen/shared"
 import { type DriveItem } from "@/features/drive/lib/item"
+import { driveRowKey } from "@/features/drive/lib/rowKey"
 
 const driveItemId = (item: DriveItem): string => item.data.uuid
 
@@ -18,6 +19,7 @@ interface DriveState {
 	setSelectedItems: (next: DriveItem[] | ((prev: DriveItem[]) => DriveItem[])) => void
 	toggleSelectedItem: (item: DriveItem) => void
 	removeFromSelection: (uuids: string[]) => void
+	removeRowsFromSelection: (rows: DriveItem[]) => void
 	clearSelectedItems: () => void
 	pendingReveal: PendingReveal | null
 	requestReveal: (reveal: PendingReveal) => void
@@ -38,11 +40,14 @@ export const useDriveStore = create<DriveState>(set => ({
 			selectedItems: typeof next === "function" ? next(state.selectedItems) : next
 		}))
 	},
+	// By row: toggling one Shared by me receiver's row leaves the item's other receiver rows alone.
 	toggleSelectedItem: item => {
 		set(state => ({
-			selectedItems: toggleInArray(state.selectedItems, item, driveItemId)
+			selectedItems: toggleInArray(state.selectedItems, item, driveRowKey)
 		}))
 	},
+	// By uuid: used where the item itself left the listing or the action applies to the whole item, so
+	// every receiver row of it goes too. Unshare, which removes only one receiver's row, prunes by row.
 	removeFromSelection: uuids => {
 		set(state => {
 			const next = removeSelectedIds(state.selectedItems, uuids, driveItemId)
@@ -53,6 +58,18 @@ export const useDriveStore = create<DriveState>(set => ({
 			}
 
 			return { selectedItems: next }
+		})
+	},
+	removeRowsFromSelection: rows => {
+		set(state => {
+			if (rows.length === 0) {
+				return state
+			}
+
+			const keys = new Set(rows.map(driveRowKey))
+			const next = state.selectedItems.filter(item => !keys.has(driveRowKey(item)))
+
+			return next.length === state.selectedItems.length ? state : { selectedItems: next }
 		})
 	},
 	clearSelectedItems: () => {

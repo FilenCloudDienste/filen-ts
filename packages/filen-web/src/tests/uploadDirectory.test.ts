@@ -174,6 +174,16 @@ function mockFailingReader(): FileSystemDirectoryReader {
 	}
 }
 
+// A file entry whose snapshot fails — e.g. the file was removed between the drop and the walk.
+function mockFailingFileEntry(name: string): FileSystemFileEntry {
+	return {
+		...baseEntry(name, false),
+		file: (_successCallback: (file: File) => void, errorCallback?: (error: DOMException) => void) => {
+			errorCallback?.(new DOMException("gone", "NotFoundError"))
+		}
+	} as FileSystemFileEntry
+}
+
 function mockDirEntry(name: string, reader: FileSystemDirectoryReader): FileSystemDirectoryEntry {
 	return {
 		...baseEntry(name, true),
@@ -277,6 +287,32 @@ describe("collectDirectoryUploads — drag-and-drop FileSystemEntry input", () =
 
 		expect(result.dirs).toEqual(["emptyfolder"])
 		expect(result.files).toEqual([])
+	})
+})
+
+describe("collectDirectoryUploads — unreadable entries", () => {
+	it("skips an unreadable file and an unreadable sub-directory, collecting everything else", async () => {
+		const good = mockBrowserFile("good.txt")
+		const nested = mockBrowserFile("nested.txt")
+		const readable = mockDirEntry("ok", mockDirectoryReader([mockFileEntry("nested.txt", nested)]))
+		const unreadable = mockDirEntry("locked", mockFailingReader())
+		const root = mockDirEntry(
+			"myfolder",
+			mockDirectoryReader([mockFileEntry("good.txt", good), mockFailingFileEntry("gone.txt"), readable, unreadable])
+		)
+
+		const result = await collectDirectoryUploads({ kind: "entries", entries: [root] })
+
+		// The unreadable directory is not recreated as an empty copy.
+		expect(new Set(result.dirs)).toEqual(new Set(["myfolder", "myfolder/ok"]))
+		expect(result.files.map(f => f.relPath).sort()).toEqual(["myfolder/good.txt", "myfolder/ok/nested.txt"])
+		expect(result.skipped).toBe(2)
+	})
+
+	it("reports no skips for a webkitdirectory pick", async () => {
+		const result = await collectDirectoryUploads({ kind: "files", files: [mockRelFile("a/b.txt")] })
+
+		expect(result.skipped).toBe(0)
 	})
 })
 
@@ -553,6 +589,187 @@ describe("runDirectoryUpload (injected deps, real runCreateDirectory/runUpload)"
 	})
 })
 
+describe("runDirectoryUpload — concurrency, cancels, skips and sizes", () => {
+	function makeHarness() {
+		const create = vi.fn<(parentUuid: string | null, name: string) => Promise<Dir>>()
+		const upload =
+			vi.fn<(parentUuid: string | null, transferId: string, file: File, onProgress: (bytes: bigint) => void) => Promise<SdkFile>>()
+		const invalidateDirectorySizes = vi.fn<(parentUuid: string | null, created?: readonly string[]) => void>()
+		const deps: RunDirectoryUploadDeps = {
+			createDirectory: { createDirectory: create, patchListing: vi.fn() },
+			upload: {
+				upload,
+				store: { add: vi.fn(), setProgress: vi.fn(), settle: vi.fn(), setItem: vi.fn(), remove: vi.fn() },
+				patchCreated: vi.fn(),
+				invalidateDirectorySizes
+			},
+			heic: { convert: { transform: vi.fn() }, readPreference: vi.fn<() => Promise<boolean>>().mockResolvedValue(false) }
+		}
+
+		return { deps, create, upload, invalidateDirectorySizes }
+	}
+
+	function dirNamed(name: string): Dir {
+		return mockDir({ uuid: testUuid(name), meta: { type: "decoded", data: { name } } })
+	}
+
+	it("creates sibling directories concurrently rather than one round trip at a time", async () => {
+		const h = makeHarness()
+		const pending: (() => void)[] = []
+
+		h.create.mockImplementation(
+			(_parentUuid, name) =>
+				new Promise(resolve => {
+					pending.push(() => {
+						resolve(dirNamed(name))
+					})
+				})
+		)
+
+		const promise = runDirectoryUpload(h.deps, { rootParentUuid: null, dirs: ["a", "b", "c"], files: [] })
+
+		await new Promise(resolve => setTimeout(resolve, 0))
+
+		expect(h.create.mock.calls.map(call => call[1])).toEqual(["a", "b", "c"])
+
+		pending.forEach(resolve => {
+			resolve()
+		})
+		await promise
+	})
+
+	it("starts a file's upload once its own directory exists, before an unrelated directory finishes", async () => {
+		const h = makeHarness()
+		let releaseSlow: () => void = () => undefined
+
+		h.create.mockImplementation((_parentUuid, name) =>
+			name === "slow"
+				? new Promise(resolve => {
+						releaseSlow = () => {
+							resolve(dirNamed(name))
+						}
+					})
+				: Promise.resolve(dirNamed(name))
+		)
+		h.upload.mockResolvedValue(mockSdkFile())
+
+		const promise = runDirectoryUpload(h.deps, {
+			rootParentUuid: null,
+			dirs: ["fast", "slow"],
+			files: [{ file: mockBrowserFile("x.txt"), relPath: "fast/x.txt" }]
+		})
+
+		await vi.waitFor(() => {
+			expect(h.upload).toHaveBeenCalledWith(testUuid("fast"), expect.any(String), expect.any(File), expect.any(Function))
+		})
+
+		releaseSlow()
+		await promise
+
+		expect(toastSuccess).toHaveBeenCalledTimes(1)
+	})
+
+	it("creates two directories differing only by case one after the other", async () => {
+		const h = makeHarness()
+		let releaseFirst: () => void = () => undefined
+
+		h.create.mockImplementationOnce(
+			() =>
+				new Promise(resolve => {
+					releaseFirst = () => {
+						resolve(dirNamed("Photos"))
+					}
+				})
+		)
+		// The backend matches the second name to the first directory.
+		h.create.mockResolvedValueOnce(dirNamed("Photos"))
+
+		const promise = runDirectoryUpload(h.deps, { rootParentUuid: null, dirs: ["Photos", "photos"], files: [] })
+
+		await new Promise(resolve => setTimeout(resolve, 0))
+
+		expect(h.create).toHaveBeenCalledTimes(1)
+
+		releaseFirst()
+		await promise
+
+		expect(h.create).toHaveBeenCalledTimes(2)
+	})
+
+	it("shows no summary when every file was cancelled and there were no directories", async () => {
+		const h = makeHarness()
+		h.upload.mockRejectedValue(sdkDto("Cancelled"))
+
+		await runDirectoryUpload(h.deps, {
+			rootParentUuid: null,
+			dirs: [],
+			files: [
+				{ file: mockBrowserFile("a.txt"), relPath: "a.txt" },
+				{ file: mockBrowserFile("b.txt"), relPath: "b.txt" }
+			]
+		})
+
+		expect(toastSuccess).not.toHaveBeenCalled()
+		expect(toastError).not.toHaveBeenCalled()
+	})
+
+	it("never counts a cancelled file as uploaded", async () => {
+		const h = makeHarness()
+		h.create.mockImplementation((_parentUuid, name) => Promise.resolve(dirNamed(name)))
+		h.upload.mockResolvedValueOnce(mockSdkFile()).mockRejectedValueOnce(sdkDto("Cancelled"))
+
+		await runDirectoryUpload(h.deps, {
+			rootParentUuid: null,
+			dirs: ["a"],
+			files: [
+				{ file: mockBrowserFile("ok.txt"), relPath: "a/ok.txt" },
+				{ file: mockBrowserFile("cancelled.txt"), relPath: "a/cancelled.txt" }
+			]
+		})
+
+		// One directory plus one file.
+		expect(toastSuccess).toHaveBeenCalledExactlyOnceWith(expect.stringContaining("2"))
+		expect(toastError).not.toHaveBeenCalled()
+	})
+
+	it("counts entries the walk skipped as failures", async () => {
+		const h = makeHarness()
+		h.upload.mockResolvedValue(mockSdkFile())
+
+		await runDirectoryUpload(h.deps, {
+			rootParentUuid: null,
+			dirs: [],
+			files: [{ file: mockBrowserFile("a.txt"), relPath: "a.txt" }],
+			skipped: 1
+		})
+
+		expect(toastError).toHaveBeenCalledTimes(1)
+		expect(toastSuccess).not.toHaveBeenCalled()
+	})
+
+	it("invalidates the target's and every created directory's size once, after the whole batch", async () => {
+		const h = makeHarness()
+		h.create.mockImplementation((_parentUuid, name) => Promise.resolve(dirNamed(name)))
+		h.upload.mockResolvedValue(mockSdkFile())
+
+		await runDirectoryUpload(h.deps, {
+			rootParentUuid: "root-uuid",
+			dirs: ["a", "a/b"],
+			files: [
+				{ file: mockBrowserFile("x.txt"), relPath: "a/x.txt" },
+				{ file: mockBrowserFile("y.txt"), relPath: "a/b/y.txt" }
+			]
+		})
+
+		expect(h.invalidateDirectorySizes).toHaveBeenCalledTimes(1)
+
+		const [target, created] = h.invalidateDirectorySizes.mock.calls[0] ?? []
+
+		expect(target).toBe("root-uuid")
+		expect(new Set(created)).toEqual(new Set([testUuid("a"), testUuid("b")]))
+	})
+})
+
 // ---------------------------------------------------------------------------
 // startDirectoryUpload — real defaultDirectoryUploadDeps wiring against the mocked sdk client/query
 // client/sonner declared at the top of this file (mirrors upload.test.ts's own startUploads block).
@@ -616,6 +833,26 @@ describe("startDirectoryUpload (real wiring)", () => {
 		// second, separate toast, and the scanning toast is never separately dismissed on this path.
 		expect(toastError).toHaveBeenCalledWith(expect.any(String), { id: "scan-toast-id" })
 		expect(toastDismiss).not.toHaveBeenCalled()
+		expect(toastSuccess).not.toHaveBeenCalled()
+	})
+
+	it("uploads the readable rest of a dropped tree and reports the unreadable entry as a failure", async () => {
+		createDirectory.mockImplementation((_parentUuid, name) =>
+			Promise.resolve(mockDir({ uuid: testUuid(name), meta: { type: "decoded", data: { name } } }))
+		)
+		uploadFile.mockResolvedValue(mockSdkFile())
+
+		const root = mockDirEntry(
+			"myfolder",
+			mockDirectoryReader([mockFileEntry("a.txt", mockBrowserFile("a.txt")), mockFailingFileEntry("gone.txt")])
+		)
+
+		await startDirectoryUpload({ kind: "entries", entries: [root] }, null)
+
+		expect(createDirectory).toHaveBeenCalledTimes(1)
+		expect(uploadFile).toHaveBeenCalledTimes(1)
+		expect(toastDismiss).toHaveBeenCalledWith("scan-toast-id")
+		expect(toastError).toHaveBeenCalledExactlyOnceWith(expect.any(String))
 		expect(toastSuccess).not.toHaveBeenCalled()
 	})
 

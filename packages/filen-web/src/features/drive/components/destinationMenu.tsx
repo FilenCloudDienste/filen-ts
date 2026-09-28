@@ -39,7 +39,9 @@ interface DestinationEntriesProps {
 
 // The one list of what a directory offers as a destination — the toolbar's Upload menu, a listing's
 // empty-space menu, the sidebar tree root's menu, and (without Paste) the New submenu below.
-export function DestinationEntries({ family, actions, paste, clear, offline = false }: DestinationEntriesProps) {
+export function DestinationEntries({ family, actions, paste, clear, offline: offlineProp }: DestinationEntriesProps) {
+	// Not a destructuring default, which the React Compiler cannot lower.
+	const offline = offlineProp ?? false
 	const { t } = useTranslation(["drive", "common"])
 	const { Item, Separator } = family
 	const title = offline ? t("common:offlineActionDisabled") : undefined

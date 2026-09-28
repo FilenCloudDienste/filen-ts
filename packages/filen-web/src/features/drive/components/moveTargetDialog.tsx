@@ -46,8 +46,10 @@ export interface MoveTargetDialogProps {
 // to this dialog (a uuid stack from root, not the "/drive/$" route) so browsing here never disturbs
 // the app's own navigation history; it always browses the "drive" variant regardless of where the
 // move/copy was dispatched from — recents/favorites/trash/sharedIn have no navigable tree of their
-// own to land into (mirrors newDirectory.tsx's identical rule for creating a directory).
-export function MoveTargetDialog({ items, onClose, mode = "move", onCopy }: MoveTargetDialogProps) {
+// own to land into (mirrors newDirectory.tsx's identical rule for creating a directory). `mode` is only
+// ever compared against "copy" rather than given a destructuring default, which the React Compiler
+// cannot lower.
+export function MoveTargetDialog({ items, onClose, mode, onCopy }: MoveTargetDialogProps) {
 	const { t } = useTranslation(["drive", "common"])
 	const isOnline = useIsOnline()
 	// Both writes in this dialog (the confirm and the in-place create) re-check connectivity here: the

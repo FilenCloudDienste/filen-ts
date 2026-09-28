@@ -93,15 +93,19 @@ export function buildLinkUpdate(current: DriveItemLinkStatus, edits: LinkFormEdi
 // A file link's key is the ITEM's own decrypted metadata key (FilePublicLink itself carries no key
 // field); a directory link's key is the LINK's own linkKey (absent until the link finishes
 // provisioning). Returns null rather than throwing when the needed key isn't available — the caller
-// degrades the URL field/copy action, not the whole panel. `item.type`/`status.type` are checked
-// together (not `item.type === status.type` as a single boolean) so each independently narrows its own
-// variable — a mismatch between the two falls through to the null case rather than reading a field
-// that doesn't exist on the other arm. The URL shape itself (NEW path-based format, key hex-encoded in
-// the fragment) is owned by features/publicLinks/lib/format.logic.ts — the same module the /f/ /d/
-// route and the chat recognizer parse with, so a built link always round-trips.
+// degrades the URL field/copy action, not the whole panel. The item is narrowed through
+// asDirectoryOrFile first, like createLink/updateLink and the link-status fetch, so a Shared-by-me arm
+// builds its URL too. Both `type`s are checked together (not `base.type === status.type` as a single
+// boolean) so each independently narrows its own variable — a mismatch between the two falls through
+// to the null case rather than reading a field that doesn't exist on the other arm. The URL shape
+// itself (NEW path-based format, key hex-encoded in the fragment) is owned by
+// features/publicLinks/lib/format.logic.ts — the same module the /f/ /d/ route and the chat recognizer
+// parse with, so a built link always round-trips.
 export function buildPublicLinkUrl(item: DriveItem, status: DriveItemLinkStatus): string | null {
-	if (item.type === "file" && status.type === "file") {
-		const key = item.data.decryptedMeta?.key
+	const base = asDirectoryOrFile(item)
+
+	if (base.type === "file" && status.type === "file") {
+		const key = base.data.decryptedMeta?.key
 
 		if (key === undefined) {
 			return null
@@ -110,7 +114,7 @@ export function buildPublicLinkUrl(item: DriveItem, status: DriveItemLinkStatus)
 		return buildPublicLinkUrlString("file", status.status.linkUuid, key)
 	}
 
-	if (item.type === "directory" && status.type === "directory") {
+	if (base.type === "directory" && status.type === "directory") {
 		const linkKey = status.status.linkKey
 
 		if (linkKey === undefined) {
@@ -124,17 +128,18 @@ export function buildPublicLinkUrl(item: DriveItem, status: DriveItemLinkStatus)
 }
 
 // Public links require a subscription (mobile parity — filen-mobile/src/features/publicLink/screen.tsx's
-// own `userIsSubbed` gate) — a tri-state rather than a plain boolean so "the account query hasn't
+// own `userIsSubbed` gate) — a state rather than a plain boolean so "the account query hasn't
 // resolved yet" is a distinct, explicit state from "resolved and not premium": the two render
 // completely differently (a loading spinner vs. the subscription empty-state), and collapsing them
 // would flash the gate at every account-query cold start. `isPremium` is `undefined` for BOTH the
 // pending and the error case (an error never overwrites previously-cached data, and there is none on a
-// cold start) — the caller passes `accountQuery.data?.isPremium` directly, never a bespoke status check.
-export type PremiumGateState = "loading" | "gated" | "allowed"
+// cold start), so the query's status tells the two apart: a failed read with nothing cached is "error"
+// (the dialog offers a retry) rather than a spinner that never settles.
+export type PremiumGateState = "loading" | "error" | "gated" | "allowed"
 
-export function resolvePremiumGateState(isPremium: boolean | undefined): PremiumGateState {
+export function resolvePremiumGateState(isPremium: boolean | undefined, accountStatus: "pending" | "error" | "success"): PremiumGateState {
 	if (isPremium === undefined) {
-		return "loading"
+		return accountStatus === "error" ? "error" : "loading"
 	}
 
 	return isPremium ? "allowed" : "gated"

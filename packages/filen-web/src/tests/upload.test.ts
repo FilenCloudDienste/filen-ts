@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { QueryClient } from "@tanstack/react-query"
-import type { File as SdkFile, UuidStr } from "@filen/sdk-rs"
-import type { DriveItem } from "@/features/drive/lib/item"
+import { QueryClient, QueryObserver } from "@tanstack/react-query"
+import type { Dir, File as SdkFile, UuidStr } from "@filen/sdk-rs"
+import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import type { ErrorDTO } from "@/lib/sdk/errors"
 import type { Transfer, TerminalStatus } from "@/features/transfers/store/useTransfersStore"
 
@@ -47,13 +47,20 @@ vi.mock("@/features/drive/lib/heicUpload", async importOriginal => {
 	}
 })
 
-import { runUpload, startUploads, throttle, defaultUploadDeps, type RunUploadDeps } from "@/features/drive/lib/upload"
+import {
+	runUpload,
+	startUploads,
+	throttle,
+	defaultUploadDeps,
+	invalidateUploadedDirectorySizes,
+	type RunUploadDeps
+} from "@/features/drive/lib/upload"
 import { warmUploadThumbnail } from "@/features/drive/lib/thumbGenerators"
 import { useTransfersStore } from "@/features/transfers/store/useTransfersStore"
 import { queryClient } from "@/queries/client"
 import { ACCOUNT_QUERY_KEY } from "@/queries/account"
 import { addAccountStorageUsed } from "@/features/drive/lib/quota"
-import { queueListingCreate } from "@/features/drive/queries/drive"
+import { directorySizeQueryKey, driveListingQueryKey, queueListingCreate } from "@/features/drive/queries/drive"
 
 // UuidStr is a template-literal brand requiring at least 3 dashes (see @filen/sdk-rs) — pad a short
 // readable test label into a shape that satisfies it, mirroring queries/drive.test.ts's own fixture.
@@ -118,7 +125,6 @@ describe("runUpload (injected deps, no worker or query client)", () => {
 		const remove = vi.fn<(id: string) => void>()
 		const setItem = vi.fn<(id: string, item: DriveItem) => void>()
 		const patchCreated = vi.fn<(parentUuid: string | null, item: DriveItem) => void>()
-		const invalidateDirectorySize = vi.fn<(parentUuid: string | null) => void>()
 		const warmThumbnail = vi.fn<(uploaded: SdkFile, file: File) => void>()
 		const markAccountStale = vi.fn<() => void>()
 		const addStorageUsed = vi.fn<(bytes: bigint) => void>()
@@ -126,7 +132,6 @@ describe("runUpload (injected deps, no worker or query client)", () => {
 			upload,
 			store: { add, setProgress, settle, setItem, remove },
 			patchCreated,
-			invalidateDirectorySize,
 			markAccountStale,
 			addStorageUsed,
 			warmThumbnail
@@ -140,7 +145,6 @@ describe("runUpload (injected deps, no worker or query client)", () => {
 			setItem,
 			remove,
 			patchCreated,
-			invalidateDirectorySize,
 			markAccountStale,
 			addStorageUsed,
 			warmThumbnail
@@ -188,9 +192,6 @@ describe("runUpload (injected deps, no worker or query client)", () => {
 		// narrowItem routes the uploaded SDK file to the plain "file" arm (has `chunks`, and carries
 		// `favorited` — see features/drive/lib/item.ts's narrowFile).
 		expect(created).toMatchObject({ type: "file", data: { uuid: testUuid("new") } })
-		// The destination directory's own cached recursive size is now stale (see queries/drive.ts's
-		// invalidateDirectorySize) — the size-sort's async re-position depends on this firing.
-		expect(h.invalidateDirectorySize).toHaveBeenCalledWith("parent-uuid")
 		// Storage used moved; the account read waits for the next focus or mount rather than one per file.
 		expect(h.markAccountStale).toHaveBeenCalledOnce()
 		// The uploaded size lands in the cached storage used for the next quota pre-flight.
@@ -247,7 +248,7 @@ describe("runUpload (injected deps, no worker or query client)", () => {
 		expect(h.warmThumbnail).not.toHaveBeenCalled()
 	})
 
-	// Optional in the same DI sense as `cancel` and `invalidateDirectorySize` — a harness that does not
+	// Optional in the same DI sense as `cancel` and `markAccountStale` — a harness that does not
 	// care about the thumbnail path simply omits it, and the upload still completes.
 	it("completes cleanly when no warmThumbnail is wired", async () => {
 		const h = makeHarness()
@@ -266,7 +267,6 @@ describe("runUpload (injected deps, no worker or query client)", () => {
 
 		expect(h.upload).toHaveBeenCalledWith(null, expect.any(String), expect.any(File), expect.any(Function))
 		expect(h.patchCreated).toHaveBeenCalledWith(null, expect.objectContaining({ type: "file" }))
-		expect(h.invalidateDirectorySize).toHaveBeenCalledWith(null)
 	})
 
 	it("reports the first progress notification through to store.setProgress, narrowed to a number", async () => {
@@ -309,7 +309,6 @@ describe("runUpload (injected deps, no worker or query client)", () => {
 		expect(outcome).toEqual({ status: "error", dto })
 		expect(h.settle).toHaveBeenCalledWith(expect.any(String), "error", dto)
 		expect(h.patchCreated).not.toHaveBeenCalled()
-		expect(h.invalidateDirectorySize).not.toHaveBeenCalled()
 		expect(h.markAccountStale).not.toHaveBeenCalled()
 		expect(h.addStorageUsed).not.toHaveBeenCalled()
 	})
@@ -326,17 +325,16 @@ describe("runUpload (injected deps, no worker or query client)", () => {
 		})
 	})
 
-	it("settles cancelled then removes the row on a Cancelled rejection, returning a clean success", async () => {
+	it("settles cancelled then removes the row on a Cancelled rejection, returning a cancelled outcome", async () => {
 		const h = makeHarness()
 		h.upload.mockRejectedValue(sdkDto("Cancelled"))
 
 		const outcome = await runUpload(h.deps, { parentUuid: "parent-uuid", file: mockBrowserFile() })
 
-		expect(outcome).toEqual({ status: "success" })
+		expect(outcome).toEqual({ status: "cancelled" })
 		const id = h.settle.mock.calls[0]?.[0]
 		expect(h.settle).toHaveBeenCalledWith(id, "cancelled")
 		expect(h.remove).toHaveBeenCalledWith(id)
-		expect(h.invalidateDirectorySize).not.toHaveBeenCalled()
 		expect(h.markAccountStale).not.toHaveBeenCalled()
 		expect(h.addStorageUsed).not.toHaveBeenCalled()
 	})
@@ -523,6 +521,143 @@ describe("startUploads (real runUpload + defaultUploadDeps, mocked sdk client/qu
 		await startUploads([mockBrowserFile("a.txt", 1_024)], null)
 
 		expect(useTransfersStore.getState().transfers[0]?.bytesTransferred).toBe(512)
+	})
+})
+
+describe("startUploads — cancelled files", () => {
+	it("shows no summary when every file was cancelled", async () => {
+		uploadFile.mockRejectedValue(sdkDto("Cancelled"))
+
+		await startUploads([mockBrowserFile("a.txt"), mockBrowserFile("b.txt")], null)
+
+		expect(toastSuccess).not.toHaveBeenCalled()
+		expect(toastError).not.toHaveBeenCalled()
+	})
+
+	it("counts only the files that actually uploaded", async () => {
+		uploadFile.mockResolvedValueOnce(mockSdkFile()).mockRejectedValueOnce(sdkDto("Cancelled")).mockResolvedValueOnce(mockSdkFile())
+
+		await startUploads([mockBrowserFile("a.txt"), mockBrowserFile("b.txt"), mockBrowserFile("c.txt")], null)
+
+		expect(toastSuccess).toHaveBeenCalledExactlyOnceWith(expect.stringContaining("2"))
+		expect(toastError).not.toHaveBeenCalled()
+	})
+})
+
+// ---------------------------------------------------------------------------
+// invalidateUploadedDirectorySizes — against the mocked module's real QueryClient.
+// ---------------------------------------------------------------------------
+
+describe("invalidateUploadedDirectorySizes", () => {
+	function dirRow(uuid: UuidStr, parent: UuidStr): DriveItem {
+		const dir: Dir = {
+			uuid,
+			parent,
+			color: "default",
+			timestamp: 1_700_000_000_000n,
+			favorited: false,
+			meta: { type: "decoded", data: { name: uuid } }
+		}
+
+		return narrowItem(dir)
+	}
+
+	// A cached size entry whose query function counts its fetches, the way useDriveDirectorySizes leaves
+	// one: fetched once, with no observer.
+	async function cacheSize(uuid: string): Promise<ReturnType<typeof vi.fn>> {
+		const fetchSize = vi.fn(() => Promise.resolve({ size: 1n, files: 1n, dirs: 0n }))
+
+		await queryClient.query({ queryKey: directorySizeQueryKey(uuid), queryFn: fetchSize, staleTime: Infinity })
+
+		return fetchSize
+	}
+
+	function isInvalidated(uuid: string): boolean | undefined {
+		return queryClient.getQueryCache().find({ queryKey: directorySizeQueryKey(uuid), exact: true })?.state.isInvalidated
+	}
+
+	beforeEach(() => {
+		queryClient.clear()
+		queryClient.setQueryData(ACCOUNT_QUERY_KEY, { storageUsed: 0n, maxStorage: 1n << 40n })
+	})
+
+	it("stales the target and every ancestor a cached listing names, refetching only a row on screen", async () => {
+		const root = testUuid("root")
+		const grand = testUuid("grand")
+		const parent = testUuid("parent")
+		const target = testUuid("target")
+		const unrelated = testUuid("unrelated")
+
+		queryClient.setQueryData<DriveItem[]>(driveListingQueryKey({ variant: "drive", uuid: null }), [dirRow(grand, root)])
+		queryClient.setQueryData<DriveItem[]>(driveListingQueryKey({ variant: "drive", uuid: grand }), [dirRow(parent, grand)])
+		queryClient.setQueryData<DriveItem[]>(driveListingQueryKey({ variant: "drive", uuid: parent }), [
+			dirRow(target, parent),
+			dirRow(unrelated, parent)
+		])
+
+		// The user is looking at `parent`'s listing and dropped the files onto the `target` row.
+		const unsubscribe = new QueryObserver(queryClient, {
+			queryKey: driveListingQueryKey({ variant: "drive", uuid: parent }),
+			queryFn: () => Promise.resolve([]),
+			staleTime: Infinity
+		}).subscribe(() => undefined)
+
+		const targetFetch = await cacheSize(target)
+		const parentFetch = await cacheSize(parent)
+		const grandFetch = await cacheSize(grand)
+		const unrelatedFetch = await cacheSize(unrelated)
+
+		invalidateUploadedDirectorySizes(target)
+
+		await vi.waitFor(() => {
+			expect(targetFetch).toHaveBeenCalledTimes(2)
+		})
+
+		expect(isInvalidated(parent)).toBe(true)
+		expect(isInvalidated(grand)).toBe(true)
+		expect(parentFetch).toHaveBeenCalledTimes(1)
+		expect(grandFetch).toHaveBeenCalledTimes(1)
+		expect(isInvalidated(unrelated)).toBe(false)
+		expect(unrelatedFetch).toHaveBeenCalledTimes(1)
+
+		unsubscribe()
+	})
+
+	it("refetches a directory the batch created that is a row on screen", async () => {
+		const root = testUuid("root")
+		const created = testUuid("created")
+
+		queryClient.setQueryData<DriveItem[]>(driveListingQueryKey({ variant: "drive", uuid: null }), [dirRow(created, root)])
+
+		const unsubscribe = new QueryObserver(queryClient, {
+			queryKey: driveListingQueryKey({ variant: "drive", uuid: null }),
+			queryFn: () => Promise.resolve([]),
+			staleTime: Infinity
+		}).subscribe(() => undefined)
+
+		// Prefetched the moment the create patched it in, while its files were still uploading.
+		const createdFetch = await cacheSize(created)
+
+		invalidateUploadedDirectorySizes(null, [created])
+
+		await vi.waitFor(() => {
+			expect(createdFetch).toHaveBeenCalledTimes(2)
+		})
+
+		unsubscribe()
+	})
+
+	it("is wired into defaultUploadDeps and runs once per startUploads batch", async () => {
+		const target = testUuid("target")
+		const targetFetch = await cacheSize(target)
+
+		uploadFile.mockImplementation(() => Promise.resolve(mockSdkFile()))
+
+		await startUploads([mockBrowserFile("a.txt"), mockBrowserFile("b.txt")], target)
+
+		expect(defaultUploadDeps.invalidateDirectorySizes).toBe(invalidateUploadedDirectorySizes)
+		expect(isInvalidated(target)).toBe(true)
+		expect(targetFetch).toHaveBeenCalledTimes(1)
 	})
 })
 

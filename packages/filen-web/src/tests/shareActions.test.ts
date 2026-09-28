@@ -1,22 +1,24 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
-import type { Contact, Dir, File, SharedFile, SharedRootDir, SharingRole, UuidStr } from "@filen/sdk-rs"
+import type { Contact, Dir, File, SharedFile, SharedRootDir, SharedRootDirsAndFiles, SharingRole, UuidStr } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import type { ErrorDTO } from "@/lib/sdk/errors"
 
 // The real sdk client module imports a Vite `?worker`, unresolvable under node vitest — mock it down
 // to the ops this file exercises, mirroring driveActions.test.ts's mock boundary.
-const { shareDirectory, shareFile, removeSharedItem } = vi.hoisted(() => ({
+const { shareDirectory, shareFile, removeSharedItem, listSharedOutRoot } = vi.hoisted(() => ({
 	shareDirectory: vi.fn(),
 	shareFile: vi.fn(),
-	removeSharedItem: vi.fn()
+	removeSharedItem: vi.fn(),
+	listSharedOutRoot: vi.fn<() => Promise<SharedRootDirsAndFiles>>()
 }))
 
 vi.mock("@/lib/sdk/client", () => ({
 	sdkApi: {
 		shareDirectory,
 		shareFile,
-		removeSharedItem
+		removeSharedItem,
+		listSharedOutRoot
 	}
 }))
 
@@ -26,7 +28,7 @@ vi.mock("@/lib/sdk/client", () => ({
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
 import { queryClient as testQueryClient } from "@/queries/client"
-import { driveListingQueryKey } from "@/features/drive/queries/drive"
+import { driveListingQueryKey, driveListingQueryOptions } from "@/features/drive/queries/drive"
 import { shareItems, unshareItems } from "@/features/drive/lib/share/actions"
 
 beforeEach(() => {
@@ -377,6 +379,38 @@ describe("unshareItems", () => {
 
 		expect(outcome.failed).toEqual([{ item: target, error: dto }])
 		expect(testQueryClient.getQueryData(sharedOutRoot())).toEqual([target])
+	})
+
+	// The Shared by me root lists an item once per receiver; removing one share leaves the others.
+	it("removes only the unshared receiver's row, leaving the item's other receivers' rows", async () => {
+		const { item: alice } = sharedRootDirFixture({ sharingRole: { Receiver: { email: "alice@filen.io", id: 1 } } })
+		const { item: bob } = sharedRootDirFixture({ sharingRole: { Receiver: { email: "bob@filen.io", id: 2 } } })
+		testQueryClient.setQueryData(sharedOutRoot(), [alice, bob])
+		removeSharedItem.mockResolvedValue(undefined)
+
+		await unshareItems([alice], "sharedOut")
+
+		expect(testQueryClient.getQueryData(sharedOutRoot())).toEqual([bob])
+	})
+
+	it("drops the row from a read of the listing under way, which may predate the unshare", async () => {
+		const { raw, item: target } = sharedRootDirFixture()
+		const { item: sibling } = sharedRootFileFixture()
+		let settle: (listing: SharedRootDirsAndFiles) => void = () => undefined
+		testQueryClient.setQueryData(sharedOutRoot(), [target, sibling])
+		listSharedOutRoot.mockReturnValueOnce(
+			new Promise(resolve => {
+				settle = resolve
+			})
+		)
+		removeSharedItem.mockResolvedValue(undefined)
+		const read = testQueryClient.query({ ...driveListingQueryOptions("sharedOut", null), staleTime: 0 })
+
+		await unshareItems([target], "sharedOut")
+		settle({ dirs: [raw], files: [sibling.data.shareSource] })
+		await read
+
+		expect(testQueryClient.getQueryData(sharedOutRoot())).toEqual([sibling])
 	})
 
 	it("a cache miss (nobody has viewed the listing yet) is a no-op patch, not a conjured empty array", async () => {

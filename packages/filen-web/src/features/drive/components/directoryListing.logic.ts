@@ -2,6 +2,7 @@ import { droppedIds, driveItemName, isBlocked, filterHiddenItems, type BlockedUs
 import { getSharerIdentity, type DriveItem } from "@/features/drive/lib/item"
 import { sortDriveItems, type DriveSortBy } from "@/features/drive/lib/sort"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
+import { driveRowKey } from "@/features/drive/lib/rowKey"
 
 // Fail-open visibility check for a sharedIn item: an unresolved sharer identity (getSharerIdentity
 // returns null — the item isn't shared, or its role couldn't be read) always KEEPS the item; only a
@@ -171,18 +172,6 @@ export function filterDriveItemsByLocalSearch<T extends DriveItem>(items: readon
 	return items.filter(item => driveItemName(item).toLowerCase().includes(normalized))
 }
 
-// A row's identity: the Shared by me root lists an item once per receiver, and each row unshares only its
-// own receiver, so a shared root row is told apart by its counterpart too.
-function rowKey(item: DriveItem): string {
-	if (item.type !== "sharedRootDirectory" && item.type !== "sharedRootFile") {
-		return item.data.uuid
-	}
-
-	const role = item.data.sharingRole
-
-	return `${item.data.uuid}:${String("Receiver" in role ? role.Receiver.id : role.Sharer.id)}`
-}
-
 // Reconciles the store's possibly-stale selected-item snapshots against the freshest metadata in
 // the listing's live rows or search results before the bulk toolbar, a bulk dialog action, a menu or the
 // clipboard reads them — a rename/favorite/move/undecryptable-flip that landed after the item was selected
@@ -201,13 +190,13 @@ export function reconcileSelectedItems<T extends DriveItem>(selectedItems: T[], 
 	const positions = new Map<string, number>()
 
 	for (const [index, item] of selectedItems.entries()) {
-		positions.set(rowKey(item), index)
+		positions.set(driveRowKey(item), index)
 	}
 
 	let reconciled: T[] | null = null
 
 	for (const live of liveItems) {
-		const key = rowKey(live)
+		const key = driveRowKey(live)
 		const index = positions.get(key)
 
 		if (index === undefined) {

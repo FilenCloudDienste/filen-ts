@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactElement, type ReactNode } from "react"
+import { useEffect, useMemo, useState, type ReactElement, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { useNavigate } from "@tanstack/react-router"
 import { useShallow } from "zustand/shallow"
@@ -24,9 +24,10 @@ import {
 import { hiddenFilterAppliesTo } from "@/features/drive/lib/hiddenItems"
 import { type DriveSortBy } from "@/features/drive/lib/sort"
 import { resolveDriveNavigationTarget, splatToUuids } from "@/features/drive/lib/navigate"
-import { asDirectoryOrFile } from "@/features/drive/lib/item"
+import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import { previewableSiblings } from "@/features/drive/lib/preview.logic"
-import { selectableForSelectAll } from "@/features/drive/lib/selectionFlags"
+import { aggregateDriveSelectionFlags, selectableForSelectAll } from "@/features/drive/lib/selectionFlags"
+import { driveRowKey } from "@/features/drive/lib/rowKey"
 import { drivePreviewSources } from "@/features/preview/lib/previewSource"
 import { deriveAudioHandoff, isAudioItem } from "@/features/audio/lib/handoff"
 import { audioEngine } from "@/features/audio/lib/audioEngine"
@@ -44,7 +45,7 @@ import { asErrorDTO } from "@/lib/sdk/errors"
 import { useAction } from "@/lib/keymap/useAction"
 import { useBlockedUsers } from "@/features/contacts/hooks/useBlockedUsers"
 import { canOpenItem, driveItemActions } from "@/features/drive/components/itemMenu.logic"
-import { isBulkDownloadEnabled } from "@/features/drive/components/bulkActionBar.logic"
+import { driveBulkActions, isBulkDownloadEnabled } from "@/features/drive/components/bulkActionBar.logic"
 import {
 	filterDriveItemsByLocalSearch,
 	filterSharedInByBlocked,
@@ -93,6 +94,8 @@ import { ListingDropSurface } from "@/features/drive/components/listingDropSurfa
 // virtualizer padding, because the marquee reads the listbox's computed paddings for its hit math.
 const GRID_LISTBOX_STYLE = { padding: GRID_INSET }
 
+const EMPTY_LISTING: DriveItem[] = []
+
 // Stable identity so a disabled/empty directorySizes read never re-triggers row renders — module scope,
 // not recreated per render (a fresh `new Map()` every render would defeat DriveRow's memoization).
 const EMPTY_DIRECTORY_SIZES: ReadonlyMap<string, number> = new Map()
@@ -109,6 +112,11 @@ export interface DirectoryListingProps {
 // list, so no route needs to change again when it does. The current directory's own uuid is always
 // the splat's last segment (null at the root, where the splat is empty).
 export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
+	// Kept out of the React Compiler: the TanStack virtualizers reached through useDriveVirtualizer return
+	// one mutable instance, so row JSX memoized on it would go stale on scroll. The listing re-renders as it
+	// scrolls and on every cursor move and marquee frame, so its derivations below are memoized by hand.
+	"use no memo"
+
 	const { t } = useTranslation(["drive", "common"])
 	const navigate = useNavigate()
 	// The full ancestor-uuid chain, current directory last. Also handed to the listing query as the
@@ -122,13 +130,17 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	const viewModePrefsQuery = useViewModePreferencesQuery()
 	const hiddenPrefQuery = useHideHiddenItemsPreferenceQuery()
 	const isOnline = useIsOnline()
+	// Rows on screen, whether from a successful fetch or kept through a failed background refetch (which
+	// leaves status "error" with its data, and the listing keeps rendering it). A still-loading or
+	// never-loaded listing has none.
+	const listingReady = listingQuery.data !== undefined
 	// New directory / upload make sense in the navigable "drive" variant AND inside an owned nested
 	// sharedOut directory (canWriteVariant) — recents/favorites/trash/links/sharedIn/the sharedOut ROOT
 	// have no directory to write into, and a still-loading listing has no confirmed uuid to target yet.
 	// Shared by NewDirectory, UploadMenu and UploadDropzone below (all three write into the same
 	// `uuid`). Offline folds in here too: all three write to the SDK, which has nothing to reach while
 	// offline.
-	const writeDisabled = !canWriteVariant(variant, uuid) || listingQuery.status !== "success" || !isOnline
+	const writeDisabled = !canWriteVariant(variant, uuid) || !listingReady || !isOnline
 	// Gates the underlying contacts/blocked fetch itself (see useBlockedUsers.ts) — only sharedIn
 	// filters by it, so the other 5 variants skip the getContacts/getBlockedContacts worker round trip
 	// on every mount and window refocus.
@@ -148,7 +160,13 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 
 	// sharedIn ONLY: hide items shared by a blocked user (fail-open — see directoryListing.logic.ts).
 	// Every other variant's listing data passes straight through, untouched.
-	const visibleItems = variant === "sharedIn" ? filterSharedInByBlocked(listingQuery.data ?? [], blocked) : (listingQuery.data ?? [])
+	const visibleItems = useMemo(
+		() =>
+			variant === "sharedIn"
+				? filterSharedInByBlocked(listingQuery.data ?? EMPTY_LISTING, blocked)
+				: (listingQuery.data ?? EMPTY_LISTING),
+		[variant, listingQuery.data, blocked]
+	)
 	// Subtree search rooted at the CURRENT directory (uuid), gated to the "drive" variant — recents/
 	// favorites/trash/shared have no navigable subtree of their own for it to search. While active,
 	// search results stand in for the normal listing query everywhere below: selection, the listbox's
@@ -174,26 +192,35 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	}
 
 	const localSearchActive = variant !== "drive" && localFilter.trim().length > 0
-	const locallyFilteredItems = variant === "drive" ? visibleItems : filterDriveItemsByLocalSearch(visibleItems, localFilter)
+	const locallyFilteredItems = useMemo(
+		() => (variant === "drive" ? visibleItems : filterDriveItemsByLocalSearch(visibleItems, localFilter)),
+		[variant, visibleItems, localFilter]
+	)
+	const sourceItems = search.active ? search.results : locallyFilteredItems
 
 	// Threaded ONCE here (not per-row — see driveRow.tsx's own comment) and read down into every row's
 	// size column AND the size sort below. Fed the PRE-sort item set (uuid-keyed, order-independent —
 	// see useDriveDirectorySizes.logic.ts), not sortedItems: sortedItems below depends on this map, so
 	// feeding it sortedItems would be circular. Gated to list view: DriveTile shows no size at all
 	// (mirrors filen-mobile's grid item, which never mounts a size query either), so prefetching while
-	// the grid is showing would pay for recursive server-side size walks nothing on screen reads.
+	// the grid is showing would pay for recursive server-side size walks nothing on screen reads. Search
+	// hits span the whole subtree, so they show the sizes already cached and warm none.
 	const directorySizes =
-		useDriveDirectorySizes({ items: search.active ? search.results : locallyFilteredItems, enabled: effectiveViewMode === "list" }) ??
+		useDriveDirectorySizes({ items: sourceItems, enabled: effectiveViewMode === "list", prefetch: !search.active }) ??
 		EMPTY_DIRECTORY_SIZES
 	// Order is resolved BEFORE anything is hidden (see resolveListingDisplayItems) — everything
 	// downstream keeps reading `sortedItems` and now sees the post-hide set.
-	const display = resolveListingDisplayItems({
-		items: search.active ? search.results : locallyFilteredItems,
-		sortBy: effectiveSort,
-		directorySizes,
-		hide: hideHidden,
-		...(search.active ? { search: { total: search.total, parentPaths: search.parentPaths } } : {})
-	})
+	const display = useMemo(
+		() =>
+			resolveListingDisplayItems({
+				items: sourceItems,
+				sortBy: effectiveSort,
+				directorySizes,
+				hide: hideHidden,
+				...(search.active ? { search: { total: search.total, parentPaths: search.parentPaths } } : {})
+			}),
+		[sourceItems, effectiveSort, directorySizes, hideHidden, search.active, search.total, search.parentPaths]
+	)
 	const sortedItems = display.items
 	const hiddenCount = display.hiddenCount
 	const resolvedCount = display.resolvedCount
@@ -204,11 +231,14 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	// captured at select time: writes and socket events replace a row in its listing, never in the
 	// selection — see reconcileSelectedItems' own doc comment. Against the listing's unfiltered rows, so a
 	// row the local filter hides is kept current too.
-	const reconciledSelectedItems = reconcileSelectedItems(selectedItems, search.active ? search.results : visibleItems)
-	// Derived once per render so each row/tile's membership check is an O(1) `.has()` instead of an
-	// O(selected) `.some()` — select-all in a large directory would otherwise make every render
-	// O(visible * selected).
-	const selectedUuids = new Set(selectedItems.map(item => item.data.uuid))
+	const reconciledSelectedItems = useMemo(
+		() => reconcileSelectedItems(selectedItems, search.active ? search.results : visibleItems),
+		[selectedItems, search.active, search.results, visibleItems]
+	)
+	// Each row/tile's membership check is an O(1) `.has()` instead of an O(selected) `.some()` — select-all
+	// in a large directory would otherwise make every render O(visible * selected). Keyed by row, so one
+	// Shared by me receiver's row being selected never highlights another receiver's.
+	const selectedRowKeys = useMemo(() => new Set(selectedItems.map(driveRowKey)), [selectedItems])
 
 	const { isDialogOpen, handleItemAction, handleBulkDialogAction, handleEmptyTrash, openPreview, renderActiveDialog } =
 		useDriveDialogHost({
@@ -296,6 +326,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	// listeners; renders the rectangle returned below inside the scrolled content layer.
 	const marquee = useMarqueeSelection({
 		items: sortedItems,
+		keyOf: driveRowKey,
 		viewMode: effectiveViewMode,
 		columns,
 		geometry: {
@@ -368,22 +399,9 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	// selected hit with no navigation involved — so nothing else intersects `selectedItems` with the
 	// live result set ([variant, splat] in useDriveListboxNav only resets on navigation; SearchInput's
 	// own onKeyDown consumes Escape locally to clear the query, so drive.clearSelection never reaches
-	// the store either). Mirrors the sharedIn purge above.
-	//
-	// Keyed on a uuid-content signature, not `sortedItems` itself: resolveListingDisplayItems/
-	// buildSearchResults rebuild a brand-new array of brand-new items every render regardless of
-	// whether a push changed anything, so a reference-keyed effect would re-fire on every unrelated
-	// re-render — this string stays `===`-stable across those, so an unchanged heartbeat can't fight
-	// an in-progress in-search selection, and only changes when a push actually adds or drops a hit.
-	// The normal listing's own rarer refetch-drop case stays out of scope — its items aren't
-	// reference-stable either, so covering it here isn't free.
-	const searchResultUuids = search.active
-		? sortedItems
-				.map(item => item.data.uuid)
-				.sort()
-				.join(",")
-		: ""
-
+	// the store either). Mirrors the sharedIn purge above. `sortedItems` is memoized above, so this
+	// re-runs when a push, the sort, a size or the hide filter changes it, never on an unrelated
+	// re-render. The normal listing's own rarer refetch-drop case stays out of scope.
 	useEffect(() => {
 		if (!search.active) {
 			return
@@ -394,27 +412,20 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 		if (toRemove.length > 0) {
 			useDriveStore.getState().removeFromSelection(toRemove)
 		}
-		// eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the signature above, not sortedItems — see comment above
-	}, [search.active, searchResultUuids])
+	}, [search.active, sortedItems])
 
 	// Hidden-selection purge: a row the display filter removed must not stay selected, or the floating
 	// bulk bar keeps offering Trash/Move/Delete over rows the user can neither see nor verify (its
-	// confirms count rows, they don't name them). Keyed on the uuid signature for the same reason the
-	// ghost purge above is — `display` is rebuilt every render — so the uuids are read back out of the
-	// key itself rather than the array.
-	const hiddenUuidsKey = display.hiddenUuids.join(",")
+	// confirms count rows, they don't name them).
+	const hiddenUuids = display.hiddenUuids
 
 	useEffect(() => {
-		if (hiddenUuidsKey.length === 0) {
-			return
-		}
-
-		const toRemove = hiddenSelectionUuids(useDriveStore.getState().selectedItems, hiddenUuidsKey.split(","))
+		const toRemove = hiddenSelectionUuids(useDriveStore.getState().selectedItems, hiddenUuids)
 
 		if (toRemove.length > 0) {
 			useDriveStore.getState().removeFromSelection(toRemove)
 		}
-	}, [hiddenUuidsKey])
+	}, [hiddenUuids])
 
 	// null (a column header's third click) clears this location back to the default order.
 	async function applySortChange(next: DriveSortBy | null): Promise<void> {
@@ -522,24 +533,29 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 
 	// Registered above at module scope. preventDefault unconditionally — Backspace's browser default
 	// (navigate back) must never fire while this listing has focus, guarded case or not. Guards: empty
-	// selection, a wired dialog already open (isDialogOpen — see its own comment), and trash itself
-	// (permanent delete stays menu-only + explicitly confirmed, never a bare keypress).
+	// selection, a wired dialog already open (isDialogOpen — see its own comment), and every surface the
+	// bulk bar offers no Trash on: trash itself (permanent delete stays menu-only + explicitly confirmed,
+	// never a bare keypress) and Shared with me (items someone else owns).
 	useAction(
 		"drive.trash",
 		keyboardEvent => {
 			keyboardEvent.preventDefault()
 
-			if (selectedItems.length === 0 || isDialogOpen || variant === "trash" || !isOnline) {
+			if (
+				reconciledSelectedItems.length === 0 ||
+				isDialogOpen ||
+				!isOnline ||
+				!driveBulkActions(variant, aggregateDriveSelectionFlags(reconciledSelectedItems)).some(
+					descriptor => descriptor.id === "trash"
+				)
+			) {
 				return
 			}
 
 			handleBulkDialogAction("trash")
 		},
 		undefined,
-		// length-only gate — reconciliation never changes selection COUNT (reconcileSelectedItems only
-		// ever refreshes fields, see its own doc comment), so the raw store array is fine here; the
-		// dialog host itself already closes over the reconciled items for the actual trash call.
-		[selectedItems, isDialogOpen, variant, isOnline]
+		[reconciledSelectedItems, isDialogOpen, variant, isOnline]
 	)
 
 	// Registered above at module scope. preventDefault unconditionally — mod+s's browser default
@@ -578,7 +594,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 		variant,
 		uuid,
 		ancestry: pathUuids,
-		listing: listingQuery.status === "success" ? listingQuery.data : undefined,
+		listing: listingQuery.data,
 		selectedItems: reconciledSelectedItems,
 		isOnline,
 		isDialogOpen
@@ -647,10 +663,12 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 				action={
 					writeDisabled ? undefined : (
 						<>
+							{/* The toolbar's copy owns the shortcut: both registering it would open two dialogs. */}
 							<NewDirectory
 								parentUuid={uuid}
 								dialogOpen={isDialogOpen}
 								hiddenNotice={hideHidden}
+								shortcut={false}
 							/>
 							<UploadMenu
 								parentUuid={uuid}
@@ -732,7 +750,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 												item={item}
 												index={virtualRow.index}
 												total={sortedItems.length}
-												selected={selectedUuids.has(item.data.uuid)}
+												selected={selectedRowKeys.has(driveRowKey(item))}
 												active={virtualRow.index === safeActiveIndex}
 												variant={variant}
 												splat={splat}
@@ -784,11 +802,11 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 
 												return (
 													<DriveTile
-														key={item.data.uuid}
+														key={driveRowKey(item)}
 														item={item}
 														index={itemIndex}
 														total={sortedItems.length}
-														selected={selectedUuids.has(item.data.uuid)}
+														selected={selectedRowKeys.has(driveRowKey(item))}
 														active={itemIndex === safeActiveIndex}
 														variant={variant}
 														splat={splat}
@@ -843,7 +861,8 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 					splat={splat}
 				/>
 				<div className="flex shrink-0 items-center gap-2">
-					{isEmptyTrashTriggerVisible(variant, sortedItems.length) ? (
+					{/* The whole trash, not the rows the filter leaves: Empty trash acts on all of it. */}
+					{isEmptyTrashTriggerVisible(variant, visibleItems.length) ? (
 						<EmptyTrashButton
 							onClick={handleEmptyTrash}
 							disabled={!isOnline}
@@ -875,7 +894,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 						onChange={next => {
 							void applySortChange(next)
 						}}
-						disabled={!isSortableVariant(variant) || listingQuery.status !== "success"}
+						disabled={!isSortableVariant(variant) || !listingReady}
 					/>
 					<ViewModeToggle
 						value={effectiveViewMode}
@@ -922,7 +941,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 					ancestry={pathUuids}
 					// Not over search results: they come from all over the subtree, not from the directory on
 					// screen.
-					disabled={!canDragVariant(variant) || listingQuery.status !== "success" || search.active}
+					disabled={!canDragVariant(variant) || !listingReady || search.active}
 				>
 					{/* Full bleed to the content card's side and bottom edges; only the top rule separates it
 					    from the controls above. */}
@@ -985,7 +1004,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 					</div>
 					{/* Bottom-anchored floating selection bar — overlays the listing container, replacing
 					    nothing in the toolbar. */}
-					{listingQuery.status === "success" && selectedItems.length > 0 ? (
+					{listingReady && selectedItems.length > 0 ? (
 						<div className="pointer-events-none absolute inset-x-6 bottom-4 z-10 flex justify-center">
 							<BulkActionBar
 								variant={variant}

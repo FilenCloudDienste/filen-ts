@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { createElement, type ReactElement, type ReactNode } from "react"
-import { act, cleanup, render, screen } from "@testing-library/react"
+import { Children, createElement, isValidElement, type ReactElement, type ReactNode } from "react"
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { QueryClient } from "@tanstack/react-query"
 import type { Dir, File, SharedFile, SharedRootDir, SharingRole, UuidStr } from "@filen/sdk-rs"
 
@@ -12,8 +12,24 @@ import type { Dir, File, SharedFile, SharedRootDir, SharingRole, UuidStr } from 
 // selection purges actually run. Those decisions live only in the component, so this file renders it with
 // its data sources stubbed and its presentational children reduced to prop probes.
 
-const { navigate, useBlockedUsers, useIsOnline, searchState } = vi.hoisted(() => ({
+const {
+	navigate,
+	useBlockedUsers,
+	useIsOnline,
+	searchState,
+	useAction,
+	handleBulkDialogAction,
+	virtualizerItems,
+	useDriveDirectorySizes,
+	EmptyState
+} = vi.hoisted(() => ({
 	navigate: vi.fn(),
+	useDriveDirectorySizes: vi.fn(),
+	EmptyState: vi.fn((_props: { action?: ReactNode }) => null),
+	useAction: vi.fn(),
+	handleBulkDialogAction: vi.fn(),
+	// Every items array the listing hands its virtualizer, in render order.
+	virtualizerItems: [] as unknown[],
 	useBlockedUsers: vi.fn(),
 	useIsOnline: vi.fn(() => true),
 	searchState: {
@@ -39,9 +55,9 @@ vi.mock("@/lib/useIsOnline", () => ({ useIsOnline }))
 vi.mock("@/features/drive/hooks/useDriveSearch", () => ({ useDriveSearch: () => searchState.current }))
 // Document-level keymap registration needs the app's hotkeys provider; the listing's shortcut bodies are
 // not this file's subject.
-vi.mock("@/lib/keymap/useAction", () => ({ useAction: vi.fn() }))
+vi.mock("@/lib/keymap/useAction", () => ({ useAction }))
 vi.mock("@/features/audio/lib/audioEngine", () => ({ audioEngine: { enqueueAndPlay: vi.fn() } }))
-vi.mock("@/features/drive/hooks/useDriveDirectorySizes", () => ({ useDriveDirectorySizes: () => undefined }))
+vi.mock("@/features/drive/hooks/useDriveDirectorySizes", () => ({ useDriveDirectorySizes }))
 vi.mock("@/features/drive/hooks/useMarqueeSelection", () => ({
 	useMarqueeSelection: () => ({ rect: null, onPointerDown: vi.fn() })
 }))
@@ -49,7 +65,7 @@ vi.mock("@/features/drive/hooks/useDriveDialogHost", () => ({
 	useDriveDialogHost: () => ({
 		isDialogOpen: false,
 		handleItemAction: vi.fn(),
-		handleBulkDialogAction: vi.fn(),
+		handleBulkDialogAction,
 		handleEmptyTrash: vi.fn(),
 		openPreview: vi.fn(),
 		renderActiveDialog: () => null
@@ -60,6 +76,8 @@ vi.mock("@/features/drive/hooks/useDriveDialogHost", () => ({
 // keeps the mapping the component actually decides — WHICH items reach the listbox — observable.
 vi.mock("@/features/drive/hooks/useDriveVirtualizer", () => ({
 	useDriveVirtualizer: (items: { data: { uuid: string } }[]) => {
+		virtualizerItems.push(items)
+
 		const virtualizer = {
 			scrollToIndex: vi.fn(),
 			getTotalSize: () => items.length * 40,
@@ -83,13 +101,28 @@ vi.mock("@/features/drive/hooks/useDriveVirtualizer", () => ({
 vi.mock("@/features/drive/components/breadcrumb", () => ({ Breadcrumb: () => null }))
 vi.mock("@/features/drive/components/sortMenu", () => ({ SortMenu: () => null }))
 vi.mock("@/features/drive/components/viewModeToggle", () => ({ ViewModeToggle: () => null }))
-vi.mock("@/features/drive/components/searchInput", () => ({ SearchInput: () => null }))
-vi.mock("@/features/drive/components/emptyTrashButton", () => ({ EmptyTrashButton: () => null }))
+vi.mock("@/features/drive/components/searchInput", () => ({
+	SearchInput: (props: { value: string; onChange: (value: string) => void }) =>
+		createElement("input", {
+			"data-testid": "search-input",
+			value: props.value,
+			onChange: (event: { target: { value: string } }) => {
+				props.onChange(event.target.value)
+			}
+		})
+}))
+vi.mock("@/features/drive/components/emptyTrashButton", () => ({
+	EmptyTrashButton: () => createElement("div", { "data-testid": "empty-trash" })
+}))
 vi.mock("@/components/loadingState", () => ({ LoadingState: () => null }))
-vi.mock("@/features/drive/components/emptyState", () => ({ EmptyState: () => null }))
+vi.mock("@/features/drive/components/emptyState", () => ({ EmptyState }))
 vi.mock("@/features/drive/components/newDirectory", () => ({
-	NewDirectory: (props: { disabled?: boolean }) =>
-		createElement("div", { "data-testid": "new-directory", "data-disabled": String(props.disabled === true) }),
+	NewDirectory: (props: { disabled?: boolean; shortcut?: boolean }) =>
+		createElement("div", {
+			"data-testid": "new-directory",
+			"data-disabled": String(props.disabled === true),
+			"data-shortcut": String(props.shortcut !== false)
+		}),
 	// The listing's destination host mounts its name dialog; closed, it renders nothing.
 	NewDirectoryDialog: () => null
 }))
@@ -110,8 +143,20 @@ vi.mock("@/features/drive/components/uploadDropzone", () => ({
 		createElement("div", { "data-testid": "upload-dropzone", "data-disabled": String(props.disabled === true) }, props.children)
 }))
 vi.mock("@/features/drive/components/driveRow", () => ({
-	DriveRow: (props: { item: { data: { uuid: string; decryptedMeta?: { name?: string } | null } } }) =>
-		createElement("div", { "data-testid": "row", "data-uuid": props.item.data.uuid }, props.item.data.decryptedMeta?.name ?? "")
+	DriveRow: (props: {
+		item: { data: { uuid: string; decryptedMeta?: { name?: string } | null; sharingRole?: { Receiver?: { email: string } } } }
+		selected: boolean
+	}) =>
+		createElement(
+			"div",
+			{
+				"data-testid": "row",
+				"data-uuid": props.item.data.uuid,
+				"data-receiver": props.item.data.sharingRole?.Receiver?.email ?? "",
+				"data-selected": String(props.selected)
+			},
+			props.item.data.decryptedMeta?.name ?? ""
+		)
 }))
 vi.mock("@/features/drive/components/driveTile", () => ({ DriveTile: () => null }))
 vi.mock("@/features/drive/components/bulkActionBar", () => ({
@@ -131,7 +176,7 @@ vi.mock("@/features/drive/components/bulkActionBar", () => ({
 }))
 
 const { listingQuery, hiddenPref } = vi.hoisted(() => ({
-	listingQuery: { current: { data: [] as unknown[], status: "success", isRefetchError: false, error: null } },
+	listingQuery: { current: { data: [] as unknown[] | undefined, status: "success", isRefetchError: false, error: null as Error | null } },
 	hiddenPref: { current: false }
 }))
 
@@ -149,6 +194,7 @@ import { deriveBlockedUsers, EMPTY_BLOCKED_USERS } from "@filen/shared"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { DirectoryListing } from "@/features/drive/components/directoryListing"
+import { NewDirectory } from "@/features/drive/components/newDirectory"
 
 function testUuid(label: string): UuidStr {
 	return `${label}-0000-0000-0000-000000000000` as UuidStr
@@ -222,7 +268,7 @@ function renderListing(options: { variant?: DriveVariant; splat?: string; items?
 	const variant = options.variant ?? "drive"
 	const splat = options.splat ?? ""
 
-	listingQuery.current = { ...listingQuery.current, data: options.items ?? [] }
+	listingQuery.current = { ...listingQuery.current, data: options.items ?? listingQuery.current.data }
 
 	const rendered = render(createElement(DirectoryListing, { variant, splat }))
 
@@ -265,6 +311,7 @@ beforeEach(() => {
 	hiddenPref.current = false
 	searchState.current = { ...searchState.current, active: false, results: [], total: 0n, status: "idle" }
 	useDriveStore.setState({ selectedItems: [], pendingReveal: null })
+	virtualizerItems.length = 0
 })
 
 afterEach(cleanup)
@@ -286,10 +333,26 @@ describe("DirectoryListing — write gate", () => {
 	})
 
 	it("disables them while the listing is still loading — there is no confirmed target uuid yet", () => {
-		listingQuery.current = { data: [], status: "pending", isRefetchError: false, error: null }
+		listingQuery.current = { data: undefined, status: "pending", isRefetchError: false, error: null }
 		renderListing()
 
 		expect(writeSurfaceStates()).toEqual({ newDirectory: "true", uploadMenu: "true", dropzone: "true", backgroundMenu: "absent" })
+	})
+
+	// A failed background refetch keeps its rows (status "error" with data), and the listing keeps
+	// rendering them — so it must keep offering what those rows offer.
+	it("keeps them enabled, and the bulk bar up, when a background refetch fails over rows still on screen", () => {
+		const documents = narrowItem(mockDir("Documents"))
+
+		listingQuery.current = { data: [documents], status: "error", isRefetchError: true, error: new Error("refetch failed") }
+
+		const { select } = renderListing()
+
+		select([documents])
+
+		expect(renderedNames()).toEqual(["Documents"])
+		expect(writeSurfaceStates()).toEqual({ newDirectory: "false", uploadMenu: "false", dropzone: "false", backgroundMenu: "false" })
+		expect(screen.getByTestId("bulk-bar").textContent).toBe("Documents")
 	})
 
 	it("disables them on the sharedOut ROOT but enables them inside an owned nested sharedOut directory", () => {
@@ -317,6 +380,19 @@ describe("DirectoryListing — write gate", () => {
 		renderListing()
 
 		expect(writeSurfaceStates()).toEqual({ newDirectory: "false", uploadMenu: "false", dropzone: "false", backgroundMenu: "false" })
+	})
+
+	// Both copies registering the shortcut would open two dialogs on one keypress.
+	it("leaves the New directory shortcut to the toolbar when the empty state offers the control too", () => {
+		renderListing()
+
+		const action = EmptyState.mock.lastCall?.[0].action
+		const emptyStateCopy = Children.toArray(isValidElement<{ children: ReactNode }>(action) ? action.props.children : null).find(
+			(child): child is ReactElement<{ shortcut?: boolean }> => isValidElement(child) && child.type === NewDirectory
+		)
+
+		expect(emptyStateCopy?.props.shortcut).toBe(false)
+		expect(screen.getByTestId("new-directory").getAttribute("data-shortcut")).toBe("true")
 	})
 
 	it("drops the selection when the empty-space menu opens, as a click-away does", () => {
@@ -472,6 +548,19 @@ describe("DirectoryListing — search-driven selection reconcile", () => {
 		expect(screen.getByTestId("bulk-bar").textContent).toBe("New name")
 	})
 
+	// Hits span the whole subtree: warming each one's size would be a recursive server-side walk per hit.
+	it("shows search hits' cached sizes without warming new ones", () => {
+		renderListing({ variant: "drive", items: [narrowItem(mockDir("Documents"))] })
+
+		expect(useDriveDirectorySizes).toHaveBeenLastCalledWith(expect.objectContaining({ prefetch: true }))
+
+		cleanup()
+		activateSearch([fresh])
+		renderListing({ variant: "drive" })
+
+		expect(useDriveDirectorySizes).toHaveBeenLastCalledWith(expect.objectContaining({ items: [fresh], prefetch: false }))
+	})
+
 	it("drops a selected hit that a push removed from the result set", () => {
 		activateSearch([fresh, dropped])
 
@@ -482,5 +571,97 @@ describe("DirectoryListing — search-driven selection reconcile", () => {
 		refresh()
 
 		expect(useDriveStore.getState().selectedItems.map(item => item.data.uuid)).toEqual([fresh.data.uuid])
+	})
+})
+
+// Shared by me lists an item once per receiver: each row is its own row, never a copy of another's state.
+describe("DirectoryListing — per-receiver rows on the Shared by me root", () => {
+	it("highlights only the receiver row that was selected", () => {
+		const row = (id: number, email: string) => narrowItem(mockSharedFile("Report", { Receiver: { email, id } }))
+		const carol = row(2, "carol@x.com")
+		const { select } = renderListing({ variant: "sharedOut", items: [row(1, "bob@x.com"), carol] })
+
+		select([carol])
+
+		const selectedReceivers = screen
+			.getAllByTestId("row")
+			.filter(element => element.getAttribute("data-selected") === "true")
+			.map(element => element.getAttribute("data-receiver"))
+
+		expect(selectedReceivers).toEqual(["carol@x.com"])
+	})
+})
+
+// The listing re-renders on every scroll frame, cursor move and marquee frame; none of those may rebuild
+// (and so re-sort) the rows every consumer reads.
+describe("DirectoryListing — derived rows stay stable across unrelated re-renders", () => {
+	it("hands the virtualizer the same rows when only the selection changed", () => {
+		for (const variant of ["drive", "sharedIn", "trash"] as const) {
+			const documents = narrowItem(mockDir("Documents"))
+			const { select } = renderListing({ variant, items: [documents, narrowItem(mockFile("report.pdf"))] })
+			const before = virtualizerItems.at(-1)
+
+			select([documents])
+
+			expect(virtualizerItems.length).toBeGreaterThan(1)
+			expect(virtualizerItems.at(-1)).toBe(before)
+
+			cleanup()
+			virtualizerItems.length = 0
+		}
+	})
+})
+
+// Every other Trash entry point withholds Trash where the bulk bar does.
+describe("DirectoryListing — Delete/Backspace trash shortcut", () => {
+	function pressTrash(): void {
+		const registration = useAction.mock.calls.findLast(call => call[0] === "drive.trash")
+		const handler = registration?.[1] as ((event: { preventDefault: () => void }) => void) | undefined
+
+		act(() => {
+			handler?.({ preventDefault: vi.fn() })
+		})
+	}
+
+	it("opens the trash confirm for owned items", () => {
+		const documents = narrowItem(mockDir("Documents"))
+		const { select } = renderListing({ variant: "drive", items: [documents] })
+
+		select([documents])
+		pressTrash()
+
+		expect(handleBulkDialogAction).toHaveBeenCalledWith("trash")
+	})
+
+	it("does nothing in Shared with me or in the trash, where the bulk bar offers no Trash", () => {
+		for (const variant of ["sharedIn", "trash"] as const) {
+			const shared = narrowItem(mockSharedFile("FromFriend", OK_ROLE))
+			const { select } = renderListing({ variant, items: [shared] })
+
+			select([shared])
+			pressTrash()
+
+			expect(handleBulkDialogAction).not.toHaveBeenCalled()
+
+			cleanup()
+		}
+	})
+})
+
+// Empty trash empties the whole trash, whatever the local filter shows.
+describe("DirectoryListing — Empty trash trigger", () => {
+	it("stays while a filter matches nothing in a non-empty trash", () => {
+		renderListing({ variant: "trash", items: [narrowItem(mockFile("report.pdf"))] })
+
+		fireEvent.change(screen.getByTestId("search-input"), { target: { value: "no such name" } })
+
+		expect(renderedNames()).toEqual([])
+		expect(screen.queryByTestId("empty-trash")).not.toBeNull()
+	})
+
+	it("is absent from an empty trash", () => {
+		renderListing({ variant: "trash", items: [] })
+
+		expect(screen.queryByTestId("empty-trash")).toBeNull()
 	})
 })

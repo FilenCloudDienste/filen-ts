@@ -1,9 +1,9 @@
 import type { Contact } from "@filen/sdk-rs"
-import { removeByUuid } from "@filen/shared"
 import { sdkApi } from "@/lib/sdk/client"
 import { queryClient } from "@/queries/client"
-import { driveListingQueryKey } from "@/features/drive/queries/drive"
+import { batchListingPatches, driveListingQueryKey, rootListingQueryUpdate } from "@/features/drive/queries/drive"
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
+import { driveRowKey } from "@/features/drive/lib/rowKey"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { runOp } from "@/lib/actions/outcome"
 import { runBulk, type BulkOutcome } from "@/features/drive/lib/bulk"
@@ -72,19 +72,26 @@ export async function shareItems(items: DriveItem[], contacts: Contact[]): Promi
 // the flattened `data` a directory arm carries has no `inner`, matching neither SharedRootDir nor
 // SharedFile (see item.ts).
 export function unshareItems(items: DriveItem[], variant: DriveVariant): Promise<BulkOutcome<DriveItem>> {
-	return runBulk(items, async item => {
-		if (item.type !== "sharedRootDirectory" && item.type !== "sharedRootFile") {
-			throw new Error(`unshareItems: item type "${item.type}" has no share source`)
-		}
+	return batchListingPatches(() =>
+		runBulk(items, async item => {
+			if (item.type !== "sharedRootDirectory" && item.type !== "sharedRootFile") {
+				throw new Error(`unshareItems: item type "${item.type}" has no share source`)
+			}
 
-		await runOp(sdkApi.removeSharedItem(item.data.shareSource))
+			await runOp(sdkApi.removeSharedItem(item.data.shareSource))
 
-		// The item vanishes from the shared ROOT listing it lives in (sharedIn or sharedOut, whichever
-		// `variant` names) — no cross-surface patch needed, unlike a normal drive write: removing a
-		// share never touches an owned listing. `prev === undefined` (nobody has viewed this listing
-		// yet) is left alone rather than conjuring a `[]`, same rationale as driveListingQueryUpdate.
-		queryClient.setQueryData<DriveItem[]>(driveListingQueryKey({ variant, uuid: null }), prev =>
-			prev === undefined ? prev : removeByUuid(prev, item.data.uuid)
-		)
-	})
+			// This row vanishes from the shared ROOT listing it lives in (sharedIn or sharedOut, whichever
+			// `variant` names) — no cross-surface patch needed, unlike a normal drive write: removing a share
+			// never touches an owned listing. Only this row: the Shared by me root lists an item once per
+			// receiver, and the share removed is this row's receiver's alone. Through the patch path, so a read
+			// under way drops it too; a listing nobody has viewed yet is left alone.
+			const key = driveRowKey(item)
+
+			rootListingQueryUpdate(variant, rows => {
+				const kept = rows.filter(row => row.data.uuid !== item.data.uuid || driveRowKey(row) !== key)
+
+				return kept.length === rows.length ? rows : kept
+			})
+		})
+	)
 }

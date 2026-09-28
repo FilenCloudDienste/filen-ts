@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { MouseEvent as ReactMouseEvent } from "react"
 import { act, renderHook } from "@testing-library/react"
 import { QueryClient } from "@tanstack/react-query"
-import type { Dir, UuidStr } from "@filen/sdk-rs"
+import type { Dir, SharedFile, UuidStr } from "@filen/sdk-rs"
 
 // Same mock boundary as useDriveListboxNavReveal.test.ts: the DriveVirtualizer type's module graph
 // reaches the Vite `?worker` client, unresolvable under vitest.
@@ -33,6 +33,27 @@ function item(label: string): DriveItem {
 	return narrowItem(dir)
 }
 
+// The Shared by me root lists one item once per receiver: same uuid, a different counterpart per row.
+function receiverRow(receiverId: number): DriveItem {
+	const file: SharedFile = {
+		uuid: testUuid("shared"),
+		size: 2_048n,
+		region: "de-1",
+		bucket: "filen-1",
+		chunks: 2n,
+		timestamp: 1_700_000_000_000n,
+		meta: {
+			type: "decoded",
+			data: { name: "Report", mime: "application/pdf", modified: 1_700_000_000_000n, size: 2_048n, key: "k", version: 2 }
+		},
+		sharingRole: { Receiver: { email: `${String(receiverId)}@x.com`, id: receiverId } },
+		sharedTag: true,
+		canMakeThumbnail: false
+	}
+
+	return narrowItem(file)
+}
+
 function click(
 	init: { detail?: number; shiftKey?: boolean; ctrlKey?: boolean; pointerType?: string } = {}
 ): ReactMouseEvent<HTMLDivElement> {
@@ -48,13 +69,13 @@ function click(
 const first = item("a")
 const items = [first, item("b"), item("c")]
 
-function renderNav() {
+function renderNav(listItems: DriveItem[] = items) {
 	const virtualizer = { scrollToIndex: vi.fn() } as unknown as DriveVirtualizer["activeVirtualizer"]
 	const itemRefs = { current: new Map<number, HTMLDivElement>() } as DriveVirtualizer["itemRefs"]
 
 	return renderHook(() =>
 		useDriveListboxNav({
-			items,
+			items: listItems,
 			viewMode: "list",
 			columns: 1,
 			virtualizer,
@@ -163,5 +184,63 @@ describe("useDriveListboxNav — plain click", () => {
 		})
 
 		expect(selectedLabels()).toEqual(["a"])
+	})
+})
+
+describe("useDriveListboxNav — one shared item's per-receiver rows", () => {
+	const bob = receiverRow(1)
+	const carol = receiverRow(2)
+
+	function selectedReceivers(): number[] {
+		return useDriveStore
+			.getState()
+			.selectedItems.map(selected =>
+				selected.type === "sharedRootFile" && "Receiver" in selected.data.sharingRole ? selected.data.sharingRole.Receiver.id : -1
+			)
+	}
+
+	it("moves a plain-click selection to the other receiver's row, with the cursor on it", () => {
+		const { result } = renderNav([bob, carol])
+
+		act(() => {
+			result.current.handlePointerSelect(0, click())
+		})
+		act(() => {
+			result.current.handlePointerSelect(1, click())
+		})
+
+		expect(selectedReceivers()).toEqual([2])
+		expect(result.current.safeActiveIndex).toBe(1)
+	})
+
+	it("ctrl-click toggles each receiver's row on its own", () => {
+		const { result } = renderNav([bob, carol])
+
+		act(() => {
+			result.current.handlePointerSelect(0, click({ ctrlKey: true }))
+		})
+		act(() => {
+			result.current.handlePointerSelect(1, click({ ctrlKey: true }))
+		})
+		expect(selectedReceivers()).toEqual([1, 2])
+
+		act(() => {
+			result.current.handlePointerSelect(0, click({ ctrlKey: true }))
+		})
+		expect(selectedReceivers()).toEqual([2])
+		expect(result.current.safeActiveIndex).toBe(0)
+	})
+
+	it("extends a shift range from the receiver row the anchor is on", () => {
+		const { result } = renderNav([bob, carol, first])
+
+		act(() => {
+			result.current.handlePointerSelect(1, click())
+		})
+		act(() => {
+			result.current.handlePointerSelect(2, click({ shiftKey: true }))
+		})
+
+		expect(selectedReceivers()).toEqual([2, -1])
 	})
 })

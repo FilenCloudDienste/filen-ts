@@ -117,7 +117,7 @@ import {
 	findOwnedListingItem,
 	flatListingQueryUpdate,
 	flushListingCreates,
-	invalidateDirectorySize,
+	batchListingPatches,
 	itemInfoQueryKey,
 	itemPathQueryKey,
 	markDriveListingStale,
@@ -643,29 +643,6 @@ describe("fetchDirectorySize", () => {
 	})
 })
 
-describe("invalidateDirectorySize", () => {
-	// upload.ts's own trigger: a landed write into a directory stales that directory's cached
-	// recursive size (see the export's own comment) — invalidateQueries marks it, it does not refetch
-	// (no active per-row observer to refetch for — useDriveDirectorySizes prefetches only).
-	it("marks a directory's cached dirSize entry stale", () => {
-		const uuid = testUuid("dir")
-		const queryKey = directorySizeQueryKey(uuid)
-		testQueryClient.setQueryData(queryKey, { size: 1_000n, files: 1n, dirs: 0n })
-
-		expect(testQueryClient.getQueryState(queryKey)?.isInvalidated).toBe(false)
-
-		invalidateDirectorySize(uuid)
-
-		expect(testQueryClient.getQueryState(queryKey)?.isInvalidated).toBe(true)
-	})
-
-	it("is a no-op for a null (root) parent — root has no dirSize entry of its own", () => {
-		expect(() => {
-			invalidateDirectorySize(null)
-		}).not.toThrow()
-	})
-})
-
 describe("useItemInfoQuery", () => {
 	// The info dialog disables this query for a trashed item (getItemPath stalls on a
 	// trashed item's unresolvable ancestry rather than reject — see fetchItemInfo's own tests above
@@ -889,9 +866,8 @@ describe("driveListingQueryUpdateGlobal", () => {
 		expect(testQueryClient.getQueryData(unfetchedKey)).toBeUndefined()
 	})
 
-	it("takes the change a function picks per listing, and leaves one it picks none for as it was", () => {
+	it("changes only the listings `where` picks, and leaves the rest as they were", () => {
 		const moved = narrowItem(mockDir({ uuid: testUuid("moved") }))
-		const renamed = narrowItem(mockDir({ uuid: testUuid("moved"), meta: { type: "decoded", data: { name: "Renamed" } } }))
 		const driveKey = driveListingQueryKey({ variant: "drive", uuid: "parent" })
 		const favoritesKey = driveListingQueryKey({ variant: "favorites", uuid: null })
 		const sharedKey = driveListingQueryKey({ variant: "sharedOut", uuid: null })
@@ -899,19 +875,10 @@ describe("driveListingQueryUpdateGlobal", () => {
 		testQueryClient.setQueryData(favoritesKey, [moved])
 		testQueryClient.setQueryData(sharedKey, [moved])
 
-		driveListingQueryUpdateGlobal(({ variant }) => {
-			switch (variant) {
-				case "drive":
-					return { type: "remove", uuid: moved.data.uuid }
-				case "favorites":
-					return { type: "replace", uuid: moved.data.uuid, replace: () => renamed }
-				default:
-					return undefined
-			}
-		})
+		driveListingQueryUpdateGlobal({ type: "remove", uuid: moved.data.uuid }, ({ variant }) => variant !== "sharedOut")
 
 		expect(testQueryClient.getQueryData(driveKey)).toEqual([])
-		expect(testQueryClient.getQueryData(favoritesKey)).toEqual([renamed])
+		expect(testQueryClient.getQueryData(favoritesKey)).toEqual([])
 		expect(testQueryClient.getQueryData(sharedKey)).toEqual([moved])
 	})
 
@@ -1584,5 +1551,198 @@ describe("fetchSharedListing", () => {
 		await fetchSharedListing("sharedIn", null, ["ignored-uuid"])
 
 		expect(listSharedDirectory).not.toHaveBeenCalled()
+	})
+})
+
+// A bulk action's items land one worker reply at a time; each used to rewrite and re-render every
+// listing holding one of them.
+describe("batchListingPatches", () => {
+	function file(label: string): DriveItem {
+		return narrowItem(mockFile({ uuid: testUuid(label) }))
+	}
+
+	it("lands every patch made while it runs in one write per listing, in order", async () => {
+		const drive = driveListingQueryKey({ variant: "drive", uuid: "parent" })
+		const trash = driveListingQueryKey({ variant: "trash", uuid: null })
+		const [a, b, c] = [file("a"), file("b"), file("c")]
+		testQueryClient.setQueryData(drive, [a, b, c])
+		testQueryClient.setQueryData(trash, [])
+		const write = vi.spyOn(testQueryClient, "setQueryData")
+
+		await batchListingPatches(async () => {
+			for (const item of [a, b]) {
+				await Promise.resolve()
+
+				driveListingQueryUpdateGlobal({ type: "remove", uuid: item.data.uuid }, ({ variant }) => variant !== "trash")
+				flatListingQueryUpdate("trash", { type: "append", items: [item] })
+			}
+
+			expect(testQueryClient.getQueryData(drive)).toEqual([a, b, c])
+		})
+
+		expect(write).toHaveBeenCalledTimes(2)
+		expect(testQueryClient.getQueryData(drive)).toEqual([c])
+		expect(testQueryClient.getQueryData(trash)).toEqual([a, b])
+	})
+
+	it("lands what is queued when its window closes, while it still runs", async () => {
+		vi.useFakeTimers()
+
+		const drive = driveListingQueryKey({ variant: "drive", uuid: "parent" })
+		const a = file("a")
+		testQueryClient.setQueryData(drive, [a])
+		const run = deferred<undefined>()
+		const batch = batchListingPatches(() => run.promise)
+
+		driveListingQueryUpdateGlobal({ type: "remove", uuid: a.data.uuid })
+		vi.advanceTimersByTime(LISTING_CREATE_FLUSH_MS)
+
+		expect(testQueryClient.getQueryData(drive)).toEqual([])
+
+		run.resolve(undefined)
+		await batch
+	})
+
+	it("lets a lookup of a row a queued patch touches see that patch", async () => {
+		const drive = driveListingQueryKey({ variant: "drive", uuid: "parent" })
+		const a = file("a")
+		testQueryClient.setQueryData(drive, [a])
+
+		await batchListingPatches(async () => {
+			driveListingQueryUpdateGlobal({ type: "remove", uuid: a.data.uuid })
+
+			expect(findOwnedListingItem(a.data.uuid)).toBeUndefined()
+
+			await Promise.resolve()
+		})
+	})
+
+	it("keeps a create queued before a patch ahead of it", async () => {
+		const drive = driveListingQueryKey({ variant: "drive", uuid: "parent" })
+		const a = file("a")
+		testQueryClient.setQueryData(drive, [])
+
+		await batchListingPatches(async () => {
+			queueListingCreate("parent", a)
+			driveListingQueryUpdateGlobal({ type: "remove", uuid: a.data.uuid })
+
+			await Promise.resolve()
+		})
+
+		expect(testQueryClient.getQueryData(drive)).toEqual([])
+	})
+})
+
+describe("appending a row a listing already holds", () => {
+	it("leaves the listing as it was when it is the very row it holds", () => {
+		const trash = driveListingQueryKey({ variant: "trash", uuid: null })
+		const row = narrowItem(mockFile({ uuid: testUuid("a") }))
+		testQueryClient.setQueryData(trash, [row, narrowItem(mockFile({ uuid: testUuid("b") }))])
+		const write = vi.spyOn(testQueryClient, "setQueryData")
+
+		flatListingQueryUpdate("trash", { type: "append", items: [row] })
+
+		expect(write).not.toHaveBeenCalled()
+	})
+
+	it("leaves the listing as it was when several such appends land in one flush", async () => {
+		const trash = driveListingQueryKey({ variant: "trash", uuid: null })
+		const [a, b] = [narrowItem(mockFile({ uuid: testUuid("a") })), narrowItem(mockFile({ uuid: testUuid("b") }))]
+		const listing = [a, b]
+		testQueryClient.setQueryData(trash, listing)
+		const write = vi.spyOn(testQueryClient, "setQueryData")
+
+		await batchListingPatches(async () => {
+			flatListingQueryUpdate("trash", { type: "append", items: [b] })
+			flatListingQueryUpdate("trash", { type: "append", items: [a] })
+
+			await Promise.resolve()
+		})
+
+		expect(write).not.toHaveBeenCalled()
+		expect(testQueryClient.getQueryData(trash)).toBe(listing)
+	})
+
+	it("re-appends a held row an earlier change in the same flush removed", async () => {
+		const trash = driveListingQueryKey({ variant: "trash", uuid: null })
+		const [a, b] = [narrowItem(mockFile({ uuid: testUuid("a") })), narrowItem(mockFile({ uuid: testUuid("b") }))]
+		testQueryClient.setQueryData(trash, [a, b])
+
+		await batchListingPatches(async () => {
+			flatListingQueryUpdate("trash", { type: "remove", uuid: a.data.uuid })
+			flatListingQueryUpdate("trash", { type: "append", items: [a] })
+			flatListingQueryUpdate("trash", { type: "append", items: [b] })
+
+			await Promise.resolve()
+		})
+
+		expect(testQueryClient.getQueryData(trash)).toEqual([b, a])
+	})
+
+	it("replaces a same-uuid row that differs", () => {
+		const trash = driveListingQueryKey({ variant: "trash", uuid: null })
+		const fresh = narrowItem(mockFile({ uuid: testUuid("a"), favorited: true }))
+		testQueryClient.setQueryData(trash, [narrowItem(mockFile({ uuid: testUuid("a") }))])
+
+		flatListingQueryUpdate("trash", { type: "append", items: [fresh] })
+
+		expect(testQueryClient.getQueryData(trash)).toEqual([fresh])
+	})
+})
+
+// Shared by me lists a directory this account shared out under its own key, rows tagged with the share's
+// role; a write into that directory used to reach only its drive listing.
+describe("a write into a directory shared out", () => {
+	const PARENT = testUuid("shared-parent")
+	const role: SharingRole = { Receiver: { email: "receiver@filen.io", id: 7 } }
+	const sharedOut = driveListingQueryKey({ variant: "sharedOut", uuid: PARENT })
+
+	function nestedFile(label: string): DriveItem {
+		return narrowItem({ ...mockFile({ uuid: testUuid(label), parent: PARENT }), sharingRole: role })
+	}
+
+	it("lists a new file there too, tagged with the share's role", () => {
+		const existing = nestedFile("existing")
+		const created = narrowItem(
+			mockFile({
+				uuid: testUuid("created"),
+				parent: PARENT,
+				meta: {
+					type: "decoded",
+					data: { name: "created.txt", mime: "text/plain", modified: 1_700_000_000_000n, size: 1n, key: "key", version: 2 }
+				}
+			})
+		)
+		testQueryClient.setQueryData(sharedOut, [existing])
+
+		queueListingCreate(PARENT, created)
+		flushListingCreates()
+
+		const rows = testQueryClient.getQueryData<DriveItem[]>(sharedOut)
+		expect(rows?.map(row => row.data.uuid)).toEqual([existing.data.uuid, created.data.uuid])
+		expect(rows?.[1]).toMatchObject({ type: "sharedFile", data: { sharingRole: role } })
+	})
+
+	it("drops a row removed from it", () => {
+		const existing = nestedFile("existing")
+		testQueryClient.setQueryData(sharedOut, [existing])
+
+		driveListingQueryUpdate(PARENT, { type: "remove", uuid: existing.data.uuid })
+
+		expect(testQueryClient.getQueryData(sharedOut)).toEqual([])
+	})
+
+	it("reads it again for a new directory, whose row it can't tag", () => {
+		testQueryClient.setQueryData(sharedOut, [nestedFile("existing")])
+
+		driveListingQueryUpdate(PARENT, { type: "upsert", items: [narrowItem(mockDir({ uuid: testUuid("new-dir"), parent: PARENT }))] })
+
+		expect(testQueryClient.getQueryState(sharedOut)?.isInvalidated).toBe(true)
+	})
+
+	it("leaves a Shared by me listing nobody has read alone", () => {
+		driveListingQueryUpdate(PARENT, { type: "upsert", items: [narrowItem(mockDir({ uuid: testUuid("new-dir"), parent: PARENT }))] })
+
+		expect(testQueryClient.getQueryCache().find({ queryKey: sharedOut })).toBeUndefined()
 	})
 })

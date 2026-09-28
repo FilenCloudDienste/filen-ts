@@ -1,6 +1,16 @@
 import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
-import type { Dir, DirPublicLinkRW, File, FilePublicLink, FileVersion, NormalDirsAndFiles, UserInfo, UuidStr } from "@filen/sdk-rs"
+import type {
+	Dir,
+	DirPublicLinkRW,
+	File,
+	FilePublicLink,
+	FileVersion,
+	NormalDirsAndFiles,
+	SharedRootDir,
+	UserInfo,
+	UuidStr
+} from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import type { ErrorDTO } from "@/lib/sdk/errors"
 
@@ -302,22 +312,32 @@ describe("renameItem", () => {
 		expect(moveDirectory).not.toHaveBeenCalled()
 	})
 
-	it("replaces (not duplicates) a stale cached row on the item's own uuid", async () => {
+	it("replaces (not duplicates) a stale cached row on the item's own uuid, taking only its name", async () => {
 		seedRootUuid()
-		const stale = dirItem({ uuid: testUuid("a"), parent: OTHER_PARENT_UUID, favorited: false })
+		const stale = dirItem({ uuid: testUuid("a"), parent: OTHER_PARENT_UUID, favorited: true })
 		const sibling = dirItem({
 			uuid: testUuid("sibling"),
 			parent: OTHER_PARENT_UUID,
 			meta: { type: "decoded", data: { name: "Sibling" } }
 		})
 		testQueryClient.setQueryData(driveListing(OTHER_PARENT_UUID), [stale, sibling])
-		renameDirectory.mockResolvedValueOnce(mockDir({ uuid: testUuid("a"), parent: OTHER_PARENT_UUID, favorited: true }))
+		renameDirectory.mockResolvedValueOnce(
+			mockDir({
+				uuid: testUuid("a"),
+				parent: OTHER_PARENT_UUID,
+				favorited: false,
+				meta: { type: "decoded", data: { name: "Renamed" } }
+			})
+		)
 
 		await renameItem(stale, "Renamed")
 
 		const patched = testQueryClient.getQueryData<DriveItem[]>(driveListing(OTHER_PARENT_UUID))
 		expect(patched).toHaveLength(2)
-		expect(patched?.find(i => i.data.uuid === testUuid("a"))?.data.favorited).toBe(true)
+		expect(patched?.find(i => i.data.uuid === testUuid("a"))?.data).toMatchObject({
+			favorited: true,
+			decryptedMeta: { name: "Renamed" }
+		})
 	})
 
 	it("returns an error outcome without patching the listing or invalidating names on rejection", async () => {
@@ -1086,6 +1106,69 @@ describe("directory colour a local action writes", () => {
 	})
 })
 
+// The Shared by me root lists an item once per receiver, each row unsharing its own receiver.
+describe("an attribute change reaching a Shared by me row", () => {
+	const DIR = testUuid("shared")
+	const sharedOutRoot = driveListingQueryKey({ variant: "sharedOut", uuid: null })
+
+	function sharedRoot(receiverId: number): Extract<DriveItem, { type: "sharedRootDirectory" }> {
+		const raw: SharedRootDir = {
+			inner: { uuid: DIR, color: "default", timestamp: 1_700_000_000_000n, meta: { type: "decoded", data: { name: "Old" } } },
+			sharingRole: { Receiver: { email: `${String(receiverId)}@filen.io`, id: receiverId } },
+			writeAccess: true
+		}
+		const item = narrowItem(raw)
+
+		if (item.type !== "sharedRootDirectory") {
+			throw new Error("expected a sharedRootDirectory arm")
+		}
+
+		return item
+	}
+
+	it("keeps every receiver's row shared through a rename, a favorite and a recolour", async () => {
+		const alice = sharedRoot(1)
+		const bob = sharedRoot(2)
+		testQueryClient.setQueryData(sharedOutRoot, [alice, bob])
+		renameDirectory.mockResolvedValueOnce(mockDir({ uuid: DIR, meta: { type: "decoded", data: { name: "New" } } }))
+		setFavorited.mockResolvedValueOnce({ type: "dir", ...mockDir({ uuid: DIR, favorited: true }) })
+		setDirectoryColor.mockResolvedValueOnce(mockDir({ uuid: DIR, color: "blue" }))
+
+		await renameItem(alice, "New")
+		await toggleFavorite(alice)
+		await setColor(dirItem({ uuid: DIR }), "blue")
+
+		const rows = testQueryClient.getQueryData<DriveItem[]>(sharedOutRoot)
+		expect(rows).toHaveLength(2)
+		expect(rows?.[0]).toMatchObject({
+			type: "sharedRootDirectory",
+			data: { sharingRole: alice.data.sharingRole, shareSource: alice.data.shareSource, favorited: true, color: "blue" }
+		})
+		expect(rows?.[1]).toMatchObject({
+			type: "sharedRootDirectory",
+			data: { sharingRole: bob.data.sharingRole, shareSource: bob.data.shareSource, favorited: true, color: "blue" }
+		})
+		expect(rows?.map(row => row.data.decryptedMeta?.name)).toEqual(["New", "New"])
+	})
+
+	it("never writes the parent and flag a shared root row synthesizes into the owned row", async () => {
+		const owned = dirItem({ uuid: DIR, parent: OTHER_PARENT_UUID, favorited: true })
+		testQueryClient.setQueryData(driveListing(OTHER_PARENT_UUID), [owned])
+		// The result carries the shape the change started from: the shared root row's own parent and flag.
+		renameDirectory.mockResolvedValueOnce(
+			mockDir({ uuid: DIR, parent: DIR, favorited: false, meta: { type: "decoded", data: { name: "New" } } })
+		)
+
+		await renameItem(sharedRoot(1), "New")
+
+		expect(testQueryClient.getQueryData<DriveItem[]>(driveListing(OTHER_PARENT_UUID))?.[0]?.data).toMatchObject({
+			parent: OTHER_PARENT_UUID,
+			favorited: true,
+			decryptedMeta: { name: "New" }
+		})
+	})
+})
+
 describe("restoreVersion", () => {
 	it("replaces the old uuid with the rotated new one in the same (root-normalized) listing — no duplicate", async () => {
 		seedRootUuid()
@@ -1194,6 +1277,20 @@ describe("deleteVersion", () => {
 				label: "This is the current version and can't be deleted."
 			}
 		})
+		expect(deleteFileVersionOp).not.toHaveBeenCalled()
+	})
+
+	// A file read before another device saved it again: its directory's refetched listing already holds the
+	// newer, live uuid, which the version list offers as an ordinary version.
+	it("refuses a version its file's directory listing holds as the live row, without calling the worker", async () => {
+		const stale = fileItem({ uuid: testUuid("stale"), parent: OTHER_PARENT_UUID })
+		const live = fileItem({ uuid: testUuid("newer"), parent: OTHER_PARENT_UUID })
+		testQueryClient.setQueryData(driveListing(OTHER_PARENT_UUID), [live])
+		seedRootUuid()
+
+		const outcome = await deleteVersion(stale, mockVersion({ uuid: testUuid("newer") }))
+
+		expect(outcome.status).toBe("error")
 		expect(deleteFileVersionOp).not.toHaveBeenCalled()
 	})
 })
@@ -1428,12 +1525,12 @@ describe("disableLink", () => {
 })
 
 describe("disableLinks (bulk)", () => {
-	it("fetches each item's live status then disables it, succeeding for every item", async () => {
+	it("removes a directory's link without reading its status, and reads a file's only when none is held", async () => {
 		const dir = dirItem({ uuid: testUuid("a") })
 		const file = fileItem({ uuid: testUuid("f") })
+		const link = mockFileLink()
 		testQueryClient.setQueryData(linksListing(), [dir, file])
-		getDirectoryLinkStatus.mockResolvedValueOnce(mockDirLink())
-		getFileLinkStatus.mockResolvedValueOnce(mockFileLink())
+		getFileLinkStatus.mockResolvedValueOnce(link)
 		removeDirectoryLink.mockResolvedValueOnce(undefined)
 		removeFileLink.mockResolvedValueOnce(undefined)
 
@@ -1441,33 +1538,81 @@ describe("disableLinks (bulk)", () => {
 
 		expect(outcome.succeeded.map(item => item.data.uuid)).toEqual([testUuid("a"), testUuid("f")])
 		expect(outcome.failed).toEqual([])
+		expect(getDirectoryLinkStatus).not.toHaveBeenCalled()
+		expect(removeDirectoryLink).toHaveBeenCalledExactlyOnceWith(dir.data)
+		expect(removeFileLink).toHaveBeenCalledExactlyOnceWith(file.data, link)
 		expect(testQueryClient.getQueryData<DriveItem[]>(linksListing())).toEqual([])
 	})
 
-	it("treats an item that already lost its link (fetch returns no status) as succeeded, without calling either remove op", async () => {
+	it("removes a file's link with the status the link panel already holds, reading none", async () => {
+		const file = fileItem({ uuid: testUuid("f") })
+		const link = mockFileLink()
+		testQueryClient.setQueryData(driveItemLinkStatusQueryKey(testUuid("f")), { type: "file", status: link })
+		removeFileLink.mockResolvedValueOnce(undefined)
+
+		const outcome = await disableLinks([file])
+
+		expect(outcome.succeeded).toEqual([file])
+		expect(getFileLinkStatus).not.toHaveBeenCalled()
+		expect(removeFileLink).toHaveBeenCalledExactlyOnceWith(file.data, link)
+	})
+
+	it("removes a file's link as it now is when the held one was replaced meanwhile", async () => {
+		const file = fileItem({ uuid: testUuid("f") })
+		const replaced = mockFileLink({ linkUuid: testUuid("replaced") })
+		const current = mockFileLink()
+		testQueryClient.setQueryData(driveItemLinkStatusQueryKey(testUuid("f")), { type: "file", status: replaced })
+		removeFileLink.mockRejectedValueOnce(sdkDto("NotFound")).mockResolvedValueOnce(undefined)
+		getFileLinkStatus.mockResolvedValueOnce(current)
+
+		const outcome = await disableLinks([file])
+
+		expect(outcome.succeeded).toEqual([file])
+		expect(removeFileLink).toHaveBeenLastCalledWith(file.data, current)
+	})
+
+	it("surfaces a file's failed removal without trying the same link again", async () => {
+		const file = fileItem({ uuid: testUuid("f") })
+		const link = mockFileLink()
+		const dto = sdkDto("Forbidden")
+		testQueryClient.setQueryData(driveItemLinkStatusQueryKey(testUuid("f")), { type: "file", status: link })
+		removeFileLink.mockRejectedValueOnce(dto)
+		getFileLinkStatus.mockResolvedValueOnce(mockFileLink())
+
+		const outcome = await disableLinks([file])
+
+		expect(outcome.failed).toEqual([{ item: file, error: dto }])
+		expect(removeFileLink).toHaveBeenCalledOnce()
+	})
+
+	it("treats an item that already lost its link as succeeded once its removal fails", async () => {
 		const dir = dirItem({ uuid: testUuid("a") })
 		testQueryClient.setQueryData(linksListing(), [dir])
+		removeDirectoryLink.mockRejectedValueOnce(sdkDto("NotFound"))
 		getDirectoryLinkStatus.mockResolvedValueOnce(null)
 
 		const outcome = await disableLinks([dir])
 
 		expect(outcome.succeeded).toEqual([dir])
-		expect(removeDirectoryLink).not.toHaveBeenCalled()
+		expect(removeDirectoryLink).toHaveBeenCalledOnce()
 		expect(testQueryClient.getQueryData<DriveItem[]>(linksListing())).toEqual([])
 	})
 
 	it("keeps one item's failure from aborting the rest — partial success", async () => {
 		const dir = dirItem({ uuid: testUuid("a") })
 		const file = fileItem({ uuid: testUuid("f") })
+		const dto = sdkDto("Forbidden")
 		getDirectoryLinkStatus.mockResolvedValueOnce(mockDirLink())
 		getFileLinkStatus.mockResolvedValueOnce(mockFileLink())
-		removeDirectoryLink.mockRejectedValueOnce(sdkDto("Forbidden"))
+		removeDirectoryLink.mockRejectedValueOnce(dto)
 		removeFileLink.mockResolvedValueOnce(undefined)
 
 		const outcome = await disableLinks([dir, file])
 
 		expect(outcome.succeeded.map(item => item.data.uuid)).toEqual([testUuid("f")])
-		expect(outcome.failed.map(failure => failure.item.data.uuid)).toEqual([testUuid("a")])
+		expect(outcome.failed).toEqual([{ item: dir, error: dto }])
+		// A directory's removal takes no status, so a link still there is not tried again.
+		expect(removeDirectoryLink).toHaveBeenCalledOnce()
 	})
 })
 
@@ -1476,5 +1621,29 @@ describe("disableLinks (bulk)", () => {
 describe("names query key shape", () => {
 	it.each(["drive", "sharedIn", "sharedOut"] as const)("a %s entry starts with the prefix renameItem invalidates", scope => {
 		expect(driveNamesQueryKey(scope, "a").slice(0, 2)).toEqual(["drive", "names"])
+	})
+})
+
+// Each item used to rewrite and re-render every listing holding it as its reply landed.
+describe("bulk actions", () => {
+	it("a bulk trash writes each listing it changes once", async () => {
+		const items = ["a", "b", "c"].map(label => fileItem({ uuid: testUuid(label) }))
+		testQueryClient.setQueryData(driveListing(OTHER_PARENT_UUID), items)
+		testQueryClient.setQueryData(trashListing(), [])
+
+		for (const item of items) {
+			trashFile.mockResolvedValueOnce(mockFile({ uuid: item.data.uuid, parent: "trash" }))
+		}
+
+		const write = vi.spyOn(testQueryClient, "setQueryData")
+
+		const outcome = await trashItems(items)
+
+		expect(outcome.succeeded).toHaveLength(3)
+		expect(write).toHaveBeenCalledTimes(2)
+		expect(testQueryClient.getQueryData(driveListing(OTHER_PARENT_UUID))).toEqual([])
+		expect(testQueryClient.getQueryData<DriveItem[]>(trashListing())?.map(item => item.data.uuid)).toEqual(
+			items.map(item => item.data.uuid)
+		)
 	})
 })

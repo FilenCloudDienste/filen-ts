@@ -23,16 +23,30 @@ function container(): HTMLDivElement {
 	return el
 }
 
-function renderMarquee(el: HTMLDivElement) {
-	const write = vi.fn()
-	const items: MarqueeItem[] = [{ data: { uuid: "a" } }, { data: { uuid: "b" } }]
+interface RowItem extends MarqueeItem {
+	row: string
+}
+
+function renderMarquee(
+	el: HTMLDivElement,
+	{
+		items = [
+			{ data: { uuid: "a" }, row: "a" },
+			{ data: { uuid: "b" }, row: "b" }
+		],
+		preset = [],
+		keyOf
+	}: { items?: RowItem[]; preset?: RowItem[]; keyOf?: (item: RowItem) => string } = {}
+) {
+	const write = vi.fn<(items: RowItem[]) => void>()
 	const { result } = renderHook(() =>
 		useMarqueeSelection({
 			items,
+			...(keyOf === undefined ? {} : { keyOf }),
 			viewMode: "list",
 			columns: 1,
 			geometry: { rowHeight: 40, tileWidth: 176, gap: 0 },
-			selection: { read: () => [], write },
+			selection: { read: () => preset, write },
 			scrollElement: el,
 			setCursor: vi.fn()
 		})
@@ -88,5 +102,35 @@ describe("useMarqueeSelection — a press that opens a context menu", () => {
 
 		expect(write).not.toHaveBeenCalled()
 		expect(result.current.rect).toBeNull()
+	})
+})
+
+// The Shared by me root lists one item once per receiver: the same uuid on two rows.
+describe("useMarqueeSelection — additive union identity", () => {
+	const bob: RowItem = { data: { uuid: "shared" }, row: "shared:bob" }
+	const carol: RowItem = { data: { uuid: "shared" }, row: "shared:carol" }
+
+	it("adds another receiver's row of an already-selected item when keyed by row", () => {
+		const el = container()
+		const { result, write } = renderMarquee(el, { items: [bob, carol], preset: [bob], keyOf: item => item.row })
+
+		act(() => {
+			pressAt(el, result.current.onPointerDown, true)
+		})
+		dragTo(10, 60)
+
+		expect(write).toHaveBeenLastCalledWith([bob, carol])
+	})
+
+	it("dedupes by uuid by default", () => {
+		const el = container()
+		const { result, write } = renderMarquee(el, { items: [bob, carol], preset: [bob] })
+
+		act(() => {
+			pressAt(el, result.current.onPointerDown, true)
+		})
+		dragTo(10, 60)
+
+		expect(write).toHaveBeenLastCalledWith([bob])
 	})
 })

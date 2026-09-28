@@ -134,3 +134,28 @@ export function sortDriveItems(items: DriveItem[], sortBy: DriveSortBy, director
 
 	return sortItemsEngine(items, mode, makeAccessors(directorySizes))
 }
+
+// The same order for rows that carry a DriveItem (a public link's browse entries), read through
+// `getItem` so each key is still extracted once per row.
+export function sortByDriveItem<T>(entries: T[], getItem: (entry: T) => DriveItem, sortBy: DriveSortBy): T[] {
+	const mode = sortModes[sortBy] ?? FALLBACK_SORT_MODE
+	const { stringKey, timestampKey, tiebreakByName } = mode
+	const accessors = makeAccessors()
+
+	return sortItemsEngine(
+		entries,
+		{
+			kind: mode.kind,
+			isAsc: mode.isAsc,
+			...(stringKey !== undefined ? { stringKey: (entry: T) => stringKey(getItem(entry)) } : {}),
+			...(timestampKey !== undefined ? { timestampKey: (entry: T) => timestampKey(getItem(entry)) } : {}),
+			...(tiebreakByName !== undefined ? { tiebreakByName } : {})
+		},
+		{
+			getUuid: entry => accessors.getUuid(getItem(entry)),
+			getSize: entry => accessors.getSize(getItem(entry)),
+			isDirectory: entry => accessors.isDirectory(getItem(entry)),
+			nameKey: entry => accessors.nameKey(getItem(entry))
+		}
+	)
+}

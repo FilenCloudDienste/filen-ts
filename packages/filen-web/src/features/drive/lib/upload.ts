@@ -6,8 +6,9 @@ import { sdkApi } from "@/lib/sdk/client"
 import { i18n } from "@/lib/i18n"
 import { runOp, type VoidActionOutcome } from "@/lib/actions/outcome"
 import { asErrorDTO } from "@/lib/sdk/errors"
-import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
-import { invalidateDirectorySize, queueListingCreate } from "@/features/drive/queries/drive"
+import { queryClient } from "@/queries/client"
+import { asDirectoryOrFile, narrowItem, type DriveItem } from "@/features/drive/lib/item"
+import { directorySizeQueryKey, findCachedListingItem, queueListingCreate } from "@/features/drive/queries/drive"
 import { markAccountStale } from "@/queries/account"
 import { useTransfersStore, type TransfersStore } from "@/features/transfers/store/useTransfersStore"
 import { defaultHeicUploadDeps, heicUploadConversionEnabled, maybeConvertHeicUpload } from "@/features/drive/lib/heicUpload"
@@ -75,10 +76,10 @@ export interface RunUploadDeps {
 	// Splices the landed file into its parent listing (queueListingCreate: batched with the other
 	// creates, its own socket echo included).
 	patchCreated: (parentUuid: string | null, item: DriveItem) => void
-	// Optional (mirrors `cancel` above): a landed upload staled the destination directory's own cached
-	// recursive size (see queries/drive.ts's invalidateDirectorySize) — real wiring always supplies it,
-	// tests that don't care about the size-sort path simply omit it.
-	invalidateDirectorySize?: typeof invalidateDirectorySize
+	// Optional (mirrors `cancel` above), and like `cancel` unused by runUpload itself: the batch callers
+	// (startUploads, runDirectoryUpload) invoke it once after their whole fan-out rather than once per
+	// file, see invalidateUploadedDirectorySizes. Tests that don't care about sizes simply omit it.
+	invalidateDirectorySizes?: typeof invalidateUploadedDirectorySizes
 	// Optional for the same DI reason: the account's storage used moved (see queries/account.ts's
 	// markAccountStale).
 	markAccountStale?: () => void
@@ -91,6 +92,8 @@ export interface RunUploadDeps {
 	warmThumbnail?: (uploaded: SdkFile, file: File) => void
 }
 
+export type UploadOutcome = VoidActionOutcome | { status: "cancelled" }
+
 // One upload attempt: register it in the transfers store, stream it through the injected `upload` op
 // with THROTTLED progress (the raw callback fires per chunk — see sdk.worker.ts's own uploadFile op —
 // far more often than any UI needs to re-render), then settle the store and — only on success — patch
@@ -98,8 +101,9 @@ export interface RunUploadDeps {
 // rejection kind — see sdk.worker.ts's uploadFile) removes the row entirely rather than leaving a
 // finished entry behind (mobile parity: an aborted transfer has no history). Never throws; LABEL-FIRST
 // via runOp/asErrorDTO, mirroring every VoidActionOutcome helper in features/drive/lib/actions.ts and
-// features/contacts/lib/actions.ts.
-export async function runUpload(deps: RunUploadDeps, args: { parentUuid: string | null; file: File }): Promise<VoidActionOutcome> {
+// features/contacts/lib/actions.ts, plus a "cancelled" arm so a summary never counts a cancelled file
+// as uploaded.
+export async function runUpload(deps: RunUploadDeps, args: { parentUuid: string | null; file: File }): Promise<UploadOutcome> {
 	const { parentUuid, file } = args
 	const id = crypto.randomUUID()
 
@@ -130,7 +134,7 @@ export async function runUpload(deps: RunUploadDeps, args: { parentUuid: string 
 			deps.store.settle(id, "cancelled")
 			deps.store.remove(id)
 
-			return { status: "success" }
+			return { status: "cancelled" }
 		}
 
 		deps.store.settle(id, "error", dto)
@@ -148,11 +152,47 @@ export async function runUpload(deps: RunUploadDeps, args: { parentUuid: string 
 	// same local file twice at once.
 	deps.warmThumbnail?.(uploaded, file)
 	deps.patchCreated(parentUuid, narrowItem(uploaded))
-	deps.invalidateDirectorySize?.(parentUuid)
 	deps.markAccountStale?.()
 	deps.addStorageUsed?.(uploaded.size)
 
 	return { status: "success" }
+}
+
+// Marks every cached recursive size an upload batch moved: the target directory, each ancestor a cached
+// listing can name (walked through the listing cache, no request), and every directory the batch
+// created (all descendants of the target, so they need no walk of their own). dirSize entries have no
+// observers (useDriveDirectorySizes prefetches), so a plain invalidation only marks them stale; one that
+// is a row of a listing on screen is refetched at once instead, or that row keeps its pre-upload size
+// (for a directory the batch created, the near-empty size prefetched the moment it was patched in).
+// The rest refetch when a listing showing them next mounts.
+export function invalidateUploadedDirectorySizes(parentUuid: string | null, createdDirectoryUuids: readonly string[] = []): void {
+	const targets = new Set<string>(createdDirectoryUuids)
+
+	for (let uuid = parentUuid; uuid !== null && !targets.has(uuid);) {
+		targets.add(uuid)
+
+		const item = findCachedListingItem(uuid)
+
+		uuid = item === undefined ? null : asDirectoryOrFile(item).data.parent
+	}
+
+	if (targets.size === 0) {
+		return
+	}
+
+	const displayed = new Set<string>()
+
+	for (const query of queryClient.getQueryCache().findAll({ queryKey: ["drive", "listing"], type: "active" })) {
+		for (const item of queryClient.getQueryData<DriveItem[]>(query.queryKey) ?? []) {
+			if (targets.has(item.data.uuid)) {
+				displayed.add(item.data.uuid)
+			}
+		}
+	}
+
+	for (const uuid of targets) {
+		void queryClient.invalidateQueries({ queryKey: directorySizeQueryKey(uuid), refetchType: displayed.has(uuid) ? "all" : "active" })
+	}
 }
 
 // The real wiring behind RunUploadDeps.upload: crosses to the sdk worker, with `onProgress` wrapped
@@ -172,7 +212,7 @@ export const defaultUploadDeps: RunUploadDeps = {
 	},
 	store: useTransfersStore.getState(),
 	patchCreated: queueListingCreate,
-	invalidateDirectorySize,
+	invalidateDirectorySizes: invalidateUploadedDirectorySizes,
 	markAccountStale,
 	addStorageUsed: addAccountStorageUsed,
 	warmThumbnail: warmUploadThumbnail
@@ -205,7 +245,16 @@ export async function startUploads(files: File[], parentUuid: string | null): Pr
 		})
 	)
 	const succeeded = outcomes.filter(outcome => outcome.status === "success").length
-	const failed = outcomes.length - succeeded
+	const failed = outcomes.filter(outcome => outcome.status === "error").length
+
+	if (succeeded > 0) {
+		defaultUploadDeps.invalidateDirectorySizes?.(parentUuid)
+	}
+
+	// Every file cancelled: the user already knows, and there is nothing to report.
+	if (succeeded === 0 && failed === 0) {
+		return
+	}
 
 	if (failed === 0) {
 		toast.success(i18n.t("transfers:transfersUploadSummaryComplete", { count: succeeded }))

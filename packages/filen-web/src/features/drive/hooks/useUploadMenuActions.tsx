@@ -18,6 +18,7 @@ export interface UseUploadMenuActionsParams {
 	openPreview: (sources: PreviewSource[], index: number) => void
 	hiddenNotice: boolean
 	// Prefix of the hidden inputs' test ids, so tests can tell one host's pickers from another's.
+	// "drive-upload" when omitted.
 	testIdPrefix?: string
 }
 
@@ -42,9 +43,11 @@ export function useUploadMenuActions({
 	disabled,
 	openPreview,
 	hiddenNotice,
-	testIdPrefix = "drive-upload"
+	testIdPrefix
 }: UseUploadMenuActionsParams): UploadMenuActions {
 	const { t } = useTranslation("drive")
+	// Not a destructuring default, which the React Compiler cannot lower.
+	const testIds = testIdPrefix ?? "drive-upload"
 	const inputRef = useRef<HTMLInputElement>(null)
 	const directoryInputRef = useRef<HTMLInputElement>(null)
 	const [textFileDialogOpen, setTextFileDialogOpen] = useState(false)
@@ -153,7 +156,7 @@ export function useUploadMenuActions({
 		host: (
 			<>
 				<input
-					data-testid={`${testIdPrefix}-files-input`}
+					data-testid={`${testIds}-files-input`}
 					ref={attachFilesInput}
 					type="file"
 					multiple
@@ -166,7 +169,7 @@ export function useUploadMenuActions({
 					// the empty state's own add affordance, the background context menu), and a fixed id would
 					// be an invalid duplicate. Only tests address this input directly — the menu items click it
 					// through the ref.
-					data-testid={`${testIdPrefix}-directory-input`}
+					data-testid={`${testIds}-directory-input`}
 					ref={attachDirectoryInput}
 					type="file"
 					disabled={disabled}

@@ -39,6 +39,7 @@ import { resolveTileClickIntent, previewOpenTarget } from "@/features/photos/com
 import { usePhotosGridDensityQuery } from "@/features/photos/queries/preferences"
 import { DEFAULT_DENSITY_INDEX, tileSizeForDensity, columnsForWidth } from "@/features/photos/lib/gridDensity"
 import { PhotoTile } from "@/features/photos/components/photoTile"
+import { setThumbnailVisibleSlots } from "@/features/drive/lib/thumbnails"
 import { PhotosBulkActionBar } from "@/features/photos/components/bulkActionBar"
 import { TimelineScrubber } from "@/features/photos/components/timelineScrubber"
 import { Button } from "@/components/ui/button"
@@ -77,6 +78,7 @@ export function PhotoGrid({ rootUuid, listing }: PhotoGridProps) {
 
 	const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null)
 	const [containerWidth, setContainerWidth] = useState(0)
+	const [containerHeight, setContainerHeight] = useState(0)
 	const [anchorUuid, setAnchorUuid] = useState<string | null>(null)
 	const [filter, setFilter] = useState<PhotosFilter>(EMPTY_PHOTOS_FILTER)
 
@@ -98,8 +100,10 @@ export function PhotoGrid({ rootUuid, listing }: PhotoGridProps) {
 
 	const selection = usePhotosStore(useShallow(state => state.selectedItems))
 	// Each selected photo as the grid now holds it, not as it was when selected: a rename or favorite
-	// replaces it in the grid, never in the selection (see reconcileSelectedItems).
-	const selectedItems = reconcileSelectedItems(selection, items)
+	// replaces it in the grid, never in the selection (see reconcileSelectedItems). Both inputs hold across
+	// scroll renders, so those do no work proportional to the selection.
+	const selectedItems = useMemo(() => reconcileSelectedItems(selection, items), [selection, items])
+	const selectedUuids = useMemo(() => new Set(selectedItems.map(selected => selected.data.uuid)), [selectedItems])
 	const { handlePointerSelect } = usePhotosSelection(items, anchorUuid, setAnchorUuid)
 	const { isDialogOpen, handleItemAction, handleBulkDialogAction, openPreview, renderActiveDialog } = usePhotosDialogHost({
 		rootUuid,
@@ -150,6 +154,7 @@ export function PhotoGrid({ rootUuid, listing }: PhotoGridProps) {
 
 			if (entry) {
 				setContainerWidth(entry.contentRect.width)
+				setContainerHeight(entry.contentRect.height)
 			}
 		})
 
@@ -165,6 +170,12 @@ export function PhotoGrid({ rootUuid, listing }: PhotoGridProps) {
 	const columns = columnsForWidth(containerWidth, tileSize, GRID_GAP)
 	const cellSize = containerWidth > 0 ? (containerWidth - GRID_GAP * (columns - 1)) / columns : tileSize
 	const timeline = useMemo(() => buildPhotosTimeline(filtered.entries, columns, cellSize, GRID_GAP), [filtered, columns, cellSize])
+
+	// This grid lays out its own tiles, so it sizes the shared thumbnail objectURL cache itself: the
+	// visible rows plus one partial row, the cache's headroom covering the overscan rows either side.
+	useEffect(() => {
+		setThumbnailVisibleSlots(columns * (Math.ceil(containerHeight / cellSize) + 1))
+	}, [columns, cellSize, containerHeight])
 	// Changing with the timeline is what makes the virtualizer re-read row sizes (it re-lays rows only
 	// when its key function changes); stable otherwise, so a scroll frame re-lays nothing.
 	const getRowKey = useCallback((index: number) => timeline.rows[index]?.key ?? index, [timeline])
@@ -457,7 +468,7 @@ export function PhotoGrid({ rootUuid, listing }: PhotoGridProps) {
 													item={item}
 													index={itemIndex}
 													total={items.length}
-													selected={selectedItems.some(selected => selected.data.uuid === item.data.uuid)}
+													selected={selectedUuids.has(item.data.uuid)}
 													active={itemIndex === safeActiveIndex}
 													registerRef={registerRef}
 													onTileClick={handleTileClick}

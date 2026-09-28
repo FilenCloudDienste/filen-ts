@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
-import type { Dir, File, FileMeta, NormalDirsAndFiles, SocketEvent, UserInfo, UuidStr } from "@filen/sdk-rs"
+import type { Dir, File, FileMeta, NormalDirsAndFiles, SharedRootDir, SocketEvent, UserInfo, UuidStr } from "@filen/sdk-rs"
 
 // The real sdk client module imports a Vite `?worker`, unresolvable under node vitest — the drive handler
 // pulls it in transitively through queries/drive + lib/actions, so it's mocked down to the listing read
@@ -18,7 +18,15 @@ vi.mock("@/lib/log", () => ({ log: { warn: logWarn, error: logError, info: vi.fn
 
 import { queryClient as testQueryClient } from "@/queries/client"
 import { ACCOUNT_QUERY_KEY } from "@/queries/account"
-import { discardListingPatches, driveListingQueryKey, driveListingQueryOptions, flushListingCreates } from "@/features/drive/queries/drive"
+import {
+	batchListingPatches,
+	discardListingPatches,
+	driveListingQueryKey,
+	driveListingQueryOptions,
+	driveListingQueryUpdateGlobal,
+	flushListingCreates
+} from "@/features/drive/queries/drive"
+import { insertIntoTrashListing } from "@/features/drive/lib/actions"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import {
@@ -532,6 +540,42 @@ describe("drive socket handlers — trash listing membership", () => {
 		expect(getTrash()?.map(i => i.data.uuid)).toEqual([testUuid("file")])
 	})
 
+	it("the echo of this client's own trash leaves the trash listing unwritten", () => {
+		const trashed = narrowItem(mockFile({ parent: "trash" }))
+		const listing = [trashed]
+		seedTrash(listing)
+
+		handleDriveEvent(driveEvt({ type: "fileTrash", uuid: testUuid("file"), stableUUID: STABLE_FILE, newUUID: undefined }))
+
+		expect(getTrash()).toBe(listing)
+	})
+
+	// A bulk trash queues its patches for one write per listing; its own echoes must not land them early.
+	it("the echoes of a bulk trash still running leave its patches queued for one write per listing", async () => {
+		const [a, b] = [narrowItem(mockFile({ uuid: testUuid("a") })), narrowItem(mockFile({ uuid: testUuid("b") }))]
+		const trashedA = narrowItem(mockFile({ uuid: testUuid("a"), parent: "trash" }))
+		const trashedB = narrowItem(mockFile({ uuid: testUuid("b"), parent: "trash" }))
+		seedListing(PARENT_A, [a, b])
+		seedTrash([])
+		const write = vi.spyOn(testQueryClient, "setQueryData")
+
+		await batchListingPatches(async () => {
+			for (const trashed of [trashedA, trashedB]) {
+				await Promise.resolve()
+
+				driveListingQueryUpdateGlobal({ type: "remove", uuid: trashed.data.uuid }, ({ variant }) => variant !== "trash")
+				insertIntoTrashListing(trashed, true)
+				handleDriveEvent(driveEvt({ type: "fileTrash", uuid: trashed.data.uuid, stableUUID: STABLE_FILE, newUUID: undefined }))
+			}
+
+			expect(write).not.toHaveBeenCalled()
+		})
+
+		expect(write).toHaveBeenCalledTimes(2)
+		expect(getListing(PARENT_A)).toEqual([])
+		expect(getTrash()).toEqual([trashedA, trashedB])
+	})
+
 	it("fileTrash leaves a row the trash listing already holds in place (a re-delivered echo never drops it)", () => {
 		seedTrash([narrowItem(mockFile())])
 
@@ -889,6 +933,52 @@ describe("drive socket handlers — attribute patches", () => {
 		handleDriveEvent(driveEvt({ type: "itemFavorite", item: { type: "file", ...mockFile({ favorited: true }) } }))
 
 		expect(getListing(PARENT_A)[0]?.data.favorited).toBe(true)
+	})
+})
+
+// The Shared by me root lists an item once per receiver, each row unsharing its own receiver.
+describe("drive socket handlers — itemFavorite on Shared by me rows", () => {
+	function sharedRoot(receiverId: number): Extract<DriveItem, { type: "sharedRootDirectory" }> {
+		const raw: SharedRootDir = {
+			inner: {
+				uuid: testUuid("dir"),
+				color: "default",
+				timestamp: 1_700_000_000_000n,
+				meta: { type: "decoded", data: { name: "Documents" } }
+			},
+			sharingRole: { Receiver: { email: `${String(receiverId)}@filen.io`, id: receiverId } },
+			writeAccess: true
+		}
+
+		const item = narrowItem(raw)
+
+		if (item.type !== "sharedRootDirectory") {
+			throw new Error("expected a sharedRootDirectory arm")
+		}
+
+		return item
+	}
+
+	it("refreshes only the flag and colour, keeping each receiver's shared row", () => {
+		const alice = sharedRoot(1)
+		const bob = sharedRoot(2)
+		seedFlat("sharedOut", [alice, bob])
+
+		handleDriveEvent(driveEvt({ type: "itemFavorite", item: { type: "normalDir", ...mockDir({ favorited: true, color: "blue" }) } }))
+
+		const rows = getFlat("sharedOut")
+		expect(rows?.map(row => row.type)).toEqual(["sharedRootDirectory", "sharedRootDirectory"])
+		expect(rows?.[0]).toMatchObject({ data: { sharingRole: alice.data.sharingRole, favorited: true, color: "blue" } })
+		expect(rows?.[1]).toMatchObject({ data: { sharingRole: bob.data.sharingRole, favorited: true, color: "blue" } })
+	})
+
+	it("leaves a listing whose row already carries the flag unwritten", () => {
+		const listing = [narrowItem(mockFile({ favorited: true }))]
+		seedListing(PARENT_A, listing)
+
+		handleDriveEvent(driveEvt({ type: "itemFavorite", item: { type: "file", ...mockFile({ favorited: true }) } }))
+
+		expect(getListing(PARENT_A)).toBe(listing)
 	})
 })
 

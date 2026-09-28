@@ -52,6 +52,16 @@ function keepPreviewOpenOnNavigate(dialog: ActiveDialog): boolean {
 	return dialog.kind === "preview"
 }
 
+// Trash, delete, restore and disable-link take the whole item out of the listing, so every receiver row
+// of it goes; unshare removes only its own receiver's row, so the item's other rows stay selected.
+function pruneSelectionByUuid(succeeded: DriveItem[]): void {
+	useDriveStore.getState().removeFromSelection(succeeded.map(item => item.data.uuid))
+}
+
+function pruneSelectionByRow(succeeded: DriveItem[]): void {
+	useDriveStore.getState().removeRowsFromSelection(succeeded)
+}
+
 export interface DriveDialogHost {
 	isDialogOpen: boolean
 	handleItemAction: (kind: ItemActionDialogKind, item: DriveItem) => void
@@ -192,13 +202,17 @@ export function useDriveDialogHost({ variant, selectedItems, hiddenNoticeApplies
 	// against `items`, tracks the shared dialogPending flag, closes the dialog, toasts the outcome,
 	// and prunes succeeded items from the selection — a no-op for whichever failed (still visible,
 	// correctly still selected, so the user can retry without re-selecting).
-	async function runBulkDialogAction(items: DriveItem[], op: (items: DriveItem[]) => Promise<BulkOutcome<DriveItem>>): Promise<void> {
+	async function runBulkDialogAction(
+		items: DriveItem[],
+		op: (items: DriveItem[]) => Promise<BulkOutcome<DriveItem>>,
+		prune: (succeeded: DriveItem[]) => void = pruneSelectionByUuid
+	): Promise<void> {
 		setDialogPending(true)
 		const outcome = await op(items)
 		setDialogPending(false)
 		closeActiveDialog()
 		toastBulkOutcome(outcome)
-		useDriveStore.getState().removeFromSelection(outcome.succeeded.map(item => item.data.uuid))
+		prune(outcome.succeeded)
 	}
 
 	async function handleTrashConfirm(items: DriveItem[]): Promise<void> {
@@ -218,7 +232,7 @@ export function useDriveDialogHost({ variant, selectedItems, hiddenNoticeApplies
 	// Root-only (see itemMenu.logic.ts's UNSHARE gate) — the sharedIn/sharedOut root-listing patch
 	// lives inside unshareItems itself, keyed off the CURRENT variant (this listing's own).
 	async function handleUnshareConfirm(items: DriveItem[]): Promise<void> {
-		await runBulkDialogAction(items, targetItems => unshareItems(targetItems, variant))
+		await runBulkDialogAction(items, targetItems => unshareItems(targetItems, variant), pruneSelectionByRow)
 	}
 
 	// Links-root only (see bulkActionBar.logic.ts's own variant gate) — revokes every selected item's

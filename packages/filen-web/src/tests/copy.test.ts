@@ -351,8 +351,43 @@ describe("runCopyJob", () => {
 
 		expect(job?.outcome).toEqual({ status: "done" })
 		expect(row()).toMatchObject({ status: "done", size: 200, bytesTransferred: 200 })
-		expect(deps.settled).toHaveBeenCalledWith(job)
+		expect(deps.settled).toHaveBeenCalledWith(job, [])
 		expect(deps.trash).not.toHaveBeenCalled()
+	})
+
+	// Their sizes were read while the job still filled them, the moment they were patched in.
+	it("hands the settle the top-level directories the job created", async () => {
+		const deps = makeDeps()
+		const dir = mockDir("copied")
+
+		deps.copyItems.mockImplementation((_id, _items, _dest, _max, onEvent) => {
+			onEvent({ type: "created", item: created(dir) })
+			onEvent({ type: "created", item: createdFile(mockFile("copied-file")) })
+
+			return Promise.resolve(report())
+		})
+
+		const job = await runCopyJob(deps, request())
+
+		expect(deps.settled).toHaveBeenCalledWith(job, [dir.uuid])
+	})
+
+	// A retried item goes back to where it was meant to land, anywhere below the destination: every
+	// directory from there up to the destination grew.
+	it("hands the settle every directory from a retried item's destination up to the job's destination", async () => {
+		const deps = makeDeps()
+		const outer = mockDir("outer", ROOT)
+		const inner = mockDir("inner", outer.uuid)
+
+		queryClient.setQueryData<Partial<UserInfo>>(ACCOUNT_QUERY_KEY, { rootDirUuid: ROOT })
+		// The outer directory is a row of the destination's listing; the inner one's listing was never read.
+		queryClient.setQueryData(driveListingQueryKey({ variant: "drive", uuid: null }), [narrowItem(outer)])
+		deps.copyItemsTo.mockResolvedValue(report())
+
+		const entries = [{ item: mockFile("x"), destination: inner, name: "x.txt" }]
+		const job = await runCopyJob(deps, { ...request(), source: { kind: "entries", entries } })
+
+		expect(deps.settled).toHaveBeenCalledWith(job, [inner.uuid, outer.uuid])
 	})
 
 	it("settles a copy with failures as completedWithErrors", async () => {

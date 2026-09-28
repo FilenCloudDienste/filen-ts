@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react"
 import * as Comlink from "comlink"
 import { sdkApi } from "@/lib/sdk/client"
 import { log } from "@/lib/log"
@@ -67,6 +67,10 @@ export function useDriveSearch(rootUuid: string | null, enabled: boolean): UseDr
 	// every timer here — is scheduled fresh per render and so can't go stale itself, but still fires
 	// later, after further renders may have closed or superseded it.
 	const generationRef = useRef(0)
+	// Bumped only by a real teardown (closeSearchEngine), unlike generationRef, which every open bumps
+	// too. A retune whose setName round trip outlives a teardown belongs to the old root: it must neither
+	// reopen through its closure nor park its query over the new root's.
+	const sessionRef = useRef(0)
 	const activeRef = useRef(false)
 	// True once the current root's engine has been opened at least once — cleared only on a real
 	// teardown (closeSearchEngine), never on a mere blank-query edit. resolveSearchTransition reads this
@@ -200,27 +204,31 @@ export function useDriveSearch(rootUuid: string | null, enabled: boolean): UseDr
 			armGrace()
 			armWatchdog(snapshot.hits.length > 0)
 		} catch (e) {
-			if (isSupersededRejection(e) || generation !== generationRef.current) {
+			if (generation !== generationRef.current) {
 				return
 			}
 
-			log.warn("drive-search", "searchOpen failed", e)
-			setPushState(prev => ({ ...prev, live: false }))
-		} finally {
-			// Settle-then-drain, superseded or not: whatever the user typed while this open was in
-			// flight was parked rather than fired (see pendingQueryRef's doc comment). A successful open
-			// installed a live handle, so the parked query retunes it (cheap refilter); a failed one
-			// left no handle, so the retune's setName-returns-false path performs the single clean
-			// reopen. Guarded on activeRef so a query cleared/closed mid-flight drains to nothing.
-			openInFlightRef.current = false
-
-			const parked = pendingQueryRef.current
-
-			pendingQueryRef.current = null
-
-			if (parked !== null && parked !== name && activeRef.current) {
-				scheduleRetune(parked)
+			if (!isSupersededRejection(e)) {
+				log.warn("drive-search", "searchOpen failed", e)
+				setPushState(prev => ({ ...prev, live: false }))
 			}
+		}
+
+		// Settle-then-drain: whatever the user typed while this open was in flight was parked rather
+		// than fired (see pendingQueryRef's doc comment). A successful open installed a live handle, so
+		// the parked query retunes it (cheap refilter); a failed one left no handle, so the retune's
+		// setName-returns-false path performs the single clean reopen. Guarded on activeRef so a query
+		// cleared mid-flight drains to nothing. A superseded open returned above without touching either
+		// ref: only a teardown supersedes one, which already reset both, a newer open may own them now,
+		// and draining through this render's closures would reopen on the old root.
+		openInFlightRef.current = false
+
+		const parked = pendingQueryRef.current
+
+		pendingQueryRef.current = null
+
+		if (parked !== null && parked !== name && activeRef.current) {
+			scheduleRetune(parked)
 		}
 	}
 
@@ -230,11 +238,14 @@ export function useDriveSearch(rootUuid: string | null, enabled: boolean): UseDr
 	// a ref during render, which this codebase's react-hooks/refs lint rule (React Compiler's own
 	// plugin) hard-rejects. A plain function scheduled fresh per call sidesteps that entirely: each
 	// scheduled timeout closes over exactly the openSearch/name it was armed with, and activeRef (read
-	// when it fires, not closed over) guards against acting on a since-closed session.
+	// when it fires, not closed over) guards against acting on a cleared query, sessionRef on a
+	// since-closed session.
 	function scheduleRetune(name: string): void {
 		if (retuneTimerRef.current !== null) {
 			clearTimeout(retuneTimerRef.current)
 		}
+
+		const session = sessionRef.current
 
 		retuneTimerRef.current = setTimeout(() => {
 			retuneTimerRef.current = null
@@ -242,6 +253,10 @@ export function useDriveSearch(rootUuid: string | null, enabled: boolean): UseDr
 			sdkApi
 				.searchSetName(name)
 				.then(ok => {
+					if (session !== sessionRef.current) {
+						return
+					}
+
 					// The user may have cleared/closed search (or navigated away) while this was in flight.
 					// The no-live-handle reopen parks like any other request when an open is already mid-
 					// flight — this fallback must never be a second concurrent opener.
@@ -261,7 +276,11 @@ export function useDriveSearch(rootUuid: string | null, enabled: boolean): UseDr
 
 	function closeSearchEngine(): void {
 		generationRef.current++
+		sessionRef.current++
 		engagedRef.current = false
+		// The superseded open settles later and leaves both alone (see openSearch's drain), so the
+		// next keystroke opens on the current root instead of parking behind it.
+		openInFlightRef.current = false
 		pendingQueryRef.current = null
 		clearTimers()
 		setPushState(INITIAL_PUSH_STATE)
@@ -322,14 +341,18 @@ export function useDriveSearch(rootUuid: string | null, enabled: boolean): UseDr
 
 	// Root/enabled change or unmount: close whatever's active and blank the box — mirrors
 	// useThumbnail.ts's live-flag idiom, generalized to the generation counter above (see its own
-	// comment) since more than one trigger can supersede the in-flight close here.
+	// comment) since more than one trigger can supersede the in-flight close here. An effect event, so
+	// the effect is keyed on root/enabled alone, never on every keystroke's re-render.
+	const teardown = useEffectEvent(() => {
+		activeRef.current = false
+		setInputValue("")
+		closeSearchEngine()
+	})
+
 	useEffect(() => {
 		return () => {
-			activeRef.current = false
-			setInputValue("")
-			closeSearchEngine()
+			teardown()
 		}
-		// eslint-disable-next-line react-hooks/exhaustive-deps -- deliberate: reset only on root/enabled change and unmount, never on every keystroke's re-render
 	}, [rootUuid, enabled])
 
 	const status = deriveSearchStatus({
@@ -343,7 +366,10 @@ export function useDriveSearch(rootUuid: string | null, enabled: boolean): UseDr
 		watchdogTripped
 	})
 
-	const { items, parentPaths } = buildSearchResults(pushState.hits)
+	// Memoized by hand: openSearch and scheduleRetune call each other, which keeps the React Compiler off
+	// this hook, and the listing re-renders on every cursor move and marquee frame. Rebuilding would hand
+	// it up to 1,000 fresh items each time, re-sorting them and re-firing the directory-size prefetch.
+	const { items, parentPaths } = useMemo(() => buildSearchResults(pushState.hits), [pushState.hits])
 
 	return {
 		input,

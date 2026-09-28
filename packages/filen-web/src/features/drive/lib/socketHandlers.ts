@@ -6,14 +6,15 @@ import {
 	driveListingQueryUpdateGlobal,
 	findOwnedListingItem,
 	flatListingQueryUpdate,
-	flushListingCreates,
+	flushListingCreatesOutsideBatch,
 	invalidateDriveListings,
 	invalidateFlatListing,
 	markListingsStale,
 	normalizeParentUuid,
-	queueListingCreate
+	queueListingCreate,
+	queuedTrashHolds
 } from "@/features/drive/queries/drive"
-import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
+import { narrowItem, withColor, withFavorited, type DriveItem } from "@/features/drive/lib/item"
 import {
 	currentRootUuid,
 	insertIntoTrashListing,
@@ -240,7 +241,7 @@ export function handleDriveEvent(event: DriveSocketEvent): void {
 	const rootUuid = currentRootUuid()
 
 	if (!BATCHED_CREATE_EVENT_TYPES.has(inner.type)) {
-		flushListingCreates()
+		flushListingCreatesOutsideBatch()
 	}
 
 	if (PHOTOS_INVALIDATING_EVENT_TYPES.has(inner.type)) {
@@ -353,9 +354,18 @@ export function handleDriveEvent(event: DriveSocketEvent): void {
 			// A shared-in item its owner trashed leaves the shared listing without ever landing here.
 			useDriveStore.getState().removeFromSelection([inner.uuid])
 
-			const trashed = supersededByEdit ? undefined : findOwnedListingItem(inner.uuid)
+			// The echo of this client's own trash still queued carries the SDK's post-trash row already, so
+			// neither the lookup (which would land the queue) nor an insert is needed, and the trash keeps it.
+			const ownTrashQueued = !supersededByEdit && queuedTrashHolds(inner.uuid)
+			const trashed = supersededByEdit || ownTrashQueued ? undefined : findOwnedListingItem(inner.uuid)
 
-			driveListingQueryUpdateGlobal({ type: "remove", uuid: inner.uuid })
+			// The trash insert below replaces a same-uuid row itself, and leaves the listing untouched when it
+			// already holds this very row (the echo of this client's own trash), so the trash is not removed
+			// from first.
+			driveListingQueryUpdateGlobal(
+				{ type: "remove", uuid: inner.uuid },
+				trashed === undefined && !ownTrashQueued ? undefined : ({ variant }) => variant !== "trash"
+			)
 
 			if (trashed !== undefined) {
 				// A file row carries no colour an outdated listing could have missed.
@@ -452,8 +462,17 @@ export function handleDriveEvent(event: DriveSocketEvent): void {
 			const item = narrowFavoriteItem(inner.item)
 
 			if (item !== undefined) {
-				// Attribute refresh wherever the row is already cached…
-				driveListingQueryUpdateGlobal({ type: "replace", uuid: item.data.uuid, replace: () => item })
+				// Attribute refresh wherever the row is already cached, taking only the flag and colour so a
+				// shared row keeps its arm and sharing context…
+				driveListingQueryUpdateGlobal({
+					type: "replace",
+					uuid: item.data.uuid,
+					replace: row => {
+						const flagged = withFavorited(row, item.data.favorited)
+
+						return item.type === "directory" ? withColor(flagged, item.data.color) : flagged
+					}
+				})
 				// …plus the Favorites root's own membership add/remove, which a replace-only fan-out can never
 				// do (mobile does both arms too). The payload item carries its NEW favorited flag and the
 				// server's colour.

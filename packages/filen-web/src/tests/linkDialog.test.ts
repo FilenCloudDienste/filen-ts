@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { Dir, DirPublicLinkRW, File, FilePublicLink, UuidStr } from "@filen/sdk-rs"
+import type { Dir, DirPublicLinkRW, File, FilePublicLink, SharedDir, SharedFile, SharingRole, UuidStr } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import type { DriveItemLinkStatus } from "@/features/drive/queries/drive"
 import {
@@ -88,6 +88,36 @@ function dirItem(overrides: Partial<Dir> = {}): DriveItem {
 
 function fileItem(overrides: Partial<File> = {}): DriveItem {
 	return narrowItem(mockFile(overrides))
+}
+
+const SHARER: SharingRole = { Sharer: { email: "receiver@filen.io", id: 7 } }
+
+// Shared-by-me arms: a root share narrows to sharedRootFile/sharedRootDirectory, a nested one (role
+// spread on by the fetcher) to sharedFile/sharedDirectory.
+function sharedRootFileItem(): DriveItem {
+	return narrowItem({
+		uuid: testUuid("shared-file"),
+		size: 1_024n,
+		region: "de-1",
+		bucket: "filen-1",
+		chunks: 1n,
+		timestamp: 1_700_000_000_000n,
+		meta: { type: "decoded", data: { name: "f", mime: "x", modified: 1n, size: 1n, key: "abc", version: 2 } },
+		sharingRole: SHARER,
+		sharedTag: true,
+		canMakeThumbnail: false
+	} satisfies SharedFile)
+}
+
+function sharedFileItem(): DriveItem {
+	return narrowItem({
+		...mockFile({ meta: { type: "decoded", data: { name: "f", mime: "x", modified: 1n, size: 1n, key: "abc", version: 2 } } }),
+		sharingRole: SHARER
+	})
+}
+
+function sharedDirItem(): DriveItem {
+	return narrowItem({ ...({ inner: mockDir(), sharedTag: true } satisfies SharedDir), sharingRole: SHARER })
 }
 
 describe("readLinkForm", () => {
@@ -260,6 +290,24 @@ describe("buildPublicLinkUrl", () => {
 		expect(buildPublicLinkUrl(item, status)).toBeNull()
 	})
 
+	it("builds the URL for Shared-by-me files, root and nested, from the item's own metadata key", () => {
+		const status = fileStatus({ linkUuid: testUuid("link") })
+
+		for (const item of [sharedRootFileItem(), sharedFileItem()]) {
+			expect(item.type).not.toBe("file")
+			expect(buildPublicLinkUrl(item, status)).toBe(`https://app.filen.io/f/${testUuid("link")}#616263`)
+		}
+	})
+
+	it("builds the URL for a Shared-by-me directory from the link's linkKey", () => {
+		const item = sharedDirItem()
+
+		expect(item.type).toBe("sharedDirectory")
+		expect(buildPublicLinkUrl(item, dirStatus({ linkUuid: testUuid("link"), linkKey: "abc" }))).toBe(
+			`https://app.filen.io/d/${testUuid("link")}#616263`
+		)
+	})
+
 	it("returns null on an item/status type mismatch rather than reading a field that doesn't exist", () => {
 		const item = dirItem()
 		const mismatchedStatus = fileStatus()
@@ -270,15 +318,24 @@ describe("buildPublicLinkUrl", () => {
 
 describe("resolvePremiumGateState", () => {
 	it("is 'loading' when isPremium is undefined (the account query hasn't resolved yet)", () => {
-		expect(resolvePremiumGateState(undefined)).toBe("loading")
+		expect(resolvePremiumGateState(undefined, "pending")).toBe("loading")
+	})
+
+	it("is 'error' when the account read failed with nothing cached, rather than an endless spinner", () => {
+		expect(resolvePremiumGateState(undefined, "error")).toBe("error")
+	})
+
+	it("keeps a cached answer through a failed refetch", () => {
+		expect(resolvePremiumGateState(true, "error")).toBe("allowed")
+		expect(resolvePremiumGateState(false, "error")).toBe("gated")
 	})
 
 	it("is 'gated' for a resolved, non-premium account", () => {
-		expect(resolvePremiumGateState(false)).toBe("gated")
+		expect(resolvePremiumGateState(false, "success")).toBe("gated")
 	})
 
 	it("is 'allowed' for a resolved, premium account", () => {
-		expect(resolvePremiumGateState(true)).toBe("allowed")
+		expect(resolvePremiumGateState(true, "success")).toBe("allowed")
 	})
 })
 

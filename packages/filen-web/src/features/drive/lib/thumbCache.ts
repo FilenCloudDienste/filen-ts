@@ -1,4 +1,4 @@
-import { THUMB_DIR, THUMB_EXT } from "@/features/drive/lib/thumbnails.logic"
+import { THUMB_DIR, THUMB_DIR_ROOT, THUMB_EXT } from "@/features/drive/lib/thumbnails.logic"
 
 // Main-thread read side of the OPFS thumbnail store — async only (no createSyncAccessHandle, which
 // is dedicated-worker-only by spec; see workers/thumbStore.ts for the worker-side write path over
@@ -45,5 +45,46 @@ export async function deleteThumbnail(uuid: string): Promise<void> {
 		}
 
 		throw e
+	}
+}
+
+function isNotFound(e: unknown): boolean {
+	return e instanceof DOMException && e.name === "NotFoundError"
+}
+
+// Logout: the whole thumbnail tree, every cache generation included — decrypted derivatives of the
+// account's files. Swept TWICE, like kvClear: a thumbnail write already in flight when the wipe starts
+// (a generation past its last abort point) can hold a file open through the first removal, or land just
+// after it and recreate the tree. Only a failure of the final pass is reported.
+export async function wipeThumbnailStore(root: Promise<FileSystemDirectoryHandle> = navigator.storage.getDirectory()): Promise<void> {
+	const parentSegments = THUMB_DIR_ROOT.slice(0, -1)
+	const leaf = THUMB_DIR_ROOT.at(-1)
+
+	if (leaf === undefined) {
+		return
+	}
+
+	let failure: { reason: unknown } | null = null
+
+	for (let pass = 0; pass < 2; pass++) {
+		failure = null
+
+		try {
+			let dir = await root
+
+			for (const segment of parentSegments) {
+				dir = await dir.getDirectoryHandle(segment)
+			}
+
+			await dir.removeEntry(leaf, { recursive: true })
+		} catch (e) {
+			if (!isNotFound(e)) {
+				failure = { reason: e }
+			}
+		}
+	}
+
+	if (failure !== null) {
+		throw failure.reason
 	}
 }

@@ -34,24 +34,29 @@ export interface NewDirectoryProps {
 	// True when this listing would actually hide a dot-prefixed name (the preference AND
 	// hiddenFilterAppliesTo) — computed once by the listing, since it already holds both halves.
 	hiddenNotice?: boolean
+	// False for a second copy of the control on the same screen, so one keypress opens one dialog.
+	// Defaults to true.
+	shortcut?: boolean
 }
 
-export function NewDirectory({ parentUuid, disabled = false, dialogOpen, offline = false, hiddenNotice = false }: NewDirectoryProps) {
+// No destructuring defaults: the React Compiler cannot lower them and would skip the whole component.
+export function NewDirectory({ parentUuid, disabled, dialogOpen, offline, hiddenNotice, shortcut }: NewDirectoryProps) {
 	const { t } = useTranslation(["drive", "common"])
 	const [open, setOpen] = useState(false)
+	const isDisabled = disabled === true
 
 	// Registered above at module scope. Guards on `disabled`/`dialogOpen` themselves (rather than
 	// being conditionally registered/mounted) since a keyboard command's live handler must stay a
-	// plain hook call.
+	// plain hook call. A copy without the shortcut attaches no listener at all.
 	useAction(
 		"drive.newDirectory",
 		() => {
-			if (!disabled && !dialogOpen) {
+			if (!isDisabled && !dialogOpen) {
 				setOpen(true)
 			}
 		},
-		undefined,
-		[disabled, dialogOpen]
+		{ enabled: shortcut !== false },
+		[isDisabled, dialogOpen]
 	)
 
 	return (
@@ -65,7 +70,7 @@ export function NewDirectory({ parentUuid, disabled = false, dialogOpen, offline
 							// Label sheds below sm — see uploadMenu.tsx's matching trigger for why the aria-label is
 							// the same key.
 							aria-label={t("driveNewDirectoryTitle")}
-							disabled={disabled}
+							disabled={isDisabled}
 							onClick={() => {
 								setOpen(true)
 							}}
@@ -76,7 +81,7 @@ export function NewDirectory({ parentUuid, disabled = false, dialogOpen, offline
 					}
 				/>
 				<TooltipContent>
-					{offline && disabled ? t("common:offlineActionDisabled") : t("driveNewDirectoryTitle")}
+					{offline === true && isDisabled ? t("common:offlineActionDisabled") : t("driveNewDirectoryTitle")}
 					<Kbd action="drive.newDirectory" />
 				</TooltipContent>
 			</Tooltip>
@@ -84,7 +89,7 @@ export function NewDirectory({ parentUuid, disabled = false, dialogOpen, offline
 				open={open}
 				onOpenChange={setOpen}
 				parentUuid={parentUuid}
-				hiddenNotice={hiddenNotice}
+				hiddenNotice={hiddenNotice === true}
 			/>
 		</>
 	)

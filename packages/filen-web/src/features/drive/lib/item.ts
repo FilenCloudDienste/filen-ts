@@ -3,6 +3,7 @@ import type {
 	File,
 	DecryptedDirMeta,
 	DecryptedFileMeta,
+	DirColor,
 	SharedDir,
 	SharedRootDir,
 	SharedFile,
@@ -11,7 +12,7 @@ import type {
 	AnyFile,
 	LinkedFile
 } from "@filen/sdk-rs"
-import { type ExtraData, type ShareIdentity, keepAgainstIncoming, shareIdentityFromRole } from "@filen/shared"
+import { type ExtraData, type ShareIdentity, shareIdentityFromRole } from "@filen/shared"
 
 // The four shared arms carry a Dir|File-shaped `data` (the underlying item flattened out of its
 // SharedDir/SharedRootDir/SharedFile wrapper) PLUS the sharing metadata — so a consumer that only
@@ -203,8 +204,8 @@ function narrowDir(raw: NarrowableDirInput): DriveItem {
 
 // Wraps a resolved Filen file-link (a `LinkedFile` — not a tree member, no real parent directory) into
 // a synthetic, self-parented DriveItem, so a chat/note file-link embed can feed the SAME preview
-// machinery (previewType, PreviewOverlay's "drive" arm, download) every owned file already uses — no
-// second, external-only viewer path. Mirrors filen-mobile's lib/sdkUnwrap.ts::linkedFileIntoDriveItem
+// machinery (previewType, PreviewOverlay, download) every owned file already uses — no second viewer
+// path. Mirrors filen-mobile's lib/sdkUnwrap.ts::linkedFileIntoDriveItem
 // field-for-field (decoded FileMeta built from the linked file's own name/mime/size/timestamp/key,
 // self-parented, the SDK's own canMakeThumbnail carried through), but routes the fabricated wasm
 // `File` through narrowItem —
@@ -350,18 +351,67 @@ export function getSharerIdentity(item: DriveItem, resolveNestedRole?: (uuid: st
 	return shareIdentityFromRole(role)
 }
 
-// Identity/name-collision filter for splicing an incoming item into a cached listing: an existing
-// row survives unless it IS the incoming item (uuid match) or a same-name duplicate the incoming
-// item supersedes (case-insensitive, trimmed) — mirrors filen-mobile's driveSelectors
-// keepAgainstIncomingDriveItem. The name arm only fires when BOTH names are present: an
-// undecryptable item's decryptedMeta is null (name undefined), and undefined === undefined would
-// wrongly treat every undecryptable row as colliding with every other one.
-export function keepAgainstIncomingDriveItem(existing: DriveItem, incoming: DriveItem): boolean {
-	return keepAgainstIncoming(existing.data.uuid, existing.data.decryptedMeta?.name, incoming.data.uuid, incoming.data.decryptedMeta?.name)
+// Insert an incoming item into a cached listing, replacing (never duplicating) whatever row it collides
+// with: the same uuid, or a same-name row it supersedes (case-insensitive, trimmed, and only when both names
+// are known — an undecryptable row has none). Covers createDirectory's idempotent-existing-directory return:
+// the backend hands back the SAME uuid it already returned last time, so the stale cached row is dropped and
+// the fresh one appended, net item count unchanged.
+export { upsertItem as upsertDriveItem } from "@filen/shared"
+
+function withData<T extends DriveItem>(row: T, update: (data: T["data"]) => T["data"]): T {
+	return { ...row, data: update(row.data) }
 }
 
-// Insert an incoming item into a cached listing, replacing (never duplicating) whatever row it
-// collides with — see keepAgainstIncomingDriveItem. Covers createDirectory's idempotent-existing-
-// directory return: the backend hands back the SAME uuid it already returned last time, so the
-// stale cached row is dropped and the fresh one appended, net item count unchanged.
-export { upsertItem as upsertDriveItem } from "@filen/shared"
+// A cached row refreshed with the one attribute an in-place change set, and nothing else. It keeps its arm
+// and sharing context (the Shared by me root lists an item once per receiver, each row unsharing its own)
+// and every other field, which the change's result may carry outdated (a colour set since) or synthesized
+// (a shared root's own parent and flag, when the change started from such a row).
+export function withNameOf(row: DriveItem, renamed: DriveItem): DriveItem {
+	const source = asDirectoryOrFile(renamed)
+
+	switch (row.type) {
+		case "directory":
+		case "sharedDirectory":
+		case "sharedRootDirectory": {
+			if (source.type !== "directory") {
+				return row
+			}
+
+			const { meta, decryptedMeta, undecryptable } = source.data
+
+			return withData(row, data => ({ ...data, meta, decryptedMeta, undecryptable }))
+		}
+
+		case "file":
+		case "sharedFile":
+		case "sharedRootFile": {
+			if (source.type !== "file") {
+				return row
+			}
+
+			const { meta, decryptedMeta, undecryptable } = source.data
+
+			return withData(row, data => ({ ...data, meta, decryptedMeta, undecryptable }))
+		}
+	}
+}
+
+export function withFavorited(row: DriveItem, favorited: boolean): DriveItem {
+	return row.data.favorited === favorited ? row : withData(row, data => ({ ...data, favorited }))
+}
+
+export function withColor(row: DriveItem, color: DirColor): DriveItem {
+	switch (row.type) {
+		case "directory":
+		case "sharedDirectory":
+		case "sharedRootDirectory": {
+			return row.data.color === color ? row : withData(row, data => ({ ...data, color }))
+		}
+
+		case "file":
+		case "sharedFile":
+		case "sharedRootFile": {
+			return row
+		}
+	}
+}

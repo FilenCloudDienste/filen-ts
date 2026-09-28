@@ -3,9 +3,10 @@ import { dirnameOf, pathSegmentDepth, sumBytes } from "@filen/shared"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { i18n } from "@/lib/i18n"
+import { log } from "@/lib/log"
 import { sdkApi } from "@/lib/sdk/client"
 import { runCreateDirectory, type CreateDirectoryDeps } from "@/features/drive/lib/createDirectory"
-import { runUpload, defaultUploadDeps, type RunUploadDeps } from "@/features/drive/lib/upload"
+import { runUpload, defaultUploadDeps, type RunUploadDeps, type UploadOutcome } from "@/features/drive/lib/upload"
 import {
 	defaultHeicUploadDeps,
 	heicUploadConversionEnabled,
@@ -39,6 +40,9 @@ export interface CollectedDirectoryUpload {
 	// by depth before creating anything.
 	dirs: string[]
 	files: CollectedFile[]
+	// Entries the browser could not read (a file or sub-directory removed after the drop, an unreadable
+	// sub-directory): each is left out, subtree and all, and counted as one failure in the summary.
+	skipped: number
 }
 
 // The two shapes a directory pick arrives in: a `webkitdirectory` file input's FileList, already
@@ -77,21 +81,41 @@ function collectFromFiles(files: File[]): CollectedDirectoryUpload {
 		}
 	}
 
-	return { dirs: [...dirs], files: collected }
+	return { dirs: [...dirs], files: collected, skipped: 0 }
 }
 
 // DnD directory entries carry the real tree structure: `dirs.add` runs for every directory entry
-// this walks into regardless of whether it has children, so an empty sub-directory is still
-// recreated (unlike the FileList path above).
+// this reads regardless of whether it has children, so an empty sub-directory is still recreated
+// (unlike the FileList path above). One entry the browser fails to read is skipped rather than
+// failing the walk, so it never strands the rest of the tree; a directory whose listing fails is not
+// recreated as an empty copy. Only when nothing at all was readable does the walk reject, with the
+// first error, since there is then no upload to run.
 async function collectFromEntries(entries: FileSystemEntry[]): Promise<CollectedDirectoryUpload> {
 	const dirs = new Set<string>()
 	const files: CollectedFile[] = []
+	let skipped = 0
+	let firstError: { error: unknown } | undefined
+
+	function skip(relPath: string, e: unknown): void {
+		log.warn("upload", "directory walk: skipped unreadable entry", relPath, e)
+
+		skipped += 1
+		firstError ??= { error: e }
+	}
 
 	async function walk(entry: FileSystemEntry, relPath: string): Promise<void> {
 		if (isDirectoryEntry(entry)) {
-			dirs.add(relPath)
+			let children: FileSystemEntry[]
 
-			const children = await readAllEntries(entry.createReader())
+			try {
+				children = await readAllEntries(entry.createReader())
+			} catch (e) {
+				skip(relPath, e)
+
+				return
+			}
+
+			dirs.add(relPath)
 
 			await Promise.all(children.map(child => walk(child, `${relPath}/${child.name}`)))
 
@@ -99,13 +123,21 @@ async function collectFromEntries(entries: FileSystemEntry[]): Promise<Collected
 		}
 
 		if (isFileEntry(entry)) {
-			files.push({ file: await readFileEntry(entry), relPath })
+			try {
+				files.push({ file: await readFileEntry(entry), relPath })
+			} catch (e) {
+				skip(relPath, e)
+			}
 		}
 	}
 
 	await Promise.all(entries.map(entry => walk(entry, entry.name)))
 
-	return { dirs: [...dirs], files }
+	if (dirs.size === 0 && files.length === 0 && firstError !== undefined) {
+		throw firstError.error
+	}
+
+	return { dirs: [...dirs], files, skipped }
 }
 
 // FileSystemEntry's isDirectory/isFile are plain booleans, not literal-typed discriminants — TS
@@ -183,11 +215,11 @@ function ancestorPaths(relPath: string): string[] {
 }
 
 // ---------------------------------------------------------------------------
-// runDirectoryUpload — create the collected sub-directories parent-before-child, then upload every
-// file into its recreated parent. Never throws: a sub-directory whose parent failed (or was itself
-// skipped) skips its whole subtree — dirs and files alike — recording the miss rather than aborting;
-// a single failure never strands the rest of the batch (mirrors startUploads' own per-file
-// independence, one level up).
+// runDirectoryUpload — create the collected sub-directories parent-before-child, uploading every
+// file into its recreated parent as soon as that parent exists. Never throws: a sub-directory whose
+// parent failed (or was itself skipped) skips its whole subtree — dirs and files alike — recording the
+// miss rather than aborting; a single failure never strands the rest of the batch (mirrors
+// startUploads' own per-file independence, one level up).
 // ---------------------------------------------------------------------------
 
 export interface RunDirectoryUploadDeps {
@@ -198,83 +230,112 @@ export interface RunDirectoryUploadDeps {
 
 export async function runDirectoryUpload(
 	deps: RunDirectoryUploadDeps,
-	args: { rootParentUuid: string | null; dirs: string[]; files: CollectedFile[] }
+	args: { rootParentUuid: string | null; dirs: string[]; files: CollectedFile[]; skipped?: number }
 ): Promise<void> {
-	const { rootParentUuid, dirs, files } = args
+	const { rootParentUuid, dirs, files, skipped = 0 } = args
 
-	if (dirs.length === 0 && files.length === 0) {
+	if (dirs.length === 0 && files.length === 0 && skipped === 0) {
 		return
 	}
 
-	// relPath -> the uuid runCreateDirectory returned for it; a path present here created (or
-	// idempotently matched an existing directory) successfully. Processing in depth-ascending order
-	// means every ancestor's own outcome is already settled by the time a deeper path is resolved, so
-	// a plain Map (rather than a per-path ancestor walk) is enough: `undefined` here can only mean
-	// "this exact path never got created" — a real ancestor that failed or was itself skipped —
-	// because a `parentPath === null` lookup resolves straight to rootParentUuid (string | null,
-	// never undefined) instead of going through this map at all.
-	const dirUuids = new Map<string, string>()
-	const failedDirPaths = new Set<string>()
-	let createdDirs = 0
+	// relPath -> its create, settling to the uuid runCreateDirectory returned (a created or
+	// idempotently matched directory), or undefined when this path, or an ancestor, failed. Each
+	// directory waits only for its own parent, and each file only for its own directory, so siblings
+	// are created concurrently and uploads start while the rest of the tree is still being created; the
+	// SDK throttles the real request concurrency. Registered in depth order so every parent's entry
+	// already exists when a child looks it up; a lookup miss can only be a path that was never
+	// collected, which resolves straight to failure.
+	const dirUuids = new Map<string, Promise<string | undefined>>()
+	// Filen names are case-insensitive: two local paths differing only by case name the same remote
+	// directory, so the later create waits for the earlier and idempotently matches it instead of
+	// racing it. Keyed by the case-folded path, the value being the last create on that key.
+	const nameClaims = new Map<string, Promise<unknown>>()
+	const createdUuids: string[] = []
+	let failedDirs = 0
+
+	function parentUuidOf(relPath: string): Promise<string | null | undefined> {
+		const parentPath = dirnameOf(relPath)
+
+		return parentPath === null ? Promise.resolve(rootParentUuid) : (dirUuids.get(parentPath) ?? Promise.resolve(undefined))
+	}
 
 	const orderedDirs = [...dirs].sort((a, b) => pathSegmentDepth(a) - pathSegmentDepth(b))
 
 	for (const relPath of orderedDirs) {
-		const parentPath = dirnameOf(relPath)
-		const parentUuid = parentPath === null ? rootParentUuid : dirUuids.get(parentPath)
+		const name = basenameOf(relPath)
+		const claimKey = relPath.toLowerCase()
+		const earlierClaim = nameClaims.get(claimKey)
 
-		if (parentUuid === undefined) {
-			failedDirPaths.add(relPath)
-			continue
-		}
+		const created = (async (): Promise<string | undefined> => {
+			const parentUuid = await parentUuidOf(relPath)
 
-		const outcome = await runCreateDirectory(deps.createDirectory, parentUuid, basenameOf(relPath))
+			if (parentUuid === undefined) {
+				failedDirs += 1
 
-		if (outcome.status === "error") {
-			failedDirPaths.add(relPath)
-			continue
-		}
+				return undefined
+			}
 
-		dirUuids.set(relPath, outcome.item.data.uuid)
-		createdDirs += 1
+			await earlierClaim
+
+			const outcome = await runCreateDirectory(deps.createDirectory, parentUuid, name)
+
+			if (outcome.status === "error") {
+				failedDirs += 1
+
+				return undefined
+			}
+
+			createdUuids.push(outcome.item.data.uuid)
+
+			return outcome.item.data.uuid
+		})()
+
+		dirUuids.set(relPath, created)
+		nameClaims.set(claimKey, created)
 	}
 
-	// One preference read for the whole walk (see heicUploadConversionEnabled); the conversion itself
-	// stays inside the fan-out below so a converted file uploads as soon as IT is ready.
-	const convertHeic = await heicUploadConversionEnabled(
+	// One preference read for the whole walk (see heicUploadConversionEnabled), started alongside the
+	// directory creates; the conversion itself stays inside the fan-out below so a converted file
+	// uploads as soon as IT is ready.
+	const convertHeic = heicUploadConversionEnabled(
 		deps.heic,
 		files.map(entry => entry.file)
 	)
 
 	// Files fan out in parallel — no JS queue/semaphore, same rationale as startUploads: the SDK's own
 	// Tower layer throttles real upload concurrency, never reimplemented here.
-	const fileOutcomes = await Promise.all(
-		files.map(async ({ file, relPath }): Promise<boolean> => {
-			const parentPath = dirnameOf(relPath)
-			const parentUuid = parentPath === null ? rootParentUuid : dirUuids.get(parentPath)
+	const [fileOutcomes] = await Promise.all([
+		Promise.all(
+			files.map(async ({ file, relPath }): Promise<UploadOutcome["status"]> => {
+				const parentUuid = await parentUuidOf(relPath)
 
-			if (parentUuid === undefined) {
-				return false
-			}
+				if (parentUuid === undefined) {
+					return "error"
+				}
 
-			// renameToJpg only rewrites file.name; `relPath` is untouched and still resolves the parent above.
-			const prepared = await maybeConvertHeicUpload(deps.heic.convert, file, convertHeic)
-			const outcome = await runUpload(deps.upload, { parentUuid, file: prepared })
+				// renameToJpg only rewrites file.name; `relPath` is untouched and still resolved the parent above.
+				const prepared = await maybeConvertHeicUpload(deps.heic.convert, file, await convertHeic)
 
-			return outcome.status === "success"
-		})
-	)
+				return (await runUpload(deps.upload, { parentUuid, file: prepared })).status
+			})
+		),
+		// A directory with no file under it is still awaited, so its outcome is counted.
+		Promise.all(dirUuids.values())
+	])
 
-	let uploadedFiles = 0
+	const uploadedFiles = fileOutcomes.filter(status => status === "success").length
 
-	for (const ok of fileOutcomes) {
-		if (ok) {
-			uploadedFiles += 1
-		}
+	if (createdUuids.length > 0 || uploadedFiles > 0) {
+		deps.upload.invalidateDirectorySizes?.(rootParentUuid, createdUuids)
 	}
 
-	const succeeded = createdDirs + uploadedFiles
-	const failed = failedDirPaths.size + (fileOutcomes.length - uploadedFiles)
+	const succeeded = createdUuids.length + uploadedFiles
+	const failed = failedDirs + skipped + fileOutcomes.filter(status => status === "error").length
+
+	// Everything that ran was cancelled by the user: nothing to report.
+	if (succeeded === 0 && failed === 0) {
+		return
+	}
 
 	if (failed === 0) {
 		toast.success(i18n.t("transfers:transfersDirectoryUploadSummaryComplete", { count: succeeded }))

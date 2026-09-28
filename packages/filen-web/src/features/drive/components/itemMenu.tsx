@@ -7,7 +7,7 @@ import { type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { toggleFavorite, restoreItems } from "@/features/drive/lib/actions"
 import { defaultRevealDeps, runOpenContainingDirectory } from "@/features/drive/lib/reveal"
-import { driveItemLinkStatusQueryKey, fetchDriveItemLinkStatus } from "@/features/drive/queries/drive"
+import { driveItemLinkStatusQueryKey, fetchDriveItemLinkStatus, type DriveItemLinkStatus } from "@/features/drive/queries/drive"
 import { queryClient } from "@/queries/client"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { asErrorDTO } from "@/lib/sdk/errors"
@@ -165,11 +165,21 @@ function ItemMenuEntries({
 	// check needed, it degrades to `onItemAction("link", item)` exactly like an item with no link at
 	// all, which is where the dialog's own subscription gate lives (see linkDialog.tsx).
 	async function runCopyLink(): Promise<void> {
-		const status = await queryClient.query({
-			queryKey: driveItemLinkStatusQueryKey(item.data.uuid),
-			queryFn: () => fetchDriveItemLinkStatus(item),
-			staleTime: "static"
-		})
+		let status: DriveItemLinkStatus | null
+
+		// `query` rethrows the fetch's error, which this fire-and-forget click would otherwise leave as a
+		// silent unhandled rejection.
+		try {
+			status = await queryClient.query({
+				queryKey: driveItemLinkStatusQueryKey(item.data.uuid),
+				queryFn: () => fetchDriveItemLinkStatus(item),
+				staleTime: "static"
+			})
+		} catch (e) {
+			toast.error(errorLabel(asErrorDTO(e)))
+			return
+		}
+
 		const outcome = await resolveCopyLinkAction(item, status, url => navigator.clipboard.writeText(url))
 
 		if (outcome.action === "copied") {

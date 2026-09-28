@@ -9,6 +9,7 @@ import {
 	resolveCursorIndex
 } from "@/features/drive/lib/listbox"
 import { type DriveItem } from "@/features/drive/lib/item"
+import { driveRowKey } from "@/features/drive/lib/rowKey"
 import { type DriveVariant, type DriveViewMode } from "@/features/drive/lib/preferences"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import { type DriveVirtualizer } from "@/features/drive/hooks/useDriveVirtualizer"
@@ -54,15 +55,17 @@ export function useDriveListboxNav({
 	splat,
 	onOpen
 }: UseDriveListboxNavParams): DriveListboxNav {
-	// Tracked by item identity (uuid), not position — a positional index alone drifts under a
+	// Tracked by row identity (driveRowKey), not position — a positional index alone drifts under a
 	// background reorder (sort-by-size backfilling sizes, a live socket/optimistic patch) with no
-	// navigation, silently retargeting Enter/Shift+Arrow onto the wrong item. `null` means "no move
-	// has happened yet in this directory/variant", which resolveCursorIndex falls back to the fallback
-	// index below (0 initially), same as the plain positional default this replaces.
-	const [activeUuid, setActiveUuid] = useState<string | null>(null)
-	const [anchorUuid, setAnchorUuid] = useState<string | null>(null)
+	// navigation, silently retargeting Enter/Shift+Arrow onto the wrong item. Not the bare uuid either:
+	// the Shared by me root lists one item once per receiver, and a uuid would resolve to the first of
+	// them. `null` means "no move has happened yet in this directory/variant", which resolveCursorIndex
+	// falls back to the fallback index below (0 initially), same as the plain positional default this
+	// replaces.
+	const [activeKey, setActiveKey] = useState<string | null>(null)
+	const [anchorKey, setAnchorKey] = useState<string | null>(null)
 	// The last position each cursor actually resolved to — what resolveCursorIndex falls back to once
-	// its uuid is no longer present in `items` (deleted/filtered/moved out from under the cursor), so
+	// its row is no longer present in `items` (deleted/filtered/moved out from under the cursor), so
 	// a vanished target lands on its nearest surviving neighbor instead of snapping back to index 0.
 	// Kept as state (not a ref) and adjusted synchronously during render — React's documented pattern
 	// for deriving state from a changed input without an extra effect round trip (see "Adjusting state
@@ -72,9 +75,9 @@ export function useDriveListboxNav({
 	const focusRequestRef = useRef(0)
 	const pendingReveal = useDriveStore(state => state.pendingReveal)
 
-	const uuids = items.map(item => item.data.uuid)
-	const safeActiveIndex = clampListboxIndex(resolveCursorIndex(activeUuid, uuids, activeFallback), items.length)
-	const safeAnchorIndex = clampListboxIndex(resolveCursorIndex(anchorUuid, uuids, anchorFallback), items.length)
+	const keys = items.map(driveRowKey)
+	const safeActiveIndex = clampListboxIndex(resolveCursorIndex(activeKey, keys, activeFallback), items.length)
+	const safeAnchorIndex = clampListboxIndex(resolveCursorIndex(anchorKey, keys, anchorFallback), items.length)
 
 	if (activeFallback !== safeActiveIndex) {
 		setActiveFallback(safeActiveIndex)
@@ -94,8 +97,8 @@ export function useDriveListboxNav({
 	useEffect(() => {
 		useDriveStore.getState().clearSelectedItems()
 		// eslint-disable-next-line react-hooks/set-state-in-effect -- deliberate navigation reset, see above
-		setActiveUuid(null)
-		setAnchorUuid(null)
+		setActiveKey(null)
+		setAnchorKey(null)
 		setActiveFallback(0)
 		setAnchorFallback(0)
 
@@ -118,8 +121,9 @@ export function useDriveListboxNav({
 	function moveActive(nextIndexRaw: number): number {
 		const next = clampListboxIndex(nextIndexRaw, items.length)
 		const rowIndex = viewMode === "grid" ? Math.floor(next / columns) : next
+		const nextItem = items[next]
 
-		setActiveUuid(items[next]?.data.uuid ?? null)
+		setActiveKey(nextItem ? driveRowKey(nextItem) : null)
 		virtualizer.scrollToIndex(rowIndex, { align: "auto" })
 		focusRequestRef.current = next
 
@@ -203,31 +207,39 @@ export function useDriveListboxNav({
 			return
 		}
 
+		const key = driveRowKey(item)
+
 		if (event.shiftKey) {
 			selectRange(safeAnchorIndex, index)
-			setActiveUuid(item.data.uuid)
+			setActiveKey(key)
 
 			return
 		}
 
 		if (event.metaKey || event.ctrlKey) {
 			useDriveStore.getState().toggleSelectedItem(item)
-			setActiveUuid(item.data.uuid)
-			setAnchorUuid(item.data.uuid)
+			setActiveKey(key)
+			setAnchorKey(key)
 
 			return
 		}
 
 		const store = useDriveStore.getState()
+		const soleSelected = store.selectedItems.length === 1 ? store.selectedItems[0] : undefined
 
-		if (isPlainClickDeselect(store.selectedItems, item.data.uuid, event.detail, clickPointerType(event.nativeEvent))) {
+		// The sole selection must be this very row: another receiver's row of the same item selects instead.
+		if (
+			soleSelected !== undefined &&
+			driveRowKey(soleSelected) === key &&
+			isPlainClickDeselect(store.selectedItems, item.data.uuid, event.detail, clickPointerType(event.nativeEvent))
+		) {
 			store.clearSelectedItems()
 		} else {
 			store.setSelectedItems([item])
 		}
 
-		setActiveUuid(item.data.uuid)
-		setAnchorUuid(item.data.uuid)
+		setActiveKey(key)
+		setAnchorKey(key)
 	}
 
 	// ARIA listbox cursor semantics (roving tabindex): plain Arrow/Home/End move the cursor only —
@@ -255,7 +267,7 @@ export function useDriveListboxNav({
 
 			if (item) {
 				useDriveStore.getState().toggleSelectedItem(item)
-				setAnchorUuid(item.data.uuid)
+				setAnchorKey(driveRowKey(item))
 			}
 
 			return
@@ -281,16 +293,19 @@ export function useDriveListboxNav({
 		if (event.shiftKey) {
 			selectRange(safeAnchorIndex, next)
 		} else {
-			setAnchorUuid(items[next]?.data.uuid ?? null)
+			const nextItem = items[next]
+
+			setAnchorKey(nextItem ? driveRowKey(nextItem) : null)
 		}
 	}
 
 	function setCursor(index: number) {
 		const clamped = clampListboxIndex(index, items.length)
-		const uuid = items[clamped]?.data.uuid ?? null
+		const item = items[clamped]
+		const key = item ? driveRowKey(item) : null
 
-		setActiveUuid(uuid)
-		setAnchorUuid(uuid)
+		setActiveKey(key)
+		setAnchorKey(key)
 	}
 
 	return { safeActiveIndex, handleKeyDown, handlePointerSelect, setCursor }

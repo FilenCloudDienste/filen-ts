@@ -16,12 +16,13 @@ import { i18n } from "@/lib/i18n"
 import { runOp } from "@/lib/actions/outcome"
 import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
 import type { CopyJobEvent } from "@/workers/sdk.worker"
-import { narrowItem, narrowToSdkItems, type DriveItem } from "@/features/drive/lib/item"
-import { invalidateDirectorySize, normalizeParentUuid, queueListingCreate } from "@/features/drive/queries/drive"
+import { asDirectoryOrFile, narrowItem, narrowToSdkItems, type DriveItem } from "@/features/drive/lib/item"
+import { findCachedListingItem, normalizeParentUuid, queueListingCreate } from "@/features/drive/queries/drive"
 import { currentRootUuid, trashItems } from "@/features/drive/lib/actions"
 import { type BulkOutcome } from "@/features/drive/lib/bulk"
 import { flushDeferredRecents } from "@/features/drive/lib/socketHandlers"
 import { accountQuotaDeps, addAccountStorageUsed } from "@/features/drive/lib/quota"
+import { invalidateUploadedDirectorySizes } from "@/features/drive/lib/upload"
 import {
 	canRetryCopy,
 	copiedTopLevel,
@@ -70,7 +71,8 @@ export interface RunCopyDeps {
 	account: QuotaCheckDeps
 	patchCreated: (item: DriveItem) => void
 	trash: (items: DriveItem[]) => Promise<BulkOutcome<DriveItem>>
-	settled: (job: CopyJob) => void
+	// `written` names the directories below the destination the job wrote into or created.
+	settled: (job: CopyJob, written: readonly string[]) => void
 }
 
 export interface CopyJobRequest {
@@ -335,6 +337,8 @@ export async function runCopyJob(deps: RunCopyDeps, request: CopyJobRequest): Pr
 	deps.release(id)
 	settleJob(deps.jobs, id, settlement, delivered)
 
+	const written = writtenDirectories(source, destination.uuid, delivered)
+
 	// Let go of them: the worker may still hold the callbacks.
 	delivered = []
 
@@ -368,7 +372,7 @@ export async function runCopyJob(deps: RunCopyDeps, request: CopyJobRequest): Pr
 	const job = settledJob
 
 	settleRow(deps.transfers, id, job)
-	deps.settled(job)
+	deps.settled(job, written)
 
 	return job
 }
@@ -394,8 +398,43 @@ function patchCopiedItem(item: DriveItem): void {
 	queueListingCreate(normalizeParentUuid(item.data.parent, currentRootUuid()), item)
 }
 
+function cachedParentOf(uuid: string): string | undefined {
+	const cached = findCachedListingItem(uuid)
+
+	return cached === undefined ? undefined : asDirectoryOrFile(cached).data.parent
+}
+
+// The directories below the destination whose recursive size the job moved: the top-level directories it
+// created, and for a retry every directory from where each item was meant to land up to the destination,
+// the first hop read from the entry itself and the rest through the listing cache (no request).
+function writtenDirectories(source: CopySource, destinationUuid: string | null, delivered: readonly DriveItem[]): string[] {
+	const written = new Set<string>(delivered.flatMap(item => (item.type === "directory" ? [item.data.uuid] : [])))
+
+	if (source.kind !== "entries") {
+		return [...written]
+	}
+
+	const rootUuid = currentRootUuid()
+
+	for (const { destination } of source.entries) {
+		let uuid = normalizeParentUuid(destination.uuid, rootUuid)
+		let parent: string | undefined = "parent" in destination ? destination.parent : undefined
+
+		while (uuid !== null && uuid !== destinationUuid && !written.has(uuid)) {
+			written.add(uuid)
+
+			const next = parent ?? cachedParentOf(uuid)
+
+			parent = undefined
+			uuid = next === undefined ? null : normalizeParentUuid(next, rootUuid)
+		}
+	}
+
+	return [...written]
+}
+
 // No toast: the card, or the transfers row, shows how the copy ended.
-function afterCopySettled(job: CopyJob): void {
+function afterCopySettled(job: CopyJob, written: readonly string[]): void {
 	flushDeferredRecents()
 
 	if (job.counts.bytesDone > 0) {
@@ -403,7 +442,7 @@ function afterCopySettled(job: CopyJob): void {
 	}
 
 	if (job.counts.dirsCreated > 0 || job.counts.filesDone > 0) {
-		invalidateDirectorySize(job.destination.uuid)
+		invalidateUploadedDirectorySizes(job.destination.uuid, written)
 	}
 
 	pruneSettledCopyJobs()

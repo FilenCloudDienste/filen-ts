@@ -43,7 +43,18 @@ function pasteEntries(paste: DrivePasteAction | undefined) {
 }
 
 // Toolbar entry point for starting an upload.
-export function UploadMenu({ parentUuid, disabled = false, openPreview, offline = false, hiddenNotice = false, paste }: UploadMenuProps) {
+export function UploadMenu({
+	parentUuid,
+	disabled: disabledProp,
+	openPreview,
+	offline: offlineProp,
+	hiddenNotice: hiddenNoticeProp,
+	paste
+}: UploadMenuProps) {
+	// Not destructuring defaults, which the React Compiler cannot lower.
+	const disabled = disabledProp ?? false
+	const offline = offlineProp ?? false
+	const hiddenNotice = hiddenNoticeProp ?? false
 	const { t } = useTranslation(["drive", "common"])
 	const actions = useUploadMenuActions({ parentUuid, disabled, openPreview, hiddenNotice })
 
@@ -101,7 +112,10 @@ export interface UploadContextMenuProps {
 // the surface are passed over: a row's own ContextMenu stops the event before it gets here, and
 // anything else (an empty state's buttons, a portalled popup bubbling through the React tree) is
 // declined via preventBaseUIHandler.
-export function UploadContextMenu({ actions, disabled = false, paste, render, onOpen }: UploadContextMenuProps) {
+export function UploadContextMenu({ actions, disabled: disabledProp, paste, render, onOpen }: UploadContextMenuProps) {
+	// Not a destructuring default, which the React Compiler cannot lower.
+	const disabled = disabledProp ?? false
+
 	function isEmptySpace(event: SyntheticEvent<HTMLDivElement>, clientX: number, clientY: number): boolean {
 		const bounds = event.currentTarget.getBoundingClientRect()
 

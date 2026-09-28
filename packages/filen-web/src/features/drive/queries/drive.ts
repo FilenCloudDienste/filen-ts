@@ -5,7 +5,17 @@ import { queryClient } from "@/queries/client"
 // Whole-statement `import type` here too — sdk.worker.ts's own top-level code pulls in
 // @filen/sdk-rs as a real value import, same elision hazard as above.
 import type { ListDirectoryTarget, ItemInfoResult } from "@/workers/sdk.worker"
-import type { Dir, File, FileVersion, DirPublicLinkRW, FilePublicLink, DirColor, DirSizeResponse, GetItemPathResult } from "@filen/sdk-rs"
+import type {
+	Dir,
+	File,
+	FileVersion,
+	DirPublicLinkRW,
+	FilePublicLink,
+	DirColor,
+	DirSizeResponse,
+	GetItemPathResult,
+	SharingRole
+} from "@filen/sdk-rs"
 import { fastLocaleCompare, driveItemName, removeByUuid, upsertItems } from "@filen/shared"
 import { narrowItem, asDirectoryOrFile, toAnyDirWithContext, type DriveItem } from "@/features/drive/lib/item"
 import {
@@ -465,8 +475,16 @@ function applyListingChange(items: DriveItem[], change: ListingChange): DriveIte
 			return next ?? items
 		}
 
+		case "append": {
+			// The very rows a listing already holds, as a socket echo of this client's own patch carries them.
+			if (change.items.every(item => items.includes(item))) {
+				return items
+			}
+
+			return applyListingChanges(items, [change])
+		}
+
 		case "upsert":
-		case "append":
 		case "update": {
 			return applyListingChanges(items, [change])
 		}
@@ -477,23 +495,333 @@ function asListingChange(change: ListingChange | ListingPatch): ListingChange {
 	return typeof change === "function" ? { type: "update", update: change } : change
 }
 
-// A read under way gets the change through its replay, cached data directly. A listing nobody has read
-// gets neither: made from the rows a change adds, it would show as that directory's whole content until
-// its read, and a copy or a directory upload would leave one such entry behind per directory it creates.
-function patchListing(params: DriveListingParams, change: ListingChange): void {
-	listingReads.get(listingId(params.variant, params.uuid))?.changes.push(change)
+// A patch to one listing, or to every listing `where` picks (all of them without one).
+type Patch =
+	| { params: DriveListingParams; change: ListingChange }
+	| { params: undefined; where: ((params: DriveListingParams) => boolean) | undefined; change: ListingRowChange }
 
-	const query = listingQuery(params)
-	const prev = query?.state.data as DriveItem[] | undefined
+function patchChangeFor(patch: Patch, params: DriveListingParams): ListingChange | undefined {
+	if (patch.params === undefined) {
+		return patch.where === undefined || patch.where(params) ? patch.change : undefined
+	}
 
-	if (query === undefined || prev === undefined) {
+	return patch.params.variant === params.variant && patch.params.uuid === params.uuid ? patch.change : undefined
+}
+
+// Row changes to rows a listing doesn't hold leave it as it was, however many land. So does an append of the
+// very rows it holds (a socket echo of this client's own patch) that nothing before it touched.
+function applyHeldChanges(items: DriveItem[], changes: readonly ListingChange[]): DriveItem[] {
+	const [first] = changes
+
+	if (changes.length === 1 && first !== undefined) {
+		return applyListingChange(items, first)
+	}
+
+	// The rows the changes kept so far name; an upsert or an edit may touch any row.
+	const uuids = new Set<string>()
+	let touchesAny = false
+	let rowsOnly = true
+	let held: Set<DriveItem> | undefined
+	let kept: ListingChange[] | undefined
+
+	for (let index = 0; index < changes.length; index++) {
+		const change = changes[index]
+
+		if (change === undefined) {
+			continue
+		}
+
+		if (change.type === "append" && !touchesAny) {
+			const rows = (held ??= new Set(items))
+
+			if (change.items.every(item => rows.has(item) && !uuids.has(item.data.uuid))) {
+				kept ??= changes.slice(0, index)
+
+				continue
+			}
+		}
+
+		kept?.push(change)
+
+		switch (change.type) {
+			case "remove":
+			case "replace": {
+				uuids.add(change.uuid)
+
+				break
+			}
+
+			case "append": {
+				rowsOnly = false
+
+				for (const item of change.items) {
+					uuids.add(item.data.uuid)
+				}
+
+				break
+			}
+
+			case "upsert":
+			case "update": {
+				rowsOnly = false
+				touchesAny = true
+
+				break
+			}
+		}
+	}
+
+	const rest = kept ?? changes
+
+	if (!rowsOnly) {
+		return applyListingChanges(items, rest)
+	}
+
+	return items.some(row => uuids.has(row.data.uuid)) ? applyListingChanges(items, rest) : items
+}
+
+function nestedShareRole(rows: readonly DriveItem[]): SharingRole | undefined {
+	for (const row of rows) {
+		if ((row.type === "sharedFile" || row.type === "sharedDirectory") && row.data.sharingRole !== undefined) {
+			return row.data.sharingRole
+		}
+	}
+
+	return undefined
+}
+
+// A directory this account shared out also lists under Shared by me, each row tagged with the share's role,
+// so a change to its drive listing reaches that listing too. A removal applies as it is and a new file joins
+// with the role the listing's rows hold. Nothing else can be tagged here (a directory's row carries the
+// SDK's own SharedDir, an edit may touch any row), so that listing reads again instead.
+function sharedOutMirror(patch: Patch): ListingChange | "reread" | undefined {
+	const target = patch.params
+
+	if (target?.variant !== "drive" || target.uuid === null) {
+		return undefined
+	}
+
+	const rows = listingQuery({ variant: "sharedOut", uuid: target.uuid })?.state.data as DriveItem[] | undefined
+
+	if (rows === undefined && !listingReads.has(listingId("sharedOut", target.uuid))) {
+		return undefined
+	}
+
+	const { change } = patch
+
+	if (change.type === "remove") {
+		return change
+	}
+
+	const role = rows === undefined ? undefined : nestedShareRole(rows)
+
+	if (change.type !== "upsert" || role === undefined) {
+		return "reread"
+	}
+
+	const files: DriveItem[] = []
+
+	for (const item of change.items) {
+		if (item.type !== "file") {
+			return "reread"
+		}
+
+		files.push(narrowItem({ ...item.data, sharingRole: role }))
+	}
+
+	return { type: "upsert", items: files }
+}
+
+// One lookup per listing by the key's hash: a filter find() copies and re-hashes the whole query cache.
+function patchedQueries(patches: readonly Patch[]): Query[] {
+	const queries = new Map<string, Query | undefined>()
+
+	for (const patch of patches) {
+		if (patch.params === undefined) {
+			return queryClient.getQueryCache().findAll({ queryKey: ["drive", "listing"] })
+		}
+
+		const id = listingId(patch.params.variant, patch.params.uuid)
+
+		if (!queries.has(id)) {
+			queries.set(id, listingQuery(patch.params))
+		}
+	}
+
+	return [...queries.values()].filter(query => query !== undefined)
+}
+
+// A read under way gets each change through its replay, cached data directly, in one write per listing. A
+// listing nobody has read gets neither: made from the rows a change adds, it would show as that directory's
+// whole content until its read, and a copy or a directory upload would leave one such entry behind per
+// directory it creates.
+function applyPatches(queued: readonly Patch[]): void {
+	const patches: Patch[] = []
+	const rereads = new Map<string, DriveListingParams>()
+
+	for (const patch of queued) {
+		patches.push(patch)
+
+		const mirror = sharedOutMirror(patch)
+
+		if (mirror === undefined || patch.params === undefined) {
+			continue
+		}
+
+		const params: DriveListingParams = { variant: "sharedOut", uuid: patch.params.uuid }
+
+		if (mirror === "reread") {
+			rereads.set(listingId(params.variant, params.uuid), params)
+		} else {
+			patches.push({ params, change: mirror })
+		}
+	}
+
+	for (const reads of listingReads.values()) {
+		for (const patch of patches) {
+			const change = patchChangeFor(patch, reads.params)
+
+			if (change !== undefined) {
+				reads.changes.push(change)
+			}
+		}
+	}
+
+	for (const query of patchedQueries(patches)) {
+		const prev = query.state.data as DriveItem[] | undefined
+
+		if (prev === undefined) {
+			continue
+		}
+
+		const params = (query.queryKey as ReturnType<typeof driveListingQueryKey>)[2]
+		const changes: ListingChange[] = []
+
+		for (const patch of patches) {
+			const change = patchChangeFor(patch, params)
+
+			if (change !== undefined) {
+				changes.push(change)
+			}
+		}
+
+		if (changes.length === 0) {
+			continue
+		}
+
+		const next = applyHeldChanges(prev, changes)
+
+		// Most cached listings don't hold the row; writing one would re-render it for nothing.
+		if (next !== prev) {
+			writeListing(query, next)
+		}
+	}
+
+	for (const params of rereads.values()) {
+		void queryClient.invalidateQueries({ queryKey: driveListingQueryKey(params), exact: true })
+	}
+}
+
+// A bulk action's items finish one worker reply at a time, and a patch per reply would rewrite and re-render
+// every listing holding one of them each time. While one runs, every patch queues with the creates, in
+// order, and lands in one write per listing per window (batchListingPatches).
+let queuedPatches: Patch[] = []
+// The rows the queued patches name, and how many edit whole listings instead. An upsert also makes way for a
+// same-name row, which only ever drops a duplicate.
+const queuedRowUuids = new Set<string>()
+// The rows the queued patches append to the trash and no later one removes from it: a trash echo of one of
+// them has nothing left to insert.
+const queuedTrashAppends = new Set<string>()
+let queuedListingEdits = 0
+let listingBatches = 0
+
+const TRASH_LISTING: DriveListingParams = { variant: "trash", uuid: null }
+
+function patchReachesTrash(patch: Patch): boolean {
+	return patch.params === undefined ? patch.where === undefined || patch.where(TRASH_LISTING) : patch.params.variant === "trash"
+}
+
+function queuePatch(patch: Patch): void {
+	queuedPatches.push(patch)
+
+	const { change } = patch
+
+	switch (change.type) {
+		case "remove":
+		case "replace": {
+			queuedRowUuids.add(change.uuid)
+
+			if (change.type === "remove" && queuedTrashAppends.size > 0 && patchReachesTrash(patch)) {
+				queuedTrashAppends.delete(change.uuid)
+			}
+
+			break
+		}
+
+		case "upsert":
+		case "append": {
+			const toTrash = change.type === "append" && patchReachesTrash(patch)
+
+			for (const item of change.items) {
+				queuedRowUuids.add(item.data.uuid)
+
+				if (toTrash) {
+					queuedTrashAppends.add(item.data.uuid)
+				}
+			}
+
+			break
+		}
+
+		case "update": {
+			queuedListingEdits++
+
+			break
+		}
+	}
+}
+
+function submitPatch(patch: Patch): void {
+	if (listingBatches > 0) {
+		// The creates queued before it land before it.
+		for (const create of takeQueuedCreates()) {
+			queuePatch(create)
+		}
+
+		queuePatch(patch)
+
+		createFlushTimer ??= setTimeout(flushListingCreates, LISTING_CREATE_FLUSH_MS)
+
 		return
 	}
 
-	const next = applyListingChange(prev, change)
+	flushListingCreates()
+	applyPatches([patch])
+}
 
-	if (next !== prev) {
-		writeListing(query, next)
+// A socket event's entry flush, which a batch skips: submitPatch already lands the creates queued before a
+// patch ahead of it, and a bulk action's own echoes would otherwise flush the batch once per item.
+export function flushListingCreatesOutsideBatch(): void {
+	if (listingBatches === 0) {
+		flushListingCreates()
+	}
+}
+
+// Whether a queued patch already appends this row to the trash: this client's own trash, not yet landed.
+export function queuedTrashHolds(uuid: string): boolean {
+	return queuedTrashAppends.has(uuid)
+}
+
+// Runs a bulk action with its listing patches queued; they land at the latest when it ends.
+export async function batchListingPatches<T>(run: () => Promise<T>): Promise<T> {
+	listingBatches++
+
+	try {
+		return await run()
+	} finally {
+		listingBatches--
+
+		flushListingCreates()
 	}
 }
 
@@ -502,14 +830,17 @@ function patchListing(params: DriveListingParams, change: ListingChange): void {
 // no navigable parent to create/move into. A ListingChange folds into a read's replay with the others; a
 // function costs that replay a pass of its own.
 export function driveListingQueryUpdate(parentUuid: string | null, change: ListingChange | ListingPatch): void {
-	flushListingCreates()
-	patchListing({ variant: "drive", uuid: parentUuid }, asListingChange(change))
+	submitPatch({ params: { variant: "drive", uuid: parentUuid }, change: asListingChange(change) })
 }
 
 // The flat listings (recents/favorites/trash/links) patched by their one key.
 export function flatListingQueryUpdate(variant: "recents" | "favorites" | "trash" | "links", change: ListingChange | ListingPatch): void {
-	flushListingCreates()
-	patchListing({ variant, uuid: null }, asListingChange(change))
+	submitPatch({ params: { variant, uuid: null }, change: asListingChange(change) })
+}
+
+// A variant's root listing patched by its one key.
+export function rootListingQueryUpdate(variant: DriveVariant, change: ListingChange | ListingPatch): void {
+	submitPatch({ params: { variant, uuid: null }, change: asListingChange(change) })
 }
 
 // How long a created item waits to land in its parent listing together with the others created meanwhile.
@@ -542,6 +873,29 @@ export function queueListingCreate(parentUuid: string | null, item: DriveItem, o
 	createFlushTimer ??= setTimeout(flushListingCreates, LISTING_CREATE_FLUSH_MS)
 }
 
+function takeQueuedCreates(): Patch[] {
+	if (queuedCreates.size === 0) {
+		return []
+	}
+
+	const patches: Patch[] = []
+
+	for (const [parentUuid, byUuid] of queuedCreates) {
+		patches.push({ params: { variant: "drive", uuid: parentUuid }, change: { type: "upsert", items: [...byUuid.values()] } })
+	}
+
+	if (queuedRecents.size > 0) {
+		// Recents spans directories, so only the uuid dedups: two recent files may share a name.
+		patches.push({ params: { variant: "recents", uuid: null }, change: { type: "append", items: [...queuedRecents.values()] } })
+	}
+
+	queuedCreates = new Map()
+	queuedRecents = new Map()
+
+	return patches
+}
+
+// Lands every queued create and patch.
 export function flushListingCreates(): void {
 	if (createFlushTimer !== undefined) {
 		clearTimeout(createFlushTimer)
@@ -549,28 +903,23 @@ export function flushListingCreates(): void {
 		createFlushTimer = undefined
 	}
 
-	if (queuedCreates.size === 0) {
+	if (queuedPatches.length === 0 && queuedCreates.size === 0) {
 		return
 	}
 
-	const creates = queuedCreates
-	const recents = queuedRecents
+	// A create still queued came after every queued patch.
+	const patches = [...queuedPatches, ...takeQueuedCreates()]
 
-	queuedCreates = new Map()
-	queuedRecents = new Map()
+	queuedPatches = []
+	queuedRowUuids.clear()
+	queuedTrashAppends.clear()
+	queuedListingEdits = 0
 
-	for (const [parentUuid, byUuid] of creates) {
-		patchListing({ variant: "drive", uuid: parentUuid }, { type: "upsert", items: [...byUuid.values()] })
-	}
-
-	if (recents.size > 0) {
-		// Recents spans directories, so only the uuid dedups: two recent files may share a name.
-		patchListing({ variant: "recents", uuid: null }, { type: "append", items: [...recents.values()] })
-	}
+	applyPatches(patches)
 }
 
-// Logout: the queued creates, the changes kept for reads under way and which listings were read belong to
-// the ended session.
+// Logout: the queued creates and patches, the changes kept for reads under way and which listings were read
+// belong to the ended session.
 export function discardListingPatches(): void {
 	if (createFlushTimer !== undefined) {
 		clearTimeout(createFlushTimer)
@@ -580,6 +929,10 @@ export function discardListingPatches(): void {
 
 	queuedCreates = new Map()
 	queuedRecents = new Map()
+	queuedPatches = []
+	queuedRowUuids.clear()
+	queuedTrashAppends.clear()
+	queuedListingEdits = 0
 	listingReads.clear()
 	listingsReadThisSession.clear()
 }
@@ -632,39 +985,10 @@ export function markListingsStale(): void {
 // parent — an item can be favorited/colored in place, or moved out of one listing into another — a
 // single narrow driveListingQueryUpdate call can't reach every affected key, but this can. A listing
 // with no cached data is never written, so this can never conjure a `[]` into an unfetched query; one
-// whose first read is under way gets the change through that read's replay. A function picks the
-// change per listing, or none.
-export function driveListingQueryUpdateGlobal(
-	change: ListingRowChange | ((params: DriveListingParams) => ListingRowChange | undefined)
-): void {
-	flushListingCreates()
-
-	const changeFor: (params: DriveListingParams) => ListingRowChange | undefined = typeof change === "function" ? change : () => change
-
-	// Every read under way, with or without data yet: its result may hold the row.
-	for (const reads of listingReads.values()) {
-		const resolved = changeFor(reads.params)
-
-		if (resolved !== undefined) {
-			reads.changes.push(resolved)
-		}
-	}
-
-	for (const query of queryClient.getQueryCache().findAll({ queryKey: ["drive", "listing"] })) {
-		const prev = query.state.data as DriveItem[] | undefined
-
-		if (prev === undefined) {
-			continue
-		}
-
-		const resolved = changeFor((query.queryKey as ReturnType<typeof driveListingQueryKey>)[2])
-		const next = resolved === undefined ? prev : applyListingChange(prev, resolved)
-
-		// Most cached listings don't hold the row; writing one would re-render it for nothing.
-		if (next !== prev) {
-			writeListing(query, next)
-		}
-	}
+// whose first read is under way gets the change through that read's replay. `where` limits it to the
+// listings it picks.
+export function driveListingQueryUpdateGlobal(change: ListingRowChange, where?: (params: DriveListingParams) => boolean): void {
+	submitPatch({ params: undefined, where, change })
 }
 
 // The row behind a uuid as the first cached listing holding it holds it, shared or owned, however current:
@@ -686,9 +1010,12 @@ export function findCachedListingItem(uuid: string): DriveItem | undefined {
 // live socket and not marked stale since, so every change to the row has reached it. Otherwise as any
 // cached listing holds it, which may be outdated: a listing restored from disk, read while the socket was
 // down or left stale by a drop may have missed a change. Owned only: a shared row is never current, and
-// only an owned row can join this account's trash. Queued creates land first, so a new row is found.
+// only an owned row can join this account's trash. Queued creates land first, so a new row is found, and so
+// do queued patches that may touch the row.
 export function findOwnedListingItem(uuid: string): { item: DriveItem; current: boolean } | undefined {
-	flushListingCreates()
+	if (queuedCreates.size > 0 || queuedListingEdits > 0 || queuedRowUuids.has(uuid)) {
+		flushListingCreates()
+	}
 
 	let outdated: DriveItem | undefined
 
@@ -923,20 +1250,6 @@ export function directorySizeQueryOptions(item: DirectorySizeItem) {
 
 export function useDirectorySizeQuery(item: DirectorySizeItem): UseQueryResult<DirSizeResponse> {
 	return useQuery(directorySizeQueryOptions(item))
-}
-
-// A directory's own cached size (if any consumer has ever prefetched/read it) goes stale the moment
-// something writes new content into it — upload.ts is the caller, right after a file lands. The only
-// observer a dirSize key can have is an open info dialog (useDriveDirectorySizes prefetches, it never
-// `useQuery`s per row — see that hook's own comment), so this mostly just flags the entry stale; the
-// next listing or info dialog that shows this directory refetches instead of serving pre-write bytes
-// for the rest of DIRECTORY_SIZE_STALE_TIME. Root (null parent) has no dirSize entry to invalidate.
-export function invalidateDirectorySize(uuid: string | null): void {
-	if (uuid === null) {
-		return
-	}
-
-	void queryClient.invalidateQueries({ queryKey: directorySizeQueryKey(uuid) })
 }
 
 // Versions panel primitive: an on-demand read of a single file's version history, newest first (the

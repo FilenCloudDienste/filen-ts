@@ -4,7 +4,6 @@ import {
 	asDirectoryOrFile,
 	getSharerIdentity,
 	isLinkedEmbedItem,
-	keepAgainstIncomingDriveItem,
 	linkedFileIntoDriveItem,
 	narrowItem,
 	upsertDriveItem,
@@ -132,10 +131,6 @@ function namedDir(uuidLabel: string, name: string, overrides: Partial<Dir> = {})
 	return narrowItem(mockDir({ uuid: testUuid(uuidLabel), meta: { type: "decoded", data: { name } }, ...overrides }))
 }
 
-function undecryptableDir(uuidLabel: string): DriveItem {
-	return narrowItem(mockDir({ uuid: testUuid(uuidLabel), meta: { type: "encrypted", data: "ciphertext" } }))
-}
-
 function mockLinkedFile(overrides: Partial<LinkedFile> = {}): LinkedFile {
 	return {
 		uuid: "55555555-5555-5555-5555-555555555555",
@@ -242,51 +237,6 @@ describe("isLinkedEmbedItem", () => {
 
 		expect(item.type).toBe("sharedRootFile")
 		expect(isLinkedEmbedItem(item)).toBe(false)
-	})
-})
-
-describe("keepAgainstIncomingDriveItem", () => {
-	it("drops the existing row when its uuid matches the incoming item", () => {
-		const existing = namedDir("same-uuid", "a.txt")
-		const incoming = namedDir("same-uuid", "b.txt")
-
-		expect(keepAgainstIncomingDriveItem(existing, incoming)).toBe(false)
-	})
-
-	it("drops an existing same-name (case/space-insensitive) duplicate with a different uuid", () => {
-		const existing = namedDir("old-uuid", "  Notes ")
-		const incoming = namedDir("new-uuid", "notes")
-
-		expect(keepAgainstIncomingDriveItem(existing, incoming)).toBe(false)
-	})
-
-	it("keeps an unrelated decryptable row (different uuid AND different name)", () => {
-		const existing = namedDir("old-uuid", "other")
-		const incoming = namedDir("new-uuid", "notes")
-
-		expect(keepAgainstIncomingDriveItem(existing, incoming)).toBe(true)
-	})
-
-	it("keeps an existing undecryptable sibling when the incoming item is also undecryptable", () => {
-		// Both names undefined — must NOT be treated as a same-name collision.
-		const existing = undecryptableDir("existing-uuid")
-		const incoming = undecryptableDir("incoming-uuid")
-
-		expect(keepAgainstIncomingDriveItem(existing, incoming)).toBe(true)
-	})
-
-	it("keeps an existing undecryptable sibling when the incoming item is decryptable", () => {
-		const existing = undecryptableDir("existing-uuid")
-		const incoming = namedDir("incoming-uuid", "notes")
-
-		expect(keepAgainstIncomingDriveItem(existing, incoming)).toBe(true)
-	})
-
-	it("keeps a decryptable row when the incoming item is undecryptable (name undefined)", () => {
-		const existing = namedDir("existing-uuid", "notes")
-		const incoming = undecryptableDir("incoming-uuid")
-
-		expect(keepAgainstIncomingDriveItem(existing, incoming)).toBe(true)
 	})
 })
 

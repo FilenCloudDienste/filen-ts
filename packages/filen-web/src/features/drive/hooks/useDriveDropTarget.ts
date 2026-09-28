@@ -34,10 +34,10 @@ export interface DriveDropTargetParams {
 	// nothing opens (a file row, an already-open node, an undecryptable directory).
 	spring?: { timing: SpringTiming; open: () => void } | undefined
 	// Also takes files dragged in from the operating system, uploading them into this directory —
-	// independent of `disabled`, which only concerns internal drags.
+	// independent of `disabled`, which only concerns internal drags. Off when omitted.
 	acceptFiles?: boolean
 	// Inert to internal drags when true (a non-directory row, a non-drive variant) — never highlights,
-	// never accepts one, never springs for one.
+	// never accepts one, never springs for one. Off when omitted.
 	disabled?: boolean
 }
 
@@ -58,15 +58,17 @@ export interface DriveDropTarget {
 // `acceptFiles` says so; anything else falls straight through to the wrapping upload dropzone. A drag
 // it accepts is claimed with stopPropagation so that same dropzone never double-handles it. Mutable
 // per-drag tracking (enter/leave depth) lives in refs, the one spring-load timer in springLoad.ts, and
-// the rendered highlight flows through setState — keeping the pointer-tracking compiler-safe.
+// the rendered highlight flows through setState — keeping the pointer-tracking compiler-safe. The
+// optional flags are compared against true rather than given destructuring defaults, which the React
+// Compiler cannot lower.
 export function useDriveDropTarget({
 	targetUuid,
 	targetAncestry,
 	routeChain,
 	targetName,
 	spring,
-	acceptFiles = false,
-	disabled = false
+	acceptFiles,
+	disabled
 }: DriveDropTargetParams): DriveDropTarget {
 	const [isOver, setIsOver] = useState(false)
 	const [mode, setMode] = useState<DragDropMode>("move")
@@ -150,10 +152,10 @@ export function useDriveDropTarget({
 	// takes files, or none (it then leaves the event alone).
 	function dragKind(event: DragEvent<HTMLElement>): "internal" | "files" | null {
 		if (isInternalDrag(event.dataTransfer)) {
-			return disabled ? null : "internal"
+			return disabled === true ? null : "internal"
 		}
 
-		return acceptFiles && isFileDrag(event.dataTransfer) ? "files" : null
+		return acceptFiles === true && isFileDrag(event.dataTransfer) ? "files" : null
 	}
 
 	// A valid internal drop needs a payload (read from the module ref, since the transfer's data is

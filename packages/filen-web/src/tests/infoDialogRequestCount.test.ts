@@ -35,7 +35,7 @@ vi.mock("@tanstack/react-router", () => ({
 
 import { queryClient } from "@/queries/client"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
-import { DIRECTORY_SIZE_STALE_TIME, directorySizeQueryKey, invalidateDirectorySize } from "@/features/drive/queries/drive"
+import { DIRECTORY_SIZE_STALE_TIME, directorySizeQueryKey } from "@/features/drive/queries/drive"
 import { useDriveDirectorySizes } from "@/features/drive/hooks/useDriveDirectorySizes"
 import { InfoDialog } from "@/features/drive/components/infoDialog"
 
@@ -145,7 +145,8 @@ describe("InfoDialog request count", () => {
 	it("refetches a size invalidated by a write (upload) once, and shows the fresh value", async () => {
 		const item = nextDir()
 		await listViewResolves(item)
-		invalidateDirectorySize(item.data.uuid)
+		// What a landed write does to the directory it wrote into (upload.ts / copy.ts).
+		void queryClient.invalidateQueries({ queryKey: directorySizeQueryKey(item.data.uuid) })
 
 		getDirSize.mockResolvedValueOnce(FRESHER_SIZE)
 		getItemInfo.mockResolvedValueOnce(PATH)

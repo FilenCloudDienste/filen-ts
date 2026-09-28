@@ -49,12 +49,19 @@ interface MarqueeUniformLayout {
 
 type MarqueeParams<T extends MarqueeItem> = {
 	items: T[]
+	// Selection identity for the additive union. Defaults to the uuid; drive passes its row key, since
+	// the Shared by me root lists one item once per receiver.
+	keyOf?: (item: T) => string
 	// The selection store this marquee drives — drive's useDriveStore, photos' usePhotosStore.
 	selection: { read: () => T[]; write: (items: T[]) => void }
 	scrollElement: HTMLDivElement | null
 	// Moves the roving cursor to the drag-end item, mirroring how a click sets it.
 	setCursor: (index: number) => void
 } & (MarqueeUniformLayout | { hitTest: MarqueeHitTest })
+
+function uuidKey(item: MarqueeItem): string {
+	return item.data.uuid
+}
 
 function uniformHitTest(itemCount: number, { viewMode, columns, geometry }: MarqueeUniformLayout): MarqueeHitTest {
 	return {
@@ -78,7 +85,8 @@ interface MarqueeDrag<T> {
 	// ctrl/cmd at arm time: union with the pre-drag set instead of replacing it
 	additive: boolean
 	preset: T[]
-	presetUuids: Set<string>
+	presetKeys: Set<string>
+	keyOf: (item: T) => string
 	started: boolean
 	lastClientX: number
 	lastClientY: number
@@ -110,7 +118,7 @@ export interface MarqueeSelection {
 // covers — hit-tested in item space so scrolled-away rows count. Auto-scrolls near the edges; Escape
 // cancels and restores the arm-time selection.
 export function useMarqueeSelection<T extends MarqueeItem>(params: MarqueeParams<T>): MarqueeSelection {
-	const { items, selection, scrollElement, setCursor } = params
+	const { items, selection, scrollElement, setCursor, keyOf = uuidKey } = params
 	const hitTest = "hitTest" in params ? params.hitTest : uniformHitTest(items.length, params)
 	const [rect, setRect] = useState<MarqueeContentRect | null>(null)
 	const dragRef = useRef<MarqueeDrag<T> | null>(null)
@@ -182,7 +190,7 @@ export function useMarqueeSelection<T extends MarqueeItem>(params: MarqueeParams
 			next = drag.preset.slice()
 
 			for (const item of hitItems) {
-				if (!drag.presetUuids.has(item.data.uuid)) {
+				if (!drag.presetKeys.has(drag.keyOf(item))) {
 					next.push(item)
 				}
 			}
@@ -392,7 +400,8 @@ export function useMarqueeSelection<T extends MarqueeItem>(params: MarqueeParams
 			startClientY: event.clientY,
 			additive: event.metaKey || event.ctrlKey,
 			preset,
-			presetUuids: new Set(preset.map(item => item.data.uuid)),
+			presetKeys: new Set(preset.map(keyOf)),
+			keyOf,
 			started: false,
 			lastClientX: event.clientX,
 			lastClientY: event.clientY,

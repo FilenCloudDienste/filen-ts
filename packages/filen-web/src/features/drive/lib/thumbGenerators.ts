@@ -18,6 +18,8 @@ import { previewStreamUrl, waitForMediaStream } from "@/features/preview/lib/pre
 import { allowedMediaContentType } from "@/features/preview/lib/mediaType"
 import { narrowItem, type BaseFileItem } from "@/features/drive/lib/item"
 import type { SdkThumbnailResult } from "@/workers/sdk.worker"
+import type { PDFWorker } from "pdfjs-dist"
+import { idleResource, type IdleResource } from "@/lib/idleResource"
 
 // pdf and svg are the generators that pull a whole file into JS memory, through the same buffered
 // download the preview overlay uses (usePreviewBytes). There is no unmount to hook a cancellation
@@ -338,6 +340,14 @@ export const generateSvgThumb: ThumbGenerator = async item => {
 	return await rasterizeSvgThumb(new TextDecoder().decode(bytes))
 }
 
+// One pdf.js worker shared by every PDF thumbnail, instead of one spun up and torn down per file.
+// Passed to getDocument explicitly, so a task's destroy() ends only its own document and never the
+// worker (pdf.js destroys only a worker it created itself), while pdfViewer.tsx's previews keep
+// their own. Torn down once no generation has used it for a while.
+const PDF_THUMB_WORKER_IDLE_MS = 30_000
+
+let pdfThumbWorker: IdleResource<PDFWorker> | null = null
+
 export const generatePdfThumb: ThumbGenerator = async item => {
 	let bytes: Uint8Array
 
@@ -352,45 +362,53 @@ export const generatePdfThumb: ThumbGenerator = async item => {
 	// Lazy: keeps pdf.js's ~1 MB bundle out of every session that never opens or generates a PDF
 	// thumbnail — pdfViewer.tsx can import it statically because that whole component is itself
 	// route/lazy-split, which this plain module is not.
-	const { getDocument, GlobalWorkerOptions } = await import("pdfjs-dist")
+	const pdfjs = await import("pdfjs-dist")
 
 	// Mirrors pdfViewer.tsx's own worker-src setup (duplicated rather than imported: that file is a
-	// React component this module must not depend on). A STRING workerSrc gives every getDocument()
-	// call its own dedicated worker, so this task's destroy() below can never tear down a document a
-	// concurrent preview or generation still has open.
-	GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.mjs", import.meta.url).href
+	// React component this module must not depend on). Read when the shared worker is constructed.
+	pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.mjs", import.meta.url).href
 
-	const task = getDocument({ data: bytes })
+	pdfThumbWorker ??= idleResource(
+		() => new pdfjs.PDFWorker(),
+		worker => {
+			worker.destroy()
+		},
+		PDF_THUMB_WORKER_IDLE_MS
+	)
 
-	try {
-		// No onPassword handler is registered — pdf.js rejects task.promise with the password exception
-		// instead of waiting on a handler that will never answer (verified against the installed 6.1.200
-		// source), so a password-protected file fails this generation promptly rather than hanging.
-		const doc = await task.promise
-		const page = await doc.getPage(1)
-		const baseViewport = page.getViewport({ scale: 1 })
-		const fitted = fitWithin(baseViewport.width, baseViewport.height, THUMB_MAX_DIM)
-		const viewport = page.getViewport({ scale: fitted.width / baseViewport.width })
+	return await pdfThumbWorker.use<ThumbGenerationResult>(async worker => {
+		const task = pdfjs.getDocument({ data: bytes, worker })
 
-		const canvas = document.createElement("canvas")
+		try {
+			// No onPassword handler is registered — pdf.js rejects task.promise with the password exception
+			// instead of waiting on a handler that will never answer (verified against the installed 6.1.200
+			// source), so a password-protected file fails this generation promptly rather than hanging.
+			const doc = await task.promise
+			const page = await doc.getPage(1)
+			const baseViewport = page.getViewport({ scale: 1 })
+			const fitted = fitWithin(baseViewport.width, baseViewport.height, THUMB_MAX_DIM)
+			const viewport = page.getViewport({ scale: fitted.width / baseViewport.width })
 
-		canvas.width = fitted.width
-		canvas.height = fitted.height
+			const canvas = document.createElement("canvas")
 
-		const renderTask = page.render({ canvas, viewport })
+			canvas.width = fitted.width
+			canvas.height = fitted.height
 
-		await renderTask.promise
+			const renderTask = page.render({ canvas, viewport })
 
-		const blob = await encodeCanvasThumb(canvas)
+			await renderTask.promise
 
-		return { type: "bytes", bytes: new Uint8Array(await blob.arrayBuffer()) }
-	} catch (e) {
-		log.warn("thumb-generators", "generatePdfThumb: render failed", item.data.uuid, e)
+			const blob = await encodeCanvasThumb(canvas)
 
-		return { type: "failed" }
-	} finally {
-		await task.destroy()
-	}
+			return { type: "bytes", bytes: new Uint8Array(await blob.arrayBuffer()) }
+		} catch (e) {
+			log.warn("thumb-generators", "generatePdfThumb: render failed", item.data.uuid, e)
+
+			return { type: "failed" }
+		} finally {
+			await task.destroy()
+		}
+	})
 }
 
 // Module scope, not inside a function: runs exactly once per module evaluation (mirrors

@@ -53,6 +53,11 @@ function withFavoriteFlips(photos: PhotoItem[], flips: ReadonlyMap<string, boole
 	return next ?? photos
 }
 
+// Drive events counted in arrival order, and the count each root's latest walk started at: an event
+// counted before the walk under way began is already in what that walk reads, so it needs no walk after.
+let photosEventSeq = 0
+const walkStartSeq = new Map<string, number>()
+
 // The recursive walk (listPhotosRecursive) plus the media predicate and capture-date sort, all in one
 // queryFn — a photos listing has exactly one consumer shape (the grid), so there is no separate
 // selector layer filtering/sorting on every render the way a multi-mode drive listing would need.
@@ -61,6 +66,7 @@ export async function fetchPhotosListing(rootUuid: string): Promise<PhotosListin
 	const flips = new Map<string, boolean>()
 
 	flipsDuringWalks.add(flips)
+	walkStartSeq.set(rootUuid, photosEventSeq)
 
 	try {
 		const { dirs, files } = await sdkApi.listPhotosRecursive(rootUuid)
@@ -103,8 +109,9 @@ export function usePhotosListingQuery(rootUuid: string | null): UseQueryResult<P
 // ever one photos listing query alive at a time (kv-persisted single root), so this needs no
 // "Global" fan-out counterpart the way drive's own multi-listing surface does. A cache miss (nobody
 // has viewed this root yet) is left alone; a photos patch is the tail of an action taken FROM an
-// already-rendered grid anyway. Unlike drive's patches it still cancels a walk under way, which then
-// stays pending until the next mount or focus.
+// already-rendered grid anyway. Unlike drive's patches it still cancels a walk under way, whose result
+// may predate the patched change; an active listing walks again at once, as the mutation behind the
+// patch has resolved by now, and an inactive one stays marked for its next mount.
 export function photosListingQueryUpdate(rootUuid: string, updater: (prev: PhotoItem[]) => PhotoItem[]): void {
 	const queryKey = photosListingQueryKey(rootUuid)
 	// One lookup by the key's hash: a filter find() copies and re-hashes the whole query cache per call.
@@ -116,12 +123,16 @@ export function photosListingQueryUpdate(rootUuid: string, updater: (prev: Photo
 
 	// setQueryData marks the listing fresh, dropping a pending invalidation and the refetch cancelled
 	// below; left unrestored, the change behind them would wait out the stale time.
-	const refreshPending = query.state.isInvalidated || query.state.fetchStatus !== "idle"
+	const walking = query.state.fetchStatus !== "idle"
+	const refreshPending = walking || query.state.isInvalidated
 
 	void query.cancel({ revert: true })
 	queryClient.setQueryData<PhotosListing>(queryKey, prev => (prev === undefined ? prev : { ...prev, photos: updater(prev.photos) }))
 
-	if (refreshPending) {
+	// A queued rewalk already walks again once the cancelled one settles.
+	if (walking && query.isActive() && !rewalkQueued.has(query.queryHash)) {
+		void queryClient.invalidateQueries({ queryKey, exact: true })
+	} else if (refreshPending) {
 		query.invalidate()
 	}
 }
@@ -175,13 +186,16 @@ export interface PhotosEventScope {
 }
 
 // Refetches the whole recursive walk rather than splice-patching the event's single item in: a photo
-// three subdirectories down has no cheap membership test from a bare uuid/parent payload. Given a
-// scope, a listing is skipped only when that is proven harmless; anything unproven invalidates. The
-// proof reads the worker's dir cache, which is only trusted for an active listing that was read this
-// session and is neither mid-walk (the walk may predate the change, so it walks once more after) nor
-// already invalidated (a missed or pending change may have left cached parent pointers stale). An
-// inactive listing is just marked stale, which costs nothing until it mounts.
+// three subdirectories down has no cheap membership test from a bare uuid/parent payload. A removal is
+// the exception, as it needs none: the listed photo is dropped in place. Given a scope, a listing is
+// skipped only when that is proven harmless; anything unproven invalidates. The proof reads the
+// worker's dir cache, which is only trusted for an active listing that was read this session and is
+// neither mid-walk (the walk may predate the change, so it walks once more after) nor already
+// invalidated (a missed or pending change may have left cached parent pointers stale). An inactive
+// listing is just marked stale, which costs nothing until it mounts.
 export function invalidatePhotosListing(scope: PhotosEventScope | null): void {
+	const seq = ++photosEventSeq
+
 	for (const query of queryClient.getQueryCache().findAll({ queryKey: ["photos", "listing"] })) {
 		const queryKey = query.queryKey
 		const rootUuid = queryKey[2]
@@ -191,6 +205,11 @@ export function invalidatePhotosListing(scope: PhotosEventScope | null): void {
 		// listing is only marked, on the query itself rather than through a filter that scans the cache.
 		const invalidate = (): void => {
 			if (query.state.fetchStatus !== "idle") {
+				// A walk that began after this event arrived already reads what it changed.
+				if (typeof rootUuid === "string" && (walkStartSeq.get(rootUuid) ?? -1) >= seq) {
+					return
+				}
+
 				rewalkAfterCurrentWalk(query.queryHash, queryKey)
 			} else if (query.isActive()) {
 				void queryClient.invalidateQueries({ queryKey, exact: true })
@@ -218,14 +237,30 @@ export function invalidatePhotosListing(scope: PhotosEventScope | null): void {
 			continue
 		}
 
-		if (scope.item === rootUuid || photos.some(photo => photo.data.uuid === scope.item)) {
+		if (scope.item === rootUuid) {
 			invalidate()
 
 			continue
 		}
 
-		// Only the item itself could have been involved, and it isn't listed: removing it changes nothing.
+		const listed = photos.some(photo => photo.data.uuid === scope.item)
+
+		// Only the item itself was involved: a file that left the tree (trashed, deleted, superseded by a
+		// new version). A listed one just leaves the listing, whichever surface removed it; an unlisted
+		// one changes nothing.
 		if (scope.dirs.length === 0) {
+			if (listed) {
+				queryClient.setQueryData<PhotosListing>(queryKey, prev =>
+					prev === undefined ? prev : { ...prev, photos: prev.photos.filter(photo => photo.data.uuid !== scope.item) }
+				)
+			}
+
+			continue
+		}
+
+		if (listed) {
+			invalidate()
+
 			continue
 		}
 

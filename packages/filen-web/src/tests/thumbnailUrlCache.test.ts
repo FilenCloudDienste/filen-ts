@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import { createThumbnailUrlCache, computeThumbnailCapacity } from "@/features/drive/lib/thumbnailUrlCache"
+import { capacityForVisibleSlots, createThumbnailUrlCache, computeThumbnailCapacity } from "@/features/drive/lib/thumbnailUrlCache"
 import { ROW_HEIGHT, TILE_WIDTH, TILE_ROW_HEIGHT } from "@/features/drive/lib/gridLayout"
 
 describe("computeThumbnailCapacity — list vs grid math", () => {
@@ -30,6 +30,19 @@ describe("computeThumbnailCapacity — list vs grid math", () => {
 	it("floors at a minimum capacity for a zero/tiny viewport (module load, before the first layout frame)", () => {
 		expect(computeThumbnailCapacity(0, 0, "list")).toBeGreaterThan(0)
 		expect(computeThumbnailCapacity(0, 0, "grid")).toBeGreaterThan(0)
+	})
+})
+
+// The photos grid counts its own slots; it must size by the same rule as the drive listing.
+describe("capacityForVisibleSlots", () => {
+	it("keeps headroom above the photos grid's mounted tiles, overscan rows included", () => {
+		// 8 columns x (6 visible rows + 3 overscan rows either side) mounted, from 8 x 7 counted slots.
+		expect(capacityForVisibleSlots(8 * 7)).toBeGreaterThanOrEqual(8 * (6 + 2 * 3))
+	})
+
+	it("floors like the drive listing's capacity, and agrees with it for the same slot count", () => {
+		expect(capacityForVisibleSlots(0)).toBe(computeThumbnailCapacity(0, 0, "list"))
+		expect(capacityForVisibleSlots(4 * 11)).toBe(computeThumbnailCapacity(TILE_WIDTH * 4, TILE_ROW_HEIGHT * 10, "grid"))
 	})
 })
 

@@ -33,13 +33,14 @@ export interface RunZipDownloadDeps {
 }
 
 // One zip attempt: resolve where it saves to FIRST — a picker-cancel is a clean no-op (mirrors
-// runDownload exactly: no transfer row is ever created for a cancelled picker) — then register ONE
-// download-direction row for the whole batch and stream it through the injected `downloadZip` op with
-// THROTTLED progress. The SDK's zip callback reports a running TOTAL across the whole archive (not per
-// item), and that total itself grows as the recursive listing discovers more files, so both the row's
-// size and its transferred bytes are driven off the same callback on every throttled tick, unlike a
-// single-file download's already-known size fixed once at add(). `Cancelled` removes the row entirely
-// (mobile parity, mirrors runDownload). Never throws; LABEL-FIRST via runOp/asErrorDTO.
+// runDownload exactly: no transfer row is ever created for a cancelled picker) — then, on the fsa
+// path, register ONE download-direction row for the whole batch and stream it through the injected
+// `downloadZip` op with THROTTLED progress. The SDK's zip callback reports a running TOTAL across the
+// whole archive (not per item), and that total itself grows as the recursive listing discovers more
+// files, so both the row's size and its transferred bytes are driven off the same callback on every
+// throttled tick, unlike a single-file download's already-known size fixed once at add(). `Cancelled`
+// removes the row entirely (mobile parity, mirrors runDownload). Never throws; LABEL-FIRST via
+// runOp/asErrorDTO.
 export async function runZipDownload(
 	deps: RunZipDownloadDeps,
 	args: { items: DriveItem[]; suggestedName: string }
@@ -56,6 +57,19 @@ export async function runZipDownload(
 		}
 
 		return { status: "error", dto: asErrorDTO(e) }
+	}
+
+	// The sw hand-off gets no row: it resolves once the navigation is issued, long before the SW has
+	// streamed a byte, reports no progress and knows no size up front, so a row could only read
+	// "Downloaded · 0 B" at once. The browser's own download manager shows that transfer.
+	if (save.kind === "sw") {
+		try {
+			await runOp(deps.downloadZip(narrowToSdkItems(items), id, save, () => undefined))
+		} catch (e) {
+			return { status: "error", dto: asErrorDTO(e) }
+		}
+
+		return { status: "success" }
 	}
 
 	deps.store.add({
@@ -158,7 +172,8 @@ function resolveSuggestedZipName(items: DriveItem[]): string {
 // The zip-download seam startDownloads' needsZip branch (download.ts) routes into. Mirrors
 // startDownloads' own summary-toast rationale: runZipDownload's return is the shared 2-state
 // VoidActionOutcome, so a picker-cancel is indistinguishable from a real completed zip here too — this
-// never claims success on the toast, the transfer row is already that signal.
+// never claims success on the toast, the transfer row (the browser's download manager on the sw path)
+// is already that signal.
 export async function startZipDownload(items: DriveItem[]): Promise<void> {
 	if (items.length === 0) {
 		return

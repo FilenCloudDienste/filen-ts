@@ -289,21 +289,39 @@ describe("photos listing request counts", () => {
 		expect(walks()).toBe(2)
 	})
 
-	it("a local patch that cancels a walk leaves the listing stale", async () => {
+	it("a local patch that cancels a walk of the mounted listing walks again at once", async () => {
 		const view = await mountRead()
 		const pending = deferred<NormalDirsAndFiles>()
 
 		listPhotosRecursive.mockImplementationOnce(() => pending.promise)
 		invalidatePhotosListing(null)
 		photosListingQueryUpdate(root, prev => prev)
+
+		expect(walks()).toBe(3)
+
 		pending.resolve({ dirs: [], files: [] })
 		await drain()
 
-		expect(walks()).toBe(2)
-		expect(isInvalidated()).toBe(true)
+		expect(walks()).toBe(3)
+		expect(isInvalidated()).toBe(false)
+		expect(queryClient.getQueryData<PhotosListing>(photosListingQueryKey(root))?.photos.map(photo => photo.data.uuid)).toEqual([PHOTO])
 
 		view.unmount()
 		mountListing()
+		await drain()
+
+		expect(walks()).toBe(3)
+	})
+
+	it("a local patch that cancels a walk with a rewalk queued walks once more, not twice", async () => {
+		await mountRead()
+		const pending = deferred<NormalDirsAndFiles>()
+
+		listPhotosRecursive.mockImplementationOnce(() => pending.promise)
+		invalidatePhotosListing(null)
+		handleDriveEvent(driveEvent({ type: "fileNew", file: mockFile(UNLISTED, B) }))
+		photosListingQueryUpdate(root, prev => prev)
+		pending.resolve({ dirs: [], files: [] })
 		await drain()
 
 		expect(walks()).toBe(3)
@@ -545,7 +563,7 @@ describe("photos listing socket scoping", () => {
 		expect(walks()).toBe(2)
 	})
 
-	it("trashing a listed photo walks; trashing an unlisted file asks nothing and does not", async () => {
+	it("trashing a listed photo drops it without walking; trashing an unlisted file asks nothing and does not", async () => {
 		await mountRead()
 
 		await fire({ type: "fileTrash", uuid: UNLISTED, stableUUID: UNLISTED, newUUID: undefined })
@@ -553,9 +571,27 @@ describe("photos listing socket scoping", () => {
 		expect(isOutsidePhotosRoot).not.toHaveBeenCalled()
 		expect(walks()).toBe(1)
 
+		// However it was trashed: the grid patches its own trash first, the viewer leaves it to this echo.
 		await fire({ type: "fileTrash", uuid: PHOTO, stableUUID: PHOTO, newUUID: undefined })
 
-		expect(walks()).toBe(2)
+		expect(isOutsidePhotosRoot).not.toHaveBeenCalled()
+		expect(walks()).toBe(1)
+		expect(queryClient.getQueryData<PhotosListing>(photosListingQueryKey(root))?.photos).toEqual([])
+		expect(isInvalidated()).toBe(false)
+	})
+
+	it("trashing a listed photo during a walk walks once more after it", async () => {
+		await mountRead()
+
+		const pending = deferred<NormalDirsAndFiles>()
+
+		listPhotosRecursive.mockImplementationOnce(() => pending.promise)
+		invalidatePhotosListing(null)
+		handleDriveEvent(driveEvent({ type: "fileTrash", uuid: PHOTO, stableUUID: PHOTO, newUUID: undefined }))
+		pending.resolve({ dirs: [], files: [mockFile(PHOTO, B)] })
+		await drain()
+
+		expect(walks()).toBe(3)
 	})
 
 	it("a file rename always walks: it can turn a file under the root into a photo", async () => {
@@ -614,7 +650,7 @@ describe("photos listing socket scoping", () => {
 		expect(walks()).toBe(3)
 	})
 
-	it("a scope check that resolves during a walk queues behind it instead of restarting it", async () => {
+	it("a scope check that resolves during a walk begun after its event neither restarts nor repeats it", async () => {
 		await mountRead()
 
 		const check = deferred<boolean>()
@@ -634,7 +670,20 @@ describe("photos listing socket scoping", () => {
 		pending.resolve({ dirs: [], files: [] })
 		await drain()
 
-		expect(walks()).toBe(3)
+		expect(walks()).toBe(2)
+	})
+
+	it("a burst of events under the root, all in before the walk they set off, walks once", async () => {
+		await mountRead()
+
+		for (let i = 0; i < 20; i++) {
+			handleDriveEvent(driveEvent({ type: "fileNew", file: mockFile(testUuid(`burst${String(i)}`), B) }))
+		}
+
+		await drain()
+
+		expect(isOutsidePhotosRoot).toHaveBeenCalledTimes(20)
+		expect(walks()).toBe(2)
 	})
 
 	it("after a socket drop, an event outside the root walks until the listing is read again", async () => {

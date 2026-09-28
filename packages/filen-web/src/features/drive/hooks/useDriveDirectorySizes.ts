@@ -28,6 +28,13 @@ import {
 // view, where nothing displays a size — see directoryListing.tsx's own call site) so the caller takes
 // its zero-cost path.
 //
+// Results landing within one frame coalesce into a single bump: each getDirSize reply arrives in its own
+// worker message, and a cold many-directory listing would otherwise re-render once per directory.
+//
+// `prefetch: false` keeps reading whatever sizes are already cached but fires no new size walks — a
+// subtree search's hits span the whole drive, so warming every one of them is a recursive server-side
+// walk per hit for rows mostly off-screen.
+//
 // useSyncExternalStore, not a useEffect+useState subscription: a plain effect attaches its listener
 // AFTER the commit that produced the render it reacts to, leaving a real gap on initial mount (or any
 // remount, e.g. navigating into a listing with directories already mid-prefetch from a previous mount)
@@ -38,10 +45,13 @@ import {
 // if it already moved, so no event landing in that window is ever silently missed.
 export function useDriveDirectorySizes({
 	items,
-	enabled
+	enabled,
+	prefetch
 }: {
 	items: DriveItem[] | undefined
 	enabled: boolean
+	// On unless false.
+	prefetch?: boolean
 }): ReadonlyMap<string, number> | undefined {
 	// The store's "value" is a monotonic counter kept OUTSIDE React state (a ref, not useState) — only
 	// its identity change matters to useSyncExternalStore, never the number itself.
@@ -53,12 +63,27 @@ export function useDriveDirectorySizes({
 				return () => undefined
 			}
 
-			return queryClient.getQueryCache().subscribe(event => {
-				if (isDirectorySizeSuccessEvent(event)) {
+			let frame: number | null = null
+
+			const unsubscribe = queryClient.getQueryCache().subscribe(event => {
+				if (frame !== null || !isDirectorySizeSuccessEvent(event)) {
+					return
+				}
+
+				frame = requestAnimationFrame(() => {
+					frame = null
 					versionRef.current += 1
 					onStoreChange()
-				}
+				})
 			})
+
+			return () => {
+				unsubscribe()
+
+				if (frame !== null) {
+					cancelAnimationFrame(frame)
+				}
+			}
 		},
 		[enabled]
 	)
@@ -68,7 +93,7 @@ export function useDriveDirectorySizes({
 	const version = useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 
 	useEffect(() => {
-		if (!enabled || items === undefined) {
+		if (!enabled || prefetch === false || items === undefined) {
 			return
 		}
 
@@ -77,7 +102,7 @@ export function useDriveDirectorySizes({
 			// with no observer, so a failure stays silent rather than becoming an unhandled rejection.
 			void queryClient.query(directorySizeQueryOptions(item)).catch(() => undefined)
 		}
-	}, [enabled, items])
+	}, [enabled, prefetch, items])
 
 	// version is bumped by the subscription above as directory-size results land; passing it into the
 	// collector keys the memo on it under both exhaustive-deps and the React Compiler.

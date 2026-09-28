@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { formatBytes } from "@filen/shared"
@@ -14,6 +14,8 @@ import { queryClient } from "@/queries/client"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { useIsOnline } from "@/lib/useIsOnline"
+import { subscribePreviewReconcile } from "@/features/preview/lib/previewReconcile"
+import { isRevisionOf } from "@/features/preview/lib/remoteChange.logic"
 import { shouldForwardOpenChange } from "@/components/dialogs/dismissal.logic"
 import {
 	hasNoPreviousVersions,
@@ -80,6 +82,29 @@ export function VersionsDialog({ file, onClose }: VersionsDialogProps) {
 	const [confirming, setConfirming] = useState<PendingConfirm | null>(null)
 	const [selectMode, setSelectMode] = useState(false)
 	const [selected, setSelected] = useState<ReadonlySet<string>>(new Set())
+	const [superseded, setSuperseded] = useState(false)
+
+	// "Current" is judged against the `file` snapshot taken at open, so once a newer version lands or the
+	// file leaves the drive, the panel would offer the live content for deletion. It closes instead,
+	// after any in-flight write settles.
+	useEffect(
+		() =>
+			subscribePreviewReconcile(event => {
+				if (
+					(event.type === "revised" && isRevisionOf(file, event.revision)) ||
+					(event.type === "removed" && event.uuid === file.data.uuid)
+				) {
+					setSuperseded(true)
+				}
+			}),
+		[file]
+	)
+
+	useEffect(() => {
+		if (superseded && !pending) {
+			onClose()
+		}
+	}, [superseded, pending, onClose])
 
 	const versions = versionsQuery.status === "success" ? versionsQuery.data : []
 	const candidates = nonCurrentVersions(versions, file)

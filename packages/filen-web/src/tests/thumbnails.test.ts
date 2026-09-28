@@ -661,12 +661,15 @@ describe("getThumbnailUrl — dedupe (pending-map join)", () => {
 })
 
 describe("getThumbnailUrl — semaphore (max 3 concurrent generations)", () => {
+	function generatorKeyedByUuid(deferred: ReturnType<typeof deferredCalls<ThumbGenerationResult>>): ThumbGenerator {
+		return item => deferred.fn(item.data.uuid)
+	}
+
 	it("a 4th concurrent call for a different uuid queues until a slot frees", async () => {
 		const items = [imageItem(), imageItem(), imageItem(), imageItem()]
-		const deferred = deferredCalls<Blob | null>()
-		const deps = depsWithGenerator(vi.fn().mockResolvedValue({ type: "bytes", bytes: new Uint8Array([1]) }), {
-			readThumbnailBlob: vi.fn((uuid: string) => deferred.fn(uuid))
-		})
+		const deferred = deferredCalls<ThumbGenerationResult>()
+		const deps = depsWithGenerator(generatorKeyedByUuid(deferred))
+		const bytes: ThumbGenerationResult = { type: "bytes", bytes: new Uint8Array([1]) }
 
 		const attempts = items.map(item => getThumbnailUrl(item, deps))
 
@@ -685,20 +688,45 @@ describe("getThumbnailUrl — semaphore (max 3 concurrent generations)", () => {
 		expect(deferred.keys).not.toContain(d.data.uuid)
 
 		// Release one in-flight slot — the 4th call's own generation should now start.
-		deferred.resolve(a.data.uuid, null)
+		deferred.resolve(a.data.uuid, bytes)
 		await flushMicrotasks()
 
 		expect(deferred.keys).toHaveLength(4)
 		expect(deferred.keys).toContain(d.data.uuid)
 
 		// Drain the rest so nothing is left dangling at the end of the test.
-		deferred.resolve(b.data.uuid, null)
-		deferred.resolve(c.data.uuid, null)
-		deferred.resolve(d.data.uuid, null)
+		deferred.resolve(b.data.uuid, bytes)
+		deferred.resolve(c.data.uuid, bytes)
+		deferred.resolve(d.data.uuid, bytes)
 
 		const urls = await Promise.all(attempts)
 
 		expect(urls.every(url => url !== null)).toBe(true)
+	})
+
+	it("an OPFS cache hit renders while every slot is held by a slow generation", async () => {
+		const slow = [imageItem(), imageItem(), imageItem()]
+		const cachedItem = imageItem()
+		const deferred = deferredCalls<ThumbGenerationResult>()
+		const deps = depsWithGenerator(generatorKeyedByUuid(deferred), {
+			readThumbnailBlob: vi.fn((uuid: string) =>
+				Promise.resolve(uuid === cachedItem.data.uuid ? new Blob([new Uint8Array([1])]) : null)
+			)
+		})
+
+		const slowAttempts = slow.map(item => getThumbnailUrl(item, deps))
+
+		await flushMicrotasks()
+
+		expect(deferred.keys).toHaveLength(3)
+
+		await expect(getThumbnailUrl(cachedItem, deps)).resolves.not.toBeNull()
+
+		for (const item of slow) {
+			deferred.resolve(item.data.uuid, { type: "failed" })
+		}
+
+		await Promise.all(slowAttempts)
 	})
 })
 

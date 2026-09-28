@@ -50,6 +50,13 @@ vi.mock("@/features/photos/components/bulkActionBar", () => ({
 		createElement("div", { "data-testid": "bulk-bar" }, names(props.selectedItems))
 }))
 
+const { setThumbnailVisibleSlots } = vi.hoisted(() => ({ setThumbnailVisibleSlots: vi.fn<(visibleSlots: number) => void>() }))
+
+vi.mock("@/features/drive/lib/thumbnails", async importOriginal => ({
+	...(await importOriginal<typeof import("@/features/drive/lib/thumbnails")>()),
+	setThumbnailVisibleSlots
+}))
+
 import "@/lib/i18n"
 import { narrowItem } from "@/features/drive/lib/item"
 import { type PhotoItem } from "@/features/photos/lib/captureSort"
@@ -112,5 +119,41 @@ describe("PhotoGrid — selection reconcile", () => {
 
 		expect(screen.getByTestId("bulk-bar").textContent).toBe("new.jpg|beach.jpg")
 		expect(names(dialogHostSelection.current)).toBe("new.jpg|beach.jpg")
+	})
+})
+
+// The grid lays out its own tiles, so it sizes the shared thumbnail objectURL cache from its own layout.
+describe("PhotoGrid — thumbnail cache sizing", () => {
+	it("sizes the cache from the rows its viewport shows", () => {
+		let resize: (width: number, height: number) => void = () => undefined
+
+		vi.stubGlobal(
+			"ResizeObserver",
+			class {
+				constructor(callback: (entries: { contentRect: { width: number; height: number } }[]) => void) {
+					resize = (width, height) => {
+						callback([{ contentRect: { width, height } }])
+					}
+				}
+
+				observe = vi.fn()
+				unobserve = vi.fn()
+				disconnect = vi.fn()
+			}
+		)
+		render(createElement(PhotoGrid, { rootUuid: ROOT, listing: { photos: [photo("p1", "a.jpg")], folders: {} } }))
+
+		act(() => {
+			resize(1_000, 400)
+		})
+		const short = setThumbnailVisibleSlots.mock.lastCall?.[0] ?? 0
+
+		act(() => {
+			resize(1_000, 1_600)
+		})
+		const tall = setThumbnailVisibleSlots.mock.lastCall?.[0] ?? 0
+
+		expect(short).toBeGreaterThan(0)
+		expect(tall).toBeGreaterThan(short)
 	})
 })

@@ -12,12 +12,16 @@ const HEADROOM_MULTIPLIER = 3
 // scrolling thrashes the cache.
 const MIN_CAPACITY = 24
 
-// How many live objectURLs the thumbnail service should keep at once for a viewport of this size and
-// view mode — see estimateVisibleSlots for the base slot count this multiplies.
-export function computeThumbnailCapacity(viewportWidth: number, viewportHeight: number, viewMode: DriveViewMode): number {
-	const visibleSlots = estimateVisibleSlots(viewportWidth, viewportHeight, viewMode)
-
+// How many live objectURLs the thumbnail service should keep at once for a surface showing this many
+// thumbnail slots. Every surface sizes through this one rule, so they cannot drift apart.
+export function capacityForVisibleSlots(visibleSlots: number): number {
 	return Math.max(MIN_CAPACITY, Math.ceil(visibleSlots * HEADROOM_MULTIPLIER))
+}
+
+// The drive listing's capacity for a viewport of this size and view mode — see estimateVisibleSlots for
+// the base slot count.
+export function computeThumbnailCapacity(viewportWidth: number, viewportHeight: number, viewMode: DriveViewMode): number {
+	return capacityForVisibleSlots(estimateVisibleSlots(viewportWidth, viewportHeight, viewMode))
 }
 
 export interface ThumbnailUrlCache {

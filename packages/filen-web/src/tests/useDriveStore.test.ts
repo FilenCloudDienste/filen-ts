@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest"
-import type { Dir, UuidStr } from "@filen/sdk-rs"
+import type { Dir, SharedFile, UuidStr } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
 
@@ -22,6 +22,27 @@ function directoryItem(uuid: UuidStr): DriveItem {
 	}
 
 	return narrowItem(dir)
+}
+
+// The Shared by me root lists one item once per receiver: same uuid, a different counterpart per row.
+function receiverRow(receiverId: number): DriveItem {
+	const file: SharedFile = {
+		uuid: testUuid("shared"),
+		size: 2_048n,
+		region: "de-1",
+		bucket: "filen-1",
+		chunks: 2n,
+		timestamp: 1_700_000_000_000n,
+		meta: {
+			type: "decoded",
+			data: { name: "Report", mime: "application/pdf", modified: 1_700_000_000_000n, size: 2_048n, key: "k", version: 2 }
+		},
+		sharingRole: { Receiver: { email: `${String(receiverId)}@x.com`, id: receiverId } },
+		sharedTag: true,
+		canMakeThumbnail: false
+	}
+
+	return narrowItem(file)
 }
 
 beforeEach(() => {
@@ -91,6 +112,20 @@ describe("toggleSelectedItem", () => {
 
 		expect(useDriveStore.getState().selectedItems).toEqual([itemB])
 	})
+
+	it("adds and removes one receiver's row of a shared item without touching another receiver's", () => {
+		const bob = receiverRow(1)
+		const carol = receiverRow(2)
+
+		useDriveStore.setState({ selectedItems: [bob] })
+		useDriveStore.getState().toggleSelectedItem(carol)
+
+		expect(useDriveStore.getState().selectedItems).toEqual([bob, carol])
+
+		useDriveStore.getState().toggleSelectedItem(bob)
+
+		expect(useDriveStore.getState().selectedItems).toEqual([carol])
+	})
 })
 
 describe("setSelectedItems", () => {
@@ -124,6 +159,15 @@ describe("removeFromSelection", () => {
 		expect(useDriveStore.getState().selectedItems).toEqual([itemB])
 	})
 
+	it("drops every receiver's row of a gone shared item", () => {
+		const itemA = directoryItem(testUuid("a"))
+
+		useDriveStore.setState({ selectedItems: [receiverRow(1), itemA, receiverRow(2)] })
+		useDriveStore.getState().removeFromSelection([testUuid("shared")])
+
+		expect(useDriveStore.getState().selectedItems).toEqual([itemA])
+	})
+
 	it("is a no-op (same array reference) when none of the given uuids are selected", () => {
 		const itemA = directoryItem(testUuid("a"))
 
@@ -132,6 +176,29 @@ describe("removeFromSelection", () => {
 		const prev = useDriveStore.getState().selectedItems
 
 		useDriveStore.getState().removeFromSelection([testUuid("z")])
+
+		expect(useDriveStore.getState().selectedItems).toBe(prev)
+	})
+})
+
+describe("removeRowsFromSelection", () => {
+	it("drops only the given receiver's row, keeping the item's other receiver rows selected", () => {
+		const itemA = directoryItem(testUuid("a"))
+		const carol = receiverRow(2)
+
+		useDriveStore.setState({ selectedItems: [receiverRow(1), itemA, carol] })
+		useDriveStore.getState().removeRowsFromSelection([receiverRow(1)])
+
+		expect(useDriveStore.getState().selectedItems).toEqual([itemA, carol])
+	})
+
+	it("is a no-op (same array reference) when none of the given rows are selected", () => {
+		useDriveStore.setState({ selectedItems: [receiverRow(1)] })
+
+		const prev = useDriveStore.getState().selectedItems
+
+		useDriveStore.getState().removeRowsFromSelection([receiverRow(2)])
+		useDriveStore.getState().removeRowsFromSelection([])
 
 		expect(useDriveStore.getState().selectedItems).toBe(prev)
 	})

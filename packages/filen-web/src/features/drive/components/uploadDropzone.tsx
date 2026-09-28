@@ -32,7 +32,9 @@ export interface UploadDropzoneProps {
 // zone) so a stray drop anywhere on the page can't make the browser navigate away to open the file.
 // Scoped to this component's own mount lifecycle, same as every other subscription effect in this
 // codebase (see themeProvider.tsx's storage listener) — added on mount, removed on unmount.
-export function UploadDropzone({ parentUuid, disabled = false, children }: UploadDropzoneProps) {
+export function UploadDropzone({ parentUuid, disabled: disabledProp, children }: UploadDropzoneProps) {
+	// Not a destructuring default, which the React Compiler cannot lower.
+	const disabled = disabledProp ?? false
 	const { t } = useTranslation("drive")
 	const [dragDepth, setDragDepth] = useState(0)
 	const active = !disabled && dragDepth > 0

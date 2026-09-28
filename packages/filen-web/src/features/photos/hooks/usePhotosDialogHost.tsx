@@ -125,11 +125,10 @@ export function usePhotosDialogHost({ rootUuid, selectedItems }: UsePhotosDialog
 	}
 
 	// Drops the acted-on slot out of the frozen pager snapshot — mirrors useDriveDialogHost's identical
-	// removeCurrentPreviewItem. No extra photos-listing patch here: fileTrash/folderTrash are BOTH in
-	// socketHandlers.ts's PHOTOS_INVALIDATING_EVENT_TYPES set, so the server's echo of this same local
-	// mutation already invalidates (and refetches) the photos listing on its own — this function only
-	// ever needs to keep the OPEN pager itself converging, the same uuid-keyed race-proofing the drive
-	// host's own doc comment explains.
+	// removeCurrentPreviewItem. No photos-listing patch here: this also runs for a remote move, which can
+	// keep the photo under the root, while the server's echo of a trash or delete drops the photo from the
+	// listing without a walk (invalidatePhotosListing). This function only keeps the OPEN pager itself
+	// converging, the same uuid-keyed race-proofing the drive host's own doc comment explains.
 	function removeCurrentPreviewItem(frozenUuid: string): void {
 		setActiveDialog(prev => {
 			if (prev?.kind !== "preview" || prev.index === undefined || prev.previewSources === undefined) {

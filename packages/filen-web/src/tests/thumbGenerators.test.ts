@@ -63,6 +63,29 @@ const { allowedMediaContentTypeMock } = vi.hoisted(() => ({ allowedMediaContentT
 
 vi.mock("@/features/preview/lib/mediaType", () => ({ allowedMediaContentType: allowedMediaContentTypeMock }))
 
+// A stand-in pdf.js whose documents fail to open, which is all the worker-sharing branch needs: the
+// worker handed to getDocument and each task's teardown are observable without a DOM.
+const { pdfWorkerCtorMock, pdfWorkerDestroyMock, getDocumentMock, taskDestroyMock } = vi.hoisted(() => ({
+	pdfWorkerCtorMock: vi.fn(),
+	pdfWorkerDestroyMock: vi.fn(),
+	getDocumentMock: vi.fn(),
+	taskDestroyMock: vi.fn(() => Promise.resolve())
+}))
+
+vi.mock("pdfjs-dist", () => ({
+	GlobalWorkerOptions: { workerSrc: "" },
+	PDFWorker: class {
+		constructor() {
+			pdfWorkerCtorMock()
+		}
+
+		destroy(): void {
+			pdfWorkerDestroyMock()
+		}
+	},
+	getDocument: getDocumentMock
+}))
+
 import {
 	generateSdkThumb,
 	generateVideoThumb,
@@ -487,5 +510,25 @@ describe("generatePdfThumb", () => {
 		downloadFileBytesMock.mockRejectedValue(new Error("network"))
 
 		await expect(generatePdfThumb(pdfItem())).resolves.toEqual({ type: "failed" })
+	})
+})
+
+describe("generatePdfThumb worker", () => {
+	beforeEach(() => {
+		downloadFileBytesMock.mockResolvedValue(new Uint8Array([1, 2, 3]))
+		getDocumentMock.mockImplementation(() => ({ promise: Promise.reject(new Error("broken pdf")), destroy: taskDestroyMock }))
+	})
+
+	it("hands every generation the same pdf.js worker, and each task tears down only its own document", async () => {
+		await expect(generatePdfThumb(pdfItem())).resolves.toEqual({ type: "failed" })
+		await expect(generatePdfThumb(pdfItem())).resolves.toEqual({ type: "failed" })
+
+		const workers = getDocumentMock.mock.calls.map(([params]) => (params as { worker: unknown }).worker)
+
+		expect(workers).toHaveLength(2)
+		expect(workers[0]).toBeDefined()
+		expect(workers[1]).toBe(workers[0])
+		expect(taskDestroyMock).toHaveBeenCalledTimes(2)
+		expect(pdfWorkerDestroyMock).not.toHaveBeenCalled()
 	})
 })

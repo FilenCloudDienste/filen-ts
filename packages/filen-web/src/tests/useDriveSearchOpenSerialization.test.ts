@@ -165,3 +165,146 @@ describe("useDriveSearch — one serialized engine open per engagement", () => {
 		expect(searchOpen).toHaveBeenCalledTimes(2)
 	})
 })
+
+describe("useDriveSearch — navigating while a worker round trip is in flight", () => {
+	const SUPERSEDED = { kind: "SearchSupersededError", message: "superseded" }
+
+	it("a query typed on the new root opens there, and the superseded open drains nothing onto the old root", async () => {
+		let rejectA!: (e: unknown) => void
+
+		searchOpen.mockImplementationOnce(
+			() =>
+				new Promise((_, reject) => {
+					rejectA = reject
+				})
+		)
+		searchOpen.mockImplementation(() => Promise.resolve(EMPTY_SNAPSHOT))
+		searchSetName.mockImplementation(() => Promise.resolve(false))
+
+		const { result, rerender } = renderHook(({ root }: { root: string }) => useDriveSearch(root, true), {
+			initialProps: { root: "A" }
+		})
+
+		act(() => {
+			result.current.setInput("report")
+		})
+
+		// Navigating tears the engine down while A's cold open is still awaiting the worker.
+		rerender({ root: "B" })
+
+		// Same query as A's: it must neither park behind A's open nor be dropped as a duplicate of it.
+		act(() => {
+			result.current.setInput("report")
+		})
+
+		expect(searchOpen.mock.calls.map(call => call[0].rootUuid)).toEqual(["A", "B"])
+
+		await act(async () => {
+			rejectA(SUPERSEDED)
+			await vi.runAllTimersAsync()
+		})
+
+		expect(searchOpen.mock.calls.map(call => call[0].rootUuid)).toEqual(["A", "B"])
+		expect(searchSetName).not.toHaveBeenCalled()
+	})
+
+	it("a different query typed on the new root is not retuned through the superseded open's closure", async () => {
+		let rejectA!: (e: unknown) => void
+		const openB = deferred<typeof EMPTY_SNAPSHOT>()
+
+		searchOpen.mockImplementationOnce(
+			() =>
+				new Promise((_, reject) => {
+					rejectA = reject
+				})
+		)
+		searchOpen.mockImplementationOnce(() => openB.promise)
+		searchSetName.mockImplementation(() => Promise.resolve(false))
+
+		const { result, rerender } = renderHook(({ root }: { root: string }) => useDriveSearch(root, true), {
+			initialProps: { root: "A" }
+		})
+
+		act(() => {
+			result.current.setInput("a")
+		})
+		rerender({ root: "B" })
+		act(() => {
+			result.current.setInput("b")
+		})
+		// Typed while B's own open is in flight: parked behind B's open, not A's.
+		act(() => {
+			result.current.setInput("bc")
+		})
+
+		await act(async () => {
+			rejectA(SUPERSEDED)
+			await vi.runAllTimersAsync()
+		})
+
+		// A's settle drained nothing: no retune, no reopen rooted at A.
+		expect(searchSetName).not.toHaveBeenCalled()
+		expect(searchOpen.mock.calls.map(call => call[0].rootUuid)).toEqual(["A", "B"])
+
+		searchSetName.mockImplementation(() => Promise.resolve(true))
+
+		await act(async () => {
+			openB.resolve(EMPTY_SNAPSHOT)
+			await openB.promise
+			await vi.runAllTimersAsync()
+		})
+
+		expect(searchSetName).toHaveBeenLastCalledWith("bc")
+		expect(searchOpen.mock.calls.map(call => call[0].rootUuid)).toEqual(["A", "B"])
+	})
+
+	it("a retune still in flight when the root changes neither reopens on the old root nor displaces the new root's query", async () => {
+		const setNameA = deferred<boolean>()
+		const openB = deferred<typeof EMPTY_SNAPSHOT>()
+
+		searchOpen.mockImplementationOnce(() => Promise.resolve(EMPTY_SNAPSHOT))
+		searchOpen.mockImplementationOnce(() => openB.promise)
+		searchSetName.mockImplementationOnce(() => setNameA.promise)
+		searchSetName.mockImplementation(() => Promise.resolve(true))
+
+		const { result, rerender } = renderHook(({ root }: { root: string }) => useDriveSearch(root, true), {
+			initialProps: { root: "A" }
+		})
+
+		act(() => {
+			result.current.setInput("a")
+		})
+		await act(async () => {
+			await Promise.resolve()
+		})
+		act(() => {
+			result.current.setInput("ab")
+		})
+		// The retune's setName is now awaiting the worker.
+		await act(async () => {
+			await vi.runAllTimersAsync()
+		})
+		expect(searchSetName).toHaveBeenCalledWith("ab")
+
+		rerender({ root: "B" })
+		act(() => {
+			result.current.setInput("x")
+		})
+
+		// The teardown closed A's handle, so its setName reports no live search.
+		await act(async () => {
+			setNameA.resolve(false)
+			await vi.runAllTimersAsync()
+		})
+		await act(async () => {
+			openB.resolve(EMPTY_SNAPSHOT)
+			await vi.runAllTimersAsync()
+		})
+
+		expect(searchOpen.mock.calls.map(call => [call[0].rootUuid, call[0].name])).toEqual([
+			["A", "a"],
+			["B", "x"]
+		])
+		expect(searchSetName.mock.calls.map(call => call[0])).toEqual(["ab"])
+	})
+})

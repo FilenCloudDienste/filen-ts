@@ -27,7 +27,9 @@ export interface SortMenuProps {
 	disabled?: boolean
 }
 
-export function SortMenu({ value, onChange, disabled = false }: SortMenuProps) {
+export function SortMenu({ value, onChange, disabled: disabledProp }: SortMenuProps) {
+	// Not a destructuring default, which the React Compiler cannot lower.
+	const disabled = disabledProp ?? false
 	const { t } = useTranslation("drive")
 	const { field, direction } = DRIVE_SORT_PARTS[value]
 

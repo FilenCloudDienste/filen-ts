@@ -7,7 +7,7 @@ import { readThumbnailBlob, deleteThumbnail as deleteThumbnailBlob } from "@/fea
 import { thumbnailCategory, type ThumbnailCategory } from "@/features/drive/lib/thumbnails.logic"
 import { asDirectoryOrFile, type BaseFileItem, type DriveItem } from "@/features/drive/lib/item"
 import { type DriveViewMode } from "@/features/drive/lib/preferences"
-import { createThumbnailUrlCache, computeThumbnailCapacity } from "@/features/drive/lib/thumbnailUrlCache"
+import { createThumbnailUrlCache, capacityForVisibleSlots, computeThumbnailCapacity } from "@/features/drive/lib/thumbnailUrlCache"
 
 // No declared mime on rendered thumbnail blobs: the format genuinely varies by producer. The SDK arm
 // always encodes webp in wasm, while the video/pdf/svg canvas encodes are webp where the browser
@@ -16,9 +16,9 @@ import { createThumbnailUrlCache, computeThumbnailCapacity } from "@/features/dr
 // carries no reliable type either. <img> sources are content-sniffed regardless, so untyped is the
 // one consistent, honest option for every path.
 
-// How many generation attempts (OPFS read + generator) run at once, app-wide — shapes DEMAND on the
-// CPU/SDK-download layer, never a limit the SDK itself needs (never reimplement SDK-side
-// concurrency; this bounds how many requests THIS app issues concurrently).
+// How many generator runs happen at once, app-wide — shapes DEMAND on the CPU/SDK-download layer,
+// never a limit the SDK itself needs (never reimplement SDK-side concurrency; this bounds how many
+// requests THIS app issues concurrently). The OPFS cache read stays outside it: see generate().
 const CONCURRENT_GENERATIONS = 3
 
 // Permanent-failure threshold — the third failed generation for a uuid blacklists it for the rest of
@@ -135,46 +135,48 @@ function finalize(deps: ThumbnailServiceDeps, uuid: string, blob: Blob): string 
 	return url
 }
 
-// The one real generation attempt for a uuid, gated by the app-wide semaphore: check the OPFS cache
-// first (another tab, or an earlier session, may have already produced this thumbnail), then route
-// through the registered generator for the category (an unregistered category resolves no bytes, same
-// as any other failure below). A generated result is written back through storeThumbnail — a persist
-// failure there is logged and non-fatal. A transient failure to obtain bytes — a thrown error, an
-// empty buffer, or no generator — is LOGGED ONLY (never surfaced to a user: thumbnail generation is
-// silent by design) and counted against the blacklist; a SETTLED "unavailable" verdict instead joins
-// the session-only `unavailable` set above and costs no strike.
+// The one real generation attempt for a uuid: check the OPFS cache first (another tab, or an earlier
+// session, may have already produced this thumbnail), then route through the registered generator for
+// the category (an unregistered category resolves no bytes, same as any other failure below). Only the
+// generator runs under the app-wide semaphore: a cache hit is a local read, and gating it would park
+// every already-cached tile behind whichever slow video/PDF generations hold the slots; the mounted
+// tiles already bound how many reads run at once. A generated result is written back through
+// storeThumbnail — a persist failure there is logged and non-fatal. A transient failure to obtain
+// bytes — a thrown error, an empty buffer, or no generator — is LOGGED ONLY (never surfaced to a user:
+// thumbnail generation is silent by design) and counted against the blacklist; a SETTLED
+// "unavailable" verdict instead joins the session-only `unavailable` set above and costs no strike.
 async function generate(
 	deps: ThumbnailServiceDeps,
 	item: BaseFileItem,
 	category: Exclude<ThumbnailCategory, "none">,
 	uuid: string
 ): Promise<string | null> {
+	// A read failure beyond the clean miss (readThumbnailBlob only maps NotFoundError to null — e.g. a
+	// quota/permission DOMException, or an eviction sweep racing this read) must degrade to the
+	// ordinary generate path, NOT reject out of the shared pending promise: a rejection would break the
+	// never-throws contract for every caller joined on this uuid AND skip the failure counter below,
+	// bypassing the blacklist into a retry-forever loop.
+	let cached: Blob | null = null
+	try {
+		cached = await deps.readThumbnailBlob(uuid)
+	} catch (e) {
+		log.warn("thumbnails", "generate: cache read failed", uuid, e)
+	}
+
+	if (cached !== null) {
+		return finalize(deps, uuid, cached)
+	}
+
+	// The settled-verdict short-circuit sits BELOW the cache read on purpose: bytes landing on disk
+	// must outrank an earlier verdict (the upload path can store a thumbnail for a uuid the listing
+	// path already gave up on), so this only ever skips the generator, never the cache.
+	if (unavailable.has(uuid)) {
+		return null
+	}
+
 	await semaphore.acquire()
 
 	try {
-		// A read failure beyond the clean miss (readThumbnailBlob only maps NotFoundError to null —
-		// e.g. a quota/permission DOMException, or an eviction sweep racing this read) must degrade to
-		// the ordinary generate path, NOT reject out of the shared pending promise: a rejection would
-		// break the never-throws contract for every caller joined on this uuid AND skip the failure
-		// counter below, bypassing the blacklist into a retry-forever loop.
-		let cached: Blob | null = null
-		try {
-			cached = await deps.readThumbnailBlob(uuid)
-		} catch (e) {
-			log.warn("thumbnails", "generate: cache read failed", uuid, e)
-		}
-
-		if (cached !== null) {
-			return finalize(deps, uuid, cached)
-		}
-
-		// The settled-verdict short-circuit sits BELOW the cache read on purpose: bytes landing on disk
-		// must outrank an earlier verdict (the upload path can store a thumbnail for a uuid the listing
-		// path already gave up on), so this only ever skips the generator, never the cache.
-		if (unavailable.has(uuid)) {
-			return null
-		}
-
 		let bytes: Uint8Array | undefined
 
 		try {
@@ -221,7 +223,7 @@ async function generate(
 
 // The service's one read entry point. Routing order: no category -> null; a live objectURL -> reuse
 // it; blacklisted -> null without touching the cache/semaphore again; an in-flight generation for
-// this uuid -> join it; otherwise start a fresh, semaphore-gated generation. `deps` defaults to the
+// this uuid -> join it; otherwise start a fresh generation. `deps` defaults to the
 // real worker/OPFS/Blob-URL wiring — pass a fake for tests.
 export async function getThumbnailUrl(item: DriveItem, deps: ThumbnailServiceDeps = defaultThumbnailDeps): Promise<string | null> {
 	const category = thumbnailCategory(item)
@@ -404,4 +406,9 @@ export function invalidateThumbnail(uuid: string, deps: ThumbnailServiceDeps = d
 // immediately, via the same LRU order get()/set() maintain everywhere else.
 export function setThumbnailViewport(viewportWidth: number, viewportHeight: number, viewMode: DriveViewMode): void {
 	urls.setCapacity(computeThumbnailCapacity(viewportWidth, viewportHeight, viewMode))
+}
+
+// The same resize for a surface that counts its own slots (the photos grid lays out its own tiles).
+export function setThumbnailVisibleSlots(visibleSlots: number): void {
+	urls.setCapacity(capacityForVisibleSlots(visibleSlots))
 }

@@ -118,13 +118,13 @@ function LinkItemHero({ item }: { item: DriveItem }) {
 // rather than one per field: two concurrent updates would both read the same stale status and the
 // second to resolve would silently clobber the first's change. Public links are a premium capability
 // (mobile parity) — a non-premium account sees a subscription empty-state instead of any of the above,
-// gated by the account query's own tri-state (resolvePremiumGateState) so a still-loading account never
+// gated by the account query's own state (resolvePremiumGateState) so a still-loading account never
 // flashes the gate before settling into "allowed".
 export function LinkDialog({ item, onClose }: LinkDialogProps) {
 	const { t } = useTranslation(["drive", "common"])
 	const linkStatusQuery = useDriveItemLinkStatusQuery(item)
 	const accountQuery = useAccountQuery()
-	const premiumGate = resolvePremiumGateState(accountQuery.data?.isPremium)
+	const premiumGate = resolvePremiumGateState(accountQuery.data?.isPremium, accountQuery.status)
 	const isOnline = useIsOnline()
 	const [pending, setPending] = useState(false)
 	const [createProgress, setCreateProgress] = useState<{ downloaded: number; total: number | undefined } | null>(null)
@@ -161,14 +161,18 @@ export function LinkDialog({ item, onClose }: LinkDialogProps) {
 		// into the config-form branch via that query's own observer, nothing further to do here.
 	}
 
-	async function handleUpdate(current: DriveItemLinkStatus, edits: LinkFormEdits): Promise<void> {
+	// Resolves whether the write landed, so a caller holding user input keeps it on failure.
+	async function handleUpdate(current: DriveItemLinkStatus, edits: LinkFormEdits): Promise<boolean> {
 		setPending(true)
 		const outcome = await updateLink(item, buildLinkUpdate(current, edits))
 		setPending(false)
 
 		if (outcome.status === "error") {
 			toast.error(errorLabel(outcome.dto))
+			return false
 		}
+
+		return true
 	}
 
 	async function handleSavePassword(current: DriveItemLinkStatus): Promise<void> {
@@ -178,7 +182,11 @@ export function LinkDialog({ item, onClose }: LinkDialogProps) {
 			return
 		}
 
-		await handleUpdate(current, { password: { kind: "new", plaintext } })
+		// A failed save leaves the editor open with the typed password intact for a retry.
+		if (!(await handleUpdate(current, { password: { kind: "new", plaintext } }))) {
+			return
+		}
+
 		setPasswordEditing(false)
 		setPasswordDraft("")
 	}
@@ -230,6 +238,13 @@ export function LinkDialog({ item, onClose }: LinkDialogProps) {
 						<LoadingState
 							size="md"
 							className="min-h-20"
+						/>
+					) : premiumGate === "error" ? (
+						<PreviewErrorState
+							message={errorLabel(asErrorDTO(accountQuery.error))}
+							onRetry={() => {
+								void accountQuery.refetch()
+							}}
 						/>
 					) : premiumGate === "gated" ? (
 						<Empty className="p-6">
