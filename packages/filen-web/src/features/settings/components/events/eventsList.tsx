@@ -14,6 +14,7 @@ import { EventDetailDialog } from "@/features/settings/components/events/eventDe
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { LoadingState } from "@/components/loadingState"
 import { Button } from "@/components/ui/button"
+import { SettingsPanel } from "@/features/settings/components/settingsLayout"
 
 const ROW_HEIGHT = 52
 const OVERSCAN = 10
@@ -137,45 +138,49 @@ export function EventsList() {
 
 	return (
 		<>
-			<div
-				ref={setScrollElement}
-				aria-label={t("settingsSectionEvents")}
-				className="mx-auto flex w-full max-w-2xl flex-1 flex-col overflow-y-auto px-6"
-				onScroll={e => {
-					void handleScroll(e.currentTarget)
-				}}
-			>
-				<div
-					className="relative w-full"
-					style={{ height: virtualizer.getTotalSize() }}
+			{/* The panel is the scroll element and sizes to its rows until it reaches the page's height,
+			    so a short log is a short panel rather than a tall empty one. */}
+			<div className="flex min-h-0 flex-1 flex-col px-4 pt-2 pb-6 sm:px-6">
+				<SettingsPanel
+					ref={setScrollElement}
+					aria-label={t("settingsSectionEvents")}
+					className="mx-auto min-h-0 w-full max-w-3xl overflow-y-auto p-1.5"
+					onScroll={e => {
+						void handleScroll(e.currentTarget)
+					}}
 				>
-					{virtualizer.getVirtualItems().map(virtualRow => {
-						const event = events[virtualRow.index]
+					<div
+						className="relative w-full"
+						style={{ height: virtualizer.getTotalSize() }}
+					>
+						{virtualizer.getVirtualItems().map(virtualRow => {
+							const event = events[virtualRow.index]
 
-						if (!event) {
-							return null
-						}
+							if (!event) {
+								return null
+							}
 
-						return (
-							<div
-								key={virtualRow.key}
-								className="absolute top-0 left-0 w-full"
-								style={{ height: ROW_HEIGHT, transform: `translateY(${String(virtualRow.start)}px)` }}
-							>
-								<EventRow
-									event={event}
-									onOpen={setSelectedEvent}
-								/>
-							</div>
-						)
-					})}
-				</div>
-				{loadingMore && (
-					<LoadingState
-						size="sm"
-						className="h-12 flex-none"
-					/>
-				)}
+							return (
+								<div
+									key={virtualRow.key}
+									className="absolute top-0 left-0 w-full"
+									style={{ height: ROW_HEIGHT, transform: `translateY(${String(virtualRow.start)}px)` }}
+								>
+									<EventRow
+										event={event}
+										onOpen={setSelectedEvent}
+									/>
+								</div>
+							)
+						})}
+					</div>
+					{loadingMore && (
+						<LoadingState
+							size="sm"
+							className="h-12 flex-none"
+						/>
+					)}
+				</SettingsPanel>
 			</div>
 			<EventDetailDialog
 				event={selectedEvent}

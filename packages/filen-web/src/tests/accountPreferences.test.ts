@@ -13,7 +13,7 @@ function makeHarness() {
 }
 
 // Covers BOTH toggles (versioning + login alerts share this exact round-trip shape — see
-// accountPreferencesCard.tsx) since the injected-deps harness is toggle-agnostic.
+// accountPreferencesRows.tsx) since the injected-deps harness is toggle-agnostic.
 describe("runPreferenceToggle (injected deps, no worker — mocks the SDK op per the settings study's e2e safety classes)", () => {
 	it("calls setEnabled with the requested value, then patches it in on success", async () => {
 		const h = makeHarness()

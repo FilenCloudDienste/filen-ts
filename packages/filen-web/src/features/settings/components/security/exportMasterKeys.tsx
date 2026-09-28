@@ -8,21 +8,21 @@ import { downloadTextFile } from "@/features/settings/lib/downloadTextFile"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { accountQueryUpdate, type AccountQuerySuccess } from "@/queries/account"
 import { buildMasterKeysFilename } from "@/features/settings/components/security/exportMasterKeys.logic"
-import { Card, CardAction, CardFooter, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
+import { SettingsRow } from "@/features/settings/components/settingsLayout"
 
-interface ExportMasterKeysCardProps {
+interface ExportMasterKeysRowProps {
 	accountQuery: AccountQuerySuccess
 }
 
-// Red-badged whenever the server reports `didExportMasterKeys === false`. Confirm → exportMasterKeys()
-// → immediate browser download (Blob + object URL, revoked after — see lib/download.ts) named
+// Badged "Not backed up" whenever the server reports `didExportMasterKeys === false`. Confirm →
+// exportMasterKeys() → immediate browser download (Blob + object URL, revoked after — see lib/download.ts) named
 // `${email}.masterKeys.${timestamp}.txt` → patch `didExportMasterKeys` (the server flips the flag on
 // the call itself, so no read-back is needed to clear the badge).
-function ExportMasterKeysCard({ accountQuery }: ExportMasterKeysCardProps) {
-	const { t } = useTranslation(["auth", "common"])
+function ExportMasterKeysRow({ accountQuery }: ExportMasterKeysRowProps) {
+	const { t } = useTranslation(["auth", "settings", "common"])
 	const isOnline = useIsOnline()
 	const { email, didExportMasterKeys } = accountQuery.data
 	const [confirmOpen, setConfirmOpen] = useState(false)
@@ -43,34 +43,23 @@ function ExportMasterKeysCard({ accountQuery }: ExportMasterKeysCardProps) {
 	}
 
 	return (
-		<Card>
-			<CardHeader>
-				<CardTitle>{t("exportMasterKeysAction")}</CardTitle>
-				<CardDescription>{t("exportMasterKeysDescription")}</CardDescription>
-				{!didExportMasterKeys && (
-					<CardAction>
-						<Badge
-							variant="destructive"
-							aria-label={t("exportMasterKeysNotBackedUp")}
-						>
-							!
-						</Badge>
-					</CardAction>
-				)}
-			</CardHeader>
-			<CardFooter>
-				<Button
-					type="button"
-					variant={didExportMasterKeys ? "outline" : "default"}
-					disabled={!isOnline}
-					title={!isOnline ? t("common:offlineActionDisabled") : undefined}
-					onClick={() => {
-						setConfirmOpen(true)
-					}}
-				>
-					{t("exportMasterKeysAction")}
-				</Button>
-			</CardFooter>
+		<SettingsRow
+			label={t("settings:settingsMasterKeysRowTitle")}
+			description={t("exportMasterKeysDescription")}
+		>
+			{!didExportMasterKeys && <Badge variant="destructive">{t("exportMasterKeysNotBackedUp")}</Badge>}
+			<Button
+				type="button"
+				variant={didExportMasterKeys ? "outline" : "default"}
+				aria-label={t("exportMasterKeysAction")}
+				disabled={!isOnline}
+				title={!isOnline ? t("common:offlineActionDisabled") : undefined}
+				onClick={() => {
+					setConfirmOpen(true)
+				}}
+			>
+				{t("settings:settingsMasterKeysExportAction")}
+			</Button>
 
 			<ConfirmDialog
 				open={confirmOpen}
@@ -84,8 +73,8 @@ function ExportMasterKeysCard({ accountQuery }: ExportMasterKeysCardProps) {
 					void handleExport()
 				}}
 			/>
-		</Card>
+		</SettingsRow>
 	)
 }
 
-export { ExportMasterKeysCard }
+export { ExportMasterKeysRow }

@@ -2,13 +2,13 @@ import { createFileRoute } from "@tanstack/react-router"
 import { useTranslation } from "react-i18next"
 import { HistoryIcon } from "lucide-react"
 import { EventsList } from "@/features/settings/components/events/eventsList"
+import { SettingsPageHeader } from "@/features/settings/components/settingsLayout"
 import { routeHead } from "@/lib/head/routeHead"
 import { i18n } from "@/lib/i18n"
 
 // The audit log: paginated getUserEvents + the 39-case UserEventKind → localized-string switch (mind
-// the twoFaEnabled/twoFaDisabled rename — see eventKind.ts). EventsList owns the whole scrollable
-// virtualized body; this route only supplies the section header, same split as every other settings
-// route.
+// the twoFaEnabled/twoFaDisabled rename — see eventKind.ts). EventsList owns the whole body, its
+// virtualized panel being its own scroll element; this route only supplies the section header.
 export const Route = createFileRoute("/_app/settings/events")({
 	head: routeHead({ title: () => [i18n.t("settings:settingsSectionEvents"), i18n.t("common:settings")] }),
 	component: EventsPage
@@ -19,12 +19,10 @@ function EventsPage() {
 
 	return (
 		<>
-			<header className="flex h-14 shrink-0 items-center gap-3 px-4">
-				<div className="flex items-center gap-2">
-					<HistoryIcon className="size-4 text-muted-foreground" />
-					<h1 className="font-heading text-base font-medium tracking-tight">{t("settingsSectionEvents")}</h1>
-				</div>
-			</header>
+			<SettingsPageHeader
+				icon={HistoryIcon}
+				title={t("settingsSectionEvents")}
+			/>
 			<EventsList />
 		</>
 	)

@@ -2,7 +2,7 @@
 
 // One file for the whole caps-lock surface, because every subject needs a DOM and the run is
 // node-environment by default (vitest.config.ts): the useCapsLock hook, the shared CapsLockWarning
-// region it drives, and the settings ChangePasswordCard render cases that prove the same contract on the
+// region it drives, and the settings ChangePasswordRow render cases that prove the same contract on the
 // settings side. The settings cases cannot live in changePassword.test.ts — that one is a
 // node-environment logic test with no DOM.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -18,10 +18,16 @@ const { changePassword } = vi.hoisted(() => ({ changePassword: vi.fn() }))
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: { changePassword } }))
 vi.mock("@/lib/sdk/session", () => ({ persistSession: vi.fn(), clearSession: vi.fn(), broadcastAuth: vi.fn() }))
 
-const { ChangePasswordCard } = await import("@/features/settings/components/security/changePassword")
+const { ChangePasswordRow } = await import("@/features/settings/components/security/changePassword")
 
 // Only refetch() is ever read, and only on the success path these cases never reach.
 const accountQuery = { refetch: vi.fn() } as unknown as AccountQuerySuccess
+
+// The form lives in the row's dialog, portaled to document.body — hence `screen` below.
+function renderPasswordForm(): void {
+	render(createElement(ChangePasswordRow, { accountQuery }))
+	fireEvent.click(screen.getByRole("button", { name: "Change password" }))
+}
 
 function capsEvent(on: boolean): { getModifierState: (key: "CapsLock") => boolean } {
 	return { getModifierState: () => on }
@@ -90,9 +96,9 @@ describe("useCapsLock", () => {
 	})
 })
 
-describe("ChangePasswordCard — caps-lock warning", () => {
+describe("ChangePasswordRow — caps-lock warning", () => {
 	it("surfaces the warning under the typed field and nowhere else", () => {
-		render(createElement(ChangePasswordCard, { accountQuery }))
+		renderPasswordForm()
 
 		fireEvent.keyDown(screen.getByLabelText("New password"), { key: "a", modifierCapsLock: true })
 
@@ -100,7 +106,7 @@ describe("ChangePasswordCard — caps-lock warning", () => {
 	})
 
 	it("clears the text on blur while the live region stays mounted", () => {
-		render(createElement(ChangePasswordCard, { accountQuery }))
+		renderPasswordForm()
 
 		const input = screen.getByLabelText("New password")
 		fireEvent.keyDown(input, { key: "a", modifierCapsLock: true })

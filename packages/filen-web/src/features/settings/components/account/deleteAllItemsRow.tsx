@@ -10,19 +10,19 @@ import { useIsOnline } from "@/lib/useIsOnline"
 import type { AccountQuerySuccess } from "@/queries/account"
 import { invalidateDriveListings } from "@/features/drive/queries/drive"
 import { invalidatePhotosListing } from "@/features/photos/queries/photos"
-import { Card, CardFooter, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { TypedConfirmDialog } from "@/components/dialogs/typedConfirmDialog"
+import { SettingsRow } from "@/features/settings/components/settingsLayout"
 
-interface DeleteAllItemsCardProps {
+interface DeleteAllItemsRowProps {
 	accountQuery: AccountQuerySuccess
 }
 
-// Same TypedConfirmDialog pattern as DeleteAllVersionsCard, one severity level up: this wipes every
+// Same TypedConfirmDialog pattern as DeleteAllVersionsRow, one severity level up: this wipes every
 // file and directory in the account, not just version history. deleteAllItems() is NEVER e2e-invoked —
 // it would nuke every other module's e2e fixtures on the shared account — unit/
-// render-only in this repo's own test suite, same as DeleteAccountCard.
-function DeleteAllItemsCard({ accountQuery }: DeleteAllItemsCardProps) {
+// render-only in this repo's own test suite, same as DeleteAccountRow.
+function DeleteAllItemsRow({ accountQuery }: DeleteAllItemsRowProps) {
 	const { t } = useTranslation(["settings", "common"])
 	const isOnline = useIsOnline()
 	const { storageUsed } = accountQuery.data
@@ -48,24 +48,22 @@ function DeleteAllItemsCard({ accountQuery }: DeleteAllItemsCardProps) {
 	}
 
 	return (
-		<Card>
-			<CardHeader>
-				<CardTitle>{t("settingsDeleteAllItemsTitle")}</CardTitle>
-				<CardDescription>{t("settingsDeleteAllItemsDescription", { size: formatBytes(Number(storageUsed)) })}</CardDescription>
-			</CardHeader>
-			<CardFooter>
-				<Button
-					type="button"
-					variant="destructive"
-					disabled={!isOnline}
-					title={!isOnline ? t("common:offlineActionDisabled") : undefined}
-					onClick={() => {
-						setOpen(true)
-					}}
-				>
-					{t("settingsDeleteAllItemsSubmit")}
-				</Button>
-			</CardFooter>
+		<SettingsRow
+			label={t("settingsDeleteAllItemsTitle")}
+			description={t("settingsDeleteAllItemsDescription", { size: formatBytes(Number(storageUsed)) })}
+			destructive
+		>
+			<Button
+				type="button"
+				variant="destructive"
+				disabled={!isOnline}
+				title={!isOnline ? t("common:offlineActionDisabled") : undefined}
+				onClick={() => {
+					setOpen(true)
+				}}
+			>
+				{t("settingsDeleteAllItemsSubmit")}
+			</Button>
 
 			<TypedConfirmDialog
 				open={open}
@@ -86,8 +84,8 @@ function DeleteAllItemsCard({ accountQuery }: DeleteAllItemsCardProps) {
 					void handleConfirm()
 				}}
 			/>
-		</Card>
+		</SettingsRow>
 	)
 }
 
-export { DeleteAllItemsCard }
+export { DeleteAllItemsRow }

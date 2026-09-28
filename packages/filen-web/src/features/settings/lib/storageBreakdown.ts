@@ -1,4 +1,6 @@
-// Pure derivation for the Account section's storage breakdown card — mirrors old-web's
+import type { StorageUsageLevel } from "@filen/shared"
+
+// Pure derivation for the Account section's storage breakdown row — mirrors old-web's
 // settings/general storage bar math (files / versioned / free) exactly: `usedClamped` never
 // exceeds `maxStorage` (a plan downgrade can otherwise report >100% used), `filesBytes` excludes
 // the versioned slice so the three segments always sum to `maxStorage`.
@@ -43,4 +45,13 @@ export function storagePercent(part: bigint, total: bigint): number {
 	const ratio = Number(part) / Number(total)
 
 	return Math.min(100, Math.max(0, ratio * 100))
+}
+
+// The used-space fill (never "versioned", which stays a fixed neutral color, or "free") warns/alerts
+// by overall usage — mirrors mobile's segmented storage bar, where only the used-space fill changes
+// color near quota. Shared by the storage breakdown row and the Account profile header's compact bar.
+export const STORAGE_LEVEL_FILL_CLASS: Record<StorageUsageLevel, string> = {
+	ok: "bg-chart-1",
+	warn: "bg-yellow-500",
+	critical: "bg-destructive"
 }

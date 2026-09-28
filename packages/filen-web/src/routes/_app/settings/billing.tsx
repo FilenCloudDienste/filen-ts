@@ -2,10 +2,11 @@ import { createFileRoute } from "@tanstack/react-router"
 import { useTranslation } from "react-i18next"
 import { CreditCardIcon } from "lucide-react"
 import { useAccountQuery } from "@/queries/account"
-import { CurrentPlanCard } from "@/features/settings/components/billing/currentPlanCard"
-import { SubscriptionsCard } from "@/features/settings/components/billing/subscriptionsCard"
-import { InvoicesCard } from "@/features/settings/components/billing/invoicesCard"
-import { ReferralCard } from "@/features/settings/components/billing/referralCard"
+import { CurrentPlanRow } from "@/features/settings/components/billing/currentPlanRow"
+import { SubscriptionsBlock } from "@/features/settings/components/billing/subscriptionsBlock"
+import { InvoicesBlock } from "@/features/settings/components/billing/invoicesBlock"
+import { ReferralRow } from "@/features/settings/components/billing/referralRow"
+import { SettingsGroup, SettingsPage } from "@/features/settings/components/settingsLayout"
 import { Button } from "@/components/ui/button"
 import { LoadingState } from "@/components/loadingState"
 import { Empty, EmptyContent, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
@@ -27,44 +28,53 @@ function BillingPage() {
 	const accountQuery = useAccountQuery()
 
 	return (
-		<>
-			<header className="flex h-14 shrink-0 items-center gap-3 px-4">
-				<div className="flex items-center gap-2">
-					<CreditCardIcon className="size-4 text-muted-foreground" />
-					<h1 className="font-heading text-base font-medium tracking-tight">{t("settingsSectionBilling")}</h1>
-				</div>
-			</header>
-			<div className="flex flex-1 flex-col overflow-y-auto p-6">
-				{accountQuery.status === "pending" ? (
-					<LoadingState size="lg" />
-				) : accountQuery.status === "error" ? (
-					<Empty>
-						<EmptyHeader>
-							<EmptyMedia variant="icon">
-								<CreditCardIcon />
-							</EmptyMedia>
-							<EmptyTitle>{t("settingsAccountLoadError")}</EmptyTitle>
-						</EmptyHeader>
-						<EmptyContent>
-							<Button
-								variant="outline"
-								onClick={() => {
-									void accountQuery.refetch()
-								}}
-							>
-								{t("common:tryAgain")}
-							</Button>
-						</EmptyContent>
-					</Empty>
-				) : (
-					<div className="mx-auto flex w-full max-w-2xl flex-col gap-4">
-						<CurrentPlanCard accountQuery={accountQuery} />
-						<SubscriptionsCard accountQuery={accountQuery} />
-						<InvoicesCard accountQuery={accountQuery} />
-						<ReferralCard accountQuery={accountQuery} />
-					</div>
-				)}
-			</div>
-		</>
+		<SettingsPage
+			icon={CreditCardIcon}
+			title={t("settingsSectionBilling")}
+		>
+			{accountQuery.status === "pending" ? (
+				<LoadingState size="lg" />
+			) : accountQuery.status === "error" ? (
+				<Empty>
+					<EmptyHeader>
+						<EmptyMedia variant="icon">
+							<CreditCardIcon />
+						</EmptyMedia>
+						<EmptyTitle>{t("settingsAccountLoadError")}</EmptyTitle>
+					</EmptyHeader>
+					<EmptyContent>
+						<Button
+							variant="outline"
+							onClick={() => {
+								void accountQuery.refetch()
+							}}
+						>
+							{t("common:tryAgain")}
+						</Button>
+					</EmptyContent>
+				</Empty>
+			) : (
+				<>
+					<SettingsGroup title={t("settingsGroupPlan")}>
+						<CurrentPlanRow accountQuery={accountQuery} />
+					</SettingsGroup>
+					<SettingsGroup
+						title={t("settingsBillingSubscriptionsTitle")}
+						description={t("settingsBillingSubscriptionsDescription")}
+					>
+						<SubscriptionsBlock accountQuery={accountQuery} />
+					</SettingsGroup>
+					<SettingsGroup
+						title={t("settingsBillingInvoicesTitle")}
+						description={t("settingsBillingInvoicesDescription")}
+					>
+						<InvoicesBlock accountQuery={accountQuery} />
+					</SettingsGroup>
+					<SettingsGroup title={t("settingsBillingReferralTitle")}>
+						<ReferralRow accountQuery={accountQuery} />
+					</SettingsGroup>
+				</>
+			)}
+		</SettingsPage>
 	)
 }

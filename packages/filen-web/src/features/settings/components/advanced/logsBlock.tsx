@@ -2,11 +2,12 @@ import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { RotateCwIcon } from "lucide-react"
+import { cn } from "@filen/shared"
 import { log } from "@/lib/log"
 import { formatLogEntry, formatLogEntries, logsExportFilename } from "@/features/settings/lib/logs"
 import { downloadTextFile } from "@/features/settings/lib/downloadTextFile"
-import { Card, CardAction, CardContent, CardFooter, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
+import { SettingsBlock } from "@/features/settings/components/settingsLayout"
 
 const LEVEL_CLASS: Record<string, string> = {
 	debug: "text-muted-foreground",
@@ -19,7 +20,7 @@ const LEVEL_CLASS: Record<string, string> = {
 // merge with the SDK worker's own separate ring buffer instance (different JS realm); see logs.ts's
 // own comment on that scope limit. No live subscription: the ring buffer is a plain array, not an
 // event source, so "Refresh" just re-reads it into local state — cheap (capped at 500 entries).
-function LogsCard() {
+function LogsBlock() {
 	const { t } = useTranslation("settings")
 	const [entries, setEntries] = useState(() => log.dump())
 
@@ -33,39 +34,30 @@ function LogsCard() {
 	}
 
 	return (
-		<Card>
-			<CardHeader>
-				<CardTitle>{t("settingsLogsTitle")}</CardTitle>
-				<CardDescription>{t("settingsLogsDescription", { count: 500 })}</CardDescription>
-				<CardAction>
-					<Button
-						type="button"
-						variant="ghost"
-						size="sm"
-						onClick={refresh}
-					>
-						<RotateCwIcon />
-						{t("settingsLogsRefresh")}
-					</Button>
-				</CardAction>
-			</CardHeader>
-			<CardContent>
-				{entries.length === 0 ? (
-					<p className="text-sm text-muted-foreground">{t("settingsLogsEmpty")}</p>
-				) : (
-					<div className="max-h-72 overflow-y-auto rounded-2xl bg-muted/40 p-3 font-mono text-xs">
-						{entries.map((entry, index) => (
-							<p
-								key={index}
-								className={`truncate ${LEVEL_CLASS[entry.level] ?? "text-foreground"}`}
-							>
-								{formatLogEntry(entry)}
-							</p>
-						))}
-					</div>
-				)}
-			</CardContent>
-			<CardFooter>
+		<SettingsBlock className="flex flex-col gap-3">
+			{entries.length === 0 ? (
+				<p className="text-sm text-muted-foreground">{t("settingsLogsEmpty")}</p>
+			) : (
+				<div className="max-h-72 overflow-y-auto rounded-2xl bg-muted/40 p-3 font-mono text-xs">
+					{entries.map((entry, index) => (
+						<p
+							key={index}
+							className={cn("truncate", LEVEL_CLASS[entry.level] ?? "text-foreground")}
+						>
+							{formatLogEntry(entry)}
+						</p>
+					))}
+				</div>
+			)}
+			<div className="flex justify-end gap-2">
+				<Button
+					type="button"
+					variant="ghost"
+					onClick={refresh}
+				>
+					<RotateCwIcon />
+					{t("settingsLogsRefresh")}
+				</Button>
 				<Button
 					type="button"
 					variant="outline"
@@ -74,9 +66,9 @@ function LogsCard() {
 				>
 					{t("settingsLogsExport")}
 				</Button>
-			</CardFooter>
-		</Card>
+			</div>
+		</SettingsBlock>
 	)
 }
 
-export { LogsCard }
+export { LogsBlock }

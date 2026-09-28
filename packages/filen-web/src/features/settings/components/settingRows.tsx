@@ -1,29 +1,34 @@
+import { useTranslation } from "react-i18next"
 import { Switch } from "@/components/ui/switch"
 import { Button } from "@/components/ui/button"
+import { SettingsRow } from "@/features/settings/components/settingsLayout"
 
 interface PreferenceToggleRowProps {
 	title: string
 	description: string
 	checked: boolean
 	disabled: boolean
+	// Native tooltip saying why the switch is disabled, only when that reason is worth telling (offline);
+	// never for a toggle that is merely in flight.
+	disabledReason?: string | undefined
 	onCheckedChange: (checked: boolean) => void
 }
 
-// A settings card row: title and description on the left, the switch that sets them on the right.
-function PreferenceToggleRow({ title, description, checked, disabled, onCheckedChange }: PreferenceToggleRowProps) {
+// A settings row whose switch sets the preference its title names.
+function PreferenceToggleRow({ title, description, checked, disabled, disabledReason, onCheckedChange }: PreferenceToggleRowProps) {
 	return (
-		<div className="flex items-center justify-between gap-4 py-2 first:pt-0">
-			<div className="flex flex-col gap-0.5">
-				<p className="text-sm font-medium">{title}</p>
-				<p className="text-sm text-muted-foreground">{description}</p>
-			</div>
+		<SettingsRow
+			label={title}
+			description={description}
+		>
 			<Switch
 				checked={checked}
 				disabled={disabled}
 				aria-label={title}
+				title={disabledReason}
 				onCheckedChange={onCheckedChange}
 			/>
-		</div>
+		</SettingsRow>
 	)
 }
 
@@ -33,23 +38,25 @@ interface ResetRowProps {
 	onReset: () => void
 }
 
-// A settings card row whose button resets the preference its title names.
+// A settings row whose button resets the preference its title names. The button reads "Reset" and is
+// named by the title, so several on one page stay distinguishable to assistive tech.
 function ResetRow({ title, description, onReset }: ResetRowProps) {
+	const { t } = useTranslation("common")
+
 	return (
-		<div className="flex items-center justify-between gap-4 py-2 last:pb-0">
-			<div className="flex flex-col gap-0.5">
-				<p className="text-sm font-medium">{title}</p>
-				<p className="text-sm text-muted-foreground">{description}</p>
-			</div>
+		<SettingsRow
+			label={title}
+			description={description}
+		>
 			<Button
 				type="button"
 				variant="outline"
-				size="sm"
+				aria-label={title}
 				onClick={onReset}
 			>
-				{title}
+				{t("reset")}
 			</Button>
-		</div>
+		</SettingsRow>
 	)
 }
 

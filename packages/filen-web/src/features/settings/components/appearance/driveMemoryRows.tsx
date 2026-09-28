@@ -13,18 +13,17 @@ import {
 	type DriveViewMode
 } from "@/features/drive/lib/preferences"
 import type { DriveSortBy } from "@/features/drive/lib/sort"
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { PreferenceToggleRow, ResetRow } from "@/features/settings/components/settingRows"
 
 type ResetTarget = "sort" | "view" | null
 
-// The card giving the per-directory drive memory data model (drive/lib/preferences.ts's `mode: "perDirectory"` + per-target
+// The rows giving the per-directory drive memory data model (drive/lib/preferences.ts's `mode: "perDirectory"` + per-target
 // reset, which already existed with no control writing them) a real UI, mirroring mobile's Appearance
 // screen: a "remember per directory" switch and a destructive "reset" action for sort and view mode
 // each. Reset mirrors mobile's own confirm-then-wipe shape (screens/appearance.tsx) via the shared
 // ConfirmDialog primitive, one dialog reused for whichever target the user picked.
-function DriveMemoryCard() {
+function DriveMemoryRows() {
 	const { t } = useTranslation(["settings", "common"])
 	const sortQuery = useSortPreferencesQuery()
 	const viewQuery = useViewModePreferencesQuery()
@@ -66,53 +65,47 @@ function DriveMemoryCard() {
 	}
 
 	return (
-		<Card>
-			<CardHeader>
-				<CardTitle>{t("settingsDriveMemoryTitle")}</CardTitle>
-				<CardDescription>{t("settingsDriveMemoryDescription")}</CardDescription>
-			</CardHeader>
-			<CardContent className="flex flex-col divide-y divide-border/60">
-				<PreferenceToggleRow
-					title={t("settingsRememberSortPerDirectory")}
-					description={t("settingsRememberSortPerDirectoryDescription")}
-					checked={sortQuery.data?.mode === "perDirectory"}
-					disabled={sortQuery.data === undefined}
-					onCheckedChange={checked => {
-						if (sortQuery.data === undefined) {
-							return
-						}
+		<>
+			<PreferenceToggleRow
+				title={t("settingsRememberSortPerDirectory")}
+				description={t("settingsRememberSortPerDirectoryDescription")}
+				checked={sortQuery.data?.mode === "perDirectory"}
+				disabled={sortQuery.data === undefined}
+				onCheckedChange={checked => {
+					if (sortQuery.data === undefined) {
+						return
+					}
 
-						void toggleSortMode(sortQuery.data, checked)
-					}}
-				/>
-				<ResetRow
-					title={t("settingsResetSort")}
-					description={t("settingsResetSortDescription")}
-					onReset={() => {
-						setResetTarget("sort")
-					}}
-				/>
-				<PreferenceToggleRow
-					title={t("settingsRememberViewPerDirectory")}
-					description={t("settingsRememberViewPerDirectoryDescription")}
-					checked={viewQuery.data?.mode === "perDirectory"}
-					disabled={viewQuery.data === undefined}
-					onCheckedChange={checked => {
-						if (viewQuery.data === undefined) {
-							return
-						}
+					void toggleSortMode(sortQuery.data, checked)
+				}}
+			/>
+			<ResetRow
+				title={t("settingsResetSort")}
+				description={t("settingsResetSortDescription")}
+				onReset={() => {
+					setResetTarget("sort")
+				}}
+			/>
+			<PreferenceToggleRow
+				title={t("settingsRememberViewPerDirectory")}
+				description={t("settingsRememberViewPerDirectoryDescription")}
+				checked={viewQuery.data?.mode === "perDirectory"}
+				disabled={viewQuery.data === undefined}
+				onCheckedChange={checked => {
+					if (viewQuery.data === undefined) {
+						return
+					}
 
-						void toggleViewMode(viewQuery.data, checked)
-					}}
-				/>
-				<ResetRow
-					title={t("settingsResetView")}
-					description={t("settingsResetViewDescription")}
-					onReset={() => {
-						setResetTarget("view")
-					}}
-				/>
-			</CardContent>
+					void toggleViewMode(viewQuery.data, checked)
+				}}
+			/>
+			<ResetRow
+				title={t("settingsResetView")}
+				description={t("settingsResetViewDescription")}
+				onReset={() => {
+					setResetTarget("view")
+				}}
+			/>
 
 			<ConfirmDialog
 				open={resetTarget !== null}
@@ -131,8 +124,8 @@ function DriveMemoryCard() {
 					void handleReset()
 				}}
 			/>
-		</Card>
+		</>
 	)
 }
 
-export { DriveMemoryCard }
+export { DriveMemoryRows }

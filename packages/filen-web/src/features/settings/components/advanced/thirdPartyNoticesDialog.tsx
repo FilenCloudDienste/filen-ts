@@ -23,7 +23,7 @@ const ROW_HEIGHT = 52
 const OVERSCAN = 10
 
 // Both panes live in ONE dialog, swapped by local state — a nested dialog would fight the shared
-// dismissal gate. Reached only through the lazy boundary in thirdPartyNoticesCard.tsx, which is what
+// dismissal gate. Reached only through the lazy boundary in thirdPartyNoticesRow.tsx, which is what
 // keeps the ~800 KB generated payload out of the entry chunk.
 function ThirdPartyNoticesDialog({ open, onOpenChange }: ThirdPartyNoticesDialogProps) {
 	const { t } = useTranslation("settings")

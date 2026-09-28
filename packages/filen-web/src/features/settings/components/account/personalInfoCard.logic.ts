@@ -36,9 +36,9 @@ export function personalToFormState(personal: Personal): PersonalFormState {
 	}
 }
 
-// The dirty-gate: true when ANY field differs from the snapshot taken when the card's form state was
-// frozen (see personalInfoCard.tsx's own comment on the freeze-on-mount invariant). Mirrors
-// nicknameCard's single-field `trimmed !== (nickName ?? "")` check, generalized to every
+// The dirty-gate: true when ANY field differs from the snapshot taken when the row's form state was
+// frozen (see personalInfoRow.tsx's own comment on the freeze-on-mount invariant). Mirrors
+// nicknameRow's single-field `trimmed !== (nickName ?? "")` check, generalized to every
 // PERSONAL_FIELD_ORDER key — raw (untrimmed) comparison on purpose: trailing whitespace the user just
 // typed should still enable Save even though formStateToUpdateInfo will trim it away on submit.
 export function isPersonalFormDirty(form: PersonalFormState, initial: PersonalFormState): boolean {

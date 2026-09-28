@@ -30,20 +30,20 @@ test.describe("settings", () => {
 		await gotoSettings(page)
 		await waitForAccountLoaded(page)
 
-		// Each pattern scoped to the card that owns it, never the whole page: an unscoped email regex
-		// matches any address the shell happens to render, and an unscoped quota regex any other "… of …
-		// used" copy — either would let this pass on something that is not the live getUserInfo read.
-		const emailCard = page.locator('[data-slot="card"]').filter({ hasText: "Current email:" })
-		const storageCard = page.locator('[data-slot="card"]').filter({ hasText: /of .* used/ })
+		// Each pattern scoped to the row or group that owns it, never the whole page: an unscoped email
+		// regex matches any address the shell (or the profile header) happens to render, and an unscoped
+		// quota regex any other "… of … used" copy — either would let this pass on something that is not
+		// the live getUserInfo read. Group titles are case-insensitive: they render uppercased.
+		const emailRow = page.locator('[data-slot="settings-row"]').filter({ hasText: "Email address" })
+		const storageGroup = page.locator('[data-slot="settings-group"]').filter({ has: page.getByRole("heading", { name: /^storage$/i }) })
 
-		await expect(emailCard.getByText("Current email:")).toBeVisible()
-		await expect(emailCard.getByText(/[^\s@]+@[^\s@]+\.[^\s@]+/)).toBeVisible()
+		await expect(emailRow.getByText(/[^\s@]+@[^\s@]+\.[^\s@]+/)).toBeVisible()
+		await expect(emailRow.getByRole("button", { name: "Change email", exact: true })).toBeVisible()
 
-		await expect(storageCard.getByText("Storage", { exact: true })).toBeVisible()
-		await expect(storageCard.getByText(/of .* used/)).toBeVisible()
+		await expect(storageGroup.getByText(/of .* used/)).toBeVisible()
 	})
 
-	test("security page is reachable from the sidebar and renders unchanged", async ({ page, injectedSession }) => {
+	test("security page is reachable from the sidebar and renders its rows", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		await gotoSettings(page)
@@ -53,12 +53,13 @@ test.describe("settings", () => {
 		await page.getByRole("link", { name: "Security", exact: true }).click()
 		await page.waitForURL(/\/settings\/security$/)
 
-		await expect(page.getByRole("heading", { name: "Security" })).toBeVisible()
-		await expect(page.getByText("Change password", { exact: true })).toBeVisible()
+		await expect(page.getByRole("heading", { name: "Security", exact: true })).toBeVisible()
+		// The row buttons read "Change…"/"Export…"; their accessible names carry the full action.
+		await expect(page.getByText("Password", { exact: true })).toBeVisible()
+		await expect(page.getByRole("button", { name: "Change password", exact: true })).toBeVisible()
 		await expect(page.getByText("Two-factor authentication", { exact: true })).toBeVisible()
-		// Two matches (the CardTitle + its own action button share this exact label) — .first() only
-		// needs to prove the card itself rendered, not disambiguate a click target.
-		await expect(page.getByText("Export master keys", { exact: true }).first()).toBeVisible()
+		await expect(page.getByText("Master keys", { exact: true })).toBeVisible()
+		await expect(page.getByRole("button", { name: "Export master keys", exact: true })).toBeVisible()
 		await expect(page.getByText("Delete account", { exact: true })).toBeVisible()
 	})
 
@@ -96,7 +97,7 @@ test.describe("settings", () => {
 		await expect(page.getByRole("button", { name: "Copy link", exact: true })).toBeVisible()
 	})
 
-	test("the destructive data-control cards render but their typed-confirm gate blocks a wrong phrase (never live-mutated)", async ({
+	test("the destructive data-control rows render but their typed-confirm gate blocks a wrong phrase (never live-mutated)", async ({
 		page,
 		injectedSession
 	}) => {
@@ -108,7 +109,7 @@ test.describe("settings", () => {
 		await expect(page.getByText("Delete all versioned files", { exact: true })).toBeVisible()
 		await page.getByRole("button", { name: "Delete versioned files", exact: true }).click()
 
-		// Scoped to the dialog carrying THIS card's own confirm button, never "an alertdialog": the
+		// Scoped to the dialog carrying THIS row's own confirm button, never "an alertdialog": the
 		// startup account reminders are alertdialogs too and mount asynchronously, so a bare role lookup
 		// is a strict-mode hazard, aims the gate assertions at whatever dialog happens to be up, and
 		// makes the toHaveCount(0) below fail on a dialog that did close.

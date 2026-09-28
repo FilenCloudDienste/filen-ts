@@ -10,13 +10,13 @@ import { downloadTextFile } from "@/features/settings/lib/downloadTextFile"
 import type { AccountQuerySuccess } from "@/queries/account"
 import { buildOtpauthUri, canDismissRecoveryKeyPanel } from "@/features/settings/components/security/twoFactor.logic"
 import { useIsOnline } from "@/lib/useIsOnline"
-import { Card, CardContent, CardFooter, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { InputDialog } from "@/components/dialogs/inputDialog"
+import { SettingsRow } from "@/features/settings/components/settingsLayout"
 
-interface TwoFactorCardProps {
+interface TwoFactorRowProps {
 	accountQuery: AccountQuerySuccess
 }
 
@@ -111,16 +111,19 @@ function RecoveryKeyPanel({ recoveryKey, onClose }: RecoveryKeyPanelProps) {
 	)
 }
 
-// Card state comes straight from useAccountQuery: `twoFactorEnabled` picks the enable/disable
+// Row state comes straight from useAccountQuery: `twoFactorEnabled` picks the enable/disable
 // branch, `twoFactorKey` (string | undefined — undefined once enabled, or transiently before the
-// server has issued one) gates whether the QR/secret step can render at all. Disable is the
-// destructive path: a confirm, then a code prompt; enable has no destructive confirm (turning
-// security ON needs no "are you sure").
-function TwoFactorCard({ accountQuery }: TwoFactorCardProps) {
-	const { t } = useTranslation(["auth", "common"])
+// server has issued one) gates whether the setup step can open at all. Enable is setup dialog (QR +
+// secret) → code prompt → one-time recovery key; each step closes before the next opens, so no
+// dialog is ever stacked on another. Disable is the destructive path: a confirm, then a code prompt;
+// enable has no destructive confirm (turning security ON needs no "are you sure").
+function TwoFactorRow({ accountQuery }: TwoFactorRowProps) {
+	const { t } = useTranslation(["auth", "settings", "common"])
 	const isOnline = useIsOnline()
 	const { email, twoFactorEnabled, twoFactorKey } = accountQuery.data
+	const setupAvailable = twoFactorKey !== undefined && twoFactorKey.length > 0
 
+	const [setupOpen, setSetupOpen] = useState(false)
 	const [enableCodeOpen, setEnableCodeOpen] = useState(false)
 	const [enablePending, setEnablePending] = useState(false)
 	const [recoveryKey, setRecoveryKey] = useState<string | null>(null)
@@ -169,58 +172,82 @@ function TwoFactorCard({ accountQuery }: TwoFactorCardProps) {
 	}
 
 	return (
-		<Card>
-			<CardHeader>
-				<CardTitle>{t("twoFactorSectionTitle")}</CardTitle>
-				<CardDescription>{t("twoFactorSectionDescription")}</CardDescription>
-			</CardHeader>
-			{!twoFactorEnabled && twoFactorKey !== undefined && twoFactorKey.length > 0 && (
-				<CardContent>
-					<div className="flex flex-col items-center gap-4">
-						<div className="rounded-3xl bg-white p-4">
-							<QRCode
-								value={buildOtpauthUri(email, twoFactorKey)}
-								size={192}
-							/>
-						</div>
-						<Button
-							type="button"
-							variant="outline"
-							onClick={() => {
-								void handleCopySecret()
-							}}
-						>
-							{t("twoFactorCopySecret")}
-						</Button>
-					</div>
-				</CardContent>
+		<SettingsRow
+			label={t("twoFactorSectionTitle")}
+			description={t("twoFactorSectionDescription")}
+		>
+			<span className="text-sm text-muted-foreground">
+				{twoFactorEnabled ? t("settings:settingsTwoFactorOn") : t("settings:settingsTwoFactorOff")}
+			</span>
+			{twoFactorEnabled ? (
+				<Button
+					type="button"
+					variant="destructive"
+					disabled={!isOnline}
+					title={!isOnline ? t("common:offlineActionDisabled") : undefined}
+					onClick={() => {
+						setDisableConfirmOpen(true)
+					}}
+				>
+					{t("twoFactorDisableSubmit")}
+				</Button>
+			) : (
+				<Button
+					type="button"
+					variant="outline"
+					disabled={!setupAvailable || !isOnline}
+					title={!isOnline ? t("common:offlineActionDisabled") : undefined}
+					onClick={() => {
+						setSetupOpen(true)
+					}}
+				>
+					{t("settings:settingsTwoFactorSetUpAction")}
+				</Button>
 			)}
-			<CardFooter>
-				{twoFactorEnabled ? (
-					<Button
-						type="button"
-						variant="destructive"
-						disabled={!isOnline}
-						title={!isOnline ? t("common:offlineActionDisabled") : undefined}
-						onClick={() => {
-							setDisableConfirmOpen(true)
-						}}
-					>
-						{t("twoFactorDisableSubmit")}
-					</Button>
-				) : (
-					<Button
-						type="button"
-						disabled={twoFactorKey === undefined || twoFactorKey.length === 0 || !isOnline}
-						title={!isOnline ? t("common:offlineActionDisabled") : undefined}
-						onClick={() => {
-							setEnableCodeOpen(true)
-						}}
-					>
-						{t("twoFactorEnableSubmit")}
-					</Button>
-				)}
-			</CardFooter>
+
+			{setupAvailable && (
+				<Dialog
+					open={setupOpen}
+					onOpenChange={setSetupOpen}
+				>
+					<DialogContent>
+						<DialogHeader>
+							<DialogTitle>{t("twoFactorSectionTitle")}</DialogTitle>
+							<DialogDescription>{t("settings:settingsTwoFactorSetUpDescription")}</DialogDescription>
+						</DialogHeader>
+						<div className="flex flex-col items-center gap-4">
+							<div className="rounded-3xl bg-white p-4">
+								<QRCode
+									value={buildOtpauthUri(email, twoFactorKey)}
+									size={192}
+								/>
+							</div>
+							<Button
+								type="button"
+								variant="outline"
+								onClick={() => {
+									void handleCopySecret()
+								}}
+							>
+								{t("twoFactorCopySecret")}
+							</Button>
+						</div>
+						<DialogFooter>
+							<Button
+								type="button"
+								disabled={!isOnline}
+								title={!isOnline ? t("common:offlineActionDisabled") : undefined}
+								onClick={() => {
+									setSetupOpen(false)
+									setEnableCodeOpen(true)
+								}}
+							>
+								{t("settings:settingsTwoFactorContinue")}
+							</Button>
+						</DialogFooter>
+					</DialogContent>
+				</Dialog>
+			)}
 
 			<InputDialog
 				open={enableCodeOpen}
@@ -278,8 +305,8 @@ function TwoFactorCard({ accountQuery }: TwoFactorCardProps) {
 					}}
 				/>
 			)}
-		</Card>
+		</SettingsRow>
 	)
 }
 
-export { TwoFactorCard }
+export { TwoFactorRow }

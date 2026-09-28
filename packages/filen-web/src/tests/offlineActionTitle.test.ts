@@ -84,7 +84,7 @@ vi.mock("@/features/drive/queries/drive", async importOriginal => {
 
 import { EmptyTrashButton } from "@/features/drive/components/emptyTrashButton"
 import { AddContactDialog } from "@/features/contacts/components/addContactDialog"
-import { GdprExportCard } from "@/features/settings/components/account/gdprExportCard"
+import { GdprExportRow } from "@/features/settings/components/account/gdprExportRow"
 import { ContactPickerDialog } from "@/features/drive/components/contactPickerDialog"
 import { VersionsDialog } from "@/features/drive/components/versionsDialog"
 import { narrowItem } from "@/features/drive/lib/item"
@@ -131,15 +131,15 @@ describe("offline-disabled controls surface a title explaining why", () => {
 		expect(getByRoleOffline("button", { name: "Add contact" }).getAttribute("title")).toBe(OFFLINE_TITLE)
 	})
 
-	it("GdprExportCard (settings mutation): the export button's title reflects live online/offline state", () => {
+	it("GdprExportRow (settings mutation): the export button's title reflects live online/offline state", () => {
 		onlineManager.setOnline(true)
-		const { getByRole } = render(createElement(GdprExportCard))
+		const { getByRole } = render(createElement(GdprExportRow))
 
 		expect(getByRole("button", { name: "Export data" }).getAttribute("title")).toBeNull()
 
 		cleanup()
 		onlineManager.setOnline(false)
-		const { getByRole: getByRoleOffline } = render(createElement(GdprExportCard))
+		const { getByRole: getByRoleOffline } = render(createElement(GdprExportRow))
 
 		expect(getByRoleOffline("button", { name: "Export data" }).getAttribute("title")).toBe(OFFLINE_TITLE)
 	})

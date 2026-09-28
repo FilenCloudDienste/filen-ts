@@ -7,18 +7,18 @@ import { asErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { referralLink, referralEarnedStorage } from "@/features/settings/lib/billing"
 import type { AccountQuerySuccess } from "@/queries/account"
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
+import { SettingsRow } from "@/features/settings/components/settingsLayout"
 
-interface ReferralCardProps {
+interface ReferralRowProps {
 	accountQuery: AccountQuerySuccess
 }
 
 // Copy-link + earned-storage/referral-count read, mirroring old-web's invite card exactly (same link
 // shape, same earned-storage cap — billing.ts's referralEarnedStorage). No management here: there is
-// no sdk-rs op to redeem/withdraw against, this card is purely a read + a copy button.
-function ReferralCard({ accountQuery }: ReferralCardProps) {
+// no sdk-rs op to redeem/withdraw against, this row is purely a read + a copy button.
+function ReferralRow({ accountQuery }: ReferralRowProps) {
 	const { t } = useTranslation("settings")
 	const { refId, refStorage, refLimit, referStorage, referCount } = accountQuery.data
 	const [copied, setCopied] = useState(false)
@@ -39,15 +39,15 @@ function ReferralCard({ accountQuery }: ReferralCardProps) {
 	}
 
 	return (
-		<Card>
-			<CardHeader>
-				<CardTitle>{t("settingsBillingReferralTitle")}</CardTitle>
-				<CardDescription>
-					{t("settingsBillingReferralEarned", { earned: formatBytes(Number(earned)), count: Number(referCount) })}
-				</CardDescription>
-			</CardHeader>
-			<CardContent className="flex gap-2">
+		<SettingsRow
+			label={t("settingsBillingReferralLinkLabel")}
+			description={t("settingsBillingReferralEarned", { earned: formatBytes(Number(earned)), count: Number(referCount) })}
+			htmlFor="referral-link"
+			stacked
+		>
+			<div className="flex gap-2">
 				<Input
+					id="referral-link"
 					readOnly
 					value={link}
 					onFocus={e => {
@@ -64,9 +64,9 @@ function ReferralCard({ accountQuery }: ReferralCardProps) {
 					{copied ? <CheckIcon data-icon="inline-start" /> : <CopyIcon data-icon="inline-start" />}
 					{t("settingsBillingReferralCopy")}
 				</Button>
-			</CardContent>
-		</Card>
+			</div>
+		</SettingsRow>
 	)
 }
 
-export { ReferralCard }
+export { ReferralRow }

@@ -1,7 +1,8 @@
 // English source catalog — "settings" namespace: the settings sidebar (Account / Security /
 // Appearance / Events / Billing sections) plus the Account and Appearance section content. The
-// existing "auth" namespace keeps the Security section's copy unchanged (that page ships as-is);
-// this namespace never duplicates those keys. Same typed-catalog rules as every other namespace:
+// "auth" namespace keeps the Security section's own copy (forms, dialogs, row titles it already had);
+// this namespace only adds that page's group titles and row-layout labels, and never duplicates
+// those keys. Same typed-catalog rules as every other namespace:
 // flat `as const` object, camelCase keys, no literal '.' or ':' (real i18next namespaces,
 // keySeparator/nsSeparator both ON).
 export const settings = {
@@ -23,30 +24,42 @@ export const settings = {
 	/** Account page — error-state title, mirrors "auth:securityLoadError" for its own section */
 	settingsAccountLoadError: "Couldn't load your account",
 
+	// ── Page layout: group titles and shared row actions ──────────────────────
+	/** Group titles — small uppercase labels above each panel of rows */
+	settingsGroupProfile: "Profile",
+	settingsGroupYourData: "Your data",
+	settingsGroupGeneral: "General",
+	settingsGroupSignIn: "Sign-in",
+	settingsGroupRecovery: "Recovery",
+	settingsGroupPlan: "Plan",
+	/** Account and Security pages — the irreversible, account-wide actions */
+	settingsGroupDangerZone: "Danger zone",
+	/** Row button that opens a dialog to change the value the row shows (email, password); its accessible name is the specific action */
+	settingsRowChangeAction: "Change…",
+	/** Row button that opens a dialog to edit several fields at once */
+	settingsRowEditAction: "Edit…",
+
 	// ── Account: avatar ──────────────────────────────────────────────────────
-	settingsAvatarTitle: "Profile picture",
-	settingsAvatarDescription: "Shown next to your name across Filen",
-	/** Avatar card — button that opens the file picker (also relabeled while an upload is in flight) */
+	/** Profile header — accessible name of the avatar, which is itself the button that opens the file picker */
 	settingsAvatarChangeAction: "Change picture",
 	settingsAvatarUploadSuccess: "Your profile picture has been updated.",
-	/** Avatar card — rejected file type (only JPEG/PNG accepted, mirrors the file input's own `accept`) */
+	/** Avatar upload — rejected file type (only JPEG/PNG accepted, mirrors the file input's own `accept`) */
 	settingsAvatarInvalidType: "Please choose a JPEG or PNG image.",
-	/** Avatar card — rejected file size; {{max}} is a pre-formatted byte size (e.g. "2 MB") */
+	/** Avatar upload — rejected file size; {{max}} is a pre-formatted byte size (e.g. "2 MB") */
 	settingsAvatarTooLarge: "Images must be smaller than {{max}}.",
 
 	// ── Account: email ───────────────────────────────────────────────────────
 	settingsEmailTitle: "Email address",
 	settingsEmailDescription: "The address you sign in with",
-	settingsEmailCurrentLabel: "Current email",
 	settingsChangeEmailAction: "Change email",
 	settingsChangeEmailNew: "New email",
 	settingsChangeEmailConfirm: "Confirm new email",
 	settingsChangeEmailPassword: "Password",
 	settingsChangeEmailInvalid: "Enter a valid email address.",
 	settingsChangeEmailMismatch: "The email addresses don't match.",
-	/** Change-email card — success toast; the account query is refetched afterward so the displayed email updates */
+	/** Change-email dialog — success toast; the account query is refetched afterward so the displayed email updates */
 	settingsChangeEmailSuccess: "Your email address has been changed. Please sign in again.",
-	/** Change-email card — mirrors "auth:changePasswordPersistFailed": the mutation succeeded server-side but the local session could not be re-saved */
+	/** Change-email dialog — mirrors "auth:changePasswordPersistFailed": the mutation succeeded server-side but the local session could not be re-saved */
 	settingsChangeEmailPersistFailed:
 		"Your email address was changed, but the new session could not be saved on this device. Please sign in again.",
 
@@ -60,8 +73,8 @@ export const settings = {
 	// ── Account: personal information ────────────────────────────────────────
 	settingsPersonalTitle: "Personal information",
 	settingsPersonalDescription: "Optional billing/invoice details — never shown to other users",
-	settingsPersonalExpand: "Show fields",
-	settingsPersonalCollapse: "Hide fields",
+	/** Accessible name of the personal-information row's "Edit…" button */
+	settingsPersonalEditAction: "Edit personal information",
 	settingsPersonalFirstName: "First name",
 	settingsPersonalLastName: "Last name",
 	settingsPersonalCompanyName: "Company name",
@@ -78,11 +91,27 @@ export const settings = {
 
 	// ── Account: storage breakdown ───────────────────────────────────────────
 	settingsStorageTitle: "Storage",
-	/** Storage breakdown card — {{used}}/{{total}} are pre-formatted byte sizes */
+	/** Storage breakdown row and profile header — {{used}}/{{total}} are pre-formatted byte sizes */
 	settingsStorageUsage: "{{used}} of {{total}} used",
 	settingsStorageFiles: "Files",
 	settingsStorageVersioned: "Versioned files",
 	settingsStorageFree: "Free",
+
+	// ── Security: row-layout labels (the rest of the page's copy lives in "auth") ──
+	/** Password row title; the row's button opens the "auth:changePasswordTitle" dialog */
+	settingsPasswordRowTitle: "Password",
+	/** Two-factor row — current state, shown beside the row's button */
+	settingsTwoFactorOn: "On",
+	settingsTwoFactorOff: "Off",
+	/** Two-factor row button that opens the setup dialog (QR code + secret) */
+	settingsTwoFactorSetUpAction: "Set up…",
+	settingsTwoFactorSetUpDescription:
+		"Scan this QR code with your authenticator app, or copy the secret into it, then continue to enter the code it shows.",
+	/** Setup dialog button — closes it and opens the code prompt that actually enables two-factor */
+	settingsTwoFactorContinue: "Continue",
+	settingsMasterKeysRowTitle: "Master keys",
+	/** Master-keys row button; its accessible name is "auth:exportMasterKeysAction" */
+	settingsMasterKeysExportAction: "Export…",
 
 	// ── Account: GDPR export ─────────────────────────────────────────────────
 	settingsGdprTitle: "Export your data",
@@ -131,7 +160,6 @@ export const settings = {
 
 	// ── Account: preferences (versioning / login alerts) ────────────────────
 	settingsPreferencesTitle: "Preferences",
-	settingsPreferencesDescription: "Safe, reversible account settings",
 	settingsVersioningTitle: "File versioning",
 	settingsVersioningDescription: "Keep previous versions of files when they're overwritten",
 	settingsLoginAlertsTitle: "Login alerts",
@@ -141,14 +169,14 @@ export const settings = {
 	/** Shared across both bulk-delete TypedConfirmDialogs — the input field's label */
 	settingsTypedConfirmLabel: "Confirmation phrase",
 	settingsDeleteAllVersionsTitle: "Delete all versioned files",
-	/** Delete-versions card description; {{count}} is the number of versioned files, {{size}} a pre-formatted byte size */
+	/** Delete-versions row description; {{count}} is the number of versioned files, {{size}} a pre-formatted byte size */
 	settingsDeleteAllVersionsDescription: "Permanently delete {{count}} versioned file(s), freeing up {{size}}. This cannot be undone.",
 	settingsDeleteAllVersionsSubmit: "Delete versioned files",
 	/** {{phrase}} interpolates DELETE_ALL_VERSIONS_PHRASE (dangerPhrases.ts) */
 	settingsDeleteAllVersionsConfirmBody: 'Type "{{phrase}}" below to permanently delete every versioned file. This cannot be undone.',
 	settingsDeleteAllVersionsSuccess: "All versioned files have been deleted.",
 	settingsDeleteAllItemsTitle: "Delete all files and directories",
-	/** Delete-everything card description; {{size}} is a pre-formatted byte size */
+	/** Delete-everything row description; {{size}} is a pre-formatted byte size */
 	settingsDeleteAllItemsDescription:
 		"Permanently delete every file and directory in your account ({{size}} total). This cannot be undone.",
 	settingsDeleteAllItemsSubmit: "Delete everything",
@@ -247,13 +275,14 @@ export const settings = {
 	settingsBillingStatusCancelled: "Cancelled",
 	settingsBillingStatusPending: "Pending",
 	settingsBillingReferralTitle: "Invite friends",
+	settingsBillingReferralLinkLabel: "Your referral link",
 	/** {{earned}} is a pre-formatted byte size, {{count}} the number of people referred */
 	settingsBillingReferralEarned: "{{earned}} earned from {{count}} referral(s)",
 	settingsBillingReferralCopy: "Copy link",
 	settingsBillingReferralCopied: "Referral link copied to clipboard.",
 
 	// ── Advanced: web transfer limits ────────────────────────────────────────
-	/** Advanced card — scoped explicitly to THIS browser tab's own uploads/downloads, since the same
+	/** Advanced group — scoped explicitly to THIS browser tab's own uploads/downloads, since the same
 	 *  app also serves as the Electron desktop frontend, whose future file-sync/network-drive engine
 	 *  will carry its own separate bandwidth/concurrency settings */
 	settingsAdvancedTransferTitle: "Web transfer performance",
@@ -289,9 +318,9 @@ export const settings = {
 	settingsAboutPrivacyPolicy: "Privacy Policy",
 
 	// ── Advanced: open source licenses ────────────────────────────────────────
-	/** Advanced settings — card title for the third-party attribution surface */
+	/** Advanced settings — row title for the third-party attribution surface */
 	settingsNoticesTitle: "Open source licenses",
-	/** Advanced settings — card body explaining what the list contains */
+	/** Advanced settings — row description explaining what the list contains */
 	settingsNoticesDescription: "Filen is built on open source software. These are the packages it includes, with their licenses.",
 	/** Advanced settings — button opening the licenses dialog */
 	settingsNoticesOpen: "View licenses",

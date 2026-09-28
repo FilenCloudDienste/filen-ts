@@ -11,12 +11,12 @@ import {
 	type DeleteAccountConfirmStage,
 	type DeleteAccountStage
 } from "@/features/settings/components/security/deleteAccount.logic"
-import { Card, CardFooter, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { InputDialog } from "@/components/dialogs/inputDialog"
+import { SettingsRow } from "@/features/settings/components/settingsLayout"
 
-interface DeleteAccountCardProps {
+interface DeleteAccountRowProps {
 	accountQuery: AccountQuerySuccess
 }
 
@@ -24,11 +24,11 @@ interface DeleteAccountCardProps {
 // a code prompt (advanceDeleteAccountChain, deleteAccount.logic.ts owns the pure transition).
 // deleteAccount() only REQUESTS deletion: the server emails a confirmation link and actual deletion
 // completes on filen.io (homepage-owned, mirroring how registration confirmation and reset
-// completion are also email-link-driven flows this app does not own a route for). This card never
+// completion are also email-link-driven flows this app does not own a route for). This row never
 // performs any further client-side action once the request lands. This screen is verified by unit
 // tests + a static render check only — the deletion request is NEVER exercised against a live
 // account.
-function DeleteAccountCard({ accountQuery }: DeleteAccountCardProps) {
+function DeleteAccountRow({ accountQuery }: DeleteAccountRowProps) {
 	const { t } = useTranslation(["auth", "common"])
 	const isOnline = useIsOnline()
 	const { twoFactorEnabled } = accountQuery.data
@@ -64,24 +64,22 @@ function DeleteAccountCard({ accountQuery }: DeleteAccountCardProps) {
 	}
 
 	return (
-		<Card>
-			<CardHeader>
-				<CardTitle>{t("deleteAccountTitle")}</CardTitle>
-				<CardDescription>{t("deleteAccountDescription")}</CardDescription>
-			</CardHeader>
-			<CardFooter>
-				<Button
-					type="button"
-					variant="destructive"
-					disabled={!isOnline}
-					title={!isOnline ? t("common:offlineActionDisabled") : undefined}
-					onClick={() => {
-						setChainStage("stage1")
-					}}
-				>
-					{t("deleteAccountSubmit")}
-				</Button>
-			</CardFooter>
+		<SettingsRow
+			label={t("deleteAccountTitle")}
+			description={t("deleteAccountDescription")}
+			destructive
+		>
+			<Button
+				type="button"
+				variant="destructive"
+				disabled={!isOnline}
+				title={!isOnline ? t("common:offlineActionDisabled") : undefined}
+				onClick={() => {
+					setChainStage("stage1")
+				}}
+			>
+				{t("deleteAccountSubmit")}
+			</Button>
 
 			<ConfirmDialog
 				open={chainStage === "stage1"}
@@ -137,8 +135,8 @@ function DeleteAccountCard({ accountQuery }: DeleteAccountCardProps) {
 					void runDelete(code)
 				}}
 			/>
-		</Card>
+		</SettingsRow>
 	)
 }
 
-export { DeleteAccountCard }
+export { DeleteAccountRow }

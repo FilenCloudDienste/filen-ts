@@ -8,22 +8,22 @@ import { errorLabel } from "@/lib/i18n/errorLabel"
 import { DELETE_ALL_VERSIONS_PHRASE } from "@/features/settings/lib/dangerPhrases"
 import { useIsOnline } from "@/lib/useIsOnline"
 import type { AccountQuerySuccess } from "@/queries/account"
-import { Card, CardFooter, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { TypedConfirmDialog } from "@/components/dialogs/typedConfirmDialog"
+import { SettingsRow } from "@/features/settings/components/settingsLayout"
 
-interface DeleteAllVersionsCardProps {
+interface DeleteAllVersionsRowProps {
 	accountQuery: AccountQuerySuccess
 }
 
 // The exact same TypedConfirmDialog primitive drive's emptyTrashButton already uses for an
-// equally severe whole-drive-scale destructive op (rather than DeleteAccountCard's plain double
-// ConfirmDialog chain — that card's two-stage shape exists for its 2FA-code branch, which this
+// equally severe whole-drive-scale destructive op (rather than DeleteAccountRow's plain double
+// ConfirmDialog chain — that row's two-stage shape exists for its 2FA-code branch, which this
 // single-stage op has no equivalent of). `isArmed`'s exact-match gate is what makes "type a wrong
 // phrase, the button stays disabled" true — verified once in typedConfirmDialog.test.ts, not
 // re-derived here. deleteAllVersions() is NEVER e2e-invoked — it would irreversibly wipe the
-// shared account's version history — this card is unit/render-only in this repo's own test suite.
-function DeleteAllVersionsCard({ accountQuery }: DeleteAllVersionsCardProps) {
+// shared account's version history — this row is unit/render-only in this repo's own test suite.
+function DeleteAllVersionsRow({ accountQuery }: DeleteAllVersionsRowProps) {
 	const { t } = useTranslation(["settings", "common"])
 	const isOnline = useIsOnline()
 	const { versionedFiles, versionedStorage } = accountQuery.data
@@ -45,29 +45,25 @@ function DeleteAllVersionsCard({ accountQuery }: DeleteAllVersionsCardProps) {
 	}
 
 	return (
-		<Card>
-			<CardHeader>
-				<CardTitle>{t("settingsDeleteAllVersionsTitle")}</CardTitle>
-				<CardDescription>
-					{t("settingsDeleteAllVersionsDescription", {
-						count: Number(versionedFiles),
-						size: formatBytes(Number(versionedStorage))
-					})}
-				</CardDescription>
-			</CardHeader>
-			<CardFooter>
-				<Button
-					type="button"
-					variant="destructive"
-					disabled={!isOnline}
-					title={!isOnline ? t("common:offlineActionDisabled") : undefined}
-					onClick={() => {
-						setOpen(true)
-					}}
-				>
-					{t("settingsDeleteAllVersionsSubmit")}
-				</Button>
-			</CardFooter>
+		<SettingsRow
+			label={t("settingsDeleteAllVersionsTitle")}
+			description={t("settingsDeleteAllVersionsDescription", {
+				count: Number(versionedFiles),
+				size: formatBytes(Number(versionedStorage))
+			})}
+			destructive
+		>
+			<Button
+				type="button"
+				variant="destructive"
+				disabled={!isOnline}
+				title={!isOnline ? t("common:offlineActionDisabled") : undefined}
+				onClick={() => {
+					setOpen(true)
+				}}
+			>
+				{t("settingsDeleteAllVersionsSubmit")}
+			</Button>
 
 			<TypedConfirmDialog
 				open={open}
@@ -88,8 +84,8 @@ function DeleteAllVersionsCard({ accountQuery }: DeleteAllVersionsCardProps) {
 					void handleConfirm()
 				}}
 			/>
-		</Card>
+		</SettingsRow>
 	)
 }
 
-export { DeleteAllVersionsCard }
+export { DeleteAllVersionsRow }

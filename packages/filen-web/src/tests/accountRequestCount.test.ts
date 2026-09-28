@@ -35,6 +35,7 @@ vi.mock("@/features/settings/lib/downloadTextFile", () => ({ downloadTextFile: v
 import "@/lib/i18n"
 import { settings as EN_SETTINGS } from "@/locales/en/settings"
 import { auth as EN_AUTH } from "@/locales/en/auth"
+import { common as EN_COMMON } from "@/locales/en/common"
 import { queryClient } from "@/queries/client"
 import {
 	ACCOUNT_QUERY_KEY,
@@ -44,10 +45,10 @@ import {
 	useAccountQuery,
 	type AccountQuerySuccess
 } from "@/queries/account"
-import { NicknameCard } from "@/features/settings/components/account/nicknameCard"
-import { PersonalInfoCard } from "@/features/settings/components/account/personalInfoCard"
-import { AccountPreferencesCard } from "@/features/settings/components/account/accountPreferencesCard"
-import { ExportMasterKeysCard } from "@/features/settings/components/security/exportMasterKeys"
+import { NicknameRow } from "@/features/settings/components/account/nicknameRow"
+import { PersonalInfoRow } from "@/features/settings/components/account/personalInfoRow"
+import { AccountPreferencesRows } from "@/features/settings/components/account/accountPreferencesRows"
+import { ExportMasterKeysRow } from "@/features/settings/components/security/exportMasterKeys"
 import { handleDriveEvent } from "@/features/drive/lib/socketHandlers"
 
 const EMPTY_PERSONAL: UserPersonalUpdateInfo = {
@@ -145,12 +146,12 @@ function focus(): void {
 	})
 }
 
-// The settings route's own shape: one page-level useAccountQuery gating the card on success.
-function renderCard(card: ComponentType<{ accountQuery: AccountQuerySuccess }>) {
+// The settings route's own shape: one page-level useAccountQuery gating the row on success.
+function renderRow(row: ComponentType<{ accountQuery: AccountQuerySuccess }>) {
 	function Page() {
 		const accountQuery = useAccountQuery()
 
-		return accountQuery.status === "success" ? createElement(card, { accountQuery }) : null
+		return accountQuery.status === "success" ? createElement(row, { accountQuery }) : null
 	}
 
 	return render(createElement(Page), { wrapper })
@@ -270,7 +271,7 @@ describe("account request counts", () => {
 
 describe("account writes patch instead of reading back", () => {
 	it("saving a nickname patches it in", async () => {
-		renderCard(NicknameCard)
+		renderRow(NicknameRow)
 		await drain()
 
 		fireEvent.change(screen.getByLabelText(EN_SETTINGS.settingsNicknameTitle), { target: { value: "  fresh  " } })
@@ -283,7 +284,7 @@ describe("account writes patch instead of reading back", () => {
 	})
 
 	it("clearing the nickname patches it out", async () => {
-		renderCard(NicknameCard)
+		renderRow(NicknameRow)
 		await drain()
 
 		fireEvent.change(screen.getByLabelText(EN_SETTINGS.settingsNicknameTitle), { target: { value: " " } })
@@ -297,7 +298,7 @@ describe("account writes patch instead of reading back", () => {
 
 	it("a failed nickname save leaves the account untouched", async () => {
 		setNickname.mockRejectedValue({ species: "plain", message: "boom", label: "boom" })
-		renderCard(NicknameCard)
+		renderRow(NicknameRow)
 		await drain()
 
 		fireEvent.change(screen.getByLabelText(EN_SETTINGS.settingsNicknameTitle), { target: { value: "fresh" } })
@@ -308,26 +309,51 @@ describe("account writes patch instead of reading back", () => {
 		expect(reads()).toBe(1)
 	})
 
-	// The server keeps a field sent blank, so the cache and the form both keep "Old City".
+	// The server keeps a field sent blank, so the cache and the reopened form both keep "Old City".
 	it("saving personal info patches only the fields it sent and shows a blank one as the value it kept", async () => {
-		renderCard(PersonalInfoCard)
+		renderRow(PersonalInfoRow)
 		await drain()
 
-		fireEvent.click(screen.getByRole("button", { name: EN_SETTINGS.settingsPersonalExpand }))
-		fireEvent.change(screen.getByLabelText(EN_SETTINGS.settingsPersonalFirstName), { target: { value: " Ada " } })
-		fireEvent.change(screen.getByLabelText(EN_SETTINGS.settingsPersonalCity), { target: { value: "" } })
-		fireEvent.click(screen.getByRole("button", { name: EN_SETTINGS.settingsPersonalSave }))
+		fireEvent.click(screen.getByRole("button", { name: EN_SETTINGS.settingsPersonalEditAction }))
+		const dialog = await screen.findByRole("dialog")
+		fireEvent.change(within(dialog).getByLabelText(EN_SETTINGS.settingsPersonalFirstName), { target: { value: " Ada " } })
+		fireEvent.change(within(dialog).getByLabelText(EN_SETTINGS.settingsPersonalCity), { target: { value: "" } })
+		fireEvent.click(within(dialog).getByRole("button", { name: EN_SETTINGS.settingsPersonalSave }))
 		await drain()
 
 		expect(updatePersonalInfo).toHaveBeenCalledExactlyOnceWith({ ...EMPTY_PERSONAL, firstName: "Ada" })
 		expect(cached()?.personal).toEqual({ ...EMPTY_PERSONAL, firstName: "Ada", city: "Old City" })
-		expect(screen.getByLabelText<HTMLInputElement>(EN_SETTINGS.settingsPersonalCity).value).toBe("Old City")
-		expect(screen.getByRole("button", { name: EN_SETTINGS.settingsPersonalSave })).toHaveProperty("disabled", true)
+		await waitFor(() => {
+			expect(screen.queryByRole("dialog")).toBeNull()
+		})
+
+		fireEvent.click(screen.getByRole("button", { name: EN_SETTINGS.settingsPersonalEditAction }))
+		const reopened = await screen.findByRole("dialog")
+		expect(within(reopened).getByLabelText<HTMLInputElement>(EN_SETTINGS.settingsPersonalCity).value).toBe("Old City")
+		expect(within(reopened).getByRole("button", { name: EN_SETTINGS.settingsPersonalSave })).toHaveProperty("disabled", true)
 		expect(reads()).toBe(1)
 	})
 
+	it("dismissing the personal info dialog drops the unsaved edit", async () => {
+		renderRow(PersonalInfoRow)
+		await drain()
+
+		fireEvent.click(screen.getByRole("button", { name: EN_SETTINGS.settingsPersonalEditAction }))
+		const dialog = await screen.findByRole("dialog")
+		fireEvent.change(within(dialog).getByLabelText(EN_SETTINGS.settingsPersonalCity), { target: { value: "Draft City" } })
+		fireEvent.click(within(dialog).getByRole("button", { name: EN_COMMON.cancel }))
+		await waitFor(() => {
+			expect(screen.queryByRole("dialog")).toBeNull()
+		})
+
+		fireEvent.click(screen.getByRole("button", { name: EN_SETTINGS.settingsPersonalEditAction }))
+		const reopened = await screen.findByRole("dialog")
+		expect(within(reopened).getByLabelText<HTMLInputElement>(EN_SETTINGS.settingsPersonalCity).value).toBe("Old City")
+		expect(updatePersonalInfo).not.toHaveBeenCalled()
+	})
+
 	it("flipping versioning and login alerts patches each flag", async () => {
-		renderCard(AccountPreferencesCard)
+		renderRow(AccountPreferencesRows)
 		await drain()
 
 		fireEvent.click(screen.getByRole("switch", { name: EN_SETTINGS.settingsVersioningTitle }))
@@ -343,7 +369,7 @@ describe("account writes patch instead of reading back", () => {
 
 	it("a failed toggle leaves the flag untouched", async () => {
 		setVersioningEnabled.mockRejectedValue({ species: "plain", message: "boom", label: "boom" })
-		renderCard(AccountPreferencesCard)
+		renderRow(AccountPreferencesRows)
 		await drain()
 
 		fireEvent.click(screen.getByRole("switch", { name: EN_SETTINGS.settingsVersioningTitle }))
@@ -354,7 +380,7 @@ describe("account writes patch instead of reading back", () => {
 	})
 
 	it("exporting the master keys patches the exported flag", async () => {
-		renderCard(ExportMasterKeysCard)
+		renderRow(ExportMasterKeysRow)
 		await drain()
 
 		fireEvent.click(screen.getByRole("button", { name: EN_AUTH.exportMasterKeysAction }))
