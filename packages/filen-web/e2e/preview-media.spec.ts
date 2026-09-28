@@ -137,7 +137,11 @@ test("image/video/audio previews stream over the SW's inline route: range-seekab
 		videoEl.muted = true
 		videoEl.currentTime = Math.max(1, (videoEl.duration || 2) / 2)
 	})
-	await video.evaluate(el => (el as HTMLVideoElement).play())
+	// Not awaited: play() settles only once playback starts, so a stream that stalls would hold this
+	// step until the test's own timeout; the poll below bounds it instead.
+	await video.evaluate(el => {
+		void (el as HTMLVideoElement).play().catch(() => undefined)
+	})
 	await expect.poll(() => video.evaluate(el => !(el as HTMLVideoElement).paused), { timeout: 15_000 }).toBe(true)
 
 	// ---- a focused native scrubber owns ArrowRight as a seek — the overlay's pager must not steal
