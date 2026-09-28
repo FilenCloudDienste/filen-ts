@@ -68,13 +68,23 @@ const TRASH_MENU_IDS: ActionId[] = ["restore", "deletePermanently", "info"]
 // Bulk bar, plain drive-variant selection (bulkActionBar.test.ts's own "drive variant" case) — no
 // color/versions id exists in the bulk builder at all, per-type or not.
 const BULK_MENU_IDS: ActionId[] = ["favorite", "move", "copy", "share", "download", "trash"]
+// Above an item's own actions: Open for anything that opens (a directory, a previewable file), then a
+// writable directory's New submenu and Paste. Those two are not item actions, so they resolve straight
+// from the catalog.
+const DIRECTORY_MENU_LABELS = [
+	labelFor("openDirectory"),
+	driveDict.driveNew,
+	driveDict.driveClipboardPaste,
+	...labelsFor(DIRECTORY_MENU_IDS)
+]
+const FILE_MENU_LABELS = [labelFor("openFile"), ...labelsFor(FILE_MENU_IDS)]
 
 test.describe.configure({ mode: "serial" })
 
-// Right-clicks `name`'s row, asserts the open context menu's menuitem sequence against `ids`, then
+// Right-clicks `name`'s row, asserts the open context menu's menuitem sequence against `labels`, then
 // closes it — one retried unit so a transient miss (row not yet settled after the previous step)
 // doesn't need its own bespoke retry.
-async function assertRowContextMenu(page: Page, listbox: Locator, name: string, ids: ActionId[]): Promise<void> {
+async function assertRowContextMenu(page: Page, listbox: Locator, name: string, labels: string[]): Promise<void> {
 	const row = listbox.getByRole("option", { name })
 	await expect(row).toBeVisible()
 	await row.click({ button: "right" })
@@ -82,7 +92,7 @@ async function assertRowContextMenu(page: Page, listbox: Locator, name: string, 
 	const menu = page.getByRole("menu")
 	await expect(menu).toBeVisible()
 	// Array form is a whole-string, in-order match per element — no "exact" option needed/available.
-	await expect(menu.getByRole("menuitem")).toHaveText(labelsFor(ids))
+	await expect(menu.getByRole("menuitem")).toHaveText(labels)
 
 	await page.keyboard.press("Escape")
 	await expect(menu).toHaveCount(0)
@@ -146,8 +156,8 @@ test.describe("context menus", () => {
 
 			// 1. Per-type context-menu completeness, right-click only — the RENDERED menu, not the
 			// descriptor list a unit test already trusts.
-			await assertRowContextMenu(page, listbox, dirName, DIRECTORY_MENU_IDS)
-			await assertRowContextMenu(page, listbox, fileName, FILE_MENU_IDS)
+			await assertRowContextMenu(page, listbox, dirName, DIRECTORY_MENU_LABELS)
+			await assertRowContextMenu(page, listbox, fileName, FILE_MENU_LABELS)
 
 			// 1b. This e2e account is free-tier (public links are a paid feature) — a REAL, live proof
 			// that the link dialog's premium gate renders instead of the link form (link CREATION itself
@@ -203,13 +213,13 @@ test.describe("context menus", () => {
 
 			// Collapse the selection back to ONE row (a plain click replaces the selection), so the OTHER
 			// row is now unselected — right-clicking it must retarget the selection to it and open the
-			// single-item menu. FILE_MENU_IDS is the exact set the per-type leg above already asserted for
+			// single-item menu. FILE_MENU_LABELS is the exact set the per-type leg above already asserted for
 			// this same row, so a failed retarget would show up as the bulk set instead.
 			await dirRow.click()
 			await fileRow.click({ button: "right" })
 			const retargetedMenu = page.getByRole("menu")
 			await expect(retargetedMenu).toBeVisible()
-			await expect(retargetedMenu.getByRole("menuitem")).toHaveText(labelsFor(FILE_MENU_IDS))
+			await expect(retargetedMenu.getByRole("menuitem")).toHaveText(FILE_MENU_LABELS)
 			await page.keyboard.press("Escape")
 			await expect(retargetedMenu).toHaveCount(0)
 
@@ -268,7 +278,7 @@ test.describe("context menus", () => {
 			const trashedDirRow = trashListing.listbox.getByRole("option", { name: dirName })
 			await expect(trashedDirRow).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
 
-			await assertRowContextMenu(page, trashListing.listbox, dirName, TRASH_MENU_IDS)
+			await assertRowContextMenu(page, trashListing.listbox, dirName, labelsFor(TRASH_MENU_IDS))
 
 			await trashedDirRow.click({ button: "right" })
 			const restoreMenu = page.getByRole("menu")

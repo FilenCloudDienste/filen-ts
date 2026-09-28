@@ -27,10 +27,7 @@ async function expandInTree(page: Page, name: string): Promise<void> {
 }
 
 test.describe("sidebar directory tree", () => {
-	test("a tree node's context menu offers its listing row's entries under the destination entries, and opens it", async ({
-		page,
-		injectedSession
-	}) => {
+	test("a tree node's context menu offers exactly its listing row's entries, and opens it", async ({ page, injectedSession }) => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		const runId = crypto.randomUUID()
@@ -44,7 +41,7 @@ test.describe("sidebar directory tree", () => {
 
 			await createDirectoryViaDialog(page, childName, listbox)
 
-			// The listing row's own menu, as the reference the tree node's must end with.
+			// The listing row's own menu, as the reference the tree node's must match.
 			await listbox.getByRole("option", { name: childName }).click({ button: "right" })
 			const rowMenu = page.getByRole("menu")
 			await expect(rowMenu).toBeVisible()
@@ -60,8 +57,10 @@ test.describe("sidebar directory tree", () => {
 			const menu = page.getByRole("menu")
 			await expect(menu).toBeVisible()
 			const entries = await menu.getByRole("menuitem").allTextContents()
-			expect(entries.slice(0, 5)).toEqual(["Open", "New directory", "Upload files", "Upload directory", "New text file"])
-			expect(entries.slice(-rowEntries.length)).toEqual(rowEntries)
+			// The one difference is Paste's shortcut badge: the tree's own mod+v pastes into the focused node,
+			// while the listing's pastes into the directory on screen rather than the row.
+			expect(entries.slice(0, 3).map(label => (label.startsWith("Paste") ? "Paste" : label))).toEqual(["Open", "New", "Paste"])
+			expect(entries.map(label => (label.startsWith("Paste") ? "Paste" : label))).toEqual(rowEntries)
 
 			await menu.getByRole("menuitem", { name: "Open", exact: true }).click()
 			await expect(page.getByRole("navigation", { name: "Breadcrumb" }).getByText(childName, { exact: true })).toBeVisible()
