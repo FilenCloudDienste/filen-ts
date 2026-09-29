@@ -11,8 +11,8 @@ import { useAccountQuery } from "@/queries/account"
 import { useContactsQuery } from "@/features/contacts/queries/contacts"
 import { toggleParticipantBlocked } from "@/features/contacts/lib/actions"
 import { ContactPickerList } from "@/features/contacts/components/contactPickerList"
-import { contactDisplayName, deriveBlockedUsers } from "@filen/shared"
-import { togglePickerContact, resolveSelectedContacts } from "@/features/contacts/lib/contactPicker.logic"
+import { contactDisplayName, deriveBlockedUsers, toggleInSet } from "@filen/shared"
+import { resolveSelectedContacts } from "@/features/contacts/lib/contactPicker.logic"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { plainErrorDTO } from "@/lib/sdk/errors"
 import { useIsOnline } from "@/lib/useIsOnline"
@@ -244,7 +244,7 @@ export function ParticipantsDialog({ note: initialNote, onClose }: ParticipantsD
 						onFilterChange={setFilter}
 						selected={selected}
 						onToggle={uuid => {
-							setSelected(prev => togglePickerContact(prev, uuid))
+							setSelected(prev => toggleInSet(prev, uuid))
 						}}
 						ariaLabel={t("common:participantsAddDialogTitle")}
 						emptyTitle={t("common:participantsAddEmpty")}

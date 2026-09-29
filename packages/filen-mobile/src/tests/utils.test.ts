@@ -168,7 +168,6 @@ vi.mock("@/constants", () => {
 })
 
 import {
-	sanitizeFileName,
 	normalizeModificationTimestampForComparison,
 	resolveMimeType,
 	convertBigInts
@@ -180,113 +179,6 @@ import { getPreviewType } from "@/lib/previewType"
 import { extractLinks, trimUnbalanced, safeParseUrl } from "@/lib/linkParser"
 import { unwrapSdkError, isNetworkClassError } from "@/lib/sdkErrors"
 import { createCompositeAbortSignal, PauseSignal, createCompositePauseSignal } from "@/lib/signals"
-
-// ---------------------------------------------------------------------------
-// sanitizeFileName
-// ---------------------------------------------------------------------------
-
-describe("sanitizeFileName", () => {
-	it("returns 'file' for empty string", () => {
-		expect(sanitizeFileName("")).toBe("file")
-	})
-
-	it("returns 'file' for strings of only dots", () => {
-		expect(sanitizeFileName("...")).toBe("file")
-	})
-
-	it("returns 'file' for strings of only spaces", () => {
-		expect(sanitizeFileName("   ")).toBe("file")
-	})
-
-	it("returns 'file' for single dot", () => {
-		expect(sanitizeFileName(".")).toBe("file")
-	})
-
-	it("returns 'file' for double dot", () => {
-		expect(sanitizeFileName("..")).toBe("file")
-	})
-
-	it("strips leading dot from hidden file names", () => {
-		expect(sanitizeFileName(".hidden")).toBe("hidden")
-	})
-
-	it("replaces illegal characters with default replacement '_'", () => {
-		const result = sanitizeFileName('a/b:c<d>e"f\\g|h?i*j')
-		// All illegal chars replaced with _
-		expect(result).not.toMatch(/[/:?<>"\\|*]/)
-		expect(result).toBe("a_b_c_d_e_f_g_h_i_j")
-	})
-
-	it("respects custom replacement character", () => {
-		expect(sanitizeFileName("a/b:c", "-")).toBe("a-b-c")
-	})
-
-	it("removes control characters U+0000-U+001F", () => {
-		// Tab (U+0009), newline (U+000A), carriage return (U+000D) are control chars
-		// Control chars U+0000 and U+001F are removed (not replaced)
-		const withControl = "hel" + String.fromCharCode(0x01) + "lo"
-		expect(sanitizeFileName(withControl)).toBe("hello")
-	})
-
-	it("removes zero-width characters U+200B and U+FEFF", () => {
-		// Zero-width space and BOM should be stripped
-		const result = sanitizeFileName("​hello﻿")
-		expect(result).toBe("hello")
-	})
-
-	it("strips leading and trailing spaces: '  report  ' → 'report'", () => {
-		expect(sanitizeFileName("  report  ")).toBe("report")
-	})
-
-	it("strips leading and trailing dots: '.file.' → 'file'", () => {
-		expect(sanitizeFileName(".file.")).toBe("file")
-	})
-
-	it("collapses internal whitespace runs to replacement: 'a  b' → 'a_b'", () => {
-		expect(sanitizeFileName("a  b")).toBe("a_b")
-	})
-
-	it("passes through a filename exactly 255 UTF-8 bytes unchanged", () => {
-		// Build a 255-byte ASCII string
-		const name = "a".repeat(255)
-		expect(sanitizeFileName(name)).toBe(name)
-	})
-
-	it("truncates a filename over 255 bytes while preserving extension", () => {
-		// Build a 300-char ASCII base name + .pdf extension
-		const base = "a".repeat(300)
-		const result = sanitizeFileName(`${base}.pdf`)
-		const bytes = new TextEncoder().encode(result).length
-		expect(bytes).toBeLessThanOrEqual(255)
-		expect(result.endsWith(".pdf")).toBe(true)
-	})
-
-	it("does not treat extension longer than 10 chars as an extension during truncation", () => {
-		// Extension ".abcdefghijk" is 11 chars — over the 10-char limit, should NOT be preserved
-		const base = "a".repeat(300)
-		const result = sanitizeFileName(`${base}.abcdefghijk`)
-		const bytes = new TextEncoder().encode(result).length
-		expect(bytes).toBeLessThanOrEqual(255)
-		// Extension not preserved because it is too long
-		expect(result.endsWith(".abcdefghijk")).toBe(false)
-	})
-
-	it("counts multibyte CJK characters by bytes during truncation", () => {
-		// Each CJK character is 3 UTF-8 bytes; 90 of them = 270 bytes (> 255)
-		const name = "文".repeat(90)
-		const result = sanitizeFileName(name)
-		const bytes = new TextEncoder().encode(result).length
-		expect(bytes).toBeLessThanOrEqual(255)
-	})
-
-	it("NFC-normalizes decomposed form", () => {
-		// "é" as decomposed NFD (U+0065 U+0301) should become NFC "é" (U+00E9)
-		const decomposed = "é" // e + combining acute accent
-		const result = sanitizeFileName(decomposed)
-		// NFC normalization collapses the sequence to a single code point
-		expect(result).toBe("é")
-	})
-})
 
 // ---------------------------------------------------------------------------
 // normalizeFilePathForSdk

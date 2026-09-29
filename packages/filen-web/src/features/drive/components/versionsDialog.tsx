@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
-import { formatBytes } from "@filen/shared"
+import { formatBytes, toggleInSet } from "@filen/shared"
 import { CheckIcon, HistoryIcon, RotateCcwIcon, Trash2Icon } from "lucide-react"
 import type { FileVersion } from "@filen/sdk-rs"
 import { type FileItem, restoreVersion, deleteVersion, deleteVersions } from "@/features/drive/lib/actions"
@@ -96,17 +96,7 @@ export function VersionsDialog({ file, onClose }: VersionsDialogProps) {
 	}
 
 	function toggleVersionSelected(uuid: string): void {
-		setSelected(prev => {
-			const next = new Set(prev)
-
-			if (next.has(uuid)) {
-				next.delete(uuid)
-			} else {
-				next.add(uuid)
-			}
-
-			return next
-		})
+		setSelected(prev => toggleInSet(prev, uuid))
 	}
 
 	function toggleSelectAll(): void {

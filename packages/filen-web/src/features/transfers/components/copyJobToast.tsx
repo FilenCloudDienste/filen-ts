@@ -1,7 +1,15 @@
 import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import { ChevronRightIcon, PauseIcon, PlayIcon, RotateCcwIcon, XIcon } from "lucide-react"
-import { cn, copyJobPercent, copyJobRate, formatBytes, formatSecondsToMediaClock, isCopyJobRunning } from "@filen/shared"
+import {
+	cn,
+	copyJobPercent,
+	copyJobRate,
+	formatBytes,
+	formatBytesPerSecond,
+	formatSecondsToMediaClock,
+	isCopyJobRunning
+} from "@filen/shared"
 import { retryFailedCopy } from "@/features/drive/lib/copy"
 import { setTransferPaused } from "@/features/transfers/lib/control"
 import { useCopyJobsStore } from "@/features/transfers/store/useCopyJobsStore"
@@ -54,7 +62,7 @@ export function CopyJobToast({ jobId, onHeightChange, onDismiss, onRetried }: Co
 					total: formatBytes(job.totals.bytes)
 				})
 			: null,
-		rate === null ? null : t("transfersAggregateSpeed", { speed: formatBytes(rate.bytesPerSecond) }),
+		rate === null ? null : formatBytesPerSecond(rate.bytesPerSecond),
 		rate?.etaSeconds == null ? null : t("transfersCopyEta", { eta: formatSecondsToMediaClock(rate.etaSeconds) })
 	]
 		.filter(part => part !== null)

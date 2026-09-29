@@ -1,5 +1,5 @@
 import { type TFunction } from "i18next"
-import { bpsToReadable, copyJobPercent, copyJobRate } from "@filen/shared"
+import { copyJobPercent, copyJobRate, formatBytesPerSecond } from "@filen/shared"
 import type { CopyJob } from "@/features/copy/copyAdapter"
 import { getCopyJob } from "@/features/copy/store/useCopyJobs.store"
 import type { FinishedTransfer, Transfer } from "@/features/transfers/store/useTransfers.store"
@@ -60,7 +60,7 @@ export function copyRowStatus(job: CopyJob | undefined, rowPaused: boolean, t: T
 				done,
 				count,
 				percent: percentText,
-				speed: bpsToReadable(rate.bytesPerSecond)
+				speed: formatBytesPerSecond(rate.bytesPerSecond)
 			})
 		: t("copy_progress_files", {
 				done,

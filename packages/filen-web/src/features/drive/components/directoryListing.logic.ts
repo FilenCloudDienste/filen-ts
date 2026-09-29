@@ -1,4 +1,4 @@
-import { droppedIds, driveItemName, isBlocked, filterHiddenItems, type BlockedUsers } from "@filen/shared"
+import { driveItemName, isBlocked, filterHiddenItems, type BlockedUsers } from "@filen/shared"
 import { getSharerIdentity, type DriveItem } from "@/features/drive/lib/item"
 import { sortDriveItems, type DriveSortBy } from "@/features/drive/lib/sort"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
@@ -22,32 +22,6 @@ export function isVisibleSharedInItem(item: DriveItem, blocked: BlockedUsers): b
 // variant; every other variant's listing data passes straight through untouched.
 export function filterSharedInByBlocked(items: readonly DriveItem[], blocked: BlockedUsers): DriveItem[] {
 	return items.filter(item => isVisibleSharedInItem(item, blocked))
-}
-
-// Uuids of currently-selected items that just became blocked (e.g. the user blocked a contact
-// while viewing that contact's shared items) — directoryListing.tsx's stale-selection purge prunes
-// exactly these from useDriveStore so the bulk bar can never target a now-hidden item. An item whose
-// identity is unresolved is never included here (fail-open — mirrors isVisibleSharedInItem).
-export function staleBlockedSelectionUuids(selectedItems: readonly DriveItem[], blocked: BlockedUsers): string[] {
-	return droppedIds(
-		selectedItems,
-		item => isVisibleSharedInItem(item, blocked),
-		item => item.data.uuid
-	)
-}
-
-// Uuids of currently-selected items no longer present in a live item set — directoryListing.tsx's
-// search-result purge uses this to drop a selection ghost the instant a push drops a hit the user
-// had selected. Generic over its second argument (not search-specific) so a future caller could
-// reuse it for the normal listing's own, rarer refetch-drop case.
-export function staleSelectionUuids(selectedItems: readonly DriveItem[], liveItems: readonly DriveItem[]): string[] {
-	const liveUuids = new Set(liveItems.map(item => item.data.uuid))
-
-	return droppedIds(
-		selectedItems,
-		item => liveUuids.has(item.data.uuid),
-		item => item.data.uuid
-	)
 }
 
 // A background refetch failure must never blank a listing that still has cached items on screen —
@@ -94,8 +68,8 @@ export interface ListingDisplayResult {
 	// one hit is hidden.
 	resolvedCount: number
 	hiddenCount: number
-	// The uuids the hide filter removed — the listing purges these from the selection (see
-	// hiddenSelectionUuids), so a row nobody can see can never sit in the bulk bar's scope.
+	// The uuids the hide filter removed — directoryListing.tsx's hidden-selection purge drops these from
+	// the selection, so a row nobody can see can never sit in the bulk bar's scope.
 	hiddenUuids: string[]
 }
 
@@ -129,26 +103,6 @@ export function resolveListingDisplayItems(input: {
 	return { items, resolvedCount: resolved.length, hiddenCount: hiddenUuids.length, hiddenUuids }
 }
 
-// Uuids of currently-selected items the hide filter just removed from the display — directoryListing
-// .tsx purges exactly these from useDriveStore. Both ways a selected row becomes hidden are covered
-// by feeding it the display pipeline's own output: switching the preference on, and renaming a
-// selected row to a dot-name (the store still holds the pre-rename snapshot, so judging the selection
-// by its own names would miss it). The bulk bar and its count-only confirms would otherwise act on
-// rows the user cannot see or verify.
-export function hiddenSelectionUuids(selectedItems: readonly DriveItem[], hiddenUuids: readonly string[]): string[] {
-	if (hiddenUuids.length === 0) {
-		return []
-	}
-
-	const hidden = new Set(hiddenUuids)
-
-	return droppedIds(
-		selectedItems,
-		item => !hidden.has(item.data.uuid),
-		item => item.data.uuid
-	)
-}
-
 // Local-substring fallback for every non-"drive" variant (favorites/recents/trash/sharedIn/
 // sharedOut/links have no navigable subtree of their own for the cache-backed engine to search — see
 // directoryListing.tsx's own useDriveSearch(uuid, variant === "drive") gate) and for the move/import
@@ -177,8 +131,8 @@ export function filterDriveItemsByLocalSearch<T extends DriveItem>(items: readon
 // clipboard reads them — a rename/favorite/move/undecryptable-flip that landed after the item was selected
 // is picked up here instead of the object captured at click time (mirrors mobile's own rule that bulk
 // actions always operate against the freshest metadata). An item no longer present in `liveItems` is
-// passed through unchanged rather than dropped — dropping it is staleSelectionUuids' own job (the
-// ghost-selection purge effect), not this function's; this only ever refreshes fields, never prunes. The
+// passed through unchanged rather than dropped — dropping it is the ghost-selection purge
+// effect's job, not this function's; this only ever refreshes fields, never prunes. The
 // same array when no selected item changed, so a change to another row re-renders nothing it feeds; one
 // pass over the live rows, indexing only the selection, each selected row taking its first live match.
 export function reconcileSelectedItems<T extends DriveItem>(selectedItems: T[], liveItems: readonly T[]): T[] {

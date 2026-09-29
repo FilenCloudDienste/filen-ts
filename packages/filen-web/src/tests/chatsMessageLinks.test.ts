@@ -86,7 +86,7 @@ describe("fetchChatMessageLinks — Filen file links", () => {
 			{
 				url: FILE_LINK_URL,
 				kind: "filenLink",
-				link: { kind: "file", linkUuid: UUID, key: KEY_PLAINTEXT },
+				link: { type: "file", uuid: UUID, key: KEY_PLAINTEXT },
 				success: true,
 				data: { type: "file", name: "vacation.jpg", size: 2048n, previewCategory: "image", linkedFile }
 			}
@@ -109,7 +109,7 @@ describe("fetchChatMessageLinks — Filen file links", () => {
 		const results = await fetchChatMessageLinks([FILE_LINK_URL])
 
 		expect(results).toEqual([
-			{ url: FILE_LINK_URL, kind: "filenLink", link: { kind: "file", linkUuid: UUID, key: KEY_PLAINTEXT }, success: false }
+			{ url: FILE_LINK_URL, kind: "filenLink", link: { type: "file", uuid: UUID, key: KEY_PLAINTEXT }, success: false }
 		])
 	})
 
@@ -149,7 +149,7 @@ describe("fetchChatMessageLinks — Filen directory links", () => {
 			{
 				url: DIR_LINK_URL,
 				kind: "filenLink",
-				link: { kind: "directory", linkUuid: UUID, key: KEY_PLAINTEXT },
+				link: { type: "directory", uuid: UUID, key: KEY_PLAINTEXT },
 				success: true,
 				data: { type: "directory", name: "Shared Folder", timestamp: 1_650_000_000_000n }
 			}
@@ -178,7 +178,7 @@ describe("fetchChatMessageLinks — Filen directory links", () => {
 		const results = await fetchChatMessageLinks([DIR_LINK_URL])
 
 		expect(results).toEqual([
-			{ url: DIR_LINK_URL, kind: "filenLink", link: { kind: "directory", linkUuid: UUID, key: KEY_PLAINTEXT }, success: false }
+			{ url: DIR_LINK_URL, kind: "filenLink", link: { type: "directory", uuid: UUID, key: KEY_PLAINTEXT }, success: false }
 		])
 	})
 })
@@ -207,11 +207,11 @@ describe("fetchChatMessageLinks — classification passthrough", () => {
 		const results = await fetchChatMessageLinks([FILE_LINK_URL, "https://example.com/photo.jpg", DIR_LINK_URL])
 
 		expect(results).toEqual([
-			{ url: FILE_LINK_URL, kind: "filenLink", link: { kind: "file", linkUuid: UUID, key: KEY_PLAINTEXT }, success: false },
+			{ url: FILE_LINK_URL, kind: "filenLink", link: { type: "file", uuid: UUID, key: KEY_PLAINTEXT }, success: false },
 			{
 				url: DIR_LINK_URL,
 				kind: "filenLink",
-				link: { kind: "directory", linkUuid: UUID, key: KEY_PLAINTEXT },
+				link: { type: "directory", uuid: UUID, key: KEY_PLAINTEXT },
 				success: true,
 				data: { type: "directory", name: "Shared Folder", timestamp: 1n }
 			}

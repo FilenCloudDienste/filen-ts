@@ -29,15 +29,15 @@ describe("time", () => {
 			simpleDateNoTime = mod.simpleDateNoTime
 		})
 
-		it("converts seconds timestamp (< 4102444800) by multiplying by 1000", () => {
+		it("converts seconds timestamp (< 10000000000) by multiplying by 1000", () => {
 			const result = simpleDate(fixedSec)
 			const resultMs = simpleDate(fixedMs)
 
 			expect(result).toBe(resultMs)
 		})
 
-		it("uses milliseconds timestamp directly when >= 4102444800", () => {
-			// fixedMs is already in the milliseconds range (>= 4102444800)
+		it("uses milliseconds timestamp directly when >= 10000000000", () => {
+			// fixedMs is already in the milliseconds range (>= 10000000000)
 			const result = simpleDate(fixedMs)
 			const month = String(fixedDate.getMonth() + 1).padStart(2, "0")
 			const day = String(fixedDate.getDate()).padStart(2, "0")
@@ -301,7 +301,7 @@ describe("time", () => {
 		})
 
 		it("epoch 0 timestamp (treated as seconds) formats the resulting local date without asserting on a specific year", () => {
-			// 0 < 4102444800, so toDate(0) returns new Date(0 * 1000) = new Date(0)
+			// 0 < 10000000000, so toDate(0) returns new Date(0 * 1000) = new Date(0)
 			// new Date(0) is UTC midnight Jan 1 1970, but local date depends on timezone.
 			// We only verify the output is a well-formed MDY 12-hour string.
 			const result = simpleDate(0)
@@ -315,11 +315,11 @@ describe("time", () => {
 			expect(result).toMatch(/\d{2}\/\d{2}\/\d{4}, \d{2}:\d{2}:\d{2} (AM|PM)/)
 		})
 
-		it("timestamp at boundary (4102444800) is treated as milliseconds", () => {
-			const result = simpleDate(4102444800)
+		it("timestamp at boundary (10000000000) is treated as milliseconds", () => {
+			const result = simpleDate(10000000000)
 
-			// new Date(4102444800) is in 1970 — confirms the ms path is taken (not *1000)
-			const expected = new Date(4102444800)
+			// new Date(10000000000) is in 1970 — confirms the ms path is taken (not *1000)
+			const expected = new Date(10000000000)
 			const month = String(expected.getMonth() + 1).padStart(2, "0")
 			const day = String(expected.getDate()).padStart(2, "0")
 			const year = expected.getFullYear()
@@ -327,18 +327,17 @@ describe("time", () => {
 			expect(result).toContain(`${month}/${day}/${year}`)
 		})
 
-		it("timestamp just below boundary (4102444799) is treated as seconds", () => {
-			const result = simpleDate(4102444799)
+		it("timestamp just below boundary (9999999999) is treated as seconds", () => {
+			const result = simpleDate(9999999999)
 
-			// 4102444799 < 4102444800 → treated as seconds → new Date(4102444799 * 1000)
-			// 4102444799 seconds = Dec 31, 2099 23:59:59 UTC (may show as Jan 1, 2100 in local tz)
-			const expected = new Date(4102444799 * 1000)
+			// 9999999999 < 10000000000 → treated as seconds → new Date(9999999999 * 1000), in 2286
+			const expected = new Date(9999999999 * 1000)
 
 			expect(result).toContain(String(expected.getFullYear()))
 		})
 
 		it("fractional seconds timestamp floors to a valid date (sub-second shift)", () => {
-			// 1742043909.5 < 4102444800, so treated as seconds; *1000 gives a half-millisecond offset
+			// 1742043909.5 < 10000000000, so treated as seconds; *1000 gives a half-millisecond offset
 			// The result must still be a well-formed MDY 12-hour string
 			const result = simpleDate(1742043909.5)
 			const expected = new Date(1742043909.5 * 1000)

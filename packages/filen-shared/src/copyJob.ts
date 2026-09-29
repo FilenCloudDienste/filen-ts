@@ -224,10 +224,6 @@ export function applyCopyUpdate<TFailure, TJob extends CopyJob<unknown, TFailure
 	}
 }
 
-export function applyCopyCreated<TItem, TJob extends CopyJob<TItem, unknown, unknown, unknown>>(job: TJob, item: TItem): TJob {
-	return { ...job, created: [...job.created, item] }
-}
-
 // The SDK checks maxBytes after its scan and fails before writing anything, reporting the totals the
 // copy needs as not attempted. The server's own limit can refuse the same way before anything lands.
 export function isQuotaPreflightFailure(report: CopyReportInput<unknown, unknown, CopyJobErrorLike>): boolean {

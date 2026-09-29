@@ -73,3 +73,11 @@ export function isHeicFileName(bareName: string, extensions: ReadonlySet<string>
 
 	return extensions.has(lower.slice(lower.lastIndexOf(".") + 1))
 }
+
+// Index of the dot that starts `name`'s extension, or -1 when it has none: a leading dot (a dotfile) or
+// a trailing one is not an extension. Returns an index so hot callers slice only what they need.
+export function extensionStart(name: string): number {
+	const dot = name.lastIndexOf(".")
+
+	return dot > 0 && dot < name.length - 1 ? dot : -1
+}

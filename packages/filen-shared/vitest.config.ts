@@ -6,6 +6,7 @@ export default defineConfig({
 		// First match wins and a bare key also matches its "/sub" paths, so the subpath goes first.
 		alias: {
 			"@filen/shared/dom": path.resolve(__dirname, "./src/dom/index.ts"),
+			"@filen/shared/tooling": path.resolve(__dirname, "./src/tooling/licenseNotices.ts"),
 			"@filen/shared": path.resolve(__dirname, "./src/index.ts")
 		}
 	},

@@ -32,6 +32,11 @@ export function hashNoteContent(content: string): string {
 	return xxHash32(content).toString(16)
 }
 
+// Newest local author timestamp across an entry list (NEGATIVE_INFINITY for an empty list).
+export function newestEntryTimestamp(entries: readonly { timestamp: number }[]): number {
+	return entries.reduce((acc, c) => (c.timestamp > acc ? c.timestamp : acc), Number.NEGATIVE_INFINITY)
+}
+
 // Pure builder for a note's inflight entry list after a keystroke.
 //
 // The author timestamp is PER-NOTE MONOTONIC — `max(now, newest existing + 1)` — so a backward
@@ -60,7 +65,7 @@ export function buildInflightEntries<TNote>({
 	sessionBaseHash: string | null
 }): InflightEntry<TNote>[] {
 	const entries = previous ?? []
-	const newestExisting = entries.reduce((acc, c) => (c.timestamp > acc ? c.timestamp : acc), Number.NEGATIVE_INFINITY)
+	const newestExisting = newestEntryTimestamp(entries)
 	const timestamp = entries.length > 0 ? Math.max(now, newestExisting + 1) : now
 	const newestEntry = entries.find(c => c.timestamp === newestExisting)
 	const baseContentHash = entries.length > 0 ? newestEntry?.baseContentHash : (sessionBaseHash ?? undefined)
@@ -114,8 +119,8 @@ export function mergeInflight<T extends { timestamp: number }>(
 			continue
 		}
 
-		const newestCurrent = currentEntries.reduce((acc, c) => (c.timestamp > acc ? c.timestamp : acc), Number.NEGATIVE_INFINITY)
-		const newestDisk = diskEntries.reduce((acc, c) => (c.timestamp > acc ? c.timestamp : acc), Number.NEGATIVE_INFINITY)
+		const newestCurrent = newestEntryTimestamp(currentEntries)
+		const newestDisk = newestEntryTimestamp(diskEntries)
 
 		// Current live edits win when they're at least as fresh as disk; otherwise the disk copy is
 		// the newer record (e.g. the live queue was empty for this uuid at fetch start) and replaces it.

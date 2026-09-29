@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { CheckIcon, CrownIcon, UserCheckIcon, UsersIcon, UserXIcon, XIcon } from "lucide-react"
 import type { Chat, ChatParticipant } from "@filen/sdk-rs"
-import { cn, contactDisplayName, deriveBlockedUsers } from "@filen/shared"
+import { cn, contactDisplayName, deriveBlockedUsers, toggleInSet } from "@filen/shared"
 import { isChatOwner } from "@/features/chats/lib/sort"
 import { addChatParticipants, removeChatParticipant, removeChatParticipants } from "@/features/chats/lib/participants"
 import { chatParticipantRows, selectedParticipantsForRemoval } from "@/features/chats/components/chatParticipantsDialog.logic"
@@ -16,7 +16,7 @@ import { ContactPickerList } from "@/features/contacts/components/contactPickerL
 // Reused for BOTH modes: `selected` holds contact uuids in "add" mode and participant userId strings in
 // "list" mode — the two are never active at once and every mode transition below resets the Set, so the
 // two id spaces never collide.
-import { togglePickerContact, resolveSelectedContacts } from "@/features/contacts/lib/contactPicker.logic"
+import { resolveSelectedContacts } from "@/features/contacts/lib/contactPicker.logic"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { plainErrorDTO } from "@/lib/sdk/errors"
 import { useIsOnline } from "@/lib/useIsOnline"
@@ -189,7 +189,7 @@ export function ChatParticipantsDialog({ chat: initialChat, onClose }: ChatParti
 							return
 						}
 
-						setSelected(prev => togglePickerContact(prev, participantKey))
+						setSelected(prev => toggleInSet(prev, participantKey))
 					}
 
 					return (
@@ -305,7 +305,7 @@ export function ChatParticipantsDialog({ chat: initialChat, onClose }: ChatParti
 						onFilterChange={setFilter}
 						selected={selected}
 						onToggle={uuid => {
-							setSelected(prev => togglePickerContact(prev, uuid))
+							setSelected(prev => toggleInSet(prev, uuid))
 						}}
 						ariaLabel={t("common:participantsAddDialogTitle")}
 						emptyTitle={t("common:participantsAddEmpty")}

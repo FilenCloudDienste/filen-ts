@@ -1,4 +1,5 @@
 import type { BlockedContact, Contact, ContactRequestIn, ContactRequestOut } from "@filen/sdk-rs"
+import { toggleInSet } from "@filen/shared"
 import { clampListboxIndex, listboxRangeItems } from "@/features/drive/lib/listbox"
 import { type ContactSection } from "@/features/contacts/components/contactsList.logic"
 
@@ -116,15 +117,7 @@ export function nextContactSelection(state: ContactSelectionState, input: Contac
 // Add if absent, remove if present — the toggle boilerplate the row click handler builds on.
 // Returns a new selection; the input is never mutated (React state-update contract).
 export function toggleContactSelection(selection: ContactSelection, section: ContactSectionKey, uuid: string): ContactSelection {
-	const next = new Set(selection[section])
-
-	if (next.has(uuid)) {
-		next.delete(uuid)
-	} else {
-		next.add(uuid)
-	}
-
-	return { ...selection, [section]: next }
+	return { ...selection, [section]: toggleInSet(selection[section], uuid) }
 }
 
 // Drops the given uuids from one section's bucket — the post-action cleanup every confirm/bulk

@@ -1,10 +1,9 @@
 import { Buffer } from "buffer"
-import { parseFilenPublicLink } from "@filen/shared"
+import { UUID_SUB, decodeHexKey } from "@filen/shared"
 
 // Single source of truth for what a Filen public link looks like — both BUILDING one (the drive
-// link dialog imports the prefixes + builder here) and PARSING one (the chat-embed recognizer, the
-// legacy redirect, and the /f/ /d/ route logic all import from here). Pure: no network, no React,
-// no SDK — just string shapes.
+// link dialog imports the prefixes + builder here) and resolving one (the legacy redirect and the
+// /f/ /d/ route logic import from here). Pure: no network, no React, no SDK — just string shapes.
 //
 // ★ SECURITY: the decryption key ALWAYS rides the URL FRAGMENT (after '#'), never the path or a
 // query param. A fragment is never sent to any server, so the key stays entirely client-side — the
@@ -15,9 +14,8 @@ import { parseFilenPublicLink } from "@filen/shared"
 //   NEW (this app, path-based):   https://app.filen.io/f/<uuid>#<hexkey>   → f = file, d = directory (this app's own scheme)
 //   LEGACY (old-web, hash-router): https://app.filen.io/#/f/<uuid>%23<key> → f = folder, d = download (a file): the legacy naming
 // The letters are DELIBERATELY swapped between eras. PARSING both eras is owned by @filen/shared's
-// parseFilenPublicLink (used by mobile directly, wrapped here as a thin `type` → `kind` mapper so
-// this app's own PublicLinkTarget shape doesn't change); only the BUILD side (prefixes below) stays
-// app-local, since mobile still builds legacy-format links and web builds NEW-format ones.
+// parseFilenPublicLink; only the BUILD side (prefixes below) stays app-local, since mobile still
+// builds legacy-format links and web builds NEW-format ones.
 
 // Canonical host every in-app-built link uses. The key stays in the fragment, so this host only
 // pins where the SPA is served, never carries key material.
@@ -31,40 +29,7 @@ export const DIRECTORY_PUBLIC_LINK_URL_PREFIX = `${PUBLIC_LINK_ORIGIN}/d/`
 
 export type PublicLinkKind = "file" | "directory"
 
-export interface PublicLinkTarget {
-	kind: PublicLinkKind
-	uuid: string
-	// The plaintext key the SDK's getLinkedFile/getDirPublicLinkInfo want — already hex-decoded from
-	// what the URL carried, never the hex itself.
-	key: string
-}
-
-const UUID_SUB = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 const UUID_RE = new RegExp(`^${UUID_SUB}$`, "i")
-
-// Even-length, all-hex → its UTF-8 plaintext. Anything else (odd length, non-hex, empty) is null —
-// the caller treats that as "not a recognizable link", never a partial parse.
-function hexDecode(hex: string): string | null {
-	if (hex.length === 0 || hex.length % 2 !== 0 || !/^[0-9a-f]+$/i.test(hex)) {
-		return null
-	}
-
-	try {
-		return Buffer.from(hex, "hex").toString("utf-8")
-	} catch {
-		return null
-	}
-}
-
-// Thin `type` → `kind` mapper over @filen/shared's parseFilenPublicLink, which owns recognition of
-// BOTH eras (letters swapped between them — see the module header). Used by the chat-embed
-// recognizer, so it is strict: the key must decode and be a valid 32-byte key, otherwise null
-// (render the raw link, never a half-resolved card).
-export function parsePublicLink(raw: string): PublicLinkTarget | null {
-	const target = parseFilenPublicLink(raw)
-
-	return target === null ? null : { kind: target.type, uuid: target.uuid, key: target.key }
-}
 
 // The NEW-format link the drive dialog copies to the clipboard: `<prefix><uuid>#<hexkey>`. `keyPlain`
 // is the SDK's plaintext key; it is hex-encoded here purely for URL-safety, decoded back on open. A
@@ -94,7 +59,7 @@ function decodeLinkKeyFragment(fragment: string): string | null {
 		return null
 	}
 
-	const key = /^[0-9a-f]+$/i.test(trimmed) && trimmed.length % 2 === 0 ? hexDecode(trimmed) : trimmed
+	const key = /^[0-9a-f]+$/i.test(trimmed) && trimmed.length % 2 === 0 ? decodeHexKey(trimmed) : trimmed
 
 	return key === null || key.length === 0 ? null : key
 }

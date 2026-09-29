@@ -13,7 +13,15 @@ import {
 	UploadIcon,
 	XIcon
 } from "lucide-react"
-import { copyJobRate, formatBytes, formatBytesFixed, formatSecondsToMediaClock, isCopyJobRunning, cn } from "@filen/shared"
+import {
+	copyJobRate,
+	formatBytes,
+	formatBytesFixed,
+	formatBytesPerSecond,
+	formatSecondsToMediaClock,
+	isCopyJobRunning,
+	cn
+} from "@filen/shared"
 import { isActiveTransfer, useTransfersStore, type Transfer } from "@/features/transfers/store/useTransfersStore"
 import {
 	transferProgress,
@@ -199,7 +207,7 @@ export function TransferRow({ transfer, onRequestCancel, onShowInDirectory }: Tr
 			bytes,
 			transfer.size > 0 ? percentFormat(i18n.language).format(runningPercentFraction(progress)) : null,
 			rate?.etaSeconds == null ? null : t("transfersRowTimeLeft", { eta: formatSecondsToMediaClock(rate.etaSeconds) }),
-			rate === null ? null : t("transfersAggregateSpeed", { speed: formatBytesFixed(rate.bytesPerSecond) })
+			rate === null ? null : formatBytesPerSecond(rate.bytesPerSecond)
 		]
 	} else if (transfer.status === "error") {
 		details = [

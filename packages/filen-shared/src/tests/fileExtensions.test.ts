@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { CODE_FILE_EXTENSIONS, HEIC_EXTENSIONS_UPLOAD, isHeicFileName } from "@filen/shared"
+import { CODE_FILE_EXTENSIONS, extensionStart, HEIC_EXTENSIONS_UPLOAD, isHeicFileName } from "@filen/shared"
 
 describe("CODE_FILE_EXTENSIONS", () => {
 	it("is the verified 53-entry intersection, lowercase and dot-less", () => {
@@ -62,5 +62,19 @@ describe("isHeicFileName", () => {
 
 		expect(isHeicFileName("burst.heics", webHeicExtensions)).toBe(false)
 		expect(isHeicFileName("burst.heics", HEIC_EXTENSIONS_UPLOAD)).toBe(true)
+	})
+})
+
+describe("extensionStart", () => {
+	it("returns the index of the last dot", () => {
+		expect(extensionStart("notes.md")).toBe(5)
+		expect(extensionStart("archive.tar.gz")).toBe(11)
+	})
+
+	it("treats a leading dot, a trailing dot or no dot as no extension", () => {
+		expect(extensionStart(".bashrc")).toBe(-1)
+		expect(extensionStart("report.")).toBe(-1)
+		expect(extensionStart("README")).toBe(-1)
+		expect(extensionStart("")).toBe(-1)
 	})
 })

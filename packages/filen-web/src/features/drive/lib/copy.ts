@@ -6,6 +6,7 @@ import {
 	copyMaxBytes,
 	driveItemName,
 	formatBytes,
+	isCopyJobRunning,
 	isQuotaPreflightFailure,
 	settleCopyJob,
 	type QuotaCheckDeps,
@@ -378,7 +379,7 @@ export function pruneSettledCopyJobs(): void {
 	const rows = new Set(useTransfersStore.getState().transfers.map(transfer => transfer.id))
 
 	for (const job of Object.values(useCopyJobsStore.getState().jobs)) {
-		if (job.outcome.status !== "running" && !job.cardVisible && !rows.has(job.id)) {
+		if (!isCopyJobRunning(job) && !job.cardVisible && !rows.has(job.id)) {
 			useCopyJobsStore.getState().remove(job.id)
 		}
 	}

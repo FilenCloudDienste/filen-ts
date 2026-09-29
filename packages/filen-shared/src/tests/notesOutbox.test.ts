@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { hashNoteContent, buildInflightEntries, mergeInflight, type InflightEntry } from "@filen/shared"
+import { hashNoteContent, buildInflightEntries, mergeInflight, newestEntryTimestamp, type InflightEntry } from "@filen/shared"
 
 // Plain object standing in for each app's own generated Note type — buildInflightEntries/mergeInflight
 // never read a field off it, only carry it through.
@@ -14,6 +14,16 @@ describe("hashNoteContent", () => {
 
 	it("differs for different content", () => {
 		expect(hashNoteContent("hello")).not.toBe(hashNoteContent("world"))
+	})
+})
+
+describe("newestEntryTimestamp", () => {
+	it("is NEGATIVE_INFINITY for an empty list", () => {
+		expect(newestEntryTimestamp([])).toBe(Number.NEGATIVE_INFINITY)
+	})
+
+	it("picks the newest timestamp regardless of order", () => {
+		expect(newestEntryTimestamp([{ timestamp: 2000 }, { timestamp: 5000 }, { timestamp: 3000 }])).toBe(5000)
 	})
 })
 

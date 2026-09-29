@@ -4,6 +4,8 @@ vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/u
 vi.mock("@filen/sdk-rs", async () => await import("@/tests/mocks/sdkCopy"))
 vi.mock("@/lib/sdkUnwrap", () => ({ unwrapParentUuid: (parent: unknown) => (typeof parent === "string" ? parent : null) }))
 vi.mock("@/lib/cache", () => ({ default: { directoryUuidToAnySharedDirWithContext: new Map([["shared-parent", { shareInfo: "role" }]]) } }))
+vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
+vi.mock("@/constants", () => ({ EXPO_IMAGE_SUPPORTED_EXTENSIONS: new Set(), EXPO_VIDEO_SUPPORTED_EXTENSIONS: new Set() }))
 
 import { copyGlyphForCopyItems, copyGlyphForEntries, copyGlyphForItems, driveItemToCopyItem } from "@/features/copy/copySource"
 import { AnyItemWithContext_Tags } from "@/tests/mocks/sdkCopy"

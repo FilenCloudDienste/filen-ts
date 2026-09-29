@@ -698,9 +698,6 @@ importers:
       happy-dom:
         specifier: ^20.14.0
         version: 20.14.5
-      tsx:
-        specifier: ^4.20.6
-        version: 4.23.13
       typescript:
         specifier: ^5.9.3
         version: 5.9.3

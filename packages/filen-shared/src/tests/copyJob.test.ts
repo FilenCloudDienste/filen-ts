@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest"
 import {
-	applyCopyCreated,
 	applyCopyUpdate,
 	copyMaxBytes,
 	createCopyJob,
@@ -155,12 +154,6 @@ describe("applyCopyUpdate", () => {
 		const withExtra = { ...job(), glyph: "file" as const }
 
 		expect(applyCopyUpdate(withExtra, update()).glyph).toBe("file")
-	})
-})
-
-describe("applyCopyCreated", () => {
-	it("records created top-level items in creation order", () => {
-		expect(applyCopyCreated(applyCopyCreated(job(2), "one"), "two").created).toEqual(["one", "two"])
 	})
 })
 

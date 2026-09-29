@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it } from "vitest"
-import { execFileSync } from "node:child_process"
+import { listInstalledNpm, type InstalledNpmPackage } from "@filen/shared/tooling"
 import { LICENSE_TEXTS } from "@/features/settings/thirdPartyNotices.gen"
 import {
 	filterThirdPartyNotices,
@@ -19,70 +19,15 @@ import { noticeRepositoryHref } from "@/features/settings/components/advanced/th
  * The generator cannot run in CI (it needs a filen-rs checkout and the local cargo caches), so every
  * guard here reads what CI does have: the committed payload and the installed pnpm tree.
  */
-interface InstalledPackage {
-	name: string
-	version: string
-}
-
-/**
- * The packages pnpm says ship, identified as `name@version` — the same query and the same identity the
- * generator uses, so the two sides of the comparison cannot drift apart. A name-keyed set would
- * silently excuse one of each multi-version package from the payload.
- *
- * `--prod` follows only `dependencies` edges: a package reachable ONLY through devDependencies is
- * dropped, one reachable through both is kept — the same thing npm's `dev` flag meant. `--no-optional`
- * drops optionalDependencies, whose install set is decided per machine. The `...` on the filter keeps
- * everything @filen/shared brings in inside the set; @filen/shared itself is a workspace member, is not
- * reported, and is correctly absent from the payload.
- */
-function installedPackages(): InstalledPackage[] {
-	let raw: string
-
-	try {
-		raw = execFileSync("pnpm", ["licenses", "list", "--json", "--prod", "--no-optional", "--filter", "@filen/web..."], {
-			encoding: "utf8",
-			maxBuffer: 256 * 1024 * 1024
-		})
-	} catch (error) {
-		throw new Error(
-			`\`pnpm licenses list\` failed — run \`pnpm install\` at the repo root: ${
-				error instanceof Error ? error.message : String(error)
-			}`,
-			{ cause: error }
-		)
-	}
-
-	const grouped = JSON.parse(raw) as Record<string, { name?: unknown; versions?: unknown }[]>
-	const installed: InstalledPackage[] = []
-
-	for (const entries of Object.values(grouped)) {
-		for (const entry of entries) {
-			if (typeof entry.name !== "string" || !Array.isArray(entry.versions)) {
-				continue
-			}
-
-			for (const version of entry.versions) {
-				if (typeof version === "string" && version.length > 0) {
-					installed.push({ name: entry.name, version })
-				}
-			}
-		}
-	}
-
-	if (installed.length === 0) {
-		throw new Error("`pnpm licenses list` reported no packages — run `pnpm install` at the repo root")
-	}
-
-	return installed
-}
-
-let installed: InstalledPackage[]
+let installed: InstalledNpmPackage[]
 let lockIds: Set<string>
 let lockEntries: number
 
-// The spawn is the slow part of this file; run it in a hook whose timeout actually covers it.
+// The same query the generator runs, identified as `name@version`, so the two sides of the comparison
+// cannot drift apart. The spawn is the slow part of this file; run it in a hook whose timeout actually
+// covers it.
 beforeAll(() => {
-	installed = installedPackages()
+	installed = listInstalledNpm("@filen/web")
 	lockIds = new Set(installed.map(entry => `${entry.name}@${entry.version}`))
 	lockEntries = installed.length
 }, 60_000)

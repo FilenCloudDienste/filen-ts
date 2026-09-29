@@ -1,3 +1,4 @@
+import { isCopyJobRunning } from "@filen/shared"
 import { sdkApi } from "@/lib/sdk/client"
 import { requestCopyCancel } from "@/features/drive/lib/copy"
 import { isActiveTransfer, useTransfersStore, type Transfer } from "@/features/transfers/store/useTransfersStore"
@@ -7,7 +8,7 @@ import { getCopyJob } from "@/features/transfers/store/useCopyJobsStore"
 function isSettledCopy(transfer: Transfer): boolean {
 	const job = transfer.direction === "copy" ? getCopyJob(transfer.id) : undefined
 
-	return job !== undefined && job.outcome.status !== "running"
+	return job !== undefined && !isCopyJobRunning(job)
 }
 
 // The live row for an id, or undefined for an unknown id or an already-terminal transfer: nothing left to

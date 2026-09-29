@@ -19,11 +19,14 @@
 		"./dom": {
 			"types": "./src/dom/index.ts",
 			"default": "./src/dom/index.ts"
+		},
+		"./tooling": {
+			"types": "./src/tooling/licenseNotices.ts",
+			"default": "./src/tooling/licenseNotices.ts"
 		}
 	},
 	"scripts": {
-		"typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json && tsc --noEmit -p tsconfig.dom.json",
-		"dev": "tsx src/dev.ts",
+		"typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json && tsc --noEmit -p tsconfig.dom.json && tsc --noEmit -p tsconfig.tooling.json",
 		"test": "vitest run",
 		"test:watch": "vitest",
 		"test:ui": "vitest --ui",
@@ -39,7 +42,6 @@
 		"@types/node": "^24.0.0",
 		"eslint": "^9.39.3",
 		"happy-dom": "^20.14.0",
-		"tsx": "^4.20.6",
 		"typescript": "^5.9.3",
 		"typescript-eslint": "^8.56.1",
 		"vitest": "^3.2.4"

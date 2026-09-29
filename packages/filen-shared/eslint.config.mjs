@@ -2,11 +2,13 @@ import js from "@eslint/js"
 import tseslint from "typescript-eslint"
 
 // @filen/shared must compile on Hermes and in the browser, so nothing platform-bound may enter it.
+const parentEscapePattern = {
+	regex: "^\\.\\.",
+	message: "Parent-escaping relative imports leave the package; import siblings with \"./\"."
+}
+
 const platformFreeImportPatterns = [
-	{
-		regex: "^\\.\\.",
-		message: "Parent-escaping relative imports leave the package; import siblings with \"./\"."
-	},
+	parentEscapePattern,
 	{
 		group: ["node:*", "react", "react-dom", "react-native", "react-native/*", "expo", "expo-*", "@expo/*"],
 		message: "@filen/shared is platform-free: no Node, React, React Native or Expo imports."
@@ -24,7 +26,7 @@ export default tseslint.config(
 	js.configs.recommended,
 	...tseslint.configs.recommended,
 	{
-		ignores: ["node_modules/**/*", "src/dev.ts"]
+		ignores: ["node_modules/**/*"]
 	},
 	{
 		files: ["**/*.ts"],
@@ -60,6 +62,29 @@ export default tseslint.config(
 				"error",
 				{
 					patterns: platformFreeImportPatterns
+				}
+			]
+		}
+	},
+	{
+		// Node-only build tooling behind the "@filen/shared/tooling" subpath; never re-exported from index.ts.
+		files: ["src/tooling/**"],
+		rules: {
+			"no-restricted-imports": [
+				"error",
+				{
+					patterns: [parentEscapePattern, selfImportPattern]
+				}
+			]
+		}
+	},
+	{
+		files: ["src/tests/tooling/**"],
+		rules: {
+			"no-restricted-imports": [
+				"error",
+				{
+					patterns: [parentEscapePattern]
 				}
 			]
 		}

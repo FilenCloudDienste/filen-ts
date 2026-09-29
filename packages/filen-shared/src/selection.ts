@@ -11,6 +11,19 @@ export function toggleInArray<T>(arr: T[], item: T, getId: (i: T) => string): T[
 	return [...arr, item]
 }
 
+// Add `value` to `set` if absent, remove if present. Returns a new Set — input is not mutated.
+export function toggleInSet<T>(set: ReadonlySet<T>, value: T): Set<T> {
+	const next = new Set(set)
+
+	if (next.has(value)) {
+		next.delete(value)
+	} else {
+		next.add(value)
+	}
+
+	return next
+}
+
 // Drop every item whose id is in idsToRemove. Returns the SAME array reference when nothing was
 // removed, so a caller can skip a store write (and the re-render it would trigger).
 export function removeSelectedIds<T>(items: readonly T[], idsToRemove: Iterable<string>, getId: (item: T) => string): T[] {
@@ -27,11 +40,4 @@ export function pruneSelection<T>(selected: T[], keep: (item: T) => boolean): T[
 	const kept = selected.filter(keep)
 
 	return kept.length === selected.length ? selected : kept
-}
-
-// Ids of selected items that fail `keep` — the dropped-side mirror of pruneSelection, for callers
-// that purge by id through a separate removal call (e.g. a store's own removeFromSelection) instead
-// of writing the kept array back directly.
-export function droppedIds<T>(selected: readonly T[], keep: (item: T) => boolean, getId: (item: T) => string): string[] {
-	return selected.filter(item => !keep(item)).map(getId)
 }

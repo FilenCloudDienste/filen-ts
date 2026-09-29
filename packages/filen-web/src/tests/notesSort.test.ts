@@ -13,7 +13,6 @@ import {
 	sortNoteHistory,
 	tagDisplayName
 } from "@/features/notes/lib/sort"
-import { DEFAULT_NOTE_TAGS_SORT_BY, sortNoteTags, tagLastActivity } from "@filen/shared"
 
 // UuidStr is a template-literal brand requiring at least 3 dashes (see @filen/sdk-rs) — pad a
 // short label the same way drive.test.ts's testUuid does.
@@ -343,70 +342,6 @@ describe("sortAndFilterNotes", () => {
 
 		expect(sortAndFilterNotes([note], "buried", bodies).map(n => n.uuid)).toStrictEqual([note.uuid])
 		expect(sortAndFilterNotes([note], "buried")).toHaveLength(0)
-	})
-})
-
-describe("tagLastActivity", () => {
-	it("falls back to the tag's own editedTimestamp when it has no notes", () => {
-		const tag = mockNoteTag({ editedTimestamp: 42n })
-
-		expect(tagLastActivity(tag, [])).toBe(42)
-	})
-
-	it("returns the most recently edited note's timestamp among its notes", () => {
-		const tag = mockNoteTag({ editedTimestamp: 1n })
-		const notes = [mockNote({ editedTimestamp: 10n }), mockNote({ editedTimestamp: 30n }), mockNote({ editedTimestamp: 20n })]
-
-		expect(tagLastActivity(tag, notes)).toBe(30)
-	})
-})
-
-describe("sortNoteTags", () => {
-	const workTag = mockNoteTag({ uuid: testUuid("work"), name: "Work", editedTimestamp: 5n })
-	const personalTag = mockNoteTag({ uuid: testUuid("personal"), name: "Personal", editedTimestamp: 15n })
-	const tags = [workTag, personalTag]
-
-	it("defaults to lastActivityDesc semantics for an unrecognized sortBy value", () => {
-		const notesByTag = { [workTag.uuid]: [], [personalTag.uuid]: [] }
-
-		expect(
-			sortNoteTags(tags, "not-a-real-mode" as unknown as typeof DEFAULT_NOTE_TAGS_SORT_BY, notesByTag, tagDisplayName).map(
-				t => t.name
-			)
-		).toEqual(["Personal", "Work"])
-	})
-
-	it("sorts nameAsc/nameDesc via locale compare", () => {
-		expect(sortNoteTags(tags, "nameAsc", {}, tagDisplayName).map(t => t.name)).toEqual(["Personal", "Work"])
-		expect(sortNoteTags(tags, "nameDesc", {}, tagDisplayName).map(t => t.name)).toEqual(["Work", "Personal"])
-	})
-
-	it("sorts by note count when notesByTag differs from tag edited time", () => {
-		const notesByTag = {
-			[workTag.uuid]: [mockNote(), mockNote(), mockNote()],
-			[personalTag.uuid]: [mockNote()]
-		}
-
-		expect(sortNoteTags(tags, "notesCountDesc", notesByTag, tagDisplayName).map(t => t.name)).toEqual(["Work", "Personal"])
-		expect(sortNoteTags(tags, "notesCountAsc", notesByTag, tagDisplayName).map(t => t.name)).toEqual(["Personal", "Work"])
-	})
-
-	it("breaks activity/count ties by name", () => {
-		const tied = [
-			mockNoteTag({ uuid: testUuid("b"), name: "Bravo", editedTimestamp: 1n }),
-			mockNoteTag({ uuid: testUuid("a"), name: "Alpha", editedTimestamp: 1n })
-		]
-
-		expect(sortNoteTags(tied, "lastActivityDesc", {}, tagDisplayName).map(t => t.name)).toEqual(["Alpha", "Bravo"])
-	})
-
-	it("does not mutate the input array", () => {
-		const input = [...tags]
-		const snapshot = [...input]
-
-		sortNoteTags(input, "nameAsc", {}, tagDisplayName)
-
-		expect(input).toEqual(snapshot)
 	})
 })
 

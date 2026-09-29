@@ -693,39 +693,29 @@ async function translateBatch(args: {
 // Catalog write (sorted keys + trailing newline for stable diffs)
 // ---------------------------------------------------------------------------
 
-function writeCatalog(lang: TargetLanguage, catalog: Record<string, string>): void {
+function writeSortedJson(path: string, record: Record<string, string>): void {
 	const sorted: Record<string, string> = {}
 
-	for (const key of Object.keys(catalog).sort()) {
-		const value = catalog[key]
+	for (const key of Object.keys(record).sort()) {
+		const value = record[key]
 
 		if (value !== undefined) {
 			sorted[key] = value
 		}
 	}
 
-	const json = `${JSON.stringify(sorted, null, "\t")}\n`
+	writeFileSync(path, `${JSON.stringify(sorted, null, "\t")}\n`, "utf8")
+}
 
-	writeFileSync(join(LOCALES_DIR, `${lang}.json`), json, "utf8")
+function writeCatalog(lang: TargetLanguage, catalog: Record<string, string>): void {
+	writeSortedJson(join(LOCALES_DIR, `${lang}.json`), catalog)
 }
 
 // Rewrite the snapshot to the current English catalog (sorted + trailing newline, like the catalogs)
 // so the next DELTA diffs against this state. Written into the same PR as the translations, so the
 // baseline only advances once that PR is merged — an unmerged run keeps re-detecting the same delta.
 function writeSnapshot(): void {
-	const sorted: Record<string, string> = {}
-
-	for (const key of Object.keys(EN_CATALOG).sort()) {
-		const value = EN_CATALOG[key]
-
-		if (value !== undefined) {
-			sorted[key] = value
-		}
-	}
-
-	const json = `${JSON.stringify(sorted, null, "\t")}\n`
-
-	writeFileSync(EN_SNAPSHOT_PATH, json, "utf8")
+	writeSortedJson(EN_SNAPSHOT_PATH, EN_CATALOG)
 }
 
 // ---------------------------------------------------------------------------

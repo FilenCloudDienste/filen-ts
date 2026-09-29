@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { CopyCounts, CopyFailure, CopyFailureInfo, CopyReport, CopyUpdate, Dir, File, UuidStr } from "@filen/sdk-rs"
-import { applyCopyCreated, applyCopyUpdate, settleCopyJob } from "@filen/shared"
+import { applyCopyUpdate, settleCopyJob } from "@filen/shared"
 import { narrowItem } from "@/features/drive/lib/item"
 import {
 	canRetryCopy,
@@ -367,16 +367,6 @@ describe("isCopyTrashPending", () => {
 		expect(canRetryCopy({ ...withRetry, created: [], trashResult: { moved: 2, failed: 0 } })).toBe(true)
 		expect(isCopyTrashPending({ ...stopped, cancelRequest: "keep", created: batch })).toBe(false)
 		expect(isCopyTrashPending({ ...stopped, outcome: { status: "running" }, created: batch })).toBe(false)
-	})
-})
-
-describe("applyCopyCreated", () => {
-	it("records created top-level items in creation order", () => {
-		const first = narrowItem(mockFile("one"))
-		const second = narrowItem(mockFile("two"))
-		const job = applyCopyCreated(applyCopyCreated(createCopyJob("j", DESTINATION, 2), first), second)
-
-		expect(job.created).toEqual([first, second])
 	})
 })
 

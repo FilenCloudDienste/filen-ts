@@ -1,16 +1,10 @@
 import { useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { CheckIcon } from "lucide-react"
-import { type Checklist, cn, addChecklistLine, removeChecklistItem } from "@filen/shared"
+import { type Checklist, cn, addChecklistLine, removeChecklistItem, patchChecklistItem } from "@filen/shared"
 import { isImeKeydown } from "@/lib/ime"
 import type { NoteEditorController } from "@/features/notes/hooks/useNoteEditor"
-import {
-	parseChecklistSeed,
-	serializeChecklist,
-	toggleChecklistItem,
-	setChecklistItemContent,
-	visibleChecklistRows
-} from "@/features/notes/components/editor/checklistEditor.logic"
+import { parseChecklistSeed, serializeChecklist, visibleChecklistRows } from "@/features/notes/components/editor/checklistEditor.logic"
 
 // Custom checklist editor (mirrors mobile's content/checklist screen): one text input per row with a
 // leading toggle. Enter on a non-empty row appends a row and focuses it; Backspace on an empty row
@@ -70,7 +64,7 @@ export function ChecklistEditor({
 			return
 		}
 
-		commit(setChecklistItemContent(rows, id, content))
+		commit(patchChecklistItem(rows, id, { content }))
 	}
 
 	function handleToggle(id: string, checked: boolean): void {
@@ -86,7 +80,7 @@ export function ChecklistEditor({
 			return
 		}
 
-		commit(toggleChecklistItem(rows, id, checked))
+		commit(patchChecklistItem(rows, id, { checked }))
 	}
 
 	function handleKeyDown(event: React.KeyboardEvent<HTMLInputElement>, id: string): void {

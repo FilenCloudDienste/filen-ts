@@ -4,7 +4,7 @@ import { useShallow } from "zustand/shallow"
 import { useNavigate } from "@tanstack/react-router"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { ArrowDownUpIcon, BrushCleaningIcon, PauseIcon, PlayIcon, XIcon } from "lucide-react"
-import { formatBytesFixed } from "@filen/shared"
+import { formatBytesPerSecond } from "@filen/shared"
 import { isActiveTransfer, useTransfersAggregate, useTransfersStore, type Transfer } from "@/features/transfers/store/useTransfersStore"
 import { useCopyJobsStore } from "@/features/transfers/store/useCopyJobsStore"
 import { pruneSettledCopyJobs } from "@/features/drive/lib/copy"
@@ -103,7 +103,7 @@ export function TransfersScreen() {
 						? [
 								t("transfersScreenActiveCount", { count: activeCount }),
 								percentFormat(i18n.language).format(runningPercentFraction(percent)),
-								t("transfersAggregateSpeed", { speed: formatBytesFixed(speed) })
+								formatBytesPerSecond(speed)
 							].join(" · ")
 						: null}
 				</p>

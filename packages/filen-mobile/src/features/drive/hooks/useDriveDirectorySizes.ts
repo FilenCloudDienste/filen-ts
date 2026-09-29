@@ -1,15 +1,12 @@
 import { useEffect, useMemo, useState } from "react"
 import { queryClient } from "@/queries/client"
 import type { DriveItem } from "@/types"
+import { isDirectoryItem } from "@/features/drive/driveSelectors"
 import type { DrivePathType } from "@/hooks/useDrivePath"
 import { BASE_QUERY_KEY, directorySizeQueryOptions, type fetchData } from "@/features/drive/queries/useDirectorySize.query"
 import { directorySizeTypeForDrivePath } from "@/features/drive/utils"
 
 type DirectorySizeResult = Awaited<ReturnType<typeof fetchData>>
-
-function isDirectoryItemType(type: DriveItem["type"]): boolean {
-	return type === "directory" || type === "sharedDirectory" || type === "sharedRootDirectory"
-}
 
 // Feeds REAL directory sizes into the size sort (#49). Directories are constructed with
 // `data.size: 0n` (sdkUnwrap) — their true sizes live only in the useDirectorySizeQuery cache the
@@ -56,7 +53,7 @@ export function useDriveDirectorySizes({
 		}
 
 		for (const item of items) {
-			if (isDirectoryItemType(item.type)) {
+			if (isDirectoryItem(item)) {
 				void queryClient.prefetchQuery(
 					directorySizeQueryOptions({
 						uuid: item.data.uuid,
@@ -83,7 +80,7 @@ export function useDriveDirectorySizes({
 		const sizes = new Map<string, number>()
 
 		for (const item of items) {
-			if (!isDirectoryItemType(item.type)) {
+			if (!isDirectoryItem(item)) {
 				continue
 			}
 

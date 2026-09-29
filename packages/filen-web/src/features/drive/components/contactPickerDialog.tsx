@@ -1,5 +1,6 @@
 import { useState } from "react"
 import { useTranslation } from "react-i18next"
+import { toggleInSet } from "@filen/shared"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { shareItems } from "@/features/drive/lib/share/actions"
 import { toastBulkOutcome } from "@/features/drive/lib/bulkToast"
@@ -7,7 +8,7 @@ import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import { useContactsQuery } from "@/features/contacts/queries/contacts"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { pendingGuardedOpenChange } from "@/components/dialogs/dismissal.logic"
-import { resolveSelectedContacts, togglePickerContact } from "@/features/contacts/lib/contactPicker.logic"
+import { resolveSelectedContacts } from "@/features/contacts/lib/contactPicker.logic"
 import { ContactPickerList } from "@/features/contacts/components/contactPickerList"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
@@ -43,7 +44,7 @@ export function ContactPickerDialog({ items, onClose, onShared }: ContactPickerD
 	})
 
 	function toggle(uuid: string): void {
-		setSelected(prev => togglePickerContact(prev, uuid))
+		setSelected(prev => toggleInSet(prev, uuid))
 	}
 
 	async function handleShare(): Promise<void> {

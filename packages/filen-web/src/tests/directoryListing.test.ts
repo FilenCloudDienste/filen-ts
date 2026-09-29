@@ -5,15 +5,12 @@ import { deriveBlockedUsers, type BlockedUsers } from "@filen/shared"
 import {
 	filterDriveItemsByLocalSearch,
 	filterSharedInByBlocked,
-	hiddenSelectionUuids,
 	isBlockingListingError,
 	isEmptyTrashTriggerVisible,
 	isVisibleSharedInItem,
 	reconcileSelectedItems,
 	resolveListingDisplayItems,
-	resolveSearchDisplayItems,
-	staleBlockedSelectionUuids,
-	staleSelectionUuids
+	resolveSearchDisplayItems
 } from "@/features/drive/components/directoryListing.logic"
 
 // UuidStr is a template-literal brand requiring at least 3 dashes (see @filen/sdk-rs) — mirrors
@@ -179,92 +176,6 @@ describe("filterSharedInByBlocked", () => {
 
 	it("returns an empty array unchanged for an empty input", () => {
 		expect(filterSharedInByBlocked([], blockedUsersFixture())).toEqual([])
-	})
-})
-
-describe("staleBlockedSelectionUuids", () => {
-	it("returns the uuids of now-blocked selected items, root and nested", () => {
-		const rootBlocked = narrowItem(mockSharedRootDir(testUuid("sel-root-blocked"), BLOCKED_ROLE))
-		const nestedBlocked = narrowItem({ ...mockSharedDir(testUuid("sel-nested-blocked")), sharingRole: BLOCKED_ROLE })
-		const rootOk = narrowItem(mockSharedRootDir(testUuid("sel-root-ok"), OK_ROLE))
-
-		const result = staleBlockedSelectionUuids([rootBlocked, nestedBlocked, rootOk], blockedUsersFixture())
-
-		expect(result).toEqual([rootBlocked.data.uuid, nestedBlocked.data.uuid])
-	})
-
-	it("never purges an item with unresolved identity, even against a non-empty blocked set", () => {
-		const plain = narrowItem(mockDir({ uuid: testUuid("sel-plain") }))
-
-		expect(staleBlockedSelectionUuids([plain], blockedUsersFixture())).toEqual([])
-	})
-
-	it("returns an empty array when nothing in the selection is blocked", () => {
-		const rootOk = narrowItem(mockSharedRootDir(testUuid("sel-ok"), OK_ROLE))
-
-		expect(staleBlockedSelectionUuids([rootOk], blockedUsersFixture())).toEqual([])
-	})
-
-	it("returns an empty array for an empty selection", () => {
-		expect(staleBlockedSelectionUuids([], blockedUsersFixture())).toEqual([])
-	})
-})
-
-describe("staleSelectionUuids", () => {
-	it("returns the uuids of selected items no longer present in the live set", () => {
-		const a = narrowItem(mockDir({ uuid: testUuid("live-a") }))
-		const b = narrowItem(mockDir({ uuid: testUuid("live-b") }))
-		const dropped = narrowItem(mockFile({ uuid: testUuid("dropped") }))
-
-		const result = staleSelectionUuids([a, dropped, b], [a, b])
-
-		expect(result).toEqual([dropped.data.uuid])
-	})
-
-	// Pins the case a push-fed effect must get right: an unchanged live set (e.g. a heartbeat) never
-	// drops a still-present selection.
-	it("returns an empty array when every selected item is still live", () => {
-		const a = narrowItem(mockDir({ uuid: testUuid("still-a") }))
-		const b = narrowItem(mockFile({ uuid: testUuid("still-b") }))
-
-		expect(staleSelectionUuids([a, b], [a, b])).toEqual([])
-	})
-
-	it("returns an empty array for an empty selection", () => {
-		const a = narrowItem(mockDir({ uuid: testUuid("live-only") }))
-
-		expect(staleSelectionUuids([], [a])).toEqual([])
-	})
-
-	it("drops every selected uuid when the live set is empty", () => {
-		const a = narrowItem(mockDir({ uuid: testUuid("now-gone-a") }))
-		const b = narrowItem(mockFile({ uuid: testUuid("now-gone-b") }))
-
-		expect(staleSelectionUuids([a, b], [])).toEqual([a.data.uuid, b.data.uuid])
-	})
-})
-
-describe("hiddenSelectionUuids", () => {
-	it("returns the selected uuids the hide filter removed from the display", () => {
-		const kept = narrowItem(mockDir({ uuid: testUuid("hid-kept") }))
-		const gone = narrowItem(mockFile({ uuid: testUuid("hid-gone") }))
-
-		expect(hiddenSelectionUuids([kept, gone], [gone.data.uuid])).toEqual([gone.data.uuid])
-	})
-
-	// The rename case: the store still holds the PRE-rename snapshot, so the purge has to be driven by
-	// the display pipeline's own output rather than by the selected items' own names.
-	it("purges by uuid, never by the selected item's own (possibly stale) name", () => {
-		const renamed = narrowItem(mockDir({ uuid: testUuid("hid-renamed"), meta: { type: "decoded", data: { name: "notes" } } }))
-
-		expect(hiddenSelectionUuids([renamed], [renamed.data.uuid])).toEqual([renamed.data.uuid])
-	})
-
-	it("returns an empty array when nothing selected is hidden", () => {
-		const kept = narrowItem(mockDir({ uuid: testUuid("hid-none") }))
-
-		expect(hiddenSelectionUuids([kept], [])).toEqual([])
-		expect(hiddenSelectionUuids([], [testUuid("hid-other")])).toEqual([])
 	})
 })
 

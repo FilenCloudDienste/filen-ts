@@ -1,7 +1,7 @@
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import { clampListboxIndex } from "@/features/drive/lib/listbox"
 import { SPREADSHEET_EXTENSIONS } from "@/features/spreadsheet/lib/fileKind"
-import { CODE_FILE_EXTENSIONS } from "@filen/shared"
+import { CODE_FILE_EXTENSIONS, extensionStart } from "@filen/shared"
 
 // Every previewable file resolves to one of these; "other" is the download-only fallback (no viewer,
 // ever — canPreview excludes it unconditionally).
@@ -106,9 +106,9 @@ const EXTENSION_CATEGORIES: ReadonlyMap<string, PreviewCategory> = buildExtensio
 // ".gitignore", where the only "." is the leading one — not a real extension). Exported for
 // textViewer.tsx (resolves a CodeMirror language the same way previewType resolves a category).
 export function extensionOf(name: string): string {
-	const dot = name.lastIndexOf(".")
+	const dot = extensionStart(name)
 
-	return dot > 0 && dot < name.length - 1 ? name.slice(dot + 1).toLowerCase() : ""
+	return dot === -1 ? "" : name.slice(dot + 1).toLowerCase()
 }
 
 export function previewCategoryForExtension(ext: string): PreviewCategory | null {

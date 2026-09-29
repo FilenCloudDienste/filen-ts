@@ -43,6 +43,8 @@ vi.mock("@/features/drive/store/useDrive.store", () => ({
 vi.mock("@/features/drive/driveSelectors", () => ({
 	hiddenFilterAppliesTo: vi.fn(() => false),
 	isFileItem: (item: { type: string }) => item.type === "file" || item.type === "sharedFile" || item.type === "sharedRootFile",
+	isDirectoryItem: (item: { type: string }) =>
+		item.type === "directory" || item.type === "sharedDirectory" || item.type === "sharedRootDirectory",
 	resolveDriveContainingDirectoryTarget: vi.fn(() => null),
 	resolveDriveNavigationTarget: vi.fn(() => null),
 	everyItemAlreadyIn: (items: { data: { parent?: string } }[], parentUuid: string) =>

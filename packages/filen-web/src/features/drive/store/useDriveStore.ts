@@ -1,5 +1,5 @@
 import { create } from "zustand"
-import { toggleInArray, removeSelectedIds } from "@filen/shared"
+import { toggleInArray, removeSelectedIds, pruneSelection } from "@filen/shared"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { driveRowKey } from "@/features/drive/lib/rowKey"
 
@@ -19,6 +19,7 @@ interface DriveState {
 	setSelectedItems: (next: DriveItem[] | ((prev: DriveItem[]) => DriveItem[])) => void
 	toggleSelectedItem: (item: DriveItem) => void
 	removeFromSelection: (uuids: string[]) => void
+	pruneSelection: (keep: (item: DriveItem) => boolean) => void
 	removeRowsFromSelection: (rows: DriveItem[]) => void
 	clearSelectedItems: () => void
 	pendingReveal: PendingReveal | null
@@ -58,6 +59,14 @@ export const useDriveStore = create<DriveState>(set => ({
 			}
 
 			return { selectedItems: next }
+		})
+	},
+	// Drops every selected row failing `keep`; same no-op-without-update rule as removeFromSelection.
+	pruneSelection: keep => {
+		set(state => {
+			const next = pruneSelection(state.selectedItems, keep)
+
+			return next === state.selectedItems ? state : { selectedItems: next }
 		})
 	},
 	removeRowsFromSelection: rows => {

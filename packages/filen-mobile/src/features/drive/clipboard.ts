@@ -1,5 +1,6 @@
 import { AnyNormalDir_Tags, type AnyNormalDir } from "@filen/sdk-rs"
 import type { DriveItem } from "@/types"
+import { isDirectoryItem } from "@/features/drive/driveSelectors"
 import type { CopyDestination } from "@/features/copy/copyAdapter"
 import type { DriveClipboardEntry } from "@/features/drive/store/useDriveClipboard.store"
 import { unwrapParentUuid } from "@/lib/sdkUnwrap"
@@ -7,10 +8,6 @@ import cache from "@/lib/cache"
 
 // Deep enough for any real tree; a longer chain is treated as unresolved.
 const MAX_ANCESTRY_DEPTH = 64
-
-function isDirectoryItem(item: DriveItem): boolean {
-	return item.type === "directory" || item.type === "sharedDirectory" || item.type === "sharedRootDirectory"
-}
 
 function parentUuidOf(item: DriveItem): string | null {
 	return item.type === "file" || item.type === "directory" ? unwrapParentUuid(item.data.parent) : null

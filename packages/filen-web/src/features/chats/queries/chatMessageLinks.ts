@@ -3,7 +3,8 @@ import type { LinkedFile } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
 import { linkedFileIntoDriveItem } from "@/features/drive/lib/item"
 import { previewType, type PreviewCategory } from "@/features/drive/lib/preview.logic"
-import { embedCandidatesForLinks, type FilenPublicLink } from "@/features/chats/lib/embeds.logic"
+import type { FilenPublicLink } from "@filen/shared"
+import { embedCandidatesForLinks } from "@/features/chats/lib/embeds.logic"
 
 // Per-message embed resolution — the async leg behind embeds.logic.ts's pure classification, which
 // only ever yields Filen public links. Each is a metadata-only read (the worker's getLinkedFileAnon /
@@ -47,8 +48,8 @@ type ResolvedFilenLinkData = Extract<ChatLinkResolution, { success: true }>["dat
 
 async function resolveFilenLinkData(link: FilenPublicLink): Promise<ResolvedFilenLinkData | null> {
 	try {
-		if (link.kind === "file") {
-			const file = await sdkApi.getLinkedFileAnon(link.linkUuid, link.key)
+		if (link.type === "file") {
+			const file = await sdkApi.getLinkedFileAnon(link.uuid, link.key)
 
 			return {
 				type: "file",
@@ -59,7 +60,7 @@ async function resolveFilenLinkData(link: FilenPublicLink): Promise<ResolvedFile
 			}
 		}
 
-		const info = await sdkApi.getDirPublicLinkInfoAnon(link.linkUuid, link.key)
+		const info = await sdkApi.getDirPublicLinkInfoAnon(link.uuid, link.key)
 		const meta = info.root.inner.meta
 
 		return {

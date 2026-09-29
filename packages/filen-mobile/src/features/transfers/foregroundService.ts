@@ -6,7 +6,7 @@ import notifee, {
 	EventType,
 	type Event
 } from "react-native-notify-kit"
-import { bpsToReadable } from "@filen/shared"
+import { formatBytesPerSecond } from "@filen/shared"
 import i18n from "@/lib/i18n"
 import secureStore from "@/lib/secureStore"
 import { withSystemPresentation } from "@/lib/systemPresentation"
@@ -312,7 +312,7 @@ class ForegroundService {
 	private async display(progress: TransferProgressSnapshot): Promise<void> {
 		const { count, progress: ratio, speed, copyingItems } = progress
 		const percent = Math.round(ratio * 100)
-		const speedText = speed > 0 ? bpsToReadable(speed) : "—"
+		const speedText = speed > 0 ? formatBytesPerSecond(speed) : "—"
 		// `count` stays a number so i18next selects the right plural form; `percent` is passed as a
 		// string because i18next's TS types collapse the interpolation overload once a key has 3+
 		// variables and one is numeric — stringifying it keeps the call fully typed.

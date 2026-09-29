@@ -1,3 +1,5 @@
+import { extensionStart } from "./fileExtensions"
+
 // How an open editor answers a newer version of what it edits, saved elsewhere: another device, another
 // tab, another participant, or a version restore. Shared by the web and mobile editors; each maps its own
 // item shapes onto these.
@@ -96,9 +98,9 @@ export async function conflictCopyName(
 	label: (args: { base: string; date: string; ext: string }) => string,
 	taken: (candidate: string) => Promise<boolean>
 ): Promise<string> {
-	const dot = name.lastIndexOf(".")
-	const ext = dot > 0 && dot < name.length - 1 ? name.slice(dot) : ""
-	const base = name.slice(0, name.length - ext.length)
+	const dot = extensionStart(name)
+	const ext = dot === -1 ? "" : name.slice(dot)
+	const base = dot === -1 ? name : name.slice(0, dot)
 	const date = conflictCopyStamp(now)
 
 	for (let attempt = 1; ; attempt++) {

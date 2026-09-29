@@ -1,6 +1,6 @@
 import * as Comlink from "comlink"
 import type { File as SdkFile } from "@filen/sdk-rs"
-import { sumBytes } from "@filen/shared"
+import { extensionStart, sumBytes } from "@filen/shared"
 import { sdkApi } from "@/lib/sdk/client"
 import { attemptOp, runOp } from "@/lib/actions/outcome"
 import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
@@ -87,8 +87,8 @@ let lastAttachmentStamp = 0
 function uniqueAttachmentName(name: string): string {
 	lastAttachmentStamp = Math.max(Date.now(), lastAttachmentStamp + 1)
 
-	const dot = name.lastIndexOf(".")
-	const ext = dot > 0 && dot < name.length - 1 ? name.slice(dot) : ""
+	const dot = extensionStart(name)
+	const ext = dot === -1 ? "" : name.slice(dot)
 
 	return `${name.slice(0, name.length - ext.length)}.${String(lastAttachmentStamp)}${ext}`
 }

@@ -6,13 +6,14 @@ import { driveItemDisplayName } from "@/lib/decryption"
 import Thumbnail from "@/features/drive/components/item/thumbnail"
 import { useTranslation } from "react-i18next"
 import type { DriveItem } from "@/types"
+import { isDirectoryItem } from "@/features/drive/driveSelectors"
 
 const DriveItemHero = ({ item, size = 128 }: { item: DriveItem; size?: number }) => {
 	const { t } = useTranslation()
 
 	return (
 		<View className="bg-transparent items-center justify-center flex-col px-4">
-			{item.type === "directory" || item.type === "sharedDirectory" || item.type === "sharedRootDirectory" ? (
+			{isDirectoryItem(item) ? (
 				<DirectoryIcon
 					color={item.type === "directory" ? item.data.color : DirColor.Default.new()}
 					width={size}
@@ -36,11 +37,7 @@ const DriveItemHero = ({ item, size = 128 }: { item: DriveItem; size?: number })
 			>
 				{driveItemDisplayName(item)}
 			</Text>
-			<Text className="text-muted-foreground">
-				{item.type === "directory" || item.type === "sharedDirectory" || item.type === "sharedRootDirectory"
-					? t("directory")
-					: t("file")}
-			</Text>
+			<Text className="text-muted-foreground">{isDirectoryItem(item) ? t("directory") : t("file")}</Text>
 		</View>
 	)
 }

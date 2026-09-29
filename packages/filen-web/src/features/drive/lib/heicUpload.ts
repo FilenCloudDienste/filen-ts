@@ -1,5 +1,5 @@
 import { type, type Type } from "arktype"
-import { Semaphore } from "@filen/shared"
+import { extensionStart, Semaphore } from "@filen/shared"
 import { kvPreference } from "@/lib/storage/preference"
 import { extensionOf, HEIC_EXTENSIONS } from "@/features/drive/lib/preview.logic"
 import { transformHeicBytesOwned } from "@/features/preview/lib/heicTransform"
@@ -30,9 +30,9 @@ export function isHeicUploadCandidate(file: File): boolean {
 // (maybeConvertHeicForUpload, useDriveUpload.ts): only the extension changes, the rest of the name
 // (including any dots within it) is preserved untouched.
 export function renameToJpg(name: string): string {
-	const ext = extensionOf(name)
+	const dot = extensionStart(name)
 
-	return `${ext.length > 0 ? name.slice(0, -(ext.length + 1)) : name}.jpg`
+	return `${dot === -1 ? name : name.slice(0, dot)}.jpg`
 }
 
 export interface HeicUploadConvertDeps {

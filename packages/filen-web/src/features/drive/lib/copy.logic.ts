@@ -10,6 +10,7 @@ import type {
 } from "@filen/sdk-rs"
 import {
 	createCopyJob as createSharedCopyJob,
+	isCopyJobRunning,
 	type CopyJob as SharedCopyJob,
 	type CopyReportInput,
 	type CopyUpdateEvents,
@@ -210,13 +211,13 @@ export function copiedTopLevel(settlement: CopySettlement, delivered: readonly D
 // A settled job whose stop asked for its copies to go to the trash, still moving them there. The job
 // keeps that batch until its trash ends, whatever a late item's trash records meanwhile.
 export function isCopyTrashPending(job: CopyJob): boolean {
-	return job.outcome.status !== "running" && job.cancelRequest === "trash" && job.created.length > 0
+	return !isCopyJobRunning(job) && job.cancelRequest === "trash" && job.created.length > 0
 }
 
 // A settled job's failures can go into a new job once its stop is done moving its copies to the trash:
 // whether the retry may take the job's row depends on how that went.
 export function canRetryCopy(job: CopyJob): boolean {
-	return job.outcome.status !== "running" && job.retryable.length > 0 && !isCopyTrashPending(job)
+	return !isCopyJobRunning(job) && job.retryable.length > 0 && !isCopyTrashPending(job)
 }
 
 // Each failed item goes back to the directory it was meant for, under the name it was planned with.

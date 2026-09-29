@@ -1,4 +1,5 @@
 import type { NoteType } from "@filen/sdk-rs"
+import { extensionStart } from "@filen/shared"
 import { extensionOf, codeMirrorSupportedExtensions } from "@/features/drive/lib/preview.logic"
 import { sanitizeRichTextHtml } from "@/features/notes/lib/sanitizeRichText"
 
@@ -59,9 +60,9 @@ export function sanitizeImportedContent(noteType: NoteType, rawText: string): st
 }
 
 // The new note's title, seeded from the file name with its extension stripped — falls back to the
-// whole file name when it carries none (extensionOf's own "no real extension" case, e.g. a dotfile).
+// whole file name when it carries none (e.g. a dotfile).
 export function titleFromFilename(filename: string): string {
-	const ext = extensionOf(filename)
+	const dot = extensionStart(filename)
 
-	return ext.length > 0 ? filename.slice(0, filename.length - ext.length - 1) : filename
+	return dot === -1 ? filename : filename.slice(0, dot)
 }

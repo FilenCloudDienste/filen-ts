@@ -1,7 +1,7 @@
 import { useShallow } from "zustand/shallow"
 import { router } from "@/lib/router"
 import { ActivityIndicator } from "react-native"
-import { bpsToReadable } from "@filen/shared"
+import { formatBytesPerSecond } from "@filen/shared"
 import { useTranslation } from "react-i18next"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import useTransfersStore, { type Transfer } from "@/features/transfers/store/useTransfers.store"
@@ -57,7 +57,7 @@ const SpeedDisplay = () => {
 			numberOfLines={1}
 			ellipsizeMode="middle"
 		>
-			{bpsToReadable(speed)}
+			{formatBytesPerSecond(speed)}
 		</Text>
 	)
 }

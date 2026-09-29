@@ -18,7 +18,7 @@ import {
 	CircleHelpIcon,
 	type LucideIcon
 } from "lucide-react"
-import { formatBytes } from "@filen/shared"
+import { formatBytesPerSecond } from "@filen/shared"
 import { cn } from "@filen/shared"
 import { DEFAULT_CONTACTS_SECTION_FILTER } from "@/features/contacts/components/contactsList.logic"
 import { flushOutboxes, performLogout } from "@/features/shell/lib/performLogout"
@@ -315,11 +315,7 @@ function TransfersEntry({ active, reordering }: RailEntryProps) {
 			icon={ArrowDownUpIcon}
 			linkOptions={{ to: "/transfers" }}
 			badgeCount={activeCount}
-			tooltipExtra={
-				showAggregate ? (
-					<span className="text-background/60"> · {t("transfers:transfersAggregateSpeed", { speed: formatBytes(speed) })}</span>
-				) : null
-			}
+			tooltipExtra={showAggregate ? <span className="text-background/60"> · {formatBytesPerSecond(speed)}</span> : null}
 		>
 			{showAggregate ? (
 				<span

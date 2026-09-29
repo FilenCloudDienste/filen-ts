@@ -3,7 +3,7 @@ import { useHeaderHeight } from "expo-router/react-navigation"
 import { Platform } from "react-native"
 import { useStore } from "zustand"
 import { KeyboardAwareScrollView } from "@/components/ui/view"
-import { checklistParser, type ChecklistItem } from "@filen/shared"
+import { checklistParser, patchChecklistItem, type ChecklistItem } from "@filen/shared"
 import Item from "@/features/notes/components/content/checklist/item"
 import { createChecklistStore, ChecklistStoreContext } from "@/features/notes/store/useChecklist.store"
 import { useShallow } from "zustand/shallow"
@@ -54,16 +54,7 @@ const Checklist = ({
 	const headerHeight = useHeaderHeight()
 
 	const onContentChange = ({ item, content }: { item: ChecklistItem; content: string }) => {
-		store.getState().setParsed(prev =>
-			prev.map(i =>
-				i.id === item.id
-					? {
-							...i,
-							content
-						}
-					: i
-			)
-		)
+		store.getState().setParsed(prev => patchChecklistItem(prev, item.id, { content }))
 
 		if (didTypeRef.current && onChange) {
 			const parsed = store.getState().parsed
@@ -73,16 +64,7 @@ const Checklist = ({
 	}
 
 	const onCheckedChange = ({ item, checked }: { item: ChecklistItem; checked: boolean }) => {
-		store.getState().setParsed(prev =>
-			prev.map(i =>
-				i.id === item.id
-					? {
-							...i,
-							checked
-						}
-					: i
-			)
-		)
+		store.getState().setParsed(prev => patchChecklistItem(prev, item.id, { checked }))
 
 		if (onChange) {
 			const parsed = store.getState().parsed

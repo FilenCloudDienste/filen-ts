@@ -1,4 +1,4 @@
-import { parseFilenPublicLink } from "@/features/chats/lib/embeds.logic"
+import { parseFilenPublicLink } from "@filen/shared"
 
 // Per-domain trust confirmation for a chat message's plain link, before it's ever opened in a new tab.
 // Scoped to EXTERNAL links only: a Filen public link (parseFilenPublicLink matches) is this

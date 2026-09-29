@@ -2,9 +2,10 @@ import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import type { Chat } from "@filen/sdk-rs"
+import { toggleInSet } from "@filen/shared"
 import { createChat } from "@/features/chats/lib/actions"
 import { useContactsQuery } from "@/features/contacts/queries/contacts"
-import { togglePickerContact, resolveSelectedContacts } from "@/features/contacts/lib/contactPicker.logic"
+import { resolveSelectedContacts } from "@/features/contacts/lib/contactPicker.logic"
 import { ContactPickerList } from "@/features/contacts/components/contactPickerList"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { useIsOnline } from "@/lib/useIsOnline"
@@ -44,7 +45,7 @@ export function CreateChatDialog({ onClose, onCreated }: CreateChatDialogProps) 
 	})
 
 	function toggle(uuid: string): void {
-		setSelected(prev => togglePickerContact(prev, uuid))
+		setSelected(prev => toggleInSet(prev, uuid))
 	}
 
 	async function handleCreate(): Promise<void> {

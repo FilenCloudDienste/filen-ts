@@ -1,0 +1,89 @@
+import { afterEach, describe, expect, it } from "vitest"
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { describeLicensing, poolLicenseTexts, repositoryOf, spdxOf, type PoolableNotice } from "@filen/shared/tooling"
+
+const APACHE =
+	"Apache License\nVersion 2.0, January 2004\n\nTERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION\n\nAPPENDIX: How to apply the Apache License to your work."
+
+const dirs: string[] = []
+
+function packageDir(files: Record<string, string>): string {
+	const dir = mkdtempSync(join(tmpdir(), "notices-"))
+
+	dirs.push(dir)
+
+	for (const [name, text] of Object.entries(files)) {
+		writeFileSync(join(dir, name), text)
+	}
+
+	return dir
+}
+
+afterEach(() => {
+	for (const dir of dirs.splice(0)) {
+		rmSync(dir, { recursive: true, force: true })
+	}
+})
+
+describe("describeLicensing", () => {
+	it("elects the lightest alternative and lifts the holder out of the terms", () => {
+		const dir = packageDir({
+			"LICENSE-MIT": "MIT License\nCopyright (c) 2020 Someone\n\nPermission is hereby granted.",
+			"LICENSE-APACHE": APACHE
+		})
+
+		expect(describeLicensing(dir, "(MIT OR Apache-2.0)")).toEqual({
+			copyright: ["Copyright (c) 2020 Someone"],
+			terms: ["MIT License\n\nPermission is hereby granted."]
+		})
+	})
+
+	it("ships every license file for a conjunction", () => {
+		const dir = packageDir({
+			"LICENSE-MIT": "Permission is hereby granted.",
+			"LICENSE-ZLIB": "This software is provided as-is."
+		})
+
+		expect(describeLicensing(dir, "MIT AND Zlib").terms.sort()).toEqual(["Permission is hereby granted.", "This software is provided as-is."])
+	})
+
+	it("describes nothing without a directory", () => {
+		expect(describeLicensing(null, "MIT")).toEqual({ copyright: [], terms: [] })
+	})
+})
+
+describe("poolLicenseTexts", () => {
+	function notice(license: string, terms: string[]): PoolableNotice {
+		return { license, terms, texts: [] }
+	}
+
+	it("pools whitespace variants and lends the Apache text only to Apache-elected packages", () => {
+		const mit = notice("MIT", ["Permission is  hereby\ngranted."])
+		const wrapped = notice("MIT", ["Permission is hereby granted."])
+		const apache = notice("Apache-2.0", [APACHE])
+		const bareApache = notice("Apache-2.0 OR GPL-3.0", [])
+		const bareMit = notice("MIT OR Apache-2.0", [])
+
+		const texts = poolLicenseTexts([mit, wrapped, apache, bareApache, bareMit])
+
+		expect(texts).toEqual(["Permission is  hereby\ngranted.", APACHE])
+		expect([mit.texts, wrapped.texts, apache.texts, bareApache.texts, bareMit.texts]).toEqual([[0], [0], [1], [1], []])
+	})
+
+	it("throws when no canonical Apache text was pooled", () => {
+		expect(() => poolLicenseTexts([notice("MIT", ["Permission is hereby granted."])])).toThrow(/canonical Apache-2.0/)
+	})
+})
+
+describe("manifest fields", () => {
+	it("reads SPDX ids and repository urls in their legacy shapes", () => {
+		expect(spdxOf("MIT")).toBe("MIT")
+		expect(spdxOf({ type: "ISC" })).toBe("ISC")
+		expect(spdxOf([{ type: "BSD-3-Clause" }])).toBe("BSD-3-Clause")
+		expect(spdxOf(undefined)).toBe("UNKNOWN")
+		expect(repositoryOf({ url: "git+https://github.com/a/b.git" })).toBe("https://github.com/a/b")
+		expect(repositoryOf(undefined)).toBeNull()
+	})
+})

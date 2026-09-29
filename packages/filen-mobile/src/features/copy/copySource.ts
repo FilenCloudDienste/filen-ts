@@ -1,5 +1,6 @@
 import { AnyItemWithContext, AnyItemWithContext_Tags, type CopyEntry } from "@filen/sdk-rs"
 import type { DriveItem } from "@/types"
+import { isDirectoryItem } from "@/features/drive/driveSelectors"
 import { driveItemToAnyDirWithContext, driveItemToAnyFile } from "@/lib/sdkSources"
 import type { CopyJobGlyph } from "@/features/copy/copyAdapter"
 
@@ -34,7 +35,7 @@ export function copyGlyphForItems(items: readonly DriveItem[]): CopyJobGlyph {
 		return "items"
 	}
 
-	return only.type === "directory" || only.type === "sharedDirectory" || only.type === "sharedRootDirectory" ? "directory" : "file"
+	return isDirectoryItem(only) ? "directory" : "file"
 }
 
 export function copyGlyphForCopyItems(items: readonly AnyItemWithContext[]): CopyJobGlyph {

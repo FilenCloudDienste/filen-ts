@@ -1,4 +1,4 @@
-import { checklistParser } from "@filen/shared"
+import { checklistParser, extensionStart } from "@filen/shared"
 import type { NoteType } from "@filen/sdk-rs"
 import { extensionOf, codeMirrorLanguageFor } from "@/features/drive/lib/preview.logic"
 import { sanitizeRichTextHtml } from "@/features/notes/lib/sanitizeRichText"
@@ -115,9 +115,9 @@ export function dedupeExportNames(names: readonly string[]): string[] {
 			return name
 		}
 
-		const dot = name.lastIndexOf(".")
-		const base = dot > 0 ? name.slice(0, dot) : name
-		const ext = dot > 0 ? name.slice(dot) : ""
+		const dot = extensionStart(name)
+		const base = dot === -1 ? name : name.slice(0, dot)
+		const ext = dot === -1 ? "" : name.slice(dot)
 
 		return `${base} (${String(count + 1)})${ext}`
 	})

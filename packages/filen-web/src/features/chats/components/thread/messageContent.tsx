@@ -1,10 +1,9 @@
 import { Fragment } from "react"
 import { useTranslation } from "react-i18next"
 import type { Chat } from "@filen/sdk-rs"
-import { cn, contactDisplayName, isEmojiOnly, type MessageSegment } from "@filen/shared"
+import { cn, contactDisplayName, isEmojiOnly, parseFilenPublicLink, type MessageSegment } from "@filen/shared"
 import { hardenLinkHref } from "@/features/chats/lib/regexed.logic"
 import { emojiForShortcode, customEmojiImageForShortcode } from "@/features/chats/lib/emoji"
-import { parseFilenPublicLink } from "@/features/chats/lib/embeds.logic"
 import { TrustedExternalLink } from "@/features/chats/components/thread/trustedExternalLink"
 import { ExternalAnchor } from "@/features/chats/components/thread/externalAnchor"
 

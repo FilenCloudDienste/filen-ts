@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest"
-import { bpsToReadable, createCopyJob as createSharedCopyJob } from "@filen/shared"
+import { createCopyJob as createSharedCopyJob, formatBytesPerSecond } from "@filen/shared"
 import i18next, { type TFunction } from "i18next"
 import { copyFinishedTitle, copyingItemCount, copyNotesText, copyRowStatus } from "@/features/copy/copyRowText"
 import useCopyJobsStore from "@/features/copy/store/useCopyJobs.store"
@@ -71,7 +71,7 @@ describe("copyRowStatus", () => {
 		})
 
 		expect(copyRowStatus(copying, false, t)).toBe(
-			`copy_progress_files_speed:{"done":340,"count":812,"percent":"43","speed":"${bpsToReadable(2_202_010)}"}`
+			`copy_progress_files_speed:{"done":340,"count":812,"percent":"43","speed":"${formatBytesPerSecond(2_202_010)}"}`
 		)
 		// No rate yet, or a zero rate: the line without it.
 		expect(copyRowStatus({ ...copying, bytesPerSecond: 0 }, false, t)).toBe(
@@ -88,7 +88,7 @@ describe("copyRowStatus", () => {
 
 		expect(copyRowStatus(single, false, realT)).toBe("0 of 1 file · 37%")
 		expect(copyRowStatus({ ...single, bytesPerSecond: 2_202_010 }, false, realT)).toBe(
-			`0 of 1 file · 37% · ${bpsToReadable(2_202_010)}`
+			`0 of 1 file · 37% · ${formatBytesPerSecond(2_202_010)}`
 		)
 		expect(copyRowStatus({ ...single, totals: { dirs: 0, files: 2, bytes: 1000 } }, false, realT)).toBe("0 of 2 files · 37%")
 	})

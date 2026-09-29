@@ -1,17 +1,18 @@
 import { Buffer } from "buffer"
 import { describe, expect, it } from "vitest"
-import { parsePublicLink, buildPublicLinkUrl, resolveRouteLink, deriveLegacyRedirect } from "@/features/publicLinks/lib/format.logic"
+import { parseFilenPublicLink } from "@filen/shared"
+import { buildPublicLinkUrl, resolveRouteLink, deriveLegacyRedirect } from "@/features/publicLinks/lib/format.logic"
 
-// Version 4 (third group starts "4"), variant 8 (fourth "8") — parsePublicLink now delegates to
-// @filen/shared's parseFilenPublicLink, which validates both nibbles via the 'uuid' package.
+// Version 4 (third group starts "4"), variant 8 (fourth "8") — @filen/shared's parseFilenPublicLink
+// validates both nibbles via the 'uuid' package.
 const UUID = "11111111-2222-4333-8444-555555555555"
 // A realistic 32-char plaintext key → 64 hex chars, comfortably above the route's min-fragment floor.
 const KEY_PLAINTEXT = "0123456789abcdef0123456789abcdef"
 const KEY_HEX = Buffer.from(KEY_PLAINTEXT, "utf-8").toString("hex")
 
-// parsePublicLink's own format-recognition cases (new/legacy eras, rejections) live in
-// @filen/shared's src/tests/publicLink.test.ts, against the parseFilenPublicLink it delegates to.
-// This file keeps only what stays web-local: building links and route-side resolution.
+// Format-recognition cases (new/legacy eras, rejections) live in @filen/shared's
+// src/tests/publicLink.test.ts. This file keeps what stays web-local: building links (checked against
+// the shared parser) and route-side resolution.
 
 describe("buildPublicLinkUrl", () => {
 	it("builds the NEW file format (/f/, hex key in a literal-# fragment)", () => {
@@ -22,13 +23,17 @@ describe("buildPublicLinkUrl", () => {
 		expect(buildPublicLinkUrl("directory", UUID, KEY_PLAINTEXT)).toBe(`https://app.filen.io/d/${UUID}#${KEY_HEX}`)
 	})
 
-	it("round-trips through parsePublicLink for a file", () => {
-		expect(parsePublicLink(buildPublicLinkUrl("file", UUID, KEY_PLAINTEXT))).toEqual({ kind: "file", uuid: UUID, key: KEY_PLAINTEXT })
+	it("round-trips through parseFilenPublicLink for a file", () => {
+		expect(parseFilenPublicLink(buildPublicLinkUrl("file", UUID, KEY_PLAINTEXT))).toEqual({
+			type: "file",
+			uuid: UUID,
+			key: KEY_PLAINTEXT
+		})
 	})
 
-	it("round-trips through parsePublicLink for a directory", () => {
-		expect(parsePublicLink(buildPublicLinkUrl("directory", UUID, KEY_PLAINTEXT))).toEqual({
-			kind: "directory",
+	it("round-trips through parseFilenPublicLink for a directory", () => {
+		expect(parseFilenPublicLink(buildPublicLinkUrl("directory", UUID, KEY_PLAINTEXT))).toEqual({
+			type: "directory",
 			uuid: UUID,
 			key: KEY_PLAINTEXT
 		})

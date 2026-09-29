@@ -65,8 +65,8 @@ describe("TransfersScreen — aggregate readout", () => {
 		const { container } = render(createElement(TransfersScreen))
 		const header = within(container.querySelector("header") ?? container)
 
-		// transfersAggregateSpeed's own "{{speed}}/s" shape — 1_000_000 bytes over the 1s window, with
-		// its decimal kept — rendered as text, not just the pure computeTransfersSpeed number.
+		// 1_000_000 bytes over the 1s window, with its decimal kept, rendered as text rather than just the
+		// pure computeTransfersSpeed number.
 		// The speed last: the one figure that keeps changing length, with nothing after it to push.
 		expect(header.getByText("1 active · 50% · 976.6 KiB/s")).toBeTruthy()
 	})

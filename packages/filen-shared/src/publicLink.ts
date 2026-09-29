@@ -14,7 +14,7 @@ function nodeBuffer(): BufferLike {
 	return (globalThis as unknown as { Buffer: BufferLike }).Buffer
 }
 
-const UUID_SUB = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+export const UUID_SUB = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 
 // NEW path format (what the current web app builds): <origin>/f|d/<uuid>(#|%23)<hexkey>. Its letters
 // read f = file, d = directory, the opposite of the legacy naming below; the scheme stays as shipped.
@@ -32,7 +32,7 @@ const HEX_64_RE = /^[0-9A-Fa-f]{64}$/
 
 // Even-length, all-hex → its UTF-8 plaintext. Anything else (odd length, empty) is null — the caller
 // treats that as "not a recognizable link", never a partial parse.
-function decodeHexKey(hex: string): string | null {
+export function decodeHexKey(hex: string): string | null {
 	if (hex.length === 0 || hex.length % 2 !== 0) {
 		return null
 	}
@@ -44,7 +44,14 @@ function decodeHexKey(hex: string): string | null {
 	}
 }
 
-export function parseFilenPublicLink(url: string): { uuid: string; key: string; type: "file" | "directory" } | null {
+export type FilenPublicLink = {
+	uuid: string
+	// Plaintext key (already hex-decoded), what getLinkedFile/getDirPublicLinkInfo want.
+	key: string
+	type: "file" | "directory"
+}
+
+export function parseFilenPublicLink(url: string): FilenPublicLink | null {
 	if (!url || url.length === 0) {
 		return null
 	}

@@ -23,7 +23,7 @@ import {
 	type LucideIcon
 } from "lucide-react"
 import type { Note, NoteTag } from "@filen/sdk-rs"
-import { cn, aggregateNoteSelectionFlags, DEFAULT_NOTE_TAGS_SORT_BY, type NoteTagsSortBy } from "@filen/shared"
+import { cn, aggregateNoteSelectionFlags, DEFAULT_NOTE_TAGS_SORT_BY, toggleInSet, type NoteTagsSortBy } from "@filen/shared"
 import { useNotes } from "@/features/notes/queries/notes"
 import { useNoteTags } from "@/features/notes/queries/noteTags"
 import { useNotesViewModeQuery, useNoteTagsSortByQuery } from "@/features/notes/queries/preferences"
@@ -385,17 +385,7 @@ export function NotesSidebar() {
 	}
 
 	function toggleTag(uuid: string): void {
-		setExpandedTags(prev => {
-			const next = new Set(prev)
-
-			if (next.has(uuid)) {
-				next.delete(uuid)
-			} else {
-				next.add(uuid)
-			}
-
-			return next
-		})
+		setExpandedTags(prev => toggleInSet(prev, uuid))
 	}
 
 	// Target of every "open the note just created/duplicated" path, including the tag-menu's

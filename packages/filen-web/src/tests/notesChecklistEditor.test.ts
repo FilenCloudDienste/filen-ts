@@ -1,12 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { Checklist } from "@filen/shared"
-import {
-	parseChecklistSeed,
-	serializeChecklist,
-	toggleChecklistItem,
-	setChecklistItemContent,
-	visibleChecklistRows
-} from "@/features/notes/components/editor/checklistEditor.logic"
+import { parseChecklistSeed, serializeChecklist, visibleChecklistRows } from "@/features/notes/components/editor/checklistEditor.logic"
 
 describe("parseChecklistSeed", () => {
 	it("falls back to a single empty unchecked row for empty content", () => {
@@ -57,28 +51,6 @@ describe("serializeChecklist — multi-run consecutive-state grouping", () => {
 		const rows = parseChecklistSeed(html, () => "unused")
 
 		expect(serializeChecklist(rows)).toBe(html)
-	})
-})
-
-describe("toggleChecklistItem / setChecklistItemContent", () => {
-	it("toggles only the targeted row's checked state without mutating the input", () => {
-		const rows: Checklist = [
-			{ id: "1", checked: false, content: "A" },
-			{ id: "2", checked: false, content: "B" }
-		]
-		const next = toggleChecklistItem(rows, "2", true)
-
-		expect(next).not.toBe(rows)
-		expect(next.map(r => r.checked)).toEqual([false, true])
-		expect(rows[1]?.checked).toBe(false)
-	})
-
-	it("sets only the targeted row's content", () => {
-		const rows: Checklist = [{ id: "1", checked: false, content: "old" }]
-		const next = setChecklistItemContent(rows, "1", "new")
-
-		expect(next[0]?.content).toBe("new")
-		expect(rows[0]?.content).toBe("old")
 	})
 })
 

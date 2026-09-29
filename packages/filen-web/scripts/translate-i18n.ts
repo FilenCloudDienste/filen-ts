@@ -201,16 +201,14 @@ function readNamespaceRecord(record: Record<string, unknown>, ns: Namespace, fil
 	return value as Record<string, string>
 }
 
-// Read the English snapshot (the DELTA baseline) — the catalog as of the last translation, nested
-// by namespace like the target catalogs. Returns null when absent (first run / not yet seeded) so
-// the caller re-baselines instead of retranslating everything; throws on a malformed file so a
-// corrupt baseline fails loudly rather than silently re-translating the whole catalog.
-function readSnapshot(): Record<Namespace, Record<string, string>> | null {
-	if (!existsSync(EN_SNAPSHOT_PATH)) {
+// Read a JSON file holding a plain object. Returns null when absent or blank; throws on any other
+// shape so a corrupt file fails loudly instead of silently losing data.
+function readJsonObject(path: string, label: string): Record<string, unknown> | null {
+	if (!existsSync(path)) {
 		return null
 	}
 
-	const raw = readFileSync(EN_SNAPSHOT_PATH, "utf8").trim()
+	const raw = readFileSync(path, "utf8").trim()
 
 	if (raw.length === 0) {
 		return null
@@ -219,10 +217,22 @@ function readSnapshot(): Record<Namespace, Record<string, string>> | null {
 	const parsed: unknown = JSON.parse(raw)
 
 	if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-		throw new Error(".en-snapshot.json is not a JSON object")
+		throw new Error(`${label} is not a JSON object`)
 	}
 
-	const record = parsed as Record<string, unknown>
+	return parsed as Record<string, unknown>
+}
+
+// Read the English snapshot (the DELTA baseline) — the catalog as of the last translation, nested
+// by namespace like the target catalogs. Returns null when absent (first run / not yet seeded) so
+// the caller re-baselines instead of retranslating everything; throws on a malformed file so a
+// corrupt baseline fails loudly rather than silently re-translating the whole catalog.
+function readSnapshot(): Record<Namespace, Record<string, string>> | null {
+	const record = readJsonObject(EN_SNAPSHOT_PATH, ".en-snapshot.json")
+
+	if (record === null) {
+		return null
+	}
 
 	return perNamespace(ns => readNamespaceRecord(record, ns, ".en-snapshot.json"))
 }
@@ -267,28 +277,10 @@ function computeNamespaceDelta(baseline: Record<string, string>, catalog: Record
 // ---------------------------------------------------------------------------
 
 function readTargetCatalog(lang: TargetLanguage): Record<Namespace, Record<string, string>> {
-	const path = join(LOCALES_DIR, `${lang}.json`)
-
-	if (!existsSync(path)) {
-		return perNamespace(() => ({}))
-	}
-
-	const raw = readFileSync(path, "utf8").trim()
-
-	if (raw.length === 0) {
-		return perNamespace(() => ({}))
-	}
-
-	const parsed: unknown = JSON.parse(raw)
-
-	if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-		throw new Error(`Catalog ${lang}.json is not a JSON object`)
-	}
-
-	const record = parsed as Record<string, unknown>
 	const fileLabel = `Catalog ${lang}.json`
+	const record = readJsonObject(join(LOCALES_DIR, `${lang}.json`), fileLabel)
 
-	return perNamespace(ns => readNamespaceRecord(record, ns, fileLabel))
+	return perNamespace(ns => (record === null ? {} : readNamespaceRecord(record, ns, fileLabel)))
 }
 
 // --- CLDR plural expansion -------------------------------------------------
@@ -750,12 +742,14 @@ function sortRecord(record: Record<string, string>): Record<string, string> {
 	return sorted
 }
 
+function writeSortedJson(path: string, byNamespace: Record<Namespace, Record<string, string>>): void {
+	const sorted: Record<Namespace, Record<string, string>> = perNamespace(ns => sortRecord(byNamespace[ns]))
+
+	writeFileSync(path, `${JSON.stringify(sorted, null, "\t")}\n`, "utf8")
+}
+
 function writeCatalog(lang: TargetLanguage, catalog: Record<Namespace, Record<string, string>>): void {
-	const sorted: Record<Namespace, Record<string, string>> = perNamespace(ns => sortRecord(catalog[ns]))
-
-	const json = `${JSON.stringify(sorted, null, "\t")}\n`
-
-	writeFileSync(join(LOCALES_DIR, `${lang}.json`), json, "utf8")
+	writeSortedJson(join(LOCALES_DIR, `${lang}.json`), catalog)
 }
 
 // Rewrite the snapshot to the current English catalog (sorted + trailing newline, like the target
@@ -763,11 +757,7 @@ function writeCatalog(lang: TargetLanguage, catalog: Record<Namespace, Record<st
 // into the same PR as the translations, so the baseline only advances once that PR is merged — an
 // unmerged run keeps re-detecting the same delta.
 function writeSnapshot(): void {
-	const sorted: Record<Namespace, Record<string, string>> = perNamespace(ns => sortRecord(EN_CATALOG[ns]))
-
-	const json = `${JSON.stringify(sorted, null, "\t")}\n`
-
-	writeFileSync(EN_SNAPSHOT_PATH, json, "utf8")
+	writeSortedJson(EN_SNAPSHOT_PATH, EN_CATALOG)
 }
 
 // ---------------------------------------------------------------------------

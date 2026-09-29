@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest"
-import { execFileSync } from "node:child_process"
 import { existsSync, readdirSync, readFileSync } from "node:fs"
 import path from "node:path"
+import { listInstalledNpm } from "@filen/shared/tooling"
 import { LICENSE_TEXTS, THIRD_PARTY_NOTICES } from "@/features/settings/thirdPartyNotices.generated"
 
 /**
@@ -20,62 +20,13 @@ const POD_INFRASTRUCTURE = new Set(["Headers", "Local Podspecs", "Target Support
 
 const PACKAGE_ROOT = path.join(__dirname, "..", "..")
 
-/**
- * The packages pnpm says reach a device — the same query the generator runs, so the two sides of the
- * comparison cannot drift apart.
- *
- * `--prod` follows only `dependencies` edges: a package reachable ONLY through devDependencies is
- * dropped, one reachable through both is kept — the same thing npm's `dev` flag meant, and why
- * @types/react, babel-preset-expo and zod are direct devDependencies that ship. `--no-optional` drops
- * optionalDependencies, whose install set is decided per machine: a macOS run gets the darwin native
- * binaries, CI's Linux run the linux ones, so counting them would make the expectation depend on where
- * the payload was generated.
- *
- * The `...` on the filter keeps everything @filen/shared brings in inside the set; @filen/shared itself is
- * a workspace member, is not reported, and is correctly absent from the payload.
- */
-function installedShippingPackages(): Set<string> {
-	let raw: string
-
-	try {
-		raw = execFileSync("pnpm", ["licenses", "list", "--json", "--prod", "--no-optional", "--filter", "@filen/mobile..."], {
-			cwd: PACKAGE_ROOT,
-			encoding: "utf8",
-			maxBuffer: 256 * 1024 * 1024
-		})
-	} catch (error) {
-		throw new Error(
-			`\`pnpm licenses list\` failed — pnpm 12 must be on PATH and \`pnpm install\` must have run at the repo root: ${
-				error instanceof Error ? error.message : String(error)
-			}`,
-			{ cause: error }
-		)
-	}
-
-	const grouped = JSON.parse(raw) as Record<string, { name?: unknown }[]>
-	const names = new Set<string>()
-
-	for (const entries of Object.values(grouped)) {
-		for (const entry of entries) {
-			if (typeof entry.name === "string" && entry.name.length > 0) {
-				names.add(entry.name)
-			}
-		}
-	}
-
-	if (names.size === 0) {
-		throw new Error("`pnpm licenses list` reported no packages — run `pnpm install` at the repo root")
-	}
-
-	return names
-}
-
 describe("third-party notices payload", () => {
 	it("covers exactly the installed npm packages that ship", () => {
 		// The drift guard, and the reason this file exists: add, remove or bump a runtime dependency
 		// without re-running the generator and this fails, naming what went missing or appeared. No
 		// tolerance — every installed shipping package must be described, and nothing else may be.
-		const expected = installedShippingPackages()
+		// The same query the generator runs, so the two sides of the comparison cannot drift apart.
+		const expected = new Set(listInstalledNpm("@filen/mobile", PACKAGE_ROOT).map(entry => entry.name))
 		const actual = new Set(THIRD_PARTY_NOTICES.filter(notice => notice.ecosystem === "npm").map(notice => notice.name))
 
 		expect([...expected].filter(name => !actual.has(name)).sort()).toEqual([])

@@ -3,21 +3,15 @@ import {
 	parseNumbersFromString,
 	convertTimestampToMs,
 	isValidHexColor,
-	chunkArray,
 	sanitizeFileName,
 	findClosestIndexString,
-	extractLinksFromString,
-	parseYouTubeVideoId,
-	parseXStatusId,
 	ratePasswordStrength,
 	sortParams,
-	jsonBigIntReplacer,
-	jsonBigIntReviver,
 	createExecutableTimeout,
 	fastLocaleCompare,
-	bpsToReadable,
 	formatBytes,
 	formatBytesFixed,
+	formatBytesPerSecond,
 	isAbortError,
 	trimmedOrUndefined
 } from "@filen/shared"
@@ -92,79 +86,113 @@ describe("isValidHexColor", () => {
 	})
 })
 
-describe("chunkArray", () => {
-	it("should split array into chunks", () => {
-		expect(chunkArray([1, 2, 3, 4, 5], 2)).toEqual([[1, 2], [3, 4], [5]])
-	})
-
-	it("should handle exact divisible length", () => {
-		expect(chunkArray([1, 2, 3, 4], 2)).toEqual([
-			[1, 2],
-			[3, 4]
-		])
-	})
-
-	it("should handle empty array", () => {
-		expect(chunkArray([], 3)).toEqual([])
-	})
-
-	it("should handle chunk size larger than array", () => {
-		expect(chunkArray([1, 2], 5)).toEqual([[1, 2]])
-	})
-
-	it("should handle chunk size of 1", () => {
-		expect(chunkArray([1, 2, 3], 1)).toEqual([[1], [2], [3]])
-	})
-})
-
 describe("sanitizeFileName", () => {
-	it("should return filename as-is for valid names", () => {
-		expect(sanitizeFileName("hello.txt")).toBe("hello.txt")
+	it("returns 'file' for empty string", () => {
+		expect(sanitizeFileName("")).toBe("file")
 	})
 
-	it("should replace illegal Windows characters", () => {
-		const result = sanitizeFileName("file<>:\"|?.txt")
-
-		expect(result).not.toContain("<")
-		expect(result).not.toContain(">")
-		expect(result).not.toContain(":")
-		expect(result).not.toContain("\"")
-		expect(result).not.toContain("|")
-		expect(result).not.toContain("?")
-	})
-
-	it("should handle reserved Windows names", () => {
-		const result = sanitizeFileName("CON")
-
-		expect(result).not.toBe("CON")
-		expect(result.startsWith("CON")).toBe(true)
-	})
-
-	it("should strip trailing dots and spaces", () => {
-		expect(sanitizeFileName("file...")).toBe("file")
-	})
-
-	it("should return 'file' for empty result", () => {
+	it("returns 'file' for strings of only dots", () => {
 		expect(sanitizeFileName("...")).toBe("file")
 	})
 
-	it("should use custom replacement character", () => {
-		const result = sanitizeFileName("file:name", "-")
-
-		expect(result).toBe("file-name")
+	it("returns 'file' for strings of only spaces", () => {
+		expect(sanitizeFileName("   ")).toBe("file")
 	})
 
-	it("should remove zero-width characters", () => {
-		const result = sanitizeFileName("file\u200Bname.txt")
-
-		expect(result).toBe("filename.txt")
+	it("returns 'file' for single dot", () => {
+		expect(sanitizeFileName(".")).toBe("file")
 	})
 
-	it("should truncate to 255 bytes", () => {
-		const longName = "a".repeat(300)
-		const result = sanitizeFileName(longName)
+	it("returns 'file' for double dot", () => {
+		expect(sanitizeFileName("..")).toBe("file")
+	})
 
-		expect(new TextEncoder().encode(result).length).toBeLessThanOrEqual(255)
+	it("strips leading dot from hidden file names", () => {
+		expect(sanitizeFileName(".hidden")).toBe("hidden")
+	})
+
+	it("replaces illegal characters with default replacement '_'", () => {
+		const result = sanitizeFileName("a/b:c<d>e\"f\\g|h?i*j")
+		// All illegal chars replaced with _
+		expect(result).not.toMatch(/[/:?<>"\\|*]/)
+		expect(result).toBe("a_b_c_d_e_f_g_h_i_j")
+	})
+
+	it("respects custom replacement character", () => {
+		expect(sanitizeFileName("a/b:c", "-")).toBe("a-b-c")
+	})
+
+	it("removes control characters U+0000-U+001F", () => {
+		// Tab (U+0009), newline (U+000A), carriage return (U+000D) are control chars
+		// Control chars U+0000 and U+001F are removed (not replaced)
+		const withControl = "hel" + String.fromCharCode(0x01) + "lo"
+		expect(sanitizeFileName(withControl)).toBe("hello")
+	})
+
+	it("removes zero-width characters U+200B and U+FEFF", () => {
+		// Zero-width space and BOM should be stripped
+		const result = sanitizeFileName("​hello﻿")
+		expect(result).toBe("hello")
+	})
+
+	it("strips leading and trailing spaces: '  report  ' → 'report'", () => {
+		expect(sanitizeFileName("  report  ")).toBe("report")
+	})
+
+	it("strips leading and trailing dots: '.file.' → 'file'", () => {
+		expect(sanitizeFileName(".file.")).toBe("file")
+	})
+
+	it("collapses internal whitespace runs to replacement: 'a  b' → 'a_b'", () => {
+		expect(sanitizeFileName("a  b")).toBe("a_b")
+	})
+
+	it("passes through a filename exactly 255 UTF-8 bytes unchanged", () => {
+		// Build a 255-byte ASCII string
+		const name = "a".repeat(255)
+		expect(sanitizeFileName(name)).toBe(name)
+	})
+
+	it("truncates a filename over 255 bytes while preserving extension", () => {
+		// Build a 300-char ASCII base name + .pdf extension
+		const base = "a".repeat(300)
+		const result = sanitizeFileName(`${base}.pdf`)
+		const bytes = new TextEncoder().encode(result).length
+		expect(bytes).toBeLessThanOrEqual(255)
+		expect(result.endsWith(".pdf")).toBe(true)
+	})
+
+	it("does not treat extension longer than 10 chars as an extension during truncation", () => {
+		// Extension ".abcdefghijk" is 11 chars — over the 10-char limit, should NOT be preserved
+		const base = "a".repeat(300)
+		const result = sanitizeFileName(`${base}.abcdefghijk`)
+		const bytes = new TextEncoder().encode(result).length
+		expect(bytes).toBeLessThanOrEqual(255)
+		// Extension not preserved because it is too long
+		expect(result.endsWith(".abcdefghijk")).toBe(false)
+	})
+
+	it("counts multibyte CJK characters by bytes during truncation", () => {
+		// Each CJK character is 3 UTF-8 bytes; 90 of them = 270 bytes (> 255)
+		const name = "文".repeat(90)
+		const result = sanitizeFileName(name)
+		const bytes = new TextEncoder().encode(result).length
+		expect(bytes).toBeLessThanOrEqual(255)
+	})
+
+	it("NFC-normalizes decomposed form", () => {
+		// "é" as decomposed NFD (U+0065 U+0301) should become NFC "é" (U+00E9)
+		const decomposed = "é" // e + combining acute accent
+		const result = sanitizeFileName(decomposed)
+		// NFC normalization collapses the sequence to a single code point
+		expect(result).toBe("é")
+	})
+	it("keeps non-ASCII characters", () => {
+		expect(sanitizeFileName("日本語 ファイル.txt")).toBe("日本語_ファイル.txt")
+	})
+
+	it("removes C1 controls and the soft hyphen", () => {
+		expect(sanitizeFileName("a\u0085b\u00ADc")).toBe("abc")
 	})
 })
 
@@ -244,63 +272,6 @@ describe("findClosestIndexString — equivalence of the removed fallback", () =>
 	})
 })
 
-describe("extractLinksFromString", () => {
-	it("should extract URLs from text", () => {
-		const text = "Visit https://example.com and http://test.org for more"
-		const links = extractLinksFromString(text)
-
-		expect(links).toContain("https://example.com")
-		expect(links).toContain("http://test.org")
-	})
-
-	it("should return empty array for no links", () => {
-		expect(extractLinksFromString("no links here")).toEqual([])
-	})
-
-	it("should return empty array for empty string", () => {
-		expect(extractLinksFromString("")).toEqual([])
-	})
-
-	it("should extract URLs with paths and query params", () => {
-		const links = extractLinksFromString("check https://example.com/path?q=1&b=2#hash")
-
-		expect(links.length).toBe(1)
-		expect(links[0]).toContain("example.com/path")
-	})
-})
-
-describe("parseYouTubeVideoId", () => {
-	it("should parse standard YouTube URL", () => {
-		expect(parseYouTubeVideoId("https://www.youtube.com/watch?v=dQw4w9WgXcQ")).toBe("dQw4w9WgXcQ")
-	})
-
-	it("should parse short YouTube URL", () => {
-		expect(parseYouTubeVideoId("https://youtu.be/dQw4w9WgXcQ")).toBe("dQw4w9WgXcQ")
-	})
-
-	it("should parse embed URL", () => {
-		expect(parseYouTubeVideoId("https://www.youtube.com/embed/dQw4w9WgXcQ")).toBe("dQw4w9WgXcQ")
-	})
-
-	it("should return null for invalid URL", () => {
-		expect(parseYouTubeVideoId("https://example.com")).toBeNull()
-	})
-})
-
-describe("parseXStatusId", () => {
-	it("should extract status ID from URL", () => {
-		expect(parseXStatusId("https://x.com/user/status/1234567890")).toBe("1234567890")
-	})
-
-	it("should return empty string for empty URL", () => {
-		expect(parseXStatusId("")).toBe("")
-	})
-
-	it("should trim whitespace from result", () => {
-		expect(parseXStatusId("https://x.com/status/123 ")).toBe("123")
-	})
-})
-
 describe("ratePasswordStrength", () => {
 	it("should rate short password as weak", () => {
 		expect(ratePasswordStrength("abc").strength).toBe("weak")
@@ -344,37 +315,6 @@ describe("sortParams", () => {
 
 	it("should handle empty object", () => {
 		expect(sortParams({})).toEqual({})
-	})
-})
-
-describe("jsonBigIntReplacer / jsonBigIntReviver", () => {
-	it("should serialize BigInt values", () => {
-		const result = jsonBigIntReplacer("key", 123n)
-
-		expect(result).toBe("$bigint:123n")
-	})
-
-	it("should pass through non-BigInt values", () => {
-		expect(jsonBigIntReplacer("key", 42)).toBe(42)
-		expect(jsonBigIntReplacer("key", "hello")).toBe("hello")
-	})
-
-	it("should deserialize BigInt values", () => {
-		const result = jsonBigIntReviver("key", "$bigint:123n")
-
-		expect(result).toBe(123n)
-	})
-
-	it("should pass through non-BigInt strings", () => {
-		expect(jsonBigIntReviver("key", "hello")).toBe("hello")
-	})
-
-	it("should roundtrip BigInt through JSON", () => {
-		const obj = { value: 9007199254740993n }
-		const json = JSON.stringify(obj, jsonBigIntReplacer)
-		const parsed = JSON.parse(json, jsonBigIntReviver)
-
-		expect(parsed.value).toBe(9007199254740993n)
 	})
 })
 
@@ -467,42 +407,16 @@ describe("fastLocaleCompare", () => {
 	})
 })
 
-describe("bpsToReadable", () => {
-	it("should return 0.1 B/s for 0", () => {
-		expect(bpsToReadable(0)).toBe("0.1 B/s")
-	})
-
-	it("should return 0.1 B/s for negative values", () => {
-		expect(bpsToReadable(-100)).toBe("0.1 B/s")
-	})
-
-	it("should format values under 1 KiB as bytes", () => {
-		const result = bpsToReadable(512)
-
-		expect(result).toBe("512.0 B/s")
+describe("formatBytesPerSecond", () => {
+	it("appends /s to the fixed-decimal form", () => {
+		expect(formatBytesPerSecond(512)).toBe("512 B/s")
+		expect(formatBytesPerSecond(1024)).toBe("1.0 KiB/s")
+		expect(formatBytesPerSecond(1048576)).toBe("1.0 MiB/s")
 	})
 
 	it("shows a value that rounds up to 1024 as 1 of the next unit", () => {
-		expect(bpsToReadable(1023.97)).toBe("1.0 KiB/s")
-		expect(bpsToReadable(1024 * 1024 - 20)).toBe("1.0 MiB/s")
-	})
-
-	it("should format KiB range values", () => {
-		const result = bpsToReadable(1024)
-
-		expect(result).toBe("1.0 KiB/s")
-	})
-
-	it("should format MiB range values", () => {
-		const result = bpsToReadable(1048576)
-
-		expect(result).toBe("1.0 MiB/s")
-	})
-
-	it("should format GiB range values", () => {
-		const result = bpsToReadable(1073741824)
-
-		expect(result).toBe("1.0 GiB/s")
+		expect(formatBytesPerSecond(1023.97)).toBe("1.0 KiB/s")
+		expect(formatBytesPerSecond(1024 * 1024 - 20)).toBe("1.0 MiB/s")
 	})
 })
 
@@ -573,12 +487,6 @@ describe("isAbortError", () => {
 		error.name = "AbortError"
 
 		expect(isAbortError(error)).toBe(true)
-	})
-
-	it("should detect AbortError from run.ts AbortError class", async () => {
-		const { AbortError } = await import("../run")
-
-		expect(isAbortError(new AbortError())).toBe(true)
 	})
 
 	it("should detect AbortController abort reason when it is an AbortError", () => {

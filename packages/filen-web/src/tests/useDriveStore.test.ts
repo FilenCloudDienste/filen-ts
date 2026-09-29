@@ -181,6 +181,34 @@ describe("removeFromSelection", () => {
 	})
 })
 
+describe("pruneSelection", () => {
+	it("drops every selected row failing keep, by data.uuid", () => {
+		const itemA = directoryItem(testUuid("a"))
+		const itemB = directoryItem(testUuid("b"))
+
+		useDriveStore.setState({ selectedItems: [receiverRow(1), itemA, receiverRow(2), itemB] })
+		useDriveStore.getState().pruneSelection(item => item.data.uuid !== testUuid("shared") && item.data.uuid !== testUuid("b"))
+
+		expect(useDriveStore.getState().selectedItems).toEqual([itemA])
+	})
+
+	it("emits no store update when every selected row is kept", () => {
+		useDriveStore.setState({ selectedItems: [directoryItem(testUuid("a"))] })
+
+		const prev = useDriveStore.getState()
+		let notified = 0
+		const unsubscribe = useDriveStore.subscribe(() => {
+			notified++
+		})
+
+		useDriveStore.getState().pruneSelection(() => true)
+		unsubscribe()
+
+		expect(useDriveStore.getState()).toBe(prev)
+		expect(notified).toBe(0)
+	})
+})
+
 describe("removeRowsFromSelection", () => {
 	it("drops only the given receiver's row, keeping the item's other receiver rows selected", () => {
 		const itemA = directoryItem(testUuid("a"))

@@ -1,5 +1,5 @@
 import { type } from "arktype"
-import { createNotePreviewFromContentText, mergeInflight } from "@filen/shared"
+import { createNotePreviewFromContentText, mergeInflight, newestEntryTimestamp } from "@filen/shared"
 import type { NoteType } from "@filen/sdk-rs"
 import { entryIsShowable, type InflightContent, type InflightEntry } from "@/features/notes/store/useNotesInflight"
 
@@ -51,11 +51,6 @@ export const inflightContentSchema = type({
 // (Sync.enqueueAnswer).
 export type RemoteEnqueue = Omit<InflightEntry, "orphan"> & { answer?: true }
 
-// Newest local author timestamp across a note's entry list (NEGATIVE_INFINITY for an empty list).
-function newestTimestamp(entries: InflightEntry[]): number {
-	return entries.reduce((acc, c) => (c.timestamp > acc ? c.timestamp : acc), Number.NEGATIVE_INFINITY)
-}
-
 // Rebuild a follower's displayed store + its still-outstanding unacked set from the leader's
 // authoritative broadcast. An unacked note is CONFIRMED (dropped from unacked) once the leader's state
 // carries an entry for it at a timestamp >= ours — proof the leader received our forwarded edit; the
@@ -71,11 +66,10 @@ export function reconcileFollower(
 
 	for (const uuid of Object.keys(unacked)) {
 		const localEntries = unacked[uuid] ?? []
-		const leaderEntries = leaderState[uuid]
-		const leaderNewest = leaderEntries ? newestTimestamp(leaderEntries) : Number.NEGATIVE_INFINITY
+		const leaderNewest = newestEntryTimestamp(leaderState[uuid] ?? [])
 
 		// Leader has caught up to (or past) our latest forward → confirmed; let the store mirror it.
-		if (leaderNewest >= newestTimestamp(localEntries)) {
+		if (leaderNewest >= newestEntryTimestamp(localEntries)) {
 			continue
 		}
 

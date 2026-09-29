@@ -49,13 +49,11 @@ import { driveBulkActions, isBulkDownloadEnabled } from "@/features/drive/compon
 import {
 	filterDriveItemsByLocalSearch,
 	filterSharedInByBlocked,
-	hiddenSelectionUuids,
 	isBlockingListingError,
 	isEmptyTrashTriggerVisible,
+	isVisibleSharedInItem,
 	reconcileSelectedItems,
-	resolveListingDisplayItems,
-	staleBlockedSelectionUuids,
-	staleSelectionUuids
+	resolveListingDisplayItems
 } from "@/features/drive/components/directoryListing.logic"
 import { Breadcrumb } from "@/features/drive/components/breadcrumb"
 import { SortMenu } from "@/features/drive/components/sortMenu"
@@ -387,11 +385,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 			return
 		}
 
-		const toRemove = staleBlockedSelectionUuids(useDriveStore.getState().selectedItems, blocked)
-
-		if (toRemove.length > 0) {
-			useDriveStore.getState().removeFromSelection(toRemove)
-		}
+		useDriveStore.getState().pruneSelection(item => isVisibleSharedInItem(item, blocked))
 	}, [variant, blocked])
 
 	// Ghost-selection purge (search only): search results are PUSH-FED — a live resync can drop a
@@ -406,24 +400,25 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 			return
 		}
 
-		const toRemove = staleSelectionUuids(useDriveStore.getState().selectedItems, sortedItems)
+		const live = new Set(sortedItems.map(item => item.data.uuid))
 
-		if (toRemove.length > 0) {
-			useDriveStore.getState().removeFromSelection(toRemove)
-		}
+		useDriveStore.getState().pruneSelection(item => live.has(item.data.uuid))
 	}, [search.active, sortedItems])
 
 	// Hidden-selection purge: a row the display filter removed must not stay selected, or the floating
 	// bulk bar keeps offering Trash/Move/Delete over rows the user can neither see nor verify (its
-	// confirms count rows, they don't name them).
+	// confirms count rows, they don't name them). Keyed by the display pipeline's own output, not the
+	// selection's names: the store holds the pre-rename snapshot of a row just renamed to a dot-name.
 	const hiddenUuids = display.hiddenUuids
 
 	useEffect(() => {
-		const toRemove = hiddenSelectionUuids(useDriveStore.getState().selectedItems, hiddenUuids)
-
-		if (toRemove.length > 0) {
-			useDriveStore.getState().removeFromSelection(toRemove)
+		if (hiddenUuids.length === 0) {
+			return
 		}
+
+		const hidden = new Set(hiddenUuids)
+
+		useDriveStore.getState().pruneSelection(item => !hidden.has(item.data.uuid))
 	}, [hiddenUuids])
 
 	// null (a column header's third click) clears this location back to the default order.

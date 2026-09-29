@@ -72,79 +72,80 @@ export function isValidHexColor(value: string, length: number = 6): boolean {
 	return true
 }
 
-export function chunkArray<T>(array: T[], chunkSize: number): T[][] {
-	const chunks: T[][] = []
-
-	for (let i = 0; i < array.length; i += chunkSize) {
-		chunks.push(array.slice(i, i + chunkSize))
-	}
-
-	return chunks
+// C0 and C1 controls, DEL, soft hyphen, zero-width space/joiners and the BOM
+function isInvisibleCharCode(code: number): boolean {
+	return (
+		code <= 0x1f ||
+		(code >= 0x7f && code <= 0x9f) ||
+		code === 0xad ||
+		(code >= 0x200b && code <= 0x200d) ||
+		code === 0xfeff
+	)
 }
 
-// eslint-disable-next-line no-control-regex
-const ZERO_WIDTH_AND_CONTROL_RE = /[\u200B-\u200D\uFEFF\u00AD\u0000-\u001F\u007F-\u009F]/g
-// eslint-disable-next-line no-control-regex
-const NON_ASCII_RE = /[^\x00-\x7F]/g
-const ILLEGAL_CHARS_WINDOWS_RE = /[<>:"/\\|?*]/g
-const ILLEGAL_CHARS_UNIX_RE = /\//g
-const TRAILING_DOTS_SPACES_RE = /[. ]+$/
-const WHITESPACE_RE = /\s+/g
-const RESERVED_NAMES_WINDOWS: Set<string> = new Set([
-	"CON",
-	"PRN",
-	"AUX",
-	"NUL",
-	"COM1",
-	"COM2",
-	"COM3",
-	"COM4",
-	"COM5",
-	"COM6",
-	"COM7",
-	"COM8",
-	"COM9",
-	"LPT1",
-	"LPT2",
-	"LPT3",
-	"LPT4",
-	"LPT5",
-	"LPT6",
-	"LPT7",
-	"LPT8",
-	"LPT9"
-])
-const textEncoder = new TextEncoder()
-const textDecoder = new TextDecoder("utf-8", { fatal: false })
+// A scan rather than a regex: a control-character class trips `no-control-regex`.
+function stripInvisibleChars(value: string): string {
+	let result = ""
+	let kept = 0
 
+	for (let i = 0; i < value.length; i++) {
+		if (isInvisibleCharCode(value.charCodeAt(i))) {
+			result += value.slice(kept, i)
+			kept = i + 1
+		}
+	}
+
+	return kept === 0 ? value : result + value.slice(kept)
+}
+
+// APFS separators, then the FAT32/exFAT illegal set
+const APFS_ILLEGAL_CHARS_RE = /[/:]/g
+const FAT_ILLEGAL_CHARS_RE = /[<>:"\\|?*]/g
+const LEADING_TRAILING_DOTS_SPACES_RE = /^[. ]+|[. ]+$/g
+const WHITESPACE_RUN_RE = /\s+/g
+const TRUNCATION_EXTENSION_RE = /(\.[^.]{1,10})$/
+const MAX_FILE_NAME_BYTES = 255
+const fileNameEncoder = new TextEncoder()
+
+/**
+ * Make `filename` safe to write as a single path component on APFS, ext4, F2FS, FAT32 and exFAT:
+ * NFC-normalizes, strips control/zero-width characters, replaces the cross-platform-illegal set
+ * (`/ : < > " \ | ? *`) and whitespace runs with `replacement`, removes leading/trailing dots and
+ * spaces (a leading dot would hide the file), and truncates to 255 UTF-8 bytes while preserving a
+ * trailing extension.
+ *
+ * Degenerate input (empty, all dots/spaces, `"."`, `".."`, or anything that sanitizes to empty)
+ * returns `"file"`, never an empty string.
+ *
+ * Does NOT percent-decode or strip `%`, so the result must not reach `decodeURIComponent` unguarded.
+ */
 export function sanitizeFileName(filename: string, replacement: string = "_"): string {
-	// Normalize to UTF-8 NFC form (canonical decomposition followed by canonical composition)
-	let sanitizedFilename = filename.normalize("NFC")
+	let sanitizedFilename = stripInvisibleChars(filename.normalize("NFC"))
 
-	// Remove zero-width characters and other invisible/control characters
-	sanitizedFilename = sanitizedFilename.replace(ZERO_WIDTH_AND_CONTROL_RE, "")
+	sanitizedFilename = sanitizedFilename.replace(APFS_ILLEGAL_CHARS_RE, replacement)
+	sanitizedFilename = sanitizedFilename.replace(FAT_ILLEGAL_CHARS_RE, replacement)
+	sanitizedFilename = sanitizedFilename.replace(LEADING_TRAILING_DOTS_SPACES_RE, "")
 
-	// Replace non-ASCII characters that might cause issues
-	sanitizedFilename = sanitizedFilename.replace(NON_ASCII_RE, replacement)
-
-	sanitizedFilename = sanitizedFilename.replace(ILLEGAL_CHARS_WINDOWS_RE, replacement)
-	sanitizedFilename = sanitizedFilename.replace(ILLEGAL_CHARS_UNIX_RE, replacement)
-	sanitizedFilename = sanitizedFilename.replace(TRAILING_DOTS_SPACES_RE, "")
-	sanitizedFilename = sanitizedFilename.replace(WHITESPACE_RE, replacement)
-
-	if (RESERVED_NAMES_WINDOWS.has(sanitizedFilename.toUpperCase())) {
-		sanitizedFilename += replacement
+	if (sanitizedFilename.startsWith(".")) {
+		sanitizedFilename = sanitizedFilename.slice(1) || "file"
 	}
 
-	// Truncate to 255 bytes (filesystem limit) in O(n) instead of O(n²)
-	const maxByteLength = 255
-	const encoded = textEncoder.encode(sanitizedFilename)
+	sanitizedFilename = sanitizedFilename.replace(WHITESPACE_RUN_RE, replacement)
 
-	if (encoded.length > maxByteLength) {
-		sanitizedFilename = textDecoder.decode(encoded.subarray(0, maxByteLength)).replace(/\uFFFD/g, "")
+	// Filesystem limits count bytes, not characters
+	if (fileNameEncoder.encode(sanitizedFilename).length > MAX_FILE_NAME_BYTES) {
+		const extension = sanitizedFilename.match(TRUNCATION_EXTENSION_RE)?.[1] ?? ""
+		const maxNameBytes = MAX_FILE_NAME_BYTES - fileNameEncoder.encode(extension).length
+		let baseName = extension ? sanitizedFilename.slice(0, -extension.length) : sanitizedFilename
+
+		while (fileNameEncoder.encode(baseName).length > maxNameBytes && baseName.length > 0) {
+			baseName = baseName.slice(0, -1)
+		}
+
+		sanitizedFilename = baseName + extension
 	}
 
-	if (!sanitizedFilename) {
+	if (!sanitizedFilename || sanitizedFilename === "." || sanitizedFilename === "..") {
 		return "file"
 	}
 
@@ -166,51 +167,9 @@ export function findClosestIndexString(sourceString: string, targetString: strin
 	return sourceString.slice(0, givenIndex + 1).lastIndexOf(targetString)
 }
 
-export const URL_REGEX: RegExp =
-	/https?:\/\/(?:www\.)?[-a-zA-Z0-9@:%._+~#=]{1,256}\.[a-zA-Z0-9()]{1,64}\b(?:[-a-zA-Z0-9()@:%_+.~#?&//=]*)/gi
-
-export function extractLinksFromString(text: string): string[] {
-	if (!text) {
-		return []
-	}
-
-	const matches: IterableIterator<RegExpMatchArray> = text.matchAll(URL_REGEX)
-	const results: string[] = []
-
-	for (const match of matches) {
-		if (match[0]) {
-			results.push(match[0])
-		}
-	}
-
-	return results
-}
-
 const HAS_UPPERCASE_RE = /[A-Z]/
 const HAS_LOWERCASE_RE = /[a-z]/
 const HAS_SPECIAL_CHARS_RE = /[!@#$%^&*(),.?":{}|<>]/
-const YOUTUBE_VIDEO_ID_RE = /(?:\?v=|\/embed\/|\/watch\?v=|\/\w+\/\w+\/|youtu.be\/)([\w-]{11})/
-
-export function parseYouTubeVideoId(url: string): string | null {
-	const match = url.match(YOUTUBE_VIDEO_ID_RE)
-
-	if (match && match.length === 2 && match[1]) {
-		return match[1]
-	}
-
-	return null
-}
-
-export function parseXStatusId(url: string): string {
-	const ex = url.split("/")
-	const part = ex[ex.length - 1]
-
-	if (!part) {
-		return ""
-	}
-
-	return part.trim()
-}
 
 export function ratePasswordStrength(password: string): {
 	strength: "weak" | "normal" | "strong" | "best"
@@ -257,22 +216,6 @@ export function sortParams<T extends Record<string, unknown>>(params: T): T {
 	}
 
 	return result
-}
-
-export function jsonBigIntReplacer(_: string, value: unknown) {
-	if (typeof value === "bigint") {
-		return `$bigint:${value.toString()}n`
-	}
-
-	return value
-}
-
-export function jsonBigIntReviver(_: string, value: unknown) {
-	if (typeof value === "string" && value.startsWith("$bigint:") && value.endsWith("n")) {
-		return BigInt(value.slice(8, -1))
-	}
-
-	return value
 }
 
 export function createExecutableTimeout(callback: () => void, delay?: number) {
@@ -391,53 +334,6 @@ export function fastLocaleCompare(a: string, b: string): number {
 	return caseDiff
 }
 
-export const BPS_TO_READABLE_UNITS = ["KiB/s", "MiB/s", "GiB/s", "TiB/s", "PiB/s", "EiB/s", "ZiB/s", "YiB/s"]
-
-export function bpsToReadable(bps: number): string {
-	if (!(bps > 0 && bps < 1099511627776)) {
-		return "0.1 B/s"
-	}
-
-	let i = -1
-	let value = bps
-
-	if (value >= 1024) {
-		value /= 1024
-		i = 0
-
-		if (value >= 1024) {
-			value /= 1024
-			i = 1
-
-			if (value >= 1024) {
-				value /= 1024
-				i = 2
-
-				if (value >= 1024) {
-					value /= 1024
-					i = 3
-				}
-			}
-		}
-	}
-
-	if (value < 0.1) {
-		value = 0.1
-	}
-
-	// A value that rounds up to 1024 shows as 1 of the next unit, as formatBytes does.
-	if (Number(value.toFixed(1)) >= 1024 && i < BPS_TO_READABLE_UNITS.length - 1) {
-		value /= 1024
-		i++
-	}
-
-	if (i < 0) {
-		return value.toFixed(1) + " B/s"
-	}
-
-	return value.toFixed(1) + " " + BPS_TO_READABLE_UNITS[i]
-}
-
 export const FORMAT_BYTES_SIZES = ["B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB", "ZiB", "YiB"]
 
 export const POWERS_1024 = [1, 1024, 1048576, 1073741824, 1099511627776, 1125899906842624] as const
@@ -503,6 +399,10 @@ export function formatBytesFixed(bytes: number, decimals: number = 1): string {
 	}
 
 	return `${shown} ${FORMAT_BYTES_SIZES[i] ?? ""}`
+}
+
+export function formatBytesPerSecond(bytesPerSecond: number): string {
+	return `${formatBytesFixed(bytesPerSecond)}/s`
 }
 
 export function isAbortError(error: unknown): boolean {

@@ -1,3 +1,5 @@
+import { type NoteSelectionFlags } from "./notesSelectionFlags"
+
 // Which bulk actions a Notes multi-selection permits — the single decision matrix both apps'
 // bulk-action UI (menu buttons on mobile, a floating bar on web) gate their eleven metadata/
 // lifecycle entries on. Descriptors, icons and labels stay per-app; this module only answers
@@ -12,26 +14,18 @@
 // Gating only ever enables an action when EVERY selected note is in a state where that action
 // is valid — the write path guards each op individually so a mixed-state slip is a silent
 // no-op, but the UI hides the action instead of offering a no-op.
-export interface NoteBulkFlagsCore {
-	count: number
-	// True iff any selected note's metadata never decrypted for this account.
-	includesUndecryptable: boolean
-	// True iff any selected note has `archive: true`.
-	includesArchived: boolean
-	// True iff any selected note has `trash: true`.
-	includesTrashed: boolean
-	// True iff the current user owns every selected note.
-	everyOwned: boolean
-	// True iff every selected note is archived OR trashed (no active note in the mix).
-	everyArchivedOrTrashed: boolean
-	everyTrashed: boolean
-	// True iff the current user has write access (owner OR a participant with permissionsWrite) to
-	// every selected note.
-	hasWriteAccessToAll: boolean
-	// True iff every selected note has the current user as a participant AND the current user is
-	// NOT the owner of any selected note.
-	participantOfEveryAndNotOwner: boolean
-}
+export type NoteBulkFlagsCore = Pick<
+	NoteSelectionFlags,
+	| "count"
+	| "includesUndecryptable"
+	| "includesArchived"
+	| "includesTrashed"
+	| "everyOwned"
+	| "everyArchivedOrTrashed"
+	| "everyTrashed"
+	| "hasWriteAccessToAll"
+	| "participantOfEveryAndNotOwner"
+>
 
 export interface NoteBulkActionAvailability {
 	pin: boolean

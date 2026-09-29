@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { Contact, UuidStr } from "@filen/sdk-rs"
-import { resolveSelectedContacts, togglePickerContact } from "@/features/contacts/lib/contactPicker.logic"
+import { resolveSelectedContacts } from "@/features/contacts/lib/contactPicker.logic"
 
 function testUuid(label: string): UuidStr {
 	return `${label}-0000-0000-0000-000000000000` as UuidStr
@@ -17,37 +17,6 @@ function mockContact(label: string): Contact {
 		publicKey: "pk"
 	}
 }
-
-describe("togglePickerContact", () => {
-	it("adds a uuid that is not yet selected", () => {
-		const next = togglePickerContact(new Set(), "a")
-
-		expect(next.has("a")).toBe(true)
-	})
-
-	it("removes a uuid that is already selected", () => {
-		const next = togglePickerContact(new Set(["a"]), "a")
-
-		expect(next.has("a")).toBe(false)
-	})
-
-	it("does not mutate the input set (returns a new set)", () => {
-		const input = new Set(["a"])
-		const next = togglePickerContact(input, "b")
-
-		expect(input.has("b")).toBe(false)
-		expect(next).not.toBe(input)
-		expect([...next].sort()).toEqual(["a", "b"])
-	})
-
-	it("toggling the same uuid twice restores the original membership", () => {
-		let selected: ReadonlySet<string> = new Set(["a"])
-		selected = togglePickerContact(selected, "b")
-		selected = togglePickerContact(selected, "b")
-
-		expect([...selected]).toEqual(["a"])
-	})
-})
 
 describe("resolveSelectedContacts", () => {
 	it("returns only the selected contacts, in source-list order", () => {

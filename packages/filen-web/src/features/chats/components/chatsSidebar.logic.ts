@@ -103,8 +103,7 @@ export function chatsWithoutBlockedOneOnOne(
 // stale-selection purge uses this to drop a selection ghost the instant a conversationDeleted/
 // conversationParticipantLeft socket event (or another tab's delete/leave) removes a chat out from
 // under an active multi-selection. Takes the live set as UUIDS, not chats, so the caller's effect can
-// read them straight back out of the uuid signature it is keyed on (drive's hiddenSelectionUuids
-// does the same).
+// read them straight back out of the uuid signature it is keyed on.
 export function staleChatSelectionUuids(selectedChats: readonly Chat[], liveUuids: readonly string[]): string[] {
 	const live = new Set(liveUuids)
 

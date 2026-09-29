@@ -125,7 +125,7 @@ export function isOneOnOneWithBlocked(chat: Chat, selfUserId: bigint | undefined
 
 	const other = others[0]
 
-	return other !== undefined && (blocked.userIds.has(other.userId) || blocked.emails.has(other.email.trim().toLowerCase()))
+	return other !== undefined && isBlocked(other, blocked)
 }
 
 /**

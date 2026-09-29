@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { toggleInArray, removeSelectedIds, pruneSelection, droppedIds } from "@filen/shared"
+import { toggleInArray, toggleInSet, removeSelectedIds, pruneSelection } from "@filen/shared"
 
 type Item = { uuid: string; name: string }
 
@@ -39,6 +39,31 @@ describe("toggleInArray", () => {
 		const dup: Item = { uuid: "a", name: "alpha-renamed" }
 
 		expect(toggleInArray(arr, dup, getId)).toEqual([])
+	})
+})
+
+describe("toggleInSet", () => {
+	it("adds a value that is absent", () => {
+		expect(toggleInSet(new Set<string>(), "a").has("a")).toBe(true)
+	})
+
+	it("removes a value that is present", () => {
+		expect(toggleInSet(new Set(["a"]), "a").has("a")).toBe(false)
+	})
+
+	it("does not mutate the input set (returns a new set)", () => {
+		const input = new Set(["a"])
+		const next = toggleInSet(input, "b")
+
+		expect(input.has("b")).toBe(false)
+		expect(next).not.toBe(input)
+		expect([...next].sort()).toEqual(["a", "b"])
+	})
+
+	it("toggling the same value twice restores the original membership", () => {
+		const selected = toggleInSet(toggleInSet(new Set(["a"]), "b"), "b")
+
+		expect([...selected]).toEqual(["a"])
 	})
 })
 
@@ -144,30 +169,5 @@ describe("pruneSelection", () => {
 		const kept = pruneSelection(items, item => liveUuids.has(item.uuid))
 
 		expect(kept.map(getId)).toEqual(["a", "b", "c"])
-	})
-})
-
-describe("droppedIds", () => {
-	it("returns the ids of items that fail the keep predicate", () => {
-		const liveUuids = new Set(["a", "c"])
-
-		expect(droppedIds(items, item => liveUuids.has(item.uuid), getId)).toEqual(["b"])
-	})
-
-	it("returns an empty array when every item passes", () => {
-		expect(droppedIds(items, () => true, getId)).toEqual([])
-	})
-
-	it("returns an empty array for an empty selection", () => {
-		expect(droppedIds([], () => false, getId)).toEqual([])
-	})
-
-	it("does not mutate the input selection", () => {
-		const input = [items[0]!, items[1]!]
-
-		const dropped = droppedIds(input, item => item.uuid === "a", getId)
-
-		expect(input.map(getId)).toEqual(["a", "b"])
-		expect(dropped).toEqual(["b"])
 	})
 })

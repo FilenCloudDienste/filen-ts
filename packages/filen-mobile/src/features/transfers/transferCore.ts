@@ -20,6 +20,7 @@ import {
 import useTransfersStore, { type Transfer, type FinishedTransfer } from "@/features/transfers/store/useTransfers.store"
 import { unwrapDirMeta, unwrapFileMeta, unwrapParentUuid } from "@/lib/sdkUnwrap"
 import { driveItemDisplayName } from "@/lib/decryption"
+import { isDirectoryItem } from "@/features/drive/driveSelectors"
 import { normalizeFilePathForExpo, normalizeFilePathForSdk } from "@/lib/paths"
 import {
 	wrapAbortSignalForSdk,
@@ -1001,7 +1002,7 @@ export async function downloadCore(
 		? createCompositeAbortSignal(globalAbortController.signal, transferAbortController.signal, signal)
 		: createCompositeAbortSignal(globalAbortController.signal, transferAbortController.signal)
 
-	if (item.type === "directory" || item.type === "sharedDirectory" || item.type === "sharedRootDirectory") {
+	if (isDirectoryItem(item)) {
 		const result = await run(async defer => {
 			// wrapAbortSignalForSdk allocates a uniffi (Rust Arc-backed) ManagedAbortSignal that must be
 			// released explicitly. Register the disposal defer() BEFORE the fallible uniffi allocation

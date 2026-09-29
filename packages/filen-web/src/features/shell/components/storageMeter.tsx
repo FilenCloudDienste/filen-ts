@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next"
-import { formatBytes, storageUsageLevel, type StorageUsageLevel } from "@filen/shared"
+import { clampedRatio, formatBytes, storageUsageLevel, type StorageUsageLevel } from "@filen/shared"
 import { useAccountQuery } from "@/queries/account"
 import { Progress } from "@/components/ui/progress"
 import { LoadingState } from "@/components/loadingState"
@@ -55,7 +55,7 @@ export function StorageMeter() {
 
 function StorageRow({ used, max }: { used: number; max: number }) {
 	const { t } = useTranslation("common")
-	const percent = max > 0 ? Math.min(100, Math.max(0, (used / max) * 100)) : 0
+	const percent = clampedRatio(used, max, 100)
 
 	return (
 		<div className={BLOCK_HEIGHT}>

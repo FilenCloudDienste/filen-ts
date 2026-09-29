@@ -232,14 +232,11 @@ export function useDriveSearch(rootUuid: string | null, enabled: boolean): UseDr
 		}
 	}
 
-	// Hand-rolled setTimeout debounce rather than @filen/shared's runDebounced: that helper's whole
-	// value is a STABLE, created-once closure, but its callback needs this render's openSearch (itself
-	// closed over the current rootUuid) — keeping a ref pointed at the latest one would mean writing to
-	// a ref during render, which this codebase's react-hooks/refs lint rule (React Compiler's own
-	// plugin) hard-rejects. A plain function scheduled fresh per call sidesteps that entirely: each
-	// scheduled timeout closes over exactly the openSearch/name it was armed with, and activeRef (read
-	// when it fires, not closed over) guards against acting on a cleared query, sessionRef on a
-	// since-closed session.
+	// Scheduled fresh per call rather than a created-once debounced closure: the callback needs this
+	// render's openSearch (closed over the current rootUuid), and pointing a ref at the latest one
+	// would mean writing to a ref during render, which the react-hooks/refs lint rule rejects. Each
+	// timeout closes over exactly the openSearch/name it was armed with; activeRef (read when it
+	// fires) guards against acting on a cleared query, sessionRef on a since-closed session.
 	function scheduleRetune(name: string): void {
 		if (retuneTimerRef.current !== null) {
 			clearTimeout(retuneTimerRef.current)

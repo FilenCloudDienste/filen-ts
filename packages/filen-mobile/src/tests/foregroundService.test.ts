@@ -9,10 +9,10 @@ vi.mock("react-native", () => ({
 	AppState: appStateMock
 }))
 
-const mockBpsToReadable = vi.fn((speed: number) => `${speed}B/s`)
+const mockFormatBytesPerSecond = vi.fn((speed: number) => `${speed}B/s`)
 
 vi.mock("@filen/shared", () => ({
-	bpsToReadable: mockBpsToReadable
+	formatBytesPerSecond: mockFormatBytesPerSecond
 }))
 
 const mockNotifee = {
@@ -62,7 +62,7 @@ beforeEach(() => {
 	mockNotifee.getNotificationSettings.mockResolvedValue({ authorizationStatus: 2 })
 	mockNotifee.requestPermission.mockResolvedValue({ authorizationStatus: 2 })
 	mockNotifee.createChannel.mockResolvedValue(undefined)
-	mockBpsToReadable.mockImplementation((speed: number) => `${speed}B/s`)
+	mockFormatBytesPerSecond.mockImplementation((speed: number) => `${speed}B/s`)
 	mockSecureStoreGet.mockResolvedValue(null)
 })
 
@@ -271,7 +271,7 @@ describe("foregroundService", () => {
 		await fgs.start({ count: 1, progress: 0.25, speed: 512, copyingItems: null })
 
 		vi.clearAllMocks()
-		mockBpsToReadable.mockImplementation((speed: number) => `${speed}B/s`)
+		mockFormatBytesPerSecond.mockImplementation((speed: number) => `${speed}B/s`)
 
 		await fgs.update({ count: 3, progress: 0.75, speed: 2048, copyingItems: null })
 
@@ -515,23 +515,23 @@ describe("foregroundService", () => {
 		expect(call.android.progress.current).toBe(0)
 	})
 
-	it("display uses em-dash speedText and does not call bpsToReadable when speed is zero", async () => {
+	it("display uses em-dash speedText and does not call formatBytesPerSecond when speed is zero", async () => {
 		const { default: fgs } = await import("@/features/transfers/foregroundService")
 
 		await fgs.start({ count: 1, progress: 0.5, speed: 0, copyingItems: null })
 
-		expect(mockBpsToReadable).not.toHaveBeenCalled()
+		expect(mockFormatBytesPerSecond).not.toHaveBeenCalled()
 		expect(mockNotifee.displayNotification).toHaveBeenCalledTimes(1)
 	})
 
-	it("display calls bpsToReadable when speed is non-zero", async () => {
-		mockBpsToReadable.mockReturnValue("512 B/s")
+	it("display calls formatBytesPerSecond when speed is non-zero", async () => {
+		mockFormatBytesPerSecond.mockReturnValue("512 B/s")
 
 		const { default: fgs } = await import("@/features/transfers/foregroundService")
 
 		await fgs.start({ count: 1, progress: 0.5, speed: 512, copyingItems: null })
 
-		expect(mockBpsToReadable).toHaveBeenCalledWith(512)
+		expect(mockFormatBytesPerSecond).toHaveBeenCalledWith(512)
 	})
 
 	it("init error-reset recovery: failed init resets initPromise so a retry succeeds", async () => {

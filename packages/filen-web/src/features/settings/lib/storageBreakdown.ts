@@ -1,4 +1,4 @@
-import type { StorageUsageLevel } from "@filen/shared"
+import { clampedRatio, type StorageUsageLevel } from "@filen/shared"
 
 // Pure derivation for the Account section's storage breakdown row — mirrors old-web's
 // settings/general storage bar math (files / versioned / free) exactly: `usedClamped` never
@@ -34,17 +34,9 @@ export function deriveStorageBreakdown(storageUsed: bigint, maxStorage: bigint, 
 	}
 }
 
-// Percent helper for the three segment widths — `total` guaranteed >0 by the caller (only called
-// with `breakdown.maxBytes`, and the maxStorage<=0 branch above is rendered as an empty state
-// rather than three zero-width segments, so this never has to guard a zero denominator itself).
+// Percent helper for the three segment widths, taking the breakdown's bigints.
 export function storagePercent(part: bigint, total: bigint): number {
-	if (total <= 0n) {
-		return 0
-	}
-
-	const ratio = Number(part) / Number(total)
-
-	return Math.min(100, Math.max(0, ratio * 100))
+	return clampedRatio(Number(part), Number(total), 100)
 }
 
 // The used-space fill (never "versioned", which stays a fixed neutral color, or "free") warns/alerts

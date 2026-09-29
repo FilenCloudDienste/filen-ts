@@ -1,8 +1,7 @@
 import { useState, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { FileIcon, FolderIcon } from "lucide-react"
-import { formatBytes } from "@filen/shared"
-import type { FilenPublicLink } from "@/features/chats/lib/embeds.logic"
+import { formatBytes, type FilenPublicLink } from "@filen/shared"
 import type { ChatLinkResolution } from "@/features/chats/queries/chatMessageLinks"
 import { linkedFileIntoDriveItem, type DriveItem } from "@/features/drive/lib/item"
 import { DirectoryGlyph, ItemIcon } from "@/features/drive/components/itemIcon"
@@ -292,7 +291,7 @@ export function FilenLinkCard({
 	const { t } = useTranslation("chats")
 
 	if (!resolution?.success) {
-		const Icon = link.kind === "directory" ? FolderIcon : FileIcon
+		const Icon = link.type === "directory" ? FolderIcon : FileIcon
 
 		return (
 			<LinkCardShell
@@ -302,9 +301,9 @@ export function FilenLinkCard({
 						className="size-5 shrink-0 text-muted-foreground"
 					/>
 				}
-				name={link.linkUuid}
-				subtitle={t(link.kind === "directory" ? "chatEmbedFilenDirectory" : "chatEmbedFilenFile")}
-				ariaLabel={t("chatEmbedOpenNewTab", { name: link.linkUuid })}
+				name={link.uuid}
+				subtitle={t(link.type === "directory" ? "chatEmbedFilenDirectory" : "chatEmbedFilenFile")}
+				ariaLabel={t("chatEmbedOpenNewTab", { name: link.uuid })}
 				href={url}
 			/>
 		)
@@ -313,7 +312,7 @@ export function FilenLinkCard({
 	const { data } = resolution
 
 	if (data.type === "directory") {
-		const name = data.name ?? link.linkUuid
+		const name = data.name ?? link.uuid
 
 		return (
 			<LinkCardShell
@@ -331,7 +330,7 @@ export function FilenLinkCard({
 		)
 	}
 
-	const name = data.name ?? link.linkUuid
+	const name = data.name ?? link.uuid
 	const item = linkedFileIntoDriveItem(data.linkedFile)
 	const sizeLabel = formatBytes(Number(data.size))
 	const { downloadable } = data.linkedFile

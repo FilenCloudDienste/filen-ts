@@ -17,12 +17,6 @@ export const transfers = {
 	/** Icon-rail Transfers trigger — accessible label while at least one upload is active; replaces the plain moduleTransfers label so the count is announced, not just shown in the visual badge; plural */
 	transfersActiveBadge_other: "Transfers, {{count}} active",
 
-	// ── Aggregate speed/progress ──────────────────────────────────────
-	// The /transfers screen header's live summary and the transfer rows' own speed — the rolling-window
-	// speed useTransfersAggregate and transferRate compute.
-	/** Live aggregate transfer speed readout — {{speed}} is a pre-formatted byte-rate string (e.g. "3.2 MB"); appends the per-second unit */
-	transfersAggregateSpeed: "{{speed}}/s",
-
 	// ── Panel ────────────────────────────────────────────────────────────────
 	/** Empty-state title shown when there are no transfers (rail entry's accessible summary + the /transfers screen) */
 	transfersEmptyTitle: "No transfers",

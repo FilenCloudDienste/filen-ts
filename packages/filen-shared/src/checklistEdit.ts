@@ -1,9 +1,25 @@
-import { type Checklist } from "./checklistParser"
+import { type Checklist, type ChecklistItem } from "./checklistParser"
 
 // Pure checklist row mutation transforms for a custom checklist editor. They compute the next list
 // (and which row to focus) without touching any UI state, so a caller applies the result, moves
-// focus, and serializes/syncs as needed. Keeping them pure makes the add/remove edit behaviour
-// unit-testable without rendering anything.
+// focus, and serializes/syncs as needed. Keeping them pure makes the edit behaviour unit-testable
+// without rendering anything.
+
+// Set a row's checked state and/or content, returning a new list (never mutating the input).
+export function patchChecklistItem(
+	rows: Checklist,
+	itemId: string,
+	patch: Partial<Pick<ChecklistItem, "checked" | "content">>
+): Checklist {
+	return rows.map(i =>
+		i.id === itemId
+			? {
+					...i,
+					...patch
+				}
+			: i
+	)
+}
 
 export interface ChecklistEditResult {
 	// Whether the list content actually changed. When false the caller must NOT serialize/enqueue (no

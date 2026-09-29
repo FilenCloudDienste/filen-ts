@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { addChecklistLine, removeChecklistItem, type Checklist } from "@filen/shared"
+import { addChecklistLine, removeChecklistItem, patchChecklistItem, type Checklist } from "@filen/shared"
 
 const base: Checklist = [
 	{ id: "a", checked: false, content: "one" },
@@ -69,5 +69,27 @@ describe("addChecklistLine", () => {
 		expect(result.changed).toBe(false)
 		expect(result.next).toBe(withEmpty)
 		expect(result.focusId).toBe("b")
+	})
+})
+
+describe("patchChecklistItem", () => {
+	it("patches only the targeted row's checked state without mutating the input", () => {
+		const rows: Checklist = [
+			{ id: "1", checked: false, content: "A" },
+			{ id: "2", checked: false, content: "B" }
+		]
+		const next = patchChecklistItem(rows, "2", { checked: true })
+
+		expect(next).not.toBe(rows)
+		expect(next.map(r => r.checked)).toEqual([false, true])
+		expect(rows[1]?.checked).toBe(false)
+	})
+
+	it("patches only the targeted row's content", () => {
+		const rows: Checklist = [{ id: "1", checked: false, content: "old" }]
+		const next = patchChecklistItem(rows, "1", { content: "new" })
+
+		expect(next[0]?.content).toBe("new")
+		expect(rows[0]?.content).toBe("old")
 	})
 })
