@@ -22,7 +22,7 @@ function InvoicesBlock({ accountQuery }: InvoicesBlockProps) {
 			{subsInvoices.length === 0 ? (
 				<Empty className="rounded-none border-0 p-4">
 					<EmptyHeader>
-						<EmptyMedia variant="icon">
+						<EmptyMedia>
 							<ReceiptIcon />
 						</EmptyMedia>
 						<EmptyTitle>{t("settingsBillingInvoicesEmptyTitle")}</EmptyTitle>

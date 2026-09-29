@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { renderHook, act } from "@testing-library/react"
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from "react"
 import { useContactsListSelection } from "@/features/contacts/hooks/useContactsListSelection"
+import { EMPTY_CONTACT_SELECTION } from "@/features/contacts/lib/selection"
 
 const UUIDS = ["a", "b", "c", "d", "e"]
 
@@ -60,7 +61,6 @@ describe("useContactsListSelection — pointer model", () => {
 		})
 
 		expect([...result.current.selection.contacts]).toEqual(["c"])
-		expect(result.current.selectedCount).toBe(1)
 	})
 
 	it("ctrl/cmd click builds a multi-selection", () => {
@@ -102,7 +102,7 @@ describe("useContactsListSelection — pointer model", () => {
 			result.current.clearSelection()
 		})
 
-		expect(result.current.selectedCount).toBe(0)
+		expect(result.current.selection).toEqual(EMPTY_CONTACT_SELECTION)
 	})
 
 	it("pruneSelection drops only the given uuids from the given section", () => {
@@ -134,7 +134,7 @@ describe("useContactsListSelection — pointer model", () => {
 
 		rerender({ resetKey: "blocked" })
 
-		expect(result.current.selectedCount).toBe(0)
+		expect(result.current.selection).toEqual(EMPTY_CONTACT_SELECTION)
 		expect(result.current.activeIndexFor("contacts", UUIDS)).toBe(0)
 
 		// A shift click after the reset has no anchor left to range from — it collapses to a plain select.
@@ -244,7 +244,7 @@ describe("useContactsListSelection — roving cursor", () => {
 		})
 
 		expect(preventDefault).not.toHaveBeenCalled()
-		expect(result.current.selectedCount).toBe(0)
+		expect(result.current.selection).toEqual(EMPTY_CONTACT_SELECTION)
 	})
 
 	// Moving DOM focus with the cursor is the entire reason registerRowRef exists: each section is one
@@ -318,6 +318,6 @@ describe("useContactsListSelection — roving cursor", () => {
 		})
 
 		expect(preventDefault).not.toHaveBeenCalled()
-		expect(result.current.selectedCount).toBe(0)
+		expect(result.current.selection).toEqual(EMPTY_CONTACT_SELECTION)
 	})
 })

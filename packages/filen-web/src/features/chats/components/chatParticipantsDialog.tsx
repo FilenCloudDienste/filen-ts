@@ -4,7 +4,7 @@ import { toast } from "sonner"
 import { CheckIcon, CrownIcon, SearchXIcon, UserCheckIcon, UsersIcon, UserXIcon, XIcon } from "lucide-react"
 import type { DialogRoot } from "@base-ui/react/dialog"
 import type { Chat, ChatParticipant } from "@filen/sdk-rs"
-import { cn, deriveBlockedUsers } from "@filen/shared"
+import { cn, contactDisplayName, deriveBlockedUsers } from "@filen/shared"
 import { isChatOwner } from "@/features/chats/lib/actions"
 import { addChatParticipants, removeChatParticipant, removeChatParticipants } from "@/features/chats/lib/participants"
 import {
@@ -17,7 +17,7 @@ import { useChats } from "@/features/chats/queries/chats"
 import { useAccountQuery } from "@/queries/account"
 import { useContactsQuery } from "@/features/contacts/queries/contacts"
 import { blockContactByEmail, unblockContact } from "@/features/contacts/lib/actions"
-import { contactDisplayName, contactInitials, filterContactsBySearch } from "@/features/contacts/components/contactsList.logic"
+import { contactInitials, filterContactsBySearch } from "@/features/contacts/components/contactsList.logic"
 // Same generic Set<uuid> picker helpers notes' own participantsDialog.tsx reuses — not re-implemented
 // here either (feedback: no duplicated selection/data layer across features for a picker this
 // codebase already has one working copy of). Reused for BOTH modes now: `selected` holds contact uuids
@@ -203,7 +203,7 @@ export function ChatParticipantsDialog({ chat: initialChat, onClose }: ChatParti
 			return (
 				<Empty className="p-6">
 					<EmptyHeader>
-						<EmptyMedia variant="icon">
+						<EmptyMedia>
 							<UsersIcon />
 						</EmptyMedia>
 						<EmptyTitle>{t("chatParticipantsEmpty")}</EmptyTitle>
@@ -358,7 +358,7 @@ export function ChatParticipantsDialog({ chat: initialChat, onClose }: ChatParti
 			return (
 				<Empty>
 					<EmptyHeader>
-						<EmptyMedia variant="icon">
+						<EmptyMedia>
 							<UsersIcon />
 						</EmptyMedia>
 						<EmptyTitle>{t("contacts:contactsLoadError")}</EmptyTitle>
@@ -374,7 +374,7 @@ export function ChatParticipantsDialog({ chat: initialChat, onClose }: ChatParti
 			return (
 				<Empty>
 					<EmptyHeader>
-						<EmptyMedia variant="icon">
+						<EmptyMedia>
 							<UsersIcon />
 						</EmptyMedia>
 						<EmptyTitle>{t("chatParticipantsAddEmpty")}</EmptyTitle>
@@ -391,7 +391,7 @@ export function ChatParticipantsDialog({ chat: initialChat, onClose }: ChatParti
 			return (
 				<Empty>
 					<EmptyHeader>
-						<EmptyMedia variant="icon">
+						<EmptyMedia>
 							<SearchXIcon />
 						</EmptyMedia>
 						<EmptyTitle>{t("contacts:contactsSearchNoResultsTitle")}</EmptyTitle>

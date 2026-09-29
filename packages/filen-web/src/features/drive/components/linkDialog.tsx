@@ -249,7 +249,7 @@ export function LinkDialog({ item, onClose }: LinkDialogProps) {
 					) : premiumGate === "gated" ? (
 						<Empty className="p-6">
 							<EmptyHeader>
-								<EmptyMedia variant="icon">
+								<EmptyMedia>
 									<CreditCardIcon />
 								</EmptyMedia>
 								<EmptyTitle>{t("driveLinkPremiumRequiredTitle")}</EmptyTitle>
@@ -283,7 +283,7 @@ export function LinkDialog({ item, onClose }: LinkDialogProps) {
 							) : current === null ? (
 								<Empty className="p-6">
 									<EmptyHeader>
-										<EmptyMedia variant="icon">
+										<EmptyMedia>
 											<LinkIcon />
 										</EmptyMedia>
 										<EmptyTitle>{t("driveLinkNoLinkTitle")}</EmptyTitle>

@@ -7,19 +7,13 @@ import { isAnyDialogOpen } from "@/lib/keymap/dialogGuard"
 export type Theme = ThemeSetting
 type ResolvedTheme = "dark" | "light"
 
-interface ThemeProviderProps {
-	children: React.ReactNode
-	defaultTheme?: Theme
-	storageKey?: string
-	disableTransitionOnChange?: boolean
-}
-
 interface ThemeProviderState {
 	theme: Theme
 	setTheme: (theme: Theme) => void
 }
 
 const COLOR_SCHEME_QUERY = "(prefers-color-scheme: dark)"
+const STORAGE_KEY = "theme"
 
 const ThemeProviderContext = React.createContext<ThemeProviderState | undefined>(undefined)
 
@@ -46,49 +40,30 @@ function disableTransitionsTemporarily() {
 	}
 }
 
-export function ThemeProvider({
-	children,
-	defaultTheme: defaultThemeProp,
-	storageKey: storageKeyProp,
-	disableTransitionOnChange: disableTransitionOnChangeProp,
-	...props
-}: ThemeProviderProps) {
-	// Not destructuring defaults, which the React Compiler cannot lower.
-	const defaultTheme = defaultThemeProp ?? DEFAULT_THEME_SETTING
-	const storageKey = storageKeyProp ?? "theme"
-	const disableTransitionOnChange = disableTransitionOnChangeProp ?? true
+function applyTheme(nextTheme: Theme) {
+	const root = document.documentElement
+	const resolvedTheme = nextTheme === "system" ? getSystemTheme() : nextTheme
+	const restoreTransitions = disableTransitionsTemporarily()
+
+	root.classList.remove("light", "dark")
+	root.classList.add(resolvedTheme)
+	restoreTransitions()
+}
+
+export function ThemeProvider({ children }: { children: React.ReactNode }) {
 	const [theme, setThemeState] = React.useState<Theme>(() => {
-		const storedTheme = localStorage.getItem(storageKey)
+		const storedTheme = localStorage.getItem(STORAGE_KEY)
 		if (isThemeSetting(storedTheme)) {
 			return storedTheme
 		}
 
-		return defaultTheme
+		return DEFAULT_THEME_SETTING
 	})
 
-	const setTheme = React.useCallback(
-		(nextTheme: Theme) => {
-			localStorage.setItem(storageKey, nextTheme)
-			setThemeState(nextTheme)
-		},
-		[storageKey]
-	)
-
-	const applyTheme = React.useCallback(
-		(nextTheme: Theme) => {
-			const root = document.documentElement
-			const resolvedTheme = nextTheme === "system" ? getSystemTheme() : nextTheme
-			const restoreTransitions = disableTransitionOnChange ? disableTransitionsTemporarily() : null
-
-			root.classList.remove("light", "dark")
-			root.classList.add(resolvedTheme)
-
-			if (restoreTransitions) {
-				restoreTransitions()
-			}
-		},
-		[disableTransitionOnChange]
-	)
+	const setTheme = (nextTheme: Theme) => {
+		localStorage.setItem(STORAGE_KEY, nextTheme)
+		setThemeState(nextTheme)
+	}
 
 	React.useEffect(() => {
 		applyTheme(theme)
@@ -107,7 +82,7 @@ export function ThemeProvider({
 		return () => {
 			mediaQuery.removeEventListener("change", handleChange)
 		}
-	}, [theme, applyTheme])
+	}, [theme])
 
 	// Registered above as "app.toggleTheme" (default combo "d") — modifier-held presses and
 	// editable-target focus (input/textarea/select/contenteditable/ARIA textbox roles) are already
@@ -120,24 +95,19 @@ export function ThemeProvider({
 	// feature's own isDialogOpen chain (directoryListing.tsx/useDriveDialogHost.tsx) — additionally
 	// guards on isAnyDialogOpen(), the shared Base UI signal (see dialogGuard.ts) that catches the
 	// preview overlay the same way it catches every other modal dialog.
-	useAction(
-		"app.toggleTheme",
-		() => {
-			if (isAnyDialogOpen()) {
-				return
-			}
+	useAction("app.toggleTheme", () => {
+		if (isAnyDialogOpen()) {
+			return
+		}
 
-			setThemeState(currentTheme => {
-				const nextTheme =
-					currentTheme === "dark" ? "light" : currentTheme === "light" ? "dark" : getSystemTheme() === "dark" ? "light" : "dark"
+		setThemeState(currentTheme => {
+			const nextTheme =
+				currentTheme === "dark" ? "light" : currentTheme === "light" ? "dark" : getSystemTheme() === "dark" ? "light" : "dark"
 
-				localStorage.setItem(storageKey, nextTheme)
-				return nextTheme
-			})
-		},
-		undefined,
-		[storageKey]
-	)
+			localStorage.setItem(STORAGE_KEY, nextTheme)
+			return nextTheme
+		})
+	})
 
 	React.useEffect(() => {
 		const handleStorageChange = (event: StorageEvent) => {
@@ -145,7 +115,7 @@ export function ThemeProvider({
 				return
 			}
 
-			if (event.key !== storageKey) {
+			if (event.key !== STORAGE_KEY) {
 				return
 			}
 
@@ -154,7 +124,7 @@ export function ThemeProvider({
 				return
 			}
 
-			setThemeState(defaultTheme)
+			setThemeState(DEFAULT_THEME_SETTING)
 		}
 
 		window.addEventListener("storage", handleStorageChange)
@@ -162,24 +132,9 @@ export function ThemeProvider({
 		return () => {
 			window.removeEventListener("storage", handleStorageChange)
 		}
-	}, [defaultTheme, storageKey])
+	}, [])
 
-	const value = React.useMemo(
-		() => ({
-			theme,
-			setTheme
-		}),
-		[theme, setTheme]
-	)
-
-	return (
-		<ThemeProviderContext.Provider
-			{...props}
-			value={value}
-		>
-			{children}
-		</ThemeProviderContext.Provider>
-	)
+	return <ThemeProviderContext.Provider value={{ theme, setTheme }}>{children}</ThemeProviderContext.Provider>
 }
 
 export const useTheme = () => {

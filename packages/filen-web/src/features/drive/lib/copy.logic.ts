@@ -11,7 +11,6 @@ import type {
 import {
 	createCopyJob as createSharedCopyJob,
 	type CopyJob as SharedCopyJob,
-	type CopyJobOutcome as SharedCopyJobOutcome,
 	type CopyReportInput,
 	type CopyUpdateEvents,
 	type CopyUpdateInput,
@@ -30,9 +29,6 @@ export interface CopyJobFailure {
 	sourcePath: string
 	destName: string
 	error: ErrorDTO
-	// A failed directory takes its whole subtree with it.
-	affectedFiles: number
-	affectedBytes: number
 }
 
 // What a copy's transfers row shows as its icon: the one item's kind, or several items.
@@ -58,8 +54,6 @@ export function copyGlyphForEntries(entries: readonly CopyEntry[]): CopyJobGlyph
 
 	return "chunks" in only.item ? "file" : "directory"
 }
-
-export type CopyJobOutcome = SharedCopyJobOutcome<ErrorDTO>
 
 export interface CopyJob extends SharedCopyJob<DriveItem, CopyJobFailure, CopyFailure, ErrorDTO> {
 	glyph: CopyJobGlyph
@@ -111,9 +105,7 @@ function toFailure(info: CopyFailureInfo): CopyJobFailure {
 		sourceUuid: info.sourceUuid,
 		sourcePath: info.sourcePath,
 		destName: info.destName,
-		error: copyErrorDTO(info.error),
-		affectedFiles: Number(info.affectedFiles),
-		affectedBytes: Number(info.affectedBytes)
+		error: copyErrorDTO(info.error)
 	}
 }
 

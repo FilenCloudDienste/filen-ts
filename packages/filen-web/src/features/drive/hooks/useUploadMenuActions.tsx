@@ -6,7 +6,7 @@ import { startDirectoryUpload } from "@/features/drive/lib/uploadDirectory"
 import { normalizeTextFileName, runCreateTextFile } from "@/features/drive/lib/createTextFile"
 import { notifyIfNameIsHidden } from "@/features/drive/lib/hiddenNameNotice"
 import { driveListingQueryUpdate } from "@/features/drive/queries/drive"
-import { type PreviewSource, drivePreviewSources } from "@/features/preview/lib/previewSource"
+import { type DriveItem } from "@/features/drive/lib/item"
 import { sdkApi } from "@/lib/sdk/client"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { InputDialog } from "@/components/dialogs/inputDialog"
@@ -15,7 +15,7 @@ export interface UseUploadMenuActionsParams {
 	// The directory uploads and new text files land in, null for My Drive's root.
 	parentUuid: string | null
 	disabled: boolean
-	openPreview: (sources: PreviewSource[], index: number) => void
+	openPreview: (items: DriveItem[], index: number) => void
 	hiddenNotice: boolean
 	// Prefix of the hidden inputs' test ids, so tests can tell one host's pickers from another's.
 	// "drive-upload" when omitted.
@@ -137,7 +137,7 @@ export function useUploadMenuActions({
 		// Opens the editor immediately (mobile parity — useDriveUpload.ts's createTextFile does the
 		// same). A single-item frozen snapshot, same as a lone previewable item's own open path
 		// (directoryListing.tsx's handleOpen).
-		openPreview(drivePreviewSources([outcome.item]), 0)
+		openPreview([outcome.item], 0)
 	}
 
 	return {

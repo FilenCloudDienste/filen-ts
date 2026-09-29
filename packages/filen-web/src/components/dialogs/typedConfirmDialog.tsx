@@ -1,4 +1,4 @@
-import { useState, type SubmitEvent } from "react"
+import { type SubmitEvent } from "react"
 import { type AlertDialogRoot } from "@base-ui/react/alert-dialog"
 import {
 	AlertDialog,
@@ -13,8 +13,8 @@ import {
 import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
-import { isArmed, shouldResetOnOpen } from "@/components/dialogs/typedConfirmDialog.logic"
 import { shouldForwardOpenChange } from "@/components/dialogs/dismissal.logic"
+import { useSeededOnOpen } from "@/lib/useSeededOnOpen"
 
 interface TypedConfirmDialogProps {
 	open: boolean
@@ -31,7 +31,6 @@ interface TypedConfirmDialogProps {
 	matchValue: string
 	confirmLabel: string
 	cancelLabel: string
-	destructive?: boolean
 	onOpenChange: (open: boolean) => void
 	onConfirm: () => void
 }
@@ -50,10 +49,10 @@ interface TypedConfirmDialogProps {
 //     unshare). Confirm button focused; Enter is the fast path.
 //  2. `ConfirmDialog` with `destructive` — irreversible, but bounded to a selection the user just
 //     made (permanent delete of selected trashed items, a version delete, chat delete/leave, contact
-//     remove/block). Red confirm, Cancel focused (confirmDialog.logic.ts).
+//     remove/block). Red confirm, Cancel focused (see confirmDialog.tsx).
 //  3. This dialog — irreversible AND unbounded: it destroys a whole container or an account-level
 //     resource the user never enumerated (empty trash, delete all items, delete all file versions).
-//     The phrase must be typed.
+//     The phrase must be typed, and the confirm button is always red.
 function TypedConfirmDialog({
 	open,
 	pending,
@@ -63,24 +62,15 @@ function TypedConfirmDialog({
 	matchValue,
 	confirmLabel,
 	cancelLabel,
-	destructive: destructiveProp,
 	onOpenChange,
 	onConfirm
 }: TypedConfirmDialogProps) {
-	// Not a destructuring default, which the React Compiler cannot lower.
-	const destructive = destructiveProp ?? false
-	// Re-armed dialogs must never resurrect a previous attempt's typed value — adjusting state during
-	// render (React's documented "reset state when a prop changes" pattern) rather than an effect,
-	// which would commit an extra render pass. Mirrors the forgot-password dialog's re-seed pattern.
-	const [wasOpen, setWasOpen] = useState(open)
-	const [typed, setTyped] = useState("")
-	if (open !== wasOpen) {
-		setWasOpen(open)
-		if (shouldResetOnOpen(open, wasOpen)) {
-			setTyped("")
-		}
-	}
-	const armed = isArmed(typed, matchValue)
+	// Re-armed dialogs must never resurrect a previous attempt's typed value.
+	const [typed, setTyped] = useSeededOnOpen(open, "")
+	// Exact match only (no trim/case-fold): the copy and `matchValue` are the same string by
+	// construction (see the prop notes), so normalization could only loosen the confirmation, never
+	// repair a drift.
+	const armed = typed === matchValue
 
 	function handleOpenChange(next: boolean, details: AlertDialogRoot.ChangeEventDetails): void {
 		if (!shouldForwardOpenChange(next, pending)) {
@@ -141,7 +131,7 @@ function TypedConfirmDialog({
 						</AlertDialogCancel>
 						<AlertDialogAction
 							type="submit"
-							variant={destructive ? "destructive" : "default"}
+							variant="destructive"
 							disabled={pending || !armed}
 						>
 							{pending && <Spinner data-icon="inline-start" />}

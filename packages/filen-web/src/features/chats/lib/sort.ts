@@ -3,10 +3,10 @@ import {
 	isBlocked,
 	EMPTY_BLOCKED_USERS,
 	resolveChatParticipantsDisplayName,
+	contactDisplayName,
 	type BlockedUsers
 } from "@filen/shared"
 import type { Chat, ChatMessage, ChatMessagePartial } from "@filen/sdk-rs"
-import { contactDisplayName } from "@/features/contacts/components/contactsList.logic"
 
 // Conversation-list ordering — ported from
 // `filen-mobile/src/features/chats/components/list/index.tsx:36-45`, not a guess. There is no

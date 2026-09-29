@@ -13,13 +13,12 @@ import {
 	activeMentionQuery,
 	activeEmojiQuery,
 	filterMentionParticipants,
-	filterEmojiSuggestions,
 	applyMention,
 	applyEmoji,
 	lastEditableOwnMessage,
 	appendAttachmentUrl
 } from "@/features/chats/lib/composer.logic"
-import { emojiForShortcode, customEmojiImageForShortcode } from "@/features/chats/lib/emoji"
+import { emojiForShortcode, customEmojiImageForShortcode, searchEmoji } from "@/features/chats/lib/emoji"
 
 // Pure composer core — no React/store/IO. Uuid-shaped fields are the SDK's branded UuidStr; literal
 // strings with 3+ dashes satisfy that template type directly.
@@ -184,7 +183,7 @@ describe("activeEmojiQuery + emoji application", () => {
 	})
 
 	it("filters known shortcodes and inserts the unicode glyph", () => {
-		const items = filterEmojiSuggestions("joy", 8)
+		const items = searchEmoji("joy", 8)
 
 		expect(items.length).toBeGreaterThan(0)
 		expect(items[0]?.name).toBe("joy")
@@ -203,7 +202,7 @@ describe("activeEmojiQuery + emoji application", () => {
 	// "smile" exists in both the standard table and the custom CDN pack — mobile-parity precedence means
 	// the custom pack wins, so the `:` autocomplete surfaces it as a "custom" suggestion, not "standard".
 	it("surfaces a colliding shortcode as its custom-pack suggestion, not the standard glyph", () => {
-		const items = filterEmojiSuggestions("smile", 8)
+		const items = searchEmoji("smile", 8)
 		const smileMatches = items.filter(item => item.name === "smile")
 
 		expect(smileMatches).toHaveLength(1)
@@ -211,7 +210,7 @@ describe("activeEmojiQuery + emoji application", () => {
 	})
 
 	it("sources the custom emoji pack into the suggestion list alongside standard shortcodes", () => {
-		const items = filterEmojiSuggestions("kekw", 8)
+		const items = searchEmoji("kekw", 8)
 
 		// The full pack has several "kekw*" prefix siblings (kekwaddle, kekwait, ...) — exact-match "kekw"
 		// still ranks first (prefix-tier alphabetical), which is what selectEmoji actually keys off.

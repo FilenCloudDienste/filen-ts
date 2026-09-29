@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { CheckIcon } from "lucide-react"
 import { type Checklist, cn, addChecklistLine, removeChecklistItem } from "@filen/shared"
@@ -42,17 +42,10 @@ export function ChecklistEditor({
 	// Live input elements by row id, for focus moves after add/remove. A ref (instance state), not
 	// state — the React Compiler keeps it stable and mutating it never triggers a render.
 	const inputRefs = useRef<Map<string, HTMLInputElement>>(new Map())
-	// The outbox enqueue callback, held in a ref so the event handlers below always call the freshest
-	// identity without re-subscribing anything (mobile parity: onChange is the only sync path).
-	const onChangeRef = useRef(controller.onChange)
-
-	useEffect(() => {
-		onChangeRef.current = controller.onChange
-	})
 
 	function commit(next: Checklist): void {
 		setRows(next)
-		onChangeRef.current(serializeChecklist(next))
+		controller.onChange(serializeChecklist(next))
 	}
 
 	function focusRow(id: string): void {

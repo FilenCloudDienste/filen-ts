@@ -3,7 +3,7 @@
 // cannot import the browser module directly — it pulls in Vite-only `?worker` imports that tsc can't
 // resolve. Declared non-optional: every spec waits for the hooks before touching them.
 //
-// rawStringifiedClient/createTestFile/trashTestFile return real SDK records (bigint fields included)
+// rawStringifiedClient/createTestFile return real SDK records (bigint fields included)
 // — safe here because these types are only ever consumed INSIDE a page.evaluate callback (structured
 // clone within the browser), never returned across the Playwright<->page bridge itself (JSON-only,
 // bigint-unsafe) — so `unknown` is precise enough for this mirror; sw.spec.ts never inspects their
@@ -19,7 +19,6 @@ interface E2eHooks {
 	comboFor: (actionId: string) => string
 	rawStringifiedClient: () => Promise<unknown>
 	createTestFile: (name: string, content: string, parentUuid?: string | null) => Promise<unknown>
-	trashTestFile: (file: unknown) => Promise<void>
 	deleteTestNoteByUuid: (uuid: string) => Promise<void>
 	// Return type is trimmed to the one field notes.spec.ts actually reads (`uuid`) — same "mirror only
 	// what a spec needs" rule as rawStringifiedClient/createTestFile's own `unknown` above.
@@ -48,7 +47,6 @@ interface E2eHooks {
 	createTestSelfChat: () => Promise<string>
 	deleteTestChatByUuid: (uuid: string) => Promise<void>
 	listTestChatUuids: () => Promise<string[]>
-	readTestChatLastMessage: (uuid: string) => Promise<string | null>
 	readTestChatMessageTexts: (uuid: string) => Promise<string[]>
 	enqueueTestChatMessage: (chatUuid: string, content: string) => Promise<boolean>
 	readPersistedInflightChatMessages: (chatUuid: string) => Promise<string[] | null>

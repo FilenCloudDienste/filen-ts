@@ -88,18 +88,6 @@ describe("useChatComposerStore", () => {
 		expect(entry?.mode).toEqual({ kind: "new" })
 	})
 
-	it("requestFocus bumps only the nonce", () => {
-		const store = useChatComposerStore.getState()
-
-		store.setDraft(CHAT, "x")
-		const before = useChatComposerStore.getState().entries[CHAT]?.focusNonce ?? 0
-
-		store.requestFocus(CHAT)
-
-		expect(useChatComposerStore.getState().entries[CHAT]?.focusNonce).toBe(before + 1)
-		expect(useChatComposerStore.getState().entries[CHAT]?.draft).toBe("x")
-	})
-
 	it("useChatComposerEntry is a plain selector over the store (default entry for an unseen chat)", () => {
 		// The hook body is a bare selector; exercised here for the default-entry shape without a renderer.
 		expect(typeof useChatComposerEntry).toBe("function")

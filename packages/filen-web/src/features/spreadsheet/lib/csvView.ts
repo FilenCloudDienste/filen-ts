@@ -83,7 +83,7 @@ function looksWesternWindows1252(bytes: Uint8Array): boolean {
 	return bytes.length < HIGH_BYTE_RATIO_MIN_LENGTH || high / bytes.length <= HIGH_BYTE_RATIO_LIMIT
 }
 
-export function decodeCsv(bytes: Uint8Array): { text: string; bom: boolean; encoding: CsvFormat["encoding"]; writable: boolean } {
+function decodeCsv(bytes: Uint8Array): { text: string; bom: boolean; encoding: CsvFormat["encoding"]; writable: boolean } {
 	// Excel's "Save as Unicode Text" writes UTF-16LE with a BOM; decoded as UTF-8 it would come back as
 	// NUL-interleaved garbage rather than throwing, so it must be checked before the UTF-8 BOM/fallback below.
 	if (UTF16LE_BOM.every((byte, index) => bytes[index] === byte)) {

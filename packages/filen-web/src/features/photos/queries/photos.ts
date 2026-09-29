@@ -92,7 +92,7 @@ export async function fetchPhotosListing(rootUuid: string): Promise<PhotosListin
 // root changes (invalidatePhotosListing), so a remount or refocus reuses it. Until a walk counts (see
 // readThisSession) it refetches like any staleTime-0 query, and a network reconnect always does: events
 // may have been missed meanwhile.
-export const PHOTOS_LISTING_STALE_TIME = 15 * 60 * 1000
+const PHOTOS_LISTING_STALE_TIME = 15 * 60 * 1000
 
 export function usePhotosListingQuery(rootUuid: string | null): UseQueryResult<PhotosListing> {
 	return useQuery({

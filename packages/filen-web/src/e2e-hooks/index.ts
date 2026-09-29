@@ -10,7 +10,7 @@ import { kvGetJson, kvHas, kvSetJson } from "@/lib/storage/adapter"
 import { comboFor, setUserCombo } from "@/lib/keymap/registry"
 import { whenBootReady } from "@/lib/sdk/boot"
 import { readThumbnailBlob } from "@/features/drive/lib/thumbCache"
-import { inflightContentSchema } from "@/features/notes/lib/sync.logic"
+import { inflightContentSchema, noteKindForPreview } from "@/features/notes/lib/sync.logic"
 import { latestInflightContent } from "@/features/notes/hooks/useNoteEditor.logic"
 import { enqueueChatMessage } from "@/features/chats/lib/sync"
 import { inflightChatMessagesSchema } from "@/features/chats/lib/sync.logic"
@@ -21,9 +21,9 @@ import { isScratchDebrisName } from "@/e2e-hooks/scratchDebris"
 // env condition in main.tsx, so a normal build dead-code-eliminates this whole module — proven by
 // the no-flag build grep). Nothing here ships to production.
 //
-// The e2e harness never types credentials or the session blob into the UI: it logs in once
-// (`mint`), stores the resulting blob to a file, and re-seeds it on later loads via sessionStorage,
-// which bootSdk drains into kv before its own resumeSession (@/lib/sdk/boot). The blob carries
+// The e2e harness logs in once through the real form, harvests the session via `dumpSession`
+// (`mint` is kept only as a fallback), stores the blob to a file, and re-seeds it on later loads via
+// sessionStorage, which bootSdk drains into kv before its own resumeSession (@/lib/sdk/boot). The blob carries
 // a bigint (`StringifiedClient.userId`), so it always travels as an envelope STRING (@/lib/serialize),
 // never raw JSON.
 
@@ -76,8 +76,6 @@ interface E2eHooks {
 	// the shared e2e account happens to already hold. `parentUuid` defaults to the drive root; callers
 	// nesting inside a scratch directory (net-zero on the shared account) pass its uuid explicitly.
 	createTestFile: (name: string, content: string, parentUuid?: string | null) => Promise<File>
-	// Trashes a File this hook created — keeps the shared e2e account net-zero after a test run.
-	trashTestFile: (file: File) => Promise<void>
 	// Permanently removes a note by uuid — trashes then deletes — keeping the shared e2e account
 	// net-zero after a UI-driven create smoke test, bypassing the trash/delete menu UI for a faster,
 	// more direct teardown. No-op when the uuid isn't found.
@@ -159,10 +157,6 @@ interface E2eHooks {
 	// Every conversation uuid currently on the account — the leak-guard seam (diff before/after a
 	// create, sweep any new uuid under serial mode).
 	listTestChatUuids: () => Promise<string[]>
-	// Fresh server read (bypassing every client cache — a full listChats) of a conversation's last
-	// message text by uuid. The real-send + kill-path cases poll this to prove a queued message
-	// actually reached the server. Null when the uuid isn't found or the chat has no message yet.
-	readTestChatLastMessage: (uuid: string) => Promise<string | null>
 	// Fresh server read (bypassing every client cache) of every message text in a conversation, via a
 	// full listMessagesBefore(now + 1h). The kill-path proof counts how many copies of a text landed —
 	// the temporal-dedupe "exactly one" assertion. Empty array when the uuid isn't found.
@@ -180,9 +174,6 @@ interface E2eHooks {
 	// Returns the count removed.
 	// `minAgeMs` age-gates the match against `Chat.created` — see olderThan.
 	sweepTestChatsByNamePrefix: (prefix: string, minAgeMs?: number) => Promise<number>
-	// Fires a realtime typing signal ("down"/"up") for a chat — the seam a second page drives so the
-	// first page's typing indicator can be exercised end-to-end. No-op when the uuid isn't found.
-	sendTestTypingSignal: (chatUuid: string, signalType: "up" | "down") => Promise<void>
 }
 
 declare global {
@@ -191,57 +182,53 @@ declare global {
 	}
 }
 
+// Runs `fn` once the SDK client is up — every hook that touches the client goes through this.
+function ready<A extends unknown[], R>(fn: (...args: A) => Promise<R>): (...args: A) => Promise<R> {
+	return async (...args) => {
+		await whenBootReady()
+
+		return fn(...args)
+	}
+}
+
+async function noteByUuid(uuid: string): Promise<Note | undefined> {
+	return (await sdkApi.listNotes()).find(n => n.uuid === uuid)
+}
+
+// deleteNote is permanent; trash first so a note in any lifecycle state is removable.
+async function purgeNote(note: Note): Promise<void> {
+	await sdkApi.deleteNote(await sdkApi.trashNote(note))
+}
+
 export function installE2eHooks(): void {
 	window.__filenE2E = {
-		mint: async (email, password) => {
-			await whenBootReady()
-
-			return stringifyEnvelope(await sdkApi.login({ email, password }))
-		},
-		dumpSession: async () => {
-			await whenBootReady()
-
-			return stringifyEnvelope(await sdkApi.toStringified())
-		},
+		mint: ready(async (email, password) => stringifyEnvelope(await sdkApi.login({ email, password }))),
+		dumpSession: ready(async () => stringifyEnvelope(await sdkApi.toStringified())),
 		probeAuthedRead: () => sdkApi.probeAuthedRead(),
 		kvSet: (key, value) => kvSetJson(key, value),
 		kvGet: key => kvGetJson(key, stringSchema),
 		kvHas: key => kvHas(key),
 		setUserCombo: (actionId, combo) => setUserCombo(actionId, combo),
 		comboFor: actionId => comboFor(actionId),
-		rawStringifiedClient: async () => {
-			await whenBootReady()
-
-			return sdkApi.toStringified()
-		},
-		createTestFile: async (name, content, parentUuid = null) => {
-			await whenBootReady()
-
-			return sdkApi.uploadFile(
+		rawStringifiedClient: ready(() => sdkApi.toStringified()),
+		createTestFile: ready((name, content, parentUuid = null) =>
+			sdkApi.uploadFile(
 				parentUuid,
 				crypto.randomUUID(),
 				new File([content], name, { type: "text/plain" }),
 				Comlink.proxy(() => undefined)
 			)
-		},
-		trashTestFile: async file => {
-			await sdkApi.trashFile(file)
-		},
-		deleteTestNoteByUuid: async uuid => {
-			await whenBootReady()
-
-			const note = (await sdkApi.listNotes()).find(n => n.uuid === uuid)
+		),
+		deleteTestNoteByUuid: ready(async uuid => {
+			const note = await noteByUuid(uuid)
 
 			if (note === undefined) {
 				return
 			}
 
-			// deleteNote is permanent; trash first so a note in any lifecycle state is removable.
-			await sdkApi.deleteNote(await sdkApi.trashNote(note))
-		},
-		createTestNoteWithContent: async (noteType, content, title) => {
-			await whenBootReady()
-
+			await purgeNote(note)
+		}),
+		createTestNoteWithContent: ready(async (noteType, content, title) => {
 			let note = await sdkApi.createNote()
 
 			// The SDK creates every note as "text" by default — only switch when a different type was
@@ -251,51 +238,39 @@ export function installE2eHooks(): void {
 				note = await sdkApi.setNoteType(note, noteType)
 			}
 
-			const previewType = noteType === "rich" || noteType === "checklist" ? noteType : "other"
-
-			note = await sdkApi.setNoteContent(note, content, createNotePreviewFromContentText(previewType, content))
+			note = await sdkApi.setNoteContent(note, content, createNotePreviewFromContentText(noteKindForPreview(noteType), content))
 			note = await sdkApi.setNoteTitle(note, title)
 
 			return note
-		},
-		readTestNoteContentByUuid: async uuid => {
-			await whenBootReady()
-
-			const note = (await sdkApi.listNotes()).find(n => n.uuid === uuid)
+		}),
+		readTestNoteContentByUuid: ready(async uuid => {
+			const note = await noteByUuid(uuid)
 
 			if (note === undefined) {
 				return null
 			}
 
 			return (await sdkApi.getNoteContent(note)) ?? null
-		},
-		setTestNoteContentByUuid: async (uuid, content) => {
-			await whenBootReady()
-
-			const note = (await sdkApi.listNotes()).find(n => n.uuid === uuid)
+		}),
+		setTestNoteContentByUuid: ready(async (uuid, content) => {
+			const note = await noteByUuid(uuid)
 
 			if (note === undefined) {
 				return
 			}
 
-			const previewType = note.noteType === "rich" || note.noteType === "checklist" ? note.noteType : "other"
-
-			await sdkApi.setNoteContent(note, content, createNotePreviewFromContentText(previewType, content))
-		},
-		renameTestNoteByUuid: async (uuid, title) => {
-			await whenBootReady()
-
-			const note = (await sdkApi.listNotes()).find(n => n.uuid === uuid)
+			await sdkApi.setNoteContent(note, content, createNotePreviewFromContentText(noteKindForPreview(note.noteType), content))
+		}),
+		renameTestNoteByUuid: ready(async (uuid, title) => {
+			const note = await noteByUuid(uuid)
 
 			if (note === undefined) {
 				return
 			}
 
 			await sdkApi.setNoteTitle(note, title)
-		},
-		readPersistedInflightContent: async uuid => {
-			await whenBootReady()
-
+		}),
+		readPersistedInflightContent: ready(async uuid => {
 			const outbox = await kvGetJson("inflightNoteContent", inflightContentSchema)
 
 			if (outbox === null) {
@@ -303,30 +278,21 @@ export function installE2eHooks(): void {
 			}
 
 			return latestInflightContent(outbox[uuid])
-		},
-		listTestNoteUuids: async () => {
-			await whenBootReady()
-
-			return (await sdkApi.listNotes()).map(note => note.uuid)
-		},
-		sweepTestNotesByTitlePrefix: async (prefix, minAgeMs) => {
-			await whenBootReady()
-
+		}),
+		listTestNoteUuids: ready(async () => (await sdkApi.listNotes()).map(note => note.uuid)),
+		sweepTestNotesByTitlePrefix: ready(async (prefix, minAgeMs) => {
 			const isOldEnough = olderThan(minAgeMs)
 			const matches = (await sdkApi.listNotes()).filter(n => (n.title ?? "").startsWith(prefix) && isOldEnough(n.createdTimestamp))
 
 			for (const note of matches) {
-				// deleteNote is permanent; trash first so a note in any lifecycle state is removable.
 				// Sequential (not Promise.all): a bulk sweep racing many notes through the same worker
 				// gains nothing from parallelism here and is easier to reason about mid-failure.
-				await sdkApi.deleteNote(await sdkApi.trashNote(note))
+				await purgeNote(note)
 			}
 
 			return matches.length
-		},
-		sweepTestTagsByNamePrefix: async (prefix, minAgeMs) => {
-			await whenBootReady()
-
+		}),
+		sweepTestTagsByNamePrefix: ready(async (prefix, minAgeMs) => {
 			const isOldEnough = olderThan(minAgeMs)
 			const matches = (await sdkApi.listNoteTags()).filter(
 				tag => (tag.name ?? "").startsWith(prefix) && isOldEnough(tag.createdTimestamp)
@@ -338,10 +304,8 @@ export function installE2eHooks(): void {
 			}
 
 			return matches.length
-		},
-		sweepTestDriveDebris: async (target, limit, minAgeMs, strayFileNames = []) => {
-			await whenBootReady()
-
+		}),
+		sweepTestDriveDebris: ready(async (target, limit, minAgeMs, strayFileNames = []) => {
 			// A row whose meta did not decode carries no name to match, so it can never be debris by this
 			// predicate — and must never be swept on a guess.
 			const nameOf = (meta: DirMeta | FileMeta): string => (meta.type === "decoded" ? meta.data.name : "")
@@ -383,10 +347,8 @@ export function installE2eHooks(): void {
 			}
 
 			return removed
-		},
-		thumbnailFileStat: async (parentUuid, name) => {
-			await whenBootReady()
-
+		}),
+		thumbnailFileStat: ready(async (parentUuid, name) => {
 			// listDirectory returns raw SDK File records, not app-level DriveItems — meta arrives as the
 			// tagged union (mirrors features/drive/lib/item.ts's own narrowItem extraction) rather than the
 			// pre-narrowed decryptedMeta field the drive UI reads.
@@ -409,10 +371,8 @@ export function installE2eHooks(): void {
 			const stat = blob as Blob & { lastModified: number }
 
 			return { size: stat.size, lastModified: stat.lastModified }
-		},
-		createTestSelfChat: async () => {
-			await whenBootReady()
-
+		}),
+		createTestSelfChat: ready(async () => {
 			// Zero participants is backend-accepted; rename immediately so a leaked conversation is
 			// sweepable by the "e2e-chat-" prefix.
 			const chat = await sdkApi.createChat([])
@@ -423,10 +383,8 @@ export function installE2eHooks(): void {
 			chatsQueryUpsert(renamed)
 
 			return renamed.uuid
-		},
-		deleteTestChatByUuid: async uuid => {
-			await whenBootReady()
-
+		}),
+		deleteTestChatByUuid: ready(async uuid => {
 			const chat = (await sdkApi.listChats()).find(c => c.uuid === uuid)
 
 			if (chat === undefined) {
@@ -434,22 +392,9 @@ export function installE2eHooks(): void {
 			}
 
 			await sdkApi.deleteChat(chat)
-		},
-		listTestChatUuids: async () => {
-			await whenBootReady()
-
-			return (await sdkApi.listChats()).map(chat => chat.uuid)
-		},
-		readTestChatLastMessage: async uuid => {
-			await whenBootReady()
-
-			const chat = (await sdkApi.listChats()).find(c => c.uuid === uuid)
-
-			return chat?.lastMessage?.message ?? null
-		},
-		readTestChatMessageTexts: async uuid => {
-			await whenBootReady()
-
+		}),
+		listTestChatUuids: ready(async () => (await sdkApi.listChats()).map(chat => chat.uuid)),
+		readTestChatMessageTexts: ready(async uuid => {
 			const chat = (await sdkApi.listChats()).find(c => c.uuid === uuid)
 
 			if (chat === undefined) {
@@ -459,10 +404,8 @@ export function installE2eHooks(): void {
 			const messages = await sdkApi.listMessagesBefore(chat, BigInt(Date.now() + 3_600_000))
 
 			return messages.map(message => message.message ?? "")
-		},
-		enqueueTestChatMessage: async (chatUuid, content) => {
-			await whenBootReady()
-
+		}),
+		enqueueTestChatMessage: ready(async (chatUuid, content) => {
 			// Prefer the list cache (offline-safe — the kill-path enqueues while offline); fall back to a
 			// network read only when the cache misses.
 			const chat = chatsQueryGet()?.find(c => c.uuid === chatUuid) ?? (await sdkApi.listChats()).find(c => c.uuid === chatUuid)
@@ -480,10 +423,8 @@ export function installE2eHooks(): void {
 				content,
 				sender: { id: user.id, email: user.email, avatarUrl: user.avatarUrl, nickName: user.nickName }
 			})
-		},
-		readPersistedInflightChatMessages: async chatUuid => {
-			await whenBootReady()
-
+		}),
+		readPersistedInflightChatMessages: ready(async chatUuid => {
 			const outbox = await kvGetJson("inflightChatMessages", inflightChatMessagesSchema)
 
 			if (outbox === null) {
@@ -497,10 +438,8 @@ export function installE2eHooks(): void {
 			}
 
 			return group.messages.map(message => message.message ?? "")
-		},
-		sweepTestChatsByNamePrefix: async (prefix, minAgeMs) => {
-			await whenBootReady()
-
+		}),
+		sweepTestChatsByNamePrefix: ready(async (prefix, minAgeMs) => {
 			const isOldEnough = olderThan(minAgeMs)
 			const matches = (await sdkApi.listChats()).filter(chat => (chat.name ?? "").startsWith(prefix) && isOldEnough(chat.created))
 
@@ -510,17 +449,6 @@ export function installE2eHooks(): void {
 			}
 
 			return matches.length
-		},
-		sendTestTypingSignal: async (chatUuid, signalType) => {
-			await whenBootReady()
-
-			const chat = chatsQueryGet()?.find(c => c.uuid === chatUuid) ?? (await sdkApi.listChats()).find(c => c.uuid === chatUuid)
-
-			if (chat === undefined) {
-				return
-			}
-
-			await sdkApi.sendTypingSignal(chat, signalType)
-		}
+		})
 	}
 }

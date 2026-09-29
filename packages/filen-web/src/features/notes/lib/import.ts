@@ -16,8 +16,7 @@ import { runOp, type ActionOutcome } from "@/lib/actions/outcome"
 // the detected type when it differs from the SDK's own "text" default, and seeds its content through
 // the SAME fault-tolerant outbox the live editor writes through — never a raw one-off SDK content call
 // — so an import that lands offline still durably queues and eventually pushes exactly like a typed
-// edit would. Bypasses createNote()'s own default-note-type PREFERENCE deliberately: an imported note's
-// type is dictated by the file it came from, not by what the user last picked for a blank note.
+// edit would.
 export async function importNoteFromFile(file: File): Promise<ActionOutcome<Note>> {
 	const noteType = detectImportNoteType(file.name)
 

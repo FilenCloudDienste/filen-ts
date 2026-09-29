@@ -146,8 +146,6 @@ export const drive = {
 	driveColumnName: "Name",
 	/** Drive list view — size column header */
 	driveColumnSize: "Size",
-	/** Drive list view — type column header */
-	driveColumnType: "Type",
 	/** Drive list view — last-modified column header */
 	driveColumnModified: "Modified",
 	/** Drive list view — screen-reader state after the sorted column header's label */
@@ -188,10 +186,6 @@ export const drive = {
 	driveListLabel: "Directory contents",
 	/** Drive listing — title shown when a directory listing fails to load */
 	driveLoadError: "Couldn't load this directory",
-	/** Drive listing — item count summary shown in the toolbar when nothing is selected; singular */
-	driveItemCount_one: "{{count}} item",
-	/** Drive listing — item count summary shown in the toolbar when nothing is selected; plural */
-	driveItemCount_other: "{{count}} items",
 	/** Drive listing — selection count shown in the toolbar in place of the item count; singular */
 	driveSelectionCount_one: "{{count}} selected",
 	/** Drive listing — selection count shown in the toolbar in place of the item count; plural */
@@ -456,8 +450,6 @@ export const drive = {
 	// ── Versions panel — bulk selection ──────────────────────────────────────
 	/** Versions panel — button entering multi-select mode */
 	driveVersionsSelectAction: "Select",
-	/** Versions panel — button leaving multi-select mode, clearing the current selection */
-	driveVersionsCancelSelectAction: "Cancel",
 	/** Versions panel (select mode) — toggle selecting/deselecting every selectable (non-current) version */
 	driveVersionsSelectAllAction: "Select all",
 	/** Versions panel (select mode) — count of currently selected versions, shown next to the bulk actions; singular */
@@ -490,8 +482,6 @@ export const drive = {
 	driveVersionsDeleteLiveBlocked: "This is the current version and can't be deleted.",
 
 	// ── Info panel ───────────────────────────────────────────────────────────
-	/** Info panel — heading (opened via driveActionInfo) */
-	driveInfoPanelTitle: "Info",
 	/** Info panel — row label: the item's directory path (breadcrumb ancestors) */
 	driveInfoPath: "Location",
 	/** Info panel — row label: size on disk (a directory's is the recursive aggregate) */

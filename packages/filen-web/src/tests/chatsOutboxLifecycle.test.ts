@@ -44,7 +44,8 @@ vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 import { Sync } from "@/features/chats/lib/sync"
 import { buildOptimisticMessage, CommittedIdLedger, type OptimisticSender, type RemoteChatEnqueue } from "@/features/chats/lib/sync.logic"
 import useChatsInflightStore, { type ChatMessageWithInflightId, type InflightChatMessages } from "@/features/chats/store/useChatsInflight"
-import { closeOutbox } from "@/lib/storage/outboxChannel"
+import { closeOutbox, decodeOutboxPayload, makeOutboxChannelTransport, type OutboxChannelMsg } from "@/lib/storage/outboxChannel"
+import { remoteChatEnqueueSchema } from "@/features/chats/lib/sync.logic"
 
 const SENDER: OptimisticSender = { id: 7n, email: "me@filen.io", avatarUrl: undefined, nickName: "Me" }
 
@@ -294,5 +295,39 @@ describe("closeOutbox — detaches the handler and closes the channel", () => {
 		expect(() => {
 			channel.postMessage("x")
 		}).toThrow()
+	})
+})
+
+// ── transport payloads ──────────────────────────────────────────────────────
+
+describe("outbox transport — payloads cross as structured clones", () => {
+	it("a forwarded send arrives with its bigints intact and validates", async () => {
+		const sender = new BroadcastChannel("filen-web-test-outbox-payload")
+		const receiver = new BroadcastChannel("filen-web-test-outbox-payload")
+		const received = new Promise<OutboxChannelMsg>(resolve => {
+			receiver.onmessage = (ev: MessageEvent<OutboxChannelMsg>) => {
+				resolve(ev.data)
+			}
+		})
+		const forward: RemoteChatEnqueue = { chat: makeChat("c1"), message: optimistic("c1", "i1", 5n) }
+
+		makeOutboxChannelTransport<RemoteChatEnqueue, InflightChatMessages>(sender).sendEnqueue(forward)
+
+		const msg = await received
+
+		closeOutbox(sender)
+		closeOutbox(receiver)
+
+		expect(msg.kind).toBe("enqueue")
+
+		const decoded = msg.kind === "enqueue" ? decodeOutboxPayload(msg.payload, remoteChatEnqueueSchema, "forwarded send") : null
+
+		expect(decoded?.message.sentTimestamp).toBe(5n)
+		expect(decoded?.chat.ownerId).toBe(7n)
+	})
+
+	it("an invalid payload is dropped, never thrown", () => {
+		expect(decodeOutboxPayload({ chat: "nope" }, remoteChatEnqueueSchema, "forwarded send")).toBeNull()
+		expect(decodeOutboxPayload("a string", remoteChatEnqueueSchema, "forwarded send")).toBeNull()
 	})
 })

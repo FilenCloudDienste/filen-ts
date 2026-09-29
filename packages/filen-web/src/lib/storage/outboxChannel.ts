@@ -1,22 +1,21 @@
 import { type, type Type } from "arktype"
 import { storageRole, onStorageLeadershipChange } from "@/lib/storage/leader"
 import { storage } from "@/lib/storage/adapter"
-import { parseEnvelope, stringifyEnvelope } from "@/lib/serialize"
 import { log } from "@/lib/log"
 
 // Shared leader-owned-outbox core, reused by the notes AND chats send outboxes (both ride the SAME db-lock
 // leadership — no second election). It owns the mechanical, feature-agnostic half of a coordinator: the
-// cross-tab channel plumbing (a dedicated BroadcastChannel, envelope-encoded), the leader/follower role
-// wiring off the db-lock signal, and the promotion replay hook. Each feature keeps its own thin coordinator
-// (message routing + arktype schemas) and its own Sync class — only the shapes flowing over the channel
-// differ; the plumbing is identical. This channel NEVER touches the db RPC protocol.
+// cross-tab channel plumbing (a dedicated BroadcastChannel), the leader/follower role wiring off the db-lock
+// signal, and the promotion replay hook. Each feature keeps its own thin coordinator (message routing +
+// arktype schemas) and its own Sync class — only the shapes flowing over the channel differ; the plumbing is
+// identical. This channel NEVER touches the db RPC protocol.
 
-// follower → leader: forward one edit (envelope-encoded feature payload) / drop an item's queued edits /
-// request a flush / request state. leader → followers: authoritative state (envelope-encoded) + a takeover
-// announcement + what is being pushed for an item, and again once the cloud holds it (`landed`, also when
-// nothing had to be sent): the hash, and the tab and entry it came from (`origin`, `stamp`), so a follower
-// knows the item's socket echo, and its own push, for what they are. Any tab → any tab: a question about an
-// item's newer version was answered (and how), so the other tabs stop asking it.
+// follower → leader: forward one edit (the feature payload) / drop an item's queued edits / request a flush /
+// request state. leader → followers: authoritative state + a takeover announcement + what is being pushed
+// for an item, and again once the cloud holds it (`landed`, also when nothing had to be sent): the hash, and
+// the tab and entry it came from (`origin`, `stamp`), so a follower knows the item's socket echo, and its own
+// push, for what they are. Any tab → any tab: a question about an item's newer version was answered (and
+// how), so the other tabs stop asking it.
 
 // How a question about an item's newer version was answered: their version, mine kept over it, or mine
 // saved beside it as a copy (theirs stays).
@@ -32,18 +31,19 @@ export interface PushDetail {
 }
 
 export type OutboxChannelMsg =
-	| { kind: "enqueue"; payload: string }
+	| { kind: "enqueue"; payload: unknown }
 	| { kind: "drop"; id: string }
 	| { kind: "executeNow" }
 	| { kind: "stateRequest" }
-	| { kind: "state"; payload: string }
+	| { kind: "state"; payload: unknown }
 	| { kind: "leaderHello" }
 	| ({ kind: "pushed"; id: string; hash: string } & PushDetail)
 	| { kind: "answered"; id: string; choice?: AnswerChoice }
 
 // The domain-agnostic transport a Sync class depends on: E is the follower's forwarded-edit shape, S the
-// leader's broadcast-state shape. Both cross the channel as $bigint envelopes. A single-tab install attaches
-// NO transport, so every method is a guarded no-op in the Sync class and the leader path stays byte-identical.
+// leader's broadcast-state shape. Both cross the channel as structured clones, which carry bigint as is. A
+// single-tab install attaches NO transport, so every method is a guarded no-op in the Sync class and the
+// leader path stays byte-identical.
 export interface OutboxChannelTransport<E, S> {
 	// follower → leader
 	sendEnqueue: (msg: E) => void
@@ -63,7 +63,7 @@ export interface OutboxChannelTransport<E, S> {
 }
 
 // Bind a channel to the transport surface — the identical mechanical mapping both features used inline:
-// envelope-encode the feature payload and post the shared message kinds.
+// post the shared message kinds, the feature payload as is.
 export function makeOutboxChannelTransport<E, S>(channel: BroadcastChannel): OutboxChannelTransport<E, S> {
 	const post = (msg: OutboxChannelMsg): void => {
 		channel.postMessage(msg)
@@ -71,7 +71,7 @@ export function makeOutboxChannelTransport<E, S>(channel: BroadcastChannel): Out
 
 	return {
 		sendEnqueue: msg => {
-			post({ kind: "enqueue", payload: stringifyEnvelope(msg) })
+			post({ kind: "enqueue", payload: msg })
 		},
 		sendDrop: id => {
 			post({ kind: "drop", id })
@@ -83,7 +83,7 @@ export function makeOutboxChannelTransport<E, S>(channel: BroadcastChannel): Out
 			post({ kind: "stateRequest" })
 		},
 		broadcastState: state => {
-			post({ kind: "state", payload: stringifyEnvelope(state) })
+			post({ kind: "state", payload: state })
 		},
 		broadcastLeaderHello: () => {
 			post({ kind: "leaderHello" })
@@ -107,20 +107,10 @@ export function closeOutbox(channel: BroadcastChannel): void {
 	channel.close()
 }
 
-// Decode + validate an envelope-encoded payload; a corrupt message is dropped (never thrown up into the
+// Validate a payload at the trust boundary; an invalid message is dropped (never thrown up into the
 // channel callback), the same convention as the kv read path.
-export function decodeOutboxPayload<T>(payload: string, schema: Type<T>, context: string): T | null {
-	let parsed: unknown
-
-	try {
-		parsed = parseEnvelope(payload)
-	} catch {
-		log.warn("outbox-channel", `dropping unparseable ${context}`)
-
-		return null
-	}
-
-	const out = schema(parsed)
+export function decodeOutboxPayload<T>(payload: unknown, schema: Type<T>, context: string): T | null {
+	const out = schema(payload)
 
 	if (out instanceof type.errors) {
 		log.warn("outbox-channel", `dropping invalid ${context}`, out.summary)

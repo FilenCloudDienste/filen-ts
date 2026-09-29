@@ -1,7 +1,6 @@
 // Per-uuid video playback continuity for the drive preview overlay's pager — mobile keeps 3 warm
 // players so paging away and back resumes mid-scene; a web <video> element is remounted fresh on every
-// pager step instead (mediaViewer.tsx's MediaElement, keyed by previewOverlay.tsx's own
-// previewSourceKey), so no player ever stays "warm" here. This module is the web-appropriate
+// pager step instead (mediaViewer.tsx's MediaElement, keyed by the item's uuid), so no player ever stays "warm" here. This module is the web-appropriate
 // equivalent: a small module-level map remembering where playback LEFT OFF, keyed by the item's own
 // uuid, applied on the next remount of that same uuid. Module-level (not component state) so it
 // survives a full unmount/remount of the video element itself, which is exactly when it needs to act.
@@ -13,18 +12,14 @@
 // currentTime only: the viewer always autoplays a fresh mount regardless of how playback last left
 // off, so a remembered "was it playing" bit would have nothing to condition on and stayed write-only
 // dead state — this module only needs to answer "where", never "whether".
-export interface VideoPlaybackState {
-	currentTime: number
-}
+const positions = new Map<string, number>()
 
-const positions = new Map<string, VideoPlaybackState>()
-
-export function getVideoPlaybackState(uuid: string): VideoPlaybackState | undefined {
+export function getVideoPosition(uuid: string): number | undefined {
 	return positions.get(uuid)
 }
 
-export function setVideoPlaybackState(uuid: string, state: VideoPlaybackState): void {
-	positions.set(uuid, state)
+export function setVideoPosition(uuid: string, seconds: number): void {
+	positions.set(uuid, seconds)
 }
 
 export function clearVideoPlaybackStates(): void {

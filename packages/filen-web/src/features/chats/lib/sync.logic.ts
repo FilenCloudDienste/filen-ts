@@ -8,11 +8,6 @@ import type { ChatMessageWithInflightId, InflightChatMessages } from "@/features
 // composeMessageList). No store/IO/React access here. The union-by-inflightId merge itself now
 // lives in @filen/shared (mergeInflightQueuesByUnion) — see reconcileChatFollower below.
 
-// The retry classifiers + drop bound live in the shared @/lib/sdk/retry module (notes' outbox uses the
-// same). Re-exported so lib/sync.ts and the tests import the whole outbox surface from one place, the
-// way the notes sync.logic re-exports its own.
-export { isNetworkClassError, MAX_NON_RETRYABLE_REJECTIONS } from "@/lib/sdk/retry"
-
 // Minimal current-user shape the optimistic-message builder needs — a structural subset of UserInfo so
 // a test can construct it without the whole account record.
 export interface OptimisticSender {

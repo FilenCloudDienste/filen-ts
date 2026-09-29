@@ -5,6 +5,7 @@ import { PlusIcon } from "lucide-react"
 import type { Note, NoteTag, NoteType } from "@filen/sdk-rs"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { asErrorDTO } from "@/lib/sdk/errors"
+import type { VoidActionOutcome } from "@/lib/actions/outcome"
 import {
 	togglePinned,
 	toggleFavorited,
@@ -83,6 +84,22 @@ interface MenuFamily {
 // (archive/restore/trash/leave) and before the trashed-variant's own deletePermanently.
 const SEPARATOR_BEFORE = new Set<NoteActionId>(["archive", "restore", "trash", "leave", "deletePermanently"])
 
+// Direct actions whose only follow-up is an error toast.
+const OUTCOME_ACTIONS: Partial<Record<NoteActionId, (note: Note) => Promise<VoidActionOutcome>>> = {
+	export: exportNote,
+	pin: togglePinned,
+	favorite: toggleFavorited,
+	archive: archiveNote,
+	restore: restoreNote,
+	trash: trashNote
+}
+
+function toastOutcomeError(outcome: VoidActionOutcome): void {
+	if (outcome.status === "error") {
+		toast.error(errorLabel(outcome.dto))
+	}
+}
+
 // Shared per-note action list, rendered by BOTH the sidebar row's right-click menu and the editor
 // header's ⋯ trigger (see NoteContextMenuContent/NoteDropdownMenuContent below) — one descriptor list
 // (noteMenuActions), one mapping from descriptor to menu row, mirrors drive's ItemMenuEntries exactly.
@@ -106,6 +123,13 @@ function NoteMenuEntries({
 	const { Item, Separator, Sub, SubTrigger, SubContent, CheckboxItem } = family
 
 	async function runDirect(descriptor: Extract<NoteActionDescriptor, { run: "direct" }>): Promise<void> {
+		const action = OUTCOME_ACTIONS[descriptor.id]
+
+		if (action) {
+			toastOutcomeError(await action(note))
+			return
+		}
+
 		switch (descriptor.id) {
 			case "duplicate": {
 				const outcome = await duplicateNote(note)
@@ -116,15 +140,6 @@ function NoteMenuEntries({
 				}
 
 				onDuplicated?.(outcome.item)
-				return
-			}
-			case "export": {
-				const outcome = await exportNote(note)
-
-				if (outcome.status === "error") {
-					toast.error(errorLabel(outcome.dto))
-				}
-
 				return
 			}
 			case "copyId": {
@@ -148,60 +163,11 @@ function NoteMenuEntries({
 
 				return
 			}
-			case "pin": {
-				const outcome = await togglePinned(note)
-
-				if (outcome.status === "error") {
-					toast.error(errorLabel(outcome.dto))
-				}
-
-				return
-			}
-			case "favorite": {
-				const outcome = await toggleFavorited(note)
-
-				if (outcome.status === "error") {
-					toast.error(errorLabel(outcome.dto))
-				}
-
-				return
-			}
-			case "archive": {
-				const outcome = await archiveNote(note)
-
-				if (outcome.status === "error") {
-					toast.error(errorLabel(outcome.dto))
-				}
-
-				return
-			}
-			case "restore": {
-				const outcome = await restoreNote(note)
-
-				if (outcome.status === "error") {
-					toast.error(errorLabel(outcome.dto))
-				}
-
-				return
-			}
-			case "trash": {
-				const outcome = await trashNote(note)
-
-				if (outcome.status === "error") {
-					toast.error(errorLabel(outcome.dto))
-				}
-
-				return
-			}
 		}
 	}
 
 	async function handleTagToggle(tag: NoteTag, nextChecked: boolean): Promise<void> {
-		const outcome = nextChecked ? await addTagToNote(note, tag) : await removeTagFromNote(note, tag)
-
-		if (outcome.status === "error") {
-			toast.error(errorLabel(outcome.dto))
-		}
+		toastOutcomeError(nextChecked ? await addTagToNote(note, tag) : await removeTagFromNote(note, tag))
 	}
 
 	async function handleTypeSelect(noteType: NoteType): Promise<void> {
@@ -209,11 +175,43 @@ function NoteMenuEntries({
 			return
 		}
 
-		const outcome = await setNoteType(note, noteType)
+		toastOutcomeError(await setNoteType(note, noteType))
+	}
 
-		if (outcome.status === "error") {
-			toast.error(errorLabel(outcome.dto))
-		}
+	function renderTagsSubmenu() {
+		const entries = noteTagSubmenuEntries(note, allTags)
+
+		return (
+			<>
+				{entries.length === 0 ? (
+					<Item disabled>{t("noteTagsSubmenuEmpty")}</Item>
+				) : (
+					entries.map(({ tag, checked }) => (
+						<CheckboxItem
+							key={tag.uuid}
+							checked={checked}
+							onCheckedChange={next => {
+								void handleTagToggle(tag, next)
+							}}
+						>
+							{tag.name ?? tag.uuid}
+						</CheckboxItem>
+					))
+				)}
+				<Separator />
+				<Item
+					disabled={!isOnline}
+					title={!isOnline ? t("common:offlineActionDisabled") : undefined}
+					onClick={event => {
+						event.stopPropagation()
+						onAction("createTag", note)
+					}}
+				>
+					<PlusIcon aria-hidden="true" />
+					{t("noteActionCreateTag")}
+				</Item>
+			</>
+		)
 	}
 
 	function renderDescriptor(descriptor: NoteActionDescriptor, index: number) {
@@ -228,54 +226,6 @@ function NoteMenuEntries({
 					: undefined
 
 		if (descriptor.run === "submenu") {
-			if (descriptor.submenu === "tags") {
-				const entries = noteTagSubmenuEntries(note, allTags)
-
-				return (
-					<Fragment key={descriptor.id}>
-						{separator}
-						<Sub>
-							<SubTrigger
-								disabled={disabled}
-								title={disabledTitle}
-							>
-								{createElement(descriptor.icon, { "aria-hidden": true })}
-								{t(descriptor.labelKey)}
-							</SubTrigger>
-							<SubContent>
-								{entries.length === 0 ? (
-									<Item disabled>{t("noteTagsSubmenuEmpty")}</Item>
-								) : (
-									entries.map(({ tag, checked }) => (
-										<CheckboxItem
-											key={tag.uuid}
-											checked={checked}
-											onCheckedChange={next => {
-												void handleTagToggle(tag, next)
-											}}
-										>
-											{tag.name ?? tag.uuid}
-										</CheckboxItem>
-									))
-								)}
-								<Separator />
-								<Item
-									disabled={!isOnline}
-									title={!isOnline ? t("common:offlineActionDisabled") : undefined}
-									onClick={event => {
-										event.stopPropagation()
-										onAction("createTag", note)
-									}}
-								>
-									<PlusIcon aria-hidden="true" />
-									{t("noteActionCreateTag")}
-								</Item>
-							</SubContent>
-						</Sub>
-					</Fragment>
-				)
-			}
-
 			return (
 				<Fragment key={descriptor.id}>
 					{separator}
@@ -288,17 +238,19 @@ function NoteMenuEntries({
 							{t(descriptor.labelKey)}
 						</SubTrigger>
 						<SubContent>
-							{NOTE_TYPE_SUBMENU.map(entry => (
-								<CheckboxItem
-									key={entry.noteType}
-									checked={note.noteType === entry.noteType}
-									onCheckedChange={() => {
-										void handleTypeSelect(entry.noteType)
-									}}
-								>
-									{t(entry.labelKey)}
-								</CheckboxItem>
-							))}
+							{descriptor.submenu === "tags"
+								? renderTagsSubmenu()
+								: NOTE_TYPE_SUBMENU.map(entry => (
+										<CheckboxItem
+											key={entry.noteType}
+											checked={note.noteType === entry.noteType}
+											onCheckedChange={() => {
+												void handleTypeSelect(entry.noteType)
+											}}
+										>
+											{t(entry.labelKey)}
+										</CheckboxItem>
+									))}
 						</SubContent>
 					</Sub>
 				</Fragment>
@@ -392,11 +344,7 @@ export function TagContextMenuContent({ tag, onTagAction, onCreateNoteInTag }: T
 	const descriptors = applyTagOfflineGate(tagMenuActions(tag), isOnline)
 
 	async function handleFavoriteToggle(): Promise<void> {
-		const outcome = await setNoteTagFavorited(tag, !tag.favorite)
-
-		if (outcome.status === "error") {
-			toast.error(errorLabel(outcome.dto))
-		}
+		toastOutcomeError(await setNoteTagFavorited(tag, !tag.favorite))
 	}
 
 	// Untitled, default-type note (mirrors the sidebar header's own "New note" — no type/title prompt),

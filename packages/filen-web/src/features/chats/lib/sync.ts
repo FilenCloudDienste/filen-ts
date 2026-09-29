@@ -1,4 +1,4 @@
-import { run, Semaphore, mergeInflightQueuesByUnion, isPermanentRejection } from "@filen/shared"
+import { run, Semaphore, mergeInflightQueuesByUnion, isPermanentRejection, MAX_NON_RETRYABLE_REJECTIONS } from "@filen/shared"
 import { onlineManager } from "@tanstack/react-query"
 import type { Chat, ChatMessagePartial } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
@@ -20,7 +20,6 @@ import {
 	buildOptimisticMessage,
 	CommittedIdLedger,
 	inflightChatMessagesSchema,
-	MAX_NON_RETRYABLE_REJECTIONS,
 	type OptimisticSender,
 	type RemoteChatEnqueue
 } from "@/features/chats/lib/sync.logic"

@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { useTranslation } from "react-i18next"
-import { driveItemName, formatBytes } from "@filen/shared"
+import { formatBytes } from "@filen/shared"
 import { ChevronRightIcon, DownloadIcon, SearchIcon, ArrowDownAZIcon, ArrowUpAZIcon } from "lucide-react"
 import type { DirPublicInfo, DirPublicLink, File as SdkFile } from "@filen/sdk-rs"
 import { type DriveItem } from "@/features/drive/lib/item"
@@ -123,27 +123,7 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 				onBack={() => {
 					setSelected(null)
 				}}
-				saveAction={
-					saveable
-						? {
-								hero: (
-									<SaveToDriveButton
-										item={selected.file}
-										name={driveItemName(selected.item)}
-										glyph="file"
-									/>
-								),
-								bar: (
-									<SaveToDriveButton
-										item={selected.file}
-										name={driveItemName(selected.item)}
-										glyph="file"
-										compact
-									/>
-								)
-							}
-						: undefined
-				}
+				saveItem={saveable ? selected.file : undefined}
 			/>
 		)
 	}

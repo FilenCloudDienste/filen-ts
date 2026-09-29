@@ -27,10 +27,6 @@ export class JobQueue {
 		return this.waiting.length
 	}
 
-	public get runningCount(): number {
-		return this.running
-	}
-
 	public enqueue(run: () => Promise<void>, priority: boolean): QueuedJob {
 		const entry: Entry = { run }
 

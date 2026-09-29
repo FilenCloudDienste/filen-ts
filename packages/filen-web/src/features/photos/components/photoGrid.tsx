@@ -367,7 +367,7 @@ export function PhotoGrid({ rootUuid, listing }: PhotoGridProps) {
 				<div className="flex flex-1 overflow-y-auto">
 					<Empty>
 						<EmptyHeader>
-							<EmptyMedia variant="icon">
+							<EmptyMedia>
 								<SearchXIcon />
 							</EmptyMedia>
 							<EmptyTitle>{t("photos:photosNoMatchesTitle")}</EmptyTitle>

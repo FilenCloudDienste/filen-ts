@@ -16,20 +16,13 @@ import { CellStore, type GridDoc, type GridSheet } from "@/features/spreadsheet/
 import { MAX_EDIT_CELLS, type EditOp, type EditResult, type FormatPatch } from "@/features/spreadsheet/lib/edits"
 import { clearedCells, newSheetName } from "@/features/spreadsheet/lib/gridEdits.logic"
 import { cellKey, type CellRange } from "@/features/spreadsheet/lib/model"
-import {
-	gridMove,
-	isImeKeydown,
-	isTypedCharacter,
-	sheetBounds,
-	sheetCols,
-	sheetRows,
-	snapToMerge
-} from "@/features/spreadsheet/lib/navigation.logic"
+import { gridMove, isTypedCharacter, sheetBounds, sheetCols, sheetRows, snapToMerge } from "@/features/spreadsheet/lib/navigation.logic"
 import { layeredSheet, type LayerKey } from "@/features/spreadsheet/lib/sizeLayer"
 import { layerKeyFor, resizable, sizesInFile } from "@/features/spreadsheet/lib/sizeRouting.logic"
 import { resetTargets, type SizeAxis, type SizeEntry } from "@/features/spreadsheet/lib/sizes.logic"
 import { endedCut, pastedCells, rangeToClip, rangeToTsv, type GridClip } from "@/features/spreadsheet/lib/tsv.logic"
 import { errorLabel } from "@/lib/i18n/errorLabel"
+import { isImeKeydown } from "@/lib/ime"
 import { log } from "@/lib/log"
 import { LoadingState } from "@/components/loadingState"
 import { InputDialog } from "@/components/dialogs/inputDialog"
@@ -184,12 +177,13 @@ function SpreadsheetBody({
 	const doc = edits.doc
 	// A file without a spreadsheet extension is never edited, whatever it may say.
 	const writability = useSpreadsheetWritability(id, doc, editable && !unnamed, neverEditable || unnamed)
-	const canEdit = editable && writability === "writable" && !unnamed && !renamed
+	const mayEdit = editable && !unnamed && !renamed
+	const canEdit = mayEdit && writability === "writable"
 	const inFile = sizesInFile(doc.kind, writability, canEdit)
-	const canResize = resizable(doc.kind, writability, editable && !unnamed && !renamed)
+	const canResize = resizable(doc.kind, writability, mayEdit)
 	// Editing waits on the worker's proof: the toolbar holds its place meanwhile, disabled, and stays so
 	// when the proof fails, so the grid never moves as the verdict lands.
-	const toolbarShown = canEdit || (editable && !unnamed && !renamed && (writability === "checking" || doc.kind === "xlsx"))
+	const toolbarShown = canEdit || (mayEdit && (writability === "checking" || doc.kind === "xlsx"))
 	const readOnlyNote = !editable
 		? readOnlyReason === "renamed"
 			? t("previewSpreadsheetReadOnlyRenamed")
@@ -755,7 +749,7 @@ function SpreadsheetBody({
 					{canEdit ? (
 						<>
 							<ContextMenuItem
-								disabled={structureDisabled || !canEdit}
+								disabled={structureDisabled}
 								onClick={() => {
 									apply({ type: "insert", sheet: sheetIndex, axis: "rows", at: range.startRow, count: rowsSelected })
 								}}
@@ -763,7 +757,7 @@ function SpreadsheetBody({
 								{t("previewSpreadsheetInsertRowsAbove", { count: rowsSelected })}
 							</ContextMenuItem>
 							<ContextMenuItem
-								disabled={structureDisabled || !canEdit}
+								disabled={structureDisabled}
 								onClick={() => {
 									apply({ type: "insert", sheet: sheetIndex, axis: "rows", at: range.endRow + 1, count: rowsSelected })
 								}}
@@ -771,7 +765,7 @@ function SpreadsheetBody({
 								{t("previewSpreadsheetInsertRowsBelow", { count: rowsSelected })}
 							</ContextMenuItem>
 							<ContextMenuItem
-								disabled={structureDisabled || !canEdit}
+								disabled={structureDisabled}
 								onClick={() => {
 									apply({ type: "delete", sheet: sheetIndex, axis: "rows", at: range.startRow, count: rowsSelected })
 								}}
@@ -780,7 +774,7 @@ function SpreadsheetBody({
 							</ContextMenuItem>
 							<ContextMenuSeparator />
 							<ContextMenuItem
-								disabled={structureDisabled || !canEdit}
+								disabled={structureDisabled}
 								onClick={() => {
 									apply({ type: "insert", sheet: sheetIndex, axis: "cols", at: range.startCol, count: colsSelected })
 								}}
@@ -788,7 +782,7 @@ function SpreadsheetBody({
 								{t("previewSpreadsheetInsertColumnsLeft", { count: colsSelected })}
 							</ContextMenuItem>
 							<ContextMenuItem
-								disabled={structureDisabled || !canEdit}
+								disabled={structureDisabled}
 								onClick={() => {
 									apply({ type: "insert", sheet: sheetIndex, axis: "cols", at: range.endCol + 1, count: colsSelected })
 								}}
@@ -796,7 +790,7 @@ function SpreadsheetBody({
 								{t("previewSpreadsheetInsertColumnsRight", { count: colsSelected })}
 							</ContextMenuItem>
 							<ContextMenuItem
-								disabled={structureDisabled || !canEdit}
+								disabled={structureDisabled}
 								onClick={() => {
 									apply({ type: "delete", sheet: sheetIndex, axis: "cols", at: range.startCol, count: colsSelected })
 								}}
@@ -805,7 +799,6 @@ function SpreadsheetBody({
 							</ContextMenuItem>
 							<ContextMenuSeparator />
 							<ContextMenuItem
-								disabled={!canEdit}
 								onClick={() => {
 									clear()
 								}}

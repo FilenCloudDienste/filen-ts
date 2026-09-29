@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { Note, NoteTag, UuidStr } from "@filen/sdk-rs"
 import {
-	buildNotesView,
 	buildNotesGroupedRows,
 	groupNotesForView,
 	buildNotesByTag,
@@ -61,31 +60,6 @@ function noteRowUuids(rows: NotesSidebarRow[]): string[] {
 function tagRowUuids(rows: NotesSidebarRow[]): string[] {
 	return rows.filter((row): row is Extract<NotesSidebarRow, { kind: "tag" }> => row.kind === "tag").map(row => row.tag.uuid)
 }
-
-describe("notesSidebar.logic — notes view", () => {
-	it("filters by title/preview and sorts pinned first", () => {
-		const pinned = mockNote({ uuid: testUuid("a"), title: "alpha", pinned: true, editedTimestamp: 1n })
-		const recent = mockNote({ uuid: testUuid("b"), title: "beta", editedTimestamp: 9n })
-		const older = mockNote({ uuid: testUuid("c"), title: "gamma", editedTimestamp: 2n })
-
-		const all = buildNotesView([recent, older, pinned], "")
-
-		// Pinned bucket wins regardless of timestamp, then editedTimestamp desc.
-		expect(all.map(n => n.uuid)).toStrictEqual([pinned.uuid, recent.uuid, older.uuid])
-
-		// Search narrows to title/preview matches.
-		expect(buildNotesView([recent, older, pinned], "beta").map(n => n.uuid)).toStrictEqual([recent.uuid])
-		expect(buildNotesView([recent, older, pinned], "preview")).toHaveLength(3)
-	})
-
-	it("narrows by full body via the bodies map when neither title nor preview matches", () => {
-		const note = mockNote({ uuid: testUuid("body-only"), title: "gamma", preview: "preview" })
-		const bodies = new Map([[note.uuid, "a term buried deep in the note body"]])
-
-		expect(buildNotesView([note], "buried", bodies).map(n => n.uuid)).toStrictEqual([note.uuid])
-		expect(buildNotesView([note], "buried")).toHaveLength(0)
-	})
-})
 
 describe("notesSidebar.logic — buildNotesByTag count math", () => {
 	it("groups notes by each inline tag, counting membership (a note under multiple tags counts in each)", () => {

@@ -2,10 +2,6 @@ import { fastLocaleCompare, contactDisplayName, type ContactLike } from "@filen/
 import type { BlockedContact, Contact, ContactRequestIn, ContactRequestOut } from "@filen/sdk-rs"
 import { type ContactsKey } from "@/lib/i18n"
 
-// Re-exported so this file's existing importers (chat mention/sort/composer + contact rows) keep
-// resolving contactDisplayName here — its home moved to @filen/shared.
-export { contactDisplayName }
-
 // Per-section counts for the contacts sidebar's filter badges. `requests` is INCOMING requests only,
 // matching the icon-rail nav badge's own count (shell/iconRail.tsx's incomingRequestCount) so the two
 // surfaces never disagree on what "requests" means for this account.

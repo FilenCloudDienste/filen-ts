@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { Dir, DirMeta, File, FileMeta, UuidStr } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
-import { type PreviewSource } from "@/features/preview/lib/previewSource"
 import { reconcilePreviewSources } from "@/features/preview/lib/previewReconcile"
 
 function testUuid(label: string): UuidStr {
@@ -40,49 +39,45 @@ function mockDir(overrides: Partial<Dir> = {}): Dir {
 	}
 }
 
-function driveSource(item: DriveItem): PreviewSource {
-	return { item }
-}
-
-function fileSourceAt(label: string): PreviewSource {
-	return driveSource(narrowItem(mockFile({ uuid: testUuid(label) })))
+function fileAt(label: string): DriveItem {
+	return narrowItem(mockFile({ uuid: testUuid(label) }))
 }
 
 describe("reconcilePreviewSources — removed", () => {
 	it("drops the removed slot and keeps the current item visible when an earlier slot goes", () => {
-		const sources = [fileSourceAt("a"), fileSourceAt("b"), fileSourceAt("c")]
-		const next = reconcilePreviewSources({ sources, index: 2 }, { type: "removed", uuid: testUuid("a") })
+		const items = [fileAt("a"), fileAt("b"), fileAt("c")]
+		const next = reconcilePreviewSources({ items, index: 2 }, { type: "removed", uuid: testUuid("a") })
 
 		expect(next).not.toBeNull()
-		expect(next?.sources.map(s => s.item.data.uuid)).toEqual([testUuid("b"), testUuid("c")])
+		expect(next?.items.map(item => item.data.uuid)).toEqual([testUuid("b"), testUuid("c")])
 		// index steps back one so the same item (c) stays under the anchor.
 		expect(next?.index).toBe(1)
 	})
 
 	it("advances to the neighbour when the current slot is removed", () => {
-		const sources = [fileSourceAt("a"), fileSourceAt("b"), fileSourceAt("c")]
-		const next = reconcilePreviewSources({ sources, index: 1 }, { type: "removed", uuid: testUuid("b") })
+		const items = [fileAt("a"), fileAt("b"), fileAt("c")]
+		const next = reconcilePreviewSources({ items, index: 1 }, { type: "removed", uuid: testUuid("b") })
 
 		expect(next?.index).toBe(1)
-		expect(next?.sources.map(s => s.item.data.uuid)).toEqual([testUuid("a"), testUuid("c")])
+		expect(next?.items.map(item => item.data.uuid)).toEqual([testUuid("a"), testUuid("c")])
 	})
 
 	it("clamps to the new last slot when the removed current item was last", () => {
-		const sources = [fileSourceAt("a"), fileSourceAt("b")]
-		const next = reconcilePreviewSources({ sources, index: 1 }, { type: "removed", uuid: testUuid("b") })
+		const items = [fileAt("a"), fileAt("b")]
+		const next = reconcilePreviewSources({ items, index: 1 }, { type: "removed", uuid: testUuid("b") })
 
 		expect(next?.index).toBe(0)
 	})
 
 	it("returns null (close) when the only remaining slot is removed", () => {
-		const sources = [fileSourceAt("a")]
-		const next = reconcilePreviewSources({ sources, index: 0 }, { type: "removed", uuid: testUuid("a") })
+		const items = [fileAt("a")]
+		const next = reconcilePreviewSources({ items, index: 0 }, { type: "removed", uuid: testUuid("a") })
 
 		expect(next).toBeNull()
 	})
 
 	it("leaves state untouched when the uuid is not in the pager", () => {
-		const state = { sources: [fileSourceAt("a")], index: 0 }
+		const state = { items: [fileAt("a")], index: 0 }
 		const next = reconcilePreviewSources(state, { type: "removed", uuid: testUuid("z") })
 
 		expect(next).toBe(state)
@@ -94,13 +89,10 @@ describe("reconcilePreviewSources — removed", () => {
 		// second application must find nothing and return the state untouched — an index-keyed removal
 		// here once dropped the surviving NEIGHBOUR on the second pass and collapsed a two-sibling pager
 		// into a spurious close.
-		const first = reconcilePreviewSources(
-			{ sources: [fileSourceAt("a"), fileSourceAt("b")], index: 0 },
-			{ type: "removed", uuid: testUuid("a") }
-		)
+		const first = reconcilePreviewSources({ items: [fileAt("a"), fileAt("b")], index: 0 }, { type: "removed", uuid: testUuid("a") })
 
 		expect(first).not.toBeNull()
-		expect(first?.sources.map(s => s.item.data.uuid)).toEqual([testUuid("b")])
+		expect(first?.items.map(item => item.data.uuid)).toEqual([testUuid("b")])
 
 		if (first === null) {
 			throw new Error("unreachable")
@@ -114,25 +106,25 @@ describe("reconcilePreviewSources — removed", () => {
 
 describe("reconcilePreviewSources — moved, revised, resync", () => {
 	it("drops a moved file like a removal", () => {
-		const sources = [fileSourceAt("a"), fileSourceAt("b")]
+		const items = [fileAt("a"), fileAt("b")]
 		const moved = narrowItem(mockFile({ uuid: testUuid("a"), parent: testUuid("elsewhere") }))
-		const next = reconcilePreviewSources({ sources, index: 0 }, { type: "moved", item: moved })
+		const next = reconcilePreviewSources({ items, index: 0 }, { type: "moved", item: moved })
 
-		expect(next?.sources.map(s => s.item.data.uuid)).toEqual([testUuid("b")])
+		expect(next?.items.map(item => item.data.uuid)).toEqual([testUuid("b")])
 	})
 
 	it("keeps the protected slot through a removal, a move or a restore", () => {
-		const state = { sources: [fileSourceAt("a"), fileSourceAt("b")], index: 0 }
+		const state = { items: [fileAt("a"), fileAt("b")], index: 0 }
 		const moved = narrowItem(mockFile({ uuid: testUuid("a"), parent: testUuid("elsewhere") }))
 
 		expect(reconcilePreviewSources(state, { type: "removed", uuid: testUuid("a") }, testUuid("a"))).toBe(state)
 		expect(reconcilePreviewSources(state, { type: "moved", item: moved }, testUuid("a"))).toBe(state)
 		expect(reconcilePreviewSources(state, { type: "restored", uuid: testUuid("a") }, testUuid("a"))).toBe(state)
-		expect(reconcilePreviewSources(state, { type: "removed", uuid: testUuid("b") }, testUuid("a"))?.sources).toHaveLength(1)
+		expect(reconcilePreviewSources(state, { type: "removed", uuid: testUuid("b") }, testUuid("a"))?.items).toHaveLength(1)
 	})
 
 	it("leaves the pager alone for a revision or a resync — the overlay answers those", () => {
-		const state = { sources: [fileSourceAt("a")], index: 0 }
+		const state = { items: [fileAt("a")], index: 0 }
 		const revision = { item: narrowItem(mockFile({ uuid: testUuid("a2") })) }
 
 		expect(reconcilePreviewSources(state, { type: "revised", revision })).toBe(state)
@@ -142,31 +134,31 @@ describe("reconcilePreviewSources — moved, revised, resync", () => {
 
 describe("reconcilePreviewSources — metadata", () => {
 	it("re-derives an owned file's title from the fresh meta", () => {
-		const sources = [driveSource(narrowItem(mockFile()))]
+		const items = [narrowItem(mockFile())]
 		const meta: FileMeta = {
 			type: "decoded",
 			data: { name: "renamed.pdf", mime: "application/pdf", modified: 1_700_000_000_000n, size: 1_024n, key: "k", version: 2 }
 		}
 
-		const next = reconcilePreviewSources({ sources, index: 0 }, { type: "fileMeta", uuid: testUuid("file"), meta })
+		const next = reconcilePreviewSources({ items, index: 0 }, { type: "fileMeta", uuid: testUuid("file"), meta })
 
-		expect(next?.sources[0]?.item.data.decryptedMeta?.name).toBe("renamed.pdf")
+		expect(next?.items[0]?.data.decryptedMeta?.name).toBe("renamed.pdf")
 	})
 
 	it("re-derives an owned directory's title from the fresh meta", () => {
-		const sources = [driveSource(narrowItem(mockDir()))]
+		const items = [narrowItem(mockDir())]
 		const meta: DirMeta = { type: "decoded", data: { name: "Renamed" } }
 
-		const next = reconcilePreviewSources({ sources, index: 0 }, { type: "folderMeta", uuid: testUuid("dir"), meta })
+		const next = reconcilePreviewSources({ items, index: 0 }, { type: "folderMeta", uuid: testUuid("dir"), meta })
 
-		expect(next?.sources[0]?.item.data.decryptedMeta?.name).toBe("Renamed")
+		expect(next?.items[0]?.data.decryptedMeta?.name).toBe("Renamed")
 	})
 })
 
 // The dialog host skips its re-render when the fold hands its state back.
 describe("reconcilePreviewSources — unchanged state", () => {
 	it("returns the same state for an event about a file the pager does not hold", () => {
-		const state = { sources: [fileSourceAt("a"), fileSourceAt("b")], index: 1 }
+		const state = { items: [fileAt("a"), fileAt("b")], index: 1 }
 		const meta: FileMeta = {
 			type: "decoded",
 			data: { name: "x.pdf", mime: "application/pdf", modified: 0n, size: 1n, key: "k", version: 2 }
@@ -181,7 +173,7 @@ describe("reconcilePreviewSources — unchanged state", () => {
 	})
 
 	it("replaces only the renamed slot", () => {
-		const state = { sources: [fileSourceAt("a"), fileSourceAt("b")], index: 0 }
+		const state = { items: [fileAt("a"), fileAt("b")], index: 0 }
 		const meta: FileMeta = {
 			type: "decoded",
 			data: { name: "renamed.pdf", mime: "application/pdf", modified: 0n, size: 1n, key: "k", version: 2 }
@@ -189,7 +181,7 @@ describe("reconcilePreviewSources — unchanged state", () => {
 		const next = reconcilePreviewSources(state, { type: "fileMeta", uuid: testUuid("b"), meta })
 
 		expect(next).not.toBe(state)
-		expect(next?.sources[0]).toBe(state.sources[0])
-		expect(next?.sources[1]?.item.data.decryptedMeta?.name).toBe("renamed.pdf")
+		expect(next?.items[0]).toBe(state.items[0])
+		expect(next?.items[1]?.data.decryptedMeta?.name).toBe("renamed.pdf")
 	})
 })

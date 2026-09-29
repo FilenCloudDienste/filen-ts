@@ -121,19 +121,8 @@ export function filterNotesBySearch(notes: readonly Note[], search: string, bodi
 	})
 }
 
-// The sidebar's one entry point: filter first (search narrows the set the sort then walks), sort
-// second. Filtering before sorting is also strictly cheaper — the bucket/timestamp comparator runs
-// over the narrowed set, not the full list.
+// Filter first (search narrows the set the sort then walks), sort second. Filtering before sorting is
+// also strictly cheaper — the bucket/timestamp comparator runs over the narrowed set, not the full list.
 export function sortAndFilterNotes(notes: readonly Note[], search = "", bodies?: ReadonlyMap<string, string | undefined>): Note[] {
 	return sortNotes(filterNotesBySearch(notes, search, bodies))
-}
-
-export function filterNoteTagsBySearch(tags: readonly NoteTag[], search: string): NoteTag[] {
-	const normalized = search.trim().toLowerCase()
-
-	if (normalized.length === 0) {
-		return [...tags]
-	}
-
-	return tags.filter(tag => tagDisplayName(tag).toLowerCase().includes(normalized))
 }

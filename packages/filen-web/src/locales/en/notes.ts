@@ -344,8 +344,6 @@ export const notes = {
 	noteParticipantRemoveDialogConfirm: "Remove",
 	/** Participants dialog — remove confirm dialog body; {{email}} = the participant's email */
 	noteParticipantRemoveDialogBody: "{{email}} will lose access to this note.",
-	/** Participants dialog — load-error title; the body is the failing query's own errorLabel */
-	noteParticipantsLoadError: "Couldn't load participants",
 	/** Add-participants sub-view — dialog title */
 	noteParticipantsAddDialogTitle: "Add participants",
 	/** Add-participants sub-view — body above the contact list */

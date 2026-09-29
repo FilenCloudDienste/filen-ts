@@ -135,7 +135,7 @@ export function PlaylistPane({ playlist }: { playlist: Playlist }) {
 				{!hasTracks ? (
 					<Empty className="border-none p-10">
 						<EmptyHeader>
-							<EmptyMedia variant="icon">
+							<EmptyMedia>
 								<MusicIcon />
 							</EmptyMedia>
 							<EmptyTitle>{t("playlistTracksEmptyTitle")}</EmptyTitle>

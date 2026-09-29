@@ -85,9 +85,7 @@ describe("copyJobStatus", () => {
 			sourceUuid: "s",
 			sourcePath: "a",
 			destName: "a",
-			error: { species: "plain" as const, message: "m", label: "l" },
-			affectedFiles: 1,
-			affectedBytes: 1
+			error: { species: "plain" as const, message: "m", label: "l" }
 		}
 
 		expect(copyJobStatus(job({ outcome: { status: "doneWithFailures" }, failures: [failure, failure] }))).toEqual({

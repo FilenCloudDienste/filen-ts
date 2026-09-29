@@ -74,7 +74,6 @@ function DeleteAllItemsRow({ accountQuery }: DeleteAllItemsRowProps) {
 				matchValue={DELETE_ALL_ITEMS_PHRASE}
 				confirmLabel={t("settingsDeleteAllItemsSubmit")}
 				cancelLabel={t("common:cancel")}
-				destructive
 				onOpenChange={next => {
 					if (!next) {
 						setOpen(false)

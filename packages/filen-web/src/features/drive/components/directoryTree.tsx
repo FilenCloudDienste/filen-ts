@@ -11,11 +11,9 @@ import { TREE_EXPAND_SPRING } from "@/features/drive/lib/springLoad"
 import { useDriveClipboardStore } from "@/features/drive/store/useDriveClipboardStore"
 import { Spinner } from "@/components/ui/spinner"
 
-// Reusable collapsible directory tree. Data wiring is fully injected (`useChildren`, `isOpen`,
-// `onToggle`, `onNavigate`) so the same primitive can back the sidebar (router navigation +
-// localStorage-persisted open state) and, later, the move-dialog (local uuid-stack state) with no
-// change here. It renders ONLY the levels below a given parent — the owning surface renders its own
-// root row and mounts this when that root is open. Lazy per level: a node's children query only fires
+// Collapsible directory tree for the drive sidebar. Data wiring is injected (`useChildren`, `isOpen`,
+// `onToggle`, `onNavigate`). It renders ONLY the levels below a given parent — the owning surface
+// renders its own root row and mounts this when that root is open. Lazy per level: a node's children query only fires
 // once its subtree mounts (an open node renders a nested DirectoryTree; a closed one renders nothing).
 //
 // Each level is a plain nested list whose rows are ordinary buttons — NOT role="tree"/"treeitem": the
@@ -35,12 +33,6 @@ export interface DirectoryTreeContext {
 	onNavigate: (path: string[]) => void
 	// Injected data source — named `use…` so it reads as the hook it is; called unconditionally per level.
 	useChildren: (uuid: string | null) => UseQueryResult<DirectoryTreeChild[]>
-	// Opt-in: each node becomes a drag-to-move drop target that also takes uploads from the system (a
-	// collapsed one auto-expands on hover-dwell).
-	// Off by default so a non-drive reuse of this primitive (e.g. the move dialog) stays inert.
-	enableDrop?: boolean
-	// Opt-in: each node is a drag source for its own directory (move, or copy with the copy modifier).
-	enableDrag?: boolean
 }
 
 export interface DirectoryTreeProps {
@@ -151,15 +143,14 @@ function DirectoryTreeNode({ child, path, depth, tree }: DirectoryTreeNodeProps)
 	const active = arraysEqual(path, tree.activePath)
 	const onBranch = !active && isStrictPrefix(path, tree.activePath)
 	const parentUuid = path.at(-2) ?? null
-	// A drag-to-move drop target for this node's directory. A collapsed node springs open (expands) after
-	// a short rest so the drag can descend into it; an open node has nothing to spring.
+	// A drag-to-move drop target for this node's directory that also takes uploads from the system. A
+	// collapsed node springs open (expands) after a short rest so the drag can descend into it; an open
+	// node has nothing to spring.
 	const drop = useDriveDropTarget({
 		targetUuid: child.uuid,
 		targetAncestry: path,
 		targetName: child.name,
-		disabled: !tree.enableDrop,
-		// Files from the system upload into the node's directory, wherever the tree takes drops at all.
-		acceptFiles: tree.enableDrop === true,
+		acceptFiles: true,
 		spring: open
 			? undefined
 			: {
@@ -170,7 +161,8 @@ function DirectoryTreeNode({ child, path, depth, tree }: DirectoryTreeNodeProps)
 				}
 	})
 
-	const dragSource = tree.enableDrag ? buildTreeDragSourceProps(() => cachedTreeDirectory(parentUuid, child.uuid)) : undefined
+	// A drag source for its own directory (move, or copy with the copy modifier).
+	const dragSource = buildTreeDragSourceProps(() => cachedTreeDirectory(parentUuid, child.uuid))
 	// Cut for a later paste: dimmed, as its listing row is, until the paste or the next copy/cut.
 	const cut = useDriveClipboardStore(state => state.cutUuids.has(child.uuid))
 

@@ -28,7 +28,6 @@ import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import { previewableSiblings } from "@/features/drive/lib/preview.logic"
 import { aggregateDriveSelectionFlags, selectableForSelectAll } from "@/features/drive/lib/selectionFlags"
 import { driveRowKey } from "@/features/drive/lib/rowKey"
-import { drivePreviewSources } from "@/features/preview/lib/previewSource"
 import { deriveAudioHandoff, isAudioItem } from "@/features/audio/lib/handoff"
 import { audioEngine } from "@/features/audio/lib/audioEngine"
 import { startDownloads } from "@/features/drive/lib/download"
@@ -286,10 +285,10 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 				return
 			}
 
-			const siblings = previewableSiblings(sortedItems, variant)
+			const siblings = previewableSiblings(sortedItems)
 			const siblingIndex = siblings.findIndex(sibling => sibling.data.uuid === item.data.uuid)
 
-			openPreview(drivePreviewSources(siblings), siblingIndex === -1 ? 0 : siblingIndex)
+			openPreview(siblings, siblingIndex === -1 ? 0 : siblingIndex)
 
 			return
 		}
@@ -331,9 +330,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 		columns,
 		geometry: {
 			rowHeight: effectiveViewMode === "list" ? ROW_HEIGHT : TILE_ROW_HEIGHT,
-			tileWidth: TILE_WIDTH,
-			// The drive grid has no inter-column gap; the cell IS the tile's slot.
-			gap: 0
+			tileWidth: TILE_WIDTH
 		},
 		selection: {
 			read: () => useDriveStore.getState().selectedItems,
@@ -610,7 +607,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 		return (
 			<Empty>
 				<EmptyHeader>
-					<EmptyMedia variant="icon">
+					<EmptyMedia>
 						<EyeOffIcon />
 					</EmptyMedia>
 					<EmptyTitle>{t("driveHiddenItemsAllHiddenTitle")}</EmptyTitle>
@@ -645,7 +642,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 			// the generic "nothing here yet" onboarding copy (same distinction the contacts list makes for its own search).
 			<Empty>
 				<EmptyHeader>
-					<EmptyMedia variant="icon">
+					<EmptyMedia>
 						<SearchXIcon />
 					</EmptyMedia>
 					<EmptyTitle>{t("driveSearchNoResults")}</EmptyTitle>
@@ -958,7 +955,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 								<div className="flex flex-1 overflow-y-auto">
 									<Empty>
 										<EmptyHeader>
-											<EmptyMedia variant="icon">
+											<EmptyMedia>
 												<CircleAlertIcon />
 											</EmptyMedia>
 											<EmptyTitle>{t("driveSearchUnavailable")}</EmptyTitle>
@@ -972,7 +969,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 									) : (
 										<Empty>
 											<EmptyHeader>
-												<EmptyMedia variant="icon">
+												<EmptyMedia>
 													<SearchXIcon />
 												</EmptyMedia>
 												<EmptyTitle>{t("driveSearchNoResults")}</EmptyTitle>

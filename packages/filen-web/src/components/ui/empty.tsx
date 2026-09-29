@@ -1,5 +1,3 @@
-import { cva, type VariantProps } from "class-variance-authority"
-
 import { cn } from "@filen/shared"
 
 function Empty({ className, ...props }: React.ComponentProps<"div">) {
@@ -25,27 +23,14 @@ function EmptyHeader({ className, ...props }: React.ComponentProps<"div">) {
 	)
 }
 
-const emptyMediaVariants = cva("mb-2 flex shrink-0 items-center justify-center [&_svg]:pointer-events-none [&_svg]:shrink-0", {
-	variants: {
-		variant: {
-			default: "bg-transparent",
-			icon: "flex size-10 shrink-0 items-center justify-center rounded-xl bg-muted text-foreground [&_svg:not([class*='size-'])]:size-5"
-		}
-	},
-	defaultVariants: {
-		variant: "default"
-	}
-})
-
-function EmptyMedia({ className, variant: variantProp, ...props }: React.ComponentProps<"div"> & VariantProps<typeof emptyMediaVariants>) {
-	// Not a destructuring default, which the React Compiler cannot lower.
-	const variant = variantProp === undefined ? "default" : variantProp
-
+function EmptyMedia({ className, ...props }: React.ComponentProps<"div">) {
 	return (
 		<div
 			data-slot="empty-icon"
-			data-variant={variant}
-			className={cn(emptyMediaVariants({ variant, className }))}
+			className={cn(
+				"mb-2 flex size-10 shrink-0 items-center justify-center rounded-xl bg-muted text-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-5",
+				className
+			)}
 			{...props}
 		/>
 	)

@@ -195,7 +195,7 @@ describe("sdk worker copy", () => {
 	// A retry after a storage refusal is the same job: a pause made between its calls must hold.
 	it("keeps a job's pause across its calls until the job is released", async () => {
 		await api.copyItems("paused", [], null, undefined, () => undefined)
-		await api.pauseCopy("paused")
+		await api.pauseTransfer("paused")
 		await api.copyItems("paused", [], null, undefined, () => undefined)
 
 		const [first, second] = copyCalls()
@@ -211,7 +211,7 @@ describe("sdk worker copy", () => {
 
 	it("keeps a stop sent between a job's calls, and one sent while its destination is looked up", async () => {
 		await api.copyItems("stopped", [], null, undefined, () => undefined)
-		await api.cancelCopy("stopped")
+		await api.cancelTransfer("stopped")
 		await api.copyItems("stopped", [], null, undefined, () => undefined)
 
 		expect(copyCalls()[1]?.managedFuture.abortSignal.aborted).toBe(true)
@@ -224,7 +224,7 @@ describe("sdk worker copy", () => {
 
 		const call = api.copyItems("looking-up", [], "dest", undefined, () => undefined)
 
-		await api.cancelCopy("looking-up")
+		await api.cancelTransfer("looking-up")
 		lookup.resolve({ uuid: "dest" })
 		await call
 
@@ -239,8 +239,8 @@ describe("sdk worker copy", () => {
 		const pause = copyCalls()[0]?.managedFuture.pauseSignal
 
 		await api.releaseCopy("released")
-		await api.pauseCopy("released")
-		await api.cancelCopy("released")
+		await api.pauseTransfer("released")
+		await api.cancelTransfer("released")
 		await api.releaseCopy("released")
 
 		expect(pause?.isPaused()).toBe(false)

@@ -9,14 +9,14 @@ import type { Transfer, TerminalStatus } from "@/features/transfers/store/useTra
 // persister, unresolvable/unwanted under node vitest — mock both down to what this module actually
 // calls, mirroring drive/actions.test.ts's mock boundary. `sonner` is mocked to assert the summary
 // toast's call args without a mounted <Toaster/>.
-const { uploadFile, cancelUpload, getUserInfo } = vi.hoisted(() => ({
+const { uploadFile, cancelTransfer, getUserInfo } = vi.hoisted(() => ({
 	uploadFile:
 		vi.fn<(parentUuid: string | null, transferId: string, file: File, onProgress: (bytes: bigint) => void) => Promise<SdkFile>>(),
-	cancelUpload: vi.fn(),
+	cancelTransfer: vi.fn(),
 	getUserInfo: vi.fn()
 }))
 
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: { uploadFile, cancelUpload, getUserInfo } }))
+vi.mock("@/lib/sdk/client", () => ({ sdkApi: { uploadFile, cancelTransfer, getUserInfo } }))
 
 // A bare, unconfigured QueryClient stands in for the real singleton — driveListingQueryUpdate only
 // needs genuine setQueryData/getQueryData cache mechanics, never the production client's OPFS-backed
@@ -732,10 +732,10 @@ describe("startUploads — HEIC convert-on-upload gating", () => {
 })
 
 describe("defaultUploadDeps.cancel", () => {
-	it("fires sdkApi.cancelUpload for the given transferId", () => {
+	it("fires sdkApi.cancelTransfer for the given transferId", () => {
 		defaultUploadDeps.cancel?.("transfer-id")
 
-		expect(cancelUpload).toHaveBeenCalledWith("transfer-id")
+		expect(cancelTransfer).toHaveBeenCalledWith("transfer-id")
 	})
 })
 

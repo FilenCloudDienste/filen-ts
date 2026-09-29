@@ -2,7 +2,8 @@ import { createElement, Fragment } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { type ItemActionDescriptor, type ItemActionDialogKind, type ItemActionId } from "@/features/drive/components/itemMenu.logic"
-import { applyOfflineGate, startItemDownload } from "@/features/drive/components/itemMenu.logic"
+import { applyOfflineGate } from "@/features/drive/components/itemMenu.logic"
+import { startDownloads } from "@/features/drive/lib/download"
 import { photosItemActions } from "@/features/photos/lib/itemActions"
 import { toggleFavoritePhoto } from "@/features/photos/lib/actions"
 import { type PhotoItem } from "@/features/photos/lib/captureSort"
@@ -40,10 +41,10 @@ function PhotosItemMenuEntries({ rootUuid, item, onItemAction, family }: PhotosI
 	const { Item, Separator } = family
 
 	async function runDirect(descriptor: Extract<ItemActionDescriptor, { run: "direct" }>): Promise<void> {
-		// Checked FIRST, before any `await` — startItemDownload's FSA save picker needs this click's
+		// Checked FIRST, before any `await` — startDownloads' FSA save picker needs this click's
 		// own live user gesture, mirrors drive's itemMenu.tsx identical ordering.
 		if (descriptor.id === "download") {
-			startItemDownload(item)
+			void startDownloads([item])
 			return
 		}
 

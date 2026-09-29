@@ -549,5 +549,5 @@ export function requestCopyCancel(jobId: string, options: { trashCopied: boolean
 	}
 
 	useCopyJobsStore.getState().update(jobId, running => ({ ...running, cancelRequest: options.trashCopied ? "trash" : "keep" }))
-	void sdkApi.cancelCopy(jobId)
+	void sdkApi.cancelTransfer(jobId)
 }

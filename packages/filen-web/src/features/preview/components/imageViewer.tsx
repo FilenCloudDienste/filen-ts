@@ -12,7 +12,6 @@ import { usePreviewAccessMode } from "@/features/preview/lib/accessMode"
 import { useRawPreview } from "@/features/preview/hooks/useRawPreview"
 import { getThumbnailUrl } from "@/features/drive/lib/thumbnails"
 import { errorLabel } from "@/lib/i18n/errorLabel"
-import { type ErrorDTO } from "@/lib/sdk/errors"
 import { LoadingState } from "@/components/loadingState"
 import { PreviewErrorState } from "@/features/preview/components/previewErrorState"
 import { type Size, type ZoomTransform, wheelZoom, dragPan, doubleClickZoom } from "@/features/preview/components/imageViewer.logic"
@@ -299,7 +298,7 @@ const heicJpegs = new WeakMap<Uint8Array, Blob>()
 // (minting the URL IS the effect; the cleanup revokes it on unmount/bytes-change).
 function TransformedImageBytes({ bytes, alt }: { bytes: Uint8Array; alt: string }) {
 	const { t } = useTranslation("preview")
-	const [state, setState] = useState<{ status: "pending" } | { status: "success"; url: string } | { status: "error"; dto: ErrorDTO }>({
+	const [state, setState] = useState<{ status: "pending" } | { status: "success"; url: string } | { status: "error" }>({
 		status: "pending"
 	})
 	// Bumped by the error state's own Retry button — `bytes` never changes on a retry (the decoded
@@ -328,9 +327,7 @@ function TransformedImageBytes({ bytes, alt }: { bytes: Uint8Array; alt: string 
 			},
 			() => {
 				if (live) {
-					const message = t("previewTransformFailed")
-
-					setState({ status: "error", dto: { species: "plain", message, label: message } })
+					setState({ status: "error" })
 				}
 			}
 		)
@@ -342,7 +339,7 @@ function TransformedImageBytes({ bytes, alt }: { bytes: Uint8Array; alt: string 
 				URL.revokeObjectURL(objectUrl)
 			}
 		}
-	}, [bytes, t, retryToken])
+	}, [bytes, retryToken])
 
 	if (state.status === "pending") {
 		return (
@@ -356,7 +353,7 @@ function TransformedImageBytes({ bytes, alt }: { bytes: Uint8Array; alt: string 
 	if (state.status === "error") {
 		return (
 			<PreviewErrorState
-				message={errorLabel(state.dto)}
+				message={t("previewTransformFailed")}
 				onRetry={() => {
 					setState({ status: "pending" })
 					setRetryToken(prev => prev + 1)

@@ -31,20 +31,13 @@ describe("formatRelativeTime", () => {
 		expect(formatRelativeTime(NOW, t, NOW + 2 * 60 * 60 * 1000)).toBe("relativeHoursAgo:2")
 	})
 
-	it("falls back to a custom absolute formatter at and beyond the cutoff", () => {
-		const absolute = vi.fn((timestamp: number) => `abs:${String(timestamp)}`)
-		const old = NOW - 7 * DAY
+	it("falls back to the locale date (no time) at and beyond the cutoff", () => {
+		for (const old of [NOW - 7 * DAY, NOW - 30 * DAY]) {
+			const result = formatRelativeTime(old, t, NOW)
 
-		expect(formatRelativeTime(old, t, NOW, { absolute })).toBe(`abs:${String(old)}`)
-		expect(absolute).toHaveBeenCalledWith(old)
-	})
-
-	it("uses the built-in locale date (no time) when no absolute formatter is provided", () => {
-		const old = NOW - 30 * DAY
-		const result = formatRelativeTime(old, t, NOW)
-
-		// Not one of the relative keys — the default absolute branch produced a real date string.
-		expect(result).not.toContain("relative")
-		expect(result).toBe(new Date(old).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }))
+			// Not one of the relative keys — the absolute branch produced a real date string.
+			expect(result).not.toContain("relative")
+			expect(result).toBe(new Date(old).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }))
+		}
 	})
 })

@@ -49,7 +49,8 @@ import useNotesInflightStore, {
 	endEditingSession,
 	type InflightContent
 } from "@/features/notes/store/useNotesInflight"
-import { reconcileFollower, hashNoteContent, type RemoteEnqueue } from "@/features/notes/lib/sync.logic"
+import { hashNoteContent } from "@filen/shared"
+import { reconcileFollower, type RemoteEnqueue } from "@/features/notes/lib/sync.logic"
 import { isOwnNotePush } from "@/features/notes/lib/pushEchoes"
 import type { PushDetail } from "@/lib/storage/outboxChannel"
 import { forgetTabEditors, seedTabEditor, takeTabEditorEcho, tabEditorChanged } from "@/features/notes/lib/tabEditors"

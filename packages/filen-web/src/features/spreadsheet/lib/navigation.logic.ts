@@ -2,9 +2,6 @@ import { createAxis, type Axis } from "@/features/spreadsheet/lib/axis.logic"
 import { rangeContains, type CellPosition, type Selection } from "@/features/spreadsheet/lib/cellRef.logic"
 import { DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT, type CellRange } from "@/features/spreadsheet/lib/model"
 
-// Lives in lib (the notes checklist needs it too); re-exported for the grid's own callers.
-export { isImeKeydown } from "@/lib/ime"
-
 // Blank rows and columns past the used area, as a spreadsheet shows.
 const EXTRA_ROWS = 100
 const EXTRA_COLS = 20

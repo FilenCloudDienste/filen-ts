@@ -24,15 +24,6 @@ export function filterNotesByBlockedOwner(notes: readonly Note[], blocked: Block
 	return notes.filter(note => !isBlocked({ userId: note.ownerId }, blocked))
 }
 
-// ── View 1 (notes) ──────────────────────────────────────────────────────────
-
-// The flat note list: filter by search, then the pinned → bucket → editedTimestamp sort. Straight
-// reuse of the foundation's sortAndFilterNotes so both views share one search/sort semantics. `bodies`
-// is the eager-fetched full-body map (useNoteSearchBodies.ts) — undefined outside an active search.
-export function buildNotesView(notes: readonly Note[], search: string, bodies?: ReadonlyMap<string, string | undefined>): Note[] {
-	return sortAndFilterNotes(notes, search, bodies)
-}
-
 // ── Notes-view date grouping ──────────────────────────────────────────────────
 // Classification (first-match-wins: Trashed → Archived → Pinned → Favorited → date buckets) is
 // @filen/shared's partitionNotesByBucket, shared with filen-mobile's notesSorter.group — this module
@@ -67,35 +58,27 @@ function monthLabel(timestamp: number): string {
 	return new Intl.DateTimeFormat(undefined, { month: "long" }).format(new Date(timestamp))
 }
 
+// Header label key + icon for every string bucket id; the Record keeps it exhaustive over the shared ids.
+const FIXED_BUCKET_HEADERS: Record<
+	Extract<NoteBucketId, string>,
+	{ key: Extract<NotesGroupLabel, { kind: "key" }>["key"]; icon: NotesGroupIcon }
+> = {
+	pinned: { key: "notesGroupPinned", icon: "pinned" },
+	favorited: { key: "notesGroupFavorited", icon: "favorited" },
+	today: { key: "notesGroupToday", icon: "today" },
+	previous7Days: { key: "notesGroupPrevious7Days", icon: "calendar" },
+	previous30Days: { key: "notesGroupPrevious30Days", icon: "calendar" },
+	archived: { key: "notesGroupArchived", icon: "archived" },
+	trashed: { key: "notesGroupTrashed", icon: "trashed" }
+}
+
 // Resolves the shared core's abstract bucket id into this app's header row — the presentation layer
 // the shared classification core deliberately excludes.
 function headerForBucket(bucketId: NoteBucketId): Extract<NotesSidebarRow, { kind: "header" }> {
-	if (bucketId === "pinned") {
-		return { kind: "header", id: "pinned", label: { kind: "key", key: "notesGroupPinned" }, icon: "pinned" }
-	}
+	if (typeof bucketId === "string") {
+		const header = FIXED_BUCKET_HEADERS[bucketId]
 
-	if (bucketId === "favorited") {
-		return { kind: "header", id: "favorited", label: { kind: "key", key: "notesGroupFavorited" }, icon: "favorited" }
-	}
-
-	if (bucketId === "today") {
-		return { kind: "header", id: "today", label: { kind: "key", key: "notesGroupToday" }, icon: "today" }
-	}
-
-	if (bucketId === "previous7Days") {
-		return { kind: "header", id: "previous7Days", label: { kind: "key", key: "notesGroupPrevious7Days" }, icon: "calendar" }
-	}
-
-	if (bucketId === "previous30Days") {
-		return { kind: "header", id: "previous30Days", label: { kind: "key", key: "notesGroupPrevious30Days" }, icon: "calendar" }
-	}
-
-	if (bucketId === "archived") {
-		return { kind: "header", id: "archived", label: { kind: "key", key: "notesGroupArchived" }, icon: "archived" }
-	}
-
-	if (bucketId === "trashed") {
-		return { kind: "header", id: "trashed", label: { kind: "key", key: "notesGroupTrashed" }, icon: "trashed" }
+		return { kind: "header", id: bucketId, label: { kind: "key", key: header.key }, icon: header.icon }
 	}
 
 	if (bucketId.kind === "month") {
@@ -199,8 +182,8 @@ function tagNameMatches(tag: NoteTag, normalized: string): boolean {
 }
 
 // A tag is shown in the tags view when the search matches its NAME or any of its member notes
-// (title or full body — `bodies` is the eager-fetched map, see buildNotesView's own comment). Empty
-// search shows all.
+// (title or full body — `bodies` is the eager-fetched full-body map from useNoteSearchBodies.ts,
+// undefined outside an active search). Empty search shows all.
 export function filterTagsForView(
 	tags: readonly NoteTag[],
 	notesByTag: Record<string, readonly Note[]>,
@@ -238,7 +221,7 @@ function notesForExpandedTag(
 		return sortNotes(notes)
 	}
 
-	return sortNotes(filterNotesBySearch(notes, search, bodies))
+	return sortAndFilterNotes(notes, search, bodies)
 }
 
 // A notes-view section header's label: either a static catalog key (Pinned/Favorited/Today/…) or a
@@ -278,7 +261,7 @@ export interface TagsViewParams {
 	sortBy: NoteTagsSortBy
 	// Localized label for the synthesized untagged row (the logic layer stays React-free).
 	untaggedLabel: string
-	// Eager-fetched full-body map, undefined outside an active search (see buildNotesView).
+	// Eager-fetched full-body map, undefined outside an active search (see filterTagsForView).
 	bodies?: ReadonlyMap<string, string | undefined>
 }
 

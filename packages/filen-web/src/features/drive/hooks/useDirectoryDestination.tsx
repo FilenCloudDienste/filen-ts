@@ -1,12 +1,12 @@
 import { useState, type ReactNode } from "react"
-import { type PreviewSource } from "@/features/preview/lib/previewSource"
+import { type DriveItem } from "@/features/drive/lib/item"
 import { useUploadMenuActions } from "@/features/drive/hooks/useUploadMenuActions"
 import { NewDirectoryDialog } from "@/features/drive/components/newDirectory"
 import { type DestinationActions } from "@/features/drive/components/destinationMenu"
 
 export interface UseDirectoryDestinationParams {
 	disabled: boolean
-	openPreview: (sources: PreviewSource[], index: number) => void
+	openPreview: (items: DriveItem[], index: number) => void
 	hiddenNotice: boolean
 	testIdPrefix: string
 }

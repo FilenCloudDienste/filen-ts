@@ -1,5 +1,5 @@
 import { listboxRange } from "@/features/drive/lib/listbox"
-import { drivePreviewSources, type PreviewSource } from "@/features/preview/lib/previewSource"
+import { type DriveItem } from "@/features/drive/lib/item"
 import type { PhotoItem } from "@/features/photos/lib/captureSort"
 import { timelineKeyTarget, type PhotosTimeline } from "@/features/photos/lib/timeline"
 
@@ -35,22 +35,22 @@ export function resolveTileClickIntent(modifiers: ClickModifiers, hasSelection: 
 }
 
 export interface PreviewOpenTarget {
-	sources: PreviewSource[]
+	sources: DriveItem[]
 	index: number
 }
 
 // Builds the frozen pager snapshot + starting slot for a tile click at `index` — the WHOLE current
-// (already capture-sorted) items array becomes the pager's candidate list, opened at the clicked
-// tile's own position within it, mirroring drive's own previewableSiblings + siblingIndex pairing but
-// with no extra filter step (a photos listing is already image/video-only by construction, see
-// predicate.ts). Returns null for a stale/out-of-range index — a click racing a background refetch
+// (already capture-sorted) items array becomes the pager's candidate list as-is (never mutated, so no
+// copy), opened at the clicked tile's own position within it, mirroring drive's own previewableSiblings
+// + siblingIndex pairing but with no extra filter step (a photos listing is already image/video-only by
+// construction, see predicate.ts). Returns null for a stale/out-of-range index — a click racing a background refetch
 // that shrank the list — rather than opening on a wrong or undefined slot.
 export function previewOpenTarget(items: PhotoItem[], index: number): PreviewOpenTarget | null {
 	if (index < 0 || index >= items.length) {
 		return null
 	}
 
-	return { sources: drivePreviewSources(items), index }
+	return { sources: items, index }
 }
 
 // The items a shift-extended selection covers: everything between the anchor (or `index` itself when

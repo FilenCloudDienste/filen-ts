@@ -18,8 +18,6 @@ export type DriveKey = Extract<keyof (typeof EN_CATALOGS)["drive"], string>
 
 export type ContactsKey = Extract<keyof (typeof EN_CATALOGS)["contacts"], string>
 
-export type TransfersKey = Extract<keyof (typeof EN_CATALOGS)["transfers"], string>
-
 export type PreviewKey = Extract<keyof (typeof EN_CATALOGS)["preview"], string>
 
 export type NotesKey = Extract<keyof (typeof EN_CATALOGS)["notes"], string>

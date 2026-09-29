@@ -11,9 +11,7 @@ import { pruneSettledCopyJobs } from "@/features/drive/lib/copy"
 import {
 	buildTransfersDisplayList,
 	cancellableTransferIds,
-	confirmCancelAllTransfers,
 	endedCopyIds,
-	hasFinishedTransfers,
 	pausableTransferIds,
 	resumableTransferIds,
 	shouldShowTransfersAggregate
@@ -43,7 +41,7 @@ export function TransfersScreen() {
 	const cancellable = cancellableTransferIds(transfers, endedCopies)
 	const pausable = pausableTransferIds(transfers, endedCopies)
 	const resumable = resumableTransferIds(transfers, endedCopies)
-	const clearable = hasFinishedTransfers(transfers)
+	const clearable = finished.length > 0
 	const showAggregate = shouldShowTransfersAggregate(activeCount)
 	// Cancel all fires immediately with no confirmation; gate it behind the shared AlertDialog
 	// wrapper (ConfirmDialog), same primitive AccountMenu's sign-out already uses. cancelTransfer is
@@ -156,7 +154,7 @@ export function TransfersScreen() {
 					<div className="flex flex-1 overflow-y-auto">
 						<Empty>
 							<EmptyHeader>
-								<EmptyMedia variant="icon">
+								<EmptyMedia>
 									<ArrowDownUpIcon />
 								</EmptyMedia>
 								<EmptyTitle>{t("transfersEmptyTitle")}</EmptyTitle>
@@ -183,7 +181,10 @@ export function TransfersScreen() {
 				destructive
 				onOpenChange={setCancelAllConfirmOpen}
 				onConfirm={() => {
-					confirmCancelAllTransfers(transfers, endedCopies, cancelTransfer)
+					for (const id of cancellable) {
+						cancelTransfer(id)
+					}
+
 					setCancelAllConfirmOpen(false)
 				}}
 			/>

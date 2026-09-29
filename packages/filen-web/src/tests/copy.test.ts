@@ -22,15 +22,15 @@ type SdkCopyItems = (
 	onEvent: (event: CopyJobEvent) => void
 ) => Promise<CopyReport>
 
-const { copyItems, copyItemsTo, cancelCopy, releaseCopy, getUserInfo } = vi.hoisted(() => ({
+const { copyItems, copyItemsTo, cancelTransfer, releaseCopy, getUserInfo } = vi.hoisted(() => ({
 	copyItems: vi.fn<SdkCopyItems>(),
 	copyItemsTo: vi.fn<(id: string, entries: unknown, maxBytes: number | undefined, onEvent: unknown) => Promise<CopyReport>>(),
-	cancelCopy: vi.fn<(id: string) => void>(),
+	cancelTransfer: vi.fn<(id: string) => void>(),
 	releaseCopy: vi.fn<(id: string) => void>(),
 	getUserInfo: vi.fn<() => Promise<UserInfo>>()
 }))
 
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: { copyItems, copyItemsTo, cancelCopy, releaseCopy, getUserInfo } }))
+vi.mock("@/lib/sdk/client", () => ({ sdkApi: { copyItems, copyItemsTo, cancelTransfer, releaseCopy, getUserInfo } }))
 
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
@@ -641,7 +641,7 @@ describe("cancel", () => {
 
 			const job = await runCopyJob(deps, request())
 
-			expect(cancelCopy).toHaveBeenCalledWith("job")
+			expect(cancelTransfer).toHaveBeenCalledWith("job")
 
 			if (trashCopied) {
 				expect(deps.trash).toHaveBeenCalledTimes(1)
@@ -724,7 +724,7 @@ describe("cancel", () => {
 		await runCopyJob(deps, request())
 		requestCopyCancel("job", { trashCopied: true })
 
-		expect(cancelCopy).not.toHaveBeenCalled()
+		expect(cancelTransfer).not.toHaveBeenCalled()
 		expect(getCopyJob("job")?.cancelRequest).toBeNull()
 	})
 
@@ -743,7 +743,7 @@ describe("cancel", () => {
 
 		const job = await runCopyJob(deps, request())
 
-		expect(cancelCopy).toHaveBeenCalledTimes(1)
+		expect(cancelTransfer).toHaveBeenCalledTimes(1)
 		expect(job?.cancelRequest).toBe("trash")
 		expect(deps.trash.mock.calls[0]?.[0].map(item => item.data.uuid)).toEqual([dir.uuid])
 	})

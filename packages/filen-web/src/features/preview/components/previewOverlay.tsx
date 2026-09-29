@@ -16,7 +16,7 @@ import { useBlocker, type ShouldBlockFn } from "@tanstack/react-router"
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog"
 import { XIcon, ChevronLeftIcon, ChevronRightIcon, DownloadIcon, SaveIcon, MoreHorizontalIcon } from "lucide-react"
 import { toast } from "sonner"
-import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
+import { asDirectoryOrFile, isLinkedEmbedItem, type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { extensionOf, previewType, type PreviewCategory } from "@/features/drive/lib/preview.logic"
 import { startDownloads } from "@/features/drive/lib/download"
@@ -47,7 +47,6 @@ import { PreviewDownloadableProvider } from "@/features/preview/lib/accessMode"
 import {
 	isTextEditingTarget,
 	PREVIEW_SURFACE,
-	previewMenuVisible,
 	previewNavigationUnmountsOverlay,
 	previewMenuHiddenActionIds,
 	hasClosest,
@@ -58,7 +57,6 @@ import {
 	type PreviewDismissIntent
 } from "@/features/preview/components/previewOverlay.logic"
 import { setPreviewDirty, usePreviewUnsavedGuardStore } from "@/features/preview/store/usePreviewUnsavedGuard"
-import { type PreviewSource, previewSourceKey, previewSourceName } from "@/features/preview/lib/previewSource"
 import { clearVideoPlaybackStates } from "@/features/preview/lib/videoContinuity"
 import { clearPreviewCache, loadPreviewBytes } from "@/features/preview/lib/previewCache"
 import { usePreviewCacheScope } from "@/features/preview/lib/accessMode"
@@ -104,7 +102,7 @@ export interface PreviewOverlayProps {
 	variant: DriveVariant
 	// Frozen previewable-sibling snapshot taken at open time (directoryListing.tsx's handleOpen) — the
 	// pager's whole candidate list, not just the opened item.
-	items: PreviewSource[]
+	items: DriveItem[]
 	index: number
 	onStep: (delta: 1 | -1) => void
 	onClose: () => void
@@ -153,7 +151,7 @@ interface PreviewErrorBoundaryState {
 // the header (Save/prev/next/download/close) lives outside it, so the overlay stays fully closeable
 // even while this is showing its fallback. A synchronous viewer throw (e.g. the markdown parser, which
 // runs during render, not inside an effect) would otherwise propagate past this dialog uncaught and
-// white-screen the whole app — no boundary exists anywhere else in this tree. Keyed by the source key
+// white-screen the whole app — no boundary exists anywhere else in this tree. Keyed by bodyKey
 // at its call site below (the drive uuid, the same key PreviewBody itself remounts on) so a
 // crash on one slot can never stick once the user steps to a different one — getDerivedStateFromError has no other way back to a
 // clean state.
@@ -204,10 +202,9 @@ export function PreviewOverlay({
 	const downloadable = downloadableProp !== false
 	const { t } = useTranslation(["preview", "common", "drive"])
 	const isOnline = useIsOnline()
-	const rawSource = items[index]
 	// The drive item at this slot BEFORE any per-slot save override — undefined only for an out-of-range
 	// index.
-	const rawDriveItem = rawSource?.item
+	const rawDriveItem = items[index]
 	const popupRef = useRef<HTMLDivElement>(null)
 	// Reader for performSave to pull the live buffer without this component
 	// re-rendering on every keystroke — see TextViewer's own contentRef prop doc.
@@ -216,11 +213,9 @@ export function PreviewOverlay({
 	const spreadsheetRef = useRef<SpreadsheetSaveSource | null>(null)
 	const cacheScope = usePreviewCacheScope()
 
-	// The open editor's unsaved edits: a text editor's buffer, or the spreadsheet's file as edited.
-	async function readEdits(): Promise<string | Uint8Array | null> {
-		const source = spreadsheetRef.current
-
-		return source === null ? (contentRef.current?.() ?? null) : (await source()).bytes
+	// The open editor's unsaved edits, encoded.
+	async function readEdits(): Promise<Uint8Array | null> {
+		return (await readSaveEdits())?.bytes ?? null
 	}
 
 	// Override for the currently-displayed item, accumulated per pager slot across the whole overlay
@@ -278,11 +273,9 @@ export function PreviewOverlay({
 		setChromeVisible(true)
 	}
 
-	// Applies the per-slot save override.
+	// The resolved slot the body actually renders, carrying its per-slot save override. Undefined only for
+	// an out-of-range index.
 	const driveItem = rawDriveItem !== undefined ? (saved.get(rawDriveItem.data.uuid) ?? rawDriveItem) : undefined
-	// The resolved slot the body actually renders, carrying its override. Undefined only for an
-	// out-of-range index.
-	const currentSource: PreviewSource | undefined = driveItem === undefined ? undefined : { item: driveItem }
 	const currentDocumentKey = rawDriveItem === undefined ? "" : (documentKeys.get(rawDriveItem.data.uuid) ?? rawDriveItem.data.uuid)
 	// The drive slot's renderer and save format, as it mounted: a rename never swaps the viewer (and with it
 	// the unsaved edits) out from under the user. Taken again whenever the slot mounts anew, which is only
@@ -619,11 +612,11 @@ export function PreviewOverlay({
 		}
 	}, [])
 
-	// The prompt that answers a waiting sign-out lives BELOW the `currentSource === undefined` early
+	// The prompt that answers a waiting sign-out lives BELOW the `driveItem === undefined` early
 	// return, so a slot that vanished under a dirty editor (its item removed elsewhere) must drop the
 	// guard too — otherwise a sign-out would wait forever on a dialog that can never render. Store
 	// writes, not React setState, so react-hooks/set-state-in-effect does not apply.
-	const slotVanished = currentSource === undefined
+	const slotVanished = driveItem === undefined
 
 	useEffect(() => {
 		if (slotVanished) {
@@ -638,7 +631,7 @@ export function PreviewOverlay({
 	// overlay still mounted, so neither the unmount cleanup nor the vanished-slot effect above runs, and a
 	// neighbour that mounts no editor at all (an image, a PDF, a rendered markdown) would strand the flag
 	// on a buffer that no longer exists — a prompt about nothing, an armed route block and beforeunload.
-	const slotKey = currentSource === undefined ? null : bodyKey(currentSource, currentDocumentKey, pin)
+	const slotKey = driveItem === undefined ? null : bodyKey(driveItem, currentDocumentKey, pin)
 
 	useEffect(() => {
 		setPreviewDirty(false)
@@ -657,7 +650,7 @@ export function PreviewOverlay({
 	// the buffer is dirty AND a slot is actually rendered: without the second term a vanished slot (early
 	// return below → no ConfirmDialog in the tree) could block a navigation nothing can then resolve,
 	// leaving the blocker's own promise unsettled after the popstate already moved the URL.
-	const guardsUnsaved = dirty && currentSource !== undefined
+	const guardsUnsaved = dirty && driveItem !== undefined
 	const blocker = useBlocker({
 		shouldBlockFn: blockWhenLeavingRoute,
 		enableBeforeUnload: false,
@@ -984,11 +977,11 @@ export function PreviewOverlay({
 		}
 	}
 
-	if (currentSource === undefined) {
+	if (driveItem === undefined) {
 		return null
 	}
 
-	const name = previewSourceName(currentSource)
+	const name = driveItemName(driveItem)
 	// The newer version the remote-change dialog asks about, for its comparison.
 	const remoteTheirs = remote.prompt?.kind === "revised" ? remote.prompt.theirs : undefined
 
@@ -1076,18 +1069,18 @@ export function PreviewOverlay({
 								aria-label={t("previewDownloadAction")}
 								title={!isOnline ? t("common:offlineActionDisabled") : undefined}
 								onClick={() => {
-									void startDownloads([currentSource.item])
+									void startDownloads([driveItem])
 								}}
 							>
 								<DownloadIcon />
 							</Button>
 						) : null}
-						{/* Never for a chat/note embed's fabricated linked-file item (previewMenuVisible). Same
+						{/* Never for a chat/note embed's fabricated linked-file item (isLinkedEmbedItem). Same
 						descriptor list + dropdown renderer the tile/row faces' own ⋯ trigger uses (itemMenu.tsx),
 						just with "download" hidden (the button above already covers it) and the two extra
 						"direct"-outcome hooks wired into this overlay's own per-slot `saved` override / pager
 						housekeeping — see previewMenuHiddenActionIds and the handleMenu* functions above. */}
-						{previewMenuVisible(currentSource) && driveItem !== undefined ? (
+						{!isLinkedEmbedItem(driveItem) ? (
 							<DropdownMenu>
 								<DropdownMenuTrigger
 									render={
@@ -1138,7 +1131,7 @@ export function PreviewOverlay({
 						<PreviewErrorBoundary key={slotKey}>
 							<PreviewDownloadableProvider downloadable={downloadable}>
 								<PreviewBody
-									source={currentSource}
+									item={driveItem}
 									category={pin?.category}
 									documentKey={currentDocumentKey}
 									editable={editable}
@@ -1148,7 +1141,7 @@ export function PreviewOverlay({
 									onDirtyChange={setPreviewDirty}
 									contentRef={contentRef}
 									spreadsheetRef={spreadsheetRef}
-									canSaveCopy={driveItem !== undefined && canSaveCopyBeside(driveItem, variant)}
+									canSaveCopy={canSaveCopyBeside(driveItem, variant)}
 									onOpenFile={opened => {
 										if (rawDriveItem !== undefined) {
 											commitSaved(rawDriveItem.data.uuid, opened)
@@ -1191,7 +1184,7 @@ export function PreviewOverlay({
 					{/* The header item-menu's own secondary dialog (rename/move/trash/etc.) — same nesting
 					precedent as the unsaved-changes ConfirmDialog above. */}
 					{renderMenuDialog()}
-					{remote.prompt !== null && driveItem !== undefined ? (
+					{remote.prompt !== null ? (
 						<RemoteChangeDialog
 							key={remote.prompt.kind === "revised" ? remote.prompt.theirs.data.uuid : `deleted:${remote.prompt.frozenUuid}`}
 							kind={remote.prompt.kind}
@@ -1285,12 +1278,12 @@ function slotPin(item: DriveItem, variant: DriveVariant): SlotPin {
 // What remounts the body. A spreadsheet follows its document (see documentKeys), so the user's own save
 // keeps the grid; every other viewer follows the version shown, and a saved text file reopens on what was
 // uploaded. By the pinned renderer, so a rename never remounts.
-function bodyKey(source: PreviewSource, documentKey: string, pin: SlotPin | null): string {
-	return pin?.category === "spreadsheet" ? `spreadsheet:${documentKey}` : previewSourceKey(source)
+function bodyKey(item: DriveItem, documentKey: string, pin: SlotPin | null): string {
+	return pin?.category === "spreadsheet" ? `spreadsheet:${documentKey}` : item.data.uuid
 }
 
 interface PreviewBodyProps {
-	source: PreviewSource
+	item: DriveItem
 	// The drive slot's pinned renderer (SlotPin).
 	category: PreviewCategory | undefined
 	documentKey: string
@@ -1323,7 +1316,7 @@ interface PreviewBodyProps {
 // A missing category arm cannot ship as a silently blank overlay: the `default` arm at the bottom of
 // the switch is the guard (a return-type annotation is not — `ReactNode` includes `undefined`).
 function PreviewBody({
-	source,
+	item,
 	category: pinnedCategory,
 	documentKey,
 	editable,
@@ -1337,7 +1330,6 @@ function PreviewBody({
 	canSaveCopy
 }: PreviewBodyProps): ReactNode {
 	const { t } = useTranslation("preview")
-	const item = source.item
 
 	// Narrows `data.decryptedMeta` to the file-arm's DecryptedFileMeta (which alone carries `.mime`) —
 	// previewType/canPreview already guarantee a file arm for every item that ever reaches this

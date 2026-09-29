@@ -2,7 +2,6 @@ import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from
 import { clampListboxIndex, listboxKeyTarget, resolveCursorIndex } from "@/features/drive/lib/listbox"
 import {
 	EMPTY_CONTACT_SELECTION_STATE,
-	contactSelectionSize,
 	nextContactSelection,
 	removeFromContactSelection,
 	type ContactSectionKey,
@@ -19,7 +18,6 @@ export interface UseContactsListSelectionParams {
 
 export interface ContactsListSelection {
 	selection: ContactSelection
-	selectedCount: number
 	// Roving cursor: the index inside `uuids` that owns this section listbox's single Tab stop.
 	// Resolved by uuid, not position, so a background refetch that reorders/removes rows cannot
 	// silently retarget the cursor (drive's resolveCursorIndex, reused).
@@ -161,7 +159,6 @@ export function useContactsListSelection({ resetKey }: UseContactsListSelectionP
 
 	return {
 		selection: state.selection,
-		selectedCount: contactSelectionSize(state.selection),
 		activeIndexFor,
 		registerRowRef,
 		handlePointerSelect,

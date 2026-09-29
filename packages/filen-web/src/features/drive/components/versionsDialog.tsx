@@ -17,12 +17,7 @@ import { useIsOnline } from "@/lib/useIsOnline"
 import { subscribePreviewReconcile } from "@/features/preview/lib/previewReconcile"
 import { isRevisionOf } from "@/features/preview/lib/remoteChange.logic"
 import { shouldForwardOpenChange } from "@/components/dialogs/dismissal.logic"
-import {
-	hasNoPreviousVersions,
-	isCurrentVersion,
-	isEverySelected,
-	nonCurrentVersions
-} from "@/features/drive/components/versionsDialog.logic"
+import { isCurrentVersion, nonCurrentVersions } from "@/features/drive/components/versionsDialog.logic"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { Button } from "@/components/ui/button"
@@ -141,7 +136,8 @@ export function VersionsDialog({ file, onClose }: VersionsDialogProps) {
 	}
 
 	function toggleSelectAll(): void {
-		setSelected(isEverySelected(selected, versions, file) ? new Set() : new Set(candidates.map(version => version.uuid)))
+		// Only reachable with candidates present; selectedVersions is a subset of them.
+		setSelected(selectedVersions.length === candidates.length ? new Set() : new Set(candidates.map(version => version.uuid)))
 	}
 
 	async function handleRestoreConfirmed(version: FileVersion): Promise<void> {
@@ -250,10 +246,10 @@ export function VersionsDialog({ file, onClose }: VersionsDialogProps) {
 					/>
 				) : versionsQuery.status === "error" ? (
 					<p className="text-sm text-destructive">{errorLabel(asErrorDTO(versionsQuery.error))}</p>
-				) : hasNoPreviousVersions(versionsQuery.data, file) ? (
+				) : candidates.length === 0 ? (
 					<Empty className="p-6">
 						<EmptyHeader>
-							<EmptyMedia variant="icon">
+							<EmptyMedia>
 								<HistoryIcon />
 							</EmptyMedia>
 							<EmptyTitle>{t("driveVersionsEmpty")}</EmptyTitle>
@@ -261,12 +257,21 @@ export function VersionsDialog({ file, onClose }: VersionsDialogProps) {
 					</Empty>
 				) : (
 					<ul className="flex max-h-80 flex-col gap-0.5 overflow-y-auto">
-						{versionsQuery.data.map(version => {
+						{versions.map(version => {
 							// The live version can't be usefully restored (it's already current) nor safely
 							// deleted (its uuid IS the file's own current storage blob — deleting it would
 							// destroy the file's live content, not just history).
 							const current = isCurrentVersion(version, file)
 							const isSelected = selected.has(version.uuid)
+							const meta = (
+								<div className="min-w-0 flex-1">
+									<div className="flex items-center gap-2">
+										<span>{formatVersionTimestamp(version.timestamp)}</span>
+										{current ? <Badge variant="secondary">{t("driveVersionsCurrentBadge")}</Badge> : null}
+									</div>
+									<span className="text-xs text-muted-foreground">{formatBytes(Number(version.size))}</span>
+								</div>
+							)
 
 							return (
 								<li key={version.uuid}>
@@ -289,23 +294,11 @@ export function VersionsDialog({ file, onClose }: VersionsDialogProps) {
 											>
 												{isSelected ? <CheckIcon className="size-3.5 text-primary-foreground" /> : null}
 											</span>
-											<div className="min-w-0 flex-1">
-												<div className="flex items-center gap-2">
-													<span>{formatVersionTimestamp(version.timestamp)}</span>
-													{current ? <Badge variant="secondary">{t("driveVersionsCurrentBadge")}</Badge> : null}
-												</div>
-												<span className="text-xs text-muted-foreground">{formatBytes(Number(version.size))}</span>
-											</div>
+											{meta}
 										</button>
 									) : (
 										<div className="flex items-center gap-3 rounded-xl px-3 py-2 text-sm">
-											<div className="min-w-0 flex-1">
-												<div className="flex items-center gap-2">
-													<span>{formatVersionTimestamp(version.timestamp)}</span>
-													{current ? <Badge variant="secondary">{t("driveVersionsCurrentBadge")}</Badge> : null}
-												</div>
-												<span className="text-xs text-muted-foreground">{formatBytes(Number(version.size))}</span>
-											</div>
+											{meta}
 											<Button
 												variant="ghost"
 												size="icon-sm"

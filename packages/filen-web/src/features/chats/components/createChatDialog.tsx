@@ -88,7 +88,7 @@ export function CreateChatDialog({ onClose, onCreated }: CreateChatDialogProps) 
 			return (
 				<Empty>
 					<EmptyHeader>
-						<EmptyMedia variant="icon">
+						<EmptyMedia>
 							<UsersIcon />
 						</EmptyMedia>
 						<EmptyTitle>{t("contacts:contactsLoadError")}</EmptyTitle>
@@ -103,7 +103,7 @@ export function CreateChatDialog({ onClose, onCreated }: CreateChatDialogProps) 
 			return (
 				<Empty>
 					<EmptyHeader>
-						<EmptyMedia variant="icon">
+						<EmptyMedia>
 							<UsersIcon />
 						</EmptyMedia>
 						<EmptyTitle>{t("contacts:contactsEmptyTitle")}</EmptyTitle>
@@ -118,7 +118,7 @@ export function CreateChatDialog({ onClose, onCreated }: CreateChatDialogProps) 
 			return (
 				<Empty>
 					<EmptyHeader>
-						<EmptyMedia variant="icon">
+						<EmptyMedia>
 							<SearchXIcon />
 						</EmptyMedia>
 						<EmptyTitle>{t("contacts:contactsSearchNoResultsTitle")}</EmptyTitle>

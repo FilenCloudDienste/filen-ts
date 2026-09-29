@@ -154,9 +154,6 @@ jobs:
       - name: Check generated error kinds are up to date
         working-directory: packages/filen-web
         run: pnpm run gen:error-kinds && git diff --exit-code
-      - name: React Compiler healthcheck
-        working-directory: packages/filen-web
-        run: pnpm run check:compiler
       - name: Unit tests
         working-directory: packages/filen-web
         run: pnpm run test

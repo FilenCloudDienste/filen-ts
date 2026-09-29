@@ -1,18 +1,10 @@
 "use client"
 
-import * as React from "react"
 import { Popover as PopoverPrimitive } from "@base-ui/react/popover"
 
 import { cn } from "@filen/shared"
 
-function Popover({ ...props }: PopoverPrimitive.Root.Props) {
-	return (
-		<PopoverPrimitive.Root
-			data-slot="popover"
-			{...props}
-		/>
-	)
-}
+const Popover = PopoverPrimitive.Root
 
 function PopoverTrigger({ ...props }: PopoverPrimitive.Trigger.Props) {
 	return (
@@ -26,24 +18,20 @@ function PopoverTrigger({ ...props }: PopoverPrimitive.Trigger.Props) {
 function PopoverContent({
 	className,
 	align: alignProp,
-	alignOffset: alignOffsetProp,
 	side: sideProp,
-	sideOffset: sideOffsetProp,
 	...props
-}: PopoverPrimitive.Popup.Props & Pick<PopoverPrimitive.Positioner.Props, "align" | "alignOffset" | "side" | "sideOffset">) {
+}: PopoverPrimitive.Popup.Props & Pick<PopoverPrimitive.Positioner.Props, "align" | "side">) {
 	// Not destructuring defaults, which the React Compiler cannot lower.
 	const align = alignProp ?? "center"
-	const alignOffset = alignOffsetProp ?? 0
 	const side = sideProp ?? "bottom"
-	const sideOffset = sideOffsetProp ?? 4
 
 	return (
 		<PopoverPrimitive.Portal>
 			<PopoverPrimitive.Positioner
 				align={align}
-				alignOffset={alignOffset}
+				alignOffset={0}
 				side={side}
-				sideOffset={sideOffset}
+				sideOffset={4}
 				className="isolate z-50"
 			>
 				<PopoverPrimitive.Popup
@@ -59,34 +47,4 @@ function PopoverContent({
 	)
 }
 
-function PopoverHeader({ className, ...props }: React.ComponentProps<"div">) {
-	return (
-		<div
-			data-slot="popover-header"
-			className={cn("flex flex-col gap-1 text-sm", className)}
-			{...props}
-		/>
-	)
-}
-
-function PopoverTitle({ className, ...props }: PopoverPrimitive.Title.Props) {
-	return (
-		<PopoverPrimitive.Title
-			data-slot="popover-title"
-			className={cn("text-base font-medium", className)}
-			{...props}
-		/>
-	)
-}
-
-function PopoverDescription({ className, ...props }: PopoverPrimitive.Description.Props) {
-	return (
-		<PopoverPrimitive.Description
-			data-slot="popover-description"
-			className={cn("text-muted-foreground", className)}
-			{...props}
-		/>
-	)
-}
-
-export { Popover, PopoverContent, PopoverDescription, PopoverHeader, PopoverTitle, PopoverTrigger }
+export { Popover, PopoverContent, PopoverTrigger }

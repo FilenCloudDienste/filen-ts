@@ -33,8 +33,6 @@ export const chats = {
 	chatNoMessages: "No messages yet",
 	/** Conversation row — accessible label on the muted indicator */
 	chatMuted: "Muted",
-	/** Conversation row — accessible label on the per-row unread indicator */
-	chatUnread: "Unread",
 	/** Conversation row — accessible label on the numeric unread badge (singular) */
 	chatUnreadCount_one: "{{count}} unread message",
 	/** Conversation row — accessible label on the numeric unread badge (plural) */

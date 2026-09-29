@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest"
 import {
 	EMPTY_CONTACT_SELECTION,
 	EMPTY_CONTACT_SELECTION_STATE,
-	contactSelectionSize,
 	nextContactSelection,
 	removeFromContactSelection,
 	resolveSelectedContacts,
@@ -78,19 +77,6 @@ describe("removeFromContactSelection", () => {
 		const next = removeFromContactSelection(EMPTY_CONTACT_SELECTION, "contacts", ["ghost"])
 
 		expect(next).toBe(EMPTY_CONTACT_SELECTION)
-	})
-})
-
-describe("contactSelectionSize", () => {
-	it("is zero for an empty selection", () => {
-		expect(contactSelectionSize(EMPTY_CONTACT_SELECTION)).toBe(0)
-	})
-
-	it("counts every section's bucket", () => {
-		const withRequest = toggleContactSelection(EMPTY_CONTACT_SELECTION, "requests", "a")
-		const withContacts = toggleContactSelection(toggleContactSelection(withRequest, "contacts", "b"), "contacts", "c")
-
-		expect(contactSelectionSize(withContacts)).toBe(3)
 	})
 })
 

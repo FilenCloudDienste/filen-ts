@@ -1,12 +1,10 @@
-import { describe, expect, it, vi } from "vitest"
+import { describe, expect, it } from "vitest"
 import { type Transfer } from "@/features/transfers/store/useTransfersStore"
 import { createCopyJob } from "@/features/drive/lib/copy.logic"
 import {
 	buildTransfersDisplayList,
 	cancellableTransferIds,
-	confirmCancelAllTransfers,
 	endedCopyIds,
-	hasFinishedTransfers,
 	pausableTransferIds,
 	resumableTransferIds,
 	shouldShowTransfersAggregate
@@ -145,68 +143,6 @@ describe("resumableTransferIds", () => {
 	})
 })
 
-describe("hasFinishedTransfers", () => {
-	it("false when every row is still uploading", () => {
-		expect(hasFinishedTransfers([transfer({ status: "uploading" }), transfer({ status: "uploading" })])).toBe(false)
-	})
-
-	it("false for an empty list", () => {
-		expect(hasFinishedTransfers([])).toBe(false)
-	})
-
-	it("true when at least one row is done", () => {
-		expect(hasFinishedTransfers([transfer({ status: "uploading" }), transfer({ status: "done" })])).toBe(true)
-	})
-
-	it("true when at least one row is error", () => {
-		expect(hasFinishedTransfers([transfer({ status: "error" })])).toBe(true)
-	})
-
-	it("false when a row is downloading (active, not finished)", () => {
-		expect(hasFinishedTransfers([transfer({ direction: "download", status: "downloading" })])).toBe(false)
-	})
-
-	it("true when a download row is done", () => {
-		expect(hasFinishedTransfers([transfer({ direction: "download", status: "done" })])).toBe(true)
-	})
-})
-
-// The header Cancel-all confirm's actual action, once the AlertDialog gating it has been
-// confirmed. The gate itself (nothing cancels until the dialog's onConfirm fires) is UI wiring
-// exercised via e2e/manual QA, not this pure DI'd action — see transfers.spec.ts.
-describe("confirmCancelAllTransfers", () => {
-	it("cancels every active transfer, paused or not, and nothing else", () => {
-		const cancel = vi.fn<(id: string) => void>()
-		const transfers = [
-			transfer({ id: "a", status: "uploading", paused: false }),
-			transfer({ id: "b", status: "downloading", paused: true }),
-			transfer({ id: "c", status: "done" }),
-			transfer({ id: "d", status: "error" })
-		]
-
-		confirmCancelAllTransfers(transfers, NONE, cancel)
-
-		expect(cancel).toHaveBeenCalledTimes(2)
-		expect(cancel.mock.calls.map(call => call[0]).sort()).toEqual(["a", "b"])
-	})
-
-	it("calls the injected cancel fn zero times when nothing is active", () => {
-		const cancel = vi.fn<(id: string) => void>()
-
-		confirmCancelAllTransfers([transfer({ status: "done" }), transfer({ status: "error" })], NONE, cancel)
-
-		expect(cancel).not.toHaveBeenCalled()
-	})
-
-	it("is a no-op for an empty list", () => {
-		const cancel = vi.fn<(id: string) => void>()
-
-		confirmCancelAllTransfers([], NONE, cancel)
-
-		expect(cancel).not.toHaveBeenCalled()
-	})
-})
-
 // Its row stays active while the copies it made move to the trash, which can be neither paused nor
 // stopped.
 describe("a copy whose job has ended", () => {
@@ -230,15 +166,10 @@ describe("a copy whose job has ended", () => {
 			transfer({ id: "copy", direction: "copy", status: "copying" }),
 			transfer({ id: "pausedCopy", direction: "copy", status: "copying", paused: true })
 		]
-		const cancel = vi.fn<(id: string) => void>()
 
 		expect(cancellableTransferIds(transfers, ended)).toEqual(["upload", "pausedUpload"])
 		expect(pausableTransferIds(transfers, ended)).toEqual(["upload"])
 		expect(resumableTransferIds(transfers, ended)).toEqual(["pausedUpload"])
-
-		confirmCancelAllTransfers(transfers, ended, cancel)
-
-		expect(cancel.mock.calls).toEqual([["upload"], ["pausedUpload"]])
 	})
 })
 

@@ -45,7 +45,7 @@ function renderMarquee(
 			...(keyOf === undefined ? {} : { keyOf }),
 			viewMode: "list",
 			columns: 1,
-			geometry: { rowHeight: 40, tileWidth: 176, gap: 0 },
+			geometry: { rowHeight: 40, tileWidth: 176 },
 			selection: { read: () => preset, write },
 			scrollElement: el,
 			setCursor: vi.fn()

@@ -70,7 +70,7 @@ function ThirdPartyNoticesDialog({ open, onOpenChange }: ThirdPartyNoticesDialog
 						{notices.length === 0 ? (
 							<Empty className="h-96">
 								<EmptyHeader>
-									<EmptyMedia variant="icon">
+									<EmptyMedia>
 										<PackageSearchIcon />
 									</EmptyMedia>
 									<EmptyDescription>{t("settingsNoticesEmpty")}</EmptyDescription>

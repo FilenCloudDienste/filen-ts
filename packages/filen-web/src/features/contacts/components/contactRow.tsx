@@ -2,17 +2,16 @@ import { type KeyboardEvent, type MouseEvent, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { CheckIcon, XIcon, MoreHorizontalIcon, RotateCcwIcon, MessagesSquareIcon } from "lucide-react"
 import type { BlockedContact, Contact, ContactRequestIn, ContactRequestOut } from "@filen/sdk-rs"
-import { contactDisplayName, contactInitials } from "@/features/contacts/components/contactsList.logic"
+import { contactInitials } from "@/features/contacts/components/contactsList.logic"
 import { ContactMenuContent } from "@/features/contacts/components/contactMenu"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { cn } from "@filen/shared"
+import { cn, contactDisplayName, type ContactLike } from "@filen/shared"
 
-interface ContactRowShellProps {
-	avatar?: string | undefined
-	displayName: string
-	email: string
+export interface ContactRowProps {
+	// Any contact-like record: a contact, an incoming/outgoing request or a blocked contact.
+	contact: ContactLike & { avatar?: string | undefined }
 	// Selection state, shared by both contracts below; meaningless without one of them.
 	selected?: boolean | undefined
 	// Contract A — bounded dialog picker (drive's ContactPickerDialog, chats' CreateChatDialog): the row
@@ -31,20 +30,10 @@ interface ContactRowShellProps {
 	children?: ReactNode
 }
 
-// Every row variant below renders through this shell — only the source record differs per variant.
 // AvatarImage/AvatarFallback are direct children of Avatar (its Base UI Root): Fallback only renders
 // itself while no image has loaded (Base UI's own imageLoadingStatus gate).
-function ContactRowShell({
-	avatar,
-	displayName,
-	email,
-	selected,
-	onToggleSelect,
-	onSelect,
-	active,
-	rowRef,
-	children
-}: ContactRowShellProps) {
+export function ContactRow({ contact, selected, onToggleSelect, onSelect, active, rowRef, children }: ContactRowProps) {
+	const displayName = contactDisplayName(contact)
 	const roving = onSelect !== undefined
 	const selectable = roving || onToggleSelect !== undefined
 
@@ -92,9 +81,9 @@ function ContactRowShell({
 			<Avatar>
 				{/* crossOrigin: require-corp COEP needs a CORS-mode request for this cross-origin egest
 				    url (see settings/account/avatarCard.tsx's matching comment for the verified detail). */}
-				{avatar !== undefined ? (
+				{contact.avatar !== undefined ? (
 					<AvatarImage
-						src={avatar}
+						src={contact.avatar}
 						crossOrigin="anonymous"
 					/>
 				) : null}
@@ -102,7 +91,7 @@ function ContactRowShell({
 			</Avatar>
 			<div className="min-w-0 flex-1">
 				<p className="truncate font-medium">{displayName}</p>
-				<p className="truncate text-xs text-muted-foreground">{email}</p>
+				<p className="truncate text-xs text-muted-foreground">{contact.email}</p>
 			</div>
 			{roving ? (
 				<div
@@ -121,90 +110,6 @@ function ContactRowShell({
 				children
 			)}
 		</div>
-	)
-}
-
-export interface ContactRowProps {
-	contact: Contact
-	selected?: boolean | undefined
-	onToggleSelect?: (() => void) | undefined
-	onSelect?: ((event: MouseEvent<HTMLDivElement>) => void) | undefined
-	active?: boolean | undefined
-	rowRef?: ((element: HTMLDivElement | null) => void) | undefined
-	children?: ReactNode
-}
-
-export function ContactRow({ contact, selected, onToggleSelect, onSelect, active, rowRef, children }: ContactRowProps) {
-	return (
-		<ContactRowShell
-			avatar={contact.avatar}
-			displayName={contactDisplayName(contact)}
-			email={contact.email}
-			selected={selected}
-			onToggleSelect={onToggleSelect}
-			onSelect={onSelect}
-			active={active}
-			rowRef={rowRef}
-		>
-			{children}
-		</ContactRowShell>
-	)
-}
-
-export interface ContactRequestRowProps {
-	// Shared by both the incoming (Requests) and outgoing (Pending) sections — both request kinds
-	// render identically here; only the trailing action slot they'll eventually get differs
-	// (accept/deny vs. cancel), which is entirely the caller's concern via `children`.
-	request: ContactRequestIn | ContactRequestOut
-	selected?: boolean | undefined
-	onToggleSelect?: (() => void) | undefined
-	onSelect?: ((event: MouseEvent<HTMLDivElement>) => void) | undefined
-	active?: boolean | undefined
-	rowRef?: ((element: HTMLDivElement | null) => void) | undefined
-	children?: ReactNode
-}
-
-export function ContactRequestRow({ request, selected, onToggleSelect, onSelect, active, rowRef, children }: ContactRequestRowProps) {
-	return (
-		<ContactRowShell
-			avatar={request.avatar}
-			displayName={contactDisplayName(request)}
-			email={request.email}
-			selected={selected}
-			onToggleSelect={onToggleSelect}
-			onSelect={onSelect}
-			active={active}
-			rowRef={rowRef}
-		>
-			{children}
-		</ContactRowShell>
-	)
-}
-
-export interface BlockedContactRowProps {
-	contact: BlockedContact
-	selected?: boolean | undefined
-	onToggleSelect?: (() => void) | undefined
-	onSelect?: ((event: MouseEvent<HTMLDivElement>) => void) | undefined
-	active?: boolean | undefined
-	rowRef?: ((element: HTMLDivElement | null) => void) | undefined
-	children?: ReactNode
-}
-
-export function BlockedContactRow({ contact, selected, onToggleSelect, onSelect, active, rowRef, children }: BlockedContactRowProps) {
-	return (
-		<ContactRowShell
-			avatar={contact.avatar}
-			displayName={contactDisplayName(contact)}
-			email={contact.email}
-			selected={selected}
-			onToggleSelect={onToggleSelect}
-			onSelect={onSelect}
-			active={active}
-			rowRef={rowRef}
-		>
-			{children}
-		</ContactRowShell>
 	)
 }
 

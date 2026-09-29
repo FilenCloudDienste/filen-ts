@@ -165,10 +165,6 @@ export function isPlaylistsDirectoryEvent(inner: DriveEvent): boolean {
 	}
 }
 
-function fallbackDisplayName(item: DriveItem): string {
-	return driveItemName(asDirectoryOrFile(item))
-}
-
 function safeJsonParse(bytes: Uint8Array): unknown {
 	try {
 		return JSON.parse(new TextDecoder().decode(bytes)) as unknown
@@ -243,7 +239,7 @@ async function pruneDeadTracksOnce(playlist: Playlist, existence: TrackExistence
 async function readOnePlaylistEntry(file: SdkFile, existence: TrackExistence): Promise<PlaylistEntry> {
 	const item = narrowItem(file)
 	const base = asDirectoryOrFile(item)
-	const fallbackName = fallbackDisplayName(item)
+	const fallbackName = driveItemName(base)
 
 	if (base.type !== "file" || base.data.undecryptable) {
 		return { status: "degraded", fileUuid: base.data.uuid, name: fallbackName }
@@ -446,7 +442,7 @@ export async function deletePlaylistAction(playlist: Playlist): Promise<void> {
 		const dirUuid = await getPlaylistsDirectoryUuid()
 		const { files } = await runPlaylistsDirectoryOp(sdkApi.listDirectory({ kind: "uuid", uuid: dirUuid }))
 		const targetName = `${playlist.uuid}.json`.toLowerCase()
-		const match = files.find(file => fallbackDisplayName(narrowItem(file)).toLowerCase() === targetName)
+		const match = files.find(file => driveItemName(narrowItem(file)).toLowerCase() === targetName)
 
 		if (match) {
 			await runOp(sdkApi.deleteFilePermanently(match))

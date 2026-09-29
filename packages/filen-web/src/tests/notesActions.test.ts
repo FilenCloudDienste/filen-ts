@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
-import type { Note, NoteType, UserInfo, UuidStr } from "@filen/sdk-rs"
+import type { Note, UserInfo, UuidStr } from "@filen/sdk-rs"
 import { hashNoteContent } from "@filen/shared"
 
 function testUuid(label: string): UuidStr {
@@ -56,15 +56,6 @@ vi.mock("@/lib/sdk/client", () => ({
 
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
-// getDefaultNoteType is exercised for real by notesMdSplitPreferences.test.ts's sibling coverage —
-// here it's stubbed so createNote's own default-type-application branch is directly controllable.
-const { getDefaultNoteTypeMock } = vi.hoisted(() => ({ getDefaultNoteTypeMock: vi.fn<() => Promise<NoteType>>() }))
-
-vi.mock("@/features/notes/lib/preferences", () => ({
-	getDefaultNoteType: getDefaultNoteTypeMock,
-	DEFAULT_NOTE_TYPE: "text"
-}))
-
 import { queryClient as testQueryClient } from "@/queries/client"
 import { ACCOUNT_QUERY_KEY } from "@/queries/account"
 import { NOTES_QUERY_KEY, notesQueryGet } from "@/features/notes/queries/notes"
@@ -73,6 +64,7 @@ import { isOwnNotePush } from "@/features/notes/lib/pushEchoes"
 import useNotesInflightStore from "@/features/notes/store/useNotesInflight"
 import {
 	createNote as createNoteAction,
+	retypeNewNote,
 	duplicateNote,
 	resolveNoteContent,
 	togglePinned,
@@ -90,7 +82,6 @@ beforeEach(() => {
 	vi.clearAllMocks()
 	testQueryClient.clear()
 	useNotesInflightStore.setState({ inflightContent: {} })
-	getDefaultNoteTypeMock.mockResolvedValue("text")
 })
 
 function mockNote(overrides: Partial<Note> = {}): Note {
@@ -118,52 +109,16 @@ function setCurrentUser(id: bigint): void {
 }
 
 describe("createNote", () => {
-	it("creates as text and upserts into the cache when the default-type preference is text", async () => {
+	it("creates as text and upserts into the cache", async () => {
 		const note = mockNote()
 		createNote.mockResolvedValueOnce(note)
 
 		const outcome = await createNoteAction()
 
 		expect(outcome).toEqual({ status: "success", item: note })
-		expect(createNote).toHaveBeenCalledExactlyOnceWith(undefined)
+		expect(createNote).toHaveBeenCalledExactlyOnceWith()
 		expect(setNoteTypeOp).not.toHaveBeenCalled()
 		expect(notesQueryGet()).toEqual([note])
-	})
-
-	it("passes an explicit title through to createNote", async () => {
-		createNote.mockResolvedValueOnce(mockNote())
-
-		await createNoteAction("My title")
-
-		expect(createNote).toHaveBeenCalledExactlyOnceWith("My title")
-	})
-
-	it("applies the persisted default type with a second setNoteType call when it differs from text", async () => {
-		const created = mockNote({ noteType: "text" })
-		const retyped = mockNote({ noteType: "md" })
-		createNote.mockResolvedValueOnce(created)
-		getDefaultNoteTypeMock.mockResolvedValueOnce("md")
-		setNoteTypeOp.mockResolvedValueOnce(retyped)
-
-		const outcome = await createNoteAction()
-
-		// The new note's content ("") is written again, as this browser's own write.
-		expect(setNoteTypeOp).toHaveBeenCalledExactlyOnceWith(created, "md", "")
-		expect(isOwnNotePush(created.uuid, hashNoteContent(""))).toBe(true)
-		expect(outcome).toEqual({ status: "success", item: retyped })
-		expect(notesQueryGet()).toEqual([retyped])
-	})
-
-	it("takes the new note's own write back when its retype fails", async () => {
-		const created = mockNote({ noteType: "text" })
-		createNote.mockResolvedValueOnce(created)
-		getDefaultNoteTypeMock.mockResolvedValueOnce("md")
-		setNoteTypeOp.mockRejectedValueOnce(new Error("offline"))
-
-		const outcome = await createNoteAction()
-
-		expect(outcome.status).toBe("error")
-		expect(isOwnNotePush(created.uuid, hashNoteContent(""))).toBe(false)
 	})
 
 	it("returns an error outcome on rejection, without touching the cache", async () => {
@@ -173,6 +128,28 @@ describe("createNote", () => {
 
 		expect(outcome.status).toBe("error")
 		expect(notesQueryGet()).toBeUndefined()
+	})
+})
+
+describe("retypeNewNote", () => {
+	it("rewrites the new note's content as this browser's own write", async () => {
+		const created = mockNote({ noteType: "text" })
+		const retyped = mockNote({ noteType: "md" })
+		setNoteTypeOp.mockResolvedValueOnce(retyped)
+
+		await expect(retypeNewNote(created, "md")).resolves.toEqual(retyped)
+
+		expect(setNoteTypeOp).toHaveBeenCalledExactlyOnceWith(created, "md", "")
+		expect(isOwnNotePush(created.uuid, hashNoteContent(""))).toBe(true)
+	})
+
+	it("takes the new note's own write back when its retype fails", async () => {
+		const created = mockNote({ noteType: "text" })
+		setNoteTypeOp.mockRejectedValueOnce(new Error("offline"))
+
+		await expect(retypeNewNote(created, "md")).rejects.toBeDefined()
+
+		expect(isOwnNotePush(created.uuid, hashNoteContent(""))).toBe(false)
 	})
 })
 

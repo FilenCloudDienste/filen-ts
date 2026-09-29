@@ -36,8 +36,6 @@ import { useContactsListSelection } from "@/features/contacts/hooks/useContactsL
 import { useInFlightKeys } from "@/features/contacts/hooks/useInFlightKeys"
 import {
 	ContactRow,
-	ContactRequestRow,
-	BlockedContactRow,
 	IncomingRequestActions,
 	OutgoingRequestActions,
 	ContactActions,
@@ -230,18 +228,63 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 	// Shared tail for a bulk confirm: run every item independently via runContactsBulk, always close
 	// (the toast conveys any partial failure), and prune succeeded uuids from the selection — mirrors
 	// directoryListing.tsx's runBulkDialogAction.
-	async function runBulkDialogAction<T>(
+	async function runBulkDialogAction<T extends { uuid: string }>(
 		section: ContactSectionKey,
 		items: T[],
-		op: (item: T) => Promise<VoidActionOutcome>,
-		uuidOf: (item: T) => string
+		op: (item: T) => Promise<VoidActionOutcome>
 	): Promise<void> {
 		setDialogPending(true)
 		const outcome = await runContactsBulk(items, op)
 		setDialogPending(false)
 		closeActiveDialog()
 		toastContactsBulkOutcome(outcome)
-		selection.pruneSelection(section, outcome.succeeded.map(uuidOf))
+		selection.pruneSelection(
+			section,
+			outcome.succeeded.map(item => item.uuid)
+		)
+	}
+
+	// Generic over the item type so each switch case below keeps its own narrowed `items`.
+	function renderConfirm<T extends { uuid: string }>(spec: {
+		title: string
+		body: string
+		confirmLabel: string
+		destructive?: boolean
+		section: ContactSectionKey
+		items: T[]
+		bulk: boolean
+		op: (item: T) => Promise<VoidActionOutcome>
+	}): ReactNode {
+		return (
+			<ConfirmDialog
+				open
+				pending={dialogPending}
+				title={spec.title}
+				body={spec.body}
+				confirmLabel={spec.confirmLabel}
+				cancelLabel={t("common:cancel")}
+				destructive={spec.destructive ?? false}
+				onOpenChange={open => {
+					if (!open) {
+						closeActiveDialog()
+					}
+				}}
+				onConfirm={() => {
+					if (spec.bulk) {
+						void runBulkDialogAction(spec.section, spec.items, spec.op)
+						return
+					}
+
+					const item = spec.items[0]
+
+					if (!item) {
+						return
+					}
+
+					void runSingleDialogAction(spec.section, item, spec.op)
+				}}
+			/>
+		)
 	}
 
 	// One instance of whichever dialog is active, switching on activeDialog.kind — never more than one
@@ -252,199 +295,61 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 			return null
 		}
 
+		const count = activeDialog.items.length
+
 		switch (activeDialog.kind) {
-			case "deny": {
-				const { items, bulk } = activeDialog
-
-				return (
-					<ConfirmDialog
-						open
-						pending={dialogPending}
-						title={t("contactsDenyConfirmTitle")}
-						body={t("contactsDenyConfirmBody", { count: items.length })}
-						confirmLabel={t("contactsActionDeny")}
-						cancelLabel={t("common:cancel")}
-						onOpenChange={open => {
-							if (!open) {
-								closeActiveDialog()
-							}
-						}}
-						onConfirm={() => {
-							if (bulk) {
-								void runBulkDialogAction(
-									"requests",
-									items,
-									request => denyRequest(request.uuid),
-									request => request.uuid
-								)
-								return
-							}
-
-							const item = items[0]
-
-							if (!item) {
-								return
-							}
-
-							void runSingleDialogAction("requests", item, request => denyRequest(request.uuid))
-						}}
-					/>
-				)
-			}
-			case "cancel": {
-				const { items, bulk } = activeDialog
-
-				return (
-					<ConfirmDialog
-						open
-						pending={dialogPending}
-						title={t("contactsCancelConfirmTitle")}
-						body={t("contactsCancelConfirmBody", { count: items.length })}
-						confirmLabel={t("contactsActionCancelRequest")}
-						cancelLabel={t("common:cancel")}
-						onOpenChange={open => {
-							if (!open) {
-								closeActiveDialog()
-							}
-						}}
-						onConfirm={() => {
-							if (bulk) {
-								void runBulkDialogAction(
-									"pending",
-									items,
-									request => cancelRequest(request.uuid),
-									request => request.uuid
-								)
-								return
-							}
-
-							const item = items[0]
-
-							if (!item) {
-								return
-							}
-
-							void runSingleDialogAction("pending", item, request => cancelRequest(request.uuid))
-						}}
-					/>
-				)
-			}
-			case "remove": {
-				const { items, bulk } = activeDialog
-
-				return (
-					<ConfirmDialog
-						open
-						pending={dialogPending}
-						title={t("contactsRemoveConfirmTitle")}
-						body={t("contactsRemoveConfirmBody", { count: items.length })}
-						confirmLabel={t("contactsActionRemove")}
-						cancelLabel={t("common:cancel")}
-						destructive
-						onOpenChange={open => {
-							if (!open) {
-								closeActiveDialog()
-							}
-						}}
-						onConfirm={() => {
-							if (bulk) {
-								void runBulkDialogAction(
-									"contacts",
-									items,
-									contact => removeContact(contact.uuid),
-									contact => contact.uuid
-								)
-								return
-							}
-
-							const item = items[0]
-
-							if (!item) {
-								return
-							}
-
-							void runSingleDialogAction("contacts", item, contact => removeContact(contact.uuid))
-						}}
-					/>
-				)
-			}
-			case "block": {
-				const { items, bulk } = activeDialog
-
-				return (
-					<ConfirmDialog
-						open
-						pending={dialogPending}
-						title={t("contactsBlockConfirmTitle")}
-						body={t("contactsBlockConfirmBody", { count: items.length })}
-						confirmLabel={t("contactsActionBlock")}
-						cancelLabel={t("common:cancel")}
-						destructive
-						onOpenChange={open => {
-							if (!open) {
-								closeActiveDialog()
-							}
-						}}
-						onConfirm={() => {
-							if (bulk) {
-								void runBulkDialogAction(
-									"contacts",
-									items,
-									contact => blockContact(contact),
-									contact => contact.uuid
-								)
-								return
-							}
-
-							const item = items[0]
-
-							if (!item) {
-								return
-							}
-
-							void runSingleDialogAction("contacts", item, contact => blockContact(contact))
-						}}
-					/>
-				)
-			}
-			case "unblock": {
-				const { items, bulk } = activeDialog
-
-				return (
-					<ConfirmDialog
-						open
-						pending={dialogPending}
-						title={t("contactsUnblockConfirmTitle")}
-						body={t("contactsUnblockConfirmBody", { count: items.length })}
-						confirmLabel={t("contactsActionUnblock")}
-						cancelLabel={t("common:cancel")}
-						onOpenChange={open => {
-							if (!open) {
-								closeActiveDialog()
-							}
-						}}
-						onConfirm={() => {
-							if (bulk) {
-								void runBulkDialogAction(
-									"blocked",
-									items,
-									contact => unblockContact(contact.uuid),
-									contact => contact.uuid
-								)
-								return
-							}
-
-							const item = items[0]
-
-							if (!item) {
-								return
-							}
-
-							void runSingleDialogAction("blocked", item, contact => unblockContact(contact.uuid))
-						}}
-					/>
-				)
-			}
+			case "deny":
+				return renderConfirm({
+					title: t("contactsDenyConfirmTitle"),
+					body: t("contactsDenyConfirmBody", { count }),
+					confirmLabel: t("contactsActionDeny"),
+					section: "requests",
+					items: activeDialog.items,
+					bulk: activeDialog.bulk,
+					op: request => denyRequest(request.uuid)
+				})
+			case "cancel":
+				return renderConfirm({
+					title: t("contactsCancelConfirmTitle"),
+					body: t("contactsCancelConfirmBody", { count }),
+					confirmLabel: t("contactsActionCancelRequest"),
+					section: "pending",
+					items: activeDialog.items,
+					bulk: activeDialog.bulk,
+					op: request => cancelRequest(request.uuid)
+				})
+			case "remove":
+				return renderConfirm({
+					title: t("contactsRemoveConfirmTitle"),
+					body: t("contactsRemoveConfirmBody", { count }),
+					confirmLabel: t("contactsActionRemove"),
+					destructive: true,
+					section: "contacts",
+					items: activeDialog.items,
+					bulk: activeDialog.bulk,
+					op: contact => removeContact(contact.uuid)
+				})
+			case "block":
+				return renderConfirm({
+					title: t("contactsBlockConfirmTitle"),
+					body: t("contactsBlockConfirmBody", { count }),
+					confirmLabel: t("contactsActionBlock"),
+					destructive: true,
+					section: "contacts",
+					items: activeDialog.items,
+					bulk: activeDialog.bulk,
+					op: contact => blockContact(contact)
+				})
+			case "unblock":
+				return renderConfirm({
+					title: t("contactsUnblockConfirmTitle"),
+					body: t("contactsUnblockConfirmBody", { count }),
+					confirmLabel: t("contactsActionUnblock"),
+					section: "blocked",
+					items: activeDialog.items,
+					bulk: activeDialog.bulk,
+					op: contact => unblockContact(contact.uuid)
+				})
 		}
 	}
 
@@ -473,9 +378,9 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 		switch (contactSection.key) {
 			case "requests":
 				return contactSection.items.map((request, index) => (
-					<ContactRequestRow
+					<ContactRow
 						key={request.uuid}
-						request={request}
+						contact={request}
 						{...rowProps(request.uuid, index)}
 					>
 						<IncomingRequestActions
@@ -490,13 +395,13 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 								setActiveDialog({ kind: "deny", bulk: false, items: [item] })
 							}}
 						/>
-					</ContactRequestRow>
+					</ContactRow>
 				))
 			case "pending":
 				return contactSection.items.map((request, index) => (
-					<ContactRequestRow
+					<ContactRow
 						key={request.uuid}
-						request={request}
+						contact={request}
 						{...rowProps(request.uuid, index)}
 					>
 						<OutgoingRequestActions
@@ -508,7 +413,7 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 								setActiveDialog({ kind: "cancel", bulk: false, items: [item] })
 							}}
 						/>
-					</ContactRequestRow>
+					</ContactRow>
 				))
 			case "contacts":
 				return contactSection.items.map((contact, index) => (
@@ -536,7 +441,7 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 				))
 			case "blocked":
 				return contactSection.items.map((blocked, index) => (
-					<BlockedContactRow
+					<ContactRow
 						key={blocked.uuid}
 						contact={blocked}
 						{...rowProps(blocked.uuid, index)}
@@ -550,7 +455,7 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 								setActiveDialog({ kind: "unblock", bulk: false, items: [item] })
 							}}
 						/>
-					</BlockedContactRow>
+					</ContactRow>
 				))
 		}
 	}
@@ -682,7 +587,7 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 						retry they need. Same treatment as drive's EmptyState error variant. */}
 						<Empty role="alert">
 							<EmptyHeader>
-								<EmptyMedia variant="icon">
+								<EmptyMedia>
 									<UsersIcon />
 								</EmptyMedia>
 								<EmptyTitle>{t("contactsLoadError")}</EmptyTitle>
@@ -709,7 +614,7 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 					<div className="flex flex-1 overflow-y-auto">
 						<Empty>
 							<EmptyHeader>
-								<EmptyMedia variant="icon">{searching ? <SearchIcon /> : <UsersIcon />}</EmptyMedia>
+								<EmptyMedia>{searching ? <SearchIcon /> : <UsersIcon />}</EmptyMedia>
 								{searching ? (
 									<>
 										<EmptyTitle>{t("contactsSearchNoResultsTitle")}</EmptyTitle>

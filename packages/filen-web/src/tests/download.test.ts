@@ -11,13 +11,13 @@ import type { FsaSaveTarget, SaveTarget, SwSaveTarget } from "@/features/drive/l
 // calls its real `saveDownload`/`isPickerCancelled` directly (they are not part of RunDownloadDeps),
 // so this file controls them the same way it controls the sdk client; saveDownload.test.ts is
 // where saveDownload's OWN mechanism-picking and SW-protocol correctness are proven.
-const { downloadFileToWriter, cancelDownload, toStringified } = vi.hoisted(() => ({
+const { downloadFileToWriter, cancelTransfer, toStringified } = vi.hoisted(() => ({
 	downloadFileToWriter: vi.fn(),
-	cancelDownload: vi.fn(),
+	cancelTransfer: vi.fn(),
 	toStringified: vi.fn()
 }))
 
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: { downloadFileToWriter, cancelDownload, toStringified } }))
+vi.mock("@/lib/sdk/client", () => ({ sdkApi: { downloadFileToWriter, cancelTransfer, toStringified } }))
 
 const { saveDownloadMock, isPickerCancelledMock, triggerSwDownloadMock } = vi.hoisted(() => ({
 	saveDownloadMock: vi.fn(),
@@ -397,10 +397,10 @@ describe("defaultDownloadDeps.download — sw branch", () => {
 })
 
 describe("defaultDownloadDeps.cancel", () => {
-	it("fires sdkApi.cancelDownload for the given transferId", () => {
+	it("fires sdkApi.cancelTransfer for the given transferId", () => {
 		defaultDownloadDeps.cancel?.("transfer-id")
 
-		expect(cancelDownload).toHaveBeenCalledWith("transfer-id")
+		expect(cancelTransfer).toHaveBeenCalledWith("transfer-id")
 	})
 })
 

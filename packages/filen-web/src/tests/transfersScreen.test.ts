@@ -9,13 +9,10 @@ import type { Transfer } from "@/features/transfers/store/useTransfersStore"
 // Same mock boundary as transfersControl.test.ts's own: the real sdk client module touches a Vite
 // `?worker`, unresolvable/unwanted under this node/jsdom vitest run — TransfersScreen's Cancel-all
 // button reaches it transitively through features/transfers/lib/control.ts's cancelTransfer.
-const { cancelUpload, cancelDownload } = vi.hoisted(() => ({
-	cancelUpload: vi.fn(),
-	cancelDownload: vi.fn()
-}))
+const { sdkCancel } = vi.hoisted(() => ({ sdkCancel: vi.fn() }))
 
 vi.mock("@/lib/sdk/client", () => ({
-	sdkApi: { cancelUpload, cancelDownload, pauseUpload: vi.fn(), pauseDownload: vi.fn(), resumeUpload: vi.fn(), resumeDownload: vi.fn() }
+	sdkApi: { cancelTransfer: sdkCancel, pauseTransfer: vi.fn(), resumeTransfer: vi.fn() }
 }))
 
 const { useTransfersStore } = await import("@/features/transfers/store/useTransfersStore")
@@ -83,10 +80,7 @@ describe("TransfersScreen — aggregate readout", () => {
 	})
 })
 
-// confirmCancelAllTransfers (the post-confirm action) was already unit-tested assuming the
-// dialog already said yes (transfers.test.ts). Nothing persisted proved the UI actually GATES it
-// behind that confirm rather than firing on the header button's own click, unlike the single-row
-// Cancel gate (downloads.spec.ts's cancel-mid-flight e2e test).
+// Cancel all must be gated behind the confirm dialog, not fire on the header button's own click.
 describe("TransfersScreen — Cancel all confirm gate", () => {
 	it("opens the confirm dialog on click, without cancelling anything yet", () => {
 		useTransfersStore.setState({ transfers: [transfer({ id: "a", status: "uploading" }), transfer({ id: "b", status: "done" })] })
@@ -96,8 +90,7 @@ describe("TransfersScreen — Cancel all confirm gate", () => {
 		fireEvent.click(screen.getByRole("button", { name: "Cancel all" }))
 
 		expect(screen.getByRole("alertdialog", { name: "Cancel all transfers?" })).toBeTruthy()
-		expect(cancelUpload).not.toHaveBeenCalled()
-		expect(cancelDownload).not.toHaveBeenCalled()
+		expect(sdkCancel).not.toHaveBeenCalled()
 	})
 
 	it("cancels every active transfer only once the dialog is confirmed", () => {
@@ -119,8 +112,7 @@ describe("TransfersScreen — Cancel all confirm gate", () => {
 		// scoped query can't accidentally hit the header's own "Cancel all" trigger button underneath.
 		fireEvent.click(within(dialog).getByRole("button", { name: "Cancel all" }))
 
-		expect(cancelUpload).toHaveBeenCalledWith("a")
-		expect(cancelDownload).toHaveBeenCalledWith("b")
+		expect(sdkCancel.mock.calls).toEqual([["a"], ["b"]])
 	})
 
 	it("dismissing the dialog (Keep transferring) cancels nothing", () => {
@@ -132,7 +124,7 @@ describe("TransfersScreen — Cancel all confirm gate", () => {
 		fireEvent.click(screen.getByRole("button", { name: "Keep transferring" }))
 
 		expect(screen.queryByRole("alertdialog", { name: "Cancel all transfers?" })).toBeNull()
-		expect(cancelUpload).not.toHaveBeenCalled()
+		expect(sdkCancel).not.toHaveBeenCalled()
 	})
 })
 

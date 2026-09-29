@@ -16,16 +16,13 @@ import { type DriveSelectionFlags } from "@/features/drive/lib/selectionFlags"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 
-// bulkActionBar.logic.ts imports features/drive/lib/download.ts (for startDownloads), which in turn touches
-// the worker client and query client — unresolvable/unwanted under node vitest, mirrors
-// download.test.ts's own mock boundary. startDownloads is replaced, since actually running
-// it would reach the (also mocked) worker.
+// bulkActionBar.logic.ts's imports reach the worker client and query client — unresolvable/unwanted
+// under node vitest.
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 vi.mock("sonner", () => ({ toast: { success: toastSuccess, error: toastError } }))
 
-const { startDownloadsMock, setFavoritedItemsMock, toastSuccess, toastError } = vi.hoisted(() => ({
-	startDownloadsMock: vi.fn(),
+const { setFavoritedItemsMock, toastSuccess, toastError } = vi.hoisted(() => ({
 	setFavoritedItemsMock: vi.fn(),
 	toastSuccess: vi.fn(),
 	toastError: vi.fn()
@@ -36,11 +33,6 @@ const { startDownloadsMock, setFavoritedItemsMock, toastSuccess, toastError } = 
 vi.mock("@/features/drive/lib/actions", async importOriginal => {
 	const actual = await importOriginal<typeof import("@/features/drive/lib/actions")>()
 	return { ...actual, setFavoritedItems: setFavoritedItemsMock }
-})
-
-vi.mock("@/features/drive/lib/download", async importOriginal => {
-	const actual = await importOriginal<typeof import("@/features/drive/lib/download")>()
-	return { ...actual, startDownloads: startDownloadsMock }
 })
 
 // isFsaAvailable reads `window`, absent entirely under node vitest (a real call would throw) — kept
@@ -59,8 +51,7 @@ import {
 	driveBulkActions,
 	isBulkActionOfflineDisabled,
 	isBulkDownloadEnabled,
-	runBulkFavorite,
-	startBulkDownload
+	runBulkFavorite
 } from "@/features/drive/components/bulkActionBar.logic"
 
 beforeEach(() => {
@@ -469,16 +460,6 @@ describe("isBulkActionOfflineDisabled", () => {
 
 	it("leaves every bulk id enabled while online", () => {
 		expect(everyBulkId.filter(id => isBulkActionOfflineDisabled(id, true))).toEqual([])
-	})
-})
-
-describe("startBulkDownload", () => {
-	it("calls startDownloads with the selection, synchronously (gesture-preserving)", () => {
-		const items = [fileItem()]
-
-		startBulkDownload(items)
-
-		expect(startDownloadsMock).toHaveBeenCalledWith(items)
 	})
 })
 

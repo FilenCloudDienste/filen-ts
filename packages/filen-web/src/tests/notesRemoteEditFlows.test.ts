@@ -29,7 +29,7 @@ const { toast } = vi.hoisted(() => ({ toast: vi.fn() }))
 vi.mock("sonner", () => ({ toast }))
 vi.mock("@/lib/i18n", () => ({ i18n: { t: (key: string) => key } }))
 
-import { hashNoteContent } from "@filen/shared"
+import { buildInflightEntries, hashNoteContent } from "@filen/shared"
 import { queryClient } from "@/queries/client"
 import { ACCOUNT_QUERY_KEY } from "@/queries/account"
 import { NOTES_QUERY_KEY } from "@/features/notes/queries/notes"
@@ -48,7 +48,6 @@ import {
 	tabEditorSynced
 } from "@/features/notes/lib/tabEditors"
 import { rememberNotePush } from "@/features/notes/lib/pushEchoes"
-import { buildInflightEntries } from "@/features/notes/lib/sync.logic"
 import {
 	deriveEditorSeed,
 	deriveSessionBaseHash,

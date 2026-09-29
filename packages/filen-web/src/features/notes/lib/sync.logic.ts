@@ -1,18 +1,7 @@
 import { type } from "arktype"
-import { hashNoteContent, mergeInflight, buildInflightEntries } from "@filen/shared"
+import { mergeInflight } from "@filen/shared"
 import type { Note, NoteType } from "@filen/sdk-rs"
 import type { InflightContent, InflightEntry } from "@/features/notes/store/useNotesInflight"
-
-// The outbox retry classifiers now live in a shared module (chats' send outbox reuses the identical
-// semantics — a byte-identical mechanical move, not a fork). Re-exported here so every existing
-// importer of this module's classifier surface (sync.ts, the notes tests) resolves unchanged.
-export { isNetworkClassError, MAX_NON_RETRYABLE_REJECTIONS } from "@/lib/sdk/retry"
-
-// The outbox's content hash, disk-restore merge and monotonic-timestamp entry builder now live in a
-// shared module (mobile's outbox uses the identical algorithms). Re-exported here so every existing
-// importer of this module's outbox surface (sync.ts, the notes tests, useNoteEditor.logic) resolves
-// unchanged.
-export { hashNoteContent, mergeInflight, buildInflightEntries }
 
 // createNotePreviewFromContentText's `type` argument, derived from the wasm STRING-union noteType —
 // mirrors mobile's `Checklist ? "checklist" : Rich ? "rich" : "other"` mapping exactly.

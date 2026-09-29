@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { CornerUpRightIcon, ClockIcon, AlertCircleIcon, BanIcon } from "lucide-react"
 import type { Chat, ChatMessage, ChatMessagePartial } from "@filen/sdk-rs"
-import { cn, isBlocked, type BlockedUsers } from "@filen/shared"
+import { cn, isBlocked, segmentMessage, type BlockedUsers } from "@filen/shared"
 import { messageSenderName } from "@/features/chats/lib/sort"
 import { useRevealedBlockedMessages } from "@/features/chats/store/useRevealedBlockedMessages"
 import { formatClockTime } from "@/features/chats/lib/time"
@@ -14,7 +14,7 @@ import { MessageActionBar } from "@/features/chats/components/thread/messageActi
 import { useMessageActions } from "@/features/chats/components/thread/useMessageActions"
 import { MessageContent } from "@/features/chats/components/thread/messageContent"
 import { MessageEmbeds } from "@/features/chats/components/thread/messageEmbeds"
-import { extractMessageLinks, embedCandidatesForLinks } from "@/features/chats/lib/embeds.logic"
+import { linksFromSegments, embedCandidatesForLinks } from "@/features/chats/lib/embeds.logic"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { useChatSendState } from "@/features/chats/store/useChatsInflight"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
@@ -85,9 +85,11 @@ export function MessageRow({ chat, message, showHeader, currentUserId, blocked }
 	// The optimistic copy's uuid IS its inflightId, so this read resolves an in-flight/failed own message
 	// to "pending"/"failed" and every confirmed (real-uuid) message to "confirmed".
 	const sendState = useChatSendState(message.uuid)
-	// Pure/sync (no query) — just enough to gate the menu's "Disable embed" entry without waiting on
-	// the async resolution MessageEmbeds itself triggers.
-	const hasEmbeds = !message.embedDisabled && embedCandidatesForLinks(extractMessageLinks(message.message)).length > 0
+	// Tokenized once for both the body and the embeds. Pure/sync (no query), so the menu's "Disable embed"
+	// entry is gated without waiting on the async resolution MessageEmbeds itself triggers.
+	const segments = segmentMessage(message.message)
+	const embedCandidates = message.embedDisabled ? [] : embedCandidatesForLinks(linksFromSegments(segments))
+	const hasEmbeds = embedCandidates.length > 0
 
 	const [confirmingDelete, setConfirmingDelete] = useState(false)
 	const [deletePending, setDeletePending] = useState(false)
@@ -215,14 +217,12 @@ export function MessageRow({ chat, message, showHeader, currentUserId, blocked }
 										<MessageContent
 											chat={chat}
 											text={message.message}
+											segments={segments}
 										/>
 										{message.edited ? (
 											<span className="ml-1 text-[11px] text-muted-foreground">{t("chatMessageEdited")}</span>
 										) : null}
-										<MessageEmbeds
-											text={message.message}
-											embedDisabled={message.embedDisabled}
-										/>
+										<MessageEmbeds candidates={embedCandidates} />
 									</span>
 								)}
 								{sendState === "pending" || sendState === "sending" ? (

@@ -117,7 +117,7 @@ export function HistoryDialog({ note: initialNote, onClose }: HistoryDialogProps
 			return (
 				<Empty className="p-6">
 					<EmptyHeader>
-						<EmptyMedia variant="icon">
+						<EmptyMedia>
 							<HistoryIcon />
 						</EmptyMedia>
 						<EmptyTitle>{t("noteHistoryLoadError")}</EmptyTitle>
@@ -133,7 +133,7 @@ export function HistoryDialog({ note: initialNote, onClose }: HistoryDialogProps
 			return (
 				<Empty className="p-6">
 					<EmptyHeader>
-						<EmptyMedia variant="icon">
+						<EmptyMedia>
 							<HistoryIcon />
 						</EmptyMedia>
 						<EmptyTitle>{t("noteHistoryEmpty")}</EmptyTitle>

@@ -4,7 +4,6 @@ import { toast } from "sonner"
 import { CircleCheckIcon, XIcon } from "lucide-react"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
-import { readMasterKeysFile } from "@/features/auth/components/masterKeysFileField.logic"
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field"
 import { Button } from "@/components/ui/button"
 
@@ -34,9 +33,9 @@ function MasterKeysFileField({ disabled, onChange }: MasterKeysFileFieldProps) {
 			return
 		}
 		try {
-			const result = await readMasterKeysFile(file)
-			setFileName(result.fileName)
-			onChange(result.text)
+			const text = await file.text()
+			setFileName(file.name)
+			onChange(text)
 		} catch (err) {
 			toast.error(errorLabel(asErrorDTO(err)))
 		}

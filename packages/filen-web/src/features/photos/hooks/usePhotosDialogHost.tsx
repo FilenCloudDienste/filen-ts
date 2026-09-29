@@ -9,7 +9,8 @@ import { type PhotoItem } from "@/features/photos/lib/captureSort"
 import { toastBulkOutcome } from "@/features/drive/lib/bulkToast"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { usePhotosStore } from "@/features/photos/store/usePhotosStore"
-import { type PreviewSource, previewSourceKey, stepPreviewSourceIndex } from "@/features/preview/lib/previewSource"
+import { type DriveItem } from "@/features/drive/lib/item"
+import { stepPreviewIndex } from "@/features/drive/lib/preview.logic"
 import { previewProtectedUuid, reconcilePreviewSources, subscribePreviewReconcile } from "@/features/preview/lib/previewReconcile"
 import { PreviewOverlay } from "@/features/preview/components/previewOverlay"
 import { PHOTOS_PREVIEW_HIDDEN_ACTION_IDS } from "@/features/photos/lib/itemActions"
@@ -29,14 +30,10 @@ import { InputDialog } from "@/components/dialogs/inputDialog"
 // its own dedicated openPreview entry point.
 type PhotosDialogKind = "rename" | "copy" | "trash" | "versions" | "info" | "link" | "share" | "preview"
 
-interface ActivePhotosDialog {
-	kind: PhotosDialogKind
-	items: PhotoItem[]
-	// Only meaningful for kind:"preview" — mirrors useDriveDialogHost's identical ActiveDialog fields
-	// (the frozen pager position + snapshot the reconcile subscription below folds events into).
-	index?: number
-	previewSources?: PreviewSource[]
-}
+// The preview arm holds the frozen pager snapshot + position the reconcile subscription below folds
+// events into — a DriveItem[], since a reconciled rename re-narrows its item.
+type ActivePhotosDialog =
+	{ kind: Exclude<PhotosDialogKind, "preview">; items: PhotoItem[] } | { kind: "preview"; items: DriveItem[]; index: number }
 
 // The preview overlay owns its own navigation semantics — same rule and rationale as drive's
 // keepPreviewOpenOnNavigate: its dirty-buffer guard, not the dialog host, decides what a route change
@@ -49,7 +46,7 @@ export interface PhotosDialogHost {
 	isDialogOpen: boolean
 	handleItemAction: (kind: ItemActionDialogKind, item: PhotoItem) => void
 	handleBulkDialogAction: (kind: BulkDialogActionKind) => void
-	openPreview: (sources: PreviewSource[], index: number) => void
+	openPreview: (items: DriveItem[], index: number) => void
 	renderActiveDialog: () => ReactNode
 }
 
@@ -77,11 +74,11 @@ export function usePhotosDialogHost({ rootUuid, selectedItems }: UsePhotosDialog
 	useEffect(() => {
 		return subscribePreviewReconcile(event => {
 			setActiveDialog(prev => {
-				if (prev?.kind !== "preview" || prev.index === undefined || prev.previewSources === undefined) {
+				if (prev?.kind !== "preview") {
 					return prev
 				}
 
-				const state = { sources: prev.previewSources, index: prev.index }
+				const state = { items: prev.items, index: prev.index }
 				const next = reconcilePreviewSources(state, event, previewProtectedUuid(state))
 
 				if (next === null) {
@@ -93,7 +90,7 @@ export function usePhotosDialogHost({ rootUuid, selectedItems }: UsePhotosDialog
 					return prev
 				}
 
-				return { ...prev, previewSources: next.sources, index: next.index }
+				return { ...prev, items: next.items, index: next.index }
 			})
 		})
 	}, [setActiveDialog])
@@ -102,26 +99,26 @@ export function usePhotosDialogHost({ rootUuid, selectedItems }: UsePhotosDialog
 	// the single implementation behind PreviewOverlay's onStep prop.
 	function stepPreview(delta: 1 | -1): void {
 		setActiveDialog(prev => {
-			if (prev?.kind !== "preview" || prev.index === undefined || prev.previewSources === undefined) {
+			if (prev?.kind !== "preview") {
 				return prev
 			}
 
-			const current = prev.previewSources[prev.index]
+			const current = prev.items[prev.index]
 
 			if (!current) {
 				return prev
 			}
 
-			return { ...prev, index: stepPreviewSourceIndex(previewSourceKey(current), prev.previewSources, delta) }
+			return { ...prev, index: stepPreviewIndex(current.data.uuid, prev.items, delta) }
 		})
 	}
 
-	// Opens the preview overlay for a frozen source snapshot at the given position — called from the
-	// grid's own tile click handler with drivePreviewSources(items) (the whole sorted media set), never
+	// Opens the preview overlay for a frozen item snapshot at the given position — called from the
+	// grid's own tile click handler with the whole sorted media set, never
 	// scoped to a smaller sibling list the way drive's audio-exclusion dance needs (a photos listing is
 	// already image/video-only by construction).
-	function openPreview(sources: PreviewSource[], index: number): void {
-		setActiveDialog({ kind: "preview", items: [], index, previewSources: sources })
+	function openPreview(items: DriveItem[], index: number): void {
+		setActiveDialog({ kind: "preview", items, index })
 	}
 
 	// Drops the acted-on slot out of the frozen pager snapshot — mirrors useDriveDialogHost's identical
@@ -131,17 +128,17 @@ export function usePhotosDialogHost({ rootUuid, selectedItems }: UsePhotosDialog
 	// converging, the same uuid-keyed race-proofing the drive host's own doc comment explains.
 	function removeCurrentPreviewItem(frozenUuid: string): void {
 		setActiveDialog(prev => {
-			if (prev?.kind !== "preview" || prev.index === undefined || prev.previewSources === undefined) {
+			if (prev?.kind !== "preview") {
 				return prev
 			}
 
-			const next = reconcilePreviewSources({ sources: prev.previewSources, index: prev.index }, { type: "removed", uuid: frozenUuid })
+			const next = reconcilePreviewSources({ items: prev.items, index: prev.index }, { type: "removed", uuid: frozenUuid })
 
 			if (next === null) {
 				return null
 			}
 
-			return { ...prev, previewSources: next.sources, index: next.index }
+			return { ...prev, items: next.items, index: next.index }
 		})
 	}
 
@@ -314,14 +311,7 @@ export function usePhotosDialogHost({ rootUuid, selectedItems }: UsePhotosDialog
 						}}
 					/>
 				) : null
-			case "preview": {
-				const previewIndex = activeDialog.index
-				const previewSources = activeDialog.previewSources
-
-				if (previewIndex === undefined || previewSources === undefined) {
-					return null
-				}
-
+			case "preview":
 				return (
 					<PreviewOverlay
 						// A photos item is always an owned, non-trashed file under the user's own drive — the
@@ -329,8 +319,8 @@ export function usePhotosDialogHost({ rootUuid, selectedItems }: UsePhotosDialog
 						// is exactly right here too (see PreviewOverlayProps' own doc comment: the overlay is
 						// reused entirely as shipped, no photos-specific variant).
 						variant="drive"
-						items={previewSources}
-						index={previewIndex}
+						items={activeDialog.items}
+						index={activeDialog.index}
 						onStep={stepPreview}
 						onClose={closeActiveDialog}
 						onItemRemoved={removeCurrentPreviewItem}
@@ -340,7 +330,6 @@ export function usePhotosDialogHost({ rootUuid, selectedItems }: UsePhotosDialog
 						hiddenMenuActionIds={PHOTOS_PREVIEW_HIDDEN_ACTION_IDS}
 					/>
 				)
-			}
 		}
 	}
 

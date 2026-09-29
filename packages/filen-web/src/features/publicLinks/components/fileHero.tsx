@@ -1,7 +1,8 @@
-import { useState, type ReactNode } from "react"
+import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import { formatBytes, driveItemName } from "@filen/shared"
 import { ArrowLeftIcon, DownloadIcon, EyeIcon, EyeOffIcon } from "lucide-react"
+import type { AnyItemWithContext } from "@filen/sdk-rs"
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import { narrowToAnyFile } from "@/features/drive/lib/download"
 import { ItemIcon } from "@/features/drive/components/itemIcon"
@@ -14,6 +15,7 @@ import { errorLabel } from "@/lib/i18n/errorLabel"
 import { anonPreviewability } from "@/features/publicLinks/lib/download.logic"
 import { startAnonFileDownload } from "@/features/publicLinks/lib/download"
 import { PublicPreview } from "@/features/publicLinks/components/publicPreview"
+import { SaveToDriveButton } from "@/features/publicLinks/components/saveToDrive"
 
 type DownloadUiState =
 	| { status: "idle" }
@@ -34,15 +36,14 @@ export function FileHero({
 	downloadEnabled,
 	linkScope,
 	onBack,
-	saveAction
+	saveItem
 }: {
 	item: DriveItem
 	downloadEnabled: boolean
 	linkScope: string
 	onBack?: () => void
-	// "Save to Cloud Drive" for a signed-in visitor: the full button for the hero, the compact one for
-	// the preview bar.
-	saveAction?: { hero: ReactNode; bar: ReactNode } | undefined
+	// Offers "Save to Cloud Drive" when present (a signed-in visitor on a saveable link).
+	saveItem?: AnyItemWithContext | undefined
 }) {
 	const { t } = useTranslation("publicLinks")
 	const base = asDirectoryOrFile(item)
@@ -129,7 +130,14 @@ export function FileHero({
 						<EyeOffIcon data-icon="inline-start" />
 						<span className="hidden sm:inline">{t("hidePreview")}</span>
 					</Button>
-					{saveAction?.bar}
+					{saveItem !== undefined && (
+						<SaveToDriveButton
+							item={saveItem}
+							name={name}
+							glyph="file"
+							compact
+						/>
+					)}
 					{downloadEnabled && (
 						<Button
 							variant="outline"
@@ -175,7 +183,13 @@ export function FileHero({
 
 				<div className="flex flex-wrap items-center justify-center gap-2">
 					{downloadButton}
-					{saveAction?.hero}
+					{saveItem !== undefined && (
+						<SaveToDriveButton
+							item={saveItem}
+							name={name}
+							glyph="file"
+						/>
+					)}
 					{previewability === "previewable" && (
 						<Button
 							variant="outline"

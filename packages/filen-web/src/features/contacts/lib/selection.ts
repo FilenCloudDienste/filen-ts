@@ -45,10 +45,6 @@ export const EMPTY_CONTACT_SELECTION_STATE: ContactSelectionState = Object.freez
 	anchor: null
 })
 
-export function contactSelectionSize(selection: ContactSelection): number {
-	return selection.requests.size + selection.pending.size + selection.contacts.size + selection.blocked.size
-}
-
 // The account's four unfiltered record sets, keyed the way the selection is.
 export interface ContactRecords {
 	requests: readonly ContactRequestIn[]

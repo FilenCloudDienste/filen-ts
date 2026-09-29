@@ -5,7 +5,6 @@ import { aggregateDriveSelectionFlags, type DriveSelectionFlags } from "@/featur
 import { canShareVariant, isReadOnlySharedVariant } from "@/features/drive/lib/share/gating"
 import { type DriveKey } from "@/lib/i18n"
 import { type DriveItem } from "@/features/drive/lib/item"
-import { startDownloads } from "@/features/drive/lib/download"
 import { setFavoritedItems } from "@/features/drive/lib/actions"
 import { toastBulkOutcome } from "@/features/drive/lib/bulkToast"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
@@ -147,17 +146,9 @@ export function isBulkActionOfflineDisabled(id: BulkActionDescriptor["id"], isOn
 	return !isOnline && OFFLINE_GATED_BULK_IDS.has(id)
 }
 
-// Download's "direct" action needs no await before it — startDownloads' FSA save picker requires the
-// click's own live user gesture (see features/drive/lib/download.ts). This is the unit-testable seam
-// proving the wiring: bulkActionBar.tsx calls it synchronously off the click, never `await`ed.
-export function startBulkDownload(items: DriveItem[]): void {
-	void startDownloads(items)
-}
-
 // The bulk favorite SET, extracted so the floating bar AND the selection-aware context menu
-// (components/bulkMenu.tsx) can never drift on what "Favorite" does to a whole selection — mirrors
-// startBulkDownload's own extraction rationale above. A succeeded item is pruned from the selection,
-// a failed one stays selected so the user can retry.
+// (components/bulkMenu.tsx) can never drift on what "Favorite" does to a whole selection. A succeeded
+// item is pruned from the selection, a failed one stays selected so the user can retry.
 export async function runBulkFavorite(items: DriveItem[]): Promise<void> {
 	const outcome = await setFavoritedItems(items, !aggregateDriveSelectionFlags(items).includesFavorited)
 	toastBulkOutcome(outcome)

@@ -2,7 +2,6 @@ import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { WifiOffIcon, WifiIcon } from "lucide-react"
 import { useIsOnline } from "@/lib/useIsOnline"
-import { nextOfflineStatus, toIndicatorStatus } from "@/features/shell/lib/offlineIndicator.logic"
 import { cn } from "@filen/shared"
 
 const BACK_ONLINE_DURATION_MS = 2000
@@ -14,39 +13,39 @@ const BACK_ONLINE_DURATION_MS = 2000
 export function OfflineIndicator() {
 	const { t } = useTranslation()
 	const isOnline = useIsOnline()
-	const [status, setStatus] = useState<"online" | "offline" | "back-online">(isOnline ? "online" : "offline")
+	// Offline is exactly `!isOnline`; only the transient "back online" confirmation needs state.
+	const [backOnline, setBackOnline] = useState(false)
 	const [prevIsOnline, setPrevIsOnline] = useState(isOnline)
 
 	// During-render adjustment (React-recommended over setState-in-effect) so the new status commits
-	// in the same pass with no intermediate paint; the guard fires it once per actual flip.
+	// in the same pass with no intermediate paint; the guard fires it once per actual flip. A drop
+	// clears the confirmation so the decay below restarts on the next return.
 	if (isOnline !== prevIsOnline) {
 		setPrevIsOnline(isOnline)
-		setStatus(prev => nextOfflineStatus(prev, isOnline))
+		setBackOnline(isOnline)
 	}
 
-	// "back-online" is transient — decay to "online" (which renders nothing) after the confirmation
-	// window. Cleanup cancels the timer if connectivity drops again before it elapses.
+	// The confirmation decays (rendering nothing) after its window. Cleanup cancels the timer if
+	// connectivity drops again before it elapses.
 	useEffect(() => {
-		if (status !== "back-online") {
+		if (!backOnline) {
 			return
 		}
 
 		const timeout = setTimeout(() => {
-			setStatus("online")
+			setBackOnline(false)
 		}, BACK_ONLINE_DURATION_MS)
 
 		return () => {
 			clearTimeout(timeout)
 		}
-	}, [status])
+	}, [backOnline])
 
-	const indicatorStatus = toIndicatorStatus(status)
-
-	if (indicatorStatus === "hidden") {
+	if (isOnline && !backOnline) {
 		return null
 	}
 
-	const offline = indicatorStatus === "offline"
+	const offline = !isOnline
 
 	return (
 		<div

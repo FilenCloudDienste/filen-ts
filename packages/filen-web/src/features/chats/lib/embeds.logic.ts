@@ -1,14 +1,13 @@
 import { parsePublicLink } from "@/features/publicLinks/lib/format.logic"
-import { segmentMessage } from "@filen/shared"
+import type { MessageSegment } from "@filen/shared"
 import { hardenLinkHref } from "@/features/chats/lib/regexed.logic"
 
-// The ONE link-extraction path every embed-aware call site shares (MessageEmbeds' own render, the
-// message-menu's "has an embed to disable" gate) — reuses chatMessageSegments's already-tokenized
-// "link" segments rather than re-scanning the raw text with a second regex pass. A segment's raw match
-// is hardened here (never validated upstream any more), and a rejected one is dropped — no plain-text
+// The ONE link-extraction path (MessageRow derives the row's embeds from it once) — reads the row's
+// already-tokenized "link" segments rather than re-scanning the raw text. A segment's raw match is
+// hardened here (never validated upstream any more), and a rejected one is dropped — no plain-text
 // fallback makes sense for an embed-link list.
-export function extractMessageLinks(text: string | undefined): string[] {
-	return segmentMessage(text)
+export function linksFromSegments(segments: readonly MessageSegment[]): string[] {
+	return segments
 		.filter((segment): segment is Extract<typeof segment, { kind: "link" }> => segment.kind === "link")
 		.map(segment => hardenLinkHref(segment.raw))
 		.filter((href): href is string => href !== null)
@@ -57,7 +56,7 @@ export interface EmbedCandidate {
 export const MAX_MESSAGE_EMBEDS = 6
 
 // Every UNIQUE, in-scope embed candidate for a message's link segments, capped and order-preserving
-// (first occurrence wins on a repeated URL). Pure — callers feed it the urls extractMessageLinks
+// (first occurrence wins on a repeated URL). Pure — callers feed it the urls linksFromSegments
 // already extracted and hardened, so this never re-implements url extraction or hardening.
 export function embedCandidatesForLinks(urls: readonly string[]): EmbedCandidate[] {
 	const seen = new Set<string>()

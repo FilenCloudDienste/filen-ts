@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest"
 import type { Note, NoteHistory, NoteParticipant, NoteTag, UuidStr } from "@filen/sdk-rs"
 import {
 	filterNotesBySearch,
-	filterNoteTagsBySearch,
 	isNoteOwner,
 	isNoteUndecryptable,
 	isTagUndecryptable,
@@ -337,17 +336,13 @@ describe("sortAndFilterNotes", () => {
 
 		expect(sortAndFilterNotes([b, a]).map(n => n.title)).toEqual(["a", "b"])
 	})
-})
 
-describe("filterNoteTagsBySearch", () => {
-	const tags = [mockNoteTag({ uuid: testUuid("a"), name: "Personal" }), mockNoteTag({ uuid: testUuid("b"), name: "Work" })]
+	it("narrows by full body via the bodies map when neither title nor preview matches", () => {
+		const note = mockNote({ uuid: testUuid("body-only"), title: "gamma", preview: "preview" })
+		const bodies = new Map([[note.uuid, "a term buried deep in the note body"]])
 
-	it("returns every tag unchanged for an empty query", () => {
-		expect(filterNoteTagsBySearch(tags, "")).toEqual(tags)
-	})
-
-	it("matches case-insensitively against the tag name", () => {
-		expect(filterNoteTagsBySearch(tags, "work").map(t => t.name)).toEqual(["Work"])
+		expect(sortAndFilterNotes([note], "buried", bodies).map(n => n.uuid)).toStrictEqual([note.uuid])
+		expect(sortAndFilterNotes([note], "buried")).toHaveLength(0)
 	})
 })
 

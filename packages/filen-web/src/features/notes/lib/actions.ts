@@ -9,7 +9,6 @@ import { noteContentQueryKey, readNoteContent } from "@/features/notes/queries/n
 import { localNoteContent } from "@/features/notes/lib/localContent"
 import { recordNotePush } from "@/features/notes/lib/pushEchoes"
 import { isNoteOwner } from "@/features/notes/lib/sort"
-import { getDefaultNoteType, DEFAULT_NOTE_TYPE } from "@/features/notes/lib/preferences"
 import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
 import { runOp, type ActionOutcome, type VoidActionOutcome } from "@/lib/actions/outcome"
 
@@ -36,21 +35,13 @@ function ownerGateError(): ActionOutcome<Note> {
 
 // ── Create ───────────────────────────────────────────────────────────────
 
-// The SDK creates a note as "text" by default, then a second setNoteType call applies the persisted
-// preference only when it differs — no type-picker dialog on create, matching both
-// mobile and old-web. `title` is optional (an empty sidebar "New note" click) — the SDK assigns its own
-// default title when omitted.
-export async function createNote(title?: string): Promise<ActionOutcome<Note>> {
+// The SDK creates a "text" note with its own default title — no type-picker dialog on create, matching
+// both mobile and old-web.
+export async function createNote(): Promise<ActionOutcome<Note>> {
 	let note: Note
 
 	try {
-		note = await runOp(sdkApi.createNote(title))
-
-		const preferredType = await getDefaultNoteType()
-
-		if (preferredType !== DEFAULT_NOTE_TYPE) {
-			note = await retypeNewNote(note, preferredType)
-		}
+		note = await runOp(sdkApi.createNote())
 	} catch (e) {
 		return { status: "error", dto: asErrorDTO(e) }
 	}

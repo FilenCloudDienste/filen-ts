@@ -33,7 +33,3 @@ export function isNoteDebrisTitle(title: string): boolean {
 export function isTagDebrisName(name: string): boolean {
 	return TAG_DEBRIS_NAME_PREFIXES.some(prefix => name.startsWith(prefix))
 }
-
-export function isChatDebrisName(name: string): boolean {
-	return CHAT_DEBRIS_NAME_PREFIXES.some(prefix => name.startsWith(prefix))
-}

@@ -19,8 +19,8 @@ import { type ExtraData, type ShareIdentity, shareIdentityFromRole } from "@file
 // cares about the base item can treat a shared-directory like a directory and a shared-file like a
 // file with no per-arm branching (see asDirectoryOrFile). `sharingRole` is the OTHER party's role
 // (see getSharerIdentity): required on every arm that natively carries one, optional on the nested
-// sharedDirectory (a SharedDir has no own role — the fetcher spreads the parent's onto it, and a
-// path that rebuilds one without the spread relies on the resolver fallback instead).
+// sharedDirectory (a SharedDir has no own role — the fetcher spreads the parent's onto it; a path
+// that rebuilds one without the spread leaves it unresolved).
 //
 // Three of the four shared arms additionally retain the untouched wasm value they were flattened
 // from, as `shareSource` — each for its own consumer. The two ROOT arms (sharedRootDirectory/
@@ -253,7 +253,7 @@ export function linkedFileIntoDriveItem(file: LinkedFile): DriveItem {
 // the two DriveItem arms that legitimately self-parent for their own reasons (sharedRootFile,
 // sharedRootDirectory — see narrowFile/narrowDir's own comments) tag as a DIFFERENT `.type`, so this
 // stays unique to the chat/note-embed adapter's own output. Gates destructive drive actions (rename/
-// move/trash/share/versions — previewOverlay.logic.ts's previewMenuVisible) out of a preview opened
+// move/trash/share/versions — the preview overlay's header menu) out of a preview opened
 // from an embed: the item is neither owned nor a real tree member, so a mutation attempted against it
 // would at best error against the backend and at worst act on a same-uuid file the viewer happens to
 // also own — never a case this app should surface UI for.
@@ -328,27 +328,19 @@ export function narrowToSdkItems(items: readonly DriveItem[]): (AnyFile | AnyDir
 
 // Resolves the OTHER party's identity for a shared item (in the sharedIn context, the sharer). The
 // root and file arms carry the role directly; a nested sharedDirectory reads its spread `sharingRole`
-// and falls back to `resolveNestedRole` (the block filter injects a resolver over its own shared-dir
-// context — a SharedDir has no native role) when the spread is absent. A non-shared arm, or a role
-// no known shape can be read from, resolves to null. The dual-surface unwrap itself (uniffi `.inner`
+// (a SharedDir has no native role). A non-shared arm, a nested directory without the spread, or a
+// role no known shape can be read from, resolves to null. The dual-surface unwrap itself (uniffi `.inner`
 // vs wasm `.Sharer`/`.Receiver`) lives in shareIdentityFromRole (@filen/shared).
-export function getSharerIdentity(item: DriveItem, resolveNestedRole?: (uuid: string) => SharingRole | undefined): ShareIdentity | null {
-	let role: SharingRole | undefined
-
+export function getSharerIdentity(item: DriveItem): ShareIdentity | null {
 	switch (item.type) {
 		case "sharedRootFile":
 		case "sharedFile":
 		case "sharedRootDirectory":
-			role = item.data.sharingRole
-			break
 		case "sharedDirectory":
-			role = item.data.sharingRole ?? resolveNestedRole?.(item.data.uuid)
-			break
+			return shareIdentityFromRole(item.data.sharingRole)
 		default:
 			return null
 	}
-
-	return shareIdentityFromRole(role)
 }
 
 // Insert an incoming item into a cached listing, replacing (never duplicating) whatever row it collides

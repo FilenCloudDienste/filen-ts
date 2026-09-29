@@ -37,7 +37,7 @@ export function PlaylistsScreen({ selectedUuid }: { selectedUuid: string | undef
 				// None exist, or every one is degraded (those still list, muted, in the sidebar).
 				<Empty className="flex-1 border-none p-10">
 					<EmptyHeader>
-						<EmptyMedia variant="icon">
+						<EmptyMedia>
 							<ListMusicIcon />
 						</EmptyMedia>
 						<EmptyTitle>{t("playlistsEmptyTitle")}</EmptyTitle>

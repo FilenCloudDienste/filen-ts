@@ -13,7 +13,7 @@ import {
 	deriveSessionBaseHash,
 	reducePersistFailureNotice
 } from "@/features/notes/hooks/useNoteEditor.logic"
-import { hashNoteContent } from "@/features/notes/lib/sync.logic"
+import { hashNoteContent } from "@filen/shared"
 
 // Same mockNote shape as notesSort.test.ts / notesReaderLogic.test.ts.
 function mockNote(overrides: Partial<Note> = {}): Note {

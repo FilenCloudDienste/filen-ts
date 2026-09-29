@@ -288,27 +288,27 @@ describe("needsImageTransform", () => {
 
 describe("canPreview", () => {
 	it("is true for a decryptable, in-range file", () => {
-		expect(canPreview(fileNamed("photo.jpg"), "drive")).toBe(true)
+		expect(canPreview(fileNamed("photo.jpg"))).toBe(true)
 	})
 
 	it("is false for a directory", () => {
-		expect(canPreview(dirItem(), "drive")).toBe(false)
+		expect(canPreview(dirItem())).toBe(false)
 	})
 
 	it("is false for an undecryptable file", () => {
-		expect(canPreview(fileNamed("photo.jpg", { undecryptable: true }), "drive")).toBe(false)
+		expect(canPreview(fileNamed("photo.jpg", { undecryptable: true }))).toBe(false)
 	})
 
 	it("is false for an 'other' category — no viewer exists, ever", () => {
-		expect(canPreview(fileNamed("archive.zip"), "drive")).toBe(false)
+		expect(canPreview(fileNamed("archive.zip"))).toBe(false)
 	})
 
 	it("is false for a whole-buffer-only category over the size cap", () => {
-		expect(canPreview(fileNamed("doc.pdf", { size: PREVIEW_MAX_BYTES + 1n }), "drive")).toBe(false)
+		expect(canPreview(fileNamed("doc.pdf", { size: PREVIEW_MAX_BYTES + 1n }))).toBe(false)
 	})
 
 	it("is true for a whole-buffer-only category exactly at the size cap", () => {
-		expect(canPreview(fileNamed("doc.pdf", { size: PREVIEW_MAX_BYTES }), "drive")).toBe(true)
+		expect(canPreview(fileNamed("doc.pdf", { size: PREVIEW_MAX_BYTES }))).toBe(true)
 	})
 
 	// text/code/markdown are whole-buffer categories too (never in STREAMED_CATEGORIES) — same cap
@@ -319,7 +319,7 @@ describe("canPreview", () => {
 		["script.ts", "code"],
 		["readme.md", "markdown"]
 	])("is false for a %s (%s) over the size cap", name => {
-		expect(canPreview(fileNamed(name, { size: PREVIEW_MAX_BYTES + 1n }), "drive")).toBe(false)
+		expect(canPreview(fileNamed(name, { size: PREVIEW_MAX_BYTES + 1n }))).toBe(false)
 	})
 
 	it.each([
@@ -327,45 +327,35 @@ describe("canPreview", () => {
 		["script.ts", "code"],
 		["readme.md", "markdown"]
 	])("is true for a %s (%s) exactly at the size cap", name => {
-		expect(canPreview(fileNamed(name, { size: PREVIEW_MAX_BYTES }), "drive")).toBe(true)
+		expect(canPreview(fileNamed(name, { size: PREVIEW_MAX_BYTES }))).toBe(true)
 	})
 
 	it("is true for a streamed category (video/audio/image) even past the whole-buffer size cap — uncapped", () => {
-		expect(canPreview(fileNamed("movie.mp4", { size: PREVIEW_MAX_BYTES + 1n }), "drive")).toBe(true)
-		expect(canPreview(fileNamed("song.mp3", { size: PREVIEW_MAX_BYTES + 1n }), "drive")).toBe(true)
-		expect(canPreview(fileNamed("photo.jpg", { size: PREVIEW_MAX_BYTES + 1n }), "drive")).toBe(true)
+		expect(canPreview(fileNamed("movie.mp4", { size: PREVIEW_MAX_BYTES + 1n }))).toBe(true)
+		expect(canPreview(fileNamed("song.mp3", { size: PREVIEW_MAX_BYTES + 1n }))).toBe(true)
+		expect(canPreview(fileNamed("photo.jpg", { size: PREVIEW_MAX_BYTES + 1n }))).toBe(true)
 	})
 
 	// HEIC/HEIF are category "image" (a STREAMED_CATEGORIES member) but never actually stream
 	// (needsImageTransform) — canPreview must apply the whole-buffer cap to them like pdf/docx, not the
 	// uncapped rule above.
 	it("is false for a HEIC file over the size cap — buffered, not streamed, despite being 'image'", () => {
-		expect(canPreview(fileNamed("photo.heic", { size: PREVIEW_MAX_BYTES + 1n }), "drive")).toBe(false)
+		expect(canPreview(fileNamed("photo.heic", { size: PREVIEW_MAX_BYTES + 1n }))).toBe(false)
 	})
 
 	it("is true for a HEIC file at or under the size cap", () => {
-		expect(canPreview(fileNamed("photo.heic", { size: PREVIEW_MAX_BYTES }), "drive")).toBe(true)
+		expect(canPreview(fileNamed("photo.heic", { size: PREVIEW_MAX_BYTES }))).toBe(true)
 	})
 
 	// rawImage is uncapped for the opposite reason to a streamed category: it is not streamed to the
 	// page at all — the SDK reads whatever ranges it needs inside wasm, so the file never enters JS
 	// memory and there is nothing for PREVIEW_MAX_BYTES to protect.
 	it("is true for a RAW file far past the whole-buffer size cap — the bytes never enter JS memory", () => {
-		expect(canPreview(fileNamed("shot.nef", { size: PREVIEW_MAX_BYTES * 4n }), "drive")).toBe(true)
+		expect(canPreview(fileNamed("shot.nef", { size: PREVIEW_MAX_BYTES * 4n }))).toBe(true)
 	})
 
 	it("is still false for an undecryptable RAW file", () => {
-		expect(canPreview(fileNamed("shot.nef", { undecryptable: true }), "drive")).toBe(false)
-	})
-
-	it("does NOT exclude trash — a trashed file still previews, read-only, mirroring mobile", () => {
-		expect(canPreview(fileNamed("photo.jpg"), "trash")).toBe(true)
-	})
-
-	it("does NOT exclude any other variant either — the base gate is variant-agnostic", () => {
-		for (const variant of ["drive", "recents", "favorites", "trash", "sharedIn", "sharedOut"] as const) {
-			expect(canPreview(fileNamed("photo.jpg"), variant)).toBe(true)
-		}
+		expect(canPreview(fileNamed("shot.nef", { undecryptable: true }))).toBe(false)
 	})
 })
 
@@ -394,18 +384,18 @@ describe("previewableSiblings", () => {
 		const c = fileNamed("c.zip")
 		const d = fileNamed("d.png")
 
-		expect(previewableSiblings([a, b, c, d], "drive")).toEqual([a, d])
+		expect(previewableSiblings([a, b, c, d])).toEqual([a, d])
 	})
 
 	it("returns an empty array when nothing is previewable", () => {
-		expect(previewableSiblings([dirItem(), fileNamed("a.zip")], "drive")).toEqual([])
+		expect(previewableSiblings([dirItem(), fileNamed("a.zip")])).toEqual([])
 	})
 
 	it("returns every item when all are previewable", () => {
 		const a = fileNamed("a.jpg")
 		const b = fileNamed("b.png")
 
-		expect(previewableSiblings([a, b], "drive")).toEqual([a, b])
+		expect(previewableSiblings([a, b])).toEqual([a, b])
 	})
 
 	// Audio is deliberately excluded from the pager: a drive-hosted audio file hands off to the
@@ -416,7 +406,7 @@ describe("previewableSiblings", () => {
 		const song = fileNamed("track.mp3", { mime: "audio/mpeg" })
 		const pdf = fileNamed("doc.pdf")
 
-		const siblings = previewableSiblings([image, song, pdf], "drive")
+		const siblings = previewableSiblings([image, song, pdf])
 
 		expect(siblings).toEqual([image, pdf])
 		expect(siblings).toHaveLength(2)
@@ -426,7 +416,7 @@ describe("previewableSiblings", () => {
 		const one = fileNamed("one.mp3", { mime: "audio/mpeg" })
 		const two = fileNamed("two.flac", { mime: "audio/flac" })
 
-		expect(previewableSiblings([one, two], "drive")).toEqual([])
+		expect(previewableSiblings([one, two])).toEqual([])
 	})
 })
 
@@ -481,7 +471,7 @@ describe("pager windowing stays cheap over a very large directory", () => {
 
 	it("previewableSiblings filters without cloning — surviving entries stay the SAME object references", () => {
 		const raw = buildLargeSiblingSet()
-		const siblings = previewableSiblings(raw, "drive")
+		const siblings = previewableSiblings(raw)
 
 		expect(siblings).toHaveLength(SIBLING_COUNT / 2)
 
@@ -494,7 +484,7 @@ describe("pager windowing stays cheap over a very large directory", () => {
 	})
 
 	it("stepPreviewIndex is a synchronous, plain-number derivation — never an awaitable/IO-shaped result", () => {
-		const siblings = previewableSiblings(buildLargeSiblingSet(), "drive")
+		const siblings = previewableSiblings(buildLargeSiblingSet())
 		const middle = siblings[Math.floor(siblings.length / 2)]
 
 		if (!middle) {
@@ -510,7 +500,7 @@ describe("pager windowing stays cheap over a very large directory", () => {
 	})
 
 	it("resolves the correct index from any position across the full sibling range, forward and back", () => {
-		const siblings = previewableSiblings(buildLargeSiblingSet(), "drive")
+		const siblings = previewableSiblings(buildLargeSiblingSet())
 		const last = siblings.length - 1
 		const checkpoints = [0, 1, Math.floor(siblings.length / 2), last - 1, last]
 
@@ -527,7 +517,7 @@ describe("pager windowing stays cheap over a very large directory", () => {
 	})
 
 	it("a long run of consecutive steps across the whole set lands on the same items the array already holds", () => {
-		const siblings = previewableSiblings(buildLargeSiblingSet(), "drive")
+		const siblings = previewableSiblings(buildLargeSiblingSet())
 		let index = 0
 
 		// Walks every slot forward, then all the way back — each step re-derives its target purely from
@@ -606,7 +596,7 @@ describe("decodeUtf8", () => {
 })
 
 describe("codeMirrorLanguageFor — extension to CodeMirror language tag", () => {
-	// The full code-extension set (previewType's own CODE_EXTENSIONS) mapped to the tag
+	// The full code-extension set (CODE_FILE_EXTENSIONS) mapped to the tag
 	// textViewer.tsx's own loader switches on, or "" when no CodeMirror grammar is wired for it (still
 	// a fully usable read-only plain-text view, just unhighlighted).
 	const EXPECTED: Record<string, string> = {

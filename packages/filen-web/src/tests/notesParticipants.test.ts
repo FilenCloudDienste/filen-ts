@@ -84,7 +84,7 @@ describe("addNoteParticipants — sequential ordering", () => {
 		const note = mockNote({ participants: [existing] })
 		const contact = mockContact({ userId: 5n })
 
-		const outcome = await addNoteParticipants(note, [contact], true)
+		const outcome = await addNoteParticipants(note, [contact])
 
 		expect(outcome).toEqual({ status: "success", item: note })
 		expect(addNoteParticipantOp).not.toHaveBeenCalled()
@@ -103,7 +103,7 @@ describe("addNoteParticipants — sequential ordering", () => {
 		addNoteParticipantOp.mockResolvedValueOnce(afterA)
 		addNoteParticipantOp.mockResolvedValueOnce(afterB)
 
-		const outcome = await addNoteParticipants(note, [contactA, contactB], true)
+		const outcome = await addNoteParticipants(note, [contactA, contactB])
 
 		// Call 1: the ORIGINAL note. Call 2: call 1's OWN result, not the original — proves the loop
 		// threads state forward instead of each add starting from the same stale base (mobile's own
@@ -123,7 +123,7 @@ describe("addNoteParticipants — sequential ordering", () => {
 
 		addNoteParticipantOp.mockResolvedValueOnce(afterFresh)
 
-		const outcome = await addNoteParticipants(note, [already, fresh], true)
+		const outcome = await addNoteParticipants(note, [already, fresh])
 
 		expect(addNoteParticipantOp).toHaveBeenCalledExactlyOnceWith(note, fresh, true)
 		expect(outcome).toEqual({ status: "success", item: afterFresh })
@@ -134,7 +134,7 @@ describe("addNoteParticipants — sequential ordering", () => {
 		testQueryClient.setQueryData(NOTES_QUERY_KEY, [note])
 		addNoteParticipantOp.mockRejectedValueOnce(new Error("fail"))
 
-		const outcome = await addNoteParticipants(note, [mockContact()], true)
+		const outcome = await addNoteParticipants(note, [mockContact()])
 
 		expect(outcome.status).toBe("error")
 		expect(notesQueryGet()).toEqual([note])

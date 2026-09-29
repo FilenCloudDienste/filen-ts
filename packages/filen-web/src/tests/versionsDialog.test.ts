@@ -2,12 +2,7 @@ import { describe, expect, it } from "vitest"
 import type { File, FileVersion, UuidStr } from "@filen/sdk-rs"
 import { narrowItem } from "@/features/drive/lib/item"
 import type { FileItem } from "@/features/drive/lib/actions"
-import {
-	hasNoPreviousVersions,
-	isCurrentVersion,
-	isEverySelected,
-	nonCurrentVersions
-} from "@/features/drive/components/versionsDialog.logic"
+import { isCurrentVersion, nonCurrentVersions } from "@/features/drive/components/versionsDialog.logic"
 
 // UuidStr is a template-literal brand requiring at least 3 dashes (see @filen/sdk-rs) — pad a short
 // readable test label into a shape that satisfies it, mirroring actions.test.ts's own fixture.
@@ -76,26 +71,6 @@ describe("isCurrentVersion", () => {
 	})
 })
 
-describe("hasNoPreviousVersions", () => {
-	it("is true when the only version present is the current (live) one", () => {
-		const file = fileItem({ uuid: testUuid("same") })
-		const version = mockVersion({ uuid: testUuid("same") })
-		expect(hasNoPreviousVersions([version], file)).toBe(true)
-	})
-
-	it("is true for an empty list (defensive — the SDK is not expected to ever return this)", () => {
-		const file = fileItem()
-		expect(hasNoPreviousVersions([], file)).toBe(true)
-	})
-
-	it("is false once at least one historical version sits alongside the current one", () => {
-		const file = fileItem({ uuid: testUuid("current") })
-		const current = mockVersion({ uuid: testUuid("current") })
-		const older = mockVersion({ uuid: testUuid("older") })
-		expect(hasNoPreviousVersions([current, older], file)).toBe(false)
-	})
-})
-
 describe("nonCurrentVersions", () => {
 	it("excludes the live version, keeping every historical one", () => {
 		const file = fileItem({ uuid: testUuid("current") })
@@ -111,37 +86,5 @@ describe("nonCurrentVersions", () => {
 		const version = mockVersion({ uuid: testUuid("same") })
 
 		expect(nonCurrentVersions([version], file)).toEqual([])
-	})
-})
-
-describe("isEverySelected", () => {
-	it("is false for an empty selection, even with candidates present", () => {
-		const file = fileItem({ uuid: testUuid("current") })
-		const older = mockVersion({ uuid: testUuid("older") })
-
-		expect(isEverySelected(new Set(), [older], file)).toBe(false)
-	})
-
-	it("is false when only SOME candidates are selected", () => {
-		const file = fileItem({ uuid: testUuid("current") })
-		const a = mockVersion({ uuid: testUuid("a") })
-		const b = mockVersion({ uuid: testUuid("b") })
-
-		expect(isEverySelected(new Set([testUuid("a")]), [a, b], file)).toBe(false)
-	})
-
-	it("is true once every non-current candidate's uuid is selected", () => {
-		const file = fileItem({ uuid: testUuid("current") })
-		const a = mockVersion({ uuid: testUuid("a") })
-		const b = mockVersion({ uuid: testUuid("b") })
-
-		expect(isEverySelected(new Set([testUuid("a"), testUuid("b")]), [a, b], file)).toBe(true)
-	})
-
-	it("is false when there are no candidates to select at all (never vacuously true)", () => {
-		const file = fileItem({ uuid: testUuid("same") })
-		const version = mockVersion({ uuid: testUuid("same") })
-
-		expect(isEverySelected(new Set(), [version], file)).toBe(false)
 	})
 })

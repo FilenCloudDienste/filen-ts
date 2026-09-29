@@ -56,7 +56,7 @@ function BillingPage() {
 			) : accountQuery.status === "error" ? (
 				<Empty>
 					<EmptyHeader>
-						<EmptyMedia variant="icon">
+						<EmptyMedia>
 							<CreditCardIcon />
 						</EmptyMedia>
 						<EmptyTitle>{t("settingsAccountLoadError")}</EmptyTitle>

@@ -46,8 +46,6 @@ export const publicLinks = {
 
 	/** File view — type label shown beside the file's name and size */
 	fileLabel: "File",
-	/** Directory view — type label shown beside the directory's name */
-	directoryLabel: "Directory",
 	/** File view — download the file */
 	download: "Download",
 	/** File view — invoke the inline preview */
@@ -82,12 +80,6 @@ export const publicLinks = {
 	emptyDirectory: "This directory is empty",
 	/** Directory view — no items match the active filter */
 	noMatches: "No items match your search",
-	/** Directory view — column header for the item name */
-	columnName: "Name",
-	/** Directory view — column header for the item size */
-	columnSize: "Size",
-	/** Directory view — column header for the modified date */
-	columnModified: "Modified",
 	/** Directory view — sort control label */
 	sortLabel: "Sort",
 	/** Directory view — sort by name */

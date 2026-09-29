@@ -540,18 +540,7 @@ describe("getSharerIdentity", () => {
 		expect(getSharerIdentity(item)).toEqual({ userId: 13n, email: "peer@filen.io" })
 	})
 
-	it("falls back to the injected resolver for a sharedDirectory with no spread role", () => {
-		const item = narrowItem(mockSharedDir()) // no role spread → data.sharingRole undefined
-		if (item.type !== "sharedDirectory") {
-			throw new Error("expected a sharedDirectory arm")
-		}
-
-		const resolve = (uuid: string): SharingRole | undefined => (uuid === item.data.uuid ? sharerRole(21, "cached@filen.io") : undefined)
-
-		expect(getSharerIdentity(item, resolve)).toEqual({ userId: 21n, email: "cached@filen.io" })
-	})
-
-	it("returns null for a roleless sharedDirectory when no resolver is given", () => {
+	it("returns null for a roleless sharedDirectory", () => {
 		expect(getSharerIdentity(narrowItem(mockSharedDir()))).toBeNull()
 	})
 

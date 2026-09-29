@@ -4,9 +4,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import "@/lib/i18n"
 
-const { cancelCopy } = vi.hoisted(() => ({ cancelCopy: vi.fn() }))
+const { cancelTransfer } = vi.hoisted(() => ({ cancelTransfer: vi.fn() }))
 
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: { cancelCopy } }))
+vi.mock("@/lib/sdk/client", () => ({ sdkApi: { cancelTransfer } }))
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), custom: vi.fn(), dismiss: vi.fn() } }))
 
 import { CopyCancelDialog } from "@/features/transfers/components/copyCancelDialog"
@@ -51,7 +51,7 @@ describe("CopyCancelDialog", () => {
 		ask()
 		fireEvent.click(await screen.findByRole("button", { name: "Stop and keep copied items" }))
 
-		expect(cancelCopy).toHaveBeenCalledWith("job")
+		expect(cancelTransfer).toHaveBeenCalledWith("job")
 		expect(getCopyJob("job")?.cancelRequest).toBe("keep")
 		expect(useCopyJobsStore.getState().cancelPromptId).toBeNull()
 	})
@@ -61,7 +61,7 @@ describe("CopyCancelDialog", () => {
 		ask()
 		fireEvent.click(await screen.findByRole("button", { name: "Move copied items to trash" }))
 
-		expect(cancelCopy).toHaveBeenCalledWith("job")
+		expect(cancelTransfer).toHaveBeenCalledWith("job")
 		expect(getCopyJob("job")?.cancelRequest).toBe("trash")
 	})
 
@@ -70,7 +70,7 @@ describe("CopyCancelDialog", () => {
 		ask()
 		fireEvent.click(await screen.findByRole("button", { name: "Continue copying" }))
 
-		expect(cancelCopy).not.toHaveBeenCalled()
+		expect(cancelTransfer).not.toHaveBeenCalled()
 		expect(getCopyJob("job")?.cancelRequest).toBeNull()
 		expect(useCopyJobsStore.getState().cancelPromptId).toBeNull()
 	})

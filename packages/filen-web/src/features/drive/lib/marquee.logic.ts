@@ -54,16 +54,14 @@ export function marqueeListIndices(rect: MarqueeContentRect, itemCount: number, 
 // Within a row each tile is a fixed `tileWidth` box centered in its column cell, so a rect falling
 // entirely in a between-tile gutter selects nothing in that column — hit-test each candidate cell's
 // ACTUAL tile box, not the whole cell. The last grid row can be partial: an index past itemCount is
-// skipped. `gap` is the grid's own inter-column gap (defaulted to 0, which reduces every expression
-// below exactly to the gapless form the drive listing uses).
+// skipped.
 export function marqueeGridIndices(
 	rect: MarqueeContentRect,
 	itemCount: number,
 	columns: number,
 	contentWidth: number,
 	tileWidth: number,
-	rowHeight: number,
-	gap = 0
+	rowHeight: number
 ): number[] {
 	if (itemCount === 0 || columns <= 0 || rowHeight <= 0 || contentWidth <= 0 || rect.bottom <= 0) {
 		return []
@@ -82,9 +80,9 @@ export function marqueeGridIndices(
 		return []
 	}
 
-	const cellWidth = (contentWidth - gap * (columns - 1)) / columns
-	// columns is the gap-aware auto-fill count upstream, so cellWidth >= tileWidth normally; clamp for
-	// the forced-single-column case where the container is narrower than one tile.
+	const cellWidth = contentWidth / columns
+	// columns is the auto-fill count upstream, so cellWidth >= tileWidth normally; clamp for the
+	// forced-single-column case where the container is narrower than one tile.
 	const boxWidth = Math.min(tileWidth, cellWidth)
 	const inset = Math.max(0, (cellWidth - tileWidth) / 2)
 	const out: number[] = []
@@ -97,7 +95,7 @@ export function marqueeGridIndices(
 				break
 			}
 
-			const tileLeft = col * (cellWidth + gap) + inset
+			const tileLeft = col * cellWidth + inset
 			const tileRight = tileLeft + boxWidth
 
 			if (rect.left < tileRight && rect.right > tileLeft) {
@@ -109,8 +107,8 @@ export function marqueeGridIndices(
 	return out
 }
 
-// Dispatches to the mode-specific hit-test. `columns`/`contentWidth`/`tileWidth`/`gap` are ignored in
-// list mode. Returns ascending indices.
+// Dispatches to the mode-specific hit-test. `columns`/`contentWidth`/`tileWidth` are ignored in list
+// mode. Returns ascending indices.
 export function marqueeIndices(
 	rect: MarqueeContentRect,
 	itemCount: number,
@@ -118,12 +116,11 @@ export function marqueeIndices(
 	columns: number,
 	contentWidth: number,
 	tileWidth: number,
-	rowHeight: number,
-	gap = 0
+	rowHeight: number
 ): number[] {
 	return viewMode === "list"
 		? marqueeListIndices(rect, itemCount, rowHeight)
-		: marqueeGridIndices(rect, itemCount, columns, contentWidth, tileWidth, rowHeight, gap)
+		: marqueeGridIndices(rect, itemCount, columns, contentWidth, tileWidth, rowHeight)
 }
 
 // The single item index under a content-space point, or -1 for a gutter / empty cell / out of range.
@@ -137,8 +134,7 @@ export function marqueeIndexAtPoint(
 	columns: number,
 	contentWidth: number,
 	tileWidth: number,
-	rowHeight: number,
-	gap = 0
+	rowHeight: number
 ): number {
 	if (itemCount === 0 || rowHeight <= 0 || y < 0) {
 		return -1
@@ -154,10 +150,8 @@ export function marqueeIndexAtPoint(
 		return -1
 	}
 
-	const cellWidth = (contentWidth - gap * (columns - 1)) / columns
-	// Divided by the cell PITCH, not the narrower cellWidth: with a gap the latter returns col === columns
-	// for a point inside the LAST tile, which the guard below would then turn into a bogus -1.
-	const col = Math.floor(x / (cellWidth + gap))
+	const cellWidth = contentWidth / columns
+	const col = Math.floor(x / cellWidth)
 
 	if (col >= columns) {
 		return -1
@@ -165,7 +159,7 @@ export function marqueeIndexAtPoint(
 
 	const boxWidth = Math.min(tileWidth, cellWidth)
 	const inset = Math.max(0, (cellWidth - tileWidth) / 2)
-	const tileLeft = col * (cellWidth + gap) + inset
+	const tileLeft = col * cellWidth + inset
 	const tileRight = tileLeft + boxWidth
 
 	if (x < tileLeft || x > tileRight) {

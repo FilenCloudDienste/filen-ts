@@ -10,8 +10,6 @@ const CENTRAL = 0x02014b50
 const SENTINEL_32 = 0xffffffff
 const SENTINEL_16 = 0xffff
 
-export class ZipLimitError extends Error {}
-
 export function checkZipLimits(bytes: Uint8Array, limits: { maxEntries: number; maxBytes: number }): void {
 	const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
 	let eocd = -1
@@ -25,7 +23,7 @@ export function checkZipLimits(bytes: Uint8Array, limits: { maxEntries: number; 
 	}
 
 	if (eocd < 0) {
-		throw new ZipLimitError("spreadsheet: not a zip")
+		throw new Error("spreadsheet: not a zip")
 	}
 
 	const count = view.getUint16(eocd + 10, true)
@@ -33,11 +31,11 @@ export function checkZipLimits(bytes: Uint8Array, limits: { maxEntries: number; 
 
 	// A ZIP64 archive: more entries or bytes than any spreadsheet opened here.
 	if (count === SENTINEL_16 || directoryOffset === SENTINEL_32 || view.getUint32(eocd + 12, true) === SENTINEL_32) {
-		throw new ZipLimitError("spreadsheet: zip too large")
+		throw new Error("spreadsheet: zip too large")
 	}
 
 	if (count > limits.maxEntries) {
-		throw new ZipLimitError("spreadsheet: too many zip entries")
+		throw new Error("spreadsheet: too many zip entries")
 	}
 
 	let position = directoryOffset
@@ -45,7 +43,7 @@ export function checkZipLimits(bytes: Uint8Array, limits: { maxEntries: number; 
 
 	for (let entry = 0; entry < count; entry++) {
 		if (position + 46 > bytes.length || view.getUint32(position, true) !== CENTRAL) {
-			throw new ZipLimitError("spreadsheet: bad zip directory")
+			throw new Error("spreadsheet: bad zip directory")
 		}
 
 		const flags = view.getUint16(position + 8, true)
@@ -54,20 +52,20 @@ export function checkZipLimits(bytes: Uint8Array, limits: { maxEntries: number; 
 		const uncompressed = view.getUint32(position + 24, true)
 
 		if (compressed === SENTINEL_32 || uncompressed === SENTINEL_32) {
-			throw new ZipLimitError("spreadsheet: zip too large")
+			throw new Error("spreadsheet: zip too large")
 		}
 
 		// A stored entry is its compressed bytes, bounded by the file. A deflated one inflates up to its
 		// declared size, unless it declares none, or leaves its sizes to a data descriptor (read from the
 		// local header then).
 		if (method === 8 && ((compressed > 0 && uncompressed === 0) || (compressed === 0 && (flags & 8) !== 0))) {
-			throw new ZipLimitError("spreadsheet: zip entry without a size")
+			throw new Error("spreadsheet: zip entry without a size")
 		}
 
 		total += method === 0 ? compressed : uncompressed
 
 		if (total > limits.maxBytes) {
-			throw new ZipLimitError("spreadsheet: zip inflates too large")
+			throw new Error("spreadsheet: zip inflates too large")
 		}
 
 		position += 46 + view.getUint16(position + 28, true) + view.getUint16(position + 30, true) + view.getUint16(position + 32, true)
@@ -97,7 +95,7 @@ export async function readZip(bytes: Uint8Array, cancelled: () => boolean = () =
 	}
 
 	if (eocd < 0) {
-		throw new ZipLimitError("spreadsheet: not a zip")
+		throw new Error("spreadsheet: not a zip")
 	}
 
 	const count = view.getUint16(eocd + 10, true)
@@ -105,7 +103,7 @@ export async function readZip(bytes: Uint8Array, cancelled: () => boolean = () =
 
 	for (let entry = 0; entry < count; entry++) {
 		if (position + 46 > bytes.length || view.getUint32(position, true) !== CENTRAL) {
-			throw new ZipLimitError("spreadsheet: bad zip directory")
+			throw new Error("spreadsheet: bad zip directory")
 		}
 
 		const method = view.getUint16(position + 10, true)

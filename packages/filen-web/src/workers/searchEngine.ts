@@ -402,5 +402,3 @@ export function createSearchEngine() {
 
 	return { open, setName, close }
 }
-
-export type SearchEngine = ReturnType<typeof createSearchEngine>

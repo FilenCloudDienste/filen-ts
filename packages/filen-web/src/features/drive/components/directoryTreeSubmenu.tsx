@@ -80,8 +80,6 @@ interface DirectoryTreeActions {
 export interface DirectoryTreeSubmenuProps extends DirectoryTreeActions {
 	label: string
 	icon: LucideIcon
-	disabled?: boolean | undefined
-	title?: string | undefined
 	// Entries above the tree (e.g. the full destination picker).
 	leading?: ReactNode
 }
@@ -92,15 +90,13 @@ export interface DirectoryTreeSubmenuProps extends DirectoryTreeActions {
 // sidebar tree's query — so it shares the drive listing's cache. Directory triggers only open their
 // submenu: Base UI routes Enter/Space and touch taps on a trigger to opening it, so the action lives on
 // its own entry.
-export function DirectoryTreeSubmenu({ label, icon: Icon, disabled, title, leading, ...actions }: DirectoryTreeSubmenuProps) {
+export function DirectoryTreeSubmenu({ label, icon: Icon, leading, ...actions }: DirectoryTreeSubmenuProps) {
 	const { t } = useTranslation("drive")
 	const { Sub, SubTrigger, SubContent, Separator, Group, Label } = actions.family
 
 	return (
 		<Sub>
 			<SubTrigger
-				disabled={disabled}
-				title={title}
 				onClick={stopRowPropagation}
 				onDoubleClick={stopRowPropagation}
 			>

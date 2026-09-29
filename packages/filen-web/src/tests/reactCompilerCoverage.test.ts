@@ -1,9 +1,8 @@
 import { describe, expect, it } from "vitest"
 import { transformFileSync } from "@babel/core"
 
-// The React Compiler silently skips a hook or component it can't compile, and neither lint nor
-// check:compiler (a fixture probe) notices. These files are compiled the way vite.config.ts compiles
-// them and must come out compiled.
+// The React Compiler silently skips a hook or component it can't compile, and lint doesn't notice.
+// These files are compiled the way vite.config.ts compiles them and must come out compiled.
 
 interface CompilerEvent {
 	kind: string
@@ -75,7 +74,6 @@ describe("React Compiler coverage", () => {
 		["src/components/ui/dropdown-menu.tsx", "DropdownMenuItem"],
 		["src/components/ui/dropdown-menu.tsx", "DropdownMenuSubContent"],
 		["src/components/ui/empty.tsx", "EmptyMedia"],
-		["src/components/ui/field.tsx", "FieldLegend"],
 		["src/components/ui/field.tsx", "Field"],
 		["src/components/ui/popover.tsx", "PopoverContent"],
 		["src/components/ui/select.tsx", "SelectTrigger"],

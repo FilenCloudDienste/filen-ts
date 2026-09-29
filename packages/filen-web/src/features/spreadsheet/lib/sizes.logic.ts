@@ -23,8 +23,8 @@ export const MAX_RESIZE_TARGETS = 10_000
 
 // What autofit adds to measured content: a cell's horizontal padding (px-1.5 each side), its 1px
 // border, and 1px of slack; a row's line box to the default row's height.
-export const CELL_FIT_PADDING = 14
-export const ROW_FIT_PADDING = 7
+const CELL_FIT_PADDING = 14
+const ROW_FIT_PADDING = 7
 
 export function clampSize(axis: SizeAxis, px: number): number {
 	return Math.round(Math.min(axis === "cols" ? MAX_COL_WIDTH : MAX_ROW_HEIGHT, Math.max(MIN_SIZE, px)))

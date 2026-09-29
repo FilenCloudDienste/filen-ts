@@ -65,12 +65,12 @@ describe("previewOpenTarget", () => {
 	const c = photoItem("c")
 	const items = [a, b, c]
 
-	it("wraps the WHOLE current items array as the pager's source list, at the clicked index", () => {
+	it("hands the WHOLE current items array over as the pager's list, at the clicked index", () => {
 		const target = previewOpenTarget(items, 1)
 
 		expect(target).not.toBeNull()
 		expect(target?.index).toBe(1)
-		expect(target?.sources).toEqual([{ item: a }, { item: b }, { item: c }])
+		expect(target?.sources).toBe(items)
 	})
 
 	it("opens at index 0 for the first tile", () => {

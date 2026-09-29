@@ -11,7 +11,6 @@ import { driveListingQueryOptions, driveListingQueryUpdate, normalizeParentUuid 
 import { emitPreviewFileMetaChanged, subscribePreviewReconcile, type PreviewReconcileEvent } from "@/features/preview/lib/previewReconcile"
 import type { FileMeta } from "@filen/sdk-rs"
 import { isRevisionOf, settleHeldRevisions, type PreviewRevision } from "@/features/preview/lib/remoteChange.logic"
-import { type PreviewSource } from "@/features/preview/lib/previewSource"
 import { usePreviewCacheScope } from "@/features/preview/lib/accessMode"
 import { loadPreviewBytes } from "@/features/preview/lib/previewCache"
 import { setPreviewDirty, usePreviewUnsavedGuardStore } from "@/features/preview/store/usePreviewUnsavedGuard"
@@ -32,15 +31,15 @@ export type RemoteChangePrompt =
 
 interface UsePreviewRemoteChangesParams {
 	variant: DriveVariant
-	items: PreviewSource[]
+	items: DriveItem[]
 	index: number
 	// The overlay's per-slot overrides (keyed by each slot's frozen uuid), read and written synchronously:
 	// two revisions can arrive before the overlay renders again.
 	savedRef: RefObject<ReadonlyMap<string, DriveItem>>
 	commitSaved: (frozenUuid: string, item: DriveItem) => void
 	contentRef: RefObject<(() => string) | null>
-	// The unsaved edits as they stand: a text buffer, or a spreadsheet's file as edited.
-	readEdits: () => Promise<string | Uint8Array | null>
+	// The unsaved edits as they stand, encoded.
+	readEdits: () => Promise<Uint8Array | null>
 	onItemRemoved: (frozenUuid: string) => void
 }
 
@@ -50,7 +49,7 @@ function isDirty(): boolean {
 
 interface OverlaySnapshot {
 	variant: DriveVariant
-	items: PreviewSource[]
+	items: DriveItem[]
 	index: number
 	commitSaved: (frozenUuid: string, item: DriveItem) => void
 	onItemRemoved: (frozenUuid: string) => void
@@ -60,7 +59,7 @@ interface OverlaySnapshot {
 // event finds its slot without walking a pager that can hold a whole photo library. Rebuilt only when
 // the slots or their overrides change (both are replaced, never mutated).
 interface SlotIndex {
-	items: PreviewSource[]
+	items: DriveItem[]
 	saved: ReadonlyMap<string, DriveItem>
 	byUuid: Map<string, number>
 	byStable: Map<string, number>
@@ -99,14 +98,14 @@ interface RemoteChangeContext {
 	setPrompt: Dispatch<SetStateAction<RemoteChangePrompt | null>>
 }
 
-function displayedOf(ctx: RemoteChangeContext, source: PreviewSource | undefined): { frozenUuid: string; displayed: DriveItem } | null {
-	if (source === undefined) {
+function displayedOf(ctx: RemoteChangeContext, item: DriveItem | undefined): { frozenUuid: string; displayed: DriveItem } | null {
+	if (item === undefined) {
 		return null
 	}
 
-	const frozenUuid = source.item.data.uuid
+	const frozenUuid = item.data.uuid
 
-	return { frozenUuid, displayed: ctx.savedRef.current.get(frozenUuid) ?? source.item }
+	return { frozenUuid, displayed: ctx.savedRef.current.get(frozenUuid) ?? item }
 }
 
 function displayedUuid(ctx: RemoteChangeContext, frozenUuid: string): string {
@@ -125,8 +124,8 @@ function slotIndex(ctx: RemoteChangeContext): SlotIndex {
 	const byUuid = new Map<string, number>()
 	const byStable = new Map<string, number>()
 
-	items.forEach((source, sourceIndex) => {
-		const displayed = saved.get(source.item.data.uuid) ?? source.item
+	items.forEach((item, sourceIndex) => {
+		const displayed = saved.get(item.data.uuid) ?? item
 
 		byUuid.set(displayed.data.uuid, sourceIndex)
 
@@ -368,20 +367,19 @@ function handleEvent(ctx: RemoteChangeContext, event: PreviewReconcileEvent): vo
 async function writeAsNewFile(
 	asked: RemoteChangePrompt,
 	item: DriveItem,
-	readEdits: () => Promise<string | Uint8Array | null>,
+	readEdits: () => Promise<Uint8Array | null>,
 	t: TFunction<"preview">
 ): Promise<{ item: DriveItem; name: string; bytes: Uint8Array | null } | null> {
-	const edits = await readEdits()
+	const content = await readEdits()
 	const base = asDirectoryOrFile(item)
 
 	// Not offered without a save source; never silent if it gets here anyway.
-	if (edits === null || base.type !== "file") {
+	if (content === null || base.type !== "file") {
 		toast.error(t("previewSaveAsNewFileFailed"))
 
 		return null
 	}
 
-	const content = typeof edits === "string" ? new TextEncoder().encode(edits) : edits
 	const bytes = asked.kind === "deleted" ? content.slice() : null
 
 	const rootUuid = currentRootUuid()
@@ -464,8 +462,7 @@ export function usePreviewRemoteChanges({
 
 	// A prompt belongs to the slot it asks about. One left behind when that slot went (the user's own
 	// trash racing its echo, say) is dropped, never shown over the next file, whose buffer it cannot save.
-	const currentSource = items[index]
-	const currentFrozenUuid = currentSource?.item.data.uuid ?? null
+	const currentFrozenUuid = items[index]?.data.uuid ?? null
 
 	if (prompt !== null && prompt.frozenUuid !== currentFrozenUuid) {
 		setPrompt(null)
@@ -553,9 +550,9 @@ export function usePreviewRemoteChanges({
 	}
 
 	function slotItem(frozenUuid: string): DriveItem | undefined {
-		const source = items.find(candidate => candidate.item.data.uuid === frozenUuid)
+		const item = items.find(candidate => candidate.data.uuid === frozenUuid)
 
-		return source === undefined ? undefined : (savedRef.current.get(frozenUuid) ?? source.item)
+		return item === undefined ? undefined : (savedRef.current.get(frozenUuid) ?? item)
 	}
 
 	function dropBuffer(): void {

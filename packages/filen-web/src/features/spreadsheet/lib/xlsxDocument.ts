@@ -905,12 +905,7 @@ export class XlsxDocument {
 					})
 				}
 
-				this.restoreText(step.formulas, (cell, text) => {
-					cell.formula = text
-				})
-				this.restoreText(step.links, (cell, text) => {
-					if (cell.hyperlink !== undefined) cell.hyperlink = { ...cell.hyperlink, location: text }
-				})
+				this.restoreTexts(step)
 
 				if (step.names === undefined) delete this.workbook.namedRanges
 				else this.workbook.namedRanges = step.names
@@ -995,13 +990,17 @@ export class XlsxDocument {
 		}
 	}
 
-	private restoreText(edits: readonly TextEdit[], restore: (cell: Cell, text: string) => void): void {
-		for (const edit of edits) {
+	private restoreTexts(step: { formulas: readonly TextEdit[]; links: readonly TextEdit[] }): void {
+		for (const edit of step.formulas) {
 			const cell = this.workbook.sheets[edit.sheet]?.cells?.get(edit.key)
 
-			if (cell !== undefined) {
-				restore(cell, edit.text)
-			}
+			if (cell !== undefined) cell.formula = edit.text
+		}
+
+		for (const edit of step.links) {
+			const cell = this.workbook.sheets[edit.sheet]?.cells?.get(edit.key)
+
+			if (cell?.hyperlink !== undefined) cell.hyperlink = { ...cell.hyperlink, location: edit.text }
 		}
 	}
 
@@ -1080,12 +1079,7 @@ export class XlsxDocument {
 		// Breaks the sheet had none of, shifting made none of either.
 		if (step.breaks !== undefined) sheet[BREAKS[edit.axis]] = step.breaks
 
-		this.restoreText(step.formulas, (cell, text) => {
-			cell.formula = text
-		})
-		this.restoreText(step.links, (cell, text) => {
-			if (cell.hyperlink !== undefined) cell.hyperlink = { ...cell.hyperlink, location: text }
-		})
+		this.restoreTexts(step)
 
 		const recalculated = this.recalculate(engine => {
 			if (edit.type === "insert") {
@@ -1927,7 +1921,7 @@ const BREAKS = { rows: "rowBreaks", cols: "colBreaks" } as const
 // Moves a sheet's cells, merges, page breaks and row/column formats for an inserted or deleted run of rows
 // or columns. A merge the deletion cuts through shrinks; one it swallows goes. Returns what a deletion took
 // out, or the row and column formats an insertion pushed past the sheet's edge, for undoing it.
-export function shiftSheet(sheet: Sheet, op: AxisEdit): Removed {
+function shiftSheet(sheet: Sheet, op: AxisEdit): Removed {
 	const rowsAxis = op.axis === "rows"
 	const removed: Removed = { values: [], cells: [], rowDefs: [], columns: [] }
 

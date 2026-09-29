@@ -72,7 +72,7 @@ function mockSharedFile(overrides: Partial<SharedFile> = {}): SharedFile {
 }
 
 // A bare SharedDir (no fetcher-spread sharingRole) narrows to a sharedDirectory whose data.sharingRole
-// is undefined — getSharerIdentity has nothing to read and no resolver is passed in these tests.
+// is undefined — getSharerIdentity has nothing to read.
 function mockSharedDir(overrides: Partial<SharedDir> = {}): SharedDir {
 	return {
 		inner: mockDir({ uuid: "55555555-5555-5555-5555-555555555555", meta: { type: "decoded", data: { name: "SharedChild" } } }),

@@ -5,7 +5,7 @@ import { formatRelativeTimeCore } from "@filen/shared"
 // clock time) — the surfaces this feeds (note rows, later chat/events rows) want a compact date, not a
 // full datetime. `undefined` locale defers to the runtime's own locale, same posture as the rest of
 // the app's date rendering.
-function defaultAbsolute(timestamp: number): string {
+function absoluteDate(timestamp: number): string {
 	return new Date(timestamp).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })
 }
 
@@ -20,12 +20,7 @@ function defaultAbsolute(timestamp: number): string {
 // `now` is required: every caller renders, and a clock read inside this call is invisible to the React
 // Compiler's memo keys, so the label would freeze. Pass useNowMinute() so the label follows the shared
 // minute tick.
-export function formatRelativeTime(
-	timestamp: number,
-	t: TFunction,
-	now: number,
-	options?: { absolute?: (timestamp: number) => string }
-): string {
+export function formatRelativeTime(timestamp: number, t: TFunction, now: number): string {
 	return formatRelativeTimeCore(
 		timestamp,
 		// TFunction's overloaded signature isn't itself assignable to a plain (key, options?) => string
@@ -38,7 +33,7 @@ export function formatRelativeTime(
 			hoursAgo: "relativeHoursAgo",
 			daysAgo: "relativeDaysAgo"
 		},
-		options?.absolute ?? defaultAbsolute,
+		absoluteDate,
 		now
 	)
 }

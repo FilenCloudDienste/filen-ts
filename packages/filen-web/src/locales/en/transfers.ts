@@ -26,8 +26,6 @@ export const transfers = {
 	// ── Panel ────────────────────────────────────────────────────────────────
 	/** Empty-state title shown when there are no transfers (rail entry's accessible summary + the /transfers screen) */
 	transfersEmptyTitle: "No transfers",
-	/** Empty-state body under transfersEmptyTitle, used where there's no room to mention both directions */
-	transfersEmptyBody: "Files you upload will appear here.",
 	/** Button clearing every finished (done/error) transfer from the list; active uploads are unaffected */
 	transfersClearFinished: "Clear finished",
 

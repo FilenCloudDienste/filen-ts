@@ -1,12 +1,11 @@
 import { Fragment } from "react"
 import { useTranslation } from "react-i18next"
 import type { Chat } from "@filen/sdk-rs"
-import { cn, segmentMessage, isEmojiOnly } from "@filen/shared"
+import { cn, contactDisplayName, isEmojiOnly, type MessageSegment } from "@filen/shared"
 import { hardenLinkHref } from "@/features/chats/lib/regexed.logic"
 import { emojiForShortcode, customEmojiImageForShortcode } from "@/features/chats/lib/emoji"
 import { parseFilenPublicLink } from "@/features/chats/lib/embeds.logic"
 import { TrustedExternalLink } from "@/features/chats/components/thread/trustedExternalLink"
-import { contactDisplayName } from "@/features/contacts/components/contactsList.logic"
 
 // Renders one message body from the pure segment list. Every branch emits a React text node or element —
 // never parsed HTML, never dangerouslySetInnerHTML — so injection is structurally impossible.
@@ -22,9 +21,9 @@ import { contactDisplayName } from "@/features/contacts/components/contactsList.
 // neither stays literal. A message whose entire (trimmed) body is emoji shortcodes renders them
 // "jumbo" — larger glyphs/images and no surrounding text sizing — mirroring mobile's emojiSize
 // heuristic (@filen/shared's isEmojiOnly).
-export function MessageContent({ chat, text }: { chat: Chat; text: string | undefined }) {
+// `segments` is segmentMessage(text), tokenized once by MessageRow, which also derives the embeds from it.
+export function MessageContent({ chat, text, segments }: { chat: Chat; text: string | undefined; segments: MessageSegment[] }) {
 	const { t } = useTranslation("chats")
-	const segments = segmentMessage(text)
 	const jumbo = isEmojiOnly(text)
 
 	if (segments.length === 0) {

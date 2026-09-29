@@ -262,7 +262,7 @@ function parseArea(text: string, start: number): { area: RefArea; end: number } 
 }
 
 // The formula as text and the references in it, in order.
-export function formulaParts(text: string): Part[] {
+function formulaParts(text: string): Part[] {
 	const parts: Part[] = []
 	let pending = 0
 	let index = 0
@@ -384,7 +384,7 @@ function needsQuotes(name: string): boolean {
 }
 
 // A sheet named in a formula: Data!, 'Bob''s Data'!, Jan:Mar!.
-export function sheetPrefix(sheet: string, lastSheet: string | null = null): string {
+function sheetPrefix(sheet: string, lastSheet: string | null = null): string {
 	const name = lastSheet === null ? sheet : `${sheet}:${lastSheet}`
 
 	return needsQuotes(sheet) || (lastSheet !== null && needsQuotes(lastSheet)) ? `'${name.replaceAll("'", "''")}'!` : `${name}!`
@@ -496,7 +496,7 @@ function shiftSpan(start: number, end: number, edit: AxisEdit, limit: number, ra
 
 // A reference's area after rows or columns of the sheet it points into were inserted or deleted: the
 // same object when nothing moved, null when it was deleted.
-export function shiftArea(area: RefArea, edit: AxisEdit): RefArea | null {
+function shiftArea(area: RefArea, edit: AxisEdit): RefArea | null {
 	const rowsAxis = edit.axis === "rows"
 
 	if ((rowsAxis && area.kind === "cols") || (!rowsAxis && area.kind === "rows")) {
@@ -836,7 +836,7 @@ export function shownFormula(formula: string): string {
 const MAX_DEPTH = 100
 
 // Whether HyperFormula can be handed the formula at all: its parser recurses once per nesting level.
-export function engineCanParse(formula: string): boolean {
+function engineCanParse(formula: string): boolean {
 	let depth = 0
 	let index = 0
 

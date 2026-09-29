@@ -300,7 +300,6 @@ function ResetForm({ token }: ResetFormProps) {
 				matchValue={typedConfirmPhrase}
 				confirmLabel={t("skipMasterKeysWarningStage4Confirm")}
 				cancelLabel={cancelLabel}
-				destructive
 				onOpenChange={open => {
 					if (!open) {
 						handleStageOutcome("stage4", false)

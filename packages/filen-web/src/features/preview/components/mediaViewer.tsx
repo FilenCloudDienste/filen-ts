@@ -11,7 +11,7 @@ import { mediaControlsList, usePreviewAccessMode, usePreviewDownloadable } from 
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { LoadingState } from "@/components/loadingState"
 import { PreviewErrorState } from "@/features/preview/components/previewErrorState"
-import { getVideoPlaybackState, setVideoPlaybackState } from "@/features/preview/lib/videoContinuity"
+import { getVideoPosition, setVideoPosition } from "@/features/preview/lib/videoContinuity"
 
 export interface MediaViewerProps {
 	item: DriveItem
@@ -54,10 +54,10 @@ function VideoElement({
 				return
 			}
 
-			const saved = getVideoPlaybackState(positionKey)
+			const saved = getVideoPosition(positionKey)
 
 			if (saved !== undefined) {
-				video.currentTime = saved.currentTime
+				video.currentTime = saved
 			}
 
 			// A rejected promise here means the browser blocked autoplay (e.g. no prior user gesture on
@@ -79,7 +79,7 @@ function VideoElement({
 
 		function handlePause(): void {
 			if (video) {
-				setVideoPlaybackState(positionKey, { currentTime: video.currentTime })
+				setVideoPosition(positionKey, video.currentTime)
 			}
 		}
 
@@ -92,7 +92,7 @@ function VideoElement({
 			// Covers stepping away WHILE still playing — the "pause" listener above only fires for an
 			// explicit pause, never for an unmount, so this is the only place that captures a mid-playback
 			// step-away's own position.
-			setVideoPlaybackState(positionKey, { currentTime: video.currentTime })
+			setVideoPosition(positionKey, video.currentTime)
 		}
 	}, [positionKey])
 

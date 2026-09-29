@@ -128,6 +128,46 @@ describe("SheetGrid resize", () => {
 		document.removeEventListener("keydown", outer)
 	})
 
+	it("cancels on Escape pressed before the first move", () => {
+		const onResize = vi.fn(() => Promise.resolve())
+		const outer = vi.fn()
+
+		document.addEventListener("keydown", outer)
+
+		const { container } = renderGrid(onResize)
+		const handle = handleOf(columnHeader(container, 1))
+
+		fireEvent.pointerDown(handle, { pointerId: 1, clientX: 100, clientY: 0, button: 0 })
+		fireEvent.keyDown(document.body, { key: "Escape" })
+		fireEvent.pointerMove(handle, { pointerId: 1, clientX: 150, clientY: 0 })
+		act(() => {
+			vi.advanceTimersToNextFrame()
+		})
+		fireEvent.pointerUp(handle, { pointerId: 1, clientX: 150, clientY: 0 })
+
+		expect(onResize).not.toHaveBeenCalled()
+		expect(outer).not.toHaveBeenCalled()
+		expect(columnHeader(container, 1).style.width).toBe(`${String(DEFAULT_COL_WIDTH)}px`)
+		document.removeEventListener("keydown", outer)
+	})
+
+	it("stops listening for Escape once the drag ends", () => {
+		const onResize = vi.fn(() => Promise.resolve())
+		const outer = vi.fn()
+
+		document.addEventListener("keydown", outer)
+
+		const { container } = renderGrid(onResize)
+		const handle = handleOf(columnHeader(container, 1))
+
+		drag(handle, 100, 150)
+		fireEvent.pointerCancel(handle, { pointerId: 1 })
+		fireEvent.keyDown(document.body, { key: "Escape" })
+
+		expect(outer).toHaveBeenCalledTimes(1)
+		document.removeEventListener("keydown", outer)
+	})
+
 	it("cancels on pointercancel", () => {
 		const onResize = vi.fn(() => Promise.resolve())
 		const { container } = renderGrid(onResize)

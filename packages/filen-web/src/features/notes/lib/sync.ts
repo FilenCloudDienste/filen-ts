@@ -4,6 +4,10 @@ import {
 	createExecutableTimeout,
 	createNotePreviewFromContentText,
 	isPermanentRejection,
+	hashNoteContent,
+	buildInflightEntries,
+	mergeInflight,
+	MAX_NON_RETRYABLE_REJECTIONS,
 	pruneAndRebaseNoteOutboxAfterPush,
 	reconcileNoteOutboxAgainstCloud
 } from "@filen/shared"
@@ -32,16 +36,12 @@ import useNotesInflightStore, {
 	type InflightEntry
 } from "@/features/notes/store/useNotesInflight"
 import {
-	hashNoteContent,
-	buildInflightEntries,
-	mergeInflight,
 	inflightContentSchema,
 	noteKindForPreview,
 	reconcileFollower,
 	remoteEnqueueToPatch,
 	newestEntry,
-	type RemoteEnqueue,
-	MAX_NON_RETRYABLE_REJECTIONS
+	type RemoteEnqueue
 } from "@/features/notes/lib/sync.logic"
 
 const OUTBOX_KV_KEY = "inflightNoteContent"

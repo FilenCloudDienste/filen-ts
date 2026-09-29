@@ -51,13 +51,6 @@ describe("EVENT_KIND_META", () => {
 			expect(EVENT_KIND_META).toHaveProperty(type)
 		}
 	})
-
-	it("maps BOTH the wasm spelling and mobile's legacy leading-digit spelling to the same 2FA labels — the WASM RENAME GOTCHA", () => {
-		expect(eventKindMeta("twoFaEnabled").labelKey).toBe("settingsEventTwoFaEnabled")
-		expect(eventKindMeta("2faEnabled").labelKey).toBe("settingsEventTwoFaEnabled")
-		expect(eventKindMeta("twoFaDisabled").labelKey).toBe("settingsEventTwoFaDisabled")
-		expect(eventKindMeta("2faDisabled").labelKey).toBe("settingsEventTwoFaDisabled")
-	})
 })
 
 describe("eventKindMeta", () => {

@@ -7,6 +7,15 @@ import { registerContactSocketHandlers } from "@/features/contacts/lib/socketHan
 import { registerGeneralSocketHandlers } from "@/features/shell/lib/generalSocketHandlers"
 import { registerPlaylistSocketHandlers } from "@/features/audio/lib/socketHandlers"
 
+const REGISTRARS: readonly (() => () => void)[] = [
+	registerNoteSocketHandlers,
+	registerChatSocketHandlers,
+	registerDriveSocketHandlers,
+	registerContactSocketHandlers,
+	registerGeneralSocketHandlers,
+	registerPlaylistSocketHandlers
+]
+
 // The realtime socket driver, mounted ONCE in the authed shell (appShell) — NOT a route, because
 // realtime updates must land while the user is anywhere in the app. On mount it registers every domain's
 // handlers (note + chat + drive + contact + general + playlists) and starts the single subscription; the bridge
@@ -15,26 +24,16 @@ import { registerPlaylistSocketHandlers } from "@/features/audio/lib/socketHandl
 // itself is not stopped here (a StrictMode remount must not tear the live socket down). Renders nothing.
 export function SocketHost(): null {
 	useEffect(() => {
-		const unregisterNotes = registerNoteSocketHandlers()
-		const unregisterChats = registerChatSocketHandlers()
-		const unregisterDrive = registerDriveSocketHandlers()
-		const unregisterContacts = registerContactSocketHandlers()
-		const unregisterGeneral = registerGeneralSocketHandlers()
-		const unregisterPlaylists = registerPlaylistSocketHandlers()
+		const unregisters = REGISTRARS.map(register => register())
 
 		void socketBridge.start()
 
 		return () => {
-			unregisterNotes()
-			unregisterChats()
-			unregisterDrive()
-			unregisterContacts()
-			unregisterGeneral()
-			unregisterPlaylists()
+			for (const unregister of unregisters) {
+				unregister()
+			}
 		}
 	}, [])
 
 	return null
 }
-
-export default SocketHost

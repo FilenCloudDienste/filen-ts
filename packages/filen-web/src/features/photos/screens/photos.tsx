@@ -82,7 +82,7 @@ export function PhotosScreen() {
 				<div className="flex flex-1 overflow-y-auto">
 					<Empty>
 						<EmptyHeader>
-							<EmptyMedia variant="icon">
+							<EmptyMedia>
 								<ImagesIcon />
 							</EmptyMedia>
 							<EmptyTitle>{t("photosUnsetTitle")}</EmptyTitle>
@@ -162,7 +162,7 @@ export function PhotosScreen() {
 					<div className="flex flex-1 overflow-y-auto">
 						<Empty>
 							<EmptyHeader>
-								<EmptyMedia variant="icon">
+								<EmptyMedia>
 									<ImagesIcon />
 								</EmptyMedia>
 								<EmptyTitle>{t("photosEmptyTitle")}</EmptyTitle>

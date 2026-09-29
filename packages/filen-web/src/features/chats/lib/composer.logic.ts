@@ -1,6 +1,5 @@
 import type { ChatMessage, ChatMessagePartial, ChatParticipant } from "@filen/sdk-rs"
-import { contactDisplayName } from "@/features/contacts/components/contactsList.logic"
-import { searchEmoji, type EmojiSuggestion } from "@/features/chats/lib/emoji"
+import { contactDisplayName } from "@filen/shared"
 
 // Pure, testable core of the chat composer — a port of filen-mobile's input send()/autocomplete logic
 // (features/chats/components/chat/input/*). No React/store/IO here; composer.tsx is the thin shell that
@@ -143,12 +142,14 @@ export function activeMentionQuery(value: string, caret: number): TriggerQuery |
 	return activeTrigger(value, caret, "@")
 }
 
-// Emoji needs at least `minLength` chars after the `:` before it opens (mobile: 3) so a lone `:` or a
-// `http:` fragment doesn't spuriously trigger it.
-export function activeEmojiQuery(value: string, caret: number, minLength = 2): TriggerQuery | null {
+// Emoji needs this many chars after the `:` before it opens so a lone `:` or a `http:` fragment doesn't
+// spuriously trigger it.
+const EMOJI_MIN_QUERY = 2
+
+export function activeEmojiQuery(value: string, caret: number): TriggerQuery | null {
 	const found = activeTrigger(value, caret, ":")
 
-	if (found === null || found.query.length < minLength) {
+	if (found === null || found.query.length < EMOJI_MIN_QUERY) {
 		return null
 	}
 
@@ -184,10 +185,6 @@ export function filterMentionParticipants(
 
 			return an < bn ? -1 : an > bn ? 1 : 0
 		})
-}
-
-export function filterEmojiSuggestions(query: string, limit = 10): EmojiSuggestion[] {
-	return searchEmoji(query, limit)
 }
 
 export interface Replacement {

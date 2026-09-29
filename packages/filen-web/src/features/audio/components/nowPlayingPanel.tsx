@@ -1,7 +1,7 @@
 import { Shuffle, Repeat, Repeat1, Trash2, X, AlertCircle } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { audioEngine } from "@/features/audio/lib/audioEngine"
-import { useAudioQueue, useAudioQueueControls, useAudioNowPlaying, useAudioError } from "@/features/audio/store/useAudioStore"
+import { useAudioStore, useAudioQueue, useAudioQueueControls, useAudioError } from "@/features/audio/store/useAudioStore"
 import { useTrackTagsStore } from "@/features/audio/store/useTrackTagsStore"
 import { trackDisplayTitle } from "@/features/audio/lib/trackTags.logic"
 import type { QueueTrack } from "@/features/audio/store/audioQueue"
@@ -20,7 +20,7 @@ export function NowPlayingPanel() {
 	const { t } = useTranslation("audio")
 	const { queue, currentIndex, coverUrlsByUuid } = useAudioQueue()
 	const { shuffleEnabled, loopMode } = useAudioQueueControls()
-	const { status } = useAudioNowPlaying()
+	const status = useAudioStore(state => state.status)
 	const lastError = useAudioError()
 	const LoopIcon = loopMode === "one" ? Repeat1 : Repeat
 

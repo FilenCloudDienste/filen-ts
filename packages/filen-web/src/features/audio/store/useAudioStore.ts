@@ -29,10 +29,8 @@ interface AudioStore {
 	shuffleEnabled: boolean
 	loopMode: LoopMode
 	shuffleOrder: number[]
-	// Output-device settings the engine owns; mirrored here purely so the player bar's volume slider /
-	// mute toggle render and update reactively (the engine stays the source of truth — it writes these
-	// on every setVolume/setMuted and after hydrating the persisted prefs). Not persisted through the
-	// store; the engine persists them via its own kv blob.
+	// Output-device settings, owned here; written only by the engine, which forwards them to the element
+	// and persists them via its own kv blob (not through the store's prefs).
 	volume: number
 	muted: boolean
 	// LABEL-FIRST error surface: the last playback failure as a structured DTO (errorLabel(dto) renders
@@ -169,7 +167,7 @@ async function persistPrefs(): Promise<void> {
 
 // Now-playing selector for the mini-player / now-playing bar — a stable-identity slice of the transport
 // state plus the resolved current track's display fields. `title` falls back to the filename until tags
-// resolve (or forever, for a tag-less file); `artist`/`album`/`coverUrl` stay null until then. Tags come
+// resolve (or forever, for a tag-less file); `artist`/`coverUrl` stay null until then. Tags come
 // from the persisted track-tag store, the one source every surface reads. useShallow keeps the transport
 // slice from re-rendering on store updates that don't touch it (same rationale as
 // useTransfersAggregate); the returned object merges in the tag fields and is not identity-stable, so
@@ -181,7 +179,6 @@ export function useAudioNowPlaying(): {
 	track: QueueTrack | null
 	title: string
 	artist: string | null
-	album: string | null
 	coverUrl: string | null
 } {
 	const playback = useAudioStore(
@@ -203,8 +200,7 @@ export function useAudioNowPlaying(): {
 	return {
 		...playback,
 		title: tags?.title ?? playback.track?.name ?? "",
-		artist: tags?.artist ?? null,
-		album: tags?.album ?? null
+		artist: tags?.artist ?? null
 	}
 }
 

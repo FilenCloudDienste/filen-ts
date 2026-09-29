@@ -76,7 +76,7 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
 function setup(
 	items = [file("a"), file("b", { stableUUID: "other" as File["stableUUID"] })],
 	index = 0,
-	readEdits?: () => Promise<string | Uint8Array | null>
+	readEdits?: () => Promise<Uint8Array | null>
 ) {
 	const savedRef = { current: new Map<string, DriveItem>() as ReadonlyMap<string, DriveItem> }
 	const commitSaved = vi.fn((frozenUuid: string, item: DriveItem) => {
@@ -88,12 +88,18 @@ function setup(
 		(props: { items: DriveItem[]; index: number }) =>
 			usePreviewRemoteChanges({
 				variant: "drive",
-				items: props.items.map(item => ({ item })),
+				items: props.items,
 				index: props.index,
 				savedRef,
 				commitSaved,
 				contentRef,
-				readEdits: readEdits ?? (() => Promise.resolve(contentRef.current?.() ?? null)),
+				readEdits:
+					readEdits ??
+					(() => {
+						const text = contentRef.current?.()
+
+						return Promise.resolve(text === undefined ? null : new TextEncoder().encode(text))
+					}),
 				onItemRemoved
 			}),
 		{ initialProps: { items, index } }

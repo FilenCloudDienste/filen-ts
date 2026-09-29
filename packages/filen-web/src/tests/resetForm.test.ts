@@ -21,7 +21,7 @@ const { ResetForm } = await import("@/features/auth/components/resetForm")
 const STRONG_ENOUGH_PASSWORD = "abcdefgh!!"
 
 // Choosing a master-keys file takes submit down the DIRECT path, skipping the 4-stage skip-keys
-// ceremony. readMasterKeysFile only needs { name, text() }, so a plain File is sufficient.
+// ceremony.
 function fillForm(): void {
 	fireEvent.change(screen.getByLabelText("Email"), { target: { value: "user@example.com" } })
 	fireEvent.change(screen.getByLabelText("New password"), { target: { value: STRONG_ENOUGH_PASSWORD } })

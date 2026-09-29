@@ -53,7 +53,7 @@ function SecurityPage() {
 			) : accountQuery.status === "error" ? (
 				<Empty>
 					<EmptyHeader>
-						<EmptyMedia variant="icon">
+						<EmptyMedia>
 							<ShieldIcon />
 						</EmptyMedia>
 						<EmptyTitle>{t("securityLoadError")}</EmptyTitle>

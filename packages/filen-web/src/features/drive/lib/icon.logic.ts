@@ -1,40 +1,32 @@
 import type { DirColor } from "@filen/sdk-rs"
-import {
-	extensionOf,
-	IMAGE_EXTENSIONS,
-	HEIC_EXTENSIONS,
-	RAW_IMAGE_EXTENSIONS,
-	VIDEO_EXTENSIONS,
-	AUDIO_EXTENSIONS
-} from "@/features/drive/lib/preview.logic"
+import { extensionOf, previewCategoryForExtension } from "@/features/drive/lib/preview.logic"
 import { dirColorHex } from "@/features/drive/lib/dirColor"
-import { fileIconKey as sharedFileIconKey, type FileIconKey } from "@filen/shared"
+import { fileIconKey as sharedFileIconKey, type FileIconKey, type FileIconSets } from "@filen/shared"
 
 // The concrete file-type glyphs in src/assets/file-icons/ (byte-identical to filen-mobile's set) a
 // file routes to — re-exported from @filen/shared so itemIcon.tsx and transferRow.logic.ts can keep
 // importing it from here.
 export type { FileIconKey }
 
-// Camera RAW shares the plain "image" glyph deliberately: FileIconKey is an exhaustive Record in
-// itemIcon.tsx keyed to the concrete SVGs in src/assets/file-icons/, so a distinct "raw" key would
-// mean a new asset. A RAW file reads as an image to a user either way.
-function isImageExtension(ext: string): boolean {
-	return IMAGE_EXTENSIONS.has(ext) || HEIC_EXTENSIONS.has(ext) || RAW_IMAGE_EXTENSIONS.has(ext)
-}
+// Routed through preview's own extension table, so a file's type icon and its preview category can
+// never disagree. Camera RAW shares the plain "image" glyph deliberately: FileIconKey is an exhaustive
+// Record in itemIcon.tsx keyed to the concrete SVGs in src/assets/file-icons/, so a distinct "raw" key
+// would mean a new asset. A RAW file reads as an image to a user either way.
+const ICON_SETS: FileIconSets = {
+	isImage: ext => {
+		const category = previewCategoryForExtension(ext)
 
-function isVideoExtension(ext: string): boolean {
-	return VIDEO_EXTENSIONS.has(ext)
-}
-
-function isAudioExtension(ext: string): boolean {
-	return AUDIO_EXTENSIONS.has(ext)
+		return category === "image" || category === "rawImage"
+	},
+	isVideo: ext => previewCategoryForExtension(ext) === "video",
+	isAudio: ext => previewCategoryForExtension(ext) === "audio"
 }
 
 // Resolves a file name to its type-icon key — a thin wrapper around @filen/shared's fileIconKey so
 // this app's two call sites keep passing a name rather than a pre-extracted extension. An empty name
 // (an undecryptable file, no extension to read) falls through to "other".
 export function fileIconKey(name: string): FileIconKey {
-	return sharedFileIconKey(extensionOf(name), { isImage: isImageExtension, isVideo: isVideoExtension, isAudio: isAudioExtension })
+	return sharedFileIconKey(extensionOf(name), ICON_SETS)
 }
 
 // Darkens a hex color channel-wise (divide each channel by `divisor`, clamp to 255) — ported from

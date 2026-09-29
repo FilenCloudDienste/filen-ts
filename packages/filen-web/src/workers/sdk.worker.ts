@@ -62,7 +62,6 @@ import init, {
 	type LinkedDirsAndFiles,
 	type UserPersonalUpdateInfo,
 	type GdprInfo,
-	type UserEvent,
 	type UserEventResult,
 	type JsClientConfig
 } from "@filen/sdk-rs"
@@ -125,42 +124,29 @@ let clientConfig: JsClientConfig = {}
 // supersession, and configure-once guard (searchEngine.ts).
 const searchEngine = createSearchEngine()
 
-// Per-transfer AbortControllers so cancelDownload(transferId) can abort an in-flight download.
-// managedFuture.abortSignal is accepted at runtime — verified — so a download carries a real, honored
-// cancel; aborting rejects the SDK call with kind "Cancelled", which the caller maps to a drop.
-const downloadAborts = new Map<string, AbortController>()
-
-// Mirrors downloadAborts for the streaming UPLOAD — see uploadFile's own comment for why this is now
-// safe (0.4.33 stopped burying managedFuture under serde(flatten)).
-const uploadAborts = new Map<string, AbortController>()
-
-// A copy job's stop and pause, keyed by the caller's job id. They span the job, not one call: a retry
-// after a storage refusal is the same job, so a stop or pause made between its calls still holds.
-// releaseCopy frees them once the caller's job is over (the pause is a wasm-heap object).
-interface CopyControls {
+// Every transfer's stop and pause, keyed by its id. Upload, download and copy ids are all random uuids,
+// so one map serves every direction. Aborting rejects the SDK call with kind "Cancelled", which the
+// caller maps to a drop; pausing never rejects, resume just continues the same future. The pause is a
+// wasm-heap object and MUST be freed or it leaks wasm memory.
+interface TransferControls {
 	abort: AbortController
 	pause: PauseSignal
 }
 
-const copyJobs = new Map<string, CopyControls>()
+const transferControls = new Map<string, TransferControls>()
 
-function copyControls(jobId: string): CopyControls {
-	let controls = copyJobs.get(jobId)
+// A copy job's controls span the job, not one call: a retry after a storage refusal is the same job, so
+// a stop or pause made between its calls still holds. releaseCopy frees them once the job is over.
+function copyControls(jobId: string): TransferControls {
+	let controls = transferControls.get(jobId)
 
 	if (controls === undefined) {
 		controls = { abort: new AbortController(), pause: new PauseSignal() }
-		copyJobs.set(jobId, controls)
+		transferControls.set(jobId, controls)
 	}
 
 	return controls
 }
-
-// Per-transfer PauseSignal so pauseUpload/pauseDownload can suspend an in-flight transfer's future
-// without erroring it — unlike abort, pause never rejects; resume just continues the same future.
-// Mirrors downloadAborts/uploadAborts, one map per direction. Each entry is a wasm-heap object: it
-// MUST be freed (see uploadFile/downloadFileToWriter's own finally) or it leaks wasm memory.
-const uploadPauses = new Map<string, PauseSignal>()
-const downloadPauses = new Map<string, PauseSignal>()
 
 // The single realtime socket listener for the app's lifetime — the wasm handle returned by
 // addEventListener, kept module-level like the transfer registries above. The SDK owns the socket's
@@ -178,24 +164,17 @@ function freeSocketListener(): void {
 	socketListener = null
 }
 
-// Shared shape behind uploadFile/downloadFileToWriter/downloadItemsToZip's per-transfer pause
-// lifecycle: register a fresh PauseSignal, run fn with it, then evict from both maps and free the
-// wasm-heap object on any exit — same delete-then-free order every one of those call sites needs.
-async function withPauseSignal<T>(
-	pauses: Map<string, PauseSignal>,
-	aborts: Map<string, AbortController>,
-	transferId: string,
-	fn: (pause: PauseSignal) => Promise<T>
-): Promise<T> {
-	const pause = new PauseSignal()
-	pauses.set(transferId, pause)
+// One upload/download call's controls: registered before fn's first await, so a stop or pause sent
+// meanwhile finds them, then evicted and freed on any exit.
+async function withTransferControls<T>(transferId: string, fn: (managedFuture: ManagedFuture) => Promise<T>): Promise<T> {
+	const controls: TransferControls = { abort: new AbortController(), pause: new PauseSignal() }
+	transferControls.set(transferId, controls)
 
 	try {
-		return await fn(pause)
+		return await fn({ abortSignal: controls.abort.signal, pauseSignal: controls.pause })
 	} finally {
-		aborts.delete(transferId)
-		pauses.delete(transferId)
-		pause.free()
+		transferControls.delete(transferId)
+		controls.pause.free()
 	}
 }
 
@@ -213,7 +192,7 @@ type CopyJobCall = (
 // must still be passed: the SDK stands in for a missing one with `new Function("")`, which the
 // production CSP (no 'unsafe-eval') rejects, leaving the copy's promise pending forever.
 async function runCopyJob(
-	controls: CopyControls,
+	controls: TransferControls,
 	onEvent: (event: CopyJobEvent) => void | Promise<void>,
 	call: CopyJobCall
 ): Promise<CopyReport> {
@@ -250,7 +229,7 @@ async function runCopyJob(
 }
 
 // Per-preview-token AbortController so cancelPreviewDownload(token) can abort an in-flight whole-buffer
-// preview fetch. Mirrors downloadAborts but keyed by the caller-minted preview token, not a transfer id
+// preview fetch. Mirrors transferControls but keyed by the caller-minted preview token, not a transfer id
 // — previews are never registered as transfers (no row, no progress), so they get their own registry
 // rather than borrowing that one.
 const previewAborts = new Map<string, AbortController>()
@@ -776,9 +755,6 @@ const api = {
 	getUserEvents(filter?: string | null, timestamp?: bigint | null): Promise<UserEventResult[]> {
 		return requireClient().getUserEvents(filter, timestamp)
 	},
-	getUserEvent(uuid: string): Promise<UserEvent> {
-		return requireClient().getUserEvent(uuid)
-	},
 	// `listDir`/`getDirOptional`/`createDir` take no cancellation param (unlike mobile's transfer
 	// facade) — a stale response from a fast navigation is simply discarded once the query key
 	// changes under it, so no AbortSignal plumbing is needed here. `Dir.timestamp`/meta bigints
@@ -822,7 +798,7 @@ const api = {
 		return result
 	},
 	// Photos' recursive listing op — there is no flat-listing equivalent on the wasm surface for OWN
-	// drive (only listLinkedDirRecursiveAnon, anon-links-only), so this wraps listDirRecursive
+	// drive (only the unauth listLinkedDirRecursive, anon-links-only), so this wraps listDirRecursive
 	// directly. SIGNATURE CAVEAT: unlike listDirectory's uuid case above, this takes no AbortSignal at
 	// all — the wasm arm's only params are the dir and a progress callback — so a stale walk from a
 	// fast root change is discarded purely by react-query's own key-change semantics (same rationale
@@ -889,14 +865,12 @@ const api = {
 	// `progress.is_undefined()`, so the key itself is droppable. Its SHAPE is not: same as
 	// downloadFileToWriter, it must stay a plain worker-side fn wrapping the caller's Comlink proxy,
 	// never the proxy object itself (serde-rejected). managedFuture.abortSignal now deserializes here
-	// too: 0.4.33 stopped burying managed_future under serde(flatten), so a per-transfer AbortController
-	// gives cancelUpload a real cancel, same as downloadFileToWriter's own.
+	// too: 0.4.33 stopped burying managed_future under serde(flatten), so cancelTransfer is a real cancel,
+	// same as downloadFileToWriter's own.
 	async uploadFile(parentUuid: string | null, transferId: string, file: BrowserFile, onProgress: (bytes: bigint) => void): Promise<File> {
 		const c = requireClient()
-		const controller = new AbortController()
-		uploadAborts.set(transferId, controller)
 
-		return withPauseSignal(uploadPauses, uploadAborts, transferId, async pause => {
+		return withTransferControls(transferId, async managedFuture => {
 			const parent = await resolveNormalDirParent(c, parentUuid)
 
 			return await c.uploadFileFromReader({
@@ -908,24 +882,9 @@ const api = {
 				progress: bytes => {
 					onProgress(bytes)
 				},
-				managedFuture: { abortSignal: controller.signal, pauseSignal: pause }
+				managedFuture
 			})
 		})
-	},
-	// Aborts an in-flight upload by transferId; a no-op once the upload has settled (the controller is
-	// already evicted). Mirrors cancelDownload.
-	cancelUpload(transferId: string): void {
-		uploadAborts.get(transferId)?.abort()
-	},
-	// Suspends an in-flight upload's future by transferId — no error, no drop, just no more
-	// bytes/progress until resumeUpload. A no-op once the upload has settled (the signal is already
-	// evicted+freed). Mirrors pauseDownload.
-	pauseUpload(transferId: string): void {
-		uploadPauses.get(transferId)?.pause()
-	},
-	// Continues a paused upload; a no-op once the upload has settled. Mirrors resumeDownload.
-	resumeUpload(transferId: string): void {
-		uploadPauses.get(transferId)?.resume()
 	},
 	// Whole-buffer save for the editable text/code preview — the non-streaming sibling of uploadFile
 	// above: a decoded string re-encoded to bytes is already fully in memory on the caller side, so
@@ -955,8 +914,7 @@ const api = {
 	// crossing Comlink as a buffer), and progress is a plain-fn-wrapped Comlink proxy (same as upload —
 	// wasm needs a plain preserved callable, not a proxy object). progress is passed unconditionally: the
 	// wasm layer requires it despite `progress?:` in the .d.ts. managedFuture.abortSignal IS accepted at
-	// runtime — same as uploadFile now — so a per-transfer AbortController gives cancelDownload a real
-	// cancel; aborting rejects the SDK call with kind "Cancelled", which the caller maps to a drop.
+	// runtime — same as uploadFile now — so cancelTransfer is a real cancel.
 	async downloadFileToWriter(
 		file: AnyFile,
 		transferId: string,
@@ -964,25 +922,22 @@ const api = {
 		onProgress: (bytes: bigint) => void
 	): Promise<void> {
 		const c = requireClient()
-		const controller = new AbortController()
-		downloadAborts.set(transferId, controller)
 
-		await withPauseSignal(downloadPauses, downloadAborts, transferId, async pause => {
+		await withTransferControls(transferId, async managedFuture => {
 			await c.downloadFileToWriter({
 				file,
 				writer,
 				progress: bytes => {
 					onProgress(bytes)
 				},
-				managedFuture: { abortSignal: controller.signal, pauseSignal: pause }
+				managedFuture
 			})
 		})
 	},
 	// A directory/multi-select zip: the SDK does its own recursion + zip framing in this ONE call, so
 	// there is still exactly one worker op for the whole batch. Everything else mirrors
-	// downloadFileToWriter exactly — same downloadAborts/downloadPauses maps keyed by the same
-	// transferId convention, so cancelDownload/pauseDownload/resumeDownload below reach a zip transfer
-	// with no changes of their own. Positional args, not an options object (downloadItemsToZip's own
+	// downloadFileToWriter exactly, so cancelTransfer/pauseTransfer/resumeTransfer reach a zip transfer by
+	// its transferId with no changes of their own. Positional args, not an options object (downloadItemsToZip's own
 	// wasm signature, unlike downloadFileToWriter's single-object DownloadFileStreamParams); progress
 	// is still a plain-fn-wrapped proxy — a raw proxy object is serde-rejected.
 	async downloadItemsToZip(
@@ -992,33 +947,29 @@ const api = {
 		onProgress: (bytesWritten: bigint, totalBytes: bigint, itemsProcessed: bigint, totalItems: bigint) => void
 	): Promise<void> {
 		const c = requireClient()
-		const controller = new AbortController()
-		downloadAborts.set(transferId, controller)
 
-		await withPauseSignal(downloadPauses, downloadAborts, transferId, async pause => {
+		await withTransferControls(transferId, async managedFuture => {
 			await c.downloadItemsToZip(
 				items,
 				writer,
 				(bytesWritten, totalBytes, itemsProcessed, totalItems) => {
 					onProgress(bytesWritten, totalBytes, itemsProcessed, totalItems)
 				},
-				{ abortSignal: controller.signal, pauseSignal: pause }
+				managedFuture
 			)
 		})
 	},
-	// Aborts an in-flight download by transferId; a no-op once the download has settled (the controller
-	// is already evicted). The abort surfaces as a "Cancelled" rejection at downloadFileToWriter's caller.
-	cancelDownload(transferId: string): void {
-		downloadAborts.get(transferId)?.abort()
+	// ── Transfer control ─────────────────────────────────────────────────────
+	// By upload/download transfer id or copy job id; each is a no-op once that transfer has settled or
+	// the copy is released. Pause stops bytes/progress without erroring the call.
+	cancelTransfer(id: string): void {
+		transferControls.get(id)?.abort.abort()
 	},
-	// Suspends an in-flight download's future by transferId — no error, no drop, just no more
-	// bytes/progress until resumeDownload. A no-op once the download has settled. Mirrors pauseUpload.
-	pauseDownload(transferId: string): void {
-		downloadPauses.get(transferId)?.pause()
+	pauseTransfer(id: string): void {
+		transferControls.get(id)?.pause.pause()
 	},
-	// Continues a paused download; a no-op once the download has settled. Mirrors resumeUpload.
-	resumeDownload(transferId: string): void {
-		downloadPauses.get(transferId)?.resume()
+	resumeTransfer(id: string): void {
+		transferControls.get(id)?.pause.resume()
 	},
 	// ── Copy ─────────────────────────────────────────────────────────────────
 	// The SDK owns the whole job (scan, concurrency, retries, share/link propagation) and resolves with
@@ -1054,22 +1005,12 @@ const api = {
 			c.copyItemsTo({ entries, ...(maxBytes !== undefined ? { maxBytes } : {}), ...callbacks })
 		)
 	},
-	// No-ops once the job is released, like cancelUpload/pauseUpload/resumeUpload once theirs settled.
-	cancelCopy(jobId: string): void {
-		copyJobs.get(jobId)?.abort.abort()
-	},
-	pauseCopy(jobId: string): void {
-		copyJobs.get(jobId)?.pause.pause()
-	},
-	resumeCopy(jobId: string): void {
-		copyJobs.get(jobId)?.pause.resume()
-	},
 	// The caller's job is over: none of its calls runs again.
 	releaseCopy(jobId: string): void {
-		const controls = copyJobs.get(jobId)
+		const controls = transferControls.get(jobId)
 
 		if (controls !== undefined) {
-			copyJobs.delete(jobId)
+			transferControls.delete(jobId)
 			controls.pause.free()
 		}
 	},
@@ -1079,7 +1020,7 @@ const api = {
 	// hands back the full decrypted Uint8Array in one shot, which crosses back to the caller via
 	// Comlink.transfer (never structured-cloned). Previews are ephemeral reads, not transfers — no
 	// transfers-store row — so this gets its own previewAborts registry rather than reusing
-	// downloadAborts/downloadPauses (no pause concept for a one-shot buffered fetch either).
+	// transferControls (no pause concept for a one-shot buffered fetch either).
 	async downloadFileBytes(file: AnyFile, previewToken: string): Promise<Uint8Array> {
 		const c = requireClient()
 		const controller = new AbortController()
@@ -1092,7 +1033,7 @@ const api = {
 		}
 	},
 	// Aborts an in-flight preview download by its token; a no-op once the download has settled (the
-	// controller is already evicted). Mirrors cancelDownload.
+	// controller is already evicted). Mirrors cancelTransfer.
 	cancelPreviewDownload(previewToken: string): void {
 		previewAborts.get(previewToken)?.abort()
 	},
@@ -1298,18 +1239,11 @@ const api = {
 			})
 		)
 	},
-	listLinkedDirRecursiveAnon(dir: AnyLinkedDir, link: DirPublicLink): Promise<LinkedDirsAndFiles> {
-		return withLinkedUnauth(unauth =>
-			unauth.listLinkedDirRecursive(dir, link, () => {
-				// no progress surface for a listing
-			})
-		)
-	},
 	getLinkedDirSizeAnon(dir: AnyLinkedDirWithContext): Promise<DirSizeResponse> {
 		return withLinkedUnauth(unauth => unauth.getDirSize(dir))
 	},
 	// Whole-buffer fetch for the unauth preview overlay — the anon mirror of downloadFileBytes above,
-	// same previewAborts registry keyed by the same token so cancelDownload/preview-cancel reach it
+	// same previewAborts registry keyed by the same token so cancelPreviewDownload reaches it
 	// unchanged. The buffered path (not the SW stream) is the unauth ceiling by design: the service
 	// worker's own wasm bundle has no UnauthClient, so range-seek streaming can't serve a logged-out
 	// visitor — this whole-buffer read is the degraded-but-working fallback.
@@ -1329,9 +1263,8 @@ const api = {
 	fetchLinkedRawPreviewAnon(file: AnyFile, previewToken: string): Promise<RawPreviewResult> {
 		return withLinkedUnauth(unauth => writeRawPreview(previewToken, params => unauth.writeEmbeddedPreview({ file, ...params })))
 	},
-	// Anon single-file save — the streaming mirror of downloadFileToWriter, same downloadAborts/
-	// downloadPauses maps + transferId convention so cancelDownload/pauseDownload/resumeDownload reach
-	// an anon transfer with no changes of their own. The WritableStream sink arrives via Comlink.transfer;
+	// Anon single-file save — the streaming mirror of downloadFileToWriter, same transferId convention
+	// so cancelTransfer/pauseTransfer/resumeTransfer reach an anon transfer with no changes of their own. The WritableStream sink arrives via Comlink.transfer;
 	// progress is a plain-fn-wrapped proxy (a raw proxy is serde-rejected — same as the authed path).
 	async downloadLinkedFileToWriterAnon(
 		file: AnyFile,
@@ -1340,17 +1273,14 @@ const api = {
 		onProgress: (bytes: bigint) => void
 	): Promise<void> {
 		await withLinkedUnauth(async unauth => {
-			const controller = new AbortController()
-			downloadAborts.set(transferId, controller)
-
-			await withPauseSignal(downloadPauses, downloadAborts, transferId, async pause => {
+			await withTransferControls(transferId, async managedFuture => {
 				await unauth.downloadFileToWriter({
 					file,
 					writer,
 					progress: bytes => {
 						onProgress(bytes)
 					},
-					managedFuture: { abortSignal: controller.signal, pauseSignal: pause }
+					managedFuture
 				})
 			})
 		})
@@ -1365,17 +1295,14 @@ const api = {
 		onProgress: (bytesWritten: bigint, totalBytes: bigint, itemsProcessed: bigint, totalItems: bigint) => void
 	): Promise<void> {
 		await withLinkedUnauth(async unauth => {
-			const controller = new AbortController()
-			downloadAborts.set(transferId, controller)
-
-			await withPauseSignal(downloadPauses, downloadAborts, transferId, async pause => {
+			await withTransferControls(transferId, async managedFuture => {
 				await unauth.downloadLinkedDirToZip(
 					dir,
 					writer,
 					(bytesWritten, totalBytes, itemsProcessed, totalItems) => {
 						onProgress(bytesWritten, totalBytes, itemsProcessed, totalItems)
 					},
-					{ abortSignal: controller.signal, pauseSignal: pause }
+					managedFuture
 				)
 			})
 		})
@@ -1457,9 +1384,6 @@ const api = {
 	// TanStack Query cache slice instead.
 	listNotes(): Promise<Note[]> {
 		return requireClient().listNotes()
-	},
-	getNote(uuid: string): Promise<Note | undefined> {
-		return requireClient().getNote(uuid)
 	},
 	getNoteContent(note: Note): Promise<string | undefined> {
 		return requireClient().getNoteContent(note)
@@ -1579,9 +1503,6 @@ const api = {
 	},
 	updateLastChatFocusTimesNow(chats: Chat[]): Promise<Chat[]> {
 		return requireClient().updateLastChatFocusTimesNow(chats)
-	},
-	getAllChatsUnreadCount(): Promise<bigint> {
-		return requireClient().getAllChatsUnreadCount()
 	},
 	sendChatMessage(chat: Chat, message: string, replyTo?: ChatMessagePartial): Promise<Chat> {
 		return requireClient().sendChatMessage(chat, message, replyTo)

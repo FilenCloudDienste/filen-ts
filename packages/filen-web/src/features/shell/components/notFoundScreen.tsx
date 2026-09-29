@@ -14,7 +14,7 @@ export function NotFoundScreen() {
 		<div className="flex min-h-svh items-center justify-center bg-canvas p-6 text-foreground">
 			<Empty className="max-w-md">
 				<EmptyHeader>
-					<EmptyMedia variant="icon">
+					<EmptyMedia>
 						<FileQuestionIcon />
 					</EmptyMedia>
 					<EmptyTitle>{t("notFoundTitle")}</EmptyTitle>

@@ -24,8 +24,6 @@ const ZIP_ENTRY_LIMIT = 20_000
 // An .xls opens to be looked at only: nothing is kept, as nothing can be written back.
 const documents = new Map<number, XlsxDocument | CsvDocument>()
 let nextId = 1
-// Whether each open text file can be saved, as its doc said at opening.
-const textWritable = new Map<number, boolean>()
 
 async function open(bytes: Uint8Array, kind: SpreadsheetFileKind): Promise<{ id: number; doc: SpreadsheetDoc }> {
 	const id = nextId++
@@ -59,12 +57,10 @@ async function open(bytes: Uint8Array, kind: SpreadsheetFileKind): Promise<{ id:
 			}
 
 			const document = new CsvDocument(rows, format)
-			const doc = document.doc()
 
 			documents.set(id, document)
-			textWritable.set(id, doc.writable)
 
-			return { id, doc }
+			return { id, doc: document.doc() }
 		}
 	}
 }
@@ -91,11 +87,11 @@ const api = {
 		return Comlink.transfer(serialized, [serialized.bytes.buffer as ArrayBuffer])
 	},
 	// Whether the open document can be saved: for a workbook, once proven that saving loses nothing (its
-	// doc opens with writable false until then); for text, as its doc said.
+	// doc opens with writable false until then); for text, as its format allows.
 	writability: async (id: number): Promise<boolean> => {
 		const found = document(id)
 
-		return found instanceof XlsxDocument ? await found.verifyWritable() : (textWritable.get(id) ?? false)
+		return found instanceof XlsxDocument ? await found.verifyWritable() : found.writable
 	},
 	// The page will not edit this document: a workbook skips its proof and drops what only saving needs.
 	viewOnly: (id: number): void => {
@@ -121,7 +117,6 @@ const api = {
 		}
 
 		documents.delete(id)
-		textWritable.delete(id)
 	}
 }
 

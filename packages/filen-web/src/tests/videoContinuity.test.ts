@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach } from "vitest"
-import { getVideoPlaybackState, setVideoPlaybackState, clearVideoPlaybackStates } from "@/features/preview/lib/videoContinuity"
+import { getVideoPosition, setVideoPosition, clearVideoPlaybackStates } from "@/features/preview/lib/videoContinuity"
 
 beforeEach(() => {
 	clearVideoPlaybackStates()
@@ -7,45 +7,45 @@ beforeEach(() => {
 
 describe("videoContinuity — write/apply lifecycle", () => {
 	it("returns undefined for a uuid with no stored position", () => {
-		expect(getVideoPlaybackState("11111111-1111-1111-1111-111111111111")).toBeUndefined()
+		expect(getVideoPosition("11111111-1111-1111-1111-111111111111")).toBeUndefined()
 	})
 
 	it("returns exactly what was written for a uuid", () => {
-		setVideoPlaybackState("aaaaaaaa-0000-0000-0000-000000000000", { currentTime: 12.5 })
+		setVideoPosition("aaaaaaaa-0000-0000-0000-000000000000", 12.5)
 
-		expect(getVideoPlaybackState("aaaaaaaa-0000-0000-0000-000000000000")).toEqual({ currentTime: 12.5 })
+		expect(getVideoPosition("aaaaaaaa-0000-0000-0000-000000000000")).toBe(12.5)
 	})
 
 	it("keeps distinct uuids independent", () => {
-		setVideoPlaybackState("a", { currentTime: 1 })
-		setVideoPlaybackState("b", { currentTime: 2 })
+		setVideoPosition("a", 1)
+		setVideoPosition("b", 2)
 
-		expect(getVideoPlaybackState("a")).toEqual({ currentTime: 1 })
-		expect(getVideoPlaybackState("b")).toEqual({ currentTime: 2 })
+		expect(getVideoPosition("a")).toBe(1)
+		expect(getVideoPosition("b")).toBe(2)
 	})
 
 	it("overwrites a previous write for the same uuid rather than accumulating", () => {
-		setVideoPlaybackState("a", { currentTime: 1 })
-		setVideoPlaybackState("a", { currentTime: 99 })
+		setVideoPosition("a", 1)
+		setVideoPosition("a", 99)
 
-		expect(getVideoPlaybackState("a")).toEqual({ currentTime: 99 })
+		expect(getVideoPosition("a")).toBe(99)
 	})
 })
 
 describe("videoContinuity — clear (overlay-session boundary)", () => {
 	it("drops every stored position", () => {
-		setVideoPlaybackState("a", { currentTime: 1 })
-		setVideoPlaybackState("b", { currentTime: 2 })
+		setVideoPosition("a", 1)
+		setVideoPosition("b", 2)
 
 		clearVideoPlaybackStates()
 
-		expect(getVideoPlaybackState("a")).toBeUndefined()
-		expect(getVideoPlaybackState("b")).toBeUndefined()
+		expect(getVideoPosition("a")).toBeUndefined()
+		expect(getVideoPosition("b")).toBeUndefined()
 	})
 
 	it("is a no-op on an already-empty map", () => {
 		clearVideoPlaybackStates()
 
-		expect(getVideoPlaybackState("a")).toBeUndefined()
+		expect(getVideoPosition("a")).toBeUndefined()
 	})
 })

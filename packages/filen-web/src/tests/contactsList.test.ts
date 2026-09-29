@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest"
 import type { BlockedContact, Contact, ContactRequestIn, ContactRequestOut } from "@filen/sdk-rs"
 import {
 	buildContactSections,
-	contactDisplayName,
 	contactInitials,
 	contactsSectionCounts,
 	filterContactSections,
@@ -55,24 +54,6 @@ function mockOutgoing(overrides: Partial<ContactRequestOut> = {}): ContactReques
 		...overrides
 	}
 }
-
-describe("contactDisplayName", () => {
-	it("returns the nickname when it is set and non-empty", () => {
-		expect(contactDisplayName({ email: "alice@filen.io", nickName: "Alice" })).toBe("Alice")
-	})
-
-	it("falls back to the email when nickName is undefined", () => {
-		expect(contactDisplayName({ email: "alice@filen.io", nickName: undefined })).toBe("alice@filen.io")
-	})
-
-	it("falls back to the email when nickName is an empty string", () => {
-		expect(contactDisplayName({ email: "alice@filen.io", nickName: "" })).toBe("alice@filen.io")
-	})
-
-	it("falls back to the email when nickName is omitted entirely", () => {
-		expect(contactDisplayName({ email: "alice@filen.io" })).toBe("alice@filen.io")
-	})
-})
 
 describe("contactInitials", () => {
 	it("uppercases the first character of the display name", () => {

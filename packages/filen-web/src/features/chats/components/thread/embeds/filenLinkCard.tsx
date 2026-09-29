@@ -78,7 +78,7 @@ function LinkCardShell({
 // uses, fed the fabricated linked-file item (linkedFileIntoDriveItem, item.ts) —
 // zero new viewer code for any of these categories. `variant="links"` (not "drive"): the item is
 // neither owned nor a real tree member, so this keeps the overlay's inline-editor save path inert
-// (isEditable gates on variant==="drive") on top of previewMenuVisible's own isLinkedEmbedItem check.
+// (isEditable gates on variant==="drive") on top of the overlay's own isLinkedEmbedItem menu gate.
 // `downloadable` is the link's own flag.
 function FilenPreviewCard({
 	item,
@@ -110,7 +110,7 @@ function FilenPreviewCard({
 			{previewOpen ? (
 				<PreviewOverlay
 					variant="links"
-					items={[{ item }]}
+					items={[item]}
 					index={0}
 					onStep={noop}
 					onClose={() => {
@@ -212,7 +212,7 @@ function FilenStreamedInlineMedia({
 			{previewOpen ? (
 				<PreviewOverlay
 					variant="links"
-					items={[{ item }]}
+					items={[item]}
 					index={0}
 					onStep={noop}
 					onClose={() => {

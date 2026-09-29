@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
 import type { Dir, File } from "@filen/sdk-rs"
-import { narrowItem, linkedFileIntoDriveItem, type DriveItem } from "@/features/drive/lib/item"
+import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 
 // previewOverlay.logic.ts's previewMenuActions pulls in itemMenu.logic.ts, which imports
 // features/drive/lib/download.ts (startDownloads) — unresolvable/unwanted under node vitest, same
@@ -20,7 +20,6 @@ vi.mock("@/features/drive/lib/download", async importOriginal => {
 import {
 	isTextEditingTarget,
 	previewMenuActions,
-	previewMenuVisible,
 	previewNavigationUnmountsOverlay,
 	hasClosest,
 	isVideoControlsBandClick,
@@ -174,32 +173,6 @@ describe("previewMenuActions (preview header item-menu derivation)", () => {
 			"trash"
 		]
 		expect(menuIds(fileItem(), "drive")).toEqual(withDownload.filter(id => id !== "download"))
-	})
-})
-
-describe("previewMenuVisible", () => {
-	it("is true for an owned drive item", () => {
-		expect(previewMenuVisible({ item: fileItem() })).toBe(true)
-	})
-
-	it("is false for a chat/note embed's fabricated linked-file item — neither owned nor a real tree member", () => {
-		const linkedItem = linkedFileIntoDriveItem({
-			uuid: "44444444-4444-4444-4444-444444444444",
-			name: { Decrypted: "shared.pdf" },
-			mime: { Decrypted: "application/pdf" },
-			size: 2_048n,
-			chunks: 1n,
-			region: "de-1",
-			bucket: "filen-1",
-			version: 2,
-			timestamp: 1_700_000_000_000n,
-			fileKey: "key",
-			downloadable: true,
-			linkedTag: true,
-			canMakeThumbnail: false
-		})
-
-		expect(previewMenuVisible({ item: linkedItem })).toBe(false)
 	})
 })
 

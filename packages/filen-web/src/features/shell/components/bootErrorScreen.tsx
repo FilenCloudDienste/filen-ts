@@ -27,10 +27,7 @@ export function BootErrorScreen({ reason, error }: BootErrorScreenProps) {
 		<div className="flex min-h-svh items-center justify-center bg-canvas p-6 text-foreground">
 			<Empty className="max-w-md">
 				<EmptyHeader>
-					<EmptyMedia
-						variant="icon"
-						className="bg-destructive/10 text-destructive"
-					>
+					<EmptyMedia className="bg-destructive/10 text-destructive">
 						<TriangleAlertIcon />
 					</EmptyMedia>
 					<EmptyTitle>{t("bootErrorTitle")}</EmptyTitle>

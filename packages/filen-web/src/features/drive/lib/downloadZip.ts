@@ -19,9 +19,8 @@ import { useTransfersStore, type TransfersStore } from "@/features/transfers/sto
 
 // DI mirror of RunDownloadDeps (download.ts) for the zip path — one archive, one transfer row, one
 // save dialog. No `cancel` field: cancelTransfer/pauseTransfer (features/transfers/lib/control.ts) already
-// dispatch to sdkApi.cancelDownload/pauseDownload by transferId for any "download"-direction row, and a
-// zip transfer registers under the exact same downloadAborts/downloadPauses maps sdk.worker.ts already
-// keys single-file downloads by — no zip-specific control wiring is needed here.
+// dispatch to the worker by transferId, and a zip transfer registers in the same transferControls map
+// sdk.worker.ts keys every transfer by — no zip-specific control wiring is needed here.
 export interface RunZipDownloadDeps {
 	downloadZip: (
 		items: AnyItemWithContext[],

@@ -60,14 +60,14 @@ export function deriveAudioHandoff(items: DriveItem[], openedUuid: string, isTra
 		return null
 	}
 
-	const opened = items.find(item => asDirectoryOrFile(item).data.uuid === openedUuid)
+	const opened = items.find(item => item.data.uuid === openedUuid)
 
-	if (!opened || !isAudioItem(opened) || asDirectoryOrFile(opened).data.undecryptable) {
+	if (!opened || !isAudioItem(opened) || opened.data.undecryptable) {
 		return null
 	}
 
-	const playable = items.filter(item => isAudioItem(item) && !asDirectoryOrFile(item).data.undecryptable)
-	const startIndex = playable.findIndex(item => asDirectoryOrFile(item).data.uuid === openedUuid)
+	const playable = items.filter(item => isAudioItem(item) && !item.data.undecryptable)
+	const startIndex = playable.findIndex(item => item.data.uuid === openedUuid)
 
 	if (startIndex === -1) {
 		return null

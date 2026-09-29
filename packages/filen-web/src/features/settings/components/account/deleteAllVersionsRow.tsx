@@ -19,9 +19,8 @@ interface DeleteAllVersionsRowProps {
 // The exact same TypedConfirmDialog primitive drive's emptyTrashButton already uses for an
 // equally severe whole-drive-scale destructive op (rather than DeleteAccountRow's plain double
 // ConfirmDialog chain — that row's two-stage shape exists for its 2FA-code branch, which this
-// single-stage op has no equivalent of). `isArmed`'s exact-match gate is what makes "type a wrong
-// phrase, the button stays disabled" true — verified once in typedConfirmDialog.test.ts, not
-// re-derived here. deleteAllVersions() is NEVER e2e-invoked — it would irreversibly wipe the
+// single-stage op has no equivalent of). The dialog's exact-match gate is what makes "type a wrong
+// phrase, the button stays disabled" true. deleteAllVersions() is NEVER e2e-invoked — it would irreversibly wipe the
 // shared account's version history — this row is unit/render-only in this repo's own test suite.
 function DeleteAllVersionsRow({ accountQuery }: DeleteAllVersionsRowProps) {
 	const { t } = useTranslation(["settings", "common"])
@@ -74,7 +73,6 @@ function DeleteAllVersionsRow({ accountQuery }: DeleteAllVersionsRowProps) {
 				matchValue={DELETE_ALL_VERSIONS_PHRASE}
 				confirmLabel={t("settingsDeleteAllVersionsSubmit")}
 				cancelLabel={t("common:cancel")}
-				destructive
 				onOpenChange={next => {
 					if (!next) {
 						setOpen(false)

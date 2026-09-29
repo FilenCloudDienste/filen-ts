@@ -35,7 +35,7 @@ export function EmptyState(props: EmptyStateProps) {
 			data-testid={props.variant === "empty" ? "listing-empty" : "listing-error"}
 		>
 			<EmptyHeader>
-				<EmptyMedia variant="icon">
+				<EmptyMedia>
 					<Icon />
 				</EmptyMedia>
 				<EmptyTitle>{props.variant === "error" ? t("driveLoadError") : t(copy?.titleKey ?? "driveEmptyTitle")}</EmptyTitle>

@@ -5,13 +5,13 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import type { CopyFailure, CopyReport, UuidStr } from "@filen/sdk-rs"
 import "@/lib/i18n"
 
-const { pauseCopy, resumeCopy, copyItemsTo } = vi.hoisted(() => ({
-	pauseCopy: vi.fn(),
-	resumeCopy: vi.fn(),
+const { pauseTransfer, resumeTransfer, copyItemsTo } = vi.hoisted(() => ({
+	pauseTransfer: vi.fn(),
+	resumeTransfer: vi.fn(),
 	copyItemsTo: vi.fn<() => Promise<CopyReport>>()
 }))
 
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: { pauseCopy, resumeCopy, copyItemsTo } }))
+vi.mock("@/lib/sdk/client", () => ({ sdkApi: { pauseTransfer, resumeTransfer, copyItemsTo } }))
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), custom: vi.fn(), dismiss: vi.fn() } }))
 
 import { CopyJobToast } from "@/features/transfers/components/copyJobToast"
@@ -164,11 +164,11 @@ describe("CopyJobToast", () => {
 
 		fireEvent.click(screen.getByRole("button", { name: "Pause" }))
 
-		expect(pauseCopy).toHaveBeenCalledWith("job")
+		expect(pauseTransfer).toHaveBeenCalledWith("job")
 
 		fireEvent.click(screen.getByRole("button", { name: "Resume" }))
 
-		expect(resumeCopy).toHaveBeenCalledWith("job")
+		expect(resumeTransfer).toHaveBeenCalledWith("job")
 	})
 
 	it("opens the stop prompt for this job", () => {
@@ -215,9 +215,7 @@ describe("CopyJobToast", () => {
 				sourceUuid: f.info.sourceUuid,
 				sourcePath: f.info.sourcePath,
 				destName: f.info.destName,
-				error: copyErrorDTO(f.info.error),
-				affectedFiles: 1,
-				affectedBytes: 1
+				error: copyErrorDTO(f.info.error)
 			})),
 			renamedCount: 1
 		})
@@ -273,9 +271,7 @@ describe("CopyJobToast", () => {
 				sourceUuid: f.info.sourceUuid,
 				sourcePath: f.info.sourcePath,
 				destName: f.info.destName,
-				error: copyErrorDTO(f.info.error),
-				affectedFiles: 1,
-				affectedBytes: 1
+				error: copyErrorDTO(f.info.error)
 			}))
 		})
 		renderCard()
@@ -353,9 +349,7 @@ describe("CopyJobToast", () => {
 					sourceUuid: failed.info.sourceUuid,
 					sourcePath: failed.info.sourcePath,
 					destName: failed.info.destName,
-					error: copyErrorDTO(failed.info.error),
-					affectedFiles: 1,
-					affectedBytes: 1
+					error: copyErrorDTO(failed.info.error)
 				}
 			]
 		})

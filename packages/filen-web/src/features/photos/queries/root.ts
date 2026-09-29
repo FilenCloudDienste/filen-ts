@@ -3,7 +3,7 @@ import { queryClient } from "@/queries/client"
 import { getPhotosRoot } from "@/features/photos/lib/root"
 
 // Same plain-fn-then-invalidate shape as startScreen.ts/sidebarWidth.ts's own kv-backed queries.
-export function photosRootQueryKey() {
+function photosRootQueryKey() {
 	return ["photos", "root"] as const
 }
 

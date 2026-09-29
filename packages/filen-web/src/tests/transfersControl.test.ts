@@ -3,21 +3,10 @@ import type { Transfer } from "@/features/transfers/store/useTransfersStore"
 
 // Same mock boundary as download.test.ts's own cancel test: the real sdk client module
 // touches a Vite `?worker`, unresolvable/unwanted under node vitest.
-const { cancelUpload, cancelDownload, pauseUpload, pauseDownload, resumeUpload, resumeDownload, pauseCopy, resumeCopy } = vi.hoisted(
-	() => ({
-		cancelUpload: vi.fn(),
-		cancelDownload: vi.fn(),
-		pauseUpload: vi.fn(),
-		pauseDownload: vi.fn(),
-		resumeUpload: vi.fn(),
-		resumeDownload: vi.fn(),
-		pauseCopy: vi.fn(),
-		resumeCopy: vi.fn()
-	})
-)
+const { sdkCancel, sdkPause, sdkResume } = vi.hoisted(() => ({ sdkCancel: vi.fn(), sdkPause: vi.fn(), sdkResume: vi.fn() }))
 
 vi.mock("@/lib/sdk/client", () => ({
-	sdkApi: { cancelUpload, cancelDownload, pauseUpload, pauseDownload, resumeUpload, resumeDownload, pauseCopy, resumeCopy }
+	sdkApi: { cancelTransfer: sdkCancel, pauseTransfer: sdkPause, resumeTransfer: sdkResume }
 }))
 
 const { requestCopyCancel } = vi.hoisted(() => ({ requestCopyCancel: vi.fn() }))
@@ -51,29 +40,26 @@ beforeEach(() => {
 })
 
 describe("cancelTransfer", () => {
-	it("calls sdkApi.cancelUpload for an active upload-direction transfer", () => {
+	it("calls sdkApi.cancelTransfer for an active upload-direction transfer", () => {
 		useTransfersStore.setState({ transfers: [makeTransfer({ id: "t1", direction: "upload", status: "uploading" })] })
 
 		cancelTransfer("t1")
 
-		expect(cancelUpload).toHaveBeenCalledWith("t1")
-		expect(cancelDownload).not.toHaveBeenCalled()
+		expect(sdkCancel.mock.calls).toEqual([["t1"]])
 	})
 
-	it("calls sdkApi.cancelDownload for an active download-direction transfer", () => {
+	it("calls sdkApi.cancelTransfer for an active download-direction transfer", () => {
 		useTransfersStore.setState({ transfers: [makeTransfer({ id: "t2", direction: "download", status: "downloading" })] })
 
 		cancelTransfer("t2")
 
-		expect(cancelDownload).toHaveBeenCalledWith("t2")
-		expect(cancelUpload).not.toHaveBeenCalled()
+		expect(sdkCancel.mock.calls).toEqual([["t2"]])
 	})
 
 	it("is a no-op for an id not present in the store", () => {
 		cancelTransfer("missing")
 
-		expect(cancelUpload).not.toHaveBeenCalled()
-		expect(cancelDownload).not.toHaveBeenCalled()
+		expect(sdkCancel).not.toHaveBeenCalled()
 	})
 
 	it("is a no-op for an already-terminal (done) transfer", () => {
@@ -81,8 +67,7 @@ describe("cancelTransfer", () => {
 
 		cancelTransfer("t3")
 
-		expect(cancelUpload).not.toHaveBeenCalled()
-		expect(cancelDownload).not.toHaveBeenCalled()
+		expect(sdkCancel).not.toHaveBeenCalled()
 	})
 
 	it("is a no-op for an already-terminal (error) transfer", () => {
@@ -90,37 +75,33 @@ describe("cancelTransfer", () => {
 
 		cancelTransfer("t4")
 
-		expect(cancelUpload).not.toHaveBeenCalled()
-		expect(cancelDownload).not.toHaveBeenCalled()
+		expect(sdkCancel).not.toHaveBeenCalled()
 	})
 })
 
 describe("pauseTransfer", () => {
-	it("calls sdkApi.pauseUpload and sets paused for an active upload-direction transfer", () => {
+	it("calls sdkApi.pauseTransfer and sets paused for an active upload-direction transfer", () => {
 		useTransfersStore.setState({ transfers: [makeTransfer({ id: "t1", direction: "upload", status: "uploading" })] })
 
 		pauseTransfer("t1")
 
-		expect(pauseUpload).toHaveBeenCalledWith("t1")
-		expect(pauseDownload).not.toHaveBeenCalled()
+		expect(sdkPause.mock.calls).toEqual([["t1"]])
 		expect(useTransfersStore.getState().transfers.find(transfer => transfer.id === "t1")?.paused).toBe(true)
 	})
 
-	it("calls sdkApi.pauseDownload and sets paused for an active download-direction transfer", () => {
+	it("calls sdkApi.pauseTransfer and sets paused for an active download-direction transfer", () => {
 		useTransfersStore.setState({ transfers: [makeTransfer({ id: "t2", direction: "download", status: "downloading" })] })
 
 		pauseTransfer("t2")
 
-		expect(pauseDownload).toHaveBeenCalledWith("t2")
-		expect(pauseUpload).not.toHaveBeenCalled()
+		expect(sdkPause.mock.calls).toEqual([["t2"]])
 		expect(useTransfersStore.getState().transfers.find(transfer => transfer.id === "t2")?.paused).toBe(true)
 	})
 
 	it("is a no-op for an id not present in the store", () => {
 		pauseTransfer("missing")
 
-		expect(pauseUpload).not.toHaveBeenCalled()
-		expect(pauseDownload).not.toHaveBeenCalled()
+		expect(sdkPause).not.toHaveBeenCalled()
 	})
 
 	it("is a no-op for an already-terminal transfer (no worker call, no setPaused)", () => {
@@ -128,38 +109,34 @@ describe("pauseTransfer", () => {
 
 		pauseTransfer("t3")
 
-		expect(pauseUpload).not.toHaveBeenCalled()
-		expect(pauseDownload).not.toHaveBeenCalled()
+		expect(sdkPause).not.toHaveBeenCalled()
 		expect(useTransfersStore.getState().transfers.find(transfer => transfer.id === "t3")?.paused).toBe(false)
 	})
 })
 
 describe("resumeTransfer", () => {
-	it("calls sdkApi.resumeUpload and clears paused for an active upload-direction transfer", () => {
+	it("calls sdkApi.resumeTransfer and clears paused for an active upload-direction transfer", () => {
 		useTransfersStore.setState({ transfers: [makeTransfer({ id: "t1", direction: "upload", status: "uploading", paused: true })] })
 
 		resumeTransfer("t1")
 
-		expect(resumeUpload).toHaveBeenCalledWith("t1")
-		expect(resumeDownload).not.toHaveBeenCalled()
+		expect(sdkResume.mock.calls).toEqual([["t1"]])
 		expect(useTransfersStore.getState().transfers.find(transfer => transfer.id === "t1")?.paused).toBe(false)
 	})
 
-	it("calls sdkApi.resumeDownload and clears paused for an active download-direction transfer", () => {
+	it("calls sdkApi.resumeTransfer and clears paused for an active download-direction transfer", () => {
 		useTransfersStore.setState({ transfers: [makeTransfer({ id: "t2", direction: "download", status: "downloading", paused: true })] })
 
 		resumeTransfer("t2")
 
-		expect(resumeDownload).toHaveBeenCalledWith("t2")
-		expect(resumeUpload).not.toHaveBeenCalled()
+		expect(sdkResume.mock.calls).toEqual([["t2"]])
 		expect(useTransfersStore.getState().transfers.find(transfer => transfer.id === "t2")?.paused).toBe(false)
 	})
 
 	it("is a no-op for an id not present in the store", () => {
 		resumeTransfer("missing")
 
-		expect(resumeUpload).not.toHaveBeenCalled()
-		expect(resumeDownload).not.toHaveBeenCalled()
+		expect(sdkResume).not.toHaveBeenCalled()
 	})
 
 	it("is a no-op for an already-terminal transfer (no worker call, no setPaused)", () => {
@@ -167,8 +144,7 @@ describe("resumeTransfer", () => {
 
 		resumeTransfer("t4")
 
-		expect(resumeUpload).not.toHaveBeenCalled()
-		expect(resumeDownload).not.toHaveBeenCalled()
+		expect(sdkResume).not.toHaveBeenCalled()
 		expect(useTransfersStore.getState().transfers.find(transfer => transfer.id === "t4")?.paused).toBe(true)
 	})
 })
@@ -180,8 +156,7 @@ describe("copy transfers", () => {
 		cancelTransfer("c1")
 
 		expect(requestCopyCancel).toHaveBeenCalledWith("c1", { trashCopied: false })
-		expect(cancelUpload).not.toHaveBeenCalled()
-		expect(cancelDownload).not.toHaveBeenCalled()
+		expect(sdkCancel).not.toHaveBeenCalled()
 	})
 
 	it("pauses and resumes a copy through the copy job", () => {
@@ -189,12 +164,12 @@ describe("copy transfers", () => {
 
 		pauseTransfer("c1")
 
-		expect(pauseCopy).toHaveBeenCalledWith("c1")
+		expect(sdkPause).toHaveBeenCalledWith("c1")
 		expect(useTransfersStore.getState().transfers[0]?.paused).toBe(true)
 
 		resumeTransfer("c1")
 
-		expect(resumeCopy).toHaveBeenCalledWith("c1")
+		expect(sdkResume).toHaveBeenCalledWith("c1")
 		expect(useTransfersStore.getState().transfers[0]?.paused).toBe(false)
 	})
 
@@ -205,7 +180,7 @@ describe("copy transfers", () => {
 		pauseTransfer("c1")
 
 		expect(requestCopyCancel).not.toHaveBeenCalled()
-		expect(pauseCopy).not.toHaveBeenCalled()
+		expect(sdkPause).not.toHaveBeenCalled()
 	})
 
 	// Its row stays active while what it copied moves to the trash, which has no pause.
@@ -217,13 +192,13 @@ describe("copy transfers", () => {
 
 		pauseTransfer("c1")
 
-		expect(pauseCopy).not.toHaveBeenCalled()
+		expect(sdkPause).not.toHaveBeenCalled()
 		expect(useTransfersStore.getState().transfers[0]?.paused).toBe(false)
 
 		useTransfersStore.getState().setPaused("c1", true)
 		resumeTransfer("c1")
 
-		expect(resumeCopy).not.toHaveBeenCalled()
+		expect(sdkResume).not.toHaveBeenCalled()
 		expect(useTransfersStore.getState().transfers[0]?.paused).toBe(true)
 	})
 })
@@ -241,8 +216,7 @@ describe("cancelActiveTransfers", () => {
 
 		cancelActiveTransfers()
 
-		expect(cancelUpload.mock.calls).toEqual([["u"]])
-		expect(cancelDownload.mock.calls).toEqual([["d"]])
+		expect(sdkCancel.mock.calls).toEqual([["u"], ["d"]])
 		expect(requestCopyCancel).toHaveBeenCalledWith("c", { trashCopied: false })
 	})
 })

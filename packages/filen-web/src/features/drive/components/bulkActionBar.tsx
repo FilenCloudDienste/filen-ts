@@ -4,13 +4,13 @@ import { XIcon } from "lucide-react"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { aggregateDriveSelectionFlags } from "@/features/drive/lib/selectionFlags"
+import { startDownloads } from "@/features/drive/lib/download"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import {
 	driveBulkActions,
 	isBulkActionOfflineDisabled,
 	isBulkDownloadEnabled,
 	runBulkFavorite,
-	startBulkDownload,
 	type BulkActionDescriptor,
 	type BulkDialogActionKind
 } from "@/features/drive/components/bulkActionBar.logic"
@@ -19,8 +19,6 @@ import { Kbd } from "@/lib/keymap/kbd"
 import { toastObstructionRef } from "@/lib/toastClearance"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-
-export type { BulkDialogActionKind }
 
 export interface BulkActionBarProps {
 	variant: DriveVariant
@@ -42,14 +40,14 @@ export function BulkActionBar({ variant, selectedItems, onDialogAction }: BulkAc
 	const flags = aggregateDriveSelectionFlags(selectedItems)
 	const descriptors = driveBulkActions(variant, flags)
 
-	// download is checked FIRST, before dialog/favorite — startBulkDownload's FSA save picker needs
+	// download is checked FIRST, before dialog/favorite — startDownloads' FSA save picker needs
 	// this click's own live user gesture (see features/drive/lib/download.ts), so nothing here may yield to the
 	// event loop ahead of it. A disabled Button's onClick never fires at all (see the disabled prop
 	// below), which today only guards the empty-selection edge case — every dir/multi selection is
 	// downloadable too now (the sw zip route).
 	function runDescriptor(descriptor: BulkActionDescriptor): void {
 		if (descriptor.id === "download") {
-			startBulkDownload(selectedItems)
+			void startDownloads(selectedItems)
 			return
 		}
 

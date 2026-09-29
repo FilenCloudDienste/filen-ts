@@ -2,7 +2,7 @@ import { type ReactElement, type SyntheticEvent } from "react"
 import { useTranslation } from "react-i18next"
 import { UploadIcon } from "lucide-react"
 import { isEmptySpaceTarget } from "@/features/drive/lib/clickAway.logic"
-import { type PreviewSource } from "@/features/preview/lib/previewSource"
+import { type DriveItem } from "@/features/drive/lib/item"
 import { useUploadMenuActions } from "@/features/drive/hooks/useUploadMenuActions"
 import { DestinationEntries, type DestinationActions } from "@/features/drive/components/destinationMenu"
 import { CONTEXT_TREE_MENU_FAMILY, DROPDOWN_TREE_MENU_FAMILY } from "@/features/drive/components/directoryTreeSubmenu"
@@ -22,7 +22,7 @@ export interface UploadMenuProps {
 	// own useDriveDialogHost().openPreview, threaded in so the newly created text file opens its
 	// editor immediately (mobile parity: useDriveUpload.ts's createTextFile does the same once its own
 	// upload settles).
-	openPreview: (sources: PreviewSource[], index: number) => void
+	openPreview: (items: DriveItem[], index: number) => void
 	// True only when `disabled` is caused specifically by the app being offline — surfaced as the
 	// trigger's native title, mirroring newDirectory.tsx's own offline/disabled split.
 	offline?: boolean

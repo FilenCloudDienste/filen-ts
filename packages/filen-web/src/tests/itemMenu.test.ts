@@ -24,20 +24,11 @@ import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 import type { DriveItemLinkStatus } from "@/features/drive/queries/drive"
 
-// itemMenu.logic.ts imports features/drive/lib/download.ts (for startDownloads) which in turn touches the
-// worker client and query client — unresolvable/unwanted under node vitest, mirrors
-// download.test.ts's own mock boundary. startDownloads is replaced, since actually running
-// it would reach the (also mocked) worker.
+// itemMenu.logic.ts's imports reach the worker client and query client — unresolvable/unwanted under
+// node vitest.
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
-
-const { startDownloadsMock } = vi.hoisted(() => ({ startDownloadsMock: vi.fn() }))
-
-vi.mock("@/features/drive/lib/download", async importOriginal => {
-	const actual = await importOriginal<typeof import("@/features/drive/lib/download")>()
-	return { ...actual, startDownloads: startDownloadsMock }
-})
 
 // isFsaAvailable reads `window`, absent entirely under node vitest (a real call would throw) — kept
 // REAL otherwise (via importOriginal) so save-download's own other exports stay genuine.
@@ -57,7 +48,6 @@ import {
 	canWriteIntoItem,
 	driveItemActions,
 	resolveCopyLinkAction,
-	startItemDownload,
 	type ItemActionId
 } from "@/features/drive/components/itemMenu.logic"
 
@@ -840,19 +830,8 @@ describe("applyOfflineGate", () => {
 	})
 })
 
-describe("startItemDownload", () => {
-	it("calls startDownloads with the item wrapped in a single-element array, synchronously (gesture-preserving)", () => {
-		const item = fileItem()
-
-		startItemDownload(item)
-
-		expect(startDownloadsMock).toHaveBeenCalledWith([item])
-	})
-})
-
 // Copy-link's dispatch matrix — the item menu's real one-tap behavior, tested at this pure seam
-// instead of itemMenu.tsx's onClick (DOM-dependent, same limitation startItemDownload's own doc
-// comment notes).
+// instead of itemMenu.tsx's onClick (DOM-dependent).
 describe("resolveCopyLinkAction", () => {
 	function fileLinkStatus(linkUuid = "55555555-5555-5555-5555-555555555555"): DriveItemLinkStatus {
 		return {

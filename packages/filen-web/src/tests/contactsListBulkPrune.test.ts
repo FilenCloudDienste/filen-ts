@@ -78,7 +78,6 @@ function selectionStub(selected: { contacts?: string[]; requests?: string[] }) {
 			contacts: new Set(selected.contacts ?? []),
 			requests: new Set(selected.requests ?? [])
 		},
-		selectedCount: (selected.contacts?.length ?? 0) + (selected.requests?.length ?? 0),
 		activeIndexFor: () => 0,
 		registerRowRef: vi.fn(),
 		handlePointerSelect: vi.fn(),

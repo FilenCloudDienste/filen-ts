@@ -35,7 +35,7 @@ import { COVER_THUMBNAIL_TYPE } from "@/features/audio/lib/trackTags.logic"
 const POSITION_WRITE_THROTTLE_MS = 250
 
 // Volume/muted persist separately from the queue prefs: they are output-device settings the engine
-// owns (desktop needs an in-app volume), not queue state. Same per-tab kv rationale as the queue prefs.
+// persists (desktop needs an in-app volume), not queue state. Same per-tab kv rationale as the queue prefs.
 const OUTPUT_PREFS_KV_KEY = "audio.v1.output"
 
 export const audioOutputPrefsSchema = type({ volume: "number", muted: "boolean" })
@@ -137,8 +137,6 @@ export class AudioEngine {
 	// Consecutive failed-track auto-skips; reset to 0 on any successful play. Bounds the auto-skip pass.
 	private skipGuard = 0
 	private lastPositionWriteAt = 0
-	private volume = 1
-	private muted = false
 	private outputLoad: Promise<void> | null = null
 	private visibilityHandler: (() => void) | null = null
 	// The one-track-ahead warm-up element + which queue index it holds, if any. `null` index means
@@ -215,8 +213,10 @@ export class AudioEngine {
 		})
 
 		// Re-apply the persisted output prefs to a freshly-created element.
-		element.setVolume(this.volume)
-		element.setMuted(this.muted)
+		const { volume, muted } = useAudioStore.getState()
+
+		element.setVolume(volume)
+		element.setMuted(muted)
 		this.element = element
 
 		return element
@@ -977,27 +977,30 @@ export class AudioEngine {
 	// Raising the volume while muted unmutes, as in any player: otherwise the slider (which shows 0 while
 	// muted) snaps back on every move and nothing becomes audible.
 	public setVolume(volume: number): void {
-		this.volume = clampVolume(volume)
-		this.element?.setVolume(this.volume)
+		const state = useAudioStore.getState()
+		const clamped = clampVolume(volume)
+		const unmute = state.muted && clamped > 0
 
-		if (this.muted && this.volume > 0) {
-			this.muted = false
+		this.element?.setVolume(clamped)
+
+		if (unmute) {
 			this.element?.setMuted(false)
 		}
 
-		useAudioStore.getState().setOutput(this.volume, this.muted)
+		state.setOutput(clamped, state.muted && !unmute)
 		void this.persistOutputPrefs()
 	}
 
 	public setMuted(muted: boolean): void {
-		this.muted = muted
+		const state = useAudioStore.getState()
+
 		this.element?.setMuted(muted)
-		useAudioStore.getState().setOutput(this.volume, this.muted)
+		state.setOutput(state.volume, muted)
 		void this.persistOutputPrefs()
 	}
 
 	public toggleMuted(): void {
-		this.setMuted(!this.muted)
+		this.setMuted(!useAudioStore.getState().muted)
 	}
 
 	// Load-once persisted volume/muted, memoized per engine instance. Swallowed on failure — output
@@ -1009,11 +1012,11 @@ export class AudioEngine {
 					return
 				}
 
-				this.volume = clampVolume(loaded.volume)
-				this.muted = loaded.muted
-				this.element?.setVolume(this.volume)
-				this.element?.setMuted(this.muted)
-				useAudioStore.getState().setOutput(this.volume, this.muted)
+				const volume = clampVolume(loaded.volume)
+
+				this.element?.setVolume(volume)
+				this.element?.setMuted(loaded.muted)
+				useAudioStore.getState().setOutput(volume, loaded.muted)
 			})
 			.catch((error: unknown) => {
 				log.warn("audio", "failed to load persisted audio output prefs", error)
@@ -1024,7 +1027,9 @@ export class AudioEngine {
 
 	private async persistOutputPrefs(): Promise<void> {
 		try {
-			await kvSetJson(OUTPUT_PREFS_KV_KEY, { volume: this.volume, muted: this.muted })
+			const { volume, muted } = useAudioStore.getState()
+
+			await kvSetJson(OUTPUT_PREFS_KV_KEY, { volume, muted })
 		} catch (error) {
 			log.warn("audio", "failed to persist audio output prefs", error)
 		}

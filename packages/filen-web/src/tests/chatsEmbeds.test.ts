@@ -1,6 +1,7 @@
 import { Buffer } from "buffer"
 import { describe, expect, it } from "vitest"
-import { parseFilenPublicLink, embedCandidatesForLinks, extractMessageLinks, MAX_MESSAGE_EMBEDS } from "@/features/chats/lib/embeds.logic"
+import { segmentMessage } from "@filen/shared"
+import { parseFilenPublicLink, embedCandidatesForLinks, linksFromSegments, MAX_MESSAGE_EMBEDS } from "@/features/chats/lib/embeds.logic"
 
 // Version 4 (third group starts "4"), variant 8 (fourth "8") — @filen/shared's parseFilenPublicLink
 // validates both nibbles via the 'uuid' package, unlike a plain 8-4-4-4-12 hex-shape regex.
@@ -131,31 +132,35 @@ describe("embedCandidatesForLinks", () => {
 	})
 })
 
-describe("extractMessageLinks", () => {
+function extractLinks(text: string | undefined): string[] {
+	return linksFromSegments(segmentMessage(text))
+}
+
+describe("linksFromSegments", () => {
 	it("pulls every 'link' segment's href, in order, from the shared segmentMessage pipeline", () => {
 		// hardenLinkHref normalizes via `new URL().href`, which appends the root path — matches
 		// segmentMessage's own actual output, not the raw substring the message text contained.
-		expect(extractMessageLinks("see https://a.example.com and https://b.example.com too")).toEqual([
+		expect(extractLinks("see https://a.example.com and https://b.example.com too")).toEqual([
 			"https://a.example.com/",
 			"https://b.example.com/"
 		])
 	})
 
 	it("returns [] for undefined/empty text", () => {
-		expect(extractMessageLinks(undefined)).toEqual([])
-		expect(extractMessageLinks("")).toEqual([])
+		expect(extractLinks(undefined)).toEqual([])
+		expect(extractLinks("")).toEqual([])
 	})
 
 	it("never extracts a url embedded inside a code fence (regexed.logic's own ordering)", () => {
-		expect(extractMessageLinks("```https://inside-code.example.com```")).toEqual([])
+		expect(extractLinks("```https://inside-code.example.com```")).toEqual([])
 	})
 
 	// A closing quote kept in the href lands in the key fragment, and the public link no longer parses.
 	it("leaves a closing quote or angle bracket out of the href, so a quoted public link keeps its card", () => {
 		const url = newFileLinkUrl()
 
-		expect(extractMessageLinks(`see "${url}" and <https://example.com/a.png>`)).toEqual([url, "https://example.com/a.png"])
-		expect(embedCandidatesForLinks(extractMessageLinks(`see "${url}" now`))).toEqual([
+		expect(extractLinks(`see "${url}" and <https://example.com/a.png>`)).toEqual([url, "https://example.com/a.png"])
+		expect(embedCandidatesForLinks(extractLinks(`see "${url}" now`))).toEqual([
 			{ kind: "filenLink", url, link: { kind: "file", linkUuid: UUID, key: KEY_PLAINTEXT } }
 		])
 	})

@@ -102,7 +102,7 @@ export function EventsList() {
 			<div className="flex flex-1 flex-col p-6">
 				<Empty>
 					<EmptyHeader>
-						<EmptyMedia variant="icon">
+						<EmptyMedia>
 							<HistoryIcon />
 						</EmptyMedia>
 						<EmptyTitle>{t("settingsEventsLoadError")}</EmptyTitle>
@@ -125,7 +125,7 @@ export function EventsList() {
 			<div className="flex flex-1 flex-col p-6">
 				<Empty>
 					<EmptyHeader>
-						<EmptyMedia variant="icon">
+						<EmptyMedia>
 							<HistoryIcon />
 						</EmptyMedia>
 						<EmptyTitle>{t("settingsEventsEmptyTitle")}</EmptyTitle>

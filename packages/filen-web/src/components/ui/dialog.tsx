@@ -6,37 +6,12 @@ import { cn } from "@filen/shared"
 import { Button } from "@/components/ui/button"
 import { XIcon } from "lucide-react"
 
-function Dialog({ ...props }: DialogPrimitive.Root.Props) {
-	return (
-		<DialogPrimitive.Root
-			data-slot="dialog"
-			{...props}
-		/>
-	)
-}
-
-function DialogTrigger({ ...props }: DialogPrimitive.Trigger.Props) {
-	return (
-		<DialogPrimitive.Trigger
-			data-slot="dialog-trigger"
-			{...props}
-		/>
-	)
-}
+const Dialog = DialogPrimitive.Root
 
 function DialogPortal({ ...props }: DialogPrimitive.Portal.Props) {
 	return (
 		<DialogPrimitive.Portal
 			data-slot="dialog-portal"
-			{...props}
-		/>
-	)
-}
-
-function DialogClose({ ...props }: DialogPrimitive.Close.Props) {
-	return (
-		<DialogPrimitive.Close
-			data-slot="dialog-close"
 			{...props}
 		/>
 	)
@@ -58,17 +33,14 @@ function DialogOverlay({ className, ...props }: DialogPrimitive.Backdrop.Props) 
 function DialogContent({
 	className,
 	children,
-	showCloseButton: showCloseButtonProp,
 	closeButtonDisabled: closeButtonDisabledProp,
 	...props
 }: DialogPrimitive.Popup.Props & {
-	showCloseButton?: boolean
 	// Local addition (not registry stock — keep across a shadcn regen): pending-gated dialogs
 	// disable the X while their operation runs.
 	closeButtonDisabled?: boolean
 }) {
-	// Not destructuring defaults, which the React Compiler cannot lower.
-	const showCloseButton = showCloseButtonProp ?? true
+	// Not a destructuring default, which the React Compiler cannot lower.
 	const closeButtonDisabled = closeButtonDisabledProp ?? false
 	// Localized: src/locales/en/common.ts `close` key — a shadcn regen of this registry file must
 	// keep this call, not revert it to the literal "Close" string.
@@ -85,22 +57,20 @@ function DialogContent({
 				{...props}
 			>
 				{children}
-				{showCloseButton && (
-					<DialogPrimitive.Close
-						data-slot="dialog-close"
-						disabled={closeButtonDisabled}
-						render={
-							<Button
-								variant="ghost"
-								className="absolute top-4 right-4 bg-secondary"
-								size="icon-sm"
-							/>
-						}
-					>
-						<XIcon />
-						<span className="sr-only">{t("close")}</span>
-					</DialogPrimitive.Close>
-				)}
+				<DialogPrimitive.Close
+					data-slot="dialog-close"
+					disabled={closeButtonDisabled}
+					render={
+						<Button
+							variant="ghost"
+							className="absolute top-4 right-4 bg-secondary"
+							size="icon-sm"
+						/>
+					}
+				>
+					<XIcon />
+					<span className="sr-only">{t("close")}</span>
+				</DialogPrimitive.Close>
 			</DialogPrimitive.Popup>
 		</DialogPortal>
 	)
@@ -116,28 +86,13 @@ function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
 	)
 }
 
-function DialogFooter({
-	className,
-	showCloseButton: showCloseButtonProp,
-	children,
-	...props
-}: React.ComponentProps<"div"> & {
-	showCloseButton?: boolean
-}) {
-	// Not a destructuring default, which the React Compiler cannot lower.
-	const showCloseButton = showCloseButtonProp ?? false
-	// Localized: src/locales/en/common.ts `close` key — a shadcn regen of this registry file must
-	// keep this call, not revert it to the literal "Close" string.
-	const { t } = useTranslation("common")
+function DialogFooter({ className, ...props }: React.ComponentProps<"div">) {
 	return (
 		<div
 			data-slot="dialog-footer"
 			className={cn("flex flex-col-reverse gap-2 sm:flex-row sm:justify-end", className)}
 			{...props}
-		>
-			{children}
-			{showCloseButton && <DialogPrimitive.Close render={<Button variant="outline" />}>{t("close")}</DialogPrimitive.Close>}
-		</div>
+		/>
 	)
 }
 
@@ -161,15 +116,4 @@ function DialogDescription({ className, ...props }: DialogPrimitive.Description.
 	)
 }
 
-export {
-	Dialog,
-	DialogClose,
-	DialogContent,
-	DialogDescription,
-	DialogFooter,
-	DialogHeader,
-	DialogOverlay,
-	DialogPortal,
-	DialogTitle,
-	DialogTrigger
-}
+export { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle }

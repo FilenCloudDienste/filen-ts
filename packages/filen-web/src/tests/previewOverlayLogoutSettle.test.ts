@@ -26,36 +26,33 @@ vi.mock("@/lib/useIsOnline", () => ({ useIsOnline: () => true }))
 import "@/lib/i18n"
 import { usePreviewUnsavedGuardStore } from "@/features/preview/store/usePreviewUnsavedGuard"
 import { narrowItem } from "@/features/drive/lib/item"
-import { type PreviewSource } from "@/features/preview/lib/previewSource"
 import { PreviewOverlay } from "@/features/preview/components/previewOverlay"
 
 // An unmapped extension renders the plain unsupported state, with nothing to load: the save/editor
 // machinery is not this file's subject.
-const SOURCE: PreviewSource = {
-	item: narrowItem({
-		uuid: "11111111-1111-1111-1111-111111111111",
-		stableUUID: undefined,
-		parent: "22222222-2222-2222-2222-222222222222",
-		size: 1_024n,
-		favorited: false,
-		region: "de-1",
-		bucket: "filen-1",
-		timestamp: 1_700_000_000_000n,
-		chunks: 1n,
-		canMakeThumbnail: false,
-		meta: {
-			type: "decoded",
-			data: {
-				name: "notes.xyz",
-				mime: "application/octet-stream",
-				modified: 1_700_000_000_000n,
-				size: 1_024n,
-				key: "key",
-				version: 2
-			}
+const ITEM = narrowItem({
+	uuid: "11111111-1111-1111-1111-111111111111",
+	stableUUID: undefined,
+	parent: "22222222-2222-2222-2222-222222222222",
+	size: 1_024n,
+	favorited: false,
+	region: "de-1",
+	bucket: "filen-1",
+	timestamp: 1_700_000_000_000n,
+	chunks: 1n,
+	canMakeThumbnail: false,
+	meta: {
+		type: "decoded",
+		data: {
+			name: "notes.xyz",
+			mime: "application/octet-stream",
+			modified: 1_700_000_000_000n,
+			size: 1_024n,
+			key: "key",
+			version: 2
 		}
-	})
-}
+	}
+})
 
 function renderOverlay() {
 	const onClose = vi.fn()
@@ -63,7 +60,7 @@ function renderOverlay() {
 	const rendered = render(
 		createElement(PreviewOverlay, {
 			variant: "drive" as const,
-			items: [SOURCE],
+			items: [ITEM],
 			index: 0,
 			onStep: vi.fn(),
 			onClose,

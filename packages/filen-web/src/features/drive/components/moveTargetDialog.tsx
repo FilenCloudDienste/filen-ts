@@ -250,7 +250,7 @@ export function MoveTargetDialog({ items, onClose, mode, onCopy }: MoveTargetDia
 						filter.trim().length > 0 ? (
 							<Empty>
 								<EmptyHeader>
-									<EmptyMedia variant="icon">
+									<EmptyMedia>
 										<SearchXIcon />
 									</EmptyMedia>
 									<EmptyTitle>{t("driveSearchNoResults")}</EmptyTitle>

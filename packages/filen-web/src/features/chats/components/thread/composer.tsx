@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { ArrowUpIcon, XIcon, CornerUpLeftIcon, PencilIcon, PaperclipIcon, UploadIcon, HardDriveIcon } from "lucide-react"
 import type { Chat, ChatMessage, ChatParticipant } from "@filen/sdk-rs"
-import { cn } from "@filen/shared"
+import { cn, contactDisplayName } from "@filen/shared"
 import { noop } from "@/lib/utils"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { enqueueChatMessage } from "@/features/chats/lib/sync"
@@ -11,7 +11,6 @@ import { signalTyping, signalStopped } from "@/features/chats/lib/typing"
 import { messageSenderName } from "@/features/chats/lib/sort"
 import { editMessage } from "@/features/chats/lib/messageActions"
 import { preflightAttachments, uploadAttachment } from "@/features/chats/lib/attachments"
-import type { OptimisticSender } from "@/features/chats/lib/sync.logic"
 import {
 	MAX_CHAT_MESSAGE_LENGTH,
 	canSend,
@@ -26,15 +25,14 @@ import {
 	activeMentionQuery,
 	activeEmojiQuery,
 	filterMentionParticipants,
-	filterEmojiSuggestions,
 	applyMention,
 	applyEmoji,
 	lastEditableOwnMessage,
 	NEW_MODE,
 	type TriggerQuery
 } from "@/features/chats/lib/composer.logic"
-import { contactDisplayName, contactInitials } from "@/features/contacts/components/contactsList.logic"
-import type { EmojiSuggestion } from "@/features/chats/lib/emoji"
+import { contactInitials } from "@/features/contacts/components/contactsList.logic"
+import { searchEmoji, type EmojiSuggestion } from "@/features/chats/lib/emoji"
 import { useChatComposerEntry, useChatComposerStore } from "@/features/chats/store/useChatComposer"
 import { loadDraft, saveDraftDebounced } from "@/features/chats/lib/drafts"
 import { beginMessageEdit, endMessageEdit } from "@/features/chats/lib/composerEdit"
@@ -63,7 +61,6 @@ export function Composer({
 	chat,
 	messages,
 	nonConfirmedUuids,
-	sender,
 	onSent
 }: {
 	chat: Chat
@@ -71,17 +68,17 @@ export function Composer({
 	messages: readonly ChatMessage[]
 	// uuids of still-pending/failed optimistic entries — excluded from the ArrowUp-edit target (uncommitted).
 	nonConfirmedUuids: ReadonlySet<string>
-	sender: OptimisticSender | undefined
 	// Fired after an own send is enqueued so the thread can jump to the bottom (mobile parity).
 	onSent: () => void
 }) {
 	const { t } = useTranslation(["chats", "common"])
 	const isOnline = useIsOnline()
+	const sender = useAccountQuery().data
 	// Pre-gates the attach menu for a free-tier account, proactively rather than after an upload
 	// already ran into the server's own createFileLink/createDirectoryLink rejection (attachments.ts's
 	// own header comment). Undefined (still loading) treats as non-Pro — the safe default while the
 	// account query is in flight, same posture as gating on `isOnline` before its first paint.
-	const isPremium = useAccountQuery().data?.isPremium === true
+	const isPremium = sender?.isPremium === true
 	const chatUuid = chat.uuid
 	const entry = useChatComposerEntry(chatUuid)
 	const draft = entry.draft
@@ -117,7 +114,7 @@ export function Composer({
 	const mentionItems: ChatParticipant[] =
 		mention !== null ? filterMentionParticipants(chat.participants, mention.query, sender?.id).slice(0, MENTION_LIMIT) : []
 	const emoji = mention === null ? activeEmojiQuery(draft, caret) : null
-	const emojiItems: EmojiSuggestion[] = emoji !== null ? filterEmojiSuggestions(emoji.query, EMOJI_LIMIT) : []
+	const emojiItems: EmojiSuggestion[] = emoji !== null ? searchEmoji(emoji.query, EMOJI_LIMIT) : []
 	const suggestKind: "mention" | "emoji" | null =
 		!manualClose && mention !== null && mentionItems.length > 0
 			? "mention"

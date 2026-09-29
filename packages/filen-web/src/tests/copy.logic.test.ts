@@ -151,14 +151,13 @@ describe("copyUpdateInput", () => {
 			update({
 				events: [
 					{ type: "fileFailed", ...failureInfo() },
-					{ type: "dirFailed", ...failureInfo({ sourcePath: "a/dir", destName: "dir", affectedFiles: 4n }) },
+					{ type: "dirFailed", ...failureInfo({ sourcePath: "a/dir", destName: "dir" }) },
 					{ type: "fileFailed", ...failureInfo({ stage: { type: "registeredAsVersion", existingFile: testUuid("existing") } }) }
 				]
 			})
 		)
 
 		expect(events.failures.map(f => f.destName)).toEqual(["b.txt", "dir"])
-		expect(events.failures[1]?.affectedFiles).toBe(4)
 		expect(events.failures[0]?.error.label).toBe("Server said no")
 		expect(events.savedAsVersion).toBe(1)
 	})

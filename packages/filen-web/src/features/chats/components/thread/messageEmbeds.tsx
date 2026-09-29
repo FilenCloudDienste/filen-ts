@@ -1,14 +1,13 @@
-import { extractMessageLinks, embedCandidatesForLinks } from "@/features/chats/lib/embeds.logic"
+import type { EmbedCandidate } from "@/features/chats/lib/embeds.logic"
 import { useChatMessageLinksQuery } from "@/features/chats/queries/chatMessageLinks"
 import { FilenLinkCard } from "@/features/chats/components/thread/embeds/filenLinkCard"
 
 // Filen public-link cards — one per unique link (embeds.logic.ts's cap + dedup), stacked under the
-// message text (messageRow.tsx mounts this directly below MessageContent). `embedDisabled` (the sender's
-// own disableMessageEmbed toggle, socket-synced) short-circuits to nothing rendered at all — the plain
-// link inline in the text is untouched either way, this component only ever ADDS chrome on top of it,
-// never replaces it, so a failed/disabled/loading embed silently degrades to that plain link.
-export function MessageEmbeds({ text, embedDisabled }: { text: string | undefined; embedDisabled: boolean }) {
-	const candidates = embedDisabled ? [] : embedCandidatesForLinks(extractMessageLinks(text))
+// message text (messageRow.tsx mounts this directly below MessageContent and derives `candidates`, empty
+// when the sender disabled embeds). The plain link inline in the text is untouched either way, this
+// component only ever ADDS chrome on top of it, never replaces it, so a failed/disabled/loading embed
+// silently degrades to that plain link.
+export function MessageEmbeds({ candidates }: { candidates: EmbedCandidate[] }) {
 	const linksQuery = useChatMessageLinksQuery(candidates.map(candidate => candidate.url))
 
 	if (candidates.length === 0) {

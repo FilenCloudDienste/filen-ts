@@ -39,7 +39,7 @@ import {
 	type ThreadAnnouncement,
 	type ThreadRow
 } from "@/features/chats/components/thread/thread.logic"
-import { composeMessageList, type OptimisticSender } from "@/features/chats/lib/sync.logic"
+import { composeMessageList } from "@/features/chats/lib/sync.logic"
 import { useChatsInflightStore } from "@/features/chats/store/useChatsInflight"
 import { Composer } from "@/features/chats/components/thread/composer"
 import { TypingIndicator } from "@/features/chats/components/thread/typingIndicator"
@@ -581,16 +581,6 @@ export function MessageThread({ chat }: { chat: Chat }) {
 	const threadListRef = useRef<ThreadListHandle | null>(null)
 	const titleId = useId()
 
-	const sender: OptimisticSender | undefined =
-		accountQuery.data !== undefined
-			? {
-					id: accountQuery.data.id,
-					email: accountQuery.data.email,
-					avatarUrl: accountQuery.data.avatarUrl,
-					nickName: accountQuery.data.nickName
-				}
-			: undefined
-
 	// Built here rather than in ThreadList: this component is compiled, so the rows are only rebuilt when
 	// the messages change, not on every virtualizer re-render while scrolling.
 	const rows = toBottomUpRows(
@@ -681,7 +671,6 @@ export function MessageThread({ chat }: { chat: Chat }) {
 				chat={chat}
 				messages={messages}
 				nonConfirmedUuids={nonConfirmedUuids}
-				sender={sender}
 				onSent={() => {
 					threadListRef.current?.followOwnSend()
 				}}

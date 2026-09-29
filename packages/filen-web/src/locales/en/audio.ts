@@ -38,16 +38,12 @@ export const audio = {
 	unknownArtist: "Unknown artist",
 	/** Accessible label for the whole player bar landmark */
 	playerLabel: "Audio player",
-	/** Queue toggle button / now-playing panel heading */
-	queue: "Queue",
 	/** Accessible label for the queue toggle button */
 	showQueue: "Show queue",
 	/** Empty a full queue and hide the player */
 	clearQueue: "Clear queue",
 	/** Per-row action removing one track from the queue */
 	removeFromQueue: "Remove from queue",
-	/** Per-row action playing a queued track immediately */
-	playTrack: "Play",
 	/** Sub-count under the panel heading, singular */
 	queueCount_one: "{{count}} track",
 	/** Sub-count under the panel heading, plural */
@@ -60,14 +56,6 @@ export const audio = {
 	commandNext: "Next track",
 	/** Skip to previous track via keyboard */
 	commandPrevious: "Previous track",
-
-	// ── Status / errors ────────────────────────────────────────────────────
-	/** Toast when a directory/selection is enqueued but some tracks couldn't be decrypted and were skipped, singular */
-	droppedUndecryptable_one: "{{count}} track couldn't be decrypted and was skipped",
-	/** Toast when a directory/selection is enqueued but some tracks couldn't be decrypted and were skipped, plural */
-	droppedUndecryptable_other: "{{count}} tracks couldn't be decrypted and were skipped",
-	/** Generic playback-failure label surfaced when a track can't be played and the queue settles */
-	playbackFailed: "Couldn't play this track",
 
 	// ── Playlists ────────────────────────────────────────────────────────────
 	/** New-playlist control in the playlists sidebar header (its accessible name) */

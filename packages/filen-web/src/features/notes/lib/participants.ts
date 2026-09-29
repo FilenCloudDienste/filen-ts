@@ -13,8 +13,9 @@ export type { ActionOutcome }
 // Idempotent, sequential add (mobile's addParticipants): every already-present contact is skipped
 // up front; the remaining adds thread the PREVIOUS call's result note into the next, so the one cache
 // write at the end keeps every new participant. A parallel Promise.all would each compute "base note +
-// their own contact" off the same stale note and the last write would clobber the rest.
-export async function addNoteParticipants(note: Note, contacts: readonly Contact[], write: boolean): Promise<ActionOutcome<Note>> {
+// their own contact" off the same stale note and the last write would clobber the rest. Every add
+// grants write, matching mobile's call site; permission changes go through setNoteParticipantPermission.
+export async function addNoteParticipants(note: Note, contacts: readonly Contact[]): Promise<ActionOutcome<Note>> {
 	const toAdd = contacts.filter(contact => !note.participants.some(p => p.userId === contact.userId))
 
 	if (toAdd.length === 0) {
@@ -25,7 +26,7 @@ export async function addNoteParticipants(note: Note, contacts: readonly Contact
 
 	try {
 		for (const contact of toAdd) {
-			updated = await runOp(sdkApi.addNoteParticipant(updated, contact, write))
+			updated = await runOp(sdkApi.addNoteParticipant(updated, contact, true))
 		}
 	} catch (e) {
 		return { status: "error", dto: asErrorDTO(e) }

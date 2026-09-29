@@ -2,15 +2,6 @@ import { isCopyJobRunning } from "@filen/shared"
 import { isActiveTransfer, type Transfer } from "@/features/transfers/store/useTransfersStore"
 import type { CopyJob } from "@/features/drive/lib/copy.logic"
 
-// Gates the header's "Clear finished" affordance — true the moment at least one row has settled
-// (done/error/completedWithErrors). Active (uploading OR downloading) rows show no such control since
-// there is nothing to clear yet. Previously lived in the now-removed rail popover's own logic module
-// (transfersPanel.logic.ts) — the screen is this predicate's only consumer now that the popover is
-// gone (the rail entry navigates straight here instead).
-export function hasFinishedTransfers(transfers: Transfer[]): boolean {
-	return transfers.some(transfer => !isActiveTransfer(transfer.status))
-}
-
 // The screen's two rendered sections. Active on top, oldest-running first (ASC startedAt) — the
 // longest-waiting transfer stays anchored at the top instead of being bumped down every time a newer
 // one starts. Finished below, newest first (DESC startedAt — there is no finishedAt field, startedAt
@@ -78,19 +69,6 @@ export function pausableTransferIds(transfers: Transfer[], endedCopies: Readonly
 // Resume-all's targets: active AND currently paused — the mirror image of pausableTransferIds.
 export function resumableTransferIds(transfers: Transfer[], endedCopies: ReadonlySet<string>): string[] {
 	return transfers.filter(transfer => isControllableTransfer(transfer, endedCopies) && transfer.paused).map(transfer => transfer.id)
-}
-
-// Cancel-all's real side-effecting step, extracted from the header's onClick so the "confirmed cancel
-// hits exactly the cancellable set, nothing else" contract is unit-testable without rendering the
-// AlertDialog that gates it (transfers.tsx wires this to ConfirmDialog's onConfirm; the same
-// cancellableTransferIds selection also drives the header button's disabled state, so what the dialog
-// confirms is always what the button showed as available). `cancel` is injected (mirrors
-// runDirectoryUpload's own DI shape) rather than importing control.ts's cancelTransfer directly, so a
-// test can assert the call set without touching the real sdk worker.
-export function confirmCancelAllTransfers(transfers: Transfer[], endedCopies: ReadonlySet<string>, cancel: (id: string) => void): void {
-	for (const id of cancellableTransferIds(transfers, endedCopies)) {
-		cancel(id)
-	}
 }
 
 // The aggregate speed/progress readout's own render gate (iconRail.tsx's TransfersEntry, this screen's

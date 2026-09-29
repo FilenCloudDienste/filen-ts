@@ -99,9 +99,7 @@ function renderTree(onToggle: (uuid: string) => void = () => undefined) {
 		onToggle,
 		onNavigate: () => undefined,
 		useChildren: uuid =>
-			({ status: "success", data: projectTreeChildren(LISTINGS.get(uuid) ?? []) }) as UseQueryResult<DirectoryTreeChild[]>,
-		enableDrop: true,
-		enableDrag: true
+			({ status: "success", data: projectTreeChildren(LISTINGS.get(uuid) ?? []) }) as UseQueryResult<DirectoryTreeChild[]>
 	}
 
 	return render(createElement(DirectoryTree, { tree }))

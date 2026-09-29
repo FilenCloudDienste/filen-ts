@@ -1,5 +1,4 @@
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
-import type { DriveVariant } from "@/features/drive/lib/preferences"
 import { clampListboxIndex } from "@/features/drive/lib/listbox"
 import { CODE_FILE_EXTENSIONS } from "@filen/shared"
 
@@ -24,9 +23,6 @@ export const PREVIEW_MAX_BYTES = 268_435_456n // 256 MiB
 // spreadsheets stop well below the other whole-buffer previews.
 export const SPREADSHEET_MAX_BYTES = 67_108_864n // 64 MiB
 
-// Exported so icon.logic's file-type routing classifies image/video/audio identically to preview — a
-// file's type icon and its preview category can never disagree.
-export const IMAGE_EXTENSIONS = new Set(["jpg", "jpeg", "png", "gif", "webp", "svg", "bmp", "ico", "apng", "avif"])
 // HEIC/HEIF resolve to the "image" category below like every other image extension, but browsers
 // cannot decode them inline — needsImageTransform/canPreview single them out to route through the
 // buffered download + a client-side transform (features/preview/lib/heicTransform.ts) instead of the SW's
@@ -40,8 +36,7 @@ const HEIC_MIMES = new Set(["image/heic", "image/heif", "image/heic-sequence", "
 // map, icon routing and photos predicate agree with what `canMakeThumbnail` will actually say for
 // them. Their own category ("rawImage") rather than "image": no browser decodes a RAW container, so
 // every browser-owned image path (the SW's inline Range route, <img>, createImageBitmap) is wrong for
-// them — only the SDK can turn one into pixels. Exported for icon.logic's file-type routing, the same
-// way IMAGE_EXTENSIONS is.
+// them — only the SDK can turn one into pixels.
 export const RAW_IMAGE_EXTENSIONS = new Set([
 	"3fr",
 	"arw",
@@ -65,10 +60,6 @@ export const RAW_IMAGE_EXTENSIONS = new Set([
 	"srw",
 	"x3f"
 ])
-export const VIDEO_EXTENSIONS = new Set(["mp4", "webm", "mkv", "mov", "m4v"])
-export const AUDIO_EXTENSIONS = new Set(["mp3", "m4a", "aac", "wav", "ogg", "flac", "opus"])
-const MARKDOWN_EXTENSIONS = new Set(["md", "markdown"])
-export const SPREADSHEET_EXTENSIONS = new Set(["csv", "tsv", "xlsx", "xlsm", "xls"])
 const SPREADSHEET_MIMES = new Set([
 	"text/csv",
 	"text/tab-separated-values",
@@ -76,10 +67,39 @@ const SPREADSHEET_MIMES = new Set([
 	"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 	"application/vnd.ms-excel.sheet.macroenabled.12"
 ])
-const TEXT_EXTENSIONS = new Set(["txt", "log"])
-// @filen/shared's CODE_FILE_EXTENSIONS minus the two extensions this app buckets into their own,
-// richer-rendered category instead: .md (-> markdown) and .log (-> text).
-const CODE_EXTENSIONS = CODE_FILE_EXTENSIONS
+
+function buildExtensionCategories(entries: [Iterable<string>, PreviewCategory][]): ReadonlyMap<string, PreviewCategory> {
+	const map = new Map<string, PreviewCategory>()
+
+	for (const [extensions, category] of entries) {
+		for (const ext of extensions) {
+			if (!map.has(ext)) {
+				map.set(ext, category)
+			}
+		}
+	}
+
+	return map
+}
+
+// The single extension -> category table (icon.logic routes through it too, so a file's type icon and
+// its preview category can never disagree). First listing wins; image/heic come BEFORE rawImage on
+// purpose: the sets are disjoint today, but if a RAW family ever gained a browser-decodable sibling
+// extension the browser-decodable answer must win — "image" renders the full picture, "rawImage" only
+// the camera's embedded preview.
+const EXTENSION_CATEGORIES: ReadonlyMap<string, PreviewCategory> = buildExtensionCategories([
+	[["jpg", "jpeg", "png", "gif", "webp", "svg", "bmp", "ico", "apng", "avif"], "image"],
+	[HEIC_EXTENSIONS, "image"],
+	[RAW_IMAGE_EXTENSIONS, "rawImage"],
+	[["mp4", "webm", "mkv", "mov", "m4v"], "video"],
+	[["mp3", "m4a", "aac", "wav", "ogg", "flac", "opus"], "audio"],
+	[["pdf"], "pdf"],
+	[["docx"], "docx"],
+	[["csv", "tsv", "xlsx", "xlsm", "xls"], "spreadsheet"],
+	[["md", "markdown"], "markdown"],
+	[["txt", "log"], "text"],
+	[CODE_FILE_EXTENSIONS, "code"]
+])
 
 // Lowercased extension with no leading dot; "" when the name has none (including a dotfile like
 // ".gitignore", where the only "." is the leading one — not a real extension). Exported for
@@ -90,51 +110,8 @@ export function extensionOf(name: string): string {
 	return dot > 0 && dot < name.length - 1 ? name.slice(dot + 1).toLowerCase() : ""
 }
 
-function categoryForExtension(ext: string): PreviewCategory | null {
-	if (IMAGE_EXTENSIONS.has(ext) || HEIC_EXTENSIONS.has(ext)) {
-		return "image"
-	}
-
-	// AFTER the image/heic branch on purpose: the two sets are disjoint today, but if a RAW family ever
-	// gained a browser-decodable sibling extension the browser-decodable answer must win — "image"
-	// renders the full picture, "rawImage" only the camera's embedded preview.
-	if (RAW_IMAGE_EXTENSIONS.has(ext)) {
-		return "rawImage"
-	}
-
-	if (VIDEO_EXTENSIONS.has(ext)) {
-		return "video"
-	}
-
-	if (AUDIO_EXTENSIONS.has(ext)) {
-		return "audio"
-	}
-
-	if (ext === "pdf") {
-		return "pdf"
-	}
-
-	if (ext === "docx") {
-		return "docx"
-	}
-
-	if (SPREADSHEET_EXTENSIONS.has(ext)) {
-		return "spreadsheet"
-	}
-
-	if (MARKDOWN_EXTENSIONS.has(ext)) {
-		return "markdown"
-	}
-
-	if (TEXT_EXTENSIONS.has(ext)) {
-		return "text"
-	}
-
-	if (CODE_EXTENSIONS.has(ext)) {
-		return "code"
-	}
-
-	return null
+export function previewCategoryForExtension(ext: string): PreviewCategory | null {
+	return EXTENSION_CATEGORIES.get(ext) ?? null
 }
 
 // Coarse mime fallback for a name whose extension resolved no category — no mime-map dependency
@@ -189,7 +166,7 @@ export function previewType(item: DriveItem): PreviewCategory {
 	}
 
 	const name = base.data.decryptedMeta?.name
-	const byExtension = name !== undefined ? categoryForExtension(extensionOf(name)) : null
+	const byExtension = name !== undefined ? previewCategoryForExtension(extensionOf(name)) : null
 
 	if (byExtension !== null) {
 		return byExtension
@@ -231,7 +208,7 @@ export function needsImageTransform(item: DriveItem): boolean {
 		return true
 	}
 
-	if (categoryForExtension(ext) !== null) {
+	if (previewCategoryForExtension(ext) !== null) {
 		return false
 	}
 
@@ -243,9 +220,8 @@ export function needsImageTransform(item: DriveItem): boolean {
 // Gate for opening a preview: a file, decryptable, resolves to a real category, and — for a
 // whole-buffer-only category — under the memory cap (a streamed category is never capped here, except
 // HEIC/HEIF: needsImageTransform pulls those back under the cap despite being category "image"). Trash
-// is NOT excluded — a trashed file still previews, read-only, mirroring mobile — `_variant` is threaded
-// for a later trash-exclusion/editability override, not consulted by this base gate.
-export function canPreview(item: DriveItem, _variant: DriveVariant): boolean {
+// is NOT excluded — a trashed file still previews, read-only, mirroring mobile.
+export function canPreview(item: DriveItem): boolean {
 	const base = asDirectoryOrFile(item)
 
 	if (base.type !== "file" || base.data.undecryptable) {
@@ -290,8 +266,8 @@ export function streamFailureAction(item: DriveItem): "buffer" | "error" {
 // preview overlay (see directoryListing's open handler), so the overlay never renders or pages to it —
 // stepping through a mixed folder skips audio and the pager's count reflects that. The public-link page
 // keeps its own audio surface, which does not route through this helper.
-export function previewableSiblings(items: DriveItem[], variant: DriveVariant): DriveItem[] {
-	return items.filter(item => canPreview(item, variant) && previewType(item) !== "audio")
+export function previewableSiblings(items: DriveItem[]): DriveItem[] {
+	return items.filter(item => canPreview(item) && previewType(item) !== "audio")
 }
 
 // Resolves the sibling one step (no wrap) from whichever sibling currently carries `currentUuid` — a
@@ -317,7 +293,7 @@ export function decodeUtf8(bytes: Uint8Array): string {
 // package (lazily imported there — this file stays framework-free, so the map value is a plain string,
 // never a CodeMirror Extension). "" means no grammar is wired for that extension; the file still
 // renders as a fully usable read-only, unhighlighted CodeMirror view, never a blocked preview. Every
-// CODE_EXTENSIONS entry above is covered (some intentionally unmapped — no maintained CodeMirror 6
+// CODE_FILE_EXTENSIONS entry is covered (some intentionally unmapped — no maintained CodeMirror 6
 // grammar exists for a bare Makefile/DOS-batch, and "vue"/"svelte" SFC parsing is out of scope), plus
 // the two markdown extensions for markdownViewer.tsx's view-source editor. Several tags share one
 // CodeMirror package family (js/cjs/mjs/jsx/tsx/ts all resolve via

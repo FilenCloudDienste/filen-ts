@@ -274,8 +274,8 @@ test("editable preview: saving a file, paging to a sibling and back still resolv
 	}
 })
 
-// The one live proof the trash-preview parity rule actually wires together: canPreview(item, "trash")
-// stays true (preview.logic.test.ts) rather than excluding trash like an undecryptable item, but
+// The one live proof the trash-preview parity rule actually wires together: canOpenItem(item, "trash")
+// stays true (itemMenu.test.ts) rather than excluding trash like an undecryptable item, but
 // isEditable(item, "trash") is false (previewSave.logic.test.ts) and the header hides Download in
 // trash (previewOverlay.tsx's own variant check) — none of that is provable without a real trashed
 // item reachable from a real Trash listing. Trashes the FILE itself (the single-item Trash flow
@@ -439,7 +439,7 @@ test("the preview header's own item menu: matches the row menu's set (no Downloa
 
 		// An arrow key with this menu open must not page the preview under it: the menu renders for the
 		// CURRENT slot, so a step swaps the item its Trash/Rename/Move act on out from beneath an already
-		// open menu. FORWARD, not back: A sits at pager index 0 and stepPreviewSourceIndex clamps, so a
+		// open menu. FORWARD, not back: A sits at pager index 0 and stepPreviewIndex clamps, so a
 		// leaked ArrowLeft is a no-op there and "still on A" would hold with no guard at all — Next is
 		// enabled at index 0, so only a leaked ArrowRight is observable, as B rendering in A's place.
 		// Escape then closes just the menu, leaving the preview itself open on A.

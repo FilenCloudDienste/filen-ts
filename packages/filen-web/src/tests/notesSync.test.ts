@@ -53,13 +53,8 @@ import { Sync } from "@/features/notes/lib/sync"
 import { NOTES_QUERY_KEY, notesQueryUpdate } from "@/features/notes/queries/notes"
 import { noteContentQueryKey } from "@/features/notes/queries/noteContent"
 import useNotesInflightStore, { type InflightContent } from "@/features/notes/store/useNotesInflight"
-import {
-	buildInflightEntries,
-	mergeInflight,
-	hashNoteContent,
-	inflightContentSchema,
-	noteKindForPreview
-} from "@/features/notes/lib/sync.logic"
+import { buildInflightEntries, mergeInflight, hashNoteContent } from "@filen/shared"
+import { inflightContentSchema, noteKindForPreview } from "@/features/notes/lib/sync.logic"
 import { deriveSessionBaseHash } from "@/features/notes/hooks/useNoteEditor.logic"
 import { holdNoteForRemoteEdit, releaseAllNoteHolds } from "@/features/notes/lib/remoteEditHolds"
 import { isOwnNotePush } from "@/features/notes/lib/pushEchoes"

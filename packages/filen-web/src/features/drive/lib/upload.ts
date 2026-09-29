@@ -208,7 +208,7 @@ export function invalidateUploadedDirectorySizes(parentUuid: string | null, crea
 export const defaultUploadDeps: RunUploadDeps = {
 	upload: (parentUuid, id, file, onProgress) => sdkApi.uploadFile(parentUuid, id, file, Comlink.proxy(onProgress)),
 	cancel: id => {
-		void sdkApi.cancelUpload(id)
+		void sdkApi.cancelTransfer(id)
 	},
 	store: useTransfersStore.getState(),
 	patchCreated: queueListingCreate,

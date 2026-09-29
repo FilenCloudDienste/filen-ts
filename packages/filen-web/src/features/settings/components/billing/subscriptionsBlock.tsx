@@ -31,7 +31,7 @@ function SubscriptionsBlock({ accountQuery }: SubscriptionsBlockProps) {
 			{subs.length === 0 ? (
 				<Empty className="rounded-none border-0 p-4">
 					<EmptyHeader>
-						<EmptyMedia variant="icon">
+						<EmptyMedia>
 							<WalletIcon />
 						</EmptyMedia>
 						<EmptyTitle>{t("settingsBillingSubscriptionsEmptyTitle")}</EmptyTitle>

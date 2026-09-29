@@ -8,7 +8,6 @@ import { resolveDriveNavigationTarget } from "@/features/drive/lib/navigate"
 import { canPreview, previewType } from "@/features/drive/lib/preview.logic"
 import { type DriveItemLinkStatus } from "@/features/drive/queries/drive"
 import { type DriveKey } from "@/lib/i18n"
-import { startDownloads } from "@/features/drive/lib/download"
 
 // Dialog kinds a per-item action can open in the listing-level dialog host (directoryListing.tsx's
 // own activeDialog state). "emptyTrash" is a listing-level action (the trash toolbar, no per-item
@@ -113,7 +112,7 @@ export function canOpenItem(item: DriveItem, variant: DriveVariant): boolean {
 		return resolveDriveNavigationTarget(item, variant, "") !== null
 	}
 
-	return canPreview(item, variant) && !(variant === "trash" && previewType(item) === "audio")
+	return canPreview(item) && !(variant === "trash" && previewType(item) === "audio")
 }
 
 // Whether the item is a directory things can be created in, uploaded into or pasted into from this
@@ -141,13 +140,6 @@ export function favoriteDescriptor(item: DriveItem): ItemActionDescriptor {
 // all) — kept as an explicit field rather than omitted, mirroring the shared field's own doc comment.
 export function downloadDescriptor(): ItemActionDescriptor {
 	return { id: "download", ...ACTION_DEFS.download, run: "direct", enabled: true }
-}
-
-// Download's "direct" action needs no await before it — startDownloads' FSA save picker requires the
-// click's own live user gesture (see download.ts). This is the unit-testable seam proving the wiring:
-// itemMenu.tsx calls it synchronously off the click, never `await`ed.
-export function startItemDownload(item: DriveItem): void {
-	void startDownloads([item])
 }
 
 // Pure per-item menu builder shared by both the right-click context menu and the ⋯ dropdown (see

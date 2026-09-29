@@ -10,10 +10,6 @@ import { usePhotosStore } from "@/features/photos/store/usePhotosStore"
 // drag-and-drop ancestry guard or the per-variant reset effect that hook also owns (a single flat
 // surface, not a navigable tree). The cursor/virtualizer-scroll half lives in usePhotosGridNav; both
 // entry points resolve a shift range through the same photosRangeSelection.
-export interface PhotosSelection {
-	handlePointerSelect: (index: number, event: MouseEvent<HTMLDivElement>) => void
-}
-
 export function usePhotosSelection(items: PhotoItem[], anchorUuid: string | null, setAnchorUuid: (uuid: string | null) => void) {
 	function handlePointerSelect(index: number, event: MouseEvent<HTMLDivElement>): void {
 		const item = items[index]

@@ -10,6 +10,7 @@ import { errorLabel } from "@/lib/i18n/errorLabel"
 import { runLoginAttempt } from "@/features/auth/lib/loginAttempt"
 import { useCapsLock } from "@/features/auth/lib/useCapsLock"
 import { useIsOnline } from "@/lib/useIsOnline"
+import { useSeededOnOpen } from "@/lib/useSeededOnOpen"
 import { Button } from "@/components/ui/button"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
@@ -33,17 +34,7 @@ function ForgotPasswordDialog({
 	const { t } = useTranslation(["auth", "common"])
 	const isOnline = useIsOnline()
 	const [pending, setPending] = useState(false)
-	// Re-seed on the open TRANSITION only, adjusting state during render (React's documented pattern
-	// for "reset state when a prop changes") rather than in an effect — an effect's setState would
-	// commit an extra render pass and trips react-hooks/set-state-in-effect.
-	const [wasOpen, setWasOpen] = useState(open)
-	const [email, setEmail] = useState(initialEmail)
-	if (open !== wasOpen) {
-		setWasOpen(open)
-		if (open) {
-			setEmail(initialEmail)
-		}
-	}
+	const [email, setEmail] = useSeededOnOpen(open, initialEmail)
 
 	async function handleSubmit(e: SubmitEvent): Promise<void> {
 		e.preventDefault()

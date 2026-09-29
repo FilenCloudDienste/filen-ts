@@ -11,8 +11,8 @@ import { useNotes } from "@/features/notes/queries/notes"
 import { useAccountQuery } from "@/queries/account"
 import { useContactsQuery } from "@/features/contacts/queries/contacts"
 import { blockContactByEmail, unblockContact } from "@/features/contacts/lib/actions"
-import { deriveBlockedUsers } from "@filen/shared"
-import { contactDisplayName, contactInitials, filterContactsBySearch } from "@/features/contacts/components/contactsList.logic"
+import { contactDisplayName, deriveBlockedUsers } from "@filen/shared"
+import { contactInitials, filterContactsBySearch } from "@/features/contacts/components/contactsList.logic"
 // Pure selection helpers, not the drive-specific parts of the module — same generic Set<uuid> shape
 // this dialog's own add-picker needs, reused rather than re-implemented (feedback: no duplicated data
 // layer/logic across features for a picker this codebase already has one working copy of).
@@ -154,9 +154,7 @@ export function ParticipantsDialog({ note: initialNote, onClose }: ParticipantsD
 		}
 
 		setAddPending(true)
-		// write defaults true for every add — both-clients parity (mobile's own addParticipants call
-		// site, screens/noteParticipants.tsx, passes permissionsWrite: true unconditionally).
-		const outcome = await addNoteParticipants(note, chosen, true)
+		const outcome = await addNoteParticipants(note, chosen)
 		setAddPending(false)
 
 		if (outcome.status === "error") {
@@ -176,7 +174,7 @@ export function ParticipantsDialog({ note: initialNote, onClose }: ParticipantsD
 			return (
 				<Empty className="p-6">
 					<EmptyHeader>
-						<EmptyMedia variant="icon">
+						<EmptyMedia>
 							<UsersIcon />
 						</EmptyMedia>
 						<EmptyTitle>{t("noteParticipantsEmpty")}</EmptyTitle>
@@ -278,7 +276,7 @@ export function ParticipantsDialog({ note: initialNote, onClose }: ParticipantsD
 			return (
 				<Empty>
 					<EmptyHeader>
-						<EmptyMedia variant="icon">
+						<EmptyMedia>
 							<UsersIcon />
 						</EmptyMedia>
 						<EmptyTitle>{t("contacts:contactsLoadError")}</EmptyTitle>
@@ -294,7 +292,7 @@ export function ParticipantsDialog({ note: initialNote, onClose }: ParticipantsD
 			return (
 				<Empty>
 					<EmptyHeader>
-						<EmptyMedia variant="icon">
+						<EmptyMedia>
 							<UsersIcon />
 						</EmptyMedia>
 						<EmptyTitle>{t("noteParticipantsAddEmpty")}</EmptyTitle>
@@ -311,7 +309,7 @@ export function ParticipantsDialog({ note: initialNote, onClose }: ParticipantsD
 			return (
 				<Empty>
 					<EmptyHeader>
-						<EmptyMedia variant="icon">
+						<EmptyMedia>
 							<SearchXIcon />
 						</EmptyMedia>
 						<EmptyTitle>{t("contacts:contactsSearchNoResultsTitle")}</EmptyTitle>

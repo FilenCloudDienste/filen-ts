@@ -23,13 +23,11 @@ type IconType = ComponentType<{ className?: string }>
 // (listLinkedItems has no nested path of its own), so it joins this union rather than SplatNavItem's.
 type DriveSidebarRoute = "/recents" | "/favorites" | "/trash" | "/links"
 
-// One entry per virtual-root row: a flat route (plain `to`), a splat route (`splatTo`, rendered at its
-// root), or an inert row (neither) — discriminated structurally so the whole IA stays one ordered
-// declarative list.
+// One entry per virtual-root row: a flat route (plain `to`) or a splat route (`splatTo`, rendered at its
+// root) — discriminated structurally so the whole IA stays one ordered declarative list.
 type DriveSidebarItem =
 	| { id: string; label: string; icon: IconType; to: DriveSidebarRoute }
 	| { id: string; label: string; icon: IconType; splatTo: DriveRouteId }
-	| { id: string; label: string; icon: IconType }
 
 // Muted group header over each virtual-root cluster ("Other", "Shared").
 const GROUP_HEADER_CLASS = "px-2.5 pt-4 pb-1 text-xs font-medium text-muted-foreground/80"
@@ -44,23 +42,9 @@ const NAV_ITEM_CLASS = cn(
 	"data-[status=active]:bg-sidebar-accent data-[status=active]:font-medium data-[status=active]:text-sidebar-accent-foreground"
 )
 
-// `to` present renders a real `<Link>` — TanStack Router stamps `data-status="active"` and
-// `aria-current="page"` on it automatically whenever the current location matches. `to` absent
-// renders an inert row — no live virtual root uses that arm today, kept for a future destination-less
-// entry.
-function NavItem({ icon: Icon, label, to }: { icon: IconType; label: string; to?: DriveSidebarRoute | undefined }) {
-	if (to === undefined) {
-		return (
-			<button
-				type="button"
-				className={NAV_ITEM_CLASS}
-			>
-				<Icon className="text-muted-foreground" />
-				<span className="truncate">{label}</span>
-			</button>
-		)
-	}
-
+// TanStack Router stamps `data-status="active"` and `aria-current="page"` on the `<Link>` automatically
+// whenever the current location matches.
+function NavItem({ icon: Icon, label, to }: { icon: IconType; label: string; to: DriveSidebarRoute }) {
 	return (
 		<Link
 			to={to}
@@ -169,10 +153,7 @@ export function DriveSidebar() {
 			reconcileLevel(parentUuid ?? TREE_ROOT_KEY, childUuids)
 		},
 		onNavigate: navigateTo,
-		useChildren: useDirectoryTreeChildrenQuery,
-		// The sidebar tree takes drops and starts drags (the move dialog's reuse of this primitive won't).
-		enableDrop: true,
-		enableDrag: true
+		useChildren: useDirectoryTreeChildrenQuery
 	}
 
 	// Virtual roots in two groups, each under a muted header. Built inside the component rather than as
@@ -202,7 +183,7 @@ export function DriveSidebar() {
 				key={item.id}
 				icon={item.icon}
 				label={item.label}
-				to={"to" in item ? item.to : undefined}
+				to={item.to}
 			/>
 		)
 	}

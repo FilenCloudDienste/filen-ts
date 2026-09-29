@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next"
 import { Link } from "@tanstack/react-router"
 import { PinIcon, HeartIcon, MoreHorizontalIcon } from "lucide-react"
 import type { Note, NoteTag } from "@filen/sdk-rs"
-import { cn } from "@filen/shared"
+import { cn, contactDisplayName } from "@filen/shared"
 import { formatRelativeTime } from "@/lib/relativeTime"
 import { useNowMinute } from "@/lib/useNowMinute"
 import { noteIcon } from "@/features/notes/lib/icon.logic"
@@ -15,7 +15,7 @@ import {
 	noteRowParticipants,
 	participantAvatarSource
 } from "@/features/notes/lib/noteRow.logic"
-import { contactDisplayName, contactInitials } from "@/features/contacts/components/contactsList.logic"
+import { contactInitials } from "@/features/contacts/components/contactsList.logic"
 import { NoteContextMenuContent, NoteDropdownMenuContent } from "@/features/notes/components/noteMenu"
 import { type NoteActionDialogKind } from "@/features/notes/components/noteMenu.logic"
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"

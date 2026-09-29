@@ -20,13 +20,6 @@ const snapshotFreshness = {
 	refetchOnReconnect: (query: { state: { error: Error | null } }) => (isNetworkClassError(query.state.error) ? "always" : false)
 } as const
 
-// `MaybeEncrypted<string>` narrow (mirrors chatMessageLinks.ts's decryptedName) — a still-encrypted
-// name degrades to the uuid rather than throwing, so an undecryptable-but-resolvable link still
-// renders a stable label instead of an error.
-export function decryptedLinkName(name: { Decrypted: string } | { Encrypted: unknown }, fallback: string): string {
-	return "Decrypted" in name ? name.Decrypted : fallback
-}
-
 // FILE link resolution against the UNAUTHENTICATED worker surface. `password` is undefined until the
 // visitor supplies one; a protected file throws until it matches (mapped to the password gate by the
 // caller's fileAccessState). `uuid`/`key` null (unresolvable fragment) keeps the query disabled. The

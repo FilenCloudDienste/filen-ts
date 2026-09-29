@@ -68,7 +68,7 @@ function attributes(text: string): Map<string, string> {
 
 const TOKEN = /<!--[\s\S]*?-->|<!\[CDATA\[([\s\S]*?)\]\]>|<\?[\s\S]*?\?>|<!DOCTYPE[^>]*>|<(\/?)([^\s/>]+)([^>]*?)(\/?)>|([^<]+)/g
 
-export function parseXml(xml: string): XmlNode {
+function parseXml(xml: string): XmlNode {
 	const root: XmlNode = { name: "", attrs: new Map(), children: [], text: "" }
 	const stack: XmlNode[] = [root]
 

@@ -272,35 +272,6 @@ export function SheetGrid({
 		remeasureRef.current?.()
 	})
 
-	// Escape while dragging a rail edge cancels the drag and nothing else (the preview would close on it).
-	const resizing = draft !== null
-
-	useEffect(() => {
-		if (!resizing) {
-			return undefined
-		}
-
-		function cancelOnEscape(event: globalThis.KeyboardEvent): void {
-			if (event.key === "Escape" && gestureRef.current !== null) {
-				event.preventDefault()
-				event.stopPropagation()
-				detachRef.current?.()
-				detachRef.current = null
-				cancelAnimationFrame(frameRef.current)
-				frameRef.current = 0
-				pendingDraft.current = null
-				gestureRef.current = null
-				setDraft(null)
-			}
-		}
-
-		window.addEventListener("keydown", cancelOnEscape, true)
-
-		return () => {
-			window.removeEventListener("keydown", cancelOnEscape, true)
-		}
-	}, [resizing])
-
 	useEffect(
 		() => () => {
 			detachRef.current?.()
@@ -841,13 +812,24 @@ export function SheetGrid({
 			}
 		}
 
+		// Escape cancels the drag and nothing else (the preview would close on it).
+		function cancelOnEscape(pressed: globalThis.KeyboardEvent): void {
+			if (pressed.key === "Escape") {
+				pressed.preventDefault()
+				pressed.stopPropagation()
+				clearDraft()
+			}
+		}
+
 		window.addEventListener("pointermove", moveResize)
 		window.addEventListener("pointerup", endResize)
 		window.addEventListener("pointercancel", cancel)
+		window.addEventListener("keydown", cancelOnEscape, true)
 		detachRef.current = () => {
 			window.removeEventListener("pointermove", moveResize)
 			window.removeEventListener("pointerup", endResize)
 			window.removeEventListener("pointercancel", cancel)
+			window.removeEventListener("keydown", cancelOnEscape, true)
 		}
 	}
 
@@ -885,12 +867,7 @@ export function SheetGrid({
 			return
 		}
 
-		detachRef.current?.()
-		detachRef.current = null
-		cancelAnimationFrame(frameRef.current)
-		frameRef.current = 0
-		pendingDraft.current = null
-		gestureRef.current = null
+		clearDraft()
 		// Held until the new sizes are the sheet's, so an answer from the worker never flickers back; a drag
 		// started meanwhile has its own draft, which this never clears.
 		setDraft(final)

@@ -18,6 +18,7 @@ import {
 // scrolls while marqueeing, at up to this many px per frame (ramped by proximity).
 const AUTO_SCROLL_EDGE_PX = 32
 const AUTO_SCROLL_MAX_SPEED_PX = 18
+const EMPTY_KEYS: ReadonlySet<string> = new Set()
 
 // The one thing a marqueeable item has to expose: a stable identity for the additive-union set.
 export interface MarqueeItem {
@@ -29,7 +30,6 @@ export interface MarqueeItem {
 export interface MarqueeGeometry {
 	rowHeight: number
 	tileWidth: number
-	gap: number
 }
 
 // A layout whose rows are not uniform (the photos timeline's month headers) hit-tests itself. Both
@@ -66,9 +66,9 @@ function uuidKey(item: MarqueeItem): string {
 function uniformHitTest(itemCount: number, { viewMode, columns, geometry }: MarqueeUniformLayout): MarqueeHitTest {
 	return {
 		indices: (rect, contentWidth) =>
-			marqueeIndices(rect, itemCount, viewMode, columns, contentWidth, geometry.tileWidth, geometry.rowHeight, geometry.gap),
+			marqueeIndices(rect, itemCount, viewMode, columns, contentWidth, geometry.tileWidth, geometry.rowHeight),
 		indexAtPoint: (x, y, contentWidth) =>
-			marqueeIndexAtPoint(x, y, itemCount, viewMode, columns, contentWidth, geometry.tileWidth, geometry.rowHeight, geometry.gap)
+			marqueeIndexAtPoint(x, y, itemCount, viewMode, columns, contentWidth, geometry.tileWidth, geometry.rowHeight)
 	}
 }
 
@@ -85,8 +85,8 @@ interface MarqueeDrag<T> {
 	// ctrl/cmd at arm time: union with the pre-drag set instead of replacing it
 	additive: boolean
 	preset: T[]
-	presetKeys: Set<string>
-	keyOf: (item: T) => string
+	// only built for additive drags; empty otherwise
+	presetKeys: ReadonlySet<string>
 	started: boolean
 	lastClientX: number
 	lastClientY: number
@@ -172,7 +172,7 @@ export function useMarqueeSelection<T extends MarqueeItem>(params: MarqueeParams
 		const items = itemsRef.current
 		const indices = hitTestRef.current.indices(marqueeRect, box.width)
 
-		drag.lastHitIndex = indices.length > 0 ? (indices[indices.length - 1] ?? -1) : -1
+		drag.lastHitIndex = indices.at(-1) ?? -1
 
 		const hitItems: T[] = []
 
@@ -190,7 +190,7 @@ export function useMarqueeSelection<T extends MarqueeItem>(params: MarqueeParams
 			next = drag.preset.slice()
 
 			for (const item of hitItems) {
-				if (!drag.presetKeys.has(drag.keyOf(item))) {
+				if (!drag.presetKeys.has(keyOf(item))) {
 					next.push(item)
 				}
 			}
@@ -393,15 +393,15 @@ export function useMarqueeSelection<T extends MarqueeItem>(params: MarqueeParams
 		const paddingRight = parseFloat(style.paddingRight) || 0
 		const box = marqueeContentBox(el.clientLeft, el.clientTop, el.clientWidth, paddingLeft, paddingTop, paddingRight)
 		const preset = selection.read()
+		const additive = event.metaKey || event.ctrlKey
 		const drag: MarqueeDrag<T> = {
 			anchorX: offsetX - box.insetLeft,
 			anchorY: offsetY - box.insetTop + el.scrollTop,
 			startClientX: event.clientX,
 			startClientY: event.clientY,
-			additive: event.metaKey || event.ctrlKey,
+			additive,
 			preset,
-			presetKeys: new Set(preset.map(keyOf)),
-			keyOf,
+			presetKeys: additive ? new Set(preset.map(keyOf)) : EMPTY_KEYS,
 			started: false,
 			lastClientX: event.clientX,
 			lastClientY: event.clientY,

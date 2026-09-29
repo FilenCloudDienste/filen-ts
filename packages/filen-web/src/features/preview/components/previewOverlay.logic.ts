@@ -3,9 +3,8 @@
 // project's DOM-free vitest environment (vitest.config.ts: environment "node", no jsdom/happy-dom).
 
 import { driveItemActions, type ItemActionDescriptor, type ItemActionId } from "@/features/drive/components/itemMenu.logic"
-import { isLinkedEmbedItem, type DriveItem } from "@/features/drive/lib/item"
+import { type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
-import { type PreviewSource } from "@/features/preview/lib/previewSource"
 
 // The header item-menu never offers Download — the header already has its own dedicated download
 // button right next to the menu's own trigger (previewOverlay.tsx).
@@ -28,13 +27,6 @@ export function previewMenuActions(
 // Download, plus whatever the opening surface leaves out of its own menus (Photos: Move).
 export function previewMenuHiddenActionIds(extra?: ReadonlySet<ItemActionId>): ReadonlySet<ItemActionId> {
 	return extra === undefined ? PREVIEW_MENU_HIDDEN_ACTION_IDS : new Set([...PREVIEW_MENU_HIDDEN_ACTION_IDS, ...extra])
-}
-
-// The header's ⋯ trigger is hidden for a chat/note embed's fabricated linked-file item
-// (isLinkedEmbedItem, item.ts): it is neither owned nor a real tree member, so
-// rename/move/trash/share/versions must never be offered for it.
-export function previewMenuVisible(source: PreviewSource): boolean {
-	return !isLinkedEmbedItem(source.item)
 }
 
 // Duck-typed rather than `target instanceof Element` — this module's own unit test has no real DOM

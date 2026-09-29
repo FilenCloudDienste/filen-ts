@@ -5,7 +5,7 @@ import type { CellEntry } from "@/features/spreadsheet/lib/gridEdits.logic"
 import { cellKey, type CellRange, type CellView } from "@/features/spreadsheet/lib/model"
 
 // How far a copy reaches: past this the clipboard text would run to hundreds of megabytes.
-export const MAX_COPY_CELLS = 1_000_000
+const MAX_COPY_CELLS = 1_000_000
 
 function tsvField(text: string): string {
 	return /[\t\n\r"]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text

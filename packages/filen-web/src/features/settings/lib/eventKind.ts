@@ -30,19 +30,9 @@ interface EventKindMeta {
 	icon: LucideIcon
 }
 
-// WASM RENAME GOTCHA: the wasm UserEventKind union spells the two 2FA event kinds
-// "twoFaEnabled"/"twoFaDisabled" (camelCase — a leading digit can't be a JS identifier, so
-// wasm-bindgen renamed them off the server's own "2faEnabled"/"2faDisabled" strings). Mobile's
-// TS-SDK binding keeps the server's original leading-digit spelling instead. Both keys are mapped to
-// the SAME label here defensively — the wasm surface is the only one this app's UI ever sees today
-// (getUserEvents comes straight from the worker seam), but a raw event string from anywhere else
-// (a future socket push, a copy-pasted fixture) must resolve identically rather than silently
-// falling into the "unknown" fallback below.
-type LegacyTwoFaSpelling = "2faEnabled" | "2faDisabled"
-
 // One map = the single source of truth for both the label and the icon per event kind, mirroring
 // drive/lib/actionDefs.ts's ACTION_DEFS shape. `satisfies` checks every real wasm `UserEventKind`
-// member is present (plus the two defensive legacy keys) while keeping each value's literal type.
+// member is present while keeping each value's literal type.
 export const EVENT_KIND_META = {
 	fileUploaded: { labelKey: "settingsEventFileUploaded", icon: UploadIcon },
 	fileVersioned: { labelKey: "settingsEventFileVersioned", icon: HistoryIcon },
@@ -82,11 +72,8 @@ export const EVENT_KIND_META = {
 	removedSharedInItems: { labelKey: "settingsEventRemovedSharedInItems", icon: UserMinusIcon },
 	removedSharedOutItems: { labelKey: "settingsEventRemovedSharedOutItems", icon: UserMinusIcon },
 	folderLinkEdited: { labelKey: "settingsEventFolderLinkEdited", icon: LinkIcon },
-	itemFavorite: { labelKey: "settingsEventItemFavorite", icon: StarIcon },
-	// Defensive legacy spellings — see the WASM RENAME GOTCHA note above.
-	"2faEnabled": { labelKey: "settingsEventTwoFaEnabled", icon: ShieldCheckIcon },
-	"2faDisabled": { labelKey: "settingsEventTwoFaDisabled", icon: ShieldOffIcon }
-} satisfies Record<UserEventKind["type"] | LegacyTwoFaSpelling, EventKindMeta>
+	itemFavorite: { labelKey: "settingsEventItemFavorite", icon: StarIcon }
+} satisfies Record<UserEventKind["type"], EventKindMeta>
 
 const FALLBACK_ICON: LucideIcon = CircleHelpIcon
 

@@ -111,7 +111,7 @@ describe("PreviewOverlay — a chat embed's linked file", () => {
 		render(
 			createElement(PreviewOverlay, {
 				variant: "links" as const,
-				items: [{ item: linkedFileIntoDriveItem(linkedFile(downloadable)) }],
+				items: [linkedFileIntoDriveItem(linkedFile(downloadable))],
 				index: 0,
 				onStep: vi.fn(),
 				onClose: vi.fn(),

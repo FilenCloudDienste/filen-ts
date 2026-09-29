@@ -34,22 +34,17 @@ export interface NotesInflightStore {
 	// "not known yet", not "clean": an editor that froze its seed here would paint the server's pre-edit
 	// content over a queued local edit, and the next keystroke would push that stale text back over it.
 	outboxHydrated: boolean
-	setOutboxHydrated: (hydrated: boolean) => void
 	// The notes a mounted editor has been typed into during this session. Deliberately NOT derivable
 	// from inflightContent: the first successful push empties a note's queue, so between a debounce
 	// flush and the next keystroke a note the user is still typing into reads as clean — and anything
 	// that treats "clean" as "safe to reseed" then tears the live surface down under the caret.
 	editingSessions: Record<string, true>
-	// Returns the OPENING edge: true only on the call that actually opened the session, false while one
-	// is already open — the caller's signal for once-per-session work (useNoteEditor's in-flight cancel).
-	beginEditingSession: (uuid: string) => boolean
-	endEditingSession: (uuid: string) => void
 	// Per note, how often the editor on screen was told to seed again (from an outbox entry it may now
 	// show), part of its remount key: the content cache may hold nothing to advance.
 	editorReseeds: Record<string, number>
 }
 
-export const useNotesInflightStore = create<NotesInflightStore>((set, get) => ({
+export const useNotesInflightStore = create<NotesInflightStore>(set => ({
 	inflightContent: {},
 	setInflightContent(fn) {
 		set(state => ({
@@ -57,44 +52,8 @@ export const useNotesInflightStore = create<NotesInflightStore>((set, get) => ({
 		}))
 	},
 	outboxHydrated: false,
-	setOutboxHydrated(hydrated) {
-		set({ outboxHydrated: hydrated })
-	},
 	editingSessions: {},
-	editorReseeds: {},
-	beginEditingSession(uuid) {
-		const { editingSessions } = get()
-
-		if (editingSessions[uuid] === true) {
-			return false
-		}
-
-		set({
-			editingSessions: {
-				...editingSessions,
-				[uuid]: true
-			}
-		})
-
-		return true
-	},
-	endEditingSession(uuid) {
-		set(state => {
-			if (state.editingSessions[uuid] !== true) {
-				return state
-			}
-
-			const next = {
-				...state.editingSessions
-			}
-
-			Reflect.deleteProperty(next, uuid)
-
-			return {
-				editingSessions: next
-			}
-		})
-	}
+	editorReseeds: {}
 }))
 
 // THE "is the user editing this note right now" test, the one that keeps the content query (and so the
@@ -116,25 +75,41 @@ export function useNoteInflight(uuid: string): boolean {
 	return useNotesInflightStore(state => (state.inflightContent[uuid] ?? []).length > 0)
 }
 
-// Reactive/non-reactive halves of the editing test above. Boolean-collapsed like useNoteInflight, so a
-// subscriber re-renders only on the edge.
+// Reactive form of the editing test above. Boolean-collapsed like useNoteInflight, so a subscriber
+// re-renders only on the edge.
 export function useNoteEditing(uuid: string): boolean {
 	return useNotesInflightStore(state => noteIsEditing(state, uuid))
 }
 
-export function isNoteEditing(uuid: string): boolean {
-	return noteIsEditing(useNotesInflightStore.getState(), uuid)
-}
-
 // The editor's own markers: the session opens on the first local change and closes when the editor
 // unmounts. A deliberate reseed (the remote-edit banner's Reload, a history restore) closes it too —
-// those WANT the content query re-enabled so their invalidation lands. begin returns the opening edge.
+// those WANT the content query re-enabled so their invalidation lands. begin returns the OPENING edge:
+// true only on the call that actually opened the session, false while one is already open — the
+// caller's signal for once-per-session work (useNoteEditor's in-flight cancel).
 export function beginEditingSession(uuid: string): boolean {
-	return useNotesInflightStore.getState().beginEditingSession(uuid)
+	const { editingSessions } = useNotesInflightStore.getState()
+
+	if (editingSessions[uuid] === true) {
+		return false
+	}
+
+	useNotesInflightStore.setState({ editingSessions: { ...editingSessions, [uuid]: true } })
+
+	return true
 }
 
 export function endEditingSession(uuid: string): void {
-	useNotesInflightStore.getState().endEditingSession(uuid)
+	useNotesInflightStore.setState(state => {
+		if (state.editingSessions[uuid] !== true) {
+			return state
+		}
+
+		const next = { ...state.editingSessions }
+
+		Reflect.deleteProperty(next, uuid)
+
+		return { editingSessions: next }
+	})
 }
 
 export function reseedEditor(uuid: string): void {
@@ -177,7 +152,7 @@ export function useOutboxHydrated(): boolean {
 
 // The outbox's own marker (sync.ts, outboxCoordinator.ts). Idempotent.
 export function setOutboxHydrated(hydrated: boolean): void {
-	useNotesInflightStore.getState().setOutboxHydrated(hydrated)
+	useNotesInflightStore.setState({ outboxHydrated: hydrated })
 }
 
 export default useNotesInflightStore

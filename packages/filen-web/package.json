@@ -13,7 +13,6 @@
 		"test": "vitest run",
 		"test:e2e": "playwright test",
 		"gen:error-kinds": "node --experimental-strip-types scripts/gen-error-kinds.ts",
-		"check:compiler": "node --experimental-strip-types scripts/check-compiler.ts",
 		"translate-i18n": "tsx scripts/translate-i18n.ts",
 		"ncu": "ncu --interactive --format group"
 	},

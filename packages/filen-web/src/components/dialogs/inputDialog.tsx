@@ -1,4 +1,4 @@
-import { useState, type ComponentProps, type SubmitEvent } from "react"
+import { type ComponentProps, type SubmitEvent } from "react"
 import { type DialogRoot } from "@base-ui/react/dialog"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Field, FieldLabel } from "@/components/ui/field"
@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { shouldForwardOpenChange } from "@/components/dialogs/dismissal.logic"
-import { seededValueOnOpen } from "@/components/dialogs/inputDialog.logic"
+import { useSeededOnOpen } from "@/lib/useSeededOnOpen"
 
 interface InputDialogProps {
 	open: boolean
@@ -36,10 +36,8 @@ interface InputDialogProps {
 // Generic single-field prompt built on the dialog primitive — the shared base for "type a value and
 // submit" flows (the pre-primitive forgot-password dialog's shape, generalized). Namespace-agnostic
 // like every dialog primitive in this directory: every label is caller-resolved. The typed value
-// starts at initialValue (blank when omitted) and resets on every open transition (adjusting state
-// during render, same "reset state when a prop changes" pattern the forgot-password dialog and
-// TypedConfirmDialog use — see inputDialog.logic.ts) so a dismissed prompt never resurfaces a stale
-// value the next time it opens. Dismissal is BLOCKED while `pending` — Escape, outside-press and the
+// starts at initialValue (blank when omitted) and resets on every open transition (useSeededOnOpen)
+// so a dismissed prompt never resurfaces a stale value the next time it opens. Dismissal is BLOCKED while `pending` — Escape, outside-press and the
 // X close button (also visually disabled) all funnel through onOpenChange, and a `false` while the
 // operation runs is a no-op, so the dialog stays open until it settles — rationale in
 // dismissal.logic.ts.
@@ -60,15 +58,7 @@ function InputDialog({
 	onOpenChange,
 	onSubmit
 }: InputDialogProps) {
-	const [wasOpen, setWasOpen] = useState(open)
-	const [value, setValue] = useState(initialValue ?? "")
-	if (open !== wasOpen) {
-		setWasOpen(open)
-		const seeded = seededValueOnOpen(open, wasOpen, initialValue ?? "")
-		if (seeded !== null) {
-			setValue(seeded)
-		}
-	}
+	const [value, setValue] = useSeededOnOpen(open, initialValue ?? "")
 	const valid = validate(value)
 
 	function handleOpenChange(next: boolean, details: DialogRoot.ChangeEventDetails): void {

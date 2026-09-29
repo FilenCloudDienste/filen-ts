@@ -4,7 +4,6 @@ import type { DocState } from "@/features/spreadsheet/lib/edits"
 import { cellKey, type CellView, type SheetView, type SpreadsheetDoc } from "@/features/spreadsheet/lib/model"
 import {
 	gridMove,
-	isImeKeydown,
 	isTypedCharacter,
 	sheetBounds,
 	sheetCols,
@@ -12,6 +11,7 @@ import {
 	snapToMerge,
 	type GridBounds
 } from "@/features/spreadsheet/lib/navigation.logic"
+import { isImeKeydown } from "@/lib/ime"
 
 const STATE: DocState = { dirty: true, canUndo: true, canRedo: false }
 

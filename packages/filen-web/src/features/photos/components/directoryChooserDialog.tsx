@@ -7,11 +7,7 @@ import { useAccountQuery } from "@/queries/account"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { cn, driveItemName } from "@filen/shared"
 import { shouldForwardOpenChange } from "@/components/dialogs/dismissal.logic"
-import {
-	isPhotosChooserRowDisabled,
-	photosChooserChoice,
-	photosChooserDirectories
-} from "@/features/photos/components/directoryChooserDialog.logic"
+import { photosChooserChoice } from "@/features/photos/components/directoryChooserDialog.logic"
 import { filterDriveItemsByLocalSearch } from "@/features/drive/components/directoryListing.logic"
 import { DirectoryGlyph } from "@/features/drive/components/itemIcon"
 import { EmptyState } from "@/features/drive/components/emptyState"
@@ -49,7 +45,7 @@ export function DirectoryChooserDialog({ pending, onChoose, onClose }: Directory
 
 	const listingQuery = useDirectoryListingQuery("drive", targetUuid)
 	const namesQuery = useDirectoryNamesQuery(pathStack)
-	const directories = photosChooserDirectories(listingQuery.data ?? [])
+	const directories = (listingQuery.data ?? []).filter(item => item.type === "directory")
 	// Resets on every descend/breadcrumb-jump (pathStack change) — mirrors moveTargetDialog.tsx's
 	// identical in-render reset (react.dev's "adjusting state when a prop changes" pattern, not a
 	// useEffect — see directoryListing.tsx's own listingKey comment for why).
@@ -159,7 +155,7 @@ export function DirectoryChooserDialog({ pending, onChoose, onClose }: Directory
 						filter.trim().length > 0 ? (
 							<Empty>
 								<EmptyHeader>
-									<EmptyMedia variant="icon">
+									<EmptyMedia>
 										<SearchXIcon />
 									</EmptyMedia>
 									<EmptyTitle>{t("drive:driveSearchNoResults")}</EmptyTitle>
@@ -174,7 +170,7 @@ export function DirectoryChooserDialog({ pending, onChoose, onClose }: Directory
 					) : (
 						<ul className="flex flex-col gap-0.5 p-2">
 							{filteredDirectories.map(directory => {
-								const disabled = isPhotosChooserRowDisabled(directory)
+								const disabled = directory.data.undecryptable
 
 								return (
 									<li key={directory.data.uuid}>

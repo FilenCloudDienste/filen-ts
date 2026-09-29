@@ -31,8 +31,8 @@ export function narrowToAnyFile(item: DriveItem): AnyFile {
 // DI mirror of RunUploadDeps (features/drive/lib/upload.ts), minus patchListing — a download is read-only
 // w.r.t. the drive, so there is no cache to patch on success. `cancel` is unused by runDownload
 // itself — the cancel button (transferRow.tsx) calls features/transfers/lib/control.ts's cancelTransfer,
-// which dispatches straight to sdkApi.cancelDownload/cancelUpload rather than through either deps
-// object; this field stays for DI/testability parity with RunUploadDeps.
+// which calls sdkApi.cancelTransfer directly rather than through either deps object; this field stays
+// for DI/testability parity with RunUploadDeps.
 export interface RunDownloadDeps {
 	download: (file: AnyFile, transferId: string, save: SaveTarget, onProgress: (bytes: bigint) => void) => Promise<void>
 	cancel?: (transferId: string) => void
@@ -110,7 +110,7 @@ export async function runDownload(deps: RunDownloadDeps, args: { item: DriveItem
 // The FSA sink wiring: a main-thread TransformStream bridges the worker call (its `writable` end,
 // Comlink.transfer'd in — the worker pulls decrypted bytes into it) and the real on-disk sink (its
 // `readable` end piped to the FSA writable). COORDINATED TEARDOWN: if the worker call rejects (e.g.
-// cancelDownload aborted it), the SDK may leave the transferred writable OPEN, so the pipe is aborted
+// cancelTransfer aborted it), the SDK may leave the transferred writable OPEN, so the pipe is aborted
 // here too via the shared AbortSignal — otherwise a naive `readable` consumer hangs forever on an
 // open-but-abandoned stream; `sinkDone` is swallowed on THIS branch only because an abort-induced
 // rejection is expected, not a real failure. The success path awaits the RAW `sinkDone` instead: a
@@ -147,7 +147,7 @@ export const defaultDownloadDeps: RunDownloadDeps = {
 	download: (file, transferId, save, onProgress) =>
 		save.kind === "fsa" ? downloadViaFsa(file, transferId, save, onProgress) : triggerSwDownload(file, save),
 	cancel: transferId => {
-		void sdkApi.cancelDownload(transferId)
+		void sdkApi.cancelTransfer(transferId)
 	},
 	store: useTransfersStore.getState()
 }

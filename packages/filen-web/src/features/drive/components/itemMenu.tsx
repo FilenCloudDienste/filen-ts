@@ -12,6 +12,7 @@ import { queryClient } from "@/queries/client"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { toastBulkOutcome } from "@/features/drive/lib/bulkToast"
+import { startDownloads } from "@/features/drive/lib/download"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import { useIsOnline } from "@/lib/useIsOnline"
 import {
@@ -19,7 +20,6 @@ import {
 	canWriteIntoItem,
 	driveItemActions,
 	resolveCopyLinkAction,
-	startItemDownload,
 	type ItemActionDescriptor,
 	type ItemActionDialogKind,
 	type ItemActionId
@@ -106,12 +106,12 @@ function ItemMenuEntries({
 	const writableDestination = destination !== undefined && canWriteIntoItem(item, variant) ? destination : undefined
 
 	async function runDirect(descriptor: Extract<ItemActionDescriptor, { run: "direct" }>): Promise<void> {
-		// Checked FIRST, before any `await` below — startItemDownload's FSA save picker needs this
+		// Checked FIRST, before any `await` below — startDownloads' FSA save picker needs this
 		// click's own live user gesture (see download.ts), so nothing here may yield to the event loop
 		// ahead of it. disabled=false is already guaranteed by the Item's own `disabled` prop below (a
 		// disabled MenuItem never fires onClick at all), so this never runs for a directory.
 		if (descriptor.id === "download") {
-			startItemDownload(item)
+			void startDownloads([item])
 			return
 		}
 

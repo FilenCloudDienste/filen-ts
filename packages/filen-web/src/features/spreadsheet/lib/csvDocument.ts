@@ -42,8 +42,12 @@ export class CsvDocument {
 		this.format = format
 	}
 
+	get writable(): boolean {
+		return this.format.writable
+	}
+
 	doc(): SpreadsheetDoc {
-		return csvDoc(this.rows, this.format.writable)
+		return csvDoc(this.rows, this.writable)
 	}
 
 	private state(): DocState {
@@ -135,7 +139,7 @@ export class CsvDocument {
 
 	// The file's bytes as edited, and the state they hold.
 	serialize(): { bytes: Uint8Array; version: number } {
-		if (!this.format.writable) {
+		if (!this.writable) {
 			throw new Error("spreadsheet: this CSV cannot be saved")
 		}
 

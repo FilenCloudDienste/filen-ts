@@ -53,39 +53,21 @@ function SelectTrigger({
 	)
 }
 
-function SelectContent({
-	className,
-	children,
-	side: sideProp,
-	sideOffset: sideOffsetProp,
-	align: alignProp,
-	alignOffset: alignOffsetProp,
-	alignItemWithTrigger: alignItemWithTriggerProp,
-	...props
-}: SelectPrimitive.Popup.Props &
-	Pick<SelectPrimitive.Positioner.Props, "align" | "alignOffset" | "side" | "sideOffset" | "alignItemWithTrigger">) {
-	// Not destructuring defaults, which the React Compiler cannot lower.
-	const side = sideProp ?? "bottom"
-	const sideOffset = sideOffsetProp ?? 4
-	const align = alignProp ?? "center"
-	const alignOffset = alignOffsetProp ?? 0
-	const alignItemWithTrigger = alignItemWithTriggerProp ?? true
-
+function SelectContent({ className, children, ...props }: SelectPrimitive.Popup.Props) {
 	return (
 		<SelectPrimitive.Portal>
 			<SelectPrimitive.Positioner
-				side={side}
-				sideOffset={sideOffset}
-				align={align}
-				alignOffset={alignOffset}
-				alignItemWithTrigger={alignItemWithTrigger}
+				side="bottom"
+				sideOffset={4}
+				align="center"
+				alignOffset={0}
+				alignItemWithTrigger
 				className="isolate z-50"
 			>
 				<SelectPrimitive.Popup
 					data-slot="select-content"
-					data-align-trigger={alignItemWithTrigger}
 					className={cn(
-						"relative isolate z-50 max-h-(--available-height) w-(--anchor-width) min-w-36 origin-(--transform-origin) animate-none! overflow-x-hidden overflow-y-auto rounded-2xl bg-popover/70 text-popover-foreground shadow-lg ring-1 ring-foreground/5 duration-100 before:pointer-events-none before:absolute before:inset-0 before:-z-1 before:rounded-[inherit] before:backdrop-blur-2xl before:backdrop-saturate-150 data-[align-trigger=true]:animate-none data-[side=bottom]:slide-in-from-top-2 data-[side=inline-end]:slide-in-from-left-2 data-[side=inline-start]:slide-in-from-right-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 **:data-[slot$=-item]:focus:bg-foreground/10 **:data-[slot$=-item]:data-highlighted:bg-foreground/10 **:data-[slot$=-separator]:bg-foreground/5 **:data-[slot$=-trigger]:focus:bg-foreground/10 **:data-[slot$=-trigger]:aria-expanded:bg-foreground/10! **:data-[variant=destructive]:**:text-accent-foreground! **:data-[variant=destructive]:text-accent-foreground! **:data-[variant=destructive]:focus:bg-foreground/10! dark:ring-foreground/10 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
+						"relative isolate z-50 max-h-(--available-height) w-(--anchor-width) min-w-36 origin-(--transform-origin) animate-none! overflow-x-hidden overflow-y-auto rounded-2xl bg-popover/70 text-popover-foreground shadow-lg ring-1 ring-foreground/5 duration-100 before:pointer-events-none before:absolute before:inset-0 before:-z-1 before:rounded-[inherit] before:backdrop-blur-2xl before:backdrop-saturate-150 data-[side=bottom]:slide-in-from-top-2 data-[side=inline-end]:slide-in-from-left-2 data-[side=inline-start]:slide-in-from-right-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 **:data-[slot$=-item]:focus:bg-foreground/10 **:data-[slot$=-item]:data-highlighted:bg-foreground/10 **:data-[slot$=-separator]:bg-foreground/5 **:data-[slot$=-trigger]:focus:bg-foreground/10 **:data-[slot$=-trigger]:aria-expanded:bg-foreground/10! **:data-[variant=destructive]:**:text-accent-foreground! **:data-[variant=destructive]:text-accent-foreground! **:data-[variant=destructive]:focus:bg-foreground/10! dark:ring-foreground/10 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
 						className
 					)}
 					{...props}
@@ -96,16 +78,6 @@ function SelectContent({
 				</SelectPrimitive.Popup>
 			</SelectPrimitive.Positioner>
 		</SelectPrimitive.Portal>
-	)
-}
-
-function SelectLabel({ className, ...props }: SelectPrimitive.GroupLabel.Props) {
-	return (
-		<SelectPrimitive.GroupLabel
-			data-slot="select-label"
-			className={cn("px-2 py-1 text-xs text-muted-foreground", className)}
-			{...props}
-		/>
 	)
 }
 
@@ -126,16 +98,6 @@ function SelectItem({ className, children, ...props }: SelectPrimitive.Item.Prop
 				<CheckIcon className="pointer-events-none" />
 			</SelectPrimitive.ItemIndicator>
 		</SelectPrimitive.Item>
-	)
-}
-
-function SelectSeparator({ className, ...props }: SelectPrimitive.Separator.Props) {
-	return (
-		<SelectPrimitive.Separator
-			data-slot="select-separator"
-			className={cn("pointer-events-none -mx-1 my-1 h-px bg-border", className)}
-			{...props}
-		/>
 	)
 }
 
@@ -169,15 +131,4 @@ function SelectScrollDownButton({ className, ...props }: React.ComponentProps<ty
 	)
 }
 
-export {
-	Select,
-	SelectContent,
-	SelectGroup,
-	SelectItem,
-	SelectLabel,
-	SelectScrollDownButton,
-	SelectScrollUpButton,
-	SelectSeparator,
-	SelectTrigger,
-	SelectValue
-}
+export { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue }

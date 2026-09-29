@@ -47,7 +47,7 @@ const CHAT: Chat = {
 
 function renderComposer(): HTMLElement {
 	const { container } = render(
-		createElement(Composer, { chat: CHAT, messages: [], nonConfirmedUuids: new Set<string>(), sender: undefined, onSent: vi.fn() })
+		createElement(Composer, { chat: CHAT, messages: [], nonConfirmedUuids: new Set<string>(), onSent: vi.fn() })
 	)
 	const root = container.firstElementChild
 

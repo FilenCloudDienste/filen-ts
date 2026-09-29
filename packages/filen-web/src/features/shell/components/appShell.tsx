@@ -1,10 +1,10 @@
-import { useEffect, useState } from "react"
+import { useEffect, useState, type ComponentType } from "react"
 import { useTranslation } from "react-i18next"
 import { Outlet, useRouter, useRouterState } from "@tanstack/react-router"
 import { IconRail } from "@/features/shell/components/iconRail"
 import { SidebarDrawer } from "@/features/shell/components/sidebarDrawer"
 import { useIsNarrowViewport } from "@/features/shell/hooks/useIsNarrowViewport"
-import { resolveSidebarKind, SIDEBAR_LABEL_KEY } from "@/features/shell/lib/appShell.logic"
+import { resolveSidebarKind, SIDEBAR_LABEL_KEY, type SidebarKind } from "@/features/shell/lib/appShell.logic"
 import { subscribeToLayoutBreakpoint } from "@/features/shell/lib/breakpoints"
 import { SidebarPanelVisibilityProvider } from "@/features/shell/lib/sidebarPanelVisibility"
 import { DriveSidebar } from "@/features/shell/components/driveSidebar"
@@ -19,6 +19,15 @@ import { SyncHost } from "@/features/notes/components/syncHost"
 import { ChatsSyncHost } from "@/features/chats/components/syncHost"
 import { SocketHost } from "@/features/shell/components/socketHost"
 import { AudioPlayerBar } from "@/features/audio/components/audioPlayerBar"
+
+const SIDEBAR_PANEL: Record<SidebarKind, ComponentType> = {
+	chats: ChatsSidebar,
+	notes: NotesSidebar,
+	settings: SettingsSidebar,
+	contacts: ContactsSidebar,
+	playlists: PlaylistsSidebar,
+	drive: DriveSidebar
+}
 
 // Padded canvas holding the three shell zones: a bare icon rail sitting directly on the canvas, then
 // two floating rounded panels — the contextual module sidebar and the content card. Nothing touches a
@@ -43,6 +52,7 @@ export function AppShell() {
 	const router = useRouter()
 	const pathname = useRouterState({ select: state => state.location.pathname })
 	const sidebarKind = resolveSidebarKind(pathname)
+	const Panel = SIDEBAR_PANEL[sidebarKind]
 	const narrow = useIsNarrowViewport()
 	const [sidebarOpen, setSidebarOpen] = useState(false)
 	// The panel is mounted either way (inline in the row, or inside the closed drawer behind display:none),
@@ -50,19 +60,7 @@ export function AppShell() {
 	// that, and it is what keeps a hidden panel's document-level shortcuts from acting on it.
 	const sidebar = (
 		<SidebarPanelVisibilityProvider visible={!narrow || sidebarOpen}>
-			{sidebarKind === "chats" ? (
-				<ChatsSidebar />
-			) : sidebarKind === "notes" ? (
-				<NotesSidebar />
-			) : sidebarKind === "settings" ? (
-				<SettingsSidebar />
-			) : sidebarKind === "contacts" ? (
-				<ContactsSidebar />
-			) : sidebarKind === "playlists" ? (
-				<PlaylistsSidebar />
-			) : (
-				<DriveSidebar />
-			)}
+			<Panel />
 		</SidebarPanelVisibilityProvider>
 	)
 

@@ -183,6 +183,8 @@ function resetStore(): void {
 		shuffleEnabled: false,
 		loopMode: "off",
 		shuffleOrder: [],
+		volume: 1,
+		muted: false,
 		lastError: null
 	})
 }

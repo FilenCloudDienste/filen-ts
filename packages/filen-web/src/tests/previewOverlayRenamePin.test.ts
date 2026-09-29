@@ -73,7 +73,7 @@ function named(name: string, uuid = "file") {
 function overlay(name: string, index = 0, variant: "drive" | "recents" = "drive") {
 	return createElement(PreviewOverlay, {
 		variant,
-		items: [{ item: named(name) }, { item: named("other.pdf", "other") }],
+		items: [named(name), named("other.pdf", "other")],
 		index,
 		onStep: vi.fn(),
 		onClose: vi.fn(),

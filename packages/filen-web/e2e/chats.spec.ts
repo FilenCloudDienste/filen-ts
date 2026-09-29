@@ -793,7 +793,7 @@ test.describe("chats", () => {
 	// self-filtered (visibleTypingUsers drops own senderId) — neither is observable as a foreign event.
 	// Compounded by the HOT create-limiter on this account, this flow is not provable end-to-end here. The
 	// realtime handlers + typing state machine are fully covered unit-level (chatsSocketHandlers.test.ts);
-	// the `sendTestTypingSignal` hook is the seam a two-user harness would drive once one exists.
+	// a two-user harness would need its own hook to fire the foreign typing signal.
 	test.skip("realtime: page B's message + typing reach page A live (needs a second distinct user)", async () => {
 		// Intentionally empty — documented skip (see the block comment above). Unit coverage stands.
 	})

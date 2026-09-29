@@ -64,7 +64,7 @@ function AccountPage() {
 			) : accountQuery.status === "error" ? (
 				<Empty>
 					<EmptyHeader>
-						<EmptyMedia variant="icon">
+						<EmptyMedia>
 							<UserIcon />
 						</EmptyMedia>
 						<EmptyTitle>{t("settingsAccountLoadError")}</EmptyTitle>
