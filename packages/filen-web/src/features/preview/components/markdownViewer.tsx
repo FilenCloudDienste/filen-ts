@@ -10,9 +10,8 @@ import { usePreviewUnsavedGuardStore } from "@/features/preview/store/usePreview
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { IN_EDITORS, useAction } from "@/lib/keymap/useAction"
 import { Button } from "@/components/ui/button"
-import { LoadingState } from "@/components/loadingState"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { PreviewErrorState } from "@/features/preview/components/previewErrorState"
+import { PreviewErrorState, PreviewLoading } from "@/features/preview/components/previewErrorState"
 
 export interface MarkdownViewerProps {
 	item: DriveItem
@@ -135,12 +134,7 @@ function MarkdownViewer({ item, alt, editable, onDirtyChange, contentRef, locked
 	}, [focusAfterToggle, mode])
 
 	if (result.status === "pending") {
-		return (
-			<LoadingState
-				size="lg"
-				className="text-inherit"
-			/>
-		)
+		return <PreviewLoading />
 	}
 
 	if (result.status === "error") {
@@ -170,14 +164,7 @@ function MarkdownViewer({ item, alt, editable, onDirtyChange, contentRef, locked
 			/>
 			<div className="min-h-0 flex-1">
 				{mode === "source" ? (
-					<Suspense
-						fallback={
-							<LoadingState
-								size="lg"
-								className="text-inherit"
-							/>
-						}
-					>
+					<Suspense fallback={<PreviewLoading />}>
 						<CodeMirrorSource
 							text={text}
 							tag={codeMirrorLanguageFor(extensionOf(driveItemName(item)))}

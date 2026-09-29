@@ -21,7 +21,7 @@ export const settings = {
 	settingsSectionBilling: "Billing",
 	/** Settings sidebar — Advanced section nav label and that section's page heading */
 	settingsSectionAdvanced: "Advanced",
-	/** Account page — error-state title, mirrors "auth:securityLoadError" for its own section */
+	/** Account, Billing and Security pages — error-state title when the account query (getUserInfo) fails to load; paired with common:tryAgain */
 	settingsAccountLoadError: "Couldn't load your account",
 
 	// ── Page layout: group titles and shared row actions ──────────────────────

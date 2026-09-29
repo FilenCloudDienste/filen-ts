@@ -16,10 +16,11 @@ import { MessageContent } from "@/features/chats/components/thread/messageConten
 import { MessageEmbeds } from "@/features/chats/components/thread/messageEmbeds"
 import { linksFromSegments, embedCandidatesForLinks } from "@/features/chats/lib/embeds.logic"
 import { errorLabel } from "@/lib/i18n/errorLabel"
+import { safeAvatarUrl } from "@/lib/avatarUrl"
 import { useChatSendState } from "@/features/chats/store/useChatsInflight"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { UserAvatar } from "@/components/userAvatar"
 
 // Compact reply-to reference line above a reply — the quoted sender + a one-line snippet of the referenced
 // message (denormalized snapshot on message.replyTo). Undecryptable reference bodies (message undefined)
@@ -73,8 +74,7 @@ export interface MessageRowProps {
 export function MessageRow({ chat, message, showHeader, currentUserId, blocked }: MessageRowProps) {
 	const { t } = useTranslation(["chats", "common"])
 	const undecryptable = message.message === undefined
-	const senderAvatar = message.senderAvatar
-	const avatarUrl = senderAvatar?.startsWith("http") === true ? senderAvatar : undefined
+	const avatarUrl = safeAvatarUrl(message.senderAvatar)
 	const name = messageSenderName(message)
 	const senderBlocked = isBlocked({ userId: BigInt(message.senderId), email: message.senderEmail }, blocked)
 	const revealed = useRevealedBlockedMessages(state => state.revealed.has(message.uuid))
@@ -160,17 +160,10 @@ export function MessageRow({ chat, message, showHeader, currentUserId, blocked }
 						>
 							<div className="relative flex w-9 shrink-0 justify-center">
 								{showHeader ? (
-									<Avatar>
-										{/* crossOrigin: require-corp COEP needs a CORS-mode request for this
-										    cross-origin egest url (see avatarCard.tsx's matching comment). */}
-										{avatarUrl !== undefined ? (
-											<AvatarImage
-												src={avatarUrl}
-												crossOrigin="anonymous"
-											/>
-										) : null}
-										<AvatarFallback>{name.trim().charAt(0).toUpperCase() || "?"}</AvatarFallback>
-									</Avatar>
+									<UserAvatar
+										src={avatarUrl}
+										name={name}
+									/>
 								) : (
 									// Continuation rows keep the avatar gutter empty at rest, revealing this exact line's
 									// own timestamp on hover/focus — a precise time is always a hover away without adding

@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next"
 
 import { cn } from "@filen/shared"
 import { Button } from "@/components/ui/button"
+import { SCRIM_CLASS } from "@/components/ui/surface"
 import { XIcon } from "lucide-react"
 
 const Dialog = DialogPrimitive.Root
@@ -21,10 +22,7 @@ function DialogOverlay({ className, ...props }: DialogPrimitive.Backdrop.Props) 
 	return (
 		<DialogPrimitive.Backdrop
 			data-slot="dialog-overlay"
-			className={cn(
-				"fixed inset-0 isolate z-50 bg-black/30 duration-100 supports-backdrop-filter:backdrop-blur-sm data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0",
-				className
-			)}
+			className={cn(SCRIM_CLASS, className)}
 			{...props}
 		/>
 	)

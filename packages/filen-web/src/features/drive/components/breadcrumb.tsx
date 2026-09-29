@@ -9,7 +9,6 @@ import { canDragVariant } from "@/features/drive/lib/dnd.logic"
 import { dropHighlightClass, useDriveDropTarget } from "@/features/drive/hooks/useDriveDropTarget"
 import { LISTING_SPRING } from "@/features/drive/lib/springLoad"
 import { errorLabel } from "@/lib/i18n/errorLabel"
-import { asErrorDTO } from "@/lib/sdk/errors"
 import { cn } from "@filen/shared"
 import { KEEP_SELECTION_PROPS } from "@/features/drive/lib/clickAway.logic"
 import { Spinner } from "@/components/ui/spinner"
@@ -75,10 +74,7 @@ function CrumbLink({ variant, routeId, splatValue, targetUuid, targetAncestry, l
 			// it current whenever its location matches: by prefix, and exactly for the moment a navigation to
 			// it has started but this breadcrumb still shows the old path. Link always sets the attribute.
 			aria-current={undefined}
-			onDragEnter={drop.onDragEnter}
-			onDragOver={drop.onDragOver}
-			onDragLeave={drop.onDragLeave}
-			onDrop={drop.onDrop}
+			{...drop.handlers}
 			className={cn(CRUMB_LINK_CLASS, "rounded-sm px-1", drop.isOver && "text-foreground", dropHighlightClass(drop))}
 		>
 			{label}
@@ -150,7 +146,7 @@ export function Breadcrumb({ variant, splat }: BreadcrumbProps) {
 						<li aria-hidden>
 							<ChevronRightIcon className="size-3.5 text-muted-foreground" />
 						</li>
-						<li className="text-destructive">{errorLabel(asErrorDTO(namesQuery.error))}</li>
+						<li className="text-destructive">{errorLabel(namesQuery.error)}</li>
 					</>
 				) : null}
 

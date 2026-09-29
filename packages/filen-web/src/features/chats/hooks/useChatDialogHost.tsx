@@ -1,21 +1,19 @@
 import { type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { useNavigate } from "@tanstack/react-router"
-import { toast } from "sonner"
 import type { Chat } from "@filen/sdk-rs"
 import { useDialogHost } from "@/lib/useDialogHost"
 import { renameChat, leaveChat, deleteChat } from "@/features/chats/lib/actions"
 import { deleteChatsPermanently, leaveChats } from "@/features/chats/lib/bulk"
 import { toastChatsBulkOutcome } from "@/features/chats/lib/bulkToast"
 import { useChatsSelectionStore } from "@/features/chats/store/useChatsSelectionStore"
-import { type BulkOutcome } from "@/features/drive/lib/bulk"
+import { type BulkOutcome } from "@/lib/actions/bulk"
 import { type ChatActionDialogKind } from "@/features/chats/components/chatMenu.logic"
 import { type ChatBulkDialogActionKind } from "@/features/chats/components/chatsBulkActionBar.logic"
 import { ChatParticipantsDialog } from "@/features/chats/components/chatParticipantsDialog"
 import { CreateChatDialog } from "@/features/chats/components/createChatDialog"
 import { InputDialog } from "@/components/dialogs/inputDialog"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
-import { errorLabel } from "@/lib/i18n/errorLabel"
 
 // Discriminates on `kind` alone, mirrors notes' ActiveNoteDialog split: the four per-chat kinds carry a
 // Chat; "create" carries nothing (there is no chat yet — that's the whole point of the dialog); the two
@@ -43,7 +41,7 @@ export interface UseChatDialogHostParams {
 export function useChatDialogHost({ currentUuid }: UseChatDialogHostParams): ChatDialogHost {
 	const { t } = useTranslation(["chats", "common"])
 	const navigate = useNavigate()
-	const { activeDialog, setActiveDialog, dialogPending, setDialogPending, isDialogOpen, closeActiveDialog } =
+	const { activeDialog, setActiveDialog, dialogPending, isDialogOpen, closeActiveDialog, runDialogPending, runDialogOutcome } =
 		useDialogHost<ActiveChatDialog>()
 
 	function openChatDialog(kind: ChatActionDialogKind, chat: Chat): void {
@@ -65,50 +63,27 @@ export function useChatDialogHost({ currentUuid }: UseChatDialogHostParams): Cha
 	}
 
 	async function handleRenameSubmit(chat: Chat, value: string): Promise<void> {
-		setDialogPending(true)
-		const outcome = await renameChat(chat, value)
-		setDialogPending(false)
-
-		if (outcome.status === "error") {
-			toast.error(errorLabel(outcome.dto))
-			return
-		}
-
-		closeActiveDialog()
+		await runDialogOutcome(() => renameChat(chat, value))
 	}
 
 	async function handleDeleteConfirm(chat: Chat): Promise<void> {
-		setDialogPending(true)
-		const outcome = await deleteChat(chat, {
-			beforeCacheRemoval: () => {
-				navigateAwayIfCurrent(chat)
-			}
-		})
-		setDialogPending(false)
-
-		if (outcome.status === "error") {
-			toast.error(errorLabel(outcome.dto))
-			return
-		}
-
-		closeActiveDialog()
+		await runDialogOutcome(() =>
+			deleteChat(chat, {
+				beforeCacheRemoval: () => {
+					navigateAwayIfCurrent(chat)
+				}
+			})
+		)
 	}
 
 	async function handleLeaveConfirm(chat: Chat): Promise<void> {
-		setDialogPending(true)
-		const outcome = await leaveChat(chat, {
-			beforeCacheRemoval: () => {
-				navigateAwayIfCurrent(chat)
-			}
-		})
-		setDialogPending(false)
-
-		if (outcome.status === "error") {
-			toast.error(errorLabel(outcome.dto))
-			return
-		}
-
-		closeActiveDialog()
+		await runDialogOutcome(() =>
+			leaveChat(chat, {
+				beforeCacheRemoval: () => {
+					navigateAwayIfCurrent(chat)
+				}
+			})
+		)
 	}
 
 	// Shared tail for both bulk-dialog confirms (deleteSelected/leaveSelected): runs `op` against
@@ -116,9 +91,7 @@ export function useChatDialogHost({ currentUuid }: UseChatDialogHostParams): Cha
 	// succeeded chats from the selection — a failed one stays selected so the user can retry. Mirrors
 	// useNoteDialogHost's own runBulkDialogAction.
 	async function runBulkDialogAction(chats: Chat[], op: (chats: Chat[]) => Promise<BulkOutcome<Chat>>): Promise<void> {
-		setDialogPending(true)
-		const outcome = await op(chats)
-		setDialogPending(false)
+		const outcome = await runDialogPending(() => op(chats))
 		closeActiveDialog()
 		toastChatsBulkOutcome(outcome)
 		useChatsSelectionStore.getState().removeFromSelection(outcome.succeeded.map(chat => chat.uuid))

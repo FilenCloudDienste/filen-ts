@@ -92,7 +92,7 @@ vi.mock("@/features/drive/hooks/useDriveVirtualizer", () => ({
 			gridVirtualizer: virtualizer,
 			activeVirtualizer: virtualizer,
 			registerRef: vi.fn(),
-			itemRefs: { current: new Map() }
+			itemRefs: { registerRef: vi.fn(), focusItem: vi.fn() }
 		}
 	}
 }))

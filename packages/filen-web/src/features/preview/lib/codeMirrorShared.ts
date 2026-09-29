@@ -7,7 +7,8 @@ import { useComboFor } from "@/lib/keymap/registry"
 import { codeMirrorKeys } from "@/features/preview/lib/editorKeys.logic"
 import { insertLink, MARKDOWN_MARKERS, toggleInlineMarker, toggleItalic } from "@/features/preview/lib/markdownCommands"
 import { StreamLanguage, syntaxHighlighting } from "@codemirror/language"
-import { useTheme } from "@/providers/themeProvider"
+import { resolveTheme, useTheme } from "@/providers/themeProvider"
+import type { CodeMirrorTag } from "@/features/drive/lib/preview.logic"
 
 // The language and theme plumbing every CodeMirror surface shares: the editor/reader
 // (codeMirrorSource.tsx) and the remote-change comparison (remoteCompare.tsx).
@@ -17,8 +18,8 @@ import { useTheme } from "@/providers/themeProvider"
 // becomes its own chunk — opening one text file only ever fetches the ONE language it actually needs,
 // never the other ~35. @codemirror/language itself (StreamLanguage) is a static import above: it's
 // core CodeMirror machinery every language needs, not a per-language grammar, so splitting it out would
-// buy nothing. Keys mirror preview.logic.ts's codeMirrorLanguageFor tags exactly.
-const LANGUAGE_LOADERS: Readonly<Record<string, () => Promise<Extension>>> = {
+// buy nothing. Keyed by CodeMirrorTag so tsc keeps the keys in step with codeMirrorLanguageFor.
+const LANGUAGE_LOADERS: Readonly<Record<CodeMirrorTag, () => Promise<Extension>>> = {
 	javascript: async () => (await import("@codemirror/lang-javascript")).javascript(),
 	jsx: async () => (await import("@codemirror/lang-javascript")).javascript({ jsx: true }),
 	typescript: async () => (await import("@codemirror/lang-javascript")).javascript({ typescript: true }),
@@ -66,7 +67,8 @@ export function useLanguageExtension(tag: string): Extension | null {
 	const [loaded, setLoaded] = useState<{ tag: string; extension: Extension } | null>(null)
 
 	useEffect(() => {
-		const loader = LANGUAGE_LOADERS[tag]
+		const loaders: Readonly<Partial<Record<string, () => Promise<Extension>>>> = LANGUAGE_LOADERS
+		const loader = loaders[tag]
 
 		if (!loader) {
 			return undefined
@@ -157,9 +159,8 @@ const DARK_THEME: Extension = [TOKEN_CHROME, syntaxHighlighting(oneDarkHighlight
 // value anything else depends on.
 export function useCodeMirrorTheme(): Extension {
 	const { theme } = useTheme()
-	const resolved = theme === "system" ? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light") : theme
 
-	return resolved === "dark" ? DARK_THEME : LIGHT_THEME
+	return resolveTheme(theme) === "dark" ? DARK_THEME : LIGHT_THEME
 }
 
 // The search panel with its replace field focused; a read-only editor's panel has none and keeps the

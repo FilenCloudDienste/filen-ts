@@ -32,13 +32,6 @@ export function formatBillingCost(cost: number): string {
 	return `€${cost.toFixed(2)}`
 }
 
-// `DateTime<Utc>` crosses wasm-bindgen as a plain ISO-8601 string (sdk-rs-shims.d.ts) — `new Date()`
-// parses that natively, no bigint-millis conversion needed (unlike every other timestamp field on this
-// app's wasm types).
-export function formatBillingDate(value: string): string {
-	return new Date(value).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })
-}
-
 export type SubscriptionStatus = "active" | "cancelled" | "pending"
 
 // A subscription's own three-state status: `cancelled` wins over `activated` (a cancelled sub can

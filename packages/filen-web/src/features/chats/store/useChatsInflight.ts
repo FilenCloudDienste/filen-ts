@@ -1,6 +1,7 @@
 import { create } from "zustand"
 import type { Chat, ChatMessage } from "@filen/sdk-rs"
 import type { ErrorDTO } from "@/lib/sdk/errors"
+import { withoutKey } from "@/lib/utils"
 
 // The send outbox's in-memory shape, a faithful port of filen-mobile's InflightChatMessages
 // (features/chats/store/useChats.store.ts). Chat sends are APPEND-only and NOT naturally idempotent
@@ -108,19 +109,7 @@ export function useChatSendState(messageUuid: string): ChatSendState {
 export function dropChatSendState(chatUuid: string): void {
 	const store = useChatsInflightStore.getState()
 
-	store.setInflightMessages(prev => {
-		if (!prev[chatUuid]) {
-			return prev
-		}
-
-		const updated = {
-			...prev
-		}
-
-		Reflect.deleteProperty(updated, chatUuid)
-
-		return updated
-	})
+	store.setInflightMessages(prev => withoutKey(prev, chatUuid))
 
 	store.setInflightErrors(prev => {
 		const remaining = Object.entries(prev).filter(([, entry]) => entry.message.chat !== chatUuid)
@@ -128,5 +117,3 @@ export function dropChatSendState(chatUuid: string): void {
 		return remaining.length === Object.keys(prev).length ? prev : Object.fromEntries(remaining)
 	})
 }
-
-export default useChatsInflightStore

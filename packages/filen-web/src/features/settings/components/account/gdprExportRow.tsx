@@ -2,7 +2,6 @@ import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { sdkApi } from "@/lib/sdk/client"
-import { asErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { downloadBlob } from "@/lib/downloadBlob"
 import { gdprInfoToJson } from "@/features/settings/lib/gdprExport"
@@ -27,7 +26,7 @@ function GdprExportRow() {
 			downloadBlob(`filen-data-export.${String(Date.now())}.json`, new Blob([gdprInfoToJson(info)], { type: "application/json" }))
 			toast.success(t("settingsGdprSuccess"))
 		} catch (e) {
-			toast.error(errorLabel(asErrorDTO(e)))
+			toast.error(errorLabel(e))
 		} finally {
 			setPending(false)
 		}

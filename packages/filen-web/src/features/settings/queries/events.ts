@@ -2,7 +2,7 @@ import { useQuery, type UseQueryResult } from "@tanstack/react-query"
 import type { UserEventResult } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
 import { queryClient } from "@/queries/client"
-import { cachedQuery } from "@/queries/patch"
+import { cachedQuery, setQueryDataKeepInvalidated } from "@/queries/patch"
 import { persister } from "@/queries/persist"
 import { currentSocketEpoch, socketLiveSince } from "@/lib/sdk/socketSession"
 import { computeNextEventsPage, mergeFirstEventsPage, selectEventsView, type EventsView } from "@/features/settings/lib/eventsPagination"
@@ -128,13 +128,7 @@ export function releaseEventsSlice(): void {
 		return
 	}
 
-	const { dataUpdatedAt, isInvalidated } = query.state
-
-	queryClient.setQueryData(EVENTS_QUERY_KEY, capEventsSlice(slice, EVENTS_SLICE_CAP), { updatedAt: dataUpdatedAt })
-
-	if (isInvalidated) {
-		query.invalidate()
-	}
+	setQueryDataKeepInvalidated(query, capEventsSlice(slice, EVENTS_SLICE_CAP), { updatedAt: query.state.dataUpdatedAt })
 
 	void persister.persistQuery(query)
 }

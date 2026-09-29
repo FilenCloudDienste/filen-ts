@@ -1,10 +1,11 @@
 import { useTranslation } from "react-i18next"
 import { formatBytes } from "@filen/shared"
-import { subscriptionStatus, SUBSCRIPTION_STATUS_LABEL_KEY, formatBillingCost, formatBillingDate } from "@/features/settings/lib/billing"
+import { subscriptionStatus, SUBSCRIPTION_STATUS_LABEL_KEY, formatBillingCost } from "@/features/settings/lib/billing"
+import { formatShortDate } from "@/lib/formatDate"
 import type { AccountQuerySuccess } from "@/queries/account"
 import { Badge } from "@/components/ui/badge"
 import { SettingsBlock } from "@/features/settings/components/settingsLayout"
-import { Empty, EmptyDescription, EmptyMedia, EmptyTitle, EmptyHeader } from "@/components/ui/empty"
+import { EmptyMessage } from "@/components/emptyMessage"
 import { WalletIcon } from "lucide-react"
 
 interface SubscriptionsBlockProps {
@@ -29,15 +30,12 @@ function SubscriptionsBlock({ accountQuery }: SubscriptionsBlockProps) {
 	return (
 		<SettingsBlock>
 			{subs.length === 0 ? (
-				<Empty className="rounded-none border-0 p-4">
-					<EmptyHeader>
-						<EmptyMedia>
-							<WalletIcon />
-						</EmptyMedia>
-						<EmptyTitle>{t("settingsBillingSubscriptionsEmptyTitle")}</EmptyTitle>
-						<EmptyDescription>{t("settingsBillingSubscriptionsEmptyDescription")}</EmptyDescription>
-					</EmptyHeader>
-				</Empty>
+				<EmptyMessage
+					className="rounded-none border-0 p-4"
+					icon={WalletIcon}
+					title={t("settingsBillingSubscriptionsEmptyTitle")}
+					description={t("settingsBillingSubscriptionsEmptyDescription")}
+				/>
 			) : (
 				<div className="overflow-x-auto">
 					<table className="w-full text-left text-sm">
@@ -62,7 +60,7 @@ function SubscriptionsBlock({ accountQuery }: SubscriptionsBlockProps) {
 										<td className="py-2">{sub.planName}</td>
 										<td className="py-2 tabular-nums">{formatBytes(Number(sub.storage))}</td>
 										<td className="py-2 tabular-nums">{formatBillingCost(sub.planCost)}</td>
-										<td className="py-2 tabular-nums">{formatBillingDate(sub.startTimestamp)}</td>
+										<td className="py-2 tabular-nums">{formatShortDate(sub.startTimestamp)}</td>
 										<td className="py-2">
 											<Badge variant={STATUS_BADGE_VARIANT[status]}>{t(SUBSCRIPTION_STATUS_LABEL_KEY[status])}</Badge>
 										</td>

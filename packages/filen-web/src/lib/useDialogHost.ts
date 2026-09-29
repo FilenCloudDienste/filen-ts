@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react"
 import { useRouterState } from "@tanstack/react-router"
+import { toast } from "sonner"
 import { resolveDialogNavigationClose } from "@/lib/useDialogHost.logic"
+import { type VoidActionOutcome } from "@/lib/actions/outcome"
+import { errorLabel } from "@/lib/i18n/errorLabel"
 
 // The listing-level "one dialog at a time" state machine, shared by every feature that hosts a
 // kind-discriminated confirm/edit dialog off a list (drive's directory listing, contacts). `Dialog`
@@ -11,9 +14,14 @@ export interface DialogHost<Dialog> {
 	activeDialog: Dialog | null
 	setActiveDialog: Dispatch<SetStateAction<Dialog | null>>
 	dialogPending: boolean
-	setDialogPending: Dispatch<SetStateAction<boolean>>
 	isDialogOpen: boolean
 	closeActiveDialog: () => void
+	// Runs a host-owned mutation with `dialogPending` set around it, for tails that need the outcome
+	// themselves (bulk confirms close unconditionally and toast their own summary).
+	runDialogPending: <T>(op: () => Promise<T>) => Promise<T>
+	// The single-target tail: on error toast and keep the dialog open so the user can retry, else close.
+	// Resolves true on success, for callers with a post-close step.
+	runDialogOutcome: (op: () => Promise<VoidActionOutcome>) => Promise<boolean>
 }
 
 export interface UseDialogHostOptions<Dialog> {
@@ -67,12 +75,38 @@ export function useDialogHost<Dialog>(options?: UseDialogHostOptions<Dialog>): D
 		setActiveDialog(null)
 	}
 
+	async function runDialogPending<T>(op: () => Promise<T>): Promise<T> {
+		setDialogPending(true)
+		const result = await op()
+		setDialogPending(false)
+
+		return result
+	}
+
+	// Not built on runDialogPending: its extra await would split the pending reset from the close.
+	async function runDialogOutcome(op: () => Promise<VoidActionOutcome>): Promise<boolean> {
+		setDialogPending(true)
+		const outcome = await op()
+		setDialogPending(false)
+
+		if (outcome.status === "error") {
+			toast.error(errorLabel(outcome.dto))
+
+			return false
+		}
+
+		closeActiveDialog()
+
+		return true
+	}
+
 	return {
 		activeDialog,
 		setActiveDialog,
 		dialogPending,
-		setDialogPending,
 		isDialogOpen: activeDialog !== null,
-		closeActiveDialog
+		closeActiveDialog,
+		runDialogPending,
+		runDialogOutcome
 	}
 }

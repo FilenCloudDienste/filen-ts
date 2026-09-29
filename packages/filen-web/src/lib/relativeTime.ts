@@ -1,13 +1,6 @@
 import { type TFunction } from "i18next"
 import { formatRelativeTimeCore } from "@filen/shared"
-
-// Locale-aware absolute fallback used once a timestamp is older than the cutoff. Kept minimal (no
-// clock time) — the surfaces this feeds (note rows, later chat/events rows) want a compact date, not a
-// full datetime. `undefined` locale defers to the runtime's own locale, same posture as the rest of
-// the app's date rendering.
-function absoluteDate(timestamp: number): string {
-	return new Date(timestamp).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })
-}
+import { formatShortDate } from "@/lib/formatDate"
 
 // Formats a millisecond timestamp as a relative label ("Just now", "5 minutes ago", "2 hours ago",
 // "3 days ago") for the recent past, falling back to an absolute date once it is older than the
@@ -33,7 +26,7 @@ export function formatRelativeTime(timestamp: number, t: TFunction, now: number)
 			hoursAgo: "relativeHoursAgo",
 			daysAgo: "relativeDaysAgo"
 		},
-		absoluteDate,
+		formatShortDate,
 		now
 	)
 }

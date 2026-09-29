@@ -2,9 +2,10 @@ import { useQuery, type UseQueryResult } from "@tanstack/react-query"
 import { sdkApi } from "@/lib/sdk/client"
 import { currentSocketEpoch, socketLiveSince } from "@/lib/sdk/socketSession"
 import { queryClient } from "@/queries/client"
-import { cachedQuery, patchQuery } from "@/queries/patch"
+import { cachedQuery, patchQuery, replaceOrAppend } from "@/queries/patch"
 import type { Chat, ChatMessage } from "@filen/sdk-rs"
 import { chatsQueryGet } from "@/features/chats/queries/chats"
+import { compareBySentTimestamp } from "@/features/chats/lib/sort"
 
 // Per-chat message list, keyed on uuid so switching between two threads never shows a stale read
 // while the new one is still in flight — same rationale as notes' noteContentQueryKey. The cache
@@ -27,7 +28,7 @@ export function chatMessagesQueryKey(chatUuid: string) {
 const INITIAL_CURSOR_OFFSET_MS = 3_600_000 // mirrors mobile's `Date.now() + 1h` initial cursor
 
 function sortAscending(messages: readonly ChatMessage[]): ChatMessage[] {
-	return [...messages].sort((a, b) => (a.sentTimestamp === b.sentTimestamp ? 0 : a.sentTimestamp < b.sentTimestamp ? -1 : 1))
+	return [...messages].sort(compareBySentTimestamp)
 }
 
 function resolveChat(chatUuid: string): Chat | undefined {
@@ -204,15 +205,10 @@ export function chatMessagesQueryAppend(chatUuid: string, updater: (prev: ChatMe
 // edit/delete-undo/socket-reconciled message needs (messageActions.ts is the current caller).
 export function chatMessagesQueryUpsert(chatUuid: string, message: ChatMessage): void {
 	chatMessagesQueryUpdate(chatUuid, prev => {
-		const index = prev.findIndex(m => m.uuid === message.uuid)
+		const next = replaceOrAppend(prev, message, m => m.uuid === message.uuid)
 
-		if (index === -1) {
-			return sortAscending([...prev, message])
-		}
-
-		const next = prev.slice()
-		next[index] = message
-		return next
+		// Only an append can break the order; next is already a fresh copy, so it sorts in place.
+		return next.length > prev.length ? next.sort(compareBySentTimestamp) : next
 	})
 }
 

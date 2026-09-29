@@ -7,7 +7,7 @@ import { startCopyWithCard } from "@/features/transfers/lib/copyToast"
 import { useDriveClipboardStore, type DriveClipboardMode } from "@/features/drive/store/useDriveClipboardStore"
 import { asListed } from "@/features/drive/lib/clipboardRecheck"
 import { type ClipboardShortcutContext } from "@/features/drive/lib/clipboard.logic"
-import { isAnyDialogOpen, isAnyMenuOpen } from "@/lib/keymap/dialogGuard"
+import { isAnyOverlayOpen } from "@/lib/keymap/dialogGuard"
 
 function hold(mode: DriveClipboardMode, items: readonly DriveItem[]): void {
 	const listed = asListed(items)
@@ -62,7 +62,7 @@ export function clipboardShortcutContext(event: KeyboardEvent, textMatters: bool
 
 	return {
 		target: event.target,
-		overlayOpen: isAnyDialogOpen() || isAnyMenuOpen(),
+		overlayOpen: isAnyOverlayOpen(),
 		textSelected: textMatters && selection !== null && !selection.isCollapsed
 	}
 }

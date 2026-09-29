@@ -1,5 +1,5 @@
 import { i18n } from "@/lib/i18n"
-import { labelFirst, type ErrorDTO } from "@/lib/sdk/errors"
+import { asErrorDTO, labelFirst, type ErrorDTO } from "@/lib/sdk/errors"
 
 // Main-thread only — this is exactly why it is NOT part of lib/sdk/errors.ts (see that module's
 // header comment: workers must stay i18n-free). `dto.kind` is a live runtime string, not a literal
@@ -20,7 +20,10 @@ function kindLabel(dto: ErrorDTO): string | undefined {
 	return undefined
 }
 
-export function errorLabel(dto: ErrorDTO): string {
+// Takes any rejection: asErrorDTO passes a DTO through untouched.
+export function errorLabel(error: unknown): string {
+	const dto = asErrorDTO(error)
+
 	return kindLabel(dto) ?? labelFirst(dto)
 }
 

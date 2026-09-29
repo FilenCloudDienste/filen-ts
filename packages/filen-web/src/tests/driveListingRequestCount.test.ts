@@ -86,15 +86,6 @@ function driveEvent(inner: DriveInner): Extract<SocketEvent, { type: "drive" }> 
 	return { type: "drive", inner, driveMessageId: 0n }
 }
 
-function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
-	let resolve!: (value: T) => void
-	const promise = new Promise<T>(r => {
-		resolve = r
-	})
-
-	return { promise, resolve }
-}
-
 // Read-this-session is page-session state, so every test lists directories of its own.
 let dirCounter = 0
 
@@ -370,7 +361,7 @@ describe("drive listing reads and the socket session", () => {
 
 	it("a read a drop interrupts doesn't count, even once the socket is back", async () => {
 		const dir = nextDir()
-		const pending = deferred<NormalDirsAndFiles>()
+		const pending = Promise.withResolvers<NormalDirsAndFiles>()
 
 		listDirectory.mockImplementationOnce(() => pending.promise)
 		mountListing(dir)
@@ -468,7 +459,7 @@ describe("drive listing socket reconcile", () => {
 
 	it("an undecodable drive event landing during a read keeps the listing stale once the read settles", async () => {
 		const dir = nextDir()
-		const pending = deferred<NormalDirsAndFiles>()
+		const pending = Promise.withResolvers<NormalDirsAndFiles>()
 
 		listDirectory.mockImplementationOnce(() => pending.promise)
 		mountListing(dir)
@@ -505,7 +496,7 @@ describe("drive listing socket reconcile", () => {
 
 		await mountRead(dir)
 
-		const pending = deferred<NormalDirsAndFiles>()
+		const pending = Promise.withResolvers<NormalDirsAndFiles>()
 
 		listDirectory.mockImplementationOnce(() => pending.promise)
 		dropSocket()
@@ -545,7 +536,7 @@ describe("drive listing socket reconcile", () => {
 describe("drive listing patches that land during a read", () => {
 	it("a first read gets the file created and the row trashed while it ran, and still counts", async () => {
 		const dir = nextDir()
-		const pending = deferred<NormalDirsAndFiles>()
+		const pending = Promise.withResolvers<NormalDirsAndFiles>()
 
 		listDirectory.mockImplementationOnce(() => pending.promise)
 		mountListing(dir)
@@ -567,7 +558,7 @@ describe("drive listing patches that land during a read", () => {
 
 	it("a rename by uuid alone reaches a first read's rows", async () => {
 		const dir = nextDir()
-		const pending = deferred<NormalDirsAndFiles>()
+		const pending = Promise.withResolvers<NormalDirsAndFiles>()
 
 		listDirectory.mockImplementationOnce(() => pending.promise)
 		mountListing(dir)
@@ -588,7 +579,7 @@ describe("drive listing patches that land during a read", () => {
 
 	it("many creates during one read cost no further read", async () => {
 		const dir = nextDir()
-		const pending = deferred<NormalDirsAndFiles>()
+		const pending = Promise.withResolvers<NormalDirsAndFiles>()
 
 		listDirectory.mockImplementationOnce(() => pending.promise)
 		mountListing(dir)
@@ -612,7 +603,7 @@ describe("drive listing patches that land during a read", () => {
 	// A move or restore echo carries no colour, so its row may be wrong where the read's was right.
 	it("a directory move with no colour to keep doesn't let the destination's read count", async () => {
 		const dir = nextDir()
-		const pending = deferred<NormalDirsAndFiles>()
+		const pending = Promise.withResolvers<NormalDirsAndFiles>()
 
 		listDirectory.mockImplementationOnce(() => pending.promise)
 		mountListing(dir)
@@ -630,7 +621,7 @@ describe("drive listing patches that land during a read", () => {
 	it("a burst of trashes, renames, recolours, moves and creates lands as it would one at a time", async () => {
 		const dir = nextDir()
 		const elsewhere = nextDir()
-		const pending = deferred<NormalDirsAndFiles>()
+		const pending = Promise.withResolvers<NormalDirsAndFiles>()
 
 		listDirectory.mockImplementationOnce(() => pending.promise)
 		mountListing(dir)
@@ -682,7 +673,7 @@ describe("drive listing patches that land during a read", () => {
 		listDirectory.mockImplementation(() => Promise.resolve({ dirs: [], files: [kept] }))
 		await mountRead(dir)
 
-		const replaced = deferred<NormalDirsAndFiles>()
+		const replaced = Promise.withResolvers<NormalDirsAndFiles>()
 		const replace = vi.fn((row: DriveItem) => row)
 
 		listDirectory.mockImplementationOnce(() => replaced.promise)
@@ -703,7 +694,7 @@ describe("drive listing patches that land during a read", () => {
 	})
 
 	it("a shared listing's read gets a patch that landed while it ran", async () => {
-		const pending = deferred<SharedRootDirsAndFiles>()
+		const pending = Promise.withResolvers<SharedRootDirsAndFiles>()
 		const { meta, size, region, bucket, chunks, timestamp, canMakeThumbnail } = mockFile("gone", nextDir())
 
 		listSharedOutRoot.mockImplementationOnce(() => pending.promise)
@@ -860,7 +851,7 @@ describe("directory colour on a move or restore echo", () => {
 	// The read applies the colourless move to what it returns, where the payload's default would overwrite
 	// the colour the server returned in a read that still counts.
 	it("a Favorites read under way keeps the colour it returns through a colourless move, and lends it", async () => {
-		const pending = deferred<NormalDirsAndFiles>()
+		const pending = Promise.withResolvers<NormalDirsAndFiles>()
 		const home = nextDir()
 		const destination = nextDir()
 
@@ -905,7 +896,7 @@ describe("recents after a copy", () => {
 		await drain()
 
 		const dir = nextDir()
-		const pending = deferred<NormalDirsAndFiles>()
+		const pending = Promise.withResolvers<NormalDirsAndFiles>()
 
 		useTransfersStore.setState({ transfers: [copyRow("copying")] })
 		fire({ type: "fileNew", file: named(mockFile("copied", dir), "copied.pdf") })

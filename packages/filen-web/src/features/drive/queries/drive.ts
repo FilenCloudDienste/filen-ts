@@ -2,6 +2,7 @@ import { useQueries, useQuery, type Query, type UseQueryResult } from "@tanstack
 import { sdkApi } from "@/lib/sdk/client"
 import { currentSocketEpoch, socketLiveSince } from "@/lib/sdk/socketSession"
 import { queryClient } from "@/queries/client"
+import { cachedQuery, setQueryDataKeepInvalidated } from "@/queries/patch"
 // Whole-statement `import type` here too — sdk.worker.ts's own top-level code pulls in
 // @filen/sdk-rs as a real value import, same elision hazard as above.
 import type { ListDirectoryTarget, ItemInfoResult } from "@/workers/sdk.worker"
@@ -18,10 +19,12 @@ import type {
 } from "@filen/sdk-rs"
 import { fastLocaleCompare, driveItemName, removeByUuid, upsertItems } from "@filen/shared"
 import { narrowItem, asDirectoryOrFile, toAnyDirWithContext, type DriveItem } from "@/features/drive/lib/item"
+import type { FlatListingKind } from "@/features/drive/lib/flatListing"
 import {
 	getHideHiddenItems,
 	getSortPreferences,
 	getViewModePreferences,
+	type DriveLocation,
 	type DrivePreferences,
 	type DriveVariant,
 	type DriveViewMode
@@ -32,13 +35,13 @@ import { getHeicUploadConvertPreference } from "@/features/drive/lib/heicUpload"
 // Query key taxonomy per client.ts ([domain, entity, params?]): `uuid` is null for every flat
 // listing (recents/favorites/trash) and for My Drive's own root, so a fast nav between two
 // directories only ever changes this one key's `uuid` — the rest of the shape is fixed per variant.
-export interface DriveListingParams {
-	variant: DriveVariant
-	uuid: string | null
-}
+export type DriveListingParams = DriveLocation
+
+// The prefix every listing scan and invalidation matches on.
+export const DRIVE_LISTING_KEY_PREFIX = ["drive", "listing"] as const
 
 export function driveListingQueryKey(params: DriveListingParams) {
-	return ["drive", "listing", params] as const
+	return [...DRIVE_LISTING_KEY_PREFIX, params] as const
 }
 
 // Root only applies to the "drive" variant (client.root() has no equivalent for the flat listings);
@@ -301,21 +304,8 @@ export async function fetchSharedListing(
 	return [...dirs.map(dir => narrowItem({ ...dir, sharingRole: role })), ...files.map(file => narrowItem({ ...file, sharingRole: role }))]
 }
 
-// One lookup by the key's hash: a filter find() copies and re-hashes the whole query cache per call.
 function listingQuery(params: DriveListingParams): Query | undefined {
-	return queryClient.getQueryCache().get(queryClient.defaultQueryOptions({ queryKey: driveListingQueryKey(params) }).queryHash)
-}
-
-// setQueryData marks a listing fresh, which drops a pending invalidation: a read socket-synced listing
-// never goes stale on its own, so the change behind it would then never be read.
-function writeListing(query: Query, next: DriveItem[]): void {
-	const invalidated = query.state.isInvalidated
-
-	queryClient.setQueryData<DriveItem[]>(query.queryKey, next)
-
-	if (invalidated) {
-		query.invalidate()
-	}
+	return cachedQuery(driveListingQueryKey(params))
 }
 
 // A read's changes applied to what it returned in as few passes as their order allows, so a burst of k
@@ -638,7 +628,7 @@ function patchedQueries(patches: readonly Patch[]): Query[] {
 
 	for (const patch of patches) {
 		if (patch.params === undefined) {
-			return queryClient.getQueryCache().findAll({ queryKey: ["drive", "listing"] })
+			return queryClient.getQueryCache().findAll({ queryKey: DRIVE_LISTING_KEY_PREFIX })
 		}
 
 		const id = listingId(patch.params.variant, patch.params.uuid)
@@ -713,7 +703,7 @@ function applyPatches(queued: readonly Patch[]): void {
 
 		// Most cached listings don't hold the row; writing one would re-render it for nothing.
 		if (next !== prev) {
-			writeListing(query, next)
+			setQueryDataKeepInvalidated(query, next)
 		}
 	}
 
@@ -834,7 +824,7 @@ export function driveListingQueryUpdate(parentUuid: string | null, change: Listi
 }
 
 // The flat listings (recents/favorites/trash/links) patched by their one key.
-export function flatListingQueryUpdate(variant: "recents" | "favorites" | "trash" | "links", change: ListingChange | ListingPatch): void {
+export function flatListingQueryUpdate(variant: FlatListingKind, change: ListingChange | ListingPatch): void {
 	submitPatch({ params: { variant, uuid: null }, change: asListingChange(change) })
 }
 
@@ -955,26 +945,26 @@ export function markDriveListingStale(uuid: string | null): void {
 }
 
 // A flat listing reads on every mount and focus anyway, so this only stops it counting as current.
-export function markFlatListingStale(variant: "recents" | "favorites" | "trash" | "links"): void {
+export function markFlatListingStale(variant: FlatListingKind): void {
 	markListingStale({ variant, uuid: null })
 }
 
 // One flat listing re-read if mounted, else marked stale.
-export function invalidateFlatListing(variant: "recents" | "favorites" | "trash" | "links"): void {
+export function invalidateFlatListing(variant: FlatListingKind): void {
 	void queryClient.invalidateQueries({ queryKey: driveListingQueryKey({ variant, uuid: null }), exact: true })
 }
 
 // Re-reads the mounted listings and marks the rest stale, for a change no event patches in place.
 export function invalidateDriveListings(): void {
 	listingStaleMarks++
-	void queryClient.invalidateQueries({ queryKey: ["drive", "listing"] })
+	void queryClient.invalidateQueries({ queryKey: DRIVE_LISTING_KEY_PREFIX })
 }
 
 // Marks every listing stale without reading, for a change no event patches in place: each re-reads on
 // its next mount or focus.
 export function markListingsStale(): void {
 	listingStaleMarks++
-	void queryClient.invalidateQueries({ queryKey: ["drive", "listing"], refetchType: "none" })
+	void queryClient.invalidateQueries({ queryKey: DRIVE_LISTING_KEY_PREFIX, refetchType: "none" })
 }
 
 // Fan-out patch across EVERY currently-instantiated listing, any variant, any uuid — a
@@ -995,7 +985,7 @@ export function driveListingQueryUpdateGlobal(change: ListingRowChange, where?: 
 // web keeps no worker-side item cache (mobile's fileUuidToNormalFile), so a listing row is the only full
 // shape at hand. `undefined` when no cached listing holds the uuid.
 export function findCachedListingItem(uuid: string): DriveItem | undefined {
-	for (const query of queryClient.getQueryCache().findAll({ queryKey: ["drive", "listing"] })) {
+	for (const query of queryClient.getQueryCache().findAll({ queryKey: DRIVE_LISTING_KEY_PREFIX })) {
 		const found = (query.state.data as DriveItem[] | undefined)?.find(item => item.data.uuid === uuid)
 
 		if (found !== undefined) {
@@ -1019,7 +1009,7 @@ export function findOwnedListingItem(uuid: string): { item: DriveItem; current: 
 
 	let outdated: DriveItem | undefined
 
-	for (const query of queryClient.getQueryCache().findAll({ queryKey: ["drive", "listing"] })) {
+	for (const query of queryClient.getQueryCache().findAll({ queryKey: DRIVE_LISTING_KEY_PREFIX })) {
 		const { variant, uuid: listingUuid } = (query.queryKey as ReturnType<typeof driveListingQueryKey>)[2]
 		const current = !query.state.isInvalidated && listingsReadThisSession.has(listingId(variant, listingUuid))
 

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react"
 import { type DriveViewMode } from "@/features/drive/lib/preferences"
+import { isToggleModifier } from "@/features/drive/lib/listbox"
 import {
-	DRAG_THRESHOLD_PX,
 	clampMarqueeRect,
 	marqueeAutoScrollTop,
 	marqueeAutoScrollVelocity,
@@ -13,6 +13,8 @@ import {
 	type MarqueeContentBox,
 	type MarqueeContentRect
 } from "@/features/drive/lib/marquee.logic"
+import { useLatestRef } from "@/lib/useLatestRef"
+import { exceedsDragThreshold, listenWindowDrag } from "@/lib/windowDrag"
 
 // Windows-Explorer edge auto-scroll: within this many px of the container's top/bottom, the listing
 // scrolls while marqueeing, at up to this many px per frame (ramped by proximity).
@@ -100,13 +102,6 @@ interface MarqueeDrag<T> {
 	paddingRight: number
 }
 
-interface MarqueeHandlers {
-	move: (event: PointerEvent) => void
-	up: (event: PointerEvent) => void
-	key: (event: KeyboardEvent) => void
-	menu: () => void
-}
-
 export interface MarqueeSelection {
 	onPointerDown: (event: ReactPointerEvent<HTMLDivElement>) => void
 	rect: MarqueeContentRect | null
@@ -123,24 +118,11 @@ export function useMarqueeSelection<T extends MarqueeItem>(params: MarqueeParams
 	const [rect, setRect] = useState<MarqueeContentRect | null>(null)
 	const dragRef = useRef<MarqueeDrag<T> | null>(null)
 	const rafRef = useRef(0)
-	const handlersRef = useRef<MarqueeHandlers | null>(null)
+	const detachRef = useRef<(() => void) | null>(null)
 
 	// Latest render values, read by the window-level listeners so they never go stale without re-binding.
-	// Synced in a post-commit effect (writing refs during render is disallowed) — pointer events are
-	// user-driven and always fire after commit, so the listeners never read a pre-commit value.
-	const itemsRef = useRef(items)
-	const hitTestRef = useRef(hitTest)
-	const selectionRef = useRef(selection)
-	const scrollElementRef = useRef(scrollElement)
-	const setCursorRef = useRef(setCursor)
-
-	useEffect(() => {
-		itemsRef.current = items
-		hitTestRef.current = hitTest
-		selectionRef.current = selection
-		scrollElementRef.current = scrollElement
-		setCursorRef.current = setCursor
-	})
+	// One object, so one effect on a hook that re-renders on every pointermove.
+	const latestRef = useLatestRef({ items, hitTest, selection, scrollElement, setCursor })
 
 	// The container's live content box, rebuilt per move from the current clientWidth + the drag's own
 	// paddings — a container with no padding and no border reduces to the raw border-box math this hook
@@ -152,7 +134,7 @@ export function useMarqueeSelection<T extends MarqueeItem>(params: MarqueeParams
 	// Recomputes the rectangle from the fixed content-space anchor and the given viewport point, hit-tests
 	// it, and applies the selection (replace, or union with the pre-drag set under ctrl/cmd).
 	function computeAndApply(clientX: number, clientY: number): void {
-		const el = scrollElementRef.current
+		const el = latestRef.current.scrollElement
 		const drag = dragRef.current
 
 		if (!el || !drag) {
@@ -169,8 +151,8 @@ export function useMarqueeSelection<T extends MarqueeItem>(params: MarqueeParams
 			marqueeRectFromPoints(drag.anchorX, drag.anchorY, contentX, contentY),
 			marqueeScrollBounds(box, el.clientLeft, el.clientTop, el.clientWidth, el.scrollHeight)
 		)
-		const items = itemsRef.current
-		const indices = hitTestRef.current.indices(marqueeRect, box.width)
+		const items = latestRef.current.items
+		const indices = latestRef.current.hitTest.indices(marqueeRect, box.width)
 
 		drag.lastHitIndex = indices.at(-1) ?? -1
 
@@ -198,13 +180,13 @@ export function useMarqueeSelection<T extends MarqueeItem>(params: MarqueeParams
 			next = hitItems
 		}
 
-		selectionRef.current.write(next)
+		latestRef.current.selection.write(next)
 		setRect(marqueeRect)
 	}
 
 	// Moves the roving cursor to the item under the drag-end point, or the last covered item.
 	function commitCursor(): void {
-		const el = scrollElementRef.current
+		const el = latestRef.current.scrollElement
 		const drag = dragRef.current
 
 		if (!el || !drag) {
@@ -215,16 +197,16 @@ export function useMarqueeSelection<T extends MarqueeItem>(params: MarqueeParams
 		const box = contentBoxFor(el, drag)
 		const contentX = drag.lastClientX - bounds.left - box.insetLeft
 		const contentY = drag.lastClientY - bounds.top - box.insetTop + el.scrollTop
-		const index = hitTestRef.current.indexAtPoint(contentX, contentY, box.width)
+		const index = latestRef.current.hitTest.indexAtPoint(contentX, contentY, box.width)
 
 		if (index >= 0) {
-			setCursorRef.current(index)
+			latestRef.current.setCursor(index)
 
 			return
 		}
 
 		if (drag.lastHitIndex >= 0) {
-			setCursorRef.current(drag.lastHitIndex)
+			latestRef.current.setCursor(drag.lastHitIndex)
 		}
 	}
 
@@ -234,16 +216,8 @@ export function useMarqueeSelection<T extends MarqueeItem>(params: MarqueeParams
 			rafRef.current = 0
 		}
 
-		const handlers = handlersRef.current
-
-		if (handlers) {
-			window.removeEventListener("pointermove", handlers.move)
-			window.removeEventListener("pointerup", handlers.up)
-			window.removeEventListener("pointercancel", handlers.up)
-			window.removeEventListener("keydown", handlers.key, true)
-			window.removeEventListener("contextmenu", handlers.menu, true)
-			handlersRef.current = null
-		}
+		detachRef.current?.()
+		detachRef.current = null
 
 		dragRef.current = null
 		setRect(null)
@@ -252,7 +226,7 @@ export function useMarqueeSelection<T extends MarqueeItem>(params: MarqueeParams
 	// rAF edge auto-scroll: while the pointer sits in an edge zone, advance scrollTop and re-hit-test at
 	// the same viewport point (the fixed content anchor makes the rectangle stretch as content moves).
 	function tickAutoScroll(): void {
-		const el = scrollElementRef.current
+		const el = latestRef.current.scrollElement
 		const drag = dragRef.current
 
 		if (!el || !drag?.started) {
@@ -293,10 +267,7 @@ export function useMarqueeSelection<T extends MarqueeItem>(params: MarqueeParams
 		drag.lastClientY = event.clientY
 
 		if (!drag.started) {
-			const dx = event.clientX - drag.startClientX
-			const dy = event.clientY - drag.startClientY
-
-			if (Math.hypot(dx, dy) < DRAG_THRESHOLD_PX) {
+			if (!exceedsDragThreshold(event.clientX - drag.startClientX, event.clientY - drag.startClientY)) {
 				return
 			}
 
@@ -344,7 +315,7 @@ export function useMarqueeSelection<T extends MarqueeItem>(params: MarqueeParams
 		event.stopPropagation()
 
 		if (drag.started) {
-			selectionRef.current.write(drag.preset)
+			latestRef.current.selection.write(drag.preset)
 		}
 
 		endDrag()
@@ -393,7 +364,7 @@ export function useMarqueeSelection<T extends MarqueeItem>(params: MarqueeParams
 		const paddingRight = parseFloat(style.paddingRight) || 0
 		const box = marqueeContentBox(el.clientLeft, el.clientTop, el.clientWidth, paddingLeft, paddingTop, paddingRight)
 		const preset = selection.read()
-		const additive = event.metaKey || event.ctrlKey
+		const additive = isToggleModifier(event)
 		const drag: MarqueeDrag<T> = {
 			anchorX: offsetX - box.insetLeft,
 			anchorY: offsetY - box.insetTop + el.scrollTop,
@@ -410,15 +381,9 @@ export function useMarqueeSelection<T extends MarqueeItem>(params: MarqueeParams
 			paddingTop,
 			paddingRight
 		}
-		const handlers: MarqueeHandlers = { move: onMove, up: onUp, key: onKey, menu: onContextMenu }
 
 		dragRef.current = drag
-		handlersRef.current = handlers
-		window.addEventListener("pointermove", handlers.move)
-		window.addEventListener("pointerup", handlers.up)
-		window.addEventListener("pointercancel", handlers.up)
-		window.addEventListener("keydown", handlers.key, true)
-		window.addEventListener("contextmenu", handlers.menu, true)
+		detachRef.current = listenWindowDrag({ move: onMove, up: onUp, cancel: onUp, key: onKey, menu: onContextMenu })
 	}
 
 	// Tear down any live drag on unmount (navigation away mid-drag).

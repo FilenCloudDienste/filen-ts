@@ -2,6 +2,7 @@ import { useQuery, type QueryKey, type UseQueryResult } from "@tanstack/react-qu
 import { sdkApi } from "@/lib/sdk/client"
 import { currentSocketEpoch, socketLiveSince } from "@/lib/sdk/socketSession"
 import { queryClient } from "@/queries/client"
+import { cachedQuery, cancelInFlightIfCached, setQueryDataKeepInvalidated } from "@/queries/patch"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { isPhotoItem } from "@/features/photos/lib/predicate"
 import { sortPhotosByCaptureDesc, type PhotoItem } from "@/features/photos/lib/captureSort"
@@ -12,8 +13,10 @@ import { photoFolderPaths } from "@/features/photos/lib/search"
 // on a photos tile must patch THIS key, not drive's own (driveListingQueryUpdate only ever touches
 // ["drive", …] keys — see photosListingQueryUpdate below and features/photos/lib/actions.ts, which
 // wraps drive's shared mutations with the extra patch this key needs).
+export const PHOTOS_LISTING_KEY_PREFIX = ["photos", "listing"] as const
+
 export function photosListingQueryKey(rootUuid: string) {
-	return ["photos", "listing", rootUuid] as const
+	return [...PHOTOS_LISTING_KEY_PREFIX, rootUuid] as const
 }
 
 export interface PhotosListing {
@@ -114,8 +117,7 @@ export function usePhotosListingQuery(rootUuid: string | null): UseQueryResult<P
 // patch has resolved by now, and an inactive one stays marked for its next mount.
 export function photosListingQueryUpdate(rootUuid: string, updater: (prev: PhotoItem[]) => PhotoItem[]): void {
 	const queryKey = photosListingQueryKey(rootUuid)
-	// One lookup by the key's hash: a filter find() copies and re-hashes the whole query cache per call.
-	const query = queryClient.getQueryCache().get<PhotosListing>(queryClient.defaultQueryOptions({ queryKey }).queryHash)
+	const query = cachedQuery<PhotosListing>(queryKey)
 
 	if (query?.state.data === undefined) {
 		return
@@ -126,7 +128,7 @@ export function photosListingQueryUpdate(rootUuid: string, updater: (prev: Photo
 	const walking = query.state.fetchStatus !== "idle"
 	const refreshPending = walking || query.state.isInvalidated
 
-	void query.cancel({ revert: true })
+	cancelInFlightIfCached(query)
 	queryClient.setQueryData<PhotosListing>(queryKey, prev => (prev === undefined ? prev : { ...prev, photos: updater(prev.photos) }))
 
 	// A queued rewalk already walks again once the cancelled one settles.
@@ -153,7 +155,7 @@ export function patchPhotosFavorite(item: DriveItem): void {
 		flips.set(item.data.uuid, item.data.favorited)
 	}
 
-	for (const query of queryClient.getQueryCache().findAll({ queryKey: ["photos", "listing"] })) {
+	for (const query of queryClient.getQueryCache().findAll({ queryKey: PHOTOS_LISTING_KEY_PREFIX })) {
 		const listing = query.state.data as PhotosListing | undefined
 
 		if (listing === undefined) {
@@ -166,14 +168,8 @@ export function patchPhotosFavorite(item: DriveItem): void {
 			continue
 		}
 
-		// No cancel: the walk under way returns the flip too. setQueryData drops a pending invalidation.
-		const invalidated = query.state.isInvalidated
-
-		queryClient.setQueryData<PhotosListing>(query.queryKey, { ...listing, photos: next })
-
-		if (invalidated) {
-			query.invalidate()
-		}
+		// No cancel: the walk under way returns the flip too.
+		setQueryDataKeepInvalidated(query, { ...listing, photos: next })
 	}
 }
 
@@ -196,7 +192,7 @@ export interface PhotosEventScope {
 export function invalidatePhotosListing(scope: PhotosEventScope | null): void {
 	const seq = ++photosEventSeq
 
-	for (const query of queryClient.getQueryCache().findAll({ queryKey: ["photos", "listing"] })) {
+	for (const query of queryClient.getQueryCache().findAll({ queryKey: PHOTOS_LISTING_KEY_PREFIX })) {
 		const queryKey = query.queryKey
 		const rootUuid = queryKey[2]
 		const photos = queryClient.getQueryData<PhotosListing>(queryKey)?.photos
@@ -294,5 +290,5 @@ function rewalkAfterCurrentWalk(queryHash: string, queryKey: QueryKey): void {
 // A dropped socket may have missed events: mark every listing stale without refetching while the socket
 // is down. The next mount, focus or event reads it again, and the scoping above stays off until it has.
 export function markPhotosListingStale(): void {
-	void queryClient.invalidateQueries({ queryKey: ["photos", "listing"], refetchType: "none" })
+	void queryClient.invalidateQueries({ queryKey: PHOTOS_LISTING_KEY_PREFIX, refetchType: "none" })
 }

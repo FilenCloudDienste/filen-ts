@@ -1,8 +1,7 @@
 import { useTranslation } from "react-i18next"
 import { PlusIcon } from "lucide-react"
 import { cn } from "@filen/shared"
-import { Button } from "@/components/ui/button"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
 
 // The workbook's sheets as tabs along the bottom edge, the way spreadsheets show them. Arrow keys move
 // between them (roving tabindex), as in a tablist. When editable, a sheet can be added, and renamed by
@@ -25,21 +24,12 @@ export function SheetTabs({
 	return (
 		<div className="flex h-9 shrink-0 items-center gap-1 border-t border-border bg-muted/40 px-2">
 			{onAdd !== undefined ? (
-				<Tooltip>
-					<TooltipTrigger
-						render={
-							<Button
-								variant="ghost"
-								size="icon-sm"
-								aria-label={t("previewSpreadsheetAddSheet")}
-								onClick={onAdd}
-							>
-								<PlusIcon />
-							</Button>
-						}
-					/>
-					<TooltipContent>{t("previewSpreadsheetAddSheet")}</TooltipContent>
-				</Tooltip>
+				<TooltipIconButton
+					label={t("previewSpreadsheetAddSheet")}
+					onClick={onAdd}
+				>
+					<PlusIcon />
+				</TooltipIconButton>
 			) : null}
 			<div
 				role="tablist"

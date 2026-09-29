@@ -5,8 +5,7 @@ import { extensionOf, codeMirrorLanguageFor, decodeUtf8 } from "@/features/drive
 import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
 import { CodeMirrorSource } from "@/features/preview/components/codeMirrorSource"
 import { errorLabel } from "@/lib/i18n/errorLabel"
-import { LoadingState } from "@/components/loadingState"
-import { PreviewErrorState } from "@/features/preview/components/previewErrorState"
+import { PreviewErrorState, PreviewLoading } from "@/features/preview/components/previewErrorState"
 
 export interface TextViewerProps {
 	item: DriveItem
@@ -38,12 +37,7 @@ function TextViewer({ item, alt, editable, onDirtyChange, contentRef, locked }: 
 	const result = usePreviewBytes(item)
 
 	if (result.status === "pending") {
-		return (
-			<LoadingState
-				size="lg"
-				className="text-inherit"
-			/>
-		)
+		return <PreviewLoading />
 	}
 
 	if (result.status === "error") {

@@ -1,14 +1,11 @@
-import { useRef, useState, type KeyboardEvent } from "react"
+import { useState, type KeyboardEvent } from "react"
 import { type Virtualizer } from "@tanstack/react-virtual"
+import { useRovingItemRefs } from "@/features/drive/hooks/useRovingItemRefs"
 import { clampListboxIndex, listboxKeyTargetIsInteractive, resolveCursorIndex } from "@/features/drive/lib/listbox"
 import { photosGridKeyAction, photosRangeSelection } from "@/features/photos/components/photoGrid.logic"
 import { type PhotoItem } from "@/features/photos/lib/captureSort"
 import { type PhotosTimeline } from "@/features/photos/lib/timeline"
 import { usePhotosStore } from "@/features/photos/store/usePhotosStore"
-
-// Bounds the rAF poll moveActive() uses to focus a cursor target that scrollToIndex just brought into
-// range but that hasn't mounted (and registered its ref) yet.
-const FOCUS_RETRY_FRAMES = 10
 
 interface UsePhotosGridNavParams {
 	items: PhotoItem[]
@@ -50,8 +47,7 @@ export function usePhotosGridNav({
 	// its uuid is gone from `items`. Adjusted during render (React's documented alternative to an
 	// effect), never in an effect body.
 	const [activeFallback, setActiveFallback] = useState(0)
-	const focusRequestRef = useRef(0)
-	const itemRefs = useRef(new Map<number, HTMLDivElement>())
+	const { registerRef, focusItem } = useRovingItemRefs()
 
 	const uuids = items.map(item => item.data.uuid)
 	const safeActiveIndex = clampListboxIndex(resolveCursorIndex(activeUuid, uuids, activeFallback), items.length)
@@ -60,52 +56,12 @@ export function usePhotosGridNav({
 		setActiveFallback(safeActiveIndex)
 	}
 
-	function registerRef(index: number, el: HTMLDivElement | null): void {
-		if (el) {
-			itemRefs.current.set(index, el)
-		} else {
-			itemRefs.current.delete(index)
-		}
-	}
-
-	// Focus is imperative by nature here: the target row may be scrolled fully out of the mounted
-	// window, and scrollToIndex's re-render lands through the virtualizer's own scroll subscription,
-	// not synchronously with the state update below. A bounded rAF poll picks the tile up once it
-	// mounts; `focusRequestRef` makes an older, still-polling request inert once a newer one lands.
 	function moveActive(nextIndexRaw: number): number {
 		const next = clampListboxIndex(nextIndexRaw, items.length)
 
 		setActiveUuid(items[next]?.data.uuid ?? null)
 		virtualizer.scrollToIndex(timeline.rowOfItem[next] ?? 0, { align: "auto" })
-		focusRequestRef.current = next
-
-		const attemptFocus = (attemptsLeft: number) => {
-			if (focusRequestRef.current !== next) {
-				return
-			}
-
-			const el = itemRefs.current.get(next)
-
-			if (el) {
-				if (document.activeElement !== el) {
-					el.focus({ preventScroll: true })
-				}
-
-				return
-			}
-
-			if (attemptsLeft <= 0) {
-				return
-			}
-
-			requestAnimationFrame(() => {
-				attemptFocus(attemptsLeft - 1)
-			})
-		}
-
-		requestAnimationFrame(() => {
-			attemptFocus(FOCUS_RETRY_FRAMES)
-		})
+		focusItem(next)
 
 		return next
 	}

@@ -1,30 +1,23 @@
-import { useEffect, type ReactNode } from "react"
+import { type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
-import { toast } from "sonner"
 import { useDialogHost } from "@/lib/useDialogHost"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
-import { stepPreviewIndex } from "@/features/drive/lib/preview.logic"
 import { renameItem, trashItems, restoreItems, deleteItemsPermanently, disableLinks, emptyTrash } from "@/features/drive/lib/actions"
 import { unshareItems } from "@/features/drive/lib/share/actions"
 import { notifyIfNameIsHidden } from "@/features/drive/lib/hiddenNameNotice"
-import { type BulkOutcome } from "@/features/drive/lib/bulk"
+import { type BulkOutcome } from "@/lib/actions/bulk"
 import { toastBulkOutcome } from "@/features/drive/lib/bulkToast"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
-import { errorLabel } from "@/lib/i18n/errorLabel"
 import { type ItemActionDialogKind } from "@/features/drive/components/itemMenu.logic"
 import { type BulkDialogActionKind } from "@/features/drive/components/bulkActionBar.logic"
 import { MoveTargetDialog } from "@/features/drive/components/moveTargetDialog"
-import { ContactPickerDialog } from "@/features/drive/components/contactPickerDialog"
 import { ColorDialog } from "@/features/drive/components/colorDialog"
-import { VersionsDialog } from "@/features/drive/components/versionsDialog"
-import { InfoDialog } from "@/features/drive/components/infoDialog"
-import { LinkDialog } from "@/features/drive/components/linkDialog"
+import { ItemDialog, RenameItemDialog, TrashConfirmDialog } from "@/features/drive/components/itemDialogs"
 import { PreviewOverlay } from "@/features/preview/components/previewOverlay"
-import { previewProtectedUuid, reconcilePreviewSources, subscribePreviewReconcile } from "@/features/preview/lib/previewReconcile"
+import { keepPreviewOpenOnNavigate, usePreviewDialogState } from "@/features/preview/hooks/usePreviewDialogState"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { TypedConfirmDialog } from "@/components/dialogs/typedConfirmDialog"
-import { InputDialog } from "@/components/dialogs/inputDialog"
 
 // The listing-level dialog host's own state shape. Widens itemMenu.logic.ts's ItemActionDialogKind
 // with two listing-level kinds neither dispatched by a per-item menu, so neither has a place in that
@@ -39,14 +32,6 @@ interface ActiveDialog {
 	// Only meaningful for kind:"preview" — the opened slot's position within `items`. Every other kind
 	// leaves this unset.
 	index?: number
-}
-
-// The preview overlay owns its own navigation semantics: its dirty-buffer guard decides what a route
-// change means for unsaved edits, and a same-route splat change deliberately keeps it mounted with the
-// buffer intact. Closing it from the dialog host would silently discard exactly what that guard exists
-// to protect.
-function keepPreviewOpenOnNavigate(dialog: ActiveDialog): boolean {
-	return dialog.kind === "preview"
 }
 
 // Trash, delete, restore and disable-link take the whole item out of the listing, so every receiver row
@@ -83,90 +68,14 @@ interface UseDriveDialogHostParams {
 // boolean can express (e.g. versions has an independent restore vs. delete-confirm flow).
 export function useDriveDialogHost({ variant, selectedItems, hiddenNoticeApplies }: UseDriveDialogHostParams): DriveDialogHost {
 	const { t } = useTranslation(["drive", "common"])
-	const { activeDialog, setActiveDialog, dialogPending, setDialogPending, isDialogOpen, closeActiveDialog } = useDialogHost<ActiveDialog>(
-		{ keepOpenOnNavigate: keepPreviewOpenOnNavigate }
-	)
+	const { activeDialog, setActiveDialog, dialogPending, isDialogOpen, closeActiveDialog, runDialogPending, runDialogOutcome } =
+		useDialogHost<ActiveDialog>({ keepOpenOnNavigate: keepPreviewOpenOnNavigate })
 
-	// Keeps an OPEN preview in sync with realtime drive mutations from ANOTHER device. The pager steps a
-	// frozen items snapshot the socket handler's listing-cache patch can't reach, so the drive
-	// handler emits a reconcile signal instead: a remote trash/move/delete advances the pager (or closes it
-	// once the last slot goes) unless the slot on screen holds unsaved edits, which the overlay answers
-	// itself, and a rename re-derives the header title — the remote-event twin of
-	// removeCurrentPreviewItem's same-client sync. Newer versions are the overlay's alone. A no-op while no
-	// preview is open (the updater short-circuits on any non-preview dialog). setActiveDialog is a stable
-	// setState, so the subscription is set up once.
-	useEffect(() => {
-		return subscribePreviewReconcile(event => {
-			setActiveDialog(prev => {
-				if (prev?.kind !== "preview" || prev.index === undefined) {
-					return prev
-				}
-
-				const state = { items: prev.items, index: prev.index }
-				const next = reconcilePreviewSources(state, event, previewProtectedUuid(state))
-
-				if (next === null) {
-					return null
-				}
-
-				// Most events are about files the pager does not hold: no new dialog state, no re-render.
-				if (next === state) {
-					return prev
-				}
-
-				return { ...prev, items: next.items, index: next.index }
-			})
-		})
-	}, [setActiveDialog])
-
-	// Steps the open preview by one sibling (no wrap) — the single implementation behind PreviewOverlay's
-	// onStep prop, which both the header's prev/next buttons AND its own local in-dialog arrow-key
-	// handler call (previewOverlay.tsx — arrow keys can't reach a document-level keymap action while
-	// the dialog traps focus, see that handler's own comment). A no-op outside kind:"preview".
-	function stepPreview(delta: 1 | -1): void {
-		setActiveDialog(prev => {
-			if (prev?.kind !== "preview" || prev.index === undefined) {
-				return prev
-			}
-
-			const current = prev.items[prev.index]
-
-			if (!current) {
-				return prev
-			}
-
-			return { ...prev, index: stepPreviewIndex(current.data.uuid, prev.items, delta) }
-		})
-	}
+	const { stepPreview, removeCurrentPreviewItem } = usePreviewDialogState(setActiveDialog)
 
 	// Opens the preview overlay for a frozen item snapshot at the given position.
 	function openPreview(items: DriveItem[], index: number): void {
 		setActiveDialog({ kind: "preview", items, index })
-	}
-
-	// Drops the acted-on slot out of the frozen pager snapshot — the preview header's own item menu
-	// (previewOverlay.tsx) calls this after a successful trash/delete-permanently/restore-from-trash on
-	// the previewed item, mirroring new mobile's driveItemRemoved gallery subscriber: stay on the same
-	// visual position (which now shows the next sibling, clamped to the new last slot), or close outright
-	// once the removed slot was the only one left. Routed through the SAME uuid-keyed reducer the socket
-	// reconcile subscription uses ON PURPOSE: the server echoes this very mutation back over the socket,
-	// and the echo can land before OR after this local call — remove-by-uuid makes the two arms converge
-	// (whichever runs second finds nothing and no-ops), where the previous remove-by-index would race the
-	// echo and drop the NEIGHBOUR's slot instead, collapsing a two-sibling pager to a spurious close.
-	function removeCurrentPreviewItem(frozenUuid: string): void {
-		setActiveDialog(prev => {
-			if (prev?.kind !== "preview" || prev.index === undefined) {
-				return prev
-			}
-
-			const next = reconcilePreviewSources({ items: prev.items, index: prev.index }, { type: "removed", uuid: frozenUuid })
-
-			if (next === null) {
-				return null
-			}
-
-			return { ...prev, items: next.items, index: next.index }
-		})
 	}
 
 	// Threaded into DriveRow/DriveTile as onItemAction (consistent with onPointerSelect/onOpen) — every
@@ -177,19 +86,12 @@ export function useDriveDialogHost({ variant, selectedItems, hiddenNoticeApplies
 	}
 
 	async function handleRenameSubmit(item: DriveItem, value: string): Promise<void> {
-		setDialogPending(true)
 		const trimmed = value.trim()
-		const outcome = await renameItem(item, trimmed)
-		setDialogPending(false)
 
-		if (outcome.status === "error") {
-			// Dialog stays open on error (e.g. a name clash) so the user can fix the name and retry —
-			// mirrors newDirectory.tsx's identical convention.
-			toast.error(errorLabel(outcome.dto))
+		if (!(await runDialogOutcome(() => renameItem(item, trimmed)))) {
 			return
 		}
 
-		closeActiveDialog()
 		// A rename has no success feedback of its own either — see newDirectory.tsx's identical call.
 		notifyIfNameIsHidden(trimmed, "renamed", hiddenNoticeApplies)
 	}
@@ -203,9 +105,7 @@ export function useDriveDialogHost({ variant, selectedItems, hiddenNoticeApplies
 		op: (items: DriveItem[]) => Promise<BulkOutcome<DriveItem>>,
 		prune: (succeeded: DriveItem[]) => void = pruneSelectionByUuid
 	): Promise<void> {
-		setDialogPending(true)
-		const outcome = await op(items)
-		setDialogPending(false)
+		const outcome = await runDialogPending(() => op(items))
 		closeActiveDialog()
 		toastBulkOutcome(outcome)
 		prune(outcome.succeeded)
@@ -252,16 +152,7 @@ export function useDriveDialogHost({ variant, selectedItems, hiddenNoticeApplies
 	}
 
 	async function handleEmptyTrashConfirm(): Promise<void> {
-		setDialogPending(true)
-		const outcome = await emptyTrash()
-		setDialogPending(false)
-
-		if (outcome.status === "error") {
-			toast.error(errorLabel(outcome.dto))
-			return
-		}
-
-		closeActiveDialog()
+		await runDialogOutcome(emptyTrash)
 	}
 
 	// One instance of whichever dialog is active, switching on activeDialog.kind — never more than one
@@ -280,20 +171,10 @@ export function useDriveDialogHost({ variant, selectedItems, hiddenNoticeApplies
 				}
 
 				return (
-					<InputDialog
-						open
+					<RenameItemDialog
+						item={item}
 						pending={dialogPending}
-						title={t("driveActionRename")}
-						body={t("driveRenameDialogBody")}
-						label={t("driveNewDirectoryLabel")}
-						initialValue={item.data.decryptedMeta?.name ?? ""}
-						submitLabel={t("driveActionRename")}
-						validate={value => value.trim().length > 0}
-						onOpenChange={open => {
-							if (!open) {
-								closeActiveDialog()
-							}
-						}}
+						onClose={closeActiveDialog}
 						onSubmit={value => {
 							void handleRenameSubmit(item, value)
 						}}
@@ -302,18 +183,10 @@ export function useDriveDialogHost({ variant, selectedItems, hiddenNoticeApplies
 			}
 			case "trash":
 				return (
-					<ConfirmDialog
-						open
+					<TrashConfirmDialog
+						count={activeDialog.items.length}
 						pending={dialogPending}
-						title={t("driveTrashConfirmTitle")}
-						body={t("driveTrashConfirmBody", { count: activeDialog.items.length })}
-						confirmLabel={t("driveActionTrash")}
-						cancelLabel={t("common:cancel")}
-						onOpenChange={open => {
-							if (!open) {
-								closeActiveDialog()
-							}
-						}}
+						onClose={closeActiveDialog}
 						onConfirm={() => {
 							void handleTrashConfirm(activeDialog.items)
 						}}
@@ -389,14 +262,6 @@ export function useDriveDialogHost({ variant, selectedItems, hiddenNoticeApplies
 						onClose={closeActiveDialog}
 					/>
 				) : null
-			case "copy":
-				return activeDialog.items.length > 0 ? (
-					<MoveTargetDialog
-						items={activeDialog.items}
-						mode="copy"
-						onClose={closeActiveDialog}
-					/>
-				) : null
 			case "color": {
 				const item = activeDialog.items[0]
 
@@ -413,59 +278,19 @@ export function useDriveDialogHost({ variant, selectedItems, hiddenNoticeApplies
 					/>
 				)
 			}
-			case "versions": {
-				const item = activeDialog.items[0]
-
-				if (item?.type !== "file") {
-					return null
-				}
-
-				return (
-					<VersionsDialog
-						file={item}
-						onClose={closeActiveDialog}
-					/>
-				)
-			}
-			case "info": {
-				const item = activeDialog.items[0]
-
-				if (!item) {
-					return null
-				}
-
-				return (
-					<InfoDialog
-						item={item}
-						variant={variant}
-						remoteInfoEnabled={variant !== "trash"}
-						onClose={closeActiveDialog}
-					/>
-				)
-			}
-			case "link": {
-				const item = activeDialog.items[0]
-
-				if (!item) {
-					return null
-				}
-
-				return (
-					<LinkDialog
-						item={item}
-						onClose={closeActiveDialog}
-					/>
-				)
-			}
+			case "copy":
+			case "versions":
+			case "info":
+			case "link":
 			case "share":
-				// Reached from a per-item menu (items: [item]) or the bulk bar (items: selectedItems) — the
-				// picker itself shares each item with every chosen contact.
-				return activeDialog.items.length > 0 ? (
-					<ContactPickerDialog
+				return (
+					<ItemDialog
+						kind={activeDialog.kind}
 						items={activeDialog.items}
+						variant={variant}
 						onClose={closeActiveDialog}
 					/>
-				) : null
+				)
 			case "unshare":
 				// Reached from a per-item menu (items: [item]) or the bulk bar (items: selectedItems) — both
 				// only ever dispatch this for sharedRootDirectory/sharedRootFile arms (itemMenu.logic.ts /

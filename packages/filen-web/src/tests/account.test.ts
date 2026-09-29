@@ -8,7 +8,7 @@ const { getUserInfo } = vi.hoisted(() => ({ getUserInfo: vi.fn<() => Promise<Use
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: { getUserInfo } }))
 
 import { queryClient } from "@/queries/client"
-import { accountQueryUpdate, fetchAccount, markAccountStale, ACCOUNT_QUERY_KEY } from "@/queries/account"
+import { accountQueryGet, accountQueryUpdate, fetchAccount, markAccountStale, ACCOUNT_QUERY_KEY } from "@/queries/account"
 
 describe("account query", () => {
 	it("queryKey is the stable, exact tuple every consumer imports", () => {
@@ -29,6 +29,17 @@ describe("account query", () => {
 		getUserInfo.mockRejectedValueOnce(error)
 
 		await expect(fetchAccount()).rejects.toBe(error)
+	})
+
+	it("accountQueryGet reads the cached account and is undefined on a miss", () => {
+		queryClient.clear()
+		expect(accountQueryGet()).toBeUndefined()
+
+		const info = { id: 7n } as UserInfo
+		queryClient.setQueryData(ACCOUNT_QUERY_KEY, info)
+		expect(accountQueryGet()).toBe(info)
+
+		queryClient.clear()
 	})
 })
 

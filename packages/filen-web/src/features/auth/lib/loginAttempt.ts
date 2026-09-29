@@ -1,7 +1,7 @@
 import type { StringifiedClient } from "@filen/sdk-rs"
 import { readTwoFactorKind } from "@/features/auth/lib/twoFactorKinds"
 import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
-import { log } from "@/lib/log"
+import { persistSessionBlob } from "@/lib/sdk/persistOutcome"
 
 export interface LoginParams {
 	email: string
@@ -60,13 +60,7 @@ export async function runLoginAttempt(deps: LoginAttemptDeps, params: LoginParam
 	// Persist is deliberately isolated from the login result: the worker IS authenticated here, so a
 	// failed local save must not masquerade as a failed login (the user would retry against a
 	// rate-limited endpoint). Losing resume-after-close beats losing the sign-in — report and proceed.
-	let persisted = true
-	try {
-		await deps.persist(blob)
-	} catch (e) {
-		persisted = false
-		log.warn("login", "session persist failed", asErrorDTO(e))
-	}
+	const persisted = await persistSessionBlob(deps, blob, "login", "session")
 	if (persisted) {
 		// Only a durably persisted session is announced — other tabs react by reading it from kv,
 		// and an unpersisted one would leave them nothing to adopt.

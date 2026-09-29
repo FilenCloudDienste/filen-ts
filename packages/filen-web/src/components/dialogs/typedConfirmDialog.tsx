@@ -1,5 +1,4 @@
 import { type SubmitEvent } from "react"
-import { type AlertDialogRoot } from "@base-ui/react/alert-dialog"
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -13,7 +12,7 @@ import {
 import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
-import { shouldForwardOpenChange } from "@/components/dialogs/dismissal.logic"
+import { pendingGuardedOpenChange } from "@/components/dialogs/dismissal.logic"
 import { useSeededOnOpen } from "@/lib/useSeededOnOpen"
 
 interface TypedConfirmDialogProps {
@@ -72,15 +71,7 @@ function TypedConfirmDialog({
 	// repair a drift.
 	const armed = typed === matchValue
 
-	function handleOpenChange(next: boolean, details: AlertDialogRoot.ChangeEventDetails): void {
-		if (!shouldForwardOpenChange(next, pending)) {
-			// Also stops Base UI's own store from flipping (it closes itself after this callback
-			// unless the event is canceled) — see dismissal.logic.ts.
-			details.cancel()
-			return
-		}
-		onOpenChange(next)
-	}
+	const handleOpenChange = pendingGuardedOpenChange(pending, onOpenChange)
 
 	function handleSubmit(e: SubmitEvent): void {
 		e.preventDefault()

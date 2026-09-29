@@ -1,15 +1,13 @@
-import { createFileRoute, Link } from "@tanstack/react-router"
-import { Trans, useTranslation } from "react-i18next"
+import { createFileRoute } from "@tanstack/react-router"
+import { useTranslation } from "react-i18next"
 import { redirectIfAuthed } from "@/features/auth/lib/guard"
-import { Logo } from "@/features/shell/components/logo"
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { RegisterForm } from "@/features/auth/components/registerForm"
-import { AuthLegalLinks } from "@/features/auth/components/legalLinks"
+import { AuthCard } from "@/features/auth/components/authCard"
 import { routeHead } from "@/lib/head/routeHead"
 import { i18n } from "@/lib/i18n"
 
 // Unauthed page: a live session bounces straight to /drive. Same shared guard as /login — see
-// guard.ts. Mirrors login.tsx's Card shell; the real form (strength meter, referral capture,
+// guard.ts. Shares login.tsx's AuthCard shell; the real form (strength meter, referral capture,
 // eligibility banner, check-your-email success state) lives in RegisterForm.
 export const Route = createFileRoute("/register")({
 	head: routeHead({ title: () => [i18n.t("auth:registerDocumentTitle")] }),
@@ -21,36 +19,12 @@ function RegisterPage() {
 	const { t } = useTranslation("auth")
 
 	return (
-		<div className="flex min-h-svh flex-col items-center justify-center gap-6 bg-canvas p-6 text-foreground">
-			<Card className="w-full max-w-sm">
-				<CardHeader className="justify-items-center gap-3 text-center">
-					<Logo className="size-10 text-primary" />
-					<div className="flex flex-col gap-1">
-						<CardTitle>{t("registerTitle")}</CardTitle>
-						<CardDescription>{t("registerSubtitle")}</CardDescription>
-					</div>
-				</CardHeader>
-				<CardContent>
-					<RegisterForm />
-				</CardContent>
-				<CardFooter className="justify-center">
-					<p className="text-sm text-muted-foreground">
-						<Trans
-							t={t}
-							i18nKey="alreadyHaveAccount"
-							components={{
-								a: (
-									<Link
-										to="/login"
-										className="text-foreground underline underline-offset-4"
-									/>
-								)
-							}}
-						/>
-					</p>
-				</CardFooter>
-			</Card>
-			<AuthLegalLinks />
-		</div>
+		<AuthCard
+			title={t("registerTitle")}
+			subtitle={t("registerSubtitle")}
+			footer={{ i18nKey: "alreadyHaveAccount", to: "/login" }}
+		>
+			<RegisterForm />
+		</AuthCard>
 	)
 }

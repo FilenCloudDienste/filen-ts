@@ -33,7 +33,7 @@ vi.mock("jszip", () => ({
 
 import { queryClient as testQueryClient } from "@/queries/client"
 import { noteContentQueryKey } from "@/features/notes/queries/noteContent"
-import useNotesInflightStore from "@/features/notes/store/useNotesInflight"
+import { useNotesInflightStore } from "@/features/notes/store/useNotesInflight"
 import { exportNote, exportAllNotes } from "@/features/notes/lib/export"
 
 function testUuid(label: string): UuidStr {

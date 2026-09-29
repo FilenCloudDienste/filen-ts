@@ -13,7 +13,7 @@ import type { ActionDef } from "@/lib/keymap/registry"
 // dialog host) and the listing's handler no-ops whenever a dialog is open.
 export const DRIVE_ACTIONS: readonly ActionDef[] = [
 	{ id: "drive.selectAll", defaultCombo: "mod+a", scope: "drive", descriptionKey: "drive:driveCommandSelectAll" },
-	{ id: "drive.clearSelection", defaultCombo: "escape", scope: "drive", descriptionKey: "drive:driveCommandClearSelection" },
+	{ id: "drive.clearSelection", defaultCombo: "escape", scope: "drive", descriptionKey: "common:clearSelection" },
 	{ id: "drive.toggleView", defaultCombo: "v", scope: "drive", descriptionKey: "drive:driveCommandToggleView" },
 	{ id: "drive.rename", defaultCombo: "f2", scope: "drive", descriptionKey: "drive:driveCommandRename" },
 	{ id: "drive.trash", defaultCombo: "delete,backspace", scope: "drive", descriptionKey: "drive:driveCommandTrash" },

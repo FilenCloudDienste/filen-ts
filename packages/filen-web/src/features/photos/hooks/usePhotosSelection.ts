@@ -1,5 +1,5 @@
 import { type MouseEvent } from "react"
-import { clickPointerType, isPlainClickDeselect } from "@/features/drive/lib/listbox"
+import { clickPointerType, isPlainClickDeselect, isToggleModifier } from "@/features/drive/lib/listbox"
 import { photosRangeSelection } from "@/features/photos/components/photoGrid.logic"
 import { type PhotoItem } from "@/features/photos/lib/captureSort"
 import { usePhotosStore } from "@/features/photos/store/usePhotosStore"
@@ -24,7 +24,7 @@ export function usePhotosSelection(items: PhotoItem[], anchorUuid: string | null
 			return
 		}
 
-		if (event.metaKey || event.ctrlKey) {
+		if (isToggleModifier(event)) {
 			usePhotosStore.getState().toggleSelectedItem(item)
 			setAnchorUuid(item.data.uuid)
 

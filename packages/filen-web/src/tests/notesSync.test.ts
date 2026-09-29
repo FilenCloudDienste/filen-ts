@@ -52,7 +52,7 @@ import { queryClient as testQueryClient } from "@/queries/client"
 import { Sync } from "@/features/notes/lib/sync"
 import { NOTES_QUERY_KEY, notesQueryUpdate } from "@/features/notes/queries/notes"
 import { noteContentQueryKey } from "@/features/notes/queries/noteContent"
-import useNotesInflightStore, { type InflightContent } from "@/features/notes/store/useNotesInflight"
+import { useNotesInflightStore, type InflightContent } from "@/features/notes/store/useNotesInflight"
 import { buildInflightEntries, mergeInflight, hashNoteContent } from "@filen/shared"
 import { inflightContentSchema, noteKindForPreview } from "@/features/notes/lib/sync.logic"
 import { deriveSessionBaseHash } from "@/features/notes/hooks/useNoteEditor.logic"
@@ -83,17 +83,6 @@ function makeNote(uuid: string, overrides: Partial<Note> = {}): Note {
 
 function sdkError(kind: string): { species: "sdk"; kind: string; label: string; message: string } {
 	return { species: "sdk", kind, label: kind, message: kind }
-}
-
-function deferred<T>(): { promise: Promise<T>; resolve: (v: T) => void; reject: (e: unknown) => void } {
-	let resolve!: (v: T) => void
-	let reject!: (e: unknown) => void
-	const promise = new Promise<T>((res, rej) => {
-		resolve = res
-		reject = rej
-	})
-
-	return { promise, resolve, reject }
 }
 
 function setStore(content: InflightContent): void {
@@ -617,7 +606,7 @@ describe("cancel() — suppresses the disk flush of an in-flight pass", () => {
 
 		setStore({ a: [{ timestamp: 1, content: "edit", note }] })
 
-		const gate = deferred<Note>()
+		const gate = Promise.withResolvers<Note>()
 		setNoteContent.mockReturnValue(gate.promise)
 
 		s.executeNow()
@@ -824,7 +813,7 @@ describe("outbox hydration gate — the editor's seed may never precede the rest
 
 		kvStore.set("inflightNoteContent", { a: [{ timestamp: 1, content: "draft", note }] })
 
-		const cloud = deferred<Note[]>()
+		const cloud = Promise.withResolvers<Note[]>()
 
 		listNotes.mockReturnValue(cloud.promise)
 		setNoteContent.mockResolvedValue(note)
@@ -1139,7 +1128,7 @@ describe("flushToDisk — one write at a time", () => {
 	it("coalesces the flushes asked for during a write into one write of the newest snapshot", async () => {
 		const s = await startedSync()
 		const note = makeNote("a")
-		const first = deferred<undefined>()
+		const first = Promise.withResolvers<undefined>()
 
 		kvSetJson.mockClear()
 		kvSetJson.mockImplementationOnce((key: string, value: unknown) => {
@@ -1164,7 +1153,7 @@ describe("flushToDisk — one write at a time", () => {
 	it("drops a write queued behind one in flight when the shutdown lands first", async () => {
 		const s = await startedSync()
 		const note = makeNote("a")
-		const first = deferred<undefined>()
+		const first = Promise.withResolvers<undefined>()
 
 		kvSetJson.mockClear()
 		kvSetJson.mockImplementationOnce(() => first.promise)
@@ -1186,7 +1175,7 @@ describe("restoreFromDisk — the reconcile's own reads", () => {
 	it("reads the pending notes' contents concurrently", async () => {
 		const noteA = makeNote("a")
 		const noteB = makeNote("b")
-		const contents = { a: deferred<string>(), b: deferred<string>() }
+		const contents = { a: Promise.withResolvers<string>(), b: Promise.withResolvers<string>() }
 
 		kvStore.set("inflightNoteContent", {
 			a: [{ timestamp: 1, content: "a-draft", note: noteA }],
@@ -1217,7 +1206,7 @@ describe("restoreFromDisk — the reconcile's own reads", () => {
 	// draft as orphaned.
 	it("never reconciles against a list the query reverted to", async () => {
 		const note = makeNote("a")
-		const cloud = deferred<Note[]>()
+		const cloud = Promise.withResolvers<Note[]>()
 
 		kvStore.set("inflightNoteContent", { a: [{ timestamp: 1, content: "draft", note }] })
 		testQueryClient.setQueryData(NOTES_QUERY_KEY, [])

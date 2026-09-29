@@ -1,10 +1,9 @@
 import type { ReactNode, SubmitEvent } from "react"
-import { type DialogRoot } from "@base-ui/react/dialog"
 import { cn } from "@filen/shared"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
-import { shouldForwardOpenChange } from "@/components/dialogs/dismissal.logic"
+import { pendingGuardedOpenChange } from "@/components/dialogs/dismissal.logic"
 
 interface FormDialogProps {
 	open: boolean
@@ -41,13 +40,7 @@ function FormDialog({
 	onSubmit,
 	children
 }: FormDialogProps) {
-	function handleOpenChange(next: boolean, details: DialogRoot.ChangeEventDetails): void {
-		if (!shouldForwardOpenChange(next, pending)) {
-			details.cancel()
-			return
-		}
-		onOpenChange(next)
-	}
+	const handleOpenChange = pendingGuardedOpenChange(pending, onOpenChange)
 
 	return (
 		<Dialog

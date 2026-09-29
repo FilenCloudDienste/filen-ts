@@ -87,6 +87,7 @@ import {
 	type SharedPathInFlight
 } from "@/features/drive/lib/sharedPath"
 import { lookupDirectoryName } from "@/features/drive/lib/directoryName"
+import { FLAT_LISTING_KINDS, type FlatListingKind } from "@/features/drive/lib/flatListing"
 import { THUMB_CACHE_CAP, THUMB_MAX_DIM, THUMB_SDK_LOSSY_QUALITY } from "@/features/drive/lib/thumbnails.logic"
 import { removeStaleThumbGenerations, sweepThumbs, writeThumb } from "@/workers/thumbStore"
 import { createSearchEngine, type SearchPush, type SearchSnapshotDTO } from "@/workers/searchEngine"
@@ -438,11 +439,11 @@ async function preflightArtifacts(): Promise<string | null> {
 
 // Named (not inlined) so queries/drive.ts's target-mapping helper can import the exact union
 // instead of duplicating it.
-export type ListDirectoryTarget = { kind: "root" } | { kind: "uuid"; uuid: string } | { kind: "recents" | "favorites" | "trash" | "links" }
+export type ListDirectoryTarget = { kind: "root" } | { kind: "uuid"; uuid: string } | { kind: FlatListingKind }
 
-// The non-uuid arms of ParentUuid: pseudo-parent sentinels with no navigable ancestry, so
-// getItemPath has nothing to walk and would only fail (or stall) resolving them.
-const PSEUDO_PARENTS: ReadonlySet<string> = new Set(["trash", "recents", "favorites", "links"])
+// Pseudo-parent sentinels have no navigable ancestry, so getItemPath has nothing to walk and would
+// only fail (or stall) resolving them.
+const PSEUDO_PARENTS: ReadonlySet<string> = new Set<string>(FLAT_LISTING_KINDS)
 
 // getItemInfo's return shape: getItemPath's path/ancestors flattened up one level. `path` is
 // nullable: see getItemInfo's own comment on why the getItemPath call underneath it can fail.
@@ -1203,26 +1204,13 @@ const api = {
 	removeFileLink(file: File, link: FilePublicLink): Promise<void> {
 		return requireClient().removeFileLink(file, link)
 	},
-	// Read-only public-link METADATA lookups (chat embeds, embeds.logic.ts's parseFilenPublicLink) —
-	// distinct from the status/create/update/remove ops above, which all target a link this account
-	// OWNS. These resolve a link pasted by ANYONE (the uuid+key the message text carries), same as
-	// opening the link in a browser would; `getLinkedFile`'s optional password param is never supplied
-	// (a password-protected link degrades to the plain-link fallback, same as a resolution failure —
-	// there is no in-chat password prompt).
-	getLinkedFile(linkUuid: string, fileKey: string): Promise<LinkedFile> {
-		return requireClient().getLinkedFile(linkUuid, fileKey)
-	},
-	getDirPublicLinkInfo(linkUuid: string, linkKey: string): Promise<DirPublicInfo> {
-		return requireClient().getDirPublicLinkInfo(linkUuid, linkKey)
-	},
 	// ── Public-link viewer (UNAUTHENTICATED) ─────────────────────────────────
 	// The anon-capable surface behind the /f/ /d/ routes, which must work with NO session. Every method
 	// routes through withLinkedUnauth (getUnauthed() for a signed-in visitor, else a throwaway
-	// UnauthClient) — NONE touch requireClient, so a logged-out tab reaches them. Deliberately kept
-	// SEPARATE from the authed getLinkedFile/getDirPublicLinkInfo above (chat embeds still use those):
-	// pointing chat-embed resolution at these too is a later dedup call, not made here. `password` is
-	// passed through for a protected file link (the dir side verifies a password by re-listing with the
-	// password set on its own DirPublicLink — a later step's concern).
+	// UnauthClient) — NONE touch requireClient, so a logged-out tab reaches them. Chat embeds resolve
+	// pasted links through the same two metadata lookups. `password` is passed through for a protected
+	// file link (the dir side verifies a password by re-listing with the password set on its own
+	// DirPublicLink — a later step's concern).
 	getLinkedFileAnon(linkUuid: string, fileKey: string, password?: string): Promise<LinkedFile> {
 		return withLinkedUnauth(unauth => unauth.getLinkedFile(linkUuid, fileKey, password ?? null))
 	},

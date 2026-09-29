@@ -152,15 +152,6 @@ function copyRow(status: Transfer["status"]): Transfer {
 	}
 }
 
-function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
-	let resolve!: (value: T) => void
-	const promise = new Promise<T>(r => {
-		resolve = r
-	})
-
-	return { promise, resolve }
-}
-
 // A read of a cached listing that stays under way until settled.
 function readUnderWay(queryKey: ReturnType<typeof driveListingQueryKey>) {
 	let resolve: (items: DriveItem[]) => void = () => undefined
@@ -852,7 +843,7 @@ describe("drive socket handlers — directory colour on move and restore", () =>
 	// A read under way applies the move to what it returns: writing the payload's default there would
 	// overwrite the colour the server just returned, in a read that still counts.
 	it("a colourless move leaves a Favorites read's server colour in place, which it then lends", async () => {
-		const pending = deferred<NormalDirsAndFiles>()
+		const pending = Promise.withResolvers<NormalDirsAndFiles>()
 
 		socketAuthenticated()
 		listDirectory.mockReturnValueOnce(pending.promise)

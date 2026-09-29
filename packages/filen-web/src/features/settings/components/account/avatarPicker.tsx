@@ -4,13 +4,11 @@ import { toast } from "sonner"
 import { CameraIcon } from "lucide-react"
 import { formatBytes } from "@filen/shared"
 import { sdkApi } from "@/lib/sdk/client"
-import { asErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { validateAvatarFile, AVATAR_MAX_BYTES } from "@/features/settings/components/account/avatarCard.logic"
-import { contactInitials } from "@/features/contacts/components/contactsList.logic"
 import { useIsOnline } from "@/lib/useIsOnline"
 import type { AccountQuerySuccess } from "@/queries/account"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { UserAvatar } from "@/components/userAvatar"
 import { Spinner } from "@/components/ui/spinner"
 
 interface AvatarPickerProps {
@@ -54,7 +52,7 @@ function AvatarPicker({ accountQuery }: AvatarPickerProps) {
 			toast.success(t("settingsAvatarUploadSuccess"))
 			void accountQuery.refetch()
 		} catch (err) {
-			toast.error(errorLabel(asErrorDTO(err)))
+			toast.error(errorLabel(err))
 		} finally {
 			setPending(false)
 			e.target.value = ""
@@ -73,22 +71,13 @@ function AvatarPicker({ accountQuery }: AvatarPickerProps) {
 					inputRef.current?.click()
 				}}
 			>
-				<Avatar
+				<UserAvatar
+					src={avatarUrl}
+					name={nickName ?? email}
 					size="lg"
 					className="size-14"
-				>
-					{/* crossOrigin: require-corp COEP needs a CORS-mode request for this cross-origin egest
-					    url — a plain no-cors <img> would need a Cross-Origin-Resource-Policy response header
-					    the CDN doesn't send (verified live against the sibling cdn.filen.io emoji host, which
-					    shares the same Access-Control-Allow-Origin: * pattern). */}
-					{avatarUrl !== undefined ? (
-						<AvatarImage
-							src={avatarUrl}
-							crossOrigin="anonymous"
-						/>
-					) : null}
-					<AvatarFallback className="text-lg">{contactInitials(nickName ?? email)}</AvatarFallback>
-				</Avatar>
+					fallbackClassName="text-lg"
+				/>
 				{pending ? (
 					<span className="absolute inset-0 flex items-center justify-center rounded-full bg-background/60">
 						<Spinner />

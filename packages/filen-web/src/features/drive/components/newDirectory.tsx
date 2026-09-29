@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { FolderPlusIcon } from "lucide-react"
 import { useAction } from "@/lib/keymap/useAction"
+import { isAnyDialogOpen } from "@/lib/keymap/dialogGuard"
 import { Kbd } from "@/lib/keymap/kbd"
 import { sdkApi } from "@/lib/sdk/client"
 import { errorLabel } from "@/lib/i18n/errorLabel"
@@ -21,12 +22,6 @@ export interface NewDirectoryProps {
 	// sharedOut directory) or while the listing hasn't loaded yet — mirrors SortMenu's
 	// disabled-not-hidden convention so the toolbar's layout stays stable across variant switches.
 	disabled?: boolean
-	// directoryListing.tsx's own useDriveDialogHost().isDialogOpen — true while ANY of that host's
-	// dialogs (including the preview overlay, kind:"preview") is open. Threaded in rather than read
-	// here directly since the host lives one level up; guards this action the same way its
-	// drive.selectAll/clearSelection/toggleView/rename/trash/download siblings guard themselves in
-	// directoryListing.tsx.
-	dialogOpen: boolean
 	// True only when `disabled` is caused specifically by the app being offline (a subset of
 	// `disabled`'s own broader gate) — swaps the tooltip's copy from the action label to the offline
 	// explanation so a proactively-disabled control still tells the user why.
@@ -40,23 +35,23 @@ export interface NewDirectoryProps {
 }
 
 // No destructuring defaults: the React Compiler cannot lower them and would skip the whole component.
-export function NewDirectory({ parentUuid, disabled, dialogOpen, offline, hiddenNotice, shortcut }: NewDirectoryProps) {
+export function NewDirectory({ parentUuid, disabled, offline, hiddenNotice, shortcut }: NewDirectoryProps) {
 	const { t } = useTranslation(["drive", "common"])
 	const [open, setOpen] = useState(false)
 	const isDisabled = disabled === true
 
-	// Registered above at module scope. Guards on `disabled`/`dialogOpen` themselves (rather than
+	// Registered above at module scope. Guards on `disabled` and an open dialog itself (rather than
 	// being conditionally registered/mounted) since a keyboard command's live handler must stay a
 	// plain hook call. A copy without the shortcut attaches no listener at all.
 	useAction(
 		"drive.newDirectory",
 		() => {
-			if (!isDisabled && !dialogOpen) {
+			if (!isDisabled && !isAnyDialogOpen()) {
 				setOpen(true)
 			}
 		},
 		{ enabled: shortcut !== false },
-		[isDisabled, dialogOpen]
+		[isDisabled]
 	)
 
 	return (

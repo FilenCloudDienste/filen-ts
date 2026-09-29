@@ -1,12 +1,15 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import {
 	clampListboxIndex,
 	clickPointerType,
 	isPlainClickDeselect,
+	isSelectionGesture,
+	isToggleModifier,
 	listboxKeyTarget,
 	listboxKeyTargetIsInteractive,
-	listboxRange,
-	resolveCursorIndex
+	listboxRangeItems,
+	resolveCursorIndex,
+	selectionAwareLinkClick
 } from "@/features/drive/lib/listbox"
 
 describe("clampListboxIndex", () => {
@@ -32,21 +35,28 @@ describe("clampListboxIndex", () => {
 	})
 })
 
-describe("listboxRange", () => {
-	it("returns a single-element range when anchor equals active", () => {
-		expect(listboxRange(3, 3)).toEqual([3])
+describe("listboxRangeItems", () => {
+	const items = ["a", "b", "c", "d", "e", "f"]
+
+	it("returns a single item when anchor equals active", () => {
+		expect(listboxRangeItems(items, 3, 3)).toEqual(["d"])
 	})
 
 	it("returns an ascending inclusive range when the anchor precedes the active index", () => {
-		expect(listboxRange(2, 5)).toEqual([2, 3, 4, 5])
+		expect(listboxRangeItems(items, 2, 5)).toEqual(["c", "d", "e", "f"])
 	})
 
 	it("returns the same ascending range when the anchor follows the active index", () => {
-		expect(listboxRange(5, 2)).toEqual([2, 3, 4, 5])
+		expect(listboxRangeItems(items, 5, 2)).toEqual(["c", "d", "e", "f"])
 	})
 
 	it("handles adjacent indices", () => {
-		expect(listboxRange(4, 5)).toEqual([4, 5])
+		expect(listboxRangeItems(items, 4, 5)).toEqual(["e", "f"])
+	})
+
+	it("skips out-of-range indices", () => {
+		expect(listboxRangeItems(items, -2, 1)).toEqual(["a", "b"])
+		expect(listboxRangeItems(items, 4, 9)).toEqual(["e", "f"])
 	})
 })
 
@@ -202,5 +212,55 @@ describe("listboxKeyTargetIsInteractive", () => {
 		listboxKeyTargetIsInteractive(target)
 
 		expect(queried).toBe("button, a, input, select, textarea")
+	})
+})
+
+describe("click modifiers", () => {
+	const none = { shiftKey: false, metaKey: false, ctrlKey: false }
+
+	it("treats Ctrl or Cmd as a toggle, and Shift alone as not", () => {
+		const shiftOnly = { ...none, shiftKey: true }
+
+		expect(isToggleModifier({ ...none, ctrlKey: true })).toBe(true)
+		expect(isToggleModifier({ ...none, metaKey: true })).toBe(true)
+		expect(isToggleModifier(shiftOnly)).toBe(false)
+		expect(isToggleModifier(none)).toBe(false)
+	})
+
+	it("treats any of Shift/Ctrl/Cmd as a selection gesture", () => {
+		expect(isSelectionGesture({ ...none, shiftKey: true })).toBe(true)
+		expect(isSelectionGesture({ ...none, ctrlKey: true })).toBe(true)
+		expect(isSelectionGesture({ ...none, metaKey: true })).toBe(true)
+		expect(isSelectionGesture(none)).toBe(false)
+	})
+})
+
+describe("selectionAwareLinkClick", () => {
+	const click = (modifiers: { shiftKey?: boolean; metaKey?: boolean; ctrlKey?: boolean }) => ({
+		shiftKey: false,
+		metaKey: false,
+		ctrlKey: false,
+		...modifiers,
+		preventDefault: vi.fn()
+	})
+
+	it("prevents navigation on a selection gesture and still reports the click", () => {
+		const onPointerSelect = vi.fn()
+		const event = click({ ctrlKey: true })
+
+		selectionAwareLinkClick(onPointerSelect)(event)
+
+		expect(event.preventDefault).toHaveBeenCalledOnce()
+		expect(onPointerSelect).toHaveBeenCalledWith(event)
+	})
+
+	it("lets a plain click navigate", () => {
+		const onPointerSelect = vi.fn()
+		const event = click({})
+
+		selectionAwareLinkClick(onPointerSelect)(event)
+
+		expect(event.preventDefault).not.toHaveBeenCalled()
+		expect(onPointerSelect).toHaveBeenCalledWith(event)
 	})
 })

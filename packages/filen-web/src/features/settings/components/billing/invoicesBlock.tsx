@@ -1,9 +1,10 @@
 import { useTranslation } from "react-i18next"
 import { ReceiptIcon } from "lucide-react"
-import { formatBillingCost, formatBillingDate } from "@/features/settings/lib/billing"
+import { formatBillingCost } from "@/features/settings/lib/billing"
+import { formatShortDate } from "@/lib/formatDate"
 import type { AccountQuerySuccess } from "@/queries/account"
 import { SettingsBlock } from "@/features/settings/components/settingsLayout"
-import { Empty, EmptyDescription, EmptyMedia, EmptyTitle, EmptyHeader } from "@/components/ui/empty"
+import { EmptyMessage } from "@/components/emptyMessage"
 
 interface InvoicesBlockProps {
 	accountQuery: AccountQuerySuccess
@@ -20,15 +21,12 @@ function InvoicesBlock({ accountQuery }: InvoicesBlockProps) {
 	return (
 		<SettingsBlock>
 			{subsInvoices.length === 0 ? (
-				<Empty className="rounded-none border-0 p-4">
-					<EmptyHeader>
-						<EmptyMedia>
-							<ReceiptIcon />
-						</EmptyMedia>
-						<EmptyTitle>{t("settingsBillingInvoicesEmptyTitle")}</EmptyTitle>
-						<EmptyDescription>{t("settingsBillingInvoicesEmptyDescription")}</EmptyDescription>
-					</EmptyHeader>
-				</Empty>
+				<EmptyMessage
+					className="rounded-none border-0 p-4"
+					icon={ReceiptIcon}
+					title={t("settingsBillingInvoicesEmptyTitle")}
+					description={t("settingsBillingInvoicesEmptyDescription")}
+				/>
 			) : (
 				<div className="overflow-x-auto">
 					<table className="w-full text-left text-sm">
@@ -49,7 +47,7 @@ function InvoicesBlock({ accountQuery }: InvoicesBlockProps) {
 									<td className="py-2">{invoice.planName}</td>
 									<td className="py-2 capitalize">{invoice.gateway}</td>
 									<td className="py-2 tabular-nums">{formatBillingCost(invoice.planCost)}</td>
-									<td className="py-2 tabular-nums">{formatBillingDate(invoice.timestamp)}</td>
+									<td className="py-2 tabular-nums">{formatShortDate(invoice.timestamp)}</td>
 								</tr>
 							))}
 						</tbody>

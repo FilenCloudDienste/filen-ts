@@ -5,3 +5,17 @@
 export function noop(): void {
 	// Intentionally empty.
 }
+
+// `record` minus `key`; the same object when the key is absent, so a store update that removes nothing
+// writes nothing new.
+export function withoutKey<T>(record: Readonly<Record<string, T>>, key: string): Readonly<Record<string, T>> {
+	if (!Object.hasOwn(record, key)) {
+		return record
+	}
+
+	const next = { ...record }
+
+	Reflect.deleteProperty(next, key)
+
+	return next
+}

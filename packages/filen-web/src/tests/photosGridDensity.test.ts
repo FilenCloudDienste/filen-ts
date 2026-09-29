@@ -15,10 +15,10 @@ import {
 	DEFAULT_DENSITY_INDEX,
 	clampDensityIndex,
 	tileSizeForDensity,
-	columnsForWidth,
 	getPhotosGridDensity,
 	setPhotosGridDensity
 } from "@/features/photos/lib/gridDensity"
+import { columnsForWidth } from "@/features/drive/lib/gridLayout"
 
 beforeEach(() => {
 	kvStore.clear()

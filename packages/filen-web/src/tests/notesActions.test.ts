@@ -61,7 +61,7 @@ import { ACCOUNT_QUERY_KEY } from "@/queries/account"
 import { NOTES_QUERY_KEY, notesQueryGet } from "@/features/notes/queries/notes"
 import { noteContentQueryKey } from "@/features/notes/queries/noteContent"
 import { isOwnNotePush } from "@/features/notes/lib/pushEchoes"
-import useNotesInflightStore from "@/features/notes/store/useNotesInflight"
+import { useNotesInflightStore } from "@/features/notes/store/useNotesInflight"
 import {
 	createNote as createNoteAction,
 	retypeNewNote,

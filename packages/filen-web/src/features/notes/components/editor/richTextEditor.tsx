@@ -17,9 +17,11 @@ import {
 	UnlinkIcon
 } from "lucide-react"
 import type { NoteEditorController } from "@/features/notes/hooks/useNoteEditor"
+import { useLatestRef } from "@/lib/useLatestRef"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import {
 	EMPTY_RICH_FORMATS,
@@ -74,26 +76,18 @@ function ToolbarButton({
 	const pressed = active === true
 
 	return (
-		<Tooltip>
-			<TooltipTrigger
-				render={
-					<Button
-						variant={pressed ? "secondary" : "ghost"}
-						size="icon-sm"
-						disabled={disabled === true}
-						aria-label={label}
-						aria-pressed={pressed}
-						onMouseDown={event => {
-							event.preventDefault()
-						}}
-						onClick={onPress}
-					>
-						{children}
-					</Button>
-				}
-			/>
-			<TooltipContent>{label}</TooltipContent>
-		</Tooltip>
+		<TooltipIconButton
+			label={label}
+			variant={pressed ? "secondary" : "ghost"}
+			disabled={disabled === true}
+			pressed={pressed}
+			onMouseDown={event => {
+				event.preventDefault()
+			}}
+			onClick={onPress}
+		>
+			{children}
+		</TooltipIconButton>
 	)
 }
 
@@ -111,16 +105,12 @@ export function RichTextEditor({ controller }: { controller: NoteEditorControlle
 	const readOnlyRef = useRef(controller.readOnly)
 	// The outbox enqueue callback, held in a ref so the text-change listener always calls the freshest
 	// identity without re-subscribing (mount-once listener).
-	const onChangeRef = useRef(controller.onChange)
+	const onChangeRef = useLatestRef(controller.onChange)
 	// Last non-null selection, for toolbar actions that run after a focus shift (the link popover).
 	const lastRangeRef = useRef<Range | null>(null)
 	const [formats, setFormats] = useState<RichActiveFormats>(EMPTY_RICH_FORMATS)
 	const [linkOpen, setLinkOpen] = useState(false)
 	const [linkUrl, setLinkUrl] = useState("")
-
-	useEffect(() => {
-		onChangeRef.current = controller.onChange
-	})
 
 	// #40 enforcement: re-apply read-only when the prop flips (the editor only mounts writable today, but
 	// this keeps a mid-session flip from ever accepting edits that would wedge sync).
@@ -169,7 +159,7 @@ export function RichTextEditor({ controller }: { controller: NoteEditorControlle
 		// Sanitize-before-seed, pasted "silent" so it never propagates (richText/dom.tsx). Never focus a
 		// read-only editor (#40) — web does not autofocus at all, so there is no caret placement to guard.
 		seedRichEditor(quill, seedRef.current)
-	}, [t])
+	}, [t, onChangeRef])
 
 	// Restore the editor selection (lost to a focus shift for the popover), run the format, reflect it.
 	function runFormat(action: (quill: Quill) => void): void {

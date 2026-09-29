@@ -15,8 +15,6 @@ export const chats = {
 	chatsListLabel: "Conversations",
 	/** Chats sidebar — search box placeholder and accessible label (filters by name/participant) */
 	chatsSearch: "Search conversations",
-	/** Chats sidebar — clears the search box */
-	chatsSearchClear: "Clear search",
 	/** Chats sidebar — title shown when the list is empty on a fresh account */
 	chatsEmptyTitle: "No conversations yet",
 	/** Chats sidebar — description under the empty title */
@@ -172,12 +170,6 @@ export const chats = {
 	// ── Multi-select / bulk actions ────────────────────────────────────────────
 	/** Keymap — mod+a: selects every currently-visible conversation */
 	chatsCommandSelectAll: "Select all conversations",
-	/** Keymap — Escape: clears the active multi-selection */
-	chatsCommandClearSelection: "Clear selection",
-	/** Bulk-action bar — accessible label on the clear-selection (X) button */
-	chatsSelectionCount_one: "{{count}} selected",
-	/** Bulk-action bar — accessible label on the clear-selection (X) button (plural) */
-	chatsSelectionCount_other: "{{count}} selected",
 	/** Bulk-action toast — every targeted conversation succeeded */
 	chatsBulkActionComplete_one: "{{count}} conversation updated",
 	/** Bulk-action toast — every targeted conversation succeeded (plural) */
@@ -201,38 +193,14 @@ export const chats = {
 	chatsLeaveSelectedConfirmBody_other: "Are you sure you want to leave these {{count}} conversations? You will lose access to them.",
 
 	// ── Participants dialog ──────────────────────────────────────────────────────
-	/** Participants dialog — heading (list mode) */
-	chatParticipantsDialogTitle: "Participants",
-	/** Participants dialog — owner-only "add participants" button */
-	chatParticipantsAddAction: "Add participants",
-	/** Participants dialog — accessible label on the crown icon next to the owner's row */
-	chatParticipantsOwnerBadge: "Owner",
-	/** Participants dialog — accessible label on a manageable row's remove button */
-	chatParticipantRemoveAction: "Remove {{email}}",
-	/** Participants dialog — accessible label on a row's block button */
-	chatParticipantsBlockAction: "Block {{email}}",
-	/** Participants dialog — accessible label on a row's unblock button */
-	chatParticipantsUnblockAction: "Unblock {{email}}",
 	/** Participants dialog — inline marker appended to a blocked participant's email */
 	chatParticipantBlockedMarker: "Blocked",
-	/** Participants dialog — shown when the blocked-contact record moved between render and click */
-	chatParticipantBlockStale: "This contact's block status just changed. Please try again.",
 	/** Participants dialog — shown when the conversation has no other participants */
 	chatParticipantsEmpty: "No other participants",
-	/** Remove-participant confirm — heading */
-	chatParticipantRemoveDialogTitle: "Remove participant?",
-	/** Remove-participant confirm — confirm button */
-	chatParticipantRemoveDialogConfirm: "Remove",
 	/** Remove-participant confirm — body copy */
 	chatParticipantRemoveDialogBody: "{{email}} will lose access to this conversation.",
-	/** Add-participants dialog — heading (add mode) */
-	chatParticipantsAddDialogTitle: "Add participants",
 	/** Add-participants dialog — body copy */
 	chatParticipantsAddDialogBody: "Choose one or more contacts to add to this conversation.",
-	/** Add-participants dialog — submit button */
-	chatParticipantsAddSubmit: "Add",
-	/** Add-participants dialog — shown when every contact is already a participant */
-	chatParticipantsAddEmpty: "No contacts available to add",
 	/** Participants dialog — owner-only bulk-remove footer button (list mode, 1+ rows selected) */
 	chatParticipantsRemoveSelectedAction_one: "Remove {{count}} participant",
 	/** Participants dialog — owner-only bulk-remove footer button (plural) */

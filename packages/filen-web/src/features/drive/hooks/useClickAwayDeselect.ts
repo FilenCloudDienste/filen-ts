@@ -1,6 +1,7 @@
-import { useEffect, useRef } from "react"
-import { isAnyDialogOpen, isAnyMenuOpen } from "@/lib/keymap/dialogGuard"
-import { DRAG_THRESHOLD_PX } from "@/features/drive/lib/marquee.logic"
+import { useEffect } from "react"
+import { useLatestRef } from "@/lib/useLatestRef"
+import { isAnyOverlayOpen } from "@/lib/keymap/dialogGuard"
+import { exceedsDragThreshold } from "@/lib/windowDrag"
 import { isKeepSelectionTarget, isPlainPointerClick, isScrollbarPress } from "@/features/drive/lib/clickAway.logic"
 
 // The press a click resolves against. `ignore` is decided at pointerdown, before anything reacts to it:
@@ -18,11 +19,7 @@ interface Press {
 // stop it and while a clicked menu or dialog is still in the DOM to be recognised. A press that travels
 // past the drag threshold (a marquee, a text selection, a resize, a drag-and-drop) is not a click.
 export function useClickAwayDeselect(active: boolean, clear: () => void): void {
-	const clearRef = useRef(clear)
-
-	useEffect(() => {
-		clearRef.current = clear
-	})
+	const clearRef = useLatestRef(clear)
 
 	useEffect(() => {
 		if (!active) {
@@ -36,7 +33,7 @@ export function useClickAwayDeselect(active: boolean, clear: () => void): void {
 				return
 			}
 
-			let ignore = isAnyDialogOpen() || isAnyMenuOpen()
+			let ignore = isAnyOverlayOpen()
 
 			if (!ignore && event.target instanceof HTMLElement) {
 				const bounds = event.target.getBoundingClientRect()
@@ -48,7 +45,7 @@ export function useClickAwayDeselect(active: boolean, clear: () => void): void {
 		}
 
 		function onPointerMove(event: PointerEvent): void {
-			if (press && !press.ignore && Math.hypot(event.clientX - press.x, event.clientY - press.y) >= DRAG_THRESHOLD_PX) {
+			if (press && !press.ignore && exceedsDragThreshold(event.clientX - press.x, event.clientY - press.y)) {
 				press.ignore = true
 			}
 		}
@@ -87,5 +84,5 @@ export function useClickAwayDeselect(active: boolean, clear: () => void): void {
 			window.removeEventListener("pointercancel", onPointerCancel, true)
 			window.removeEventListener("click", onClick, true)
 		}
-	}, [active])
+	}, [active, clearRef])
 }

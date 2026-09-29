@@ -1,6 +1,4 @@
-import { createElement } from "react"
 import { useTranslation } from "react-i18next"
-import { XIcon } from "lucide-react"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { aggregateDriveSelectionFlags } from "@/features/drive/lib/selectionFlags"
@@ -15,10 +13,7 @@ import {
 	type BulkDialogActionKind
 } from "@/features/drive/components/bulkActionBar.logic"
 import { useIsOnline } from "@/lib/useIsOnline"
-import { Kbd } from "@/lib/keymap/kbd"
-import { toastObstructionRef } from "@/lib/toastClearance"
-import { Button } from "@/components/ui/button"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { BulkActionButton, SelectionActionBar } from "@/components/selectionActionBar"
 
 export interface BulkActionBarProps {
 	variant: DriveVariant
@@ -60,72 +55,36 @@ export function BulkActionBar({ variant, selectedItems, onDialogAction }: BulkAc
 	}
 
 	return (
-		<div
-			ref={toastObstructionRef}
-			role="toolbar"
-			aria-label={t("driveSelectionActionsLabel")}
-			className="pointer-events-auto flex max-w-full flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border bg-popover px-3 py-2 text-popover-foreground shadow-lg"
+		<SelectionActionBar
+			count={selectedItems.length}
+			clearKbdAction="drive.clearSelection"
+			onClear={() => {
+				useDriveStore.getState().clearSelectedItems()
+			}}
 		>
-			<div className="flex items-center gap-2">
-				<Tooltip>
-					<TooltipTrigger
-						render={
-							<Button
-								variant="ghost"
-								size="icon-sm"
-								aria-label={t("driveCommandClearSelection")}
-								onClick={() => {
-									useDriveStore.getState().clearSelectedItems()
-								}}
-							>
-								<XIcon />
-							</Button>
-						}
-					/>
-					<TooltipContent>
-						{t("driveCommandClearSelection")}
-						<Kbd action="drive.clearSelection" />
-					</TooltipContent>
-				</Tooltip>
-				<p className="text-sm text-muted-foreground">{t("driveSelectionCount", { count: selectedItems.length })}</p>
-			</div>
-			<div className="flex items-center gap-2">
-				{descriptors.map(descriptor => {
-					// isBulkDownloadEnabled is effectively always true here (the bar only mounts once a
-					// selection exists) — kept as a defensive check mirroring itemMenu.logic.ts's own
-					// downloadDescriptor rather than assuming the caller never renders an empty selection.
-					// Every other descriptor stays always-enabled.
-					const offlineDisabled = isBulkActionOfflineDisabled(descriptor.id, isOnline)
-					const disabled = (descriptor.id === "download" && !isBulkDownloadEnabled(selectedItems)) || offlineDisabled
-					// Icon-only keeps the floating pill compact; the label lives on aria-label (stable
-					// accessible name) and in the tooltip.
-					const keymapAction = KEYMAP_ACTION_FOR[descriptor.id]
+			{descriptors.map(descriptor => {
+				const offlineDisabled = isBulkActionOfflineDisabled(descriptor.id, isOnline)
+				// isBulkDownloadEnabled is effectively always true here (the bar only mounts once a
+				// selection exists) — kept as a defensive check mirroring itemMenu.logic.ts's own
+				// downloadDescriptor rather than assuming the caller never renders an empty selection.
+				// Every other descriptor stays always-enabled.
+				const disabled = (descriptor.id === "download" && !isBulkDownloadEnabled(selectedItems)) || offlineDisabled
 
-					return (
-						<Tooltip key={descriptor.id}>
-							<TooltipTrigger
-								render={
-									<Button
-										variant={descriptor.destructive ? "destructive" : "outline"}
-										size="icon-sm"
-										disabled={disabled}
-										aria-label={t(descriptor.labelKey)}
-										onClick={() => {
-											runDescriptor(descriptor)
-										}}
-									>
-										{createElement(descriptor.icon, { "aria-hidden": true })}
-									</Button>
-								}
-							/>
-							<TooltipContent>
-								{offlineDisabled ? t("common:offlineActionDisabled") : t(descriptor.labelKey)}
-								{keymapAction === undefined ? null : <Kbd action={keymapAction} />}
-							</TooltipContent>
-						</Tooltip>
-					)
-				})}
-			</div>
-		</div>
+				return (
+					<BulkActionButton
+						key={descriptor.id}
+						icon={descriptor.icon}
+						label={t(descriptor.labelKey)}
+						destructive={descriptor.destructive}
+						disabled={disabled}
+						disabledReason={offlineDisabled ? t("common:offlineActionDisabled") : undefined}
+						kbdAction={KEYMAP_ACTION_FOR[descriptor.id]}
+						onClick={() => {
+							runDescriptor(descriptor)
+						}}
+					/>
+				)
+			})}
+		</SelectionActionBar>
 	)
 }

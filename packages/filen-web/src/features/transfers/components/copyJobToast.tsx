@@ -14,6 +14,7 @@ import {
 	copyJobTitle,
 	type CopyJobKeyStatus
 } from "@/features/transfers/components/copyJobToast.logic"
+import { percentFormat } from "@/features/transfers/components/transferRow.logic"
 import { canRetryCopy, type CopyJob } from "@/features/drive/lib/copy.logic"
 import { errorLabelOr } from "@/lib/i18n/errorLabel"
 import { Button } from "@/components/ui/button"
@@ -45,8 +46,7 @@ export function CopyJobToast({ jobId, onHeightChange, onDismiss, onRetried }: Co
 	const title = copyJobTitle(job)
 	const percent = copyJobPercent(job)
 	const rate = copyJobRate(job)
-	const percentLabel =
-		percent === null ? null : new Intl.NumberFormat(i18n.language, { style: "percent", maximumFractionDigits: 0 }).format(percent / 100)
+	const percentLabel = percent === null ? null : percentFormat(i18n.language).format(percent / 100)
 	const bytesLine = [
 		job.totals.bytes > 0
 			? t("transfersCopyBytesProgress", {

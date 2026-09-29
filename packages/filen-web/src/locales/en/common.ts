@@ -18,8 +18,18 @@ export const common = {
 	reset: "Reset",
 	/** Generic retry button for a failed data load (e.g. the security settings page's account query) — shared by any future error-state view */
 	tryAgain: "Try again",
+	/** Shared no-results empty state (NoResultsMessage) — title once a search or list filter matched nothing */
+	searchNoResults: "No matches",
 	/** Shared list filter box (ListFilterInput) — screen-reader label on the icon-only button clearing the typed filter */
 	clearFilter: "Clear filter",
+	/** Floating selection bar (selectionActionBar.tsx) — accessible name of the toolbar */
+	selectionActionsLabel: "Selection actions",
+	/** Floating selection bar — the clear-selection button's label; also every surface's Escape command description */
+	clearSelection: "Clear selection",
+	/** Floating selection bar — selected row count; singular */
+	selectedCount_one: "{{count}} selected",
+	/** Floating selection bar — selected row count; plural */
+	selectedCount_other: "{{count}} selected",
 	/** Shared in-progress announcement: the spinner primitive's default screen-reader label */
 	loading: "Loading",
 	/** Toast primitive — screen-reader label on the dismiss button every toast carries */
@@ -163,5 +173,29 @@ export const common = {
 	/** Keyboard shortcuts — button that drops a user's override and restores the built-in combo */
 	shortcutsResetToDefault: "Reset to default",
 	/** Keyboard shortcuts — rejection message when the recorded combo already belongs to another shortcut */
-	shortcutsConflict: 'Already used by "{{action}}"'
+	shortcutsConflict: 'Already used by "{{action}}"',
+	/** Chat and note participants dialogs — title (list mode) */
+	participantsDialogTitle: "Participants",
+	/** Participants dialogs — owner-only button that opens the add-participants picker */
+	participantsAddAction: "Add participants",
+	/** Participants dialogs — accessible label on the crown icon next to the owner's row */
+	participantOwnerBadge: "Owner",
+	/** Participants dialogs — accessible label on a row's remove button; {{email}} = the participant's email */
+	participantRemoveAction: "Remove {{email}}",
+	/** Participants dialogs — accessible label on a row's block button; {{email}} = the participant's email */
+	participantBlockAction: "Block {{email}}",
+	/** Participants dialogs — accessible label on a row's unblock button; {{email}} = the participant's email */
+	participantUnblockAction: "Unblock {{email}}",
+	/** Participants dialogs — the blocked-contact record moved (e.g. unblocked in another tab) between render and click */
+	participantBlockStale: "This contact's block status just changed. Please try again.",
+	/** Participants dialogs — remove confirm title */
+	participantRemoveDialogTitle: "Remove participant?",
+	/** Participants dialogs — remove confirm button (also the bulk remove confirm's) */
+	participantRemoveDialogConfirm: "Remove",
+	/** Participants dialogs — title in add mode */
+	participantsAddDialogTitle: "Add participants",
+	/** Participants dialogs — add-mode submit button */
+	participantsAddSubmit: "Add",
+	/** Participants dialogs — add-mode empty state when every contact is already a participant, or the account has no contacts */
+	participantsAddEmpty: "No contacts available to add"
 } as const

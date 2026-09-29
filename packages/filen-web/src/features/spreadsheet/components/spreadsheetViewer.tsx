@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { stableUuidOf } from "@/features/drive/store/useDriveClipboardStore"
-import { PreviewErrorState } from "@/features/preview/components/previewErrorState"
+import { PreviewErrorState, PreviewLoading } from "@/features/preview/components/previewErrorState"
 import { FormatToolbar } from "@/features/spreadsheet/components/formatToolbar"
 import { SheetGrid } from "@/features/spreadsheet/components/sheetGrid"
 import { SheetTabs } from "@/features/spreadsheet/components/sheetTabs"
@@ -24,7 +24,6 @@ import { endedCut, pastedCells, rangeToClip, rangeToTsv, type GridClip } from "@
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { isImeKeydown } from "@/lib/ime"
 import { log } from "@/lib/log"
-import { LoadingState } from "@/components/loadingState"
 import { InputDialog } from "@/components/dialogs/inputDialog"
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { Button } from "@/components/ui/button"
@@ -960,12 +959,7 @@ function SpreadsheetViewer({
 
 	switch (state.status) {
 		case "pending":
-			return (
-				<LoadingState
-					size="lg"
-					className="text-inherit"
-				/>
-			)
+			return <PreviewLoading />
 		case "error":
 			return (
 				<PreviewErrorState

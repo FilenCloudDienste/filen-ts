@@ -2,6 +2,7 @@ import { type LucideIcon } from "lucide-react"
 import { NOTE_ACTION_DEFS } from "@/features/notes/lib/actionDefs"
 import { isNoteOwner, isNoteUndecryptable, isTagUndecryptable } from "@/features/notes/lib/sort"
 import type { Note, NoteTag, NoteType } from "@filen/sdk-rs"
+import { type ActionDescriptor } from "@/lib/actionDescriptor"
 import type { NotesKey } from "@/lib/i18n"
 
 // Dialog kinds a note-menu entry can dispatch to the surface-level dialog host (useNoteDialogHost) —
@@ -30,24 +31,14 @@ export type NoteActionId =
 	| "deletePermanently"
 	| "leave"
 
-interface NoteActionDescriptorShared {
-	id: NoteActionId
-	labelKey: NotesKey
-	icon: LucideIcon
-	destructive?: boolean
-	// Present-but-disabled (never absent) once set to false — mirrors itemMenu.logic.ts's own field.
-	// Only applyNoteOfflineGate below ever sets it; noteMenuActions itself never disables a descriptor
-	// it decides to include.
-	enabled?: boolean
-}
-
-// "direct" resolves immediately (pin/favorite/duplicate/archive/restore/trash/type-change/tag-toggle);
-// "dialog" opens the surface's dialog host on the given kind; "submenu" nests a tags/type picker;
-// mutually exclusive by construction, same rationale as drive's own ItemActionDescriptor union.
-export type NoteActionDescriptor =
-	| (NoteActionDescriptorShared & { run: "direct" })
-	| (NoteActionDescriptorShared & { run: "dialog"; dialogKind: NoteActionDialogKind })
-	| (NoteActionDescriptorShared & { run: "submenu"; submenu: "type" | "tags" })
+// "submenu" nests a tags/type picker. `enabled` mirrors itemMenu.logic.ts's own field; only
+// applyNoteOfflineGate below ever sets it.
+export type NoteActionDescriptor = ActionDescriptor<
+	NotesKey,
+	NoteActionId,
+	NoteActionDialogKind,
+	{ run: "submenu"; submenu: "type" | "tags" }
+> & { enabled?: boolean }
 
 const RENAME: NoteActionDescriptor = { id: "rename", ...NOTE_ACTION_DEFS.rename, run: "dialog", dialogKind: "rename" }
 const DUPLICATE: NoteActionDescriptor = { id: "duplicate", ...NOTE_ACTION_DEFS.duplicate, run: "direct" }

@@ -1,6 +1,7 @@
 import type { ChatMessage } from "@filen/sdk-rs"
 import { isBlocked, EMPTY_BLOCKED_USERS, type BlockedUsers } from "@filen/shared"
 import { messageSenderName } from "@/features/chats/lib/sort"
+import { dayNumber } from "@/features/chats/lib/time"
 
 // Thread row model + scroll math — PURE, no React, unit-tested.
 //
@@ -9,7 +10,7 @@ import { messageSenderName } from "@/features/chats/lib/sort"
 // visual burst: the first row carries the avatar + name + timestamp header, subsequent rows in the burst
 // render indented with no repeated header. A day boundary or a sender change always starts a new burst
 // (and the day boundary also emits a separator row). Mirrors old-web's `isTimestampSameMinute` (a 2-minute
-// window, not a literal same-minute) + `isTimestampSameDay` grouping.
+// window, not a literal same-minute) + same-day grouping (`dayNumber`, shared with the day label).
 
 // Old-web's window: two timestamps group if within 2 minutes of each other.
 const BURST_WINDOW_MS = 120_000
@@ -36,14 +37,6 @@ function isFirstUnread(message: ChatMessage, lastFocus: bigint, currentUserId: b
 	return !isBlocked({ userId: BigInt(message.senderId), email: message.senderEmail }, blocked)
 }
 
-function toDayNumber(timestamp: bigint): number {
-	const date = new Date(Number(timestamp))
-
-	// Local-calendar day index (not UTC) so separators land on the viewer's own midnight, matching how the
-	// day label renders. Encodes Y/M/D into one comparable number.
-	return date.getFullYear() * 10000 + date.getMonth() * 100 + date.getDate()
-}
-
 // True when `current` continues `previous`'s burst: same sender AND within the 2-minute window AND the
 // same calendar day. senderId is `number` on the wasm surface (not bigint) — compared directly here since
 // both sides are the same field; self-detection elsewhere coerces to BigInt, this does not need to.
@@ -52,7 +45,7 @@ function continuesBurst(previous: ChatMessage, current: ChatMessage): boolean {
 		return false
 	}
 
-	if (toDayNumber(previous.sentTimestamp) !== toDayNumber(current.sentTimestamp)) {
+	if (dayNumber(new Date(Number(previous.sentTimestamp))) !== dayNumber(new Date(Number(current.sentTimestamp)))) {
 		return false
 	}
 
@@ -84,7 +77,7 @@ export function buildThreadRows(
 	let unreadInserted = false
 
 	for (const message of messages) {
-		const day = toDayNumber(message.sentTimestamp)
+		const day = dayNumber(new Date(Number(message.sentTimestamp)))
 
 		if (day !== previousDay) {
 			rows.push({ kind: "day", key: `day-${String(day)}`, timestamp: message.sentTimestamp })

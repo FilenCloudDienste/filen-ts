@@ -3,6 +3,7 @@
 import { describe, expect, it } from "vitest"
 import type { LinkedFile } from "@filen/sdk-rs"
 import { linkedFileIntoDriveItem } from "@/features/drive/lib/item"
+import { PREVIEW_MAX_BYTES } from "@/features/drive/lib/preview.logic"
 import {
 	chooseDownloadStrategy,
 	anonPreviewability,
@@ -54,11 +55,11 @@ describe("anonPreviewability", () => {
 	})
 
 	it("caps a large media file — anon has no streaming, so it must buffer under the cap", () => {
-		expect(anonPreviewability(linkedFileIntoDriveItem(makeLinkedFile("movie.mp4", 8_000_000n)), 1_000_000n)).toBe("too-large")
+		expect(anonPreviewability(linkedFileIntoDriveItem(makeLinkedFile("movie.mp4", PREVIEW_MAX_BYTES + 1n)))).toBe("too-large")
 	})
 
 	it("never caps a camera RAW — its preview is the SDK-extracted embedded JPEG, not the file's bytes", () => {
-		expect(anonPreviewability(linkedFileIntoDriveItem(makeLinkedFile("shot.NEF", 90_000_000n)), 1_000_000n)).toBe("previewable")
+		expect(anonPreviewability(linkedFileIntoDriveItem(makeLinkedFile("shot.NEF", PREVIEW_MAX_BYTES + 1n)))).toBe("previewable")
 	})
 
 	it("marks an unknown-category file unpreviewable", () => {

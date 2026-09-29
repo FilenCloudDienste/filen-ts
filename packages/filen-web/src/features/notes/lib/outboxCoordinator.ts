@@ -1,5 +1,11 @@
 import { type } from "arktype"
-import { type OutboxChannelMsg, makeOutboxChannelTransport, decodeOutboxPayload, bindOutboxLeadership } from "@/lib/storage/outboxChannel"
+import {
+	type OutboxChannelMsg,
+	type OutboxRoute,
+	makeOutboxChannelTransport,
+	routeOutboxMessage,
+	bindOutboxLeadership
+} from "@/lib/storage/outboxChannel"
 import { sync } from "@/features/notes/lib/sync"
 import { inflightContentSchema, type RemoteEnqueue } from "@/features/notes/lib/sync.logic"
 import { setOutboxHydrated, type InflightContent } from "@/features/notes/store/useNotesInflight"
@@ -27,6 +33,13 @@ const remoteEnqueueSchema = type({
 	"answer?": "true"
 }).as<RemoteEnqueue>()
 
+const ROUTE: OutboxRoute<RemoteEnqueue, InflightContent> = {
+	enqueueSchema: remoteEnqueueSchema,
+	stateSchema: inflightContentSchema,
+	enqueueLabel: "forwarded edit",
+	stateLabel: "leader state"
+}
+
 let started = false
 
 // Backstop for the editor's hydration gate (useNoteEditor): every normal path flips it within a disk
@@ -35,9 +48,7 @@ let started = false
 // so the gate opens on its own well after any healthy boot has already opened it.
 const HYDRATION_BACKSTOP_MS = 5000
 
-// One dispatcher, routed by the outbox's CURRENT role (role flips live on promotion): the leader half handles
-// follower forwards, the follower half handles leader broadcasts. A message meant for the other role is
-// ignored — a tab never acts on its own category.
+// The notes-only kinds first, then the shared role-routed dispatch.
 function handleMessage(msg: OutboxChannelMsg): void {
 	// Every tab keeps the list of what the leader pushed, whichever role it holds by the time it hears.
 	if (msg.kind === "pushed") {
@@ -59,55 +70,14 @@ function handleMessage(msg: OutboxChannelMsg): void {
 		return
 	}
 
-	if (sync.outboxRole === "leader") {
-		switch (msg.kind) {
-			case "enqueue": {
-				const decoded = decodeOutboxPayload(msg.payload, remoteEnqueueSchema, "forwarded edit")
+	// Leader-only: ingestDrop no-ops on any other role.
+	if (msg.kind === "drop") {
+		sync.ingestDrop(msg.id)
 
-				if (decoded !== null) {
-					sync.ingestRemoteEnqueue(decoded)
-				}
-
-				return
-			}
-			case "drop": {
-				sync.ingestDrop(msg.id)
-
-				return
-			}
-			case "executeNow": {
-				sync.executeNow()
-
-				return
-			}
-			case "stateRequest": {
-				sync.broadcastState()
-
-				return
-			}
-			default:
-				return
-		}
+		return
 	}
 
-	switch (msg.kind) {
-		case "state": {
-			const decoded = decodeOutboxPayload(msg.payload, inflightContentSchema, "leader state")
-
-			if (decoded !== null) {
-				sync.applyLeaderState(decoded)
-			}
-
-			return
-		}
-		case "leaderHello": {
-			sync.resendUnacked()
-
-			return
-		}
-		default:
-			return
-	}
+	routeOutboxMessage(msg, sync, ROUTE)
 }
 
 // Mounted once by SyncHost. Attaches the transport, then adopts the initial role from the db lock and

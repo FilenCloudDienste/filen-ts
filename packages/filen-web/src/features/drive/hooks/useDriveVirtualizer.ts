@@ -1,10 +1,12 @@
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useState } from "react"
 import { useVirtualizer } from "@tanstack/react-virtual"
+import { useElementSize } from "@/lib/useElementSize"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { type DriveViewMode } from "@/features/drive/lib/preferences"
-import { GRID_INSET, ROW_HEIGHT, TILE_WIDTH, TILE_ROW_HEIGHT } from "@/features/drive/lib/gridLayout"
+import { GRID_INSET, ROW_HEIGHT, TILE_WIDTH, TILE_ROW_HEIGHT, columnsForWidth } from "@/features/drive/lib/gridLayout"
 import { setThumbnailViewport } from "@/features/drive/lib/thumbnails"
 import { driveRowKey } from "@/features/drive/lib/rowKey"
+import { useRovingItemRefs } from "@/features/drive/hooks/useRovingItemRefs"
 
 const LIST_OVERSCAN = 8
 const GRID_OVERSCAN = 3
@@ -19,40 +21,18 @@ export function useDriveVirtualizer(items: DriveItem[], viewMode: DriveViewMode)
 	// later pending<->success swap would leave one observing a detached node. A callback ref instead
 	// fires on every mount/unmount of the actual DOM node regardless of which branch renders it first.
 	const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null)
-	const itemRefs = useRef(new Map<number, HTMLDivElement>())
-	const [containerWidth, setContainerWidth] = useState(0)
-	const [containerHeight, setContainerHeight] = useState(0)
-
-	useEffect(() => {
-		if (!scrollElement) {
-			return
-		}
-
-		const observer = new ResizeObserver(entries => {
-			const entry = entries[0]
-
-			if (entry) {
-				setContainerWidth(entry.contentRect.width)
-				setContainerHeight(entry.contentRect.height)
-			}
-		})
-
-		observer.observe(scrollElement)
-
-		return () => {
-			observer.disconnect()
-		}
-	}, [scrollElement])
+	const itemRefs = useRovingItemRefs()
+	const { width: containerWidth, height: containerHeight } = useElementSize(scrollElement)
 
 	// Keeps the thumbnail service's bounded objectURL cache sized to what this listing can actually
-	// show — this ResizeObserver already fires on every layout change that matters (OS window resize,
+	// show — the size observer already fires on every layout change that matters (OS window resize,
 	// sidebar collapse, and the width/height jump a view-mode toggle causes), so there is no separate
 	// window-resize listener anywhere in the thumbnail service itself.
 	useEffect(() => {
 		setThumbnailViewport(containerWidth, containerHeight, viewMode)
 	}, [containerWidth, containerHeight, viewMode])
 
-	const columns = Math.max(1, Math.floor(containerWidth / TILE_WIDTH))
+	const columns = columnsForWidth(containerWidth, TILE_WIDTH)
 	const rowCount = Math.ceil(items.length / columns)
 
 	const listVirtualizer = useVirtualizer({
@@ -82,15 +62,16 @@ export function useDriveVirtualizer(items: DriveItem[], viewMode: DriveViewMode)
 
 	const activeVirtualizer = viewMode === "list" ? listVirtualizer : gridVirtualizer
 
-	function registerRef(index: number, el: HTMLDivElement | null) {
-		if (el) {
-			itemRefs.current.set(index, el)
-		} else {
-			itemRefs.current.delete(index)
-		}
+	return {
+		setScrollElement,
+		scrollElement,
+		columns,
+		listVirtualizer,
+		gridVirtualizer,
+		activeVirtualizer,
+		registerRef: itemRefs.registerRef,
+		itemRefs
 	}
-
-	return { setScrollElement, scrollElement, columns, listVirtualizer, gridVirtualizer, activeVirtualizer, registerRef, itemRefs }
 }
 
 export type DriveVirtualizer = ReturnType<typeof useDriveVirtualizer>

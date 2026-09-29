@@ -1,25 +1,17 @@
-import { useState, type ReactNode } from "react"
+import { useState } from "react"
 import { useTranslation } from "react-i18next"
-import { CheckIcon, SearchXIcon, UsersIcon } from "lucide-react"
-import type { DialogRoot } from "@base-ui/react/dialog"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { shareItems } from "@/features/drive/lib/share/actions"
 import { toastBulkOutcome } from "@/features/drive/lib/bulkToast"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import { useContactsQuery } from "@/features/contacts/queries/contacts"
-import { asErrorDTO } from "@/lib/sdk/errors"
-import { errorLabel } from "@/lib/i18n/errorLabel"
 import { useIsOnline } from "@/lib/useIsOnline"
-import { shouldForwardOpenChange } from "@/components/dialogs/dismissal.logic"
-import { resolveSelectedContacts, togglePickerContact } from "@/features/drive/components/contactPickerDialog.logic"
-import { filterContactsBySearch } from "@/features/contacts/components/contactsList.logic"
-import { ContactRow } from "@/features/contacts/components/contactRow"
-import { ListFilterInput } from "@/components/listFilterInput"
+import { pendingGuardedOpenChange } from "@/components/dialogs/dismissal.logic"
+import { resolveSelectedContacts, togglePickerContact } from "@/features/contacts/lib/contactPicker.logic"
+import { ContactPickerList } from "@/features/contacts/components/contactPickerList"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
-import { LoadingState } from "@/components/loadingState"
-import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 
 export interface ContactPickerDialogProps {
 	items: DriveItem[]
@@ -32,10 +24,8 @@ export interface ContactPickerDialogProps {
 
 // Contact picker — mounted-when-active by the listing's dialog host (directoryListing.tsx's "share"
 // case) for both the per-item menu and the bulk bar. Multi-selects from the established contact list
-// (reusing ContactRow's avatar/name/presence visuals + its selectable-option treatment) and shares
-// every chosen item with every chosen contact via shareItems. No confirm step — picking contacts and
-// pressing Share IS the confirmation (mobile parity). Design polish is deferred to a later pass; this
-// is a clean functional picker built from existing primitives.
+// (ContactPickerList) and shares every chosen item with every chosen contact via shareItems. No confirm
+// step — picking contacts and pressing Share IS the confirmation (mobile parity).
 export function ContactPickerDialog({ items, onClose, onShared }: ContactPickerDialogProps) {
 	const { t } = useTranslation(["drive", "contacts", "common"])
 	const isOnline = useIsOnline()
@@ -45,23 +35,12 @@ export function ContactPickerDialog({ items, onClose, onShared }: ContactPickerD
 	const [filter, setFilter] = useState("")
 
 	const contacts = contactsQuery.data?.contacts ?? []
-	// Filter box over the picker's own contact list — a selection made before typing stays selected
-	// even once its row scrolls out of the filtered view (only `selected` uuids drive submission, see
-	// handleShare below), matching every other picker dialog's own filter-doesn't-touch-selection rule.
-	const filteredContacts = filterContactsBySearch(contacts, filter)
 
-	function handleOpenChange(next: boolean, details: DialogRoot.ChangeEventDetails): void {
-		if (!shouldForwardOpenChange(next, pending)) {
-			// Also stops Base UI's own store from flipping (it closes itself after this callback unless
-			// the event is canceled) — see dismissal.logic.ts.
-			details.cancel()
-			return
-		}
-
+	const handleOpenChange = pendingGuardedOpenChange(pending, next => {
 		if (!next) {
 			onClose()
 		}
-	}
+	})
 
 	function toggle(uuid: string): void {
 		setSelected(prev => togglePickerContact(prev, uuid))
@@ -96,87 +75,6 @@ export function ContactPickerDialog({ items, onClose, onShared }: ContactPickerD
 		}
 	}
 
-	function renderBody(): ReactNode {
-		if (contactsQuery.status === "pending") {
-			return <LoadingState size="md" />
-		}
-
-		if (contactsQuery.status === "error") {
-			return (
-				<Empty>
-					<EmptyHeader>
-						<EmptyMedia>
-							<UsersIcon />
-						</EmptyMedia>
-						<EmptyTitle>{t("contacts:contactsLoadError")}</EmptyTitle>
-						<EmptyDescription>{errorLabel(asErrorDTO(contactsQuery.error))}</EmptyDescription>
-					</EmptyHeader>
-				</Empty>
-			)
-		}
-
-		// The free/no-contacts account lands here — a clean empty state, never a crash.
-		if (contacts.length === 0) {
-			return (
-				<Empty>
-					<EmptyHeader>
-						<EmptyMedia>
-							<UsersIcon />
-						</EmptyMedia>
-						<EmptyTitle>{t("contacts:contactsEmptyTitle")}</EmptyTitle>
-						<EmptyDescription>{t("contacts:contactsEmptyBody")}</EmptyDescription>
-					</EmptyHeader>
-				</Empty>
-			)
-		}
-
-		// A non-matching filter gets its own "no results" state, distinct from the genuine
-		// no-contacts-at-all branch above.
-		if (filteredContacts.length === 0) {
-			return (
-				<Empty>
-					<EmptyHeader>
-						<EmptyMedia>
-							<SearchXIcon />
-						</EmptyMedia>
-						<EmptyTitle>{t("contacts:contactsSearchNoResultsTitle")}</EmptyTitle>
-					</EmptyHeader>
-				</Empty>
-			)
-		}
-
-		return (
-			<div
-				role="listbox"
-				aria-multiselectable="true"
-				aria-label={t("contacts:contactsSectionContacts")}
-				className="flex flex-1 flex-col gap-0.5 overflow-y-auto p-2"
-			>
-				{filteredContacts.map(contact => {
-					const isSelected = selected.has(contact.uuid)
-
-					return (
-						<ContactRow
-							key={contact.uuid}
-							contact={contact}
-							selected={isSelected}
-							onToggleSelect={() => {
-								toggle(contact.uuid)
-							}}
-						>
-							{isSelected ? (
-								<CheckIcon
-									aria-hidden="true"
-									className="size-4 shrink-0 text-primary"
-								/>
-							) : null}
-						</ContactRow>
-					)
-				})}
-			</div>
-		)
-	}
-
 	// Re-checks connectivity at the confirm layer: the entry point that opened this picker was gated
 	// when it was clicked, but the connection can drop while the picker is open.
 	const canSubmit = selected.size > 0 && !pending && isOnline
@@ -194,17 +92,16 @@ export function ContactPickerDialog({ items, onClose, onShared }: ContactPickerD
 					<DialogTitle>{t("driveShareDialogTitle")}</DialogTitle>
 					<DialogDescription>{t("driveShareDialogBody", { count: items.length })}</DialogDescription>
 				</DialogHeader>
-				{contacts.length > 0 ? (
-					<ListFilterInput
-						value={filter}
-						onChange={setFilter}
-						placeholder={t("contacts:contactsSearchPlaceholder")}
-						ariaLabel={t("contacts:contactsSearchPlaceholder")}
-					/>
-				) : null}
-				<div className="flex h-72 flex-col overflow-hidden rounded-xl ring-1 ring-foreground/5 dark:ring-foreground/10">
-					{renderBody()}
-				</div>
+				<ContactPickerList
+					contactsQuery={contactsQuery}
+					filter={filter}
+					onFilterChange={setFilter}
+					selected={selected}
+					onToggle={toggle}
+					ariaLabel={t("contacts:contactsSectionContacts")}
+					emptyTitle={t("contacts:contactsEmptyTitle")}
+					emptyDescription={t("contacts:contactsEmptyBody")}
+				/>
 				<DialogFooter>
 					<Button
 						variant="outline"

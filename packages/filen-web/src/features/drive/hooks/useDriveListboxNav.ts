@@ -1,11 +1,12 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from "react"
+import { useEffect, useState, type KeyboardEvent, type MouseEvent } from "react"
 import {
 	clampListboxIndex,
 	clickPointerType,
 	isPlainClickDeselect,
+	isToggleModifier,
 	listboxKeyTarget,
 	listboxKeyTargetIsInteractive,
-	listboxRange,
+	listboxRangeItems,
 	resolveCursorIndex
 } from "@/features/drive/lib/listbox"
 import { type DriveItem } from "@/features/drive/lib/item"
@@ -13,10 +14,6 @@ import { driveRowKey } from "@/features/drive/lib/rowKey"
 import { type DriveVariant, type DriveViewMode } from "@/features/drive/lib/preferences"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import { type DriveVirtualizer } from "@/features/drive/hooks/useDriveVirtualizer"
-
-// Bounds the rAF poll moveActive() uses to focus a cursor target that scrollToIndex just brought
-// into range but that hasn't mounted (and registered its ref) yet.
-const FOCUS_RETRY_FRAMES = 10
 
 interface UseDriveListboxNavParams {
 	items: DriveItem[]
@@ -72,7 +69,6 @@ export function useDriveListboxNav({
 	// when a prop changes" in the React docs); a ref cannot be read during render under React Compiler.
 	const [activeFallback, setActiveFallback] = useState(0)
 	const [anchorFallback, setAnchorFallback] = useState(0)
-	const focusRequestRef = useRef(0)
 	const pendingReveal = useDriveStore(state => state.pendingReveal)
 
 	const keys = items.map(driveRowKey)
@@ -112,12 +108,6 @@ export function useDriveListboxNav({
 		}
 	}, [variant, splat])
 
-	// Focus is imperative by nature here: the target index may be scrolled fully out of the mounted
-	// window, and scrollToIndex's resulting re-render happens through the virtualizer's own
-	// scroll-event subscription, not synchronously with the state update below — so on the very next
-	// render the target row/tile may not exist in the DOM (and its ref) yet. A bounded rAF poll picks
-	// it up once it mounts; `focusRequestRef` lets a rapid run of keypresses invalidate an older,
-	// still-polling request instead of it stealing focus back after a newer one already landed.
 	function moveActive(nextIndexRaw: number): number {
 		const next = clampListboxIndex(nextIndexRaw, items.length)
 		const rowIndex = viewMode === "grid" ? Math.floor(next / columns) : next
@@ -125,35 +115,7 @@ export function useDriveListboxNav({
 
 		setActiveKey(nextItem ? driveRowKey(nextItem) : null)
 		virtualizer.scrollToIndex(rowIndex, { align: "auto" })
-		focusRequestRef.current = next
-
-		const attemptFocus = (attemptsLeft: number) => {
-			if (focusRequestRef.current !== next) {
-				return
-			}
-
-			const el = itemRefs.current.get(next)
-
-			if (el) {
-				if (document.activeElement !== el) {
-					el.focus({ preventScroll: true })
-				}
-
-				return
-			}
-
-			if (attemptsLeft <= 0) {
-				return
-			}
-
-			requestAnimationFrame(() => {
-				attemptFocus(attemptsLeft - 1)
-			})
-		}
-
-		requestAnimationFrame(() => {
-			attemptFocus(FOCUS_RETRY_FRAMES)
-		})
+		itemRefs.focusItem(next)
 
 		return next
 	}
@@ -187,17 +149,7 @@ export function useDriveListboxNav({
 	}, [pendingReveal, items, splat])
 
 	function selectRange(anchor: number, active: number) {
-		const rangeItems: DriveItem[] = []
-
-		for (const i of listboxRange(anchor, active)) {
-			const item = items[i]
-
-			if (item) {
-				rangeItems.push(item)
-			}
-		}
-
-		useDriveStore.getState().setSelectedItems(rangeItems)
+		useDriveStore.getState().setSelectedItems(listboxRangeItems(items, anchor, active))
 	}
 
 	function handlePointerSelect(index: number, event: MouseEvent<HTMLDivElement>) {
@@ -216,7 +168,7 @@ export function useDriveListboxNav({
 			return
 		}
 
-		if (event.metaKey || event.ctrlKey) {
+		if (isToggleModifier(event)) {
 			useDriveStore.getState().toggleSelectedItem(item)
 			setActiveKey(key)
 			setAnchorKey(key)

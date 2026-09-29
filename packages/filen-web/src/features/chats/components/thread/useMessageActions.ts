@@ -2,7 +2,7 @@ import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import type { Chat, ChatMessage } from "@filen/sdk-rs"
 import { errorLabel } from "@/lib/i18n/errorLabel"
-import { asErrorDTO } from "@/lib/sdk/errors"
+import { copyText } from "@/lib/copyText"
 import {
 	applyMessageOfflineGate,
 	messageMenuActions,
@@ -65,12 +65,7 @@ export function useMessageActions({
 			return
 		}
 
-		try {
-			await navigator.clipboard.writeText(message.message)
-			toast.success(t("chatMessageCopyToast"))
-		} catch (e) {
-			toast.error(errorLabel(asErrorDTO(e)))
-		}
+		await copyText(message.message, t("chatMessageCopyToast"))
 	}
 
 	async function handleDisableEmbed(): Promise<void> {
@@ -87,8 +82,8 @@ export function useMessageActions({
 			// senderId is `number` on the wasm surface — coerce so the local blocked-set cross-reference
 			// matches by id, not only email.
 			userId: BigInt(message.senderId),
-			...(message.senderNickName !== undefined ? { nickName: message.senderNickName } : {}),
-			...(message.senderAvatar !== undefined ? { avatar: message.senderAvatar } : {})
+			nickName: message.senderNickName,
+			avatar: message.senderAvatar
 		})
 
 		if (outcome.status === "error") {

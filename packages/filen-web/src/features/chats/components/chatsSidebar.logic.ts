@@ -1,6 +1,7 @@
 import type { Chat } from "@filen/sdk-rs"
 import { sortChats, chatDisplayName, chatMessagePreview, isChatUndecryptable, isLastMessageFromBlocked } from "@/features/chats/lib/sort"
 import { isBlocked, EMPTY_BLOCKED_USERS, type BlockedUsers } from "@filen/shared"
+import { matchesContactSearch } from "@/features/contacts/components/contactsList.logic"
 
 // A chat is listed only when the viewer owns it OR it has at least one message — mirrors mobile's own
 // list filter (components/list/index.tsx): an owned-but-empty chat the user just created still shows
@@ -60,13 +61,7 @@ export function filterChats(
 			return true
 		}
 
-		return chat.participants.some(p => {
-			if (p.email.toLowerCase().includes(term)) {
-				return true
-			}
-
-			return p.nickName?.toLowerCase().includes(term) ?? false
-		})
+		return chat.participants.some(p => matchesContactSearch(p, term))
 	})
 }
 

@@ -10,6 +10,7 @@ type ResolvedTheme = "dark" | "light"
 interface ThemeProviderState {
 	theme: Theme
 	setTheme: (theme: Theme) => void
+	toggleTheme: () => void
 }
 
 const COLOR_SCHEME_QUERY = "(prefers-color-scheme: dark)"
@@ -23,6 +24,10 @@ function getSystemTheme(): ResolvedTheme {
 	}
 
 	return "light"
+}
+
+export function resolveTheme(theme: Theme): ResolvedTheme {
+	return theme === "system" ? getSystemTheme() : theme
 }
 
 function disableTransitionsTemporarily() {
@@ -42,7 +47,7 @@ function disableTransitionsTemporarily() {
 
 function applyTheme(nextTheme: Theme) {
 	const root = document.documentElement
-	const resolvedTheme = nextTheme === "system" ? getSystemTheme() : nextTheme
+	const resolvedTheme = resolveTheme(nextTheme)
 	const restoreTransitions = disableTransitionsTemporarily()
 
 	root.classList.remove("light", "dark")
@@ -63,6 +68,15 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 	const setTheme = (nextTheme: Theme) => {
 		localStorage.setItem(STORAGE_KEY, nextTheme)
 		setThemeState(nextTheme)
+	}
+
+	const toggleTheme = () => {
+		setThemeState(currentTheme => {
+			const nextTheme = resolveTheme(currentTheme) === "dark" ? "light" : "dark"
+
+			localStorage.setItem(STORAGE_KEY, nextTheme)
+			return nextTheme
+		})
 	}
 
 	React.useEffect(() => {
@@ -100,13 +114,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 			return
 		}
 
-		setThemeState(currentTheme => {
-			const nextTheme =
-				currentTheme === "dark" ? "light" : currentTheme === "light" ? "dark" : getSystemTheme() === "dark" ? "light" : "dark"
-
-			localStorage.setItem(STORAGE_KEY, nextTheme)
-			return nextTheme
-		})
+		toggleTheme()
 	})
 
 	React.useEffect(() => {
@@ -134,7 +142,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 		}
 	}, [])
 
-	return <ThemeProviderContext.Provider value={{ theme, setTheme }}>{children}</ThemeProviderContext.Provider>
+	return <ThemeProviderContext.Provider value={{ theme, setTheme, toggleTheme }}>{children}</ThemeProviderContext.Provider>
 }
 
 export const useTheme = () => {

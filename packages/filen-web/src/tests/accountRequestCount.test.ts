@@ -99,15 +99,6 @@ const ACCOUNT: UserInfo = {
 	didExportMasterKeys: false
 }
 
-function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
-	let resolve!: (value: T) => void
-	const promise = new Promise<T>(r => {
-		resolve = r
-	})
-
-	return { promise, resolve }
-}
-
 function wrapper({ children }: { children: ReactNode }) {
 	return createElement(QueryClientProvider, { client: queryClient, children })
 }
@@ -234,7 +225,7 @@ describe("account request counts", () => {
 		mountAccount()
 		await drain()
 
-		const pending = deferred<UserInfo>()
+		const pending = Promise.withResolvers<UserInfo>()
 		getUserInfo.mockImplementationOnce(() => pending.promise)
 		void queryClient.invalidateQueries({ queryKey: ACCOUNT_QUERY_KEY })
 		markAccountStale()

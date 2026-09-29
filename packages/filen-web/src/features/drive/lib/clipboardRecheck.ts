@@ -6,8 +6,10 @@ import { errorLabel } from "@/lib/i18n/errorLabel"
 import { asErrorDTO, DIRECTORY_NOT_FOUND_PREFIX, type ErrorDTO } from "@/lib/sdk/errors"
 import { sdkApi } from "@/lib/sdk/client"
 import { queryClient } from "@/queries/client"
+import { cachedQuery } from "@/queries/patch"
 import { asDirectoryOrFile, narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { currentRootUuid } from "@/features/drive/lib/actions"
+import { getPerDirectoryKey } from "@/features/drive/lib/preferences"
 import {
 	driveListingQueryKey,
 	driveListingQueryOptions,
@@ -64,10 +66,6 @@ function homeListing(item: DriveItem, rootUuid: string): DriveListingParams | un
 		case "sharedRootFile":
 			return sharedOut(item.data.sharingRole) ? { variant: "sharedOut", uuid: null } : undefined
 	}
-}
-
-function listingKey(params: DriveListingParams): string {
-	return `${params.variant}:${params.uuid ?? ""}`
 }
 
 interface ListingRows {
@@ -139,11 +137,10 @@ interface CachedListing {
 	byUuid: Map<string, DriveItem>
 }
 
-// A My Drive listing as the cache holds it, found by its key's hash: a filter find() re-hashes the whole
-// query cache. undefined when it holds none.
+// A My Drive listing as the cache holds it, undefined when it holds none.
 function cachedDriveListing(uuid: string | null): CachedListing | undefined {
 	const options = driveListingQueryOptions("drive", uuid)
-	const query = queryClient.getQueryCache().get<DriveItem[]>(queryClient.defaultQueryOptions(options).queryHash)
+	const query = cachedQuery<DriveItem[]>(options.queryKey)
 	const rows = query?.state.data
 
 	if (query === undefined || rows === undefined) {
@@ -180,7 +177,7 @@ export function asListed(items: readonly DriveItem[]): { items: DriveItem[]; cur
 			return item
 		}
 
-		const key = listingKey(home)
+		const key = getPerDirectoryKey(home)
 		let listing = listings.get(key)
 
 		if (!listings.has(key)) {
@@ -248,7 +245,7 @@ async function listingRows(params: DriveListingParams): Promise<ListingRows | nu
 // error to show.
 function refuse(e: unknown): false {
 	if (!(e instanceof CancelledError)) {
-		toast.error(errorLabel(asErrorDTO(e)))
+		toast.error(errorLabel(e))
 	}
 
 	return false
@@ -274,7 +271,7 @@ export async function recheckClipboard(): Promise<boolean> {
 	// Each listing read once. A file created moments ago joins its listing first, so a content save's
 	// successor is found there.
 	const rowsOf = (params: DriveListingParams): Promise<ListingRows | null> => {
-		const key = listingKey(params)
+		const key = getPerDirectoryKey(params)
 		let read = reads.get(key)
 
 		if (read === undefined) {
@@ -299,7 +296,7 @@ export async function recheckClipboard(): Promise<boolean> {
 		}
 
 		void rowsOf(home)
-		homes.set(item, listingKey(home))
+		homes.set(item, getPerDirectoryKey(home))
 	}
 
 	try {

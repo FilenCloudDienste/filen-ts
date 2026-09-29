@@ -1,7 +1,6 @@
 import { type } from "arktype"
-import { kvGetJson, kvSetJson } from "@/lib/storage/adapter"
+import { kvLoadOnce, kvSetJsonQuiet } from "@/lib/storage/kvBestEffort"
 import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
-import { log } from "@/lib/log"
 import { useAudioStore } from "@/features/audio/store/useAudioStore"
 import {
 	buildShuffleOrder,
@@ -18,7 +17,7 @@ import {
 	type QueueTrack
 } from "@/features/audio/store/audioQueue"
 import type { MediaSessionPublisher } from "@/features/audio/lib/mediaSession"
-import { CoverArtCache } from "@/features/audio/lib/coverCache"
+import { createThumbnailUrlCache } from "@/features/drive/lib/thumbnailUrlCache"
 import { backfillTrackDuration, getTrackTags } from "@/features/audio/store/useTrackTagsStore"
 import { COVER_THUMBNAIL_TYPE } from "@/features/audio/lib/trackTags.logic"
 
@@ -101,6 +100,10 @@ export interface AudioEngineDeps {
 	resolveCover?: (track: QueueTrack, source: TrackSource) => Promise<{ cover: Blob | null } | null>
 }
 
+// Cover-art blob URLs are held only for the current + one-ahead prefetched track, so this is headroom
+// for a short back/forward history.
+const COVER_CACHE_MAX_ENTRIES = 8
+
 function defaultRevoke(url: string): void {
 	if (typeof URL !== "undefined" && typeof URL.revokeObjectURL === "function") {
 		URL.revokeObjectURL(url)
@@ -137,7 +140,21 @@ export class AudioEngine {
 	// Consecutive failed-track auto-skips; reset to 0 on any successful play. Bounds the auto-skip pass.
 	private skipGuard = 0
 	private lastPositionWriteAt = 0
-	private outputLoad: Promise<void> | null = null
+	// Load-once persisted volume/muted, memoized per engine instance. Output prefs are a nicety, never a
+	// blocker, so a failed read leaves the defaults in place.
+	private readonly loadOutputPrefs = kvLoadOnce(
+		OUTPUT_PREFS_KV_KEY,
+		audioOutputPrefsSchema,
+		loaded => {
+			const volume = clampVolume(loaded.volume)
+
+			this.element?.setVolume(volume)
+			this.element?.setMuted(loaded.muted)
+			useAudioStore.getState().setOutput(volume, loaded.muted)
+		},
+		"audio",
+		"audio output prefs"
+	)
 	private visibilityHandler: (() => void) | null = null
 	// The one-track-ahead warm-up element + which queue index it holds, if any. `null` index means
 	// "nothing warmed" (no prefetch dep, queue end, or the warm-up itself failed/was superseded).
@@ -152,7 +169,10 @@ export class AudioEngine {
 	// The index whose warm-up is still resolving, so a reschedule that lands on the same next track (a
 	// loop/shuffle toggle right after a track starts) lets it finish instead of restarting it.
 	private prefetchPendingIndex: number | null = null
-	private readonly coverCache = new CoverArtCache()
+	// One mint per track shared by every surface that shows cover art (bar, panel, MediaSession).
+	private readonly coverCache = createThumbnailUrlCache(COVER_CACHE_MAX_ENTRIES, (_uuid, url) => {
+		this.revoke(url)
+	})
 
 	public constructor(deps: AudioEngineDeps) {
 		this.deps = deps
@@ -449,7 +469,7 @@ export class AudioEngine {
 
 		const known = getTrackTags(track.uuid)
 
-		if (known !== undefined && (!known.cover || this.coverCache.get(track.uuid) !== null)) {
+		if (known !== undefined && (!known.cover || this.coverCache.get(track.uuid) !== undefined)) {
 			return
 		}
 
@@ -482,21 +502,21 @@ export class AudioEngine {
 		const tags = getTrackTags(track.uuid)
 		const coverUrl = this.coverCache.get(track.uuid)
 
-		this.deps.mediaSession.setMetadata(
-			track,
-			tags ? { title: tags.title, artist: tags.artist, album: tags.album } : null,
-			coverUrl !== null ? { url: coverUrl, type: COVER_THUMBNAIL_TYPE } : null
-		)
+		this.deps.mediaSession.setMetadata(track, tags, coverUrl !== undefined ? { url: coverUrl, type: COVER_THUMBNAIL_TYPE } : null)
 	}
 
 	// Mints/evicts the cover into the shared LRU and mirrors the cache's live key set into the store so
-	// every reactive surface (bar, panel thumbnails) sees it. Returns the freshly-minted URL.
-	private applyCover(uuid: string, cover: Blob): string {
-		const url = this.coverCache.set(uuid, cover)
+	// every reactive surface (bar, panel thumbnails) sees it.
+	private applyCover(uuid: string, cover: Blob): void {
+		const previous = this.coverCache.delete(uuid)
 
-		useAudioStore.getState().setCoverUrls(this.coverCache.snapshot())
+		if (previous !== undefined) {
+			this.revoke(previous)
+		}
 
-		return url
+		this.coverCache.set(uuid, URL.createObjectURL(cover))
+
+		useAudioStore.getState().setCoverUrls(Object.fromEntries(this.coverCache.entries()))
 	}
 
 	private onTimeUpdate(): void {
@@ -1003,36 +1023,14 @@ export class AudioEngine {
 		this.setMuted(!useAudioStore.getState().muted)
 	}
 
-	// Load-once persisted volume/muted, memoized per engine instance. Swallowed on failure — output
-	// prefs are a nicety, never a blocker.
 	public hydrateOutputPrefs(): Promise<void> {
-		this.outputLoad ??= kvGetJson(OUTPUT_PREFS_KV_KEY, audioOutputPrefsSchema)
-			.then(loaded => {
-				if (loaded === null) {
-					return
-				}
-
-				const volume = clampVolume(loaded.volume)
-
-				this.element?.setVolume(volume)
-				this.element?.setMuted(loaded.muted)
-				useAudioStore.getState().setOutput(volume, loaded.muted)
-			})
-			.catch((error: unknown) => {
-				log.warn("audio", "failed to load persisted audio output prefs", error)
-			})
-
-		return this.outputLoad
+		return this.loadOutputPrefs()
 	}
 
-	private async persistOutputPrefs(): Promise<void> {
-		try {
-			const { volume, muted } = useAudioStore.getState()
+	private persistOutputPrefs(): Promise<void> {
+		const { volume, muted } = useAudioStore.getState()
 
-			await kvSetJson(OUTPUT_PREFS_KV_KEY, { volume, muted })
-		} catch (error) {
-			log.warn("audio", "failed to persist audio output prefs", error)
-		}
+		return kvSetJsonQuiet(OUTPUT_PREFS_KV_KEY, { volume, muted }, "audio", "audio output prefs")
 	}
 
 	// Foreground reconcile: re-derive position/status straight off the element after the tab was
@@ -1091,7 +1089,7 @@ export class AudioEngine {
 		this.element = null
 		this.loadedTrackUuid = null
 		this.teardownPrefetch()
-		this.coverCache.revokeAll()
+		this.coverCache.clear()
 
 		if (this.currentBlobUrl !== null) {
 			this.revoke(this.currentBlobUrl)

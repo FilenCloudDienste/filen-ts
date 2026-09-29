@@ -1,8 +1,7 @@
 import type { Contact, Note, NoteParticipant } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
 import { notesQueryUpsert, notesQueryUpdate, notesQueryGet } from "@/features/notes/queries/notes"
-import { asErrorDTO } from "@/lib/sdk/errors"
-import { runOp, type ActionOutcome } from "@/lib/actions/outcome"
+import { attemptOp, type ActionOutcome } from "@/lib/actions/outcome"
 
 export type { ActionOutcome }
 
@@ -24,12 +23,14 @@ export async function addNoteParticipants(note: Note, contacts: readonly Contact
 
 	let updated = note
 
-	try {
-		for (const contact of toAdd) {
-			updated = await runOp(sdkApi.addNoteParticipant(updated, contact, true))
+	for (const contact of toAdd) {
+		const outcome = await attemptOp(sdkApi.addNoteParticipant(updated, contact, true))
+
+		if (outcome.status === "error") {
+			return outcome
 		}
-	} catch (e) {
-		return { status: "error", dto: asErrorDTO(e) }
+
+		updated = outcome.item
 	}
 
 	notesQueryUpsert(updated)
@@ -44,17 +45,13 @@ export async function removeNoteParticipant(note: Note, participant: NotePartici
 		return { status: "success", item: note }
 	}
 
-	let updated: Note
+	const outcome = await attemptOp(sdkApi.removeNoteParticipant(note, participant.userId))
 
-	try {
-		updated = await runOp(sdkApi.removeNoteParticipant(note, participant.userId))
-	} catch (e) {
-		return { status: "error", dto: asErrorDTO(e) }
+	if (outcome.status === "success") {
+		notesQueryUpsert(outcome.item)
 	}
 
-	notesQueryUpsert(updated)
-
-	return { status: "success", item: updated }
+	return outcome
 }
 
 // Mobile's setParticipantPermission. The SDK returns only the updated NoteParticipant (not the whole
@@ -67,13 +64,13 @@ export async function setNoteParticipantPermission(note: Note, participant: Note
 		return { status: "success", item: note }
 	}
 
-	let updatedParticipant: NoteParticipant
+	const outcome = await attemptOp(sdkApi.setNoteParticipantPermission(note.uuid, participant, write))
 
-	try {
-		updatedParticipant = await runOp(sdkApi.setNoteParticipantPermission(note.uuid, participant, write))
-	} catch (e) {
-		return { status: "error", dto: asErrorDTO(e) }
+	if (outcome.status === "error") {
+		return outcome
 	}
+
+	const updatedParticipant = outcome.item
 
 	notesQueryUpdate(prev =>
 		prev.map(n =>

@@ -16,15 +16,15 @@ export function useCapsLock(): {
 } {
 	const [capsLockOn, setCapsLockOn] = useState(false)
 
+	function sync(e: { getModifierState: (key: "CapsLock") => boolean }): void {
+		setCapsLockOn(e.getModifierState("CapsLock"))
+	}
+
 	return {
 		capsLockOn,
-		onKeyDown: e => {
-			setCapsLockOn(e.getModifierState("CapsLock"))
-		},
+		onKeyDown: sync,
 		// Keyup is what catches the user toggling caps lock while focused without typing.
-		onKeyUp: e => {
-			setCapsLockOn(e.getModifierState("CapsLock"))
-		},
+		onKeyUp: sync,
 		onBlur: () => {
 			setCapsLockOn(false)
 		}

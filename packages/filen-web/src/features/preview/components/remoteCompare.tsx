@@ -8,16 +8,12 @@ import { codeMirrorLanguageFor, decodeUtf8, extensionOf } from "@/features/drive
 import { useCodeMirrorTheme, useLanguageExtension } from "@/features/preview/lib/codeMirrorShared"
 import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
 import { LoadingState } from "@/components/loadingState"
+import { isNarrowViewport } from "@/features/shell/lib/breakpoints"
 
 // Unchanged stretches fold away so the differences stay in view, and a diff that runs long falls back
 // to a coarser one rather than holding the main thread on two large, very different files.
 const COLLAPSE_UNCHANGED = { margin: 3, minSize: 4 }
 const DIFF_CONFIG = { scanLimit: 10_000, timeout: 500 }
-
-// Side by side needs the width; a narrow window gets one column with both versions interleaved.
-function prefersSideBySide(): boolean {
-	return window.matchMedia("(min-width: 768px)").matches
-}
 
 // The newer version's text, as far as it has been had.
 export type RemoteTheirs = { status: "loading" } | { status: "failed" } | { status: "ready"; text: string }
@@ -31,7 +27,8 @@ export function RemoteCompare({ theirs, mine, tag }: { theirs: RemoteTheirs; min
 	const theme = useCodeMirrorTheme()
 	const language = useLanguageExtension(tag)
 	const hostRef = useRef<HTMLDivElement>(null)
-	const [sideBySide] = useState(prefersSideBySide)
+	// Side by side needs the width; a narrow window gets one column with both versions interleaved.
+	const [sideBySide] = useState(() => !isNarrowViewport())
 
 	useEffect(() => {
 		const host = hostRef.current

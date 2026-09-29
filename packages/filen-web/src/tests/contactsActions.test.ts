@@ -61,10 +61,11 @@ import {
 	denyRequest,
 	messageContact,
 	removeContact,
-	runContactsBulk,
 	sendContactRequest as sendContactRequestAction,
+	toggleParticipantBlocked,
 	unblockContact as unblockContactAction
 } from "@/features/contacts/lib/actions"
+import { runBulkOutcomes } from "@/lib/actions/bulk"
 
 beforeEach(() => {
 	vi.clearAllMocks()
@@ -542,32 +543,7 @@ describe("messageContact", () => {
 	})
 })
 
-describe("runContactsBulk", () => {
-	it("resolves every item as succeeded when perItem resolves success for all", async () => {
-		const items = [mockIncoming(), mockIncoming({ uuid: testUuid("b") })]
-		const perItem = vi.fn().mockResolvedValue({ status: "success" } as const)
-
-		const result = await runContactsBulk(items, perItem)
-
-		expect(result).toEqual({ succeeded: items, failed: [] })
-		expect(perItem).toHaveBeenCalledTimes(2)
-	})
-
-	it("collects a VoidActionOutcome error status as a BulkFailure carrying the original dto, without aborting the rest", async () => {
-		const ok = mockIncoming({ uuid: testUuid("ok") })
-		const bad = mockIncoming({ uuid: testUuid("bad") })
-		const dto = sdkDto("Forbidden")
-		const perItem = vi
-			.fn()
-			.mockResolvedValueOnce({ status: "success" } as const)
-			.mockResolvedValueOnce({ status: "error", dto } as const)
-
-		const result = await runContactsBulk([ok, bad], perItem)
-
-		expect(result.succeeded).toEqual([ok])
-		expect(result.failed).toEqual([{ item: bad, error: dto }])
-	})
-
+describe("runBulkOutcomes over contact helpers", () => {
 	it("composes with a real helper end-to-end: bulk-denying a subset removes exactly those from incoming", async () => {
 		const keep = mockIncoming({ uuid: testUuid("keep") })
 		const denyA = mockIncoming({ uuid: testUuid("deny-a") })
@@ -575,18 +551,40 @@ describe("runContactsBulk", () => {
 		seedRequests({ incoming: [keep, denyA, denyB] })
 		denyContactRequest.mockResolvedValue(undefined)
 
-		const result = await runContactsBulk([denyA, denyB], item => denyRequest(item.uuid))
+		const result = await runBulkOutcomes([denyA, denyB], item => denyRequest(item.uuid))
 
 		expect(result.succeeded).toEqual([denyA, denyB])
 		expect(testQueryClient.getQueryData<{ incoming: ContactRequestIn[] }>(CONTACT_REQUESTS_QUERY_KEY)?.incoming).toEqual([keep])
 	})
+})
 
-	it("resolves to an empty split on an empty selection without calling perItem", async () => {
-		const perItem = vi.fn()
+describe("toggleParticipantBlocked", () => {
+	it("blocks by email when the participant is not blocked", async () => {
+		seedContacts({ contacts: [], blocked: [] })
+		blockContact.mockResolvedValueOnce(testUuid("new-blocked"))
 
-		const result = await runContactsBulk([], perItem)
+		const toggled = toggleParticipantBlocked({ email: "peer@x.io", userId: 7n, nickName: undefined, avatar: undefined }, [], false)
 
-		expect(result).toEqual({ succeeded: [], failed: [] })
-		expect(perItem).not.toHaveBeenCalled()
+		expect(toggled).not.toBe("stale")
+		expect(await toggled).toEqual({ status: "success" })
+		expect(blockContact).toHaveBeenCalledExactlyOnceWith("peer@x.io")
+		expect(unblockContact).not.toHaveBeenCalled()
+	})
+
+	it("unblocks by the blocked record's uuid, matched on userId", async () => {
+		const blocked = mockBlockedContact({ userId: 7n })
+		seedContacts({ blocked: [blocked] })
+		unblockContact.mockResolvedValueOnce(undefined)
+		getContacts.mockResolvedValueOnce([])
+
+		expect(await toggleParticipantBlocked({ email: "peer@x.io", userId: 7n }, [blocked], true)).toEqual({ status: "success" })
+		expect(unblockContact).toHaveBeenCalledExactlyOnceWith(blocked.uuid)
+	})
+
+	it("returns stale synchronously, starting no op, when the blocked record is gone", () => {
+		expect(toggleParticipantBlocked({ email: "peer@x.io", userId: 7n }, [mockBlockedContact({ userId: 8n })], true)).toBe("stale")
+		expect(toggleParticipantBlocked({ email: "peer@x.io", userId: 7n }, undefined, true)).toBe("stale")
+		expect(unblockContact).not.toHaveBeenCalled()
+		expect(blockContact).not.toHaveBeenCalled()
 	})
 })

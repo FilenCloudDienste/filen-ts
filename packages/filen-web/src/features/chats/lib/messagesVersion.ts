@@ -1,4 +1,5 @@
 import { notifyManager } from "@tanstack/react-query"
+import { createListenerSet } from "@/lib/listenerSet"
 import { queryClient } from "@/queries/client"
 
 // The rail's unread sum (useChatsUnreadCount) reads each chat's message cache without observing it, so a
@@ -8,7 +9,7 @@ import { queryClient } from "@/queries/client"
 // for the whole app, subscribed from the start so no write lands unseen before the rail subscribes.
 let messagesVersion = 0
 let messagesVersionNotifyPending = false
-const messagesVersionListeners = new Set<() => void>()
+const messagesVersionListeners = createListenerSet("chats.messagesVersion")
 
 // The part of a query-cache event this reads; the event types its query's key as any.
 interface MessagesCacheEvent {
@@ -45,20 +46,11 @@ queryClient.getQueryCache().subscribe(event => {
 
 	notifyManager.schedule(() => {
 		messagesVersionNotifyPending = false
-
-		for (const listener of messagesVersionListeners) {
-			listener()
-		}
+		messagesVersionListeners.emit()
 	})
 })
 
-export function subscribeMessagesVersion(listener: () => void): () => void {
-	messagesVersionListeners.add(listener)
-
-	return () => {
-		messagesVersionListeners.delete(listener)
-	}
-}
+export const subscribeMessagesVersion = messagesVersionListeners.subscribe
 
 export function getMessagesVersion(): number {
 	return messagesVersion

@@ -2,6 +2,7 @@ import * as Comlink from "comlink"
 import { serializeError, deserializeError, type SerializedError } from "@filen/shared" // preserves stack traces across the BroadcastChannel
 import DbWorker from "@/workers/db.worker.ts?worker" // matches the sdk worker's own spawn convention (src/lib/sdk/client.ts) — confirmed working in dev + build
 import type { StorageApi } from "@/workers/db.worker"
+import { createListenerSet } from "@/lib/listenerSet"
 import { log } from "@/lib/log"
 
 const LOCK = "filen-web-db-leader"
@@ -17,20 +18,14 @@ export interface StorageHandle {
 // leader death the promoted tab flips to "leader" here so the outbox can hand the loop over. No second
 // lock, no change to the db RPC protocol (Req/Res/Hello are untouched).
 let currentRole: "leader" | "follower" | null = null
-const leadershipListeners: Set<() => void> = new Set<() => void>()
+const leadershipListeners = createListenerSet("db.leader")
 
 export function storageRole(): "leader" | "follower" | null {
 	return currentRole
 }
 
 // Subscribe to leadership changes (fires on promotion follower→leader). Returns an unsubscribe fn.
-export function onStorageLeadershipChange(listener: () => void): () => void {
-	leadershipListeners.add(listener)
-
-	return () => {
-		leadershipListeners.delete(listener)
-	}
-}
+export const onStorageLeadershipChange = leadershipListeners.subscribe
 
 function setStorageRole(role: "leader" | "follower"): void {
 	if (currentRole === role) {
@@ -38,10 +33,7 @@ function setStorageRole(role: "leader" | "follower"): void {
 	}
 
 	currentRole = role
-
-	for (const listener of leadershipListeners) {
-		listener()
-	}
+	leadershipListeners.emit()
 }
 
 interface Req {
@@ -69,29 +61,6 @@ const STORAGE_METHODS = [
 	"kvEntries",
 	"kvDeletePrefix"
 ] as const satisfies readonly (keyof StorageApi)[]
-
-// A promise plus its externally-exposed settle functions — lets a listener registered before the
-// promise exists (e.g. inside the promise's own executor) settle it later without a self-reference
-// through the `const` binding that is still being initialized (that self-reference was rev-1's bug).
-function deferred<T = void>(): { promise: Promise<T>; resolve: (value: T) => void; reject: (reason: unknown) => void } {
-	let resolveFn: ((value: T) => void) | undefined
-	let rejectFn: ((reason: unknown) => void) | undefined
-	const promise = new Promise<T>((res, rej) => {
-		resolveFn = res
-		rejectFn = rej
-	})
-
-	// The executor above runs synchronously during `new Promise`, so both are always assigned here.
-	return {
-		promise,
-		resolve: value => {
-			resolveFn?.(value)
-		},
-		reject: reason => {
-			rejectFn?.(reason)
-		}
-	}
-}
 
 // Spin up this tab's own db worker, open OPFS, and start serving the RPC channel — the work a tab does
 // the moment it holds the lock, whether it was the FIRST leader or a promoted follower. Returns the
@@ -245,11 +214,11 @@ async function followerHandle(signal: AbortSignal): Promise<StorageHandle> {
 	const ch = new BroadcastChannel(CHANNEL)
 	const pending = new Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void }>()
 
-	const ready = deferred()
+	const ready = Promise.withResolvers<undefined>()
 
 	ch.addEventListener("message", (ev: MessageEvent<Msg>) => {
 		if (ev.data.kind === "leader-ready") {
-			ready.resolve()
+			ready.resolve(undefined)
 		}
 	})
 

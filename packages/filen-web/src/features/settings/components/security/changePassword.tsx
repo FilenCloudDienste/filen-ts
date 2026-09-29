@@ -4,17 +4,14 @@ import { toast } from "sonner"
 import { isPasswordStrongEnough, ratePasswordStrength } from "@filen/shared"
 import { sdkApi } from "@/lib/sdk/client"
 import { persistSession, clearSession } from "@/lib/sdk/session"
-import { asErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { runChangePasswordAttempt } from "@/features/settings/components/security/changePassword.logic"
-import { useCapsLock } from "@/features/auth/lib/useCapsLock"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { markAccountStale } from "@/queries/account"
-import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
-import { Input } from "@/components/ui/input"
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Button } from "@/components/ui/button"
 import { StrengthMeter } from "@/features/auth/components/strengthMeter"
-import { CapsLockWarning } from "@/features/auth/components/capsLockWarning"
+import { PasswordInput } from "@/features/auth/components/passwordInput"
 import { SettingsRow } from "@/features/settings/components/settingsLayout"
 import { FormDialog } from "@/components/dialogs/formDialog"
 
@@ -30,9 +27,6 @@ function ChangePasswordRow() {
 	const [newPassword, setNewPassword] = useState("")
 	const [confirmPassword, setConfirmPassword] = useState("")
 	const [pending, setPending] = useState(false)
-	const currentPasswordCaps = useCapsLock()
-	const newPasswordCaps = useCapsLock()
-	const confirmPasswordCaps = useCapsLock()
 
 	const passwordStrength = newPassword.length > 0 ? ratePasswordStrength(newPassword) : null
 	const passwordsMatch = newPassword.length > 0 && newPassword === confirmPassword
@@ -85,7 +79,7 @@ function ChangePasswordRow() {
 					break
 			}
 		} catch (e) {
-			toast.error(errorLabel(asErrorDTO(e)))
+			toast.error(errorLabel(e))
 		} finally {
 			setPending(false)
 		}
@@ -127,60 +121,42 @@ function ChangePasswordRow() {
 				<FieldGroup>
 					<Field>
 						<FieldLabel htmlFor="current-password">{t("changePasswordCurrent")}</FieldLabel>
-						<Input
+						<PasswordInput
 							id="current-password"
-							type="password"
 							autoComplete="current-password"
 							value={currentPassword}
 							disabled={pending}
 							onChange={e => {
 								setCurrentPassword(e.target.value)
 							}}
-							onKeyDown={currentPasswordCaps.onKeyDown}
-							onKeyUp={currentPasswordCaps.onKeyUp}
-							onBlur={currentPasswordCaps.onBlur}
 						/>
-						<CapsLockWarning active={currentPasswordCaps.capsLockOn} />
 					</Field>
 					<Field>
 						<FieldLabel htmlFor="new-password">{t("changePasswordNew")}</FieldLabel>
-						<Input
+						<PasswordInput
 							id="new-password"
-							type="password"
 							autoComplete="new-password"
 							value={newPassword}
 							disabled={pending}
 							onChange={e => {
 								setNewPassword(e.target.value)
 							}}
-							onKeyDown={newPasswordCaps.onKeyDown}
-							onKeyUp={newPasswordCaps.onKeyUp}
-							onBlur={newPasswordCaps.onBlur}
-						/>
-						{passwordStrength && <StrengthMeter tier={passwordStrength.strength} />}
-						<CapsLockWarning active={newPasswordCaps.capsLockOn} />
+						>
+							{passwordStrength && <StrengthMeter tier={passwordStrength.strength} />}
+						</PasswordInput>
 					</Field>
 					<Field>
 						<FieldLabel htmlFor="confirm-new-password">{t("changePasswordConfirm")}</FieldLabel>
-						<Input
+						<PasswordInput
 							id="confirm-new-password"
-							type="password"
+							error={passwordsMismatched && t("passwordsDoNotMatch")}
 							autoComplete="new-password"
-							aria-invalid={passwordsMismatched}
-							// Same condition the error below renders on — a describedby pointing at an id that
-							// is not in the document describes nothing.
-							aria-describedby={passwordsMismatched ? "confirm-new-password-error" : undefined}
 							value={confirmPassword}
 							disabled={pending}
 							onChange={e => {
 								setConfirmPassword(e.target.value)
 							}}
-							onKeyDown={confirmPasswordCaps.onKeyDown}
-							onKeyUp={confirmPasswordCaps.onKeyUp}
-							onBlur={confirmPasswordCaps.onBlur}
 						/>
-						{passwordsMismatched && <FieldError id="confirm-new-password-error">{t("passwordsDoNotMatch")}</FieldError>}
-						<CapsLockWarning active={confirmPasswordCaps.capsLockOn} />
 					</Field>
 				</FieldGroup>
 			</FormDialog>

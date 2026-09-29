@@ -2,14 +2,14 @@ import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import QRCode from "react-qr-code"
-import { type DialogRoot } from "@base-ui/react/dialog"
 import { useBlocker, type ShouldBlockFn } from "@tanstack/react-router"
 import { sdkApi } from "@/lib/sdk/client"
-import { asErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
+import { copyText } from "@/lib/copyText"
 import { downloadTextFile } from "@/features/settings/lib/downloadTextFile"
 import { accountQueryUpdate, type AccountQuerySuccess } from "@/queries/account"
-import { buildOtpauthUri, canDismissRecoveryKeyPanel } from "@/features/settings/components/security/twoFactor.logic"
+import { buildOtpauthUri } from "@/features/settings/components/security/twoFactor.logic"
+import { pendingGuardedOpenChange } from "@/components/dialogs/dismissal.logic"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { holdUnload } from "@/lib/unloadGuard"
 import { Button } from "@/components/ui/button"
@@ -34,7 +34,7 @@ interface RecoveryKeyPanelProps {
 // artifact, see the naming law in locales/en/auth.ts) is shown here exactly once, straight from
 // enable2FA's return value, and lives ONLY in this component's state — it is never persisted,
 // logged, or refetched. It can only be dismissed via the explicit "I've saved it" confirm; every
-// other dismissal route is blocked (canDismissRecoveryKeyPanel, twoFactor.logic.ts) so a stray
+// other dismissal route is blocked (pendingGuardedOpenChange with `!saved` as pending) so a stray
 // Escape or outside-click can never lose it before the user has acknowledged saving it. Navigation is
 // held the same way: a Back gesture or a closing tab would unmount it just as surely.
 function RecoveryKeyPanel({ recoveryKey, onClose }: RecoveryKeyPanelProps) {
@@ -44,23 +44,14 @@ function RecoveryKeyPanel({ recoveryKey, onClose }: RecoveryKeyPanelProps) {
 	useBlocker({ shouldBlockFn: blockEveryNavigation, enableBeforeUnload: false, withResolver: false })
 	useEffect(() => holdUnload(), [])
 
-	function handleOpenChange(next: boolean, details: DialogRoot.ChangeEventDetails): void {
-		if (!canDismissRecoveryKeyPanel(next, saved)) {
-			details.cancel()
-			return
-		}
+	const handleOpenChange = pendingGuardedOpenChange(!saved, next => {
 		if (!next) {
 			onClose()
 		}
-	}
+	})
 
 	async function handleCopy(): Promise<void> {
-		try {
-			await navigator.clipboard.writeText(recoveryKey)
-			toast.success(t("copiedToClipboard"))
-		} catch (e) {
-			toast.error(errorLabel(asErrorDTO(e)))
-		}
+		await copyText(recoveryKey, t("copiedToClipboard"))
 	}
 
 	function handleDownload(): void {
@@ -145,12 +136,7 @@ function TwoFactorRow({ accountQuery }: TwoFactorRowProps) {
 		if (twoFactorKey === undefined) {
 			return
 		}
-		try {
-			await navigator.clipboard.writeText(twoFactorKey)
-			toast.success(t("copiedToClipboard"))
-		} catch (e) {
-			toast.error(errorLabel(asErrorDTO(e)))
-		}
+		await copyText(twoFactorKey, t("copiedToClipboard"))
 	}
 
 	async function handleEnableSubmit(code: string): Promise<void> {
@@ -163,7 +149,7 @@ function TwoFactorRow({ accountQuery }: TwoFactorRowProps) {
 			// only copy of the key. getUserInfo withholds the setup key while 2FA is on; mirror that.
 			accountQueryUpdate(prev => ({ ...prev, twoFactorEnabled: true, twoFactorKey: undefined }))
 		} catch (e) {
-			toast.error(errorLabel(asErrorDTO(e)))
+			toast.error(errorLabel(e))
 		} finally {
 			setEnablePending(false)
 		}
@@ -176,7 +162,7 @@ function TwoFactorRow({ accountQuery }: TwoFactorRowProps) {
 			setDisableCodeOpen(false)
 			void accountQuery.refetch()
 		} catch (e) {
-			toast.error(errorLabel(asErrorDTO(e)))
+			toast.error(errorLabel(e))
 		} finally {
 			setDisablePending(false)
 		}

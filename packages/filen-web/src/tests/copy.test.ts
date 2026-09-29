@@ -44,7 +44,7 @@ const { toastSuccess, toastError, toastCustom, toastDismiss } = vi.hoisted(() =>
 vi.mock("sonner", () => ({ toast: { success: toastSuccess, error: toastError, custom: toastCustom, dismiss: toastDismiss } }))
 
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
-import { type BulkOutcome } from "@/features/drive/lib/bulk"
+import { type BulkOutcome } from "@/lib/actions/bulk"
 import {
 	pruneSettledCopyJobs,
 	requestCopyCancel,
@@ -183,15 +183,6 @@ function copyFailure(label: string, stage: CopyFailure["info"]["stage"] = { type
 			affectedBytes: 100n
 		}
 	}
-}
-
-function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
-	let resolve: (value: T) => void = () => undefined
-	const promise = new Promise<T>(r => {
-		resolve = r
-	})
-
-	return { promise, resolve }
 }
 
 function makeDeps() {
@@ -582,7 +573,7 @@ describe("runCopyJob quota", () => {
 	// figure; the fresh read must not be that read.
 	it("runs again on the server's figure even when an account write lands during the fresh read", async () => {
 		const deps = { ...makeDeps(), account: accountQuotaDeps }
-		const fresh = deferred<UserInfo>()
+		const fresh = Promise.withResolvers<UserInfo>()
 
 		queryClient.setQueryData<Partial<UserInfo>>(ACCOUNT_QUERY_KEY, { maxStorage: 1_000n, storageUsed: 900n })
 		getUserInfo.mockReturnValueOnce(fresh.promise)
@@ -751,7 +742,7 @@ describe("cancel", () => {
 	it("keeps a stopped copy's row active until its copies are in the trash, then removes it", async () => {
 		const deps = makeDeps()
 		const dir = mockDir("copied")
-		const trash = deferred<{ succeeded: DriveItem[]; failed: [] }>()
+		const trash = Promise.withResolvers<{ succeeded: DriveItem[]; failed: [] }>()
 
 		deps.trash.mockReturnValue(trash.promise)
 		deps.copyItems.mockImplementation((id, _items, _dest, _max, onEvent) => {
@@ -894,7 +885,7 @@ describe("cancel", () => {
 	it("clears a paused row's pause once the job ends, while its copies move to the trash", async () => {
 		const deps = makeDeps()
 		const dir = mockDir("copied")
-		const trash = deferred<BulkOutcome<DriveItem>>()
+		const trash = Promise.withResolvers<BulkOutcome<DriveItem>>()
 
 		deps.trash.mockReturnValue(trash.promise)
 		deps.copyItems.mockImplementation((id, _items, _dest, _max, onEvent) => {
@@ -999,7 +990,7 @@ describe("events after the result", () => {
 		const early = mockDir("early")
 		const late = mockDir("late")
 		const failed = copyFailure("failed")
-		const batch = deferred<BulkOutcome<DriveItem>>()
+		const batch = Promise.withResolvers<BulkOutcome<DriveItem>>()
 		let deliverLate = (): void => undefined
 
 		deps.trash
@@ -1199,7 +1190,7 @@ describe("startCopy and retryFailedCopy", () => {
 	it("retries nothing while a stop is still moving the copies to the trash", async () => {
 		const deps = makeDeps()
 		const stuck = mockDir("stuck")
-		const trash = deferred<BulkOutcome<DriveItem>>()
+		const trash = Promise.withResolvers<BulkOutcome<DriveItem>>()
 
 		deps.trash.mockReturnValue(trash.promise)
 		deps.copyItems.mockImplementation((id, _items, _dest, _max, onEvent) => {

@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react"
+import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import { useShallow } from "zustand/shallow"
 import { useNavigate } from "@tanstack/react-router"
@@ -22,7 +22,7 @@ import { percentFormat, runningPercentFraction } from "@/features/transfers/comp
 import { defaultRevealDeps, runOpenContainingDirectory } from "@/features/drive/lib/reveal"
 import type { DriveItem } from "@/features/drive/lib/item"
 import { Button } from "@/components/ui/button"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
 import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription } from "@/components/ui/empty"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 
@@ -108,21 +108,21 @@ export function TransfersScreen() {
 						: null}
 				</p>
 				<div className="ml-auto flex shrink-0 items-center gap-1">
-					<HeaderAction
+					<TooltipIconButton
 						label={t("transfersScreenPauseAll")}
 						disabled={pausable.length === 0}
 						onClick={handlePauseAll}
 					>
 						<PauseIcon />
-					</HeaderAction>
-					<HeaderAction
+					</TooltipIconButton>
+					<TooltipIconButton
 						label={t("transfersScreenResumeAll")}
 						disabled={resumable.length === 0}
 						onClick={handleResumeAll}
 					>
 						<PlayIcon />
-					</HeaderAction>
-					<HeaderAction
+					</TooltipIconButton>
+					<TooltipIconButton
 						label={t("transfersScreenCancelAll")}
 						disabled={cancellable.length === 0}
 						onClick={() => {
@@ -130,7 +130,7 @@ export function TransfersScreen() {
 						}}
 					>
 						<XIcon />
-					</HeaderAction>
+					</TooltipIconButton>
 					<Button
 						variant="outline"
 						size="sm"
@@ -304,36 +304,5 @@ function TransfersList({
 				)
 			})}
 		</div>
-	)
-}
-
-function HeaderAction({
-	label,
-	disabled,
-	onClick,
-	children
-}: {
-	label: string
-	disabled: boolean
-	onClick: () => void
-	children: ReactNode
-}) {
-	return (
-		<Tooltip>
-			<TooltipTrigger
-				render={
-					<Button
-						variant="ghost"
-						size="icon-sm"
-						aria-label={label}
-						disabled={disabled}
-						onClick={onClick}
-					>
-						{children}
-					</Button>
-				}
-			/>
-			<TooltipContent>{label}</TooltipContent>
-		</Tooltip>
 	)
 }

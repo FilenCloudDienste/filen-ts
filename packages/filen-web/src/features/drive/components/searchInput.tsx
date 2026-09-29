@@ -16,38 +16,26 @@ export interface SearchInputProps {
 	value: string
 	onChange: (value: string) => void
 	onClear: () => void
-	// The host's own dialog-open flag (useDriveDialogHost, usePhotosDialogHost) — see newDirectory.tsx's identical
-	// prop for the full rationale (covers the preview overlay too). Without this, mod+f while a
-	// dialog/preview is open would steal focus onto this input, sitting behind the dialog's own focus
-	// trap.
-	dialogOpen: boolean
 }
 
-export function SearchInput({ action, label, value, onChange, onClear, dialogOpen }: SearchInputProps) {
+export function SearchInput({ action, label, value, onChange, onClear }: SearchInputProps) {
 	const { t } = useTranslation("drive")
 	const inputRef = useRef<HTMLInputElement>(null)
 
 	// Registered above at module scope. preventDefault unconditionally — every browser intercepts
 	// mod+f for its own find-in-page, which must never fire while a listing has this mounted;
-	// the focus steal itself is guarded on dialogOpen (see its own prop comment).
-	useAction(
-		action,
-		keyboardEvent => {
-			keyboardEvent.preventDefault()
+	// the focus steal itself stands down while a dialog is open.
+	useAction(action, keyboardEvent => {
+		keyboardEvent.preventDefault()
 
-			// dialogOpen only knows about drive's own dialog host; a modal raised anywhere else in the shell
-			// (the startup account reminders, the narrow-viewport sidebar drawer) would otherwise still let
-			// mod+f pull focus onto this input behind that surface's focus trap. Same shared signal the rail's
-			// own navigation actions guard on.
-			if (dialogOpen || isAnyDialogOpen()) {
-				return
-			}
+		// Any open dialog, the preview overlay, the startup reminders and the narrow-viewport sidebar
+		// drawer included: focus would land on this input behind that surface's focus trap.
+		if (isAnyDialogOpen()) {
+			return
+		}
 
-			inputRef.current?.focus()
-		},
-		undefined,
-		[dialogOpen]
-	)
+		inputRef.current?.focus()
+	})
 
 	return (
 		// min-w-0: the input's own intrinsic width is this wrapper's flex floor otherwise, and the controls

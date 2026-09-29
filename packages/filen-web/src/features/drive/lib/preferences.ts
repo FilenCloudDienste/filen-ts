@@ -1,13 +1,15 @@
 import { type, type Type } from "arktype"
-import { kvGetJson, kvSetJson } from "@/lib/storage/adapter"
+import { kvPreference } from "@/lib/storage/preference"
 import { type DriveSortBy } from "@/features/drive/lib/sort"
+import type { FlatListingKind } from "@/features/drive/lib/flatListing"
+import { withoutKey } from "@/lib/utils"
 
 // The listing surfaces sort/view-mode preferences apply to — the NormalDirsAndFiles roots (My
 // Drive, recents, favorites, trash, links), plus the two shared roots (sharedIn/sharedOut), which
 // carry the widened DriveItem shape (see features/drive/lib/item.ts). links lists via the SDK's own
 // listLinkedItems() (a NormalDirsAndFiles of the owned items that carry a public link), so its rows
 // are plain directory/file arms just like the other flat roots.
-export type DriveVariant = "drive" | "recents" | "favorites" | "trash" | "links" | "sharedIn" | "sharedOut"
+export type DriveVariant = "drive" | FlatListingKind | "sharedIn" | "sharedOut"
 
 // Minimal location a preference is scoped to: which listing surface, and (for "drive") which
 // directory within it. `uuid` is null for the three flat listings and for My Drive's own root.
@@ -24,6 +26,20 @@ export interface DrivePreferences<T extends string> {
 	mode: "global" | "perDirectory"
 	global: T
 	perDirectory: Record<string, T>
+}
+
+// Pure mode flip — the caller persists the result. Turning perDirectory OFF deliberately leaves any
+// existing perDirectory entries in place (only resetPreferences wipes them) so re-enabling the toggle
+// later restores what the user had before, rather than silently discarding it on every off/on cycle.
+export function withModeToggle<T extends string>(prefs: DrivePreferences<T>, perDirectory: boolean): DrivePreferences<T> {
+	return { ...prefs, mode: perDirectory ? "perDirectory" : "global" }
+}
+
+// Pure reset — wipes the global value back to the app default AND every per-directory override,
+// matching mobile's "Reset sort"/"Reset view" actions (screens/appearance.tsx), regardless of which
+// mode is currently active.
+export function resetPreferences<T extends string>(prefs: DrivePreferences<T>, defaultGlobal: T): DrivePreferences<T> {
+	return { ...prefs, global: defaultGlobal, perDirectory: {} }
 }
 
 // Recents is a fixed chronological view (see resolveEffectiveSort) — no sort menu renders for it,
@@ -53,8 +69,6 @@ export function canWriteVariant(variant: DriveVariant, uuid: string | null): boo
 	return variant === "drive" || (variant === "sharedOut" && uuid !== null)
 }
 
-const SORT_PREFERENCES_KV_KEY = "drive.sortPreferences.v1"
-
 // Annotated as `Type<DriveSortBy>` rather than cast: a literal added to/removed from DriveSortBy
 // without a matching edit here fails to compile instead of silently under/over-accepting.
 const driveSortBySchema: Type<DriveSortBy> = type(
@@ -73,16 +87,11 @@ export const DEFAULT_SORT_PREFERENCES: DrivePreferences<DriveSortBy> = {
 	perDirectory: {}
 }
 
-// kvGetJson already collapses "absent" and "schema-invalid" to null (see @/lib/storage/adapter) —
-// the `?? DEFAULT` below is the self-heal: a corrupt persisted value is indistinguishable from no
-// value at all, and both resolve to the same default.
-export async function getSortPreferences(): Promise<DrivePreferences<DriveSortBy>> {
-	return (await kvGetJson(SORT_PREFERENCES_KV_KEY, sortPreferencesSchema)) ?? DEFAULT_SORT_PREFERENCES
-}
-
-export async function setSortPreferences(next: DrivePreferences<DriveSortBy>): Promise<void> {
-	await kvSetJson(SORT_PREFERENCES_KV_KEY, next)
-}
+export const { get: getSortPreferences, set: setSortPreferences } = kvPreference({
+	key: "drive.sortPreferences.v1",
+	schema: sortPreferencesSchema,
+	fallback: DEFAULT_SORT_PREFERENCES
+})
 
 export function resolveEffectiveSort(prefs: DrivePreferences<DriveSortBy>, location: DriveLocation): DriveSortBy {
 	if (location.variant === "recents") {
@@ -126,30 +135,13 @@ export function withSortCleared(prefs: DrivePreferences<DriveSortBy>, location: 
 	if (prefs.mode === "perDirectory") {
 		const key = getPerDirectoryKey(location)
 
-		return { ...prefs, perDirectory: Object.fromEntries(Object.entries(prefs.perDirectory).filter(([entryKey]) => entryKey !== key)) }
+		return { ...prefs, perDirectory: withoutKey(prefs.perDirectory, key) }
 	}
 
 	return { ...prefs, global: DEFAULT_SORT_PREFERENCES.global }
 }
 
-// Pure mode flip — the caller persists the result via setSortPreferences. Turning perDirectory OFF
-// deliberately leaves any existing perDirectory entries in place (only the "Reset sort" action below
-// wipes them) so re-enabling the toggle later restores what the user had before, rather than
-// silently discarding it on every off/on cycle.
-export function withSortModeToggle(prefs: DrivePreferences<DriveSortBy>, perDirectory: boolean): DrivePreferences<DriveSortBy> {
-	return { ...prefs, mode: perDirectory ? "perDirectory" : "global" }
-}
-
-// Pure reset — wipes the global order back to the app default AND every per-directory override,
-// matching mobile's "Reset sort" action (screens/appearance.tsx): resets the global order and clears
-// all saved per-directory overrides in one action, regardless of which mode is currently active.
-export function resetSortPreferences(prefs: DrivePreferences<DriveSortBy>): DrivePreferences<DriveSortBy> {
-	return { ...prefs, global: DEFAULT_SORT_PREFERENCES.global, perDirectory: {} }
-}
-
 export type DriveViewMode = "list" | "grid"
-
-const VIEW_MODE_PREFERENCES_KV_KEY = "drive.viewModePreferences.v1"
 
 const driveViewModeSchema: Type<DriveViewMode> = type("'list'|'grid'")
 
@@ -165,13 +157,11 @@ export const DEFAULT_VIEW_MODE_PREFERENCES: DrivePreferences<DriveViewMode> = {
 	perDirectory: {}
 }
 
-export async function getViewModePreferences(): Promise<DrivePreferences<DriveViewMode>> {
-	return (await kvGetJson(VIEW_MODE_PREFERENCES_KV_KEY, viewModePreferencesSchema)) ?? DEFAULT_VIEW_MODE_PREFERENCES
-}
-
-export async function setViewModePreferences(next: DrivePreferences<DriveViewMode>): Promise<void> {
-	await kvSetJson(VIEW_MODE_PREFERENCES_KV_KEY, next)
-}
+export const { get: getViewModePreferences, set: setViewModePreferences } = kvPreference({
+	key: "drive.viewModePreferences.v1",
+	schema: viewModePreferencesSchema,
+	fallback: DEFAULT_VIEW_MODE_PREFERENCES
+})
 
 // Unlike sort, view mode has no read-only variant — recents renders as list or grid same as any
 // other listing — so this carries no variant special-case.
@@ -195,18 +185,6 @@ export function withViewModeSelection(
 	return { ...prefs, global: next }
 }
 
-// Same mode-flip/reset pair as the sort preferences above, mirroring mobile's "Remember view mode per
-// directory" toggle + "Reset view" action (screens/appearance.tsx).
-export function withViewModeModeToggle(prefs: DrivePreferences<DriveViewMode>, perDirectory: boolean): DrivePreferences<DriveViewMode> {
-	return { ...prefs, mode: perDirectory ? "perDirectory" : "global" }
-}
-
-export function resetViewModePreferences(prefs: DrivePreferences<DriveViewMode>): DrivePreferences<DriveViewMode> {
-	return { ...prefs, global: DEFAULT_VIEW_MODE_PREFERENCES.global, perDirectory: {} }
-}
-
-const HIDE_HIDDEN_ITEMS_KV_KEY = "drive.hideHiddenItems.v1"
-
 const hideHiddenItemsSchema: Type<boolean> = type("boolean")
 
 // Default OFF, deliberately unlike Finder and File Explorer (mobile parity). Those hide dot-prefixed
@@ -216,10 +194,8 @@ const hideHiddenItemsSchema: Type<boolean> = type("boolean")
 // lib/hiddenItems.ts's hiddenFilterAppliesTo.
 export const DEFAULT_HIDE_HIDDEN_ITEMS = false
 
-export async function getHideHiddenItems(): Promise<boolean> {
-	return (await kvGetJson(HIDE_HIDDEN_ITEMS_KV_KEY, hideHiddenItemsSchema)) ?? DEFAULT_HIDE_HIDDEN_ITEMS
-}
-
-export async function setHideHiddenItems(next: boolean): Promise<void> {
-	await kvSetJson(HIDE_HIDDEN_ITEMS_KV_KEY, next)
-}
+export const { get: getHideHiddenItems, set: setHideHiddenItems } = kvPreference({
+	key: "drive.hideHiddenItems.v1",
+	schema: hideHiddenItemsSchema,
+	fallback: DEFAULT_HIDE_HIDDEN_ITEMS
+})

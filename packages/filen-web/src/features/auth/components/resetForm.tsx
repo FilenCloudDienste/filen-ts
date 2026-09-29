@@ -5,20 +5,18 @@ import { toast } from "sonner"
 import { isPasswordStrongEnough, isValidEmail, ratePasswordStrength } from "@filen/shared"
 import { sdkApi } from "@/lib/sdk/client"
 import { persistSession, broadcastAuth } from "@/lib/sdk/session"
-import { asErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { runResetAttempt } from "@/features/auth/lib/resetAttempt"
-import { useCapsLock } from "@/features/auth/lib/useCapsLock"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { Button } from "@/components/ui/button"
-import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { TypedConfirmDialog } from "@/components/dialogs/typedConfirmDialog"
 import { StrengthMeter } from "@/features/auth/components/strengthMeter"
 import { MasterKeysFileField } from "@/features/auth/components/masterKeysFileField"
-import { CapsLockWarning } from "@/features/auth/components/capsLockWarning"
+import { PasswordInput } from "@/features/auth/components/passwordInput"
 import { advanceSkipMasterKeysChain, type SkipMasterKeysStage } from "@/features/auth/components/skipMasterKeysChain.logic"
 
 interface ResetFormProps {
@@ -45,8 +43,6 @@ function ResetForm({ token }: ResetFormProps) {
 	// Set once a two-factor account blocked the automatic sign-in — terminal, never a resubmit (the
 	// token is already spent).
 	const [signInRequired, setSignInRequired] = useState(false)
-	const passwordCaps = useCapsLock()
-	const confirmPasswordCaps = useCapsLock()
 
 	const trimmedEmail = email.trim()
 	const passwordStrength = password.length > 0 ? ratePasswordStrength(password) : null
@@ -110,7 +106,7 @@ function ResetForm({ token }: ResetFormProps) {
 					break
 			}
 		} catch (e) {
-			toast.error(errorLabel(asErrorDTO(e)))
+			toast.error(errorLabel(e))
 		} finally {
 			setPending(false)
 		}
@@ -188,41 +184,28 @@ function ResetForm({ token }: ResetFormProps) {
 					</Field>
 					<Field>
 						<FieldLabel htmlFor="reset-new-password">{t("resetNewPassword")}</FieldLabel>
-						<Input
+						<PasswordInput
 							id="reset-new-password"
-							type="password"
 							autoComplete="new-password"
 							value={password}
 							onChange={e => {
 								setPassword(e.target.value)
 							}}
-							onKeyDown={passwordCaps.onKeyDown}
-							onKeyUp={passwordCaps.onKeyUp}
-							onBlur={passwordCaps.onBlur}
-						/>
-						{passwordStrength && <StrengthMeter tier={passwordStrength.strength} />}
-						<CapsLockWarning active={passwordCaps.capsLockOn} />
+						>
+							{passwordStrength && <StrengthMeter tier={passwordStrength.strength} />}
+						</PasswordInput>
 					</Field>
 					<Field>
 						<FieldLabel htmlFor="reset-confirm-password">{t("resetConfirmPassword")}</FieldLabel>
-						<Input
+						<PasswordInput
 							id="reset-confirm-password"
-							type="password"
+							error={passwordsMismatched && t("passwordsDoNotMatch")}
 							autoComplete="new-password"
-							aria-invalid={passwordsMismatched}
-							// Same condition the error below renders on — a describedby pointing at an id that is
-							// not in the document describes nothing.
-							aria-describedby={passwordsMismatched ? "reset-confirm-password-error" : undefined}
 							value={confirmPassword}
 							onChange={e => {
 								setConfirmPassword(e.target.value)
 							}}
-							onKeyDown={confirmPasswordCaps.onKeyDown}
-							onKeyUp={confirmPasswordCaps.onKeyUp}
-							onBlur={confirmPasswordCaps.onBlur}
 						/>
-						{passwordsMismatched && <FieldError id="reset-confirm-password-error">{t("passwordsDoNotMatch")}</FieldError>}
-						<CapsLockWarning active={confirmPasswordCaps.capsLockOn} />
 					</Field>
 					<MasterKeysFileField
 						disabled={pending}

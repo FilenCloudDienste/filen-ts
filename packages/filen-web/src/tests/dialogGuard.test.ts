@@ -86,3 +86,21 @@ describe("isAnyDialogOpen", () => {
 		expect(isAnyDialogOpen()).toBe(false)
 	})
 })
+
+describe("isAnyOverlayOpen", () => {
+	it("is false with no open dialog or menu in the DOM", async () => {
+		vi.stubGlobal("document", fakeDocument([{ role: "dialog", dataOpen: false }]))
+
+		const { isAnyOverlayOpen } = await import("@/lib/keymap/dialogGuard")
+
+		expect(isAnyOverlayOpen()).toBe(false)
+	})
+
+	it.each(["dialog", "alertdialog", "menu"])('is true while a role="%s" popup carries data-open', async role => {
+		vi.stubGlobal("document", fakeDocument([{ role, dataOpen: true }]))
+
+		const { isAnyOverlayOpen } = await import("@/lib/keymap/dialogGuard")
+
+		expect(isAnyOverlayOpen()).toBe(true)
+	})
+})

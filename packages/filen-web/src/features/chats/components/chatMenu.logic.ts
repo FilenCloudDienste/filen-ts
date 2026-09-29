@@ -1,7 +1,7 @@
-import { type LucideIcon } from "lucide-react"
 import { CHAT_ACTION_DEFS } from "@/features/chats/lib/actionDefs"
 import { isChatUndecryptable } from "@/features/chats/lib/sort"
 import type { Chat } from "@filen/sdk-rs"
+import { type ActionDescriptor } from "@/lib/actionDescriptor"
 import type { ChatsKey } from "@/lib/i18n"
 
 // Dialog kinds a chat-menu entry can dispatch to the surface-level dialog host (useChatDialogHost) —
@@ -12,21 +12,8 @@ export type ChatActionDialogKind = "rename" | "delete" | "leave" | "participants
 
 export type ChatActionId = "markRead" | "mute" | "participants" | "rename" | "delete" | "leave"
 
-interface ChatActionDescriptorShared {
-	id: ChatActionId
-	labelKey: ChatsKey
-	icon: LucideIcon
-	destructive?: boolean
-	// Present-but-disabled (never absent) once set to false — mirrors itemMenu.logic.ts's own field.
-	// Only applyOfflineGate below ever sets it; chatMenuActions itself never disables a descriptor it
-	// decides to include.
-	enabled?: boolean
-}
-
-// "direct" resolves immediately (markRead/mute-toggle); "dialog" opens the surface's dialog host on
-// the given kind — mutually exclusive by construction, same shape as notes' NoteActionDescriptor.
-export type ChatActionDescriptor =
-	(ChatActionDescriptorShared & { run: "direct" }) | (ChatActionDescriptorShared & { run: "dialog"; dialogKind: ChatActionDialogKind })
+// `enabled` mirrors itemMenu.logic.ts's own field; only applyOfflineGate below ever sets it.
+export type ChatActionDescriptor = ActionDescriptor<ChatsKey, ChatActionId, ChatActionDialogKind> & { enabled?: boolean }
 
 const MARK_READ: ChatActionDescriptor = { id: "markRead", ...CHAT_ACTION_DEFS.markRead, run: "direct" }
 const PARTICIPANTS: ChatActionDescriptor = {

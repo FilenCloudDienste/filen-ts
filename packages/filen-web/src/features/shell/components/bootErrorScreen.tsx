@@ -1,7 +1,6 @@
 import { useTranslation } from "react-i18next"
 import { TriangleAlertIcon } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
+import { FullScreenNotice, ReloadButton } from "@/components/fullScreenNotice"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import type { ErrorDTO } from "@/lib/sdk/errors"
 
@@ -24,26 +23,14 @@ export function BootErrorScreen({ reason, error }: BootErrorScreenProps) {
 	const detail = error ? errorLabel(error) : undefined
 
 	return (
-		<div className="flex min-h-svh items-center justify-center bg-canvas p-6 text-foreground">
-			<Empty className="max-w-md">
-				<EmptyHeader>
-					<EmptyMedia className="bg-destructive/10 text-destructive">
-						<TriangleAlertIcon />
-					</EmptyMedia>
-					<EmptyTitle>{t("bootErrorTitle")}</EmptyTitle>
-					{detail ? <EmptyDescription className="select-text">{detail}</EmptyDescription> : null}
-				</EmptyHeader>
-				<EmptyContent>
-					<Button
-						onClick={() => {
-							window.location.reload()
-						}}
-					>
-						{t("reload")}
-					</Button>
-					{reason ? <span className="font-mono text-xs text-muted-foreground select-text">{reason}</span> : null}
-				</EmptyContent>
-			</Empty>
-		</div>
+		<FullScreenNotice
+			icon={<TriangleAlertIcon />}
+			destructive={true}
+			title={t("bootErrorTitle")}
+			description={detail ? <span className="select-text">{detail}</span> : undefined}
+		>
+			<ReloadButton />
+			{reason ? <span className="font-mono text-xs text-muted-foreground select-text">{reason}</span> : null}
+		</FullScreenNotice>
 	)
 }

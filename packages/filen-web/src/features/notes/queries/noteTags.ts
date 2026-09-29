@@ -1,7 +1,7 @@
 import { useQuery, type UseQueryResult } from "@tanstack/react-query"
 import { sdkApi } from "@/lib/sdk/client"
 import { queryClient } from "@/queries/client"
-import { patchQuery } from "@/queries/patch"
+import { patchQuery, replaceOrAppend } from "@/queries/patch"
 import type { NoteTag } from "@filen/sdk-rs"
 
 // One global tag list, mirroring NOTES_QUERY_KEY — exactly one tags cache per session, same
@@ -24,17 +24,7 @@ export function noteTagsQueryUpdate(updater: (prev: NoteTag[]) => NoteTag[]): vo
 }
 
 export function noteTagsQueryUpsert(tag: NoteTag): void {
-	noteTagsQueryUpdate(prev => {
-		const index = prev.findIndex(t => t.uuid === tag.uuid)
-
-		if (index === -1) {
-			return [...prev, tag]
-		}
-
-		const next = prev.slice()
-		next[index] = tag
-		return next
-	})
+	noteTagsQueryUpdate(prev => replaceOrAppend(prev, tag, t => t.uuid === tag.uuid))
 }
 
 export function noteTagsQueryRemove(uuid: string): void {

@@ -1,10 +1,10 @@
 import type { Note, NoteTag } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
 import { i18n } from "@/lib/i18n"
+import { plainErrorDTO } from "@/lib/sdk/errors"
 import { notesQueryUpdate, notesQueryUpsert } from "@/features/notes/queries/notes"
 import { noteTagsQueryUpsert, noteTagsQueryRemove } from "@/features/notes/queries/noteTags"
-import { asErrorDTO } from "@/lib/sdk/errors"
-import { runOp, type ActionOutcome, type VoidActionOutcome } from "@/lib/actions/outcome"
+import { attemptOp, type ActionOutcome, type VoidActionOutcome } from "@/lib/actions/outcome"
 
 export type { ActionOutcome, VoidActionOutcome }
 
@@ -18,9 +18,7 @@ function isReservedTagName(name: string): boolean {
 }
 
 function reservedNameError(): ActionOutcome<NoteTag> {
-	const message = i18n.t("notes:noteTagReservedName")
-
-	return { status: "error", dto: { species: "plain", message, label: message } }
+	return { status: "error", dto: plainErrorDTO(i18n.t("notes:noteTagReservedName")) }
 }
 
 // ── Tag CRUD ─────────────────────────────────────────────────────────────
@@ -32,17 +30,13 @@ export async function createNoteTag(name: string): Promise<ActionOutcome<NoteTag
 		return reservedNameError()
 	}
 
-	let tag: NoteTag
+	const outcome = await attemptOp(sdkApi.createNoteTag(trimmed))
 
-	try {
-		tag = await runOp(sdkApi.createNoteTag(trimmed))
-	} catch (e) {
-		return { status: "error", dto: asErrorDTO(e) }
+	if (outcome.status === "success") {
+		noteTagsQueryUpsert(outcome.item)
 	}
 
-	noteTagsQueryUpsert(tag)
-
-	return { status: "success", item: tag }
+	return outcome
 }
 
 export async function renameNoteTag(tag: NoteTag, name: string): Promise<ActionOutcome<NoteTag>> {
@@ -52,13 +46,13 @@ export async function renameNoteTag(tag: NoteTag, name: string): Promise<ActionO
 		return reservedNameError()
 	}
 
-	let updated: NoteTag
+	const outcome = await attemptOp(sdkApi.renameNoteTag(tag, trimmed))
 
-	try {
-		updated = await runOp(sdkApi.renameNoteTag(tag, trimmed))
-	} catch (e) {
-		return { status: "error", dto: asErrorDTO(e) }
+	if (outcome.status === "error") {
+		return outcome
 	}
+
+	const updated = outcome.item
 
 	noteTagsQueryUpsert(updated)
 	// The tag's display name is embedded in every note row's own `tags` array (Note.tags), not just
@@ -66,14 +60,14 @@ export async function renameNoteTag(tag: NoteTag, name: string): Promise<ActionO
 	// it until the next full notes refetch.
 	notesQueryUpdate(prev => prev.map(note => ({ ...note, tags: note.tags.map(t => (t.uuid === updated.uuid ? updated : t)) })))
 
-	return { status: "success", item: updated }
+	return outcome
 }
 
 export async function deleteNoteTag(tag: NoteTag): Promise<VoidActionOutcome> {
-	try {
-		await runOp(sdkApi.deleteNoteTag(tag))
-	} catch (e) {
-		return { status: "error", dto: asErrorDTO(e) }
+	const outcome = await attemptOp(sdkApi.deleteNoteTag(tag))
+
+	if (outcome.status === "error") {
+		return outcome
 	}
 
 	noteTagsQueryRemove(tag.uuid)
@@ -90,17 +84,13 @@ export async function setNoteTagFavorited(tag: NoteTag, favorite: boolean): Prom
 		return { status: "success", item: tag }
 	}
 
-	let updated: NoteTag
+	const outcome = await attemptOp(sdkApi.setNoteTagFavorited(tag, favorite))
 
-	try {
-		updated = await runOp(sdkApi.setNoteTagFavorited(tag, favorite))
-	} catch (e) {
-		return { status: "error", dto: asErrorDTO(e) }
+	if (outcome.status === "success") {
+		noteTagsQueryUpsert(outcome.item)
 	}
 
-	noteTagsQueryUpsert(updated)
-
-	return { status: "success", item: updated }
+	return outcome
 }
 
 // ── Note <-> tag membership ──────────────────────────────────────────────
@@ -116,18 +106,16 @@ export async function addTagToNote(note: Note, tag: NoteTag): Promise<ActionOutc
 		return { status: "success", item: note }
 	}
 
-	let result: { note: Note; tag: NoteTag }
+	const outcome = await attemptOp(sdkApi.addTagToNote(note, tag))
 
-	try {
-		result = await runOp(sdkApi.addTagToNote(note, tag))
-	} catch (e) {
-		return { status: "error", dto: asErrorDTO(e) }
+	if (outcome.status === "error") {
+		return outcome
 	}
 
-	notesQueryUpsert(result.note)
-	noteTagsQueryUpsert(result.tag)
+	notesQueryUpsert(outcome.item.note)
+	noteTagsQueryUpsert(outcome.item.tag)
 
-	return { status: "success", item: result.note }
+	return { status: "success", item: outcome.item.note }
 }
 
 export async function removeTagFromNote(note: Note, tag: NoteTag): Promise<ActionOutcome<Note>> {
@@ -135,15 +123,11 @@ export async function removeTagFromNote(note: Note, tag: NoteTag): Promise<Actio
 		return { status: "success", item: note }
 	}
 
-	let updated: Note
+	const outcome = await attemptOp(sdkApi.removeTagFromNote(note, tag))
 
-	try {
-		updated = await runOp(sdkApi.removeTagFromNote(note, tag))
-	} catch (e) {
-		return { status: "error", dto: asErrorDTO(e) }
+	if (outcome.status === "success") {
+		notesQueryUpsert(outcome.item)
 	}
 
-	notesQueryUpsert(updated)
-
-	return { status: "success", item: updated }
+	return outcome
 }

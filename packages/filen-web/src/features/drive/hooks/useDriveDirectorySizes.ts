@@ -114,5 +114,3 @@ export function useDriveDirectorySizes({
 		return collectDirectorySizes(items, queryClient, version)
 	}, [enabled, items, version])
 }
-
-export default useDriveDirectorySizes

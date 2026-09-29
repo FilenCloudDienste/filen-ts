@@ -34,8 +34,8 @@ vi.mock("@/lib/toastClearance", () => ({ toastObstructionRef: () => undefined })
 // without driving clicks, and so the prune the component performs is directly observable.
 vi.mock("@/features/contacts/hooks/useContactsListSelection", () => ({ useContactsListSelection }))
 
-// Only the two singular ops are stubbed — runContactsBulk (and the per-item runBulk contract it adapts)
-// stays real, since "which uuids succeeded" is exactly what this asserts on.
+// Only the two singular ops are stubbed — runBulkOutcomes stays real, since "which uuids succeeded" is
+// exactly what this asserts on.
 vi.mock("@/features/contacts/lib/actions", async importOriginal => ({
 	...(await importOriginal<typeof import("@/features/contacts/lib/actions")>()),
 	acceptRequest,

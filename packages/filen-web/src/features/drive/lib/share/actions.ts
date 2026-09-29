@@ -6,7 +6,7 @@ import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import { driveRowKey } from "@/features/drive/lib/rowKey"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { runOp } from "@/lib/actions/outcome"
-import { runBulk, type BulkOutcome } from "@/features/drive/lib/bulk"
+import { runBulk, type BulkOutcome } from "@/lib/actions/bulk"
 
 // Shares each item with every chosen contact — the outward-facing write of the sharing domain,
 // zero-`useMutation` (typed async helper + a cache invalidate on success), LABEL-FIRST error shaping

@@ -1,5 +1,6 @@
 import type { Dir } from "@filen/sdk-rs"
-import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
+import { asErrorDTO } from "@/lib/sdk/errors"
+import { type ActionOutcome } from "@/lib/actions/outcome"
 import { narrowItem, upsertDriveItem, type DriveItem } from "@/features/drive/lib/item"
 
 // Injected collaborators so the attempt is unit-testable without a worker or a query client —
@@ -11,24 +12,20 @@ export interface CreateDirectoryDeps {
 	patchListing: (parentUuid: string | null, updater: (prev: DriveItem[]) => DriveItem[]) => void
 }
 
-export type CreateDirectoryOutcome =
-	// The backend is idempotent (see sdk.worker.ts's createDirectory) — a name that already exists
-	// under this parent returns THAT directory unchanged rather than erroring, so "success" covers
-	// both a genuinely new directory and a matched-existing one; the caller cannot and need not
-	// distinguish the two.
-	| { status: "success"; item: DriveItem }
-	// A name clash against a FILE, an invalid name, or any transport failure. The caller surfaces
-	// the DTO's label.
-	| { status: "error"; dto: ErrorDTO }
-
 // One create-directory attempt: create, narrow the result into a DriveItem, then patch the
 // affected listing (add-or-replace by identity — see upsertDriveItem) so the new directory appears
 // without a refetch.
+//
+// The backend is idempotent (see sdk.worker.ts's createDirectory) — a name that already exists
+// under this parent returns THAT directory unchanged rather than erroring, so "success" covers
+// both a genuinely new directory and a matched-existing one; the caller cannot and need not
+// distinguish the two. "error" is a name clash against a FILE, an invalid name, or any transport
+// failure; the caller surfaces the DTO's label.
 export async function runCreateDirectory(
 	deps: CreateDirectoryDeps,
 	parentUuid: string | null,
 	name: string
-): Promise<CreateDirectoryOutcome> {
+): Promise<ActionOutcome<DriveItem>> {
 	let created: Dir
 	try {
 		created = await deps.createDirectory(parentUuid, name)

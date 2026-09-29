@@ -1,19 +1,17 @@
 import { type } from "arktype"
 import * as Comlink from "comlink"
-import { createNotePreviewFromContentText } from "@filen/shared"
-import type { StringifiedClient, File, Note, NoteType, DirMeta, FileMeta, UserInfo } from "@filen/sdk-rs"
+import type { StringifiedClient, File, Note, NoteType, DirMeta, FileMeta } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
-import { queryClient } from "@/queries/client"
-import { ACCOUNT_QUERY_KEY } from "@/queries/account"
+import { accountQueryGet } from "@/queries/account"
 import { stringifyEnvelope } from "@/lib/serialize"
 import { kvGetJson, kvHas, kvSetJson } from "@/lib/storage/adapter"
 import { comboFor, setUserCombo } from "@/lib/keymap/registry"
 import { whenBootReady } from "@/lib/sdk/boot"
 import { readThumbnailBlob } from "@/features/drive/lib/thumbCache"
-import { inflightContentSchema, noteKindForPreview } from "@/features/notes/lib/sync.logic"
+import { INFLIGHT_NOTE_CONTENT_KV_KEY, inflightContentSchema, notePreviewFor } from "@/features/notes/lib/sync.logic"
 import { latestInflightContent } from "@/features/notes/hooks/useNoteEditor.logic"
 import { enqueueChatMessage } from "@/features/chats/lib/sync"
-import { inflightChatMessagesSchema } from "@/features/chats/lib/sync.logic"
+import { INFLIGHT_CHAT_MESSAGES_KV_KEY, inflightChatMessagesSchema } from "@/features/chats/lib/sync.logic"
 import { chatsQueryUpsert, chatsQueryGet } from "@/features/chats/queries/chats"
 import { isScratchDebrisName } from "@/e2e-hooks/scratchDebris"
 
@@ -238,7 +236,7 @@ export function installE2eHooks(): void {
 				note = await sdkApi.setNoteType(note, noteType)
 			}
 
-			note = await sdkApi.setNoteContent(note, content, createNotePreviewFromContentText(noteKindForPreview(noteType), content))
+			note = await sdkApi.setNoteContent(note, content, notePreviewFor(noteType, content))
 			note = await sdkApi.setNoteTitle(note, title)
 
 			return note
@@ -259,7 +257,7 @@ export function installE2eHooks(): void {
 				return
 			}
 
-			await sdkApi.setNoteContent(note, content, createNotePreviewFromContentText(noteKindForPreview(note.noteType), content))
+			await sdkApi.setNoteContent(note, content, notePreviewFor(note.noteType, content))
 		}),
 		renameTestNoteByUuid: ready(async (uuid, title) => {
 			const note = await noteByUuid(uuid)
@@ -271,7 +269,7 @@ export function installE2eHooks(): void {
 			await sdkApi.setNoteTitle(note, title)
 		}),
 		readPersistedInflightContent: ready(async uuid => {
-			const outbox = await kvGetJson("inflightNoteContent", inflightContentSchema)
+			const outbox = await kvGetJson(INFLIGHT_NOTE_CONTENT_KV_KEY, inflightContentSchema)
 
 			if (outbox === null) {
 				return null
@@ -416,7 +414,7 @@ export function installE2eHooks(): void {
 
 			// The account the app already holds, as the composer takes its sender: the kill-paths enqueue
 			// offline, where a live read fails on every engine whose workers really go offline.
-			const user = queryClient.getQueryData<UserInfo>(ACCOUNT_QUERY_KEY) ?? (await sdkApi.getUserInfo())
+			const user = accountQueryGet() ?? (await sdkApi.getUserInfo())
 
 			return enqueueChatMessage({
 				chat,
@@ -425,7 +423,7 @@ export function installE2eHooks(): void {
 			})
 		}),
 		readPersistedInflightChatMessages: ready(async chatUuid => {
-			const outbox = await kvGetJson("inflightChatMessages", inflightChatMessagesSchema)
+			const outbox = await kvGetJson(INFLIGHT_CHAT_MESSAGES_KV_KEY, inflightChatMessagesSchema)
 
 			if (outbox === null) {
 				return null

@@ -7,12 +7,12 @@ import { act, renderHook, waitFor } from "@testing-library/react"
 import { QueryClient, QueryClientProvider, focusManager } from "@tanstack/react-query"
 import type { LinkedFile } from "@filen/sdk-rs"
 
-const { getLinkedFile, getDirPublicLinkInfo } = vi.hoisted(() => ({
-	getLinkedFile: vi.fn<(linkUuid: string, fileKey: string) => Promise<LinkedFile>>(),
-	getDirPublicLinkInfo: vi.fn()
+const { getLinkedFileAnon, getDirPublicLinkInfoAnon } = vi.hoisted(() => ({
+	getLinkedFileAnon: vi.fn<(linkUuid: string, fileKey: string) => Promise<LinkedFile>>(),
+	getDirPublicLinkInfoAnon: vi.fn()
 }))
 
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: { getLinkedFile, getDirPublicLinkInfo } }))
+vi.mock("@/lib/sdk/client", () => ({ sdkApi: { getLinkedFileAnon, getDirPublicLinkInfoAnon } }))
 
 import {
 	CHAT_MESSAGE_LINKS_FAILED_STALE_TIME,
@@ -67,7 +67,7 @@ beforeEach(() => {
 			queries: { staleTime: 0, gcTime: Infinity, retry: false, refetchOnWindowFocus: true, refetchOnReconnect: true }
 		}
 	})
-	getLinkedFile.mockResolvedValue(LINKED_FILE)
+	getLinkedFileAnon.mockResolvedValue(LINKED_FILE)
 })
 
 afterEach(() => {
@@ -83,7 +83,7 @@ describe("chat message link embed request counts", () => {
 		await drain()
 		first.unmount()
 
-		expect(getLinkedFile).toHaveBeenCalledTimes(1)
+		expect(getLinkedFileAnon).toHaveBeenCalledTimes(1)
 
 		const row = mountEmbeds()
 		await drain()
@@ -96,7 +96,7 @@ describe("chat message link embed request counts", () => {
 		})
 		await drain()
 
-		expect(getLinkedFile).toHaveBeenCalledTimes(1)
+		expect(getLinkedFileAnon).toHaveBeenCalledTimes(1)
 
 		row.unmount()
 	})
@@ -120,7 +120,7 @@ describe("chat message link embed request counts", () => {
 			await drain()
 			row.unmount()
 
-			counts.push(getLinkedFile.mock.calls.length)
+			counts.push(getLinkedFileAnon.mock.calls.length)
 		}
 
 		return counts
@@ -131,7 +131,7 @@ describe("chat message link embed request counts", () => {
 	})
 
 	it("a row with a failed resolution retries after the failure window but not before", async () => {
-		getLinkedFile.mockRejectedValue(new Error("network"))
+		getLinkedFileAnon.mockRejectedValue(new Error("network"))
 
 		expect(await countsAfterRemounts([CHAT_MESSAGE_LINKS_FAILED_STALE_TIME - 1, CHAT_MESSAGE_LINKS_FAILED_STALE_TIME + 1])).toEqual([
 			1, 2

@@ -1,6 +1,7 @@
 import type { ComponentProps, ComponentType, ReactNode } from "react"
 import { ArrowUpRightIcon } from "lucide-react"
 import { cn } from "@filen/shared"
+import { CARD_SURFACE_CLASS } from "@/components/ui/surface"
 
 type IconType = ComponentType<{ className?: string }>
 
@@ -42,15 +43,11 @@ function SettingsPage({ icon, title, children }: SettingsPageProps) {
 	)
 }
 
-// Same radius, ring and shadow as ui/card.tsx, so a settings page reads as the same surface family.
 function SettingsPanel({ className, ...props }: ComponentProps<"div">) {
 	return (
 		<div
 			data-slot="settings-panel"
-			className={cn(
-				"overflow-hidden rounded-[min(var(--radius-4xl),24px)] bg-card text-sm text-card-foreground shadow-sm ring-1 ring-foreground/5 dark:ring-foreground/10",
-				className
-			)}
+			className={cn(CARD_SURFACE_CLASS, className)}
 			{...props}
 		/>
 	)
@@ -171,7 +168,7 @@ function SettingsLinkRow({ href, label }: SettingsLinkRowProps) {
 			target="_blank"
 			rel="noopener noreferrer"
 			data-slot="settings-row"
-			className="flex min-h-12 items-center justify-between gap-4 px-5 py-3.5 text-sm font-medium transition-colors outline-none hover:bg-muted/50 focus-visible:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset"
+			className="flex min-h-12 items-center justify-between gap-4 px-5 py-3.5 text-sm font-medium focus-ring-row transition-colors outline-none hover:bg-muted/50 focus-visible:bg-muted/50 focus-visible:ring-inset"
 		>
 			<span className="min-w-0 truncate">{label}</span>
 			<ArrowUpRightIcon

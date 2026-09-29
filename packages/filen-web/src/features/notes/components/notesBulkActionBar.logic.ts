@@ -1,7 +1,7 @@
-import { type LucideIcon } from "lucide-react"
 import type { Note, NoteTag } from "@filen/sdk-rs"
 import { noteBulkActionAvailability, type NoteSelectionFlags } from "@filen/shared"
 import { NOTE_ACTION_DEFS } from "@/features/notes/lib/actionDefs"
+import { type ActionDescriptor } from "@/lib/actionDescriptor"
 import { type NotesKey } from "@/lib/i18n"
 
 // Dialog kinds the notes bulk-action bar can ask useNoteDialogHost to open — disjoint from
@@ -11,21 +11,13 @@ import { type NotesKey } from "@/lib/i18n"
 // single-item note dispositions diverge.
 export type NoteBulkDialogActionKind = "trashSelected" | "deleteSelected" | "leaveSelected"
 
-interface NoteBulkActionDescriptorShared {
-	id: "pin" | "favorite" | "type" | "tags" | "duplicate" | "export" | "archive" | "restore" | "trash" | "delete" | "leave"
-	labelKey: NotesKey
-	icon: LucideIcon
-	destructive?: boolean
-}
-
-// "direct" resolves immediately; "dialog" asks the host to open the given bulk-confirm kind;
-// "submenu" opens its own small popover (type picker / tri-state tag list) — mirrors
-// noteMenu.logic.ts's NoteActionDescriptor union, widened with "dialog" carrying a
-// NoteBulkDialogActionKind instead of NoteActionDialogKind.
-export type NoteBulkActionDescriptor =
-	| (NoteBulkActionDescriptorShared & { run: "direct" })
-	| (NoteBulkActionDescriptorShared & { run: "dialog"; dialogKind: NoteBulkDialogActionKind })
-	| (NoteBulkActionDescriptorShared & { run: "submenu"; submenu: "type" | "tags" })
+// "submenu" opens its own small popover (type picker / tri-state tag list).
+export type NoteBulkActionDescriptor = ActionDescriptor<
+	NotesKey,
+	"pin" | "favorite" | "type" | "tags" | "duplicate" | "export" | "archive" | "restore" | "trash" | "delete" | "leave",
+	NoteBulkDialogActionKind,
+	{ run: "submenu"; submenu: "type" | "tags" }
+>
 
 // Pure gating builder for the notes bulk-action bar — mirrors bulkActionBar.logic.ts's
 // driveBulkActions (variant/flag-gated descriptor list, testable without rendering anything). Which

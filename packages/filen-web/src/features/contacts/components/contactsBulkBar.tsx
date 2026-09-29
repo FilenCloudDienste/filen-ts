@@ -1,13 +1,10 @@
 import { createElement } from "react"
 import { useTranslation } from "react-i18next"
-import { XIcon } from "lucide-react"
 import type { BlockedContact, Contact, ContactRequestIn, ContactRequestOut } from "@filen/sdk-rs"
 import { type SelectedContacts } from "@/features/contacts/lib/selection"
 import { buildContactBulkActions, type ContactBulkActionKind } from "@/features/contacts/components/contactsBulkBar.logic"
-import { Kbd } from "@/lib/keymap/kbd"
-import { toastObstructionRef } from "@/lib/toastClearance"
 import { Button } from "@/components/ui/button"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { SelectionActionBar } from "@/components/selectionActionBar"
 
 export interface ContactsBulkBarProps {
 	// The selection already resolved against the live records (resolveSelectedContacts) — the same value
@@ -31,9 +28,8 @@ export interface ContactsBulkBarProps {
 }
 
 // Bottom-anchored floating selection bar (contactsList.tsx overlays it on the list while a 2+
-// selection exists) — mirrors drive/bulkActionBar.tsx's pill and its two-flex-child shape (clear+count
-// on the left, actions on the right), plus its "compute selected items from a selection set, gate the
-// descriptor list, dispatch by kind" structure.
+// selection exists) — mirrors drive/bulkActionBar.tsx's "compute selected items from a selection set,
+// gate the descriptor list, dispatch by kind" structure, with labelled text buttons carrying per-kind counts.
 export function ContactsBulkBar({
 	selected,
 	onClear,
@@ -79,48 +75,26 @@ export function ContactsBulkBar({
 	}
 
 	return (
-		<div
-			ref={toastObstructionRef}
-			className="pointer-events-auto flex max-w-full flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border bg-popover px-3 py-2 text-popover-foreground shadow-lg"
+		<SelectionActionBar
+			count={selected.total}
+			clearKbdAction="contacts.clearSelection"
+			onClear={onClear}
 		>
-			<div className="flex items-center gap-2">
-				<Tooltip>
-					<TooltipTrigger
-						render={
-							<Button
-								variant="ghost"
-								size="icon-sm"
-								aria-label={t("contactsCommandClearSelection")}
-								onClick={onClear}
-							>
-								<XIcon />
-							</Button>
-						}
-					/>
-					<TooltipContent>
-						{t("contactsCommandClearSelection")}
-						<Kbd action="contacts.clearSelection" />
-					</TooltipContent>
-				</Tooltip>
-				<p className="text-sm text-muted-foreground">{t("contactsSelectionCount", { count: selected.total })}</p>
-			</div>
-			<div className="flex items-center gap-2">
-				{descriptors.map(descriptor => (
-					<Button
-						key={descriptor.kind}
-						variant={descriptor.destructive ? "destructive" : "outline"}
-						size="sm"
-						disabled={disabled}
-						title={title}
-						onClick={() => {
-							run(descriptor.kind)
-						}}
-					>
-						{createElement(descriptor.icon, { "aria-hidden": true })}
-						{t(descriptor.labelKey)} ({descriptor.count})
-					</Button>
-				))}
-			</div>
-		</div>
+			{descriptors.map(descriptor => (
+				<Button
+					key={descriptor.kind}
+					variant={descriptor.destructive ? "destructive" : "outline"}
+					size="sm"
+					disabled={disabled}
+					title={title}
+					onClick={() => {
+						run(descriptor.kind)
+					}}
+				>
+					{createElement(descriptor.icon, { "aria-hidden": true })}
+					{t(descriptor.labelKey)} ({descriptor.count})
+				</Button>
+			))}
+		</SelectionActionBar>
 	)
 }

@@ -7,6 +7,7 @@ import { targetOwnParents } from "@/features/drive/lib/ownAncestry"
 import type { ParentLookup } from "@/features/drive/components/moveTargetDialog.logic"
 import type { DriveItem } from "@/features/drive/lib/item"
 import { isMacPlatform } from "@/lib/keymap/kbd.logic"
+import { useLatestRef } from "@/lib/useLatestRef"
 import { startCopyWithCard } from "@/features/transfers/lib/copyToast"
 import { isFileDrag, uploadDroppedFiles } from "@/features/drive/lib/uploadDrop"
 import { armSpringLoad, cancelSpringLoad, type SpringTiming } from "@/features/drive/lib/springLoad"
@@ -41,16 +42,20 @@ export interface DriveDropTargetParams {
 	disabled?: boolean
 }
 
+export interface DropHandlers {
+	onDragEnter: (event: DragEvent<HTMLElement>) => void
+	onDragOver: (event: DragEvent<HTMLElement>) => void
+	onDragLeave: (event: DragEvent<HTMLElement>) => void
+	onDrop: (event: DragEvent<HTMLElement>) => void
+}
+
 export interface DriveDropTarget {
 	isOver: boolean
 	// What a drop here would do right now, following the copy modifier.
 	mode: DragDropMode
 	// The hovering drag is an OS file drag, which uploads into this directory.
 	upload: boolean
-	onDragEnter: (event: DragEvent<HTMLElement>) => void
-	onDragOver: (event: DragEvent<HTMLElement>) => void
-	onDragLeave: (event: DragEvent<HTMLElement>) => void
-	onDrop: (event: DragEvent<HTMLElement>) => void
+	handlers: DropHandlers
 }
 
 // A move (or, with the copy modifier held, copy) drop target — shared by directory rows/tiles, the sidebar tree nodes + root, and the
@@ -83,16 +88,8 @@ export function useDriveDropTarget({
 	// This target's identity to the page's one spring-load timer (springLoad.ts).
 	const springOwnerRef = useRef({})
 	// The timer fires up to seconds after it was armed; a re-render must not leave it calling a stale
-	// `open` (a row's index moves with a re-sort) — read the latest through a ref (keeps the async path
-	// compiler-safe).
-	const springRef = useRef(spring)
-
-	const targetNameRef = useRef(targetName)
-
-	useEffect(() => {
-		springRef.current = spring
-		targetNameRef.current = targetName
-	})
+	// `open` (a row's index moves with a re-sort). One object, so one effect per row.
+	const latestRef = useLatestRef({ spring, targetName })
 
 	// Names this directory in the listing's upload overlay while a file drag rests on it.
 	useEffect(() => {
@@ -101,7 +98,7 @@ export function useDriveDropTarget({
 		}
 
 		const owner = springOwnerRef.current
-		const name = targetNameRef.current
+		const name = latestRef.current.targetName
 		const { setTarget, clearTarget } = useUploadDropTargetStore.getState()
 
 		setTarget({ owner, name: typeof name === "function" ? name() : name })
@@ -109,14 +106,14 @@ export function useDriveDropTarget({
 		return () => {
 			clearTarget(owner)
 		}
-	}, [isOver, upload])
+	}, [isOver, upload, latestRef])
 
 	function armSpring(element: HTMLElement): void {
-		const current = springRef.current
+		const current = latestRef.current.spring
 
 		if (current !== undefined) {
 			armSpringLoad(springOwnerRef.current, element, current.timing, () => {
-				springRef.current?.open()
+				latestRef.current.spring?.open()
 			})
 		}
 	}
@@ -181,7 +178,7 @@ export function useDriveDropTarget({
 	function canSpring(event: DragEvent<HTMLElement>): boolean {
 		const kind = dragKind(event)
 
-		if (springRef.current === undefined || kind === null) {
+		if (latestRef.current.spring === undefined || kind === null) {
 			return false
 		}
 
@@ -340,7 +337,7 @@ export function useDriveDropTarget({
 		}
 	}, [])
 
-	return { isOver, mode, upload, onDragEnter, onDragOver, onDragLeave, onDrop }
+	return { isOver, mode, upload, handlers: { onDragEnter, onDragOver, onDragLeave, onDrop } }
 }
 
 // The hovered target's highlight: a solid ring for a move, a dashed outline for a copy, so the mode

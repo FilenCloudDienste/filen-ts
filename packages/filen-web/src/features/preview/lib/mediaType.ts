@@ -1,5 +1,5 @@
-import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
-import { previewType, needsImageTransform } from "@/features/drive/lib/preview.logic"
+import { driveItemMime, type DriveItem } from "@/features/drive/lib/item"
+import { previewType, needsImageTransform, isStreamedCategory } from "@/features/drive/lib/preview.logic"
 import { isAllowedInlineContentType } from "@/lib/sw/protocol"
 
 // The page-side half of the inline-preview allowlist gate (the SW's own independent re-check lives in
@@ -15,11 +15,10 @@ import { isAllowedInlineContentType } from "@/lib/sw/protocol"
 export function allowedMediaContentType(item: DriveItem): string | null {
 	const category = previewType(item)
 
-	// "rawImage" is excluded by this same allowlist-of-three: a RAW container has no browser decoder,
-	// so serving one inline would hand the page bytes nothing can render, and a camera's RAW mime
-	// (image/x-nikon-nef and friends) must never be treated as a streamable image just because it
-	// starts with "image/".
-	if (category !== "video" && category !== "audio" && category !== "image") {
+	// "rawImage" is not a streamed category: a RAW container has no browser decoder, so serving one
+	// inline would hand the page bytes nothing can render, and a camera's RAW mime (image/x-nikon-nef
+	// and friends) must never be treated as a streamable image just because it starts with "image/".
+	if (!isStreamedCategory(category)) {
 		return null
 	}
 
@@ -30,8 +29,7 @@ export function allowedMediaContentType(item: DriveItem): string | null {
 		return null
 	}
 
-	const base = asDirectoryOrFile(item)
-	const mime = base.type === "file" ? base.data.decryptedMeta?.mime : undefined
+	const mime = driveItemMime(item)
 
 	if (mime === undefined) {
 		return null

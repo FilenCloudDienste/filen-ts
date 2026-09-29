@@ -20,13 +20,12 @@ function renderMenuItems(
 	return descriptors.map(descriptor => (
 		<Item
 			key={descriptor.id}
-			variant={descriptor.id === "delete" || descriptor.id === "remove" || descriptor.id === "block" ? "destructive" : "default"}
+			variant={descriptor.destructive ? "destructive" : "default"}
 			disabled={descriptor.enabled === false}
 			// `enabled === false` can only come from the offline gate here, so the title needs no
 			// separate online check (unlike chatMenu.tsx's).
 			title={descriptor.enabled === false ? t("common:offlineActionDisabled") : undefined}
-			onClick={event => {
-				event.stopPropagation()
+			onClick={() => {
 				runAction(descriptor)
 			}}
 		>

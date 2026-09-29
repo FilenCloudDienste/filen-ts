@@ -100,15 +100,6 @@ function driveEvent(inner: Extract<SocketEvent, { type: "drive" }>["inner"]): Ex
 	return { type: "drive", inner, driveMessageId: 0n }
 }
 
-function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
-	let resolve!: (value: T) => void
-	const promise = new Promise<T>(r => {
-		resolve = r
-	})
-
-	return { promise, resolve }
-}
-
 function wrapper({ children }: { children: ReactNode }) {
 	return createElement(QueryClientProvider, { client: queryClient, children })
 }
@@ -165,7 +156,7 @@ describe("copy request counts", () => {
 
 		const readsBefore = listDirectory.mock.calls.length
 		const keysBefore = listingKeys()
-		const finish = deferred<CopyReport>()
+		const finish = Promise.withResolvers<CopyReport>()
 		const source = narrowItem(mockDir(testUuid("source"), ROOT, "source"))
 
 		expect(readsBefore).toBe(2)

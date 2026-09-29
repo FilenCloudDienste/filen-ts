@@ -1,5 +1,6 @@
 /// <reference lib="webworker" />
 import { log } from "@/lib/log"
+import { isLockConflictError, opfsDirectory } from "@/lib/storage/opfs"
 import { planSizeCapEviction } from "@filen/shared"
 import { THUMB_DIR, THUMB_DIR_ROOT, THUMB_GENERATION, THUMB_EXT, type ThumbCacheEntry } from "@/features/drive/lib/thumbnails.logic"
 
@@ -7,15 +8,6 @@ import { THUMB_DIR, THUMB_DIR_ROOT, THUMB_GENERATION, THUMB_EXT, type ThumbCache
 // stays trivially importable from sdk.worker.ts without dragging the SDK's own init/thread-pool
 // concerns along. createSyncAccessHandle is dedicated-worker-only by spec; this module is never
 // imported main-thread (see thumbCache.ts for the async main-thread read side over the same tree).
-async function thumbDirHandle(): Promise<FileSystemDirectoryHandle> {
-	let dir = await navigator.storage.getDirectory()
-
-	for (const segment of THUMB_DIR) {
-		dir = await dir.getDirectoryHandle(segment, { create: true })
-	}
-
-	return dir
-}
 
 // Persists one thumbnail's bytes, keyed by the item's own uuid — uuid rotates on any content change,
 // so this is a plain overwrite-or-create with no versioning concern of its own. A second tab (or a
@@ -25,7 +17,7 @@ async function thumbDirHandle(): Promise<FileSystemDirectoryHandle> {
 // Anything else that fails after the handle is acquired (write/flush/quota) propagates, so the
 // caller's own defensive wrapping (see sdk.worker.ts's makeThumbnail/storeThumbnail) logs it once.
 export async function writeThumb(uuid: string, bytes: Uint8Array): Promise<void> {
-	const dir = await thumbDirHandle()
+	const dir = await opfsDirectory(THUMB_DIR)
 	const fileHandle = await dir.getFileHandle(`${uuid}${THUMB_EXT}`, { create: true })
 
 	let handle: FileSystemSyncAccessHandle
@@ -37,7 +29,7 @@ export async function writeThumb(uuid: string, bytes: Uint8Array): Promise<void>
 		// are exclusive) — its write persists the identical bytes, so skipping is lossless. Anything
 		// else (quota, permissions) is unexpected and logged louder, but still skip-not-throw: the
 		// caller's in-hand bytes render either way and persistence stays best-effort.
-		if (e instanceof DOMException && e.name === "NoModificationAllowedError") {
+		if (isLockConflictError(e)) {
 			log.info("thumb-store", "writeThumb: concurrent writer holds the handle, skipping persist", uuid)
 		} else {
 			log.warn("thumb-store", "writeThumb: sync access handle unavailable, skipping persist", uuid, e)
@@ -58,7 +50,7 @@ export async function writeThumb(uuid: string, bytes: Uint8Array): Promise<void>
 // input. getFile() per entry (not getSize() via a sync access handle) so this stays a plain async
 // read, safely callable even while another entry in the same directory is mid-write elsewhere.
 export async function listThumbs(): Promise<ThumbCacheEntry[]> {
-	const dir = await thumbDirHandle()
+	const dir = await opfsDirectory(THUMB_DIR)
 	const entries: ThumbCacheEntry[] = []
 
 	for await (const handle of dir.values()) {
@@ -80,11 +72,7 @@ export async function listThumbs(): Promise<ThumbCacheEntry[]> {
 // should ever wait on. Per-entry failures are logged and skipped, same rationale as sweepThumbs'
 // eviction loop below — one locked directory must not strand every other stale generation.
 export async function removeStaleThumbGenerations(): Promise<void> {
-	let dir = await navigator.storage.getDirectory()
-
-	for (const segment of THUMB_DIR_ROOT) {
-		dir = await dir.getDirectoryHandle(segment, { create: true })
-	}
+	const dir = await opfsDirectory(THUMB_DIR_ROOT)
 
 	for await (const handle of dir.values()) {
 		if (handle.kind !== "directory" || handle.name === THUMB_GENERATION) {
@@ -115,7 +103,7 @@ export async function sweepThumbs(capBytes: number): Promise<void> {
 		return
 	}
 
-	const dir = await thumbDirHandle()
+	const dir = await opfsDirectory(THUMB_DIR)
 
 	await Promise.all(
 		evict.map(async name => {

@@ -1,3 +1,4 @@
+import type { RefObject } from "react"
 import { create } from "zustand"
 
 // The overlay's unsaved-buffer bit, hoisted out of component state so the sign-out path — a plain lib
@@ -43,6 +44,12 @@ export function setPreviewDirty(dirty: boolean): void {
 	usePreviewUnsavedGuardStore.getState().setDirty(dirty)
 }
 
+// The dirty bit and the buffer's getter clear together, or a stale buffer stays readable to a save.
+export function dropPreviewBuffer(contentRef: RefObject<(() => string) | null>): void {
+	setPreviewDirty(false)
+	contentRef.current = null
+}
+
 // Coalesces two concurrent asks (the account menu and a socket force-logout) onto one prompt and one
 // answer, so neither can strand a promise the other settled.
 let inFlight: Promise<boolean> | null = null
@@ -62,5 +69,3 @@ export async function confirmDiscardUnsavedPreview(): Promise<boolean> {
 
 	return await inFlight
 }
-
-export default usePreviewUnsavedGuardStore

@@ -6,6 +6,7 @@ import type { Chat, ChatMessage, ChatParticipant } from "@filen/sdk-rs"
 import { cn, contactDisplayName } from "@filen/shared"
 import { noop } from "@/lib/utils"
 import { errorLabel } from "@/lib/i18n/errorLabel"
+import { safeAvatarUrl } from "@/lib/avatarUrl"
 import { enqueueChatMessage } from "@/features/chats/lib/sync"
 import { signalTyping, signalStopped } from "@/features/chats/lib/typing"
 import { messageSenderName } from "@/features/chats/lib/sort"
@@ -31,7 +32,6 @@ import {
 	NEW_MODE,
 	type TriggerQuery
 } from "@/features/chats/lib/composer.logic"
-import { contactInitials } from "@/features/contacts/components/contactsList.logic"
 import { searchEmoji, type EmojiSuggestion } from "@/features/chats/lib/emoji"
 import { useChatComposerEntry, useChatComposerStore } from "@/features/chats/store/useChatComposer"
 import { loadDraft, saveDraftDebounced } from "@/features/chats/lib/drafts"
@@ -41,7 +41,7 @@ import { useIsOnline } from "@/lib/useIsOnline"
 import { toastObstructionRef } from "@/lib/toastClearance"
 import { useAccountQuery } from "@/queries/account"
 import { Button } from "@/components/ui/button"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { UserAvatar } from "@/components/userAvatar"
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu"
 
 // Grow the input with its content up to this many px, then scroll internally (mobile caps at a quarter
@@ -501,7 +501,7 @@ export function Composer({
 					{suggestKind === "mention"
 						? mentionItems.map((participant, index) => {
 								const name = contactDisplayName(participant)
-								const avatarUrl = participant.avatar?.startsWith("http") === true ? participant.avatar : undefined
+								const avatarUrl = safeAvatarUrl(participant.avatar)
 
 								return (
 									<button
@@ -520,17 +520,11 @@ export function Composer({
 											}
 										}}
 									>
-										<Avatar className="size-7 shrink-0">
-											{/* crossOrigin: require-corp COEP needs a CORS-mode request for this
-											    cross-origin egest url (see avatarCard.tsx's matching comment). */}
-											{avatarUrl !== undefined ? (
-												<AvatarImage
-													src={avatarUrl}
-													crossOrigin="anonymous"
-												/>
-											) : null}
-											<AvatarFallback>{contactInitials(name)}</AvatarFallback>
-										</Avatar>
+										<UserAvatar
+											src={avatarUrl}
+											name={name}
+											className="size-7 shrink-0"
+										/>
 										<span className="flex min-w-0 flex-col">
 											<span className="truncate text-sm">{name}</span>
 											<span className="truncate text-xs text-muted-foreground">{participant.email}</span>

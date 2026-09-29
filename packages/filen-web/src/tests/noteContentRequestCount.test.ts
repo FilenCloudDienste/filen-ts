@@ -30,7 +30,7 @@ import { NOTES_QUERY_KEY } from "@/features/notes/queries/notes"
 import { noteContentQueryKey, useNoteContentQuery } from "@/features/notes/queries/noteContent"
 import { handleNoteEvent } from "@/features/notes/lib/socketHandlers"
 import { useNoteSearchBodies } from "@/features/notes/hooks/useNoteSearchBodies"
-import useNotesInflightStore from "@/features/notes/store/useNotesInflight"
+import { useNotesInflightStore } from "@/features/notes/store/useNotesInflight"
 import { socketAuthenticated, socketDropped } from "@/lib/sdk/socketSession"
 
 const USER_ID = 7n
@@ -73,15 +73,6 @@ function contentEdited(note: Note, editorId: number): Extract<SocketEvent, { typ
 		},
 		noteMessageId: 0n
 	}
-}
-
-function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
-	let resolve!: (value: T) => void
-	const promise = new Promise<T>(r => {
-		resolve = r
-	})
-
-	return { promise, resolve }
 }
 
 function wrapper({ children }: { children: ReactNode }) {
@@ -204,7 +195,7 @@ describe("note content request counts", () => {
 	})
 
 	it("a read a content edit raced doesn't count", async () => {
-		const read = deferred<string>()
+		const read = Promise.withResolvers<string>()
 		getNoteContent.mockImplementationOnce(() => read.promise)
 
 		const { unmount } = renderHook(() => useNoteContentQuery(NOTE_A), { wrapper })
@@ -227,7 +218,7 @@ describe("note content request counts", () => {
 
 	it("a cancelled read doesn't count", async () => {
 		queryClient.setQueryData(noteContentQueryKey(NOTE_A.uuid), "persisted")
-		const read = deferred<string>()
+		const read = Promise.withResolvers<string>()
 		getNoteContent.mockImplementationOnce(() => read.promise)
 
 		const { unmount } = renderHook(() => useNoteContentQuery(NOTE_A), { wrapper })

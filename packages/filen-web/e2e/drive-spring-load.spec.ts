@@ -1,5 +1,6 @@
 import type { Locator, Page } from "@playwright/test"
 import { test, expect } from "./fixtures"
+import { SPRING_BLINK_ATTRIBUTE, SPRING_LOAD_DELAY_MS } from "@/features/drive/lib/springLoad"
 import {
 	bootTo,
 	createDirectoryViaDialog,
@@ -9,9 +10,6 @@ import {
 	waitForListingSettled,
 	LIVE_WRITE_TIMEOUT_MS
 } from "./helpers/listing"
-
-// Mirrors src/features/drive/lib/springLoad.ts: how long a drag rests on a directory before it opens.
-const SPRING_LOAD_DELAY_MS = 2000
 
 async function centerOf(locator: Locator): Promise<{ x: number; y: number }> {
 	const box = await locator.boundingBox()
@@ -26,18 +24,18 @@ async function centerOf(locator: Locator): Promise<{ x: number; y: number }> {
 // Every value the blink attribute takes, in order, recorded in the page — the blink lasts a few hundred
 // milliseconds on an element that is gone right after, too brief and too short-lived to poll for.
 async function recordBlinks(page: Page): Promise<void> {
-	await page.evaluate(() => {
+	await page.evaluate(attribute => {
 		const recorded: (string | null)[] = []
 
 		Object.assign(window, { __springBlinks: recorded })
 		new MutationObserver(records => {
 			for (const record of records) {
 				if (record.target instanceof Element) {
-					recorded.push(record.target.getAttribute("data-spring-blink"))
+					recorded.push(record.target.getAttribute(attribute))
 				}
 			}
-		}).observe(document.body, { attributes: true, attributeFilter: ["data-spring-blink"], subtree: true })
-	})
+		}).observe(document.body, { attributes: true, attributeFilter: [attribute], subtree: true })
+	}, SPRING_BLINK_ATTRIBUTE)
 }
 
 async function recordedBlinks(page: Page): Promise<(string | null)[]> {

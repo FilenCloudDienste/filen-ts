@@ -1,13 +1,11 @@
 import { toast } from "sonner"
-import type { UserInfo } from "@filen/sdk-rs"
 import { formatBytes, resolveQuotaVerdict, type QuotaCheckDeps, type QuotaVerdict } from "@filen/shared"
 import { i18n } from "@/lib/i18n"
-import { queryClient } from "@/queries/client"
-import { ACCOUNT_QUERY_KEY, accountQueryUpdate, fetchAccountFresh } from "@/queries/account"
+import { accountQueryGet, accountQueryUpdate, fetchAccountFresh } from "@/queries/account"
 
 // The fresh read also refreshes every other account consumer, unless the account was written meanwhile.
 export const accountQuotaDeps: QuotaCheckDeps = {
-	cached: () => queryClient.getQueryData<UserInfo>(ACCOUNT_QUERY_KEY),
+	cached: accountQueryGet,
 	fetchFresh: fetchAccountFresh
 }
 

@@ -3,7 +3,6 @@ import { audioEngine } from "@/features/audio/lib/audioEngine"
 import { queueTracksFromPlaylist } from "@/features/audio/lib/playlists"
 import type { Playlist } from "@filen/shared"
 import { errorLabel } from "@/lib/i18n/errorLabel"
-import { asErrorDTO } from "@/lib/sdk/errors"
 
 // Thin glue between the playlist data layer and the playback engine singleton — split out of
 // playlists.ts specifically so that module stays free of audioEngine's import-time side effects
@@ -32,12 +31,12 @@ export function shufflePlayPlaylist(playlist: Playlist): Promise<void> {
 // Fire-and-forget forms of the two above for click handlers, a failure surfacing as a toast.
 export function startPlaylist(playlist: Playlist, startIndex: number): void {
 	void playPlaylistFrom(playlist, startIndex).catch((error: unknown) => {
-		toast.error(errorLabel(asErrorDTO(error)))
+		toast.error(errorLabel(error))
 	})
 }
 
 export function startShuffledPlaylist(playlist: Playlist): void {
 	void shufflePlayPlaylist(playlist).catch((error: unknown) => {
-		toast.error(errorLabel(asErrorDTO(error)))
+		toast.error(errorLabel(error))
 	})
 }

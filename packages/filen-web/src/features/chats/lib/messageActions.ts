@@ -3,8 +3,7 @@ import { sdkApi } from "@/lib/sdk/client"
 import { chatsQueryUpsert } from "@/features/chats/queries/chats"
 import { chatMessagesQueryRemove, chatMessagesQueryUpsert } from "@/features/chats/queries/chatMessages"
 import { cancelOwnMessageEcho } from "@/features/chats/lib/parkedOwnMessages"
-import { asErrorDTO } from "@/lib/sdk/errors"
-import { runOp, type VoidActionOutcome } from "@/lib/actions/outcome"
+import { attemptOp, type VoidActionOutcome } from "@/lib/actions/outcome"
 
 export type { VoidActionOutcome }
 
@@ -19,13 +18,13 @@ export type { VoidActionOutcome }
 // The gate itself lives in messageMenu.logic.ts's descriptor builder (the entry is absent for a non-
 // sender); this function stays a plain SDK call + cache patch, same posture as every other action here.
 export async function deleteMessage(chat: Chat, message: ChatMessage): Promise<VoidActionOutcome> {
-	let updatedChat: Chat
+	const outcome = await attemptOp(sdkApi.deleteMessage(chat, message))
 
-	try {
-		updatedChat = await runOp(sdkApi.deleteMessage(chat, message))
-	} catch (e) {
-		return { status: "error", dto: asErrorDTO(e) }
+	if (outcome.status === "error") {
+		return outcome
 	}
+
+	const updatedChat = outcome.item
 
 	chatsQueryUpsert(updatedChat)
 	chatMessagesQueryRemove(chat.uuid, message.uuid)
@@ -42,13 +41,13 @@ export async function deleteMessage(chat: Chat, message: ChatMessage): Promise<V
 // thread cache so the edited marker appears without waiting for the socket echo. Online-best-
 // effort: a failure returns an error DTO and the caller (composer) restores the input for a retry.
 export async function editMessage(chat: Chat, message: ChatMessage, newMessage: string): Promise<VoidActionOutcome> {
-	let updated: ChatMessage
+	const outcome = await attemptOp(sdkApi.editMessage(chat, message, newMessage))
 
-	try {
-		updated = await runOp(sdkApi.editMessage(chat, message, newMessage))
-	} catch (e) {
-		return { status: "error", dto: asErrorDTO(e) }
+	if (outcome.status === "error") {
+		return outcome
 	}
+
+	const updated = outcome.item
 
 	chatMessagesQueryUpsert(chat.uuid, updated)
 
@@ -61,13 +60,13 @@ export async function editMessage(chat: Chat, message: ChatMessage, newMessage: 
 // field) is enough to patch the right thread cache — this takes only the message, not a Chat, since
 // the wasm op itself (disableMessageEmbed(message)) needs no separate chat argument either.
 export async function disableMessageEmbed(message: ChatMessage): Promise<VoidActionOutcome> {
-	let updated: ChatMessage
+	const outcome = await attemptOp(sdkApi.disableMessageEmbed(message))
 
-	try {
-		updated = await runOp(sdkApi.disableMessageEmbed(message))
-	} catch (e) {
-		return { status: "error", dto: asErrorDTO(e) }
+	if (outcome.status === "error") {
+		return outcome
 	}
+
+	const updated = outcome.item
 
 	chatMessagesQueryUpsert(message.chat, updated)
 

@@ -2,7 +2,6 @@ import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { CheckIcon } from "lucide-react"
-import type { DialogRoot } from "@base-ui/react/dialog"
 import type { DirColor } from "@filen/sdk-rs"
 import type { DriveKey } from "@/lib/i18n"
 import { type DirectoryItem, setColor } from "@/features/drive/lib/actions"
@@ -10,7 +9,7 @@ import { dirColorHex, isCustomDirColor, normalizeCustomHex } from "@/features/dr
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { cn } from "@filen/shared"
 import { useIsOnline } from "@/lib/useIsOnline"
-import { shouldForwardOpenChange } from "@/components/dialogs/dismissal.logic"
+import { pendingGuardedOpenChange } from "@/components/dialogs/dismissal.logic"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Field, FieldContent, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
@@ -55,18 +54,11 @@ export function ColorDialog({ directory, onClose }: ColorDialogProps) {
 	const normalizedCustomHex = normalizeCustomHex(customHex)
 	const customSelected = isCustomDirColor(directory.data.color)
 
-	function handleOpenChange(next: boolean, details: DialogRoot.ChangeEventDetails): void {
-		if (!shouldForwardOpenChange(next, pending)) {
-			// Also stops Base UI's own store from flipping (it closes itself after this callback
-			// unless the event is canceled) — see dismissal.logic.ts.
-			details.cancel()
-			return
-		}
-
+	const handleOpenChange = pendingGuardedOpenChange(pending, next => {
 		if (!next) {
 			onClose()
 		}
-	}
+	})
 
 	async function handleSelect(color: DirColor): Promise<void> {
 		setPending(true)
@@ -142,7 +134,7 @@ export function ColorDialog({ directory, onClose }: ColorDialogProps) {
 								setCustomHex(event.target.value)
 							}}
 							className={cn(
-								"size-10 shrink-0 cursor-pointer appearance-none rounded-full border-0 bg-transparent p-0 outline-none disabled:pointer-events-none disabled:opacity-50 [&::-moz-color-swatch]:rounded-full [&::-moz-color-swatch]:border-0 [&::-webkit-color-swatch]:rounded-full [&::-webkit-color-swatch]:border-0 [&::-webkit-color-swatch-wrapper]:rounded-full [&::-webkit-color-swatch-wrapper]:p-0",
+								"size-10 shrink-0 appearance-none rounded-full border-0 bg-transparent p-0 outline-none disabled:pointer-events-none disabled:opacity-50 [&::-moz-color-swatch]:rounded-full [&::-moz-color-swatch]:border-0 [&::-webkit-color-swatch]:rounded-full [&::-webkit-color-swatch]:border-0 [&::-webkit-color-swatch-wrapper]:rounded-full [&::-webkit-color-swatch-wrapper]:p-0",
 								customSelected && "ring-2 ring-ring ring-offset-2 ring-offset-popover"
 							)}
 						/>

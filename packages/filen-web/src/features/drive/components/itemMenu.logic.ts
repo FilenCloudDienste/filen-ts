@@ -1,4 +1,3 @@
-import { type LucideIcon } from "lucide-react"
 import { ACTION_DEFS } from "@/features/drive/lib/actionDefs"
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import { canMoveVariant, canWriteVariant, type DriveVariant } from "@/features/drive/lib/preferences"
@@ -7,6 +6,7 @@ import { buildPublicLinkUrl } from "@/features/drive/components/linkDialog.logic
 import { resolveDriveNavigationTarget } from "@/features/drive/lib/navigate"
 import { canPreview, previewType } from "@/features/drive/lib/preview.logic"
 import { type DriveItemLinkStatus } from "@/features/drive/queries/drive"
+import { type ActionDescriptor } from "@/lib/actionDescriptor"
 import { type DriveKey } from "@/lib/i18n"
 
 // Dialog kinds a per-item action can open in the listing-level dialog host (directoryListing.tsx's
@@ -35,32 +35,16 @@ export type ItemActionId =
 	| "restore"
 	| "deletePermanently"
 
-interface ItemActionDescriptorShared {
-	id: ItemActionId
-	labelKey: DriveKey
-	icon: LucideIcon
-	destructive?: boolean
-	// Present-but-disabled (never absent) once set to false — omitted (default enabled) for every
-	// descriptor that has no reason to ever disable itself. Today only "download" uses it: a dead
-	// click is worse than a disabled control (see downloadDescriptor below).
-	enabled?: boolean
-}
+// `enabled`: present-but-disabled (never absent) once set to false — omitted (default enabled) for
+// every descriptor that has no reason to ever disable itself. Today only "download" uses it: a dead
+// click is worse than a disabled control (see downloadDescriptor below).
+export type ItemActionDescriptor = ActionDescriptor<DriveKey, ItemActionId, ItemActionDialogKind> & { enabled?: boolean }
 
-// "direct" calls an action helper immediately (favorite/restore); "dialog" opens the listing's dialog host
-// on the given kind — the two arms are mutually exclusive (a direct action has nowhere to route a
-// dialogKind, a dialog action always needs one), modeled as a discriminated union rather than an
-// optional field so a caller can never observe an inconsistent combination.
-export type ItemActionDescriptor =
-	(ItemActionDescriptorShared & { run: "direct" }) | (ItemActionDescriptorShared & { run: "dialog"; dialogKind: ItemActionDialogKind })
-
-// Exported (alongside favoriteDescriptor/downloadDescriptor below): features/photos/lib/itemActions.ts
-// reuses these SAME descriptor objects for its own, smaller photos-surface menu rather than
-// reconstructing them — one ACTION_DEFS-backed source per action, whichever surface offers it.
-export const RENAME: ItemActionDescriptor = { id: "rename", ...ACTION_DEFS.rename, run: "dialog", dialogKind: "rename" }
+const RENAME: ItemActionDescriptor = { id: "rename", ...ACTION_DEFS.rename, run: "dialog", dialogKind: "rename" }
 const MOVE: ItemActionDescriptor = { id: "move", ...ACTION_DEFS.move, run: "dialog", dialogKind: "move" }
 const COLOR: ItemActionDescriptor = { id: "color", ...ACTION_DEFS.color, run: "dialog", dialogKind: "color" }
-export const VERSIONS: ItemActionDescriptor = { id: "versions", ...ACTION_DEFS.versions, run: "dialog", dialogKind: "versions" }
-export const INFO: ItemActionDescriptor = { id: "info", ...ACTION_DEFS.info, run: "dialog", dialogKind: "info" }
+const VERSIONS: ItemActionDescriptor = { id: "versions", ...ACTION_DEFS.versions, run: "dialog", dialogKind: "versions" }
+const INFO: ItemActionDescriptor = { id: "info", ...ACTION_DEFS.info, run: "dialog", dialogKind: "info" }
 // Search results only (see driveItemActions' searchHit option) — navigates to the hit's parent and
 // reveals the row there. "direct": itemMenu.tsx resolves the ancestor chain and navigates itself,
 // there is no dialog to route to.
@@ -75,12 +59,12 @@ const OPEN_CONTAINING_DIRECTORY: ItemActionDescriptor = {
 // makes by id (see resolveCopyLinkAction below) BEFORE falling through to this "dialog" descriptor —
 // this dialogKind only fires when there's no link yet (or its URL can't be built), the same case
 // Public link's own click always opens the dialog for.
-export const PUBLIC_LINK: ItemActionDescriptor = { id: "publicLink", ...ACTION_DEFS.publicLink, run: "dialog", dialogKind: "link" }
-export const COPY_LINK: ItemActionDescriptor = { id: "copyLink", ...ACTION_DEFS.copyLink, run: "dialog", dialogKind: "link" }
+const PUBLIC_LINK: ItemActionDescriptor = { id: "publicLink", ...ACTION_DEFS.publicLink, run: "dialog", dialogKind: "link" }
+const COPY_LINK: ItemActionDescriptor = { id: "copyLink", ...ACTION_DEFS.copyLink, run: "dialog", dialogKind: "link" }
 // Share the item with a Filen contact (opens the contact picker) — distinct from a public link (a
 // URL anyone can open): this grants a specific existing contact access. Variant-gated (see
 // canShareVariant / driveItemActions).
-export const SHARE: ItemActionDescriptor = { id: "share", ...ACTION_DEFS.share, run: "dialog", dialogKind: "share" }
+const SHARE: ItemActionDescriptor = { id: "share", ...ACTION_DEFS.share, run: "dialog", dialogKind: "share" }
 // Stop sharing a shared-root item (removeSharedItem) — root-only: gated below to the
 // sharedRootDirectory/sharedRootFile arms alone, the only two whose shareSource is a SharedRootItem
 // (see item.ts's shareSource retention) — removeSharedItem's own wasm signature. Destructive-styled
@@ -88,7 +72,7 @@ export const SHARE: ItemActionDescriptor = { id: "share", ...ACTION_DEFS.share, 
 // destructive there too) — the other party loses access immediately.
 const UNSHARE: ItemActionDescriptor = { id: "unshare", ...ACTION_DEFS.unshare, run: "dialog", dialogKind: "unshare" }
 // Recoverable — not destructive-styled, matching the trash-confirm dialog it opens.
-export const TRASH: ItemActionDescriptor = { id: "trash", ...ACTION_DEFS.trash, run: "dialog", dialogKind: "trash" }
+const TRASH: ItemActionDescriptor = { id: "trash", ...ACTION_DEFS.trash, run: "dialog", dialogKind: "trash" }
 // A single item restores directly, no confirm (mobile parity — see driveRestoreSelectedConfirmTitle's
 // own doc comment: that confirm is bulk-selection only).
 const RESTORE: ItemActionDescriptor = { id: "restore", ...ACTION_DEFS.restore, run: "direct" }
@@ -101,7 +85,7 @@ const DELETE_PERMANENTLY: ItemActionDescriptor = {
 // Copies the item anywhere in the caller's own drive. Offered wherever the item can be read — owned or
 // shared in, any listing but the trash — since a copy changes nothing about the source. A submenu in the
 // item menus (copySubmenu.tsx); "dialog" opens the full destination picker in its copy mode.
-export const COPY: ItemActionDescriptor = { id: "copy", ...ACTION_DEFS.copy, run: "dialog", dialogKind: "copy" }
+const COPY: ItemActionDescriptor = { id: "copy", ...ACTION_DEFS.copy, run: "dialog", dialogKind: "copy" }
 
 // Whether opening the item (double-click, Enter, the menu's Open) does anything: a directory the listing
 // can navigate into (never a trashed or undecryptable one), or a file with a preview. Audio opens the
@@ -128,7 +112,7 @@ function openDescriptor(item: DriveItem): ItemActionDescriptor {
 		: { id: "open", ...ACTION_DEFS.openFile, run: "direct" }
 }
 
-export function favoriteDescriptor(item: DriveItem): ItemActionDescriptor {
+function favoriteDescriptor(item: DriveItem): ItemActionDescriptor {
 	return item.data.favorited
 		? { id: "favorite", ...ACTION_DEFS.unfavorite, run: "direct" }
 		: { id: "favorite", ...ACTION_DEFS.favorite, run: "direct" }
@@ -138,7 +122,7 @@ export function favoriteDescriptor(item: DriveItem): ItemActionDescriptor {
 // zip path means a dir/multi selection downloads on every browser now, not just Chromium's File System
 // Access API. PRESENCE is still gated elsewhere (trash/undecryptable never reach this call site at
 // all) — kept as an explicit field rather than omitted, mirroring the shared field's own doc comment.
-export function downloadDescriptor(): ItemActionDescriptor {
+function downloadDescriptor(): ItemActionDescriptor {
 	return { id: "download", ...ACTION_DEFS.download, run: "direct", enabled: true }
 }
 

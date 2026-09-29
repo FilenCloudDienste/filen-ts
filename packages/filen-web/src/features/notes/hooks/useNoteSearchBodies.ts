@@ -2,7 +2,7 @@ import { useQueries } from "@tanstack/react-query"
 import { useShallow } from "zustand/shallow"
 import type { Note } from "@filen/sdk-rs"
 import { fetchTrackedNoteContent, noteContentQueryKey } from "@/features/notes/queries/noteContent"
-import useNotesInflightStore, { noteIsEditing } from "@/features/notes/store/useNotesInflight"
+import { useNotesInflightStore, noteIsEditing } from "@/features/notes/store/useNotesInflight"
 import { noteSearchBodyCandidates, buildNoteBodiesMap } from "@/features/notes/hooks/useNoteSearchBodies.logic"
 
 // Eager, OPT-IN full-body fetch for notes search: title-matching notes never need their body

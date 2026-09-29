@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest"
 import type { Dir, DirMeta, File, FileMeta, UuidStr } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
-import { reconcilePreviewSources } from "@/features/preview/lib/previewReconcile"
+import {
+	reconcilePreviewDialog,
+	reconcilePreviewSources,
+	removePreviewDialogItem,
+	stepPreviewDialog,
+	type PreviewDialogFields
+} from "@/features/preview/lib/previewReconcile"
+import { setPreviewDirty } from "@/features/preview/store/usePreviewUnsavedGuard"
 
 function testUuid(label: string): UuidStr {
 	return `${label}-0000-0000-0000-000000000000` as UuidStr
@@ -183,5 +190,53 @@ describe("reconcilePreviewSources — unchanged state", () => {
 		expect(next).not.toBe(state)
 		expect(next?.items[0]).toBe(state.items[0])
 		expect(next?.items[1]?.data.decryptedMeta?.name).toBe("renamed.pdf")
+	})
+})
+
+describe("preview dialog updaters", () => {
+	function previewDialog(labels: string[], index: number): PreviewDialogFields {
+		return { kind: "preview", items: labels.map(fileAt), index }
+	}
+
+	it("leave any other dialog, or no dialog, untouched", () => {
+		const other: PreviewDialogFields = { kind: "rename", items: [fileAt("a")] }
+
+		expect(reconcilePreviewDialog(other, { type: "removed", uuid: testUuid("a") })).toBe(other)
+		expect(removePreviewDialogItem(other, testUuid("a"))).toBe(other)
+		expect(stepPreviewDialog(other, 1)).toBe(other)
+		expect(reconcilePreviewDialog(null, { type: "resync" })).toBeNull()
+	})
+
+	it("return the same dialog when an event changes nothing, so the host skips its re-render", () => {
+		const dialog = previewDialog(["a", "b"], 0)
+
+		expect(reconcilePreviewDialog(dialog, { type: "removed", uuid: testUuid("z") })).toBe(dialog)
+		expect(removePreviewDialogItem(dialog, testUuid("z"))).toBe(dialog)
+	})
+
+	it("fold a removal into items and index, and close once the last slot goes", () => {
+		const next = reconcilePreviewDialog(previewDialog(["a", "b", "c"], 2), { type: "removed", uuid: testUuid("a") })
+
+		expect(next?.kind).toBe("preview")
+		expect(next?.items.map(item => item.data.uuid)).toEqual([testUuid("b"), testUuid("c")])
+		expect(next?.index).toBe(1)
+		expect(removePreviewDialogItem(previewDialog(["a"], 0), testUuid("a"))).toBeNull()
+	})
+
+	it("keep a slot with unsaved edits through a remote removal, but not through the overlay's own", () => {
+		const dialog = previewDialog(["a", "b"], 0)
+
+		setPreviewDirty(true)
+
+		expect(reconcilePreviewDialog(dialog, { type: "removed", uuid: testUuid("a") })).toBe(dialog)
+		expect(removePreviewDialogItem(dialog, testUuid("a"))?.items.map(item => item.data.uuid)).toEqual([testUuid("b")])
+
+		setPreviewDirty(false)
+	})
+
+	it("step by one sibling without wrapping", () => {
+		expect(stepPreviewDialog(previewDialog(["a", "b"], 0), 1)?.index).toBe(1)
+		expect(stepPreviewDialog(previewDialog(["a", "b"], 1), 1)?.index).toBe(1)
+		expect(stepPreviewDialog(previewDialog(["a", "b"], 1), -1)?.index).toBe(0)
 	})
 })

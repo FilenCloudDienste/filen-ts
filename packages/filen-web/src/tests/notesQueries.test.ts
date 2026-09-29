@@ -168,19 +168,10 @@ describe("notesQueryUpdate / notesQueryGet", () => {
 	})
 })
 
-function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
-	let resolve!: (value: T) => void
-	const promise = new Promise<T>(r => {
-		resolve = r
-	})
-
-	return { promise, resolve }
-}
-
 // Queued answers for listNotes, handed out in call order, so a test can resolve an early read AFTER a
 // later one and see which of them the cache keeps.
 function queueListNotes(count: number): { resolve: (index: number, notes: Note[]) => Promise<void> } {
-	const reads = Array.from({ length: count }, () => deferred<Note[]>())
+	const reads = Array.from({ length: count }, () => Promise.withResolvers<Note[]>())
 	let next = 0
 
 	listNotes.mockImplementation(() => {

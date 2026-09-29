@@ -6,18 +6,9 @@ import { QueryClient, QueryObserver } from "@tanstack/react-query"
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
 import { queryClient } from "@/queries/client"
-import { patchQuery } from "@/queries/patch"
+import { patchQuery, replaceOrAppend } from "@/queries/patch"
 
 const KEY = ["test", "list"] as const
-
-function deferred<T>() {
-	let resolve: (value: T) => void = () => undefined
-	const promise = new Promise<T>(res => {
-		resolve = res
-	})
-
-	return { promise, resolve }
-}
 
 async function settle(): Promise<void> {
 	for (let i = 0; i < 5; i++) {
@@ -57,7 +48,7 @@ describe("patchQuery", () => {
 	})
 
 	it("cancels a refetch the patch overtakes, then reads again at once while mounted", async () => {
-		const stale = deferred<string[]>()
+		const stale = Promise.withResolvers<string[]>()
 		const read = vi.fn<() => Promise<string[]>>().mockReturnValueOnce(stale.promise).mockResolvedValue(["a", "b", "server"])
 		queryClient.setQueryData(KEY, ["a"])
 		const unmount = mount(read)
@@ -75,7 +66,7 @@ describe("patchQuery", () => {
 	})
 
 	it("keeps an initial fetch alive, and replaces it with a read that starts after the patch", async () => {
-		const initial = deferred<string[]>()
+		const initial = Promise.withResolvers<string[]>()
 		const read = vi.fn<() => Promise<string[]>>().mockReturnValueOnce(initial.promise).mockResolvedValue(["server", "b"])
 		const unmount = mount(read)
 		await settle()
@@ -120,5 +111,24 @@ describe("patchQuery", () => {
 		patchQuery<string[]>(KEY, prev => [...(prev ?? []), "b"])
 
 		expect(scan).not.toHaveBeenCalled()
+	})
+})
+
+describe("replaceOrAppend", () => {
+	it("replaces the match in place in a fresh array", () => {
+		const list = ["a", "b", "c"] as const
+		const next = replaceOrAppend<string>(list, "B", row => row === "b")
+
+		expect(next).toEqual(["a", "B", "c"])
+		expect(next).not.toBe(list)
+		expect(list).toEqual(["a", "b", "c"])
+	})
+
+	it("appends when nothing matches", () => {
+		const list = ["a"]
+		const next = replaceOrAppend(list, "z", row => row === "x")
+
+		expect(next).toEqual(["a", "z"])
+		expect(next).not.toBe(list)
 	})
 })

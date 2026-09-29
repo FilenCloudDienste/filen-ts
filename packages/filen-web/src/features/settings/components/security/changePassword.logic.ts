@@ -1,6 +1,6 @@
 import type { StringifiedClient } from "@filen/sdk-rs"
 import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
-import { log } from "@/lib/log"
+import { persistSessionBlob } from "@/lib/sdk/persistOutcome"
 
 export interface ChangePasswordParams {
 	currentPassword: string
@@ -50,22 +50,8 @@ export async function runChangePasswordAttempt(
 	// Isolated from the result on purpose: the SDK call already SUCCEEDED (the account's password is
 	// already changed server-side) by the time this runs, so a local save failure must not read as a
 	// failed change — the same "succeeded but not saved" category login/reset already surface via
-	// `persisted: false` rather than a hard error.
-	let persisted = true
-	try {
-		await deps.persist(blob)
-	} catch (e) {
-		persisted = false
-		log.warn("security", "change-password session persist failed", asErrorDTO(e))
-		// The pre-change blob is still on disk and now authenticates with the dead old password — drop
-		// it so the next resume starts clean instead of reviving credentials that no longer work.
-		// Best-effort in its own right: a stale blob is the worst case either way, so a clear failure is
-		// logged and swallowed, never thrown.
-		try {
-			await deps.clearSession()
-		} catch (clearError) {
-			log.warn("security", "clearing stale session after change-password persist failure failed", asErrorDTO(clearError))
-		}
-	}
+	// `persisted: false` rather than a hard error. On failure the pre-change blob, which authenticates
+	// with the dead old password, is cleared so the next resume starts clean.
+	const persisted = await persistSessionBlob(deps, blob, "security", "change-password session")
 	return { status: "success", persisted }
 }

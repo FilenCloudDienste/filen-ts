@@ -3,18 +3,16 @@ import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { isPasswordStrongEnough, isValidEmail, ratePasswordStrength } from "@filen/shared"
 import { sdkApi } from "@/lib/sdk/client"
-import { asErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { getReferral } from "@/features/auth/lib/referral"
-import { useCapsLock } from "@/features/auth/lib/useCapsLock"
 import { useRegisterCheckQuery } from "@/features/auth/queries/registerCheck"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { Button } from "@/components/ui/button"
-import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
 import { StrengthMeter } from "@/features/auth/components/strengthMeter"
-import { CapsLockWarning } from "@/features/auth/components/capsLockWarning"
+import { PasswordInput } from "@/features/auth/components/passwordInput"
 
 const REGISTER_CHECK_LEARN_MORE_URL = "https://filen.io/hub/free-10-gb-at-signup-eligibility-check-before-creating-an-account/"
 
@@ -54,8 +52,6 @@ function RegisterForm() {
 	const [pending, setPending] = useState(false)
 	const [resendPending, setResendPending] = useState(false)
 	const [registered, setRegistered] = useState(false)
-	const passwordCaps = useCapsLock()
-	const confirmPasswordCaps = useCapsLock()
 
 	const emailValid = isValidEmail(email)
 	const passwordStrength = password.length > 0 ? ratePasswordStrength(password) : null
@@ -85,7 +81,7 @@ function RegisterForm() {
 			})
 			setRegistered(true)
 		} catch (err) {
-			toast.error(errorLabel(asErrorDTO(err)))
+			toast.error(errorLabel(err))
 		} finally {
 			setPending(false)
 		}
@@ -101,7 +97,7 @@ function RegisterForm() {
 			toast.success(t("resendConfirmationSent"))
 		} catch (err) {
 			// A network/server failure is not "email sent" — LABEL-FIRST.
-			toast.error(errorLabel(asErrorDTO(err)))
+			toast.error(errorLabel(err))
 		} finally {
 			setResendPending(false)
 		}
@@ -152,43 +148,30 @@ function RegisterForm() {
 					</Field>
 					<Field>
 						<FieldLabel htmlFor="register-password">{t("registerPassword")}</FieldLabel>
-						<Input
+						<PasswordInput
 							id="register-password"
-							type="password"
 							autoComplete="new-password"
 							value={password}
 							disabled={pending}
 							onChange={e => {
 								setPassword(e.target.value)
 							}}
-							onKeyDown={passwordCaps.onKeyDown}
-							onKeyUp={passwordCaps.onKeyUp}
-							onBlur={passwordCaps.onBlur}
-						/>
-						{passwordStrength && <StrengthMeter tier={passwordStrength.strength} />}
-						<CapsLockWarning active={passwordCaps.capsLockOn} />
+						>
+							{passwordStrength && <StrengthMeter tier={passwordStrength.strength} />}
+						</PasswordInput>
 					</Field>
 					<Field>
 						<FieldLabel htmlFor="register-confirm-password">{t("registerConfirmPassword")}</FieldLabel>
-						<Input
+						<PasswordInput
 							id="register-confirm-password"
-							type="password"
+							error={passwordsMismatched && t("passwordsDoNotMatch")}
 							autoComplete="new-password"
-							aria-invalid={passwordsMismatched}
-							// Same condition the error below renders on — a describedby pointing at an id that is
-							// not in the document describes nothing.
-							aria-describedby={passwordsMismatched ? "register-confirm-password-error" : undefined}
 							value={confirmPassword}
 							disabled={pending}
 							onChange={e => {
 								setConfirmPassword(e.target.value)
 							}}
-							onKeyDown={confirmPasswordCaps.onKeyDown}
-							onKeyUp={confirmPasswordCaps.onKeyUp}
-							onBlur={confirmPasswordCaps.onBlur}
 						/>
-						{passwordsMismatched && <FieldError id="register-confirm-password-error">{t("passwordsDoNotMatch")}</FieldError>}
-						<CapsLockWarning active={confirmPasswordCaps.capsLockOn} />
 					</Field>
 				</FieldGroup>
 				<Button

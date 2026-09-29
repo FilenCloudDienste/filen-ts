@@ -40,13 +40,12 @@ function item(label: string): DriveItem {
 
 const SPLAT = "a/b"
 
-// useDriveListboxNav takes its virtualizer and ref map as plain params, so both stub trivially. An
-// empty ref map just lets the bounded rAF focus poll expire — the same path a not-yet-mounted row
-// takes in production.
+// useDriveListboxNav takes its virtualizer and item-ref registry as plain params, so both stub
+// trivially; the rAF focus poll itself is covered in useRovingItemRefs.test.ts.
 function renderNav(items: DriveItem[], splat = SPLAT) {
 	const scrollToIndex = vi.fn()
 	const virtualizer = { scrollToIndex } as unknown as DriveVirtualizer["activeVirtualizer"]
-	const itemRefs = { current: new Map<number, HTMLDivElement>() } as DriveVirtualizer["itemRefs"]
+	const itemRefs: DriveVirtualizer["itemRefs"] = { registerRef: vi.fn(), focusItem: vi.fn() }
 
 	const rendered = renderHook(
 		(props: { items: DriveItem[] }) =>

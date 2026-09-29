@@ -19,5 +19,3 @@ export const useSocketStatusStore = create<SocketStatusStore>(set => ({
 		set({ status })
 	}
 }))
-
-export default useSocketStatusStore

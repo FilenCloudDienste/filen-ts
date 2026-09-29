@@ -1,10 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router"
 import { useTranslation } from "react-i18next"
 import { redirectIfAuthed } from "@/features/auth/lib/guard"
-import { Logo } from "@/features/shell/components/logo"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { ResetForm } from "@/features/auth/components/resetForm"
-import { AuthLegalLinks } from "@/features/auth/components/legalLinks"
+import { AuthCard } from "@/features/auth/components/authCard"
 import { routeHead } from "@/lib/head/routeHead"
 import { i18n } from "@/lib/i18n"
 
@@ -22,20 +20,11 @@ function ResetPage() {
 	const { token } = Route.useParams()
 
 	return (
-		<div className="flex min-h-svh flex-col items-center justify-center gap-6 bg-canvas p-6 text-foreground">
-			<Card className="w-full max-w-sm">
-				<CardHeader className="justify-items-center gap-3 text-center">
-					<Logo className="size-10 text-primary" />
-					<div className="flex flex-col gap-1">
-						<CardTitle>{t("resetTitle")}</CardTitle>
-						<CardDescription>{t("resetBody")}</CardDescription>
-					</div>
-				</CardHeader>
-				<CardContent>
-					<ResetForm token={token} />
-				</CardContent>
-			</Card>
-			<AuthLegalLinks />
-		</div>
+		<AuthCard
+			title={t("resetTitle")}
+			subtitle={t("resetBody")}
+		>
+			<ResetForm token={token} />
+		</AuthCard>
 	)
 }

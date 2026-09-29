@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { driveItemName } from "@filen/shared"
-import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
+import { driveItemMime, type DriveItem } from "@/features/drive/lib/item"
 import { allowedMediaContentType } from "@/features/preview/lib/mediaType"
 import { isMediaStreamAvailable } from "@/features/preview/lib/previewStream"
 import { streamFailureAction } from "@/features/drive/lib/preview.logic"
@@ -9,8 +9,8 @@ import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
 import { usePreviewStreamUrl } from "@/features/preview/hooks/usePreviewStreamUrl"
 import { mediaControlsList, usePreviewAccessMode, usePreviewDownloadable } from "@/features/preview/lib/accessMode"
 import { errorLabel } from "@/lib/i18n/errorLabel"
-import { LoadingState } from "@/components/loadingState"
-import { PreviewErrorState } from "@/features/preview/components/previewErrorState"
+import { useObjectUrl } from "@/lib/useObjectUrl"
+import { PreviewErrorState, PreviewLoading } from "@/features/preview/components/previewErrorState"
 import { getVideoPosition, setVideoPosition } from "@/features/preview/lib/videoContinuity"
 
 export interface MediaViewerProps {
@@ -222,12 +222,7 @@ function StreamedMedia({
 	}
 
 	if (result.status !== "success") {
-		return (
-			<LoadingState
-				size="lg"
-				className="text-inherit"
-			/>
-		)
+		return <PreviewLoading />
 	}
 
 	return (
@@ -263,20 +258,7 @@ function BufferedMediaBytes({
 	alt: string
 	positionKey: string
 }) {
-	const [url, setUrl] = useState<string | null>(null)
-
-	useEffect(() => {
-		// Mirrors imageViewer.tsx's own blob-mint effect — see its comment for the ArrayBuffer-narrowing
-		// and double-invoke-safety rationale, identical here.
-		const objectUrl = URL.createObjectURL(new Blob([bytes as Uint8Array<ArrayBuffer>], { type: mime ?? "application/octet-stream" }))
-
-		// eslint-disable-next-line react-hooks/set-state-in-effect -- deliberate, see imageViewer.tsx's own identical effect
-		setUrl(objectUrl)
-
-		return () => {
-			URL.revokeObjectURL(objectUrl)
-		}
-	}, [bytes, mime])
+	const url = useObjectUrl(bytes, mime)
 
 	if (!url) {
 		return null
@@ -299,12 +281,7 @@ function BufferedMedia({ item, category, alt }: { item: DriveItem; category: "vi
 	const result = usePreviewBytes(item)
 
 	if (result.status === "pending") {
-		return (
-			<LoadingState
-				size="lg"
-				className="text-inherit"
-			/>
-		)
+		return <PreviewLoading />
 	}
 
 	if (result.status === "error") {
@@ -316,8 +293,7 @@ function BufferedMedia({ item, category, alt }: { item: DriveItem; category: "vi
 		)
 	}
 
-	const base = asDirectoryOrFile(item)
-	const mime = base.type === "file" ? base.data.decryptedMeta?.mime : undefined
+	const mime = driveItemMime(item)
 
 	return (
 		<BufferedMediaBytes

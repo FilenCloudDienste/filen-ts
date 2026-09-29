@@ -1,6 +1,6 @@
 import { type, type Type } from "arktype"
 import { Semaphore } from "@filen/shared"
-import { kvGetJson, kvSetJson } from "@/lib/storage/adapter"
+import { kvPreference } from "@/lib/storage/preference"
 import { extensionOf, HEIC_EXTENSIONS } from "@/features/drive/lib/preview.logic"
 import { transformHeicBytesOwned } from "@/features/preview/lib/heicTransform"
 import { log } from "@/lib/log"
@@ -10,16 +10,13 @@ import { log } from "@/lib/log"
 // lib/imageConversion.ts): opt-in, off by default — a HEIC/HEIF upload is left untouched unless the
 // user has explicitly turned this on.
 
-const HEIC_UPLOAD_CONVERT_KV_KEY = "drive.convertHeicToJpgOnUpload.v1"
 const heicUploadConvertSchema: Type<boolean> = type("boolean")
 
-export async function getHeicUploadConvertPreference(): Promise<boolean> {
-	return (await kvGetJson(HEIC_UPLOAD_CONVERT_KV_KEY, heicUploadConvertSchema)) ?? false
-}
-
-export async function setHeicUploadConvertPreference(next: boolean): Promise<void> {
-	await kvSetJson(HEIC_UPLOAD_CONVERT_KV_KEY, next)
-}
+export const { get: getHeicUploadConvertPreference, set: setHeicUploadConvertPreference } = kvPreference({
+	key: "drive.convertHeicToJpgOnUpload.v1",
+	schema: heicUploadConvertSchema,
+	fallback: false
+})
 
 // ── Convert-on-upload ────────────────────────────────────────────────────
 

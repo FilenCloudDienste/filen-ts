@@ -1,11 +1,10 @@
-import { useState, type CSSProperties, type MouseEvent } from "react"
+import { type CSSProperties, type MouseEvent } from "react"
 import { useTranslation } from "react-i18next"
-import { StarIcon, MoreHorizontalIcon } from "lucide-react"
+import { StarIcon } from "lucide-react"
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import { canWriteVariant, type DriveVariant } from "@/features/drive/lib/preferences"
-import { ItemIcon } from "@/features/drive/components/itemIcon"
+import { ItemThumbnail } from "@/features/drive/components/itemThumbnail"
 import { formatItemSize, formatModifiedDate, sharedIdentityLabel } from "@/features/drive/lib/format"
-import { invalidateThumbnail } from "@/features/drive/lib/thumbnails"
 import { splatToUuids } from "@/features/drive/lib/navigate"
 import { canDragVariant } from "@/features/drive/lib/dnd.logic"
 import { buildDragSourceProps } from "@/features/drive/lib/dnd"
@@ -16,13 +15,12 @@ import { type DestinationActions } from "@/features/drive/components/destination
 import { DriveBulkContextMenuContent } from "@/features/drive/components/bulkMenu"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import { useDriveClipboardStore } from "@/features/drive/store/useDriveClipboardStore"
-import { useThumbnail } from "@/features/drive/hooks/useThumbnail"
 import { dropHighlightClass, useDriveDropTarget } from "@/features/drive/hooks/useDriveDropTarget"
 import { LISTING_SPRING } from "@/features/drive/lib/springLoad"
 import { cn, driveItemName } from "@filen/shared"
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
-import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { Button } from "@/components/ui/button"
+import { DropdownMenu } from "@/components/ui/dropdown-menu"
+import { RowMenuTrigger } from "@/components/rowMenuTrigger"
 
 export interface DriveRowProps {
 	item: DriveItem
@@ -117,10 +115,6 @@ export function DriveRow({
 	// Only the two shared variants' ROOT listing resolve a counterparty; every other variant/nested
 	// item gets null (no badge) — see sharedIdentityLabel's own doc comment.
 	const shared = sharedIdentityLabel(item, variant)
-	const thumbUrl = useThumbnail(item)
-	// Downgrades a torn/corrupt cache entry back to the icon without waiting for a remount — see the
-	// img's own onError below. Never reset back to false: this mount already gave up on this uuid.
-	const [thumbFailed, setThumbFailed] = useState(false)
 	const bulkMenu = selected && selectedItems.length > 1
 	// Cut for a later paste: dimmed, Explorer-style, until the paste or the next copy/cut. The ⋯ trigger
 	// keeps its own hover-only opacity.
@@ -171,29 +165,13 @@ export function DriveRow({
 								onCursorMove(index)
 							}
 						}}
-						onDragEnter={drop.onDragEnter}
-						onDragOver={drop.onDragOver}
-						onDragLeave={drop.onDragLeave}
-						onDrop={drop.onDrop}
+						{...drop.handlers}
 					>
-						{thumbUrl !== null && !thumbFailed ? (
-							<img
-								src={thumbUrl}
-								alt=""
-								draggable={false}
-								decoding="async"
-								className="size-6 shrink-0 rounded-md object-cover"
-								onError={() => {
-									invalidateThumbnail(item.data.uuid)
-									setThumbFailed(true)
-								}}
-							/>
-						) : (
-							<ItemIcon
-								item={item}
-								className="size-6 shrink-0"
-							/>
-						)}
+						<ItemThumbnail
+							item={item}
+							imgClassName="size-6 shrink-0 rounded-md object-cover"
+							iconClassName="size-6 shrink-0"
+						/>
 						<span className="min-w-0 flex-1 truncate">{name}</span>
 						{/* These two ride with the Modified column (see directoryListing.tsx's header): their flex
 						    base size is their own content width while the name's is 0, so every pixel the card is
@@ -226,32 +204,13 @@ export function DriveRow({
 							{formatModifiedDate(item)}
 						</span>
 						<DropdownMenu>
-							<DropdownMenuTrigger
-								render={
-									<Button
-										variant="ghost"
-										size="icon-xs"
-										aria-label={t("driveItemMenuTrigger")}
-										// Roving-tabindex-friendly: only the active row's trigger joins the normal Tab
-										// sequence, matching the row's own tabIndex — otherwise every visible row would
-										// add its own Tab stop, defeating the listbox's one-stop roving pattern.
-										tabIndex={active ? 0 : -1}
-										// A coarse pointer cannot hover, so the reveal never fires there — show the trigger
-										// unconditionally and grow it (glyph included, or icon-xs would pin a 12px mark
-										// inside a 32px box). 32px is the ceiling: the row is ROW_HEIGHT tall.
-										className="shrink-0 opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100 aria-expanded:opacity-100 pointer-coarse:size-8 pointer-coarse:opacity-100 pointer-coarse:[&_svg:not([class*='size-'])]:size-4"
-										onClick={event => {
-											// Must not select the row — see itemMenu.tsx's own onClick for why a click
-											// inside the (portaled) menu content needs the same guard.
-											event.stopPropagation()
-										}}
-										onDoubleClick={event => {
-											event.stopPropagation()
-										}}
-									>
-										<MoreHorizontalIcon />
-									</Button>
-								}
+							<RowMenuTrigger
+								label={t("driveItemMenuTrigger")}
+								reveal="row"
+								// Roving-tabindex-friendly: only the active row's trigger joins the normal Tab
+								// sequence, matching the row's own tabIndex — otherwise every visible row would
+								// add its own Tab stop, defeating the listbox's one-stop roving pattern.
+								tabIndex={active ? 0 : -1}
 							/>
 							{/* The ⋯ dropdown stays single-item — it is a per-row affordance, and the bulk
 							    surface already has its own bar plus the context menu below. */}

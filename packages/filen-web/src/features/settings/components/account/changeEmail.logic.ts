@@ -1,5 +1,6 @@
 import type { StringifiedClient } from "@filen/sdk-rs"
 import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
+import { persistSessionBlob } from "@/lib/sdk/persistOutcome"
 import { log } from "@/lib/log"
 
 export interface ChangeEmailParams {
@@ -12,7 +13,7 @@ export interface ChangeEmailParams {
 // wasm's `changeEmail(password, new_email)` returns `Promise<void>`, not a re-derived
 // `StringifiedClient` the way `changePassword` does. `toStringified` (already wired on the worker
 // for exactly this "re-read whatever client is currently live" purpose) stands in for that missing
-// return value, so the persist law below is byte-for-byte the same law changePassword enforces.
+// return value, so both share the same persistSessionBlob law.
 export interface ChangeEmailAttemptDeps {
 	changeEmail: (params: ChangeEmailParams) => Promise<void>
 	toStringified: () => Promise<StringifiedClient>
@@ -43,27 +44,9 @@ export async function runChangeEmailAttempt(deps: ChangeEmailAttemptDeps, params
 		log.warn("settings", "change-email post-mutation toStringified failed", asErrorDTO(e))
 	}
 
-	let persisted = false
-	if (blob !== null) {
-		try {
-			await deps.persist(blob)
-			persisted = true
-		} catch (e) {
-			log.warn("settings", "change-email session persist failed", asErrorDTO(e))
-		}
-	}
-
-	if (!persisted) {
-		// The pre-change blob is still on disk and now records the dead old email — drop it so the
-		// next resume starts clean instead of reviving a stale identity. Best-effort in its own
-		// right: a stale blob is the worst case either way, so a clear failure is logged and
-		// swallowed, never thrown.
-		try {
-			await deps.clearSession()
-		} catch (clearError) {
-			log.warn("settings", "clearing stale session after change-email persist failure failed", asErrorDTO(clearError))
-		}
-	}
+	// On failure the pre-change blob, which records the dead old email, is cleared so the next resume
+	// starts clean instead of reviving a stale identity.
+	const persisted = await persistSessionBlob(deps, blob, "settings", "change-email session")
 
 	return { status: "success", persisted }
 }

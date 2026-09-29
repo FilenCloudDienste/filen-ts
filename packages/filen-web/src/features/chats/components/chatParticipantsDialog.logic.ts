@@ -1,9 +1,9 @@
-import type { Chat, ChatParticipant, Contact } from "@filen/sdk-rs"
+import type { Chat, ChatParticipant } from "@filen/sdk-rs"
 import { isBlocked, EMPTY_BLOCKED_USERS, type BlockedUsers } from "@filen/shared"
 
 // Pure gating/derivation helpers for chatParticipantsDialog.tsx, kept out of the component so the
-// owner-vs-participant view split and the add-picker's exclusion filter stay testable without a DOM
-// renderer (mirrors notes' participantsDialog.logic.ts).
+// owner-vs-participant view split stays testable without a DOM renderer (mirrors notes'
+// participantsDialog.logic.ts).
 
 export interface ChatParticipantRowModel {
 	participant: ChatParticipant
@@ -40,21 +40,12 @@ export function chatParticipantRows(
 	}))
 }
 
-// The add-picker's own contact list, filtered down to contacts not already a participant — mirrors
-// mobile's selectContacts userIdsToExclude / notes' contactsAvailableToAdd. Order is preserved from
-// the source contacts query.
-export function contactsAvailableToAddToChat(contacts: readonly Contact[], chat: Chat): Contact[] {
-	const existingUserIds = new Set(chat.participants.map(p => p.userId))
-
-	return contacts.filter(contact => !existingUserIds.has(contact.userId))
-}
-
-// Resolves the list-mode `selected` Set (reused wholesale from the add-picker above — the two modes
+// Resolves the list-mode `selected` Set (shared with the add-picker — the two modes
 // are mutually exclusive, never active at once) back to the concrete ChatParticipant records the bulk
 // remove action needs. `canManage` is re-checked here (not just trusted from the Set) as a
 // defense-in-depth gate: a row that stopped being manageable between selection and dispatch (e.g. an
 // ownership change landing via a live socket patch while the dialog is open) is silently dropped
-// rather than removed. Mirrors drive/contactPickerDialog.logic.ts's resolveSelectedContacts.
+// rather than removed. Mirrors contactPicker.logic.ts's resolveSelectedContacts.
 export function selectedParticipantsForRemoval(rows: readonly ChatParticipantRowModel[], selected: ReadonlySet<string>): ChatParticipant[] {
 	return rows.filter(row => row.canManage && selected.has(row.participant.userId.toString())).map(row => row.participant)
 }

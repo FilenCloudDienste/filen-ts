@@ -12,7 +12,7 @@ import type { ActionDef } from "@/lib/keymap/registry"
 export const NOTES_ACTIONS: readonly ActionDef[] = [
 	{ id: "notes.newNote", defaultCombo: "n", scope: "notes", descriptionKey: "notes:notesNewNote" },
 	{ id: "notes.selectAll", defaultCombo: "mod+a", scope: "notes", descriptionKey: "notes:notesCommandSelectAll" },
-	{ id: "notes.clearSelection", defaultCombo: "escape", scope: "notes", descriptionKey: "notes:notesCommandClearSelection" },
+	{ id: "notes.clearSelection", defaultCombo: "escape", scope: "notes", descriptionKey: "common:clearSelection" },
 	{ id: "notes.trash", defaultCombo: "delete,backspace", scope: "notes", descriptionKey: "notes:notesCommandTrash" },
 	{ id: "notes.saveNow", defaultCombo: "mod+s", scope: "notes", descriptionKey: "notes:notesSaveAction" }
 ]

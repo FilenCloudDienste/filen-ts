@@ -1,5 +1,7 @@
 import { type, type Type } from "arktype"
 import { kvGetJson, kvSetJson } from "@/lib/storage/adapter"
+import { kvPreference } from "@/lib/storage/preference"
+import { splitterKeyValue, type SplitterKeyBounds } from "@/lib/useSeparatorValue.logic"
 import { NOTE_TAGS_SORT_OPTIONS, DEFAULT_NOTE_TAGS_SORT_BY, type NoteTagsSortBy } from "@filen/shared"
 
 // The sidebar's two-view toggle, persisted with the same kv-backed convention drive's view mode uses
@@ -9,27 +11,19 @@ import { NOTE_TAGS_SORT_OPTIONS, DEFAULT_NOTE_TAGS_SORT_BY, type NoteTagsSortBy 
 // sidebar, not a per-listing surface.
 export type NotesViewMode = "notes" | "tags"
 
-const NOTES_VIEW_MODE_KV_KEY = "notes.viewMode.v1"
-
 const notesViewModeSchema: Type<NotesViewMode> = type("'notes'|'tags'")
 
 export const DEFAULT_NOTES_VIEW_MODE: NotesViewMode = "notes"
 
-// kvGetJson collapses "absent" and "schema-invalid" to null (see @/lib/storage/adapter); the `??`
-// default is the self-heal, same rule as getViewModePreferences.
-export async function getNotesViewMode(): Promise<NotesViewMode> {
-	return (await kvGetJson(NOTES_VIEW_MODE_KV_KEY, notesViewModeSchema)) ?? DEFAULT_NOTES_VIEW_MODE
-}
-
-export async function setNotesViewMode(next: NotesViewMode): Promise<void> {
-	await kvSetJson(NOTES_VIEW_MODE_KV_KEY, next)
-}
+export const { get: getNotesViewMode, set: setNotesViewMode } = kvPreference({
+	key: "notes.viewMode.v1",
+	schema: notesViewModeSchema,
+	fallback: DEFAULT_NOTES_VIEW_MODE
+})
 
 // md split-pane preview ratio — md notes also get the split live-preview layout, and the ratio is
 // persisted, one global value, same kv-backed shape as the view mode above.
 // Clamped well inside [0,1] so a drag never collapses either pane to zero width.
-const MD_SPLIT_RATIO_KV_KEY = "notes.mdSplitRatio.v1"
-
 const mdSplitRatioSchema: Type<number> = type("number")
 
 export const DEFAULT_MD_SPLIT_RATIO = 0.5
@@ -42,49 +36,30 @@ export function clampMdSplitRatio(ratio: number): number {
 
 export const MD_SPLIT_RATIO_STEP = 0.05
 
-// WAI-ARIA window-splitter keys for the split pane's divider: ArrowRight widens the left pane,
-// ArrowLeft narrows it, Home/End jump to the clamps. null = a key this separator does not handle, so
-// the caller leaves the event alone. A sibling of clampMdSplitRatio rather than shared with the
-// sidebar's widthFromKey: different unit, different clamp, different persistence.
+const MD_SPLIT_RATIO_KEY_BOUNDS: SplitterKeyBounds = { step: MD_SPLIT_RATIO_STEP, min: MD_SPLIT_RATIO_MIN, max: MD_SPLIT_RATIO_MAX }
+
+// ArrowRight widens the left pane.
 export function ratioFromKey(key: string, ratio: number): number | null {
-	switch (key) {
-		case "ArrowLeft":
-			return clampMdSplitRatio(ratio - MD_SPLIT_RATIO_STEP)
-		case "ArrowRight":
-			return clampMdSplitRatio(ratio + MD_SPLIT_RATIO_STEP)
-		case "Home":
-			return MD_SPLIT_RATIO_MIN
-		case "End":
-			return MD_SPLIT_RATIO_MAX
-		default:
-			return null
-	}
+	return splitterKeyValue(key, ratio, MD_SPLIT_RATIO_KEY_BOUNDS)
 }
 
-export async function getMdSplitRatio(): Promise<number> {
-	const stored = await kvGetJson(MD_SPLIT_RATIO_KV_KEY, mdSplitRatioSchema)
-
-	return stored === null ? DEFAULT_MD_SPLIT_RATIO : clampMdSplitRatio(stored)
-}
-
-export async function setMdSplitRatio(ratio: number): Promise<void> {
-	await kvSetJson(MD_SPLIT_RATIO_KV_KEY, clampMdSplitRatio(ratio))
-}
+export const { get: getMdSplitRatio, set: setMdSplitRatio } = kvPreference({
+	key: "notes.mdSplitRatio.v1",
+	schema: mdSplitRatioSchema,
+	fallback: DEFAULT_MD_SPLIT_RATIO,
+	normalize: clampMdSplitRatio
+})
 
 // The tags-view sort order — sortNoteTags (sort.ts) has always been ported+tested, but the view
 // hardcoded DEFAULT_NOTE_TAGS_SORT_BY with no control; this is the persisted preference an actual
 // sort-menu control reads/writes. Same single-global-value kv shape as the view mode above.
-const TAGS_SORT_BY_KV_KEY = "notes.tagsSortBy.v1"
-
 const tagsSortBySchema: Type<NoteTagsSortBy> = type.enumerated(...NOTE_TAGS_SORT_OPTIONS)
 
-export async function getNoteTagsSortBy(): Promise<NoteTagsSortBy> {
-	return (await kvGetJson(TAGS_SORT_BY_KV_KEY, tagsSortBySchema)) ?? DEFAULT_NOTE_TAGS_SORT_BY
-}
-
-export async function setNoteTagsSortBy(next: NoteTagsSortBy): Promise<void> {
-	await kvSetJson(TAGS_SORT_BY_KV_KEY, next)
-}
+export const { get: getNoteTagsSortBy, set: setNoteTagsSortBy } = kvPreference({
+	key: "notes.tagsSortBy.v1",
+	schema: tagsSortBySchema,
+	fallback: DEFAULT_NOTE_TAGS_SORT_BY
+})
 
 // Per-note "hide completed checklist items" view preference — Record<noteUuid, boolean>, absent
 // entry defaults to false (show everything). Purely a rendering filter (checklistEditor.tsx never edits

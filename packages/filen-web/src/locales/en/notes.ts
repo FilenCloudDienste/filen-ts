@@ -12,8 +12,6 @@ export const notes = {
 	notesNewNote: "New note",
 	/** Notes sidebar — search box placeholder and accessible label (filters the active view) */
 	notesSearch: "Search notes",
-	/** Notes sidebar — clears the search box */
-	notesSearchClear: "Clear search",
 	/** Notes sidebar — header ⋯ trigger next to "New note", opens the bulk-ops menu */
 	notesSidebarMoreActions: "More options",
 	/** Notes sidebar bulk-ops menu — downloads every non-trashed note as one archive */
@@ -320,38 +318,14 @@ export const notes = {
 	noteUpdatedElsewhere: "Updated with changes saved elsewhere.",
 
 	// ── Participants dialog ────────────────────────────────────────────────────
-	/** Participants dialog — title */
-	noteParticipantsDialogTitle: "Participants",
-	/** Participants dialog — owner-only "add participants" button, opens the contact-picker sub-view */
-	noteParticipantsAddAction: "Add participants",
-	/** Participants dialog — badge/label on the owner's own row */
-	noteParticipantsOwnerBadge: "Owner",
 	/** Participants dialog — accessible label on a row's permission switch; {{email}} = the participant's email */
 	noteParticipantsCanEditLabel: "{{email}} can edit",
-	/** Participants dialog — accessible label on a row's remove button; {{email}} = the participant's email */
-	noteParticipantsRemoveAction: "Remove {{email}}",
-	/** Participants dialog — accessible label on a row's block button; {{email}} = the participant's email */
-	noteParticipantsBlockAction: "Block {{email}}",
-	/** Participants dialog — accessible label on a row's unblock button; {{email}} = the participant's email */
-	noteParticipantsUnblockAction: "Unblock {{email}}",
-	/** Participants dialog — the blocked-contact record moved (e.g. unblocked in another tab) between render and click */
-	noteParticipantBlockStale: "This contact's block status just changed. Please try again.",
 	/** Participants dialog — empty state when the note has no participants besides the current user */
 	noteParticipantsEmpty: "No other participants yet",
-	/** Participants dialog — remove confirm dialog title */
-	noteParticipantRemoveDialogTitle: "Remove participant?",
-	/** Participants dialog — remove confirm dialog's own submit button (no email, unlike the row's aria-labeled icon button) */
-	noteParticipantRemoveDialogConfirm: "Remove",
 	/** Participants dialog — remove confirm dialog body; {{email}} = the participant's email */
 	noteParticipantRemoveDialogBody: "{{email}} will lose access to this note.",
-	/** Add-participants sub-view — dialog title */
-	noteParticipantsAddDialogTitle: "Add participants",
 	/** Add-participants sub-view — body above the contact list */
 	noteParticipantsAddDialogBody: "Choose one or more contacts to add to this note.",
-	/** Add-participants sub-view — submit button */
-	noteParticipantsAddSubmit: "Add",
-	/** Add-participants sub-view — empty state when every contact is already a participant, or the account has no contacts */
-	noteParticipantsAddEmpty: "No contacts available to add",
 
 	// ── History dialog ─────────────────────────────────────────────────────────
 	/** History dialog — title */
@@ -378,14 +352,8 @@ export const notes = {
 	// ── Multi-select + bulk-action bar ──────────────────────────────────────────
 	/** Keymap — description for the Cmd/Ctrl+A action that selects every currently-visible note */
 	notesCommandSelectAll: "Select all notes",
-	/** Keymap — description for the Escape action that clears the notes selection; also the bulk bar's clear button */
-	notesCommandClearSelection: "Clear selection",
 	/** Keymap — description for the Delete/Backspace action that bulk-trashes the selected notes */
 	notesCommandTrash: "Trash selected notes",
-	/** Bulk-action bar — selection-count label; singular */
-	notesSelectionCount_one: "{{count}} selected",
-	/** Bulk-action bar — selection-count label; plural */
-	notesSelectionCount_other: "{{count}} selected",
 	/** Bulk-action bar — every action's outcome toast when every selected note succeeded; singular */
 	notesBulkActionComplete_one: "{{count}} note updated",
 	/** Bulk-action bar — every action's outcome toast when every selected note succeeded; plural */

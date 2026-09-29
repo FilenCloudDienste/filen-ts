@@ -2,7 +2,7 @@ import { CancelledError, focusManager, useQuery, type UseQueryResult } from "@ta
 import { sdkApi } from "@/lib/sdk/client"
 import { currentSocketEpoch, socketLiveSince } from "@/lib/sdk/socketSession"
 import { queryClient } from "@/queries/client"
-import { patchQuery } from "@/queries/patch"
+import { patchQuery, replaceOrAppend } from "@/queries/patch"
 import type { Chat } from "@filen/sdk-rs"
 
 // One global list query, mirroring mobile's useChatsQuery / this app's own notes/queries/notes.ts
@@ -145,17 +145,7 @@ export function chatsQueryUpdate(updater: (prev: Chat[]) => Chat[]): void {
 // markRead all read back through this too), plus create's
 // append case.
 export function chatsQueryUpsert(chat: Chat): void {
-	chatsQueryUpdate(prev => {
-		const index = prev.findIndex(c => c.uuid === chat.uuid)
-
-		if (index === -1) {
-			return [...prev, chat]
-		}
-
-		const next = prev.slice()
-		next[index] = chat
-		return next
-	})
+	chatsQueryUpdate(prev => replaceOrAppend(prev, chat, c => c.uuid === chat.uuid))
 }
 
 export function chatsQueryRemove(uuid: string): void {

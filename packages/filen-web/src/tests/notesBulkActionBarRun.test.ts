@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { createElement } from "react"
 import type { Note, UuidStr } from "@filen/sdk-rs"
-import type { BulkOutcome } from "@/features/drive/lib/bulk"
+import type { BulkOutcome } from "@/lib/actions/bulk"
 import "@/lib/i18n"
 
 const { duplicateNotes } = vi.hoisted(() => ({ duplicateNotes: vi.fn() }))

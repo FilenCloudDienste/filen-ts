@@ -1,7 +1,7 @@
 import { type MouseEvent } from "react"
 import { useTranslation } from "react-i18next"
 import { Link } from "@tanstack/react-router"
-import { VolumeOffIcon, MoreHorizontalIcon } from "lucide-react"
+import { VolumeOffIcon } from "lucide-react"
 import type { Chat } from "@filen/sdk-rs"
 import { cn, type BlockedUsers } from "@filen/shared"
 import { chatDisplayName, isChatUndecryptable, chatMessagePreview, chatAvatarUrl, chatPreviewTier } from "@/features/chats/lib/sort"
@@ -9,12 +9,13 @@ import { useChatUnreadCount } from "@/features/chats/hooks/useChatUnreadCount"
 import { useChatTypingLabel } from "@/features/chats/hooks/useChatTyping"
 import { formatRelativeTime } from "@/lib/relativeTime"
 import { useNowMinute } from "@/lib/useNowMinute"
+import { selectionAwareLinkClick } from "@/features/drive/lib/listbox"
 import { ChatContextMenuContent, ChatDropdownMenuContent } from "@/features/chats/components/chatMenu"
 import { type ChatActionDialogKind } from "@/features/chats/components/chatMenu.logic"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { UserAvatar } from "@/components/userAvatar"
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
-import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { Button } from "@/components/ui/button"
+import { DropdownMenu } from "@/components/ui/dropdown-menu"
+import { RowMenuTrigger } from "@/components/rowMenuTrigger"
 
 export interface ChatRowProps {
 	chat: Chat
@@ -104,32 +105,13 @@ export function ChatRow({
 							// aria-current is a different fact from aria-selected (which lives on the option
 							// container): this is the routed conversation, not necessarily a selected one.
 							aria-current={selected ? "page" : undefined}
-							onClick={event => {
-								// Ctrl/Cmd/Shift held: this is a selection gesture, not a navigation intent —
-								// preventDefault blocks BOTH the router's own SPA navigate (which already skips
-								// itself on a modified click) AND the browser's native "open in new tab" default
-								// a real anchor would otherwise still run. A plain click falls through unprevented
-								// so navigation proceeds exactly as before, alongside collapsing the selection to
-								// just this chat (drive/notes' own plain-click-selects-one semantics).
-								if (event.metaKey || event.ctrlKey || event.shiftKey) {
-									event.preventDefault()
-								}
-
-								onPointerSelect(event)
-							}}
+							onClick={selectionAwareLinkClick(onPointerSelect)}
 							className="flex h-full min-w-0 flex-1 items-center gap-2.5 rounded-lg text-left focus-ring-row outline-none"
 						>
-							<Avatar>
-								{/* crossOrigin: require-corp COEP needs a CORS-mode request for this cross-origin
-								    egest url (see avatarCard.tsx's matching comment for the verified detail). */}
-								{avatarUrl !== undefined ? (
-									<AvatarImage
-										src={avatarUrl}
-										crossOrigin="anonymous"
-									/>
-								) : null}
-								<AvatarFallback>{name.trim().charAt(0).toUpperCase() || "?"}</AvatarFallback>
-							</Avatar>
+							<UserAvatar
+								src={avatarUrl}
+								name={name}
+							/>
 							<div className="flex min-w-0 flex-1 flex-col">
 								<div className="flex min-w-0 items-center gap-1.5">
 									{chat.muted ? (
@@ -174,24 +156,9 @@ export function ChatRow({
 							</div>
 						</Link>
 						<DropdownMenu>
-							<DropdownMenuTrigger
-								render={
-									<Button
-										variant="ghost"
-										size="icon-xs"
-										aria-label={t("chatItemMenuTrigger")}
-										// Coarse-pointer fallback — see DriveRow's identical trigger.
-										className="shrink-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 aria-expanded:opacity-100 pointer-coarse:size-8 pointer-coarse:opacity-100 pointer-coarse:[&_svg:not([class*='size-'])]:size-4"
-										onClick={event => {
-											// The button is a sibling of the Link now, not a descendant, so a click here
-											// can never bubble into a navigation — this only stops it reaching the row
-											// div's own onContextMenu, mirroring noteRow.tsx's matching trigger.
-											event.stopPropagation()
-										}}
-									>
-										<MoreHorizontalIcon />
-									</Button>
-								}
+							<RowMenuTrigger
+								label={t("chatItemMenuTrigger")}
+								reveal="plain"
 							/>
 							<ChatDropdownMenuContent
 								chat={chat}

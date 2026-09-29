@@ -39,5 +39,3 @@ export function ChatsSyncHost(): null {
 
 	return null
 }
-
-export default ChatsSyncHost

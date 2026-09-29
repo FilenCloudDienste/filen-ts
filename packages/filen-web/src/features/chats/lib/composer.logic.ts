@@ -1,5 +1,6 @@
 import type { ChatMessage, ChatMessagePartial, ChatParticipant } from "@filen/sdk-rs"
 import { contactDisplayName } from "@filen/shared"
+import { matchesContactSearch } from "@/features/contacts/components/contactsList.logic"
 
 // Pure, testable core of the chat composer — a port of filen-mobile's input send()/autocomplete logic
 // (features/chats/components/chat/input/*). No React/store/IO here; composer.tsx is the thin shell that
@@ -163,7 +164,7 @@ export function filterMentionParticipants(
 	query: string,
 	currentUserId: bigint | undefined
 ): ChatParticipant[] {
-	const normalized = query.toLowerCase().trim()
+	const normalized = query.trim().toLowerCase()
 
 	return participants
 		.filter(participant => {
@@ -171,13 +172,7 @@ export function filterMentionParticipants(
 				return false
 			}
 
-			if (normalized.length === 0) {
-				return true
-			}
-
-			return (
-				contactDisplayName(participant).toLowerCase().includes(normalized) || participant.email.toLowerCase().includes(normalized)
-			)
+			return matchesContactSearch(participant, normalized)
 		})
 		.sort((a, b) => {
 			const an = contactDisplayName(a).toLowerCase()

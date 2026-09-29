@@ -38,6 +38,10 @@ describe("errorLabel", () => {
 		expect(errorLabel(dto)).toBe("server said boom")
 	})
 
+	it("normalises a raw rejection before labelling it", () => {
+		expect(errorLabel(new Error("socket closed"))).toBe("socket closed")
+	})
+
 	it("falls back to labelFirst when the DTO carries no kind at all", () => {
 		const dto: ErrorDTO = { species: "plain", message: "plain failure", label: "plain failure" }
 

@@ -1,12 +1,5 @@
 import { describe, expect, it } from "vitest"
-import {
-	tierLabelKey,
-	referralLink,
-	referralEarnedStorage,
-	formatBillingCost,
-	formatBillingDate,
-	subscriptionStatus
-} from "@/features/settings/lib/billing"
+import { tierLabelKey, referralLink, referralEarnedStorage, formatBillingCost, subscriptionStatus } from "@/features/settings/lib/billing"
 
 describe("tierLabelKey (account-plans-stack rule: derived from isPremium only)", () => {
 	it("Free for a non-premium account", () => {
@@ -42,12 +35,6 @@ describe("formatBillingCost", () => {
 	it("formats a plain number as a euro amount with two decimals", () => {
 		expect(formatBillingCost(9.9)).toBe("€9.90")
 		expect(formatBillingCost(0)).toBe("€0.00")
-	})
-})
-
-describe("formatBillingDate", () => {
-	it("formats an ISO-8601 DateTime<Utc> string into a short localized date", () => {
-		expect(formatBillingDate("2026-01-15T00:00:00Z")).toMatch(/2026/)
 	})
 })
 

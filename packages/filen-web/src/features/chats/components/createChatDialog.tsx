@@ -1,24 +1,17 @@
-import { useState, type ReactNode } from "react"
+import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
-import { CheckIcon, SearchXIcon, UsersIcon } from "lucide-react"
-import type { DialogRoot } from "@base-ui/react/dialog"
 import type { Chat } from "@filen/sdk-rs"
 import { createChat } from "@/features/chats/lib/actions"
 import { useContactsQuery } from "@/features/contacts/queries/contacts"
-import { togglePickerContact, resolveSelectedContacts } from "@/features/drive/components/contactPickerDialog.logic"
-import { filterContactsBySearch } from "@/features/contacts/components/contactsList.logic"
-import { ContactRow } from "@/features/contacts/components/contactRow"
-import { ListFilterInput } from "@/components/listFilterInput"
-import { asErrorDTO } from "@/lib/sdk/errors"
+import { togglePickerContact, resolveSelectedContacts } from "@/features/contacts/lib/contactPicker.logic"
+import { ContactPickerList } from "@/features/contacts/components/contactPickerList"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { useIsOnline } from "@/lib/useIsOnline"
-import { shouldForwardOpenChange } from "@/components/dialogs/dismissal.logic"
+import { pendingGuardedOpenChange } from "@/components/dialogs/dismissal.logic"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
-import { LoadingState } from "@/components/loadingState"
-import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 
 export interface CreateChatDialogProps {
 	onClose: () => void
@@ -28,12 +21,12 @@ export interface CreateChatDialogProps {
 }
 
 // New-conversation contact picker — mounted-when-active by the sidebar's "New chat" button via
-// useChatDialogHost's "create" kind. Multi-selects from the established contact list (reusing
-// ContactRow's avatar/name/presence visuals, same as drive's ContactPickerDialog) and calls createChat
-// with every chosen contact. Picker treats 0 selections as cancel — createChat is NEVER called with an
-// empty array (the SDK sees no call at all until at least one contact is selected), matching both
-// mobile and old-web. The zero-contacts FREE e2e account lands on this dialog's own
-// empty state, never a crash — the one thing this flow is confidently e2e-provable up to.
+// useChatDialogHost's "create" kind. Multi-selects from the established contact list (ContactPickerList,
+// same as drive's ContactPickerDialog) and calls createChat with every chosen contact. Picker treats 0
+// selections as cancel — createChat is NEVER called with an empty array (the SDK sees no call at all
+// until at least one contact is selected), matching both mobile and old-web. The zero-contacts FREE e2e
+// account lands on this dialog's own empty state, never a crash — the one thing this flow is
+// confidently e2e-provable up to.
 export function CreateChatDialog({ onClose, onCreated }: CreateChatDialogProps) {
 	const { t } = useTranslation(["chats", "contacts", "common"])
 	const isOnline = useIsOnline()
@@ -43,18 +36,12 @@ export function CreateChatDialog({ onClose, onCreated }: CreateChatDialogProps) 
 	const [filter, setFilter] = useState("")
 
 	const contacts = contactsQuery.data?.contacts ?? []
-	const filteredContacts = filterContactsBySearch(contacts, filter)
 
-	function handleOpenChange(next: boolean, details: DialogRoot.ChangeEventDetails): void {
-		if (!shouldForwardOpenChange(next, pending)) {
-			details.cancel()
-			return
-		}
-
+	const handleOpenChange = pendingGuardedOpenChange(pending, next => {
 		if (!next) {
 			onClose()
 		}
-	}
+	})
 
 	function toggle(uuid: string): void {
 		setSelected(prev => togglePickerContact(prev, uuid))
@@ -79,86 +66,6 @@ export function CreateChatDialog({ onClose, onCreated }: CreateChatDialogProps) 
 		onCreated(outcome.item)
 	}
 
-	function renderBody(): ReactNode {
-		if (contactsQuery.status === "pending") {
-			return <LoadingState size="md" />
-		}
-
-		if (contactsQuery.status === "error") {
-			return (
-				<Empty>
-					<EmptyHeader>
-						<EmptyMedia>
-							<UsersIcon />
-						</EmptyMedia>
-						<EmptyTitle>{t("contacts:contactsLoadError")}</EmptyTitle>
-						<EmptyDescription>{errorLabel(asErrorDTO(contactsQuery.error))}</EmptyDescription>
-					</EmptyHeader>
-				</Empty>
-			)
-		}
-
-		// The zero-contacts FREE account lands here — a clean empty state, never a crash.
-		if (contacts.length === 0) {
-			return (
-				<Empty>
-					<EmptyHeader>
-						<EmptyMedia>
-							<UsersIcon />
-						</EmptyMedia>
-						<EmptyTitle>{t("contacts:contactsEmptyTitle")}</EmptyTitle>
-						<EmptyDescription>{t("contacts:contactsEmptyBody")}</EmptyDescription>
-					</EmptyHeader>
-				</Empty>
-			)
-		}
-
-		// A non-matching filter gets its own "no results" state.
-		if (filteredContacts.length === 0) {
-			return (
-				<Empty>
-					<EmptyHeader>
-						<EmptyMedia>
-							<SearchXIcon />
-						</EmptyMedia>
-						<EmptyTitle>{t("contacts:contactsSearchNoResultsTitle")}</EmptyTitle>
-					</EmptyHeader>
-				</Empty>
-			)
-		}
-
-		return (
-			<div
-				role="listbox"
-				aria-multiselectable="true"
-				aria-label={t("contacts:contactsSectionContacts")}
-				className="flex flex-1 flex-col gap-0.5 overflow-y-auto p-2"
-			>
-				{filteredContacts.map(contact => {
-					const isSelected = selected.has(contact.uuid)
-
-					return (
-						<ContactRow
-							key={contact.uuid}
-							contact={contact}
-							selected={isSelected}
-							onToggleSelect={() => {
-								toggle(contact.uuid)
-							}}
-						>
-							{isSelected ? (
-								<CheckIcon
-									aria-hidden="true"
-									className="size-4 shrink-0 text-primary"
-								/>
-							) : null}
-						</ContactRow>
-					)
-				})}
-			</div>
-		)
-	}
-
 	const canSubmit = selected.size > 0 && !pending && isOnline
 
 	return (
@@ -174,17 +81,16 @@ export function CreateChatDialog({ onClose, onCreated }: CreateChatDialogProps) 
 					<DialogTitle>{t("chatCreateDialogTitle")}</DialogTitle>
 					<DialogDescription>{t("chatCreateDialogBody")}</DialogDescription>
 				</DialogHeader>
-				{contacts.length > 0 ? (
-					<ListFilterInput
-						value={filter}
-						onChange={setFilter}
-						placeholder={t("contacts:contactsSearchPlaceholder")}
-						ariaLabel={t("contacts:contactsSearchPlaceholder")}
-					/>
-				) : null}
-				<div className="flex h-72 flex-col overflow-hidden rounded-xl ring-1 ring-foreground/5 dark:ring-foreground/10">
-					{renderBody()}
-				</div>
+				<ContactPickerList
+					contactsQuery={contactsQuery}
+					filter={filter}
+					onFilterChange={setFilter}
+					selected={selected}
+					onToggle={toggle}
+					ariaLabel={t("contacts:contactsSectionContacts")}
+					emptyTitle={t("contacts:contactsEmptyTitle")}
+					emptyDescription={t("contacts:contactsEmptyBody")}
+				/>
 				<DialogFooter>
 					<Button
 						variant="outline"

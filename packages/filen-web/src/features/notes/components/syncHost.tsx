@@ -41,5 +41,3 @@ export function SyncHost(): null {
 
 	return null
 }
-
-export default SyncHost

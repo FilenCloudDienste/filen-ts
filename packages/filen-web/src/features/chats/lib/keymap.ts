@@ -4,5 +4,5 @@ import type { ActionDef } from "@/lib/keymap/registry"
 // visible (search-filtered) decryptable conversation, Escape clears the selection.
 export const CHATS_ACTIONS: readonly ActionDef[] = [
 	{ id: "chats.selectAll", defaultCombo: "mod+a", scope: "chats", descriptionKey: "chats:chatsCommandSelectAll" },
-	{ id: "chats.clearSelection", defaultCombo: "escape", scope: "chats", descriptionKey: "chats:chatsCommandClearSelection" }
+	{ id: "chats.clearSelection", defaultCombo: "escape", scope: "chats", descriptionKey: "common:clearSelection" }
 ]

@@ -89,15 +89,6 @@ const UNLISTED = testUuid("unlisted")
 let rootCounter = 0
 let root: UuidStr
 
-function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
-	let resolve!: (value: T) => void
-	const promise = new Promise<T>(r => {
-		resolve = r
-	})
-
-	return { promise, resolve }
-}
-
 function wrapper({ children }: { children: ReactNode }) {
 	return createElement(QueryClientProvider, { client: queryClient, children })
 }
@@ -228,7 +219,7 @@ describe("photos listing request counts", () => {
 	})
 
 	it("a walk a drop interrupts doesn't count, even once the socket is back", async () => {
-		const pending = deferred<NormalDirsAndFiles>()
+		const pending = Promise.withResolvers<NormalDirsAndFiles>()
 
 		listPhotosRecursive.mockImplementationOnce(() => pending.promise)
 		mountListing()
@@ -291,7 +282,7 @@ describe("photos listing request counts", () => {
 
 	it("a local patch that cancels a walk of the mounted listing walks again at once", async () => {
 		const view = await mountRead()
-		const pending = deferred<NormalDirsAndFiles>()
+		const pending = Promise.withResolvers<NormalDirsAndFiles>()
 
 		listPhotosRecursive.mockImplementationOnce(() => pending.promise)
 		invalidatePhotosListing(null)
@@ -315,7 +306,7 @@ describe("photos listing request counts", () => {
 
 	it("a local patch that cancels a walk with a rewalk queued walks once more, not twice", async () => {
 		await mountRead()
-		const pending = deferred<NormalDirsAndFiles>()
+		const pending = Promise.withResolvers<NormalDirsAndFiles>()
 
 		listPhotosRecursive.mockImplementationOnce(() => pending.promise)
 		invalidatePhotosListing(null)
@@ -361,7 +352,7 @@ describe("photos listing favorites", () => {
 	it("a favorite during a walk flips the flag at once, and the walk returns it flipped without walking again", async () => {
 		await mountRead()
 
-		const pending = deferred<NormalDirsAndFiles>()
+		const pending = Promise.withResolvers<NormalDirsAndFiles>()
 
 		listPhotosRecursive.mockImplementationOnce(() => pending.promise)
 		invalidatePhotosListing(null)
@@ -378,7 +369,7 @@ describe("photos listing favorites", () => {
 	})
 
 	it("a favorite during the first walk, before the listing has rows, lands in what the walk returns", async () => {
-		const pending = deferred<NormalDirsAndFiles>()
+		const pending = Promise.withResolvers<NormalDirsAndFiles>()
 
 		listPhotosRecursive.mockImplementationOnce(() => pending.promise)
 		mountListing()
@@ -394,7 +385,7 @@ describe("photos listing favorites", () => {
 	it("a favorite on a new photo, during the walk its upload set off, lands in what that walk returns", async () => {
 		await mountRead()
 
-		const pending = deferred<NormalDirsAndFiles>()
+		const pending = Promise.withResolvers<NormalDirsAndFiles>()
 
 		listPhotosRecursive.mockImplementationOnce(() => pending.promise)
 		handleDriveEvent(driveEvent({ type: "fileNew", file: mockFile(UNLISTED, B) }))
@@ -415,7 +406,7 @@ describe("photos listing favorites", () => {
 	it("the latest of several flips during one walk wins", async () => {
 		await mountRead()
 
-		const pending = deferred<NormalDirsAndFiles>()
+		const pending = Promise.withResolvers<NormalDirsAndFiles>()
 
 		listPhotosRecursive.mockImplementationOnce(() => pending.promise)
 		invalidatePhotosListing(null)
@@ -433,7 +424,7 @@ describe("photos listing favorites", () => {
 	it("a flip reaches only the walk it lands during, never a later one", async () => {
 		await mountRead()
 
-		const pending = deferred<NormalDirsAndFiles>()
+		const pending = Promise.withResolvers<NormalDirsAndFiles>()
 
 		listPhotosRecursive.mockImplementationOnce(() => pending.promise)
 		invalidatePhotosListing(null)
@@ -583,7 +574,7 @@ describe("photos listing socket scoping", () => {
 	it("trashing a listed photo during a walk walks once more after it", async () => {
 		await mountRead()
 
-		const pending = deferred<NormalDirsAndFiles>()
+		const pending = Promise.withResolvers<NormalDirsAndFiles>()
 
 		listPhotosRecursive.mockImplementationOnce(() => pending.promise)
 		invalidatePhotosListing(null)
@@ -618,7 +609,7 @@ describe("photos listing socket scoping", () => {
 	it("an event during a walk walks once more after it, without asking", async () => {
 		await mountRead()
 
-		const pending = deferred<NormalDirsAndFiles>()
+		const pending = Promise.withResolvers<NormalDirsAndFiles>()
 
 		listPhotosRecursive.mockImplementationOnce(() => pending.promise)
 		invalidatePhotosListing(null)
@@ -633,7 +624,7 @@ describe("photos listing socket scoping", () => {
 	it("a burst of events during a walk queues one more walk, not one per event", async () => {
 		await mountRead()
 
-		const pending = deferred<NormalDirsAndFiles>()
+		const pending = Promise.withResolvers<NormalDirsAndFiles>()
 
 		listPhotosRecursive.mockImplementationOnce(() => pending.promise)
 		invalidatePhotosListing(null)
@@ -653,8 +644,8 @@ describe("photos listing socket scoping", () => {
 	it("a scope check that resolves during a walk begun after its event neither restarts nor repeats it", async () => {
 		await mountRead()
 
-		const check = deferred<boolean>()
-		const pending = deferred<NormalDirsAndFiles>()
+		const check = Promise.withResolvers<boolean>()
+		const pending = Promise.withResolvers<NormalDirsAndFiles>()
 
 		isOutsidePhotosRoot.mockImplementationOnce(() => check.promise)
 		handleDriveEvent(driveEvent({ type: "fileNew", file: mockFile(UNLISTED, B) }))

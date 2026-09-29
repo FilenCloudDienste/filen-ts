@@ -25,5 +25,3 @@ export const useChatTypingStore = create<ChatTypingStore>(set => ({
 		set(state => ({ typing: typeof fn === "function" ? fn(state.typing) : fn }))
 	}
 }))
-
-export default useChatTypingStore

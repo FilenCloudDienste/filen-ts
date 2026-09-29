@@ -1,10 +1,10 @@
 import * as Comlink from "comlink"
-import type { Dir, DirColor, File, FileVersion, UserInfo } from "@filen/sdk-rs"
+import type { Dir, DirColor, File, FileVersion } from "@filen/sdk-rs"
 import { removeByUuid } from "@filen/shared"
 import { sdkApi } from "@/lib/sdk/client"
 import { i18n } from "@/lib/i18n"
 import { queryClient } from "@/queries/client"
-import { ACCOUNT_QUERY_KEY, markAccountStale } from "@/queries/account"
+import { accountQueryGet, markAccountStale } from "@/queries/account"
 import {
 	driveListingQueryKey,
 	driveListingQueryUpdate,
@@ -31,9 +31,9 @@ import {
 	type DriveItem
 } from "@/features/drive/lib/item"
 import { dropFromClipboard, followClipboardItem } from "@/features/drive/lib/clipboardSync"
-import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
-import { runBulk, type BulkOutcome } from "@/features/drive/lib/bulk"
-import { runOp, type ActionOutcome as GenericActionOutcome, type VoidActionOutcome } from "@/lib/actions/outcome"
+import { asErrorDTO, plainErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
+import { runBulk, runBulkOutcomes, type BulkOutcome } from "@/lib/actions/bulk"
+import { attemptOp, runOp, type ActionOutcome as GenericActionOutcome, type VoidActionOutcome } from "@/lib/actions/outcome"
 import { emitBranchChange } from "@/features/drive/lib/branchChanges"
 
 export type { VoidActionOutcome }
@@ -50,15 +50,7 @@ export type ActionOutcome = GenericActionOutcome<DriveItem>
 // .logic.ts split keeps previewSave.logic.ts itself framework-free, so its rootUuid dependency is
 // resolved by the caller instead, same as every other action here.
 export function currentRootUuid(): string {
-	return queryClient.getQueryData<UserInfo>(ACCOUNT_QUERY_KEY)?.rootDirUuid ?? ""
-}
-
-// Attribute-only refresh (a flag or color changed; identity and name did not) — replaces an
-// existing row in place, never appends. Deliberately not upsertDriveItem: patched globally, an
-// upsert would wrongly ADD the item to every currently-cached listing that never held it (trash,
-// favorites, a sibling directory) instead of leaving an absent row absent.
-export function replaceIfPresent(items: DriveItem[], updated: DriveItem): DriveItem[] {
-	return items.map(item => (item.data.uuid === updated.data.uuid ? updated : item))
+	return accountQueryGet()?.rootDirUuid ?? ""
 }
 
 // A directory row keeps the colour it holds: an action's result carries the colour of the row the action
@@ -86,16 +78,15 @@ function withCurrentColor(item: DriveItem): { item: DriveItem; colorKnown: boole
 
 export async function renameItem(item: DriveItem, newName: string): Promise<ActionOutcome> {
 	const base = asDirectoryOrFile(item)
-	let renamed: Dir | File
-	try {
-		renamed = await runOp<Dir | File>(
-			base.type === "directory" ? sdkApi.renameDirectory(base.data, newName) : sdkApi.renameFile(base.data, newName)
-		)
-	} catch (e) {
-		return { status: "error", dto: asErrorDTO(e) }
+	const outcome = await attemptOp<Dir | File>(
+		base.type === "directory" ? sdkApi.renameDirectory(base.data, newName) : sdkApi.renameFile(base.data, newName)
+	)
+
+	if (outcome.status === "error") {
+		return outcome
 	}
 
-	const updated = narrowItem(renamed)
+	const updated = narrowItem(outcome.item)
 	// A rename never changes listing membership (same uuid, same parent) — a global replace-in-place covers
 	// the drive-parent listing too, and also fans the new name out to a favorited/recent/shared copy of the
 	// same row, which a narrow per-parent patch never reached; each row takes only the name.
@@ -265,10 +256,10 @@ export function deleteItemsPermanently(items: DriveItem[]): Promise<BulkOutcome<
 // ── Empty trash ──────────────────────────────────────────────────────────
 
 export async function emptyTrash(): Promise<VoidActionOutcome> {
-	try {
-		await runOp(sdkApi.emptyTrash())
-	} catch (e) {
-		return { status: "error", dto: asErrorDTO(e) }
+	const outcome = await attemptOp(sdkApi.emptyTrash())
+
+	if (outcome.status === "error") {
+		return outcome
 	}
 
 	// Trashed items live in no other listing, so this alone empties the whole surface.
@@ -314,12 +305,13 @@ function applyFavoritePatch(favorited: boolean, result: DriveItem): void {
 export async function toggleFavorite(item: DriveItem): Promise<ActionOutcome> {
 	const nextFavorited = !item.data.favorited
 
-	let result: DriveItem
-	try {
-		result = narrowItem(await runOp<Dir | File>(sdkApi.setFavorited(item.data, nextFavorited)))
-	} catch (e) {
-		return { status: "error", dto: asErrorDTO(e) }
+	const outcome = await attemptOp<Dir | File>(sdkApi.setFavorited(item.data, nextFavorited))
+
+	if (outcome.status === "error") {
+		return outcome
 	}
+
+	const result = narrowItem(outcome.item)
 
 	applyFavoritePatch(nextFavorited, result)
 
@@ -342,12 +334,13 @@ export function setFavoritedItems(items: DriveItem[], favorited: boolean): Promi
 // ── Color ────────────────────────────────────────────────────────────────
 
 export async function setColor(dir: DirectoryItem, color: DirColor): Promise<ActionOutcome> {
-	let colored: Dir
-	try {
-		colored = await runOp(sdkApi.setDirectoryColor(dir.data, color))
-	} catch (e) {
-		return { status: "error", dto: asErrorDTO(e) }
+	const outcome = await attemptOp(sdkApi.setDirectoryColor(dir.data, color))
+
+	if (outcome.status === "error") {
+		return outcome
 	}
+
+	const colored = outcome.item
 
 	const updated = narrowItem(colored)
 	driveListingQueryUpdateGlobal({ type: "replace", uuid: updated.data.uuid, replace: row => withColor(row, colored.color) })
@@ -359,12 +352,13 @@ export async function setColor(dir: DirectoryItem, color: DirColor): Promise<Act
 // ── File versions ────────────────────────────────────────────────────────
 
 export async function restoreVersion(file: FileItem, version: FileVersion): Promise<ActionOutcome> {
-	let restored: File
-	try {
-		restored = await runOp(sdkApi.restoreFileVersionOp(file.data, version))
-	} catch (e) {
-		return { status: "error", dto: asErrorDTO(e) }
+	const outcome = await attemptOp(sdkApi.restoreFileVersionOp(file.data, version))
+
+	if (outcome.status === "error") {
+		return outcome
 	}
+
+	const restored = outcome.item
 
 	// Content change, not a move: the returned file carries a ROTATED uuid, replacing the old one in
 	// the SAME listing. upsertDriveItem's own dedup can't be relied on alone — an undecryptable row
@@ -401,14 +395,13 @@ function isLiveVersion(file: FileItem, version: FileVersion): boolean {
 
 export async function deleteVersion(file: FileItem, version: FileVersion): Promise<VoidActionOutcome> {
 	if (isLiveVersion(file, version)) {
-		const message = i18n.t("drive:driveVersionsDeleteLiveBlocked")
-		return { status: "error", dto: { species: "plain", message, label: message } }
+		return { status: "error", dto: plainErrorDTO(i18n.t("drive:driveVersionsDeleteLiveBlocked")) }
 	}
 
-	try {
-		await runOp(sdkApi.deleteFileVersionOp(version))
-	} catch (e) {
-		return { status: "error", dto: asErrorDTO(e) }
+	const outcome = await attemptOp(sdkApi.deleteFileVersionOp(version))
+
+	if (outcome.status === "error") {
+		return outcome
 	}
 
 	markAccountStale()
@@ -422,14 +415,7 @@ export async function deleteVersion(file: FileItem, version: FileVersion): Promi
 // failure never aborting the rest — same partial-success shape as every other bulk helper in this
 // file.
 export function deleteVersions(file: FileItem, versions: FileVersion[]): Promise<BulkOutcome<FileVersion>> {
-	return runBulk(versions, async version => {
-		const outcome = await deleteVersion(file, version)
-
-		if (outcome.status === "error") {
-			// eslint-disable-next-line @typescript-eslint/only-throw-error -- runBulk's per-item catch expects a plain ErrorDTO, mirrors import.ts's own convention
-			throw outcome.dto
-		}
-	})
+	return runBulkOutcomes(versions, version => deleteVersion(file, version))
 }
 
 // ── Public link ──────────────────────────────────────────────────────────
@@ -530,7 +516,7 @@ export async function disableLink(item: DriveItem, current: DriveItemLinkStatus)
 // it — and a file's link replaced meanwhile is removed as it now is.
 export function disableLinks(items: DriveItem[]): Promise<BulkOutcome<DriveItem>> {
 	return batchListingPatches(() =>
-		runBulk(items, async item => {
+		runBulkOutcomes(items, async (item): Promise<VoidActionOutcome> => {
 			const isDirectory = asDirectoryOrFile(item).type === "directory"
 			const held = isDirectory ? undefined : heldLinkStatus(item)
 			let failure: VoidActionOutcome | undefined
@@ -539,7 +525,7 @@ export function disableLinks(items: DriveItem[]): Promise<BulkOutcome<DriveItem>
 				const outcome = await disableLinkForItem(item, held)
 
 				if (outcome.status === "success") {
-					return
+					return outcome
 				}
 
 				failure = outcome
@@ -549,18 +535,13 @@ export function disableLinks(items: DriveItem[]): Promise<BulkOutcome<DriveItem>
 
 			if (current === null) {
 				flatListingQueryUpdate("links", { type: "remove", uuid: item.data.uuid })
-				return
+
+				return { status: "success" }
 			}
 
 			// Tried again only with a file link replaced meanwhile: a directory's removal takes no status, and
 			// the same link fails the same way.
-			const outcome =
-				failure !== undefined && (isDirectory || sameFileLink(held, current)) ? failure : await disableLinkForItem(item, current)
-
-			if (outcome.status === "error") {
-				// eslint-disable-next-line @typescript-eslint/only-throw-error -- runBulk's per-item catch expects a plain ErrorDTO, mirrors import.ts's own convention
-				throw outcome.dto
-			}
+			return failure !== undefined && (isDirectory || sameFileLink(held, current)) ? failure : disableLinkForItem(item, current)
 		})
 	)
 }

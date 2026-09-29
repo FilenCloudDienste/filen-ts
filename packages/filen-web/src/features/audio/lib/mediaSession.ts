@@ -1,5 +1,6 @@
 import type { ElementSample, QueueTrack } from "@/features/audio/store/audioQueue"
 import { THUMB_MAX_DIM } from "@/features/drive/lib/thumbnails.logic"
+import { trackDisplayTitle } from "@/features/audio/lib/trackTags.logic"
 
 // The Media Session bridge — wires OS media keys / lock-screen controls (navigator.mediaSession) to the
 // audio engine, both directions, entirely feature-detected so Safari/Firefox gaps degrade to no-ops.
@@ -132,7 +133,7 @@ export function mediaSessionMetadataFor(
 		return null
 	}
 
-	return { title: tags?.title ?? track.name, artist: tags?.artist ?? "", album: tags?.album ?? "" }
+	return { title: trackDisplayTitle(tags, track.name), artist: tags?.artist ?? "", album: tags?.album ?? "" }
 }
 
 // The subset of navigator.mediaSession this module touches — declared structurally so a test can pass a

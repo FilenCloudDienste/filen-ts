@@ -1,19 +1,10 @@
-import { listboxRange } from "@/features/drive/lib/listbox"
+import { isSelectionGesture, listboxRangeItems, type ClickModifiers } from "@/features/drive/lib/listbox"
 import { type DriveItem } from "@/features/drive/lib/item"
 import type { PhotoItem } from "@/features/photos/lib/captureSort"
 import { timelineKeyTarget, type PhotosTimeline } from "@/features/photos/lib/timeline"
 
 export interface TileClickIntent {
 	kind: "open" | "select"
-}
-
-// A bare pick of the three modifier flags a click event carries — decoupled from React's own
-// MouseEvent type so this stays a plain function callers can feed a hand-built object into (see
-// photosTileClick.test.ts), the same shape usePhotosSelection's own handlePointerSelect narrows to.
-export interface ClickModifiers {
-	shiftKey: boolean
-	metaKey: boolean
-	ctrlKey: boolean
 }
 
 // A plain click (no modifier) opens the viewer when the grid has no active selection — the whole
@@ -27,7 +18,7 @@ export interface ClickModifiers {
 // modifier-click-never-opens rule (driveTile.tsx only ever opens on a doubleClick, never a modified
 // single one).
 export function resolveTileClickIntent(modifiers: ClickModifiers, hasSelection: boolean): TileClickIntent {
-	if (modifiers.shiftKey || modifiers.metaKey || modifiers.ctrlKey) {
+	if (isSelectionGesture(modifiers)) {
 		return { kind: "select" }
 	}
 
@@ -60,9 +51,7 @@ export function photosRangeSelection(items: readonly PhotoItem[], anchorUuid: st
 	const anchorIndex = anchorUuid === null ? -1 : items.findIndex(existing => existing.data.uuid === anchorUuid)
 	const resolvedAnchor = anchorIndex === -1 ? index : anchorIndex
 
-	return listboxRange(resolvedAnchor, index)
-		.map(rangeIndex => items[rangeIndex])
-		.filter((rangeItem): rangeItem is PhotoItem => rangeItem !== undefined)
+	return listboxRangeItems(items, resolvedAnchor, index)
 }
 
 export type PhotosGridKeyAction = { kind: "move"; target: number } | { kind: "toggle" } | { kind: "open" } | { kind: "none" }

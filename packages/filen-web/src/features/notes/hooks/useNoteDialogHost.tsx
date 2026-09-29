@@ -8,7 +8,7 @@ import { setNoteTitle, deleteNote, leaveNote } from "@/features/notes/lib/action
 import { createNoteTag, renameNoteTag, deleteNoteTag } from "@/features/notes/lib/tags"
 import { createTagForNote, type CreatedTag } from "@/features/notes/lib/createTagForNote"
 import { trashNotes, deleteNotesPermanently, leaveNotes } from "@/features/notes/lib/bulk"
-import { type BulkOutcome } from "@/features/drive/lib/bulk"
+import { type BulkOutcome } from "@/lib/actions/bulk"
 import { toastNotesBulkOutcome } from "@/features/notes/lib/bulkToast"
 import { useNotesSelectionStore } from "@/features/notes/store/useNotesSelectionStore"
 import { errorLabel } from "@/lib/i18n/errorLabel"
@@ -57,7 +57,7 @@ export interface UseNoteDialogHostParams {
 export function useNoteDialogHost({ currentUuid }: UseNoteDialogHostParams): NoteDialogHost {
 	const { t } = useTranslation(["notes", "common"])
 	const navigate = useNavigate()
-	const { activeDialog, setActiveDialog, dialogPending, setDialogPending, isDialogOpen, closeActiveDialog } =
+	const { activeDialog, setActiveDialog, dialogPending, isDialogOpen, closeActiveDialog, runDialogPending, runDialogOutcome } =
 		useDialogHost<ActiveNoteDialog>()
 
 	function openNoteDialog(kind: NoteActionDialogKind, note: Note): void {
@@ -83,50 +83,27 @@ export function useNoteDialogHost({ currentUuid }: UseNoteDialogHostParams): Not
 	}
 
 	async function handleRenameSubmit(note: Note, value: string): Promise<void> {
-		setDialogPending(true)
-		const outcome = await setNoteTitle(note, value)
-		setDialogPending(false)
-
-		if (outcome.status === "error") {
-			toast.error(errorLabel(outcome.dto))
-			return
-		}
-
-		closeActiveDialog()
+		await runDialogOutcome(() => setNoteTitle(note, value))
 	}
 
 	async function handleDeleteConfirm(note: Note): Promise<void> {
-		setDialogPending(true)
-		const outcome = await deleteNote(note, {
-			beforeCacheRemoval: () => {
-				navigateAwayIfCurrent(note)
-			}
-		})
-		setDialogPending(false)
-
-		if (outcome.status === "error") {
-			toast.error(errorLabel(outcome.dto))
-			return
-		}
-
-		closeActiveDialog()
+		await runDialogOutcome(() =>
+			deleteNote(note, {
+				beforeCacheRemoval: () => {
+					navigateAwayIfCurrent(note)
+				}
+			})
+		)
 	}
 
 	async function handleLeaveConfirm(note: Note): Promise<void> {
-		setDialogPending(true)
-		const outcome = await leaveNote(note, {
-			beforeCacheRemoval: () => {
-				navigateAwayIfCurrent(note)
-			}
-		})
-		setDialogPending(false)
-
-		if (outcome.status === "error") {
-			toast.error(errorLabel(outcome.dto))
-			return
-		}
-
-		closeActiveDialog()
+		await runDialogOutcome(() =>
+			leaveNote(note, {
+				beforeCacheRemoval: () => {
+					navigateAwayIfCurrent(note)
+				}
+			})
+		)
 	}
 
 	// Shared tail for every bulk-dialog confirm (trashSelected/deleteSelected/leaveSelected): runs
@@ -134,9 +111,7 @@ export function useNoteDialogHost({ currentUuid }: UseNoteDialogHostParams): Not
 	// outcome, and prunes succeeded notes from the selection — a failed one stays selected so the
 	// user can retry without re-selecting. Mirrors useDriveDialogHost's own runBulkDialogAction.
 	async function runBulkDialogAction(notes: Note[], op: (notes: Note[]) => Promise<BulkOutcome<Note>>): Promise<void> {
-		setDialogPending(true)
-		const outcome = await op(notes)
-		setDialogPending(false)
+		const outcome = await runDialogPending(() => op(notes))
 		closeActiveDialog()
 		toastNotesBulkOutcome(outcome)
 		useNotesSelectionStore.getState().removeFromSelection(outcome.succeeded.map(note => note.uuid))
@@ -155,39 +130,17 @@ export function useNoteDialogHost({ currentUuid }: UseNoteDialogHostParams): Not
 	}
 
 	async function handleRenameTagSubmit(tag: NoteTag, value: string): Promise<void> {
-		setDialogPending(true)
-		const outcome = await renameNoteTag(tag, value)
-		setDialogPending(false)
-
-		if (outcome.status === "error") {
-			// Dialog stays open on error (e.g. a reserved name) so the user can fix the name and retry —
-			// same convention as the note rename above.
-			toast.error(errorLabel(outcome.dto))
-			return
-		}
-
-		closeActiveDialog()
+		await runDialogOutcome(() => renameNoteTag(tag, value))
 	}
 
 	async function handleDeleteTagConfirm(tag: NoteTag): Promise<void> {
-		setDialogPending(true)
-		const outcome = await deleteNoteTag(tag)
-		setDialogPending(false)
-
-		if (outcome.status === "error") {
-			toast.error(errorLabel(outcome.dto))
-			return
-		}
-
-		closeActiveDialog()
+		await runDialogOutcome(() => deleteNoteTag(tag))
 	}
 
 	// old-web parity: creating a tag from a note's own menu immediately tags that note too, saving the
 	// user a second interaction.
 	async function handleCreateTagSubmit(dialog: { note: Note; createdTag?: CreatedTag }, name: string): Promise<void> {
-		setDialogPending(true)
-		const outcome = await createTagForNote(dialog.note, name, dialog.createdTag)
-		setDialogPending(false)
+		const outcome = await runDialogPending(() => createTagForNote(dialog.note, name, dialog.createdTag))
 
 		if (outcome.status === "error") {
 			const { created } = outcome
@@ -207,16 +160,7 @@ export function useNoteDialogHost({ currentUuid }: UseNoteDialogHostParams): Not
 	// Standalone tag creation: unlike handleCreateTagSubmit above, there is no note to attach the
 	// new tag to (the whole point — this is reachable with zero notes in the account).
 	async function handleCreateStandaloneTagSubmit(name: string): Promise<void> {
-		setDialogPending(true)
-		const outcome = await createNoteTag(name)
-		setDialogPending(false)
-
-		if (outcome.status === "error") {
-			toast.error(errorLabel(outcome.dto))
-			return
-		}
-
-		closeActiveDialog()
+		await runDialogOutcome(() => createNoteTag(name))
 	}
 
 	function renderActiveDialog(): ReactNode {

@@ -6,10 +6,12 @@ import { sdkApi } from "@/lib/sdk/client"
 import { i18n } from "@/lib/i18n"
 import { runOp, type VoidActionOutcome } from "@/lib/actions/outcome"
 import { asErrorDTO } from "@/lib/sdk/errors"
+import { pipeWorkerToSink } from "@/lib/pipeWorkerToSink"
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
-import { throttle, PROGRESS_THROTTLE_MS } from "@/features/drive/lib/upload"
+import { throttle, PROGRESS_THROTTLE_MS } from "@/lib/throttle"
 import { saveDownload, triggerSwDownload, isPickerCancelled, type SaveTarget, type FsaSaveTarget } from "@/features/drive/lib/saveDownload"
 import { useTransfersStore, type TransfersStore } from "@/features/transfers/store/useTransfersStore"
+import { settleTransferFailure } from "@/features/transfers/lib/settle"
 import { startZipDownload } from "@/features/drive/lib/downloadZip"
 
 // Extracts the SDK AnyFile a download op wants from a DriveItem's file arm. A directory item is a
@@ -90,16 +92,7 @@ export async function runDownload(deps: RunDownloadDeps, args: { item: DriveItem
 	} catch (e) {
 		const dto = asErrorDTO(e)
 
-		if (dto.kind === "Cancelled") {
-			deps.store.settle(id, "cancelled")
-			deps.store.remove(id)
-
-			return { status: "success" }
-		}
-
-		deps.store.settle(id, "error", dto)
-
-		return { status: "error", dto }
+		return settleTransferFailure(deps.store, id, dto) ? { status: "success" } : { status: "error", dto }
 	}
 
 	deps.store.settle(id, "done")
@@ -107,35 +100,10 @@ export async function runDownload(deps: RunDownloadDeps, args: { item: DriveItem
 	return { status: "success" }
 }
 
-// The FSA sink wiring: a main-thread TransformStream bridges the worker call (its `writable` end,
-// Comlink.transfer'd in — the worker pulls decrypted bytes into it) and the real on-disk sink (its
-// `readable` end piped to the FSA writable). COORDINATED TEARDOWN: if the worker call rejects (e.g.
-// cancelTransfer aborted it), the SDK may leave the transferred writable OPEN, so the pipe is aborted
-// here too via the shared AbortSignal — otherwise a naive `readable` consumer hangs forever on an
-// open-but-abandoned stream; `sinkDone` is swallowed on THIS branch only because an abort-induced
-// rejection is expected, not a real failure. The success path awaits the RAW `sinkDone` instead: a
-// genuine close/flush failure (disk full at close, a revoked handle) must reject this function too,
-// not be silently treated as a finished download.
-async function downloadViaFsa(file: AnyFile, transferId: string, save: FsaSaveTarget, onProgress: (bytes: bigint) => void): Promise<void> {
-	const transform = new TransformStream<Uint8Array, Uint8Array>()
-	const teardown = new AbortController()
-	const sinkDone = transform.readable.pipeTo(save.writable, { signal: teardown.signal })
-
-	try {
-		await sdkApi.downloadFileToWriter(
-			file,
-			transferId,
-			Comlink.transfer(transform.writable, [transform.writable]),
-			Comlink.proxy(onProgress)
-		)
-	} catch (e) {
-		teardown.abort()
-		await sinkDone.catch(() => undefined)
-
-		throw e
-	}
-
-	await sinkDone
+function downloadViaFsa(file: AnyFile, transferId: string, save: FsaSaveTarget, onProgress: (bytes: bigint) => void): Promise<void> {
+	return pipeWorkerToSink(save.writable, transferred =>
+		sdkApi.downloadFileToWriter(file, transferId, transferred, Comlink.proxy(onProgress))
+	)
 }
 
 // The real wiring behind RunDownloadDeps.download: branches on SaveTarget.kind, applying

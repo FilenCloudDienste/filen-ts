@@ -12,7 +12,7 @@ import { log } from "@/lib/log"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { EventRow } from "@/features/settings/components/events/eventRow"
 import { EventDetailDialog } from "@/features/settings/components/events/eventDetailDialog"
-import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
+import { EmptyMessage } from "@/components/emptyMessage"
 import { LoadingState } from "@/components/loadingState"
 import { Button } from "@/components/ui/button"
 import { SettingsPanel } from "@/features/settings/components/settingsLayout"
@@ -100,13 +100,10 @@ export function EventsList() {
 	if (blockingQueryError(eventsQuery) !== null) {
 		return (
 			<div className="flex flex-1 flex-col p-6">
-				<Empty>
-					<EmptyHeader>
-						<EmptyMedia>
-							<HistoryIcon />
-						</EmptyMedia>
-						<EmptyTitle>{t("settingsEventsLoadError")}</EmptyTitle>
-					</EmptyHeader>
+				<EmptyMessage
+					icon={HistoryIcon}
+					title={t("settingsEventsLoadError")}
+				>
 					<Button
 						variant="outline"
 						onClick={() => {
@@ -115,7 +112,7 @@ export function EventsList() {
 					>
 						{t("common:tryAgain")}
 					</Button>
-				</Empty>
+				</EmptyMessage>
 			</div>
 		)
 	}
@@ -123,19 +120,15 @@ export function EventsList() {
 	if (events.length === 0) {
 		return (
 			<div className="flex flex-1 flex-col p-6">
-				<Empty>
-					<EmptyHeader>
-						<EmptyMedia>
-							<HistoryIcon />
-						</EmptyMedia>
-						<EmptyTitle>{t("settingsEventsEmptyTitle")}</EmptyTitle>
-						<EmptyDescription>
-							{firstPageErrCount > 0
-								? t("settingsEventsUndecryptable", { count: firstPageErrCount })
-								: t("settingsEventsEmptyDescription")}
-						</EmptyDescription>
-					</EmptyHeader>
-				</Empty>
+				<EmptyMessage
+					icon={HistoryIcon}
+					title={t("settingsEventsEmptyTitle")}
+					description={
+						firstPageErrCount > 0
+							? t("settingsEventsUndecryptable", { count: firstPageErrCount })
+							: t("settingsEventsEmptyDescription")
+					}
+				/>
 			</div>
 		)
 	}

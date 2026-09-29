@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react"
 import { useTranslation } from "react-i18next"
 import { driveItemName } from "@filen/shared"
-import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
+import { driveItemMime, type DriveItem } from "@/features/drive/lib/item"
 import { allowedMediaContentType } from "@/features/preview/lib/mediaType"
 import { isMediaStreamAvailable } from "@/features/preview/lib/previewStream"
 import { streamFailureAction, needsImageTransform } from "@/features/drive/lib/preview.logic"
@@ -12,8 +12,8 @@ import { usePreviewAccessMode } from "@/features/preview/lib/accessMode"
 import { useRawPreview } from "@/features/preview/hooks/useRawPreview"
 import { getThumbnailUrl } from "@/features/drive/lib/thumbnails"
 import { errorLabel } from "@/lib/i18n/errorLabel"
-import { LoadingState } from "@/components/loadingState"
-import { PreviewErrorState } from "@/features/preview/components/previewErrorState"
+import { useObjectUrl } from "@/lib/useObjectUrl"
+import { PreviewErrorState, PreviewGate, PreviewLoading } from "@/features/preview/components/previewErrorState"
 import { type Size, type ZoomTransform, wheelZoom, dragPan, doubleClickZoom } from "@/features/preview/components/imageViewer.logic"
 
 export interface ImageViewerProps {
@@ -193,12 +193,7 @@ function StreamedImage({
 	}
 
 	if (result.status !== "success") {
-		return (
-			<LoadingState
-				size="lg"
-				className="text-inherit"
-			/>
-		)
+		return <PreviewLoading />
 	}
 
 	return (
@@ -220,27 +215,7 @@ function StreamedImage({
 }
 
 function BufferedImageBytes({ bytes, mime, alt }: { bytes: Uint8Array; mime: string | undefined; alt: string }) {
-	const [url, setUrl] = useState<string | null>(null)
-
-	useEffect(() => {
-		// The generic ArrayBufferLike-vs-ArrayBuffer parameter on Uint8Array (TS lib.es2024.arraybuffer)
-		// makes an unparameterized Uint8Array reject BlobPart's stricter ArrayBufferView<ArrayBuffer> —
-		// bytes here is always backed by a real ArrayBuffer (Comlink.transfer of a worker download, never
-		// a SharedArrayBuffer), so this narrows the generic parameter only, not the value.
-		const objectUrl = URL.createObjectURL(new Blob([bytes as Uint8Array<ArrayBuffer>], { type: mime ?? "application/octet-stream" }))
-
-		// Minting the blob URL IS the side effect (a fresh external-system resource requiring a paired
-		// revoke) — there is no value to render until this runs, so it cannot be computed during render. A
-		// useMemo/lazy-useState alternative would recompute under StrictMode's double-invoke with no
-		// cleanup hook to revoke the discarded first URL, leaking it; this effect's own cleanup below is
-		// exactly what makes the double-invoke safe (create/revoke/create, no leak).
-		// eslint-disable-next-line react-hooks/set-state-in-effect -- deliberate, see above
-		setUrl(objectUrl)
-
-		return () => {
-			URL.revokeObjectURL(objectUrl)
-		}
-	}, [bytes, mime])
+	const url = useObjectUrl(bytes, mime)
 
 	if (!url) {
 		return null
@@ -255,17 +230,12 @@ function BufferedImageBytes({ bytes, mime, alt }: { bytes: Uint8Array; mime: str
 }
 
 // Buffered mode (the original whole-buffer behavior, now the fallback): a full-file download,
-// minted/revoked as a blob URL entirely in BufferedImageBytes's own effect so the blob never outlives it.
+// minted/revoked as a blob URL by BufferedImageBytes (useObjectUrl) so the blob never outlives it.
 function BufferedImage({ item, alt }: { item: DriveItem; alt: string }) {
 	const result = usePreviewBytes(item)
 
 	if (result.status === "pending") {
-		return (
-			<LoadingState
-				size="lg"
-				className="text-inherit"
-			/>
-		)
+		return <PreviewLoading />
 	}
 
 	if (result.status === "error") {
@@ -277,8 +247,7 @@ function BufferedImage({ item, alt }: { item: DriveItem; alt: string }) {
 		)
 	}
 
-	const base = asDirectoryOrFile(item)
-	const mime = base.type === "file" ? base.data.decryptedMeta?.mime : undefined
+	const mime = driveItemMime(item)
 
 	return (
 		<BufferedImageBytes
@@ -294,7 +263,7 @@ function BufferedImage({ item, alt }: { item: DriveItem; alt: string }) {
 const heicJpegs = new WeakMap<Uint8Array, Blob>()
 
 // HEIC/HEIF byte stage: pipes the already-downloaded buffer through the lazy-loaded transform and
-// mints/revokes a blob URL from the resulting JPEG, mirroring BufferedImageBytes's own lifecycle
+// mints/revokes a blob URL from the resulting JPEG, mirroring useObjectUrl's lifecycle
 // (minting the URL IS the effect; the cleanup revokes it on unmount/bytes-change).
 function TransformedImageBytes({ bytes, alt }: { bytes: Uint8Array; alt: string }) {
 	const { t } = useTranslation("preview")
@@ -342,12 +311,7 @@ function TransformedImageBytes({ bytes, alt }: { bytes: Uint8Array; alt: string 
 	}, [bytes, retryToken])
 
 	if (state.status === "pending") {
-		return (
-			<LoadingState
-				size="lg"
-				className="text-inherit"
-			/>
-		)
+		return <PreviewLoading />
 	}
 
 	if (state.status === "error") {
@@ -374,49 +338,21 @@ function TransformedImageBytes({ bytes, alt }: { bytes: Uint8Array; alt: string 
 // BufferedImage, then hands the bytes to TransformedImageBytes for the decode+re-encode step before
 // anything renders.
 function TransformedImage({ item, alt }: { item: DriveItem; alt: string }) {
-	const result = usePreviewBytes(item)
-
-	if (result.status === "pending") {
-		return (
-			<LoadingState
-				size="lg"
-				className="text-inherit"
-			/>
-		)
-	}
-
-	if (result.status === "error") {
-		return (
-			<PreviewErrorState
-				message={errorLabel(result.dto)}
-				onRetry={result.refetch}
-			/>
-		)
-	}
-
 	return (
-		<TransformedImageBytes
-			bytes={result.bytes}
-			alt={alt}
-		/>
+		<PreviewGate result={usePreviewBytes(item)}>
+			{ready => (
+				<TransformedImageBytes
+					bytes={ready.bytes}
+					alt={alt}
+				/>
+			)}
+		</PreviewGate>
 	)
 }
 
-// A Blob already in hand (a RAW's embedded preview), minted/revoked as a blob URL with the same
-// effect-owned lifecycle as BufferedImageBytes.
+// A Blob already in hand (a RAW's embedded preview).
 function BlobImage({ blob, alt }: { blob: Blob; alt: string }) {
-	const [url, setUrl] = useState<string | null>(null)
-
-	useEffect(() => {
-		const objectUrl = URL.createObjectURL(blob)
-
-		// eslint-disable-next-line react-hooks/set-state-in-effect -- minting the URL is the effect, see BufferedImageBytes
-		setUrl(objectUrl)
-
-		return () => {
-			URL.revokeObjectURL(objectUrl)
-		}
-	}, [blob])
+	const url = useObjectUrl(blob)
 
 	if (!url) {
 		return null
@@ -467,12 +403,7 @@ function RawThumbnailFallback({ item, alt }: { item: DriveItem; alt: string }) {
 	}, [item, accessMode])
 
 	if (state.status === "pending") {
-		return (
-			<LoadingState
-				size="lg"
-				className="text-inherit"
-			/>
-		)
+		return <PreviewLoading />
 	}
 
 	if (state.url === null) {
@@ -497,40 +428,22 @@ function RawThumbnailFallback({ item, alt }: { item: DriveItem; alt: string }) {
 // Camera RAW: no browser decodes the container, so the page shows the JPEG the camera embedded in it,
 // extracted by the SDK (useRawPreview). Never the SW route and never a whole-file download.
 export function RawImageViewer({ item, alt }: ImageViewerProps) {
-	const result = useRawPreview(item)
-
-	if (result.status === "pending") {
-		return (
-			<LoadingState
-				size="lg"
-				className="text-inherit"
-			/>
-		)
-	}
-
-	if (result.status === "error") {
-		return (
-			<PreviewErrorState
-				message={errorLabel(result.dto)}
-				onRetry={result.refetch}
-			/>
-		)
-	}
-
-	if (result.preview.type === "noPreview") {
-		return (
-			<RawThumbnailFallback
-				item={item}
-				alt={alt}
-			/>
-		)
-	}
-
 	return (
-		<BlobImage
-			blob={result.preview.blob}
-			alt={alt}
-		/>
+		<PreviewGate result={useRawPreview(item)}>
+			{ready =>
+				ready.preview.type === "noPreview" ? (
+					<RawThumbnailFallback
+						item={item}
+						alt={alt}
+					/>
+				) : (
+					<BlobImage
+						blob={ready.preview.blob}
+						alt={alt}
+					/>
+				)
+			}
+		</PreviewGate>
 	)
 }
 

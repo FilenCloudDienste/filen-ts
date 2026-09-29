@@ -25,11 +25,3 @@ export const TAG_DEBRIS_NAME_PREFIXES: readonly string[] = ["e2e-tag-"]
 // creation so any conversation leaked by a spec that dies before its own teardown is sweepable by this
 // prefix (createChat fights a server-side conversations/create rate limit, so leaks compound quickly).
 export const CHAT_DEBRIS_NAME_PREFIXES: readonly string[] = ["e2e-chat-"]
-
-export function isNoteDebrisTitle(title: string): boolean {
-	return NOTE_DEBRIS_TITLE_PREFIXES.some(prefix => title.startsWith(prefix))
-}
-
-export function isTagDebrisName(name: string): boolean {
-	return TAG_DEBRIS_NAME_PREFIXES.some(prefix => name.startsWith(prefix))
-}

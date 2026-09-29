@@ -39,58 +39,52 @@ import { IN_EDITORS_AND_FIELDS, useAction } from "@/lib/keymap/useAction"
 import { log } from "@/lib/log"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { holdUnload } from "@/lib/unloadGuard"
+import { hasClosest } from "@/lib/domTarget"
 import { previewTitleSplitIndex } from "@/features/preview/lib/previewTitle"
 import { cn, driveItemName } from "@filen/shared"
 import { ImageViewer, RawImageViewer } from "@/features/preview/components/imageViewer"
 import { MediaViewer } from "@/features/preview/components/mediaViewer"
+import {
+	DocxViewer,
+	MarkdownViewer,
+	PdfViewer,
+	SpreadsheetViewer,
+	TextViewer,
+	ViewerSuspense
+} from "@/features/preview/components/lazyViewers"
 import { PreviewDownloadableProvider } from "@/features/preview/lib/accessMode"
 import {
 	isTextEditingTarget,
 	PREVIEW_SURFACE,
 	previewNavigationUnmountsOverlay,
 	previewMenuHiddenActionIds,
-	hasClosest,
 	isVideoControlsBandClick,
 	resolveUnsavedConfirm,
 	shouldToggleChrome,
 	unsavedPromptOpen,
 	type PreviewDismissIntent
 } from "@/features/preview/components/previewOverlay.logic"
-import { setPreviewDirty, usePreviewUnsavedGuardStore } from "@/features/preview/store/usePreviewUnsavedGuard"
+import { dropPreviewBuffer, setPreviewDirty, usePreviewUnsavedGuardStore } from "@/features/preview/store/usePreviewUnsavedGuard"
 import { clearVideoPlaybackStates } from "@/features/preview/lib/videoContinuity"
 import { clearPreviewCache, loadPreviewBytes } from "@/features/preview/lib/previewCache"
 import { usePreviewCacheScope } from "@/features/preview/lib/accessMode"
 import type { SpreadsheetSaveSource } from "@/features/spreadsheet/components/spreadsheetViewer"
-import { spreadsheetSaveFormat } from "@/features/spreadsheet/lib/spreadsheetClient"
+import { spreadsheetSaveFormat } from "@/features/spreadsheet/lib/fileKind"
 import { usePreviewRemoteChanges } from "@/features/preview/hooks/usePreviewRemoteChanges"
 import { RemoteChangeDialog } from "@/features/preview/components/remoteChangeDialog"
 import { DriveDropdownMenuContent } from "@/features/drive/components/itemMenu"
 import { type ItemActionDialogKind, type ItemActionId } from "@/features/drive/components/itemMenu.logic"
 import { MoveTargetDialog } from "@/features/drive/components/moveTargetDialog"
-import { InfoDialog } from "@/features/drive/components/infoDialog"
-import { LinkDialog } from "@/features/drive/components/linkDialog"
-import { ContactPickerDialog } from "@/features/drive/components/contactPickerDialog"
-import { VersionsDialog } from "@/features/drive/components/versionsDialog"
+import { ItemDialog, RenameItemDialog, TrashConfirmDialog } from "@/features/drive/components/itemDialogs"
 import { Button } from "@/components/ui/button"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
 import { Kbd } from "@/lib/keymap/kbd"
 import { Spinner } from "@/components/ui/spinner"
 import { LoadingState } from "@/components/loadingState"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
-import { InputDialog } from "@/components/dialogs/inputDialog"
 import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { isAnyMenuOpen } from "@/lib/keymap/dialogGuard"
 
-// Lazy chunks: pdf.js (~1MB+), docx-preview, CodeMirror (+ its per-language grammar chunks) and
-// react-markdown only ever download once a file needing them is actually opened, never on the app's
-// own initial bundle (image/video/audio all stream or buffer directly, no heavy renderer library
-// involved). markdownViewer.tsx's own "view source" toggle lazy-imports CodeMirrorSource — the module
-// TextViewer's chunk also pulls in, deduped by the bundler.
-const PdfViewer = lazy(() => import("@/features/preview/components/pdfViewer"))
-const DocxViewer = lazy(() => import("@/features/preview/components/docxViewer"))
-const TextViewer = lazy(() => import("@/features/preview/components/textViewer"))
-const MarkdownViewer = lazy(() => import("@/features/preview/components/markdownViewer"))
-const SpreadsheetViewer = lazy(() => import("@/features/spreadsheet/components/spreadsheetViewer"))
 // @codemirror/merge, for the remote-change dialog's comparison only.
 const RemoteFileCompare = lazy(() => import("@/features/preview/components/remoteCompare"))
 
@@ -431,6 +425,10 @@ export function PreviewOverlay({
 		onItemRemoved(rawDriveItem.data.uuid)
 	}
 
+	function closeMenuDialog(): void {
+		setMenuDialogKind(null)
+	}
+
 	// The header item-menu's secondary dialog, if any — nested inside the outer DialogPrimitive.Root
 	// exactly like the unsaved-changes ConfirmDialog below (Base UI supports nesting a dialog inside
 	// another normally, see that one's own doc comment). Move/versions/info/link/share are entirely
@@ -444,20 +442,10 @@ export function PreviewOverlay({
 		switch (menuDialogKind) {
 			case "rename":
 				return (
-					<InputDialog
-						open
+					<RenameItemDialog
+						item={driveItem}
 						pending={menuPending}
-						title={t("drive:driveActionRename")}
-						body={t("drive:driveRenameDialogBody")}
-						label={t("drive:driveNewDirectoryLabel")}
-						initialValue={driveItem.data.decryptedMeta?.name ?? ""}
-						submitLabel={t("drive:driveActionRename")}
-						validate={value => value.trim().length > 0}
-						onOpenChange={open => {
-							if (!open) {
-								setMenuDialogKind(null)
-							}
-						}}
+						onClose={closeMenuDialog}
 						onSubmit={value => {
 							void handleMenuRename(value)
 						}}
@@ -467,57 +455,20 @@ export function PreviewOverlay({
 				return (
 					<MoveTargetDialog
 						items={[driveItem]}
-						onClose={() => {
-							setMenuDialogKind(null)
-						}}
+						onClose={closeMenuDialog}
 					/>
 				)
 			case "copy":
-				return (
-					<MoveTargetDialog
-						items={[driveItem]}
-						mode="copy"
-						onClose={() => {
-							setMenuDialogKind(null)
-						}}
-					/>
-				)
 			case "versions":
-				return driveItem.type === "file" ? (
-					<VersionsDialog
-						file={driveItem}
-						onClose={() => {
-							setMenuDialogKind(null)
-						}}
-					/>
-				) : null
 			case "info":
-				return (
-					<InfoDialog
-						item={driveItem}
-						variant={variant}
-						remoteInfoEnabled={variant !== "trash"}
-						onClose={() => {
-							setMenuDialogKind(null)
-						}}
-					/>
-				)
 			case "link":
-				return (
-					<LinkDialog
-						item={driveItem}
-						onClose={() => {
-							setMenuDialogKind(null)
-						}}
-					/>
-				)
 			case "share":
 				return (
-					<ContactPickerDialog
+					<ItemDialog
+						kind={menuDialogKind}
 						items={[driveItem]}
-						onClose={() => {
-							setMenuDialogKind(null)
-						}}
+						variant={variant}
+						onClose={closeMenuDialog}
 					/>
 				)
 			case "unshare":
@@ -532,7 +483,7 @@ export function PreviewOverlay({
 						destructive
 						onOpenChange={open => {
 							if (!open) {
-								setMenuDialogKind(null)
+								closeMenuDialog()
 							}
 						}}
 						onConfirm={() => {
@@ -542,18 +493,10 @@ export function PreviewOverlay({
 				)
 			case "trash":
 				return (
-					<ConfirmDialog
-						open
+					<TrashConfirmDialog
+						count={1}
 						pending={menuPending}
-						title={t("drive:driveTrashConfirmTitle")}
-						body={t("drive:driveTrashConfirmBody", { count: 1 })}
-						confirmLabel={t("drive:driveActionTrash")}
-						cancelLabel={t("common:cancel")}
-						onOpenChange={open => {
-							if (!open) {
-								setMenuDialogKind(null)
-							}
-						}}
+						onClose={closeMenuDialog}
 						onConfirm={() => {
 							void handleMenuTrash()
 						}}
@@ -571,7 +514,7 @@ export function PreviewOverlay({
 						destructive
 						onOpenChange={open => {
 							if (!open) {
-								setMenuDialogKind(null)
+								closeMenuDialog()
 							}
 						}}
 						onConfirm={() => {
@@ -634,8 +577,7 @@ export function PreviewOverlay({
 	const slotKey = driveItem === undefined ? null : bodyKey(driveItem, currentDocumentKey, pin)
 
 	useEffect(() => {
-		setPreviewDirty(false)
-		contentRef.current = null
+		dropPreviewBuffer(contentRef)
 	}, [slotKey])
 
 	useEffect(() => {
@@ -757,10 +699,9 @@ export function PreviewOverlay({
 
 		// A text editor was read-only through the upload, so it holds exactly what was saved.
 		if (edits.commit === null) {
-			setPreviewDirty(false)
 			// The remounted viewer re-seeds this itself when it mounts an editor; markdown returns in
 			// RENDERED mode and mounts none, so a stale buffer would otherwise stay readable to a second save.
-			contentRef.current = null
+			dropPreviewBuffer(contentRef)
 		}
 
 		// Last, so a version saved elsewhere after this one is judged against it.
@@ -950,8 +891,7 @@ export function PreviewOverlay({
 		// The buffer is gone by the user's own choice: drop the dirty bit and the stale content with it.
 		// The slot-change effect above cannot cover this one — a discarded "close" answer changes no slot,
 		// and a discarded prev/next must be clean BEFORE the step, not after it.
-		setPreviewDirty(false)
-		contentRef.current = null
+		dropPreviewBuffer(contentRef)
 
 		// `logoutRequest !== null` is re-tested (not read off `actions` alone) so TS narrows it — same
 		// reason `blocker.status` is re-tested below.
@@ -1013,27 +953,16 @@ export function PreviewOverlay({
 					>
 						<PreviewName name={name} />
 						{editable && dirty ? (
-							<Tooltip>
-								<TooltipTrigger
-									render={
-										<Button
-											variant="ghost"
-											size="icon-sm"
-											disabled={saving}
-											aria-label={t("previewSaveAction")}
-											onClick={() => {
-												void performSave()
-											}}
-										>
-											{saving ? <Spinner className="size-4" /> : <SaveIcon />}
-										</Button>
-									}
-								/>
-								<TooltipContent>
-									{t("previewSaveAction")}
-									<Kbd action="preview.save" />
-								</TooltipContent>
-							</Tooltip>
+							<TooltipIconButton
+								label={t("previewSaveAction")}
+								disabled={saving}
+								shortcut={<Kbd action="preview.save" />}
+								onClick={() => {
+									void performSave()
+								}}
+							>
+								{saving ? <Spinner className="size-4" /> : <SaveIcon />}
+							</TooltipIconButton>
 						) : null}
 						<Button
 							variant="ghost"
@@ -1367,30 +1296,16 @@ function PreviewBody({
 			)
 		case "pdf":
 			return (
-				<Suspense
-					fallback={
-						<LoadingState
-							size="lg"
-							className="text-inherit"
-						/>
-					}
-				>
+				<ViewerSuspense>
 					<PdfViewer
 						item={item}
 						alt={alt}
 					/>
-				</Suspense>
+				</ViewerSuspense>
 			)
 		case "spreadsheet":
 			return (
-				<Suspense
-					fallback={
-						<LoadingState
-							size="lg"
-							className="text-inherit"
-						/>
-					}
-				>
+				<ViewerSuspense>
 					<SpreadsheetViewer
 						item={item}
 						documentKey={documentKey}
@@ -1403,35 +1318,21 @@ function PreviewBody({
 						onOpenFile={onOpenFile}
 						canSaveCopy={canSaveCopy}
 					/>
-				</Suspense>
+				</ViewerSuspense>
 			)
 		case "docx":
 			return (
-				<Suspense
-					fallback={
-						<LoadingState
-							size="lg"
-							className="text-inherit"
-						/>
-					}
-				>
+				<ViewerSuspense>
 					<DocxViewer
 						item={item}
 						alt={alt}
 					/>
-				</Suspense>
+				</ViewerSuspense>
 			)
 		case "text":
 		case "code":
 			return (
-				<Suspense
-					fallback={
-						<LoadingState
-							size="lg"
-							className="text-inherit"
-						/>
-					}
-				>
+				<ViewerSuspense>
 					<TextViewer
 						item={item}
 						alt={alt}
@@ -1440,18 +1341,11 @@ function PreviewBody({
 						onDirtyChange={onDirtyChange}
 						contentRef={contentRef}
 					/>
-				</Suspense>
+				</ViewerSuspense>
 			)
 		case "markdown":
 			return (
-				<Suspense
-					fallback={
-						<LoadingState
-							size="lg"
-							className="text-inherit"
-						/>
-					}
-				>
+				<ViewerSuspense>
 					<MarkdownViewer
 						item={item}
 						alt={alt}
@@ -1460,7 +1354,7 @@ function PreviewBody({
 						onDirtyChange={onDirtyChange}
 						contentRef={contentRef}
 					/>
-				</Suspense>
+				</ViewerSuspense>
 			)
 		case "rawImage":
 			return (

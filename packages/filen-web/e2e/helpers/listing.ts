@@ -4,8 +4,8 @@ import { OPEN_OVERLAY_SELECTOR } from "@/lib/keymap/dialogGuard"
 
 // Startup account reminders (master-keys export, storage over limit) are BLOCKING modal alertdialogs
 // the authed shell raises once per page LOAD. They are LATCHED CLOSED in the e2e build before the first
-// render (src/main.tsx calls markReminderFired/markStorageReminderFired under VITE_E2E), so the normal
-// path here reads the DOM once and returns.
+// render (src/main.tsx sets both useReminderStore flags under VITE_E2E), so the normal path here reads
+// the DOM once and returns.
 //
 // This used to drive the dismissal itself, and it was the single most expensive thing in the suite: a
 // 15s wait for the keys dialog plus an unconditional 3s for a storage dialog that CANNOT mount on an

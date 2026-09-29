@@ -83,7 +83,6 @@ function renderClipboard(overrides: Partial<UseDriveClipboardParams> = {}) {
 			listing: [],
 			selectedItems: [REPORT],
 			isOnline: true,
-			isDialogOpen: false,
 			...overrides
 		})
 	)
@@ -191,8 +190,7 @@ describe("useDriveClipboard", () => {
 					ancestry: [DEST],
 					listing,
 					selectedItems: [],
-					isOnline: true,
-					isDialogOpen: false
+					isOnline: true
 				}),
 			{ initialProps: { listing: [] as DriveItem[] } }
 		)
@@ -298,7 +296,11 @@ describe("useDriveClipboard", () => {
 
 		unmount()
 		useDriveClipboardStore.getState().set({ mode: "copy", items: [REPORT] })
-		renderClipboard({ isDialogOpen: true })
+		const dialog = document.createElement("div")
+		dialog.setAttribute("role", "dialog")
+		dialog.setAttribute("data-open", "")
+		document.body.append(dialog)
+		renderClipboard()
 
 		expect(press(row(), "c").defaultPrevented).toBe(false)
 		expect(press(row(), "v").defaultPrevented).toBe(false)

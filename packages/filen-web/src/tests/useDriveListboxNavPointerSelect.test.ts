@@ -71,7 +71,7 @@ const items = [first, item("b"), item("c")]
 
 function renderNav(listItems: DriveItem[] = items) {
 	const virtualizer = { scrollToIndex: vi.fn() } as unknown as DriveVirtualizer["activeVirtualizer"]
-	const itemRefs = { current: new Map<number, HTMLDivElement>() } as DriveVirtualizer["itemRefs"]
+	const itemRefs: DriveVirtualizer["itemRefs"] = { registerRef: vi.fn(), focusItem: vi.fn() }
 
 	return renderHook(() =>
 		useDriveListboxNav({

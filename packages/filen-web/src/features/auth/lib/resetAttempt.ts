@@ -1,6 +1,7 @@
 import type { StringifiedClient } from "@filen/sdk-rs"
 import { readTwoFactorKind } from "@/features/auth/lib/twoFactorKinds"
 import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
+import { persistSessionBlob } from "@/lib/sdk/persistOutcome"
 import { log } from "@/lib/log"
 
 export interface ResetParams {
@@ -59,13 +60,7 @@ export async function runResetAttempt(deps: ResetAttemptDeps, params: ResetParam
 	// Persist is deliberately isolated from the reset result: the worker IS authenticated here
 	// (completePasswordReset auto-logs-in, matching login), so a failed local save must not masquerade
 	// as a failed reset — losing resume-after-close beats losing the completed reset.
-	let persisted = true
-	try {
-		await deps.persist(blob)
-	} catch (e) {
-		persisted = false
-		log.warn("reset", "session persist failed", asErrorDTO(e))
-	}
+	const persisted = await persistSessionBlob(deps, blob, "reset", "session")
 	if (persisted) {
 		// Only a durably persisted session is announced — other tabs react by reading it from kv, and
 		// an unpersisted one would leave them nothing to adopt.

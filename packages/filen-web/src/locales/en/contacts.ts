@@ -47,12 +47,6 @@ export const contacts = {
 	// and a floating bar appears at 2+ selected, overlaying the list without replacing the search box —
 	// the same model drive/notes/chats/photos use. Its per-section action buttons reuse the Row action
 	// labels below verbatim.
-	/** Floating selection bar — accessible label on the clear-selection button; also the Escape command's description */
-	contactsCommandClearSelection: "Clear selection",
-	/** Floating selection bar — total selected row count across every section, singular */
-	contactsSelectionCount_one: "{{count}} selected",
-	/** Floating selection bar — total selected row count across every section, plural */
-	contactsSelectionCount_other: "{{count}} selected",
 
 	// ── Section groups ───────────────────────────────────────────────────────
 	/** Contacts page — header of the highlighted incoming-requests panel atop the "All" view, singular */

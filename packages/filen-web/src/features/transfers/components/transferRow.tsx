@@ -32,8 +32,7 @@ import { useCopyJobsStore } from "@/features/transfers/store/useCopyJobsStore"
 import { DirectoryGlyph, FileTypeIcon } from "@/features/drive/components/itemIcon"
 import type { DriveItem } from "@/features/drive/lib/item"
 import { errorLabel } from "@/lib/i18n/errorLabel"
-import { Button } from "@/components/ui/button"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
 
 export interface TransferRowProps {
 	transfer: Transfer
@@ -157,26 +156,7 @@ function badgeTone(transfer: Transfer, trashing: boolean): string {
 	return "bg-primary text-primary-foreground"
 }
 
-function RowAction({ label, onClick, children }: { label: string; onClick: () => void; children: ReactNode }) {
-	return (
-		<Tooltip>
-			<TooltipTrigger
-				render={
-					<Button
-						variant="ghost"
-						size="icon-sm"
-						aria-label={label}
-						className="text-muted-foreground hover:text-foreground"
-						onClick={onClick}
-					>
-						{children}
-					</Button>
-				}
-			/>
-			<TooltipContent>{label}</TooltipContent>
-		</Tooltip>
-	)
-}
+const ROW_ACTION_CLASS = "text-muted-foreground hover:text-foreground"
 
 // One transfer: the glyph, the item's name over a single line of details, and its controls. An active
 // row reads "312 MiB of 842 MiB · 37% · 4.2 MB/s · 2:05 left" (or "Paused · …"); a finished one says
@@ -272,41 +252,45 @@ export function TransferRow({ transfer, onRequestCancel, onShowInDirectory }: Tr
 			</div>
 			<div className="flex shrink-0 items-center gap-0.5">
 				{job !== undefined ? (
-					<RowAction
+					<TooltipIconButton
 						label={t("transfersRowCopyDetails")}
+						className={ROW_ACTION_CLASS}
 						onClick={() => {
 							showCopyToast(transfer.id)
 						}}
 					>
 						<PanelBottomOpenIcon />
-					</RowAction>
+					</TooltipIconButton>
 				) : null}
 				{!active ? (
 					<>
 						{revealItem !== undefined ? (
-							<RowAction
+							<TooltipIconButton
 								label={t("transfersRowShowInDirectory")}
+								className={ROW_ACTION_CLASS}
 								onClick={() => {
 									onShowInDirectory(revealItem)
 								}}
 							>
 								<FolderSearchIcon />
-							</RowAction>
+							</TooltipIconButton>
 						) : null}
-						<RowAction
+						<TooltipIconButton
 							label={t("transfersRowRemove")}
+							className={ROW_ACTION_CLASS}
 							onClick={() => {
 								useTransfersStore.getState().remove(transfer.id)
 								pruneSettledCopyJobs()
 							}}
 						>
 							<XIcon />
-						</RowAction>
+						</TooltipIconButton>
 					</>
 				) : trashing ? null : (
 					<>
-						<RowAction
+						<TooltipIconButton
 							label={t(transfer.paused ? "transfersRowResume" : "transfersRowPause")}
+							className={ROW_ACTION_CLASS}
 							onClick={() => {
 								if (transfer.paused) {
 									resumeTransfer(transfer.id)
@@ -316,13 +300,14 @@ export function TransferRow({ transfer, onRequestCancel, onShowInDirectory }: Tr
 							}}
 						>
 							{transfer.paused ? <PlayIcon /> : <PauseIcon />}
-						</RowAction>
-						<RowAction
+						</TooltipIconButton>
+						<TooltipIconButton
 							label={t("transfersRowCancel")}
+							className={ROW_ACTION_CLASS}
 							onClick={onRequestCancel}
 						>
 							<XIcon />
-						</RowAction>
+						</TooltipIconButton>
 					</>
 				)}
 			</div>

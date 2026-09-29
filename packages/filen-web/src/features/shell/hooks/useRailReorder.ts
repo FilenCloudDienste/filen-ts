@@ -8,10 +8,9 @@ import {
 	type MouseEvent,
 	type PointerEvent
 } from "react"
+import { useLatestRef } from "@/lib/useLatestRef"
+import { DRAG_THRESHOLD_PX, listenWindowDrag } from "@/lib/windowDrag"
 import { moveRailEntry, railDropIndex, railShift, type RailEntryId } from "@/features/shell/lib/railOrder.logic"
-
-// Movement before a press turns into a drag, so a plain click still navigates.
-const DRAG_THRESHOLD = 4
 
 interface Drag {
 	from: number
@@ -56,13 +55,8 @@ export function useRailReorder(order: readonly RailEntryId[], onReorder: (next: 
 	const gestureRef = useRef<Gesture | null>(null)
 	const suppressClickRef = useRef(false)
 	const cleanupRef = useRef<(() => void) | null>(null)
-	const orderRef = useRef(order)
-	const onReorderRef = useRef(onReorder)
-
-	useEffect(() => {
-		orderRef.current = order
-		onReorderRef.current = onReorder
-	}, [order, onReorder])
+	const orderRef = useLatestRef(order)
+	const onReorderRef = useLatestRef(onReorder)
 
 	useEffect(
 		() => () => {
@@ -127,7 +121,7 @@ export function useRailReorder(order: readonly RailEntryId[], onReorder: (next: 
 
 					const deltaY = move.clientY - gesture.startY
 
-					if (!gesture.dragging && Math.abs(deltaY) < DRAG_THRESHOLD) {
+					if (!gesture.dragging && Math.abs(deltaY) < DRAG_THRESHOLD_PX) {
 						return
 					}
 
@@ -147,16 +141,7 @@ export function useRailReorder(order: readonly RailEntryId[], onReorder: (next: 
 					}
 				}
 
-				window.addEventListener("pointermove", onMove)
-				window.addEventListener("pointerup", onUp)
-				window.addEventListener("pointercancel", onCancel)
-				window.addEventListener("keydown", onKey, true)
-				cleanupRef.current = () => {
-					window.removeEventListener("pointermove", onMove)
-					window.removeEventListener("pointerup", onUp)
-					window.removeEventListener("pointercancel", onCancel)
-					window.removeEventListener("keydown", onKey, true)
-				}
+				cleanupRef.current = listenWindowDrag({ move: onMove, up: onUp, cancel: onCancel, key: onKey })
 			},
 			onClickCapture: event => {
 				if (suppressClickRef.current) {

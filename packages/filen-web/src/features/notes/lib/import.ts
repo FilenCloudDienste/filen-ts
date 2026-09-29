@@ -1,6 +1,7 @@
 import type { Note } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
 import { i18n } from "@/lib/i18n"
+import { plainErrorDTO } from "@/lib/sdk/errors"
 import { queryClient } from "@/queries/client"
 import { notesQueryUpsert } from "@/features/notes/queries/notes"
 import { noteContentQueryKey } from "@/features/notes/queries/noteContent"
@@ -8,8 +9,7 @@ import { sync } from "@/features/notes/lib/sync"
 import { retypeNewNote } from "@/features/notes/lib/actions"
 import { detectImportNoteType, sanitizeImportedContent, titleFromFilename } from "@/features/notes/lib/import.logic"
 import { exceedsNoteSizeCap } from "@/features/notes/hooks/useNoteEditor.logic"
-import { asErrorDTO } from "@/lib/sdk/errors"
-import { runOp, type ActionOutcome } from "@/lib/actions/outcome"
+import { attemptOp, type ActionOutcome } from "@/lib/actions/outcome"
 
 // Import Note: reads a picked file's text, detects its note type from the extension
 // (import.logic.ts), creates a note titled from the file name, flips it to
@@ -21,42 +21,36 @@ export async function importNoteFromFile(file: File): Promise<ActionOutcome<Note
 	const noteType = detectImportNoteType(file.name)
 
 	if (noteType === undefined) {
-		const message = i18n.t("notes:noteImportUnsupportedType")
-
-		return { status: "error", dto: { species: "plain", message, label: message } }
+		return { status: "error", dto: plainErrorDTO(i18n.t("notes:noteImportUnsupportedType")) }
 	}
 
-	let rawText: string
+	const read = await attemptOp(file.text())
 
-	try {
-		rawText = await file.text()
-	} catch (e) {
-		return { status: "error", dto: asErrorDTO(e) }
+	if (read.status === "error") {
+		return read
 	}
 
-	const content = sanitizeImportedContent(noteType, rawText)
+	const content = sanitizeImportedContent(noteType, read.item)
 
 	// The editor's own cap: a push past it is rejected server-side, so the note would stay empty on
 	// every device while this tab's cache showed the text. Checked before anything is created.
 	if (exceedsNoteSizeCap(content)) {
-		const message = i18n.t("notes:noteImportTooLarge")
-
-		return { status: "error", dto: { species: "plain", message, label: message } }
+		return { status: "error", dto: plainErrorDTO(i18n.t("notes:noteImportTooLarge")) }
 	}
 
 	const title = titleFromFilename(file.name)
 
-	let note: Note
+	let created = await attemptOp(sdkApi.createNote(title))
 
-	try {
-		note = await runOp(sdkApi.createNote(title))
-
-		if (note.noteType !== noteType) {
-			note = await retypeNewNote(note, noteType)
-		}
-	} catch (e) {
-		return { status: "error", dto: asErrorDTO(e) }
+	if (created.status === "success" && created.item.noteType !== noteType) {
+		created = await attemptOp(retypeNewNote(created.item, noteType))
 	}
+
+	if (created.status === "error") {
+		return created
+	}
+
+	const note = created.item
 
 	notesQueryUpsert(note)
 

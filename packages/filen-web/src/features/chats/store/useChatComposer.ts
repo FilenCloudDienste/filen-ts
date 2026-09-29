@@ -78,5 +78,3 @@ export const useChatComposerStore = create<ChatComposerStore>(set => {
 export function useChatComposerEntry(chatUuid: string): ChatComposerEntry {
 	return useChatComposerStore(state => state.entries[chatUuid] ?? EMPTY_ENTRY)
 }
-
-export default useChatComposerStore

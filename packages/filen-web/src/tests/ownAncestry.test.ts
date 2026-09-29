@@ -6,6 +6,7 @@ vi.mock("@/queries/client", async () => {
 
 	return { queryClient: new QueryClient() }
 })
+vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
 
 import { queryClient } from "@/queries/client"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"

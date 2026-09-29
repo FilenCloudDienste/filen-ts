@@ -1,41 +1,33 @@
 import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
-import { CheckIcon, CrownIcon, SearchXIcon, UserCheckIcon, UsersIcon, UserXIcon, XIcon } from "lucide-react"
-import type { DialogRoot } from "@base-ui/react/dialog"
+import { CheckIcon, CrownIcon, UserCheckIcon, UsersIcon, UserXIcon, XIcon } from "lucide-react"
 import type { Chat, ChatParticipant } from "@filen/sdk-rs"
 import { cn, contactDisplayName, deriveBlockedUsers } from "@filen/shared"
 import { isChatOwner } from "@/features/chats/lib/actions"
 import { addChatParticipants, removeChatParticipant, removeChatParticipants } from "@/features/chats/lib/participants"
-import {
-	chatParticipantRows,
-	contactsAvailableToAddToChat,
-	selectedParticipantsForRemoval
-} from "@/features/chats/components/chatParticipantsDialog.logic"
+import { chatParticipantRows, selectedParticipantsForRemoval } from "@/features/chats/components/chatParticipantsDialog.logic"
 import { toastChatParticipantsBulkRemoveOutcome } from "@/features/chats/lib/bulkToast"
 import { useChats } from "@/features/chats/queries/chats"
 import { useAccountQuery } from "@/queries/account"
 import { useContactsQuery } from "@/features/contacts/queries/contacts"
-import { blockContactByEmail, unblockContact } from "@/features/contacts/lib/actions"
-import { contactInitials, filterContactsBySearch } from "@/features/contacts/components/contactsList.logic"
-// Same generic Set<uuid> picker helpers notes' own participantsDialog.tsx reuses — not re-implemented
-// here either (feedback: no duplicated selection/data layer across features for a picker this
-// codebase already has one working copy of). Reused for BOTH modes now: `selected` holds contact uuids
-// in "add" mode and participant userId strings in "list" mode — the two are mutually exclusive (never
-// active at once) and every mode transition below resets the Set, so the two id spaces never collide.
-import { togglePickerContact, resolveSelectedContacts } from "@/features/drive/components/contactPickerDialog.logic"
+import { toggleParticipantBlocked } from "@/features/contacts/lib/actions"
+import { ContactPickerList } from "@/features/contacts/components/contactPickerList"
+// Reused for BOTH modes: `selected` holds contact uuids in "add" mode and participant userId strings in
+// "list" mode — the two are never active at once and every mode transition below resets the Set, so the
+// two id spaces never collide.
+import { togglePickerContact, resolveSelectedContacts } from "@/features/contacts/lib/contactPicker.logic"
 import { errorLabel } from "@/lib/i18n/errorLabel"
-import { asErrorDTO } from "@/lib/sdk/errors"
+import { plainErrorDTO } from "@/lib/sdk/errors"
 import { useIsOnline } from "@/lib/useIsOnline"
-import { shouldForwardOpenChange } from "@/components/dialogs/dismissal.logic"
+import { onActivateKey } from "@/lib/rowKeys"
+import { pendingGuardedOpenChange } from "@/components/dialogs/dismissal.logic"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
-import { ListFilterInput } from "@/components/listFilterInput"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { UserAvatar } from "@/components/userAvatar"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
-import { LoadingState } from "@/components/loadingState"
-import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
+import { EmptyMessage } from "@/components/emptyMessage"
 
 export interface ChatParticipantsDialogProps {
 	chat: Chat
@@ -49,7 +41,7 @@ export interface ChatParticipantsDialogProps {
 // is intentionally NOT here — it stays the chat menu's own dialog-routed "Leave"/"Delete" entry, so
 // the viewer's own row never appears in this list at all (chatParticipantRows' self-exclusion).
 export function ChatParticipantsDialog({ chat: initialChat, onClose }: ChatParticipantsDialogProps) {
-	const { t } = useTranslation(["chats", "contacts", "common"])
+	const { t } = useTranslation(["chats", "common"])
 	const isOnline = useIsOnline()
 	const chatsQuery = useChats()
 	const accountQuery = useAccountQuery()
@@ -80,16 +72,11 @@ export function ChatParticipantsDialog({ chat: initialChat, onClose }: ChatParti
 	const rows = chatParticipantRows(chat, currentUserId, owner, blockedUsers)
 	const selectedForRemoval = selectedParticipantsForRemoval(rows, selected)
 
-	function handleOpenChange(next: boolean, details: DialogRoot.ChangeEventDetails): void {
-		if (!shouldForwardOpenChange(next, pendingUserId !== null || addPending || bulkRemovePending)) {
-			details.cancel()
-			return
-		}
-
+	const handleOpenChange = pendingGuardedOpenChange(pendingUserId !== null || addPending || bulkRemovePending, next => {
 		if (!next) {
 			onClose()
 		}
-	}
+	})
 
 	async function handleRemoveConfirmed(participant: ChatParticipant): Promise<void> {
 		setPendingUserId(participant.userId)
@@ -103,46 +90,17 @@ export function ChatParticipantsDialog({ chat: initialChat, onClose }: ChatParti
 	}
 
 	// Block/unblock a participant, regardless of ownership (mobile parity: never gated on canManage).
-	// Unblock needs the BLOCKED CONTACT's own uuid (unblockContact is uuid-keyed, unlike block itself which
-	// is email-keyed) — resolved from the same warm contacts cache the row's `blocked` flag came from; a
-	// miss (the block list moved since the last render) surfaces as an error rather than a guessed uuid.
 	async function handleToggleBlock(participant: ChatParticipant, isBlockedNow: boolean): Promise<void> {
-		if (isBlockedNow) {
-			const blockedUuid = contactsQuery.data?.blocked.find(c => c.userId === participant.userId)?.uuid
+		const toggled = toggleParticipantBlocked(participant, contactsQuery.data?.blocked, isBlockedNow)
 
-			if (blockedUuid === undefined) {
-				toast.error(
-					errorLabel({
-						species: "plain",
-						message: t("chatParticipantBlockStale"),
-						label: t("chatParticipantBlockStale")
-					})
-				)
-
-				return
-			}
-
-			setPendingUserId(participant.userId)
-			const outcome = await unblockContact(blockedUuid)
-			setPendingUserId(null)
-
-			if (outcome.status === "error") {
-				toast.error(errorLabel(outcome.dto))
-			}
+		if (toggled === "stale") {
+			toast.error(errorLabel(plainErrorDTO(t("common:participantBlockStale"))))
 
 			return
 		}
 
 		setPendingUserId(participant.userId)
-		// ChatParticipant.nickName/avatar are REQUIRED keys that may hold undefined, and
-		// exactOptionalPropertyTypes rejects passing undefined into BlockIdentity's optional fields — hence
-		// the spread guards (notes' NoteParticipant.nickName is a plain string, so its copy needs none).
-		const outcome = await blockContactByEmail({
-			email: participant.email,
-			userId: participant.userId,
-			...(participant.nickName !== undefined ? { nickName: participant.nickName } : {}),
-			...(participant.avatar !== undefined ? { avatar: participant.avatar } : {})
-		})
+		const outcome = await toggled
 		setPendingUserId(null)
 
 		if (outcome.status === "error") {
@@ -201,14 +159,11 @@ export function ChatParticipantsDialog({ chat: initialChat, onClose }: ChatParti
 	function renderListBody() {
 		if (rows.length === 0) {
 			return (
-				<Empty className="p-6">
-					<EmptyHeader>
-						<EmptyMedia>
-							<UsersIcon />
-						</EmptyMedia>
-						<EmptyTitle>{t("chatParticipantsEmpty")}</EmptyTitle>
-					</EmptyHeader>
-				</Empty>
+				<EmptyMessage
+					className="p-6"
+					icon={UsersIcon}
+					title={t("chatParticipantsEmpty")}
+				/>
 			)
 		}
 
@@ -216,7 +171,7 @@ export function ChatParticipantsDialog({ chat: initialChat, onClose }: ChatParti
 			<ul
 				role="listbox"
 				aria-multiselectable="true"
-				aria-label={t("chatParticipantsDialogTitle")}
+				aria-label={t("common:participantsDialogTitle")}
 				className="flex max-h-80 flex-col gap-0.5 overflow-y-auto"
 			>
 				{rows.map(({ participant, canManage, isOwner: rowIsOwner, blocked }) => {
@@ -244,48 +199,23 @@ export function ChatParticipantsDialog({ chat: initialChat, onClose }: ChatParti
 							aria-selected={canManage ? isSelected : undefined}
 							tabIndex={canManage ? 0 : undefined}
 							onClick={canManage ? toggleRowSelected : undefined}
-							onKeyDown={
-								canManage
-									? event => {
-											// Enter/Space here is the ROW's own select gesture; a keydown that bubbled up
-											// from a control inside the row belongs to that control, and preventDefault
-											// would cancel its activation click.
-											if (event.target !== event.currentTarget) {
-												return
-											}
-
-											if (event.key !== "Enter" && event.key !== " ") {
-												return
-											}
-
-											event.preventDefault()
-											toggleRowSelected()
-										}
-									: undefined
-							}
+							onKeyDown={canManage ? onActivateKey(toggleRowSelected) : undefined}
 							className={cn(
 								"flex items-center gap-3 rounded-xl px-2 py-2 text-sm outline-none",
-								canManage && "cursor-pointer focus-ring-row select-none",
+								canManage && "focus-ring-row select-none",
 								isSelected && "bg-accent text-accent-foreground"
 							)}
 						>
-							<Avatar>
-								{/* crossOrigin: require-corp COEP needs a CORS-mode request for this cross-origin
-								    egest url (see settings/account/avatarCard.tsx's matching comment). */}
-								{participant.avatar !== undefined ? (
-									<AvatarImage
-										src={participant.avatar}
-										crossOrigin="anonymous"
-									/>
-								) : null}
-								<AvatarFallback>{contactInitials(displayName)}</AvatarFallback>
-							</Avatar>
+							<UserAvatar
+								src={participant.avatar}
+								name={displayName}
+							/>
 							<div className="min-w-0 flex-1">
 								<div className="flex items-center gap-1.5">
 									<p className="truncate font-medium">{displayName}</p>
 									{rowIsOwner ? (
 										<CrownIcon
-											aria-label={t("chatParticipantsOwnerBadge")}
+											aria-label={t("common:participantOwnerBadge")}
 											className="size-3.5 shrink-0 text-amber-500"
 										/>
 									) : null}
@@ -305,7 +235,7 @@ export function ChatParticipantsDialog({ chat: initialChat, onClose }: ChatParti
 										variant="ghost"
 										size="icon-sm"
 										disabled={rowPending || !isOnline}
-										aria-label={t("chatParticipantRemoveAction", { email: participant.email })}
+										aria-label={t("common:participantRemoveAction", { email: participant.email })}
 										title={!isOnline ? t("common:offlineActionDisabled") : undefined}
 										onClick={event => {
 											// Stop the toggle-select handler on the row itself from also firing —
@@ -322,7 +252,7 @@ export function ChatParticipantsDialog({ chat: initialChat, onClose }: ChatParti
 									variant="ghost"
 									size="icon-sm"
 									disabled={rowPending || !isOnline}
-									aria-label={t(blocked ? "chatParticipantsUnblockAction" : "chatParticipantsBlockAction", {
+									aria-label={t(blocked ? "common:participantUnblockAction" : "common:participantBlockAction", {
 										email: participant.email
 									})}
 									title={!isOnline ? t("common:offlineActionDisabled") : undefined}
@@ -349,115 +279,6 @@ export function ChatParticipantsDialog({ chat: initialChat, onClose }: ChatParti
 		)
 	}
 
-	function renderAddBody() {
-		if (contactsQuery.status === "pending") {
-			return <LoadingState size="md" />
-		}
-
-		if (contactsQuery.status === "error") {
-			return (
-				<Empty>
-					<EmptyHeader>
-						<EmptyMedia>
-							<UsersIcon />
-						</EmptyMedia>
-						<EmptyTitle>{t("contacts:contactsLoadError")}</EmptyTitle>
-						<EmptyDescription>{errorLabel(asErrorDTO(contactsQuery.error))}</EmptyDescription>
-					</EmptyHeader>
-				</Empty>
-			)
-		}
-
-		const available = contactsAvailableToAddToChat(contactsQuery.data.contacts, chat)
-
-		if (available.length === 0) {
-			return (
-				<Empty>
-					<EmptyHeader>
-						<EmptyMedia>
-							<UsersIcon />
-						</EmptyMedia>
-						<EmptyTitle>{t("chatParticipantsAddEmpty")}</EmptyTitle>
-					</EmptyHeader>
-				</Empty>
-			)
-		}
-
-		const filteredAvailable = filterContactsBySearch(available, filter)
-
-		// A non-matching filter gets its own "no results" state, distinct from the "everyone's
-		// already a participant" branch above.
-		if (filteredAvailable.length === 0) {
-			return (
-				<Empty>
-					<EmptyHeader>
-						<EmptyMedia>
-							<SearchXIcon />
-						</EmptyMedia>
-						<EmptyTitle>{t("contacts:contactsSearchNoResultsTitle")}</EmptyTitle>
-					</EmptyHeader>
-				</Empty>
-			)
-		}
-
-		return (
-			<div
-				role="listbox"
-				aria-multiselectable="true"
-				aria-label={t("chatParticipantsAddDialogTitle")}
-				className="flex flex-1 flex-col gap-0.5 overflow-y-auto p-2"
-			>
-				{filteredAvailable.map(contact => {
-					const isSelected = selected.has(contact.uuid)
-					const displayName = contactDisplayName(contact)
-
-					return (
-						<div
-							key={contact.uuid}
-							role="option"
-							aria-selected={isSelected}
-							tabIndex={0}
-							onClick={() => {
-								setSelected(prev => togglePickerContact(prev, contact.uuid))
-							}}
-							onKeyDown={event => {
-								if (event.key !== "Enter" && event.key !== " ") {
-									return
-								}
-
-								event.preventDefault()
-								setSelected(prev => togglePickerContact(prev, contact.uuid))
-							}}
-							className="flex h-14 cursor-pointer items-center gap-3 rounded-xl px-2 text-sm focus-ring-row outline-none select-none aria-selected:bg-accent aria-selected:text-accent-foreground"
-						>
-							<Avatar>
-								{/* crossOrigin: require-corp COEP needs a CORS-mode request for this cross-origin
-								    egest url (see settings/account/avatarCard.tsx's matching comment). */}
-								{contact.avatar !== undefined ? (
-									<AvatarImage
-										src={contact.avatar}
-										crossOrigin="anonymous"
-									/>
-								) : null}
-								<AvatarFallback>{contactInitials(displayName)}</AvatarFallback>
-							</Avatar>
-							<div className="min-w-0 flex-1">
-								<p className="truncate font-medium">{displayName}</p>
-								<p className="truncate text-xs text-muted-foreground">{contact.email}</p>
-							</div>
-							{isSelected ? (
-								<CheckIcon
-									aria-hidden="true"
-									className="size-4 shrink-0 text-primary"
-								/>
-							) : null}
-						</div>
-					)
-				})}
-			</div>
-		)
-	}
-
 	const dialogPending = pendingUserId !== null || addPending || bulkRemovePending
 
 	return (
@@ -470,23 +291,26 @@ export function ChatParticipantsDialog({ chat: initialChat, onClose }: ChatParti
 				className="sm:max-w-lg"
 			>
 				<DialogHeader>
-					<DialogTitle>{mode === "list" ? t("chatParticipantsDialogTitle") : t("chatParticipantsAddDialogTitle")}</DialogTitle>
+					<DialogTitle>
+						{mode === "list" ? t("common:participantsDialogTitle") : t("common:participantsAddDialogTitle")}
+					</DialogTitle>
 					{mode === "add" ? <DialogDescription>{t("chatParticipantsAddDialogBody")}</DialogDescription> : null}
 				</DialogHeader>
 				{mode === "list" ? (
 					renderListBody()
 				) : (
-					<>
-						<ListFilterInput
-							value={filter}
-							onChange={setFilter}
-							placeholder={t("contacts:contactsSearchPlaceholder")}
-							ariaLabel={t("contacts:contactsSearchPlaceholder")}
-						/>
-						<div className="flex h-72 flex-col overflow-hidden rounded-xl ring-1 ring-foreground/5 dark:ring-foreground/10">
-							{renderAddBody()}
-						</div>
-					</>
+					<ContactPickerList
+						contactsQuery={contactsQuery}
+						filter={filter}
+						onFilterChange={setFilter}
+						selected={selected}
+						onToggle={uuid => {
+							setSelected(prev => togglePickerContact(prev, uuid))
+						}}
+						ariaLabel={t("common:participantsAddDialogTitle")}
+						emptyTitle={t("common:participantsAddEmpty")}
+						exclude={chat.participants}
+					/>
 				)}
 				<DialogFooter>
 					{mode === "list" ? (
@@ -517,7 +341,7 @@ export function ChatParticipantsDialog({ chat: initialChat, onClose }: ChatParti
 										setMode("add")
 									}}
 								>
-									{t("chatParticipantsAddAction")}
+									{t("common:participantsAddAction")}
 								</Button>
 							) : null}
 							<Button
@@ -549,7 +373,7 @@ export function ChatParticipantsDialog({ chat: initialChat, onClose }: ChatParti
 								}}
 							>
 								{addPending && <Spinner data-icon="inline-start" />}
-								{t("chatParticipantsAddSubmit")}
+								{t("common:participantsAddSubmit")}
 							</Button>
 						</>
 					)}
@@ -560,9 +384,9 @@ export function ChatParticipantsDialog({ chat: initialChat, onClose }: ChatParti
 			<ConfirmDialog
 				open={removing !== null}
 				pending={pendingUserId !== null}
-				title={t("chatParticipantRemoveDialogTitle")}
+				title={t("common:participantRemoveDialogTitle")}
 				body={t("chatParticipantRemoveDialogBody", { email: removing?.email ?? "" })}
-				confirmLabel={t("chatParticipantRemoveDialogConfirm")}
+				confirmLabel={t("common:participantRemoveDialogConfirm")}
 				cancelLabel={t("common:cancel")}
 				destructive
 				onOpenChange={open => {
@@ -583,7 +407,7 @@ export function ChatParticipantsDialog({ chat: initialChat, onClose }: ChatParti
 				pending={bulkRemovePending}
 				title={t("chatParticipantRemoveSelectedDialogTitle")}
 				body={t("chatParticipantRemoveSelectedDialogBody", { count: selectedForRemoval.length })}
-				confirmLabel={t("chatParticipantRemoveDialogConfirm")}
+				confirmLabel={t("common:participantRemoveDialogConfirm")}
 				cancelLabel={t("common:cancel")}
 				destructive
 				onOpenChange={open => {

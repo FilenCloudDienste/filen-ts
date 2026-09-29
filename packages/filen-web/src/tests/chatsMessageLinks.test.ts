@@ -4,12 +4,12 @@ import type { LinkedFile, DirPublicInfo } from "@filen/sdk-rs"
 
 // Mock boundary matching chatsQueries.test.ts: the real sdk client module imports a Vite `?worker`,
 // unresolvable under node vitest.
-const { getLinkedFile, getDirPublicLinkInfo } = vi.hoisted(() => ({
-	getLinkedFile: vi.fn<(linkUuid: string, fileKey: string) => Promise<LinkedFile>>(),
-	getDirPublicLinkInfo: vi.fn<(linkUuid: string, linkKey: string) => Promise<DirPublicInfo>>()
+const { getLinkedFileAnon, getDirPublicLinkInfoAnon } = vi.hoisted(() => ({
+	getLinkedFileAnon: vi.fn<(linkUuid: string, fileKey: string) => Promise<LinkedFile>>(),
+	getDirPublicLinkInfoAnon: vi.fn<(linkUuid: string, linkKey: string) => Promise<DirPublicInfo>>()
 }))
 
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: { getLinkedFile, getDirPublicLinkInfo } }))
+vi.mock("@/lib/sdk/client", () => ({ sdkApi: { getLinkedFileAnon, getDirPublicLinkInfoAnon } }))
 
 import { fetchChatMessageLinks } from "@/features/chats/queries/chatMessageLinks"
 
@@ -77,11 +77,11 @@ afterEach(() => {
 describe("fetchChatMessageLinks — Filen file links", () => {
 	it("resolves a file link's decrypted name + size + previewCategory + the raw LinkedFile on success", async () => {
 		const linkedFile = mockLinkedFile({ name: { Decrypted: "vacation.jpg" }, mime: { Decrypted: "image/jpeg" }, size: 2048n })
-		getLinkedFile.mockResolvedValueOnce(linkedFile)
+		getLinkedFileAnon.mockResolvedValueOnce(linkedFile)
 
 		const results = await fetchChatMessageLinks([FILE_LINK_URL])
 
-		expect(getLinkedFile).toHaveBeenCalledExactlyOnceWith(UUID, KEY_PLAINTEXT)
+		expect(getLinkedFileAnon).toHaveBeenCalledExactlyOnceWith(UUID, KEY_PLAINTEXT)
 		expect(results).toEqual([
 			{
 				url: FILE_LINK_URL,
@@ -94,15 +94,17 @@ describe("fetchChatMessageLinks — Filen file links", () => {
 	})
 
 	it("resolves previewCategory from the extension, not just the mime — a .pdf-named file classifies as pdf", async () => {
-		getLinkedFile.mockResolvedValueOnce(mockLinkedFile({ name: { Decrypted: "invoice.pdf" }, mime: { Decrypted: "application/pdf" } }))
+		getLinkedFileAnon.mockResolvedValueOnce(
+			mockLinkedFile({ name: { Decrypted: "invoice.pdf" }, mime: { Decrypted: "application/pdf" } })
+		)
 
 		const results = await fetchChatMessageLinks([FILE_LINK_URL])
 
 		expect(results[0]).toMatchObject({ success: true, data: { previewCategory: "pdf" } })
 	})
 
-	it("degrades to success:false (never throws) when getLinkedFile rejects — e.g. a password-protected link", async () => {
-		getLinkedFile.mockRejectedValueOnce(new Error("password required"))
+	it("degrades to success:false (never throws) when getLinkedFileAnon rejects — e.g. a password-protected link", async () => {
+		getLinkedFileAnon.mockRejectedValueOnce(new Error("password required"))
 
 		const results = await fetchChatMessageLinks([FILE_LINK_URL])
 
@@ -112,7 +114,7 @@ describe("fetchChatMessageLinks — Filen file links", () => {
 	})
 
 	it("degrades to name:null when the file's own name arrives still-Encrypted — never throws", async () => {
-		getLinkedFile.mockResolvedValueOnce(mockLinkedFile({ name: { Encrypted: "cipher" } }))
+		getLinkedFileAnon.mockResolvedValueOnce(mockLinkedFile({ name: { Encrypted: "cipher" } }))
 
 		const results = await fetchChatMessageLinks([FILE_LINK_URL])
 
@@ -120,7 +122,7 @@ describe("fetchChatMessageLinks — Filen file links", () => {
 	})
 
 	it("still resolves previewCategory from the decrypted MIME when the name alone is undecryptable (extension-first, mime-fallback)", async () => {
-		getLinkedFile.mockResolvedValueOnce(mockLinkedFile({ name: { Encrypted: "cipher" }, mime: { Decrypted: "application/pdf" } }))
+		getLinkedFileAnon.mockResolvedValueOnce(mockLinkedFile({ name: { Encrypted: "cipher" }, mime: { Decrypted: "application/pdf" } }))
 
 		const results = await fetchChatMessageLinks([FILE_LINK_URL])
 
@@ -128,7 +130,7 @@ describe("fetchChatMessageLinks — Filen file links", () => {
 	})
 
 	it("previewCategory falls back to 'other' when BOTH name and mime arrive still-Encrypted — no classification signal at all", async () => {
-		getLinkedFile.mockResolvedValueOnce(mockLinkedFile({ name: { Encrypted: "cipher-name" }, mime: { Encrypted: "cipher-mime" } }))
+		getLinkedFileAnon.mockResolvedValueOnce(mockLinkedFile({ name: { Encrypted: "cipher-name" }, mime: { Encrypted: "cipher-mime" } }))
 
 		const results = await fetchChatMessageLinks([FILE_LINK_URL])
 
@@ -138,11 +140,11 @@ describe("fetchChatMessageLinks — Filen file links", () => {
 
 describe("fetchChatMessageLinks — Filen directory links", () => {
 	it("resolves a directory link's decoded name + created timestamp on success", async () => {
-		getDirPublicLinkInfo.mockResolvedValueOnce(mockDirPublicInfo("Shared Folder", { created: 1_650_000_000_000n }))
+		getDirPublicLinkInfoAnon.mockResolvedValueOnce(mockDirPublicInfo("Shared Folder", { created: 1_650_000_000_000n }))
 
 		const results = await fetchChatMessageLinks([DIR_LINK_URL])
 
-		expect(getDirPublicLinkInfo).toHaveBeenCalledExactlyOnceWith(UUID, KEY_PLAINTEXT)
+		expect(getDirPublicLinkInfoAnon).toHaveBeenCalledExactlyOnceWith(UUID, KEY_PLAINTEXT)
 		expect(results).toEqual([
 			{
 				url: DIR_LINK_URL,
@@ -155,7 +157,7 @@ describe("fetchChatMessageLinks — Filen directory links", () => {
 	})
 
 	it("falls back to the root's own raw timestamp when the decoded meta carries no `created`", async () => {
-		getDirPublicLinkInfo.mockResolvedValueOnce(mockDirPublicInfo("Shared Folder", { timestamp: 1_600_000_000_000n }))
+		getDirPublicLinkInfoAnon.mockResolvedValueOnce(mockDirPublicInfo("Shared Folder", { timestamp: 1_600_000_000_000n }))
 
 		const results = await fetchChatMessageLinks([DIR_LINK_URL])
 
@@ -163,7 +165,7 @@ describe("fetchChatMessageLinks — Filen directory links", () => {
 	})
 
 	it("degrades to name:null when the root dir's meta isn't decoded", async () => {
-		getDirPublicLinkInfo.mockResolvedValueOnce(mockDirPublicInfo(null))
+		getDirPublicLinkInfoAnon.mockResolvedValueOnce(mockDirPublicInfo(null))
 
 		const results = await fetchChatMessageLinks([DIR_LINK_URL])
 
@@ -171,7 +173,7 @@ describe("fetchChatMessageLinks — Filen directory links", () => {
 	})
 
 	it("degrades to success:false on rejection", async () => {
-		getDirPublicLinkInfo.mockRejectedValueOnce(new Error("not found"))
+		getDirPublicLinkInfoAnon.mockRejectedValueOnce(new Error("not found"))
 
 		const results = await fetchChatMessageLinks([DIR_LINK_URL])
 
@@ -194,13 +196,13 @@ describe("fetchChatMessageLinks — classification passthrough", () => {
 
 		expect(results).toEqual([])
 		expect(fetchSpy).not.toHaveBeenCalled()
-		expect(getLinkedFile).not.toHaveBeenCalled()
-		expect(getDirPublicLinkInfo).not.toHaveBeenCalled()
+		expect(getLinkedFileAnon).not.toHaveBeenCalled()
+		expect(getDirPublicLinkInfoAnon).not.toHaveBeenCalled()
 	})
 
 	it("resolves multiple distinct links independently (one rejection doesn't affect the others)", async () => {
-		getLinkedFile.mockRejectedValueOnce(new Error("fail"))
-		getDirPublicLinkInfo.mockResolvedValueOnce(mockDirPublicInfo("Shared Folder", { timestamp: 1n }))
+		getLinkedFileAnon.mockRejectedValueOnce(new Error("fail"))
+		getDirPublicLinkInfoAnon.mockResolvedValueOnce(mockDirPublicInfo("Shared Folder", { timestamp: 1n }))
 
 		const results = await fetchChatMessageLinks([FILE_LINK_URL, "https://example.com/photo.jpg", DIR_LINK_URL])
 

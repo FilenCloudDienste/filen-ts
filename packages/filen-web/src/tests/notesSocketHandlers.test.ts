@@ -44,7 +44,7 @@ import { queryClient as testQueryClient } from "@/queries/client"
 import { ACCOUNT_QUERY_KEY } from "@/queries/account"
 import { fetchNotes, NOTES_QUERY_KEY } from "@/features/notes/queries/notes"
 import { noteContentQueryKey } from "@/features/notes/queries/noteContent"
-import useNotesInflightStore, { beginEditingSession, type InflightContent } from "@/features/notes/store/useNotesInflight"
+import { useNotesInflightStore, beginEditingSession, type InflightContent } from "@/features/notes/store/useNotesInflight"
 import { setNoteAnswerBroadcast, useNotesRemoteEditStore } from "@/features/notes/store/useNoteRemoteEdit"
 import { handleNoteEvent, keepMineOverRemoteEdit, reloadRemoteEdit, saveRemoteEditMineAsCopy } from "@/features/notes/lib/socketHandlers"
 import { forgetNotePushes, isOwnNotePush, rememberNotePush, setNotePushBroadcast } from "@/features/notes/lib/pushEchoes"
@@ -144,15 +144,6 @@ function mountList(): void {
 	})
 
 	unmounts.push(observer.subscribe(() => undefined))
-}
-
-function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
-	let resolve!: (value: T) => void
-	const promise = new Promise<T>(r => {
-		resolve = r
-	})
-
-	return { promise, resolve }
 }
 
 async function settle(): Promise<void> {
@@ -287,8 +278,8 @@ describe("note socket handlers — metadata", () => {
 		seedNotes([makeNote("a")])
 		setAccountId(7n)
 		mountList()
-		const stale = deferred<Note[]>()
-		const fresh = deferred<Note[]>()
+		const stale = Promise.withResolvers<Note[]>()
+		const fresh = Promise.withResolvers<Note[]>()
 		listNotes.mockReturnValueOnce(stale.promise).mockReturnValueOnce(fresh.promise)
 
 		handleNoteEvent(noteEvt({ type: "new", note: "b" as never }))
@@ -316,8 +307,8 @@ describe("note socket handlers — metadata", () => {
 	it("new: a title edit landing before its read is patched over a read that starts after it", async () => {
 		seedNotes([makeNote("a")])
 		mountList()
-		const stale = deferred<Note[]>()
-		const fresh = deferred<Note[]>()
+		const stale = Promise.withResolvers<Note[]>()
+		const fresh = Promise.withResolvers<Note[]>()
 		listNotes.mockReturnValueOnce(stale.promise).mockReturnValueOnce(fresh.promise)
 
 		handleNoteEvent(noteEvt({ type: "new", note: "b" as never }))

@@ -171,11 +171,6 @@ export function marqueeIndexAtPoint(
 	return index < itemCount ? index : -1
 }
 
-// Pointer travel (px) that turns a press into a drag. Below it the press is still a click: the marquee
-// never arms (a zero-size replace-mode marquee would clear the selection on every click), and a
-// click-away may still clear the selection.
-export const DRAG_THRESHOLD_PX = 4
-
 // Pins a content-space rect inside `bounds` (the scroll container's scrollable area, in the same content
 // space — see marqueeScrollBounds). The rectangle is rendered inside the scroll content, so any part of
 // it past that area's far edge becomes scrollable overflow itself: dragging below a short listing then

@@ -2,6 +2,7 @@
 import * as Comlink from "comlink"
 import sqlite3InitModule, { type SqlValue } from "@sqlite.org/sqlite-wasm"
 import { opfsUnavailableError } from "@/lib/storage/errors"
+import { isLockConflictError, isNotFoundError } from "@/lib/storage/opfs"
 import { log } from "@/lib/log"
 
 // Narrow local interface — sqlite-wasm's own typings are inconsistent here (see the SAH pool / oo1
@@ -31,10 +32,6 @@ const POOL_FILES_DIRECTORY = ".opaque"
 // Waits between lock probes, ~3s in all.
 const POOL_RELEASE_BACKOFF_MS = [50, 100, 200, 400, 800, 1600] as const
 
-function isLockConflict(e: unknown): boolean {
-	return e instanceof DOMException && e.name === "NoModificationAllowedError"
-}
-
 // Locks and releases every pool file once, sequentially, so no handle outlives a failed step. close() is
 // synchronous in every browser the pool supports (the library's apiVersionCheck refuses the rest), so
 // the install right after never meets a lock of the probe's own.
@@ -46,7 +43,7 @@ async function probePool(): Promise<void> {
 
 		files = await (await root.getDirectoryHandle(POOL_DIRECTORY)).getDirectoryHandle(POOL_FILES_DIRECTORY)
 	} catch (e) {
-		if (e instanceof DOMException && e.name === "NotFoundError") {
+		if (isNotFoundError(e)) {
 			return // first run: no pool yet, nothing can hold it
 		}
 
@@ -78,7 +75,7 @@ async function waitForPoolRelease(): Promise<void> {
 		} catch (e) {
 			const delay = POOL_RELEASE_BACKOFF_MS[attempt]
 
-			if (!isLockConflict(e) || delay === undefined) {
+			if (!isLockConflictError(e) || delay === undefined) {
 				return
 			}
 

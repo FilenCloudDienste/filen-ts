@@ -1,5 +1,5 @@
 import { type } from "arktype"
-import { mergeInflight } from "@filen/shared"
+import { createNotePreviewFromContentText, mergeInflight } from "@filen/shared"
 import type { Note, NoteType } from "@filen/sdk-rs"
 import type { InflightContent, InflightEntry } from "@/features/notes/store/useNotesInflight"
 
@@ -7,6 +7,10 @@ import type { InflightContent, InflightEntry } from "@/features/notes/store/useN
 // mirrors mobile's `Checklist ? "checklist" : Rich ? "rich" : "other"` mapping exactly.
 export function noteKindForPreview(noteType: NoteType): "rich" | "checklist" | "other" {
 	return noteType === "checklist" ? "checklist" : noteType === "rich" ? "rich" : "other"
+}
+
+export function notePreviewFor(noteType: NoteType, content: string): string {
+	return createNotePreviewFromContentText(noteKindForPreview(noteType), content)
 }
 
 // arktype schema for the DURABLE outbox's read path (invalid → dropped, the kv
@@ -25,6 +29,8 @@ const inflightEntrySchema = type({
 	"orphan?": "true",
 	"carriedFrom?": "string"
 })
+
+export const INFLIGHT_NOTE_CONTENT_KV_KEY = "inflightNoteContent"
 
 export const inflightContentSchema = type({
 	"[string]": inflightEntrySchema.array()

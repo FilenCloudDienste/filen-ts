@@ -1,16 +1,12 @@
 import { useEffect, useState } from "react"
 import * as Comlink from "comlink"
 import { driveItemName } from "@filen/shared"
-import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
+import { type DriveItem } from "@/features/drive/lib/item"
 import { extensionOf } from "@/features/drive/lib/preview.logic"
 import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
 import { gridDoc, type GridDoc } from "@/features/spreadsheet/lib/cellStore.logic"
-import {
-	sniffSpreadsheetKind,
-	spreadsheetFileKind,
-	spreadsheetSaveFormat,
-	spreadsheetWorker
-} from "@/features/spreadsheet/lib/spreadsheetClient"
+import { sniffSpreadsheetKind, spreadsheetWorker } from "@/features/spreadsheet/lib/spreadsheetClient"
+import { spreadsheetFileKind, spreadsheetSaveFormat } from "@/features/spreadsheet/lib/fileKind"
 import { type ErrorDTO } from "@/lib/sdk/errors"
 
 export type SpreadsheetDocState =
@@ -26,9 +22,7 @@ export type SpreadsheetDocState =
 type Opened = { status: "unreadable" } | { status: "ready"; id: number; doc: GridDoc; unnamed: boolean; format: string | null }
 
 function extension(item: DriveItem): string {
-	const base = asDirectoryOrFile(item)
-
-	return extensionOf(base.type === "file" ? driveItemName(base) : "")
+	return extensionOf(driveItemName(item))
 }
 
 function nameFormat(item: DriveItem): string | null {

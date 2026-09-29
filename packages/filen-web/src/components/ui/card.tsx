@@ -1,13 +1,15 @@
 import * as React from "react"
 
 import { cn } from "@filen/shared"
+import { CARD_SURFACE_CLASS } from "@/components/ui/surface"
 
 function Card({ className, ...props }: React.ComponentProps<"div">) {
 	return (
 		<div
 			data-slot="card"
 			className={cn(
-				"group/card flex flex-col gap-(--card-spacing) overflow-hidden rounded-[min(var(--radius-4xl),24px)] bg-card py-(--card-spacing) text-sm text-card-foreground shadow-sm ring-1 ring-foreground/5 [--card-spacing:--spacing(5)] has-[>img:first-child]:pt-0 dark:ring-foreground/10 *:[img:first-child]:rounded-t-[min(var(--radius-4xl),24px)] *:[img:last-child]:rounded-b-[min(var(--radius-4xl),24px)]",
+				"group/card flex flex-col gap-(--card-spacing) py-(--card-spacing) [--card-spacing:--spacing(5)] has-[>img:first-child]:pt-0 *:[img:first-child]:rounded-t-[min(var(--radius-4xl),24px)] *:[img:last-child]:rounded-b-[min(var(--radius-4xl),24px)]",
+				CARD_SURFACE_CLASS,
 				className
 			)}
 			{...props}

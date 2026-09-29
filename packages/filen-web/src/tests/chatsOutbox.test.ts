@@ -44,7 +44,7 @@ vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
 import { Sync, enqueueChatMessage, sync } from "@/features/chats/lib/sync"
 import { inflightChatMessagesSchema, buildOptimisticMessage, type OptimisticSender } from "@/features/chats/lib/sync.logic"
-import useChatsInflightStore, { type ChatMessageWithInflightId, type InflightChatMessages } from "@/features/chats/store/useChatsInflight"
+import { useChatsInflightStore, type ChatMessageWithInflightId, type InflightChatMessages } from "@/features/chats/store/useChatsInflight"
 
 const SENDER: OptimisticSender = { id: 7n, email: "me@filen.io", avatarUrl: undefined, nickName: "Me" }
 

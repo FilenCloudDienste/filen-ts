@@ -64,15 +64,6 @@ function nameOf(item: DriveItem | undefined): string | undefined {
 	return item?.type === "file" && item.data.meta.type === "decoded" ? item.data.meta.data.name : undefined
 }
 
-function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
-	let resolve: (value: T) => void = () => undefined
-	const promise = new Promise<T>(r => {
-		resolve = r
-	})
-
-	return { promise, resolve }
-}
-
 function setup(
 	items = [file("a"), file("b", { stableUUID: "other" as File["stableUUID"] })],
 	index = 0,
@@ -144,7 +135,7 @@ beforeEach(() => {
 describe("usePreviewRemoteChanges", () => {
 	it("saving mine as a new file follows the newest revision that arrived during the upload", async () => {
 		const { hook, commitSaved } = setup()
-		const upload = deferred<{ status: "success"; item: DriveItem }>()
+		const upload = Promise.withResolvers<{ status: "success"; item: DriveItem }>()
 
 		runPreviewSave.mockReturnValueOnce(upload.promise)
 
@@ -364,7 +355,7 @@ describe("usePreviewRemoteChanges", () => {
 
 	it("uploads a new file once however often it is asked while the first upload runs", async () => {
 		const { hook } = setup()
-		const upload = deferred<{ status: "success"; item: DriveItem }>()
+		const upload = Promise.withResolvers<{ status: "success"; item: DriveItem }>()
 
 		runPreviewSave.mockReturnValue(upload.promise)
 

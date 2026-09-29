@@ -186,12 +186,6 @@ export const drive = {
 	driveListLabel: "Directory contents",
 	/** Drive listing — title shown when a directory listing fails to load */
 	driveLoadError: "Couldn't load this directory",
-	/** Drive listing — selection count shown in the toolbar in place of the item count; singular */
-	driveSelectionCount_one: "{{count}} selected",
-	/** Drive listing — selection count shown in the toolbar in place of the item count; plural */
-	driveSelectionCount_other: "{{count}} selected",
-	/** Bulk action bar — accessible name of the floating toolbar shown while a drive selection exists */
-	driveSelectionActionsLabel: "Selection actions",
 	/** Drive listing row — visually-hidden label announcing a favorited item's star indicator */
 	driveFavorited: "Favorited",
 	/** Grid tile — visually-hidden label announcing the selection checkmark badge shown on a selected tile, in addition to its selection ring */
@@ -206,8 +200,6 @@ export const drive = {
 	// ── Search ───────────────────────────────────────────────────────────────
 	/** Drive search input — accessible label on the button clearing the current search text */
 	driveSearchClear: "Clear search",
-	/** Drive search — empty-state title once the search has settled with zero matches */
-	driveSearchNoResults: "No matches",
 	/** Drive search — status text shown next to a spinner while zero matches have converged yet but the search is still actively running */
 	driveSearchStillSearching: "Still searching…",
 	/** Drive search — error empty-state title once the search has given up (the underlying session died or timed out with nothing back) */
@@ -226,8 +218,6 @@ export const drive = {
 	driveCommandNewDirectory: "New directory",
 	/** Keymap registry — description for the drive.selectAll command */
 	driveCommandSelectAll: "Select all",
-	/** Keymap registry — description for the drive.clearSelection command */
-	driveCommandClearSelection: "Clear selection",
 	/** Keymap registry — description for the drive.toggleView command */
 	driveCommandToggleView: "Toggle view",
 	/** Keymap registry — description for the drive.rename command */
@@ -452,10 +442,6 @@ export const drive = {
 	driveVersionsSelectAction: "Select",
 	/** Versions panel (select mode) — toggle selecting/deselecting every selectable (non-current) version */
 	driveVersionsSelectAllAction: "Select all",
-	/** Versions panel (select mode) — count of currently selected versions, shown next to the bulk actions; singular */
-	driveVersionsSelectedCount_one: "{{count}} selected",
-	/** Versions panel (select mode) — count of currently selected versions; plural */
-	driveVersionsSelectedCount_other: "{{count}} selected",
 	/** Versions panel (select mode) — deletes every currently selected version */
 	driveVersionsDeleteSelectedAction: "Delete selected",
 	/** Versions panel — deletes every non-current version in one action; hidden when there are none */

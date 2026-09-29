@@ -81,12 +81,7 @@ function ChatMenuEntries({ chat, currentUserId, blocked, onAction, family }: Cha
 					variant={descriptor.destructive ? "destructive" : "default"}
 					disabled={descriptor.enabled === false}
 					title={descriptor.enabled === false && !isOnline ? t("common:offlineActionDisabled") : undefined}
-					onClick={event => {
-						// Stop propagation — the portaled popup's synthetic events still bubble through the
-						// REACT tree even though the DOM node lives elsewhere (same rationale as noteMenu.tsx),
-						// so without this a row click would also select the conversation underneath.
-						event.stopPropagation()
-
+					onClick={() => {
 						if (descriptor.run === "direct") {
 							void runDirect(descriptor)
 							return

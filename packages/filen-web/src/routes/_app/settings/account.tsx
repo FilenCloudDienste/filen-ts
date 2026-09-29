@@ -1,7 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router"
 import { useTranslation } from "react-i18next"
 import { UserIcon } from "lucide-react"
-import { useAccountQuery } from "@/queries/account"
 import { ProfileHeader } from "@/features/settings/components/account/profileHeader"
 import { NicknameRow } from "@/features/settings/components/account/nicknameRow"
 import { ChangeEmailRow } from "@/features/settings/components/account/changeEmail"
@@ -11,32 +10,25 @@ import { GdprExportRow } from "@/features/settings/components/account/gdprExport
 import { AccountPreferencesRows } from "@/features/settings/components/account/accountPreferencesRows"
 import { DeleteAllVersionsRow } from "@/features/settings/components/account/deleteAllVersionsRow"
 import { DeleteAllItemsRow } from "@/features/settings/components/account/deleteAllItemsRow"
-import { SettingsGroup, SettingsPage } from "@/features/settings/components/settingsLayout"
-import { Button } from "@/components/ui/button"
-import { LoadingState } from "@/components/loadingState"
-import { Empty, EmptyContent, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
+import { AccountGate } from "@/features/settings/components/accountGate"
+import { SettingsGroup } from "@/features/settings/components/settingsLayout"
 import { routeHead } from "@/lib/head/routeHead"
 import { i18n } from "@/lib/i18n"
 
-// Same one-top-level-gate shape as the Security page: every row independently reads
-// useAccountQuery (dedupe via the shared ["account"] key), but the page gates on ONE branch so every
-// row mounts only once the account has genuinely loaded. The gate is on the data, not the status: a
-// failed background read keeps the cached account, so the page stays up over it.
 export const Route = createFileRoute("/_app/settings/account")({
 	head: routeHead({ title: () => [i18n.t("settings:settingsSectionAccount"), i18n.t("common:settings")] }),
 	component: AccountPage
 })
 
 function AccountPage() {
-	const { t } = useTranslation(["settings", "common"])
-	const accountQuery = useAccountQuery()
+	const { t } = useTranslation("settings")
 
 	return (
-		<SettingsPage
+		<AccountGate
 			icon={UserIcon}
 			title={t("settingsSectionAccount")}
 		>
-			{accountQuery.data !== undefined ? (
+			{accountQuery => (
 				<>
 					<ProfileHeader accountQuery={accountQuery} />
 					<SettingsGroup title={t("settingsGroupProfile")}>
@@ -61,28 +53,7 @@ function AccountPage() {
 						<DeleteAllItemsRow accountQuery={accountQuery} />
 					</SettingsGroup>
 				</>
-			) : accountQuery.status === "error" ? (
-				<Empty>
-					<EmptyHeader>
-						<EmptyMedia>
-							<UserIcon />
-						</EmptyMedia>
-						<EmptyTitle>{t("settingsAccountLoadError")}</EmptyTitle>
-					</EmptyHeader>
-					<EmptyContent>
-						<Button
-							variant="outline"
-							onClick={() => {
-								void accountQuery.refetch()
-							}}
-						>
-							{t("common:tryAgain")}
-						</Button>
-					</EmptyContent>
-				</Empty>
-			) : (
-				<LoadingState size="lg" />
 			)}
-		</SettingsPage>
+		</AccountGate>
 	)
 }

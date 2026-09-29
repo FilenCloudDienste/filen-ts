@@ -82,12 +82,6 @@ export function applyRichReadOnly(target: RichEnableTarget, readOnly: boolean): 
 	target.enable(!readOnly)
 }
 
-// The value to hand Quill's format("header", …). Toggles the requested level off when it is already
-// active, otherwise switches to it (mobile quillToggleHeader).
-export function nextHeaderValue(current: RichHeaderLevel | null, requested: RichHeaderLevel): RichHeaderLevel | false {
-	return current === requested ? false : requested
-}
-
 // The value to hand Quill's format("list", …) (mobile quillToggleList): toggle the active list off,
 // otherwise switch to the requested type — a checklist request maps to Quill's "unchecked".
 export function nextListValue(current: RichListValue | null, requested: RichListRequest): RichListValue | false {

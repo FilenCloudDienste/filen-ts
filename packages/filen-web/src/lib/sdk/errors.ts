@@ -80,6 +80,11 @@ export function toErrorDTO(e: unknown): ErrorDTO {
 	// without matching on message text. The default, unset `.name` ("Error") carries no information and
 	// is excluded so it doesn't masquerade as a real kind.
 	const kind = e instanceof Error && e.name !== "" && e.name !== "Error" ? e.name : undefined
+	return plainErrorDTO(message, kind)
+}
+
+// A locally generated (non-SDK) error: the message is its own label.
+export function plainErrorDTO(message: string, kind?: string): ErrorDTO {
 	return { species: "plain", message, label: message, ...(kind !== undefined ? { kind } : {}) }
 }
 

@@ -10,7 +10,6 @@ import { defaultRevealDeps, runOpenContainingDirectory } from "@/features/drive/
 import { driveItemLinkStatusQueryKey, fetchDriveItemLinkStatus, type DriveItemLinkStatus } from "@/features/drive/queries/drive"
 import { queryClient } from "@/queries/client"
 import { errorLabel } from "@/lib/i18n/errorLabel"
-import { asErrorDTO } from "@/lib/sdk/errors"
 import { toastBulkOutcome } from "@/features/drive/lib/bulkToast"
 import { startDownloads } from "@/features/drive/lib/download"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
@@ -42,13 +41,13 @@ export interface ItemMenuContentProps {
 	// the listing-level dialog host (directoryListing.tsx) owns turning this into an open dialog.
 	// "direct"-run descriptors (favorite/restore) never call this — they resolve fully in place below.
 	onItemAction: (kind: ItemActionDialogKind, item: DriveItem) => void
-	// Preview-only extension points (both omitted by every row/tile caller — current behavior there is
-	// unchanged). The preview overlay keeps its own per-slot item override map instead of relying on a
-	// listing refetch, so it needs the updated item the instant a "direct" descriptor resolves.
+	// For a surface whose items live outside the drive listings: the preview overlay (its own per-slot
+	// item override map) and photos (its own listing cache) need the updated item the instant a
+	// "direct" descriptor resolves.
 	onFavoriteToggled?: ((item: DriveItem) => void) | undefined
 	onRestored?: ((item: DriveItem) => void) | undefined
-	// Preview-only: descriptor ids to omit from the rendered list — the preview drops "download" since
-	// its header already has its own dedicated download button (previewOverlay.tsx).
+	// Descriptor ids to omit from the rendered list — the preview drops "download" (its header has its
+	// own download button), photos drops "move" (photos/lib/itemActions.ts).
 	hiddenActionIds?: ReadonlySet<ItemActionId> | undefined
 	// True for a search hit whose parent is not the directory on screen — the only case
 	// "Open containing directory" is offered for. Omitted by every non-listing caller.
@@ -176,7 +175,7 @@ function ItemMenuEntries({
 				staleTime: "static"
 			})
 		} catch (e) {
-			toast.error(errorLabel(asErrorDTO(e)))
+			toast.error(errorLabel(e))
 			return
 		}
 
@@ -188,7 +187,7 @@ function ItemMenuEntries({
 		}
 
 		if (outcome.action === "clipboardError") {
-			toast.error(errorLabel(asErrorDTO(outcome.error)))
+			toast.error(errorLabel(outcome.error))
 			return
 		}
 
@@ -223,14 +222,7 @@ function ItemMenuEntries({
 							variant={descriptor.destructive ? "destructive" : "default"}
 							disabled={descriptor.enabled === false}
 							title={descriptor.enabled === false && !isOnline ? t("common:offlineActionDisabled") : undefined}
-							onClick={event => {
-								// The ⋯ dropdown is mounted as a React descendant of the row's own clickable div
-								// (needed so the trigger button sits visually inside the row) — Base UI's MenuItem
-								// itself never stops propagation, and a portaled popup's synthetic events still
-								// bubble through the REACT tree (not the DOM tree), so without this an item click
-								// would also fire the row's onClick and reselect it.
-								event.stopPropagation()
-
+							onClick={() => {
 								// Synchronous off the click, like the double-click it mirrors: audio starts
 								// playback from here.
 								if (descriptor.id === "open") {
@@ -300,8 +292,8 @@ export function DriveContextMenuContent({
 	)
 }
 
-// ⋯ trigger surface — rendered inside a per-row/tile <DropdownMenu> (see driveRow.tsx/driveTile.tsx),
-// and by the preview header's own item menu (previewOverlay.tsx).
+// ⋯ trigger surface — rendered inside a per-row/tile <DropdownMenu> (see driveRow.tsx/driveTile.tsx/
+// photoTile.tsx), and by the preview header's own item menu (previewOverlay.tsx).
 export function DriveDropdownMenuContent({
 	item,
 	variant,

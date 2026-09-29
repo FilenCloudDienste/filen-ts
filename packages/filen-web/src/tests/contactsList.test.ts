@@ -2,10 +2,10 @@ import { describe, expect, it } from "vitest"
 import type { BlockedContact, Contact, ContactRequestIn, ContactRequestOut } from "@filen/sdk-rs"
 import {
 	buildContactSections,
-	contactInitials,
 	contactsSectionCounts,
 	filterContactSections,
 	filterContactsBySearch,
+	contactsNotIn,
 	isContactsSectionFilter,
 	CONTACTS_SECTION_FILTERS,
 	CONTACTS_SECTION_HEADER_KEY,
@@ -54,20 +54,6 @@ function mockOutgoing(overrides: Partial<ContactRequestOut> = {}): ContactReques
 		...overrides
 	}
 }
-
-describe("contactInitials", () => {
-	it("uppercases the first character of the display name", () => {
-		expect(contactInitials("alice")).toBe("A")
-	})
-
-	it("trims leading whitespace before taking the first character", () => {
-		expect(contactInitials("  bob")).toBe("B")
-	})
-
-	it("falls back to a placeholder for an empty display name", () => {
-		expect(contactInitials("")).toBe("?")
-	})
-})
 
 describe("contactsSectionCounts", () => {
 	it("counts each section by its own array length", () => {
@@ -282,5 +268,21 @@ describe("filterContactsBySearch", () => {
 		const noNick = { email: "carol@filen.io" }
 
 		expect(filterContactsBySearch([noNick], "carol")).toEqual([noNick])
+	})
+})
+
+describe("contactsNotIn", () => {
+	it("drops contacts already a participant, preserving source order", () => {
+		const already = mockContact({ uuid: "c0000000-0000-0000-0000-000000000000", userId: 5n })
+		const fresh1 = mockContact({ uuid: "c1000000-0000-0000-0000-000000000000", userId: 6n })
+		const fresh2 = mockContact({ uuid: "c2000000-0000-0000-0000-000000000000", userId: 7n })
+
+		expect(contactsNotIn([already, fresh1, fresh2], [{ userId: 5n }])).toEqual([fresh1, fresh2])
+	})
+
+	it("returns every contact when there are no participants", () => {
+		const contacts = [mockContact({ userId: 1n }), mockContact({ userId: 2n })]
+
+		expect(contactsNotIn(contacts, [])).toEqual(contacts)
 	})
 })

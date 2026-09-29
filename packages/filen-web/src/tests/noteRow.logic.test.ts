@@ -1,12 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { Note, NoteParticipant, NoteTag, UuidStr } from "@filen/sdk-rs"
-import {
-	noteRowPreview,
-	noteRowSharedByEmail,
-	noteRowTags,
-	noteRowParticipants,
-	participantAvatarSource
-} from "@/features/notes/lib/noteRow.logic"
+import { noteRowPreview, noteRowSharedByEmail, noteRowTags, noteRowParticipants } from "@/features/notes/lib/noteRow.logic"
 
 // UuidStr is a template-literal brand requiring at least 3 dashes — pad a short label, same as notesSort.test.ts.
 function testUuid(label: string): UuidStr {
@@ -158,14 +152,5 @@ describe("noteRow.logic — noteRowParticipants", () => {
 		const note = mockNote({ participants: [mockParticipant({ userId: 1n }), mockParticipant({ userId: 2n })] })
 
 		expect(noteRowParticipants(note, undefined)).toHaveLength(2)
-	})
-})
-
-describe("noteRow.logic — participantAvatarSource", () => {
-	it("returns the avatar only when it is a real https URL", () => {
-		expect(participantAvatarSource(mockParticipant({ avatar: "https://cdn.example/a.png" }))).toBe("https://cdn.example/a.png")
-		expect(participantAvatarSource(mockParticipant({ avatar: "none" }))).toBeUndefined()
-		// avatar absent (never set) → undefined.
-		expect(participantAvatarSource(mockParticipant())).toBeUndefined()
 	})
 })

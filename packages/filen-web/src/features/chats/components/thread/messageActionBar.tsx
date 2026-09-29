@@ -6,6 +6,7 @@ import { MessageDropdownMenuContent } from "@/features/chats/components/thread/m
 import { inlinePrimaryActions } from "@/features/chats/components/thread/messageActionBar.logic"
 import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Button } from "@/components/ui/button"
+import { stopRowPropagation } from "@/lib/domEvents"
 
 // Floating hover action bar pinned to a row's top-right (Discord placement) — a SECOND renderer of the
 // row's one useMessageActions result the right-click menu also gets, as inline icon buttons plus a ⋯
@@ -53,9 +54,7 @@ export function MessageActionBar({ descriptors, runAction }: MessageActionsHandl
 							variant="ghost"
 							size="icon-xs"
 							aria-label={t("chatMessageMoreActions")}
-							onClick={event => {
-								event.stopPropagation()
-							}}
+							onClick={stopRowPropagation}
 						>
 							<MoreHorizontalIcon />
 						</Button>

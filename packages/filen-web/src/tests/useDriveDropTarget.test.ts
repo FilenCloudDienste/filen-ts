@@ -80,14 +80,14 @@ describe("useDriveDropTarget", () => {
 		const over = dragEvent(false)
 
 		act(() => {
-			result.current.onDragOver(over.event)
+			result.current.handlers.onDragOver(over.event)
 		})
 
 		expect(over.dataTransfer.dropEffect).toBe("move")
 		expect(result.current.mode).toBe("move")
 
 		act(() => {
-			result.current.onDrop(dragEvent(false).event)
+			result.current.handlers.onDrop(dragEvent(false).event)
 		})
 
 		expect(performMove).toHaveBeenCalledExactlyOnceWith([REPORT], "docs-0000-0000-0000-000000000000")
@@ -99,7 +99,7 @@ describe("useDriveDropTarget", () => {
 		const over = dragEvent(true)
 
 		act(() => {
-			result.current.onDragOver(over.event)
+			result.current.handlers.onDragOver(over.event)
 		})
 
 		expect(over.dataTransfer.dropEffect).toBe("copy")
@@ -107,7 +107,7 @@ describe("useDriveDropTarget", () => {
 		expect(dropHighlightClass(result.current)).toContain("outline-dashed")
 
 		act(() => {
-			result.current.onDrop(dragEvent(true).event)
+			result.current.handlers.onDrop(dragEvent(true).event)
 		})
 
 		expect(startCopyWithCard).toHaveBeenCalledExactlyOnceWith([REPORT], { uuid: "docs-0000-0000-0000-000000000000", name: "Docs" })
@@ -119,7 +119,7 @@ describe("useDriveDropTarget", () => {
 		const moveOver = dragEvent(false)
 
 		act(() => {
-			result.current.onDragOver(moveOver.event)
+			result.current.handlers.onDragOver(moveOver.event)
 		})
 
 		expect(moveOver.preventDefault).not.toHaveBeenCalled()
@@ -128,7 +128,7 @@ describe("useDriveDropTarget", () => {
 		const copyOver = dragEvent(true)
 
 		act(() => {
-			result.current.onDragOver(copyOver.event)
+			result.current.handlers.onDragOver(copyOver.event)
 		})
 
 		expect(copyOver.preventDefault).toHaveBeenCalled()
@@ -136,7 +136,7 @@ describe("useDriveDropTarget", () => {
 
 		// Letting go of the modifier over the same target withdraws it again.
 		act(() => {
-			result.current.onDragOver(dragEvent(false).event)
+			result.current.handlers.onDragOver(dragEvent(false).event)
 		})
 
 		expect(result.current.isOver).toBe(false)
@@ -183,7 +183,7 @@ describe("a row on a route cut short", () => {
 		const over = dragEvent(copy)
 
 		act(() => {
-			result.current.onDragOver(over.event)
+			result.current.handlers.onDragOver(over.event)
 		})
 
 		return over.preventDefault.mock.calls.length > 0
@@ -227,7 +227,7 @@ describe("a row on a route cut short", () => {
 			const over = dragEvent(false)
 
 			act(() => {
-				result.current.onDragOver(over.event)
+				result.current.handlers.onDragOver(over.event)
 			})
 
 			return over.preventDefault.mock.calls.length > 0
@@ -301,7 +301,7 @@ describe("spring-loading", () => {
 		const { result, open } = renderSpringTarget()
 
 		act(() => {
-			result.current.onDragEnter(springEvent().event)
+			result.current.handlers.onDragEnter(springEvent().event)
 		})
 		expect(result.current.isOver).toBe(true)
 
@@ -321,8 +321,8 @@ describe("spring-loading", () => {
 		const event = springEvent().event
 
 		act(() => {
-			leave.result.current.onDragEnter(event)
-			leave.result.current.onDragLeave(event)
+			leave.result.current.handlers.onDragEnter(event)
+			leave.result.current.handlers.onDragLeave(event)
 			vi.advanceTimersByTime(SPRING_LOAD_DELAY_MS)
 		})
 		expect(leave.open).not.toHaveBeenCalled()
@@ -330,8 +330,8 @@ describe("spring-loading", () => {
 		const dropped = renderSpringTarget()
 
 		act(() => {
-			dropped.result.current.onDragEnter(springEvent().event)
-			dropped.result.current.onDrop(springEvent().event)
+			dropped.result.current.handlers.onDragEnter(springEvent().event)
+			dropped.result.current.handlers.onDrop(springEvent().event)
 			vi.advanceTimersByTime(SPRING_LOAD_DELAY_MS)
 		})
 		expect(dropped.open).not.toHaveBeenCalled()
@@ -339,7 +339,7 @@ describe("spring-loading", () => {
 		const unmounted = renderSpringTarget()
 
 		act(() => {
-			unmounted.result.current.onDragEnter(springEvent().event)
+			unmounted.result.current.handlers.onDragEnter(springEvent().event)
 		})
 		unmounted.unmount()
 		act(() => {
@@ -372,9 +372,9 @@ describe("spring-loading", () => {
 		)
 
 		act(() => {
-			self.result.current.onDragEnter(springEvent().event)
-			self.result.current.onDragOver(springEvent({ copy: true }).event)
-			below.result.current.onDragEnter(springEvent().event)
+			self.result.current.handlers.onDragEnter(springEvent().event)
+			self.result.current.handlers.onDragOver(springEvent({ copy: true }).event)
+			below.result.current.handlers.onDragEnter(springEvent().event)
 			vi.advanceTimersByTime(SPRING_LOAD_DELAY_MS)
 		})
 
@@ -397,7 +397,7 @@ describe("spring-loading", () => {
 		const enter = springEvent()
 
 		act(() => {
-			result.current.onDragEnter(enter.event)
+			result.current.handlers.onDragEnter(enter.event)
 			vi.advanceTimersByTime(SPRING_LOAD_DELAY_MS)
 		})
 
@@ -411,7 +411,7 @@ describe("spring-loading", () => {
 		const enter = springEvent({ files: true })
 
 		act(() => {
-			taking.result.current.onDragEnter(enter.event)
+			taking.result.current.handlers.onDragEnter(enter.event)
 		})
 		expect(enter.preventDefault).toHaveBeenCalled()
 		expect(taking.result.current.mode).toBe("copy")
@@ -424,7 +424,7 @@ describe("spring-loading", () => {
 		const drop = springEvent({ files: true })
 
 		act(() => {
-			taking.result.current.onDrop(drop.event)
+			taking.result.current.handlers.onDrop(drop.event)
 		})
 		expect(uploadDroppedFiles).toHaveBeenCalledExactlyOnceWith(drop.dataTransfer, DOCS)
 
@@ -432,7 +432,7 @@ describe("spring-loading", () => {
 		const ignored = springEvent({ files: true })
 
 		act(() => {
-			refusing.result.current.onDragEnter(ignored.event)
+			refusing.result.current.handlers.onDragEnter(ignored.event)
 			vi.advanceTimersByTime(SPRING_LOAD_DELAY_MS)
 		})
 		expect(ignored.preventDefault).not.toHaveBeenCalled()

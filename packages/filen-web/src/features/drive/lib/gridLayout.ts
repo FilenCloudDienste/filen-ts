@@ -10,6 +10,21 @@ export const TILE_ROW_HEIGHT = 244
 // Grid view's padding on the listbox, keeping the full-bleed listing's tiles off the pane edges.
 export const GRID_INSET = 12
 
+// Responsive auto-fill column count for a given container width and tile size — CSS Grid's own
+// `repeat(auto-fill, minmax(tile, 1fr))` semantics expressed as plain arithmetic so the virtualizer's
+// row-count math (photos' photoGrid and the drive grid) can compute it without measuring the DOM
+// grid itself. Never less than 1 (a container narrower than one tile still shows a single column).
+// `gap` is the grid's own inter-column gap: n columns occupy n*tile + (n-1)*gap, so ignoring it
+// over-counts at exact-fit widths and leaves each 1fr cell narrower than the fixed-width tile inside
+// it. Defaulted to 0, which reduces the expression exactly to the gapless form.
+export function columnsForWidth(containerWidth: number, tileSize: number, gap = 0): number {
+	if (tileSize <= 0) {
+		return 1
+	}
+
+	return Math.max(1, Math.floor((containerWidth + gap) / (tileSize + gap)))
+}
+
 // How many item slots can be simultaneously on screen for a viewport of this size, before any
 // headroom multiplier — a list row is one slot per ROW_HEIGHT of vertical space, a grid tile is one
 // slot per TILE_WIDTH-by-TILE_ROW_HEIGHT cell. The "+1" on each axis accounts for a partially-visible
@@ -20,7 +35,7 @@ export function estimateVisibleSlots(viewportWidth: number, viewportHeight: numb
 		return Math.max(0, Math.ceil(viewportHeight / ROW_HEIGHT)) + 1
 	}
 
-	const columns = Math.max(1, Math.floor(viewportWidth / TILE_WIDTH))
+	const columns = columnsForWidth(viewportWidth, TILE_WIDTH)
 	const rows = Math.max(0, Math.ceil(viewportHeight / TILE_ROW_HEIGHT)) + 1
 
 	return columns * rows

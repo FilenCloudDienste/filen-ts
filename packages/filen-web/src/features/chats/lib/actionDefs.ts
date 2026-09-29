@@ -1,11 +1,6 @@
-import { PencilIcon, Volume2Icon, VolumeOffIcon, UsersIcon, MailOpenIcon, Trash2Icon, LogOutIcon, type LucideIcon } from "lucide-react"
+import { PencilIcon, Volume2Icon, VolumeOffIcon, UsersIcon, MailOpenIcon, Trash2Icon, LogOutIcon } from "lucide-react"
+import { type ActionDef } from "@/lib/actionDescriptor"
 import { type ChatsKey } from "@/lib/i18n"
-
-export interface ChatActionDef {
-	labelKey: ChatsKey
-	icon: LucideIcon
-	destructive?: boolean
-}
 
 // Per-action label + icon (+ destructive styling) facts for the chat menu (chatMenu.logic.ts), mirroring
 // notes' own NOTE_ACTION_DEFS split: one place a label/icon can drift from, gating/ordering stays the
@@ -19,4 +14,4 @@ export const CHAT_ACTION_DEFS = {
 	rename: { labelKey: "chatActionRename", icon: PencilIcon },
 	delete: { labelKey: "chatActionDelete", icon: Trash2Icon, destructive: true },
 	leave: { labelKey: "chatActionLeave", icon: LogOutIcon, destructive: true }
-} satisfies Record<string, ChatActionDef>
+} satisfies Record<string, ActionDef<ChatsKey>>

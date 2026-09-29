@@ -2,7 +2,6 @@ import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { ArrowLeftIcon, HistoryIcon, RotateCcwIcon } from "lucide-react"
-import type { DialogRoot } from "@base-ui/react/dialog"
 import type { Note, NoteHistory } from "@filen/sdk-rs"
 import { useNotes } from "@/features/notes/queries/notes"
 import { useNoteHistoryQuery } from "@/features/notes/queries/noteHistory"
@@ -13,13 +12,13 @@ import { NoteReaderByType } from "@/features/notes/components/reader/noteReaderB
 import { formatVersionTimestamp } from "@/features/drive/lib/format"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { useIsOnline } from "@/lib/useIsOnline"
-import { asErrorDTO } from "@/lib/sdk/errors"
-import { shouldForwardOpenChange } from "@/components/dialogs/dismissal.logic"
+import { pendingGuardedOpenChange } from "@/components/dialogs/dismissal.logic"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { LoadingState } from "@/components/loadingState"
-import { Empty, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
+import { EmptyMessage } from "@/components/emptyMessage"
+import { SURFACE_RING } from "@/components/ui/surface"
 
 export interface HistoryDialogProps {
 	note: Note
@@ -44,16 +43,11 @@ export function HistoryDialog({ note: initialNote, onClose }: HistoryDialogProps
 	const [confirmingRestore, setConfirmingRestore] = useState<NoteHistory | null>(null)
 	const [pending, setPending] = useState(false)
 
-	function handleOpenChange(next: boolean, details: DialogRoot.ChangeEventDetails): void {
-		if (!shouldForwardOpenChange(next, pending)) {
-			details.cancel()
-			return
-		}
-
+	const handleOpenChange = pendingGuardedOpenChange(pending, next => {
 		if (!next) {
 			onClose()
 		}
-	}
+	})
 
 	async function handleRestoreConfirmed(history: NoteHistory): Promise<void> {
 		setPending(true)
@@ -87,7 +81,7 @@ export function HistoryDialog({ note: initialNote, onClose }: HistoryDialogProps
 						{t("noteHistoryBackToList")}
 					</Button>
 				</div>
-				<div className="min-h-0 flex-1 overflow-hidden rounded-xl ring-1 ring-foreground/5 dark:ring-foreground/10">
+				<div className={`min-h-0 flex-1 overflow-hidden rounded-xl ${SURFACE_RING}`}>
 					{history.content !== undefined ? (
 						<NoteReaderByType
 							note={{ ...note, noteType: history.noteType }}
@@ -115,15 +109,13 @@ export function HistoryDialog({ note: initialNote, onClose }: HistoryDialogProps
 
 		if (historyQuery.status === "error") {
 			return (
-				<Empty className="p-6">
-					<EmptyHeader>
-						<EmptyMedia>
-							<HistoryIcon />
-						</EmptyMedia>
-						<EmptyTitle>{t("noteHistoryLoadError")}</EmptyTitle>
-					</EmptyHeader>
-					<p className="text-center text-sm text-muted-foreground">{errorLabel(asErrorDTO(historyQuery.error))}</p>
-				</Empty>
+				<EmptyMessage
+					className="p-6"
+					icon={HistoryIcon}
+					title={t("noteHistoryLoadError")}
+				>
+					<p className="text-center text-sm text-muted-foreground">{errorLabel(historyQuery.error)}</p>
+				</EmptyMessage>
 			)
 		}
 
@@ -131,14 +123,11 @@ export function HistoryDialog({ note: initialNote, onClose }: HistoryDialogProps
 
 		if (sorted.length === 0) {
 			return (
-				<Empty className="p-6">
-					<EmptyHeader>
-						<EmptyMedia>
-							<HistoryIcon />
-						</EmptyMedia>
-						<EmptyTitle>{t("noteHistoryEmpty")}</EmptyTitle>
-					</EmptyHeader>
-				</Empty>
+				<EmptyMessage
+					className="p-6"
+					icon={HistoryIcon}
+					title={t("noteHistoryEmpty")}
+				/>
 			)
 		}
 

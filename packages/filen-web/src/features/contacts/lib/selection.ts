@@ -1,5 +1,5 @@
 import type { BlockedContact, Contact, ContactRequestIn, ContactRequestOut } from "@filen/sdk-rs"
-import { clampListboxIndex, listboxRange } from "@/features/drive/lib/listbox"
+import { clampListboxIndex, listboxRangeItems } from "@/features/drive/lib/listbox"
 import { type ContactSection } from "@/features/contacts/components/contactsList.logic"
 
 // Per-section selected-uuid buckets for the contacts bulk-selection mode. Unlike drive's single
@@ -96,16 +96,7 @@ export function nextContactSelection(state: ContactSelectionState, input: Contac
 	const anchorIndex = anchor !== null && anchor.section === input.section ? input.uuids.indexOf(anchor.uuid) : -1
 
 	if (input.shift && anchorIndex !== -1) {
-		const range = listboxRange(anchorIndex, clampListboxIndex(input.index, input.uuids.length))
-		const ranged: string[] = []
-
-		for (const i of range) {
-			const rangedUuid = input.uuids[i]
-
-			if (rangedUuid !== undefined) {
-				ranged.push(rangedUuid)
-			}
-		}
+		const ranged = listboxRangeItems(input.uuids, anchorIndex, clampListboxIndex(input.index, input.uuids.length))
 
 		// The anchor deliberately does NOT move: a run of consecutive Shift+clicks keeps ranging from the
 		// same fixed start, exactly like useNotesListSelection.

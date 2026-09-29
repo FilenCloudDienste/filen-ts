@@ -1,54 +1,36 @@
-import { describe, expect, it } from "vitest"
-import { shouldForwardOpenChange } from "@/components/dialogs/dismissal.logic"
+import { describe, expect, it, vi } from "vitest"
+import { pendingGuardedOpenChange } from "@/components/dialogs/dismissal.logic"
 
-describe("shouldForwardOpenChange (pending dismissal gate)", () => {
-	it("blocks a dismissal while the operation is pending", () => {
-		expect(shouldForwardOpenChange(false, true)).toBe(false)
+function run(next: boolean, pending: boolean) {
+	const onChange = vi.fn()
+	const cancel = vi.fn()
+
+	pendingGuardedOpenChange(pending, onChange)(next, { cancel })
+
+	return { onChange, cancel }
+}
+
+describe("pendingGuardedOpenChange (pending dismissal gate)", () => {
+	it("blocks a dismissal while pending and cancels the Base UI event", () => {
+		const { onChange, cancel } = run(false, true)
+
+		expect(onChange).not.toHaveBeenCalled()
+		expect(cancel).toHaveBeenCalledOnce()
 	})
 
 	it("forwards a dismissal once the operation has settled", () => {
-		expect(shouldForwardOpenChange(false, false)).toBe(true)
+		const { onChange, cancel } = run(false, false)
+
+		expect(onChange).toHaveBeenCalledWith(false)
+		expect(cancel).not.toHaveBeenCalled()
 	})
 
 	it("never blocks an opening change", () => {
-		expect(shouldForwardOpenChange(true, true)).toBe(true)
-		expect(shouldForwardOpenChange(true, false)).toBe(true)
-	})
-})
+		for (const pending of [true, false]) {
+			const { onChange, cancel } = run(true, pending)
 
-describe("dismissal gate integration (the primitives' handleOpenChange wiring)", () => {
-	// Mirrors the exact handler shape all three primitives use: a blocked change cancels the Base UI
-	// event (so its internal store keeps the dialog open too) and never reaches the caller's
-	// onOpenChange.
-	function makeHarness(initialPending: boolean) {
-		const state = { open: true, pending: initialPending, canceled: false }
-		const handleOpenChange = (next: boolean): void => {
-			if (!shouldForwardOpenChange(next, state.pending)) {
-				state.canceled = true // stands in for details.cancel()
-				return
-			}
-			state.open = next // stands in for the caller's onOpenChange
+			expect(onChange).toHaveBeenCalledWith(true)
+			expect(cancel).not.toHaveBeenCalled()
 		}
-		return { state, handleOpenChange }
-	}
-
-	it("a dismiss attempt during pending leaves the dialog open and cancels the Base UI event", () => {
-		const h = makeHarness(true)
-
-		h.handleOpenChange(false) // Escape / X button / outside-press while onConfirm runs
-
-		expect(h.state.open).toBe(true)
-		expect(h.state.canceled).toBe(true)
-	})
-
-	it("after settling, the same dismissal closes normally", () => {
-		const h = makeHarness(true)
-		h.handleOpenChange(false)
-		expect(h.state.open).toBe(true)
-
-		h.state.pending = false // operation settles
-		h.handleOpenChange(false)
-
-		expect(h.state.open).toBe(false)
 	})
 })

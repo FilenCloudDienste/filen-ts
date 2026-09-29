@@ -36,9 +36,3 @@ export function noteRowTags(note: Note): NoteTag[] {
 export function noteRowParticipants(note: Note, currentUserId: bigint | undefined): NoteParticipant[] {
 	return note.participants.filter(participant => participant.userId !== currentUserId)
 }
-
-// A participant's avatar URL, but only when it is a real https source — mobile's own guard, since the
-// field can carry a non-URL placeholder. Undefined falls the row back to the initials avatar.
-export function participantAvatarSource(participant: NoteParticipant): string | undefined {
-	return participant.avatar?.startsWith("https://") === true ? participant.avatar : undefined
-}

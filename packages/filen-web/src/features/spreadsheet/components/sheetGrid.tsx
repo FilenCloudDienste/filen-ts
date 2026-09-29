@@ -13,6 +13,7 @@ import {
 import { createPortal } from "react-dom"
 import { useTranslation } from "react-i18next"
 import { cn } from "@filen/shared"
+import { listenWindowDrag } from "@/lib/windowDrag"
 import type { Axis } from "@/features/spreadsheet/lib/axis.logic"
 import {
 	cellName,
@@ -821,16 +822,7 @@ export function SheetGrid({
 			}
 		}
 
-		window.addEventListener("pointermove", moveResize)
-		window.addEventListener("pointerup", endResize)
-		window.addEventListener("pointercancel", cancel)
-		window.addEventListener("keydown", cancelOnEscape, true)
-		detachRef.current = () => {
-			window.removeEventListener("pointermove", moveResize)
-			window.removeEventListener("pointerup", endResize)
-			window.removeEventListener("pointercancel", cancel)
-			window.removeEventListener("keydown", cancelOnEscape, true)
-		}
+		detachRef.current = listenWindowDrag({ move: moveResize, up: endResize, cancel, key: cancelOnEscape })
 	}
 
 	// At most one layout per frame, however fast the pointer moves.
@@ -993,7 +985,7 @@ export function SheetGrid({
 				aria-multiselectable="true"
 				aria-activedescendant={activeShown ? activeId : undefined}
 				tabIndex={0}
-				className="relative min-h-0 flex-1 overflow-auto bg-background outline-none select-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset"
+				className="relative min-h-0 flex-1 overflow-auto bg-background focus-ring-row outline-none select-none focus-visible:ring-inset"
 				onPointerDown={handlePointerDown}
 				onPointerMove={handlePointerMove}
 				onPointerUp={handlePointerUp}

@@ -11,7 +11,6 @@ import {
 	reflectRichFormats,
 	sameRichFormats,
 	serializeRichEditor,
-	nextHeaderValue,
 	nextListValue,
 	nextToggleValue,
 	cycleHeaderValue,
@@ -111,12 +110,6 @@ describe("toolbar format-value helpers", () => {
 	it("nextToggleValue negates", () => {
 		expect(nextToggleValue(false)).toBe(true)
 		expect(nextToggleValue(true)).toBe(false)
-	})
-
-	it("nextHeaderValue toggles a level off when active, else switches to it", () => {
-		expect(nextHeaderValue(2, 2)).toBe(false)
-		expect(nextHeaderValue(1, 2)).toBe(2)
-		expect(nextHeaderValue(null, 3)).toBe(3)
 	})
 
 	it("cycleHeaderValue walks none → H1 → H2 → H3 → none", () => {

@@ -88,6 +88,12 @@ export function sortNoteHistory(history: readonly NoteHistory[]): NoteHistory[] 
 	})
 }
 
+// The one search-term normalization every notes filter shares, so body-fetch scoping can never
+// disagree with the filter it feeds.
+export function normalizeSearch(search: string): string {
+	return search.trim().toLowerCase()
+}
+
 // Title-only half of the search match — exported so useNoteSearchBodies.ts can skip fetching a note's
 // body when its title already qualifies (a title hit never needs its body checked too), keeping the
 // eager content fetch scoped to only the notes that actually need it.
@@ -103,7 +109,7 @@ export function noteTitleMatchesSearch(note: Note, normalizedSearch: string): bo
 // body-only match briefly reads as "not found" rather than crashing or matching everything. Empty/
 // whitespace query returns the list unchanged, same as mobile.
 export function filterNotesBySearch(notes: readonly Note[], search: string, bodies?: ReadonlyMap<string, string | undefined>): Note[] {
-	const normalized = search.trim().toLowerCase()
+	const normalized = normalizeSearch(search)
 
 	if (normalized.length === 0) {
 		return [...notes]

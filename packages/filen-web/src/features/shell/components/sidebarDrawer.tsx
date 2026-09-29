@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next"
 import { PanelLeftIcon } from "lucide-react"
 import { Drawer as DrawerPrimitive } from "@base-ui/react/drawer"
 import { cn } from "@filen/shared"
+import { SCRIM_CLASS } from "@/components/ui/surface"
 
 // Below the layout breakpoint the module sidebar moves out of the shell row into this drawer — the
 // SAME element, mounted once (see appShell.tsx: never both, or the notes/chats sidebars' virtualizers,
@@ -43,7 +44,7 @@ export function SidebarDrawer({
 		>
 			{narrow ? (
 				<DrawerPrimitive.Portal keepMounted={true}>
-					<DrawerPrimitive.Backdrop className="fixed inset-0 isolate z-50 bg-black/30 duration-100 supports-backdrop-filter:backdrop-blur-sm data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0" />
+					<DrawerPrimitive.Backdrop className={SCRIM_CLASS} />
 					<DrawerPrimitive.Viewport className="fixed inset-0 z-50 flex">
 						{/* aria-label rather than a Drawer.Title: each panel already renders its own <h2>, and the
 						    popup merges consumer props last so this wins as the accessible name. */}

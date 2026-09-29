@@ -175,10 +175,7 @@ function DirectoryTreeNode({ child, path, depth, tree }: DirectoryTreeNodeProps)
 				data-cut={cut ? "" : undefined}
 				style={{ paddingInlineStart: levelInset(depth) }}
 				{...dragSource}
-				onDragEnter={drop.onDragEnter}
-				onDragOver={drop.onDragOver}
-				onDragLeave={drop.onDragLeave}
-				onDrop={drop.onDrop}
+				{...drop.handlers}
 				className={cn(
 					// Soft-chrome row: rounded tonal hover/active, no divider lines. app-region-no-drag keeps
 					// the row clickable inside the sidebar's Electron drag region.

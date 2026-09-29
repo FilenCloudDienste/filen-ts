@@ -1,8 +1,9 @@
 import type { DirMeta, FileMeta } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
+import { stepPreviewIndex } from "@/features/drive/lib/preview.logic"
 import { type PreviewRevision } from "@/features/preview/lib/remoteChange.logic"
 import { usePreviewUnsavedGuardStore } from "@/features/preview/store/usePreviewUnsavedGuard"
-import { log } from "@/lib/log"
+import { createListenerSet } from "@/lib/listenerSet"
 
 // The seam that keeps an OPEN preview pager in sync with realtime drive mutations from ANOTHER device.
 // The pager reads a frozen DriveItem[] snapshot held in the dialog host's own React state (taken at
@@ -36,32 +37,15 @@ export interface PreviewPagerState {
 	index: number
 }
 
-type Listener = (event: PreviewReconcileEvent) => void
-
 // At most one subscriber in practice (the single mounted dialog host), but a Set keeps the contract
 // symmetric with the socket registry and tolerates a StrictMode double-subscribe.
-const listeners: Set<Listener> = new Set<Listener>()
+const listeners = createListenerSet<PreviewReconcileEvent>("preview.reconcile")
 
 // Subscribe the open preview to reconcile events; returns the unsubscribe fn. Called from the dialog
 // host's mount effect.
-export function subscribePreviewReconcile(listener: Listener): () => void {
-	listeners.add(listener)
+export const subscribePreviewReconcile = listeners.subscribe
 
-	return () => {
-		listeners.delete(listener)
-	}
-}
-
-// A throwing subscriber is logged and never aborts the fan-out (mirrors the socket bridge's dispatch).
-function emit(event: PreviewReconcileEvent): void {
-	for (const listener of listeners) {
-		try {
-			listener(event)
-		} catch (e) {
-			log.error("preview", "reconcile listener threw", event.type, e)
-		}
-	}
-}
+const emit = listeners.emit
 
 export function emitPreviewItemRemoved(uuid: string): void {
 	emit({ type: "removed", uuid })
@@ -169,4 +153,64 @@ export function reconcilePreviewSources(
 		case "folderMeta":
 			return patchMeta(state, event.uuid, item => (item.type === "directory" ? narrowItem({ ...item.data, meta: event.meta }) : null))
 	}
+}
+
+// The slice of a dialog host's state the pager lives in: while `kind` is "preview", `items` is the frozen
+// snapshot taken at open time and `index` the slot on screen.
+export interface PreviewDialogFields {
+	kind: string
+	items: DriveItem[]
+	index?: number
+}
+
+// Folds one event into an open preview dialog, returning `prev` itself when nothing changed so the host
+// skips its re-render. A no-op on any other dialog.
+function foldPreviewDialog<D extends PreviewDialogFields>(prev: D | null, event: PreviewReconcileEvent, guardUnsaved: boolean): D | null {
+	if (prev?.kind !== "preview" || prev.index === undefined) {
+		return prev
+	}
+
+	const state = { items: prev.items, index: prev.index }
+	const next = reconcilePreviewSources(state, event, guardUnsaved ? previewProtectedUuid(state) : null)
+
+	if (next === null) {
+		return null
+	}
+
+	if (next === state) {
+		return prev
+	}
+
+	return { ...prev, items: next.items, index: next.index }
+}
+
+// A remote mutation from the reconcile bus: a trash/move/delete advances the pager (or closes it once the
+// last slot goes) unless the slot on screen holds unsaved edits, which the overlay answers itself, and a
+// rename re-derives the header title.
+export function reconcilePreviewDialog<D extends PreviewDialogFields>(prev: D | null, event: PreviewReconcileEvent): D | null {
+	return foldPreviewDialog(prev, event, true)
+}
+
+// Drops the slot the overlay's own item menu just trashed, deleted or restored: the same position then
+// shows the next sibling (clamped to the new last slot), or the preview closes once it was the only one.
+// Keyed by uuid on purpose: the server echoes this mutation back over the socket, before or after this
+// local call, and removing by uuid makes whichever runs second find nothing, where removing by index
+// would drop the neighbour's slot instead.
+export function removePreviewDialogItem<D extends PreviewDialogFields>(prev: D | null, uuid: string): D | null {
+	return foldPreviewDialog(prev, { type: "removed", uuid }, false)
+}
+
+// Steps the open preview by one sibling, without wrapping.
+export function stepPreviewDialog<D extends PreviewDialogFields>(prev: D | null, delta: 1 | -1): D | null {
+	if (prev?.kind !== "preview" || prev.index === undefined) {
+		return prev
+	}
+
+	const current = prev.items[prev.index]
+
+	if (!current) {
+		return prev
+	}
+
+	return { ...prev, index: stepPreviewIndex(current.data.uuid, prev.items, delta) }
 }

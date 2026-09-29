@@ -7,8 +7,7 @@ import {
 	rereadOutgoingRequests
 } from "@/features/contacts/queries/contacts"
 import { asErrorDTO } from "@/lib/sdk/errors"
-import { runOp, type VoidActionOutcome } from "@/lib/actions/outcome"
-import { runBulk, type BulkOutcome } from "@/features/drive/lib/bulk"
+import { attemptOp, runOp, type VoidActionOutcome } from "@/lib/actions/outcome"
 import { createChat } from "@/features/chats/lib/actions"
 
 export type { VoidActionOutcome }
@@ -32,10 +31,10 @@ export async function sendContactRequest(email: string): Promise<VoidActionOutco
 }
 
 export async function acceptRequest(uuid: string): Promise<VoidActionOutcome> {
-	try {
-		await runOp(sdkApi.acceptContactRequest(uuid))
-	} catch (e) {
-		return { status: "error", dto: asErrorDTO(e) }
+	const outcome = await attemptOp(sdkApi.acceptContactRequest(uuid))
+
+	if (outcome.status === "error") {
+		return outcome
 	}
 
 	// Immediate feedback: drop the request from incoming without waiting on a refetch.
@@ -52,10 +51,10 @@ export async function acceptRequest(uuid: string): Promise<VoidActionOutcome> {
 }
 
 export async function denyRequest(uuid: string): Promise<VoidActionOutcome> {
-	try {
-		await runOp(sdkApi.denyContactRequest(uuid))
-	} catch (e) {
-		return { status: "error", dto: asErrorDTO(e) }
+	const outcome = await attemptOp(sdkApi.denyContactRequest(uuid))
+
+	if (outcome.status === "error") {
+		return outcome
 	}
 
 	contactRequestsQueryUpdate(prev => ({ ...prev, incoming: prev.incoming.filter(r => r.uuid !== uuid) }))
@@ -64,10 +63,10 @@ export async function denyRequest(uuid: string): Promise<VoidActionOutcome> {
 }
 
 export async function cancelRequest(uuid: string): Promise<VoidActionOutcome> {
-	try {
-		await runOp(sdkApi.cancelContactRequest(uuid))
-	} catch (e) {
-		return { status: "error", dto: asErrorDTO(e) }
+	const outcome = await attemptOp(sdkApi.cancelContactRequest(uuid))
+
+	if (outcome.status === "error") {
+		return outcome
 	}
 
 	contactRequestsQueryUpdate(prev => ({ ...prev, outgoing: prev.outgoing.filter(r => r.uuid !== uuid) }))
@@ -107,9 +106,9 @@ export async function messageContact(contact: Contact, opts?: MessageContactOpti
 export interface BlockIdentity {
 	email: string
 	userId: bigint
-	nickName?: string
-	avatar?: string
-	timestamp?: bigint
+	nickName?: string | undefined
+	avatar?: string | undefined
+	timestamp?: bigint | undefined
 }
 
 // Block by identity — the SDK op is email-keyed (unlike every other contact mutation, which takes a
@@ -118,18 +117,17 @@ export interface BlockIdentity {
 // rather than refetched; `timestamp` defaults to now (a block time, not a contact-creation time) and
 // self-heals on the next contacts refetch anyway.
 export async function blockContactByEmail(identity: BlockIdentity): Promise<VoidActionOutcome> {
-	let blockedUuid: string
-	try {
-		blockedUuid = await runOp(sdkApi.blockContact(identity.email))
-	} catch (e) {
-		return { status: "error", dto: asErrorDTO(e) }
+	const outcome = await attemptOp(sdkApi.blockContact(identity.email))
+
+	if (outcome.status === "error") {
+		return outcome
 	}
 
 	// The op's return is a bare uuid string, not a UuidStr — the SDK's own declared return type here
 	// is `Promise<string>` (unlike every read op, which hands back a fully-typed record), so the brand
 	// is asserted rather than inferred.
 	const blocked: BlockedContact = {
-		uuid: blockedUuid as UuidStr,
+		uuid: outcome.item as UuidStr,
 		userId: identity.userId,
 		email: identity.email,
 		// BlockedContact.nickName is non-optional, unlike Contact.nickName.
@@ -150,13 +148,28 @@ export async function blockContactByEmail(identity: BlockIdentity): Promise<Void
 }
 
 export async function blockContact(contact: Contact): Promise<VoidActionOutcome> {
-	return blockContactByEmail({
-		email: contact.email,
-		userId: contact.userId,
-		nickName: contact.nickName ?? "",
-		timestamp: contact.timestamp,
-		...(contact.avatar !== undefined ? { avatar: contact.avatar } : {})
-	})
+	return blockContactByEmail(contact)
+}
+
+// A participant's block toggle (chat or note participants dialog). Unblock is uuid-keyed, so it needs the
+// blocked record the row's flag came from; "stale" (returned synchronously, before any op starts) means
+// that record has since left the block list, e.g. unblocked in another tab.
+export function toggleParticipantBlocked(
+	participant: BlockIdentity,
+	blocked: readonly BlockedContact[] | undefined,
+	isBlockedNow: boolean
+): "stale" | Promise<VoidActionOutcome> {
+	if (!isBlockedNow) {
+		return blockContactByEmail(participant)
+	}
+
+	const blockedUuid = blocked?.find(c => c.userId === participant.userId)?.uuid
+
+	if (blockedUuid === undefined) {
+		return "stale"
+	}
+
+	return unblockContact(blockedUuid)
 }
 
 export async function unblockContact(uuid: string): Promise<VoidActionOutcome> {
@@ -178,32 +191,13 @@ export async function unblockContact(uuid: string): Promise<VoidActionOutcome> {
 }
 
 export async function removeContact(uuid: string): Promise<VoidActionOutcome> {
-	try {
-		await runOp(sdkApi.deleteContact(uuid))
-	} catch (e) {
-		return { status: "error", dto: asErrorDTO(e) }
+	const outcome = await attemptOp(sdkApi.deleteContact(uuid))
+
+	if (outcome.status === "error") {
+		return outcome
 	}
 
 	contactsQueryUpdate(prev => ({ ...prev, contacts: prev.contacts.filter(c => c.uuid !== uuid) }))
 
 	return { status: "success" }
-}
-
-// ── Bulk ─────────────────────────────────────────────────────────────────
-
-// Adapts any of the never-throwing helpers above into runBulk's throw-on-failure per-item contract,
-// so a bulk action reuses the exact same op + patch as its singular counterpart instead of
-// duplicating either. Generic over the item type since accept/deny/cancel/remove/block/unblock each
-// bulk over a differently-shaped record (ContactRequestIn/Out, Contact, BlockedContact) — the caller
-// supplies both the list and which singular helper to apply per item.
-export function runContactsBulk<T>(items: T[], perItem: (item: T) => Promise<VoidActionOutcome>): Promise<BulkOutcome<T>> {
-	return runBulk(items, async item => {
-		const outcome = await perItem(item)
-		if (outcome.status === "error") {
-			// Mirrors runOp: a plain ErrorDTO thrown intact is what runBulk's per-item catch (and the
-			// BulkFailure.error it produces) expects to receive.
-			// eslint-disable-next-line @typescript-eslint/only-throw-error -- deliberate, see above
-			throw outcome.dto
-		}
-	})
 }

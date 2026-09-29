@@ -1,10 +1,11 @@
 import { run } from "@filen/shared"
 import type { Chat } from "@filen/sdk-rs"
 import { log } from "@/lib/log"
+import { withoutKey } from "@/lib/utils"
 import { sync } from "@/features/chats/lib/sync"
 import { deleteDraft } from "@/features/chats/lib/drafts"
 import { chatMessagesQueryUpdate } from "@/features/chats/queries/chatMessages"
-import useChatsInflightStore, { dropChatSendState, type ChatMessageWithInflightId } from "@/features/chats/store/useChatsInflight"
+import { useChatsInflightStore, dropChatSendState, type ChatMessageWithInflightId } from "@/features/chats/store/useChatsInflight"
 
 // Failed-send helpers + per-chat outbox purge — a port of mobile's chatsInflight.ts. All are
 // best-effort and silent (callers own UX / must not fail a succeeded removal over cleanup).
@@ -56,19 +57,7 @@ export async function retryInflightMessage({ chat, message }: { chat: Chat; mess
 		}
 	})
 
-	useChatsInflightStore.getState().setInflightErrors(prev => {
-		if (prev[message.inflightId] === undefined) {
-			return prev
-		}
-
-		const updated = {
-			...prev
-		}
-
-		Reflect.deleteProperty(updated, message.inflightId)
-
-		return updated
-	})
+	useChatsInflightStore.getState().setInflightErrors(prev => withoutKey(prev, message.inflightId))
 
 	const retryFlushed = await sync.flushToDisk(useChatsInflightStore.getState().inflightMessages)
 
@@ -96,35 +85,10 @@ export async function removeInflightMessage({ chat, message }: { chat: Chat; mes
 			return prev
 		}
 
-		const updated = {
-			...prev
-		}
-
-		if (remaining.length === 0) {
-			Reflect.deleteProperty(updated, chat.uuid)
-		} else {
-			updated[chat.uuid] = {
-				...existing,
-				messages: remaining
-			}
-		}
-
-		return updated
+		return remaining.length === 0 ? withoutKey(prev, chat.uuid) : { ...prev, [chat.uuid]: { ...existing, messages: remaining } }
 	})
 
-	useChatsInflightStore.getState().setInflightErrors(prev => {
-		if (prev[message.inflightId] === undefined) {
-			return prev
-		}
-
-		const updated = {
-			...prev
-		}
-
-		Reflect.deleteProperty(updated, message.inflightId)
-
-		return updated
-	})
+	useChatsInflightStore.getState().setInflightErrors(prev => withoutKey(prev, message.inflightId))
 
 	// The optimistic copy's uuid IS its inflightId.
 	chatMessagesQueryUpdate(chat.uuid, prev => prev.filter(m => m.uuid !== message.inflightId))

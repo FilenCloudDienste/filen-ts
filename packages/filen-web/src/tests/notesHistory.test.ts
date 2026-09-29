@@ -32,7 +32,7 @@ import { isOwnNotePush } from "@/features/notes/lib/pushEchoes"
 import { queryClient as testQueryClient } from "@/queries/client"
 import { NOTES_QUERY_KEY, notesQueryGet } from "@/features/notes/queries/notes"
 import { noteContentQueryKey } from "@/features/notes/queries/noteContent"
-import useNotesInflightStore, { beginEditingSession } from "@/features/notes/store/useNotesInflight"
+import { useNotesInflightStore, beginEditingSession } from "@/features/notes/store/useNotesInflight"
 import { restoreNoteFromHistory } from "@/features/notes/lib/history"
 
 beforeEach(() => {

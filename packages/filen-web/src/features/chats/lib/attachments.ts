@@ -2,7 +2,7 @@ import * as Comlink from "comlink"
 import type { File as SdkFile } from "@filen/sdk-rs"
 import { sumBytes } from "@filen/shared"
 import { sdkApi } from "@/lib/sdk/client"
-import { runOp } from "@/lib/actions/outcome"
+import { attemptOp, runOp } from "@/lib/actions/outcome"
 import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
 import { narrowItem, upsertDriveItem, type DriveItem } from "@/features/drive/lib/item"
 import {
@@ -14,7 +14,8 @@ import {
 import { createLink } from "@/features/drive/lib/actions"
 import { buildPublicLinkUrl } from "@/features/drive/components/linkDialog.logic"
 import { useTransfersStore } from "@/features/transfers/store/useTransfersStore"
-import { throttle, PROGRESS_THROTTLE_MS } from "@/features/drive/lib/upload"
+import { settleTransferFailure } from "@/features/transfers/lib/settle"
+import { throttle, PROGRESS_THROTTLE_MS } from "@/lib/throttle"
 import { noop } from "@/lib/utils"
 import { markAccountStale } from "@/queries/account"
 import { addAccountStorageUsed, ensureUploadQuota } from "@/features/drive/lib/quota"
@@ -118,13 +119,13 @@ async function createPublicLinkUrl(item: DriveItem): Promise<AttachmentOutcome> 
 // from earlier drive use, and re-creating one it already owns would be a needless round trip at best —
 // reuse it.
 async function ensurePublicLinkUrl(item: DriveItem): Promise<AttachmentOutcome> {
-	let existing: DriveItemLinkStatus | null
+	const outcome = await attemptOp(fetchDriveItemLinkStatus(item))
 
-	try {
-		existing = await runOp(fetchDriveItemLinkStatus(item))
-	} catch (e) {
-		return { status: "error", dto: asErrorDTO(e) }
+	if (outcome.status === "error") {
+		return outcome
 	}
+
+	const existing = outcome.item
 
 	if (existing !== null) {
 		driveItemLinkStatusQueryUpdate(item.data.uuid, existing)
@@ -153,13 +154,13 @@ export function preflightAttachments(files: readonly File[]): Promise<boolean> {
 // that shared, separately-tested helper), then a straight link create: the upload is a fresh file under
 // a unique name, so it cannot already carry a link and the status read would be a wasted round trip.
 export async function uploadAttachment(file: File, onProgress: (bytesTransferred: number) => void): Promise<AttachmentOutcome> {
-	let parentUuid: string
+	const parent = await attemptOp(chatUploadsDirUuid())
 
-	try {
-		parentUuid = await chatUploadsDirUuid()
-	} catch (e) {
-		return { status: "error", dto: asErrorDTO(e) }
+	if (parent.status === "error") {
+		return parent
 	}
+
+	const parentUuid = parent.item
 
 	const transferId = crypto.randomUUID()
 	const store = useTransfersStore.getState()
@@ -190,14 +191,7 @@ export async function uploadAttachment(file: File, onProgress: (bytesTransferred
 	} catch (e) {
 		const dto = asErrorDTO(e)
 
-		if (dto.kind === "Cancelled") {
-			store.settle(transferId, "cancelled")
-			store.remove(transferId)
-
-			return { status: "error", dto }
-		}
-
-		store.settle(transferId, "error", dto)
+		settleTransferFailure(store, transferId, dto)
 
 		return { status: "error", dto }
 	}

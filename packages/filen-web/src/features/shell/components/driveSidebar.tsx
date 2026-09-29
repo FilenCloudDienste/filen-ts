@@ -1,4 +1,4 @@
-import { Fragment, type ComponentType } from "react"
+import { type ComponentType } from "react"
 import { useTranslation } from "react-i18next"
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router"
 import { ChevronRightIcon, FolderClosedIcon, ClockIcon, StarIcon, Trash2Icon, UsersIcon, Share2Icon, Link2Icon } from "lucide-react"
@@ -11,8 +11,8 @@ import { DirectoryTreeMenu } from "@/features/drive/components/directoryTreeMenu
 import { dropHighlightClass, useDriveDropTarget } from "@/features/drive/hooks/useDriveDropTarget"
 import { TREE_EXPAND_SPRING } from "@/features/drive/lib/springLoad"
 import { StorageMeter } from "@/features/shell/components/storageMeter"
-import { useResizableSidebar } from "@/features/shell/hooks/useResizableSidebar"
-import { SidebarResizeHandle } from "@/features/shell/components/sidebarResizeHandle"
+import { ResizableSidebarPanel } from "@/features/shell/components/sidebarPanel"
+import { SIDEBAR_NAV_ITEM_CLASS } from "@/features/shell/lib/sidebarNavItem"
 import { Separator } from "@/components/ui/separator"
 
 type IconType = ComponentType<{ className?: string }>
@@ -32,23 +32,13 @@ type DriveSidebarItem =
 // Muted group header over each virtual-root cluster ("Other", "Shared").
 const GROUP_HEADER_CLASS = "px-2.5 pt-4 pb-1 text-xs font-medium text-muted-foreground/80"
 
-// Shared by NavItem and the splat links below, so all stay visually identical without recomputing the
-// same static class string on every render.
-const NAV_ITEM_CLASS = cn(
-	// app-region-no-drag: every row is a real click target inside the sidebar's own drag region (see
-	// the <aside> below).
-	"group flex h-8 w-full items-center gap-2.5 rounded-xl px-2.5 text-sm focus-ring transition-colors outline-none app-region-no-drag [&_svg]:size-4 [&_svg]:shrink-0",
-	"text-sidebar-foreground/80 hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground",
-	"data-[status=active]:bg-sidebar-accent data-[status=active]:font-medium data-[status=active]:text-sidebar-accent-foreground"
-)
-
 // TanStack Router stamps `data-status="active"` and `aria-current="page"` on the `<Link>` automatically
 // whenever the current location matches.
 function NavItem({ icon: Icon, label, to }: { icon: IconType; label: string; to: DriveSidebarRoute }) {
 	return (
 		<Link
 			to={to}
-			className={NAV_ITEM_CLASS}
+			className={SIDEBAR_NAV_ITEM_CLASS}
 		>
 			<Icon className="text-muted-foreground group-data-[status=active]:text-primary" />
 			<span className="truncate">{label}</span>
@@ -64,7 +54,7 @@ function SplatNavItem({ icon: Icon, label, to }: { icon: IconType; label: string
 		<Link
 			to={to}
 			params={{ _splat: "" }}
-			className={NAV_ITEM_CLASS}
+			className={SIDEBAR_NAV_ITEM_CLASS}
 		>
 			<Icon className="text-muted-foreground group-data-[status=active]:text-primary" />
 			<span className="truncate">{label}</span>
@@ -91,10 +81,7 @@ function CloudDriveRoot({ label, open, onToggle }: { label: string; open: boolea
 		<div
 			// The root's chain is empty — see directoryTreeMenu.tsx.
 			data-tree-path=""
-			onDragEnter={drop.onDragEnter}
-			onDragOver={drop.onDragOver}
-			onDragLeave={drop.onDragLeave}
-			onDrop={drop.onDrop}
+			{...drop.handlers}
 			className={cn(
 				"group flex h-8 items-center gap-1 rounded-xl pr-1 transition-colors app-region-no-drag hover:bg-sidebar-accent/60 data-menu-open:bg-sidebar-accent/60",
 				dropHighlightClass(drop)
@@ -131,8 +118,6 @@ export function DriveSidebar() {
 	const pathname = useRouterState({ select: state => state.location.pathname })
 	const onDrive = pathname === "/drive" || pathname.startsWith("/drive/")
 	const activePath = onDrive ? splatToUuids(pathname.replace(/^\/drive\/?/, "")) : []
-
-	const resize = useResizableSidebar("drive")
 
 	const openMap = useDirectoryTreeStore(state => state.open)
 	const toggle = useDirectoryTreeStore(state => state.toggle)
@@ -189,63 +174,51 @@ export function DriveSidebar() {
 	}
 
 	return (
-		<Fragment>
-			<aside
-				// Drag region (Electron plumbing): inert in a plain browser (-webkit-app-region is ignored
-				// outside Chromium/Electron). Interactive descendants opt back out with app-region-no-drag.
-				// Width is user-resizable (see useResizableSidebar) — the inline style replaces what used
-				// to be a static w-52 utility class, and max-w-full clamps a wide persisted width to
-				// whatever host it lands in (the shell row, or the narrow-viewport drawer). Visibility is
-				// the shell's call, never this panel's — see appShell.tsx.
-				className="flex max-w-full shrink-0 flex-col rounded-xl bg-sidebar app-region-drag"
-				style={{ width: resize.width }}
-			>
-				{/* Pinned outside the scroll area. Inside that flex column its `truncate` (overflow: hidden)
+		<ResizableSidebarPanel
+			module="drive"
+			resizeLabel={t("driveSidebarResize")}
+		>
+			{/* Pinned outside the scroll area. Inside that flex column its `truncate` (overflow: hidden)
 				    zeroes its automatic minimum height, so an overflowing tree squeezes it and the first row
 				    paints over its text. */}
-				<h2 className="shrink-0 truncate px-5.5 pt-4 pb-1.5 text-[15px] font-semibold">{t("driveMyDrive")}</h2>
-				{/* pt-1 keeps the first row's focus ring clear of the scroll area's clipping edge. */}
-				<div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-3 pt-1 pb-3">
-					{/* A nested disclosure list, deliberately NOT role="tree": the ARIA tree pattern owes a
+			<h2 className="shrink-0 truncate px-5.5 pt-4 pb-1.5 text-[15px] font-semibold">{t("driveMyDrive")}</h2>
+			{/* pt-1 keeps the first row's focus ring clear of the scroll area's clipping edge. */}
+			<div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-3 pt-1 pb-3">
+				{/* A nested disclosure list, deliberately NOT role="tree": the ARIA tree pattern owes a
 					roving-tabindex/arrow-key focus model this sidebar does not implement, and claiming the
 					role without it sends a screen-reader user into an interaction mode whose items never take
 					focus. Plain list semantics describe what is really here — each row's chevron carries its
 					own aria-expanded, and the subtree it discloses is nested inside its own item. */}
-					<DirectoryTreeMenu
-						onNavigate={navigateTo}
-						render={
-							<ul
-								aria-label={t("driveTreeLabel")}
-								className="flex flex-col gap-0.5"
-							>
-								<li className="flex flex-col gap-0.5">
-									<CloudDriveRoot
-										label={t("driveMyDrive")}
-										open={rootOpen}
-										onToggle={() => {
-											toggle(TREE_ROOT_KEY, TREE_ROOT_KEY)
-										}}
-									/>
-									{rootOpen ? <DirectoryTree tree={tree} /> : null}
-								</li>
-							</ul>
-						}
-					/>
-					<p className={GROUP_HEADER_CLASS}>{t("driveGroupOther")}</p>
-					<div className="flex flex-col gap-0.5">{otherItems.map(renderItem)}</div>
-					<p className={GROUP_HEADER_CLASS}>{t("driveGroupShared")}</p>
-					<div className="flex flex-col gap-0.5">{sharedItems.map(renderItem)}</div>
-				</div>
-				{/* Bottom block: storage-usage meter above a tonal-only separator (no hard rule). */}
-				<div className="shrink-0 px-3 pb-3">
-					<Separator className="mb-3 bg-border/50" />
-					<StorageMeter />
-				</div>
-			</aside>
-			<SidebarResizeHandle
-				ariaLabel={t("driveSidebarResize")}
-				handle={resize}
-			/>
-		</Fragment>
+				<DirectoryTreeMenu
+					onNavigate={navigateTo}
+					render={
+						<ul
+							aria-label={t("driveTreeLabel")}
+							className="flex flex-col gap-0.5"
+						>
+							<li className="flex flex-col gap-0.5">
+								<CloudDriveRoot
+									label={t("driveMyDrive")}
+									open={rootOpen}
+									onToggle={() => {
+										toggle(TREE_ROOT_KEY, TREE_ROOT_KEY)
+									}}
+								/>
+								{rootOpen ? <DirectoryTree tree={tree} /> : null}
+							</li>
+						</ul>
+					}
+				/>
+				<p className={GROUP_HEADER_CLASS}>{t("driveGroupOther")}</p>
+				<div className="flex flex-col gap-0.5">{otherItems.map(renderItem)}</div>
+				<p className={GROUP_HEADER_CLASS}>{t("driveGroupShared")}</p>
+				<div className="flex flex-col gap-0.5">{sharedItems.map(renderItem)}</div>
+			</div>
+			{/* Bottom block: storage-usage meter above a tonal-only separator (no hard rule). */}
+			<div className="shrink-0 px-3 pb-3">
+				<Separator className="mb-3 bg-border/50" />
+				<StorageMeter />
+			</div>
+		</ResizableSidebarPanel>
 	)
 }

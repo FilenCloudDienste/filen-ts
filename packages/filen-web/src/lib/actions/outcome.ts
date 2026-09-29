@@ -28,3 +28,13 @@ export async function runOp<T>(op: Promise<T>): Promise<T> {
 		throw asErrorDTO(e)
 	}
 }
+
+// runOp for a site that resolves the rejection into an outcome instead of throwing. Same explicit
+// type-argument caveat as runOp for a union-returning op.
+export async function attemptOp<T>(op: Promise<T>): Promise<ActionOutcome<T>> {
+	try {
+		return { status: "success", item: await op }
+	} catch (e) {
+		return { status: "error", dto: asErrorDTO(e) }
+	}
+}

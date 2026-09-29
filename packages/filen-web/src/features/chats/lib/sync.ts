@@ -3,14 +3,16 @@ import { onlineManager } from "@tanstack/react-query"
 import type { Chat, ChatMessagePartial } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
 import { log } from "@/lib/log"
+import { withoutKey } from "@/lib/utils"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { kvGetJson, kvSetJson, kvDelete } from "@/lib/storage/adapter"
 import { type OutboxChannelTransport, type OutboxRole } from "@/lib/storage/outboxChannel"
 import { chatsQueryUpdate, chatsQueryGet, chatsQueryFetch } from "@/features/chats/queries/chats"
 import { chatMessagesQueryUpdate, chatMessagesQueryAppend } from "@/features/chats/queries/chatMessages"
-import { newestMessage } from "@/features/chats/lib/sort"
+import { newestMessage, compareBySentTimestamp } from "@/features/chats/lib/sort"
 import { deleteDraft } from "@/features/chats/lib/drafts"
-import useChatsInflightStore, {
+import {
+	useChatsInflightStore,
 	dropChatSendState,
 	type ChatMessageWithInflightId,
 	type InflightChatMessages
@@ -19,6 +21,7 @@ import {
 	reconcileChatFollower,
 	buildOptimisticMessage,
 	CommittedIdLedger,
+	INFLIGHT_CHAT_MESSAGES_KV_KEY,
 	inflightChatMessagesSchema,
 	type OptimisticSender,
 	type RemoteChatEnqueue
@@ -29,8 +32,6 @@ import {
 // send, `S` the whole queue. A single-tab install attaches NO transport, so every forward/broadcast is a
 // guarded no-op and the leader path stays byte-identical to the pre-multi-tab outbox.
 export type ChatOutboxTransport = OutboxChannelTransport<RemoteChatEnqueue, InflightChatMessages>
-
-const OUTBOX_KV_KEY = "inflightChatMessages"
 
 // Read the abort flag through a function boundary so an early guard does not narrow later reads to a
 // literal `false` — the signal is aborted externally by cancel(), mid-pass; the later checks are
@@ -351,12 +352,12 @@ export class Sync {
 			const filtered = Object.fromEntries(Object.entries(inflightChatMessages).filter(([, { messages }]) => messages.length > 0))
 
 			if (Object.keys(filtered).length === 0) {
-				await kvDelete(OUTBOX_KV_KEY)
+				await kvDelete(INFLIGHT_CHAT_MESSAGES_KV_KEY)
 
 				return
 			}
 
-			await kvSetJson(OUTBOX_KV_KEY, filtered)
+			await kvSetJson(INFLIGHT_CHAT_MESSAGES_KV_KEY, filtered)
 		})
 
 		if (!result.success) {
@@ -390,7 +391,7 @@ export class Sync {
 				this.mutex.release()
 			})
 
-			const fromDisk = await kvGetJson(OUTBOX_KV_KEY, inflightChatMessagesSchema)
+			const fromDisk = await kvGetJson(INFLIGHT_CHAT_MESSAGES_KV_KEY, inflightChatMessagesSchema)
 
 			if (!fromDisk || Object.keys(fromDisk).length === 0) {
 				return false
@@ -568,9 +569,7 @@ export class Sync {
 					}
 
 					// Sequential per chat, oldest-first — message ORDER is load-bearing for a chat.
-					const sorted = [...messages].sort((a, b) =>
-						a.sentTimestamp === b.sentTimestamp ? 0 : a.sentTimestamp < b.sentTimestamp ? -1 : 1
-					)
+					const sorted = [...messages].sort(compareBySentTimestamp)
 
 					for (const message of sorted) {
 						if (isAborted(signal)) {
@@ -593,19 +592,7 @@ export class Sync {
 							committedChat = await this.pushMessage(chat, message)
 
 							// Success: clear any error record for this send.
-							useChatsInflightStore.getState().setInflightErrors(prev => {
-								if (prev[message.inflightId] === undefined) {
-									return prev
-								}
-
-								const updated = {
-									...prev
-								}
-
-								Reflect.deleteProperty(updated, message.inflightId)
-
-								return updated
-							})
+							useChatsInflightStore.getState().setInflightErrors(prev => withoutKey(prev, message.inflightId))
 						} catch (e) {
 							if (isAborted(signal)) {
 								return
@@ -718,20 +705,7 @@ export class Sync {
 				return prev
 			}
 
-			const updated = {
-				...prev
-			}
-
-			if (remaining.length === 0) {
-				Reflect.deleteProperty(updated, chatUuid)
-			} else {
-				updated[chatUuid] = {
-					...existing,
-					messages: remaining
-				}
-			}
-
-			return updated
+			return remaining.length === 0 ? withoutKey(prev, chatUuid) : { ...prev, [chatUuid]: { ...existing, messages: remaining } }
 		})
 	}
 
@@ -755,15 +729,7 @@ export class Sync {
 				return prev[inflightId] === true ? prev : { ...prev, [inflightId]: true }
 			}
 
-			if (prev[inflightId] === undefined) {
-				return prev
-			}
-
-			const updated = { ...prev }
-
-			Reflect.deleteProperty(updated, inflightId)
-
-			return updated
+			return withoutKey(prev, inflightId)
 		})
 	}
 

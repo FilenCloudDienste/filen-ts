@@ -11,11 +11,11 @@ import { useKnownCoverUrl } from "@/features/audio/hooks/useTrackMetadata"
 import { formatRelativeTime } from "@/lib/relativeTime"
 import { useNowMinute } from "@/lib/useNowMinute"
 import { errorLabel } from "@/lib/i18n/errorLabel"
-import { asErrorDTO } from "@/lib/sdk/errors"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { Button } from "@/components/ui/button"
 import { LoadingState } from "@/components/loadingState"
 import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { SidebarPanel } from "@/features/shell/components/sidebarPanel"
 
 // ContactsSidebar's nav-row idiom, grown to two lines for the thumbnail + meta. Keyed on aria-current
 // rather than TanStack's data-status: with no (or a stale) `playlist` param the view shows the first
@@ -42,12 +42,7 @@ export function PlaylistsSidebar() {
 	const selectedUuid = resolveSelectedPlaylist(entries, selectedParam)?.uuid
 
 	return (
-		<aside
-			// Drag region (Electron plumbing): inert in a plain browser, opted back out by every
-			// interactive descendant via app-region-no-drag — same convention as the other sidebars.
-			// Visibility is the shell's call, never this panel's — see appShell.tsx.
-			className="flex w-52 max-w-full shrink-0 flex-col rounded-xl bg-sidebar app-region-drag"
-		>
+		<SidebarPanel>
 			<div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-3">
 				<div className="flex items-center justify-between gap-2 pb-2.5 pl-2.5">
 					<h2 className="truncate pt-1 text-[15px] font-semibold">{t("common:modulePlaylists")}</h2>
@@ -71,7 +66,7 @@ export function PlaylistsSidebar() {
 						className="py-4"
 					/>
 				) : playlistsQuery.status === "error" ? (
-					<p className="px-2.5 text-xs text-destructive">{errorLabel(asErrorDTO(playlistsQuery.error))}</p>
+					<p className="px-2.5 text-xs text-destructive">{errorLabel(playlistsQuery.error)}</p>
 				) : (
 					<ul className="flex flex-col gap-0.5">
 						{entries.map(entry => (
@@ -84,7 +79,7 @@ export function PlaylistsSidebar() {
 					</ul>
 				)}
 			</div>
-		</aside>
+		</SidebarPanel>
 	)
 }
 

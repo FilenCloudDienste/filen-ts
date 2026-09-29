@@ -1,22 +1,22 @@
-import { type KeyboardEvent, type MouseEvent, type ReactNode } from "react"
+import { type MouseEvent, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { CheckIcon, XIcon, MoreHorizontalIcon, RotateCcwIcon, MessagesSquareIcon } from "lucide-react"
 import type { BlockedContact, Contact, ContactRequestIn, ContactRequestOut } from "@filen/sdk-rs"
-import { contactInitials } from "@/features/contacts/components/contactsList.logic"
 import { ContactMenuContent } from "@/features/contacts/components/contactMenu"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { UserAvatar } from "@/components/userAvatar"
 import { Button } from "@/components/ui/button"
 import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { cn, contactDisplayName, type ContactLike } from "@filen/shared"
+import { onActivateKey } from "@/lib/rowKeys"
 
 export interface ContactRowProps {
 	// Any contact-like record: a contact, an incoming/outgoing request or a blocked contact.
 	contact: ContactLike & { avatar?: string | undefined }
 	// Selection state, shared by both contracts below; meaningless without one of them.
 	selected?: boolean | undefined
-	// Contract A — bounded dialog picker (drive's ContactPickerDialog, chats' CreateChatDialog): the row
-	// owns its own Enter/Space toggle and is unconditionally tabbable. Correct where the list is short,
-	// fixed-height and its trailing slot holds a glyph rather than controls.
+	// Contract A — bounded dialog picker (ContactPickerList): the row owns its own Enter/Space toggle and
+	// is unconditionally tabbable. Correct where the list is short, fixed-height and its trailing slot
+	// holds a glyph rather than controls.
 	onToggleSelect?: (() => void) | undefined
 	// Contract B — the contacts page's section listbox: the container owns key handling (it is the only
 	// scope holding the section's uuid array), so the row takes a click handler, a roving cursor flag and
@@ -30,21 +30,10 @@ export interface ContactRowProps {
 	children?: ReactNode
 }
 
-// AvatarImage/AvatarFallback are direct children of Avatar (its Base UI Root): Fallback only renders
-// itself while no image has loaded (Base UI's own imageLoadingStatus gate).
 export function ContactRow({ contact, selected, onToggleSelect, onSelect, active, rowRef, children }: ContactRowProps) {
 	const displayName = contactDisplayName(contact)
 	const roving = onSelect !== undefined
 	const selectable = roving || onToggleSelect !== undefined
-
-	function handleKeyDown(event: KeyboardEvent<HTMLDivElement>): void {
-		if (event.key !== "Enter" && event.key !== " ") {
-			return
-		}
-
-		event.preventDefault()
-		onToggleSelect?.()
-	}
 
 	// One Tab stop per section listbox under contract B, the row's own stop under contract A.
 	function resolveTabIndex(): number | undefined {
@@ -66,7 +55,7 @@ export function ContactRow({ contact, selected, onToggleSelect, onSelect, active
 			aria-selected={selectable ? selected === true : undefined}
 			tabIndex={resolveTabIndex()}
 			onClick={onSelect ?? onToggleSelect}
-			onKeyDown={onToggleSelect === undefined ? undefined : handleKeyDown}
+			onKeyDown={onToggleSelect === undefined ? undefined : onActivateKey(onToggleSelect)}
 			className={cn(
 				"flex h-14 items-center gap-3 text-sm",
 				// Contract B rows tile a rounded, hairline-divided panel (contactsList.tsx) — square, and ringed
@@ -74,21 +63,14 @@ export function ContactRow({ contact, selected, onToggleSelect, onSelect, active
 				// own rounded pill.
 				roving ? "group/row px-3 focus-visible:ring-inset" : "rounded-xl px-2",
 				selectable
-					? "cursor-pointer focus-ring-row outline-none select-none not-aria-selected:hover:bg-accent/50 aria-selected:bg-accent aria-selected:text-accent-foreground"
+					? "focus-ring-row outline-none select-none not-aria-selected:hover:bg-accent/50 aria-selected:bg-accent aria-selected:text-accent-foreground"
 					: "hover:bg-accent/50"
 			)}
 		>
-			<Avatar>
-				{/* crossOrigin: require-corp COEP needs a CORS-mode request for this cross-origin egest
-				    url (see settings/account/avatarCard.tsx's matching comment for the verified detail). */}
-				{contact.avatar !== undefined ? (
-					<AvatarImage
-						src={contact.avatar}
-						crossOrigin="anonymous"
-					/>
-				) : null}
-				<AvatarFallback>{contactInitials(displayName)}</AvatarFallback>
-			</Avatar>
+			<UserAvatar
+				src={contact.avatar}
+				name={displayName}
+			/>
 			<div className="min-w-0 flex-1">
 				<p className="truncate font-medium">{displayName}</p>
 				<p className="truncate text-xs text-muted-foreground">{contact.email}</p>

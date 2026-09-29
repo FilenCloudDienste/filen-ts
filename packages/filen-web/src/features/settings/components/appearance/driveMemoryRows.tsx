@@ -5,10 +5,10 @@ import { useSortPreferencesQuery, useViewModePreferencesQuery } from "@/features
 import {
 	setSortPreferences,
 	setViewModePreferences,
-	withSortModeToggle,
-	withViewModeModeToggle,
-	resetSortPreferences,
-	resetViewModePreferences,
+	withModeToggle,
+	resetPreferences,
+	DEFAULT_SORT_PREFERENCES,
+	DEFAULT_VIEW_MODE_PREFERENCES,
 	type DrivePreferences,
 	type DriveViewMode
 } from "@/features/drive/lib/preferences"
@@ -31,12 +31,12 @@ function DriveMemoryRows() {
 	const [pending, setPending] = useState(false)
 
 	async function toggleSortMode(prefs: DrivePreferences<DriveSortBy>, checked: boolean): Promise<void> {
-		await setSortPreferences(withSortModeToggle(prefs, checked))
+		await setSortPreferences(withModeToggle(prefs, checked))
 		void sortQuery.refetch()
 	}
 
 	async function toggleViewMode(prefs: DrivePreferences<DriveViewMode>, checked: boolean): Promise<void> {
-		await setViewModePreferences(withViewModeModeToggle(prefs, checked))
+		await setViewModePreferences(withModeToggle(prefs, checked))
 		void viewQuery.refetch()
 	}
 
@@ -49,11 +49,11 @@ function DriveMemoryRows() {
 
 		try {
 			if (resetTarget === "sort" && sortQuery.data !== undefined) {
-				await setSortPreferences(resetSortPreferences(sortQuery.data))
+				await setSortPreferences(resetPreferences(sortQuery.data, DEFAULT_SORT_PREFERENCES.global))
 				void sortQuery.refetch()
 				toast.success(t("settingsResetSortSuccess"))
 			} else if (resetTarget === "view" && viewQuery.data !== undefined) {
-				await setViewModePreferences(resetViewModePreferences(viewQuery.data))
+				await setViewModePreferences(resetPreferences(viewQuery.data, DEFAULT_VIEW_MODE_PREFERENCES.global))
 				void viewQuery.refetch()
 				toast.success(t("settingsResetViewSuccess"))
 			}

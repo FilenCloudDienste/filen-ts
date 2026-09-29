@@ -1,15 +1,7 @@
-import { isSafeLinkHref } from "@/features/preview/components/docxViewer.logic"
+import { isSafeAbsoluteHref } from "@/lib/safeUrl"
 
 // DOM passes over docx-preview's rendered output (docxViewer.tsx), kept apart from the component so
 // they can be exercised on a plain DOM tree.
-
-function isAbsoluteUrl(href: string): boolean {
-	try {
-		return new URL(href).protocol.length > 0
-	} catch {
-		return false
-	}
-}
 
 function findById(root: HTMLElement, id: string): Element | undefined {
 	return Array.from(root.querySelectorAll("[id]")).find(el => el.id === id)
@@ -40,7 +32,7 @@ export function sanitizeDocxLinks(root: HTMLElement): void {
 			continue
 		}
 
-		if (!isAbsoluteUrl(raw) || !isSafeLinkHref(raw)) {
+		if (!isSafeAbsoluteHref(raw)) {
 			anchor.removeAttribute("href")
 
 			continue

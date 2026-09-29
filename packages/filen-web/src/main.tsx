@@ -10,7 +10,7 @@ import { routeTree } from "@/routeTree.gen"
 import { bootSdk } from "@/lib/sdk/boot"
 import { registerAllActions } from "@/lib/keymap/actions"
 import { NotFoundScreen } from "@/features/shell/components/notFoundScreen"
-import { markReminderFired, markStorageReminderFired } from "@/features/settings/components/security/exportMasterKeys.logic"
+import { useReminderStore } from "@/features/shell/store/useReminderStore"
 
 // notFoundMode "root" (the default is "fuzzy") keeps every unknown URL on ONE full-page 404 instead of
 // rendering it inside whichever ancestor layout happened to match, and makes the root match the
@@ -51,8 +51,7 @@ if (import.meta.env.VITE_E2E === "1") {
 	// Suppressing them here rather than dismissing them from the test side also removes a fixed 3s (and
 	// up to 15s more) from every authed page load. AccountReminders keeps its own coverage in
 	// src/tests/accountReminders.test.ts.
-	markReminderFired()
-	markStorageReminderFired()
+	useReminderStore.setState({ keysDismissed: true, storageDismissed: true })
 
 	void import("@/e2e-hooks")
 		.then(m => {

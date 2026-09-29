@@ -227,8 +227,6 @@ export const auth = {
 	// ── Security settings page ──────────────────────────────────────────────────
 	/** Security settings — page title */
 	securityTitle: "Security",
-	/** Security settings — error-state title shown when the account query (getUserInfo) fails to load; paired with common:tryAgain */
-	securityLoadError: "Couldn't load your account",
 
 	// ── Change password (security settings) ─────────────────────────────────────
 	/** Change-password section — heading and dialog title */

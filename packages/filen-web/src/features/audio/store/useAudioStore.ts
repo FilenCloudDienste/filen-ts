@@ -1,11 +1,11 @@
 import { type } from "arktype"
 import { create } from "zustand"
 import { useShallow } from "zustand/shallow"
-import { kvGetJson, kvSetJson } from "@/lib/storage/adapter"
-import { log } from "@/lib/log"
+import { kvLoadOnce, kvSetJsonQuiet } from "@/lib/storage/kvBestEffort"
 import type { ErrorDTO } from "@/lib/sdk/errors"
 import type { AudioPlaybackStatus, LoopMode, QueueTrack } from "@/features/audio/store/audioQueue"
 import { useTrackTagsStore } from "@/features/audio/store/useTrackTagsStore"
+import { trackDisplayTitle } from "@/features/audio/lib/trackTags.logic"
 
 // The reactive surface the audio module drives its UI through — the zustand mirror of the engine
 // singleton, following useTransfersStore's conventions exactly: an in-memory-only store (the queue is
@@ -37,7 +37,7 @@ interface AudioStore {
 	// it). Cleared on the next successful play. Never a spinner-forever state — a failure that exhausts
 	// the auto-skip budget settles the status AND leaves this set.
 	lastError: ErrorDTO | null
-	// Cover-art blob URLs, keyed by track uuid — a live mirror of the engine's CoverArtCache (the LRU
+	// Cover-art blob URLs, keyed by track uuid — a live mirror of the engine's cover cache (the LRU
 	// itself lives in the engine; this is purely the reactive read side for the bar/panel). A missing key
 	// means "no cached cover", never triggers a fetch on read.
 	coverUrlsByUuid: Record<string, string>
@@ -60,7 +60,7 @@ interface AudioStore {
 	setShuffle: (shuffleEnabled: boolean, shuffleOrder: number[]) => void
 	// Persists (fire-and-forget).
 	setLoop: (loopMode: LoopMode) => void
-	// Replaces the whole cover-url mirror with the engine's CoverArtCache's current snapshot.
+	// Replaces the whole cover-url mirror with the engine's cover cache entries.
 	setCoverUrls: (coverUrlsByUuid: Record<string, string>) => void
 	// Engine dispose (logout): clears queue+playback but preserves the persisted shuffle/loop prefs.
 	reset: () => void
@@ -137,32 +137,24 @@ function markPrefsUserModified(): void {
 	prefsUserModified = true
 }
 
-let prefsLoad: Promise<void> | null = null
-
 // Load-once persisted shuffle/loop into the store, memoized like the keymap registry's override load. A
-// rejected read is swallowed: a storage hiccup must never break playback, defaults just keep working.
-export function hydrateAudioPrefs(): Promise<void> {
-	prefsLoad ??= kvGetJson(PREFS_KV_KEY, audioPrefsSchema)
-		.then(loaded => {
-			if (loaded !== null && !prefsUserModified) {
-				useAudioStore.setState({ shuffleEnabled: loaded.shuffleEnabled, loopMode: loaded.loopMode })
-			}
-		})
-		.catch((error: unknown) => {
-			log.warn("audio", "failed to load persisted audio prefs", error)
-		})
+// storage hiccup must never break playback, defaults just keep working.
+export const hydrateAudioPrefs = kvLoadOnce(
+	PREFS_KV_KEY,
+	audioPrefsSchema,
+	loaded => {
+		if (!prefsUserModified) {
+			useAudioStore.setState({ shuffleEnabled: loaded.shuffleEnabled, loopMode: loaded.loopMode })
+		}
+	},
+	"audio",
+	"audio prefs"
+)
 
-	return prefsLoad
-}
+function persistPrefs(): Promise<void> {
+	const { shuffleEnabled, loopMode } = useAudioStore.getState()
 
-async function persistPrefs(): Promise<void> {
-	try {
-		const { shuffleEnabled, loopMode } = useAudioStore.getState()
-
-		await kvSetJson(PREFS_KV_KEY, { shuffleEnabled, loopMode })
-	} catch (error) {
-		log.warn("audio", "failed to persist audio prefs", error)
-	}
+	return kvSetJsonQuiet(PREFS_KV_KEY, { shuffleEnabled, loopMode }, "audio", "audio prefs")
 }
 
 // Now-playing selector for the mini-player / now-playing bar — a stable-identity slice of the transport
@@ -199,7 +191,7 @@ export function useAudioNowPlaying(): {
 
 	return {
 		...playback,
-		title: tags?.title ?? playback.track?.name ?? "",
+		title: trackDisplayTitle(tags, playback.track?.name ?? ""),
 		artist: tags?.artist ?? null
 	}
 }

@@ -1,4 +1,4 @@
-import { Fragment, useRef, useState, type ReactNode } from "react"
+import { useRef, useState, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { useNavigate, useRouterState } from "@tanstack/react-router"
 import { useVirtualizer } from "@tanstack/react-virtual"
@@ -7,7 +7,6 @@ import { toast } from "sonner"
 import {
 	PlusIcon,
 	SearchIcon,
-	XIcon,
 	ChevronRightIcon,
 	StarIcon,
 	StickyNoteIcon,
@@ -57,17 +56,18 @@ import { errorLabel } from "@/lib/i18n/errorLabel"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { useNowMinute } from "@/lib/useNowMinute"
 import { useAction } from "@/lib/keymap/useAction"
-import { useResizableSidebar } from "@/features/shell/hooks/useResizableSidebar"
 import { useIsSidebarPanelVisible } from "@/features/shell/lib/sidebarPanelVisibility"
-import { SidebarResizeHandle } from "@/features/shell/components/sidebarResizeHandle"
+import { ResizableSidebarPanel } from "@/features/shell/components/sidebarPanel"
 import { NoteRow } from "@/features/notes/components/noteRow"
 import { NotesBulkActionBar } from "@/features/notes/components/notesBulkActionBar"
 import { canBulkTrashNotes } from "@/features/notes/components/notesBulkActionBar.logic"
 import { TagContextMenuContent } from "@/features/notes/components/noteMenu"
 import { type NoteTagDialogKind } from "@/features/notes/components/noteMenu.logic"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { LoadingState } from "@/components/loadingState"
+import { ListFilterInput } from "@/components/listFilterInput"
+import { SidebarNotice } from "@/components/sidebarNotice"
+import { BULK_BAR_MIN_SELECTION } from "@/components/selectionActionBar"
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
 import {
 	DropdownMenu,
@@ -79,10 +79,6 @@ import {
 	DropdownMenuSeparator,
 	DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu"
-
-// The floating bulk bar mounts at this many selected — and the notes.trash shortcut fires at exactly
-// the same threshold, so the shortcut is never live without the affordance that names it.
-const BULK_BAR_MIN_SELECTION = 2
 
 // First-pass size estimates only — note rows now vary in height (optional preview / shared-by /
 // avatar / tag lines), and the notes view interleaves section headers, so real heights come from the
@@ -126,34 +122,6 @@ function selectedUuidFromPath(pathname: string): string {
 	const match = /^\/notes\/([^/]+)/.exec(pathname)
 
 	return match?.[1] ?? ""
-}
-
-// Compact centered empty/error state, sized for the narrow sidebar (not the full-page Empty primitive).
-// `role` is opt-in so only the load-failure caller announces — an empty note list is not an error.
-function SidebarNotice({
-	icon,
-	title,
-	description,
-	action,
-	role
-}: {
-	icon: ReactNode
-	title: string
-	description?: string
-	action?: ReactNode
-	role?: "alert"
-}) {
-	return (
-		<div
-			role={role}
-			className="flex flex-1 flex-col items-center justify-center gap-2 px-4 py-8 text-center"
-		>
-			<div className="text-muted-foreground [&_svg]:size-6">{icon}</div>
-			<p className="text-sm font-medium">{title}</p>
-			{description !== undefined ? <p className="text-xs text-muted-foreground">{description}</p> : null}
-			{action}
-		</div>
-	)
 }
 
 function segmentClass(active: boolean): string {
@@ -314,7 +282,6 @@ export function NotesSidebar() {
 	const pathname = useRouterState({ select: state => state.location.pathname })
 	const selectedUuid = selectedUuidFromPath(pathname)
 
-	const resize = useResizableSidebar("notes")
 	const notesQuery = useNotes()
 	const tagsQuery = useNoteTags()
 	const viewModeQuery = useNotesViewModeQuery()
@@ -694,206 +661,165 @@ export function NotesSidebar() {
 	}
 
 	return (
-		<Fragment>
-			<aside
-				// Geometry mirrors DriveSidebar (rounded-xl, borderless) — the shell's contextual panel slot.
-				// Width is user-resizable (useResizableSidebar) — the inline style replaces the old static
-				// w-52 utility, and a trailing drag-handle sibling (below) commits the new width; max-w-full
-				// clamps a wide persisted width to whatever host it lands in (the shell row, or the
-				// narrow-viewport drawer). Visibility is the shell's call, never this panel's — see
-				// appShell.tsx. Drag region is Electron plumbing, inert in a plain browser; interactive
-				// descendants opt back out with app-region-no-drag.
-				className="flex max-w-full shrink-0 flex-col rounded-xl bg-sidebar app-region-drag"
-				style={{ width: resize.width }}
-			>
-				<div className="flex flex-col gap-2 p-3">
-					<div className="flex items-center justify-between gap-2">
-						<h2 className="truncate px-1 text-[15px] font-semibold">{t("notesSidebarTitle")}</h2>
-						<div className="flex items-center gap-0.5">
-							<Button
-								variant="ghost"
-								size="icon-sm"
-								disabled={!isOnline}
-								aria-label={t("notesNewNote")}
-								title={!isOnline ? t("common:offlineActionDisabled") : undefined}
-								className="app-region-no-drag"
-								onClick={() => {
-									void handleNewNote()
-								}}
-							>
-								<PlusIcon />
-							</Button>
-							{/* Bulk-ops menu — export/import/new-tag. The TRIGGER itself stays always-enabled: a
+		<ResizableSidebarPanel
+			module="notes"
+			resizeLabel={t("notesSidebarResize")}
+		>
+			<div className="flex flex-col gap-2 p-3">
+				<div className="flex items-center justify-between gap-2">
+					<h2 className="truncate px-1 text-[15px] font-semibold">{t("notesSidebarTitle")}</h2>
+					<div className="flex items-center gap-0.5">
+						<Button
+							variant="ghost"
+							size="icon-sm"
+							disabled={!isOnline}
+							aria-label={t("notesNewNote")}
+							title={!isOnline ? t("common:offlineActionDisabled") : undefined}
+							className="app-region-no-drag"
+							onClick={() => {
+								void handleNewNote()
+							}}
+						>
+							<PlusIcon />
+						</Button>
+						{/* Bulk-ops menu — export/import/new-tag. The TRIGGER itself stays always-enabled: a
 						zero-note account must still be able to reach "New tag" here; only the export item,
 						which genuinely needs notes to zip, carries its own disabled state. */}
-							<DropdownMenu>
-								<DropdownMenuTrigger
-									render={
-										<Button
-											variant="ghost"
-											size="icon-sm"
-											aria-label={t("notesSidebarMoreActions")}
-											className="app-region-no-drag"
-										>
-											<MoreHorizontalIcon />
-										</Button>
-									}
-								/>
-								<DropdownMenuContent align="end">
-									<DropdownMenuItem
-										disabled={notesQuery.isPending || allNotes.length === 0}
-										onClick={() => {
-											void handleExportAll()
-										}}
+						<DropdownMenu>
+							<DropdownMenuTrigger
+								render={
+									<Button
+										variant="ghost"
+										size="icon-sm"
+										aria-label={t("notesSidebarMoreActions")}
+										className="app-region-no-drag"
 									>
-										{t("notesExportAllAction")}
-									</DropdownMenuItem>
-									<DropdownMenuItem
-										disabled={!isOnline}
-										title={!isOnline ? t("common:offlineActionDisabled") : undefined}
-										onClick={() => {
-											importInputRef.current?.click()
-										}}
-									>
-										<UploadIcon />
-										{t("notesImportAction")}
-									</DropdownMenuItem>
-									<DropdownMenuSeparator />
-									<DropdownMenuItem
-										disabled={!isOnline}
-										title={!isOnline ? t("common:offlineActionDisabled") : undefined}
-										onClick={() => {
-											dialogHost.openCreateTagDialog()
-										}}
-									>
-										<PlusIcon />
-										{t("noteActionCreateTag")}
-									</DropdownMenuItem>
-								</DropdownMenuContent>
-							</DropdownMenu>
-							{/* The actual file picker: hidden, triggered by the menu item above. Its `accept` is
+										<MoreHorizontalIcon />
+									</Button>
+								}
+							/>
+							<DropdownMenuContent align="end">
+								<DropdownMenuItem
+									disabled={notesQuery.isPending || allNotes.length === 0}
+									onClick={() => {
+										void handleExportAll()
+									}}
+								>
+									{t("notesExportAllAction")}
+								</DropdownMenuItem>
+								<DropdownMenuItem
+									disabled={!isOnline}
+									title={!isOnline ? t("common:offlineActionDisabled") : undefined}
+									onClick={() => {
+										importInputRef.current?.click()
+									}}
+								>
+									<UploadIcon />
+									{t("notesImportAction")}
+								</DropdownMenuItem>
+								<DropdownMenuSeparator />
+								<DropdownMenuItem
+									disabled={!isOnline}
+									title={!isOnline ? t("common:offlineActionDisabled") : undefined}
+									onClick={() => {
+										dialogHost.openCreateTagDialog()
+									}}
+								>
+									<PlusIcon />
+									{t("noteActionCreateTag")}
+								</DropdownMenuItem>
+							</DropdownMenuContent>
+						</DropdownMenu>
+						{/* The actual file picker: hidden, triggered by the menu item above. Its `accept` is
 						the widened import union (import.logic.ts), and the value resets after every pick so
 						re-selecting the same file still fires a change event. */}
-							<input
-								ref={importInputRef}
-								type="file"
-								accept={importAcceptAttribute()}
-								className="hidden"
-								onChange={event => {
-									const file = event.target.files?.[0]
-									event.target.value = ""
-
-									if (file) {
-										void handleImportFile(file)
-									}
-								}}
-							/>
-						</div>
-					</div>
-
-					<div className="relative app-region-no-drag">
-						<SearchIcon
-							aria-hidden="true"
-							className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground"
-						/>
-						<Input
-							type="search"
-							aria-label={t("notesSearch")}
-							placeholder={t("notesSearch")}
-							value={search}
+						<input
+							ref={importInputRef}
+							type="file"
+							accept={importAcceptAttribute()}
+							className="hidden"
 							onChange={event => {
-								setSearch(event.target.value)
-							}}
-							onKeyDown={event => {
-								if (event.key === "Escape" && search.length > 0) {
-									event.preventDefault()
-									setSearch("")
+								const file = event.target.files?.[0]
+								event.target.value = ""
+
+								if (file) {
+									void handleImportFile(file)
 								}
 							}}
-							className="h-8 pr-8 pl-8"
 						/>
-						{search.length > 0 ? (
-							<Button
-								variant="ghost"
-								size="icon-xs"
-								aria-label={t("notesSearchClear")}
-								className="absolute top-1/2 right-1.5 -translate-y-1/2"
-								onClick={() => {
-									setSearch("")
-								}}
-							>
-								<XIcon />
-							</Button>
-						) : null}
-					</div>
-
-					<div className="flex items-center gap-1.5">
-						<div
-							role="group"
-							aria-label={t("notesViewToggleLabel")}
-							className="flex flex-1 gap-0.5 rounded-lg bg-muted p-0.5 app-region-no-drag"
-						>
-							<button
-								type="button"
-								aria-pressed={viewMode === "notes"}
-								onClick={() => {
-									void handleViewModeChange("notes")
-								}}
-								className={segmentClass(viewMode === "notes")}
-							>
-								{t("notesViewNotes")}
-							</button>
-							<button
-								type="button"
-								aria-pressed={viewMode === "tags"}
-								onClick={() => {
-									void handleViewModeChange("tags")
-								}}
-								className={segmentClass(viewMode === "tags")}
-							>
-								{t("notesViewTags")}
-							</button>
-						</div>
-						{/* Tags-view sort control, shown only in the view it applies to (the notes view has its
-					own date-grouping instead, no sort control of its own). */}
-						{viewMode === "tags" ? (
-							<TagsSortMenu
-								value={tagsSortBy}
-								onChange={next => {
-									void handleTagsSortChange(next)
-								}}
-							/>
-						) : null}
 					</div>
 				</div>
 
-				<div className="relative flex min-h-0 flex-1 flex-col">
+				<ListFilterInput
+					value={search}
+					onChange={setSearch}
+					placeholder={t("notesSearch")}
+					ariaLabel={t("notesSearch")}
+					wrapperClassName="app-region-no-drag"
+				/>
+
+				<div className="flex items-center gap-1.5">
 					<div
-						ref={setScrollElement}
-						className="flex flex-1 flex-col overflow-y-auto px-1.5 pb-3"
+						role="group"
+						aria-label={t("notesViewToggleLabel")}
+						className="flex flex-1 gap-0.5 rounded-lg bg-muted p-0.5 app-region-no-drag"
 					>
-						{renderBody()}
+						<button
+							type="button"
+							aria-pressed={viewMode === "notes"}
+							onClick={() => {
+								void handleViewModeChange("notes")
+							}}
+							className={segmentClass(viewMode === "notes")}
+						>
+							{t("notesViewNotes")}
+						</button>
+						<button
+							type="button"
+							aria-pressed={viewMode === "tags"}
+							onClick={() => {
+								void handleViewModeChange("tags")
+							}}
+							className={segmentClass(viewMode === "tags")}
+						>
+							{t("notesViewTags")}
+						</button>
 					</div>
-					{/* Bottom-anchored floating selection bar — overlays the scroll container, replacing
-				    nothing in the header. Mirrors directoryListing.tsx's own BulkActionBar placement. Shown
-				    at 2+ selected only — a single selection is just normal browsing. */}
-					{liveSelectedNotes.length >= BULK_BAR_MIN_SELECTION ? (
-						<div className="pointer-events-none absolute inset-x-2 bottom-2 z-10 flex justify-center">
-							<NotesBulkActionBar
-								selectedNotes={liveSelectedNotes}
-								allTags={allTags}
-								currentUserId={currentUserId}
-								onDialogAction={dialogHost.openBulkDialog}
-							/>
-						</div>
+					{/* Tags-view sort control, shown only in the view it applies to (the notes view has its
+					own date-grouping instead, no sort control of its own). */}
+					{viewMode === "tags" ? (
+						<TagsSortMenu
+							value={tagsSortBy}
+							onChange={next => {
+								void handleTagsSortChange(next)
+							}}
+						/>
 					) : null}
 				</div>
-				{dialogHost.renderActiveDialog()}
-			</aside>
-			<SidebarResizeHandle
-				ariaLabel={t("notesSidebarResize")}
-				handle={resize}
-			/>
-		</Fragment>
+			</div>
+
+			<div className="relative flex min-h-0 flex-1 flex-col">
+				<div
+					ref={setScrollElement}
+					className="flex flex-1 flex-col overflow-y-auto px-1.5 pb-3"
+				>
+					{renderBody()}
+				</div>
+				{/* Bottom-anchored floating selection bar — overlays the scroll container, replacing
+				    nothing in the header. Mirrors directoryListing.tsx's own BulkActionBar placement. Shown
+				    at 2+ selected only — a single selection is just normal browsing. */}
+				{liveSelectedNotes.length >= BULK_BAR_MIN_SELECTION ? (
+					<div className="pointer-events-none absolute inset-x-2 bottom-2 z-10 flex justify-center">
+						<NotesBulkActionBar
+							selectedNotes={liveSelectedNotes}
+							allTags={allTags}
+							currentUserId={currentUserId}
+							onDialogAction={dialogHost.openBulkDialog}
+						/>
+					</div>
+				) : null}
+			</div>
+			{dialogHost.renderActiveDialog()}
+		</ResizableSidebarPanel>
 	)
 }

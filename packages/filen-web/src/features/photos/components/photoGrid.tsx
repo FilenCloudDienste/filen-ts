@@ -4,7 +4,9 @@ import { SearchXIcon } from "lucide-react"
 import { useShallow } from "zustand/shallow"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { useAction } from "@/lib/keymap/useAction"
+import { isAnyDialogOpen } from "@/lib/keymap/dialogGuard"
 import { useIsOnline } from "@/lib/useIsOnline"
+import { useElementSize } from "@/lib/useElementSize"
 import { selectableForSelectAll } from "@/features/drive/lib/selectionFlags"
 import { reconcileSelectedItems } from "@/features/drive/components/directoryListing.logic"
 import { canCopyToClipboard, shouldHandleClipboardShortcut } from "@/features/drive/lib/clipboard.logic"
@@ -25,6 +27,7 @@ import {
 import {
 	buildPhotosTimeline,
 	formatTimelineMonth,
+	gridCellWidth,
 	timelineIndexAtPoint,
 	timelineMarqueeIndices,
 	timelineRowSize
@@ -33,26 +36,25 @@ import { usePhotosStore } from "@/features/photos/store/usePhotosStore"
 import { usePhotosSelection } from "@/features/photos/hooks/usePhotosSelection"
 import { usePhotosGridNav } from "@/features/photos/hooks/usePhotosGridNav"
 import { useMarqueeSelection } from "@/features/drive/hooks/useMarqueeSelection"
+import { MarqueeRect } from "@/features/drive/components/marqueeRect"
 import { useClickAwayDeselect } from "@/features/drive/hooks/useClickAwayDeselect"
 import { usePhotosDialogHost } from "@/features/photos/hooks/usePhotosDialogHost"
 import { resolveTileClickIntent, previewOpenTarget } from "@/features/photos/components/photoGrid.logic"
 import { usePhotosGridDensityQuery } from "@/features/photos/queries/preferences"
-import { DEFAULT_DENSITY_INDEX, tileSizeForDensity, columnsForWidth } from "@/features/photos/lib/gridDensity"
+import { DEFAULT_DENSITY_INDEX, tileSizeForDensity } from "@/features/photos/lib/gridDensity"
+import { columnsForWidth } from "@/features/drive/lib/gridLayout"
 import { PhotoTile } from "@/features/photos/components/photoTile"
 import { setThumbnailVisibleSlots } from "@/features/drive/lib/thumbnails"
 import { PhotosBulkActionBar } from "@/features/photos/components/bulkActionBar"
 import { TimelineScrubber } from "@/features/photos/components/timelineScrubber"
 import { Button } from "@/components/ui/button"
-import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
+import { BULK_BAR_MIN_SELECTION } from "@/components/selectionActionBar"
+import { EmptyMessage } from "@/components/emptyMessage"
 
 // Spacer between tiles only, never along the grid's outer edges: CSS grid gap separates columns and
 // the virtualizer's gap separates rows. 2px reads as a seam, not as padding.
 const GRID_GAP = 2
 const GRID_OVERSCAN = 3
-// Bulk bar only earns its own floating UI at 2+ selected — a single selection is already fully
-// covered by that one tile's own context menu (photosItemActions), unlike drive's listing which
-// shows its bar from 1 (a deliberate photos-only threshold, not a drive gating drift).
-const BULK_BAR_MIN_SELECTION = 2
 
 const KIND_CHIPS: readonly {
 	kind: PhotosKindFilter
@@ -77,8 +79,7 @@ export function PhotoGrid({ rootUuid, listing }: PhotoGridProps) {
 	const tileSize = tileSizeForDensity(densityIndex)
 
 	const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null)
-	const [containerWidth, setContainerWidth] = useState(0)
-	const [containerHeight, setContainerHeight] = useState(0)
+	const { width: containerWidth, height: containerHeight } = useElementSize(scrollElement)
 	const [anchorUuid, setAnchorUuid] = useState<string | null>(null)
 	const [filter, setFilter] = useState<PhotosFilter>(EMPTY_PHOTOS_FILTER)
 
@@ -144,31 +145,10 @@ export function PhotoGrid({ rootUuid, listing }: PhotoGridProps) {
 		usePhotosStore.getState().clearSelectedItems()
 	}, [rootUuid])
 
-	useEffect(() => {
-		if (!scrollElement) {
-			return
-		}
-
-		const observer = new ResizeObserver(entries => {
-			const entry = entries[0]
-
-			if (entry) {
-				setContainerWidth(entry.contentRect.width)
-				setContainerHeight(entry.contentRect.height)
-			}
-		})
-
-		observer.observe(scrollElement)
-
-		return () => {
-			observer.disconnect()
-		}
-	}, [scrollElement])
-
 	// The density's tile size only decides how many columns fit; each tile then fills its share of the
 	// width after the gaps, and rows are that tall, so no slack is left anywhere.
 	const columns = columnsForWidth(containerWidth, tileSize, GRID_GAP)
-	const cellSize = containerWidth > 0 ? (containerWidth - GRID_GAP * (columns - 1)) / columns : tileSize
+	const cellSize = containerWidth > 0 ? gridCellWidth(containerWidth, columns, GRID_GAP) : tileSize
 	const timeline = useMemo(() => buildPhotosTimeline(filtered.entries, columns, cellSize, GRID_GAP), [filtered, columns, cellSize])
 
 	// This grid lays out its own tiles, so it sizes the shared thumbnail objectURL cache itself: the
@@ -229,7 +209,7 @@ export function PhotoGrid({ rootUuid, listing }: PhotoGridProps) {
 	useAction(
 		"photos.selectAll",
 		keyboardEvent => {
-			if (isDialogOpen) {
+			if (isAnyDialogOpen()) {
 				return
 			}
 
@@ -240,7 +220,7 @@ export function PhotoGrid({ rootUuid, listing }: PhotoGridProps) {
 			usePhotosStore.getState().setSelectedItems(selectableForSelectAll(items) as PhotoItem[])
 		},
 		undefined,
-		[isDialogOpen, items]
+		[items]
 	)
 
 	useAction(
@@ -264,14 +244,14 @@ export function PhotoGrid({ rootUuid, listing }: PhotoGridProps) {
 		keyboardEvent => {
 			keyboardEvent.preventDefault()
 
-			if (isDialogOpen || !isOnline || selectedItems.length < BULK_BAR_MIN_SELECTION) {
+			if (isAnyDialogOpen() || !isOnline || selectedItems.length < BULK_BAR_MIN_SELECTION) {
 				return
 			}
 
 			handleBulkDialogAction("trash")
 		},
 		undefined,
-		[isDialogOpen, isOnline, selectedItems]
+		[isOnline, selectedItems]
 	)
 
 	// Copies the selection onto the drive clipboard, for a paste into a Cloud Drive directory. Photos has
@@ -281,7 +261,6 @@ export function PhotoGrid({ rootUuid, listing }: PhotoGridProps) {
 		"photos.copy",
 		keyboardEvent => {
 			if (
-				isDialogOpen ||
 				!shouldHandleClipboardShortcut(clipboardShortcutContext(keyboardEvent, true)) ||
 				!canCopyToClipboard(selectedItems, "drive")
 			) {
@@ -292,7 +271,7 @@ export function PhotoGrid({ rootUuid, listing }: PhotoGridProps) {
 			copyToClipboard(selectedItems)
 		},
 		undefined,
-		[isDialogOpen, selectedItems]
+		[selectedItems]
 	)
 
 	// A changed search or filter shows a different set: the selection, anchor, cursor and scroll position
@@ -318,7 +297,6 @@ export function PhotoGrid({ rootUuid, listing }: PhotoGridProps) {
 					onClear={() => {
 						updateFilter(prev => ({ ...prev, query: "" }))
 					}}
-					dialogOpen={isDialogOpen}
 				/>
 				<div
 					role="group"
@@ -365,25 +343,20 @@ export function PhotoGrid({ rootUuid, listing }: PhotoGridProps) {
 			</div>
 			{items.length === 0 ? (
 				<div className="flex flex-1 overflow-y-auto">
-					<Empty>
-						<EmptyHeader>
-							<EmptyMedia>
-								<SearchXIcon />
-							</EmptyMedia>
-							<EmptyTitle>{t("photos:photosNoMatchesTitle")}</EmptyTitle>
-							<EmptyDescription>{t("photos:photosNoMatchesBody")}</EmptyDescription>
-						</EmptyHeader>
-						<EmptyContent>
-							<Button
-								variant="outline"
-								onClick={() => {
-									updateFilter(() => EMPTY_PHOTOS_FILTER)
-								}}
-							>
-								{t("photos:photosClearFilters")}
-							</Button>
-						</EmptyContent>
-					</Empty>
+					<EmptyMessage
+						icon={SearchXIcon}
+						title={t("photos:photosNoMatchesTitle")}
+						description={t("photos:photosNoMatchesBody")}
+					>
+						<Button
+							variant="outline"
+							onClick={() => {
+								updateFilter(() => EMPTY_PHOTOS_FILTER)
+							}}
+						>
+							{t("photos:photosClearFilters")}
+						</Button>
+					</EmptyMessage>
 				</div>
 			) : (
 				<div className="flex min-h-0 flex-1">
@@ -401,22 +374,8 @@ export function PhotoGrid({ rootUuid, listing }: PhotoGridProps) {
 						onPointerDown={marquee.onPointerDown}
 					>
 						<div style={{ position: "relative", width: "100%", height: virtualizer.getTotalSize() }}>
-							{/* Marquee rectangle — content-space, so it stretches correctly as the grid auto-scrolls, and
-							    the FIRST child of the sized wrapper so it shares the tiles' own content-space origin.
-							    Non-interactive (pointer-events-none) so it never intercepts the ongoing drag. */}
-							{marquee.rect ? (
-								<div
-									aria-hidden="true"
-									data-testid="marquee-rect"
-									className="pointer-events-none absolute z-20 rounded-xs border border-primary/60 bg-primary/15"
-									style={{
-										left: marquee.rect.left,
-										top: marquee.rect.top,
-										width: marquee.rect.right - marquee.rect.left,
-										height: marquee.rect.bottom - marquee.rect.top
-									}}
-								/>
-							) : null}
+							{/* The FIRST child of the sized wrapper so it shares the tiles' own content-space origin. */}
+							<MarqueeRect rect={marquee.rect} />
 							{virtualizer.getVirtualItems().map(virtualRow => {
 								const row = timeline.rows[virtualRow.index]
 

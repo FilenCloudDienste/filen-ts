@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { describe, expect, it } from "vitest"
 import {
 	buildMasterKeysFilename,
 	shouldShowExportReminder,
@@ -92,44 +92,5 @@ describe("selectActiveReminder (one-at-a-time sequencing, keys before storage)",
 	it("never surfaces a reminder until the account query has settled successfully", () => {
 		expect(selectActiveReminder(params({ accountStatus: "pending", storageOverLimit: true }))).toBe(null)
 		expect(selectActiveReminder(params({ accountStatus: "error", storageOverLimit: true }))).toBe(null)
-	})
-})
-
-describe("reminderFired / markReminderFired (module-level singleton, reset via fresh import)", () => {
-	beforeEach(() => {
-		vi.resetModules()
-	})
-
-	it("starts unfired and flips permanently once marked", async () => {
-		const { reminderFired, markReminderFired } = await import("@/features/settings/components/security/exportMasterKeys.logic")
-
-		expect(reminderFired()).toBe(false)
-
-		markReminderFired()
-
-		expect(reminderFired()).toBe(true)
-	})
-
-	it("a fresh module instance (simulating a new boot) starts unfired again", async () => {
-		const first = await import("@/features/settings/components/security/exportMasterKeys.logic")
-		first.markReminderFired()
-		expect(first.reminderFired()).toBe(true)
-
-		vi.resetModules()
-
-		const second = await import("@/features/settings/components/security/exportMasterKeys.logic")
-		expect(second.reminderFired()).toBe(false)
-	})
-
-	it("tracks the storage flag independently of the keys flag", async () => {
-		const mod = await import("@/features/settings/components/security/exportMasterKeys.logic")
-
-		expect(mod.storageReminderFired()).toBe(false)
-
-		mod.markReminderFired()
-		expect(mod.storageReminderFired()).toBe(false)
-
-		mod.markStorageReminderFired()
-		expect(mod.storageReminderFired()).toBe(true)
 	})
 })

@@ -2,6 +2,7 @@ import { onlineManager } from "@tanstack/react-query"
 import { InFlight } from "@filen/shared"
 import { sdkApi } from "@/lib/sdk/client"
 import { log } from "@/lib/log"
+import { defaultObjectUrlFns, type ObjectUrlFns } from "@/lib/objectUrl"
 import { readThumbnailBlob } from "@/features/drive/lib/thumbCache"
 import { capacityForVisibleSlots, createThumbnailUrlCache, type ThumbnailUrlCache } from "@/features/drive/lib/thumbnailUrlCache"
 import { JobQueue, type QueuedJob } from "@/features/audio/lib/trackMetadata.logic"
@@ -49,13 +50,11 @@ export interface TrackMetadataRequestOptions {
 	refresh?: boolean
 }
 
-export interface TrackMetadataDeps {
+export interface TrackMetadataDeps extends ObjectUrlFns {
 	readRemote: (track: QueueTrack, token: string) => Promise<AudioMetadataResult>
 	readLocal: (blob: Blob, uuid: string, token: string) => Promise<AudioMetadataResult>
 	cancelRead: (token: string) => void
 	readThumbnail: (uuid: string) => Promise<Blob | null>
-	createObjectUrl: (blob: Blob) => string
-	revokeObjectUrl: (url: string) => void
 	isOnline: () => boolean
 	now: () => number
 }
@@ -80,16 +79,13 @@ export class TrackMetadataService {
 	private readonly refreshed = new Set<string>()
 	private readonly readTokens = new Set<string>()
 	private readonly coverUrls: ThumbnailUrlCache
-	// The cache's live keys, so logout can revoke every URL it still holds.
-	private readonly coverUrlUuids = new Set<string>()
 	private readonly coverReads = new InFlight<string, string | null>()
 	// Bumped by reset, so a read that settles after logout writes nothing back.
 	private epoch = 0
 
 	public constructor(deps: TrackMetadataDeps) {
 		this.deps = deps
-		this.coverUrls = createThumbnailUrlCache(capacityForVisibleSlots(COVER_URL_SLOTS), (uuid, url) => {
-			this.coverUrlUuids.delete(uuid)
+		this.coverUrls = createThumbnailUrlCache(capacityForVisibleSlots(COVER_URL_SLOTS), (_uuid, url) => {
 			deps.revokeObjectUrl(url)
 		})
 	}
@@ -261,7 +257,6 @@ export class TrackMetadataService {
 
 		const url = this.deps.createObjectUrl(blob)
 
-		this.coverUrlUuids.add(uuid)
 		this.coverUrls.set(uuid, url)
 
 		return url
@@ -346,15 +341,7 @@ export class TrackMetadataService {
 		this.failures.clear()
 		this.refreshed.clear()
 
-		for (const uuid of this.coverUrlUuids) {
-			const url = this.coverUrls.delete(uuid)
-
-			if (url !== undefined) {
-				this.deps.revokeObjectUrl(url)
-			}
-		}
-
-		this.coverUrlUuids.clear()
+		this.coverUrls.clear()
 		resetTrackTags()
 	}
 }
@@ -366,10 +353,7 @@ export const trackMetadata = new TrackMetadataService({
 		void sdkApi.cancelPreviewDownload(token)
 	},
 	readThumbnail: readThumbnailBlob,
-	createObjectUrl: blob => URL.createObjectURL(blob),
-	revokeObjectUrl: url => {
-		URL.revokeObjectURL(url)
-	},
+	...defaultObjectUrlFns,
 	isOnline: () => onlineManager.isOnline(),
 	now: () => Date.now()
 })

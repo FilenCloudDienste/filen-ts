@@ -1,6 +1,7 @@
 import { create } from "zustand"
 import type { Note } from "@filen/sdk-rs"
 import type { InflightEntry as SharedInflightEntry } from "@filen/shared"
+import { withoutKey } from "@/lib/utils"
 
 // The sync outbox's per-entry shape and in-memory shape live in @filen/shared (mobile's InflightContent
 // is the identical generic type instantiated with its own Note), generic over each app's own generated
@@ -100,15 +101,9 @@ export function beginEditingSession(uuid: string): boolean {
 
 export function endEditingSession(uuid: string): void {
 	useNotesInflightStore.setState(state => {
-		if (state.editingSessions[uuid] !== true) {
-			return state
-		}
+		const editingSessions = withoutKey(state.editingSessions, uuid)
 
-		const next = { ...state.editingSessions }
-
-		Reflect.deleteProperty(next, uuid)
-
-		return { editingSessions: next }
+		return editingSessions === state.editingSessions ? state : { editingSessions }
 	})
 }
 
@@ -121,15 +116,9 @@ export function reseedEditor(uuid: string): void {
 // The editor left the note: its count goes with it.
 export function forgetEditorReseeds(uuid: string): void {
 	useNotesInflightStore.setState(state => {
-		if (state.editorReseeds[uuid] === undefined) {
-			return state
-		}
+		const editorReseeds = withoutKey(state.editorReseeds, uuid)
 
-		const next = { ...state.editorReseeds }
-
-		Reflect.deleteProperty(next, uuid)
-
-		return { editorReseeds: next }
+		return editorReseeds === state.editorReseeds ? state : { editorReseeds }
 	})
 }
 
@@ -154,5 +143,3 @@ export function useOutboxHydrated(): boolean {
 export function setOutboxHydrated(hydrated: boolean): void {
 	useNotesInflightStore.setState({ outboxHydrated: hydrated })
 }
-
-export default useNotesInflightStore

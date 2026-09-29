@@ -43,7 +43,8 @@ vi.mock("sonner", () => ({ toast }))
 vi.mock("@/lib/i18n", () => ({ i18n: { t: (key: string) => key } }))
 
 import { Sync } from "@/features/notes/lib/sync"
-import useNotesInflightStore, {
+import {
+	useNotesInflightStore,
 	noteIsEditing,
 	beginEditingSession,
 	endEditingSession,

@@ -2,7 +2,8 @@ import * as Comlink from "comlink"
 import type { AnyFile, AnyLinkedDirWithContext } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
 import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
-import { isFsaAvailable, isPickerCancelled } from "@/features/drive/lib/saveDownload"
+import { pipeWorkerToSink } from "@/lib/pipeWorkerToSink"
+import { isFsaAvailable, isPickerCancelled, pickFsaTarget } from "@/features/drive/lib/saveDownload"
 import { chooseDownloadStrategy, createCollectingSink, type CollectingSink } from "@/features/publicLinks/lib/download.logic"
 import { previewCacheScope } from "@/features/preview/lib/accessMode"
 import { joinPreviewBytes, loadPreviewBytes } from "@/features/preview/lib/previewCache"
@@ -44,16 +45,8 @@ function saveBlob(blob: Blob, name: string): void {
 // directly from the click handler, and this is their first step. Returns null when the user dismisses
 // the picker (a clean no-op, never an error).
 async function pickFsaWritable(suggestedName: string): Promise<FileSystemWritableFileStream | null> {
-	const picker = window.showSaveFilePicker
-
-	if (picker === undefined) {
-		return null
-	}
-
 	try {
-		const handle = await picker({ suggestedName })
-
-		return await handle.createWritable()
+		return (await pickFsaTarget(suggestedName)).writable
 	} catch (e) {
 		if (isPickerCancelled(e)) {
 			return null
@@ -61,31 +54,6 @@ async function pickFsaWritable(suggestedName: string): Promise<FileSystemWritabl
 
 		throw e
 	}
-}
-
-// Bridges a worker stream to a main-thread destination: a TransformStream's writable end is transferred
-// into the worker (the SDK pushes decrypted bytes into it), its readable end piped to the destination
-// sink here. COORDINATED TEARDOWN mirrors the authed downloadViaFsa: a rejected worker call aborts the
-// pipe too, so a consumer never hangs on an open-but-abandoned stream; the success path awaits the raw
-// pipe result so a close/flush failure (disk full, revoked handle) rejects rather than looking done.
-async function pipeWorkerToSink(
-	destination: WritableStream<Uint8Array>,
-	run: (transferred: WritableStream<Uint8Array>) => Promise<void>
-): Promise<void> {
-	const transform = new TransformStream<Uint8Array, Uint8Array>()
-	const teardown = new AbortController()
-	const sinkDone = transform.readable.pipeTo(destination, { signal: teardown.signal })
-
-	try {
-		await run(Comlink.transfer(transform.writable, [transform.writable]))
-	} catch (e) {
-		teardown.abort()
-		await sinkDone.catch(() => undefined)
-
-		throw e
-	}
-
-	await sinkDone
 }
 
 // Writes a buffer already in memory to the picked file; an aborted write leaves no partial file behind.

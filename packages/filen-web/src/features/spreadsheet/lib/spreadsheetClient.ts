@@ -1,6 +1,6 @@
 import * as Comlink from "comlink"
 import SpreadsheetWorker from "@/features/spreadsheet/workers/spreadsheet.worker.ts?worker"
-import type { SpreadsheetFileKind, SpreadsheetWorkerApi } from "@/features/spreadsheet/workers/spreadsheet.worker"
+import type { SpreadsheetWorkerApi } from "@/features/spreadsheet/workers/spreadsheet.worker"
 
 // One worker for every open spreadsheet, created the first time one opens. It holds the open workbooks,
 // each until its viewer closes it.
@@ -10,30 +10,6 @@ export function spreadsheetWorker(): Comlink.Remote<SpreadsheetWorkerApi> {
 	worker ??= Comlink.wrap<SpreadsheetWorkerApi>(new SpreadsheetWorker())
 
 	return worker
-}
-
-// The format a name promises, for telling whether a rename changed it: its kind, except that .xlsm
-// (macros kept) and .xlsx (none allowed) open alike but are different files.
-export function spreadsheetSaveFormat(extension: string): string | null {
-	const kind = spreadsheetFileKind(extension)
-
-	return kind === "xlsx" ? extension : kind
-}
-
-export function spreadsheetFileKind(extension: string): SpreadsheetFileKind | null {
-	switch (extension) {
-		case "xlsx":
-		case "xlsm":
-			return "xlsx"
-		case "xls":
-			return "xls"
-		case "csv":
-			return "csv"
-		case "tsv":
-			return "tsv"
-		default:
-			return null
-	}
 }
 
 const ZIP = [0x50, 0x4b, 0x03, 0x04]

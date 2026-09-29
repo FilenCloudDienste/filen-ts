@@ -48,7 +48,7 @@ import {
 	type OptimisticSender,
 	type RemoteChatEnqueue
 } from "@/features/chats/lib/sync.logic"
-import useChatsInflightStore, { type ChatMessageWithInflightId, type InflightChatMessages } from "@/features/chats/store/useChatsInflight"
+import { useChatsInflightStore, type ChatMessageWithInflightId, type InflightChatMessages } from "@/features/chats/store/useChatsInflight"
 
 const SENDER: OptimisticSender = { id: 7n, email: "me@filen.io", avatarUrl: undefined, nickName: "Me" }
 

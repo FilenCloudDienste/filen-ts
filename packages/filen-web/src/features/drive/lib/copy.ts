@@ -14,12 +14,12 @@ import {
 import { sdkApi } from "@/lib/sdk/client"
 import { i18n } from "@/lib/i18n"
 import { runOp } from "@/lib/actions/outcome"
-import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
+import { asErrorDTO, plainErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
 import type { CopyJobEvent } from "@/workers/sdk.worker"
 import { asDirectoryOrFile, narrowItem, narrowToSdkItems, type DriveItem } from "@/features/drive/lib/item"
 import { findCachedListingItem, normalizeParentUuid, queueListingCreate } from "@/features/drive/queries/drive"
 import { currentRootUuid, trashItems } from "@/features/drive/lib/actions"
-import { type BulkOutcome } from "@/features/drive/lib/bulk"
+import { type BulkOutcome } from "@/lib/actions/bulk"
 import { flushDeferredRecents } from "@/features/drive/lib/socketHandlers"
 import { accountQuotaDeps, addAccountStorageUsed } from "@/features/drive/lib/quota"
 import { invalidateUploadedDirectorySizes } from "@/features/drive/lib/upload"
@@ -120,18 +120,14 @@ async function readFreshAccount(account: QuotaCheckDeps): Promise<StorageCounter
 }
 
 function quotaExceededDTO(neededBytes: number, freeBytes: number): ErrorDTO {
-	const message = i18n.t("transfers:transfersCopyQuotaExceeded", { needed: formatBytes(neededBytes), free: formatBytes(freeBytes) })
-
-	return { species: "plain", message, label: message }
+	return plainErrorDTO(i18n.t("transfers:transfersCopyQuotaExceeded", { needed: formatBytes(neededBytes), free: formatBytes(freeBytes) }))
 }
 
 // Settles a job the user stopped as cancelled; never shown.
 const STOPPED: ErrorDTO = { species: "sdk", kind: "Cancelled", message: "", label: "" }
 
 function trashFailedDTO(count: number): ErrorDTO {
-	const message = i18n.t("transfers:transfersCopyTrashFailedItems", { count })
-
-	return { species: "plain", message, label: message }
+	return plainErrorDTO(i18n.t("transfers:transfersCopyTrashFailedItems", { count }))
 }
 
 function addTrashOutcome(result: CopyJob["trashResult"], outcome: BulkOutcome<DriveItem>): NonNullable<CopyJob["trashResult"]> {

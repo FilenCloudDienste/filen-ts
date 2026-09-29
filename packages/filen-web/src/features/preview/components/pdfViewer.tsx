@@ -30,11 +30,12 @@ import {
 	type PageVisibility,
 	type PdfLinkAnnotation
 } from "@/features/preview/components/pdfViewer.logic"
-import { errorLabel } from "@/lib/i18n/errorLabel"
+import { useLatestRef } from "@/lib/useLatestRef"
+import { prefersReducedMotion } from "@/lib/motion"
 import { LoadingState } from "@/components/loadingState"
 import { Button } from "@/components/ui/button"
 import { InputDialog } from "@/components/dialogs/inputDialog"
-import { PreviewErrorState } from "@/features/preview/components/previewErrorState"
+import { PreviewErrorState, PreviewGate, PreviewLoading } from "@/features/preview/components/previewErrorState"
 import "@/features/preview/components/pdfLayers.css"
 
 export interface PdfViewerProps {
@@ -246,11 +247,7 @@ function PdfPage({
 	// Latest onIntersect, read (never as a dependency) from the observer callback below — keeps that
 	// effect from tearing down and recreating its IntersectionObserver on every ancestor re-render,
 	// which a raw `onIntersect` dependency would otherwise force on every one of those renders.
-	const onIntersectRef = useRef(onIntersect)
-
-	useEffect(() => {
-		onIntersectRef.current = onIntersect
-	})
+	const onIntersectRef = useLatestRef(onIntersect)
 
 	useEffect(() => {
 		let live = true
@@ -296,7 +293,7 @@ function PdfPage({
 		return () => {
 			observer.disconnect()
 		}
-	}, [root, pageNumber])
+	}, [root, pageNumber, onIntersectRef])
 
 	// A second, wider-margin observer purely for eviction — deliberately separate from the one above
 	// (which needs fine-grained ratios for the current-page indicator, not a 1200px-wide root). Boolean
@@ -555,7 +552,7 @@ function PdfPageList({ doc, alt }: { doc: PDFDocumentProxy; alt: string }) {
 		// The app's global reduced-motion rule is CSS, which a JS-supplied `behavior` overrides — so the
 		// preference has to be read here too.
 		el?.scrollIntoView({
-			behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+			behavior: prefersReducedMotion() ? "auto" : "smooth",
 			block: "start"
 		})
 	}
@@ -680,12 +677,7 @@ function PdfDocument({ bytes, alt }: { bytes: Uint8Array; alt: string }) {
 	const { state, submitPassword, retry } = usePdfDocument(bytes)
 
 	if (state.status === "loading") {
-		return (
-			<LoadingState
-				size="lg"
-				className="text-inherit"
-			/>
-		)
+		return <PreviewLoading />
 	}
 
 	if (state.status === "password") {
@@ -717,31 +709,15 @@ function PdfDocument({ bytes, alt }: { bytes: Uint8Array; alt: string }) {
 // Top-level gate on the whole-buffer download (usePreviewBytes, shared with every other buffered
 // category) — PdfDocument above owns everything pdf.js-specific once bytes are in hand.
 function PdfViewer({ item, alt }: PdfViewerProps) {
-	const result = usePreviewBytes(item)
-
-	if (result.status === "pending") {
-		return (
-			<LoadingState
-				size="lg"
-				className="text-inherit"
-			/>
-		)
-	}
-
-	if (result.status === "error") {
-		return (
-			<PreviewErrorState
-				message={errorLabel(result.dto)}
-				onRetry={result.refetch}
-			/>
-		)
-	}
-
 	return (
-		<PdfDocument
-			bytes={result.bytes}
-			alt={alt}
-		/>
+		<PreviewGate result={usePreviewBytes(item)}>
+			{ready => (
+				<PdfDocument
+					bytes={ready.bytes}
+					alt={alt}
+				/>
+			)}
+		</PreviewGate>
 	)
 }
 

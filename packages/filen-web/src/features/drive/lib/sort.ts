@@ -1,5 +1,5 @@
 import { driveItemName, sortItems as sortItemsEngine, type SortMode, type SortEngineAccessors } from "@filen/shared"
-import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
+import { asDirectoryOrFile, driveItemMime, type DriveItem } from "@/features/drive/lib/item"
 
 // Field x direction. "type" groups files by MIME (directories have none, so they fall back to
 // name — see typeSortKey); the other fields are self-explanatory. Recents forces uploadDateDesc
@@ -69,8 +69,7 @@ function nameSortKey(item: DriveItem): string {
 // — so ties (many files sharing a MIME) are broken by name before the uuid chain (tiebreakByName
 // on the sort mode below).
 function typeSortKey(item: DriveItem): string {
-	const base = asDirectoryOrFile(item)
-	return base.type === "file" ? (base.data.decryptedMeta?.mime ?? driveItemName(base)) : nameSortKey(item)
+	return driveItemMime(item) ?? driveItemName(item)
 }
 
 // Both Dir and File carry a native, server-assigned `timestamp` — the upload time — directly, so

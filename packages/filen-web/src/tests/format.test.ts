@@ -9,6 +9,7 @@ import {
 	formatVersionTimestamp,
 	sharedIdentityLabel
 } from "@/features/drive/lib/format"
+import { formatShortDate } from "@/lib/formatDate"
 
 function mockDir(overrides: Partial<Dir> = {}): Dir {
 	return {
@@ -40,10 +41,6 @@ function mockFile(overrides: Partial<File> = {}): File {
 		},
 		...overrides
 	}
-}
-
-function expectedDate(ms: number): string {
-	return new Date(ms).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })
 }
 
 function sharerRole(id: number, email: string): SharingRole {
@@ -124,13 +121,13 @@ describe("formatModifiedDate", () => {
 			})
 		)
 
-		expect(formatModifiedDate(item)).toBe(expectedDate(1_700_000_000_000))
+		expect(formatModifiedDate(item)).toBe(formatShortDate(1_700_000_000_000))
 	})
 
 	it("falls back to the item's own timestamp for an undecryptable file", () => {
 		const item = narrowItem(mockFile({ timestamp: 1_700_000_000_000n, meta: { type: "encrypted", data: "ciphertext" } }))
 
-		expect(formatModifiedDate(item)).toBe(expectedDate(1_700_000_000_000))
+		expect(formatModifiedDate(item)).toBe(formatShortDate(1_700_000_000_000))
 	})
 
 	it("uses decryptedMeta.created for a directory when present", () => {
@@ -138,13 +135,13 @@ describe("formatModifiedDate", () => {
 			mockDir({ timestamp: 1n, meta: { type: "decoded", data: { name: "Documents", created: 1_700_000_000_000n } } })
 		)
 
-		expect(formatModifiedDate(item)).toBe(expectedDate(1_700_000_000_000))
+		expect(formatModifiedDate(item)).toBe(formatShortDate(1_700_000_000_000))
 	})
 
 	it("falls back to the item's own timestamp for a directory with no created field", () => {
 		const item = narrowItem(mockDir({ timestamp: 1_700_000_000_000n, meta: { type: "decoded", data: { name: "Documents" } } }))
 
-		expect(formatModifiedDate(item)).toBe(expectedDate(1_700_000_000_000))
+		expect(formatModifiedDate(item)).toBe(formatShortDate(1_700_000_000_000))
 	})
 })
 
@@ -160,7 +157,7 @@ describe("formatCreatedDate", () => {
 			})
 		)
 
-		expect(formatCreatedDate(item)).toBe(expectedDate(1_700_000_000_000))
+		expect(formatCreatedDate(item)).toBe(formatShortDate(1_700_000_000_000))
 	})
 
 	it("falls back to the item's own timestamp for a file with no created field", () => {
@@ -171,7 +168,7 @@ describe("formatCreatedDate", () => {
 			})
 		)
 
-		expect(formatCreatedDate(item)).toBe(expectedDate(1_700_000_000_000))
+		expect(formatCreatedDate(item)).toBe(formatShortDate(1_700_000_000_000))
 	})
 
 	it("uses decryptedMeta.created for a directory when present", () => {
@@ -179,13 +176,13 @@ describe("formatCreatedDate", () => {
 			mockDir({ timestamp: 1n, meta: { type: "decoded", data: { name: "Documents", created: 1_700_000_000_000n } } })
 		)
 
-		expect(formatCreatedDate(item)).toBe(expectedDate(1_700_000_000_000))
+		expect(formatCreatedDate(item)).toBe(formatShortDate(1_700_000_000_000))
 	})
 
 	it("falls back to the item's own timestamp for an undecryptable item", () => {
 		const item = narrowItem(mockDir({ timestamp: 1_700_000_000_000n, meta: { type: "encrypted", data: "ciphertext" } }))
 
-		expect(formatCreatedDate(item)).toBe(expectedDate(1_700_000_000_000))
+		expect(formatCreatedDate(item)).toBe(formatShortDate(1_700_000_000_000))
 	})
 })
 
@@ -201,13 +198,13 @@ describe("formatUploadedDate", () => {
 			})
 		)
 
-		expect(formatUploadedDate(item)).toBe(expectedDate(1_700_000_000_000))
+		expect(formatUploadedDate(item)).toBe(formatShortDate(1_700_000_000_000))
 	})
 
 	it("reads the raw timestamp even for an undecryptable item (never falls back — it is the source)", () => {
 		const item = narrowItem(mockDir({ timestamp: 1_700_000_000_000n, meta: { type: "encrypted", data: "ciphertext" } }))
 
-		expect(formatUploadedDate(item)).toBe(expectedDate(1_700_000_000_000))
+		expect(formatUploadedDate(item)).toBe(formatShortDate(1_700_000_000_000))
 	})
 })
 

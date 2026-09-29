@@ -1,7 +1,7 @@
 import { newestEntry } from "@/features/notes/lib/sync.logic"
 import { reseedTabEditor } from "@/features/notes/lib/remoteContent"
 import { shownTabEditors, tabEditorBuffer, tabEditorDirty } from "@/features/notes/lib/tabEditors"
-import useNotesInflightStore, { TAB_ID, entryIsShowable, type InflightEntry } from "@/features/notes/store/useNotesInflight"
+import { useNotesInflightStore, TAB_ID, entryIsShowable, type InflightEntry } from "@/features/notes/store/useNotesInflight"
 import { useNotesRemoteEditStore } from "@/features/notes/store/useNoteRemoteEdit"
 
 // An entry that becomes showable (an orphan: its tab is gone) under an editor already on screen is a version

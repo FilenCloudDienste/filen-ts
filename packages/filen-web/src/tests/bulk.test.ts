@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
-import { runBulk } from "@/features/drive/lib/bulk"
+import { runBulk, runBulkOutcomes } from "@/lib/actions/bulk"
+import type { VoidActionOutcome } from "@/lib/actions/outcome"
+import type { ErrorDTO } from "@/lib/sdk/errors"
 
 describe("runBulk", () => {
 	it("resolves empty on empty input without calling perItem", async () => {
@@ -98,5 +100,41 @@ describe("runBulk", () => {
 
 		expect(result.failed).toEqual([{ item: "slow", error }])
 		expect(result.succeeded).toEqual(["fast"])
+	})
+})
+
+describe("runBulkOutcomes", () => {
+	it("resolves empty on empty input without calling perItem", async () => {
+		const perItem = vi.fn<(item: string) => Promise<VoidActionOutcome>>()
+
+		const result = await runBulkOutcomes([], perItem)
+
+		expect(result).toEqual({ succeeded: [], failed: [] })
+		expect(perItem).not.toHaveBeenCalled()
+	})
+
+	it("fails an error outcome's item with its dto, without aborting the rest", async () => {
+		const dto: ErrorDTO = { species: "plain", message: "forbidden", label: "forbidden" }
+		const perItem = vi
+			.fn<(item: string) => Promise<VoidActionOutcome>>()
+			.mockResolvedValueOnce({ status: "success" })
+			.mockResolvedValueOnce({ status: "error", dto })
+			.mockResolvedValueOnce({ status: "success" })
+
+		const result = await runBulkOutcomes(["a", "b", "c"], perItem)
+
+		expect(result).toEqual({ succeeded: ["a", "c"], failed: [{ item: "b", error: dto }] })
+	})
+
+	it("fails an item whose perItem throws, with the thrown value", async () => {
+		const error = new Error("boom")
+		const perItem = vi
+			.fn<(item: string) => Promise<VoidActionOutcome>>()
+			.mockRejectedValueOnce(error)
+			.mockResolvedValueOnce({ status: "success" })
+
+		const result = await runBulkOutcomes(["a", "b"], perItem)
+
+		expect(result).toEqual({ succeeded: ["b"], failed: [{ item: "a", error }] })
 	})
 })

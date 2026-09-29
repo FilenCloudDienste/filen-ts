@@ -4,6 +4,7 @@ import {
 	chatDisplayName,
 	chatMessagePreview,
 	chatPreviewTier,
+	compareBySentTimestamp,
 	isChatUndecryptable,
 	isLastMessageFromBlocked,
 	messageSenderName,
@@ -178,6 +179,16 @@ describe("newestMessage", () => {
 		const again = { ...newer }
 
 		expect(newestMessage(newer, again)).toBe(again)
+	})
+})
+
+describe("compareBySentTimestamp", () => {
+	it("orders oldest first, bigint-safe past Number precision", () => {
+		const big = 2n ** 63n
+
+		expect(compareBySentTimestamp({ sentTimestamp: big }, { sentTimestamp: big + 1n })).toBe(-1)
+		expect(compareBySentTimestamp({ sentTimestamp: big + 1n }, { sentTimestamp: big })).toBe(1)
+		expect(compareBySentTimestamp({ sentTimestamp: big }, { sentTimestamp: big })).toBe(0)
 	})
 })
 

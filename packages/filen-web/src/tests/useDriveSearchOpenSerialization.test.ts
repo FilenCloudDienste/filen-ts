@@ -18,15 +18,6 @@ import { useDriveSearch } from "@/features/drive/hooks/useDriveSearch"
 
 const EMPTY_SNAPSHOT = { hits: [], total: 0n, live: true }
 
-function deferred<T>(): { promise: Promise<T>; resolve: (v: T) => void } {
-	let resolve!: (v: T) => void
-	const promise = new Promise<T>(r => {
-		resolve = r
-	})
-
-	return { promise, resolve }
-}
-
 beforeEach(() => {
 	vi.useFakeTimers()
 	searchOpen.mockReset()
@@ -42,7 +33,7 @@ afterEach(() => {
 
 describe("useDriveSearch — one serialized engine open per engagement", () => {
 	it("keystrokes typed while the first open is in flight park and retune, never a second open", async () => {
-		const firstOpen = deferred<typeof EMPTY_SNAPSHOT>()
+		const firstOpen = Promise.withResolvers<typeof EMPTY_SNAPSHOT>()
 
 		searchOpen.mockImplementation(() => firstOpen.promise)
 		searchSetName.mockImplementation(() => Promise.resolve(true))
@@ -87,7 +78,7 @@ describe("useDriveSearch — one serialized engine open per engagement", () => {
 	})
 
 	it("a query blanked mid-open drops the parked keystrokes instead of resurrecting them", async () => {
-		const firstOpen = deferred<typeof EMPTY_SNAPSHOT>()
+		const firstOpen = Promise.withResolvers<typeof EMPTY_SNAPSHOT>()
 
 		searchOpen.mockImplementation(() => firstOpen.promise)
 		searchSetName.mockImplementation(() => Promise.resolve(true))
@@ -128,7 +119,7 @@ describe("useDriveSearch — one serialized engine open per engagement", () => {
 
 		expect(searchOpen).toHaveBeenCalledTimes(1)
 
-		const secondOpen = deferred<typeof EMPTY_SNAPSHOT>()
+		const secondOpen = Promise.withResolvers<typeof EMPTY_SNAPSHOT>()
 
 		searchOpen.mockImplementation(() => secondOpen.promise)
 
@@ -210,7 +201,7 @@ describe("useDriveSearch — navigating while a worker round trip is in flight",
 
 	it("a different query typed on the new root is not retuned through the superseded open's closure", async () => {
 		let rejectA!: (e: unknown) => void
-		const openB = deferred<typeof EMPTY_SNAPSHOT>()
+		const openB = Promise.withResolvers<typeof EMPTY_SNAPSHOT>()
 
 		searchOpen.mockImplementationOnce(
 			() =>
@@ -259,8 +250,8 @@ describe("useDriveSearch — navigating while a worker round trip is in flight",
 	})
 
 	it("a retune still in flight when the root changes neither reopens on the old root nor displaces the new root's query", async () => {
-		const setNameA = deferred<boolean>()
-		const openB = deferred<typeof EMPTY_SNAPSHOT>()
+		const setNameA = Promise.withResolvers<boolean>()
+		const openB = Promise.withResolvers<typeof EMPTY_SNAPSHOT>()
 
 		searchOpen.mockImplementationOnce(() => Promise.resolve(EMPTY_SNAPSHOT))
 		searchOpen.mockImplementationOnce(() => openB.promise)

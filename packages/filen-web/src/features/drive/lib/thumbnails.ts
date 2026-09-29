@@ -3,6 +3,7 @@ import { onlineManager } from "@tanstack/react-query"
 import { Semaphore, InFlight } from "@filen/shared"
 import { sdkApi } from "@/lib/sdk/client"
 import { log } from "@/lib/log"
+import { defaultObjectUrlFns, type ObjectUrlFns } from "@/lib/objectUrl"
 import { readThumbnailBlob, deleteThumbnail as deleteThumbnailBlob } from "@/features/drive/lib/thumbCache"
 import { thumbnailCategory, type ThumbnailCategory } from "@/features/drive/lib/thumbnails.logic"
 import { asDirectoryOrFile, type BaseFileItem, type DriveItem } from "@/features/drive/lib/item"
@@ -62,12 +63,10 @@ export function registerThumbGenerator(category: ThumbGeneratorCategory, generat
 
 // Injected collaborators so the service is unit-testable without a worker, OPFS, or a real Blob-URL
 // registry — mirrors RunUploadDeps (features/drive/lib/upload.ts).
-export interface ThumbnailServiceDeps {
+export interface ThumbnailServiceDeps extends ObjectUrlFns {
 	readThumbnailBlob: (uuid: string) => Promise<Blob | null>
 	deleteThumbnail: (uuid: string) => Promise<void>
 	storeThumbnail: (uuid: string, bytes: Uint8Array) => Promise<void>
-	createObjectUrl: (blob: Blob) => string
-	revokeObjectUrl: (url: string) => void
 	getGenerator: (category: ThumbGeneratorCategory) => ThumbGenerator | undefined
 }
 
@@ -79,10 +78,7 @@ export const defaultThumbnailDeps: ThumbnailServiceDeps = {
 	readThumbnailBlob,
 	deleteThumbnail: deleteThumbnailBlob,
 	storeThumbnail: (uuid, bytes) => sdkApi.storeThumbnail(uuid, Comlink.transfer(bytes, [bytes.buffer])),
-	createObjectUrl: blob => URL.createObjectURL(blob),
-	revokeObjectUrl: url => {
-		URL.revokeObjectURL(url)
-	},
+	...defaultObjectUrlFns,
 	getGenerator: category => generators.get(category)
 }
 

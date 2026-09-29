@@ -1,30 +1,10 @@
-import {
-	toggleFavorite,
-	setFavoritedItems,
-	trashItems,
-	renameItem,
-	replaceIfPresent,
-	type ActionOutcome
-} from "@/features/drive/lib/actions"
-import { type BulkOutcome } from "@/features/drive/lib/bulk"
+import { setFavoritedItems, trashItems, renameItem, type ActionOutcome } from "@/features/drive/lib/actions"
+import { type BulkOutcome } from "@/lib/actions/bulk"
 import type { DriveItem } from "@/features/drive/lib/item"
 import { photosListingQueryUpdate } from "@/features/photos/queries/photos"
 import type { PhotoItem } from "@/features/photos/lib/captureSort"
 
 export type { ActionOutcome }
-
-// Narrows a mutation's returned DriveItem back down to the photos listing's own PhotoItem arm —
-// every mutation below (rename/favorite) preserves the input's type ("file" in, "file" out; the
-// backend never turns a file into a directory), so this always succeeds for an item this module was
-// ever handed in the first place. Written as a real type guard (not a cast) so the narrowed array
-// below is honestly typed.
-function asPhotoItem(item: DriveItem): PhotoItem | null {
-	return item.type === "file" ? item : null
-}
-
-function asPhotoItems(items: DriveItem[]): PhotoItem[] {
-	return items.filter((item): item is PhotoItem => item.type === "file")
-}
 
 // Thin wrappers around drive's own shared action helpers (features/drive/lib/actions.ts) — the SAME
 // network op + drive-cache patch runs unchanged; each wrapper only layers on the ONE extra patch the
@@ -39,32 +19,14 @@ function asPhotoItems(items: DriveItem[]): PhotoItem[] {
 // (contacts/notes/audio/chats, see actions.ts's own grep-able usage) already reaches into drive's
 // action helpers the same way this file does, never the other way around.
 
-// The preview overlay's own header menu runs drive's raw toggleFavorite (it is the shared,
-// un-forked PreviewOverlay component — see previewOverlay.tsx's own itemMenu.tsx-sourced descriptor),
-// never this file's toggleFavoritePhoto wrapper. This is the patch that extension point calls instead
-// (PreviewOverlayProps.onFavoriteToggled, wired from usePhotosDialogHost), so the grid's heart badge
-// flips at once rather than on the itemFavorite socket echo (patchPhotosFavorite), which only flips it
-// in place: an attribute flip, not a membership change, never re-walks the listing.
-export function patchPhotoFavoriteFromPreview(rootUuid: string, item: DriveItem): void {
-	const photoItem = asPhotoItem(item)
-
-	if (photoItem !== null) {
-		photosListingQueryUpdate(rootUuid, prev => asPhotoItems(replaceIfPresent(prev, photoItem)))
+// Attribute-only refresh (a favorite flag or name changed) — replaces the row in place, never
+// appends: the item may have left the listing meanwhile. Called with the favorite result of drive's
+// own item menu (tile and preview) and after a rename, so the grid updates at once rather than on the
+// socket echo.
+export function patchPhoto(rootUuid: string, item: DriveItem): void {
+	if (item.type === "file") {
+		photosListingQueryUpdate(rootUuid, prev => prev.map(existing => (existing.data.uuid === item.data.uuid ? item : existing)))
 	}
-}
-
-export async function toggleFavoritePhoto(rootUuid: string, item: PhotoItem): Promise<ActionOutcome> {
-	const outcome = await toggleFavorite(item)
-
-	if (outcome.status === "success") {
-		const photoItem = asPhotoItem(outcome.item)
-
-		if (photoItem !== null) {
-			photosListingQueryUpdate(rootUuid, prev => asPhotoItems(replaceIfPresent(prev, photoItem)))
-		}
-	}
-
-	return outcome
 }
 
 // Bulk favorite is a SET (mirrors setFavoritedItems' own doc comment: the bar computes one target
@@ -107,11 +69,7 @@ export async function renamePhotoItem(rootUuid: string, item: PhotoItem, newName
 	const outcome = await renameItem(item, newName)
 
 	if (outcome.status === "success") {
-		const photoItem = asPhotoItem(outcome.item)
-
-		if (photoItem !== null) {
-			photosListingQueryUpdate(rootUuid, prev => asPhotoItems(replaceIfPresent(prev, photoItem)))
-		}
+		patchPhoto(rootUuid, outcome.item)
 	}
 
 	return outcome

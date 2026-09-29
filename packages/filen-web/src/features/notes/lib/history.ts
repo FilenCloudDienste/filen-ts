@@ -4,11 +4,10 @@ import { queryClient } from "@/queries/client"
 import { log } from "@/lib/log"
 import { notesQueryUpsert } from "@/features/notes/queries/notes"
 import { noteContentQueryKey } from "@/features/notes/queries/noteContent"
-import useNotesInflightStore, { endEditingSession } from "@/features/notes/store/useNotesInflight"
+import { useNotesInflightStore, endEditingSession } from "@/features/notes/store/useNotesInflight"
 import { sync } from "@/features/notes/lib/sync"
 import { recordNotePush } from "@/features/notes/lib/pushEchoes"
-import { asErrorDTO } from "@/lib/sdk/errors"
-import { runOp, type ActionOutcome } from "@/lib/actions/outcome"
+import { attemptOp, type ActionOutcome } from "@/lib/actions/outcome"
 
 export type { ActionOutcome }
 
@@ -18,18 +17,17 @@ export type { ActionOutcome }
 // it by the outbox's next pass. This is the same drop-entry/clear-rejections/flush-to-disk seam
 // socketHandlers.ts's reloadRemoteEdit already uses for the analogous "server wins" case.
 export async function restoreNoteFromHistory(note: Note, history: NoteHistory): Promise<ActionOutcome<Note>> {
-	let updated: Note
-
 	// Its echo is this browser's own write, not an edit made elsewhere.
 	const forget = history.content === undefined ? undefined : recordNotePush(note.uuid, history.content)
+	const outcome = await attemptOp(sdkApi.restoreNoteFromHistory(note, history))
 
-	try {
-		updated = await runOp(sdkApi.restoreNoteFromHistory(note, history))
-	} catch (e) {
+	if (outcome.status === "error") {
 		forget?.()
 
-		return { status: "error", dto: asErrorDTO(e) }
+		return outcome
 	}
+
+	const updated = outcome.item
 
 	notesQueryUpsert(updated)
 
@@ -60,5 +58,5 @@ export async function restoreNoteFromHistory(note: Note, history: NoteHistory): 
 		void queryClient.invalidateQueries({ queryKey: contentKey })
 	}
 
-	return { status: "success", item: updated }
+	return outcome
 }

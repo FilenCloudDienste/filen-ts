@@ -48,10 +48,7 @@ function Target({ uuid, ancestry, name, children }: { uuid: string; ancestry: st
 		{
 			"data-testid": name,
 			"data-over": drop.isOver ? "" : undefined,
-			onDragEnter: drop.onDragEnter,
-			onDragOver: drop.onDragOver,
-			onDragLeave: drop.onDragLeave,
-			onDrop: drop.onDrop
+			...drop.handlers
 		},
 		children
 	)

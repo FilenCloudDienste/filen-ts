@@ -1,6 +1,5 @@
 import { createFileRoute, redirect } from "@tanstack/react-router"
-import { sdkApi } from "@/lib/sdk/client"
-import { whenBootReady } from "@/lib/sdk/boot"
+import { isSignedIn } from "@/features/auth/lib/guard"
 import { AppShell } from "@/features/shell/components/appShell"
 
 // Authed layout: everything under it (Drive today; the other modules later) requires a session — the
@@ -8,11 +7,7 @@ import { AppShell } from "@/features/shell/components/appShell"
 // layout, so its children keep clean URLs (e.g. /drive).
 export const Route = createFileRoute("/_app")({
 	beforeLoad: async () => {
-		// Await boot (incl. session resume) before reading hasClient(): during the router's initial
-		// load the worker may still be booting, and reading too early would bounce an authed reload.
-		await whenBootReady()
-		const authed = await sdkApi.hasClient().catch(() => false)
-		if (!authed) {
+		if (!(await isSignedIn())) {
 			throw redirect({ to: "/login" })
 		}
 	},

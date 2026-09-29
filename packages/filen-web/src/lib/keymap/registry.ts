@@ -1,7 +1,8 @@
 import { type } from "arktype"
 import { create } from "zustand"
 import { kvGetJson, kvSetJson } from "@/lib/storage/adapter"
-import { log } from "@/lib/log"
+import { kvLoadOnce } from "@/lib/storage/kvBestEffort"
+import { withoutKey } from "@/lib/utils"
 import type { CommonKey, DriveKey, PreviewKey, NotesKey, ChatsKey, AudioKey, PhotosKey, ContactsKey } from "@/lib/i18n"
 
 // Keyboard-first from day one — every keyboard-controllable action in the app registers
@@ -101,10 +102,10 @@ const useKeymapStore = create<KeymapState>(set => ({
 		set(state => ({ overrides: { ...state.overrides, [id]: combo }, recordingRejection: withoutRejectionFor(state, id) }))
 	},
 	clearOverride: id => {
-		// Rebuilt rather than deleted-from: keymapOverridesSchema rejects "", so an override can only
-		// be REMOVED (back to the default), never blanked.
+		// keymapOverridesSchema rejects "", so an override can only be REMOVED (back to the default), never
+		// blanked.
 		set(state => ({
-			overrides: Object.fromEntries(Object.entries(state.overrides).filter(([key]) => key !== id)),
+			overrides: withoutKey(state.overrides, id),
 			recordingRejection: withoutRejectionFor(state, id)
 		}))
 	},
@@ -122,26 +123,19 @@ export function useOverrides(): Record<string, string> {
 	return useKeymapStore(state => state.overrides)
 }
 
-// Memoized like `storage()` in @/lib/storage/adapter.ts — the kv read fires at most once per
-// module lifetime, kicked off by the first `registerAction` call (import order between this
-// module and its first feature consumer is otherwise unspecified). A rejected read is swallowed
-// here too: a storage-layer failure must never take keyboard shortcuts down with it, so defaults
-// keep working either way — only a successfully-loaded, schema-valid record ever overrides them.
-let overridesLoad: Promise<void> | null = null
-
-function ensureOverridesLoaded(): Promise<void> {
-	overridesLoad ??= kvGetJson(OVERRIDES_KV_KEY, keymapOverridesSchema)
-		.then(loaded => {
-			if (loaded !== null) {
-				useKeymapStore.getState().setOverrides(loaded)
-			}
-		})
-		.catch((error: unknown) => {
-			log.warn("keymap", "failed to load persisted keymap overrides", error)
-		})
-
-	return overridesLoad
-}
+// The kv read fires at most once per module lifetime, kicked off by the first `registerAction` call
+// (import order between this module and its first feature consumer is otherwise unspecified). A
+// storage-layer failure must never take keyboard shortcuts down with it, so defaults keep working
+// either way — only a successfully-loaded, schema-valid record ever overrides them.
+const ensureOverridesLoaded = kvLoadOnce(
+	OVERRIDES_KV_KEY,
+	keymapOverridesSchema,
+	loaded => {
+		useKeymapStore.getState().setOverrides(loaded)
+	},
+	"keymap",
+	"keymap overrides"
+)
 
 // Test-only synchronization point today (also handy for a future boot gate that wants to know
 // the keymap has settled). Production callers never need to await this — `comboFor`/`useComboFor`

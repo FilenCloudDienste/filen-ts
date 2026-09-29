@@ -6,6 +6,7 @@ import type { FilenPublicLink } from "@/features/chats/lib/embeds.logic"
 import type { ChatLinkResolution } from "@/features/chats/queries/chatMessageLinks"
 import { linkedFileIntoDriveItem, type DriveItem } from "@/features/drive/lib/item"
 import { DirectoryGlyph, ItemIcon } from "@/features/drive/components/itemIcon"
+import { isStreamedCategory, type StreamedCategory } from "@/features/drive/lib/preview.logic"
 import { allowedMediaContentType } from "@/features/preview/lib/mediaType"
 import { isMediaStreamAvailable } from "@/features/preview/lib/previewStream"
 import { usePreviewStreamUrl } from "@/features/preview/hooks/usePreviewStreamUrl"
@@ -13,13 +14,10 @@ import { mediaControlsList } from "@/features/preview/lib/accessMode"
 import { PreviewOverlay } from "@/features/preview/components/previewOverlay"
 import { LoadingState } from "@/components/loadingState"
 import { noop } from "@/lib/utils"
+import { formatShortDate } from "@/lib/formatDate"
 
 const CARD_CLASS =
 	"mt-1 flex max-w-sm min-w-0 items-center gap-2.5 rounded-xl border border-border bg-muted/40 px-3 py-2 text-sm transition-colors hover:bg-muted/70"
-
-function formatCardDate(timestamp: bigint): string {
-	return new Date(Number(timestamp)).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })
-}
 
 // Icon + name + subtitle, either a plain new-tab anchor (`href`) or a click-to-preview button
 // (`onClick`) — the one shared shell every FilenLinkCard branch below renders through, so the visual
@@ -142,7 +140,7 @@ function FilenStreamedInlineMedia({
 }: {
 	item: DriveItem
 	name: string
-	category: "image" | "video" | "audio"
+	category: StreamedCategory
 	contentType: string
 	downloadable: boolean
 	fallback: ReactNode
@@ -242,7 +240,7 @@ function FilenInlineMedia({
 }: {
 	item: DriveItem
 	name: string
-	category: "image" | "video" | "audio"
+	category: StreamedCategory
 	downloadable: boolean
 	fallback: ReactNode
 }) {
@@ -321,7 +319,7 @@ export function FilenLinkCard({
 					/>
 				}
 				name={name}
-				subtitle={formatCardDate(data.timestamp)}
+				subtitle={formatShortDate(data.timestamp)}
 				ariaLabel={t("chatEmbedOpenNewTab", { name })}
 				href={url}
 			/>
@@ -339,7 +337,7 @@ export function FilenLinkCard({
 		/>
 	)
 
-	if (data.previewCategory === "image" || data.previewCategory === "video" || data.previewCategory === "audio") {
+	if (isStreamedCategory(data.previewCategory)) {
 		return (
 			<FilenInlineMedia
 				item={item}

@@ -68,10 +68,10 @@ import {
 	acceptRequest,
 	cancelRequest,
 	removeContact,
-	runContactsBulk,
 	sendContactRequest as sendContactRequestAction,
 	unblockContact as unblockContactAction
 } from "@/features/contacts/lib/actions"
+import { runBulkOutcomes } from "@/lib/actions/bulk"
 import { handleContactEvent } from "@/features/contacts/lib/socketHandlers"
 import { ContactPickerDialog } from "@/features/drive/components/contactPickerDialog"
 import { socketAuthenticated, socketDropped } from "@/lib/sdk/socketSession"
@@ -384,7 +384,7 @@ describe("contacts request counts", () => {
 		await drain()
 		vi.clearAllMocks()
 
-		const outcome = await runContactsBulk(serverIncoming, request => acceptRequest(request.uuid))
+		const outcome = await runBulkOutcomes(serverIncoming, request => acceptRequest(request.uuid))
 
 		expect(outcome.failed).toEqual([])
 		await waitFor(() => {
@@ -444,7 +444,7 @@ describe("contacts request counts", () => {
 		await drain()
 		vi.clearAllMocks()
 
-		const outcome = await runContactsBulk([...serverBlocked], blocked => unblockContactAction(blocked.uuid))
+		const outcome = await runBulkOutcomes([...serverBlocked], blocked => unblockContactAction(blocked.uuid))
 		await drain()
 
 		expect(outcome.failed).toEqual([])

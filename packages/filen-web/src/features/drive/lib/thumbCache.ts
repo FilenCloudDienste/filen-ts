@@ -1,30 +1,20 @@
 import { THUMB_DIR, THUMB_DIR_ROOT, THUMB_EXT } from "@/features/drive/lib/thumbnails.logic"
+import { isNotFoundError, opfsDirectory } from "@/lib/storage/opfs"
 
 // Main-thread read side of the OPFS thumbnail store — async only (no createSyncAccessHandle, which
 // is dedicated-worker-only by spec; see workers/thumbStore.ts for the worker-side write path over
-// the same tree). Deliberately its own small directory-walk rather than importing thumbStore.ts:
-// that module is worker-only in intent, and this one runs on the main thread — duplicating four
-// lines keeps the two from becoming accidentally coupled.
-async function thumbDirHandle(): Promise<FileSystemDirectoryHandle> {
-	let dir = await navigator.storage.getDirectory()
-
-	for (const segment of THUMB_DIR) {
-		dir = await dir.getDirectoryHandle(segment, { create: true })
-	}
-
-	return dir
-}
+// the same tree).
 
 // A cache miss (never written, or evicted) resolves null rather than rejecting — the service's own
 // generate-on-miss path treats this as the normal "not cached yet" signal, not an error.
 export async function readThumbnailBlob(uuid: string): Promise<Blob | null> {
 	try {
-		const dir = await thumbDirHandle()
+		const dir = await opfsDirectory(THUMB_DIR)
 		const fileHandle = await dir.getFileHandle(`${uuid}${THUMB_EXT}`)
 
 		return await fileHandle.getFile()
 	} catch (e) {
-		if (e instanceof DOMException && e.name === "NotFoundError") {
+		if (isNotFoundError(e)) {
 			return null
 		}
 
@@ -37,19 +27,15 @@ export async function readThumbnailBlob(uuid: string): Promise<Blob | null> {
 // that should allow a fresh regenerate. A missing entry is a clean no-op.
 export async function deleteThumbnail(uuid: string): Promise<void> {
 	try {
-		const dir = await thumbDirHandle()
+		const dir = await opfsDirectory(THUMB_DIR)
 		await dir.removeEntry(`${uuid}${THUMB_EXT}`)
 	} catch (e) {
-		if (e instanceof DOMException && e.name === "NotFoundError") {
+		if (isNotFoundError(e)) {
 			return
 		}
 
 		throw e
 	}
-}
-
-function isNotFound(e: unknown): boolean {
-	return e instanceof DOMException && e.name === "NotFoundError"
 }
 
 // Logout: the whole thumbnail tree, every cache generation included — decrypted derivatives of the
@@ -78,7 +64,7 @@ export async function wipeThumbnailStore(root: Promise<FileSystemDirectoryHandle
 
 			await dir.removeEntry(leaf, { recursive: true })
 		} catch (e) {
-			if (!isNotFound(e)) {
+			if (!isNotFoundError(e)) {
 				failure = { reason: e }
 			}
 		}

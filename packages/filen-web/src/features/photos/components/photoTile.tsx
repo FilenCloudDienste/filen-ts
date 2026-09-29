@@ -1,17 +1,17 @@
-import { useState, type MouseEvent } from "react"
+import { type MouseEvent } from "react"
 import { useTranslation } from "react-i18next"
-import { CheckIcon, MoreHorizontalIcon, PlayIcon, StarIcon } from "lucide-react"
+import { CheckIcon, PlayIcon, StarIcon } from "lucide-react"
 import { type ItemActionDialogKind } from "@/features/drive/components/itemMenu.logic"
 import { showVideoBadge } from "@/features/drive/components/driveTile.logic"
-import { useThumbnail } from "@/features/drive/hooks/useThumbnail"
-import { invalidateThumbnail } from "@/features/drive/lib/thumbnails"
-import { ItemIcon } from "@/features/drive/components/itemIcon"
-import { PhotosContextMenuContent, PhotosDropdownMenuContent } from "@/features/photos/components/itemMenu"
+import { ItemThumbnail } from "@/features/drive/components/itemThumbnail"
+import { DriveContextMenuContent, DriveDropdownMenuContent } from "@/features/drive/components/itemMenu"
+import { patchPhoto } from "@/features/photos/lib/actions"
+import { PHOTOS_HIDDEN_ACTION_IDS } from "@/features/photos/lib/itemActions"
 import { type PhotoItem } from "@/features/photos/lib/captureSort"
 import { driveItemName } from "@filen/shared"
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
-import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { Button } from "@/components/ui/button"
+import { DropdownMenu } from "@/components/ui/dropdown-menu"
+import { RowMenuTrigger } from "@/components/rowMenuTrigger"
 
 export interface PhotoTileProps {
 	rootUuid: string
@@ -42,8 +42,6 @@ export interface PhotoTileProps {
 export function PhotoTile({ rootUuid, item, index, total, selected, active, registerRef, onTileClick, onItemAction }: PhotoTileProps) {
 	const { t } = useTranslation(["drive", "photos"])
 	const name = driveItemName(item)
-	const thumbUrl = useThumbnail(item)
-	const [thumbFailed, setThumbFailed] = useState(false)
 
 	return (
 		<ContextMenu>
@@ -66,27 +64,12 @@ export function PhotoTile({ rootUuid, item, index, total, selected, active, regi
 							onTileClick(index, event)
 						}}
 					>
-						<div className="relative aspect-square w-full overflow-hidden bg-muted/40">
-							{thumbUrl !== null && !thumbFailed ? (
-								<img
-									src={thumbUrl}
-									alt=""
-									draggable={false}
-									decoding="async"
-									className="size-full object-cover"
-									onError={() => {
-										invalidateThumbnail(item.data.uuid)
-										setThumbFailed(true)
-									}}
-								/>
-							) : (
-								<div className="flex size-full items-center justify-center">
-									<ItemIcon
-										item={item}
-										className="size-14"
-									/>
-								</div>
-							)}
+						<div className="relative flex aspect-square w-full items-center justify-center overflow-hidden bg-muted/40">
+							<ItemThumbnail
+								item={item}
+								imgClassName="size-full object-cover"
+								iconClassName="size-14"
+							/>
 							{/* Above the image, so the inset ring stays inside the tile instead of over its neighbors. */}
 							{selected ? <div className="absolute inset-0 bg-background/30 ring-2 ring-ring ring-inset" /> : null}
 							{item.data.favorited ? (
@@ -117,37 +100,37 @@ export function PhotoTile({ rootUuid, item, index, total, selected, active, regi
 								</div>
 							) : null}
 							<DropdownMenu>
-								<DropdownMenuTrigger
-									render={
-										<Button
-											variant="ghost"
-											size="icon-xs"
-											tabIndex={active ? 0 : -1}
-											aria-label={t("driveItemMenuTrigger")}
-											// Coarse-pointer fallback — see DriveRow's identical trigger.
-											className="absolute top-1 right-1 shrink-0 opacity-0 group-hover/tile:opacity-100 focus-visible:opacity-100 aria-expanded:opacity-100 pointer-coarse:size-8 pointer-coarse:opacity-100 pointer-coarse:[&_svg:not([class*='size-'])]:size-4"
-											onClick={event => {
-												event.stopPropagation()
-											}}
-										>
-											<MoreHorizontalIcon />
-										</Button>
-									}
+								<RowMenuTrigger
+									label={t("driveItemMenuTrigger")}
+									reveal="tile"
+									tabIndex={active ? 0 : -1}
 								/>
-								<PhotosDropdownMenuContent
-									rootUuid={rootUuid}
+								<DriveDropdownMenuContent
 									item={item}
-									onItemAction={onItemAction}
+									variant="drive"
+									hiddenActionIds={PHOTOS_HIDDEN_ACTION_IDS}
+									onItemAction={kind => {
+										onItemAction(kind, item)
+									}}
+									onFavoriteToggled={updated => {
+										patchPhoto(rootUuid, updated)
+									}}
 								/>
 							</DropdownMenu>
 						</div>
 					</div>
 				}
 			/>
-			<PhotosContextMenuContent
-				rootUuid={rootUuid}
+			<DriveContextMenuContent
 				item={item}
-				onItemAction={onItemAction}
+				variant="drive"
+				hiddenActionIds={PHOTOS_HIDDEN_ACTION_IDS}
+				onItemAction={kind => {
+					onItemAction(kind, item)
+				}}
+				onFavoriteToggled={updated => {
+					patchPhoto(rootUuid, updated)
+				}}
 			/>
 		</ContextMenu>
 	)

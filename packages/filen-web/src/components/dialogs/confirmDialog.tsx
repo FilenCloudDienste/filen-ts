@@ -1,4 +1,3 @@
-import { type AlertDialogRoot } from "@base-ui/react/alert-dialog"
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -10,7 +9,7 @@ import {
 	AlertDialogTitle
 } from "@/components/ui/alert-dialog"
 import { Spinner } from "@/components/ui/spinner"
-import { shouldForwardOpenChange } from "@/components/dialogs/dismissal.logic"
+import { pendingGuardedOpenChange } from "@/components/dialogs/dismissal.logic"
 
 interface ConfirmDialogProps {
 	open: boolean
@@ -54,15 +53,7 @@ function ConfirmDialog({
 	// Not a destructuring default, which the React Compiler cannot lower.
 	const destructive = destructiveProp ?? false
 
-	function handleOpenChange(next: boolean, details: AlertDialogRoot.ChangeEventDetails): void {
-		if (!shouldForwardOpenChange(next, pending)) {
-			// Also stops Base UI's own store from flipping (it closes itself after this callback
-			// unless the event is canceled) — see dismissal.logic.ts.
-			details.cancel()
-			return
-		}
-		onOpenChange(next)
-	}
+	const handleOpenChange = pendingGuardedOpenChange(pending, onOpenChange)
 
 	return (
 		<AlertDialog

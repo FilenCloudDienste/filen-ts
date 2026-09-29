@@ -79,22 +79,13 @@ function peerMessage(label: string, chatLabel: string, sentTimestamp: bigint): C
 	}
 }
 
-function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
-	let resolve!: (value: T) => void
-	const promise = new Promise<T>(r => {
-		resolve = r
-	})
-
-	return { promise, resolve }
-}
-
 // Server pages held open per chat until the test answers them, so the resync's list write renders first,
 // as it does over a real network.
 function holdMessageReads(): (chatLabel: string, page: ChatMessage[]) => void {
 	const held = new Map<string, (page: ChatMessage[]) => void>()
 
 	listMessagesBefore.mockImplementation(chat => {
-		const page = deferred<ChatMessage[]>()
+		const page = Promise.withResolvers<ChatMessage[]>()
 
 		held.set(chat.uuid, page.resolve)
 
@@ -560,7 +551,7 @@ describe("signing out", () => {
 
 	it("renders nothing for a chat deleted just before the wipe", async () => {
 		const unmount = await renderRail()
-		const purged = deferred<undefined>()
+		const purged = Promise.withResolvers<undefined>()
 
 		// The removal waits on the chat's queued sends and draft being purged first.
 		purgeChatInflightState.mockReturnValueOnce(purged.promise)

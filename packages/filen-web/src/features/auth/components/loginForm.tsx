@@ -5,10 +5,8 @@ import { toast } from "sonner"
 import { isValidEmail } from "@filen/shared"
 import { sdkApi } from "@/lib/sdk/client"
 import { persistSession, broadcastAuth } from "@/lib/sdk/session"
-import { asErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { runLoginAttempt } from "@/features/auth/lib/loginAttempt"
-import { useCapsLock } from "@/features/auth/lib/useCapsLock"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { useSeededOnOpen } from "@/lib/useSeededOnOpen"
 import { Button } from "@/components/ui/button"
@@ -17,7 +15,7 @@ import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { TwoFactorDialog } from "@/features/auth/components/twoFactorDialog"
-import { CapsLockWarning } from "@/features/auth/components/capsLockWarning"
+import { PasswordInput } from "@/features/auth/components/passwordInput"
 
 // Forgot-password dialog: small enough to live as a private sibling of the login form rather than
 // its own file. Re-seeds its email field from the login form's current value on every open (the
@@ -46,7 +44,7 @@ function ForgotPasswordDialog({
 			toast.success(t("passwordResetEmailSent"))
 		} catch (err) {
 			// A network/server failure is not "email sent" — LABEL-FIRST, dialog stays open to retry.
-			toast.error(errorLabel(asErrorDTO(err)))
+			toast.error(errorLabel(err))
 		} finally {
 			setPending(false)
 		}
@@ -106,7 +104,6 @@ function LoginForm() {
 	const [twoFactorOpen, setTwoFactorOpen] = useState(false)
 	const [twoFactorError, setTwoFactorError] = useState<string>()
 	const [forgotOpen, setForgotOpen] = useState(false)
-	const passwordCaps = useCapsLock()
 	// Cancellation counter for in-flight attempts: bumped on every two-factor dialog dismissal, so an
 	// attempt that started under an older value is stale when it settles and its result is discarded
 	// (no dialog reopen, no toast, no navigation — a late success is logged out by the helper).
@@ -164,7 +161,7 @@ function LoginForm() {
 			}
 		} catch (e) {
 			// Only reachable from past the helper (it never throws) — e.g. a navigation failure.
-			toast.error(errorLabel(asErrorDTO(e)))
+			toast.error(errorLabel(e))
 		} finally {
 			// Unconditional reset is safe: every submit affordance is disabled while pending, so
 			// attempts can never overlap — this only ever clears THIS attempt's flag.
@@ -200,20 +197,15 @@ function LoginForm() {
 					</Field>
 					<Field>
 						<FieldLabel htmlFor="password">{t("loginPassword")}</FieldLabel>
-						<Input
+						<PasswordInput
 							id="password"
-							type="password"
 							autoComplete="current-password"
 							value={password}
 							disabled={pending}
 							onChange={e => {
 								setPassword(e.target.value)
 							}}
-							onKeyDown={passwordCaps.onKeyDown}
-							onKeyUp={passwordCaps.onKeyUp}
-							onBlur={passwordCaps.onBlur}
 						/>
-						<CapsLockWarning active={passwordCaps.capsLockOn} />
 					</Field>
 				</FieldGroup>
 				<Button

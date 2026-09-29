@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next"
 import { useStartScreenQuery } from "@/features/shell/queries/startScreen"
-import { setStartScreen, START_SCREENS, type StartScreen } from "@/features/shell/lib/startScreen"
+import { DEFAULT_START_SCREEN, setStartScreen, START_SCREENS, type StartScreen } from "@/features/shell/lib/startScreen"
 import type { SettingsKey } from "@/lib/i18n"
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { SettingsRow } from "@/features/settings/components/settingsLayout"
@@ -32,7 +32,7 @@ function StartScreenRow() {
 		>
 			<Select
 				items={START_SCREENS.map(screen => ({ value: screen, label: t(START_SCREEN_LABEL_KEYS[screen]) }))}
-				value={query.data ?? "drive"}
+				value={query.data ?? DEFAULT_START_SCREEN}
 				disabled={query.data === undefined}
 				onValueChange={value => {
 					if (value !== null) {

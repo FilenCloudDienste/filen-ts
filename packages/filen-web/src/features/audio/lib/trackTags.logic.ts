@@ -41,6 +41,6 @@ export function planTrackTagEvictions(records: [string, TrackTagRecord][], max: 
 		.map(([uuid]) => uuid)
 }
 
-export function trackDisplayTitle(record: TrackTagRecord | undefined, fileName: string): string {
-	return record?.title ?? fileName
+export function trackDisplayTitle(tags: { title: string | null } | null | undefined, fileName: string): string {
+	return tags?.title ?? fileName
 }

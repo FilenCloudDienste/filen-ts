@@ -1,5 +1,6 @@
 import { create } from "zustand"
-import { kvDelete, kvEntriesJson, kvGetJson, kvSetJson } from "@/lib/storage/adapter"
+import { kvDelete, kvEntriesJson, kvGetJson } from "@/lib/storage/adapter"
+import { kvSetJsonQuiet } from "@/lib/storage/kvBestEffort"
 import { log } from "@/lib/log"
 import {
 	planTrackTagEvictions,
@@ -29,9 +30,7 @@ let epoch = 0
 const elementDurations = new Map<string, number>()
 
 function persist(uuid: string, record: TrackTagRecord): void {
-	void kvSetJson(trackTagsKey(uuid), record).catch((error: unknown) => {
-		log.warn("audio", "failed to persist track tags", error)
-	})
+	void kvSetJsonQuiet(trackTagsKey(uuid), record, "audio", "track tags")
 }
 
 export function hydrateTrackTags(): Promise<void> {

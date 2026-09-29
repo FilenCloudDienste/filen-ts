@@ -15,7 +15,11 @@ const { downloadLinkedDirToZipAnon, downloadLinkedFileBytesAnon, createObjectURL
 }))
 
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: { downloadLinkedDirToZipAnon, downloadLinkedFileBytesAnon } }))
-vi.mock("@/features/drive/lib/saveDownload", () => ({ isFsaAvailable: () => false, isPickerCancelled: () => false }))
+vi.mock("@/features/drive/lib/saveDownload", () => ({
+	isFsaAvailable: () => false,
+	isPickerCancelled: () => false,
+	pickFsaTarget: vi.fn()
+}))
 // A 4-byte cap, so a 6-byte zip outgrows it.
 vi.mock("@/features/publicLinks/lib/download.logic", async importOriginal => {
 	const actual = await importOriginal<typeof import("@/features/publicLinks/lib/download.logic")>()

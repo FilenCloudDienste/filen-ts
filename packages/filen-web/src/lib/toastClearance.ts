@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react"
+import { createListenerSet } from "@/lib/listenerSet"
 import { computeToastClearance } from "@/lib/toastClearance.logic"
 
 // Single source of truth for how far toasts must lift: surfaces that can sit in the bottom-right toast
@@ -6,7 +7,7 @@ import { computeToastClearance } from "@/lib/toastClearance.logic"
 // element while mounted, and the Toaster reads the measured clearance. Nothing registered — public-link
 // routes, an idle shell — reads 0, i.e. sonner's normal flush offset.
 const obstructions = new Map<Element, ResizeObserver>()
-const listeners = new Set<() => void>()
+const listeners = createListenerSet("toastClearance")
 let clearance = 0
 let frame: number | null = null
 
@@ -24,10 +25,7 @@ function measure(): void {
 	}
 
 	clearance = next
-
-	for (const listener of listeners) {
-		listener()
-	}
+	listeners.emit()
 }
 
 // Deferred to the next frame for changes that move an obstruction without resizing it — another bar
@@ -78,19 +76,11 @@ export function toastObstructionRef(element: HTMLElement | null): (() => void) |
 	}
 }
 
-function subscribe(listener: () => void): () => void {
-	listeners.add(listener)
-
-	return () => {
-		listeners.delete(listener)
-	}
-}
-
 function getClearance(): number {
 	return clearance
 }
 
 // Pixels between the viewport's bottom edge and the top of the highest obstruction in the toast column.
 export function useToastClearance(): number {
-	return useSyncExternalStore(subscribe, getClearance, () => 0)
+	return useSyncExternalStore(listeners.subscribe, getClearance, () => 0)
 }

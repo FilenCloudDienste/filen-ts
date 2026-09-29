@@ -280,6 +280,12 @@ export function asDirectoryOrFile(item: DriveItem): BaseDirectoryItem | BaseFile
 	}
 }
 
+// Directories carry no mime.
+export function driveItemMime(item: DriveItem): string | undefined {
+	const base = asDirectoryOrFile(item)
+	return base.type === "file" ? base.data.decryptedMeta?.mime : undefined
+}
+
 // Rebuilds the SDK's AnyDirWithContext from a directory-arm DriveItem — the shape every
 // category-dispatched dir op (zip download, getDirSize, …) needs so an UNTAGGED union match lands on
 // the right arm. A plain owned directory needs no wrapper (data is already an AnyNormalDir). A

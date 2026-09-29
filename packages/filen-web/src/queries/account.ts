@@ -2,7 +2,7 @@ import { useQuery, type Query, type UseQueryResult } from "@tanstack/react-query
 import type { UserInfo } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
 import { queryClient } from "@/queries/client"
-import { cachedQuery, patchQuery } from "@/queries/patch"
+import { cachedQuery, cancelInFlightIfCached, patchQuery } from "@/queries/patch"
 
 // Query key taxonomy per client.ts ([domain, entity, params?]): this resource has exactly one
 // entity per session (there is no per-account param to key on — the worker only ever holds a
@@ -62,12 +62,10 @@ function accountQuery(): Query<UserInfo> | undefined {
 	return cachedQuery<UserInfo>(ACCOUNT_QUERY_KEY)
 }
 
-// A read in flight may have been answered before this tab's write and would land over it. Not an
-// initial fetch: cancelling that would strand the query on its loading state with nothing to show.
-function cancelInFlightIfCached(query: Query<UserInfo>): void {
-	if (query.state.data !== undefined) {
-		void query.cancel({ revert: true })
-	}
+// For code outside React. The account is warm by the time any surface that calls this can render, so a
+// miss degrades to undefined: owner gates treat it as "not the owner", the SDK being the final authority.
+export function accountQueryGet(): UserInfo | undefined {
+	return accountQuery()?.state.data
 }
 
 // For a write whose server-side effect is not known locally (storage used after an upload or a

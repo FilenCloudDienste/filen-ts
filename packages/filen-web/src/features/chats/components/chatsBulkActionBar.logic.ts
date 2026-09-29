@@ -1,6 +1,6 @@
-import { type LucideIcon } from "lucide-react"
 import { CHAT_ACTION_DEFS } from "@/features/chats/lib/actionDefs"
 import { type ChatSelectionFlags } from "@/features/chats/lib/selectionFlags"
+import { type ActionDescriptor } from "@/lib/actionDescriptor"
 import { type ChatsKey } from "@/lib/i18n"
 
 // Dialog kinds the chats bulk-action bar can ask useChatDialogHost to open — disjoint from
@@ -8,19 +8,7 @@ import { type ChatsKey } from "@/lib/i18n"
 // notes' NoteBulkDialogActionKind split.
 export type ChatBulkDialogActionKind = "deleteSelected" | "leaveSelected"
 
-interface ChatBulkActionDescriptorShared {
-	id: "markRead" | "mute" | "delete" | "leave"
-	labelKey: ChatsKey
-	icon: LucideIcon
-	destructive?: boolean
-}
-
-// "direct" resolves immediately (markRead/mute-toggle); "dialog" asks the host to open the given
-// bulk-confirm kind — mirrors chatMenu.logic.ts's own ChatActionDescriptor union and notes'
-// NoteBulkActionDescriptor, sized down (chats have no submenu-driven bulk action).
-export type ChatBulkActionDescriptor =
-	| (ChatBulkActionDescriptorShared & { run: "direct" })
-	| (ChatBulkActionDescriptorShared & { run: "dialog"; dialogKind: ChatBulkDialogActionKind })
+export type ChatBulkActionDescriptor = ActionDescriptor<ChatsKey, "markRead" | "mute" | "delete" | "leave", ChatBulkDialogActionKind>
 
 // Pure gating builder for the chats bulk-action bar — mirrors notesBulkActionBar.logic.ts's
 // noteBulkActions (flag-gated descriptor list, testable without rendering anything). Reuses the exact

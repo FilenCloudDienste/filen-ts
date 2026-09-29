@@ -1,28 +1,17 @@
 import { type ParentLookup } from "@/features/drive/components/moveTargetDialog.logic"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
+import { createListenerSet } from "@/lib/listenerSet"
 
 // A directory that left its place: moved (here, from the sidebar tree, or on another device) or trashed.
 // The drive route is a uuid chain, so one of its directories moving or going to the trash leaves the
 // route naming a place that no longer exists; the listing on screen re-routes off these.
 export type BranchChange = { type: "moved"; uuid: string; parentUuid: string | null } | { type: "trashed"; uuid: string }
 
-type Listener = (change: BranchChange) => void
+const listeners = createListenerSet<BranchChange>("drive.branch")
 
-const listeners = new Set<Listener>()
+export const subscribeBranchChanges = listeners.subscribe
 
-export function subscribeBranchChanges(listener: Listener): () => void {
-	listeners.add(listener)
-
-	return () => {
-		listeners.delete(listener)
-	}
-}
-
-export function emitBranchChange(change: BranchChange): void {
-	for (const listener of listeners) {
-		listener(change)
-	}
-}
+export const emitBranchChange = listeners.emit
 
 // Deep enough for any real tree; a longer chain is treated as unresolved.
 const MAX_CHAIN_DEPTH = 64

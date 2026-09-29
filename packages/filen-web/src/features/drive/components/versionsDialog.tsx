@@ -3,20 +3,17 @@ import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { formatBytes } from "@filen/shared"
 import { CheckIcon, HistoryIcon, RotateCcwIcon, Trash2Icon } from "lucide-react"
-import type { DialogRoot } from "@base-ui/react/dialog"
 import type { FileVersion } from "@filen/sdk-rs"
-import { i18n } from "@/lib/i18n"
 import { type FileItem, restoreVersion, deleteVersion, deleteVersions } from "@/features/drive/lib/actions"
-import { type BulkOutcome } from "@/features/drive/lib/bulk"
 import { formatVersionTimestamp } from "@/features/drive/lib/format"
 import { fileVersionsQueryKey, useFileVersionsQuery } from "@/features/drive/queries/drive"
 import { queryClient } from "@/queries/client"
 import { errorLabel } from "@/lib/i18n/errorLabel"
-import { asErrorDTO } from "@/lib/sdk/errors"
+import { toastBulkSummary } from "@/lib/actions/bulkToast"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { subscribePreviewReconcile } from "@/features/preview/lib/previewReconcile"
 import { isRevisionOf } from "@/features/preview/lib/remoteChange.logic"
-import { shouldForwardOpenChange } from "@/components/dialogs/dismissal.logic"
+import { pendingGuardedOpenChange } from "@/components/dialogs/dismissal.logic"
 import { isCurrentVersion, nonCurrentVersions } from "@/features/drive/components/versionsDialog.logic"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
@@ -25,7 +22,7 @@ import { Badge } from "@/components/ui/badge"
 import { Spinner } from "@/components/ui/spinner"
 import { LoadingState } from "@/components/loadingState"
 import { cn } from "@filen/shared"
-import { Empty, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
+import { EmptyMessage } from "@/components/emptyMessage"
 
 export interface VersionsDialogProps {
 	file: FileItem
@@ -36,24 +33,6 @@ export interface VersionsDialogProps {
 // actions (delete-selected, delete-all) all share this one nested ConfirmDialog (below) rather than
 // four near-duplicate instances, so at most one in-flight confirmation can ever exist at a time.
 type PendingConfirm = { kind: "restore" | "delete"; version: FileVersion } | { kind: "bulkDelete"; versions: FileVersion[] }
-
-// Same partial-success counting bulkToast.ts does for BulkOutcome<DriveItem> — kept local rather than
-// widening that helper's DriveItem-specific typing (mirrors upload.ts's own precedent: a non-DriveItem
-// bulk outcome counts itself instead of forcing a mismatched reuse).
-function toastVersionsBulkOutcome(outcome: BulkOutcome<FileVersion>): void {
-	if (outcome.succeeded.length === 0 && outcome.failed.length === 0) {
-		return
-	}
-
-	if (outcome.failed.length === 0) {
-		toast.success(i18n.t("drive:driveVersionsBulkDeleteComplete", { count: outcome.succeeded.length }))
-		return
-	}
-
-	toast.error(
-		i18n.t("drive:driveVersionsBulkDeleteCompleteWithFailures", { count: outcome.succeeded.length, failed: outcome.failed.length })
-	)
-}
 
 // File-version history panel — mounted-when-active by the listing's dialog host. Restoring rotates
 // the file's own uuid (actions.ts's restoreVersion already patches the drive-listing cache for that),
@@ -105,16 +84,11 @@ export function VersionsDialog({ file, onClose }: VersionsDialogProps) {
 	const candidates = nonCurrentVersions(versions, file)
 	const selectedVersions = candidates.filter(version => selected.has(version.uuid))
 
-	function handleOpenChange(next: boolean, details: DialogRoot.ChangeEventDetails): void {
-		if (!shouldForwardOpenChange(next, pending)) {
-			details.cancel()
-			return
-		}
-
+	const handleOpenChange = pendingGuardedOpenChange(pending, next => {
 		if (!next) {
 			onClose()
 		}
-	}
+	})
 
 	function exitSelectMode(): void {
 		setSelectMode(false)
@@ -177,7 +151,10 @@ export function VersionsDialog({ file, onClose }: VersionsDialogProps) {
 		const outcome = await deleteVersions(file, targets)
 		setPending(false)
 		setConfirming(null)
-		toastVersionsBulkOutcome(outcome)
+		toastBulkSummary(outcome, {
+			complete: "drive:driveVersionsBulkDeleteComplete",
+			withFailures: "drive:driveVersionsBulkDeleteCompleteWithFailures"
+		})
 
 		// Widened to plain `Set<string>` (not the branded UuidStr the FileVersion arm carries) — `selected`
 		// below is a plain string set (no dependency on the SDK's own uuid brand), so both `.has` calls
@@ -245,16 +222,13 @@ export function VersionsDialog({ file, onClose }: VersionsDialogProps) {
 						className="min-h-20"
 					/>
 				) : versionsQuery.status === "error" ? (
-					<p className="text-sm text-destructive">{errorLabel(asErrorDTO(versionsQuery.error))}</p>
+					<p className="text-sm text-destructive">{errorLabel(versionsQuery.error)}</p>
 				) : candidates.length === 0 ? (
-					<Empty className="p-6">
-						<EmptyHeader>
-							<EmptyMedia>
-								<HistoryIcon />
-							</EmptyMedia>
-							<EmptyTitle>{t("driveVersionsEmpty")}</EmptyTitle>
-						</EmptyHeader>
-					</Empty>
+					<EmptyMessage
+						className="p-6"
+						icon={HistoryIcon}
+						title={t("driveVersionsEmpty")}
+					/>
 				) : (
 					<ul className="flex max-h-80 flex-col gap-0.5 overflow-y-auto">
 						{versions.map(version => {
@@ -335,7 +309,7 @@ export function VersionsDialog({ file, onClose }: VersionsDialogProps) {
 						{selectMode ? (
 							<>
 								<span className="mr-auto self-center text-sm text-muted-foreground">
-									{t("driveVersionsSelectedCount", { count: selectedVersions.length })}
+									{t("common:selectedCount", { count: selectedVersions.length })}
 								</span>
 								<Button
 									variant="destructive"

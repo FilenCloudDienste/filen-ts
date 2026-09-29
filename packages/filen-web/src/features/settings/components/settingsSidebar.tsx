@@ -2,7 +2,8 @@ import type { ComponentType } from "react"
 import { useTranslation } from "react-i18next"
 import { Link } from "@tanstack/react-router"
 import { UserIcon, ShieldIcon, SunMoonIcon, KeyboardIcon, HistoryIcon, CreditCardIcon, SlidersHorizontalIcon } from "lucide-react"
-import { cn } from "@filen/shared"
+import { SidebarPanel } from "@/features/shell/components/sidebarPanel"
+import { SIDEBAR_NAV_ITEM_CLASS } from "@/features/shell/lib/sidebarNavItem"
 
 type IconType = ComponentType<{ className?: string }>
 
@@ -42,15 +43,6 @@ const SETTINGS_ITEMS: SettingsSidebarItem[] = [
 	{ id: "advanced", labelKey: "settingsSectionAdvanced", icon: SlidersHorizontalIcon, to: "/settings/advanced" }
 ]
 
-// Same row styling idiom as DriveSidebar/NotesSidebar/ChatsSidebar's own nav rows — each sidebar
-// defines its own copy rather than sharing one (none of the three existing ones export theirs
-// either), so this follows the established precedent rather than introducing a new shared module.
-const NAV_ITEM_CLASS = cn(
-	"group flex h-8 w-full items-center gap-2.5 rounded-xl px-2.5 text-sm focus-ring transition-colors outline-none app-region-no-drag [&_svg]:size-4 [&_svg]:shrink-0",
-	"text-sidebar-foreground/80 hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground",
-	"data-[status=active]:bg-sidebar-accent data-[status=active]:font-medium data-[status=active]:text-sidebar-accent-foreground"
-)
-
 // The shell's settings contextual sidebar: a flat list of section nav links, same w-52
 // rounded-xl borderless panel geometry as the other three module sidebars. TanStack stamps
 // `data-status="active"` on the matching Link automatically — no manual pathname comparison needed
@@ -59,12 +51,7 @@ export function SettingsSidebar() {
 	const { t } = useTranslation(["settings", "common"])
 
 	return (
-		<aside
-			// Drag region (Electron plumbing): inert in a plain browser, opted back out by every
-			// interactive descendant via app-region-no-drag — same convention as the other sidebars.
-			// Visibility is the shell's call, never this panel's — see appShell.tsx.
-			className="flex w-52 max-w-full shrink-0 flex-col rounded-xl bg-sidebar app-region-drag"
-		>
+		<SidebarPanel>
 			<div className="flex flex-1 flex-col overflow-y-auto p-3">
 				<h2 className="truncate px-2.5 pt-1 pb-2.5 text-[15px] font-semibold">{t("common:settings")}</h2>
 				<div className="flex flex-col gap-0.5">
@@ -72,7 +59,7 @@ export function SettingsSidebar() {
 						<Link
 							key={item.id}
 							to={item.to}
-							className={NAV_ITEM_CLASS}
+							className={SIDEBAR_NAV_ITEM_CLASS}
 						>
 							<item.icon className="text-muted-foreground group-data-[status=active]:text-primary" />
 							<span className="truncate">{t(item.labelKey)}</span>
@@ -80,6 +67,6 @@ export function SettingsSidebar() {
 					))}
 				</div>
 			</div>
-		</aside>
+		</SidebarPanel>
 	)
 }

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from "react"
-import { clampListboxIndex, listboxKeyTarget, resolveCursorIndex } from "@/features/drive/lib/listbox"
+import { clampListboxIndex, isToggleModifier, listboxKeyTarget, resolveCursorIndex } from "@/features/drive/lib/listbox"
+import { isActivationKey } from "@/lib/rowKeys"
 import {
 	EMPTY_CONTACT_SELECTION_STATE,
 	nextContactSelection,
@@ -88,9 +89,7 @@ export function useContactsListSelection({ resetKey }: UseContactsListSelectionP
 			return
 		}
 
-		setState(prev =>
-			nextContactSelection(prev, { section, uuids, index, shift: event.shiftKey, toggle: event.metaKey || event.ctrlKey })
-		)
+		setState(prev => nextContactSelection(prev, { section, uuids, index, shift: event.shiftKey, toggle: isToggleModifier(event) }))
 		moveCursor(section, uuid)
 	}
 
@@ -108,7 +107,7 @@ export function useContactsListSelection({ resetKey }: UseContactsListSelectionP
 
 		const activeIndex = activeIndexFor(section, uuids)
 
-		if (event.key === " " || event.key === "Enter") {
+		if (isActivationKey(event.key)) {
 			event.preventDefault()
 			setState(prev => nextContactSelection(prev, { section, uuids, index: activeIndex, shift: false, toggle: true }))
 

@@ -8,30 +8,6 @@ function testUuid(label: string): UuidStr {
 	return `${label}-0000-0000-0000-000000000000` as UuidStr
 }
 
-// A controllable promise for interleaving two engine calls at a precise await point — vitest has no
-// built-in for this, and the codebase's own DeferFn (@filen/shared) is a cleanup callback, not a
-// resolver, so this is a small test-only primitive. No `!`: the executor runs synchronously, but the
-// assignment is still read through an optional call rather than asserted non-null.
-function deferredPromise<T>(): { promise: Promise<T>; resolve: (value: T) => void; reject: (reason: unknown) => void } {
-	let resolveFn: ((value: T) => void) | undefined
-	let rejectFn: ((reason: unknown) => void) | undefined
-
-	const promise = new Promise<T>((resolve, reject) => {
-		resolveFn = resolve
-		rejectFn = reject
-	})
-
-	return {
-		promise,
-		resolve: value => {
-			resolveFn?.(value)
-		},
-		reject: reason => {
-			rejectFn?.(reason)
-		}
-	}
-}
-
 function snapshot(overrides: Partial<CacheSearchSnapshot> = {}): CacheSearchSnapshot {
 	return { results: [], total: 0n, live: true, ...overrides }
 }
@@ -273,7 +249,7 @@ describe("createSearchEngine — open", () => {
 
 	it("tears a superseded orphan down in the verified window-then-search order, without installing it", async () => {
 		const order: string[] = []
-		const deferredRange = deferredPromise<ReturnType<typeof makeFakeWindow>>()
+		const deferredRange = Promise.withResolvers<ReturnType<typeof makeFakeWindow>>()
 		const windowA = makeFakeWindow(snapshot())
 
 		windowA.free.mockImplementation(() => {
@@ -317,7 +293,7 @@ describe("createSearchEngine — open", () => {
 	})
 
 	it("closes+frees an orphan created before getRange was ever reached (superseded during createSearch)", async () => {
-		const deferredCreate = deferredPromise<ReturnType<typeof fakeSearchResolving>>()
+		const deferredCreate = Promise.withResolvers<ReturnType<typeof fakeSearchResolving>>()
 		const createSearch = vi.fn().mockReturnValueOnce(deferredCreate.promise)
 		const { client } = makeFakeClient(createSearch)
 		const engine = createSearchEngine()
@@ -469,7 +445,7 @@ describe("createSearchEngine — open", () => {
 		const searchA = fakeSearchResolving(makeFakeWindow(snapshot()), listener => {
 			listenerA = listener
 		})
-		const pendingSearchB = deferredPromise<ReturnType<typeof fakeSearchResolving>>()
+		const pendingSearchB = Promise.withResolvers<ReturnType<typeof fakeSearchResolving>>()
 		const createSearch = vi.fn().mockResolvedValueOnce(searchA).mockReturnValueOnce(pendingSearchB.promise)
 		const { client } = makeFakeClient(createSearch)
 		const engine = createSearchEngine()

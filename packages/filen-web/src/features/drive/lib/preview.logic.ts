@@ -1,5 +1,6 @@
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import { clampListboxIndex } from "@/features/drive/lib/listbox"
+import { SPREADSHEET_EXTENSIONS } from "@/features/spreadsheet/lib/fileKind"
 import { CODE_FILE_EXTENSIONS } from "@filen/shared"
 
 // Every previewable file resolves to one of these; "other" is the download-only fallback (no viewer,
@@ -95,7 +96,7 @@ const EXTENSION_CATEGORIES: ReadonlyMap<string, PreviewCategory> = buildExtensio
 	[["mp3", "m4a", "aac", "wav", "ogg", "flac", "opus"], "audio"],
 	[["pdf"], "pdf"],
 	[["docx"], "docx"],
-	[["csv", "tsv", "xlsx", "xlsm", "xls"], "spreadsheet"],
+	[SPREADSHEET_EXTENSIONS, "spreadsheet"],
 	[["md", "markdown"], "markdown"],
 	[["txt", "log"], "text"],
 	[CODE_FILE_EXTENSIONS, "code"]
@@ -185,7 +186,14 @@ export function previewType(item: DriveItem): PreviewCategory {
 // streamed route at all — canPreview applies the whole-buffer cap to them instead, same as pdf/docx.
 // rawImage is deliberately NOT a member: no browser decodes a RAW container, so handing one to the
 // SW's inline route would serve bytes nothing can render (mediaType.ts refuses it independently).
-const STREAMED_CATEGORIES = new Set<PreviewCategory>(["video", "audio", "image"])
+const STREAMED_CATEGORIES = ["video", "audio", "image"] as const satisfies readonly PreviewCategory[]
+const STREAMED_CATEGORY_SET: ReadonlySet<PreviewCategory> = new Set(STREAMED_CATEGORIES)
+
+export type StreamedCategory = (typeof STREAMED_CATEGORIES)[number]
+
+export function isStreamedCategory(category: PreviewCategory): category is StreamedCategory {
+	return STREAMED_CATEGORY_SET.has(category)
+}
 
 // True for HEIC/HEIF — an "image"-category item that still can't stream, since no browser decodes it
 // inline. imageViewer.tsx checks this before ever considering the SW route, routing these through the
@@ -234,18 +242,24 @@ export function canPreview(item: DriveItem): boolean {
 		return false
 	}
 
-	if (STREAMED_CATEGORIES.has(category) && !needsImageTransform(item)) {
+	if (isStreamedCategory(category) && !needsImageTransform(item)) {
 		return true
 	}
 
-	// rawImage is uncapped for the opposite reason to a streamed category: it is not streamed to the
-	// page at all. The SDK reads whatever ranges it needs inside wasm and hands back only a small
-	// decoded result, so the file never enters JS memory and PREVIEW_MAX_BYTES has nothing to protect.
+	const cap = bufferedSizeCap(category)
+
+	return cap === null || base.data.size <= cap
+}
+
+// The JS-memory ceiling for a category previewed from a whole buffer. null for rawImage: it is not
+// streamed to the page at all — the SDK reads whatever ranges it needs inside wasm and hands back only
+// a small decoded result, so the file never enters JS memory and there is nothing to protect.
+export function bufferedSizeCap(category: PreviewCategory): bigint | null {
 	if (category === "rawImage") {
-		return true
+		return null
 	}
 
-	return base.data.size <= (category === "spreadsheet" ? SPREADSHEET_MAX_BYTES : PREVIEW_MAX_BYTES)
+	return category === "spreadsheet" ? SPREADSHEET_MAX_BYTES : PREVIEW_MAX_BYTES
 }
 
 // Decision for a streamed viewer's POST-resolution failure (network drop mid-seek, an SW-side decrypt
@@ -300,7 +314,7 @@ export function decodeUtf8(bytes: Uint8Array): string {
 // @codemirror/lang-javascript with different jsx/typescript flags; c/cpp/h/hpp share
 // @codemirror/lang-cpp's C-family grammar; cs/kt/dart/gradle route through the legacy clike/groovy
 // stream parsers, the closest available grammars for those).
-const CODE_LANGUAGE_MAP: Readonly<Record<string, string>> = {
+const CODE_LANGUAGE_MAP = {
 	js: "javascript",
 	cjs: "javascript",
 	mjs: "javascript",
@@ -350,10 +364,13 @@ const CODE_LANGUAGE_MAP: Readonly<Record<string, string>> = {
 	php: "php",
 	md: "markdown",
 	markdown: "markdown"
-}
+} as const satisfies Readonly<Record<string, string>>
 
-export function codeMirrorLanguageFor(ext: string): string {
-	return CODE_LANGUAGE_MAP[ext] ?? ""
+export type CodeMirrorTag = (typeof CODE_LANGUAGE_MAP)[keyof typeof CODE_LANGUAGE_MAP]
+
+export function codeMirrorLanguageFor(ext: string): CodeMirrorTag | "" {
+	const byExt: Readonly<Partial<Record<string, CodeMirrorTag>>> = CODE_LANGUAGE_MAP
+	return byExt[ext] ?? ""
 }
 
 // Every extension codeMirrorLanguageFor recognizes — the notes import feature builds its file input's

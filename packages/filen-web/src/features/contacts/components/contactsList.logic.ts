@@ -19,13 +19,6 @@ export function contactsSectionCounts(input: {
 	}
 }
 
-// First character of the display name, uppercased — AvatarFallback content when no avatar image
-// loads. "?" only covers the type-level empty-string case (email is never empty in practice).
-export function contactInitials(displayName: string): string {
-	const trimmed = displayName.trim()
-	return trimmed.length > 0 ? trimmed.charAt(0).toUpperCase() : "?"
-}
-
 // One section per row-kind the contacts page renders — `items` is concretely typed per key so a
 // component switching on `key` gets the right record shape for free, with no extra per-item
 // discriminant needed (unlike mobile's flat, single-list ContactListItemWithHeader, which interleaves
@@ -46,7 +39,8 @@ export interface BuildContactSectionsInput {
 	search: string
 }
 
-function matchesSearch(item: ContactLike, searchNormalized: string): boolean {
+// The one email-or-display-name rule; `searchNormalized` is already trimmed and lowercased.
+export function matchesContactSearch(item: ContactLike, searchNormalized: string): boolean {
 	if (searchNormalized.length === 0) {
 		return true
 	}
@@ -54,18 +48,18 @@ function matchesSearch(item: ContactLike, searchNormalized: string): boolean {
 	return item.email.toLowerCase().includes(searchNormalized) || contactDisplayName(item).toLowerCase().includes(searchNormalized)
 }
 
-// Shared contact-list filter — exported (unlike the section-builder below, which stays this
-// page's own concern) so every picker dialog that lists plain Contact rows (the drive share-recipient
-// picker, the new-chat/add-chat-participant pickers, the add-note-participant picker) can filter on the
-// exact same email-or-display-name substring rule this page's own search box uses, rather than each
-// dialog growing its own copy (feedback: no duplicated selection/data layer across features for a
-// picker this codebase already has one working rule for). Generic over ContactLike so it works whether
-// the caller is filtering plain Contact[] or the narrower "available to add" list a participant dialog
-// already pre-filtered by membership.
+// The page search box's email-or-display-name rule, shared with ContactPickerList.
 export function filterContactsBySearch<T extends ContactLike>(items: readonly T[], search: string): T[] {
 	const normalized = search.trim().toLowerCase()
 
-	return items.filter(item => matchesSearch(item, normalized))
+	return items.filter(item => matchesContactSearch(item, normalized))
+}
+
+// Contacts not already among `participants` (a chat's or a note's), in source order.
+export function contactsNotIn(contacts: readonly Contact[], participants: readonly { userId: bigint }[]): Contact[] {
+	const excluded = new Set(participants.map(p => p.userId))
+
+	return contacts.filter(contact => !excluded.has(contact.userId))
 }
 
 function sortByEmail<T extends { email: string }>(items: T[]): T[] {
@@ -81,22 +75,22 @@ export function buildContactSections(input: BuildContactSectionsInput): ContactS
 	const searchNormalized = input.search.trim().toLowerCase()
 	const sections: ContactSection[] = []
 
-	const requests = sortByEmail(input.incoming.filter(item => matchesSearch(item, searchNormalized)))
+	const requests = sortByEmail(input.incoming.filter(item => matchesContactSearch(item, searchNormalized)))
 	if (requests.length > 0) {
 		sections.push({ key: "requests", items: requests })
 	}
 
-	const pending = sortByEmail(input.outgoing.filter(item => matchesSearch(item, searchNormalized)))
+	const pending = sortByEmail(input.outgoing.filter(item => matchesContactSearch(item, searchNormalized)))
 	if (pending.length > 0) {
 		sections.push({ key: "pending", items: pending })
 	}
 
-	const contactItems = sortByEmail(input.contacts.filter(item => matchesSearch(item, searchNormalized)))
+	const contactItems = sortByEmail(input.contacts.filter(item => matchesContactSearch(item, searchNormalized)))
 	if (contactItems.length > 0) {
 		sections.push({ key: "contacts", items: contactItems })
 	}
 
-	const blockedItems = sortByEmail(input.blocked.filter(item => matchesSearch(item, searchNormalized)))
+	const blockedItems = sortByEmail(input.blocked.filter(item => matchesContactSearch(item, searchNormalized)))
 	if (blockedItems.length > 0) {
 		sections.push({ key: "blocked", items: blockedItems })
 	}

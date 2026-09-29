@@ -1,7 +1,7 @@
 import { useQuery, type UseQueryResult } from "@tanstack/react-query"
 import { sdkApi } from "@/lib/sdk/client"
 import { queryClient } from "@/queries/client"
-import { cachedQuery, patchQuery } from "@/queries/patch"
+import { cachedQuery, patchQuery, replaceOrAppend } from "@/queries/patch"
 import type { Note } from "@filen/sdk-rs"
 
 // One global list query, mirroring mobile's useNotesWithContent.query.ts — every variant (all
@@ -80,17 +80,7 @@ export function notesQueryRefetch(options?: { onlyIfFetching?: boolean }): void 
 // shape for a mutation that returns the one Note it touched (pin/favorite/archive/trash/restore/
 // rename/setType), plus create/duplicate's append case.
 export function notesQueryUpsert(note: Note): void {
-	notesQueryUpdate(prev => {
-		const index = prev.findIndex(n => n.uuid === note.uuid)
-
-		if (index === -1) {
-			return [...prev, note]
-		}
-
-		const next = prev.slice()
-		next[index] = note
-		return next
-	})
+	notesQueryUpdate(prev => replaceOrAppend(prev, note, n => n.uuid === note.uuid))
 }
 
 export function notesQueryRemove(uuid: string): void {

@@ -9,7 +9,7 @@ import type { Virtualizer } from "@tanstack/react-virtual"
 // The grid's pure key table is pinned in photosGridNav.test.ts; this file covers the hook that ACTS on
 // it — cursor identity, the anchor/range split between plain and shifted arrows, and the row (never the
 // item index) handed to the virtualizer. The stubbing shape mirrors drive's twin,
-// useDriveListboxNavReveal.test.ts: the virtualizer and the ref map are plain params.
+// useDriveListboxNavReveal.test.ts: the virtualizer is a plain param.
 
 import { narrowItem } from "@/features/drive/lib/item"
 import { type PhotoItem } from "@/features/photos/lib/captureSort"

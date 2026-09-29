@@ -2,7 +2,6 @@ import { type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { type LucideIcon } from "lucide-react"
 import { useDirectoryTreeChildrenQuery } from "@/features/drive/queries/drive"
-import { stopRowPropagation } from "@/features/drive/lib/rowPropagation"
 import { DirectoryGlyph } from "@/features/drive/components/itemIcon"
 import { Spinner } from "@/components/ui/spinner"
 import {
@@ -96,18 +95,11 @@ export function DirectoryTreeSubmenu({ label, icon: Icon, leading, ...actions }:
 
 	return (
 		<Sub>
-			<SubTrigger
-				onClick={stopRowPropagation}
-				onDoubleClick={stopRowPropagation}
-			>
+			<SubTrigger>
 				<Icon aria-hidden="true" />
 				{label}
 			</SubTrigger>
-			<SubContent
-				className="max-w-72"
-				onClick={stopRowPropagation}
-				onDoubleClick={stopRowPropagation}
-			>
+			<SubContent className="max-w-72">
 				{leading}
 				{leading !== undefined ? <Separator /> : null}
 				<Group>

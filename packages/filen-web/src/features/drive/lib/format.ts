@@ -1,4 +1,5 @@
 import { formatBytes } from "@filen/shared"
+import { formatShortDate } from "@/lib/formatDate"
 import { asDirectoryOrFile, getSharerIdentity, type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 
@@ -20,10 +21,6 @@ export function formatItemSize(item: DriveItem, directorySizes?: ReadonlyMap<str
 	return size !== undefined ? formatBytes(size) : ""
 }
 
-function formatTimestamp(timestamp: bigint): string {
-	return new Date(Number(timestamp)).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })
-}
-
 // Mirrors sort.ts's lastModifiedSortKey field resolution exactly, so the displayed date always
 // matches what sorting by "last modified" actually orders by. Routed through asDirectoryOrFile so a
 // file arm's decryptedMeta (with `modified`) and a directory arm's (with `created`) each resolve
@@ -35,7 +32,7 @@ export function formatModifiedDate(item: DriveItem): string {
 			? (base.data.decryptedMeta?.modified ?? base.data.timestamp)
 			: (base.data.decryptedMeta?.created ?? base.data.timestamp)
 
-	return formatTimestamp(timestamp)
+	return formatShortDate(timestamp)
 }
 
 // The info panel's own "Created" row: both item types carry an OPTIONAL `created` field on their
@@ -43,7 +40,7 @@ export function formatModifiedDate(item: DriveItem): string {
 // the item's own raw timestamp — same fallback formatModifiedDate uses for a directory with no
 // `created` field, so an item missing this field never renders a blank/undefined date.
 export function formatCreatedDate(item: DriveItem): string {
-	return formatTimestamp(item.data.decryptedMeta?.created ?? item.data.timestamp)
+	return formatShortDate(item.data.decryptedMeta?.created ?? item.data.timestamp)
 }
 
 // The info panel's own "Uploaded" row: the item's raw server-side upload timestamp, distinct from the
@@ -51,7 +48,7 @@ export function formatCreatedDate(item: DriveItem): string {
 // later than its own recorded created/modified. Present on every arm (unlike the optional meta
 // fields), so this never falls back. Mirrors filen-mobile's rawUploadTimestamp row.
 export function formatUploadedDate(item: DriveItem): string {
-	return formatTimestamp(item.data.timestamp)
+	return formatShortDate(item.data.timestamp)
 }
 
 // The versions panel's own per-row label. Unlike formatModifiedDate/formatCreatedDate this includes

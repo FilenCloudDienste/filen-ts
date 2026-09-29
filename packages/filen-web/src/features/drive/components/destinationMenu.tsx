@@ -1,7 +1,6 @@
 import { useTranslation } from "react-i18next"
 import { ClipboardPasteIcon, ClipboardXIcon, FilePlusIcon, FolderPlusIcon, FolderUpIcon, PlusIcon, UploadIcon } from "lucide-react"
 import { type PasteDirectory } from "@/features/drive/lib/directoryPaste"
-import { stopRowPropagation } from "@/features/drive/lib/rowPropagation"
 import { useDirectoryPaste } from "@/features/drive/hooks/useDirectoryPaste"
 import { type DirectoryTreeMenuFamily } from "@/features/drive/components/directoryTreeSubmenu"
 import { useIsOnline } from "@/lib/useIsOnline"
@@ -112,9 +111,7 @@ export function DestinationPasteItem({ family, paste }: { family: DirectoryTreeM
 	return (
 		<Item
 			disabled={!paste.enabled}
-			onClick={event => {
-				// A row's ⋯ dropdown is a React descendant of the row — see stopRowPropagation.
-				event.stopPropagation()
+			onClick={() => {
 				paste.run()
 			}}
 		>
@@ -152,16 +149,11 @@ export function DirectoryDestinationEntries({ family, directory, actions, pasteS
 				<SubTrigger
 					disabled={!isOnline}
 					title={isOnline ? undefined : t("common:offlineActionDisabled")}
-					onClick={stopRowPropagation}
-					onDoubleClick={stopRowPropagation}
 				>
 					<PlusIcon aria-hidden="true" />
 					{t("driveNew")}
 				</SubTrigger>
-				<SubContent
-					onClick={stopRowPropagation}
-					onDoubleClick={stopRowPropagation}
-				>
+				<SubContent>
 					<DestinationEntries
 						family={family}
 						actions={actions}

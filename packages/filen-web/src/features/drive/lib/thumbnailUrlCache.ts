@@ -30,6 +30,10 @@ export interface ThumbnailUrlCache {
 	delete: (uuid: string) => string | undefined
 	setCapacity: (capacity: number) => void
 	size: () => number
+	// Oldest first; live, so drain it before the next mutation.
+	entries: () => Iterable<[string, string]>
+	// Evicts every entry through onEvict.
+	clear: () => void
 }
 
 // A least-recently-used uuid -> objectURL cache, bounded to `capacity` entries. Backed by a plain
@@ -99,6 +103,16 @@ export function createThumbnailUrlCache(capacity: number, onEvict: (uuid: string
 		},
 		size() {
 			return map.size
+		},
+		entries() {
+			return map.entries()
+		},
+		clear() {
+			for (const [uuid, url] of map) {
+				onEvict(uuid, url)
+			}
+
+			map.clear()
 		}
 	}
 }

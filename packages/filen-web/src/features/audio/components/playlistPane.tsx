@@ -17,7 +17,6 @@ import type { Playlist, PlaylistFile } from "@filen/shared"
 import { formatRelativeTime } from "@/lib/relativeTime"
 import { useNowMinute } from "@/lib/useNowMinute"
 import { errorLabel } from "@/lib/i18n/errorLabel"
-import { asErrorDTO } from "@/lib/sdk/errors"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { cn } from "@filen/shared"
 import { Button } from "@/components/ui/button"
@@ -356,7 +355,7 @@ function TrackRow({ playlist, file, index, playing, dragOver, removing, disabled
 		try {
 			await removeTracksFromPlaylistAction(playlist, [file.uuid])
 		} catch (error) {
-			toast.error(errorLabel(asErrorDTO(error)))
+			toast.error(errorLabel(error))
 		}
 
 		setRemovingUuid(null)
@@ -370,7 +369,7 @@ function TrackRow({ playlist, file, index, playing, dragOver, removing, disabled
 		try {
 			await reorderPlaylistFileAction(playlist, movedUuid, file.uuid)
 		} catch (error) {
-			toast.error(errorLabel(asErrorDTO(error)))
+			toast.error(errorLabel(error))
 		}
 	}
 

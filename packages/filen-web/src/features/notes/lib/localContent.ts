@@ -1,6 +1,6 @@
 import { queryClient } from "@/queries/client"
 import { noteContentQueryKey } from "@/features/notes/queries/noteContent"
-import useNotesInflightStore from "@/features/notes/store/useNotesInflight"
+import { useNotesInflightStore } from "@/features/notes/store/useNotesInflight"
 import { newestEntry } from "@/features/notes/lib/sync.logic"
 
 // A note's content AS THIS CLIENT KNOWS IT — the same precedence the editor's seed applies

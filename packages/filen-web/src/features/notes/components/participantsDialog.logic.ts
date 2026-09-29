@@ -1,9 +1,8 @@
-import type { Contact, Note, NoteParticipant } from "@filen/sdk-rs"
+import type { Note, NoteParticipant } from "@filen/sdk-rs"
 import { isBlocked, EMPTY_BLOCKED_USERS, type BlockedUsers } from "@filen/shared"
 
 // Pure gating/derivation helpers for participantsDialog.tsx, kept out of the component so the owner-
-// vs-participant view split and the add-picker's exclusion filter stay testable without a DOM renderer
-// (see vitest.config.ts).
+// vs-participant view split stays testable without a DOM renderer (see vitest.config.ts).
 
 export interface ParticipantRowModel {
 	participant: NoteParticipant
@@ -38,12 +37,4 @@ export function participantRows(
 		canManage: viewerIsOwner && !participant.isOwner,
 		blocked: isBlocked({ userId: participant.userId, email: participant.email }, blocked)
 	}))
-}
-
-// The add-picker's own contact list, filtered down to contacts not already a participant — mirrors
-// mobile's selectContacts userIdsToExclude. Order is preserved from the source contacts query.
-export function contactsAvailableToAdd(contacts: readonly Contact[], note: Note): Contact[] {
-	const existingUserIds = new Set(note.participants.map(p => p.userId))
-
-	return contacts.filter(contact => !existingUserIds.has(contact.userId))
 }

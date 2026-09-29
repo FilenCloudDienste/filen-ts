@@ -15,10 +15,12 @@ vi.mock("@/features/drive/hooks/useDriveDropTarget", () => ({
 	useDriveDropTarget: () => ({
 		isOver: false,
 		mode: "move",
-		onDragEnter: () => undefined,
-		onDragOver: () => undefined,
-		onDragLeave: () => undefined,
-		onDrop: () => undefined
+		handlers: {
+			onDragEnter: () => undefined,
+			onDragOver: () => undefined,
+			onDragLeave: () => undefined,
+			onDrop: () => undefined
+		}
 	})
 }))
 

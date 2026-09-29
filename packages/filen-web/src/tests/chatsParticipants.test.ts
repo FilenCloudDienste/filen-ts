@@ -23,11 +23,7 @@ vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 import { queryClient as testQueryClient } from "@/queries/client"
 import { CHATS_QUERY_KEY, chatsQueryGet } from "@/features/chats/queries/chats"
 import { addChatParticipants, removeChatParticipant, removeChatParticipants } from "@/features/chats/lib/participants"
-import {
-	chatParticipantRows,
-	contactsAvailableToAddToChat,
-	selectedParticipantsForRemoval
-} from "@/features/chats/components/chatParticipantsDialog.logic"
+import { chatParticipantRows, selectedParticipantsForRemoval } from "@/features/chats/components/chatParticipantsDialog.logic"
 import { deriveBlockedUsers } from "@filen/shared"
 
 beforeEach(() => {
@@ -246,24 +242,6 @@ describe("chatParticipantRows blocked flag", () => {
 		const rows = chatParticipantRows(chat, 2n, false, blocked)
 
 		expect(rows.find(r => r.participant.userId === 1n)).toMatchObject({ isOwner: true, canManage: false, blocked: true })
-	})
-})
-
-describe("contactsAvailableToAddToChat", () => {
-	it("filters out contacts already a participant, preserving source order", () => {
-		const chat = mockChat({ participants: [mockParticipant({ userId: 5n })] })
-		const already = mockContact({ userId: 5n })
-		const fresh1 = mockContact({ uuid: testUuid("c1"), userId: 6n })
-		const fresh2 = mockContact({ uuid: testUuid("c2"), userId: 7n })
-
-		expect(contactsAvailableToAddToChat([already, fresh1, fresh2], chat)).toEqual([fresh1, fresh2])
-	})
-
-	it("returns every contact when none are participants yet", () => {
-		const chat = mockChat({ participants: [] })
-		const contacts = [mockContact({ userId: 1n }), mockContact({ userId: 2n })]
-
-		expect(contactsAvailableToAddToChat(contacts, chat)).toEqual(contacts)
 	})
 })
 

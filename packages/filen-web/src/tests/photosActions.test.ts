@@ -17,13 +17,7 @@ import { queryClient as testQueryClient } from "@/queries/client"
 import { narrowItem } from "@/features/drive/lib/item"
 import { toggleFavorite, trashItems } from "@/features/drive/lib/actions"
 import { photosListingQueryKey, type PhotosListing } from "@/features/photos/queries/photos"
-import {
-	toggleFavoritePhoto,
-	setFavoritedPhotos,
-	trashPhotos,
-	renamePhotoItem,
-	patchPhotoFavoriteFromPreview
-} from "@/features/photos/lib/actions"
+import { setFavoritedPhotos, trashPhotos, renamePhotoItem, patchPhoto } from "@/features/photos/lib/actions"
 import { type PhotoItem } from "@/features/photos/lib/captureSort"
 
 function testUuid(label: string): UuidStr {
@@ -101,30 +95,6 @@ describe("drive's own action helpers do not reach the photos cache (the gap phot
 	})
 })
 
-describe("toggleFavoritePhoto", () => {
-	it("patches the photos listing's favorited flag in place on success", async () => {
-		const item = photoItem()
-		seedPhotosListing([item])
-		setFavorited.mockResolvedValueOnce({ ...item.data, favorited: true })
-
-		const outcome = await toggleFavoritePhoto(ROOT_UUID, item)
-
-		expect(outcome.status).toBe("success")
-		expect(getPhotosListing()?.[0]?.data.favorited).toBe(true)
-	})
-
-	it("leaves the photos listing untouched on a rejected mutation", async () => {
-		const item = photoItem()
-		seedPhotosListing([item])
-		setFavorited.mockRejectedValueOnce(new Error("network error"))
-
-		const outcome = await toggleFavoritePhoto(ROOT_UUID, item)
-
-		expect(outcome.status).toBe("error")
-		expect(getPhotosListing()?.[0]?.data.favorited).toBe(false)
-	})
-})
-
 describe("setFavoritedPhotos", () => {
 	it("sets every succeeded item's favorited flag to the target value", async () => {
 		const a = photoItem({ uuid: testUuid("a") })
@@ -174,16 +144,14 @@ describe("trashPhotos", () => {
 	})
 })
 
-// The overlay's own header menu runs drive's raw toggleFavorite (not toggleFavoritePhoto above), so
-// this is the ONE local patch keeping the grid's heart badge in sync — a synchronous, network-free
-// write straight from the overlay's returned item, unlike every other wrapper here which awaits its
-// own mutation.
-describe("patchPhotoFavoriteFromPreview", () => {
-	it("patches the photos listing's favorited flag from the overlay's returned item", () => {
+// Drive's item menu (tile and preview) runs drive's raw toggleFavorite, so this is the one local patch
+// keeping the grid's heart badge in sync — a synchronous, network-free write from the returned item.
+describe("patchPhoto", () => {
+	it("patches the photos listing's favorited flag from the menu's returned item", () => {
 		const item = photoItem()
 		seedPhotosListing([item])
 
-		patchPhotoFavoriteFromPreview(ROOT_UUID, { ...item, data: { ...item.data, favorited: true } })
+		patchPhoto(ROOT_UUID, { ...item, data: { ...item.data, favorited: true } })
 
 		expect(getPhotosListing()?.[0]?.data.favorited).toBe(true)
 	})
@@ -193,7 +161,7 @@ describe("patchPhotoFavoriteFromPreview", () => {
 		seedPhotosListing([item])
 		const other = photoItem({ uuid: testUuid("other"), favorited: true })
 
-		patchPhotoFavoriteFromPreview(ROOT_UUID, other)
+		patchPhoto(ROOT_UUID, other)
 
 		expect(getPhotosListing()).toHaveLength(1)
 		expect(getPhotosListing()?.[0]?.data.favorited).toBe(false)

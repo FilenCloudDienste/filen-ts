@@ -3,7 +3,7 @@ import type { LinkedFile, DirPublicInfo, LinkedDirsAndFiles, AnyLinkedDir, DirPu
 import { sdkApi } from "@/lib/sdk/client"
 import { queryClient } from "@/queries/client"
 import type { DriveItem } from "@/features/drive/lib/item"
-import type { DriveListingParams } from "@/features/drive/queries/drive"
+import { DRIVE_LISTING_KEY_PREFIX, type DriveListingParams } from "@/features/drive/queries/drive"
 import { isNetworkClassError } from "@/lib/sdk/retry"
 import { publicLinkQueryKey, secretFingerprint, passwordStatePart } from "@/features/publicLinks/lib/queryKey.logic"
 
@@ -132,7 +132,7 @@ export function usePublicVisitorSignedIn(): UseQueryResult<boolean> {
 function isInCachedOwnedListing(uuid: string): boolean {
 	return queryClient
 		.getQueryCache()
-		.findAll({ queryKey: ["drive", "listing"] })
+		.findAll({ queryKey: DRIVE_LISTING_KEY_PREFIX })
 		.some(query => {
 			const params = query.queryKey[2] as DriveListingParams | undefined
 

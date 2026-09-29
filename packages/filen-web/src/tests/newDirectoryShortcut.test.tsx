@@ -32,12 +32,7 @@ afterEach(cleanup)
 
 describe("NewDirectory shortcut", () => {
 	it("opens the name dialog", () => {
-		render(
-			<NewDirectory
-				parentUuid={null}
-				dialogOpen={false}
-			/>
-		)
+		render(<NewDirectory parentUuid={null} />)
 		pressN()
 
 		expect(screen.getAllByTestId("new-directory-dialog")).toHaveLength(1)
@@ -47,13 +42,9 @@ describe("NewDirectory shortcut", () => {
 	it("opens one dialog when a second copy of the control is on screen without the shortcut", () => {
 		render(
 			<>
+				<NewDirectory parentUuid={null} />
 				<NewDirectory
 					parentUuid={null}
-					dialogOpen={false}
-				/>
-				<NewDirectory
-					parentUuid={null}
-					dialogOpen={false}
 					shortcut={false}
 				/>
 			</>
@@ -67,11 +58,22 @@ describe("NewDirectory shortcut", () => {
 		render(
 			<NewDirectory
 				parentUuid={null}
-				dialogOpen={false}
 				disabled
 			/>
 		)
 		pressN()
+
+		expect(screen.queryByTestId("new-directory-dialog")).toBeNull()
+	})
+
+	it("stays shut while a dialog is open", () => {
+		const dialog = document.createElement("div")
+		dialog.setAttribute("role", "dialog")
+		dialog.setAttribute("data-open", "")
+		document.body.append(dialog)
+		render(<NewDirectory parentUuid={null} />)
+		pressN()
+		dialog.remove()
 
 		expect(screen.queryByTestId("new-directory-dialog")).toBeNull()
 	})

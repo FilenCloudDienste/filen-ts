@@ -1,7 +1,7 @@
 import { useQuery, type UseQueryResult } from "@tanstack/react-query"
 import { currentSocketEpoch, socketLiveSince } from "@/lib/sdk/socketSession"
 import { queryClient } from "@/queries/client"
-import { patchQuery } from "@/queries/patch"
+import { patchQuery, replaceOrAppend } from "@/queries/patch"
 import { fetchPlaylistEntries } from "@/features/audio/lib/playlists"
 import type { Playlist } from "@filen/shared"
 
@@ -68,19 +68,9 @@ export function playlistsQueryUpdate(updater: (prev: PlaylistEntry[]) => Playlis
 // Replaces (or appends) a single playlist's "ok" row by uuid, preserving every other row's position —
 // the write path's confirm-then-patch after a successful create/rename/add/remove/reorder/prune save.
 export function playlistsQueryUpsert(playlist: Playlist): void {
-	playlistsQueryUpdate(prev => {
-		const index = prev.findIndex(entry => entry.status === "ok" && entry.playlist.uuid === playlist.uuid)
-
-		if (index === -1) {
-			return [...prev, { status: "ok", playlist }]
-		}
-
-		const next = prev.slice()
-
-		next[index] = { status: "ok", playlist }
-
-		return next
-	})
+	playlistsQueryUpdate(prev =>
+		replaceOrAppend(prev, { status: "ok", playlist }, entry => entry.status === "ok" && entry.playlist.uuid === playlist.uuid)
+	)
 }
 
 export function playlistsQueryRemove(uuid: string): void {

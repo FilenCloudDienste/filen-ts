@@ -4,9 +4,8 @@ import { renderAsync } from "docx-preview"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
 import { collectBlobUrls, sanitizeDocxLinks } from "@/features/preview/lib/docxDom"
-import { errorLabel } from "@/lib/i18n/errorLabel"
 import { LoadingState } from "@/components/loadingState"
-import { PreviewErrorState } from "@/features/preview/components/previewErrorState"
+import { PreviewErrorState, PreviewGate } from "@/features/preview/components/previewErrorState"
 
 export interface DocxViewerProps {
 	item: DriveItem
@@ -126,31 +125,15 @@ function DocxRender({ bytes, alt }: { bytes: Uint8Array; alt: string }) {
 // Top-level gate on the whole-buffer download (usePreviewBytes, shared with every other buffered
 // category) — DocxRender above owns everything docx-preview-specific once bytes are in hand.
 function DocxViewer({ item, alt }: DocxViewerProps) {
-	const result = usePreviewBytes(item)
-
-	if (result.status === "pending") {
-		return (
-			<LoadingState
-				size="lg"
-				className="text-inherit"
-			/>
-		)
-	}
-
-	if (result.status === "error") {
-		return (
-			<PreviewErrorState
-				message={errorLabel(result.dto)}
-				onRetry={result.refetch}
-			/>
-		)
-	}
-
 	return (
-		<DocxRender
-			bytes={result.bytes}
-			alt={alt}
-		/>
+		<PreviewGate result={usePreviewBytes(item)}>
+			{ready => (
+				<DocxRender
+					bytes={ready.bytes}
+					alt={alt}
+				/>
+			)}
+		</PreviewGate>
 	)
 }
 

@@ -1,4 +1,3 @@
-import { useEffect, useRef } from "react"
 import { useTranslation } from "react-i18next"
 import { onlineManager } from "@tanstack/react-query"
 import { type HotkeyCallback } from "react-hotkeys-hook"
@@ -11,6 +10,7 @@ import { clipboardShortcutContext, copyToClipboard, cutToClipboard } from "@/fea
 import { pasteWhenStillValid } from "@/features/drive/lib/clipboardPaste"
 import { useDriveClipboardStore } from "@/features/drive/store/useDriveClipboardStore"
 import { useAction } from "@/lib/keymap/useAction"
+import { useLatestRef } from "@/lib/useLatestRef"
 
 export interface DrivePasteAction {
 	enabled: boolean
@@ -29,7 +29,6 @@ export interface UseDriveClipboardParams {
 	listing: readonly DriveItem[] | undefined
 	selectedItems: readonly DriveItem[]
 	isOnline: boolean
-	isDialogOpen: boolean
 }
 
 // The listing's mod+c/x/v and the Paste and Clear clipboard entries its menus show. Each shortcut
@@ -41,19 +40,14 @@ export function useDriveClipboard({
 	ancestry,
 	listing,
 	selectedItems,
-	isOnline,
-	isDialogOpen
+	isOnline
 }: UseDriveClipboardParams): DrivePasteAction {
 	const { t } = useTranslation("drive")
 	const entry = useDriveClipboardStore(state => state.entry)
 	const target = { variant, uuid, ancestry, readParents: cachedOwnParents, listing, online: isOnline }
 	const pasteEnabled = canPaste(entry, target)
 	// The listing as last rendered, for a paste judged again once its recheck settles.
-	const listingRef = useRef(listing)
-
-	useEffect(() => {
-		listingRef.current = listing
-	})
+	const listingRef = useLatestRef(listing)
 
 	async function destinationName(): Promise<string> {
 		if (uuid === null) {
@@ -76,7 +70,7 @@ export function useDriveClipboard({
 	}
 
 	function claims(event: KeyboardEvent, textMatters: boolean): boolean {
-		return !isDialogOpen && shouldHandleClipboardShortcut(clipboardShortcutContext(event, textMatters))
+		return shouldHandleClipboardShortcut(clipboardShortcutContext(event, textMatters))
 	}
 
 	const onCopy: HotkeyCallback = event => {

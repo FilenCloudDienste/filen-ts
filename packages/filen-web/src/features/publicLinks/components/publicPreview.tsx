@@ -1,28 +1,18 @@
-import { lazy, Suspense, type ReactNode } from "react"
+import { type ReactNode } from "react"
 import { driveItemName } from "@filen/shared"
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import { previewType } from "@/features/drive/lib/preview.logic"
 import { PreviewAccessModeProvider, PreviewDownloadableProvider } from "@/features/preview/lib/accessMode"
 import { ImageViewer, RawImageViewer } from "@/features/preview/components/imageViewer"
 import { MediaViewer } from "@/features/preview/components/mediaViewer"
-import { LoadingState } from "@/components/loadingState"
-
-// The heavy category viewers are lazy — a text/pdf link shouldn't pull in the media stack, mirroring
-// previewOverlay's own split.
-const PdfViewer = lazy(() => import("@/features/preview/components/pdfViewer"))
-const DocxViewer = lazy(() => import("@/features/preview/components/docxViewer"))
-const TextViewer = lazy(() => import("@/features/preview/components/textViewer"))
-const MarkdownViewer = lazy(() => import("@/features/preview/components/markdownViewer"))
-const SpreadsheetViewer = lazy(() => import("@/features/spreadsheet/components/spreadsheetViewer"))
-
-function ViewerFallback() {
-	return (
-		<LoadingState
-			size="lg"
-			className="text-inherit"
-		/>
-	)
-}
+import {
+	DocxViewer,
+	MarkdownViewer,
+	PdfViewer,
+	SpreadsheetViewer,
+	TextViewer,
+	ViewerSuspense
+} from "@/features/preview/components/lazyViewers"
 
 // Inline preview for a public-link file, reusing the SAME viewer components the authed app uses — fed
 // a fabricated DriveItem (linkedFileIntoDriveItem / a narrowed listing File) and wrapped in the anon
@@ -80,51 +70,51 @@ function PublicPreviewBody({ item, category, alt }: { item: DriveItem; category:
 			)
 		case "pdf":
 			return (
-				<Suspense fallback={<ViewerFallback />}>
+				<ViewerSuspense>
 					<PdfViewer
 						item={item}
 						alt={alt}
 					/>
-				</Suspense>
+				</ViewerSuspense>
 			)
 		case "docx":
 			return (
-				<Suspense fallback={<ViewerFallback />}>
+				<ViewerSuspense>
 					<DocxViewer
 						item={item}
 						alt={alt}
 					/>
-				</Suspense>
+				</ViewerSuspense>
 			)
 		case "spreadsheet":
 			return (
-				<Suspense fallback={<ViewerFallback />}>
+				<ViewerSuspense>
 					<SpreadsheetViewer
 						item={item}
 						documentKey={item.data.uuid}
 						neverEditable
 						alt={alt}
 					/>
-				</Suspense>
+				</ViewerSuspense>
 			)
 		case "text":
 		case "code":
 			return (
-				<Suspense fallback={<ViewerFallback />}>
+				<ViewerSuspense>
 					<TextViewer
 						item={item}
 						alt={alt}
 					/>
-				</Suspense>
+				</ViewerSuspense>
 			)
 		case "markdown":
 			return (
-				<Suspense fallback={<ViewerFallback />}>
+				<ViewerSuspense>
 					<MarkdownViewer
 						item={item}
 						alt={alt}
 					/>
-				</Suspense>
+				</ViewerSuspense>
 			)
 		// Reachable, unlike "other": anonPreviewability admits rawImage. The embedded preview is read
 		// through the anon worker method by the provider this component wraps its viewer in.

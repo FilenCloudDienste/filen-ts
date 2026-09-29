@@ -1,6 +1,6 @@
 import type { StringifiedClient } from "@filen/sdk-rs"
 import { sdkApi, threadCount } from "@/lib/sdk/client"
-import { asErrorDTO } from "@/lib/sdk/errors"
+import { asErrorDTO, plainErrorDTO } from "@/lib/sdk/errors"
 import { persistSession, resumeSession } from "@/lib/sdk/session"
 import { parseEnvelope } from "@/lib/serialize"
 import { SESSION_SLOT } from "@/e2e-hooks/sessionSlot"
@@ -37,7 +37,7 @@ export async function bootSdk(): Promise<void> {
 	try {
 		const result = await sdkApi.boot({ threads: threadCount() })
 		if (!result.ok) {
-			setError(result.reason, { species: "plain", message: result.detail, label: result.detail })
+			setError(result.reason, plainErrorDTO(result.detail))
 			log.error("boot", `${result.reason}: ${result.detail}`)
 			return
 		}
@@ -57,8 +57,7 @@ export async function bootSdk(): Promise<void> {
 		// racing THAT specific failure still hits the generic 10s timeout — a residual gap, but mostly a
 		// test-harness artifact: real browsers are all-or-nothing on the OPFS API itself.
 		if (!isOpfsApiAvailable()) {
-			const detail = "navigator.storage.getDirectory unavailable"
-			setError("opfs", { species: "plain", message: detail, label: detail })
+			setError("opfs", plainErrorDTO("navigator.storage.getDirectory unavailable"))
 			log.error("boot", "opfs unavailable (capability pre-check)")
 			return
 		}

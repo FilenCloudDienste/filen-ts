@@ -1,11 +1,10 @@
 import { type ComponentProps, type SubmitEvent } from "react"
-import { type DialogRoot } from "@base-ui/react/dialog"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
-import { shouldForwardOpenChange } from "@/components/dialogs/dismissal.logic"
+import { pendingGuardedOpenChange } from "@/components/dialogs/dismissal.logic"
 import { useSeededOnOpen } from "@/lib/useSeededOnOpen"
 
 interface InputDialogProps {
@@ -61,15 +60,7 @@ function InputDialog({
 	const [value, setValue] = useSeededOnOpen(open, initialValue ?? "")
 	const valid = validate(value)
 
-	function handleOpenChange(next: boolean, details: DialogRoot.ChangeEventDetails): void {
-		if (!shouldForwardOpenChange(next, pending)) {
-			// Also stops Base UI's own store from flipping (it closes itself after this callback
-			// unless the event is canceled) — see dismissal.logic.ts.
-			details.cancel()
-			return
-		}
-		onOpenChange(next)
-	}
+	const handleOpenChange = pendingGuardedOpenChange(pending, onOpenChange)
 
 	function handleSubmit(e: SubmitEvent): void {
 		e.preventDefault()

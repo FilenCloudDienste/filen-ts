@@ -1,13 +1,13 @@
-import { createNotePreviewFromContentText, hashNoteContent, run } from "@filen/shared"
-import type { SocketEvent, UserInfo, Note } from "@filen/sdk-rs"
+import { hashNoteContent, run } from "@filen/shared"
+import type { SocketEvent, Note } from "@filen/sdk-rs"
 import { registerSocketHandler, decryptedOrSkip } from "@/lib/sdk/socket"
 import { queryClient } from "@/queries/client"
 import { log } from "@/lib/log"
-import { ACCOUNT_QUERY_KEY } from "@/queries/account"
-import useNotesInflightStore, { endEditingSession, type InflightEntry } from "@/features/notes/store/useNotesInflight"
+import { accountQueryGet } from "@/queries/account"
+import { useNotesInflightStore, endEditingSession, type InflightEntry } from "@/features/notes/store/useNotesInflight"
 import { useNotesRemoteEditStore } from "@/features/notes/store/useNoteRemoteEdit"
 import { sync } from "@/features/notes/lib/sync"
-import { newestEntry, noteKindForPreview } from "@/features/notes/lib/sync.logic"
+import { newestEntry, notePreviewFor } from "@/features/notes/lib/sync.logic"
 import { notesQueryUpdate, notesQueryRemove, notesQueryGet, notesQueryRefetch, notesQueryUpsert } from "@/features/notes/queries/notes"
 import { markNoteContentUnsynced, noteContentQueryKey, readNoteContent } from "@/features/notes/queries/noteContent"
 import { isOwnNotePush, recordNotePush } from "@/features/notes/lib/pushEchoes"
@@ -22,7 +22,7 @@ import {
 } from "@/features/notes/lib/tabEditors"
 import { followContent, takeRemoteContent } from "@/features/notes/lib/remoteContent"
 import { sdkApi } from "@/lib/sdk/client"
-import { asErrorDTO } from "@/lib/sdk/errors"
+import { asErrorDTO, plainErrorDTO } from "@/lib/sdk/errors"
 import { runOp, type ActionOutcome } from "@/lib/actions/outcome"
 import type { AnswerChoice } from "@/lib/storage/outboxChannel"
 
@@ -38,13 +38,6 @@ type NoteSocketEvent = Extract<SocketEvent, { type: "note" }>
 // authed shell's socket host. Only "note" events reach handleNoteEvent — the registry routes by type.
 export function registerNoteSocketHandlers(): () => void {
 	return registerSocketHandler("note", handleNoteEvent)
-}
-
-// The current account's numeric user id, read off the account query cache (no subscription — this runs
-// outside React). bigint on the wasm surface; ContentEdited.editorId is a number, so echo suppression
-// compares BigInt(editorId) === id.
-function currentUserId(): bigint | undefined {
-	return queryClient.getQueryData<UserInfo>(ACCOUNT_QUERY_KEY)?.id
 }
 
 export function handleNoteEvent(event: NoteSocketEvent): void {
@@ -156,7 +149,7 @@ function handleContentEdited(inner: Extract<NoteSocketEvent["inner"], { type: "c
 	// this browser pushed (pushEchoes.ts, shared by every tab): the same account editing on another device
 	// is an edit like anyone else's. Content that can't be decrypted can't be recognised, and is taken for
 	// ours, as is every edit of this account's while the account id is not known yet (cache not warm).
-	const userId = currentUserId()
+	const userId = accountQueryGet()?.id
 
 	if (userId === undefined || BigInt(inner.editorId) === userId) {
 		if (content === undefined) {
@@ -255,7 +248,7 @@ function patchRowFromOwnEcho(
 		return
 	}
 
-	const preview = createNotePreviewFromContentText(noteKindForPreview(cached.noteType), content)
+	const preview = notePreviewFor(cached.noteType, content)
 
 	notesQueryUpdate(prev =>
 		prev.map(n =>
@@ -419,9 +412,7 @@ export async function saveRemoteEditMineAsCopy(note: Note, title: string): Promi
 	const mine = tabNoteContent(note.uuid)
 
 	if (mine === undefined) {
-		const message = "saveRemoteEditMineAsCopy: no local content"
-
-		return { status: "error", dto: { species: "plain", message, label: message } }
+		return { status: "error", dto: plainErrorDTO("saveRemoteEditMineAsCopy: no local content") }
 	}
 
 	let copy: Note | null = null
@@ -432,7 +423,7 @@ export async function saveRemoteEditMineAsCopy(note: Note, title: string): Promi
 
 		recordNotePush(copy.uuid, mine)
 
-		copy = await runOp(sdkApi.setNoteContent(copy, mine, createNotePreviewFromContentText(noteKindForPreview(copy.noteType), mine)))
+		copy = await runOp(sdkApi.setNoteContent(copy, mine, notePreviewFor(copy.noteType, mine)))
 	} catch (e) {
 		if (copy !== null) {
 			await discardPartialCopy(copy)
@@ -461,7 +452,7 @@ async function discardPartialCopy(copy: Note): Promise<void> {
 }
 
 function patchRowFromContentEdited(inner: Extract<NoteSocketEvent["inner"], { type: "contentEdited" }>, content: string | undefined): void {
-	const preview = content !== undefined ? createNotePreviewFromContentText(noteKindForPreview(inner.noteType), content) : undefined
+	const preview = content !== undefined ? notePreviewFor(inner.noteType, content) : undefined
 
 	notesQueryUpdate(prev =>
 		prev.map(n =>

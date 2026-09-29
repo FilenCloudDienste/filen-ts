@@ -1,8 +1,7 @@
-import { Fragment, useState } from "react"
+import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
-import { ChevronRightIcon, FolderPlusIcon, SearchXIcon } from "lucide-react"
-import type { DialogRoot } from "@base-ui/react/dialog"
+import { FolderPlusIcon } from "lucide-react"
 import type { DriveItem } from "@/features/drive/lib/item"
 import { moveItems } from "@/features/drive/lib/actions"
 import { startCopyWithCard } from "@/features/transfers/lib/copyToast"
@@ -10,23 +9,19 @@ import { type CopyDestination } from "@/features/drive/lib/copy.logic"
 import { toastBulkOutcome } from "@/features/drive/lib/bulkToast"
 import { runCreateDirectory } from "@/features/drive/lib/createDirectory"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
-import { useDirectoryListingQuery, useDirectoryNamesQuery, driveListingQueryUpdate } from "@/features/drive/queries/drive"
+import { driveListingQueryUpdate } from "@/features/drive/queries/drive"
 import { sdkApi } from "@/lib/sdk/client"
 import { errorLabel } from "@/lib/i18n/errorLabel"
-import { asErrorDTO } from "@/lib/sdk/errors"
 import { useIsOnline } from "@/lib/useIsOnline"
-import { cn, driveItemName } from "@filen/shared"
-import { shouldForwardOpenChange } from "@/components/dialogs/dismissal.logic"
+import { pendingGuardedOpenChange } from "@/components/dialogs/dismissal.logic"
 import { isCopyConfirmDisabled, isMoveConfirmDisabled, isMoveRowDisabled } from "@/features/drive/components/moveTargetDialog.logic"
 import { filterDriveItemsByLocalSearch } from "@/features/drive/components/directoryListing.logic"
-import { DirectoryGlyph } from "@/features/drive/components/itemIcon"
-import { EmptyState } from "@/features/drive/components/emptyState"
-import { LoadingState } from "@/components/loadingState"
+import { PickerBreadcrumb, PickerDirectoryRow, PickerListShell } from "@/features/drive/components/directoryPicker"
+import { useDirectoryPicker, useDirectoryPickerFilter } from "@/features/drive/hooks/useDirectoryPicker"
 import { ListFilterInput } from "@/components/listFilterInput"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
-import { Empty, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { InputDialog } from "@/components/dialogs/inputDialog"
 
 export interface MoveTargetDialogProps {
@@ -55,34 +50,16 @@ export function MoveTargetDialog({ items, onClose, mode, onCopy }: MoveTargetDia
 	// Both writes in this dialog (the confirm and the in-place create) re-check connectivity here: the
 	// entry point was gated when it was clicked, but the connection can drop while the picker is open.
 	const offlineTitle = !isOnline ? t("common:offlineActionDisabled") : undefined
-	const [pathStack, setPathStack] = useState<string[]>([])
+	const { pathStack, targetUuid, listingQuery, namesQuery, descend, goRoot, goTo } = useDirectoryPicker()
+	const [filter, setFilter] = useDirectoryPickerFilter(pathStack)
 	const [pending, setPending] = useState(false)
-	const [filter, setFilter] = useState("")
 	const [newFolderOpen, setNewFolderOpen] = useState(false)
 	const [newFolderPending, setNewFolderPending] = useState(false)
-	const targetUuid = pathStack.at(-1) ?? null
-
-	const listingQuery = useDirectoryListingQuery("drive", targetUuid)
-	const namesQuery = useDirectoryNamesQuery(pathStack)
 	const directories = (listingQuery.data ?? []).filter(item => item.type === "directory")
 	// Same instant local name filter the non-"drive" listing variants use — this picker is a pure
 	// breadcrumb browser (never wired to the cache-backed engine), so a filtered folder tree is the only
-	// way to search it. Resets on every descend/breadcrumb-jump (pathStack change) — a query scoped to
-	// one folder should never silently carry over and hide everything in the next. Reset IN RENDER
-	// (react.dev's "adjusting state when a prop changes" pattern), not a useEffect — see
-	// directoryListing.tsx's identical listingKey comment for why.
+	// way to search it.
 	const filteredDirectories = filterDriveItemsByLocalSearch(directories, filter)
-	const pathKey = pathStack.join("/")
-	const [filterPathKey, setFilterPathKey] = useState(pathKey)
-
-	if (pathKey !== filterPathKey) {
-		setFilterPathKey(pathKey)
-		setFilter("")
-	}
-
-	function descend(uuid: string): void {
-		setPathStack(prev => [...prev, uuid])
-	}
 
 	// Creates a destination directory in place, right inside whichever directory the picker is
 	// currently browsing (targetUuid) — the same helper newDirectory.tsx's own toolbar trigger uses,
@@ -107,18 +84,11 @@ export function MoveTargetDialog({ items, onClose, mode, onCopy }: MoveTargetDia
 		setNewFolderOpen(false)
 	}
 
-	function handleOpenChange(next: boolean, details: DialogRoot.ChangeEventDetails): void {
-		if (!shouldForwardOpenChange(next, pending)) {
-			// Also stops Base UI's own store from flipping (it closes itself after this callback
-			// unless the event is canceled) — see dismissal.logic.ts.
-			details.cancel()
-			return
-		}
-
+	const handleOpenChange = pendingGuardedOpenChange(pending, next => {
 		if (!next) {
 			onClose()
 		}
-	}
+	})
 
 	async function handleConfirm(): Promise<void> {
 		if (mode === "copy") {
@@ -160,53 +130,12 @@ export function MoveTargetDialog({ items, onClose, mode, onCopy }: MoveTargetDia
 				<DialogHeader>
 					<DialogTitle>{t(mode === "copy" ? "driveCopyDialogTitle" : "driveMoveDialogTitle")}</DialogTitle>
 				</DialogHeader>
-				<nav
-					aria-label={t("driveBreadcrumbLabel")}
-					className="flex items-center gap-1.5 overflow-x-auto text-sm"
-				>
-					<button
-						type="button"
-						disabled={pathStack.length === 0}
-						onClick={() => {
-							setPathStack([])
-						}}
-						className={cn(
-							"shrink-0",
-							pathStack.length === 0
-								? "font-medium text-foreground"
-								: "text-muted-foreground hover:text-foreground hover:underline"
-						)}
-					>
-						{t("driveMyDrive")}
-					</button>
-					{pathStack.map((uuid, index) => {
-						const isLast = index === pathStack.length - 1
-
-						return (
-							<Fragment key={uuid}>
-								<ChevronRightIcon
-									aria-hidden="true"
-									className="size-3.5 shrink-0 text-muted-foreground"
-								/>
-								<button
-									type="button"
-									disabled={isLast}
-									onClick={() => {
-										setPathStack(prev => prev.slice(0, index + 1))
-									}}
-									className={cn(
-										"min-w-0 shrink-0 truncate",
-										isLast
-											? "font-medium text-foreground"
-											: "text-muted-foreground hover:text-foreground hover:underline"
-									)}
-								>
-									{namesQuery.data?.[uuid] ?? uuid}
-								</button>
-							</Fragment>
-						)
-					})}
-				</nav>
+				<PickerBreadcrumb
+					pathStack={pathStack}
+					names={namesQuery.data}
+					onRoot={goRoot}
+					onJump={goTo}
+				/>
 				<div className="flex items-center gap-2">
 					<div className="min-w-0 flex-1">
 						{directories.length > 0 ? (
@@ -235,68 +164,20 @@ export function MoveTargetDialog({ items, onClose, mode, onCopy }: MoveTargetDia
 						{t("driveMoveDialogNewDirectory")}
 					</Button>
 				</div>
-				<div className="h-72 overflow-y-auto rounded-xl ring-1 ring-foreground/5 dark:ring-foreground/10">
-					{listingQuery.status === "pending" ? (
-						<LoadingState size="md" />
-					) : listingQuery.status === "error" ? (
-						<EmptyState
-							variant="error"
-							error={asErrorDTO(listingQuery.error)}
-							onRetry={() => {
-								void listingQuery.refetch()
-							}}
+				<PickerListShell
+					listingQuery={listingQuery}
+					isEmpty={filteredDirectories.length === 0}
+					noResults={filter.trim().length > 0}
+				>
+					{filteredDirectories.map(directory => (
+						<PickerDirectoryRow
+							key={directory.data.uuid}
+							directory={directory}
+							disabled={isMoveRowDisabled(directory, pathStack, items)}
+							onDescend={descend}
 						/>
-					) : filteredDirectories.length === 0 ? (
-						filter.trim().length > 0 ? (
-							<Empty>
-								<EmptyHeader>
-									<EmptyMedia>
-										<SearchXIcon />
-									</EmptyMedia>
-									<EmptyTitle>{t("driveSearchNoResults")}</EmptyTitle>
-								</EmptyHeader>
-							</Empty>
-						) : (
-							<EmptyState
-								variant="empty"
-								driveVariant="drive"
-							/>
-						)
-					) : (
-						<ul className="flex flex-col gap-0.5 p-2">
-							{filteredDirectories.map(directory => {
-								const disabled = isMoveRowDisabled(directory, pathStack, items)
-
-								return (
-									<li key={directory.data.uuid}>
-										<button
-											type="button"
-											disabled={disabled}
-											onDoubleClick={() => {
-												if (!disabled) {
-													descend(directory.data.uuid)
-												}
-											}}
-											onKeyDown={event => {
-												if (event.key === "Enter" && !disabled) {
-													event.preventDefault()
-													descend(directory.data.uuid)
-												}
-											}}
-											className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm focus-ring-row outline-none hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
-										>
-											<DirectoryGlyph
-												color={directory.data.color}
-												className="size-4 shrink-0"
-											/>
-											<span className="min-w-0 flex-1 truncate">{driveItemName(directory)}</span>
-										</button>
-									</li>
-								)
-							})}
-						</ul>
-					)}
-				</div>
+					))}
+				</PickerListShell>
 				<DialogFooter>
 					<Button
 						disabled={

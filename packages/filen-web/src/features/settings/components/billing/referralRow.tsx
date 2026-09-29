@@ -1,10 +1,8 @@
 import { useState } from "react"
 import { useTranslation } from "react-i18next"
-import { toast } from "sonner"
 import { formatBytes } from "@filen/shared"
 import { CopyIcon, CheckIcon } from "lucide-react"
-import { asErrorDTO } from "@/lib/sdk/errors"
-import { errorLabel } from "@/lib/i18n/errorLabel"
+import { copyText } from "@/lib/copyText"
 import { referralLink, referralEarnedStorage } from "@/features/settings/lib/billing"
 import type { AccountQuerySuccess } from "@/queries/account"
 import { Input } from "@/components/ui/input"
@@ -26,16 +24,14 @@ function ReferralRow({ accountQuery }: ReferralRowProps) {
 	const earned = referralEarnedStorage(refStorage, refLimit, referStorage)
 
 	async function handleCopy(): Promise<void> {
-		try {
-			await navigator.clipboard.writeText(link)
-			setCopied(true)
-			toast.success(t("settingsBillingReferralCopied"))
-			setTimeout(() => {
-				setCopied(false)
-			}, 2000)
-		} catch (e) {
-			toast.error(errorLabel(asErrorDTO(e)))
+		if (!(await copyText(link, t("settingsBillingReferralCopied")))) {
+			return
 		}
+
+		setCopied(true)
+		setTimeout(() => {
+			setCopied(false)
+		}, 2000)
 	}
 
 	return (

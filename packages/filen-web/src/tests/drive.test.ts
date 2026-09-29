@@ -204,15 +204,6 @@ function mockFileLink(overrides: Partial<FilePublicLink> = {}): FilePublicLink {
 	}
 }
 
-function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
-	let resolve: (value: T) => void = () => undefined
-	const promise = new Promise<T>(r => {
-		resolve = r
-	})
-
-	return { promise, resolve }
-}
-
 describe("driveListingQueryKey", () => {
 	it("builds the [domain, entity, params] tuple", () => {
 		expect(driveListingQueryKey({ variant: "drive", uuid: "abc" })).toEqual(["drive", "listing", { variant: "drive", uuid: "abc" }])
@@ -500,7 +491,7 @@ describe("destinationDirectoryName", () => {
 
 	it("joins the breadcrumb's resolution while it is still under way instead of asking again", async () => {
 		const [a, b] = [testUuid("a"), testUuid("b")]
-		const worker = deferred<string | null>()
+		const worker = Promise.withResolvers<string | null>()
 		resolveDirectoryName.mockReturnValueOnce(worker.promise)
 
 		const crumb = testQueryClient.query({
@@ -901,7 +892,7 @@ describe("driveListingQueryUpdateGlobal", () => {
 	it("never cancels a read under way, on a listing it changes or not", async () => {
 		const drop = narrowItem(mockDir({ uuid: testUuid("drop") }))
 		const affected = driveListingQueryKey({ variant: "drive", uuid: null })
-		const read = deferred<DriveItem[]>()
+		const read = Promise.withResolvers<DriveItem[]>()
 		testQueryClient.setQueryData(affected, [drop])
 		const refetch = testQueryClient.query({ queryKey: affected, queryFn: () => read.promise, staleTime: 0 })
 
@@ -1415,7 +1406,7 @@ describe("findOwnedListingItem", () => {
 
 		expect(findOwnedListingItem(wanted)?.current).toBe(false)
 
-		const pending = deferred<NormalDirsAndFiles>()
+		const pending = Promise.withResolvers<NormalDirsAndFiles>()
 
 		listDirectory.mockReturnValueOnce(pending.promise)
 
@@ -1591,7 +1582,7 @@ describe("batchListingPatches", () => {
 		const drive = driveListingQueryKey({ variant: "drive", uuid: "parent" })
 		const a = file("a")
 		testQueryClient.setQueryData(drive, [a])
-		const run = deferred<undefined>()
+		const run = Promise.withResolvers<undefined>()
 		const batch = batchListingPatches(() => run.promise)
 
 		driveListingQueryUpdateGlobal({ type: "remove", uuid: a.data.uuid })

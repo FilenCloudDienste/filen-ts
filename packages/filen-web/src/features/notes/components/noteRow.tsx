@@ -1,27 +1,22 @@
 import { type MouseEvent, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { Link } from "@tanstack/react-router"
-import { PinIcon, HeartIcon, MoreHorizontalIcon } from "lucide-react"
+import { PinIcon, HeartIcon } from "lucide-react"
 import type { Note, NoteTag } from "@filen/sdk-rs"
 import { cn, contactDisplayName } from "@filen/shared"
 import { formatRelativeTime } from "@/lib/relativeTime"
 import { useNowMinute } from "@/lib/useNowMinute"
 import { noteIcon } from "@/features/notes/lib/icon.logic"
 import { noteDisplayTitle } from "@/features/notes/lib/displayTitle"
-import {
-	noteRowPreview,
-	noteRowSharedByEmail,
-	noteRowTags,
-	noteRowParticipants,
-	participantAvatarSource
-} from "@/features/notes/lib/noteRow.logic"
-import { contactInitials } from "@/features/contacts/components/contactsList.logic"
+import { selectionAwareLinkClick } from "@/features/drive/lib/listbox"
+import { noteRowPreview, noteRowSharedByEmail, noteRowTags, noteRowParticipants } from "@/features/notes/lib/noteRow.logic"
+import { safeAvatarUrl } from "@/lib/avatarUrl"
 import { NoteContextMenuContent, NoteDropdownMenuContent } from "@/features/notes/components/noteMenu"
 import { type NoteActionDialogKind } from "@/features/notes/components/noteMenu.logic"
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
-import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar"
-import { Button } from "@/components/ui/button"
+import { DropdownMenu } from "@/components/ui/dropdown-menu"
+import { RowMenuTrigger } from "@/components/rowMenuTrigger"
+import { UserAvatar } from "@/components/userAvatar"
 
 export interface NoteRowProps {
 	note: Note
@@ -111,20 +106,7 @@ export function NoteRow({
 							// rows do the same). The multi-selection is a separate fact with no honest ARIA on a
 							// plain list item — it shows as the ring below, plus the bulk bar's own selected count.
 							aria-current={selected ? "page" : undefined}
-							onClick={event => {
-								// Ctrl/Cmd/Shift held: this is a selection gesture, not a navigation intent —
-								// preventDefault blocks BOTH the router's own SPA navigate (which already skips
-								// itself on a modified click, see @tanstack/react-router's isCtrlEvent) AND the
-								// browser's native "open in new tab" default a real anchor would otherwise still
-								// run. A plain click falls through unprevented so navigation proceeds exactly as
-								// before, alongside collapsing the selection to just this note (drive's own
-								// plain-click-selects-one semantics).
-								if (event.metaKey || event.ctrlKey || event.shiftKey) {
-									event.preventDefault()
-								}
-
-								onPointerSelect(event)
-							}}
+							onClick={selectionAwareLinkClick(onPointerSelect)}
 							className="flex min-w-0 flex-1 items-start gap-2.5 rounded-lg text-left focus-ring-row outline-none"
 						>
 							<div className="flex shrink-0 flex-col items-center gap-1.5">
@@ -165,24 +147,16 @@ export function NoteRow({
 									<div className="flex flex-wrap gap-1.5 pt-0.5">
 										{participants.map(participant => {
 											const displayName = contactDisplayName(participant)
-											const source = participantAvatarSource(participant)
+											const source = safeAvatarUrl(participant.avatar)
 
 											return (
-												<Avatar
+												<UserAvatar
 													key={participant.userId.toString()}
+													src={source}
+													name={displayName}
 													size="sm"
-												>
-													{source !== undefined ? (
-														<AvatarImage
-															src={source}
-															alt={displayName}
-															// crossOrigin: require-corp COEP needs a CORS-mode request for this
-															// cross-origin egest url (see avatarCard.tsx's matching comment).
-															crossOrigin="anonymous"
-														/>
-													) : null}
-													<AvatarFallback>{contactInitials(displayName)}</AvatarFallback>
-												</Avatar>
+													alt={displayName}
+												/>
 											)
 										})}
 									</div>
@@ -203,24 +177,9 @@ export function NoteRow({
 							</div>
 						</Link>
 						<DropdownMenu>
-							<DropdownMenuTrigger
-								render={
-									<Button
-										variant="ghost"
-										size="icon-xs"
-										aria-label={t("noteItemMenuTrigger")}
-										// Coarse-pointer fallback — see DriveRow's identical trigger.
-										className="shrink-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 aria-expanded:opacity-100 pointer-coarse:size-8 pointer-coarse:opacity-100 pointer-coarse:[&_svg:not([class*='size-'])]:size-4"
-										onClick={event => {
-											// The button is a sibling of the Link now, not a descendant, so a click here
-											// can never bubble into a navigation — this only stops it reaching the row
-											// div's own onContextMenu, mirroring driveRow.tsx's matching trigger.
-											event.stopPropagation()
-										}}
-									>
-										<MoreHorizontalIcon />
-									</Button>
-								}
+							<RowMenuTrigger
+								label={t("noteItemMenuTrigger")}
+								reveal="plain"
 							/>
 							<NoteDropdownMenuContent
 								note={note}

@@ -18,16 +18,10 @@ import {
 	LogOutIcon,
 	PlusIcon,
 	StarIcon,
-	StarOffIcon,
-	type LucideIcon
+	StarOffIcon
 } from "lucide-react"
+import { type ActionDef } from "@/lib/actionDescriptor"
 import { type NotesKey } from "@/lib/i18n"
-
-export interface NoteActionDef {
-	labelKey: NotesKey
-	icon: LucideIcon
-	destructive?: boolean
-}
 
 // Per-action label + icon (+ destructive styling) facts for the note menu (noteMenu.logic.ts), mirroring
 // drive's ACTION_DEFS split: one place a label/icon can drift from, gating/ordering stays the builder's
@@ -59,4 +53,4 @@ export const NOTE_ACTION_DEFS = {
 	tagFavorite: { labelKey: "noteTagActionFavorite", icon: StarIcon },
 	tagUnfavorite: { labelKey: "noteTagActionUnfavorite", icon: StarOffIcon },
 	tagDelete: { labelKey: "noteTagActionDelete", icon: Trash2Icon, destructive: true }
-} satisfies Record<string, NoteActionDef>
+} satisfies Record<string, ActionDef<NotesKey>>

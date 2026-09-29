@@ -1,9 +1,9 @@
-import type { Chat, ChatMessage, ChatParticipant, MaybeEncrypted, ChatTypingType, UserInfo } from "@filen/sdk-rs"
+import type { Chat, ChatMessage, ChatParticipant, MaybeEncrypted, ChatTypingType } from "@filen/sdk-rs"
 import { notifyManager } from "@tanstack/react-query"
 import { registerSocketHandler, decryptedOrSkip } from "@/lib/sdk/socket"
-import { queryClient } from "@/queries/client"
-import { ACCOUNT_QUERY_KEY } from "@/queries/account"
+import { accountQueryGet } from "@/queries/account"
 import { log } from "@/lib/log"
+import { withoutKey } from "@/lib/utils"
 import { chatsQueryUpdate, chatsQueryUpsert, chatsQueryGet, markChatsListUnsynced } from "@/features/chats/queries/chats"
 import {
 	chatMessagesQueryUpdate,
@@ -12,7 +12,7 @@ import {
 	markChatMessagesUnsynced
 } from "@/features/chats/queries/chatMessages"
 import { refetchChatsAndMessages } from "@/features/chats/lib/refetchChatsAndMessages"
-import { newestMessage } from "@/features/chats/lib/sort"
+import { newestMessage, compareBySentTimestamp } from "@/features/chats/lib/sort"
 import { useSocketStatusStore } from "@/features/chats/store/useSocketStatus"
 import { purgeChatInflightState } from "@/features/chats/lib/inflight"
 import { applyTypingSignal, clearTypingForSender } from "@/features/chats/lib/typing"
@@ -76,14 +76,6 @@ interface TypedChatSocketEvent {
 // broadcast and the park's expiry.
 const OWN_MESSAGE_RECONCILE_DELAY_MS = 3_000
 const FOREIGN_MESSAGE_DELAY_MS = 1
-
-function currentUserId(): bigint | undefined {
-	return queryClient.getQueryData<UserInfo>(ACCOUNT_QUERY_KEY)?.id
-}
-
-function bySentTimestampAsc(a: ChatMessage, b: ChatMessage): number {
-	return a.sentTimestamp === b.sentTimestamp ? 0 : a.sentTimestamp < b.sentTimestamp ? -1 : 1
-}
 
 // Resolve the chat that currently holds `messageUuid` in its message cache — MessageDelete /
 // MessageEmbedDisabled carry only the message uuid (no chat), so mobile searches every cached thread.
@@ -207,7 +199,7 @@ export function handleChatEvent(event: TypedChatSocketEvent): void {
 			// account — run the full local removal (the conversationDeleted path) instead of keeping
 			// a chat whose participants no longer include us. Same fire-and-forget ownership as the
 			// conversationDeleted arm below.
-			const userId = currentUserId()
+			const userId = accountQueryGet()?.id
 
 			if (userId !== undefined && inner.userId === userId) {
 				void handleConversationDeleted(inner.uuid).catch((e: unknown) => {
@@ -245,7 +237,7 @@ export function handleChatEvent(event: TypedChatSocketEvent): void {
 
 function handleMessageNew(msg: ChatMessage): void {
 	const senderId = BigInt(msg.senderId)
-	const userId = currentUserId()
+	const userId = accountQueryGet()?.id
 	const isOwn = userId !== undefined && senderId === userId
 	const park = isOwn && sync.outboxRole !== "follower"
 	// Snapshot focus NOW (at event time) — the delayed patch below runs later, by when the user may have
@@ -268,7 +260,7 @@ function handleMessageNew(msg: ChatMessage): void {
 				// already present (our own send's commit reconciled the optimistic copy, or a prior echo
 				// landed), leave it untouched instead of re-appending a duplicate.
 				chatMessagesQueryAppend(msg.chat, prev =>
-					prev.some(m => m.uuid === msg.uuid) ? prev : [...prev, message].sort(bySentTimestampAsc)
+					prev.some(m => m.uuid === msg.uuid) ? prev : [...prev, message].sort(compareBySentTimestamp)
 				)
 
 				// Always refresh lastMessage/timestamp; for a FOREIGN message in the FOCUSED chat, advance
@@ -316,17 +308,7 @@ export async function handleConversationDeleted(uuid: string): Promise<void> {
 	await purgeChatInflightState(uuid)
 
 	// Drop any typing state for the gone chat.
-	useChatTypingStore.getState().setTyping(prev => {
-		if (prev[uuid] === undefined) {
-			return prev
-		}
-
-		const updated = { ...prev }
-
-		Reflect.deleteProperty(updated, uuid)
-
-		return updated
-	})
+	useChatTypingStore.getState().setTyping(prev => withoutKey(prev, uuid))
 
 	// Cache removal — the open thread route resolves the chat from the list cache, so removing it here
 	// re-renders that route to the select-a-conversation placeholder (the web nav-away: no imperative

@@ -102,7 +102,7 @@ function HelpEntry() {
 function AccountMenu() {
 	const { t } = useTranslation(["common", "auth"])
 	const navigate = useNavigate()
-	const { setTheme } = useTheme()
+	const { toggleTheme } = useTheme()
 	const accountQuery = useAccountQuery()
 	const hasUnsyncedWork = useHasUnsyncedWork()
 	const hasActiveTransfers = useHasActiveTransfers()
@@ -191,11 +191,7 @@ function AccountMenu() {
 								<Kbd action="app.openShortcuts" />
 							</span>
 						</DropdownMenuItem>
-						<DropdownMenuItem
-							onClick={() => {
-								setTheme(document.documentElement.classList.contains("dark") ? "light" : "dark")
-							}}
-						>
+						<DropdownMenuItem onClick={toggleTheme}>
 							<SunIcon className="dark:hidden" />
 							<MoonIcon className="hidden dark:block" />
 							{t("toggleTheme")}

@@ -1,8 +1,8 @@
-import { type LucideIcon } from "lucide-react"
 import { ACTION_DEFS } from "@/features/drive/lib/actionDefs"
 import { canMoveVariant, type DriveVariant } from "@/features/drive/lib/preferences"
 import { aggregateDriveSelectionFlags, type DriveSelectionFlags } from "@/features/drive/lib/selectionFlags"
 import { canShareVariant, isReadOnlySharedVariant } from "@/features/drive/lib/share/gating"
+import { type ActionDescriptor } from "@/lib/actionDescriptor"
 import { type DriveKey } from "@/lib/i18n"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { setFavoritedItems } from "@/features/drive/lib/actions"
@@ -16,18 +16,11 @@ import { useDriveStore } from "@/features/drive/store/useDriveStore"
 // other link/access kinds.
 export type BulkDialogActionKind = "move" | "copy" | "share" | "unshare" | "trash" | "delete" | "restoreSelected" | "disableLink"
 
-interface BulkActionDescriptorShared {
-	id: "favorite" | "move" | "copy" | "share" | "unshare" | "trash" | "restoreSelected" | "delete" | "download" | "disableLink"
-	labelKey: DriveKey
-	icon: LucideIcon
-	destructive?: boolean
-}
-
-// "direct" calls the bulk favorite SET helper immediately; "dialog" asks the host to open the given
-// kind — mirrors itemMenu.logic.ts's ItemActionDescriptor split (same rationale: a discriminated
-// union instead of an optional field, so a caller can never observe an inconsistent combination).
-export type BulkActionDescriptor =
-	(BulkActionDescriptorShared & { run: "direct" }) | (BulkActionDescriptorShared & { run: "dialog"; dialogKind: BulkDialogActionKind })
+export type BulkActionDescriptor = ActionDescriptor<
+	DriveKey,
+	"favorite" | "move" | "copy" | "share" | "unshare" | "trash" | "restoreSelected" | "delete" | "download" | "disableLink",
+	BulkDialogActionKind
+>
 
 // Pure gating builder for the bulk-action bar — mirrors itemMenu.logic.ts's driveItemActions
 // (variant/flag-gated descriptor list, trivially testable without rendering anything). Covers all 6

@@ -1,5 +1,5 @@
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
-import { previewType, PREVIEW_MAX_BYTES, SPREADSHEET_MAX_BYTES } from "@/features/drive/lib/preview.logic"
+import { bufferedSizeCap, previewType } from "@/features/drive/lib/preview.logic"
 
 // Pure decisions behind the public-link download + preview surface — no worker, no DOM, no React, so
 // every cap and branch is directly unit-testable. The service worker cannot serve an anonymous
@@ -35,7 +35,7 @@ export type AnonPreviewability = "previewable" | "too-large" | "unpreviewable"
 // streamed category is NOT exempt from the size cap here: anon preview is ALWAYS buffered (no SW
 // stream), so an oversized video/audio/image is capped the same as a pdf/text — the view then offers
 // download instead. A non-file / undecryptable / unknown-category item is simply not previewable.
-export function anonPreviewability(item: DriveItem, cap: bigint = PREVIEW_MAX_BYTES): AnonPreviewability {
+export function anonPreviewability(item: DriveItem): AnonPreviewability {
 	const base = asDirectoryOrFile(item)
 
 	if (base.type !== "file" || base.data.undecryptable) {
@@ -48,15 +48,9 @@ export function anonPreviewability(item: DriveItem, cap: bigint = PREVIEW_MAX_BY
 		return "unpreviewable"
 	}
 
-	// A RAW's preview is the embedded JPEG the SDK lifts out with a few range reads — the file itself
-	// never enters JS memory, so the buffered cap has nothing to bound (canPreview's same exemption).
-	if (category === "rawImage") {
-		return "previewable"
-	}
+	const cap = bufferedSizeCap(category)
 
-	return base.data.size <= (category === "spreadsheet" && SPREADSHEET_MAX_BYTES < cap ? SPREADSHEET_MAX_BYTES : cap)
-		? "previewable"
-		: "too-large"
+	return cap === null || base.data.size <= cap ? "previewable" : "too-large"
 }
 
 // The in-memory sink for a non-FSA zip download: the SDK streams the archive into `writable`, chunks
@@ -78,13 +72,7 @@ export function createCollectingSink(cap: bigint = PUBLIC_BUFFERED_DOWNLOAD_MAX_
 	const chunks: Uint8Array[] = []
 	let total = 0n
 	let exceeded = false
-	let resolve: (blob: Blob) => void
-	let reject: (reason: unknown) => void
-
-	const done = new Promise<Blob>((res, rej) => {
-		resolve = res
-		reject = rej
-	})
+	const { promise: done, resolve, reject } = Promise.withResolvers<Blob>()
 
 	done.catch(() => undefined)
 

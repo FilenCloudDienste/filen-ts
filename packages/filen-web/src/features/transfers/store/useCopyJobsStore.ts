@@ -1,5 +1,6 @@
 import { create } from "zustand"
 import { type CopyJob } from "@/features/drive/lib/copy.logic"
+import { withoutKey } from "@/lib/utils"
 
 // The detail behind each copy job's single transfers row, keyed by the same id. In memory only, like
 // useTransfersStore: a copy doesn't outlive the tab that runs it.
@@ -31,7 +32,11 @@ export const useCopyJobsStore = create<CopyJobsStore>(set => ({
 		set({ cancelPromptId: id })
 	},
 	remove: id => {
-		set(state => (id in state.jobs ? { jobs: Object.fromEntries(Object.entries(state.jobs).filter(([key]) => key !== id)) } : state))
+		set(state => {
+			const jobs = withoutKey(state.jobs, id)
+
+			return jobs === state.jobs ? state : { jobs }
+		})
 	}
 }))
 

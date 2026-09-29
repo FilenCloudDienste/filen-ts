@@ -175,7 +175,7 @@ export function AudioPlayerBar() {
 							value={Math.min(positionMs, seekMax)}
 							aria-label={t("seek")}
 							disabled={seekMax === 0}
-							className="h-1 min-w-0 flex-1 cursor-pointer accent-primary"
+							className="h-1 min-w-0 flex-1 accent-primary"
 							onChange={event => {
 								audioEngine.seek(Number(event.target.value) / 1000)
 							}}
@@ -206,7 +206,7 @@ export function AudioPlayerBar() {
 						step={0.01}
 						value={muted ? 0 : volume}
 						aria-label={t("volume")}
-						className="hidden h-1 w-24 cursor-pointer accent-primary lg:inline-block"
+						className="hidden h-1 w-24 accent-primary lg:inline-block"
 						onChange={event => {
 							audioEngine.setVolume(Number(event.target.value))
 						}}

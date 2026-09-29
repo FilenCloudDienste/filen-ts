@@ -1,5 +1,5 @@
-import useNotesInflightStore from "@/features/notes/store/useNotesInflight"
-import useChatsInflightStore from "@/features/chats/store/useChatsInflight"
+import { useNotesInflightStore } from "@/features/notes/store/useNotesInflight"
+import { useChatsInflightStore } from "@/features/chats/store/useChatsInflight"
 import { hasUnsyncedNotes, hasUnsyncedChatSends } from "@/features/shell/hooks/useUnsyncedWork.logic"
 
 // True while either durable outbox still holds something the server has never seen. Sign-out cancels

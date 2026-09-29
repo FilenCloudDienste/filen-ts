@@ -98,5 +98,3 @@ export function NoteRemoteEditDialog({ note }: { note: Note }) {
 		/>
 	)
 }
-
-export default NoteRemoteEditDialog

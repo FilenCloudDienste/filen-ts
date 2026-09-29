@@ -1,6 +1,6 @@
 import { hashNoteContent } from "@filen/shared"
 import { localNoteContent } from "@/features/notes/lib/localContent"
-import useNotesInflightStore from "@/features/notes/store/useNotesInflight"
+import { useNotesInflightStore } from "@/features/notes/store/useNotesInflight"
 
 // What the note editor in THIS tab shows and has typed, per note. The outbox is shared by every tab (the
 // leader's queue, mirrored in the followers), so its entries can be another tab's typing; this records

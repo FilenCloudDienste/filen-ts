@@ -16,16 +16,10 @@ import {
 	StarOffIcon,
 	Trash2Icon,
 	UserMinusIcon,
-	UsersIcon,
-	type LucideIcon
+	UsersIcon
 } from "lucide-react"
+import { type ActionDef } from "@/lib/actionDescriptor"
 import { type DriveKey } from "@/lib/i18n"
-
-export interface ActionDef {
-	labelKey: DriveKey
-	icon: LucideIcon
-	destructive?: boolean
-}
 
 // Per-action label + icon (+ destructive styling) facts shared by the single-item menu
 // (itemMenu.logic.ts) and the bulk-action bar (bulkActionBar.logic.ts) so the two builders can't
@@ -57,4 +51,4 @@ export const ACTION_DEFS = {
 	deletePermanently: { labelKey: "driveActionDeletePermanently", icon: Trash2Icon, destructive: true },
 	emptyTrash: { labelKey: "driveActionEmptyTrash", icon: Trash2Icon, destructive: true },
 	disableLink: { labelKey: "driveLinkDisableAction", icon: Link2OffIcon, destructive: true }
-} satisfies Record<string, ActionDef>
+} satisfies Record<string, ActionDef<DriveKey>>

@@ -1,4 +1,5 @@
-import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
+import { asErrorDTO } from "@/lib/sdk/errors"
+import { type VoidActionOutcome } from "@/lib/actions/outcome"
 
 // Injected collaborators, same shape as changeEmail.logic.ts's runChangeEmailAttempt — testable
 // without a worker or a React render. Both the versioning and login-alerts toggles share this exact
@@ -11,9 +12,7 @@ export interface PreferenceToggleDeps {
 	patch: (enabled: boolean) => void
 }
 
-export type PreferenceToggleOutcome = { status: "success" } | { status: "error"; dto: ErrorDTO }
-
-export async function runPreferenceToggle(deps: PreferenceToggleDeps, next: boolean): Promise<PreferenceToggleOutcome> {
+export async function runPreferenceToggle(deps: PreferenceToggleDeps, next: boolean): Promise<VoidActionOutcome> {
 	try {
 		await deps.setEnabled(next)
 	} catch (e) {

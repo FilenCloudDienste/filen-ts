@@ -2,7 +2,7 @@
 // node (pdfViewer.logic.test.ts) with no pdf.js, canvas, or DOM involved.
 
 import { type CSSProperties } from "react"
-import { isSafeLinkHref } from "@/features/preview/components/docxViewer.logic"
+import { isSafeAbsoluteHref } from "@/lib/safeUrl"
 
 // Two IntersectionObserver rootMargin values per page: RENDER (tight) triggers the first render as a
 // page approaches the viewport; EVICT (generous) releases that page's canvas only once it has
@@ -164,7 +164,7 @@ function asRect(value: unknown): [number, number, number, number] | null {
 }
 
 // Keeps only entries that are Links with a usable URL. The scheme allowlist is the preview surface's
-// single URL-safety verdict (isSafeLinkHref), the same one the docx and markdown viewers apply — a PDF
+// single URL-safety verdict (isSafeAbsoluteHref), the same one the docx and markdown viewers apply — a PDF
 // can carry a javascript:/data: URI action just as a crafted docx can. An entry with no `url` is an
 // internal/destination link, which this viewer cannot resolve and therefore never renders.
 export function pdfLinkAnnotations(annotations: readonly unknown[]): PdfLinkAnnotation[] {
@@ -177,7 +177,7 @@ export function pdfLinkAnnotations(annotations: readonly unknown[]): PdfLinkAnno
 
 		const url = entry["url"]
 
-		if (entry["subtype"] !== "Link" || typeof url !== "string" || !isSafeLinkHref(url)) {
+		if (entry["subtype"] !== "Link" || typeof url !== "string" || !isSafeAbsoluteHref(url)) {
 			continue
 		}
 

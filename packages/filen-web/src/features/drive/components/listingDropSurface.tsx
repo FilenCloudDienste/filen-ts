@@ -33,10 +33,7 @@ export function ListingDropSurface({ uuid, ancestry, disabled, children }: Listi
 	return (
 		<div
 			className="relative flex min-h-0 flex-1 flex-col pt-4"
-			onDragEnter={drop.onDragEnter}
-			onDragOver={drop.onDragOver}
-			onDragLeave={drop.onDragLeave}
-			onDrop={drop.onDrop}
+			{...drop.handlers}
 		>
 			{children}
 			{highlight === false ? null : (

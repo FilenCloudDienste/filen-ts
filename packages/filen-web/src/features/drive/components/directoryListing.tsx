@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type ReactElement, type ReactNode } from 
 import { useTranslation } from "react-i18next"
 import { useNavigate } from "@tanstack/react-router"
 import { useShallow } from "zustand/shallow"
-import { SearchXIcon, CircleAlertIcon, EyeOffIcon } from "lucide-react"
+import { CircleAlertIcon, EyeOffIcon } from "lucide-react"
 import {
 	resolveEffectiveSort,
 	resolveEffectiveViewMode,
@@ -17,6 +17,7 @@ import {
 	DEFAULT_SORT_PREFERENCES,
 	DEFAULT_VIEW_MODE_PREFERENCES,
 	DEFAULT_HIDE_HIDDEN_ITEMS,
+	getPerDirectoryKey,
 	type DriveVariant,
 	type DriveLocation,
 	type DriveViewMode
@@ -39,7 +40,7 @@ import {
 } from "@/features/drive/queries/drive"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import { GRID_INSET, ROW_HEIGHT, TILE_ROW_HEIGHT, TILE_WIDTH } from "@/features/drive/lib/gridLayout"
-import { isAnyMenuOpen } from "@/lib/keymap/dialogGuard"
+import { isAnyDialogOpen, isAnyMenuOpen } from "@/lib/keymap/dialogGuard"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { useAction } from "@/lib/keymap/useAction"
 import { useBlockedUsers } from "@/features/contacts/hooks/useBlockedUsers"
@@ -77,13 +78,14 @@ import { useDriveVirtualizer } from "@/features/drive/hooks/useDriveVirtualizer"
 import { useDriveDirectorySizes } from "@/features/drive/hooks/useDriveDirectorySizes"
 import { useDriveListboxNav } from "@/features/drive/hooks/useDriveListboxNav"
 import { useMarqueeSelection } from "@/features/drive/hooks/useMarqueeSelection"
+import { MarqueeRect } from "@/features/drive/components/marqueeRect"
 import { useClickAwayDeselect } from "@/features/drive/hooks/useClickAwayDeselect"
 import { useDriveDialogHost } from "@/features/drive/hooks/useDriveDialogHost"
 import { useDriveClipboard } from "@/features/drive/hooks/useDriveClipboard"
 import { useDirectoryDestination } from "@/features/drive/hooks/useDirectoryDestination"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { Spinner } from "@/components/ui/spinner"
-import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
+import { EmptyMessage, NoResultsMessage } from "@/components/emptyMessage"
 import { reroutedRoute, subscribeBranchChanges } from "@/features/drive/lib/branchChanges"
 import { cachedOwnParents } from "@/features/drive/lib/ownAncestry"
 import { canDragVariant } from "@/features/drive/lib/dnd.logic"
@@ -181,7 +183,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	// a sibling sharedIn/sharedOut folder. Reset IN RENDER (react.dev's "adjusting state when a prop
 	// changes" pattern), not a useEffect — a synchronous setState inside an effect body is a React
 	// Compiler lint error (cascading-render risk) here, and this needs no external system either way.
-	const listingKey = `${variant}:${uuid ?? ""}`
+	const listingKey = getPerDirectoryKey(driveLocation)
 	const [localFilter, setLocalFilter] = useState("")
 	const [localFilterListingKey, setLocalFilterListingKey] = useState(listingKey)
 
@@ -444,8 +446,8 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 
 	// Registered above at module scope. Browser default for mod+a is "select all page text" — must
 	// preventDefault or the native selection would visibly compete with the drive-item selection.
-	// Guarded on isDialogOpen (see its own comment) so a background Cmd+A can't select items behind
-	// an open dialog — returns before preventDefault, so the browser default runs instead in that case.
+	// Stands down while a dialog is open so a background Cmd+A can't select items behind it — returns
+	// before preventDefault, so the browser default runs instead in that case.
 	// Withheld (preventDefault still runs, so the browser default stays suppressed either way)
 	// while the cache-backed search is still converging (warming/searching-empty/background) — only
 	// offered once the result set has settled, so the user can't "select all" a partial/still-growing
@@ -453,7 +455,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	useAction(
 		"drive.selectAll",
 		keyboardEvent => {
-			if (isDialogOpen) {
+			if (isAnyDialogOpen()) {
 				return
 			}
 
@@ -470,7 +472,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 			useDriveStore.getState().setSelectedItems(selectableForSelectAll(sortedItems))
 		},
 		undefined,
-		[isDialogOpen, sortedItems, search.active, search.status]
+		[sortedItems, search.active, search.status]
 	)
 
 	// Registered above at module scope. No preventDefault — bare Escape has no disruptive browser
@@ -492,18 +494,18 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	)
 
 	// Registered above at module scope. Net-new shortcut — no listbox handling to reconcile. Guarded
-	// on isDialogOpen so it can't flip the background view mode while a dialog is open.
+	// so it can't flip the background view mode while a dialog is open.
 	useAction(
 		"drive.toggleView",
 		() => {
-			if (isDialogOpen) {
+			if (isAnyDialogOpen()) {
 				return
 			}
 
 			void applyViewModeChange(effectiveViewMode === "list" ? "grid" : "list")
 		},
 		undefined,
-		[isDialogOpen, effectiveViewMode, applyViewModeChange]
+		[effectiveViewMode, applyViewModeChange]
 	)
 
 	// Registered above at module scope. No preventDefault — F2 has no disruptive browser default.
@@ -512,7 +514,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	useAction(
 		"drive.rename",
 		() => {
-			if (isDialogOpen) {
+			if (isAnyDialogOpen()) {
 				return
 			}
 
@@ -525,12 +527,12 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 			handleItemAction("rename", item)
 		},
 		undefined,
-		[isDialogOpen, sortedItems, safeActiveIndex, variant, isOnline]
+		[sortedItems, safeActiveIndex, variant, isOnline]
 	)
 
 	// Registered above at module scope. preventDefault unconditionally — Backspace's browser default
 	// (navigate back) must never fire while this listing has focus, guarded case or not. Guards: empty
-	// selection, a wired dialog already open (isDialogOpen — see its own comment), and every surface the
+	// selection, a dialog already open, and every surface the
 	// bulk bar offers no Trash on: trash itself (permanent delete stays menu-only + explicitly confirmed,
 	// never a bare keypress) and Shared with me (items someone else owns).
 	useAction(
@@ -540,7 +542,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 
 			if (
 				reconciledSelectedItems.length === 0 ||
-				isDialogOpen ||
+				isAnyDialogOpen() ||
 				!isOnline ||
 				!driveBulkActions(variant, aggregateDriveSelectionFlags(reconciledSelectedItems)).some(
 					descriptor => descriptor.id === "trash"
@@ -552,7 +554,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 			handleBulkDialogAction("trash")
 		},
 		undefined,
-		[reconciledSelectedItems, isDialogOpen, variant, isOnline]
+		[reconciledSelectedItems, variant, isOnline]
 	)
 
 	// Registered above at module scope. preventDefault unconditionally — mod+s's browser default
@@ -570,7 +572,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 			keyboardEvent.preventDefault()
 
 			if (
-				isDialogOpen ||
+				isAnyDialogOpen() ||
 				variant === "trash" ||
 				!isOnline ||
 				!isBulkDownloadEnabled(reconciledSelectedItems) ||
@@ -582,7 +584,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 			void startDownloads(reconciledSelectedItems)
 		},
 		undefined,
-		[reconciledSelectedItems, isDialogOpen, variant, isOnline]
+		[reconciledSelectedItems, variant, isOnline]
 	)
 
 	// mod+c/x/v and the Paste entry in the upload menus. A paste always lands in the directory on
@@ -593,8 +595,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 		ancestry: pathUuids,
 		listing: listingQuery.data,
 		selectedItems: reconciledSelectedItems,
-		isOnline,
-		isDialogOpen
+		isOnline
 	})
 
 	const isSearchTruncated = search.active && search.total > BigInt(resolvedCount)
@@ -605,17 +606,11 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 
 	function renderAllHiddenEmpty(): ReactNode {
 		return (
-			<Empty>
-				<EmptyHeader>
-					<EmptyMedia>
-						<EyeOffIcon />
-					</EmptyMedia>
-					<EmptyTitle>{t("driveHiddenItemsAllHiddenTitle")}</EmptyTitle>
-					<EmptyDescription>
-						{t("driveHiddenItemsAllHiddenBody", { setting: t("driveShowHiddenItems"), display: t("driveDisplay") })}
-					</EmptyDescription>
-				</EmptyHeader>
-			</Empty>
+			<EmptyMessage
+				icon={EyeOffIcon}
+				title={t("driveHiddenItemsAllHiddenTitle")}
+				description={t("driveHiddenItemsAllHiddenBody", { setting: t("driveShowHiddenItems"), display: t("driveDisplay") })}
+			/>
 		)
 	}
 
@@ -640,14 +635,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 		) : localSearchActive ? (
 			// The local-filter empty state — a non-matching query on a non-empty listing reads as "no matches", never
 			// the generic "nothing here yet" onboarding copy (same distinction the contacts list makes for its own search).
-			<Empty>
-				<EmptyHeader>
-					<EmptyMedia>
-						<SearchXIcon />
-					</EmptyMedia>
-					<EmptyTitle>{t("driveSearchNoResults")}</EmptyTitle>
-				</EmptyHeader>
-			</Empty>
+			<NoResultsMessage />
 		) : (
 			<EmptyState
 				variant="empty"
@@ -663,7 +651,6 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 							{/* The toolbar's copy owns the shortcut: both registering it would open two dialogs. */}
 							<NewDirectory
 								parentUuid={uuid}
-								dialogOpen={isDialogOpen}
 								hiddenNotice={hideHidden}
 								shortcut={false}
 							/>
@@ -714,21 +701,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 							role="presentation"
 							style={{ position: "relative", width: "100%", height: activeVirtualizer.getTotalSize() }}
 						>
-							{/* Marquee rectangle — content-space, so it stretches correctly as the listing auto-scrolls.
-							    Non-interactive (pointer-events-none) so it never intercepts the ongoing drag. */}
-							{marquee.rect ? (
-								<div
-									aria-hidden="true"
-									data-testid="marquee-rect"
-									className="pointer-events-none absolute z-20 rounded-xs border border-primary/60 bg-primary/15"
-									style={{
-										left: marquee.rect.left,
-										top: marquee.rect.top,
-										width: marquee.rect.right - marquee.rect.left,
-										height: marquee.rect.bottom - marquee.rect.top
-									}}
-								/>
-							) : null}
+							<MarqueeRect rect={marquee.rect} />
 							{effectiveViewMode === "list"
 								? listVirtualizer.getVirtualItems().map(virtualRow => {
 										const item = sortedItems[virtualRow.index]
@@ -869,7 +842,6 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 					<NewDirectory
 						parentUuid={uuid}
 						disabled={writeDisabled}
-						dialogOpen={isDialogOpen}
 						offline={!isOnline}
 						hiddenNotice={hideHidden}
 					/>
@@ -926,7 +898,6 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 									setLocalFilter("")
 								}
 					}
-					dialogOpen={isDialogOpen}
 				/>
 			</div>
 			<UploadDropzone
@@ -953,29 +924,14 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 								</div>
 							) : search.status === "terminal" ? (
 								<div className="flex flex-1 overflow-y-auto">
-									<Empty>
-										<EmptyHeader>
-											<EmptyMedia>
-												<CircleAlertIcon />
-											</EmptyMedia>
-											<EmptyTitle>{t("driveSearchUnavailable")}</EmptyTitle>
-										</EmptyHeader>
-									</Empty>
+									<EmptyMessage
+										icon={CircleAlertIcon}
+										title={t("driveSearchUnavailable")}
+									/>
 								</div>
 							) : sortedItems.length === 0 ? (
 								<div className="flex flex-1 overflow-y-auto">
-									{allHidden ? (
-										renderAllHiddenEmpty()
-									) : (
-										<Empty>
-											<EmptyHeader>
-												<EmptyMedia>
-													<SearchXIcon />
-												</EmptyMedia>
-												<EmptyTitle>{t("driveSearchNoResults")}</EmptyTitle>
-											</EmptyHeader>
-										</Empty>
-									)}
+									{allHidden ? renderAllHiddenEmpty() : <NoResultsMessage />}
 								</div>
 							) : (
 								renderListboxContent()

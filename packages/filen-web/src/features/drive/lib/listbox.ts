@@ -1,6 +1,8 @@
 // Roving-tabindex cursor math for the drive listbox — kept as pure functions so the surrounding
 // component only ever wires DOM events to arithmetic, never re-derives it inline.
 
+import { hasClosest } from "@/lib/domTarget"
+
 // Clamps a cursor into [0, length-1]. Callers must not invoke this against an empty list (the
 // listbox itself is not rendered in that state — see directoryListing.tsx's empty branch); the 0
 // fallback here exists only so a transient zero-length render can never throw.
@@ -12,15 +14,19 @@ export function clampListboxIndex(index: number, length: number): number {
 	return Math.min(Math.max(index, 0), length - 1)
 }
 
-// Inclusive index range between an anchor and the active cursor, always ascending regardless of
-// which side is larger — the shape Shift+Arrow/Shift+Click both need to turn into a selection.
-export function listboxRange(anchor: number, active: number): number[] {
-	const start = Math.min(anchor, active)
+// The items between an anchor and the active cursor, inclusive and ascending regardless of which side
+// is larger — the shape Shift+Arrow/Shift+Click both turn into a selection. Out-of-range indices are
+// skipped.
+export function listboxRangeItems<T>(items: readonly T[], anchor: number, active: number): T[] {
 	const end = Math.max(anchor, active)
-	const range: number[] = []
+	const range: T[] = []
 
-	for (let i = start; i <= end; i++) {
-		range.push(i)
+	for (let i = Math.min(anchor, active); i <= end; i++) {
+		const item = items[i]
+
+		if (item !== undefined) {
+			range.push(item)
+		}
 	}
 
 	return range
@@ -81,12 +87,6 @@ export function listboxKeyTarget(key: string, activeIndex: number, itemCount: nu
 // the cursor option's tab stop alongside the option itself.
 const INTERACTIVE_KEY_TARGET_SELECTOR = "button, a, input, select, textarea"
 
-// Probed by shape, not with `instanceof Element`, so this module stays testable in the DOM-free node
-// environment.
-function hasClosest(target: EventTarget | null): target is EventTarget & { closest: (selector: string) => Element | null } {
-	return typeof target === "object" && target !== null && typeof (target as { closest?: unknown }).closest === "function"
-}
-
 // True when a keydown started on such a control rather than on the option itself. The listbox leaves
 // those keys alone: its preventDefault on Enter/Space would cancel the native click the control's menu
 // opens on. Shared by the drive listbox and the photos grid.
@@ -111,4 +111,36 @@ export function isPlainClickDeselect(
 // (read as a mouse by isPlainClickDeselect).
 export function clickPointerType(event: MouseEvent): string {
 	return "pointerType" in event && typeof event.pointerType === "string" ? event.pointerType : ""
+}
+
+// The modifier flags a click carries, decoupled from React's MouseEvent so pure resolvers can take a
+// hand-built object.
+export interface ClickModifiers {
+	shiftKey: boolean
+	metaKey: boolean
+	ctrlKey: boolean
+}
+
+// Ctrl/Cmd toggles one item in or out of the selection (Shift extends a range instead).
+export function isToggleModifier(modifiers: Pick<ClickModifiers, "metaKey" | "ctrlKey">): boolean {
+	return modifiers.metaKey || modifiers.ctrlKey
+}
+
+// Any of Shift/Ctrl/Cmd makes a click a selection gesture rather than an open or navigation.
+export function isSelectionGesture(modifiers: ClickModifiers): boolean {
+	return modifiers.shiftKey || isToggleModifier(modifiers)
+}
+
+// Click handler for a row's navigating Link. A selection gesture preventDefaults, blocking both the
+// router's SPA navigate and the browser's native open-in-new-tab; a plain click still navigates.
+export function selectionAwareLinkClick<E extends ClickModifiers & { preventDefault: () => void }>(
+	onPointerSelect: (event: E) => void
+): (event: E) => void {
+	return event => {
+		if (isSelectionGesture(event)) {
+			event.preventDefault()
+		}
+
+		onPointerSelect(event)
+	}
 }

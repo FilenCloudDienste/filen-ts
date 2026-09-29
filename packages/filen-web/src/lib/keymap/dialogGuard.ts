@@ -35,7 +35,11 @@ export function isAnyMenuOpen(): boolean {
 }
 
 // Both of the above as one selector, for a caller that asks "is ANY layer still stacked over the page"
-// rather than which kind. Exported because the e2e teardown helper (e2e/helpers/listing.ts) needs the
-// same answer from outside the page, and the two selectors above are subtle enough (see their comments)
-// that a second copy of them would drift.
+// rather than which kind, in one DOM scan. The selector itself is exported because the e2e teardown
+// helper (e2e/helpers/listing.ts) needs the same answer from outside the page, and the two selectors
+// above are subtle enough (see their comments) that a second copy of them would drift.
 export const OPEN_OVERLAY_SELECTOR = `${OPEN_DIALOG_SELECTOR}, ${OPEN_MENU_SELECTOR}`
+
+export function isAnyOverlayOpen(): boolean {
+	return document.querySelector(OPEN_OVERLAY_SELECTOR) !== null
+}

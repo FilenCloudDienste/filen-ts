@@ -1,11 +1,10 @@
-import { useState, type MouseEvent } from "react"
+import { type MouseEvent } from "react"
 import { useTranslation } from "react-i18next"
-import { CheckIcon, MoreHorizontalIcon, PlayIcon, StarIcon } from "lucide-react"
+import { CheckIcon, PlayIcon, StarIcon } from "lucide-react"
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import { canWriteVariant, type DriveVariant } from "@/features/drive/lib/preferences"
-import { ItemIcon } from "@/features/drive/components/itemIcon"
+import { ItemThumbnail } from "@/features/drive/components/itemThumbnail"
 import { sharedIdentityLabel } from "@/features/drive/lib/format"
-import { invalidateThumbnail } from "@/features/drive/lib/thumbnails"
 import { splatToUuids } from "@/features/drive/lib/navigate"
 import { canDragVariant } from "@/features/drive/lib/dnd.logic"
 import { buildDragSourceProps } from "@/features/drive/lib/dnd"
@@ -17,13 +16,12 @@ import { DriveBulkContextMenuContent } from "@/features/drive/components/bulkMen
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import { useDriveClipboardStore } from "@/features/drive/store/useDriveClipboardStore"
 import { showVideoBadge } from "@/features/drive/components/driveTile.logic"
-import { useThumbnail } from "@/features/drive/hooks/useThumbnail"
 import { dropHighlightClass, useDriveDropTarget } from "@/features/drive/hooks/useDriveDropTarget"
 import { LISTING_SPRING } from "@/features/drive/lib/springLoad"
 import { cn, driveItemName } from "@filen/shared"
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
-import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { Button } from "@/components/ui/button"
+import { DropdownMenu } from "@/components/ui/dropdown-menu"
+import { RowMenuTrigger } from "@/components/rowMenuTrigger"
 
 export interface DriveTileProps {
 	item: DriveItem
@@ -107,10 +105,6 @@ export function DriveTile({
 	// Only the two shared variants' ROOT listing resolve a counterparty; every other variant/nested
 	// item gets null (no badge) — see sharedIdentityLabel's own doc comment.
 	const shared = sharedIdentityLabel(item, variant)
-	const thumbUrl = useThumbnail(item)
-	// Downgrades a torn/corrupt cache entry back to the icon without waiting for a remount — see the
-	// img's own onError below. Never reset back to false: this mount already gave up on this uuid.
-	const [thumbFailed, setThumbFailed] = useState(false)
 	const bulkMenu = selected && selectedItems.length > 1
 	// Cut for a later paste: dimmed, Explorer-style, until the paste or the next copy/cut. The ⋯ trigger
 	// keeps its own hover-only opacity.
@@ -157,37 +151,19 @@ export function DriveTile({
 								onCursorMove(index)
 							}
 						}}
-						onDragEnter={drop.onDragEnter}
-						onDragOver={drop.onDragOver}
-						onDragLeave={drop.onDragLeave}
-						onDrop={drop.onDrop}
+						{...drop.handlers}
 					>
 						{/* The tile's face: a square that fills the tile's width, thumbnail or icon alike —
 						the icon case keeps a tinted backdrop so it reads as the same card shape rather than
 						a bare glyph floating on the canvas. An opaque thumbnail paints over the tile's own
 						aria-selected background, so selection needs its own ring here too — see
 						colorDialog.tsx's identical ring-on-a-filled-swatch idiom. */}
-						<div className="relative aspect-square w-full overflow-hidden rounded-xl bg-muted/40 group-aria-selected/tile:ring-2 group-aria-selected/tile:ring-ring">
-							{thumbUrl !== null && !thumbFailed ? (
-								<img
-									src={thumbUrl}
-									alt=""
-									draggable={false}
-									decoding="async"
-									className="size-full object-cover"
-									onError={() => {
-										invalidateThumbnail(item.data.uuid)
-										setThumbFailed(true)
-									}}
-								/>
-							) : (
-								<div className="flex size-full items-center justify-center">
-									<ItemIcon
-										item={item}
-										className="size-14"
-									/>
-								</div>
-							)}
+						<div className="relative flex aspect-square w-full items-center justify-center overflow-hidden rounded-xl bg-muted/40 group-aria-selected/tile:ring-2 group-aria-selected/tile:ring-ring">
+							<ItemThumbnail
+								item={item}
+								imgClassName="size-full object-cover"
+								iconClassName="size-14"
+							/>
 							{selected ? (
 								// Explicit selection badge (mobile parity: a filled checkmark over a
 								// dimmed thumbnail) IN ADDITION to the aria-selected ring above, not instead of it —
@@ -229,28 +205,11 @@ export function DriveTile({
 								</div>
 							) : null}
 							<DropdownMenu>
-								<DropdownMenuTrigger
-									render={
-										<Button
-											variant="ghost"
-											size="icon-xs"
-											aria-label={t("driveItemMenuTrigger")}
-											// Roving-tabindex-friendly — see DriveRow's identical comment.
-											tabIndex={active ? 0 : -1}
-											// Coarse-pointer fallback — see DriveRow's identical trigger.
-											className="absolute top-1 right-1 shrink-0 opacity-0 group-hover/tile:opacity-100 focus-visible:opacity-100 aria-expanded:opacity-100 pointer-coarse:size-8 pointer-coarse:opacity-100 pointer-coarse:[&_svg:not([class*='size-'])]:size-4"
-											onClick={event => {
-												// Must not select the tile — see itemMenu.tsx's own onClick for why a click
-												// inside the (portaled) menu content needs the same guard.
-												event.stopPropagation()
-											}}
-											onDoubleClick={event => {
-												event.stopPropagation()
-											}}
-										>
-											<MoreHorizontalIcon />
-										</Button>
-									}
+								<RowMenuTrigger
+									label={t("driveItemMenuTrigger")}
+									reveal="tile"
+									// Roving-tabindex-friendly — see DriveRow's identical comment.
+									tabIndex={active ? 0 : -1}
 								/>
 								{/* The ⋯ dropdown stays single-item — see DriveRow's identical note. */}
 								<DriveDropdownMenuContent

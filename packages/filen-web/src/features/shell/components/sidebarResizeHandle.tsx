@@ -31,6 +31,7 @@ export function SidebarResizeHandle({ ariaLabel, handle, className }: SidebarRes
 			onPointerDown={handle.onPointerDown}
 			onPointerMove={handle.onPointerMove}
 			onPointerUp={handle.onPointerUp}
+			onPointerCancel={handle.onPointerCancel}
 			onKeyDown={handle.onKeyDown}
 			onKeyUp={handle.onKeyUp}
 			onBlur={handle.onBlur}

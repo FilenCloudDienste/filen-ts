@@ -23,6 +23,7 @@ export type MessageActionId = "reply" | "copy" | "edit" | "delete" | "retry" | "
 interface MessageActionDescriptorShared {
 	labelKey: ChatsKey
 	icon: LucideIcon
+	destructive?: boolean
 	// Present-but-disabled (never absent) once set to false — same field and semantics as
 	// ChatActionDescriptor's. Only applyMessageOfflineGate below ever sets it.
 	enabled?: boolean

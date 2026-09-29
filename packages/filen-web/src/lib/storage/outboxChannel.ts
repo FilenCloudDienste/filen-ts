@@ -6,9 +6,10 @@ import { log } from "@/lib/log"
 // Shared leader-owned-outbox core, reused by the notes AND chats send outboxes (both ride the SAME db-lock
 // leadership — no second election). It owns the mechanical, feature-agnostic half of a coordinator: the
 // cross-tab channel plumbing (a dedicated BroadcastChannel), the leader/follower role wiring off the db-lock
-// signal, and the promotion replay hook. Each feature keeps its own thin coordinator (message routing +
-// arktype schemas) and its own Sync class — only the shapes flowing over the channel differ; the plumbing is
-// identical. This channel NEVER touches the db RPC protocol.
+// signal, the promotion replay hook, and the role-routed dispatch of the shared message kinds. Each feature
+// keeps its own thin coordinator (arktype schemas + any feature-only kinds) and its own Sync class — only the
+// shapes flowing over the channel differ; the plumbing is identical. This channel NEVER touches the db RPC
+// protocol.
 
 // follower → leader: forward one edit (the feature payload) / drop an item's queued edits / request a flush /
 // request state. leader → followers: authoritative state + a takeover announcement + what is being pushed
@@ -134,6 +135,75 @@ export interface OutboxLeadershipTarget {
 	start: () => void
 	startAsFollower: () => void
 	promoteToLeader: () => void
+}
+
+// What routeOutboxMessage drives: the role read plus the Sync methods each shared message kind lands on.
+export interface OutboxRouteTarget<E, S> {
+	readonly outboxRole: OutboxRole
+	ingestRemoteEnqueue: (msg: E) => void
+	executeNow: () => void
+	broadcastState: () => void
+	applyLeaderState: (state: S) => void
+	resendUnacked: () => void
+}
+
+// A feature's payload schemas and the labels an invalid payload is logged under. Hold it in a module const
+// so dispatch allocates nothing per message.
+export interface OutboxRoute<E, S> {
+	enqueueSchema: Type<E>
+	stateSchema: Type<S>
+	enqueueLabel: string
+	stateLabel: string
+}
+
+// Dispatch the shared message kinds by the outbox's CURRENT role (role flips live on promotion): the leader
+// half handles follower forwards, the follower half handles leader broadcasts. A message meant for the other
+// role, or a feature-only kind, is ignored here — a tab never acts on its own category.
+export function routeOutboxMessage<E, S>(msg: OutboxChannelMsg, target: OutboxRouteTarget<E, S>, route: OutboxRoute<E, S>): void {
+	if (target.outboxRole === "leader") {
+		switch (msg.kind) {
+			case "enqueue": {
+				const decoded = decodeOutboxPayload(msg.payload, route.enqueueSchema, route.enqueueLabel)
+
+				if (decoded !== null) {
+					target.ingestRemoteEnqueue(decoded)
+				}
+
+				return
+			}
+			case "executeNow": {
+				target.executeNow()
+
+				return
+			}
+			case "stateRequest": {
+				target.broadcastState()
+
+				return
+			}
+			default:
+				return
+		}
+	}
+
+	switch (msg.kind) {
+		case "state": {
+			const decoded = decodeOutboxPayload(msg.payload, route.stateSchema, route.stateLabel)
+
+			if (decoded !== null) {
+				target.applyLeaderState(decoded)
+			}
+
+			return
+		}
+		case "leaderHello": {
+			target.resendUnacked()
+
+			return
+		}
+		default:
+			return
+	}
 }
 
 // Wire a leader-owned outbox to the db-lock leadership: create its dedicated channel, let the caller attach

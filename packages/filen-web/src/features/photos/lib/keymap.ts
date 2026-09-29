@@ -5,7 +5,7 @@ import type { ActionDef } from "@/lib/keymap/registry"
 // keep in sync. Same combos as drive's, safe because the two routes are mutually exclusive.
 export const PHOTOS_ACTIONS: readonly ActionDef[] = [
 	{ id: "photos.selectAll", defaultCombo: "mod+a", scope: "photos", descriptionKey: "drive:driveCommandSelectAll" },
-	{ id: "photos.clearSelection", defaultCombo: "escape", scope: "photos", descriptionKey: "drive:driveCommandClearSelection" },
+	{ id: "photos.clearSelection", defaultCombo: "escape", scope: "photos", descriptionKey: "common:clearSelection" },
 	{ id: "photos.trash", defaultCombo: "delete,backspace", scope: "photos", descriptionKey: "drive:driveCommandTrash" },
 	// Puts the selection on the drive clipboard, to be pasted into a Cloud Drive directory.
 	{ id: "photos.copy", defaultCombo: "mod+c", scope: "photos", descriptionKey: "drive:driveCommandCopy" },

@@ -1,9 +1,8 @@
 import type { Chat, ChatParticipant, Contact } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
 import { chatsQueryUpsert } from "@/features/chats/queries/chats"
-import { asErrorDTO } from "@/lib/sdk/errors"
-import { runOp, type ActionOutcome } from "@/lib/actions/outcome"
-import { type BulkFailure, type BulkOutcome } from "@/features/drive/lib/bulk"
+import { attemptOp, type ActionOutcome } from "@/lib/actions/outcome"
+import { type BulkFailure, type BulkOutcome } from "@/lib/actions/bulk"
 
 export type { ActionOutcome }
 
@@ -28,12 +27,14 @@ export async function addChatParticipants(chat: Chat, contacts: readonly Contact
 
 	let updated = chat
 
-	try {
-		for (const contact of toAdd) {
-			updated = await runOp(sdkApi.addChatParticipant(updated, contact))
+	for (const contact of toAdd) {
+		const outcome = await attemptOp(sdkApi.addChatParticipant(updated, contact))
+
+		if (outcome.status === "error") {
+			return outcome
 		}
-	} catch (e) {
-		return { status: "error", dto: asErrorDTO(e) }
+
+		updated = outcome.item
 	}
 
 	chatsQueryUpsert(updated)
@@ -48,17 +49,13 @@ export async function removeChatParticipant(chat: Chat, participant: ChatPartici
 		return { status: "success", item: chat }
 	}
 
-	let updated: Chat
+	const outcome = await attemptOp(sdkApi.removeChatParticipant(chat, participant.userId))
 
-	try {
-		updated = await runOp(sdkApi.removeChatParticipant(chat, participant.userId))
-	} catch (e) {
-		return { status: "error", dto: asErrorDTO(e) }
+	if (outcome.status === "success") {
+		chatsQueryUpsert(outcome.item)
 	}
 
-	chatsQueryUpsert(updated)
-
-	return { status: "success", item: updated }
+	return outcome
 }
 
 // Bulk counterpart of removeChatParticipant, for the owner-only multi-select in chatParticipantsDialog.

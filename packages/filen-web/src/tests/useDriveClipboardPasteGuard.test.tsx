@@ -19,6 +19,7 @@ vi.mock("@/features/drive/lib/clipboard", async importOriginal => ({
 }))
 vi.mock("@/features/drive/lib/clipboardRecheck", () => ({ recheckClipboard: () => Promise.resolve(true) }))
 vi.mock("@/features/drive/queries/drive", () => ({
+	DRIVE_LISTING_KEY_PREFIX: ["drive", "listing"],
 	cachedDirectoryName: () => "inner",
 	destinationDirectoryName: () => Promise.resolve("inner"),
 	directoryNameScope: () => "drive"
@@ -73,8 +74,7 @@ describe("useDriveClipboard paste guard", () => {
 				ancestry: [testUuid("inner")],
 				listing: [],
 				selectedItems: [],
-				isOnline: true,
-				isDialogOpen: false
+				isOnline: true
 			})
 		)
 	}

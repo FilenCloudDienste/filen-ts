@@ -2,7 +2,6 @@ import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { sdkApi } from "@/lib/sdk/client"
-import { asErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { downloadTextFile } from "@/features/settings/lib/downloadTextFile"
 import { useIsOnline } from "@/lib/useIsOnline"
@@ -36,7 +35,7 @@ function ExportMasterKeysRow({ accountQuery }: ExportMasterKeysRowProps) {
 			setConfirmOpen(false)
 			accountQueryUpdate(prev => ({ ...prev, didExportMasterKeys: true }))
 		} catch (e) {
-			toast.error(errorLabel(asErrorDTO(e)))
+			toast.error(errorLabel(e))
 		} finally {
 			setPending(false)
 		}

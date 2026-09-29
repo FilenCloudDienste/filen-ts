@@ -1,26 +1,16 @@
-import { useEffect, type ReactNode } from "react"
-import { useTranslation } from "react-i18next"
-import { toast } from "sonner"
+import { type ReactNode } from "react"
 import { useDialogHost } from "@/lib/useDialogHost"
 import { type ItemActionDialogKind } from "@/features/drive/components/itemMenu.logic"
 import { type BulkDialogActionKind } from "@/features/drive/components/bulkActionBar.logic"
-import { renamePhotoItem, trashPhotos, patchPhotoFavoriteFromPreview } from "@/features/photos/lib/actions"
+import { renamePhotoItem, trashPhotos, patchPhoto } from "@/features/photos/lib/actions"
 import { type PhotoItem } from "@/features/photos/lib/captureSort"
 import { toastBulkOutcome } from "@/features/drive/lib/bulkToast"
-import { errorLabel } from "@/lib/i18n/errorLabel"
 import { usePhotosStore } from "@/features/photos/store/usePhotosStore"
 import { type DriveItem } from "@/features/drive/lib/item"
-import { stepPreviewIndex } from "@/features/drive/lib/preview.logic"
-import { previewProtectedUuid, reconcilePreviewSources, subscribePreviewReconcile } from "@/features/preview/lib/previewReconcile"
+import { keepPreviewOpenOnNavigate, usePreviewDialogState } from "@/features/preview/hooks/usePreviewDialogState"
 import { PreviewOverlay } from "@/features/preview/components/previewOverlay"
-import { PHOTOS_PREVIEW_HIDDEN_ACTION_IDS } from "@/features/photos/lib/itemActions"
-import { VersionsDialog } from "@/features/drive/components/versionsDialog"
-import { InfoDialog } from "@/features/drive/components/infoDialog"
-import { LinkDialog } from "@/features/drive/components/linkDialog"
-import { ContactPickerDialog } from "@/features/drive/components/contactPickerDialog"
-import { MoveTargetDialog } from "@/features/drive/components/moveTargetDialog"
-import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
-import { InputDialog } from "@/components/dialogs/inputDialog"
+import { PHOTOS_HIDDEN_ACTION_IDS } from "@/features/photos/lib/itemActions"
+import { ItemDialog, RenameItemDialog, TrashConfirmDialog } from "@/features/drive/components/itemDialogs"
 
 // The photos surface's own dialog kind — narrower than drive's ActiveDialogKind (no move/color/
 // unshare/delete/import/emptyTrash/restoreSelected/disableLink: none of those ever reach a photos item
@@ -30,17 +20,10 @@ import { InputDialog } from "@/components/dialogs/inputDialog"
 // its own dedicated openPreview entry point.
 type PhotosDialogKind = "rename" | "copy" | "trash" | "versions" | "info" | "link" | "share" | "preview"
 
-// The preview arm holds the frozen pager snapshot + position the reconcile subscription below folds
-// events into — a DriveItem[], since a reconciled rename re-narrows its item.
+// The preview arm holds the frozen pager snapshot + position usePreviewDialogState folds events into
+// — a DriveItem[], since a reconciled rename re-narrows its item.
 type ActivePhotosDialog =
 	{ kind: Exclude<PhotosDialogKind, "preview">; items: PhotoItem[] } | { kind: "preview"; items: DriveItem[]; index: number }
-
-// The preview overlay owns its own navigation semantics — same rule and rationale as drive's
-// keepPreviewOpenOnNavigate: its dirty-buffer guard, not the dialog host, decides what a route change
-// means for unsaved edits.
-function keepPreviewOpenOnNavigate(dialog: ActivePhotosDialog): boolean {
-	return dialog.kind === "preview"
-}
 
 export interface PhotosDialogHost {
 	isDialogOpen: boolean
@@ -62,56 +45,13 @@ interface UsePhotosDialogHostParams {
 // overlay does — the overlay itself and the info dialog — get "drive", see their render-site comments),
 // so there is no photos-specific fork of any of them beyond the preview's one extra favorite-patch prop.
 export function usePhotosDialogHost({ rootUuid, selectedItems }: UsePhotosDialogHostParams): PhotosDialogHost {
-	const { t } = useTranslation(["drive", "photos", "common"])
-	const { activeDialog, setActiveDialog, dialogPending, setDialogPending, isDialogOpen, closeActiveDialog } =
+	const { activeDialog, setActiveDialog, dialogPending, isDialogOpen, closeActiveDialog, runDialogPending, runDialogOutcome } =
 		useDialogHost<ActivePhotosDialog>({ keepOpenOnNavigate: keepPreviewOpenOnNavigate })
 
-	// Keeps an OPEN photos preview in sync with realtime drive mutations — the same previewReconcile bus
-	// useDriveDialogHost subscribes to, safe to share: at most one of the two hosts is ever mounted at a
-	// time (drive's directory listing and the photos grid are different routes), and the bus tolerates
-	// multiple subscribers by design (previewReconcile.ts's own Set). A no-op while no photos preview is
-	// open (the updater short-circuits on any non-preview dialog).
-	useEffect(() => {
-		return subscribePreviewReconcile(event => {
-			setActiveDialog(prev => {
-				if (prev?.kind !== "preview") {
-					return prev
-				}
-
-				const state = { items: prev.items, index: prev.index }
-				const next = reconcilePreviewSources(state, event, previewProtectedUuid(state))
-
-				if (next === null) {
-					return null
-				}
-
-				// Most events are about files the pager does not hold: no new dialog state, no re-render.
-				if (next === state) {
-					return prev
-				}
-
-				return { ...prev, items: next.items, index: next.index }
-			})
-		})
-	}, [setActiveDialog])
-
-	// Steps the open preview by one sibling (no wrap) — mirrors useDriveDialogHost's identical stepPreview,
-	// the single implementation behind PreviewOverlay's onStep prop.
-	function stepPreview(delta: 1 | -1): void {
-		setActiveDialog(prev => {
-			if (prev?.kind !== "preview") {
-				return prev
-			}
-
-			const current = prev.items[prev.index]
-
-			if (!current) {
-				return prev
-			}
-
-			return { ...prev, index: stepPreviewIndex(current.data.uuid, prev.items, delta) }
-		})
-	}
+	// A removal from the preview patches no photos listing: a remote move can keep the photo under the
+	// root, while the server's echo of a trash or delete drops it from the listing without a walk
+	// (invalidatePhotosListing). Only the open pager itself converges here.
+	const { stepPreview, removeCurrentPreviewItem } = usePreviewDialogState(setActiveDialog)
 
 	// Opens the preview overlay for a frozen item snapshot at the given position — called from the
 	// grid's own tile click handler with the whole sorted media set, never
@@ -121,30 +61,10 @@ export function usePhotosDialogHost({ rootUuid, selectedItems }: UsePhotosDialog
 		setActiveDialog({ kind: "preview", items, index })
 	}
 
-	// Drops the acted-on slot out of the frozen pager snapshot — mirrors useDriveDialogHost's identical
-	// removeCurrentPreviewItem. No photos-listing patch here: this also runs for a remote move, which can
-	// keep the photo under the root, while the server's echo of a trash or delete drops the photo from the
-	// listing without a walk (invalidatePhotosListing). This function only keeps the OPEN pager itself
-	// converging, the same uuid-keyed race-proofing the drive host's own doc comment explains.
-	function removeCurrentPreviewItem(frozenUuid: string): void {
-		setActiveDialog(prev => {
-			if (prev?.kind !== "preview") {
-				return prev
-			}
-
-			const next = reconcilePreviewSources({ items: prev.items, index: prev.index }, { type: "removed", uuid: frozenUuid })
-
-			if (next === null) {
-				return null
-			}
-
-			return { ...prev, items: next.items, index: next.index }
-		})
-	}
-
 	// itemMenu.logic.ts's ItemActionDialogKind is wider than PhotosDialogKind (drive's own menu can
-	// dispatch move/color/unshare/delete/import too) — photosItemActions never produces a descriptor
-	// carrying one of those, so this narrows defensively and no-ops rather than widening the type.
+	// dispatch move/color/unshare/delete/import too) — a photos item under PHOTOS_HIDDEN_ACTION_IDS never
+	// gets a descriptor carrying one of those, so this narrows defensively and no-ops rather than
+	// widening the type.
 	function handleItemAction(kind: ItemActionDialogKind, item: PhotoItem): void {
 		if (
 			kind !== "rename" &&
@@ -170,22 +90,11 @@ export function usePhotosDialogHost({ rootUuid, selectedItems }: UsePhotosDialog
 	}
 
 	async function handleRenameSubmit(item: PhotoItem, value: string): Promise<void> {
-		setDialogPending(true)
-		const outcome = await renamePhotoItem(rootUuid, item, value.trim())
-		setDialogPending(false)
-
-		if (outcome.status === "error") {
-			toast.error(errorLabel(outcome.dto))
-			return
-		}
-
-		closeActiveDialog()
+		await runDialogOutcome(() => renamePhotoItem(rootUuid, item, value.trim()))
 	}
 
 	async function handleTrashConfirm(items: PhotoItem[]): Promise<void> {
-		setDialogPending(true)
-		const outcome = await trashPhotos(rootUuid, items)
-		setDialogPending(false)
+		const outcome = await runDialogPending(() => trashPhotos(rootUuid, items))
 		closeActiveDialog()
 		toastBulkOutcome(outcome)
 		usePhotosStore.getState().removeFromSelection(outcome.succeeded.map(item => item.data.uuid))
@@ -205,112 +114,45 @@ export function usePhotosDialogHost({ rootUuid, selectedItems }: UsePhotosDialog
 				}
 
 				return (
-					<InputDialog
-						open
+					<RenameItemDialog
+						item={item}
 						pending={dialogPending}
-						title={t("driveActionRename")}
-						body={t("driveRenameDialogBody")}
-						label={t("driveNewDirectoryLabel")}
-						initialValue={item.data.decryptedMeta?.name ?? ""}
-						submitLabel={t("driveActionRename")}
-						validate={value => value.trim().length > 0}
-						onOpenChange={open => {
-							if (!open) {
-								closeActiveDialog()
-							}
-						}}
+						onClose={closeActiveDialog}
 						onSubmit={value => {
 							void handleRenameSubmit(item, value)
 						}}
 					/>
 				)
 			}
-			// Drive's destination picker in its copy mode: the copy lands in the Cloud Drive tree and runs
-			// on with its own progress card; the selection stays.
-			case "copy":
-				return activeDialog.items.length > 0 ? (
-					<MoveTargetDialog
-						items={activeDialog.items}
-						mode="copy"
-						onClose={closeActiveDialog}
-					/>
-				) : null
 			case "trash":
 				return (
-					<ConfirmDialog
-						open
+					<TrashConfirmDialog
+						count={activeDialog.items.length}
 						pending={dialogPending}
-						title={t("driveTrashConfirmTitle")}
-						body={t("driveTrashConfirmBody", { count: activeDialog.items.length })}
-						confirmLabel={t("driveActionTrash")}
-						cancelLabel={t("common:cancel")}
-						onOpenChange={open => {
-							if (!open) {
-								closeActiveDialog()
-							}
-						}}
+						onClose={closeActiveDialog}
 						onConfirm={() => {
 							void handleTrashConfirm(activeDialog.items)
 						}}
 					/>
 				)
-			case "versions": {
-				const item = activeDialog.items[0]
-
-				if (!item) {
-					return null
-				}
-
-				return (
-					<VersionsDialog
-						file={item}
-						onClose={closeActiveDialog}
-					/>
-				)
-			}
-			case "info": {
-				const item = activeDialog.items[0]
-
-				if (!item) {
-					return null
-				}
-
-				return (
-					<InfoDialog
-						item={item}
-						// Same reasoning as the preview overlay's own variant below: a photos item is always an
-						// owned, non-trashed file under the user's own drive, so it carries no sharing
-						// counterparty row.
-						variant="drive"
-						remoteInfoEnabled
-						onClose={closeActiveDialog}
-					/>
-				)
-			}
-			case "link": {
-				const item = activeDialog.items[0]
-
-				if (!item) {
-					return null
-				}
-
-				return (
-					<LinkDialog
-						item={item}
-						onClose={closeActiveDialog}
-					/>
-				)
-			}
+			case "copy":
+			case "versions":
+			case "info":
+			case "link":
 			case "share":
-				return activeDialog.items.length > 0 ? (
-					<ContactPickerDialog
+				return (
+					<ItemDialog
+						kind={activeDialog.kind}
 						items={activeDialog.items}
+						// A photos item is always an owned, non-trashed file under the user's own drive, so it
+						// carries no sharing counterparty row.
+						variant="drive"
 						onClose={closeActiveDialog}
 						onShared={succeededUuids => {
 							usePhotosStore.getState().removeFromSelection(succeededUuids)
 						}}
 					/>
-				) : null
+				)
 			case "preview":
 				return (
 					<PreviewOverlay
@@ -325,9 +167,9 @@ export function usePhotosDialogHost({ rootUuid, selectedItems }: UsePhotosDialog
 						onClose={closeActiveDialog}
 						onItemRemoved={removeCurrentPreviewItem}
 						onFavoriteToggled={item => {
-							patchPhotoFavoriteFromPreview(rootUuid, item)
+							patchPhoto(rootUuid, item)
 						}}
-						hiddenMenuActionIds={PHOTOS_PREVIEW_HIDDEN_ACTION_IDS}
+						hiddenMenuActionIds={PHOTOS_HIDDEN_ACTION_IDS}
 					/>
 				)
 		}

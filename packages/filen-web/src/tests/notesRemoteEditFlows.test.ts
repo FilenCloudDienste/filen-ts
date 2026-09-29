@@ -35,7 +35,7 @@ import { ACCOUNT_QUERY_KEY } from "@/queries/account"
 import { NOTES_QUERY_KEY } from "@/features/notes/queries/notes"
 import { noteContentQueryKey } from "@/features/notes/queries/noteContent"
 import { sync } from "@/features/notes/lib/sync"
-import useNotesInflightStore, { beginEditingSession } from "@/features/notes/store/useNotesInflight"
+import { useNotesInflightStore, beginEditingSession } from "@/features/notes/store/useNotesInflight"
 import { useNotesRemoteEditStore } from "@/features/notes/store/useNoteRemoteEdit"
 import { handleNoteEvent, keepMineOverRemoteEdit, reloadRemoteEdit } from "@/features/notes/lib/socketHandlers"
 import { heldNotes, releaseAllNoteHolds } from "@/features/notes/lib/remoteEditHolds"
@@ -91,15 +91,6 @@ function contentEdited(content: string, editorId: number): Extract<SocketEvent, 
 			editedTimestamp: 999n
 		}
 	}
-}
-
-function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
-	let resolve!: (value: T) => void
-	const promise = new Promise<T>(r => {
-		resolve = r
-	})
-
-	return { promise, resolve }
 }
 
 async function tick(): Promise<void> {
@@ -188,7 +179,7 @@ describe("notes — this tab's own push", () => {
 		openNote()
 		type("v1")
 
-		const peek = deferred<string | undefined>()
+		const peek = Promise.withResolvers<string | undefined>()
 
 		getNoteContent.mockReturnValueOnce(peek.promise)
 		setNoteContent.mockImplementation(n => Promise.resolve(n))
@@ -249,7 +240,7 @@ describe("notes — answering the question", () => {
 		type("mine")
 
 		const cloud = cloudOf("old")
-		const response = deferred<Note>()
+		const response = Promise.withResolvers<Note>()
 
 		setNoteContent.mockImplementationOnce((_n, content) => {
 			cloud.set(content)
@@ -488,7 +479,7 @@ describe("notes — this browser's own writes outside the typing", () => {
 		listNotes.mockResolvedValue([note])
 		getNoteContent.mockResolvedValue("old")
 
-		const response = deferred<Note>()
+		const response = Promise.withResolvers<Note>()
 
 		setNoteContent.mockImplementationOnce(() => response.promise)
 		setNoteContent.mockImplementation(n => Promise.resolve(n))
@@ -596,7 +587,7 @@ describe("notes — a follower's keystroke typed before it heard its push land",
 		openNote()
 
 		const cloud = cloudOf("old")
-		const response = deferred<Note>()
+		const response = Promise.withResolvers<Note>()
 
 		setNoteContent.mockImplementationOnce((_n, content) => {
 			cloud.set(content)
@@ -779,7 +770,7 @@ describe("notes — a push's base, and who hears of an overwrite", () => {
 		seedTabEditor(note.uuid, "a:1", "B0", "B0")
 
 		const cloud = cloudOf("B0")
-		const response = deferred<Note>()
+		const response = Promise.withResolvers<Note>()
 
 		setNoteContent.mockImplementationOnce((_n, content) => {
 			cloud.set(content)
@@ -834,7 +825,7 @@ describe("notes — a push's base, and who hears of an overwrite", () => {
 		seedTabEditor(note.uuid, "a:1", "D", "B0")
 
 		const cloud = cloudOf("B0")
-		const response = deferred<Note>()
+		const response = Promise.withResolvers<Note>()
 
 		setNoteContent.mockImplementationOnce((_n, content) => {
 			cloud.set(content)
@@ -952,7 +943,7 @@ describe("notes — what a tab's editor shows, and which echoes are its own", ()
 				})
 		)
 		// The pushes stay out, so the queue can be looked at.
-		const pushes = deferred<Note>()
+		const pushes = Promise.withResolvers<Note>()
 
 		setNoteContent.mockImplementation(() => pushes.promise)
 		sync.start()
@@ -977,7 +968,7 @@ describe("notes — what a tab's editor shows, and which echoes are its own", ()
 		seedTabEditor(note.uuid, "a:1", "D", "B0")
 
 		const cloud = cloudOf("B0")
-		const response = deferred<Note>()
+		const response = Promise.withResolvers<Note>()
 
 		setNoteContent.mockImplementationOnce((_n, content) => {
 			cloud.set(content)
@@ -1007,7 +998,7 @@ describe("notes — what a tab's editor shows, and which echoes are its own", ()
 		seedTabEditor(note.uuid, "a:1", "B0", "B0")
 
 		const cloud = cloudOf("B0")
-		const response = deferred<Note>()
+		const response = Promise.withResolvers<Note>()
 
 		if (failFirst) {
 			setNoteContent.mockImplementationOnce(() => Promise.reject(new Error("fetch failed")))

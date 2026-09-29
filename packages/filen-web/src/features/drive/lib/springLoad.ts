@@ -1,3 +1,5 @@
+import { prefersReducedMotion } from "@/lib/motion"
+
 // Spring-loaded directories (Finder's name): a drag that rests on a directory it could drop into opens it
 // after a delay, and keeps going there. The timing lives here, in one place.
 
@@ -39,10 +41,6 @@ export function springBlinkSchedule(timing: SpringTiming, reducedMotion: boolean
 		atMs: start + index * SPRING_LOAD_BLINK_PHASE_MS,
 		state: index % 2 === 0 ? ("off" as const) : ("on" as const)
 	}))
-}
-
-function prefersReducedMotion(): boolean {
-	return typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches
 }
 
 interface Armed {

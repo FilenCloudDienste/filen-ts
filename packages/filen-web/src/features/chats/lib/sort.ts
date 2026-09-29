@@ -7,6 +7,7 @@ import {
 	type BlockedUsers
 } from "@filen/shared"
 import type { Chat, ChatMessage, ChatMessagePartial } from "@filen/sdk-rs"
+import { safeAvatarUrl } from "@/lib/avatarUrl"
 
 // Conversation-list ordering — ported from
 // `filen-mobile/src/features/chats/components/list/index.tsx:36-45`, not a guess. There is no
@@ -39,6 +40,11 @@ function compareChats(a: Chat, b: Chat): number {
 // Returns a NEW array, never mutates the input.
 export function sortChats(chats: readonly Chat[]): Chat[] {
 	return [...chats].sort(compareChats)
+}
+
+// Oldest-first message order: send order and thread order both rest on it. Bigint-safe three-way compare.
+export function compareBySentTimestamp(a: { sentTimestamp: bigint }, b: { sentTimestamp: bigint }): number {
+	return a.sentTimestamp === b.sentTimestamp ? 0 : a.sentTimestamp < b.sentTimestamp ? -1 : 1
 }
 
 // The lastMessage a chat's row takes from `incoming`: never an older one than it already shows. A parked
@@ -76,9 +82,9 @@ export function chatDisplayName(chat: Chat, currentUserId: bigint, soloFallback:
 	return resolveChatParticipantsDisplayName(others, soloFallback)
 }
 
-// Participant-derived avatar image (mobile's own rule, list/chat/index.tsx): the other participants sans
-// self, keeping only a real http avatar URL. A 1:1 uses the other person's image; anything else has no
-// single representative image and falls back to undefined (the caller renders the display-name initial).
+// Participant-derived avatar image: the other participants sans self, keeping only a real avatar URL. A
+// 1:1 uses the other person's image; anything else has no single representative image and falls back to
+// undefined (the caller renders the display-name initial).
 // Shared by the sidebar row (chatRow.tsx) and the thread header (messageThread.tsx).
 export function chatAvatarUrl(chat: Chat, currentUserId: bigint | undefined): string | undefined {
 	const others = chat.participants.filter(p => p.userId !== currentUserId)
@@ -87,9 +93,7 @@ export function chatAvatarUrl(chat: Chat, currentUserId: bigint | undefined): st
 		return undefined
 	}
 
-	const avatar = others[0]?.avatar
-
-	return avatar?.startsWith("http") === true ? avatar : undefined
+	return safeAvatarUrl(others[0]?.avatar)
 }
 
 // lastMessage preview-line derivation — the "last-message" tier ONLY of the full precedence

@@ -53,15 +53,6 @@ function ok(id: bigint): UserEventResult {
 const PAGE_ONE = [ok(30n), ok(29n), ok(28n)]
 const PAGE_TWO = [ok(27n), ok(26n)]
 
-function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
-	let resolve!: (value: T) => void
-	const promise = new Promise<T>(r => {
-		resolve = r
-	})
-
-	return { promise, resolve }
-}
-
 function wrapper({ children }: { children: ReactNode }) {
 	return createElement(QueryClientProvider, { client: queryClient, children })
 }
@@ -193,7 +184,7 @@ describe("account events request counts", () => {
 		mountEvents()
 		await drain()
 
-		const refresh = deferred<UserEventResult[]>()
+		const refresh = Promise.withResolvers<UserEventResult[]>()
 		getUserEvents.mockImplementationOnce(() => refresh.promise).mockResolvedValueOnce(PAGE_TWO)
 		handleGeneralEvent(newEvent())
 		await act(async () => {
@@ -350,7 +341,7 @@ describe("account events slice bound", () => {
 		mountEvents()
 		await drain()
 
-		const older = deferred<UserEventResult[]>()
+		const older = Promise.withResolvers<UserEventResult[]>()
 		getUserEvents.mockImplementationOnce(() => older.promise).mockResolvedValueOnce([ok(40n), ok(39n)])
 
 		let result: { newCount: number; terminate: boolean } | undefined

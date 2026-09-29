@@ -25,7 +25,7 @@ vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 import { queryClient as testQueryClient } from "@/queries/client"
 import { NOTES_QUERY_KEY, notesQueryGet } from "@/features/notes/queries/notes"
 import { addNoteParticipants, removeNoteParticipant, setNoteParticipantPermission } from "@/features/notes/lib/participants"
-import { participantRows, contactsAvailableToAdd } from "@/features/notes/components/participantsDialog.logic"
+import { participantRows } from "@/features/notes/components/participantsDialog.logic"
 import { deriveBlockedUsers } from "@filen/shared"
 
 beforeEach(() => {
@@ -257,23 +257,5 @@ describe("participantRows — blocked cross-reference", () => {
 
 		expect(rows.find(r => r.participant.userId === 2n)?.blocked).toBe(true)
 		expect(rows.find(r => r.participant.userId === 1n)?.blocked).toBe(false)
-	})
-})
-
-describe("contactsAvailableToAdd", () => {
-	it("filters out contacts already a participant, preserving source order", () => {
-		const note = mockNote({ participants: [mockParticipant({ userId: 5n })] })
-		const already = mockContact({ userId: 5n })
-		const fresh1 = mockContact({ uuid: testUuid("c1"), userId: 6n })
-		const fresh2 = mockContact({ uuid: testUuid("c2"), userId: 7n })
-
-		expect(contactsAvailableToAdd([already, fresh1, fresh2], note)).toEqual([fresh1, fresh2])
-	})
-
-	it("returns every contact when none are participants yet", () => {
-		const note = mockNote({ participants: [] })
-		const contacts = [mockContact({ userId: 1n }), mockContact({ userId: 2n })]
-
-		expect(contactsAvailableToAdd(contacts, note)).toEqual(contacts)
 	})
 })

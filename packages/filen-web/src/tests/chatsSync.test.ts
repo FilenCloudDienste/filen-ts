@@ -47,7 +47,7 @@ import { retryInflightMessage, removeInflightMessage } from "@/features/chats/li
 import { buildOptimisticMessage, type OptimisticSender } from "@/features/chats/lib/sync.logic"
 import { chatMessagesQueryGet } from "@/features/chats/queries/chatMessages"
 import { chatsQueryGet, chatsQueryUpdate, chatsQueryUpsert } from "@/features/chats/queries/chats"
-import useChatsInflightStore, { type ChatMessageWithInflightId, type InflightChatMessages } from "@/features/chats/store/useChatsInflight"
+import { useChatsInflightStore, type ChatMessageWithInflightId, type InflightChatMessages } from "@/features/chats/store/useChatsInflight"
 
 const SENDER: OptimisticSender = { id: 7n, email: "me@filen.io", avatarUrl: undefined, nickName: "Me" }
 

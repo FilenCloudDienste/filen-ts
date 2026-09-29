@@ -5,7 +5,6 @@ import { SearchIcon, UsersIcon } from "lucide-react"
 import { toast } from "sonner"
 import type { BlockedContact, Contact, ContactRequestIn, ContactRequestOut } from "@filen/sdk-rs"
 import { useContactsQuery, useContactRequestsQuery } from "@/features/contacts/queries/contacts"
-import { asErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { useDialogHost } from "@/lib/useDialogHost"
 import { useIsOnline } from "@/lib/useIsOnline"
@@ -27,9 +26,9 @@ import {
 	blockContact,
 	unblockContact,
 	messageContact,
-	runContactsBulk,
 	type VoidActionOutcome
 } from "@/features/contacts/lib/actions"
+import { runBulkOutcomes } from "@/lib/actions/bulk"
 import { toastContactsBulkOutcome } from "@/features/contacts/lib/bulkToast"
 import { resolveSelectedContacts, type ContactSectionKey } from "@/features/contacts/lib/selection"
 import { useContactsListSelection } from "@/features/contacts/hooks/useContactsListSelection"
@@ -47,12 +46,10 @@ import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { LoadingState } from "@/components/loadingState"
+import { BULK_BAR_MIN_SELECTION } from "@/components/selectionActionBar"
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { cn } from "@filen/shared"
-
-// The floating bulk bar mounts at this many selected — a single selection is already fully served by
-// that row's own action buttons.
-const BULK_BAR_MIN_SELECTION = 2
+import { SURFACE_RING } from "@/components/ui/surface"
 
 // Every section's rows sit in one of these: a rounded, ringed panel (ui/card.tsx's ring language) with
 // hairline dividers between rows.
@@ -86,7 +83,8 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 	const offlineTitle = !isOnline ? t("common:offlineActionDisabled") : undefined
 	const [search, setSearch] = useState("")
 	const selection = useContactsListSelection({ resetKey: section })
-	const { activeDialog, setActiveDialog, dialogPending, setDialogPending, closeActiveDialog } = useDialogHost<ActiveContactDialog>()
+	const { activeDialog, setActiveDialog, dialogPending, closeActiveDialog, runDialogPending, runDialogOutcome } =
+		useDialogHost<ActiveContactDialog>()
 	// Accept has no confirm dialog to carry a pending state, and its row stays until the op resolves: a
 	// second click meanwhile would send a duplicate accept for a request the first is consuming.
 	const accepting = useInFlightKeys()
@@ -189,7 +187,7 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 			return
 		}
 
-		const outcome = await runContactsBulk(
+		const outcome = await runBulkOutcomes(
 			items.filter(request => claimed.has(request.uuid)),
 			request => acceptRequest(request.uuid)
 		)
@@ -212,20 +210,12 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 		item: T,
 		op: (item: T) => Promise<VoidActionOutcome>
 	): Promise<void> {
-		setDialogPending(true)
-		const outcome = await op(item)
-		setDialogPending(false)
-
-		if (outcome.status === "error") {
-			toast.error(errorLabel(outcome.dto))
-			return
+		if (await runDialogOutcome(() => op(item))) {
+			selection.pruneSelection(section, [item.uuid])
 		}
-
-		closeActiveDialog()
-		selection.pruneSelection(section, [item.uuid])
 	}
 
-	// Shared tail for a bulk confirm: run every item independently via runContactsBulk, always close
+	// Shared tail for a bulk confirm: run every item independently via runBulkOutcomes, always close
 	// (the toast conveys any partial failure), and prune succeeded uuids from the selection — mirrors
 	// directoryListing.tsx's runBulkDialogAction.
 	async function runBulkDialogAction<T extends { uuid: string }>(
@@ -233,9 +223,7 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 		items: T[],
 		op: (item: T) => Promise<VoidActionOutcome>
 	): Promise<void> {
-		setDialogPending(true)
-		const outcome = await runContactsBulk(items, op)
-		setDialogPending(false)
+		const outcome = await runDialogPending(() => runBulkOutcomes(items, op))
 		closeActiveDialog()
 		toastContactsBulkOutcome(outcome)
 		selection.pruneSelection(
@@ -480,11 +468,7 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 				onKeyDown={event => {
 					selection.handleKeyDown(contactSection.key, uuids, event)
 				}}
-				className={
-					callout
-						? "flex flex-col divide-y divide-primary/10"
-						: cn(SECTION_PANEL_CLASS, "divide-border ring-foreground/5 dark:ring-foreground/10")
-				}
+				className={callout ? "flex flex-col divide-y divide-primary/10" : cn(SECTION_PANEL_CLASS, "divide-border", SURFACE_RING)}
 			>
 				{renderSectionItems(contactSection, uuids)}
 			</div>
@@ -591,7 +575,7 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 									<UsersIcon />
 								</EmptyMedia>
 								<EmptyTitle>{t("contactsLoadError")}</EmptyTitle>
-								<EmptyDescription>{errorLabel(asErrorDTO(queryError))}</EmptyDescription>
+								<EmptyDescription>{errorLabel(queryError)}</EmptyDescription>
 							</EmptyHeader>
 							<EmptyContent>
 								<Button

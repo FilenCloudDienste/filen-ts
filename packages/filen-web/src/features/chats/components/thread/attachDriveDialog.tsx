@@ -1,18 +1,14 @@
-import { Fragment, useState } from "react"
+import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
-import { ChevronRightIcon } from "lucide-react"
-import type { DialogRoot } from "@base-ui/react/dialog"
 import { attachExistingDriveItem } from "@/features/chats/lib/attachments"
 import { type DriveItem } from "@/features/drive/lib/item"
-import { useDirectoryListingQuery, useDirectoryNamesQuery } from "@/features/drive/queries/drive"
 import { errorLabel } from "@/lib/i18n/errorLabel"
-import { asErrorDTO } from "@/lib/sdk/errors"
-import { cn, driveItemName } from "@filen/shared"
-import { shouldForwardOpenChange } from "@/components/dialogs/dismissal.logic"
+import { driveItemName } from "@filen/shared"
+import { pendingGuardedOpenChange } from "@/components/dialogs/dismissal.logic"
 import { ItemIcon } from "@/features/drive/components/itemIcon"
-import { EmptyState } from "@/features/drive/components/emptyState"
-import { LoadingState } from "@/components/loadingState"
+import { PICKER_ROW_CLASS, PickerBreadcrumb, PickerListShell } from "@/features/drive/components/directoryPicker"
+import { useDirectoryPicker } from "@/features/drive/hooks/useDirectoryPicker"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Spinner } from "@/components/ui/spinner"
 
@@ -23,38 +19,22 @@ export interface AttachDriveDialogProps {
 	onAttached: (url: string) => void
 }
 
-// Drive-file picker for the composer's attach flow — deliberately reuses the move-dialog's tree/picker
-// machinery instead of building a second tree. Reuses the SAME tree-fetching
-// hooks moveTargetDialog.tsx does (useDirectoryListingQuery/useDirectoryNamesQuery, local uuid path
-// stack, "My Drive" breadcrumb) — there is exactly one directory-tree data source in this app and this
-// is it. The SELECTION semantics differ from move on purpose: a directory row descends (browsing), a
+// Drive-file picker for the composer's attach flow, built on directoryPicker.tsx — there is exactly
+// one directory-tree data source in this app and this is it. The SELECTION semantics differ from move on purpose: a directory row descends (browsing), a
 // FILE row is clickable and immediately attaches (no separate confirm step — a picker with one purpose
 // per row needs no "select then confirm" ceremony move's multi-item flow does). An item that already
 // carries a public link reuses it (attachExistingDriveItem's own get-then-create) rather than erroring.
 export function AttachDriveDialog({ onClose, onAttached }: AttachDriveDialogProps) {
-	const { t } = useTranslation(["chats", "drive"])
-	const [pathStack, setPathStack] = useState<string[]>([])
+	const { t } = useTranslation("chats")
+	const { pathStack, listingQuery, namesQuery, descend, goRoot, goTo } = useDirectoryPicker()
 	const [attachingUuid, setAttachingUuid] = useState<string | null>(null)
-	const targetUuid = pathStack.at(-1) ?? null
-
-	const listingQuery = useDirectoryListingQuery("drive", targetUuid)
-	const namesQuery = useDirectoryNamesQuery(pathStack)
 	const rows = listingQuery.data ?? []
 
-	function descend(uuid: string): void {
-		setPathStack(prev => [...prev, uuid])
-	}
-
-	function handleOpenChange(next: boolean, details: DialogRoot.ChangeEventDetails): void {
-		if (!shouldForwardOpenChange(next, attachingUuid !== null)) {
-			details.cancel()
-			return
-		}
-
+	const handleOpenChange = pendingGuardedOpenChange(attachingUuid !== null, next => {
 		if (!next) {
 			onClose()
 		}
-	}
+	})
 
 	async function handleAttach(item: DriveItem): Promise<void> {
 		if (item.data.undecryptable) {
@@ -85,104 +65,47 @@ export function AttachDriveDialog({ onClose, onAttached }: AttachDriveDialogProp
 				<DialogHeader>
 					<DialogTitle>{t("chatAttachDriveDialogTitle")}</DialogTitle>
 				</DialogHeader>
-				<nav
-					aria-label={t("drive:driveBreadcrumbLabel")}
-					className="flex items-center gap-1.5 overflow-x-auto text-sm"
+				<PickerBreadcrumb
+					pathStack={pathStack}
+					names={namesQuery.data}
+					onRoot={goRoot}
+					onJump={goTo}
+				/>
+				<p className="text-xs text-muted-foreground">{t("chatAttachDriveDialogHint")}</p>
+				<PickerListShell
+					listingQuery={listingQuery}
+					isEmpty={rows.length === 0}
 				>
-					<button
-						type="button"
-						disabled={pathStack.length === 0}
-						onClick={() => {
-							setPathStack([])
-						}}
-						className={cn(
-							"shrink-0",
-							pathStack.length === 0
-								? "font-medium text-foreground"
-								: "text-muted-foreground hover:text-foreground hover:underline"
-						)}
-					>
-						{t("drive:driveMyDrive")}
-					</button>
-					{pathStack.map((uuid, index) => {
-						const isLast = index === pathStack.length - 1
+					{rows.map(item => {
+						const disabled = item.data.undecryptable || attachingUuid !== null
+						const isAttaching = attachingUuid === item.data.uuid
 
 						return (
-							<Fragment key={uuid}>
-								<ChevronRightIcon
-									aria-hidden="true"
-									className="size-3.5 shrink-0 text-muted-foreground"
-								/>
+							<li key={item.data.uuid}>
 								<button
 									type="button"
-									disabled={isLast}
+									disabled={disabled}
 									onClick={() => {
-										setPathStack(prev => prev.slice(0, index + 1))
+										if (item.type === "directory") {
+											descend(item.data.uuid)
+											return
+										}
+
+										void handleAttach(item)
 									}}
-									className={cn(
-										"min-w-0 shrink-0 truncate",
-										isLast
-											? "font-medium text-foreground"
-											: "text-muted-foreground hover:text-foreground hover:underline"
-									)}
+									className={PICKER_ROW_CLASS}
 								>
-									{namesQuery.data?.[uuid] ?? uuid}
+									<ItemIcon
+										item={item}
+										className="size-4 shrink-0"
+									/>
+									<span className="min-w-0 flex-1 truncate">{driveItemName(item)}</span>
+									{isAttaching ? <Spinner className="size-3.5 shrink-0" /> : null}
 								</button>
-							</Fragment>
+							</li>
 						)
 					})}
-				</nav>
-				<p className="text-xs text-muted-foreground">{t("chatAttachDriveDialogHint")}</p>
-				<div className="h-72 overflow-y-auto rounded-xl ring-1 ring-foreground/5 dark:ring-foreground/10">
-					{listingQuery.status === "pending" ? (
-						<LoadingState size="md" />
-					) : listingQuery.status === "error" ? (
-						<EmptyState
-							variant="error"
-							error={asErrorDTO(listingQuery.error)}
-							onRetry={() => {
-								void listingQuery.refetch()
-							}}
-						/>
-					) : rows.length === 0 ? (
-						<EmptyState
-							variant="empty"
-							driveVariant="drive"
-						/>
-					) : (
-						<ul className="flex flex-col gap-0.5 p-2">
-							{rows.map(item => {
-								const disabled = item.data.undecryptable || attachingUuid !== null
-								const isAttaching = attachingUuid === item.data.uuid
-
-								return (
-									<li key={item.data.uuid}>
-										<button
-											type="button"
-											disabled={disabled}
-											onClick={() => {
-												if (item.type === "directory") {
-													descend(item.data.uuid)
-													return
-												}
-
-												void handleAttach(item)
-											}}
-											className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm focus-ring-row outline-none hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
-										>
-											<ItemIcon
-												item={item}
-												className="size-4 shrink-0"
-											/>
-											<span className="min-w-0 flex-1 truncate">{driveItemName(item)}</span>
-											{isAttaching ? <Spinner className="size-3.5 shrink-0" /> : null}
-										</button>
-									</li>
-								)
-							})}
-						</ul>
-					)}
-				</div>
+				</PickerListShell>
 			</DialogContent>
 		</Dialog>
 	)

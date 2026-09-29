@@ -58,7 +58,7 @@ import { useChatsUnreadCount } from "@/features/chats/hooks/useChatsUnreadCount"
 import { handleAuthSuccess, handleChatEvent, handleReconnecting, resetSocketReconnectState } from "@/features/chats/lib/socketHandlers"
 import { Sync } from "@/features/chats/lib/sync"
 import { buildOptimisticMessage } from "@/features/chats/lib/sync.logic"
-import useChatsInflightStore from "@/features/chats/store/useChatsInflight"
+import { useChatsInflightStore } from "@/features/chats/store/useChatsInflight"
 import { socketAuthenticated, socketDropped } from "@/lib/sdk/socketSession"
 
 const USER_ID = 7n
@@ -84,15 +84,6 @@ function mockMessage(chat: Chat): ChatMessage {
 
 const CHATS = [mockChat("a"), mockChat("b"), mockChat("c")]
 const [CHAT_A] = CHATS as [Chat, Chat, Chat]
-
-function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
-	let resolve!: (value: T) => void
-	const promise = new Promise<T>(r => {
-		resolve = r
-	})
-
-	return { promise, resolve }
-}
 
 function wrapper({ children }: { children: ReactNode }) {
 	return createElement(QueryClientProvider, { client: queryClient, children })
@@ -145,7 +136,7 @@ function threadMessage(label: string, sentTimestamp: bigint): ChatMessage {
 // and reads, and a socket delivery of m3 lands mid-read: the patch cancels the read, so the gap stays.
 async function cancelThreadReadWithPatch() {
 	const [m1, m2, m3] = [threadMessage("m1", 10n), threadMessage("m2", 20n), threadMessage("m3", 30n)]
-	const page = deferred<ChatMessage[]>()
+	const page = Promise.withResolvers<ChatMessage[]>()
 	queryClient.setQueryData(["chats", "list"], CHATS)
 	chatMessagesQueryUpdate(CHAT_A.uuid, () => [m1])
 	listMessagesBefore.mockImplementationOnce(() => page.promise)
@@ -185,7 +176,7 @@ afterEach(() => {
 
 describe("chat list and message request counts", () => {
 	it("boot on /chats reads the list once and each chat's messages once", async () => {
-		const list = deferred<Chat[]>()
+		const list = Promise.withResolvers<Chat[]>()
 		listChats.mockImplementationOnce(() => list.promise)
 
 		const { unmount } = renderShellOnChats()
@@ -285,8 +276,8 @@ describe("chat list and message request counts", () => {
 	})
 
 	it("a read a drop interrupts doesn't count: a remount reads again", async () => {
-		const list = deferred<Chat[]>()
-		const page = deferred<ChatMessage[]>()
+		const list = Promise.withResolvers<Chat[]>()
+		const page = Promise.withResolvers<ChatMessage[]>()
 		listChats.mockImplementationOnce(() => list.promise)
 		listMessagesBefore.mockImplementationOnce(() => page.promise)
 		queryClient.setQueryData(["chats", "list"], CHATS)
@@ -325,7 +316,7 @@ describe("chat list and message request counts", () => {
 
 	it("a list read a patch cancels is read again at once, and shows what it was reading for", async () => {
 		queryClient.setQueryData(["chats", "list"], CHATS)
-		const first = deferred<Chat[]>()
+		const first = Promise.withResolvers<Chat[]>()
 		listChats.mockImplementationOnce(() => first.promise)
 
 		const list = renderHook(() => useChats(), { wrapper })
@@ -357,7 +348,7 @@ describe("chat list and message request counts", () => {
 	// cancel and no second read.
 	it("an append during a thread read lets that read land, keeps the appended message, and counts it", async () => {
 		const [m1, m2, m3] = [threadMessage("m1", 10n), threadMessage("m2", 20n), threadMessage("m3", 30n)]
-		const page = deferred<ChatMessage[]>()
+		const page = Promise.withResolvers<ChatMessage[]>()
 		queryClient.setQueryData(["chats", "list"], CHATS)
 		chatMessagesQueryUpdate(CHAT_A.uuid, () => [m1])
 		listMessagesBefore.mockImplementationOnce(() => page.promise)
@@ -388,7 +379,7 @@ describe("chat list and message request counts", () => {
 	// read must not land over the append.
 	it("an append to an empty thread during its read re-reads instead of letting the empty page erase it", async () => {
 		const m1 = threadMessage("m1", 10n)
-		const page = deferred<ChatMessage[]>()
+		const page = Promise.withResolvers<ChatMessage[]>()
 		queryClient.setQueryData(["chats", "list"], CHATS)
 		chatMessagesQueryUpdate(CHAT_A.uuid, () => [])
 		listMessagesBefore.mockImplementationOnce(() => page.promise).mockResolvedValueOnce([m1])
@@ -484,7 +475,7 @@ describe("chat list and message request counts", () => {
 		listMessagesBefore.mockClear()
 
 		const introduced = mockChat("d")
-		const first = deferred<Chat[]>()
+		const first = Promise.withResolvers<Chat[]>()
 		listChats.mockImplementationOnce(() => first.promise)
 		listChats.mockImplementationOnce(() => Promise.resolve([...CHATS, introduced]))
 
@@ -526,7 +517,7 @@ describe("chat list and message request counts", () => {
 			}
 		})
 
-		const list = deferred<Chat[]>()
+		const list = Promise.withResolvers<Chat[]>()
 		listChats.mockImplementationOnce(() => list.promise)
 
 		const shell = renderShellOnChats()
@@ -668,7 +659,7 @@ describe("chat list and thread requests on returning to the tab", () => {
 		vi.useFakeTimers({ toFake: ["Date"] })
 
 		const view = await mountOpenThread()
-		const first = deferred<Chat[]>()
+		const first = Promise.withResolvers<Chat[]>()
 
 		listChats.mockImplementationOnce(() => first.promise)
 		hide()

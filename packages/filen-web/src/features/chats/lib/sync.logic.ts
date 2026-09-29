@@ -2,6 +2,7 @@ import { type } from "arktype"
 import { mergeInflightQueuesByUnion } from "@filen/shared"
 import type { Chat, ChatMessage, ChatMessagePartial } from "@filen/sdk-rs"
 import type { ChatMessageWithInflightId, InflightChatMessages } from "@/features/chats/store/useChatsInflight"
+import { compareBySentTimestamp } from "@/features/chats/lib/sort"
 
 // Pure, testable core of the chat send outbox — a faithful port of filen-mobile's chats sync/store
 // helpers (features/chats/components/sync.tsx mergeInflight + features/chats/utils.ts
@@ -110,7 +111,7 @@ export function composeMessageList({
 			return aPending ? 1 : -1
 		}
 
-		return a.sentTimestamp === b.sentTimestamp ? 0 : a.sentTimestamp < b.sentTimestamp ? -1 : 1
+		return compareBySentTimestamp(a, b)
 	})
 }
 
@@ -131,6 +132,8 @@ const inflightChatGroupSchema = type({
 	chat: "object",
 	messages: inflightChatMessageEntrySchema.array()
 })
+
+export const INFLIGHT_CHAT_MESSAGES_KV_KEY = "inflightChatMessages"
 
 export const inflightChatMessagesSchema = type({
 	"[string]": inflightChatGroupSchema
@@ -157,16 +160,11 @@ export interface RemoteChatEnqueue {
 	message: ChatMessageWithInflightId
 }
 
-// Trust-boundary schema for a forwarded send (invalid → dropped, the channel's convention): the same
-// load-bearing scalars the durable queue validates, `chat` as a non-null object only.
+// Trust-boundary schema for a forwarded send (invalid → dropped, the channel's convention): the durable
+// queue's own entry schema, `chat` as a non-null object only.
 export const remoteChatEnqueueSchema = type({
 	chat: "object",
-	message: {
-		inflightId: "string",
-		uuid: "string",
-		chat: "string",
-		sentTimestamp: "bigint"
-	}
+	message: inflightChatMessageEntrySchema
 }).as<RemoteChatEnqueue>()
 
 // A bounded ledger of recently-committed inflightIds. On a leadership takeover the new leader clears its

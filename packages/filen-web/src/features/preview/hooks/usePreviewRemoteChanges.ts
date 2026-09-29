@@ -13,7 +13,7 @@ import type { FileMeta } from "@filen/sdk-rs"
 import { isRevisionOf, settleHeldRevisions, type PreviewRevision } from "@/features/preview/lib/remoteChange.logic"
 import { usePreviewCacheScope } from "@/features/preview/lib/accessMode"
 import { loadPreviewBytes } from "@/features/preview/lib/previewCache"
-import { setPreviewDirty, usePreviewUnsavedGuardStore } from "@/features/preview/store/usePreviewUnsavedGuard"
+import { dropPreviewBuffer, usePreviewUnsavedGuardStore } from "@/features/preview/store/usePreviewUnsavedGuard"
 import { queryClient } from "@/queries/client"
 import { sdkApi } from "@/lib/sdk/client"
 import { errorLabel } from "@/lib/i18n/errorLabel"
@@ -555,11 +555,6 @@ export function usePreviewRemoteChanges({
 		return item === undefined ? undefined : (savedRef.current.get(frozenUuid) ?? item)
 	}
 
-	function dropBuffer(): void {
-		setPreviewDirty(false)
-		contentRef.current = null
-	}
-
 	function keepMine(): void {
 		if (prompt?.kind === "revised") {
 			keptOver.current.set(prompt.frozenUuid, prompt.theirs.data.uuid)
@@ -576,7 +571,7 @@ export function usePreviewRemoteChanges({
 		}
 
 		setPrompt(null)
-		dropBuffer()
+		dropPreviewBuffer(contentRef)
 		commitSaved(prompt.frozenUuid, prompt.theirs)
 	}
 
@@ -586,7 +581,7 @@ export function usePreviewRemoteChanges({
 		}
 
 		setPrompt(null)
-		dropBuffer()
+		dropPreviewBuffer(contentRef)
 		onItemRemoved(prompt.frozenUuid)
 	}
 
@@ -623,7 +618,7 @@ export function usePreviewRemoteChanges({
 		const newest = promptRef.current?.frozenUuid === asked.frozenUuid ? promptRef.current : asked
 
 		setPrompt(null)
-		dropBuffer()
+		dropPreviewBuffer(contentRef)
 
 		if (newest.kind === "revised") {
 			commitSaved(asked.frozenUuid, newest.theirs)

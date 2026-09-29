@@ -91,11 +91,7 @@ export function DriveBulkContextMenuContent({ variant, selectedItems, onBulkActi
 						variant={descriptor.destructive ? "destructive" : "default"}
 						disabled={offlineDisabled}
 						title={offlineDisabled ? t("common:offlineActionDisabled") : undefined}
-						onClick={event => {
-							// A portaled popup's synthetic events still bubble through the REACT tree, so
-							// without this an item click would also fire the row's own onClick and collapse
-							// the selection this menu is acting on — see itemMenu.tsx's identical guard.
-							event.stopPropagation()
+						onClick={() => {
 							runDescriptor(descriptor)
 						}}
 					>

@@ -1,69 +1,20 @@
 import * as Comlink from "comlink"
 import type { File as SdkFile } from "@filen/sdk-rs"
 import { sumBytes } from "@filen/shared"
-import { toast } from "sonner"
 import { sdkApi } from "@/lib/sdk/client"
-import { i18n } from "@/lib/i18n"
 import { runOp, type VoidActionOutcome } from "@/lib/actions/outcome"
+import { toastSummary } from "@/lib/actions/bulkToast"
 import { asErrorDTO } from "@/lib/sdk/errors"
+import { throttle, PROGRESS_THROTTLE_MS } from "@/lib/throttle"
 import { queryClient } from "@/queries/client"
 import { asDirectoryOrFile, narrowItem, type DriveItem } from "@/features/drive/lib/item"
-import { directorySizeQueryKey, findCachedListingItem, queueListingCreate } from "@/features/drive/queries/drive"
+import { DRIVE_LISTING_KEY_PREFIX, directorySizeQueryKey, findCachedListingItem, queueListingCreate } from "@/features/drive/queries/drive"
 import { markAccountStale } from "@/queries/account"
 import { useTransfersStore, type TransfersStore } from "@/features/transfers/store/useTransfersStore"
+import { settleTransferFailure } from "@/features/transfers/lib/settle"
 import { defaultHeicUploadDeps, heicUploadConversionEnabled, maybeConvertHeicUpload } from "@/features/drive/lib/heicUpload"
 import { warmUploadThumbnail } from "@/features/drive/lib/thumbGenerators"
 import { addAccountStorageUsed, ensureUploadQuota } from "@/features/drive/lib/quota"
-
-// Leading+trailing throttle, written locally rather than pulling a dependency — no throttle/debounce
-// util exists in src/lib yet. The leading edge invokes immediately so the first progress
-// notification never waits; every call arriving inside the window only overwrites a pending buffer,
-// and exactly the LAST one fires at the trailing edge once the window elapses — critical for upload
-// progress, whose final notification (100%) must never be the one a throttle silently drops. A call
-// arriving once the window has fully elapsed (no pending buffer left over) starts a fresh cycle.
-export function throttle<Args extends unknown[]>(fn: (...args: Args) => void, ms: number): (...args: Args) => void {
-	let lastInvoked: number | null = null
-	let timeoutId: ReturnType<typeof setTimeout> | null = null
-	let pendingArgs: Args | null = null
-
-	function invoke(args: Args): void {
-		lastInvoked = Date.now()
-		fn(...args)
-	}
-
-	return (...args: Args) => {
-		const now = Date.now()
-
-		if (lastInvoked === null || now - lastInvoked >= ms) {
-			if (timeoutId !== null) {
-				clearTimeout(timeoutId)
-				timeoutId = null
-			}
-			pendingArgs = null
-			invoke(args)
-			return
-		}
-
-		pendingArgs = args
-
-		if (timeoutId === null) {
-			const remaining = ms - (now - lastInvoked)
-			timeoutId = setTimeout(() => {
-				timeoutId = null
-				if (pendingArgs !== null) {
-					const toSend = pendingArgs
-					pendingArgs = null
-					invoke(toSend)
-				}
-			}, remaining)
-		}
-	}
-}
-
-// ~10 store updates/sec per transfer is plenty for a progress bar and keeps a many-file batch from
-// re-rendering the transfers panel on every chunk (mobile parity). Exported so features/drive/lib/download.ts
-// reuses the exact same cadence instead of redeclaring the constant.
-export const PROGRESS_THROTTLE_MS = 100
 
 // Injected collaborators so a single upload attempt is unit-testable without a worker or a query
 // client — mirrors runCreateDirectory's shape (features/drive/lib/createDirectory.ts). `store` needs `remove`
@@ -130,16 +81,7 @@ export async function runUpload(deps: RunUploadDeps, args: { parentUuid: string 
 	} catch (e) {
 		const dto = asErrorDTO(e)
 
-		if (dto.kind === "Cancelled") {
-			deps.store.settle(id, "cancelled")
-			deps.store.remove(id)
-
-			return { status: "cancelled" }
-		}
-
-		deps.store.settle(id, "error", dto)
-
-		return { status: "error", dto }
+		return settleTransferFailure(deps.store, id, dto) ? { status: "cancelled" } : { status: "error", dto }
 	}
 
 	deps.store.settle(id, "done")
@@ -182,7 +124,7 @@ export function invalidateUploadedDirectorySizes(parentUuid: string | null, crea
 
 	const displayed = new Set<string>()
 
-	for (const query of queryClient.getQueryCache().findAll({ queryKey: ["drive", "listing"], type: "active" })) {
+	for (const query of queryClient.getQueryCache().findAll({ queryKey: DRIVE_LISTING_KEY_PREFIX, type: "active" })) {
 		for (const item of queryClient.getQueryData<DriveItem[]>(query.queryKey) ?? []) {
 			if (targets.has(item.data.uuid)) {
 				displayed.add(item.data.uuid)
@@ -221,9 +163,7 @@ export const defaultUploadDeps: RunUploadDeps = {
 // Fan out every file in parallel — no JS queue/semaphore: the SDK's own Tower layer throttles actual
 // upload concurrency (CLAUDE.md rule: never reimplement concurrency/retry limits in JS). Each file is
 // fully independent (its own transfer row, its own outcome), so one failing upload never blocks or
-// cancels the rest. Ends in one SUMMARY toast — toastBulkOutcome (features/drive/lib/bulkToast.ts) is typed
-// specifically to BulkOutcome<DriveItem>, which a raw File fan-out never produces, so this counts the
-// runUpload outcomes directly instead of forcing a mismatched reuse.
+// cancels the rest. Ends in one summary toast.
 export async function startUploads(files: File[], parentUuid: string | null): Promise<void> {
 	if (files.length === 0) {
 		return
@@ -251,15 +191,8 @@ export async function startUploads(files: File[], parentUuid: string | null): Pr
 		defaultUploadDeps.invalidateDirectorySizes?.(parentUuid)
 	}
 
-	// Every file cancelled: the user already knows, and there is nothing to report.
-	if (succeeded === 0 && failed === 0) {
-		return
-	}
-
-	if (failed === 0) {
-		toast.success(i18n.t("transfers:transfersUploadSummaryComplete", { count: succeeded }))
-		return
-	}
-
-	toast.error(i18n.t("transfers:transfersUploadSummaryCompleteWithFailures", { count: succeeded, failed }))
+	toastSummary(succeeded, failed, {
+		complete: "transfers:transfersUploadSummaryComplete",
+		withFailures: "transfers:transfersUploadSummaryCompleteWithFailures"
+	})
 }

@@ -1,23 +1,18 @@
-import { useState, type ReactNode } from "react"
+import { type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { Link } from "@tanstack/react-router"
 import { formatBytes, driveItemName } from "@filen/shared"
 import { StarIcon } from "lucide-react"
-import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
+import { asDirectoryOrFile, driveItemMime, type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
-import { ItemIcon } from "@/features/drive/components/itemIcon"
+import { ItemHeroTile } from "@/features/drive/components/itemThumbnail"
 import { formatCreatedDate, formatItemSize, formatModifiedDate, formatUploadedDate, sharedIdentityLabel } from "@/features/drive/lib/format"
 import { previewType } from "@/features/drive/lib/preview.logic"
-import { dirColorHex } from "@/features/drive/lib/dirColor"
-import { invalidateThumbnail } from "@/features/drive/lib/thumbnails"
 import { parentNavigationTarget } from "@/features/drive/lib/navigate"
 import { previewKindLabelKey } from "@/features/drive/components/infoDialog.logic"
-import { useThumbnail } from "@/features/drive/hooks/useThumbnail"
 import { useDirectorySizeQuery, useItemInfoQuery, type DirectorySizeItem } from "@/features/drive/queries/drive"
 import { isDirectorySizeItem } from "@/features/drive/hooks/useDriveDirectorySizes.logic"
 import { errorLabel } from "@/lib/i18n/errorLabel"
-import { asErrorDTO } from "@/lib/sdk/errors"
-import { cn } from "@filen/shared"
 import { CannotDecryptState } from "@/components/cannotDecryptState"
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import { Spinner } from "@/components/ui/spinner"
@@ -87,22 +82,14 @@ export function InfoDialog({ item, variant, remoteInfoEnabled, onClose }: InfoDi
 	// Rules-of-hooks: called unconditionally regardless of variant — remoteInfoEnabled controls
 	// fetching through `enabled`, never whether the hook itself runs.
 	const infoQuery = useItemInfoQuery(item.data, { enabled: remoteInfoEnabled && !undecryptable })
-	const thumbUrl = useThumbnail(item)
-	// Downgrades a torn/corrupt cache entry back to the icon without waiting for a remount — see the
-	// img's own onError below. Never reset back to false: this mount already gave up on this uuid.
-	const [thumbFailed, setThumbFailed] = useState(false)
 
 	const name = driveItemName(item)
 	// A shared file reads as a file, a shared directory as a directory (asDirectoryOrFile) — the raw
 	// six-arm `item.type` would miss every shared arm in the branches below (see item.ts).
 	const base = asDirectoryOrFile(item)
 	const isDirectory = base.type === "directory"
-	// Only an owned directory tints by its own color; a shared directory's arm carries the owner's color
-	// but reads as the neutral default here, mirroring filen-mobile's hero.
-	const dirHex = dirColorHex(item.type === "directory" ? item.data.color : "default")
-	const showThumb = base.type === "file" && thumbUrl !== null && !thumbFailed
 
-	const mime = base.type === "file" ? base.data.decryptedMeta?.mime : undefined
+	const mime = driveItemMime(item)
 	const kindKey = base.type === "file" ? previewKindLabelKey(previewType(item)) : null
 	// The sharing counterparty is item metadata that belongs here at every width — and it is the only
 	// place it survives once the listing row sheds its own label on a narrow card (see driveRow.tsx).
@@ -152,32 +139,11 @@ export function InfoDialog({ item, variant, remoteInfoEnabled, onClose }: InfoDi
 		>
 			<DialogContent>
 				<div className="flex min-w-0 flex-col items-center gap-3 pt-2 text-center">
-					<div
-						className={cn(
-							"relative flex size-28 shrink-0 items-center justify-center overflow-hidden rounded-2xl ring-1 ring-foreground/5",
-							!isDirectory && "bg-muted"
-						)}
-						style={isDirectory ? { backgroundColor: `color-mix(in srgb, ${dirHex} 16%, transparent)` } : undefined}
-					>
-						{showThumb ? (
-							<img
-								src={thumbUrl}
-								alt=""
-								draggable={false}
-								decoding="async"
-								className="size-full object-cover"
-								onError={() => {
-									invalidateThumbnail(item.data.uuid)
-									setThumbFailed(true)
-								}}
-							/>
-						) : (
-							<ItemIcon
-								item={item}
-								className="size-12"
-							/>
-						)}
-					</div>
+					<ItemHeroTile
+						item={item}
+						className="size-28 rounded-2xl"
+						iconClassName="size-12"
+					/>
 					<div className="flex flex-col items-center gap-1">
 						<div className="flex w-full min-w-0 items-center justify-center gap-1.5">
 							<DialogTitle className="line-clamp-2 min-w-0 text-base leading-snug font-medium break-words select-text">
@@ -221,7 +187,7 @@ export function InfoDialog({ item, variant, remoteInfoEnabled, onClose }: InfoDi
 					{remoteInfoEnabled && (remoteLoading || remoteError || path !== null) ? (
 						<InfoRow label={t("driveInfoPath")}>
 							{remoteError ? (
-								<span className="text-destructive">{errorLabel(asErrorDTO(infoQuery.error))}</span>
+								<span className="text-destructive">{errorLabel(infoQuery.error)}</span>
 							) : path !== null ? (
 								<Link
 									to="/drive/$"

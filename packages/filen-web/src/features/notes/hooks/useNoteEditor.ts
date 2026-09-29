@@ -3,7 +3,8 @@ import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import type { Note } from "@filen/sdk-rs"
 import { useNoteContentQuery, isUndecryptableContentError, noteContentQueryKey } from "@/features/notes/queries/noteContent"
-import useNotesInflightStore, {
+import {
+	useNotesInflightStore,
 	useNoteInflight,
 	useOutboxHydrated,
 	beginEditingSession,

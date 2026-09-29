@@ -1,3 +1,4 @@
+import { listboxKeyTarget } from "@/features/drive/lib/listbox"
 import type { MarqueeContentRect } from "@/features/drive/lib/marquee.logic"
 
 // The photos grid as virtual rows: a header per capture month, then that month's tiles in rows of
@@ -101,24 +102,8 @@ function nextTileRow(timeline: PhotosTimeline, from: number, step: 1 | -1): Extr
 // cursor lands on the first or last item, as the drive grid's clamp does. Left/right, Home and End
 // walk the capture order.
 export function timelineKeyTarget(key: string, activeIndex: number, itemCount: number, timeline: PhotosTimeline): number | null {
-	if (key === "ArrowRight") {
-		return activeIndex + 1
-	}
-
-	if (key === "ArrowLeft") {
-		return activeIndex - 1
-	}
-
-	if (key === "Home") {
-		return 0
-	}
-
-	if (key === "End") {
-		return itemCount - 1
-	}
-
 	if (key !== "ArrowDown" && key !== "ArrowUp") {
-		return null
+		return listboxKeyTarget(key, activeIndex, itemCount, timeline.columns, true)
 	}
 
 	const step = key === "ArrowDown" ? 1 : -1
@@ -126,7 +111,7 @@ export function timelineKeyTarget(key: string, activeIndex: number, itemCount: n
 	const row = rowIndex === undefined ? undefined : timeline.rows[rowIndex]
 
 	if (rowIndex === undefined || row?.kind !== "tiles") {
-		return activeIndex + step * timeline.columns
+		return listboxKeyTarget(key, activeIndex, itemCount, timeline.columns, true)
 	}
 
 	const target = nextTileRow(timeline, rowIndex, step)
@@ -158,8 +143,10 @@ function firstRowEndingAfter(timeline: PhotosTimeline, y: number): number {
 	return low
 }
 
-function cellWidthFor(timeline: PhotosTimeline, contentWidth: number): number {
-	return (contentWidth - timeline.gap * (timeline.columns - 1)) / timeline.columns
+// One cell's width across `columns` cells separated by `gap`: the grid's layout and the hit-tests below
+// must agree on it.
+export function gridCellWidth(contentWidth: number, columns: number, gap: number): number {
+	return (contentWidth - gap * (columns - 1)) / columns
 }
 
 // The items whose tile box the marquee rectangle overlaps, ascending. Headers and gutters select
@@ -169,7 +156,7 @@ export function timelineMarqueeIndices(rect: MarqueeContentRect, timeline: Photo
 		return []
 	}
 
-	const cellWidth = cellWidthFor(timeline, contentWidth)
+	const cellWidth = gridCellWidth(contentWidth, timeline.columns, timeline.gap)
 	const out: number[] = []
 
 	for (let rowIndex = firstRowEndingAfter(timeline, rect.top); rowIndex < timeline.rows.length; rowIndex++) {
@@ -210,7 +197,7 @@ export function timelineIndexAtPoint(x: number, y: number, timeline: PhotosTimel
 		return -1
 	}
 
-	const cellWidth = cellWidthFor(timeline, contentWidth)
+	const cellWidth = gridCellWidth(contentWidth, timeline.columns, timeline.gap)
 	const column = Math.floor(x / (cellWidth + timeline.gap))
 
 	if (x - column * (cellWidth + timeline.gap) > cellWidth) {

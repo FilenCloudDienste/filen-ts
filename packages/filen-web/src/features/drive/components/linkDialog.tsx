@@ -3,7 +3,6 @@ import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { Link } from "@tanstack/react-router"
 import { CopyIcon, LinkIcon, CreditCardIcon } from "lucide-react"
-import type { DialogRoot } from "@base-ui/react/dialog"
 import type { PublicLinkExpiration } from "@filen/sdk-rs"
 import type { DriveItem } from "@/features/drive/lib/item"
 import { createLink, disableLink, updateLink } from "@/features/drive/lib/actions"
@@ -17,16 +16,12 @@ import {
 	resolvePremiumGateState,
 	type LinkFormEdits
 } from "@/features/drive/components/linkDialog.logic"
-import { ItemIcon } from "@/features/drive/components/itemIcon"
-import { dirColorHex } from "@/features/drive/lib/dirColor"
-import { invalidateThumbnail } from "@/features/drive/lib/thumbnails"
-import { useThumbnail } from "@/features/drive/hooks/useThumbnail"
+import { ItemHeroTile } from "@/features/drive/components/itemThumbnail"
 import { errorLabel } from "@/lib/i18n/errorLabel"
-import { asErrorDTO } from "@/lib/sdk/errors"
+import { copyText } from "@/lib/copyText"
 import { useIsOnline } from "@/lib/useIsOnline"
 import type { DriveKey } from "@/lib/i18n"
-import { cn } from "@filen/shared"
-import { shouldForwardOpenChange } from "@/components/dialogs/dismissal.logic"
+import { pendingGuardedOpenChange } from "@/components/dialogs/dismissal.logic"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Field, FieldContent, FieldGroup, FieldLabel } from "@/components/ui/field"
@@ -57,48 +52,19 @@ const EXPIRATION_OPTIONS: { value: PublicLinkExpiration; labelKey: DriveKey }[] 
 	{ value: "30d", labelKey: "driveLinkExpirationThirtyDays" }
 ]
 
-// Compact item-hero header — a smaller sibling of infoDialog.tsx's own centered hero tile (same
-// thumbnail/fallback-icon/directory-color-tint machinery, laid out horizontally instead of stacked so
-// it reads as a header strip above the form rather than competing with it for vertical space). Local
-// thumbFailed state mirrors infoDialog's own: never resets once tripped, this mount already gave up on
-// this uuid's cached thumbnail.
+// Compact item-hero header — infoDialog.tsx's hero tile at a smaller size, laid out horizontally so it
+// reads as a header strip above the form rather than competing with it for vertical space.
 function LinkItemHero({ item }: { item: DriveItem }) {
 	const { t } = useTranslation("drive")
-	const thumbUrl = useThumbnail(item)
-	const [thumbFailed, setThumbFailed] = useState(false)
 	const hero = resolveLinkHeroInfo(item)
-	const isDirectory = hero.typeLabelKey === "driveItemTypeDirectory"
-	const dirHex = dirColorHex(item.type === "directory" ? item.data.color : "default")
-	const showThumb = !isDirectory && thumbUrl !== null && !thumbFailed
 
 	return (
 		<div className="flex min-w-0 items-center gap-3 rounded-xl bg-muted/40 p-3">
-			<div
-				className={cn(
-					"relative flex size-12 shrink-0 items-center justify-center overflow-hidden rounded-xl ring-1 ring-foreground/5",
-					!isDirectory && "bg-muted"
-				)}
-				style={isDirectory ? { backgroundColor: `color-mix(in srgb, ${dirHex} 16%, transparent)` } : undefined}
-			>
-				{showThumb ? (
-					<img
-						src={thumbUrl}
-						alt=""
-						draggable={false}
-						decoding="async"
-						className="size-full object-cover"
-						onError={() => {
-							invalidateThumbnail(item.data.uuid)
-							setThumbFailed(true)
-						}}
-					/>
-				) : (
-					<ItemIcon
-						item={item}
-						className="size-6"
-					/>
-				)}
-			</div>
+			<ItemHeroTile
+				item={item}
+				className="size-12 rounded-xl"
+				iconClassName="size-6"
+			/>
 			<div className="flex min-w-0 flex-col">
 				<span className="truncate text-sm font-medium select-text">{hero.name}</span>
 				<span className="truncate text-xs text-muted-foreground">
@@ -132,18 +98,11 @@ export function LinkDialog({ item, onClose }: LinkDialogProps) {
 	const [passwordDraft, setPasswordDraft] = useState("")
 	const [confirmDisableOpen, setConfirmDisableOpen] = useState(false)
 
-	function handleOpenChange(next: boolean, details: DialogRoot.ChangeEventDetails): void {
-		if (!shouldForwardOpenChange(next, pending)) {
-			// Also stops Base UI's own store from flipping (it closes itself after this callback
-			// unless the event is canceled) — see dismissal.logic.ts.
-			details.cancel()
-			return
-		}
-
+	const handleOpenChange = pendingGuardedOpenChange(pending, next => {
 		if (!next) {
 			onClose()
 		}
-	}
+	})
 
 	async function handleCreate(): Promise<void> {
 		setPending(true)
@@ -208,12 +167,7 @@ export function LinkDialog({ item, onClose }: LinkDialogProps) {
 	}
 
 	async function handleCopy(url: string): Promise<void> {
-		try {
-			await navigator.clipboard.writeText(url)
-			toast.success(t("driveLinkUrlCopiedToast"))
-		} catch (e) {
-			toast.error(errorLabel(asErrorDTO(e)))
-		}
+		await copyText(url, t("driveLinkUrlCopiedToast"))
 	}
 
 	const current = linkStatusQuery.status === "success" ? linkStatusQuery.data : undefined
@@ -241,7 +195,7 @@ export function LinkDialog({ item, onClose }: LinkDialogProps) {
 						/>
 					) : premiumGate === "error" ? (
 						<PreviewErrorState
-							message={errorLabel(asErrorDTO(accountQuery.error))}
+							message={errorLabel(accountQuery.error)}
 							onRetry={() => {
 								void accountQuery.refetch()
 							}}
@@ -275,7 +229,7 @@ export function LinkDialog({ item, onClose }: LinkDialogProps) {
 								/>
 							) : linkStatusQuery.status === "error" ? (
 								<PreviewErrorState
-									message={errorLabel(asErrorDTO(linkStatusQuery.error))}
+									message={errorLabel(linkStatusQuery.error)}
 									onRetry={() => {
 										void linkStatusQuery.refetch()
 									}}

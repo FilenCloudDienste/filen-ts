@@ -1,5 +1,5 @@
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
-import { extensionOf } from "@/features/drive/lib/preview.logic"
+import { extensionOf, previewCategoryForExtension } from "@/features/drive/lib/preview.logic"
 
 // Every category this app can produce a cached thumbnail for. "sdk" is every STILL raster image —
 // plain raster, HEIC and camera RAW alike — decoded by the Rust SDK, which is the only decoder any of
@@ -99,8 +99,6 @@ export const THUMB_DIR = [...THUMB_DIR_ROOT, THUMB_GENERATION]
 
 export const THUMB_EXT = ".thumb"
 
-const VIDEO_EXTENSIONS = new Set(["mp4", "mov", "webm", "m4v", "mkv"])
-
 // Category routing over every file-family arm — owned, shared-root and nested shared files alike
 // (asDirectoryOrFile). A shared file carries the same decrypted meta and the SDK's own
 // canMakeThumbnail, and the SDK thumbnails any AnyFile, so a shared file routes exactly like an owned
@@ -136,7 +134,7 @@ export function thumbnailCategory(item: DriveItem): ThumbnailCategory {
 		return base.data.size <= THUMB_SVG_SIZE_GATE ? "svg" : "none"
 	}
 
-	if (VIDEO_EXTENSIONS.has(ext)) {
+	if (previewCategoryForExtension(ext) === "video") {
 		return "video"
 	}
 

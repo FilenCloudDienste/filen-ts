@@ -1,14 +1,14 @@
-import type { Chat, Contact, UserInfo } from "@filen/sdk-rs"
+import type { Chat, Contact } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
 import { i18n } from "@/lib/i18n"
+import { plainErrorDTO } from "@/lib/sdk/errors"
 import { queryClient } from "@/queries/client"
 import { removeQueriesAndPersisted } from "@/queries/persist"
-import { ACCOUNT_QUERY_KEY } from "@/queries/account"
+import { accountQueryGet } from "@/queries/account"
 import { chatsQueryUpsert, chatsQueryRemove } from "@/features/chats/queries/chats"
 import { chatMessagesQueryKey } from "@/features/chats/queries/chatMessages"
 import { purgeChatInflightState } from "@/features/chats/lib/inflight"
-import { asErrorDTO } from "@/lib/sdk/errors"
-import { runOp, type ActionOutcome, type VoidActionOutcome } from "@/lib/actions/outcome"
+import { attemptOp, type ActionOutcome, type VoidActionOutcome } from "@/lib/actions/outcome"
 
 export type { ActionOutcome, VoidActionOutcome }
 
@@ -18,23 +18,14 @@ export type { ActionOutcome, VoidActionOutcome }
 // Nothing here calls toast — every caller (chatMenu.tsx, useChatDialogHost, createChatDialog, ...)
 // resolves the outcome and surfaces `errorLabel(dto)` itself, same convention as notes.
 
-// Same rationale as notes' currentUserId(): the account query is warm by the time any chat surface can
-// render, so a cache miss degrades to undefined rather than throwing — every owner-gate below treats an
-// unresolved id as "not the owner" (the safer default; the SDK itself is the final authority anyway).
-function currentUserId(): bigint | undefined {
-	return queryClient.getQueryData<UserInfo>(ACCOUNT_QUERY_KEY)?.id
-}
-
 // Chat.ownerId is a single bigint field on the Chat itself (unlike NoteParticipant's own per-row
 // isOwner flag) — no participant lookup needed.
-export function isChatOwner(chat: Chat, userId: bigint | undefined = currentUserId()): boolean {
+export function isChatOwner(chat: Chat, userId: bigint | undefined = accountQueryGet()?.id): boolean {
 	return userId !== undefined && chat.ownerId === userId
 }
 
 function ownerGateError(): ActionOutcome<Chat> {
-	const message = i18n.t("chats:chatOwnerOnlyError")
-
-	return { status: "error", dto: { species: "plain", message, label: message } }
+	return { status: "error", dto: plainErrorDTO(i18n.t("chats:chatOwnerOnlyError")) }
 }
 
 // ── Create ───────────────────────────────────────────────────────────────
@@ -44,21 +35,16 @@ function ownerGateError(): ActionOutcome<Chat> {
 // drive convention of gating twice (menu + action layer).
 export async function createChat(contacts: Contact[]): Promise<ActionOutcome<Chat>> {
 	if (contacts.length === 0) {
-		const message = i18n.t("chats:chatCreateNoContactsError")
-		return { status: "error", dto: { species: "plain", message, label: message } }
+		return { status: "error", dto: plainErrorDTO(i18n.t("chats:chatCreateNoContactsError")) }
 	}
 
-	let chat: Chat
+	const outcome = await attemptOp(sdkApi.createChat(contacts))
 
-	try {
-		chat = await runOp(sdkApi.createChat(contacts))
-	} catch (e) {
-		return { status: "error", dto: asErrorDTO(e) }
+	if (outcome.status === "success") {
+		chatsQueryUpsert(outcome.item)
 	}
 
-	chatsQueryUpsert(chat)
-
-	return { status: "success", item: chat }
+	return outcome
 }
 
 // ── Rename (owner-only) ──────────────────────────────────────────────────
@@ -76,17 +62,13 @@ export async function renameChat(chat: Chat, name: string): Promise<ActionOutcom
 		return { status: "success", item: chat }
 	}
 
-	let updated: Chat
+	const outcome = await attemptOp(sdkApi.renameChat(chat, trimmed))
 
-	try {
-		updated = await runOp(sdkApi.renameChat(chat, trimmed))
-	} catch (e) {
-		return { status: "error", dto: asErrorDTO(e) }
+	if (outcome.status === "success") {
+		chatsQueryUpsert(outcome.item)
 	}
 
-	chatsQueryUpsert(updated)
-
-	return { status: "success", item: updated }
+	return outcome
 }
 
 // ── Mute (any participant — a personal setting, not owner-gated) ────────
@@ -96,17 +78,13 @@ export async function setChatMuted(chat: Chat, mute: boolean): Promise<ActionOut
 		return { status: "success", item: chat }
 	}
 
-	let updated: Chat
+	const outcome = await attemptOp(sdkApi.muteChat(chat, mute))
 
-	try {
-		updated = await runOp(sdkApi.muteChat(chat, mute))
-	} catch (e) {
-		return { status: "error", dto: asErrorDTO(e) }
+	if (outcome.status === "success") {
+		chatsQueryUpsert(outcome.item)
 	}
 
-	chatsQueryUpsert(updated)
-
-	return { status: "success", item: updated }
+	return outcome
 }
 
 // ── Leave (non-owner self-remove) / Delete (owner) ───────────────────────
@@ -121,10 +99,10 @@ export interface LeaveOrDeleteChatOptions {
 // Mirrors mobile's chats.leave: no internal ownership gate (any participant, owner included, can leave
 // — the UI only ever exposes this to non-owners since Delete covers the owner's own exit).
 export async function leaveChat(chat: Chat, opts?: LeaveOrDeleteChatOptions): Promise<VoidActionOutcome> {
-	try {
-		await runOp(sdkApi.leaveChat(chat))
-	} catch (e) {
-		return { status: "error", dto: asErrorDTO(e) }
+	const outcome = await attemptOp(sdkApi.leaveChat(chat))
+
+	if (outcome.status === "error") {
+		return outcome
 	}
 
 	// The sync must never retry a queued send into a chat we just left — best-effort, never throws.
@@ -139,14 +117,13 @@ export async function leaveChat(chat: Chat, opts?: LeaveOrDeleteChatOptions): Pr
 
 export async function deleteChat(chat: Chat, opts?: LeaveOrDeleteChatOptions): Promise<VoidActionOutcome> {
 	if (!isChatOwner(chat)) {
-		const message = i18n.t("chats:chatOwnerOnlyError")
-		return { status: "error", dto: { species: "plain", message, label: message } }
+		return { status: "error", dto: plainErrorDTO(i18n.t("chats:chatOwnerOnlyError")) }
 	}
 
-	try {
-		await runOp(sdkApi.deleteChat(chat))
-	} catch (e) {
-		return { status: "error", dto: asErrorDTO(e) }
+	const outcome = await attemptOp(sdkApi.deleteChat(chat))
+
+	if (outcome.status === "error") {
+		return outcome
 	}
 
 	await purgeChatInflightState(chat.uuid)
@@ -166,15 +143,13 @@ export async function deleteChat(chat: Chat, opts?: LeaveOrDeleteChatOptions): P
 // (mirrors mobile's UI-level markAsRead handler, chat.tsx: Promise.all, not allSettled — an explicit
 // user action's failure should surface, unlike the send path's best-effort post-commit housekeeping).
 export async function markChatRead(chat: Chat): Promise<VoidActionOutcome> {
-	let updatedChats: Chat[]
+	const outcome = await attemptOp(Promise.all([sdkApi.updateLastChatFocusTimesNow([chat]), sdkApi.markChatRead(chat)]))
 
-	try {
-		;[updatedChats] = await Promise.all([runOp(sdkApi.updateLastChatFocusTimesNow([chat])), runOp(sdkApi.markChatRead(chat))])
-	} catch (e) {
-		return { status: "error", dto: asErrorDTO(e) }
+	if (outcome.status === "error") {
+		return outcome
 	}
 
-	const refreshed = updatedChats[0]
+	const refreshed = outcome.item[0][0]
 
 	if (refreshed) {
 		// The refreshed chat carries the advanced lastFocus; the client-derived unread count (both the

@@ -2,27 +2,26 @@
 // drive/lib/format.ts formats the same way). Millisecond server timestamps sit far inside f64's safe
 // range, so Number() narrowing a bigint timestamp is lossless and display-only.
 
+// Local-calendar day index (not UTC) so separators land on the viewer's own midnight, matching how the
+// day label renders. Encodes Y/M/D into one comparable number.
+export function dayNumber(date: Date): number {
+	return date.getFullYear() * 10000 + date.getMonth() * 100 + date.getDate()
+}
+
 // Which calendar day a timestamp falls on, relative to now: drives the day-separator label (Today /
 // Yesterday / a localized date). Pure except for the `now` clock read, which is injectable for tests.
 export function dayKind(timestamp: bigint, now: number = Date.now()): "today" | "yesterday" | "other" {
-	const then = new Date(Number(timestamp))
+	const key = dayNumber(new Date(Number(timestamp)))
 	const today = new Date(now)
-	const yesterday = new Date(now)
-	yesterday.setDate(yesterday.getDate() - 1)
 
-	if (then.getFullYear() === today.getFullYear() && then.getMonth() === today.getMonth() && then.getDate() === today.getDate()) {
+	if (key === dayNumber(today)) {
 		return "today"
 	}
 
-	if (
-		then.getFullYear() === yesterday.getFullYear() &&
-		then.getMonth() === yesterday.getMonth() &&
-		then.getDate() === yesterday.getDate()
-	) {
-		return "yesterday"
-	}
+	// setDate, not a 24h subtraction, so DST days still land on the previous calendar day.
+	today.setDate(today.getDate() - 1)
 
-	return "other"
+	return key === dayNumber(today) ? "yesterday" : "other"
 }
 
 // HH:MM in the viewer's locale — the burst-header time and the compact list-row time for a same-day chat.

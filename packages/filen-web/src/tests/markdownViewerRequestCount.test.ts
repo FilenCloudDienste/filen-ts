@@ -17,7 +17,7 @@ vi.mock("@/lib/sdk/client", () => ({
 	threadCount: () => 1
 }))
 
-vi.mock("@/providers/themeProvider", () => ({ useTheme: () => ({ theme: "light", setTheme: vi.fn() }) }))
+vi.mock("@/providers/themeProvider", () => ({ useTheme: () => ({ theme: "light", setTheme: vi.fn() }), resolveTheme: () => "light" }))
 
 // CodeMirror's own view needs layout jsdom lacks; a textarea stands in for the editor surface over a
 // detached EditorView carrying CodeMirrorSource's real extensions, so its buffer, dirty and contentRef

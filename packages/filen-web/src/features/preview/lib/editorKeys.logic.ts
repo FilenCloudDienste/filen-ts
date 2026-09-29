@@ -1,3 +1,5 @@
+import { comboAlternatives } from "@/lib/keymap/kbd.logic"
+
 // The app's shortcut combos ("mod+shift+x", alternatives comma-separated, as react-hotkeys-hook reads
 // them) in CodeMirror's key notation ("Mod-Shift-x"), so the editor binds the same, user-rebindable
 // shortcuts the shortcuts list shows.
@@ -13,16 +15,10 @@ const MODIFIERS: Readonly<Record<string, string>> = {
 	command: "Meta"
 }
 
-// react-hotkeys-hook's tokens (its aliases, and the recorder's lowercased event.code with "key",
+// react-hotkeys-hook's alias-resolved tokens (and the recorder's lowercased event.code with "key",
 // "digit" and "numpad" stripped) as KeyboardEvent.key names, which CodeMirror matches on. Letters,
-// digits and names that only need a capital ("enter", "f5") fall through to codeMirrorKey.
+// digits and names that only need a capital ("escape", "enter", "f5") fall through to codeMirrorKey.
 const KEYS: Readonly<Record<string, string>> = {
-	esc: "Escape",
-	return: "Enter",
-	up: "ArrowUp",
-	down: "ArrowDown",
-	left: "ArrowLeft",
-	right: "ArrowRight",
 	arrowup: "ArrowUp",
 	arrowdown: "ArrowDown",
 	arrowleft: "ArrowLeft",
@@ -59,14 +55,5 @@ function codeMirrorKey(key: string): string {
 }
 
 export function codeMirrorKeys(combo: string): string[] {
-	return combo
-		.split(",")
-		.map(chord => chord.trim().toLowerCase())
-		.filter(chord => chord.length > 0)
-		.map(chord =>
-			chord
-				.split("+")
-				.map(part => MODIFIERS[part] ?? codeMirrorKey(part))
-				.join("-")
-		)
+	return comboAlternatives(combo).map(keys => keys.map(key => MODIFIERS[key] ?? codeMirrorKey(key)).join("-"))
 }

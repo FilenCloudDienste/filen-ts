@@ -2,6 +2,7 @@ import { Semaphore } from "@filen/shared"
 import type { Chat, ChatTypingType } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
 import { log } from "@/lib/log"
+import { withoutKey } from "@/lib/utils"
 import { useChatTypingStore, type ChatTypingUser } from "@/features/chats/store/useChatTyping"
 
 // Realtime typing — both directions. A faithful port of filen-mobile's chats typing handling
@@ -49,15 +50,7 @@ function removeTypingUser(chatUuid: string, senderId: bigint): void {
 			return prev
 		}
 
-		const updated = { ...prev }
-
-		if (remaining.length === 0) {
-			Reflect.deleteProperty(updated, chatUuid)
-		} else {
-			updated[chatUuid] = remaining
-		}
-
-		return updated
+		return remaining.length === 0 ? withoutKey(prev, chatUuid) : { ...prev, [chatUuid]: remaining }
 	})
 }
 

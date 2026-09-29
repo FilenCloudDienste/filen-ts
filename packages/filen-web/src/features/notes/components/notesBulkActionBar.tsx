@@ -1,10 +1,9 @@
 import { createElement, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
-import { XIcon } from "lucide-react"
 import type { Note, NoteTag, NoteType } from "@filen/sdk-rs"
 import { aggregateNoteSelectionFlags } from "@filen/shared"
-import { type BulkOutcome } from "@/features/drive/lib/bulk"
+import { type BulkOutcome } from "@/lib/actions/bulk"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { isNoteUndecryptable } from "@/features/notes/lib/sort"
 import {
@@ -29,10 +28,8 @@ import {
 } from "@/features/notes/components/notesBulkActionBar.logic"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { NOTE_TYPE_SUBMENU } from "@/features/notes/components/noteMenu.logic"
-import { Kbd } from "@/lib/keymap/kbd"
 import { Button } from "@/components/ui/button"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { toastObstructionRef } from "@/lib/toastClearance"
+import { BulkActionButton, SelectionActionBar } from "@/components/selectionActionBar"
 import {
 	DropdownMenu,
 	DropdownMenuContent,
@@ -156,121 +153,46 @@ export function NotesBulkActionBar({ selectedNotes, allTags, currentUserId, onDi
 	}
 
 	return (
-		<div
-			ref={toastObstructionRef}
-			className="pointer-events-auto flex max-w-full flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border bg-popover px-3 py-2 text-popover-foreground shadow-lg"
+		<SelectionActionBar
+			count={selectedNotes.length}
+			clearKbdAction="notes.clearSelection"
+			onClear={() => {
+				useNotesSelectionStore.getState().clearSelectedNotes()
+			}}
 		>
-			<div className="flex items-center gap-2">
-				<Tooltip>
-					<TooltipTrigger
-						render={
-							<Button
-								variant="ghost"
-								size="icon-sm"
-								aria-label={t("notesCommandClearSelection")}
-								onClick={() => {
-									useNotesSelectionStore.getState().clearSelectedNotes()
-								}}
-							>
-								<XIcon />
-							</Button>
-						}
-					/>
-					<TooltipContent>
-						{t("notesCommandClearSelection")}
-						<Kbd action="notes.clearSelection" />
-					</TooltipContent>
-				</Tooltip>
-				<p className="text-sm text-muted-foreground">{t("notesSelectionCount", { count: selectedNotes.length })}</p>
-			</div>
-			<div className="flex items-center gap-2">
-				{descriptors.map(descriptor => {
-					const offlineDisabled = isNoteBulkActionOfflineDisabled(descriptor.id, isOnline)
-					const disabled = offlineDisabled || blocked
-					const disabledReason = offlineDisabled ? t("common:offlineActionDisabled") : anyInflight ? t("noteSyncing") : undefined
-					const keymapAction = KEYMAP_ACTION_FOR[descriptor.id]
+			{descriptors.map(descriptor => {
+				const offlineDisabled = isNoteBulkActionOfflineDisabled(descriptor.id, isOnline)
+				const disabled = offlineDisabled || blocked
+				const disabledReason = offlineDisabled ? t("common:offlineActionDisabled") : anyInflight ? t("noteSyncing") : undefined
 
-					if (descriptor.run === "submenu") {
-						const entries =
-							descriptor.submenu === "tags"
-								? noteBulkTagSubmenuEntries(selectedNotes, allTags).map(({ tag, checked }) => (
-										<DropdownMenuCheckboxItem
-											key={tag.uuid}
-											checked={checked}
-											onCheckedChange={next => {
-												void handleTagToggle(tag, next)
-											}}
-										>
-											{tag.name ?? tag.uuid}
-										</DropdownMenuCheckboxItem>
-									))
-								: NOTE_TYPE_SUBMENU.map(entry => (
-										<DropdownMenuItem
-											key={entry.noteType}
-											onClick={() => {
-												void handleTypeSelect(entry.noteType)
-											}}
-										>
-											{t(entry.labelKey)}
-										</DropdownMenuItem>
-									))
-
-						return (
-							<DropdownMenu key={descriptor.id}>
-								<DropdownMenuTrigger
-									render={
-										<Button
-											variant="outline"
-											size="icon-sm"
-											disabled={disabled}
-											aria-label={t(descriptor.labelKey)}
-											title={disabledReason}
-										>
-											{createElement(descriptor.icon, { "aria-hidden": true })}
-										</Button>
-									}
-								/>
-								<DropdownMenuContent align="end">
-									{entries.length === 0 ? (
-										<DropdownMenuItem disabled>{t("noteTagsSubmenuEmpty")}</DropdownMenuItem>
-									) : (
-										entries
-									)}
-								</DropdownMenuContent>
-							</DropdownMenu>
-						)
-					}
-
-					if (descriptor.run === "dialog") {
-						return (
-							<Tooltip key={descriptor.id}>
-								<TooltipTrigger
-									render={
-										<Button
-											variant={descriptor.destructive ? "destructive" : "outline"}
-											size="icon-sm"
-											disabled={disabled}
-											aria-label={t(descriptor.labelKey)}
-											title={disabledReason}
-											onClick={() => {
-												onDialogAction(descriptor.dialogKind, selectedNotes)
-											}}
-										>
-											{createElement(descriptor.icon, { "aria-hidden": true })}
-										</Button>
-									}
-								/>
-								<TooltipContent>
-									{disabledReason ?? t(descriptor.labelKey)}
-									{keymapAction === undefined ? null : <Kbd action={keymapAction} />}
-								</TooltipContent>
-							</Tooltip>
-						)
-					}
+				if (descriptor.run === "submenu") {
+					const entries =
+						descriptor.submenu === "tags"
+							? noteBulkTagSubmenuEntries(selectedNotes, allTags).map(({ tag, checked }) => (
+									<DropdownMenuCheckboxItem
+										key={tag.uuid}
+										checked={checked}
+										onCheckedChange={next => {
+											void handleTagToggle(tag, next)
+										}}
+									>
+										{tag.name ?? tag.uuid}
+									</DropdownMenuCheckboxItem>
+								))
+							: NOTE_TYPE_SUBMENU.map(entry => (
+									<DropdownMenuItem
+										key={entry.noteType}
+										onClick={() => {
+											void handleTypeSelect(entry.noteType)
+										}}
+									>
+										{t(entry.labelKey)}
+									</DropdownMenuItem>
+								))
 
 					return (
-						<Tooltip key={descriptor.id}>
-							<TooltipTrigger
+						<DropdownMenu key={descriptor.id}>
+							<DropdownMenuTrigger
 								render={
 									<Button
 										variant="outline"
@@ -278,19 +200,39 @@ export function NotesBulkActionBar({ selectedNotes, allTags, currentUserId, onDi
 										disabled={disabled}
 										aria-label={t(descriptor.labelKey)}
 										title={disabledReason}
-										onClick={() => {
-											runDescriptor(descriptor)
-										}}
 									>
 										{createElement(descriptor.icon, { "aria-hidden": true })}
 									</Button>
 								}
 							/>
-							<TooltipContent>{disabledReason ?? t(descriptor.labelKey)}</TooltipContent>
-						</Tooltip>
+							<DropdownMenuContent align="end">
+								{entries.length === 0 ? <DropdownMenuItem disabled>{t("noteTagsSubmenuEmpty")}</DropdownMenuItem> : entries}
+							</DropdownMenuContent>
+						</DropdownMenu>
 					)
-				})}
-			</div>
-		</div>
+				}
+
+				return (
+					<BulkActionButton
+						key={descriptor.id}
+						icon={descriptor.icon}
+						label={t(descriptor.labelKey)}
+						destructive={descriptor.destructive}
+						disabled={disabled}
+						disabledReason={disabledReason}
+						kbdAction={KEYMAP_ACTION_FOR[descriptor.id]}
+						onClick={() => {
+							if (descriptor.run === "dialog") {
+								onDialogAction(descriptor.dialogKind, selectedNotes)
+
+								return
+							}
+
+							runDescriptor(descriptor)
+						}}
+					/>
+				)
+			})}
+		</SelectionActionBar>
 	)
 }

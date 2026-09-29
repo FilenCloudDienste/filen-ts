@@ -16,7 +16,7 @@ const { hasClient, whenBootReady, getStartScreen } = vi.hoisted(() => ({
 
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: { hasClient } }))
 vi.mock("@/lib/sdk/boot", () => ({ whenBootReady }))
-vi.mock("@/features/shell/lib/startScreen", () => ({ getStartScreen }))
+vi.mock("@/features/shell/lib/startScreen", () => ({ getStartScreen, DEFAULT_START_SCREEN: "drive" }))
 
 async function freshModule() {
 	vi.resetModules()

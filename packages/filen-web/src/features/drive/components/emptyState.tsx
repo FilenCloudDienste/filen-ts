@@ -6,7 +6,7 @@ import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { driveEmptyStateCopy } from "@/features/drive/components/emptyState.logic"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { Button } from "@/components/ui/button"
-import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
+import { EmptyMessage } from "@/components/emptyMessage"
 
 // Discriminated on variant so an "error" render can never be constructed without its error/retry —
 // the same two branches directoryListing.tsx's placeholder rendered inline, now shared with the real
@@ -30,33 +30,23 @@ export function EmptyState(props: EmptyStateProps) {
 		// DIFFERENT id — an errored listing is not a settled-empty one.
 		// Assertive on error only: it replaces content the reader was waiting for and carries a retry
 		// they need to act on. An empty directory is not an error and stays silent.
-		<Empty
+		<EmptyMessage
 			role={props.variant === "error" ? "alert" : undefined}
 			data-testid={props.variant === "empty" ? "listing-empty" : "listing-error"}
+			icon={Icon}
+			title={props.variant === "error" ? t("driveLoadError") : t(copy?.titleKey ?? "driveEmptyTitle")}
+			description={props.variant === "error" ? errorLabel(props.error) : t(copy?.bodyKey ?? "driveEmptyBody")}
 		>
-			<EmptyHeader>
-				<EmptyMedia>
-					<Icon />
-				</EmptyMedia>
-				<EmptyTitle>{props.variant === "error" ? t("driveLoadError") : t(copy?.titleKey ?? "driveEmptyTitle")}</EmptyTitle>
-				<EmptyDescription>
-					{props.variant === "error" ? errorLabel(props.error) : t(copy?.bodyKey ?? "driveEmptyBody")}
-				</EmptyDescription>
-			</EmptyHeader>
 			{props.variant === "error" ? (
-				<EmptyContent>
-					<Button
-						variant="outline"
-						onClick={props.onRetry}
-					>
-						{t("common:tryAgain")}
-					</Button>
-				</EmptyContent>
+				<Button
+					variant="outline"
+					onClick={props.onRetry}
+				>
+					{t("common:tryAgain")}
+				</Button>
 			) : props.action ? (
-				<EmptyContent>
-					<div className="flex items-center gap-2">{props.action}</div>
-				</EmptyContent>
+				<div className="flex items-center gap-2">{props.action}</div>
 			) : null}
-		</Empty>
+		</EmptyMessage>
 	)
 }

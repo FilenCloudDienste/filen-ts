@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next"
+import { cn } from "@filen/shared"
 import { SearchIcon, XIcon } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -8,19 +9,19 @@ export interface ListFilterInputProps {
 	onChange: (value: string) => void
 	placeholder: string
 	ariaLabel: string
+	wrapperClassName?: string
 }
 
-// Shared filter box for the picker surfaces that have no reason to hijack a global keyboard
-// shortcut the way drive's own SearchInput does (mod+f + its Kbd hint make sense for a full listing,
-// not a modal's contact list): the move/import destination picker and the four contact/participant
-// picker dialogs (share-recipient, chat-participant, note-participant, new-chat contact) all mount this
-// instead. Same visual chrome (icon-left, clear-button-right Input), no keymap registration, no
-// dialogOpen prop — a dialog's own focus trap already keeps this the only focusable search box in play.
-export function ListFilterInput({ value, onChange, placeholder, ariaLabel }: ListFilterInputProps) {
+// Shared filter box for surfaces that have no reason to hijack a global keyboard shortcut the way
+// drive's own SearchInput does (mod+f + its Kbd hint make sense for a full listing, not a picker or a
+// sidebar): the destination/contact/participant pickers and the notes/chats sidebars. Icon-left,
+// clear-button-right Input, no keymap registration. Escape clears a non-empty value and stops there, so
+// it never also reaches a document-level Escape action.
+export function ListFilterInput({ value, onChange, placeholder, ariaLabel, wrapperClassName }: ListFilterInputProps) {
 	const { t } = useTranslation("common")
 
 	return (
-		<div className="relative w-full shrink-0">
+		<div className={cn("relative w-full shrink-0", wrapperClassName)}>
 			<SearchIcon
 				aria-hidden="true"
 				className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground"

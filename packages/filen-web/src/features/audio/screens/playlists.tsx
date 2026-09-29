@@ -6,7 +6,6 @@ import { openPlaylistDialog } from "@/features/audio/store/usePlaylistDialogStor
 import { PlaylistPane } from "@/features/audio/components/playlistPane"
 import { PlaylistDialogsHost } from "@/features/audio/components/playlistDialogsHost"
 import { errorLabel } from "@/lib/i18n/errorLabel"
-import { asErrorDTO } from "@/lib/sdk/errors"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { Button } from "@/components/ui/button"
 import { LoadingState } from "@/components/loadingState"
@@ -26,7 +25,7 @@ export function PlaylistsScreen({ selectedUuid }: { selectedUuid: string | undef
 			{playlistsQuery.status === "pending" ? (
 				<LoadingState size="lg" />
 			) : playlistsQuery.status === "error" ? (
-				<p className="px-4 py-10 text-center text-sm text-destructive">{errorLabel(asErrorDTO(playlistsQuery.error))}</p>
+				<p className="px-4 py-10 text-center text-sm text-destructive">{errorLabel(playlistsQuery.error)}</p>
 			) : playlist !== null ? (
 				<PlaylistPane
 					// A different playlist is a different page: drag/remove state never carries across.

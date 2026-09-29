@@ -244,6 +244,11 @@ describe("pdfLinkAnnotations", () => {
 		expect(pdfLinkAnnotations([link({ url: "javascript:alert(1)" })])).toEqual([])
 	})
 
+	it("drops a relative URL, which would resolve against the app's own origin", () => {
+		expect(pdfLinkAnnotations([link({ url: "docs/page.html" })])).toEqual([])
+		expect(pdfLinkAnnotations([link({ url: "#section" })])).toEqual([])
+	})
+
 	it("drops a non-Link subtype", () => {
 		expect(pdfLinkAnnotations([link({ subtype: "Widget" })])).toEqual([])
 	})

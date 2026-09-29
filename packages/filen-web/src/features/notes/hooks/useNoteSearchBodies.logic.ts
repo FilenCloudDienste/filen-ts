@@ -1,4 +1,4 @@
-import { noteTitleMatchesSearch } from "@/features/notes/lib/sort"
+import { normalizeSearch, noteTitleMatchesSearch } from "@/features/notes/lib/sort"
 import type { Note } from "@filen/sdk-rs"
 
 // Pure bits pulled out of useNoteSearchBodies.ts so the fetch-scoping decision is table-testable
@@ -10,7 +10,7 @@ import type { Note } from "@filen/sdk-rs"
 // Returns every note, unfiltered, for a blank query (the hook itself is what skips fetching then, by
 // passing an empty candidate list into useQueries).
 export function noteSearchBodyCandidates(notes: readonly Note[], search: string): Note[] {
-	const normalized = search.trim().toLowerCase()
+	const normalized = normalizeSearch(search)
 
 	if (normalized.length === 0) {
 		return []

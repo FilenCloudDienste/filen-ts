@@ -1,6 +1,6 @@
 import { type, type Type } from "arktype"
 import type { JsClientConfig } from "@filen/sdk-rs"
-import { kvGetJson, kvSetJson } from "@/lib/storage/adapter"
+import { kvPreference } from "@/lib/storage/preference"
 import {
 	TRANSFER_PERFORMANCE_PRESETS,
 	type TransferPerformancePreset,
@@ -39,21 +39,15 @@ export const DEFAULT_TRANSFER_PREFERENCES: TransferPreferences = {
 	preset: DEFAULT_TRANSFER_PERFORMANCE_PRESET
 }
 
-const TRANSFER_CONFIG_KV_KEY = "settings.transferConfig.v1"
-
 const transferPreferencesSchema: Type<TransferPreferences> = type({
 	preset: type.enumerated(...TRANSFER_PERFORMANCE_PRESETS)
 })
 
-// kvGetJson collapses "absent" and "schema-invalid" to null (see @/lib/storage/adapter); the `??`
-// default is the self-heal, same rule as every other kv-backed preference in this app.
-export async function getTransferPreferences(): Promise<TransferPreferences> {
-	return (await kvGetJson(TRANSFER_CONFIG_KV_KEY, transferPreferencesSchema)) ?? DEFAULT_TRANSFER_PREFERENCES
-}
-
-export async function setTransferPreferences(next: TransferPreferences): Promise<void> {
-	await kvSetJson(TRANSFER_CONFIG_KV_KEY, next)
-}
+export const { get: getTransferPreferences, set: setTransferPreferences } = kvPreference({
+	key: "settings.transferConfig.v1",
+	schema: transferPreferencesSchema,
+	fallback: DEFAULT_TRANSFER_PREFERENCES
+})
 
 // Pure preset -> JsClientConfig mapping, called from boot.ts (main thread, after the preference is
 // read from kv) and unit-tested without touching the worker or wasm at all.

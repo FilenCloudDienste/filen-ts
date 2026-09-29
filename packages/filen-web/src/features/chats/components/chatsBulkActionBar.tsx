@@ -1,8 +1,6 @@
-import { createElement } from "react"
 import { useTranslation } from "react-i18next"
-import { XIcon } from "lucide-react"
 import type { Chat } from "@filen/sdk-rs"
-import { type BulkOutcome } from "@/features/drive/lib/bulk"
+import { type BulkOutcome } from "@/lib/actions/bulk"
 import { aggregateChatSelectionFlags } from "@/features/chats/lib/selectionFlags"
 import { chatMessagesQueryGet } from "@/features/chats/queries/chatMessages"
 import type { BlockedUsers } from "@filen/shared"
@@ -15,11 +13,8 @@ import {
 	type ChatBulkActionDescriptor,
 	type ChatBulkDialogActionKind
 } from "@/features/chats/components/chatsBulkActionBar.logic"
-import { Kbd } from "@/lib/keymap/kbd"
 import { useIsOnline } from "@/lib/useIsOnline"
-import { toastObstructionRef } from "@/lib/toastClearance"
-import { Button } from "@/components/ui/button"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { BulkActionButton, SelectionActionBar } from "@/components/selectionActionBar"
 
 export type { ChatBulkDialogActionKind }
 
@@ -36,7 +31,7 @@ export interface ChatsBulkActionBarProps {
 
 // Bottom-anchored floating selection bar (chatsSidebar.tsx overlays it on the scrollable list while a
 // 2+ selection exists) — mirrors features/notes/components/notesBulkActionBar.tsx, sized down: chats
-// have no submenu-driven bulk action, so every descriptor renders as a single tooltip'd icon button.
+// have no submenu-driven bulk action, so every descriptor renders as a plain BulkActionButton.
 export function ChatsBulkActionBar({ selectedChats, currentUserId, blocked, onDialogAction }: ChatsBulkActionBarProps) {
 	const { t } = useTranslation(["chats", "common"])
 	const isOnline = useIsOnline()
@@ -64,85 +59,36 @@ export function ChatsBulkActionBar({ selectedChats, currentUserId, blocked, onDi
 	}
 
 	return (
-		<div
-			ref={toastObstructionRef}
-			className="pointer-events-auto flex max-w-full flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border bg-popover px-3 py-2 text-popover-foreground shadow-lg"
+		<SelectionActionBar
+			count={selectedChats.length}
+			clearKbdAction="chats.clearSelection"
+			onClear={() => {
+				useChatsSelectionStore.getState().clearSelectedChats()
+			}}
 		>
-			<div className="flex items-center gap-2">
-				<Tooltip>
-					<TooltipTrigger
-						render={
-							<Button
-								variant="ghost"
-								size="icon-sm"
-								aria-label={t("chatsCommandClearSelection")}
-								onClick={() => {
-									useChatsSelectionStore.getState().clearSelectedChats()
-								}}
-							>
-								<XIcon />
-							</Button>
-						}
+			{descriptors.map(descriptor => {
+				const offlineDisabled = isChatBulkActionOfflineDisabled(descriptor.id, isOnline)
+
+				return (
+					<BulkActionButton
+						key={descriptor.id}
+						icon={descriptor.icon}
+						label={t(descriptor.labelKey)}
+						destructive={descriptor.destructive}
+						disabled={offlineDisabled}
+						disabledReason={offlineDisabled ? t("common:offlineActionDisabled") : undefined}
+						onClick={() => {
+							if (descriptor.run === "dialog") {
+								onDialogAction(descriptor.dialogKind, selectedChats)
+
+								return
+							}
+
+							runDescriptor(descriptor)
+						}}
 					/>
-					<TooltipContent>
-						{t("chatsCommandClearSelection")}
-						<Kbd action="chats.clearSelection" />
-					</TooltipContent>
-				</Tooltip>
-				<p className="text-sm text-muted-foreground">{t("chatsSelectionCount", { count: selectedChats.length })}</p>
-			</div>
-			<div className="flex items-center gap-2">
-				{descriptors.map(descriptor => {
-					const offlineDisabled = isChatBulkActionOfflineDisabled(descriptor.id, isOnline)
-					const tooltip = offlineDisabled ? t("common:offlineActionDisabled") : t(descriptor.labelKey)
-
-					if (descriptor.run === "dialog") {
-						return (
-							<Tooltip key={descriptor.id}>
-								<TooltipTrigger
-									render={
-										<Button
-											variant={descriptor.destructive ? "destructive" : "outline"}
-											size="icon-sm"
-											disabled={offlineDisabled}
-											aria-label={t(descriptor.labelKey)}
-											title={offlineDisabled ? tooltip : undefined}
-											onClick={() => {
-												onDialogAction(descriptor.dialogKind, selectedChats)
-											}}
-										>
-											{createElement(descriptor.icon, { "aria-hidden": true })}
-										</Button>
-									}
-								/>
-								<TooltipContent>{tooltip}</TooltipContent>
-							</Tooltip>
-						)
-					}
-
-					return (
-						<Tooltip key={descriptor.id}>
-							<TooltipTrigger
-								render={
-									<Button
-										variant="outline"
-										size="icon-sm"
-										disabled={offlineDisabled}
-										aria-label={t(descriptor.labelKey)}
-										title={offlineDisabled ? tooltip : undefined}
-										onClick={() => {
-											runDescriptor(descriptor)
-										}}
-									>
-										{createElement(descriptor.icon, { "aria-hidden": true })}
-									</Button>
-								}
-							/>
-							<TooltipContent>{tooltip}</TooltipContent>
-						</Tooltip>
-					)
-				})}
-			</div>
-		</div>
+				)
+			})}
+		</SelectionActionBar>
 	)
 }

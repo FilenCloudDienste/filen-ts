@@ -57,17 +57,6 @@ async function flush(): Promise<void> {
 	}
 }
 
-interface Deferred<T> {
-	promise: Promise<T>
-	resolve: (value: T) => void
-}
-
-function deferred<T>(): Deferred<T> {
-	const { promise, resolve } = Promise.withResolvers<T>()
-
-	return { promise, resolve }
-}
-
 function makeService(overrides: Partial<TrackMetadataDeps> = {}) {
 	let urls = 0
 	const deps = {
@@ -93,10 +82,10 @@ describe("JobQueue", () => {
 	it("runs at most `concurrency` jobs, FIFO, with priority jobs first", async () => {
 		const queue = new JobQueue(2)
 		const order: string[] = []
-		const gates = new Map<string, Deferred<undefined>>()
+		const gates = new Map<string, PromiseWithResolvers<undefined>>()
 
 		function job(name: string): () => Promise<void> {
-			const gate = deferred<undefined>()
+			const gate = Promise.withResolvers<undefined>()
 
 			gates.set(name, gate)
 
@@ -128,7 +117,7 @@ describe("JobQueue", () => {
 
 	it("drops a waiting job on cancel, moves one forward on prioritize, and never cancels a running one", async () => {
 		const queue = new JobQueue(1)
-		const gate = deferred<undefined>()
+		const gate = Promise.withResolvers<undefined>()
 		const ran: string[] = []
 
 		const running = queue.enqueue(() => {
@@ -180,6 +169,7 @@ describe("trackTags.logic", () => {
 		expect(trackDisplayTitle(record({ title: "Song" }), "a.mp3")).toBe("Song")
 		expect(trackDisplayTitle(record({ title: null }), "a.mp3")).toBe("a.mp3")
 		expect(trackDisplayTitle(undefined, "a.mp3")).toBe("a.mp3")
+		expect(trackDisplayTitle(null, "a.mp3")).toBe("a.mp3")
 	})
 })
 
@@ -258,7 +248,7 @@ describe("TrackMetadataService", () => {
 
 	it("shares one read between concurrent requests for the same track", async () => {
 		const { service, deps } = makeService()
-		const gate = deferred<AudioMetadataResult>()
+		const gate = Promise.withResolvers<AudioMetadataResult>()
 
 		deps.readRemote.mockReturnValue(gate.promise)
 
@@ -273,7 +263,7 @@ describe("TrackMetadataService", () => {
 
 	it("drops a queued read nobody wants any more, but keeps one another caller still wants", async () => {
 		const { service, deps } = makeService()
-		const gates = [deferred<AudioMetadataResult>(), deferred<AudioMetadataResult>()]
+		const gates = [Promise.withResolvers<AudioMetadataResult>(), Promise.withResolvers<AudioMetadataResult>()]
 
 		deps.readRemote
 			.mockReturnValueOnce(gates[0]?.promise ?? Promise.resolve(parsed()))
@@ -422,7 +412,7 @@ describe("TrackMetadataService", () => {
 		deps.readThumbnail.mockResolvedValue(new Blob(["thumb"]))
 		await service.loadCoverUrl("x")
 
-		const gate = deferred<AudioMetadataResult>()
+		const gate = Promise.withResolvers<AudioMetadataResult>()
 
 		deps.readRemote.mockReturnValue(gate.promise)
 

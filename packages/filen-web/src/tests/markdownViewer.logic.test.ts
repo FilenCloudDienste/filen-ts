@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest"
 import { markdownUrlTransform } from "@/features/preview/components/markdownViewer.logic"
 
-// Mirrors docxViewer.logic.test.ts's own isSafeLinkHref scheme cases — markdownUrlTransform delegates
-// to that exact function — plus its own rule that only an absolute URL survives.
+// Mirrors safeUrl.test.ts's own isSafeAbsoluteHref cases — markdownUrlTransform delegates to that
+// exact function.
 describe("markdownUrlTransform", () => {
 	it("keeps an https URL", () => {
 		expect(markdownUrlTransform("https://example.com")).toBe("https://example.com")

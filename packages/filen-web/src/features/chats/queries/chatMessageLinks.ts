@@ -6,10 +6,10 @@ import { previewType, type PreviewCategory } from "@/features/drive/lib/preview.
 import { embedCandidatesForLinks, type FilenPublicLink } from "@/features/chats/lib/embeds.logic"
 
 // Per-message embed resolution — the async leg behind embeds.logic.ts's pure classification, which
-// only ever yields Filen public links. Each is a metadata-only read against the wasm surface
-// (getLinkedFile / getDirPublicLinkInfo) — the SAME round trip opening the link in a browser would make,
-// and it goes to Filen's own API, never to a host the sender picked. A password-protected link or a
-// resolution failure both degrade to `success: false` — there is no in-chat password prompt
+// only ever yields Filen public links. Each is a metadata-only read (the worker's getLinkedFileAnon /
+// getDirPublicLinkInfoAnon) — the SAME round trip opening the link in a browser would make, and it goes
+// to Filen's own API, never to a host the sender picked. A password-protected link or a resolution
+// failure both degrade to `success: false` — there is no in-chat password prompt
 // (FilenLinkCard then renders from the URL's own uuid, no network-derived name/icon). Nothing here ever
 // fetches a third-party url: that would hand the reader's IP to whoever posted the link.
 
@@ -48,7 +48,7 @@ type ResolvedFilenLinkData = Extract<ChatLinkResolution, { success: true }>["dat
 async function resolveFilenLinkData(link: FilenPublicLink): Promise<ResolvedFilenLinkData | null> {
 	try {
 		if (link.kind === "file") {
-			const file = await sdkApi.getLinkedFile(link.linkUuid, link.key)
+			const file = await sdkApi.getLinkedFileAnon(link.linkUuid, link.key)
 
 			return {
 				type: "file",
@@ -59,7 +59,7 @@ async function resolveFilenLinkData(link: FilenPublicLink): Promise<ResolvedFile
 			}
 		}
 
-		const info = await sdkApi.getDirPublicLinkInfo(link.linkUuid, link.key)
+		const info = await sdkApi.getDirPublicLinkInfoAnon(link.linkUuid, link.key)
 		const meta = info.root.inner.meta
 
 		return {

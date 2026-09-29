@@ -1,5 +1,6 @@
 import { type, type Type } from "arktype"
-import { kvGetJson, kvSetJson } from "@/lib/storage/adapter"
+import { kvPreference, type KvPreference } from "@/lib/storage/preference"
+import { splitterKeyValue, type SplitterKeyBounds } from "@/lib/useSeparatorValue.logic"
 
 // The three contextual sidebars big enough to want more room than the fixed-width settings/contacts
 // panels — each persists its own width independently, same per-module split as old-web's own
@@ -25,39 +26,34 @@ export function widthFromDrag(startWidth: number, startClientX: number, clientX:
 
 export const SIDEBAR_WIDTH_STEP = 16
 
-// WAI-ARIA window-splitter keys for a TRAILING-edge handle: ArrowRight grows, ArrowLeft shrinks (same
-// sign convention as widthFromDrag's clientX delta), Home/End jump to the clamps. null = a key this
-// separator does not handle, so the caller leaves the event alone.
-export function widthFromKey(key: string, width: number): number | null {
-	switch (key) {
-		case "ArrowLeft":
-			return clampSidebarWidth(width - SIDEBAR_WIDTH_STEP)
-		case "ArrowRight":
-			return clampSidebarWidth(width + SIDEBAR_WIDTH_STEP)
-		case "Home":
-			return SIDEBAR_WIDTH_MIN
-		case "End":
-			return SIDEBAR_WIDTH_MAX
-		default:
-			return null
-	}
-}
+const SIDEBAR_WIDTH_KEY_BOUNDS: SplitterKeyBounds = { step: SIDEBAR_WIDTH_STEP, min: SIDEBAR_WIDTH_MIN, max: SIDEBAR_WIDTH_MAX }
 
-function sidebarWidthKvKey(module: SidebarModule): string {
-	return `shell.sidebarWidth.${module}.v1`
+// ArrowRight grows the trailing-edge handle, same sign convention as widthFromDrag's clientX delta.
+export function widthFromKey(key: string, width: number): number | null {
+	return splitterKeyValue(key, width, SIDEBAR_WIDTH_KEY_BOUNDS)
 }
 
 const sidebarWidthSchema: Type<number> = type("number")
 
-// kvGetJson already collapses "absent" and "schema-invalid" to null (see @/lib/storage/adapter); a
-// persisted-but-out-of-range value (e.g. written before MIN/MAX changed) is clamped on the way out
-// too, not just on write — same self-heal shape as getMdSplitRatio.
-export async function getSidebarWidth(module: SidebarModule): Promise<number> {
-	const stored = await kvGetJson(sidebarWidthKvKey(module), sidebarWidthSchema)
-
-	return stored === null ? DEFAULT_SIDEBAR_WIDTH : clampSidebarWidth(stored)
+function sidebarWidthPreference(module: SidebarModule): KvPreference<number> {
+	return kvPreference({
+		key: `shell.sidebarWidth.${module}.v1`,
+		schema: sidebarWidthSchema,
+		fallback: DEFAULT_SIDEBAR_WIDTH,
+		normalize: clampSidebarWidth
+	})
 }
 
-export async function setSidebarWidth(module: SidebarModule, width: number): Promise<void> {
-	await kvSetJson(sidebarWidthKvKey(module), clampSidebarWidth(width))
+const sidebarWidthPreferences: Record<SidebarModule, KvPreference<number>> = {
+	drive: sidebarWidthPreference("drive"),
+	notes: sidebarWidthPreference("notes"),
+	chats: sidebarWidthPreference("chats")
+}
+
+export function getSidebarWidth(module: SidebarModule): Promise<number> {
+	return sidebarWidthPreferences[module].get()
+}
+
+export function setSidebarWidth(module: SidebarModule, width: number): Promise<void> {
+	return sidebarWidthPreferences[module].set(width)
 }

@@ -1,9 +1,9 @@
 import { toast } from "sonner"
 import { dirnameOf, pathSegmentDepth, sumBytes } from "@filen/shared"
-import { asErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { i18n } from "@/lib/i18n"
 import { log } from "@/lib/log"
+import { toastSummary } from "@/lib/actions/bulkToast"
 import { sdkApi } from "@/lib/sdk/client"
 import { runCreateDirectory, type CreateDirectoryDeps } from "@/features/drive/lib/createDirectory"
 import { runUpload, defaultUploadDeps, type RunUploadDeps, type UploadOutcome } from "@/features/drive/lib/upload"
@@ -332,18 +332,10 @@ export async function runDirectoryUpload(
 	const succeeded = createdUuids.length + uploadedFiles
 	const failed = failedDirs + skipped + fileOutcomes.filter(status => status === "error").length
 
-	// Everything that ran was cancelled by the user: nothing to report.
-	if (succeeded === 0 && failed === 0) {
-		return
-	}
-
-	if (failed === 0) {
-		toast.success(i18n.t("transfers:transfersDirectoryUploadSummaryComplete", { count: succeeded }))
-
-		return
-	}
-
-	toast.error(i18n.t("transfers:transfersDirectoryUploadSummaryCompleteWithFailures", { count: succeeded, failed }))
+	toastSummary(succeeded, failed, {
+		complete: "transfers:transfersDirectoryUploadSummaryComplete",
+		withFailures: "transfers:transfersDirectoryUploadSummaryCompleteWithFailures"
+	})
 }
 
 // ---------------------------------------------------------------------------
@@ -378,7 +370,7 @@ export async function startDirectoryUpload(input: DirectoryUploadInput, rootPare
 	} catch (e) {
 		// A hard walk failure (the browser couldn't even enumerate the dropped/picked tree) — nothing
 		// partial to report here, unlike runDirectoryUpload's own per-item failures above.
-		toast.error(errorLabel(asErrorDTO(e)), { id: scanningToastId })
+		toast.error(errorLabel(e), { id: scanningToastId })
 
 		return
 	}

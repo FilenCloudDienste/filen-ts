@@ -1,10 +1,11 @@
 import { create } from "zustand"
 import type { AnswerChoice } from "@/lib/storage/outboxChannel"
-import useNotesInflightStore from "@/features/notes/store/useNotesInflight"
+import { useNotesInflightStore } from "@/features/notes/store/useNotesInflight"
 import { newestEntry } from "@/features/notes/lib/sync.logic"
 import { holdNoteForRemoteEdit, releaseNoteHold } from "@/features/notes/lib/remoteEditHolds"
 import { tabEditorDirty } from "@/features/notes/lib/tabEditors"
 import { takeRemoteContent } from "@/features/notes/lib/remoteContent"
+import { withoutKey } from "@/lib/utils"
 
 // Per note, "the server's content moved while you have unsynced changes", set by the realtime ContentEdited
 // handler ONLY while the note has them — a note without reloads instead. Surfaced as the
@@ -46,17 +47,9 @@ export const useNotesRemoteEditStore = create<NotesRemoteEditStore>((set, get) =
 	function drop(uuid: string): void {
 		releaseNoteHold(uuid)
 		set(state => {
-			if (state.remoteEdited[uuid] === undefined) {
-				return state
-			}
+			const remoteEdited = withoutKey(state.remoteEdited, uuid)
 
-			const next = {
-				...state.remoteEdited
-			}
-
-			Reflect.deleteProperty(next, uuid)
-
-			return { remoteEdited: next }
+			return remoteEdited === state.remoteEdited ? state : { remoteEdited }
 		})
 	}
 
@@ -105,5 +98,3 @@ export const useNotesRemoteEditStore = create<NotesRemoteEditStore>((set, get) =
 export function useNoteRemoteEdit(uuid: string): NoteRemoteEdit | undefined {
 	return useNotesRemoteEditStore(state => state.remoteEdited[uuid])
 }
-
-export default useNotesRemoteEditStore

@@ -43,9 +43,17 @@ vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
 import { Sync } from "@/features/chats/lib/sync"
 import { buildOptimisticMessage, CommittedIdLedger, type OptimisticSender, type RemoteChatEnqueue } from "@/features/chats/lib/sync.logic"
-import useChatsInflightStore, { type ChatMessageWithInflightId, type InflightChatMessages } from "@/features/chats/store/useChatsInflight"
-import { closeOutbox, decodeOutboxPayload, makeOutboxChannelTransport, type OutboxChannelMsg } from "@/lib/storage/outboxChannel"
-import { remoteChatEnqueueSchema } from "@/features/chats/lib/sync.logic"
+import { useChatsInflightStore, type ChatMessageWithInflightId, type InflightChatMessages } from "@/features/chats/store/useChatsInflight"
+import {
+	closeOutbox,
+	decodeOutboxPayload,
+	makeOutboxChannelTransport,
+	routeOutboxMessage,
+	type OutboxChannelMsg,
+	type OutboxRole,
+	type OutboxRoute
+} from "@/lib/storage/outboxChannel"
+import { inflightChatMessagesSchema, remoteChatEnqueueSchema } from "@/features/chats/lib/sync.logic"
 
 const SENDER: OptimisticSender = { id: 7n, email: "me@filen.io", avatarUrl: undefined, nickName: "Me" }
 
@@ -329,5 +337,78 @@ describe("outbox transport — payloads cross as structured clones", () => {
 	it("an invalid payload is dropped, never thrown", () => {
 		expect(decodeOutboxPayload({ chat: "nope" }, remoteChatEnqueueSchema, "forwarded send")).toBeNull()
 		expect(decodeOutboxPayload("a string", remoteChatEnqueueSchema, "forwarded send")).toBeNull()
+	})
+})
+
+// ── routeOutboxMessage ──────────────────────────────────────────────────────
+
+describe("routeOutboxMessage — role-routed dispatch of the shared kinds", () => {
+	const route: OutboxRoute<RemoteChatEnqueue, InflightChatMessages> = {
+		enqueueSchema: remoteChatEnqueueSchema,
+		stateSchema: inflightChatMessagesSchema,
+		enqueueLabel: "forwarded send",
+		stateLabel: "leader state"
+	}
+
+	function target(outboxRole: OutboxRole) {
+		return {
+			outboxRole,
+			ingestRemoteEnqueue: vi.fn(),
+			executeNow: vi.fn(),
+			broadcastState: vi.fn(),
+			applyLeaderState: vi.fn(),
+			resendUnacked: vi.fn()
+		}
+	}
+
+	const forward: RemoteChatEnqueue = { chat: makeChat("c1"), message: optimistic("c1", "i1", 5n) }
+	const all: OutboxChannelMsg[] = [
+		{ kind: "enqueue", payload: forward },
+		{ kind: "executeNow" },
+		{ kind: "stateRequest" },
+		{ kind: "state", payload: {} },
+		{ kind: "leaderHello" },
+		{ kind: "drop", id: "n1" }
+	]
+
+	it("a leader acts on follower forwards only", () => {
+		const t = target("leader")
+
+		for (const msg of all) {
+			routeOutboxMessage(msg, t, route)
+		}
+
+		expect(t.ingestRemoteEnqueue).toHaveBeenCalledTimes(1)
+		expect(t.executeNow).toHaveBeenCalledTimes(1)
+		expect(t.broadcastState).toHaveBeenCalledTimes(1)
+		expect(t.applyLeaderState).not.toHaveBeenCalled()
+		expect(t.resendUnacked).not.toHaveBeenCalled()
+	})
+
+	it("any other role acts on leader broadcasts only", () => {
+		for (const role of ["follower", "unresolved"] as const) {
+			const t = target(role)
+
+			for (const msg of all) {
+				routeOutboxMessage(msg, t, route)
+			}
+
+			expect(t.ingestRemoteEnqueue).not.toHaveBeenCalled()
+			expect(t.executeNow).not.toHaveBeenCalled()
+			expect(t.broadcastState).not.toHaveBeenCalled()
+			expect(t.applyLeaderState).toHaveBeenCalledWith({})
+			expect(t.resendUnacked).toHaveBeenCalledTimes(1)
+		}
+	})
+
+	it("an invalid payload is dropped before it reaches the target", () => {
+		const leader = target("leader")
+		const follower = target("follower")
+
+		routeOutboxMessage({ kind: "enqueue", payload: { chat: "nope" } }, leader, route)
+		routeOutboxMessage({ kind: "state", payload: "nope" }, follower, route)
+
+		expect(leader.ingestRemoteEnqueue).not.toHaveBeenCalled()
+		expect(follower.applyLeaderState).not.toHaveBeenCalled()
 	})
 })

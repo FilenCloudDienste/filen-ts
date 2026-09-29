@@ -4,10 +4,9 @@ import { driveItemName } from "@filen/shared"
 import { asDirectoryOrFile, narrowItem, upsertDriveItem, type DriveItem } from "@/features/drive/lib/item"
 import { extensionOf, previewType, type PreviewCategory } from "@/features/drive/lib/preview.logic"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
+import { isEditableSpreadsheetExtension } from "@/features/spreadsheet/lib/fileKind"
 import { runOp, type ActionOutcome } from "@/lib/actions/outcome"
-import { asErrorDTO, PARENT_NOT_FOUND_PREFIX, type ErrorDTO } from "@/lib/sdk/errors"
-
-const EDITABLE_SPREADSHEET_EXTENSIONS: ReadonlySet<string> = new Set(["csv", "tsv", "xlsx", "xlsm"])
+import { asErrorDTO, plainErrorDTO, PARENT_NOT_FOUND_PREFIX, type ErrorDTO } from "@/lib/sdk/errors"
 
 // Editable-preview eligibility gate (mobile parity): only a decryptable text/code/markdown file or spreadsheet
 // inside the navigable "drive" variant — never trash/recents/favorites/sharedIn/sharedOut (no
@@ -39,7 +38,7 @@ export function isEditable(item: DriveItem, variant: DriveVariant): boolean {
 	// A spreadsheet edits in its grid, and saves in the format its extension names; a legacy .xls, or one
 	// known only by its mime type, only opens to be looked at.
 	if (category === "spreadsheet") {
-		return EDITABLE_SPREADSHEET_EXTENSIONS.has(extensionOf(driveItemName(base)))
+		return isEditableSpreadsheetExtension(extensionOf(driveItemName(base)))
 	}
 
 	return isTextCategory(category)
@@ -93,8 +92,7 @@ export async function runPreviewSave(
 	if (base.type !== "file") {
 		// Unreachable in practice — isEditable already excludes every non-file arm — kept so the
 		// narrow below (decryptedMeta.mime is file-arm-only) type-checks without a non-null assertion.
-		const message = "runPreviewSave: not a file"
-		return { status: "error", dto: { species: "plain", message, label: message } }
+		return { status: "error", dto: plainErrorDTO("runPreviewSave: not a file") }
 	}
 
 	const name = asNewFile ?? driveItemName(base)

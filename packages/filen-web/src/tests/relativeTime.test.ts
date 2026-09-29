@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { TFunction } from "i18next"
 import { formatRelativeTime } from "@/lib/relativeTime"
+import { formatShortDate } from "@/lib/formatDate"
 
 // A stand-in for the i18next t: echoes the key and, for the plural keys, the resolved count — so a
 // single assertion pins down BOTH which branch fired and the number it carried.
@@ -37,7 +38,7 @@ describe("formatRelativeTime", () => {
 
 			// Not one of the relative keys — the absolute branch produced a real date string.
 			expect(result).not.toContain("relative")
-			expect(result).toBe(new Date(old).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }))
+			expect(result).toBe(formatShortDate(old))
 		}
 	})
 })

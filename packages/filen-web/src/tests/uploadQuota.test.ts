@@ -171,15 +171,6 @@ describe("startUploads quota pre-flight", () => {
 // Any account write cancels the account query's own read, which then resolves with the cached figure;
 // the pre-flight's fresh read must not be that read.
 describe("the pre-flight's fresh read", () => {
-	function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
-		let resolve: (value: T) => void = () => undefined
-		const promise = new Promise<T>(r => {
-			resolve = r
-		})
-
-		return { promise, resolve }
-	}
-
 	it.each([
 		[
 			"a stale mark",
@@ -196,7 +187,7 @@ describe("the pre-flight's fresh read", () => {
 	])("judges on the server's figure when %s lands during the read, and leaves the cache to that write", async (_, write) => {
 		queryClient.setQueryData(ACCOUNT_QUERY_KEY, account(9_900n, 10_000n))
 
-		const fresh = deferred<UserInfo>()
+		const fresh = Promise.withResolvers<UserInfo>()
 
 		getUserInfo.mockReturnValueOnce(fresh.promise)
 
@@ -225,7 +216,7 @@ describe("the pre-flight's fresh read", () => {
 	it("shares one read among pre-flights that start while it runs", async () => {
 		queryClient.setQueryData(ACCOUNT_QUERY_KEY, account(9_900n, 10_000n))
 
-		const fresh = deferred<UserInfo>()
+		const fresh = Promise.withResolvers<UserInfo>()
 
 		getUserInfo.mockReturnValueOnce(fresh.promise)
 
@@ -243,8 +234,8 @@ describe("the pre-flight's fresh read", () => {
 	it("reads again for a pre-flight that starts after an account write", async () => {
 		queryClient.setQueryData(ACCOUNT_QUERY_KEY, account(9_900n, 10_000n))
 
-		const before = deferred<UserInfo>()
-		const after = deferred<UserInfo>()
+		const before = Promise.withResolvers<UserInfo>()
+		const after = Promise.withResolvers<UserInfo>()
 
 		getUserInfo.mockReturnValueOnce(before.promise).mockReturnValueOnce(after.promise)
 

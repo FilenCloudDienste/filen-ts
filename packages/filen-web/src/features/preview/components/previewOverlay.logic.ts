@@ -2,40 +2,16 @@
 // other viewer's own *.logic.ts sibling, e.g. docxViewer.logic.ts) so it is unit-testable under this
 // project's DOM-free vitest environment (vitest.config.ts: environment "node", no jsdom/happy-dom).
 
-import { driveItemActions, type ItemActionDescriptor, type ItemActionId } from "@/features/drive/components/itemMenu.logic"
-import { type DriveItem } from "@/features/drive/lib/item"
-import { type DriveVariant } from "@/features/drive/lib/preferences"
+import { type ItemActionId } from "@/features/drive/components/itemMenu.logic"
+import { hasClosest } from "@/lib/domTarget"
 
 // The header item-menu never offers Download — the header already has its own dedicated download
 // button right next to the menu's own trigger (previewOverlay.tsx).
 export const PREVIEW_MENU_HIDDEN_ACTION_IDS = new Set<ItemActionId>(["download"])
 
-// Same descriptor list + variant/type/undecryptable gating the row/tile ⋯ dropdown uses
-// (driveItemActions), Download stripped — pulled out here so the gating itself (trash reduces to
-// restore/delete/info, links drops move, sharedIn/sharedOut drop the owner-mutating group, etc.) is
-// unit-testable without mounting the overlay itself.
-export function previewMenuActions(
-	item: DriveItem,
-	variant: DriveVariant,
-	extraHidden?: ReadonlySet<ItemActionId>
-): ItemActionDescriptor[] {
-	const hidden = previewMenuHiddenActionIds(extraHidden)
-
-	return driveItemActions(item, variant).filter(descriptor => !hidden.has(descriptor.id))
-}
-
 // Download, plus whatever the opening surface leaves out of its own menus (Photos: Move).
 export function previewMenuHiddenActionIds(extra?: ReadonlySet<ItemActionId>): ReadonlySet<ItemActionId> {
 	return extra === undefined ? PREVIEW_MENU_HIDDEN_ACTION_IDS : new Set([...PREVIEW_MENU_HIDDEN_ACTION_IDS, ...extra])
-}
-
-// Duck-typed rather than `target instanceof Element` — this module's own unit test has no real DOM
-// global to check against, mirroring sdk/errors.ts's own isSdkError precedent for the identical reason
-// (a live object is probed by shape, not by a runtime class binding that may not exist here). Exported
-// for previewOverlay.tsx's own click-to-hide-chrome handler (see shouldToggleChrome below), which needs
-// the SAME "is this target inside an interactive surface" check the keyboard guard above already does.
-export function hasClosest(target: EventTarget | null): target is EventTarget & { closest: (selector: string) => Element | null } {
-	return typeof target === "object" && target !== null && typeof (target as { closest?: unknown }).closest === "function"
 }
 
 // True while `target` sits inside a CodeMirror surface (editable OR read-only alike) — CodeMirror's
@@ -81,7 +57,7 @@ export function isVideoControlsBandClick(elementHeight: number, clickOffsetY: nu
 // CodeMirror surface, ...) or on a video/audio element's own native controls band must never toggle it,
 // or every ordinary interaction with those surfaces would also flicker the chrome. Pure decision table,
 // no DOM: previewOverlay.tsx computes `isInteractive`/`isMedia`/`mediaControlsBandHit` from the real
-// click event (hasClosest + isVideoControlsBandClick above) and hands them here.
+// click event (hasClosest + isVideoControlsBandClick) and hands them here.
 export interface ChromeToggleClick {
 	// True when the click target sits inside a button/link/input, a text-selection surface (a CodeMirror
 	// editor or a pdf.js text layer), or any other widget that owns its own click semantics.

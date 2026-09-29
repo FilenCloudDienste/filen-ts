@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import {
 	TIMELINE_HEADER_HEIGHT,
 	buildPhotosTimeline,
+	gridCellWidth,
 	timelineHeaderAt,
 	timelineIndexAtPoint,
 	timelineKeyTarget,
@@ -71,6 +72,13 @@ describe("timelineKeyTarget", () => {
 	it("walks capture order sideways, across months", () => {
 		expect(timelineKeyTarget("ArrowRight", 4, 8, TIMELINE)).toBe(5)
 		expect(timelineKeyTarget("ArrowLeft", 5, 8, TIMELINE)).toBe(4)
+	})
+})
+
+describe("gridCellWidth", () => {
+	it("splits the width left after the gaps evenly across the columns", () => {
+		expect(gridCellWidth(3 * CELL + 2 * GAP, COLUMNS, GAP)).toBe(CELL)
+		expect(gridCellWidth(CELL, 1, GAP)).toBe(CELL)
 	})
 })
 

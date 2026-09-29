@@ -1,16 +1,16 @@
-import type { Note, NoteType, UserInfo } from "@filen/sdk-rs"
+import type { Note, NoteType } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
 import { i18n } from "@/lib/i18n"
 import { queryClient } from "@/queries/client"
 import { removeQueriesAndPersisted } from "@/queries/persist"
-import { ACCOUNT_QUERY_KEY } from "@/queries/account"
+import { accountQueryGet } from "@/queries/account"
 import { notesQueryUpsert, notesQueryRemove } from "@/features/notes/queries/notes"
 import { noteContentQueryKey, readNoteContent } from "@/features/notes/queries/noteContent"
 import { localNoteContent } from "@/features/notes/lib/localContent"
 import { recordNotePush } from "@/features/notes/lib/pushEchoes"
 import { isNoteOwner } from "@/features/notes/lib/sort"
-import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
-import { runOp, type ActionOutcome, type VoidActionOutcome } from "@/lib/actions/outcome"
+import { asErrorDTO, plainErrorDTO } from "@/lib/sdk/errors"
+import { attemptOp, runOp, type ActionOutcome, type VoidActionOutcome } from "@/lib/actions/outcome"
 
 export type { ActionOutcome, VoidActionOutcome }
 
@@ -20,17 +20,8 @@ export type { ActionOutcome, VoidActionOutcome }
 // Nothing here calls toast — every caller (noteMenu.tsx, the sidebar's new-note button, ...) resolves
 // the outcome and surfaces `errorLabel(dto)` itself, same convention as drive's itemMenu.tsx.
 
-// Same rationale as drive's currentRootUuid(): the account query is warm by the time any note surface
-// can render, so a cache miss degrades to undefined rather than throwing — every owner-gate below treats
-// an unresolved id as "not the owner" (the safer default; the SDK itself is the final authority anyway).
-function currentUserId(): bigint | undefined {
-	return queryClient.getQueryData<UserInfo>(ACCOUNT_QUERY_KEY)?.id
-}
-
 function ownerGateError(): ActionOutcome<Note> {
-	const message = i18n.t("notes:noteOwnerOnlyError")
-
-	return { status: "error", dto: { species: "plain", message, label: message } }
+	return { status: "error", dto: plainErrorDTO(i18n.t("notes:noteOwnerOnlyError")) }
 }
 
 // ── Create ───────────────────────────────────────────────────────────────
@@ -38,17 +29,13 @@ function ownerGateError(): ActionOutcome<Note> {
 // The SDK creates a "text" note with its own default title — no type-picker dialog on create, matching
 // both mobile and old-web.
 export async function createNote(): Promise<ActionOutcome<Note>> {
-	let note: Note
+	const outcome = await attemptOp(sdkApi.createNote())
 
-	try {
-		note = await runOp(sdkApi.createNote())
-	} catch (e) {
-		return { status: "error", dto: asErrorDTO(e) }
+	if (outcome.status === "success") {
+		notesQueryUpsert(outcome.item)
 	}
 
-	notesQueryUpsert(note)
-
-	return { status: "success", item: note }
+	return outcome
 }
 
 // A just-created note's retype, which writes its content ("" for a new note) again: recorded as this
@@ -84,10 +71,8 @@ export async function resolveNoteContent(note: Note): Promise<string> {
 	const result = await runOp(readNoteContent(note))
 
 	if (result.status === "undecryptable") {
-		const message = i18n.t("notes:noteContentUndecryptableError")
-
 		// eslint-disable-next-line @typescript-eslint/only-throw-error -- ErrorDTO is the boundary contract, mirrors runOp's own convention
-		throw { species: "plain", message, label: message } satisfies ErrorDTO
+		throw plainErrorDTO(i18n.t("notes:noteContentUndecryptableError"))
 	}
 
 	return result.content
@@ -138,17 +123,13 @@ export async function setNotePinned(note: Note, pinned: boolean): Promise<Action
 		return { status: "success", item: note }
 	}
 
-	let updated: Note
+	const outcome = await attemptOp(sdkApi.setNotePinned(note, pinned))
 
-	try {
-		updated = await runOp(sdkApi.setNotePinned(note, pinned))
-	} catch (e) {
-		return { status: "error", dto: asErrorDTO(e) }
+	if (outcome.status === "success") {
+		notesQueryUpsert(outcome.item)
 	}
 
-	notesQueryUpsert(updated)
-
-	return { status: "success", item: updated }
+	return outcome
 }
 
 export async function togglePinned(note: Note): Promise<ActionOutcome<Note>> {
@@ -160,17 +141,13 @@ export async function setNoteFavorited(note: Note, favorited: boolean): Promise<
 		return { status: "success", item: note }
 	}
 
-	let updated: Note
+	const outcome = await attemptOp(sdkApi.setNoteFavorited(note, favorited))
 
-	try {
-		updated = await runOp(sdkApi.setNoteFavorited(note, favorited))
-	} catch (e) {
-		return { status: "error", dto: asErrorDTO(e) }
+	if (outcome.status === "success") {
+		notesQueryUpsert(outcome.item)
 	}
 
-	notesQueryUpsert(updated)
-
-	return { status: "success", item: updated }
+	return outcome
 }
 
 export async function toggleFavorited(note: Note): Promise<ActionOutcome<Note>> {
@@ -183,7 +160,7 @@ export async function toggleFavorited(note: Note): Promise<ActionOutcome<Note>> 
 // builder that hides the entry for a non-owner — defense-in-depth, same rule this codebase already
 // applies to connectivity gates (library AND component layer).
 export async function archiveNote(note: Note): Promise<ActionOutcome<Note>> {
-	if (!isNoteOwner(note, currentUserId())) {
+	if (!isNoteOwner(note, accountQueryGet()?.id)) {
 		return ownerGateError()
 	}
 
@@ -191,17 +168,13 @@ export async function archiveNote(note: Note): Promise<ActionOutcome<Note>> {
 		return { status: "success", item: note }
 	}
 
-	let updated: Note
+	const outcome = await attemptOp(sdkApi.archiveNote(note))
 
-	try {
-		updated = await runOp(sdkApi.archiveNote(note))
-	} catch (e) {
-		return { status: "error", dto: asErrorDTO(e) }
+	if (outcome.status === "success") {
+		notesQueryUpsert(outcome.item)
 	}
 
-	notesQueryUpsert(updated)
-
-	return { status: "success", item: updated }
+	return outcome
 }
 
 export async function restoreNote(note: Note): Promise<ActionOutcome<Note>> {
@@ -209,17 +182,13 @@ export async function restoreNote(note: Note): Promise<ActionOutcome<Note>> {
 		return { status: "success", item: note }
 	}
 
-	let updated: Note
+	const outcome = await attemptOp(sdkApi.restoreNote(note))
 
-	try {
-		updated = await runOp(sdkApi.restoreNote(note))
-	} catch (e) {
-		return { status: "error", dto: asErrorDTO(e) }
+	if (outcome.status === "success") {
+		notesQueryUpsert(outcome.item)
 	}
 
-	notesQueryUpsert(updated)
-
-	return { status: "success", item: updated }
+	return outcome
 }
 
 export async function trashNote(note: Note): Promise<ActionOutcome<Note>> {
@@ -227,20 +196,16 @@ export async function trashNote(note: Note): Promise<ActionOutcome<Note>> {
 		return { status: "success", item: note }
 	}
 
-	let updated: Note
-
-	try {
-		updated = await runOp(sdkApi.trashNote(note))
-	} catch (e) {
-		return { status: "error", dto: asErrorDTO(e) }
-	}
+	const outcome = await attemptOp(sdkApi.trashNote(note))
 
 	// Trashed notes stay IN the flat list (sort.ts's noteBucket sorts them to the bottom tier) — there is
 	// no separate notes-trash view (the sidebar only has the notes/tags views) — so this is a plain
 	// upsert, never a removal.
-	notesQueryUpsert(updated)
+	if (outcome.status === "success") {
+		notesQueryUpsert(outcome.item)
+	}
 
-	return { status: "success", item: updated }
+	return outcome
 }
 
 export interface DeleteNoteOptions {
@@ -260,10 +225,10 @@ export async function deleteNote(note: Note, opts?: DeleteNoteOptions): Promise<
 		return { status: "success" }
 	}
 
-	try {
-		await runOp(sdkApi.deleteNote(note))
-	} catch (e) {
-		return { status: "error", dto: asErrorDTO(e) }
+	const outcome = await attemptOp(sdkApi.deleteNote(note))
+
+	if (outcome.status === "error") {
+		return outcome
 	}
 
 	opts?.beforeCacheRemoval?.()
@@ -276,17 +241,16 @@ export async function deleteNote(note: Note, opts?: DeleteNoteOptions): Promise<
 // ── Leave (non-owner self-remove) ────────────────────────────────────────
 
 export async function leaveNote(note: Note, opts?: DeleteNoteOptions): Promise<VoidActionOutcome> {
-	const userId = currentUserId()
+	const userId = accountQueryGet()?.id
 
 	if (userId === undefined) {
-		const message = i18n.t("notes:noteNotSignedInError")
-		return { status: "error", dto: { species: "plain", message, label: message } }
+		return { status: "error", dto: plainErrorDTO(i18n.t("notes:noteNotSignedInError")) }
 	}
 
-	try {
-		await runOp(sdkApi.removeNoteParticipant(note, userId))
-	} catch (e) {
-		return { status: "error", dto: asErrorDTO(e) }
+	const outcome = await attemptOp(sdkApi.removeNoteParticipant(note, userId))
+
+	if (outcome.status === "error") {
+		return outcome
 	}
 
 	opts?.beforeCacheRemoval?.()
@@ -307,17 +271,13 @@ export async function setNoteTitle(note: Note, title: string): Promise<ActionOut
 		return { status: "success", item: note }
 	}
 
-	let updated: Note
+	const outcome = await attemptOp(sdkApi.setNoteTitle(note, trimmed))
 
-	try {
-		updated = await runOp(sdkApi.setNoteTitle(note, trimmed))
-	} catch (e) {
-		return { status: "error", dto: asErrorDTO(e) }
+	if (outcome.status === "success") {
+		notesQueryUpsert(outcome.item)
 	}
 
-	notesQueryUpsert(updated)
-
-	return { status: "success", item: updated }
+	return outcome
 }
 
 // Passes the current content as `knownContent` when it's already cached (mirrors mobile's setType)
@@ -330,21 +290,18 @@ export async function setNoteType(note: Note, noteType: NoteType): Promise<Actio
 
 	const knownContent = queryClient.getQueryData<string | undefined>(noteContentQueryKey(note.uuid))
 
-	let updated: Note
-
 	// The retype writes the content again; its echo is this browser's own write. Content the SDK reads
 	// itself is not known here.
 	const forget = knownContent === undefined ? undefined : recordNotePush(note.uuid, knownContent)
+	const outcome = await attemptOp(sdkApi.setNoteType(note, noteType, knownContent))
 
-	try {
-		updated = await runOp(sdkApi.setNoteType(note, noteType, knownContent))
-	} catch (e) {
+	if (outcome.status === "error") {
 		forget?.()
 
-		return { status: "error", dto: asErrorDTO(e) }
+		return outcome
 	}
 
-	notesQueryUpsert(updated)
+	notesQueryUpsert(outcome.item)
 
-	return { status: "success", item: updated }
+	return outcome
 }

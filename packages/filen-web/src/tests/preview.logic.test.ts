@@ -5,6 +5,7 @@ import {
 	previewType,
 	canPreview,
 	needsImageTransform,
+	isStreamedCategory,
 	previewableSiblings,
 	stepPreviewIndex,
 	streamFailureAction,
@@ -15,7 +16,7 @@ import {
 	RAW_IMAGE_EXTENSIONS
 } from "@/features/drive/lib/preview.logic"
 
-// Mirrors contactPickerDialog.logic.test.ts's own testUuid helper — UuidStr is a branded template
+// Mirrors contactPicker.logic.test.ts's own testUuid helper — UuidStr is a branded template
 // literal type (`${string}-${string}-${string}-${string}`) a plain dynamic string can't satisfy
 // structurally, so a labeled fixture uuid needs this one cast, same as every other test fixture here.
 function testUuid(label: string): UuidStr {
@@ -283,6 +284,18 @@ describe("needsImageTransform", () => {
 
 	it("is false for an extensionless file with a streamable image mime", () => {
 		expect(needsImageTransform(fileNamed("IMG_0001", { mime: "image/jpeg" }))).toBe(false)
+	})
+})
+
+describe("isStreamedCategory", () => {
+	it("is true only for image, video and audio", () => {
+		expect(isStreamedCategory("image")).toBe(true)
+		expect(isStreamedCategory("video")).toBe(true)
+		expect(isStreamedCategory("audio")).toBe(true)
+
+		for (const category of ["rawImage", "pdf", "docx", "spreadsheet", "text", "code", "markdown", "other"] as const) {
+			expect(isStreamedCategory(category)).toBe(false)
+		}
 	})
 })
 

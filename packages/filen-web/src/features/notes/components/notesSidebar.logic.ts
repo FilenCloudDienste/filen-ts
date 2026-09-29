@@ -1,14 +1,10 @@
-import { sortAndFilterNotes, sortNotes, filterNotesBySearch, tagDisplayName } from "@/features/notes/lib/sort"
+import { sortAndFilterNotes, sortNotes, filterNotesBySearch, normalizeSearch, tagDisplayName } from "@/features/notes/lib/sort"
 import { isBlocked, type BlockedUsers, sortNoteTags, type NoteTagsSortBy, partitionNotesByBucket, type NoteBucketId } from "@filen/shared"
 import type { Note, NoteTag } from "@filen/sdk-rs"
 
 // Pure view-model builders for the two-view sidebar. No React, no cache — the
 // component feeds in the raw notes/tags lists + the current search/expand/sort state, and gets back the
 // exact row model the virtualizer walks. Tested directly against these inputs (notesSidebar.logic.test.ts).
-
-function normalizeSearch(search: string): string {
-	return search.trim().toLowerCase()
-}
 
 // A note whose OWNER is a blocked contact is silently hidden from both views, even though the
 // note itself isn't deleted (mirrors filen-mobile's filterNotesByBlockedOwner: owner-based only, so a

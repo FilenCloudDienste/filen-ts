@@ -27,7 +27,8 @@ vi.mock("@/lib/keymap/kbd", async () => {
 
 import { narrowItem } from "@/features/drive/lib/item"
 import { type PhotoItem } from "@/features/photos/lib/captureSort"
-import { PhotosDropdownMenuContent } from "@/features/photos/components/itemMenu"
+import { DriveDropdownMenuContent } from "@/features/drive/components/itemMenu"
+import { PHOTOS_HIDDEN_ACTION_IDS } from "@/features/photos/lib/itemActions"
 import { useDriveClipboardStore } from "@/features/drive/store/useDriveClipboardStore"
 import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 
@@ -53,7 +54,12 @@ function renderMenu() {
 			DropdownMenu,
 			{ defaultOpen: true },
 			createElement(DropdownMenuTrigger, null, "menu"),
-			createElement(PhotosDropdownMenuContent, { rootUuid: "root", item: PHOTO, onItemAction })
+			createElement(DriveDropdownMenuContent, {
+				item: PHOTO,
+				variant: "drive",
+				hiddenActionIds: PHOTOS_HIDDEN_ACTION_IDS,
+				onItemAction
+			})
 		)
 	)
 
@@ -88,7 +94,25 @@ afterEach(() => {
 	cleanup()
 })
 
+// Photos renders drive's own item menu with PHOTOS_HIDDEN_ACTION_IDS (photoTile.tsx).
 describe("photos item menu", () => {
+	it("offers drive's file menu without Move", () => {
+		renderMenu()
+
+		expect(screen.getAllByRole("menuitem").map(entry => entry.textContent)).toEqual([
+			"Rename",
+			"Copy",
+			"Favorite",
+			"Versions",
+			"Info",
+			"Download",
+			"Share",
+			"Public link",
+			"Copy link",
+			"Trash"
+		])
+	})
+
 	it("offers drive's Copy submenu, whose picker entry opens the copy dialog for the photo", async () => {
 		const { onItemAction } = renderMenu()
 

@@ -4,7 +4,7 @@ import { toast } from "sonner"
 import { PlusIcon } from "lucide-react"
 import type { Note, NoteTag, NoteType } from "@filen/sdk-rs"
 import { errorLabel } from "@/lib/i18n/errorLabel"
-import { asErrorDTO } from "@/lib/sdk/errors"
+import { copyText } from "@/lib/copyText"
 import type { VoidActionOutcome } from "@/lib/actions/outcome"
 import {
 	togglePinned,
@@ -143,12 +143,7 @@ function NoteMenuEntries({
 				return
 			}
 			case "copyId": {
-				try {
-					await navigator.clipboard.writeText(note.uuid)
-					toast.success(t("noteCopyIdToast"))
-				} catch (e) {
-					toast.error(errorLabel(asErrorDTO(e)))
-				}
+				await copyText(note.uuid, t("noteCopyIdToast"))
 
 				return
 			}
@@ -158,7 +153,7 @@ function NoteMenuEntries({
 					await navigator.clipboard.writeText(content)
 					toast.success(t("noteCopyContentToast"))
 				} catch (e) {
-					toast.error(errorLabel(asErrorDTO(e)))
+					toast.error(errorLabel(e))
 				}
 
 				return
@@ -202,8 +197,7 @@ function NoteMenuEntries({
 				<Item
 					disabled={!isOnline}
 					title={!isOnline ? t("common:offlineActionDisabled") : undefined}
-					onClick={event => {
-						event.stopPropagation()
+					onClick={() => {
 						onAction("createTag", note)
 					}}
 				>
@@ -264,12 +258,7 @@ function NoteMenuEntries({
 					variant={descriptor.destructive ? "destructive" : "default"}
 					disabled={disabled}
 					title={disabledTitle}
-					onClick={event => {
-						// Stop propagation — the portaled popup's synthetic events still bubble through the
-						// REACT tree even though the DOM node lives elsewhere (same rationale as drive's
-						// itemMenu.tsx), so without this a row click would also reselect/toggle underneath.
-						event.stopPropagation()
-
+					onClick={() => {
 						if (descriptor.run === "direct") {
 							void runDirect(descriptor)
 							return
@@ -376,11 +365,7 @@ export function TagContextMenuContent({ tag, onTagAction, onCreateNoteInTag }: T
 					variant={descriptor.run === "dialog" && descriptor.destructive === true ? "destructive" : "default"}
 					disabled={descriptor.enabled === false}
 					title={descriptor.enabled === false && !isOnline ? t("common:offlineActionDisabled") : undefined}
-					onClick={event => {
-						// Same propagation stop as NoteMenuEntries — without it the click would also toggle
-						// the tag group's own expand/collapse underneath the (portaled) menu.
-						event.stopPropagation()
-
+					onClick={() => {
 						if (descriptor.run === "direct") {
 							if (descriptor.id === "tagCreateNote") {
 								void handleCreateNoteInTag()

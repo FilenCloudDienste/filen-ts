@@ -4,16 +4,14 @@ import { toast } from "sonner"
 import { isValidEmail } from "@filen/shared"
 import { sdkApi } from "@/lib/sdk/client"
 import { persistSession, clearSession } from "@/lib/sdk/session"
-import { asErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { runChangeEmailAttempt } from "@/features/settings/components/account/changeEmail.logic"
-import { useCapsLock } from "@/features/auth/lib/useCapsLock"
 import { useIsOnline } from "@/lib/useIsOnline"
 import type { AccountQuerySuccess } from "@/queries/account"
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
-import { CapsLockWarning } from "@/features/auth/components/capsLockWarning"
+import { PasswordInput } from "@/features/auth/components/passwordInput"
 import { SettingsRow } from "@/features/settings/components/settingsLayout"
 import { FormDialog } from "@/components/dialogs/formDialog"
 
@@ -34,7 +32,6 @@ function ChangeEmailRow({ accountQuery }: ChangeEmailRowProps) {
 	const [confirmEmail, setConfirmEmail] = useState("")
 	const [password, setPassword] = useState("")
 	const [pending, setPending] = useState(false)
-	const passwordCaps = useCapsLock()
 
 	const emailsMatch = newEmail.length > 0 && newEmail === confirmEmail
 	const canSubmit = emailsMatch && isValidEmail(newEmail) && password.length > 0 && isOnline
@@ -85,7 +82,7 @@ function ChangeEmailRow({ accountQuery }: ChangeEmailRowProps) {
 					break
 			}
 		} catch (e) {
-			toast.error(errorLabel(asErrorDTO(e)))
+			toast.error(errorLabel(e))
 		} finally {
 			setPending(false)
 		}
@@ -161,20 +158,15 @@ function ChangeEmailRow({ accountQuery }: ChangeEmailRowProps) {
 					</Field>
 					<Field>
 						<FieldLabel htmlFor="change-email-password">{t("settingsChangeEmailPassword")}</FieldLabel>
-						<Input
+						<PasswordInput
 							id="change-email-password"
-							type="password"
 							autoComplete="current-password"
 							value={password}
 							disabled={pending}
 							onChange={e => {
 								setPassword(e.target.value)
 							}}
-							onKeyDown={passwordCaps.onKeyDown}
-							onKeyUp={passwordCaps.onKeyUp}
-							onBlur={passwordCaps.onBlur}
 						/>
-						<CapsLockWarning active={passwordCaps.capsLockOn} />
 					</Field>
 				</FieldGroup>
 			</FormDialog>

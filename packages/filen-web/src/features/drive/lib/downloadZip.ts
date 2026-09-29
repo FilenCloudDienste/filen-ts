@@ -6,8 +6,9 @@ import { sdkApi } from "@/lib/sdk/client"
 import { i18n } from "@/lib/i18n"
 import { runOp, type VoidActionOutcome } from "@/lib/actions/outcome"
 import { asErrorDTO } from "@/lib/sdk/errors"
+import { pipeWorkerToSink } from "@/lib/pipeWorkerToSink"
 import { asDirectoryOrFile, narrowToSdkItems, type DriveItem } from "@/features/drive/lib/item"
-import { throttle, PROGRESS_THROTTLE_MS } from "@/features/drive/lib/upload"
+import { throttle, PROGRESS_THROTTLE_MS } from "@/lib/throttle"
 import {
 	saveDownload,
 	triggerSwZipDownload,
@@ -16,6 +17,7 @@ import {
 	type FsaSaveTarget
 } from "@/features/drive/lib/saveDownload"
 import { useTransfersStore, type TransfersStore } from "@/features/transfers/store/useTransfersStore"
+import { settleTransferFailure } from "@/features/transfers/lib/settle"
 
 // DI mirror of RunDownloadDeps (download.ts) for the zip path — one archive, one transfer row, one
 // save dialog. No `cancel` field: cancelTransfer/pauseTransfer (features/transfers/lib/control.ts) already
@@ -92,16 +94,7 @@ export async function runZipDownload(
 	} catch (e) {
 		const dto = asErrorDTO(e)
 
-		if (dto.kind === "Cancelled") {
-			deps.store.settle(id, "cancelled")
-			deps.store.remove(id)
-
-			return { status: "success" }
-		}
-
-		deps.store.settle(id, "error", dto)
-
-		return { status: "error", dto }
+		return settleTransferFailure(deps.store, id, dto) ? { status: "success" } : { status: "error", dto }
 	}
 
 	// The SDK rejects the WHOLE call on any real per-entry failure (verified against filen-sdk-rs's
@@ -114,37 +107,15 @@ export async function runZipDownload(
 	return { status: "success" }
 }
 
-// The FSA sink wiring — identical shape to download.ts's downloadViaFsa, same coordinated teardown and
-// same asymmetric swallow: the worker call rejecting can leave the transferred writable open, so the
-// pipe is aborted on the same shared signal and `sinkDone` is swallowed there ONLY (an abort-induced
-// rejection is expected). The success path awaits the RAW `sinkDone`, so a genuine close/flush failure
-// (disk full at close, a revoked handle) rejects this function too, rather than reporting a finished
-// zip that never actually finished writing.
-async function downloadZipViaFsa(
+function downloadZipViaFsa(
 	items: AnyItemWithContext[],
 	transferId: string,
 	save: FsaSaveTarget,
 	onProgress: (bytesWritten: bigint, totalBytes: bigint, itemsProcessed: bigint, totalItems: bigint) => void
 ): Promise<void> {
-	const transform = new TransformStream<Uint8Array, Uint8Array>()
-	const teardown = new AbortController()
-	const sinkDone = transform.readable.pipeTo(save.writable, { signal: teardown.signal })
-
-	try {
-		await sdkApi.downloadItemsToZip(
-			items,
-			transferId,
-			Comlink.transfer(transform.writable, [transform.writable]),
-			Comlink.proxy(onProgress)
-		)
-	} catch (e) {
-		teardown.abort()
-		await sinkDone.catch(() => undefined)
-
-		throw e
-	}
-
-	await sinkDone
+	return pipeWorkerToSink(save.writable, transferred =>
+		sdkApi.downloadItemsToZip(items, transferId, transferred, Comlink.proxy(onProgress))
+	)
 }
 
 // The real wiring behind RunZipDownloadDeps.downloadZip: fsa streams through the worker directly, sw

@@ -10,6 +10,8 @@ import {
 	type ContactsSectionFilter
 } from "@/features/contacts/components/contactsList.logic"
 import { useContactsQuery, useContactRequestsQuery } from "@/features/contacts/queries/contacts"
+import { SidebarPanel } from "@/features/shell/components/sidebarPanel"
+import { SIDEBAR_NAV_ITEM_CLASS } from "@/features/shell/lib/sidebarNavItem"
 import { type ContactsKey } from "@/lib/i18n"
 
 type IconType = ComponentType<{ className?: string }>
@@ -31,14 +33,6 @@ const FILTER_LABEL_KEY: Record<ContactsSectionFilter, ContactsKey> = {
 	all: "contactsSectionAll",
 	...CONTACTS_SECTION_HEADER_KEY
 }
-
-// Same row styling idiom as DriveSidebar/NotesSidebar/ChatsSidebar/SettingsSidebar's own nav rows —
-// each sidebar defines its own copy rather than sharing one (none of them export theirs either).
-const NAV_ITEM_CLASS = cn(
-	"group flex h-8 w-full items-center gap-2.5 rounded-xl px-2.5 text-sm focus-ring transition-colors outline-none app-region-no-drag [&_svg]:size-4 [&_svg]:shrink-0",
-	"text-sidebar-foreground/80 hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground",
-	"data-[status=active]:bg-sidebar-accent data-[status=active]:font-medium data-[status=active]:text-sidebar-accent-foreground"
-)
 
 // The shell's contacts contextual sidebar: a flat list of section-filter nav links, same w-52
 // rounded-xl borderless panel geometry as the other module sidebars (SettingsSidebar's shape is the
@@ -62,12 +56,7 @@ export function ContactsSidebar() {
 	})
 
 	return (
-		<aside
-			// Drag region (Electron plumbing): inert in a plain browser, opted back out by every
-			// interactive descendant via app-region-no-drag — same convention as the other sidebars.
-			// Visibility is the shell's call, never this panel's — see appShell.tsx.
-			className="flex w-52 max-w-full shrink-0 flex-col rounded-xl bg-sidebar app-region-drag"
-		>
+		<SidebarPanel>
 			<div className="flex flex-1 flex-col overflow-y-auto p-3">
 				<h2 className="truncate px-2.5 pt-1 pb-2.5 text-[15px] font-semibold">{t("common:moduleContacts")}</h2>
 				<div className="flex flex-col gap-0.5">
@@ -83,7 +72,7 @@ export function ContactsSidebar() {
 								search={{ section: filter }}
 								// Described, not named: the link's accessible name stays its bare label.
 								aria-description={count > 0 ? String(count) : undefined}
-								className={NAV_ITEM_CLASS}
+								className={SIDEBAR_NAV_ITEM_CLASS}
 							>
 								<Icon className="text-muted-foreground group-data-[status=active]:text-primary" />
 								<span className="flex-1 truncate">{t(FILTER_LABEL_KEY[filter])}</span>
@@ -106,6 +95,6 @@ export function ContactsSidebar() {
 					})}
 				</div>
 			</div>
-		</aside>
+		</SidebarPanel>
 	)
 }

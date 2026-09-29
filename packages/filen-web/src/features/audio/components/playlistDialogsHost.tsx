@@ -5,7 +5,6 @@ import { toast } from "sonner"
 import { createPlaylist, deletePlaylistAction, renamePlaylistAction } from "@/features/audio/lib/playlists"
 import { closePlaylistDialog, usePlaylistDialogStore } from "@/features/audio/store/usePlaylistDialogStore"
 import { errorLabel } from "@/lib/i18n/errorLabel"
-import { asErrorDTO } from "@/lib/sdk/errors"
 import { InputDialog } from "@/components/dialogs/inputDialog"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 
@@ -32,7 +31,7 @@ export function PlaylistDialogsHost({ selectedUuid }: { selectedUuid: string | u
 			closePlaylistDialog()
 			void navigate({ to: "/playlists", search: { playlist: playlist.uuid } })
 		} catch (error) {
-			toast.error(errorLabel(asErrorDTO(error)))
+			toast.error(errorLabel(error))
 		} finally {
 			setPending(false)
 		}
@@ -49,7 +48,7 @@ export function PlaylistDialogsHost({ selectedUuid }: { selectedUuid: string | u
 			await renamePlaylistAction(dialog.playlist, name.trim())
 			closePlaylistDialog()
 		} catch (error) {
-			toast.error(errorLabel(asErrorDTO(error)))
+			toast.error(errorLabel(error))
 		} finally {
 			setPending(false)
 		}
@@ -72,7 +71,7 @@ export function PlaylistDialogsHost({ selectedUuid }: { selectedUuid: string | u
 				void navigate({ to: "/playlists", search: {}, replace: true })
 			}
 		} catch (error) {
-			toast.error(errorLabel(asErrorDTO(error)))
+			toast.error(errorLabel(error))
 		} finally {
 			setPending(false)
 		}

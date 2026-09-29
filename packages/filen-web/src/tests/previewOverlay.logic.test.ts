@@ -3,7 +3,7 @@ import { QueryClient } from "@tanstack/react-query"
 import type { Dir, File } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 
-// previewOverlay.logic.ts's previewMenuActions pulls in itemMenu.logic.ts, which imports
+// itemMenu.logic.ts (driveItemActions, which the preview header menu filters) imports
 // features/drive/lib/download.ts (startDownloads) — unresolvable/unwanted under node vitest, same
 // mocking boundary as itemMenu.test.ts.
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
@@ -19,16 +19,17 @@ vi.mock("@/features/drive/lib/download", async importOriginal => {
 
 import {
 	isTextEditingTarget,
-	previewMenuActions,
+	previewMenuHiddenActionIds,
 	previewNavigationUnmountsOverlay,
-	hasClosest,
 	isVideoControlsBandClick,
 	resolveUnsavedConfirm,
 	shouldToggleChrome,
 	unsavedPromptOpen,
 	VIDEO_CONTROLS_BAND_PX
 } from "@/features/preview/components/previewOverlay.logic"
-import { PHOTOS_PREVIEW_HIDDEN_ACTION_IDS, photosItemActions } from "@/features/photos/lib/itemActions"
+import { PHOTOS_HIDDEN_ACTION_IDS } from "@/features/photos/lib/itemActions"
+import { driveItemActions, type ItemActionId } from "@/features/drive/components/itemMenu.logic"
+import type { DriveVariant } from "@/features/drive/lib/preferences"
 
 // Minimal duck-typed stand-in for a DOM EventTarget — no jsdom/happy-dom in this project
 // (vitest.config.ts: environment "node"), mirroring lib/auth/referral.test.ts's own stubbed `document`
@@ -111,11 +112,16 @@ function fileItem(overrides: Partial<File> = {}): DriveItem {
 	return narrowItem(mockFile(overrides))
 }
 
-function menuIds(item: DriveItem, variant: Parameters<typeof previewMenuActions>[1]): string[] {
-	return previewMenuActions(item, variant).map(descriptor => descriptor.id)
+// The header menu is the row/tile dropdown's driveItemActions minus previewMenuHiddenActionIds.
+function menuIds(item: DriveItem, variant: DriveVariant, extraHidden?: ReadonlySet<ItemActionId>): string[] {
+	const hidden = previewMenuHiddenActionIds(extraHidden)
+
+	return driveItemActions(item, variant)
+		.map(descriptor => descriptor.id)
+		.filter(id => !hidden.has(id))
 }
 
-describe("previewMenuActions (preview header item-menu derivation)", () => {
+describe("previewMenuHiddenActionIds (preview header item-menu derivation)", () => {
 	it("drops download from the drive-variant set — the header already has its own download button", () => {
 		expect(menuIds(fileItem(), "drive")).not.toContain("download")
 		expect(menuIds(fileItem(), "drive")).toEqual([
@@ -132,14 +138,18 @@ describe("previewMenuActions (preview header item-menu derivation)", () => {
 		])
 	})
 
-	it("opened from Photos, offers exactly what the Photos grid does (the header keeps its own download)", () => {
-		const item = fileItem()
-		const photosGrid = photosItemActions(item)
-			.map(descriptor => descriptor.id)
-			.filter(id => id !== "download")
-
-		expect(previewMenuActions(item, "drive", PHOTOS_PREVIEW_HIDDEN_ACTION_IDS).map(descriptor => descriptor.id)).toEqual(photosGrid)
-		expect(photosGrid).not.toContain("move")
+	it("opened from Photos, drops Move like the Photos grid (the header keeps its own download)", () => {
+		expect(menuIds(fileItem(), "drive", PHOTOS_HIDDEN_ACTION_IDS)).toEqual([
+			"rename",
+			"copy",
+			"favorite",
+			"versions",
+			"info",
+			"share",
+			"publicLink",
+			"copyLink",
+			"trash"
+		])
 	})
 
 	it("otherwise matches driveItemActions' own variant gating exactly (download aside)", () => {
@@ -173,20 +183,6 @@ describe("previewMenuActions (preview header item-menu derivation)", () => {
 			"trash"
 		]
 		expect(menuIds(fileItem(), "drive")).toEqual(withDownload.filter(id => id !== "download"))
-	})
-})
-
-describe("hasClosest", () => {
-	it("is false for a null target", () => {
-		expect(hasClosest(null)).toBe(false)
-	})
-
-	it("is false for a target with no closest method", () => {
-		expect(hasClosest({} as unknown as EventTarget)).toBe(false)
-	})
-
-	it("is true for a target shaped like a real Element", () => {
-		expect(hasClosest(fakeTarget(null))).toBe(true)
 	})
 })
 

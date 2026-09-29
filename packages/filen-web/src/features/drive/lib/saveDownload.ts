@@ -8,7 +8,8 @@ import {
 	SW_MSG_INIT_CLIENT,
 	SW_MSG_LOGOUT,
 	SW_MSG_REGISTER_DOWNLOAD,
-	SW_MSG_REGISTER_ZIP_DOWNLOAD
+	SW_MSG_REGISTER_ZIP_DOWNLOAD,
+	SW_REQUEST_TIMEOUT_MS
 } from "@/lib/sw/protocol"
 
 // The disk mechanism a download writes to, picked once per saveDownload() call by capability —
@@ -41,7 +42,7 @@ export function isPickerCancelled(e: unknown): boolean {
 	return isAbortError(e)
 }
 
-async function pickFsaTarget(suggestedName: string): Promise<FsaSaveTarget> {
+export async function pickFsaTarget(suggestedName: string): Promise<FsaSaveTarget> {
 	const picker = window.showSaveFilePicker
 
 	if (picker === undefined) {
@@ -54,15 +55,11 @@ async function pickFsaTarget(suggestedName: string): Promise<FsaSaveTarget> {
 	return { kind: "fsa", writable }
 }
 
-// A worker that never acks must not leave its caller pending forever (a wedged worker would stall a
-// download behind an unresolvable promise). Generous enough for the one slow message — INIT_CLIENT
-// compiles the 2 MB wasm on a cold worker before it can reply.
-const SW_REQUEST_TIMEOUT_MS = 15_000
-
 // One MessageChannel round trip to the active service worker: post `{type, ...payload}` with the
 // channel's port2 transferred, resolve/reject on its single ack (`{ok: true}` / `{ok: false, error}`)
 // — the exact reply shape sw.ts's own message listener posts back for SW_MSG_INIT_CLIENT and
-// SW_MSG_REGISTER_DOWNLOAD. The port is closed on every outcome, timeout included.
+// SW_MSG_REGISTER_DOWNLOAD. The port is closed on every outcome, timeout included, so a wedged worker
+// can't stall a download behind an unresolvable promise.
 export function sendToSw(target: ServiceWorker, type: string, payload: Record<string, unknown>): Promise<void> {
 	return new Promise((resolve, reject) => {
 		const channel = new MessageChannel()

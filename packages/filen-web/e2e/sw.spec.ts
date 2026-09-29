@@ -1,13 +1,14 @@
 import { test, expect } from "./fixtures"
-import { SW_DOWNLOAD_PREFIX, SW_MSG_INIT_CLIENT, SW_MSG_LOGOUT, SW_MSG_REGISTER_ZIP_DOWNLOAD } from "@/lib/sw/protocol"
+import {
+	SW_DOWNLOAD_PREFIX,
+	SW_MSG_INIT_CLIENT,
+	SW_MSG_LOGOUT,
+	SW_MSG_REGISTER_ZIP_DOWNLOAD,
+	SW_REQUEST_TIMEOUT_MS
+} from "@/lib/sw/protocol"
 import { bootTo, enterScratchDirectory, trashScratchDirectory, LIVE_WRITE_TIMEOUT_MS } from "./helpers/listing"
 import { waitForSwReady } from "./helpers/sw"
 import { FIREFOX_SERVICE_WORKERS_BLOCKED } from "./helpers/firefox"
-
-// Mirrors saveDownload.ts's own (non-exported) SW_REQUEST_TIMEOUT_MS — see no-coi.spec.ts for the same
-// local-redeclaration precedent. The app's budget is the right one here: this file drives the same
-// protocol against the same worker, so an ack that would fail the app must fail here too.
-const SW_ACK_TIMEOUT_MS = 15_000
 
 // Ceiling for a response the worker itself serves. The zip is a live SDK download of the two files
 // uploaded below, streamed through the worker, so this is sized off that round trip rather than off
@@ -186,7 +187,8 @@ test.describe("service worker", () => {
 					logoutType: SW_MSG_LOGOUT,
 					prefix: SW_DOWNLOAD_PREFIX,
 					parentUuid: scratchUuid,
-					ackTimeoutMs: SW_ACK_TIMEOUT_MS,
+					// The app's own budget: an ack that would fail the app must fail here too.
+					ackTimeoutMs: SW_REQUEST_TIMEOUT_MS,
 					uploadTimeoutMs: LIVE_WRITE_TIMEOUT_MS,
 					responseTimeoutMs: SW_RESPONSE_TIMEOUT_MS
 				}

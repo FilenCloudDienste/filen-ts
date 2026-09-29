@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react"
+import { useLatestRef } from "@/lib/useLatestRef"
 import { spreadsheetWorker } from "@/features/spreadsheet/lib/spreadsheetClient"
 import { applyEditResult, type GridDoc } from "@/features/spreadsheet/lib/cellStore.logic"
 import type { DocState, EditOp, EditResult } from "@/features/spreadsheet/lib/edits"
@@ -34,11 +35,7 @@ export function useSpreadsheetEdits(
 	const [pending, setPending] = useState(0)
 	const queue = useRef<Promise<unknown>>(Promise.resolve())
 	// The latest, for results that land after the render that asked for them.
-	const onShiftRef = useRef(onShift)
-
-	useEffect(() => {
-		onShiftRef.current = onShift
-	})
+	const onShiftRef = useLatestRef(onShift)
 
 	function enqueue<T>(call: () => Promise<T>): Promise<T> {
 		const next = queue.current.then(call)

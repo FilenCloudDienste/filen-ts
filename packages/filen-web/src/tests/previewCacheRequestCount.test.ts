@@ -34,10 +34,11 @@ vi.mock("@/features/drive/lib/preview.logic", async importOriginal => ({
 	...(await importOriginal<typeof import("@/features/drive/lib/preview.logic")>()),
 	PREVIEW_MAX_BYTES: 100n
 }))
-vi.mock("@/features/drive/lib/saveDownload", () => ({
+vi.mock("@/features/drive/lib/saveDownload", async importOriginal => ({
 	registerWithSw,
 	isFsaAvailable: () => typeof window.showSaveFilePicker === "function",
-	isPickerCancelled: () => false
+	isPickerCancelled: () => false,
+	pickFsaTarget: (await importOriginal<typeof import("@/features/drive/lib/saveDownload")>()).pickFsaTarget
 }))
 vi.mock("@/features/preview/lib/heicTransform", () => ({ transformHeicBytes, transformHeicBytesOwned: transformHeicBytes }))
 

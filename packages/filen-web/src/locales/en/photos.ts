@@ -3,7 +3,7 @@
 // catalog rules as common/drive/transfers: flat `as const` object, camelCase keys, no literal '.' or
 // ':' (real i18next namespaces, keySeparator/nsSeparator both ON). Shared breadcrumb/filter/"move here"-
 // shaped copy the chooser reuses verbatim lives in the "drive" namespace (driveMyDrive,
-// driveBreadcrumbLabel, driveSearchNoResults) rather than being duplicated here.
+// driveBreadcrumbLabel) rather than being duplicated here.
 export const photos = {
 	// ── Unset hero (no root chosen yet) ───────────────────────────────────────
 	/** Unset-state hero — title shown before any photos root directory has been chosen */

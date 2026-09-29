@@ -1,8 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router"
 import { useTranslation } from "react-i18next"
 import { ShieldAlertIcon } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
+import { FullScreenNotice, ReloadButton } from "@/components/fullScreenNotice"
 import { routeHead } from "@/lib/head/routeHead"
 import { i18n } from "@/lib/i18n"
 
@@ -18,25 +17,13 @@ function NoCoiPage() {
 	const { t } = useTranslation()
 
 	return (
-		<div className="flex min-h-svh items-center justify-center bg-canvas p-6 text-foreground">
-			<Empty className="max-w-md">
-				<EmptyHeader>
-					<EmptyMedia className="bg-destructive/10 text-destructive">
-						<ShieldAlertIcon />
-					</EmptyMedia>
-					<EmptyTitle>{t("noCoiTitle")}</EmptyTitle>
-					<EmptyDescription>{t("noCoiBody")}</EmptyDescription>
-				</EmptyHeader>
-				<EmptyContent>
-					<Button
-						onClick={() => {
-							window.location.reload()
-						}}
-					>
-						{t("reload")}
-					</Button>
-				</EmptyContent>
-			</Empty>
-		</div>
+		<FullScreenNotice
+			icon={<ShieldAlertIcon />}
+			destructive={true}
+			title={t("noCoiTitle")}
+			description={t("noCoiBody")}
+		>
+			<ReloadButton />
+		</FullScreenNotice>
 	)
 }

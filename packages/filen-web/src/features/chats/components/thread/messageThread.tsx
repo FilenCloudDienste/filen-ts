@@ -56,7 +56,7 @@ import { ChatDropdownMenuContent } from "@/features/chats/components/chatMenu"
 import { useChatDialogHost } from "@/features/chats/hooks/useChatDialogHost"
 import { useAccountQuery } from "@/queries/account"
 import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { UserAvatar } from "@/components/userAvatar"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { LoadingState } from "@/components/loadingState"
@@ -613,17 +613,11 @@ export function MessageThread({ chat }: { chat: Chat }) {
 	return (
 		<div className="flex min-h-0 flex-1 flex-col">
 			<header className="flex shrink-0 items-center gap-2.5 px-5 py-4">
-				<Avatar className="size-8 shrink-0">
-					{/* crossOrigin: require-corp COEP needs a CORS-mode request for this cross-origin egest
-					    url (see avatarCard.tsx's matching comment). */}
-					{headerAvatarUrl !== undefined ? (
-						<AvatarImage
-							src={headerAvatarUrl}
-							crossOrigin="anonymous"
-						/>
-					) : null}
-					<AvatarFallback>{headerTitle.trim().charAt(0).toUpperCase() || "?"}</AvatarFallback>
-				</Avatar>
+				<UserAvatar
+					src={headerAvatarUrl}
+					name={headerTitle}
+					className="size-8 shrink-0"
+				/>
 				<h1
 					id={titleId}
 					className="min-w-0 flex-1 truncate text-base font-semibold"

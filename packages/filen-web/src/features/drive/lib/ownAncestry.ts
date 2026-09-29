@@ -1,5 +1,5 @@
 import type { DriveItem } from "@/features/drive/lib/item"
-import type { DriveListingParams } from "@/features/drive/queries/drive"
+import { DRIVE_LISTING_KEY_PREFIX, type DriveListingParams } from "@/features/drive/queries/drive"
 import { ownDirectoryUuids, type ParentLookup } from "@/features/drive/components/moveTargetDialog.logic"
 import { queryClient } from "@/queries/client"
 
@@ -29,7 +29,7 @@ function directoriesIn(listing: readonly DriveItem[]): ReadonlySet<string> {
 function ownListings(): OwnListing[] {
 	const listings: OwnListing[] = []
 
-	for (const query of queryClient.getQueryCache().findAll({ queryKey: ["drive", "listing"] })) {
+	for (const query of queryClient.getQueryCache().findAll({ queryKey: DRIVE_LISTING_KEY_PREFIX })) {
 		const { variant, uuid } = query.queryKey[2] as DriveListingParams
 		const data = query.state.data as readonly DriveItem[] | undefined
 

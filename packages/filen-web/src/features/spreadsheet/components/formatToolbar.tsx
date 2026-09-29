@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
 import type { PreviewKey } from "@/lib/i18n"
 
 // The number formats offered by name; any other a cell carries shows as "Custom".
@@ -68,24 +69,15 @@ function ToolbarButton({
 	children: ReactNode
 }) {
 	return (
-		<Tooltip>
-			<TooltipTrigger
-				render={
-					<Button
-						variant="ghost"
-						size="icon-sm"
-						aria-label={label}
-						aria-pressed={active}
-						disabled={disabled}
-						className={cn(active === true && "bg-accent text-foreground")}
-						onClick={onClick}
-					>
-						{children}
-					</Button>
-				}
-			/>
-			<TooltipContent>{label}</TooltipContent>
-		</Tooltip>
+		<TooltipIconButton
+			label={label}
+			pressed={active}
+			disabled={disabled}
+			className={cn(active === true && "bg-accent text-foreground")}
+			onClick={onClick}
+		>
+			{children}
+		</TooltipIconButton>
 	)
 }
 

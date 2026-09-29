@@ -114,15 +114,6 @@ const UPDATE: CopyUpdate = {
 	activeTimeMs: 0n
 }
 
-function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
-	let resolve: (value: T) => void = () => undefined
-	const promise = new Promise<T>(r => {
-		resolve = r
-	})
-
-	return { promise, resolve }
-}
-
 async function settle(): Promise<void> {
 	for (let i = 0; i < 10; i++) {
 		await new Promise(resolve => setTimeout(resolve, 0))
@@ -218,7 +209,7 @@ describe("sdk worker copy", () => {
 
 		await api.releaseCopy("stopped")
 
-		const lookup = deferred<unknown>()
+		const lookup = Promise.withResolvers<unknown>()
 
 		fakeClient.getDirOptional.mockReturnValue(lookup.promise)
 

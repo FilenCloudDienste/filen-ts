@@ -2,7 +2,7 @@ import JSZip from "jszip"
 import type { Note } from "@filen/sdk-rs"
 import { i18n } from "@/lib/i18n"
 import { downloadBlob } from "@/lib/downloadBlob"
-import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
+import { asErrorDTO, plainErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
 import { runOp, type VoidActionOutcome } from "@/lib/actions/outcome"
 import { readNoteContent, type NoteContentResult } from "@/features/notes/queries/noteContent"
 import { localNoteContent } from "@/features/notes/lib/localContent"
@@ -29,9 +29,7 @@ async function resolveContent(note: Note): Promise<NoteContentResult> {
 }
 
 function undecryptableError(): ErrorDTO {
-	const message = i18n.t("notes:noteContentUndecryptableError")
-
-	return { species: "plain", message, label: message }
+	return plainErrorDTO(i18n.t("notes:noteContentUndecryptableError"))
 }
 
 export async function exportNote(note: Note): Promise<VoidActionOutcome> {

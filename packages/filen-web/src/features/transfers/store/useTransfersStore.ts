@@ -4,6 +4,7 @@ import { useShallow } from "zustand/shallow"
 import type { ErrorDTO } from "@/lib/sdk/errors"
 import type { DriveItem } from "@/features/drive/lib/item"
 import { clampedRatio } from "@filen/shared"
+import { withoutKey } from "@/lib/utils"
 
 // One row per in-flight or finished transfer, in-memory only (no persistence — mirrors
 // useDriveStore's selection state, not a query). "upload" and "download" rows come from
@@ -155,15 +156,6 @@ export interface TransfersStore {
 	// Drops every sample that has left the window (useSpeedSampleAging's tick). Writes nothing when
 	// nothing aged out.
 	pruneSpeedSamples: () => void
-}
-
-// The same object when the key is absent, so a settle that had no samples writes nothing new.
-function withoutKey<T>(record: Readonly<Record<string, T>>, key: string): Readonly<Record<string, T>> {
-	if (!(key in record)) {
-		return record
-	}
-
-	return Object.fromEntries(Object.entries(record).filter(([entryKey]) => entryKey !== key))
 }
 
 // The samples still inside the window starting at `windowStart`; the same array when none aged out.

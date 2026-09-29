@@ -2,7 +2,6 @@ import {
 	run,
 	Semaphore,
 	createExecutableTimeout,
-	createNotePreviewFromContentText,
 	isPermanentRejection,
 	hashNoteContent,
 	buildInflightEntries,
@@ -22,13 +21,15 @@ import { forgetTabEditors, tabEditorAdopts, tabEditorHasPush, tabEditorLanded, t
 import { followContent } from "@/features/notes/lib/remoteContent"
 import { followShowableDrafts } from "@/features/notes/lib/showableDrafts"
 import { log } from "@/lib/log"
+import { withoutKey } from "@/lib/utils"
 import { toast } from "sonner"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { kvGetJson, kvSetJson, kvDelete } from "@/lib/storage/adapter"
 import { type OutboxChannelTransport, type OutboxRole, type PushDetail } from "@/lib/storage/outboxChannel"
 import { noteContentQueryKey, readNoteContent } from "@/features/notes/queries/noteContent"
 import { fetchNotes, notesQueryGet, notesQueryUpdate } from "@/features/notes/queries/notes"
-import useNotesInflightStore, {
+import {
+	useNotesInflightStore,
 	TAB_ID,
 	setOutboxHydrated,
 	clearEditingSessions,
@@ -36,15 +37,15 @@ import useNotesInflightStore, {
 	type InflightEntry
 } from "@/features/notes/store/useNotesInflight"
 import {
+	INFLIGHT_NOTE_CONTENT_KV_KEY,
 	inflightContentSchema,
-	noteKindForPreview,
+	notePreviewFor,
 	reconcileFollower,
 	remoteEnqueueToPatch,
 	newestEntry,
 	type RemoteEnqueue
 } from "@/features/notes/lib/sync.logic"
 
-const OUTBOX_KV_KEY = "inflightNoteContent"
 // Waits before re-sending pushes that failed, then every 10 minutes (Sync.scheduleResend).
 const RESEND_BACKOFF_MS = [30_000, 120_000, 600_000]
 
@@ -258,26 +259,11 @@ export class Sync {
 	public dropEntry(noteUuid: string): void {
 		// A follower's store only mirrors the leader's queue: the leader must drop it, or it pushes it.
 		if (this.role === "follower") {
-			const unacked = { ...this.unacked }
-
-			Reflect.deleteProperty(unacked, noteUuid)
-			this.unacked = unacked
+			this.unacked = withoutKey(this.unacked, noteUuid)
 			this.transport?.sendDrop?.(noteUuid)
 		}
 
-		useNotesInflightStore.getState().setInflightContent(prev => {
-			if (!(noteUuid in prev)) {
-				return prev
-			}
-
-			const updated: InflightContent = {
-				...prev
-			}
-
-			Reflect.deleteProperty(updated, noteUuid)
-
-			return updated
-		})
+		useNotesInflightStore.getState().setInflightContent(prev => withoutKey(prev, noteUuid))
 	}
 
 	// LEADER: a follower dropped the note's queued edits (a history restore, a reload of theirs there).
@@ -761,10 +747,7 @@ export class Sync {
 			return this.runOutboxWrite(inflightContent, signal)
 		}
 
-		let resolve!: (success: boolean) => void
-		const result = new Promise<boolean>(r => {
-			resolve = r
-		})
+		const { promise: result, resolve } = Promise.withResolvers<boolean>()
 
 		this.queuedWrite = { content: inflightContent, signal, result, resolve }
 
@@ -784,12 +767,12 @@ export class Sync {
 
 			const result = await run(async () => {
 				if (Object.keys(inflightContent).length === 0) {
-					await kvDelete(OUTBOX_KV_KEY)
+					await kvDelete(INFLIGHT_NOTE_CONTENT_KV_KEY)
 
 					return
 				}
 
-				await kvSetJson(OUTBOX_KV_KEY, inflightContent)
+				await kvSetJson(INFLIGHT_NOTE_CONTENT_KV_KEY, inflightContent)
 			})
 
 			if (!result.success) {
@@ -841,7 +824,7 @@ export class Sync {
 				this.mutex.release()
 			})
 
-			const read = await kvGetJson(OUTBOX_KV_KEY, inflightContentSchema)
+			const read = await kvGetJson(INFLIGHT_NOTE_CONTENT_KV_KEY, inflightContentSchema)
 			const orphan = await this.orphanMarker()
 
 			// A promoted leader's store holds the closed leader's entries too.
@@ -1054,10 +1037,7 @@ export class Sync {
 					const push = alreadyInCloud
 						? ({ success: true, data: undefined } as const)
 						: await run(async () => {
-								const preview = createNotePreviewFromContentText(
-									noteKindForPreview(liveNote.noteType),
-									mostRecentContent.content
-								)
+								const preview = notePreviewFor(liveNote.noteType, mostRecentContent.content)
 
 								return sdkApi.setNoteContent(liveNote, mostRecentContent.content, preview)
 							})
@@ -1100,15 +1080,7 @@ export class Sync {
 						this.nonRetryableRejections.delete(noteUuid)
 						this.answeredNotes.delete(noteUuid)
 
-						useNotesInflightStore.getState().setInflightContent(prev => {
-							const updated: InflightContent = {
-								...prev
-							}
-
-							Reflect.deleteProperty(updated, noteUuid)
-
-							return updated
-						})
+						useNotesInflightStore.getState().setInflightContent(prev => withoutKey(prev, noteUuid))
 
 						log.error("notes-sync", "dropping inflight content after max non-retryable rejections; edit lost", noteUuid, e)
 
@@ -1189,25 +1161,15 @@ export class Sync {
 					// every entry typed during the round trip (they survive the prune). Without this the
 					// next pass would flag our OWN push as a conflict against their stale session base.
 					useNotesInflightStore.getState().setInflightContent(prev => {
-						const updated: InflightContent = {
-							...prev
-						}
-
 						// Only the pushing tab's own continuations were typed on the push; another tab's never saw it.
 						const remaining = pruneAndRebaseNoteOutboxAfterPush(
-							updated[noteUuid],
+							prev[noteUuid],
 							syncedUpTo,
 							pushedContentHash,
 							entry => entry.carriedFrom !== undefined && entry.carriedFrom === (mostRecentContent.origin ?? "")
 						)
 
-						if (remaining === undefined) {
-							Reflect.deleteProperty(updated, noteUuid)
-						} else {
-							updated[noteUuid] = remaining
-						}
-
-						return updated
+						return remaining === undefined ? withoutKey(prev, noteUuid) : { ...prev, [noteUuid]: remaining }
 					})
 
 					// Only AFTER the push landed: a failed push overwrites nothing and is retried.

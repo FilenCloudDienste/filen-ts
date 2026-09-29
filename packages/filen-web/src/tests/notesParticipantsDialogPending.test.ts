@@ -8,9 +8,9 @@ import { createElement } from "react"
 import type { Note, NoteParticipant } from "@filen/sdk-rs"
 import "@/lib/i18n"
 
-const { setNoteParticipantPermission, blockContactByEmail } = vi.hoisted(() => ({
+const { setNoteParticipantPermission, toggleParticipantBlocked } = vi.hoisted(() => ({
 	setNoteParticipantPermission: vi.fn(),
-	blockContactByEmail: vi.fn()
+	toggleParticipantBlocked: vi.fn()
 }))
 
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
@@ -23,10 +23,7 @@ vi.mock("@/features/notes/lib/participants", () => ({
 	setNoteParticipantPermission
 }))
 
-vi.mock("@/features/contacts/lib/actions", () => ({
-	blockContactByEmail,
-	unblockContact: vi.fn()
-}))
+vi.mock("@/features/contacts/lib/actions", () => ({ toggleParticipantBlocked }))
 
 vi.mock("@/features/notes/queries/notes", () => ({ useNotes: () => ({ data: undefined }) }))
 
@@ -66,7 +63,7 @@ const note: Note = {
 
 beforeEach(() => {
 	setNoteParticipantPermission.mockReset()
-	blockContactByEmail.mockReset()
+	toggleParticipantBlocked.mockReset()
 })
 
 afterEach(() => {
@@ -92,7 +89,7 @@ describe("ParticipantsDialog — one operation at a time", () => {
 
 		fireEvent.click(blockOther)
 
-		expect(blockContactByEmail).not.toHaveBeenCalled()
+		expect(toggleParticipantBlocked).not.toHaveBeenCalled()
 
 		await act(async () => {
 			finish({ status: "success" })

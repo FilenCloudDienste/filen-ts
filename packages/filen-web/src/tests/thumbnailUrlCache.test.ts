@@ -178,3 +178,33 @@ describe("createThumbnailUrlCache — invalidate-style delete interplay", () => 
 		expect(onEvict).not.toHaveBeenCalled()
 	})
 })
+
+describe("createThumbnailUrlCache — entries and clear", () => {
+	it("entries() lists the live pairs oldest first, reflecting touches", () => {
+		const cache = createThumbnailUrlCache(5, vi.fn())
+
+		cache.set("a", "blob:a")
+		cache.set("b", "blob:b")
+		cache.get("a")
+
+		expect([...cache.entries()]).toEqual([
+			["b", "blob:b"],
+			["a", "blob:a"]
+		])
+	})
+
+	it("clear() evicts every entry through onEvict and empties the cache", () => {
+		const onEvict = vi.fn()
+		const cache = createThumbnailUrlCache(5, onEvict)
+
+		cache.set("a", "blob:a")
+		cache.set("b", "blob:b")
+		cache.clear()
+
+		expect(onEvict).toHaveBeenCalledTimes(2)
+		expect(onEvict).toHaveBeenCalledWith("a", "blob:a")
+		expect(onEvict).toHaveBeenCalledWith("b", "blob:b")
+		expect(cache.size()).toBe(0)
+		expect([...cache.entries()]).toEqual([])
+	})
+})

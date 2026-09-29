@@ -40,6 +40,10 @@ export const SW_ERROR_NO_CLIENT = "no-client"
 // the page reload.
 export const SW_MSG_LOGOUT = "FILEN_SW_LOGOUT"
 
+// How long the page waits for a message's ack before rejecting. Generous enough for the one slow
+// message: INIT_CLIENT compiles the 2 MB wasm on a cold worker before it can reply.
+export const SW_REQUEST_TIMEOUT_MS = 15_000
+
 // ── Inline-preview Content-Type allowlist ───────────────────────────────────────────────────────
 // The SW's inline route (SW_MSG_REGISTER_PREVIEW) only ever serves a Content-Type on this list —
 // never an attacker-controlled file's own claimed mime unchecked, never text/html. video/audio use a
