@@ -117,7 +117,7 @@ describe("followShift", () => {
 	}
 
 	it("moves sizes past an inserted run", () => {
-		expect(rows(followShift(layer, 0, { axis: "rows", kind: "insert", at: 2, count: 2, revert: false }, []))).toEqual([
+		expect(rows(followShift(layer, 0, { axis: "rows", type: "insert", at: 2, count: 2, revert: false }, []))).toEqual([
 			[1, 40],
 			[5, 50],
 			[7, 60]
@@ -125,14 +125,14 @@ describe("followShift", () => {
 	})
 
 	it("gives an undone delete its sizes back", () => {
-		const deleted = followShift(layer, 0, { axis: "rows", kind: "delete", at: 2, count: 2, revert: false }, [])
+		const deleted = followShift(layer, 0, { axis: "rows", type: "delete", at: 2, count: 2, revert: false }, [])
 
 		expect(rows(deleted)).toEqual([
 			[1, 40],
 			[3, 60]
 		])
 
-		const undone = followShift(deleted.layer, 0, { axis: "rows", kind: "delete", at: 2, count: 2, revert: true }, deleted.stash)
+		const undone = followShift(deleted.layer, 0, { axis: "rows", type: "delete", at: 2, count: 2, revert: true }, deleted.stash)
 
 		expect(rows(undone)).toEqual([
 			[1, 40],
@@ -143,10 +143,10 @@ describe("followShift", () => {
 	})
 
 	it("takes an undone insert's run back out", () => {
-		const inserted = followShift(layer, 0, { axis: "rows", kind: "insert", at: 2, count: 2, revert: false }, [])
+		const inserted = followShift(layer, 0, { axis: "rows", type: "insert", at: 2, count: 2, revert: false }, [])
 
 		expect(
-			rows(followShift(inserted.layer, 0, { axis: "rows", kind: "insert", at: 2, count: 2, revert: true }, inserted.stash))
+			rows(followShift(inserted.layer, 0, { axis: "rows", type: "insert", at: 2, count: 2, revert: true }, inserted.stash))
 		).toEqual([
 			[1, 40],
 			[3, 50],
@@ -155,7 +155,7 @@ describe("followShift", () => {
 	})
 
 	it("leaves a sheet with no sizes on that axis alone", () => {
-		const next = followShift(layer, 0, { axis: "cols", kind: "insert", at: 0, count: 1, revert: false }, [])
+		const next = followShift(layer, 0, { axis: "cols", type: "insert", at: 0, count: 1, revert: false }, [])
 
 		expect(next.layer).toBe(layer)
 	})

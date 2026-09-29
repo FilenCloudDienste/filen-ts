@@ -1,9 +1,7 @@
 // @vitest-environment jsdom
 
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { createElement, type ReactNode } from "react"
 import { renderHook, waitFor } from "@testing-library/react"
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import type { Dir, NormalDirsAndFiles, SharedDir, SharingRole, UuidStr } from "@filen/sdk-rs"
 import { InFlight } from "@filen/shared"
 import type { ListDirectoryTarget } from "@/workers/sdk.worker"
@@ -16,18 +14,12 @@ const { resolveDirectoryName, listDirectory } = vi.hoisted(() => ({
 
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: { resolveDirectoryName, listDirectory } }))
 
-// The production defaults minus the persister (sqlite, unavailable under vitest).
-vi.mock("@/queries/client", () => ({
-	queryClient: new QueryClient({
-		defaultOptions: {
-			queries: { staleTime: 0, gcTime: Infinity, retry: false, refetchOnWindowFocus: true, refetchOnReconnect: true }
-		}
-	})
-}))
+vi.mock("@/queries/client", async () => ({ queryClient: (await import("@/tests/testQueryClient")).createTestQueryClient() }))
 
 vi.mock("@/lib/log", () => ({ log: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() } }))
 
 import { queryClient } from "@/queries/client"
+import { queryClientWrapper } from "@/tests/testQueryClient"
 import { cacheDirs, clearDirectoryCache, getCachedDir, getCachedName } from "@/features/drive/lib/cache"
 import { lookupDirectoryName } from "@/features/drive/lib/directoryName"
 import { useDirectoryListingQuery, useDirectoryNamesQuery } from "@/features/drive/queries/drive"
@@ -119,9 +111,7 @@ function namesOf(uuids: readonly string[]): Record<string, string> {
 	return Object.fromEntries(uuids.map(uuid => [uuid, `Dir ${uuid.slice(0, 4)}`]))
 }
 
-function wrapper({ children }: { children: ReactNode }) {
-	return createElement(QueryClientProvider, { client: queryClient }, children)
-}
+const wrapper = queryClientWrapper(queryClient)
 
 // What the drive route mounts for a splat: the current directory's listing and one crumb per uuid.
 function renderDriveRoute(initial: string[], variant: DriveVariant = "drive") {

@@ -467,15 +467,14 @@ function narrowOwnedWalk({ dirs, files }: { dirs: NonRootDirTagged[]; files: Nor
 
 // Cache-first parent resolve shared by createDirectory/moveDirectory/moveFile: `null` maps to
 // client.root() (the only "parent" a create/move can target that isn't itself a real Dir); any other
-// uuid checks the in-memory dir cache before a getDirOptional round trip, same cache-first rule as
-// listDirectory's uuid case. Throws when the uuid can't be resolved at all — every caller treats a
+// uuid goes through resolveOwnedDir, so concurrent ops into a cold parent share one lookup. Throws when the uuid can't be resolved at all — every caller treats a
 // missing parent as a hard failure; there is no sensible partial result for "create/move into a
 // directory that doesn't exist".
 async function resolveNormalDirParent(c: Client, parentUuid: string | null): Promise<AnyNormalDir> {
 	if (parentUuid === null) {
 		return c.root()
 	}
-	const found = getCachedDir(parentUuid) ?? (await c.getDirOptional(parentUuid))
+	const found = await resolveOwnedDir(c, parentUuid)
 	if (found === undefined) {
 		throw new Error(`${PARENT_NOT_FOUND_PREFIX}${parentUuid}`)
 	}
@@ -520,8 +519,8 @@ function lookupsFor(c: Client): ClientLookups {
 	return lookups
 }
 
-// Cache-first owned-dir resolve shared by listDirectory's uuid case and the breadcrumb's name lookup:
-// on a cold deep link both ask for the same uuid at once, and this answers them with one getDirOptional.
+// Cache-first owned-dir resolve (listDirectory's uuid case, the breadcrumb's name lookup, every
+// create/move/upload parent): concurrent asks for the same cold uuid share one getDirOptional.
 async function resolveOwnedDir(c: Client, uuid: string): Promise<Dir | undefined> {
 	const cached = getCachedDir(uuid)
 
@@ -815,7 +814,7 @@ const api = {
 			return narrowOwnedWalk(await c.listDirRecursive(driveRoot, () => undefined))
 		}
 
-		const dir = getCachedDir(rootUuid) ?? (await c.getDirOptional(rootUuid))
+		const dir = await resolveOwnedDir(c, rootUuid)
 
 		// A cached dir survives its own trashing — trashDirectory re-caches the SDK's returned Dir
 		// rather than evicting it (cache.ts's own cacheDirs doc comment) — so a root this same session

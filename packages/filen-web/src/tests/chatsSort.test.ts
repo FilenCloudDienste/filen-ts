@@ -4,11 +4,14 @@ import {
 	chatDisplayName,
 	chatMessagePreview,
 	chatPreviewTier,
+	chatTitle,
 	compareBySentTimestamp,
+	isChatOwner,
 	isChatUndecryptable,
 	isLastMessageFromBlocked,
 	messageSenderName,
 	newestMessage,
+	otherParticipants,
 	sortChats
 } from "@/features/chats/lib/sort"
 import { deriveBlockedUsers } from "@filen/shared"
@@ -192,6 +195,35 @@ describe("compareBySentTimestamp", () => {
 	})
 })
 
+describe("isChatOwner", () => {
+	it("is true when the given userId matches the chat's ownerId", () => {
+		expect(isChatOwner(mockChat({ ownerId: 5n }), 5n)).toBe(true)
+	})
+
+	it("is false when the given userId does not match", () => {
+		expect(isChatOwner(mockChat({ ownerId: 5n }), 6n)).toBe(false)
+	})
+
+	it("is false when userId is undefined (no resolved account yet)", () => {
+		expect(isChatOwner(mockChat({ ownerId: 5n }), undefined)).toBe(false)
+	})
+})
+
+describe("otherParticipants", () => {
+	it("excludes only the viewer's own row", () => {
+		const self = mockParticipant({ userId: 1n })
+		const other = mockParticipant({ userId: 2n })
+
+		expect(otherParticipants(mockChat({ participants: [self, other] }), 1n)).toEqual([other])
+	})
+
+	it("keeps every participant when the viewer is unresolved", () => {
+		const participants = [mockParticipant({ userId: 1n }), mockParticipant({ userId: 2n })]
+
+		expect(otherParticipants(mockChat({ participants }), undefined)).toEqual(participants)
+	})
+})
+
 describe("isChatUndecryptable", () => {
 	it("is true when key is undefined", () => {
 		expect(isChatUndecryptable(mockUndecryptableChat())).toBe(true)
@@ -249,6 +281,31 @@ describe("chatDisplayName — display-name derivation table", () => {
 		const chat = mockChat({ name: "Team Chat", participants: [] })
 
 		expect(chatDisplayName(chat, self, solo)).toBe("Team Chat")
+	})
+})
+
+describe("chatTitle", () => {
+	const undecryptable = "Cannot decrypt"
+	const solo = "Just you"
+
+	it("returns the undecryptable label, even with no resolved viewer", () => {
+		const chat = mockUndecryptableChat({ name: "should be ignored" })
+
+		expect(chatTitle(chat, 1n, undecryptable, solo)).toBe(undecryptable)
+		expect(chatTitle(chat, undefined, undecryptable, solo)).toBe(undecryptable)
+	})
+
+	it("returns the display name once the viewer is resolved", () => {
+		const chat = mockChat({ participants: [mockParticipant({ userId: 1n })] })
+
+		expect(chatTitle(chat, 1n, undecryptable, solo)).toBe(solo)
+	})
+
+	it("falls back to the uuid while the viewer is unresolved", () => {
+		const uuid = testUuid("unresolved")
+		const chat = mockChat({ uuid, name: "Team Chat" })
+
+		expect(chatTitle(chat, undefined, undecryptable, solo)).toBe(uuid)
 	})
 })
 

@@ -221,19 +221,10 @@ export function followDriveEventOnClipboard(event: DriveSocketEvent): void {
 			break
 		}
 
-		// With newUUID it's a content save on an account without versioning, not a trash: the clipboard follows
-		// the successor. The stable id this carries is then freshly minted, so it pairs by uuid alone.
-		case "fileTrash": {
-			if (inner.newUUID === undefined) {
-				dropGone(inner.uuid, inner.stableUUID)
-			} else {
-				followRetired(inner.uuid, inner.newUUID)
-			}
-
-			break
-		}
-
-		// Without newUUID a moved file replaced it, and its lineage is gone.
+		// With newUUID it's a content save (a trash on accounts without versioning), so the clipboard follows the
+		// successor; the stable id this carries is then freshly minted, so it pairs by uuid alone. Without it the
+		// file was trashed, or a moved file replaced it, and its lineage is gone.
+		case "fileTrash":
 		case "fileArchived": {
 			if (inner.newUUID === undefined) {
 				dropGone(inner.uuid, inner.stableUUID)

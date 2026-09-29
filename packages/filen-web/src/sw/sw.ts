@@ -163,6 +163,40 @@ function parseRange(header: string, total: number): { start: number; end: number
 	return { start, end }
 }
 
+// Pumps `run` into a Response the caller has ALREADY built: constructing it validates every header value
+// as a ByteString and can throw synchronously, and counting the stream first would leave the in-flight
+// count stuck above zero (the finally never runs because nothing consumes the readable), permanently
+// gating SKIP_WAITING so the SW could never activate an update. On failure the writable is aborted so the
+// Response readable ERRORS (never hangs).
+//
+// waitUntil is what keeps this worker alive for the pump: respondWith gets an already-resolved Response,
+// so the fetch event itself settles immediately and an idle worker is terminated (spec-permitted, ~30 s in
+// Firefox) straight through a running download — which the page cannot observe, having handed the save
+// off to the browser. Browsers cap that extension (~5 min), so this bounds the exposure rather than
+// removing it.
+function pumpToResponse(
+	event: FetchEvent,
+	id: string,
+	client: SwClient,
+	writable: WritableStream<Uint8Array>,
+	run: () => Promise<void>
+): void {
+	downloads.beginStream(id)
+	retainClient(client)
+	event.waitUntil(
+		(async () => {
+			try {
+				await run()
+			} catch {
+				await writable.abort().catch(() => undefined)
+			} finally {
+				downloads.endStream(id)
+				releaseClient(client)
+			}
+		})()
+	)
+}
+
 // Zip branch: a freshly-generated archive is non-seekable, so any Range header is IGNORED — this
 // always answers a plain 200 with the full stream (standard behavior for a resource that doesn't
 // support range requests), never Content-Length/Accept-Ranges (the total size isn't known upfront
@@ -170,10 +204,7 @@ function parseRange(header: string, total: number): { start: number; end: number
 function handleZipDownload(event: FetchEvent, id: string, pending: PendingZipDownload, client: SwClient): Response {
 	const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>()
 
-	// Build the Response BEFORE counting the stream: constructing it validates every header value as a
-	// ByteString and can throw synchronously — counting first would leave the in-flight count stuck above
-	// zero (the pump below never runs its finally), permanently gating SKIP_WAITING so the SW could never
-	// activate an update.
+	// Built BEFORE pumpToResponse counts the stream (see there).
 	const response = new Response(readable, {
 		status: 200,
 		headers: {
@@ -183,24 +214,10 @@ function handleZipDownload(event: FetchEvent, id: string, pending: PendingZipDow
 		}
 	})
 
-	downloads.beginStream(id)
-	retainClient(client)
-	// On failure, abort the writable so the Response readable ERRORS (never hangs) — same contract as
-	// the file branch. progress is a no-op: nothing page-side reads it, the browser's own download manager
-	// owns the save from here. This route carries no Content-Length (a generated archive's total isn't
-	// known), so a truncated body looks like a COMPLETE download — hence waitUntil, see below.
-	event.waitUntil(
-		(async () => {
-			try {
-				await client.downloadItemsToZip(pending.items, writable, () => undefined, {})
-			} catch {
-				await writable.abort().catch(() => undefined)
-			} finally {
-				downloads.endStream(id)
-				releaseClient(client)
-			}
-		})()
-	)
+	// progress is a no-op: nothing page-side reads it, the browser's own download manager owns the save
+	// from here. This route carries no Content-Length (a generated archive's total isn't known), so a
+	// truncated body looks like a COMPLETE download — which is why the pump's waitUntil matters here.
+	pumpToResponse(event, id, client, writable, () => client.downloadItemsToZip(pending.items, writable, () => undefined, {}))
 
 	return response
 }
@@ -247,10 +264,7 @@ function streamFileRange(
 		responseHeaders["Content-Security-Policy"] = "sandbox"
 	}
 
-	// Build the Response BEFORE counting the stream and starting the pump: header-value validation (a
-	// Content-Disposition that isn't a legal ByteString) throws synchronously here, and counting first
-	// would leave the in-flight count stuck above zero (the pump's finally never runs because nothing
-	// consumes the readable), permanently gating SKIP_WAITING.
+	// Built BEFORE pumpToResponse counts the stream (see there).
 	let response: Response
 	if (range !== null) {
 		responseHeaders["Content-Range"] = `bytes ${String(start)}-${String(end)}/${String(total)}`
@@ -262,39 +276,21 @@ function streamFileRange(
 		response = new Response(readable, { status: 200, headers: responseHeaders })
 	}
 
-	downloads.beginStream(id)
-	retainClient(client)
 	// Stream the decrypted bytes straight into the Response body's writable end. `end` is EXCLUSIVE on
 	// the SDK's `{start,end}` (Rust range convention) — an HTTP inclusive `bytes=0-99` maps to
-	// `{start:0,end:100}`. On failure, abort the writable so the Response readable ERRORS (never hangs).
-	// The id is NOT evicted on GET — Safari probes a range then re-fetches, so a download must survive
-	// repeated GETs. There is no page-side completion signal either, so nothing ever evicts it on
-	// finish — retention is bounded instead (PendingRegistry), which still respects Safari's
-	// repeated-GET need for any recent entry.
-	//
-	// waitUntil is what keeps this worker alive for the pump: respondWith gets an already-resolved
-	// Response, so the fetch event itself settles immediately and an idle worker is terminated
-	// (spec-permitted, ~30 s in Firefox) straight through a running download — which the page cannot
-	// observe, having handed the save off to the browser. Browsers cap that extension (~5 min), so this
-	// bounds the exposure rather than removing it.
-	event.waitUntil(
-		(async () => {
-			try {
-				await client.downloadFileToWriter({
-					file: pending.file,
-					writer: writable,
-					// progress is REQUIRED at runtime despite `progress?:` in the .d.ts (omitting it rejects the
-					// wasm call mid-stream — same gotcha as the streaming upload).
-					progress: () => undefined,
-					...(range !== null ? { start: BigInt(start), end: BigInt(end + 1) } : {})
-				})
-			} catch {
-				await writable.abort().catch(() => undefined)
-			} finally {
-				downloads.endStream(id)
-				releaseClient(client)
-			}
-		})()
+	// `{start:0,end:100}`. The id is NOT evicted on GET — Safari probes a range then re-fetches, so a
+	// download must survive repeated GETs. There is no page-side completion signal either, so nothing
+	// ever evicts it on finish — retention is bounded instead (PendingRegistry), which still respects
+	// Safari's repeated-GET need for any recent entry.
+	pumpToResponse(event, id, client, writable, () =>
+		client.downloadFileToWriter({
+			file: pending.file,
+			writer: writable,
+			// progress is REQUIRED at runtime despite `progress?:` in the .d.ts (omitting it rejects the
+			// wasm call mid-stream — same gotcha as the streaming upload).
+			progress: () => undefined,
+			...(range !== null ? { start: BigInt(start), end: BigInt(end + 1) } : {})
+		})
 	)
 
 	return response

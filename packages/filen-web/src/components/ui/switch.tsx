@@ -1,13 +1,15 @@
 import { Switch as SwitchPrimitive } from "@base-ui/react/switch"
 
 import { cn } from "@filen/shared"
+import { INVALID_RING_CLASS } from "@/components/ui/surface"
 
 function Switch({ className, ...props }: SwitchPrimitive.Root.Props) {
 	return (
 		<SwitchPrimitive.Root
 			data-slot="switch"
 			className={cn(
-				"peer group/switch relative inline-flex h-5 w-8 shrink-0 items-center rounded-2xl border-2 focus-ring transition-all outline-none after:absolute after:-inset-x-3 after:-inset-y-2 focus-visible:border-ring aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 data-checked:border-primary data-checked:bg-primary data-unchecked:border-transparent data-unchecked:bg-input/90 data-disabled:cursor-not-allowed data-disabled:opacity-50",
+				"peer group/switch relative inline-flex h-5 w-8 shrink-0 items-center rounded-2xl border-2 focus-ring transition-all outline-none after:absolute after:-inset-x-3 after:-inset-y-2 focus-visible:border-ring data-checked:border-primary data-checked:bg-primary data-unchecked:border-transparent data-unchecked:bg-input/90 data-disabled:cursor-not-allowed data-disabled:opacity-50",
+				INVALID_RING_CLASS,
 				className
 			)}
 			{...props}

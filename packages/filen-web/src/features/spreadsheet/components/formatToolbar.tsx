@@ -11,11 +11,12 @@ import {
 	Redo2Icon,
 	StrikethroughIcon,
 	UnderlineIcon,
-	Undo2Icon
+	Undo2Icon,
+	type LucideIcon
 } from "lucide-react"
 import { cn } from "@filen/shared"
-import type { FormatPatch } from "@/features/spreadsheet/lib/edits"
-import type { CellStyleView } from "@/features/spreadsheet/lib/model"
+import { TOGGLE_FORMATS, toggledPatch, type FormatPatch, type ToggleFormat } from "@/features/spreadsheet/lib/edits"
+import type { CellStyleView, HorizontalAlign } from "@/features/spreadsheet/lib/model"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -35,6 +36,19 @@ const NUMBER_FORMATS: readonly { value: string; labelKey: PreviewKey }[] = [
 ]
 
 const CUSTOM = "custom"
+
+const TOGGLE_BUTTONS: Record<ToggleFormat, { icon: LucideIcon; labelKey: PreviewKey }> = {
+	bold: { icon: BoldIcon, labelKey: "previewSpreadsheetBold" },
+	italic: { icon: ItalicIcon, labelKey: "previewSpreadsheetItalic" },
+	underline: { icon: UnderlineIcon, labelKey: "previewSpreadsheetUnderline" },
+	strike: { icon: StrikethroughIcon, labelKey: "previewSpreadsheetStrikethrough" }
+}
+
+const ALIGN_BUTTONS: readonly { align: HorizontalAlign; icon: LucideIcon; labelKey: PreviewKey }[] = [
+	{ align: "left", icon: AlignLeftIcon, labelKey: "previewSpreadsheetAlignLeft" },
+	{ align: "center", icon: AlignCenterIcon, labelKey: "previewSpreadsheetAlignCenter" },
+	{ align: "right", icon: AlignRightIcon, labelKey: "previewSpreadsheetAlignRight" }
+]
 
 const PALETTE = [
 	"#000000",
@@ -78,6 +92,15 @@ function ToolbarButton({
 		>
 			{children}
 		</TooltipIconButton>
+	)
+}
+
+function ToolbarDivider() {
+	return (
+		<span
+			aria-hidden="true"
+			className="mx-1 h-5 w-px bg-border"
+		/>
 	)
 }
 
@@ -198,54 +221,25 @@ export function FormatToolbar({
 			</ToolbarButton>
 			{formats ? (
 				<>
-					<span
-						aria-hidden="true"
-						className="mx-1 h-5 w-px bg-border"
-					/>
-					<ToolbarButton
-						label={t("previewSpreadsheetBold")}
-						disabled={disabled}
-						active={style?.bold === true}
-						onClick={() => {
-							onFormat({ bold: style?.bold !== true })
-						}}
-					>
-						<BoldIcon />
-					</ToolbarButton>
-					<ToolbarButton
-						label={t("previewSpreadsheetItalic")}
-						disabled={disabled}
-						active={style?.italic === true}
-						onClick={() => {
-							onFormat({ italic: style?.italic !== true })
-						}}
-					>
-						<ItalicIcon />
-					</ToolbarButton>
-					<ToolbarButton
-						label={t("previewSpreadsheetUnderline")}
-						disabled={disabled}
-						active={style?.underline === true}
-						onClick={() => {
-							onFormat({ underline: style?.underline !== true })
-						}}
-					>
-						<UnderlineIcon />
-					</ToolbarButton>
-					<ToolbarButton
-						label={t("previewSpreadsheetStrikethrough")}
-						disabled={disabled}
-						active={style?.strike === true}
-						onClick={() => {
-							onFormat({ strike: style?.strike !== true })
-						}}
-					>
-						<StrikethroughIcon />
-					</ToolbarButton>
-					<span
-						aria-hidden="true"
-						className="mx-1 h-5 w-px bg-border"
-					/>
+					<ToolbarDivider />
+					{TOGGLE_FORMATS.map(({ format }) => {
+						const { icon: Icon, labelKey } = TOGGLE_BUTTONS[format]
+
+						return (
+							<ToolbarButton
+								key={format}
+								label={t(labelKey)}
+								disabled={disabled}
+								active={style?.[format] === true}
+								onClick={() => {
+									onFormat(toggledPatch(style, format))
+								}}
+							>
+								<Icon />
+							</ToolbarButton>
+						)
+					})}
+					<ToolbarDivider />
 					<ColorButton
 						label={t("previewSpreadsheetTextColor")}
 						disabled={disabled}
@@ -264,44 +258,21 @@ export function FormatToolbar({
 							onFormat({ fill })
 						}}
 					/>
-					<span
-						aria-hidden="true"
-						className="mx-1 h-5 w-px bg-border"
-					/>
-					<ToolbarButton
-						label={t("previewSpreadsheetAlignLeft")}
-						disabled={disabled}
-						active={style?.align === "left"}
-						onClick={() => {
-							onFormat({ align: style?.align === "left" ? null : "left" })
-						}}
-					>
-						<AlignLeftIcon />
-					</ToolbarButton>
-					<ToolbarButton
-						label={t("previewSpreadsheetAlignCenter")}
-						disabled={disabled}
-						active={style?.align === "center"}
-						onClick={() => {
-							onFormat({ align: style?.align === "center" ? null : "center" })
-						}}
-					>
-						<AlignCenterIcon />
-					</ToolbarButton>
-					<ToolbarButton
-						label={t("previewSpreadsheetAlignRight")}
-						disabled={disabled}
-						active={style?.align === "right"}
-						onClick={() => {
-							onFormat({ align: style?.align === "right" ? null : "right" })
-						}}
-					>
-						<AlignRightIcon />
-					</ToolbarButton>
-					<span
-						aria-hidden="true"
-						className="mx-1 h-5 w-px bg-border"
-					/>
+					<ToolbarDivider />
+					{ALIGN_BUTTONS.map(({ align, icon: Icon, labelKey }) => (
+						<ToolbarButton
+							key={align}
+							label={t(labelKey)}
+							disabled={disabled}
+							active={style?.align === align}
+							onClick={() => {
+								onFormat({ align: style?.align === align ? null : align })
+							}}
+						>
+							<Icon />
+						</ToolbarButton>
+					))}
+					<ToolbarDivider />
 					<Select
 						items={[
 							...NUMBER_FORMATS.map(format => ({ value: format.value, label: t(format.labelKey) })),

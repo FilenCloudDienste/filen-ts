@@ -1,4 +1,11 @@
-import { sortAndFilterNotes, sortNotes, filterNotesBySearch, normalizeSearch, tagDisplayName } from "@/features/notes/lib/sort"
+import {
+	sortAndFilterNotes,
+	sortNotes,
+	filterNotesBySearch,
+	normalizeSearch,
+	tagDisplayName,
+	compareEditedDescThenUuid
+} from "@/features/notes/lib/sort"
 import { isBlocked, type BlockedUsers, sortNoteTags, type NoteTagsSortBy, partitionNotesByBucket, type NoteBucketId } from "@filen/shared"
 import type { Note, NoteTag } from "@filen/sdk-rs"
 
@@ -35,16 +42,10 @@ interface GroupEntry {
 	note: Note
 }
 
-// Newest-first within a bucket — editedTimestamp desc with a uuid tiebreak so equal-timestamp notes
-// keep a stable order across refetches (input order is not itself stable). Bigint-safe: never Number()s
-// the comparison (reads the original note's bigint field, not the derived `ts`). Mirrors compareNotes'
-// own tiebreak, minus its cross-bucket tier (within one date bucket every note already shares that tier).
+// Within one date bucket every note already shares compareNotes' cross-bucket tier; reads the note's
+// bigint field, never the derived `ts`.
 function compareByEditedDesc(a: GroupEntry, b: GroupEntry): number {
-	if (a.note.editedTimestamp !== b.note.editedTimestamp) {
-		return a.note.editedTimestamp > b.note.editedTimestamp ? -1 : 1
-	}
-
-	return a.note.uuid < b.note.uuid ? -1 : a.note.uuid > b.note.uuid ? 1 : 0
+	return compareEditedDescThenUuid(a.note, b.note)
 }
 
 // The previous-month header label — the calendar month name of the bucket's lower bound (mobile names

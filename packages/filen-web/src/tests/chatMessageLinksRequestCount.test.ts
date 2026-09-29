@@ -2,9 +2,8 @@
 
 import { Buffer } from "buffer"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { createElement, type ReactNode } from "react"
 import { act, renderHook, waitFor } from "@testing-library/react"
-import { QueryClient, QueryClientProvider, focusManager } from "@tanstack/react-query"
+import { focusManager, type QueryClient } from "@tanstack/react-query"
 import type { LinkedFile } from "@filen/sdk-rs"
 
 const { getLinkedFileAnon, getDirPublicLinkInfoAnon } = vi.hoisted(() => ({
@@ -19,6 +18,7 @@ import {
 	CHAT_MESSAGE_LINKS_STALE_TIME,
 	useChatMessageLinksQuery
 } from "@/features/chats/queries/chatMessageLinks"
+import { createTestQueryClient, queryClientWrapper } from "@/tests/testQueryClient"
 
 const UUID = "11111111-1111-4111-8111-111111111111"
 const KEY_PLAINTEXT = "0123456789abcdef0123456789abcdef"
@@ -41,15 +41,10 @@ const LINKED_FILE: LinkedFile = {
 	canMakeThumbnail: false
 }
 
-// The production defaults minus the persister (sqlite, unavailable under vitest).
 let queryClient: QueryClient
 
-function wrapper({ children }: { children: ReactNode }) {
-	return createElement(QueryClientProvider, { client: queryClient, children })
-}
-
 function mountEmbeds() {
-	return renderHook(() => useChatMessageLinksQuery(URLS), { wrapper })
+	return renderHook(() => useChatMessageLinksQuery(URLS), { wrapper: queryClientWrapper(queryClient) })
 }
 
 async function drain(): Promise<void> {
@@ -62,11 +57,7 @@ async function drain(): Promise<void> {
 }
 
 beforeEach(() => {
-	queryClient = new QueryClient({
-		defaultOptions: {
-			queries: { staleTime: 0, gcTime: Infinity, retry: false, refetchOnWindowFocus: true, refetchOnReconnect: true }
-		}
-	})
+	queryClient = createTestQueryClient()
 	getLinkedFileAnon.mockResolvedValue(LINKED_FILE)
 })
 

@@ -5,9 +5,9 @@ import { queryClient } from "@/queries/client"
 import { usePublicDirInfo, publicDirListingQueryKey } from "@/features/publicLinks/queries/publicLink"
 import { dirAccessState, linkForBrowsing } from "@/features/publicLinks/lib/password.logic"
 import { rootCrumb } from "@/features/publicLinks/lib/browse.logic"
-import { PasswordGate } from "@/features/publicLinks/components/passwordGate"
 import { DirectoryBrowser } from "@/features/publicLinks/components/directoryBrowser"
-import { PublicLinkLoading, PublicLinkInvalid, PublicLinkError } from "@/features/publicLinks/components/publicLinkStates"
+import { PublicLinkLoading } from "@/features/publicLinks/components/publicLinkStates"
+import { LinkAccessGate } from "@/features/publicLinks/components/linkAccessGate"
 
 // The /d/ route body. Resolves the directory info (root + link handle + hasPassword) up front; a
 // protected link is validated by LISTING the root with the typed password set — success accepts it,
@@ -56,29 +56,14 @@ export function DirectoryLinkView({ uuid, linkKey }: { uuid: string; linkKey: st
 			})
 	}
 
-	if (access === "loading") {
-		return <PublicLinkLoading />
-	}
-
-	if (access === "invalid") {
-		return <PublicLinkInvalid />
-	}
-
-	if (access === "error") {
+	if (access !== "ready") {
 		return (
-			<PublicLinkError
+			<LinkAccessGate
+				access={access}
 				onRetry={() => {
 					void info.refetch()
 				}}
-			/>
-		)
-	}
-
-	if (access === "prompt" || access === "checking" || access === "wrong") {
-		return (
-			<PasswordGate
-				state={access}
-				onSubmit={verify}
+				onSubmitPassword={verify}
 			/>
 		)
 	}

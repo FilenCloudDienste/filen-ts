@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { ArrowLeftIcon, HistoryIcon, RotateCcwIcon } from "lucide-react"
 import type { Note, NoteHistory } from "@filen/sdk-rs"
-import { useNotes } from "@/features/notes/queries/notes"
+import { useLiveNote } from "@/features/notes/queries/notes"
 import { useNoteHistoryQuery } from "@/features/notes/queries/noteHistory"
 import { sortNoteHistory } from "@/features/notes/lib/sort"
 import { restoreNoteFromHistory } from "@/features/notes/lib/history"
@@ -35,8 +35,7 @@ export interface HistoryDialogProps {
 export function HistoryDialog({ note: initialNote, onClose }: HistoryDialogProps) {
 	const { t } = useTranslation(["notes", "common"])
 	const isOnline = useIsOnline()
-	const notesQuery = useNotes()
-	const note = notesQuery.data?.find(n => n.uuid === initialNote.uuid) ?? initialNote
+	const note = useLiveNote(initialNote)
 	const historyQuery = useNoteHistoryQuery(note)
 
 	const [previewing, setPreviewing] = useState<NoteHistory | null>(null)

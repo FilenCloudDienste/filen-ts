@@ -1,6 +1,5 @@
 import type { Chat, ChatMessage } from "@filen/sdk-rs"
-import { isChatOwner } from "@/features/chats/lib/actions"
-import { isChatUndecryptable } from "@/features/chats/lib/sort"
+import { isChatOwner, isChatUndecryptable } from "@/features/chats/lib/sort"
 import { chatHasUnread } from "@/features/chats/lib/unread.logic"
 import { EMPTY_BLOCKED_USERS, type BlockedUsers } from "@filen/shared"
 

@@ -1,5 +1,6 @@
 import type { Note, NoteParticipant } from "@filen/sdk-rs"
 import { isBlocked, EMPTY_BLOCKED_USERS, type BlockedUsers } from "@filen/shared"
+import { noteRowParticipants } from "@/features/notes/lib/noteRow.logic"
 
 // Pure gating/derivation helpers for participantsDialog.tsx, kept out of the component so the owner-
 // vs-participant view split stays testable without a DOM renderer (see vitest.config.ts).
@@ -29,8 +30,7 @@ export function participantRows(
 	viewerIsOwner: boolean,
 	blocked: BlockedUsers = EMPTY_BLOCKED_USERS
 ): ParticipantRowModel[] {
-	const others = note.participants.filter(p => currentUserId === undefined || p.userId !== currentUserId)
-	const sorted = others.sort((a, b) => Number(b.isOwner) - Number(a.isOwner))
+	const sorted = noteRowParticipants(note, currentUserId).sort((a, b) => Number(b.isOwner) - Number(a.isOwner))
 
 	return sorted.map(participant => ({
 		participant,

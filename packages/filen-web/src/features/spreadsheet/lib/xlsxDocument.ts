@@ -13,11 +13,12 @@ import {
 import { openXlsx, parseRange, saveXlsx, writeXlsx, type RoundtripWorkbook } from "hucre/xlsx"
 import type { RawCellContent } from "hyperformula"
 import { parseCellInput, type ParsedInput } from "@/features/spreadsheet/lib/cellInput.logic"
+import { EditHistory } from "@/features/spreadsheet/lib/editHistory"
+import { rangeArea, rangeContains } from "@/features/spreadsheet/lib/cellRef.logic"
 import {
-	MAX_COLS,
 	MAX_EDIT_CELLS,
-	MAX_ROWS,
 	MAX_SHEET_CELLS,
+	type AxisEdit,
 	type CellPatch,
 	type DocState,
 	type EditOp,
@@ -39,14 +40,19 @@ import {
 	formulaTranslator,
 	namesSheet,
 	renameSheetInFormula,
+	sameSheet,
 	shiftFormula,
-	storedFormula,
-	type AxisEdit
+	shiftSpan,
+	storedFormula
 } from "@/features/spreadsheet/lib/formulaRefs"
-import { cellKey, type CellView, type SpreadsheetDoc } from "@/features/spreadsheet/lib/model"
+import type { CellEntry } from "@/features/spreadsheet/lib/gridEdits.logic"
+import { cellKey, MAX_COLUMNS, MAX_ROWS, type CellRange, type CellView, type SpreadsheetDoc } from "@/features/spreadsheet/lib/model"
 import {
+	cellIdOf,
+	ERROR_VALUE,
 	hasArrayFormulas,
 	isWorksheet,
+	parseCellId,
 	sheetExtent,
 	structureLocked,
 	workbookDoc,
@@ -67,11 +73,8 @@ import { pause, saveLosses } from "@/features/spreadsheet/lib/xlsxVerify"
 import { rawEntries, xlsxSavePlan, type SavePlan } from "@/features/spreadsheet/lib/xlsxWritable"
 import { readZip } from "@/features/spreadsheet/lib/zipLimits"
 
-// Excel's own limits.
-const HISTORY_LIMIT = 100
+// Excel's own limit.
 const SHEET_NAME = /^[^\\/?*[\]:]{1,31}$/
-// Undo keeps what each step replaced; past this many cells in all, the oldest steps go.
-const HISTORY_CELLS = MAX_SHEET_CELLS
 const THEME_PART = "xl/theme/theme1.xml"
 // The most file bytes (inflated) proven by an unedited save; a larger workbook opens view-only.
 const VERIFY_LIMIT = 192 * 1024 * 1024
@@ -79,19 +82,8 @@ const VERIFY_LIMIT = 192 * 1024 * 1024
 // relationships stay (it reads them for the parts it re-attaches), and so does every drawing it keeps.
 const REGENERATED =
 	/^(\[Content_Types\]\.xml|_rels\/\.rels|xl\/_rels\/workbook\.xml\.rels|xl\/workbook\.xml|xl\/styles\.xml|xl\/sharedStrings\.xml|xl\/calcChain\.xml|docProps\/(app|core)\.xml|xl\/worksheets\/sheet\d+\.xml|xl\/comments[^/]*\.xml|xl\/comments\/.*|xl\/tables\/.*|xl\/drawings\/vmlDrawing\d+\.vml)$/i
-const ERROR_VALUE = /^#[A-Z0-9/!?_]+$/
 
 type NamedRange = NonNullable<RoundtripWorkbook["namedRanges"]>[number]
-
-function key(row: number, col: number): string {
-	return `${String(row)},${String(col)}`
-}
-
-function parseKey(cellId: string): [number, number] {
-	const comma = cellId.indexOf(",")
-
-	return [Number(cellId.slice(0, comma)), Number(cellId.slice(comma + 1))]
-}
 
 function typeOf(value: CellValue): Cell["type"] {
 	if (value === null) return "empty"
@@ -222,7 +214,7 @@ function expandSharedFormulas(sheets: readonly Sheet[]): void {
 				cell.formula !== "" &&
 				cell.formulaSharedIndex !== undefined
 			) {
-				const [row, col] = parseKey(cellId)
+				const [row, col] = parseCellId(cellId)
 
 				masters.set(cell.formulaSharedIndex, { row, col, translate: formulaTranslator(cell.formula) })
 			}
@@ -242,7 +234,7 @@ function expandSharedFormulas(sheets: readonly Sheet[]): void {
 					delete cell.formulaResult
 					cell.type = typeOf(cell.value)
 				} else {
-					const [row, col] = parseKey(cellId)
+					const [row, col] = parseCellId(cellId)
 
 					cell.formula = master.translate(row - master.row, col - master.col)
 					cell.type = "formula"
@@ -346,15 +338,6 @@ type Step =
 			results: ResultBefore[]
 	  }
 
-// `before` and `after` identify the document's states either side of the step: equal ids, equal content.
-interface Entry {
-	step: Step
-	op: EditOp
-	before: number
-	after: number
-	cells: number
-}
-
 // The cells in the sheet's rectangle once `cells` are written, as writing past its edge grows every row.
 function grownBox(sheet: Sheet, cells: readonly { row: number; col: number }[]): number {
 	let rows = sheet.rows.length
@@ -407,23 +390,17 @@ export class XlsxDocument {
 	// with every edit. Once the workbook has had a formula, every edit that changes cells goes through it.
 	private engine: FormulaEngine | null = null
 	private hasFormulas = false
-	private undoSteps: Entry[] = []
-	private redoSteps: { op: EditOp; after: number }[] = []
-	private historyCells = 0
-	// Identifies the current state; `saved` is the state last written to the file (0: as opened).
-	private current = 0
-	private nextState = 1
-	private saved = 0
+	// Undo keeps what each step replaced, up to `historyBudget` cells in all.
+	private readonly history: EditHistory<Step>
 	// The style table's length when the running edit started.
 	private styleMark = 0
-	private readonly historyBudget: number
 	private prepared = false
 	private closed = false
 
-	constructor(workbook: RoundtripWorkbook, historyBudget = HISTORY_CELLS) {
+	constructor(workbook: RoundtripWorkbook, historyBudget = MAX_SHEET_CELLS) {
 		this.workbook = workbook
 		this.date1904 = workbook.dateSystem === "1904"
-		this.historyBudget = historyBudget
+		this.history = new EditHistory<Step>(stepCells, historyBudget)
 		this.views = new WorkbookViews(workbook.themeColors, this.date1904)
 		this.savePlan = xlsxSavePlan(workbook)
 
@@ -452,7 +429,7 @@ export class XlsxDocument {
 		this.worksheets().forEach((sheet, index) => {
 			for (const [cellId, cell] of sheet.cells ?? []) {
 				if (cell.formula !== undefined && !hasStoredResult(cell)) {
-					const [row, col] = parseKey(cellId)
+					const [row, col] = parseCellId(cellId)
 
 					missing.push({ sheet, index, row, col, cell })
 				}
@@ -485,10 +462,6 @@ export class XlsxDocument {
 		return target === undefined ? -1 : this.workbook.sheets.indexOf(target)
 	}
 
-	private state(): DocState {
-		return { dirty: this.current !== this.saved, canUndo: this.undoSteps.length > 0, canRedo: this.redoSteps.length > 0 }
-	}
-
 	private ensureEngine(): FormulaEngine {
 		this.engine ??= this.buildEngine()
 
@@ -502,7 +475,7 @@ export class XlsxDocument {
 			const formulas: EngineCell[] = []
 
 			for (const [cellId, cell] of sheet.cells ?? []) {
-				const [row, col] = parseKey(cellId)
+				const [row, col] = parseCellId(cellId)
 				const values = rows[row]
 
 				if (values === undefined) {
@@ -537,7 +510,7 @@ export class XlsxDocument {
 	}
 
 	private engineCell(sheet: Sheet, row: number, col: number): EngineCell {
-		const cell = sheet.cells?.get(key(row, col))
+		const cell = sheet.cells?.get(cellIdOf(row, col))
 		const value = sheet.rows[row]?.[col] ?? null
 
 		if (cell?.formula !== undefined) {
@@ -575,7 +548,7 @@ export class XlsxDocument {
 
 		for (const recalculated of cells) {
 			const sheet = worksheets[recalculated.sheet]
-			const cell = sheet?.cells?.get(key(recalculated.row, recalculated.col))
+			const cell = sheet?.cells?.get(cellIdOf(recalculated.row, recalculated.col))
 
 			if (sheet === undefined || cell?.formula === undefined) {
 				continue
@@ -612,7 +585,7 @@ export class XlsxDocument {
 
 				return this.syncResults(this.ensureEngine()).map(before => {
 					const sheet = this.workbook.sheets[before.sheet]
-					const [row, col] = parseKey(before.key)
+					const [row, col] = parseCellId(before.key)
 					const value = sheet?.rows[row]?.[col] ?? null
 
 					return {
@@ -636,28 +609,13 @@ export class XlsxDocument {
 		this.engine = null
 	}
 
-	private pushStep(entry: Entry): void {
-		this.undoSteps.push(entry)
-		this.historyCells += entry.cells
-
-		while (this.undoSteps.length > 1 && (this.undoSteps.length > HISTORY_LIMIT || this.historyCells > this.historyBudget)) {
-			const dropped = this.undoSteps.shift()
-
-			this.historyCells -= dropped?.cells ?? 0
-		}
-	}
-
 	apply(op: EditOp): EditResult {
 		this.styleMark = this.views.styles.styles.length
 
 		const result = this.run(op)
 
 		if (result.step !== null) {
-			const after = this.nextState++
-
-			this.pushStep({ step: result.step, op, before: this.current, after, cells: stepCells(result.step) })
-			this.redoSteps = []
-			this.current = after
+			this.history.record(result.step, op)
 		}
 
 		return result.result()
@@ -666,38 +624,33 @@ export class XlsxDocument {
 	undo(): EditResult {
 		this.styleMark = this.views.styles.styles.length
 
-		const last = this.undoSteps.at(-1)
+		const step = this.history.peekUndo()
 
-		if (last === undefined) {
-			return { type: "none", state: this.state() }
+		if (step === undefined) {
+			return { type: "none", state: this.history.state() }
 		}
 
 		// The history moves only once the step is reverted.
-		const result = this.revert(last.step)
+		const result = this.revert(step)
 
-		this.undoSteps.pop()
-		this.historyCells -= last.cells
-		this.redoSteps.push({ op: last.op, after: last.after })
-		this.current = last.before
+		this.history.popUndo()
 
-		return { ...result, state: this.state() }
+		return { ...result, state: this.history.state() }
 	}
 
 	redo(): EditResult {
 		this.styleMark = this.views.styles.styles.length
 
-		const redone = this.redoSteps.at(-1)
+		const op = this.history.peekRedo()
 
-		if (redone === undefined) {
-			return { type: "none", state: this.state() }
+		if (op === undefined) {
+			return { type: "none", state: this.history.state() }
 		}
 
-		const result = this.run(redone.op)
+		const result = this.run(op)
 
 		if (result.step !== null) {
-			this.redoSteps.pop()
-			this.pushStep({ step: result.step, op: redone.op, before: this.current, after: redone.after, cells: stepCells(result.step) })
-			this.current = redone.after
+			this.history.commitRedo(result.step)
 		}
 
 		return result.result()
@@ -739,7 +692,7 @@ export class XlsxDocument {
 		// Yields first, so a close already on its way is seen before any work.
 		await pause()
 
-		if (raw !== null && this.savePlan.writable && this.untouched() && !closed()) {
+		if (raw !== null && this.savePlan.writable && this.history.untouched() && !closed()) {
 			let size = 0
 
 			for (const bytes of raw.values()) size += bytes.length
@@ -764,7 +717,7 @@ export class XlsxDocument {
 				if (losses !== null && !closed()) {
 					this.losses = losses
 					// An edit that came in while it saved would be read as the file.
-					proven = losses.length === 0 && this.untouched()
+					proven = losses.length === 0 && this.history.untouched()
 				}
 			}
 		}
@@ -773,7 +726,7 @@ export class XlsxDocument {
 		this.releaseRaw(raw)
 
 		// Never edited, so the engine the opening calculation built is not needed.
-		if (!proven && this.untouched()) {
+		if (!proven && this.history.untouched()) {
 			this.dropEngine()
 		}
 
@@ -791,10 +744,6 @@ export class XlsxDocument {
 		}
 
 		return closed() ? null : await readZip(bytes, closed)
-	}
-
-	private untouched(): boolean {
-		return this.current === 0 && this.undoSteps.length === 0
 	}
 
 	// Keeps of the file's parts only what saving copies as it was: saving writes the rest anew, and a
@@ -821,7 +770,7 @@ export class XlsxDocument {
 			throw new Error("spreadsheet: this workbook cannot be saved")
 		}
 
-		const version = this.current
+		const version = this.history.version
 
 		if (!this.prepared) {
 			await this.prepareSave()
@@ -858,9 +807,7 @@ export class XlsxDocument {
 
 	// The state `version` names is now the file's: the document is clean exactly while it is back there.
 	markSaved(version: number): DocState {
-		this.saved = version
-
-		return this.state()
+		return this.history.markSaved(version)
 	}
 
 	// Stops a proof still running (it resolves false) and lets go of the engine and the file's parts.
@@ -932,7 +879,7 @@ export class XlsxDocument {
 		for (const before of results) {
 			const sheet = this.workbook.sheets[before.sheet]
 			const cell = sheet?.cells?.get(before.key)
-			const [row, col] = parseKey(before.key)
+			const [row, col] = parseCellId(before.key)
 			const values = sheet?.rows[row]
 
 			if (cell === undefined) {
@@ -978,7 +925,7 @@ export class XlsxDocument {
 				continue
 			}
 
-			const [row, col] = parseKey(at.key)
+			const [row, col] = parseCellId(at.key)
 			const list = bySheet.get(index) ?? []
 
 			list.push(this.engineCell(sheet, row, col))
@@ -1008,7 +955,7 @@ export class XlsxDocument {
 		const sheet = this.workbook.sheets[step.sheet]
 
 		if (sheet === undefined) {
-			return { type: "none", state: this.state() }
+			return { type: "none", state: this.history.state() }
 		}
 
 		const gridIndex = this.worksheets().indexOf(sheet)
@@ -1026,7 +973,7 @@ export class XlsxDocument {
 		}
 
 		for (const [cellId, before] of step.before) {
-			const [row, col] = parseKey(cellId)
+			const [row, col] = parseCellId(cellId)
 
 			this.write(sheet, row, col, before.value, before.cell)
 			touched.push({ row, col })
@@ -1106,7 +1053,7 @@ export class XlsxDocument {
 					cells.set(gridIndex, targetCells)
 				}
 
-				targetCells.set(key(row, col), this.engineCell(target, row, col))
+				targetCells.set(cellIdOf(row, col), this.engineCell(target, row, col))
 			}
 
 			step.removed.values.forEach((values, index) => {
@@ -1118,7 +1065,7 @@ export class XlsxDocument {
 			})
 
 			for (const [cellId] of step.removed.cells) {
-				const [row, col] = parseKey(cellId)
+				const [row, col] = parseCellId(cellId)
 
 				add(step.sheet, row, col)
 			}
@@ -1129,7 +1076,7 @@ export class XlsxDocument {
 				}
 
 				const target = this.workbook.sheets[formula.sheet]
-				const [row, col] = parseKey(formula.key)
+				const [row, col] = parseCellId(formula.key)
 
 				if (target !== undefined) add(worksheets.indexOf(target), row, col)
 			}
@@ -1186,27 +1133,24 @@ export class XlsxDocument {
 		}
 
 		if (cell === undefined) {
-			sheet.cells?.delete(key(row, col))
+			sheet.cells?.delete(cellIdOf(row, col))
 		} else {
 			sheet.cells ??= new Map()
-			sheet.cells.set(key(row, col), cell)
+			sheet.cells.set(cellIdOf(row, col), cell)
 		}
 	}
 
 	private refused(reason: Extract<EditResult, { type: "refused" }>["reason"]): { step: null; result: () => EditResult } {
-		return { step: null, result: () => ({ type: "refused", reason, state: this.state() }) }
+		return { step: null, result: () => ({ type: "refused", reason, state: this.history.state() }) }
 	}
 
-	private setCells(
-		sheetIndex: number,
-		cells: readonly { row: number; col: number; input: string }[]
-	): { step: Step | null; result: () => EditResult } {
+	private setCells(sheetIndex: number, cells: readonly CellEntry[]): { step: Step | null; result: () => EditResult } {
 		const sheet = this.worksheets()[sheetIndex]
 
 		if (
 			sheet === undefined ||
 			cells.length > MAX_EDIT_CELLS ||
-			cells.some(cell => cell.row >= MAX_ROWS || cell.col >= MAX_COLS) ||
+			cells.some(cell => cell.row >= MAX_ROWS || cell.col >= MAX_COLUMNS) ||
 			grownBox(sheet, cells) > MAX_SHEET_CELLS
 		) {
 			return this.refused("tooLarge")
@@ -1216,7 +1160,7 @@ export class XlsxDocument {
 			...cell,
 			parsed: parseTyped(
 				cell.input,
-				startingStyle(sheet, cell.row, cell.col, sheet.cells?.get(key(cell.row, cell.col))),
+				startingStyle(sheet, cell.row, cell.col, sheet.cells?.get(cellIdOf(cell.row, cell.col))),
 				this.date1904
 			)
 		}))
@@ -1243,7 +1187,7 @@ export class XlsxDocument {
 		const extent = { rows: sheet.rows.length, cols: sheet.rows[0]?.length ?? 0 }
 
 		for (const { row, col, input, parsed } of parsedCells) {
-			const cellId = key(row, col)
+			const cellId = cellIdOf(row, col)
 			const existing = sheet.cells?.get(cellId)
 
 			if (!before.has(cellId)) {
@@ -1300,7 +1244,7 @@ export class XlsxDocument {
 			engine.set(
 				sheetIndex,
 				[...before.keys()].map(cellId => {
-					const [row, col] = parseKey(cellId)
+					const [row, col] = parseCellId(cellId)
 
 					return this.engineCell(sheet, row, col)
 				})
@@ -1317,7 +1261,7 @@ export class XlsxDocument {
 		const sheet = this.workbook.sheets[this.workbookIndex(op.sheet)]
 
 		if (op.sizes.length > MAX_RESIZE_TARGETS) {
-			return { step: null, result: () => ({ type: "refused", reason: "tooLarge", state: this.state() }) }
+			return { step: null, result: () => ({ type: "refused", reason: "tooLarge", state: this.history.state() }) }
 		}
 
 		// Only what changes: a reset of a size the file never had, or a size it already holds, is no edit
@@ -1337,7 +1281,7 @@ export class XlsxDocument {
 					})
 
 		if (sheet === undefined || changes.length === 0) {
-			return { step: null, result: () => ({ type: "none", state: this.state() }) }
+			return { step: null, result: () => ({ type: "none", state: this.history.state() }) }
 		}
 
 		const before = changes.map(([at]): [number, number | undefined] => [at, fileSize(sheet, op.axis, at)])
@@ -1362,7 +1306,7 @@ export class XlsxDocument {
 		const sheet = this.workbook.sheets[step.sheet]
 
 		if (sheet === undefined) {
-			return { type: "none", state: this.state() }
+			return { type: "none", state: this.history.state() }
 		}
 
 		for (const [at, size] of step.before) {
@@ -1387,14 +1331,11 @@ export class XlsxDocument {
 
 				return [at, size === undefined ? null : axis === "cols" ? colWidthToPx(size) : rowHeightToPx(size)]
 			}),
-			state: this.state()
+			state: this.history.state()
 		}
 	}
 
-	private format(
-		sheetIndex: number,
-		op: { range: { startRow: number; startCol: number; endRow: number; endCol: number }; patch: FormatPatch }
-	): { step: Step | null; result: () => EditResult } {
+	private format(sheetIndex: number, op: { range: CellRange; patch: FormatPatch }): { step: Step | null; result: () => EditResult } {
 		const sheet = this.worksheets()[sheetIndex]
 
 		if (sheet === undefined) {
@@ -1426,7 +1367,7 @@ export class XlsxDocument {
 
 		for (let row = startRow; row <= lastRow; row++) {
 			for (let col = startCol; col <= lastCol; col++) {
-				const cellId = key(row, col)
+				const cellId = cellIdOf(row, col)
 				const existing = sheet.cells?.get(cellId)
 				const value = sheet.rows[row]?.[col] ?? null
 
@@ -1466,7 +1407,7 @@ export class XlsxDocument {
 				}
 
 				if (candidate === target && edit.type === "delete") {
-					const [row, col] = parseKey(cellId)
+					const [row, col] = parseCellId(cellId)
 					const position = rowsAxis ? row : col
 
 					// Deleted with its cell.
@@ -1506,7 +1447,7 @@ export class XlsxDocument {
 		}
 
 		const rowsAxis = op.axis === "rows"
-		const limit = rowsAxis ? MAX_ROWS : MAX_COLS
+		const limit = rowsAxis ? MAX_ROWS : MAX_COLUMNS
 		const extent = sheetExtent(sheet)
 		const used = rowsAxis ? extent.rowCount : extent.colCount
 		const across = rowsAxis ? (sheet.rows[0]?.length ?? 0) : sheet.rows.length
@@ -1519,19 +1460,18 @@ export class XlsxDocument {
 			return this.refused("tooLarge")
 		}
 
-		const edit: AxisEdit = { type: op.type, axis: op.axis, at: op.at, count: op.count }
 		// Built before anything moves, as it moves its own copy; asked first whether it can move it (a spilled
 		// array on the way cannot be moved), so nothing changes when it cannot.
 		const engine = this.hasFormulas ? this.ensureEngine() : null
 
-		if (engine !== null && !engine.canMove(op.sheet, edit)) {
+		if (engine !== null && !engine.canMove(op.sheet, op)) {
 			return this.refused("structureLocked")
 		}
 		const merges = sheet.merges?.map(merge => ({ ...merge }))
 		// shiftSheet replaces the list, never changes it.
-		const breaks = sheet[BREAKS[edit.axis]]
-		const { formulas, links } = this.shiftReferences(sheet, edit)
-		const removed = shiftSheet(sheet, edit)
+		const breaks = sheet[BREAKS[op.axis]]
+		const { formulas, links } = this.shiftReferences(sheet, op)
+		const removed = shiftSheet(sheet, op)
 
 		const changed = this.gridSheets([...formulas, ...links]).add(op.sheet)
 
@@ -1542,13 +1482,13 @@ export class XlsxDocument {
 		for (const cell of recalculated) changed.add(cell.sheet)
 
 		return {
-			step: { type: "structure", sheet: op.sheet, edit, merges, breaks, removed, formulas, links },
+			step: { type: "structure", sheet: op.sheet, edit: op, merges, breaks, removed, formulas, links },
 			result: () => this.sheetsResult(changed)
 		}
 	}
 
 	private nameRefused(name: string, except: Sheet | undefined): boolean {
-		const taken = this.workbook.sheets.some(sheet => sheet !== except && sheet.name.toLowerCase() === name.toLowerCase())
+		const taken = this.workbook.sheets.some(sheet => sheet !== except && sameSheet(sheet.name, name))
 
 		return !SHEET_NAME.test(name) || name.startsWith("'") || name.endsWith("'") || taken
 	}
@@ -1599,7 +1539,7 @@ export class XlsxDocument {
 					continue
 				}
 
-				const [row, col] = parseKey(cellId)
+				const [row, col] = parseCellId(cellId)
 				const value = engine.value(index, row, col)
 				const stored = cell.formulaResult
 
@@ -1671,7 +1611,7 @@ export class XlsxDocument {
 			this.workbook.namedRanges = names.map(named => {
 				const next: NamedRange = { ...named, range: renameSheetInFormula(named.range, oldName, name) }
 
-				if (named.scope?.toLowerCase() === oldName.toLowerCase()) {
+				if (named.scope !== undefined && sameSheet(named.scope, oldName)) {
 					next.scope = name
 				}
 
@@ -1748,7 +1688,7 @@ export class XlsxDocument {
 
 		const styles = this.views.styles.styles
 
-		return { type: "cells", patches, styles: styles.length > this.styleMark ? styles : [], state: this.state() }
+		return { type: "cells", patches, styles: styles.length > this.styleMark ? styles : [], state: this.history.state() }
 	}
 
 	// A view of each sheet in `changed` (grid indices), null for the rest.
@@ -1756,7 +1696,7 @@ export class XlsxDocument {
 		const lockStructure = workbookStructureLocked(this.workbook)
 		const sheets = this.worksheets().map((sheet, index) => (changed.has(index) ? this.views.sheet(sheet, lockStructure) : null))
 
-		return { type: "sheets", sheets, styles: this.views.styles.styles, state: this.state() }
+		return { type: "sheets", sheets, styles: this.views.styles.styles, state: this.history.state() }
 	}
 }
 
@@ -1885,7 +1825,7 @@ function moveDetails(sheet: Sheet, rowsAxis: boolean, at: number, shift: number)
 		const cells = new Map<string, Cell>()
 
 		for (const [cellId, cell] of sheet.cells) {
-			const [row, col] = parseKey(cellId)
+			const [row, col] = parseCellId(cellId)
 			const index = rowsAxis ? row : col
 
 			if (index < at) {
@@ -1893,7 +1833,7 @@ function moveDetails(sheet: Sheet, rowsAxis: boolean, at: number, shift: number)
 			} else if (index < deletedEnd) {
 				removedCells.push([cellId, cell])
 			} else {
-				cells.set(rowsAxis ? key(index + shift, col) : key(row, index + shift), cell)
+				cells.set(rowsAxis ? cellIdOf(index + shift, col) : cellIdOf(row, index + shift), cell)
 			}
 		}
 
@@ -1923,6 +1863,7 @@ const BREAKS = { rows: "rowBreaks", cols: "colBreaks" } as const
 // out, or the row and column formats an insertion pushed past the sheet's edge, for undoing it.
 function shiftSheet(sheet: Sheet, op: AxisEdit): Removed {
 	const rowsAxis = op.axis === "rows"
+	const limit = rowsAxis ? MAX_ROWS : MAX_COLUMNS
 	const removed: Removed = { values: [], cells: [], rowDefs: [], columns: [] }
 
 	if (rowsAxis) {
@@ -1953,31 +1894,13 @@ function shiftSheet(sheet: Sheet, op: AxisEdit): Removed {
 	removed.rowDefs = details.rowDefs
 
 	const merges = sheet.merges?.flatMap(merge => {
-		const start = rowsAxis ? merge.startRow : merge.startCol
-		const end = rowsAxis ? merge.endRow : merge.endCol
-		let nextStart: number
-		let nextEnd: number
+		const moved = shiftSpan(rowsAxis ? merge.startRow : merge.startCol, rowsAxis ? merge.endRow : merge.endCol, op, limit, true)
 
-		if (op.type === "insert") {
-			const limit = rowsAxis ? MAX_ROWS : MAX_COLS
-
-			nextStart = start >= op.at ? start + op.count : start
-			nextEnd = Math.min(end >= op.at ? end + op.count : end, limit - 1)
-
-			if (nextStart >= limit) {
-				return []
-			}
-		} else {
-			const removedBefore = (index: number) => Math.max(0, Math.min(index, op.at + op.count) - op.at)
-
-			nextStart = start - removedBefore(start)
-			nextEnd = end - removedBefore(end + 1)
-
-			if (nextEnd < nextStart) {
-				return []
-			}
+		if (moved === null) {
+			return []
 		}
 
+		const [nextStart, nextEnd] = moved
 		const next = rowsAxis ? { ...merge, startRow: nextStart, endRow: nextEnd } : { ...merge, startCol: nextStart, endCol: nextEnd }
 
 		return next.startRow === next.endRow && next.startCol === next.endCol ? [] : [next]
@@ -1992,8 +1915,6 @@ function shiftSheet(sheet: Sheet, op: AxisEdit): Removed {
 	const breaks = sheet[BREAKS[op.axis]]
 
 	if (breaks !== undefined) {
-		const limit = rowsAxis ? MAX_ROWS : MAX_COLS
-
 		sheet[BREAKS[op.axis]] = breaks.flatMap(last => {
 			const start = last + 1
 
@@ -2016,8 +1937,8 @@ function shiftSheet(sheet: Sheet, op: AxisEdit): Removed {
 
 			// Formats running to the last column (as hiding every column to the right writes them) stop at
 			// the sheet's edge.
-			if (sheet.columns.length > MAX_COLS) {
-				removed.columns = sheet.columns.splice(MAX_COLS)
+			if (sheet.columns.length > MAX_COLUMNS) {
+				removed.columns = sheet.columns.splice(MAX_COLUMNS)
 			}
 		}
 	}
@@ -2044,7 +1965,7 @@ function splitsArray(sheet: Sheet, cells: readonly { row: number; col: number }[
 		return false
 	}
 
-	const edited = new Set(cells.map(cell => key(cell.row, cell.col)))
+	const edited = new Set(cells.map(cell => cellIdOf(cell.row, cell.col)))
 
 	for (const cell of sheet.cells?.values() ?? []) {
 		if (cell.formulaType !== "array" || cell.formulaRef === undefined) {
@@ -2055,22 +1976,20 @@ function splitsArray(sheet: Sheet, cells: readonly { row: number; col: number }[
 		let inside = 0
 
 		for (const { row, col } of cells) {
-			if (row >= range.startRow && row <= range.endRow && col >= range.startCol && col <= range.endCol) inside++
+			if (rangeContains(range, row, col)) inside++
 		}
 
 		if (inside === 0) {
 			continue
 		}
 
-		const size = (range.endRow - range.startRow + 1) * (range.endCol - range.startCol + 1)
-
-		if (size > edited.size) {
+		if (rangeArea(range) > edited.size) {
 			return true
 		}
 
 		for (let row = range.startRow; row <= range.endRow; row++) {
 			for (let col = range.startCol; col <= range.endCol; col++) {
-				if (!edited.has(key(row, col))) return true
+				if (!edited.has(cellIdOf(row, col))) return true
 			}
 		}
 	}

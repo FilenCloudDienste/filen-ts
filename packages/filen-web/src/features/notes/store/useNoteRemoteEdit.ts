@@ -80,7 +80,7 @@ export const useNotesRemoteEditStore = create<NotesRemoteEditStore>((set, get) =
 
 			drop(uuid)
 
-			const queued = newestEntry(useNotesInflightStore.getState().inflightContent[uuid] ?? [])
+			const queued = newestEntry(useNotesInflightStore.getState().inflightContent[uuid])
 			const mineKept = choice === undefined ? queued !== undefined && queued.content !== edit.theirs : choice === "mine"
 
 			if (!mineKept) {

@@ -1,11 +1,11 @@
-import { Shuffle, Repeat, Repeat1, Trash2, X, AlertCircle } from "lucide-react"
+import { Trash2, X, AlertCircle } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { audioEngine } from "@/features/audio/lib/audioEngine"
-import { useAudioStore, useAudioQueue, useAudioQueueControls, useAudioError } from "@/features/audio/store/useAudioStore"
+import { useAudioStore, useAudioQueue, useAudioError } from "@/features/audio/store/useAudioStore"
 import { useTrackTagsStore } from "@/features/audio/store/useTrackTagsStore"
 import { trackDisplayTitle } from "@/features/audio/lib/trackTags.logic"
 import type { QueueTrack } from "@/features/audio/store/audioQueue"
-import { nextLoopMode } from "@/features/audio/components/audioTransport.logic"
+import { ShuffleToggleButton, LoopToggleButton } from "@/features/audio/components/queueToggles"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@filen/shared"
@@ -19,10 +19,8 @@ import { cn } from "@filen/shared"
 export function NowPlayingPanel() {
 	const { t } = useTranslation("audio")
 	const { queue, currentIndex, coverUrlsByUuid } = useAudioQueue()
-	const { shuffleEnabled, loopMode } = useAudioQueueControls()
 	const status = useAudioStore(state => state.status)
 	const lastError = useAudioError()
-	const LoopIcon = loopMode === "one" ? Repeat1 : Repeat
 
 	return (
 		<div className="flex max-h-[min(60vh,28rem)] flex-col overflow-hidden">
@@ -31,30 +29,8 @@ export function NowPlayingPanel() {
 					<p className="text-xs text-muted-foreground">{t("queueCount", { count: queue.length })}</p>
 				</div>
 				<div className="flex items-center gap-1">
-					<Button
-						variant="ghost"
-						size="icon-sm"
-						aria-label={t("shuffle")}
-						aria-pressed={shuffleEnabled}
-						className={cn(shuffleEnabled && "text-primary")}
-						onClick={() => {
-							audioEngine.setShuffleEnabled(!shuffleEnabled)
-						}}
-					>
-						<Shuffle />
-					</Button>
-					<Button
-						variant="ghost"
-						size="icon-sm"
-						aria-label={loopMode === "off" ? t("loopOff") : loopMode === "all" ? t("loopAll") : t("loopOne")}
-						aria-pressed={loopMode !== "off"}
-						className={cn(loopMode !== "off" && "text-primary")}
-						onClick={() => {
-							audioEngine.setLoopMode(nextLoopMode(loopMode))
-						}}
-					>
-						<LoopIcon />
-					</Button>
+					<ShuffleToggleButton />
+					<LoopToggleButton />
 					<Button
 						variant="ghost"
 						size="icon-sm"

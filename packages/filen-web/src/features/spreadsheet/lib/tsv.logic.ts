@@ -1,8 +1,7 @@
-import type { CellPosition } from "@/features/spreadsheet/lib/cellRef.logic"
-import { MAX_COLS, MAX_ROWS } from "@/features/spreadsheet/lib/edits"
-import { formulaTranslator, rewriteFormula, type FormulaRef } from "@/features/spreadsheet/lib/formulaRefs"
+import { rangeCols, rangeRows, type CellPosition } from "@/features/spreadsheet/lib/cellRef.logic"
+import { formulaTranslator, rewriteFormula, sameSheet, type FormulaRef } from "@/features/spreadsheet/lib/formulaRefs"
 import type { CellEntry } from "@/features/spreadsheet/lib/gridEdits.logic"
-import { cellKey, type CellRange, type CellView } from "@/features/spreadsheet/lib/model"
+import { cellKey, MAX_COLUMNS, MAX_ROWS, type CellRange, type CellView } from "@/features/spreadsheet/lib/model"
 
 // How far a copy reaches: past this the clipboard text would run to hundreds of megabytes.
 const MAX_COPY_CELLS = 1_000_000
@@ -19,8 +18,8 @@ export function rangeToTsv(
 	range: CellRange,
 	inputs?: Map<number, string>
 ): string | null {
-	const rows = range.endRow - range.startRow + 1
-	const cols = range.endCol - range.startCol + 1
+	const rows = rangeRows(range)
+	const cols = rangeCols(range)
 
 	if (rows * cols > MAX_COPY_CELLS) {
 		return null
@@ -76,10 +75,6 @@ export function endedCut(clip: GridClip | null): GridClip | null {
 	return clip?.cut === true ? { ...clip, cut: false } : clip
 }
 
-function sameSheet(a: string, b: string): boolean {
-	return a.toUpperCase() === b.toUpperCase()
-}
-
 // A cut formula's references as spreadsheets move them: one into the cut range follows its cells to
 // `to` on `sheet`, and the rest keep pointing where they did (named by the sheet they are on, when the
 // formula moves to another).
@@ -115,7 +110,7 @@ function movedFormula(formula: string, clip: GridClip, to: CellPosition, sheet: 
 			endCol: area.endCol + cols
 		}
 
-		if (Math.max(next.startRow, next.endRow) >= MAX_ROWS || Math.max(next.startCol, next.endCol) >= MAX_COLS) {
+		if (Math.max(next.startRow, next.endRow) >= MAX_ROWS || Math.max(next.startCol, next.endCol) >= MAX_COLUMNS) {
 			return null
 		}
 
@@ -183,8 +178,8 @@ export function pastedCells(text: string, clip: GridClip | null, to: CellPositio
 	}
 
 	const inputs = pastedInputs(clip, to, sheet)
-	const rows = clip.range.endRow - clip.range.startRow + 1
-	const cols = clip.range.endCol - clip.range.startCol + 1
+	const rows = rangeRows(clip.range)
+	const cols = rangeCols(clip.range)
 
 	for (let rowOffset = 0; rowOffset < rows; rowOffset++) {
 		for (let colOffset = 0; colOffset < cols; colOffset++) {

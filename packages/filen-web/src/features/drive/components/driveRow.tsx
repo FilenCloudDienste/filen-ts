@@ -1,61 +1,24 @@
-import { type CSSProperties, type MouseEvent } from "react"
+import { type CSSProperties } from "react"
 import { useTranslation } from "react-i18next"
 import { StarIcon } from "lucide-react"
-import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
-import { canWriteVariant, type DriveVariant } from "@/features/drive/lib/preferences"
 import { ItemThumbnail } from "@/features/drive/components/itemThumbnail"
-import { formatItemSize, formatModifiedDate, sharedIdentityLabel } from "@/features/drive/lib/format"
-import { splatToUuids } from "@/features/drive/lib/navigate"
-import { canDragVariant } from "@/features/drive/lib/dnd.logic"
-import { buildDragSourceProps } from "@/features/drive/lib/dnd"
-import { type ItemActionDialogKind } from "@/features/drive/components/itemMenu.logic"
-import { type BulkDialogActionKind } from "@/features/drive/components/bulkActionBar.logic"
-import { DriveContextMenuContent, DriveDropdownMenuContent, type ItemDestination } from "@/features/drive/components/itemMenu"
-import { type DestinationActions } from "@/features/drive/components/destinationMenu"
-import { DriveBulkContextMenuContent } from "@/features/drive/components/bulkMenu"
-import { useDriveStore } from "@/features/drive/store/useDriveStore"
-import { useDriveClipboardStore } from "@/features/drive/store/useDriveClipboardStore"
-import { dropHighlightClass, useDriveDropTarget } from "@/features/drive/hooks/useDriveDropTarget"
-import { LISTING_SPRING } from "@/features/drive/lib/springLoad"
-import { cn, driveItemName } from "@filen/shared"
+import { formatItemSize, formatModifiedDate } from "@/features/drive/lib/format"
+import { DriveDropdownMenuContent } from "@/features/drive/components/itemMenu"
+import { DriveCellContextMenuContent } from "@/features/drive/components/bulkMenu"
+import { useDriveItemCell, type DriveItemCellProps } from "@/features/drive/hooks/useDriveItemCell"
+import { dropHighlightClass } from "@/features/drive/hooks/useDriveDropTarget"
+import { cn } from "@filen/shared"
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { DropdownMenu } from "@/components/ui/dropdown-menu"
 import { RowMenuTrigger } from "@/components/rowMenuTrigger"
 
-export interface DriveRowProps {
-	item: DriveItem
-	index: number
-	// The listing's full item count. Virtualized: only a window of rows is mounted, so the DOM child
-	// count is a fabricated total and the set size has to come from the owning list.
-	total: number
-	selected: boolean
-	active: boolean
-	variant: DriveVariant
+export interface DriveRowProps extends DriveItemCellProps {
 	// Absolute-positioning style computed by the virtualizer (position/top/left/width/transform) —
 	// the row owns none of that itself, only its own visual/layout concerns.
 	style: CSSProperties
-	// The current listing's "/drive/$" splat — the row's own ancestry (for the drag-move self/descendant
-	// guard) is this chain plus the row's uuid. A primitive so a memoized row keeps its identity.
-	splat: string
-	// Search results only: the item's ancestor-name chain from the search root (empty for a direct
-	// child of it) — undefined outside an active search, where a row has nothing to show here.
-	searchParentPath?: string
 	// uuid -> resolved directory bytes, threaded down from the listing's ONE useDriveDirectorySizes call
 	// (never mounted per-row — see directoryListing.tsx) — passed straight through to formatItemSize.
 	directorySizes: ReadonlyMap<string, number>
-	// The listing's already-reconciled selection — right-clicking a row inside a 2+ selection opens the
-	// BULK menu over exactly these items (freshest metadata, same as the bulk bar reads).
-	selectedItems: DriveItem[]
-	onPointerSelect: (index: number, event: MouseEvent<HTMLDivElement>) => void
-	// Moves the roving cursor + range anchor to a row (useDriveListboxNav's setCursor) — the retarget
-	// half of a right-click, which never fires onClick and so never reaches onPointerSelect.
-	onCursorMove: (index: number) => void
-	onOpen: (index: number) => void
-	onItemAction: (kind: ItemActionDialogKind, item: DriveItem) => void
-	// The listing's create/upload host (useDirectoryDestination), for a directory row's New submenu.
-	destinationActions: (uuid: string | null) => DestinationActions
-	onBulkAction: (kind: BulkDialogActionKind) => void
-	registerRef: (index: number, el: HTMLDivElement | null) => void
 }
 
 export function DriveRow({
@@ -79,46 +42,18 @@ export function DriveRow({
 	registerRef
 }: DriveRowProps) {
 	const { t } = useTranslation("drive")
-	const name = driveItemName(item)
-	// Drag-to-move: a move-capable row is a drag source; a directory row is also a drop target for a
-	// move (self/descendant/same-parent guarded via its own ancestry). The accessible move route stays
-	// the item menu's "Move" action — this is a pointer-only enhancement.
-	const dragSource = buildDragSourceProps(item, variant, selectedItems)
-	// A cross-directory search hit is the only case "Open containing directory" has somewhere to go —
-	// searchParentPath is "" for a direct child of the search root and undefined outside a search.
-	const searchHit = searchParentPath !== undefined && searchParentPath.length > 0
-	const pathUuids = splatToUuids(splat)
-	const targetAncestry = [...pathUuids, item.data.uuid]
-	// ⌘V pastes into the listing on screen, not into this row, so the row's Paste shows no shortcut.
-	const destination: ItemDestination = { actionsFor: destinationActions, ancestry: targetAncestry, pasteShortcut: false }
-	const springable = asDirectoryOrFile(item).type === "directory" && !item.data.undecryptable
-	const drop = useDriveDropTarget({
-		targetUuid: item.data.uuid,
-		targetAncestry,
-		routeChain: { parent: item.data.parent },
-		targetName: name,
-		// Internal drags: owned My Drive directories only.
-		disabled: item.type !== "directory" || !canDragVariant(variant),
-		// A drag resting on a directory opens it (springLoad.ts), and files from the system upload into it
-		// wherever the listing's own dropzone would upload (canWriteVariant, judged for this directory).
-		// Neither for an undecryptable one, which doesn't open either.
-		spring: springable
-			? {
-					timing: LISTING_SPRING,
-					open: () => {
-						onOpen(index)
-					}
-				}
-			: undefined,
-		acceptFiles: springable && canWriteVariant(variant, item.data.uuid)
+	const { name, open, dragSource, searchHit, destination, drop, shared, bulkMenu, cut, onContextMenu } = useDriveItemCell({
+		item,
+		index,
+		variant,
+		splat,
+		selected,
+		selectedItems,
+		searchParentPath,
+		destinationActions,
+		onOpen,
+		onCursorMove
 	})
-	// Only the two shared variants' ROOT listing resolve a counterparty; every other variant/nested
-	// item gets null (no badge) — see sharedIdentityLabel's own doc comment.
-	const shared = sharedIdentityLabel(item, variant)
-	const bulkMenu = selected && selectedItems.length > 1
-	// Cut for a later paste: dimmed, Explorer-style, until the paste or the next copy/cut. The ⋯ trigger
-	// keeps its own hover-only opacity.
-	const cut = useDriveClipboardStore(state => state.cutUuids.has(item.data.uuid))
 
 	return (
 		<ContextMenu>
@@ -149,22 +84,8 @@ export function DriveRow({
 						onClick={event => {
 							onPointerSelect(index, event)
 						}}
-						onDoubleClick={() => {
-							onOpen(index)
-						}}
-						onContextMenu={() => {
-							// Right-clicking outside the current selection retargets it to this row (the
-							// file-manager convention) — otherwise a single-item menu would open while
-							// unrelated rows stayed highlighted. Merges with ContextMenuTrigger's own handler
-							// (Base UI's mergeProps chains same-name handlers, see the comment above). The
-							// cursor and range anchor move with it — a right-click is a pointer selection, and
-							// leaving them behind would make the next Arrow jump from an unselected row and
-							// Shift+Click range from an anchor the user never set.
-							if (!selected) {
-								useDriveStore.getState().setSelectedItems([item])
-								onCursorMove(index)
-							}
-						}}
+						onDoubleClick={open}
+						onContextMenu={onContextMenu}
 						{...drop.handlers}
 					>
 						<ItemThumbnail
@@ -178,7 +99,7 @@ export function DriveRow({
 						    short comes out of the name first. Non-monotonic on purpose — the card is widest just
 						    below md and narrowest just above it, because that is where the shell puts the sidebar
 						    back into the row. What they carry stays reachable in the item info dialog. */}
-						{searchParentPath !== undefined && searchParentPath.length > 0 ? (
+						{searchHit ? (
 							<span className="hidden max-w-48 min-w-0 shrink truncate text-xs text-muted-foreground sm:block md:hidden lg:block">
 								{searchParentPath}
 							</span>
@@ -219,33 +140,24 @@ export function DriveRow({
 								variant={variant}
 								onItemAction={onItemAction}
 								searchHit={searchHit}
-								onOpen={() => {
-									onOpen(index)
-								}}
+								onOpen={open}
 								destination={destination}
 							/>
 						</DropdownMenu>
 					</div>
 				}
 			/>
-			{bulkMenu ? (
-				<DriveBulkContextMenuContent
-					variant={variant}
-					selectedItems={selectedItems}
-					onBulkAction={onBulkAction}
-				/>
-			) : (
-				<DriveContextMenuContent
-					item={item}
-					variant={variant}
-					onItemAction={onItemAction}
-					searchHit={searchHit}
-					onOpen={() => {
-						onOpen(index)
-					}}
-					destination={destination}
-				/>
-			)}
+			<DriveCellContextMenuContent
+				bulkMenu={bulkMenu}
+				item={item}
+				variant={variant}
+				selectedItems={selectedItems}
+				onBulkAction={onBulkAction}
+				onItemAction={onItemAction}
+				searchHit={searchHit}
+				onOpen={open}
+				destination={destination}
+			/>
 		</ContextMenu>
 	)
 }

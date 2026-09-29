@@ -1,12 +1,5 @@
-import { describe, expect, it, vi } from "vitest"
-import { QueryClient } from "@tanstack/react-query"
+import { describe, expect, it } from "vitest"
 import type { Chat, ChatMessage, ChatParticipant, UuidStr } from "@filen/sdk-rs"
-
-// selectionFlags.ts imports isChatOwner from lib/actions.ts, which in turn imports the sdk client and
-// query client modules — unresolvable/unwanted under node vitest, mirrors notesSelectionFlags.test.ts's
-// own mock boundary.
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
-vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
 import { aggregateChatSelectionFlags, selectableChatsForSelectAll } from "@/features/chats/lib/selectionFlags"
 import { deriveBlockedUsers } from "@filen/shared"

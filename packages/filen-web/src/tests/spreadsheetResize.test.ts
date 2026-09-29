@@ -183,9 +183,9 @@ describe("CsvDocument structural shifts", () => {
 		const document = csvDocument("a,b\nc,d\n")
 		const inserted = document.apply({ type: "insert", sheet: 0, axis: "rows", at: 1, count: 2 })
 
-		expect(inserted).toMatchObject({ type: "sheets", shift: { axis: "rows", kind: "insert", at: 1, count: 2, revert: false } })
-		expect(document.undo()).toMatchObject({ type: "sheets", shift: { axis: "rows", kind: "insert", at: 1, count: 2, revert: true } })
-		expect(document.redo()).toMatchObject({ type: "sheets", shift: { kind: "insert", revert: false } })
+		expect(inserted).toMatchObject({ type: "sheets", shift: { axis: "rows", type: "insert", at: 1, count: 2, revert: false } })
+		expect(document.undo()).toMatchObject({ type: "sheets", shift: { axis: "rows", type: "insert", at: 1, count: 2, revert: true } })
+		expect(document.redo()).toMatchObject({ type: "sheets", shift: { type: "insert", revert: false } })
 	})
 
 	it("moves nothing for an insert past the end", () => {

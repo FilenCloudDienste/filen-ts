@@ -1,54 +1,15 @@
-import { type MouseEvent } from "react"
 import { useTranslation } from "react-i18next"
 import { CheckIcon, PlayIcon, StarIcon } from "lucide-react"
-import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
-import { canWriteVariant, type DriveVariant } from "@/features/drive/lib/preferences"
 import { ItemThumbnail } from "@/features/drive/components/itemThumbnail"
-import { sharedIdentityLabel } from "@/features/drive/lib/format"
-import { splatToUuids } from "@/features/drive/lib/navigate"
-import { canDragVariant } from "@/features/drive/lib/dnd.logic"
-import { buildDragSourceProps } from "@/features/drive/lib/dnd"
-import { type ItemActionDialogKind } from "@/features/drive/components/itemMenu.logic"
-import { type BulkDialogActionKind } from "@/features/drive/components/bulkActionBar.logic"
-import { DriveContextMenuContent, DriveDropdownMenuContent, type ItemDestination } from "@/features/drive/components/itemMenu"
-import { type DestinationActions } from "@/features/drive/components/destinationMenu"
-import { DriveBulkContextMenuContent } from "@/features/drive/components/bulkMenu"
-import { useDriveStore } from "@/features/drive/store/useDriveStore"
-import { useDriveClipboardStore } from "@/features/drive/store/useDriveClipboardStore"
+import { DriveDropdownMenuContent } from "@/features/drive/components/itemMenu"
+import { DriveCellContextMenuContent } from "@/features/drive/components/bulkMenu"
 import { showVideoBadge } from "@/features/drive/components/driveTile.logic"
-import { dropHighlightClass, useDriveDropTarget } from "@/features/drive/hooks/useDriveDropTarget"
-import { LISTING_SPRING } from "@/features/drive/lib/springLoad"
-import { cn, driveItemName } from "@filen/shared"
+import { useDriveItemCell, type DriveItemCellProps } from "@/features/drive/hooks/useDriveItemCell"
+import { dropHighlightClass } from "@/features/drive/hooks/useDriveDropTarget"
+import { cn } from "@filen/shared"
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { DropdownMenu } from "@/components/ui/dropdown-menu"
 import { RowMenuTrigger } from "@/components/rowMenuTrigger"
-
-export interface DriveTileProps {
-	item: DriveItem
-	index: number
-	// The listing's full item count — see DriveRow's identical prop (virtualized set size).
-	total: number
-	selected: boolean
-	active: boolean
-	variant: DriveVariant
-	// The current listing's "/drive/$" splat — see DriveRow's identical prop (drag-move ancestry guard).
-	splat: string
-	// Search results only: the item's ancestor-name chain from the search root — undefined outside an
-	// active search. Shown as a native hover tooltip (title attr), not inline text — a tile has far
-	// less room than a row for a second line.
-	searchParentPath?: string
-	// The listing's already-reconciled selection — see DriveRow's identical prop (bulk context menu).
-	selectedItems: DriveItem[]
-	onPointerSelect: (index: number, event: MouseEvent<HTMLDivElement>) => void
-	// See DriveRow's identical prop (the right-click retarget's cursor half).
-	onCursorMove: (index: number) => void
-	onOpen: (index: number) => void
-	onItemAction: (kind: ItemActionDialogKind, item: DriveItem) => void
-	// The listing's create/upload host (useDirectoryDestination), for a directory tile's New submenu.
-	destinationActions: (uuid: string | null) => DestinationActions
-	onBulkAction: (kind: BulkDialogActionKind) => void
-	registerRef: (index: number, el: HTMLDivElement | null) => void
-}
 
 // Grid tiles are plain CSS-grid children of an already-positioned virtual row (see
 // directoryListing.tsx) — unlike DriveRow, no per-tile absolute-positioning style is needed.
@@ -69,46 +30,20 @@ export function DriveTile({
 	destinationActions,
 	onBulkAction,
 	registerRef
-}: DriveTileProps) {
+}: DriveItemCellProps) {
 	const { t } = useTranslation("drive")
-	const name = driveItemName(item)
-	// Drag-to-move — see DriveRow's identical wiring. Pointer-only enhancement; the item menu's "Move"
-	// stays the accessible route.
-	const dragSource = buildDragSourceProps(item, variant, selectedItems)
-	// See DriveRow's identical derivation.
-	const searchHit = searchParentPath !== undefined && searchParentPath.length > 0
-	const pathUuids = splatToUuids(splat)
-	const targetAncestry = [...pathUuids, item.data.uuid]
-	// ⌘V pastes into the listing on screen, not into this tile, so the tile's Paste shows no shortcut.
-	const destination: ItemDestination = { actionsFor: destinationActions, ancestry: targetAncestry, pasteShortcut: false }
-	const springable = asDirectoryOrFile(item).type === "directory" && !item.data.undecryptable
-	const drop = useDriveDropTarget({
-		targetUuid: item.data.uuid,
-		targetAncestry,
-		routeChain: { parent: item.data.parent },
-		targetName: name,
-		// Internal drags: owned My Drive directories only.
-		disabled: item.type !== "directory" || !canDragVariant(variant),
-		// A drag resting on a directory opens it (springLoad.ts), and files from the system upload into it
-		// wherever the listing's own dropzone would upload (canWriteVariant, judged for this directory).
-		// Neither for an undecryptable one, which doesn't open either.
-		spring: springable
-			? {
-					timing: LISTING_SPRING,
-					open: () => {
-						onOpen(index)
-					}
-				}
-			: undefined,
-		acceptFiles: springable && canWriteVariant(variant, item.data.uuid)
+	const { name, open, dragSource, searchHit, destination, drop, shared, bulkMenu, cut, onContextMenu } = useDriveItemCell({
+		item,
+		index,
+		variant,
+		splat,
+		selected,
+		selectedItems,
+		searchParentPath,
+		destinationActions,
+		onOpen,
+		onCursorMove
 	})
-	// Only the two shared variants' ROOT listing resolve a counterparty; every other variant/nested
-	// item gets null (no badge) — see sharedIdentityLabel's own doc comment.
-	const shared = sharedIdentityLabel(item, variant)
-	const bulkMenu = selected && selectedItems.length > 1
-	// Cut for a later paste: dimmed, Explorer-style, until the paste or the next copy/cut. The ⋯ trigger
-	// keeps its own hover-only opacity.
-	const cut = useDriveClipboardStore(state => state.cutUuids.has(item.data.uuid))
 
 	return (
 		<ContextMenu>
@@ -125,7 +60,8 @@ export function DriveTile({
 						aria-posinset={index + 1}
 						aria-setsize={total}
 						tabIndex={active ? 0 : -1}
-						title={searchParentPath !== undefined && searchParentPath.length > 0 ? searchParentPath : undefined}
+						// The full, untruncated search path as a native hover tooltip.
+						title={searchHit ? searchParentPath : undefined}
 						// Fixed width (not full-bleed 1fr) + justify-self-center: the tile stays pinned to
 						// TILE_WIDTH regardless of how much extra space its grid column gets, so the face
 						// below stays the deterministic square useDriveVirtualizer's row-height estimate
@@ -140,17 +76,8 @@ export function DriveTile({
 						onClick={event => {
 							onPointerSelect(index, event)
 						}}
-						onDoubleClick={() => {
-							onOpen(index)
-						}}
-						onContextMenu={() => {
-							// Right-clicking outside the current selection retargets it (and the cursor +
-							// range anchor) to this tile — see DriveRow's identical handler.
-							if (!selected) {
-								useDriveStore.getState().setSelectedItems([item])
-								onCursorMove(index)
-							}
-						}}
+						onDoubleClick={open}
+						onContextMenu={onContextMenu}
 						{...drop.handlers}
 					>
 						{/* The tile's face: a square that fills the tile's width, thumbnail or icon alike —
@@ -217,9 +144,7 @@ export function DriveTile({
 									variant={variant}
 									onItemAction={onItemAction}
 									searchHit={searchHit}
-									onOpen={() => {
-										onOpen(index)
-									}}
+									onOpen={open}
 									destination={destination}
 								/>
 							</DropdownMenu>
@@ -231,7 +156,7 @@ export function DriveTile({
 						shared-identity badge below are mutually exclusive rather than stacked (search only ever
 						runs in the "drive" variant, where `shared` is never set, so this never actually collides
 						in practice). */}
-						{searchParentPath !== undefined && searchParentPath.length > 0 ? (
+						{searchHit ? (
 							<span className="w-full truncate text-[0.7rem] text-muted-foreground">{searchParentPath}</span>
 						) : shared ? (
 							<span className="w-full truncate text-[0.7rem] text-muted-foreground">
@@ -241,24 +166,17 @@ export function DriveTile({
 					</div>
 				}
 			/>
-			{bulkMenu ? (
-				<DriveBulkContextMenuContent
-					variant={variant}
-					selectedItems={selectedItems}
-					onBulkAction={onBulkAction}
-				/>
-			) : (
-				<DriveContextMenuContent
-					item={item}
-					variant={variant}
-					onItemAction={onItemAction}
-					searchHit={searchHit}
-					onOpen={() => {
-						onOpen(index)
-					}}
-					destination={destination}
-				/>
-			)}
+			<DriveCellContextMenuContent
+				bulkMenu={bulkMenu}
+				item={item}
+				variant={variant}
+				selectedItems={selectedItems}
+				onBulkAction={onBulkAction}
+				onItemAction={onItemAction}
+				searchHit={searchHit}
+				onOpen={open}
+				destination={destination}
+			/>
 		</ContextMenu>
 	)
 }

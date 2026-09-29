@@ -7,3 +7,10 @@ export const SCRIM_CLASS =
 	"fixed inset-0 isolate z-50 bg-black/30 duration-100 supports-backdrop-filter:backdrop-blur-sm data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0"
 
 export const CARD_SURFACE_CLASS = `overflow-hidden rounded-[min(var(--radius-4xl),24px)] bg-card text-sm text-card-foreground shadow-sm ${SURFACE_RING}`
+
+// Shared by Input and SelectTrigger.
+export const FIELD_CONTROL_CLASS =
+	"rounded-2xl border border-transparent bg-input/50 focus-ring transition-[color,box-shadow] duration-200 outline-none focus-visible:border-ring disabled:cursor-not-allowed disabled:opacity-50"
+
+export const INVALID_RING_CLASS =
+	"aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40"

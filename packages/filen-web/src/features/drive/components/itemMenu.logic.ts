@@ -1,5 +1,5 @@
 import { ACTION_DEFS } from "@/features/drive/lib/actionDefs"
-import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
+import { isDirectoryItem, isSharedRootDriveItem, type DriveItem } from "@/features/drive/lib/item"
 import { canMoveVariant, canWriteVariant, type DriveVariant } from "@/features/drive/lib/preferences"
 import { canShareVariant, isReadOnlySharedVariant } from "@/features/drive/lib/share/gating"
 import { buildPublicLinkUrl } from "@/features/drive/components/linkDialog.logic"
@@ -65,9 +65,8 @@ const COPY_LINK: ItemActionDescriptor = { id: "copyLink", ...ACTION_DEFS.copyLin
 // URL anyone can open): this grants a specific existing contact access. Variant-gated (see
 // canShareVariant / driveItemActions).
 const SHARE: ItemActionDescriptor = { id: "share", ...ACTION_DEFS.share, run: "dialog", dialogKind: "share" }
-// Stop sharing a shared-root item (removeSharedItem) — root-only: gated below to the
-// sharedRootDirectory/sharedRootFile arms alone, the only two whose shareSource is a SharedRootItem
-// (see item.ts's shareSource retention) — removeSharedItem's own wasm signature. Destructive-styled
+// Stop sharing a shared-root item (removeSharedItem) — root-only: gated below to
+// isSharedRootDriveItem, removeSharedItem's own wasm signature. Destructive-styled
 // (via ACTION_DEFS.unshare), mirroring mobile's own removeShare/stopSharing menu entries (both
 // destructive there too) — the other party loses access immediately.
 const UNSHARE: ItemActionDescriptor = { id: "unshare", ...ACTION_DEFS.unshare, run: "dialog", dialogKind: "unshare" }
@@ -92,7 +91,7 @@ const COPY: ItemActionDescriptor = { id: "copy", ...ACTION_DEFS.copy, run: "dial
 // player rather than a preview, which a trashed track never does. directoryListing.tsx's open handler
 // gates on this too, so the menu entry can never offer an inert open.
 export function canOpenItem(item: DriveItem, variant: DriveVariant): boolean {
-	if (asDirectoryOrFile(item).type === "directory") {
+	if (isDirectoryItem(item)) {
 		return resolveDriveNavigationTarget(item, variant, "") !== null
 	}
 
@@ -103,11 +102,11 @@ export function canOpenItem(item: DriveItem, variant: DriveVariant): boolean {
 // listing — the same gate a file dropped on the row uploads by. Offline doesn't count against it: the
 // menu shows those entries disabled then.
 export function canWriteIntoItem(item: DriveItem, variant: DriveVariant): boolean {
-	return asDirectoryOrFile(item).type === "directory" && !item.data.undecryptable && canWriteVariant(variant, item.data.uuid)
+	return isDirectoryItem(item) && !item.data.undecryptable && canWriteVariant(variant, item.data.uuid)
 }
 
 function openDescriptor(item: DriveItem): ItemActionDescriptor {
-	return asDirectoryOrFile(item).type === "directory"
+	return isDirectoryItem(item)
 		? { id: "open", ...ACTION_DEFS.openDirectory, run: "direct" }
 		: { id: "open", ...ACTION_DEFS.openFile, run: "direct" }
 }
@@ -158,7 +157,7 @@ function itemActionsFor(item: DriveItem, variant: DriveVariant, searchHit: boole
 	// sharedIn/sharedOut ROOT listings, the only place a sharedRoot* arm ever appears. Independent of
 	// the undecryptable reduction below — unshare needs no decrypted metadata (it acts on
 	// shareSource's own identity), the same pure-uuid-disposition rationale as TRASH.
-	const isSharedRoot = item.type === "sharedRootDirectory" || item.type === "sharedRootFile"
+	const isSharedRoot = isSharedRootDriveItem(item)
 
 	// Every owner-mutating push below (rename/move/favorite/color/versions/publicLink/copyLink/trash)
 	// is gated on ownerMutable, false ONLY for sharedIn — see isReadOnlySharedVariant's own doc comment
@@ -192,7 +191,7 @@ function itemActionsFor(item: DriveItem, variant: DriveVariant, searchHit: boole
 				...(canMoveVariant(variant) ? [MOVE] : []),
 				COPY,
 				favoriteDescriptor(item),
-				asDirectoryOrFile(item).type === "directory" ? COLOR : VERSIONS,
+				isDirectoryItem(item) ? COLOR : VERSIONS,
 				INFO
 			]
 		: [INFO]

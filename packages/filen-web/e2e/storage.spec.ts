@@ -1,7 +1,6 @@
-import { test, expect } from "./fixtures"
+import { test, expect, seedSession } from "./fixtures"
 import { waitForE2eHooks } from "./helpers/e2eHooks"
 import { BOOT_SETTLE_TIMEOUT_MS, bootTo } from "./helpers/listing"
-import { SESSION_SLOT } from "@/e2e-hooks/sessionSlot"
 
 test.describe("storage", () => {
 	test("kv values persist across a reload", async ({ page }) => {
@@ -48,12 +47,7 @@ test.describe("storage", () => {
 		// of opening its own OPFS handle.
 		const follower = await context.newPage()
 
-		await follower.addInitScript(
-			([slot, blob]) => {
-				sessionStorage.setItem(slot, blob)
-			},
-			[SESSION_SLOT, injectedSession] as const
-		)
+		await seedSession(follower, injectedSession)
 		// The blocking startup reminders arm per page load — the follower is its own load, so it gets
 		// its own boot barrier.
 		await bootTo(follower, "/")
@@ -77,12 +71,7 @@ test.describe("storage", () => {
 		// takes over the SAME lock — reopening the shared OPFS — once the leader dies.
 		const leader = await context.newPage()
 
-		await leader.addInitScript(
-			([slot, blob]) => {
-				sessionStorage.setItem(slot, blob)
-			},
-			[SESSION_SLOT, injectedSession] as const
-		)
+		await seedSession(leader, injectedSession)
 		await bootTo(leader, "/")
 		await waitForE2eHooks(leader)
 		await leader.evaluate(() => window.__filenE2E.kvSet("e2e.storage.failover", "before-handoff"))

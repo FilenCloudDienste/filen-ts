@@ -7,8 +7,7 @@ import { renameItem, trashItems, restoreItems, deleteItemsPermanently, disableLi
 import { unshareItems } from "@/features/drive/lib/share/actions"
 import { notifyIfNameIsHidden } from "@/features/drive/lib/hiddenNameNotice"
 import { type BulkOutcome } from "@/lib/actions/bulk"
-import { toastBulkOutcome } from "@/features/drive/lib/bulkToast"
-import { useDriveStore } from "@/features/drive/store/useDriveStore"
+import { finishBulkOutcome, pruneSelectionByRow, pruneSelectionByUuid } from "@/features/drive/lib/bulkToast"
 import { type ItemActionDialogKind } from "@/features/drive/components/itemMenu.logic"
 import { type BulkDialogActionKind } from "@/features/drive/components/bulkActionBar.logic"
 import { MoveTargetDialog } from "@/features/drive/components/moveTargetDialog"
@@ -32,16 +31,6 @@ interface ActiveDialog {
 	// Only meaningful for kind:"preview" — the opened slot's position within `items`. Every other kind
 	// leaves this unset.
 	index?: number
-}
-
-// Trash, delete, restore and disable-link take the whole item out of the listing, so every receiver row
-// of it goes; unshare removes only its own receiver's row, so the item's other rows stay selected.
-function pruneSelectionByUuid(succeeded: DriveItem[]): void {
-	useDriveStore.getState().removeFromSelection(succeeded.map(item => item.data.uuid))
-}
-
-function pruneSelectionByRow(succeeded: DriveItem[]): void {
-	useDriveStore.getState().removeRowsFromSelection(succeeded)
 }
 
 export interface DriveDialogHost {
@@ -107,8 +96,7 @@ export function useDriveDialogHost({ variant, selectedItems, hiddenNoticeApplies
 	): Promise<void> {
 		const outcome = await runDialogPending(() => op(items))
 		closeActiveDialog()
-		toastBulkOutcome(outcome)
-		prune(outcome.succeeded)
+		finishBulkOutcome(outcome, prune)
 	}
 
 	async function handleTrashConfirm(items: DriveItem[]): Promise<void> {
@@ -240,7 +228,7 @@ export function useDriveDialogHost({ variant, selectedItems, hiddenNoticeApplies
 						pending={dialogPending}
 						title={t("driveEmptyTrashConfirmTitle")}
 						body={t("driveEmptyTrashConfirmBody", { phrase })}
-						matchLabel={t("driveEmptyTrashTypedConfirmLabel")}
+						matchLabel={t("common:confirmationPhrase")}
 						matchValue={phrase}
 						confirmLabel={t("driveActionEmptyTrash")}
 						cancelLabel={t("common:cancel")}

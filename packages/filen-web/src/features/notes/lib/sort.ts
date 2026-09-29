@@ -13,22 +13,20 @@ function noteBucket(note: Note): number {
 	return (note.pinned ? 0 : 3) + (note.trash ? 2 : note.archive ? 1 : 0)
 }
 
-function compareNotes(a: Note, b: Note): number {
-	const bucketDiff = noteBucket(a) - noteBucket(b)
-
-	if (bucketDiff !== 0) {
-		return bucketDiff
-	}
-
+// Newest-first by editedTimestamp. Deterministic uuid tiebreak for equal timestamps (including two
+// never-edited-since-create notes) — input order is not stable across refetches, so falling through to
+// it would reshuffle on every refresh. Plain uuid string compare: note lists are small, no case for
+// numeric-uuid extraction the way drive's sort.ts pays for its much larger listings.
+export function compareEditedDescThenUuid(a: Note, b: Note): number {
 	if (a.editedTimestamp !== b.editedTimestamp) {
 		return a.editedTimestamp > b.editedTimestamp ? -1 : 1
 	}
 
-	// Deterministic tiebreak for equal timestamps (including two never-edited-since-create notes) —
-	// input order is not stable across refetches, so falling through to it would reshuffle on every
-	// refresh. Plain uuid string compare: note lists are small, no case for numeric-uuid extraction
-	// the way drive's sort.ts pays for its much larger listings.
 	return a.uuid < b.uuid ? -1 : a.uuid > b.uuid ? 1 : 0
+}
+
+function compareNotes(a: Note, b: Note): number {
+	return noteBucket(a) - noteBucket(b) || compareEditedDescThenUuid(a, b)
 }
 
 // Bucket → editedTimestamp desc, mirroring mobile's notesSorter.sort. Returns a NEW array, never

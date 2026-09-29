@@ -8,7 +8,7 @@ import { useNotesInflightStore, endEditingSession, type InflightEntry } from "@/
 import { useNotesRemoteEditStore } from "@/features/notes/store/useNoteRemoteEdit"
 import { sync } from "@/features/notes/lib/sync"
 import { newestEntry, notePreviewFor } from "@/features/notes/lib/sync.logic"
-import { notesQueryUpdate, notesQueryRemove, notesQueryGet, notesQueryRefetch, notesQueryUpsert } from "@/features/notes/queries/notes"
+import { notesQueryUpdate, notesQueryRemove, notesQueryFind, notesQueryRefetch, notesQueryUpsert } from "@/features/notes/queries/notes"
 import { markNoteContentUnsynced, noteContentQueryKey, readNoteContent } from "@/features/notes/queries/noteContent"
 import { isOwnNotePush, recordNotePush } from "@/features/notes/lib/pushEchoes"
 import {
@@ -153,7 +153,7 @@ function handleContentEdited(inner: Extract<NoteSocketEvent["inner"], { type: "c
 
 	if (userId === undefined || BigInt(inner.editorId) === userId) {
 		if (content === undefined) {
-			refetchRowForEcho(inner, cachedRow(inner.note))
+			refetchRowForEcho(inner, notesQueryFind(inner.note))
 
 			return
 		}
@@ -163,7 +163,7 @@ function handleContentEdited(inner: Extract<NoteSocketEvent["inner"], { type: "c
 		if (isOwnNotePush(inner.note, hash)) {
 			followOwnPush(inner.note, content, hash)
 
-			const cached = cachedRow(inner.note)
+			const cached = notesQueryFind(inner.note)
 
 			patchRowFromOwnEcho(inner, content, cached)
 			refetchRowForEcho(inner, cached)
@@ -172,7 +172,7 @@ function handleContentEdited(inner: Extract<NoteSocketEvent["inner"], { type: "c
 		}
 	}
 
-	const note = notesQueryGet()?.find(n => n.uuid === inner.note)
+	const note = notesQueryFind(inner.note)
 
 	if (note === undefined) {
 		log.warn("socket", "note contentEdited: note not in cache", inner.note)
@@ -221,10 +221,6 @@ function handleContentEdited(inner: Extract<NoteSocketEvent["inner"], { type: "c
 	// reseed from their content, saying so when that editor is on screen.
 	patchRowFromContentEdited(inner, content)
 	takeRemoteContent(inner.note, content, useNotesRemoteEditStore.getState().openNote === inner.note)
-}
-
-function cachedRow(uuid: string): Note | undefined {
-	return notesQueryGet()?.find(n => n.uuid === uuid)
 }
 
 // An echo never patches the row's type: it may be older than this tab's own later change. A stale type

@@ -1,9 +1,8 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { createElement, type ReactNode } from "react"
 import { act, renderHook, waitFor } from "@testing-library/react"
-import { QueryClient, QueryClientProvider, focusManager, onlineManager } from "@tanstack/react-query"
+import { focusManager, onlineManager } from "@tanstack/react-query"
 import type { Dir, File, NormalDirsAndFiles, UuidStr } from "@filen/sdk-rs"
 import { narrowItem } from "@/features/drive/lib/item"
 
@@ -13,17 +12,12 @@ const { listDirectory } = vi.hoisted(() => ({
 
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: { listDirectory } }))
 
-// The production defaults minus the persister (sqlite, unavailable under vitest). The same instance
-// backs the provider below AND driveListingQueryUpdate, so a patch lands where the hooks read.
-vi.mock("@/queries/client", () => ({
-	queryClient: new QueryClient({
-		defaultOptions: {
-			queries: { staleTime: 0, gcTime: Infinity, retry: false, refetchOnWindowFocus: true, refetchOnReconnect: true }
-		}
-	})
-}))
+// The same instance backs the provider below AND driveListingQueryUpdate, so a patch lands where the
+// hooks read.
+vi.mock("@/queries/client", async () => ({ queryClient: (await import("@/tests/testQueryClient")).createTestQueryClient() }))
 
 import { queryClient } from "@/queries/client"
+import { queryClientWrapper } from "@/tests/testQueryClient"
 import {
 	driveListingQueryKey,
 	driveListingQueryUpdate,
@@ -68,9 +62,7 @@ function mockFile(label: string): File {
 
 const LISTING: NormalDirsAndFiles = { dirs: [mockDir("zeta", "Zeta"), mockDir("alpha", "Alpha")], files: [mockFile("file")] }
 
-function wrapper({ children }: { children: ReactNode }) {
-	return createElement(QueryClientProvider, { client: queryClient, children })
-}
+const wrapper = queryClientWrapper(queryClient)
 
 function renderTreeAndListing(uuid: string | null) {
 	return renderHook(

@@ -1,7 +1,8 @@
 import type { ChatMessage } from "@filen/sdk-rs"
-import { isBlocked, EMPTY_BLOCKED_USERS, type BlockedUsers } from "@filen/shared"
+import { EMPTY_BLOCKED_USERS, type BlockedUsers } from "@filen/shared"
 import { messageSenderName } from "@/features/chats/lib/sort"
 import { dayNumber } from "@/features/chats/lib/time"
+import { isOwnMessage, isSenderBlocked } from "@/features/chats/lib/sender"
 
 // Thread row model + scroll math — PURE, no React, unit-tested.
 //
@@ -24,17 +25,16 @@ export type ThreadRow =
 	| { kind: "message"; key: string; message: ChatMessage; showHeader: boolean }
 
 // The "New" divider's placement: old-web's NewDivider guard (first message where `sentTimestamp >
-// lastFocus && senderId !== self`, never re-inserted for a later qualifying message). senderId is
-// `number` on the wasm surface — coerced with BigInt before comparing, same rule as unread.logic.ts.
+// lastFocus && senderId !== self`, never re-inserted for a later qualifying message).
 // A blocked sender's message never qualifies: a red "New" marker for content the reader chose not to see
 // would be its own leak. Not isMessageUnread — there is no Chat in hand here, and the divider deliberately
 // ignores chat.muted (a muted conversation still shows where you left off).
 function isFirstUnread(message: ChatMessage, lastFocus: bigint, currentUserId: bigint, blocked: BlockedUsers): boolean {
-	if (message.sentTimestamp <= lastFocus || BigInt(message.senderId) === currentUserId) {
+	if (message.sentTimestamp <= lastFocus || isOwnMessage(message, currentUserId)) {
 		return false
 	}
 
-	return !isBlocked({ userId: BigInt(message.senderId), email: message.senderEmail }, blocked)
+	return !isSenderBlocked(message, blocked)
 }
 
 // True when `current` continues `previous`'s burst: same sender AND within the 2-minute window AND the
@@ -224,9 +224,7 @@ export function announcementSubject(
 	let name: string | null = null
 
 	for (const message of messages.slice(Math.max(0, messages.length - newTailCount))) {
-		const messageSenderId = BigInt(message.senderId)
-
-		if (messageSenderId === currentUserId || isBlocked({ userId: messageSenderId, email: message.senderEmail }, blocked)) {
+		if (isOwnMessage(message, currentUserId) || isSenderBlocked(message, blocked)) {
 			continue
 		}
 

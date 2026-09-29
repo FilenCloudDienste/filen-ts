@@ -156,10 +156,11 @@ const api = {
 	},
 	kvKeys: (prefix: string): string[] => {
 		const out: string[] = []
+		const { where, bind } = prefixRange(prefix)
 
 		requireDb().exec({
-			sql: "SELECT key FROM kv WHERE key LIKE ? || '%'",
-			bind: [prefix],
+			sql: `SELECT key FROM kv WHERE ${where}`,
+			bind,
 			callback: row => {
 				const value = row[0]
 

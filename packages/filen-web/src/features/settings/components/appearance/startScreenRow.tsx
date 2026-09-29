@@ -2,8 +2,7 @@ import { useTranslation } from "react-i18next"
 import { useStartScreenQuery } from "@/features/shell/queries/startScreen"
 import { DEFAULT_START_SCREEN, setStartScreen, START_SCREENS, type StartScreen } from "@/features/shell/lib/startScreen"
 import type { SettingsKey } from "@/lib/i18n"
-import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { SettingsRow } from "@/features/settings/components/settingsLayout"
+import { SettingsSelectRow } from "@/features/settings/components/settingRows"
 
 const START_SCREEN_LABEL_KEYS: Record<StartScreen, SettingsKey> = {
 	drive: "settingsStartScreenDrive",
@@ -25,41 +24,15 @@ function StartScreenRow() {
 	}
 
 	return (
-		<SettingsRow
+		<SettingsSelectRow
 			label={t("settingsStartScreenTitle")}
 			description={t("settingsStartScreenDescription")}
-			htmlFor="start-screen-select"
-		>
-			<Select
-				items={START_SCREENS.map(screen => ({ value: screen, label: t(START_SCREEN_LABEL_KEYS[screen]) }))}
-				value={query.data ?? DEFAULT_START_SCREEN}
-				disabled={query.data === undefined}
-				onValueChange={value => {
-					if (value !== null) {
-						void apply(value)
-					}
-				}}
-			>
-				<SelectTrigger
-					id="start-screen-select"
-					className="min-w-36"
-				>
-					<SelectValue />
-				</SelectTrigger>
-				<SelectContent>
-					<SelectGroup>
-						{START_SCREENS.map(screen => (
-							<SelectItem
-								key={screen}
-								value={screen}
-							>
-								{t(START_SCREEN_LABEL_KEYS[screen])}
-							</SelectItem>
-						))}
-					</SelectGroup>
-				</SelectContent>
-			</Select>
-		</SettingsRow>
+			id="start-screen-select"
+			options={START_SCREENS.map(screen => ({ value: screen, label: t(START_SCREEN_LABEL_KEYS[screen]) }))}
+			value={query.data ?? DEFAULT_START_SCREEN}
+			disabled={query.data === undefined}
+			onChange={value => void apply(value)}
+		/>
 	)
 }
 

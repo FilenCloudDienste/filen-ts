@@ -1,6 +1,7 @@
 import { type } from "arktype"
 import { kvDelete, kvGetJson, kvSetJson } from "@/lib/storage/adapter"
-import { restoreSizes, shiftSizes, withSizes, type AxisShift, type SizeAxis, type SizeEntry } from "@/features/spreadsheet/lib/sizes.logic"
+import type { AxisEdit } from "@/features/spreadsheet/lib/edits"
+import { restoreSizes, shiftSizes, withSizes, type SizeAxis, type SizeEntry } from "@/features/spreadsheet/lib/sizes.logic"
 
 // Column widths and row heights kept beside a file rather than in it: every view but an editable
 // workbook (a CSV cannot hold sizes, and a read-only file is never written). Keyed by the file's stable
@@ -137,7 +138,7 @@ const STASH_LIMIT = 50
 export function followShift(
 	layer: SizeLayer,
 	sheet: number,
-	shift: AxisShift & { revert: boolean },
+	shift: AxisEdit & { revert: boolean },
 	stash: readonly StashedSizes[]
 ): { layer: SizeLayer; stash: StashedSizes[] } {
 	const sizes = layer.get(sheet)
@@ -149,7 +150,7 @@ export function followShift(
 
 	const id = `${String(sheet)}:${shift.axis}:${String(shift.at)}:${String(shift.count)}`
 	// Undoing an insert deletes the run again; undoing a delete inserts it back.
-	const kind = shift.revert ? (shift.kind === "insert" ? "delete" : "insert") : shift.kind
+	const kind = shift.revert ? (shift.type === "insert" ? "delete" : "insert") : shift.type
 	const moved = shiftSizes(axisSizes, kind, shift.at, shift.count)
 	let next = moved.sizes
 	let nextStash = [...stash]

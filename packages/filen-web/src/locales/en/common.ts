@@ -30,6 +30,8 @@ export const common = {
 	selectedCount_one: "{{count}} selected",
 	/** Floating selection bar — selected row count; plural */
 	selectedCount_other: "{{count}} selected",
+	/** Typed-confirm dialog (TypedConfirmDialog) — label on the input the user types the confirmation phrase into */
+	confirmationPhrase: "Confirmation phrase",
 	/** Shared in-progress announcement: the spinner primitive's default screen-reader label */
 	loading: "Loading",
 	/** Toast primitive — screen-reader label on the dismiss button every toast carries */
@@ -82,20 +84,25 @@ export const common = {
 	signOut: "Sign out",
 	/** Icon rail — tooltip + accessible label on the storage-usage meter */
 	storage: "Storage",
-	/** Drive sidebar — storage meter caption; {{used}} and {{total}} are pre-formatted byte sizes (e.g. "1.2 GB of 100 GB used") */
+	/** Drive sidebar storage meter caption, settings profile header, storage breakdown and current-plan rows; {{used}} and {{total}} are pre-formatted byte sizes (e.g. "1.2 GB of 100 GB used") */
 	storageUsage: "{{used}} of {{total}} used",
 	/** Icon rail — help entry tooltip/accessible label (its destination ships later) */
 	help: "Help",
 	/** Drive sidebar — heading of the bottom usage block (above the storage meter) */
 	usage: "Usage",
-	// Drive sidebar — sharing and public-link destinations; kept here (not in the "drive" namespace,
-	// which holds the rest of the listing surface) until their own listing surface ships.
-	/** Drive sidebar — item for content other users shared with the user */
+	// Sharing and public-link destinations: drive sidebar items, their routes' titles and the drive
+	// breadcrumb's root label
+	/** Drive sidebar item and breadcrumb root — content other users shared with the user */
 	driveSharedIn: "Shared with me",
-	/** Drive sidebar — item for content the user shared with others */
+	/** Drive sidebar item and breadcrumb root — content the user shared with others */
 	driveSharedOut: "Shared with others",
-	/** Drive sidebar — item for the user's public links */
+	/** Drive sidebar item and breadcrumb root — the user's items that carry a public link */
 	driveLinks: "Links",
+	// Legal links: the auth screens' footer and settings → Advanced → About
+	/** Link to the Terms of Service */
+	legalTerms: "Terms of Service",
+	/** Link to the Privacy Policy */
+	legalPrivacy: "Privacy Policy",
 	// Global offline indicator — a fixed, non-blocking pill mounted once at the app root so it covers
 	// every route (authed shell and the unauthenticated sign-in/register/reset pages alike)
 	/** Offline indicator — shown while the browser has no connection */

@@ -46,12 +46,21 @@ vi.mock("@/features/drive/lib/saveDownload", async importOriginal => {
 	return { ...actual, isFsaAvailable: isFsaAvailableMock }
 })
 
+const { startDownloadsMock } = vi.hoisted(() => ({ startDownloadsMock: vi.fn() }))
+
+vi.mock("@/features/drive/lib/download", async importOriginal => {
+	const actual = await importOriginal<typeof import("@/features/drive/lib/download")>()
+	return { ...actual, startDownloads: startDownloadsMock }
+})
+
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import {
 	driveBulkActions,
 	isBulkActionOfflineDisabled,
 	isBulkDownloadEnabled,
-	runBulkFavorite
+	runBulkDescriptor,
+	runBulkFavorite,
+	type BulkActionDescriptor
 } from "@/features/drive/components/bulkActionBar.logic"
 
 beforeEach(() => {
@@ -508,5 +517,49 @@ describe("runBulkFavorite", () => {
 
 		expect(toastError).toHaveBeenCalledTimes(1)
 		expect(toastSuccess).not.toHaveBeenCalled()
+	})
+})
+
+// The shared dispatch behind BOTH the floating bar and the selection-aware context menu.
+describe("runBulkDescriptor", () => {
+	function descriptorFor(id: BulkActionDescriptor["id"]): BulkActionDescriptor {
+		const descriptor = driveBulkActions("drive", flags()).find(d => d.id === id)
+
+		if (!descriptor) {
+			throw new Error(`no ${id} descriptor`)
+		}
+
+		return descriptor
+	}
+
+	it("starts the download synchronously, without dispatching a dialog", () => {
+		const items = [fileItem({ uuid: testUuid("dl") })]
+		const onDialogAction = vi.fn()
+
+		runBulkDescriptor(descriptorFor("download"), items, onDialogAction)
+
+		expect(startDownloadsMock).toHaveBeenCalledExactlyOnceWith(items)
+		expect(onDialogAction).not.toHaveBeenCalled()
+		expect(setFavoritedItemsMock).not.toHaveBeenCalled()
+	})
+
+	it("runs favorite directly", () => {
+		const items = [fileItem({ uuid: testUuid("fav"), favorited: false })]
+		const onDialogAction = vi.fn()
+		setFavoritedItemsMock.mockResolvedValueOnce({ succeeded: [], failed: [] })
+
+		runBulkDescriptor(descriptorFor("favorite"), items, onDialogAction)
+
+		expect(setFavoritedItemsMock).toHaveBeenCalledExactlyOnceWith(items, true)
+		expect(onDialogAction).not.toHaveBeenCalled()
+	})
+
+	it("hands every dialog descriptor to the dialog callback", () => {
+		const onDialogAction = vi.fn()
+
+		runBulkDescriptor(descriptorFor("trash"), [fileItem({ uuid: testUuid("tr") })], onDialogAction)
+
+		expect(onDialogAction).toHaveBeenCalledExactlyOnceWith("trash")
+		expect(startDownloadsMock).not.toHaveBeenCalled()
 	})
 })

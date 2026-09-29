@@ -17,10 +17,8 @@ export function PublicLinkLoading() {
 	return <LoadingState size="lg" />
 }
 
-// "This link is unavailable" — the single terminal surface for a bad uuid, a bad/short key, a
-// not-found, or any resolution failure that isn't a password prompt (old-web parity: it deliberately
-// does not distinguish "doesn't exist" from "expired").
-export function PublicLinkInvalid() {
+// The "link is unavailable" card; each terminal state supplies only its trailing action.
+function UnavailableSurface({ action }: { action: ReactNode }) {
 	const { t } = useTranslation("publicLinks")
 
 	return (
@@ -33,14 +31,29 @@ export function PublicLinkInvalid() {
 					<h1 className="text-lg font-semibold">{t("unavailableTitle")}</h1>
 					<p className="text-sm text-muted-foreground">{t("unavailableBody")}</p>
 				</div>
+				{action}
+			</div>
+		</CenteredSurface>
+	)
+}
+
+// "This link is unavailable" — the single terminal surface for a bad uuid, a bad/short key, a
+// not-found, or any resolution failure that isn't a password prompt (old-web parity: it deliberately
+// does not distinguish "doesn't exist" from "expired").
+export function PublicLinkInvalid() {
+	const { t } = useTranslation("publicLinks")
+
+	return (
+		<UnavailableSurface
+			action={
 				<Link
 					to="/"
 					className="text-sm text-foreground underline underline-offset-4"
 				>
 					{t("back")}
 				</Link>
-			</div>
-		</CenteredSurface>
+			}
+		/>
 	)
 }
 
@@ -50,15 +63,8 @@ export function PublicLinkError({ onRetry }: { onRetry: () => void }) {
 	const { t } = useTranslation("publicLinks")
 
 	return (
-		<CenteredSurface>
-			<div className="flex max-w-sm flex-col items-center gap-3 text-center">
-				<div className="flex size-12 items-center justify-center rounded-2xl bg-muted text-muted-foreground">
-					<FileWarningIcon className="size-6" />
-				</div>
-				<div className="flex flex-col gap-1">
-					<h1 className="text-lg font-semibold">{t("unavailableTitle")}</h1>
-					<p className="text-sm text-muted-foreground">{t("unavailableBody")}</p>
-				</div>
+		<UnavailableSurface
+			action={
 				<Button
 					variant="outline"
 					size="sm"
@@ -67,7 +73,7 @@ export function PublicLinkError({ onRetry }: { onRetry: () => void }) {
 					<RotateCwIcon data-icon="inline-start" />
 					{t("retry")}
 				</Button>
-			</div>
-		</CenteredSurface>
+			}
+		/>
 	)
 }

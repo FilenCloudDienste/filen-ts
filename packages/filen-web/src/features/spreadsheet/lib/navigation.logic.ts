@@ -108,13 +108,20 @@ export function sheetCols(sheet: NavigableSheet): Axis {
 	)
 }
 
+// The sheet's last used row and column: where header clicks, select-all and mod+arrow stop.
+export function lastUsed(sheet: NavigableSheet): { row: number; col: number } {
+	return { row: Math.max(0, sheet.rowCount - 1), col: Math.max(0, sheet.colCount - 1) }
+}
+
 // The bounds a sheet's grid moves within, bar the page size, which depends on the viewport.
 export function sheetBounds(sheet: NavigableSheet, rows: Axis, cols: Axis): Omit<GridBounds, "pageRows"> {
+	const last = lastUsed(sheet)
+
 	return {
 		rowCount: rows.count,
 		colCount: cols.count,
-		lastUsedRow: Math.max(0, sheet.rowCount - 1),
-		lastUsedCol: Math.max(0, sheet.colCount - 1),
+		lastUsedRow: last.row,
+		lastUsedCol: last.col,
 		hiddenRow: row => rows.size(row) === 0,
 		hiddenCol: col => cols.size(col) === 0,
 		mergeAt: (row, col) => mergeAt(sheet.merges, row, col)

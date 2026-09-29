@@ -3,7 +3,6 @@
 import { describe, expect, it, vi } from "vitest"
 import { createElement, type ReactNode } from "react"
 import { act, render, renderHook, screen, waitFor } from "@testing-library/react"
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import type { Dir, DirSizeResponse, File, UuidStr } from "@filen/sdk-rs"
 import { formatBytes } from "@filen/shared"
 import "@/lib/i18n"
@@ -15,14 +14,7 @@ const { getItemInfo, getDirSize } = vi.hoisted(() => ({
 
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: { getItemInfo, getDirSize } }))
 
-// The production defaults minus the persister (sqlite, unavailable under vitest).
-vi.mock("@/queries/client", () => ({
-	queryClient: new QueryClient({
-		defaultOptions: {
-			queries: { staleTime: 0, gcTime: Infinity, retry: false, refetchOnWindowFocus: true, refetchOnReconnect: true }
-		}
-	})
-}))
+vi.mock("@/queries/client", async () => ({ queryClient: (await import("@/tests/testQueryClient")).createTestQueryClient() }))
 
 vi.mock("@/lib/log", () => ({ log: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() } }))
 
@@ -34,6 +26,7 @@ vi.mock("@tanstack/react-router", () => ({
 }))
 
 import { queryClient } from "@/queries/client"
+import { queryClientWrapper } from "@/tests/testQueryClient"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { DIRECTORY_SIZE_STALE_TIME, directorySizeQueryKey } from "@/features/drive/queries/drive"
 import { useDriveDirectorySizes } from "@/features/drive/hooks/useDriveDirectorySizes"
@@ -86,9 +79,7 @@ function nextDir(): DriveItem {
 	return narrowItem(mockDir(`dir${String(dirCounter)}`))
 }
 
-function wrapper({ children }: { children: ReactNode }) {
-	return createElement(QueryClientProvider, { client: queryClient, children })
-}
+const wrapper = queryClientWrapper(queryClient)
 
 async function drain(): Promise<void> {
 	await act(async () => {

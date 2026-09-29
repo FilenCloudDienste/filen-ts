@@ -1,9 +1,7 @@
 // @vitest-environment jsdom
 
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { createElement, type ReactNode } from "react"
 import { act, renderHook, waitFor } from "@testing-library/react"
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import type { CopyCounts, CopyReport, Dir, File, NormalDirsAndFiles, SocketEvent, UserInfo, UuidStr } from "@filen/sdk-rs"
 import type { CopyJobEvent } from "@/workers/sdk.worker"
 
@@ -24,20 +22,14 @@ const { listDirectory, copyItems, getUserInfo } = vi.hoisted(() => ({
 
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: { listDirectory, copyItems, getUserInfo, releaseCopy: vi.fn() } }))
 
-// The production defaults minus the persister (sqlite, unavailable under vitest).
-vi.mock("@/queries/client", () => ({
-	queryClient: new QueryClient({
-		defaultOptions: {
-			queries: { staleTime: 0, gcTime: Infinity, retry: false, refetchOnWindowFocus: true, refetchOnReconnect: true }
-		}
-	})
-}))
+vi.mock("@/queries/client", async () => ({ queryClient: (await import("@/tests/testQueryClient")).createTestQueryClient() }))
 
 vi.mock("@/lib/log", () => ({ log: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() } }))
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), custom: vi.fn(), dismiss: vi.fn() } }))
 
 import { queryClient } from "@/queries/client"
+import { queryClientWrapper } from "@/tests/testQueryClient"
 import { ACCOUNT_QUERY_KEY } from "@/queries/account"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { discardListingPatches, driveListingQueryKey, flushListingCreates, useDirectoryListingQuery } from "@/features/drive/queries/drive"
@@ -100,9 +92,7 @@ function driveEvent(inner: Extract<SocketEvent, { type: "drive" }>["inner"]): Ex
 	return { type: "drive", inner, driveMessageId: 0n }
 }
 
-function wrapper({ children }: { children: ReactNode }) {
-	return createElement(QueryClientProvider, { client: queryClient, children })
-}
+const wrapper = queryClientWrapper(queryClient)
 
 async function drain(): Promise<void> {
 	await act(async () => {

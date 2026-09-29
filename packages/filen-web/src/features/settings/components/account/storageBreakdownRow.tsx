@@ -29,7 +29,7 @@ function LegendItem({ swatchClassName, label, bytes }: LegendItemProps) {
 // from old-web's settings/general bar (storageBreakdown.ts). No Progress primitive here — that
 // component only renders ONE indicator; this is a plain proportional-width flex row instead.
 function StorageBreakdownRow({ accountQuery }: StorageBreakdownRowProps) {
-	const { t } = useTranslation("settings")
+	const { t } = useTranslation(["settings", "common"])
 	const { storageUsed, maxStorage, versionedStorage } = accountQuery.data
 	const breakdown = deriveStorageBreakdown(storageUsed, maxStorage, versionedStorage)
 	const filesPercent = storagePercent(breakdown.filesBytes, breakdown.maxBytes)
@@ -41,7 +41,7 @@ function StorageBreakdownRow({ accountQuery }: StorageBreakdownRowProps) {
 
 	return (
 		<SettingsRow
-			label={t("settingsStorageUsage", {
+			label={t("common:storageUsage", {
 				used: formatBytes(Number(breakdown.usedBytes)),
 				total: formatBytes(Number(breakdown.maxBytes))
 			})}

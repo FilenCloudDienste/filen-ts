@@ -6,7 +6,7 @@ import type { Note, NoteParticipant } from "@filen/sdk-rs"
 import { isNoteOwner } from "@/features/notes/lib/sort"
 import { addNoteParticipants, removeNoteParticipant, setNoteParticipantPermission } from "@/features/notes/lib/participants"
 import { participantRows } from "@/features/notes/components/participantsDialog.logic"
-import { useNotes } from "@/features/notes/queries/notes"
+import { useLiveNote } from "@/features/notes/queries/notes"
 import { useAccountQuery } from "@/queries/account"
 import { useContactsQuery } from "@/features/contacts/queries/contacts"
 import { toggleParticipantBlocked } from "@/features/contacts/lib/actions"
@@ -39,12 +39,8 @@ export interface ParticipantsDialogProps {
 export function ParticipantsDialog({ note: initialNote, onClose }: ParticipantsDialogProps) {
 	const { t } = useTranslation(["notes", "common"])
 	const isOnline = useIsOnline()
-	const notesQuery = useNotes()
 	const accountQuery = useAccountQuery()
-	// Re-resolved from the live list cache every render so an in-dialog add/remove/permission change —
-	// or a realtime participant* socket event landing while this is open — repaints immediately, never
-	// the note snapshot the menu happened to be holding at open time.
-	const note = notesQuery.data?.find(n => n.uuid === initialNote.uuid) ?? initialNote
+	const note = useLiveNote(initialNote)
 	const currentUserId = accountQuery.data?.id
 	const owner = isNoteOwner(note, currentUserId)
 

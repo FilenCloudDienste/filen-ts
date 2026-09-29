@@ -6,8 +6,8 @@ import { type ActionDescriptor } from "@/lib/actionDescriptor"
 import { type DriveKey } from "@/lib/i18n"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { setFavoritedItems } from "@/features/drive/lib/actions"
-import { toastBulkOutcome } from "@/features/drive/lib/bulkToast"
-import { useDriveStore } from "@/features/drive/store/useDriveStore"
+import { startDownloads } from "@/features/drive/lib/download"
+import { finishBulkOutcome } from "@/features/drive/lib/bulkToast"
 
 // Dialog kinds the bulk-action bar can ask the listing's dialog host to open — a narrow subset of
 // directoryListing.tsx's own ActiveDialogKind (the per-item-only kinds — rename/color/versions/info/
@@ -140,10 +140,29 @@ export function isBulkActionOfflineDisabled(id: BulkActionDescriptor["id"], isOn
 }
 
 // The bulk favorite SET, extracted so the floating bar AND the selection-aware context menu
-// (components/bulkMenu.tsx) can never drift on what "Favorite" does to a whole selection. A succeeded
-// item is pruned from the selection, a failed one stays selected so the user can retry.
+// (components/bulkMenu.tsx) can never drift on what "Favorite" does to a whole selection.
 export async function runBulkFavorite(items: DriveItem[]): Promise<void> {
 	const outcome = await setFavoritedItems(items, !aggregateDriveSelectionFlags(items).includesFavorited)
-	toastBulkOutcome(outcome)
-	useDriveStore.getState().removeFromSelection(outcome.succeeded.map(item => item.data.uuid))
+	finishBulkOutcome(outcome)
+}
+
+// Shared dispatch for the floating bar and the selection-aware context menu. Download is checked FIRST
+// and stays synchronous: startDownloads' FSA save picker needs the click's live user gesture (see
+// features/drive/lib/download.ts), so nothing may yield to the event loop ahead of it.
+export function runBulkDescriptor(
+	descriptor: BulkActionDescriptor,
+	items: DriveItem[],
+	onDialogAction: (kind: BulkDialogActionKind) => void
+): void {
+	if (descriptor.id === "download") {
+		void startDownloads(items)
+		return
+	}
+
+	if (descriptor.run === "direct") {
+		void runBulkFavorite(items)
+		return
+	}
+
+	onDialogAction(descriptor.dialogKind)
 }

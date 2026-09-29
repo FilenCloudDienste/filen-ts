@@ -15,28 +15,11 @@ import { photos } from "@/locales/en/photos"
 // The app's namespace list and English catalogs, side-effect free. Deliberately NOT `@/lib/i18n`:
 // that module runs `i18n.init(…)` at import time, which the translation pipeline (scripts/
 // translate-i18n.ts) must not trigger — so both it and the runtime read the list from here instead
-// of each restating it. Adding a namespace is one edit in this file.
-export const EN_NAMESPACES = [
-	"common",
-	"errors",
-	"auth",
-	"drive",
-	"contacts",
-	"transfers",
-	"preview",
-	"notes",
-	"chats",
-	"settings",
-	"publicLinks",
-	"audio",
-	"photos"
-] as const
-
-export type EnNamespace = (typeof EN_NAMESPACES)[number]
-
+// of each restating it. Adding a namespace is one import plus one entry below.
+//
 // `satisfies`, never a widening annotation: the literal key types survive (i18next.d.ts's
-// CustomTypeOptions and every *Key union derive from them) while a namespace listed above with no
-// catalog here — or a catalog with no namespace — is a compile error.
+// CustomTypeOptions and every *Key union derive from them) while a catalog that is not a flat string
+// record is a compile error.
 export const EN_CATALOGS = {
 	common,
 	errors,
@@ -51,4 +34,8 @@ export const EN_CATALOGS = {
 	publicLinks,
 	audio,
 	photos
-} satisfies Record<EnNamespace, Record<string, string>>
+} satisfies Record<string, Record<string, string>>
+
+export type EnNamespace = keyof typeof EN_CATALOGS
+
+export const EN_NAMESPACES = Object.keys(EN_CATALOGS) as EnNamespace[]

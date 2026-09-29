@@ -17,13 +17,13 @@ interface CurrentPlanRowProps {
 // disagree on it. "Manage on filen.io" is the only mutation surface this row allows — external link,
 // never a client-side billing-management call (sdk-rs exposes no such endpoint).
 function CurrentPlanRow({ accountQuery }: CurrentPlanRowProps) {
-	const { t } = useTranslation("settings")
+	const { t } = useTranslation(["settings", "common"])
 	const { isPremium, storageUsed, maxStorage } = accountQuery.data
 
 	return (
 		<SettingsRow
 			label={t("settingsBillingCurrentPlanTitle")}
-			description={t("settingsStorageUsage", { used: formatBytes(Number(storageUsed)), total: formatBytes(Number(maxStorage)) })}
+			description={t("common:storageUsage", { used: formatBytes(Number(storageUsed)), total: formatBytes(Number(maxStorage)) })}
 		>
 			<Badge variant={isPremium ? "default" : "secondary"}>{t(tierLabelKey(isPremium))}</Badge>
 			<a

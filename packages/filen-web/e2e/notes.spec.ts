@@ -1,12 +1,11 @@
 import { readFileSync } from "node:fs"
 import JSZip from "jszip"
 import type { Locator, Page } from "@playwright/test"
-import { test, expect, closeTrackedPage, settleLeases } from "./fixtures"
+import { test, expect, closeTrackedPage, seedSession, settleLeases } from "./fixtures"
 import { focusEditorSurface } from "./helpers/editor"
 import { resolveEditorModKey, resolveModKey } from "./helpers/modkey"
 import { waitForE2eHooks } from "./helpers/e2eHooks"
 import { BOOT_SETTLE_TIMEOUT_MS, bootTo, dismissStartupReminders, LIVE_WRITE_TIMEOUT_MS } from "./helpers/listing"
-import { SESSION_SLOT } from "@/e2e-hooks/sessionSlot"
 
 // Notes shell smoke: rail entry → /notes, the contextual sidebar renders, the two-view toggle switches,
 // and a UI-created note lands in the list and navigates. Net-zero on the shared FREE account — the one
@@ -1123,12 +1122,7 @@ test.describe("notes: rich and checklist editors", () => {
 async function bootSecondPage(page: Page, injectedSession: string): Promise<Page> {
 	const pageB = await page.context().newPage()
 
-	await pageB.addInitScript(
-		([slot, blob]) => {
-			sessionStorage.setItem(slot, blob)
-		},
-		[SESSION_SLOT, injectedSession] as const
-	)
+	await seedSession(pageB, injectedSession)
 	await bootTo(pageB)
 	// A sibling page seeds its own session, so its shell renders authed off kv whether or not the
 	// fire-and-forget hook import has landed — and every caller of this helper drives pageB through

@@ -51,12 +51,17 @@ export function reseedTabEditor(uuid: string, announce: boolean): void {
 // The content cache follows `content` without a new dataUpdatedAt, so a shown editor that already holds it
 // stays mounted.
 export function followContent(uuid: string, content: string): void {
-	const contentKey = noteContentQueryKey(uuid)
-
-	if (queryClient.getQueryData<string>(contentKey) === content) {
+	if (queryClient.getQueryData<string>(noteContentQueryKey(uuid)) === content) {
 		return
 	}
 
+	writeContentKeepingRemountKey(uuid, content)
+}
+
+// Cancels first: a read in flight would otherwise land after the write and advance dataUpdatedAt, the
+// editor's remount key.
+export function writeContentKeepingRemountKey(uuid: string, content: string): void {
+	const contentKey = noteContentQueryKey(uuid)
 	const updatedAt = queryClient.getQueryState<string | undefined>(contentKey)?.dataUpdatedAt
 
 	void queryClient.cancelQueries({ queryKey: contentKey, exact: true })

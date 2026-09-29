@@ -1,20 +1,29 @@
-import { useQuery, type UseQueryResult } from "@tanstack/react-query"
+import { useQuery, type QueryFunction, type QueryFunctionContext, type QueryKey, type UseQueryResult } from "@tanstack/react-query"
 import type { LinkedFile, DirPublicInfo, LinkedDirsAndFiles, AnyLinkedDir, DirPublicLink, DirSizeResponse } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
 import { queryClient } from "@/queries/client"
 import type { DriveItem } from "@/features/drive/lib/item"
 import { DRIVE_LISTING_KEY_PREFIX, type DriveListingParams } from "@/features/drive/queries/drive"
 import { isNetworkClassError } from "@/lib/sdk/retry"
-import { publicLinkQueryKey, secretFingerprint, passwordStatePart } from "@/features/publicLinks/lib/queryKey.logic"
+import { publicLinkQueryKey, secretFingerprint, linkFingerprint } from "@/features/publicLinks/lib/queryKey.logic"
 
 // ★ SECURITY: the decryption key AND any visitor-typed password MUST NOT appear in a react-query key —
 // every secret travels ONLY through the queryFn closures below; the key carries a non-secret djb2
 // fingerprint of it (queryKey.logic.ts) so a query re-runs when the fragment key or password changes.
 
+// A passthrough persister runs the queryFn with NO storage round trip: a public resolution must leave
+// nothing on this browser's disk (an explicit `undefined` is rejected under exactOptionalPropertyTypes,
+// so it overrides the client's default persister this way).
+function noDiskPersister<T, K extends QueryKey>(queryFn: QueryFunction<T, K>, context: QueryFunctionContext<K>): T | Promise<T> {
+	return queryFn(context)
+}
+
 // No socket reaches this unauthenticated surface, so a resolved read is a snapshot: a focus or a return
 // to a visited level serves it, and the error retry or a reload re-reads. With no events to miss while
 // offline, a reconnect only re-runs a read that last failed on the wire.
-const snapshotFreshness = {
+const publicQueryOptions = {
+	retry: false,
+	persister: noDiskPersister,
 	staleTime: Infinity,
 	refetchOnWindowFocus: false,
 	refetchOnReconnect: (query: { state: { error: Error | null } }) => (isNetworkClassError(query.state.error) ? "always" : false)
@@ -22,10 +31,7 @@ const snapshotFreshness = {
 
 // FILE link resolution against the UNAUTHENTICATED worker surface. `password` is undefined until the
 // visitor supplies one; a protected file throws until it matches (mapped to the password gate by the
-// caller's fileAccessState). `uuid`/`key` null (unresolvable fragment) keeps the query disabled. The
-// passthrough persister runs the queryFn with NO storage round trip — a public resolution must leave
-// nothing on this browser's disk (an explicit `undefined` is rejected under exactOptionalPropertyTypes,
-// so it overrides the client's default persister this way).
+// caller's fileAccessState). `uuid`/`key` null (unresolvable fragment) keeps the query disabled.
 export function usePublicFile(uuid: string | null, key: string | null, password: string | undefined): UseQueryResult<LinkedFile> {
 	const enabled = uuid !== null && key !== null
 
@@ -33,9 +39,7 @@ export function usePublicFile(uuid: string | null, key: string | null, password:
 		queryKey: publicLinkQueryKey("file", uuid ?? "disabled", secretFingerprint(key ?? undefined, password)),
 		queryFn: () => sdkApi.getLinkedFileAnon(uuid ?? "", key ?? "", password),
 		enabled,
-		retry: false,
-		persister: (queryFn, context) => queryFn(context),
-		...snapshotFreshness
+		...publicQueryOptions
 	})
 }
 
@@ -48,9 +52,7 @@ export function usePublicDirInfo(uuid: string | null, key: string | null): UseQu
 		queryKey: publicLinkQueryKey("dirInfo", uuid ?? "disabled", secretFingerprint(key ?? undefined)),
 		queryFn: () => sdkApi.getDirPublicLinkInfoAnon(uuid ?? "", key ?? ""),
 		enabled,
-		retry: false,
-		persister: (queryFn, context) => queryFn(context),
-		...snapshotFreshness
+		...publicQueryOptions
 	})
 }
 
@@ -65,7 +67,7 @@ export function usePublicDirSize(args: {
 	const enabled = levelUuid !== null && dir !== null && link !== null
 
 	return useQuery({
-		queryKey: publicLinkQueryKey("size", levelUuid ?? "disabled", secretFingerprint(link?.linkKey, passwordStatePart(link?.password))),
+		queryKey: publicLinkQueryKey("size", levelUuid ?? "disabled", linkFingerprint(link)),
 		queryFn: () => {
 			if (dir === null || link === null) {
 				throw new Error("public-link size invoked without a resolved directory")
@@ -74,15 +76,13 @@ export function usePublicDirSize(args: {
 			return sdkApi.getLinkedDirSizeAnon({ dir, link })
 		},
 		enabled,
-		retry: false,
-		persister: (queryFn, context) => queryFn(context),
-		...snapshotFreshness
+		...publicQueryOptions
 	})
 }
 
 // Shared with the directory password check, which seeds the root level with the listing it already read.
 export function publicDirListingQueryKey(levelUuid: string | null, link: DirPublicLink | null) {
-	return publicLinkQueryKey("listing", levelUuid ?? "disabled", secretFingerprint(link?.linkKey, passwordStatePart(link?.password)))
+	return publicLinkQueryKey("listing", levelUuid ?? "disabled", linkFingerprint(link))
 }
 
 // One directory LEVEL's listing. Keyed by that level's own uuid plus a fingerprint of the link key +
@@ -106,9 +106,7 @@ export function usePublicDirListing(args: {
 			return sdkApi.listLinkedDirAnon(dir, link)
 		},
 		enabled,
-		retry: false,
-		persister: (queryFn, context) => queryFn(context),
-		...snapshotFreshness
+		...publicQueryOptions
 	})
 }
 
@@ -123,7 +121,7 @@ export function usePublicVisitorSignedIn(): UseQueryResult<boolean> {
 		staleTime: Infinity,
 		gcTime: 0,
 		refetchOnWindowFocus: false,
-		persister: (queryFn, context) => queryFn(context)
+		persister: noDiskPersister
 	})
 }
 
@@ -152,9 +150,7 @@ export function useLinkSaveable(kind: "file" | "directory", uuid: string | null)
 		queryKey: ["publicLinks", "owned", kind, uuid],
 		queryFn: async () => uuid !== null && (isInCachedOwnedListing(uuid) || (await sdkApi.ownsItem(kind, uuid))),
 		enabled: signedIn.data === true && uuid !== null,
-		retry: false,
-		persister: (queryFn, context) => queryFn(context),
-		...snapshotFreshness
+		...publicQueryOptions
 	})
 
 	return signedIn.data === true && owned.data === false

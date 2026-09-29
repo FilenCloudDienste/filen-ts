@@ -93,8 +93,8 @@ const EN_CATALOG: Record<Namespace, Record<string, string>> = EN_CATALOGS
 
 // Every per-namespace record below is built from NAMESPACES, so adding a namespace to the catalog
 // module is the only edit a new namespace needs. Object.fromEntries erases the key union, so the
-// result is re-typed once, here — NAMESPACES is the exhaustive tuple Namespace is derived from, so
-// every key is present by construction.
+// result is re-typed once, here — NAMESPACES lists every key of the catalog object Namespace is derived
+// from, so every key is present by construction.
 function perNamespace<T>(make: (ns: Namespace) => T): Record<Namespace, T> {
 	return Object.fromEntries(NAMESPACES.map(ns => [ns, make(ns)])) as Record<Namespace, T>
 }

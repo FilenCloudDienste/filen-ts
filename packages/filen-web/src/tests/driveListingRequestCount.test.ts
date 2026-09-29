@@ -1,9 +1,8 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { createElement, type ReactNode } from "react"
 import { act, renderHook, waitFor } from "@testing-library/react"
-import { QueryClient, QueryClientProvider, focusManager, onlineManager } from "@tanstack/react-query"
+import { focusManager, onlineManager } from "@tanstack/react-query"
 import type { Dir, File, NormalDirsAndFiles, SharedRootDirsAndFiles, SocketEvent, UuidStr } from "@filen/sdk-rs"
 
 const { listDirectory, listSharedInRoot, listSharedOutRoot } = vi.hoisted(() => ({
@@ -14,18 +13,12 @@ const { listDirectory, listSharedInRoot, listSharedOutRoot } = vi.hoisted(() => 
 
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: { listDirectory, listSharedInRoot, listSharedOutRoot } }))
 
-// The production defaults minus the persister (sqlite, unavailable under vitest).
-vi.mock("@/queries/client", () => ({
-	queryClient: new QueryClient({
-		defaultOptions: {
-			queries: { staleTime: 0, gcTime: Infinity, retry: false, refetchOnWindowFocus: true, refetchOnReconnect: true }
-		}
-	})
-}))
+vi.mock("@/queries/client", async () => ({ queryClient: (await import("@/tests/testQueryClient")).createTestQueryClient() }))
 
 vi.mock("@/lib/log", () => ({ log: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() } }))
 
 import { queryClient } from "@/queries/client"
+import { queryClientWrapper } from "@/tests/testQueryClient"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import {
 	discardListingPatches,
@@ -95,9 +88,7 @@ function nextDir(): UuidStr {
 	return testUuid(`dir${String(dirCounter)}`)
 }
 
-function wrapper({ children }: { children: ReactNode }) {
-	return createElement(QueryClientProvider, { client: queryClient, children })
-}
+const wrapper = queryClientWrapper(queryClient)
 
 function mountListing(uuid: string) {
 	return renderHook(() => useDirectoryListingQuery("drive", uuid), { wrapper })

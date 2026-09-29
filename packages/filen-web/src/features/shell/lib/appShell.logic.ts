@@ -1,5 +1,10 @@
 import { type CommonKey } from "@/lib/i18n"
 
+// A section root or any route nested under it.
+export function pathIsUnder(pathname: string, root: string): boolean {
+	return pathname === root || pathname.startsWith(`${root}/`)
+}
+
 export type SidebarKind = "chats" | "notes" | "settings" | "contacts" | "playlists" | "drive"
 
 // The drive panel is the app's PERSISTENT navigation, not a drive-only accessory: every route without
@@ -7,15 +12,15 @@ export type SidebarKind = "chats" | "notes" | "settings" | "contacts" | "playlis
 // /favorites, /trash, /links, /shared-in, /shared-out) keeps it, so the shell's geometry
 // never jumps width between rail destinations and the storage meter stays reachable app-wide.
 export function resolveSidebarKind(pathname: string): SidebarKind {
-	if (pathname === "/chats" || pathname.startsWith("/chats/")) {
+	if (pathIsUnder(pathname, "/chats")) {
 		return "chats"
 	}
 
-	if (pathname === "/notes" || pathname.startsWith("/notes/")) {
+	if (pathIsUnder(pathname, "/notes")) {
 		return "notes"
 	}
 
-	if (pathname === "/settings" || pathname.startsWith("/settings/")) {
+	if (pathIsUnder(pathname, "/settings")) {
 		return "settings"
 	}
 

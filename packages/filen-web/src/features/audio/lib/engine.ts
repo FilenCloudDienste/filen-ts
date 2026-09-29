@@ -212,12 +212,9 @@ export class AudioEngine {
 		}
 	}
 
-	private ensureElement(): AudioElementAdapter {
-		if (this.element) {
-			return this.element
-		}
-
-		const element = this.deps.createElement({
+	// The real playback callbacks, for a freshly created element and for a promoted warm one.
+	private playbackEvents(): AudioElementEvents {
+		return {
 			onTimeUpdate: () => {
 				this.onTimeUpdate()
 			},
@@ -230,7 +227,37 @@ export class AudioEngine {
 			onError: () => {
 				this.onPlaybackFailure(asErrorDTO(new Error("audio element playback error")))
 			}
-		})
+		}
+	}
+
+	// Shared play-start tail: a failure or success that lands after a supersede (new load or pause) is
+	// dropped silently.
+	private async playAndSettle(element: AudioElementAdapter, generation: number, pauseGeneration: number): Promise<void> {
+		try {
+			await element.play()
+		} catch (error) {
+			if (this.superseded(generation, pauseGeneration)) {
+				return
+			}
+
+			this.onPlaybackFailure(asErrorDTO(error))
+
+			return
+		}
+
+		if (this.superseded(generation, pauseGeneration)) {
+			return
+		}
+
+		this.settlePlaying(element)
+	}
+
+	private ensureElement(): AudioElementAdapter {
+		if (this.element) {
+			return this.element
+		}
+
+		const element = this.deps.createElement(this.playbackEvents())
 
 		// Re-apply the persisted output prefs to a freshly-created element.
 		const { volume, muted } = useAudioStore.getState()
@@ -391,20 +418,7 @@ export class AudioEngine {
 		this.prefetchBlobUrl = null
 		this.prefetchAbort = null
 
-		promoted.rebind({
-			onTimeUpdate: () => {
-				this.onTimeUpdate()
-			},
-			onDurationChange: () => {
-				this.onDurationChange()
-			},
-			onEnded: () => {
-				void this.handleTrackEnd()
-			},
-			onError: () => {
-				this.onPlaybackFailure(asErrorDTO(new Error("audio element playback error")))
-			}
-		})
+		promoted.rebind(this.playbackEvents())
 
 		if (this.currentBlobUrl !== null && this.currentBlobUrl !== promotedBlobUrl) {
 			this.revoke(this.currentBlobUrl)
@@ -426,23 +440,7 @@ export class AudioEngine {
 		// reached metadata yet; the now-bound handler corrects that when it lands.
 		this.onDurationChange()
 
-		try {
-			await promoted.play()
-		} catch (error) {
-			if (this.superseded(generation, pauseGeneration)) {
-				return
-			}
-
-			this.onPlaybackFailure(asErrorDTO(error))
-
-			return
-		}
-
-		if (this.superseded(generation, pauseGeneration)) {
-			return
-		}
-
-		this.settlePlaying(promoted)
+		await this.playAndSettle(promoted, generation, pauseGeneration)
 	}
 
 	// Shared success tail for a track that just started playing, whether via a cold-started element
@@ -622,23 +620,7 @@ export class AudioEngine {
 			return
 		}
 
-		try {
-			await element.play()
-		} catch (error) {
-			if (this.superseded(generation, pauseGeneration)) {
-				return
-			}
-
-			this.onPlaybackFailure(asErrorDTO(error))
-
-			return
-		}
-
-		if (this.superseded(generation, pauseGeneration)) {
-			return
-		}
-
-		this.settlePlaying(element)
+		await this.playAndSettle(element, generation, pauseGeneration)
 	}
 
 	// Revoke the outgoing blob URL when it is being replaced, and remember the new one (or null for a
@@ -767,23 +749,7 @@ export class AudioEngine {
 		element.seek(0)
 		useAudioStore.getState().setPosition(0)
 
-		try {
-			await element.play()
-		} catch (error) {
-			if (this.superseded(generation, pauseGeneration)) {
-				return
-			}
-
-			this.onPlaybackFailure(asErrorDTO(error))
-
-			return
-		}
-
-		if (this.superseded(generation, pauseGeneration)) {
-			return
-		}
-
-		this.settlePlaying(element)
+		await this.playAndSettle(element, generation, pauseGeneration)
 	}
 
 	// Replace the whole queue positioned at a track and start playing — the folder-open / playlist-play

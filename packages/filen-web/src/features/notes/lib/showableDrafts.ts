@@ -1,7 +1,7 @@
-import { newestEntry } from "@/features/notes/lib/sync.logic"
+import { newestShowableEntry } from "@/features/notes/lib/sync.logic"
 import { reseedTabEditor } from "@/features/notes/lib/remoteContent"
 import { shownTabEditors, tabEditorBuffer, tabEditorDirty } from "@/features/notes/lib/tabEditors"
-import { useNotesInflightStore, TAB_ID, entryIsShowable, type InflightEntry } from "@/features/notes/store/useNotesInflight"
+import { useNotesInflightStore, TAB_ID } from "@/features/notes/store/useNotesInflight"
 import { useNotesRemoteEditStore } from "@/features/notes/store/useNoteRemoteEdit"
 
 // An entry that becomes showable (an orphan: its tab is gone) under an editor already on screen is a version
@@ -10,8 +10,8 @@ import { useNotesRemoteEditStore } from "@/features/notes/store/useNoteRemoteEdi
 export function followShowableDrafts(): () => void {
 	return useNotesInflightStore.subscribe((state, prev) => {
 		for (const uuid of shownTabEditors()) {
-			const next = newestShowable(state.inflightContent[uuid])
-			const before = newestShowable(prev.inflightContent[uuid])
+			const next = newestShowableEntry(state.inflightContent[uuid])
+			const before = newestShowableEntry(prev.inflightContent[uuid])
 
 			if (
 				next === undefined ||
@@ -36,8 +36,4 @@ export function followShowableDrafts(): () => void {
 			}
 		}
 	})
-}
-
-function newestShowable(entries: InflightEntry[] | undefined): InflightEntry | undefined {
-	return newestEntry((entries ?? []).filter(entryIsShowable))
 }

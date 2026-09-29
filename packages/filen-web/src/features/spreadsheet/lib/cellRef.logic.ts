@@ -15,6 +15,18 @@ export function columnName(index: number): string {
 	return name
 }
 
+// The inverse of columnName for column letters in either case. `& 0xdf` upper-cases an ASCII letter
+// without allocating; callers pass only letters.
+export function columnIndex(letters: string): number {
+	let index = 0
+
+	for (let position = 0; position < letters.length; position++) {
+		index = index * 26 + ((letters.charCodeAt(position) & 0xdf) - 64)
+	}
+
+	return index - 1
+}
+
 export function cellName(row: number, col: number): string {
 	return `${columnName(col)}${String(row + 1)}`
 }
@@ -43,6 +55,18 @@ export function rangeName(range: CellRange): string {
 	const start = cellName(range.startRow, range.startCol)
 
 	return range.startRow === range.endRow && range.startCol === range.endCol ? start : `${start}:${cellName(range.endRow, range.endCol)}`
+}
+
+export function rangeRows(range: CellRange): number {
+	return range.endRow - range.startRow + 1
+}
+
+export function rangeCols(range: CellRange): number {
+	return range.endCol - range.startCol + 1
+}
+
+export function rangeArea(range: CellRange): number {
+	return rangeRows(range) * rangeCols(range)
 }
 
 export function rangeContains(range: CellRange, row: number, col: number): boolean {

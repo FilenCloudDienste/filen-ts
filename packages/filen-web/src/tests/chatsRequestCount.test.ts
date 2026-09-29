@@ -1,9 +1,8 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { createElement, type ReactNode } from "react"
 import { act, renderHook, waitFor } from "@testing-library/react"
-import { QueryClient, QueryClientProvider, focusManager } from "@tanstack/react-query"
+import { focusManager } from "@tanstack/react-query"
 import type { Chat, ChatMessage, UuidStr } from "@filen/sdk-rs"
 
 function testUuid(label: string): UuidStr {
@@ -19,14 +18,7 @@ const { listChats, listMessagesBefore, sendChatMessage } = vi.hoisted(() => ({
 
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: { listChats, listMessagesBefore, sendChatMessage } }))
 
-// The production defaults minus the persister (sqlite, unavailable under vitest).
-vi.mock("@/queries/client", () => ({
-	queryClient: new QueryClient({
-		defaultOptions: {
-			queries: { staleTime: 0, gcTime: Infinity, retry: false, refetchOnWindowFocus: true, refetchOnReconnect: true }
-		}
-	})
-}))
+vi.mock("@/queries/client", async () => ({ queryClient: (await import("@/tests/testQueryClient")).createTestQueryClient() }))
 
 const { kvStore } = vi.hoisted(() => ({ kvStore: new Map<string, unknown>() }))
 
@@ -47,6 +39,7 @@ vi.mock("@/lib/storage/adapter", () => ({
 vi.mock("@/features/chats/lib/inflight", () => ({ purgeChatInflightState: () => Promise.resolve() }))
 
 import { queryClient } from "@/queries/client"
+import { queryClientWrapper } from "@/tests/testQueryClient"
 import { CHATS_LIST_REREAD_MS, chatsQueryGet, chatsQueryUpsert, useChats } from "@/features/chats/queries/chats"
 import {
 	chatMessagesQueryAppend,
@@ -85,9 +78,7 @@ function mockMessage(chat: Chat): ChatMessage {
 const CHATS = [mockChat("a"), mockChat("b"), mockChat("c")]
 const [CHAT_A] = CHATS as [Chat, Chat, Chat]
 
-function wrapper({ children }: { children: ReactNode }) {
-	return createElement(QueryClientProvider, { client: queryClient, children })
-}
+const wrapper = queryClientWrapper(queryClient)
 
 async function settle(): Promise<void> {
 	await act(async () => {

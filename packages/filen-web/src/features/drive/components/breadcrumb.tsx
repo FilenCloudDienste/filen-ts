@@ -18,9 +18,9 @@ const VARIANT_ROOT_LABEL_KEY = {
 	recents: "driveRecents",
 	favorites: "driveFavorites",
 	trash: "driveTrash",
-	links: "driveLinks",
-	sharedIn: "driveSharedIn",
-	sharedOut: "driveSharedOut"
+	links: "common:driveLinks",
+	sharedIn: "common:driveSharedIn",
+	sharedOut: "common:driveSharedOut"
 } as const satisfies Record<DriveVariant, string>
 
 const CRUMB_LINK_CLASS = "text-muted-foreground hover:text-foreground hover:underline"
@@ -86,7 +86,7 @@ function CrumbLink({ variant, routeId, splatValue, targetUuid, targetAncestry, l
 // URL itself carries no ancestor uuids. A non-empty splat occurs on the three splat routes (drive,
 // shared-in, shared-out); `variant` picks how its crumb names resolve (useDirectoryNamesQuery).
 export function Breadcrumb({ variant, splat }: BreadcrumbProps) {
-	const { t } = useTranslation("drive")
+	const { t } = useTranslation(["drive", "common"])
 	const rootLabel = t(VARIANT_ROOT_LABEL_KEY[variant])
 	const uuids = splatToUuids(splat)
 	// One route id for every crumb link — the shared variants link within their own splat routes, so

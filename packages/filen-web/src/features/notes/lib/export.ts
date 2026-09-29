@@ -2,10 +2,9 @@ import JSZip from "jszip"
 import type { Note } from "@filen/sdk-rs"
 import { i18n } from "@/lib/i18n"
 import { downloadBlob } from "@/lib/downloadBlob"
-import { asErrorDTO, plainErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
-import { runOp, type VoidActionOutcome } from "@/lib/actions/outcome"
-import { readNoteContent, type NoteContentResult } from "@/features/notes/queries/noteContent"
-import { localNoteContent } from "@/features/notes/lib/localContent"
+import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
+import type { VoidActionOutcome } from "@/lib/actions/outcome"
+import { resolveLocalFirstContent, noteUndecryptableError } from "@/features/notes/lib/localContent"
 import { isNoteUndecryptable } from "@/features/notes/lib/sort"
 import { exportFilename, exportContent, exportMimeType, dedupeExportNames } from "@/features/notes/lib/export.logic"
 
@@ -13,31 +12,12 @@ import { exportFilename, exportContent, exportMimeType, dedupeExportNames } from
 // a real browser download. Never calls toast itself — same convention as lib/actions.ts, the caller
 // (noteMenu.tsx / notesSidebar.tsx) resolves the outcome and surfaces `errorLabel(dto)`.
 
-// Local-first content read (localNoteContent: unsynced outbox edit, then the content cache): a note
-// already open in the editor has its content warm, so exporting it costs no extra round trip — and an
-// export must be what the user SEES, which offline (or inside the outbox debounce) is the queued edit,
-// not the last thing that reached the server. Content that exists but never decrypted is reported as
-// such, never coalesced to "" — an empty file is not a backup.
-async function resolveContent(note: Note): Promise<NoteContentResult> {
-	const local = localNoteContent(note.uuid)
-
-	if (local !== undefined) {
-		return { status: "ok", content: local }
-	}
-
-	return runOp(readNoteContent(note))
-}
-
-function undecryptableError(): ErrorDTO {
-	return plainErrorDTO(i18n.t("notes:noteContentUndecryptableError"))
-}
-
 export async function exportNote(note: Note): Promise<VoidActionOutcome> {
 	try {
-		const result = await resolveContent(note)
+		const result = await resolveLocalFirstContent(note)
 
 		if (result.status === "undecryptable") {
-			return { status: "error", dto: undecryptableError() }
+			return { status: "error", dto: noteUndecryptableError() }
 		}
 
 		const filename = exportFilename(note.title, note.noteType, i18n.t("notes:noteUntitled"))
@@ -85,7 +65,7 @@ export async function exportAllNotes(notes: readonly Note[]): Promise<ExportAllO
 				continue
 			}
 
-			const result = await resolveContent(note)
+			const result = await resolveLocalFirstContent(note)
 
 			if (result.status === "undecryptable") {
 				skipped += 1

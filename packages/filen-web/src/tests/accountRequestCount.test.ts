@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { createElement, type ComponentType, type ReactNode } from "react"
+import { createElement, type ComponentType } from "react"
 import { act, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react"
-import { QueryClient, QueryClientProvider, focusManager, onlineManager } from "@tanstack/react-query"
+import { focusManager, onlineManager } from "@tanstack/react-query"
 import type { File, FileMeta, SocketEvent, UserInfo, UserPersonalUpdateInfo, UuidStr } from "@filen/sdk-rs"
 
 const { getUserInfo, setNickname, updatePersonalInfo, setVersioningEnabled, setLoginAlertsEnabled, exportMasterKeys } = vi.hoisted(() => ({
@@ -19,14 +19,7 @@ vi.mock("@/lib/sdk/client", () => ({
 	sdkApi: { getUserInfo, setNickname, updatePersonalInfo, setVersioningEnabled, setLoginAlertsEnabled, exportMasterKeys }
 }))
 
-// The production defaults minus the persister (sqlite, unavailable under vitest).
-vi.mock("@/queries/client", () => ({
-	queryClient: new QueryClient({
-		defaultOptions: {
-			queries: { staleTime: 0, gcTime: Infinity, retry: false, refetchOnWindowFocus: true, refetchOnReconnect: true }
-		}
-	})
-}))
+vi.mock("@/queries/client", async () => ({ queryClient: (await import("@/tests/testQueryClient")).createTestQueryClient() }))
 
 vi.mock("@/lib/log", () => ({ log: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() } }))
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
@@ -37,6 +30,7 @@ import { settings as EN_SETTINGS } from "@/locales/en/settings"
 import { auth as EN_AUTH } from "@/locales/en/auth"
 import { common as EN_COMMON } from "@/locales/en/common"
 import { queryClient } from "@/queries/client"
+import { queryClientWrapper } from "@/tests/testQueryClient"
 import {
 	ACCOUNT_QUERY_KEY,
 	ACCOUNT_STALE_TIME,
@@ -99,9 +93,7 @@ const ACCOUNT: UserInfo = {
 	didExportMasterKeys: false
 }
 
-function wrapper({ children }: { children: ReactNode }) {
-	return createElement(QueryClientProvider, { client: queryClient, children })
-}
+const wrapper = queryClientWrapper(queryClient)
 
 function mountAccount() {
 	return renderHook(() => useAccountQuery(), { wrapper })
@@ -472,8 +464,7 @@ describe("account first read of the session", () => {
 		freshClient.clear()
 		freshClient.setQueryData(fresh.ACCOUNT_QUERY_KEY, { ...ACCOUNT }, { updatedAt: Date.now() })
 
-		const freshWrapper = ({ children }: { children: ReactNode }) =>
-			createElement(QueryClientProvider, { client: freshClient, children })
+		const freshWrapper = queryClientWrapper(freshClient)
 		const first = renderHook(() => fresh.useAccountQuery(), { wrapper: freshWrapper })
 		await waitFor(() => {
 			expect(reads()).toBe(1)

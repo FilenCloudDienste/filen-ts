@@ -1,20 +1,23 @@
 import { driveItemName, sortItems as sortItemsEngine, type SortMode, type SortEngineAccessors } from "@filen/shared"
-import { asDirectoryOrFile, driveItemMime, type DriveItem } from "@/features/drive/lib/item"
+import { isDirectoryItem, driveItemMime, lastModifiedOf, type DriveItem } from "@/features/drive/lib/item"
 
 // Field x direction. "type" groups files by MIME (directories have none, so they fall back to
 // name — see typeSortKey); the other fields are self-explanatory. Recents forces uploadDateDesc
 // unconditionally (see @/features/drive/lib/preferences) and never reaches this module through a menu.
-export type DriveSortBy =
-	| "nameAsc"
-	| "nameDesc"
-	| "sizeAsc"
-	| "sizeDesc"
-	| "typeAsc"
-	| "typeDesc"
-	| "uploadDateAsc"
-	| "uploadDateDesc"
-	| "lastModifiedAsc"
-	| "lastModifiedDesc"
+export const DRIVE_SORT_BY = [
+	"nameAsc",
+	"nameDesc",
+	"sizeAsc",
+	"sizeDesc",
+	"typeAsc",
+	"typeDesc",
+	"uploadDateAsc",
+	"uploadDateDesc",
+	"lastModifiedAsc",
+	"lastModifiedDesc"
+] as const
+
+export type DriveSortBy = (typeof DRIVE_SORT_BY)[number]
 
 export type DriveSortField = "name" | "size" | "type" | "uploadDate" | "lastModified"
 export type DriveSortDirection = "asc" | "desc"
@@ -80,15 +83,10 @@ function uploadDateSortKey(item: DriveItem): number {
 }
 
 function lastModifiedSortKey(item: DriveItem): number {
-	const base = asDirectoryOrFile(item)
-	return Number(
-		base.type === "file"
-			? (base.data.decryptedMeta?.modified ?? base.data.timestamp)
-			: (base.data.decryptedMeta?.created ?? base.data.timestamp)
-	)
+	return Number(lastModifiedOf(item))
 }
 
-const sortModes: Record<string, SortMode<DriveItem>> = {
+const sortModes: Record<DriveSortBy, SortMode<DriveItem>> = {
 	nameAsc: { kind: "parts", isAsc: true, stringKey: nameSortKey },
 	nameDesc: { kind: "parts", isAsc: false, stringKey: nameSortKey },
 	sizeAsc: { kind: "size", isAsc: true },
@@ -101,23 +99,11 @@ const sortModes: Record<string, SortMode<DriveItem>> = {
 	lastModifiedDesc: { kind: "timestamp", isAsc: false, timestampKey: lastModifiedSortKey }
 }
 
-function requiredSortMode(key: string): SortMode<DriveItem> {
-	const mode = sortModes[key]
-
-	if (mode === undefined) {
-		throw new Error(`sort.ts: missing sort mode "${key}"`)
-	}
-
-	return mode
-}
-
-const FALLBACK_SORT_MODE = requiredSortMode("nameAsc")
-
 function makeAccessors(directorySizes?: ReadonlyMap<string, number>): SortEngineAccessors<DriveItem> {
 	return {
 		getUuid: item => item.data.uuid,
 		getSize: item => item.data.size,
-		isDirectory: item => asDirectoryOrFile(item).type === "directory",
+		isDirectory: item => isDirectoryItem(item),
 		nameKey: nameSortKey,
 		...(directorySizes !== undefined ? { directorySizes } : {})
 	}
@@ -129,15 +115,13 @@ function makeAccessors(directorySizes?: ReadonlyMap<string, number>): SortEngine
 // its raw synthetic 0n size and falls into the deterministic name tiebreak. Wiring real sizes in by
 // default is a later enhancement — the 0n fallback is well-defined on its own.
 export function sortDriveItems(items: DriveItem[], sortBy: DriveSortBy, directorySizes?: ReadonlyMap<string, number>): DriveItem[] {
-	const mode = sortModes[sortBy] ?? FALLBACK_SORT_MODE
-
-	return sortItemsEngine(items, mode, makeAccessors(directorySizes))
+	return sortItemsEngine(items, sortModes[sortBy], makeAccessors(directorySizes))
 }
 
 // The same order for rows that carry a DriveItem (a public link's browse entries), read through
 // `getItem` so each key is still extracted once per row.
 export function sortByDriveItem<T>(entries: T[], getItem: (entry: T) => DriveItem, sortBy: DriveSortBy): T[] {
-	const mode = sortModes[sortBy] ?? FALLBACK_SORT_MODE
+	const mode = sortModes[sortBy]
 	const { stringKey, timestampKey, tiebreakByName } = mode
 	const accessors = makeAccessors()
 

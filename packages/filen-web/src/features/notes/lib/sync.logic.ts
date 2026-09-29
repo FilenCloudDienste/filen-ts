@@ -1,7 +1,7 @@
 import { type } from "arktype"
 import { createNotePreviewFromContentText, mergeInflight } from "@filen/shared"
-import type { Note, NoteType } from "@filen/sdk-rs"
-import type { InflightContent, InflightEntry } from "@/features/notes/store/useNotesInflight"
+import type { NoteType } from "@filen/sdk-rs"
+import { entryIsShowable, type InflightContent, type InflightEntry } from "@/features/notes/store/useNotesInflight"
 
 // createNotePreviewFromContentText's `type` argument, derived from the wasm STRING-union noteType —
 // mirrors mobile's `Checklist ? "checklist" : Rich ? "rich" : "other"` mapping exactly.
@@ -20,7 +20,7 @@ export function notePreviewFor(noteType: NoteType, content: string): string {
 // loop already prefers the LIVE note from the list cache over this snapshot. `.as<InflightContent>()`
 // carries the trusted-boundary cast (the persisted note round-trips through the $bigint envelope, so
 // at runtime it is a genuine Note) without loosening the runtime structural check.
-const inflightEntrySchema = type({
+export const inflightEntrySchema = type({
 	timestamp: "number",
 	content: "string",
 	note: "object",
@@ -47,19 +47,9 @@ export const inflightContentSchema = type({
 
 // A single edit a follower forwards to the leader. Carries the follower's own monotonic author
 // timestamp so cross-tab ordering stays last-write-wins by wall clock; the leader ingests it AS-IS
-// (never re-stamps) and merges it by that timestamp.
-export interface RemoteEnqueue {
-	note: Note
-	content: string
-	timestamp: number
-	baseContentHash?: string
-	// The id of the tab that queued it, and whether it was typed on that tab's previous entry
-	// (InflightEntry).
-	origin?: string
-	carriedFrom?: string
-	// An answer to the remote-edit dialog (Sync.enqueueAnswer).
-	answer?: true
-}
+// (never re-stamps) and merges it by that timestamp. `answer`: an answer to the remote-edit dialog
+// (Sync.enqueueAnswer).
+export type RemoteEnqueue = Omit<InflightEntry, "orphan"> & { answer?: true }
 
 // Newest local author timestamp across a note's entry list (NEGATIVE_INFINITY for an empty list).
 function newestTimestamp(entries: InflightEntry[]): number {
@@ -118,6 +108,11 @@ export function remoteEnqueueToPatch(msg: RemoteEnqueue): InflightContent {
 
 // The newest entry a follower holds for a note, used both to seed the optimistic store write and to
 // pick the single entry it forwards to the leader (older entries are strictly superseded).
-export function newestEntry(entries: InflightEntry[]): InflightEntry | undefined {
-	return entries.reduce<InflightEntry | undefined>((acc, c) => (acc === undefined || c.timestamp > acc.timestamp ? c : acc), undefined)
+export function newestEntry(entries: readonly InflightEntry[] | undefined): InflightEntry | undefined {
+	return entries?.reduce<InflightEntry | undefined>((acc, c) => (acc === undefined || c.timestamp > acc.timestamp ? c : acc), undefined)
+}
+
+// The same, over the entries this tab's editor may show (entryIsShowable): never another live tab's.
+export function newestShowableEntry(entries: readonly InflightEntry[] | undefined): InflightEntry | undefined {
+	return newestEntry(entries?.filter(entryIsShowable))
 }

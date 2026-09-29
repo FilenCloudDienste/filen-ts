@@ -25,7 +25,7 @@ import {
 import { hiddenFilterAppliesTo } from "@/features/drive/lib/hiddenItems"
 import { type DriveSortBy } from "@/features/drive/lib/sort"
 import { resolveDriveNavigationTarget, splatToUuids } from "@/features/drive/lib/navigate"
-import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
+import { isDirectoryItem, type DriveItem } from "@/features/drive/lib/item"
 import { previewableSiblings } from "@/features/drive/lib/preview.logic"
 import { aggregateDriveSelectionFlags, selectableForSelectAll } from "@/features/drive/lib/selectionFlags"
 import { driveRowKey } from "@/features/drive/lib/rowKey"
@@ -271,7 +271,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 		}
 
 		// A file opens the preview overlay; a directory falls through to the navigation path below.
-		if (asDirectoryOrFile(item).type === "file") {
+		if (!isDirectoryItem(item)) {
 			// Drive-hosted audio hands off to the persistent player instead of the preview overlay: opening
 			// one audio file enqueues the folder's audio siblings (in this listing's current sort order,
 			// positioned at the opened track) and starts playback. A trashed/undecryptable track stays

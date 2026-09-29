@@ -25,7 +25,7 @@ vi.mock("@/features/notes/lib/participants", () => ({
 
 vi.mock("@/features/contacts/lib/actions", () => ({ toggleParticipantBlocked }))
 
-vi.mock("@/features/notes/queries/notes", () => ({ useNotes: () => ({ data: undefined }) }))
+vi.mock("@/features/notes/queries/notes", () => ({ useLiveNote: (note: Note) => note }))
 
 vi.mock("@/queries/account", () => ({ useAccountQuery: () => ({ data: { id: 1n } }) }))
 

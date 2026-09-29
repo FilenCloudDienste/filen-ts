@@ -45,6 +45,7 @@ import {
 } from "@/features/notes/components/notesSidebar.logic"
 import { createNote } from "@/features/notes/lib/actions"
 import { exportAllNotes } from "@/features/notes/lib/export"
+import { toastNotesExportOutcome } from "@/features/notes/lib/bulkToast"
 import { importNoteFromFile } from "@/features/notes/lib/import"
 import { importAcceptAttribute } from "@/features/notes/lib/import.logic"
 import { selectableNotesForSelectAll } from "@/features/notes/lib/selectionFlags"
@@ -397,6 +398,12 @@ export function NotesSidebar() {
 		})
 	}
 
+	// Target of every "open the note just created/duplicated" path, including the tag-menu's
+	// create-then-tag round trip (noteMenu.tsx).
+	async function openNote(note: Note): Promise<void> {
+		await navigate({ to: "/notes/$uuid", params: { uuid: note.uuid } })
+	}
+
 	async function handleNewNote(): Promise<void> {
 		const outcome = await createNote()
 
@@ -405,31 +412,11 @@ export function NotesSidebar() {
 			return
 		}
 
-		await navigate({ to: "/notes/$uuid", params: { uuid: outcome.item.uuid } })
-	}
-
-	async function handleDuplicated(duplicated: Note): Promise<void> {
-		await navigate({ to: "/notes/$uuid", params: { uuid: duplicated.uuid } })
-	}
-
-	// Same "navigate to the freshly created note" tail as handleDuplicated/handleNewNote, fired once the
-	// tag-menu's own create-then-tag round trip (noteMenu.tsx) resolves.
-	async function handleCreateNoteInTag(created: Note): Promise<void> {
-		await navigate({ to: "/notes/$uuid", params: { uuid: created.uuid } })
+		await openNote(outcome.item)
 	}
 
 	async function handleExportAll(): Promise<void> {
-		const outcome = await exportAllNotes(allNotes)
-
-		if (outcome.status === "error") {
-			toast.error(errorLabel(outcome.dto))
-
-			return
-		}
-
-		if (outcome.skipped > 0) {
-			toast.warning(t("notesExportSkippedUndecryptable", { count: outcome.skipped }))
-		}
+		toastNotesExportOutcome(await exportAllNotes(allNotes))
 	}
 
 	// The hidden file input's onChange: detect+sanitize+create all happen inside importNoteFromFile
@@ -444,7 +431,7 @@ export function NotesSidebar() {
 			return
 		}
 
-		await navigate({ to: "/notes/$uuid", params: { uuid: outcome.item.uuid } })
+		await openNote(outcome.item)
 	}
 
 	async function handleTagsSortChange(next: NoteTagsSortBy): Promise<void> {
@@ -633,7 +620,7 @@ export function NotesSidebar() {
 									}}
 									onTagAction={dialogHost.openTagDialog}
 									onCreateNoteInTag={created => {
-										void handleCreateNoteInTag(created)
+										void openNote(created)
 									}}
 								/>
 							) : (
@@ -646,7 +633,7 @@ export function NotesSidebar() {
 									currentUserId={currentUserId}
 									onAction={dialogHost.openNoteDialog}
 									onDuplicated={duplicated => {
-										void handleDuplicated(duplicated)
+										void openNote(duplicated)
 									}}
 									onPointerSelect={event => {
 										selection.handlePointerSelect(selectableIndexByRowKey.get(sidebarRowKey(row)) ?? -1, event)

@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next"
 import { Link } from "@tanstack/react-router"
 import { formatBytes, driveItemName } from "@filen/shared"
 import { StarIcon } from "lucide-react"
-import { asDirectoryOrFile, driveItemMime, type DriveItem } from "@/features/drive/lib/item"
+import { asDirectoryOrFile, driveItemMime, isDirectoryItem, type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { ItemHeroTile } from "@/features/drive/components/itemThumbnail"
 import { formatCreatedDate, formatItemSize, formatModifiedDate, formatUploadedDate, sharedIdentityLabel } from "@/features/drive/lib/format"
@@ -11,7 +11,6 @@ import { previewType } from "@/features/drive/lib/preview.logic"
 import { parentNavigationTarget } from "@/features/drive/lib/navigate"
 import { previewKindLabelKey } from "@/features/drive/components/infoDialog.logic"
 import { useDirectorySizeQuery, useItemInfoQuery, type DirectorySizeItem } from "@/features/drive/queries/drive"
-import { isDirectorySizeItem } from "@/features/drive/hooks/useDriveDirectorySizes.logic"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { CannotDecryptState } from "@/components/cannotDecryptState"
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
@@ -168,7 +167,7 @@ export function InfoDialog({ item, variant, remoteInfoEnabled, onClose }: InfoDi
 				<div className="flex min-w-0 flex-col divide-y divide-border/50 rounded-xl ring-1 ring-border/60">
 					{base.type === "file" ? (
 						<InfoRow label={t("driveInfoSize")}>{formatItemSize(item)}</InfoRow>
-					) : remoteInfoEnabled && isDirectorySizeItem(item) ? (
+					) : remoteInfoEnabled && isDirectoryItem(item) ? (
 						<DirectorySizeRows item={item} />
 					) : null}
 

@@ -1,5 +1,6 @@
 import * as Comlink from "comlink"
 import SpreadsheetWorker from "@/features/spreadsheet/workers/spreadsheet.worker.ts?worker"
+import type { SpreadsheetKind } from "@/features/spreadsheet/lib/model"
 import type { SpreadsheetWorkerApi } from "@/features/spreadsheet/workers/spreadsheet.worker"
 
 // One worker for every open spreadsheet, created the first time one opens. It holds the open workbooks,
@@ -21,7 +22,7 @@ function startsWith(bytes: Uint8Array, magic: readonly number[]): boolean {
 
 // A file whose name does not say what it is, read from its first bytes: a zip is taken for an .xlsx, an
 // OLE2 compound file for an .xls, anything else for text.
-export function sniffSpreadsheetKind(bytes: Uint8Array): "xlsx" | "xls" | "csv" {
+export function sniffSpreadsheetKind(bytes: Uint8Array): SpreadsheetKind {
 	if (startsWith(bytes, ZIP)) return "xlsx"
 	if (startsWith(bytes, OLE2)) return "xls"
 

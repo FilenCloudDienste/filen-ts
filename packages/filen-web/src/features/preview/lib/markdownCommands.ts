@@ -1,4 +1,4 @@
-import { EditorSelection, type EditorState, type SelectionRange, type StateCommand } from "@codemirror/state"
+import { EditorSelection, type ChangeSpec, type EditorState, type SelectionRange, type StateCommand } from "@codemirror/state"
 
 // Markdown formatting for the editor's shortcuts (editor.bold and friends), as plain CodeMirror commands
 // over every selection range.
@@ -56,18 +56,26 @@ function toggleRange(range: SelectionRange, marker: string, wrapped: "outside" |
 	}
 }
 
-export function toggleInlineMarker(marker: string): StateCommand {
+// A command applying `edit` to every selection range as one user input.
+function byRange(edit: (range: SelectionRange, state: EditorState) => { changes: ChangeSpec; range: SelectionRange }): StateCommand {
 	return ({ state, dispatch }) => {
 		if (state.readOnly) {
 			return false
 		}
 
-		const transaction = state.changeByRange(range => toggleRange(range, marker, wrapping(state, range, marker)))
-
-		dispatch(state.update(transaction, { scrollIntoView: true, userEvent: "input" }))
+		dispatch(
+			state.update(
+				state.changeByRange(range => edit(range, state)),
+				{ scrollIntoView: true, userEvent: "input" }
+			)
+		)
 
 		return true
 	}
+}
+
+export function toggleInlineMarker(marker: string): StateCommand {
+	return byRange((range, state) => toggleRange(range, marker, wrapping(state, range, marker)))
 }
 
 const WORD_CHAR = /[\p{L}\p{N}_]/u
@@ -85,68 +93,48 @@ function italicStarWrapping(state: EditorState, range: SelectionRange): "outside
 
 // Italic takes either marker off. It goes on as `_`, except mid-word (a word character right before or
 // after the selection), where CommonMark ignores `_` and only `*` renders.
-export const toggleItalic: StateCommand = ({ state, dispatch }) => {
-	if (state.readOnly) {
-		return false
+export const toggleItalic: StateCommand = byRange((range, state) => {
+	const underscore = wrapping(state, range, "_")
+
+	if (underscore !== null) {
+		return toggleRange(range, "_", underscore)
 	}
 
-	const transaction = state.changeByRange(range => {
-		const underscore = wrapping(state, range, "_")
+	const star = italicStarWrapping(state, range)
 
-		if (underscore !== null) {
-			return toggleRange(range, "_", underscore)
-		}
+	if (star !== null) {
+		return toggleRange(range, "*", star)
+	}
 
-		const star = italicStarWrapping(state, range)
+	const midWord = WORD_CHAR.test(state.sliceDoc(range.from - 1, range.from)) || WORD_CHAR.test(state.sliceDoc(range.to, range.to + 1))
 
-		if (star !== null) {
-			return toggleRange(range, "*", star)
-		}
-
-		const midWord = WORD_CHAR.test(state.sliceDoc(range.from - 1, range.from)) || WORD_CHAR.test(state.sliceDoc(range.to, range.to + 1))
-
-		return toggleRange(range, midWord ? "*" : "_", null)
-	})
-
-	dispatch(state.update(transaction, { scrollIntoView: true, userEvent: "input" }))
-
-	return true
-}
+	return toggleRange(range, midWord ? "*" : "_", null)
+})
 
 const URL_PLACEHOLDER = "url"
 
 // Turns each selection into a markdown link. Selected text becomes the label with the url placeholder
 // selected, ready to be typed over; a selected url becomes the target with the cursor in the empty label;
 // nothing selected gives an empty link with the cursor in its label.
-export const insertLink: StateCommand = ({ state, dispatch }) => {
-	if (state.readOnly) {
-		return false
-	}
+export const insertLink: StateCommand = byRange((range, state) => {
+	const text = state.sliceDoc(range.from, range.to)
 
-	const transaction = state.changeByRange(range => {
-		const text = state.sliceDoc(range.from, range.to)
-
-		if (text.length === 0 || /^https?:\/\/\S+$/.test(text)) {
-			const target = text.length === 0 ? URL_PLACEHOLDER : text
-
-			return {
-				changes: { from: range.from, to: range.to, insert: `[](${target})` },
-				range: EditorSelection.cursor(range.from + 1)
-			}
-		}
-
-		const urlStart = range.to + 3
+	if (text.length === 0 || /^https?:\/\/\S+$/.test(text)) {
+		const target = text.length === 0 ? URL_PLACEHOLDER : text
 
 		return {
-			changes: [
-				{ from: range.from, insert: "[" },
-				{ from: range.to, insert: `](${URL_PLACEHOLDER})` }
-			],
-			range: EditorSelection.range(urlStart, urlStart + URL_PLACEHOLDER.length)
+			changes: { from: range.from, to: range.to, insert: `[](${target})` },
+			range: EditorSelection.cursor(range.from + 1)
 		}
-	})
+	}
 
-	dispatch(state.update(transaction, { scrollIntoView: true, userEvent: "input" }))
+	const urlStart = range.to + 3
 
-	return true
-}
+	return {
+		changes: [
+			{ from: range.from, insert: "[" },
+			{ from: range.to, insert: `](${URL_PLACEHOLDER})` }
+		],
+		range: EditorSelection.range(urlStart, urlStart + URL_PLACEHOLDER.length)
+	}
+})

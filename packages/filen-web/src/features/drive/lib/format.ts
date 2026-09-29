@@ -1,6 +1,6 @@
 import { formatBytes } from "@filen/shared"
 import { formatShortDate } from "@/lib/formatDate"
-import { asDirectoryOrFile, getSharerIdentity, type DriveItem } from "@/features/drive/lib/item"
+import { asDirectoryOrFile, getSharerIdentity, isSharedRootDriveItem, lastModifiedOf, type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 
 // Directories carry no real size on the item itself (synthetic 0n — see narrowItem in
@@ -21,18 +21,8 @@ export function formatItemSize(item: DriveItem, directorySizes?: ReadonlyMap<str
 	return size !== undefined ? formatBytes(size) : ""
 }
 
-// Mirrors sort.ts's lastModifiedSortKey field resolution exactly, so the displayed date always
-// matches what sorting by "last modified" actually orders by. Routed through asDirectoryOrFile so a
-// file arm's decryptedMeta (with `modified`) and a directory arm's (with `created`) each resolve
-// against the correctly-typed meta, shared arms included.
 export function formatModifiedDate(item: DriveItem): string {
-	const base = asDirectoryOrFile(item)
-	const timestamp =
-		base.type === "file"
-			? (base.data.decryptedMeta?.modified ?? base.data.timestamp)
-			: (base.data.decryptedMeta?.created ?? base.data.timestamp)
-
-	return formatShortDate(timestamp)
+	return formatShortDate(lastModifiedOf(item))
 }
 
 // The info panel's own "Created" row: both item types carry an OPTIONAL `created` field on their
@@ -80,7 +70,7 @@ export function sharedIdentityLabel(
 		return null
 	}
 
-	if (item.type !== "sharedRootFile" && item.type !== "sharedRootDirectory") {
+	if (!isSharedRootDriveItem(item)) {
 		return null
 	}
 

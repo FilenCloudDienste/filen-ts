@@ -1,6 +1,6 @@
 import i18n from "i18next"
 import { initReactI18next } from "react-i18next"
-import { EN_CATALOGS } from "@/lib/i18n/catalog"
+import { EN_CATALOGS, type EnNamespace } from "@/lib/i18n/catalog"
 
 // Per-namespace key unions, derived from the same object that is registered as i18next's `resources`
 // below, so a union can never name a key the app does not actually ship. `Extract<..., string>`
@@ -12,23 +12,25 @@ import { EN_CATALOGS } from "@/lib/i18n/catalog"
 // The keymap's `ActionDef.descriptionKey` composes these into namespace-PREFIXED literals
 // (`ShortcutDescriptionKey`, lib/keymap/registry.ts) — a bare key would only ever resolve in
 // whichever namespace `t` happened to default to.
-export type CommonKey = Extract<keyof (typeof EN_CATALOGS)["common"], string>
+export type NamespaceKey<N extends EnNamespace> = Extract<keyof (typeof EN_CATALOGS)[N], string>
 
-export type DriveKey = Extract<keyof (typeof EN_CATALOGS)["drive"], string>
+export type CommonKey = NamespaceKey<"common">
 
-export type ContactsKey = Extract<keyof (typeof EN_CATALOGS)["contacts"], string>
+export type DriveKey = NamespaceKey<"drive">
 
-export type PreviewKey = Extract<keyof (typeof EN_CATALOGS)["preview"], string>
+export type ContactsKey = NamespaceKey<"contacts">
 
-export type NotesKey = Extract<keyof (typeof EN_CATALOGS)["notes"], string>
+export type PreviewKey = NamespaceKey<"preview">
 
-export type ChatsKey = Extract<keyof (typeof EN_CATALOGS)["chats"], string>
+export type NotesKey = NamespaceKey<"notes">
 
-export type SettingsKey = Extract<keyof (typeof EN_CATALOGS)["settings"], string>
+export type ChatsKey = NamespaceKey<"chats">
 
-export type AudioKey = Extract<keyof (typeof EN_CATALOGS)["audio"], string>
+export type SettingsKey = NamespaceKey<"settings">
 
-export type PhotosKey = Extract<keyof (typeof EN_CATALOGS)["photos"], string>
+export type AudioKey = NamespaceKey<"audio">
+
+export type PhotosKey = NamespaceKey<"photos">
 
 // `Intl.PluralRules` gate: i18next's plural-key resolution (`_one`/
 // `_other` suffixes, unused by rev 1's catalogs but load-bearing the moment a count-based key

@@ -1,5 +1,6 @@
-import { columnName } from "@/features/spreadsheet/lib/cellRef.logic"
-import { MAX_COLS, MAX_ROWS } from "@/features/spreadsheet/lib/edits"
+import { columnIndex, columnName } from "@/features/spreadsheet/lib/cellRef.logic"
+import type { AxisEdit } from "@/features/spreadsheet/lib/edits"
+import { MAX_COLUMNS, MAX_ROWS } from "@/features/spreadsheet/lib/model"
 
 // Cell references inside Excel formula text, found and rewritten without evaluating anything: filling a
 // shared formula down, moving references for inserted or deleted rows and columns, renaming a sheet. The
@@ -40,13 +41,6 @@ interface RefPart {
 }
 
 type Part = string | RefPart
-
-export interface AxisEdit {
-	type: "insert" | "delete"
-	axis: "rows" | "cols"
-	at: number
-	count: number
-}
 
 const QUOTE = 34
 const APOSTROPHE = 39
@@ -150,16 +144,6 @@ const CELL = /^(\$?)([A-Za-z]{1,3})(\$?)([0-9]{1,7})$/
 const COLUMN = /^(\$?)([A-Za-z]{1,3})$/
 const ROW = /^(\$?)([0-9]{1,7})$/
 
-function columnIndex(letters: string): number {
-	let index = 0
-
-	for (let position = 0; position < letters.length; position++) {
-		index = index * 26 + (letters.toUpperCase().charCodeAt(position) - 64)
-	}
-
-	return index - 1
-}
-
 interface Point {
 	kind: "cell" | "cols" | "rows"
 	row: number
@@ -176,7 +160,7 @@ function point(word: string): Point | null {
 		const col = columnIndex(letters)
 		const row = Number(digits) - 1
 
-		return col < MAX_COLS && row >= 0 && row < MAX_ROWS
+		return col < MAX_COLUMNS && row >= 0 && row < MAX_ROWS
 			? { kind: "cell", row, col, rowAbs: rowAbs === "$", colAbs: colAbs === "$" }
 			: null
 	}
@@ -187,7 +171,7 @@ function point(word: string): Point | null {
 		const [, colAbs = "", letters = ""] = column
 		const col = columnIndex(letters)
 
-		return col < MAX_COLS ? { kind: "cols", row: 0, col, rowAbs: false, colAbs: colAbs === "$" } : null
+		return col < MAX_COLUMNS ? { kind: "cols", row: 0, col, rowAbs: false, colAbs: colAbs === "$" } : null
 	}
 
 	const row = ROW.exec(word)
@@ -454,7 +438,7 @@ export function formulaTranslator(formula: string): (rows: number, cols: number)
 			if (
 				Math.min(next.startRow, next.endRow, next.startCol, next.endCol) < 0 ||
 				Math.max(next.startRow, next.endRow) >= MAX_ROWS ||
-				Math.max(next.startCol, next.endCol) >= MAX_COLS
+				Math.max(next.startCol, next.endCol) >= MAX_COLUMNS
 			) {
 				return null
 			}
@@ -463,12 +447,12 @@ export function formulaTranslator(formula: string): (rows: number, cols: number)
 		})
 }
 
-function sameSheet(a: string, b: string): boolean {
+export function sameSheet(a: string, b: string): boolean {
 	return a === b || a.toUpperCase() === b.toUpperCase()
 }
 
 // One axis of an area moved for an insert or delete: null when the deletion takes all of it.
-function shiftSpan(start: number, end: number, edit: AxisEdit, limit: number, range: boolean): [number, number] | null {
+export function shiftSpan(start: number, end: number, edit: AxisEdit, limit: number, range: boolean): [number, number] | null {
 	if (edit.type === "insert") {
 		const nextStart = start >= edit.at ? start + edit.count : start
 		let nextEnd = end >= edit.at ? end + edit.count : end
@@ -505,7 +489,7 @@ function shiftArea(area: RefArea, edit: AxisEdit): RefArea | null {
 
 	const start = rowsAxis ? area.startRow : area.startCol
 	const end = rowsAxis ? area.endRow : area.endCol
-	const moved = shiftSpan(Math.min(start, end), Math.max(start, end), edit, rowsAxis ? MAX_ROWS : MAX_COLS, area.range)
+	const moved = shiftSpan(Math.min(start, end), Math.max(start, end), edit, rowsAxis ? MAX_ROWS : MAX_COLUMNS, area.range)
 
 	if (moved === null) {
 		return null
@@ -625,6 +609,11 @@ function prefixOf(name: string): string | null {
 	return null
 }
 
+// A function name without the _xlfn./_xlws. prefixes files store for newer functions.
+function bareFunctionName(name: string): string {
+	return name.replace(/^(?:_xlfn\.|_xlws\.)+/i, "")
+}
+
 // Rewrites each word in a formula (outside strings, quoted sheet names and brackets), told whether it
 // calls a function.
 function mapWords(formula: string, map: (word: string, called: boolean) => string): string {
@@ -738,7 +727,7 @@ function prefixParameters(formula: string): string {
 			const before = formula.charCodeAt(index - 1)
 			const called = after === 40
 			const reference = after === 33 || before === 33 || after === 58 || before === 58
-			const bare = name.replace(/^(?:_xlfn\.)?(?:_xlws\.)?/i, "").toUpperCase()
+			const bare = bareFunctionName(name).toUpperCase()
 			let bound = false
 
 			binds = called && (bare === "LET" || bare === "LAMBDA") ? bare : null
@@ -825,7 +814,7 @@ export function shownFormula(formula: string): string {
 
 		if (unbound !== name || !called) return unbound
 
-		const bare = name.replace(/^(?:_xlfn\.)?(?:_xlws\.)?/i, "")
+		const bare = bareFunctionName(name)
 		const prefix = prefixOf(bare)
 
 		return prefix !== null && name.toLowerCase() === `${prefix}${bare}`.toLowerCase() ? bare : name
@@ -918,7 +907,7 @@ function arrayTooLarge(formula: string): boolean {
 
 		const area = part.ref.area
 		const rows = area.kind === "cols" ? MAX_ROWS : Math.abs(area.endRow - area.startRow) + 1
-		const cols = area.kind === "rows" ? MAX_COLS : Math.abs(area.endCol - area.startCol) + 1
+		const cols = area.kind === "rows" ? MAX_COLUMNS : Math.abs(area.endCol - area.startCol) + 1
 
 		return rows * cols > MAX_ARRAY_CELLS
 	})
@@ -1085,7 +1074,7 @@ export function engineFormula(formula: string): string {
 			const next = formula.charCodeAt(end)
 
 			if (next === 40) {
-				const name = word.replace(/^(?:_xlfn\.|_xlws\.)+/i, "")
+				const name = bareFunctionName(word)
 
 				wrapNext = ARRAY_ARGUMENTS.has(name.toUpperCase())
 				text += wrapNext ? `ARRAYFORMULA(${name}` : name

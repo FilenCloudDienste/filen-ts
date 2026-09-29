@@ -1,6 +1,6 @@
-import { useState, type ReactElement } from "react"
+import { useState, type ReactElement, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
-import { Link, useNavigate, useRouterState } from "@tanstack/react-router"
+import { Link, useNavigate, useRouterState, type RegisteredRouter, type ValidateLinkOptions } from "@tanstack/react-router"
 import {
 	FolderClosedIcon,
 	NotebookPenIcon,
@@ -15,7 +15,8 @@ import {
 	KeyboardIcon,
 	LogOutIcon,
 	UserIcon,
-	CircleHelpIcon
+	CircleHelpIcon,
+	type LucideIcon
 } from "lucide-react"
 import { formatBytes } from "@filen/shared"
 import { cn } from "@filen/shared"
@@ -110,7 +111,7 @@ function AccountMenu() {
 	const [shortcutsOpen, setShortcutsOpen] = useState(false)
 	const [pending, setPending] = useState(false)
 
-	// Same shape and guard as the rail's four route-nav actions below: an open dialog owns the
+	// Same guard as the rail's route-nav actions (useNavigateAction): an open dialog owns the
 	// keyboard, so the overlay never stacks on top of one.
 	useAction("app.openShortcuts", () => {
 		if (isAnyDialogOpen()) {
@@ -236,9 +237,62 @@ function AccountMenu() {
 	)
 }
 
+// One section entry: a nav Link in a right-side tooltip. `ariaLabel` replaces `label` as the Link's name
+// when a count is folded in; `tooltipExtra` trails the label in the tooltip; `children` overlay the icon.
+// `relative` anchors the badge and overlays, so it is only added for entries that carry them.
+interface RailLinkProps<TOptions = unknown> extends RailEntryProps {
+	label: string
+	ariaLabel?: string | undefined
+	icon: LucideIcon
+	linkOptions: ValidateLinkOptions<RegisteredRouter, TOptions>
+	badgeCount?: number
+	tooltipExtra?: ReactNode
+	children?: ReactNode
+}
+
+function RailLink<TOptions>(props: RailLinkProps<TOptions>): ReactElement
+function RailLink({ active, reordering, label, ariaLabel, icon: Icon, linkOptions, badgeCount, tooltipExtra, children }: RailLinkProps) {
+	return (
+		<Tooltip disabled={reordering}>
+			<TooltipTrigger
+				render={
+					<Link
+						{...linkOptions}
+						aria-current={active ? "page" : undefined}
+						aria-label={ariaLabel ?? label}
+						className={
+							badgeCount === undefined && children === undefined
+								? railItemClass(active)
+								: cn(railItemClass(active), "relative")
+						}
+					>
+						<Icon />
+						{badgeCount !== undefined && badgeCount > 0 ? (
+							// aria-hidden: the count is already folded into the Link's own aria-label — a labelled
+							// element ignores descendant content for its accessible name, so a label here would be
+							// dead weight, not a second announcement.
+							<Badge
+								aria-hidden="true"
+								className="absolute -top-1 -right-1 h-4 min-w-4 justify-center rounded-full px-1 text-[10px] tabular-nums"
+							>
+								{badgeCount}
+							</Badge>
+						) : null}
+						{children}
+					</Link>
+				}
+			/>
+			<TooltipContent side="right">
+				{label}
+				{tooltipExtra}
+			</TooltipContent>
+		</Tooltip>
+	)
+}
+
 // This used to be a Popover trigger showing a quick-glance panel, with a "See all" footer link
 // to the real screen; the extra click/indirection was not worth it, so it is now a plain nav Link like
-// every other rail entry above, straight to /transfers. Also renders the aggregate {percent,
+// every other rail entry, straight to /transfers. Also renders the aggregate {percent,
 // speed} computeTransfersAggregate already computes (previously only activeCount was read anywhere):
 // a slim progress sliver along the icon's own bottom edge for `percent`, and the live rolling-window
 // `speed` folded into the tooltip text — mirrors mobile's floating pill's own speed+progress readout,
@@ -253,103 +307,65 @@ function TransfersEntry({ active, reordering }: RailEntryProps) {
 	useSpeedSampleAging()
 
 	return (
-		<Tooltip disabled={reordering}>
-			<TooltipTrigger
-				render={
-					<Link
-						to="/transfers"
-						aria-current={active ? "page" : undefined}
-						aria-label={
-							activeCount > 0 ? t("transfers:transfersActiveBadge", { count: activeCount }) : t("common:moduleTransfers")
-						}
-						className={cn(railItemClass(active), "relative")}
-					>
-						<ArrowDownUpIcon />
-						{activeCount > 0 ? (
-							// aria-hidden: the count is already folded into the Link's own aria-label above — a
-							// labelled element ignores descendant content for its accessible name, so a label
-							// here would be dead weight, not a second announcement.
-							<Badge
-								aria-hidden="true"
-								className="absolute -top-1 -right-1 h-4 min-w-4 justify-center rounded-full px-1 text-[10px] tabular-nums"
-							>
-								{activeCount}
-							</Badge>
-						) : null}
-						{showAggregate ? (
-							<span
-								aria-hidden="true"
-								className="absolute inset-x-2 bottom-1 h-[3px] overflow-hidden rounded-full bg-foreground/20"
-							>
-								<span
-									className="block h-full rounded-full bg-primary transition-[width] duration-300 ease-out"
-									style={{ width: `${String(percent)}%` }}
-								/>
-							</span>
-						) : null}
-					</Link>
-				}
-			/>
-			<TooltipContent side="right">
-				{t("common:moduleTransfers")}
-				{showAggregate ? (
+		<RailLink
+			active={active}
+			reordering={reordering}
+			label={t("common:moduleTransfers")}
+			ariaLabel={activeCount > 0 ? t("transfers:transfersActiveBadge", { count: activeCount }) : undefined}
+			icon={ArrowDownUpIcon}
+			linkOptions={{ to: "/transfers" }}
+			badgeCount={activeCount}
+			tooltipExtra={
+				showAggregate ? (
 					<span className="text-background/60"> · {t("transfers:transfersAggregateSpeed", { speed: formatBytes(speed) })}</span>
-				) : null}
-			</TooltipContent>
-		</Tooltip>
+				) : null
+			}
+		>
+			{showAggregate ? (
+				<span
+					aria-hidden="true"
+					className="absolute inset-x-2 bottom-1 h-[3px] overflow-hidden rounded-full bg-foreground/20"
+				>
+					<span
+						className="block h-full rounded-full bg-primary transition-[width] duration-300 ease-out"
+						style={{ width: `${String(percent)}%` }}
+					/>
+				</span>
+			) : null}
+		</RailLink>
 	)
 }
 
-// Playlists' own dedicated entry, straight to /playlists — a plain nav Link like Notes/Contacts above,
-// following TransfersEntry's own precedent (the newest plain-nav rail entry) for a destination this
-// simple: no badge/aggregate readout to carry, unlike Transfers' active-count/speed sliver. Previously
-// playlists only lived inside the now-playing popover's Playlists tab, unreachable without a playing
-// queue — this rail entry (plus nowPlayingPanel.tsx dropping that tab) fixes that reachability gap.
+// Previously playlists only lived inside the now-playing popover's Playlists tab, unreachable without a
+// playing queue — this entry (plus nowPlayingPanel.tsx dropping that tab) fixes that reachability gap.
 function PlaylistsEntry({ active, reordering }: RailEntryProps) {
 	const { t } = useTranslation("common")
 
 	return (
-		<Tooltip disabled={reordering}>
-			<TooltipTrigger
-				render={
-					<Link
-						to="/playlists"
-						aria-current={active ? "page" : undefined}
-						aria-label={t("modulePlaylists")}
-						className={railItemClass(active)}
-					>
-						<ListMusicIcon />
-					</Link>
-				}
-			/>
-			<TooltipContent side="right">{t("modulePlaylists")}</TooltipContent>
-		</Tooltip>
+		<RailLink
+			active={active}
+			reordering={reordering}
+			label={t("modulePlaylists")}
+			icon={ListMusicIcon}
+			linkOptions={{ to: "/playlists" }}
+		/>
 	)
 }
 
-// Photos' own dedicated entry, straight to /photos — same plain-nav shape as PlaylistsEntry right
-// above. Placed next to the Drive entry (below) rather than beside Transfers/Playlists/Chats:
-// photos is a derived VIEW over a directory the user picks from their own drive, not an independent
-// module with its own storage the way playlists/transfers are.
+// Default order puts Photos next to Drive rather than beside Transfers/Playlists/Chats: photos is a
+// derived VIEW over a directory the user picks from their own drive, not an independent module with
+// its own storage the way playlists/transfers are.
 function PhotosEntry({ active, reordering }: RailEntryProps) {
 	const { t } = useTranslation("common")
 
 	return (
-		<Tooltip disabled={reordering}>
-			<TooltipTrigger
-				render={
-					<Link
-						to="/photos"
-						aria-current={active ? "page" : undefined}
-						aria-label={t("modulePhotos")}
-						className={railItemClass(active)}
-					>
-						<ImagesIcon />
-					</Link>
-				}
-			/>
-			<TooltipContent side="right">{t("modulePhotos")}</TooltipContent>
-		</Tooltip>
+		<RailLink
+			active={active}
+			reordering={reordering}
+			label={t("modulePhotos")}
+			icon={ImagesIcon}
+			linkOptions={{ to: "/photos" }}
+		/>
 	)
 }
 
@@ -357,22 +373,13 @@ function DriveEntry({ active, reordering }: RailEntryProps) {
 	const { t } = useTranslation()
 
 	return (
-		<Tooltip disabled={reordering}>
-			<TooltipTrigger
-				render={
-					<Link
-						to="/drive/$"
-						params={{ _splat: "" }}
-						aria-current={active ? "page" : undefined}
-						aria-label={t("moduleDrive")}
-						className={railItemClass(active)}
-					>
-						<FolderClosedIcon />
-					</Link>
-				}
-			/>
-			<TooltipContent side="right">{t("moduleDrive")}</TooltipContent>
-		</Tooltip>
+		<RailLink
+			active={active}
+			reordering={reordering}
+			label={t("moduleDrive")}
+			icon={FolderClosedIcon}
+			linkOptions={{ to: "/drive/$", params: { _splat: "" } }}
+		/>
 	)
 }
 
@@ -384,34 +391,15 @@ function ContactsEntry({ active, reordering }: RailEntryProps) {
 	const incomingRequestCount = contactRequestsQuery.status === "success" ? contactRequestsQuery.data.incoming.length : 0
 
 	return (
-		<Tooltip disabled={reordering}>
-			<TooltipTrigger
-				render={
-					<Link
-						to="/contacts"
-						search={{ section: DEFAULT_CONTACTS_SECTION_FILTER }}
-						aria-current={active ? "page" : undefined}
-						aria-label={
-							incomingRequestCount > 0 ? t("contactRequestsBadge", { count: incomingRequestCount }) : t("moduleContacts")
-						}
-						className={cn(railItemClass(active), "relative")}
-					>
-						<UsersIcon />
-						{incomingRequestCount > 0 ? (
-							// aria-hidden: the count is folded into the Link's own aria-label (a labelled element
-							// ignores descendant content for its accessible name) — mirrors TransfersEntry's badge.
-							<Badge
-								aria-hidden="true"
-								className="absolute -top-1 -right-1 h-4 min-w-4 justify-center rounded-full px-1 text-[10px] tabular-nums"
-							>
-								{incomingRequestCount}
-							</Badge>
-						) : null}
-					</Link>
-				}
-			/>
-			<TooltipContent side="right">{t("moduleContacts")}</TooltipContent>
-		</Tooltip>
+		<RailLink
+			active={active}
+			reordering={reordering}
+			label={t("moduleContacts")}
+			ariaLabel={incomingRequestCount > 0 ? t("contactRequestsBadge", { count: incomingRequestCount }) : undefined}
+			icon={UsersIcon}
+			linkOptions={{ to: "/contacts", search: { section: DEFAULT_CONTACTS_SECTION_FILTER } }}
+			badgeCount={incomingRequestCount}
+		/>
 	)
 }
 
@@ -419,21 +407,13 @@ function NotesEntry({ active, reordering }: RailEntryProps) {
 	const { t } = useTranslation()
 
 	return (
-		<Tooltip disabled={reordering}>
-			<TooltipTrigger
-				render={
-					<Link
-						to="/notes"
-						aria-current={active ? "page" : undefined}
-						aria-label={t("moduleNotes")}
-						className={railItemClass(active)}
-					>
-						<NotebookPenIcon />
-					</Link>
-				}
-			/>
-			<TooltipContent side="right">{t("moduleNotes")}</TooltipContent>
-		</Tooltip>
+		<RailLink
+			active={active}
+			reordering={reordering}
+			label={t("moduleNotes")}
+			icon={NotebookPenIcon}
+			linkOptions={{ to: "/notes" }}
+		/>
 	)
 }
 
@@ -445,30 +425,15 @@ function ChatsEntry({ active, reordering }: RailEntryProps) {
 	const unreadChatsCount = useChatsUnreadCount(currentUserId)
 
 	return (
-		<Tooltip disabled={reordering}>
-			<TooltipTrigger
-				render={
-					<Link
-						to="/chats"
-						aria-current={active ? "page" : undefined}
-						aria-label={unreadChatsCount > 0 ? t("chatsUnreadBadge", { count: unreadChatsCount }) : t("moduleChats")}
-						className={cn(railItemClass(active), "relative")}
-					>
-						<MessagesSquareIcon />
-						{unreadChatsCount > 0 ? (
-							// aria-hidden: the count is folded into the Link's own aria-label (mirrors TransfersEntry's badge).
-							<Badge
-								aria-hidden="true"
-								className="absolute -top-1 -right-1 h-4 min-w-4 justify-center rounded-full px-1 text-[10px] tabular-nums"
-							>
-								{unreadChatsCount}
-							</Badge>
-						) : null}
-					</Link>
-				}
-			/>
-			<TooltipContent side="right">{t("moduleChats")}</TooltipContent>
-		</Tooltip>
+		<RailLink
+			active={active}
+			reordering={reordering}
+			label={t("moduleChats")}
+			ariaLabel={unreadChatsCount > 0 ? t("chatsUnreadBadge", { count: unreadChatsCount }) : undefined}
+			icon={MessagesSquareIcon}
+			linkOptions={{ to: "/chats" }}
+			badgeCount={unreadChatsCount}
+		/>
 	)
 }
 
@@ -476,21 +441,13 @@ function SettingsEntry({ active, reordering }: RailEntryProps) {
 	const { t } = useTranslation()
 
 	return (
-		<Tooltip disabled={reordering}>
-			<TooltipTrigger
-				render={
-					<Link
-						to="/settings/account"
-						aria-current={active ? "page" : undefined}
-						aria-label={t("settings")}
-						className={railItemClass(active)}
-					>
-						<SettingsIcon />
-					</Link>
-				}
-			/>
-			<TooltipContent side="right">{t("settings")}</TooltipContent>
-		</Tooltip>
+		<RailLink
+			active={active}
+			reordering={reordering}
+			label={t("settings")}
+			icon={SettingsIcon}
+			linkOptions={{ to: "/settings/account" }}
+		/>
 	)
 }
 
@@ -505,73 +462,38 @@ const RAIL_ENTRIES: Record<RailEntryId, (props: RailEntryProps) => ReactElement>
 	settings: SettingsEntry
 }
 
+// Registered at module scope (default unassigned) — this only wires the LIVE combo, which starts as ""
+// (react-hotkeys-hook's parser treats it as "never matches") and works the instant a user rebinds it,
+// with no further code change. Guarded on isAnyDialogOpen() (dialogGuard.ts, the same shared Base UI
+// signal themeProvider.tsx uses — this rail is mounted outside the drive feature's own isDialogOpen
+// chain too) so a rebound combo can't navigate away out from under an open dialog/preview.
+function useNavigateAction(id: string, to: "/settings/account" | "/transfers" | "/playlists" | "/photos"): void {
+	const navigate = useNavigate()
+
+	useAction(
+		id,
+		() => {
+			if (isAnyDialogOpen()) {
+				return
+			}
+
+			void navigate({ to })
+		},
+		undefined,
+		[navigate, to]
+	)
+}
+
 export function IconRail() {
 	const { t } = useTranslation()
-	const navigate = useNavigate()
 	const pathname = useRouterState({ select: state => state.location.pathname })
 	const order = useRailOrderQuery().data ?? DEFAULT_RAIL_ORDER
 	const { slotProps } = useRailReorder(order, saveRailOrder)
 
-	// Registered above at module scope (default unassigned) — this only wires the LIVE combo, which
-	// starts as "" (react-hotkeys-hook's parser treats it as "never matches") and works the instant a
-	// user rebinds it via a future shortcuts UI, with no further code change. Guarded on
-	// isAnyDialogOpen() (dialogGuard.ts, the same shared Base UI signal themeProvider.tsx uses — this
-	// rail is mounted outside the drive feature's own isDialogOpen chain too) so a rebound combo can't
-	// navigate away out from under an open dialog/preview.
-	useAction(
-		"app.openSettings",
-		() => {
-			if (isAnyDialogOpen()) {
-				return
-			}
-
-			void navigate({ to: "/settings/account" })
-		},
-		undefined,
-		[navigate]
-	)
-
-	// Mirrors the app.openSettings wiring directly above.
-	useAction(
-		"app.openTransfers",
-		() => {
-			if (isAnyDialogOpen()) {
-				return
-			}
-
-			void navigate({ to: "/transfers" })
-		},
-		undefined,
-		[navigate]
-	)
-
-	// Mirrors the app.openTransfers wiring directly above.
-	useAction(
-		"app.openPlaylists",
-		() => {
-			if (isAnyDialogOpen()) {
-				return
-			}
-
-			void navigate({ to: "/playlists" })
-		},
-		undefined,
-		[navigate]
-	)
-
-	// Mirrors the app.openPlaylists wiring directly above.
-	useAction(
-		"app.openPhotos",
-		() => {
-			if (isAnyDialogOpen()) {
-				return
-			}
-
-			void navigate({ to: "/photos" })
-		},
-		undefined,
-		[navigate]
-	)
+	useNavigateAction("app.openSettings", "/settings/account")
+	useNavigateAction("app.openTransfers", "/transfers")
+	useNavigateAction("app.openPlaylists", "/playlists")
+	useNavigateAction("app.openPhotos", "/photos")
 
 	return (
 		<nav

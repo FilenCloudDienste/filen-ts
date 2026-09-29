@@ -1,5 +1,9 @@
+import type { Note } from "@filen/sdk-rs"
+import { i18n } from "@/lib/i18n"
+import { plainErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
+import { runOp } from "@/lib/actions/outcome"
 import { queryClient } from "@/queries/client"
-import { noteContentQueryKey } from "@/features/notes/queries/noteContent"
+import { noteContentQueryKey, readNoteContent, type NoteContentResult } from "@/features/notes/queries/noteContent"
 import { useNotesInflightStore } from "@/features/notes/store/useNotesInflight"
 import { newestEntry } from "@/features/notes/lib/sync.logic"
 
@@ -10,7 +14,24 @@ import { newestEntry } from "@/features/notes/lib/sync.logic"
 // see is stale, which is exactly the case those affordances stay enabled offline for.
 export function localNoteContent(uuid: string): string | undefined {
 	return (
-		newestEntry(useNotesInflightStore.getState().inflightContent[uuid] ?? [])?.content ??
+		newestEntry(useNotesInflightStore.getState().inflightContent[uuid])?.content ??
 		queryClient.getQueryData<string | undefined>(noteContentQueryKey(uuid))
 	)
+}
+
+// Local-first, then fetch: a note already open in the editor has its content warm, so copy/export cost
+// no extra round trip. Content that exists but never decrypted is reported as such, never coalesced to
+// "" (an empty export is not a backup). A fetch failure propagates as a thrown ErrorDTO (runOp).
+export async function resolveLocalFirstContent(note: Note): Promise<NoteContentResult> {
+	const local = localNoteContent(note.uuid)
+
+	if (local !== undefined) {
+		return { status: "ok", content: local }
+	}
+
+	return runOp(readNoteContent(note))
+}
+
+export function noteUndecryptableError(): ErrorDTO {
+	return plainErrorDTO(i18n.t("notes:noteContentUndecryptableError"))
 }

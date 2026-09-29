@@ -26,11 +26,11 @@ const PKG = join(require.resolve("@filen/sdk-rs"), "..")
 // "pool". Hence the exact vite pin in package.json; drop it once a release emits that chunk again.
 const ARTIFACTS = ["filen-sdk-worker-thread.js", "sdk-rs.js", "sdk-rs_bg.wasm"]
 const MIME: Record<string, string> = { ".js": "text/javascript", ".wasm": "application/wasm" }
-const COI: Record<string, string> = {
+export const COI_HEADERS = {
 	"Cross-Origin-Opener-Policy": "same-origin",
 	"Cross-Origin-Embedder-Policy": "require-corp",
 	"Cross-Origin-Resource-Policy": "same-origin"
-}
+} as const
 
 // Map a request path to the package-relative artifact it serves, or null — directory-agnostic so it
 // works both at the worker's dev source dir and at the built assets dir. `sdk.worker.ts` and Vite's
@@ -81,7 +81,7 @@ export function sdkArtifacts(): Plugin {
 					return
 				}
 				res.setHeader("Content-Type", MIME[extname(file)] ?? "text/javascript")
-				for (const [k, v] of Object.entries(COI)) {
+				for (const [k, v] of Object.entries(COI_HEADERS)) {
 					res.setHeader(k, v)
 				}
 				createReadStream(file)

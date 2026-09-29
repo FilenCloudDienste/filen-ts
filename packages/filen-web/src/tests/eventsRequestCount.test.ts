@@ -1,9 +1,8 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { createElement, type ReactNode } from "react"
 import { act, renderHook, waitFor } from "@testing-library/react"
-import { QueryClient, QueryClientProvider, focusManager, onlineManager } from "@tanstack/react-query"
+import { focusManager, onlineManager } from "@tanstack/react-query"
 import type { SocketEvent, UserEventResult } from "@filen/sdk-rs"
 
 const { getUserEvents, persistQuery } = vi.hoisted(() => ({
@@ -13,14 +12,7 @@ const { getUserEvents, persistQuery } = vi.hoisted(() => ({
 
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: { getUserEvents } }))
 
-// The production defaults minus the persister (sqlite, unavailable under vitest).
-vi.mock("@/queries/client", () => ({
-	queryClient: new QueryClient({
-		defaultOptions: {
-			queries: { staleTime: 0, gcTime: Infinity, retry: false, refetchOnWindowFocus: true, refetchOnReconnect: true }
-		}
-	})
-}))
+vi.mock("@/queries/client", async () => ({ queryClient: (await import("@/tests/testQueryClient")).createTestQueryClient() }))
 
 vi.mock("@/queries/persist", () => ({ persister: { persistQuery } }))
 
@@ -28,6 +20,7 @@ vi.mock("@/lib/log", () => ({ log: { warn: vi.fn(), error: vi.fn(), info: vi.fn(
 vi.mock("@/features/shell/lib/performLogout", () => ({ performLogout: vi.fn() }))
 
 import { queryClient } from "@/queries/client"
+import { queryClientWrapper } from "@/tests/testQueryClient"
 import {
 	EVENTS_QUERY_KEY,
 	EVENTS_SLICE_CAP,
@@ -53,9 +46,7 @@ function ok(id: bigint): UserEventResult {
 const PAGE_ONE = [ok(30n), ok(29n), ok(28n)]
 const PAGE_TWO = [ok(27n), ok(26n)]
 
-function wrapper({ children }: { children: ReactNode }) {
-	return createElement(QueryClientProvider, { client: queryClient, children })
-}
+const wrapper = queryClientWrapper(queryClient)
 
 function mountEvents() {
 	return renderHook(() => useEventsQuery(), { wrapper })

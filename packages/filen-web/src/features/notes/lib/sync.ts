@@ -18,7 +18,7 @@ import { i18n } from "@/lib/i18n"
 import { forgetNotePushes, rememberNotePush } from "@/features/notes/lib/pushEchoes"
 import { heldNotes, releaseAllNoteHolds } from "@/features/notes/lib/remoteEditHolds"
 import { forgetTabEditors, tabEditorAdopts, tabEditorHasPush, tabEditorLanded, tabEditorPushed } from "@/features/notes/lib/tabEditors"
-import { followContent } from "@/features/notes/lib/remoteContent"
+import { followContent, writeContentKeepingRemountKey } from "@/features/notes/lib/remoteContent"
 import { followShowableDrafts } from "@/features/notes/lib/showableDrafts"
 import { log } from "@/lib/log"
 import { withoutKey } from "@/lib/utils"
@@ -27,7 +27,7 @@ import { asErrorDTO } from "@/lib/sdk/errors"
 import { kvGetJson, kvSetJson, kvDelete } from "@/lib/storage/adapter"
 import { type OutboxChannelTransport, type OutboxRole, type PushDetail } from "@/lib/storage/outboxChannel"
 import { noteContentQueryKey, readNoteContent } from "@/features/notes/queries/noteContent"
-import { fetchNotes, notesQueryGet, notesQueryUpdate } from "@/features/notes/queries/notes"
+import { fetchNotes, notesQueryFind, notesQueryUpdate } from "@/features/notes/queries/notes"
 import {
 	useNotesInflightStore,
 	TAB_ID,
@@ -75,7 +75,7 @@ const SYNC_DEBOUNCE_MS = 3000
 // returns carries the metadata of the pre-push snapshot, which a socket patch may have moved on since.
 // Never rolls a row back past a newer edit it already shows.
 function patchRowAfterPush(pushed: Note): void {
-	const row = notesQueryGet()?.find(n => n.uuid === pushed.uuid)
+	const row = notesQueryFind(pushed.uuid)
 
 	if (row === undefined || pushed.editedTimestamp <= row.editedTimestamp) {
 		return
@@ -467,7 +467,7 @@ export class Sync {
 			sessionBaseHash
 		})
 		const own = newestEntry(entries)
-		const previous = newestEntry(useNotesInflightStore.getState().inflightContent[note.uuid] ?? [])
+		const previous = newestEntry(useNotesInflightStore.getState().inflightContent[note.uuid])
 		// Typed on this tab's own previous entry, or on the orphan draft its editor showed: it carries that
 		// entry's base.
 		const continues = previous !== undefined && (previous.origin === this.tabId || tabEditorAdopts(note.uuid, previous.content))
@@ -560,7 +560,7 @@ export class Sync {
 		})
 
 		if (detail.overwrote === true) {
-			const note = notesQueryGet()?.find(n => n.uuid === noteUuid) ?? pushed?.note
+			const note = notesQueryFind(noteUuid) ?? pushed?.note
 
 			toast(
 				i18n.t("notes:noteOverwroteNewerRemoteChanges", {
@@ -964,7 +964,7 @@ export class Sync {
 						return
 					}
 
-					const mostRecentContent = [...contents].sort((a, b) => b.timestamp - a.timestamp).at(0)
+					const mostRecentContent = newestEntry(contents)
 
 					if (!mostRecentContent) {
 						return
@@ -974,7 +974,7 @@ export class Sync {
 					// refetch (type, participants, encryption key) between the edit-time snapshot and
 					// this flush is reflected in the push. Fall back to the snapshot if the note has
 					// left the cache (concurrently deleted).
-					const liveNote = notesQueryGet()?.find(n => n.uuid === noteUuid) ?? mostRecentContent.note
+					const liveNote = notesQueryFind(noteUuid) ?? mostRecentContent.note
 
 					// Capture the LOCAL author-time of the entry we are about to push BEFORE the await.
 					// The prune below removes exactly what we sent (and strictly-older entries) by this
@@ -1138,24 +1138,9 @@ export class Sync {
 
 					this.transport?.broadcastPushed(noteUuid, pushedContentHash, detail)
 
-					// The pushed content IS the cloud content now — write it into the per-note content
-					// query cache so an editor reseed after the queue drains paints what the user typed,
-					// never the stale pre-edit cache. dataUpdatedAt is PRESERVED so the editor's remount
-					// key (this timestamp) does not advance and reset the cursor after every push.
-					const contentKey = noteContentQueryKey(noteUuid)
-
-					// Cancel-before-patch, like every drive listing patch: a content read snapshotted BEFORE
-					// this push would otherwise land after it, overwrite the pushed content with pre-edit
-					// bytes AND advance dataUpdatedAt, remounting the editor onto the stale text.
-					void queryClient.cancelQueries({ queryKey: contentKey, exact: true })
-
-					const previousUpdatedAt = queryClient.getQueryState<string | undefined>(contentKey)?.dataUpdatedAt
-
-					queryClient.setQueryData<string>(
-						contentKey,
-						mostRecentContent.content,
-						previousUpdatedAt !== undefined ? { updatedAt: previousUpdatedAt } : undefined
-					)
+					// An editor reseed after the queue drains paints what the user typed. Cancels even when the
+					// cache already holds it: a read snapshotted before this push would land after it.
+					writeContentKeepingRemountKey(noteUuid, mostRecentContent.content)
 
 					// The content we just pushed IS the cloud content now, so it becomes the base for
 					// every entry typed during the round trip (they survive the prune). Without this the

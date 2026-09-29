@@ -1,7 +1,8 @@
-import { type, type Type } from "arktype"
+import type { Type } from "arktype"
 import { acquireStorage, type StorageHandle } from "@/lib/storage/leader"
 import { parseEnvelope, stringifyEnvelope } from "@/lib/serialize"
 import { log } from "@/lib/log"
+import { decodeValue } from "@/lib/storage/decode"
 
 let handle: Promise<StorageHandle> | null = null
 
@@ -28,35 +29,25 @@ export function storage(): Promise<StorageHandle> {
 	return handle
 }
 
-export async function kvGetJson<T>(key: string, schema: Type<T>): Promise<T | null> {
-	const { api } = await storage()
-	const raw = await api.kvGet(key)
-
-	if (raw === null) {
-		return null
-	}
-
+function decodeKvValue<T>(key: string, raw: string, schema: Type<T>): T | null {
 	let parsed: unknown
 
 	try {
 		parsed = parseEnvelope(raw)
 	} catch {
 		log.warn("kv", `dropping unparseable value at ${key}`)
+
 		return null
 	}
 
-	const out = schema(parsed)
+	return decodeValue(parsed, schema, "kv", `value at ${key}`)
+}
 
-	if (out instanceof type.errors) {
-		log.warn("kv", `dropping invalid value at ${key}`, out.summary)
-		return null
-	}
+export async function kvGetJson<T>(key: string, schema: Type<T>): Promise<T | null> {
+	const { api } = await storage()
+	const raw = await api.kvGet(key)
 
-	// arktype's `Type<t>` callable returns `distill.Out<t>` (its "morph-aware" output shape), which
-	// TS cannot statically prove equals the bare `T` this function is generic over — that distinction
-	// only matters for schemas with `.pipe()`/default morphs, none of which this app's kv schemas use.
-	// This narrow assertion (arktype's own documented generic-wrapper friction) is the bridge.
-	return out as T
+	return raw === null ? null : decodeKvValue(key, raw, schema)
 }
 
 // Every row under a prefix in one round trip, each validated like kvGetJson; a row that fails to parse
@@ -67,24 +58,11 @@ export async function kvEntriesJson<T>(prefix: string, schema: Type<T>): Promise
 	const out: [string, T][] = []
 
 	for (const [key, raw] of rows) {
-		let parsed: unknown
+		const value = decodeKvValue(key, raw, schema)
 
-		try {
-			parsed = parseEnvelope(raw)
-		} catch {
-			log.warn("kv", `dropping unparseable value at ${key}`)
-			continue
+		if (value !== null) {
+			out.push([key, value])
 		}
-
-		const value = schema(parsed)
-
-		if (value instanceof type.errors) {
-			log.warn("kv", `dropping invalid value at ${key}`, value.summary)
-			continue
-		}
-
-		// Same arktype generic bridge as kvGetJson's.
-		out.push([key, value as T])
 	}
 
 	return out

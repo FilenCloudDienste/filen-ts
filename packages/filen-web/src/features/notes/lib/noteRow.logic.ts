@@ -1,5 +1,6 @@
 import { fastLocaleCompare } from "@filen/shared"
 import type { Note, NoteParticipant, NoteTag } from "@filen/sdk-rs"
+import { tagDisplayName } from "@/features/notes/lib/sort"
 
 // Pure per-row content derivations, split out of noteRow.tsx so the row's non-trivial rules
 // (shared-by ownership, tag ordering, preview omission, self-exclusion) are unit-testable without a
@@ -24,10 +25,10 @@ export function noteRowSharedByEmail(note: Note, currentUserId: bigint | undefin
 	return note.participants.find(participant => participant.isOwner)?.email ?? null
 }
 
-// The note's own tags, sorted by display name (fastLocaleCompare on name ?? uuid) — the row's tag-chip
+// The note's own tags, sorted by display name (fastLocaleCompare on tagDisplayName) — the row's tag-chip
 // strip order, matching mobile. Returns a NEW array, never mutates note.tags.
 export function noteRowTags(note: Note): NoteTag[] {
-	return [...note.tags].sort((a, b) => fastLocaleCompare(a.name ?? a.uuid, b.name ?? b.uuid))
+	return [...note.tags].sort((a, b) => fastLocaleCompare(tagDisplayName(a), tagDisplayName(b)))
 }
 
 // Participants other than the current user — the avatar strip never shows your own avatar (mobile

@@ -5,8 +5,8 @@ import { queryClient } from "@/queries/client"
 import { removeQueriesAndPersisted } from "@/queries/persist"
 import { accountQueryGet } from "@/queries/account"
 import { notesQueryUpsert, notesQueryRemove } from "@/features/notes/queries/notes"
-import { noteContentQueryKey, readNoteContent } from "@/features/notes/queries/noteContent"
-import { localNoteContent } from "@/features/notes/lib/localContent"
+import { noteContentQueryKey } from "@/features/notes/queries/noteContent"
+import { resolveLocalFirstContent, noteUndecryptableError } from "@/features/notes/lib/localContent"
 import { recordNotePush } from "@/features/notes/lib/pushEchoes"
 import { isNoteOwner } from "@/features/notes/lib/sort"
 import { asErrorDTO, plainErrorDTO } from "@/lib/sdk/errors"
@@ -54,25 +54,15 @@ export async function retypeNewNote(note: Note, noteType: NoteType): Promise<Not
 
 // ── Copy content ─────────────────────────────────────────────────────────
 
-// Local-first-then-fetch (localNoteContent: unsynced outbox edit, then the content cache): an
-// already-open note's content is almost certainly warm, so this only round-trips to the SDK when it
-// genuinely isn't — and what gets copied is what the user sees, not the last text that reached the
-// server. A fetch failure propagates as a thrown ErrorDTO (runOp) — the caller's own try/catch
-// (noteMenu.tsx's copyContent handler, same shape as its copyId sibling) surfaces it as an error toast
-// instead of silently copying an empty string. Content that exists but never decrypted throws the same
-// way, for the same reason.
+// What gets copied is what the user sees (resolveLocalFirstContent). A fetch failure or undecryptable
+// content throws an ErrorDTO — the caller's own try/catch (noteMenu.tsx's copyContent handler) surfaces
+// it as an error toast instead of silently copying an empty string.
 export async function resolveNoteContent(note: Note): Promise<string> {
-	const local = localNoteContent(note.uuid)
-
-	if (local !== undefined) {
-		return local
-	}
-
-	const result = await runOp(readNoteContent(note))
+	const result = await resolveLocalFirstContent(note)
 
 	if (result.status === "undecryptable") {
 		// eslint-disable-next-line @typescript-eslint/only-throw-error -- ErrorDTO is the boundary contract, mirrors runOp's own convention
-		throw plainErrorDTO(i18n.t("notes:noteContentUndecryptableError"))
+		throw noteUndecryptableError()
 	}
 
 	return result.content

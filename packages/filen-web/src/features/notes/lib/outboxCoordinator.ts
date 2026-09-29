@@ -1,4 +1,3 @@
-import { type } from "arktype"
 import {
 	type OutboxChannelMsg,
 	type OutboxRoute,
@@ -7,7 +6,7 @@ import {
 	bindOutboxLeadership
 } from "@/lib/storage/outboxChannel"
 import { sync } from "@/features/notes/lib/sync"
-import { inflightContentSchema, type RemoteEnqueue } from "@/features/notes/lib/sync.logic"
+import { inflightContentSchema, inflightEntrySchema, type RemoteEnqueue } from "@/features/notes/lib/sync.logic"
 import { setOutboxHydrated, type InflightContent } from "@/features/notes/store/useNotesInflight"
 import { rememberNotePush, setNotePushBroadcast } from "@/features/notes/lib/pushEchoes"
 import { setNoteAnswerBroadcast, useNotesRemoteEditStore } from "@/features/notes/store/useNoteRemoteEdit"
@@ -19,19 +18,8 @@ import { setNoteAnswerBroadcast, useNotesRemoteEditStore } from "@/features/note
 
 const OUTBOX_CHANNEL = "filen-web-notes-outbox"
 
-// A follower's forwarded edit, validated at the trust boundary the same way the durable outbox validates its
-// persisted entries: `note` as a non-null object only (over-constraining the wasm Note snapshot would drop
-// otherwise-valid forwards the moment the SDK adds a field; the leader prefers the live note from its own
-// list cache anyway).
-const remoteEnqueueSchema = type({
-	note: "object",
-	content: "string",
-	timestamp: "number",
-	"baseContentHash?": "string",
-	"origin?": "string",
-	"carriedFrom?": "string",
-	"answer?": "true"
-}).as<RemoteEnqueue>()
+// A follower's forwarded edit, validated at the trust boundary by the durable outbox's own entry schema.
+const remoteEnqueueSchema = inflightEntrySchema.omit("orphan").and({ "answer?": "true" }).as<RemoteEnqueue>()
 
 const ROUTE: OutboxRoute<RemoteEnqueue, InflightContent> = {
 	enqueueSchema: remoteEnqueueSchema,

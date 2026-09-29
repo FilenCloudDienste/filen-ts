@@ -3,8 +3,7 @@ import { ReceiptIcon } from "lucide-react"
 import { formatBillingCost } from "@/features/settings/lib/billing"
 import { formatShortDate } from "@/lib/formatDate"
 import type { AccountQuerySuccess } from "@/queries/account"
-import { SettingsBlock } from "@/features/settings/components/settingsLayout"
-import { EmptyMessage } from "@/components/emptyMessage"
+import { SettingsTableBlock } from "@/features/settings/components/billing/billingTable"
 
 interface InvoicesBlockProps {
 	accountQuery: AccountQuerySuccess
@@ -16,45 +15,23 @@ interface InvoicesBlockProps {
 // read-only by construction, not by an omitted button.
 function InvoicesBlock({ accountQuery }: InvoicesBlockProps) {
 	const { t } = useTranslation("settings")
-	const { subsInvoices } = accountQuery.data
 
 	return (
-		<SettingsBlock>
-			{subsInvoices.length === 0 ? (
-				<EmptyMessage
-					className="rounded-none border-0 p-4"
-					icon={ReceiptIcon}
-					title={t("settingsBillingInvoicesEmptyTitle")}
-					description={t("settingsBillingInvoicesEmptyDescription")}
-				/>
-			) : (
-				<div className="overflow-x-auto">
-					<table className="w-full text-left text-sm">
-						<thead>
-							<tr className="text-xs text-muted-foreground">
-								<th className="pb-2 font-medium">{t("settingsBillingColumnPlan")}</th>
-								<th className="pb-2 font-medium">{t("settingsBillingColumnGateway")}</th>
-								<th className="pb-2 font-medium">{t("settingsBillingColumnCost")}</th>
-								<th className="pb-2 font-medium">{t("settingsBillingColumnDate")}</th>
-							</tr>
-						</thead>
-						<tbody>
-							{subsInvoices.map(invoice => (
-								<tr
-									key={invoice.id}
-									className="border-t border-border/60"
-								>
-									<td className="py-2">{invoice.planName}</td>
-									<td className="py-2 capitalize">{invoice.gateway}</td>
-									<td className="py-2 tabular-nums">{formatBillingCost(invoice.planCost)}</td>
-									<td className="py-2 tabular-nums">{formatShortDate(invoice.timestamp)}</td>
-								</tr>
-							))}
-						</tbody>
-					</table>
-				</div>
-			)}
-		</SettingsBlock>
+		<SettingsTableBlock
+			rows={accountQuery.data.subsInvoices}
+			rowKey={invoice => invoice.id}
+			columns={[
+				{ header: t("settingsBillingColumnPlan"), cell: invoice => invoice.planName },
+				{ header: t("settingsBillingColumnGateway"), className: "capitalize", cell: invoice => invoice.gateway },
+				{ header: t("settingsBillingColumnCost"), className: "tabular-nums", cell: invoice => formatBillingCost(invoice.planCost) },
+				{ header: t("settingsBillingColumnDate"), className: "tabular-nums", cell: invoice => formatShortDate(invoice.timestamp) }
+			]}
+			empty={{
+				icon: ReceiptIcon,
+				title: t("settingsBillingInvoicesEmptyTitle"),
+				description: t("settingsBillingInvoicesEmptyDescription")
+			}}
+		/>
 	)
 }
 

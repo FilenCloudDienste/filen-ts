@@ -6,7 +6,7 @@ import { i18n } from "@/lib/i18n"
 import { queryClient } from "@/queries/client"
 import { accountQueryGet, markAccountStale } from "@/queries/account"
 import {
-	driveListingQueryKey,
+	cachedListing,
 	driveListingQueryUpdate,
 	driveListingQueryUpdateGlobal,
 	batchListingPatches,
@@ -25,6 +25,7 @@ import {
 	narrowItem,
 	upsertDriveItem,
 	asDirectoryOrFile,
+	isDirectoryItem,
 	withColor,
 	withFavorited,
 	withNameOf,
@@ -386,9 +387,7 @@ function isLiveVersion(file: FileItem, version: FileVersion): boolean {
 		return true
 	}
 
-	const siblings = queryClient.getQueryData<DriveItem[]>(
-		driveListingQueryKey({ variant: "drive", uuid: normalizeParentUuid(file.data.parent, currentRootUuid()) })
-	)
+	const siblings = cachedListing("drive", normalizeParentUuid(file.data.parent, currentRootUuid()))
 
 	return siblings?.some(row => row.data.uuid === version.uuid) === true
 }
@@ -517,7 +516,7 @@ export async function disableLink(item: DriveItem, current: DriveItemLinkStatus)
 export function disableLinks(items: DriveItem[]): Promise<BulkOutcome<DriveItem>> {
 	return batchListingPatches(() =>
 		runBulkOutcomes(items, async (item): Promise<VoidActionOutcome> => {
-			const isDirectory = asDirectoryOrFile(item).type === "directory"
+			const isDirectory = isDirectoryItem(item)
 			const held = isDirectory ? undefined : heldLinkStatus(item)
 			let failure: VoidActionOutcome | undefined
 

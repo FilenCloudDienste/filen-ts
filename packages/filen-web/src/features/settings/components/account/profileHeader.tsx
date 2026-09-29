@@ -15,7 +15,7 @@ interface ProfileHeaderProps {
 // Billing page's rule (tierLabelKey: isPremium only, never a plan name) and the usage the Storage
 // row's derivation, so the three surfaces cannot disagree.
 function ProfileHeader({ accountQuery }: ProfileHeaderProps) {
-	const { t } = useTranslation("settings")
+	const { t } = useTranslation(["settings", "common"])
 	const { nickName, email, isPremium, storageUsed, maxStorage, versionedStorage } = accountQuery.data
 	const hasNickname = nickName !== undefined && nickName.length > 0
 	const breakdown = deriveStorageBreakdown(storageUsed, maxStorage, versionedStorage)
@@ -32,7 +32,7 @@ function ProfileHeader({ accountQuery }: ProfileHeaderProps) {
 				<div className="flex items-center justify-between gap-2">
 					<Badge variant={isPremium ? "default" : "secondary"}>{t(tierLabelKey(isPremium))}</Badge>
 					<span className="truncate text-xs text-muted-foreground tabular-nums">
-						{t("settingsStorageUsage", {
+						{t("common:storageUsage", {
 							used: formatBytes(Number(breakdown.usedBytes)),
 							total: formatBytes(Number(breakdown.maxBytes))
 						})}

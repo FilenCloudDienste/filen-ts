@@ -7,7 +7,7 @@ import { asErrorDTO, DIRECTORY_NOT_FOUND_PREFIX, type ErrorDTO } from "@/lib/sdk
 import { sdkApi } from "@/lib/sdk/client"
 import { queryClient } from "@/queries/client"
 import { cachedQuery } from "@/queries/patch"
-import { asDirectoryOrFile, narrowItem, type DriveItem } from "@/features/drive/lib/item"
+import { isDirectoryItem, isSharedRootDriveItem, narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { currentRootUuid } from "@/features/drive/lib/actions"
 import { getPerDirectoryKey } from "@/features/drive/lib/preferences"
 import {
@@ -114,7 +114,7 @@ async function unlistedSharedRoot(
 ): Promise<DriveItem | null> {
 	const uuid = item.data.uuid
 
-	if (asDirectoryOrFile(item).type === "directory") {
+	if (isDirectoryItem(item)) {
 		const dir = await sdkApi.getDirectory(uuid)
 
 		return dir === undefined || dir.parent === "trash" ? null : narrowItem(dir)
@@ -317,7 +317,7 @@ export async function recheckClipboard(): Promise<boolean> {
 
 		const row = rows === null ? null : currentRow(item, rows)
 
-		if (row === null && (item.type === "sharedRootDirectory" || item.type === "sharedRootFile")) {
+		if (row === null && isSharedRootDriveItem(item)) {
 			unlisted.push(item)
 		} else {
 			found.set(item, row)

@@ -3,6 +3,8 @@ import { Select as SelectPrimitive } from "@base-ui/react/select"
 
 import { cn } from "@filen/shared"
 import { ChevronDownIcon, CheckIcon, ChevronUpIcon } from "lucide-react"
+import { FIELD_CONTROL_CLASS, INVALID_RING_CLASS } from "@/components/ui/surface"
+import { MENU_POPUP_CLASS } from "@/components/ui/menuStyles"
 
 const Select = SelectPrimitive.Root
 
@@ -42,7 +44,9 @@ function SelectTrigger({
 			data-slot="select-trigger"
 			data-size={size}
 			className={cn(
-				"flex w-fit items-center justify-between gap-1.5 rounded-2xl border border-transparent bg-input/50 px-3 py-2 text-sm whitespace-nowrap focus-ring transition-[color,box-shadow] duration-200 outline-none focus-visible:border-ring disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 data-placeholder:text-muted-foreground data-[size=default]:h-8 data-[size=sm]:h-7 *:data-[slot=select-value]:line-clamp-1 *:data-[slot=select-value]:flex *:data-[slot=select-value]:items-center *:data-[slot=select-value]:gap-1.5 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+				"flex w-fit items-center justify-between gap-1.5 px-3 py-2 text-sm whitespace-nowrap data-placeholder:text-muted-foreground data-[size=default]:h-8 data-[size=sm]:h-7 *:data-[slot=select-value]:line-clamp-1 *:data-[slot=select-value]:flex *:data-[slot=select-value]:items-center *:data-[slot=select-value]:gap-1.5 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+				FIELD_CONTROL_CLASS,
+				INVALID_RING_CLASS,
 				className
 			)}
 			{...props}
@@ -66,10 +70,7 @@ function SelectContent({ className, children, ...props }: SelectPrimitive.Popup.
 			>
 				<SelectPrimitive.Popup
 					data-slot="select-content"
-					className={cn(
-						"relative isolate z-50 max-h-(--available-height) w-(--anchor-width) min-w-36 origin-(--transform-origin) animate-none! overflow-x-hidden overflow-y-auto rounded-2xl bg-popover/70 text-popover-foreground shadow-lg ring-1 ring-foreground/5 duration-100 before:pointer-events-none before:absolute before:inset-0 before:-z-1 before:rounded-[inherit] before:backdrop-blur-2xl before:backdrop-saturate-150 data-[side=bottom]:slide-in-from-top-2 data-[side=inline-end]:slide-in-from-left-2 data-[side=inline-start]:slide-in-from-right-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 **:data-[slot$=-item]:focus:bg-foreground/10 **:data-[slot$=-item]:data-highlighted:bg-foreground/10 **:data-[slot$=-separator]:bg-foreground/5 **:data-[slot$=-trigger]:focus:bg-foreground/10 **:data-[slot$=-trigger]:aria-expanded:bg-foreground/10! **:data-[variant=destructive]:**:text-accent-foreground! **:data-[variant=destructive]:text-accent-foreground! **:data-[variant=destructive]:focus:bg-foreground/10! dark:ring-foreground/10 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
-						className
-					)}
+					className={cn(MENU_POPUP_CLASS, "isolate w-(--anchor-width) min-w-36", className)}
 					{...props}
 				>
 					<SelectScrollUpButton />

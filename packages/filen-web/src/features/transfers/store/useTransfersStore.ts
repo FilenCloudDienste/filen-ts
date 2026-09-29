@@ -145,7 +145,7 @@ export interface TransfersStore {
 	setSize: (id: string, size: number) => void
 	// Flips ONLY the paused flag — never touches status (paused is not a terminal state; see
 	// Transfer["paused"]'s own comment). Backs the active-row pause/resume toggle
-	// (features/transfers/lib/control.ts's pauseTransfer/resumeTransfer).
+	// (features/transfers/lib/control.ts's setTransferPaused).
 	setPaused: (id: string, paused: boolean) => void
 	settle: (id: string, status: TerminalStatus, error?: ErrorDTO) => void
 	setItem: (id: string, item: DriveItem) => void

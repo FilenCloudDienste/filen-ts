@@ -1,5 +1,5 @@
 import type { Dir } from "@filen/sdk-rs"
-import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
+import { isDirectoryItem, type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 
 // The three splat routes a directory open can land on — one per browsable surface with a path of its
@@ -40,9 +40,9 @@ export function splatToUuids(splat: string): string[] {
 // once drivePath.type === "trash") — a trashed directory's contents are never browsable, so this
 // returns null rather than a splat target the other variants get.
 export function resolveDriveNavigationTarget(item: DriveItem, variant: DriveVariant, currentSplat: string): DriveNavigationTarget | null {
-	// A shared directory is navigable too (browsing into a nested share), so directory-vs-file routes
-	// through asDirectoryOrFile — else descending into a shared-dir would be rejected as a non-directory.
-	if (asDirectoryOrFile(item).type !== "directory") {
+	// A shared directory is navigable too (browsing into a nested share), so every directory arm counts
+	// — else descending into a shared-dir would be rejected as a non-directory.
+	if (!isDirectoryItem(item)) {
 		return null
 	}
 

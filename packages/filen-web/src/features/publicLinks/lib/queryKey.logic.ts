@@ -1,4 +1,4 @@
-import type { PasswordState } from "@filen/sdk-rs"
+import type { DirPublicLink, PasswordState } from "@filen/sdk-rs"
 
 // ★ SECURITY: the decryption key AND any visitor-typed password MUST NOT appear in a react-query key.
 // The default key hasher JSON-stringifies the whole key into `queryHash`, which the global queryCache
@@ -32,12 +32,17 @@ export function secretFingerprint(...parts: (string | undefined)[]): string {
 // secret-bearing arms have to move the digest — "known" carries the visitor's typed password and
 // "hashed" the server-side hash — so each contributes its tag AND its payload; "none" contributes the
 // tag alone, which keeps it distinct from an absent link rather than collapsing onto the empty string.
-export function passwordStatePart(state: PasswordState | undefined): string | undefined {
+function passwordStatePart(state: PasswordState | undefined): string | undefined {
 	if (state === undefined) {
 		return undefined
 	}
 
 	return state.type === "none" ? state.type : `${state.type}:${state.data}`
+}
+
+// A directory link's key + password digest, shared by every key and scope that must move with either.
+export function linkFingerprint(link: DirPublicLink | null | undefined): string {
+	return secretFingerprint(link?.linkKey, passwordStatePart(link?.password))
 }
 
 export function publicLinkQueryKey(scope: string, uuid: string, secret: string) {

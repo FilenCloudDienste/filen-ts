@@ -12,7 +12,8 @@ import {
 import type { ChatMessage } from "@filen/sdk-rs"
 import type { ChatsKey } from "@/lib/i18n"
 import type { ChatSendState } from "@/features/chats/store/useChatsInflight"
-import { isBlocked, EMPTY_BLOCKED_USERS, type BlockedUsers } from "@filen/shared"
+import { EMPTY_BLOCKED_USERS, type BlockedUsers } from "@filen/shared"
+import { isOwnMessage, isSenderBlocked } from "@/features/chats/lib/sender"
 
 export type MessageActionId = "reply" | "copy" | "edit" | "delete" | "retry" | "remove" | "disableEmbed" | "block"
 
@@ -107,8 +108,7 @@ export function messageMenuActions(
 		return actions
 	}
 
-	const senderId = BigInt(message.senderId)
-	const isSender = currentUserId !== undefined && senderId === currentUserId
+	const isSender = isOwnMessage(message, currentUserId)
 
 	// Reply/edit target a committed server uuid — confirmed only (a pending send carries its inflightId
 	// as its uuid, which the server doesn't know).
@@ -136,12 +136,7 @@ export function messageMenuActions(
 	// already blocked. Gated on a known current user (never offer "block" when we can't tell whose message
 	// it is) so we never surface it on our own bubble. A blocked sender's messages drop out of the unread
 	// count immediately (isMessageUnread cross-references the same blocked set).
-	if (
-		sendState === "confirmed" &&
-		currentUserId !== undefined &&
-		!isSender &&
-		!isBlocked({ userId: senderId, email: message.senderEmail }, blocked)
-	) {
+	if (sendState === "confirmed" && currentUserId !== undefined && !isSender && !isSenderBlocked(message, blocked)) {
 		actions.push(BLOCK)
 	}
 

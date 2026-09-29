@@ -1,5 +1,6 @@
 import type { Chat, ChatParticipant } from "@filen/sdk-rs"
 import { isBlocked, EMPTY_BLOCKED_USERS, type BlockedUsers } from "@filen/shared"
+import { otherParticipants } from "@/features/chats/lib/sort"
 
 // Pure gating/derivation helpers for chatParticipantsDialog.tsx, kept out of the component so the
 // owner-vs-participant view split stays testable without a DOM renderer (mirrors notes'
@@ -27,8 +28,9 @@ export function chatParticipantRows(
 	viewerIsOwner: boolean,
 	blocked: BlockedUsers = EMPTY_BLOCKED_USERS
 ): ChatParticipantRowModel[] {
-	const others = chat.participants.filter(p => currentUserId === undefined || p.userId !== currentUserId)
-	const sorted = [...others].sort((a, b) => Number(b.userId === chat.ownerId) - Number(a.userId === chat.ownerId))
+	const sorted = otherParticipants(chat, currentUserId).sort(
+		(a, b) => Number(b.userId === chat.ownerId) - Number(a.userId === chat.ownerId)
+	)
 
 	return sorted.map(participant => ({
 		participant,

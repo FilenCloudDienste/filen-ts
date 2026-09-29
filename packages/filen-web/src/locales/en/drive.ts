@@ -71,12 +71,6 @@ export const drive = {
 	driveFavorites: "Favorites",
 	/** Drive sidebar — item for trashed files and directories */
 	driveTrash: "Trash",
-	/** Drive breadcrumb — root label for the owned items that carry a public link */
-	driveLinks: "Links",
-	/** Drive breadcrumb — root label for the items other users share with you */
-	driveSharedIn: "Shared with me",
-	/** Drive breadcrumb — root label for the items you share with other users */
-	driveSharedOut: "Shared with others",
 	/** Drive sidebar — group header over the recents/favorites/trash rows */
 	driveGroupOther: "Other",
 	/** Drive sidebar — group header over the sharing and public-link rows */
@@ -309,8 +303,6 @@ export const drive = {
 	driveEmptyTrashConfirmTitle: "Empty trash?",
 	/** Empty-trash confirm dialog — body instructing the user to type the confirmation phrase; {{phrase}} interpolates driveEmptyTrashTypedConfirmPhrase */
 	driveEmptyTrashConfirmBody: 'Type "{{phrase}}" below to permanently delete everything in the trash. This cannot be undone.',
-	/** Empty-trash confirm dialog — label for the confirmation-phrase input */
-	driveEmptyTrashTypedConfirmLabel: "Confirmation phrase",
 	/** Empty-trash confirm dialog — the phrase the user must type EXACTLY (character for character, including case) to confirm; translate as a short, natural phrase a user can type in your language — it is compared verbatim against what they type */
 	driveEmptyTrashTypedConfirmPhrase: "EMPTY TRASH",
 

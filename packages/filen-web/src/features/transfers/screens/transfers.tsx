@@ -16,7 +16,7 @@ import {
 	resumableTransferIds,
 	shouldShowTransfersAggregate
 } from "@/features/transfers/screens/transfers.logic"
-import { cancelTransfer, pauseTransfer, resumeTransfer } from "@/features/transfers/lib/control"
+import { cancelTransfer, setTransferPaused } from "@/features/transfers/lib/control"
 import { TransferRow } from "@/features/transfers/components/transferRow"
 import { percentFormat, runningPercentFraction } from "@/features/transfers/components/transferRow.logic"
 import { defaultRevealDeps, runOpenContainingDirectory } from "@/features/drive/lib/reveal"
@@ -80,13 +80,13 @@ export function TransfersScreen() {
 
 	function handlePauseAll(): void {
 		for (const id of pausable) {
-			pauseTransfer(id)
+			setTransferPaused(id, true)
 		}
 	}
 
 	function handleResumeAll(): void {
 		for (const id of resumable) {
-			resumeTransfer(id)
+			setTransferPaused(id, false)
 		}
 	}
 

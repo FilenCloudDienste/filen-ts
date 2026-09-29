@@ -1,27 +1,7 @@
 {
+  "extends": "./tsconfig.base.json",
   "compilerOptions": {
-    "target": "ES2024",
-    // DOM libs are here for the e2e project only: Playwright page.evaluate / addInitScript callbacks
-    // are type-checked in this project but run in the browser, so they reference window/document/etc.
-    "lib": ["ES2024", "DOM", "DOM.Iterable"],
-    "module": "ESNext",
-    "moduleResolution": "bundler",
-    "types": ["node"],
-    "strict": true,
-    "noUncheckedIndexedAccess": true,
-    "exactOptionalPropertyTypes": true,
-    "verbatimModuleSyntax": true,
-    "isolatedModules": true,
-    "erasableSyntaxOnly": true,
-    "noPropertyAccessFromIndexSignature": true,
-    "noImplicitOverride": true,
-    "noUncheckedSideEffectImports": true,
-    "noFallthroughCasesInSwitch": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    "skipLibCheck": true,
-    "noEmit": true,
-    "paths": { "@/*": ["./src/*"] }
+    "types": ["node"]
   },
   "include": [
     "e2e",

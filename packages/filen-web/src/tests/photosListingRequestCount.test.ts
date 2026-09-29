@@ -1,9 +1,8 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { createElement, type ReactNode } from "react"
 import { act, renderHook, waitFor } from "@testing-library/react"
-import { QueryClient, QueryClientProvider, focusManager, onlineManager } from "@tanstack/react-query"
+import { focusManager, onlineManager } from "@tanstack/react-query"
 import type { Dir, File, NormalDirsAndFiles, SocketEvent, UuidStr } from "@filen/sdk-rs"
 
 const { listPhotosRecursive, isOutsidePhotosRoot } = vi.hoisted(() => ({
@@ -13,18 +12,12 @@ const { listPhotosRecursive, isOutsidePhotosRoot } = vi.hoisted(() => ({
 
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: { listPhotosRecursive, isOutsidePhotosRoot } }))
 
-// The production defaults minus the persister (sqlite, unavailable under vitest).
-vi.mock("@/queries/client", () => ({
-	queryClient: new QueryClient({
-		defaultOptions: {
-			queries: { staleTime: 0, gcTime: Infinity, retry: false, refetchOnWindowFocus: true, refetchOnReconnect: true }
-		}
-	})
-}))
+vi.mock("@/queries/client", async () => ({ queryClient: (await import("@/tests/testQueryClient")).createTestQueryClient() }))
 
 vi.mock("@/lib/log", () => ({ log: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() } }))
 
 import { queryClient } from "@/queries/client"
+import { queryClientWrapper } from "@/tests/testQueryClient"
 import { cacheDirs, clearDirectoryCache, isOutsideRoot } from "@/features/drive/lib/cache"
 import {
 	invalidatePhotosListing,
@@ -89,9 +82,7 @@ const UNLISTED = testUuid("unlisted")
 let rootCounter = 0
 let root: UuidStr
 
-function wrapper({ children }: { children: ReactNode }) {
-	return createElement(QueryClientProvider, { client: queryClient, children })
-}
+const wrapper = queryClientWrapper(queryClient)
 
 function mountListing() {
 	return renderHook(() => usePhotosListingQuery(root), { wrapper })

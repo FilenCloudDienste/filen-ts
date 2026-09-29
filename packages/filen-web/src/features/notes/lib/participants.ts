@@ -1,7 +1,8 @@
 import type { Contact, Note, NoteParticipant } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
-import { notesQueryUpsert, notesQueryUpdate, notesQueryGet } from "@/features/notes/queries/notes"
+import { notesQueryUpsert, notesQueryUpdate, notesQueryFind } from "@/features/notes/queries/notes"
 import { attemptOp, type ActionOutcome } from "@/lib/actions/outcome"
+import { contactsNotIn } from "@/features/contacts/components/contactsList.logic"
 
 export type { ActionOutcome }
 
@@ -15,7 +16,7 @@ export type { ActionOutcome }
 // their own contact" off the same stale note and the last write would clobber the rest. Every add
 // grants write, matching mobile's call site; permission changes go through setNoteParticipantPermission.
 export async function addNoteParticipants(note: Note, contacts: readonly Contact[]): Promise<ActionOutcome<Note>> {
-	const toAdd = contacts.filter(contact => !note.participants.some(p => p.userId === contact.userId))
+	const toAdd = contactsNotIn(contacts, note.participants)
 
 	if (toAdd.length === 0) {
 		return { status: "success", item: note }
@@ -80,7 +81,7 @@ export async function setNoteParticipantPermission(note: Note, participant: Note
 		)
 	)
 
-	const patched = notesQueryGet()?.find(n => n.uuid === note.uuid)
+	const patched = notesQueryFind(note.uuid)
 
 	return {
 		status: "success",

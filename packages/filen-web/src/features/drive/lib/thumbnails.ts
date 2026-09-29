@@ -131,6 +131,26 @@ function finalize(deps: ThumbnailServiceDeps, uuid: string, blob: Blob): string 
 	return url
 }
 
+// Persists freshly produced bytes (a failure is logged and non-fatal) and finalizes them. The generic
+// ArrayBufferLike-vs-ArrayBuffer parameter on Uint8Array (TS lib.es2024.arraybuffer) makes an
+// unparameterized Uint8Array reject BlobPart's stricter ArrayBufferView<ArrayBuffer> — bytes here is
+// always backed by a real ArrayBuffer (a producer's own freshly-allocated buffer, never a
+// SharedArrayBuffer), so the cast narrows the generic parameter only, mirroring imageViewer.tsx's
+// identical cast. The Blob is built BEFORE the persist call: the Blob constructor copies bytes into
+// its own storage immediately, whereas storeThumbnail's Comlink.transfer detaches this SAME buffer
+// synchronously, at the call itself (postMessage's transfer-list handoff, not once the call resolves)
+// — persisting first would leave `bytes` a zero-length view, silently producing an empty Blob.
+async function persistAndFinalize(deps: ThumbnailServiceDeps, uuid: string, bytes: Uint8Array, label: string): Promise<string> {
+	const attachedBytes = bytes as Uint8Array<ArrayBuffer>
+	const blob = new Blob([attachedBytes])
+
+	await deps.storeThumbnail(uuid, attachedBytes).catch((e: unknown) => {
+		log.warn("thumbnails", `${label}: persist failed`, uuid, e)
+	})
+
+	return finalize(deps, uuid, blob)
+}
+
 // The one real generation attempt for a uuid: check the OPFS cache first (another tab, or an earlier
 // session, may have already produced this thumbnail), then route through the registered generator for
 // the category (an unregistered category resolves no bytes, same as any other failure below). Only the
@@ -195,23 +215,7 @@ async function generate(
 			return null
 		}
 
-		// The generic ArrayBufferLike-vs-ArrayBuffer parameter on Uint8Array (TS lib.es2024.arraybuffer)
-		// makes an unparameterized Uint8Array reject BlobPart's stricter ArrayBufferView<ArrayBuffer> —
-		// bytes here is always backed by a real ArrayBuffer (a generator's own freshly-allocated buffer,
-		// never a SharedArrayBuffer), so this narrows the generic parameter only, mirroring
-		// imageViewer.tsx's identical cast. Built BEFORE the persist call below: the Blob constructor
-		// copies bytes into its own storage immediately, whereas storeThumbnail's Comlink.transfer
-		// detaches this SAME buffer synchronously, at the call itself (postMessage's transfer-list
-		// handoff, not once the call resolves) — persisting first would leave `bytes` a zero-length view
-		// by the time this line ran, silently producing an empty Blob.
-		const attachedBytes = bytes as Uint8Array<ArrayBuffer>
-		const blob = new Blob([attachedBytes])
-
-		await deps.storeThumbnail(uuid, attachedBytes).catch((e: unknown) => {
-			log.warn("thumbnails", "generate: persist failed", uuid, e)
-		})
-
-		return finalize(deps, uuid, blob)
+		return await persistAndFinalize(deps, uuid, bytes, "generate")
 	} finally {
 		semaphore.release()
 	}
@@ -343,17 +347,7 @@ export function seedThumbnail(
 				return null
 			}
 
-			// Same ordering hazard generate() documents at length: the Blob must be built BEFORE the
-			// persist call, because storeThumbnail's Comlink.transfer detaches this very buffer
-			// synchronously at the postMessage, leaving a zero-length view behind.
-			const attachedBytes = result.bytes as Uint8Array<ArrayBuffer>
-			const blob = new Blob([attachedBytes])
-
-			await deps.storeThumbnail(uuid, attachedBytes).catch((e: unknown) => {
-				log.warn("thumbnails", "seedThumbnail: persist failed", uuid, e)
-			})
-
-			return finalize(deps, uuid, blob)
+			return persistAndFinalize(deps, uuid, result.bytes, "seedThumbnail")
 		})
 		.finally(() => {
 			seats.delete(uuid)

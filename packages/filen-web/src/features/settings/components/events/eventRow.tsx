@@ -2,14 +2,14 @@ import { useTranslation } from "react-i18next"
 import type { UserEvent } from "@filen/sdk-rs"
 import { formatRelativeTime } from "@/lib/relativeTime"
 import { useNowMinute } from "@/lib/useNowMinute"
-import { eventKindMeta } from "@/features/settings/lib/eventKind"
+import { eventKindDisplay } from "@/features/settings/lib/eventKind"
 
 export interface EventRowProps {
 	event: UserEvent
 	onOpen: (event: UserEvent) => void
 }
 
-// One virtualized row: icon + human-readable label (eventKindMeta) + relative timestamp (shared
+// One virtualized row: icon + human-readable label (eventKindDisplay) + relative timestamp (shared
 // lib/relativeTime.ts, same helper the note/chat rows use). The whole row opens the compact detail
 // dialog (EventDetailDialog) — there is no per-row menu, matching how thin this row is on mobile (a
 // plain ListRow → alert). The dialog's own header stays absolute — this row is the "at a glance" list,
@@ -18,8 +18,7 @@ export function EventRow({ event, onOpen }: EventRowProps) {
 	const { t } = useTranslation("settings")
 	const { t: tCommon } = useTranslation("common")
 	const now = useNowMinute()
-	const { labelKey, icon: Icon } = eventKindMeta(event.kind.type)
-	const label = labelKey === "settingsEventUnknown" ? t(labelKey, { type: event.kind.type }) : t(labelKey)
+	const { label, icon: Icon } = eventKindDisplay(event.kind.type, t)
 
 	return (
 		<button

@@ -91,8 +91,6 @@ export const settings = {
 
 	// ── Account: storage breakdown ───────────────────────────────────────────
 	settingsStorageTitle: "Storage",
-	/** Storage breakdown row and profile header — {{used}}/{{total}} are pre-formatted byte sizes */
-	settingsStorageUsage: "{{used}} of {{total}} used",
 	settingsStorageFiles: "Files",
 	settingsStorageVersioned: "Versioned files",
 	settingsStorageFree: "Free",
@@ -166,8 +164,6 @@ export const settings = {
 	settingsLoginAlertsDescription: "Get an email whenever a new device signs in to your account",
 
 	// ── Account: destructive data controls ──────────────────────────────
-	/** Shared across both bulk-delete TypedConfirmDialogs — the input field's label */
-	settingsTypedConfirmLabel: "Confirmation phrase",
 	settingsDeleteAllVersionsTitle: "Delete all versioned files",
 	/** Delete-versions row description; {{count}} is the number of versioned files, {{size}} a pre-formatted byte size */
 	settingsDeleteAllVersionsDescription: "Permanently delete {{count}} versioned file(s), freeing up {{size}}. This cannot be undone.",
@@ -314,8 +310,6 @@ export const settings = {
 
 	// ── Advanced: about / legal ────────────────────────────────────────────────
 	settingsAboutTitle: "About",
-	settingsAboutTermsOfService: "Terms of Service",
-	settingsAboutPrivacyPolicy: "Privacy Policy",
 
 	// ── Advanced: open source licenses ────────────────────────────────────────
 	/** Advanced settings — row title for the third-party attribution surface */

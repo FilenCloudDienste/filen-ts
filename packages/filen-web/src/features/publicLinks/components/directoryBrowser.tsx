@@ -23,7 +23,7 @@ import {
 import { startAnonDirZipDownload } from "@/features/publicLinks/lib/download"
 import type { ErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
-import { secretFingerprint, passwordStatePart } from "@/features/publicLinks/lib/queryKey.logic"
+import { linkFingerprint } from "@/features/publicLinks/lib/queryKey.logic"
 import { FileHero } from "@/features/publicLinks/components/fileHero"
 import { SaveToDriveButton } from "@/features/publicLinks/components/saveToDrive"
 import { Input } from "@/components/ui/input"
@@ -119,7 +119,7 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 			<FileHero
 				item={selected.item}
 				downloadEnabled={link.enableDownload}
-				linkScope={secretFingerprint(link.linkKey, passwordStatePart(link.password))}
+				linkScope={linkFingerprint(link)}
 				onBack={() => {
 					setSelected(null)
 				}}

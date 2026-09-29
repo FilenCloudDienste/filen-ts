@@ -15,8 +15,7 @@ vi.mock("@/lib/storage/adapter", () => ({
 
 const { ALL_ACTIONS } = await import("@/lib/keymap/actions")
 const { conflictingActions, RESOLVED_COLLISIONS } = await import("@/lib/keymap/conflicts")
-const { SHORTCUT_NAMESPACES, SHORTCUT_SCOPE_LABEL_KEYS } = await import("@/lib/keymap/shortcutsCatalog")
-const { EN_CATALOGS } = await import("@/lib/i18n/catalog")
+const { SHORTCUT_SCOPE_LABEL_KEYS } = await import("@/lib/keymap/shortcutsCatalog")
 
 const RESOLVED = ALL_ACTIONS.map(def => ({ ...def, combo: def.defaultCombo }))
 
@@ -61,26 +60,6 @@ describe("ALL_ACTIONS", () => {
 	it("labels every scope it uses", () => {
 		for (const def of ALL_ACTIONS) {
 			expect(SHORTCUT_SCOPE_LABEL_KEYS[def.scope], def.id).toBeTruthy()
-		}
-	})
-
-	it("names a shortcut namespace in every descriptionKey, and a key that exists in it", () => {
-		// The prefixed type already compile-checks both halves; this is the runtime guard that
-		// SHORTCUT_NAMESPACES (what the shortcuts UI actually loads) has not drifted from the prefixes
-		// the type admits — a mismatch there renders a raw key on screen.
-		for (const def of ALL_ACTIONS) {
-			const [namespacePart, keyPart] = def.descriptionKey.split(":")
-			const namespace = SHORTCUT_NAMESPACES.find(candidate => candidate === namespacePart)
-
-			expect(namespace, def.descriptionKey).toBeDefined()
-
-			if (namespace === undefined) {
-				continue
-			}
-
-			const catalog: Record<string, unknown> = EN_CATALOGS[namespace]
-
-			expect(Object.keys(catalog), def.descriptionKey).toContain(keyPart)
 		}
 	})
 })

@@ -1,29 +1,14 @@
-import { existsSync, readFileSync } from "node:fs"
 import type { Page } from "@playwright/test"
-import { test, expect, SESSION_FILE } from "./fixtures"
+import { test, expect, readHarvestedSession } from "./fixtures"
 import { waitForE2eHooks } from "./helpers/e2eHooks"
 import { BOOT_SETTLE_TIMEOUT_MS, bootTo, dismissStartupReminders } from "./helpers/listing"
 import { SESSION_SLOT } from "@/e2e-hooks/sessionSlot"
 
-interface SessionFile {
-	session: string
-}
-
-// Reads the harvested session directly rather than via the injectedSession fixture: that fixture's
-// addInitScript re-fires on EVERY navigation of its page (Playwright's documented behavior, not just
-// the first), including the reload logout itself triggers — left alone, it would silently re-seed
-// and resurrect the very session this test clears. seedOncePerPage below replaces it with a version
-// that only ever seeds once per page.
-function readHarvestedSession(): string | null {
-	if (!existsSync(SESSION_FILE)) {
-		return null
-	}
-
-	const { session } = JSON.parse(readFileSync(SESSION_FILE, "utf8")) as SessionFile
-
-	return session
-}
-
+// Used with readHarvestedSession instead of the injectedSession fixture: that fixture's addInitScript
+// re-fires on EVERY navigation of its page (Playwright's documented behavior, not just the first),
+// including the reload logout itself triggers — left alone, it would silently re-seed and resurrect
+// the very session this test clears.
+//
 // Seeds sessionStorage for ONE page's very first navigation only, via a localStorage marker this
 // script owns end-to-end (kvClear never touches localStorage — it only wipes the app's own
 // sqlite-backed kv). Every later navigation of the same page (reload included) finds the marker set

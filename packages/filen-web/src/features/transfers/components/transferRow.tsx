@@ -25,7 +25,7 @@ import {
 	runningPercentFraction,
 	type TransferRate
 } from "@/features/transfers/components/transferRow.logic"
-import { pauseTransfer, resumeTransfer } from "@/features/transfers/lib/control"
+import { setTransferPaused } from "@/features/transfers/lib/control"
 import { showCopyToast } from "@/features/transfers/lib/copyToast"
 import { pruneSettledCopyJobs } from "@/features/drive/lib/copy"
 import { useCopyJobsStore } from "@/features/transfers/store/useCopyJobsStore"
@@ -292,11 +292,7 @@ export function TransferRow({ transfer, onRequestCancel, onShowInDirectory }: Tr
 							label={t(transfer.paused ? "transfersRowResume" : "transfersRowPause")}
 							className={ROW_ACTION_CLASS}
 							onClick={() => {
-								if (transfer.paused) {
-									resumeTransfer(transfer.id)
-								} else {
-									pauseTransfer(transfer.id)
-								}
+								setTransferPaused(transfer.id, !transfer.paused)
 							}}
 						>
 							{transfer.paused ? <PlayIcon /> : <PauseIcon />}

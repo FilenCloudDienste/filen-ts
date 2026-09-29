@@ -1,6 +1,6 @@
 import * as Comlink from "comlink"
 import { openXlsx, readXls } from "hucre/xlsx"
-import type { SpreadsheetDoc } from "@/features/spreadsheet/lib/model"
+import type { SpreadsheetDoc, SpreadsheetKind } from "@/features/spreadsheet/lib/model"
 import { MAX_SHEET_CELLS, type DocState, type EditOp, type EditResult } from "@/features/spreadsheet/lib/edits"
 import { workbookDoc, WorkbookViews } from "@/features/spreadsheet/lib/xlsxView"
 import { parseCsvFile } from "@/features/spreadsheet/lib/csvView"
@@ -15,7 +15,7 @@ import { xlsToXlsx } from "@/features/spreadsheet/lib/xlsConvert"
 // all (or number past ZIP_ENTRY_LIMIT) or a grid past CELL_LIMIT fails to open rather than taking the tab's
 // memory.
 
-export type SpreadsheetFileKind = "xlsx" | "xls" | "csv" | "tsv"
+export type SpreadsheetFileKind = SpreadsheetKind | "tsv"
 
 const CELL_LIMIT = MAX_SHEET_CELLS
 const DECOMPRESSED_LIMIT = 512 * 1024 * 1024

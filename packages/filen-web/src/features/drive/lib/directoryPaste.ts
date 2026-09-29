@@ -1,12 +1,10 @@
 import { onlineManager } from "@tanstack/react-query"
-import { type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { canPasteIntoDirectory, type DirectoryPasteTarget } from "@/features/drive/lib/clipboard.logic"
 import { pasteWhenStillValid } from "@/features/drive/lib/clipboardPaste"
 import { cachedOwnParents } from "@/features/drive/lib/ownAncestry"
 import { currentRootUuid } from "@/features/drive/lib/actions"
-import { driveListingQueryKey } from "@/features/drive/queries/drive"
-import { queryClient } from "@/queries/client"
+import { cachedListing } from "@/features/drive/queries/drive"
 
 // A directory a paste can land in without being on screen: a listing row or tile, or a sidebar tree
 // node. `uuid` is null for My Drive's root; `ancestry` is its root-to-directory uuid chain as far as the
@@ -26,7 +24,7 @@ export function directoryPasteTarget(directory: PasteDirectory, online: boolean)
 		uuid: directory.uuid,
 		ancestry: directory.ancestry,
 		readParents: cachedOwnParents,
-		listing: queryClient.getQueryData<DriveItem[]>(driveListingQueryKey({ variant: directory.variant, uuid: directory.uuid })),
+		listing: cachedListing(directory.variant, directory.uuid),
 		online,
 		parentUuid: directory.uuid ?? currentRootUuid()
 	}

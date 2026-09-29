@@ -93,3 +93,15 @@ export function notesQueryRemove(uuid: string): void {
 export function notesQueryGet(): Note[] | undefined {
 	return queryClient.getQueryData<Note[]>(NOTES_QUERY_KEY)
 }
+
+export function notesQueryFind(uuid: string): Note | undefined {
+	return notesQueryGet()?.find(n => n.uuid === uuid)
+}
+
+// The live row, re-resolved every render so an in-dialog change or a realtime socket patch landing while
+// the dialog is open repaints immediately; the snapshot the menu held only until the list has it.
+export function useLiveNote(initial: Note): Note {
+	const notes = useNotes().data
+
+	return notes?.find(n => n.uuid === initial.uuid) ?? initial
+}

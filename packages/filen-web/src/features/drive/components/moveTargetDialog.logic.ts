@@ -1,14 +1,9 @@
-import type { DriveItem } from "@/features/drive/lib/item"
+import { isDirectoryItem, type DriveItem } from "@/features/drive/lib/item"
 import type { DirectoryTreeTarget } from "@/features/drive/components/directoryTreeSubmenu"
 
 // A move destination is illegal for two independent reasons, checked separately so the picker can
 // apply them at different points: entering a row (browsing) only ever needs the first, "Move here"
 // needs both.
-
-// Every directory arm: a directory shared out is still the user's own, listed under its real uuid.
-function isDirectoryItem(item: DriveItem): boolean {
-	return item.type === "directory" || item.type === "sharedDirectory" || item.type === "sharedRootDirectory"
-}
 
 // A directory shared with the user sits in its owner's tree, never the user's, so it can't be above a
 // destination there. Its role names the other party, here the sharer; one without a role still counts.

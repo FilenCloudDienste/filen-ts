@@ -45,7 +45,7 @@ import { Composer } from "@/features/chats/components/thread/composer"
 import { TypingIndicator } from "@/features/chats/components/thread/typingIndicator"
 import { setFocusedChat } from "@/features/chats/lib/focusedChat"
 import { dayKind, formatFullDate } from "@/features/chats/lib/time"
-import { chatDisplayName, isChatUndecryptable, chatAvatarUrl } from "@/features/chats/lib/sort"
+import { chatTitle, chatAvatarUrl } from "@/features/chats/lib/sort"
 import { useBlockedUsers } from "@/features/contacts/hooks/useBlockedUsers"
 import { useRevealedBlockedMessages } from "@/features/chats/store/useRevealedBlockedMessages"
 import { markChatRead } from "@/features/chats/lib/actions"
@@ -603,11 +603,7 @@ export function MessageThread({ chat }: { chat: Chat }) {
 		}
 	}, [chatUuid])
 
-	const headerTitle = isChatUndecryptable(chat)
-		? t("chatUndecryptable")
-		: currentUserId !== undefined
-			? chatDisplayName(chat, currentUserId, t("chatJustYou"))
-			: chat.uuid
+	const headerTitle = chatTitle(chat, currentUserId, t("chatUndecryptable"), t("chatJustYou"))
 	const headerAvatarUrl = chatAvatarUrl(chat, currentUserId)
 
 	return (

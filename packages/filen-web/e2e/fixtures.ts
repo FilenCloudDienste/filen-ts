@@ -13,6 +13,7 @@ import {
 	type Request,
 	type TestInfo
 } from "@playwright/test"
+import { SESSION_SLOT } from "@/e2e-hooks/sessionSlot"
 
 // The session blob is secret-equivalent and lives ONLY here (gitignored, mode 0600) and in the
 // sessionStorage seed — it is never typed into a page, so it cannot appear in screenshots or DOM
@@ -46,11 +47,24 @@ export function readFixtureManifest(): FixtureManifest {
 	return JSON.parse(readFileSync(FIXTURES_FILE, "utf8")) as FixtureManifest
 }
 
-// Must match src/e2e-hooks/index.ts and the app's SESSION_SLOT.
-const SESSION_SLOT = "filen.e2e.session"
+export function readHarvestedSession(): string | null {
+	if (!existsSync(SESSION_FILE)) {
+		return null
+	}
 
-interface SessionFile {
-	session: string
+	const { session } = JSON.parse(readFileSync(SESSION_FILE, "utf8")) as { session: string }
+
+	return session
+}
+
+// addInitScript re-fires on every navigation of the page, reloads included.
+export async function seedSession(page: Page, session: string): Promise<void> {
+	await page.addInitScript(
+		([slot, blob]) => {
+			sessionStorage.setItem(slot, blob)
+		},
+		[SESSION_SLOT, session] as const
+	)
 }
 
 // Every write serialises on an account-wide lease the SDK takes with `POST …/v3/user/lock`
@@ -726,20 +740,15 @@ export const test = base.extend<{
 		await use(page)
 	},
 	injectedSession: async ({ page, context, accountLock: _accountLock }, use) => {
-		if (!existsSync(SESSION_FILE)) {
+		const session = readHarvestedSession()
+
+		if (session === null) {
 			test.skip(true, "no injected session (e2e credentials not configured)")
 
 			return
 		}
 
-		const { session } = JSON.parse(readFileSync(SESSION_FILE, "utf8")) as SessionFile
-
-		await page.addInitScript(
-			([slot, blob]) => {
-				sessionStorage.setItem(slot, blob)
-			},
-			[SESSION_SLOT, session] as const
-		)
+		await seedSession(page, session)
 
 		// Second pages a spec opens itself take leases too, and a spec closing one mid-release orphans it
 		// the same way a closed context would (closeTrackedPage avoids that).

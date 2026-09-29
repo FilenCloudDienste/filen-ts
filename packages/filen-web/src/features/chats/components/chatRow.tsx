@@ -4,7 +4,7 @@ import { Link } from "@tanstack/react-router"
 import { VolumeOffIcon } from "lucide-react"
 import type { Chat } from "@filen/sdk-rs"
 import { cn, type BlockedUsers } from "@filen/shared"
-import { chatDisplayName, isChatUndecryptable, chatMessagePreview, chatAvatarUrl, chatPreviewTier } from "@/features/chats/lib/sort"
+import { chatTitle, chatMessagePreview, chatAvatarUrl, chatPreviewTier } from "@/features/chats/lib/sort"
 import { useChatUnreadCount } from "@/features/chats/hooks/useChatUnreadCount"
 import { useChatTypingLabel } from "@/features/chats/hooks/useChatTyping"
 import { formatRelativeTime } from "@/lib/relativeTime"
@@ -62,12 +62,7 @@ export function ChatRow({
 	const { t } = useTranslation("chats")
 	const { t: tCommon } = useTranslation("common")
 	const now = useNowMinute()
-	const undecryptable = isChatUndecryptable(chat)
-	const name = undecryptable
-		? t("chatUndecryptable")
-		: currentUserId !== undefined
-			? chatDisplayName(chat, currentUserId, t("chatJustYou"))
-			: chat.uuid
+	const name = chatTitle(chat, currentUserId, t("chatUndecryptable"), t("chatJustYou"))
 	const typingLabel = useChatTypingLabel(chat.uuid, currentUserId)
 	// chatPreviewTier owns the DECISION (typing > blocked > message > empty); this line owns the COPY.
 	// `typingLabel ?? …` short-circuits exactly the "typing" tier, so no narrowing cast is needed.

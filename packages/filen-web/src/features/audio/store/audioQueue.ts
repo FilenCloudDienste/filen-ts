@@ -8,7 +8,10 @@ import type { AnyFile } from "@filen/sdk-rs"
 // against plain arrays. The stateful pieces (the zustand store, the singleton engine) sit on top of
 // this and only ever call into these functions.
 
-export type LoopMode = "off" | "all" | "one"
+// In loop-toggle cycle order.
+export const LOOP_MODES = ["off", "all", "one"] as const
+
+export type LoopMode = (typeof LOOP_MODES)[number]
 
 // Four playback phases the store surfaces to the UI. "loading" spans source resolution (SW-stream
 // registration or the whole-buffer blob download) up to the element actually starting; a settled

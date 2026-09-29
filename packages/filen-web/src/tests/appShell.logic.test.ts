@@ -1,7 +1,19 @@
 import { describe, expect, it } from "vitest"
-import { resolveSidebarKind, SIDEBAR_LABEL_KEY, type SidebarKind } from "@/features/shell/lib/appShell.logic"
+import { pathIsUnder, resolveSidebarKind, SIDEBAR_LABEL_KEY, type SidebarKind } from "@/features/shell/lib/appShell.logic"
 
 const ALL_KINDS: SidebarKind[] = ["chats", "notes", "settings", "contacts", "playlists", "drive"]
+
+describe("pathIsUnder", () => {
+	it("matches the root and nested routes", () => {
+		expect(pathIsUnder("/drive", "/drive")).toBe(true)
+		expect(pathIsUnder("/drive/a/b", "/drive")).toBe(true)
+	})
+
+	it("rejects a sibling that only shares the prefix", () => {
+		expect(pathIsUnder("/drivex", "/drive")).toBe(false)
+		expect(pathIsUnder("/", "/drive")).toBe(false)
+	})
+})
 
 describe("resolveSidebarKind", () => {
 	it("matches the bare /chats index", () => {

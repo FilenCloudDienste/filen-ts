@@ -1,5 +1,13 @@
 import type { Chat } from "@filen/sdk-rs"
-import { sortChats, chatDisplayName, chatMessagePreview, isChatUndecryptable, isLastMessageFromBlocked } from "@/features/chats/lib/sort"
+import {
+	sortChats,
+	chatDisplayName,
+	chatMessagePreview,
+	isChatOwner,
+	isChatUndecryptable,
+	isLastMessageFromBlocked,
+	otherParticipants
+} from "@/features/chats/lib/sort"
 import { isBlocked, EMPTY_BLOCKED_USERS, type BlockedUsers } from "@filen/shared"
 import { matchesContactSearch } from "@/features/contacts/components/contactsList.logic"
 
@@ -7,13 +15,13 @@ import { matchesContactSearch } from "@/features/contacts/components/contactsLis
 // list filter (components/list/index.tsx): an owned-but-empty chat the user just created still shows
 // (it's theirs), but a chat the user was merely invited to and that nobody has posted in yet is hidden
 // until the first message arrives. `currentUserId` unresolved (account query not yet warm) treats every
-// chat as "not owned" — the safer default, same posture as isChatOwner elsewhere in this feature.
+// chat as "not owned" (isChatOwner) — the safer default.
 function isListedChat(chat: Chat, currentUserId: bigint | undefined): boolean {
 	if (chat.lastMessage !== undefined) {
 		return true
 	}
 
-	return currentUserId !== undefined && chat.ownerId === currentUserId
+	return isChatOwner(chat, currentUserId)
 }
 
 // Conversation-list view model — PURE, unit-tested. Client-side search filter over the sorted list.
@@ -70,7 +78,7 @@ export function filterChats(
 // tombstoned per message instead. Uses the shared isBlocked helper so the userId-first / trimmed-email
 // fallback rule stays in one place.
 export function isOneOnOneWithBlocked(chat: Chat, currentUserId: bigint | undefined, blocked: BlockedUsers): boolean {
-	const others = chat.participants.filter(p => currentUserId === undefined || p.userId !== currentUserId)
+	const others = otherParticipants(chat, currentUserId)
 	const other = others[0]
 
 	if (others.length !== 1 || other === undefined) {

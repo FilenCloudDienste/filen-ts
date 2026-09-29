@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest"
 import { canEncodeWindows1252, parseCsvFile, serializeCsv, type CsvFormat } from "@/features/spreadsheet/lib/csvView"
 import { CsvDocument } from "@/features/spreadsheet/lib/csvDocument"
-import { MAX_COLS, MAX_SHEET_CELLS } from "@/features/spreadsheet/lib/edits"
+import { MAX_SHEET_CELLS } from "@/features/spreadsheet/lib/edits"
 import { MAX_COLUMNS } from "@/features/spreadsheet/lib/model"
 import { standardWindows1252Decoding } from "@/tests/whatwgWindows1252"
 
@@ -290,12 +290,12 @@ describe("CsvDocument structural edits", () => {
 		const { rows, format } = parseCsvFile(encoder.encode("a,b\n1,2\n"), false)
 		const document = new CsvDocument(rows, format)
 
-		expect(document.apply({ type: "insert", sheet: 0, axis: "cols", at: 1, count: MAX_COLS - 1 })).toMatchObject({
+		expect(document.apply({ type: "insert", sheet: 0, axis: "cols", at: 1, count: MAX_COLUMNS - 1 })).toMatchObject({
 			type: "refused",
 			reason: "tooLarge"
 		})
-		expect(document.apply({ type: "insert", sheet: 0, axis: "cols", at: 1, count: MAX_COLS - 2 }).type).toBe("sheets")
-		expect(document.doc().sheets[0]?.colCount).toBe(MAX_COLS)
+		expect(document.apply({ type: "insert", sheet: 0, axis: "cols", at: 1, count: MAX_COLUMNS - 2 }).type).toBe("sheets")
+		expect(document.doc().sheets[0]?.colCount).toBe(MAX_COLUMNS)
 	})
 
 	it("leaves the file alone for rows or columns inserted past its data", () => {

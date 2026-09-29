@@ -66,6 +66,7 @@ describe("db.worker bulk kv ops", () => {
 
 		expect(await api.kvEntries("a_b")).toEqual([["a_b-1", "literal"]])
 		expect(await api.kvEntries("a%")).toEqual([["a%b-1", "percent"]])
+		expect(await api.kvKeys("a_b")).toEqual(["a_b-1"])
 	})
 
 	it("kvDeletePrefix drops every row under the prefix and leaves the rest", async () => {

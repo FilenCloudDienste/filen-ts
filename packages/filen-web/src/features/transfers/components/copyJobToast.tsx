@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next"
 import { ChevronRightIcon, PauseIcon, PlayIcon, RotateCcwIcon, XIcon } from "lucide-react"
 import { cn, copyJobPercent, copyJobRate, formatBytes, formatSecondsToMediaClock, isCopyJobRunning } from "@filen/shared"
 import { retryFailedCopy } from "@/features/drive/lib/copy"
-import { pauseTransfer, resumeTransfer } from "@/features/transfers/lib/control"
+import { setTransferPaused } from "@/features/transfers/lib/control"
 import { useCopyJobsStore } from "@/features/transfers/store/useCopyJobsStore"
 import { useTransfersStore } from "@/features/transfers/store/useTransfersStore"
 import {
@@ -140,11 +140,7 @@ export function CopyJobToast({ jobId, onHeightChange, onDismiss, onRetried }: Co
 								aria-label={t(rowPaused ? "transfersRowResume" : "transfersRowPause")}
 								disabled={job.cancelRequest !== null}
 								onClick={() => {
-									if (rowPaused) {
-										resumeTransfer(jobId)
-									} else {
-										pauseTransfer(jobId)
-									}
+									setTransferPaused(jobId, !rowPaused)
 								}}
 							>
 								{rowPaused ? <PlayIcon /> : <PauseIcon />}

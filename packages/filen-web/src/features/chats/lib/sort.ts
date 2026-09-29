@@ -1,13 +1,13 @@
 import {
 	parseNumbersFromString,
-	isBlocked,
 	EMPTY_BLOCKED_USERS,
 	resolveChatParticipantsDisplayName,
 	contactDisplayName,
 	type BlockedUsers
 } from "@filen/shared"
-import type { Chat, ChatMessage, ChatMessagePartial } from "@filen/sdk-rs"
+import type { Chat, ChatMessage, ChatMessagePartial, ChatParticipant } from "@filen/sdk-rs"
 import { safeAvatarUrl } from "@/lib/avatarUrl"
+import { isSenderBlocked } from "@/features/chats/lib/sender"
 
 // Conversation-list ordering — ported from
 // `filen-mobile/src/features/chats/components/list/index.tsx:36-45`, not a guess. There is no
@@ -60,14 +60,24 @@ export function isChatUndecryptable(chat: Chat): boolean {
 	return chat.key === undefined
 }
 
+// Chat.ownerId is a single bigint on the Chat itself (unlike NoteParticipant's per-row isOwner flag). An
+// unresolved viewer (account query not yet warm) is never the owner: undefined never equals a bigint.
+export function isChatOwner(chat: Chat, userId: bigint | undefined): boolean {
+	return chat.ownerId === userId
+}
+
+// The participants other than the viewer. Returns a new array.
+export function otherParticipants(chat: Chat, userId: bigint | undefined): ChatParticipant[] {
+	return chat.participants.filter(p => p.userId !== userId)
+}
+
 // Display-name derivation for unnamed chats: an explicit chat.name wins, else the other
 // participant(s)' nickName-or-email via @filen/shared's resolveChatParticipantsDisplayName
 // (shared with mobile's chatDisplayName, lib/decryption.ts).
 //
-// Undecryptable-placeholder COPY (mobile's i18n `cannot_decrypt_${uuid}` string) lives in the
-// component that renders chat rows (chatRow.tsx's `t("chatUndecryptable")`) — same posture
-// notes/lib/sort.ts takes for noteDisplayTitle (falls back to the raw uuid, not a placeholder
-// string, at this foundation layer).
+// Undecryptable-placeholder COPY (mobile's i18n `cannot_decrypt_${uuid}` string) is passed in by the
+// rendering components through chatTitle — same posture notes/lib/sort.ts takes for noteDisplayTitle
+// (falls back to the raw uuid, not a placeholder string, at this foundation layer).
 export function chatDisplayName(chat: Chat, currentUserId: bigint, soloFallback: string): string {
 	if (isChatUndecryptable(chat)) {
 		return chat.uuid
@@ -77,9 +87,19 @@ export function chatDisplayName(chat: Chat, currentUserId: bigint, soloFallback:
 		return chat.name
 	}
 
-	const others = chat.participants.filter(p => p.userId !== currentUserId)
+	const others = otherParticipants(chat, currentUserId)
 
 	return resolveChatParticipantsDisplayName(others, soloFallback)
+}
+
+// The title a chat renders under: the undecryptable placeholder, else the display name, else the uuid
+// while the viewer is unresolved. Shared by the sidebar row and the thread header.
+export function chatTitle(chat: Chat, currentUserId: bigint | undefined, undecryptableLabel: string, soloFallback: string): string {
+	if (isChatUndecryptable(chat)) {
+		return undecryptableLabel
+	}
+
+	return currentUserId !== undefined ? chatDisplayName(chat, currentUserId, soloFallback) : chat.uuid
 }
 
 // Participant-derived avatar image: the other participants sans self, keeping only a real avatar URL. A
@@ -87,7 +107,7 @@ export function chatDisplayName(chat: Chat, currentUserId: bigint, soloFallback:
 // undefined (the caller renders the display-name initial).
 // Shared by the sidebar row (chatRow.tsx) and the thread header (messageThread.tsx).
 export function chatAvatarUrl(chat: Chat, currentUserId: bigint | undefined): string | undefined {
-	const others = chat.participants.filter(p => p.userId !== currentUserId)
+	const others = otherParticipants(chat, currentUserId)
 
 	if (others.length !== 1) {
 		return undefined
@@ -117,8 +137,7 @@ export function messageSenderName(message: ChatMessagePartial): string {
 	return contactDisplayName({ email: message.senderEmail, nickName: message.senderNickName })
 }
 
-// Whether a chat's last message came from a blocked sender. senderId is `number` on the wasm surface (the
-// codegen quirk unread.logic.ts documents) — coerce before comparing to a bigint userId.
+// Whether a chat's last message came from a blocked sender.
 export function isLastMessageFromBlocked(chat: Chat, blocked: BlockedUsers): boolean {
 	const lastMessage = chat.lastMessage
 
@@ -126,7 +145,7 @@ export function isLastMessageFromBlocked(chat: Chat, blocked: BlockedUsers): boo
 		return false
 	}
 
-	return isBlocked({ userId: BigInt(lastMessage.senderId), email: lastMessage.senderEmail }, blocked)
+	return isSenderBlocked(lastMessage, blocked)
 }
 
 // Which of the four mutually exclusive preview tiers a conversation row renders. Decided here rather than

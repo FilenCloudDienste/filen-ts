@@ -19,6 +19,28 @@ import { MasterKeysFileField } from "@/features/auth/components/masterKeysFileFi
 import { PasswordInput } from "@/features/auth/components/passwordInput"
 import { advanceSkipMasterKeysChain, type SkipMasterKeysStage } from "@/features/auth/components/skipMasterKeysChain.logic"
 
+// Stage 4 is the typed confirm, rendered separately.
+const CONFIRM_STAGES = [
+	{
+		stage: "stage1",
+		titleKey: "skipMasterKeysWarningStage1Title",
+		bodyKey: "skipMasterKeysWarningStage1Body",
+		continueKey: "skipMasterKeysWarningStage1Continue"
+	},
+	{
+		stage: "stage2",
+		titleKey: "skipMasterKeysWarningStage2Title",
+		bodyKey: "skipMasterKeysWarningStage2Body",
+		continueKey: "skipMasterKeysWarningStage2Continue"
+	},
+	{
+		stage: "stage3",
+		titleKey: "skipMasterKeysWarningStage3Title",
+		bodyKey: "skipMasterKeysWarningStage3Body",
+		continueKey: "skipMasterKeysWarningStage3Continue"
+	}
+] as const satisfies readonly { stage: SkipMasterKeysStage; titleKey: string; bodyKey: string; continueKey: string }[]
+
 interface ResetFormProps {
 	token: string
 }
@@ -223,63 +245,32 @@ function ResetForm({ token }: ResetFormProps) {
 				</Button>
 			</form>
 
-			<ConfirmDialog
-				open={chainStage === "stage1"}
-				pending={false}
-				title={t("skipMasterKeysWarningStage1Title")}
-				body={t("skipMasterKeysWarningStage1Body")}
-				confirmLabel={t("skipMasterKeysWarningStage1Continue")}
-				cancelLabel={cancelLabel}
-				destructive
-				onOpenChange={open => {
-					if (!open) {
-						handleStageOutcome("stage1", false)
-					}
-				}}
-				onConfirm={() => {
-					handleStageOutcome("stage1", true)
-				}}
-			/>
-			<ConfirmDialog
-				open={chainStage === "stage2"}
-				pending={false}
-				title={t("skipMasterKeysWarningStage2Title")}
-				body={t("skipMasterKeysWarningStage2Body")}
-				confirmLabel={t("skipMasterKeysWarningStage2Continue")}
-				cancelLabel={cancelLabel}
-				destructive
-				onOpenChange={open => {
-					if (!open) {
-						handleStageOutcome("stage2", false)
-					}
-				}}
-				onConfirm={() => {
-					handleStageOutcome("stage2", true)
-				}}
-			/>
-			<ConfirmDialog
-				open={chainStage === "stage3"}
-				pending={false}
-				title={t("skipMasterKeysWarningStage3Title")}
-				body={t("skipMasterKeysWarningStage3Body")}
-				confirmLabel={t("skipMasterKeysWarningStage3Continue")}
-				cancelLabel={cancelLabel}
-				destructive
-				onOpenChange={open => {
-					if (!open) {
-						handleStageOutcome("stage3", false)
-					}
-				}}
-				onConfirm={() => {
-					handleStageOutcome("stage3", true)
-				}}
-			/>
+			{CONFIRM_STAGES.map(({ stage, titleKey, bodyKey, continueKey }) => (
+				<ConfirmDialog
+					key={stage}
+					open={chainStage === stage}
+					pending={false}
+					title={t(titleKey)}
+					body={t(bodyKey)}
+					confirmLabel={t(continueKey)}
+					cancelLabel={cancelLabel}
+					destructive
+					onOpenChange={open => {
+						if (!open) {
+							handleStageOutcome(stage, false)
+						}
+					}}
+					onConfirm={() => {
+						handleStageOutcome(stage, true)
+					}}
+				/>
+			))}
 			<TypedConfirmDialog
 				open={chainStage === "stage4"}
 				pending={pending}
 				title={t("skipMasterKeysWarningStage4Title")}
 				body={t("skipMasterKeysWarningStage4Body", { phrase: typedConfirmPhrase })}
-				matchLabel={t("skipMasterKeysWarningTypedConfirmLabel")}
+				matchLabel={t("common:confirmationPhrase")}
 				matchValue={typedConfirmPhrase}
 				confirmLabel={t("skipMasterKeysWarningStage4Confirm")}
 				cancelLabel={cancelLabel}

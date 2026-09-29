@@ -1,3 +1,5 @@
+import { pathIsUnder } from "@/features/shell/lib/appShell.logic"
+
 // The icon rail's reorderable links. The logo above them and the help/account footer below stay put.
 export const RAIL_ENTRY_IDS = ["drive", "photos", "transfers", "notes", "chats", "playlists", "contacts", "settings"] as const
 
@@ -76,17 +78,15 @@ export function railShift(index: number, from: number, to: number, pitch: number
 // Whether `pathname` is inside the section an entry links to. Drive, Notes, Chats and Settings nest
 // deeper routes under their root; the others are single pages.
 export function railEntryActive(id: RailEntryId, pathname: string): boolean {
-	const under = (root: string): boolean => pathname === root || pathname.startsWith(`${root}/`)
-
 	switch (id) {
 		case "drive":
-			return under("/drive")
+			return pathIsUnder(pathname, "/drive")
 		case "notes":
-			return under("/notes")
+			return pathIsUnder(pathname, "/notes")
 		case "chats":
-			return under("/chats")
+			return pathIsUnder(pathname, "/chats")
 		case "settings":
-			return under("/settings")
+			return pathIsUnder(pathname, "/settings")
 		case "photos":
 			return pathname === "/photos"
 		case "transfers":

@@ -117,3 +117,38 @@ export function dropChatSendState(chatUuid: string): void {
 		return remaining.length === Object.keys(prev).length ? prev : Object.fromEntries(remaining)
 	})
 }
+
+// Upserts one message at the tail of its chat's queue (a re-enqueue of the same inflightId replaces it).
+export function enqueueInflightMessage(chat: Chat, message: ChatMessageWithInflightId): void {
+	useChatsInflightStore.getState().setInflightMessages(prev => ({
+		...prev,
+		[chat.uuid]: {
+			chat,
+			messages: [...(prev[chat.uuid]?.messages.filter(m => m.inflightId !== message.inflightId) ?? []), message]
+		}
+	}))
+}
+
+// Removes one message from a chat's queue, dropping the chat key when its queue drains. No-op when the
+// entry is already gone (a concurrent remove/purge).
+export function dequeueInflightMessage(chatUuid: string, inflightId: string): void {
+	useChatsInflightStore.getState().setInflightMessages(prev => {
+		const existing = prev[chatUuid]
+
+		if (!existing) {
+			return prev
+		}
+
+		const remaining = existing.messages.filter(m => m.inflightId !== inflightId)
+
+		if (remaining.length === existing.messages.length) {
+			return prev
+		}
+
+		return remaining.length === 0 ? withoutKey(prev, chatUuid) : { ...prev, [chatUuid]: { ...existing, messages: remaining } }
+	})
+}
+
+export function clearInflightError(inflightId: string): void {
+	useChatsInflightStore.getState().setInflightErrors(prev => withoutKey(prev, inflightId))
+}

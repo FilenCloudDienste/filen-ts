@@ -2,8 +2,7 @@ import { useEffect, useRef, useState } from "react"
 import { useLatestRef } from "@/lib/useLatestRef"
 import { spreadsheetWorker } from "@/features/spreadsheet/lib/spreadsheetClient"
 import { applyEditResult, type GridDoc } from "@/features/spreadsheet/lib/cellStore.logic"
-import type { DocState, EditOp, EditResult } from "@/features/spreadsheet/lib/edits"
-import type { AxisShift } from "@/features/spreadsheet/lib/sizes.logic"
+import type { AxisEdit, DocState, EditOp, EditResult } from "@/features/spreadsheet/lib/edits"
 
 export interface SpreadsheetSnapshot {
 	bytes: Uint8Array
@@ -28,7 +27,7 @@ export interface SpreadsheetEdits {
 export function useSpreadsheetEdits(
 	id: number,
 	initial: GridDoc,
-	onShift?: (sheet: number, shift: AxisShift & { revert: boolean }) => void
+	onShift?: (sheet: number, shift: AxisEdit & { revert: boolean }) => void
 ): SpreadsheetEdits {
 	const [doc, setDoc] = useState(initial)
 	const [state, setState] = useState<DocState>({ dirty: false, canUndo: false, canRedo: false })

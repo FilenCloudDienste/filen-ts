@@ -1,88 +1,43 @@
-import { useState } from "react"
 import { useTranslation } from "react-i18next"
-import { toast } from "sonner"
 import { formatBytes } from "@filen/shared"
 import { sdkApi } from "@/lib/sdk/client"
-import { errorLabel } from "@/lib/i18n/errorLabel"
 import { DELETE_ALL_ITEMS_PHRASE } from "@/features/settings/lib/dangerPhrases"
-import { useIsOnline } from "@/lib/useIsOnline"
 import type { AccountQuerySuccess } from "@/queries/account"
 import { invalidateDriveListings } from "@/features/drive/queries/drive"
 import { invalidatePhotosListing } from "@/features/photos/queries/photos"
-import { Button } from "@/components/ui/button"
-import { TypedConfirmDialog } from "@/components/dialogs/typedConfirmDialog"
-import { SettingsRow } from "@/features/settings/components/settingsLayout"
+import { TypedDeleteRow } from "@/features/settings/components/account/typedDeleteRow"
 
 interface DeleteAllItemsRowProps {
 	accountQuery: AccountQuerySuccess
 }
 
-// Same TypedConfirmDialog pattern as DeleteAllVersionsRow, one severity level up: this wipes every
-// file and directory in the account, not just version history. deleteAllItems() is NEVER e2e-invoked —
-// it would nuke every other module's e2e fixtures on the shared account — unit/
-// render-only in this repo's own test suite, same as DeleteAccountRow.
+// One severity level up from DeleteAllVersionsRow: this wipes every file and directory in the account,
+// not just version history. deleteAllItems() is NEVER e2e-invoked — it would nuke every other module's
+// e2e fixtures on the shared account — unit/render-only in this repo's own test suite, same as
+// DeleteAccountRow.
 function DeleteAllItemsRow({ accountQuery }: DeleteAllItemsRowProps) {
-	const { t } = useTranslation(["settings", "common"])
-	const isOnline = useIsOnline()
+	const { t } = useTranslation("settings")
 	const { storageUsed } = accountQuery.data
-	const [open, setOpen] = useState(false)
-	const [pending, setPending] = useState(false)
-
-	async function handleConfirm(): Promise<void> {
-		setPending(true)
-		try {
-			await sdkApi.deleteAllItems()
-			// Nothing patches the listings here, and a read My Drive listing never refetches on its own. The
-			// photos walk trusts itself for a while too; a mounted one re-walks, finds its root gone and resets.
-			invalidateDriveListings()
-			invalidatePhotosListing(null)
-			setOpen(false)
-			toast.success(t("settingsDeleteAllItemsSuccess"))
-			void accountQuery.refetch()
-		} catch (e) {
-			toast.error(errorLabel(e))
-		} finally {
-			setPending(false)
-		}
-	}
 
 	return (
-		<SettingsRow
-			label={t("settingsDeleteAllItemsTitle")}
+		<TypedDeleteRow
+			title={t("settingsDeleteAllItemsTitle")}
 			description={t("settingsDeleteAllItemsDescription", { size: formatBytes(Number(storageUsed)) })}
-			destructive
-		>
-			<Button
-				type="button"
-				variant="destructive"
-				disabled={!isOnline}
-				title={!isOnline ? t("common:offlineActionDisabled") : undefined}
-				onClick={() => {
-					setOpen(true)
-				}}
-			>
-				{t("settingsDeleteAllItemsSubmit")}
-			</Button>
-
-			<TypedConfirmDialog
-				open={open}
-				pending={pending}
-				title={t("settingsDeleteAllItemsTitle")}
-				body={t("settingsDeleteAllItemsConfirmBody", { phrase: DELETE_ALL_ITEMS_PHRASE })}
-				matchLabel={t("settingsTypedConfirmLabel")}
-				matchValue={DELETE_ALL_ITEMS_PHRASE}
-				confirmLabel={t("settingsDeleteAllItemsSubmit")}
-				cancelLabel={t("common:cancel")}
-				onOpenChange={next => {
-					if (!next) {
-						setOpen(false)
-					}
-				}}
-				onConfirm={() => {
-					void handleConfirm()
-				}}
-			/>
-		</SettingsRow>
+			submitLabel={t("settingsDeleteAllItemsSubmit")}
+			confirmBody={t("settingsDeleteAllItemsConfirmBody", { phrase: DELETE_ALL_ITEMS_PHRASE })}
+			phrase={DELETE_ALL_ITEMS_PHRASE}
+			successMessage={t("settingsDeleteAllItemsSuccess")}
+			run={async () => {
+				await sdkApi.deleteAllItems()
+				// Nothing patches the listings here, and a read My Drive listing never refetches on its own. The
+				// photos walk trusts itself for a while too; a mounted one re-walks, finds its root gone and resets.
+				invalidateDriveListings()
+				invalidatePhotosListing(null)
+			}}
+			onDeleted={() => {
+				void accountQuery.refetch()
+			}}
+		/>
 	)
 }
 

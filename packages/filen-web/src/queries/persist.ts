@@ -203,19 +203,10 @@ const kvStorage: AsyncStorage<string | undefined> = {
 	}
 }
 
-// Query keys excluded from disk persistence entirely, matched exactly (not just by domain prefix)
-// so future queries sharing a domain default back to normal persistence. First (and today, only)
-// entry: the register-eligibility check is IP/region + time sensitive and already refetches on
-// every mount (staleTime 0 + refetchOnMount "always"), so persisting it would only ever serve a
-// stale banner for an instant, at the cost of a needless disk row. Imported rather than
-// re-literaled so the two can never drift apart.
-const NEVER_PERSIST_QUERY_KEYS: readonly (readonly string[])[] = [REGISTER_CHECK_QUERY_KEY]
-
-function isNeverPersisted(queryKey: readonly unknown[]): boolean {
-	return NEVER_PERSIST_QUERY_KEYS.some(
-		excluded => excluded.length === queryKey.length && excluded.every((segment, i) => segment === queryKey[i])
-	)
-}
+// The register-eligibility check is never persisted: it is IP/region + time sensitive and already
+// refetches on every mount (staleTime 0 + refetchOnMount "always"), so a disk row would only ever
+// serve a stale banner for an instant. Matched exactly by hash, so other auth queries still persist.
+const REGISTER_CHECK_QUERY_HASH = hashKey(REGISTER_CHECK_QUERY_KEY)
 
 export const persister = experimental_createQueryPersister({
 	storage: kvStorage,
@@ -225,7 +216,7 @@ export const persister = experimental_createQueryPersister({
 	serialize,
 	deserialize,
 	filters: {
-		predicate: query => !isNeverPersisted(query.queryKey)
+		predicate: query => query.queryHash !== REGISTER_CHECK_QUERY_HASH
 	}
 })
 

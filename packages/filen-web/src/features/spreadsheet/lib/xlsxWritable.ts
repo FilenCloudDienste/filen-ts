@@ -1,4 +1,5 @@
 import type { RoundtripWorkbook } from "hucre/xlsx"
+import { decodeXml, dirname, relationshipTypeName, relsPath, resolvePart } from "@/features/spreadsheet/lib/opcPaths"
 import { isWorksheet } from "@/features/spreadsheet/lib/xlsxView"
 
 // Whether saveXlsx can write this workbook back without breaking it. It rewrites the workbook and every
@@ -16,27 +17,6 @@ interface Relationship {
 }
 
 const decoder = new TextDecoder()
-
-function decodeXml(text: string): string {
-	return text.replace(/&(#x[0-9a-f]+|#[0-9]+|amp|lt|gt|quot|apos);/gi, (_match, entity: string) => {
-		switch (entity.toLowerCase()) {
-			case "amp":
-				return "&"
-			case "lt":
-				return "<"
-			case "gt":
-				return ">"
-			case "quot":
-				return '"'
-			case "apos":
-				return "'"
-			default:
-				return String.fromCodePoint(
-					entity[1]?.toLowerCase() === "x" ? Number.parseInt(entity.slice(2), 16) : Number.parseInt(entity.slice(1), 10)
-				)
-		}
-	})
-}
 
 function attributes(text: string): Map<string, string> {
 	const found = new Map<string, string>()
@@ -70,26 +50,6 @@ function relationships(xml: string | undefined): Relationship[] {
 				type: attrs.get("Type") ?? "",
 				target: attrs.get("Target") ?? ""
 			}))
-}
-
-// A relationship target as a part path, as hucre resolves it.
-function resolve(base: string, target: string): string {
-	if (target.startsWith("/")) {
-		return target.slice(1)
-	}
-
-	const parts = base.split("/").filter(Boolean)
-
-	for (const part of target.split("/").filter(Boolean)) {
-		if (part === "..") parts.pop()
-		else if (part !== ".") parts.push(part)
-	}
-
-	return parts.join("/")
-}
-
-function typeName(type: string): string {
-	return type.slice(type.lastIndexOf("/") + 1)
 }
 
 export function rawEntries(workbook: RoundtripWorkbook): Map<string, Uint8Array> | null {
@@ -220,19 +180,19 @@ export function xlsxSavePlan(workbook: RoundtripWorkbook): SavePlan {
 	}
 
 	const rootRels = relationships(text("_rels/.rels"))
-	const office = rootRels.find(rel => typeName(rel.type) === "officeDocument")
+	const office = rootRels.find(rel => relationshipTypeName(rel.type) === "officeDocument")
 
 	if (
 		office === undefined ||
-		resolve("", office.target).toLowerCase() !== "xl/workbook.xml" ||
-		rootRels.some(rel => !ROOT_TYPES.has(typeName(rel.type)))
+		resolvePart("", office.target) !== "xl/workbook.xml" ||
+		rootRels.some(rel => !ROOT_TYPES.has(relationshipTypeName(rel.type)))
 	) {
 		return VIEW_ONLY
 	}
 
 	for (const rel of rootRels) {
-		const type = typeName(rel.type)
-		const path = resolve("", rel.target)
+		const type = relationshipTypeName(rel.type)
+		const path = resolvePart("", rel.target)
 
 		if (type === "custom-properties" && /<(?:[\w.-]+:)?property\b/.test(text(path) ?? "")) {
 			return VIEW_ONLY
@@ -246,7 +206,7 @@ export function xlsxSavePlan(workbook: RoundtripWorkbook): SavePlan {
 	const workbookXml = text("xl/workbook.xml")
 	const workbookRels = relationships(text("xl/_rels/workbook.xml.rels"))
 
-	if (workbookXml === undefined || workbookRels.some(rel => !WORKBOOK_TYPES.has(typeName(rel.type)))) {
+	if (workbookXml === undefined || workbookRels.some(rel => !WORKBOOK_TYPES.has(relationshipTypeName(rel.type)))) {
 		return VIEW_ONLY
 	}
 
@@ -259,14 +219,11 @@ export function xlsxSavePlan(workbook: RoundtripWorkbook): SavePlan {
 	}
 
 	const byId = new Map(workbookRels.map(rel => [rel.id, rel]))
-	const theme = workbookRels.find(rel => typeName(rel.type) === "theme")
+	const theme = workbookRels.find(rel => relationshipTypeName(rel.type) === "theme")
 
 	// saveXlsx always points the workbook at theme/theme1.xml; one without a theme (LibreOffice writes
 	// none) gets a default one added.
-	if (
-		theme !== undefined &&
-		(resolve("xl", theme.target).toLowerCase() !== "xl/theme/theme1.xml" || !entries.has("xl/theme/theme1.xml"))
-	) {
+	if (theme !== undefined && (resolvePart("xl", theme.target) !== "xl/theme/theme1.xml" || !entries.has("xl/theme/theme1.xml"))) {
 		return VIEW_ONLY
 	}
 
@@ -282,22 +239,18 @@ export function xlsxSavePlan(workbook: RoundtripWorkbook): SavePlan {
 		const id = relationshipId(attrs)
 		const rel = id === undefined ? undefined : byId.get(id)
 
-		if (rel === undefined || typeName(rel.type) !== "worksheet") {
+		if (rel === undefined || relationshipTypeName(rel.type) !== "worksheet") {
 			return VIEW_ONLY
 		}
 
-		paths.push(resolve("xl", rel.target).toLowerCase())
+		paths.push(resolvePart("xl", rel.target))
 	}
 
 	const positional = paths.every((path, index) => path === `xl/worksheets/sheet${String(index + 1)}.xml`)
-	const sheetRels = paths.map(path => {
-		const slash = path.lastIndexOf("/")
-
-		return relationships(text(`${path.slice(0, slash)}/_rels/${path.slice(slash + 1)}.rels`))
-	})
+	const sheetRels = paths.map(path => relationships(text(relsPath(path))))
 	const preserved =
 		[...entries.keys()].some(path => path.startsWith("xl/threadedcomments/")) ||
-		sheetRels.some(rels => rels.some(rel => PRESERVED_SHEET_TYPES.has(typeName(rel.type))))
+		sheetRels.some(rels => rels.some(rel => PRESERVED_SHEET_TYPES.has(relationshipTypeName(rel.type))))
 
 	if (preserved && !positional) {
 		return VIEW_ONLY
@@ -306,7 +259,7 @@ export function xlsxSavePlan(workbook: RoundtripWorkbook): SavePlan {
 	for (const [index, rels] of sheetRels.entries()) {
 		const sheet = workbook.sheets[index]
 		const path = paths[index] ?? ""
-		const base = path.slice(0, path.lastIndexOf("/"))
+		const base = dirname(path)
 		const pictures = sheet?.images?.length ?? 0
 
 		if ((sheet?.textBoxes?.length ?? 0) > 0) {
@@ -314,8 +267,8 @@ export function xlsxSavePlan(workbook: RoundtripWorkbook): SavePlan {
 		}
 
 		for (const rel of rels) {
-			const type = typeName(rel.type)
-			const target = resolve(base, rel.target).toLowerCase()
+			const type = relationshipTypeName(rel.type)
+			const target = resolvePart(base, rel.target)
 
 			if (!SHEET_TYPES.has(type)) {
 				return VIEW_ONLY
@@ -350,21 +303,13 @@ export function xlsxSavePlan(workbook: RoundtripWorkbook): SavePlan {
 						// saveXlsx writes anew (pictures, drawings).
 						if (pictures > 0) return VIEW_ONLY
 
-						const slash = target.lastIndexOf("/")
-						const drawingRels = relationships(text(`${target.slice(0, slash)}/_rels/${target.slice(slash + 1)}.rels`))
+						for (const drawingRel of relationships(text(relsPath(target)))) {
+							const part = resolvePart(dirname(target), drawingRel.target)
 
-						for (const drawingRel of drawingRels) {
-							const part = resolve(target.slice(0, slash), drawingRel.target).toLowerCase()
+							if (relationshipTypeName(drawingRel.type) !== "chart") return VIEW_ONLY
 
-							if (typeName(drawingRel.type) !== "chart") return VIEW_ONLY
-
-							const partSlash = part.lastIndexOf("/")
-
-							for (const chartRel of relationships(
-								text(`${part.slice(0, partSlash)}/_rels/${part.slice(partSlash + 1)}.rels`)
-							)) {
-								if (/^xl\/(media|drawings)\//.test(resolve(part.slice(0, partSlash), chartRel.target).toLowerCase()))
-									return VIEW_ONLY
+							for (const chartRel of relationships(text(relsPath(part)))) {
+								if (/^xl\/(media|drawings)\//.test(resolvePart(dirname(part), chartRel.target))) return VIEW_ONLY
 							}
 						}
 					} else if (!picturesOnly(drawing, pictures)) {
@@ -386,7 +331,7 @@ export function xlsxSavePlan(workbook: RoundtripWorkbook): SavePlan {
 	for (const path of entries.keys()) {
 		const comment = numbered(path, /^xl\/threadedcomments\/threadedcomment(\d+)\.xml$/)
 
-		if (comment !== null && !sheetRels[comment - 1]?.some(rel => typeName(rel.type) === "threadedComment")) {
+		if (comment !== null && !sheetRels[comment - 1]?.some(rel => relationshipTypeName(rel.type) === "threadedComment")) {
 			return VIEW_ONLY
 		}
 
@@ -402,7 +347,7 @@ export function xlsxSavePlan(workbook: RoundtripWorkbook): SavePlan {
 		const numbers = elements(workbookXml, element).map(attrs => {
 			const id = relationshipId(attrs)
 			const rel = id === undefined ? undefined : byId.get(id)
-			const number = rel === undefined ? null : numbered(resolve("xl", rel.target).toLowerCase(), pattern)
+			const number = rel === undefined ? null : numbered(resolvePart("xl", rel.target), pattern)
 
 			return { number, id: idAttribute === undefined ? undefined : attrs.get(idAttribute) }
 		})

@@ -3,7 +3,8 @@ import { create } from "zustand"
 import { kvGetJson, kvSetJson } from "@/lib/storage/adapter"
 import { kvLoadOnce } from "@/lib/storage/kvBestEffort"
 import { withoutKey } from "@/lib/utils"
-import type { CommonKey, DriveKey, PreviewKey, NotesKey, ChatsKey, AudioKey, PhotosKey, ContactsKey } from "@/lib/i18n"
+import type { NamespaceKey } from "@/lib/i18n"
+import type { SHORTCUT_NAMESPACES } from "@/lib/keymap/shortcutsCatalog"
 
 // Keyboard-first from day one — every keyboard-controllable action in the app registers
 // here instead of wiring its own `window.addEventListener("keydown", …)`. A Map-backed registry
@@ -15,18 +16,12 @@ import type { CommonKey, DriveKey, PreviewKey, NotesKey, ChatsKey, AudioKey, Pho
 // in effect. This file stays feature-agnostic: it holds no concrete action, only the mechanism.
 export type ActionScope = "global" | "drive" | "editor" | "notes" | "chats" | "audio" | "photos" | "contacts"
 
+type ShortcutNamespace = (typeof SHORTCUT_NAMESPACES)[number]
+
 // The namespace has to travel with the key: the shortcuts UI resolves these against several
 // catalogs at once, and an unprefixed key would only ever resolve in the first one. Both halves are
 // compile-checked — the namespace exists, and the key exists IN that namespace.
-export type ShortcutDescriptionKey =
-	| `common:${CommonKey}`
-	| `drive:${DriveKey}`
-	| `notes:${NotesKey}`
-	| `chats:${ChatsKey}`
-	| `photos:${PhotosKey}`
-	| `audio:${AudioKey}`
-	| `preview:${PreviewKey}`
-	| `contacts:${ContactsKey}`
+export type ShortcutDescriptionKey = { [N in ShortcutNamespace]: `${N}:${NamespaceKey<N>}` }[ShortcutNamespace]
 
 export interface ActionDef {
 	id: string

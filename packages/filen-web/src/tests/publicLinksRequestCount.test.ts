@@ -3,7 +3,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { createElement, type ReactNode } from "react"
 import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react"
-import { QueryClient, QueryClientProvider, focusManager, onlineManager } from "@tanstack/react-query"
+import { focusManager, onlineManager } from "@tanstack/react-query"
 import type {
 	AnyLinkedDir,
 	DirPublicInfo,
@@ -33,14 +33,7 @@ vi.mock("@/lib/sdk/client", () => ({
 	}
 }))
 
-// The production defaults minus the persister (sqlite, unavailable under vitest).
-vi.mock("@/queries/client", () => ({
-	queryClient: new QueryClient({
-		defaultOptions: {
-			queries: { staleTime: 0, gcTime: Infinity, retry: false, refetchOnWindowFocus: true, refetchOnReconnect: true }
-		}
-	})
-}))
+vi.mock("@/queries/client", async () => ({ queryClient: (await import("@/tests/testQueryClient")).createTestQueryClient() }))
 
 vi.mock("@/lib/log", () => ({ log: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() } }))
 vi.mock("@tanstack/react-router", () => ({
@@ -48,6 +41,7 @@ vi.mock("@tanstack/react-router", () => ({
 }))
 
 import { queryClient } from "@/queries/client"
+import { queryClientWrapper } from "@/tests/testQueryClient"
 import { usePublicFile, publicDirListingQueryKey } from "@/features/publicLinks/queries/publicLink"
 import { linkForBrowsing } from "@/features/publicLinks/lib/password.logic"
 import { DirectoryLinkView } from "@/features/publicLinks/components/directoryLinkView"
@@ -125,9 +119,7 @@ function listingFor(dir: AnyLinkedDir): LinkedDirsAndFiles {
 	return (dir as LinkedDir).inner.uuid === SUB_UUID ? SUB_LISTING : ROOT_LISTING
 }
 
-function wrapper({ children }: { children: ReactNode }) {
-	return createElement(QueryClientProvider, { client: queryClient, children })
-}
+const wrapper = queryClientWrapper(queryClient)
 
 async function drain(): Promise<void> {
 	await act(async () => {

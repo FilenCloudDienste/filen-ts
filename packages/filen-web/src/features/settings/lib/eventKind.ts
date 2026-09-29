@@ -22,6 +22,7 @@ import {
 	CircleHelpIcon,
 	type LucideIcon
 } from "lucide-react"
+import type { TFunction } from "i18next"
 import type { UserEventKind } from "@filen/sdk-rs"
 import type { SettingsKey } from "@/lib/i18n"
 
@@ -76,6 +77,7 @@ export const EVENT_KIND_META = {
 } satisfies Record<UserEventKind["type"], EventKindMeta>
 
 const FALLBACK_ICON: LucideIcon = CircleHelpIcon
+const UNKNOWN_LABEL_KEY = "settingsEventUnknown"
 
 // Never crashes on a server event type this build doesn't know about yet: `type` arrives as a plain
 // runtime string (same dynamic-key-under-a-typed-catalog gap as errorLabel.ts), so the lookup is cast
@@ -83,5 +85,12 @@ const FALLBACK_ICON: LucideIcon = CircleHelpIcon
 export function eventKindMeta(type: string): EventKindMeta {
 	const meta = (EVENT_KIND_META as Record<string, EventKindMeta | undefined>)[type]
 
-	return meta ?? { labelKey: "settingsEventUnknown", icon: FALLBACK_ICON }
+	return meta ?? { labelKey: UNKNOWN_LABEL_KEY, icon: FALLBACK_ICON }
+}
+
+// The translated label plus icon; the unknown fallback names the raw server type.
+export function eventKindDisplay(type: string, t: TFunction<"settings">): { label: string; icon: LucideIcon } {
+	const { labelKey, icon } = eventKindMeta(type)
+
+	return { label: labelKey === UNKNOWN_LABEL_KEY ? t(labelKey, { type }) : t(labelKey), icon }
 }

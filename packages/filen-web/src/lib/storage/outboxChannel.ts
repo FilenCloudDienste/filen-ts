@@ -1,7 +1,7 @@
-import { type, type Type } from "arktype"
+import type { Type } from "arktype"
 import { storageRole, onStorageLeadershipChange } from "@/lib/storage/leader"
 import { storage } from "@/lib/storage/adapter"
-import { log } from "@/lib/log"
+import { decodeValue } from "@/lib/storage/decode"
 
 // Shared leader-owned-outbox core, reused by the notes AND chats send outboxes (both ride the SAME db-lock
 // leadership — no second election). It owns the mechanical, feature-agnostic half of a coordinator: the
@@ -108,18 +108,9 @@ export function closeOutbox(channel: BroadcastChannel): void {
 	channel.close()
 }
 
-// Validate a payload at the trust boundary; an invalid message is dropped (never thrown up into the
-// channel callback), the same convention as the kv read path.
+// The channel's trust boundary, the same drop-and-log convention as the kv read path.
 export function decodeOutboxPayload<T>(payload: unknown, schema: Type<T>, context: string): T | null {
-	const out = schema(payload)
-
-	if (out instanceof type.errors) {
-		log.warn("outbox-channel", `dropping invalid ${context}`, out.summary)
-
-		return null
-	}
-
-	return out as T
+	return decodeValue(payload, schema, "outbox-channel", context)
 }
 
 // The outbox lifecycle as an explicit state machine: a tab starts "unresolved" (leadership not yet decided —

@@ -15,6 +15,7 @@ import { PreviewOverlay } from "@/features/preview/components/previewOverlay"
 import { LoadingState } from "@/components/loadingState"
 import { noop } from "@/lib/utils"
 import { formatShortDate } from "@/lib/formatDate"
+import { EXTERNAL_LINK_REL } from "@/features/chats/components/thread/externalAnchor"
 
 const CARD_CLASS =
 	"mt-1 flex max-w-sm min-w-0 items-center gap-2.5 rounded-xl border border-border bg-muted/40 px-3 py-2 text-sm transition-colors hover:bg-muted/70"
@@ -37,20 +38,26 @@ function LinkCardShell({
 	href?: string
 	onClick?: () => void
 }) {
+	const body = (
+		<>
+			{icon}
+			<span className="flex min-w-0 flex-1 flex-col text-left">
+				<span className="truncate font-medium text-foreground">{name}</span>
+				<span className="truncate text-xs text-muted-foreground">{subtitle}</span>
+			</span>
+		</>
+	)
+
 	if (href !== undefined) {
 		return (
 			<a
 				href={href}
 				target="_blank"
-				rel="noopener noreferrer nofollow"
+				rel={EXTERNAL_LINK_REL}
 				aria-label={ariaLabel}
 				className={CARD_CLASS}
 			>
-				{icon}
-				<span className="flex min-w-0 flex-1 flex-col">
-					<span className="truncate font-medium text-foreground">{name}</span>
-					<span className="truncate text-xs text-muted-foreground">{subtitle}</span>
-				</span>
+				{body}
 			</a>
 		)
 	}
@@ -62,22 +69,32 @@ function LinkCardShell({
 			onClick={onClick}
 			className={CARD_CLASS}
 		>
-			{icon}
-			<span className="flex min-w-0 flex-1 flex-col text-left">
-				<span className="truncate font-medium text-foreground">{name}</span>
-				<span className="truncate text-xs text-muted-foreground">{subtitle}</span>
-			</span>
+			{body}
 		</button>
 	)
 }
 
+// The single linked file in the SAME PreviewOverlay every owned drive file uses. `variant="links"` (not
+// "drive"): the item is neither owned nor a real tree member, so this keeps the overlay's inline-editor save
+// path inert (isEditable gates on variant==="drive") on top of the overlay's own isLinkedEmbedItem menu gate.
+function LinkedPreviewOverlay({ item, downloadable, onClose }: { item: DriveItem; downloadable: boolean; onClose: () => void }) {
+	return (
+		<PreviewOverlay
+			variant="links"
+			items={[item]}
+			index={0}
+			onStep={noop}
+			onClose={onClose}
+			onItemRemoved={onClose}
+			downloadable={downloadable}
+		/>
+	)
+}
+
 // A resolved Filen file link's rich card (pdf/docx/text/code/markdown, and the fallback for a failed
-// image/video/audio inline stream below) — click opens the SAME PreviewOverlay every owned drive file
-// uses, fed the fabricated linked-file item (linkedFileIntoDriveItem, item.ts) —
-// zero new viewer code for any of these categories. `variant="links"` (not "drive"): the item is
-// neither owned nor a real tree member, so this keeps the overlay's inline-editor save path inert
-// (isEditable gates on variant==="drive") on top of the overlay's own isLinkedEmbedItem menu gate.
-// `downloadable` is the link's own flag.
+// image/video/audio inline stream below) — click opens LinkedPreviewOverlay, fed the fabricated linked-file
+// item (linkedFileIntoDriveItem, item.ts) — zero new viewer code for any of these categories. `downloadable`
+// is the link's own flag.
 function FilenPreviewCard({
 	item,
 	name,
@@ -106,18 +123,12 @@ function FilenPreviewCard({
 				}}
 			/>
 			{previewOpen ? (
-				<PreviewOverlay
-					variant="links"
-					items={[item]}
-					index={0}
-					onStep={noop}
+				<LinkedPreviewOverlay
+					item={item}
+					downloadable={downloadable}
 					onClose={() => {
 						setPreviewOpen(false)
 					}}
-					onItemRemoved={() => {
-						setPreviewOpen(false)
-					}}
-					downloadable={downloadable}
 				/>
 			) : null}
 		</>
@@ -208,18 +219,12 @@ function FilenStreamedInlineMedia({
 				/>
 			</button>
 			{previewOpen ? (
-				<PreviewOverlay
-					variant="links"
-					items={[item]}
-					index={0}
-					onStep={noop}
+				<LinkedPreviewOverlay
+					item={item}
+					downloadable={downloadable}
 					onClose={() => {
 						setPreviewOpen(false)
 					}}
-					onItemRemoved={() => {
-						setPreviewOpen(false)
-					}}
-					downloadable={downloadable}
 				/>
 			) : null}
 		</>

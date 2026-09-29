@@ -1,11 +1,9 @@
 import { createElement, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
-import { toast } from "sonner"
 import type { Note, NoteTag, NoteType } from "@filen/sdk-rs"
 import { aggregateNoteSelectionFlags } from "@filen/shared"
 import { type BulkOutcome } from "@/lib/actions/bulk"
-import { errorLabel } from "@/lib/i18n/errorLabel"
-import { isNoteUndecryptable } from "@/features/notes/lib/sort"
+import { isNoteUndecryptable, tagDisplayName } from "@/features/notes/lib/sort"
 import {
 	setPinnedNotes,
 	setFavoritedNotes,
@@ -16,7 +14,7 @@ import {
 	setTagOnNotes
 } from "@/features/notes/lib/bulk"
 import { exportAllNotes } from "@/features/notes/lib/export"
-import { toastNotesBulkOutcome } from "@/features/notes/lib/bulkToast"
+import { toastNotesBulkOutcome, toastNotesExportOutcome } from "@/features/notes/lib/bulkToast"
 import { useNotesSelectionStore } from "@/features/notes/store/useNotesSelectionStore"
 import { useNotesInflightStore } from "@/features/notes/store/useNotesInflight"
 import {
@@ -116,17 +114,7 @@ export function NotesBulkActionBar({ selectedNotes, allTags, currentUserId, onDi
 	}
 
 	async function exportSelected(): Promise<void> {
-		const outcome = await exportAllNotes(selectedNotes)
-
-		if (outcome.status === "error") {
-			toast.error(errorLabel(outcome.dto))
-
-			return
-		}
-
-		if (outcome.skipped > 0) {
-			toast.warning(t("notesExportSkippedUndecryptable", { count: outcome.skipped }))
-		}
+		toastNotesExportOutcome(await exportAllNotes(selectedNotes))
 	}
 
 	function runDescriptor(descriptor: Extract<NoteBulkActionDescriptor, { run: "direct" }>): void {
@@ -176,7 +164,7 @@ export function NotesBulkActionBar({ selectedNotes, allTags, currentUserId, onDi
 											void handleTagToggle(tag, next)
 										}}
 									>
-										{tag.name ?? tag.uuid}
+										{tagDisplayName(tag)}
 									</DropdownMenuCheckboxItem>
 								))
 							: NOTE_TYPE_SUBMENU.map(entry => (

@@ -23,7 +23,7 @@ vi.mock("@/features/notes/lib/bulk", () => ({
 	setTagOnNotes: vi.fn()
 }))
 
-vi.mock("@/features/notes/lib/bulkToast", () => ({ toastNotesBulkOutcome: vi.fn() }))
+vi.mock("@/features/notes/lib/bulkToast", () => ({ toastNotesBulkOutcome: vi.fn(), toastNotesExportOutcome: vi.fn() }))
 
 vi.mock("@/lib/useIsOnline", () => ({ useIsOnline: () => true }))
 

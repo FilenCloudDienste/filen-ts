@@ -25,25 +25,31 @@ export function marqueeRectFromPoints(ax: number, ay: number, bx: number, by: nu
 	}
 }
 
-// List mode: each row is a full-width band of `rowHeight`. A row intersects when the rect's vertical
-// span overlaps the row's [i*h,(i+1)*h) band — an edge-touch (rect ending exactly on a boundary) never
-// reaches into the next row. A plain click never selects because the hook only starts marqueeing past a
-// small drag threshold, not because of this math. Horizontal extent is irrelevant: rows span full width.
-export function marqueeListIndices(rect: MarqueeContentRect, itemCount: number, rowHeight: number): number[] {
-	if (itemCount === 0 || rowHeight <= 0 || rect.bottom <= 0 || rect.top >= itemCount * rowHeight) {
-		return []
+// The inclusive [first, last] rows whose `rowHeight` band the rect's vertical span overlaps, or null when
+// it covers none. A row intersects when the span overlaps its [i*h,(i+1)*h) band — an edge-touch (rect
+// ending exactly on a boundary) never reaches into the next row. A plain click never selects because the
+// hook only starts marqueeing past a small drag threshold, not because of this math.
+function rowBand(rect: MarqueeContentRect, rowCount: number, rowHeight: number): [number, number] | null {
+	if (rowCount === 0 || rowHeight <= 0 || rect.bottom <= 0 || rect.top >= rowCount * rowHeight) {
+		return null
 	}
 
 	const first = Math.max(0, Math.floor(rect.top / rowHeight))
-	const last = Math.min(itemCount - 1, Math.ceil(rect.bottom / rowHeight) - 1)
+	const last = Math.min(rowCount - 1, Math.ceil(rect.bottom / rowHeight) - 1)
 
-	if (first > last) {
-		return []
-	}
+	return first > last ? null : [first, last]
+}
 
+// List mode: each row is a full-width band of `rowHeight`, so horizontal extent is irrelevant.
+export function marqueeListIndices(rect: MarqueeContentRect, itemCount: number, rowHeight: number): number[] {
+	const band = rowBand(rect, itemCount, rowHeight)
 	const out: number[] = []
 
-	for (let i = first; i <= last; i++) {
+	if (!band) {
+		return out
+	}
+
+	for (let i = band[0]; i <= band[1]; i++) {
 		out.push(i)
 	}
 
@@ -63,20 +69,13 @@ export function marqueeGridIndices(
 	tileWidth: number,
 	rowHeight: number
 ): number[] {
-	if (itemCount === 0 || columns <= 0 || rowHeight <= 0 || contentWidth <= 0 || rect.bottom <= 0) {
+	if (columns <= 0 || contentWidth <= 0) {
 		return []
 	}
 
-	const rowCount = Math.ceil(itemCount / columns)
+	const band = rowBand(rect, Math.ceil(itemCount / columns), rowHeight)
 
-	if (rect.top >= rowCount * rowHeight) {
-		return []
-	}
-
-	const firstRow = Math.max(0, Math.floor(rect.top / rowHeight))
-	const lastRow = Math.min(rowCount - 1, Math.ceil(rect.bottom / rowHeight) - 1)
-
-	if (firstRow > lastRow) {
+	if (!band) {
 		return []
 	}
 
@@ -87,7 +86,7 @@ export function marqueeGridIndices(
 	const inset = Math.max(0, (cellWidth - tileWidth) / 2)
 	const out: number[] = []
 
-	for (let row = firstRow; row <= lastRow; row++) {
+	for (let row = band[0]; row <= band[1]; row++) {
 		for (let col = 0; col < columns; col++) {
 			const index = row * columns + col
 

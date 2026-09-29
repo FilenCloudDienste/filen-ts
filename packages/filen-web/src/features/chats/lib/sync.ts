@@ -14,6 +14,9 @@ import { deleteDraft } from "@/features/chats/lib/drafts"
 import {
 	useChatsInflightStore,
 	dropChatSendState,
+	enqueueInflightMessage,
+	dequeueInflightMessage,
+	clearInflightError,
 	type ChatMessageWithInflightId,
 	type InflightChatMessages
 } from "@/features/chats/store/useChatsInflight"
@@ -236,13 +239,7 @@ export class Sync {
 	private applyLeaderOptimistic(chat: Chat, message: ChatMessageWithInflightId): void {
 		chatMessagesQueryUpdate(chat.uuid, prev => [...prev.filter(m => m.uuid !== message.uuid), message])
 
-		useChatsInflightStore.getState().setInflightMessages(prev => ({
-			...prev,
-			[chat.uuid]: {
-				chat,
-				messages: [...(prev[chat.uuid]?.messages.filter(m => m.inflightId !== message.inflightId) ?? []), message]
-			}
-		}))
+		enqueueInflightMessage(chat, message)
 	}
 
 	// The send intake, routed by role. A leader paints + persists + kicks the loop (returns the persist
@@ -290,13 +287,7 @@ export class Sync {
 	// pending bubble — no query-cache paint, the leader owns the commit swap + the realtime echo delivers the
 	// committed copy), track it as unacked, and forward it to the leader. No disk write and no loop here.
 	private followerEnqueue(chat: Chat, optimistic: ChatMessageWithInflightId): Promise<boolean> {
-		useChatsInflightStore.getState().setInflightMessages(prev => ({
-			...prev,
-			[chat.uuid]: {
-				chat,
-				messages: [...(prev[chat.uuid]?.messages.filter(m => m.inflightId !== optimistic.inflightId) ?? []), optimistic]
-			}
-		}))
+		enqueueInflightMessage(chat, optimistic)
 
 		this.unacked = mergeInflightQueuesByUnion(this.unacked, {
 			[chat.uuid]: {
@@ -592,7 +583,7 @@ export class Sync {
 							committedChat = await this.pushMessage(chat, message)
 
 							// Success: clear any error record for this send.
-							useChatsInflightStore.getState().setInflightErrors(prev => withoutKey(prev, message.inflightId))
+							clearInflightError(message.inflightId)
 						} catch (e) {
 							if (isAborted(signal)) {
 								return
@@ -632,7 +623,7 @@ export class Sync {
 									message.inflightId,
 									permanentRejections
 								)
-								this.dequeue(chatUuid, message.inflightId)
+								dequeueInflightMessage(chatUuid, message.inflightId)
 
 								continue
 							}
@@ -648,7 +639,7 @@ export class Sync {
 						// immediately. The housekeeping below is two best-effort round trips — running them
 						// first would hold a committed send on disk across both, and a tab closed in that
 						// window replays it as a peer-visible duplicate.
-						this.dequeue(chatUuid, message.inflightId)
+						dequeueInflightMessage(chatUuid, message.inflightId)
 
 						await this.flushToDisk(useChatsInflightStore.getState().inflightMessages)
 
@@ -687,26 +678,6 @@ export class Sync {
 
 			log.error("chats-sync", "sync pass threw unexpectedly", result.error)
 		}
-	}
-
-	// Remove one message from a chat's queue, dropping the chat key when its queue drains. No-op when
-	// the entry is already gone (a concurrent remove/purge).
-	private dequeue(chatUuid: string, inflightId: string): void {
-		useChatsInflightStore.getState().setInflightMessages(prev => {
-			const existing = prev[chatUuid]
-
-			if (!existing) {
-				return prev
-			}
-
-			const remaining = existing.messages.filter(m => m.inflightId !== inflightId)
-
-			if (remaining.length === existing.messages.length) {
-				return prev
-			}
-
-			return remaining.length === 0 ? withoutKey(prev, chatUuid) : { ...prev, [chatUuid]: { ...existing, messages: remaining } }
-		})
 	}
 
 	// A chat deleted while its conversationDeleted event was missed: drop what the removal paths

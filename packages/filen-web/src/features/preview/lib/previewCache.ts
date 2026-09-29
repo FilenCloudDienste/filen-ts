@@ -96,13 +96,25 @@ export function previewCacheEpoch(): number {
 	return epoch
 }
 
+function bytesKey(scope: string, uuid: string): string {
+	return `bytes:${scope}:${uuid}`
+}
+
+function rawKey(scope: string, uuid: string): string {
+	return `raw:${scope}:${uuid}`
+}
+
+function streamKey(scope: string, uuid: string, contentType: string): string {
+	return `${scope}:${uuid}:${contentType}`
+}
+
 // `scope` is previewCacheScope's (accessMode.tsx); null caches nothing.
 export function getPreviewBytes(scope: string | null, uuid: string): Uint8Array | undefined {
 	if (scope === null) {
 		return undefined
 	}
 
-	const key = `bytes:${scope}:${uuid}`
+	const key = bytesKey(scope, uuid)
 	const entry = loaded.get(key)
 
 	// A consumer that transferred the buffer to a worker would leave an empty view behind.
@@ -129,7 +141,7 @@ export async function joinPreviewBytes(scope: string | null, uuid: string): Prom
 		return cached
 	}
 
-	return await pendingBytes.get(`bytes:${scope}:${uuid}`)?.catch(() => undefined)
+	return await pendingBytes.get(bytesKey(scope, uuid))?.catch(() => undefined)
 }
 
 // What a caller that went away gets instead of a load of its own: asErrorDTO reads the name as the
@@ -172,7 +184,7 @@ export function loadPreviewBytes(
 		return load()
 	}
 
-	const key = `bytes:${scope}:${uuid}`
+	const key = bytesKey(scope, uuid)
 	const pending = pendingBytes.get(key)
 
 	if (pending !== undefined) {
@@ -217,30 +229,30 @@ export function getRawPreview(scope: string | null, uuid: string): RawPreviewRes
 		return undefined
 	}
 
-	const value = loaded.get(`raw:${scope}:${uuid}`)?.value
+	const value = loaded.get(rawKey(scope, uuid))?.value
 
 	return value === undefined || value instanceof Uint8Array ? undefined : value
 }
 
 export function setRawPreview(scope: string | null, uuid: string, preview: RawPreviewResult, loadEpoch: number): void {
 	if (scope !== null && loadEpoch === epoch) {
-		loaded.set(`raw:${scope}:${uuid}`, preview, preview.type === "preview" ? preview.blob.size : 0)
+		loaded.set(rawKey(scope, uuid), preview, preview.type === "preview" ? preview.blob.size : 0)
 	}
 }
 
 export function getPreviewStreamId(scope: string | null, uuid: string, contentType: string): string | undefined {
-	return scope === null ? undefined : streamIds.get(`${scope}:${uuid}:${contentType}`)?.value
+	return scope === null ? undefined : streamIds.get(streamKey(scope, uuid, contentType))?.value
 }
 
 export function setPreviewStreamId(scope: string | null, uuid: string, contentType: string, id: string, loadEpoch: number): void {
 	if (scope !== null && loadEpoch === epoch) {
-		streamIds.set(`${scope}:${uuid}:${contentType}`, id, 0)
+		streamIds.set(streamKey(scope, uuid, contentType), id, 0)
 	}
 }
 
 export function forgetPreviewStreamId(scope: string | null, uuid: string, contentType: string): void {
 	if (scope !== null) {
-		streamIds.delete(`${scope}:${uuid}:${contentType}`)
+		streamIds.delete(streamKey(scope, uuid, contentType))
 	}
 }
 

@@ -42,15 +42,7 @@ import { queryClient as testQueryClient } from "@/queries/client"
 import { ACCOUNT_QUERY_KEY } from "@/queries/account"
 import { CHATS_QUERY_KEY, chatsQueryGet } from "@/features/chats/queries/chats"
 import { chatMessagesQueryKey } from "@/features/chats/queries/chatMessages"
-import {
-	isChatOwner,
-	createChat as createChatAction,
-	renameChat,
-	setChatMuted,
-	leaveChat,
-	deleteChat,
-	markChatRead
-} from "@/features/chats/lib/actions"
+import { createChat as createChatAction, renameChat, setChatMuted, leaveChat, deleteChat, markChatRead } from "@/features/chats/lib/actions"
 
 beforeEach(() => {
 	vi.clearAllMocks()
@@ -99,20 +91,6 @@ function mockContact(overrides: Partial<Contact> = {}): Contact {
 function setCurrentUser(id: bigint): void {
 	testQueryClient.setQueryData<UserInfo>(ACCOUNT_QUERY_KEY, { id } as UserInfo)
 }
-
-describe("isChatOwner", () => {
-	it("is true when the given userId matches the chat's ownerId", () => {
-		expect(isChatOwner(mockChat({ ownerId: 5n }), 5n)).toBe(true)
-	})
-
-	it("is false when the given userId does not match", () => {
-		expect(isChatOwner(mockChat({ ownerId: 5n }), 6n)).toBe(false)
-	})
-
-	it("is false when userId is undefined (no resolved account yet)", () => {
-		expect(isChatOwner(mockChat({ ownerId: 5n }), undefined)).toBe(false)
-	})
-})
 
 describe("createChat", () => {
 	it("never calls the SDK with an empty contact list — returns an error outcome", async () => {

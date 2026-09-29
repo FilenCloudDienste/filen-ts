@@ -1,5 +1,5 @@
 import { CHAT_ACTION_DEFS } from "@/features/chats/lib/actionDefs"
-import { isChatUndecryptable } from "@/features/chats/lib/sort"
+import { isChatOwner, isChatUndecryptable } from "@/features/chats/lib/sort"
 import type { Chat } from "@filen/sdk-rs"
 import { type ActionDescriptor } from "@/lib/actionDescriptor"
 import type { ChatsKey } from "@/lib/i18n"
@@ -36,7 +36,7 @@ function muteDescriptor(chat: Chat): ChatActionDescriptor {
 // `hasUnread` is caller-computed (chatHasUnread, unread.logic.ts) rather than re-derived here so this
 // stays a pure function of its own inputs, with no query-cache/account dependency of its own.
 export function chatMenuActions(chat: Chat, currentUserId: bigint | undefined, hasUnread: boolean): ChatActionDescriptor[] {
-	const owner = currentUserId !== undefined && chat.ownerId === currentUserId
+	const owner = isChatOwner(chat, currentUserId)
 
 	// An undecryptable conversation (group key didn't decrypt) can only be left or deleted — mute/
 	// rename/participants/markRead all need decrypted state this chat doesn't have (mirrors mobile's

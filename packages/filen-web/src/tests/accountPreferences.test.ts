@@ -1,9 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import {
-	runPreferenceToggle,
-	isPreferenceRowDisabled,
-	type PreferenceToggleDeps
-} from "@/features/settings/components/account/accountPreferences.logic"
+import { runPreferenceToggle, type PreferenceToggleDeps } from "@/features/settings/components/account/accountPreferences.logic"
 
 function makeHarness() {
 	const setEnabled = vi.fn<(enabled: boolean) => Promise<void>>()
@@ -45,19 +41,5 @@ describe("runPreferenceToggle (injected deps, no worker — mocks the SDK op per
 
 		expect(outcome).toEqual({ status: "error", dto: error })
 		expect(h.patch).not.toHaveBeenCalled()
-	})
-})
-
-describe("isPreferenceRowDisabled", () => {
-	it("disables the row while offline, even with no toggle in flight", () => {
-		expect(isPreferenceRowDisabled(false, false)).toBe(true)
-	})
-
-	it("disables the row while a toggle is in flight, even online", () => {
-		expect(isPreferenceRowDisabled(true, true)).toBe(true)
-	})
-
-	it("leaves the row enabled only when online and idle", () => {
-		expect(isPreferenceRowDisabled(false, true)).toBe(false)
 	})
 })

@@ -9,14 +9,15 @@ import {
 	type SizeLayer,
 	type StashedSizes
 } from "@/features/spreadsheet/lib/sizeLayer"
-import type { AxisShift, SizeAxis, SizeEntry } from "@/features/spreadsheet/lib/sizes.logic"
+import type { AxisEdit } from "@/features/spreadsheet/lib/edits"
+import type { SizeAxis, SizeEntry } from "@/features/spreadsheet/lib/sizes.logic"
 import { log } from "@/lib/log"
 
 export interface SizeLayerHandle {
 	layer: SizeLayer
 	update: (sheet: number, axis: SizeAxis, entries: readonly SizeEntry[]) => void
 	// A CSV's rows or columns moved: its sizes move with them (an undone delete gets its sizes back).
-	follow: (sheet: number, shift: AxisShift & { revert: boolean }) => void
+	follow: (sheet: number, shift: AxisEdit & { revert: boolean }) => void
 }
 
 function persist(key: LayerKey, layer: SizeLayer): void {

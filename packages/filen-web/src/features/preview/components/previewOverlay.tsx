@@ -342,33 +342,15 @@ export function PreviewOverlay({
 		setMenuDialogKind(null)
 	}
 
-	async function handleMenuTrash(): Promise<void> {
+	async function removeCurrentItem(remove: typeof trashItems): Promise<void> {
 		if (driveItem === undefined || rawDriveItem === undefined) {
 			return
 		}
 
 		setMenuPending(true)
-		// Its echo can beat the response back: the user's own trash, not one made elsewhere.
+		// Its echo can beat the response back: the user's own removal, not one made elsewhere.
 		remote.expectOwnChange(driveItem.data.uuid, "remove")
-		const outcome = await trashItems([driveItem])
-		remote.forgetOwnChange(driveItem.data.uuid)
-		setMenuPending(false)
-		setMenuDialogKind(null)
-		toastBulkOutcome(outcome)
-
-		if (outcome.succeeded.length > 0) {
-			onItemRemoved(rawDriveItem.data.uuid)
-		}
-	}
-
-	async function handleMenuDelete(): Promise<void> {
-		if (driveItem === undefined || rawDriveItem === undefined) {
-			return
-		}
-
-		setMenuPending(true)
-		remote.expectOwnChange(driveItem.data.uuid, "remove")
-		const outcome = await deleteItemsPermanently([driveItem])
+		const outcome = await remove([driveItem])
 		remote.forgetOwnChange(driveItem.data.uuid)
 		setMenuPending(false)
 		setMenuDialogKind(null)
@@ -498,7 +480,7 @@ export function PreviewOverlay({
 						pending={menuPending}
 						onClose={closeMenuDialog}
 						onConfirm={() => {
-							void handleMenuTrash()
+							void removeCurrentItem(trashItems)
 						}}
 					/>
 				)
@@ -518,7 +500,7 @@ export function PreviewOverlay({
 							}
 						}}
 						onConfirm={() => {
-							void handleMenuDelete()
+							void removeCurrentItem(deleteItemsPermanently)
 						}}
 					/>
 				)

@@ -5,7 +5,7 @@ import { DEFAULT_ROW_HEIGHT, type CellRange } from "@/features/spreadsheet/lib/m
 // heights in points.
 const PX_PER_CHAR = 7
 const CHAR_PADDING = 5
-const PX_PER_POINT = 4 / 3
+export const PX_PER_POINT = 4 / 3
 
 export type SizeAxis = "rows" | "cols"
 
@@ -21,9 +21,11 @@ export const MAX_ROW_HEIGHT = 545
 // resizes only the dragged one, so no gesture builds a size map the size of the sheet.
 export const MAX_RESIZE_TARGETS = 10_000
 
-// What autofit adds to measured content: a cell's horizontal padding (px-1.5 each side), its 1px
-// border, and 1px of slack; a row's line box to the default row's height.
-const CELL_FIT_PADDING = 14
+// A cell's horizontal padding (px-1.5 each side) and its gridline.
+export const CELL_PADDING = 13
+// What autofit adds to measured content: a cell's padding and 1px of slack; a row's line box to the
+// default row's height.
+const CELL_FIT_PADDING = CELL_PADDING + 1
 const ROW_FIT_PADDING = 7
 
 export function clampSize(axis: SizeAxis, px: number): number {
@@ -69,14 +71,6 @@ export function sheetWithSizes<T extends { colWidths: ReadonlyMap<number, number
 	return axis === "cols"
 		? { ...sheet, colWidths: withSizes(sheet.colWidths, entries) }
 		: { ...sheet, rowHeights: withSizes(sheet.rowHeights, entries) }
-}
-
-// A structural edit, as sizes follow it.
-export interface AxisShift {
-	axis: SizeAxis
-	kind: "insert" | "delete"
-	at: number
-	count: number
 }
 
 export function shiftSizes(

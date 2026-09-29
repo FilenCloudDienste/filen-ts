@@ -6,6 +6,7 @@ import { hardenLinkHref } from "@/features/chats/lib/regexed.logic"
 import { emojiForShortcode, customEmojiImageForShortcode } from "@/features/chats/lib/emoji"
 import { parseFilenPublicLink } from "@/features/chats/lib/embeds.logic"
 import { TrustedExternalLink } from "@/features/chats/components/thread/trustedExternalLink"
+import { ExternalAnchor } from "@/features/chats/components/thread/externalAnchor"
 
 // Renders one message body from the pure segment list. Every branch emits a React text node or element —
 // never parsed HTML, never dangerouslySetInnerHTML — so injection is structurally impossible.
@@ -66,15 +67,11 @@ export function MessageContent({ chat, text, segments }: { chat: Chat; text: str
 						// same posture as the embed card below it (filenLinkCard.tsx) opens with.
 						if (parseFilenPublicLink(href) !== null) {
 							return (
-								<a
+								<ExternalAnchor
 									key={index}
 									href={href}
-									target="_blank"
-									rel="noopener noreferrer nofollow"
 									className={linkClassName}
-								>
-									{href}
-								</a>
+								/>
 							)
 						}
 

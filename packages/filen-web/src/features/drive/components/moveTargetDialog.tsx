@@ -1,28 +1,21 @@
 import { useState } from "react"
 import { useTranslation } from "react-i18next"
-import { toast } from "sonner"
 import { FolderPlusIcon } from "lucide-react"
 import type { DriveItem } from "@/features/drive/lib/item"
-import { moveItems } from "@/features/drive/lib/actions"
+import { performMove } from "@/features/drive/lib/dnd"
 import { startCopyWithCard } from "@/features/transfers/lib/copyToast"
 import { type CopyDestination } from "@/features/drive/lib/copy.logic"
-import { toastBulkOutcome } from "@/features/drive/lib/bulkToast"
-import { runCreateDirectory } from "@/features/drive/lib/createDirectory"
-import { useDriveStore } from "@/features/drive/store/useDriveStore"
-import { driveListingQueryUpdate } from "@/features/drive/queries/drive"
-import { sdkApi } from "@/lib/sdk/client"
-import { errorLabel } from "@/lib/i18n/errorLabel"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { pendingGuardedOpenChange } from "@/components/dialogs/dismissal.logic"
 import { isCopyConfirmDisabled, isMoveConfirmDisabled, isMoveRowDisabled } from "@/features/drive/components/moveTargetDialog.logic"
 import { filterDriveItemsByLocalSearch } from "@/features/drive/components/directoryListing.logic"
 import { PickerBreadcrumb, PickerDirectoryRow, PickerListShell } from "@/features/drive/components/directoryPicker"
 import { useDirectoryPicker, useDirectoryPickerFilter } from "@/features/drive/hooks/useDirectoryPicker"
+import { NewDirectoryDialog } from "@/features/drive/components/newDirectory"
 import { ListFilterInput } from "@/components/listFilterInput"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
-import { InputDialog } from "@/components/dialogs/inputDialog"
 
 export interface MoveTargetDialogProps {
 	items: DriveItem[]
@@ -54,35 +47,11 @@ export function MoveTargetDialog({ items, onClose, mode, onCopy }: MoveTargetDia
 	const [filter, setFilter] = useDirectoryPickerFilter(pathStack)
 	const [pending, setPending] = useState(false)
 	const [newFolderOpen, setNewFolderOpen] = useState(false)
-	const [newFolderPending, setNewFolderPending] = useState(false)
 	const directories = (listingQuery.data ?? []).filter(item => item.type === "directory")
 	// Same instant local name filter the non-"drive" listing variants use — this picker is a pure
 	// breadcrumb browser (never wired to the cache-backed engine), so a filtered folder tree is the only
 	// way to search it.
 	const filteredDirectories = filterDriveItemsByLocalSearch(directories, filter)
-
-	// Creates a destination directory in place, right inside whichever directory the picker is
-	// currently browsing (targetUuid) — the same helper newDirectory.tsx's own toolbar trigger uses,
-	// patching this picker's own listing query (variant "drive", the only variant this picker ever
-	// browses) so the new row appears with no refetch and can be descended into or picked immediately.
-	async function handleCreateFolder(name: string): Promise<void> {
-		setNewFolderPending(true)
-		const outcome = await runCreateDirectory(
-			{ createDirectory: (parent, next) => sdkApi.createDirectory(parent, next), patchListing: driveListingQueryUpdate },
-			targetUuid,
-			name.trim()
-		)
-		setNewFolderPending(false)
-
-		if (outcome.status === "error") {
-			// Dialog stays open on error (e.g. a name clash) so the user can fix the name and retry —
-			// mirrors newDirectory.tsx's identical convention.
-			toast.error(errorLabel(outcome.dto))
-			return
-		}
-
-		setNewFolderOpen(false)
-	}
 
 	const handleOpenChange = pendingGuardedOpenChange(pending, next => {
 		if (!next) {
@@ -107,15 +76,9 @@ export function MoveTargetDialog({ items, onClose, mode, onCopy }: MoveTargetDia
 		}
 
 		setPending(true)
-		const outcome = await moveItems(items, targetUuid)
+		await performMove(items, targetUuid)
 		setPending(false)
 		onClose()
-		toastBulkOutcome(outcome)
-
-		// A moved item vanishes from whichever listing it was selected in (see actions.ts) — leaving it
-		// selected would strand a phantom entry in the "N selected" count, same cleanup
-		// directoryListing.tsx's own trash/delete confirms already do.
-		useDriveStore.getState().removeFromSelection(outcome.succeeded.map(item => item.data.uuid))
 	}
 
 	return (
@@ -200,20 +163,13 @@ export function MoveTargetDialog({ items, onClose, mode, onCopy }: MoveTargetDia
 			</DialogContent>
 			{/* Nested inside the outer Dialog (Base UI's own "Nested dialogs" support — same pattern as
 			versionsDialog.tsx's nested ConfirmDialog) rather than a sibling, for the stacked focus-trap/
-			backdrop behavior. */}
-			<InputDialog
+			backdrop behavior. It patches the "drive" listing this picker browses, so the new row is
+			immediately descendable/pickable. */}
+			<NewDirectoryDialog
 				open={newFolderOpen}
-				pending={newFolderPending}
-				title={t("driveNewDirectoryTitle")}
-				body={t("driveNewDirectoryBody")}
-				label={t("driveNewDirectoryLabel")}
-				placeholder={t("driveNewDirectoryPlaceholder")}
-				submitLabel={t("driveNewDirectorySubmit")}
-				validate={name => name.trim().length > 0}
 				onOpenChange={setNewFolderOpen}
-				onSubmit={value => {
-					void handleCreateFolder(value)
-				}}
+				parentUuid={targetUuid}
+				hiddenNotice={false}
 			/>
 		</Dialog>
 	)

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type FocusEvent, type KeyboardEvent, type RefObject } from "react"
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, type FocusEvent, type KeyboardEvent, type RefObject } from "react"
 import { flushSync } from "react-dom"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
@@ -11,9 +11,24 @@ import { SheetTabs } from "@/features/spreadsheet/components/sheetTabs"
 import { useSizeLayer } from "@/features/spreadsheet/hooks/useSizeLayer"
 import { useSpreadsheetDoc } from "@/features/spreadsheet/hooks/useSpreadsheetDoc"
 import { useSpreadsheetEdits, useSpreadsheetWritability, type SpreadsheetSnapshot } from "@/features/spreadsheet/hooks/useSpreadsheetEdits"
-import { rangeName, selectionRange, type CellPosition, type Selection } from "@/features/spreadsheet/lib/cellRef.logic"
+import {
+	rangeArea,
+	rangeCols,
+	rangeName,
+	rangeRows,
+	selectionRange,
+	type CellPosition,
+	type Selection
+} from "@/features/spreadsheet/lib/cellRef.logic"
 import { CellStore, type GridDoc, type GridSheet } from "@/features/spreadsheet/lib/cellStore.logic"
-import { MAX_EDIT_CELLS, type EditOp, type EditResult, type FormatPatch } from "@/features/spreadsheet/lib/edits"
+import {
+	MAX_EDIT_CELLS,
+	TOGGLE_FORMATS,
+	toggledPatch,
+	type EditOp,
+	type EditResult,
+	type FormatPatch
+} from "@/features/spreadsheet/lib/edits"
 import { clearedCells, newSheetName } from "@/features/spreadsheet/lib/gridEdits.logic"
 import { cellKey, type CellRange } from "@/features/spreadsheet/lib/model"
 import { gridMove, isTypedCharacter, sheetBounds, sheetCols, sheetRows, snapToMerge } from "@/features/spreadsheet/lib/navigation.logic"
@@ -33,7 +48,7 @@ import { saveAsXlsx } from "@/features/spreadsheet/lib/saveAsXlsx"
 // The overlay's handle on the open file's bytes as edited, read when it saves: an open cell entry is
 // committed first, and the bytes come after every edit already made. `commit` marks them saved once
 // stored.
-export type SpreadsheetSaveSource = () => Promise<{ bytes: Uint8Array; commit: () => void }>
+export type SpreadsheetSaveSource = () => Promise<SpreadsheetSnapshot>
 
 interface SpreadsheetViewerProps {
 	item: DriveItem
@@ -121,6 +136,17 @@ const REFUSED_MESSAGES = {
 	tableHeader: "previewSpreadsheetTableHeader",
 	encoding: "previewSpreadsheetEncodingUnsupported"
 } as const satisfies Record<Extract<EditResult, { type: "refused" }>["reason"], string>
+
+// The structural context-menu items, in menu order; a separator follows each axis's delete. `after`
+// inserts past the selection's end rather than at its start.
+const STRUCTURE_ITEMS = [
+	{ key: "previewSpreadsheetInsertRowsAbove", type: "insert", axis: "rows", after: false },
+	{ key: "previewSpreadsheetInsertRowsBelow", type: "insert", axis: "rows", after: true },
+	{ key: "previewSpreadsheetDeleteRows", type: "delete", axis: "rows", after: false },
+	{ key: "previewSpreadsheetInsertColumnsLeft", type: "insert", axis: "cols", after: false },
+	{ key: "previewSpreadsheetInsertColumnsRight", type: "insert", axis: "cols", after: true },
+	{ key: "previewSpreadsheetDeleteColumns", type: "delete", axis: "cols", after: false }
+] as const
 
 type Move = "down" | "up" | "right" | "left" | "none"
 
@@ -374,7 +400,7 @@ function SpreadsheetBody({
 		if (mod && !event.altKey) {
 			const undo = key === "z" && !event.shiftKey
 			const redo = (key === "z" && event.shiftKey) || key === "y"
-			const property = doc.kind === "xlsx" && !event.shiftKey ? ({ b: "bold", i: "italic", u: "underline" } as const)[key] : undefined
+			const toggle = doc.kind === "xlsx" && !event.shiftKey ? TOGGLE_FORMATS.find(entry => entry.shortcutKey === key) : undefined
 
 			if (undo || redo) {
 				event.preventDefault()
@@ -383,9 +409,9 @@ function SpreadsheetBody({
 				return true
 			}
 
-			if (property !== undefined) {
+			if (toggle !== undefined) {
 				event.preventDefault()
-				format({ [property]: activeStyle?.[property] !== true })
+				format(toggledPatch(activeStyle, toggle.format))
 
 				return true
 			}
@@ -448,10 +474,7 @@ function SpreadsheetBody({
 
 	function copyRange(event: ClipboardEvent, cut: boolean): boolean {
 		// Past what one edit takes, pasting it here is refused anyway: nothing is kept beside the text.
-		const clip =
-			(range.endRow - range.startRow + 1) * (range.endCol - range.startCol + 1) <= MAX_EDIT_CELLS
-				? rangeToClip(sheet, range, cut)
-				: null
+		const clip = rangeArea(range) <= MAX_EDIT_CELLS ? rangeToClip(sheet, range, cut) : null
 		const text = clip?.tsv ?? rangeToTsv(sheet, range)
 
 		event.preventDefault()
@@ -592,8 +615,8 @@ function SpreadsheetBody({
 		}
 	}, [])
 
-	const rowsSelected = range.endRow - range.startRow + 1
-	const colsSelected = range.endCol - range.startCol + 1
+	const rowsSelected = rangeRows(range)
+	const colsSelected = rangeCols(range)
 	const structureDisabled = sheet.structureLocked
 
 	// Into the file for an editable workbook (an undoable edit), beside it for everything else.
@@ -747,56 +770,26 @@ function SpreadsheetBody({
 				<ContextMenuContent>
 					{canEdit ? (
 						<>
-							<ContextMenuItem
-								disabled={structureDisabled}
-								onClick={() => {
-									apply({ type: "insert", sheet: sheetIndex, axis: "rows", at: range.startRow, count: rowsSelected })
-								}}
-							>
-								{t("previewSpreadsheetInsertRowsAbove", { count: rowsSelected })}
-							</ContextMenuItem>
-							<ContextMenuItem
-								disabled={structureDisabled}
-								onClick={() => {
-									apply({ type: "insert", sheet: sheetIndex, axis: "rows", at: range.endRow + 1, count: rowsSelected })
-								}}
-							>
-								{t("previewSpreadsheetInsertRowsBelow", { count: rowsSelected })}
-							</ContextMenuItem>
-							<ContextMenuItem
-								disabled={structureDisabled}
-								onClick={() => {
-									apply({ type: "delete", sheet: sheetIndex, axis: "rows", at: range.startRow, count: rowsSelected })
-								}}
-							>
-								{t("previewSpreadsheetDeleteRows", { count: rowsSelected })}
-							</ContextMenuItem>
-							<ContextMenuSeparator />
-							<ContextMenuItem
-								disabled={structureDisabled}
-								onClick={() => {
-									apply({ type: "insert", sheet: sheetIndex, axis: "cols", at: range.startCol, count: colsSelected })
-								}}
-							>
-								{t("previewSpreadsheetInsertColumnsLeft", { count: colsSelected })}
-							</ContextMenuItem>
-							<ContextMenuItem
-								disabled={structureDisabled}
-								onClick={() => {
-									apply({ type: "insert", sheet: sheetIndex, axis: "cols", at: range.endCol + 1, count: colsSelected })
-								}}
-							>
-								{t("previewSpreadsheetInsertColumnsRight", { count: colsSelected })}
-							</ContextMenuItem>
-							<ContextMenuItem
-								disabled={structureDisabled}
-								onClick={() => {
-									apply({ type: "delete", sheet: sheetIndex, axis: "cols", at: range.startCol, count: colsSelected })
-								}}
-							>
-								{t("previewSpreadsheetDeleteColumns", { count: colsSelected })}
-							</ContextMenuItem>
-							<ContextMenuSeparator />
+							{STRUCTURE_ITEMS.map(item => {
+								const rows = item.axis === "rows"
+								const count = rows ? rowsSelected : colsSelected
+								const start = rows ? range.startRow : range.startCol
+								const at = item.after ? start + count : start
+
+								return (
+									<Fragment key={item.key}>
+										<ContextMenuItem
+											disabled={structureDisabled}
+											onClick={() => {
+												apply({ type: item.type, sheet: sheetIndex, axis: item.axis, at, count })
+											}}
+										>
+											{t(item.key, { count })}
+										</ContextMenuItem>
+										{item.type === "delete" ? <ContextMenuSeparator /> : null}
+									</Fragment>
+								)
+							})}
 							<ContextMenuItem
 								onClick={() => {
 									clear()

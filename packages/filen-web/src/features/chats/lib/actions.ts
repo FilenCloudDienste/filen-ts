@@ -8,6 +8,7 @@ import { accountQueryGet } from "@/queries/account"
 import { chatsQueryUpsert, chatsQueryRemove } from "@/features/chats/queries/chats"
 import { chatMessagesQueryKey } from "@/features/chats/queries/chatMessages"
 import { purgeChatInflightState } from "@/features/chats/lib/inflight"
+import { isChatOwner } from "@/features/chats/lib/sort"
 import { attemptOp, type ActionOutcome, type VoidActionOutcome } from "@/lib/actions/outcome"
 
 export type { ActionOutcome, VoidActionOutcome }
@@ -17,12 +18,6 @@ export type { ActionOutcome, VoidActionOutcome }
 // success) patch the chats-list cache directly (confirm-then-patch, mirrors notes/lib/actions.ts).
 // Nothing here calls toast — every caller (chatMenu.tsx, useChatDialogHost, createChatDialog, ...)
 // resolves the outcome and surfaces `errorLabel(dto)` itself, same convention as notes.
-
-// Chat.ownerId is a single bigint field on the Chat itself (unlike NoteParticipant's own per-row
-// isOwner flag) — no participant lookup needed.
-export function isChatOwner(chat: Chat, userId: bigint | undefined = accountQueryGet()?.id): boolean {
-	return userId !== undefined && chat.ownerId === userId
-}
 
 function ownerGateError(): ActionOutcome<Chat> {
 	return { status: "error", dto: plainErrorDTO(i18n.t("chats:chatOwnerOnlyError")) }
@@ -52,7 +47,7 @@ export async function createChat(contacts: Contact[]): Promise<ActionOutcome<Cha
 // No-op on empty/unchanged (mirrors notes' setNoteTitle) — a blank or identical value never reaches
 // the SDK at all.
 export async function renameChat(chat: Chat, name: string): Promise<ActionOutcome<Chat>> {
-	if (!isChatOwner(chat)) {
+	if (!isChatOwner(chat, accountQueryGet()?.id)) {
 		return ownerGateError()
 	}
 
@@ -116,7 +111,7 @@ export async function leaveChat(chat: Chat, opts?: LeaveOrDeleteChatOptions): Pr
 }
 
 export async function deleteChat(chat: Chat, opts?: LeaveOrDeleteChatOptions): Promise<VoidActionOutcome> {
-	if (!isChatOwner(chat)) {
+	if (!isChatOwner(chat, accountQueryGet()?.id)) {
 		return { status: "error", dto: plainErrorDTO(i18n.t("chats:chatOwnerOnlyError")) }
 	}
 

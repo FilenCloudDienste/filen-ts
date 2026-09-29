@@ -1,4 +1,4 @@
-import { detectDelimiter, parseCsv, writeCsv, type CellValue } from "hucre"
+import { detectBom, detectDelimiter, parseCsv, writeCsv, type CellValue } from "hucre"
 import { cellKey, MAX_COLUMNS, type CellView, type SpreadsheetDoc } from "@/features/spreadsheet/lib/model"
 
 // How a CSV file was written, so a save writes it back the same way: its separator, its line ends, a byte
@@ -84,18 +84,21 @@ function looksWesternWindows1252(bytes: Uint8Array): boolean {
 }
 
 function decodeCsv(bytes: Uint8Array): { text: string; bom: boolean; encoding: CsvFormat["encoding"]; writable: boolean } {
+	const bomInfo = detectBom(bytes)
+
 	// Excel's "Save as Unicode Text" writes UTF-16LE with a BOM; decoded as UTF-8 it would come back as
-	// NUL-interleaved garbage rather than throwing, so it must be checked before the UTF-8 BOM/fallback below.
-	if (UTF16LE_BOM.every((byte, index) => bytes[index] === byte)) {
-		return { text: new TextDecoder("utf-16le").decode(bytes.subarray(2)), bom: true, encoding: "utf-16le", writable: true }
+	// NUL-interleaved garbage rather than throwing, so it must be handled before the UTF-8 fallback below.
+	if (bomInfo !== null && bomInfo.encoding !== "utf-8") {
+		return {
+			text: new TextDecoder(bomInfo.encoding).decode(bytes.subarray(bomInfo.length)),
+			bom: true,
+			encoding: bomInfo.encoding,
+			writable: true
+		}
 	}
 
-	if (UTF16BE_BOM.every((byte, index) => bytes[index] === byte)) {
-		return { text: new TextDecoder("utf-16be").decode(bytes.subarray(2)), bom: true, encoding: "utf-16be", writable: true }
-	}
-
-	const bom = UTF8_BOM.every((byte, index) => bytes[index] === byte)
-	const body = bom ? bytes.subarray(3) : bytes
+	const bom = bomInfo !== null
+	const body = bomInfo !== null ? bytes.subarray(bomInfo.length) : bytes
 
 	try {
 		return { text: new TextDecoder("utf-8", { fatal: true }).decode(body), bom, encoding: "utf-8", writable: true }

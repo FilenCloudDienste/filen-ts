@@ -40,9 +40,8 @@ import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { driveListingQueryKey, projectTreeChildren } from "@/features/drive/queries/drive"
 import { queryClient } from "@/queries/client"
 import { DROPDOWN_TREE_MENU_FAMILY, DirectoryTreeSubmenu, type DirectoryTreeTarget } from "@/features/drive/components/directoryTreeSubmenu"
-import { MoveSubmenu } from "@/features/drive/components/moveSubmenu"
+import { TransferSubmenu } from "@/features/drive/components/transferSubmenu"
 import { useDriveClipboardStore } from "@/features/drive/store/useDriveClipboardStore"
-import { CopySubmenu } from "@/features/drive/components/copySubmenu"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { FolderInputIcon } from "lucide-react"
 
@@ -263,11 +262,11 @@ describe("DirectoryTreeSubmenu", () => {
 	})
 })
 
-describe("MoveSubmenu", () => {
+describe("TransferSubmenu (move)", () => {
 	function renderMove(items: DriveItem[]) {
 		const onChooseDestination = vi.fn()
 
-		inOpenMenu(createElement(MoveSubmenu, { family: DROPDOWN_TREE_MENU_FAMILY, items, onChooseDestination }))
+		inOpenMenu(createElement(TransferSubmenu, { mode: "move", family: DROPDOWN_TREE_MENU_FAMILY, items, onChooseDestination }))
 
 		return { onChooseDestination }
 	}
@@ -404,11 +403,11 @@ describe("MoveSubmenu", () => {
 	})
 })
 
-describe("CopySubmenu", () => {
+describe("TransferSubmenu (copy)", () => {
 	function renderCopy(items: DriveItem[]) {
 		const onChooseDestination = vi.fn()
 
-		inOpenMenu(createElement(CopySubmenu, { family: DROPDOWN_TREE_MENU_FAMILY, items, onChooseDestination }))
+		inOpenMenu(createElement(TransferSubmenu, { mode: "copy", family: DROPDOWN_TREE_MENU_FAMILY, items, onChooseDestination }))
 
 		return { onChooseDestination }
 	}

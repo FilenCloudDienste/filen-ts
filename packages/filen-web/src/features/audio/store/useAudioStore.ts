@@ -3,7 +3,7 @@ import { create } from "zustand"
 import { useShallow } from "zustand/shallow"
 import { kvLoadOnce, kvSetJsonQuiet } from "@/lib/storage/kvBestEffort"
 import type { ErrorDTO } from "@/lib/sdk/errors"
-import type { AudioPlaybackStatus, LoopMode, QueueTrack } from "@/features/audio/store/audioQueue"
+import { LOOP_MODES, type AudioPlaybackStatus, type LoopMode, type QueueTrack } from "@/features/audio/store/audioQueue"
 import { useTrackTagsStore } from "@/features/audio/store/useTrackTagsStore"
 import { trackDisplayTitle } from "@/features/audio/lib/trackTags.logic"
 
@@ -18,7 +18,7 @@ import { trackDisplayTitle } from "@/features/audio/lib/trackTags.logic"
 // keymap.v1.overrides). A malformed value drops the whole blob and both defaults win.
 const PREFS_KV_KEY = "audio.v1.prefs"
 
-export const audioPrefsSchema = type({ shuffleEnabled: "boolean", loopMode: "'off'|'all'|'one'" })
+export const audioPrefsSchema = type({ shuffleEnabled: "boolean", loopMode: type.enumerated(...LOOP_MODES) })
 
 interface AudioStore {
 	queue: QueueTrack[]
@@ -194,17 +194,6 @@ export function useAudioNowPlaying(): {
 		title: trackDisplayTitle(tags, playback.track?.name ?? ""),
 		artist: tags?.artist ?? null
 	}
-}
-
-// The shuffle/loop toggle state plus whether anything is queued — for the transport controls.
-export function useAudioQueueControls(): { shuffleEnabled: boolean; loopMode: LoopMode; hasQueue: boolean } {
-	return useAudioStore(
-		useShallow(state => ({
-			shuffleEnabled: state.shuffleEnabled,
-			loopMode: state.loopMode,
-			hasQueue: state.queue.length > 0
-		}))
-	)
 }
 
 // The full queue + current index + cover-url mirror for the now-playing panel's track list. The queue

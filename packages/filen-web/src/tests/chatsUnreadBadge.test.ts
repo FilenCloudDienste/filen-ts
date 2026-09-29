@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { createElement, Fragment, useLayoutEffect, type ReactNode } from "react"
+import { createElement, Fragment, useLayoutEffect } from "react"
 import { act, render, renderHook, waitFor } from "@testing-library/react"
-import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query"
+import { useQuery } from "@tanstack/react-query"
 import type { BlockedContact, Chat, ChatMessage, Contact, UuidStr } from "@filen/sdk-rs"
 import { EMPTY_BLOCKED_USERS } from "@filen/shared"
 
@@ -24,18 +24,12 @@ vi.mock("@/lib/sdk/client", () => ({
 	sdkApi: { listChats, listMessagesBefore, leaveChat: leaveChatOp, getContacts, getBlockedContacts }
 }))
 
-// The production defaults minus the persister (sqlite, unavailable under vitest).
-vi.mock("@/queries/client", () => ({
-	queryClient: new QueryClient({
-		defaultOptions: {
-			queries: { staleTime: 0, gcTime: Infinity, retry: false, refetchOnWindowFocus: true, refetchOnReconnect: true }
-		}
-	})
-}))
+vi.mock("@/queries/client", async () => ({ queryClient: (await import("@/tests/testQueryClient")).createTestQueryClient() }))
 
 vi.mock("@/features/chats/lib/inflight", () => ({ purgeChatInflightState }))
 
 import { queryClient } from "@/queries/client"
+import { queryClientWrapper } from "@/tests/testQueryClient"
 import { ACCOUNT_QUERY_KEY } from "@/queries/account"
 import { CHATS_QUERY_KEY, chatsQueryGet, useChats } from "@/features/chats/queries/chats"
 import { chatMessagesQueryGet, chatMessagesQueryKey, useChatMessages } from "@/features/chats/queries/chatMessages"
@@ -103,9 +97,7 @@ function holdMessageReads(): (chatLabel: string, page: ChatMessage[]) => void {
 	}
 }
 
-function wrapper({ children }: { children: ReactNode }) {
-	return createElement(QueryClientProvider, { client: queryClient, children })
-}
+const wrapper = queryClientWrapper(queryClient)
 
 async function settle(): Promise<void> {
 	await act(async () => {

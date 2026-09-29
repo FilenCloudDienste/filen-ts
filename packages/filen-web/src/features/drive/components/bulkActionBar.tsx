@@ -2,13 +2,12 @@ import { useTranslation } from "react-i18next"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { aggregateDriveSelectionFlags } from "@/features/drive/lib/selectionFlags"
-import { startDownloads } from "@/features/drive/lib/download"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import {
 	driveBulkActions,
 	isBulkActionOfflineDisabled,
 	isBulkDownloadEnabled,
-	runBulkFavorite,
+	runBulkDescriptor,
 	type BulkActionDescriptor,
 	type BulkDialogActionKind
 } from "@/features/drive/components/bulkActionBar.logic"
@@ -34,25 +33,6 @@ export function BulkActionBar({ variant, selectedItems, onDialogAction }: BulkAc
 	const isOnline = useIsOnline()
 	const flags = aggregateDriveSelectionFlags(selectedItems)
 	const descriptors = driveBulkActions(variant, flags)
-
-	// download is checked FIRST, before dialog/favorite — startDownloads' FSA save picker needs
-	// this click's own live user gesture (see features/drive/lib/download.ts), so nothing here may yield to the
-	// event loop ahead of it. A disabled Button's onClick never fires at all (see the disabled prop
-	// below), which today only guards the empty-selection edge case — every dir/multi selection is
-	// downloadable too now (the sw zip route).
-	function runDescriptor(descriptor: BulkActionDescriptor): void {
-		if (descriptor.id === "download") {
-			void startDownloads(selectedItems)
-			return
-		}
-
-		if (descriptor.run === "direct") {
-			void runBulkFavorite(selectedItems)
-			return
-		}
-
-		onDialogAction(descriptor.dialogKind)
-	}
 
 	return (
 		<SelectionActionBar
@@ -80,7 +60,7 @@ export function BulkActionBar({ variant, selectedItems, onDialogAction }: BulkAc
 						disabledReason={offlineDisabled ? t("common:offlineActionDisabled") : undefined}
 						kbdAction={KEYMAP_ACTION_FOR[descriptor.id]}
 						onClick={() => {
-							runDescriptor(descriptor)
+							runBulkDescriptor(descriptor, selectedItems, onDialogAction)
 						}}
 					/>
 				)

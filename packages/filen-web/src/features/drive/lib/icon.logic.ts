@@ -1,6 +1,6 @@
 import type { DirColor } from "@filen/sdk-rs"
 import { extensionOf, previewCategoryForExtension } from "@/features/drive/lib/preview.logic"
-import { dirColorHex } from "@/features/drive/lib/dirColor"
+import { DIR_COLOR_HEX, dirColorHex } from "@/features/drive/lib/dirColor"
 import { fileIconKey as sharedFileIconKey, type FileIconKey, type FileIconSets } from "@filen/shared"
 
 // The concrete file-type glyphs in src/assets/file-icons/ (byte-identical to filen-mobile's set) a
@@ -45,7 +45,7 @@ export function shadeColor(hex: string, divisor: number): string {
 // an uncolored directory reads identically across platforms.
 export function directoryFolderTint(color: DirColor): { path1: string; path2: string } {
 	if (color === "default") {
-		return { path1: "#5398DF", path2: "#85BCFF" }
+		return { path1: "#5398DF", path2: DIR_COLOR_HEX.default }
 	}
 
 	const hex = dirColorHex(color)

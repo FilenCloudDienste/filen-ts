@@ -13,6 +13,7 @@ import { TREE_EXPAND_SPRING } from "@/features/drive/lib/springLoad"
 import { StorageMeter } from "@/features/shell/components/storageMeter"
 import { ResizableSidebarPanel } from "@/features/shell/components/sidebarPanel"
 import { SIDEBAR_NAV_ITEM_CLASS } from "@/features/shell/lib/sidebarNavItem"
+import { pathIsUnder } from "@/features/shell/lib/appShell.logic"
 import { Separator } from "@/components/ui/separator"
 
 type IconType = ComponentType<{ className?: string }>
@@ -116,7 +117,7 @@ export function DriveSidebar() {
 	// splat, so its pathname is "/drive" at the root and "/drive/<a>/<b>" nested; strip the prefix back
 	// to the raw splat and split into its uuid chain. Any non-drive route highlights nothing.
 	const pathname = useRouterState({ select: state => state.location.pathname })
-	const onDrive = pathname === "/drive" || pathname.startsWith("/drive/")
+	const onDrive = pathIsUnder(pathname, "/drive")
 	const activePath = onDrive ? splatToUuids(pathname.replace(/^\/drive\/?/, "")) : []
 
 	const openMap = useDirectoryTreeStore(state => state.open)

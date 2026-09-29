@@ -7,7 +7,7 @@ import { i18n } from "@/lib/i18n"
 import { runOp, type VoidActionOutcome } from "@/lib/actions/outcome"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { pipeWorkerToSink } from "@/lib/pipeWorkerToSink"
-import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
+import { asDirectoryOrFile, isDirectoryItem, type DriveItem } from "@/features/drive/lib/item"
 import { throttle, PROGRESS_THROTTLE_MS } from "@/lib/throttle"
 import { saveDownload, triggerSwDownload, isPickerCancelled, type SaveTarget, type FsaSaveTarget } from "@/features/drive/lib/saveDownload"
 import { useTransfersStore, type TransfersStore } from "@/features/transfers/store/useTransfersStore"
@@ -127,7 +127,7 @@ export const defaultDownloadDeps: RunDownloadDeps = {
 // every download entry point (item-menu/bulk-bar/keymap) reads — their own ENABLED gate is now
 // unconditional (the service-worker zip path covers every dir/multi selection, not just FSA browsers).
 export function needsZip(items: DriveItem[]): boolean {
-	return items.length > 1 || items.some(item => asDirectoryOrFile(item).type === "directory")
+	return items.length > 1 || items.some(item => isDirectoryItem(item))
 }
 
 // The one call a download entry point makes. Mirrors startUploads' partial-failure toast

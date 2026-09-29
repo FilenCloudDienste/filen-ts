@@ -154,7 +154,6 @@ function rejoinFavorites(item: DriveItem, colorKnown: boolean): void {
 function narrowFavoriteItem(item: NonRootItemTagged): DriveItem | undefined {
 	switch (item.type) {
 		case "file":
-			return narrowItem(item)
 		case "normalDir":
 			return narrowItem(item)
 		default:

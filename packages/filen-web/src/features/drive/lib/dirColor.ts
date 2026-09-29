@@ -12,13 +12,22 @@ export const DIR_COLOR_HEX: Record<"default" | "blue" | "green" | "purple" | "re
 	gray: "#8F8E93"
 }
 
+type NamedDirColor = keyof typeof DIR_COLOR_HEX
+
+// The custom-color picker's starting value: `<input type=color>` only accepts lowercase hex.
+export const DEFAULT_CUSTOM_HEX = DIR_COLOR_HEX.default.toLowerCase()
+
 const HEX_PATTERN = /^#[0-9a-f]{6}$/i
+
+function isNamedDirColor(color: DirColor): color is NamedDirColor {
+	return Object.hasOwn(DIR_COLOR_HEX, color)
+}
 
 // Resolves any DirColor to a concrete hex: a named color maps through DIR_COLOR_HEX, a freeform
 // "#rrggbb" (the SDK's custom-color arm) passes through untouched, and anything unrecognized falls
 // back to the default tint — the row/tile always has a real color to paint with.
 export function dirColorHex(color: DirColor): string {
-	if (color === "default" || color === "blue" || color === "green" || color === "purple" || color === "red" || color === "gray") {
+	if (isNamedDirColor(color)) {
 		return DIR_COLOR_HEX[color]
 	}
 
@@ -39,5 +48,5 @@ export function normalizeCustomHex(value: string): string | null {
 // the color dialog uses this to decide whether the custom swatch (not one of the fixed six) should
 // show as currently selected.
 export function isCustomDirColor(color: DirColor): boolean {
-	return color !== "default" && color !== "blue" && color !== "green" && color !== "purple" && color !== "red" && color !== "gray"
+	return !isNamedDirColor(color)
 }

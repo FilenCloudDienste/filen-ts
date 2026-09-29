@@ -1,6 +1,6 @@
 import type { QueryClient } from "@tanstack/react-query"
 import type { DirSizeResponse } from "@filen/sdk-rs"
-import { type DriveItem } from "@/features/drive/lib/item"
+import { isDirectoryItem, type DriveItem } from "@/features/drive/lib/item"
 import { directorySizeQueryKey, type DirectorySizeItem } from "@/features/drive/queries/drive"
 
 // Pure bits pulled out of useDriveDirectorySizes.ts's effect/subscription wiring so they're
@@ -13,19 +13,13 @@ import { directorySizeQueryKey, type DirectorySizeItem } from "@/features/drive/
 // scrolls into a later listing. DEVIATION FROM MOBILE (which is unbounded).
 export const MAX_DIRECTORY_SIZE_PREFETCH = 1000
 
-// A DriveItem arm the size query can dispatch on — owned OR shared directories, matching
-// queries/drive's DirectorySizeItem (the arms toAnyDirWithContext accepts).
-export function isDirectorySizeItem(item: DriveItem): item is DirectorySizeItem {
-	return item.type === "directory" || item.type === "sharedDirectory" || item.type === "sharedRootDirectory"
-}
-
 // Which directories in the listing to fire a size prefetch for — directories only, capped at
 // MAX_DIRECTORY_SIZE_PREFETCH, input order preserved.
 export function directorySizePrefetchTargets(items: readonly DriveItem[]): DirectorySizeItem[] {
 	const targets: DirectorySizeItem[] = []
 
 	for (const item of items) {
-		if (!isDirectorySizeItem(item)) {
+		if (!isDirectoryItem(item)) {
 			continue
 		}
 
@@ -53,7 +47,7 @@ export function collectDirectorySizes(
 	const sizes = new Map<string, number>()
 
 	for (const item of items) {
-		if (!isDirectorySizeItem(item)) {
+		if (!isDirectoryItem(item)) {
 			continue
 		}
 

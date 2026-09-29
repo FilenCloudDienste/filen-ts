@@ -6,7 +6,7 @@ import { FILEN_PRIVACY_URL, FILEN_TERMS_URL } from "@/lib/externalUrls"
 // inside an Electron BrowserWindow that already opens the OS browser, so no desktop bridge is needed.
 // Wraps rather than overflows: translated labels run much longer than the English pair.
 function AuthLegalLinks() {
-	const { t } = useTranslation("auth")
+	const { t } = useTranslation("common")
 
 	return (
 		<p className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-xs text-muted-foreground">

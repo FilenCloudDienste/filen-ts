@@ -46,8 +46,8 @@ export function subscriptionStatus(sub: Pick<UserAccountSubs, "activated" | "can
 	return sub.activated ? "active" : "pending"
 }
 
-export const SUBSCRIPTION_STATUS_LABEL_KEY = {
-	active: "settingsBillingStatusActive",
-	cancelled: "settingsBillingStatusCancelled",
-	pending: "settingsBillingStatusPending"
-} satisfies Record<SubscriptionStatus, SettingsKey>
+export const SUBSCRIPTION_STATUS_META = {
+	active: { labelKey: "settingsBillingStatusActive", badge: "default" },
+	cancelled: { labelKey: "settingsBillingStatusCancelled", badge: "destructive" },
+	pending: { labelKey: "settingsBillingStatusPending", badge: "secondary" }
+} as const satisfies Record<SubscriptionStatus, { labelKey: SettingsKey; badge: "default" | "destructive" | "secondary" }>

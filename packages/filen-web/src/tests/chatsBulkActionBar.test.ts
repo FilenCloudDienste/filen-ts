@@ -1,12 +1,5 @@
-import { describe, expect, it, vi } from "vitest"
-import { QueryClient } from "@tanstack/react-query"
+import { describe, expect, it } from "vitest"
 import { MailOpenIcon, Volume2Icon, VolumeOffIcon, Trash2Icon, LogOutIcon } from "lucide-react"
-
-// chatsBulkActionBar.logic.ts's own imports are all pure/type-only, but resolving its module path
-// still resolves selectionFlags.ts's — mirrors notesBulkActionBar.test.ts's own mock boundary
-// (isChatOwner's sdk/queryClient chain, unresolvable/unwanted under node vitest).
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
-vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
 import { chatBulkActions, isChatBulkActionOfflineDisabled } from "@/features/chats/components/chatsBulkActionBar.logic"
 import { type ChatSelectionFlags } from "@/features/chats/lib/selectionFlags"

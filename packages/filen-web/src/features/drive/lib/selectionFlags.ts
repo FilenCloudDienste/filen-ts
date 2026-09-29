@@ -1,4 +1,4 @@
-import { type DriveItem } from "@/features/drive/lib/item"
+import { isSharedRootDriveItem, type DriveItem } from "@/features/drive/lib/item"
 
 // Aggregated flags for a Drive multi-selection, computed in a single pass — the bulk-action bar's
 // only source of gating truth (directoryListing.tsx computes this once per render from
@@ -16,10 +16,9 @@ export interface DriveSelectionFlags {
 	// True iff any selected item is undecryptable. Gates bulk actions that need decrypted metadata
 	// (favorite, move) — trash/restore/delete stay available, since those only need each item's uuid.
 	includesUndecryptable: boolean
-	// True iff every selected item is a shared-root arm (sharedRootDirectory/sharedRootFile) — the
-	// only two arms removeSharedItem accepts, since only their shareSource is a SharedRootItem (see
-	// item.ts's shareSource retention). Drives the bulk Unshare button's gate, mirroring the per-item
-	// menu's own item.type check (itemMenu.logic.ts).
+	// True iff every selected item is a shared-root arm (isSharedRootDriveItem) — the only arms
+	// removeSharedItem accepts. Drives the bulk Unshare button's gate, mirroring the per-item menu's own
+	// check (itemMenu.logic.ts).
 	everySharedRoot: boolean
 }
 
@@ -71,7 +70,7 @@ export function aggregateDriveSelectionFlags(items: readonly DriveItem[]): Drive
 			everyDirectory = false
 		}
 
-		if (item.type !== "sharedRootDirectory" && item.type !== "sharedRootFile") {
+		if (!isSharedRootDriveItem(item)) {
 			everySharedRoot = false
 		}
 	}

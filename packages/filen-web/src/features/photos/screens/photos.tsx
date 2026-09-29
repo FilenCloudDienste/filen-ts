@@ -72,6 +72,18 @@ export function PhotosScreen() {
 		setChooserOpen(false)
 	}
 
+	const chooser = chooserOpen ? (
+		<DirectoryChooserDialog
+			pending={choosePending}
+			onChoose={choice => {
+				void handleChoose(choice)
+			}}
+			onClose={() => {
+				setChooserOpen(false)
+			}}
+		/>
+	) : null
+
 	if (rootQuery.status === "pending") {
 		return <LoadingState size="lg" />
 	}
@@ -99,17 +111,7 @@ export function PhotosScreen() {
 						</EmptyContent>
 					</Empty>
 				</div>
-				{chooserOpen ? (
-					<DirectoryChooserDialog
-						pending={choosePending}
-						onChoose={choice => {
-							void handleChoose(choice)
-						}}
-						onClose={() => {
-							setChooserOpen(false)
-						}}
-					/>
-				) : null}
+				{chooser}
 			</>
 		)
 	}
@@ -179,17 +181,7 @@ export function PhotosScreen() {
 					/>
 				)}
 			</div>
-			{chooserOpen ? (
-				<DirectoryChooserDialog
-					pending={choosePending}
-					onChoose={choice => {
-						void handleChoose(choice)
-					}}
-					onClose={() => {
-						setChooserOpen(false)
-					}}
-				/>
-			) : null}
+			{chooser}
 		</>
 	)
 }

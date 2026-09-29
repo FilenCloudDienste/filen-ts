@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { createAxis } from "@/features/spreadsheet/lib/axis.logic"
-import { cellName, columnName, expandToMerges, rangeName } from "@/features/spreadsheet/lib/cellRef.logic"
+import { cellName, columnIndex, columnName, expandToMerges, rangeName } from "@/features/spreadsheet/lib/cellRef.logic"
 import { gridMove, type GridBounds } from "@/features/spreadsheet/lib/navigation.logic"
 import { parseTsv, rangeToTsv } from "@/features/spreadsheet/lib/tsv.logic"
 import { cellKey, type SheetView } from "@/features/spreadsheet/lib/model"
@@ -39,6 +39,10 @@ describe("cell names", () => {
 		expect(cellName(0, 0)).toBe("A1")
 		expect(rangeName({ startRow: 1, startCol: 1, endRow: 6, endCol: 3 })).toBe("B2:D7")
 		expect(rangeName({ startRow: 4, startCol: 2, endRow: 4, endCol: 2 })).toBe("C5")
+	})
+
+	it("parses column letters in either case back to their index", () => {
+		expect(["A", "Z", "AA", "ZZ", "AAA", "xfd", "aB"].map(columnIndex)).toEqual([0, 25, 26, 701, 702, 16383, 27])
 	})
 
 	it("grows a selection over the merges it touches, and the ones those reach", () => {

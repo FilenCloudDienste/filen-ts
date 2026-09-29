@@ -1,3 +1,4 @@
+import { rangeArea, rangeContains } from "@/features/spreadsheet/lib/cellRef.logic"
 import { cellKey, keyCol, keyRow, type CellRange } from "@/features/spreadsheet/lib/model"
 
 export interface CellEntry {
@@ -15,9 +16,7 @@ export function clearedCells(
 	limit: number
 ): CellEntry[] | null {
 	const cleared: CellEntry[] = []
-	const area = (target.endRow - target.startRow + 1) * (target.endCol - target.startCol + 1)
-
-	if (area <= cells.size) {
+	if (rangeArea(target) <= cells.size) {
 		for (let row = target.startRow; row <= target.endRow; row++) {
 			for (let col = target.startCol; col <= target.endCol; col++) {
 				if (cells.has(cellKey(row, col))) {
@@ -37,7 +36,7 @@ export function clearedCells(
 		const row = keyRow(key)
 		const col = keyCol(key)
 
-		if (row >= target.startRow && row <= target.endRow && col >= target.startCol && col <= target.endCol) {
+		if (rangeContains(target, row, col)) {
 			if (cleared.length === limit) {
 				return null
 			}

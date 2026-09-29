@@ -1,23 +1,21 @@
 import { canEncodeWindows1252, csvCellView, csvDoc, serializeCsv, type CsvFormat } from "@/features/spreadsheet/lib/csvView"
+import { EditHistory } from "@/features/spreadsheet/lib/editHistory"
 import {
-	MAX_COLS,
 	MAX_EDIT_CELLS,
-	MAX_ROWS,
 	MAX_SHEET_CELLS,
+	type AxisEdit,
 	type DocState,
 	type EditOp,
 	type EditResult
 } from "@/features/spreadsheet/lib/edits"
-import { cellKey, keyCol, keyRow, type CellView, type SpreadsheetDoc } from "@/features/spreadsheet/lib/model"
-import type { AxisShift } from "@/features/spreadsheet/lib/sizes.logic"
-
-const HISTORY_LIMIT = 100
+import { cellKey, keyCol, keyRow, MAX_COLUMNS, MAX_ROWS, type CellView, type SpreadsheetDoc } from "@/features/spreadsheet/lib/model"
+import type { SizeAxis } from "@/features/spreadsheet/lib/sizes.logic"
 
 type Step =
 	// `rowCount`/`rowWidths` are the sheet's extent just before this step's writes grew it — a setCells past
 	// the current edge grows `rows` (see write()), and nothing else shrinks it back on undo.
 	| { type: "cells"; before: Map<number, string>; rowCount: number; rowWidths: Map<number, number> }
-	| { type: "structure"; axis: "rows" | "cols"; kind: "insert" | "delete"; at: number; count: number; removed: string[][] }
+	| { type: "structure"; edit: AxisEdit; removed: string[][] }
 
 // How many cells a step's snapshot holds, for the history's total memory budget.
 function stepWeight(step: Step): number {
@@ -29,13 +27,7 @@ function stepWeight(step: Step): number {
 export class CsvDocument {
 	private rows: string[][]
 	private readonly format: CsvFormat
-	private undoSteps: { step: Step; op: EditOp; before: number; after: number }[] = []
-	private redoSteps: { op: EditOp; after: number }[] = []
-	private historyWeight = 0
-	// Identifies the current state; `saved` is the state last written to the file (0: as opened).
-	private current = 0
-	private nextState = 1
-	private saved = 0
+	private readonly history = new EditHistory<Step>(stepWeight, MAX_SHEET_CELLS)
 
 	constructor(rows: string[][], format: CsvFormat) {
 		this.rows = rows
@@ -50,22 +42,18 @@ export class CsvDocument {
 		return csvDoc(this.rows, this.writable)
 	}
 
-	private state(): DocState {
-		return { dirty: this.current !== this.saved, canUndo: this.undoSteps.length > 0, canRedo: this.redoSteps.length > 0 }
-	}
-
 	apply(op: EditOp): EditResult {
 		// A windows-1252 file's saved encoding never changes behind the user's back (see serializeCsv): a
 		// cell that would hold a character the table cannot represent is refused outright, before any row is
 		// touched, rather than silently reformatting the whole file to UTF-8 and corrupting every untouched
 		// cell's bytes on the next save.
 		if (op.type === "setCells" && this.format.encoding === "windows-1252" && op.cells.some(cell => !canEncodeWindows1252(cell.input))) {
-			return { type: "refused", reason: "encoding", state: this.state() }
+			return { type: "refused", reason: "encoding", state: this.history.state() }
 		}
 
 		// Rows or columns inserted past the data move nothing: the file stays as it is.
 		if (op.type === "insert" && this.pastData(op.axis, op.at)) {
-			return { type: "none", state: this.state() }
+			return { type: "none", state: this.history.state() }
 		}
 
 		const step = this.run(op)
@@ -74,67 +62,58 @@ export class CsvDocument {
 			return {
 				type: "refused",
 				reason: op.type === "addSheet" || op.type === "renameSheet" ? "sheetName" : "tooLarge",
-				state: this.state()
+				state: this.history.state()
 			}
 		}
 
-		const after = this.nextState++
-
-		this.pushStep({ step, op, before: this.current, after })
-		this.redoSteps = []
-		this.current = after
+		this.history.record(step, op)
 
 		return this.result(op, step)
 	}
 
 	undo(): EditResult {
-		const last = this.undoSteps.pop()
+		const step = this.history.peekUndo()
 
-		if (last === undefined) {
-			return { type: "none", state: this.state() }
+		if (step === undefined) {
+			return { type: "none", state: this.history.state() }
 		}
 
-		this.historyWeight -= stepWeight(last.step)
-		this.redoSteps.push({ op: last.op, after: last.after })
-		this.current = last.before
+		this.history.popUndo()
 
-		if (last.step.type === "structure") {
-			this.revertStructure(last.step)
+		if (step.type === "structure") {
+			this.revertStructure(step)
 
-			return this.sheetsResult(shiftOf(last.step, true))
+			return this.sheetsResult({ ...step.edit, revert: true })
 		}
 
 		const touched: number[] = []
 
-		for (const [key, text] of last.step.before) {
+		for (const [key, text] of step.before) {
 			this.write(keyRow(key), keyCol(key), text)
 			touched.push(key)
 		}
 
-		this.shrinkTo(last.step.rowCount, last.step.rowWidths)
+		this.shrinkTo(step.rowCount, step.rowWidths)
 
 		return this.cellsResult(touched)
 	}
 
 	redo(): EditResult {
-		const redone = this.redoSteps.pop()
+		const op = this.history.peekRedo()
 
-		if (redone === undefined) {
-			return { type: "none", state: this.state() }
+		if (op === undefined) {
+			return { type: "none", state: this.history.state() }
 		}
 
-		const redoSteps = this.redoSteps
-		const step = this.run(redone.op)
+		const step = this.run(op)
 
 		if (step === null) {
-			return { type: "none", state: this.state() }
+			return { type: "none", state: this.history.state() }
 		}
 
-		this.pushStep({ step, op: redone.op, before: this.current, after: redone.after })
-		this.current = redone.after
-		this.redoSteps = redoSteps
+		this.history.commitRedo(step)
 
-		return this.result(redone.op, step)
+		return this.result(op, step)
 	}
 
 	// The file's bytes as edited, and the state they hold.
@@ -143,35 +122,19 @@ export class CsvDocument {
 			throw new Error("spreadsheet: this CSV cannot be saved")
 		}
 
-		return { bytes: serializeCsv(this.rows, this.format), version: this.current }
+		return { bytes: serializeCsv(this.rows, this.format), version: this.history.version }
 	}
 
 	// The state `version` names is now the file's: the document is clean exactly while it is back there.
 	markSaved(version: number): DocState {
-		this.saved = version
-
-		return this.state()
-	}
-
-	// Drops the oldest undo steps once they pass HISTORY_LIMIT steps or MAX_SHEET_CELLS of snapshotted
-	// cells, always keeping at least the step just pushed. Unique state ids are never reused, so a save
-	// point whose step falls out of history stays unreachable, and dirty stays true, without bookkeeping.
-	private pushStep(entry: { step: Step; op: EditOp; before: number; after: number }): void {
-		this.undoSteps.push(entry)
-		this.historyWeight += stepWeight(entry.step)
-
-		while (this.undoSteps.length > 1 && (this.undoSteps.length > HISTORY_LIMIT || this.historyWeight > MAX_SHEET_CELLS)) {
-			const dropped = this.undoSteps.shift()
-
-			this.historyWeight -= dropped === undefined ? 0 : stepWeight(dropped.step)
-		}
+		return this.history.markSaved(version)
 	}
 
 	private width(): number {
 		return this.rows.reduce((width, row) => Math.max(width, row.length), 0)
 	}
 
-	private pastData(axis: "rows" | "cols", at: number): boolean {
+	private pastData(axis: SizeAxis, at: number): boolean {
 		return at >= (axis === "rows" ? this.rows.length : this.width())
 	}
 
@@ -210,7 +173,7 @@ export class CsvDocument {
 	private run(op: EditOp): Step | null {
 		switch (op.type) {
 			case "setCells": {
-				if (op.cells.length > MAX_EDIT_CELLS || op.cells.some(cell => cell.row >= MAX_ROWS || cell.col >= MAX_COLS)) {
+				if (op.cells.length > MAX_EDIT_CELLS || op.cells.some(cell => cell.row >= MAX_ROWS || cell.col >= MAX_COLUMNS)) {
 					return null
 				}
 
@@ -256,14 +219,14 @@ export class CsvDocument {
 						removed = this.rows.splice(op.at, op.count)
 					}
 
-					return { type: "structure", axis: "rows", kind: op.type, at, count: op.count, removed }
+					return { type: "structure", edit: { type: op.type, axis: "rows", at, count: op.count }, removed }
 				}
 
 				const removed: string[][] = []
 
 				if (op.type === "insert") {
 					// Past the grid's last column, cells would take the keys of the next row's (cellKey).
-					if (this.width() + op.count > MAX_COLS) {
+					if (this.width() + op.count > MAX_COLUMNS) {
 						return null
 					}
 
@@ -276,7 +239,7 @@ export class CsvDocument {
 					}
 				}
 
-				return { type: "structure", axis: "cols", kind: op.type, at: op.at, count: op.count, removed }
+				return { type: "structure", edit: { type: op.type, axis: "cols", at: op.at, count: op.count }, removed }
 			}
 			// A CSV is one sheet, and holds no formats or sizes (its sizes live beside it: lib/sizeLayer.ts).
 			case "addSheet":
@@ -290,29 +253,31 @@ export class CsvDocument {
 	// Reverses a structural step without re-copying the sheet: an insert's undo just deletes the same run
 	// back out, and a delete's undo re-inserts exactly the cells it removed (touched rows only, on cols).
 	private revertStructure(step: Extract<Step, { type: "structure" }>): void {
-		if (step.axis === "rows") {
+		const { type, axis, at, count } = step.edit
+
+		if (axis === "rows") {
 			this.rows =
-				step.kind === "insert"
-					? this.rows.slice(0, step.at).concat(this.rows.slice(step.at + step.count))
-					: this.rows.slice(0, step.at).concat(step.removed, this.rows.slice(step.at))
+				type === "insert"
+					? this.rows.slice(0, at).concat(this.rows.slice(at + count))
+					: this.rows.slice(0, at).concat(step.removed, this.rows.slice(at))
 
 			return
 		}
 
 		this.rows = this.rows.map((row, index) => {
-			if (step.kind === "insert") {
-				return row.length > step.at + step.count ? row.slice(0, step.at).concat(row.slice(step.at + step.count)) : row
+			if (type === "insert") {
+				return row.length > at + count ? row.slice(0, at).concat(row.slice(at + count)) : row
 			}
 
 			const removedRow = step.removed[index]
 
-			return removedRow === undefined ? row : row.slice(0, step.at).concat(removedRow, row.slice(step.at))
+			return removedRow === undefined ? row : row.slice(0, at).concat(removedRow, row.slice(at))
 		})
 	}
 
 	private result(op: EditOp, step: Step): EditResult {
 		if (step.type === "structure") {
-			return this.sheetsResult(shiftOf(step, false))
+			return this.sheetsResult({ ...step.edit, revert: false })
 		}
 
 		return op.type !== "setCells" ? this.sheetsResult() : this.cellsResult([...step.before.keys()])
@@ -330,16 +295,18 @@ export class CsvDocument {
 				}
 			],
 			styles: [],
-			state: this.state()
+			state: this.history.state()
 		}
 	}
 
 	// `shift`: where the edit moved rows or columns, for the sizes kept beside the file.
-	private sheetsResult(shift?: AxisShift & { revert: boolean }): EditResult {
-		return { type: "sheets", sheets: this.doc().sheets, styles: [], state: this.state(), ...(shift === undefined ? {} : { shift }) }
+	private sheetsResult(shift?: AxisEdit & { revert: boolean }): EditResult {
+		return {
+			type: "sheets",
+			sheets: this.doc().sheets,
+			styles: [],
+			state: this.history.state(),
+			...(shift === undefined ? {} : { shift })
+		}
 	}
-}
-
-function shiftOf(step: Extract<Step, { type: "structure" }>, revert: boolean): AxisShift & { revert: boolean } {
-	return { axis: step.axis, kind: step.kind, at: step.at, count: step.count, revert }
 }

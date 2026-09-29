@@ -216,7 +216,7 @@ describe("sdk worker copy", () => {
 		const call = api.copyItems("looking-up", [], "dest", undefined, () => undefined)
 
 		await api.cancelTransfer("looking-up")
-		lookup.resolve({ uuid: "dest" })
+		lookup.resolve({ uuid: "dest", meta: { type: "decoded", data: { name: "dest" } } })
 		await call
 
 		expect(copyCalls()[2]?.managedFuture.abortSignal.aborted).toBe(true)

@@ -1,6 +1,7 @@
 import type { ChatMessage, ChatMessagePartial, ChatParticipant } from "@filen/sdk-rs"
 import { contactDisplayName } from "@filen/shared"
 import { matchesContactSearch } from "@/features/contacts/components/contactsList.logic"
+import { isOwnMessage } from "@/features/chats/lib/sender"
 
 // Pure, testable core of the chat composer — a port of filen-mobile's input send()/autocomplete logic
 // (features/chats/components/chat/input/*). No React/store/IO here; composer.tsx is the thin shell that
@@ -232,7 +233,7 @@ export function lastEditableOwnMessage(
 			continue
 		}
 
-		if (message.message !== undefined && BigInt(message.senderId) === currentUserId) {
+		if (message.message !== undefined && isOwnMessage(message, currentUserId)) {
 			return message
 		}
 	}

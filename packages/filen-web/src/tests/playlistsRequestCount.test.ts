@@ -1,9 +1,8 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { createElement, type ReactNode } from "react"
 import { act, renderHook, waitFor } from "@testing-library/react"
-import { QueryClient, QueryClientProvider, focusManager, onlineManager } from "@tanstack/react-query"
+import { focusManager, onlineManager } from "@tanstack/react-query"
 import type { Dir, File as SdkFile, SocketEvent, UuidStr } from "@filen/sdk-rs"
 
 const { createDirectory, listDirectory, downloadFileBytes, uploadFileBytes, subscribeToSocket, socket } = vi.hoisted(() => {
@@ -26,17 +25,11 @@ const { createDirectory, listDirectory, downloadFileBytes, uploadFileBytes, subs
 
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: { createDirectory, listDirectory, downloadFileBytes, uploadFileBytes, subscribeToSocket } }))
 
-// The production defaults minus the persister (sqlite, unavailable under vitest). The same instance
-// backs the provider below AND the write path's cache patches.
-vi.mock("@/queries/client", () => ({
-	queryClient: new QueryClient({
-		defaultOptions: {
-			queries: { staleTime: 0, gcTime: Infinity, retry: false, refetchOnWindowFocus: true, refetchOnReconnect: true }
-		}
-	})
-}))
+// The same instance backs the provider below AND the write path's cache patches.
+vi.mock("@/queries/client", async () => ({ queryClient: (await import("@/tests/testQueryClient")).createTestQueryClient() }))
 
 import { queryClient } from "@/queries/client"
+import { queryClientWrapper } from "@/tests/testQueryClient"
 import { markPlaylistsUnsynced, PLAYLISTS_QUERY_KEY, PLAYLISTS_STALE_TIME, usePlaylistsQuery } from "@/features/audio/queries/playlists"
 import { createPlaylist } from "@/features/audio/lib/playlists"
 import { handlePlaylistsDriveEvent, registerPlaylistSocketHandlers } from "@/features/audio/lib/socketHandlers"
@@ -83,9 +76,7 @@ function driveEvent(inner: DriveEvent): Extract<SocketEvent, { type: "drive" }> 
 	return { type: "drive", inner, driveMessageId: 0n }
 }
 
-function wrapper({ children }: { children: ReactNode }) {
-	return createElement(QueryClientProvider, { client: queryClient, children })
-}
+const wrapper = queryClientWrapper(queryClient)
 
 function counts() {
 	return { list: listDirectory.mock.calls.length, download: downloadFileBytes.mock.calls.length }

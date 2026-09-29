@@ -8,6 +8,7 @@ import { formatRelativeTime } from "@/lib/relativeTime"
 import { useNowMinute } from "@/lib/useNowMinute"
 import { noteIcon } from "@/features/notes/lib/icon.logic"
 import { noteDisplayTitle } from "@/features/notes/lib/displayTitle"
+import { tagDisplayName } from "@/features/notes/lib/sort"
 import { selectionAwareLinkClick } from "@/features/drive/lib/listbox"
 import { noteRowPreview, noteRowSharedByEmail, noteRowTags, noteRowParticipants } from "@/features/notes/lib/noteRow.logic"
 import { safeAvatarUrl } from "@/lib/avatarUrl"
@@ -169,7 +170,7 @@ export function NoteRow({
 												className="inline-flex max-w-full items-center gap-1 rounded-full bg-muted px-2 py-0.5"
 											>
 												{tag.favorite ? <HeartIcon className="size-3 shrink-0 text-red-500" /> : null}
-												<span className="truncate text-xs text-muted-foreground">{tag.name ?? tag.uuid}</span>
+												<span className="truncate text-xs text-muted-foreground">{tagDisplayName(tag)}</span>
 											</span>
 										))}
 									</div>

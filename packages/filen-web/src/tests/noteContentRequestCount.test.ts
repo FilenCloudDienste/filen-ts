@@ -1,23 +1,14 @@
 // @vitest-environment jsdom
 
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { createElement, type ReactNode } from "react"
 import { act, renderHook, waitFor } from "@testing-library/react"
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import type { Note, SocketEvent, UuidStr } from "@filen/sdk-rs"
 
 const { getNoteContent } = vi.hoisted(() => ({ getNoteContent: vi.fn<(note: Note) => Promise<string | undefined>>() }))
 
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: { getNoteContent } }))
 
-// The production defaults minus the persister (sqlite, unavailable under vitest).
-vi.mock("@/queries/client", () => ({
-	queryClient: new QueryClient({
-		defaultOptions: {
-			queries: { staleTime: 0, gcTime: Infinity, retry: false, refetchOnWindowFocus: true, refetchOnReconnect: true }
-		}
-	})
-}))
+vi.mock("@/queries/client", async () => ({ queryClient: (await import("@/tests/testQueryClient")).createTestQueryClient() }))
 
 // The outbox singleton only matters to the reload action, which these tests never take.
 vi.mock("@/features/notes/lib/sync", () => ({ sync: {} }))
@@ -25,6 +16,7 @@ vi.mock("@/features/notes/lib/sync", () => ({ sync: {} }))
 vi.mock("@/lib/log", () => ({ log: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() } }))
 
 import { queryClient } from "@/queries/client"
+import { queryClientWrapper } from "@/tests/testQueryClient"
 import { ACCOUNT_QUERY_KEY } from "@/queries/account"
 import { NOTES_QUERY_KEY } from "@/features/notes/queries/notes"
 import { noteContentQueryKey, useNoteContentQuery } from "@/features/notes/queries/noteContent"
@@ -75,9 +67,7 @@ function contentEdited(note: Note, editorId: number): Extract<SocketEvent, { typ
 	}
 }
 
-function wrapper({ children }: { children: ReactNode }) {
-	return createElement(QueryClientProvider, { client: queryClient, children })
-}
+const wrapper = queryClientWrapper(queryClient)
 
 async function drain(): Promise<void> {
 	await act(async () => {

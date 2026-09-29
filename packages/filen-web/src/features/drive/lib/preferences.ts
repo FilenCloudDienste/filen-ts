@@ -1,6 +1,6 @@
 import { type, type Type } from "arktype"
 import { kvPreference } from "@/lib/storage/preference"
-import { type DriveSortBy } from "@/features/drive/lib/sort"
+import { DRIVE_SORT_BY, type DriveSortBy } from "@/features/drive/lib/sort"
 import type { FlatListingKind } from "@/features/drive/lib/flatListing"
 import { withoutKey } from "@/lib/utils"
 
@@ -69,11 +69,7 @@ export function canWriteVariant(variant: DriveVariant, uuid: string | null): boo
 	return variant === "drive" || (variant === "sharedOut" && uuid !== null)
 }
 
-// Annotated as `Type<DriveSortBy>` rather than cast: a literal added to/removed from DriveSortBy
-// without a matching edit here fails to compile instead of silently under/over-accepting.
-const driveSortBySchema: Type<DriveSortBy> = type(
-	"'nameAsc'|'nameDesc'|'sizeAsc'|'sizeDesc'|'typeAsc'|'typeDesc'|'uploadDateAsc'|'uploadDateDesc'|'lastModifiedAsc'|'lastModifiedDesc'"
-)
+const driveSortBySchema: Type<DriveSortBy> = type.enumerated(...DRIVE_SORT_BY)
 
 export const sortPreferencesSchema: Type<DrivePreferences<DriveSortBy>> = type({
 	mode: "'global'|'perDirectory'",

@@ -3,7 +3,7 @@ import react from "@vitejs/plugin-react"
 import tailwindcss from "@tailwindcss/vite"
 import { tanstackRouter } from "@tanstack/router-plugin/vite"
 import babel from "@rolldown/plugin-babel"
-import { sdkArtifacts } from "./vite/sdk-artifacts-plugin"
+import { sdkArtifacts, COI_HEADERS } from "./vite/sdk-artifacts-plugin"
 
 // preview.headers only reaches the responses the static handler serves with a body: its 304 Not
 // Modified goes out bare, and WebKit then refuses a worker script revalidated on reload for want of
@@ -22,12 +22,6 @@ function previewHeaders(): Plugin {
 		}
 	}
 }
-
-const COI_HEADERS = {
-	"Cross-Origin-Opener-Policy": "same-origin",
-	"Cross-Origin-Embedder-Policy": "require-corp",
-	"Cross-Origin-Resource-Policy": "same-origin"
-} as const
 
 // Hardened CSP, preview/prod only (the dev server needs HMR inline/eval).
 // connect-src: the JS glue (sdk-rs.js) contains NO literal hosts, but the wasm BINARY does —

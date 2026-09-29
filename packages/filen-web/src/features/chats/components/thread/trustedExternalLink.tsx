@@ -4,6 +4,7 @@ import { externalLinkDomain, shouldInterceptLinkClick } from "@/features/chats/l
 import { trustDomain } from "@/features/chats/lib/trustedDomains"
 import { useTrustedDomainsQuery } from "@/features/chats/queries/trustedDomains"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
+import { ExternalAnchor } from "@/features/chats/components/thread/externalAnchor"
 
 // A message-text link anchor, gated by a one-time-per-domain trust confirmation before it's ever opened
 // as a bare external navigation. Scoped to EXTERNAL (non-Filen) links only: a Filen public link
@@ -25,14 +26,10 @@ export function TrustedExternalLink({ href, className }: { href: string; classNa
 	// block navigation on a confirmation that could never resolve.
 	if (domain === null) {
 		return (
-			<a
+			<ExternalAnchor
 				href={href}
-				target="_blank"
-				rel="noopener noreferrer nofollow"
 				className={className}
-			>
-				{href}
-			</a>
+			/>
 		)
 	}
 
@@ -63,15 +60,11 @@ export function TrustedExternalLink({ href, className }: { href: string; classNa
 
 	return (
 		<>
-			<a
+			<ExternalAnchor
 				href={href}
-				target="_blank"
-				rel="noopener noreferrer nofollow"
 				className={className}
 				onClick={handleClick}
-			>
-				{href}
-			</a>
+			/>
 			<ConfirmDialog
 				open={pendingConfirm}
 				pending={false}

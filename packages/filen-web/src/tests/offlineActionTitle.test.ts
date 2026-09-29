@@ -3,7 +3,7 @@
 // Proves the offline gating sweep's own "tooltip/label" half actually renders — every gated control
 // disables itself while offline (covered separately by each surface's own logic tests: itemMenu.logic.ts's
 // applyOfflineGate, bulkActionBar.logic.ts's isBulkActionOfflineDisabled, composer.logic.ts's
-// isAttachDisabled, accountPreferences.logic.ts's isPreferenceRowDisabled, eventsPagination.ts's
+// isAttachDisabled, eventsPagination.ts's
 // shouldSkipEventsScroll), but none of those prove the disabled control tells the user WHY. This
 // renders one representative control per surface family (drive/contacts/settings) and asserts the
 // shared "common:offlineActionDisabled" copy shows up as its native title exactly while offline, and

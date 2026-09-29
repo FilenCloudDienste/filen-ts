@@ -25,10 +25,19 @@ import {
 	type Selection
 } from "@/features/spreadsheet/lib/cellRef.logic"
 import type { GridSheet } from "@/features/spreadsheet/lib/cellStore.logic"
-import { gridMove, mergeAt, sheetBounds, sheetCols, sheetRows } from "@/features/spreadsheet/lib/navigation.logic"
+import { gridMove, lastUsed, mergeAt, sheetBounds, sheetCols, sheetRows } from "@/features/spreadsheet/lib/navigation.logic"
 import { cellKey, DEFAULT_ROW_HEIGHT, type CellRange, type CellStyleView, type CellView } from "@/features/spreadsheet/lib/model"
 import { measureContents } from "@/features/spreadsheet/lib/autofit"
-import { clampSize, fitSize, resizeTargets, sheetWithSizes, type SizeAxis, type SizeEntry } from "@/features/spreadsheet/lib/sizes.logic"
+import {
+	CELL_PADDING,
+	clampSize,
+	fitSize,
+	PX_PER_POINT,
+	resizeTargets,
+	sheetWithSizes,
+	type SizeAxis,
+	type SizeEntry
+} from "@/features/spreadsheet/lib/sizes.logic"
 
 const ROW_HEADER_WIDTH = 52
 const COL_HEADER_HEIGHT = 24
@@ -150,8 +159,6 @@ function overlaps(start: number, end: number, spans: readonly Span[]): boolean {
 }
 
 const SPILL_COLUMNS = 32
-// A cell's horizontal padding (px-1.5 each side) and its gridline.
-const CELL_PADDING = 13
 
 function cellStyle(view: CellView, style: CellStyleView | undefined): CSSProperties {
 	const css: CSSProperties = {}
@@ -170,7 +177,7 @@ function cellStyle(view: CellView, style: CellStyleView | undefined): CSSPropert
 	const lines = [style?.underline === true ? "underline" : "", style?.strike === true ? "line-through" : ""].filter(Boolean)
 
 	if (lines.length > 0) css.textDecoration = lines.join(" ")
-	if (style?.size !== undefined) css.fontSize = `${String(Math.max(8, Math.min(style.size * (4 / 3), 40)))}px`
+	if (style?.size !== undefined) css.fontSize = `${String(Math.max(8, Math.min(style.size * PX_PER_POINT, 40)))}px`
 
 	css.justifyContent =
 		style?.align === "center"
@@ -389,8 +396,7 @@ export function SheetGrid({
 		return { row, col }
 	}
 
-	const lastUsedRow = Math.max(0, sheet.rowCount - 1)
-	const lastUsedCol = Math.max(0, sheet.colCount - 1)
+	const { row: lastUsedRow, col: lastUsedCol } = lastUsed(sheet)
 
 	function select(anchor: CellPosition, next: CellPosition): void {
 		onSelectionChange({ anchor, focus: next })
@@ -761,9 +767,7 @@ export function SheetGrid({
 	// click selects to the last used row or column, never the grid's blank tail, so "whole" means that.
 	function targetsFor(axis: SizeAxis, index: number): number[] {
 		const whole =
-			axis === "cols"
-				? range.startRow === 0 && range.endRow >= Math.max(0, sheet.rowCount - 1)
-				: range.startCol === 0 && range.endCol >= Math.max(0, sheet.colCount - 1)
+			axis === "cols" ? range.startRow === 0 && range.endRow >= lastUsedRow : range.startCol === 0 && range.endCol >= lastUsedCol
 
 		return resizeTargets(axis, index, range, whole, at => sizeAt(axis, at) === 0)
 	}

@@ -1,13 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
 import type { Dir, File, UuidStr, DirSizeResponse } from "@filen/sdk-rs"
-import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
+import { narrowItem, isDirectoryItem, type DriveItem } from "@/features/drive/lib/item"
 import { directorySizeQueryKey } from "@/features/drive/queries/drive"
 import {
 	MAX_DIRECTORY_SIZE_PREFETCH,
 	collectDirectorySizes,
 	directorySizePrefetchTargets,
-	isDirectorySizeItem,
 	isDirectorySizeSuccessEvent,
 	type DirectorySizeCacheEvent
 } from "@/features/drive/hooks/useDriveDirectorySizes.logic"
@@ -68,13 +67,13 @@ function fileItem(label: string): DriveItem {
 	return narrowItem(mockFile({ uuid: testUuid(label) }))
 }
 
-describe("isDirectorySizeItem", () => {
+describe("isDirectoryItem", () => {
 	it("accepts an owned directory", () => {
-		expect(isDirectorySizeItem(dirItem("d"))).toBe(true)
+		expect(isDirectoryItem(dirItem("d"))).toBe(true)
 	})
 
 	it("rejects a file", () => {
-		expect(isDirectorySizeItem(fileItem("f"))).toBe(false)
+		expect(isDirectoryItem(fileItem("f"))).toBe(false)
 	})
 
 	// The guard reads only the discriminant `.type`, so the shared directory arms follow the same
@@ -82,13 +81,13 @@ describe("isDirectorySizeItem", () => {
 	// exactly these three). Minimal discriminant-only fixtures, mirroring driveItem.test.ts's own
 	// `as unknown as` shapes for values whose non-discriminant fields are irrelevant to what's tested.
 	it("accepts the shared directory arms", () => {
-		expect(isDirectorySizeItem({ type: "sharedDirectory" } as unknown as DriveItem)).toBe(true)
-		expect(isDirectorySizeItem({ type: "sharedRootDirectory" } as unknown as DriveItem)).toBe(true)
+		expect(isDirectoryItem({ type: "sharedDirectory" } as unknown as DriveItem)).toBe(true)
+		expect(isDirectoryItem({ type: "sharedRootDirectory" } as unknown as DriveItem)).toBe(true)
 	})
 
 	it("rejects the shared file arms", () => {
-		expect(isDirectorySizeItem({ type: "sharedFile" } as unknown as DriveItem)).toBe(false)
-		expect(isDirectorySizeItem({ type: "sharedRootFile" } as unknown as DriveItem)).toBe(false)
+		expect(isDirectoryItem({ type: "sharedFile" } as unknown as DriveItem)).toBe(false)
+		expect(isDirectoryItem({ type: "sharedRootFile" } as unknown as DriveItem)).toBe(false)
 	})
 })
 

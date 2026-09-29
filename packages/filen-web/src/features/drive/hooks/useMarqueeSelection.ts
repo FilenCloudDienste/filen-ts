@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react"
 import { type DriveViewMode } from "@/features/drive/lib/preferences"
 import { isToggleModifier } from "@/features/drive/lib/listbox"
+import { isScrollbarPress } from "@/features/drive/lib/clickAway.logic"
 import {
 	clampMarqueeRect,
 	marqueeAutoScrollTop,
@@ -348,9 +349,7 @@ export function useMarqueeSelection<T extends MarqueeItem>(params: MarqueeParams
 		const offsetX = event.clientX - bounds.left
 		const offsetY = event.clientY - bounds.top
 
-		// The scrollbar gutter lives outside the client box — never arm a drag from it. Compared against
-		// the PADDING box (offset by clientLeft/clientTop), so a bordered container is exact too.
-		if (offsetX - el.clientLeft >= el.clientWidth || offsetY - el.clientTop >= el.clientHeight) {
+		if (isScrollbarPress(offsetX, offsetY, el)) {
 			return
 		}
 

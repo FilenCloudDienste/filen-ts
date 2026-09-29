@@ -5,7 +5,7 @@ import { CheckIcon } from "lucide-react"
 import type { DirColor } from "@filen/sdk-rs"
 import type { DriveKey } from "@/lib/i18n"
 import { type DirectoryItem, setColor } from "@/features/drive/lib/actions"
-import { dirColorHex, isCustomDirColor, normalizeCustomHex } from "@/features/drive/lib/dirColor"
+import { DEFAULT_CUSTOM_HEX, dirColorHex, isCustomDirColor, normalizeCustomHex } from "@/features/drive/lib/dirColor"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { cn } from "@filen/shared"
 import { useIsOnline } from "@/lib/useIsOnline"
@@ -50,7 +50,9 @@ export function ColorDialog({ directory, onClose }: ColorDialogProps) {
 	// Seeded from the directory's own current custom color when it has one, else a neutral starting
 	// point — never one of the 6 named DIR_COLOR_HEX values, so the custom field never silently reads
 	// as "already applied" for a directory that's merely using a named color.
-	const [customHex, setCustomHex] = useState(isCustomDirColor(directory.data.color) ? dirColorHex(directory.data.color) : "#85bcff")
+	const [customHex, setCustomHex] = useState(
+		isCustomDirColor(directory.data.color) ? dirColorHex(directory.data.color) : DEFAULT_CUSTOM_HEX
+	)
 	const normalizedCustomHex = normalizeCustomHex(customHex)
 	const customSelected = isCustomDirColor(directory.data.color)
 
@@ -129,7 +131,7 @@ export function ColorDialog({ directory, onClose }: ColorDialogProps) {
 							type="color"
 							aria-label={t("driveColorCustomLabel")}
 							disabled={pending || !isOnline}
-							value={normalizedCustomHex ?? "#85bcff"}
+							value={normalizedCustomHex ?? DEFAULT_CUSTOM_HEX}
 							onChange={event => {
 								setCustomHex(event.target.value)
 							}}

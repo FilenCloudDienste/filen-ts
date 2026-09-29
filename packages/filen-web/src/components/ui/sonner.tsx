@@ -1,6 +1,7 @@
 import { Toaster as Sonner, type ToasterProps } from "sonner"
 import { useTranslation } from "react-i18next"
-import { CircleCheckIcon, InfoIcon, TriangleAlertIcon, OctagonXIcon, Loader2Icon } from "lucide-react"
+import { CircleCheckIcon, InfoIcon, TriangleAlertIcon, OctagonXIcon } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { useTheme } from "@/providers/themeProvider"
 import { useToastClearance } from "@/lib/toastClearance"
 import { TOAST_EDGE_OFFSET_PX, TOAST_MOBILE_EDGE_OFFSET_PX, TOAST_WIDTH_PX, toastBottomOffset } from "@/lib/toastClearance.logic"
@@ -24,14 +25,9 @@ const Toaster = ({ ...props }: ToasterProps) => {
 				info: <InfoIcon className="size-4" />,
 				warning: <TriangleAlertIcon className="size-4" />,
 				error: <OctagonXIcon className="size-4" />,
-				// data-slot="spinner" is what exempts it from the global reduced-motion freeze (index.css) —
-				// a frozen loading toast reads as a hung app, the exact case that exemption exists for.
-				loading: (
-					<Loader2Icon
-						data-slot="spinner"
-						className="size-4 animate-spin"
-					/>
-				)
+				// Spinner's data-slot exempts it from the global reduced-motion freeze (index.css); a frozen
+				// loading toast reads as a hung app.
+				loading: <Spinner />
 			}}
 			style={
 				{

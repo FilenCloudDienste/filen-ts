@@ -6,6 +6,20 @@ import { colWidthToPx, rowHeightToPx } from "@/features/spreadsheet/lib/sizes.lo
 
 const DEFAULT_FONT_SIZE = 11
 
+// An Excel error literal ("#DIV/0!", "#GETTING_DATA").
+export const ERROR_VALUE = /^#[A-Z0-9/!?_]+$/
+
+// hucre's key for a cell in a sheet's cell map.
+export function cellIdOf(row: number, col: number): string {
+	return `${String(row)},${String(col)}`
+}
+
+export function parseCellId(cellId: string): [number, number] {
+	const comma = cellId.indexOf(",")
+
+	return [Number(cellId.slice(0, comma)), Number(cellId.slice(comma + 1))]
+}
+
 function pad(value: number): string {
 	return String(value).padStart(2, "0")
 }
@@ -139,7 +153,7 @@ export class WorkbookViews {
 
 	// One cell's view, or null for a cell with nothing to show.
 	cell(sheet: Sheet, row: number, col: number): CellView | null {
-		return this.view(sheet.rows[row]?.[col], sheet.cells?.get(`${String(row)},${String(col)}`))
+		return this.view(sheet.rows[row]?.[col], sheet.cells?.get(cellIdOf(row, col)))
 	}
 
 	view(value: CellValue | undefined, cell: Cell | undefined): CellView | null {
@@ -159,7 +173,7 @@ export class WorkbookViews {
 		if (input !== text) view.input = input
 		if (styleId !== undefined) view.style = styleId
 		if (typeof shown === "number" || typeof shown === "boolean" || shown instanceof Date) view.numeric = true
-		if (cell?.type === "error" || (typeof shown === "string" && cell?.formula !== undefined && /^#[A-Z0-9/!?]+$/.test(shown))) {
+		if (cell?.type === "error" || (typeof shown === "string" && cell?.formula !== undefined && ERROR_VALUE.test(shown))) {
 			view.error = true
 		}
 
@@ -180,9 +194,7 @@ function sheetView(sheet: Sheet, views: WorkbookViews, lockStructure: boolean): 
 	const detailed = new Set<number>()
 
 	for (const [cellId, cell] of sheet.cells ?? []) {
-		const comma = cellId.indexOf(",")
-		const row = Number(cellId.slice(0, comma))
-		const col = Number(cellId.slice(comma + 1))
+		const [row, col] = parseCellId(cellId)
 		const values = sheet.rows[row]
 
 		if (values === undefined || col >= values.length) {

@@ -1,6 +1,5 @@
-import { existsSync, readFileSync } from "node:fs"
 import type { Locator, Page } from "@playwright/test"
-import { test, expect, openHookContext, SESSION_FILE, settleLeases, trackLeaseReleases } from "./fixtures"
+import { test, expect, openHookContext, readHarvestedSession, seedSession, settleLeases, trackLeaseReleases } from "./fixtures"
 import { waitForE2eHooks } from "./helpers/e2eHooks"
 import { bootTo, BOOT_SETTLE_TIMEOUT_MS, LIVE_WRITE_TIMEOUT_MS } from "./helpers/listing"
 
@@ -41,10 +40,6 @@ async function gotoChats(page: Page): Promise<void> {
 	await page.getByRole("link", { name: "Chats", exact: true }).click()
 	await page.waitForURL(/\/chats(\/|$)/)
 }
-
-// Mirrors fixtures.ts's own (non-exported) constant — same local-redeclaration precedent as
-// auth.spec.ts / storage.spec.ts. Used only by the afterAll teardown, which owns its own context.
-const SESSION_SLOT = "filen.e2e.session"
 
 // The app's own origin, read off a live page rather than restated from playwright.config.ts. The
 // afterAll teardown builds its context by hand, and a hand-made context inherits no `baseURL`.
@@ -823,12 +818,12 @@ test.describe("chats", () => {
 	// either way.
 	//
 	// It builds its own context because `injectedSession` is a test-scoped fixture and nothing
-	// test-scoped is reachable from a hook: the session is seeded here the same way e2e/fixtures.ts
-	// seeds it, and `appOrigin` stands in for the `baseURL` option, which a hand-made context does not
-	// inherit. The cleanup-setup project's "e2e-chat-" name-prefix sweep (e2e/setup/cleanup.setup.ts)
+	// test-scoped is reachable from a hook: the session is seeded here with the fixture's own
+	// seedSession, and `appOrigin` stands in for the `baseURL` option, which a hand-made context does
+	// not inherit. The cleanup-setup project's "e2e-chat-" name-prefix sweep (e2e/setup/cleanup.setup.ts)
 	// remains the backstop for a run that dies before even this.
 	test.afterAll(async ({ browser, browserName, playwright }, testInfo) => {
-		if (sharedChatUuid === undefined || appOrigin === undefined || !existsSync(SESSION_FILE)) {
+		if (sharedChatUuid === undefined || appOrigin === undefined) {
 			return
 		}
 
@@ -841,7 +836,11 @@ test.describe("chats", () => {
 		let page: Page | undefined
 
 		try {
-			const { session } = JSON.parse(readFileSync(SESSION_FILE, "utf8")) as { session: string }
+			const session = readHarvestedSession()
+
+			if (session === null) {
+				return
+			}
 
 			// Made like a test's own context: under the chats lock, and on webkit over a persistent profile.
 			hookContext = await openHookContext({ browser, browserName, playwright }, testInfo, appOrigin)
@@ -849,12 +848,7 @@ test.describe("chats", () => {
 			// A hand-made context, so the fixture's own tracking never attached to it.
 			trackLeaseReleases(page)
 
-			await page.addInitScript(
-				([slot, blob]) => {
-					sessionStorage.setItem(slot, blob)
-				},
-				[SESSION_SLOT, session] as const
-			)
+			await seedSession(page, session)
 
 			await bootTo(page)
 			await waitForE2eHooks(page)

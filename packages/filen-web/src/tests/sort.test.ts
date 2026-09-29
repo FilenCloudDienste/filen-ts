@@ -336,12 +336,6 @@ describe("sortDriveItems", () => {
 				expect(a).toEqual(b)
 			}
 		})
-
-		it("falls back to nameAsc for an unrecognized sortBy value", () => {
-			const items = [fileItem({ name: "b" }), fileItem({ name: "a" })]
-
-			expect(names(sortDriveItems(items, "bogus" as DriveSortBy))).toEqual(["a", "b"])
-		})
 	})
 })
 

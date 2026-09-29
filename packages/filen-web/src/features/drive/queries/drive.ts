@@ -18,7 +18,14 @@ import type {
 	SharingRole
 } from "@filen/sdk-rs"
 import { fastLocaleCompare, driveItemName, removeByUuid, upsertItems } from "@filen/shared"
-import { narrowItem, asDirectoryOrFile, toAnyDirWithContext, type DriveItem } from "@/features/drive/lib/item"
+import {
+	narrowItem,
+	asDirectoryOrFile,
+	isDirectoryItem,
+	toAnyDirWithContext,
+	type DriveItem,
+	type DirectoryLikeItem
+} from "@/features/drive/lib/item"
 import type { FlatListingKind } from "@/features/drive/lib/flatListing"
 import {
 	getHideHiddenItems,
@@ -269,12 +276,16 @@ export function useDirectoryTreeChildrenQuery(uuid: string | null): UseQueryResu
 	})
 }
 
+// A listing as the cache holds it: never a fetch.
+export function cachedListing(variant: DriveVariant, uuid: string | null): DriveItem[] | undefined {
+	return queryClient.getQueryData<DriveItem[]>(driveListingQueryKey({ variant, uuid }))
+}
+
 // The row behind a sidebar tree node, as the "drive" listing its level rendered from holds it: a cache
 // read, never a fetch — that level is mounted, so its listing is cached. `parentUuid` is null for a
 // root-level node.
 export function cachedTreeDirectory(parentUuid: string | null, uuid: string): Extract<DriveItem, { type: "directory" }> | undefined {
-	const listing = queryClient.getQueryData<DriveItem[]>(driveListingQueryKey({ variant: "drive", uuid: parentUuid }))
-	const found = listing?.find(item => item.data.uuid === uuid)
+	const found = cachedListing("drive", parentUuid)?.find(item => item.data.uuid === uuid)
 
 	return found?.type === "directory" ? found : undefined
 }
@@ -1069,7 +1080,7 @@ export function driveNamesQueryKey(scope: DirectoryNameScope, uuid: string) {
 export function cachedDirectoryName(uuid: string): string | undefined {
 	const item = findCachedListingItem(uuid)
 
-	if (item === undefined || asDirectoryOrFile(item).type !== "directory") {
+	if (item === undefined || !isDirectoryItem(item)) {
 		return undefined
 	}
 
@@ -1209,7 +1220,7 @@ export async function fetchItemPath(item: Dir | File): Promise<GetItemPathResult
 // prefetches a listing's directories under this exact key — see directoryListing.tsx), at sort time
 // the size sort, and the info dialog's size rows — so opening Info on a directory whose row already
 // resolved a size costs no second getDirSize.
-export type DirectorySizeItem = Extract<DriveItem, { type: "directory" | "sharedDirectory" | "sharedRootDirectory" }>
+export type DirectorySizeItem = DirectoryLikeItem
 
 // 15-minute staleTime: a directory's recursive size is expensive to recompute server-side and drifts
 // slowly, so unlike the client's refetch-everything default (staleTime 0) this holds its value across

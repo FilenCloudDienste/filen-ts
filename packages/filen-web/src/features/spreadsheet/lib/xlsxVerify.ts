@@ -1,4 +1,7 @@
+import { columnIndex } from "@/features/spreadsheet/lib/cellRef.logic"
 import { formulaTranslator } from "@/features/spreadsheet/lib/formulaRefs"
+import { decodeXml, dirname, relationshipTypeName, relsPath, resolvePart } from "@/features/spreadsheet/lib/opcPaths"
+import { cellKey } from "@/features/spreadsheet/lib/model"
 import { INDEXED_COLORS } from "@/features/spreadsheet/lib/styleTable"
 
 // Whether saving a workbook loses anything: its unedited save compared with the file it was opened from,
@@ -16,31 +19,6 @@ interface XmlNode {
 }
 
 const decoder = new TextDecoder()
-
-const ENTITY = /&(#x[0-9a-f]+|#[0-9]+|amp|lt|gt|quot|apos);/gi
-
-function decode(text: string): string {
-	return text.includes("&")
-		? text.replace(ENTITY, (_match, entity: string) => {
-				switch (entity.toLowerCase()) {
-					case "amp":
-						return "&"
-					case "lt":
-						return "<"
-					case "gt":
-						return ">"
-					case "quot":
-						return '"'
-					case "apos":
-						return "'"
-					default:
-						return String.fromCodePoint(
-							entity[1]?.toLowerCase() === "x" ? Number.parseInt(entity.slice(2), 16) : Number.parseInt(entity.slice(1), 10)
-						)
-				}
-			})
-		: text
-}
 
 function localName(name: string): string {
 	const colon = name.indexOf(":")
@@ -60,7 +38,7 @@ function attributes(text: string): Map<string, string> {
 			continue
 		}
 
-		found.set(name.startsWith("r:") ? name : localName(name), decode(double ?? single ?? ""))
+		found.set(name.startsWith("r:") ? name : localName(name), decodeXml(double ?? single ?? ""))
 	}
 
 	return found
@@ -79,7 +57,7 @@ function parseXml(xml: string): XmlNode {
 		if (cdata !== undefined) {
 			current.text += cdata
 		} else if (text !== undefined) {
-			current.text += decode(text)
+			current.text += decodeXml(text)
 		} else if (name !== undefined) {
 			if (closing === "/") {
 				if (stack.length > 1) stack.pop()
@@ -576,14 +554,6 @@ interface CellRecord {
 	attrs: string
 }
 
-function columnIndex(letters: string): number {
-	let index = 0
-
-	for (let position = 0; position < letters.length; position++) index = index * 26 + (letters.charCodeAt(position) - 64)
-
-	return index - 1
-}
-
 const CELL_REF = /^([A-Z]{1,3})(\d+)$/
 const SHEET_DATA_TOKEN = /<(?:[\w.-]+:)?row\b([^>]*?)\/?>|<(?:[\w.-]+:)?c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/(?:[\w.-]+:)?c>)/g
 const FORMULA = /<(?:[\w.-]+:)?f\b([^>]*?)(?:\/>|>([\s\S]*?)<\/(?:[\w.-]+:)?f>)/
@@ -645,7 +615,7 @@ function* sheetItems(sheetData: string, context: Context): Generator<SheetItem> 
 
 		if (formulaMatch !== null) {
 			const fAttrs = attributes(formulaMatch[1] ?? "")
-			let text = decode(formulaMatch[2] ?? "")
+			let text = decodeXml(formulaMatch[2] ?? "")
 
 			if (fAttrs.get("t") === "shared") {
 				const index = fAttrs.get("si") ?? ""
@@ -677,7 +647,7 @@ function* sheetItems(sheetData: string, context: Context): Generator<SheetItem> 
 
 			value = item === undefined ? undefined : `s:${richText(parseXml(`<is>${item}</is>`))}`
 		} else if (valueText !== undefined && valueText !== "") {
-			const text = decode(valueText)
+			const text = decodeXml(valueText)
 
 			switch (type) {
 				case "s":
@@ -749,7 +719,7 @@ async function compareSheetData(
 	let lastCol = -1
 	const savedRows = new Map<number, string>()
 
-	const position = (item: SheetItem) => (item.kind === "row" ? item.row * 20_000 - 1 : item.row * 20_000 + item.col)
+	const position = (item: SheetItem) => (item.kind === "row" ? cellKey(item.row, 0) - 1 : cellKey(item.row, item.col))
 
 	for (const item of sheetItems(original, originalContext)) {
 		if (++walked % PAUSE_EVERY === 0) {
@@ -890,33 +860,10 @@ function relationships(xml: string | undefined): Relationship[] {
 
 	return parseXml(xml).children.map(node => ({
 		id: node.attrs.get("Id") ?? "",
-		type: (node.attrs.get("Type") ?? "").replace(/^.*\//, ""),
+		type: relationshipTypeName(node.attrs.get("Type") ?? ""),
 		target: node.attrs.get("Target") ?? "",
 		external: node.attrs.get("TargetMode") === "External"
 	}))
-}
-
-function resolve(base: string, target: string): string {
-	if (target.startsWith("/")) return target.slice(1).toLowerCase()
-
-	const parts = base.split("/").filter(Boolean)
-
-	for (const part of target.split("/").filter(Boolean)) {
-		if (part === "..") parts.pop()
-		else if (part !== ".") parts.push(part)
-	}
-
-	return parts.join("/").toLowerCase()
-}
-
-function relsPath(part: string): string {
-	const slash = part.lastIndexOf("/")
-
-	return `${part.slice(0, slash)}/_rels/${part.slice(slash + 1)}.rels`
-}
-
-function dirname(part: string): string {
-	return part.slice(0, part.lastIndexOf("/"))
 }
 
 interface Package {
@@ -953,7 +900,7 @@ function sheetParts(pkg: Package, sheetPath: string): { links: Map<string, strin
 
 		const list = parts.get(rel.type) ?? []
 
-		list.push(resolve(dirname(sheetPath), rel.target))
+		list.push(resolvePart(dirname(sheetPath), rel.target))
 		parts.set(rel.type, list)
 	}
 
@@ -1055,7 +1002,7 @@ function drawingRecords(pkg: Package, paths: readonly string[]): Map<string, num
 
 		if (xml === undefined) continue
 
-		const images = new Map(pkg.rels(path).map(rel => [rel.id, pkg.entries.get(resolve(dirname(path), rel.target))]))
+		const images = new Map(pkg.rels(path).map(rel => [rel.id, pkg.entries.get(resolvePart(dirname(path), rel.target))]))
 		const tree = parseXml(xml)
 		const walk = (node: XmlNode) => {
 			const embed = node.attrs.get("r:embed")
@@ -1237,7 +1184,7 @@ export async function saveLosses(input: VerifyInput, cancelled: () => boolean = 
 				handled.add(drawing)
 				handled.add(relsPath(drawing))
 
-				for (const rel of original.rels(drawing)) handled.add(resolve(dirname(drawing), rel.target))
+				for (const rel of original.rels(drawing)) handled.add(resolvePart(dirname(drawing), rel.target))
 			}
 
 			report(

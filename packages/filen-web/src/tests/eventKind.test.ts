@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
-import { EVENT_KIND_META, eventKindMeta } from "@/features/settings/lib/eventKind"
+import { i18n } from "@/lib/i18n"
+import { EVENT_KIND_META, eventKindDisplay, eventKindMeta } from "@/features/settings/lib/eventKind"
 
 // Every real wasm UserEventKind["type"] member, copied straight from sdk-rs.d.ts's union (verified
 // against the installed package — see the module's own header comment for the source line).
@@ -62,5 +63,20 @@ describe("eventKindMeta", () => {
 
 	it("never crashes on a server event type this build doesn't know about yet — falls back to the generic label", () => {
 		expect(eventKindMeta("someBrandNewServerEventType").labelKey).toBe("settingsEventUnknown")
+	})
+})
+
+describe("eventKindDisplay", () => {
+	const t = i18n.getFixedT("en", "settings")
+
+	it("translates a known kind with its own icon", () => {
+		const display = eventKindDisplay("login", t)
+
+		expect(display.label).toBe("Signed in")
+		expect(display.icon).toBe(EVENT_KIND_META.login.icon)
+	})
+
+	it("names the raw server type in the unknown fallback", () => {
+		expect(eventKindDisplay("someBrandNewServerEventType", t).label).toBe("Account activity (someBrandNewServerEventType)")
 	})
 })

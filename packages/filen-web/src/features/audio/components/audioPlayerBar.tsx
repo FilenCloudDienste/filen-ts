@@ -1,10 +1,10 @@
 import { useState } from "react"
 import { useTranslation } from "react-i18next"
-import { Play, Pause, SkipForward, SkipBack, Shuffle, Repeat, Repeat1, Volume2, VolumeX, ListMusic, Music } from "lucide-react"
+import { Play, Pause, SkipForward, SkipBack, Volume2, VolumeX, ListMusic, Music } from "lucide-react"
 import { audioEngine } from "@/features/audio/lib/audioEngine"
-import { useAudioNowPlaying, useAudioQueueControls, useAudioOutput, useAudioError } from "@/features/audio/store/useAudioStore"
+import { useAudioStore, useAudioNowPlaying, useAudioOutput, useAudioError } from "@/features/audio/store/useAudioStore"
 import { NowPlayingPanel } from "@/features/audio/components/nowPlayingPanel"
-import { nextLoopMode } from "@/features/audio/components/audioTransport.logic"
+import { ShuffleToggleButton, LoopToggleButton } from "@/features/audio/components/queueToggles"
 import { useAction } from "@/lib/keymap/useAction"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { MiddleEllipsis } from "@/components/middleEllipsis"
@@ -24,7 +24,7 @@ import { cn, formatSecondsToMediaClock } from "@filen/shared"
 export function AudioPlayerBar() {
 	const { t } = useTranslation(["audio", "common"])
 	const { status, positionMs, durationMs, track, title, artist, coverUrl } = useAudioNowPlaying()
-	const { shuffleEnabled, loopMode, hasQueue } = useAudioQueueControls()
+	const hasQueue = useAudioStore(state => state.queue.length > 0)
 	const { volume, muted } = useAudioOutput()
 	const lastError = useAudioError()
 	const [queueOpen, setQueueOpen] = useState(false)
@@ -49,7 +49,6 @@ export function AudioPlayerBar() {
 
 	const isPlaying = status === "playing"
 	const isLoading = status === "loading"
-	const LoopIcon = loopMode === "one" ? Repeat1 : Repeat
 	const seekMax = durationMs > 0 ? durationMs : 0
 
 	return (
@@ -108,18 +107,7 @@ export function AudioPlayerBar() {
 				{/* Center: transport + scrubber. */}
 				<div className="flex flex-[2_1_0] flex-col items-center gap-1">
 					<div className="flex items-center gap-1">
-						<Button
-							variant="ghost"
-							size="icon-sm"
-							aria-label={t("shuffle")}
-							aria-pressed={shuffleEnabled}
-							className={cn("hidden sm:inline-flex", shuffleEnabled && "text-primary")}
-							onClick={() => {
-								audioEngine.setShuffleEnabled(!shuffleEnabled)
-							}}
-						>
-							<Shuffle />
-						</Button>
+						<ShuffleToggleButton className="hidden sm:inline-flex" />
 						<Button
 							variant="ghost"
 							size="icon-sm"
@@ -150,18 +138,7 @@ export function AudioPlayerBar() {
 						>
 							<SkipForward />
 						</Button>
-						<Button
-							variant="ghost"
-							size="icon-sm"
-							aria-label={loopMode === "off" ? t("loopOff") : loopMode === "all" ? t("loopAll") : t("loopOne")}
-							aria-pressed={loopMode !== "off"}
-							className={cn("hidden sm:inline-flex", loopMode !== "off" && "text-primary")}
-							onClick={() => {
-								audioEngine.setLoopMode(nextLoopMode(loopMode))
-							}}
-						>
-							<LoopIcon />
-						</Button>
+						<LoopToggleButton className="hidden sm:inline-flex" />
 					</div>
 					<div className="flex w-full items-center gap-2">
 						<span className="w-9 shrink-0 text-right text-[0.7rem] text-muted-foreground tabular-nums">

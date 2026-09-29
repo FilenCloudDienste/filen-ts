@@ -3,8 +3,9 @@ import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { CornerUpRightIcon, ClockIcon, AlertCircleIcon, BanIcon } from "lucide-react"
 import type { Chat, ChatMessage, ChatMessagePartial } from "@filen/sdk-rs"
-import { cn, isBlocked, segmentMessage, type BlockedUsers } from "@filen/shared"
+import { cn, segmentMessage, type BlockedUsers } from "@filen/shared"
 import { messageSenderName } from "@/features/chats/lib/sort"
+import { isSenderBlocked } from "@/features/chats/lib/sender"
 import { useRevealedBlockedMessages } from "@/features/chats/store/useRevealedBlockedMessages"
 import { formatClockTime } from "@/features/chats/lib/time"
 import { senderNameColor } from "@/features/chats/lib/nameColor"
@@ -33,7 +34,7 @@ import { UserAvatar } from "@/components/userAvatar"
 // denormalized snapshot, and the referenced message itself is revealable in place if still in the thread.
 function ReplyReference({ replyTo, blocked }: { replyTo: ChatMessagePartial; blocked: BlockedUsers }) {
 	const { t } = useTranslation("chats")
-	const senderBlocked = isBlocked({ userId: BigInt(replyTo.senderId), email: replyTo.senderEmail }, blocked)
+	const senderBlocked = isSenderBlocked(replyTo, blocked)
 
 	return (
 		<div className="mb-0.5 flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
@@ -76,7 +77,7 @@ export function MessageRow({ chat, message, showHeader, currentUserId, blocked }
 	const undecryptable = message.message === undefined
 	const avatarUrl = safeAvatarUrl(message.senderAvatar)
 	const name = messageSenderName(message)
-	const senderBlocked = isBlocked({ userId: BigInt(message.senderId), email: message.senderEmail }, blocked)
+	const senderBlocked = isSenderBlocked(message, blocked)
 	const revealed = useRevealedBlockedMessages(state => state.revealed.has(message.uuid))
 	const showTombstone = senderBlocked && !revealed
 	// Name coloring is a group-chat signal only — inert (undefined → default foreground) in a 1:1 (a chat

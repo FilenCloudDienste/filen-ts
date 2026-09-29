@@ -1,10 +1,19 @@
 import type { CommonKey } from "@/lib/i18n"
+import type { EnNamespace } from "@/lib/i18n/catalog"
 import type { ActionScope, ResolvedAction } from "@/lib/keymap/registry"
 
-// The namespaces `ActionDef.descriptionKey` prefixes can name — what the shortcuts UI loads via
-// useTranslation. A prefix admitted by the type but missing here renders as a raw key, so the two
-// are kept in step by a runtime test.
-export const SHORTCUT_NAMESPACES = ["common", "drive", "notes", "chats", "photos", "audio", "preview", "contacts"] as const
+// The namespaces `ActionDef.descriptionKey` prefixes can name (registry.ts derives the type from
+// this list) and what the shortcuts UI loads via useTranslation, so the two cannot drift.
+export const SHORTCUT_NAMESPACES = [
+	"common",
+	"drive",
+	"notes",
+	"chats",
+	"photos",
+	"audio",
+	"preview",
+	"contacts"
+] as const satisfies readonly EnNamespace[]
 
 // Display order of the scope groups. A plain array, so a scope missing from it makes its whole group
 // vanish from BOTH surfaces silently — covered by an exhaustiveness assertion in the tests.

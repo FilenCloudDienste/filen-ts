@@ -1,5 +1,6 @@
-import type { CellRange, CellStyleView, CellView, SheetView } from "@/features/spreadsheet/lib/model"
-import type { AxisShift, SizeAxis, SizeEntry } from "@/features/spreadsheet/lib/sizes.logic"
+import type { CellEntry } from "@/features/spreadsheet/lib/gridEdits.logic"
+import type { CellRange, CellStyleView, CellView, HorizontalAlign, SheetView } from "@/features/spreadsheet/lib/model"
+import type { SizeAxis, SizeEntry } from "@/features/spreadsheet/lib/sizes.logic"
 
 // What the grid asks the worker to change, and what comes back. Sheet indices are the grid's (worksheets
 // only, in order).
@@ -11,15 +12,36 @@ export type FormatPatch = Partial<{
 	// CSS hex, or null to clear.
 	color: string | null
 	fill: string | null
-	align: "left" | "center" | "right" | null
+	align: HorizontalAlign | null
 	// An Excel number format, "General" to clear.
 	numFmt: string
 }>
 
+export type ToggleFormat = "bold" | "italic" | "underline" | "strike"
+
+// The on/off formats, in toolbar order; those with a key toggle on mod+key.
+export const TOGGLE_FORMATS: readonly { format: ToggleFormat; shortcutKey?: string }[] = [
+	{ format: "bold", shortcutKey: "b" },
+	{ format: "italic", shortcutKey: "i" },
+	{ format: "underline", shortcutKey: "u" },
+	{ format: "strike" }
+]
+
+export function toggledPatch(style: CellStyleView | undefined, format: ToggleFormat): FormatPatch {
+	return { [format]: style?.[format] !== true }
+}
+
+// A run of rows or columns inserted or deleted.
+export interface AxisEdit {
+	type: "insert" | "delete"
+	axis: SizeAxis
+	at: number
+	count: number
+}
+
 export type EditOp =
-	| { type: "setCells"; sheet: number; cells: readonly { row: number; col: number; input: string }[] }
-	| { type: "insert"; sheet: number; axis: "rows" | "cols"; at: number; count: number }
-	| { type: "delete"; sheet: number; axis: "rows" | "cols"; at: number; count: number }
+	| { type: "setCells"; sheet: number; cells: readonly CellEntry[] }
+	| ({ sheet: number } & AxisEdit)
 	| { type: "addSheet"; name: string }
 	| { type: "renameSheet"; sheet: number; name: string }
 	| { type: "format"; sheet: number; range: CellRange; patch: FormatPatch }
@@ -57,7 +79,7 @@ export type EditResult =
 			state: DocState
 			// A CSV's rows or columns moved (applied, redone, or undone when `revert`): where, so sizes kept
 			// beside the file follow them.
-			shift?: AxisShift & { revert: boolean }
+			shift?: AxisEdit & { revert: boolean }
 	  }
 	// Columns or rows were resized: their sizes as the sheet now reads them (null: none of their own).
 	| { type: "sizes"; sheet: number; axis: SizeAxis; sizes: SizeEntry[]; state: DocState }
@@ -74,10 +96,6 @@ export type EditResult =
 	| { type: "none"; state: DocState }
 
 export const MAX_EDIT_CELLS = 200_000
-
-// Excel's own grid size.
-export const MAX_ROWS = 1_048_576
-export const MAX_COLS = 16_384
 
 // The largest sheet opened or grown by an edit. A workbook sheet holds its values as a dense rectangle,
 // so this bounds its rows times its columns, whatever is filled.

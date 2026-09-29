@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next"
 import type { UserEvent } from "@filen/sdk-rs"
-import { eventKindMeta } from "@/features/settings/lib/eventKind"
+import { eventKindDisplay } from "@/features/settings/lib/eventKind"
 import { buildEventDetailRows } from "@/features/settings/lib/eventDetail"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { MiddleEllipsis } from "@/components/middleEllipsis"
@@ -21,8 +21,7 @@ export function EventDetailDialog({ event, onOpenChange }: EventDetailDialogProp
 		return null
 	}
 
-	const { labelKey } = eventKindMeta(event.kind.type)
-	const title = labelKey === "settingsEventUnknown" ? t(labelKey, { type: event.kind.type }) : t(labelKey)
+	const { label: title } = eventKindDisplay(event.kind.type, t)
 	const rows = buildEventDetailRows(event, t)
 
 	return (

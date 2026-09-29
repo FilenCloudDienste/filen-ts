@@ -15,7 +15,7 @@ import { createContext, useContext, type ReactNode } from "react"
 export type PreviewAccessMode = "authed" | "anon"
 
 const PreviewAccessModeContext = createContext<PreviewAccessMode>("authed")
-const PreviewCacheScopeContext = createContext<string | null>("authed")
+const PreviewCacheScopeContext = createContext<string | null>(previewCacheScope("authed", undefined))
 // A public link can allow previewing its file but not downloading it; its viewers then offer no way of
 // their own to save the bytes. Everything else may.
 const PreviewDownloadableContext = createContext(true)

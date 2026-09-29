@@ -2,9 +2,9 @@
 // sequential ConfirmDialogs (stage1-3) then one TypedConfirmDialog (stage4), shown only when the user
 // submits without an imported master-keys file. Extracted so "confirming advances exactly one stage"
 // and "cancelling from ANY stage aborts the whole submit" are unit-tested without mounting a dialog.
-export type SkipMasterKeysStage = "stage1" | "stage2" | "stage3" | "stage4"
+const STAGE_ORDER = ["stage1", "stage2", "stage3", "stage4"] as const
 
-const STAGE_ORDER: readonly SkipMasterKeysStage[] = ["stage1", "stage2", "stage3", "stage4"]
+export type SkipMasterKeysStage = (typeof STAGE_ORDER)[number]
 
 export type SkipMasterKeysChainOutcome =
 	// Confirmed short of the last stage — the caller opens `stage` next.

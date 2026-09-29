@@ -1,6 +1,8 @@
 import { useTranslation } from "react-i18next"
 import { Switch } from "@/components/ui/switch"
 import { Button } from "@/components/ui/button"
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { LoadingState } from "@/components/loadingState"
 import { SettingsRow } from "@/features/settings/components/settingsLayout"
 
 interface PreferenceToggleRowProps {
@@ -60,4 +62,63 @@ function ResetRow({ title, description, onReset }: ResetRowProps) {
 	)
 }
 
-export { PreferenceToggleRow, ResetRow }
+interface SettingsSelectRowProps<V extends string> {
+	label: string
+	description: string
+	id: string
+	options: readonly { value: V; label: string }[]
+	// Undefined while the preference loads; a spinner holds the select's place.
+	value: V | undefined
+	disabled: boolean
+	onChange: (value: V) => void
+}
+
+// A settings row whose select picks the preference its label names.
+function SettingsSelectRow<V extends string>({ label, description, id, options, value, disabled, onChange }: SettingsSelectRowProps<V>) {
+	return (
+		<SettingsRow
+			label={label}
+			description={description}
+			htmlFor={id}
+		>
+			{value === undefined ? (
+				<LoadingState
+					size="sm"
+					className="min-h-8 w-36"
+				/>
+			) : (
+				<Select
+					items={options}
+					value={value}
+					disabled={disabled}
+					onValueChange={next => {
+						if (next !== null) {
+							onChange(next)
+						}
+					}}
+				>
+					<SelectTrigger
+						id={id}
+						className="min-w-36"
+					>
+						<SelectValue />
+					</SelectTrigger>
+					<SelectContent>
+						<SelectGroup>
+							{options.map(option => (
+								<SelectItem
+									key={option.value}
+									value={option.value}
+								>
+									{option.label}
+								</SelectItem>
+							))}
+						</SelectGroup>
+					</SelectContent>
+				</Select>
+			)}
+		</SettingsRow>
+	)
+}
+
+export { PreferenceToggleRow, ResetRow, SettingsSelectRow }

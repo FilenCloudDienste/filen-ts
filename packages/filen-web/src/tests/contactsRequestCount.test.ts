@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { createElement, type ReactNode } from "react"
+import { createElement } from "react"
 import { act, render, renderHook, screen, waitFor } from "@testing-library/react"
-import { QueryClient, QueryClientProvider, focusManager, onlineManager } from "@tanstack/react-query"
+import { focusManager, onlineManager } from "@tanstack/react-query"
 import type { BlockedContact, Contact, ContactRequestIn, ContactRequestOut, UuidStr } from "@filen/sdk-rs"
 
 const {
@@ -42,19 +42,13 @@ vi.mock("@/lib/sdk/client", () => ({
 	}
 }))
 
-// The production defaults minus the persister (sqlite, unavailable under vitest).
-vi.mock("@/queries/client", () => ({
-	queryClient: new QueryClient({
-		defaultOptions: {
-			queries: { staleTime: 0, gcTime: Infinity, retry: false, refetchOnWindowFocus: true, refetchOnReconnect: true }
-		}
-	})
-}))
+vi.mock("@/queries/client", async () => ({ queryClient: (await import("@/tests/testQueryClient")).createTestQueryClient() }))
 
 vi.mock("@/lib/log", () => ({ log: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() } }))
 
 import "@/lib/i18n"
 import { queryClient } from "@/queries/client"
+import { queryClientWrapper } from "@/tests/testQueryClient"
 import {
 	CONTACTS_QUERY_KEY,
 	CONTACTS_STALE_TIME,
@@ -137,9 +131,7 @@ function cachedOutgoing(): ContactRequestOut[] | undefined {
 	return queryClient.getQueryData<{ outgoing: ContactRequestOut[] }>(CONTACT_REQUESTS_QUERY_KEY)?.outgoing
 }
 
-function wrapper({ children }: { children: ReactNode }) {
-	return createElement(QueryClientProvider, { client: queryClient, children })
-}
+const wrapper = queryClientWrapper(queryClient)
 
 // The shell's always-mounted rail badge.
 function mountIconRail() {
@@ -534,8 +526,7 @@ describe("contacts first read of the session", () => {
 		freshClient.setQueryData(fresh.CONTACTS_QUERY_KEY, { contacts: [], blocked: [] }, { updatedAt: Date.now() })
 		freshClient.setQueryData(fresh.CONTACT_REQUESTS_QUERY_KEY, { incoming: [], outgoing: [] }, { updatedAt: Date.now() })
 
-		const freshWrapper = ({ children }: { children: ReactNode }) =>
-			createElement(QueryClientProvider, { client: freshClient, children })
+		const freshWrapper = queryClientWrapper(freshClient)
 		const mountBoth = () =>
 			renderHook(
 				() => {

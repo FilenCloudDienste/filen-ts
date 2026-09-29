@@ -1,4 +1,7 @@
 import { DetailedCellError, ErrorType, HyperFormula, type RawCellContent, type SimpleCellAddress } from "hyperformula"
+import type { AxisEdit } from "@/features/spreadsheet/lib/edits"
+import { MAX_COLUMNS, MAX_ROWS } from "@/features/spreadsheet/lib/model"
+import type { SizeAxis } from "@/features/spreadsheet/lib/sizes.logic"
 
 // HyperFormula over a workbook, for recalculating what an edit changes. Built only once the workbook has a
 // formula to care about, and kept in step with the workbook from then on (cells, inserted and deleted rows
@@ -62,6 +65,11 @@ const PARSE_ERROR = "#ERROR!"
 // Content standing in for a formula the engine cannot be given: text reading as its parse error.
 export const UNPARSEABLE = `'${PARSE_ERROR}`
 
+// A recalculated cell's key in a batch's changes.
+function changeKey(address: SimpleCellAddress): string {
+	return `${String(address.sheet)},${String(address.row)},${String(address.col)}`
+}
+
 function exported(value: unknown): RecalculatedCell["value"] {
 	if (value instanceof DetailedCellError) {
 		return ERROR_TEXT[value.type] ?? value.value
@@ -94,8 +102,8 @@ export class FormulaEngine {
 			// Ordinary formulas as Excel calculates them: a range where one value is expected meets the
 			// formula's row or column. Array-evaluating calls are marked with ARRAYFORMULA (formulaRefs.ts).
 			useArrayArithmetic: false,
-			maxRows: 1_048_576,
-			maxColumns: 16_384,
+			maxRows: MAX_ROWS,
+			maxColumns: MAX_COLUMNS,
 			// Excel's serial dates (1900-02-29 included, or counted from 1904), whitespace and empty-cell
 			// arithmetic.
 			leapYear1900: !date1904,
@@ -187,7 +195,7 @@ export class FormulaEngine {
 			)
 
 			for (const cell of failing) {
-				changes.delete(`${String(cell.address.sheet)},${String(cell.address.row)},${String(cell.address.col)}`)
+				changes.delete(changeKey(cell.address))
 			}
 
 			const failed = new Set(failing)
@@ -212,7 +220,7 @@ export class FormulaEngine {
 				continue
 			}
 
-			into.set(`${String(change.address.sheet)},${String(change.address.row)},${String(change.address.col)}`, {
+			into.set(changeKey(change.address), {
 				sheet,
 				row: change.address.row,
 				col: change.address.col,
@@ -263,7 +271,7 @@ export class FormulaEngine {
 
 	// Whether the engine can insert or delete these rows or columns (it cannot move a spilled array onto
 	// cells it would cover, nor grow a sheet past its size).
-	canMove(sheet: number, edit: { type: "insert" | "delete"; axis: "rows" | "cols"; at: number; count: number }): boolean {
+	canMove(sheet: number, edit: AxisEdit): boolean {
 		const id = this.sheetIds[sheet]
 
 		if (id === undefined) {
@@ -279,7 +287,7 @@ export class FormulaEngine {
 		return edit.axis === "rows" ? this.engine.isItPossibleToRemoveRows(id, span) : this.engine.isItPossibleToRemoveColumns(id, span)
 	}
 
-	insert(sheet: number, axis: "rows" | "cols", at: number, count: number): RecalculatedCell[] {
+	insert(sheet: number, axis: SizeAxis, at: number, count: number): RecalculatedCell[] {
 		const id = this.sheetIds[sheet]
 		const changes = new Map<string, RecalculatedCell>()
 
@@ -301,7 +309,7 @@ export class FormulaEngine {
 		return [...changes.values()]
 	}
 
-	remove(sheet: number, axis: "rows" | "cols", at: number, count: number): RecalculatedCell[] {
+	remove(sheet: number, axis: SizeAxis, at: number, count: number): RecalculatedCell[] {
 		const id = this.sheetIds[sheet]
 		const changes = new Map<string, RecalculatedCell>()
 

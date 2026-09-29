@@ -7,7 +7,7 @@ import { i18n } from "@/lib/i18n"
 import { runOp, type VoidActionOutcome } from "@/lib/actions/outcome"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { pipeWorkerToSink } from "@/lib/pipeWorkerToSink"
-import { asDirectoryOrFile, narrowToSdkItems, type DriveItem } from "@/features/drive/lib/item"
+import { isDirectoryItem, narrowToSdkItems, type DriveItem } from "@/features/drive/lib/item"
 import { throttle, PROGRESS_THROTTLE_MS } from "@/lib/throttle"
 import {
 	saveDownload,
@@ -20,7 +20,7 @@ import { useTransfersStore, type TransfersStore } from "@/features/transfers/sto
 import { settleTransferFailure } from "@/features/transfers/lib/settle"
 
 // DI mirror of RunDownloadDeps (download.ts) for the zip path — one archive, one transfer row, one
-// save dialog. No `cancel` field: cancelTransfer/pauseTransfer (features/transfers/lib/control.ts) already
+// save dialog. No `cancel` field: cancelTransfer/setTransferPaused (features/transfers/lib/control.ts) already
 // dispatch to the worker by transferId, and a zip transfer registers in the same transferControls map
 // sdk.worker.ts keys every transfer by — no zip-specific control wiring is needed here.
 export interface RunZipDownloadDeps {
@@ -132,7 +132,7 @@ export const defaultZipDownloadDeps: RunZipDownloadDeps = {
 function resolveSuggestedZipName(items: DriveItem[]): string {
 	const [item] = items
 
-	if (items.length === 1 && item !== undefined && asDirectoryOrFile(item).type === "directory") {
+	if (items.length === 1 && item !== undefined && isDirectoryItem(item)) {
 		return `${driveItemName(item)}.zip`
 	}
 

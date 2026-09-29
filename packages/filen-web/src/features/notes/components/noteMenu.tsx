@@ -18,6 +18,7 @@ import {
 	createNote
 } from "@/features/notes/lib/actions"
 import { exportNote } from "@/features/notes/lib/export"
+import { tagDisplayName } from "@/features/notes/lib/sort"
 import { addTagToNote, removeTagFromNote, setNoteTagFavorited } from "@/features/notes/lib/tags"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { useNoteInflight } from "@/features/notes/store/useNotesInflight"
@@ -189,7 +190,7 @@ function NoteMenuEntries({
 								void handleTagToggle(tag, next)
 							}}
 						>
-							{tag.name ?? tag.uuid}
+							{tagDisplayName(tag)}
 						</CheckboxItem>
 					))
 				)}

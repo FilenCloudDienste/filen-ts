@@ -261,6 +261,14 @@ export function isLinkedEmbedItem(item: DriveItem): boolean {
 	return item.type === "file" && item.data.parent === item.data.uuid
 }
 
+// The two ROOT shared arms: the only ones whose shareSource is a SharedRootItem (removeSharedItem's
+// argument) and whose rows are listed once per receiver.
+export type SharedRootDriveItem = Extract<DriveItem, { type: "sharedRootDirectory" | "sharedRootFile" }>
+
+export function isSharedRootDriveItem(item: DriveItem): item is SharedRootDriveItem {
+	return item.type === "sharedRootDirectory" || item.type === "sharedRootFile"
+}
+
 // Collapses any of the six arms onto the base directory|file projection: the base arms pass through
 // unchanged (same reference), and each shared arm re-tags to directory|file over its already
 // Dir|File-shaped `data`. The consumer fan-out routes its binary directory-vs-file dispatch through
@@ -280,6 +288,24 @@ export function asDirectoryOrFile(item: DriveItem): BaseDirectoryItem | BaseFile
 	}
 }
 
+// The "last modified" instant both the sort key and the displayed date read, so the two never
+// disagree: a file's meta `modified`, a directory's meta `created`, else the upload timestamp.
+export function lastModifiedOf(item: DriveItem): bigint {
+	const base = asDirectoryOrFile(item)
+
+	return base.type === "file"
+		? (base.data.decryptedMeta?.modified ?? base.data.timestamp)
+		: (base.data.decryptedMeta?.created ?? base.data.timestamp)
+}
+
+// Every directory arm, owned or shared.
+export type DirectoryLikeItem = Extract<DriveItem, { type: "directory" | "sharedDirectory" | "sharedRootDirectory" }>
+
+// asDirectoryOrFile(item).type === "directory" without allocating a wrapper for the shared arms.
+export function isDirectoryItem(item: DriveItem): item is DirectoryLikeItem {
+	return item.type === "directory" || item.type === "sharedDirectory" || item.type === "sharedRootDirectory"
+}
+
 // Directories carry no mime.
 export function driveItemMime(item: DriveItem): string | undefined {
 	const base = asDirectoryOrFile(item)
@@ -293,9 +319,7 @@ export function driveItemMime(item: DriveItem): string | undefined {
 // sharedDirectory's role is only ever present via the fetcher's spread (queries/drive.ts) — if it's
 // missing there is no correct arm to dispatch to, so this throws rather than let the caller fall
 // through to the owned arm and mis-list/mis-decrypt a share silently.
-export function toAnyDirWithContext(
-	item: Extract<DriveItem, { type: "directory" | "sharedDirectory" | "sharedRootDirectory" }>
-): AnyDirWithContext {
+export function toAnyDirWithContext(item: DirectoryLikeItem): AnyDirWithContext {
 	switch (item.type) {
 		case "directory":
 			return item.data

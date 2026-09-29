@@ -4,7 +4,8 @@
 
 export type SpreadsheetKind = "xlsx" | "xls" | "csv"
 
-// Excel's own column cap. Cell keys pack row and column into one number (cellKey).
+// Excel's own grid size. Cell keys pack row and column into one number (cellKey).
+export const MAX_ROWS = 1_048_576
 export const MAX_COLUMNS = 16_384
 
 export function cellKey(row: number, col: number): number {

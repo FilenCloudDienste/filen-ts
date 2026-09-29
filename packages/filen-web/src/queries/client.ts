@@ -2,13 +2,7 @@ import { QueryCache, QueryClient } from "@tanstack/react-query"
 import { persister } from "@/queries/persist"
 import { asErrorDTO, labelFirst } from "@/lib/sdk/errors"
 import { log } from "@/lib/log"
-
-// TWO INDEPENDENT CLOCKS, deliberately decoupled: gcTime is IN-MEMORY retention measured from the
-// last observer unsubscribing; the persister's `PERSIST_MAX_AGE` (persist.ts) is ON-DISK expiry
-// measured from `dataUpdatedAt` and is the sole disk-eviction authority. gcTime is set
-// effectively-infinite because the persister is the real eviction mechanism — mirroring mobile's
-// own QUERY_CLIENT_CACHE_TIME value.
-const GC_TIME = 86400 * 365 * 1000 * 10 // ~10 years
+import { QUERY_DEFAULTS } from "@/queries/clientDefaults"
 
 // ---------------------------------------------------------------------------------------------
 // Conventions
@@ -43,28 +37,19 @@ const GC_TIME = 86400 * 365 * 1000 * 10 // ~10 years
 //
 // Freshness: realtime socket events patch or invalidate queries by key from one subscription (the
 // authed shell's SocketHost, each feature's socketHandlers.ts). A family those events keep current
-// sets its own staleTime on its query; the default below is for data no event reaches. A persisted
-// row restores with its original read time, so such a family must still read once per session —
-// events missed while the app was closed are never replayed. This module only owns the client
+// sets its own staleTime on its query; the default (clientDefaults.ts) is for data no event
+// reaches. A persisted row restores with its original read time, so such a family must still read
+// once per session — events missed while the app was closed are never replayed. This module only owns the client
 // instance and its error/persistence plumbing — never feature-specific query keys.
 // ---------------------------------------------------------------------------------------------
 
 export const queryClient = new QueryClient({
 	defaultOptions: {
 		queries: {
+			...QUERY_DEFAULTS,
 			// Per-query kv persistence as a default: every query automatically restores from /
 			// persists to its own sqlite row through the wrapped queryFn pipeline.
-			persister: persister.persisterFn,
-			staleTime: 0, // every mount/focus refetches unless the query sets its own (see Freshness above)
-			gcTime: GC_TIME,
-			// retry: false — the Rust SDK owns ALL retries internally (tower stack; CLAUDE.md rule:
-			// never add retry/rate-limit/concurrency logic in JS). An app-level retry here would just
-			// re-run an already-exhausted SDK retry cycle and delay surfacing the error to the UI.
-			// Transient recovery = SDK-internal retries + refetchOnWindowFocus/refetchOnReconnect
-			// below (+ socket-driven invalidation).
-			retry: false,
-			refetchOnWindowFocus: true,
-			refetchOnReconnect: true
+			persister: persister.persisterFn
 		}
 	},
 	// Global error logging (verified against the installed v5.101.2 source,

@@ -8,17 +8,17 @@ import { SettingsLinkRow } from "@/features/settings/components/settingsLayout"
 // default browser (Electron's default `window.open` handler for a target the app hasn't otherwise
 // intercepted), so no bridge call is needed here either.
 function AboutRows() {
-	const { t } = useTranslation("settings")
+	const { t } = useTranslation("common")
 
 	return (
 		<>
 			<SettingsLinkRow
 				href={FILEN_TERMS_URL}
-				label={t("settingsAboutTermsOfService")}
+				label={t("legalTerms")}
 			/>
 			<SettingsLinkRow
 				href={FILEN_PRIVACY_URL}
-				label={t("settingsAboutPrivacyPolicy")}
+				label={t("legalPrivacy")}
 			/>
 		</>
 	)

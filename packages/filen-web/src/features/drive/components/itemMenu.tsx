@@ -10,7 +10,7 @@ import { defaultRevealDeps, runOpenContainingDirectory } from "@/features/drive/
 import { driveItemLinkStatusQueryKey, fetchDriveItemLinkStatus, type DriveItemLinkStatus } from "@/features/drive/queries/drive"
 import { queryClient } from "@/queries/client"
 import { errorLabel } from "@/lib/i18n/errorLabel"
-import { toastBulkOutcome } from "@/features/drive/lib/bulkToast"
+import { finishBulkOutcome } from "@/features/drive/lib/bulkToast"
 import { startDownloads } from "@/features/drive/lib/download"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import { useIsOnline } from "@/lib/useIsOnline"
@@ -28,8 +28,7 @@ import {
 	DROPDOWN_TREE_MENU_FAMILY,
 	type DirectoryTreeMenuFamily
 } from "@/features/drive/components/directoryTreeSubmenu"
-import { MoveSubmenu } from "@/features/drive/components/moveSubmenu"
-import { CopySubmenu } from "@/features/drive/components/copySubmenu"
+import { TransferSubmenu } from "@/features/drive/components/transferSubmenu"
 import { DirectoryDestinationEntries, type DestinationActions } from "@/features/drive/components/destinationMenu"
 import { ContextMenuContent } from "@/components/ui/context-menu"
 import { DropdownMenuContent } from "@/components/ui/dropdown-menu"
@@ -80,7 +79,7 @@ const SEPARATOR_BEFORE = new Set<ItemActionId>(["info", "trash", "deletePermanen
 // one mapping from descriptor to menu row. Base UI's ContextMenu and DropdownMenu are separate Root
 // families with their own Item/Separator primitives (not interchangeable across triggers even though
 // their props are structurally identical), so the one piece each caller supplies is which family to
-// render rows with. Move and Copy are submenus (moveSubmenu.tsx, copySubmenu.tsx) that also need the
+// render rows with. Move and Copy are submenus (transferSubmenu.tsx) that also need the
 // family's submenu parts.
 function ItemMenuEntries({
 	item,
@@ -147,8 +146,7 @@ function ItemMenuEntries({
 		// was selected in (see actions.ts), so a successful outcome also drops it from selection —
 		// mirrors directoryListing.tsx's identical cleanup after a trash/delete confirm.
 		const outcome = await restoreItems([item])
-		toastBulkOutcome(outcome)
-		useDriveStore.getState().removeFromSelection(outcome.succeeded.map(succeededItem => succeededItem.data.uuid))
+		finishBulkOutcome(outcome)
 
 		if (outcome.succeeded.some(succeededItem => succeededItem.data.uuid === item.data.uuid)) {
 			onRestored?.(item)
@@ -201,20 +199,13 @@ function ItemMenuEntries({
 					{index > 0 && (SEPARATOR_BEFORE.has(descriptor.id) || descriptors[index - 1]?.id === "open") ? <Separator /> : null}
 					{/* The Move and Copy submenus open offline too, for their clipboard entries; each gates its own
 					    destinations, so their descriptors' offline flag is not applied to the trigger. */}
-					{descriptor.id === "move" ? (
-						<MoveSubmenu
+					{descriptor.id === "move" || descriptor.id === "copy" ? (
+						<TransferSubmenu
+							mode={descriptor.id}
 							family={family}
 							items={[item]}
-							onChooseDestination={() => {
-								onItemAction("move", item)
-							}}
-						/>
-					) : descriptor.id === "copy" ? (
-						<CopySubmenu
-							family={family}
-							items={[item]}
-							onChooseDestination={() => {
-								onItemAction("copy", item)
+							onChooseDestination={mode => {
+								onItemAction(mode, item)
 							}}
 						/>
 					) : (

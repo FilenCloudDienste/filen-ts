@@ -2,7 +2,7 @@ import type { Contact } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
 import { queryClient } from "@/queries/client"
 import { batchListingPatches, driveListingQueryKey, rootListingQueryUpdate } from "@/features/drive/queries/drive"
-import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
+import { asDirectoryOrFile, isSharedRootDriveItem, type DriveItem } from "@/features/drive/lib/item"
 import { driveRowKey } from "@/features/drive/lib/rowKey"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { runOp } from "@/lib/actions/outcome"
@@ -62,10 +62,9 @@ export async function shareItems(items: DriveItem[], contacts: Contact[]): Promi
 }
 
 // Stops sharing a shared-root item — a directory shared out, or an item shared in the caller wants
-// gone. Root-only: itemMenu.logic.ts/bulkActionBar.logic.ts gate this action to the
-// sharedRootDirectory/sharedRootFile arms alone, the only two whose shareSource is a SharedRootItem
-// (see item.ts's union doc comment) — the type guard below is a defense-in-depth backstop for a caller
-// bug, never a state the real gated callers can reach.
+// gone. Root-only: itemMenu.logic.ts/bulkActionBar.logic.ts gate this action to isSharedRootDriveItem
+// — the type guard below is a defense-in-depth backstop for a caller bug, never a state the real gated
+// callers can reach.
 //
 // `item.data.shareSource`, never `item.data` itself, is what crosses to the worker: removeSharedItem
 // forwards its argument straight to the SDK, which deserializes SharedRootItem as an UNTAGGED union —
@@ -74,7 +73,7 @@ export async function shareItems(items: DriveItem[], contacts: Contact[]): Promi
 export function unshareItems(items: DriveItem[], variant: DriveVariant): Promise<BulkOutcome<DriveItem>> {
 	return batchListingPatches(() =>
 		runBulk(items, async item => {
-			if (item.type !== "sharedRootDirectory" && item.type !== "sharedRootFile") {
+			if (!isSharedRootDriveItem(item)) {
 				throw new Error(`unshareItems: item type "${item.type}" has no share source`)
 			}
 
