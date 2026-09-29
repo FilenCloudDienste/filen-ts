@@ -11,7 +11,6 @@ import type { File, UuidStr } from "@filen/sdk-rs"
 
 const { mounts } = vi.hoisted(() => ({ mounts: { text: 0, spreadsheet: 0 } }))
 
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() } }))
 vi.mock("@tanstack/react-router", () => ({

@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { createElement } from "react"
 import { act, render, renderHook, screen, waitFor } from "@testing-library/react"
 import { focusManager, onlineManager } from "@tanstack/react-query"
-import type { BlockedContact, Contact, ContactRequestIn, ContactRequestOut, UuidStr } from "@filen/sdk-rs"
+import type { BlockedContact, Contact, ContactRequestIn, ContactRequestOut } from "@filen/sdk-rs"
 
 const {
 	getContacts,
@@ -44,8 +44,6 @@ vi.mock("@/lib/sdk/client", () => ({
 
 vi.mock("@/queries/client", async () => ({ queryClient: (await import("@/tests/testQueryClient")).createTestQueryClient() }))
 
-vi.mock("@/lib/log", () => ({ log: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() } }))
-
 import "@/lib/i18n"
 import { queryClient } from "@/queries/client"
 import { queryClientWrapper } from "@/tests/testQueryClient"
@@ -69,10 +67,7 @@ import { runBulkOutcomes } from "@/lib/actions/bulk"
 import { handleContactEvent } from "@/features/contacts/lib/socketHandlers"
 import { ContactPickerDialog } from "@/features/drive/components/contactPickerDialog"
 import { socketAuthenticated, socketDropped } from "@/lib/sdk/socketSession"
-
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import { testUuid } from "@/tests/support/uuid"
 
 function mockContact(label: string): Contact {
 	return {

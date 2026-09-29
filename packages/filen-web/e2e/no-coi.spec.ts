@@ -63,6 +63,9 @@ function startPlainServer(): Promise<PlainServer> {
 	})
 }
 
+// SDK-free: nothing here signs in.
+test.use({ injectSession: false })
+
 test.describe("no cross-origin isolation", () => {
 	// Undefined until beforeAll assigns it: a rejected startPlainServer would otherwise leave afterAll
 	// closing nothing, and a throw in teardown REPLACES the beforeAll error that caused it.

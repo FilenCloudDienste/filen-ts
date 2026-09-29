@@ -1,5 +1,5 @@
 import { test, expect } from "./fixtures"
-import { bootTo, enterScratchDirectory, openTransfers, trashScratchDirectory, LIVE_WRITE_TIMEOUT_MS } from "./helpers/listing"
+import { withScratchDirectory, openTransfers, uploadFiles, breadcrumb } from "./helpers/listing"
 
 // Transfers-screen-specific affordances (transferRow.tsx/screens/transfers.tsx) that uploads.spec.ts
 // doesn't already cover: a finished row's own Show in directory and Remove controls, and the
@@ -8,28 +8,16 @@ import { bootTo, enterScratchDirectory, openTransfers, trashScratchDirectory, LI
 // directory is disposable.
 test.describe("transfers screen", () => {
 	test("the rail entry navigates straight to /transfers (no popover), a finished row reveals its file and exposes Remove (not Cancel); Clear finished drops it from the list", async ({
-		page,
-		injectedSession
+		page
 	}) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
+		await withScratchDirectory(page, "transfers-screen", async ({ listbox, scratchName, runId }) => {
+			const fileName = `e2e-transfers-screen-${runId}.txt`
 
-		const runId = crypto.randomUUID()
-		const scratchName = `e2e-transfers-screen-${runId}`
-		const fileName = `e2e-transfers-screen-${runId}.txt`
-
-		await bootTo(page)
-
-		try {
-			const { listbox } = await enterScratchDirectory(page, scratchName)
-
-			await page
-				.getByRole("main")
-				.locator('input[type="file"]')
-				.first()
-				.setInputFiles({ name: fileName, mimeType: "text/plain", buffer: Buffer.from("e2e transfers screen probe") })
-
-			// Cold boot + a real upload round trip, so the write budget rather than a UI-responsiveness one.
-			await expect(listbox.getByRole("option", { name: fileName })).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
+			await uploadFiles(
+				page,
+				[{ name: fileName, mimeType: "text/plain", buffer: Buffer.from("e2e transfers screen probe") }],
+				listbox
+			)
 
 			// A plain nav link now (mirrors every other rail entry), not a popover trigger.
 			await openTransfers(page)
@@ -45,7 +33,7 @@ test.describe("transfers screen", () => {
 			// "Show in directory" opens the directory the upload landed in, with the file selected.
 			const row = page.getByRole("listitem", { name: fileName })
 			await row.getByRole("button", { name: "Show in directory", exact: true }).click()
-			await expect(page.getByRole("navigation", { name: "Breadcrumb" }).locator('[aria-current="page"]')).toHaveText(scratchName, {
+			await expect(breadcrumb(page).locator('[aria-current="page"]')).toHaveText(scratchName, {
 				timeout: 30_000
 			})
 			await expect(listbox.getByRole("option", { name: fileName })).toHaveAttribute("aria-selected", "true", { timeout: 15_000 })
@@ -64,8 +52,6 @@ test.describe("transfers screen", () => {
 			// finished row survives clearFinished() (useTransfersStore.ts).
 			await expect(removeButton).toHaveCount(0)
 			await expect(page.getByText("No transfers", { exact: true })).toBeVisible()
-		} finally {
-			await trashScratchDirectory(page, scratchName)
-		}
+		})
 	})
 })

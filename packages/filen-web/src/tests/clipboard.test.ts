@@ -9,7 +9,6 @@ const { performMove, startCopyWithCard, toastSuccess } = vi.hoisted(() => ({
 }))
 
 // Copying looks its items up in the cached listings, which hold none here.
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 vi.mock("@/features/drive/lib/dnd", () => ({ performMove }))
 vi.mock("@/features/transfers/lib/copyToast", () => ({ startCopyWithCard }))

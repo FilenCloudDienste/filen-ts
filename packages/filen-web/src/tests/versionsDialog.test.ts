@@ -1,14 +1,9 @@
 import { describe, expect, it } from "vitest"
-import type { File, FileVersion, UuidStr } from "@filen/sdk-rs"
+import type { File, FileVersion } from "@filen/sdk-rs"
 import { narrowItem } from "@/features/drive/lib/item"
 import type { FileItem } from "@/features/drive/lib/actions"
 import { isCurrentVersion, nonCurrentVersions } from "@/features/drive/components/versionsDialog.logic"
-
-// UuidStr is a template-literal brand requiring at least 3 dashes (see @filen/sdk-rs) — pad a short
-// readable test label into a shape that satisfies it, mirroring actions.test.ts's own fixture.
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import { testUuid } from "@/tests/support/uuid"
 
 // Local fixtures mirror actions.test.ts's own per-file convention.
 function mockFile(overrides: Partial<File> = {}): File {

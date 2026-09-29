@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { Dir, DirPublicLinkRW, File, FilePublicLink, SharedDir, SharedFile, SharingRole, UuidStr } from "@filen/sdk-rs"
+import type { Dir, DirPublicLinkRW, File, FilePublicLink, SharedDir, SharedFile, SharingRole } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import type { DriveItemLinkStatus } from "@/features/drive/queries/drive"
 import {
@@ -9,12 +9,7 @@ import {
 	resolveLinkHeroInfo,
 	resolvePremiumGateState
 } from "@/features/drive/components/linkDialog.logic"
-
-// UuidStr is a template-literal brand requiring at least 3 dashes (see @filen/sdk-rs) — pad a short
-// readable test label into a shape that satisfies it, mirroring versionsDialog.test.ts's own fixture.
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import { testUuid } from "@/tests/support/uuid"
 
 function mockDirLink(overrides: Partial<DirPublicLinkRW> = {}): DirPublicLinkRW {
 	return {

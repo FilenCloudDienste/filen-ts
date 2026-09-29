@@ -6,9 +6,6 @@ import { act, renderHook } from "@testing-library/react"
 import { QueryClient } from "@tanstack/react-query"
 import type { Dir, UuidStr } from "@filen/sdk-rs"
 
-// Same mock boundary as useDriveListboxNavReveal.test.ts: the DriveVirtualizer type's module graph
-// reaches the Vite `?worker` client, unresolvable under vitest.
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"

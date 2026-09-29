@@ -19,7 +19,7 @@ import {
 	LogOutIcon,
 	PlusIcon
 } from "lucide-react"
-import type { Note, NoteTag, UuidStr } from "@filen/sdk-rs"
+import type { Note } from "@filen/sdk-rs"
 
 import {
 	noteMenuActions,
@@ -30,62 +30,8 @@ import {
 	NOTE_TYPE_SUBMENU,
 	type NoteActionDescriptor
 } from "@/features/notes/components/noteMenu.logic"
-
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
-
-function mockNote(overrides: Partial<Note> = {}): Note {
-	return {
-		uuid: testUuid("note"),
-		ownerId: 1n,
-		lastEditorId: 1n,
-		favorite: false,
-		pinned: false,
-		tags: [],
-		noteType: "text",
-		encryptionKey: "note-key",
-		title: "note title",
-		preview: "note preview",
-		trash: false,
-		archive: false,
-		createdTimestamp: 1_700_000_000_000n,
-		editedTimestamp: 1_700_000_000_000n,
-		participants: [],
-		...overrides
-	}
-}
-
-function mockTag(overrides: Partial<NoteTag> = {}): NoteTag {
-	return {
-		uuid: testUuid("tag"),
-		name: "tag",
-		favorite: false,
-		editedTimestamp: 1_700_000_000_000n,
-		createdTimestamp: 1_700_000_000_000n,
-		...overrides
-	}
-}
-
-// Undecryptable note/tag builders — the SDK leaves encryptionKey/title (note) and name (tag) absent,
-// which exactOptionalPropertyTypes models as the property being missing (never `= undefined`), so these
-// delete rather than assign undefined.
-function undecryptableNote(overrides: Partial<Note> = {}): Note {
-	const note: Note = { ...mockNote(overrides) }
-
-	delete note.encryptionKey
-	delete note.title
-
-	return note
-}
-
-function undecryptableTag(overrides: Partial<NoteTag> = {}): NoteTag {
-	const tag: NoteTag = { ...mockTag(overrides) }
-
-	delete tag.name
-
-	return tag
-}
+import { mockNote, mockNoteTag, tagWithoutName, undecryptableNote } from "@/tests/fixtures/notes"
+import { testUuid } from "@/tests/support/uuid"
 
 function ids(note: Note, userId: bigint | undefined): string[] {
 	return noteMenuActions(note, userId).map(d => d.id)
@@ -330,8 +276,8 @@ describe("noteMenuActions — returns a fresh array each call", () => {
 
 describe("noteTagSubmenuEntries", () => {
 	it("checks every tag the note already carries, unchecks the rest", () => {
-		const assigned = mockTag({ uuid: testUuid("assigned") })
-		const unassigned = mockTag({ uuid: testUuid("unassigned") })
+		const assigned = mockNoteTag({ uuid: testUuid("assigned") })
+		const unassigned = mockNoteTag({ uuid: testUuid("unassigned") })
 		const note = mockNote({ tags: [assigned] })
 
 		expect(noteTagSubmenuEntries(note, [assigned, unassigned])).toEqual([
@@ -359,7 +305,7 @@ describe("NOTE_TYPE_SUBMENU", () => {
 
 describe("tagMenuActions — the tags-view row menu", () => {
 	it("lists createNote, rename, favorite, delete in that order for an unfavorited tag", () => {
-		expect(tagMenuActions(mockTag()).map(d => ({ id: d.id, labelKey: d.labelKey, run: d.run }))).toEqual([
+		expect(tagMenuActions(mockNoteTag()).map(d => ({ id: d.id, labelKey: d.labelKey, run: d.run }))).toEqual([
 			{ id: "tagCreateNote", labelKey: "noteTagActionCreateNote", run: "direct" },
 			{ id: "tagRename", labelKey: "noteTagActionRename", run: "dialog" },
 			{ id: "tagFavorite", labelKey: "noteTagActionFavorite", run: "direct" },
@@ -368,20 +314,20 @@ describe("tagMenuActions — the tags-view row menu", () => {
 	})
 
 	it("createNote carries its own icon fact, distinct from favorite's", () => {
-		const descriptors = tagMenuActions(mockTag())
+		const descriptors = tagMenuActions(mockNoteTag())
 
 		expect(descriptors[0]).toMatchObject({ id: "tagCreateNote", icon: PlusIcon, run: "direct" })
 	})
 
 	it("flips the favorite entry's label for an already-favorited tag, keeping order stable", () => {
-		const descriptors = tagMenuActions(mockTag({ favorite: true }))
+		const descriptors = tagMenuActions(mockNoteTag({ favorite: true }))
 
 		expect(descriptors.map(d => d.id)).toEqual(["tagCreateNote", "tagRename", "tagFavorite", "tagDelete"])
 		expect(descriptors[2]?.labelKey).toBe("noteTagActionUnfavorite")
 	})
 
 	it("routes rename and delete to their disjoint tag dialog kinds, delete destructive", () => {
-		const descriptors = tagMenuActions(mockTag())
+		const descriptors = tagMenuActions(mockNoteTag())
 		const rename = descriptors[1]
 		const del = descriptors[3]
 
@@ -391,7 +337,7 @@ describe("tagMenuActions — the tags-view row menu", () => {
 	})
 
 	it("an undecryptable tag (no name) reduces to delete alone — rename/favorite/createNote need decrypted metadata", () => {
-		const descriptors = tagMenuActions(undecryptableTag())
+		const descriptors = tagMenuActions(tagWithoutName())
 
 		expect(descriptors.map(d => d.id)).toEqual(["tagDelete"])
 		expect(descriptors[0]?.run === "dialog" && descriptors[0].dialogKind).toBe("deleteTag")
@@ -438,13 +384,13 @@ describe("applyNoteOfflineGate", () => {
 
 describe("applyTagOfflineGate", () => {
 	it("returns the input identity-equal when online", () => {
-		const actions = tagMenuActions(mockTag())
+		const actions = tagMenuActions(mockNoteTag())
 
 		expect(applyTagOfflineGate(actions, true)).toBe(actions)
 	})
 
 	it("disables every tag action offline — all four are writes", () => {
-		const gated = applyTagOfflineGate(tagMenuActions(mockTag()), false)
+		const gated = applyTagOfflineGate(tagMenuActions(mockNoteTag()), false)
 
 		expect(gated.map(d => d.id)).toEqual(["tagCreateNote", "tagRename", "tagFavorite", "tagDelete"])
 		expect(gated.every(d => d.enabled === false)).toBe(true)

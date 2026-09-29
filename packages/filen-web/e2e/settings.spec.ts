@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs"
 import { test, expect } from "./fixtures"
-import { gotoSettings, waitForAccountLoaded } from "./helpers/settings"
+import { trackConsoleErrors } from "./helpers/csp"
+import { gotoSettings, openSettingsSection, waitForAccountLoaded } from "./helpers/settings"
 import { BOOT_SETTLE_TIMEOUT_MS, LIVE_WRITE_TIMEOUT_MS } from "./helpers/listing"
 
 // Every settings section here is either a plain, read-only render (Account/Appearance/Security's own
@@ -9,12 +10,7 @@ import { BOOT_SETTLE_TIMEOUT_MS, LIVE_WRITE_TIMEOUT_MS } from "./helpers/listing
 // uploadAvatar/deleteAll* all stay unit/render-only, never invoked against the live shared account).
 // getUserInfo/getGdprInfo are the only live network reads exercised, both read-only.
 test.describe("settings", () => {
-	test("the settings sidebar renders every section and Account is the index-redirect landing section", async ({
-		page,
-		injectedSession
-	}) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
+	test("the settings sidebar renders every section and Account is the index-redirect landing section", async ({ page }) => {
 		await gotoSettings(page)
 
 		for (const label of ["Account", "Security", "Appearance", "Keyboard", "Events", "Billing", "Advanced"]) {
@@ -24,9 +20,7 @@ test.describe("settings", () => {
 		await expect(page.getByRole("link", { name: "Account", exact: true })).toHaveAttribute("aria-current", "page")
 	})
 
-	test("the Account section renders live getUserInfo data (email + storage breakdown)", async ({ page, injectedSession }) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
+	test("the Account section renders live getUserInfo data (email + storage breakdown)", async ({ page }) => {
 		await gotoSettings(page)
 		await waitForAccountLoaded(page)
 
@@ -43,15 +37,12 @@ test.describe("settings", () => {
 		await expect(storageGroup.getByText(/of .* used/)).toBeVisible()
 	})
 
-	test("security page is reachable from the sidebar and renders its rows", async ({ page, injectedSession }) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
+	test("security page is reachable from the sidebar and renders its rows", async ({ page }) => {
 		await gotoSettings(page)
 		// The Security page gates on the same account read, so it renders from the settled cache.
 		await waitForAccountLoaded(page)
 
-		await page.getByRole("link", { name: "Security", exact: true }).click()
-		await page.waitForURL(/\/settings\/security$/)
+		await openSettingsSection(page, "Security")
 
 		await expect(page.getByRole("heading", { name: "Security", exact: true })).toBeVisible()
 		// The row buttons read "Change…"/"Export…"; their accessible names carry the full action.
@@ -63,13 +54,10 @@ test.describe("settings", () => {
 		await expect(page.getByText("Delete account", { exact: true })).toBeVisible()
 	})
 
-	test("the Events section renders live getUserEvents rows (the e2e account has login history)", async ({ page, injectedSession }) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
+	test("the Events section renders live getUserEvents rows (the e2e account has login history)", async ({ page }) => {
 		await gotoSettings(page)
 
-		await page.getByRole("link", { name: "Events", exact: true }).click()
-		await page.waitForURL(/\/settings\/events$/)
+		await openSettingsSection(page, "Events")
 
 		// The list renders exactly one of two terminal states, and the container below exists only in the
 		// non-empty one (eventsList.tsx). Raced first, then narrowed: asserting the empty state's absence
@@ -83,13 +71,10 @@ test.describe("settings", () => {
 		await expect(firstEventRow).toBeVisible()
 	})
 
-	test("the Billing section renders every table's empty state (the e2e account is FREE)", async ({ page, injectedSession }) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
+	test("the Billing section renders every table's empty state (the e2e account is FREE)", async ({ page }) => {
 		await gotoSettings(page)
 
-		await page.getByRole("link", { name: "Billing", exact: true }).click()
-		await page.waitForURL(/\/settings\/billing$/)
+		await openSettingsSection(page, "Billing")
 
 		await expect(page.getByText("Free", { exact: true })).toBeVisible()
 		await expect(page.getByText("No subscriptions", { exact: true })).toBeVisible()
@@ -98,11 +83,8 @@ test.describe("settings", () => {
 	})
 
 	test("the destructive data-control rows render but their typed-confirm gate blocks a wrong phrase (never live-mutated)", async ({
-		page,
-		injectedSession
+		page
 	}) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
 		await gotoSettings(page)
 		await waitForAccountLoaded(page)
 
@@ -141,12 +123,9 @@ test.describe("settings", () => {
 		await itemsDialog.getByRole("button", { name: "Cancel", exact: true }).click()
 	})
 
-	test("the theme three-way switch round-trips through light/dark/system", async ({ page, injectedSession }) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
+	test("the theme three-way switch round-trips through light/dark/system", async ({ page }) => {
 		await gotoSettings(page)
-		await page.getByRole("link", { name: "Appearance", exact: true }).click()
-		await page.waitForURL(/\/settings\/appearance$/)
+		await openSettingsSection(page, "Appearance")
 
 		// Disambiguated (not a bare getByRole("combobox")): the Appearance page also has the Start
 		// Screen select now.
@@ -182,48 +161,23 @@ test.describe("settings", () => {
 		await expect.poll(() => page.evaluate(() => localStorage.getItem("theme"))).toBe("system")
 	})
 
-	test("every settings section is reachable from the sidebar in one pass, with no console errors", async ({ page, injectedSession }) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
+	test("every settings section is reachable from the sidebar in one pass, with no console errors", async ({ page }) => {
 		await gotoSettings(page)
 
 		// Scoped to the settings leg alone (post-boot, post-navigation-into-settings), same convention as
 		// drive.spec.ts's Links-nav console-error capture — the account query's own boot fetch is not part
 		// of what this test is asserting.
-		const consoleErrors: string[] = []
+		const consoleErrors = trackConsoleErrors(page)
 
-		page.on("console", msg => {
-			if (msg.type() !== "error") {
-				return
-			}
-
-			const text = msg.text()
-
-			// arktype's benign CSP probe (see shell.spec.ts) — blocked by no-unsafe-eval, not a failure.
-			if (/unsafe-eval/i.test(text)) {
-				return
-			}
-
-			consoleErrors.push(text)
-		})
-
-		const sections: { label: string; heading: string; path: string }[] = [
-			{ label: "Account", heading: "Account", path: "/settings/account" },
-			{ label: "Security", heading: "Security", path: "/settings/security" },
-			{ label: "Appearance", heading: "Appearance", path: "/settings/appearance" },
-			{ label: "Events", heading: "Events", path: "/settings/events" },
-			{ label: "Billing", heading: "Billing", path: "/settings/billing" },
-			{ label: "Advanced", heading: "Advanced", path: "/settings/advanced" }
-		]
+		const sections = ["Account", "Security", "Appearance", "Events", "Billing", "Advanced"]
 
 		// Each section's own heading is waited for before the next click — the URL flips before the route's
 		// component commits, so moving on at the URL alone would click the next link out of a tree that has
 		// not rendered yet. Generously budgeted: several sections fire a live read on mount, and this loop
 		// pays for all six in one test.
-		for (const section of sections) {
-			await page.getByRole("link", { name: section.label, exact: true }).click()
-			await page.waitForURL(new RegExp(`${section.path}$`))
-			await expect(page.getByRole("heading", { name: section.heading, exact: true })).toBeVisible({
+		for (const label of sections) {
+			await openSettingsSection(page, label)
+			await expect(page.getByRole("heading", { name: label, exact: true })).toBeVisible({
 				timeout: BOOT_SETTLE_TIMEOUT_MS
 			})
 		}
@@ -231,9 +185,7 @@ test.describe("settings", () => {
 		expect(consoleErrors, consoleErrors.join("\n")).toEqual([])
 	})
 
-	test("GDPR export downloads a JSON file", async ({ page, injectedSession }) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
+	test("GDPR export downloads a JSON file", async ({ page }) => {
 		await gotoSettings(page)
 		await waitForAccountLoaded(page)
 
@@ -251,13 +203,10 @@ test.describe("settings", () => {
 		expect(parsed).toMatchObject({ user: expect.any(Object), events: expect.any(Object) })
 	})
 
-	test("the Advanced section renders working Terms of Service and Privacy Policy links", async ({ page, injectedSession }) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
+	test("the Advanced section renders working Terms of Service and Privacy Policy links", async ({ page }) => {
 		await gotoSettings(page)
 
-		await page.getByRole("link", { name: "Advanced", exact: true }).click()
-		await page.waitForURL(/\/settings\/advanced$/)
+		await openSettingsSection(page, "Advanced")
 
 		// Asserted, never clicked — a real click would leave the app on an external filen.io page, and
 		// every assertion after it would run against that.
@@ -274,13 +223,10 @@ test.describe("settings", () => {
 		await expect(privacy).toHaveAttribute("rel", "noopener noreferrer")
 	})
 
-	test("the Advanced section opens the lazily-loaded open source licenses dialog", async ({ page, injectedSession }) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
+	test("the Advanced section opens the lazily-loaded open source licenses dialog", async ({ page }) => {
 		await gotoSettings(page)
 
-		await page.getByRole("link", { name: "Advanced", exact: true }).click()
-		await page.waitForURL(/\/settings\/advanced$/)
+		await openSettingsSection(page, "Advanced")
 
 		// The only real proof that the lazily-imported payload chunk loads under the hardened preview CSP.
 		await page.getByRole("button", { name: "View licenses", exact: true }).click()

@@ -11,7 +11,6 @@ vi.mock("@/queries/client", async () => {
 	const { QueryClient: Client } = await import("@tanstack/react-query")
 	return { queryClient: new Client({ defaultOptions: { queries: { retry: false } } }) }
 })
-vi.mock("@/lib/log", () => ({ log: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() } }))
 
 import { queryClient } from "@/queries/client"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"

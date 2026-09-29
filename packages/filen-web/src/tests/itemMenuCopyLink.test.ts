@@ -17,7 +17,6 @@ vi.mock("@/queries/client", async () => {
 	return { queryClient: new Client({ defaultOptions: { queries: { retry: false } } }) }
 })
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: toastError } }))
-vi.mock("@/lib/log", () => ({ log: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() } }))
 vi.mock("@/features/drive/lib/dnd", () => ({ performMove: vi.fn() }))
 vi.mock("@/features/transfers/lib/copyToast", () => ({ startCopyWithCard: vi.fn() }))
 vi.mock("@/features/drive/queries/drive", async importOriginal => ({

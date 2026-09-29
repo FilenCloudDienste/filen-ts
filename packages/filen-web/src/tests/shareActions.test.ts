@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
-import type { Contact, Dir, File, SharedFile, SharedRootDir, SharedRootDirsAndFiles, SharingRole, UuidStr } from "@filen/sdk-rs"
+import type { Contact, Dir, File, SharedFile, SharedRootDir, SharedRootDirsAndFiles } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import type { ErrorDTO } from "@/lib/sdk/errors"
 
@@ -30,17 +30,13 @@ vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 import { queryClient as testQueryClient } from "@/queries/client"
 import { driveListingQueryKey, driveListingQueryOptions } from "@/features/drive/queries/drive"
 import { shareItems, unshareItems } from "@/features/drive/lib/share/actions"
+import { mockSharedFile, mockSharedRootDir } from "@/tests/fixtures/sdk"
+import { testUuid } from "@/tests/support/uuid"
 
 beforeEach(() => {
 	vi.clearAllMocks()
 	testQueryClient.clear()
 })
-
-// UuidStr is a template-literal brand requiring at least 3 dashes — pad a short readable label into a
-// shape that satisfies it, mirroring driveActions.test.ts's own fixture.
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
 
 function mockDir(overrides: Partial<Dir> = {}): Dir {
 	return {
@@ -88,43 +84,6 @@ function fileItem(overrides: Partial<File> = {}): Extract<DriveItem, { type: "fi
 		throw new Error("expected a file arm")
 	}
 	return item
-}
-
-function sharerRole(id: number, email: string): SharingRole {
-	return { Sharer: { email, id } }
-}
-
-function mockSharedRootDir(overrides: Partial<SharedRootDir> = {}): SharedRootDir {
-	return {
-		inner: {
-			uuid: testUuid("sroot"),
-			color: "default",
-			timestamp: 1_700_000_000_000n,
-			meta: { type: "decoded", data: { name: "SharedRoot" } }
-		},
-		sharingRole: sharerRole(42, "sharer@filen.io"),
-		writeAccess: true,
-		...overrides
-	}
-}
-
-function mockSharedFile(overrides: Partial<SharedFile> = {}): SharedFile {
-	return {
-		uuid: testUuid("sfile"),
-		size: 2_048n,
-		region: "de-1",
-		bucket: "filen-1",
-		chunks: 2n,
-		timestamp: 1_700_000_000_000n,
-		meta: {
-			type: "decoded",
-			data: { name: "shared.pdf", mime: "application/pdf", modified: 1_700_000_000_000n, size: 2_048n, key: "k", version: 2 }
-		},
-		sharingRole: sharerRole(7, "receiver@filen.io"),
-		canMakeThumbnail: false,
-		sharedTag: true,
-		...overrides
-	}
 }
 
 // Returns the raw wasm fixture ALONGSIDE the narrowed item — unshareItems' whole point is that it

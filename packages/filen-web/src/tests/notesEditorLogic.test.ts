@@ -1,5 +1,4 @@
 import { describe, expect, it, vi } from "vitest"
-import type { Note, NoteParticipant } from "@filen/sdk-rs"
 import type { InflightEntry } from "@/features/notes/store/useNotesInflight"
 import {
 	MAX_NOTE_SIZE,
@@ -14,38 +13,7 @@ import {
 	reducePersistFailureNotice
 } from "@/features/notes/hooks/useNoteEditor.logic"
 import { hashNoteContent } from "@filen/shared"
-
-// Same mockNote shape as notesSort.test.ts / notesReaderLogic.test.ts.
-function mockNote(overrides: Partial<Note> = {}): Note {
-	return {
-		uuid: "00000000-0000-0000-0000-000000000000",
-		ownerId: 1n,
-		lastEditorId: 1n,
-		favorite: false,
-		pinned: false,
-		tags: [],
-		noteType: "text",
-		title: "title",
-		preview: "preview",
-		trash: false,
-		archive: false,
-		createdTimestamp: 0n,
-		editedTimestamp: 0n,
-		participants: [],
-		...overrides
-	}
-}
-
-function participant(userId: bigint, permissionsWrite: boolean): NoteParticipant {
-	return {
-		userId,
-		isOwner: false,
-		email: "participant@example.com",
-		nickName: "participant",
-		permissionsWrite,
-		addedTimestamp: 0n
-	}
-}
+import { mockNote, mockNoteParticipant } from "@/tests/fixtures/notes"
 
 function entry(content: string, timestamp: number): InflightEntry {
 	return { content, timestamp, note: mockNote() }
@@ -175,13 +143,13 @@ describe("deriveEditorReadOnly", () => {
 	})
 
 	it("is read-only for a shared note whose participant row carries no write permission", () => {
-		const note = mockNote({ ownerId: 1n, participants: [participant(7n, false)] })
+		const note = mockNote({ ownerId: 1n, participants: [mockNoteParticipant({ userId: 7n, permissionsWrite: false })] })
 
 		expect(deriveEditorReadOnly(note, 7n)).toBe(true)
 	})
 
 	it("is writable for a shared note whose participant row carries write permission", () => {
-		const note = mockNote({ ownerId: 1n, participants: [participant(7n, true)] })
+		const note = mockNote({ ownerId: 1n, participants: [mockNoteParticipant({ userId: 7n, permissionsWrite: true })] })
 
 		expect(deriveEditorReadOnly(note, 7n)).toBe(false)
 	})

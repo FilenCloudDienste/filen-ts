@@ -39,10 +39,7 @@ import {
 import { socketAuthenticated } from "@/lib/sdk/socketSession"
 import { useTransfersStore, type Transfer } from "@/features/transfers/store/useTransfersStore"
 import { subscribePreviewReconcile, type PreviewReconcileEvent } from "@/features/preview/lib/previewReconcile"
-
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import { testUuid } from "@/tests/support/uuid"
 
 const ROOT_UUID = testUuid("root")
 const PARENT_A = testUuid("parent-a")

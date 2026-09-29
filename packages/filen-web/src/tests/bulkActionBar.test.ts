@@ -11,14 +11,12 @@ import {
 	RotateCcwIcon,
 	DownloadIcon
 } from "lucide-react"
-import type { Dir, File, UuidStr } from "@filen/sdk-rs"
+import type { Dir, File } from "@filen/sdk-rs"
 import { type DriveSelectionFlags } from "@/features/drive/lib/selectionFlags"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 
-// bulkActionBar.logic.ts's imports reach the worker client and query client — unresolvable/unwanted
-// under node vitest.
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
+// bulkActionBar.logic.ts's imports reach the query client — unwanted under node vitest.
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 vi.mock("sonner", () => ({ toast: { success: toastSuccess, error: toastError } }))
 
@@ -62,6 +60,7 @@ import {
 	runBulkFavorite,
 	type BulkActionDescriptor
 } from "@/features/drive/components/bulkActionBar.logic"
+import { testUuid } from "@/tests/support/uuid"
 
 beforeEach(() => {
 	vi.clearAllMocks()
@@ -70,10 +69,6 @@ beforeEach(() => {
 })
 
 // Local fixtures mirror itemMenu.test.ts's own per-file convention.
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
-
 function mockFile(overrides: Partial<File> = {}): File {
 	return {
 		uuid: "33333333-3333-3333-3333-333333333333",

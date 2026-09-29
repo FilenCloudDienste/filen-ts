@@ -3,7 +3,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { render, cleanup, fireEvent, screen, act } from "@testing-library/react"
 import { createElement } from "react"
-import type { Dir, File, UuidStr } from "@filen/sdk-rs"
+import type { Dir, File } from "@filen/sdk-rs"
 import "@/lib/i18n"
 
 // The row/tile pull the SDK surface in transitively (item menu -> actions); a Vite `?worker` import is
@@ -14,7 +14,6 @@ vi.mock("@/lib/keymap/kbd", async () => {
 	const { createElement: element } = await import("react")
 	return { Kbd: ({ action }: { action: string }) => element("span", null, ` ${action}`) }
 })
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
 // The Move submenu's tree levels read through this hook once opened; left loading here, since the tree
 // itself is covered by directoryTreeSubmenu.test.ts.
 vi.mock("@/features/drive/queries/drive", async importOriginal => {
@@ -41,10 +40,7 @@ import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import { useDriveClipboardStore } from "@/features/drive/store/useDriveClipboardStore"
 import { DriveRow, type DriveRowProps } from "@/features/drive/components/driveRow"
 import { DriveTile } from "@/features/drive/components/driveTile"
-
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import { testUuid } from "@/tests/support/uuid"
 
 function dirItem(label: string): DriveItem {
 	const dir: Dir = {

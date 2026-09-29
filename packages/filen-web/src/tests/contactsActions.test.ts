@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
-import type { BlockedContact, Chat, Contact, ContactRequestIn, ContactRequestOut, UuidStr } from "@filen/sdk-rs"
+import type { BlockedContact, Chat, Contact, ContactRequestIn, ContactRequestOut } from "@filen/sdk-rs"
 import type { ErrorDTO } from "@/lib/sdk/errors"
 
 // The real sdk client module imports a Vite `?worker`, unresolvable under node vitest — mock it down
@@ -66,60 +66,13 @@ import {
 	unblockContact as unblockContactAction
 } from "@/features/contacts/lib/actions"
 import { runBulkOutcomes } from "@/lib/actions/bulk"
+import { mockBlockedContact, mockContact, mockIncoming, mockOutgoing } from "@/tests/support/contactFixtures"
+import { testUuid } from "@/tests/support/uuid"
 
 beforeEach(() => {
 	vi.clearAllMocks()
 	testQueryClient.clear()
 })
-
-// UuidStr is a template-literal brand requiring at least 3 dashes — pad a short readable test label
-// into a shape that satisfies it, mirroring drive/actions.test.ts's own fixture.
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
-
-function mockContact(overrides: Partial<Contact> = {}): Contact {
-	return {
-		uuid: testUuid("alice"),
-		userId: 1n,
-		email: "alice@filen.io",
-		nickName: "Alice",
-		lastActive: 1_700_000_000_000n,
-		timestamp: 1_700_000_000_000n,
-		publicKey: "alice-public-key",
-		...overrides
-	}
-}
-
-function mockBlockedContact(overrides: Partial<BlockedContact> = {}): BlockedContact {
-	return {
-		uuid: testUuid("bob-blocked"),
-		userId: 2n,
-		email: "bob@filen.io",
-		nickName: "Bob",
-		timestamp: 1_700_000_000_000n,
-		...overrides
-	}
-}
-
-function mockIncoming(overrides: Partial<ContactRequestIn> = {}): ContactRequestIn {
-	return {
-		uuid: testUuid("carol-in"),
-		userId: 3n,
-		email: "carol@filen.io",
-		nickName: "Carol",
-		...overrides
-	}
-}
-
-function mockOutgoing(overrides: Partial<ContactRequestOut> = {}): ContactRequestOut {
-	return {
-		uuid: testUuid("dave-out"),
-		email: "dave@filen.io",
-		nickName: "Dave",
-		...overrides
-	}
-}
 
 function mockChat(overrides: Partial<Chat> = {}): Chat {
 	return {

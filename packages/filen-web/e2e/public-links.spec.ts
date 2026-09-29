@@ -1,7 +1,8 @@
 import { test, expect } from "./fixtures"
+import { BOOT_SETTLE_TIMEOUT_MS, SIGN_IN_HEADING } from "./helpers/listing"
 
-// The unauthenticated public-link viewer. These specs run WITHOUT an injected session (plain `test`,
-// no `injectedSession` fixture) — a logged-OUT browser context — which is the whole point: the /f/
+// The unauthenticated public-link viewer. These specs run WITHOUT an injected session
+// (`injectSession: false`) — a logged-OUT browser context — which is the whole point: the /f/
 // and /d/ routes must boot and render with no session at all, gated only by the root BootGate, never
 // bounced to /login and never collapsing into the boot-error screen. No live premium link exists to
 // test a SUCCESS path (link creation is premium; the e2e account is free-tier), so success is out of
@@ -15,6 +16,8 @@ const RANDOM_UUID = "deadbeef-0000-4000-8000-0123456789ab"
 const HEX_KEY = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
 test.describe("public links (unauthenticated)", () => {
+	test.use({ injectSession: false })
+
 	test("a file link renders the viewer's own invalid state, not a login redirect or boot error", async ({ page }) => {
 		await page.goto(`/f/${RANDOM_UUID}#${HEX_KEY}`)
 
@@ -22,17 +25,17 @@ test.describe("public links (unauthenticated)", () => {
 		// boot-error screen never shows, and the sign-in surface is nowhere on the page.
 		await expect(page).toHaveURL(new RegExp(`/f/${RANDOM_UUID}`))
 		await expect(page.getByText("Filen could not start")).toHaveCount(0)
-		await expect(page.getByText("Sign in to Filen")).toHaveCount(0)
+		await expect(page.getByText(SIGN_IN_HEADING)).toHaveCount(0)
 
 		// The route's OWN surface renders — the viewer, not some other page. It either sits in its
 		// loading state or has already reached its shared invalid surface.
 		await expect(page.getByRole("status", { name: "Loading" }).or(page.getByText("This link is unavailable"))).toBeVisible({
-			timeout: 30_000
+			timeout: BOOT_SETTLE_TIMEOUT_MS
 		})
 
 		// The nonexistent link lands on the shared invalid surface — proving the ANONYMOUS worker path end
 		// to end (no session, real round trip, graceful failure).
-		await expect(page.getByText("This link is unavailable")).toBeVisible({ timeout: 30_000 })
+		await expect(page.getByText("This link is unavailable")).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
 		await expect(page.getByRole("link", { name: "Back to Filen" })).toBeVisible()
 	})
 
@@ -41,13 +44,13 @@ test.describe("public links (unauthenticated)", () => {
 
 		await expect(page).toHaveURL(new RegExp(`/d/${RANDOM_UUID}`))
 		await expect(page.getByText("Filen could not start")).toHaveCount(0)
-		await expect(page.getByText("Sign in to Filen")).toHaveCount(0)
+		await expect(page.getByText(SIGN_IN_HEADING)).toHaveCount(0)
 
 		await expect(page.getByRole("status", { name: "Loading" }).or(page.getByText("This link is unavailable"))).toBeVisible({
-			timeout: 30_000
+			timeout: BOOT_SETTLE_TIMEOUT_MS
 		})
 
-		await expect(page.getByText("This link is unavailable")).toBeVisible({ timeout: 30_000 })
+		await expect(page.getByText("This link is unavailable")).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
 	})
 
 	test("renders the marketing-light chrome for a logged-out visitor — no login redirect", async ({ page }) => {
@@ -58,7 +61,7 @@ test.describe("public links (unauthenticated)", () => {
 		await expect(page).toHaveURL(new RegExp(`/f/${RANDOM_UUID}`))
 
 		const brand = page.getByRole("link", { name: "Filen home" })
-		await expect(brand).toBeVisible({ timeout: 30_000 })
+		await expect(brand).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
 		await expect(brand).toHaveAttribute("href", "https://filen.io")
 
 		// One quiet sign-in link plus one tasteful "Get Filen" CTA — the old-web upsell sidebar is dropped.
@@ -80,12 +83,12 @@ test.describe("public links (unauthenticated)", () => {
 		await page.setViewportSize({ width: 360, height: 780 })
 		await page.goto(`/f/${RANDOM_UUID}#${HEX_KEY}`)
 
-		await expect(page.getByRole("link", { name: "Get Filen" })).toBeVisible({ timeout: 30_000 })
+		await expect(page.getByRole("link", { name: "Get Filen" })).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
 
 		// The chrome above renders the moment the route does (see the chrome test's own note), so gating
 		// on it alone would measure the TRANSIENT loading state and let an invalid card that
 		// overflows 360px pass.
-		await expect(page.getByText("This link is unavailable")).toBeVisible({ timeout: 30_000 })
+		await expect(page.getByText("This link is unavailable")).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
 
 		// Polled, not read once: the invalid card's own mount is what settles the layout, and a read taken
 		// on the frame it commits can catch the document mid-reflow and report an overflow that is gone a
@@ -103,7 +106,7 @@ test.describe("public links (unauthenticated)", () => {
 
 		// The rewrite runs client-side once the app boots, so this closes on a cold boot, not on a server
 		// redirect — the same budget every other first-paint wait in this file carries.
-		await expect(page).toHaveURL(new RegExp(`/d/${RANDOM_UUID}#${HEX_KEY}`), { timeout: 30_000 })
+		await expect(page).toHaveURL(new RegExp(`/d/${RANDOM_UUID}#${HEX_KEY}`), { timeout: BOOT_SETTLE_TIMEOUT_MS })
 	})
 
 	test("a link route carries a generic title and a noindex robots meta", async ({ page }) => {
@@ -112,7 +115,7 @@ test.describe("public links (unauthenticated)", () => {
 		// the route to mount, not the SDK round trip, so no engine gate is required.
 		await page.goto(`/f/${RANDOM_UUID}#${HEX_KEY}`)
 
-		await expect(page).toHaveTitle("Shared file · Filen", { timeout: 30_000 })
+		await expect(page).toHaveTitle("Shared file · Filen", { timeout: BOOT_SETTLE_TIMEOUT_MS })
 		await expect(page.locator('meta[name="robots"]')).toHaveAttribute("content", /noindex/)
 	})
 })

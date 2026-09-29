@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import type { Dir, File, UuidStr } from "@filen/sdk-rs"
+import type { Dir, File } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import {
 	assembleDragPayload,
@@ -9,12 +9,7 @@ import {
 	isValidCopyTarget,
 	isValidMoveTarget
 } from "@/features/drive/lib/dnd.logic"
-
-// UuidStr is a template-literal brand requiring at least 3 dashes (mirrors moveTargetDialog.test.ts) —
-// a padded label doubles as both an item's `data.uuid` and a matching ancestry entry.
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import { testUuid } from "@/tests/support/uuid"
 
 function mockDir(overrides: Partial<Dir> = {}): Dir {
 	return {

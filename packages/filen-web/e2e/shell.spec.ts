@@ -1,46 +1,27 @@
 import { test, expect } from "./fixtures"
-import { BOOT_SETTLE_TIMEOUT_MS } from "./helpers/listing"
+import { CSP_VIOLATION_PATTERN, trackConsoleErrors } from "./helpers/csp"
+import { BOOT_SETTLE_TIMEOUT_MS, bootToSignIn } from "./helpers/listing"
 
 // SDK-free: asserts the shell design system + typed i18n catalog render on the pre-auth sign-in
 // surface under the hardened preview CSP, with no CSP violations reaching the console. The sign-in and
 // 404 pages render only once the SDK has booted, so each test's first wait carries the boot budget.
 test.describe("shell", { tag: "@no-sdk" }, () => {
+	test.use({ injectSession: false })
+
 	test("the sign-in shell renders localized content with no CSP violations", async ({ page }) => {
-		const consoleErrors: string[] = []
-		const cspViolations: string[] = []
+		const consoleErrors = trackConsoleErrors(page)
 
-		page.on("console", msg => {
-			if (msg.type() !== "error") {
-				return
-			}
-
-			const text = msg.text()
-
-			// arktype detects CSP by attempting `new Function` (@ark/util envHasCsp); under the app's
-			// no-unsafe-eval CSP that probe is blocked — the browser logs a violation (firefox surfaces it
-			// as a console error, chromium does not) and arktype falls back to interpreted validation. This
-			// is arktype's intended CSP support, benign and expected, so it is not a shell failure.
-			if (/unsafe-eval/i.test(text)) {
-				return
-			}
-
-			consoleErrors.push(text)
-
-			if (/content security policy|refused to/i.test(text)) {
-				cspViolations.push(text)
-			}
-		})
-
-		await page.goto("/")
+		await bootToSignIn(page)
 
 		// Catalog strings resolve (no raw keys) across the sign-in card — the real login form (not the
 		// pre-auth placeholder this test originally shipped against).
-		await expect(page.getByText("Sign in to Filen")).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
 		await expect(page.getByText("Your end-to-end encrypted drive, notes and chats.")).toBeVisible()
 		await expect(page.getByText("Email", { exact: true })).toBeVisible()
 		await expect(page.getByText("Password", { exact: true })).toBeVisible()
 		await expect(page.getByRole("button", { name: "Sign in", exact: true })).toBeVisible()
 		await expect(page.getByRole("button", { name: "Forgot password?", exact: true })).toBeVisible()
+
+		const cspViolations = consoleErrors.filter(message => CSP_VIOLATION_PATTERN.test(message))
 
 		expect(cspViolations, cspViolations.join("\n")).toEqual([])
 		expect(consoleErrors, consoleErrors.join("\n")).toEqual([])
@@ -49,9 +30,7 @@ test.describe("shell", { tag: "@no-sdk" }, () => {
 	test("the route's own title beats index.html's static one", async ({ page }) => {
 		// The browser is the only real proof that React's hoisted <title> is inserted AHEAD of the static
 		// fallback in index.html — a unit test cannot make that claim.
-		await page.goto("/")
-
-		await expect(page.getByText("Sign in to Filen")).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
+		await bootToSignIn(page)
 		await expect(page).toHaveTitle("Sign in · Filen")
 	})
 

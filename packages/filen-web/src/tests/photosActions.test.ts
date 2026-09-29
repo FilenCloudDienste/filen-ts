@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
-import type { File, UuidStr } from "@filen/sdk-rs"
+import type { File } from "@filen/sdk-rs"
 
 // Mirrors driveActions.test.ts's own mock boundary — only the ops these wrappers (via drive's own
 // action helpers) actually call.
@@ -19,10 +19,7 @@ import { toggleFavorite, trashItems } from "@/features/drive/lib/actions"
 import { photosListingQueryKey, type PhotosListing } from "@/features/photos/queries/photos"
 import { setFavoritedPhotos, trashPhotos, renamePhotoItem, patchPhoto } from "@/features/photos/lib/actions"
 import { type PhotoItem } from "@/features/photos/lib/captureSort"
-
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import { testUuid } from "@/tests/support/uuid"
 
 const ROOT_UUID = "root-uuid"
 

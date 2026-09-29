@@ -1,7 +1,7 @@
 import type { Page } from "@playwright/test"
 import { test, expect, readHarvestedSession } from "./fixtures"
 import { waitForE2eHooks } from "./helpers/e2eHooks"
-import { BOOT_SETTLE_TIMEOUT_MS, bootTo, dismissStartupReminders } from "./helpers/listing"
+import { BOOT_SETTLE_TIMEOUT_MS, bootTo, bootToSignIn, reloadToShell, SIGN_IN_HEADING, toasts } from "./helpers/listing"
 import { SESSION_SLOT } from "@/e2e-hooks/sessionSlot"
 
 // Used with readHarvestedSession instead of the injectedSession fixture: that fixture's addInitScript
@@ -46,6 +46,7 @@ test.describe("auth", () => {
 	// run and bust the budget. Same guard auth.setup.ts uses for its one real success.
 	test.describe("real login attempt", () => {
 		test.describe.configure({ retries: 0 })
+		test.use({ injectSession: false })
 
 		test("a wrong password surfaces the label-first error through the minified worker", async ({ page, browserName }) => {
 			// The run's ONE deliberate failed login (auth-setup's one success + this one failure, exactly
@@ -55,8 +56,7 @@ test.describe("auth", () => {
 			test.skip(browserName !== "chromium", "chromium-only: a second browser project would double the failed-login budget")
 			test.skip(email === "", "no e2e credentials configured")
 
-			await page.goto("/login")
-			await expect(page.getByText("Sign in to Filen")).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
+			await bootToSignIn(page, "/login")
 
 			await page.getByLabel("Email", { exact: true }).fill(email)
 			// Deliberately NOT the real password — this test never reads FILEN_WEB_E2E_TEST_PASSWORD, only
@@ -77,12 +77,11 @@ test.describe("auth", () => {
 				// is a rate-limit error whose toast reads nothing like the string above. Unattached, that
 				// failure reports only "expected 'Wrong email or password…' to be visible" and points the
 				// next reader at the error catalog instead of at the rate limit.
-				const toasts = await page
-					.locator("[data-sonner-toast]")
+				const toastTexts = await toasts(page)
 					.allInnerTexts()
 					.catch(() => [])
 
-				throw new Error(`the wrong-password toast never rendered; toasts on the page: ${JSON.stringify(toasts)}`, { cause })
+				throw new Error(`the wrong-password toast never rendered; toasts on the page: ${JSON.stringify(toastTexts)}`, { cause })
 			}
 
 			// A rejected attempt never navigates — still on the sign-in form.
@@ -90,9 +89,7 @@ test.describe("auth", () => {
 		})
 	})
 
-	test("an authed session survives a reload without re-authenticating against the SDK API", async ({ page, injectedSession }) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
+	test("an authed session survives a reload without re-authenticating against the SDK API", async ({ page }) => {
 		await bootTo(page, "/")
 
 		const sdkHostRequests: string[] = []
@@ -102,11 +99,7 @@ test.describe("auth", () => {
 			}
 		})
 
-		// THE RULE (helpers/listing.ts): the blocking startup reminder renders the rest of the shell
-		// inert, so it is dismissed before any role-based landmark assertion — the reload re-arms it.
-		await page.reload()
-		await dismissStartupReminders(page)
-		await expect(page.getByRole("navigation", { name: "Filen" })).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
+		await reloadToShell(page)
 
 		// The authed shell's own account query (IconRail's AccountMenu + the export-keys reminder) fires
 		// its normal reads (verified live: user/info, user/settings, user/account) the instant it mounts,
@@ -129,66 +122,71 @@ test.describe("auth", () => {
 		expect(loginRequests, sdkHostRequests.join("\n")).toEqual([])
 	})
 
-	test("logout signs out, wipes the local session, and a second tab converges to sign-in", async ({ page, context }) => {
-		const session = readHarvestedSession()
+	// Seeds itself once per page (seedOncePerPage), so the fixture's re-seeding init script stays off.
+	test.describe("logout", () => {
+		test.use({ injectSession: false })
 
-		test.skip(session === null, "no injected session (e2e credentials not configured)")
+		test("logout signs out, wipes the local session, and a second tab converges to sign-in", async ({ page, context }) => {
+			const session = readHarvestedSession()
 
-		if (session === null) {
-			// Unreachable once the skip above fires — Playwright aborts the test there — but tsc has no
-			// way to know that, so this is what actually narrows the type for everything below.
-			return
-		}
+			test.skip(session === null, "no injected session (e2e credentials not configured)")
 
-		await seedOncePerPage(page, session)
-		await bootTo(page, "/")
+			if (session === null) {
+				// Unreachable once the skip above fires — Playwright aborts the test there — but tsc has no
+				// way to know that, so this is what actually narrows the type for everything below.
+				return
+			}
 
-		// A second, already-signed-in tab opened BEFORE logout — the realistic multi-tab scenario the
-		// auth broadcast channel exists to keep coherent. The once-per-page marker lives in localStorage,
-		// which is shared across the context, so this second call is a no-op: `second` renders authed
-		// because the first seed already persisted the session into the shared kv. What matters is that
-		// neither page re-seeds on its post-logout reload, so both converge onto the wiped kv state.
-		const second = await context.newPage()
+			await seedOncePerPage(page, session)
+			await bootTo(page, "/")
 
-		await seedOncePerPage(second, session)
-		await bootTo(second, "/")
+			// A second, already-signed-in tab opened BEFORE logout — the realistic multi-tab scenario the
+			// auth broadcast channel exists to keep coherent. The once-per-page marker lives in localStorage,
+			// which is shared across the context, so this second call is a no-op: `second` renders authed
+			// because the first seed already persisted the session into the shared kv. What matters is that
+			// neither page re-seeds on its post-logout reload, so both converge onto the wiped kv state.
+			const second = await context.newPage()
 
-		// Each surface asserted before it is clicked: the three steps are one chained interaction, and
-		// a click issued against a menu that has not opened (or a confirm that has not mounted) fails
-		// as an actionability timeout on the NEXT step, naming a locator rather than the step that
-		// actually did not happen.
-		const accountMenu = page.getByRole("menu")
-		const signOutItem = accountMenu.getByRole("menuitem", { name: "Sign out", exact: true })
-		// the confirm dialog's own action button
-		const signOutConfirm = page.getByRole("alertdialog").getByRole("button", { name: "Sign out", exact: true })
+			await seedOncePerPage(second, session)
+			await bootTo(second, "/")
 
-		await page.getByRole("button", { name: "Account", exact: true }).click()
-		await expect(signOutItem).toBeVisible()
-		await signOutItem.click()
-		await expect(signOutConfirm).toBeVisible()
-		await signOutConfirm.click()
+			// Each surface asserted before it is clicked: the three steps are one chained interaction, and
+			// a click issued against a menu that has not opened (or a confirm that has not mounted) fails
+			// as an actionability timeout on the NEXT step, naming a locator rather than the step that
+			// actually did not happen.
+			const accountMenu = page.getByRole("menu")
+			const signOutItem = accountMenu.getByRole("menuitem", { name: "Sign out", exact: true })
+			// the confirm dialog's own action button
+			const signOutConfirm = page.getByRole("alertdialog").getByRole("button", { name: "Sign out", exact: true })
 
-		// Everything between the click and this render is one budget: runLogout's eight phases
-		// (cancel-queries, clear-query-cache, sdk-logout, clear-session, kv-clear, wipe-service-worker,
-		// broadcast, reload — sdk-logout being a live call of its own), then a complete cold boot before
-		// the sign-in form exists at all.
-		await expect(page.getByText("Sign in to Filen")).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
+			await page.getByRole("button", { name: "Account", exact: true }).click()
+			await expect(signOutItem).toBeVisible()
+			await signOutItem.click()
+			await expect(signOutConfirm).toBeVisible()
+			await signOutConfirm.click()
 
-		// The logout reload is a cold boot, and the hooks arrive on their own fire-and-forget import —
-		// a rendered sign-in form is no proof they are back.
-		await waitForE2eHooks(page)
+			// Everything between the click and this render is one budget: runLogout's eight phases
+			// (cancel-queries, clear-query-cache, sdk-logout, clear-session, kv-clear, wipe-service-worker,
+			// broadcast, reload — sdk-logout being a live call of its own), then a complete cold boot before
+			// the sign-in form exists at all.
+			await expect(page.getByText(SIGN_IN_HEADING)).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
 
-		// kvHas, not kvGet: the session key holds an OBJECT (StringifiedClient), not a plain string, so
-		// kvGet's stringSchema would report "null" whether the row is genuinely gone or merely the wrong
-		// shape for that schema — kvHas checks existence directly, independent of shape.
-		const sessionStillPresent = await page.evaluate(() => window.__filenE2E.kvHas("sdk.session.v1"))
-		expect(sessionStillPresent).toBe(false)
+			// The logout reload is a cold boot, and the hooks arrive on their own fire-and-forget import —
+			// a rendered sign-in form is no proof they are back.
+			await waitForE2eHooks(page)
 
-		// The second tab converges by itself: the logout broadcast reloads every other tab (__root.tsx),
-		// and that reload re-reads the now-empty shared kv (seedOncePerPage's marker means it does NOT
-		// re-seed). Reloading it here as well raced that reload, which Firefox aborts.
-		await expect(second.getByText("Sign in to Filen")).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
+			// kvHas, not kvGet: the session key holds an OBJECT (StringifiedClient), not a plain string, so
+			// kvGet's stringSchema would report "null" whether the row is genuinely gone or merely the wrong
+			// shape for that schema — kvHas checks existence directly, independent of shape.
+			const sessionStillPresent = await page.evaluate(() => window.__filenE2E.kvHas("sdk.session.v1"))
+			expect(sessionStillPresent).toBe(false)
 
-		await second.close()
+			// The second tab converges by itself: the logout broadcast reloads every other tab (__root.tsx),
+			// and that reload re-reads the now-empty shared kv (seedOncePerPage's marker means it does NOT
+			// re-seed). Reloading it here as well raced that reload, which Firefox aborts.
+			await expect(second.getByText(SIGN_IN_HEADING)).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
+
+			await second.close()
+		})
 	})
 })

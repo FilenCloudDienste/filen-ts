@@ -1,22 +1,18 @@
-import type { Page } from "@playwright/test"
 import { test, expect } from "./fixtures"
 import {
-	waitForListingSettled,
 	bootTo,
 	clickSidebarLink,
-	trashScratchDirectory,
-	descendInto,
 	createDirectoryViaDialog,
+	descendInto,
+	directoryListbox,
 	enterScratchDirectory,
-	LIVE_WRITE_TIMEOUT_MS
+	expectBreadcrumbAt,
+	trashScratchDirectory,
+	uploadFiles,
+	waitForListingSettled
 } from "./helpers/listing"
 import { resolveModKey } from "./helpers/modkey"
 import { trackCspViolations } from "./helpers/csp"
-
-async function createDirectory(page: Page, listbox: ReturnType<Page["getByRole"]>, name: string): Promise<void> {
-	await createDirectoryViaDialog(page, name)
-	await expect(listbox.getByRole("option", { name })).toBeVisible()
-}
 
 // The one live proof the whole subtree search feature works end to end: a real
 // configureCache/createSearch/getRange round trip against the live cache-search engine, real
@@ -26,11 +22,8 @@ async function createDirectory(page: Page, listbox: ReturnType<Page["getByRole"]
 // the SAME scratch tree, and splitting it would multiply the number of cold convergence waits (each
 // several seconds) without adding coverage.
 test("subtree search finds a nested file with its parent path, mod+f focuses it, hits navigate/preview per type, and Escape/no-results both resolve", async ({
-	page,
-	injectedSession
+	page
 }) => {
-	expect(injectedSession.length).toBeGreaterThan(0)
-
 	const runId = crypto.randomUUID()
 	const scratchName = `e2e-search-${runId}`
 	// Embeds the run's own suffix too (not a plain "nested") so the SAME search query surfaces this as
@@ -55,17 +48,11 @@ test("subtree search finds a nested file with its parent path, mod+f focuses it,
 		// also sets the generous viewport that defeats virtualization for the shared account's root, where
 		// a specific named row could otherwise never mount.
 		const { listbox: scratchListbox } = await enterScratchDirectory(page, scratchName)
-		await createDirectory(page, scratchListbox, nestedName)
+		await createDirectoryViaDialog(page, nestedName, scratchListbox)
 		await descendInto(page, scratchListbox, nestedName)
 
 		const { listbox: nestedListbox } = await waitForListingSettled(page)
-		await page
-			.getByRole("main")
-			.locator('input[type="file"]')
-			.first()
-			.setInputFiles({ name: targetName, mimeType: "text/plain", buffer: Buffer.from(targetContent, "utf8") })
-		// The write budget: this is a real upload settling on the account-wide lease, not a UI beat.
-		await expect(nestedListbox.getByRole("option", { name: targetName })).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
+		await uploadFiles(page, [{ name: targetName, mimeType: "text/plain", buffer: Buffer.from(targetContent, "utf8") }], nestedListbox)
 
 		// Back up to the scratch directory's own top (not the account root) via the sidebar link then a
 		// fresh descent — the search below is scoped to THIS run's own small subtree rather than the
@@ -94,7 +81,7 @@ test("subtree search finds a nested file with its parent path, mod+f focuses it,
 		// 4.9-6.6s against a scratch directory this size in this same account — a generous ceiling covers
 		// slower runs without chasing the unbounded, whole-account case. Results are push-fed live, so
 		// this asserts the eventual settled state rather than any particular intermediate status text.
-		const listbox = page.getByRole("listbox", { name: "Directory contents" })
+		const listbox = directoryListbox(page)
 		const targetHit = listbox.getByRole("option", { name: targetName })
 		await expect(targetHit).toBeVisible({ timeout: 40_000 })
 		await expect(targetHit).toContainText(nestedName)
@@ -132,7 +119,7 @@ test("subtree search finds a nested file with its parent path, mod+f focuses it,
 		// typed from) and leaves search entirely — old-web parity.
 		await dirHit.dblclick()
 		await expect(page).toHaveURL(/\/drive\/[^/]+$/)
-		await expect(page.getByRole("navigation", { name: "Breadcrumb" }).getByText(nestedName, { exact: true })).toBeVisible()
+		await expectBreadcrumbAt(page, nestedName)
 		await expect(searchInput).toHaveValue("")
 
 		const { listbox: afterNavListbox } = await waitForListingSettled(page)
@@ -190,7 +177,7 @@ test("subtree search finds a nested file with its parent path, mod+f focuses it,
 		// TWO splat segments — the regression guard for the truncated-splat defect: the target is built
 		// from the SDK's full ancestor chain, never from the item's own single `parent` uuid.
 		await expect(page).toHaveURL(/\/drive\/[^/]+\/[^/]+$/)
-		await expect(page.getByRole("navigation", { name: "Breadcrumb" }).getByText(nestedName, { exact: true })).toBeVisible()
+		await expectBreadcrumbAt(page, nestedName)
 
 		const { listbox: revealedListbox } = await waitForListingSettled(page)
 		await expect(revealedListbox.getByRole("option", { name: targetName })).toHaveAttribute("aria-selected", "true")

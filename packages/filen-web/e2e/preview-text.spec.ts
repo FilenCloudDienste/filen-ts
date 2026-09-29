@@ -1,14 +1,17 @@
 import type { Page } from "@playwright/test"
 import { test, expect } from "./fixtures"
 import {
+	withScratchDirectory,
 	bootTo,
 	descendInto,
 	enterScratchDirectory,
 	trashScratchDirectory,
 	waitForListingSettled,
-	LIVE_WRITE_TIMEOUT_MS
+	LAZY_VIEWER_TIMEOUT_MS,
+	LIVE_WRITE_TIMEOUT_MS,
+	uploadFiles
 } from "./helpers/listing"
-import { enterFixtureDirectory, FIXTURE_FILES } from "./helpers/fixtures"
+import { openFixtureRows } from "./helpers/fixtures"
 import { focusEditorSurface } from "./helpers/editor"
 import { DOCX_BYTES, TEXT_BYTES } from "./helpers/fixtureBytes"
 import { trackCspViolations } from "./helpers/csp"
@@ -80,24 +83,19 @@ async function seedLeaveRouteHistory(page: Page, scratchName: string): Promise<v
 // fallback for a string-callback form of setImmediate — dead code (jszip only ever calls it with a
 // real function), but this run's own zero-CSP-violations assertion is the empirical proof that dead
 // path is never actually reached, not just an assumption from reading the source.
-test("docx preview renders document content and closes, no CSP console errors", async ({ page, injectedSession }) => {
-	expect(injectedSession.length).toBeGreaterThan(0)
-
-	const [nameDocx] = FIXTURE_FILES["preview-docx"]
-
+test("docx preview renders document content and closes, no CSP console errors", async ({ page }) => {
 	const cspViolations = trackCspViolations(page)
 
 	await bootTo(page)
 
-	const { listbox } = await enterFixtureDirectory(page, "preview-docx")
-
-	const row = listbox.getByRole("option", { name: nameDocx })
-	await expect(row).toBeVisible({ timeout: 45_000 })
+	const {
+		rows: [row]
+	} = await openFixtureRows(page, "preview-docx")
 
 	// Opens the docx-preview lazy chunk for the first time this run.
 	await row.dblclick()
 	const text = page.getByText("Hello from a tiny docx fixture.")
-	await expect(text).toBeVisible({ timeout: 60_000 })
+	await expect(text).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 
 	await page.keyboard.press("Escape")
 	await expect(text).toHaveCount(0)
@@ -112,12 +110,7 @@ test("docx preview renders document content and closes, no CSP console errors", 
 // browser BACK, the vector the guard is actually about (a sidebar click cannot be used — the overlay's
 // backdrop and popup are both `fixed inset-0 z-50`, so the sidebar link is covered and outside the
 // modal's interaction scope, and Playwright's actionability check would simply time out).
-test("text preview renders, edits, and guards unsaved edits against navigation, no CSP console errors", async ({
-	page,
-	injectedSession
-}) => {
-	expect(injectedSession.length).toBeGreaterThan(0)
-
+test("text preview renders, edits, and guards unsaved edits against navigation, no CSP console errors", async ({ page }) => {
 	const runId = crypto.randomUUID()
 	const scratchName = `e2e-preview-text-${runId}`
 	const nameTxt = `e2e-preview-text-${runId}.txt`
@@ -137,20 +130,21 @@ test("text preview renders, edits, and guards unsaved edits against navigation, 
 		// this cannot run before the scratch directory exists.
 		await seedLeaveRouteHistory(page, scratchName)
 
-		const input = page.getByRole("main").locator('input[type="file"]').first()
-		await input.setInputFiles([
-			{ name: nameTxt, mimeType: "text/plain", buffer: TEXT_BYTES },
-			// A sibling slot that mounts NO editor — what proves the discard actually resets the buffer.
-			{
-				name: nameDocx,
-				mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-				buffer: DOCX_BYTES
-			}
-		])
+		await uploadFiles(
+			page,
+			[
+				{ name: nameTxt, mimeType: "text/plain", buffer: TEXT_BYTES },
+				// A sibling slot that mounts NO editor — what proves the discard actually resets the buffer.
+				{
+					name: nameDocx,
+					mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+					buffer: DOCX_BYTES
+				}
+			],
+			listbox
+		)
 
 		const row = listbox.getByRole("option", { name: nameTxt })
-		await expect(row).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
-		await expect(listbox.getByRole("option", { name: nameDocx })).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 
 		// Opens the CodeMirror lazy chunk for the first time this run.
 		await row.dblclick()
@@ -197,7 +191,7 @@ test("text preview renders, edits, and guards unsaved edits against navigation, 
 		await stepToSibling()
 		await expect(unsavedPrompt).toBeVisible()
 		await unsavedPrompt.getByRole("button", { name: "Discard", exact: true }).click()
-		await expect(page.getByText("Hello from a tiny docx fixture.")).toBeVisible({ timeout: 60_000 })
+		await expect(page.getByText("Hello from a tiny docx fixture.")).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 		await expect(saveButton).toHaveCount(0)
 
 		await stepToSibling()
@@ -254,19 +248,14 @@ test("text preview renders, edits, and guards unsaved edits against navigation, 
 
 // Proves language routing actually engages a real @codemirror/lang-javascript chunk (not just plain
 // text): a highlighted line wraps its tokens in <span>s, a plain one (the text leg above) doesn't.
-test("code preview renders with syntax highlighting, no CSP console errors", async ({ page, injectedSession }) => {
-	expect(injectedSession.length).toBeGreaterThan(0)
-
-	const [nameCode] = FIXTURE_FILES["preview-code"]
-
+test("code preview renders with syntax highlighting, no CSP console errors", async ({ page }) => {
 	const cspViolations = trackCspViolations(page)
 
 	await bootTo(page)
 
-	const { listbox } = await enterFixtureDirectory(page, "preview-code")
-
-	const row = listbox.getByRole("option", { name: nameCode })
-	await expect(row).toBeVisible({ timeout: 45_000 })
+	const {
+		rows: [row]
+	} = await openFixtureRows(page, "preview-code")
 
 	// Opens the CodeMirror + @codemirror/lang-javascript lazy chunks for the first time this run.
 	await row.dblclick()
@@ -282,28 +271,15 @@ test("code preview renders with syntax highlighting, no CSP console errors", asy
 // Proves the react-markdown + remark-gfm rendered view (a real <h1>, a safe external link with
 // target="_blank"/rel="noreferrer"), the view-source toggle (falls back to the same CodeMirror surface
 // the text/code legs above prove), and toggling back — the whole read-only markdown surface end to end.
-test("markdown preview renders GFM content and its view-source toggle round-trips, no CSP console errors", async ({
-	page,
-	injectedSession
-}) => {
-	expect(injectedSession.length).toBeGreaterThan(0)
-
-	const runId = crypto.randomUUID()
-	const scratchName = `e2e-preview-md-${runId}`
-	const nameMd = `e2e-preview-md-${runId}.md`
-
+test("markdown preview renders GFM content and its view-source toggle round-trips, no CSP console errors", async ({ page }) => {
 	const cspViolations = trackCspViolations(page)
 
-	await bootTo(page)
+	await withScratchDirectory(page, "preview-md", async ({ listbox, runId }) => {
+		const nameMd = `e2e-preview-md-${runId}.md`
 
-	try {
-		const { listbox } = await enterScratchDirectory(page, scratchName)
-
-		const input = page.getByRole("main").locator('input[type="file"]').first()
-		await input.setInputFiles([{ name: nameMd, mimeType: "text/markdown", buffer: MARKDOWN_BYTES }])
+		await uploadFiles(page, [{ name: nameMd, mimeType: "text/markdown", buffer: MARKDOWN_BYTES }], listbox)
 
 		const row = listbox.getByRole("option", { name: nameMd })
-		await expect(row).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 
 		// Opens the react-markdown + remark-gfm lazy chunk for the first time this run.
 		await row.dblclick()
@@ -363,17 +339,13 @@ test("markdown preview renders GFM content and its view-source toggle round-trip
 		await expect(heading).toHaveCount(0)
 
 		expect(cspViolations).toEqual([])
-	} finally {
-		await trashScratchDirectory(page, scratchName)
-	}
+	})
 })
 
 // The blocked pop's DISCARD half — the main test above only proves Cancel/restore. Unlike that leg,
 // this one asserts the DESTINATION a proceed() lands on, which is exactly the entry
 // seedLeaveRouteHistory puts behind /drive.
-test("discarding after a cancelled back on the same pop still proceeds to the destination", async ({ page, injectedSession }) => {
-	expect(injectedSession.length).toBeGreaterThan(0)
-
+test("discarding after a cancelled back on the same pop still proceeds to the destination", async ({ page }) => {
 	const scratchName = `e2e-preview-text-${crypto.randomUUID()}`
 	const nameTxt = `${scratchName}.txt`
 	const unsavedPrompt = page.getByRole("alertdialog", { name: "Unsaved changes" })
@@ -385,13 +357,8 @@ test("discarding after a cancelled back on the same pop still proceeds to the de
 
 		await seedLeaveRouteHistory(page, scratchName)
 
-		await page
-			.getByRole("main")
-			.locator('input[type="file"]')
-			.first()
-			.setInputFiles([{ name: nameTxt, mimeType: "text/plain", buffer: TEXT_BYTES }])
+		await uploadFiles(page, [{ name: nameTxt, mimeType: "text/plain", buffer: TEXT_BYTES }], listbox)
 		const row = listbox.getByRole("option", { name: nameTxt })
-		await expect(row).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 		await row.dblclick()
 
 		const dialog = page.getByRole("dialog")

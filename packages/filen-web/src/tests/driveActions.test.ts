@@ -134,18 +134,13 @@ import {
 	type DirectoryItem,
 	type FileItem
 } from "@/features/drive/lib/actions"
+import { testUuid } from "@/tests/support/uuid"
 
 beforeEach(() => {
 	vi.clearAllMocks()
 	testQueryClient.clear()
 	discardListingPatches()
 })
-
-// UuidStr is a template-literal brand requiring at least 3 dashes — pad a short readable test label
-// into a shape that satisfies it, mirroring queries/drive.test.ts's own fixture.
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
 
 const ROOT_UUID = testUuid("root")
 const OTHER_PARENT_UUID = testUuid("other-parent")

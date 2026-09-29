@@ -16,7 +16,6 @@ import type { Contact, File, FileVersion } from "@filen/sdk-rs"
 import "@/lib/i18n"
 import { onlineManager } from "@tanstack/react-query"
 
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 

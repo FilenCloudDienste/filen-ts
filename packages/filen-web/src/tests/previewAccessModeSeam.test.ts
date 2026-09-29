@@ -3,6 +3,7 @@
 import { describe, expect, it, vi, beforeEach } from "vitest"
 import { createElement, type ReactNode } from "react"
 import { renderHook, waitFor } from "@testing-library/react"
+import { linkedFileItem } from "@/tests/fixtures/sdk"
 
 // Mock the worker client so importing the hook never spawns a real Worker. Both byte methods are
 // spies; the seam test asserts which one the ambient access mode selects.
@@ -17,23 +18,8 @@ vi.mock("@/lib/sdk/client", () => ({
 
 const { usePreviewBytes } = await import("@/features/preview/hooks/usePreviewBytes")
 const { PreviewAccessModeProvider } = await import("@/features/preview/lib/accessMode")
-const { linkedFileIntoDriveItem } = await import("@/features/drive/lib/item")
 
-const item = linkedFileIntoDriveItem({
-	uuid: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
-	name: { Decrypted: "notes.txt" },
-	mime: { Decrypted: "text/plain" },
-	size: 10n,
-	chunks: 1n,
-	region: "",
-	bucket: "",
-	version: 2,
-	timestamp: 0n,
-	fileKey: "k",
-	downloadable: true,
-	linkedTag: true,
-	canMakeThumbnail: false
-})
+const item = linkedFileItem("notes.txt", { uuid: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", mime: { Decrypted: "text/plain" } })
 
 describe("usePreviewBytes access-mode seam", () => {
 	beforeEach(() => {

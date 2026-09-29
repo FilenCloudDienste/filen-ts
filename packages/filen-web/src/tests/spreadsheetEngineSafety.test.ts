@@ -1,46 +1,10 @@
-import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
-import { openXlsx, writeXlsx, type RoundtripWorkbook } from "hucre/xlsx"
-import type { Cell, CellValue } from "hucre"
-import type { EditResult } from "@/features/spreadsheet/lib/edits"
-import { cellKey, type CellView } from "@/features/spreadsheet/lib/model"
-import { XlsxDocument } from "@/features/spreadsheet/lib/xlsxDocument"
-import { proven } from "@/tests/spreadsheetProven"
+import { formula, openFixture, openSheets, proven, savedWorkbook, shownCell, viewCell } from "@/tests/spreadsheetProven"
 import { rawEntries } from "@/features/spreadsheet/lib/xlsxWritable"
-
-const FIXTURES = new URL("./fixtures/spreadsheet/", import.meta.url)
-
-async function fixture(name: string): Promise<RoundtripWorkbook> {
-	return await openXlsx(readFileSync(new URL(name, FIXTURES)), { readStyles: true })
-}
-
-async function open(sheets: { name: string; rows: CellValue[][]; cells?: Map<string, Cell> }[]): Promise<XlsxDocument> {
-	return await proven(await openXlsx(await writeXlsx({ sheets }), { readStyles: true }))
-}
-
-async function saved(document: XlsxDocument): Promise<RoundtripWorkbook> {
-	return await openXlsx((await document.serialize()).bytes, { readStyles: true })
-}
-
-function formula(text: string, result: CellValue = null): Cell {
-	return { value: result, type: "formula", formula: text, formulaResult: result }
-}
-
-function view(result: EditResult, row: number, col: number, sheet = 0): CellView | null | undefined {
-	if (result.type === "cells") {
-		return result.patches.find(patch => patch.sheet === sheet)?.cells.find(([key]) => key === cellKey(row, col))?.[1]
-	}
-
-	return result.type === "sheets" ? result.sheets[sheet]?.cells.get(cellKey(row, col)) : undefined
-}
-
-function shown(document: XlsxDocument, row: number, col: number, sheet = 0): CellView | undefined {
-	return document.doc().sheets[sheet]?.cells.get(cellKey(row, col))
-}
 
 describe("XlsxDocument, what saving cannot move", () => {
 	it("locks rows around array formulas and refuses edits to part of one", async () => {
-		const document = await proven(await fixture("array.xlsx"))
+		const document = await proven(await openFixture("array.xlsx"))
 
 		expect(document.doc().sheets[0]?.structureLocked).toBe(true)
 		expect(document.apply({ type: "insert", sheet: 0, axis: "rows", at: 0, count: 1 })).toMatchObject({ reason: "structureLocked" })
@@ -61,40 +25,40 @@ describe("XlsxDocument, what saving cannot move", () => {
 	})
 
 	it("locks rows on a sheet with threaded comments, and saves it", async () => {
-		const document = await proven(await fixture("threaded.xlsx"))
+		const document = await proven(await openFixture("threaded.xlsx"))
 
 		expect(document.writable).toBe(true)
 		expect(document.doc().sheets[0]?.structureLocked).toBe(true)
 		expect(document.apply({ type: "insert", sheet: 0, axis: "rows", at: 0, count: 2 })).toMatchObject({ reason: "structureLocked" })
 
-		const reopened = await saved(document)
+		const reopened = await savedWorkbook(document)
 
 		expect(reopened.sheets[0]?.threadedComments?.[0]?.ref).toBe("B1")
 	})
 
 	it("opens view-only what saving would drop: shapes, form controls, iterative calculation", async () => {
-		expect((await proven(await fixture("shape.xlsx"))).writable).toBe(false)
-		expect((await proven(await fixture("ctrl.xlsx"))).writable).toBe(false)
-		expect((await proven(await fixture("calc.xlsx"))).writable).toBe(false)
+		expect((await proven(await openFixture("shape.xlsx"))).writable).toBe(false)
+		expect((await proven(await openFixture("ctrl.xlsx"))).writable).toBe(false)
+		expect((await proven(await openFixture("calc.xlsx"))).writable).toBe(false)
 	})
 
 	it("keeps column formats within the sheet when columns are inserted, and restores them on undo", async () => {
-		const document = await proven(await fixture("hidecols.xlsx"))
+		const document = await proven(await openFixture("hidecols.xlsx"))
 
 		document.apply({ type: "insert", sheet: 0, axis: "cols", at: 1, count: 2 })
 
-		expect((await saved(document)).sheets[0]?.columns?.length).toBeLessThanOrEqual(16_384)
+		expect((await savedWorkbook(document)).sheets[0]?.columns?.length).toBeLessThanOrEqual(16_384)
 
 		document.undo()
 
-		const restored = await saved(document)
+		const restored = await savedWorkbook(document)
 
 		expect(restored.sheets[0]?.columns?.length).toBe(16_384)
 		expect(restored.sheets[0]?.columns?.[16_383]?.hidden).toBe(true)
 	})
 
 	it("refuses to rename a table column by editing its header, and allows the rest", async () => {
-		const document = await proven(await fixture("table.xlsx"))
+		const document = await proven(await openFixture("table.xlsx"))
 
 		expect(document.apply({ type: "setCells", sheet: 0, cells: [{ row: 0, col: 1, input: "Quantity" }] })).toMatchObject({
 			reason: "tableHeader"
@@ -110,23 +74,25 @@ describe("XlsxDocument, what saving cannot move", () => {
 describe("XlsxDocument, LibreOffice files", () => {
 	it("saves a LibreOffice workbook, adding the theme it lacks and dropping its empty custom properties", async () => {
 		for (const name of ["lo-plain.xlsx", "lo-array.xlsx"]) {
-			const document = await proven(await fixture(name))
+			const document = await proven(await openFixture(name))
 
 			expect(document.writable).toBe(true)
 
 			document.apply({ type: "setCells", sheet: 0, cells: [{ row: 2, col: 1, input: "400" }] })
 
-			const raw = rawEntries(await saved(document))
+			const raw = rawEntries(await savedWorkbook(document))
 
 			expect(raw?.has("xl/theme/theme1.xml")).toBe(true)
 			expect(raw?.has("docProps/custom.xml")).toBe(false)
 		}
 
-		expect(shown(await proven(await saved(await proven(await fixture("lo-plain.xlsx")))), 3, 1)).toMatchObject({ text: "1500" })
+		expect(shownCell(await proven(await savedWorkbook(await proven(await openFixture("lo-plain.xlsx")))), 3, 1)).toMatchObject({
+			text: "1500"
+		})
 	})
 
 	it("opens view-only a workbook whose custom properties hold something", async () => {
-		const workbook = await fixture("lo-array.xlsx")
+		const workbook = await openFixture("lo-array.xlsx")
 		const raw = rawEntries(workbook)
 
 		raw?.set(
@@ -142,7 +108,7 @@ describe("XlsxDocument, LibreOffice files", () => {
 
 describe("XlsxDocument engine edges", () => {
 	it("reads sheet names the engine only takes quoted", async () => {
-		const document = await open([
+		const document = await openSheets([
 			{ name: "数据", rows: [[5]] },
 			{ name: "Q1.2024", rows: [[1]] },
 			{
@@ -155,16 +121,16 @@ describe("XlsxDocument engine edges", () => {
 			}
 		])
 
-		expect(view(document.apply({ type: "setCells", sheet: 0, cells: [{ row: 0, col: 0, input: "21" }] }), 0, 0, 2)).toMatchObject({
+		expect(viewCell(document.apply({ type: "setCells", sheet: 0, cells: [{ row: 0, col: 0, input: "21" }] }), 0, 0, 2)).toMatchObject({
 			text: "42"
 		})
-		expect(view(document.apply({ type: "setCells", sheet: 1, cells: [{ row: 0, col: 0, input: "3" }] }), 0, 1, 2)).toMatchObject({
+		expect(viewCell(document.apply({ type: "setCells", sheet: 1, cells: [{ row: 0, col: 0, input: "3" }] }), 0, 1, 2)).toMatchObject({
 			text: "3"
 		})
 	})
 
 	it("keeps the results a circular reference stored", async () => {
-		const document = await open([
+		const document = await openSheets([
 			{
 				name: "S",
 				rows: [[100, 105.26, 52.63]],
@@ -177,14 +143,14 @@ describe("XlsxDocument engine edges", () => {
 
 		document.apply({ type: "setCells", sheet: 0, cells: [{ row: 0, col: 0, input: "200" }] })
 
-		expect(shown(document, 0, 1)).toMatchObject({ text: "105.26" })
-		expect(view(document.apply({ type: "setCells", sheet: 0, cells: [{ row: 1, col: 0, input: "=A2+1" }] }), 1, 0)).toMatchObject({
+		expect(shownCell(document, 0, 1)).toMatchObject({ text: "105.26" })
+		expect(viewCell(document.apply({ type: "setCells", sheet: 0, cells: [{ row: 1, col: 0, input: "=A2+1" }] }), 1, 0)).toMatchObject({
 			text: "0"
 		})
 	})
 
 	it("formats the whole range asked for, past the used area", async () => {
-		const document = await open([{ name: "S", rows: [[1, 2]] }])
+		const document = await openSheets([{ name: "S", rows: [[1, 2]] }])
 		const result = document.apply({
 			type: "format",
 			sheet: 0,
@@ -197,19 +163,19 @@ describe("XlsxDocument engine edges", () => {
 
 	it("takes a formula too deeply nested for the engine without throwing, and opens a file holding one", async () => {
 		const deep = `${"(".repeat(300)}1${")".repeat(300)}`
-		const document = await open([{ name: "S", rows: [[1]], cells: new Map([["0,0", formula("1", 1)]]) }])
+		const document = await openSheets([{ name: "S", rows: [[1]], cells: new Map([["0,0", formula("1", 1)]]) }])
 		const result = document.apply({ type: "setCells", sheet: 0, cells: [{ row: 0, col: 1, input: `=${deep}` }] })
 
-		expect(view(result, 0, 1)).toMatchObject({ text: "#ERROR!" })
+		expect(viewCell(result, 0, 1)).toMatchObject({ text: "#ERROR!" })
 		expect(document.undo().state.canUndo).toBe(false)
 
-		const stored = await open([{ name: "S", rows: [[null]], cells: new Map([["0,0", formula(deep)]]) }])
+		const stored = await openSheets([{ name: "S", rows: [[null]], cells: new Map([["0,0", formula(deep)]]) }])
 
-		expect(shown(stored, 0, 0)).toMatchObject({ input: `=${deep}` })
+		expect(shownCell(stored, 0, 0)).toMatchObject({ input: `=${deep}` })
 	})
 
 	it("sends only the sheets a structural edit changed", async () => {
-		const document = await open([
+		const document = await openSheets([
 			{ name: "Big", rows: [[1, 2]] },
 			{ name: "Small", rows: [[1]] }
 		])
@@ -221,25 +187,25 @@ describe("XlsxDocument engine edges", () => {
 	})
 
 	it("recalculates formulas that named a sheet's new name, and back on undo", async () => {
-		const document = await open([
+		const document = await openSheets([
 			{ name: "S", rows: [[5, "#REF!"]], cells: new Map([["0,1", formula("Summary!A1*2", "#REF!")]]) },
 			{ name: "T", rows: [[7]] }
 		])
 		const renamed = document.apply({ type: "renameSheet", sheet: 1, name: "Summary" })
 
-		expect(view(renamed, 0, 1)).toMatchObject({ text: "14" })
-		expect(view(document.apply({ type: "setCells", sheet: 1, cells: [{ row: 0, col: 0, input: "8" }] }), 0, 1)).toMatchObject({
+		expect(viewCell(renamed, 0, 1)).toMatchObject({ text: "14" })
+		expect(viewCell(document.apply({ type: "setCells", sheet: 1, cells: [{ row: 0, col: 0, input: "8" }] }), 0, 1)).toMatchObject({
 			text: "16"
 		})
 
 		document.undo()
 		document.undo()
 
-		expect(shown(document, 0, 1)).toMatchObject({ text: "#REF!" })
+		expect(shownCell(document, 0, 1)).toMatchObject({ text: "#REF!" })
 
 		const edited = document.apply({ type: "setCells", sheet: 1, cells: [{ row: 0, col: 0, input: "9" }] })
 
-		expect(view(edited, 0, 1)).toBeUndefined()
-		expect(shown(document, 0, 1)).toMatchObject({ text: "#REF!" })
+		expect(viewCell(edited, 0, 1)).toBeUndefined()
+		expect(shownCell(document, 0, 1)).toMatchObject({ text: "#REF!" })
 	})
 })

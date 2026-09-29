@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient, onlineManager } from "@tanstack/react-query"
 import type { Note } from "@filen/sdk-rs"
+import { mockNote } from "@/tests/fixtures/notes"
 
 // Same worker-free seams as notesSync.test: the sdk client, the kv adapter, the persisted query client,
 // and sonner are all mocked so the outbox runs under node vitest. This file exercises the
@@ -57,22 +58,7 @@ import type { PushDetail } from "@/lib/storage/outboxChannel"
 import { forgetTabEditors, seedTabEditor, takeTabEditorEcho, tabEditorChanged } from "@/features/notes/lib/tabEditors"
 
 function makeNote(uuid: string, overrides: Partial<Note> = {}): Note {
-	return {
-		uuid: uuid as Note["uuid"],
-		ownerId: 1n,
-		lastEditorId: 1n,
-		favorite: false,
-		pinned: false,
-		tags: [],
-		noteType: "text",
-		trash: false,
-		archive: false,
-		createdTimestamp: 0n,
-		editedTimestamp: 0n,
-		participants: [],
-		title: `note-${uuid}`,
-		...overrides
-	}
+	return mockNote({ uuid: uuid as Note["uuid"], title: `note-${uuid}`, ...overrides })
 }
 
 // Inferred return type keeps each field a precisely-typed Mock<Sig> — assignable to NotesOutboxTransport AND

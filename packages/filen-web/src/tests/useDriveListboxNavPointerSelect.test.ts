@@ -4,21 +4,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { MouseEvent as ReactMouseEvent } from "react"
 import { act, renderHook } from "@testing-library/react"
 import { QueryClient } from "@tanstack/react-query"
-import type { Dir, SharedFile, UuidStr } from "@filen/sdk-rs"
+import type { Dir } from "@filen/sdk-rs"
 
-// Same mock boundary as useDriveListboxNavReveal.test.ts: the DriveVirtualizer type's module graph
-// reaches the Vite `?worker` client, unresolvable under vitest.
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import { useDriveListboxNav } from "@/features/drive/hooks/useDriveListboxNav"
 import type { DriveVirtualizer } from "@/features/drive/hooks/useDriveVirtualizer"
-
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import { receiverRow } from "@/tests/fixtures/sdk"
+import { testUuid } from "@/tests/support/uuid"
 
 function item(label: string): DriveItem {
 	const dir: Dir = {
@@ -31,27 +26,6 @@ function item(label: string): DriveItem {
 	}
 
 	return narrowItem(dir)
-}
-
-// The Shared by me root lists one item once per receiver: same uuid, a different counterpart per row.
-function receiverRow(receiverId: number): DriveItem {
-	const file: SharedFile = {
-		uuid: testUuid("shared"),
-		size: 2_048n,
-		region: "de-1",
-		bucket: "filen-1",
-		chunks: 2n,
-		timestamp: 1_700_000_000_000n,
-		meta: {
-			type: "decoded",
-			data: { name: "Report", mime: "application/pdf", modified: 1_700_000_000_000n, size: 2_048n, key: "k", version: 2 }
-		},
-		sharingRole: { Receiver: { email: `${String(receiverId)}@x.com`, id: receiverId } },
-		sharedTag: true,
-		canMakeThumbnail: false
-	}
-
-	return narrowItem(file)
 }
 
 function click(

@@ -12,6 +12,7 @@ import {
 	type GridBounds
 } from "@/features/spreadsheet/lib/navigation.logic"
 import { isImeKeydown } from "@/lib/ime"
+import { mockSheetView } from "@/tests/mockSheetView"
 
 const STATE: DocState = { dirty: true, canUndo: true, canRedo: false }
 
@@ -20,21 +21,7 @@ function view(text: string): CellView {
 }
 
 function sheetView(name: string, cells: [number, CellView][], extra: Partial<SheetView> = {}): SheetView {
-	return {
-		name,
-		rowCount: 10,
-		colCount: 5,
-		cells: new Map(cells),
-		merges: [],
-		colWidths: new Map(),
-		rowHeights: new Map(),
-		hiddenCols: [],
-		hiddenRows: [],
-		frozenRows: 0,
-		frozenCols: 0,
-		structureLocked: false,
-		...extra
-	}
+	return mockSheetView({ name, rowCount: 10, colCount: 5, cells: new Map(cells), ...extra })
 }
 
 describe("CellStore", () => {

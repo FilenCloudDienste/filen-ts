@@ -16,14 +16,13 @@ vi.mock("@/lib/sdk/client", () => ({ sdkApi: { resolveDirectoryName, listDirecto
 
 vi.mock("@/queries/client", async () => ({ queryClient: (await import("@/tests/testQueryClient")).createTestQueryClient() }))
 
-vi.mock("@/lib/log", () => ({ log: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() } }))
-
 import { queryClient } from "@/queries/client"
 import { queryClientWrapper } from "@/tests/testQueryClient"
 import { cacheDirs, clearDirectoryCache, getCachedDir, getCachedName } from "@/features/drive/lib/cache"
 import { lookupDirectoryName } from "@/features/drive/lib/directoryName"
 import { useDirectoryListingQuery, useDirectoryNamesQuery } from "@/features/drive/queries/drive"
 import type { DriveVariant } from "@/features/drive/lib/preferences"
+import { testUuid } from "@/tests/support/uuid"
 
 const ROOT = "root-0000-0000-0000-000000000000" as UuidStr
 const ROLE: SharingRole = { Sharer: { email: "owner@filen.io", id: 42 } }
@@ -55,10 +54,6 @@ function resolveOwnedDir(uuid: string): Promise<Dir | undefined> {
 
 		return dir
 	})
-}
-
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
 }
 
 function mockDir(uuid: string, parent: string): Dir {

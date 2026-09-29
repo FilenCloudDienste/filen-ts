@@ -7,9 +7,7 @@ import type { UseQueryResult } from "@tanstack/react-query"
 import "@/lib/i18n"
 
 // The drop hook reaches into the SDK action surface, and drag-to-move is not what these role assertions
-// are about (directoryTreeDnd.test.tsx covers it); the node's drag source imports the same surface, which
-// no case here reaches. Everything else is injected through DirectoryTreeContext.
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
+// are about (directoryTreeDnd.test.tsx covers it). Everything else is injected through DirectoryTreeContext.
 vi.mock("@/features/drive/hooks/useDriveDropTarget", () => ({
 	dropHighlightClass: () => false,
 	useDriveDropTarget: () => ({

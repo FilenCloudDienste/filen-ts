@@ -6,7 +6,7 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
-import type { Note } from "@filen/sdk-rs"
+import { mockNote } from "@/tests/fixtures/notes"
 
 // Mock boundary matching notesActions.test.ts: the real sdk client module imports a Vite `?worker`,
 // unresolvable under node vitest.
@@ -41,26 +41,6 @@ beforeEach(() => {
 	vi.clearAllMocks()
 	testQueryClient.clear()
 })
-
-function mockNote(overrides: Partial<Note> = {}): Note {
-	return {
-		uuid: "note-0000-0000-0000-000000000000",
-		ownerId: 1n,
-		lastEditorId: 1n,
-		favorite: false,
-		pinned: false,
-		tags: [],
-		noteType: "text",
-		title: "Untitled",
-		preview: "",
-		trash: false,
-		archive: false,
-		createdTimestamp: 0n,
-		editedTimestamp: 0n,
-		participants: [],
-		...overrides
-	}
-}
 
 function mockFile(name: string, content: string): File {
 	return new File([content], name, { type: "text/plain" })

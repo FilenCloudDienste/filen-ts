@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
-import type { Note, UuidStr } from "@filen/sdk-rs"
+import type { Note } from "@filen/sdk-rs"
+import { mockNote, undecryptableNote } from "@/tests/fixtures/notes"
 
 // Same worker-free seams as the other notes suites: the sdk client imports a Vite `?worker`, and the
 // real query client owns the OPFS persistence pipeline neither is wanted here.
@@ -35,41 +36,7 @@ import { queryClient as testQueryClient } from "@/queries/client"
 import { noteContentQueryKey } from "@/features/notes/queries/noteContent"
 import { useNotesInflightStore } from "@/features/notes/store/useNotesInflight"
 import { exportNote, exportAllNotes } from "@/features/notes/lib/export"
-
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
-
-function mockNote(overrides: Partial<Note> = {}): Note {
-	return {
-		uuid: testUuid("note"),
-		ownerId: 1n,
-		lastEditorId: 1n,
-		favorite: false,
-		pinned: false,
-		tags: [],
-		noteType: "text",
-		encryptionKey: "key",
-		title: "note title",
-		preview: "preview",
-		trash: false,
-		archive: false,
-		createdTimestamp: 0n,
-		editedTimestamp: 0n,
-		participants: [],
-		...overrides
-	}
-}
-
-// The SDK leaves encryptionKey absent (never `= undefined`) on a metadata-undecryptable note —
-// exactOptionalPropertyTypes models that as a missing property.
-function undecryptableNote(overrides: Partial<Note> = {}): Note {
-	const note: Note = { ...mockNote(overrides) }
-
-	delete note.encryptionKey
-
-	return note
-}
+import { testUuid } from "@/tests/support/uuid"
 
 beforeEach(() => {
 	vi.clearAllMocks()

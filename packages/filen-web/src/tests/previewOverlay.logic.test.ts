@@ -3,10 +3,6 @@ import { QueryClient } from "@tanstack/react-query"
 import type { Dir, File } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 
-// itemMenu.logic.ts (driveItemActions, which the preview header menu filters) imports
-// features/drive/lib/download.ts (startDownloads) — unresolvable/unwanted under node vitest, same
-// mocking boundary as itemMenu.test.ts.
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 

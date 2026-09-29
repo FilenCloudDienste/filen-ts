@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { BlockedContact, ChatMessage, UuidStr } from "@filen/sdk-rs"
+import type { BlockedContact, ChatMessage } from "@filen/sdk-rs"
 import {
 	announcementSubject,
 	buildThreadRows,
@@ -17,10 +17,7 @@ import {
 } from "@/features/chats/components/thread/thread.logic"
 import { deriveBlockedUsers } from "@filen/shared"
 import { i18n } from "@/lib/i18n"
-
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import { testUuid } from "@/tests/support/uuid"
 
 // Local-calendar timestamp so the day-boundary tests are deterministic regardless of the runner's TZ
 // (buildThreadRows uses local getFullYear/Month/Date, matching how the day label renders).

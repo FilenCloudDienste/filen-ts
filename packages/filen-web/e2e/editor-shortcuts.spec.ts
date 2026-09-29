@@ -1,5 +1,5 @@
 import { test, expect } from "./fixtures"
-import { bootTo, enterScratchDirectory, trashScratchDirectory, LIVE_WRITE_TIMEOUT_MS } from "./helpers/listing"
+import { bootTo, enterScratchDirectory, trashScratchDirectory, uploadFiles, LIVE_WRITE_TIMEOUT_MS } from "./helpers/listing"
 import { focusEditorSurface } from "./helpers/editor"
 import { resolveEditorModKey, resolveModKey } from "./helpers/modkey"
 
@@ -10,9 +10,7 @@ import { resolveEditorModKey, resolveModKey } from "./helpers/modkey"
 // device emulation (helpers/modkey.ts), hence the two resolvers.
 test.describe.configure({ mode: "default" })
 
-test("the file editor's shortcuts: find, replace, markdown formatting, preview toggle and save", async ({ page, injectedSession }) => {
-	expect(injectedSession.length).toBeGreaterThan(0)
-
+test("the file editor's shortcuts: find, replace, markdown formatting, preview toggle and save", async ({ page }) => {
 	const runId = crypto.randomUUID()
 	const scratchName = `e2e-editor-keys-${runId}`
 	const fileName = `e2e-editor-keys-${runId}.md`
@@ -22,15 +20,10 @@ test("the file editor's shortcuts: find, replace, markdown formatting, preview t
 	try {
 		const { listbox } = await enterScratchDirectory(page, scratchName)
 
-		await page
-			.getByRole("main")
-			.locator('input[type="file"]')
-			.first()
-			.setInputFiles([{ name: fileName, mimeType: "text/markdown", buffer: Buffer.from("plain words here", "utf8") }])
+		await uploadFiles(page, [{ name: fileName, mimeType: "text/markdown", buffer: Buffer.from("plain words here", "utf8") }], listbox)
 
 		const row = listbox.getByRole("option", { name: fileName })
 
-		await expect(row).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 		await row.dblclick()
 
 		const dialog = page.getByRole("dialog")

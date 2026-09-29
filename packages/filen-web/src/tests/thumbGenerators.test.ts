@@ -94,15 +94,12 @@ import {
 	rasterizeSvgThumb,
 	warmUploadThumbnail
 } from "@/features/drive/lib/thumbGenerators"
+import { testUuid } from "@/tests/support/uuid"
 
 // Captured immediately after import: registerThumbGenerator only ever runs once, as a module-scope
 // side effect at import time (see thumbGenerators.ts's own closing comment) — this must be read
 // before the beforeEach below's vi.clearAllMocks() has any chance to wipe it.
 const registrationCallsAtImport = registerThumbGeneratorMock.mock.calls.slice()
-
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
 
 let uuidCounter = 0
 

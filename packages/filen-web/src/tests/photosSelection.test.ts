@@ -5,14 +5,11 @@ import { narrowItem } from "@/features/drive/lib/item"
 import { type PhotoItem } from "@/features/photos/lib/captureSort"
 import { usePhotosStore } from "@/features/photos/store/usePhotosStore"
 import { usePhotosSelection } from "@/features/photos/hooks/usePhotosSelection"
+import { testUuid } from "@/tests/support/uuid"
 
 // usePhotosSelection calls no React hooks of its own (anchor state is threaded in by the caller — see
 // photoGrid.tsx) — it's exercisable as a plain function, no renderHook/jsdom needed, mirroring how
 // listbox.ts's own pure functions are tested directly.
-
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
 
 function mockFile(uuid: UuidStr): File {
 	return {

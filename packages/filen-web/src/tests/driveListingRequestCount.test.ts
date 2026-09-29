@@ -15,8 +15,6 @@ vi.mock("@/lib/sdk/client", () => ({ sdkApi: { listDirectory, listSharedInRoot, 
 
 vi.mock("@/queries/client", async () => ({ queryClient: (await import("@/tests/testQueryClient")).createTestQueryClient() }))
 
-vi.mock("@/lib/log", () => ({ log: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() } }))
-
 import { queryClient } from "@/queries/client"
 import { queryClientWrapper } from "@/tests/testQueryClient"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
@@ -38,10 +36,7 @@ import {
 } from "@/features/drive/lib/socketHandlers"
 import { socketAuthenticated, socketDropped } from "@/lib/sdk/socketSession"
 import { useTransfersStore, type Transfer } from "@/features/transfers/store/useTransfersStore"
-
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import { testUuid } from "@/tests/support/uuid"
 
 function mockFile(label: string, parent: UuidStr): File {
 	return {

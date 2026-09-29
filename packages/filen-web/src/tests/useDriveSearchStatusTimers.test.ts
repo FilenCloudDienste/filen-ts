@@ -2,7 +2,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, renderHook } from "@testing-library/react"
-import type { Dir, UuidStr } from "@filen/sdk-rs"
+import type { Dir } from "@filen/sdk-rs"
 
 // deriveSearchStatus is exhaustively table-tested (searchStatus.test.ts) and the open serialization has
 // its own file; what neither covers is the half that ARMS the machine's two inputs — the grace and
@@ -20,10 +20,7 @@ vi.mock("@/lib/sdk/client", () => ({ sdkApi: { searchOpen, searchSetName, search
 import { useDriveSearch } from "@/features/drive/hooks/useDriveSearch"
 import { GRACE_MS, WATCHDOG_MS, STALL_CEILING_MS } from "@/features/drive/lib/searchStatus.logic"
 import type { SearchPush, SearchHitDTO, SearchSnapshotDTO as SnapshotDTO } from "@/workers/searchEngine"
-
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import { testUuid } from "@/tests/support/uuid"
 
 function hit(label: string): SearchHitDTO {
 	const dir: Dir = {

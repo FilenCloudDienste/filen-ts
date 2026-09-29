@@ -1,10 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
-import type { Chat, ChatMessage, UuidStr } from "@filen/sdk-rs"
-
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import type { Chat, ChatMessage } from "@filen/sdk-rs"
 
 const { listChats, listMessagesBefore } = vi.hoisted(() => ({
 	listChats: vi.fn<() => Promise<Chat[]>>(),
@@ -18,6 +14,7 @@ import { queryClient as testQueryClient } from "@/queries/client"
 import { chatsQueryGet } from "@/features/chats/queries/chats"
 import { chatMessagesQueryGet } from "@/features/chats/queries/chatMessages"
 import { refetchChatsAndMessages } from "@/features/chats/lib/refetchChatsAndMessages"
+import { testUuid } from "@/tests/support/uuid"
 
 function mockChat(label: string): Chat {
 	return {

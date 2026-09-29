@@ -1,6 +1,6 @@
 import { existsSync, rmSync } from "node:fs"
-import { test as teardown, expect, FIXTURES_FILE, readFixtureManifest } from "../fixtures"
-import { dismissStartupReminders, trashScratchDirectory } from "../helpers/listing"
+import { test as teardown, FIXTURES_FILE, readFixtureManifest } from "../fixtures"
+import { dismissStartupReminders, setTallListingViewport, trashScratchDirectory } from "../helpers/listing"
 
 // Removes the shared fixture tree setup/fixtures.setup.ts built. Wired as `teardown` on the
 // fixtures-setup project (playwright.config.ts), so Playwright runs it only after that project AND
@@ -16,9 +16,7 @@ teardown.describe.configure({ retries: 0 })
 // own nested-tree teardown.
 const TEARDOWN_CONFIRM_TIMEOUT_MS = 120_000
 
-teardown("trash the shared read-only fixture tree", async ({ page, injectedSession }) => {
-	expect(injectedSession.length).toBeGreaterThan(0)
-
+teardown("trash the shared read-only fixture tree", async ({ page }) => {
 	// A teardown project still runs when its owner FAILED, and fixtures-setup writes the manifest only
 	// once the root directory exists — so a setup that died on that very first create leaves nothing to
 	// remove here. Reporting that as a second failure would bury the real one, so it is a clean no-op.
@@ -40,9 +38,7 @@ teardown("trash the shared read-only fixture tree", async ({ page, injectedSessi
 	// starts from a fresh load has not.
 	await dismissStartupReminders(page)
 
-	// Same virtualization workaround as everywhere else: trashScratchDirectory locates the root row by
-	// name, and a virtualized listing may not have mounted it.
-	await page.setViewportSize({ width: 1280, height: 8000 })
+	await setTallListingViewport(page)
 
 	// Best-effort, exactly like cleanup.setup.ts's own sweeps: this runs after every test has already
 	// passed or failed, so letting a contended `drive-write` lease here turn a green run red would

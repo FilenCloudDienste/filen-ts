@@ -1,12 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient, QueryObserver } from "@tanstack/react-query"
-import type { Note, NoteHistory, NoteTag, UuidStr } from "@filen/sdk-rs"
-
-// UuidStr is a template-literal brand requiring at least 3 dashes (see @filen/sdk-rs) — pad a short
-// label the same way drive.test.ts's testUuid does.
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import type { Note, NoteHistory, NoteTag } from "@filen/sdk-rs"
+import { mockNote, mockNoteTag } from "@/tests/fixtures/notes"
 
 // Mock boundary matching contacts.test.ts/drive.test.ts: the real sdk client module imports a Vite
 // `?worker`, unresolvable under node vitest.
@@ -73,42 +68,12 @@ import {
 	noteTagsQueryUpsert,
 	useNoteTags
 } from "@/features/notes/queries/noteTags"
+import { testUuid } from "@/tests/support/uuid"
 
 beforeEach(() => {
 	vi.clearAllMocks()
 	testQueryClient.clear()
 })
-
-function mockNote(overrides: Partial<Note> = {}): Note {
-	return {
-		uuid: "11111111-1111-1111-1111-111111111111",
-		ownerId: 1n,
-		lastEditorId: 1n,
-		favorite: false,
-		pinned: false,
-		tags: [],
-		noteType: "text",
-		title: "note title",
-		preview: "note preview",
-		trash: false,
-		archive: false,
-		createdTimestamp: 1_700_000_000_000n,
-		editedTimestamp: 1_700_000_000_000n,
-		participants: [],
-		...overrides
-	}
-}
-
-function mockNoteTag(overrides: Partial<NoteTag> = {}): NoteTag {
-	return {
-		uuid: "22222222-2222-2222-2222-222222222222",
-		name: "tag",
-		favorite: false,
-		editedTimestamp: 1_700_000_000_000n,
-		createdTimestamp: 1_700_000_000_000n,
-		...overrides
-	}
-}
 
 describe("fetchNotes", () => {
 	it("passes through sdkApi.listNotes unchanged", async () => {

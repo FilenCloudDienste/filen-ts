@@ -1,8 +1,6 @@
 // @vitest-environment jsdom
 
 import { describe, expect, it } from "vitest"
-import type { LinkedFile } from "@filen/sdk-rs"
-import { linkedFileIntoDriveItem } from "@/features/drive/lib/item"
 import { PREVIEW_MAX_BYTES } from "@/features/drive/lib/preview.logic"
 import {
 	chooseDownloadStrategy,
@@ -10,24 +8,7 @@ import {
 	createCollectingSink,
 	PUBLIC_BUFFERED_DOWNLOAD_MAX_BYTES
 } from "@/features/publicLinks/lib/download.logic"
-
-function makeLinkedFile(name: string, size: bigint): LinkedFile {
-	return {
-		uuid: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
-		name: { Decrypted: name },
-		mime: { Decrypted: "application/octet-stream" },
-		size,
-		chunks: 1n,
-		region: "",
-		bucket: "",
-		version: 2,
-		timestamp: 0n,
-		fileKey: "k",
-		downloadable: true,
-		linkedTag: true,
-		canMakeThumbnail: false
-	}
-}
+import { linkedFileItem } from "@/tests/fixtures/sdk"
 
 describe("chooseDownloadStrategy", () => {
 	it("streams via FSA whenever available, regardless of size", () => {
@@ -51,19 +32,19 @@ describe("chooseDownloadStrategy", () => {
 
 describe("anonPreviewability", () => {
 	it("marks a small previewable file previewable", () => {
-		expect(anonPreviewability(linkedFileIntoDriveItem(makeLinkedFile("photo.jpg", 1024n)))).toBe("previewable")
+		expect(anonPreviewability(linkedFileItem("photo.jpg", { size: 1024n }))).toBe("previewable")
 	})
 
 	it("caps a large media file — anon has no streaming, so it must buffer under the cap", () => {
-		expect(anonPreviewability(linkedFileIntoDriveItem(makeLinkedFile("movie.mp4", PREVIEW_MAX_BYTES + 1n)))).toBe("too-large")
+		expect(anonPreviewability(linkedFileItem("movie.mp4", { size: PREVIEW_MAX_BYTES + 1n }))).toBe("too-large")
 	})
 
 	it("never caps a camera RAW — its preview is the SDK-extracted embedded JPEG, not the file's bytes", () => {
-		expect(anonPreviewability(linkedFileIntoDriveItem(makeLinkedFile("shot.NEF", PREVIEW_MAX_BYTES + 1n)))).toBe("previewable")
+		expect(anonPreviewability(linkedFileItem("shot.NEF", { size: PREVIEW_MAX_BYTES + 1n }))).toBe("previewable")
 	})
 
 	it("marks an unknown-category file unpreviewable", () => {
-		expect(anonPreviewability(linkedFileIntoDriveItem(makeLinkedFile("archive.zip", 1024n)))).toBe("unpreviewable")
+		expect(anonPreviewability(linkedFileItem("archive.zip", { size: 1024n }))).toBe("unpreviewable")
 	})
 })
 

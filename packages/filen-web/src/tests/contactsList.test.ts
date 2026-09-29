@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest"
-import type { BlockedContact, Contact, ContactRequestIn, ContactRequestOut } from "@filen/sdk-rs"
 import {
 	buildContactSections,
 	contactsSectionCounts,
@@ -11,49 +10,7 @@ import {
 	CONTACTS_SECTION_HEADER_KEY,
 	type ContactSection
 } from "@/features/contacts/components/contactsList.logic"
-
-function mockContact(overrides: Partial<Contact> = {}): Contact {
-	return {
-		uuid: "11111111-1111-1111-1111-111111111111",
-		userId: 1n,
-		email: "alice@filen.io",
-		nickName: "Alice",
-		lastActive: 1_700_000_000_000n,
-		timestamp: 1_700_000_000_000n,
-		publicKey: "alice-public-key",
-		...overrides
-	}
-}
-
-function mockBlockedContact(overrides: Partial<BlockedContact> = {}): BlockedContact {
-	return {
-		uuid: "22222222-2222-2222-2222-222222222222",
-		userId: 2n,
-		email: "bob@filen.io",
-		nickName: "Bob",
-		timestamp: 1_700_000_000_000n,
-		...overrides
-	}
-}
-
-function mockIncoming(overrides: Partial<ContactRequestIn> = {}): ContactRequestIn {
-	return {
-		uuid: "33333333-3333-3333-3333-333333333333",
-		userId: 3n,
-		email: "carol@filen.io",
-		nickName: "Carol",
-		...overrides
-	}
-}
-
-function mockOutgoing(overrides: Partial<ContactRequestOut> = {}): ContactRequestOut {
-	return {
-		uuid: "44444444-4444-4444-4444-444444444444",
-		email: "dave@filen.io",
-		nickName: "Dave",
-		...overrides
-	}
-}
+import { mockBlockedContact, mockContact, mockIncoming, mockOutgoing } from "@/tests/support/contactFixtures"
 
 describe("contactsSectionCounts", () => {
 	it("counts each section by its own array length", () => {

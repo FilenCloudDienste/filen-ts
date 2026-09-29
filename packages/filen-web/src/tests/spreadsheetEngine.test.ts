@@ -1,48 +1,10 @@
-import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
 import { openXlsx, writeXlsx } from "hucre/xlsx"
-import type { Cell, CellValue, Workbook } from "hucre"
-import type { EditResult } from "@/features/spreadsheet/lib/edits"
+import type { Cell } from "hucre"
 import { engineFormula, formulaTranslator, renameSheetInFormula, shiftFormula } from "@/features/spreadsheet/lib/formulaRefs"
-import { cellKey, type CellView } from "@/features/spreadsheet/lib/model"
 import { sniffSpreadsheetKind } from "@/features/spreadsheet/lib/spreadsheetClient"
-import { XlsxDocument } from "@/features/spreadsheet/lib/xlsxDocument"
-import { proven } from "@/tests/spreadsheetProven"
+import { formula, openFixture, openSheets, proven, reopen, shownCell, viewCell } from "@/tests/spreadsheetProven"
 import { checkZipLimits } from "@/features/spreadsheet/lib/zipLimits"
-
-const FIXTURES = new URL("./fixtures/spreadsheet/", import.meta.url)
-
-type Sheets = { name: string; rows: CellValue[][]; cells?: Map<string, Cell> }[]
-
-async function open(sheets: Sheets, namedRanges?: Workbook["namedRanges"]): Promise<XlsxDocument> {
-	const bytes = await writeXlsx(namedRanges === undefined ? { sheets } : { sheets, namedRanges })
-
-	return await proven(await openXlsx(bytes, { readStyles: true }))
-}
-
-async function reopen(document: XlsxDocument): Promise<XlsxDocument> {
-	return await proven(await openXlsx((await document.serialize()).bytes, { readStyles: true }))
-}
-
-function formula(formula: string, result: CellValue = null): Cell {
-	return { value: result, type: "formula", formula, formulaResult: result }
-}
-
-function view(result: EditResult, row: number, col: number, sheet = 0): CellView | null | undefined {
-	if (result.type === "cells") {
-		return result.patches.find(patch => patch.sheet === sheet)?.cells.find(([key]) => key === cellKey(row, col))?.[1]
-	}
-
-	if (result.type === "sheets") {
-		return result.sheets[sheet]?.cells.get(cellKey(row, col)) ?? null
-	}
-
-	return undefined
-}
-
-function shown(document: XlsxDocument, row: number, col: number, sheet = 0): CellView | undefined {
-	return document.doc().sheets[sheet]?.cells.get(cellKey(row, col))
-}
 
 describe("formula references", () => {
 	const insertRow = { type: "insert", axis: "rows", at: 1, count: 2 } as const
@@ -91,29 +53,29 @@ describe("formula references", () => {
 describe("XlsxDocument formulas", () => {
 	it("expands shared formulas into ordinary ones, keeping their results, and saves them valid", async () => {
 		// B1 stores A1*2 for B1:B10 (as Excel writes a fill-down); B2:B10 hold only their results.
-		const document = await proven(await openXlsx(readFileSync(new URL("shared.xlsx", FIXTURES)), { readStyles: true }))
+		const document = await proven(await openFixture("shared.xlsx"))
 
-		expect(shown(document, 2, 1)).toMatchObject({ text: "6", input: "=A3*2" })
-		expect(shown(document, 1, 0, 1)).toMatchObject({ text: "10", input: "=S1!B5" })
+		expect(shownCell(document, 2, 1)).toMatchObject({ text: "6", input: "=A3*2" })
+		expect(shownCell(document, 1, 0, 1)).toMatchObject({ text: "10", input: "=S1!B5" })
 
 		const edited = document.apply({ type: "setCells", sheet: 0, cells: [{ row: 4, col: 0, input: "100" }] })
 
-		expect(view(edited, 4, 1)).toMatchObject({ text: "200" })
-		expect(view(edited, 1, 0, 1)).toMatchObject({ text: "200" })
+		expect(viewCell(edited, 4, 1)).toMatchObject({ text: "200" })
+		expect(viewCell(edited, 1, 0, 1)).toMatchObject({ text: "200" })
 
 		document.apply({ type: "setCells", sheet: 0, cells: [{ row: 0, col: 1, input: "=A1*3" }] })
 		document.apply({ type: "insert", sheet: 0, axis: "rows", at: 1, count: 1 })
 
 		const reopened = await reopen(document)
 
-		expect(shown(reopened, 0, 1)).toMatchObject({ text: "3", input: "=A1*3" })
-		expect(shown(reopened, 3, 1)).toMatchObject({ text: "6", input: "=A4*2" })
-		expect(shown(reopened, 5, 1)).toMatchObject({ text: "200", input: "=A6*2" })
-		expect(shown(reopened, 1, 0, 1)).toMatchObject({ text: "200", input: "=S1!B6" })
+		expect(shownCell(reopened, 0, 1)).toMatchObject({ text: "3", input: "=A1*3" })
+		expect(shownCell(reopened, 3, 1)).toMatchObject({ text: "6", input: "=A4*2" })
+		expect(shownCell(reopened, 5, 1)).toMatchObject({ text: "200", input: "=A6*2" })
+		expect(shownCell(reopened, 1, 0, 1)).toMatchObject({ text: "200", input: "=S1!B6" })
 	})
 
 	it("hands text to the engine as text", async () => {
-		const document = await open([{ name: "S", rows: [[null]] }])
+		const document = await openSheets([{ name: "S", rows: [[null]] }])
 		const result = document.apply({
 			type: "setCells",
 			sheet: 0,
@@ -130,14 +92,14 @@ describe("XlsxDocument formulas", () => {
 			]
 		})
 
-		expect(view(result, 0, 1)).toMatchObject({ text: "3" })
-		expect(view(result, 1, 1)).toMatchObject({ text: "=1+1" })
-		expect(view(result, 2, 1)).toMatchObject({ text: "TRUE" })
-		expect(view(result, 3, 2)).toMatchObject({ text: "10" })
+		expect(viewCell(result, 0, 1)).toMatchObject({ text: "3" })
+		expect(viewCell(result, 1, 1)).toMatchObject({ text: "=1+1" })
+		expect(viewCell(result, 2, 1)).toMatchObject({ text: "TRUE" })
+		expect(viewCell(result, 3, 2)).toMatchObject({ text: "10" })
 	})
 
 	it("calculates dates the same in every timezone and shows date results as dates", async () => {
-		const document = await open([
+		const document = await openSheets([
 			{
 				name: "S",
 				rows: [[new Date(Date.UTC(2024, 0, 15)), null]],
@@ -154,13 +116,13 @@ describe("XlsxDocument formulas", () => {
 			]
 		})
 
-		expect(view(result, 0, 1)).toMatchObject({ text: "2024-01-16" })
-		expect(view(result, 0, 2)).toMatchObject({ text: "15" })
-		expect(view(result, 0, 3)).toMatchObject({ text: "0" })
+		expect(viewCell(result, 0, 1)).toMatchObject({ text: "2024-01-16" })
+		expect(viewCell(result, 0, 2)).toMatchObject({ text: "15" })
+		expect(viewCell(result, 0, 3)).toMatchObject({ text: "0" })
 	})
 
 	it("keeps the file's results for formulas the engine cannot read, and calculates what depends on them", async () => {
-		const document = await open([
+		const document = await openSheets([
 			{
 				name: "S",
 				rows: [
@@ -177,19 +139,19 @@ describe("XlsxDocument formulas", () => {
 		])
 		const result = document.apply({ type: "setCells", sheet: 0, cells: [{ row: 0, col: 0, input: "-1" }] })
 
-		expect(view(result, 0, 2)).toMatchObject({ text: "1" })
-		expect(view(result, 1, 1)).toMatchObject({ text: "no" })
+		expect(viewCell(result, 0, 2)).toMatchObject({ text: "1" })
+		expect(viewCell(result, 1, 1)).toMatchObject({ text: "no" })
 		// An intersection it has no syntax for: the stored result stays, the reference still moves.
-		expect(shown(document, 1, 2)).toMatchObject({ text: "10" })
+		expect(shownCell(document, 1, 2)).toMatchObject({ text: "10" })
 
 		const inserted = document.apply({ type: "insert", sheet: 0, axis: "rows", at: 0, count: 1 })
 
-		expect(view(inserted, 2, 2)).toMatchObject({ text: "10", input: "=SUM(A2:A3 A2:C2)" })
-		expect(view(inserted, 1, 1)).toMatchObject({ input: '=CONCAT("a","b")' })
+		expect(viewCell(inserted, 2, 2)).toMatchObject({ text: "10", input: "=SUM(A2:A3 A2:C2)" })
+		expect(viewCell(inserted, 1, 1)).toMatchObject({ input: '=CONCAT("a","b")' })
 	})
 
 	it("keeps a legacy array formula's stored result rather than the engine's #SPILL!", async () => {
-		const document = await open([
+		const document = await openSheets([
 			{
 				name: "S",
 				rows: [
@@ -204,19 +166,19 @@ describe("XlsxDocument formulas", () => {
 			}
 		])
 
-		expect(shown(document, 0, 2)).toMatchObject({ text: "2", input: "=A1:A3*2" })
+		expect(shownCell(document, 0, 2)).toMatchObject({ text: "2", input: "=A1:A3*2" })
 
 		const edited = document.apply({ type: "setCells", sheet: 0, cells: [{ row: 1, col: 0, input: "20" }] })
 
-		expect(view(edited, 0, 2) ?? shown(document, 0, 2)).toMatchObject({ text: "2" })
-		expect(shown(document, 0, 3)).toMatchObject({ text: "3" })
-		expect(view(document.apply({ type: "setCells", sheet: 0, cells: [{ row: 2, col: 3, input: "=C1*10" }] }), 2, 3)).toMatchObject({
+		expect(viewCell(edited, 0, 2) ?? shownCell(document, 0, 2)).toMatchObject({ text: "2" })
+		expect(shownCell(document, 0, 3)).toMatchObject({ text: "3" })
+		expect(viewCell(document.apply({ type: "setCells", sheet: 0, cells: [{ row: 2, col: 3, input: "=C1*10" }] }), 2, 3)).toMatchObject({
 			text: "20"
 		})
 	})
 
 	it("calculates formulas that named a sheet once it is added, and puts their results back on undo", async () => {
-		const document = await open([
+		const document = await openSheets([
 			{
 				name: "S",
 				rows: [["#REF!", "#REF!"]],
@@ -228,23 +190,23 @@ describe("XlsxDocument formulas", () => {
 		])
 		const added = document.apply({ type: "addSheet", name: "New" })
 
-		expect(view(added, 0, 0)).toMatchObject({ text: "1", input: "=New!A1+1" })
-		expect(view(added, 0, 1)).toMatchObject({ text: "2" })
-		expect(view(document.apply({ type: "setCells", sheet: 1, cells: [{ row: 0, col: 0, input: "5" }] }), 0, 1)).toMatchObject({
+		expect(viewCell(added, 0, 0)).toMatchObject({ text: "1", input: "=New!A1+1" })
+		expect(viewCell(added, 0, 1)).toMatchObject({ text: "2" })
+		expect(viewCell(document.apply({ type: "setCells", sheet: 1, cells: [{ row: 0, col: 0, input: "5" }] }), 0, 1)).toMatchObject({
 			text: "12"
 		})
 
 		document.undo()
 		document.undo()
 
-		expect(shown(document, 0, 0)).toMatchObject({ text: "#REF!", error: true })
-		expect(shown(document, 0, 1)).toMatchObject({ text: "#REF!" })
+		expect(shownCell(document, 0, 0)).toMatchObject({ text: "#REF!", error: true })
+		expect(shownCell(document, 0, 1)).toMatchObject({ text: "#REF!" })
 		expect(document.doc().sheets).toHaveLength(1)
 	})
 
 	it("moves hyperlinks into a sheet for inserts and deletes, and back on undo", async () => {
 		const link = (location: string) => ({ value: "go", type: "string" as const, hyperlink: { target: "", location } })
-		const document = await open([
+		const document = await openSheets([
 			{ name: "S", rows: [["go"], [null], [null], [null]], cells: new Map([["0,0", link("S!A4")]]) },
 			{
 				name: "Other",
@@ -276,19 +238,19 @@ describe("XlsxDocument formulas", () => {
 	})
 
 	it("keeps recalculating after sheet steps and their undo, in a file that had no formulas", async () => {
-		const document = await open([{ name: "S", rows: [[1, null]] }])
+		const document = await openSheets([{ name: "S", rows: [[1, null]] }])
 
-		expect(view(document.apply({ type: "setCells", sheet: 0, cells: [{ row: 0, col: 1, input: "=A1*2" }] }), 0, 1)).toMatchObject({
+		expect(viewCell(document.apply({ type: "setCells", sheet: 0, cells: [{ row: 0, col: 1, input: "=A1*2" }] }), 0, 1)).toMatchObject({
 			text: "2"
 		})
 
 		document.apply({ type: "addSheet", name: "X" })
 		document.apply({ type: "renameSheet", sheet: 0, name: "T" })
 
-		expect(view(document.apply({ type: "setCells", sheet: 0, cells: [{ row: 0, col: 0, input: "5" }] }), 0, 1)).toMatchObject({
+		expect(viewCell(document.apply({ type: "setCells", sheet: 0, cells: [{ row: 0, col: 0, input: "5" }] }), 0, 1)).toMatchObject({
 			text: "10"
 		})
-		expect(view(document.apply({ type: "insert", sheet: 0, axis: "rows", at: 0, count: 1 }), 1, 1)).toMatchObject({
+		expect(viewCell(document.apply({ type: "insert", sheet: 0, axis: "rows", at: 0, count: 1 }), 1, 1)).toMatchObject({
 			text: "10",
 			input: "=A2*2"
 		})
@@ -300,14 +262,14 @@ describe("XlsxDocument formulas", () => {
 		const undone = document.undo()
 
 		expect(undone.type).toBe("sheets")
-		expect(shown(document, 0, 1)).toMatchObject({ text: "2" })
-		expect(view(document.apply({ type: "setCells", sheet: 0, cells: [{ row: 0, col: 0, input: "7" }] }), 0, 1)).toMatchObject({
+		expect(shownCell(document, 0, 1)).toMatchObject({ text: "2" })
+		expect(viewCell(document.apply({ type: "setCells", sheet: 0, cells: [{ row: 0, col: 0, input: "7" }] }), 0, 1)).toMatchObject({
 			text: "14"
 		})
 	})
 
 	it("renames the sheet in defined names and hyperlinks, and undoes it", async () => {
-		const document = await open(
+		const document = await openSheets(
 			[
 				{
 					name: "Bob's Data",
@@ -324,7 +286,7 @@ describe("XlsxDocument formulas", () => {
 		const reopened = await reopen(document)
 		const edited = reopened.apply({ type: "setCells", sheet: 0, cells: [{ row: 0, col: 2, input: "10" }] })
 
-		expect(view(edited, 0, 0, 1)).toMatchObject({ text: "13" })
+		expect(viewCell(edited, 0, 0, 1)).toMatchObject({ text: "13" })
 
 		const workbook = await openXlsx((await document.serialize()).bytes)
 
@@ -339,7 +301,7 @@ describe("XlsxDocument formulas", () => {
 	})
 
 	it("scopes sheet-level names to their sheets", async () => {
-		const document = await open(
+		const document = await openSheets(
 			[
 				{ name: "A", rows: [[1, 2]], cells: new Map([["0,1", formula("Rate*2", 2)]]) },
 				{ name: "B", rows: [[2, 4]], cells: new Map([["0,1", formula("Rate*2", 4)]]) }
@@ -351,14 +313,14 @@ describe("XlsxDocument formulas", () => {
 		)
 		const result = document.apply({ type: "setCells", sheet: 1, cells: [{ row: 0, col: 0, input: "5" }] })
 
-		expect(view(result, 0, 1, 1)).toMatchObject({ text: "10" })
-		expect(shown(document, 0, 1, 0)).toMatchObject({ text: "2" })
+		expect(viewCell(result, 0, 1, 1)).toMatchObject({ text: "10" })
+		expect(shownCell(document, 0, 1, 0)).toMatchObject({ text: "2" })
 	})
 
 	it("opens a sheet named __proto__", async () => {
-		const document = await open([{ name: "__proto__", rows: [[1, 2]], cells: new Map([["0,1", formula("A1*2", 2)]]) }])
+		const document = await openSheets([{ name: "__proto__", rows: [[1, 2]], cells: new Map([["0,1", formula("A1*2", 2)]]) }])
 
-		expect(view(document.apply({ type: "setCells", sheet: 0, cells: [{ row: 0, col: 0, input: "5" }] }), 0, 1)).toMatchObject({
+		expect(viewCell(document.apply({ type: "setCells", sheet: 0, cells: [{ row: 0, col: 0, input: "5" }] }), 0, 1)).toMatchObject({
 			text: "10"
 		})
 	})
@@ -366,7 +328,7 @@ describe("XlsxDocument formulas", () => {
 
 describe("XlsxDocument edits", () => {
 	it("patches the sheets a formula reaches instead of sending the workbook", async () => {
-		const document = await open([
+		const document = await openSheets([
 			{ name: "Data", rows: [[1, 2]] },
 			{ name: "Sum", rows: [[2]], cells: new Map([["0,0", formula("Data!A1*2", 2)]]) }
 		])
@@ -374,13 +336,13 @@ describe("XlsxDocument edits", () => {
 
 		expect(result.type).toBe("cells")
 		expect(result.type === "cells" ? result.patches.map(patch => patch.sheet).sort() : null).toEqual([0, 1])
-		expect(view(result, 0, 0, 1)).toMatchObject({ text: "14" })
+		expect(viewCell(result, 0, 0, 1)).toMatchObject({ text: "14" })
 		// No new format: no style table.
 		expect(result.type === "cells" ? result.styles : null).toEqual([])
 	})
 
 	it("inserts and deletes many rows, and undoes a deletion with what it took", async () => {
-		const document = await open([
+		const document = await openSheets([
 			{
 				name: "S",
 				rows: [
@@ -393,24 +355,24 @@ describe("XlsxDocument edits", () => {
 		])
 
 		expect(document.apply({ type: "insert", sheet: 0, axis: "rows", at: 1, count: 300_000 }).type).toBe("sheets")
-		expect(shown(document, 300_002, 1)).toMatchObject({ text: "6", input: "=SUM(A1:A300003)" })
+		expect(shownCell(document, 300_002, 1)).toMatchObject({ text: "6", input: "=SUM(A1:A300003)" })
 
 		document.undo()
 		document.apply({ type: "delete", sheet: 0, axis: "rows", at: 0, count: 1 })
 
-		expect(shown(document, 1, 1)).toMatchObject({ text: "5", input: "=SUM(A1:A2)" })
+		expect(shownCell(document, 1, 1)).toMatchObject({ text: "5", input: "=SUM(A1:A2)" })
 
 		document.undo()
 
-		expect(shown(document, 0, 0)).toMatchObject({ text: "1" })
-		expect(shown(document, 2, 1)).toMatchObject({ text: "6", input: "=SUM(A1:A3)" })
-		expect(view(document.apply({ type: "setCells", sheet: 0, cells: [{ row: 0, col: 0, input: "10" }] }), 2, 1)).toMatchObject({
+		expect(shownCell(document, 0, 0)).toMatchObject({ text: "1" })
+		expect(shownCell(document, 2, 1)).toMatchObject({ text: "6", input: "=SUM(A1:A3)" })
+		expect(viewCell(document.apply({ type: "setCells", sheet: 0, cells: [{ row: 0, col: 0, input: "10" }] }), 2, 1)).toMatchObject({
 			text: "15"
 		})
 	})
 
 	it("recalculates through ranges a deletion shrank, once it is undone", async () => {
-		const document = await open([
+		const document = await openSheets([
 			{
 				name: "S",
 				rows: [[1], [2], [3], [4], [10]],
@@ -421,15 +383,15 @@ describe("XlsxDocument edits", () => {
 
 		document.apply({ type: "delete", sheet: 0, axis: "rows", at: 1, count: 2 })
 
-		expect(shown(document, 2, 0)).toMatchObject({ text: "5", input: "=SUM(A1:A2)" })
-		expect(shown(document, 0, 0, 1)).toMatchObject({ text: "#REF!", input: "=S!#REF!" })
+		expect(shownCell(document, 2, 0)).toMatchObject({ text: "5", input: "=SUM(A1:A2)" })
+		expect(shownCell(document, 0, 0, 1)).toMatchObject({ text: "#REF!", input: "=S!#REF!" })
 
 		document.undo()
 
 		const edited = document.apply({ type: "setCells", sheet: 0, cells: [{ row: 2, col: 0, input: "30" }] })
 
-		expect(view(edited, 4, 0)).toMatchObject({ text: "37", input: "=SUM(A1:A4)" })
-		expect(view(edited, 0, 0, 1)).toMatchObject({ text: "30", input: "=S!A3" })
+		expect(viewCell(edited, 4, 0)).toMatchObject({ text: "37", input: "=SUM(A1:A4)" })
+		expect(viewCell(edited, 0, 0, 1)).toMatchObject({ text: "30", input: "=S!A3" })
 	})
 
 	it("keeps undo history within a cell budget", async () => {
@@ -447,11 +409,11 @@ describe("XlsxDocument edits", () => {
 		while (document.undo().type !== "none") undone++
 
 		expect(undone).toBe(2)
-		expect(shown(document, 0, 0)).toMatchObject({ text: "30" })
+		expect(shownCell(document, 0, 0)).toMatchObject({ text: "30" })
 	})
 
 	it("tracks the saved state across undo and redo", async () => {
-		const document = await open([{ name: "S", rows: [[1]] }])
+		const document = await openSheets([{ name: "S", rows: [[1]] }])
 
 		document.apply({ type: "setCells", sheet: 0, cells: [{ row: 0, col: 0, input: "2" }] })
 
@@ -475,7 +437,7 @@ describe("XlsxDocument edits", () => {
 
 describe("XlsxDocument locks", () => {
 	it("opens a workbook with a chart sheet view-only, and locks rows and renames around its charts", async () => {
-		const workbook = await openXlsx(readFileSync(new URL("chartsheet.xlsx", FIXTURES)), { readStyles: true })
+		const workbook = await openFixture("chartsheet.xlsx")
 		const document = await proven(workbook)
 		const doc = document.doc()
 
@@ -488,11 +450,11 @@ describe("XlsxDocument locks", () => {
 	})
 
 	it("opens a workbook whose tab order is not its part order view-only when parts ride on positions", async () => {
-		const reordered = await proven(await openXlsx(readFileSync(new URL("reordered.xlsx", FIXTURES)), { readStyles: true }))
+		const reordered = await proven(await openFixture("reordered.xlsx"))
 
 		expect(reordered.writable).toBe(false)
 
-		const plain = await open([
+		const plain = await openSheets([
 			{ name: "A", rows: [[1]] },
 			{ name: "B", rows: [[2]] }
 		])

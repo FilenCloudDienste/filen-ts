@@ -5,7 +5,8 @@ import { test, expect, closeTrackedPage, seedSession, settleLeases } from "./fix
 import { focusEditorSurface } from "./helpers/editor"
 import { resolveEditorModKey, resolveModKey } from "./helpers/modkey"
 import { waitForE2eHooks } from "./helpers/e2eHooks"
-import { BOOT_SETTLE_TIMEOUT_MS, bootTo, dismissStartupReminders, LIVE_WRITE_TIMEOUT_MS } from "./helpers/listing"
+import { dispatchAppConnectivity } from "./helpers/offline"
+import { BOOT_SETTLE_TIMEOUT_MS, bootTo, LIVE_WRITE_TIMEOUT_MS, reloadToShell } from "./helpers/listing"
 
 // Notes shell smoke: rail entry → /notes, the contextual sidebar renders, the two-view toggle switches,
 // and a UI-created note lands in the list and navigates. Net-zero on the shared FREE account — the one
@@ -177,9 +178,7 @@ async function withNoteLeakGuard(page: Page, body: () => Promise<void>): Promise
 }
 
 test.describe("notes", () => {
-	test("rail entry navigates to /notes and renders the contextual sidebar", async ({ page, injectedSession }) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
+	test("rail entry navigates to /notes and renders the contextual sidebar", async ({ page }) => {
 		await gotoNotes(page)
 
 		await expect(page.getByRole("link", { name: "Notes", exact: true })).toHaveAttribute("aria-current", "page")
@@ -187,9 +186,7 @@ test.describe("notes", () => {
 		await expect(page.getByRole("button", { name: "New note", exact: true })).toBeVisible()
 	})
 
-	test("the two-view toggle switches between notes and tags", async ({ page, injectedSession }) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
+	test("the two-view toggle switches between notes and tags", async ({ page }) => {
 		await gotoNotes(page)
 
 		const notesToggle = page.getByRole("button", { name: "Notes", exact: true })
@@ -207,9 +204,7 @@ test.describe("notes", () => {
 		await expect(notesToggle).toHaveAttribute("aria-pressed", "true")
 	})
 
-	test("creating a note lands in the list and navigates to it", async ({ page, injectedSession }) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
+	test("creating a note lands in the list and navigates to it", async ({ page }) => {
 		await gotoNotes(page)
 
 		// The guard owns the teardown: this test only learns the uuid from the navigation it asserts,
@@ -251,9 +246,7 @@ test.describe("notes", () => {
 	// on the previous one's live state (a rename before a pin has something to assert on, trash before
 	// restore has something to restore), so splitting would only duplicate the create+rename setup per
 	// test for no isolation gain.
-	test("action menu: rename, pin, favorite, tag assign, trash/restore, delete permanently", async ({ page, injectedSession }) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
+	test("action menu: rename, pin, favorite, tag assign, trash/restore, delete permanently", async ({ page }) => {
 		await gotoNotes(page)
 
 		const main = page.getByRole("main")
@@ -300,8 +293,6 @@ test.describe("notes", () => {
 			// same trigger (disabled-not-hidden, see noteEditorPane) — settle it before cutting the
 			// network, or the offline assertions race the create's own flush.
 			await expect(menuTrigger).toBeEnabled()
-			// Barrier before the network dies: the e2e hooks arrive via a fire-and-forget dynamic
-			// import, and a chunk request that is in flight when the page goes offline FAILS PERMANENTLY.
 			await waitForE2eHooks(page)
 			await page.context().setOffline(true)
 
@@ -468,12 +459,7 @@ test.describe("notes", () => {
 	// content under that note's own file. Both downloads are a plain Blob+anchor click (export.ts's
 	// downloadBlob — never the drive FSA/SW path), so a real "download" event fires the instant the
 	// click lands; no picker stub needed, unlike downloads.spec.ts's drive-file cases.
-	test("export: a checklist note downloads faithful markdown lines, and export-all zips the same content", async ({
-		page,
-		injectedSession
-	}) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
+	test("export: a checklist note downloads faithful markdown lines, and export-all zips the same content", async ({ page }) => {
 		const content = '<ul data-checked="false"><li>Buy milk</li></ul><ul data-checked="true"><li>Already done</li></ul>'
 		const expectedMarkdown = "- [ ] Buy milk\n- [x] Already done"
 		const { uuid, title } = await createAndOpenTestNote(page, "checklist", content, "e2e export checklist")
@@ -534,27 +520,34 @@ test.describe("notes", () => {
 	})
 })
 
-// Read-only content renderers: each note is created with a distinctive title + content
-// through the programmatic hook layer (bypassing the editor UI for a fast, deterministic seed), located in the sidebar via search
-// (title is a random-suffixed string, so an exact-text match is unambiguous even against whatever else
-// lives in the shared account), then opened for a render assertion. Net-zero teardown per test.
+// Random enough that concurrent runs never collide on a title or a marker.
+function uniqueSuffix(): string {
+	return `${String(Date.now())}-${String(Math.floor(Math.random() * 100_000))}`
+}
+
+// Each note is created with a distinctive title + content through the programmatic hook layer
+// (bypassing the editor UI for a fast, deterministic seed), then opened. The read-only renderers pass
+// the content to render; the editing specs pass "" because the editor is what writes it. Net-zero
+// teardown per test.
 async function createAndOpenTestNote(
 	page: Page,
 	noteType: NoteTypeUnderTest,
 	content: string,
-	titlePrefix: string
+	titlePrefix: string,
+	options: { booted?: boolean } = {}
 ): Promise<{ uuid: string; title: string }> {
-	const title = `${titlePrefix} ${String(Date.now())}-${String(Math.floor(Math.random() * 100_000))}`
+	const title = `${titlePrefix} ${uniqueSuffix()}`
 
-	// The hook only exists once the app has booted — boot first, THEN create the note, THEN enter /notes
-	// so its own list query mounts fresh and picks the new note up in its very first fetch (no
-	// stale-cache dance: nothing has fetched the list yet in this page load).
-	await bootTo(page)
-
-	// An authed shell only proves the hooks arrived on the FIRST load of a context that never persisted
-	// a session — bootSdk resumes from kv independently of the fire-and-forget hook import, so every
-	// later load can render exactly like this one with no `window.__filenE2E` on it at all.
-	await waitForE2eHooks(page)
+	// `booted`: the page sits on a shell booted a moment ago with its hooks installed (bootSecondPage),
+	// so another cold boot would buy nothing.
+	if (options.booted !== true) {
+		// A page reused by the same test may have just written; unloading it with a release in flight
+		// orphans the lease.
+		await settleLeases(page)
+		// The hook only exists once the app has booted — boot first, THEN create the note, THEN enter
+		// /notes so its own list query mounts fresh and picks the new note up in its very first fetch.
+		await bootTo(page)
+	}
 
 	const note = await page.evaluate(args => window.__filenE2E.createTestNoteWithContent(args.noteType, args.content, args.title), {
 		noteType,
@@ -567,7 +560,7 @@ async function createAndOpenTestNote(
 	return { uuid: note.uuid, title }
 }
 
-type NoteTypeUnderTest = "text" | "code" | "md" | "rich" | "checklist"
+type NoteTypeUnderTest = Parameters<Window["__filenE2E"]["createTestNoteWithContent"]>[0]
 
 // The surface each type's editor mounts. A note opened in the wrong editor (a list row whose noteType
 // lags the server's) fails here, naming the type it expected, rather than as a missing heading or a
@@ -612,9 +605,7 @@ async function openCreatedNote(page: Page, noteType: NoteTypeUnderTest, title: s
 // This file's top-level test.describe.configure({ mode: "serial" }) already keeps every note-creating
 // test (this block's and the "notes" block's own) from stacking concurrently against that cap.
 test.describe("notes: read-only content renderers", () => {
-	test("text note renders its raw content", async ({ page, injectedSession }) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
+	test("text note renders its raw content", async ({ page }) => {
 		const content = "Hello from a plain text e2e note."
 		const { uuid } = await createAndOpenTestNote(page, "text", content, "e2e text")
 
@@ -634,9 +625,7 @@ test.describe("notes: read-only content renderers", () => {
 		}
 	})
 
-	test("code note renders its raw content", async ({ page, injectedSession }) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
+	test("code note renders its raw content", async ({ page }) => {
 		const content = "const answer = 42;"
 		const { uuid } = await createAndOpenTestNote(page, "code", content, "e2e code")
 
@@ -647,9 +636,7 @@ test.describe("notes: read-only content renderers", () => {
 		}
 	})
 
-	test("md note renders both the raw source split and the live preview", async ({ page, injectedSession }) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
+	test("md note renders both the raw source split and the live preview", async ({ page }) => {
 		const content = "# E2E Heading\n\nSome **bold** text."
 		const { uuid } = await createAndOpenTestNote(page, "md", content, "e2e md")
 		const main = page.getByRole("main")
@@ -665,9 +652,7 @@ test.describe("notes: read-only content renderers", () => {
 		}
 	})
 
-	test("rich note renders sanitized HTML and strips a script tag", async ({ page, injectedSession }) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
+	test("rich note renders sanitized HTML and strips a script tag", async ({ page }) => {
 		const content = "<p>Hello <strong>rich</strong> note</p><script>window.__e2eRichXss = true</script>"
 		const { uuid } = await createAndOpenTestNote(page, "rich", content, "e2e rich")
 		const main = page.getByRole("main")
@@ -688,9 +673,7 @@ test.describe("notes: read-only content renderers", () => {
 	// reader — the seed is parsed into faithful rows (values + checked state). The read-only ChecklistReader
 	// is now reached only by a trashed note (deriveEditorReadOnly), which this shared FREE account has no
 	// UI-free path to open; the seed-faithfulness it used to prove is covered here on the editor surface.
-	test("checklist note opens in the editor with faithful rows and checked state", async ({ page, injectedSession }) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
+	test("checklist note opens in the editor with faithful rows and checked state", async ({ page }) => {
 		const content = '<ul data-checked="false"><li>Buy milk</li></ul><ul data-checked="true"><li>Already done</li></ul>'
 		const { uuid } = await createAndOpenTestNote(page, "checklist", content, "e2e checklist")
 
@@ -718,41 +701,6 @@ test.describe("notes: read-only content renderers", () => {
 	})
 })
 
-// Live CodeMirror editing wired to the fault-tolerant outbox. These two legs are the
-// core durability proof: an edit survives a window-kill mid-edit AND still reaches the server.
-// Serial + net-zero like every note-creating test above.
-async function createEmptyNoteAndOpen(
-	page: Page,
-	noteType: "text" | "md" | "rich" | "checklist",
-	titlePrefix: string,
-	options: { booted?: boolean } = {}
-): Promise<{ uuid: string; title: string }> {
-	const title = `${titlePrefix} ${String(Date.now())}-${String(Math.floor(Math.random() * 100_000))}`
-
-	// `booted`: the page sits on a shell booted a moment ago with its hooks installed (bootSecondPage),
-	// so another cold boot would buy nothing.
-	if (options.booted !== true) {
-		// A page reused by the same test may have just written; unloading it with a release in flight
-		// orphans the lease.
-		await settleLeases(page)
-		await bootTo(page)
-
-		// Same barrier as createAndOpenTestNote: an authed shell is no proof the hooks are installed on
-		// any load past a context's first.
-		await waitForE2eHooks(page)
-	}
-
-	// Empty content — the editor is what writes the content in these cases, not the hook.
-	const note = await page.evaluate(args => window.__filenE2E.createTestNoteWithContent(args.noteType, "", args.title), {
-		noteType,
-		title
-	})
-
-	await openCreatedNote(page, noteType, title, note.uuid)
-
-	return { uuid: note.uuid, title }
-}
-
 // Enter /notes from the rail and open the note whose title matches, scoped to the sidebar (the same
 // title. The row is clicked by its href, not its text: an EMPTY note repeats its title in BOTH the
 // row's title span AND its preview snippet (noteRow.tsx falls the preview back to the title), so a
@@ -771,28 +719,10 @@ async function reloadToNote(page: Page): Promise<void> {
 	// The note's create (and, on the drained paths, the edit's push) took write leases, released
 	// fire-and-forget; reloading over a release in flight orphans the lease.
 	await settleLeases(page)
-	await page.reload()
-	await dismissStartupReminders(page)
-	await expect(page.getByRole("navigation", { name: "Filen" })).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
-	// A reload re-runs the fire-and-forget hook import while bootSdk resumes the session from kv on its
-	// own — so the shell can be authed and interactive with no `window.__filenE2E` yet. Every caller
-	// here reads a hook shortly after, and an evaluate that lands early rejects; inside an expect.poll
-	// that rejection aborts the poll on its first iteration rather than retrying.
-	await waitForE2eHooks(page)
+	await reloadToShell(page)
 }
 
-// Shuts the tab's outbox gate: the push loop runs only while TanStack's onlineManager reads online, and
-// that moves only on the window online/offline EVENT (chats.spec's setAppOffline explains why the
-// context's own offline emulation cannot stand in). An edit typed after this stays on disk, so the 3s
-// debounce cannot race a reload or a kill to the server. The context itself stays online, and a fresh
-// boot seeds the manager from navigator.onLine, so the next boot's replay pushes.
-async function gateOutbox(page: Page): Promise<void> {
-	await page.evaluate(() => {
-		window.dispatchEvent(new Event("offline"))
-	})
-}
-
-// A fresh server read through the page's SDK, which the gate above does not stop.
+// A fresh server read through the page's SDK, which dispatchAppConnectivity's gate does not stop.
 async function readServerContent(page: Page, uuid: string): Promise<string> {
 	return (await page.evaluate(id => window.__filenE2E.readTestNoteContentByUuid(id), uuid)) ?? ""
 }
@@ -802,10 +732,8 @@ async function readServerContent(page: Page, uuid: string): Promise<string> {
 // and Escape leaving the editor for the note's row. The editor keys go through CodeMirror, whose "mod"
 // can differ from the app's under Playwright's device emulation (helpers/modkey.ts).
 test.describe("notes: editor shortcuts", () => {
-	test("a markdown note formats, saves, hides its preview and leaves the editor on its shortcuts", async ({ page, injectedSession }) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
-		const { uuid } = await createEmptyNoteAndOpen(page, "md", "e2e md-keys")
+	test("a markdown note formats, saves, hides its preview and leaves the editor on its shortcuts", async ({ page }) => {
+		const { uuid } = await createAndOpenTestNote(page, "md", "", "e2e md-keys")
 		const main = page.getByRole("main")
 		const content = main.locator(".cm-content")
 		const bold = main.locator("strong", { hasText: "bold" })
@@ -849,12 +777,13 @@ test.describe("notes: editor shortcuts", () => {
 	})
 })
 
+// Live CodeMirror editing wired to the fault-tolerant outbox. These two legs are the
+// core durability proof: an edit survives a window-kill mid-edit AND still reaches the server.
+// Serial + net-zero like every note-creating test above.
 test.describe("notes: live editors", () => {
-	test("text edit typed then reloaded before the debounce survives and reaches the server", async ({ page, injectedSession }) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
-		const marker = `killpath-${String(Date.now())}-${String(Math.floor(Math.random() * 100_000))}`
-		const { uuid } = await createEmptyNoteAndOpen(page, "text", "e2e killpath")
+	test("text edit typed then reloaded before the debounce survives and reaches the server", async ({ page }) => {
+		const marker = `killpath-${uniqueSuffix()}`
+		const { uuid } = await createAndOpenTestNote(page, "text", "", "e2e killpath")
 		const main = page.getByRole("main")
 
 		try {
@@ -862,7 +791,7 @@ test.describe("notes: live editors", () => {
 			// the boot replay below is the only way it can reach the server.
 			const editor = main.locator(".cm-content")
 			await focusEditorSurface(editor)
-			await gateOutbox(page)
+			await dispatchAppConnectivity(page, true)
 			await page.keyboard.type(marker)
 
 			// Prove the immediate-persist landed on OPFS BEFORE the reload — the survives-window-close
@@ -891,12 +820,10 @@ test.describe("notes: live editors", () => {
 		}
 	})
 
-	test("md edit persists through the debounce and both panes reflect it after reload", async ({ page, injectedSession }) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
-		const headingText = `ReloadHeading-${String(Date.now())}-${String(Math.floor(Math.random() * 100_000))}`
+	test("md edit persists through the debounce and both panes reflect it after reload", async ({ page }) => {
+		const headingText = `ReloadHeading-${uniqueSuffix()}`
 		const typed = `# ${headingText}`
-		const { uuid } = await createEmptyNoteAndOpen(page, "md", "e2e md-edit")
+		const { uuid } = await createAndOpenTestNote(page, "md", "", "e2e md-edit")
 		const main = page.getByRole("main")
 
 		try {
@@ -937,20 +864,19 @@ test.describe("notes: live editors", () => {
 // Rich (Quill) + custom checklist editors wired to the same fault-tolerant outbox.
 // Serial + net-zero like every note-creating test above.
 test.describe("notes: rich and checklist editors", () => {
-	test("rich toolbar formatting survives an immediate reload and reaches the server", async ({ page, injectedSession }) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
-		const marker = `RichBold${String(Date.now())}${String(Math.floor(Math.random() * 100_000))}`
-		const { uuid } = await createEmptyNoteAndOpen(page, "rich", "e2e rich-edit")
+	test("rich toolbar formatting survives an immediate reload and reaches the server", async ({ page }) => {
+		const marker = `RichBold-${uniqueSuffix()}`
+		const { uuid } = await createAndOpenTestNote(page, "rich", "", "e2e rich-edit")
 		const main = page.getByRole("main")
 
 		try {
 			// Type bold content straight into the live Quill surface: focus the editor, toggle Bold, type.
-			// Gated first (gateOutbox), so the boot replay below is the only way the edit reaches the server.
+			// Gated first (dispatchAppConnectivity), so the boot replay below is the only way the edit
+			// reaches the server.
 			const editor = main.locator(".ql-editor")
 			await focusEditorSurface(editor)
 			await main.getByRole("button", { name: "Bold", exact: true }).click()
-			await gateOutbox(page)
+			await dispatchAppConnectivity(page, true)
 			await page.keyboard.type(marker)
 
 			// The bold run is on screen before any reload — proves the toolbar drove quill.format.
@@ -996,9 +922,7 @@ test.describe("notes: rich and checklist editors", () => {
 		}
 	})
 
-	test("a hostile-HTML rich note opens sanitized in the editor and never executes its script", async ({ page, injectedSession }) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
+	test("a hostile-HTML rich note opens sanitized in the editor and never executes its script", async ({ page }) => {
 		const content = "<p>Safe <strong>rich</strong> body</p><script>window.__e2eEditorXss = true</script>"
 		const { uuid } = await createAndOpenTestNote(page, "rich", content, "e2e rich-xss")
 		const main = page.getByRole("main")
@@ -1016,12 +940,10 @@ test.describe("notes: rich and checklist editors", () => {
 		}
 	})
 
-	test("checklist rows added and toggled survive an immediate reload", async ({ page, injectedSession }) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
-		const first = `Chk1-${String(Date.now())}-${String(Math.floor(Math.random() * 100_000))}`
-		const second = `Chk2-${String(Date.now())}-${String(Math.floor(Math.random() * 100_000))}`
-		const { uuid } = await createEmptyNoteAndOpen(page, "checklist", "e2e checklist-edit")
+	test("checklist rows added and toggled survive an immediate reload", async ({ page }) => {
+		const first = `Chk1-${uniqueSuffix()}`
+		const second = `Chk2-${uniqueSuffix()}`
+		const { uuid } = await createAndOpenTestNote(page, "checklist", "", "e2e checklist-edit")
 		const main = page.getByRole("main")
 
 		try {
@@ -1035,8 +957,9 @@ test.describe("notes: rich and checklist editors", () => {
 			// the WRONG element — a fill+Enter there splits nothing and the count below never reaches 2.
 			const rows = main.getByRole("textbox", { name: "Checklist item", exact: true })
 			await expect(rows.first()).toBeVisible()
-			// Gated first (gateOutbox), so the boot replay below is the only way the edit reaches the server.
-			await gateOutbox(page)
+			// Gated first (dispatchAppConnectivity), so the boot replay below is the only way the edit
+			// reaches the server.
+			await dispatchAppConnectivity(page, true)
 			await rows.first().fill(first)
 			// Read the value back before pressing Enter: `fill` proves only that the DOM input was
 			// written, and the checklist editor's own model round trip lands after it — a remount inside
@@ -1124,20 +1047,14 @@ async function bootSecondPage(page: Page, injectedSession: string): Promise<Page
 
 	await seedSession(pageB, injectedSession)
 	await bootTo(pageB)
-	// A sibling page seeds its own session, so its shell renders authed off kv whether or not the
-	// fire-and-forget hook import has landed — and every caller of this helper drives pageB through
-	// `window.__filenE2E`. The barrier belongs to pageB, not to the fixture page.
-	await waitForE2eHooks(pageB)
 
 	return pageB
 }
 
 test.describe("notes: realtime", () => {
 	test("a rename on a second page lands live on the editor header and sidebar row", async ({ page, injectedSession }) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
-		const { uuid, title } = await createEmptyNoteAndOpen(page, "text", "e2e realtime-meta")
-		const newTitle = `e2e renamed ${String(Date.now())}-${String(Math.floor(Math.random() * 100_000))}`
+		const { uuid, title } = await createAndOpenTestNote(page, "text", "", "e2e realtime-meta")
+		const newTitle = `e2e renamed ${uniqueSuffix()}`
 		const main = page.getByRole("main")
 		const sidebar = page.getByRole("complementary")
 
@@ -1179,9 +1096,7 @@ test.describe("notes: realtime", () => {
 		page,
 		injectedSession
 	}) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
-		const stamp = `${String(Date.now())}-${String(Math.floor(Math.random() * 100_000))}`
+		const stamp = uniqueSuffix()
 		const initialContent = `initial-${stamp}`
 		const remoteContent = `remote-${stamp}`
 		const secondRemoteContent = `remote-again-${stamp}`
@@ -1194,7 +1109,6 @@ test.describe("notes: realtime", () => {
 		// than by text — a short single-line content can equal the row's own preview snippet, which would
 		// make a getByText(title) row click strict-mode ambiguous.
 		await bootTo(page)
-		await waitForE2eHooks(page)
 
 		const note = await page.evaluate(args => window.__filenE2E.createTestNoteWithContent("text", args.content, args.title), {
 			content: initialContent,
@@ -1253,12 +1167,10 @@ test.describe("notes: realtime", () => {
 // management surface (render-only past the point a second account would be needed — see below).
 // Serial + net-zero like every other note-creating block in this file.
 test.describe("notes: participants and history dialogs", () => {
-	test("history dialog lists both versions, previews the old one read-only, and restores it", async ({ page, injectedSession }) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
-		const v1 = `HistV1-${String(Date.now())}-${String(Math.floor(Math.random() * 100_000))}`
-		const v2 = `HistV2-${String(Date.now())}-${String(Math.floor(Math.random() * 100_000))}`
-		const v3 = `HistV3-${String(Date.now())}-${String(Math.floor(Math.random() * 100_000))}`
+	test("history dialog lists both versions, previews the old one read-only, and restores it", async ({ page }) => {
+		const v1 = `HistV1-${uniqueSuffix()}`
+		const v2 = `HistV2-${uniqueSuffix()}`
+		const v3 = `HistV3-${uniqueSuffix()}`
 		const { uuid } = await createAndOpenTestNote(page, "text", v1, "e2e history")
 		const main = page.getByRole("main")
 
@@ -1329,10 +1241,8 @@ test.describe("notes: participants and history dialogs", () => {
 	// whichever of empty/populated it turns out to be) renders without ever asserting a specific
 	// outcome past that point, mirroring contacts.spec.ts's own hasContacts-agnostic pattern. Dismissed
 	// via Escape, never submitted — no outward-facing add on the shared account.
-	test("participants dialog renders the owner management surface", async ({ page, injectedSession }) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
-		const { uuid } = await createEmptyNoteAndOpen(page, "text", "e2e participants")
+	test("participants dialog renders the owner management surface", async ({ page }) => {
+		const { uuid } = await createAndOpenTestNote(page, "text", "", "e2e participants")
 		const main = page.getByRole("main")
 
 		try {
@@ -1380,9 +1290,7 @@ test.describe("notes: multi-tab outbox", () => {
 		page,
 		injectedSession
 	}) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
-		const stamp = `${String(Date.now())}-${String(Math.floor(Math.random() * 100_000))}`
+		const stamp = uniqueSuffix()
 		const markerX = `leaderX-${stamp}`
 		const markerY = `followerY-${stamp}`
 		const markerZ = `failoverZ-${stamp}`
@@ -1398,7 +1306,7 @@ test.describe("notes: multi-tab outbox", () => {
 		try {
 			// The leader's OWN edit drains through its push loop to the server. bootSecondPage has just
 			// booted it, and a second boot would only hand the db lock back and forth for nothing.
-			const x = await createEmptyNoteAndOpen(leader, "text", "e2e mt-leader", { booted: true })
+			const x = await createAndOpenTestNote(leader, "text", "", "e2e mt-leader", { booted: true })
 
 			uuidX = x.uuid
 			await typeIntoTextEditor(leader, markerX)
@@ -1407,7 +1315,7 @@ test.describe("notes: multi-tab outbox", () => {
 				.toBe(markerX)
 
 			// The follower FORWARDS its edit to the leader, which pushes it — the follower never pushes.
-			const y = await createEmptyNoteAndOpen(page, "text", "e2e mt-follower")
+			const y = await createAndOpenTestNote(page, "text", "", "e2e mt-follower")
 
 			uuidY = y.uuid
 			await typeIntoTextEditor(page, markerY)
@@ -1417,15 +1325,15 @@ test.describe("notes: multi-tab outbox", () => {
 
 			// ── FAILOVER ──────────────────────────────────────────────────────────
 			// A fresh note typed on the follower, forwarded to the leader, persisted on the leader's disk —
-			// then the leader is killed without ever pushing Z itself. Its outbox is gated first (gateOutbox):
-			// a kill raced against the 3s debounce could lose to it, and then either pass on the leader's own
-			// push, proving no failover, or land mid-push and orphan the lease. Its earlier pushes' releases
-			// are settled first for the same reason.
-			const z = await createEmptyNoteAndOpen(page, "text", "e2e mt-failover")
+			// then the leader is killed without ever pushing Z itself. Its outbox is gated first
+			// (dispatchAppConnectivity): a kill raced against the 3s debounce could lose to it, and then
+			// either pass on the leader's own push, proving no failover, or land mid-push and orphan the
+			// lease. Its earlier pushes' releases are settled first for the same reason.
+			const z = await createAndOpenTestNote(page, "text", "", "e2e mt-failover")
 
 			uuidZ = z.uuid
 			await settleLeases(leader)
-			await gateOutbox(leader)
+			await dispatchAppConnectivity(leader, true)
 			await typeIntoTextEditor(page, markerZ)
 
 			// Confirm the forward reached the LEADER's OPFS (proves cross-tab forward + immediate-persist).

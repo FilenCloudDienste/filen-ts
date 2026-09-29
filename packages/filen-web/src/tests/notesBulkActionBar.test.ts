@@ -13,7 +13,6 @@ import {
 	Trash2Icon,
 	LogOutIcon
 } from "lucide-react"
-import type { Note, NoteTag, UuidStr } from "@filen/sdk-rs"
 
 import {
 	noteBulkActions,
@@ -22,10 +21,8 @@ import {
 	canBulkTrashNotes
 } from "@/features/notes/components/notesBulkActionBar.logic"
 import { type NoteSelectionFlags } from "@filen/shared"
-
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import { testUuid } from "@/tests/support/uuid"
+import { mockNote, mockNoteTag } from "@/tests/fixtures/notes"
 
 function flags(overrides: Partial<NoteSelectionFlags> = {}): NoteSelectionFlags {
 	return {
@@ -195,41 +192,12 @@ describe("noteBulkActions — archive/restore icon identity", () => {
 	})
 })
 
-function mockTag(overrides: Partial<NoteTag> = {}): NoteTag {
-	return {
-		uuid: testUuid("tag"),
-		name: "tag",
-		favorite: false,
-		editedTimestamp: 1_700_000_000_000n,
-		createdTimestamp: 1_700_000_000_000n,
-		...overrides
-	}
-}
-
-function mockNote(tags: NoteTag[], uuid: UuidStr = testUuid("note")): Note {
-	return {
-		uuid,
-		ownerId: 1n,
-		lastEditorId: 1n,
-		favorite: false,
-		pinned: false,
-		tags,
-		noteType: "text",
-		encryptionKey: "key",
-		trash: false,
-		archive: false,
-		createdTimestamp: 1_700_000_000_000n,
-		editedTimestamp: 1_700_000_000_000n,
-		participants: []
-	}
-}
-
 describe("noteBulkTagSubmenuEntries — tri-state collapse", () => {
 	it("checks a tag only when EVERY selected note already carries it", () => {
-		const shared = mockTag({ uuid: testUuid("shared") })
-		const partial = mockTag({ uuid: testUuid("partial") })
-		const noteA = mockNote([shared, partial], testUuid("a"))
-		const noteB = mockNote([shared], testUuid("b"))
+		const shared = mockNoteTag({ uuid: testUuid("shared") })
+		const partial = mockNoteTag({ uuid: testUuid("partial") })
+		const noteA = mockNote({ uuid: testUuid("a"), tags: [shared, partial] })
+		const noteB = mockNote({ uuid: testUuid("b"), tags: [shared] })
 
 		const entries = noteBulkTagSubmenuEntries([noteA, noteB], [shared, partial])
 
@@ -240,15 +208,15 @@ describe("noteBulkTagSubmenuEntries — tri-state collapse", () => {
 	})
 
 	it("checks no tag at all when the selection is empty", () => {
-		const tag = mockTag()
+		const tag = mockNoteTag()
 
 		expect(noteBulkTagSubmenuEntries([], [tag])).toEqual([{ tag, checked: false }])
 	})
 
 	it("returns one entry per account tag, in the given order", () => {
-		const tagA = mockTag({ uuid: testUuid("a") })
-		const tagB = mockTag({ uuid: testUuid("b") })
-		const note = mockNote([tagA, tagB])
+		const tagA = mockNoteTag({ uuid: testUuid("a") })
+		const tagB = mockNoteTag({ uuid: testUuid("b") })
+		const note = mockNote({ tags: [tagA, tagB] })
 
 		expect(noteBulkTagSubmenuEntries([note], [tagA, tagB]).map(e => e.tag.uuid)).toEqual([tagA.uuid, tagB.uuid])
 	})

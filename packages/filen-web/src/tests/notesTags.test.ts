@@ -1,10 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
-import type { Note, NoteTag, UuidStr } from "@filen/sdk-rs"
-
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import { mockNote, mockNoteTag } from "@/tests/fixtures/notes"
 
 const { createNoteTagOp, renameNoteTagOp, deleteNoteTagOp, setNoteTagFavoritedOp, addTagToNoteOp, removeTagFromNoteOp } = vi.hoisted(
 	() => ({
@@ -42,42 +38,12 @@ import {
 	removeTagFromNote
 } from "@/features/notes/lib/tags"
 import { createTagForNote } from "@/features/notes/lib/createTagForNote"
+import { testUuid } from "@/tests/support/uuid"
 
 beforeEach(() => {
 	vi.clearAllMocks()
 	testQueryClient.clear()
 })
-
-function mockNote(overrides: Partial<Note> = {}): Note {
-	return {
-		uuid: testUuid("note"),
-		ownerId: 1n,
-		lastEditorId: 1n,
-		favorite: false,
-		pinned: false,
-		tags: [],
-		noteType: "text",
-		title: "note title",
-		preview: "note preview",
-		trash: false,
-		archive: false,
-		createdTimestamp: 1_700_000_000_000n,
-		editedTimestamp: 1_700_000_000_000n,
-		participants: [],
-		...overrides
-	}
-}
-
-function mockTag(overrides: Partial<NoteTag> = {}): NoteTag {
-	return {
-		uuid: testUuid("tag"),
-		name: "tag",
-		favorite: false,
-		editedTimestamp: 1_700_000_000_000n,
-		createdTimestamp: 1_700_000_000_000n,
-		...overrides
-	}
-}
 
 describe("createNoteTag — reserved-name rejection", () => {
 	it.each(["all", "favorites", "pinned", "All", "FAVORITES", "  pinned  "])("rejects %j without calling the worker", async name => {
@@ -88,7 +54,7 @@ describe("createNoteTag — reserved-name rejection", () => {
 	})
 
 	it("creates a non-reserved, trimmed name and upserts the tags cache", async () => {
-		const tag = mockTag({ name: "work" })
+		const tag = mockNoteTag({ name: "work" })
 		createNoteTagOp.mockResolvedValueOnce(tag)
 
 		const outcome = await createNoteTag("  work  ")
@@ -108,7 +74,7 @@ describe("createNoteTag — reserved-name rejection", () => {
 
 	it("succeeds with a completely empty notes list (no note argument, none needed)", async () => {
 		testQueryClient.setQueryData(NOTES_QUERY_KEY, [])
-		const tag = mockTag({ name: "solo" })
+		const tag = mockNoteTag({ name: "solo" })
 		createNoteTagOp.mockResolvedValueOnce(tag)
 
 		const outcome = await createNoteTag("solo")
@@ -124,14 +90,14 @@ describe("createNoteTag — reserved-name rejection", () => {
 
 describe("renameNoteTag", () => {
 	it("rejects a reserved name without calling the worker", async () => {
-		const outcome = await renameNoteTag(mockTag(), "Favorites")
+		const outcome = await renameNoteTag(mockNoteTag(), "Favorites")
 
 		expect(outcome.status).toBe("error")
 		expect(renameNoteTagOp).not.toHaveBeenCalled()
 	})
 
 	it("renames the tag and patches its name onto every cached note row carrying it", async () => {
-		const tag = mockTag({ uuid: testUuid("t"), name: "old" })
+		const tag = mockNoteTag({ uuid: testUuid("t"), name: "old" })
 		const renamed = { ...tag, name: "new" }
 		const noteWithTag = mockNote({ uuid: testUuid("a"), tags: [tag] })
 		const noteWithoutTag = mockNote({ uuid: testUuid("b"), tags: [] })
@@ -148,8 +114,8 @@ describe("renameNoteTag", () => {
 
 describe("deleteNoteTag", () => {
 	it("removes the tag from the tags cache and strips it from every cached note row", async () => {
-		const tag = mockTag({ uuid: testUuid("t") })
-		const otherTag = mockTag({ uuid: testUuid("other") })
+		const tag = mockNoteTag({ uuid: testUuid("t") })
+		const otherTag = mockNoteTag({ uuid: testUuid("other") })
 		const noteWithTag = mockNote({ uuid: testUuid("a"), tags: [tag, otherTag] })
 		const noteWithoutTag = mockNote({ uuid: testUuid("b"), tags: [otherTag] })
 		testQueryClient.setQueryData(NOTES_QUERY_KEY, [noteWithTag, noteWithoutTag])
@@ -167,7 +133,7 @@ describe("deleteNoteTag", () => {
 	})
 
 	it("returns an error outcome on rejection, without patching either cache", async () => {
-		const tag = mockTag()
+		const tag = mockNoteTag()
 		testQueryClient.setQueryData(NOTE_TAGS_QUERY_KEY, [tag])
 		deleteNoteTagOp.mockRejectedValueOnce(new Error("fail"))
 
@@ -180,14 +146,14 @@ describe("deleteNoteTag", () => {
 
 describe("setNoteTagFavorited", () => {
 	it("no-ops when the requested state matches the current one", async () => {
-		const tag = mockTag({ favorite: true })
+		const tag = mockNoteTag({ favorite: true })
 
 		await expect(setNoteTagFavorited(tag, true)).resolves.toEqual({ status: "success", item: tag })
 		expect(setNoteTagFavoritedOp).not.toHaveBeenCalled()
 	})
 
 	it("favorites and upserts the result", async () => {
-		const tag = mockTag({ favorite: false })
+		const tag = mockNoteTag({ favorite: false })
 		const updated = { ...tag, favorite: true }
 		setNoteTagFavoritedOp.mockResolvedValueOnce(updated)
 
@@ -200,7 +166,7 @@ describe("setNoteTagFavorited", () => {
 
 describe("addTagToNote — idempotent", () => {
 	it("is a no-op (no worker call) when the note already carries the tag", async () => {
-		const tag = mockTag()
+		const tag = mockNoteTag()
 		const note = mockNote({ tags: [tag] })
 
 		const outcome = await addTagToNote(note, tag)
@@ -210,7 +176,7 @@ describe("addTagToNote — idempotent", () => {
 	})
 
 	it("adds the tag and patches both the note and tag caches", async () => {
-		const tag = mockTag()
+		const tag = mockNoteTag()
 		const note = mockNote({ tags: [] })
 		const updatedNote = { ...note, tags: [tag] }
 		addTagToNoteOp.mockResolvedValueOnce({ note: updatedNote, tag })
@@ -226,7 +192,7 @@ describe("addTagToNote — idempotent", () => {
 
 describe("removeTagFromNote — idempotent", () => {
 	it("is a no-op (no worker call) when the note does not carry the tag", async () => {
-		const tag = mockTag()
+		const tag = mockNoteTag()
 		const note = mockNote({ tags: [] })
 
 		const outcome = await removeTagFromNote(note, tag)
@@ -236,7 +202,7 @@ describe("removeTagFromNote — idempotent", () => {
 	})
 
 	it("removes the tag and upserts the result", async () => {
-		const tag = mockTag()
+		const tag = mockNoteTag()
 		const note = mockNote({ tags: [tag] })
 		const updated = { ...note, tags: [] }
 		removeTagFromNoteOp.mockResolvedValueOnce(updated)
@@ -252,7 +218,7 @@ describe("removeTagFromNote — idempotent", () => {
 describe("createTagForNote", () => {
 	it("retrying after the tagging half failed reuses the created tag instead of creating a duplicate", async () => {
 		const note = mockNote()
-		const tag = mockTag({ uuid: testUuid("t"), name: "work" })
+		const tag = mockNoteTag({ uuid: testUuid("t"), name: "work" })
 		createNoteTagOp.mockResolvedValueOnce(tag)
 		addTagToNoteOp.mockRejectedValueOnce(new Error("offline"))
 
@@ -273,8 +239,8 @@ describe("createTagForNote", () => {
 
 	it("creates a new tag when the name changed or the earlier tag is gone", async () => {
 		const note = mockNote()
-		const tag = mockTag({ uuid: testUuid("t"), name: "work" })
-		const renamed = mockTag({ uuid: testUuid("r"), name: "home" })
+		const tag = mockNoteTag({ uuid: testUuid("t"), name: "work" })
+		const renamed = mockNoteTag({ uuid: testUuid("r"), name: "home" })
 		createNoteTagOp.mockResolvedValueOnce(renamed)
 		addTagToNoteOp.mockResolvedValueOnce({ note: { ...note, tags: [renamed] }, tag: renamed })
 
@@ -282,7 +248,7 @@ describe("createTagForNote", () => {
 
 		expect(createNoteTagOp).toHaveBeenCalledExactlyOnceWith("home")
 
-		const again = mockTag({ uuid: testUuid("x"), name: "work" })
+		const again = mockNoteTag({ uuid: testUuid("x"), name: "work" })
 		createNoteTagOp.mockResolvedValueOnce(again)
 		addTagToNoteOp.mockResolvedValueOnce({ note: { ...note, tags: [again] }, tag: again })
 

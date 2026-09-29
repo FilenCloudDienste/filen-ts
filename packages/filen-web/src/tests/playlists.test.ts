@@ -2,11 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
 import type { Dir, File as SdkFile, SocketEvent, UuidStr } from "@filen/sdk-rs"
 import { DIRECTORY_NOT_FOUND_PREFIX, PARENT_NOT_FOUND_PREFIX, type ErrorDTO } from "@/lib/sdk/errors"
-
-// UuidStr is a template-literal brand — pad a short label the same way drive.test.ts's testUuid does.
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import { testUuid } from "@/tests/support/uuid"
 
 const DOT_FILEN_UUID = testUuid("dotfilen")
 const PLAYLISTS_DIR_UUID = testUuid("playlistsdir")

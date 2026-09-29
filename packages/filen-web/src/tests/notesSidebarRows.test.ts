@@ -3,12 +3,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { render, cleanup, act, screen } from "@testing-library/react"
 import { createElement, type ReactNode } from "react"
-import type { Note, NoteTag, UuidStr } from "@filen/sdk-rs"
+import type { Note } from "@filen/sdk-rs"
 import "@/lib/i18n"
-
-// Both rows pull the SDK action surface in transitively (their menus), and the real client module
-// imports a Vite `?worker` — unresolvable under vitest, and no assertion here dispatches an action.
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
 
 // The note row's Link is the only router surface these rows touch; stubbed down to the anchor it
 // renders so a row can mount without a router context. `_params` is destructured purely to keep the
@@ -22,39 +18,7 @@ vi.mock("@tanstack/react-router", () => ({
 
 import { NoteRow } from "@/features/notes/components/noteRow"
 import { TagGroupRow } from "@/features/notes/components/notesSidebar"
-
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
-
-function mockNote(): Note {
-	return {
-		uuid: testUuid("note"),
-		ownerId: 1n,
-		lastEditorId: 1n,
-		favorite: false,
-		pinned: false,
-		tags: [],
-		noteType: "text",
-		title: "title",
-		preview: "preview",
-		trash: false,
-		archive: false,
-		createdTimestamp: 0n,
-		editedTimestamp: 0n,
-		participants: []
-	}
-}
-
-function mockTag(): NoteTag {
-	return {
-		uuid: testUuid("tag"),
-		name: "Recipes",
-		favorite: false,
-		editedTimestamp: 0n,
-		createdTimestamp: 0n
-	}
-}
+import { mockNote, mockNoteTag } from "@/tests/fixtures/notes"
 
 function renderNoteRow(selected: boolean, multiSelected: boolean, note: Note = mockNote()) {
 	return render(
@@ -74,7 +38,7 @@ function renderNoteRow(selected: boolean, multiSelected: boolean, note: Note = m
 function renderTagRow(expanded: boolean) {
 	return render(
 		createElement(TagGroupRow, {
-			row: { kind: "tag", tag: mockTag(), noteCount: 2, expanded },
+			row: { kind: "tag", tag: mockNoteTag({ name: "Recipes" }), noteCount: 2, expanded },
 			onToggle: () => undefined,
 			onTagAction: () => undefined,
 			onCreateNoteInTag: () => undefined

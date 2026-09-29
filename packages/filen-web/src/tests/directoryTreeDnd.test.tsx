@@ -8,7 +8,6 @@ import type { Dir, UuidStr } from "@filen/sdk-rs"
 
 const { performMove, startCopyWithCard } = vi.hoisted(() => ({ performMove: vi.fn(), startCopyWithCard: vi.fn() }))
 
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 vi.mock("@/features/drive/lib/dnd", async importOriginal => ({
 	...(await importOriginal<typeof import("@/features/drive/lib/dnd")>()),
@@ -22,10 +21,7 @@ import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { INTERNAL_DRAG_TYPE, clearDragPayload, getDragPayload } from "@/features/drive/lib/dnd"
 import { driveListingQueryKey, projectTreeChildren, type DirectoryTreeChild } from "@/features/drive/queries/drive"
 import { DirectoryTree, type DirectoryTreeContext } from "@/features/drive/components/directoryTree"
-
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import { testUuid } from "@/tests/support/uuid"
 
 function dirItem(label: string, name: string, parent: string): DriveItem {
 	return narrowItem({

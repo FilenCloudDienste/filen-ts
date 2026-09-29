@@ -14,8 +14,6 @@ vi.mock("@/lib/sdk/client", () => ({ sdkApi: { listPhotosRecursive, isOutsidePho
 
 vi.mock("@/queries/client", async () => ({ queryClient: (await import("@/tests/testQueryClient")).createTestQueryClient() }))
 
-vi.mock("@/lib/log", () => ({ log: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() } }))
-
 import { queryClient } from "@/queries/client"
 import { queryClientWrapper } from "@/tests/testQueryClient"
 import { cacheDirs, clearDirectoryCache, isOutsideRoot } from "@/features/drive/lib/cache"
@@ -29,10 +27,7 @@ import {
 } from "@/features/photos/queries/photos"
 import { handleDriveEvent } from "@/features/drive/lib/socketHandlers"
 import { socketAuthenticated, socketDropped } from "@/lib/sdk/socketSession"
-
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import { testUuid } from "@/tests/support/uuid"
 
 function mockDir(uuid: UuidStr, parent: UuidStr): Dir {
 	return {

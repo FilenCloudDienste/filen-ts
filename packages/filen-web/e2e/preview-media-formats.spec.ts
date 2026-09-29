@@ -1,6 +1,7 @@
 import { test, expect } from "./fixtures"
-import { bootTo } from "./helpers/listing"
-import { enterFixtureDirectory, FIXTURE_FILES } from "./helpers/fixtures"
+import { bootTo, LAZY_VIEWER_TIMEOUT_MS } from "./helpers/listing"
+import { FIXTURE_FILES, openFixtureRows } from "./helpers/fixtures"
+import { boxOf } from "./helpers/geometry"
 import { PDF_PASSWORD_CORRECT } from "./helpers/fixtureBytes"
 import { trackCspViolations } from "./helpers/csp"
 
@@ -13,20 +14,15 @@ import { trackCspViolations } from "./helpers/csp"
 // that made a teardown's root-row click retry forever against a listing whose rows kept detaching
 // under the concurrent churn.
 
-test("image preview opens, pages with the button and the arrow key, and closes with escape", async ({ page, injectedSession }) => {
-	expect(injectedSession.length).toBeGreaterThan(0)
-
+test("image preview opens, pages with the button and the arrow key, and closes with escape", async ({ page }) => {
 	// Exactly two slots, so the pager has somewhere to go and exactly one direction is enabled at each end.
 	const [nameA, nameB] = FIXTURE_FILES["preview-image"]
 
 	await bootTo(page)
 
-	const { listbox } = await enterFixtureDirectory(page, "preview-image")
-
-	const rowA = listbox.getByRole("option", { name: nameA })
-	const rowB = listbox.getByRole("option", { name: nameB })
-	await expect(rowA).toBeVisible({ timeout: 45_000 })
-	await expect(rowB).toBeVisible({ timeout: 45_000 })
+	const {
+		rows: [rowA]
+	} = await openFixtureRows(page, "preview-image")
 
 	// Open the first image — the overlay renders it (worker round trip -> generous timeout).
 	await rowA.dblclick()
@@ -58,26 +54,23 @@ test("image preview opens, pages with the button and the arrow key, and closes w
 // mediaType.test.ts, heicCodec.test.ts), an injected/mocked decoder can't prove this. Also
 // proves the buffered-not-streamed guarantee end to end (the img's own src) and zero CSP violations
 // during the WASM load + decode (the CSP concession this feature could have needed, but didn't).
-test("HEIC preview transforms client-side and renders via the buffered path, never the SW route", async ({ page, injectedSession }) => {
-	expect(injectedSession.length).toBeGreaterThan(0)
-
+test("HEIC preview transforms client-side and renders via the buffered path, never the SW route", async ({ page }) => {
 	const [nameHeic] = FIXTURE_FILES["preview-heic"]
 
 	const cspViolations = trackCspViolations(page)
 
 	await bootTo(page)
 
-	const { listbox } = await enterFixtureDirectory(page, "preview-heic")
-
-	const row = listbox.getByRole("option", { name: nameHeic })
-	await expect(row).toBeVisible({ timeout: 45_000 })
+	const {
+		rows: [row]
+	} = await openFixtureRows(page, "preview-heic")
 
 	// The WASM decoder is lazy-loaded here for the first time (fetch + compile + decode + a JPEG
 	// re-encode), on top of the worker round trip every buffered preview already pays — a generous
 	// timeout accounts for that, not just the download.
 	await row.dblclick()
 	const img = page.getByRole("img", { name: nameHeic })
-	await expect(img).toBeVisible({ timeout: 60_000 })
+	await expect(img).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 
 	// Buffered path only, never the SW's inline route (needsImageTransform's own unit test proves
 	// the logic-layer guarantee; this is the same guarantee observed live).
@@ -98,11 +91,8 @@ test("HEIC preview transforms client-side and renders via the buffered path, nev
 // CSP console violations (the pdf.js worker's own acceptance check). The selectable text layer and the
 // annotation link overlay are DOM-only too — pdf.js generates that DOM, so this is their only proof.
 test("PDF preview renders multi-page content with a selectable text layer and safe annotation links, pages via its own toolbar with a real scroll, and closes, no CSP console errors", async ({
-	page,
-	injectedSession
+	page
 }) => {
-	expect(injectedSession.length).toBeGreaterThan(0)
-
 	// Two 60s canvas renders, a 30s text layer, the retried band reads and the page-2 scroll add to
 	// ~270s of pinned waits, on top of the fixture-tree descent preamble the read lane's 480s already
 	// mostly holds — together they can exceed it. An explicit ceiling rather than test.slow(), which
@@ -110,18 +100,13 @@ test("PDF preview renders multi-page content with a selectable text layer and sa
 	// in the same way).
 	test.setTimeout(600_000)
 
-	const [namePdf, nameLinksPdf] = FIXTURE_FILES["preview-pdf-pages"]
-
 	const cspViolations = trackCspViolations(page)
 
 	await bootTo(page)
 
-	const { listbox } = await enterFixtureDirectory(page, "preview-pdf-pages")
-
-	const row = listbox.getByRole("option", { name: namePdf })
-	await expect(row).toBeVisible({ timeout: 45_000 })
-	const linksRow = listbox.getByRole("option", { name: nameLinksPdf })
-	await expect(linksRow).toBeVisible({ timeout: 45_000 })
+	const {
+		rows: [row, linksRow]
+	} = await openFixtureRows(page, "preview-pdf-pages")
 
 	// A short viewport (rather than enterFixtureDirectory's tall one, which exists only to defeat
 	// the drive LISTING's own virtualization) — PDF_BYTES' two 300x400pt pages can't both fit at
@@ -132,7 +117,7 @@ test("PDF preview renders multi-page content with a selectable text layer and sa
 	// spin-up), on top of the buffered download every whole-buffer preview already pays.
 	await row.dblclick()
 	const firstPageCanvas = page.locator('canvas[aria-label*="Page 1 of 2"]')
-	await expect(firstPageCanvas).toBeVisible({ timeout: 60_000 })
+	await expect(firstPageCanvas).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 	await expect(page.getByText("Page 1 of 2")).toBeVisible()
 
 	// The selectable text layer: only present once TextLayer has actually rendered.
@@ -160,12 +145,8 @@ test("PDF preview renders multi-page content with a selectable text layer and sa
 	// AFTER the canvas paints, so a pair of boxes sampled in between is self-consistent and still outside
 	// the band — a failure that says the layer is broken when it is only mid-layout.
 	await expect(async () => {
-		const spanBox = await pageOneSpan.boundingBox()
-		const canvasBox = await firstPageCanvas.boundingBox()
-
-		if (!spanBox || !canvasBox) {
-			throw new Error("text-layer span or page canvas has no bounding box")
-		}
+		const spanBox = await boxOf(pageOneSpan)
+		const canvasBox = await boxOf(firstPageCanvas)
 
 		expect(spanBox.x).toBeGreaterThanOrEqual(canvasBox.x - 1)
 		expect(spanBox.y).toBeGreaterThanOrEqual(canvasBox.y - 1)
@@ -201,7 +182,7 @@ test("PDF preview renders multi-page content with a selectable text layer and sa
 	// (unlike the docx sweep, which strips an href after render).
 	await linksRow.dblclick()
 	const linksPageCanvas = page.locator('canvas[aria-label*="Page 1 of 1"]')
-	await expect(linksPageCanvas).toBeVisible({ timeout: 60_000 })
+	await expect(linksPageCanvas).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 
 	const annotationLink = page.getByRole("dialog").getByRole("link")
 	await expect(annotationLink).toHaveCount(1)
@@ -212,12 +193,8 @@ test("PDF preview renders multi-page content with a selectable text layer and sa
 	// Retried for the same reason the text-layer bands above are: the annotation layer is positioned off
 	// the canvas's measured box, so a pair sampled mid-layout is self-consistent and still out of bounds.
 	await expect(async () => {
-		const linkBox = await annotationLink.boundingBox()
-		const linksCanvasBox = await linksPageCanvas.boundingBox()
-
-		if (!linkBox || !linksCanvasBox) {
-			throw new Error("annotation link or page canvas has no bounding box")
-		}
+		const linkBox = await boxOf(annotationLink)
+		const linksCanvasBox = await boxOf(linksPageCanvas)
 
 		expect(linkBox.x).toBeGreaterThanOrEqual(linksCanvasBox.x - 1)
 		expect(linkBox.x + linkBox.width).toBeLessThanOrEqual(linksCanvasBox.x + linksCanvasBox.width + 1)
@@ -237,27 +214,21 @@ test("PDF preview renders multi-page content with a selectable text layer and sa
 // usePdfDocument's own comment on why a second call would hand pdf.js an already-detached buffer),
 // and the correct password resolving to a real render. The shared InputDialog primitive is driven
 // through its normal label/submit affordances, exactly as a user would.
-test("PDF preview prompts for a password, retries after a wrong one, and renders once correct, no CSP console errors", async ({
-	page,
-	injectedSession
-}) => {
-	expect(injectedSession.length).toBeGreaterThan(0)
-
-	const [namePdf] = FIXTURE_FILES["preview-pdf-locked"]
-
+test("PDF preview prompts for a password, retries after a wrong one, and renders once correct, no CSP console errors", async ({ page }) => {
 	const cspViolations = trackCspViolations(page)
 
 	await bootTo(page)
 
-	const { listbox } = await enterFixtureDirectory(page, "preview-pdf-locked")
-
-	const row = listbox.getByRole("option", { name: namePdf })
-	await expect(row).toBeVisible({ timeout: 45_000 })
+	const {
+		rows: [row]
+	} = await openFixtureRows(page, "preview-pdf-locked")
 
 	// Opens the pdf.js lazy chunk for the first time this run; the loading task's onPassword fires
 	// before its own promise ever settles, so the password prompt appears instead of a spinner.
 	await row.dblclick()
-	await expect(page.getByText("This PDF is password-protected. Enter the password to view it.")).toBeVisible({ timeout: 60_000 })
+	await expect(page.getByText("This PDF is password-protected. Enter the password to view it.")).toBeVisible({
+		timeout: LAZY_VIEWER_TIMEOUT_MS
+	})
 
 	// exact:true — a substring match on "Password" also matches the dialog's OWN accessible name
 	// (aria-labelledby -> its title, "Password required"), a real Playwright ambiguity trap, not an

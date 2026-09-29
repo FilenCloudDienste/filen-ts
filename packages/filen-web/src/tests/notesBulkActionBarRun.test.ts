@@ -5,13 +5,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { createElement } from "react"
-import type { Note, UuidStr } from "@filen/sdk-rs"
+import type { Note } from "@filen/sdk-rs"
 import type { BulkOutcome } from "@/lib/actions/bulk"
+import { testUuid } from "@/tests/support/uuid"
+import { mockNote } from "@/tests/fixtures/notes"
 import "@/lib/i18n"
 
 const { duplicateNotes } = vi.hoisted(() => ({ duplicateNotes: vi.fn() }))
-
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
 
 vi.mock("@/features/notes/lib/bulk", () => ({
 	setPinnedNotes: vi.fn(),
@@ -27,34 +27,11 @@ vi.mock("@/features/notes/lib/bulkToast", () => ({ toastNotesBulkOutcome: vi.fn(
 
 vi.mock("@/lib/useIsOnline", () => ({ useIsOnline: () => true }))
 
-// Measures the bar with a ResizeObserver, which jsdom lacks; clearance is not under test.
-vi.mock("@/lib/toastClearance", () => ({ toastObstructionRef: () => undefined }))
-
 const { NotesBulkActionBar } = await import("@/features/notes/components/notesBulkActionBar")
 const { useNotesInflightStore } = await import("@/features/notes/store/useNotesInflight")
 
-function mockNote(label: string): Note {
-	return {
-		uuid: `${label}-0000-0000-0000-000000000000` as UuidStr,
-		ownerId: 1n,
-		lastEditorId: 1n,
-		favorite: false,
-		pinned: false,
-		tags: [],
-		noteType: "text",
-		encryptionKey: "note-key",
-		title: label,
-		preview: "",
-		trash: false,
-		archive: false,
-		createdTimestamp: 0n,
-		editedTimestamp: 0n,
-		participants: []
-	}
-}
-
-const edited = mockNote("b")
-const notes = [mockNote("a"), edited]
+const edited = mockNote({ uuid: testUuid("b"), title: "b" })
+const notes = [mockNote({ uuid: testUuid("a"), title: "a" }), edited]
 
 function duplicateButton(): HTMLButtonElement {
 	return screen.getByRole("button", { name: "Duplicate" })

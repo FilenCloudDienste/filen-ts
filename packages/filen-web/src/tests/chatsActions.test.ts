@@ -1,10 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
-import type { Chat, ChatParticipant, Contact, UserInfo, UuidStr } from "@filen/sdk-rs"
-
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import type { Chat, ChatParticipant, UserInfo } from "@filen/sdk-rs"
 
 // Mock boundary matching chatsQueries.test.ts: the real sdk client module imports a Vite `?worker`,
 // unresolvable under node vitest.
@@ -43,6 +39,8 @@ import { ACCOUNT_QUERY_KEY } from "@/queries/account"
 import { CHATS_QUERY_KEY, chatsQueryGet } from "@/features/chats/queries/chats"
 import { chatMessagesQueryKey } from "@/features/chats/queries/chatMessages"
 import { createChat as createChatAction, renameChat, setChatMuted, leaveChat, deleteChat, markChatRead } from "@/features/chats/lib/actions"
+import { mockPlainContact } from "@/tests/support/contactFixtures"
+import { testUuid } from "@/tests/support/uuid"
 
 beforeEach(() => {
 	vi.clearAllMocks()
@@ -75,19 +73,6 @@ function mockChat(overrides: Partial<Chat> = {}): Chat {
 	}
 }
 
-function mockContact(overrides: Partial<Contact> = {}): Contact {
-	return {
-		uuid: testUuid("contact"),
-		userId: 2n,
-		email: "c@x.io",
-		nickName: "c",
-		lastActive: 0n,
-		timestamp: 0n,
-		publicKey: "",
-		...overrides
-	}
-}
-
 function setCurrentUser(id: bigint): void {
 	testQueryClient.setQueryData<UserInfo>(ACCOUNT_QUERY_KEY, { id } as UserInfo)
 }
@@ -102,7 +87,7 @@ describe("createChat", () => {
 
 	it("creates and upserts into the chats-list cache", async () => {
 		const chat = mockChat()
-		const contact = mockContact()
+		const contact = mockPlainContact()
 		createChatOp.mockResolvedValueOnce(chat)
 
 		const outcome = await createChatAction([contact])
@@ -115,7 +100,7 @@ describe("createChat", () => {
 	it("returns an error outcome on rejection, without touching the cache", async () => {
 		createChatOp.mockRejectedValueOnce(new Error("fail"))
 
-		const outcome = await createChatAction([mockContact()])
+		const outcome = await createChatAction([mockPlainContact()])
 
 		expect(outcome.status).toBe("error")
 		expect(chatsQueryGet()).toBeUndefined()

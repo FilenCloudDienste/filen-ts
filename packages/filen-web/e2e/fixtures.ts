@@ -80,6 +80,15 @@ interface LockRequestBody {
 	resource?: unknown
 }
 
+// Throws on a page that is closing (postDataJSON), so every caller guards it.
+function readLockRequest(request: Request): LockRequestBody | null {
+	if (!new URL(request.url()).pathname.endsWith(LOCK_PATH)) {
+		return null
+	}
+
+	return request.postDataJSON() as LockRequestBody | null
+}
+
 // The answer is an envelope — `{status, message, code, data: {acquired, released, …}}` — so the flag
 // sits one level down. Reading it off the top level fails silently: every lease then looks unheld, and
 // the wait below returns on a page that is still holding one.
@@ -102,29 +111,25 @@ const LEASE_RELEASE_POLL_MS = 100
 // ours to release), so they stop counting and are named in the warning instead.
 const LEASE_ACQUIRE_ANSWER_MS = 5_000
 
-interface LeaseTracker {
-	waitForReleases: () => Promise<void>
-}
-
-// Every tracker by page, so closeTrackedPage can find the one the fixture attached.
-const leaseTrackers = new WeakMap<Page, LeaseTracker>()
+// Every page's release wait, so closeTrackedPage can find the one the fixture attached.
+const leaseTrackers = new WeakMap<Page, () => Promise<void>>()
 
 // Closes a page a spec opened itself only once its leases are released: closing it with a release in
 // flight orphans the lease, and the next write anywhere on the account waits ~70s for it to age out.
 export async function closeTrackedPage(page: Page): Promise<void> {
-	await leaseTrackers.get(page)?.waitForReleases()
+	await leaseTrackers.get(page)?.()
 	await page.close()
 }
 
 // For a spec about to reload or navigate away right after a write: the SDK releases the lease
 // fire-and-forget, and unloading the page with that release in flight orphans it the same way.
 export async function settleLeases(page: Page): Promise<void> {
-	await leaseTrackers.get(page)?.waitForReleases()
+	await leaseTrackers.get(page)?.()
 }
 
-// Watches the write leases a page takes and hands back a bounded wait for their releases. The
+// Watches the write leases a page takes and registers a bounded wait for their releases. The
 // listeners attach on call, so a lease taken before that is invisible to it.
-export function trackLeaseReleases(page: Page): LeaseTracker {
+export function trackLeaseReleases(page: Page): void {
 	// uuid -> resource for every lease acquired and not released again. The SDK mints a uuid per lease,
 	// not per page, and its writes serialise on the lock anyway, so this holds one entry at a time.
 	const heldLeases = new Map<string, string>()
@@ -144,11 +149,7 @@ export function trackLeaseReleases(page: Page): LeaseTracker {
 	// here may only ever cost the wait below, never the test.
 	page.on("request", request => {
 		try {
-			if (!new URL(request.url()).pathname.endsWith(LOCK_PATH)) {
-				return
-			}
-
-			const body = request.postDataJSON() as LockRequestBody | null
+			const body = readLockRequest(request)
 
 			if (body === null || typeof body.uuid !== "string") {
 				return
@@ -215,41 +216,35 @@ export function trackLeaseReleases(page: Page): LeaseTracker {
 		pendingReleases.delete(request)
 	})
 
-	const tracker: LeaseTracker = {
-		// Hold the context open until the server has answered the release. Killing it with one still in
-		// flight leaves the lease to age out on its own, and the next test's first write waits that out:
-		// measured at 74,683ms against 544ms, and one such orphan cost a later create 49s even after the
-		// release request itself had gone out. A page that acquired nothing waits for nothing, so this is
-		// free on the read lane.
-		waitForReleases: async () => {
-			const deadline = Date.now() + LEASE_RELEASE_TIMEOUT_MS
-			const answerable = () =>
-				[...pendingAcquires.values()].filter(({ startedAt }) => Date.now() - startedAt < LEASE_ACQUIRE_ANSWER_MS).length
+	// Hold the context open until the server has answered the release. Killing it with one still in
+	// flight leaves the lease to age out on its own, and the next test's first write waits that out:
+	// measured at 74,683ms against 544ms, and one such orphan cost a later create 49s even after the
+	// release request itself had gone out. A page that acquired nothing waits for nothing, so this is
+	// free on the read lane.
+	leaseTrackers.set(page, async () => {
+		const deadline = Date.now() + LEASE_RELEASE_TIMEOUT_MS
+		const answerable = () =>
+			[...pendingAcquires.values()].filter(({ startedAt }) => Date.now() - startedAt < LEASE_ACQUIRE_ANSWER_MS).length
 
-			while ((heldLeases.size > 0 || answerable() > 0 || pendingReleases.size > 0) && Date.now() < deadline) {
-				await new Promise(resolve => setTimeout(resolve, LEASE_RELEASE_POLL_MS))
-			}
-
-			// Named per bucket, because the three mean different things and the silent version of this
-			// reported only the first: a HELD lease means the release never went out, an UNANSWERED
-			// release that it went out and died in flight, and an ABANDONED acquire that the client threw
-			// a lock request away — which is the one that leaves a lease nobody can release. All three
-			// cost the next test's first write, so none of them may pass unremarked.
-			const stuck = [
-				...[...heldLeases.values()].map(resource => `held ${resource}`),
-				...[...pendingAcquires.values()].map(({ uuid, resource }) => `abandoned acquire ${resource} ${uuid}`),
-				...[...pendingReleases.values()].map(({ uuid, resource }) => `unanswered release ${resource} ${uuid}`)
-			]
-
-			if (stuck.length > 0) {
-				console.warn(`lease not settled at teardown (${stuck.join(", ")})`)
-			}
+		while ((heldLeases.size > 0 || answerable() > 0 || pendingReleases.size > 0) && Date.now() < deadline) {
+			await new Promise(resolve => setTimeout(resolve, LEASE_RELEASE_POLL_MS))
 		}
-	}
 
-	leaseTrackers.set(page, tracker)
+		// Named per bucket, because the three mean different things and the silent version of this
+		// reported only the first: a HELD lease means the release never went out, an UNANSWERED
+		// release that it went out and died in flight, and an ABANDONED acquire that the client threw
+		// a lock request away — which is the one that leaves a lease nobody can release. All three
+		// cost the next test's first write, so none of them may pass unremarked.
+		const stuck = [
+			...[...heldLeases.values()].map(resource => `held ${resource}`),
+			...[...pendingAcquires.values()].map(({ uuid, resource }) => `abandoned acquire ${resource} ${uuid}`),
+			...[...pendingReleases.values()].map(({ uuid, resource }) => `unanswered release ${resource} ${uuid}`)
+		]
 
-	return tracker
+		if (stuck.length > 0) {
+			console.warn(`lease not settled at teardown (${stuck.join(", ")})`)
+		}
+	})
 }
 
 // What a failed test's page did, attached to its report: console errors (dedicated workers' included),
@@ -328,10 +323,10 @@ async function collectDiagnostics(context: BrowserContext): Promise<() => string
 		})
 		page.on("request", request => {
 			try {
-				if (path(request.url()).endsWith(LOCK_PATH)) {
-					const body = request.postDataJSON() as LockRequestBody | null
+				const body = readLockRequest(request)
 
-					log(`${tab} lock ${String(body?.type)} ${String(body?.resource)} ${String(body?.uuid)}`)
+				if (body !== null) {
+					log(`${tab} lock ${String(body.type)} ${String(body.resource)} ${String(body.uuid)}`)
 				}
 			} catch {
 				// A closing page's request can no longer be read; the timeline just loses that line.
@@ -575,17 +570,20 @@ export async function openHookContext(
 // context by this factor. Anything but a number above 1 (unset, garbage, 1) leaves the run untouched.
 const CPU_THROTTLE_RATE = Number(process.env["E2E_CPU_THROTTLE"] ?? "1")
 
-// Fixture every authed spec pulls in. It seeds the saved session blob into sessionStorage before the
-// app loads on every navigation (page context — the worker-owned sqlite cannot be written from an
-// init script; the app's own e2e hook moves it into the worker + kv and re-runs the route guards).
-// Skips cleanly when no session was minted (no credentials), so the SDK-free subset still runs for
-// contributors without credentials.
+// Seeds the saved session blob into every test's page by default: sessionStorage before the app loads
+// on every navigation (page context — the worker-owned sqlite cannot be written from an init script;
+// the app's own e2e hook moves it into the worker + kv and re-runs the route guards). Skips cleanly
+// when no session was minted (no credentials). SDK-free and logged-out tests opt out with
+// `test.use({ injectSession: false })`, which also keeps them running for contributors without
+// credentials. Requested by name only where the blob itself is consumed.
 export const test = base.extend<{
+	injectSession: boolean
 	injectedSession: string
 	failureDiagnostics: undefined
 	accountLock: undefined
 	webkitStorageLock: undefined
 }>({
+	injectSession: [true, { option: true }],
 	accountLock: [
 		// Playwright requires a destructured first argument; browserName is a free worker-scoped one.
 		async ({ browserName: _browserName }, use, testInfo) => {
@@ -739,35 +737,48 @@ export const test = base.extend<{
 
 		await use(page)
 	},
-	injectedSession: async ({ page, context, accountLock: _accountLock }, use) => {
-		const session = readHarvestedSession()
+	injectedSession: [
+		async ({ page, context, injectSession, accountLock: _accountLock }, use) => {
+			if (!injectSession) {
+				await use("")
 
-		if (session === null) {
-			test.skip(true, "no injected session (e2e credentials not configured)")
+				return
+			}
 
-			return
-		}
+			const session = readHarvestedSession()
 
-		await seedSession(page, session)
+			if (session === null) {
+				test.skip(true, "no injected session (e2e credentials not configured)")
 
-		// Second pages a spec opens itself take leases too, and a spec closing one mid-release orphans it
-		// the same way a closed context would (closeTrackedPage avoids that).
-		trackLeaseReleases(page)
-		context.on("page", trackLeaseReleases)
+				return
+			}
 
-		await use(session)
+			if (session === "") {
+				throw new Error("the harvested session blob is empty")
+			}
 
-		await Promise.all(
-			context
-				.pages()
-				.filter(open => !open.isClosed())
-				.flatMap(open => {
-					const tracker = leaseTrackers.get(open)
+			await seedSession(page, session)
 
-					return tracker === undefined ? [] : [tracker.waitForReleases()]
-				})
-		)
-	}
+			// Second pages a spec opens itself take leases too, and a spec closing one mid-release orphans it
+			// the same way a closed context would (closeTrackedPage avoids that).
+			trackLeaseReleases(page)
+			context.on("page", trackLeaseReleases)
+
+			await use(session)
+
+			await Promise.all(
+				context
+					.pages()
+					.filter(open => !open.isClosed())
+					.flatMap(open => {
+						const waitForReleases = leaseTrackers.get(open)
+
+						return waitForReleases === undefined ? [] : [waitForReleases()]
+					})
+			)
+		},
+		{ auto: true }
+	]
 })
 
 export { expect }

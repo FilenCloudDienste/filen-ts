@@ -1,10 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
-import type { Contact, Note, NoteParticipant, UuidStr } from "@filen/sdk-rs"
-
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import { mockNote, mockNoteParticipant } from "@/tests/fixtures/notes"
 
 const { addNoteParticipantOp, removeNoteParticipantOp, setNoteParticipantPermissionOp } = vi.hoisted(() => ({
 	addNoteParticipantOp: vi.fn(),
@@ -27,62 +23,18 @@ import { NOTES_QUERY_KEY, notesQueryGet } from "@/features/notes/queries/notes"
 import { addNoteParticipants, removeNoteParticipant, setNoteParticipantPermission } from "@/features/notes/lib/participants"
 import { participantRows } from "@/features/notes/components/participantsDialog.logic"
 import { deriveBlockedUsers } from "@filen/shared"
+import { mockPlainContact } from "@/tests/support/contactFixtures"
 
 beforeEach(() => {
 	vi.clearAllMocks()
 	testQueryClient.clear()
 })
 
-function mockNote(overrides: Partial<Note> = {}): Note {
-	return {
-		uuid: testUuid("note"),
-		ownerId: 1n,
-		lastEditorId: 1n,
-		favorite: false,
-		pinned: false,
-		tags: [],
-		noteType: "text",
-		title: "note title",
-		preview: "note preview",
-		trash: false,
-		archive: false,
-		createdTimestamp: 0n,
-		editedTimestamp: 0n,
-		participants: [],
-		...overrides
-	}
-}
-
-function mockParticipant(overrides: Partial<NoteParticipant> = {}): NoteParticipant {
-	return {
-		userId: 2n,
-		isOwner: false,
-		email: "p@x.io",
-		nickName: "p",
-		permissionsWrite: false,
-		addedTimestamp: 0n,
-		...overrides
-	}
-}
-
-function mockContact(overrides: Partial<Contact> = {}): Contact {
-	return {
-		uuid: testUuid("contact"),
-		userId: 2n,
-		email: "c@x.io",
-		nickName: "c",
-		lastActive: 0n,
-		timestamp: 0n,
-		publicKey: "",
-		...overrides
-	}
-}
-
 describe("addNoteParticipants — sequential ordering", () => {
 	it("is a no-op (no worker call) when every contact is already a participant", async () => {
-		const existing = mockParticipant({ userId: 5n })
+		const existing = mockNoteParticipant({ userId: 5n })
 		const note = mockNote({ participants: [existing] })
-		const contact = mockContact({ userId: 5n })
+		const contact = mockPlainContact({ userId: 5n })
 
 		const outcome = await addNoteParticipants(note, [contact])
 
@@ -92,12 +44,12 @@ describe("addNoteParticipants — sequential ordering", () => {
 
 	it("threads each add through the PREVIOUS call's returned note, in list order", async () => {
 		const note = mockNote({ participants: [] })
-		const contactA = mockContact({ userId: 10n, email: "a@x.io" })
-		const contactB = mockContact({ userId: 20n, email: "b@x.io" })
+		const contactA = mockPlainContact({ userId: 10n, email: "a@x.io" })
+		const contactB = mockPlainContact({ userId: 20n, email: "b@x.io" })
 
-		const afterA = mockNote({ participants: [mockParticipant({ userId: 10n, email: "a@x.io" })] })
+		const afterA = mockNote({ participants: [mockNoteParticipant({ userId: 10n, email: "a@x.io" })] })
 		const afterB = mockNote({
-			participants: [mockParticipant({ userId: 10n, email: "a@x.io" }), mockParticipant({ userId: 20n, email: "b@x.io" })]
+			participants: [mockNoteParticipant({ userId: 10n, email: "a@x.io" }), mockNoteParticipant({ userId: 20n, email: "b@x.io" })]
 		})
 
 		addNoteParticipantOp.mockResolvedValueOnce(afterA)
@@ -115,11 +67,11 @@ describe("addNoteParticipants — sequential ordering", () => {
 	})
 
 	it("skips only the already-present contacts, still adding the rest", async () => {
-		const existing = mockParticipant({ userId: 5n })
+		const existing = mockNoteParticipant({ userId: 5n })
 		const note = mockNote({ participants: [existing] })
-		const already = mockContact({ userId: 5n })
-		const fresh = mockContact({ userId: 6n })
-		const afterFresh = mockNote({ participants: [existing, mockParticipant({ userId: 6n })] })
+		const already = mockPlainContact({ userId: 5n })
+		const fresh = mockPlainContact({ userId: 6n })
+		const afterFresh = mockNote({ participants: [existing, mockNoteParticipant({ userId: 6n })] })
 
 		addNoteParticipantOp.mockResolvedValueOnce(afterFresh)
 
@@ -134,7 +86,7 @@ describe("addNoteParticipants — sequential ordering", () => {
 		testQueryClient.setQueryData(NOTES_QUERY_KEY, [note])
 		addNoteParticipantOp.mockRejectedValueOnce(new Error("fail"))
 
-		const outcome = await addNoteParticipants(note, [mockContact()])
+		const outcome = await addNoteParticipants(note, [mockPlainContact()])
 
 		expect(outcome.status).toBe("error")
 		expect(notesQueryGet()).toEqual([note])
@@ -145,14 +97,14 @@ describe("removeNoteParticipant", () => {
 	it("is a no-op (no worker call) when the participant isn't on the note", async () => {
 		const note = mockNote({ participants: [] })
 
-		const outcome = await removeNoteParticipant(note, mockParticipant())
+		const outcome = await removeNoteParticipant(note, mockNoteParticipant({ userId: 2n }))
 
 		expect(outcome).toEqual({ status: "success", item: note })
 		expect(removeNoteParticipantOp).not.toHaveBeenCalled()
 	})
 
 	it("removes and upserts the resulting note", async () => {
-		const participant = mockParticipant({ userId: 5n })
+		const participant = mockNoteParticipant({ userId: 5n })
 		const note = mockNote({ participants: [participant] })
 		const updated = mockNote({ participants: [] })
 		removeNoteParticipantOp.mockResolvedValueOnce(updated)
@@ -167,7 +119,7 @@ describe("removeNoteParticipant", () => {
 
 describe("setNoteParticipantPermission — patches the LIVE cache row, not a stale snapshot", () => {
 	it("no-ops when the requested permission already matches", async () => {
-		const participant = mockParticipant({ permissionsWrite: true })
+		const participant = mockNoteParticipant({ userId: 2n, permissionsWrite: true })
 		const note = mockNote({ participants: [participant] })
 
 		const outcome = await setNoteParticipantPermission(note, participant, true)
@@ -177,11 +129,11 @@ describe("setNoteParticipantPermission — patches the LIVE cache row, not a sta
 	})
 
 	it("patches onto whatever the cache holds NOW, even if it moved since the caller's own snapshot", async () => {
-		const participant = mockParticipant({ userId: 5n, permissionsWrite: false })
+		const participant = mockNoteParticipant({ userId: 5n, permissionsWrite: false })
 		const staleNote = mockNote({ participants: [participant] })
 		// The cache has since gained an UNRELATED second participant this caller's own `note` argument
 		// doesn't know about — a naive patch built off the stale argument would silently drop them.
-		const otherParticipant = mockParticipant({ userId: 6n })
+		const otherParticipant = mockNoteParticipant({ userId: 6n })
 		const liveNote = mockNote({ participants: [participant, otherParticipant] })
 		testQueryClient.setQueryData(NOTES_QUERY_KEY, [liveNote])
 
@@ -197,9 +149,9 @@ describe("setNoteParticipantPermission — patches the LIVE cache row, not a sta
 })
 
 describe("participantRows — self-exclusion, ordering, and owner/participant view gating", () => {
-	const owner = mockParticipant({ userId: 1n, isOwner: true })
-	const participantA = mockParticipant({ userId: 2n, isOwner: false })
-	const participantB = mockParticipant({ userId: 3n, isOwner: false })
+	const owner = mockNoteParticipant({ userId: 1n, isOwner: true })
+	const participantA = mockNoteParticipant({ userId: 2n, isOwner: false })
+	const participantB = mockNoteParticipant({ userId: 3n, isOwner: false })
 	const note = mockNote({ ownerId: 1n, participants: [participantA, owner, participantB] })
 
 	it("excludes the viewer's own row entirely (mirrors mobile: self-management stays the menu's own Leave dialog)", () => {
@@ -243,9 +195,9 @@ describe("participantRows — self-exclusion, ordering, and owner/participant vi
 })
 
 describe("participantRows — blocked cross-reference", () => {
-	const owner = mockParticipant({ userId: 1n, isOwner: true })
-	const blockedParticipant = mockParticipant({ userId: 2n, isOwner: false, email: "blocked@x.io" })
-	const regularParticipant = mockParticipant({ userId: 3n, isOwner: false, email: "regular@x.io" })
+	const owner = mockNoteParticipant({ userId: 1n, isOwner: true })
+	const blockedParticipant = mockNoteParticipant({ userId: 2n, isOwner: false, email: "blocked@x.io" })
+	const regularParticipant = mockNoteParticipant({ userId: 3n, isOwner: false, email: "regular@x.io" })
 	const note = mockNote({ ownerId: 1n, participants: [owner, blockedParticipant, regularParticipant] })
 
 	it("flags only the row whose identity is in the blocked set — NOT gated by canManage/ownership", () => {

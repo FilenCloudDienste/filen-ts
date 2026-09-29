@@ -1,5 +1,13 @@
 import { test, expect } from "./fixtures"
-import { bootTo, enterScratchDirectory, trashScratchDirectory, dismissOverlays, LIVE_WRITE_TIMEOUT_MS } from "./helpers/listing"
+import {
+	withScratchDirectory,
+	bootTo,
+	enterScratchDirectory,
+	trashScratchDirectory,
+	dismissOverlays,
+	LIVE_WRITE_TIMEOUT_MS,
+	uploadFiles
+} from "./helpers/listing"
 import { trackCspViolations } from "./helpers/csp"
 
 // The drive → persistent-player handoff, end to end: double-clicking a drive audio file enqueues the
@@ -42,31 +50,24 @@ function makeSilentWav(seconds: number): Buffer {
 const WAV_A = makeSilentWav(60)
 const WAV_B = makeSilentWav(60)
 
-test("drive audio double-click hands off to the persistent player and transport works", async ({ page, injectedSession }) => {
-	expect(injectedSession.length).toBeGreaterThan(0)
-
+test("drive audio double-click hands off to the persistent player and transport works", async ({ page }) => {
 	const cspViolations = trackCspViolations(page)
-	const runId = crypto.randomUUID()
-	const scratchName = `e2e-audio-${runId}`
-	// Names chosen so the default ascending sort puts A before B — the queue order the handoff derives.
-	const nameA = `e2e-audio-a-${runId}.wav`
-	const nameB = `e2e-audio-b-${runId}.wav`
 
-	await bootTo(page)
+	await withScratchDirectory(page, "audio", async ({ listbox, runId }) => {
+		// Names chosen so the default ascending sort puts A before B — the queue order the handoff derives.
+		const nameA = `e2e-audio-a-${runId}.wav`
+		const nameB = `e2e-audio-b-${runId}.wav`
 
-	try {
-		const { listbox } = await enterScratchDirectory(page, scratchName)
-
-		const input = page.getByRole("main").locator('input[type="file"]').first()
-		await input.setInputFiles([
-			{ name: nameA, mimeType: "audio/wav", buffer: WAV_A },
-			{ name: nameB, mimeType: "audio/wav", buffer: WAV_B }
-		])
+		await uploadFiles(
+			page,
+			[
+				{ name: nameA, mimeType: "audio/wav", buffer: WAV_A },
+				{ name: nameB, mimeType: "audio/wav", buffer: WAV_B }
+			],
+			listbox
+		)
 
 		const rowA = listbox.getByRole("option", { name: nameA })
-		const rowB = listbox.getByRole("option", { name: nameB })
-		await expect(rowA).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
-		await expect(rowB).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 
 		// The player bar is absent until a queue exists.
 		const bar = page.getByRole("region", { name: "Audio player" })
@@ -144,9 +145,7 @@ test("drive audio double-click hands off to the persistent player and transport 
 		await expect(bar).toHaveCount(0, { timeout: 15_000 })
 
 		expect(cspViolations, `CSP violations: ${JSON.stringify(cspViolations)}`).toHaveLength(0)
-	} finally {
-		await trashScratchDirectory(page, scratchName)
-	}
+	})
 })
 
 // Playlist CRUD end to end: create, add the 2 scratch tracks via the drive picker, drag-reorder, play
@@ -156,9 +155,7 @@ test("drive audio double-click hands off to the persistent player and transport 
 // everything created here (the two audio files, the playlist itself) is removed by the end — the
 // `.filen/Playlists` directory the app lazily creates is left behind, which is acceptable app
 // infrastructure (mirrors mobile leaving it too).
-test("playlists: create, add tracks via the picker, reorder, play, and delete", async ({ page, injectedSession }) => {
-	expect(injectedSession.length).toBeGreaterThan(0)
-
+test("playlists: create, add tracks via the picker, reorder, play, and delete", async ({ page }) => {
 	const cspViolations = trackCspViolations(page)
 	const runId = crypto.randomUUID()
 	const scratchName = `e2e-playlist-${runId}`
@@ -209,16 +206,14 @@ test("playlists: create, add tracks via the picker, reorder, play, and delete", 
 	try {
 		const { listbox } = await enterScratchDirectory(page, scratchName)
 
-		const input = page.getByRole("main").locator('input[type="file"]').first()
-		await input.setInputFiles([
-			{ name: nameA, mimeType: "audio/wav", buffer: WAV_A },
-			{ name: nameB, mimeType: "audio/wav", buffer: WAV_B }
-		])
-
-		const rowA = listbox.getByRole("option", { name: nameA })
-		const rowB = listbox.getByRole("option", { name: nameB })
-		await expect(rowA).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
-		await expect(rowB).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
+		await uploadFiles(
+			page,
+			[
+				{ name: nameA, mimeType: "audio/wav", buffer: WAV_A },
+				{ name: nameB, mimeType: "audio/wav", buffer: WAV_B }
+			],
+			listbox
+		)
 
 		// The rail's dedicated Playlists entry — no queue needed first, unlike the old popover-tab route.
 		await page.getByRole("link", { name: "Playlists", exact: true }).click()

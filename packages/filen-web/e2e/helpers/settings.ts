@@ -12,6 +12,12 @@ export async function gotoSettings(page: Page): Promise<void> {
 	await expect(page.getByRole("heading", { name: "Account", exact: true })).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
 }
 
+// Every section's slug is its sidebar label lowercased.
+export async function openSettingsSection(page: Page, label: string): Promise<void> {
+	await page.getByRole("link", { name: label, exact: true }).click()
+	await page.waitForURL(new RegExp(`/settings/${label.toLowerCase()}$`))
+}
+
 // The Account and Security pages mount their rows only once the live getUserInfo read has settled, and
 // the h1 gotoSettings waits for renders before it. Callers that need a row wait here, on the Account
 // page, for either terminal state: losing to the error state throws at once instead of timing out on

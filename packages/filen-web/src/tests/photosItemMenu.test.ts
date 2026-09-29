@@ -7,7 +7,6 @@ import type { File, UuidStr } from "@filen/sdk-rs"
 import "@/lib/i18n"
 
 // The Copy submenu's tree reads its root level through this query; an empty, loaded root is enough here.
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
 vi.mock("@/queries/client", async () => {
 	const { QueryClient: Client } = await import("@tanstack/react-query")
 	return { queryClient: new Client() }

@@ -1,18 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import type { Chat, UuidStr } from "@filen/sdk-rs"
+import type { Chat } from "@filen/sdk-rs"
 
 // typing.ts imports the real sdk client (a Vite `?worker`, unresolvable under node) and the log module —
 // mock both at the boundary, same posture as chatsUnreadLogic.test.ts.
 const { sendTypingSignalOp } = vi.hoisted(() => ({ sendTypingSignalOp: vi.fn() }))
 
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: { sendTypingSignal: sendTypingSignalOp } }))
-vi.mock("@/lib/log", () => ({ log: { warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() } }))
 
 import { signalStopped, signalTyping } from "@/features/chats/lib/typing"
-
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import { testUuid } from "@/tests/support/uuid"
 
 // typing.ts keeps its per-chat send state in a module-global Map with no reset, and vitest evaluates the
 // module once per file — so every case builds its own chat uuid to get a virgin TypingSendState.

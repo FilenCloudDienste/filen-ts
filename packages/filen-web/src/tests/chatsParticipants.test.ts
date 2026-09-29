@@ -1,10 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
-import type { Chat, ChatParticipant, Contact, UuidStr } from "@filen/sdk-rs"
-
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import type { Chat, ChatParticipant } from "@filen/sdk-rs"
 
 const { addChatParticipantOp, removeChatParticipantOp } = vi.hoisted(() => ({
 	addChatParticipantOp: vi.fn(),
@@ -25,6 +21,8 @@ import { CHATS_QUERY_KEY, chatsQueryGet } from "@/features/chats/queries/chats"
 import { addChatParticipants, removeChatParticipant, removeChatParticipants } from "@/features/chats/lib/participants"
 import { chatParticipantRows, selectedParticipantsForRemoval } from "@/features/chats/components/chatParticipantsDialog.logic"
 import { deriveBlockedUsers } from "@filen/shared"
+import { mockPlainContact } from "@/tests/support/contactFixtures"
+import { testUuid } from "@/tests/support/uuid"
 
 beforeEach(() => {
 	vi.clearAllMocks()
@@ -57,24 +55,11 @@ function mockChat(overrides: Partial<Chat> = {}): Chat {
 	}
 }
 
-function mockContact(overrides: Partial<Contact> = {}): Contact {
-	return {
-		uuid: testUuid("contact"),
-		userId: 2n,
-		email: "c@x.io",
-		nickName: "c",
-		lastActive: 0n,
-		timestamp: 0n,
-		publicKey: "",
-		...overrides
-	}
-}
-
 describe("addChatParticipants — sequential ordering", () => {
 	it("is a no-op (no worker call) when every contact is already a participant", async () => {
 		const existing = mockParticipant({ userId: 5n })
 		const chat = mockChat({ participants: [existing] })
-		const contact = mockContact({ userId: 5n })
+		const contact = mockPlainContact({ userId: 5n })
 
 		const outcome = await addChatParticipants(chat, [contact])
 
@@ -84,8 +69,8 @@ describe("addChatParticipants — sequential ordering", () => {
 
 	it("threads each add through the PREVIOUS call's returned chat, in list order", async () => {
 		const chat = mockChat({ participants: [] })
-		const contactA = mockContact({ userId: 10n, email: "a@x.io" })
-		const contactB = mockContact({ userId: 20n, email: "b@x.io" })
+		const contactA = mockPlainContact({ userId: 10n, email: "a@x.io" })
+		const contactB = mockPlainContact({ userId: 20n, email: "b@x.io" })
 
 		const afterA = mockChat({ participants: [mockParticipant({ userId: 10n, email: "a@x.io" })] })
 		const afterB = mockChat({
@@ -110,8 +95,8 @@ describe("addChatParticipants — sequential ordering", () => {
 	it("skips only the already-present contacts, still adding the rest", async () => {
 		const existing = mockParticipant({ userId: 5n })
 		const chat = mockChat({ participants: [existing] })
-		const already = mockContact({ userId: 5n })
-		const fresh = mockContact({ userId: 6n })
+		const already = mockPlainContact({ userId: 5n })
+		const fresh = mockPlainContact({ userId: 6n })
 		const afterFresh = mockChat({ participants: [existing, mockParticipant({ userId: 6n })] })
 
 		addChatParticipantOp.mockResolvedValueOnce(afterFresh)
@@ -127,7 +112,7 @@ describe("addChatParticipants — sequential ordering", () => {
 		testQueryClient.setQueryData(CHATS_QUERY_KEY, [chat])
 		addChatParticipantOp.mockRejectedValueOnce(new Error("fail"))
 
-		const outcome = await addChatParticipants(chat, [mockContact()])
+		const outcome = await addChatParticipants(chat, [mockPlainContact()])
 
 		expect(outcome.status).toBe("error")
 		expect(chatsQueryGet()).toEqual([chat])

@@ -35,36 +35,17 @@ import { queryClient } from "@/queries/client"
 import { FileLinkView } from "@/features/publicLinks/components/fileLinkView"
 import { MediaElement } from "@/features/preview/components/mediaViewer"
 import { PreviewOverlay } from "@/features/preview/components/previewOverlay"
-import { linkedFileIntoDriveItem } from "@/features/drive/lib/item"
 import { mediaControlsList, PreviewDownloadableProvider } from "@/features/preview/lib/accessMode"
+import { linkedFileItem, mockLinkedFile } from "@/tests/fixtures/sdk"
 
 const LINK_UUID = "c1000000-0000-0000-0000-000000000000"
-
-// Not previewable, so the hero card shows, with every action it can offer.
-function linkedFile(downloadable: boolean): LinkedFile {
-	return {
-		uuid: "f1000000-0000-0000-0000-000000000000",
-		name: { Decrypted: "archive.bin" },
-		mime: { Decrypted: "application/octet-stream" },
-		size: 10n,
-		chunks: 1n,
-		region: "de-1",
-		bucket: "filen-1",
-		version: 2,
-		timestamp: 0n,
-		fileKey: "k",
-		downloadable,
-		linkedTag: true,
-		canMakeThumbnail: false
-	}
-}
 
 function wrapper({ children }: { children: ReactNode }) {
 	return createElement(QueryClientProvider, { client: queryClient, children })
 }
 
 async function renderLink(downloadable: boolean): Promise<void> {
-	getLinkedFileAnon.mockResolvedValue(linkedFile(downloadable))
+	getLinkedFileAnon.mockResolvedValue(mockLinkedFile({ downloadable }))
 	render(createElement(FileLinkView, { uuid: LINK_UUID, linkKey: "key" }), { wrapper })
 
 	await act(async () => {
@@ -111,7 +92,7 @@ describe("PreviewOverlay — a chat embed's linked file", () => {
 		render(
 			createElement(PreviewOverlay, {
 				variant: "links" as const,
-				items: [linkedFileIntoDriveItem(linkedFile(downloadable))],
+				items: [linkedFileItem("archive.bin", { downloadable })],
 				index: 0,
 				onStep: vi.fn(),
 				onClose: vi.fn(),

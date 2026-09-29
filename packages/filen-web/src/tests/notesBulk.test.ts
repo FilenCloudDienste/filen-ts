@@ -1,10 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
-import type { Note, NoteTag, UuidStr } from "@filen/sdk-rs"
-
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import type { Note, NoteTag } from "@filen/sdk-rs"
+import { mockNote, mockNoteTag } from "@/tests/fixtures/notes"
 
 // Mock boundary matching notesActions.test.ts / notesTags.test.ts: the real sdk client module
 // imports a Vite `?worker`, unresolvable under node vitest.
@@ -70,43 +67,12 @@ import {
 	leaveNotes,
 	setTagOnNotes
 } from "@/features/notes/lib/bulk"
+import { testUuid } from "@/tests/support/uuid"
 
 beforeEach(() => {
 	vi.clearAllMocks()
 	testQueryClient.clear()
 })
-
-function mockNote(overrides: Partial<Note> = {}): Note {
-	return {
-		uuid: testUuid("note"),
-		ownerId: 1n,
-		lastEditorId: 1n,
-		favorite: false,
-		pinned: false,
-		tags: [],
-		noteType: "text",
-		encryptionKey: "key",
-		title: "title",
-		preview: "preview",
-		trash: false,
-		archive: false,
-		createdTimestamp: 1_700_000_000_000n,
-		editedTimestamp: 1_700_000_000_000n,
-		participants: [],
-		...overrides
-	}
-}
-
-function mockTag(overrides: Partial<NoteTag> = {}): NoteTag {
-	return {
-		uuid: testUuid("tag"),
-		name: "tag",
-		favorite: false,
-		editedTimestamp: 1_700_000_000_000n,
-		createdTimestamp: 1_700_000_000_000n,
-		...overrides
-	}
-}
 
 function setCurrentUser(id: bigint): void {
 	testQueryClient.setQueryData(ACCOUNT_QUERY_KEY, { id })
@@ -253,7 +219,7 @@ describe("deleteNotesPermanently / leaveNotes — per-note beforeCacheRemoval", 
 
 describe("setTagOnNotes — checked true adds, checked false removes", () => {
 	it("checked=true calls addTagToNote for every selected note", async () => {
-		const tag = mockTag()
+		const tag = mockNoteTag()
 		const noteA = mockNote({ uuid: testUuid("a"), tags: [] })
 		const noteB = mockNote({ uuid: testUuid("b"), tags: [] })
 		addTagToNoteOp.mockImplementation((note: Note, t: NoteTag) => Promise.resolve({ note: { ...note, tags: [t] }, tag: t }))
@@ -266,7 +232,7 @@ describe("setTagOnNotes — checked true adds, checked false removes", () => {
 	})
 
 	it("checked=false calls removeTagFromNote for every selected note", async () => {
-		const tag = mockTag()
+		const tag = mockNoteTag()
 		const note = mockNote({ tags: [tag] })
 		removeTagFromNoteOp.mockResolvedValueOnce({ ...note, tags: [] })
 

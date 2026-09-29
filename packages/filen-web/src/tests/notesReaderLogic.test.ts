@@ -1,27 +1,6 @@
 import { describe, expect, it } from "vitest"
-import type { Note } from "@filen/sdk-rs"
 import { codeMirrorTagForNote } from "@/features/notes/components/reader/reader.logic"
-
-// Same mockNote shape as notesSort.test.ts.
-function mockNote(overrides: Partial<Note> = {}): Note {
-	return {
-		uuid: "00000000-0000-0000-0000-000000000000",
-		ownerId: 1n,
-		lastEditorId: 1n,
-		favorite: false,
-		pinned: false,
-		tags: [],
-		noteType: "text",
-		title: "title",
-		preview: "preview",
-		trash: false,
-		archive: false,
-		createdTimestamp: 0n,
-		editedTimestamp: 0n,
-		participants: [],
-		...overrides
-	}
-}
+import { mockNote } from "@/tests/fixtures/notes"
 
 describe("codeMirrorTagForNote", () => {
 	it("is always 'markdown' for an md note, regardless of title", () => {

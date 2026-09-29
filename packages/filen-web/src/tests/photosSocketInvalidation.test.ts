@@ -1,8 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
-import type { Dir, File, SocketEvent, UuidStr } from "@filen/sdk-rs"
+import type { Dir, File, SocketEvent } from "@filen/sdk-rs"
 
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
 const { logWarn, logError } = vi.hoisted(() => ({ logWarn: vi.fn(), logError: vi.fn() }))
@@ -11,10 +10,7 @@ vi.mock("@/lib/log", () => ({ log: { warn: logWarn, error: logError, info: vi.fn
 import { queryClient as testQueryClient } from "@/queries/client"
 import { photosListingQueryKey } from "@/features/photos/queries/photos"
 import { handleDriveEvent } from "@/features/drive/lib/socketHandlers"
-
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import { testUuid } from "@/tests/support/uuid"
 
 const ROOT_UUID = "root-uuid"
 // The fixture file's whole-life id, and the uuid a content edit rotates the lineage onto (what `newUUID`

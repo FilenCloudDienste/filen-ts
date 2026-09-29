@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 import * as Comlink from "comlink"
-import type { DecodedHeicImage, HeicDecoderModule, HeicTransformDeps } from "@/features/preview/lib/heicCodec"
+import type { HeicTransformDeps } from "@/features/preview/lib/heicCodec"
+import { depsFor, fakeLib } from "@/tests/heicFakes"
 import type { HeicWorkerApi } from "@/features/preview/workers/heic.worker"
 
 // heic.worker.ts can't be imported directly here: Comlink.expose(api) runs at module load against
@@ -37,51 +38,11 @@ async function exposeOverChannel(deps: HeicTransformDeps): Promise<{ remote: Com
 	}
 }
 
-// A minimal libheif-shaped fake — just enough surface for runHeicTransform's happy/throw paths.
-// heicCodec.test.ts owns the exhaustive decode/encode matrix; this file only needs the two shapes
-// below to prove the boundary-crossing behavior, not re-prove decode correctness.
-function fakeLib(decodeThrows?: unknown): HeicDecoderModule {
-	class HeifDecoder {
-		decoder: unknown = true
-
-		decode(): {
-			get_width: () => number
-			get_height: () => number
-			display: (target: DecodedHeicImage, callback: (result: unknown) => void) => void
-			free: () => void
-		}[] {
-			if (decodeThrows !== undefined) {
-				// eslint-disable-next-line @typescript-eslint/only-throw-error -- deliberately a non-Error throw, mirroring decode()'s real WASM-trap failure shape
-				throw decodeThrows
-			}
-
-			return [
-				{
-					get_width: () => 2,
-					get_height: () => 2,
-					display: (target, callback) => {
-						target.data.fill(128)
-						callback({})
-					},
-					free: () => undefined
-				}
-			]
-		}
-	}
-
-	return { HeifDecoder, heif_context_free: () => undefined }
-}
-
-function depsFor(lib: HeicDecoderModule): HeicTransformDeps {
-	return {
-		getDecoder: () => Promise.resolve(lib),
-		encodeJpeg: () => Promise.resolve(new Blob(["jpeg"], { type: "image/jpeg" }))
-	}
-}
-
+// heicCodec.test.ts owns the exhaustive decode/encode matrix; this file only needs the default and
+// throwing fakes to prove the boundary-crossing behavior, not re-prove decode correctness.
 describe("heic worker boundary — a real Comlink round trip over MessageChannel", () => {
 	it("resolves with a Blob on the wrapped side", async () => {
-		const { remote, close } = await exposeOverChannel(depsFor(fakeLib()))
+		const { remote, close } = await exposeOverChannel(depsFor(fakeLib().lib).deps)
 
 		try {
 			await expect(remote.transform(new Uint8Array([1, 2, 3]))).resolves.toBeInstanceOf(Blob)
@@ -91,7 +52,7 @@ describe("heic worker boundary — a real Comlink round trip over MessageChannel
 	})
 
 	it("transfers the input buffer instead of cloning it — the sender's buffer is detached after the call", async () => {
-		const { remote, close } = await exposeOverChannel(depsFor(fakeLib()))
+		const { remote, close } = await exposeOverChannel(depsFor(fakeLib().lib).deps)
 		const bytes = new Uint8Array([1, 2, 3])
 		const buffer = bytes.buffer
 
@@ -105,7 +66,7 @@ describe("heic worker boundary — a real Comlink round trip over MessageChannel
 	})
 
 	it("still rejects with a clean Error once a raw non-Error throw has crossed the boundary", async () => {
-		const { remote, close } = await exposeOverChannel(depsFor(fakeLib("native boom")))
+		const { remote, close } = await exposeOverChannel(depsFor(fakeLib({ decodeThrows: "native boom" }).lib).deps)
 
 		try {
 			const rejection: unknown = await remote.transform(new Uint8Array([1, 2, 3])).catch((e: unknown) => e)

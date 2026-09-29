@@ -3,12 +3,7 @@ import type { Dir, File, UuidStr, SharedDir, SharedFile, SharingRole } from "@fi
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { driveRouteIdFor, parentNavigationTarget, resolveDriveNavigationTarget, splatToUuids } from "@/features/drive/lib/navigate"
-
-// UuidStr is a template-literal brand requiring at least 3 dashes (see @filen/sdk-rs) — pad a short
-// readable test label into a shape that satisfies it, mirroring sort.test.ts's own uuid fixtures.
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import { testUuid } from "@/tests/support/uuid"
 
 // Built through the real narrowItem (item.test.ts covers its own correctness) rather than
 // hand-rolled DriveItem literals, so this fixture can't silently drift from the actual narrowed

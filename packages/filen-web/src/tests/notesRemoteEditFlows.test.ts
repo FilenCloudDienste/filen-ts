@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient, onlineManager } from "@tanstack/react-query"
 import type { Note, SocketEvent } from "@filen/sdk-rs"
+import { mockNote } from "@/tests/fixtures/notes"
 
 // End to end over the real outbox (sync.ts), socket handlers and tab editor record: a note edited here
 // while another device or tab saves it. Only the SDK, the disk and the toasts are mocked.
@@ -58,22 +59,9 @@ import {
 const ME = 7
 const ELSEWHERE = 99
 
+// Edited before the 999n socket events below, so their echoes apply.
 function makeNote(uuid: string): Note {
-	return {
-		uuid: uuid as Note["uuid"],
-		ownerId: 1n,
-		lastEditorId: 1n,
-		favorite: false,
-		pinned: false,
-		tags: [],
-		noteType: "text",
-		trash: false,
-		archive: false,
-		createdTimestamp: 0n,
-		editedTimestamp: 0n,
-		participants: [],
-		title: `note-${uuid}`
-	}
+	return mockNote({ uuid: uuid as Note["uuid"], title: `note-${uuid}`, editedTimestamp: 0n })
 }
 
 const note = makeNote("a")

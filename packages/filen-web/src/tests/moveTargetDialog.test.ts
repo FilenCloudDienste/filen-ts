@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { Dir, File, SharedDir, SharedRootDir, SharingRole, UuidStr } from "@filen/sdk-rs"
+import type { Dir, File, SharedDir, SharedRootDir, SharingRole } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import {
 	ancestryHits,
@@ -12,14 +12,7 @@ import {
 	isMoveRowDisabled,
 	type ParentLookup
 } from "@/features/drive/components/moveTargetDialog.logic"
-
-// UuidStr is a template-literal brand requiring at least 3 dashes (see @filen/sdk-rs) — pad a short
-// readable test label into a shape that satisfies it, mirroring actions.test.ts's own fixture. The
-// picker's own ancestry chains are plain `string[]` (no brand), so a padded label doubles as both a
-// fixture's `data.uuid` and a matching ancestry entry with no further conversion.
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import { testUuid } from "@/tests/support/uuid"
 
 // Local fixtures mirror itemMenu.test.ts's own per-file convention (each test file owns its minimal
 // Dir/File shape rather than sharing one across files).

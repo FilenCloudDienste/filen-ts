@@ -5,7 +5,6 @@ import type { DragEvent } from "react"
 import { QueryClient } from "@tanstack/react-query"
 import type { File, UuidStr } from "@filen/sdk-rs"
 
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
 import { narrowItem } from "@/features/drive/lib/item"

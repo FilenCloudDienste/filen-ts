@@ -1,12 +1,11 @@
 import type { Page } from "@playwright/test"
 import { test, expect } from "./fixtures"
 import {
-	bootTo,
+	withScratchDirectory,
 	createDirectoryViaDialog,
-	enterScratchDirectory,
-	trashScratchDirectory,
 	waitForListingSettled,
-	LIVE_WRITE_TIMEOUT_MS
+	LIVE_WRITE_TIMEOUT_MS,
+	expectBreadcrumbAt
 } from "./helpers/listing"
 import { html5DragMove } from "./helpers/dnd"
 
@@ -27,17 +26,9 @@ async function expandInTree(page: Page, name: string): Promise<void> {
 }
 
 test.describe("sidebar directory tree", () => {
-	test("a tree node's context menu offers exactly its listing row's entries, and opens it", async ({ page, injectedSession }) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
-		const runId = crypto.randomUUID()
-		const scratchName = `e2e-tree-${runId}`
-		const childName = `tree-child-${runId}`
-
-		await bootTo(page)
-
-		try {
-			const { listbox } = await enterScratchDirectory(page, scratchName)
+	test("a tree node's context menu offers exactly its listing row's entries, and opens it", async ({ page }) => {
+		await withScratchDirectory(page, "tree", async ({ listbox, scratchName, runId }) => {
+			const childName = `tree-child-${runId}`
 
 			await createDirectoryViaDialog(page, childName, listbox)
 
@@ -63,25 +54,15 @@ test.describe("sidebar directory tree", () => {
 			expect(entries.map(label => (label.startsWith("Paste") ? "Paste" : label))).toEqual(rowEntries)
 
 			await menu.getByRole("menuitem", { name: "Open", exact: true }).click()
-			await expect(page.getByRole("navigation", { name: "Breadcrumb" }).getByText(childName, { exact: true })).toBeVisible()
+			await expectBreadcrumbAt(page, childName)
 			await waitForListingSettled(page)
-		} finally {
-			await trashScratchDirectory(page, scratchName)
-		}
+		})
 	})
 
-	test("drags a tree node onto another tree node to move it", async ({ page, injectedSession }) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
-		const runId = crypto.randomUUID()
-		const scratchName = `e2e-tree-dnd-${runId}`
-		const draggedName = `tree-dragged-${runId}`
-		const targetName = `tree-target-${runId}`
-
-		await bootTo(page)
-
-		try {
-			const { listbox } = await enterScratchDirectory(page, scratchName)
+	test("drags a tree node onto another tree node to move it", async ({ page }) => {
+		await withScratchDirectory(page, "tree-dnd", async ({ listbox, scratchName, runId }) => {
+			const draggedName = `tree-dragged-${runId}`
+			const targetName = `tree-target-${runId}`
 
 			await createDirectoryViaDialog(page, draggedName, listbox)
 			await createDirectoryViaDialog(page, targetName, listbox)
@@ -100,8 +81,6 @@ test.describe("sidebar directory tree", () => {
 
 			await expect(listbox.getByRole("option", { name: targetName })).toBeVisible()
 			await expect(listbox.getByRole("option", { name: draggedName })).toHaveCount(0)
-		} finally {
-			await trashScratchDirectory(page, scratchName)
-		}
+		})
 	})
 })

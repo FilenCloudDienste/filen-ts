@@ -16,6 +16,7 @@ export default defineConfig({
 		// .tsx too: every component in this codebase is .tsx, so a JSX-bearing test file would
 		// otherwise be SKIPPED SILENTLY rather than failing.
 		include: ["src/**/*.test.{ts,tsx}"],
+		setupFiles: ["src/tests/setup.ts"],
 		// `pool: "threads"` measured -14% wall here and stayed green across 7 of 8 full runs — but the
 		// eighth died on an unexpected worker exit that took the whole run with it. Threads share one
 		// process, so any file that leaks (this suite still has mounted-root and module-state leaks)

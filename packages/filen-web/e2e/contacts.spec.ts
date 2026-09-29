@@ -50,9 +50,7 @@ async function waitForContactsSettled(page: Page): Promise<{ hasContacts: boolea
 }
 
 test.describe("contacts", () => {
-	test("client-nav to /contacts renders the view and marks the rail link current", async ({ page, injectedSession }) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
+	test("client-nav to /contacts renders the view and marks the rail link current", async ({ page }) => {
 		await gotoContacts(page)
 
 		await expect(page.getByRole("searchbox", { name: "Search contacts" })).toBeVisible()
@@ -69,11 +67,8 @@ test.describe("contacts", () => {
 	})
 
 	test("the contacts sidebar renders every section filter, defaults to All, and switching updates the active link, URL, and heading", async ({
-		page,
-		injectedSession
+		page
 	}) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
 		await gotoContacts(page)
 		await waitForContactsSettled(page)
 
@@ -107,9 +102,7 @@ test.describe("contacts", () => {
 		await expect(sidebar.getByRole("link", { name: "All", exact: true })).toHaveAttribute("aria-current", "page")
 	})
 
-	test("the add-contact dialog gates an invalid email and is dismissed without ever submitting", async ({ page, injectedSession }) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
+	test("the add-contact dialog gates an invalid email and is dismissed without ever submitting", async ({ page }) => {
 		await gotoContacts(page)
 
 		// .first(): the header's own trigger, which always renders — an account with no contacts at all
@@ -138,9 +131,7 @@ test.describe("contacts", () => {
 		await expect(dialog).toHaveCount(0)
 	})
 
-	test("rows are permanently selectable listbox options with a roving Tab stop", async ({ page, injectedSession }) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
+	test("rows are permanently selectable listbox options with a roving Tab stop", async ({ page }) => {
 		await gotoContacts(page)
 		const { hasContacts } = await waitForContactsSettled(page)
 
@@ -192,12 +183,7 @@ test.describe("contacts", () => {
 		await expect(options.first()).toHaveAttribute("aria-selected", "false")
 	})
 
-	test("an established contact's destructive row action opens a confirm dialog and dismisses without mutating", async ({
-		page,
-		injectedSession
-	}) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
+	test("an established contact's destructive row action opens a confirm dialog and dismisses without mutating", async ({ page }) => {
 		await gotoContacts(page)
 		const { hasContacts } = await waitForContactsSettled(page)
 		test.skip(!hasContacts, "this account has no contacts, requests, or blocked entries to act on")

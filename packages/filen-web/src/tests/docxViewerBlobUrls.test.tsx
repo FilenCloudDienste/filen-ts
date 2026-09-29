@@ -3,6 +3,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { render, waitFor } from "@testing-library/react"
 import "@/lib/i18n"
+import { linkedFileItem } from "@/tests/fixtures/sdk"
 
 // docx-preview mints an object URL per embedded image and font and never revokes one; the viewer
 // owns that, once the render it belongs to is gone.
@@ -17,22 +18,11 @@ vi.mock("@/features/preview/hooks/usePreviewBytes", () => ({
 }))
 
 const { default: DocxViewer } = await import("@/features/preview/components/docxViewer")
-const { linkedFileIntoDriveItem } = await import("@/features/drive/lib/item")
 
-const item = linkedFileIntoDriveItem({
+const item = linkedFileItem("doc.docx", {
 	uuid: "aaaaaaaa-0000-0000-0000-000000000001",
-	name: { Decrypted: "doc.docx" },
 	mime: { Decrypted: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" },
-	size: 1n,
-	chunks: 1n,
-	region: "",
-	bucket: "",
-	version: 2,
-	timestamp: 0n,
-	fileKey: "k",
-	downloadable: true,
-	linkedTag: true,
-	canMakeThumbnail: false
+	size: 1n
 })
 
 const revokeObjectURL = vi.fn<(url: string) => void>()

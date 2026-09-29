@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { render, cleanup, fireEvent, screen, act } from "@testing-library/react"
 import { createElement, type ReactNode } from "react"
 import { onlineManager } from "@tanstack/react-query"
-import type { Dir, File, SharedRootDir, UuidStr } from "@filen/sdk-rs"
+import type { Dir, File, SharedRootDir } from "@filen/sdk-rs"
 import "@/lib/i18n"
 
 // The tree reads each level through useDirectoryTreeChildrenQuery; the per-uuid results below stand in
@@ -20,7 +20,6 @@ vi.mock("@/lib/keymap/kbd", async () => {
 	const { createElement: element } = await import("react")
 	return { Kbd: ({ action }: { action: string }) => element("span", null, ` ${action}`) }
 })
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
 vi.mock("@/queries/client", async () => {
 	const { QueryClient: Client } = await import("@tanstack/react-query")
 	return { queryClient: new Client() }
@@ -44,10 +43,7 @@ import { TransferSubmenu } from "@/features/drive/components/transferSubmenu"
 import { useDriveClipboardStore } from "@/features/drive/store/useDriveClipboardStore"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { FolderInputIcon } from "lucide-react"
-
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import { testUuid } from "@/tests/support/uuid"
 
 function dirItem(label: string, parent: string, overrides: Partial<Dir> = {}): DriveItem {
 	return narrowItem({

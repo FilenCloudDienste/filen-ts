@@ -1,8 +1,6 @@
-import { describe, expect, it, vi } from "vitest"
+import { describe, expect, it } from "vitest"
 import { createListenerSet } from "@/lib/listenerSet"
 import { withoutKey } from "@/lib/utils"
-
-vi.mock("@/lib/log", () => ({ log: { error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() } }))
 
 describe("createListenerSet", () => {
 	it("fans out past a throwing listener and stops after unsubscribe or clear", () => {

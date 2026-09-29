@@ -2,7 +2,7 @@
 
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, renderHook } from "@testing-library/react"
-import type { Dir, UuidStr } from "@filen/sdk-rs"
+import type { Dir } from "@filen/sdk-rs"
 
 const { pasteClipboard } = vi.hoisted(() => ({ pasteClipboard: vi.fn(() => Promise.resolve()) }))
 
@@ -33,10 +33,7 @@ import { DRIVE_ACTIONS } from "@/features/drive/lib/keymap"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { useDriveClipboard } from "@/features/drive/hooks/useDriveClipboard"
 import { useDriveClipboardStore } from "@/features/drive/store/useDriveClipboardStore"
-
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import { testUuid } from "@/tests/support/uuid"
 
 function dirItem(label: string, parent: string): DriveItem {
 	return narrowItem({

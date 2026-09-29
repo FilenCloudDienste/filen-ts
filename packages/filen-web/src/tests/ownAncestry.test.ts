@@ -1,21 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import type { Dir, SharedDir, SharedRootDir, SharingRole, UuidStr } from "@filen/sdk-rs"
+import type { Dir, SharedDir, SharedRootDir, SharingRole } from "@filen/sdk-rs"
 
 vi.mock("@/queries/client", async () => {
 	const { QueryClient } = await import("@tanstack/react-query")
 
 	return { queryClient: new QueryClient() }
 })
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
 
 import { queryClient } from "@/queries/client"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { cachedOwnParents, targetOwnParents } from "@/features/drive/lib/ownAncestry"
-
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import { testUuid } from "@/tests/support/uuid"
 
 const ROOT = testUuid("root")
 const RECEIVER: SharingRole = { Receiver: { email: "friend@filen.io", id: 7 } }

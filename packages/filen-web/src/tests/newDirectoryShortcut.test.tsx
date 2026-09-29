@@ -12,8 +12,6 @@ vi.mock("@/components/ui/tooltip", () => ({
 	TooltipTrigger: (props: { render: ReactElement }) => props.render,
 	TooltipContent: () => null
 }))
-// Reaches the Vite `?worker` client, unresolvable under vitest; nothing here submits.
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
 vi.mock("@/features/drive/queries/drive", () => ({ driveListingQueryUpdate: vi.fn() }))
 vi.mock("@/components/dialogs/inputDialog", () => ({
 	InputDialog: (props: { open: boolean }) => (props.open ? <div data-testid="new-directory-dialog" /> : null)

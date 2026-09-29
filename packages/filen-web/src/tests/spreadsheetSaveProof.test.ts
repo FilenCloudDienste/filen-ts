@@ -1,41 +1,11 @@
-import { readFileSync } from "node:fs"
 import { describe, expect, it, vi } from "vitest"
-import { openXlsx, saveXlsx, writeXlsx, type RoundtripWorkbook } from "hucre/xlsx"
-import type { Cell, CellValue } from "hucre"
-import type { EditResult } from "@/features/spreadsheet/lib/edits"
+import { openXlsx, saveXlsx, writeXlsx } from "hucre/xlsx"
 import { FormulaEngine } from "@/features/spreadsheet/lib/formulaEngine"
-import { cellKey, type CellView } from "@/features/spreadsheet/lib/model"
 import { XlsxDocument } from "@/features/spreadsheet/lib/xlsxDocument"
 import { saveLosses } from "@/features/spreadsheet/lib/xlsxVerify"
 import { rawEntries, xlsxSavePlan } from "@/features/spreadsheet/lib/xlsxWritable"
 import { readZip } from "@/features/spreadsheet/lib/zipLimits"
-import { proven } from "@/tests/spreadsheetProven"
-
-const FIXTURES = new URL("./fixtures/spreadsheet/", import.meta.url)
-
-async function fixture(name: string): Promise<RoundtripWorkbook> {
-	return await openXlsx(readFileSync(new URL(name, FIXTURES)), { readStyles: true })
-}
-
-async function open(sheets: { name: string; rows: CellValue[][]; cells?: Map<string, Cell> }[]): Promise<XlsxDocument> {
-	return await proven(await openXlsx(await writeXlsx({ sheets }), { readStyles: true }))
-}
-
-function formula(text: string, result: CellValue = null): Cell {
-	return { value: result, type: "formula", formula: text, formulaResult: result }
-}
-
-function view(result: EditResult, row: number, col: number, sheet = 0): CellView | null | undefined {
-	if (result.type === "cells") {
-		return result.patches.find(patch => patch.sheet === sheet)?.cells.find(([key]) => key === cellKey(row, col))?.[1]
-	}
-
-	return result.type === "sheets" ? result.sheets[sheet]?.cells.get(cellKey(row, col)) : undefined
-}
-
-function shown(document: XlsxDocument, row: number, col: number, sheet = 0): CellView | undefined {
-	return document.doc().sheets[sheet]?.cells.get(cellKey(row, col))
-}
+import { formula, openFixture, openSheets, proven, shownCell, viewCell } from "@/tests/spreadsheetProven"
 
 describe("proof that saving loses nothing", () => {
 	it("skips the proof for a page that will not edit, and then refuses to save", async () => {
@@ -48,7 +18,7 @@ describe("proof that saving loses nothing", () => {
 	})
 
 	it("opens view-only until proven, and proves ordinary files from Google Sheets, LibreOffice and openpyxl", async () => {
-		const workbook = await fixture("gs.xlsx")
+		const workbook = await openFixture("gs.xlsx")
 		const document = new XlsxDocument(workbook)
 
 		expect(document.writable).toBe(false)
@@ -56,25 +26,25 @@ describe("proof that saving loses nothing", () => {
 		expect(document.writable).toBe(true)
 
 		for (const name of ["lo-plain.xlsx", "lo-array.xlsx", "dv.xlsx", "shared.xlsx", "table.xlsx", "threaded.xlsx"]) {
-			const other = await proven(await fixture(name))
+			const other = await proven(await openFixture(name))
 
 			expect([name, other.losses]).toEqual([name, []])
 		}
 	})
 
 	it("keeps view-only an Excel file with what saving would lose: x14 validations, picture offsets, data bars", async () => {
-		const excel = await proven(await fixture("excel_full.xlsx"))
+		const excel = await proven(await openFixture("excel_full.xlsx"))
 
 		expect(excel.writable).toBe(false)
 		expect(excel.losses.some(loss => loss.includes("extLst"))).toBe(true)
 		expect(excel.losses.some(loss => loss.includes("colOff"))).toBe(true)
 		await expect(excel.serialize()).rejects.toThrow()
 
-		expect((await proven(await fixture("cf.xlsx"))).writable).toBe(false)
+		expect((await proven(await openFixture("cf.xlsx"))).writable).toBe(false)
 	})
 
 	it("finds a value, a format or an element that saving changed", async () => {
-		const workbook = await fixture("shared.xlsx")
+		const workbook = await openFixture("shared.xlsx")
 		const plan = xlsxSavePlan(workbook)
 		const original = new Map(rawEntries(workbook))
 		const saved = (await readZip(await saveXlsx(workbook))) ?? new Map<string, Uint8Array>()
@@ -122,7 +92,7 @@ describe("proof that saving loses nothing", () => {
 	})
 
 	it("proves only the file as opened: an edit made first leaves it view-only", async () => {
-		const document = new XlsxDocument(await fixture("gs.xlsx"))
+		const document = new XlsxDocument(await openFixture("gs.xlsx"))
 
 		document.apply({ type: "setCells", sheet: 0, cells: [{ row: 0, col: 0, input: "x" }] })
 
@@ -130,7 +100,7 @@ describe("proof that saving loses nothing", () => {
 	})
 
 	it("keeps of the file only what saving copies once proven, and nothing of a view-only one", async () => {
-		const writable = await fixture("lo-plain.xlsx")
+		const writable = await openFixture("lo-plain.xlsx")
 
 		await proven(writable)
 
@@ -138,7 +108,7 @@ describe("proof that saving loses nothing", () => {
 			[...(rawEntries(writable)?.keys() ?? [])].some(path => /worksheets\/sheet\d+\.xml$|sharedStrings|styles\.xml/i.test(path))
 		).toBe(false)
 
-		const viewOnly = await fixture("excel_full.xlsx")
+		const viewOnly = await openFixture("excel_full.xlsx")
 
 		await proven(viewOnly)
 
@@ -146,14 +116,14 @@ describe("proof that saving loses nothing", () => {
 	})
 
 	it("reads back what the patched writer keeps: conditional format kinds, hidden names, row formats", async () => {
-		const cf = await openXlsx(await saveXlsx(await fixture("cf.xlsx")))
+		const cf = await openXlsx(await saveXlsx(await openFixture("cf.xlsx")))
 		const rules = cf.sheets[0]?.conditionalRules ?? []
 
 		expect(rules.find(rule => rule.type === "timePeriod")?.timePeriod).toBe("lastWeek")
 		expect(rules.find(rule => rule.type === "top10")?.rank).toBe(3)
 		expect(rules.find(rule => rule.type === "containsText")?.operator).toBe("containsText")
 
-		const excel = await openXlsx(await saveXlsx(await fixture("excel_full.xlsx")))
+		const excel = await openXlsx(await saveXlsx(await openFixture("excel_full.xlsx")))
 
 		expect(excel.namedRanges?.find(named => named.name === "_xlnm._FilterDatabase")?.hidden).toBe(true)
 	})
@@ -161,7 +131,7 @@ describe("proof that saving loses nothing", () => {
 
 describe("XlsxDocument engine, as Excel reads ordinary formulas", () => {
 	it("intersects a range where one value is expected, evaluates SUMPRODUCT over arrays, and never spills", async () => {
-		const document = await open([
+		const document = await openSheets([
 			{
 				name: "S",
 				rows: [
@@ -183,42 +153,42 @@ describe("XlsxDocument engine, as Excel reads ordinary formulas", () => {
 			]
 		})
 
-		expect(view(result, 1, 2)).toMatchObject({ text: "4" })
-		expect(view(result, 0, 3)).toMatchObject({ text: "90" })
-		expect(view(result, 0, 4)).toMatchObject({ text: "1" })
-		expect(view(result, 0, 5)).toMatchObject({ text: "1" })
+		expect(viewCell(result, 1, 2)).toMatchObject({ text: "4" })
+		expect(viewCell(result, 0, 3)).toMatchObject({ text: "90" })
+		expect(viewCell(result, 0, 4)).toMatchObject({ text: "1" })
+		expect(viewCell(result, 0, 5)).toMatchObject({ text: "1" })
 		expect(document.apply({ type: "insert", sheet: 0, axis: "rows", at: 2, count: 1 }).type).toBe("sheets")
 	})
 
 	it("keeps the stored result of an array formula", async () => {
-		const document = await proven(await fixture("lo-array.xlsx"))
-		const before = shown(document, 0, 2)
+		const document = await proven(await openFixture("lo-array.xlsx"))
+		const before = shownCell(document, 0, 2)
 
 		document.apply({ type: "setCells", sheet: 0, cells: [{ row: 1, col: 0, input: "100" }] })
 
-		expect(shown(document, 0, 2)).toEqual(before)
+		expect(shownCell(document, 0, 2)).toEqual(before)
 	})
 
 	it("does not build an array too large to hold, typed or read from a file", async () => {
-		const document = await open([{ name: "S", rows: [[1]] }])
+		const document = await openSheets([{ name: "S", rows: [[1]] }])
 		const started = performance.now()
 
 		expect(
-			view(document.apply({ type: "setCells", sheet: 0, cells: [{ row: 0, col: 1, input: "=SEQUENCE(1000,1000)" }] }), 0, 1)
+			viewCell(document.apply({ type: "setCells", sheet: 0, cells: [{ row: 0, col: 1, input: "=SEQUENCE(1000,1000)" }] }), 0, 1)
 		).toMatchObject({
 			text: "#ERROR!"
 		})
 		expect(performance.now() - started).toBeLessThan(2000)
 
-		const stored = await open([{ name: "S", rows: [[null]], cells: new Map([["0,0", formula("SEQUENCE(100000,100000)")]]) }])
+		const stored = await openSheets([{ name: "S", rows: [[null]], cells: new Map([["0,0", formula("SEQUENCE(100000,100000)")]]) }])
 
-		expect(shown(stored, 0, 0)).toMatchObject({ input: "=SEQUENCE(100000,100000)" })
+		expect(shownCell(stored, 0, 0)).toMatchObject({ input: "=SEQUENCE(100000,100000)" })
 	})
 })
 
 describe("XlsxDocument, structural edits all or nothing", () => {
 	it("keeps the workbook and the engine together when the engine fails part-way", async () => {
-		const document = await open([
+		const document = await openSheets([
 			{
 				name: "S",
 				rows: [[1], [2], [3], [4]],
@@ -231,8 +201,8 @@ describe("XlsxDocument, structural edits all or nothing", () => {
 
 		expect(document.apply({ type: "insert", sheet: 0, axis: "rows", at: 1, count: 1 }).type).toBe("sheets")
 		expect(insert).toHaveBeenCalled()
-		expect(shown(document, 4, 0)).toMatchObject({ input: "=SUM(A1:A4)" })
-		expect(view(document.apply({ type: "setCells", sheet: 0, cells: [{ row: 1, col: 0, input: "10" }] }), 4, 0)).toMatchObject({
+		expect(shownCell(document, 4, 0)).toMatchObject({ input: "=SUM(A1:A4)" })
+		expect(viewCell(document.apply({ type: "setCells", sheet: 0, cells: [{ row: 1, col: 0, input: "10" }] }), 4, 0)).toMatchObject({
 			text: "16"
 		})
 
@@ -247,14 +217,14 @@ describe("XlsxDocument, structural edits all or nothing", () => {
 		remove.mockRestore()
 
 		expect(undone.state).toMatchObject({ canUndo: false, canRedo: true })
-		expect(shown(document, 3, 0)).toMatchObject({ text: "6", input: "=SUM(A1:A3)" })
-		expect(view(document.apply({ type: "setCells", sheet: 0, cells: [{ row: 0, col: 0, input: "5" }] }), 3, 0)).toMatchObject({
+		expect(shownCell(document, 3, 0)).toMatchObject({ text: "6", input: "=SUM(A1:A3)" })
+		expect(viewCell(document.apply({ type: "setCells", sheet: 0, cells: [{ row: 0, col: 0, input: "5" }] }), 3, 0)).toMatchObject({
 			text: "10"
 		})
 	})
 
 	it("shrinks a sheet back when undoing an edit that grew it", async () => {
-		const document = await open([{ name: "S", rows: [[1, 2]] }])
+		const document = await openSheets([{ name: "S", rows: [[1, 2]] }])
 
 		document.apply({ type: "setCells", sheet: 0, cells: [{ row: 9, col: 5, input: "x" }] })
 
@@ -266,7 +236,7 @@ describe("XlsxDocument, structural edits all or nothing", () => {
 	})
 
 	it("locks rows and columns on a sheet with a print area or print titles", async () => {
-		const workbook = await fixture("printarea.xlsx")
+		const workbook = await openFixture("printarea.xlsx")
 
 		// Sheet A's print area lives in its page setup, not in the defined names.
 		delete workbook.namedRanges

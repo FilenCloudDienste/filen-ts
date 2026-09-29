@@ -1,11 +1,8 @@
 import { describe, expect, it } from "vitest"
-import type { ChatMessage, UuidStr } from "@filen/sdk-rs"
+import type { ChatMessage } from "@filen/sdk-rs"
 import { applyMessageOfflineGate, messageMenuActions, type MessageActionId } from "@/features/chats/components/thread/messageMenu.logic"
 import { inlinePrimaryActions, INLINE_PRIMARY } from "@/features/chats/components/thread/messageActionBar.logic"
-
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import { testUuid } from "@/tests/support/uuid"
 
 function mockMessage(overrides: Partial<ChatMessage> = {}): ChatMessage {
 	return {

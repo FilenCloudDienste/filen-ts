@@ -4,7 +4,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 import { createElement } from "react"
 import { act, fireEvent, render, screen } from "@testing-library/react"
 import { QueryClient } from "@tanstack/react-query"
-import type { Chat, ChatMessage, UuidStr } from "@filen/sdk-rs"
+import type { Chat, ChatMessage } from "@filen/sdk-rs"
 import { EMPTY_BLOCKED_USERS } from "@filen/shared"
 
 // The thread's scroll bookkeeping on its column-reverse scroller (scrollTop 0 at the bottom, negative going
@@ -23,7 +23,6 @@ const { messagesByChat, loadOlderChatMessages, markChatRead, toastError } = vi.h
 	toastError: vi.fn()
 }))
 
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 vi.mock("@/features/chats/queries/chatMessages", () => ({
 	useChatMessages: (chatUuid: string) => ({ data: messagesByChat.get(chatUuid), isPending: false, isError: false }),
@@ -51,6 +50,7 @@ vi.mock("@/lib/i18n/errorLabel", () => ({ errorLabel: () => "Could not mark as r
 
 import "@/lib/i18n"
 import { MessageThread } from "@/features/chats/components/thread/messageThread"
+import { testUuid } from "@/tests/support/uuid"
 
 const CLIENT_HEIGHT = 300
 const ROW_HEIGHT = 24
@@ -102,18 +102,14 @@ afterAll(() => {
 	}
 })
 
-function uuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
-
 function chat(label: string): Chat {
-	return { uuid: uuid(label), ownerId: 1n, participants: [], muted: false, created: 0n, lastFocus: 10_000n }
+	return { uuid: testUuid(label), ownerId: 1n, participants: [], muted: false, created: 0n, lastFocus: 10_000n }
 }
 
 function message(chatLabel: string, label: string, sentTimestamp: bigint, senderId = 9): ChatMessage {
 	return {
-		uuid: uuid(label),
-		chat: uuid(chatLabel),
+		uuid: testUuid(label),
+		chat: testUuid(chatLabel),
 		senderId,
 		senderEmail: "peer@filen.io",
 		senderNickName: "Peer",

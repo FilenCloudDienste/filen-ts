@@ -1,25 +1,19 @@
-import type { Locator, Page } from "@playwright/test"
+import type { Page } from "@playwright/test"
 import { test, expect } from "./fixtures"
 import { SPRING_BLINK_ATTRIBUTE, SPRING_LOAD_DELAY_MS } from "@/features/drive/lib/springLoad"
+import { centerOf } from "./helpers/geometry"
 import {
 	bootTo,
 	createDirectoryViaDialog,
 	descendInto,
+	directoryListbox,
 	enterScratchDirectory,
+	expectBreadcrumbAt,
 	trashScratchDirectory,
+	uploadFiles,
 	waitForListingSettled,
 	LIVE_WRITE_TIMEOUT_MS
 } from "./helpers/listing"
-
-async function centerOf(locator: Locator): Promise<{ x: number; y: number }> {
-	const box = await locator.boundingBox()
-
-	if (box === null) {
-		throw new Error("no bounding box — the element is not rendered")
-	}
-
-	return { x: box.x + box.width / 2, y: box.y + box.height / 2 }
-}
 
 // Every value the blink attribute takes, in order, recorded in the page — the blink lasts a few hundred
 // milliseconds on an element that is gone right after, too brief and too short-lived to poll for.
@@ -46,9 +40,7 @@ async function recordedBlinks(page: Page): Promise<(string | null)[]> {
 // whether the browser's drag survives the listing it started in being replaced by another, which only a
 // drag the browser itself runs can answer.
 test.describe("spring-loaded directories", () => {
-	test("a drag resting on a directory blinks it, opens it, and drops inside it", async ({ page, injectedSession }) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
+	test("a drag resting on a directory blinks it, opens it, and drops inside it", async ({ page }) => {
 		const runId = crypto.randomUUID()
 		const scratchName = `e2e-spring-${runId}`
 		const targetDirName = `spring-target-${runId}`
@@ -60,11 +52,7 @@ test.describe("spring-loaded directories", () => {
 			const { listbox } = await enterScratchDirectory(page, scratchName)
 
 			await createDirectoryViaDialog(page, targetDirName, listbox)
-			await page
-				.getByRole("main")
-				.locator('input[type="file"]')
-				.first()
-				.setInputFiles({ name: fileName, mimeType: "text/plain", buffer: Buffer.from("spring-load probe") })
+			await uploadFiles(page, [{ name: fileName, mimeType: "text/plain", buffer: Buffer.from("spring-load probe") }])
 
 			await expect(listbox.getByRole("option")).toHaveCount(2, { timeout: LIVE_WRITE_TIMEOUT_MS })
 
@@ -89,7 +77,7 @@ test.describe("spring-loaded directories", () => {
 
 			await page.waitForURL(url => url.toString() !== scratchUrl, { timeout: SPRING_LOAD_DELAY_MS + 5_000 })
 			expect(Date.now() - movedAt).toBeGreaterThanOrEqual(SPRING_LOAD_DELAY_MS)
-			await expect(page.getByRole("navigation", { name: "Breadcrumb" }).getByText(targetDirName, { exact: true })).toBeVisible()
+			await expectBreadcrumbAt(page, targetDirName)
 			expect(await recordedBlinks(page)).toEqual(["off", "on", "off", "on", null])
 
 			// Still dragging: the new, empty listing takes the drag and the drop once it has loaded, and its
@@ -111,7 +99,7 @@ test.describe("spring-loaded directories", () => {
 
 			await page.mouse.up()
 
-			const inside = page.getByRole("listbox", { name: "Directory contents" }).getByRole("option", { name: fileName })
+			const inside = directoryListbox(page).getByRole("option", { name: fileName })
 			await expect(inside).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 		} finally {
 			await trashScratchDirectory(page, scratchName)
@@ -120,9 +108,7 @@ test.describe("spring-loaded directories", () => {
 
 	// Files from the system dropped on a directory row upload into that directory, not beside it. The drop
 	// is dispatched with a real DataTransfer carrying a File: an OS drag can't be driven from the test.
-	test("files from the system dropped on a directory row upload into it", async ({ page, injectedSession }) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
+	test("files from the system dropped on a directory row upload into it", async ({ page }) => {
 		const runId = crypto.randomUUID()
 		const scratchName = `e2e-osdrop-${runId}`
 		const targetDirName = `osdrop-target-${runId}`

@@ -38,8 +38,6 @@ vi.mock("@filen/sdk-rs/service-worker/sdk-rs.js", () => ({
 	}
 }))
 
-vi.mock("@/lib/log", () => ({ log: { error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() } }))
-
 type Listener = (event: unknown) => void
 
 let listeners: Map<string, Listener>

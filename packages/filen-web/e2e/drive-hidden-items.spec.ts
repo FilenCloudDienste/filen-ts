@@ -1,5 +1,5 @@
 import { test, expect } from "./fixtures"
-import { bootTo, createDirectoryViaDialog, enterScratchDirectory, trashScratchDirectory } from "./helpers/listing"
+import { withScratchDirectory, createDirectoryViaDialog } from "./helpers/listing"
 
 // The hide-hidden-items display filter, end to end: the Display menu's checkbox, the listing filter,
 // the footer count, and the "won't be listed" toast a create fires while the filter is on. The rules
@@ -13,21 +13,12 @@ import { bootTo, createDirectoryViaDialog, enterScratchDirectory, trashScratchDi
 test.describe.configure({ mode: "default" })
 
 test("Display > Show hidden items filters dot-prefixed rows, counts them in the footer, and warns when a new name would be hidden", async ({
-	page,
-	injectedSession
+	page
 }) => {
-	expect(injectedSession.length).toBeGreaterThan(0)
-
-	const runId = crypto.randomUUID()
-	const scratchName = `e2e-hidden-${runId}`
-	const hiddenName = `.e2e-hidden-${runId}`
-	const visibleName = `visible-${runId}`
-	const secondHiddenName = `.e2e-hidden-second-${runId}`
-
-	await bootTo(page)
-
-	try {
-		const { listbox } = await enterScratchDirectory(page, scratchName)
+	await withScratchDirectory(page, "hidden", async ({ listbox, runId }) => {
+		const hiddenName = `.e2e-hidden-${runId}`
+		const visibleName = `visible-${runId}`
+		const secondHiddenName = `.e2e-hidden-second-${runId}`
 
 		async function toggleShowHiddenItems(): Promise<void> {
 			await page.getByRole("button", { name: "Display", exact: true }).click()
@@ -79,7 +70,5 @@ test("Display > Show hidden items filters dot-prefixed rows, counts them in the 
 		await expect(visibleRow).toBeVisible()
 		await expect(listbox.getByRole("option", { name: secondHiddenName })).toBeVisible()
 		await expect(page.getByText("2 hidden items are not shown", { exact: true })).toHaveCount(0)
-	} finally {
-		await trashScratchDirectory(page, scratchName)
-	}
+	})
 })

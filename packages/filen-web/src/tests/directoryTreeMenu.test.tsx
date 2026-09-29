@@ -69,10 +69,7 @@ import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import { DirectoryTree, type DirectoryTreeContext } from "@/features/drive/components/directoryTree"
 import { DirectoryTreeMenu } from "@/features/drive/components/directoryTreeMenu"
 import { DriveRow } from "@/features/drive/components/driveRow"
-
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import { testUuid } from "@/tests/support/uuid"
 
 const ROOT = testUuid("root")
 

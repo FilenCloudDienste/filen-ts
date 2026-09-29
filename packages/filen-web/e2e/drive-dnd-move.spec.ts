@@ -1,11 +1,11 @@
 import { test, expect } from "./fixtures"
 import {
-	bootTo,
+	breadcrumb,
 	createDirectoryViaDialog,
 	descendInto,
-	enterScratchDirectory,
-	trashScratchDirectory,
+	uploadFiles,
 	waitForListingSettled,
+	withScratchDirectory,
 	LIVE_WRITE_TIMEOUT_MS
 } from "./helpers/listing"
 import { html5DragMove } from "./helpers/dnd"
@@ -14,28 +14,16 @@ const ROW_SELECTOR = '[role="option"]'
 const BREADCRUMB_LINK_SELECTOR = 'nav[aria-label="Breadcrumb"] a'
 
 test.describe("drive drag-to-move", () => {
-	test("drags a file into a directory, then back out via the breadcrumb", async ({ page, injectedSession }) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
-		const runId = crypto.randomUUID()
-		const scratchName = `e2e-dnd-${runId}`
-		const targetDirName = `target-${runId}`
-		const fileName = `dragged-${runId}.txt`
-
-		await bootTo(page)
-
-		try {
-			const { listbox } = await enterScratchDirectory(page, scratchName)
+	test("drags a file into a directory, then back out via the breadcrumb", async ({ page }) => {
+		await withScratchDirectory(page, "dnd", async ({ listbox, scratchName, runId }) => {
+			const targetDirName = `target-${runId}`
+			const fileName = `dragged-${runId}.txt`
 
 			// A sibling directory to drop into.
 			await createDirectoryViaDialog(page, targetDirName)
 
 			// A file to drag.
-			await page
-				.getByRole("main")
-				.locator('input[type="file"]')
-				.first()
-				.setInputFiles({ name: fileName, mimeType: "text/plain", buffer: Buffer.from("drag-to-move probe") })
+			await uploadFiles(page, [{ name: fileName, mimeType: "text/plain", buffer: Buffer.from("drag-to-move probe") }])
 
 			const options = listbox.getByRole("option")
 			await expect(options).toHaveCount(2, { timeout: LIVE_WRITE_TIMEOUT_MS }) // target directory + uploaded file
@@ -64,13 +52,11 @@ test.describe("drive drag-to-move", () => {
 
 			// 3) Drag it back out onto the scratch ancestor in the breadcrumb — it leaves the nested listing.
 			// Dispatched once and waited out at the write budget, as in leg 1.
-			const scratchCrumb = page.getByRole("navigation", { name: "Breadcrumb" }).getByRole("link", { name: scratchName, exact: true })
+			const scratchCrumb = breadcrumb(page).getByRole("link", { name: scratchName, exact: true })
 			await expect(scratchCrumb).toBeVisible()
 
 			await html5DragMove(page, { selector: ROW_SELECTOR, text: fileName }, { selector: BREADCRUMB_LINK_SELECTOR, text: scratchName })
 			await expect(nestedFileRow).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
-		} finally {
-			await trashScratchDirectory(page, scratchName)
-		}
+		})
 	})
 })

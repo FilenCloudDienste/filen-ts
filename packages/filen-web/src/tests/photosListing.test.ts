@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
-import type { Dir, File, NormalDirsAndFiles, UuidStr } from "@filen/sdk-rs"
+import type { Dir, File, NormalDirsAndFiles } from "@filen/sdk-rs"
 
 const { listPhotosRecursive } = vi.hoisted(() => ({
 	listPhotosRecursive: vi.fn<(rootUuid: string) => Promise<NormalDirsAndFiles>>()
@@ -13,6 +13,7 @@ import { queryClient as testQueryClient } from "@/queries/client"
 import { fetchPhotosListing, photosListingQueryKey, photosListingQueryUpdate, type PhotosListing } from "@/features/photos/queries/photos"
 import { narrowItem } from "@/features/drive/lib/item"
 import { type PhotoItem } from "@/features/photos/lib/captureSort"
+import { testUuid } from "@/tests/support/uuid"
 
 function photoItem(overrides: Partial<File> = {}): PhotoItem {
 	const item = narrowItem(mockFile(overrides))
@@ -22,10 +23,6 @@ function photoItem(overrides: Partial<File> = {}): PhotoItem {
 	}
 
 	return item
-}
-
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
 }
 
 function mockDir(overrides: Partial<Dir> = {}): Dir {

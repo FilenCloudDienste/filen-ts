@@ -1,14 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import type { File as SdkFile, UuidStr } from "@filen/sdk-rs"
+import type { File as SdkFile } from "@filen/sdk-rs"
 import { normalizeTextFileName, runCreateTextFile, type CreateTextFileDeps } from "@/features/drive/lib/createTextFile"
 import type { DriveItem } from "@/features/drive/lib/item"
 import type { ErrorDTO } from "@/lib/sdk/errors"
-
-// UuidStr is a template-literal brand requiring at least 3 dashes (see @filen/sdk-rs) — pad a short
-// readable test label into a shape that satisfies it, mirroring createDirectory.test.ts's own fixture.
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import { testUuid } from "@/tests/support/uuid"
 
 function mockFile(overrides: Partial<SdkFile> = {}): SdkFile {
 	return {

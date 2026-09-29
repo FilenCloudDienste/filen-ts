@@ -35,6 +35,8 @@ async function gotoRegister(page: Page, fulfillRegisterCheck: (route: Route) => 
 const NOT_ELIGIBLE = (route: Route): Promise<void> => route.fulfill({ json: { status: true, data: { ok: false } } })
 
 test.describe("register", { tag: "@no-sdk" }, () => {
+	test.use({ injectSession: false })
+
 	test("submit stays disabled until email, matching passwords, and minimum strength are all satisfied", async ({ page }) => {
 		await gotoRegister(page, NOT_ELIGIBLE)
 

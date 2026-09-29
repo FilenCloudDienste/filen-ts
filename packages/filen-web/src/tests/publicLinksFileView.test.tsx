@@ -34,26 +34,12 @@ vi.mock("@/lib/useIsOnline", () => ({ useIsOnline: () => true }))
 
 import { queryClient } from "@/queries/client"
 import { FileLinkView } from "@/features/publicLinks/components/fileLinkView"
+import { mockLinkedFile } from "@/tests/fixtures/sdk"
 
 const LINK_UUID = "c1000000-0000-0000-0000-000000000000"
 const WRONG_PASSWORD = { species: "sdk", kind: "WrongPassword", message: "", label: "Wrong password" }
 
-// Not previewable, so the hero card shows.
-const linkedFile: LinkedFile = {
-	uuid: "f1000000-0000-0000-0000-000000000000",
-	name: { Decrypted: "archive.bin" },
-	mime: { Decrypted: "application/octet-stream" },
-	size: 10n,
-	chunks: 1n,
-	region: "de-1",
-	bucket: "filen-1",
-	version: 2,
-	timestamp: 0n,
-	fileKey: "k",
-	downloadable: true,
-	linkedTag: true,
-	canMakeThumbnail: false
-}
+const linkedFile = mockLinkedFile()
 
 function wrapper({ children }: { children: ReactNode }) {
 	return createElement(QueryClientProvider, { client: queryClient, children })

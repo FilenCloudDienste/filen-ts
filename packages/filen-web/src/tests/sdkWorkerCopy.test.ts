@@ -68,8 +68,6 @@ vi.mock("comlink", () => ({
 	transfer: (value: unknown) => value
 }))
 
-vi.mock("@/lib/log", () => ({ log: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() } }))
-
 await import("@/workers/sdk.worker")
 
 // What the page sees: every call answers with a promise.

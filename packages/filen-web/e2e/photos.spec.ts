@@ -1,6 +1,15 @@
 import type { Page } from "@playwright/test"
 import { test, expect } from "./fixtures"
-import { bootTo, enterScratchDirectory, trashScratchDirectory, BOOT_SETTLE_TIMEOUT_MS, LIVE_WRITE_TIMEOUT_MS } from "./helpers/listing"
+import { boxOf } from "./helpers/geometry"
+import {
+	bootTo,
+	clickLinkUntilUrl,
+	enterScratchDirectory,
+	trashScratchDirectory,
+	uploadFiles,
+	BOOT_SETTLE_TIMEOUT_MS,
+	LIVE_WRITE_TIMEOUT_MS
+} from "./helpers/listing"
 import { PNG_BYTES } from "./helpers/fixtureBytes"
 import { resolveModKey } from "./helpers/modkey"
 
@@ -22,23 +31,15 @@ const MP4_BYTES = Buffer.from(
 	"base64"
 )
 
-// The rail's Photos entry, retried until the URL commits — a click that silently fails to commit under
-// suite load leaves every later step on the listing the spec believes it has left (the same reason
-// helpers/listing.ts's openTransfers retries). Callers then wait on a landmark of the photos screen
-// itself, since the URL flips before React commits the route.
+// The rail's Photos entry. Callers then wait on a landmark of the photos screen itself, since the URL
+// flips before React commits the route.
 async function openPhotos(page: Page): Promise<void> {
-	await expect(async () => {
-		await page.getByRole("link", { name: "Photos", exact: true }).first().click()
-		await expect(page).toHaveURL(/\/photos$/, { timeout: 5_000 })
-	}).toPass({ timeout: 30_000 })
+	await clickLinkUntilUrl(page, page.getByRole("link", { name: "Photos", exact: true }).first(), /\/photos$/)
 }
 
 test("photos: root pick over a mixed upload, media-only grid, viewer pager + in-overlay favorite reflecting back without a reload, change-directory, and root-gone reset", async ({
-	page,
-	injectedSession
+	page
 }) => {
-	expect(injectedSession.length).toBeGreaterThan(0)
-
 	const runId = crypto.randomUUID()
 	const scratchName = `e2e-photos-${runId}`
 	const nameImage = `e2e-photos-${runId}.png`
@@ -53,20 +54,15 @@ test("photos: root pick over a mixed upload, media-only grid, viewer pager + in-
 	try {
 		const { listbox: driveListbox } = await enterScratchDirectory(page, scratchName)
 
-		await page
-			.getByRole("main")
-			.locator('input[type="file"]')
-			.first()
-			.setInputFiles([
+		await uploadFiles(
+			page,
+			[
 				{ name: nameImage, mimeType: "image/png", buffer: PNG_BYTES },
 				{ name: nameVideo, mimeType: "video/mp4", buffer: MP4_BYTES },
 				{ name: nameDoc, mimeType: "text/plain", buffer: Buffer.from("photos grid must never show this row") }
-			])
-
-		// Uploads, so each row lands on the account-wide write lease.
-		await expect(driveListbox.getByRole("option", { name: nameImage })).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
-		await expect(driveListbox.getByRole("option", { name: nameVideo })).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
-		await expect(driveListbox.getByRole("option", { name: nameDoc })).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
+			],
+			driveListbox
+		)
 
 		// ---- navigate to /photos: unset hero (no root picked yet) ----
 		await openPhotos(page)
@@ -199,13 +195,9 @@ test("photos: root pick over a mixed upload, media-only grid, viewer pager + in-
 		// ---- marquee: a drag over blank grid space rubber-band-selects the tiles it covers ----
 		// Also after the click above, for the same reason: this leg ends with a real selection, which
 		// would silently turn that click into a "select" instead of an "open".
-		const gridBox = await grid.boundingBox()
-		const firstTileBox = await tiles.first().boundingBox()
-		const secondTileBox = await tiles.nth(1).boundingBox()
-
-		if (!gridBox || !firstTileBox || !secondTileBox) {
-			throw new Error("photos grid or its tiles have no bounding box")
-		}
+		const gridBox = await boxOf(grid)
+		const firstTileBox = await boxOf(tiles.first())
+		const secondTileBox = await boxOf(tiles.nth(1))
 
 		// A press point BELOW the tile row (blank space inside the grid), dragged right and down:
 		// marqueeRectFromPoints normalizes the rect, so only a right/down drag puts its x/y at the press

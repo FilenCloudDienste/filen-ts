@@ -24,7 +24,6 @@ vi.mock("@/lib/storage/leader", () => ({
 		})
 }))
 
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
 vi.mock("@/features/drive/lib/thumbCache", () => ({ readThumbnailBlob: vi.fn(), deleteThumbnail: vi.fn() }))
 
 const { TrackMetadataService } = await import("@/features/audio/lib/trackMetadata")

@@ -1,27 +1,32 @@
 import { test, expect } from "./fixtures"
 import { waitForE2eHooks } from "./helpers/e2eHooks"
-import { BOOT_SETTLE_TIMEOUT_MS, bootTo } from "./helpers/listing"
+import { BOOT_SETTLE_TIMEOUT_MS, bootTo, bootToSignIn } from "./helpers/listing"
 
 test.describe("boot", () => {
-	test("boots to a ready shell and forwards to sign-in when unauthenticated", async ({ page }) => {
-		await page.goto("/")
+	test.describe("signed out", () => {
+		test.use({ injectSession: false })
 
-		// The sign-in surface only renders once the boot store reaches "ready" (the root gate holds the
-		// boot screen until then), so its presence is the user-visible proof of a ready boot phase. A
-		// healthy boot never shows the boot-error screen. Boot budget, not the expect default: this is
-		// a cold wasm init + OPFS open, which the 10s UI-responsiveness default was never sized for.
-		await expect(page.getByText("Sign in to Filen")).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
-		await expect(page.getByText("Filen could not start")).toHaveCount(0)
+		test("boots to a ready shell and forwards to sign-in when unauthenticated", async ({ page }) => {
+			// The sign-in surface only renders once the boot store reaches "ready" (the root gate holds the
+			// boot screen until then), so its presence is the user-visible proof of a ready boot phase. A
+			// healthy boot never shows the boot-error screen.
+			await bootToSignIn(page)
+			await expect(page.getByText("Filen could not start")).toHaveCount(0)
 
-		// Legal footer on the sign-in screen — route wiring has no unit-test surface, and this test
-		// already has the page loaded, so it costs no extra navigation.
-		await expect(page.getByRole("link", { name: "Terms of Service", exact: true })).toHaveAttribute("href", "https://filen.io/terms")
-		await expect(page.getByRole("link", { name: "Privacy Policy", exact: true })).toHaveAttribute("href", "https://filen.io/privacy")
+			// Legal footer on the sign-in screen — route wiring has no unit-test surface, and this test
+			// already has the page loaded, so it costs no extra navigation.
+			await expect(page.getByRole("link", { name: "Terms of Service", exact: true })).toHaveAttribute(
+				"href",
+				"https://filen.io/terms"
+			)
+			await expect(page.getByRole("link", { name: "Privacy Policy", exact: true })).toHaveAttribute(
+				"href",
+				"https://filen.io/privacy"
+			)
+		})
 	})
 
-	test("an injected session boots authenticated and an authed read succeeds", async ({ page, injectedSession }) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
+	test("an injected session boots authenticated and an authed read succeeds", async ({ page }) => {
 		// bootTo's own nav wait is the assertion this test wants: the authed shell rendering is itself
 		// proof the session authenticated the router (`hasClient()` gated the redirect).
 		await bootTo(page, "/")

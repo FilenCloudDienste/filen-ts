@@ -12,7 +12,6 @@ import type { Chat, ChatMessage, ChatMessagePartial } from "@filen/sdk-rs"
 // them. Rendered rather than probed through a seam because "replaces the ENTIRE row subtree" is the
 // property under test.
 
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 

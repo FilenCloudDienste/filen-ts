@@ -22,9 +22,16 @@ export interface DragEndpoint {
 	text: string
 }
 
-export async function html5DragMove(page: Page, source: DragEndpoint, target: DragEndpoint): Promise<void> {
-	const contract = await page.evaluate(
-		([src, tgt]) => {
+// `copy` holds the page's own copy modifier (Option on macOS, else Ctrl) from dragenter on, the way a
+// user presses it once the drag is under way.
+async function html5Drag(
+	page: Page,
+	source: DragEndpoint,
+	target: DragEndpoint,
+	copy: boolean
+): Promise<{ draggable: string | null; dropAllowed: boolean; dropEffect: string }> {
+	return page.evaluate(
+		([src, tgt, withCopy]) => {
 			function resolve(endpoint: { selector: string; text: string }): Element {
 				const match = Array.from(document.querySelectorAll(endpoint.selector)).find(element =>
 					element.textContent.includes(endpoint.text)
@@ -37,28 +44,60 @@ export async function html5DragMove(page: Page, source: DragEndpoint, target: Dr
 				return match
 			}
 
+			const mac = /mac/i.test(navigator.userAgent) && !/iphone|ipad|ipod/i.test(navigator.userAgent)
 			const srcElement = resolve(src)
 			const tgtElement = resolve(tgt)
 			const dataTransfer = new DataTransfer()
-			const fire = (element: Element, type: string): boolean => {
-				return element.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer }))
-			}
+			const fire = (element: Element, type: string, modifier: boolean): boolean =>
+				element.dispatchEvent(
+					new DragEvent(type, {
+						bubbles: true,
+						cancelable: true,
+						dataTransfer,
+						altKey: modifier && mac,
+						ctrlKey: modifier && !mac
+					})
+				)
+
+			// A synthetic transfer outside a real drag session drops what the handler writes to its drop
+			// effect, so the write itself is recorded.
+			let dropEffect = "unset"
+
+			Object.defineProperty(dataTransfer, "dropEffect", {
+				get: () => dropEffect,
+				set: (value: string) => {
+					dropEffect = value
+				}
+			})
 
 			const draggable = srcElement.getAttribute("draggable")
 
-			fire(srcElement, "dragstart")
-			fire(tgtElement, "dragenter")
+			fire(srcElement, "dragstart", false)
+			fire(tgtElement, "dragenter", withCopy)
 
-			const dropAllowed = !fire(tgtElement, "dragover")
+			const dropAllowed = !fire(tgtElement, "dragover", withCopy)
 
-			fire(tgtElement, "drop")
-			fire(srcElement, "dragend")
+			fire(tgtElement, "drop", withCopy)
+			fire(srcElement, "dragend", withCopy)
 
-			return { draggable, dropAllowed }
+			return { draggable, dropAllowed, dropEffect }
 		},
-		[source, target] as const
+		[source, target, copy] as const
 	)
+}
+
+export async function html5DragMove(page: Page, source: DragEndpoint, target: DragEndpoint): Promise<void> {
+	const contract = await html5Drag(page, source, target, false)
 
 	expect(contract.draggable).toBe("true")
 	expect(contract.dropAllowed).toBe(true)
+}
+
+// The copy variant: the target must also accept the drop AS a copy.
+export async function html5DragCopy(page: Page, source: DragEndpoint, target: DragEndpoint): Promise<void> {
+	const contract = await html5Drag(page, source, target, true)
+
+	expect(contract.draggable).toBe("true")
+	expect(contract.dropAllowed).toBe(true)
+	expect(contract.dropEffect).toBe("copy")
 }

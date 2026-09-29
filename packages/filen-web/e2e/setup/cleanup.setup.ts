@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test"
 import { test as setup, expect } from "../fixtures"
-import { BOOT_SETTLE_TIMEOUT_MS, dismissStartupReminders } from "../helpers/listing"
+import { bootTo, clickLinkUntilUrl } from "../helpers/listing"
 import { waitForE2eHooks } from "../helpers/e2eHooks"
 import { FIXTURE_FILES } from "../helpers/fixtures"
 import {
@@ -86,16 +86,10 @@ async function sweepDriveSurface(page: Page, target: "root" | "trash"): Promise<
 // attribute the row puts on its name span (playlistsSidebar.tsx) and matched by the same anchored
 // predicate as every other surface.
 async function sweepPlaylistDebris(page: Page): Promise<void> {
-	// Through the proven nav, like every other surface here: a bare click can silently fail to commit
-	// under load, and this one runs straight after the drive sweep — so an uncommitted click would have
-	// scanned whatever listing was still mounted and reported "nothing to sweep".
-	// NOT gotoSidebarListing: that scopes to the contextual sidebar (`complementary`), and Playlists is
-	// an icon-RAIL entry — scoping it there found nothing and burned the click's whole timeout. Same URL
-	// proof, unscoped locator.
-	await expect(async () => {
-		await page.getByRole("link", { name: "Playlists", exact: true }).click()
-		await expect(page).toHaveURL(/\/playlists$/, { timeout: 5_000 })
-	}).toPass({ timeout: 30_000 })
+	// Retried until the URL commits: this runs straight after the drive sweep, so an uncommitted click
+	// would have scanned whatever listing was still mounted and reported "nothing to sweep". Unscoped,
+	// not clickSidebarLink: Playlists is an icon-RAIL entry, not in the contextual sidebar.
+	await clickLinkUntilUrl(page, page.getByRole("link", { name: "Playlists", exact: true }), /\/playlists$/)
 	await expect(page.getByRole("heading", { name: "Playlists", exact: true })).toBeVisible()
 
 	const deadline = Date.now() + SWEEP_BUDGET_MS
@@ -142,14 +136,7 @@ async function sweepPrefixes(kind: string, prefixes: readonly string[], sweep: (
 	}
 }
 
-setup("sweep drive, trash and playlist debris matching a retired scratch-name prefix", async ({ page, injectedSession }) => {
-	// Same convention every other authed spec uses (auth.spec.ts, downloads.spec.ts, contacts.spec.ts,
-	// boot.spec.ts): asserting the session actually came back — not just requesting it — proves the
-	// fixture's addInitScript seeding ran, rather than silently continuing against an unauthenticated
-	// page that would only surface as a confusing waitForListingSettled timeout below. The one fatal
-	// condition here: without a session nothing in the run could pass anyway.
-	expect(injectedSession.length).toBeGreaterThan(0)
-
+setup("sweep drive, trash and playlist debris matching a retired scratch-name prefix", async ({ page }) => {
 	try {
 		await page.goto("/drive")
 		await waitForE2eHooks(page)
@@ -179,18 +166,12 @@ setup("sweep drive, trash and playlist debris matching a retired scratch-name pr
 // createNote calls outright. Tags leak separately (they outlive their notes; deleting a note never
 // deletes the tags on it). Programmatic sweep through the same e2e hooks the specs' own teardowns
 // use — no UI interaction, so the blocking startup reminders never gate it.
-setup("sweep notes, tags and chats matching a spec-minted debris prefix", async ({ page, injectedSession }) => {
-	expect(injectedSession.length).toBeGreaterThan(0)
-
+setup("sweep notes, tags and chats matching a spec-minted debris prefix", async ({ page }) => {
 	try {
-		await page.goto("/drive")
-
-		// The hooks issue authed SDK reads, which need the injected session actually resumed: the authed
-		// shell's nav is the readiness signal, at the cold-boot budget (at the expect default a slow first
+		// The hooks issue authed SDK reads, which need the injected session actually resumed: bootTo's
+		// shell barrier is the readiness signal, at the cold-boot budget (at the expect default a slow first
 		// boot skipped every notes-side sweep for the run, letting debris pile up against the 10-note cap).
-		// The blocking startup reminder has to be gone before that landmark is in the role tree at all.
-		await dismissStartupReminders(page)
-		await expect(page.getByRole("navigation", { name: "Filen" })).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
+		await bootTo(page)
 
 		await sweepPrefixes("note", NOTE_DEBRIS_TITLE_PREFIXES, prefix =>
 			page.evaluate(([p, minAgeMs]) => window.__filenE2E.sweepTestNotesByTitlePrefix(p, minAgeMs), [

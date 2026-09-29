@@ -4,9 +4,6 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, createEvent, fireEvent, render, screen } from "@testing-library/react"
 import { createElement } from "react"
 
-// The pickers' upload paths reach the SDK worker, which is unresolvable under vitest; no case here
-// starts an upload.
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
 // The Paste entry's shortcut badge, reduced to its action id (the registry isn't loaded here).
 vi.mock("@/lib/keymap/kbd", async () => {
 	const { createElement: element } = await import("react")

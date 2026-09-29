@@ -1,13 +1,12 @@
 import { test, expect } from "./fixtures"
 import {
-	bootTo,
+	withScratchDirectory,
 	clickSidebarLink,
 	waitForListingSettled,
-	enterScratchDirectory,
-	trashScratchDirectory,
 	selectAndTrashRow,
 	BOOT_SETTLE_TIMEOUT_MS,
-	LIVE_WRITE_TIMEOUT_MS
+	LIVE_WRITE_TIMEOUT_MS,
+	uploadFiles
 } from "./helpers/listing"
 import { focusEditorSurface } from "./helpers/editor"
 import { TEXT_BYTES } from "./helpers/fixtureBytes"
@@ -38,15 +37,7 @@ const LONG_TEXT_BYTES = Buffer.from(
 // real worker. Net-zero via the same scratch-directory convention every other leg in this file uses
 // (enterScratchDirectory/trashScratchDirectory) — the edited file never leaves the scratch directory,
 // which the teardown trashes whole. Drives the Save button; editor-shortcuts.spec.ts drives mod+s.
-test("editable text preview saves via its Save button, persists across reopen, and prompts on unsaved close", async ({
-	page,
-	injectedSession
-}) => {
-	expect(injectedSession.length).toBeGreaterThan(0)
-
-	const runId = crypto.randomUUID()
-	const scratchName = `e2e-preview-edit-${runId}`
-	const nameTxt = `e2e-preview-edit-${runId}.txt`
+test("editable text preview saves via its Save button, persists across reopen, and prompts on unsaved close", async ({ page }) => {
 	const modKey = await resolveEditorModKey(page)
 	// EVERY alertdialog in this file is scoped by its title, never by role alone (the convention
 	// downloads.spec.ts and preview-text.spec.ts already follow): the shared account's own startup
@@ -55,16 +46,12 @@ test("editable text preview saves via its Save button, persists across reopen, a
 	// false failure.
 	const unsavedPrompt = page.getByRole("alertdialog", { name: "Unsaved changes" })
 
-	await bootTo(page)
+	await withScratchDirectory(page, "preview-edit", async ({ listbox, runId }) => {
+		const nameTxt = `e2e-preview-edit-${runId}.txt`
 
-	try {
-		const { listbox } = await enterScratchDirectory(page, scratchName)
-
-		const input = page.getByRole("main").locator('input[type="file"]').first()
-		await input.setInputFiles([{ name: nameTxt, mimeType: "text/plain", buffer: TEXT_BYTES }])
+		await uploadFiles(page, [{ name: nameTxt, mimeType: "text/plain", buffer: TEXT_BYTES }], listbox)
 
 		const row = listbox.getByRole("option", { name: nameTxt })
-		await expect(row).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 
 		await row.dblclick()
 		const original = page.getByRole("dialog").getByText("Hello from a tiny text fixture.")
@@ -133,9 +120,7 @@ test("editable text preview saves via its Save button, persists across reopen, a
 		await unsavedPrompt.getByRole("button", { name: "Discard" }).click()
 		await expect(unsavedPrompt).toHaveCount(0)
 		await expect(page.locator(".cm-content")).toHaveCount(0)
-	} finally {
-		await trashScratchDirectory(page, scratchName)
-	}
+	})
 })
 
 // Regression test: the CodeMirror wrapper div had no height class of its own, so it
@@ -144,24 +129,15 @@ test("editable text preview saves via its Save button, persists across reopen, a
 // full mechanism). Asserts the FIX, not just the symptom's absence: the scroller's own box is taller
 // than its visible area (a container that never overflowed would trivially "not be stuck" too), and a
 // keyboard-driven scroll actually moves it.
-test("editable text preview: a long file's editor actually scrolls", async ({ page, injectedSession }) => {
-	expect(injectedSession.length).toBeGreaterThan(0)
-
-	const runId = crypto.randomUUID()
-	const scratchName = `e2e-preview-scroll-${runId}`
-	const nameTxt = `e2e-preview-scroll-${runId}.txt`
+test("editable text preview: a long file's editor actually scrolls", async ({ page }) => {
 	const modKey = await resolveEditorModKey(page)
 
-	await bootTo(page)
+	await withScratchDirectory(page, "preview-scroll", async ({ listbox, runId }) => {
+		const nameTxt = `e2e-preview-scroll-${runId}.txt`
 
-	try {
-		const { listbox } = await enterScratchDirectory(page, scratchName)
-
-		const input = page.getByRole("main").locator('input[type="file"]').first()
-		await input.setInputFiles([{ name: nameTxt, mimeType: "text/plain", buffer: LONG_TEXT_BYTES }])
+		await uploadFiles(page, [{ name: nameTxt, mimeType: "text/plain", buffer: LONG_TEXT_BYTES }], listbox)
 
 		const row = listbox.getByRole("option", { name: nameTxt })
-		await expect(row).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 
 		// A short viewport (not enterScratchDirectory's tall one, which exists only to defeat the drive
 		// LISTING's own virtualization) — mirrors preview-media-formats.spec.ts's PDF leg. The fixture's
@@ -192,9 +168,7 @@ test("editable text preview: a long file's editor actually scrolls", async ({ pa
 
 		await page.keyboard.press("Escape")
 		await expect(page.locator(".cm-content")).toHaveCount(0)
-	} finally {
-		await trashScratchDirectory(page, scratchName)
-	}
+	})
 })
 
 // The exact multi-sibling regression a single accumulated-per-slot override (not a single shared slot)
@@ -204,33 +178,23 @@ test("editable text preview: a long file's editor actually scrolls", async ({ pa
 // worker's own download op 404s on a uuid the earlier save already rotated away from. A is also saved
 // TWICE in a row before ever paging away, proving a same-slot re-save chains onto the SAME accumulated
 // entry (keyed by A's frozen uuid, not its already-rotated one) rather than orphaning the first save.
-test("editable preview: saving a file, paging to a sibling and back still resolves its own saved content", async ({
-	page,
-	injectedSession
-}) => {
-	expect(injectedSession.length).toBeGreaterThan(0)
-
-	const runId = crypto.randomUUID()
-	const scratchName = `e2e-preview-edit-pager-${runId}`
-	const nameA = `e2e-preview-edit-pager-a-${runId}.txt`
-	const nameB = `e2e-preview-edit-pager-b-${runId}.txt`
+test("editable preview: saving a file, paging to a sibling and back still resolves its own saved content", async ({ page }) => {
 	const modKey = await resolveEditorModKey(page)
 
-	await bootTo(page)
+	await withScratchDirectory(page, "preview-edit-pager", async ({ listbox, runId }) => {
+		const nameA = `e2e-preview-edit-pager-a-${runId}.txt`
+		const nameB = `e2e-preview-edit-pager-b-${runId}.txt`
 
-	try {
-		const { listbox } = await enterScratchDirectory(page, scratchName)
-
-		const input = page.getByRole("main").locator('input[type="file"]').first()
-		await input.setInputFiles([
-			{ name: nameA, mimeType: "text/plain", buffer: TEXT_BYTES },
-			{ name: nameB, mimeType: "text/plain", buffer: TEXT_BYTES }
-		])
+		await uploadFiles(
+			page,
+			[
+				{ name: nameA, mimeType: "text/plain", buffer: TEXT_BYTES },
+				{ name: nameB, mimeType: "text/plain", buffer: TEXT_BYTES }
+			],
+			listbox
+		)
 
 		const rowA = listbox.getByRole("option", { name: nameA })
-		const rowB = listbox.getByRole("option", { name: nameB })
-		await expect(rowA).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
-		await expect(rowB).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 
 		// "a" sorts before "b" — Next from A lands on B, mirroring the image leg's own nameA/nameB proof.
 		await rowA.dblclick()
@@ -269,9 +233,7 @@ test("editable preview: saving a file, paging to a sibling and back still resolv
 
 		await page.keyboard.press("Escape")
 		await expect(page.locator(".cm-content")).toHaveCount(0)
-	} finally {
-		await trashScratchDirectory(page, scratchName)
-	}
+	})
 })
 
 // The one live proof the trash-preview parity rule actually wires together: canOpenItem(item, "trash")
@@ -283,26 +245,11 @@ test("editable preview: saving a file, paging to a sibling and back still resolv
 // the item is a top-level Trash entry (a trashed directory's own contents stay unbrowsable — this
 // proves the file case only). The now-empty scratch directory still gets trashed as usual in the
 // teardown, same as every other test in this file.
-test("a trashed file opens its preview read-only: content renders, no save action, no download action", async ({
-	page,
-	injectedSession
-}) => {
-	expect(injectedSession.length).toBeGreaterThan(0)
+test("a trashed file opens its preview read-only: content renders, no save action, no download action", async ({ page }) => {
+	await withScratchDirectory(page, "preview-trash", async ({ listbox, runId }) => {
+		const nameTxt = `e2e-preview-trash-${runId}.txt`
 
-	const runId = crypto.randomUUID()
-	const scratchName = `e2e-preview-trash-${runId}`
-	const nameTxt = `e2e-preview-trash-${runId}.txt`
-
-	await bootTo(page)
-
-	try {
-		const { listbox } = await enterScratchDirectory(page, scratchName)
-
-		const input = page.getByRole("main").locator('input[type="file"]').first()
-		await input.setInputFiles([{ name: nameTxt, mimeType: "text/plain", buffer: TEXT_BYTES }])
-
-		const row = listbox.getByRole("option", { name: nameTxt })
-		await expect(row).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
+		await uploadFiles(page, [{ name: nameTxt, mimeType: "text/plain", buffer: TEXT_BYTES }], listbox)
 
 		// The helper rather than a hand-rolled select/confirm: it clears any lingering toast before the
 		// bulk-bar click (Sonner and the bar share the bottom-right corner, and a fading toast swallows
@@ -364,9 +311,7 @@ test("a trashed file opens its preview read-only: content renders, no save actio
 
 		await page.keyboard.press("Escape")
 		await expect(line).toHaveCount(0)
-	} finally {
-		await trashScratchDirectory(page, scratchName)
-	}
+	})
 })
 
 // The preview header's own item menu (d6-preview-menu): same descriptor set the row/tile ⋯ dropdown
@@ -379,33 +324,25 @@ test("a trashed file opens its preview read-only: content renders, no save actio
 // dismissOnSuccess: isPreview === true), not exercisable here since the shared e2e account has no
 // shared-root items to open a preview on (project_filen_web_free_e2e_account).
 test("the preview header's own item menu: matches the row menu's set (no Download), favorite round-trips, trash advances to the next sibling", async ({
-	page,
-	injectedSession
+	page
 }) => {
-	expect(injectedSession.length).toBeGreaterThan(0)
-
-	const runId = crypto.randomUUID()
-	const scratchName = `e2e-preview-menu-${runId}`
-	const nameA = `e2e-preview-menu-a-${runId}.txt`
-	const nameB = `e2e-preview-menu-b-${runId}.txt`
 	const contentA = Buffer.from("Preview menu content A\n", "utf8")
 	const contentB = Buffer.from("Preview menu content B\n", "utf8")
 
-	await bootTo(page)
+	await withScratchDirectory(page, "preview-menu", async ({ listbox, runId }) => {
+		const nameA = `e2e-preview-menu-a-${runId}.txt`
+		const nameB = `e2e-preview-menu-b-${runId}.txt`
 
-	try {
-		const { listbox } = await enterScratchDirectory(page, scratchName)
-
-		const input = page.getByRole("main").locator('input[type="file"]').first()
-		await input.setInputFiles([
-			{ name: nameA, mimeType: "text/plain", buffer: contentA },
-			{ name: nameB, mimeType: "text/plain", buffer: contentB }
-		])
+		await uploadFiles(
+			page,
+			[
+				{ name: nameA, mimeType: "text/plain", buffer: contentA },
+				{ name: nameB, mimeType: "text/plain", buffer: contentB }
+			],
+			listbox
+		)
 
 		const rowA = listbox.getByRole("option", { name: nameA })
-		const rowB = listbox.getByRole("option", { name: nameB })
-		await expect(rowA).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
-		await expect(rowB).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 
 		// "a" sorts before "b" — opening A leaves B as its one sibling to advance onto after trash below.
 		await rowA.dblclick()
@@ -494,7 +431,5 @@ test("the preview header's own item menu: matches the row menu's set (no Downloa
 
 		await page.keyboard.press("Escape")
 		await expect(dialog).toHaveCount(0)
-	} finally {
-		await trashScratchDirectory(page, scratchName)
-	}
+	})
 })

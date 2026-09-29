@@ -16,7 +16,6 @@ vi.mock("@/queries/client", async () => ({ queryClient: (await import("@/tests/t
 
 vi.mock("@/queries/persist", () => ({ persister: { persistQuery } }))
 
-vi.mock("@/lib/log", () => ({ log: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() } }))
 vi.mock("@/features/shell/lib/performLogout", () => ({ performLogout: vi.fn() }))
 
 import { queryClient } from "@/queries/client"

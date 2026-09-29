@@ -1,21 +1,14 @@
 import { describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
-import type { Chat, ChatMessage, UuidStr } from "@filen/sdk-rs"
+import type { Chat, ChatMessage } from "@filen/sdk-rs"
 
-// countUnreadMessages/sumUnread are pure, but they live in hook modules that transitively import the SDK
-// client (a Vite `?worker`, unresolvable under node) — mock that boundary so the import chain evaluates,
-// same posture as chatsQueries.test.ts.
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
 import { isMessageUnread, chatHasUnread, chatLastFocus } from "@/features/chats/lib/unread.logic"
 import { countUnreadMessages } from "@/features/chats/hooks/useChatUnreadCount"
 import { sumUnread } from "@/features/chats/hooks/useChatsUnreadCount"
 import { deriveBlockedUsers, EMPTY_BLOCKED_USERS } from "@filen/shared"
-
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import { testUuid } from "@/tests/support/uuid"
 
 function mockChat(overrides: Partial<Chat> = {}): Chat {
 	return {

@@ -126,16 +126,8 @@ function renderSplitView(selectedUuid?: string) {
 	return render(createElement("div", null, createElement(PlaylistsSidebar), createElement(PlaylistsScreen, { selectedUuid })))
 }
 
-// jsdom lays nothing out and mints no object URLs: the pane's header observer only needs to exist.
+// jsdom lays nothing out and mints no object URLs.
 beforeEach(() => {
-	vi.stubGlobal(
-		"ResizeObserver",
-		class {
-			public observe = vi.fn()
-			public unobserve = vi.fn()
-			public disconnect = vi.fn()
-		}
-	)
 	// The virtualizer sizes its viewport off offsetHeight, which jsdom leaves at 0: a 600px pane.
 	const original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetHeight")
 

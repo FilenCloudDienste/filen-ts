@@ -1,10 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
-import type { SocketEvent, UuidStr } from "@filen/sdk-rs"
-
-// events.ts imports the sdk client (a Vite `?worker`, unresolvable under node) — mocked to nothing; the
-// handler only reads/invalidates the events cache, never a worker op.
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
+import type { SocketEvent } from "@filen/sdk-rs"
 
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
@@ -23,10 +19,7 @@ vi.mock("@/lib/log", () => ({ log: { warn: logWarn, error: logError, info: vi.fn
 import { queryClient as testQueryClient } from "@/queries/client"
 import { EVENTS_QUERY_KEY } from "@/features/settings/queries/events"
 import { handleGeneralEvent } from "@/features/shell/lib/generalSocketHandlers"
-
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import { testUuid } from "@/tests/support/uuid"
 
 function generalEvt(inner: Extract<SocketEvent, { type: "general" }>["inner"]): Extract<SocketEvent, { type: "general" }> {
 	return { type: "general", inner, generalMessageId: 0n }

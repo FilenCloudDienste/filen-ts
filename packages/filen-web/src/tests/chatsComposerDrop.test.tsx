@@ -18,7 +18,6 @@ const { state, preflightAttachments, uploadAttachment, toastError } = vi.hoisted
 	toastError: vi.fn()
 }))
 
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 vi.mock("@/lib/useIsOnline", () => ({ useIsOnline: () => state.isOnline }))
 vi.mock("@/queries/account", () => ({ useAccountQuery: () => ({ data: { isPremium: state.isPremium } }) }))
@@ -28,8 +27,6 @@ vi.mock("@/features/chats/lib/typing", () => ({ signalTyping: vi.fn(), signalSto
 vi.mock("@/features/chats/lib/drafts", () => ({ loadDraft: () => Promise.resolve(""), saveDraftDebounced: vi.fn() }))
 vi.mock("@/features/chats/components/thread/attachDriveDialog", () => ({ AttachDriveDialog: () => null }))
 vi.mock("sonner", () => ({ toast: { error: toastError } }))
-// The composer registers with the toast-clearance store, which needs a ResizeObserver jsdom lacks.
-vi.mock("@/lib/toastClearance", () => ({ toastObstructionRef: () => undefined }))
 
 import "@/lib/i18n"
 import { Composer } from "@/features/chats/components/thread/composer"

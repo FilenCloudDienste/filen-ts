@@ -14,12 +14,7 @@ import {
 	getSharedDirContext,
 	isOutsideRoot
 } from "@/features/drive/lib/cache"
-
-// UuidStr is a template-literal brand requiring at least 3 dashes (see @filen/sdk-rs) — pad a short
-// readable test label into a shape that satisfies it, mirroring drive.test.ts's own uuid fixtures.
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import { testUuid } from "@/tests/support/uuid"
 
 function mockDir(overrides: Partial<Dir> = {}): Dir {
 	return {

@@ -1,12 +1,5 @@
 import { test, expect } from "./fixtures"
-import {
-	waitForListingSettled,
-	bootTo,
-	clickSidebarLink,
-	enterScratchDirectory,
-	createDirectoryViaDialog,
-	trashScratchDirectory
-} from "./helpers/listing"
+import { withScratchDirectory, waitForListingSettled, bootTo, clickSidebarLink, createDirectoryViaDialog } from "./helpers/listing"
 
 // Sharing/unsharing are OUTWARD-FACING mutations (a share reaches ANOTHER account; unshare revokes
 // real access) and premium-gated, so every test below is render/gate-only — the contact picker is
@@ -18,9 +11,7 @@ import {
 // contacts to unblock) — both are covered by unit tests and manual QA instead, not here.
 //
 test.describe("sharing", () => {
-	test("shared surfaces render and activate from the sidebar", async ({ page, injectedSession }) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
+	test("shared surfaces render and activate from the sidebar", async ({ page }) => {
 		await bootTo(page)
 
 		// Activated via in-app sidebar clicks rather than a cold goto, which is what makes the
@@ -48,22 +39,13 @@ test.describe("sharing", () => {
 	// the directory the moment anything above it throws. The picker itself is only ever driven up to
 	// its own disabled submit button, then dismissed via Escape — this suite never shares anything for
 	// real.
-	test("the bulk Share button opens the contact picker; dismissing shares nothing", async ({ page, injectedSession }) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
+	test("the bulk Share button opens the contact picker; dismissing shares nothing", async ({ page }) => {
+		await withScratchDirectory(page, "share", async ({ listbox, runId }) => {
+			const nestedName = `shared-candidate-${runId}`
 
-		const runId = crypto.randomUUID()
-		const scratchName = `e2e-share-${runId}`
-		const nestedName = `shared-candidate-${runId}`
-
-		await bootTo(page)
-
-		try {
-			const { listbox } = await enterScratchDirectory(page, scratchName)
-
-			await createDirectoryViaDialog(page, nestedName)
+			await createDirectoryViaDialog(page, nestedName, listbox)
 
 			const nestedRow = listbox.getByRole("option", { name: nestedName })
-			await expect(nestedRow).toBeVisible()
 
 			await nestedRow.click()
 			await expect(page.getByText("1 selected", { exact: true })).toBeVisible()
@@ -93,8 +75,6 @@ test.describe("sharing", () => {
 			// so this suite never sends one.
 			await page.keyboard.press("Escape")
 			await expect(dialog).toHaveCount(0)
-		} finally {
-			await trashScratchDirectory(page, scratchName)
-		}
+		})
 	})
 })

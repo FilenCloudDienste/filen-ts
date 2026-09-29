@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest"
-import type { Note, NoteHistory, NoteParticipant, NoteTag, UuidStr } from "@filen/sdk-rs"
 import {
 	filterNotesBySearch,
 	isNoteOwner,
@@ -13,107 +12,16 @@ import {
 	sortNoteHistory,
 	tagDisplayName
 } from "@/features/notes/lib/sort"
-
-// UuidStr is a template-literal brand requiring at least 3 dashes (see @filen/sdk-rs) — pad a
-// short label the same way drive.test.ts's testUuid does.
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
-
-function mockNote(overrides: Partial<Note> = {}): Note {
-	return {
-		uuid: "00000000-0000-0000-0000-000000000000",
-		ownerId: 1n,
-		lastEditorId: 1n,
-		favorite: false,
-		pinned: false,
-		tags: [],
-		noteType: "text",
-		title: "title",
-		preview: "preview",
-		trash: false,
-		archive: false,
-		createdTimestamp: 0n,
-		editedTimestamp: 0n,
-		participants: [],
-		...overrides
-	}
-}
-
-function mockParticipant(overrides: Partial<NoteParticipant> = {}): NoteParticipant {
-	return {
-		userId: 1n,
-		isOwner: false,
-		email: "participant@example.com",
-		nickName: "participant",
-		permissionsWrite: false,
-		addedTimestamp: 0n,
-		...overrides
-	}
-}
-
-function mockNoteTag(overrides: Partial<NoteTag> = {}): NoteTag {
-	return {
-		uuid: "00000000-0000-0000-0000-000000000000",
-		name: "tag",
-		favorite: false,
-		editedTimestamp: 0n,
-		createdTimestamp: 0n,
-		...overrides
-	}
-}
-
-// exactOptionalPropertyTypes distinguishes "key absent" (valid for an optional field) from "key
-// present with value undefined" (rejected) — these two builders construct an undecryptable-style
-// Note/NoteTag (title/name genuinely absent, matching what the wasm surface returns for a note the
-// client can't decrypt) by simply never including the key, rather than assigning it undefined.
-function mockNoteWithoutTitle(overrides: Omit<Partial<Note>, "title"> = {}): Note {
-	return {
-		uuid: "00000000-0000-0000-0000-000000000000",
-		ownerId: 1n,
-		lastEditorId: 1n,
-		favorite: false,
-		pinned: false,
-		tags: [],
-		noteType: "text",
-		preview: "preview",
-		trash: false,
-		archive: false,
-		createdTimestamp: 0n,
-		editedTimestamp: 0n,
-		participants: [],
-		...overrides
-	}
-}
-
-function mockNoteWithoutPreview(overrides: Omit<Partial<Note>, "preview"> = {}): Note {
-	return {
-		uuid: "00000000-0000-0000-0000-000000000000",
-		ownerId: 1n,
-		lastEditorId: 1n,
-		favorite: false,
-		pinned: false,
-		tags: [],
-		noteType: "text",
-		title: "title",
-		trash: false,
-		archive: false,
-		createdTimestamp: 0n,
-		editedTimestamp: 0n,
-		participants: [],
-		...overrides
-	}
-}
-
-function mockNoteTagWithoutName(overrides: Omit<Partial<NoteTag>, "name"> = {}): NoteTag {
-	return {
-		uuid: "00000000-0000-0000-0000-000000000000",
-		favorite: false,
-		editedTimestamp: 0n,
-		createdTimestamp: 0n,
-		...overrides
-	}
-}
+import { testUuid } from "@/tests/support/uuid"
+import {
+	mockNote,
+	mockNoteHistory,
+	mockNoteParticipant,
+	mockNoteTag,
+	noteWithoutPreview,
+	tagWithoutName,
+	undecryptableNote
+} from "@/tests/fixtures/notes"
 
 describe("sortNotes — bucket rules", () => {
 	it("puts a pinned note before an unpinned one regardless of edited time", () => {
@@ -190,24 +98,24 @@ describe("sortNotes — bucket rules", () => {
 describe("noteDisplayTitle / tagDisplayName", () => {
 	it("falls back to uuid when title is undefined", () => {
 		const uuid = testUuid("fallback")
-		expect(noteDisplayTitle(mockNoteWithoutTitle({ uuid }))).toBe(uuid)
+		expect(noteDisplayTitle(undecryptableNote({ uuid }))).toBe(uuid)
 	})
 
 	it("falls back to uuid when tag name is undefined", () => {
 		const uuid = testUuid("fallback")
-		expect(tagDisplayName(mockNoteTagWithoutName({ uuid }))).toBe(uuid)
+		expect(tagDisplayName(tagWithoutName({ uuid }))).toBe(uuid)
 	})
 })
 
 describe("isNoteUndecryptable / isTagUndecryptable", () => {
 	it("a note is undecryptable exactly when it carries no encryptionKey", () => {
 		expect(isNoteUndecryptable(mockNote({ encryptionKey: "note-key" }))).toBe(false)
-		expect(isNoteUndecryptable(mockNoteWithoutTitle())).toBe(true)
+		expect(isNoteUndecryptable(undecryptableNote())).toBe(true)
 	})
 
 	it("a tag is undecryptable exactly when it carries no name", () => {
 		expect(isTagUndecryptable(mockNoteTag())).toBe(false)
-		expect(isTagUndecryptable(mockNoteTagWithoutName())).toBe(true)
+		expect(isTagUndecryptable(tagWithoutName())).toBe(true)
 	})
 })
 
@@ -231,19 +139,19 @@ describe("hasNoteWriteAccess", () => {
 	})
 
 	it("is true for a participant carrying permissionsWrite", () => {
-		const note = mockNote({ ownerId: 5n, participants: [mockParticipant({ userId: 7n, permissionsWrite: true })] })
+		const note = mockNote({ ownerId: 5n, participants: [mockNoteParticipant({ userId: 7n, permissionsWrite: true })] })
 
 		expect(hasNoteWriteAccess(note, 7n)).toBe(true)
 	})
 
 	it("is false for a participant without permissionsWrite", () => {
-		const note = mockNote({ ownerId: 5n, participants: [mockParticipant({ userId: 7n, permissionsWrite: false })] })
+		const note = mockNote({ ownerId: 5n, participants: [mockNoteParticipant({ userId: 7n, permissionsWrite: false })] })
 
 		expect(hasNoteWriteAccess(note, 7n)).toBe(false)
 	})
 
 	it("is false for a user who is neither owner nor participant, and for an unresolved id", () => {
-		const note = mockNote({ ownerId: 5n, participants: [mockParticipant({ userId: 7n, permissionsWrite: true })] })
+		const note = mockNote({ ownerId: 5n, participants: [mockNoteParticipant({ userId: 7n, permissionsWrite: true })] })
 
 		expect(hasNoteWriteAccess(note, 9n)).toBe(false)
 		expect(hasNoteWriteAccess(note, undefined)).toBe(false)
@@ -253,7 +161,7 @@ describe("hasNoteWriteAccess", () => {
 describe("filterNotesBySearch", () => {
 	const notes = [
 		mockNote({ uuid: testUuid("a"), title: "Groceries", preview: "milk, eggs" }),
-		mockNoteWithoutPreview({ uuid: testUuid("b"), title: "Untitled" }),
+		noteWithoutPreview({ uuid: testUuid("b"), title: "Untitled" }),
 		mockNote({ uuid: testUuid("c"), title: "Work notes", preview: "quarterly plan" })
 	]
 
@@ -314,7 +222,7 @@ describe("noteTitleMatchesSearch", () => {
 
 	it("falls back to matching the uuid text for a title-less (undecryptable) note", () => {
 		const uuid = testUuid("titleless-match")
-		const note = mockNoteWithoutTitle({ uuid })
+		const note = undecryptableNote({ uuid })
 
 		expect(noteTitleMatchesSearch(note, "titleless-match")).toBe(true)
 	})
@@ -345,34 +253,24 @@ describe("sortAndFilterNotes", () => {
 	})
 })
 
-function mockHistory(overrides: Partial<NoteHistory> = {}): NoteHistory {
-	return {
-		id: 1n,
-		editedTimestamp: 0n,
-		editorId: 1n,
-		noteType: "text",
-		...overrides
-	}
-}
-
 describe("sortNoteHistory", () => {
 	it("sorts newest-first by editedTimestamp, staying in bigint (never Number())", () => {
-		const oldest = mockHistory({ id: 1n, editedTimestamp: 1_700_000_000_000n })
-		const newest = mockHistory({ id: 2n, editedTimestamp: 1_800_000_000_000n })
-		const middle = mockHistory({ id: 3n, editedTimestamp: 1_750_000_000_000n })
+		const oldest = mockNoteHistory({ id: 1n, editedTimestamp: 1_700_000_000_000n })
+		const newest = mockNoteHistory({ id: 2n, editedTimestamp: 1_800_000_000_000n })
+		const middle = mockNoteHistory({ id: 3n, editedTimestamp: 1_750_000_000_000n })
 
 		expect(sortNoteHistory([oldest, newest, middle]).map(h => h.id)).toEqual([2n, 3n, 1n])
 	})
 
 	it("breaks a timestamp tie by the higher (later) id", () => {
-		const lowerId = mockHistory({ id: 1n, editedTimestamp: 5n })
-		const higherId = mockHistory({ id: 2n, editedTimestamp: 5n })
+		const lowerId = mockNoteHistory({ id: 1n, editedTimestamp: 5n })
+		const higherId = mockNoteHistory({ id: 2n, editedTimestamp: 5n })
 
 		expect(sortNoteHistory([lowerId, higherId]).map(h => h.id)).toEqual([2n, 1n])
 	})
 
 	it("does not mutate the input array", () => {
-		const input = [mockHistory({ id: 1n }), mockHistory({ id: 2n, editedTimestamp: 1n })]
+		const input = [mockNoteHistory({ id: 1n, editedTimestamp: 0n }), mockNoteHistory({ id: 2n, editedTimestamp: 1n })]
 		const snapshot = [...input]
 
 		sortNoteHistory(input)

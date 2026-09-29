@@ -3,6 +3,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { renderHook, waitFor } from "@testing-library/react"
 import type { AnyFile, LinkedFile } from "@filen/sdk-rs"
+import { linkedFileItem } from "@/tests/fixtures/sdk"
 
 // A favorite toggle or rename hands the viewer a new item object for the same uuid while its buffer is
 // still downloading. That must neither cancel nor restart the download.
@@ -19,24 +20,9 @@ vi.mock("@/lib/sdk/client", () => ({
 
 const { usePreviewBytes } = await import("@/features/preview/hooks/usePreviewBytes")
 const { clearPreviewCache } = await import("@/features/preview/lib/previewCache")
-const { linkedFileIntoDriveItem } = await import("@/features/drive/lib/item")
 
 function makeItem(uuid: LinkedFile["uuid"], name: string) {
-	return linkedFileIntoDriveItem({
-		uuid,
-		name: { Decrypted: name },
-		mime: { Decrypted: "text/plain" },
-		size: 3n,
-		chunks: 1n,
-		region: "",
-		bucket: "",
-		version: 2,
-		timestamp: 0n,
-		fileKey: "k",
-		downloadable: true,
-		linkedTag: true,
-		canMakeThumbnail: false
-	})
+	return linkedFileItem(name, { uuid, mime: { Decrypted: "text/plain" }, size: 3n })
 }
 
 const UUID_A = "aaaaaaaa-0000-0000-0000-000000000001"

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { Dir, File, UuidStr, SharedDir, SharedRootDir, SharedFile, SharingRole, LinkedFile } from "@filen/sdk-rs"
+import type { Dir, File, SharedDir, SharedRootDir, SharedFile, SharingRole, LinkedFile } from "@filen/sdk-rs"
 import {
 	asDirectoryOrFile,
 	getSharerIdentity,
@@ -9,12 +9,7 @@ import {
 	upsertDriveItem,
 	type DriveItem
 } from "@/features/drive/lib/item"
-
-// UuidStr is a template-literal brand requiring at least 3 dashes (see @filen/sdk-rs) — pad a short
-// readable test label into a shape that satisfies it, mirroring queries/drive.test.ts's own fixture.
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import { testUuid } from "@/tests/support/uuid"
 
 function mockDir(overrides: Partial<Dir> = {}): Dir {
 	return {

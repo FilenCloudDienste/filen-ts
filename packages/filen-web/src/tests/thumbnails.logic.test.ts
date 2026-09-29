@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { Dir, File, SharedDir, SharedFile, SharedRootDir, UuidStr } from "@filen/sdk-rs"
+import type { Dir, File, SharedDir, SharedFile, SharedRootDir } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { RAW_IMAGE_EXTENSIONS } from "@/features/drive/lib/preview.logic"
 import {
@@ -9,13 +9,10 @@ import {
 	THUMB_SIZE_GATE,
 	THUMB_SVG_SIZE_GATE
 } from "@/features/drive/lib/thumbnails.logic"
+import { testUuid } from "@/tests/support/uuid"
 
 // Mirrors item.test.ts's own fixture helpers — this file needs the same six-arm coverage to prove
 // thumbnailCategory routes the "file" arm only.
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
-
 function mockFile(overrides: Partial<File> = {}): File {
 	return {
 		uuid: testUuid("file"),

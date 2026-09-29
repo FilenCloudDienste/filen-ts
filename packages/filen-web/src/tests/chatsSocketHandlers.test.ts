@@ -1,12 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
-import type { Chat, ChatMessage, ChatParticipant, ChatTypingType, UuidStr } from "@filen/sdk-rs"
-
-// UuidStr is a template-literal brand requiring at least 3 dashes — pad a short label (chatsQueries.test's
-// own testUuid convention).
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import type { Chat, ChatMessage, ChatParticipant, ChatTypingType } from "@filen/sdk-rs"
 
 // sdkApi is mocked to the one op the send-typing path calls; the query modules import sdkApi but never
 // invoke it here (only their cache patchers run).
@@ -49,6 +43,7 @@ import {
 	resetSocketReconnectState
 } from "@/features/chats/lib/socketHandlers"
 import { sync } from "@/features/chats/lib/sync"
+import { testUuid } from "@/tests/support/uuid"
 
 function makeChat(uuid: string, overrides: Partial<Chat> = {}): Chat {
 	return {

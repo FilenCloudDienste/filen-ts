@@ -61,10 +61,7 @@ import { queryClient } from "@/queries/client"
 import { ACCOUNT_QUERY_KEY } from "@/queries/account"
 import { accountQuotaDeps, addAccountStorageUsed } from "@/features/drive/lib/quota"
 import { discardListingPatches, driveListingQueryKey, flushListingCreates } from "@/features/drive/queries/drive"
-
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import { testUuid } from "@/tests/support/uuid"
 
 const ROOT = testUuid("root")
 const DESTINATION = { uuid: null, name: "My Drive" }

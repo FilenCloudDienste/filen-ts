@@ -1,11 +1,8 @@
 import { describe, expect, it } from "vitest"
-import type { File, UuidStr } from "@filen/sdk-rs"
+import type { File } from "@filen/sdk-rs"
 import { narrowItem } from "@/features/drive/lib/item"
 import { captureTimestamp, sortPhotosByCaptureDesc, type PhotoItem } from "@/features/photos/lib/captureSort"
-
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import { testUuid } from "@/tests/support/uuid"
 
 function photo(uuid: string, timestamp: bigint, created?: bigint, modified?: bigint): PhotoItem {
 	const item = narrowItem({

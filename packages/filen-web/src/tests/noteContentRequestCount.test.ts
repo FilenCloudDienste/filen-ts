@@ -2,7 +2,7 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { act, renderHook, waitFor } from "@testing-library/react"
-import type { Note, SocketEvent, UuidStr } from "@filen/sdk-rs"
+import type { Note, SocketEvent } from "@filen/sdk-rs"
 
 const { getNoteContent } = vi.hoisted(() => ({ getNoteContent: vi.fn<(note: Note) => Promise<string | undefined>>() }))
 
@@ -13,8 +13,6 @@ vi.mock("@/queries/client", async () => ({ queryClient: (await import("@/tests/t
 // The outbox singleton only matters to the reload action, which these tests never take.
 vi.mock("@/features/notes/lib/sync", () => ({ sync: {} }))
 
-vi.mock("@/lib/log", () => ({ log: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() } }))
-
 import { queryClient } from "@/queries/client"
 import { queryClientWrapper } from "@/tests/testQueryClient"
 import { ACCOUNT_QUERY_KEY } from "@/queries/account"
@@ -24,32 +22,12 @@ import { handleNoteEvent } from "@/features/notes/lib/socketHandlers"
 import { useNoteSearchBodies } from "@/features/notes/hooks/useNoteSearchBodies"
 import { useNotesInflightStore } from "@/features/notes/store/useNotesInflight"
 import { socketAuthenticated, socketDropped } from "@/lib/sdk/socketSession"
+import { testUuid } from "@/tests/support/uuid"
+import { mockNote } from "@/tests/fixtures/notes"
 
 const USER_ID = 7n
 
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
-
-function mockNote(label: string): Note {
-	return {
-		uuid: testUuid(label),
-		ownerId: 1n,
-		lastEditorId: 1n,
-		favorite: false,
-		pinned: false,
-		tags: [],
-		noteType: "text",
-		title: label,
-		trash: false,
-		archive: false,
-		createdTimestamp: 0n,
-		editedTimestamp: 0n,
-		participants: []
-	}
-}
-
-const NOTES = [mockNote("a"), mockNote("b"), mockNote("c")]
+const NOTES = ["a", "b", "c"].map(label => mockNote({ uuid: testUuid(label), title: label }))
 const [NOTE_A] = NOTES as [Note, Note, Note]
 
 function contentEdited(note: Note, editorId: number): Extract<SocketEvent, { type: "note" }> {
@@ -153,7 +131,7 @@ describe("note content request counts", () => {
 		await visit(NOTE_A)
 
 		act(() => {
-			handleNoteEvent(contentEdited(mockNote("b"), 99))
+			handleNoteEvent(contentEdited(mockNote({ uuid: testUuid("b"), title: "b" }), 99))
 		})
 		await visit(NOTE_A)
 

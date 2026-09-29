@@ -9,7 +9,8 @@ import {
 	enterScratchDirectory,
 	LIVE_WRITE_TIMEOUT_MS,
 	BOOT_SETTLE_TIMEOUT_MS,
-	trashScratchDirectory
+	trashScratchDirectory,
+	setTallListingViewport
 } from "./helpers/listing"
 import { MOD_KEY } from "./helpers/modkey"
 
@@ -21,9 +22,7 @@ import { MOD_KEY } from "./helpers/modkey"
 test.describe.configure({ mode: "serial" })
 
 test.describe("drive bulk actions", () => {
-	test("selecting an item floats the bulk-action bar; clear-selection dismisses it", async ({ page, injectedSession }) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
+	test("selecting an item floats the bulk-action bar; clear-selection dismisses it", async ({ page }) => {
 		await bootTo(page)
 		const { listbox, hasItems } = await waitForListingSettled(page)
 		test.skip(!hasItems, "drive root has no items in this account — nothing to select")
@@ -54,9 +53,7 @@ test.describe("drive bulk actions", () => {
 		await expect(page.getByRole("button", { name: "Clear selection", exact: true })).toHaveCount(0)
 	})
 
-	test("the bulk Move button opens the destination picker without moving anything", async ({ page, injectedSession }) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
+	test("the bulk Move button opens the destination picker without moving anything", async ({ page }) => {
 		await bootTo(page)
 		const { listbox, hasItems } = await waitForListingSettled(page)
 		test.skip(!hasItems, "drive root has no items in this account — nothing to select")
@@ -90,10 +87,8 @@ test.describe("drive bulk actions", () => {
 		await expect(createButton).toBeEnabled()
 
 		// useIsOnline reads TanStack's onlineManager, which tracks the window online/offline events this
-		// flag fires (precedent: chats.spec.ts). The picker's listing query stays `success` off the warm
+		// flag fires (helpers/offline.ts). The picker's listing query stays `success` off the warm
 		// cache while offline, so the confirm's own status arm never confounds the assertion.
-		// Barrier before the network dies: the e2e hooks arrive via a fire-and-forget dynamic
-		// import, and a chunk request that is in flight when the page goes offline FAILS PERMANENTLY.
 		await waitForE2eHooks(page)
 		await page.context().setOffline(true)
 		await expect(createButton).toBeDisabled()
@@ -109,9 +104,7 @@ test.describe("drive bulk actions", () => {
 
 	// Copy replaced the shared-in-only Import: it is offered on owned items too, as a submenu whose
 	// first entry opens the destination picker. Opening the menus mutates nothing.
-	test("the per-item menu offers Copy (and no Import) on an owned /drive item", async ({ page, injectedSession }) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
+	test("the per-item menu offers Copy (and no Import) on an owned /drive item", async ({ page }) => {
 		await bootTo(page)
 		const { listbox, hasItems } = await waitForListingSettled(page)
 		test.skip(!hasItems, "drive root has no items in this account — nothing to open a menu on")
@@ -131,12 +124,7 @@ test.describe("drive bulk actions", () => {
 		await expect(page.getByRole("menu")).toHaveCount(0)
 	})
 
-	test("the bulk Trash button opens the trash confirm; dismissing leaves the item selected and in place", async ({
-		page,
-		injectedSession
-	}) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
+	test("the bulk Trash button opens the trash confirm; dismissing leaves the item selected and in place", async ({ page }) => {
 		await bootTo(page)
 		const { listbox, hasItems } = await waitForListingSettled(page)
 		test.skip(!hasItems, "drive root has no items in this account — nothing to select")
@@ -174,18 +162,12 @@ test.describe("drive bulk actions", () => {
 	// two items would otherwise produce. (First written flat: this exact interference reproduced
 	// live as a flaky drive.spec.ts "selection" test failure under this suite's fullyParallel config.)
 	test("net-zero round trip: create, bulk-favorite, bulk-trash, verify trash-variant gating, bulk-restore confirm, re-trash", async ({
-		page,
-		injectedSession
+		page
 	}) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
-		// Same tall-viewport workaround as enterScratchDirectory (listing.ts): both the root and the
-		// trash listing virtualize their rows, and the shared account's /trash has accumulated enough
-		// leftover directories from prior runs of this very test that a freshly-trashed row can sort
-		// below the virtualizer's render window and never mount, making a name-based row locator miss it
-		// entirely. A tall viewport makes the scroll container exceed any realistic item count's total
-		// row height so every row renders for the rest of this test.
-		await page.setViewportSize({ width: 1280, height: 8000 })
+		// Set here rather than left to enterScratchDirectory: the shared account's /trash has accumulated
+		// enough leftover directories from prior runs of this very test that a freshly-trashed row can
+		// sort below the virtualizer's render window there too.
+		await setTallListingViewport(page)
 
 		const suffix = crypto.randomUUID()
 		const scratchName = `e2e-bulk-actions-${suffix}`

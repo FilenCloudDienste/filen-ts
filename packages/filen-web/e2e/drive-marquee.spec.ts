@@ -1,24 +1,11 @@
-import type { Locator } from "@playwright/test"
 import { test, expect } from "./fixtures"
 import { enterFixtureDirectory, enterFixtureRoot } from "./helpers/fixtures"
-import { bootTo, waitForListingSettled } from "./helpers/listing"
+import { boxOf } from "./helpers/geometry"
+import { bootTo, breadcrumb, waitForListingSettled } from "./helpers/listing"
 import { MOD_KEY } from "./helpers/modkey"
 
-// Strict null handling (no `!`): a locator with no box on screen is a real failure, surfaced here.
-async function boxOf(locator: Locator): Promise<{ x: number; y: number; width: number; height: number }> {
-	const box = await locator.boundingBox()
-
-	if (!box) {
-		throw new Error("expected the element to have an on-screen bounding box")
-	}
-
-	return box
-}
-
 test.describe("drive rubber-band selection", () => {
-	test("marquee selects a row band; ctrl-drag unions; Escape mid-drag restores", async ({ page, injectedSession }) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
+	test("marquee selects a row band; ctrl-drag unions; Escape mid-drag restores", async ({ page }) => {
 		await bootTo(page)
 
 		// Six tiny files, provisioned once per run by the fixtures-setup project — the marquee's targets.
@@ -84,9 +71,7 @@ test.describe("drive rubber-band selection", () => {
 		await assertSelected([1, 2, 3, 4, 5])
 	})
 
-	test("a marquee dragged past a short listing's edges never scrolls it or grows its content", async ({ page, injectedSession }) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
+	test("a marquee dragged past a short listing's edges never scrolls it or grows its content", async ({ page }) => {
 		await bootTo(page)
 
 		const { listbox } = await enterFixtureDirectory(page, "marquee")
@@ -137,15 +122,12 @@ test.describe("drive rubber-band selection", () => {
 	})
 
 	test("a click away from the items clears the selection, a click on the sole selected row deselects it, and a double-click still opens", async ({
-		page,
-		injectedSession
+		page
 	}) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
 		await bootTo(page)
 
 		const { listbox: rootListbox } = await enterFixtureRoot(page)
-		const breadcrumb = page.getByRole("navigation", { name: "Breadcrumb" })
+		const crumbs = breadcrumb(page)
 		// Token-anchored like helpers/listing.ts's own row lookup: the row's accessible name carries its
 		// size/date columns after the item name.
 		const marqueeDir = rootListbox.getByRole("option", { name: /(^|\s)marquee(\s|$)/ })
@@ -155,7 +137,7 @@ test.describe("drive rubber-band selection", () => {
 		await marqueeDir.click()
 		await expect(marqueeDir).toHaveAttribute("aria-selected", "true")
 		await marqueeDir.dblclick()
-		await expect(breadcrumb.getByText("marquee", { exact: true })).toBeVisible()
+		await expect(crumbs.getByText("marquee", { exact: true })).toBeVisible()
 
 		const { listbox } = await waitForListingSettled(page)
 		const options = listbox.getByRole("option")
@@ -174,9 +156,9 @@ test.describe("drive rubber-band selection", () => {
 		await expect(selectedBar).toHaveCount(0)
 
 		// The page header's background, in the gap between the breadcrumb and the action buttons.
-		const header = page.locator("header", { has: breadcrumb })
+		const header = page.locator("header", { has: crumbs })
 		const headerBox = await boxOf(header)
-		const breadcrumbBox = await boxOf(breadcrumb)
+		const breadcrumbBox = await boxOf(crumbs)
 
 		await first.click()
 		await expect(page.getByText("1 selected", { exact: true })).toBeVisible()

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { CopyCounts, CopyFailure, CopyFailureInfo, CopyReport, CopyUpdate, Dir, File, UuidStr } from "@filen/sdk-rs"
+import type { CopyCounts, CopyFailure, CopyFailureInfo, CopyReport, CopyUpdate, Dir, File } from "@filen/sdk-rs"
 import { applyCopyUpdate, settleCopyJob } from "@filen/shared"
 import { narrowItem } from "@/features/drive/lib/item"
 import {
@@ -14,10 +14,7 @@ import {
 	isCopyTrashPending,
 	retryEntries
 } from "@/features/drive/lib/copy.logic"
-
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import { testUuid } from "@/tests/support/uuid"
 
 const DESTINATION = { uuid: null, name: "My Drive" }
 // The SDK's own message: developer text, kept on the error for logs.

@@ -1,12 +1,6 @@
 import { describe, expect, it } from "vitest"
-import type { UuidStr } from "@filen/sdk-rs"
 import { photosChooserChoice } from "@/features/photos/components/directoryChooserDialog.logic"
-
-// UuidStr is a template-literal brand requiring at least 3 dashes — pad a short readable test label
-// into a shape that satisfies it.
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import { testUuid } from "@/tests/support/uuid"
 
 describe("photosChooserChoice", () => {
 	it("chooses the directory open in the picker", () => {

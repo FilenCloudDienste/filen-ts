@@ -1,13 +1,10 @@
 import { describe, expect, it } from "vitest"
-import type { File, UuidStr } from "@filen/sdk-rs"
+import type { File } from "@filen/sdk-rs"
 import { narrowItem } from "@/features/drive/lib/item"
 import { type PhotoItem } from "@/features/photos/lib/captureSort"
 import { type ClickModifiers } from "@/features/drive/lib/listbox"
 import { resolveTileClickIntent, previewOpenTarget, photosRangeSelection } from "@/features/photos/components/photoGrid.logic"
-
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import { testUuid } from "@/tests/support/uuid"
 
 function photoItem(uuid: string): PhotoItem {
 	const item = narrowItem({

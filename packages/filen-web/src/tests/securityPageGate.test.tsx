@@ -19,7 +19,6 @@ vi.mock("@/lib/sdk/client", () => ({ sdkApi: { getUserInfo } }))
 vi.mock("@/queries/client", () => ({
 	queryClient: new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } })
 }))
-vi.mock("@/lib/log", () => ({ log: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() } }))
 vi.mock("@/features/settings/components/security/changePassword", () => ({ ChangePasswordRow: () => null }))
 vi.mock("@/features/settings/components/security/exportMasterKeys", () => ({ ExportMasterKeysRow: () => null }))
 vi.mock("@/features/settings/components/security/deleteAccount", () => ({ DeleteAccountRow: () => null }))

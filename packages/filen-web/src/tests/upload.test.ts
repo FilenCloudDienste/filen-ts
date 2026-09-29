@@ -60,12 +60,7 @@ import { queryClient } from "@/queries/client"
 import { ACCOUNT_QUERY_KEY } from "@/queries/account"
 import { addAccountStorageUsed } from "@/features/drive/lib/quota"
 import { directorySizeQueryKey, driveListingQueryKey, queueListingCreate } from "@/features/drive/queries/drive"
-
-// UuidStr is a template-literal brand requiring at least 3 dashes (see @filen/sdk-rs) — pad a short
-// readable test label into a shape that satisfies it, mirroring queries/drive.test.ts's own fixture.
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import { testUuid } from "@/tests/support/uuid"
 
 function mockBrowserFile(name = "report.pdf", size = 1_024): File {
 	return new File([new Uint8Array(size)], name)

@@ -1,44 +1,11 @@
 import { describe, expect, it } from "vitest"
-import type { Chat, ChatMessage, Note, UuidStr } from "@filen/sdk-rs"
+import type { ChatMessage } from "@filen/sdk-rs"
 import type { InflightContent } from "@/features/notes/store/useNotesInflight"
 import type { ChatMessageWithInflightId, InflightChatMessageErrors, InflightChatMessages } from "@/features/chats/store/useChatsInflight"
 import { hasUnsyncedNotes, hasUnsyncedChatSends, logoutConfirmBodyKey } from "@/features/shell/hooks/useUnsyncedWork.logic"
-
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
-
-function mockNote(): Note {
-	return {
-		uuid: testUuid("note"),
-		ownerId: 1n,
-		lastEditorId: 1n,
-		favorite: false,
-		pinned: false,
-		tags: [],
-		noteType: "text",
-		encryptionKey: "key",
-		title: "note",
-		preview: "preview",
-		trash: false,
-		archive: false,
-		createdTimestamp: 0n,
-		editedTimestamp: 0n,
-		participants: []
-	}
-}
-
-function mockChat(): Chat {
-	return {
-		uuid: testUuid("chat"),
-		ownerId: 1n,
-		key: "chat-key",
-		participants: [],
-		muted: false,
-		created: 0n,
-		lastFocus: 0n
-	}
-}
+import { testUuid } from "@/tests/support/uuid"
+import { mockNote } from "@/tests/fixtures/notes"
+import { mockChat } from "@/tests/fixtures/sdk"
 
 function mockQueuedMessage(): ChatMessageWithInflightId {
 	const message: ChatMessage = {

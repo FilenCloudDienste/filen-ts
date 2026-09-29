@@ -3,6 +3,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { act, render, waitFor } from "@testing-library/react"
 import "@/lib/i18n"
+import { linkedFileItem } from "@/tests/fixtures/sdk"
 
 // PdfPage's own lifecycle against a stand-in pdf.js: eviction must release the page's decoded
 // resources, and a page reaching the render margin must not re-render its siblings.
@@ -80,23 +81,8 @@ class FakeIntersectionObserver {
 }
 
 const { default: PdfViewer } = await import("@/features/preview/components/pdfViewer")
-const { linkedFileIntoDriveItem } = await import("@/features/drive/lib/item")
 
-const item = linkedFileIntoDriveItem({
-	uuid: "aaaaaaaa-0000-0000-0000-000000000001",
-	name: { Decrypted: "doc.pdf" },
-	mime: { Decrypted: "application/pdf" },
-	size: 1n,
-	chunks: 1n,
-	region: "",
-	bucket: "",
-	version: 2,
-	timestamp: 0n,
-	fileKey: "k",
-	downloadable: true,
-	linkedTag: true,
-	canMakeThumbnail: false
-})
+const item = linkedFileItem("doc.pdf", { uuid: "aaaaaaaa-0000-0000-0000-000000000001", mime: { Decrypted: "application/pdf" }, size: 1n })
 
 // The render-margin observer asks for ratio thresholds; the eviction one does not.
 function observerFor(pageNumber: number, kind: "render" | "evict"): Observed {

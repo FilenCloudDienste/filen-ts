@@ -12,13 +12,11 @@ const { updateLink, accountState, refetchAccount } = vi.hoisted(() => {
 	return { updateLink: vi.fn(), accountState: state, refetchAccount: vi.fn() }
 })
 
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
 vi.mock("@/queries/client", async () => {
 	const { QueryClient: Client } = await import("@tanstack/react-query")
 	return { queryClient: new Client() }
 })
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
-vi.mock("@/lib/log", () => ({ log: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() } }))
 vi.mock("@/features/drive/hooks/useThumbnail", () => ({ useThumbnail: () => null }))
 vi.mock("@/features/drive/lib/thumbnails", () => ({ invalidateThumbnail: vi.fn() }))
 vi.mock("@tanstack/react-router", () => ({

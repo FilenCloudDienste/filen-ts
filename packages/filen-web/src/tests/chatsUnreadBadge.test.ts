@@ -4,12 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { createElement, Fragment, useLayoutEffect } from "react"
 import { act, render, renderHook, waitFor } from "@testing-library/react"
 import { useQuery } from "@tanstack/react-query"
-import type { BlockedContact, Chat, ChatMessage, Contact, UuidStr } from "@filen/sdk-rs"
+import type { BlockedContact, Chat, ChatMessage, Contact } from "@filen/sdk-rs"
 import { EMPTY_BLOCKED_USERS } from "@filen/shared"
-
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
 
 const { listChats, listMessagesBefore, leaveChatOp, purgeChatInflightState, getContacts, getBlockedContacts } = vi.hoisted(() => ({
 	listChats: vi.fn<() => Promise<Chat[]>>(),
@@ -42,6 +38,7 @@ import { leaveChat } from "@/features/chats/lib/actions"
 import { refetchChatsAndMessages } from "@/features/chats/lib/refetchChatsAndMessages"
 import { socketAuthenticated, socketDropped } from "@/lib/sdk/socketSession"
 import { CONTACTS_QUERY_KEY } from "@/features/contacts/queries/contacts"
+import { testUuid } from "@/tests/support/uuid"
 
 const USER_ID = 7n
 

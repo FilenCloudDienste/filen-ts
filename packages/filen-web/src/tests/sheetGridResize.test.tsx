@@ -5,18 +5,11 @@ import { act, fireEvent, render, screen } from "@testing-library/react"
 import "@/lib/i18n"
 import { SheetGrid } from "@/features/spreadsheet/components/sheetGrid"
 import { gridSheet } from "@/features/spreadsheet/lib/cellStore.logic"
-import { DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT, type SheetView } from "@/features/spreadsheet/lib/model"
+import { DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT } from "@/features/spreadsheet/lib/model"
 import type { Selection } from "@/features/spreadsheet/lib/cellRef.logic"
+import { mockSheetView } from "@/tests/mockSheetView"
 
 beforeEach(() => {
-	vi.stubGlobal(
-		"ResizeObserver",
-		class {
-			observe = vi.fn()
-			unobserve = vi.fn()
-			disconnect = vi.fn()
-		}
-	)
 	vi.useFakeTimers({ toFake: ["requestAnimationFrame", "cancelAnimationFrame"] })
 	HTMLElement.prototype.setPointerCapture = vi.fn()
 	HTMLElement.prototype.releasePointerCapture = vi.fn()
@@ -26,29 +19,11 @@ afterEach(() => {
 	vi.useRealTimers()
 })
 
-function sheet(extra: Partial<SheetView> = {}): SheetView {
-	return {
-		name: "Sheet1",
-		rowCount: 5,
-		colCount: 4,
-		cells: new Map(),
-		merges: [],
-		colWidths: new Map(),
-		rowHeights: new Map(),
-		hiddenCols: [],
-		hiddenRows: [],
-		frozenRows: 0,
-		frozenCols: 0,
-		structureLocked: false,
-		...extra
-	}
-}
-
 const ORIGIN: Selection = { anchor: { row: 0, col: 0 }, focus: { row: 0, col: 0 } }
 
 function renderGrid(
 	onResize: (axis: string, sizes: readonly (readonly [number, number | null])[]) => Promise<void>,
-	view = sheet(),
+	view = mockSheetView(),
 	selection = ORIGIN
 ) {
 	return render(
@@ -183,7 +158,7 @@ describe("SheetGrid resize", () => {
 	it("resizes every selected column of a whole-column selection", async () => {
 		const onResize = vi.fn(() => Promise.resolve())
 		const selection: Selection = { anchor: { row: 0, col: 1 }, focus: { row: 1_048_575, col: 3 } }
-		const { container } = renderGrid(onResize, sheet(), selection)
+		const { container } = renderGrid(onResize, mockSheetView(), selection)
 		const handle = handleOf(columnHeader(container, 2))
 
 		drag(handle, 0, 20)
@@ -201,7 +176,7 @@ describe("SheetGrid resize", () => {
 	})
 
 	it("moves a frozen column's edge and the body with it", () => {
-		const { container } = renderGrid(() => Promise.resolve(), sheet({ frozenCols: 1 }))
+		const { container } = renderGrid(() => Promise.resolve(), mockSheetView({ frozenCols: 1 }))
 		const grid = container.querySelector<HTMLElement>(".grid")
 
 		drag(handleOf(columnHeader(container, 0)), 0, 30)
@@ -264,7 +239,7 @@ describe("SheetGrid resize", () => {
 	it("keeps an open cell editor over its cell at the new width", () => {
 		const { container } = render(
 			<SheetGrid
-				sheet={gridSheet(sheet())}
+				sheet={gridSheet(mockSheetView())}
 				styles={[]}
 				selection={{ anchor: { row: 0, col: 1 }, focus: { row: 0, col: 1 } }}
 				onSelectionChange={() => undefined}
@@ -283,7 +258,7 @@ describe("SheetGrid resize", () => {
 	it("resizes every column of a header selection, which spans the used rows", async () => {
 		const onResize = vi.fn(() => Promise.resolve())
 		const selection: Selection = { anchor: { row: 0, col: 1 }, focus: { row: 4, col: 3 } }
-		const { container } = renderGrid(onResize, sheet(), selection)
+		const { container } = renderGrid(onResize, mockSheetView(), selection)
 		const handle = handleOf(columnHeader(container, 2))
 
 		drag(handle, 0, 20)
@@ -323,7 +298,7 @@ describe("SheetGrid resize", () => {
 	it("commits nothing for a click that never moved, even on a whole selection", async () => {
 		const onResize = vi.fn(() => Promise.resolve())
 		const selection: Selection = { anchor: { row: 0, col: 1 }, focus: { row: 4, col: 3 } }
-		const { container } = renderGrid(onResize, sheet(), selection)
+		const { container } = renderGrid(onResize, mockSheetView(), selection)
 		const handle = handleOf(columnHeader(container, 2))
 
 		await act(() => {
@@ -381,7 +356,7 @@ describe("SheetGrid resize", () => {
 	it("has no handles without onResize", () => {
 		const { container } = render(
 			<SheetGrid
-				sheet={gridSheet(sheet())}
+				sheet={gridSheet(mockSheetView())}
 				styles={[]}
 				selection={ORIGIN}
 				onSelectionChange={() => undefined}

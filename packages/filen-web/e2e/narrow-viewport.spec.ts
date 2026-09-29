@@ -1,6 +1,6 @@
 import { test, expect } from "./fixtures"
 import { bootTo, openTransfers, waitForListingSettled } from "./helpers/listing"
-import { gotoSettings } from "./helpers/settings"
+import { gotoSettings, openSettingsSection } from "./helpers/settings"
 
 // The narrow-viewport shell contract: below the layout breakpoint no module sidebar sits in the shell
 // row, the rail's one drawer trigger reaches it, picking a destination closes it again, and both drive
@@ -11,9 +11,7 @@ import { gotoSettings } from "./helpers/settings"
 test.describe("narrow viewport", () => {
 	test.use({ viewport: { width: 390, height: 844 } })
 
-	test("no sidebar sits in the row, the rail's trigger opens it, and the drive chrome rows fit", async ({ page, injectedSession }) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
+	test("no sidebar sits in the row, the rail's trigger opens it, and the drive chrome rows fit", async ({ page }) => {
 		await bootTo(page)
 		await waitForListingSettled(page)
 
@@ -46,9 +44,7 @@ test.describe("narrow viewport", () => {
 		await expect(recents).toBeHidden()
 	})
 
-	test("every settings section is reachable, and picking one closes the drawer", async ({ page, injectedSession }) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
+	test("every settings section is reachable, and picking one closes the drawer", async ({ page }) => {
 		await gotoSettings(page)
 
 		const sections = ["Account", "Security", "Appearance", "Events", "Billing", "Advanced"]
@@ -70,17 +66,14 @@ test.describe("narrow viewport", () => {
 			await expect(page.getByRole("link", { name: label, exact: true })).toBeVisible()
 		}
 
-		await page.getByRole("link", { name: "Security", exact: true }).click()
-		await page.waitForURL(/\/settings\/security$/)
+		await openSettingsSection(page, "Security")
 
 		// The drawer closed itself on the navigation, so neither it nor the panel it hosts is presented.
 		await expect(page.getByRole("dialog")).toHaveCount(0)
 		await expect(page.getByRole("complementary")).toHaveCount(0)
 	})
 
-	test("the drive Name column survives 390px and the secondary columns return at desktop", async ({ page, injectedSession }) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
+	test("the drive Name column survives 390px and the secondary columns return at desktop", async ({ page }) => {
 		await bootTo(page)
 
 		const { hasItems } = await waitForListingSettled(page)
@@ -114,9 +107,7 @@ test.describe("narrow viewport", () => {
 		await expect(modified).toBeVisible()
 	})
 
-	test("the transfers toolbar is fully reachable", async ({ page, injectedSession }) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
+	test("the transfers toolbar is fully reachable", async ({ page }) => {
 		// Entered through the rail rather than a hard goto to /transfers: the rail's own link is part of
 		// what "reachable at 390px" means. No listing assertion is wanted here, so bootTo's shell barrier
 		// is the right half of THE RULE (helpers/listing.ts), not waitForListingSettled.

@@ -1,32 +1,7 @@
 import { describe, expect, it } from "vitest"
-import type { Note, UuidStr } from "@filen/sdk-rs"
 import { noteSearchBodyCandidates, buildNoteBodiesMap } from "@/features/notes/hooks/useNoteSearchBodies.logic"
-
-// UuidStr is a template-literal brand requiring at least 3 dashes — mirrors notesSort.test.ts's own
-// testUuid helper.
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
-
-function mockNote(overrides: Partial<Note> = {}): Note {
-	return {
-		uuid: testUuid("note"),
-		ownerId: 1n,
-		lastEditorId: 1n,
-		favorite: false,
-		pinned: false,
-		tags: [],
-		noteType: "text",
-		title: "title",
-		preview: "preview",
-		trash: false,
-		archive: false,
-		createdTimestamp: 0n,
-		editedTimestamp: 0n,
-		participants: [],
-		...overrides
-	}
-}
+import { testUuid } from "@/tests/support/uuid"
+import { mockNote } from "@/tests/fixtures/notes"
 
 describe("noteSearchBodyCandidates", () => {
 	it("returns no candidates at all for a blank query — the whole opt-in gate", () => {

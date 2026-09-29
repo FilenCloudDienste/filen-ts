@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
-import type { File as SdkFile, Dir, FilePublicLink, DirPublicLinkRW, UserInfo, UuidStr } from "@filen/sdk-rs"
+import type { File as SdkFile, Dir, FilePublicLink, DirPublicLinkRW, UserInfo } from "@filen/sdk-rs"
 
 // Mock boundary matching upload.test.ts: the real sdk client/query client modules import a Vite
 // `?worker` / touch an OPFS-backed persister, unresolvable/unwanted under node vitest.
@@ -34,10 +34,7 @@ import { formatBytes } from "@filen/shared"
 import { queryClient } from "@/queries/client"
 import { ACCOUNT_QUERY_KEY } from "@/queries/account"
 import { driveListingQueryKey } from "@/features/drive/queries/drive"
-
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import { testUuid } from "@/tests/support/uuid"
 
 function mockDir(uuid: string): Dir {
 	return {

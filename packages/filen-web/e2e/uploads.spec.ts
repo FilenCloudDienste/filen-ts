@@ -3,11 +3,13 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { test, expect } from "./fixtures"
 import {
+	withScratchDirectory,
 	bootTo,
 	descendInto,
 	enterScratchDirectory,
 	openTransfers,
 	trashScratchDirectory,
+	uploadFiles,
 	waitForListingSettled,
 	LIVE_WRITE_TIMEOUT_MS
 } from "./helpers/listing"
@@ -20,30 +22,13 @@ import {
 // automatable path through the exact same upload orchestration.
 
 test.describe("uploads", () => {
-	test("picking a file uploads it through the worker and lands a row in the listing", async ({ page, injectedSession }) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
+	test("picking a file uploads it through the worker and lands a row in the listing", async ({ page }) => {
+		await withScratchDirectory(page, "upload", async ({ listbox, runId }) => {
+			const fileName = `e2e-upload-${runId}.txt`
 
-		const runId = crypto.randomUUID()
-		const scratchName = `e2e-upload-${runId}`
-		const fileName = `e2e-upload-${runId}.txt`
-
-		await bootTo(page)
-
-		try {
-			const { listbox } = await enterScratchDirectory(page, scratchName)
-
-			// The unlabeled multiple picker is the first `type=file` input in DOM order (uploadMenu.tsx) —
-			// present regardless of visibility, and nothing is selected yet at this point in the test, so it
-			// hasn't been swapped out for the bulk-action bar.
-			await page
-				.getByRole("main")
-				.locator('input[type="file"]')
-				.first()
-				.setInputFiles({ name: fileName, mimeType: "text/plain", buffer: Buffer.from("e2e upload probe") })
-
-			const row = listbox.getByRole("option", { name: fileName })
-			// Cold boot + a real upload round trip, so the write budget rather than a UI-responsiveness one.
-			await expect(row).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
+			// The picker is present regardless of visibility, and nothing is selected yet at this point in the
+			// test, so it hasn't been swapped out for the bulk-action bar.
+			await uploadFiles(page, [{ name: fileName, mimeType: "text/plain", buffer: Buffer.from("e2e upload probe") }], listbox)
 
 			// The rail Transfers entry navigates straight to the /transfers screen (no more popover)
 			// and reflects this same just-finished transfer — runUpload settles the store to "done" before
@@ -54,14 +39,10 @@ test.describe("uploads", () => {
 			// than the first status line anywhere on the screen.
 			const transferRow = page.getByRole("listitem", { name: fileName })
 			await expect(transferRow.getByText(/^Uploaded · /)).toBeVisible()
-		} finally {
-			await trashScratchDirectory(page, scratchName)
-		}
+		})
 	})
 
-	test("picking a directory recreates its tree and lands the top-level directory in the listing", async ({ page, injectedSession }) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
+	test("picking a directory recreates its tree and lands the top-level directory in the listing", async ({ page }) => {
 		const runId = crypto.randomUUID()
 		const scratchName = `e2e-dir-upload-${runId}`
 		const rootName = `e2e-dir-upload-tree-${runId}`

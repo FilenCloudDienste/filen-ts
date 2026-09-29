@@ -1,7 +1,7 @@
 import { statSync } from "node:fs"
 import type { Page } from "@playwright/test"
 import { test, expect } from "./fixtures"
-import { enterFixtureDirectory, FIXTURE_FILES } from "./helpers/fixtures"
+import { enterFixtureDirectory, FIXTURE_FILES, openFixtureRows } from "./helpers/fixtures"
 import { bootTo, clickSidebarLink, openTransfers, LIVE_WRITE_TIMEOUT_MS } from "./helpers/listing"
 import { DOWNLOAD_FSA_TEXT, DOWNLOAD_SW_TEXT } from "./helpers/fixtureBytes"
 import { MOD_KEY } from "./helpers/modkey"
@@ -125,19 +125,16 @@ function readSmokeSink(page: Page): Promise<{ bytes: number; first4: number[] }>
 // appears is the download under test.
 
 test.describe("downloads", () => {
-	test("a single file downloads through the File System Access path and the transfer reaches Done", async ({ page, injectedSession }) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
+	test("a single file downloads through the File System Access path and the transfer reaches Done", async ({ page }) => {
 		await stubFsaPicker(page)
 
 		await bootTo(page)
 
 		const [fileName] = FIXTURE_FILES["download-fsa"]
 
-		const { listbox } = await enterFixtureDirectory(page, "download-fsa")
-
-		const row = listbox.getByRole("option", { name: fileName })
-		await expect(row).toBeVisible({ timeout: 20_000 })
+		const {
+			rows: [row]
+		} = await openFixtureRows(page, "download-fsa")
 
 		await row.click()
 		await page.getByRole("button", { name: "Download", exact: true }).click()
@@ -154,21 +151,14 @@ test.describe("downloads", () => {
 		expect(sink.bytes).toBe(Buffer.byteLength(DOWNLOAD_FSA_TEXT, "utf8"))
 	})
 
-	test("a multi-select download zips into ONE archive over the File System Access path", async ({ page, injectedSession }) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
+	test("a multi-select download zips into ONE archive over the File System Access path", async ({ page }) => {
 		await stubFsaPicker(page)
 
 		await bootTo(page)
 
-		const [nameA, nameB] = FIXTURE_FILES["download-zip"]
-
-		const { listbox } = await enterFixtureDirectory(page, "download-zip")
-
-		const rowA = listbox.getByRole("option", { name: nameA })
-		const rowB = listbox.getByRole("option", { name: nameB })
-		await expect(rowA).toBeVisible({ timeout: 20_000 })
-		await expect(rowB).toBeVisible({ timeout: 20_000 })
+		const {
+			rows: [rowA, rowB]
+		} = await openFixtureRows(page, "download-zip")
 
 		// Click, then modifier-click to add to the selection -- the same mechanism drive-actions.spec.ts's
 		// own bulk tests use.
@@ -198,24 +188,17 @@ test.describe("downloads", () => {
 		expect(sink.bytes).toBeGreaterThan(100)
 	})
 
-	test("a single file downloads through the service-worker path as a real browser download", async ({
-		page,
-		injectedSession,
-		browserName
-	}) => {
+	test("a single file downloads through the service-worker path as a real browser download", async ({ page, browserName }) => {
 		test.skip(browserName === "firefox", FIREFOX_SERVICE_WORKERS_BLOCKED)
-		expect(injectedSession.length).toBeGreaterThan(0)
-
 		await deleteFsaPicker(page)
 
 		await bootTo(page)
 
 		const [fileName] = FIXTURE_FILES["download-sw"]
 
-		const { listbox } = await enterFixtureDirectory(page, "download-sw")
-
-		const row = listbox.getByRole("option", { name: fileName })
-		await expect(row).toBeVisible({ timeout: 20_000 })
+		const {
+			rows: [row]
+		} = await openFixtureRows(page, "download-sw")
 
 		await row.click()
 
@@ -239,12 +222,7 @@ test.describe("downloads", () => {
 		await expect(swRow.getByText(/^Downloaded · /)).toBeVisible({ timeout: 20_000 })
 	})
 
-	test("cancelling a File System Access download mid-flight removes the row and leaves the source untouched", async ({
-		page,
-		injectedSession
-	}) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
+	test("cancelling a File System Access download mid-flight removes the row and leaves the source untouched", async ({ page }) => {
 		// The only read-lane test that enters the fixture tree TWICE — once here and again after the
 		// cancel, to prove the listing survived the round trip. Two descents plus this test's own pins
 		// sit above the lane ceiling, so it opts in where that cost is visible rather than widening the
@@ -260,10 +238,10 @@ test.describe("downloads", () => {
 
 		const [fileName] = FIXTURE_FILES["download-cancel"]
 
-		const { listbox } = await enterFixtureDirectory(page, "download-cancel")
-
-		const row = listbox.getByRole("option", { name: fileName })
-		await expect(row).toBeVisible({ timeout: 20_000 })
+		const {
+			listbox,
+			rows: [row]
+		} = await openFixtureRows(page, "download-cancel")
 
 		await row.click()
 		await page.getByRole("button", { name: "Download", exact: true }).click()

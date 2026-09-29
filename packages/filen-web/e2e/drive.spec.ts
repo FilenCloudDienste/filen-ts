@@ -1,5 +1,6 @@
 import { test, expect } from "./fixtures"
-import { bootTo, clickSidebarLink, waitForListingSettled } from "./helpers/listing"
+import { trackConsoleErrors } from "./helpers/csp"
+import { bootTo, breadcrumb, clickSidebarLink, waitForListingSettled } from "./helpers/listing"
 import { enterFixtureRoot, FIXTURE_FILES } from "./helpers/fixtures"
 import { resolveModKey } from "./helpers/modkey"
 
@@ -20,17 +21,15 @@ import { resolveModKey } from "./helpers/modkey"
 const FIXTURE_ROOT_ROW_COUNT = Object.keys(FIXTURE_FILES).length
 
 test.describe("drive", () => {
-	test("the Cloud Drive listing renders the shell, breadcrumb, and directory contents region", async ({ page, injectedSession }) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
+	test("the Cloud Drive listing renders the shell, breadcrumb, and directory contents region", async ({ page }) => {
 		await bootTo(page)
 		const { listbox } = await waitForListingSettled(page)
 
 		await expect(page.getByRole("navigation", { name: "Filen" })).toBeVisible()
 
-		const breadcrumb = page.getByRole("navigation", { name: "Breadcrumb" })
-		await expect(breadcrumb).toBeVisible()
-		const rootCrumb = breadcrumb.getByText("Cloud Drive", { exact: true })
+		const crumbs = breadcrumb(page)
+		await expect(crumbs).toBeVisible()
+		const rootCrumb = crumbs.getByText("Cloud Drive", { exact: true })
 		await expect(rootCrumb).toBeVisible()
 		await expect(rootCrumb).toHaveAttribute("aria-current", "page")
 
@@ -41,9 +40,7 @@ test.describe("drive", () => {
 		await expect(listbox.getByRole("option").first()).toBeVisible()
 	})
 
-	test("navigating into a subdirectory grows the URL and breadcrumb and requeries the listing", async ({ page, injectedSession }) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
+	test("navigating into a subdirectory grows the URL and breadcrumb and requeries the listing", async ({ page }) => {
 		await bootTo(page)
 		const { listbox } = await enterFixtureRoot(page)
 
@@ -60,16 +57,14 @@ test.describe("drive", () => {
 		await expect(page.getByRole("navigation", { name: "Filen" })).toBeVisible()
 
 		// The root breadcrumb segment becomes a real link once a step deeper than root.
-		const breadcrumb = page.getByRole("navigation", { name: "Breadcrumb" })
-		await expect(breadcrumb.getByRole("link", { name: "Cloud Drive", exact: true })).toBeVisible()
+		const crumbs = breadcrumb(page)
+		await expect(crumbs.getByRole("link", { name: "Cloud Drive", exact: true })).toBeVisible()
 
 		// The listing re-queries for the new directory and settles the same way root did.
 		await waitForListingSettled(page)
 	})
 
-	test("an open dialog closes when a history pop changes the location under the same route", async ({ page, injectedSession }) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
+	test("an open dialog closes when a history pop changes the location under the same route", async ({ page }) => {
 		// The axis matters: /drive and /drive/<uuid> are ONE route (routes/_app/drive.$.tsx), so a pop
 		// along the splat re-renders the listing in place and its dialog host survives — which is the
 		// only state in which closing an open dialog is this host's job. A pop across two DIFFERENT
@@ -106,9 +101,7 @@ test.describe("drive", () => {
 		await expect(page.getByRole("dialog")).toHaveCount(0)
 	})
 
-	test("view mode toggles between list and grid and persists across a reload", async ({ page, injectedSession }) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
+	test("view mode toggles between list and grid and persists across a reload", async ({ page }) => {
 		await bootTo(page)
 		await waitForListingSettled(page)
 
@@ -138,9 +131,7 @@ test.describe("drive", () => {
 		await page.keyboard.press("Escape")
 	})
 
-	test("the sidebar resize separator is keyboard-operable and two presses compound", async ({ page, injectedSession }) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
+	test("the sidebar resize separator is keyboard-operable and two presses compound", async ({ page }) => {
 		await bootTo(page)
 		await waitForListingSettled(page)
 
@@ -168,9 +159,7 @@ test.describe("drive", () => {
 		await expect(handle).toHaveAttribute("aria-valuenow", String(before))
 	})
 
-	test("the sort menu opens, a field/direction selection reflects and survives close/reopen", async ({ page, injectedSession }) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
+	test("the sort menu opens, a field/direction selection reflects and survives close/reopen", async ({ page }) => {
 		await bootTo(page)
 		await waitForListingSettled(page)
 
@@ -206,12 +195,7 @@ test.describe("drive", () => {
 		await page.keyboard.press("Escape")
 	})
 
-	test("selection: click selects, Cmd/Ctrl+A selects all, Escape clears, Arrow moves the roving cursor", async ({
-		page,
-		injectedSession
-	}) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
+	test("selection: click selects, Cmd/Ctrl+A selects all, Escape clears, Arrow moves the roving cursor", async ({ page }) => {
 		await bootTo(page)
 		// enterFixtureRoot forces the tall viewport the select-all assertion needs: the selected-rows
 		// count must equal the bar's total, which only holds when no selected row sits unmounted below
@@ -245,12 +229,7 @@ test.describe("drive", () => {
 		await expect(second).toBeFocused()
 	})
 
-	test("the new-directory dialog opens and gates an empty/whitespace name without creating anything", async ({
-		page,
-		injectedSession
-	}) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
+	test("the new-directory dialog opens and gates an empty/whitespace name without creating anything", async ({ page }) => {
 		await bootTo(page)
 		await waitForListingSettled(page)
 
@@ -287,32 +266,14 @@ test.describe("drive", () => {
 	// client-side sidebar click rather than a cold goto("/links") because the sidebar row IS what this
 	// test is about.
 	test("the sidebar Links row navigates to the /links virtual root, which renders the shell and settles with no console errors", async ({
-		page,
-		injectedSession
+		page
 	}) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
 		await bootTo(page)
 		await waitForListingSettled(page)
 
 		// Scope the console-error capture to the links leg alone (post-boot): the assertion below is
 		// about the /links render, not the authed shell's own boot.
-		const consoleErrors: string[] = []
-
-		page.on("console", msg => {
-			if (msg.type() !== "error") {
-				return
-			}
-
-			const text = msg.text()
-
-			// arktype's benign CSP probe (see shell.spec.ts) — blocked by no-unsafe-eval, not a failure.
-			if (/unsafe-eval/i.test(text)) {
-				return
-			}
-
-			consoleErrors.push(text)
-		})
+		const consoleErrors = trackConsoleErrors(page)
 
 		await clickSidebarLink(page, "Links", /\/links$/)
 
@@ -322,9 +283,9 @@ test.describe("drive", () => {
 
 		await expect(page.getByRole("navigation", { name: "Filen" })).toBeVisible()
 
-		const breadcrumb = page.getByRole("navigation", { name: "Breadcrumb" })
-		await expect(breadcrumb).toBeVisible()
-		const rootCrumb = breadcrumb.getByText("Links", { exact: true })
+		const crumbs = breadcrumb(page)
+		await expect(crumbs).toBeVisible()
+		const rootCrumb = crumbs.getByText("Links", { exact: true })
 		await expect(rootCrumb).toBeVisible()
 		await expect(rootCrumb).toHaveAttribute("aria-current", "page")
 

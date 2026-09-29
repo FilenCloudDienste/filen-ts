@@ -1,11 +1,8 @@
 import { describe, expect, it } from "vitest"
 import { MailOpenIcon, Volume2Icon, VolumeOffIcon, UsersIcon, PencilIcon, Trash2Icon, LogOutIcon } from "lucide-react"
-import type { Chat, ChatParticipant, UuidStr } from "@filen/sdk-rs"
+import type { Chat, ChatParticipant } from "@filen/sdk-rs"
 import { applyOfflineGate, chatMenuActions, type ChatActionDescriptor } from "@/features/chats/components/chatMenu.logic"
-
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import { testUuid } from "@/tests/support/uuid"
 
 function mockParticipant(overrides: Partial<ChatParticipant> = {}): ChatParticipant {
 	return {

@@ -1,46 +1,46 @@
 import { test, expect, seedSession } from "./fixtures"
 import { waitForE2eHooks } from "./helpers/e2eHooks"
-import { BOOT_SETTLE_TIMEOUT_MS, bootTo } from "./helpers/listing"
+import { BOOT_SETTLE_TIMEOUT_MS, bootTo, bootToSignIn, SIGN_IN_HEADING } from "./helpers/listing"
 
 test.describe("storage", () => {
-	test("kv values persist across a reload", async ({ page }) => {
-		// The sign-in form renders only once boot is done, storage included, so it gates both kv calls:
-		// the hooks chunk alone arrives mid-boot, and reloading a document whose storage is still opening
-		// leaves the next one racing its teardown for the db lock and the OPFS pool.
-		const signIn = page.getByText("Sign in to Filen")
+	test.describe("signed out", () => {
+		test.use({ injectSession: false })
 
-		await page.goto("/")
-		await expect(signIn).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
-		await waitForE2eHooks(page)
+		test("kv values persist across a reload", async ({ page }) => {
+			// The sign-in form renders only once boot is done, storage included, so it gates both kv calls:
+			// the hooks chunk alone arrives mid-boot, and reloading a document whose storage is still opening
+			// leaves the next one racing its teardown for the db lock and the OPFS pool.
+			const signIn = page.getByText(SIGN_IN_HEADING)
 
-		await page.evaluate(() => window.__filenE2E.kvSet("e2e.storage.persist", "persisted-value"))
-
-		// Retried because Playwright-firefox aborts a reload issued while the first load still has a
-		// request in flight (NS_BINDING_ABORTED) — the boot fires several, so on a slow runner the race
-		// is ordinary rather than exceptional. That abort fails fast, so the barrier's own budget inside
-		// still leaves room for a second attempt. Re-reloading is safe: the value under test is already
-		// written, and the assertion below is what proves the reload happened at all.
-		await expect(async () => {
-			await page.reload()
+			await bootToSignIn(page)
 			await waitForE2eHooks(page)
-		}).toPass({ timeout: 60_000 })
 
-		await expect(signIn).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
+			await page.evaluate(() => window.__filenE2E.kvSet("e2e.storage.persist", "persisted-value"))
 
-		const value = await page.evaluate(() => window.__filenE2E.kvGet("e2e.storage.persist"))
-		expect(value).toBe("persisted-value")
+			// Retried because Playwright-firefox aborts a reload issued while the first load still has a
+			// request in flight (NS_BINDING_ABORTED) — the boot fires several, so on a slow runner the race
+			// is ordinary rather than exceptional. That abort fails fast, so the barrier's own budget inside
+			// still leaves room for a second attempt. Re-reloading is safe: the value under test is already
+			// written, and the assertion below is what proves the reload happened at all.
+			await expect(async () => {
+				await page.reload()
+				await waitForE2eHooks(page)
+			}).toPass({ timeout: 60_000 })
+
+			await expect(signIn).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
+
+			const value = await page.evaluate(() => window.__filenE2E.kvGet("e2e.storage.persist"))
+			expect(value).toBe("persisted-value")
+		})
 	})
 
 	test("a follower tab reads a value written by the leader tab through the BroadcastChannel RPC", async ({
 		page,
-		injectedSession,
-		context
+		context,
+		injectedSession
 	}) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
 		// Leader tab: wins the Web Lock, opens OPFS directly, and writes a value into its own sqlite.
 		await bootTo(page, "/")
-		await waitForE2eHooks(page)
 		await page.evaluate(() => window.__filenE2E.kvSet("e2e.storage.leader", "from-leader"))
 
 		// Follower tab: the lock is already held, so it reads through the BroadcastChannel RPC instead
@@ -51,7 +51,6 @@ test.describe("storage", () => {
 		// The blocking startup reminders arm per page load — the follower is its own load, so it gets
 		// its own boot barrier.
 		await bootTo(follower, "/")
-		await waitForE2eHooks(follower)
 
 		const readThrough = await follower.evaluate(() => window.__filenE2E.kvGet("e2e.storage.leader"))
 		expect(readThrough).toBe("from-leader")
@@ -61,11 +60,9 @@ test.describe("storage", () => {
 
 	test("a follower is promoted to leader when the leader tab dies, and its kv keeps working", async ({
 		page,
-		injectedSession,
-		context
+		context,
+		injectedSession
 	}) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
 		// The LEADER is a sibling tab booted first (it wins the Web Lock, opens OPFS, writes a value). The
 		// fixture `page` is the FOLLOWER + survivor: it reads through the RPC while the leader lives, then
 		// takes over the SAME lock — reopening the shared OPFS — once the leader dies.
@@ -73,12 +70,10 @@ test.describe("storage", () => {
 
 		await seedSession(leader, injectedSession)
 		await bootTo(leader, "/")
-		await waitForE2eHooks(leader)
 		await leader.evaluate(() => window.__filenE2E.kvSet("e2e.storage.failover", "before-handoff"))
 
 		// Follower boots second → reads through the BroadcastChannel RPC (proves the leader holds the lock).
 		await bootTo(page, "/")
-		await waitForE2eHooks(page)
 		expect(await page.evaluate(() => window.__filenE2E.kvGet("e2e.storage.failover"))).toBe("before-handoff")
 
 		// Kill the leader. The released Web Lock promotes the follower, which opens its own OPFS handle on

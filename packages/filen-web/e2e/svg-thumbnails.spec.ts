@@ -1,5 +1,5 @@
 import { test, expect } from "./fixtures"
-import { bootTo, enterScratchDirectory, trashScratchDirectory, LIVE_WRITE_TIMEOUT_MS } from "./helpers/listing"
+import { uploadFiles, withScratchDirectory } from "./helpers/listing"
 
 // An svg is rasterised in the page itself (no Rust decoder handles svg), so this is the live proof that
 // doing so is safe: the markup below carries a script, an inline event handler and an external image,
@@ -15,14 +15,8 @@ const HOSTILE_SVG = `<?xml version="1.0" encoding="UTF-8"?>
 </svg>`
 
 test("an uploaded svg thumbnails as its drawing, at its own aspect, without running its script or fetching its resources", async ({
-	page,
-	injectedSession
+	page
 }) => {
-	expect(injectedSession.length).toBeGreaterThan(0)
-
-	const runId = crypto.randomUUID()
-	const scratchName = `e2e-svg-thumb-${runId}`
-	const svgName = `e2e-svg-thumb-${runId}.svg`
 	const trackerRequests: string[] = []
 
 	page.on("request", request => {
@@ -31,19 +25,12 @@ test("an uploaded svg thumbnails as its drawing, at its own aspect, without runn
 		}
 	})
 
-	await bootTo(page)
+	await withScratchDirectory(page, "svg-thumb", async ({ listbox, runId }) => {
+		const svgName = `e2e-svg-thumb-${runId}.svg`
 
-	try {
-		const { listbox } = await enterScratchDirectory(page, scratchName)
-
-		await page
-			.getByRole("main")
-			.locator('input[type="file"]')
-			.first()
-			.setInputFiles([{ name: svgName, mimeType: "image/svg+xml", buffer: Buffer.from(HOSTILE_SVG, "utf8") }])
+		await uploadFiles(page, [{ name: svgName, mimeType: "image/svg+xml", buffer: Buffer.from(HOSTILE_SVG, "utf8") }], listbox)
 
 		const row = listbox.getByRole("option", { name: svgName })
-		await expect(row).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 
 		const thumb = row.locator("img")
 		await expect(thumb).toHaveAttribute("src", /^blob:/, { timeout: 30_000 })
@@ -79,7 +66,5 @@ test("an uploaded svg thumbnails as its drawing, at its own aspect, without runn
 
 		expect(await page.evaluate(() => (window as unknown as { __svgPwned?: string }).__svgPwned)).toBeUndefined()
 		expect(trackerRequests).toEqual([])
-	} finally {
-		await trashScratchDirectory(page, scratchName)
-	}
+	})
 })

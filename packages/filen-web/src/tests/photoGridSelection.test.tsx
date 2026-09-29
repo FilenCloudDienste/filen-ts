@@ -19,7 +19,6 @@ function names(items: readonly NamedItem[]): string {
 	return items.map(item => item.data.decryptedMeta?.name ?? "").join("|")
 }
 
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 vi.mock("@/lib/keymap/useAction", () => ({ useAction: vi.fn() }))
 vi.mock("@/lib/useIsOnline", () => ({ useIsOnline: () => true }))
@@ -88,14 +87,6 @@ function photo(label: string, name: string): PhotoItem {
 }
 
 beforeEach(() => {
-	vi.stubGlobal(
-		"ResizeObserver",
-		class {
-			observe = vi.fn()
-			unobserve = vi.fn()
-			disconnect = vi.fn()
-		}
-	)
 	usePhotosStore.setState({ selectedItems: [] })
 })
 

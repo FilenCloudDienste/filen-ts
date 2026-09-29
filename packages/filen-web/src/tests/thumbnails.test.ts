@@ -32,10 +32,7 @@ import {
 	type ThumbnailServiceDeps,
 	type ThumbSeedResult
 } from "@/features/drive/lib/thumbnails"
-
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import { testUuid } from "@/tests/support/uuid"
 
 let uuidCounter = 0
 

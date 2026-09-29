@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest"
 import { render, screen, fireEvent, within } from "@testing-library/react"
 import { createElement } from "react"
 import { QueryClient } from "@tanstack/react-query"
-import type { Chat, ChatMessage, UuidStr } from "@filen/sdk-rs"
+import type { Chat, ChatMessage } from "@filen/sdk-rs"
 import { deriveBlockedUsers } from "@filen/shared"
 import type { MessageActionDescriptor } from "@/features/chats/components/thread/messageMenu.logic"
 
@@ -15,7 +15,6 @@ const { useMessageActions, runAction } = vi.hoisted(() => ({
 	runAction: vi.fn<(descriptor: MessageActionDescriptor) => void>()
 }))
 
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 vi.mock("@/features/chats/components/thread/useMessageActions", () => ({ useMessageActions }))
 vi.mock("@/features/chats/components/thread/messageEmbeds", () => ({ MessageEmbeds: () => null }))
@@ -24,10 +23,7 @@ import "@/lib/i18n"
 import { messageMenuActions } from "@/features/chats/components/thread/messageMenu.logic"
 import { MessageRow } from "@/features/chats/components/thread/messageRow"
 import { formatClockTime } from "@/features/chats/lib/time"
-
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import { testUuid } from "@/tests/support/uuid"
 
 const chat: Chat = {
 	uuid: testUuid("chat"),

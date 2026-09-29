@@ -6,6 +6,8 @@ import { test, expect } from "./fixtures"
 // real failure (the capability pre-check or the leader's open()-throws path, see @/lib/sdk/boot) — the
 // pre-check's own decision is unit-tested in capability.test.ts, not re-proven here.
 test.describe("no OPFS storage", () => {
+	test.use({ injectSession: false })
+
 	test("renders the OPFS-required page's copy with a reload action", async ({ page }) => {
 		await page.goto("/no-opfs")
 

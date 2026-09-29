@@ -1,11 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
-import type { Note, UserInfo, UuidStr } from "@filen/sdk-rs"
+import type { UserInfo } from "@filen/sdk-rs"
 import { hashNoteContent } from "@filen/shared"
-
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import { mockNote } from "@/tests/fixtures/notes"
 
 // Mock boundary matching notesQueries.test.ts: the real sdk client module imports a Vite `?worker`,
 // unresolvable under node vitest.
@@ -77,32 +74,13 @@ import {
 	setNoteTitle,
 	setNoteType
 } from "@/features/notes/lib/actions"
+import { testUuid } from "@/tests/support/uuid"
 
 beforeEach(() => {
 	vi.clearAllMocks()
 	testQueryClient.clear()
 	useNotesInflightStore.setState({ inflightContent: {} })
 })
-
-function mockNote(overrides: Partial<Note> = {}): Note {
-	return {
-		uuid: testUuid("note"),
-		ownerId: 1n,
-		lastEditorId: 1n,
-		favorite: false,
-		pinned: false,
-		tags: [],
-		noteType: "text",
-		title: "note title",
-		preview: "note preview",
-		trash: false,
-		archive: false,
-		createdTimestamp: 1_700_000_000_000n,
-		editedTimestamp: 1_700_000_000_000n,
-		participants: [],
-		...overrides
-	}
-}
 
 function setCurrentUser(id: bigint): void {
 	testQueryClient.setQueryData<UserInfo>(ACCOUNT_QUERY_KEY, { id } as UserInfo)

@@ -1,14 +1,9 @@
 import { describe, expect, it } from "vitest"
-import type { Dir, File, UuidStr } from "@filen/sdk-rs"
+import type { Dir, File } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { RAW_IMAGE_EXTENSIONS } from "@/features/drive/lib/preview.logic"
 import { allowedMediaContentType } from "@/features/preview/lib/mediaType"
-
-// Mirrors preview.logic.test.ts's own testUuid/mockFile/mockDir fixtures — each test file here owns
-// its own local fixtures, no shared test-utils module.
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import { testUuid } from "@/tests/support/uuid"
 
 function mockFile(overrides: Partial<File> = {}): File {
 	return {

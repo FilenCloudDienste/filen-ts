@@ -3,7 +3,7 @@
 import { describe, expect, it, vi } from "vitest"
 import { createElement, type ReactNode } from "react"
 import { act, render, renderHook, screen, waitFor } from "@testing-library/react"
-import type { Dir, DirSizeResponse, File, UuidStr } from "@filen/sdk-rs"
+import type { Dir, DirSizeResponse, File } from "@filen/sdk-rs"
 import { formatBytes } from "@filen/shared"
 import "@/lib/i18n"
 
@@ -15,8 +15,6 @@ const { getItemInfo, getDirSize } = vi.hoisted(() => ({
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: { getItemInfo, getDirSize } }))
 
 vi.mock("@/queries/client", async () => ({ queryClient: (await import("@/tests/testQueryClient")).createTestQueryClient() }))
-
-vi.mock("@/lib/log", () => ({ log: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() } }))
 
 // The hero thumbnail pipeline and the Location link's router are out of scope for a request count.
 vi.mock("@/features/drive/hooks/useThumbnail", () => ({ useThumbnail: () => null }))
@@ -31,10 +29,7 @@ import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { DIRECTORY_SIZE_STALE_TIME, directorySizeQueryKey } from "@/features/drive/queries/drive"
 import { useDriveDirectorySizes } from "@/features/drive/hooks/useDriveDirectorySizes"
 import { InfoDialog } from "@/features/drive/components/infoDialog"
-
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import { testUuid } from "@/tests/support/uuid"
 
 function mockDir(label: string): Dir {
 	return {

@@ -1,19 +1,18 @@
 import { test, expect } from "./fixtures"
-import { BOOT_SETTLE_TIMEOUT_MS } from "./helpers/listing"
+import { waitForE2eHooks } from "./helpers/e2eHooks"
+import { bootToSignIn } from "./helpers/listing"
 import { isDark, pressUntilTheme } from "./helpers/theme"
 
 // SDK-free: the theme-toggle action is registered globally (theme-provider, mounted above the auth
 // gate), so it works on the pre-auth sign-in surface without a session.
 test.describe("keymap", { tag: "@no-sdk" }, () => {
 	// Pin the color scheme so the "system" default resolves deterministically to light.
-	test.use({ colorScheme: "light" })
+	test.use({ colorScheme: "light", injectSession: false })
 
 	test("the default binding toggles the theme and a user override rebinds it", async ({ page }) => {
-		await page.goto("/")
-		// Wait for a ready, interactive shell so the hotkey binding is active. Boot budget, not the
-		// expect default: this is a cold wasm init + OPFS open.
-		await expect(page.getByText("Sign in to Filen")).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
-		await page.waitForFunction(() => "__filenE2E" in window)
+		// A ready, interactive shell, so the hotkey binding is active.
+		await bootToSignIn(page)
+		await waitForE2eHooks(page)
 
 		await expect.poll(() => isDark(page)).toBe(false)
 

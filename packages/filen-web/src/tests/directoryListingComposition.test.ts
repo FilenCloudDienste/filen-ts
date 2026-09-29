@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { Children, createElement, isValidElement, type ReactElement, type ReactNode } from "react"
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { QueryClient } from "@tanstack/react-query"
-import type { Dir, File, SharedFile, SharedRootDir, SharingRole, UuidStr } from "@filen/sdk-rs"
+import type { Dir, File, SharedFile, SharedRootDir, SharingRole } from "@filen/sdk-rs"
 
 // Every ingredient below is exhaustively tested as a function (directoryListing.test.ts, hiddenItems.test.ts,
 // preferences.test.ts). What is NOT tested anywhere is that the listing COMBINES them correctly: which
@@ -46,7 +46,6 @@ const {
 	}
 }))
 
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() } }))
 vi.mock("@tanstack/react-router", () => ({ useNavigate: () => navigate }))
@@ -195,10 +194,7 @@ import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { DirectoryListing } from "@/features/drive/components/directoryListing"
 import { NewDirectory } from "@/features/drive/components/newDirectory"
-
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import { testUuid } from "@/tests/support/uuid"
 
 function sharerRole(id: number, email: string): SharingRole {
 	return { Sharer: { email, id } }

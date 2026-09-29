@@ -3,12 +3,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { cleanup, createEvent, fireEvent, render, screen } from "@testing-library/react"
 import { createElement } from "react"
-import type { Dir, SharedDir, SharingRole, UuidStr } from "@filen/sdk-rs"
+import type { Dir, SharedDir, SharingRole } from "@filen/sdk-rs"
 import "@/lib/i18n"
 
 const { uploadDroppedFiles } = vi.hoisted(() => ({ uploadDroppedFiles: vi.fn() }))
 
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
 vi.mock("@/features/drive/hooks/useThumbnail", () => ({ useThumbnail: () => null }))
 vi.mock("@/features/drive/lib/uploadDrop", async importOriginal => ({
 	...(await importOriginal<typeof import("@/features/drive/lib/uploadDrop")>()),
@@ -18,10 +17,7 @@ vi.mock("@/features/drive/lib/uploadDrop", async importOriginal => ({
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { DriveRow } from "@/features/drive/components/driveRow"
-
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import { testUuid } from "@/tests/support/uuid"
 
 const OWNED = narrowItem({
 	uuid: testUuid("owned"),

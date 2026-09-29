@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { Note, NoteTag, UuidStr } from "@filen/sdk-rs"
+import type { Note } from "@filen/sdk-rs"
 import {
 	buildNotesGroupedRows,
 	groupNotesForView,
@@ -15,42 +15,8 @@ import {
 	type NotesSidebarRow
 } from "@/features/notes/components/notesSidebar.logic"
 import { deriveBlockedUsers, EMPTY_BLOCKED_USERS, DEFAULT_NOTE_TAGS_SORT_BY, type NoteTagsSortBy } from "@filen/shared"
-
-// UuidStr is a template-literal brand requiring at least 3 dashes — pad a short label, same as notesSort.test.ts.
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
-
-function mockTag(overrides: Partial<NoteTag> = {}): NoteTag {
-	return {
-		uuid: testUuid("tag"),
-		name: "tag",
-		favorite: false,
-		editedTimestamp: 0n,
-		createdTimestamp: 0n,
-		...overrides
-	}
-}
-
-function mockNote(overrides: Partial<Note> = {}): Note {
-	return {
-		uuid: testUuid("note"),
-		ownerId: 1n,
-		lastEditorId: 1n,
-		favorite: false,
-		pinned: false,
-		tags: [],
-		noteType: "text",
-		title: "title",
-		preview: "preview",
-		trash: false,
-		archive: false,
-		createdTimestamp: 0n,
-		editedTimestamp: 0n,
-		participants: [],
-		...overrides
-	}
-}
+import { testUuid } from "@/tests/support/uuid"
+import { mockNote, mockNoteTag } from "@/tests/fixtures/notes"
 
 // Helpers: the note-row / tag-row uuids in a flattened tags-view result.
 function noteRowUuids(rows: NotesSidebarRow[]): string[] {
@@ -63,8 +29,8 @@ function tagRowUuids(rows: NotesSidebarRow[]): string[] {
 
 describe("notesSidebar.logic — buildNotesByTag count math", () => {
 	it("groups notes by each inline tag, counting membership (a note under multiple tags counts in each)", () => {
-		const work = mockTag({ uuid: testUuid("work"), name: "work" })
-		const home = mockTag({ uuid: testUuid("home"), name: "home" })
+		const work = mockNoteTag({ uuid: testUuid("work"), name: "work" })
+		const home = mockNoteTag({ uuid: testUuid("home"), name: "home" })
 
 		const n1 = mockNote({ uuid: testUuid("n1"), tags: [work] })
 		const n2 = mockNote({ uuid: testUuid("n2"), tags: [work, home] })
@@ -79,7 +45,7 @@ describe("notesSidebar.logic — buildNotesByTag count math", () => {
 	})
 
 	it("collects the zero-tag notes into the untagged bucket", () => {
-		const work = mockTag({ uuid: testUuid("work"), name: "work" })
+		const work = mockNoteTag({ uuid: testUuid("work"), name: "work" })
 		const tagged = mockNote({ uuid: testUuid("n1"), tags: [work] })
 		const bare1 = mockNote({ uuid: testUuid("n2"), tags: [] })
 		const bare2 = mockNote({ uuid: testUuid("n3"), tags: [] })
@@ -90,7 +56,7 @@ describe("notesSidebar.logic — buildNotesByTag count math", () => {
 	})
 
 	it("omits the untagged key entirely when every note carries a tag", () => {
-		const work = mockTag({ uuid: testUuid("work"), name: "work" })
+		const work = mockNoteTag({ uuid: testUuid("work"), name: "work" })
 
 		const byTag = buildNotesByTag([mockNote({ uuid: testUuid("n1"), tags: [work] })])
 
@@ -99,8 +65,8 @@ describe("notesSidebar.logic — buildNotesByTag count math", () => {
 })
 
 describe("notesSidebar.logic — tags view filtering", () => {
-	const work = mockTag({ uuid: testUuid("work"), name: "work" })
-	const home = mockTag({ uuid: testUuid("home"), name: "home" })
+	const work = mockNoteTag({ uuid: testUuid("work"), name: "work" })
+	const home = mockNoteTag({ uuid: testUuid("home"), name: "home" })
 	const groceries = mockNote({ uuid: testUuid("g"), title: "groceries", preview: "milk", tags: [home] })
 	const standup = mockNote({ uuid: testUuid("s"), title: "standup", preview: "notes", tags: [work] })
 	const notesByTag = buildNotesByTag([groceries, standup])
@@ -132,11 +98,11 @@ describe("notesSidebar.logic — tags view filtering", () => {
 })
 
 describe("notesSidebar.logic — buildTagsViewRows flattening", () => {
-	const work = mockTag({ uuid: testUuid("work"), name: "work" })
-	const home = mockTag({ uuid: testUuid("home"), name: "home" })
+	const work = mockNoteTag({ uuid: testUuid("work"), name: "work" })
+	const home = mockNoteTag({ uuid: testUuid("home"), name: "home" })
 	const a = mockNote({ uuid: testUuid("a"), title: "alpha", tags: [work], editedTimestamp: 2n })
 	const b = mockNote({ uuid: testUuid("b"), title: "beta", tags: [work], editedTimestamp: 5n })
-	const c = mockNote({ uuid: testUuid("c"), title: "gamma", tags: [home] })
+	const c = mockNote({ uuid: testUuid("c"), title: "gamma", tags: [home], editedTimestamp: 0n })
 	const notesByTag = buildNotesByTag([a, b, c])
 
 	it("emits one tag row per tag with the total count and no member rows when collapsed", () => {
@@ -218,8 +184,8 @@ describe("notesSidebar.logic — buildTagsViewRows flattening", () => {
 
 describe("notesSidebar.logic — sidebarRowKey", () => {
 	it("scopes a note row's key by its owning tag so the same note under two tags never collides", () => {
-		const tagA = mockTag({ uuid: testUuid("ta") })
-		const tagB = mockTag({ uuid: testUuid("tb") })
+		const tagA = mockNoteTag({ uuid: testUuid("ta") })
+		const tagB = mockNoteTag({ uuid: testUuid("tb") })
 		const note = mockNote({ uuid: testUuid("n") })
 
 		const keyA = sidebarRowKey({ kind: "note", note, tagUuid: tagA.uuid })
@@ -232,7 +198,7 @@ describe("notesSidebar.logic — sidebarRowKey", () => {
 
 describe("notesSidebar.logic — selectableNotesFromRows (click-selection range)", () => {
 	it("extracts only note-kind rows, in order, tag headers excluded", () => {
-		const tag = mockTag({ uuid: testUuid("t") })
+		const tag = mockNoteTag({ uuid: testUuid("t") })
 		const noteA = mockNote({ uuid: testUuid("a") })
 		const noteB = mockNote({ uuid: testUuid("b") })
 		const rows: NotesSidebarRow[] = [
@@ -245,14 +211,14 @@ describe("notesSidebar.logic — selectableNotesFromRows (click-selection range)
 	})
 
 	it("returns an empty array when every row is a tag header", () => {
-		const tag = mockTag()
+		const tag = mockNoteTag()
 
 		expect(selectableNotesFromRows([{ kind: "tag", tag, noteCount: 0, expanded: false }])).toEqual([])
 	})
 
 	it("includes the same note once per tag group it appears under (notes view has one row per note)", () => {
-		const tagA = mockTag({ uuid: testUuid("ta") })
-		const tagB = mockTag({ uuid: testUuid("tb") })
+		const tagA = mockNoteTag({ uuid: testUuid("ta") })
+		const tagB = mockNoteTag({ uuid: testUuid("tb") })
 		const note = mockNote({ uuid: testUuid("n") })
 		const rows: NotesSidebarRow[] = [
 			{ kind: "note", note, tagUuid: tagA.uuid },
@@ -395,8 +361,8 @@ describe("notesSidebar.logic — selectableRowIndexByKey (click target resolutio
 		// A uuid-keyed map would collapse both rows for `note` onto whichever is built last (index 2),
 		// so clicking the FIRST occurrence would be misresolved onto the SECOND row's position.
 		// Row-identity keys (sidebarRowKey) keep them distinct.
-		const tagA = mockTag({ uuid: testUuid("ta") })
-		const tagB = mockTag({ uuid: testUuid("tb") })
+		const tagA = mockNoteTag({ uuid: testUuid("ta") })
+		const tagB = mockNoteTag({ uuid: testUuid("tb") })
 		const note = mockNote({ uuid: testUuid("n") })
 		const other = mockNote({ uuid: testUuid("o") })
 		const rows: NotesSidebarRow[] = [
@@ -413,7 +379,7 @@ describe("notesSidebar.logic — selectableRowIndexByKey (click target resolutio
 	})
 
 	it("skips tag header rows when assigning positions, matching selectableNotesFromRows' own indices", () => {
-		const tag = mockTag({ uuid: testUuid("t") })
+		const tag = mockNoteTag({ uuid: testUuid("t") })
 		const noteA = mockNote({ uuid: testUuid("a") })
 		const noteB = mockNote({ uuid: testUuid("b") })
 		const rows: NotesSidebarRow[] = [
@@ -462,8 +428,8 @@ describe("filterNotesByBlockedOwner", () => {
 })
 
 describe("notesSidebar.logic — untagged virtual row", () => {
-	const work = mockTag({ uuid: testUuid("work"), name: "work" })
-	const zebra = mockTag({ uuid: testUuid("zebra"), name: "zebra" })
+	const work = mockNoteTag({ uuid: testUuid("work"), name: "work" })
+	const zebra = mockNoteTag({ uuid: testUuid("zebra"), name: "zebra" })
 	const tagged = mockNote({ uuid: testUuid("a"), title: "alpha", tags: [work], editedTimestamp: 9n })
 	const zTagged = mockNote({ uuid: testUuid("z"), title: "zulu", tags: [zebra], editedTimestamp: 8n })
 	const bare = mockNote({ uuid: testUuid("b"), title: "beta", tags: [], editedTimestamp: 2n })
@@ -521,7 +487,7 @@ describe("notesSidebar.logic — untagged virtual row", () => {
 	})
 
 	it("a real tag literally named Untagged keeps its own uuid and is never collapsed into the virtual row", () => {
-		const impostor = mockTag({ uuid: testUuid("impostor"), name: "Untagged" })
+		const impostor = mockNoteTag({ uuid: testUuid("impostor"), name: "Untagged" })
 		const note = mockNote({ uuid: testUuid("i"), tags: [impostor] })
 
 		const rows = buildTagsViewRows({

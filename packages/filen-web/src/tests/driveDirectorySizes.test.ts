@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
-import type { Dir, File, UuidStr, DirSizeResponse } from "@filen/sdk-rs"
+import type { Dir, File, DirSizeResponse } from "@filen/sdk-rs"
 import { narrowItem, isDirectoryItem, type DriveItem } from "@/features/drive/lib/item"
 import { directorySizeQueryKey } from "@/features/drive/queries/drive"
 import {
@@ -10,22 +10,16 @@ import {
 	isDirectorySizeSuccessEvent,
 	type DirectorySizeCacheEvent
 } from "@/features/drive/hooks/useDriveDirectorySizes.logic"
+import { testUuid } from "@/tests/support/uuid"
 
-// queries/drive pulls in the SDK worker (`?worker`) and the real query client (sqlite persister) —
-// neither resolves under node vitest, so mock the module boundary. The logic under test takes a
-// QueryClient by PARAMETER (see collectDirectorySizes) and never touches sdkApi, so bare stubs suffice.
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
+// queries/drive pulls in the real query client (sqlite persister), which does not resolve under node
+// vitest. The logic under test takes a QueryClient by PARAMETER (see collectDirectorySizes), so a bare
+// stub suffices.
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
 beforeEach(() => {
 	vi.clearAllMocks()
 })
-
-// UuidStr is a template-literal brand requiring at least 3 dashes (see @filen/sdk-rs) — pad a short
-// readable label into a satisfying shape, mirroring drive.test.ts's own uuid fixtures.
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
 
 function mockDir(overrides: Partial<Dir> = {}): Dir {
 	return {

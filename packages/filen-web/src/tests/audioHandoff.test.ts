@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest"
-import type { File, UuidStr } from "@filen/sdk-rs"
+import type { File } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { deriveAudioHandoff, isAudioItem } from "@/features/audio/lib/handoff"
+import { testUuid } from "@/tests/support/uuid"
 
 // Pure derivation of the drive → audio-engine handoff: given a listing snapshot and the opened item,
 // produce the folder's audio-sibling queue (listing order preserved, positioned at the opened track) or
@@ -9,10 +10,6 @@ import { deriveAudioHandoff, isAudioItem } from "@/features/audio/lib/handoff"
 // preview.logic.test.ts's own mockFile/fileNamed builders — an undecryptable file carries an
 // `{type:"encrypted"}` meta, which narrowItem turns into decryptedMeta=null (no name/mime), so it can
 // never classify as audio (that is exactly why such a track is never enqueued).
-
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
 
 function fileNamed(name: string, options: { mime?: string; undecryptable?: boolean } = {}): DriveItem {
 	const { mime = "application/octet-stream", undecryptable = false } = options

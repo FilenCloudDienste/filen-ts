@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient, onlineManager } from "@tanstack/react-query"
 import { type } from "arktype"
 import type { Note } from "@filen/sdk-rs"
+import { mockNote } from "@/tests/fixtures/notes"
 
 // The real sdk client imports a Vite `?worker`, unresolvable under node vitest — mock it to the two
 // note ops the outbox calls (setNoteContent push + getNoteContent conflict peek / reconcile).
@@ -61,24 +62,7 @@ import { isOwnNotePush } from "@/features/notes/lib/pushEchoes"
 import { forgetTabEditors, seedTabEditor, tabEditorBaseHash, tabEditorChanged, tabEditorDirty } from "@/features/notes/lib/tabEditors"
 
 function makeNote(uuid: string, overrides: Partial<Note> = {}): Note {
-	const note: Note = {
-		uuid: uuid as Note["uuid"],
-		ownerId: 1n,
-		lastEditorId: 1n,
-		favorite: false,
-		pinned: false,
-		tags: [],
-		noteType: "text",
-		trash: false,
-		archive: false,
-		createdTimestamp: 0n,
-		editedTimestamp: 0n,
-		participants: [],
-		title: `note-${uuid}`,
-		...overrides
-	}
-
-	return note
+	return mockNote({ uuid: uuid as Note["uuid"], title: `note-${uuid}`, ...overrides })
 }
 
 function sdkError(kind: string): { species: "sdk"; kind: string; label: string; message: string } {

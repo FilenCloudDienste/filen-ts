@@ -7,7 +7,6 @@ import type { StorageApi } from "@/workers/db.worker"
 const mocks = vi.hoisted(() => ({ expose: vi.fn() }))
 
 vi.mock("comlink", () => ({ expose: mocks.expose }))
-vi.mock("@/lib/log", () => ({ log: { error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() } }))
 vi.mock("@sqlite.org/sqlite-wasm", async importOriginal => {
 	const actual = await importOriginal<typeof import("@sqlite.org/sqlite-wasm")>()
 

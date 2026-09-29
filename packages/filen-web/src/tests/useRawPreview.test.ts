@@ -4,6 +4,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest"
 import { createElement, type ReactNode } from "react"
 import { act, renderHook, waitFor } from "@testing-library/react"
 import type { LinkedFile } from "@filen/sdk-rs"
+import { linkedFileItem } from "@/tests/fixtures/sdk"
 
 const preview = { type: "noPreview" } as const
 const fetchRawPreview = vi.fn(() => Promise.resolve(preview))
@@ -17,25 +18,10 @@ vi.mock("@/lib/sdk/client", () => ({
 
 const { useRawPreview } = await import("@/features/preview/hooks/useRawPreview")
 const { PreviewAccessModeProvider } = await import("@/features/preview/lib/accessMode")
-const { linkedFileIntoDriveItem } = await import("@/features/drive/lib/item")
 const { clearPreviewCache } = await import("@/features/preview/lib/previewCache")
 
 function makeItem(uuid: LinkedFile["uuid"], name: string) {
-	return linkedFileIntoDriveItem({
-		uuid,
-		name: { Decrypted: name },
-		mime: { Decrypted: "image/x-nikon-nef" },
-		size: 90_000_000n,
-		chunks: 90n,
-		region: "",
-		bucket: "",
-		version: 2,
-		timestamp: 0n,
-		fileKey: "k",
-		downloadable: true,
-		linkedTag: true,
-		canMakeThumbnail: true
-	})
+	return linkedFileItem(name, { uuid, mime: { Decrypted: "image/x-nikon-nef" }, size: 90_000_000n, chunks: 90n, canMakeThumbnail: true })
 }
 
 const item = makeItem("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", "shot.NEF")

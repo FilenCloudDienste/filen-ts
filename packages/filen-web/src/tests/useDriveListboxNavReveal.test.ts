@@ -3,11 +3,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { renderHook } from "@testing-library/react"
 import { QueryClient } from "@tanstack/react-query"
-import type { Dir, UuidStr } from "@filen/sdk-rs"
+import type { Dir } from "@filen/sdk-rs"
 
-// The DriveVirtualizer type below is only reachable through a module whose graph pulls in the Vite
-// `?worker` client, unresolvable under vitest — mirrors itemMenu.test.ts's own mock boundary.
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
@@ -16,14 +13,11 @@ import { useDriveListboxNav } from "@/features/drive/hooks/useDriveListboxNav"
 // Whole-statement `import type` (not the inline keyword — see lib/cache.ts): the inline form doesn't
 // reliably elide here, and useDriveVirtualizer's own module graph reaches the Vite `?worker` client.
 import type { DriveVirtualizer } from "@/features/drive/hooks/useDriveVirtualizer"
+import { testUuid } from "@/tests/support/uuid"
 
 // The reveal effect is the most intricate piece of the "Open containing directory" flow: it has to
 // fire AFTER the [variant, splat] navigation reset (which clears the selection in the same commit),
 // exactly once, only for its own listing, and re-arm when the row lands late.
-
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
 
 function item(label: string): DriveItem {
 	const dir: Dir = {

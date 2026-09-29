@@ -3,7 +3,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { act, renderHook } from "@testing-library/react"
 import { QueryClient } from "@tanstack/react-query"
-import type { File, FileMeta, UuidStr } from "@filen/sdk-rs"
+import type { File, FileMeta } from "@filen/sdk-rs"
+import { testUuid } from "@/tests/support/uuid"
 
 const { toast, runPreviewSave, nameExistsInDirectory } = vi.hoisted(() => ({
 	toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }),
@@ -34,10 +35,6 @@ const { driveListingQueryOptions } = await import("@/features/drive/queries/driv
 const { clearPreviewCache, getPreviewBytes } = await import("@/features/preview/lib/previewCache")
 
 type DriveItem = ReturnType<typeof narrowItem>
-
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
 
 function meta(name: string): FileMeta {
 	return { type: "decoded", data: { name, mime: "text/plain", modified: 0n, size: 1n, key: "k", version: 2 } }

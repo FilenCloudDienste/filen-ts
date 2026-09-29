@@ -3,11 +3,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, renderHook, waitFor } from "@testing-library/react"
 import { focusManager } from "@tanstack/react-query"
-import type { Chat, ChatMessage, UuidStr } from "@filen/sdk-rs"
-
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import type { Chat, ChatMessage } from "@filen/sdk-rs"
 
 const { listChats, listMessagesBefore, sendChatMessage } = vi.hoisted(() => ({
 	listChats: vi.fn<() => Promise<Chat[]>>(),
@@ -53,6 +49,7 @@ import { Sync } from "@/features/chats/lib/sync"
 import { buildOptimisticMessage } from "@/features/chats/lib/sync.logic"
 import { useChatsInflightStore } from "@/features/chats/store/useChatsInflight"
 import { socketAuthenticated, socketDropped } from "@/lib/sdk/socketSession"
+import { testUuid } from "@/tests/support/uuid"
 
 const USER_ID = 7n
 

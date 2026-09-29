@@ -3,7 +3,15 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { Page } from "@playwright/test"
 import { test as setup, expect, FIXTURES_DIR, FIXTURES_FILE, type FixtureManifest } from "../fixtures"
-import { createDirectoryViaDialog, descendInto, waitForListingSettled } from "../helpers/listing"
+import {
+	breadcrumb,
+	createDirectoryViaDialog,
+	descendInto,
+	directoryListbox,
+	fileInput,
+	setTallListingViewport,
+	waitForListingSettled
+} from "../helpers/listing"
 import { FIXTURE_FILES, type FixtureFileName, type FixtureScenario } from "../helpers/fixtures"
 import {
 	BMP_BYTES,
@@ -131,7 +139,7 @@ async function uploadScenarioFiles(page: Page, scenario: FixtureScenario, workDi
 		throw new Error(`fixture scenario "${scenario}" mixes on-disk and in-memory payloads, which setInputFiles cannot take`)
 	}
 
-	const input = page.getByRole("main").locator('input[type="file"]').first()
+	const input = fileInput(page)
 
 	if (onDisk.length > 0) {
 		await input.setInputFiles(
@@ -150,7 +158,7 @@ async function uploadScenarioFiles(page: Page, scenario: FixtureScenario, workDi
 	// Every row, not just the last: uploads run concurrently inside the SDK, so arrival order says
 	// nothing, and a scenario that lands three of its four files is exactly the half-built state a
 	// later spec would otherwise report as its own mysterious failure.
-	const listbox = page.getByRole("listbox", { name: "Directory contents" })
+	const listbox = directoryListbox(page)
 
 	for (const name of names) {
 		// What is LEFT of the shared budget, never a fresh figure per file or per scenario — a fresh one
@@ -209,11 +217,7 @@ async function createFixtureRoot(page: Page): Promise<FixtureManifest> {
 			// entirely and fail on attempt 1, taking every chromium lane with it (Playwright does not
 			// schedule a project whose dependency failed).
 			await page.goto("/drive")
-
-			// Same virtualization workaround as enterScratchDirectory/enterFixtureDirectory: a tall
-			// viewport makes the virtualizer render every row in one pass, so the descents below always
-			// find their row.
-			await page.setViewportSize({ width: 1280, height: 8000 })
+			await setTallListingViewport(page)
 			await waitForListingSettled(page)
 
 			await createDirectoryViaDialog(page, manifest.fixtureRoot)
@@ -234,13 +238,9 @@ async function createFixtureRoot(page: Page): Promise<FixtureManifest> {
 	)
 }
 
-setup("build the shared read-only fixture tree", async ({ page, injectedSession }) => {
-	// Same convention as cleanup.setup.ts: proving the session actually came back beats discovering it
-	// didn't as an unexplained listing timeout several steps down.
-	expect(injectedSession.length).toBeGreaterThan(0)
-
+setup("build the shared read-only fixture tree", async ({ page }) => {
 	const manifest = await createFixtureRoot(page)
-	const listbox = page.getByRole("listbox", { name: "Directory contents" })
+	const listbox = directoryListbox(page)
 
 	// Persisted the moment the root EXISTS, before anything is uploaded into it — a setup that dies
 	// half-built still leaves the teardown something to trash. (Belt and braces: the name starts "e2e-",
@@ -251,10 +251,7 @@ setup("build the shared read-only fixture tree", async ({ page, injectedSession 
 	await descendInto(page, listbox, manifest.fixtureRoot)
 
 	const workDir = mkdtempSync(join(tmpdir(), "filen-e2e-fixtures-"))
-	const breadcrumbHome = page.getByRole("navigation", { name: "Breadcrumb" }).getByRole("link", {
-		name: manifest.fixtureRoot,
-		exact: true
-	})
+	const breadcrumbHome = breadcrumb(page).getByRole("link", { name: manifest.fixtureRoot, exact: true })
 
 	// One deadline for the WHOLE build, not one per scenario: a per-scenario budget only moves the same
 	// multiplication down a level. Started once the root exists, so the create loop's retries above are

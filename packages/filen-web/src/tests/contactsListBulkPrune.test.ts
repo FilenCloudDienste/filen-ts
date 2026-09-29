@@ -20,15 +20,12 @@ const { acceptRequest, removeContact, useContactsListSelection, pruneSelection, 
 	toastError: vi.fn()
 }))
 
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 vi.mock("sonner", () => ({ toast: { success: toastSuccess, error: toastError, warning: vi.fn() } }))
 // useDialogHost closes on navigation, so it reads the current href off the router.
 vi.mock("@tanstack/react-router", () => ({ useNavigate: () => vi.fn(), useRouterState: () => "/contacts" }))
 vi.mock("@/lib/keymap/useAction", () => ({ useAction: vi.fn() }))
 vi.mock("@/lib/useIsOnline", () => ({ useIsOnline: () => true }))
-// The bulk bar registers with the toast-clearance store, which needs a ResizeObserver jsdom lacks.
-vi.mock("@/lib/toastClearance", () => ({ toastObstructionRef: () => undefined }))
 
 // The selection hook has its own test file; here it is a stand-in so a multi-row selection can be set up
 // without driving clicks, and so the prune the component performs is directly observable.

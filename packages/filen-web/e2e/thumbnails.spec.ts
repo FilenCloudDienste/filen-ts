@@ -1,6 +1,6 @@
 import { test, expect } from "./fixtures"
 import { bootTo, waitForListingSettled } from "./helpers/listing"
-import { enterFixtureDirectory, FIXTURE_FILES } from "./helpers/fixtures"
+import { FIXTURE_FILES, openFixtureRows } from "./helpers/fixtures"
 import { trackCspViolations } from "./helpers/csp"
 import { waitForE2eHooks } from "./helpers/e2eHooks"
 import { waitForSwReady } from "./helpers/sw"
@@ -17,20 +17,20 @@ import { FIREFOX_SERVICE_WORKERS_BLOCKED } from "./helpers/firefox"
 // a second, fresh document mid-test: the proof that the OPFS cache survives a real cold boot, not just
 // a component remount.
 test("png, bmp and svg files render real thumbnails in both listing views, the text sibling keeps its icon, and a fresh reload repaints from the OPFS cache without regenerating", async ({
-	page,
-	injectedSession
+	page
 }) => {
-	expect(injectedSession.length).toBeGreaterThan(0)
-
-	// The png/bmp/svg that must thumbnail and the txt that must not — provisioned once per run by the
-	// fixtures-setup project, in that exact set (helpers/fixtures.ts).
-	const [namePng, nameBmp, nameTxt, nameSvg] = FIXTURE_FILES.thumbnails
+	const [namePng] = FIXTURE_FILES.thumbnails
 
 	const cspViolations = trackCspViolations(page)
 
 	await bootTo(page)
 
-	const { listbox } = await enterFixtureDirectory(page, "thumbnails")
+	// The png/bmp/svg that must thumbnail and the txt that must not — provisioned once per run by the
+	// fixtures-setup project, in that exact set (helpers/fixtures.ts).
+	const {
+		listbox,
+		rows: [rowPng, rowBmp, rowTxt, rowSvg]
+	} = await openFixtureRows(page, "thumbnails")
 
 	// The scenario directory's own url and uuid, off the URL the descent above just navigated to (mirrors
 	// drive.spec.ts's own subdirectory-navigation assertion) — the uuid to probe its thumbnail's on-disk
@@ -44,15 +44,6 @@ test("png, bmp and svg files render real thumbnails in both listing views, the t
 	if (fixtureUuid === undefined) {
 		throw new Error("fixture directory did not navigate to a uuid'd url")
 	}
-
-	const rowPng = listbox.getByRole("option", { name: namePng })
-	const rowBmp = listbox.getByRole("option", { name: nameBmp })
-	const rowTxt = listbox.getByRole("option", { name: nameTxt })
-	const rowSvg = listbox.getByRole("option", { name: nameSvg })
-	await expect(rowPng).toBeVisible({ timeout: 45_000 })
-	await expect(rowBmp).toBeVisible({ timeout: 45_000 })
-	await expect(rowTxt).toBeVisible({ timeout: 45_000 })
-	await expect(rowSvg).toBeVisible({ timeout: 45_000 })
 
 	// The PNG's icon slot swaps to a real <img> once the SDK's decode resolves — a generous timeout
 	// covers the real range reads + wasm decode behind it. alt="" makes this element decorative (no
@@ -148,10 +139,8 @@ test("png, bmp and svg files render real thumbnails in both listing views, the t
 // thumbnail silently fails. Nothing covered it, which is how exactly that state shipped: the worker was
 // registered only in production builds, so this path could not run in dev at all and the failure showed
 // up as a missing image rather than an error. Asserting the rendered blob is what makes it visible.
-test("a video row renders a real thumbnail off the service worker's stream", async ({ page, injectedSession, browserName }) => {
+test("a video row renders a real thumbnail off the service worker's stream", async ({ page, browserName }) => {
 	test.skip(browserName === "firefox", FIREFOX_SERVICE_WORKERS_BLOCKED)
-	expect(injectedSession.length).toBeGreaterThan(0)
-
 	const cspViolations = trackCspViolations(page)
 
 	await bootTo(page)
@@ -161,11 +150,9 @@ test("a video row renders a real thumbnail off the service worker's stream", asy
 	// unclaimed page and the row simply never gets an img, reported as a missing thumbnail.
 	await waitForSwReady(page)
 
-	const { listbox } = await enterFixtureDirectory(page, "preview-media")
-	const [, nameMp4] = FIXTURE_FILES["preview-media"]
-	const videoRow = listbox.getByRole("option", { name: nameMp4 })
-
-	await expect(videoRow).toBeVisible({ timeout: 30_000 })
+	const {
+		rows: [, videoRow]
+	} = await openFixtureRows(page, "preview-media")
 
 	// Generous because this is a real streamed decode, not a cache read: the worker serves Range
 	// requests for the clip, the page seeks it and paints one frame. The blob: src is the load-bearing

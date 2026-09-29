@@ -1,12 +1,16 @@
-import type { Page } from "@playwright/test"
+import type { Locator, Page } from "@playwright/test"
 import { test, expect } from "./fixtures"
+import { html5DragCopy } from "./helpers/dnd"
+import { boxOf } from "./helpers/geometry"
 import {
 	bootTo,
+	breadcrumb,
 	createDirectoryViaDialog,
 	descendInto,
 	enterScratchDirectory,
 	openTransfers,
 	trashScratchDirectory,
+	uploadFiles,
 	waitForListingSettled,
 	LIVE_WRITE_TIMEOUT_MS
 } from "./helpers/listing"
@@ -21,73 +25,13 @@ async function openSubmenu(page: Page, name: string): Promise<void> {
 	await page.getByRole("menuitem", { name, exact: true }).last().click()
 }
 
-async function openRowMenu(page: Page, listbox: ReturnType<Page["getByRole"]>, rowName: string): Promise<void> {
+async function openRowMenu(page: Page, listbox: Locator, rowName: string): Promise<void> {
 	await listbox.getByRole("option", { name: rowName }).getByRole("button", { name: "More actions", exact: true }).click()
 	await expect(page.getByRole("menu").first()).toBeVisible()
 }
 
 async function uploadTextFile(page: Page, name: string): Promise<void> {
-	await page
-		.getByRole("main")
-		.locator('input[type="file"]')
-		.first()
-		.setInputFiles({ name, mimeType: "text/plain", buffer: Buffer.from(`copy probe ${name}`) })
-}
-
-// Drives an HTML5 drag with the copy modifier held, the way drive-dnd-move.spec drives a plain one:
-// one shared DataTransfer through dragstart → dragenter → dragover → drop → dragend, both endpoints
-// resolved in the same turn. The modifier is the page's own copy key (Option on macOS, else Ctrl), and
-// the target has to accept the drop as a copy (dragover cancelled, dropEffect "copy").
-async function html5DragCopy(page: Page, source: { selector: string; text: string }, target: { selector: string; text: string }) {
-	const contract = await page.evaluate(
-		([src, tgt]) => {
-			function resolve(endpoint: { selector: string; text: string }): Element {
-				const match = Array.from(document.querySelectorAll(endpoint.selector)).find(element =>
-					element.textContent.includes(endpoint.text)
-				)
-
-				if (match === undefined) {
-					throw new Error(`no ${endpoint.selector} element contains "${endpoint.text}"`)
-				}
-
-				return match
-			}
-
-			const mac = /mac/i.test(navigator.userAgent) && !/iphone|ipad|ipod/i.test(navigator.userAgent)
-			const srcElement = resolve(src)
-			const tgtElement = resolve(tgt)
-			const dataTransfer = new DataTransfer()
-			const fire = (element: Element, type: string, copy: boolean): boolean =>
-				element.dispatchEvent(
-					new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer, altKey: copy && mac, ctrlKey: copy && !mac })
-				)
-
-			// A synthetic transfer outside a real drag session drops what the handler writes to its drop
-			// effect, so the write itself is recorded.
-			let dropEffect = "unset"
-
-			Object.defineProperty(dataTransfer, "dropEffect", {
-				get: () => dropEffect,
-				set: (value: string) => {
-					dropEffect = value
-				}
-			})
-
-			fire(srcElement, "dragstart", false)
-			fire(tgtElement, "dragenter", true)
-
-			const dropAllowed = !fire(tgtElement, "dragover", true)
-
-			fire(tgtElement, "drop", true)
-			fire(srcElement, "dragend", true)
-
-			return { dropAllowed, dropEffect }
-		},
-		[source, target] as const
-	)
-
-	expect(contract.dropAllowed).toBe(true)
-	expect(contract.dropEffect).toBe("copy")
+	await uploadFiles(page, [{ name, mimeType: "text/plain", buffer: Buffer.from(`copy probe ${name}`) }])
 }
 
 // A finished copy card stays until hidden, and the teardown's trash waits for toasts to clear; a test
@@ -110,12 +54,7 @@ async function hideCopyCards(page: Page): Promise<void> {
 test.describe.configure({ mode: "serial" })
 
 test.describe("drive copy", () => {
-	test("copies a file into another directory through the item menu's tree, leaving the source in place", async ({
-		page,
-		injectedSession
-	}) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
+	test("copies a file into another directory through the item menu's tree, leaving the source in place", async ({ page }) => {
 		const runId = crypto.randomUUID()
 		const scratchName = `e2e-copy-${runId}`
 		const targetDirName = `target-${runId}`
@@ -167,9 +106,7 @@ test.describe("drive copy", () => {
 		}
 	})
 
-	test("copies a selection beside itself through the destination picker, keeping both names", async ({ page, injectedSession }) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
+	test("copies a selection beside itself through the destination picker, keeping both names", async ({ page }) => {
 		const runId = crypto.randomUUID()
 		const scratchName = `e2e-copy-${runId}`
 		const firstName = `first-${runId}.txt`
@@ -211,9 +148,7 @@ test.describe("drive copy", () => {
 		}
 	})
 
-	test("copies with mod+c and cuts with mod+x, pasting by key and from the empty-space menu", async ({ page, injectedSession }) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
+	test("copies with mod+c and cuts with mod+x, pasting by key and from the empty-space menu", async ({ page }) => {
 		const runId = crypto.randomUUID()
 		const scratchName = `e2e-copy-${runId}`
 		const subName = `sub-${runId}`
@@ -228,11 +163,7 @@ test.describe("drive copy", () => {
 			const { listbox } = await enterScratchDirectory(page, scratchName)
 
 			const openEmptySpaceMenu = async (): Promise<void> => {
-				const box = await listbox.boundingBox()
-
-				if (box === null) {
-					throw new Error("the listing has no box")
-				}
+				const box = await boxOf(listbox)
 
 				await listbox.click({ button: "right", position: { x: 16, y: box.height - 16 } })
 			}
@@ -271,9 +202,9 @@ test.describe("drive copy", () => {
 			await page.keyboard.press("Escape")
 
 			// Cut in the parent, paste into the subdirectory through its empty-space menu: a move.
-			const breadcrumb = page.getByRole("navigation", { name: "Breadcrumb" })
+			const crumbs = breadcrumb(page)
 
-			await breadcrumb.getByRole("link", { name: scratchName, exact: true }).click()
+			await crumbs.getByRole("link", { name: scratchName, exact: true }).click()
 			await expect(listbox.getByRole("option", { name: movedName })).toBeVisible()
 			await listbox.getByRole("option", { name: movedName }).click()
 			await page.keyboard.press(`${mod}+x`)
@@ -289,8 +220,8 @@ test.describe("drive copy", () => {
 
 			// Gated on the current crumb before asserting: keptName is in both directories, and the moved row's
 			// absence would also hold for the moment between the two listings.
-			await breadcrumb.getByRole("link", { name: scratchName, exact: true }).click()
-			await expect(breadcrumb.locator('[aria-current="page"]')).toHaveText(scratchName)
+			await crumbs.getByRole("link", { name: scratchName, exact: true }).click()
+			await expect(crumbs.locator('[aria-current="page"]')).toHaveText(scratchName)
 			await waitForListingSettled(page)
 			await expect(listbox.getByRole("option", { name: keptName })).toBeVisible()
 			await expect(listbox.getByRole("option", { name: movedName })).toHaveCount(0)
@@ -300,9 +231,7 @@ test.describe("drive copy", () => {
 		}
 	})
 
-	test("copies by dragging with the copy modifier held, onto a row and onto a breadcrumb", async ({ page, injectedSession }) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
+	test("copies by dragging with the copy modifier held, onto a row and onto a breadcrumb", async ({ page }) => {
 		const runId = crypto.randomUUID()
 		const scratchName = `e2e-copy-${runId}`
 		const subName = `sub-${runId}`
@@ -335,7 +264,7 @@ test.describe("drive copy", () => {
 			await page.getByRole("button", { name: "Hide copy progress" }).click()
 			await expect(listbox.getByRole("option", { name: fileName })).toBeVisible()
 
-			await page.getByRole("navigation", { name: "Breadcrumb" }).getByRole("link", { name: scratchName, exact: true }).click()
+			await breadcrumb(page).getByRole("link", { name: scratchName, exact: true }).click()
 			await expect(listbox.getByRole("option", { name: `dragged-${runId}` })).toHaveCount(2, { timeout: LIVE_WRITE_TIMEOUT_MS })
 		} finally {
 			await hideCopyCards(page)

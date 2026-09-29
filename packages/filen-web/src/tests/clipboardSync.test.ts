@@ -11,8 +11,7 @@ import type {
 	SharedRootDirsAndFiles,
 	SharingRole,
 	SocketEvent,
-	UserInfo,
-	UuidStr
+	UserInfo
 } from "@filen/sdk-rs"
 import type { ListDirectoryTarget } from "@/workers/sdk.worker"
 
@@ -67,7 +66,6 @@ vi.mock("@/lib/sdk/client", () => ({
 	}
 }))
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
-vi.mock("@/lib/log", () => ({ log: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() } }))
 vi.mock("@/features/drive/lib/dnd", () => ({ performMove }))
 vi.mock("@/features/transfers/lib/copyToast", () => ({ startCopyWithCard }))
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: toastError, warning: toastWarning } }))
@@ -89,10 +87,7 @@ import { followClipboardItem } from "@/features/drive/lib/clipboardSync"
 import { recheckClipboard } from "@/features/drive/lib/clipboardRecheck"
 import { copyToClipboard, cutToClipboard, pasteClipboard } from "@/features/drive/lib/clipboard"
 import { isClipboardCurrent, useDriveClipboardStore } from "@/features/drive/store/useDriveClipboardStore"
-
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import { testUuid } from "@/tests/support/uuid"
 
 const HOME = testUuid("home")
 const ELSEWHERE = testUuid("elsewhere")

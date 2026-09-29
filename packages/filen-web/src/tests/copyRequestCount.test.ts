@@ -24,8 +24,6 @@ vi.mock("@/lib/sdk/client", () => ({ sdkApi: { listDirectory, copyItems, getUser
 
 vi.mock("@/queries/client", async () => ({ queryClient: (await import("@/tests/testQueryClient")).createTestQueryClient() }))
 
-vi.mock("@/lib/log", () => ({ log: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() } }))
-
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), custom: vi.fn(), dismiss: vi.fn() } }))
 
 import { queryClient } from "@/queries/client"
@@ -38,10 +36,7 @@ import { startCopy } from "@/features/drive/lib/copy"
 import { getCopyJob } from "@/features/transfers/store/useCopyJobsStore"
 import { useTransfersStore } from "@/features/transfers/store/useTransfersStore"
 import { socketAuthenticated } from "@/lib/sdk/socketSession"
-
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import { testUuid } from "@/tests/support/uuid"
 
 const ROOT = testUuid("root")
 const TOP = testUuid("top")

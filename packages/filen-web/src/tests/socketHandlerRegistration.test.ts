@@ -24,11 +24,9 @@ vi.mock("@/lib/sdk/socket", () => ({
 	decryptedOrSkip: vi.fn()
 }))
 
-// Every domain's handler graph reaches the sdk client (a Vite `?worker`, unresolvable under node) and
-// the shared query client — the same mock boundary the per-domain handler tests use.
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
+// Every domain's handler graph reaches the shared query client — the same mock boundary the per-domain
+// handler tests use.
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
-vi.mock("@/lib/log", () => ({ log: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() } }))
 vi.mock("@/features/shell/lib/performLogout", () => ({ performLogout: vi.fn(() => Promise.resolve(true)) }))
 
 import {

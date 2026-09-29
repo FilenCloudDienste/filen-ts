@@ -15,11 +15,12 @@ const PORT = 4173
 const BASE_URL = `http://localhost:${String(PORT)}`
 
 // Lane membership is decided by ONE question: does the spec take the account-wide `drive-write` lock?
-// (Verified per file by grepping for enterScratchDirectory / createDirectoryViaDialog / setInputFiles /
-// createTestFile / trashScratchDirectory, then reading each hit.) That lock is a SERVER-SIDE LEASE with
-// a client keep-alive — the wasm carries `v3/user/lock`, the resource name `drive-write`, and
-// `Refreshed lock` — and the SDK's write path waits for it with unbounded patience and no error (it
-// polls ~8640 times on a fibonacci backoff capped at 30s, which is forever in any practical sense).
+// (Verified per file by grepping for withScratchDirectory / enterScratchDirectory / uploadFiles /
+// createDirectoryViaDialog / setInputFiles / createTestFile / trashScratchDirectory, then reading each
+// hit.) That lock is a SERVER-SIDE LEASE with a client keep-alive — the wasm carries `v3/user/lock`,
+// the resource name `drive-write`, and `Refreshed lock` — and the SDK's write path waits for it with
+// unbounded patience and no error (it polls ~8640 times on a fibonacci backoff capped at 30s, which is
+// forever in any practical sense).
 // Two consequences shape everything below: a browser context killed mid-write stops refreshing its
 // lease but does NOT release it, so it blocks every other client until the TTL expires; and one such
 // orphaned lease cascades, because the next test to want the lock also hangs, also gets killed, and

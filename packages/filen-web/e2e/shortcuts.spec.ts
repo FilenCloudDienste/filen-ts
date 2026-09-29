@@ -1,6 +1,7 @@
+import type { Page } from "@playwright/test"
 import { test, expect } from "./fixtures"
 import { waitForE2eHooks } from "./helpers/e2eHooks"
-import { gotoSettings } from "./helpers/settings"
+import { gotoSettings, openSettingsSection } from "./helpers/settings"
 import { isDark, pressUntilTheme } from "./helpers/theme"
 
 // The browser is the only real proof that the shortcuts catalog is complete WITHOUT having visited
@@ -13,19 +14,16 @@ test.describe("keyboard shortcuts", () => {
 	// Pin the color scheme so the "system" default resolves deterministically to light.
 	test.use({ colorScheme: "light" })
 
-	async function gotoKeyboardSettings(page: Parameters<typeof gotoSettings>[0]): Promise<void> {
+	async function gotoKeyboardSettings(page: Page): Promise<void> {
 		await gotoSettings(page)
-		await page.getByRole("link", { name: "Keyboard", exact: true }).click()
-		await page.waitForURL(/\/settings\/keyboard$/)
+		await openSettingsSection(page, "Keyboard")
 	}
 
-	function settingsRow(page: Parameters<typeof gotoSettings>[0]) {
+	function settingsRow(page: Page) {
 		return page.locator('li[data-action-id="app.openSettings"]')
 	}
 
-	test("the overlay opens on its combo and lists groups from route chunks that were never loaded", async ({ page, injectedSession }) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
+	test("the overlay opens on its combo and lists groups from route chunks that were never loaded", async ({ page }) => {
 		await gotoSettings(page)
 		await page.keyboard.press("Shift+Slash")
 
@@ -52,9 +50,7 @@ test.describe("keyboard shortcuts", () => {
 		await expect(dialog).toBeHidden()
 	})
 
-	test("Settings -> Keyboard renders the same catalog", async ({ page, injectedSession }) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
+	test("Settings -> Keyboard renders the same catalog", async ({ page }) => {
 		await gotoKeyboardSettings(page)
 
 		await expect(page.getByRole("heading", { name: /^photos$/i })).toBeVisible()
@@ -62,9 +58,7 @@ test.describe("keyboard shortcuts", () => {
 		await expect(settingsRow(page)).toContainText("Not set")
 	})
 
-	test("recording suppresses every live hotkey and refuses a combo another action already holds", async ({ page, injectedSession }) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
+	test("recording suppresses every live hotkey and refuses a combo another action already holds", async ({ page }) => {
 		await gotoKeyboardSettings(page)
 
 		await expect.poll(() => isDark(page)).toBe(false)
@@ -87,9 +81,7 @@ test.describe("keyboard shortcuts", () => {
 		expect(await page.evaluate(() => window.__filenE2E.comboFor("app.openSettings"))).toBe("")
 	})
 
-	test("Escape cancels a recording without dismissing or navigating anything", async ({ page, injectedSession }) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
+	test("Escape cancels a recording without dismissing or navigating anything", async ({ page }) => {
 		await gotoKeyboardSettings(page)
 
 		const row = settingsRow(page)
@@ -106,9 +98,7 @@ test.describe("keyboard shortcuts", () => {
 		expect(new URL(page.url()).pathname).toBe("/settings/keyboard")
 	})
 
-	test("a second shortcuts list never strands the recording session", async ({ page, injectedSession }) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
+	test("a second shortcuts list never strands the recording session", async ({ page }) => {
 		await gotoKeyboardSettings(page)
 
 		const row = settingsRow(page)

@@ -5,6 +5,7 @@ import {
 	descendInto,
 	enterScratchDirectory,
 	trashScratchDirectory,
+	uploadFiles,
 	waitForListingSettled,
 	LIVE_WRITE_TIMEOUT_MS
 } from "./helpers/listing"
@@ -48,13 +49,7 @@ async function save(page: Page): Promise<void> {
 	await expect(saveButton).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
 }
 
-test("an open editor follows saves made elsewhere, asks over unsaved edits, and never over its own save", async ({
-	page,
-	context,
-	injectedSession
-}) => {
-	expect(injectedSession.length).toBeGreaterThan(0)
-
+test("an open editor follows saves made elsewhere, asks over unsaved edits, and never over its own save", async ({ page, context }) => {
 	const runId = crypto.randomUUID()
 	const scratchName = `e2e-remote-change-${runId}`
 	const fileName = `e2e-remote-change-${runId}.txt`
@@ -66,12 +61,7 @@ test("an open editor follows saves made elsewhere, asks over unsaved edits, and 
 	try {
 		const { listbox } = await enterScratchDirectory(page, scratchName)
 
-		await page
-			.getByRole("main")
-			.locator('input[type="file"]')
-			.first()
-			.setInputFiles([{ name: fileName, mimeType: "text/plain", buffer: Buffer.from("first line", "utf8") }])
-		await expect(listbox.getByRole("option", { name: fileName })).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
+		await uploadFiles(page, [{ name: fileName, mimeType: "text/plain", buffer: Buffer.from("first line", "utf8") }], listbox)
 
 		const mine = await openFile(page, fileName)
 

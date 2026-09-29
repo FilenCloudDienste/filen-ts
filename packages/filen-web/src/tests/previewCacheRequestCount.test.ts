@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { createElement, type ReactNode } from "react"
 import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react"
 import type { AnyFile, LinkedFile } from "@filen/sdk-rs"
+import type { DriveItem } from "@/features/drive/lib/item"
+import { linkedFileItem } from "@/tests/fixtures/sdk"
 import "@/lib/i18n"
 
 // Request counts for the session preview cache (previewCache.ts): what a remounted viewer, a public
@@ -51,29 +53,10 @@ const { clearPreviewCache, getPreviewBytes } = await import("@/features/preview/
 const { ImageViewer } = await import("@/features/preview/components/imageViewer")
 const { FileHero } = await import("@/features/publicLinks/components/fileHero")
 const { startAnonFileDownload } = await import("@/features/publicLinks/lib/download")
-const { linkedFileIntoDriveItem } = await import("@/features/drive/lib/item")
 const { narrowToAnyFile } = await import("@/features/drive/lib/download")
 
-type DriveItem = ReturnType<typeof linkedFileIntoDriveItem>
-
 function makeItem(uuid: LinkedFile["uuid"], name: string, size: number): DriveItem {
-	const file: LinkedFile = {
-		uuid,
-		name: { Decrypted: name },
-		mime: { Decrypted: "application/octet-stream" },
-		size: BigInt(size),
-		chunks: 1n,
-		region: "",
-		bucket: "",
-		version: 2,
-		timestamp: 0n,
-		fileKey: "k",
-		downloadable: true,
-		linkedTag: true,
-		canMakeThumbnail: false
-	}
-
-	return linkedFileIntoDriveItem(file)
+	return linkedFileItem(name, { uuid, size: BigInt(size) })
 }
 
 // Every download answers a fresh buffer of the file's own size.

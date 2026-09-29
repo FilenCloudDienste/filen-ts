@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient, QueryObserver } from "@tanstack/react-query"
-import type { Note, NoteParticipant, SocketEvent } from "@filen/sdk-rs"
+import type { Note, SocketEvent } from "@filen/sdk-rs"
+import { mockNote, mockNoteParticipant } from "@/tests/fixtures/notes"
 
 // sdkApi is mocked to the ops the handlers use: the list read (the "new" handler refetches it), the content
 // read of "Load theirs", and the conflicted copy's writes.
@@ -61,33 +62,7 @@ import { hashNoteContent } from "@filen/shared"
 import type { AnswerChoice } from "@/lib/storage/outboxChannel"
 
 function makeNote(uuid: string, overrides: Partial<Note> = {}): Note {
-	return {
-		uuid: uuid as Note["uuid"],
-		ownerId: 1n,
-		lastEditorId: 1n,
-		favorite: false,
-		pinned: false,
-		tags: [],
-		noteType: "text",
-		trash: false,
-		archive: false,
-		createdTimestamp: 0n,
-		editedTimestamp: 0n,
-		participants: [],
-		title: `note-${uuid}`,
-		...overrides
-	}
-}
-
-function participant(userId: bigint): NoteParticipant {
-	return {
-		userId,
-		isOwner: false,
-		email: `u${userId.toString()}@x.io`,
-		nickName: `u${userId.toString()}`,
-		permissionsWrite: false,
-		addedTimestamp: 0n
-	}
+	return mockNote({ uuid: uuid as Note["uuid"], title: `note-${uuid}`, ...overrides })
 }
 
 function noteEvt(inner: Extract<SocketEvent, { type: "note" }>["inner"]): Extract<SocketEvent, { type: "note" }> {
@@ -198,8 +173,8 @@ describe("note socket handlers — metadata", () => {
 	})
 
 	it("participantNew adds/replaces a participant by userId", () => {
-		seedNotes([makeNote("a", { participants: [participant(1n)] })])
-		handleNoteEvent(noteEvt({ type: "participantNew", note: "a" as never, participant: participant(2n) }))
+		seedNotes([makeNote("a", { participants: [mockNoteParticipant({ userId: 1n })] })])
+		handleNoteEvent(noteEvt({ type: "participantNew", note: "a" as never, participant: mockNoteParticipant({ userId: 2n }) }))
 
 		expect(
 			getNotes()[0]
@@ -209,14 +184,14 @@ describe("note socket handlers — metadata", () => {
 	})
 
 	it("participantRemoved filters a participant by userId", () => {
-		seedNotes([makeNote("a", { participants: [participant(1n), participant(2n)] })])
+		seedNotes([makeNote("a", { participants: [mockNoteParticipant({ userId: 1n }), mockNoteParticipant({ userId: 2n })] })])
 		handleNoteEvent(noteEvt({ type: "participantRemoved", note: "a" as never, userId: 1n }))
 
 		expect(getNotes()[0]?.participants.map(p => p.userId)).toEqual([2n])
 	})
 
 	it("participantPermissions flips permissionsWrite on the matching participant", () => {
-		seedNotes([makeNote("a", { participants: [participant(1n)] })])
+		seedNotes([makeNote("a", { participants: [mockNoteParticipant({ userId: 1n })] })])
 		handleNoteEvent(noteEvt({ type: "participantPermissions", note: "a" as never, userId: 1n, permissionsWrite: true }))
 
 		expect(getNotes()[0]?.participants[0]?.permissionsWrite).toBe(true)

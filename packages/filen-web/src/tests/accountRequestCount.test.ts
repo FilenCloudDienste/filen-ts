@@ -21,7 +21,6 @@ vi.mock("@/lib/sdk/client", () => ({
 
 vi.mock("@/queries/client", async () => ({ queryClient: (await import("@/tests/testQueryClient")).createTestQueryClient() }))
 
-vi.mock("@/lib/log", () => ({ log: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() } }))
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 vi.mock("@/features/settings/lib/downloadTextFile", () => ({ downloadTextFile: vi.fn() }))
 

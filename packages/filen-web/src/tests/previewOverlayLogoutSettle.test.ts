@@ -10,7 +10,6 @@ import { QueryClient } from "@tanstack/react-query"
 // browser keeps decrypted local state for a session the server already revoked. The store half and the
 // pure decision (resolveUnsavedConfirm) are both pinned elsewhere; the overlay's own two calls are not.
 
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() } }))
 vi.mock("@tanstack/react-router", () => ({

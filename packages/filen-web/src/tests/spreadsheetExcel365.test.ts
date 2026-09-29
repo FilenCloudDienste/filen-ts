@@ -1,22 +1,15 @@
-import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
-import { openXlsx, saveXlsx, writeXlsx, type RoundtripWorkbook } from "hucre/xlsx"
-import type { EditResult } from "@/features/spreadsheet/lib/edits"
+import { openXlsx, saveXlsx, writeXlsx } from "hucre/xlsx"
 import { shownFormula, storedFormula } from "@/features/spreadsheet/lib/formulaRefs"
-import { cellKey, type CellView } from "@/features/spreadsheet/lib/model"
+import { cellKey } from "@/features/spreadsheet/lib/model"
 import type { XlsxDocument } from "@/features/spreadsheet/lib/xlsxDocument"
 import { saveLosses } from "@/features/spreadsheet/lib/xlsxVerify"
 import { structureLocked } from "@/features/spreadsheet/lib/xlsxView"
 import { rawEntries, xlsxSavePlan } from "@/features/spreadsheet/lib/xlsxWritable"
 import { readZip } from "@/features/spreadsheet/lib/zipLimits"
-import { proven } from "@/tests/spreadsheetProven"
+import { openFixture, proven, viewCell } from "@/tests/spreadsheetProven"
 
 // Fixtures x365_*.xlsx: made-up workbooks shaped as Excel 365 writes them, one trait each.
-const FIXTURES = new URL("./fixtures/spreadsheet/", import.meta.url)
-
-async function fixture(name: string): Promise<RoundtripWorkbook> {
-	return await openXlsx(readFileSync(new URL(name, FIXTURES)), { readStyles: true })
-}
 
 async function savedParts(document: XlsxDocument): Promise<Map<string, string>> {
 	const parts = (await readZip((await document.serialize()).bytes)) ?? new Map<string, Uint8Array>()
@@ -27,7 +20,7 @@ async function savedParts(document: XlsxDocument): Promise<Map<string, string>> 
 
 // What the proof finds when a save differed from the real one in `part` as `edit` changes it.
 async function lossesIf(name: string, part: string, edit: (xml: string) => string): Promise<string[]> {
-	const workbook = await fixture(name)
+	const workbook = await openFixture(name)
 	const plan = xlsxSavePlan(workbook)
 	const saved = (await readZip(await saveXlsx(workbook))) ?? new Map<string, Uint8Array>()
 	const xml = new TextDecoder().decode(saved.get(part))
@@ -42,12 +35,6 @@ async function lossesIf(name: string, part: string, edit: (xml: string) => strin
 			dropped: plan.drop
 		})) ?? []
 	)
-}
-
-function view(result: EditResult, row: number, col: number, sheet = 0): CellView | null | undefined {
-	return result.type === "cells"
-		? result.patches.find(patch => patch.sheet === sheet)?.cells.find(([key]) => key === cellKey(row, col))?.[1]
-		: undefined
 }
 
 describe("Excel 365 files", () => {
@@ -67,56 +54,56 @@ describe("Excel 365 files", () => {
 			"x365_breaks.xlsx",
 			"x365_localestyles.xlsx"
 		]) {
-			const document = await proven(await fixture(name))
+			const document = await proven(await openFixture(name))
 
 			expect([name, document.losses]).toEqual([name, []])
 		}
 	})
 
 	it("writes back what Excel files carry: dates as the locale's short date, column formats, formatted rows, table formats, code names", async () => {
-		const dates = await savedParts(await proven(await fixture("x365_dates.xlsx")))
+		const dates = await savedParts(await proven(await openFixture("x365_dates.xlsx")))
 
 		expect(dates.get("xl/styles.xml")).toMatch(/<xf numFmtId="14"/)
 
-		const columns = await savedParts(await proven(await fixture("x365_colstyle.xlsx")))
+		const columns = await savedParts(await proven(await openFixture("x365_colstyle.xlsx")))
 
 		expect(columns.get("xl/worksheets/sheet1.xml")).toMatch(/<col min="1" max="16384"[^>]*style=/)
 		expect(columns.get("xl/worksheets/sheet1.xml")).not.toMatch(/<c r="A1"[^>]* s="/)
 
-		const rows = await savedParts(await proven(await fixture("x365_emptyrows.xlsx")))
+		const rows = await savedParts(await proven(await openFixture("x365_emptyrows.xlsx")))
 
 		expect(rows.get("xl/worksheets/sheet1.xml")).toMatch(/<row r="7"[^>]*customFormat/)
 
-		const codeName = await savedParts(await proven(await fixture("x365_codename.xlsx")))
+		const codeName = await savedParts(await proven(await openFixture("x365_codename.xlsx")))
 
 		expect(codeName.get("xl/worksheets/sheet1.xml")).toMatch(/<sheetPr codeName="Tabelle1"/)
 
-		const table = await savedParts(await proven(await fixture("x365_tabledxf.xlsx")))
+		const table = await savedParts(await proven(await openFixture("x365_tabledxf.xlsx")))
 		const dxfId = /<tableColumn [^>]*name="Qty"[^>]*dataDxfId="(\d+)"/.exec(table.get("xl/tables/table1.xml") ?? "")?.[1]
 		const dxfs = /<dxfs[^>]*>([\s\S]*?)<\/dxfs>/.exec(table.get("xl/styles.xml") ?? "")?.[1]?.match(/<dxf>[\s\S]*?<\/dxf>/g) ?? []
 
 		expect(dxfs[Number(dxfId)]).toMatch(/formatCode="#,##0"/)
 
-		const calc = await savedParts(await proven(await fixture("x365_calcpr.xlsx")))
+		const calc = await savedParts(await proven(await openFixture("x365_calcpr.xlsx")))
 
 		expect(calc.get("xl/workbook.xml")).toMatch(/<calcPr[^>]*fullPrecision="0"[^>]*refMode="R1C1"/)
 	})
 
 	it("keeps view-only what saving would change: pivot formats, a shown note, hidden sheet tabs, a hyperlink base", async () => {
-		const pivot = await proven(await fixture("x365_pivotformat.xlsx"))
+		const pivot = await proven(await openFixture("x365_pivotformat.xlsx"))
 
 		expect(pivot.writable).toBe(false)
 		expect(pivot.losses.some(loss => loss.includes("renumbers"))).toBe(true)
 
-		const note = await proven(await fixture("x365_visiblenote.xlsx"))
+		const note = await proven(await openFixture("x365_visiblenote.xlsx"))
 
 		expect(note.losses.some(loss => loss.includes("shown all the time"))).toBe(true)
-		expect((await proven(await fixture("x365_bookviews.xlsx"))).writable).toBe(false)
-		expect((await proven(await fixture("x365_hlbase.xlsx"))).writable).toBe(false)
+		expect((await proven(await openFixture("x365_bookviews.xlsx"))).writable).toBe(false)
+		expect((await proven(await openFixture("x365_hlbase.xlsx"))).writable).toBe(false)
 	})
 
 	it("writes back named styles, built-in formats 41 to 44, the file's own codes and a column's quote prefix", async () => {
-		const styles = (await savedParts(await proven(await fixture("x365_namedstyles.xlsx")))).get("xl/styles.xml") ?? ""
+		const styles = (await savedParts(await proven(await openFixture("x365_namedstyles.xlsx")))).get("xl/styles.xml") ?? ""
 
 		for (const style of ["Comma", "Currency", "Percent", "Hyperlink"])
 			expect(styles).toMatch(new RegExp(`<cellStyle name="${style}" xfId="[1-9]`))
@@ -128,13 +115,13 @@ describe("Excel 365 files", () => {
 	})
 
 	it("writes back a filtered list, errors Excel is told not to flag, the workbook's VBA name, and formats turning bold off", async () => {
-		const filtered = await savedParts(await proven(await fixture("x365_filtered.xlsx")))
+		const filtered = await savedParts(await proven(await openFixture("x365_filtered.xlsx")))
 
 		expect(filtered.get("xl/worksheets/sheet1.xml")).toMatch(/<sheetPr filterMode="1"\/>/)
 		expect(filtered.get("xl/worksheets/sheet1.xml")).toContain('<ignoredError sqref="A2:A3" numberStoredAsText="1"/>')
 		expect(filtered.get("xl/workbook.xml")).toMatch(/<workbookPr codeName="ThisWorkbook"/)
 
-		const off = (await savedParts(await proven(await fixture("x365_cfoff.xlsx")))).get("xl/styles.xml")
+		const off = (await savedParts(await proven(await openFixture("x365_cfoff.xlsx")))).get("xl/styles.xml")
 
 		expect(off).toMatch(/<dxf><font><b val="0"\/><i val="0"\/><u val="none"\/><strike val="0"\/>/)
 	})
@@ -157,7 +144,7 @@ describe("Excel 365 files", () => {
 	})
 
 	it("gives a new cell its row's format, else its column's, and leaves a cell the file holds as it is", async () => {
-		const accounts = await proven(await fixture("x365_namedstyles.xlsx"))
+		const accounts = await proven(await openFixture("x365_namedstyles.xlsx"))
 		const typed = accounts.apply({
 			type: "setCells",
 			sheet: 0,
@@ -172,10 +159,10 @@ describe("Excel 365 files", () => {
 			]
 		})
 
-		expect(view(typed, 4, 0)?.text).not.toBe("12.5")
-		expect(view(typed, 4, 1)).toMatchObject({ text: "12" })
-		expect(view(typed, 4, 1)?.numeric).not.toBe(true)
-		expect(view(typed, 5, 1)).toMatchObject({ text: "=1+1" })
+		expect(viewCell(typed, 4, 0)?.text).not.toBe("12.5")
+		expect(viewCell(typed, 4, 1)).toMatchObject({ text: "12" })
+		expect(viewCell(typed, 4, 1)?.numeric).not.toBe(true)
+		expect(viewCell(typed, 5, 1)).toMatchObject({ text: "=1+1" })
 
 		const bolded = accounts.apply({
 			type: "format",
@@ -200,20 +187,20 @@ describe("Excel 365 files", () => {
 		for (const ref of ["B5", "B6", "B7", "H2"]) expect(sheet).toMatch(new RegExp(`<c r="${ref}"[^>]*t="s"`))
 		expect(format("A6")).toMatch(/numFmtId="42"[^>]*fontId="[1-9]/)
 
-		const rows = await proven(await fixture("x365_emptyrows.xlsx"))
+		const rows = await proven(await openFixture("x365_emptyrows.xlsx"))
 
 		rows.apply({ type: "setCells", sheet: 0, cells: [{ row: 6, col: 3, input: "5" }] })
 		expect((await savedParts(rows)).get("xl/worksheets/sheet1.xml")).toMatch(/<c r="D7" s="[1-9]/)
 
 		// A1 is in the file without a format of its own: it stays without one.
-		const columns = await proven(await fixture("x365_colstyle.xlsx"))
+		const columns = await proven(await openFixture("x365_colstyle.xlsx"))
 
 		columns.apply({ type: "setCells", sheet: 0, cells: [{ row: 0, col: 0, input: "Renamed" }] })
 		expect((await savedParts(columns)).get("xl/worksheets/sheet1.xml")).not.toMatch(/<c r="A1"[^>]* s="/)
 	})
 
 	it("keeps a built-in format spelled in the file's locale, and named styles no cell uses", async () => {
-		const styles = (await savedParts(await proven(await fixture("x365_localestyles.xlsx")))).get("xl/styles.xml") ?? ""
+		const styles = (await savedParts(await proven(await openFixture("x365_localestyles.xlsx")))).get("xl/styles.xml") ?? ""
 
 		expect(styles).toMatch(/<numFmt numFmtId="44" formatCode="[^"]*€/)
 		expect(styles).toMatch(/<xf numFmtId="44"/)
@@ -262,12 +249,16 @@ describe("Excel 365 files", () => {
 			]
 		})
 
-		expect([view(result, 0, 1)?.text, view(result, 0, 2)?.text, view(result, 0, 3)?.text]).toEqual(["43844", "43844", "2024"])
+		expect([viewCell(result, 0, 1)?.text, viewCell(result, 0, 2)?.text, viewCell(result, 0, 3)?.text]).toEqual([
+			"43844",
+			"43844",
+			"2024"
+		])
 		expect((await savedParts(document)).get("xl/worksheets/sheet1.xml")).toMatch(/<c r="B1"><f>A1<\/f><v>43844<\/v>/)
 	})
 
 	it("moves manual page breaks with their rows and columns, drops one whose row goes, and puts them back on undo", async () => {
-		const document = await proven(await fixture("x365_breaks.xlsx"))
+		const document = await proven(await openFixture("x365_breaks.xlsx"))
 		const breaks = async () => {
 			const sheet = (await savedParts(document)).get("xl/worksheets/sheet1.xml") ?? ""
 
@@ -293,7 +284,7 @@ describe("Excel 365 files", () => {
 	})
 
 	it("locks rows and columns on a sheet with errors told not to flag, which are kept by range", async () => {
-		const sheet = (await fixture("x365_filtered.xlsx")).sheets[0]
+		const sheet = (await openFixture("x365_filtered.xlsx")).sheets[0]
 
 		expect(sheet).toBeDefined()
 
@@ -306,7 +297,7 @@ describe("Excel 365 files", () => {
 	})
 
 	it("writes whole-sheet column formats as one range", async () => {
-		const parts = await savedParts(await proven(await fixture("hidecols.xlsx")))
+		const parts = await savedParts(await proven(await openFixture("hidecols.xlsx")))
 
 		expect(parts.get("xl/worksheets/sheet1.xml")?.match(/<col /g)?.length ?? 0).toBeLessThan(10)
 	})
@@ -346,7 +337,7 @@ describe("formula text", () => {
 		const document = await proven(await openXlsx(await writeXlsx({ sheets: [{ name: "S", rows: [[1, "a"]] }] }), { readStyles: true }))
 		const typed = document.apply({ type: "setCells", sheet: 0, cells: [{ row: 0, col: 2, input: '=TEXTJOIN("-",TRUE,A1:B1)' }] })
 
-		expect(view(typed, 0, 2)).toMatchObject({ text: "1-a", input: '=TEXTJOIN("-",TRUE,A1:B1)' })
+		expect(viewCell(typed, 0, 2)).toMatchObject({ text: "1-a", input: '=TEXTJOIN("-",TRUE,A1:B1)' })
 		expect((await savedParts(document)).get("xl/worksheets/sheet1.xml")).toContain("<f>_xlfn.TEXTJOIN(")
 	})
 
@@ -391,7 +382,7 @@ describe("formula text", () => {
 		})
 
 		expect(performance.now() - started).toBeLessThan(2000)
-		expect(view(result, 1, 0)).toMatchObject({ text: "#N/A" })
-		expect(view(result, 2, 0)).toMatchObject({ text: "128008000" })
+		expect(viewCell(result, 1, 0)).toMatchObject({ text: "#N/A" })
+		expect(viewCell(result, 2, 0)).toMatchObject({ text: "128008000" })
 	})
 })

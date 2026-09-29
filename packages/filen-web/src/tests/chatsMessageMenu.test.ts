@@ -1,12 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
 import { CornerUpLeftIcon, CopyIcon, PencilIcon, Trash2Icon, UserXIcon } from "lucide-react"
-import type { Chat, ChatMessage, UuidStr } from "@filen/sdk-rs"
+import type { Chat, ChatMessage } from "@filen/sdk-rs"
 import { deriveBlockedUsers } from "@filen/shared"
-
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
 
 // Mock boundary matching chatsQueries.test.ts: the real sdk client module imports a Vite `?worker`,
 // unresolvable under node vitest. messageMenuActions itself needs neither mock (pure logic, no sdk/
@@ -28,6 +24,7 @@ import { chatMessagesQueryKey, chatMessagesQueryGet } from "@/features/chats/que
 import { deleteMessage, editMessage, disableMessageEmbed } from "@/features/chats/lib/messageActions"
 import { parkOwnMessageEcho } from "@/features/chats/lib/parkedOwnMessages"
 import { applyMessageOfflineGate, messageMenuActions } from "@/features/chats/components/thread/messageMenu.logic"
+import { testUuid } from "@/tests/support/uuid"
 
 function mockMessage(overrides: Partial<ChatMessage> = {}): ChatMessage {
 	return {

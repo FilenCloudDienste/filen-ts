@@ -3,7 +3,8 @@ import { fileURLToPath } from "node:url"
 import type { Locator, Page } from "@playwright/test"
 import { writeXlsx } from "hucre/xlsx"
 import { test, expect } from "./fixtures"
-import { bootTo, enterScratchDirectory, trashScratchDirectory, LIVE_WRITE_TIMEOUT_MS } from "./helpers/listing"
+import { boxOf, centerOf } from "./helpers/geometry"
+import { withScratchDirectory, LAZY_VIEWER_TIMEOUT_MS, LIVE_WRITE_TIMEOUT_MS, uploadFiles } from "./helpers/listing"
 import { resolveModKey } from "./helpers/modkey"
 import { trackCspViolations } from "./helpers/csp"
 
@@ -57,12 +58,7 @@ function columnHeader(grid: Locator, col: number): Locator {
 // Drags column `col`'s right edge by `dx` pixels (`col` as the sheet numbers it, A = 1).
 async function dragColumnEdge(page: Page, grid: Locator, col: number, dx: number): Promise<void> {
 	const handle = columnHeader(grid, col).locator("[data-resize-handle]")
-	const box = await handle.boundingBox()
-
-	if (box === null) throw new Error("no resize handle")
-
-	const x = box.x + box.width / 2
-	const y = box.y + box.height / 2
+	const { x, y } = await centerOf(handle)
 
 	await page.mouse.move(x, y)
 	await page.mouse.down()
@@ -75,35 +71,27 @@ async function columnWidth(grid: Locator, col: number): Promise<number> {
 	return (await columnHeader(grid, col).boundingBox())?.width ?? 0
 }
 
-test("csv and xlsx open as grids, edit, recalculate and save, no CSP console errors", async ({ page, injectedSession }) => {
-	expect(injectedSession.length).toBeGreaterThan(0)
-
-	const runId = crypto.randomUUID()
-	const scratchName = `e2e-preview-spreadsheet-${runId}`
-	const nameCsv = `e2e-sheet-${runId}.csv`
-	const nameXlsx = `e2e-sheet-${runId}.xlsx`
-
+test("csv and xlsx open as grids, edit, recalculate and save, no CSP console errors", async ({ page }) => {
 	const cspViolations = trackCspViolations(page)
 	const dialog = page.getByRole("dialog")
 	const grid = dialog.getByRole("grid")
 	const saveButton = dialog.getByRole("button", { name: "Save", exact: true })
 
-	await bootTo(page)
-
-	try {
-		const { listbox } = await enterScratchDirectory(page, scratchName)
-		const input = page.getByRole("main").locator('input[type="file"]').first()
-
-		await input.setInputFiles([
-			{ name: nameCsv, mimeType: "text/csv", buffer: CSV_BYTES },
-			{ name: nameXlsx, mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", buffer: await xlsxBytes() }
-		])
-		await expect(listbox.getByRole("option", { name: nameCsv })).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
-		await expect(listbox.getByRole("option", { name: nameXlsx })).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
+	await withScratchDirectory(page, "preview-spreadsheet", async ({ listbox, runId }) => {
+		const nameCsv = `e2e-sheet-${runId}.csv`
+		const nameXlsx = `e2e-sheet-${runId}.xlsx`
+		await uploadFiles(
+			page,
+			[
+				{ name: nameCsv, mimeType: "text/csv", buffer: CSV_BYTES },
+				{ name: nameXlsx, mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", buffer: await xlsxBytes() }
+			],
+			listbox
+		)
 
 		// CSV: the delimiter is sniffed, a cell edit marks the file dirty, and the save keeps the grid.
 		await listbox.getByRole("option", { name: nameCsv }).dblclick()
-		await expect(gridCell(grid, 2, 1)).toHaveText("Apples", { timeout: 60_000 })
+		await expect(gridCell(grid, 2, 1)).toHaveText("Apples", { timeout: LAZY_VIEWER_TIMEOUT_MS })
 		await expect(gridCell(grid, 1, 2)).toHaveText("Qty")
 
 		await typeInto(page, grid, 3, 2, "42")
@@ -122,11 +110,11 @@ test("csv and xlsx open as grids, edit, recalculate and save, no CSP console err
 		const xlsxRow = listbox.getByRole("option", { name: nameXlsx })
 
 		await xlsxRow.dblclick()
-		await expect(gridCell(grid, 4, 2)).toHaveText("1500", { timeout: 60_000 })
+		await expect(gridCell(grid, 4, 2)).toHaveText("1500", { timeout: LAZY_VIEWER_TIMEOUT_MS })
 		await expect(dialog.getByRole("tab", { name: "Notes" })).toBeVisible()
 		// A workbook opens view-only (its toolbar disabled) until the worker has proven it saves intact; typing
 		// waits for that.
-		await expect(dialog.getByRole("button", { name: "Bold", exact: true })).toBeEnabled({ timeout: 60_000 })
+		await expect(dialog.getByRole("button", { name: "Bold", exact: true })).toBeEnabled({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 		await expect(dialog.getByText("Checking this file can be saved…")).toHaveCount(0)
 
 		await typeInto(page, grid, 3, 2, "500")
@@ -161,7 +149,7 @@ test("csv and xlsx open as grids, edit, recalculate and save, no CSP console err
 		await page.reload()
 		await expect(xlsxRow).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 		await xlsxRow.dblclick()
-		await expect(gridCell(grid, 4, 2)).toHaveText("1700", { timeout: 60_000 })
+		await expect(gridCell(grid, 4, 2)).toHaveText("1700", { timeout: LAZY_VIEWER_TIMEOUT_MS })
 		await expect(gridCell(grid, 5, 2)).toHaveText("3400")
 		await expect(dialog.getByRole("tab", { name: "Notes" })).toBeVisible()
 
@@ -169,43 +157,27 @@ test("csv and xlsx open as grids, edit, recalculate and save, no CSP console err
 		await expect(dialog).toHaveCount(0)
 
 		expect(cspViolations).toEqual([])
-	} finally {
-		await trashScratchDirectory(page, scratchName)
-	}
+	})
 })
 
-test("rails resize: an xlsx keeps a width in the file, a csv beside it, and the rails hide what scrolls under them", async ({
-	page,
-	injectedSession
-}) => {
-	expect(injectedSession.length).toBeGreaterThan(0)
-
-	const runId = crypto.randomUUID()
-	const scratchName = `e2e-preview-spreadsheet-resize-${runId}`
-	const nameCsv = `e2e-sheet-resize-${runId}.csv`
-	const nameXlsx = `e2e-sheet-resize-${runId}.xlsx`
+test("rails resize: an xlsx keeps a width in the file, a csv beside it, and the rails hide what scrolls under them", async ({ page }) => {
 	const dialog = page.getByRole("dialog")
 	const grid = dialog.getByRole("grid")
 	const saveButton = dialog.getByRole("button", { name: "Save", exact: true })
 
-	await bootTo(page)
+	await withScratchDirectory(page, "preview-spreadsheet-resize", async ({ listbox, runId }) => {
+		const nameCsv = `e2e-sheet-resize-${runId}.csv`
+		const nameXlsx = `e2e-sheet-resize-${runId}.xlsx`
 
-	try {
-		const { listbox } = await enterScratchDirectory(page, scratchName)
-
-		await page
-			.getByRole("main")
-			.locator('input[type="file"]')
-			.first()
-			.setInputFiles([
-				{ name: nameCsv, mimeType: "text/csv", buffer: CSV_BYTES },
-				{ name: nameXlsx, mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", buffer: await xlsxBytes() }
-			])
+		await uploadFiles(page, [
+			{ name: nameCsv, mimeType: "text/csv", buffer: CSV_BYTES },
+			{ name: nameXlsx, mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", buffer: await xlsxBytes() }
+		])
 		await expect(listbox.getByRole("option", { name: nameXlsx })).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 
 		// XLSX: once editable, a drag is an edit; saved, the width is the file's.
 		await listbox.getByRole("option", { name: nameXlsx }).dblclick()
-		await expect(dialog.getByRole("button", { name: "Bold", exact: true })).toBeEnabled({ timeout: 60_000 })
+		await expect(dialog.getByRole("button", { name: "Bold", exact: true })).toBeEnabled({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 
 		const before = await columnWidth(grid, 2)
 
@@ -220,14 +192,14 @@ test("rails resize: an xlsx keeps a width in the file, a csv beside it, and the 
 		await page.reload()
 		await expect(listbox.getByRole("option", { name: nameXlsx })).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 		await listbox.getByRole("option", { name: nameXlsx }).dblclick()
-		await expect(gridCell(grid, 1, 1)).toHaveText("Item", { timeout: 60_000 })
+		await expect(gridCell(grid, 1, 1)).toHaveText("Item", { timeout: LAZY_VIEWER_TIMEOUT_MS })
 		await expect.poll(() => columnWidth(grid, 2)).toBeGreaterThan(before + 70)
 		await page.keyboard.press("Escape")
 		await expect(dialog).toHaveCount(0)
 
 		// CSV: sizes live beside the file and survive closing it.
 		await listbox.getByRole("option", { name: nameCsv }).dblclick()
-		await expect(gridCell(grid, 2, 1)).toHaveText("Apples", { timeout: 60_000 })
+		await expect(gridCell(grid, 2, 1)).toHaveText("Apples", { timeout: LAZY_VIEWER_TIMEOUT_MS })
 
 		const csvBefore = await columnWidth(grid, 1)
 
@@ -238,7 +210,7 @@ test("rails resize: an xlsx keeps a width in the file, a csv beside it, and the 
 		await page.keyboard.press("Escape")
 		await expect(dialog).toHaveCount(0)
 		await listbox.getByRole("option", { name: nameCsv }).dblclick()
-		await expect(gridCell(grid, 2, 1)).toHaveText("Apples", { timeout: 60_000 })
+		await expect(gridCell(grid, 2, 1)).toHaveText("Apples", { timeout: LAZY_VIEWER_TIMEOUT_MS })
 		await expect.poll(() => columnWidth(grid, 1)).toBeGreaterThan(csvBefore + 50)
 
 		// Opaque rails: a cell scrolled under the column rail is not what the rail's centre hits.
@@ -246,9 +218,7 @@ test("rails resize: an xlsx keeps a width in the file, a csv beside it, and the 
 			element.scrollTop = 4
 		})
 
-		const rail = await columnHeader(grid, 1).boundingBox()
-
-		if (rail === null) throw new Error("no rail")
+		const rail = await boxOf(columnHeader(grid, 1))
 
 		const hit = await page.evaluate(
 			([x, y]) => document.elementFromPoint(x, y)?.closest('[role="columnheader"], [role="gridcell"]')?.getAttribute("role"),
@@ -256,37 +226,24 @@ test("rails resize: an xlsx keeps a width in the file, a csv beside it, and the 
 		)
 
 		expect(hit).toBe("columnheader")
-	} finally {
-		await trashScratchDirectory(page, scratchName)
-	}
+	})
 })
 
-test("an .xls opens read-only and saves as an editable .xlsx beside it", async ({ page, injectedSession }) => {
-	expect(injectedSession.length).toBeGreaterThan(0)
-
-	const runId = crypto.randomUUID()
-	const scratchName = `e2e-preview-spreadsheet-xls-${runId}`
-	const nameXls = `e2e-sheet-${runId}.xls`
-	const nameXlsx = `e2e-sheet-${runId}.xlsx`
-	// A row's name holds more than the file name, and the .xls's is a prefix of the .xlsx's.
-	const xlsRowName = new RegExp(`${runId}\\.xls(?!x)`)
+test("an .xls opens read-only and saves as an editable .xlsx beside it", async ({ page }) => {
 	const dialog = page.getByRole("dialog")
 	const grid = dialog.getByRole("grid")
 
-	await bootTo(page)
+	await withScratchDirectory(page, "preview-spreadsheet-xls", async ({ listbox, runId }) => {
+		const nameXls = `e2e-sheet-${runId}.xls`
+		const nameXlsx = `e2e-sheet-${runId}.xlsx`
+		// A row's name holds more than the file name, and the .xls's is a prefix of the .xlsx's.
+		const xlsRowName = new RegExp(`${runId}\\.xls(?!x)`)
 
-	try {
-		const { listbox } = await enterScratchDirectory(page, scratchName)
-
-		await page
-			.getByRole("main")
-			.locator('input[type="file"]')
-			.first()
-			.setInputFiles([{ name: nameXls, mimeType: "application/vnd.ms-excel", buffer: readFileSync(XLS_FIXTURE) }])
+		await uploadFiles(page, [{ name: nameXls, mimeType: "application/vnd.ms-excel", buffer: readFileSync(XLS_FIXTURE) }])
 		await expect(listbox.getByRole("option", { name: xlsRowName })).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 
 		await listbox.getByRole("option", { name: xlsRowName }).dblclick()
-		await expect(gridCell(grid, 2, 1)).toHaveText("Rent", { timeout: 60_000 })
+		await expect(gridCell(grid, 2, 1)).toHaveText("Rent", { timeout: LAZY_VIEWER_TIMEOUT_MS })
 		await expect(dialog.getByText("Old .xls format — view only.")).toBeVisible()
 
 		await dialog.getByRole("button", { name: "Save as .xlsx", exact: true }).click()
@@ -298,14 +255,12 @@ test("an .xls opens read-only and saves as an editable .xlsx beside it", async (
 
 		// The copy takes the preview's place, with the same values, and becomes editable once proven.
 		await expect(dialog.getByText(nameXlsx)).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
-		await expect(gridCell(grid, 2, 2)).toHaveText("1200", { timeout: 60_000 })
-		await expect(dialog.getByRole("button", { name: "Bold", exact: true })).toBeEnabled({ timeout: 60_000 })
+		await expect(gridCell(grid, 2, 2)).toHaveText("1200", { timeout: LAZY_VIEWER_TIMEOUT_MS })
+		await expect(dialog.getByRole("button", { name: "Bold", exact: true })).toBeEnabled({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 
 		await page.keyboard.press("Escape")
 		await expect(dialog).toHaveCount(0)
 		await expect(listbox.getByRole("option", { name: nameXlsx })).toBeVisible()
 		await expect(listbox.getByRole("option", { name: xlsRowName })).toBeVisible()
-	} finally {
-		await trashScratchDirectory(page, scratchName)
-	}
+	})
 })

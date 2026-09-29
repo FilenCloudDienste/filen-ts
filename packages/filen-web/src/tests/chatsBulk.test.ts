@@ -1,10 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
-import type { Chat, ChatParticipant, UuidStr } from "@filen/sdk-rs"
-
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import type { Chat, ChatParticipant } from "@filen/sdk-rs"
 
 // Mock boundary matching chatsActions.test.ts: the real sdk client module imports a Vite `?worker`,
 // unresolvable under node vitest.
@@ -36,6 +32,7 @@ import { queryClient as testQueryClient } from "@/queries/client"
 import { ACCOUNT_QUERY_KEY } from "@/queries/account"
 import { chatsQueryGet } from "@/features/chats/queries/chats"
 import { markChatsRead, setChatsMuted, deleteChatsPermanently, leaveChats } from "@/features/chats/lib/bulk"
+import { testUuid } from "@/tests/support/uuid"
 
 beforeEach(() => {
 	vi.clearAllMocks()

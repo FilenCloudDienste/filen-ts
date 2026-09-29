@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
-import type { CopyFailure, CopyReport, UuidStr } from "@filen/sdk-rs"
+import type { CopyFailure, CopyReport } from "@filen/sdk-rs"
 import "@/lib/i18n"
 
 const { pauseTransfer, resumeTransfer, copyItemsTo } = vi.hoisted(() => ({
@@ -19,10 +19,7 @@ import { copyErrorDTO, createCopyJob, type CopyJob } from "@/features/drive/lib/
 import { narrowItem } from "@/features/drive/lib/item"
 import { useCopyJobsStore } from "@/features/transfers/store/useCopyJobsStore"
 import { useTransfersStore } from "@/features/transfers/store/useTransfersStore"
-
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import { testUuid } from "@/tests/support/uuid"
 
 function seed(overrides: Partial<CopyJob> = {}): void {
 	const job: CopyJob = { ...createCopyJob("job", { uuid: null, name: "Photos" }, 3), cardVisible: true, ...overrides }
@@ -105,16 +102,6 @@ function renderCard() {
 
 	return { onDismiss, onHeightChange, onRetried }
 }
-
-beforeEach(() => {
-	vi.stubGlobal(
-		"ResizeObserver",
-		class {
-			observe = vi.fn()
-			disconnect = vi.fn()
-		}
-	)
-})
 
 afterEach(() => {
 	cleanup()

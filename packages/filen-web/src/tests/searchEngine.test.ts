@@ -1,12 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 import type { Client, CacheSearchSnapshot, CacheStatusMessage, Dir, File, UuidStr } from "@filen/sdk-rs"
 import { createSearchEngine, SearchSupersededError, CEILING, type SearchPush } from "@/workers/searchEngine"
-
-// UuidStr is a branded template literal requiring at least 3 dashes (see @filen/sdk-rs) — mirrors
-// queries/drive.test.ts's own testUuid() so a readable label still satisfies the brand.
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import { testUuid } from "@/tests/support/uuid"
 
 function snapshot(overrides: Partial<CacheSearchSnapshot> = {}): CacheSearchSnapshot {
 	return { results: [], total: 0n, live: true, ...overrides }

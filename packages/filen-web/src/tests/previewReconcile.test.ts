@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { Dir, DirMeta, File, FileMeta, UuidStr } from "@filen/sdk-rs"
+import type { Dir, DirMeta, File, FileMeta } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import {
 	reconcilePreviewDialog,
@@ -9,10 +9,7 @@ import {
 	type PreviewDialogFields
 } from "@/features/preview/lib/previewReconcile"
 import { setPreviewDirty } from "@/features/preview/store/usePreviewUnsavedGuard"
-
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import { testUuid } from "@/tests/support/uuid"
 
 function mockFile(overrides: Partial<File> = {}): File {
 	return {

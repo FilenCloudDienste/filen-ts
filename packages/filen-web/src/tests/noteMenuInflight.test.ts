@@ -8,8 +8,6 @@ import { createElement } from "react"
 import type { Note } from "@filen/sdk-rs"
 import "@/lib/i18n"
 
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
-
 vi.mock("@/lib/useIsOnline", () => ({ useIsOnline: () => true }))
 
 const { NoteDropdownMenuContent } = await import("@/features/notes/components/noteMenu")

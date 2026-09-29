@@ -21,7 +21,6 @@ vi.mock("@/features/drive/lib/uploadDrop", async importOriginal => ({
 	uploadDroppedFiles
 }))
 vi.mock("@/features/drive/lib/actions", () => ({ currentRootUuid: () => "root-0000-0000-0000-000000000000" }))
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
 vi.mock("@/queries/client", async () => {
 	const { QueryClient } = await import("@tanstack/react-query")
 

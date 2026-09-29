@@ -1,12 +1,9 @@
 import { describe, expect, it } from "vitest"
-import type { Chat, ChatMessage, ChatParticipant, UuidStr } from "@filen/sdk-rs"
+import type { Chat, ChatMessage, ChatParticipant } from "@filen/sdk-rs"
 
 import { aggregateChatSelectionFlags, selectableChatsForSelectAll } from "@/features/chats/lib/selectionFlags"
 import { deriveBlockedUsers } from "@filen/shared"
-
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import { testUuid } from "@/tests/support/uuid"
 
 function mockParticipant(overrides: Partial<ChatParticipant> = {}): ChatParticipant {
 	return {

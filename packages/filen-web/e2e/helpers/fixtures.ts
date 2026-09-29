@@ -1,6 +1,6 @@
-import type { Page } from "@playwright/test"
-import { readFixtureManifest } from "../fixtures"
-import { descendInto, waitForListingSettled } from "./listing"
+import type { Locator, Page } from "@playwright/test"
+import { expect, readFixtureManifest } from "../fixtures"
+import { descendInto, type ListingHandle, setTallListingViewport, waitForListingSettled } from "./listing"
 
 // The shared, READ-ONLY fixture tree: one scenario directory per test that only ever LOOKS at its
 // files, each holding the exact set that test expects. Built once per run by setup/fixtures.setup.ts
@@ -55,12 +55,8 @@ export type FixtureFileName = (typeof FIXTURE_FILES)[FixtureScenario][number]
 // The fixture ROOT's own listing, one hop from the drive root. Worth having on its own: it is the one
 // listing in the account with a known, stable row set (one directory per scenario) that no write-lane
 // test can churn underneath an assertion.
-//
-// The tall viewport is the same virtualization workaround enterScratchDirectory documents: the
-// listing renders rows through a virtualizer, so a row sorted below the fold may not be in the DOM at
-// all, and a locator hunting one specific name would silently miss it.
-export async function enterFixtureRoot(page: Page): Promise<{ listbox: ReturnType<Page["getByRole"]>; hasItems: boolean }> {
-	await page.setViewportSize({ width: 1280, height: 8000 })
+export async function enterFixtureRoot(page: Page): Promise<ListingHandle> {
+	await setTallListingViewport(page)
 
 	const { fixtureRoot } = readFixtureManifest()
 	const { listbox } = await waitForListingSettled(page)
@@ -75,10 +71,7 @@ export async function enterFixtureRoot(page: Page): Promise<{ listbox: ReturnTyp
 // READ. Two descents rather than one, since the tree is root -> fixtureRoot -> scenario; the fixture
 // root exists so the whole run's tree is ONE row at the account root (one create, one trash) instead
 // of a dozen, and so the teardown has a single thing to remove.
-export async function enterFixtureDirectory(
-	page: Page,
-	scenario: FixtureScenario
-): Promise<{ listbox: ReturnType<Page["getByRole"]>; hasItems: boolean }> {
+export async function enterFixtureDirectory(page: Page, scenario: FixtureScenario): Promise<ListingHandle> {
 	// Re-resolves against whatever listing is mounted, so this descent runs against the fixture root's
 	// listing rather than a stale handle on the account root's.
 	const { listbox } = await enterFixtureRoot(page)
@@ -86,4 +79,29 @@ export async function enterFixtureDirectory(
 	await descendInto(page, listbox, scenario)
 
 	return waitForListingSettled(page)
+}
+
+// A fixture row is present from the start, but the first read of a scenario listing after a cold boot
+// can still be slow under suite load.
+const FIXTURE_ROW_TIMEOUT_MS = 45_000
+
+// One row locator per scenario file, in FIXTURE_FILES order. Mapped over a type parameter so a tuple
+// maps to a tuple.
+type LocatorsFor<T extends readonly unknown[]> = { [K in keyof T]: Locator }
+type FixtureRows<S extends FixtureScenario> = LocatorsFor<(typeof FIXTURE_FILES)[S]>
+
+// enterFixtureDirectory plus each scenario file's row, awaited visible. Callers boot first, so any setup
+// that has to precede the descent stays theirs.
+export async function openFixtureRows<S extends FixtureScenario>(
+	page: Page,
+	scenario: S
+): Promise<{ listbox: Locator; rows: FixtureRows<S> }> {
+	const { listbox } = await enterFixtureDirectory(page, scenario)
+	const rows = FIXTURE_FILES[scenario].map(name => listbox.getByRole("option", { name }))
+
+	for (const row of rows) {
+		await expect(row).toBeVisible({ timeout: FIXTURE_ROW_TIMEOUT_MS })
+	}
+
+	return { listbox, rows: rows as FixtureRows<S> }
 }

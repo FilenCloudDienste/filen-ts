@@ -19,14 +19,13 @@ import {
 	EyeIcon,
 	FolderOpenIcon
 } from "lucide-react"
-import type { Dir, File, SharedDir, SharedFile, SharedRootDir, SharingRole, UuidStr } from "@filen/sdk-rs"
+import type { Dir, File, SharedDir, UuidStr } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 import type { DriveItemLinkStatus } from "@/features/drive/queries/drive"
+import { mockSharedFile, mockSharedRootDir, sharerRole } from "@/tests/fixtures/sdk"
 
-// itemMenu.logic.ts's imports reach the worker client and query client — unresolvable/unwanted under
-// node vitest.
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
+// itemMenu.logic.ts's imports reach the query client — unwanted under node vitest.
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 
@@ -95,43 +94,6 @@ function dirItem(overrides: Partial<Dir> = {}): DriveItem {
 
 function fileItem(overrides: Partial<File> = {}): DriveItem {
 	return narrowItem(mockFile(overrides))
-}
-
-function sharerRole(id: number, email: string): SharingRole {
-	return { Sharer: { email, id } }
-}
-
-function mockSharedRootDir(overrides: Partial<SharedRootDir> = {}): SharedRootDir {
-	return {
-		inner: {
-			uuid: "44444444-4444-4444-4444-444444444444",
-			color: "default",
-			timestamp: 1_700_000_000_000n,
-			meta: { type: "decoded", data: { name: "SharedRoot" } }
-		},
-		sharingRole: sharerRole(42, "sharer@filen.io"),
-		writeAccess: true,
-		...overrides
-	}
-}
-
-function mockSharedFile(overrides: Partial<SharedFile> = {}): SharedFile {
-	return {
-		uuid: "55555555-5555-5555-5555-555555555555",
-		size: 2_048n,
-		region: "de-1",
-		bucket: "filen-1",
-		chunks: 2n,
-		timestamp: 1_700_000_000_000n,
-		meta: {
-			type: "decoded",
-			data: { name: "shared.pdf", mime: "application/pdf", modified: 1_700_000_000_000n, size: 2_048n, key: "k", version: 2 }
-		},
-		sharingRole: sharerRole(7, "receiver@filen.io"),
-		sharedTag: true,
-		canMakeThumbnail: false,
-		...overrides
-	}
 }
 
 function mockSharedDir(overrides: Partial<SharedDir> = {}): SharedDir {

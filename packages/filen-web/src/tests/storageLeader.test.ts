@@ -7,7 +7,6 @@ vi.mock("@/workers/db.worker.ts?worker", () => ({ default: vi.fn() }))
 vi.mock("comlink", () => ({
 	wrap: () => ({ open: () => Promise.resolve(), kvGet: () => Promise.resolve("from-leader") })
 }))
-vi.mock("@/lib/log", () => ({ log: { error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() } }))
 
 type LockCallback = (lock: { name: string } | null) => unknown
 interface Waiter {

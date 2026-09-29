@@ -13,8 +13,6 @@ const { setNoteParticipantPermission, toggleParticipantBlocked } = vi.hoisted(()
 	toggleParticipantBlocked: vi.fn()
 }))
 
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
-
 vi.mock("@/lib/useIsOnline", () => ({ useIsOnline: () => true }))
 
 vi.mock("@/features/notes/lib/participants", () => ({

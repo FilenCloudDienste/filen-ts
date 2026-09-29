@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import type { Transfer } from "@/features/transfers/store/useTransfersStore"
 
 // Same mock boundary as download.test.ts's own cancel test: the real sdk client module
 // touches a Vite `?worker`, unresolvable/unwanted under node vitest.
@@ -17,21 +16,7 @@ import { cancelActiveTransfers, cancelTransfer, setTransferPaused } from "@/feat
 import { useTransfersStore } from "@/features/transfers/store/useTransfersStore"
 import { useCopyJobsStore } from "@/features/transfers/store/useCopyJobsStore"
 import { createCopyJob } from "@/features/drive/lib/copy.logic"
-
-function makeTransfer(overrides: Partial<Transfer> = {}): Transfer {
-	return {
-		id: "t1",
-		direction: "upload",
-		name: "report.pdf",
-		size: 1_024,
-		bytesTransferred: 0,
-		status: "uploading",
-		paused: false,
-		parentUuid: null,
-		startedAt: 0,
-		...overrides
-	}
-}
+import { makeTransfer } from "@/tests/fixtures/transfers"
 
 beforeEach(() => {
 	vi.clearAllMocks()

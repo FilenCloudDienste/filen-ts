@@ -3,7 +3,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, renderHook, waitFor } from "@testing-library/react"
 import { focusManager, onlineManager } from "@tanstack/react-query"
-import type { Dir, File, NormalDirsAndFiles, UuidStr } from "@filen/sdk-rs"
+import type { Dir, File, NormalDirsAndFiles } from "@filen/sdk-rs"
 import { narrowItem } from "@/features/drive/lib/item"
 
 const { listDirectory } = vi.hoisted(() => ({
@@ -25,10 +25,7 @@ import {
 	useDirectoryTreeChildrenQuery
 } from "@/features/drive/queries/drive"
 import { socketAuthenticated } from "@/lib/sdk/socketSession"
-
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import { testUuid } from "@/tests/support/uuid"
 
 function mockDir(label: string, name: string): Dir {
 	return {

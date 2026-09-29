@@ -129,6 +129,7 @@ import {
 	useItemInfoQuery,
 	type ListingChange
 } from "@/features/drive/queries/drive"
+import { testUuid } from "@/tests/support/uuid"
 
 // Unlike account.test.ts (one call-count assertion in the whole file), several tests here assert
 // exact call counts — clear history between tests so an earlier test's calls can't leak in.
@@ -141,12 +142,6 @@ beforeEach(() => {
 afterEach(() => {
 	vi.useRealTimers()
 })
-
-// UuidStr is a template-literal brand requiring at least 3 dashes (see @filen/sdk-rs) — pad a short
-// readable test label into a shape that satisfies it, mirroring sort.test.ts's own uuid fixtures.
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
 
 function mockDir(overrides: Partial<Dir> = {}): Dir {
 	return {

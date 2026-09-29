@@ -1,12 +1,9 @@
 import { describe, expect, it } from "vitest"
-import type { Dir, File, SharedDir, SharedFile, SharedRootDir, SharingRole, UuidStr } from "@filen/sdk-rs"
+import type { Dir, File, SharedDir } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { aggregateDriveSelectionFlags, selectableForSelectAll } from "@/features/drive/lib/selectionFlags"
-
-// UuidStr is a template-literal brand requiring at least 3 dashes — mirrors item.test.ts's own fixture.
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import { mockSharedFile, mockSharedRootDir, sharerRole } from "@/tests/fixtures/sdk"
+import { testUuid } from "@/tests/support/uuid"
 
 function mockDir(overrides: Partial<Dir> = {}): Dir {
 	return {
@@ -50,43 +47,6 @@ function fileItem(overrides: Partial<File> = {}): DriveItem {
 
 function undecryptableFile(overrides: Partial<File> = {}): DriveItem {
 	return narrowItem({ ...mockFile(overrides), meta: { type: "encrypted", data: "ciphertext" } })
-}
-
-function sharerRole(id: number, email: string): SharingRole {
-	return { Sharer: { email, id } }
-}
-
-function mockSharedRootDir(overrides: Partial<SharedRootDir> = {}): SharedRootDir {
-	return {
-		inner: {
-			uuid: testUuid("sroot"),
-			color: "default",
-			timestamp: 1_700_000_000_000n,
-			meta: { type: "decoded", data: { name: "SharedRoot" } }
-		},
-		sharingRole: sharerRole(42, "sharer@filen.io"),
-		writeAccess: true,
-		...overrides
-	}
-}
-
-function mockSharedFile(overrides: Partial<SharedFile> = {}): SharedFile {
-	return {
-		uuid: testUuid("sfile"),
-		size: 2_048n,
-		region: "de-1",
-		bucket: "filen-1",
-		chunks: 2n,
-		timestamp: 1_700_000_000_000n,
-		meta: {
-			type: "decoded",
-			data: { name: "shared.pdf", mime: "application/pdf", modified: 1_700_000_000_000n, size: 2_048n, key: "k", version: 2 }
-		},
-		sharingRole: sharerRole(7, "receiver@filen.io"),
-		sharedTag: true,
-		canMakeThumbnail: false,
-		...overrides
-	}
 }
 
 function mockSharedDir(overrides: Partial<SharedDir> = {}): SharedDir {

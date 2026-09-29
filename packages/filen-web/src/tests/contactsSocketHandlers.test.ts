@@ -1,11 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
 import type { ContactRequestsQueryData } from "@/features/contacts/queries/contacts"
-import type { SocketEvent, UuidStr } from "@filen/sdk-rs"
-
-// contacts.ts imports the sdk client (a Vite `?worker`, unresolvable under node) — mocked to nothing; the
-// handler only ever runs the requests-cache patcher, never a worker op.
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
+import type { SocketEvent } from "@filen/sdk-rs"
 
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
@@ -16,10 +12,7 @@ vi.mock("@/lib/log", () => ({ log: { warn: vi.fn(), error: logError, info: vi.fn
 import { queryClient as testQueryClient } from "@/queries/client"
 import { CONTACT_REQUESTS_QUERY_KEY } from "@/features/contacts/queries/contacts"
 import { handleContactEvent } from "@/features/contacts/lib/socketHandlers"
-
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import { testUuid } from "@/tests/support/uuid"
 
 function contactEvt(inner: Extract<SocketEvent, { type: "contact" }>["inner"]): Extract<SocketEvent, { type: "contact" }> {
 	return { type: "contact", inner, contactMessageId: 0n }

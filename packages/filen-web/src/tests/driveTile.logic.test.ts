@@ -1,11 +1,8 @@
 import { describe, expect, it } from "vitest"
-import type { Dir, File, UuidStr } from "@filen/sdk-rs"
+import type { Dir, File } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { showVideoBadge } from "@/features/drive/components/driveTile.logic"
-
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import { testUuid } from "@/tests/support/uuid"
 
 function mockFile(overrides: Partial<File> = {}): File {
 	return {

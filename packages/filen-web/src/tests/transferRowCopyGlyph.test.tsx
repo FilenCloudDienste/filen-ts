@@ -4,7 +4,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { cleanup, render, screen } from "@testing-library/react"
 import "@/lib/i18n"
 
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), custom: vi.fn(), dismiss: vi.fn() } }))
 
 import { TransferRow } from "@/features/transfers/components/transferRow"

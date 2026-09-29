@@ -1,5 +1,5 @@
-import { test, expect } from "./fixtures"
-import { BOOT_SETTLE_TIMEOUT_MS } from "./helpers/listing"
+import { test } from "./fixtures"
+import { bootToSignIn } from "./helpers/listing"
 import { waitForSwReady } from "./helpers/sw"
 import { FIREFOX_SERVICE_WORKERS_BLOCKED } from "./helpers/firefox"
 
@@ -11,14 +11,13 @@ import { FIREFOX_SERVICE_WORKERS_BLOCKED } from "./helpers/firefox"
 // lane. This probe is unauthenticated and takes no drive lock, so it belongs in the read lane, where
 // a transient service-worker registration blip can retry.
 test.describe("service worker version endpoint", () => {
+	test.use({ injectSession: false })
+
 	test("registers and answers the version endpoint", async ({ page, browserName }) => {
 		test.skip(browserName === "firefox", FIREFOX_SERVICE_WORKERS_BLOCKED)
 
-		await page.goto("/")
-
-		// SW registration fires once the app reaches a ready shell — so this closes on a cold boot (wasm
-		// init, the SDK thread pool, the OPFS open), not on UI responsiveness.
-		await expect(page.getByText("Sign in to Filen")).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
+		// SW registration fires once the app reaches a ready shell.
+		await bootToSignIn(page)
 
 		await waitForSwReady(page)
 	})

@@ -1,10 +1,7 @@
 import { describe, expect, it } from "vitest"
-import type { Contact, UuidStr } from "@filen/sdk-rs"
+import type { Contact } from "@filen/sdk-rs"
 import { resolveSelectedContacts } from "@/features/contacts/lib/contactPicker.logic"
-
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import { testUuid } from "@/tests/support/uuid"
 
 function mockContact(label: string): Contact {
 	return {

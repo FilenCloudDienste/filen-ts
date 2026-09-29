@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { BlockedContact, Chat, ChatMessage, ChatParticipant, UuidStr } from "@filen/sdk-rs"
+import type { Chat, ChatMessage, ChatParticipant } from "@filen/sdk-rs"
 import {
 	chatDisplayName,
 	chatMessagePreview,
@@ -15,12 +15,8 @@ import {
 	sortChats
 } from "@/features/chats/lib/sort"
 import { deriveBlockedUsers } from "@filen/shared"
-
-// UuidStr is a template-literal brand requiring at least 3 dashes (see @filen/sdk-rs) — pad a
-// short label the same way notesSort.test.ts's testUuid does.
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import { mockPlainBlockedContact } from "@/tests/support/contactFixtures"
+import { testUuid } from "@/tests/support/uuid"
 
 function mockParticipant(overrides: Partial<ChatParticipant> = {}): ChatParticipant {
 	return {
@@ -94,17 +90,6 @@ function mockUndecryptableMessage(overrides: Omit<Partial<ChatMessage>, "message
 		edited: false,
 		editedTimestamp: 0n,
 		sentTimestamp: 1_000n,
-		...overrides
-	}
-}
-
-function mockBlockedContact(overrides: Partial<BlockedContact> = {}): BlockedContact {
-	return {
-		uuid: testUuid("blocked"),
-		userId: 2n,
-		email: "b@example.com",
-		nickName: "",
-		timestamp: 0n,
 		...overrides
 	}
 }
@@ -342,7 +327,7 @@ describe("messageSenderName", () => {
 })
 
 describe("isLastMessageFromBlocked", () => {
-	const blocked = deriveBlockedUsers([mockBlockedContact({ userId: 9n, email: "zoe@example.com" })])
+	const blocked = deriveBlockedUsers([mockPlainBlockedContact({ userId: 9n, email: "zoe@example.com" })])
 
 	it("is false when the chat has no lastMessage", () => {
 		expect(isLastMessageFromBlocked(mockChat(), blocked)).toBe(false)
@@ -369,7 +354,7 @@ describe("isLastMessageFromBlocked", () => {
 })
 
 describe("chatPreviewTier", () => {
-	const blocked = deriveBlockedUsers([mockBlockedContact({ userId: 9n, email: "zoe@example.com" })])
+	const blocked = deriveBlockedUsers([mockPlainBlockedContact({ userId: 9n, email: "zoe@example.com" })])
 
 	function chatFromBlockedSender(): Chat {
 		return mockChat({ lastMessage: mockMessage({ senderId: 9, senderEmail: "zoe@example.com", message: "hidden" }) })

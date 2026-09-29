@@ -1,5 +1,11 @@
-import type { RoundtripWorkbook } from "hucre/xlsx"
+import { readFileSync } from "node:fs"
+import { openXlsx, writeXlsx, type RoundtripWorkbook } from "hucre/xlsx"
+import type { Cell, CellValue, Workbook } from "hucre"
+import type { EditResult } from "@/features/spreadsheet/lib/edits"
+import { cellKey, type CellView } from "@/features/spreadsheet/lib/model"
 import { XlsxDocument } from "@/features/spreadsheet/lib/xlsxDocument"
+
+const FIXTURES = new URL("./fixtures/spreadsheet/", import.meta.url)
 
 // A workbook opened as the worker opens one: proven (or not) to save intact before anything is edited.
 export async function proven(workbook: RoundtripWorkbook, historyBudget?: number): Promise<XlsxDocument> {
@@ -8,4 +14,42 @@ export async function proven(workbook: RoundtripWorkbook, historyBudget?: number
 	await document.verifyWritable()
 
 	return document
+}
+
+export async function openFixture(name: string): Promise<RoundtripWorkbook> {
+	return await openXlsx(readFileSync(new URL(name, FIXTURES)), { readStyles: true })
+}
+
+export async function openSheets(
+	sheets: { name: string; rows: CellValue[][]; cells?: Map<string, Cell> }[],
+	namedRanges?: Workbook["namedRanges"]
+): Promise<XlsxDocument> {
+	const bytes = await writeXlsx(namedRanges === undefined ? { sheets } : { sheets, namedRanges })
+
+	return await proven(await openXlsx(bytes, { readStyles: true }))
+}
+
+export async function savedWorkbook(document: XlsxDocument): Promise<RoundtripWorkbook> {
+	return await openXlsx((await document.serialize()).bytes, { readStyles: true })
+}
+
+export async function reopen(document: XlsxDocument): Promise<XlsxDocument> {
+	return await proven(await savedWorkbook(document))
+}
+
+export function formula(text: string, result: CellValue = null): Cell {
+	return { value: result, type: "formula", formula: text, formulaResult: result }
+}
+
+// A cell as an edit result carries it; undefined when the result does not.
+export function viewCell(result: EditResult, row: number, col: number, sheet = 0): CellView | null | undefined {
+	if (result.type === "cells") {
+		return result.patches.find(patch => patch.sheet === sheet)?.cells.find(([key]) => key === cellKey(row, col))?.[1]
+	}
+
+	return result.type === "sheets" ? result.sheets[sheet]?.cells.get(cellKey(row, col)) : undefined
+}
+
+export function shownCell(document: XlsxDocument, row: number, col: number, sheet = 0): CellView | undefined {
+	return document.doc().sheets[sheet]?.cells.get(cellKey(row, col))
 }

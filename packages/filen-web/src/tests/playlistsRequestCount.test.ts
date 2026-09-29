@@ -35,12 +35,9 @@ import { createPlaylist } from "@/features/audio/lib/playlists"
 import { handlePlaylistsDriveEvent, registerPlaylistSocketHandlers } from "@/features/audio/lib/socketHandlers"
 import { socketBridge } from "@/lib/sdk/socket"
 import { socketAuthenticated, socketDropped } from "@/lib/sdk/socketSession"
+import { testUuid } from "@/tests/support/uuid"
 
 type DriveEvent = Extract<SocketEvent, { type: "drive" }>["inner"]
-
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
 
 const DOT_FILEN_UUID = testUuid("dotfilen")
 const PLAYLISTS_DIR_UUID = testUuid("playlistsdir")

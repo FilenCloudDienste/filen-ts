@@ -3,7 +3,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { act, renderHook } from "@testing-library/react"
 import type { KeyboardEvent as ReactKeyboardEvent } from "react"
-import type { File, UuidStr } from "@filen/sdk-rs"
+import type { File } from "@filen/sdk-rs"
 import type { Virtualizer } from "@tanstack/react-virtual"
 
 // The grid's pure key table is pinned in photosGridNav.test.ts; this file covers the hook that ACTS on
@@ -16,12 +16,9 @@ import { type PhotoItem } from "@/features/photos/lib/captureSort"
 import { usePhotosStore } from "@/features/photos/store/usePhotosStore"
 import { usePhotosGridNav } from "@/features/photos/hooks/usePhotosGridNav"
 import { buildPhotosTimeline } from "@/features/photos/lib/timeline"
+import { testUuid } from "@/tests/support/uuid"
 
 const COLUMNS = 4
-
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
 
 function photoItem(label: string): PhotoItem {
 	const file: File = {

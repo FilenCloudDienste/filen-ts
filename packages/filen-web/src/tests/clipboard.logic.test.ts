@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { describe, expect, it, vi } from "vitest"
-import type { Dir, File, SharedRootDir, UuidStr } from "@filen/sdk-rs"
+import type { Dir, File, SharedRootDir } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 import {
@@ -15,10 +15,7 @@ import {
 } from "@/features/drive/lib/clipboard.logic"
 import { type DriveClipboardEntry } from "@/features/drive/store/useDriveClipboardStore"
 import { type ParentLookup } from "@/features/drive/components/moveTargetDialog.logic"
-
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import { testUuid } from "@/tests/support/uuid"
 
 function dirItem(label: string, parent: string): DriveItem {
 	return narrowItem({

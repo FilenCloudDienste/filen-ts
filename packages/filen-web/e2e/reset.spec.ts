@@ -29,6 +29,8 @@ function submitButton(page: Page) {
 }
 
 test.describe("reset", { tag: "@no-sdk" }, () => {
+	test.use({ injectSession: false })
+
 	test("submitting without a master-keys file opens the skip-keys ceremony at stage 1", async ({ page }) => {
 		await gotoReset(page)
 		await fillValidFields(page)

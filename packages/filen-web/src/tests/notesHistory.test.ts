@@ -1,11 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
-import type { Note, NoteHistory, UuidStr } from "@filen/sdk-rs"
 import { hashNoteContent } from "@filen/shared"
-
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import { mockNote, mockNoteHistory } from "@/tests/fixtures/notes"
 
 const { restoreNoteFromHistoryOp } = vi.hoisted(() => ({ restoreNoteFromHistoryOp: vi.fn() }))
 
@@ -41,43 +37,13 @@ beforeEach(() => {
 	flushToDisk.mockResolvedValue(true)
 })
 
-function mockNote(overrides: Partial<Note> = {}): Note {
-	return {
-		uuid: testUuid("note"),
-		ownerId: 1n,
-		lastEditorId: 1n,
-		favorite: false,
-		pinned: false,
-		tags: [],
-		noteType: "text",
-		title: "note title",
-		preview: "note preview",
-		trash: false,
-		archive: false,
-		createdTimestamp: 0n,
-		editedTimestamp: 0n,
-		participants: [],
-		...overrides
-	}
-}
-
-function mockHistory(overrides: Partial<NoteHistory> = {}): NoteHistory {
-	return {
-		id: 1n,
-		editedTimestamp: 0n,
-		editorId: 1n,
-		noteType: "text",
-		...overrides
-	}
-}
-
 describe("restoreNoteFromHistory", () => {
 	it("returns an error outcome on SDK rejection, without touching the outbox seam or any cache", async () => {
 		const note = mockNote()
 		testQueryClient.setQueryData(NOTES_QUERY_KEY, [note])
 		restoreNoteFromHistoryOp.mockRejectedValueOnce(new Error("fail"))
 
-		const outcome = await restoreNoteFromHistory(note, mockHistory())
+		const outcome = await restoreNoteFromHistory(note, mockNoteHistory())
 
 		expect(outcome.status).toBe("error")
 		expect(dropEntry).not.toHaveBeenCalled()
@@ -103,7 +69,7 @@ describe("restoreNoteFromHistory", () => {
 			return Promise.resolve(true)
 		})
 
-		const outcome = await restoreNoteFromHistory(note, mockHistory({ content: "restored" }))
+		const outcome = await restoreNoteFromHistory(note, mockNoteHistory({ content: "restored" }))
 
 		expect(outcome).toEqual({ status: "success", item: updated })
 		expect(notesQueryGet()).toEqual([updated])
@@ -121,7 +87,7 @@ describe("restoreNoteFromHistory", () => {
 			return Promise.resolve(note)
 		})
 
-		await restoreNoteFromHistory(note, mockHistory({ content: "restored" }))
+		await restoreNoteFromHistory(note, mockNoteHistory({ content: "restored" }))
 
 		expect(recordedBeforeSend).toEqual([true])
 	})
@@ -131,7 +97,7 @@ describe("restoreNoteFromHistory", () => {
 		restoreNoteFromHistoryOp.mockResolvedValueOnce(note)
 		beginEditingSession(note.uuid)
 
-		await restoreNoteFromHistory(note, mockHistory({ content: "restored" }))
+		await restoreNoteFromHistory(note, mockNoteHistory({ content: "restored" }))
 
 		expect(useNotesInflightStore.getState().editingSessions[note.uuid]).toBeUndefined()
 	})
@@ -145,7 +111,7 @@ describe("restoreNoteFromHistory", () => {
 		const staleUpdatedAt = 111_111
 		testQueryClient.setQueryData(contentKey, "stale pre-restore content", { updatedAt: staleUpdatedAt })
 
-		await restoreNoteFromHistory(note, mockHistory({ content: "restored content" }))
+		await restoreNoteFromHistory(note, mockNoteHistory({ content: "restored content" }))
 
 		expect(testQueryClient.getQueryData(contentKey)).toBe("restored content")
 		expect(testQueryClient.getQueryState<string>(contentKey)?.dataUpdatedAt).not.toBe(staleUpdatedAt)
@@ -158,7 +124,7 @@ describe("restoreNoteFromHistory", () => {
 		testQueryClient.setQueryData(contentKey, "still here")
 		const invalidateSpy = vi.spyOn(testQueryClient, "invalidateQueries")
 
-		await restoreNoteFromHistory(note, mockHistory())
+		await restoreNoteFromHistory(note, mockNoteHistory())
 
 		expect(testQueryClient.getQueryData(contentKey)).toBe("still here")
 		expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: contentKey })
@@ -169,7 +135,7 @@ describe("restoreNoteFromHistory", () => {
 		restoreNoteFromHistoryOp.mockResolvedValueOnce(note)
 		flushToDisk.mockResolvedValueOnce(false)
 
-		const outcome = await restoreNoteFromHistory(note, mockHistory())
+		const outcome = await restoreNoteFromHistory(note, mockNoteHistory())
 
 		expect(outcome.status).toBe("success")
 		expect(logWarn).toHaveBeenCalledOnce()

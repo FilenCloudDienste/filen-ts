@@ -1,7 +1,7 @@
 import { test, expect } from "./fixtures"
 import { SW_DOWNLOAD_PREFIX } from "@/lib/sw/protocol"
 import { bootTo } from "./helpers/listing"
-import { enterFixtureDirectory, FIXTURE_FILES } from "./helpers/fixtures"
+import { FIXTURE_FILES, openFixtureRows } from "./helpers/fixtures"
 import { waitForSwReady } from "./helpers/sw"
 import { trackCspViolations } from "./helpers/csp"
 import { FIREFOX_SERVICE_WORKERS_BLOCKED } from "./helpers/firefox"
@@ -29,12 +29,9 @@ interface SwResponseLog {
 
 test("image/video/audio previews stream over the SW's inline route: range-seekable, inline, allowlisted Content-Type, zero CSP violations", async ({
 	page,
-	injectedSession,
 	browserName
 }) => {
 	test.skip(browserName === "firefox", FIREFOX_SERVICE_WORKERS_BLOCKED)
-	expect(injectedSession.length).toBeGreaterThan(0)
-
 	// Destructured in the scenario's own nameAsc order (mp3 < mp4 < png) — that order is the reason the
 	// video sits at the MIDDLE pager index, which the ArrowRight leg below depends on.
 	const [nameAudio, nameVideo, nameImage] = FIXTURE_FILES["preview-media"]
@@ -57,15 +54,10 @@ test("image/video/audio previews stream over the SW's inline route: range-seekab
 
 	await bootTo(page)
 
-	const { listbox } = await enterFixtureDirectory(page, "preview-media")
+	const {
+		rows: [rowAudio, rowVideo, rowImage]
+	} = await openFixtureRows(page, "preview-media")
 	await waitForSwReady(page)
-
-	const rowImage = listbox.getByRole("option", { name: nameImage })
-	const rowVideo = listbox.getByRole("option", { name: nameVideo })
-	const rowAudio = listbox.getByRole("option", { name: nameAudio })
-	await expect(rowImage).toBeVisible({ timeout: 45_000 })
-	await expect(rowVideo).toBeVisible({ timeout: 45_000 })
-	await expect(rowAudio).toBeVisible({ timeout: 45_000 })
 
 	// ---- image leg: <img> served by the SW's inline route, not the buffered blob: fallback ----
 	await rowImage.dblclick()

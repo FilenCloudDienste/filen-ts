@@ -6,7 +6,7 @@ import {
 	SW_MSG_REGISTER_ZIP_DOWNLOAD,
 	SW_REQUEST_TIMEOUT_MS
 } from "@/lib/sw/protocol"
-import { bootTo, enterScratchDirectory, trashScratchDirectory, LIVE_WRITE_TIMEOUT_MS } from "./helpers/listing"
+import { withScratchDirectory, LIVE_WRITE_TIMEOUT_MS } from "./helpers/listing"
 import { waitForSwReady } from "./helpers/sw"
 import { FIREFOX_SERVICE_WORKERS_BLOCKED } from "./helpers/firefox"
 
@@ -25,23 +25,10 @@ test.describe("service worker", () => {
 	// rather than through a real Download click: Chromium (the only engine this suite trusts for
 	// service workers — see the skip below) always has the File System Access API, so a real click
 	// would take the fsa branch and never reach the sw route under test here.
-	test("registers a real 2-file selection, streams a valid zip response, and drops it on logout", async ({
-		page,
-		injectedSession,
-		browserName
-	}) => {
+	test("registers a real 2-file selection, streams a valid zip response, and drops it on logout", async ({ page, browserName }) => {
 		test.skip(browserName === "firefox", FIREFOX_SERVICE_WORKERS_BLOCKED)
-		expect(injectedSession.length).toBeGreaterThan(0)
-
-		// The drive listing, not just the bare authed shell, so the scratch directory below has somewhere
-		// to be created.
-		await bootTo(page)
-		await waitForSwReady(page)
-
-		const scratchName = `e2e-sw-zip-${crypto.randomUUID()}`
-
-		try {
-			await enterScratchDirectory(page, scratchName)
+		await withScratchDirectory(page, "sw-zip", async () => {
+			await waitForSwReady(page)
 
 			const scratchUuid = /\/drive\/([^/]+)$/.exec(page.url())?.[1]
 
@@ -209,8 +196,6 @@ test.describe("service worker", () => {
 			// worker's own handler branches on that (sw.ts's handleDownload).
 			expect(result.logoutAck).toEqual({ ok: true })
 			expect(result.afterLogoutStatus).toBe(404)
-		} finally {
-			await trashScratchDirectory(page, scratchName)
-		}
+		})
 	})
 })

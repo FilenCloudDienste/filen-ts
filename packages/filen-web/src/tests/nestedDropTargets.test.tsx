@@ -8,7 +8,6 @@ import type { File, UuidStr } from "@filen/sdk-rs"
 
 const { performMove } = vi.hoisted(() => ({ performMove: vi.fn() }))
 
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 vi.mock("@/features/drive/lib/actions", () => ({ currentRootUuid: () => "root-0000-0000-0000-000000000000" }))
 vi.mock("@/features/drive/lib/dnd", async importOriginal => ({

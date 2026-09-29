@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import type { AnyFile, AnyLinkedDirWithContext, LinkedFile } from "@filen/sdk-rs"
+import type { AnyFile, AnyLinkedDirWithContext } from "@filen/sdk-rs"
+import { linkedFileItem } from "@/tests/fixtures/sdk"
 
 // What a public link's buffered (non-FSA) download reports: a directory's zip that outgrows the
 // in-memory cap is "too large", not a bare failure; a failed zip leaves no rejection unhandled; a
@@ -28,7 +29,6 @@ vi.mock("@/features/publicLinks/lib/download.logic", async importOriginal => {
 })
 
 const { startAnonDirZipDownload, startAnonFileDownload } = await import("@/features/publicLinks/lib/download")
-const { linkedFileIntoDriveItem } = await import("@/features/drive/lib/item")
 const { narrowToAnyFile } = await import("@/features/drive/lib/download")
 const { clearPreviewCache } = await import("@/features/preview/lib/previewCache")
 
@@ -89,27 +89,13 @@ describe("startAnonDirZipDownload without FSA", () => {
 
 describe("startAnonFileDownload without FSA", () => {
 	it("reports no share of progress until the buffered bytes are in", async () => {
-		const file: LinkedFile = {
-			uuid: "f1000000-0000-0000-0000-000000000000",
-			name: { Decrypted: "movie.mp4" },
-			mime: { Decrypted: "video/mp4" },
-			size: 10n,
-			chunks: 1n,
-			region: "",
-			bucket: "",
-			version: 2,
-			timestamp: 0n,
-			fileKey: "k",
-			downloadable: true,
-			linkedTag: true,
-			canMakeThumbnail: false
-		}
+		const file = narrowToAnyFile(linkedFileItem("movie.mp4", { mime: { Decrypted: "video/mp4" } }))
 		const onProgress = vi.fn()
 
 		downloadLinkedFileBytesAnon.mockResolvedValue(new Uint8Array(10))
 
 		const outcome = await startAnonFileDownload({
-			file: narrowToAnyFile(linkedFileIntoDriveItem(file)),
+			file,
 			name: "movie.mp4",
 			size: 10n,
 			linkScope: "scope",

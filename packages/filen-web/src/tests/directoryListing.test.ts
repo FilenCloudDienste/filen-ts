@@ -12,12 +12,7 @@ import {
 	resolveListingDisplayItems,
 	resolveSearchDisplayItems
 } from "@/features/drive/components/directoryListing.logic"
-
-// UuidStr is a template-literal brand requiring at least 3 dashes (see @filen/sdk-rs) — mirrors
-// queries/drive.test.ts's own testUuid helper.
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import { testUuid } from "@/tests/support/uuid"
 
 function sharerRole(id: number, email: string): SharingRole {
 	return { Sharer: { email, id } }

@@ -4,12 +4,12 @@ import {
 	waitForListingSettled,
 	bootTo,
 	clickSidebarLink,
-	enterScratchDirectory,
-	trashScratchDirectory,
+	withScratchDirectory,
 	descendInto,
 	createDirectoryViaDialog,
 	LIVE_WRITE_TIMEOUT_MS,
-	BOOT_SETTLE_TIMEOUT_MS
+	BOOT_SETTLE_TIMEOUT_MS,
+	toasts
 } from "./helpers/listing"
 import { MOD_KEY } from "./helpers/modkey"
 import { ACTION_DEFS } from "@/features/drive/lib/actionDefs"
@@ -100,27 +100,18 @@ async function assertRowContextMenu(page: Page, listbox: Locator, name: string, 
 
 test.describe("context menus", () => {
 	// The one test in this file that touches live account state — a net-zero round trip inside a
-	// single scratch directory (enterScratchDirectory/trashScratchDirectory, mirrors every other
-	// data-mutating drive spec's convention). Everything below stays nested inside it except the
-	// trash/restore leg, which necessarily visits the flat /trash listing — trashing the scratch
-	// directory itself in the `finally` sweeps up its contents (nested or restored back into it)
-	// regardless of where this test's own assertions stop.
+	// single scratch directory (withScratchDirectory, every other data-mutating drive spec's
+	// convention). Everything below stays nested inside it except the trash/restore leg, which
+	// necessarily visits the flat /trash listing — trashing the scratch directory itself at teardown
+	// sweeps up its contents (nested or restored back into it) regardless of where this test's own
+	// assertions stop.
 	test("a file row, a directory row, the bulk bar, and the trash-variant menu render exactly the gated entries, in order", async ({
-		page,
-		injectedSession
+		page
 	}) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
-		const runId = crypto.randomUUID()
-		const scratchName = `e2e-menus-${runId}`
-		const dirName = `e2e-menus-${runId}-dir`
-		const fileBaseName = `e2e-menus-${runId}-file`
-		const fileName = `${fileBaseName}.txt`
-
-		await bootTo(page)
-
-		try {
-			const { listbox } = await enterScratchDirectory(page, scratchName)
+		await withScratchDirectory(page, "menus", async ({ listbox, scratchName, runId }) => {
+			const dirName = `e2e-menus-${runId}-dir`
+			const fileBaseName = `e2e-menus-${runId}-file`
+			const fileName = `${fileBaseName}.txt`
 
 			await createDirectoryViaDialog(page, dirName, listbox)
 
@@ -230,7 +221,7 @@ test.describe("context menus", () => {
 			// reachable from the right-click surface too, not just the toolbar/bulk bar), then read
 			// the reduced menu back on the /trash listing, then restore — net-zero, it lands back in
 			// the scratch directory it came from (restoreItems restores to the original parent),
-			// where the `finally` below sweeps it up regardless.
+			// where the scratch teardown sweeps it up regardless.
 			await dirRow.click({ button: "right" })
 			const trashMenu = page.getByRole("menu")
 			await expect(trashMenu).toBeVisible()
@@ -253,7 +244,7 @@ test.describe("context menus", () => {
 			const trashFailureToast = driveDict.driveBulkActionCompleteWithFailures_other
 				.replace("{{count}}", "0")
 				.replace("{{failed}}", "1")
-			await expect(page.locator("[data-sonner-toast]").filter({ hasText: trashFailureToast })).toHaveCount(0, { timeout: 5_000 })
+			await expect(toasts(page).filter({ hasText: trashFailureToast })).toHaveCount(0, { timeout: 5_000 })
 
 			// On the live page: trashItems patches the row out only after the write succeeded, and a refetch
 			// already in flight replays that patch (queries/drive.ts's patchListing). A reload proved less, not
@@ -294,11 +285,7 @@ test.describe("context menus", () => {
 			await descendInto(page, rootAfterRestore.listbox, scratchName)
 			const restoredListing = await waitForListingSettled(page)
 			await expect(restoredListing.listbox.getByRole("option", { name: dirName })).toBeVisible()
-		} finally {
-			// Sweeps the whole scratch subtree — the nested directory and the file, restored or not,
-			// in whichever state the test stopped in.
-			await trashScratchDirectory(page, scratchName)
-		}
+		})
 	})
 
 	// The links/shared-in/shared-out surfaces are read-only-mutation-wise on this FREE e2e account
@@ -307,12 +294,7 @@ test.describe("context menus", () => {
 	// per-item Move descriptor would otherwise need: the toolbar's New directory/Upload stay
 	// present-but-disabled (directoryListing.tsx's writeDisabled, uniform across every non-"drive"
 	// variant), and no Move surface is reachable anywhere on the page.
-	test("links + shared-root surfaces: toolbar write-gating stands in for a per-item menu on empty listings", async ({
-		page,
-		injectedSession
-	}) => {
-		expect(injectedSession.length).toBeGreaterThan(0)
-
+	test("links + shared-root surfaces: toolbar write-gating stands in for a per-item menu on empty listings", async ({ page }) => {
 		await bootTo(page)
 
 		async function assertWriteGated(linkName: string, urlPattern: RegExp): Promise<void> {

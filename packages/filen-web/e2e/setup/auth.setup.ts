@@ -1,7 +1,7 @@
 import { chmodSync, mkdirSync, writeFileSync } from "node:fs"
 import { test as setup, expect } from "@playwright/test"
 import { AUTH_DIR, SESSION_FILE } from "../fixtures"
-import { BOOT_SETTLE_TIMEOUT_MS, dismissStartupReminders } from "../helpers/listing"
+import { awaitShell, bootToSignIn, toasts as toastStack } from "../helpers/listing"
 import { waitForE2eHooks } from "../helpers/e2eHooks"
 
 // Exactly one real login per run: this setup project runs once and every authed spec reuses the blob
@@ -18,12 +18,11 @@ const password = process.env["FILEN_WEB_E2E_TEST_PASSWORD"] ?? ""
 setup("sign in through the real form and harvest the session", async ({ page }) => {
 	setup.skip(email === "" || password === "", "no e2e credentials configured")
 
-	await page.goto("/")
 	// The login screen only renders once boot reaches "ready" (the SDK worker's thread pool must be up
-	// before login can derive keys), so its presence gates the form fill below. Pinned at the cold-boot
-	// budget rather than the expect default: the whole project graph depends on this one test and it
-	// cannot retry, so a slow runner must not read as a broken login form.
-	await expect(page.getByText("Sign in to Filen")).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
+	// before login can derive keys), so its presence gates the form fill below. At the cold-boot budget:
+	// the whole project graph depends on this one test and it cannot retry, so a slow runner must not
+	// read as a broken login form.
+	await bootToSignIn(page)
 	await waitForE2eHooks(page)
 
 	// Drive the REAL form for the one login the budget allows — genuine UI coverage of the field
@@ -40,7 +39,7 @@ setup("sign in through the real form and harvest the session", async ({ page }) 
 	// rest of the app inert until dismissed, hiding the nav), or a toast, which is how a rejected or
 	// rate-limited login reports itself. A toast without the nav names the failure instead of timing out.
 	const nav = page.getByRole("navigation", { name: "Filen" })
-	const toasts = page.locator("[data-sonner-toast]")
+	const toasts = toastStack(page)
 
 	await expect(nav.or(toasts).or(page.getByRole("alertdialog")).first()).toBeVisible({ timeout: LOGIN_TIMEOUT_MS })
 
@@ -48,8 +47,7 @@ setup("sign in through the real form and harvest the session", async ({ page }) 
 		throw new Error(`Sign-in did not complete: ${JSON.stringify(await toasts.allInnerTexts())}`)
 	}
 
-	await dismissStartupReminders(page)
-	await expect(nav).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
+	await awaitShell(page)
 
 	// Harvest the now-live worker session — NOT the kv copy: a persist failure (persisted: false, a
 	// real documented outcome — see loginAttempt.ts) would leave nothing there even though the login

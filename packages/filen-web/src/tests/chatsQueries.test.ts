@@ -1,12 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
-import type { Chat, ChatMessage, ChatParticipant, UuidStr } from "@filen/sdk-rs"
-
-// UuidStr is a template-literal brand requiring at least 3 dashes (see @filen/sdk-rs) — pad a
-// short label the same way notesQueries.test.ts's testUuid does.
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import type { Chat, ChatMessage, ChatParticipant } from "@filen/sdk-rs"
 
 // Mock boundary matching notesQueries.test.ts: the real sdk client module imports a Vite
 // `?worker`, unresolvable under node vitest.
@@ -55,6 +49,7 @@ import {
 	mergeNewestPage,
 	useChatMessages
 } from "@/features/chats/queries/chatMessages"
+import { testUuid } from "@/tests/support/uuid"
 
 beforeEach(() => {
 	vi.clearAllMocks()

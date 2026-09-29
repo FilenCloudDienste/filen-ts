@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
-import type { Dir, File, GetItemPathResult, UuidStr } from "@filen/sdk-rs"
+import type { Dir, File, GetItemPathResult } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 
 // The real sdk client module imports a Vite `?worker`, unresolvable under node vitest — reveal.ts
@@ -22,10 +22,7 @@ import {
 	runOpenContainingDirectory,
 	type RevealDeps
 } from "@/features/drive/lib/reveal"
-
-function testUuid(label: string): UuidStr {
-	return `${label}-0000-0000-0000-000000000000` as UuidStr
-}
+import { testUuid } from "@/tests/support/uuid"
 
 function ancestor(uuid: string): Dir {
 	return {
