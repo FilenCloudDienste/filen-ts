@@ -9,17 +9,13 @@ import useDomDomEvents from "@/hooks/useDomEvents/useDomDomEvents"
 import { installDomConsoleProxy } from "@/hooks/useDomEvents/domConsoleProxy"
 import { installDomViewportReset, onViewportChange, VIEWPORT_HEIGHT } from "@/lib/domViewport"
 import { decodeEditorInitialValue } from "@/components/textEditor/initialValueCodec"
-import { classifyExternalLinkHref } from "@/components/textEditor/linkUtils"
+import { FLUSH_COMPOSITION_COMMIT_MS } from "@/components/textEditor/domTiming"
+import { classifyUntrustedLinkHref } from "@/lib/untrustedLinks"
 import { quillV2ToLegacyV1 } from "@filen/shared/dom"
 import Quill from "quill"
 import DOMPurify from "dompurify"
 import QuillThemeCustomizer, { getThemeOptions } from "@/components/textEditor/richText/quillTheme"
 import type { TextEditorEvents, Colors, Font } from "@/components/textEditor"
-
-// How long after a flush request (and its optional composition-committing blur) the document
-// is re-read for the divergence check — long enough for the keyboard's finalized text to land
-// through the normal event path, short enough to fit inside a screen-pop animation.
-const FLUSH_COMPOSITION_COMMIT_MS = 80
 
 // How long after the last DOM `input` event the live document is mirrored to native (#67).
 // LatinIME-family keyboards (Heliboard, GrapheneOS/AOSP; iOS CJK keyboards behave alike) hold
@@ -53,6 +49,27 @@ DOMPurify.addHook("afterSanitizeAttributes", (node: Element) => {
 		node.setAttribute("rel", "noopener noreferrer")
 	}
 })
+
+// Reports the live document iff it differs from the last value delivered to native, so the
+// text-change, input-mirror and flush paths never double-report the same content (#67). Persists
+// lists and code blocks in Quill v1's on-disk form rather than Quill v2's (<ol><li data-list>): v2
+// markup is read by web/desktop (Quill 1.3.7) as a plain numbered list — checkboxes gone, bullets
+// renumbered. See quillCompat for the mechanism.
+function reportHtmlIfChanged(
+	quill: Quill,
+	lastReportedHtmlRef: React.RefObject<string | null>,
+	onValueChangeRef: React.RefObject<((value: string) => void) | undefined>
+): void {
+	const html = quillV2ToLegacyV1(quill.root.innerHTML)
+
+	if (html === lastReportedHtmlRef.current) {
+		return
+	}
+
+	lastReportedHtmlRef.current = html
+
+	onValueChangeRef.current?.(html)
+}
 
 export type HeaderLevel = 1 | 2 | 3 | 4 | 5 | 6
 export type ListType = "ordered" | "bullet" | "checked" | "unchecked"
@@ -238,12 +255,6 @@ const RichTextEditorDom = ({
 				break
 			}
 
-			case "dismissKeyboard": {
-				quillRef.current?.blur()
-
-				break
-			}
-
 			// #67: report the final document iff it differs from the last value change events
 			// delivered — some WebView/keyboard combos never fire change events for IME-composed
 			// text. commitComposition blurs first so the keyboard finalizes the composing region
@@ -262,15 +273,7 @@ const RichTextEditorDom = ({
 						return
 					}
 
-					const html = quillV2ToLegacyV1(quillRef.current.root.innerHTML)
-
-					if (html === lastReportedHtmlRef.current) {
-						return
-					}
-
-					lastReportedHtmlRef.current = html
-
-					onValueChangeRef.current?.(html)
+					reportHtmlIfChanged(quillRef.current, lastReportedHtmlRef, onValueChangeRef)
 				}, FLUSH_COMPOSITION_COMMIT_MS)
 
 				break
@@ -315,21 +318,9 @@ const RichTextEditorDom = ({
 				return
 			}
 
-			// Persist lists and code blocks in Quill v1's on-disk form rather than
-			// Quill v2's (<ol><li data-list>). v2 markup is read by web/desktop (Quill 1.3.7) as a plain
-			// numbered list — checkboxes gone, bullets renumbered. See quillCompat for the mechanism.
-			const html = quillV2ToLegacyV1(quillRef.current.root.innerHTML)
-
-			// Divergence-gated like the mirror/flush paths: when a composition commit lands
-			// content the input mirror already reported, skip the duplicate (#67). Only literal
-			// duplicates of the last delivered value are skipped — any real change diverges.
-			if (html === lastReportedHtmlRef.current) {
-				return
-			}
-
-			lastReportedHtmlRef.current = html
-
-			onValueChange?.(html)
+			// Divergence-gated: a composition commit landing content the input mirror already
+			// reported is skipped as a duplicate (#67).
+			reportHtmlIfChanged(quillRef.current, lastReportedHtmlRef, onValueChangeRef)
 		})
 
 		// Keeps the caret visible when the selection moves (#102) — the Quill counterpart of
@@ -378,18 +369,10 @@ const RichTextEditorDom = ({
 					return
 				}
 
-				const html = quillV2ToLegacyV1(quillRef.current.root.innerHTML)
-
-				if (html === lastReportedHtmlRef.current) {
-					return
-				}
-
-				lastReportedHtmlRef.current = html
-
-				onValueChangeRef.current?.(html)
+				reportHtmlIfChanged(quillRef.current, lastReportedHtmlRef, onValueChangeRef)
 			}, INPUT_MIRROR_DEBOUNCE_MS)
 		})
-	}, [placeholder, onValueChange, postFormatUpdates, postMessage, readOnly])
+	}, [placeholder, postFormatUpdates, postMessage, readOnly])
 
 	// #40 fix: actually ENFORCE read-only. The Quill instance honours the construction
 	// `readOnly` flag, and this effect re-applies it whenever the prop flips so a
@@ -505,15 +488,15 @@ const RichTextEditorDom = ({
 
 			event.preventDefault()
 
-			const { url, intercept } = classifyExternalLinkHref(href)
+			const classification = classifyUntrustedLinkHref(href)
 
-			if (!intercept) {
+			if (classification.action !== "external") {
 				return
 			}
 
 			postMessageRef.current({
 				type: "externalLinkClicked",
-				data: url
+				data: classification.url
 			})
 		}
 

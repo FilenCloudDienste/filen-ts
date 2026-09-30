@@ -4,7 +4,6 @@ import { vi, describe, it, expect, beforeEach } from "vitest"
 // deliberately REAL here: this suite exists to prove removeQueryEverywhere actually matches and
 // deletes, which a mocked QueryClient cannot show. src/tests/client.test.ts mocks both packages, so
 // its coverage stops exactly where this one starts.
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 
 vi.mock("react-native", async () => {
 	const actual = await import("@/tests/mocks/reactNative")

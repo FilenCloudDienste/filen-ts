@@ -12,6 +12,7 @@ export type NotesStore = {
 	setSelectedNotes: (fn: Note[] | ((prev: Note[]) => Note[])) => void
 	setSelectedTags: (fn: NoteTag[] | ((prev: NoteTag[]) => NoteTag[])) => void
 	toggleSelectedNote: (note: Note) => void
+	toggleSelectedTag: (tag: NoteTag) => void
 	clearSelectedNotes: () => void
 	selectAllNotes: (notes: Note[]) => void
 	clearSelectedTags: () => void
@@ -19,6 +20,7 @@ export type NotesStore = {
 }
 
 const noteId = (n: Note) => n.uuid
+const tagId = (t: NoteTag) => t.uuid
 
 export const useNotesStore = create<NotesStore>(set => ({
 	selectedNotes: [],
@@ -48,6 +50,11 @@ export const useNotesStore = create<NotesStore>(set => ({
 	toggleSelectedNote(note) {
 		set(state => ({
 			selectedNotes: toggleInArray(state.selectedNotes, note, noteId)
+		}))
+	},
+	toggleSelectedTag(tag) {
+		set(state => ({
+			selectedTags: toggleInArray(state.selectedTags, tag, tagId)
 		}))
 	},
 	clearSelectedNotes() {

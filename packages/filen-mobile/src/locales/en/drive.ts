@@ -214,12 +214,6 @@ export const drive = {
 	delete_selected_permanently: "Delete selected permanently",
 	/** Bulk action: move all selected items to a new location */
 	move_selected: "Move selected",
-	/** Bulk action: save all selected image/video items to the device photo library */
-	save_to_photos_selected: "Save to photos",
-	/** Bulk action: share all selected items with a Filen user */
-	share_filen_user_selected: "Share with Filen user",
-	/** Bulk action: remove offline cache for all selected items */
-	remove_offline_selected: "Remove from offline",
 	/** Bulk action: stop sharing all selected outgoing-share items */
 	stop_sharing_selected: "Stop sharing selected",
 	/** Bulk action: remove all selected incoming-share items */
@@ -232,7 +226,7 @@ export const drive = {
 	are_you_sure_restore_selected: "Are you sure you want to restore the selected items?",
 	/** Confirmation body for bulk permanent delete */
 	are_you_sure_delete_selected_permanently: "Are you sure you want to permanently delete the selected items? This cannot be undone.",
-	/** Confirmation body for bulk trash */
+	/** Confirmation body for bulk trash (drive and photos) */
 	are_you_sure_trash_selected: "Are you sure you want to move the selected items to the trash? You can restore them later.",
 	/** Confirmation body for bulk stop-sharing */
 	are_you_sure_stop_sharing_selected: "Are you sure you want to stop sharing the selected items?",
@@ -242,7 +236,7 @@ export const drive = {
 	are_you_sure_disable_public_link_selected: "Are you sure you want to disable the public link for the selected items?",
 	/** Confirmation body for bulk remove-offline */
 	confirm_remove_offline_selected: "Are you sure you want to remove the selected items from offline storage?",
-	/** Confirm button label for bulk remove-offline dialog */
+	/** Remove-from-offline action: menu item, confirmation title and confirm button (single and bulk) */
 	remove_offline: "Remove from offline",
 
 	// ── Empty trash actions / confirmation ────────────────────────────────────
@@ -294,9 +288,9 @@ export const drive = {
 	open_containing_directory: "Open containing directory",
 	/** Per-item context menu: download item to the device filesystem */
 	download_to_device: "Download to device",
-	/** Per-item context menu: make the item available when offline */
+	/** Menu action (single and bulk, drive/photos/notes): make the item(s) available when offline */
 	make_available_offline: "Make available offline",
-	/** Per-item context menu: save image or video to the device photo library */
+	/** Menu action (single and bulk): save image or video items to the device photo library */
 	save_to_photos: "Save to photos",
 	/** Per-item context menu (Android): download the file, then open it in a third-party app via the native chooser (read-only) */
 	open_with: "Open with…",
@@ -304,11 +298,11 @@ export const drive = {
 	no_app_to_open_file: "No app available to open this file type",
 	/** Per-item context menu sub-item: create a shareable public link */
 	share_public_link: "Share public link",
-	/** Per-item context menu sub-item: share item with another Filen user */
+	/** Menu action (single and bulk): share with another Filen user */
 	share_filen_user: "Share with Filen user",
-	/** Per-item context menu: remove an item that someone shared with the current user */
+	/** Remove an item someone shared with the current user: menu item, confirmation title and confirm button */
 	remove_share: "Remove share",
-	/** Per-item context menu: stop sharing an item that the current user owns */
+	/** Stop sharing an item the current user owns: menu item, confirmation title and confirm button */
 	stop_sharing: "Stop sharing",
 	/** Per-item context menu: disable the public link for this item */
 	disable_public_link: "Disable public link",
@@ -343,30 +337,19 @@ export const drive = {
 	/** Per-item context menu: permanently delete the item (trash view only) */
 	delete_permanently: "Delete permanently",
 
-	// ── Per-item rename prompt ─────────────────────────────────────────────────
-	/** Rename-item dialog title */
-	rename_item: "Rename",
-	// enter_new_name lives in common.ts.
+	// rename and enter_new_name (the rename prompt) live in common.ts.
 
 	// ── Per-item confirmation dialogs ─────────────────────────────────────────
-	/** Confirmation dialog title for permanently deleting a single item */
-	delete_permanently_item: "Delete permanently",
 	/** Confirmation body for permanently deleting a single item */
 	confirm_delete_permanently: "Are you sure you want to permanently delete this item? This cannot be undone.",
 	/** Confirmation dialog title for trashing a single item */
 	trash_item: "Trash",
 	/** Confirmation body for trashing a single item */
 	confirm_trash: "Are you sure you want to move this item to the trash? You can restore it later.",
-	/** Confirmation dialog title for removing a single item from offline storage */
-	remove_offline_item: "Remove from offline",
 	/** Confirmation body for removing a single item from offline storage */
 	confirm_remove_offline: "Are you sure you want to remove this item from offline storage?",
-	/** Confirmation dialog title for removing a single incoming share */
-	remove_share_item: "Remove share",
 	/** Confirmation body for removing a single incoming share */
 	confirm_remove_share: "Are you sure you want to remove this share?",
-	/** Confirmation dialog title for stopping outgoing share of a single item */
-	stop_sharing_item: "Stop sharing",
 	/** Confirmation body for stopping outgoing share of a single item */
 	confirm_stop_sharing: "Are you sure you want to stop sharing this item?",
 	/** Confirmation dialog title and button for disabling a public link */
@@ -445,14 +428,14 @@ export const drive = {
 	download_missing_files_other: "Downloaded with {{count}} missing files",
 
 	// ── Bottom tab labels (routes/tabs/_layout.tsx) ───────────────────────────
-	/** Bottom tab label for the drive (files) tab */
+	/** Bottom tab label and start-screen option for the drive (files) tab */
 	tab_drive: "Drive",
-	/** Bottom tab label for the photos tab */
+	/** Bottom tab label and start-screen option for the photos tab */
 	tab_photos: "Photos",
-	/** Bottom tab label for the notes tab */
+	/** Bottom tab label and start-screen option for the notes tab */
 	tab_notes: "Notes",
-	/** Bottom tab label for the chats tab */
+	/** Bottom tab label and start-screen option for the chats tab */
 	tab_chats: "Chats",
-	/** Bottom tab label for the more (settings) tab */
+	/** Bottom tab label and start-screen option for the more (settings) tab */
 	tab_more: "More"
 } as const

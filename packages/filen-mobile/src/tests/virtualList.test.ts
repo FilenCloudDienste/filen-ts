@@ -3,10 +3,6 @@ vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 
 // ─── Module boundary mocks (must precede all imports) ─────────────────────────
 
-// react-native is globally aliased to our minimal mock, but virtualList.tsx
-// re-imports specific named exports; stub those too.
-vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
-
 // Flash-list: ships a native module that can't load in node; return a stub.
 vi.mock("@shopify/flash-list", () => ({
 	FlashList: () => null

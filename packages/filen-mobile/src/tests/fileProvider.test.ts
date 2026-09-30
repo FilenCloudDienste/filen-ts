@@ -8,8 +8,6 @@ const { mockSecureStoreData } = vi.hoisted(() => {
 	}
 })
 
-vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
-
 // Use the REAL Semaphore here (not the no-op mock) so writeMutex actually
 // serializes — the enable() race fix depends on genuine mutual exclusion.
 // vi.importActual bypasses this factory's own interception of the bare specifier.

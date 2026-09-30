@@ -4,8 +4,6 @@ import pathModule from "path"
 // @ts-expect-error __DEV__ is a React Native global
 globalThis.__DEV__ = true
 
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
-
 vi.mock("expo-media-library/next", async () => await import("@/tests/mocks/expoMediaLibrary"))
 
 vi.mock("react-native-blob-util", async () => await import("@/tests/mocks/reactNativeBlobUtil"))
@@ -166,7 +164,7 @@ vi.mock("@/features/transfers/transfers", () => ({
 }))
 
 const mockSetSyncing = vi.fn()
-const mockSetErrors = vi.fn()
+const mockAddError = vi.fn()
 const mockAddSkippedAsset = vi.fn()
 const mockRemoveSkippedAsset = vi.fn()
 const mockClearSkippedAssets = vi.fn()
@@ -175,7 +173,7 @@ vi.mock("@/features/cameraUpload/store/useCameraUpload.store", () => ({
 	default: {
 		getState: () => ({
 			setSyncing: mockSetSyncing,
-			setErrors: mockSetErrors,
+			addError: mockAddError,
 			addSkippedAsset: mockAddSkippedAsset,
 			removeSkippedAsset: mockRemoveSkippedAsset,
 			clearSkippedAssets: mockClearSkippedAssets
@@ -1391,7 +1389,7 @@ describe("sync flow", () => {
 			await cameraUpload.sync()
 
 			expect(transfers.upload).toHaveBeenCalledTimes(1)
-			expect(mockSetErrors).not.toHaveBeenCalled()
+			expect(mockAddError).not.toHaveBeenCalled()
 		})
 
 		it("hashes an asset whose name needs encoding", async () => {
@@ -1412,7 +1410,7 @@ describe("sync flow", () => {
 			await cameraUpload.sync()
 
 			expect(transfers.upload).toHaveBeenCalledTimes(1)
-			expect(mockSetErrors).not.toHaveBeenCalled()
+			expect(mockAddError).not.toHaveBeenCalled()
 		})
 
 		it("hashes a video whose getUri() carries an AVFoundation fragment", async () => {
@@ -1448,7 +1446,7 @@ describe("sync flow", () => {
 
 			expect(mockFileHash).toHaveBeenCalledWith(uri, expect.objectContaining({ algorithm: "MD5" }))
 			expect(transfers.upload).toHaveBeenCalledTimes(1)
-			expect(mockSetErrors).not.toHaveBeenCalled()
+			expect(mockAddError).not.toHaveBeenCalled()
 		})
 
 		it("stores the returned hash verbatim, so existing ledger entries keep shielding", async () => {
@@ -1647,7 +1645,7 @@ describe("sync flow", () => {
 			await cameraUpload.sync()
 
 			expect(transfers.upload).toHaveBeenCalledTimes(1)
-			expect(mockSetErrors).not.toHaveBeenCalled()
+			expect(mockAddError).not.toHaveBeenCalled()
 		})
 
 		it("does not hash BLAKE3 when the destination is empty", async () => {
@@ -2166,12 +2164,8 @@ describe("sync flow", () => {
 
 		await cameraUpload.sync()
 
-		expect(mockSetErrors).toHaveBeenCalled()
-		// Tighten: verify the updater function actually appends an Error to the list
-		const updater = vi.mocked(mockSetErrors).mock.calls[0]?.[0] as (prev: unknown[]) => unknown[]
-		const result = updater([])
-		expect(result).toHaveLength(1)
-		expect((result[0] as any).error).toBeInstanceOf(Error)
+		expect(mockAddError).toHaveBeenCalled()
+		expect(mockAddError.mock.calls[0]?.[0].error).toBeInstanceOf(Error)
 	})
 
 	it("maxUploads caps the number of deltas processed", async () => {
@@ -3293,13 +3287,12 @@ describe("MD5 hash cache", () => {
 		}
 	}
 
-	it("skips upload when MD5 matches cached value (legacy string entry) and migrates it to the verified-mtime shape", async () => {
+	it("skips upload when MD5 matches a never-verified legacy entry and records the verified mtime", async () => {
 		setupLocalAssets([{ id: "a1", filename: "photo.jpg" }])
 
-		// Legacy persisted shape: bare md5 string. It must still shield the upload
-		// (treated as verifiedModificationTime: -1 → one hash, md5 matches → skip)
-		// and be upgraded in place to the object shape carrying the verified mtime.
-		cameraUploadState.hashes.set("/camera roll/photo.jpg", "mock-md5")
+		// A legacy bare-md5 row as the store serves it (verifiedModificationTime: -1): it must still
+		// shield the upload (one hash, md5 matches → skip) and record the verified mtime.
+		cameraUploadState.hashes.set("/camera roll/photo.jpg", { md5: "mock-md5", verifiedModificationTime: -1 })
 
 		await cameraUpload.sync()
 
@@ -3312,10 +3305,10 @@ describe("MD5 hash cache", () => {
 		expect(cameraUploadState.hashes.has("/camera roll/photo.jpg")).toBe(false)
 	})
 
-	it("legacy string entry is hashed ONCE, then the following pass takes the verified-mtime fast path (no getUri)", async () => {
+	it("a never-verified legacy entry is hashed ONCE, then the following pass takes the verified-mtime fast path (no getUri)", async () => {
 		setupLocalAssets([{ id: "a1", filename: "photo.jpg" }])
 
-		cameraUploadState.hashes.set("/camera roll/photo.jpg", "mock-md5")
+		cameraUploadState.hashes.set("/camera roll/photo.jpg", { md5: "mock-md5", verifiedModificationTime: -1 })
 
 		const { Asset } = await import("@/tests/mocks/expoMediaLibrary")
 		const getUriSpy = vi.spyOn(Asset.prototype, "getUri")
@@ -3349,7 +3342,7 @@ describe("MD5 hash cache", () => {
 		setupLocalAssets([{ id: "a1", filename: "photo.jpg" }])
 
 		// First: confirm the match path really skips upload
-		cameraUploadState.hashes.set("/camera roll/photo.jpg", "mock-md5")
+		cameraUploadState.hashes.set("/camera roll/photo.jpg", { md5: "mock-md5", verifiedModificationTime: -1 })
 
 		await cameraUpload.sync()
 
@@ -3372,7 +3365,10 @@ describe("MD5 hash cache", () => {
 
 		setupLocalAssets([{ id: "a2", filename: "photo2.jpg" }])
 
-		cameraUploadState.hashes.set("/camera roll/photo2.jpg", "old-hash-different-from-changed-md5")
+		cameraUploadState.hashes.set("/camera roll/photo2.jpg", {
+			md5: "old-hash-different-from-changed-md5",
+			verifiedModificationTime: -1
+		})
 
 		resetSyncInterval()
 
@@ -3880,7 +3876,7 @@ describe("ensureParentDirectoryExistsCache TTL expiry", () => {
 // ─── deltas() remoteDir null guard ───────────────────────────────────────────
 
 describe("deltas() remoteDir null guard", () => {
-	it("sync() silently skips (no setSyncing, no setErrors) when remoteDir is null — guard fires before reaching deltas()", async () => {
+	it("sync() silently skips (no setSyncing, no addError) when remoteDir is null — guard fires before reaching deltas()", async () => {
 		// sync() has an early return at the config check level (!config.remoteDir),
 		// so setSyncing(true) is never called, and deltas() is never reached.
 		// This documents that the null guard in deltas() is a secondary safety net.
@@ -3892,7 +3888,7 @@ describe("deltas() remoteDir null guard", () => {
 		await cameraUpload.sync()
 
 		expect(mockSetSyncing).not.toHaveBeenCalled()
-		expect(mockSetErrors).not.toHaveBeenCalled()
+		expect(mockAddError).not.toHaveBeenCalled()
 	})
 
 	it("deltas() throws when remoteDir is null (secondary guard — called directly)", async () => {
@@ -4176,11 +4172,11 @@ describe("sync flow — the asset disappears mid-pass", () => {
 
 		await cameraUpload.sync()
 
-		expect(mockSetErrors).toHaveBeenCalled()
+		expect(mockAddError).toHaveBeenCalled()
 
 		// Attribution matters: the issues modal offers a retry per asset, so an error with no assetId
 		// is not actionable.
-		const surfaced = mockSetErrors.mock.calls.flatMap(call => (call[0] as (errors: unknown[]) => unknown[])([]))
+		const surfaced = mockAddError.mock.calls.map(call => call[0])
 
 		expect(surfaced.some(error => (error as { assetId?: string }).assetId === "gone")).toBe(true)
 	})
@@ -5476,8 +5472,8 @@ describe("B2 — collision-resolved upload names", () => {
 			meta: { name: "IMG_0001.jpg", created: 1000n, modified: 2000n }
 		} as any)
 
-		// The member's entry under its (already-suffixed) local key — legacy string shape.
-		cameraUploadState.hashes.set("/camera roll/img_0001_2.jpg", "mock-md5")
+		// The member's entry under its (already-suffixed) local key — a never-verified legacy entry.
+		cameraUploadState.hashes.set("/camera roll/img_0001_2.jpg", { md5: "mock-md5", verifiedModificationTime: -1 })
 
 		await cameraUpload.sync()
 
@@ -5966,7 +5962,7 @@ describe("B1 regression — compress copy overwrites the existing staging file",
 		// ran, with the compressed bytes, and no error was recorded.
 		expect(transfers.upload).toHaveBeenCalledTimes(1)
 		expect(uploadedBytes).toEqual(new Uint8Array([9, 9, 9]))
-		expect(mockSetErrors).not.toHaveBeenCalled()
+		expect(mockAddError).not.toHaveBeenCalled()
 	})
 })
 
@@ -6012,14 +6008,12 @@ describe("B3 — degraded remote listing", () => {
 		expect(transfers.upload).toHaveBeenCalledTimes(1)
 
 		// Exactly one error entry, carrying the degraded-listing message.
-		expect(mockSetErrors).toHaveBeenCalledTimes(1)
+		expect(mockAddError).toHaveBeenCalledTimes(1)
 
-		const updater = mockSetErrors.mock.calls[0]?.[0] as (prev: unknown[]) => any[]
-		const entries = updater([])
+		const entry = mockAddError.mock.calls[0]?.[0]
 
-		expect(entries).toHaveLength(1)
-		expect(entries[0].error).toBeInstanceOf(Error)
-		expect((entries[0].error as Error).message).toBe("camera_upload_remote_listing_incomplete")
+		expect(entry.error).toBeInstanceOf(Error)
+		expect((entry.error as Error).message).toBe("camera_upload_remote_listing_incomplete")
 	})
 
 	it("no scan errors → no degraded-listing entry (negative case)", async () => {
@@ -6028,7 +6022,7 @@ describe("B3 — degraded remote listing", () => {
 		await cameraUpload.sync()
 
 		expect(transfers.upload).toHaveBeenCalledTimes(1)
-		expect(mockSetErrors).not.toHaveBeenCalled()
+		expect(mockAddError).not.toHaveBeenCalled()
 	})
 })
 
@@ -6072,7 +6066,7 @@ describe("shared remote walk", () => {
 
 		expect(walk).toHaveBeenCalledTimes(1)
 		expect(transfers.upload).toHaveBeenCalledTimes(1)
-		expect(mockSetErrors).toHaveBeenCalledTimes(1)
+		expect(mockAddError).toHaveBeenCalledTimes(1)
 	})
 
 	it("a sync never takes over a walk that started before it", async () => {
@@ -6252,7 +6246,7 @@ describe("B10 — enumeration failures are surfaced", () => {
 		expect(transfers.upload).toHaveBeenCalledTimes(1)
 
 		// One error entry for the bad asset, carrying the asset identifier.
-		const entries = mockSetErrors.mock.calls.map(call => (call[0] as (prev: unknown[]) => any[])([])).flat()
+		const entries = mockAddError.mock.calls.map(call => call[0])
 		const badEntries = entries.filter(entry => entry.assetId === "bad")
 
 		expect(badEntries).toHaveLength(1)
@@ -6278,7 +6272,7 @@ describe("B10 — enumeration failures are surfaced", () => {
 
 		expect(transfers.upload).not.toHaveBeenCalled()
 
-		const entries = mockSetErrors.mock.calls.map(call => (call[0] as (prev: unknown[]) => any[])([])).flat()
+		const entries = mockAddError.mock.calls.map(call => call[0])
 		const badEntries = entries.filter(entry => entry.assetId === "bad")
 
 		expect(badEntries).toHaveLength(1)
@@ -6328,7 +6322,7 @@ describe("B10 — enumeration failures are surfaced", () => {
 		// The good album's asset still uploaded.
 		expect(transfers.upload).toHaveBeenCalledTimes(1)
 
-		const entries = mockSetErrors.mock.calls.map(call => (call[0] as (prev: unknown[]) => any[])([])).flat()
+		const entries = mockAddError.mock.calls.map(call => call[0])
 		const albumFailureEntries = entries.filter(
 			entry => entry.error instanceof Error && (entry.error as Error).message === "camera_upload_album_listing_failed"
 		)

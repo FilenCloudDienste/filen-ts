@@ -47,7 +47,7 @@ export type MenuButton = {
 // `hasInternet` value.
 //
 // CRITICAL: leaf buttons must NOT have a `subButtons` key on the returned object,
-// even with an undefined value. The iOS rendering path at toIosMenuSubMenuConfig
+// even with an undefined value. The iOS rendering path at toIosMenuItem
 // uses `"subButtons" in button` as the leaf-vs-submenu discriminator, so setting
 // `subButtons: undefined` on a leaf would route it through the submenu config and
 // break the native menu.
@@ -183,6 +183,29 @@ export function iosMenuAttributesFromButton(button: MenuButton): MenuAttributes[
 	return attributes
 }
 
+function iosCommon(button: MenuButton) {
+	const attributes = iosMenuAttributesFromButton(button)
+	const iosIcon = button.icon ? iconToSwiftUiIcon(button.icon) : undefined
+
+	return {
+		discoverabilityTitle: button.subTitle,
+		menuAttributes: attributes.length > 0 ? attributes : undefined,
+		icon: iosIcon
+			? {
+					type: "IMAGE_SYSTEM" as const,
+					imageValue: {
+						systemName: iosIcon
+					}
+				}
+			: undefined,
+		menuState: button.checked ? ("on" as const) : undefined
+	}
+}
+
+function toIosMenuItem(button: MenuButton): MenuElementConfig {
+	return "subButtons" in button ? toIosMenuSubMenuConfig(button) : toIosMenuElementConfig(button)
+}
+
 export function toIosMenuSubMenuConfig(button: MenuButton): MenuElementConfig {
 	if (button.loading) {
 		return {
@@ -191,34 +214,13 @@ export function toIosMenuSubMenuConfig(button: MenuButton): MenuElementConfig {
 		}
 	}
 
-	const attributes = iosMenuAttributesFromButton(button)
-	const iosIcon = button.icon ? iconToSwiftUiIcon(button.icon) : undefined
-
 	return {
 		menuOptions: button.subButtonsInline ? ["displayInline"] : undefined,
 		menuTitle: button.title ?? "",
 		menuSubtitle: button.subTitle,
 		menuPreferredElementSize: button.iOSItemSize,
-		discoverabilityTitle: button.subTitle,
-		menuAttributes: attributes.length > 0 ? attributes : undefined,
-		icon: iosIcon
-			? {
-					type: "IMAGE_SYSTEM",
-					imageValue: {
-						systemName: iosIcon
-					}
-				}
-			: undefined,
-		menuState: button.checked ? "on" : undefined,
-		menuItems: button.subButtons
-			? button.subButtons.map(button => {
-					if ("subButtons" in button) {
-						return toIosMenuSubMenuConfig(button)
-					}
-
-					return toIosMenuElementConfig(button)
-				})
-			: undefined
+		...iosCommon(button),
+		menuItems: button.subButtons ? button.subButtons.map(toIosMenuItem) : undefined
 	}
 }
 
@@ -230,24 +232,11 @@ export function toIosMenuElementConfig(button: MenuButton): MenuElementConfig {
 		}
 	}
 
-	const attributes = iosMenuAttributesFromButton(button)
-	const iosIcon = button.icon ? iconToSwiftUiIcon(button.icon) : undefined
-
 	return {
 		actionKey: button.id,
 		actionTitle: button.title ?? "",
 		actionSubtitle: button.subTitle,
-		discoverabilityTitle: button.subTitle,
-		menuAttributes: attributes.length > 0 ? attributes : undefined,
-		icon: iosIcon
-			? {
-					type: "IMAGE_SYSTEM",
-					imageValue: {
-						systemName: iosIcon
-					}
-				}
-			: undefined,
-		menuState: button.checked ? "on" : undefined
+		...iosCommon(button)
 	} satisfies MenuElementConfig
 }
 
@@ -263,16 +252,7 @@ function toIosMenuConfig({
 	return {
 		menuTitle: title ?? "",
 		menuPreferredElementSize: iOSItemSize,
-		menuItems:
-			buttons.length > 0
-				? buttons.map(button => {
-						if ("subButtons" in button) {
-							return toIosMenuSubMenuConfig(button)
-						}
-
-						return toIosMenuElementConfig(button)
-					})
-				: undefined
+		menuItems: buttons.length > 0 ? buttons.map(toIosMenuItem) : undefined
 	} satisfies MenuConfig
 }
 
@@ -306,23 +286,20 @@ export type MenuProps = {
 	previewBackground?: boolean
 }
 
-const MenuInnerIos = ({ children, ...props }: MenuProps) => {
+// Receives the offline-gated buttons, already emptied when their ids are not unique.
+type MenuInnerPlatformProps = Omit<MenuProps, "buttons"> & {
+	buttons: MenuButton[]
+}
+
+const MenuInnerIos = ({ children, ...props }: MenuInnerPlatformProps) => {
 	const bgBackgroundTertiary = useResolveClassNames("bg-background-tertiary")
 
-	const uniqueButtons = props.buttons && checkIfButtonIdsAreUnique(props.buttons) ? props.buttons : []
-
 	const onPressMenuItem = (e: OnPressMenuItemEventObject) => {
-		const button = findButtonById(uniqueButtons, e.nativeEvent.actionKey)
-
-		if (!button) {
-			return
-		}
-
-		button?.onPress?.()
+		findButtonById(props.buttons, e.nativeEvent.actionKey)?.onPress?.()
 	}
 
 	const menuConfig = toIosMenuConfig({
-		buttons: uniqueButtons,
+		buttons: props.buttons,
 		title: props.title
 	})
 
@@ -381,25 +358,17 @@ const MenuInnerIos = ({ children, ...props }: MenuProps) => {
 	)
 }
 
-const MenuInnerAndroid = ({ children, ...props }: MenuProps) => {
+const MenuInnerAndroid = ({ children, ...props }: MenuInnerPlatformProps) => {
 	const textForeground = useResolveClassNames("text-foreground")
 	const textRed500 = useResolveClassNames("text-red-500")
 	const textMutedForeground = useResolveClassNames("text-muted-foreground")
 
-	const uniqueButtons = props.buttons && checkIfButtonIdsAreUnique(props.buttons) ? props.buttons : []
-
 	const onPressAction = (e: NativeActionEvent) => {
-		const button = findButtonById(uniqueButtons, e.nativeEvent.event)
-
-		if (!button) {
-			return
-		}
-
-		button?.onPress?.()
+		findButtonById(props.buttons, e.nativeEvent.event)?.onPress?.()
 	}
 
 	const actions = toReactNativeMenuActions({
-		buttons: uniqueButtons,
+		buttons: props.buttons,
 		colors: {
 			normal: (textForeground.color as string) ?? "white",
 			destructive: (textRed500.color as string) ?? "white",
@@ -442,13 +411,16 @@ const MenuInnerAndroid = ({ children, ...props }: MenuProps) => {
 const MenuInner = ({ children, ...props }: MenuProps) => {
 	const isOnline = useIsOnline()
 
+	if (props.disabled) {
+		return children
+	}
+
 	// Apply the per-button requiresOnline gate once; downstream iOS/Android
 	// rendering paths see a fully-resolved `disabled` value per button.
-	const buttons = props.buttons?.map(button => applyOfflineGate(button, isOnline))
-	const effectiveProps: Omit<MenuProps, "children"> = { ...props, buttons }
-
-	if (effectiveProps.disabled) {
-		return children
+	const gatedButtons = props.buttons?.map(button => applyOfflineGate(button, isOnline))
+	const effectiveProps = {
+		...props,
+		buttons: gatedButtons && checkIfButtonIdsAreUnique(gatedButtons) ? gatedButtons : []
 	}
 
 	// A long-press (context) menu shares the press with the row's own tap handler. Flag the subtree so

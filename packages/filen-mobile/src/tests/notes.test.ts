@@ -22,10 +22,6 @@ const {
 // Module mocks
 // ---------------------------------------------------------------------------
 
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
-
-vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
-
 vi.mock("@filen/shared", async () => ({
 	...(await import("@/tests/mocks/filenShared")),
 	createNotePreviewFromContentText: vi.fn().mockReturnValue("preview-text"),
@@ -38,10 +34,11 @@ vi.mock("@/lib/auth", () => ({
 	}
 }))
 
-vi.mock("@/features/notes/queries/useNotesQuery", () => ({
+vi.mock("@/features/notes/queries/useNotesQuery", async () => ({
 	notesQueryUpdate: mockNotesWithContentQueryUpdate,
 	notesQueryGet: vi.fn().mockReturnValue([]),
-	fetchData: vi.fn().mockResolvedValue([])
+	fetchData: vi.fn().mockResolvedValue([]),
+	...(await import("@/tests/mocks/notesQueryWriters")).notesQueryWriters(mockNotesWithContentQueryUpdate)
 }))
 
 vi.mock("@/features/notes/queries/useNoteContent.query", () => ({

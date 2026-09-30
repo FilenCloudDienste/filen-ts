@@ -1,12 +1,8 @@
 import { vi, describe, it, expect } from "vitest"
 vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 
-// uniffi-bindgen-react-native declares "type": "module" but ships CJS code,
-// breaking Node imports. The real UniffiEnum is just an empty class with a
-// variadic constructor — this mock is byte-for-byte identical to the real thing.
 // Real SDK tagged union classes (DirMeta, ParentUuid, etc.) can't be imported
-// in Node either, since they require native Rust modules at the top level.
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
+// in Node, since they require native Rust modules at the top level.
 
 // Must import after vi.mock so the mock is active when serializer.ts loads
 import { serialize, deserialize, deserializeRouteParam, freezeForLog } from "@/lib/serializer"

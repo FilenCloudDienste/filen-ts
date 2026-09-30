@@ -35,8 +35,6 @@ const {
 	}
 })
 
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
-
 vi.mock("@filen/sdk-rs", () => ({
 	UnauthJsClient: {
 		fromConfig: mockFromConfig

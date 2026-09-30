@@ -151,20 +151,21 @@ export type TransferOptions = {
 }
 
 /**
- * Pulls a whole file across the bridge. Returns null if cancelled part-way.
- *
- * Peak cost is the file plus one chunk: the destination is allocated up front and each chunk is
- * copied straight into it, so there is never a second full copy the way a concatenate-then-decode
- * would produce.
+ * Pulls a whole file across the bridge chunk by chunk, handing each to `onChunk` with its offset.
+ * Returns false if cancelled part-way.
  */
-export async function readAllBytes(read: RangeReader, size: number, options: TransferOptions = {}): Promise<Uint8Array | null> {
+async function forEachChunk(
+	read: RangeReader,
+	size: number,
+	options: TransferOptions,
+	onChunk: (chunk: Uint8Array, offset: number) => void
+): Promise<boolean> {
 	const { isCancelled, onProgress, chunkSize = RANGE_CHUNK_SIZE } = options
-	const bytes = new Uint8Array(size)
 	let offset = 0
 
 	while (offset < size) {
 		if (isCancelled?.()) {
-			return null
+			return false
 		}
 
 		const length = Math.min(chunkSize, MAX_RANGE_LENGTH, size - offset)
@@ -176,14 +177,30 @@ export async function readAllBytes(read: RangeReader, size: number, options: Tra
 			throw new Error("short read")
 		}
 
-		bytes.set(chunk, offset)
+		onChunk(chunk, offset)
 
 		offset += length
 
 		onProgress?.(offset, size)
 	}
 
-	return bytes
+	return true
+}
+
+/**
+ * Pulls a whole file across the bridge. Returns null if cancelled part-way.
+ *
+ * Peak cost is the file plus one chunk: the destination is allocated up front and each chunk is
+ * copied straight into it, so there is never a second full copy the way a concatenate-then-decode
+ * would produce.
+ */
+export async function readAllBytes(read: RangeReader, size: number, options: TransferOptions = {}): Promise<Uint8Array | null> {
+	const bytes = new Uint8Array(size)
+	const completed = await forEachChunk(read, size, options, (chunk, offset) => {
+		bytes.set(chunk, offset)
+	})
+
+	return completed ? bytes : null
 }
 
 /**
@@ -197,30 +214,16 @@ export async function readAllBytes(read: RangeReader, size: number, options: Tra
  * unchanged and undecodable input yields U+FFFD, for the binary-content gate to catch.
  */
 export async function readAllText(read: RangeReader, size: number, options: TransferOptions = {}): Promise<string | null> {
-	const { isCancelled, onProgress, chunkSize = RANGE_CHUNK_SIZE } = options
 	const decoder = new TextDecoder("utf-8")
 	let text = ""
-	let offset = 0
-
-	while (offset < size) {
-		if (isCancelled?.()) {
-			return null
-		}
-
-		const length = Math.min(chunkSize, MAX_RANGE_LENGTH, size - offset)
-		const chunk = base64ToBytes(await read(offset, length))
-
-		if (chunk.byteLength !== length) {
-			throw new Error("short read")
-		}
-
+	const completed = await forEachChunk(read, size, options, chunk => {
 		text += decoder.decode(chunk, {
 			stream: true
 		})
+	})
 
-		offset += length
-
-		onProgress?.(offset, size)
+	if (!completed) {
+		return null
 	}
 
 	// Flush any incomplete trailing sequence to a replacement character.

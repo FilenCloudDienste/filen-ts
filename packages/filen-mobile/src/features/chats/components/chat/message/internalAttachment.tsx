@@ -14,20 +14,7 @@ import { t as i18nT } from "@/lib/i18n"
 import { type InternalLinkData } from "@/features/chats/utils"
 import logger from "@/lib/logger"
 
-export const InternalAttachment = ({
-	data,
-	layout,
-	fromSelf
-}: {
-	data: InternalLinkData
-	layout: {
-		width: number
-		height: number
-	}
-	fromSelf: boolean
-}) => {
-	const maxWH = layout.width * 0.75 - 32 - 24
-
+export const InternalAttachment = ({ data, maxWidth, fromSelf }: { data: InternalLinkData; maxWidth: number; fromSelf: boolean }) => {
 	return (
 		<PressableScale
 			className={cn(
@@ -35,7 +22,7 @@ export const InternalAttachment = ({
 				fromSelf ? "bg-blue-600" : "bg-background-tertiary"
 			)}
 			style={{
-				width: maxWH
+				width: maxWidth
 			}}
 			onPress={async () => {
 				if (data.type === "directory") {

@@ -8,7 +8,6 @@ const h = vi.hoisted(() => ({
 }))
 
 vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 vi.mock("@filen/shared", async () => await import("@/tests/mocks/filenShared"))
 vi.mock("@filen/sdk-rs", () => ({ AnyNormalDir_Tags: { Dir: "Dir", Root: "Root" } }))
 vi.mock("@/constants", () => ({ EXPO_IMAGE_SUPPORTED_EXTENSIONS: new Set(), EXPO_VIDEO_SUPPORTED_EXTENSIONS: new Set() }))

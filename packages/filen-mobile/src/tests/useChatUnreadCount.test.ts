@@ -10,10 +10,6 @@ const mocks = vi.hoisted(() => ({
 	stringifiedClient: { userId: 1n } as { userId: bigint } | null
 }))
 
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
-
-vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
-
 vi.mock("@/features/chats/queries/useChatMessages.query", () => ({
 	default: (_params: unknown, _options: unknown) => ({
 		status: mocks.chatMessagesQueryStatus,

@@ -1,9 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
 
-// The logger now imports the shared serializer, which imports uniffi-bindgen-react-native (CJS,
-// unloadable in Node) — mock it the same way serializer.test.ts does.
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
-
 import { File, Directory, Paths, fs } from "@/tests/mocks/expoFileSystem"
 import { Logger } from "@/lib/logger"
 import { LOGS_DIRECTORY } from "@/lib/storageRoots"

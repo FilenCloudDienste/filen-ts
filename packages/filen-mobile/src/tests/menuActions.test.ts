@@ -28,10 +28,6 @@ vi.mock("@/features/drive/driveHiddenItems", () => ({
 	readHideHiddenItems: async () => false
 }))
 
-vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
-
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
-
 vi.mock("@filen/shared", async () => await import("@/tests/mocks/filenShared"))
 
 vi.mock("@/lib/i18n", () => ({
@@ -580,6 +576,18 @@ describe("buildUndecryptableMenuButtons dismiss (#40)", () => {
 		const callArgs = mockConfirmedAction.mock.calls[0]?.[0] as { dismiss: (() => boolean) | undefined }
 
 		expect(callArgs.dismiss).toBeUndefined()
+	})
+
+	it("styles the trash confirm like the decryptable menu (not destructive)", () => {
+		buildUndecryptableMenuButtons({
+			item: makeFile(),
+			drivePath: makeDrivePath("drive"),
+			t
+		})
+
+		const callArgs = mockConfirmedAction.mock.calls[0]?.[0] as { promptDestructive: boolean }
+
+		expect(callArgs.promptDestructive).toBe(false)
 	})
 })
 

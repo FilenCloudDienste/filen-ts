@@ -183,6 +183,24 @@ describe("useDriveSearch — gating + lifecycle", () => {
 		expect(driveSearchMock.open.mock.calls[0]?.[0]).toMatchObject({ rootUuid: null, name: "report" })
 	})
 
+	it("reports isCacheSearch only on the plain browser with a non-blank query", () => {
+		const { result } = render()
+
+		expect(result.current.isCacheSearch).toBe(false)
+
+		act(() => {
+			result.current.setSearchQuery("   ")
+		})
+
+		expect(result.current.isCacheSearch).toBe(false)
+
+		act(() => {
+			result.current.setSearchQuery("report")
+		})
+
+		expect(result.current.isCacheSearch).toBe(true)
+	})
+
 	it("does not open while the screen is unfocused", () => {
 		gates.focused = false
 
@@ -226,6 +244,7 @@ describe("useDriveSearch — gating + lifecycle", () => {
 
 		expect(driveSearchMock.open).not.toHaveBeenCalled()
 		expect(result.current.status).toBe("idle")
+		expect(result.current.isCacheSearch).toBe(false)
 	})
 
 	it("keeps the search engine open when the query is cleared (warm for instant re-search)", () => {

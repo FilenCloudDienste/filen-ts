@@ -68,11 +68,11 @@ const {
 // Module mocks — must be before any imports that load the mocked modules
 // ---------------------------------------------------------------------------
 
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
-
 vi.mock("@/features/drive/queries/useDriveItems.query", () => ({
 	driveItemsQueryUpdateGlobal: mockDriveItemsQueryUpdateGlobal,
 	driveItemsQueryUpdate: mockDriveItemsQueryUpdate,
+	driveItemsQueryUpdateRoot: (type: string, updater: unknown) =>
+		mockDriveItemsQueryUpdate({ params: { path: { type, uuid: null } }, updater }),
 	driveItemsQueryUpdateForNormalParent: mockDriveItemsQueryUpdateForNormalParent,
 	driveItemsQueryUpdateForPhotos: vi.fn(),
 	driveItemsQueryRemoveDirectoryFromPhotos: mockRemoveDirectoryFromPhotos,

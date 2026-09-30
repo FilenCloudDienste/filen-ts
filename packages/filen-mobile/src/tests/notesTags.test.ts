@@ -18,18 +18,15 @@ vi.mock("@/lib/signals", () => ({
 	toSignalOpts: (signal?: AbortSignal) => (signal ? { signal } : undefined)
 }))
 
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
-
-vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
-
 vi.mock("@/lib/auth", () => ({
 	default: {
 		getSdkClients: mockGetSdkClients
 	}
 }))
 
-vi.mock("@/features/notes/queries/useNotesQuery", () => ({
-	notesQueryUpdate: mockNotesWithContentQueryUpdate
+vi.mock("@/features/notes/queries/useNotesQuery", async () => ({
+	notesQueryUpdate: mockNotesWithContentQueryUpdate,
+	...(await import("@/tests/mocks/notesQueryWriters")).notesQueryWriters(mockNotesWithContentQueryUpdate)
 }))
 
 vi.mock("@/features/notes/queries/useNotesTags.query", () => ({

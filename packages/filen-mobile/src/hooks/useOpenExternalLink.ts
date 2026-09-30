@@ -3,7 +3,7 @@ import { Linking } from "react-native"
 import { useTranslation } from "react-i18next"
 import { useSecureStore } from "@/lib/secureStore"
 import { safeParseUrl } from "@/lib/linkParser"
-import { classifyExternalLinkHref } from "@/components/textEditor/linkUtils"
+import { classifyUntrustedLinkHref } from "@/lib/untrustedLinks"
 import prompts from "@/lib/prompts"
 import alerts from "@/lib/alerts"
 import logger from "@/lib/logger"
@@ -22,8 +22,9 @@ export const OPEN_LINK_TRUSTED_DOMAINS_SECURE_STORE_KEY = "openLinkTrustedDomain
  * now and callers just supply the URL.
  *
  * The policy:
- *  1. Scheme allowlist (`classifyExternalLinkHref`) — http/https plus the user-navigable
- *     communication schemes. `javascript:`, `data:`, `file:`, `content:` and `intent:` are refused.
+ *  1. Scheme allowlist (`classifyUntrustedLinkHref`) — http/https plus the user-navigable
+ *     communication schemes. `javascript:`, `data:`, `file:`, `content:` and `intent:` are refused,
+ *     as is anything carrying interior whitespace or control characters.
  *  2. For http(s) only, `safeParseUrl` additionally requires https and rejects embedded credentials
  *     and private/loopback hosts, then the host is shown in a trusted-domain confirmation remembered
  *     per domain. A communication scheme has no host to vet or display, so it skips this step — the
@@ -41,9 +42,9 @@ export default function useOpenExternalLink(tag: string): (rawUrl: string) => Pr
 
 	return useCallback(
 		async (rawUrl: string) => {
-			const classification = classifyExternalLinkHref(rawUrl)
+			const classification = classifyUntrustedLinkHref(rawUrl)
 
-			if (!classification.intercept) {
+			if (classification.action !== "external") {
 				logger.warn(tag, "refused to open a link with a non-allowlisted scheme")
 				alerts.error(t("cannot_open_link"))
 

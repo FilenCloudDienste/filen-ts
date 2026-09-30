@@ -1,13 +1,11 @@
 import { type Chat } from "@/types"
 import { messageDisplayBody } from "@/lib/decryption"
-import { useEffect } from "react"
 import View from "@/components/ui/view"
 import Text from "@/components/ui/text"
 import { useResolveClassNames } from "uniwind"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import { PressableScale } from "@/components/ui/pressables"
-import useChatsStore, { type ChatMessageWithInflightId } from "@/features/chats/store/useChats.store"
-import { useShallow } from "zustand/shallow"
+import { type ChatMessageWithInflightId } from "@/features/chats/store/useChats.store"
 import { useSecureStore } from "@/lib/secureStore"
 import { chatReplyToKey } from "@/features/chats/chatDrafts"
 import { contactDisplayName } from "@filen/shared"
@@ -15,15 +13,15 @@ import { useTranslation } from "react-i18next"
 import Avatar from "@/components/ui/avatar"
 import PopupContainerView from "@/features/chats/components/chat/input/popupContainerView"
 import { resolveReplySenderDisplayName } from "@/features/chats/utils"
+import useSuggestionSlot from "@/features/chats/hooks/useSuggestionSlot"
 
 export const ReplyTo = ({ chat }: { chat: Chat }) => {
 	const [chatReplyTo, setChatReplyTo] = useSecureStore<ChatMessageWithInflightId | null>(chatReplyToKey(chat.uuid), null)
-	const suggestionsVisible = useChatsStore(useShallow(state => state.suggestionsVisible))
 	const textMutedForeground = useResolveClassNames("text-muted-foreground")
 	const { t } = useTranslation()
 
-	const info = ((): { show: false } | { show: true; displayName: string } => {
-		if (!chatReplyTo || suggestionsVisible.filter(s => s !== "reply").length > 0) {
+	const info = useSuggestionSlot("reply", (othersVisible): { show: false } | { show: true; displayName: string } => {
+		if (!chatReplyTo || othersVisible) {
 			return {
 				show: false
 			}
@@ -39,15 +37,7 @@ export const ReplyTo = ({ chat }: { chat: Chat }) => {
 			show: true,
 			displayName
 		}
-	})()
-
-	useEffect(() => {
-		if (info.show) {
-			useChatsStore.getState().setSuggestionsVisible(prev => [...prev.filter(s => s !== "reply"), "reply"])
-		} else {
-			useChatsStore.getState().setSuggestionsVisible(prev => prev.filter(s => s !== "reply"))
-		}
-	}, [info.show])
+	})
 
 	if (!info.show || !chatReplyTo) {
 		return null

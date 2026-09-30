@@ -35,17 +35,16 @@ vi.mock("@/lib/imageConversion", () => ({
 
 import {
 	modifyAssetPathOnCollision,
+	resolveCollisionSlot,
 	collisionNameSuffix,
 	sanitizePathSegment,
 	albumFolderTitle,
 	applyAfterActivationToggle,
 	dedupTreeKey,
-	collisionBaseName,
 	stripFilenameExtension,
 	effectiveCreationTimestamp,
 	composeLocalTreePath,
 	rawRemoteTreePath,
-	normalizeCameraUploadHashEntry,
 	isDirUsable,
 	isReleasedSharedObjectError,
 	withReleasedSharedObjectRetry,
@@ -210,27 +209,6 @@ describe("collisionNameSuffix", () => {
 
 			expect(suffix).toMatch(/^_[a-z0-9_-]+$/)
 		}
-	})
-})
-
-// ─── normalizeCameraUploadHashEntry (#B4+B6 lazy migration) ──────────────────
-
-describe("normalizeCameraUploadHashEntry", () => {
-	it("undefined passes through", () => {
-		expect(normalizeCameraUploadHashEntry(undefined)).toBeUndefined()
-	})
-
-	it("a legacy string value becomes { md5, verifiedModificationTime: -1 }", () => {
-		expect(normalizeCameraUploadHashEntry("abc123")).toEqual({
-			md5: "abc123",
-			verifiedModificationTime: -1
-		})
-	})
-
-	it("an object value passes through unchanged (same reference)", () => {
-		const entry = { md5: "abc123", verifiedModificationTime: 1700000000000 }
-
-		expect(normalizeCameraUploadHashEntry(entry)).toBe(entry)
 	})
 })
 
@@ -628,6 +606,53 @@ describe("modifyAssetPathOnCollision", () => {
 	})
 })
 
+// ─── resolveCollisionSlot ────────────────────────────────────────────────────
+
+describe("resolveCollisionSlot", () => {
+	const base = { name: "IMG_0001.JPG", sortSec: 1700000000, compress: false }
+
+	it("takes the iteration-0 slot and reports its suffix", () => {
+		const tree = { "/album/img_0001.jpg": 1 }
+
+		expect(resolveCollisionSlot({ ...base, tree, path: "/album/img_0001.jpg" })).toEqual({
+			path: "/album/img_0001_1700000000.jpg",
+			suffix: "_1700000000"
+		})
+	})
+
+	it("chains to iteration 1 when the iteration-0 slot is also taken", () => {
+		const it0 = modifyAssetPathOnCollision({ iteration: 0, path: "/album/img_0001.jpg", asset: { name: "IMG_0001.JPG", contentHash: "1700000000" } })
+		const it1 = modifyAssetPathOnCollision({ iteration: 1, path: it0 ?? "", asset: { name: "IMG_0001.JPG", contentHash: "1700000000" } })
+		const tree = { "/album/img_0001.jpg": 1, [it0 ?? ""]: 1 }
+
+		expect(resolveCollisionSlot({ ...base, tree, path: "/album/img_0001.jpg" })).toEqual({
+			path: it1,
+			suffix: collisionNameSuffix({ iteration: 1, asset: { name: "IMG_0001.JPG", contentHash: "1700000000" } })
+		})
+	})
+
+	it("returns null once both iterations are taken", () => {
+		const it0 = modifyAssetPathOnCollision({ iteration: 0, path: "/album/img_0001.jpg", asset: { name: "IMG_0001.JPG", contentHash: "1700000000" } })
+		const it1 = modifyAssetPathOnCollision({ iteration: 1, path: it0 ?? "", asset: { name: "IMG_0001.JPG", contentHash: "1700000000" } })
+		const tree = { "/album/img_0001.jpg": 1, [it0 ?? ""]: 1, [it1 ?? ""]: 1 }
+
+		expect(resolveCollisionSlot({ ...base, tree, path: "/album/img_0001.jpg" })).toBeNull()
+	})
+
+	it("returns null for a degenerate path", () => {
+		expect(resolveCollisionSlot({ ...base, tree: { "img_0001.jpg": 1 }, path: "img_0001.jpg" })).toBeNull()
+	})
+
+	it("applies dedupTreeKey to the name so compress keys stay extension-agnostic", () => {
+		const tree = { "/album/img_0001": 1 }
+
+		expect(resolveCollisionSlot({ ...base, compress: true, tree, path: "/album/img_0001" })).toEqual({
+			path: "/album/img_0001_1700000000",
+			suffix: "_1700000000"
+		})
+	})
+})
+
 // ─── applyAfterActivationToggle ──────────────────────────────────────────────
 
 describe("applyAfterActivationToggle", () => {
@@ -739,6 +764,13 @@ describe("dedupTreeKey", () => {
 
 	it("strips the extension when compress is ON (extension-agnostic key)", () => {
 		expect(dedupTreeKey({ path: "/camera roll/photo.png", compress: true })).toBe("/camera roll/photo")
+	})
+
+	it("applies the same transform to bare filenames (collision-suffix base)", () => {
+		expect(dedupTreeKey({ path: "photo.png", compress: true })).toBe("photo")
+		expect(dedupTreeKey({ path: "photo.heic", compress: false, convertHeic: true })).toBe("photo.jpg")
+		expect(dedupTreeKey({ path: "doc.png", compress: false, convertHeic: true })).toBe("doc.png")
+		expect(dedupTreeKey({ path: "photo.heic", compress: true, convertHeic: true })).toBe("photo")
 	})
 
 	it("compress ON: .png and .jpg of the same stem collapse to one key (#15 symmetry)", () => {
@@ -865,32 +897,6 @@ describe("dedup key symmetry across compress/convertHeic states", () => {
 	})
 })
 
-// ─── collisionBaseName (#B2/#15/HEIC collision-name symmetry) ─────────────────
-
-describe("collisionBaseName", () => {
-	it("compress ON: strips the extension (extension-agnostic — uploaded ext is unpredictable)", () => {
-		expect(collisionBaseName({ name: "photo.png", compress: true })).toBe("photo")
-		expect(collisionBaseName({ name: "photo.jpg", compress: true })).toBe("photo")
-	})
-
-	it("convertHeic ON: a HEIC name is normalized to its post-conversion .jpg name", () => {
-		expect(collisionBaseName({ name: "photo.heic", compress: false, convertHeic: true })).toBe("photo.jpg")
-	})
-
-	it("convertHeic ON: a non-HEIC name is kept verbatim (it is uploaded unchanged)", () => {
-		expect(collisionBaseName({ name: "doc.png", compress: false, convertHeic: true })).toBe("doc.png")
-		expect(collisionBaseName({ name: "pic.jpg", compress: false, convertHeic: true })).toBe("pic.jpg")
-	})
-
-	it("neither option: the name is kept verbatim", () => {
-		expect(collisionBaseName({ name: "photo.heic", compress: false, convertHeic: false })).toBe("photo.heic")
-	})
-
-	it("compress dominates convertHeic (strip wins when both are on)", () => {
-		expect(collisionBaseName({ name: "photo.heic", compress: true, convertHeic: true })).toBe("photo")
-	})
-})
-
 // ─── convertHeic collision key symmetry (local .heic vs remote uploaded .jpg) ──
 
 describe("convertHeic collision key symmetry", () => {
@@ -905,7 +911,7 @@ describe("convertHeic collision key symmetry", () => {
 			iteration: 0,
 			path: localBaseKey,
 			asset: {
-				name: collisionBaseName({ name: "photo.heic", compress: false, convertHeic: true }),
+				name: dedupTreeKey({ path: "photo.heic", compress: false, convertHeic: true }),
 				contentHash
 			}
 		})
@@ -960,7 +966,7 @@ describe("#15 — compress-rename key symmetry through the collision suffix", ()
 // ─── #15 — MULTI-DOT filenames must not diverge under compress ────────────────
 
 describe("#15 — compress collision key symmetry for multi-dot filenames", () => {
-	// Regression: `collisionBaseName` under compress strips only the LAST extension, leaving a
+	// Regression: `dedupTreeKey` under compress strips only the LAST extension, leaving a
 	// still-dotted stem (e.g. "vacation.2024"). modifyAssetPathOnCollision used to re-split that
 	// stem via Paths.extname (reading ".2024" as an extension) and inserted the suffix MID-stem
 	// ("vacation_<T>.2024"), while the uploaded remote name appends the suffix to the whole stem
@@ -972,13 +978,13 @@ describe("#15 — compress collision key symmetry for multi-dot filenames", () =
 		const filename = "vacation.2024.png"
 
 		// LOCAL: the base key strips the real trailing extension, then the collision loop resolves
-		// the suffix from the extension-stripped collisionBaseName.
+		// the suffix from the extension-stripped name.
 		const localBaseKey = dedupTreeKey({ path: `/camera roll/${filename}`, compress: true })
 		const localResolved = modifyAssetPathOnCollision({
 			iteration: 0,
 			path: localBaseKey,
 			asset: {
-				name: collisionBaseName({ name: filename, compress: true }),
+				name: dedupTreeKey({ path: filename, compress: true }),
 				contentHash
 			},
 			compress: true
@@ -988,7 +994,7 @@ describe("#15 — compress collision key symmetry for multi-dot filenames", () =
 		// writing "vacation.2024_<suffix>.jpg"; listRemote strips the .jpg for its key.
 		const suffix = collisionNameSuffix({
 			iteration: 0,
-			asset: { name: collisionBaseName({ name: filename, compress: true }), contentHash }
+			asset: { name: dedupTreeKey({ path: filename, compress: true }), contentHash }
 		})
 		const uploadedRemoteName = `vacation.2024${suffix}.jpg`
 		const remoteKey = dedupTreeKey({ path: `/camera roll/${uploadedRemoteName}`, compress: true })
@@ -1000,7 +1006,7 @@ describe("#15 — compress collision key symmetry for multi-dot filenames", () =
 	it("local collision key equals the remote uploaded file's key for a multi-dot name (iteration 1)", () => {
 		const contentHash = String(Math.floor(1700000000000 / 1000))
 		const filename = "my.photo.final.png"
-		const collisionName = collisionBaseName({ name: filename, compress: true })
+		const collisionName = dedupTreeKey({ path: filename, compress: true })
 
 		const localResolved = modifyAssetPathOnCollision({
 			iteration: 1,
@@ -1027,7 +1033,7 @@ describe("#15 — compress collision key symmetry for multi-dot filenames", () =
 			iteration: 0,
 			path: dedupTreeKey({ path: `/camera roll/${filename}`, compress: true }),
 			asset: {
-				name: collisionBaseName({ name: filename, compress: true }),
+				name: dedupTreeKey({ path: filename, compress: true }),
 				contentHash
 			},
 			compress: true

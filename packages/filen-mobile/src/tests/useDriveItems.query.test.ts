@@ -73,10 +73,6 @@ const {
 	}
 })
 
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
-
-vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
-
 vi.mock("expo-router", () => ({
 	useLocalSearchParams: vi.fn().mockReturnValue({}),
 	useNavigation: vi.fn().mockReturnValue({})
@@ -377,6 +373,7 @@ vi.mock("@filen/sdk-rs", () => ({
 
 import {
 	driveItemsQueryUpdateForNormalParent,
+	driveItemsQueryUpdateRoot,
 	driveItemsQueryFindFileInNormalParent,
 	fetchData,
 	driveItemsQueryGet,
@@ -534,6 +531,21 @@ describe("removeVolatileParamsForKey (via driveItemsQueryGet)", () => {
 
 		const strippedPath = (keyWith as unknown[])[1] as Record<string, Record<string, unknown>>
 		expect(strippedPath["path"]).not.toHaveProperty("shared")
+	})
+})
+
+// ─── driveItemsQueryUpdateRoot ──────────────────────────────────────────────
+
+describe("driveItemsQueryUpdateRoot", () => {
+	it("patches the virtual root listing keyed uuid: null", () => {
+		const ITEM = { type: "file", data: { uuid: "item-1" } } as unknown as DriveItem
+
+		driveItemsQueryUpdateRoot("trash", [ITEM])
+
+		const calls = mockQueryUpdaterSet.mock.calls.filter(c => (c[0] as unknown[])[0] === BASE_QUERY_KEY)
+
+		expect(calls).toHaveLength(1)
+		expect(((calls[0]?.[0] as unknown[])[1] as Record<string, unknown>)["path"]).toEqual({ type: "trash", uuid: null })
 	})
 })
 

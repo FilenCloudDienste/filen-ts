@@ -185,6 +185,98 @@ export function useDriveUpload({
 		return false
 	}
 
+	// The shared fan-out: quota gate, then each picked asset uploaded (after optional HEIC conversion)
+	// and deleted afterwards, whatever the outcome.
+	const uploadAssets = async <T>({
+		parent,
+		assets,
+		uriOf,
+		describe,
+		convertHeic,
+		label
+	}: {
+		parent: AnyNormalDir
+		assets: T[]
+		uriOf: (asset: T) => string
+		// Called per asset right before its upload, so "now" timestamps and names are taken at upload time.
+		describe: (asset: T) => {
+			name: string
+			mime: string | undefined
+			created?: number
+			modified?: number
+		}
+		convertHeic: boolean
+		label: string
+	}): Promise<void> => {
+		if (!(await fitsOrRefuse(assets.map(asset => new FileSystem.File(uriOf(asset)))))) {
+			return
+		}
+
+		const convertHeicEnabled = convertHeic && (await isConvertHeicToJpgEnabled())
+
+		const transferResult = await run(async () => {
+			return await Promise.allSettled(
+				assets.map(async asset => {
+					return await run(
+						async defer => {
+							const assetFile = new FileSystem.File(uriOf(asset))
+
+							defer(() => {
+								if (assetFile.exists) {
+									assetFile.delete()
+								}
+							})
+
+							if (!assetFile.exists) {
+								throw new Error("Asset file does not exist")
+							}
+
+							const { name, mime, created, modified } = describe(asset)
+
+							const converted = await maybeConvertHeicForUpload({
+								file: assetFile,
+								name,
+								mime,
+								enabled: convertHeicEnabled
+							})
+
+							if (converted.convertedTmpFile) {
+								const convertedTmpFile = converted.convertedTmpFile
+
+								defer(() => {
+									if (convertedTmpFile.exists) {
+										convertedTmpFile.delete()
+									}
+								})
+							}
+
+							return await transfers.upload({
+								localFileOrDir: converted.file,
+								parent,
+								name: converted.name,
+								mime: converted.mime,
+								created,
+								modified
+							})
+						},
+						{
+							throw: true
+						}
+					)
+				})
+			)
+		})
+
+		if (!transferResult.success) {
+			logger.error("drive-upload", `${label} fan-out failed`, { error: transferResult.error, count: assets.length })
+			alerts.error(transferResult.error)
+
+			return
+		}
+
+		reportTransferResults(transferResult.data)
+	}
+
 	const uploadFiles = async (): Promise<void> => {
 		if (!parent) {
 			return
@@ -208,72 +300,18 @@ export function useDriveUpload({
 			return
 		}
 
-		const assets = documentPickerResult.data.documents
-
-		if (!(await fitsOrRefuse(assets.map(asset => new FileSystem.File(asset.uri))))) {
-			return
-		}
-
-		const convertHeic = await isConvertHeicToJpgEnabled()
-
-		const transferResult = await run(async () => {
-			return await Promise.allSettled(
-				assets.map(async asset => {
-					return await run(
-						async defer => {
-							const assetFile = new FileSystem.File(asset.uri)
-
-							defer(() => {
-								if (assetFile.exists) {
-									assetFile.delete()
-								}
-							})
-
-							if (!assetFile.exists) {
-								throw new Error("Asset file does not exist")
-							}
-
-							const converted = await maybeConvertHeicForUpload({
-								file: assetFile,
-								name: asset.name,
-								mime: asset.mimeType,
-								enabled: convertHeic
-							})
-
-							if (converted.convertedTmpFile) {
-								const convertedTmpFile = converted.convertedTmpFile
-
-								defer(() => {
-									if (convertedTmpFile.exists) {
-										convertedTmpFile.delete()
-									}
-								})
-							}
-
-							return await transfers.upload({
-								localFileOrDir: converted.file,
-								parent,
-								name: converted.name,
-								modified: asset.lastModified,
-								mime: converted.mime
-							})
-						},
-						{
-							throw: true
-						}
-					)
-				})
-			)
+		await uploadAssets({
+			parent,
+			assets: documentPickerResult.data.documents,
+			uriOf: asset => asset.uri,
+			describe: asset => ({
+				name: asset.name,
+				mime: asset.mimeType,
+				modified: asset.lastModified
+			}),
+			convertHeic: true,
+			label: "uploadFiles"
 		})
-
-		if (!transferResult.success) {
-			logger.error("drive-upload", "uploadFiles fan-out failed", { error: transferResult.error, count: assets.length })
-			alerts.error(transferResult.error)
-
-			return
-		}
-
-		reportTransferResults(transferResult.data)
 	}
 
 	// Shared body for library-picker and camera-capture flows. Camera captures record the current
@@ -289,70 +327,18 @@ export function useDriveUpload({
 			return
 		}
 
-		if (!(await fitsOrRefuse(assets.map(asset => new FileSystem.File(asset.uri))))) {
-			return
-		}
-
-		const convertHeic = await isConvertHeicToJpgEnabled()
-
-		const transferResult = await run(async () => {
-			return await Promise.allSettled(
-				assets.map(async asset => {
-					return await run(
-						async defer => {
-							const assetFile = new FileSystem.File(asset.uri)
-
-							defer(() => {
-								if (assetFile.exists) {
-									assetFile.delete()
-								}
-							})
-
-							if (!assetFile.exists) {
-								throw new Error("Asset file does not exist")
-							}
-
-							const converted = await maybeConvertHeicForUpload({
-								file: assetFile,
-								name: pickedAssetName(asset),
-								mime: asset.mimeType,
-								enabled: convertHeic
-							})
-
-							if (converted.convertedTmpFile) {
-								const convertedTmpFile = converted.convertedTmpFile
-
-								defer(() => {
-									if (convertedTmpFile.exists) {
-										convertedTmpFile.delete()
-									}
-								})
-							}
-
-							return await transfers.upload({
-								localFileOrDir: converted.file,
-								parent,
-								name: converted.name,
-								mime: converted.mime,
-								...(source === "camera" ? { created: Date.now(), modified: Date.now() } : {})
-							})
-						},
-						{
-							throw: true
-						}
-					)
-				})
-			)
+		await uploadAssets({
+			parent,
+			assets,
+			uriOf: asset => asset.uri,
+			describe: asset => ({
+				name: pickedAssetName(asset),
+				mime: asset.mimeType,
+				...(source === "camera" ? { created: Date.now(), modified: Date.now() } : {})
+			}),
+			convertHeic: true,
+			label: "uploadFromPicker"
 		})
-
-		if (!transferResult.success) {
-			logger.error("drive-upload", "uploadFromPicker fan-out failed", { error: transferResult.error, count: assets.length })
-			alerts.error(transferResult.error)
-
-			return
-		}
-
-		reportTransferResults(transferResult.data)
 	}
 
 	const uploadPhotosOrVideos = (): Promise<void> => {
@@ -399,48 +385,19 @@ export function useDriveUpload({
 			return
 		}
 
-		if (!(await fitsOrRefuse(scans.map(scan => new FileSystem.File(normalizeFilePathForExpo(scan)))))) {
-			return
-		}
-
-		const transferResult = await run(async () => {
-			return await Promise.allSettled(
-				scans.map(async scan => {
-					return await run(
-						async defer => {
-							const scanFile = new FileSystem.File(normalizeFilePathForExpo(scan))
-
-							defer(() => {
-								if (scanFile.exists) {
-									scanFile.delete()
-								}
-							})
-
-							return await transfers.upload({
-								localFileOrDir: scanFile,
-								parent,
-								modified: Date.now(),
-								created: Date.now(),
-								name: `${t("scanned_document_name")}_${new Date().toISOString().replace(/[:.]/g, "-")}.jpg`,
-								mime: "image/jpeg"
-							})
-						},
-						{
-							throw: true
-						}
-					)
-				})
-			)
+		await uploadAssets({
+			parent,
+			assets: scans,
+			uriOf: scan => normalizeFilePathForExpo(scan),
+			describe: () => ({
+				name: `${t("scanned_document_name")}_${new Date().toISOString().replace(/[:.]/g, "-")}.jpg`,
+				mime: "image/jpeg",
+				created: Date.now(),
+				modified: Date.now()
+			}),
+			convertHeic: false,
+			label: "scanDocument"
 		})
-
-		if (!transferResult.success) {
-			logger.error("drive-upload", "scanDocument fan-out failed", { error: transferResult.error, count: scans.length })
-			alerts.error(transferResult.error)
-
-			return
-		}
-
-		reportTransferResults(transferResult.data)
 	}
 
 	const createTextFile = async (): Promise<void> => {

@@ -11,7 +11,6 @@ import { vi, describe, it, expect, beforeEach } from "vitest"
 import { renderHook, waitFor } from "@testing-library/react"
 
 vi.mock("expo-crypto", async () => await import("@/tests/mocks/expoCrypto"))
-vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
 
 vi.mock("@/lib/logger", () => ({
 	default: { error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() }

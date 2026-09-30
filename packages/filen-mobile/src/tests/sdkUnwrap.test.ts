@@ -102,10 +102,6 @@ const {
 // Module mocks
 // ---------------------------------------------------------------------------
 
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
-
-vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
-
 vi.mock("@filen/sdk-rs", () => ({
 	ParentUuid_Tags: mockParentUuidTags,
 	AnyNormalDir_Tags: mockAnyNormalDirTags,

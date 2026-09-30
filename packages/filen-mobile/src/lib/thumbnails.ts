@@ -10,10 +10,11 @@ import { onlineManager } from "@tanstack/react-query"
 import { THUMBNAILS_VERSION, THUMBNAILS_DIRECTORY } from "@/lib/storageRoots"
 import {
 	type ThumbnailKind,
-	abortError,
+	throwIfAborted,
 	OfflineAbortError,
 	ProviderUnavailableError,
 	getPath,
+	getPathForUuid,
 	ensureThumbnailsDirectory,
 	getThumbnailKind,
 	getThumbnailKindForName,
@@ -221,6 +222,58 @@ class Thumbnails {
 		return getThumbnailKind(item) !== null
 	}
 
+	// Bytes on disk outrank any earlier session verdict for this uuid.
+	private markAvailable(uuid: string): void {
+		this.available.add(uuid)
+		this.unavailable.delete(uuid)
+	}
+
+	// Aborts, offline and a provider that never came up are not verdicts about the file — only a
+	// real failure counts toward the blacklist, and only that one is logged at error. An abort
+	// has TWO possible flavours on the from-path call, which carries both cancellation channels:
+	// the bindings' AbortError, or a FilenSdkError Cancelled that isAbortError does NOT match.
+	// Testing `signal?.aborted` FIRST is therefore load-bearing, not a shortcut — it is what makes
+	// the flavour irrelevant. Keep it first.
+	private recordFailure(params: {
+		uuid: string
+		error: unknown
+		signal?: AbortSignal
+		message: string
+		context: () => Record<string, unknown>
+	}): void {
+		if (
+			params.signal?.aborted ||
+			isAbortError(params.error) ||
+			params.error instanceof OfflineAbortError ||
+			params.error instanceof ProviderUnavailableError
+		) {
+			return
+		}
+
+		logger.error("thumbnails", params.message, {
+			uuid: params.uuid,
+			...params.context(),
+			platform: Platform.OS,
+			error: String(params.error)
+		})
+
+		this.failures.set(params.uuid, (this.failures.get(params.uuid) ?? 0) + 1)
+	}
+
+	private removePartialOutput(outputPath: string): void {
+		for (const path of [outputPath, `${outputPath}.tmp`]) {
+			const partial = new FileSystem.File(path)
+
+			if (partial.exists) {
+				try {
+					partial.delete()
+				} catch {
+					// Best-effort cleanup of partial output
+				}
+			}
+		}
+	}
+
 	// An existing `<uuid>.webp` is served as is and repairs `available`; a 0-byte file is a
 	// crashed/interrupted write that would loop the consumer forever, so it is deleted and reported
 	// absent. The one integrity check, shared by generate() and generateFromLocalFile().
@@ -232,8 +285,7 @@ class Thumbnails {
 		}
 
 		if (outputFile.size > 0) {
-			this.available.add(uuid)
-			this.unavailable.delete(uuid)
+			this.markAvailable(uuid)
 
 			return normalizeFilePathForExpo(outputPath)
 		}
@@ -260,9 +312,7 @@ class Thumbnails {
 				this.clearBarrier.leave()
 			})
 
-			if (params.signal?.aborted) {
-				throw abortError(params.signal)
-			}
+			throwIfAborted(params.signal)
 
 			const uuid = params.item.data.uuid
 			const outputPath = getPath(params.item)
@@ -302,9 +352,7 @@ class Thumbnails {
 		})
 
 		if (!result.success) {
-			if (params.signal?.aborted) {
-				throw abortError(params.signal)
-			}
+			throwIfAborted(params.signal)
 
 			throw result.error
 		}
@@ -333,48 +381,23 @@ class Thumbnails {
 		})
 
 		if (!result.success) {
-			// Aborts, offline and a provider that never came up are not verdicts about the file — only a
-			// real failure counts toward the blacklist, and only that one is logged at error. An abort
-			// has TWO possible flavours on the from-path call, which carries both cancellation channels:
-			// the bindings' AbortError, or a FilenSdkError Cancelled that isAbortError does NOT match.
-			// Testing `params.signal?.aborted` FIRST is therefore load-bearing, not a shortcut — it is
-			// what makes the flavour irrelevant. Keep it first.
-			if (
-				!params.signal?.aborted &&
-				!isAbortError(result.error) &&
-				!(result.error instanceof OfflineAbortError) &&
-				!(result.error instanceof ProviderUnavailableError)
-			) {
-				logger.error("thumbnails", "generation failed", {
-					uuid: params.uuid,
-					kind: params.kind,
-					platform: Platform.OS,
-					error: String(result.error)
+			this.recordFailure({
+				uuid: params.uuid,
+				error: result.error,
+				signal: params.signal,
+				message: "generation failed",
+				context: () => ({
+					kind: params.kind
 				})
+			})
 
-				this.failures.set(params.uuid, (this.failures.get(params.uuid) ?? 0) + 1)
-			}
-
-			for (const path of [params.outputPath, `${params.outputPath}.tmp`]) {
-				const partial = new FileSystem.File(path)
-
-				if (partial.exists) {
-					try {
-						partial.delete()
-					} catch {
-						// Best-effort cleanup of partial output
-					}
-				}
-			}
+			this.removePartialOutput(params.outputPath)
 
 			throw result.error
 		}
 
 		if (result.data !== null) {
-			this.available.add(params.uuid)
-
-			// Bytes on disk outrank any earlier session verdict for this uuid.
-			this.unavailable.delete(params.uuid)
+			this.markAvailable(params.uuid)
 		}
 
 		return result.data
@@ -395,9 +418,7 @@ class Thumbnails {
 	}): Promise<string | null> {
 		const localSourcePath = await this.resolveLocalSourcePath(params.item, params.signal)
 
-		if (params.signal?.aborted) {
-			throw abortError(params.signal)
-		}
+		throwIfAborted(params.signal)
 
 		let outcome: SdkThumbnailOutcome
 
@@ -511,9 +532,7 @@ class Thumbnails {
 			videoSourceUrl = getFileUrl(file)
 		}
 
-		if (params.signal?.aborted) {
-			throw abortError(params.signal)
-		}
+		throwIfAborted(params.signal)
 
 		await this.semaphore.acquire()
 
@@ -587,7 +606,7 @@ class Thumbnails {
 			return null
 		}
 
-		const outputPath = FileSystem.Paths.join(DIRECTORY.uri, `${params.uuid}.webp`)
+		const outputPath = getPathForUuid(params.uuid)
 		const existing = this.readExistingThumbnail(params.uuid, outputPath)
 
 		if (existing !== null) {
@@ -643,45 +662,22 @@ class Thumbnails {
 						}
 					}
 
-					this.available.add(params.uuid)
-
-					// Bytes on disk outrank any earlier session verdict for this uuid.
-					this.unavailable.delete(params.uuid)
+					this.markAvailable(params.uuid)
 
 					return normalizeFilePathForExpo(outputPath)
 				} catch (error) {
-					// Same exemptions as doGenerate, and for the same reason the signal test comes first:
-					// the from-path call carries both cancellation channels, so an abort arrives as either
-					// the bindings' AbortError or a FilenSdkError Cancelled. isAbortError was missing here
-					// while its sibling had it, which counted a cancelled upload as a real failure.
-					if (
-						!params.signal?.aborted &&
-						!isAbortError(error) &&
-						!(error instanceof OfflineAbortError) &&
-						!(error instanceof ProviderUnavailableError)
-					) {
-						logger.error("thumbnails", "generateFromLocalFile failed", {
-							uuid: params.uuid,
+					this.recordFailure({
+						uuid: params.uuid,
+						error,
+						signal: params.signal,
+						message: "generateFromLocalFile failed",
+						context: () => ({
 							ext: FileSystem.Paths.extname(params.name).toLowerCase().trim(),
-							kind,
-							platform: Platform.OS,
-							error: String(error)
+							kind
 						})
+					})
 
-						this.failures.set(params.uuid, (this.failures.get(params.uuid) ?? 0) + 1)
-					}
-
-					for (const path of [outputPath, `${outputPath}.tmp`]) {
-						const partial = new FileSystem.File(path)
-
-						if (partial.exists) {
-							try {
-								partial.delete()
-							} catch {
-								// Best-effort cleanup of partial output
-							}
-						}
-					}
+					this.removePartialOutput(outputPath)
 
 					throw error
 				}

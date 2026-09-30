@@ -7,7 +7,6 @@ import SettingsHeader from "@/components/ui/settingsHeader"
 import { ScreenBody } from "@/components/ui/safeAreaView"
 import { Fragment, useState } from "react"
 import { useTranslation } from "react-i18next"
-import { type TFunction } from "i18next"
 import { useResolveClassNames } from "uniwind"
 import type { DriveItem } from "@/types"
 import DismissStack from "@/components/dismissStack"
@@ -34,49 +33,21 @@ import { driveItemDisplayName } from "@/lib/decryption"
 import CannotDecryptScreen from "@/components/cannotDecryptScreen"
 import i18n from "@/lib/i18n"
 import ListEmpty, { LoadErrorEmpty } from "@/components/ui/listEmpty"
-import { recentHeldLinkStatus, isExpirationChecked, isPublicLinkQueryError, linkStatusForWrite } from "@/features/publicLink/utils"
+import { recentHeldLinkStatus, isPublicLinkQueryError, linkStatusForWrite } from "@/features/publicLink/utils"
 import logger from "@/lib/logger"
 import { type PublicLinkEdits } from "@/features/drive/drivePublicLink"
+import { type en } from "@/locales/en"
 
-function expirationToText(expiration: PublicLinkExpiration, t: TFunction) {
-	switch (expiration) {
-		case PublicLinkExpiration.Never: {
-			return t("never")
-		}
-
-		case PublicLinkExpiration.OneHour: {
-			return t("one_hour")
-		}
-
-		case PublicLinkExpiration.SixHours: {
-			return t("six_hours")
-		}
-
-		case PublicLinkExpiration.OneDay: {
-			return t("one_day")
-		}
-
-		case PublicLinkExpiration.ThreeDays: {
-			return t("three_days")
-		}
-
-		case PublicLinkExpiration.OneWeek: {
-			return t("one_week")
-		}
-
-		case PublicLinkExpiration.TwoWeeks: {
-			return t("two_weeks")
-		}
-
-		case PublicLinkExpiration.ThirtyDays: {
-			return t("thirty_days")
-		}
-
-		default: {
-			return t("unknown")
-		}
-	}
-}
+const EXPIRATION_OPTIONS = [
+	{ value: PublicLinkExpiration.Never, labelKey: "never" },
+	{ value: PublicLinkExpiration.OneHour, labelKey: "one_hour" },
+	{ value: PublicLinkExpiration.SixHours, labelKey: "six_hours" },
+	{ value: PublicLinkExpiration.OneDay, labelKey: "one_day" },
+	{ value: PublicLinkExpiration.ThreeDays, labelKey: "three_days" },
+	{ value: PublicLinkExpiration.OneWeek, labelKey: "one_week" },
+	{ value: PublicLinkExpiration.TwoWeeks, labelKey: "two_weeks" },
+	{ value: PublicLinkExpiration.ThirtyDays, labelKey: "thirty_days" }
+] as const satisfies readonly { value: PublicLinkExpiration; labelKey: keyof typeof en }[]
 
 function PublicLink() {
 	const { t } = useTranslation()
@@ -113,6 +84,8 @@ function PublicLink() {
 			? publicLinkStatusQuery.data.status.downloadable
 			: publicLinkStatusQuery.data.status.enableDownload
 		: false
+
+	const currentExpiration = edited?.expiration ?? publicLinkStatusQuery.data?.status.expiration
 
 	if (!itemParsed || (itemParsed.type !== "file" && itemParsed.type !== "directory")) {
 		return <DismissStack />
@@ -260,7 +233,6 @@ function PublicLink() {
 											</Text>
 										</View>
 										<Group
-											className="bg-background-tertiary"
 											buttons={[
 												{
 													icon: "link-outline",
@@ -293,7 +265,6 @@ function PublicLink() {
 											]}
 										/>
 										<Group
-											className="bg-background-tertiary"
 											buttons={[
 												{
 													icon: "lock-closed-outline",
@@ -348,60 +319,23 @@ function PublicLink() {
 															<View className="flex-row items-center gap-4 bg-transparent">
 																<Menu
 																	type="dropdown"
-																	buttons={[
-																		{
-																			title: t("never"),
-																			enum: PublicLinkExpiration.Never
-																		},
-																		{
-																			title: t("one_hour"),
-																			enum: PublicLinkExpiration.OneHour
-																		},
-																		{
-																			title: t("six_hours"),
-																			enum: PublicLinkExpiration.SixHours
-																		},
-																		{
-																			title: t("one_day"),
-																			enum: PublicLinkExpiration.OneDay
-																		},
-																		{
-																			title: t("three_days"),
-																			enum: PublicLinkExpiration.ThreeDays
-																		},
-																		{
-																			title: t("one_week"),
-																			enum: PublicLinkExpiration.OneWeek
-																		},
-																		{
-																			title: t("two_weeks"),
-																			enum: PublicLinkExpiration.TwoWeeks
-																		},
-																		{
-																			title: t("thirty_days"),
-																			enum: PublicLinkExpiration.ThirtyDays
-																		}
-																	].map(expiration => ({
-																		id: expiration.enum.toString(),
-																		title: expiration.title,
-																		checked: isExpirationChecked({
-																			candidate: expiration.enum,
-																			editedExpiration: edited?.expiration,
-																			serverExpiration: publicLinkStatusQuery.data?.status.expiration
-																		}),
+																	buttons={EXPIRATION_OPTIONS.map(option => ({
+																		id: option.value.toString(),
+																		title: t(option.labelKey),
+																		checked: option.value === currentExpiration,
 																		onPress: () => {
 																			setEdited(prev => ({
 																				...(prev ?? {}),
-																				expiration: expiration.enum
+																				expiration: option.value
 																			}))
 																		}
 																	}))}
 																>
 																	<CrossGlassContainerView className="min-h-9 p-2 px-3 items-center justify-center flex-row">
 																		<Text className="text-blue-500 text-base">
-																			{expirationToText(
-																				edited?.expiration ?? publicLinkStatusQuery.data.status.expiration,
-																				t
+																			{t(
+																				EXPIRATION_OPTIONS.find(option => option.value === currentExpiration)
+																					?.labelKey ?? "unknown"
 																			)}
 																		</Text>
 																	</CrossGlassContainerView>

@@ -161,8 +161,6 @@ const {
 	}
 })
 
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
-
 const { mockMarkDirectorySizesStale, mockAddAccountStorageUsed } = vi.hoisted(() => ({
 	mockMarkDirectorySizesStale: vi.fn(),
 	mockAddAccountStorageUsed: vi.fn()
@@ -175,8 +173,6 @@ vi.mock("@/features/drive/queries/useDirectorySize.query", () => ({
 vi.mock("@/queries/useAccount.query", () => ({
 	addAccountStorageUsed: mockAddAccountStorageUsed
 }))
-
-vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
 
 vi.mock("@filen/sdk-rs", () => {
 	class TaggedUnion {

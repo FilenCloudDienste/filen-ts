@@ -11,7 +11,7 @@ import { useTranslation } from "react-i18next"
 import Button from "@/components/ui/button"
 import { createChatFlow } from "@/features/chats/chatsActions"
 import useBlockedUsers from "@/features/contacts/hooks/useBlockedUsers"
-import { isOneOnOneWithBlocked } from "@/features/chats/chatSelectors"
+import { visibleChats } from "@/features/chats/chatSelectors"
 import logger from "@/lib/logger"
 import { TAB_LIST_CONTENT_CLASS } from "@/constants"
 
@@ -28,19 +28,16 @@ const List = ({ searchQuery }: { searchQuery: string }) => {
 			return []
 		}
 
-		let chats = chatsQuery.data
-			.filter(chat => chat.ownerId === stringigiedClient?.userId || chat.lastMessage)
-			.filter(chat => !isOneOnOneWithBlocked(chat, stringigiedClient?.userId, blocked))
-			.sort((a, b) => {
-				const aLastMessageTimestamp = a.lastMessage ? Number(a.lastMessage.sentTimestamp) : 0
-				const bLastMessageTimestamp = b.lastMessage ? Number(b.lastMessage.sentTimestamp) : 0
+		let chats = visibleChats(chatsQuery.data, stringigiedClient?.userId, blocked).sort((a, b) => {
+			const aLastMessageTimestamp = a.lastMessage ? Number(a.lastMessage.sentTimestamp) : 0
+			const bLastMessageTimestamp = b.lastMessage ? Number(b.lastMessage.sentTimestamp) : 0
 
-				if (aLastMessageTimestamp === bLastMessageTimestamp) {
-					return parseNumbersFromString(b.uuid) - parseNumbersFromString(a.uuid)
-				}
+			if (aLastMessageTimestamp === bLastMessageTimestamp) {
+				return parseNumbersFromString(b.uuid) - parseNumbersFromString(a.uuid)
+			}
 
-				return bLastMessageTimestamp - aLastMessageTimestamp
-			})
+			return bLastMessageTimestamp - aLastMessageTimestamp
+		})
 
 		if (searchQuery && searchQuery.length > 0) {
 			const searchQueryNormalized = searchQuery.toLowerCase().trim()

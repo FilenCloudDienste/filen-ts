@@ -4,13 +4,13 @@ import { Platform } from "react-native"
 import type { ListRenderItemInfo } from "@/components/ui/virtualList"
 import { type Chat as TChat } from "@/types"
 import View from "@/components/ui/view"
-import Avatar from "@/components/ui/avatar"
+import ChatAvatar from "@/features/chats/components/chatAvatar"
 import { PressableScale } from "@/components/ui/pressables"
 import Menu from "@/features/chats/components/list/chat/menu"
 import { chatDisplayName } from "@/lib/decryption"
 import { router } from "@/lib/router"
 import { useStringifiedClient } from "@/lib/auth"
-import { fastLocaleCompare, cn, contactDisplayName, isBlocked } from "@filen/shared"
+import { cn, isBlocked } from "@filen/shared"
 import useChatUnreadCount from "@/features/chats/hooks/useChatUnreadCount"
 import useChatsStore from "@/features/chats/store/useChats.store"
 import { useShallow } from "zustand/shallow"
@@ -20,6 +20,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { useTranslation } from "react-i18next"
 import { formatRelativeTime, simpleDateNoTime } from "@/lib/time"
 import useBlockedUsers from "@/features/contacts/hooks/useBlockedUsers"
+import { typingLabel, typingNames } from "@/features/chats/utils"
 
 const Chat = ({ info }: { info: ListRenderItemInfo<TChat> }) => {
 	const { t } = useTranslation()
@@ -39,33 +40,13 @@ const Chat = ({ info }: { info: ListRenderItemInfo<TChat> }) => {
 	)
 	const [isMenuOpen, setIsMenuOpen] = useState<boolean>(false)
 
-	const typingUsers = typing
-		.map(t => t.senderId)
-		.map(senderId => info.item.participants.find(p => p.userId === senderId))
-		.filter(Boolean)
-		.map(participant => contactDisplayName(participant!))
-
-	const participantsWithoutSelf = info.item.participants.filter(p => p.userId !== stringifiedClient?.userId)
+	const typingUsers = typingNames(typing, info.item.participants)
 
 	const title = stringifiedClient ? chatDisplayName(info.item, stringifiedClient.userId, t("just_you")) : ""
 
-	const participantsWithAvatars = participantsWithoutSelf
-		.filter(p => p.avatar && p.avatar.startsWith("http"))
-		.sort((a, b) => fastLocaleCompare(contactDisplayName(a), contactDisplayName(b)))
-		.map(p => p.avatar)
-		.slice(0, 5)
-
 	const onPress = () => {
 		if (useChatsStore.getState().selectedChats.length > 0) {
-			useChatsStore.getState().setSelectedChats(prev => {
-				const prevSelected = prev.some(n => n.uuid === info.item.uuid)
-
-				if (prevSelected) {
-					return prev.filter(n => n.uuid !== info.item.uuid)
-				}
-
-				return [...prev.filter(n => n.uuid !== info.item.uuid), info.item]
-			})
+			useChatsStore.getState().toggleSelectedChat(info.item)
 
 			return
 		}
@@ -100,25 +81,12 @@ const Chat = ({ info }: { info: ListRenderItemInfo<TChat> }) => {
 								<Checkbox value={isSelected} />
 							</View>
 						)}
-						{participantsWithAvatars.length === 0 ? (
-							<Avatar
-								className="shrink-0"
-								size={38}
-								immediateFallback={true}
-							/>
-						) : participantsWithoutSelf.length <= 1 ? (
-							<Avatar
-								className="shrink-0"
-								size={38}
-								source={participantsWithoutSelf.at(0)?.avatar}
-							/>
-						) : (
-							<Avatar
-								className="shrink-0"
-								size={38}
-								group={participantsWithoutSelf.length}
-							/>
-						)}
+						<ChatAvatar
+							className="shrink-0"
+							size={38}
+							participants={info.item.participants}
+							selfUserId={stringifiedClient?.userId}
+						/>
 						<View className="flex-col border-b border-separator w-full py-3 items-start gap-0.5 bg-transparent flex-1">
 							<View className="flex-1 flex-row items-center gap-2 bg-transparent">
 								{info.item.muted && (
@@ -153,7 +121,7 @@ const Chat = ({ info }: { info: ListRenderItemInfo<TChat> }) => {
 									ellipsizeMode="tail"
 									className="text-xs text-muted-foreground italic"
 								>
-									{typingUsers.length > 1 ? t("typing_with_names", { names: typingUsers.join(", ") }) : t("typing")}
+									{typingLabel(typingUsers, t)}
 								</Text>
 							) : info.item.lastMessage && info.item.lastMessage.inner.message ? (
 								<Text

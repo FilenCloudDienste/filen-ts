@@ -39,21 +39,6 @@ function monthFormatter(): Intl.DateTimeFormat {
 	return formatter
 }
 
-export type SortByType =
-	| "nameAsc"
-	| "sizeAsc"
-	| "mimeAsc"
-	| "lastModifiedAsc"
-	| "nameDesc"
-	| "sizeDesc"
-	| "mimeDesc"
-	| "lastModifiedDesc"
-	| "uploadDateAsc"
-	| "uploadDateDesc"
-	| "creationAsc"
-	| "creationDesc"
-	| "captureDesc"
-
 // Delegate kept so the existing logout wiring (src/lib/auth.ts) is untouched.
 export function clearSortCaches(): void {
 	clearNaturalSortCaches()
@@ -131,7 +116,7 @@ export function captureTimestamp(item: DriveItem): number {
 	return Number.isFinite(estimate) ? estimate : creationSortKey(item)
 }
 
-const sortModes: Record<string, SortMode<DriveItem>> = {
+const sortModes = {
 	nameAsc: { kind: "parts", isAsc: true, stringKey: nameSortKey },
 	nameDesc: { kind: "parts", isAsc: false, stringKey: nameSortKey },
 	sizeAsc: { kind: "size", isAsc: true },
@@ -145,9 +130,9 @@ const sortModes: Record<string, SortMode<DriveItem>> = {
 	creationAsc: { kind: "timestamp", isAsc: true, timestampKey: creationSortKey },
 	creationDesc: { kind: "timestamp", isAsc: false, timestampKey: creationSortKey },
 	captureDesc: { kind: "timestamp", isAsc: false, timestampKey: captureTimestamp }
-}
+} as const satisfies Record<string, SortMode<DriveItem>>
 
-const FALLBACK_SORT_MODE = sortModes["nameAsc"] as SortMode<DriveItem>
+export type SortByType = keyof typeof sortModes
 
 export type SortItemsOptions = {
 	// Real directory sizes (bytes) keyed by directory uuid, fed in by the drive screen from the
@@ -169,7 +154,8 @@ function makeSortAccessors<T extends DriveItem>(directorySizes?: ReadonlyMap<str
 }
 
 function sortItems<T extends DriveItem>(items: T[], type: SortByType, options?: SortItemsOptions): T[] {
-	const mode = (sortModes[type] ?? FALLBACK_SORT_MODE) as SortMode<T>
+	// A corrupt or stale persisted preference sorts by name.
+	const mode: SortMode<T> = Object.hasOwn(sortModes, type) ? sortModes[type] : sortModes.nameAsc
 
 	return sortItemsEngine(items, mode, makeSortAccessors<T>(options?.directorySizes))
 }

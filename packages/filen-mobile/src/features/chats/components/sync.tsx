@@ -4,7 +4,7 @@ import chats from "@/features/chats/chats"
 import { AppState } from "react-native"
 import useChatsStore, { type InflightChatMessages } from "@/features/chats/store/useChats.store"
 import sqlite from "@/lib/sqlite"
-import { fetchData as chatsQueryFetch } from "@/features/chats/queries/useChats.query"
+import { chatsQueryFetch } from "@/features/chats/queries/useChats.query"
 import { unwrapSdkError, isPermanentSdkRejection } from "@/lib/sdkErrors"
 import logger from "@/lib/logger"
 import { OutboxSync } from "@/lib/outboxSync"
@@ -129,15 +129,7 @@ export class Sync extends OutboxSync<InflightChatMessages> {
 								signal
 							})
 
-							useChatsStore.getState().setInflightErrors(prev => {
-								const updated = {
-									...prev
-								}
-
-								delete updated[message.inflightId]
-
-								return updated
-							})
+							useChatsStore.getState().clearInflightError(message.inflightId)
 						} catch (e) {
 							if (signal.aborted) {
 								return
@@ -173,52 +165,13 @@ export class Sync extends OutboxSync<InflightChatMessages> {
 								// (retry/remove) in the chat.
 								logger.error("chats-sync", "dropping inflight message after max permanent rejections", { inflightId: message.inflightId, chatUuid, permanentRejections, error: e })
 
-								useChatsStore.getState().setInflightMessages(prev => {
-									const existing = prev[chatUuid]
-
-									if (!existing) {
-										return prev
-									}
-
-									const remaining = existing.messages.filter(m => m.inflightId !== message.inflightId)
-									const updated = {
-										...prev
-									}
-
-									if (remaining.length === 0) {
-										delete updated[chatUuid]
-									} else {
-										updated[chatUuid] = {
-											...existing,
-											messages: remaining
-										}
-									}
-
-									return updated
-								})
+								useChatsStore.getState().dequeueInflightMessage(chatUuid, message.inflightId)
 							}
 
 							continue
 						}
 
-						useChatsStore.getState().setInflightMessages(prev => {
-							const updated = {
-								...prev
-							}
-
-							if (updated[chatUuid]) {
-								updated[chatUuid] = {
-									...updated[chatUuid],
-									messages: (updated[chatUuid]?.messages ?? []).filter(m => m.inflightId !== message.inflightId)
-								}
-
-								if (updated[chatUuid].messages.length === 0) {
-									delete updated[chatUuid]
-								}
-							}
-
-							return updated
-						})
+						useChatsStore.getState().dequeueInflightMessage(chatUuid, message.inflightId)
 					}
 				})
 			)

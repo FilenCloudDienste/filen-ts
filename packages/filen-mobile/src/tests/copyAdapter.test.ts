@@ -1,7 +1,6 @@
 import { vi, describe, it, expect } from "vitest"
 import { readFileSync } from "node:fs"
 
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 vi.mock("@filen/sdk-rs", async () => await import("@/tests/mocks/sdkCopy"))
 vi.mock("@/lib/i18n", () => ({ default: { t: (key: string) => key } }))
 vi.mock("@/lib/sdkUnwrap", () => ({

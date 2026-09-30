@@ -16,10 +16,6 @@ vi.mock("@/features/transfers/quota", () => ({
 	uploadQuotaRefusal: mockUploadQuotaRefusal
 }))
 
-vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
-
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
-
 vi.mock("@filen/shared", async () => await import("@/tests/mocks/filenShared"))
 
 vi.mock("expo-crypto", async () => await import("@/tests/mocks/expoCrypto"))

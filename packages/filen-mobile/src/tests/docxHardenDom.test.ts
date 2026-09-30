@@ -2,12 +2,8 @@
 
 import { describe, it, expect } from "vitest"
 
-import {
-	hardenDocxDom,
-	hardenDocxStyles,
-	hardenDocxInlineStyles,
-	DOCX_EXTERNAL_URL_ATTRIBUTE
-} from "@/components/docxPreview/linkSafety"
+import { hardenDocxDom, hardenDocxStyles, hardenDocxInlineStyles } from "@/components/docxPreview/linkSafety"
+import { EXTERNAL_URL_ATTRIBUTE } from "@/lib/domExternalLink"
 
 function render(html: string): HTMLElement {
 	const root = document.createElement("div")
@@ -26,7 +22,7 @@ describe("hardenDocxDom — anchors", () => {
 		const anchor = root.querySelector("a")
 
 		expect(anchor?.hasAttribute("href")).toBe(false)
-		expect(anchor?.hasAttribute(DOCX_EXTERNAL_URL_ATTRIBUTE)).toBe(false)
+		expect(anchor?.hasAttribute(EXTERNAL_URL_ATTRIBUTE)).toBe(false)
 		// The text survives — only the link affordance is removed.
 		expect(anchor?.textContent).toBe("Open full report")
 	})
@@ -38,7 +34,7 @@ describe("hardenDocxDom — anchors", () => {
 
 		const anchor = root.querySelector("a")
 
-		expect(anchor?.getAttribute(DOCX_EXTERNAL_URL_ATTRIBUTE)).toBe("https://example.com/doc")
+		expect(anchor?.getAttribute(EXTERNAL_URL_ATTRIBUTE)).toBe("https://example.com/doc")
 		expect(anchor?.getAttribute("href")).toBe("#")
 	})
 
@@ -50,7 +46,7 @@ describe("hardenDocxDom — anchors", () => {
 		const anchor = root.querySelector("a")
 
 		expect(anchor?.getAttribute("href")).toBe("#section-2")
-		expect(anchor?.hasAttribute(DOCX_EXTERNAL_URL_ATTRIBUTE)).toBe(false)
+		expect(anchor?.hasAttribute(EXTERNAL_URL_ATTRIBUTE)).toBe(false)
 	})
 
 	it("clears a document-supplied data-external-url on EVERY anchor, including fragments", () => {
@@ -58,16 +54,16 @@ describe("hardenDocxDom — anchors", () => {
 		// survived the sweep would be handed to the OS. Fragment anchors take an early `continue`,
 		// which is exactly where the clear used to be skipped.
 		const root = render(
-			`<a href="#bookmark" ${DOCX_EXTERNAL_URL_ATTRIBUTE}="javascript:alert(1)">frag</a>` +
-				`<a href="javascript:alert(1)" ${DOCX_EXTERNAL_URL_ATTRIBUTE}="https://evil.example">blocked</a>`
+			`<a href="#bookmark" ${EXTERNAL_URL_ATTRIBUTE}="javascript:alert(1)">frag</a>` +
+				`<a href="javascript:alert(1)" ${EXTERNAL_URL_ATTRIBUTE}="https://evil.example">blocked</a>`
 		)
 
 		hardenDocxDom(root)
 
 		const [fragment, blocked] = Array.from(root.querySelectorAll("a"))
 
-		expect(fragment?.hasAttribute(DOCX_EXTERNAL_URL_ATTRIBUTE)).toBe(false)
-		expect(blocked?.hasAttribute(DOCX_EXTERNAL_URL_ATTRIBUTE)).toBe(false)
+		expect(fragment?.hasAttribute(EXTERNAL_URL_ATTRIBUTE)).toBe(false)
+		expect(blocked?.hasAttribute(EXTERNAL_URL_ATTRIBUTE)).toBe(false)
 	})
 
 	it("blocks an href carrying an allowlisted scheme plus a smuggled second scheme", () => {

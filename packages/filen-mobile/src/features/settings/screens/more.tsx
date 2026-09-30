@@ -135,6 +135,7 @@ function More() {
 							)}
 						</PressableScale>
 						<Group
+							className="bg-background-secondary"
 							buttons={[
 								{
 									icon: "time-outline",
@@ -159,6 +160,7 @@ function More() {
 							]}
 						/>
 						<Group
+							className="bg-background-secondary"
 							buttons={[
 								...(userIsSubbed
 									? [
@@ -182,6 +184,7 @@ function More() {
 							]}
 						/>
 						<Group
+							className="bg-background-secondary"
 							buttons={[
 								{
 									icon: "person-outline",
@@ -201,6 +204,7 @@ function More() {
 							]}
 						/>
 						<Group
+							className="bg-background-secondary"
 							buttons={[
 								{
 									icon: "lock-closed-outline",
@@ -238,6 +242,7 @@ function More() {
 							]}
 						/>
 						<Group
+							className="bg-background-secondary"
 							buttons={[
 								{
 									icon: "code-slash-outline",

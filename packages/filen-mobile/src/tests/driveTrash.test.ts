@@ -50,8 +50,6 @@ const {
 // Module mocks
 // ---------------------------------------------------------------------------
 
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
-
 const { mockMarkDirectorySizesStale } = vi.hoisted(() => ({ mockMarkDirectorySizesStale: vi.fn() }))
 
 vi.mock("@/features/drive/queries/useDirectorySize.query", () => ({
@@ -79,6 +77,8 @@ vi.mock("@/lib/sdkUnwrap", () => ({
 vi.mock("@/features/drive/queries/useDriveItems.query", () => ({
 	driveItemsQueryUpdateGlobal: vi.fn(),
 	driveItemsQueryUpdate: mockDriveItemsQueryUpdate,
+	driveItemsQueryUpdateRoot: (type: string, updater: unknown) =>
+		mockDriveItemsQueryUpdate({ params: { path: { type, uuid: null } }, updater }),
 	driveItemsQueryUpdateForNormalParent: mockDriveItemsQueryUpdateForNormalParent,
 	driveItemsQueryGet: vi.fn(),
 	driveItemsQueryRemoveDirectoryFromPhotos: vi.fn()

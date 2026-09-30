@@ -1,10 +1,11 @@
 import { ChatEvent_Tags, ChatTypingType, MaybeEncryptedUniffi_Tags, SocketEvent_Tags, type SocketEvent } from "@filen/sdk-rs"
-import useChatsStore from "@/features/chats/store/useChats.store"
+import useChatsStore, { type Typing } from "@/features/chats/store/useChats.store"
 import { chatMessagesQueryUpdate, chatMessagesQueryGet } from "@/features/chats/queries/useChatMessages.query"
-import { chatsQueryGet, chatsQueryUpdate } from "@/features/chats/queries/useChats.query"
-import { wrapChat, wrapMessage } from "@/features/chats/chatsWrap"
+import { chatsQueryGet, chatsQueryUpdate, replaceChatInCache } from "@/features/chats/queries/useChats.query"
+import { wrapChat, wrapQueryMessage, NO_INFLIGHT_ID } from "@/features/chats/chatsWrap"
 import events from "@/lib/events"
 import { purgeChatInflightState } from "@/features/chats/chatsInflight"
+import { dropChatFromCachesDeferred } from "@/features/chats/chats"
 import logger from "@/lib/logger"
 import auth from "@/lib/auth"
 
@@ -18,6 +19,24 @@ export const chatTypingTimeoutsRef: Record<string, NodeJS.Timeout> = {}
 
 function typingTimeoutKey(chatUuid: string, senderId: bigint): string {
 	return `${chatUuid}:${senderId}`
+}
+
+function clearTypingTimeout(chatUuid: string, senderId: bigint): void {
+	const key = typingTimeoutKey(chatUuid, senderId)
+
+	clearTimeout(chatTypingTimeoutsRef[key])
+	delete chatTypingTimeoutsRef[key]
+}
+
+function withoutTypingSender(prev: Record<string, Typing>, chatUuid: string, senderId: bigint): Record<string, Typing> {
+	return {
+		...prev,
+		[chatUuid]: (prev[chatUuid] ?? []).filter(t => t.senderId !== senderId)
+	}
+}
+
+function findChatByMessageUuid(uuid: string) {
+	return chatsQueryGet()?.find(c => chatMessagesQueryGet({ uuid: c.uuid })?.some(m => m.inner.uuid === uuid))
 }
 
 // Removes every local trace of a chat this account can no longer access — shared by
@@ -48,20 +67,7 @@ async function removeChatLocally(uuid: string): Promise<boolean> {
 	// not lag behind.
 	useChatsStore.getState().removeFromSelection([uuid])
 
-	// We have to set a timeout here, otherwise the main chat _layout redirect kicks in too early and which feels janky and messes with the navigation stack if we are inside the chat when this happen.
-	// This is a bit of a band-aid solution, ideally we would have a more robust way to handle this, but it works for now and the delay is short enough that it shouldn't cause any issues.
-	setTimeout(() => {
-		chatMessagesQueryUpdate({
-			params: {
-				uuid
-			},
-			updater: () => []
-		})
-
-		chatsQueryUpdate({
-			updater: prev => (prev ?? []).filter(c => c.uuid !== uuid)
-		})
-	}, 3000)
+	dropChatFromCachesDeferred(uuid)
 
 	return true
 }
@@ -76,8 +82,7 @@ export async function handleChatEvent({ event }: { event: ChatSocketEvent }): Pr
 			const [inner] = eventInner.inner.inner
 			const timeoutKey = typingTimeoutKey(inner.chat, inner.senderId)
 
-			clearTimeout(chatTypingTimeoutsRef[timeoutKey])
-			delete chatTypingTimeoutsRef[timeoutKey]
+			clearTypingTimeout(inner.chat, inner.senderId)
 
 			useChatsStore.getState().setTyping(prev => {
 				switch (inner.typingType) {
@@ -85,10 +90,7 @@ export async function handleChatEvent({ event }: { event: ChatSocketEvent }): Pr
 						chatTypingTimeoutsRef[timeoutKey] = setTimeout(() => {
 							delete chatTypingTimeoutsRef[timeoutKey]
 
-							useChatsStore.getState().setTyping(prev => ({
-								...prev,
-								[inner.chat]: (prev[inner.chat] ?? []).filter(t => t.senderId !== inner.senderId)
-							}))
+							useChatsStore.getState().setTyping(prev => withoutTypingSender(prev, inner.chat, inner.senderId))
 						}, 10000)
 
 						return {
@@ -98,10 +100,7 @@ export async function handleChatEvent({ event }: { event: ChatSocketEvent }): Pr
 					}
 
 					case ChatTypingType.Up: {
-						return {
-							...prev,
-							[inner.chat]: (prev[inner.chat] ?? []).filter(t => t.senderId !== inner.senderId)
-						}
+						return withoutTypingSender(prev, inner.chat, inner.senderId)
 					}
 				}
 			})
@@ -111,15 +110,10 @@ export async function handleChatEvent({ event }: { event: ChatSocketEvent }): Pr
 
 		case ChatEvent_Tags.MessageNew: {
 			const [inner] = eventInner.inner.inner
-			const messageTimeoutKey = typingTimeoutKey(inner.msg.chat, inner.msg.inner.senderId)
 
-			clearTimeout(chatTypingTimeoutsRef[messageTimeoutKey])
-			delete chatTypingTimeoutsRef[messageTimeoutKey]
+			clearTypingTimeout(inner.msg.chat, inner.msg.inner.senderId)
 
-			useChatsStore.getState().setTyping(prev => ({
-				...prev,
-				[inner.msg.chat]: (prev[inner.msg.chat] ?? []).filter(t => t.senderId !== inner.msg.inner.senderId)
-			}))
+			useChatsStore.getState().setTyping(prev => withoutTypingSender(prev, inner.msg.chat, inner.msg.inner.senderId))
 
 			setTimeout(
 				() => {
@@ -135,10 +129,7 @@ export async function handleChatEvent({ event }: { event: ChatSocketEvent }): Pr
 								return prev
 							}
 
-							const committed = {
-								...wrapMessage(inner.msg),
-								inflightId: "" // Placeholder, actual inflightId is only needed for send sync
-							}
+							const committed = wrapQueryMessage(inner.msg)
 
 							// Slow own send (longer than the 3s self-delay): the optimistic copy still
 							// carries its inflight uuid, invisible to the server-uuid dedupe above — swap
@@ -147,7 +138,7 @@ export async function handleChatEvent({ event }: { event: ChatSocketEvent }): Pr
 							// reconcile later drops either shape idempotently.
 							if (userId === inner.msg.inner.senderId) {
 								const inflightIndex = prev.findIndex(
-									m => m.inflightId !== "" && m.inner.senderId === userId && m.inner.message === inner.msg.inner.message
+									m => m.inflightId !== NO_INFLIGHT_ID && m.inner.senderId === userId && m.inner.message === inner.msg.inner.message
 								)
 
 								if (inflightIndex !== -1) {
@@ -283,14 +274,7 @@ export async function handleChatEvent({ event }: { event: ChatSocketEvent }): Pr
 		case ChatEvent_Tags.MessageDelete: {
 			const [inner] = eventInner.inner.inner
 
-			const chats = chatsQueryGet()
-			const chat = chats?.find(c => {
-				const messages = chatMessagesQueryGet({
-					uuid: c.uuid
-				})
-
-				return messages?.some(m => m.inner.uuid === inner.uuid)
-			})
+			const chat = findChatByMessageUuid(inner.uuid)
 
 			if (!chat) {
 				logger.warn("chats", "MessageDelete: message not found in cache", { msgUuid: inner.uuid })
@@ -325,14 +309,7 @@ export async function handleChatEvent({ event }: { event: ChatSocketEvent }): Pr
 		case ChatEvent_Tags.MessageEmbedDisabled: {
 			const [inner] = eventInner.inner.inner
 
-			const chats = chatsQueryGet()
-			const chat = chats?.find(c => {
-				const messages = chatMessagesQueryGet({
-					uuid: c.uuid
-				})
-
-				return messages?.some(m => m.inner.uuid === inner.uuid)
-			})
+			const chat = findChatByMessageUuid(inner.uuid)
 
 			if (!chat) {
 				break
@@ -403,9 +380,7 @@ export async function handleChatEvent({ event }: { event: ChatSocketEvent }): Pr
 				participants: chat.participants.filter(p => p.userId !== inner.userId)
 			}
 
-			chatsQueryUpdate({
-				updater: prev => prev.map(c => (c.uuid === inner.uuid ? updatedChat : c))
-			})
+			replaceChatInCache(updatedChat)
 
 			break
 		}
@@ -425,9 +400,7 @@ export async function handleChatEvent({ event }: { event: ChatSocketEvent }): Pr
 				participants: [...chat.participants.filter(p => p.userId !== inner.participant.userId), inner.participant]
 			}
 
-			chatsQueryUpdate({
-				updater: prev => prev.map(c => (c.uuid === inner.chat ? updatedChat : c))
-			})
+			replaceChatInCache(updatedChat)
 
 			break
 		}

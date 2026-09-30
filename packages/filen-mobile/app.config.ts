@@ -3,7 +3,7 @@
 import "ts-node/register"
 import type { ExpoConfig, ConfigContext } from "expo/config"
 import { SUPPORTED_LANGUAGES } from "./src/locales/languages"
-import { EXTERNAL_LINK_PROTOCOLS } from "./src/components/textEditor/linkUtils"
+import { EXTERNAL_LINK_PROTOCOLS } from "./src/lib/untrustedLinks"
 import { APPLE_TEAM_ID, IOS_APP_GROUP_IDENTIFIER, IOS_KEYCHAIN_ACCESS_GROUP } from "./src/lib/appIdentity"
 
 const VERSION: string = "4.0.18"
@@ -12,9 +12,26 @@ const ANDROID_MIN_SDK_VERSION: number = 31
 const ANDROID_TARGET_SDK_VERSION: number = 36
 const ANDROID_COMPILE_SDK_VERSION: number = 36
 const ANDROID_BUILD_TOOLS_VERSION: string = "36.0.0"
+// Gradle ABIs and the Rust .so set must match. x86_64 first: withAndroidRustBuild reads targets[0] for uniffi-bindgen
+const ANDROID_ABIS: string[] = ["x86_64", "arm64-v8a"]
 const IOS_DEPLOYMENT_TARGET: string = "26.0"
 const NAME: string = "Filen"
 const IDENTIFIER: string = "io.filen.app"
+
+// The iOS File Provider extension and the Android provider build the same crate
+const NATIVE_CACHE_CRATE = {
+	crateName: "filen-mobile-native-cache",
+	libName: "filen_mobile_native_cache",
+	cargoArgs: "-F heif-decoder"
+}
+
+// Both platforms' scheme declarations derive from the runtime allowlist so what the app will open and
+// what it may ask the OS about cannot drift apart. "http://" -> "http", "tel:" -> "tel".
+const EXTERNAL_LINK_SCHEMES: string[] = EXTERNAL_LINK_PROTOCOLS.map(protocol => protocol.replace(/:.*$/, ""))
+
+// Several plugins write the same Info.plist keys; the last one wins, so they must share one string.
+const CAMERA_USAGE: string = "Please allow access to your camera so that Filen can take photos."
+const MICROPHONE_USAGE: string = "Please allow access to your microphone so that Filen can capture audio when recording videos."
 
 function semverToNumber(version: string): number {
 	const parts = version.replace(/^v/, "").split(".").map(Number)
@@ -85,12 +102,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
 			},
 			// iOS refuses canOpenURL for any scheme not declared here, so without it every mailto:/tel:/
 			// sms: link in the app fails the can-open check and reports "cannot open" — previews, notes
-			// and chat alike. Derived from the runtime allowlist for the same reason the Android <queries>
-			// block is: what the app will open and what it may ask about cannot be allowed to drift.
-			// http/https are handled by the system and must not be listed.
-			LSApplicationQueriesSchemes: EXTERNAL_LINK_PROTOCOLS.map(protocol => protocol.replace(/:.*$/, "")).filter(
-				scheme => scheme !== "http" && scheme !== "https"
-			),
+			// and chat alike. http/https are handled by the system and must not be listed.
+			LSApplicationQueriesSchemes: EXTERNAL_LINK_SCHEMES.filter(scheme => scheme !== "http" && scheme !== "https"),
 			LSApplicationCategoryType: "public.app-category.productivity",
 			UIRequiredDeviceCapabilities: ["arm64"],
 			CFBundleAllowMixedLocalizations: true,
@@ -130,8 +143,6 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
 			"RECEIVE_BOOT_COMPLETED",
 			"VIBRATE",
 			"POST_NOTIFICATIONS",
-			"FOREGROUND_SERVICE",
-			"FOREGROUND_SERVICE_DATA_SYNC",
 			"USE_FINGERPRINT",
 			"USE_BIOMETRIC",
 			"SYSTEM_ALERT_WINDOW",
@@ -165,11 +176,22 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
 					targetSdkVersion: ANDROID_TARGET_SDK_VERSION,
 					minSdkVersion: ANDROID_MIN_SDK_VERSION,
 					buildToolsVersion: ANDROID_BUILD_TOOLS_VERSION,
+					buildArchs: ANDROID_ABIS,
 					enableProguardInReleaseBuilds: false,
 					enableShrinkResourcesInReleaseBuilds: false,
 					enableBundleCompression: false,
 					useLegacyPackaging: false,
-					enablePngCrunchInReleaseBuilds: false
+					enablePngCrunchInReleaseBuilds: false,
+					// Android 11+ package visibility hides handlers for undeclared schemes from
+					// Linking.canOpenURL, so a mailto:/tel: link reports "cannot open" even with a handler
+					// installed. No <category>: a category-less query matches CATEGORY_DEFAULT, which every
+					// launchable activity declares. https is omitted because the template already declares it.
+					manifestQueries: {
+						intent: EXTERNAL_LINK_SCHEMES.filter(scheme => scheme !== "https").map(scheme => ({
+							action: "VIEW",
+							data: { scheme }
+						}))
+					}
 				},
 				ios: {
 					deploymentTarget: IOS_DEPLOYMENT_TARGET,
@@ -208,7 +230,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
 		[
 			"expo-audio",
 			{
-				microphonePermission: "Please allow access to your microphone so that Filen can capture audio when recording videos.",
+				microphonePermission: MICROPHONE_USAGE,
 				enableBackgroundPlayback: true,
 				enableBackgroundRecording: false,
 				recordAudioAndroid: false
@@ -232,8 +254,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
 			"expo-image-picker",
 			{
 				photosPermission: "Please allow access to your photos so that Filen can back them up automatically.",
-				cameraPermission: "Please allow access to your camera so that Filen can take photos.",
-				microphonePermission: "Please allow access to your microphone so that Filen can capture audio when recording videos."
+				cameraPermission: CAMERA_USAGE,
+				microphonePermission: MICROPHONE_USAGE
 			}
 		],
 		[
@@ -287,16 +309,18 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
 		// Debug builds install as io.filen.app.debug so a dev build and the Play-Store app can
 		// coexist on one device — release builds are untouched.
 		"./plugins/withAndroidDebugSuffix",
+		"./plugins/withGradleMemory",
+		// Also adds the FOREGROUND_SERVICE and FOREGROUND_SERVICE_DATA_SYNC permissions.
 		[
-			"./plugins/withAndroidManifestPolicies",
+			"react-native-notify-kit",
 			{
-				// Derived from the runtime allowlist so the manifest <queries> block and what the app is
-				// actually willing to open can never drift apart. "http://" -> "http", "tel:" -> "tel".
-				schemes: EXTERNAL_LINK_PROTOCOLS.map(protocol => protocol.replace(/:.*$/, ""))
+				android: {
+					foregroundService: {
+						types: ["dataSync"]
+					}
+				}
 			}
 		],
-		"./plugins/withGradleMemory",
-		"./plugins/withNotifeeForegroundServiceType",
 		[
 			"./plugins/withAndroidLocaleConfig",
 			{
@@ -304,18 +328,10 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
 			}
 		],
 		[
-			"./plugins/withAndroidArchitectures",
-			{
-				architectures: "arm64-v8a,x86_64"
-			}
-		],
-		[
 			"./plugins/withFileProvider",
 			{
-				crateName: "filen-mobile-native-cache",
-				libName: "filen_mobile_native_cache",
+				...NATIVE_CACHE_CRATE,
 				targets: ["aarch64-apple-ios", "aarch64-apple-ios-sim"],
-				cargoArgs: "-F heif-decoder",
 				developmentTeamId: APPLE_TEAM_ID,
 				iosAppGroupIdentifier: IOS_APP_GROUP_IDENTIFIER
 			}
@@ -323,17 +339,15 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
 		[
 			"./plugins/withAndroidRustBuild",
 			{
-				crateName: "filen-mobile-native-cache",
-				libName: "filen_mobile_native_cache",
-				targets: ["x86_64", "arm64-v8a"],
-				cargoArgs: "-F heif-decoder"
+				...NATIVE_CACHE_CRATE,
+				targets: ANDROID_ABIS
 			}
 		],
 		"./plugins/withAndroidSigning",
 		[
 			"react-native-document-scanner-plugin",
 			{
-				cameraPermission: "Please allow access to your camera so that Filen can take photos."
+				cameraPermission: CAMERA_USAGE
 			}
 		]
 	],

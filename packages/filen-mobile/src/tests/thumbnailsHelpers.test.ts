@@ -27,8 +27,6 @@ vi.mock("@filen/sdk-rs", () => {
 	}
 })
 
-vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
-
 // Mock storageRoots — use the mock Directory from the already-mocked expo-file-system
 vi.mock("@/lib/storageRoots", async () => {
 	const efs = await import("@/tests/mocks/expoFileSystem")
@@ -52,8 +50,10 @@ vi.mock("@/stores/useHttp.store", () => ({
 
 import {
 	abortError,
+	throwIfAborted,
 	OfflineAbortError,
 	getPath,
+	getPathForUuid,
 	ensureThumbnailsDirectory,
 	getThumbnailKind
 } from "@/lib/thumbnailsHelpers"
@@ -146,6 +146,22 @@ describe("abortError", () => {
 	})
 })
 
+describe("throwIfAborted", () => {
+	it("does nothing when there is no signal or it is not aborted", () => {
+		expect(() => throwIfAborted(undefined)).not.toThrow()
+		expect(() => throwIfAborted(new AbortController().signal)).not.toThrow()
+	})
+
+	it("throws abortError(signal) when the signal is aborted", () => {
+		const controller = new AbortController()
+		const reason = new Error("stop")
+
+		controller.abort(reason)
+
+		expect(() => throwIfAborted(controller.signal)).toThrow(reason)
+	})
+})
+
 // ---------------------------------------------------------------------------
 // OfflineAbortError
 // ---------------------------------------------------------------------------
@@ -195,6 +211,15 @@ describe("getPath", () => {
 		const result = getPath(item as any)
 
 		expect(result).toBe(`${THUMBNAILS_DIR}/shared-uuid.webp`)
+	})
+
+	it("matches getPathForUuid for the same uuid", () => {
+		const item = {
+			type: "file" as const,
+			data: { uuid: "abc-123", size: 1024n, decryptedMeta: { name: "photo.jpg" } }
+		}
+
+		expect(getPath(item as any)).toBe(getPathForUuid("abc-123"))
 	})
 })
 

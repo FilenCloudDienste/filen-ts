@@ -78,8 +78,6 @@ vi.mock("expo-background-task", () => mockBackgroundTask)
 
 vi.mock("@filen/shared", async () => await import("@/tests/mocks/filenShared"))
 
-vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
-
 vi.mock("@/lib/setup", () => ({ default: mockSetup }))
 
 vi.mock("@/features/cameraUpload/cameraUpload", () => ({ default: mockCameraUpload }))

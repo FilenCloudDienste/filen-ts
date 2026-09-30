@@ -13,6 +13,7 @@ import IconTextField from "@/components/ui/iconTextField"
 import auth from "@/lib/auth"
 import alerts from "@/lib/alerts"
 import { inputPrompt } from "@/lib/promptFlow"
+import { promptEmailAndRun } from "@/features/auth/promptEmailAndRun"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import { unwrapSdkError } from "@/lib/sdkErrors"
 import useIsOnline from "@/hooks/useIsOnline"
@@ -100,43 +101,17 @@ const Login = () => {
 
 		const trimmedEmail = email.trim()
 
-		const firstAttempt = await runWithLoading(async () => {
-			await auth.login({
-				email: trimmedEmail,
-				password,
-				twoFactorCode: undefined
-			})
-		})
-
-		if (firstAttempt.success) {
-			await finishLogin()
-
-			return
-		}
-
-		if (!isTwoFactorRequiredError(firstAttempt.error)) {
-			logger.warn("auth", "login failed", { error: firstAttempt.error })
-			alerts.error(firstAttempt.error)
-
-			return
-		}
-
-		// 2FA required. Prompt and retry; on a rejected code, re-prompt with a hint instead of
-		// dropping back to the Sign In button. Cancelling the prompt exits the flow.
-		let wrongCode = false
+		// The first attempt goes without a code. A 2FA error then means a code is required, or the submitted one
+		// was wrong/expired: prompt (with a hint after a rejected code) and retry. Cancelling the prompt exits.
+		let twoFactorCode: string | undefined
 
 		for (;;) {
-			const twoFactorCode = await promptForTwoFactor(wrongCode)
-
-			if (!twoFactorCode) {
-				return
-			}
-
+			const code = twoFactorCode
 			const attempt = await runWithLoading(async () => {
 				await auth.login({
 					email: trimmedEmail,
 					password,
-					twoFactorCode
+					twoFactorCode: code
 				})
 			})
 
@@ -146,16 +121,20 @@ const Login = () => {
 				return
 			}
 
-			// A 2FA error after a code was submitted means it was wrong/expired → re-prompt with a
-			// hint. Any other failure is real → surface it and stop.
 			if (!isTwoFactorRequiredError(attempt.error)) {
-				logger.warn("auth", "login with 2FA failed", { error: attempt.error })
+				logger.warn("auth", "login failed", { error: attempt.error, withTwoFactorCode: code !== undefined })
 				alerts.error(attempt.error)
 
 				return
 			}
 
-			wrongCode = true
+			const nextCode = await promptForTwoFactor(code !== undefined)
+
+			if (!nextCode) {
+				return
+			}
+
+			twoFactorCode = nextCode
 		}
 	}
 
@@ -167,42 +146,16 @@ const Login = () => {
 			return
 		}
 
-		const targetEmail = await inputPrompt(
-			{
-				title: t("reset_password"),
-				message: t("enter_account_email"),
-				placeholder: t("email_placeholder_hint"),
-				cancelText: t("cancel"),
-				okText: t("send"),
-				defaultValue: email.trim(),
-				keyboardType: "email-address"
-			},
-			{ tag: "auth", message: "reset password prompt failed" },
-			{ trim: true, allowEmpty: true }
-		)
-
-		if (targetEmail === null) {
-			return
-		}
-
-		if (!isValidEmail(targetEmail)) {
-			alerts.error(t("please_enter_valid_email"))
-
-			return
-		}
-
-		const result = await runWithLoading(async () => {
-			await auth.startPasswordReset(targetEmail)
+		await promptEmailAndRun({
+			t,
+			title: t("reset_password"),
+			message: t("enter_account_email"),
+			okText: t("send"),
+			defaultValue: email.trim(),
+			logLabel: "password reset",
+			action: targetEmail => auth.startPasswordReset(targetEmail),
+			successMessage: t("password_reset_email_sent")
 		})
-
-		if (!result.success) {
-			logger.warn("auth", "password reset request failed", { error: result.error })
-			alerts.error(result.error)
-
-			return
-		}
-
-		alerts.normal(t("password_reset_email_sent"))
 	}
 
 	const openRegister = (): void => {

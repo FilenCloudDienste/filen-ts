@@ -15,13 +15,14 @@ import { ActivityIndicator, type NativeSyntheticEvent, type NativeScrollEvent } 
 import { useResolveClassNames } from "uniwind"
 import { run } from "@filen/shared"
 import chats from "@/features/chats/chats"
+import { withoutInflight } from "@/features/chats/chatsWrap"
 import useViewLayout from "@/hooks/useViewLayout"
 import alerts from "@/lib/alerts"
 import { onlineManager } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
 import { PressableScale } from "@/components/ui/pressables"
 import Ionicons from "@expo/vector-icons/Ionicons"
-import { composeMessageList } from "@/features/chats/utils"
+import { composeMessageList, attachmentMaxWidth } from "@/features/chats/utils"
 import logger from "@/lib/logger"
 
 const SCROLL_THRESHOLD = 300
@@ -136,7 +137,7 @@ const Messages = ({ chat }: { chat: TChat }) => {
 								info={info}
 								nextMessage={messages[info.index - 1]}
 								prevMessage={messages[info.index + 1]}
-								layout={layout}
+								attachmentMaxWidth={attachmentMaxWidth(layout.width)}
 							/>
 						)
 					}}
@@ -196,10 +197,7 @@ const Messages = ({ chat }: { chat: TChat }) => {
 								before: lastMessage.sentTimestamp
 							})
 
-							return moreMessages.map(m => ({
-								...m,
-								inflightId: "" // Placeholder, actual inflightId is only needed for send sync
-							})) satisfies ChatMessageWithInflightId[]
+							return moreMessages.map(withoutInflight)
 						})
 
 						if (!result.success) {

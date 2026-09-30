@@ -8,8 +8,6 @@ const h = vi.hoisted(() => ({
 }))
 
 vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
-vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
 vi.mock("@filen/sdk-rs", () => ({ AnyNormalDir_Tags: { Dir: "Dir", Root: "Root" } }))
 vi.mock("@/lib/router", () => ({ router: { push: h.push } }))
 vi.mock("@/lib/serializer", () => ({ serialize: (value: unknown) => JSON.stringify(value) }))

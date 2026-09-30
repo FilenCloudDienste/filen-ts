@@ -1,53 +1,17 @@
 import type { ListRenderItemInfo } from "@/components/ui/virtualList"
 import type { DriveItem } from "@/types"
 import { simpleDate } from "@/lib/time"
+import { isFileItem } from "@/features/drive/driveSelectors"
+import { pickDisplayTimestamp, rawUploadTimestamp } from "@/features/drive/utils"
 
-// File-variant date resolution is identical across file / sharedFile /
-// sharedRootFile: prefer modified, then created, then the upload timestamp.
-function resolveFileDate(item: Extract<DriveItem, { type: "file" | "sharedFile" | "sharedRootFile" }>): string {
-	if (item.data.decryptedMeta?.modified) {
-		return simpleDate(Number(item.data.decryptedMeta.modified))
-	}
-
-	if (item.data.decryptedMeta?.created) {
-		return simpleDate(Number(item.data.decryptedMeta.created))
-	}
-
-	return simpleDate(Number(item.data.timestamp))
-}
-
+// Files prefer modified, then created; directories created; both fall back to the upload timestamp.
 const DateComponent = ({ info }: { info: ListRenderItemInfo<DriveItem> }) => {
-	switch (info.item.type) {
-		case "file":
-		case "sharedFile":
-		case "sharedRootFile": {
-			return resolveFileDate(info.item)
-		}
+	const item = info.item
+	const metaTimestamp = isFileItem(item)
+		? item.data.decryptedMeta?.modified || item.data.decryptedMeta?.created
+		: item.data.decryptedMeta?.created
 
-		case "directory": {
-			if (info.item.data.decryptedMeta?.created) {
-				return simpleDate(Number(info.item.data.decryptedMeta.created))
-			}
-
-			return simpleDate(Number(info.item.data.timestamp))
-		}
-
-		case "sharedDirectory": {
-			if (info.item.data.decryptedMeta?.created) {
-				return simpleDate(Number(info.item.data.decryptedMeta.created))
-			}
-
-			return simpleDate(Number(info.item.data.inner.timestamp))
-		}
-
-		case "sharedRootDirectory": {
-			if (info.item.data.decryptedMeta?.created) {
-				return simpleDate(Number(info.item.data.decryptedMeta.created))
-			}
-
-			return simpleDate(Number(info.item.data.inner.timestamp))
-		}
-	}
+	return simpleDate(pickDisplayTimestamp(metaTimestamp, rawUploadTimestamp(item)))
 }
 
 export default DateComponent

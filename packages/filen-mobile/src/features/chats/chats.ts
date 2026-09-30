@@ -1,7 +1,7 @@
 import auth from "@/lib/auth"
 import { type ChatMessagePartial, ChatTypingType, type Contact, type ChatParticipant, AnyNormalDir, DirMeta_Tags } from "@filen/sdk-rs"
 import { type Chat, type ChatMessage } from "@/types"
-import { chatsQueryUpdate, chatsQueryFetch, chatsQueryGet } from "@/features/chats/queries/useChats.query"
+import { chatsQueryUpdate, chatsQueryFetch, chatsQueryGet, replaceChatInCache } from "@/features/chats/queries/useChats.query"
 import {
 	chatMessagesQueryUpdate,
 	chatMessagesQueryFetch,
@@ -9,7 +9,7 @@ import {
 	chatMessagesQueryIsActive
 } from "@/features/chats/queries/useChatMessages.query"
 import { cachedMessagesMatchLastMessage } from "@/features/chats/chatSelectors"
-import { wrapChat, wrapMessage } from "@/features/chats/chatsWrap"
+import { wrapChat, wrapMessage, withoutInflight } from "@/features/chats/chatsWrap"
 import { Semaphore, run } from "@filen/shared"
 import transfers from "@/features/transfers/transfers"
 import drive from "@/features/drive/drive"
@@ -19,6 +19,25 @@ import { purgeChatInflightState } from "@/features/chats/chatsInflight"
 import logger from "@/lib/logger"
 import { uploadQuotaRefusal } from "@/features/transfers/quota"
 import { toSignalOpts } from "@/lib/signals"
+
+// Deferred so the chat _layout redirect doesn't fire while the removed chat is still on screen,
+// which janks the navigation stack.
+const CHAT_CACHE_REMOVAL_DELAY_MS = 3000
+
+export function dropChatFromCachesDeferred(uuid: string): void {
+	setTimeout(() => {
+		chatsQueryUpdate({
+			updater: prev => prev.filter(c => c.uuid !== uuid)
+		})
+
+		chatMessagesQueryUpdate({
+			params: {
+				uuid
+			},
+			updater: () => []
+		})
+	}, CHAT_CACHE_REMOVAL_DELAY_MS)
+}
 
 class Chats {
 	private readonly refetchChatsAndMessagesMutex: Semaphore = new Semaphore(1)
@@ -77,9 +96,7 @@ class Chats {
 		// Reconcile the query cache immediately off the committed chat: drop the optimistic
 		// in-flight copy (matched by inflightId) and any prior copy of the same server uuid,
 		// then append the committed message.
-		chatsQueryUpdate({
-			updater: prev => prev.map(c => (c.uuid === chat.uuid ? chat : c))
-		})
+		replaceChatInCache(chat)
 
 		if (lastMessage) {
 			chatMessagesQueryUpdate({
@@ -109,16 +126,10 @@ class Chats {
 
 		// Post-commit housekeeping is best-effort — a rejection here must NOT bubble, or the
 		// committed message would be retried and duplicated.
-		await Promise.allSettled([
-			this.updateLastFocusTimesNow({
-				chats: [chat],
-				signal
-			}),
-			this.markRead({
-				chat,
-				signal
-			})
-		])
+		await this.markAsRead({
+			chat,
+			signal
+		}).catch(() => {})
 
 		return {
 			chat,
@@ -147,9 +158,7 @@ class Chats {
 			)
 		)
 
-		chatsQueryUpdate({
-			updater: prev => prev.map(c => (c.uuid === chat.uuid ? chat : c))
-		})
+		replaceChatInCache(chat)
 
 		chatMessagesQueryUpdate({
 			params: {
@@ -203,15 +212,7 @@ class Chats {
 			params: {
 				uuid: chat.uuid
 			},
-			updater: prev =>
-				prev.map(m =>
-					m.inner.uuid === message.inner.uuid
-						? {
-								...message,
-								inflightId: "" // Placeholder, actual inflightId is only needed for send sync
-							}
-						: m
-				)
+			updater: prev => prev.map(m => (m.inner.uuid === message.inner.uuid ? withoutInflight(message) : m))
 		})
 
 		return message
@@ -235,15 +236,7 @@ class Chats {
 			params: {
 				uuid: message.chat
 			},
-			updater: prev =>
-				prev.map(m =>
-					m.inner.uuid === message.inner.uuid
-						? {
-								...message,
-								inflightId: "" // Placeholder, actual inflightId is only needed for send sync
-							}
-						: m
-				)
+			updater: prev => prev.map(m => (m.inner.uuid === message.inner.uuid ? withoutInflight(message) : m))
 		})
 
 		return message
@@ -264,9 +257,7 @@ class Chats {
 			)
 		)
 
-		chatsQueryUpdate({
-			updater: prev => prev.map(c => (c.uuid === chat.uuid ? chat : c))
-		})
+		replaceChatInCache(chat)
 
 		return chat
 	}
@@ -283,19 +274,7 @@ class Chats {
 		// the sync must never retry into a chat we just left. Best-effort (never throws).
 		await purgeChatInflightState(chat.uuid)
 
-		// We have to set a timeout here, otherwise the main chat _layout redirect kicks in too early and which feels janky and messes with the navigation stack
-		setTimeout(() => {
-			chatsQueryUpdate({
-				updater: prev => prev.filter(c => c.uuid !== chat.uuid)
-			})
-
-			chatMessagesQueryUpdate({
-				params: {
-					uuid: chat.uuid
-				},
-				updater: () => []
-			})
-		}, 3000)
+		dropChatFromCachesDeferred(chat.uuid)
 	}
 
 	public async delete({ chat, signal }: { chat: Chat; signal?: AbortSignal }) {
@@ -310,19 +289,7 @@ class Chats {
 		// the sync must never retry into a deleted chat. Best-effort (never throws).
 		await purgeChatInflightState(chat.uuid)
 
-		// We have to set a timeout here, otherwise the main chat _layout redirect kicks in too early and which feels janky and messes with the navigation stack
-		setTimeout(() => {
-			chatsQueryUpdate({
-				updater: prev => prev.filter(c => c.uuid !== chat.uuid)
-			})
-
-			chatMessagesQueryUpdate({
-				params: {
-					uuid: chat.uuid
-				},
-				updater: () => []
-			})
-		}, 3000)
+		dropChatFromCachesDeferred(chat.uuid)
 	}
 
 	public async mute({ chat, signal, mute }: { chat: Chat; signal?: AbortSignal; mute: boolean }) {
@@ -340,9 +307,7 @@ class Chats {
 			)
 		)
 
-		chatsQueryUpdate({
-			updater: prev => prev.map(c => (c.uuid === chat.uuid ? chat : c))
-		})
+		replaceChatInCache(chat)
 
 		return chat
 	}
@@ -390,9 +355,7 @@ class Chats {
 			)
 		}
 
-		chatsQueryUpdate({
-			updater: prev => prev.map(c => (c.uuid === chat.uuid ? updated : c))
-		})
+		replaceChatInCache(updated)
 
 		return updated
 	}
@@ -412,9 +375,7 @@ class Chats {
 			)
 		)
 
-		chatsQueryUpdate({
-			updater: prev => prev.map(c => (c.uuid === chat.uuid ? chat : c))
-		})
+		replaceChatInCache(chat)
 
 		return chat
 	}
@@ -428,6 +389,20 @@ class Chats {
 		)
 	}
 
+	// A chat only reads as read once both the server read marker and the focus time move.
+	public async markAsRead({ chat, signal }: { chat: Chat; signal?: AbortSignal }): Promise<void> {
+		await Promise.all([
+			this.updateLastFocusTimesNow({
+				chats: [chat],
+				signal
+			}),
+			this.markRead({
+				chat,
+				signal
+			})
+		])
+	}
+
 	public async updateLastFocusTimesNow({ chats, signal }: { chats: Chat[]; signal?: AbortSignal }) {
 		const { authedSdkClient } = await auth.getSdkClients()
 
@@ -439,9 +414,7 @@ class Chats {
 		).map(wrapChat)
 
 		for (const chat of chats) {
-			chatsQueryUpdate({
-				updater: prev => prev.map(c => (c.uuid === chat.uuid ? chat : c))
-			})
+			replaceChatInCache(chat)
 		}
 
 		return chats

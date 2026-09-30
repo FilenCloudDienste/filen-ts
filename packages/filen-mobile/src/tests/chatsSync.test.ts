@@ -53,8 +53,6 @@ const { kvStore, chatsState, mockSendMessage, mockFetchChats, mockSetInflightMes
 		}
 	})
 
-vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
-
 // restoreFromDisk delegates the merge to the real @filen/shared mergeInflightQueuesByUnion, and the
 // outbox drop gate to the real isPermanentRejection/MAX_NON_RETRYABLE_REJECTIONS — pull them through
 // via importActual rather than re-implementing the algorithms here.
@@ -71,14 +69,21 @@ vi.mock("@filen/shared", async () => {
 
 vi.mock("@/lib/sqlite", async () => (await import("@/tests/mocks/sqliteKv")).createSqliteKvMock(kvStore))
 
-vi.mock("@/features/chats/store/useChats.store", () => {
+// The dequeue/clear actions run the real pure reducers through the mocked setters.
+vi.mock("@/features/chats/store/useChats.store", async () => {
+	const actual = await vi.importActual<typeof import("@/features/chats/store/useChats.store")>("@/features/chats/store/useChats.store")
+
 	return {
+		...actual,
 		default: {
 			getState: () => ({
 				inflightMessages: chatsState.inflightMessages,
 				setInflightMessages: mockSetInflightMessages,
 				inflightErrors: chatsState.inflightErrors,
-				setInflightErrors: mockSetInflightErrors
+				setInflightErrors: mockSetInflightErrors,
+				dequeueInflightMessage: (chatUuid: string, inflightId: string) =>
+					mockSetInflightMessages((prev: InflightChatMessages) => actual.withoutInflightMessage(prev, chatUuid, inflightId)),
+				clearInflightError: (inflightId: string) => mockSetInflightErrors((prev: InflightChatMessageErrors) => actual.withoutInflightError(prev, inflightId))
 			})
 		}
 	}
@@ -91,7 +96,7 @@ vi.mock("@/features/chats/chats", () => ({
 }))
 
 vi.mock("@/features/chats/queries/useChats.query", () => ({
-	fetchData: mockFetchChats
+	chatsQueryFetch: mockFetchChats
 }))
 
 vi.mock("@/lib/alerts", async () => await import("@/tests/mocks/alerts"))
@@ -138,7 +143,7 @@ import { onlineManager } from "@tanstack/react-query"
 import { Sync } from "@/features/chats/components/sync"
 import { MAX_NON_RETRYABLE_REJECTIONS } from "@filen/shared"
 import sqlite from "@/lib/sqlite"
-import type { InflightChatMessages } from "@/features/chats/store/useChats.store"
+import type { InflightChatMessages, InflightChatMessageErrors } from "@/features/chats/store/useChats.store"
 
 const KV_KEY = "inflightChatMessages"
 

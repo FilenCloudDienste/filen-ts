@@ -32,8 +32,8 @@ import {
 	filterNotesByBlockedOwner,
 	filterUntaggedNotes,
 	withUntaggedTag,
-	createUntaggedTag,
 	isUntaggedTagUuid,
+	resolveNotesTag,
 	UNTAGGED_TAG_UUID
 } from "@/features/notes/utils"
 import { LazyWrapper } from "@/components/lazyWrapper"
@@ -70,23 +70,7 @@ const Notes = () => {
 	const notesData = notesQuery.data
 	const notesTagsData = notesTagsQuery.data
 
-	const tag = (() => {
-		if (!tagUuid) {
-			return null
-		}
-
-		// #84: the virtual "Untagged" row navigates with its sentinel uuid — it has no
-		// entry in the tags query, so resolve it to the synthesized tag directly.
-		if (isUntaggedTagUuid(tagUuid)) {
-			return createUntaggedTag(t("untagged"))
-		}
-
-		if (!notesTagsData) {
-			return null
-		}
-
-		return notesTagsData.find(noteTag => noteTag.uuid === tagUuid) ?? null
-	})()
+	const tag = resolveNotesTag({ tagUuid, tags: notesTagsData, untaggedName: t("untagged") })
 
 	const isUntaggedScreen = tag !== null && isUntaggedTagUuid(tag.uuid)
 
@@ -303,11 +287,12 @@ const Notes = () => {
 
 	const searchActive = searchQuery.trim().length > 0
 
-	// One empty state for every note-row view, resolved through the same table as the title and the
-	// View menu — so a new view cannot inherit another one's copy by falling through a ternary. The
-	// create action rides on `allowsCreate` for the same reason the header's create entry does: from a
-	// narrowed view the new note would not appear here, which reads as the action having failed.
-	const noteRowsEmptyComponent = () => {
+	// One empty state for every view, resolved through the same table as the title and the View menu —
+	// so a new view cannot inherit another one's copy by falling through a ternary. The tags view creates
+	// tags; a note-row view offers create only on `allowsCreate`, for the same reason the header's create
+	// entry does: from a narrowed view the new note would not appear here, which reads as the action
+	// having failed.
+	const emptyComponent = () => {
 		if (searchActive) {
 			return (
 				<NoResultsEmpty />
@@ -322,7 +307,16 @@ const Notes = () => {
 				title={t(descriptor.empty.titleKey)}
 				description={t(descriptor.empty.descriptionKey)}
 				action={
-					descriptor.allowsCreate ? (
+					viewMode === "tags" ? (
+						<Button
+							onPress={() => {
+								void createTagFlow({ t })
+							}}
+							requiresOnline
+						>
+							{t("create_tag")}
+						</Button>
+					) : descriptor.allowsCreate ? (
 						<Button
 							onPress={() => {
 								// #84: a note created from the virtual screen must not be tag-attached.
@@ -333,32 +327,6 @@ const Notes = () => {
 							{t("create_note")}
 						</Button>
 					) : undefined
-				}
-			/>
-		)
-	}
-
-	const tagsEmptyComponent = () => {
-		if (searchActive) {
-			return (
-				<NoResultsEmpty />
-			)
-		}
-
-		return (
-			<ListEmpty
-				icon="pricetag-outline"
-				title={t("no_tags")}
-				description={t("no_tags_description")}
-				action={
-					<Button
-						onPress={() => {
-							void createTagFlow({ t })
-						}}
-						requiresOnline
-					>
-						{t("create_tag")}
-					</Button>
 				}
 			/>
 		)
@@ -386,7 +354,7 @@ const Notes = () => {
 							loading={notesQuery.status === "pending" || awaitsUser}
 							requiresOnline={true}
 							onRefresh={onRefresh}
-							emptyComponent={noteRowsEmptyComponent}
+							emptyComponent={emptyComponent}
 						/>
 					) : (
 						<VirtualList
@@ -398,7 +366,7 @@ const Notes = () => {
 							renderItem={renderItemTagsView}
 							requiresOnline={true}
 							onRefresh={onRefresh}
-							emptyComponent={tagsEmptyComponent}
+							emptyComponent={emptyComponent}
 						/>
 					)}
 				</LazyWrapper>

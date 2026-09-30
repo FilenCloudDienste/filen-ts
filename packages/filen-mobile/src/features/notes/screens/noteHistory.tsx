@@ -15,7 +15,7 @@ import alerts from "@/lib/alerts"
 import { confirmedAction } from "@/lib/confirmedAction"
 import { type NoteHistory as TNoteHistory, type Note } from "@/types"
 import Menu from "@/components/ui/menu"
-import useNotesQuery from "@/features/notes/queries/useNotesQuery"
+import { useCachedNote } from "@/features/notes/queries/useNotesQuery"
 import useNoteHistoryQuery from "@/features/notes/queries/useNoteHistory.query"
 import notes from "@/features/notes/notes"
 import { sortNoteHistoryNewestFirst } from "@/features/notes/utils"
@@ -95,13 +95,7 @@ const NoteHistory = () => {
 	const insets = useSafeAreaInsets()
 	const dismiss = useDismissStack()
 
-	const notesQuery = useNotesQuery({
-		enabled: false
-	})
-
-	// A failed refetch keeps the data and only flips `status` (#103) — resolve from the cached
-	// list so an offline note still opens.
-	const note = uuid ? (notesQuery.data?.find(n => n.uuid === uuid) ?? null) : null
+	const note = useCachedNote(uuid)
 
 	const noteHistoryQuery = useNoteHistoryQuery(
 		{

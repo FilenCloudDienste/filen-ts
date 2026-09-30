@@ -3,6 +3,7 @@ import { vi, describe, it, expect, beforeEach, afterEach } from "vitest"
 const {
 	mockGetSdkClients,
 	mockChatsQueryUpdate,
+	mockReplaceChatInCache,
 	mockChatMessagesQueryUpdate,
 	mockChatsQueryGet,
 	mockChatsQueryFetch,
@@ -37,6 +38,7 @@ const {
 		mockSdkClient,
 		mockGetSdkClients: vi.fn().mockResolvedValue({ authedSdkClient: mockSdkClient }),
 		mockChatsQueryUpdate: vi.fn(),
+		mockReplaceChatInCache: vi.fn(),
 		mockChatsQueryGet: vi.fn().mockReturnValue([]),
 		mockChatsQueryFetch: vi.fn().mockResolvedValue([]),
 		mockChatMessagesQueryFetch: vi.fn().mockResolvedValue([]),
@@ -46,10 +48,6 @@ const {
 		mockPurgeChatInflightState: vi.fn().mockResolvedValue(undefined)
 	}
 })
-
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
-
-vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
 
 vi.mock("@filen/shared", async () => await import("@/tests/mocks/filenShared"))
 
@@ -62,7 +60,8 @@ vi.mock("@/lib/auth", () => ({
 vi.mock("@/features/chats/queries/useChats.query", () => ({
 	chatsQueryUpdate: mockChatsQueryUpdate,
 	chatsQueryGet: mockChatsQueryGet,
-	chatsQueryFetch: mockChatsQueryFetch
+	chatsQueryFetch: mockChatsQueryFetch,
+	replaceChatInCache: mockReplaceChatInCache
 }))
 
 vi.mock("@/features/chats/queries/useChatMessages.query", () => ({
@@ -181,6 +180,7 @@ describe("chats.editMessage", () => {
 	beforeEach(() => {
 		mockGetSdkClients.mockClear()
 		mockChatsQueryUpdate.mockClear()
+		mockReplaceChatInCache.mockClear()
 		mockChatMessagesQueryUpdate.mockClear()
 		mockSdkClient.editMessage.mockClear()
 	})
@@ -377,6 +377,7 @@ describe("chats.mute", () => {
 	beforeEach(() => {
 		mockGetSdkClients.mockClear()
 		mockChatsQueryUpdate.mockClear()
+		mockReplaceChatInCache.mockClear()
 		mockSdkClient.muteChat.mockClear()
 	})
 
@@ -387,7 +388,7 @@ describe("chats.mute", () => {
 
 		expect(result).toBe(chat)
 		expect(mockGetSdkClients).not.toHaveBeenCalled()
-		expect(mockChatsQueryUpdate).not.toHaveBeenCalled()
+		expect(mockReplaceChatInCache).not.toHaveBeenCalled()
 	})
 
 	it("returns the original chat without SDK call when unmuting an already-unmuted chat", async () => {
@@ -424,31 +425,17 @@ describe("chats.mute", () => {
 		expect(result.muted).toBe(false)
 	})
 
-	it("invokes chatsQueryUpdate after muting", async () => {
+	it("writes the muted chat back to the cache", async () => {
 		const chat = makeChat({ muted: false, uuid: "chat-mute-3" })
 		const sdkResult = { ...chat, muted: true, key: "some-key" }
 
 		mockSdkClient.muteChat.mockResolvedValueOnce(sdkResult)
 
-		await chats.mute({ chat, mute: true })
+		const result = await chats.mute({ chat, mute: true })
 
-		expect(mockChatsQueryUpdate).toHaveBeenCalledTimes(1)
-	})
-
-	it("chatsQueryUpdate updater replaces the matching chat by uuid", async () => {
-		const chat = makeChat({ muted: false, uuid: "chat-mute-4" })
-		const other = makeChat({ uuid: "other-chat" })
-		const sdkResult = { ...chat, muted: true, key: "some-key" }
-
-		mockSdkClient.muteChat.mockResolvedValueOnce(sdkResult)
-
-		await chats.mute({ chat, mute: true })
-
-		const updater = getLastChatsUpdater()
-		const updated = updater([other, chat])
-
-		expect(updated.find(c => c.uuid === "chat-mute-4")?.muted).toBe(true)
-		expect(updated.find(c => c.uuid === "other-chat")?.muted).toBe(false)
+		expect(mockReplaceChatInCache).toHaveBeenCalledOnce()
+		expect(mockReplaceChatInCache).toHaveBeenCalledWith(result)
+		expect(result.muted).toBe(true)
 	})
 
 	it("wrapChat marks chat as undecryptable when SDK returns undefined key", async () => {
@@ -556,6 +543,7 @@ describe("chats.addParticipants (single contact)", () => {
 	beforeEach(() => {
 		mockGetSdkClients.mockClear()
 		mockChatsQueryUpdate.mockClear()
+		mockReplaceChatInCache.mockClear()
 		mockSdkClient.addChatParticipant.mockClear()
 	})
 
@@ -573,34 +561,19 @@ describe("chats.addParticipants (single contact)", () => {
 		expect(result.undecryptable).toBe(false)
 	})
 
-	it("invokes chatsQueryUpdate after adding participant", async () => {
+	it("writes the updated chat back to the cache", async () => {
 		const chat = makeChat({ participants: [], uuid: "chat-add-p" })
-		const contact = { userId: 77n, email: "add@test.com" } as unknown as Contact
-		const sdkResult = { ...chat, key: "some-key" }
-
-		mockSdkClient.addChatParticipant.mockResolvedValueOnce(sdkResult)
-
-		await chats.addParticipants({ chat, contacts: [contact] })
-
-		expect(mockChatsQueryUpdate).toHaveBeenCalledTimes(1)
-	})
-
-	it("chatsQueryUpdate updater replaces the matching chat by uuid", async () => {
-		const chat = makeChat({ participants: [], uuid: "chat-add-p2" })
-		const other = makeChat({ uuid: "other-chat" })
 		const contact = { userId: 55n, email: "p@test.com" } as unknown as Contact
 		const newParticipant = makeParticipant(55n, "p@test.com")
 		const sdkResult = { ...chat, key: "some-key", participants: [newParticipant] }
 
 		mockSdkClient.addChatParticipant.mockResolvedValueOnce(sdkResult)
 
-		await chats.addParticipants({ chat, contacts: [contact] })
+		const result = await chats.addParticipants({ chat, contacts: [contact] })
 
-		const updater = getLastChatsUpdater()
-		const updated = updater([other, chat])
-
-		expect(updated.find(c => c.uuid === "chat-add-p2")?.participants).toHaveLength(1)
-		expect(updated.find(c => c.uuid === "other-chat")?.participants).toHaveLength(0)
+		expect(mockReplaceChatInCache).toHaveBeenCalledOnce()
+		expect(mockReplaceChatInCache).toHaveBeenCalledWith(result)
+		expect(result.participants).toHaveLength(1)
 	})
 })
 
@@ -608,6 +581,7 @@ describe("chats.addParticipants (bulk)", () => {
 	beforeEach(() => {
 		mockGetSdkClients.mockClear()
 		mockChatsQueryUpdate.mockClear()
+		mockReplaceChatInCache.mockClear()
 		mockSdkClient.addChatParticipant.mockReset()
 	})
 
@@ -633,13 +607,10 @@ describe("chats.addParticipants (bulk)", () => {
 		expect(mockSdkClient.addChatParticipant.mock.calls[1]?.[0].participants).toHaveLength(1)
 
 		// A single cache write, carrying BOTH new participants.
-		expect(mockChatsQueryUpdate).toHaveBeenCalledTimes(1)
+		expect(mockReplaceChatInCache).toHaveBeenCalledOnce()
+		expect(mockReplaceChatInCache).toHaveBeenCalledWith(result)
+		expect(result.uuid).toBe("chat-bulk")
 		expect(result.participants).toHaveLength(2)
-
-		const updater = getLastChatsUpdater()
-		const updated = updater([chat])
-
-		expect(updated.find(c => c.uuid === "chat-bulk")?.participants).toHaveLength(2)
 	})
 
 	it("returns the original chat without touching SDK or cache when all contacts already exist", async () => {
@@ -652,7 +623,7 @@ describe("chats.addParticipants (bulk)", () => {
 		expect(result).toBe(chat)
 		expect(mockGetSdkClients).not.toHaveBeenCalled()
 		expect(mockSdkClient.addChatParticipant).not.toHaveBeenCalled()
-		expect(mockChatsQueryUpdate).not.toHaveBeenCalled()
+		expect(mockReplaceChatInCache).not.toHaveBeenCalled()
 	})
 })
 
@@ -660,6 +631,7 @@ describe("chats.removeParticipant", () => {
 	beforeEach(() => {
 		mockGetSdkClients.mockClear()
 		mockChatsQueryUpdate.mockClear()
+		mockReplaceChatInCache.mockClear()
 		mockSdkClient.removeChatParticipant.mockClear()
 	})
 
@@ -671,7 +643,7 @@ describe("chats.removeParticipant", () => {
 
 		expect(result).toBe(chat)
 		expect(mockGetSdkClients).not.toHaveBeenCalled()
-		expect(mockChatsQueryUpdate).not.toHaveBeenCalled()
+		expect(mockReplaceChatInCache).not.toHaveBeenCalled()
 	})
 
 	it("calls SDK removeChatParticipant and returns wrapped result when participant exists", async () => {
@@ -688,16 +660,17 @@ describe("chats.removeParticipant", () => {
 		expect(result.undecryptable).toBe(false)
 	})
 
-	it("invokes chatsQueryUpdate after removing participant", async () => {
+	it("writes the updated chat back to the cache", async () => {
 		const participant = makeParticipant(22n, "r@test.com")
 		const chat = makeChat({ participants: [participant], uuid: "chat-remove-p2" })
 		const sdkResult = { ...chat, key: "some-key", participants: [] }
 
 		mockSdkClient.removeChatParticipant.mockResolvedValueOnce(sdkResult)
 
-		await chats.removeParticipant({ chat, participant })
+		const result = await chats.removeParticipant({ chat, participant })
 
-		expect(mockChatsQueryUpdate).toHaveBeenCalledTimes(1)
+		expect(mockReplaceChatInCache).toHaveBeenCalledOnce()
+		expect(mockReplaceChatInCache).toHaveBeenCalledWith(result)
 	})
 })
 
@@ -705,6 +678,7 @@ describe("chats.deleteMessage", () => {
 	beforeEach(() => {
 		mockGetSdkClients.mockClear()
 		mockChatsQueryUpdate.mockClear()
+		mockReplaceChatInCache.mockClear()
 		mockChatMessagesQueryUpdate.mockClear()
 		mockSdkClient.deleteMessage.mockClear()
 	})
@@ -723,16 +697,17 @@ describe("chats.deleteMessage", () => {
 		expect(result.undecryptable).toBe(false)
 	})
 
-	it("invokes both chatsQueryUpdate and chatMessagesQueryUpdate after deleting", async () => {
+	it("writes the chat back and updates the messages cache after deleting", async () => {
 		const chat = makeChat({ uuid: "chat-del-msg2" })
 		const message = makeMessage("bye", { inner: { uuid: "del-msg-2" } } as Partial<ChatMessageWithInflightId>)
 		const sdkResult = { ...chat, key: "some-key" }
 
 		mockSdkClient.deleteMessage.mockResolvedValueOnce(sdkResult)
 
-		await chats.deleteMessage({ chat, message })
+		const result = await chats.deleteMessage({ chat, message })
 
-		expect(mockChatsQueryUpdate).toHaveBeenCalledTimes(1)
+		expect(mockReplaceChatInCache).toHaveBeenCalledOnce()
+		expect(mockReplaceChatInCache).toHaveBeenCalledWith(result)
 		expect(mockChatMessagesQueryUpdate).toHaveBeenCalledTimes(1)
 	})
 
@@ -758,6 +733,7 @@ describe("chats.rename", () => {
 	beforeEach(() => {
 		mockGetSdkClients.mockClear()
 		mockChatsQueryUpdate.mockClear()
+		mockReplaceChatInCache.mockClear()
 		mockSdkClient.renameChat.mockClear()
 	})
 
@@ -791,15 +767,16 @@ describe("chats.rename", () => {
 		expect((result as any).name).toBe("New Name")
 	})
 
-	it("invokes chatsQueryUpdate after renaming", async () => {
+	it("writes the renamed chat back to the cache", async () => {
 		const chat = makeChat({ uuid: "chat-rename2" })
 		const sdkResult = { ...chat, name: "Renamed", key: "some-key" }
 
 		mockSdkClient.renameChat.mockResolvedValueOnce(sdkResult)
 
-		await chats.rename({ chat, newName: "Renamed" })
+		const result = await chats.rename({ chat, newName: "Renamed" })
 
-		expect(mockChatsQueryUpdate).toHaveBeenCalledTimes(1)
+		expect(mockReplaceChatInCache).toHaveBeenCalledOnce()
+		expect(mockReplaceChatInCache).toHaveBeenCalledWith(result)
 	})
 })
 
@@ -807,6 +784,7 @@ describe("chats.leave", () => {
 	beforeEach(() => {
 		mockGetSdkClients.mockClear()
 		mockChatsQueryUpdate.mockClear()
+		mockReplaceChatInCache.mockClear()
 		mockChatMessagesQueryUpdate.mockClear()
 		mockSdkClient.leaveChat.mockClear()
 		mockPurgeChatInflightState.mockClear()
@@ -898,6 +876,7 @@ describe("chats.delete", () => {
 	beforeEach(() => {
 		mockGetSdkClients.mockClear()
 		mockChatsQueryUpdate.mockClear()
+		mockReplaceChatInCache.mockClear()
 		mockChatMessagesQueryUpdate.mockClear()
 		mockSdkClient.deleteChat.mockClear()
 		mockPurgeChatInflightState.mockClear()
@@ -987,6 +966,7 @@ describe("chats.sendMessage", () => {
 	beforeEach(() => {
 		mockGetSdkClients.mockClear()
 		mockChatsQueryUpdate.mockClear()
+		mockReplaceChatInCache.mockClear()
 		mockChatMessagesQueryUpdate.mockClear()
 		mockSdkClient.sendChatMessage.mockClear()
 		mockSdkClient.sendTypingSignal.mockClear()
@@ -1248,10 +1228,40 @@ describe("chats.markRead", () => {
 	})
 })
 
+describe("chats.markAsRead", () => {
+	beforeEach(() => {
+		mockGetSdkClients.mockClear()
+		mockSdkClient.markChatRead.mockClear()
+		mockSdkClient.updateLastChatFocusTimesNow.mockClear()
+	})
+
+	it("moves both the read marker and the focus time", async () => {
+		const chat = makeChat({ uuid: "chat-markasread" })
+
+		mockSdkClient.markChatRead.mockResolvedValueOnce(undefined)
+		mockSdkClient.updateLastChatFocusTimesNow.mockResolvedValueOnce([{ ...chat, key: "some-key" }])
+
+		await chats.markAsRead({ chat })
+
+		expect(mockSdkClient.markChatRead).toHaveBeenCalledWith(chat, undefined)
+		expect(mockSdkClient.updateLastChatFocusTimesNow).toHaveBeenCalledWith([chat], undefined)
+	})
+
+	it("rejects when either call fails", async () => {
+		const chat = makeChat({ uuid: "chat-markasread-fail" })
+
+		mockSdkClient.markChatRead.mockRejectedValueOnce(new Error("mark-read failed"))
+		mockSdkClient.updateLastChatFocusTimesNow.mockResolvedValueOnce([{ ...chat, key: "some-key" }])
+
+		await expect(chats.markAsRead({ chat })).rejects.toThrow("mark-read failed")
+	})
+})
+
 describe("chats.updateLastFocusTimesNow", () => {
 	beforeEach(() => {
 		mockGetSdkClients.mockClear()
 		mockChatsQueryUpdate.mockClear()
+		mockReplaceChatInCache.mockClear()
 		mockSdkClient.updateLastChatFocusTimesNow.mockClear()
 	})
 
@@ -1273,7 +1283,7 @@ describe("chats.updateLastFocusTimesNow", () => {
 		result.forEach(c => expect(c.undecryptable).toBe(false))
 	})
 
-	it("invokes chatsQueryUpdate once per chat returned", async () => {
+	it("writes each returned chat back to the cache", async () => {
 		const chat1 = makeChat({ uuid: "focus-3" })
 		const chat2 = makeChat({ uuid: "focus-4" })
 		const sdkResult = [
@@ -1283,9 +1293,11 @@ describe("chats.updateLastFocusTimesNow", () => {
 
 		mockSdkClient.updateLastChatFocusTimesNow.mockResolvedValueOnce(sdkResult)
 
-		await chats.updateLastFocusTimesNow({ chats: [chat1, chat2] })
+		const result = await chats.updateLastFocusTimesNow({ chats: [chat1, chat2] })
 
-		expect(mockChatsQueryUpdate).toHaveBeenCalledTimes(2)
+		expect(mockReplaceChatInCache).toHaveBeenCalledTimes(2)
+		expect(mockReplaceChatInCache).toHaveBeenNthCalledWith(1, result[0])
+		expect(mockReplaceChatInCache).toHaveBeenNthCalledWith(2, result[1])
 	})
 })
 
@@ -1334,6 +1346,7 @@ describe("chats.create", () => {
 	beforeEach(() => {
 		mockGetSdkClients.mockClear()
 		mockChatsQueryUpdate.mockClear()
+		mockReplaceChatInCache.mockClear()
 		mockSdkClient.createChat.mockClear()
 	})
 
@@ -1397,6 +1410,7 @@ describe("chats.refetchChatsAndMessages", () => {
 		mockChatMessagesQueryIsActive.mockReset()
 		mockChatMessagesQueryIsActive.mockReturnValue(false)
 		mockChatsQueryUpdate.mockClear()
+		mockReplaceChatInCache.mockClear()
 		mockChatMessagesQueryUpdate.mockClear()
 	})
 
@@ -1480,6 +1494,7 @@ describe("wrapChat / wrapMessage (undecryptable derivation)", () => {
 	beforeEach(() => {
 		mockGetSdkClients.mockClear()
 		mockChatsQueryUpdate.mockClear()
+		mockReplaceChatInCache.mockClear()
 		mockSdkClient.muteChat.mockClear()
 		mockSdkClient.disableMessageEmbed.mockClear()
 	})

@@ -20,12 +20,8 @@ export const media = {
 	photos_per_row_one: "{{count}} photo per row",
 	/** Photos tab / header menu — plural form of photos_per_row_one */
 	photos_per_row_other: "{{count}} photos per row",
-	// favorite_selected, unfavorite_selected, download_selected, make_available_offline_selected
-	// and trash_selected live in common.ts.
-	/** Photos tab bulk action — save all selected photos/videos to the device media library */
-	save_to_device_photos_selected: "Save to photos",
-	/** Photos tab bulk confirm dialog — body text for the "trash selected" confirmation */
-	are_you_sure_trash_selected_photos: "Are you sure you want to move the selected items to the trash? You can restore them later.",
+	// favorite_selected, unfavorite_selected, download_selected and trash_selected live in common.ts;
+	// make_available_offline, save_to_photos and are_you_sure_trash_selected in drive.ts.
 
 	// ── Camera upload settings ─────────────────────────────────────────────────
 	/** Camera upload settings screen — header title */

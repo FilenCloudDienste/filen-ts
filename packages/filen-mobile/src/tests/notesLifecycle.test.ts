@@ -9,24 +9,18 @@ const {
 	mockRemoveQueryEverywhere,
 	mockNotesWithContentQueryUpdate,
 	mockNoteContentQueryUpdate,
-	mockFlushToDisk,
-	mockClearRejections
+	mockDiscardInflight
 } = vi.hoisted(() => ({
 	mockGetSdkClients: vi.fn(),
 	mockNotesWithContentQueryUpdate: vi.fn(),
 	mockNoteContentQueryUpdate: vi.fn(),
 	mockRemoveQueryEverywhere: vi.fn(),
-	mockFlushToDisk: vi.fn().mockResolvedValue(undefined),
-	mockClearRejections: vi.fn()
+	mockDiscardInflight: vi.fn().mockResolvedValue(true)
 }))
 
 // ---------------------------------------------------------------------------
 // Module mocks
 // ---------------------------------------------------------------------------
-
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
-
-vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
 
 vi.mock("@/lib/auth", () => ({
 	default: {
@@ -34,8 +28,9 @@ vi.mock("@/lib/auth", () => ({
 	}
 }))
 
-vi.mock("@/features/notes/queries/useNotesQuery", () => ({
-	notesQueryUpdate: mockNotesWithContentQueryUpdate
+vi.mock("@/features/notes/queries/useNotesQuery", async () => ({
+	notesQueryUpdate: mockNotesWithContentQueryUpdate,
+	...(await import("@/tests/mocks/notesQueryWriters")).notesQueryWriters(mockNotesWithContentQueryUpdate)
 }))
 
 vi.mock("@/features/notes/queries/useNoteContent.query", () => ({
@@ -52,8 +47,7 @@ vi.mock("@/queries/client", () => ({
 
 vi.mock("@/features/notes/components/sync", () => ({
 	sync: {
-		flushToDisk: mockFlushToDisk,
-		clearRejections: mockClearRejections
+		discardInflight: mockDiscardInflight
 	}
 }))
 
@@ -106,7 +100,6 @@ vi.mock("@filen/shared", async () => ({
 import { restoreFromHistory, deleteNote } from "@/features/notes/notesLifecycle"
 import { leave } from "@/features/notes/notesParticipants"
 import { type Note, type NoteHistory } from "@/types"
-import useNotesInflightStore from "@/features/notes/store/useNotesInflight.store"
 import useNotesStore from "@/features/notes/store/useNotes.store"
 
 // ---------------------------------------------------------------------------
@@ -181,9 +174,7 @@ describe("restoreFromHistory", () => {
 		mockGetSdkClients.mockReset()
 		mockNotesWithContentQueryUpdate.mockReset()
 		mockNoteContentQueryUpdate.mockReset()
-		mockFlushToDisk.mockClear()
-		mockFlushToDisk.mockResolvedValue(undefined)
-		useNotesInflightStore.getState().setInflightContent({})
+		mockDiscardInflight.mockClear()
 	})
 
 	it("calls authedSdkClient.restoreNoteFromHistory with the note and history args", async () => {
@@ -363,51 +354,7 @@ describe("restoreFromHistory", () => {
 		expect(result.undecryptable).toBe(true)
 	})
 
-	it("removes the restored note's inflight content so a stale pre-restore edit cannot overwrite it", async () => {
-		const sdkClient = makeMockSdkClient()
-		mockGetSdkClients.mockResolvedValue({ authedSdkClient: sdkClient })
-
-		const note = makeNote({ uuid: "note-uuid-1" })
-		const history = makeHistory()
-
-		// Simulate a still-queued pre-restore edit for this note plus an unrelated one.
-		useNotesInflightStore.getState().setInflightContent({
-			"note-uuid-1": [{ timestamp: 1234, content: "stale pre-restore edit", note }],
-			"other-uuid": [{ timestamp: 5678, content: "untouched", note: makeNote({ uuid: "other-uuid" }) }]
-		})
-
-		await restoreFromHistory({ note, history })
-
-		const inflight = useNotesInflightStore.getState().inflightContent
-
-		expect(inflight["note-uuid-1"]).toBeUndefined()
-		// Inflight for unrelated notes must be left intact.
-		expect(inflight["other-uuid"]).toBeDefined()
-	})
-
-	it("flushes the cleared inflight content to disk after restore", async () => {
-		const sdkClient = makeMockSdkClient()
-		mockGetSdkClients.mockResolvedValue({ authedSdkClient: sdkClient })
-
-		const note = makeNote({ uuid: "note-uuid-1" })
-		const history = makeHistory()
-
-		useNotesInflightStore.getState().setInflightContent({
-			"note-uuid-1": [{ timestamp: 1234, content: "stale pre-restore edit", note }]
-		})
-
-		await restoreFromHistory({ note, history })
-
-		expect(mockFlushToDisk).toHaveBeenCalledTimes(1)
-
-		// The flushed snapshot must already exclude the restored note's inflight entry.
-		const flushedArg = mockFlushToDisk.mock.calls[0]?.[0]
-
-		expect(flushedArg).toBeDefined()
-		expect(flushedArg["note-uuid-1"]).toBeUndefined()
-	})
-
-	it("does not break when there is no inflight content for the restored note", async () => {
+	it("discards the restored note's unsynced edits once the restore lands, so a stale pre-restore edit cannot overwrite it", async () => {
 		const sdkClient = makeMockSdkClient()
 		mockGetSdkClients.mockResolvedValue({ authedSdkClient: sdkClient })
 
@@ -416,8 +363,11 @@ describe("restoreFromHistory", () => {
 
 		await restoreFromHistory({ note, history })
 
-		expect(useNotesInflightStore.getState().inflightContent["note-uuid-1"]).toBeUndefined()
-		expect(mockFlushToDisk).toHaveBeenCalledTimes(1)
+		expect(mockDiscardInflight).toHaveBeenCalledTimes(1)
+		expect(mockDiscardInflight).toHaveBeenCalledWith("note-uuid-1")
+		expect(mockDiscardInflight.mock.invocationCallOrder[0]).toBeGreaterThan(
+			sdkClient.restoreNoteFromHistory.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY
+		)
 	})
 })
 

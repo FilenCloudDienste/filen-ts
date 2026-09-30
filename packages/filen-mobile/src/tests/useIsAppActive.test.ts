@@ -43,7 +43,7 @@ vi.mock("react-native", () => ({
 // ─── Imports ─────────────────────────────────────────────────────────────────
 
 import { renderHook, act } from "@testing-library/react"
-import useIsAppActive from "@/hooks/useIsAppActive"
+import useIsAppActive, { useIsAppState } from "@/hooks/useIsAppActive"
 
 beforeEach(() => {
 	mockAppState.currentState = "active"
@@ -164,6 +164,34 @@ describe("useIsAppActive", () => {
 
 		// result.current is frozen at the last rendered value (true) because the
 		// hook is unmounted and its listener was removed
+		expect(result.current).toBe(true)
+	})
+})
+
+describe("useIsAppState", () => {
+	it("tracks the requested status and ignores flips between the others", () => {
+		mockAppState.currentState = "active"
+
+		let renders = 0
+
+		const { result } = renderHook(() => {
+			renders++
+
+			return useIsAppState("background")
+		})
+
+		expect(result.current).toBe(false)
+
+		act(() => {
+			mockAppState.emit("inactive")
+		})
+
+		expect(renders).toBe(1)
+
+		act(() => {
+			mockAppState.emit("background")
+		})
+
 		expect(result.current).toBe(true)
 	})
 })

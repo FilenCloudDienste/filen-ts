@@ -152,26 +152,14 @@ function Account() {
 								color={textMutedForeground.color}
 							/>
 						</PressableScale>
-						<Group
-							className="bg-background-tertiary"
-							buttons={buildProfileButtons({ t, accountQuery })}
-						/>
-						<Group
-							className="bg-background-tertiary"
-							buttons={buildAccountToggleButtons({ t, accountQuery })}
-						/>
-						<Group
-							className="bg-background-tertiary"
-							buttons={buildLogoutButtons({ t })}
-						/>
+						<Group buttons={buildProfileButtons({ t, accountQuery })} />
+						<Group buttons={buildAccountToggleButtons({ t, accountQuery })} />
+						<Group buttons={buildLogoutButtons({ t })} />
 						<View className="bg-transparent gap-2">
 							<View className="bg-transparent flex-row items-center gap-2 px-2">
 								<Text className="text-xs font-semibold uppercase tracking-wider text-red-500">{t("danger_zone")}</Text>
 							</View>
-							<Group
-								className="bg-background-tertiary"
-								buttons={buildDangerZoneButtons({ t, accountQuery, textRed500 })}
-							/>
+							<Group buttons={buildDangerZoneButtons({ t, accountQuery, textRed500 })} />
 						</View>
 					</SettingsScrollView>
 				)}

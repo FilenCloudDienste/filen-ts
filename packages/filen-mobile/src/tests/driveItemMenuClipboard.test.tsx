@@ -3,7 +3,6 @@ import { vi, describe, it, expect, beforeEach, afterEach } from "vitest"
 import { act, cleanup, render } from "@testing-library/react"
 
 vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 vi.mock("@filen/shared", async () => await import("@/tests/mocks/filenShared"))
 vi.mock("@filen/sdk-rs", () => ({ AnyNormalDir_Tags: { Dir: "Dir", Root: "Root" } }))
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string) => key }) }))

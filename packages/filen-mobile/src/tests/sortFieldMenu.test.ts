@@ -3,7 +3,6 @@ import { vi, describe, it, expect, beforeEach, afterEach } from "vitest"
 // Hoisted mock for the actionSheet façade so we can assert show() calls.
 const { mockShow } = vi.hoisted(() => ({ mockShow: vi.fn() }))
 
-vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
 vi.mock("@/providers/actionSheet.provider", () => ({ actionSheet: { show: mockShow } }))
 
 import { buildSortFieldButton } from "@/components/ui/sortFieldMenu"

@@ -15,10 +15,6 @@ const mocks = vi.hoisted(() => ({
 	fetchMissingMessages: vi.fn().mockResolvedValue(undefined)
 }))
 
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
-
-vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
-
 vi.mock("@/features/chats/queries/useChats.query", () => ({
 	default: (_options: unknown) => ({
 		status: mocks.chatsQueryStatus,

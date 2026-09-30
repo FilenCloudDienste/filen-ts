@@ -94,8 +94,6 @@ const { mockDb, open } = vi.hoisted(() => {
 	return { mockDb, open: vi.fn(() => mockDb) }
 })
 
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
-
 // Minimal react-native mock — storageRoots (imported transitively) reads Platform at module
 // evaluation. iOS branch keeps the shared-container base distinct from the private base, which
 // is what the relocation tests below exercise.

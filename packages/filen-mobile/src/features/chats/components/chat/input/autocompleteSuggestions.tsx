@@ -1,5 +1,4 @@
 import { type Chat } from "@/types"
-import { useEffect } from "react"
 import { PressableScale } from "@/components/ui/pressables"
 import { useSecureStore } from "@/lib/secureStore"
 import { chatInputValueKey } from "@/features/chats/chatDrafts"
@@ -7,6 +6,7 @@ import useChatsStore, { type Suggestions } from "@/features/chats/store/useChats
 import { useShallow } from "zustand/shallow"
 import { findClosestIndexString } from "@filen/shared"
 import PopupContainerView from "@/features/chats/components/chat/input/popupContainerView"
+import useSuggestionSlot from "@/features/chats/hooks/useSuggestionSlot"
 
 // Stable empty list for the hidden case — `never[]` is assignable to any `T[]`, and a shared identity
 // keeps the hidden path allocation-free.
@@ -44,16 +44,15 @@ export function AutocompleteSuggestions<T>({
 }) {
 	const [chatInputValue, setChatInputValue] = useSecureStore<string>(chatInputValueKey(chat.uuid), "")
 	const inputSelection = useChatsStore(useShallow(state => state.inputSelection))
-	const suggestionsVisible = useChatsStore(useShallow(state => state.suggestionsVisible))
 	const inputFocused = useChatsStore(useShallow(state => state.inputFocused))
 
-	const { show, text } = (() => {
+	const { show, text } = useSuggestionSlot(kind, othersVisible => {
 		const valueNormalized = chatInputValue.toLowerCase()
 
 		if (
 			valueNormalized.length === 0 ||
 			inputSelection.start === 0 ||
-			suggestionsVisible.filter(s => s !== kind).length > 0 ||
+			othersVisible ||
 			!inputFocused
 		) {
 			return {
@@ -83,7 +82,7 @@ export function AutocompleteSuggestions<T>({
 						?.startsWith(trigger)),
 			text: sliced
 		}
-	})()
+	})
 
 	// Only when the popup is actually shown: the render below returns null on `!show` regardless of
 	// `items`, and `getItems` is pure. `show === false` does NOT imply an empty `text` — with no trigger
@@ -91,14 +90,6 @@ export function AutocompleteSuggestions<T>({
 	// emoji list on every keystroke, in every chat, twice (mentions and emojis are both mounted), and
 	// allocated an intermediate array that `.slice(0, 10)` immediately discarded.
 	const items = show ? getItems(text) : EMPTY_ITEMS
-
-	useEffect(() => {
-		if (show) {
-			useChatsStore.getState().setSuggestionsVisible(prev => [...prev.filter(s => s !== kind), kind])
-		} else {
-			useChatsStore.getState().setSuggestionsVisible(prev => prev.filter(s => s !== kind))
-		}
-	}, [show, kind])
 
 	if (!show || items.length === 0) {
 		return null

@@ -21,10 +21,13 @@ import events from "@/lib/events"
 import logger from "@/lib/logger"
 import { withSystemPresentation, systemPresentation, useSystemPresentationStore } from "@/lib/systemPresentation"
 import usePipStore from "@/stores/usePip.store"
+import { ROOT_OVERLAY_CLASSES } from "@/components/rootOverlay"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import { useResolveClassNames } from "uniwind"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import Svg, { Circle } from "react-native-svg"
+
+const OVERLAY_CLASSES = `${ROOT_OVERLAY_CLASSES} bg-background`
 
 const LOCK_MULTIPLIER_INITIAL = 1
 const LOCK_MULTIPLIER_MAX_SECONDS = 3600
@@ -265,8 +268,6 @@ export function reduceBiometricAppState(
 	}
 }
 
-const OVERLAY_CLASSES = "absolute top-0 left-0 right-0 bottom-0 z-10000 w-full h-full bg-background"
-
 const ICON_BLOCK_SIZE = 80
 const RING_RADIUS = 34
 const RING_STROKE = 4
@@ -291,7 +292,7 @@ function Parent({ children }: { children: React.ReactNode }) {
 		return <FullWindowOverlay>{children}</FullWindowOverlay>
 	}
 
-	return <View className="absolute top-0 left-0 right-0 bottom-0 z-10000 w-full h-full">{children}</View>
+	return <View className={ROOT_OVERLAY_CLASSES}>{children}</View>
 }
 
 function nextLockState(prev: { lockedMultiplier: number }): { lockedUntil: number; lockedMultiplier: number } {
@@ -620,7 +621,7 @@ function BiometricInner({ setAuthenticated }: { setAuthenticated: React.Dispatch
 
 function Locked({ lockedUntil, lockSeconds }: { lockedUntil: number; lockSeconds: number }) {
 	const { t } = useTranslation()
-	const [msLeft, setMsLeft] = useState<number>(() => Math.max(0, lockedUntil - new Date().getTime()))
+	const [msLeft, setMsLeft] = useState<number>(() => remainingMs(Date.now(), lockedUntil))
 	const [, setBiometric] = useBiometric()
 	const totalMs = lockSeconds * LOCK_BASE_MS
 

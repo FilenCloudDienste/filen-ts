@@ -20,7 +20,6 @@ import { IndicatorBadge } from "@/features/drive/components/item/indicators"
 import useDriveItemInteraction from "@/features/drive/hooks/useDriveItemInteraction"
 import useDriveItemIndicators from "@/features/drive/hooks/useDriveItemIndicators"
 import { driveItemDisplayName } from "@/lib/decryption"
-import { driveItemHasLeadingCheckbox } from "@/features/drive/driveSelectors"
 import { useTranslation } from "react-i18next"
 import { useIsDriveItemCut } from "@/features/drive/store/useDriveClipboard.store"
 
@@ -44,20 +43,15 @@ const Item = ({
 	const { t } = useTranslation()
 	const textForeground = useResolveClassNames("text-foreground")
 	const [isMenuOpen, setIsMenuOpen] = useRecyclingState<boolean>(false, [info.item.data.uuid])
-	const {
-		onPress,
-		disabled,
-		navigateOnly,
-		isSelected,
-		areDriveItemsSelected,
-		isSelectedFromDriveSelect,
-		onPressSelectForDriveSelect
-	} = useDriveItemInteraction({ info, drivePath, getListItems })
+	const { onPress, disabled, navigateOnly, areDriveItemsSelected, hasCheckbox, checkbox } = useDriveItemInteraction({
+		info,
+		drivePath,
+		getListItems
+	})
 	const { showFavorited, showOffline, isStoredOffline, hasSyncError } = useDriveItemIndicators({
 		item: info.item,
 		drivePath
 	})
-	const hasLeadingCheckbox = driveItemHasLeadingCheckbox({ drivePath, areDriveItemsSelected })
 	const isCut = useIsDriveItemCut(info.item.data.uuid)
 
 	return (
@@ -99,29 +93,18 @@ const Item = ({
 						isCut && "opacity-50"
 					)}
 				>
-					{areDriveItemsSelected && !drivePath.selectOptions && (
+					{hasCheckbox && (
 						<View className={cn("flex-row h-full items-center justify-center bg-transparent shrink-0", Platform.OS === "android" && "pl-4")}>
 							<Checkbox
-								value={isSelected}
-								onValueChange={onPress}
+								{...checkbox}
 								hitSlop={16}
-							/>
-						</View>
-					)}
-					{drivePath.selectOptions && drivePath.selectOptions.intention === "select" && (
-						<View className={cn("flex-row h-full items-center justify-center bg-transparent shrink-0", Platform.OS === "android" && "pl-4")}>
-							<Checkbox
-								value={disabled ? false : isSelectedFromDriveSelect}
-								onValueChange={disabled ? undefined : onPressSelectForDriveSelect}
-								hitSlop={16}
-								color={disabled ? "transparent" : undefined}
 							/>
 						</View>
 					)}
 					<PressableScale
 						className={cn(
 							"w-full h-auto flex-row gap-4 bg-transparent",
-							Platform.OS === "android" && (hasLeadingCheckbox ? "pr-4" : "px-4")
+							Platform.OS === "android" && (hasCheckbox ? "pr-4" : "px-4")
 						)}
 						onPress={onPress}
 					>

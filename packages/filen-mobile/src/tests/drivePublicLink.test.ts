@@ -22,7 +22,9 @@ vi.mock("@/lib/auth", () => ({
 }))
 
 vi.mock("@/features/drive/queries/useDriveItems.query", () => ({
-	driveItemsQueryUpdate: mockDriveItemsQueryUpdate
+	driveItemsQueryUpdate: mockDriveItemsQueryUpdate,
+	driveItemsQueryUpdateRoot: (type: string, updater: unknown) =>
+		mockDriveItemsQueryUpdate({ params: { path: { type, uuid: null } }, updater })
 }))
 
 vi.mock("@/features/drive/queries/useDriveItemPublicLinkStatus.query", () => ({

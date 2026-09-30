@@ -12,8 +12,6 @@ const sdk = vi.hoisted(() => ({
 	listMessagesBefore: vi.fn()
 }))
 
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
-vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
 vi.mock("@/features/transfers/transfers", () => ({ default: { upload: vi.fn() } }))
 vi.mock("@/features/transfers/quota", () => ({ uploadQuotaRefusal: vi.fn(async () => null) }))
 vi.mock("@/features/drive/drive", () => ({ default: { enablePublicLink: vi.fn() } }))

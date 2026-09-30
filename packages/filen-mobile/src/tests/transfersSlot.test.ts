@@ -1,7 +1,5 @@
 import { vi } from "vitest"
 
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
-
 vi.mock("@expo/vector-icons/Ionicons", () => ({ default: () => null }))
 vi.mock("@filen/shared", () => ({ formatBytesPerSecond: (n: number) => String(n) }))
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (k: string) => k }) }))

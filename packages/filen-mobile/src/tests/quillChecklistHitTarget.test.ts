@@ -13,9 +13,7 @@
 // These assertions encode the two halves of the fix. They are deliberately about the checklist
 // markers only: bullets and ordered numbers are not interactive and keep Quill's geometry.
 
-import { vi, describe, it, expect, beforeEach } from "vitest"
-
-vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
+import { describe, it, expect, beforeEach } from "vitest"
 
 import { QuillThemeCustomizer } from "@/components/textEditor/richText/quillTheme"
 

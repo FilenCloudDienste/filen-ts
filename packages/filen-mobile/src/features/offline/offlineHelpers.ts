@@ -2,7 +2,7 @@ import type { AnyDirWithContext } from "@filen/sdk-rs"
 import { type DriveItem } from "@/types"
 import { unwrapAnyDirUuid } from "@/lib/sdkUnwrap"
 import { tryDriveItemToAnyDirWithContext } from "@/lib/sdkSources"
-import { isDirectoryItem } from "@/features/drive/driveSelectors"
+import { isDirectoryItem, isFileItem } from "@/features/drive/driveSelectors"
 import * as FileSystem from "expo-file-system"
 import { OFFLINE_DIRECTORIES_DIRECTORY } from "@/lib/storageRoots"
 import { metaFileName } from "@/lib/metaFile"
@@ -87,6 +87,31 @@ export function makeSyncError({
 	}
 }
 
+// Keeps the first error per id, in push order.
+export function createSyncErrorCollector() {
+	const errors: OfflineSyncError[] = []
+	const ids = new Set<string>()
+
+	const push = (error: OfflineSyncError): void => {
+		if (!ids.has(error.id)) {
+			ids.add(error.id)
+			errors.push(error)
+		}
+	}
+
+	const pushAll = (newErrors: OfflineSyncError[]): void => {
+		for (const error of newErrors) {
+			push(error)
+		}
+	}
+
+	return {
+		errors,
+		push,
+		pushAll
+	}
+}
+
 // Converts a directory DriveItem directly into an AnyDirWithContext (or OfflineParent) for SDK calls.
 // Returns null for non-directory items and for missing shared-parent context.
 // Extracted from Offline.findParentAnyDirWithContext so sync and future reconcile code can reuse
@@ -94,6 +119,12 @@ export function makeSyncError({
 export function directoryDriveItemToAnyDirWithContext(item: DriveItem): OfflineParent | null {
 	// Must not throw: it runs per nested entry inside an unguarded Promise.all in listDirectoriesRecursive, and callers skip null.
 	return isDirectoryItem(item) ? tryDriveItemToAnyDirWithContext(item) : null
+}
+
+// The size a stored file's bytes should have per its (client-supplied) meta; -1 when unknown, so it
+// never matches a real on-disk size.
+export function expectedFileSize(item: DriveItem): number {
+	return isFileItem(item) ? Number(item.data.decryptedMeta?.size ?? -1) : -1
 }
 
 // secureStore key for the "Sync offline files on Wi-Fi only" setting. Boolean; absent/false →

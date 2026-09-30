@@ -7,16 +7,6 @@ export const appearance = {
 	start_screen: "Start screen",
 	/** Settings row subtitle explaining the start-screen option */
 	start_screen_description: "Choose the screen shown when the app opens",
-	/** Start-screen option: the file browser (Drive) tab */
-	start_screen_drive: "Drive",
-	/** Start-screen option: the Photos tab */
-	start_screen_photos: "Photos",
-	/** Start-screen option: the Notes tab */
-	start_screen_notes: "Notes",
-	/** Start-screen option: the Chats tab */
-	start_screen_chats: "Chats",
-	/** Start-screen option: the More (settings) tab */
-	start_screen_more: "More",
 	/** Settings row label: choose the app display language */
 	language: "Language",
 	/** Settings row subtitle for the language option */

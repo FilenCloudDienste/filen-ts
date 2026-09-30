@@ -22,6 +22,7 @@ import {
 	createUntaggedTag,
 	filterUntaggedNotes,
 	withUntaggedTag,
+	resolveNotesTag,
 	filterNoteTagsBySearchQuery,
 	noteTypeToEditorType,
 	computeTagState,
@@ -270,6 +271,18 @@ describe("virtual untagged tag", () => {
 
 		expect(filterNoteTagsBySearchQuery(tags, "untag").map(t => t.uuid)).toEqual([UNTAGGED_TAG_UUID])
 		expect(filterNoteTagsBySearchQuery(tags, "alp").map(t => t.uuid)).toEqual(["a-a-a-a"])
+	})
+
+	it("resolveNotesTag: null without a tagUuid, the virtual tag for the sentinel, else the query's tag or null", () => {
+		const work = makeTag("w-w-w-w", "work")
+
+		expect(resolveNotesTag({ tagUuid: undefined, tags: [work], untaggedName: "Untagged" })).toBeNull()
+		expect(resolveNotesTag({ tagUuid: UNTAGGED_TAG_UUID, tags: undefined, untaggedName: "Untagged" })).toEqual(
+			createUntaggedTag("Untagged")
+		)
+		expect(resolveNotesTag({ tagUuid: "w-w-w-w", tags: [work], untaggedName: "Untagged" })).toBe(work)
+		expect(resolveNotesTag({ tagUuid: "w-w-w-w", tags: undefined, untaggedName: "Untagged" })).toBeNull()
+		expect(resolveNotesTag({ tagUuid: "x-x-x-x", tags: [work], untaggedName: "Untagged" })).toBeNull()
 	})
 })
 

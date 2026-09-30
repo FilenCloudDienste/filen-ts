@@ -6,8 +6,6 @@ import { vi, describe, it, expect } from "vitest"
 // in the SDK + auth/cache/query chain at module load. Stub those boundaries so
 // the test stays a fast, isolated unit test of the updater logic only.
 
-vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
-
 vi.mock("@filen/sdk-rs", () => ({
 	CreatedTime: {},
 	DirColor: {},
@@ -32,7 +30,7 @@ vi.mock("@/lib/sdkUnwrap", () => ({
 }))
 
 vi.mock("@/features/drive/queries/useDriveItems.query", () => ({
-	driveItemsQueryUpdate: vi.fn(),
+	driveItemsQueryUpdateRoot: vi.fn(),
 	driveItemsQueryUpdateGlobal: vi.fn()
 }))
 

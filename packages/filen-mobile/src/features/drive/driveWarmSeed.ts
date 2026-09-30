@@ -1,5 +1,9 @@
 import { queryClient } from "@/queries/client"
-import { BASE_QUERY_KEY as DRIVE_ITEMS_BASE_QUERY_KEY } from "@/features/drive/queries/useDriveItems.query"
+import {
+	BASE_QUERY_KEY as DRIVE_ITEMS_BASE_QUERY_KEY,
+	driveItemsQueryPath,
+	type UseDriveItemsQueryParams
+} from "@/features/drive/queries/useDriveItems.query"
 import { BASE_QUERY_KEY as PLAYLISTS_BASE_QUERY_KEY, seedTrackIfUncached } from "@/features/audio/queries/usePlaylists.query"
 import cache from "@/lib/cache"
 import { type DriveItem } from "@/types"
@@ -10,7 +14,7 @@ import logger from "@/lib/logger"
 const YIELD_EVERY = 2000
 
 type DriveWarmSeedRow = {
-	path: { type?: string } | undefined
+	path: UseDriveItemsQueryParams["path"] | undefined
 	data: DriveItem[]
 	dataUpdatedAt: number
 }
@@ -45,7 +49,7 @@ export async function warmSeedDriveCaches(): Promise<void> {
 					continue
 				}
 
-				const path = (query.queryKey[1] as { path?: { type?: string } } | undefined)?.path
+				const path = driveItemsQueryPath(query)
 
 				// A linked DriveItem unwraps to a plain directory/file shape and would be mis-filed
 				// into the normal-dir cache; the linked context needs the parent link's meta, which

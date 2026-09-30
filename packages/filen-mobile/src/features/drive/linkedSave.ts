@@ -1,15 +1,12 @@
 import { type TFunction } from "i18next"
 import { type FetchStatus } from "@tanstack/react-query"
 import { AnyDirWithContext, AnyFile, AnyItemWithContext } from "@filen/sdk-rs"
-import { run } from "@filen/shared"
 import { type MenuButton } from "@/components/ui/menu"
 import type { DrivePath } from "@/hooks/useDrivePath"
 import type { DriveItem } from "@/types"
-import alerts from "@/lib/alerts"
 import cache from "@/lib/cache"
-import logger from "@/lib/logger"
 import { driveItemDisplayName } from "@/lib/decryption"
-import { selectCopyDestination } from "@/features/drive/driveSelectSession"
+import { pickDestinationAndCopy } from "@/features/drive/pickDestinationAndCopy"
 import copyRunner from "@/features/copy/copyRunner"
 
 // Whose ownership decides whether a link view offers "Save to Cloud Drive": a directory link's root
@@ -131,35 +128,19 @@ export async function saveLinkedToDrive({ items, name }: { items: AnyItemWithCon
 		return
 	}
 
-	const picked = await run(async () => {
-		return await selectCopyDestination([])
+	await pickDestinationAndCopy({
+		pickerItems: [],
+		start: ({ destination, destinationDir }) =>
+			copyRunner.startCopyItems({
+				items,
+				name,
+				destination,
+				destinationDir
+			}),
+		logTag: "drive-link",
+		label: "save to cloud drive",
+		count: items.length
 	})
-
-	if (!picked.success) {
-		logger.error("drive-link", "save to cloud drive: destination picker failed", { error: picked.error })
-		alerts.error(picked.error)
-
-		return
-	}
-
-	if (!picked.data) {
-		return
-	}
-
-	const { destination, destinationDir } = picked.data
-	const started = await run(async () => {
-		return copyRunner.startCopyItems({
-			items,
-			name,
-			destination,
-			destinationDir
-		})
-	})
-
-	if (!started.success) {
-		logger.error("drive-link", "save to cloud drive: copy failed to start", { error: started.error, count: items.length })
-		alerts.error(started.error)
-	}
 }
 
 // "Save to Cloud Drive" for link items, offered only when every item's SDK source is held (a directory

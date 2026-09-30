@@ -1,6 +1,5 @@
 import { vi, describe, it, expect } from "vitest"
 
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 vi.mock("@filen/sdk-rs", async () => await import("@/tests/mocks/sdkCopy"))
 vi.mock("@/lib/sdkUnwrap", () => ({ unwrapParentUuid: (parent: unknown) => (typeof parent === "string" ? parent : null) }))
 vi.mock("@/lib/cache", () => ({ default: { directoryUuidToAnySharedDirWithContext: new Map([["shared-parent", { shareInfo: "role" }]]) } }))

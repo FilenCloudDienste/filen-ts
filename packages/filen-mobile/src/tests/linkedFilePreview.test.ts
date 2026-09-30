@@ -13,7 +13,6 @@ const h = vi.hoisted(() => ({
 }))
 
 vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 vi.mock("@filen/shared", async () => ({
 	...(await import("@/tests/mocks/filenShared")),
 	cn: (...classes: unknown[]) => classes.filter(Boolean).join(" "),
@@ -162,7 +161,7 @@ describe("public file links opened in the gallery", () => {
 	})
 
 	it("a chat's file bubble for a previewable file goes through it", async () => {
-		const element = InternalAttachment({ data: fileLink("lf-3"), layout: { width: 400, height: 800 }, fromSelf: false }) as unknown as {
+		const element = InternalAttachment({ data: fileLink("lf-3"), maxWidth: 244, fromSelf: false }) as unknown as {
 			props: { onPress: () => Promise<void> }
 		}
 

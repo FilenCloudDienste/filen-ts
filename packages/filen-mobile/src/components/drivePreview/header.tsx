@@ -7,7 +7,7 @@ import { PressableScale } from "@/components/ui/pressables"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
 import useViewLayout from "@/hooks/useViewLayout"
-import { useEffect, Fragment } from "react"
+import { useEffect, Fragment, type ComponentProps } from "react"
 import { useTranslation } from "react-i18next"
 import { Platform, StyleSheet } from "react-native"
 import DriveItemMenu from "@/features/drive/components/item/menu"
@@ -23,6 +23,44 @@ import SafeAreaView from "@/components/ui/safeAreaView"
 import HeaderScrim, { drivePreviewHeaderNeedsScrim, SCRIM_FADE_DURATION_MS } from "@/components/drivePreview/headerScrim"
 import { galleryItemRenderName } from "@/components/drivePreview/galleryRenderName"
 import logger from "@/lib/logger"
+
+// The plain face (audio previews) has no glass and always draws its icon at 24.
+const HeaderIconButton = ({
+	name,
+	size,
+	plain,
+	color
+}: {
+	name: ComponentProps<typeof Ionicons>["name"]
+	size: number
+	plain: boolean
+	color: ComponentProps<typeof Ionicons>["color"]
+}) => {
+	if (plain) {
+		return (
+			<View className="size-11 flex-row items-center justify-center bg-transparent rounded-full">
+				<Ionicons
+					name={name}
+					size={24}
+					color="white"
+				/>
+			</View>
+		)
+	}
+
+	return (
+		<CrossGlassContainerView
+			className={cn("size-11 flex-row items-center justify-center", Platform.OS === "android" && "bg-zinc-900")}
+			theme={Platform.OS === "android" ? "dark" : undefined}
+		>
+			<Ionicons
+				name={name}
+				size={size}
+				color={color}
+			/>
+		</CrossGlassContainerView>
+	)
+}
 
 const GalleryHeader = ({
 	animatedStyle,
@@ -46,22 +84,20 @@ const GalleryHeader = ({
 
 	const currentItemPreviewType = getPreviewType(currentItem ? galleryItemRenderName(currentItem) : "")
 
-	const solidHeader = Platform.select({
-		android:
-			currentItemPreviewType === "docx" ||
-			currentItemPreviewType === "pdf" ||
-			currentItemPreviewType === "video" ||
-			currentItemPreviewType === "code" ||
-			currentItemPreviewType === "text" ||
-			currentItemPreviewType === "unknown",
-		default: currentItemPreviewType === "docx" || currentItemPreviewType === "pdf" || currentItemPreviewType === "video"
-	})
+	const solidHeader =
+		currentItemPreviewType === "docx" ||
+		currentItemPreviewType === "pdf" ||
+		currentItemPreviewType === "video" ||
+		(Platform.OS === "android" &&
+			(currentItemPreviewType === "code" || currentItemPreviewType === "text" || currentItemPreviewType === "unknown"))
+	const plainIcons = currentItemPreviewType === "audio"
+	const iconColor = Platform.OS === "android" || !solidHeader ? "white" : textForeground.color
 
 	// The previews that stay transparent AND scroll text under this header need a backdrop, or the
 	// title competes with whatever line is behind it — see headerScrim.
 	const needsScrim = drivePreviewHeaderNeedsScrim({
 		previewType: currentItemPreviewType,
-		solidHeader: solidHeader ?? false
+		solidHeader
 	})
 	const bgBackground = useResolveClassNames("bg-background")
 	const contentScrolled = useDrivePreviewStore(useShallow(state => state.contentScrolled))
@@ -119,26 +155,12 @@ const GalleryHeader = ({
 						hitSlop={10}
 						rippleColor="transparent"
 					>
-						{currentItemPreviewType === "audio" ? (
-							<View className="size-11 flex-row items-center justify-center bg-transparent rounded-full">
-								<Ionicons
-									name="close-outline"
-									size={24}
-									color="white"
-								/>
-							</View>
-						) : (
-							<CrossGlassContainerView
-								className={cn("size-11 flex-row items-center justify-center", Platform.OS === "android" && "bg-zinc-900")}
-								theme={Platform.OS === "android" ? "dark" : undefined}
-							>
-								<Ionicons
-									name="close-outline"
-									size={30}
-									color={Platform.OS === "android" ? "white" : solidHeader ? textForeground.color : "white"}
-								/>
-							</CrossGlassContainerView>
-						)}
+						<HeaderIconButton
+							name="close-outline"
+							size={30}
+							plain={plainIcons}
+							color={iconColor}
+						/>
 					</PressableScale>
 					<Text
 						className={cn("flex-1 font-semibold text-base text-center", solidHeader ? "text-foreground" : "text-white")}
@@ -162,29 +184,12 @@ const GalleryHeader = ({
 									isStoredOffline={isStoredOffline}
 									isPreview={true}
 								>
-									{currentItemPreviewType === "audio" ? (
-										<View className="size-11 flex-row items-center justify-center bg-transparent rounded-full">
-											<Ionicons
-												name="ellipsis-horizontal"
-												size={24}
-												color="white"
-											/>
-										</View>
-									) : (
-										<CrossGlassContainerView
-											className={cn(
-												"size-11 flex-row items-center justify-center",
-												Platform.OS === "android" && "bg-zinc-900"
-											)}
-											theme={Platform.OS === "android" ? "dark" : undefined}
-										>
-											<Ionicons
-												name="ellipsis-horizontal"
-												size={24}
-												color={Platform.OS === "android" ? "white" : solidHeader ? textForeground.color : "white"}
-											/>
-										</CrossGlassContainerView>
-									)}
+									<HeaderIconButton
+										name="ellipsis-horizontal"
+										size={24}
+										plain={plainIcons}
+										color={iconColor}
+									/>
 								</DriveItemMenu>
 							) : (
 								<Menu
@@ -205,19 +210,12 @@ const GalleryHeader = ({
 										}
 									]}
 								>
-									<CrossGlassContainerView
-										className={cn(
-											"size-11 flex-row items-center justify-center",
-											Platform.OS === "android" && "bg-zinc-900"
-										)}
-										theme={Platform.OS === "android" ? "dark" : undefined}
-									>
-										<Ionicons
-											name="ellipsis-horizontal"
-											size={24}
-											color={Platform.OS === "android" ? "white" : solidHeader ? textForeground.color : "white"}
-										/>
-									</CrossGlassContainerView>
+									<HeaderIconButton
+										name="ellipsis-horizontal"
+										size={24}
+										plain={false}
+										color={iconColor}
+									/>
 								</Menu>
 							)}
 						</Fragment>

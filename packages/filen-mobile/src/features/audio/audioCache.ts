@@ -43,6 +43,22 @@ function hasMetadata(m: Metadata): m is NonNullable<Metadata> {
 	return m !== null && Object.keys(m).length > 0
 }
 
+function isExpired(metadata: Metadata, now: number, ttlMs: number): boolean {
+	return !hasMetadata(metadata) || now >= metadata.cachedAt + ttlMs
+}
+
+function sidecarFile(cacheId: string): FileSystem.File {
+	return new FileSystem.File(FileSystem.Paths.join(PARENT_DIRECTORY.uri, metaFileName(cacheId)))
+}
+
+function deletePictureAt(uri: string): void {
+	const pictureFile = new FileSystem.File(uri)
+
+	if (pictureFile.exists) {
+		pictureFile.delete()
+	}
+}
+
 // music-metadata's `parseWebStream` runs on the JS thread; for large inputs it can visibly
 // degrade JS-thread performance (headerless-VBR duration scans, large embedded cover art,
 // general stream/parse overhead). Skip parsing a file whose size is KNOWN to exceed the cap —
@@ -73,12 +89,7 @@ export class AudioCache extends DiskCache {
 
 		return {
 			audio: dataFile,
-			metadata: new FileSystem.File(
-				FileSystem.Paths.join(
-					PARENT_DIRECTORY.uri,
-					metaFileName(cacheItemId(item))
-				)
-			)
+			metadata: sidecarFile(cacheItemId(item))
 		}
 	}
 
@@ -149,13 +160,15 @@ export class AudioCache extends DiskCache {
 				throw new Error("Item metadata is not decrypted")
 			}
 
+			const cacheId = cacheItemId(item)
+
 			await this.clearBarrier.enter()
 
 			defer(() => {
 				this.clearBarrier.leave()
 			})
 
-			const mutex = this.getMutexForKey(cacheItemId(item))
+			const mutex = this.getMutexForKey(cacheId)
 
 			await mutex.acquire()
 
@@ -177,7 +190,7 @@ export class AudioCache extends DiskCache {
 					}
 				} catch (e) {
 					logger.error("audioCache", "corrupt metadata sidecar deleted", {
-						uuid: cacheItemId(item),
+						uuid: cacheId,
 						error: e
 					})
 
@@ -219,7 +232,6 @@ export class AudioCache extends DiskCache {
 						let pictureBlurhash: string | null = null
 
 						if (picture) {
-							const cacheId = cacheItemId(item)
 							const ext = mimeTypes.extension(picture.format) || "jpg"
 							const pictureFile = new FileSystem.File(FileSystem.Paths.join(PARENT_DIRECTORY.uri, `${cacheId}.${ext}`))
 
@@ -242,7 +254,7 @@ export class AudioCache extends DiskCache {
 								pictureBlurhash = await Image.generateBlurhashAsync(image, [4, 3])
 							} catch (e) {
 								logger.warn("audioCache", "blurhash generation failed for cover art", {
-									uuid: cacheItemId(item),
+									uuid: cacheId,
 									error: e
 								})
 							} finally {
@@ -285,7 +297,7 @@ export class AudioCache extends DiskCache {
 					}
 				} catch (e) {
 					logger.error("audioCache", "audio metadata parse or sidecar write failed", {
-						uuid: cacheItemId(item),
+						uuid: cacheId,
 						error: e
 					})
 
@@ -337,6 +349,7 @@ export class AudioCache extends DiskCache {
 						gcSemaphore.release()
 					})
 
+					const cacheId = entry.name.replace(META_FILE_SUFFIX, "")
 					let shouldDelete = false
 					let pictureUri: string | null = null
 					let cachedAt = 0
@@ -347,7 +360,7 @@ export class AudioCache extends DiskCache {
 						pictureUri = metadata?.pictureUri ?? null
 						cachedAt = metadata?.cachedAt ?? 0
 
-						return !hasMetadata(metadata) || now >= (metadata?.cachedAt ?? 0) + ttlMs
+						return isExpired(metadata, now, ttlMs)
 					})
 
 					if (parseResult.success) {
@@ -370,7 +383,7 @@ export class AudioCache extends DiskCache {
 						}
 
 						survivors.push({
-							key: entry.name.replace(META_FILE_SUFFIX, ""),
+							key: cacheId,
 							cachedAt,
 							size
 						})
@@ -378,7 +391,7 @@ export class AudioCache extends DiskCache {
 						return
 					}
 
-					const mutex = this.getMutexForKey(entry.name.replace(META_FILE_SUFFIX, ""))
+					const mutex = this.getMutexForKey(cacheId)
 
 					await mutex.acquire()
 
@@ -399,7 +412,7 @@ export class AudioCache extends DiskCache {
 
 						pictureUri = metadata?.pictureUri ?? null
 
-						return !hasMetadata(metadata) || now >= (metadata?.cachedAt ?? 0) + ttlMs
+						return isExpired(metadata, now, ttlMs)
 					})
 
 					if (recheck.success && !recheck.data) {
@@ -407,11 +420,7 @@ export class AudioCache extends DiskCache {
 					}
 
 					if (pictureUri) {
-						const pictureFile = new FileSystem.File(pictureUri)
-
-						if (pictureFile.exists) {
-							pictureFile.delete()
-						}
+						deletePictureAt(pictureUri)
 					}
 
 					if (entry.exists) {
@@ -441,7 +450,7 @@ export class AudioCache extends DiskCache {
 						mutex.release()
 					})
 
-					const sidecar = new FileSystem.File(FileSystem.Paths.join(PARENT_DIRECTORY.uri, metaFileName(cacheId)))
+					const sidecar = sidecarFile(cacheId)
 
 					if (!sidecar.exists) {
 						return
@@ -464,11 +473,7 @@ export class AudioCache extends DiskCache {
 					}
 
 					if (pictureUri) {
-						const pictureFile = new FileSystem.File(pictureUri)
-
-						if (pictureFile.exists) {
-							pictureFile.delete()
-						}
+						deletePictureAt(pictureUri)
 					}
 
 					if (sidecar.exists) {
@@ -500,7 +505,7 @@ export class AudioCache extends DiskCache {
 						return
 					}
 
-					const sidecar = new FileSystem.File(FileSystem.Paths.join(PARENT_DIRECTORY.uri, metaFileName(cacheId)))
+					const sidecar = sidecarFile(cacheId)
 
 					if (sidecar.exists) {
 						return

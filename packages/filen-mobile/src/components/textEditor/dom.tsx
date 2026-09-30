@@ -16,6 +16,7 @@ import useDomDomEvents from "@/hooks/useDomEvents/useDomDomEvents"
 import useEffectOnce from "@/hooks/useEffectOnce"
 import { installDomConsoleProxy } from "@/hooks/useDomEvents/domConsoleProxy"
 import { installDomViewportReset, onViewportChange } from "@/lib/domViewport"
+import { FLUSH_COMPOSITION_COMMIT_MS } from "@/components/textEditor/domTiming"
 import {
 	createLayoutThemeSpec,
 	CODE_MIRROR_DIMENSIONS,
@@ -24,7 +25,7 @@ import {
 } from "@/components/textEditor/codeMirrorLayout"
 import { proseContentAttributes } from "@/components/textEditor/inputAttributes"
 import { decodeEditorInitialValue } from "@/components/textEditor/initialValueCodec"
-import { classifyExternalLinkHref } from "@/components/textEditor/linkUtils"
+import { classifyUntrustedLinkHref } from "@/lib/untrustedLinks"
 import { isScrolled } from "@/components/textEditor/scrollReporting"
 import { readAllText, writeAllBytes, type ChunkWriter, type RangeReader } from "@/lib/rangeTransfer"
 import { isProbablyBinaryText } from "@/lib/previewType"
@@ -45,10 +46,10 @@ const rehypeExternalLinks: Plugin<[], Root> = () => {
 		visit(tree, "element", (node: Element) => {
 			try {
 				if (node.tagName === "a" && node.properties?.["href"]) {
-					const { url, intercept } = classifyExternalLinkHref(String(node.properties["href"]))
+					const classification = classifyUntrustedLinkHref(String(node.properties["href"]))
 
-					if (intercept) {
-						node.properties["data-external-url"] = url
+					if (classification.action === "external") {
+						node.properties["data-external-url"] = classification.url
 						node.properties["href"] = "#"
 					}
 				}
@@ -99,11 +100,6 @@ const keepCaretVisible = (() => {
 		})
 	})
 })()
-
-// How long after a flush request (and its optional composition-committing blur) the document
-// is re-read for the divergence check — long enough for the keyboard's finalized text to land
-// through the normal DOM event path, short enough to fit inside a screen-pop animation.
-const FLUSH_COMPOSITION_COMMIT_MS = 80
 
 const TextEditorDOM = ({
 	ref,
@@ -181,6 +177,19 @@ const TextEditorDOM = ({
 	// events work (everywhere but #67's) flushes are pure no-ops.
 	const lastReportedValueRef = useRef(decodeEditorInitialValue(initialValue ?? ""))
 
+	// Chunked mode reports "contentEdited" once per mount, not per change.
+	const markEdited = (post: (message: TextEditorEvents) => void) => {
+		if (editedReportedRef.current) {
+			return
+		}
+
+		editedReportedRef.current = true
+
+		post({
+			type: "contentEdited"
+		})
+	}
+
 	// #39 fix: do NOT gate propagation on a physical keydown. `@uiw/react-codemirror`
 	// already filters out programmatic/initial `setValue` changes (it only fires
 	// onChange for real document mutations), so the old `didTypeRef` keydown gate was
@@ -200,13 +209,7 @@ const TextEditorDOM = ({
 		// crosses this bridge as a JSON string inside a postMessage, so sending it on every keystroke
 		// makes typing cost the file size per character. The host pulls it once, when the user saves.
 		if (chunked) {
-			if (!editedReportedRef.current) {
-				editedReportedRef.current = true
-
-				postMessageRef.current({
-					type: "contentEdited"
-				})
-			}
+			markEdited(postMessageRef.current)
 
 			return
 		}
@@ -255,13 +258,7 @@ const TextEditorDOM = ({
 			// an IME-composed edit would leave the save button hidden and the navigate-away guard
 			// silent, and the edit would be lost exactly on the devices #67 is about.
 			if (chunked) {
-				if (!editedReportedRef.current) {
-					editedReportedRef.current = true
-
-					post({
-						type: "contentEdited"
-					})
-				}
+				markEdited(post)
 
 				return
 			}

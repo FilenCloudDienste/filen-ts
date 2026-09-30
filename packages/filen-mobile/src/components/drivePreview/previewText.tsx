@@ -1,7 +1,4 @@
-import { useEffect, useRef } from "react"
-import View, { CrossGlassContainerView } from "@/components/ui/view"
-import Text from "@/components/ui/text"
-import { unwrapFileMeta, unwrappedFileIntoDriveItem, unwrapParentUuid } from "@/lib/sdkUnwrap"
+import View from "@/components/ui/view"
 import { getPreviewType } from "@/lib/previewType"
 import TextEditor, { backgroundColors, type TextEditorDocumentStatus } from "@/components/textEditor"
 import { MAX_TEXT_BYTES } from "@/components/textEditor/constants"
@@ -9,60 +6,37 @@ import { useShallow } from "zustand/shallow"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import { useResolveClassNames, useUniwind } from "uniwind"
-import { ActivityIndicator } from "react-native"
-import useFileUriQuery from "@/queries/useFileUri.query"
-import useRangeSource, { type RangeSource } from "@/hooks/useRangeSource"
+import { ActivityIndicator, type ViewStyle } from "react-native"
+import { type RangeSource } from "@/hooks/useRangeSource"
 import { useTranslation } from "react-i18next"
-import { PressableScale } from "@/components/ui/pressables"
-import Ionicons from "@expo/vector-icons/Ionicons"
-import transfers from "@/features/transfers/transfers"
-import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
-import alerts from "@/lib/alerts"
 import { useRecyclingState } from "@shopify/flash-list"
-import { AnyDirWithContext_Tags } from "@filen/sdk-rs"
 import { type GalleryItemTagged, galleryItemKey } from "@/components/drivePreview/gallery"
-import { galleryItemRenderName, galleryItemFileSource } from "@/components/drivePreview/galleryRenderName"
-import useEditableTarget from "@/components/drivePreview/useEditableTarget"
-import useRemoteRevisions from "@/components/drivePreview/useRemoteRevisions"
-import PreviewLoadFailedNotice from "@/components/drivePreview/previewLoadFailedNotice"
-import { isUnavailableOffline } from "@/components/drivePreview/previewAvailability"
-import useIsOnline from "@/hooks/useIsOnline"
-import logger from "@/lib/logger"
-import type { File } from "expo-file-system"
-import type { DriveItemFileExtracted } from "@/types"
+import { galleryItemRenderName } from "@/components/drivePreview/galleryRenderName"
+import useEditableSave from "@/components/drivePreview/useEditableSave"
+import PreviewSaveButton from "@/components/drivePreview/previewSaveButton"
+import { PreviewStatusMessage } from "@/components/drivePreview/previewStatus"
+import PreviewDocumentGate from "@/components/drivePreview/previewDocumentGate"
 
 const PreviewTextInner = ({
 	previewType,
 	source,
-	item
+	item,
+	containerStyle
 }: {
 	previewType: "text" | "code"
 	source: Extract<RangeSource, { status: "ready" }>
 	item: GalleryItemTagged
+	containerStyle: ViewStyle
 }) => {
 	const { t } = useTranslation()
-	const bgBackground = useResolveClassNames("bg-background")
-	const { theme } = useUniwind()
 	const headerHeight = useDrivePreviewStore(useShallow(state => state.headerHeight))
 	const setContentScrolled = useDrivePreviewStore(useShallow(state => state.setContentScrolled))
 	const insets = useSafeAreaInsets()
-	const [hasEdits, setHasEdits] = useRecyclingState<boolean>(false, [galleryItemKey(item)])
 	const [status, setStatus] = useRecyclingState<TextEditorDocumentStatus | "loading">("loading", [galleryItemKey(item)])
-	const textPrimary = useResolveClassNames("text-primary")
-	const isOnline = useIsOnline()
-	const { itemToUse, resolveParent, readOnly, applySaved } = useEditableTarget(item)
-	const saveHandleRef = useRef<(() => Promise<File | null>) | null>(null)
-	const savingRef = useRef<boolean>(false)
-	// False once this editor unmounted: a save still in its check then uploads nothing.
-	const mountedRef = useRef<boolean>(true)
-
-	useEffect(() => {
-		mountedRef.current = true
-
-		return () => {
-			mountedRef.current = false
-		}
-	}, [])
+	const { hasEdits, setHasEdits, saveHandleRef, readOnly, save, isOnline } = useEditableSave(item, {
+		failed: "Text file save failed",
+		notSerialised: "The file could not be saved"
+	})
 
 	// The editor's mode and highlighting follow the name the page opened with (galleryItemRenderName), never a
 	// rename that would remount it under unsaved edits.
@@ -75,202 +49,18 @@ const PreviewTextInner = ({
 	// preference, not a per-file one.
 	const isMarkdownFile = /\.(md|markdown)$/i.test(fileName)
 
-	const save = async (): Promise<boolean> => {
-		// See previewPdf: the loading overlay presents asynchronously and the unsaved-changes prompt
-		// renders above it, so re-entry is reachable without a race. Two concurrent saves share one
-		// write target.
-		if (savingRef.current || !hasEdits || readOnly || !isOnline) {
-			return false
-		}
-
-		savingRef.current = true
-
-		let saved: DriveItemFileExtracted | null = null
-
-		try {
-			// A version saved elsewhere while the socket was down is asked about before this save goes over it.
-			// The check may read the file's directory: the loading state shows meanwhile.
-			const checked = await runWithLoading(async () => await remote.beforeSave())
-			const target = checked.success ? checked.data : null
-
-			// Discarded or closed during the check: nothing to save into.
-			if (target === null || !mountedRef.current) {
-				return false
-			}
-
-			const result = await runSave(target)
-
-			saved = result.saved
-
-			return result.ok
-		} finally {
-			savingRef.current = false
-			// Judged with the save slot released, so a check the save held back runs now.
-			remote.saveSettled(saved)
-		}
-	}
-
-	// Uploads the editor's content under `name` beside the file: the file's own name makes a new version
-	// of it, any other a new file.
-	const uploadEdits = async (name: string, target: DriveItemFileExtracted | null = itemToUse) =>
-		await runWithLoading(async defer => {
-			if (!target?.data.decryptedMeta) {
-				throw new Error("Missing decryptedMeta")
-			}
-
-			// The target's own directory: it may have moved elsewhere, found by the check before this save.
-			const parent = await resolveParent(target.type === "file" ? (unwrapParentUuid(target.data.parent) ?? undefined) : undefined)
-
-			if (!parent || parent === "sharedInRoot" || parent.tag !== AnyDirWithContext_Tags.Normal) {
-				throw new Error("Missing parent directory")
-			}
-
-			// Serialised by the editor into a temp file — the document never crosses the bridge whole.
-			const savedFile = await saveHandleRef.current?.()
-
-			if (!savedFile) {
-				throw new Error("The file could not be saved")
-			}
-
-			defer(() => {
-				if (savedFile.exists) {
-					savedFile.delete()
-				}
-			})
-
-			return await transfers.upload({
-				localFileOrDir: savedFile,
-				parent: parent.inner[0],
-				name,
-				modified: Date.now(),
-				created: target.data.decryptedMeta.created != null ? Number(target.data.decryptedMeta.created) : undefined,
-				mime: target.data.decryptedMeta.mime
-			})
-		})
-
-	// Writes the edits over `target`, under its name: what the save made, when it made a file.
-	const runSave = async (target: DriveItemFileExtracted): Promise<{ ok: boolean; saved: DriveItemFileExtracted | null }> => {
-		const name = target.data.decryptedMeta?.name
-
-		if (name === undefined) {
-			return { ok: false, saved: null }
-		}
-
-		const result = await uploadEdits(name, target)
-
-		if (!result.success) {
-			logger.error("drivePreview", "Text file save failed", {
-				error: result.error
-			})
-
-			alerts.error(result.error)
-
-			return { ok: false, saved: null }
-		}
-
-		if (!result.data) {
-			return { ok: false, saved: null }
-		}
-
-		setHasEdits(false)
-
-		const newFile = result.data.files[0]
-		const newDriveItem = newFile ? unwrappedFileIntoDriveItem(unwrapFileMeta(newFile)) : null
-
-		if (newDriveItem?.type !== "file") {
-			return { ok: true, saved: null }
-		}
-
-		applySaved(newDriveItem)
-
-		return { ok: true, saved: newDriveItem }
-	}
-
-	// The unsaved edits written to a new file beside this one, for the remote-change prompts.
-	const saveAsNewFile = async (name: string): Promise<DriveItemFileExtracted | null> => {
-		const result = await uploadEdits(name)
-
-		if (!result.success) {
-			logger.error("drivePreview", "Text file save failed", {
-				error: result.error
-			})
-
-			alerts.error(result.error)
-
-			return null
-		}
-
-		const newFile = result.data?.files[0]
-		const newDriveItem = newFile ? unwrappedFileIntoDriveItem(unwrapFileMeta(newFile)) : null
-
-		if (newDriveItem?.type !== "file") {
-			return null
-		}
-
-		setHasEdits(false)
-
-		return newDriveItem
-	}
-
-	const remote = useRemoteRevisions({ item, itemToUse, resolveParent, hasEdits, savingRef, saveAsNewFile })
-
-	// Publish the dirty flag so the route-level unsaved-changes guard can prompt on navigate-away.
-	useEffect(() => {
-		useDrivePreviewStore.getState().setHasUnsavedEdits(hasEdits && !readOnly)
-	}, [hasEdits, readOnly])
-
-	// save() is re-created each render; keep the latest in a ref and publish ONE stable wrapper so the
-	// guard can save-then-leave. Clear the handle + flag on unmount so a later preview cannot inherit
-	// this item's dirty state.
-	const saveRef = useRef(save)
-
-	useEffect(() => {
-		saveRef.current = save
-	})
-
-	useEffect(() => {
-		useDrivePreviewStore.getState().setSaveEdits(() => saveRef.current())
-
-		return () => {
-			useDrivePreviewStore.getState().setSaveEdits(null)
-			useDrivePreviewStore.getState().setHasUnsavedEdits(false)
-		}
-	}, [])
-
-	const containerStyle = {
-		backgroundColor:
-			previewType === "text" ? bgBackground.backgroundColor : backgroundColors["normal"][theme === "dark" ? "dark" : "light"]
-	}
-
 	return (
 		<View
 			className="flex-1"
 			style={containerStyle}
 		>
 			{hasEdits && item.type === "drive" && (
-				<View
-					className="absolute left-0 right-0 bg-transparent z-1000 flex-row items-center justify-end pl-4"
-					style={{
-						top: headerHeight,
-						paddingRight: 16 + insets.right
-					}}
-				>
-					<PressableScale
-						className="size-11 items-center justify-center"
-						onPress={save}
-						hitSlop={10}
-						enabled={isOnline}
-						rippleColor="transparent"
-					>
-						<CrossGlassContainerView className="size-11 flex-row items-center justify-center">
-							<Ionicons
-								name="save-outline"
-								size={20}
-								color={textPrimary.color}
-							/>
-						</CrossGlassContainerView>
-					</PressableScale>
-				</View>
+				<PreviewSaveButton
+					onPress={save}
+					enabled={isOnline}
+					top={headerHeight}
+					insetRight={insets.right}
+				/>
 			)}
 			<TextEditor
 				// A new document always gets a new WebView, so the previous file's document is not a cost
@@ -301,16 +91,10 @@ const PreviewTextInner = ({
 							color="white"
 						/>
 					) : (
-						<>
-							<Ionicons
-								name={status === "notText" ? "document-outline" : "warning-outline"}
-								size={48}
-								color="#9ca3af"
-							/>
-							<Text className="mt-4 text-center text-sm leading-5 text-muted-foreground">
-								{status === "notText" ? t("preview_not_text") : t("preview_load_failed")}
-							</Text>
-						</>
+						<PreviewStatusMessage
+							icon={status === "notText" ? "document-outline" : "warning-outline"}
+							text={status === "notText" ? t("preview_not_text") : t("preview_load_failed")}
+						/>
 					)}
 				</View>
 			)}
@@ -322,100 +106,34 @@ const PreviewText = ({ item }: { item: GalleryItemTagged }) => {
 	const { t } = useTranslation()
 	const bgBackground = useResolveClassNames("bg-background")
 	const { theme } = useUniwind()
-
-	const isOnline = useIsOnline()
 	const previewType = getPreviewType(galleryItemRenderName(item))
-
-	const query = useFileUriQuery(galleryItemFileSource(item))
-
-	// No magic: text has no signature. Content that turns out not to be text is caught after decoding,
-	// by the editor's binary-content gate.
-	const source = useRangeSource(query.status === "success" ? query.data.uri : null, {
-		maxBytes: MAX_TEXT_BYTES
-	})
 
 	const containerStyle = {
 		backgroundColor:
 			previewType === "text" ? bgBackground.backgroundColor : backgroundColors["normal"][theme === "dark" ? "dark" : "light"]
 	}
 
-	if (query.status === "pending" && query.fetchStatus === "fetching") {
-		return (
-			<View
-				className="flex-1 items-center justify-center"
-				style={containerStyle}
-			>
-				<ActivityIndicator
-					size="small"
-					color="white"
-				/>
-			</View>
-		)
-	}
-
-	if (isUnavailableOffline(query, isOnline)) {
-		return (
-			<View
-				className="flex-1 items-center justify-center px-8"
-				style={containerStyle}
-			>
-				<Ionicons
-					name="cloud-offline-outline"
-					size={48}
-					color="#9ca3af"
-				/>
-				<Text className="mt-4 text-center text-sm leading-5 text-muted-foreground">{t("unavailable_offline")}</Text>
-			</View>
-		)
-	}
-
-	if (query.status === "error") {
-		return (
-			<PreviewLoadFailedNotice
-				style={containerStyle}
-				onRetry={() => query.refetch()}
-			/>
-		)
-	}
-
-	if (source.status === "refused") {
-		return (
-			<View
-				className="flex-1 items-center justify-center px-8"
-				style={containerStyle}
-			>
-				<Ionicons
-					name={source.reason === "tooLarge" ? "document-outline" : "warning-outline"}
-					size={48}
-					color="#9ca3af"
-				/>
-				<Text className="mt-4 text-center text-sm leading-5 text-muted-foreground">
-					{source.reason === "tooLarge" ? t("text_file_too_large") : t("preview_load_failed")}
-				</Text>
-			</View>
-		)
-	}
-
-	if (source.status === "ready") {
-		return (
-			<PreviewTextInner
-				previewType={previewType === "code" ? "code" : "text"}
-				source={source}
-				item={item}
-			/>
-		)
-	}
-
 	return (
-		<View
-			className="flex-1 items-center justify-center"
+		<PreviewDocumentGate
+			item={item}
+			maxBytes={MAX_TEXT_BYTES}
+			// No magic: text has no signature. Content that turns out not to be text is caught after decoding,
+			// by the editor's binary-content gate.
+			refusedText={{
+				tooLarge: t("text_file_too_large"),
+				other: t("preview_load_failed")
+			}}
 			style={containerStyle}
 		>
-			<ActivityIndicator
-				size="small"
-				color="white"
-			/>
-		</View>
+			{source => (
+				<PreviewTextInner
+					previewType={previewType === "code" ? "code" : "text"}
+					source={source}
+					item={item}
+					containerStyle={containerStyle}
+				/>
+			)}
+		</PreviewDocumentGate>
 	)
 }
 

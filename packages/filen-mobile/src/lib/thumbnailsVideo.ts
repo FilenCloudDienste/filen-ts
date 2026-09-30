@@ -4,7 +4,7 @@ import * as VideoThumbnails from "expo-video-thumbnails"
 import { normalizeFilePathForExpo } from "@/lib/paths"
 import { renderAndSave } from "@/lib/imageManipulator"
 import { run } from "@filen/shared"
-import { abortError } from "@/lib/thumbnailsHelpers"
+import { abortError, throwIfAborted } from "@/lib/thumbnailsHelpers"
 
 export async function generateVideo(
 	params: {
@@ -34,9 +34,7 @@ export async function generateVideo(
 	const result = await run(async defer => {
 		const url = "localSourceUri" in params ? normalizeFilePathForExpo(params.localSourceUri) : params.sourceUrl
 
-		if (params.signal?.aborted) {
-			throw abortError(params.signal)
-		}
+		throwIfAborted(params.signal)
 
 		// Extract the frame to a FILE rather than an in-memory SharedRef. Feeding a
 		// cross-module SharedRef (expo-video's VideoThumbnail) into the sync
@@ -52,9 +50,7 @@ export async function generateVideo(
 				quality: 1
 			})
 		} catch (error) {
-			if (params.signal?.aborted) {
-				throw abortError(params.signal)
-			}
+			throwIfAborted(params.signal)
 
 			const message = error instanceof Error ? error.message : String(error)
 
@@ -75,9 +71,7 @@ export async function generateVideo(
 			}
 		})
 
-		if (params.signal?.aborted) {
-			throw abortError(params.signal)
-		}
+		throwIfAborted(params.signal)
 
 		// Resize + re-encode to WEBP. This is the app's LAST manipulator decode in the thumbnail
 		// pipeline — images are SDK decodes now, but Rust decodes no video, so the frame still comes
@@ -94,9 +88,7 @@ export async function generateVideo(
 				params.width
 			)
 		} catch (error) {
-			if (params.signal?.aborted) {
-				throw abortError(params.signal)
-			}
+			throwIfAborted(params.signal)
 
 			throw error
 		}

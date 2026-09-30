@@ -108,7 +108,7 @@ vi.mock("@/lib/kvScan", () => ({
 	})
 }))
 
-import { CameraUploadState } from "@/features/cameraUpload/cameraUploadState"
+import { CameraUploadState, type CameraUploadHashEntry } from "@/features/cameraUpload/cameraUploadState"
 import { serialize, deserialize } from "@/lib/serializer"
 import sqlite from "@/lib/sqlite"
 import { forEachKvRowByPrefix } from "@/lib/kvScan"
@@ -119,6 +119,10 @@ const ABORTS_PREFIX = "cameraUpload:aborts:"
 
 function make(): CameraUploadState {
 	return new CameraUploadState()
+}
+
+function entry(md5: string): CameraUploadHashEntry {
+	return { md5, verifiedModificationTime: 1 }
 }
 
 function seedHash(key: string, value: unknown): void {
@@ -135,8 +139,10 @@ beforeEach(() => {
 })
 
 describe("loadHashes", () => {
-	it("pages new-prefix rows into memory (object + legacy string values)", async () => {
-		seedHash("asset1", { md5: "m1", verifiedModificationTime: 5 })
+	it("pages new-prefix rows into memory, upgrading legacy string values to never-verified entries", async () => {
+		const stored = { md5: "m1", verifiedModificationTime: 5 }
+
+		seedHash("asset1", stored)
 		seedHash("asset2", "bare-md5")
 		seedHash("/album/photo.jpg", "legacy-path")
 
@@ -144,9 +150,11 @@ describe("loadHashes", () => {
 
 		await state.loadHashes()
 
-		expect(state.getHashSync("asset1")).toEqual({ md5: "m1", verifiedModificationTime: 5 })
-		expect(state.getHashSync("asset2")).toBe("bare-md5")
-		expect(state.getHashSync("/album/photo.jpg")).toBe("legacy-path")
+		expect(state.getHashSync("asset1")).toEqual(stored)
+		expect(state.getHashSync("asset2")).toEqual({ md5: "bare-md5", verifiedModificationTime: -1 })
+		expect(state.getHashSync("/album/photo.jpg")).toEqual({ md5: "legacy-path", verifiedModificationTime: -1 })
+		// The kv row keeps its legacy shape until the next write.
+		expect(deserialize(kvStore.get(HASHES_PREFIX + "asset2") as string)).toBe("bare-md5")
 		expect(state.hashKeys().sort()).toEqual(["/album/photo.jpg", "asset1", "asset2"])
 	})
 
@@ -213,7 +221,7 @@ describe("loadHashes", () => {
 
 		// The two valid rows are committed to memory.
 		expect(state.getHashSync("good1")).toEqual({ md5: "m1", verifiedModificationTime: 1 })
-		expect(state.getHashSync("good2")).toBe("legacy")
+		expect(state.getHashSync("good2")).toEqual({ md5: "legacy", verifiedModificationTime: -1 })
 		// The corrupt row is dropped from memory and range-deleted from kv.
 		expect(state.getHashSync("corrupt")).toBeUndefined()
 		expect(kvStore.has(HASHES_PREFIX + "corrupt")).toBe(false)
@@ -242,6 +250,14 @@ describe("getHash (background point reads)", () => {
 		expect(await state.getHash("asset1")).toEqual({ md5: "m1", verifiedModificationTime: 7 })
 	})
 
+	it("upgrades a legacy string row to a never-verified entry", async () => {
+		seedHash("asset1", "bare-md5")
+
+		const state = make()
+
+		expect(await state.getHash("asset1")).toEqual({ md5: "bare-md5", verifiedModificationTime: -1 })
+	})
+
 	it("returns undefined for a missing key", async () => {
 		const state = make()
 
@@ -268,7 +284,7 @@ describe("getHash (background point reads)", () => {
 
 		vi.mocked(sqlite.kvAsync.get).mockClear()
 
-		expect(await state.getHash("asset1")).toBe("x")
+		expect(await state.getHash("asset1")).toEqual({ md5: "x", verifiedModificationTime: -1 })
 		expect(vi.mocked(sqlite.kvAsync.get)).not.toHaveBeenCalled()
 	})
 
@@ -304,18 +320,18 @@ describe("write-through", () => {
 		const state = make()
 
 		await state.loadHashes()
-		await state.setHash("stale", "old")
+		await state.setHash("stale", entry("old"))
 
 		await state.applyHashBatch({
 			upserts: [
 				["a", { md5: "ma", verifiedModificationTime: 1 }],
-				["b", "legacy"]
+				["b", entry("mb")]
 			],
 			deletes: ["stale"]
 		})
 
 		expect(state.getHashSync("a")).toEqual({ md5: "ma", verifiedModificationTime: 1 })
-		expect(state.getHashSync("b")).toBe("legacy")
+		expect(state.getHashSync("b")).toEqual(entry("mb"))
 		expect(state.getHashSync("stale")).toBeUndefined()
 		expect(deserialize(kvStore.get(HASHES_PREFIX + "a") as string)).toEqual({ md5: "ma", verifiedModificationTime: 1 })
 		expect(kvStore.has(HASHES_PREFIX + "stale")).toBe(false)
@@ -357,10 +373,10 @@ describe("write-through", () => {
 		const db = await sqlite.openDb()
 
 		// 300 upserts → two chunks at APPLY_CHUNK_SIZE=256 (256 + 44).
-		const upserts: [string, string][] = []
+		const upserts: [string, CameraUploadHashEntry][] = []
 
 		for (let i = 0; i < 300; i++) {
-			upserts.push([`asset${i}`, `md5-${i}`])
+			upserts.push([`asset${i}`, entry(`md5-${i}`)])
 		}
 
 		// After the first chunk lands, a logout latches the store — the per-chunk re-check must abort the tail.
@@ -439,7 +455,7 @@ describe("clearForLogout", () => {
 
 		await state.setHash("leak", { md5: "secret", verifiedModificationTime: 1 })
 		await state.setAbort("leak", 3)
-		await state.applyHashBatch({ upserts: [["leak2", "x"]] })
+		await state.applyHashBatch({ upserts: [["leak2", entry("x")]] })
 
 		expect(state.getHashSync("leak")).toBeUndefined()
 		expect(state.getHashSync("leak2")).toBeUndefined()
@@ -456,9 +472,9 @@ describe("clearForLogout", () => {
 		// A fresh session's load un-locks.
 		await state.loadHashes()
 
-		await state.setHash("fresh", "value")
+		await state.setHash("fresh", entry("value"))
 
-		expect(state.getHashSync("fresh")).toBe("value")
+		expect(state.getHashSync("fresh")).toEqual(entry("value"))
 		expect(kvStore.has(HASHES_PREFIX + "fresh")).toBe(true)
 	})
 
@@ -476,10 +492,10 @@ describe("clearForLogout", () => {
 		vi.mocked(sqlite.kvAsync.remove).mockClear()
 		vi.mocked(db.executeBatch).mockClear()
 
-		await state.setHash("x", "v")
+		await state.setHash("x", entry("v"))
 		await state.setAbort("x", 1)
 		await state.deleteAbort("x")
-		await state.applyHashBatch({ upserts: [["y", "v"]], deletes: ["z"] })
+		await state.applyHashBatch({ upserts: [["y", entry("v")]], deletes: ["z"] })
 
 		// Neither memory nor kv is touched — no set/remove/executeBatch command ever leaves the store.
 		expect(state.getHashSync("x")).toBeUndefined()
@@ -518,7 +534,7 @@ describe("clearForLogout", () => {
 		await loadPromise
 
 		// The stale-generation load must neither unlatch the store nor commit its scanned rows.
-		await state.setHash("after", "z")
+		await state.setHash("after", entry("z"))
 
 		expect(state.getHashSync("after")).toBeUndefined()
 		expect(state.getHashSync("zombie")).toBeUndefined()
@@ -550,7 +566,7 @@ describe("clearForLogout", () => {
 		const loadPromise = state.loadHashes()
 
 		// Entry must NOT unlatch: a write while the scan is still in flight is still refused.
-		await state.setHash("early", "nope")
+		await state.setHash("early", entry("nope"))
 
 		expect(state.getHashSync("early")).toBeUndefined()
 
@@ -559,12 +575,12 @@ describe("clearForLogout", () => {
 		await loadPromise
 
 		// Only the committed load unlatches — now writes reach memory + kv again.
-		await state.setHash("late", "yes")
+		await state.setHash("late", entry("yes"))
 
-		expect(state.getHashSync("late")).toBe("yes")
+		expect(state.getHashSync("late")).toEqual(entry("yes"))
 		expect(kvStore.has(HASHES_PREFIX + "late")).toBe(true)
 		// The scanned row committed to memory on the same generation-checked path.
-		expect(state.getHashSync("fresh")).toBe("value")
+		expect(state.getHashSync("fresh")).toEqual({ md5: "value", verifiedModificationTime: -1 })
 	})
 })
 
@@ -583,6 +599,16 @@ describe("getHashMany", () => {
 
 		expect(found.get("asset-1")).toMatchObject({ md5: "a" })
 		expect(found.get("asset-2")).toMatchObject({ md5: "b" })
+	})
+
+	it("upgrades legacy string rows to never-verified entries", async () => {
+		const state = make()
+
+		seedHash("asset-1", "bare-md5")
+
+		const found = await state.getHashMany(["asset-1"])
+
+		expect(found.get("asset-1")).toEqual({ md5: "bare-md5", verifiedModificationTime: -1 })
 	})
 
 	it("omits keys that have no entry rather than mapping them to null", async () => {

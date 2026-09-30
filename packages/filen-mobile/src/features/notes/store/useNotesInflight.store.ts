@@ -27,4 +27,21 @@ export const useNotesInflightStore = create<NotesInflightStore>(set => ({
 	}
 }))
 
+// Whether the note has unsynced edits.
+export function hasInflightEntries(inflight: InflightContent, uuid: string): boolean {
+	return (inflight[uuid] ?? []).length > 0
+}
+
+// The entry with the greatest timestamp, first of ties.
+export function newestInflightEntry(entries: InflightContent[string] | undefined): InflightContent[string][number] | undefined {
+	return (entries ?? []).reduce<InflightContent[string][number] | undefined>(
+		(latest, entry) => (latest === undefined || entry.timestamp > latest.timestamp ? entry : latest),
+		undefined
+	)
+}
+
+export function useNoteHasInflight(uuid: string): boolean {
+	return useNotesInflightStore(state => hasInflightEntries(state.inflightContent, uuid))
+}
+
 export default useNotesInflightStore

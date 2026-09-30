@@ -2,10 +2,7 @@ import { type MenuButton } from "@/components/ui/menu"
 import type { DriveItem } from "@/types"
 import type { DrivePath } from "@/hooks/useDrivePath"
 import { type TFunction } from "i18next"
-import { run } from "@filen/shared"
-import alerts from "@/lib/alerts"
-import logger from "@/lib/logger"
-import { selectCopyDestination } from "@/features/drive/driveSelectSession"
+import { pickDestinationAndCopy } from "@/features/drive/pickDestinationAndCopy"
 import copyRunner from "@/features/copy/copyRunner"
 import useDriveClipboardStore from "@/features/drive/store/useDriveClipboard.store"
 
@@ -99,38 +96,22 @@ export function buildCopyMenuButton({
 		icon: "copyTo",
 		requiresOnline: true,
 		onPress: async () => {
-			const picked = await run(async () => {
-				return await selectCopyDestination(items)
+			const started = await pickDestinationAndCopy({
+				pickerItems: items,
+				start: ({ destination, destinationDir }) =>
+					copyRunner.start({
+						items,
+						destination,
+						destinationDir
+					}),
+				logTag: "drive",
+				label: "copy to",
+				count: items.length
 			})
 
-			if (!picked.success) {
-				logger.error("drive", "copy to: destination picker failed", { error: picked.error })
-				alerts.error(picked.error)
-
-				return
+			if (started) {
+				onDone?.()
 			}
-
-			if (!picked.data) {
-				return
-			}
-
-			const { destination, destinationDir } = picked.data
-			const started = await run(async () => {
-				return copyRunner.start({
-					items,
-					destination,
-					destinationDir
-				})
-			})
-
-			if (!started.success) {
-				logger.error("drive", "copy to: failed to start", { error: started.error, count: items.length })
-				alerts.error(started.error)
-
-				return
-			}
-
-			onDone?.()
 		}
 	})
 

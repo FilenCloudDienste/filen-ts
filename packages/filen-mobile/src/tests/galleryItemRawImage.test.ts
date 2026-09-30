@@ -10,12 +10,18 @@ const { mockUseFileUrlQuery } = vi.hoisted(() => ({
 
 vi.mock("react-native", async () => {
 	const actual = await import("@/tests/mocks/reactNative")
-	const { createElement: h } = await import("react")
 
 	return {
 		...actual,
-		useWindowDimensions: () => ({ width: 400, height: 800, scale: 2, fontScale: 1 }),
-		ActivityIndicator: () => h("div", { "data-testid": "spinner" })
+		useWindowDimensions: () => ({ width: 400, height: 800, scale: 2, fontScale: 1 })
+	}
+})
+
+vi.mock("@/components/drivePreview/previewStatus", async () => {
+	const { createElement: h } = await import("react")
+
+	return {
+		PreviewSpinner: () => h("div", { "data-testid": "spinner" })
 	}
 })
 

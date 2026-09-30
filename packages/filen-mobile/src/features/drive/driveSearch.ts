@@ -2,6 +2,7 @@ import { AppState } from "react-native"
 import {
 	type CacheStatusListener,
 	type CacheStatusMessage,
+	type CacheSearchConfig,
 	type CacheSearchInterface,
 	type CacheSearchWindowHandle,
 	type CacheSearchSnapshot,
@@ -40,6 +41,17 @@ type OpenArgs = {
 	name: string
 	onSnapshot: (snapshot: CacheSearchSnapshot) => void
 	signal: AbortSignal
+}
+
+// The one config for both the initial open and an in-place refilter, so a refilter can never
+// change match semantics vs the open.
+function searchConfig(name: string): CacheSearchConfig {
+	return {
+		name: trimmedOrUndefined(name),
+		itemType: CacheSearchItemType.All,
+		recursive: true,
+		caseSensitive: false
+	}
 }
 
 // A per-open cancellation token, flipped by a newer open or by closeActive. Set
@@ -239,7 +251,7 @@ export class DriveSearch {
 		try {
 			search = await authedSdkClient.createSearch(
 				resolvedRoot,
-				{ name: trimmedOrUndefined(name), itemType: CacheSearchItemType.All, recursive: true, caseSensitive: false },
+				searchConfig(name),
 				{ signal }
 			)
 		} catch (error) {
@@ -307,12 +319,7 @@ export class DriveSearch {
 		}
 
 		try {
-			await search.setConfig({
-				name: trimmedOrUndefined(name),
-				itemType: CacheSearchItemType.All,
-				recursive: true,
-				caseSensitive: false
-			})
+			await search.setConfig(searchConfig(name))
 
 			return true
 		} catch (error) {

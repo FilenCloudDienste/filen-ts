@@ -61,41 +61,44 @@ export type DrivePreviewStore = {
 	setContentScrolled: (value: boolean) => void
 }
 
+// Per-session state, cleared by reset(). A function so every session gets a fresh `items` array.
+function initialSession() {
+	return {
+		currentIndex: null,
+		currentItem: null,
+		initialScrollIndex: 0,
+		items: [],
+		drivePath: null,
+		hasUnsavedEdits: false,
+		saveEdits: null,
+		isLeaving: false,
+		pendingOpen: null,
+		contentScrolled: false
+	} satisfies Partial<DrivePreviewStore>
+}
+
 export const useDrivePreviewStore = create<DrivePreviewStore>((set, get) => ({
+	...initialSession(),
 	headerHeight: null,
 	setHeaderHeight(headerHeight) {
 		set({
 			headerHeight
 		})
 	},
-	currentIndex: null,
 	setCurrentIndex(currentIndex) {
 		set({
 			currentIndex
 		})
 	},
 	reset() {
-		set({
-			currentIndex: null,
-			currentItem: null,
-			initialScrollIndex: 0,
-			items: [],
-			drivePath: null,
-			hasUnsavedEdits: false,
-			saveEdits: null,
-			isLeaving: false,
-			pendingOpen: null,
-			contentScrolled: false
-		})
+		set(initialSession())
 	},
-	isLeaving: false,
 	setLeaving(leaving) {
 		// Unwinding the latch also drops anything parked behind it: a dismissal that was BLOCKED (the
 		// unsaved-changes prompt cancelled, or a failed save) keeps this gallery alive, so a tap that
 		// landed during the prompt must not fire later when the user eventually does leave.
 		set(leaving ? { isLeaving: true } : { isLeaving: false, pendingOpen: null })
 	},
-	pendingOpen: null,
 	endSession() {
 		const pending = get().pendingOpen
 
@@ -105,33 +108,26 @@ export const useDrivePreviewStore = create<DrivePreviewStore>((set, get) => ({
 			get().open(pending)
 		}
 	},
-	currentItem: null,
 	setCurrentItem(fn) {
 		set(state => ({
 			currentItem: typeof fn === "function" ? fn(state.currentItem) : fn
 		}))
 	},
-	items: [],
 	setCurrentItems(fn) {
 		set(state => ({
 			items: typeof fn === "function" ? fn(state.items) : fn
 		}))
 	},
-	initialScrollIndex: 0,
-	drivePath: null,
-	hasUnsavedEdits: false,
 	setHasUnsavedEdits(value) {
 		set({
 			hasUnsavedEdits: value
 		})
 	},
-	saveEdits: null,
 	setSaveEdits(fn) {
 		set({
 			saveEdits: fn
 		})
 	},
-	contentScrolled: false,
 	setContentScrolled(value) {
 		set({
 			contentScrolled: value

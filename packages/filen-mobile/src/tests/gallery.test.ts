@@ -5,8 +5,6 @@ vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 // gallery.tsx imports many native/heavy modules; stub them all so the pure
 // galleryItemKey export can be loaded in a node vitest environment.
 
-vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
-
 vi.mock("react-i18next", () => ({
 	useTranslation: () => ({ t: (k: string) => k })
 }))

@@ -12,7 +12,7 @@ import Text from "@/components/ui/text"
 import { PressableOpacity } from "@/components/ui/pressables"
 import auth from "@/lib/auth"
 import alerts from "@/lib/alerts"
-import { inputPrompt } from "@/lib/promptFlow"
+import { promptEmailAndRun } from "@/features/auth/promptEmailAndRun"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import useIsOnline from "@/hooks/useIsOnline"
 import useRegisterCheckQuery from "@/features/auth/queries/useRegisterCheck.query"
@@ -95,42 +95,16 @@ const Register = () => {
 			return
 		}
 
-		const targetEmail = await inputPrompt(
-			{
-				title: t("resend_confirmation_email"),
-				message: t("enter_registered_email"),
-				placeholder: t("email_placeholder_hint"),
-				cancelText: t("cancel"),
-				okText: t("resend"),
-				defaultValue: email.trim(),
-				keyboardType: "email-address"
-			},
-			{ tag: "auth", message: "resend confirmation prompt failed" },
-			{ trim: true, allowEmpty: true }
-		)
-
-		if (targetEmail === null) {
-			return
-		}
-
-		if (!isValidEmail(targetEmail)) {
-			alerts.error(t("please_enter_valid_email"))
-
-			return
-		}
-
-		const result = await runWithLoading(async () => {
-			await auth.resendConfirmationEmail(targetEmail)
+		await promptEmailAndRun({
+			t,
+			title: t("resend_confirmation_email"),
+			message: t("enter_registered_email"),
+			okText: t("resend"),
+			defaultValue: email.trim(),
+			logLabel: "resend confirmation email",
+			action: targetEmail => auth.resendConfirmationEmail(targetEmail),
+			successMessage: t("resend_confirmation_email_sent")
 		})
-
-		if (!result.success) {
-			logger.warn("auth", "resend confirmation email failed", { error: result.error })
-			alerts.error(result.error)
-
-			return
-		}
-
-		alerts.normal(t("resend_confirmation_email_sent"))
 	}
 
 	return (

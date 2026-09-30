@@ -69,7 +69,7 @@ export function usePhotoBulkActions({ items, drivePath }: { items: DriveItemFile
 	if (driveFlags.everyImageOrVideoFile) {
 		bulkButtons.push({
 			id: "bulkSaveToPhotos",
-			title: t("save_to_device_photos_selected"),
+			title: t("save_to_photos"),
 			icon: "image",
 			requiresOnline: true,
 			onPress: async () => {
@@ -110,7 +110,7 @@ export function usePhotoBulkActions({ items, drivePath }: { items: DriveItemFile
 
 	bulkButtons.push({
 		id: "bulkMakeOffline",
-		title: t("make_available_offline_selected"),
+		title: t("make_available_offline"),
 		icon: "archive",
 		requiresOnline: true,
 		onPress: async () => {
@@ -149,7 +149,7 @@ export function usePhotoBulkActions({ items, drivePath }: { items: DriveItemFile
 				clearSelection: clearDriveSelection,
 				confirm: {
 					title: t("trash_selected"),
-					message: t("are_you_sure_trash_selected_photos"),
+					message: t("are_you_sure_trash_selected"),
 					okText: t("trash"),
 					cancelText: t("cancel"),
 					destructive: true

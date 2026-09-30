@@ -1,17 +1,13 @@
 import type { JSONValue } from "expo/build/dom/dom.types"
-
-export type RNWebViewFunctions = {
-	postMessage?: ((message: unknown) => void) | undefined
-}
+import { getReactNativeWebView } from "@/lib/domExternalLink"
 
 function useDomDomEvents<T>(onMessage?: (message: T, postMessage: (message: T) => void) => void) {
 	const postMessage = (message: T) => {
-		const rnWebView = (globalThis as unknown as { ReactNativeWebView?: RNWebViewFunctions | undefined }).ReactNativeWebView
+		const rnWebView = getReactNativeWebView()
 
-		// NOTE: keep console.* (NOT the RN logger) here — this runs inside the WebView/DOM context,
-		// where the RN diagnostic logger is unavailable. Capturing DOM-side console is a separate
-		// deferred effort (proxy DOM console → Hermes).
-		if (!rnWebView || !rnWebView.postMessage) {
+		// console.* (NOT the RN logger): this runs inside the WebView, where the logger is unavailable.
+		// domConsoleProxy forwards it to the native side.
+		if (!rnWebView) {
 			console.error("RNWebView is not available")
 
 			return

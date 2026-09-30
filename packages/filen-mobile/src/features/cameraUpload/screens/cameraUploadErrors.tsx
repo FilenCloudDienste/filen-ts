@@ -125,7 +125,7 @@ const CameraUploadErrors = () => {
 			icon: "trash",
 			title: t("clear_errors"),
 			onPress: () => {
-				useCameraUploadStore.getState().setErrors([])
+				useCameraUploadStore.getState().clearErrors()
 
 				cameraUpload
 					.sync({ manual: true })

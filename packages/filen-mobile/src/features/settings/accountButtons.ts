@@ -435,6 +435,53 @@ export function buildProfileButtons({
 	]
 }
 
+function buildAccountToggleButton({
+	accountQuery,
+	field,
+	sdkSetter,
+	icon,
+	title,
+	subTitle
+}: {
+	accountQuery: AccountQuerySuccess
+	field: "versioningEnabled" | "loginAlertsEnabled"
+	sdkSetter: "setVersioningEnabled" | "setLoginAlertsEnabled"
+	icon: Button["icon"]
+	title: string
+	subTitle: string
+}): Button {
+	return {
+		icon,
+		title,
+		subTitle,
+		requiresOnline: true,
+		rightItem: {
+			type: "switch",
+			value: accountQuery.data[field],
+			onValueChange: async () => {
+				const result = await runWithLoading(async () => {
+					const { authedSdkClient } = await auth.getSdkClients()
+
+					const enabled = !accountQuery.data[field]
+
+					await authedSdkClient[sdkSetter](enabled)
+
+					accountQueryPatch({
+						[field]: enabled
+					})
+				})
+
+				if (!result.success) {
+					logger.error("settings", `${sdkSetter} failed`, { error: result.error })
+					alerts.error(result.error)
+
+					return
+				}
+			}
+		}
+	}
+}
+
 // Account feature toggles (file versioning / login alerts).
 export function buildAccountToggleButtons({
 	t,
@@ -444,66 +491,22 @@ export function buildAccountToggleButtons({
 	accountQuery: AccountQuerySuccess
 }): Button[] {
 	return [
-		{
+		buildAccountToggleButton({
+			accountQuery,
+			field: "versioningEnabled",
+			sdkSetter: "setVersioningEnabled",
 			icon: "layers-outline",
 			title: t("file_versioning"),
-			subTitle: t("file_versioning_description"),
-			requiresOnline: true,
-			rightItem: {
-				type: "switch",
-				value: accountQuery.data.versioningEnabled,
-				onValueChange: async () => {
-					const result = await runWithLoading(async () => {
-						const { authedSdkClient } = await auth.getSdkClients()
-
-						const versioningEnabled = !accountQuery.data.versioningEnabled
-
-						await authedSdkClient.setVersioningEnabled(versioningEnabled)
-
-						accountQueryPatch({
-							versioningEnabled
-						})
-					})
-
-					if (!result.success) {
-						logger.error("settings", "setVersioningEnabled failed", { error: result.error })
-						alerts.error(result.error)
-
-						return
-					}
-				}
-			}
-		},
-		{
+			subTitle: t("file_versioning_description")
+		}),
+		buildAccountToggleButton({
+			accountQuery,
+			field: "loginAlertsEnabled",
+			sdkSetter: "setLoginAlertsEnabled",
 			icon: "notifications-outline",
 			title: t("login_alerts"),
-			subTitle: t("login_alerts_description"),
-			requiresOnline: true,
-			rightItem: {
-				type: "switch",
-				value: accountQuery.data.loginAlertsEnabled,
-				onValueChange: async () => {
-					const result = await runWithLoading(async () => {
-						const { authedSdkClient } = await auth.getSdkClients()
-
-						const loginAlertsEnabled = !accountQuery.data.loginAlertsEnabled
-
-						await authedSdkClient.setLoginAlertsEnabled(loginAlertsEnabled)
-
-						accountQueryPatch({
-							loginAlertsEnabled
-						})
-					})
-
-					if (!result.success) {
-						logger.error("settings", "setLoginAlertsEnabled failed", { error: result.error })
-						alerts.error(result.error)
-
-						return
-					}
-				}
-			}
-		}
+			subTitle: t("login_alerts_description")
+		})
 	]
 }
 

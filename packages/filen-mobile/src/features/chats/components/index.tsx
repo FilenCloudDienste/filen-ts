@@ -14,7 +14,7 @@ import type { MenuButton } from "@/components/ui/menu"
 import { selectAllMenuButton } from "@/components/ui/selectAllMenuButton"
 import { createChatFlow } from "@/features/chats/chatsActions"
 import { runBulk } from "@/lib/bulkOps"
-import { aggregateChatSelectionFlags, allVisibleChatsSelected, chatHasUnread, isOneOnOneWithBlocked } from "@/features/chats/chatSelectors"
+import { aggregateChatSelectionFlags, allVisibleChatsSelected, chatHasUnread, isOneOnOneWithBlocked, visibleChats } from "@/features/chats/chatSelectors"
 import { useTranslation } from "react-i18next"
 import { LazyWrapper } from "@/components/lazyWrapper"
 import useBlockedUsers from "@/features/contacts/hooks/useBlockedUsers"
@@ -39,9 +39,7 @@ const Header = ({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.SetSt
 			return []
 		}
 
-		return chatsQuery.data
-			.filter(chat => chat.ownerId === stringigiedClient?.userId || chat.lastMessage)
-			.filter(chat => !isOneOnOneWithBlocked(chat, stringigiedClient?.userId, blocked))
+		return visibleChats(chatsQuery.data, stringigiedClient?.userId, blocked)
 	})()
 
 	// Live-list cross-reference: stale selections could carry old `undecryptable`
@@ -120,15 +118,11 @@ const Header = ({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.SetSt
 					title: t("mark_as_read"),
 					icon: "envelopeOpen",
 					onPress: async () => {
-						// Mirror the single-item path in chats/list/chat/menu.tsx — call
-						// both markRead AND updateLastFocusTimesNow per chat. Only the
-						// chats with actual unread go through to avoid no-op SDK calls.
+						// Only the chats with actual unread go through to avoid no-op SDK calls.
 						await runBulk({
 							items: unreadChats,
 							clearSelection: () => useChatsStore.getState().clearSelectedChats(),
-							op: async chat => {
-								await Promise.all([chatsLib.markRead({ chat }), chatsLib.updateLastFocusTimesNow({ chats: [chat] })])
-							}
+							op: chat => chatsLib.markAsRead({ chat })
 						})
 					}
 				})

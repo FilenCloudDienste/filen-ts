@@ -41,9 +41,6 @@ export type TextEditorEvents =
 			type: "quillToggleBold"
 	  }
 	| {
-			type: "dismissKeyboard"
-	  }
-	| {
 			type: "quillToggleItalic"
 	  }
 	| {
@@ -505,40 +502,42 @@ export const TextEditor = ({
 		}
 	}, [type, readOnly])
 
+	const sharedProps = {
+		ref,
+		dom: {
+			...DOM_HOST_WEBVIEW_PROPS,
+			onMessage: onDomMessage
+		},
+		onValueChange,
+		initialValue: encodedInitialValue,
+		placeholder,
+		readOnly,
+		font: {
+			family: text.fontFamily as string,
+			size: text.fontSize as number,
+			weight: text.fontWeight as number
+		},
+		colors: {
+			text: {
+				foreground: textForeground.color as string,
+				primary: textPrimary.color as string,
+				muted: textMuted.color as string
+			},
+			background: {
+				primary: bgBackground.backgroundColor as string,
+				secondary: bgSecondary.backgroundColor as string,
+				accent: bgAccent.backgroundColor as string
+			}
+		},
+		paddingTop,
+		paddingBottom
+	}
+
 	return (
 		<Fragment>
 			<DomKeyboardHost>
 				{type === "richtext" ? (
-					<RichTextEditorDOM
-						ref={ref}
-						dom={{
-							...DOM_HOST_WEBVIEW_PROPS,
-							onMessage: onDomMessage
-						}}
-						onValueChange={onValueChange}
-						initialValue={encodedInitialValue}
-						placeholder={placeholder}
-						readOnly={readOnly}
-						font={{
-							family: text.fontFamily as string,
-							size: text.fontSize as number,
-							weight: text.fontWeight as number
-						}}
-						colors={{
-							text: {
-								foreground: textForeground.color as string,
-								primary: textPrimary.color as string,
-								muted: textMuted.color as string
-							},
-							background: {
-								primary: bgBackground.backgroundColor as string,
-								secondary: bgSecondary.backgroundColor as string,
-								accent: bgAccent.backgroundColor as string
-							}
-						}}
-						paddingTop={paddingTop}
-						paddingBottom={paddingBottom}
-					/>
+					<RichTextEditorDOM {...sharedProps} />
 				) : (
 					<View
 						className="flex-1"
@@ -552,14 +551,10 @@ export const TextEditor = ({
 						}}
 					>
 						<TextEditorDOM
-							ref={ref}
+							{...sharedProps}
 							type={type}
-							onValueChange={onValueChange}
 							darkMode={theme === "dark"}
 							platform={Platform.OS}
-							initialValue={encodedInitialValue}
-							placeholder={placeholder}
-							readOnly={readOnly}
 							fileName={fileName}
 							markdownPreviewActive={markdownPreviewActive}
 							// Top-level, never grouped: expo/dom only treats a top-level prop as a callable
@@ -567,29 +562,6 @@ export const TextEditor = ({
 							readRange={chunked ? readRange : undefined}
 							fileSize={chunked ? fileSize : undefined}
 							writeChunk={chunked ? writeTarget.writeChunk : undefined}
-							dom={{
-								...DOM_HOST_WEBVIEW_PROPS,
-								onMessage: onDomMessage
-							}}
-							font={{
-								family: text.fontFamily as string,
-								size: text.fontSize as number,
-								weight: text.fontWeight as number
-							}}
-							colors={{
-								text: {
-									foreground: textForeground.color as string,
-									primary: textPrimary.color as string,
-									muted: textMuted.color as string
-								},
-								background: {
-									primary: bgBackground.backgroundColor as string,
-									secondary: bgSecondary.backgroundColor as string,
-									accent: bgAccent.backgroundColor as string
-								}
-							}}
-							paddingTop={paddingTop}
-							paddingBottom={paddingBottom}
 						/>
 					</View>
 				)}

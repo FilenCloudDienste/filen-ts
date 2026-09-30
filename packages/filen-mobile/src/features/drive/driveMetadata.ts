@@ -2,7 +2,7 @@ import auth from "@/lib/auth"
 import { CreatedTime, DirColor, NonRootNormalItem } from "@filen/sdk-rs"
 import type { DriveItem } from "@/types"
 import { unwrapParentUuid } from "@/lib/sdkUnwrap"
-import { driveItemsQueryUpdateGlobal, driveItemsQueryUpdate } from "@/features/drive/queries/useDriveItems.query"
+import { driveItemsQueryUpdateGlobal, driveItemsQueryUpdateRoot } from "@/features/drive/queries/useDriveItems.query"
 import { itemFromModified } from "@/features/drive/driveModified"
 import events from "@/lib/events"
 import { applyMembershipPatch } from "@filen/shared"
@@ -56,15 +56,7 @@ export async function favorite({ item, favorited }: { item: DriveItem; favorited
 
 	item = itemFromModified(modifiedItem.inner[0])
 
-	driveItemsQueryUpdate({
-		params: {
-			path: {
-				type: "favorites",
-				uuid: null
-			}
-		},
-		updater: prev => favoritesListingUpdater(prev, item, favorited)
-	})
+	driveItemsQueryUpdateRoot("favorites", prev => favoritesListingUpdater(prev, item, favorited))
 
 	// Refresh an open preview showing this file (favorite badge in the header).
 	replaceInListings({

@@ -16,7 +16,7 @@ import { remoteListingPosition } from "@/features/cameraUpload/remoteListing"
 import { useCameraUploadDestination } from "@/features/cameraUpload/queries/useCameraUploadDestination.query"
 import Button from "@/components/ui/button"
 import usePhotosStore from "@/features/photos/store/usePhotos.store"
-import { usePhotosGridTiles } from "@/features/photos/photosGridTiles"
+import { usePhotosGridTiles, clampPhotosGridTiles } from "@/features/photos/photosGridTiles"
 import useDriveStore from "@/features/drive/store/useDrive.store"
 import { useTranslation } from "react-i18next"
 import Header from "@/features/photos/components/photosHeader"
@@ -54,7 +54,7 @@ const Photos = () => {
 		}
 	)
 
-	const size = !layout ? 0 : layout.width / Math.min(Math.max(1, photosGridTiles), 5)
+	const size = !layout ? 0 : layout.width / clampPhotosGridTiles(photosGridTiles)
 
 	// Configured (enabled + a destination set) but the destination dir is gone/trashed on the
 	// server. Hold the empty state until the lookup settles (loading) so it does not flash on first

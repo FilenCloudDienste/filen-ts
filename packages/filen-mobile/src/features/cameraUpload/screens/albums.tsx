@@ -114,7 +114,6 @@ const Albums = () => {
 					) : albumsQuery.status === "success" && albumsQuery.data.length > 0 ? (
 						<SettingsScrollView>
 							<Group
-								className="bg-background-tertiary"
 								buttons={albumsQuery.data
 									.slice()
 									.sort((a, b) => b.assetCount - a.assetCount)

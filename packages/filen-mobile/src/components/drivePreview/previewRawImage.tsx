@@ -1,12 +1,11 @@
 import { useTranslation } from "react-i18next"
-import { ActivityIndicator } from "react-native"
 import { type SharedValue } from "react-native-reanimated"
 import useRawPreviewQuery from "@/queries/useRawPreview.query"
 import PreviewImage from "@/components/drivePreview/previewImage"
 import UnavailableOfflineNotice from "@/components/drivePreview/unavailableOfflineNotice"
 import PreviewLoadFailedNotice from "@/components/drivePreview/previewLoadFailedNotice"
+import { PreviewSpinner } from "@/components/drivePreview/previewStatus"
 import ListEmpty from "@/components/ui/listEmpty"
-import View from "@/components/ui/view"
 import { type GalleryItemTagged } from "@/components/drivePreview/gallery"
 
 // A RAW camera file's own bytes are never rendered: the page shows the JPEG the SDK extracts from
@@ -57,14 +56,7 @@ const PreviewRawImage = ({
 	}
 
 	if (rawPreviewQuery.status !== "success") {
-		return (
-			<View className="bg-transparent flex-1 items-center justify-center">
-				<ActivityIndicator
-					size="small"
-					color="white"
-				/>
-			</View>
-		)
+		return <PreviewSpinner className="bg-transparent" />
 	}
 
 	switch (rawPreviewQuery.data.kind) {

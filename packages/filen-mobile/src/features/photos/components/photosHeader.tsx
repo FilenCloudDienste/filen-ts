@@ -8,7 +8,7 @@ import { useShallow } from "zustand/shallow"
 import { useTranslation } from "react-i18next"
 import useCameraUploadStore from "@/features/cameraUpload/store/useCameraUpload.store"
 import useDriveStore from "@/features/drive/store/useDrive.store"
-import { usePhotosGridTiles } from "@/features/photos/photosGridTiles"
+import { usePhotosGridTiles, PHOTOS_GRID_TILE_OPTIONS } from "@/features/photos/photosGridTiles"
 import usePhotoBulkActions from "@/features/photos/hooks/usePhotoBulkActions"
 
 export const Header = ({ items, drivePath }: { items: DriveItemFileExtracted[]; drivePath: DrivePath }) => {
@@ -91,38 +91,12 @@ export const Header = ({ items, drivePath }: { items: DriveItemFileExtracted[]; 
 						id: "gridTiles",
 						title: t("photos_per_row", { count: photosGridTiles }),
 						icon: "grid",
-						subButtons: [
-							{
-								id: "gridTiles1",
-								title: "1",
-								checked: photosGridTiles === 1,
-								onPress: () => setPhotosGridTiles(1)
-							},
-							{
-								id: "gridTiles2",
-								title: "2",
-								checked: photosGridTiles === 2,
-								onPress: () => setPhotosGridTiles(2)
-							},
-							{
-								id: "gridTiles3",
-								title: "3",
-								checked: photosGridTiles === 3,
-								onPress: () => setPhotosGridTiles(3)
-							},
-							{
-								id: "gridTiles4",
-								title: "4",
-								checked: photosGridTiles === 4,
-								onPress: () => setPhotosGridTiles(4)
-							},
-							{
-								id: "gridTiles5",
-								title: "5",
-								checked: photosGridTiles === 5,
-								onPress: () => setPhotosGridTiles(5)
-							}
-						]
+						subButtons: PHOTOS_GRID_TILE_OPTIONS.map(tiles => ({
+							id: `gridTiles${tiles}`,
+							title: String(tiles),
+							checked: photosGridTiles === tiles,
+							onPress: () => setPhotosGridTiles(tiles)
+						}))
 					}
 				]
 			}

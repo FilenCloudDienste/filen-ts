@@ -10,7 +10,7 @@ export type CollisionParams = {
 	iteration: number
 	path: string
 	// #15: whether the compress option is on. Under compress `asset.name` is already the
-	// extension-STRIPPED stem (collisionBaseName strips it because the uploaded extension is
+	// extension-STRIPPED stem (dedupTreeKey strips it because the uploaded extension is
 	// unpredictable), so the suffix must be appended to the WHOLE stem — re-splitting it would
 	// mis-read a dotted stem segment (e.g. "vacation.2024" → ext ".2024") and diverge from the
 	// remote key. Defaults to false (the extension-splitting path) when omitted.
@@ -84,13 +84,23 @@ export function collisionNameSuffix({ iteration, asset }: { iteration: number; a
  * (no parent directory / degenerate basename).
  */
 export function modifyAssetPathOnCollision({ iteration, path, asset, compress }: CollisionParams): string | null {
-	// #15: under compress the name is ALREADY extension-stripped (collisionBaseName), so keep it
+	const suffix = collisionNameSuffix({ iteration, asset })
+
+	if (suffix === null) {
+		return null
+	}
+
+	return applyCollisionSuffix({ path, name: asset.name, suffix, compress })
+}
+
+function applyCollisionSuffix({ path, name, suffix, compress }: { path: string; name: string; suffix: string; compress?: boolean }): string | null {
+	// #15: under compress the name is ALREADY extension-stripped (dedupTreeKey), so keep it
 	// whole — splitting off a trailing dotted segment as an "extension" would place the suffix
 	// mid-stem ("vacation_<T>.2024") and diverge from the remote key ("vacation.2024_<T>", derived
 	// from the uploaded `<full-stem>_<suffix>.<uploadExt>` name via dedupTreeKey). Otherwise split
 	// the real trailing extension so the suffix lands before it ("img_0001_<T>.jpg").
-	const ext = compress ? "" : extnameOf(asset.name)
-	const basename = compress ? asset.name : FileSystem.Paths.basename(asset.name, ext)
+	const ext = compress ? "" : extnameOf(name)
+	const basename = compress ? name : FileSystem.Paths.basename(name, ext)
 	const slashIndex = path.lastIndexOf("/")
 	const parentDir = slashIndex > 0 ? path.slice(0, slashIndex) : slashIndex === 0 ? "/" : ""
 
@@ -98,13 +108,57 @@ export function modifyAssetPathOnCollision({ iteration, path, asset, compress }:
 		return null
 	}
 
-	const suffix = collisionNameSuffix({ iteration, asset })
+	return `${parentDir === "/" ? "" : parentDir}/${basename}${suffix}${ext}`.toLowerCase().trim()
+}
 
-	if (suffix === null) {
-		return null
+/**
+ * Walks the collision iterations from an OCCUPIED `path` until a free tree slot is found. listLocal
+ * and listRemote both resolve through here so one physical asset lands on the same key on both
+ * sides. `name` is the raw asset name (dedupTreeKey is applied here); `sortSec` is the
+ * seconds-floored effectiveCreationTimestamp that forms the collision identity. Returns the slot
+ * and the suffix it carries (#B2: the upload bakes it into the filename), or null when the
+ * iterations are exhausted or the path is degenerate.
+ */
+export function resolveCollisionSlot({
+	tree,
+	path,
+	name,
+	sortSec,
+	compress,
+	convertHeic
+}: {
+	tree: Record<string, unknown>
+	path: string
+	name: string
+	sortSec: number
+	compress: boolean
+	convertHeic?: boolean
+}): { path: string; suffix: string } | null {
+	const asset = {
+		name: dedupTreeKey({ path: name, compress, convertHeic }),
+		contentHash: String(sortSec)
+	}
+	let slot = path
+	let suffix = ""
+
+	for (let iteration = 0; tree[slot]; iteration++) {
+		const nextSuffix = collisionNameSuffix({ iteration, asset })
+
+		if (nextSuffix === null) {
+			return null
+		}
+
+		const nextSlot = applyCollisionSuffix({ path: slot, name: asset.name, suffix: nextSuffix, compress })
+
+		if (nextSlot === null) {
+			return null
+		}
+
+		slot = nextSlot
+		suffix = nextSuffix
 	}
 
-	return `${parentDir === "/" ? "" : parentDir}/${basename}${suffix}${ext}`.toLowerCase().trim()
+	return { path: slot, suffix }
 }
 
 // Strip characters that would split a folder name into multiple path segments
@@ -155,11 +209,12 @@ export function albumFolderTitle(title: string): string | null {
 //
 // When neither option is on the full path (extension included) is kept verbatim, so genuinely
 // different-extension siblings never merge.
+//
+// Also applied to bare filenames to derive the collision-suffix base, so the collision-resolved key
+// gets the same transform on both sides.
 export function dedupTreeKey({ path, compress, convertHeic }: { path: string; compress: boolean; convertHeic?: boolean }): string {
 	if (compress) {
-		const ext = extnameOf(path)
-
-		return ext.length === 0 ? path : path.slice(0, -ext.length)
+		return stripFilenameExtension(path)
 	}
 
 	if (convertHeic && isHeicFile(path)) {
@@ -171,10 +226,7 @@ export function dedupTreeKey({ path, compress, convertHeic }: { path: string; co
 	return path
 }
 
-// Strip the trailing extension from a filename so the collision-suffix logic
-// produces an extension-agnostic suffix when compression is enabled. Mirrors
-// `dedupTreeKey`: the local source extension and the remote (possibly `.jpg`)
-// extension must not leak into the collision suffix or the keys diverge again.
+// Strip the trailing extension (the compress branch of `dedupTreeKey`).
 export function stripFilenameExtension(name: string): string {
 	const ext = extnameOf(name)
 
@@ -183,28 +235,6 @@ export function stripFilenameExtension(name: string): string {
 	}
 
 	return name.slice(0, -ext.length)
-}
-
-// The post-rewrite filename used to derive a collision suffix, kept SYMMETRIC across listLocal and
-// listRemote. Mirrors `dedupTreeKey` exactly so the collision-resolved key matches on both sides:
-//   - compress: extension-agnostic stem (uploaded ext unpredictable).
-//   - convertHeic: a HEIC name maps to its post-conversion `.jpg` name; non-HEIC names are kept
-//     verbatim (they upload unchanged). Using the `.jpg` name — not a bare stem — keeps the collision
-//     path's extension aligned with the remote `name_<suffix>.jpg` the upload actually writes.
-//   - neither: the name verbatim.
-// compress dominates when both options are on.
-export function collisionBaseName({ name, compress, convertHeic }: { name: string; compress: boolean; convertHeic?: boolean }): string {
-	if (compress) {
-		return stripFilenameExtension(name)
-	}
-
-	if (convertHeic && isHeicFile(name)) {
-		const ext = extnameOf(name)
-
-		return ext.length === 0 ? name : `${name.slice(0, -ext.length)}.jpg`
-	}
-
-	return name
 }
 
 // #B7: ONE timestamp fallback rule for everything that derives an identity from an
@@ -239,24 +269,6 @@ export function rawRemoteTreePath(path: string): string {
 	const trimmed = path.trim()
 
 	return trimmed.startsWith("/") ? trimmed : `/${trimmed}`
-}
-
-// #B4+B6: lazy migration for hash ledger values. Entries persisted before the
-// verified-mtime shape are bare md5 strings; treat them as "never verified" (-1) so the
-// next encounter hashes once and upgrades the entry on write.
-export function normalizeCameraUploadHashEntry(value: CameraUploadHashEntry | string | undefined): CameraUploadHashEntry | undefined {
-	if (value === undefined) {
-		return undefined
-	}
-
-	if (typeof value === "string") {
-		return {
-			md5: value,
-			verifiedModificationTime: -1
-		}
-	}
-
-	return value
 }
 
 // Stale path strings (config toggles rewrite tree keys) never match again but would otherwise

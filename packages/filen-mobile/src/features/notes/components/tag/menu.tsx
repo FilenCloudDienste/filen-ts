@@ -1,4 +1,3 @@
-import { NoteType } from "@filen/sdk-rs"
 import { type NoteTag } from "@/types"
 import { Menu as MenuComponent, type MenuButton } from "@/components/ui/menu"
 import View from "@/components/ui/view"
@@ -8,11 +7,10 @@ import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import notes from "@/features/notes/notes"
 import { inputPrompt } from "@/lib/promptFlow"
 import alerts from "@/lib/alerts"
-import { router } from "@/lib/router"
-import { Paths } from "expo-file-system"
 import { useTranslation } from "react-i18next"
 import logger from "@/lib/logger"
-import { deleteTagAction } from "@/features/notes/components/notesActions"
+import { createNoteSubButtons } from "@/features/notes/components/note/menu"
+import { createNoteFlow, deleteTagAction } from "@/features/notes/components/notesActions"
 
 export type TagMenuOrigin = "tags"
 
@@ -35,40 +33,6 @@ const Menu = ({
 
 	const onCloseMenu = () => {
 		useNotesStore.getState().setActiveTag(null)
-	}
-
-	const createNote = async (type: NoteType) => {
-		const title = await inputPrompt(
-			{
-				title: t("create_note"),
-				message: t("enter_note_name"),
-				cancelText: t("cancel"),
-				okText: t("create")
-			},
-			{ tag: "notes", message: "create note in tag prompt failed", level: "error", context: { tagUuid: tag.uuid } },
-			{ trim: true }
-		)
-
-		if (title === null) {
-			return
-		}
-
-		const createResult = await runWithLoading(async () => {
-			return await notes.createWithOptionalTag({
-				title,
-				type,
-				tag
-			})
-		})
-
-		if (!createResult.success) {
-			logger.error("notes", "create note in tag failed", { error: createResult.error, tagUuid: tag.uuid })
-			alerts.error(createResult.error)
-
-			return
-		}
-
-		router.push(Paths.join("/", "note", createResult.data.uuid))
 	}
 
 	const buttons = (() => {
@@ -100,13 +64,7 @@ const Menu = ({
 				icon: "select",
 				checked: isSelected,
 				onPress: () => {
-					useNotesStore.getState().setSelectedTags(prev => {
-						if (isSelected) {
-							return prev.filter(selectedTag => selectedTag.uuid !== tag.uuid)
-						} else {
-							return [...prev.filter(selectedTag => selectedTag.uuid !== tag.uuid), tag]
-						}
-					})
+					useNotesStore.getState().toggleSelectedTag(tag)
 				}
 			})
 		}
@@ -116,53 +74,7 @@ const Menu = ({
 			title: t("create_note"),
 			icon: "plus",
 			requiresOnline: true,
-			subButtons: [
-				{
-					title: t("note_type_text"),
-					id: "text",
-					icon: "text",
-					requiresOnline: true,
-					onPress: async () => {
-						await createNote(NoteType.Text)
-					}
-				},
-				{
-					title: t("note_type_checklist"),
-					id: "checklist",
-					icon: "checklist",
-					requiresOnline: true,
-					onPress: async () => {
-						await createNote(NoteType.Checklist)
-					}
-				},
-				{
-					title: t("note_type_code"),
-					id: "code",
-					icon: "code",
-					requiresOnline: true,
-					onPress: async () => {
-						await createNote(NoteType.Code)
-					}
-				},
-				{
-					title: t("note_type_richtext"),
-					id: "richtext",
-					icon: "richtext",
-					requiresOnline: true,
-					onPress: async () => {
-						await createNote(NoteType.Rich)
-					}
-				},
-				{
-					title: t("note_type_markdown"),
-					id: "markdown",
-					icon: "markdown",
-					requiresOnline: true,
-					onPress: async () => {
-						await createNote(NoteType.Md)
-					}
-				}
-			]
+			subButtons: createNoteSubButtons(t, type => createNoteFlow({ t, tag, type }))
 		})
 
 		buttons.push({

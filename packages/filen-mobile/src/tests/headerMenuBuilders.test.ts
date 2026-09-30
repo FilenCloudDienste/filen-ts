@@ -12,8 +12,6 @@ const { mockIsItemStoredSync, mockIsItemTopLevelStoredSync, mockActionSheetShow,
 
 // ---- heavy native deps that must be stubbed before the module under test loads ----
 
-vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 vi.mock("@filen/shared", async () => await import("@/tests/mocks/filenShared"))
 vi.mock("expo-crypto", () => ({ randomUUID: vi.fn(() => "mock-uuid") }))
 vi.mock("expo-file-system", () => ({

@@ -43,16 +43,13 @@ const Message = ({
 	info,
 	nextMessage,
 	prevMessage,
-	layout
+	attachmentMaxWidth
 }: {
 	chat: TChat
 	info: ListRenderItemInfo<ChatMessageWithInflightId>
 	nextMessage?: ChatMessageWithInflightId
 	prevMessage?: ChatMessageWithInflightId
-	layout: {
-		width: number
-		height: number
-	}
+	attachmentMaxWidth: number
 }) => {
 	const { t } = useTranslation()
 	const stringifiedClient = useStringifiedClient()
@@ -175,7 +172,7 @@ const Message = ({
 									message={info.item}
 									fromSelf={fromSelf}
 									single={true}
-									layout={layout}
+									maxWidth={attachmentMaxWidth}
 								/>
 							) : (
 								<View className="flex-col bg-transparent w-auto h-auto">
@@ -202,7 +199,7 @@ const Message = ({
 										message={info.item}
 										fromSelf={fromSelf}
 										single={false}
-										layout={layout}
+										maxWidth={attachmentMaxWidth}
 									/>
 								</View>
 							)}

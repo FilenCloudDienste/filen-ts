@@ -13,7 +13,6 @@ vi.mock("@filen/sdk-rs", () => ({
 
 // Heavy React + native deps pulled in transitively by events.tsx. None of their
 // implementations matter — only computeNextPage (a pure function) is under test.
-vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
 vi.mock("expo-router", () => ({ router: {}, useNavigation: vi.fn() }))
 vi.mock("expo-status-bar", () => ({}))
 vi.mock("react-native-safe-area-context", () => ({

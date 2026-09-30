@@ -3,7 +3,7 @@ import { MakeThumbnailInMemoryResult_Tags, ManagedFuture, type AnyFile, type Mak
 import { run } from "@filen/shared"
 import auth from "@/lib/auth"
 import { toSignalOpts, wrapAbortSignalForSdk, disposeSdkAbortSignal } from "@/lib/signals"
-import { abortError } from "@/lib/thumbnailsHelpers"
+import { throwIfAborted } from "@/lib/thumbnailsHelpers"
 import logger from "@/lib/logger"
 
 // The SDK request box (Contain, never upscaled). 384 wide is sized to the tiles that actually render
@@ -132,9 +132,7 @@ export async function generateImageViaSdk(params: {
 		toSignalOpts(params.signal)
 	)
 
-	if (params.signal?.aborted) {
-		throw abortError(params.signal)
-	}
+	throwIfAborted(params.signal)
 
 	return handleThumbnailResult(result, params)
 }
@@ -188,9 +186,7 @@ export async function generateImageFromPathViaSdk(params: {
 		// races: it surfaces either as the bindings' AbortError or as a FilenSdkError Cancelled,
 		// whichever wins. Testing the JS signal FIRST — here and again in thumbnails.ts — makes the
 		// flavour irrelevant to the caller's failure ledger.
-		if (params.signal?.aborted) {
-			throw abortError(params.signal)
-		}
+		throwIfAborted(params.signal)
 
 		return handleThumbnailResult(outcome, params)
 	})

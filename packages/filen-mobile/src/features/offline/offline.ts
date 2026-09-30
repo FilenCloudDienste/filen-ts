@@ -1,7 +1,7 @@
 import * as FileSystem from "expo-file-system"
 import logger from "@/lib/logger"
 import type { DriveItem } from "@/types"
-import { run, Semaphore, dirnameOf } from "@filen/shared"
+import { run, Semaphore, dirnameOf, type DeferFn } from "@filen/shared"
 import transfers from "@/features/transfers/transfers"
 import { serialize, deserialize, serializeEquals } from "@/lib/serializer"
 import auth from "@/lib/auth"
@@ -16,9 +16,12 @@ import {
 	parentCacheKey,
 	directoryDriveItemToAnyDirWithContext,
 	makeSyncError,
+	createSyncErrorCollector,
+	expectedFileSize,
 	type OfflineParent,
 	type OfflineUuidParent,
-	type OfflineSyncError
+	type OfflineSyncError,
+	type OfflineSyncErrorKind
 } from "@/features/offline/offlineHelpers"
 import { planTreeReconcile, uuidFromSyncTmpName, type LocalTreeEntry, type RemoteTreeEntry } from "@/features/offline/offlineSyncPlanner"
 import { validateUuid } from "@/lib/uuid"
@@ -64,21 +67,20 @@ export type DirectoryOfflineMeta = FileOrDirectoryOfflineMeta & {
 	>
 }
 
+export type OfflineEntry = {
+	item: DriveItem
+	parent: OfflineParent
+}
+
 export type Index = {
-	files: Record<
-		Uuid,
-		{
-			item: DriveItem
-			parent: OfflineParent
-		}
-	>
-	directories: Record<
-		Uuid,
-		{
-			item: DriveItem
-			parent: OfflineParent
-		}
-	>
+	files: Record<Uuid, OfflineEntry>
+	directories: Record<Uuid, OfflineEntry>
+}
+
+type OfflineSizeStats = {
+	size: number
+	files: number
+	dirs: number
 }
 
 // Critical: When changing anything related to offline storage index/store/persistence format, bump OFFLINE_VERSION in storageRoots.ts to invalidate old caches and prevent potential issues from stale or incompatible data.
@@ -117,6 +119,36 @@ function rawPathDirname(path: string): string {
 	const d = dirnameOf(path)
 
 	return d === null || d === "" ? "/" : d
+}
+
+// The delivered size to record for freshly downloaded bytes: only when it diverges from the meta size,
+// so thorough heals bless these bytes instead of re-downloading the same shortfall forever.
+function deliveredDiskSize(item: DriveItem, dataFile: FileSystem.File): number | undefined {
+	if (!dataFile.exists) {
+		return undefined
+	}
+
+	const observedSize = dataFile.size ?? 0
+
+	return observedSize !== expectedFileSize(item) ? observedSize : undefined
+}
+
+function writeStandaloneMeta(
+	metaFile: FileSystem.File,
+	{ item, parent, diskSize }: { item: DriveItem; parent: OfflineParent; diskSize: number | undefined }
+): void {
+	atomicWrite(
+		metaFile,
+		serialize({
+			item,
+			parent,
+			...(diskSize !== undefined
+				? {
+						diskSize
+					}
+				: {})
+		} satisfies FileOrDirectoryOfflineMeta)
+	)
 }
 
 // Manages offline file/directory storage on device.
@@ -164,14 +196,7 @@ export class Offline {
 	private readonly listDirectoriesCache = new Map<string, Awaited<ReturnType<Offline["listDirectories"]>>>()
 	private listFilesCache: Awaited<ReturnType<Offline["listFiles"]>> | null = null
 	private listDirectoriesRecursiveCache: Awaited<ReturnType<Offline["listDirectoriesRecursive"]>> | null = null
-	private readonly itemSizeCache = new Map<
-		string,
-		{
-			size: number
-			files: number
-			dirs: number
-		}
-	>()
+	private readonly itemSizeCache = new Map<string, OfflineSizeStats>()
 	private readonly getLocalFileCache = new Map<string, FileSystem.File>()
 	private directoriesEnsured = false
 	private versionSweepDone = false
@@ -262,6 +287,55 @@ export class Offline {
 				this.storeItemMutexes.delete(uuid)
 			}
 		}
+	}
+
+	/**
+	 * Enter a per-uuid store section: clearBarrier → per-uuid lock → [storeMutex] → ensureDirectories.
+	 * This is the one lock order every store method takes (callers never hold the per-uuid lock when
+	 * entering another section), so no deadlock is possible. Releases are registered on the caller's
+	 * run() defer and so unwind in reverse. Argument validation stays in the caller, before this.
+	 */
+	private async enterStoreSection(defer: DeferFn, uuid: string, opts?: { storeMutex?: boolean }): Promise<void> {
+		await this.clearBarrier.enter()
+
+		defer(() => {
+			this.clearBarrier.leave()
+		})
+
+		const releaseStoreItemLock = await this.acquireStoreItemLock(uuid)
+
+		defer(() => {
+			releaseStoreItemLock()
+		})
+
+		if (opts?.storeMutex) {
+			await this.storeMutex.acquire()
+
+			defer(() => {
+				this.storeMutex.release()
+			})
+		}
+
+		this.ensureDirectories()
+	}
+
+	private async removeStoredDirectory(rootUri: string, uuid: string): Promise<void> {
+		await run(
+			async defer => {
+				await this.enterStoreSection(defer, uuid)
+
+				const dir = new FileSystem.Directory(FileSystem.Paths.join(rootUri, uuid))
+
+				if (dir.exists) {
+					dir.delete()
+				}
+
+				this.invalidateCaches()
+			},
+			{
+				throw: true
+			}
+		)
 	}
 
 	// Called after any mutation to offline storage. Must be aggressive because the filesystem changed.
@@ -468,26 +542,18 @@ export class Offline {
 				const indexFiles: Index["files"] = {}
 				const indexDirectories: Index["directories"] = {}
 
-				for (const { item, parent } of files) {
-					indexFiles[item.data.uuid] = {
-						item,
-						parent
+				const addToIndex = (target: Index["files"], entries: readonly OfflineEntry[]): void => {
+					for (const { item, parent } of entries) {
+						target[item.data.uuid] = {
+							item,
+							parent
+						}
 					}
 				}
 
-				for (const { item, parent } of directories.directories) {
-					indexDirectories[item.data.uuid] = {
-						item,
-						parent
-					}
-				}
-
-				for (const { item, parent } of directories.files) {
-					indexFiles[item.data.uuid] = {
-						item,
-						parent
-					}
-				}
+				addToIndex(indexFiles, files)
+				addToIndex(indexDirectories, directories.directories)
+				addToIndex(indexFiles, directories.files)
 
 				const index: Index = {
 					files: indexFiles,
@@ -678,12 +744,7 @@ export class Offline {
 	// routes it through the normal sync decision flow (the heal re-downloads missing bytes, gone
 	// remotes get removed). Dirs with missing/empty/undecodable metas are listBrokenStandaloneUuids
 	// territory.
-	public async listFiles(): Promise<
-		{
-			item: DriveItem
-			parent: OfflineParent
-		}[]
-	> {
+	public async listFiles(): Promise<OfflineEntry[]> {
 		if (this.listFilesCache) {
 			return this.listFilesCache
 		}
@@ -691,7 +752,7 @@ export class Offline {
 		this.ensureDirectories()
 
 		const entries = FILES_DIRECTORY.list()
-		const files: Awaited<ReturnType<typeof this.listFiles>> = []
+		const files: OfflineEntry[] = []
 
 		await Promise.all(
 			entries.map(async entry => {
@@ -699,30 +760,9 @@ export class Offline {
 					return
 				}
 
-				const metaFile = new FileSystem.File(`${entry.uri}/${metaFileName(entry.name)}`)
-				const metaInfo = metaFile.info()
+				const meta = await this.readStandaloneMeta(entry.name)
 
-				if (!metaInfo.exists || (metaInfo.size ?? 0) === 0) {
-					return
-				}
-
-				const readResult = await run(async () => {
-					const meta: FileOrDirectoryOfflineMeta = deserialize(await metaFile.text())
-
-					if (Object.keys(meta).length === 0) {
-						throw new Error("File meta is empty")
-					}
-
-					return meta
-				})
-
-				if (!readResult.success) {
-					return
-				}
-
-				const meta = readResult.data
-
-				if (!isFileItem(meta.item)) {
+				if (!meta || !isFileItem(meta.item)) {
 					return
 				}
 
@@ -754,25 +794,7 @@ export class Offline {
 				continue
 			}
 
-			const metaFile = new FileSystem.File(`${entry.uri}/${metaFileName(entry.name)}`)
-			const metaInfo = metaFile.info()
-			let brokenMeta = !metaInfo.exists || (metaInfo.size ?? 0) === 0
-
-			if (!brokenMeta) {
-				const readResult = await run(async () => {
-					const meta: FileOrDirectoryOfflineMeta = deserialize(await metaFile.text())
-
-					if (Object.keys(meta).length === 0) {
-						throw new Error("File meta is empty")
-					}
-
-					return meta
-				})
-
-				brokenMeta = !readResult.success
-			}
-
-			if (!brokenMeta) {
+			if ((await this.readStandaloneMeta(entry.name)) !== null) {
 				continue
 			}
 
@@ -827,19 +849,7 @@ export class Offline {
 	public async updateTreeRootMeta({ uuid, item, parent }: { uuid: string; item: DriveItem; parent: OfflineParent }): Promise<void> {
 		await run(
 			async defer => {
-				await this.clearBarrier.enter()
-
-				defer(() => {
-					this.clearBarrier.leave()
-				})
-
-				const releaseStoreItemLock = await this.acquireStoreItemLock(uuid)
-
-				defer(() => {
-					releaseStoreItemLock()
-				})
-
-				this.ensureDirectories()
+				await this.enterStoreSection(defer, uuid)
 
 				const existingMeta = await this.readDirectoryMeta(uuid)
 
@@ -871,34 +881,7 @@ export class Offline {
 	// or permanently deleted — such dirs cannot be addressed as a DriveItem through removeItem.
 	// NO index update — broken dirs were never indexed; callers batch one at the end of their pass.
 	public async removeStandaloneDirectory(uuid: string): Promise<void> {
-		await run(
-			async defer => {
-				await this.clearBarrier.enter()
-
-				defer(() => {
-					this.clearBarrier.leave()
-				})
-
-				const releaseStoreItemLock = await this.acquireStoreItemLock(uuid)
-
-				defer(() => {
-					releaseStoreItemLock()
-				})
-
-				this.ensureDirectories()
-
-				const standaloneDir = new FileSystem.Directory(FileSystem.Paths.join(FILES_DIRECTORY.uri, uuid))
-
-				if (standaloneDir.exists) {
-					standaloneDir.delete()
-				}
-
-				this.invalidateCaches()
-			},
-			{
-				throw: true
-			}
-		)
+		await this.removeStoredDirectory(FILES_DIRECTORY_URI, uuid)
 	}
 
 	// Deletes a stored tree's directories/{uuid} directly by uuid. Used by the sync top-level pass
@@ -906,34 +889,7 @@ export class Offline {
 	// permanently deleted — such dirs cannot be addressed as a DriveItem through removeItem.
 	// NO index update — broken trees were never indexed; callers batch one at the end of their pass.
 	public async removeTreeDirectory(uuid: string): Promise<void> {
-		await run(
-			async defer => {
-				await this.clearBarrier.enter()
-
-				defer(() => {
-					this.clearBarrier.leave()
-				})
-
-				const releaseStoreItemLock = await this.acquireStoreItemLock(uuid)
-
-				defer(() => {
-					releaseStoreItemLock()
-				})
-
-				this.ensureDirectories()
-
-				const treeDir = new FileSystem.Directory(FileSystem.Paths.join(DIRECTORIES_DIRECTORY.uri, uuid))
-
-				if (treeDir.exists) {
-					treeDir.delete()
-				}
-
-				this.invalidateCaches()
-			},
-			{
-				throw: true
-			}
-		)
+		await this.removeStoredDirectory(DIRECTORIES_DIRECTORY_URI, uuid)
 	}
 
 	// Renames a standalone stored file's data file in place (remote rename, same uuid ⟹ same bytes)
@@ -942,7 +898,7 @@ export class Offline {
 	// corrected. The meta rewrite does NOT require a data file: a bytes-missing standalone that was
 	// moved/renamed remotely must still converge (meta parent/item updated; the heal redownloads
 	// the bytes later) — requiring bytes here made the re-anchor no-op forever.
-	public async renameStandaloneFile({ item, parent }: { item: DriveItem; parent: OfflineParent }): Promise<void> {
+	public async renameStandaloneFile({ item, parent }: OfflineEntry): Promise<void> {
 		await run(
 			async defer => {
 				if (!isFileItem(item)) {
@@ -955,19 +911,7 @@ export class Offline {
 
 				const newName = item.data.decryptedMeta.name
 
-				await this.clearBarrier.enter()
-
-				defer(() => {
-					this.clearBarrier.leave()
-				})
-
-				const releaseStoreItemLock = await this.acquireStoreItemLock(item.data.uuid)
-
-				defer(() => {
-					releaseStoreItemLock()
-				})
-
-				this.ensureDirectories()
+				await this.enterStoreSection(defer, item.data.uuid)
 
 				const standaloneDir = new FileSystem.Directory(FileSystem.Paths.join(FILES_DIRECTORY.uri, item.data.uuid))
 
@@ -999,18 +943,11 @@ export class Offline {
 				// record so a meta-size-drifted file doesn't lose its blessing on rename.
 				const priorDiskSize = (await this.readStandaloneMeta(item.data.uuid))?.diskSize
 
-				atomicWrite(
-					metaFile,
-					serialize({
-						item,
-						parent,
-						...(priorDiskSize !== undefined
-							? {
-									diskSize: priorDiskSize
-								}
-							: {})
-					} satisfies FileOrDirectoryOfflineMeta)
-				)
+				writeStandaloneMeta(metaFile, {
+					item,
+					parent,
+					diskSize: priorDiskSize
+				})
 
 				this.invalidateCaches()
 			},
@@ -1096,35 +1033,20 @@ export class Offline {
 			const topLevelUuid = directory.data.uuid
 			const directoryName = directory.data.decryptedMeta.name
 
-			await this.clearBarrier.enter()
+			await this.enterStoreSection(defer, topLevelUuid, { storeMutex: true })
 
-			defer(() => {
-				this.clearBarrier.leave()
-			})
+			const { errors, push: pushError } = createSyncErrorCollector()
 
-			const releaseStoreItemLock = await this.acquireStoreItemLock(topLevelUuid)
-
-			defer(() => {
-				releaseStoreItemLock()
-			})
-
-			await this.storeMutex.acquire()
-
-			defer(() => {
-				this.storeMutex.release()
-			})
-
-			this.ensureDirectories()
-
-			const errors: OfflineSyncError[] = []
-			const errorIds = new Set<string>()
-
-			const pushError = (error: OfflineSyncError): void => {
-				if (!errorIds.has(error.id)) {
-					errorIds.add(error.id)
-					errors.push(error)
-				}
-			}
+			const treeError = (kind: OfflineSyncErrorKind, message: string, degraded?: boolean): OfflineSyncError =>
+				makeSyncError({
+					itemUuid: topLevelUuid,
+					topLevelUuid,
+					name: directoryName,
+					itemType: directory.type,
+					kind,
+					message,
+					degraded
+				})
 
 			const liveDir = new FileSystem.Directory(FileSystem.Paths.join(DIRECTORIES_DIRECTORY_URI, topLevelUuid))
 			// CRITICAL encoding contract: every disk access that carries a RAW entry path MUST pass
@@ -1289,14 +1211,7 @@ export class Offline {
 				}
 
 				pushError(
-					makeSyncError({
-						itemUuid: topLevelUuid,
-						topLevelUuid,
-						name: directoryName,
-						itemType: directory.type,
-						kind: "listing",
-						message: listingResult.error instanceof Error ? listingResult.error.message : String(listingResult.error)
-					})
+					treeError("listing", listingResult.error instanceof Error ? listingResult.error.message : String(listingResult.error))
 				)
 
 				return finish(errors)
@@ -1461,7 +1376,7 @@ export class Offline {
 					// meta-size-drifted remotes the meta size can NEVER match disk, and comparing
 					// against it would re-mark the entry missing (and re-download it) every
 					// thorough pass forever.
-					const expectedSize = entry.diskSize ?? Number(entry.item.data.decryptedMeta?.size ?? -1)
+					const expectedSize = entry.diskSize ?? expectedFileSize(entry.item)
 
 					local.push({
 						uuid,
@@ -1512,17 +1427,7 @@ export class Offline {
 					reasons.push(`${unreadableListedFiles} listed file(s) with unreadable metadata`)
 				}
 
-				pushError(
-					makeSyncError({
-						itemUuid: topLevelUuid,
-						topLevelUuid,
-						name: directoryName,
-						itemType: directory.type,
-						kind: "listing",
-						degraded: true,
-						message: `Remote listing degraded (${reasons.join(", ")}) — skipped deletions for this pass`
-					})
-				)
+				pushError(treeError("listing", `Remote listing degraded (${reasons.join(", ")}) — skipped deletions for this pass`, true))
 			}
 
 			// Execute the planned local mutations. All remote-truth-following and idempotent — safe
@@ -1581,16 +1486,7 @@ export class Offline {
 			}
 
 			if (!opsResult.success) {
-				pushError(
-					makeSyncError({
-						itemUuid: topLevelUuid,
-						topLevelUuid,
-						name: directoryName,
-						itemType: directory.type,
-						kind: "store",
-						message: opsResult.error instanceof Error ? opsResult.error.message : String(opsResult.error)
-					})
-				)
+				pushError(treeError("store", opsResult.error instanceof Error ? opsResult.error.message : String(opsResult.error)))
 
 				return finish(errors)
 			}
@@ -1629,14 +1525,10 @@ export class Offline {
 
 				if (!downloadResult.success) {
 					pushError(
-						makeSyncError({
-							itemUuid: topLevelUuid,
-							topLevelUuid,
-							name: directoryName,
-							itemType: directory.type,
-							kind: "download",
-							message: downloadResult.error instanceof Error ? downloadResult.error.message : String(downloadResult.error)
-						})
+						treeError(
+							"download",
+							downloadResult.error instanceof Error ? downloadResult.error.message : String(downloadResult.error)
+						)
 					)
 
 					return finish(errors)
@@ -1656,15 +1548,11 @@ export class Offline {
 				// bare "missing on disk".
 				if ("scanErrors" in transferred && transferred.scanErrors.length > 0) {
 					pushError(
-						makeSyncError({
-							itemUuid: topLevelUuid,
-							topLevelUuid,
-							name: directoryName,
-							itemType: directory.type,
-							kind: "listing",
-							degraded: true,
-							message: `Download tree scan reported ${transferred.scanErrors.length} error(s) — entries it dropped are reported missing below`
-						})
+						treeError(
+							"listing",
+							`Download tree scan reported ${transferred.scanErrors.length} error(s) — entries it dropped are reported missing below`,
+							true
+						)
 					)
 				}
 
@@ -1755,7 +1643,7 @@ export class Offline {
 					}
 
 					const observedSize = dataFileInfo.size ?? 0
-					const expectedSize = isFileItem(remoteEntry.item) ? Number(remoteEntry.item.data.decryptedMeta?.size ?? -1) : -1
+					const expectedSize = expectedFileSize(remoteEntry.item)
 
 					verifiedFileUuids.add(uuid)
 
@@ -1914,7 +1802,7 @@ export class Offline {
 						}
 					} else {
 						const preservedInfo = new FileSystem.File(liveDirUri, path).info()
-						const expectedSize = entry.diskSize ?? Number(entry.item.data.decryptedMeta?.size ?? -1)
+						const expectedSize = entry.diskSize ?? expectedFileSize(entry.item)
 
 						if (!preservedInfo.exists || (preservedInfo.size ?? 0) !== expectedSize) {
 							continue
@@ -2128,27 +2016,9 @@ export class Offline {
 				throw new Error("File missing decrypted meta")
 			}
 
-			await this.clearBarrier.enter()
-
-			defer(() => {
-				this.clearBarrier.leave()
-			})
-
-			// Per-UUID lock (outermost of the store locks): serializes the whole guard→delete→download→index
-			// section against another store call for the same file, so neither wipes the other's in-flight target.
-			const releaseStoreItemLock = await this.acquireStoreItemLock(file.data.uuid)
-
-			defer(() => {
-				releaseStoreItemLock()
-			})
-
-			await this.storeMutex.acquire()
-
-			defer(() => {
-				this.storeMutex.release()
-			})
-
-			this.ensureDirectories()
+			// The per-uuid lock serializes the whole guard→delete→download→index section against another
+			// store call for the same file, so neither wipes the other's in-flight target.
+			await this.enterStoreSection(defer, file.data.uuid, { storeMutex: true })
 
 			if (await this.isItemStored(file)) {
 				return true
@@ -2191,24 +2061,11 @@ export class Offline {
 					return false
 				}
 
-				// Record the delivered size when it diverges from the (client-supplied, possibly
-				// wrong) meta size, so thorough heals bless these bytes instead of re-downloading
-				// the same shortfall forever.
-				const observedSize = dataFile.exists ? (dataFile.size ?? 0) : null
-				const expectedSize = Number(file.data.decryptedMeta?.size ?? -1)
-
-				atomicWrite(
-					metaFile,
-					serialize({
-						item: file,
-						parent,
-						...(observedSize !== null && observedSize !== expectedSize
-							? {
-									diskSize: observedSize
-								}
-							: {})
-					} satisfies FileOrDirectoryOfflineMeta)
-				)
+				writeStandaloneMeta(metaFile, {
+					item: file,
+					parent,
+					diskSize: deliveredDiskSize(file, dataFile)
+				})
 
 				this.invalidateCaches()
 
@@ -2276,25 +2133,7 @@ export class Offline {
 				throw new Error("File missing decrypted meta")
 			}
 
-			await this.clearBarrier.enter()
-
-			defer(() => {
-				this.clearBarrier.leave()
-			})
-
-			const releaseStoreItemLock = await this.acquireStoreItemLock(item.data.uuid)
-
-			defer(() => {
-				releaseStoreItemLock()
-			})
-
-			await this.storeMutex.acquire()
-
-			defer(() => {
-				this.storeMutex.release()
-			})
-
-			this.ensureDirectories()
+			await this.enterStoreSection(defer, item.data.uuid, { storeMutex: true })
 
 			const standaloneDir = new FileSystem.Directory(FileSystem.Paths.join(FILES_DIRECTORY.uri, item.data.uuid))
 
@@ -2351,23 +2190,11 @@ export class Offline {
 
 			const metaFile = new FileSystem.File(FileSystem.Paths.join(standaloneDir.uri, metaName))
 
-			// Same delivered-size record as storeFile — without it a meta-size-drifted remote
-			// would be re-healed (re-downloaded at the same shortfall) on every thorough pass.
-			const observedSize = dataFile.exists ? (dataFile.size ?? 0) : null
-			const expectedSize = Number(item.data.decryptedMeta.size ?? -1)
-
-			atomicWrite(
-				metaFile,
-				serialize({
-					item,
-					parent,
-					...(observedSize !== null && observedSize !== expectedSize
-						? {
-								diskSize: observedSize
-							}
-						: {})
-				} satisfies FileOrDirectoryOfflineMeta)
-			)
+			writeStandaloneMeta(metaFile, {
+				item,
+				parent,
+				diskSize: deliveredDiskSize(item, dataFile)
+			})
 
 			this.invalidateCaches()
 
@@ -2471,14 +2298,8 @@ export class Offline {
 	// With parent: navigates into a stored directory tree and returns only the immediate children of that parent.
 	// The parent may also be a bare-uuid reference from the listing path (no SDK context; index-resolved).
 	public async listDirectories(parent?: OfflineParent | OfflineUuidParent): Promise<{
-		files: {
-			item: DriveItem
-			parent: OfflineParent
-		}[]
-		directories: {
-			item: DriveItem
-			parent: OfflineParent
-		}[]
+		files: OfflineEntry[]
+		directories: OfflineEntry[]
 	}> {
 		const cacheKey: string = parent ? parentCacheKey(parent) : "root"
 		const cached = this.listDirectoriesCache.get(cacheKey)
@@ -2489,8 +2310,8 @@ export class Offline {
 
 		this.ensureDirectories()
 
-		const directories: Awaited<ReturnType<typeof this.listDirectories>>["directories"] = []
-		const files: Awaited<ReturnType<typeof this.listDirectories>>["files"] = []
+		const directories: OfflineEntry[] = []
+		const files: OfflineEntry[] = []
 		const topLevelEntries = DIRECTORIES_DIRECTORY.list()
 
 		if (!parent) {
@@ -2600,41 +2421,18 @@ export class Offline {
 				continue
 			}
 
-			switch (entryMeta.item.type) {
-				case "directory":
-				case "sharedRootDirectory":
-				case "sharedDirectory": {
-					const parent = this.findParentAnyDirWithContext(pathToItem, dirname)
+			const parent = this.findParentAnyDirWithContext(pathToItem, dirname)
 
-					if (!parent) {
-						continue
-					}
-
-					directories.push({
-						item: entryMeta.item,
-						parent
-					})
-
-					break
-				}
-
-				case "file":
-				case "sharedFile":
-				case "sharedRootFile": {
-					const parent = this.findParentAnyDirWithContext(pathToItem, dirname)
-
-					if (!parent) {
-						continue
-					}
-
-					files.push({
-						item: entryMeta.item,
-						parent
-					})
-
-					break
-				}
+			if (!parent) {
+				continue
 			}
+
+			const target = isDirectoryItem(entryMeta.item) ? directories : files
+
+			target.push({
+				item: entryMeta.item,
+				parent
+			})
 		}
 
 		const parentResult = {
@@ -2665,8 +2463,8 @@ export class Offline {
 
 		this.ensureDirectories()
 
-		const directories: Awaited<ReturnType<typeof this.listDirectories>>["directories"] = []
-		const files: Awaited<ReturnType<typeof this.listDirectories>>["files"] = []
+		const directories: OfflineEntry[] = []
+		const files: OfflineEntry[] = []
 		const seenUuids = new Set<string>()
 		const topLevelEntries = DIRECTORIES_DIRECTORY.list()
 
@@ -2725,45 +2523,20 @@ export class Offline {
 						continue
 					}
 
-					switch (entryMeta.item.type) {
-						case "directory":
-						case "sharedRootDirectory":
-						case "sharedDirectory": {
-							const parent = this.findParentAnyDirWithContext(pathToItem, dirname)
+					const parent = this.findParentAnyDirWithContext(pathToItem, dirname)
 
-							if (!parent) {
-								continue
-							}
-
-							seenUuids.add(entryMeta.item.data.uuid)
-
-							directories.push({
-								item: entryMeta.item,
-								parent
-							})
-
-							break
-						}
-
-						case "file":
-						case "sharedFile":
-						case "sharedRootFile": {
-							const parent = this.findParentAnyDirWithContext(pathToItem, dirname)
-
-							if (!parent) {
-								continue
-							}
-
-							seenUuids.add(entryMeta.item.data.uuid)
-
-							files.push({
-								item: entryMeta.item,
-								parent
-							})
-
-							break
-						}
+					if (!parent) {
+						continue
 					}
+
+					seenUuids.add(entryMeta.item.data.uuid)
+
+					const target = isDirectoryItem(entryMeta.item) ? directories : files
+
+					target.push({
+						item: entryMeta.item,
+						parent
+					})
 				}
 			})
 		)
@@ -2778,11 +2551,7 @@ export class Offline {
 		return recursiveResult
 	}
 
-	public async itemSize(item: DriveItem): Promise<{
-		size: number
-		files: number
-		dirs: number
-	}> {
+	public async itemSize(item: DriveItem): Promise<OfflineSizeStats> {
 		const cachedSize = this.itemSizeCache.get(item.data.uuid)
 
 		if (cachedSize) {
@@ -2791,130 +2560,110 @@ export class Offline {
 
 		this.ensureDirectories()
 
-		switch (item.type) {
-			case "file":
-			case "sharedFile":
-			case "sharedRootFile": {
-				const index = await this.readIndex()
-				const fileEntry = index.files[item.data.uuid]
+		if (isFileItem(item)) {
+			const index = await this.readIndex()
+			const fileEntry = index.files[item.data.uuid]
 
-				if (!fileEntry || !isFileItem(fileEntry.item)) {
-					return {
-						size: 0,
-						files: 0,
-						dirs: 0
-					}
-				}
-
-				const sizeResult = {
-					size: Number(fileEntry.item.data.decryptedMeta?.size ?? 0),
-					files: 1,
+			if (!fileEntry || !isFileItem(fileEntry.item)) {
+				return {
+					size: 0,
+					files: 0,
 					dirs: 0
 				}
-
-				this.itemSizeCache.set(item.data.uuid, sizeResult)
-
-				return sizeResult
 			}
 
-			case "directory":
-			case "sharedRootDirectory":
-			case "sharedDirectory": {
-				const uuidToTopLevel = await this.buildUuidToTopLevelIndex()
-				const topLevelUuid = uuidToTopLevel.get(item.data.uuid)
+			const sizeResult = {
+				size: Number(fileEntry.item.data.decryptedMeta?.size ?? 0),
+				files: 1,
+				dirs: 0
+			}
 
-				if (!topLevelUuid) {
-					return {
-						size: 0,
-						files: 0,
-						dirs: 0
-					}
-				}
+			this.itemSizeCache.set(item.data.uuid, sizeResult)
 
-				const directoryMeta = await this.readDirectoryMeta(topLevelUuid)
+			return sizeResult
+		}
 
-				if (!directoryMeta) {
-					return {
-						size: 0,
-						files: 0,
-						dirs: 0
-					}
-				}
+		const uuidToTopLevel = await this.buildUuidToTopLevelIndex()
+		const topLevelUuid = uuidToTopLevel.get(item.data.uuid)
 
-				const entryUuids = Object.keys(directoryMeta.entries)
-				const uuidToPath: Record<string, string> = {
-					[topLevelUuid]: "/"
-				}
-
-				for (let i = 0; i < entryUuids.length; i++) {
-					const entryMeta = directoryMeta.entries[entryUuids[i] as string]
-
-					if (!entryMeta || !isDirectoryItem(entryMeta.item)) {
-						continue
-					}
-
-					uuidToPath[entryMeta.item.data.uuid] = entryMeta.path
-				}
-
-				const targetPath = uuidToPath[item.data.uuid]
-
-				if (!targetPath) {
-					return {
-						size: 0,
-						files: 0,
-						dirs: 0
-					}
-				}
-
-				let size = 0
-				let files = 0
-				let dirs = 0
-				const targetPrefix = targetPath === "/" ? "/" : `${targetPath}/`
-
-				for (let i = 0; i < entryUuids.length; i++) {
-					const entryMeta = directoryMeta.entries[entryUuids[i] as string]
-
-					if (!entryMeta) {
-						continue
-					}
-
-					const dirname = rawPathDirname(entryMeta.path)
-
-					if (dirname !== targetPath && !dirname.startsWith(targetPrefix)) {
-						continue
-					}
-
-					switch (entryMeta.item.type) {
-						case "directory":
-						case "sharedRootDirectory":
-						case "sharedDirectory": {
-							dirs += 1
-
-							break
-						}
-
-						case "file":
-						case "sharedFile":
-						case "sharedRootFile": {
-							size += Number(entryMeta.item.data.decryptedMeta?.size ?? 0)
-							files += 1
-
-							break
-						}
-					}
-				}
-
-				const sizeResult = {
-					size,
-					files,
-					dirs
-				}
-
-				this.itemSizeCache.set(item.data.uuid, sizeResult)
-
-				return sizeResult
+		if (!topLevelUuid) {
+			return {
+				size: 0,
+				files: 0,
+				dirs: 0
 			}
 		}
+
+		const directoryMeta = await this.readDirectoryMeta(topLevelUuid)
+
+		if (!directoryMeta) {
+			return {
+				size: 0,
+				files: 0,
+				dirs: 0
+			}
+		}
+
+		const entryUuids = Object.keys(directoryMeta.entries)
+		const uuidToPath: Record<string, string> = {
+			[topLevelUuid]: "/"
+		}
+
+		for (let i = 0; i < entryUuids.length; i++) {
+			const entryMeta = directoryMeta.entries[entryUuids[i] as string]
+
+			if (!entryMeta || !isDirectoryItem(entryMeta.item)) {
+				continue
+			}
+
+			uuidToPath[entryMeta.item.data.uuid] = entryMeta.path
+		}
+
+		const targetPath = uuidToPath[item.data.uuid]
+
+		if (!targetPath) {
+			return {
+				size: 0,
+				files: 0,
+				dirs: 0
+			}
+		}
+
+		let size = 0
+		let files = 0
+		let dirs = 0
+		const targetPrefix = targetPath === "/" ? "/" : `${targetPath}/`
+
+		for (let i = 0; i < entryUuids.length; i++) {
+			const entryMeta = directoryMeta.entries[entryUuids[i] as string]
+
+			if (!entryMeta) {
+				continue
+			}
+
+			const dirname = rawPathDirname(entryMeta.path)
+
+			if (dirname !== targetPath && !dirname.startsWith(targetPrefix)) {
+				continue
+			}
+
+			if (isDirectoryItem(entryMeta.item)) {
+				dirs += 1
+			} else {
+				size += Number(entryMeta.item.data.decryptedMeta?.size ?? 0)
+				files += 1
+			}
+		}
+
+		const sizeResult = {
+			size,
+			files,
+			dirs
+		}
+
+		this.itemSizeCache.set(item.data.uuid, sizeResult)
+
+		return sizeResult
 	}
 
 	public async clearAll(): Promise<void> {
@@ -2936,11 +2685,7 @@ export class Offline {
 		await this.updateIndex()
 	}
 
-	public async size(): Promise<{
-		size: number
-		files: number
-		dirs: number
-	}> {
+	public async size(): Promise<OfflineSizeStats> {
 		const index = await this.readIndex()
 		const files = Object.keys(index.files).length
 		const dirs = Object.keys(index.directories).length
@@ -2956,30 +2701,10 @@ export class Offline {
 
 	public async removeItem(item: DriveItem): Promise<void> {
 		const result = await run(async defer => {
-			await this.clearBarrier.enter()
-
-			defer(() => {
-				this.clearBarrier.leave()
-			})
-
-			// Per-UUID lock: a removal must not interleave with a same-uuid reconcile/redownload
+			// The per-uuid lock keeps a removal from interleaving with a same-uuid reconcile/redownload
 			// mid-pass — without it the delete can land between that pass's download and commit,
-			// whose meta/index write then resurrects the item. Callers never hold this lock when
-			// calling removeItem and the lock order matches every other store method
-			// (clearBarrier → per-uuid → storeMutex), so no deadlock is possible.
-			const releaseStoreItemLock = await this.acquireStoreItemLock(item.data.uuid)
-
-			defer(() => {
-				releaseStoreItemLock()
-			})
-
-			await this.storeMutex.acquire()
-
-			defer(() => {
-				this.storeMutex.release()
-			})
-
-			this.ensureDirectories()
+			// whose meta/index write then resurrects the item.
+			await this.enterStoreSection(defer, item.data.uuid, { storeMutex: true })
 
 			let didDelete = false
 

@@ -24,8 +24,6 @@ const { mockDb, open } = vi.hoisted(() => {
 // Module mocks
 // ---------------------------------------------------------------------------
 
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
-
 vi.mock("react-native", () => ({
 	AppState: {
 		addEventListener: () => ({ remove: () => {} })

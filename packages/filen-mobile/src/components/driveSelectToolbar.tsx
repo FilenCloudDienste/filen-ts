@@ -24,6 +24,19 @@ import { useTranslation } from "react-i18next"
 import useIsOnline from "@/hooks/useIsOnline"
 import logger from "@/lib/logger"
 
+function emitRootSelection(id: string, parentDir: AnyNormalDir) {
+	events.emit("driveSelect", {
+		id,
+		selectedItems: [
+			{
+				type: "root",
+				data: parentDir
+			}
+		],
+		cancelled: false
+	})
+}
+
 const DriveSelectToolbar = () => {
 	const textForeground = useResolveClassNames("text-foreground")
 	const insets = useSafeAreaInsets()
@@ -139,17 +152,7 @@ const DriveSelectToolbar = () => {
 					return
 				}
 
-				events.emit("driveSelect", {
-					id: drivePath.selectOptions.id,
-					selectedItems: [
-						{
-							type: "root",
-							data: parentDir
-						}
-					],
-					cancelled: false
-				})
-
+				emitRootSelection(drivePath.selectOptions.id, parentDir)
 				dismiss()
 
 				break
@@ -167,16 +170,7 @@ const DriveSelectToolbar = () => {
 						return
 					}
 
-					events.emit("driveSelect", {
-						id: drivePath.selectOptions.id,
-						selectedItems: [
-							{
-								type: "root",
-								data: parentDir
-							}
-						],
-						cancelled: false
-					})
+					emitRootSelection(drivePath.selectOptions.id, parentDir)
 
 					return
 				}

@@ -27,8 +27,6 @@ vi.mock("@/lib/signals", () => ({
 	toSignalOpts: (signal?: AbortSignal) => (signal ? { signal } : undefined)
 }))
 
-vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
-
 vi.mock("@filen/shared", async () => ({
 	...(await import("@/tests/mocks/filenShared")),
 	// sortParams feeds chatMessagesQueryGet's key on the true-miss path — identity is fine for the test.
@@ -43,10 +41,6 @@ vi.mock("@/lib/auth", () => ({
 
 vi.mock("@/features/chats/queries/useChats.query", () => ({
 	chatsQueryGet: mockChatsQueryGet
-}))
-
-vi.mock("@/features/chats/chatsWrap", () => ({
-	wrapMessage: vi.fn((msg: unknown) => ({ ...(msg as Record<string, unknown>), undecryptable: false }))
 }))
 
 vi.mock("@/queries/client", () => ({

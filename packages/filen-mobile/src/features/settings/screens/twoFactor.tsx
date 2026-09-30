@@ -36,10 +36,7 @@ function TwoFactor() {
 					/>
 				) : (
 					<SettingsScrollView>
-						<Group
-							className="bg-background-tertiary"
-							buttons={buildTwoFactorButtons({ t, accountQuery })}
-						/>
+						<Group buttons={buildTwoFactorButtons({ t, accountQuery })} />
 						{!accountQuery.data.twoFactorEnabled &&
 							accountQuery.data.twoFactorKey &&
 							accountQuery.data.twoFactorKey.length > 0 && (

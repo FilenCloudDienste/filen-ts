@@ -4,7 +4,7 @@ Filen mobile app for iOS and Android. Lives inside the `filen-ts` monorepo at `p
 
 Built on Expo 55 / React Native 0.83 / React 19 / Hermes. All server communication, encryption and auth go through `@filen/sdk-rs` (Rust SDK consumed as a React Native turbo module).
 
-The iOS File Provider Extension and the Android Documents Provider are wired in via three vendored git submodules under this package (`filen-rs/`, `filen-ios-file-provider/`, `filen-android-documents-provider/`) and three custom Expo config plugins (`plugins/withFileProvider.ts`, `plugins/withAndroidRustBuild.ts`, `plugins/withAndroidArchitectures.ts`). Those plugins compile a separate Rust crate (`filen-mobile-native-cache`) and inject it into the iOS extension target and the Android `jniLibs/`.
+The iOS File Provider Extension and the Android Documents Provider are wired in via three vendored git submodules under this package (`filen-rs/`, `filen-ios-file-provider/`, `filen-android-documents-provider/`) and two custom Expo config plugins (`plugins/withFileProvider.ts`, `plugins/withAndroidRustBuild.ts`). Those plugins compile a separate Rust crate (`filen-mobile-native-cache`) and inject it into the iOS extension target and the Android `jniLibs/`.
 
 ---
 

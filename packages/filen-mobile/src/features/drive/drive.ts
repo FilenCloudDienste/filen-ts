@@ -19,6 +19,53 @@ import { driveItemsQueryRefetchFailedLinkedListing } from "@/features/drive/quer
 import logger from "@/lib/logger"
 import cache from "@/lib/cache"
 
+// Shared failure path of the link openers: a password-protected link opened without a password
+// prompts once and retries with it; a wrong entered password or any other error alerts.
+async function handleLinkOpenError({
+	error,
+	linkUuid,
+	password,
+	kind,
+	retry
+}: {
+	error: unknown
+	linkUuid: string
+	password: string | undefined
+	kind: "file" | "directory"
+	retry: (password: string) => Promise<void>
+}): Promise<void> {
+	const operation = kind === "file" ? "openLinkedFile" : "openLinkedDirectory"
+
+	if (unwrapSdkError(error)?.kind() === ErrorKind.WrongPassword) {
+		if (password) {
+			alerts.error(i18n.t("wrong_password"))
+
+			return
+		}
+
+		const enteredPassword = await inputPrompt(
+			{
+				title: i18n.t("password_required"),
+				message: kind === "file" ? i18n.t("enter_public_link_file_password") : i18n.t("enter_public_link_directory_password"),
+				cancelText: i18n.t("cancel"),
+				okText: i18n.t("submit"),
+				inputType: "secure-text"
+			},
+			{ tag: "drive-link", message: `${operation} password prompt failed` },
+			{ allowEmpty: true }
+		)
+
+		if (enteredPassword !== null) {
+			await retry(enteredPassword)
+		}
+
+		return
+	}
+
+	logger.error("drive-link", `${operation} failed`, { linkUuid, error })
+	alerts.error(error)
+}
+
 const drive = {
 	favorite,
 	shareWithFilenUser,
@@ -62,45 +109,19 @@ const drive = {
 		})
 
 		if (!result.success) {
-			const unwrappedError = unwrapSdkError(result.error)
-
-			if (unwrappedError?.kind() === ErrorKind.WrongPassword) {
-				if (!password) {
-					const enteredPassword = await inputPrompt(
-						{
-							title: i18n.t("password_required"),
-							message: i18n.t("enter_public_link_directory_password"),
-							cancelText: i18n.t("cancel"),
-							okText: i18n.t("submit"),
-							inputType: "secure-text"
-						},
-						{ tag: "drive-link", message: "openLinkedDirectory password prompt failed" },
-						{ allowEmpty: true }
-					)
-
-					if (enteredPassword === null) {
-						return
-					}
-
-					password = enteredPassword
-
-					await this.openLinkedDirectory({
+			await handleLinkOpenError({
+				error: result.error,
+				linkUuid,
+				password,
+				kind: "directory",
+				retry: enteredPassword =>
+					this.openLinkedDirectory({
 						linkUuid,
 						linkKey,
 						root,
-						password
+						password: enteredPassword
 					})
-
-					return
-				}
-
-				alerts.error(i18n.t("wrong_password"))
-
-				return
-			}
-
-			logger.error("drive-link", "openLinkedDirectory failed", { linkUuid, error: result.error })
-			alerts.error(result.error)
+			})
 
 			return
 		}
@@ -139,44 +160,18 @@ const drive = {
 		})
 
 		if (!result.success) {
-			const unwrappedError = unwrapSdkError(result.error)
-
-			if (unwrappedError?.kind() === ErrorKind.WrongPassword) {
-				if (!password) {
-					const enteredPassword = await inputPrompt(
-						{
-							title: i18n.t("password_required"),
-							message: i18n.t("enter_public_link_file_password"),
-							cancelText: i18n.t("cancel"),
-							okText: i18n.t("submit"),
-							inputType: "secure-text"
-						},
-						{ tag: "drive-link", message: "openLinkedFile password prompt failed" },
-						{ allowEmpty: true }
-					)
-
-					if (enteredPassword === null) {
-						return
-					}
-
-					password = enteredPassword
-
-					await this.openLinkedFile({
+			await handleLinkOpenError({
+				error: result.error,
+				linkUuid,
+				password,
+				kind: "file",
+				retry: enteredPassword =>
+					this.openLinkedFile({
 						linkUuid,
 						fileKey,
-						password
+						password: enteredPassword
 					})
-
-					return
-				}
-
-				alerts.error(i18n.t("wrong_password"))
-
-				return
-			}
-
-			logger.error("drive-link", "openLinkedFile failed", { linkUuid, error: result.error })
-			alerts.error(result.error)
+			})
 
 			return
 		}

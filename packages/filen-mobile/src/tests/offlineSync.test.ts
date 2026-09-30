@@ -5,8 +5,6 @@ import { vi, describe, it, expect, beforeEach, afterEach } from "vitest"
 // and what merely records an error), not filesystem behavior (covered by offline.test.ts). The
 // <OfflineSync /> host component tests live in offlineSyncHost.test.ts.
 
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
-
 vi.mock("expo-crypto", async () => await import("@/tests/mocks/expoCrypto"))
 
 vi.mock("@/features/offline/offline", () => ({

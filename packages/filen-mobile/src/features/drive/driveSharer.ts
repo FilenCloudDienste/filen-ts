@@ -1,5 +1,5 @@
 import { type SharingRole } from "@filen/sdk-rs"
-import { type ShareIdentity, shareIdentityFromRole } from "@filen/shared"
+import { type BlockedUsers, type ShareIdentity, isBlocked, shareIdentityFromRole } from "@filen/shared"
 import { type DriveItem } from "@/types"
 import cache from "@/lib/cache"
 
@@ -31,4 +31,12 @@ export function getSharerIdentity(item: DriveItem): ShareIdentity | null {
 	}
 
 	return shareIdentityFromRole(role)
+}
+
+// The single "hidden from this user" rule for shared-in items: the list filter and the
+// stale-selection purge must agree, or a selected item could be one the list hides.
+export function isSharerBlocked(item: DriveItem, blocked: BlockedUsers): boolean {
+	const sharer = getSharerIdentity(item)
+
+	return sharer !== null && isBlocked(sharer, blocked)
 }

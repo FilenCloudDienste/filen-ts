@@ -162,10 +162,6 @@ const {
 
 // --- module mocks ------------------------------------------------------------
 
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
-
-vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
-
 vi.mock("@filen/shared", async () => await import("@/tests/mocks/filenShared"))
 
 vi.mock("@/lib/auth", () => ({
@@ -206,6 +202,8 @@ vi.mock("@/features/drive/socketCreateBatcher", () => ({
 
 vi.mock("@/features/drive/queries/useDriveItems.query", () => ({
 	driveItemsQueryUpdate: mockDriveItemsQueryUpdate,
+	driveItemsQueryUpdateRoot: (type: string, updater: unknown) =>
+		mockDriveItemsQueryUpdate({ params: { path: { type, uuid: null } }, updater }),
 	driveItemsQueryUpdateGlobal: mockDriveItemsQueryUpdateGlobal,
 	driveItemsQueryUpdateForNormalParent: mockDriveItemsQueryUpdateForNormalParent,
 	driveItemsQueryGet: mockDriveItemsQueryGet,

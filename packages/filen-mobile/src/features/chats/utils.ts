@@ -1,8 +1,9 @@
 import { AnyFile, MaybeEncryptedUniffi_Tags } from "@filen/sdk-rs"
 import { contactDisplayName } from "@filen/shared"
+import { type TFunction } from "i18next"
 import { type Chat, type ChatMessage } from "@/types"
 import { type LinkResult } from "@/features/chats/queries/useChatMessageLinks.query"
-import { type ChatMessageWithInflightId, type Suggestions } from "@/features/chats/store/useChats.store"
+import { type ChatMessageWithInflightId, type Suggestions, type Typing } from "@/features/chats/store/useChats.store"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
 import { openLinkedFilePreview } from "@/features/drive/linkedFilePreview"
 
@@ -63,11 +64,11 @@ export function composeMessageList({
 	return [...byUuid.values()].sort((a, b) => Number(b.sentTimestamp) - Number(a.sentTimestamp))
 }
 
-/**
- * Resolves the best available display name for the sender of a reply-to message
- * when the sender is no longer present in chat.participants (e.g. they left the chat).
- * Prefers nickName → email → fallback (usually the i18n "unknown" string).
- */
+// Width cap for a message's media: Message's max-w-3/4 bubble minus its px-4 wrapper and p-3 bubble padding.
+export function attachmentMaxWidth(listWidth: number): number {
+	return listWidth * 0.75 - 32 - 24
+}
+
 /**
  * Whether the keyboard's own prediction strip should be suppressed, given what the input is showing.
  *
@@ -79,6 +80,11 @@ export function shouldSuppressKeyboardSuggestions(suggestionsVisible: readonly S
 	return suggestionsVisible.some(suggestion => suggestion === "mentions" || suggestion === "emojis")
 }
 
+/**
+ * Resolves the best available display name for the sender of a reply-to message
+ * when the sender is no longer present in chat.participants (e.g. they left the chat).
+ * Prefers nickName → email → fallback (usually the i18n "unknown" string).
+ */
 export function resolveReplySenderDisplayName(senderNickName: string | undefined, senderEmail: string | undefined, fallback: string): string {
 	if (senderNickName && senderNickName.length > 0) {
 		return senderNickName
@@ -112,6 +118,26 @@ export function messageSenderLabel(chat: Chat, message: ChatMessage, currentUser
 	}
 
 	return resolveReplySenderDisplayName(message.inner.senderNickName, message.inner.senderEmail, fallback)
+}
+
+// Typists no longer in chat.participants are dropped.
+export function typingNames(typing: Typing, participants: Chat["participants"]): string[] {
+	const names: string[] = []
+
+	for (const { senderId } of typing) {
+		const participant = participants.find(p => p.userId === senderId)
+
+		if (participant) {
+			names.push(contactDisplayName(participant))
+		}
+	}
+
+	return names
+}
+
+// A single typist is left unnamed.
+export function typingLabel(names: string[], t: TFunction): string {
+	return names.length > 1 ? t("typing_with_names", { names: names.join(", ") }) : t("typing")
 }
 
 // The decrypted-file/directory shape carried by a successful internal link.

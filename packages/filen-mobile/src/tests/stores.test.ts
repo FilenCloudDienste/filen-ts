@@ -4,9 +4,6 @@ const { mockRouterPush } = vi.hoisted(() => ({
 	mockRouterPush: vi.fn()
 }))
 
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
-vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
-
 vi.mock("expo-router", () => ({
 	router: {
 		push: mockRouterPush
@@ -20,6 +17,8 @@ vi.mock("@/lib/router", () => ({
 }))
 
 vi.mock("@/lib/utils", () => ({}))
+
+vi.mock("expo-crypto", async () => await import("@/tests/mocks/expoCrypto"))
 
 // Use the real implementation so the mock cannot silently drift from production behaviour.
 // @/constants is extended below to supply the extension Sets that the real getPreviewType reads.
@@ -503,58 +502,58 @@ describe("useCameraUploadStore.addSkippedAsset", () => {
 })
 
 // ---------------------------------------------------------------------------
-// useCameraUploadStore.setErrors — bounded error log (CU-08)
+// useCameraUploadStore.addError / clearErrors — bounded error log (CU-08)
 // ---------------------------------------------------------------------------
 
-describe("useCameraUploadStore.setErrors — bounded error log (CU-08)", () => {
+describe("useCameraUploadStore.addError — bounded error log (CU-08)", () => {
 	beforeEach(() => {
 		resetCameraUploadStore()
 	})
 
-	function makeErrors(count: number, startIndex = 0): { id: string; timestamp: number }[] {
-		const errors: { id: string; timestamp: number }[] = []
-
+	function addErrors(count: number): void {
 		for (let i = 0; i < count; i++) {
-			errors.push({ id: `e${startIndex + i}`, timestamp: startIndex + i })
+			useCameraUploadStore.getState().addError({ error: new Error(`e${i}`) })
 		}
-
-		return errors
 	}
 
-	it("stores an array under the cap unchanged", () => {
-		useCameraUploadStore.getState().setErrors(makeErrors(3))
+	it("appends an entry with a generated id, timestamp, error and assetId", () => {
+		const error = new Error("boom")
 
-		expect(useCameraUploadStore.getState().errors.length).toBe(3)
+		useCameraUploadStore.getState().addError({ error, assetId: "asset-1" })
+
+		const [entry] = useCameraUploadStore.getState().errors
+
+		expect(entry?.error).toBe(error)
+		expect(entry?.assetId).toBe("asset-1")
+		expect(typeof entry?.id).toBe("string")
+		expect(typeof entry?.timestamp).toBe("number")
 	})
 
-	it("caps a direct set at MAX_CAMERA_UPLOAD_ERRORS", () => {
-		useCameraUploadStore.getState().setErrors(makeErrors(MAX_CAMERA_UPLOAD_ERRORS + 50))
+	it("gives each entry a distinct id", () => {
+		addErrors(3)
 
-		expect(useCameraUploadStore.getState().errors.length).toBe(MAX_CAMERA_UPLOAD_ERRORS)
+		const ids = new Set(useCameraUploadStore.getState().errors.map(entry => entry.id))
+
+		expect(ids.size).toBe(3)
 	})
 
-	it("keeps the MOST RECENT entries and drops the oldest (front) when over the cap", () => {
-		useCameraUploadStore.getState().setErrors(makeErrors(MAX_CAMERA_UPLOAD_ERRORS + 5))
-
-		const errors = useCameraUploadStore.getState().errors
-
-		// The 5 oldest were dropped from the front; the newest is retained at the back.
-		expect(errors[0]?.id).toBe("e5")
-		expect(errors[errors.length - 1]?.id).toBe(`e${MAX_CAMERA_UPLOAD_ERRORS + 4}`)
-	})
-
-	it("functional append (the engine's per-pass push) stays bounded across many passes", () => {
-		// Simulate a durable failure pushing one entry per sync pass, far beyond the cap — the
-		// unbounded-growth bug. The array must stabilize at the cap, not grow forever.
-		for (let pass = 0; pass < MAX_CAMERA_UPLOAD_ERRORS + 30; pass++) {
-			useCameraUploadStore.getState().setErrors(errors => [...errors, { id: `e${pass}`, timestamp: pass }])
-		}
+	it("stays bounded at MAX_CAMERA_UPLOAD_ERRORS across many passes, keeping the most recent", () => {
+		// A durable failure pushes one entry per sync pass, far beyond the cap. The array must
+		// stabilize at the cap with the oldest dropped from the front.
+		addErrors(MAX_CAMERA_UPLOAD_ERRORS + 30)
 
 		const errors = useCameraUploadStore.getState().errors
 
 		expect(errors.length).toBe(MAX_CAMERA_UPLOAD_ERRORS)
-		// The most recent push is still present at the back.
-		expect(errors[errors.length - 1]?.id).toBe(`e${MAX_CAMERA_UPLOAD_ERRORS + 29}`)
+		expect(String(errors[0]?.error)).toBe("Error: e30")
+		expect(String(errors[errors.length - 1]?.error)).toBe(`Error: e${MAX_CAMERA_UPLOAD_ERRORS + 29}`)
+	})
+
+	it("clearErrors empties the log", () => {
+		addErrors(3)
+		useCameraUploadStore.getState().clearErrors()
+
+		expect(useCameraUploadStore.getState().errors).toEqual([])
 	})
 })
 

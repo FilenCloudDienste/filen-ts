@@ -12,46 +12,12 @@
  * and `\x01javascript:x` both navigate but neither matches a naive prefix test. An allowlist fails
  * those closed: anything that is not recognisably one of the permitted schemes is blocked.
  *
- * Deliberately no DOM / native imports so this is unit-testable in isolation, and so the "use dom"
- * bundle and the native side can share one definition of the envelope below.
+ * Deliberately no DOM / native imports so this is unit-testable in isolation. The tap envelope the
+ * "use dom" bundle posts to the native side lives in `@/lib/domExternalLink`.
  */
 
 import { classifyUntrustedLinkHref } from "@/lib/untrustedLinks"
-
-export const DOCX_EXTERNAL_URL_ATTRIBUTE = "data-external-url"
-
-export const DOCX_EXTERNAL_LINK_KEY = "__filenDocxExternalLink"
-
-/**
- * WebView → native envelope for "the user tapped an external link". Key-tagged in the same style as
- * the console proxy's DomLogEnvelope so one `onMessage` can demultiplex both without ambiguity.
- */
-export type DocxExternalLinkEnvelope = {
-	[DOCX_EXTERNAL_LINK_KEY]: {
-		url: string
-	}
-}
-
-/**
- * Native-side parser for the envelope above. Returns the URL, or null when `parsed` is any other
- * message. Re-classifies rather than trusting the payload: the WebView is the untrusted side of
- * this boundary, and the value reaches Linking.openURL.
- */
-export function parseDocxExternalLink(parsed: unknown): string | null {
-	if (typeof parsed !== "object" || parsed === null || !(DOCX_EXTERNAL_LINK_KEY in parsed)) {
-		return null
-	}
-
-	const envelope = (parsed as DocxExternalLinkEnvelope)[DOCX_EXTERNAL_LINK_KEY]
-
-	if (typeof envelope !== "object" || envelope === null) {
-		return null
-	}
-
-	const classification = classifyUntrustedLinkHref(envelope.url)
-
-	return classification.action === "external" ? classification.url : null
-}
+import { EXTERNAL_URL_ATTRIBUTE } from "@/lib/domExternalLink"
 
 /**
  * Rewrite every anchor the library produced so none of them can navigate this WebView.
@@ -68,7 +34,7 @@ export function hardenDocxAnchors(root: ParentNode): void {
 		// place on a `#fragment` anchor. docx-preview has no attribute passthrough today, so nothing
 		// can actually plant one — but the guarantee this attribute carries should not depend on a
 		// third-party renderer's current behaviour.
-		anchor.removeAttribute(DOCX_EXTERNAL_URL_ATTRIBUTE)
+		anchor.removeAttribute(EXTERNAL_URL_ATTRIBUTE)
 
 		// In-document bookmark: the browser resolves it without leaving the page.
 		if (classification.action === "internal") {
@@ -76,7 +42,7 @@ export function hardenDocxAnchors(root: ParentNode): void {
 		}
 
 		if (classification.action === "external") {
-			anchor.setAttribute(DOCX_EXTERNAL_URL_ATTRIBUTE, classification.url)
+			anchor.setAttribute(EXTERNAL_URL_ATTRIBUTE, classification.url)
 
 			// Point the href somewhere inert while keeping the element an anchor. The click handler
 			// cancels the fragment jump and hands the real URL to the OS, so the preview WebView never

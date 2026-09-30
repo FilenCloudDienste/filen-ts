@@ -97,7 +97,10 @@ vi.mock("@filen/shared", async () => ({
 
 vi.mock("@/lib/sqlite", async () => (await import("@/tests/mocks/sqliteKv")).createSqliteKvMock(kvStore))
 
-vi.mock("@/features/notes/store/useNotesInflight.store", () => {
+vi.mock("@/features/notes/store/useNotesInflight.store", async () => {
+	const { hasInflightEntries, newestInflightEntry } = await vi.importActual<typeof import("@/features/notes/store/useNotesInflight.store")>(
+		"@/features/notes/store/useNotesInflight.store"
+	)
 	const mockSetInflightContent = vi.fn((fn: unknown) => {
 		if (typeof fn === "function") {
 			notesState.inflightContent = fn(notesState.inflightContent)
@@ -108,6 +111,8 @@ vi.mock("@/features/notes/store/useNotesInflight.store", () => {
 
 	return {
 		INFLIGHT_CONTENT_SQLITE_KV_KEY: "inflightNoteContent",
+		hasInflightEntries,
+		newestInflightEntry,
 		default: {
 			getState: () => ({
 				inflightContent: notesState.inflightContent,
@@ -520,6 +525,24 @@ describe("Sync (Notes)", () => {
 			}
 		})
 
+		it("discardInflight drops only that note's edits and persists the rest, reporting the flush", async () => {
+			const sync = await createSync()
+
+			notesState.inflightContent = {
+				"note-1": [{ timestamp: 1000, content: "stale", note: mockNote("note-1") }],
+				"note-2": [{ timestamp: 2000, content: "keep", note: mockNote("note-2") }]
+			}
+
+			const flushed = await sync.discardInflight("note-1")
+
+			expect(flushed).toBe(true)
+			expect(notesState.inflightContent["note-1"]).toBeUndefined()
+			expect(notesState.inflightContent["note-2"]).toHaveLength(1)
+			expect(kvStore.get(KV_KEY)).toEqual({
+				"note-2": [{ timestamp: 2000, content: "keep", note: mockNote("note-2") }]
+			})
+		})
+
 		it("writes only the remaining entries after a partial sync failure", async () => {
 			const sync = await createSync()
 
@@ -920,11 +943,11 @@ describe("Sync (Notes)", () => {
 			expect(notesState.inflightContent["note-1"]).toHaveLength(1)
 		})
 
-		it("VC3: clearRejections resets the strike count when inflight is cleared OUTSIDE a sync pass (remote-edit reload / restoreFromHistory)", async () => {
+		it("VC3: discardInflight resets the strike count when inflight is cleared OUTSIDE a sync pass (remote-edit reload / restoreFromHistory)", async () => {
 			// Regression: the rejection counter is keyed by the stable note uuid and only reset
 			// by the start-of-pass cleanup loop when inflight is empty AT sync entry. The remote-edit
-			// reload and restoreFromHistory clear a note's inflight WITHOUT kicking a sync, so without
-			// an explicit clearRejections the stale count leaks into the next editing session and drops
+			// reload and restoreFromHistory clear a note's inflight WITHOUT kicking a sync, so unless
+			// discardInflight resets it the stale count leaks into the next editing session and drops
 			// a fresh edit after a single failure instead of MAX_NON_RETRYABLE_REJECTIONS.
 			const sync = await createSync()
 
@@ -946,8 +969,7 @@ describe("Sync (Notes)", () => {
 			}
 
 			// The reload / restore path clears this note's inflight out-of-band AND resets its strikes.
-			notesState.inflightContent = {}
-			sync.clearRejections("note-1")
+			await sync.discardInflight("note-1")
 
 			// A fresh editing session for the SAME note fails once — it must be KEPT (fresh count
 			// 1/MAX), never inherit the pre-clear strikes.

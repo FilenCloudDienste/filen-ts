@@ -18,7 +18,7 @@ import { pickDocuments } from "@/lib/documentPicker"
 import * as FileSystem from "expo-file-system"
 import { runBulk } from "@/lib/bulkOps"
 import notesOffline from "@/features/notes/notesOffline"
-import { NOTE_TYPE_LABEL_KEY, NOTE_TYPE_OPTIONS, noteTypeToIcon } from "@/features/notes/components/note/menu"
+import { createNoteSubButtons, NOTE_TYPE_LABEL_KEY, NOTE_TYPE_OPTIONS, noteTypeToIcon } from "@/features/notes/components/note/menu"
 import { createTagFlow } from "@/features/notes/components/notesActions"
 import { type NotesTagsSortBy } from "@/features/notes/notesTagsSortPreference"
 import { type TFunction } from "i18next"
@@ -69,6 +69,53 @@ export function buildTagsSortMenuButton(current: NotesTagsSortBy, setSort: (next
 	}
 }
 
+// One bulk entry: online-only, runs `op` over `items` via runBulk. A confirm makes it destructive.
+function bulkMenuButton<T>({
+	t,
+	id,
+	title,
+	icon,
+	items,
+	clearSelection,
+	op,
+	confirm
+}: {
+	t: TFunction
+	id: string
+	title: string
+	icon: Icons
+	items: T[]
+	clearSelection: () => void
+	op: (item: T) => Promise<unknown>
+	confirm?: {
+		title: string
+		message: string
+		okText: string
+	}
+}): MenuButton {
+	return {
+		id,
+		title,
+		icon,
+		destructive: confirm ? true : undefined,
+		requiresOnline: true,
+		onPress: async () => {
+			await runBulk({
+				items,
+				clearSelection,
+				confirm: confirm
+					? {
+							...confirm,
+							cancelText: t("cancel"),
+							destructive: true
+						}
+					: undefined,
+				op
+			})
+		}
+	}
+}
+
 // Builds the notes-screen header's right-hand menu (select-all / create / import / bulk
 // note actions / bulk tag actions / create-tag / view-mode switch) from the current
 // selection + view state. Extracted verbatim from the Header component's headerRightItems
@@ -116,6 +163,8 @@ export function buildNotesHeaderRightItems({
 }): HeaderItem[] {
 	const items: HeaderItem[] = []
 	const menuButtons: MenuButton[] = []
+	const clearSelectedNotes = () => useNotesStore.getState().clearSelectedNotes()
+	const clearSelectedTags = () => useNotesStore.getState().clearSelectedTags()
 
 	// Both note-row views: the offline view renders the same rows, so it needs the same select-all and
 	// the same bulk actions. `onlyNotes` is already the narrowed set there, so select-all selects the
@@ -126,7 +175,7 @@ export function buildNotesHeaderRightItems({
 				selectAllMenuButton({
 					t,
 					allSelected: selectedNotes.length === onlyNotes.length,
-					onClear: () => useNotesStore.getState().clearSelectedNotes(),
+					onClear: clearSelectedNotes,
 					onSelectAll: () => useNotesStore.getState().selectAllNotes(onlyNotes)
 				})
 			)
@@ -142,53 +191,7 @@ export function buildNotesHeaderRightItems({
 				title: t("create_note"),
 				icon: "plus",
 				requiresOnline: true,
-				subButtons: [
-					{
-						title: t("note_type_text"),
-						id: "text",
-						icon: "text",
-						requiresOnline: true,
-						onPress: async () => {
-							await createNote(NoteType.Text)
-						}
-					},
-					{
-						title: t("note_type_checklist"),
-						id: "checklist",
-						icon: "checklist",
-						requiresOnline: true,
-						onPress: async () => {
-							await createNote(NoteType.Checklist)
-						}
-					},
-					{
-						title: t("note_type_code"),
-						id: "code",
-						icon: "code",
-						requiresOnline: true,
-						onPress: async () => {
-							await createNote(NoteType.Code)
-						}
-					},
-					{
-						title: t("note_type_richtext"),
-						id: "richtext",
-						icon: "richtext",
-						requiresOnline: true,
-						onPress: async () => {
-							await createNote(NoteType.Rich)
-						}
-					},
-					{
-						title: t("note_type_markdown"),
-						id: "markdown",
-						icon: "markdown",
-						requiresOnline: true,
-						onPress: async () => {
-							await createNote(NoteType.Md)
-						}
-					}
-				]
+				subButtons: createNoteSubButtons(t, createNote)
 			})
 
 			menuButtons.push({
@@ -300,7 +303,7 @@ export function buildNotesHeaderRightItems({
 			if (markedSelection.length > 0) {
 				menuButtons.push({
 					id: "bulkRemoveOffline",
-					title: t("remove_offline_selected"),
+					title: t("remove_offline"),
 					icon: "trash",
 					destructive: true,
 					onPress: async () => {
@@ -310,11 +313,11 @@ export function buildNotesHeaderRightItems({
 						// not danger.
 						await runBulk({
 							items: markedSelection,
-							clearSelection: () => useNotesStore.getState().clearSelectedNotes(),
+							clearSelection: clearSelectedNotes,
 							confirm: {
-								title: t("remove_offline_selected"),
+								title: t("remove_offline"),
 								message: t("confirm_remove_notes_offline_selected"),
-								okText: t("remove_offline_selected"),
+								okText: t("remove_offline"),
 								cancelText: t("cancel"),
 								destructive: true
 							},
@@ -332,35 +335,31 @@ export function buildNotesHeaderRightItems({
 
 			// Toggles (pin / favorite) sit first — one-tap, most-tapped.
 			if (bulkActionAvailability.pin) {
-				menuButtons.push({
-					id: "bulkPin",
-					title: noteFlags.includesPinned ? t("unpin_selected") : t("pin_selected"),
-					icon: "pin",
-					requiresOnline: true,
-					onPress: async () => {
-						await runBulk({
-							items: selectedNotesLive,
-							clearSelection: () => useNotesStore.getState().clearSelectedNotes(),
-							op: n => notesLib.setPinned({ note: n, pinned: !noteFlags.includesPinned })
-						})
-					}
-				})
+				menuButtons.push(
+					bulkMenuButton({
+						t,
+						id: "bulkPin",
+						title: noteFlags.includesPinned ? t("unpin_selected") : t("pin_selected"),
+						icon: "pin",
+						items: selectedNotesLive,
+						clearSelection: clearSelectedNotes,
+						op: n => notesLib.setPinned({ note: n, pinned: !noteFlags.includesPinned })
+					})
+				)
 			}
 
 			if (bulkActionAvailability.favorite) {
-				menuButtons.push({
-					id: "bulkFavorite",
-					title: noteFlags.includesFavorited ? t("unfavorite_selected") : t("favorite_selected"),
-					icon: "heart",
-					requiresOnline: true,
-					onPress: async () => {
-						await runBulk({
-							items: selectedNotesLive,
-							clearSelection: () => useNotesStore.getState().clearSelectedNotes(),
-							op: n => notesLib.setFavorited({ note: n, favorite: !noteFlags.includesFavorited })
-						})
-					}
-				})
+				menuButtons.push(
+					bulkMenuButton({
+						t,
+						id: "bulkFavorite",
+						title: noteFlags.includesFavorited ? t("unfavorite_selected") : t("favorite_selected"),
+						icon: "heart",
+						items: selectedNotesLive,
+						clearSelection: clearSelectedNotes,
+						op: n => notesLib.setFavorited({ note: n, favorite: !noteFlags.includesFavorited })
+					})
+				)
 			}
 
 			// Offline availability. Device-side, so unlike its neighbours it is NOT gated on write
@@ -371,23 +370,21 @@ export function buildNotesHeaderRightItems({
 				const notMarked = selectedNotesLive.filter(n => markedOffline[n.uuid] !== true)
 
 				if (notMarked.length > 0) {
-					menuButtons.push({
-						id: "bulkMakeAvailableOffline",
-						title: t("make_available_offline_selected"),
-						icon: "download",
-						requiresOnline: true,
-						onPress: async () => {
-							// Foreground (blocking) unlike the drive's equivalent: note bodies are small
-							// text fetched inline, not multi-GB transfers with their own progress bar, so
-							// there is nothing for the user to watch if we return early. notesOffline.mark
-							// bounds the fan-out internally, so a large selection paces itself.
-							await runBulk({
-								items: notMarked,
-								clearSelection: () => useNotesStore.getState().clearSelectedNotes(),
-								op: n => notesOffline.mark({ note: n })
-							})
-						}
-					})
+					// Foreground (blocking) unlike the drive's equivalent: note bodies are small text
+					// fetched inline, not multi-GB transfers with their own progress bar, so there is
+					// nothing for the user to watch if we return early. notesOffline.mark bounds the
+					// fan-out internally, so a large selection paces itself.
+					menuButtons.push(
+						bulkMenuButton({
+							t,
+							id: "bulkMakeAvailableOffline",
+							title: t("make_available_offline"),
+							icon: "download",
+							items: notMarked,
+							clearSelection: clearSelectedNotes,
+							op: n => notesOffline.mark({ note: n })
+						})
+					)
 				}
 			}
 
@@ -408,7 +405,7 @@ export function buildNotesHeaderRightItems({
 								onPress: async () => {
 									await runBulk({
 										items: selectedNotesLive,
-										clearSelection: () => useNotesStore.getState().clearSelectedNotes(),
+										clearSelection: clearSelectedNotes,
 										op: async n => {
 											const content = await notesLib.getContent({ note: n })
 
@@ -444,19 +441,17 @@ export function buildNotesHeaderRightItems({
 			}
 
 			if (bulkActionAvailability.duplicate) {
-				menuButtons.push({
-					id: "bulkDuplicate",
-					title: t("duplicate_selected"),
-					icon: "duplicate",
-					requiresOnline: true,
-					onPress: async () => {
-						await runBulk({
-							items: selectedNotesLive,
-							clearSelection: () => useNotesStore.getState().clearSelectedNotes(),
-							op: n => notesLib.duplicate({ note: n })
-						})
-					}
-				})
+				menuButtons.push(
+					bulkMenuButton({
+						t,
+						id: "bulkDuplicate",
+						title: t("duplicate_selected"),
+						icon: "duplicate",
+						items: selectedNotesLive,
+						clearSelection: clearSelectedNotes,
+						op: n => notesLib.duplicate({ note: n })
+					})
+				)
 			}
 
 			if (bulkActionAvailability.export) {
@@ -485,7 +480,7 @@ export function buildNotesHeaderRightItems({
 							return
 						}
 
-						useNotesStore.getState().clearSelectedNotes()
+						clearSelectedNotes()
 
 						const result = await shareTmpFile({
 							uri: exportResult.data.file.uri,
@@ -507,107 +502,88 @@ export function buildNotesHeaderRightItems({
 			}
 
 			if (bulkActionAvailability.archive) {
-				menuButtons.push({
-					id: "bulkArchive",
-					title: t("archive_selected"),
-					icon: "archive",
-					requiresOnline: true,
-					onPress: async () => {
-						await runBulk({
-							items: selectedNotesLive,
-							clearSelection: () => useNotesStore.getState().clearSelectedNotes(),
-							op: n => notesLib.archive({ note: n })
-						})
-					}
-				})
+				menuButtons.push(
+					bulkMenuButton({
+						t,
+						id: "bulkArchive",
+						title: t("archive_selected"),
+						icon: "archive",
+						items: selectedNotesLive,
+						clearSelection: clearSelectedNotes,
+						op: n => notesLib.archive({ note: n })
+					})
+				)
 			}
 
 			if (bulkActionAvailability.restore) {
-				menuButtons.push({
-					id: "bulkRestore",
-					title: t("restore_selected"),
-					icon: "restore",
-					requiresOnline: true,
-					onPress: async () => {
-						await runBulk({
-							items: selectedNotesLive,
-							clearSelection: () => useNotesStore.getState().clearSelectedNotes(),
-							op: n => notesLib.restore({ note: n })
-						})
-					}
-				})
+				menuButtons.push(
+					bulkMenuButton({
+						t,
+						id: "bulkRestore",
+						title: t("restore_selected"),
+						icon: "restore",
+						items: selectedNotesLive,
+						clearSelection: clearSelectedNotes,
+						op: n => notesLib.restore({ note: n })
+					})
+				)
 			}
 
 			if (bulkActionAvailability.trash) {
-				menuButtons.push({
-					id: "bulkTrash",
-					title: t("trash_selected"),
-					icon: "trash",
-					destructive: true,
-					requiresOnline: true,
-					onPress: async () => {
-						await runBulk({
-							items: selectedNotesLive,
-							clearSelection: () => useNotesStore.getState().clearSelectedNotes(),
-							confirm: {
-								title: t("trash_selected"),
-								message: t("are_you_sure_trash_selected_notes"),
-								okText: t("trash"),
-								cancelText: t("cancel"),
-								destructive: true
-							},
-							op: n => notesLib.trash({ note: n })
-						})
-					}
-				})
+				menuButtons.push(
+					bulkMenuButton({
+						t,
+						id: "bulkTrash",
+						title: t("trash_selected"),
+						icon: "trash",
+						items: selectedNotesLive,
+						clearSelection: clearSelectedNotes,
+						confirm: {
+							title: t("trash_selected"),
+							message: t("are_you_sure_trash_selected_notes"),
+							okText: t("trash")
+						},
+						op: n => notesLib.trash({ note: n })
+					})
+				)
 			}
 
 			if (bulkActionAvailability.delete) {
-				menuButtons.push({
-					id: "bulkDelete",
-					title: t("delete_selected"),
-					icon: "delete",
-					destructive: true,
-					requiresOnline: true,
-					onPress: async () => {
-						await runBulk({
-							items: selectedNotesLive,
-							clearSelection: () => useNotesStore.getState().clearSelectedNotes(),
-							confirm: {
-								title: t("delete_selected"),
-								message: t("are_you_sure_delete_selected_notes"),
-								okText: t("delete"),
-								cancelText: t("cancel"),
-								destructive: true
-							},
-							op: n => notesLib.delete({ note: n })
-						})
-					}
-				})
+				menuButtons.push(
+					bulkMenuButton({
+						t,
+						id: "bulkDelete",
+						title: t("delete_selected"),
+						icon: "delete",
+						items: selectedNotesLive,
+						clearSelection: clearSelectedNotes,
+						confirm: {
+							title: t("delete_selected"),
+							message: t("are_you_sure_delete_selected_notes"),
+							okText: t("delete")
+						},
+						op: n => notesLib.delete({ note: n })
+					})
+				)
 			}
 
 			if (bulkActionAvailability.leave) {
-				menuButtons.push({
-					id: "bulkLeave",
-					title: t("leave_selected"),
-					icon: "exit",
-					destructive: true,
-					requiresOnline: true,
-					onPress: async () => {
-						await runBulk({
-							items: selectedNotesLive,
-							clearSelection: () => useNotesStore.getState().clearSelectedNotes(),
-							confirm: {
-								title: t("leave_selected"),
-								message: t("are_you_sure_leave_selected_notes"),
-								okText: t("leave"),
-								cancelText: t("cancel"),
-								destructive: true
-							},
-							op: n => notesLib.leave({ note: n })
-						})
-					}
-				})
+				menuButtons.push(
+					bulkMenuButton({
+						t,
+						id: "bulkLeave",
+						title: t("leave_selected"),
+						icon: "exit",
+						items: selectedNotesLive,
+						clearSelection: clearSelectedNotes,
+						confirm: {
+							title: t("leave_selected"),
+							message: t("are_you_sure_leave_selected_notes"),
+							okText: t("leave")
+						},
+						op: n => notesLib.leave({ note: n })
+					})
+				)
 			}
 		}
 	} else {
@@ -616,7 +592,7 @@ export function buildNotesHeaderRightItems({
 				selectAllMenuButton({
 					t,
 					allSelected: selectedTags.length === notesTags.length,
-					onClear: () => useNotesStore.getState().clearSelectedTags(),
+					onClear: clearSelectedTags,
 					onSelectAll: () => useNotesStore.getState().selectAllTags(notesTags)
 				})
 			)
@@ -625,41 +601,34 @@ export function buildNotesHeaderRightItems({
 		if (selectedTags.length > 0) {
 			const anyTagFavorited = selectedTags.some(selectedTag => selectedTag.favorite)
 
-			menuButtons.push({
-				id: "bulkFavorite",
-				title: anyTagFavorited ? t("unfavorite_selected") : t("favorite_selected"),
-				icon: "heart",
-				requiresOnline: true,
-				onPress: async () => {
-					await runBulk({
-						items: selectedTags,
-						clearSelection: () => useNotesStore.getState().clearSelectedTags(),
-						op: selectedTag => notesLib.favoriteTag({ tag: selectedTag, favorite: !anyTagFavorited })
-					})
-				}
-			})
+			menuButtons.push(
+				bulkMenuButton({
+					t,
+					id: "bulkFavorite",
+					title: anyTagFavorited ? t("unfavorite_selected") : t("favorite_selected"),
+					icon: "heart",
+					items: selectedTags,
+					clearSelection: clearSelectedTags,
+					op: selectedTag => notesLib.favoriteTag({ tag: selectedTag, favorite: !anyTagFavorited })
+				})
+			)
 
-			menuButtons.push({
-				id: "bulkDelete",
-				title: t("delete_selected"),
-				icon: "delete",
-				destructive: true,
-				requiresOnline: true,
-				onPress: async () => {
-					await runBulk({
-						items: selectedTags,
-						clearSelection: () => useNotesStore.getState().clearSelectedTags(),
-						confirm: {
-							title: t("delete_all_tags_title"),
-							message: t("delete_all_tags_confirmation"),
-							okText: t("delete_all_tags"),
-							cancelText: t("cancel"),
-							destructive: true
-						},
-						op: selectedTag => notesLib.deleteTag({ tag: selectedTag })
-					})
-				}
-			})
+			menuButtons.push(
+				bulkMenuButton({
+					t,
+					id: "bulkDelete",
+					title: t("delete_selected"),
+					icon: "delete",
+					items: selectedTags,
+					clearSelection: clearSelectedTags,
+					confirm: {
+						title: t("delete_all_tags_title"),
+						message: t("delete_all_tags_confirmation"),
+						okText: t("delete")
+					},
+					op: selectedTag => notesLib.deleteTag({ tag: selectedTag })
+				})
+			)
 		}
 	}
 
@@ -698,8 +667,8 @@ export function buildNotesHeaderRightItems({
 							// The selection belongs to the list that made it: switching views changes which
 							// notes exist to act on, so carrying it over would leave the header counting rows
 							// that are no longer on screen.
-							useNotesStore.getState().clearSelectedNotes()
-							useNotesStore.getState().clearSelectedTags()
+							clearSelectedNotes()
+							clearSelectedTags()
 
 							setNotesViewMode(mode)
 						}

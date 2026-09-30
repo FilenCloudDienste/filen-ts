@@ -3,11 +3,17 @@ import type { DriveItem } from "@/types"
 import type { DrivePath } from "@/hooks/useDrivePath"
 import useDriveStore from "@/features/drive/store/useDrive.store"
 import useDriveSelectStore, { selectDriveSelectSelection } from "@/features/drive/store/useDriveSelect.store"
-import { useShallow } from "zustand/shallow"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
 import { getPreviewType } from "@/lib/previewType"
 import { driveItemDisplayName } from "@/lib/decryption"
-import { isDriveItemDisabled, isDriveItemNavigateOnly, nextDriveSelectSelection, resolveDriveNavigationTarget, isFileItem } from "@/features/drive/driveSelectors"
+import {
+	isDriveItemDisabled,
+	isDriveItemNavigateOnly,
+	nextDriveSelectSelection,
+	resolveDriveNavigationTarget,
+	isFileItem,
+	driveItemHasLeadingCheckbox
+} from "@/features/drive/driveSelectors"
 import { router } from "@/lib/router"
 
 export default function useDriveItemInteraction({
@@ -22,21 +28,21 @@ export default function useDriveItemInteraction({
 	onPress: () => void
 	disabled: boolean
 	navigateOnly: boolean
-	isSelected: boolean
-	isSelecting: boolean
 	areDriveItemsSelected: boolean
-	isSelectedFromDriveSelect: boolean
-	onPressSelectForDriveSelect: () => void
+	hasCheckbox: boolean
+	checkbox: {
+		value: boolean
+		onValueChange: (() => void) | undefined
+		color: "transparent" | undefined
+	}
 } {
-	const isSelected = useDriveStore(
-		useShallow(state => state.selectedItems.some(i => i.data.uuid === info.item.data.uuid && i.type === info.item.type))
+	const isSelected = useDriveStore(state =>
+		state.selectedItems.some(i => i.data.uuid === info.item.data.uuid && i.type === info.item.type)
 	)
-	const areDriveItemsSelected = useDriveStore(useShallow(state => state.selectedItems.length > 0))
+	const areDriveItemsSelected = useDriveStore(state => state.selectedItems.length > 0)
 	const selectSessionId = drivePath.selectOptions?.id
-	const isSelectedFromDriveSelect = useDriveSelectStore(
-		useShallow(state =>
-			selectDriveSelectSelection(state, selectSessionId).some(i => i.data.uuid === info.item.data.uuid && i.type === info.item.type)
-		)
+	const isSelectedFromDriveSelect = useDriveSelectStore(state =>
+		selectDriveSelectSelection(state, selectSessionId).some(i => i.data.uuid === info.item.data.uuid && i.type === info.item.type)
 	)
 	const previewType = isFileItem(info.item) ? getPreviewType(driveItemDisplayName(info.item)) : null
 
@@ -103,15 +109,7 @@ export default function useDriveItemInteraction({
 			}
 
 			if (areDriveItemsSelected) {
-				useDriveStore.getState().setSelectedItems(prev => {
-					const prevSelected = prev.some(i => i.data.uuid === info.item.data.uuid)
-
-					if (prevSelected) {
-						return prev.filter(i => i.data.uuid !== info.item.data.uuid)
-					}
-
-					return [...prev.filter(i => i.data.uuid !== info.item.data.uuid), info.item]
-				})
+				useDriveStore.getState().toggleSelectedItem(info.item)
 
 				return
 			}
@@ -149,14 +147,25 @@ export default function useDriveItemInteraction({
 		}
 	}
 
+	// The picker's checkbox is disabled-gated in value, handler and colour; the bulk one is not.
+	const checkbox = drivePath.selectOptions
+		? {
+				value: disabled ? false : isSelectedFromDriveSelect,
+				onValueChange: disabled ? undefined : onPressSelectForDriveSelect,
+				color: disabled ? ("transparent" as const) : undefined
+			}
+		: {
+				value: isSelected,
+				onValueChange: onPress,
+				color: undefined
+			}
+
 	return {
 		onPress,
 		disabled,
 		navigateOnly,
-		isSelected,
-		isSelecting: (areDriveItemsSelected && !drivePath.selectOptions) || drivePath.selectOptions?.intention === "select",
 		areDriveItemsSelected,
-		isSelectedFromDriveSelect,
-		onPressSelectForDriveSelect
+		hasCheckbox: driveItemHasLeadingCheckbox({ drivePath, areDriveItemsSelected }),
+		checkbox
 	}
 }

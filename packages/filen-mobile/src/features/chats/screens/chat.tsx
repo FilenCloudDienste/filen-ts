@@ -11,12 +11,12 @@ import useChatsQuery from "@/features/chats/queries/useChats.query"
 import View, { CrossGlassContainerView } from "@/components/ui/view"
 import Text from "@/components/ui/text"
 import { useResolveClassNames } from "uniwind"
-import { cn, fastLocaleCompare, runEffect, contactDisplayName } from "@filen/shared"
+import { cn, runEffect } from "@filen/shared"
 import { useReanimatedKeyboardAnimation } from "react-native-keyboard-controller"
 import { AnimatedView } from "@/components/ui/animated"
 import { interpolate, useAnimatedStyle } from "react-native-reanimated"
 import { useStringifiedClient } from "@/lib/auth"
-import Avatar from "@/components/ui/avatar"
+import ChatAvatar from "@/features/chats/components/chatAvatar"
 import { useShallow } from "zustand/shallow"
 import Input from "@/features/chats/components/chat/input"
 import events from "@/lib/events"
@@ -38,15 +38,7 @@ const HeaderTitle = ({ chat }: { chat: TChat }) => {
 	const { t } = useTranslation()
 	const stringifiedClient = useStringifiedClient()
 
-	const participantsWithoutSelf = chat.participants.filter(p => p.userId !== stringifiedClient?.userId)
-
 	const title = stringifiedClient ? chatDisplayName(chat, stringifiedClient.userId, t("just_you")) : ""
-
-	const participantsWithAvatars = participantsWithoutSelf
-		.filter(p => p.avatar && p.avatar.startsWith("http"))
-		.sort((a, b) => fastLocaleCompare(contactDisplayName(a), contactDisplayName(b)))
-		.map(p => p.avatar)
-		.slice(0, 5)
 
 	return (
 		<View
@@ -59,25 +51,12 @@ const HeaderTitle = ({ chat }: { chat: TChat }) => {
 			)}
 		>
 			<View className="flex-row items-center -mt-1 bg-transparent">
-				{participantsWithAvatars.length === 0 ? (
-					<Avatar
-						className="shrink-0 z-10"
-						size={36}
-						immediateFallback={true}
-					/>
-				) : participantsWithoutSelf.length <= 1 ? (
-					<Avatar
-						className="shrink-0 z-10"
-						size={36}
-						source={participantsWithoutSelf.at(0)?.avatar}
-					/>
-				) : (
-					<Avatar
-						className="shrink-0 z-10"
-						size={36}
-						group={participantsWithoutSelf.length}
-					/>
-				)}
+				<ChatAvatar
+					className="shrink-0 z-10"
+					size={36}
+					participants={chat.participants}
+					selfUserId={stringifiedClient?.userId}
+				/>
 			</View>
 			<CrossGlassContainerView
 				className="bg-background-secondary border border-border py-0.5 px-1.5 rounded-full -mt-2"
@@ -135,14 +114,9 @@ const Unread = ({ chat }: { chat: TChat }) => {
 
 	const markAsRead = async () => {
 		const result = await runWithLoading(async () => {
-			return await Promise.all([
-				chats.updateLastFocusTimesNow({
-					chats: [chat]
-				}),
-				chats.markRead({
-					chat
-				})
-			])
+			await chats.markAsRead({
+				chat
+			})
 		})
 
 		if (!result.success) {

@@ -1,9 +1,5 @@
 import { vi, describe, it, expect, beforeEach } from "vitest"
 
-vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
-
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
-
 vi.mock("@filen/shared", async () => {
 	// Use the real isValidHexColor (pure fn, no native deps) and provide cn stub
 	const { isValidHexColor } = await import("@filen/shared")

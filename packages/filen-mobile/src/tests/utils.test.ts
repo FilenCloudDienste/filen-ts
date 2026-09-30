@@ -112,10 +112,6 @@ vi.mock("@filen/sdk-rs", () => ({
 	}
 }))
 
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
-
-vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
-
 vi.mock("@/lib/cache", () => ({
 	default: {}
 }))

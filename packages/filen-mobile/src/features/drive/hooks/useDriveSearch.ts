@@ -8,6 +8,7 @@ import { type DrivePath } from "@/hooks/useDrivePath"
 import driveSearch from "@/features/drive/driveSearch"
 import { useDriveSearchStore } from "@/features/drive/store/useDriveSearch.store"
 import { useDriveStore } from "@/features/drive/store/useDrive.store"
+import { isPlainDrivePath } from "@/features/drive/driveSelectors"
 import { unwrapDirMeta, unwrappedDirIntoDriveItem, unwrapFileMeta, unwrappedFileIntoDriveItem } from "@/lib/sdkUnwrap"
 import events from "@/lib/events"
 import useIsOnline from "@/hooks/useIsOnline"
@@ -27,6 +28,8 @@ export type UseDriveSearch = {
 	// Total match count reported by the SDK (may exceed `searchResults.length`, which is
 	// capped at the window CEILING) — drives the "showing first N of M" truncation footer.
 	totalCount: number
+	// The list shows the cache search's results instead of the directory listing.
+	isCacheSearch: boolean
 }
 
 const SETCONFIG_DEBOUNCE_MS = 350
@@ -119,8 +122,14 @@ export function useDriveSearch({ drivePath }: { drivePath: DrivePath }): UseDriv
 	// The open-gate: screen focused, app in front, biometric unlocked.
 	const searchLive = isFocused && unlockedForeground
 
-	const isPlainDrive = drivePath.type === "drive" && !drivePath.selectOptions
+	const isPlainDrive = isPlainDrivePath(drivePath)
 	const searchActive = searchQuery.trim().length > 0
+	// The cache-backed search is the SINGLE source for the list ONLY on the plain /drive
+	// browser with an active query — it already matched the whole subtree, so there's no
+	// merge with the directory listing and no local re-filter (that would double-filter an
+	// already-matched set). Every other context (favorites/trash/recents/select/…) keeps
+	// its local listing, locally filtered by the query — and the plain browser with no
+	// query falls through here too (empty query → filter is a no-op).
 	const isCacheSearch = isPlainDrive && searchActive
 
 	// Identity of the current search session — changes whenever the open effect must (re)open: the
@@ -619,7 +628,8 @@ export function useDriveSearch({ drivePath }: { drivePath: DrivePath }): UseDriv
 		searchResults: showResults ? searchResults : NO_RESULTS,
 		searchResultPaths: showResults ? searchResultPaths : NO_PATHS,
 		status,
-		totalCount: showResults ? totalCount : 0
+		totalCount: showResults ? totalCount : 0,
+		isCacheSearch
 	}
 }
 

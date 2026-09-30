@@ -4,7 +4,7 @@ import { normalParentUuidOf, unwrapParentUuid } from "@/lib/sdkUnwrap"
 import cache from "@/lib/cache"
 
 // Deep enough for any real tree; a longer chain is treated as unresolved.
-const MAX_ANCESTRY_DEPTH = 64
+export const MAX_ANCESTRY_DEPTH = 64
 
 type PasteGuard = {
 	// The clipboard's directories: a paste can't land in any of them or below.

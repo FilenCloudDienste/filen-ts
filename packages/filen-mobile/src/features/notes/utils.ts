@@ -197,6 +197,30 @@ export function createUntaggedTag(name: string): NoteTag {
 	}
 }
 
+/**
+ * The tag a notes screen is scoped to by its route's tagUuid: null without one, the synthesized
+ * tag for the virtual sentinel (it has no entry in the tags query), otherwise the query's tag.
+ */
+export function resolveNotesTag({
+	tagUuid,
+	tags,
+	untaggedName
+}: {
+	tagUuid: string | undefined
+	tags: readonly NoteTag[] | undefined
+	untaggedName: string
+}): NoteTag | null {
+	if (!tagUuid) {
+		return null
+	}
+
+	if (isUntaggedTagUuid(tagUuid)) {
+		return createUntaggedTag(untaggedName)
+	}
+
+	return tags?.find(noteTag => noteTag.uuid === tagUuid) ?? null
+}
+
 export function filterUntaggedNotes(notes: Note[]): Note[] {
 	return notes.filter(note => note.tags.length === 0)
 }

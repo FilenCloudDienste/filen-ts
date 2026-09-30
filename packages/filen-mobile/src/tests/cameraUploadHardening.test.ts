@@ -29,8 +29,6 @@ import { xxHash32 } from "js-xxhash"
 // @ts-expect-error __DEV__ is a React Native global
 globalThis.__DEV__ = true
 
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
-
 vi.mock("expo-media-library/next", async () => await import("@/tests/mocks/expoMediaLibrary"))
 
 vi.mock("react-native-blob-util", async () => await import("@/tests/mocks/reactNativeBlobUtil"))
@@ -139,7 +137,7 @@ vi.mock("@/features/transfers/transfers", () => ({
 }))
 
 const mockSetSyncing = vi.fn()
-const mockSetErrors = vi.fn()
+const mockAddError = vi.fn()
 const mockAddSkippedAsset = vi.fn()
 const mockRemoveSkippedAsset = vi.fn()
 const mockClearSkippedAssets = vi.fn()
@@ -148,7 +146,7 @@ vi.mock("@/features/cameraUpload/store/useCameraUpload.store", () => ({
 	default: {
 		getState: () => ({
 			setSyncing: mockSetSyncing,
-			setErrors: mockSetErrors,
+			addError: mockAddError,
 			addSkippedAsset: mockAddSkippedAsset,
 			removeSkippedAsset: mockRemoveSkippedAsset,
 			clearSkippedAssets: mockClearSkippedAssets

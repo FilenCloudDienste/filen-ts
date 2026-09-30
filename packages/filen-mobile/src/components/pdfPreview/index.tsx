@@ -1,14 +1,15 @@
 import { useEffect, useRef, useState } from "react"
 import { ActivityIndicator } from "react-native"
 import { useTranslation } from "react-i18next"
-import Ionicons from "@expo/vector-icons/Ionicons"
 import { run } from "@filen/shared"
 import Dom from "@/components/pdfPreview/dom"
 import DomKeyboardHost, { DOM_HOST_WEBVIEW_PROPS } from "@/components/domKeyboardHost"
 import Text from "@/components/ui/text"
 import { PressableScale } from "@/components/ui/pressables"
 import View from "@/components/ui/view"
-import { parsePdfExternalLink, parsePdfViewerEvent, type PdfPasswordResponse, type PdfSaveRequest } from "@/components/pdfPreview/protocol"
+import { PreviewStatusMessage } from "@/components/drivePreview/previewStatus"
+import { parsePdfViewerEvent, type PdfPasswordResponse, type PdfSaveRequest } from "@/components/pdfPreview/protocol"
+import { parseExternalLinkMessage } from "@/lib/domExternalLink"
 import useChunkedWriteTarget from "@/hooks/useChunkedWriteTarget"
 import { MAX_PDF_BYTES } from "@/components/pdfPreview/constants"
 import { PDF_MAGIC } from "@/lib/rangeTransfer"
@@ -271,7 +272,7 @@ const PdfPreview = ({
 								return
 							}
 
-							const externalUrl = parsePdfExternalLink(parsed)
+							const externalUrl = parseExternalLinkMessage(parsed)
 
 							if (externalUrl !== null) {
 								openExternalLink(externalUrl).catch(err => {
@@ -421,16 +422,10 @@ const PdfPreview = ({
 							<Text className="text-sm leading-5 text-primary">{t("enter_pdf_password")}</Text>
 						</PressableScale>
 					) : (
-						<>
-							<Ionicons
-								name="warning-outline"
-								size={48}
-								color="#9ca3af"
-							/>
-							<Text className="mt-4 text-center text-sm leading-5 text-muted-foreground">
-								{phase === "unsupported" ? t("pdf_preview_unsupported") : t("unable_to_load_pdf")}
-							</Text>
-						</>
+						<PreviewStatusMessage
+							icon="warning-outline"
+							text={phase === "unsupported" ? t("pdf_preview_unsupported") : t("unable_to_load_pdf")}
+						/>
 					)}
 				</View>
 			)}

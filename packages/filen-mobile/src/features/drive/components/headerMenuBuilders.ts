@@ -350,7 +350,7 @@ export function buildBulkActionMenu({
 	) {
 		menuButtons.push({
 			id: "bulkSaveToPhotos",
-			title: t("save_to_photos_selected"),
+			title: t("save_to_photos"),
 			icon: "image",
 			requiresOnline: true,
 			onPress: async () => {
@@ -378,7 +378,7 @@ export function buildBulkActionMenu({
 	) {
 		menuButtons.push({
 			id: "bulkShareFilenUser",
-			title: t("share_filen_user_selected"),
+			title: t("share_filen_user"),
 			icon: "users",
 			requiresOnline: true,
 			onPress: async () => {
@@ -449,7 +449,7 @@ export function buildBulkActionMenu({
 	) {
 		menuButtons.push({
 			id: "bulkMakeOffline",
-			title: t("make_available_offline_selected"),
+			title: t("make_available_offline"),
 			icon: "archive",
 			requiresOnline: true,
 			onPress: async () => {
@@ -495,7 +495,7 @@ export function buildBulkActionMenu({
 		menuButtons.push(
 			confirmBulkButton({
 				id: "bulkRemoveOffline",
-				title: t("remove_offline_selected"),
+				title: t("remove_offline"),
 				icon: "trash",
 				message: t("confirm_remove_offline_selected"),
 				okText: t("remove_offline"),

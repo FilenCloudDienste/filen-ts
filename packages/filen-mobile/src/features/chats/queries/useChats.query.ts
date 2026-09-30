@@ -37,6 +37,12 @@ export const useChatsQuery = chatsQuery.useQuery
 export const chatsQueryUpdate = chatsQuery.update
 export const chatsQueryGet = chatsQuery.get
 
+export function replaceChatInCache(chat: Chat): void {
+	chatsQueryUpdate({
+		updater: prev => prev.map(c => (c.uuid === chat.uuid ? chat : c))
+	})
+}
+
 // Through the query registry rather than the bare fetchData, so a mounted observer's in-flight read is shared.
 export function chatsQueryFetch(): Promise<Awaited<ReturnType<typeof fetchData>>> {
 	return queryClient.fetchQuery({

@@ -17,16 +17,13 @@ import { type AnyFile } from "@filen/sdk-rs"
 function renderLinkMedia({
 	link,
 	fromSelf,
-	layout,
+	maxWidth,
 	getFileUrl,
 	onLoadFailed
 }: {
 	link: SuccessfulLink
 	fromSelf: boolean
-	layout: {
-		width: number
-		height: number
-	}
+	maxWidth: number
 	getFileUrl: ((file: AnyFile) => string) | null
 	onLoadFailed?: () => void
 }) {
@@ -38,7 +35,7 @@ function renderLinkMedia({
 				<ImageAttachment
 					url={media.url}
 					name={media.name}
-					layout={layout}
+					maxWidth={maxWidth}
 					onLoadFailed={onLoadFailed}
 					linked={media.linked ?? undefined}
 				/>
@@ -50,7 +47,7 @@ function renderLinkMedia({
 				<VideoAttachment
 					url={media.url}
 					name={media.name}
-					layout={layout}
+					maxWidth={maxWidth}
 					linked={media.linked ?? undefined}
 					fromSelf={fromSelf}
 				/>
@@ -61,7 +58,7 @@ function renderLinkMedia({
 			return (
 				<InternalAttachment
 					data={media.linked}
-					layout={layout}
+					maxWidth={maxWidth}
 					fromSelf={fromSelf}
 				/>
 			)
@@ -78,16 +75,13 @@ export const Attachments = ({
 	message,
 	fromSelf,
 	single,
-	layout
+	maxWidth
 }: {
 	chat: TChat
 	message: ChatMessageWithInflightId
 	fromSelf: boolean
 	single: boolean
-	layout: {
-		width: number
-		height: number
-	}
+	maxWidth: number
 }) => {
 	const getHttpProviderFileUrl = useHttpStore(useShallow(state => state.getFileUrl))
 	const mappingHelper = useMappingHelper()
@@ -126,7 +120,7 @@ export const Attachments = ({
 				? renderLinkMedia({
 						link,
 						fromSelf,
-						layout,
+						maxWidth,
 						getFileUrl: getHttpProviderFileUrl,
 						onLoadFailed: () => setSingleAttachmentLoadFailed(true)
 					})
@@ -163,7 +157,7 @@ export const Attachments = ({
 							? renderLinkMedia({
 									link,
 									fromSelf,
-									layout,
+									maxWidth,
 									getFileUrl: getHttpProviderFileUrl
 								})
 							: null}

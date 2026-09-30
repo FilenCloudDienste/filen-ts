@@ -5,6 +5,7 @@ import { socketCoveredRefetchOnMount } from "@/queries/socketSession"
 import auth from "@/lib/auth"
 import { type Note } from "@/types"
 import { toSignalOpts } from "@/lib/signals"
+import { wrapSdkNote } from "@/features/notes/utils"
 
 export const BASE_QUERY_KEY = "useNotesQuery"
 
@@ -27,12 +28,7 @@ export async function fetchData(params?: { signal?: AbortSignal }) {
 		toSignalOpts(params?.signal)
 	)
 
-	const notes: Note[] = all.map(n => ({
-		...n,
-		undecryptable: n.encryptionKey === undefined
-	}))
-
-	return notes
+	return all.map(wrapSdkNote)
 }
 
 const notesQuery = createFixedKeyQuery({
@@ -43,6 +39,16 @@ const notesQuery = createFixedKeyQuery({
 
 export const useNotesQuery = notesQuery.useQuery
 export const notesQueryGet = notesQuery.get
+
+// A failed refetch keeps the data and only flips `status` (#103) — resolve from the cached list so an
+// offline note still opens.
+export function useCachedNote(uuid: string | undefined): Note | null {
+	const query = useNotesQuery({
+		enabled: false
+	})
+
+	return uuid ? (query.data?.find(n => n.uuid === uuid) ?? null) : null
+}
 
 // Bumped on every list write. Snapshot-replacers (the socket New handler's fetched list) compare
 // it around their network round-trip: a write landing mid-fetch means the snapshot is stale and
@@ -57,6 +63,29 @@ export function notesQueryUpdate(params: { updater: QueryUpdater<Awaited<ReturnT
 	notesListGeneration++
 
 	notesQuery.update(params)
+}
+
+export function notesQueryReplace(note: Note) {
+	notesQueryUpdate({
+		updater: prev => prev.map(n => (n.uuid === note.uuid ? note : n))
+	})
+}
+
+// Patches onto the LIVE cache entry rather than a closure-captured copy: concurrent writers (bulk
+// Promise.all, socket events) would otherwise each rebuild from the same stale base and the last
+// write would revert the others until the next refetch.
+export function notesQueryPatch(uuid: string, patch: (live: Note) => Partial<Note>) {
+	notesQueryUpdate({
+		updater: prev =>
+			prev.map(n =>
+				n.uuid === uuid
+					? {
+							...n,
+							...patch(n)
+						}
+					: n
+			)
+	})
 }
 
 export default useNotesQuery

@@ -228,10 +228,7 @@ function FileProviderSettings() {
 			/>
 			<ScreenBody>
 				<SettingsScrollView contentContainerClassName="px-4 gap-2">
-					<Group
-						className="bg-background-tertiary"
-						buttons={groupButtons}
-					/>
+					<Group buttons={groupButtons} />
 					<Text className="text-sm text-muted-foreground px-4 leading-5">{featureDescription}</Text>
 				</SettingsScrollView>
 			</ScreenBody>

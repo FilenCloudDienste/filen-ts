@@ -4,7 +4,6 @@ import crypto from "crypto"
 
 // authFileKey imports native/platform modules at the top; stub them so the pure seal/open crypto can
 // be exercised in a node env. sealAuthFile/openAuthFile only use `crypto` (real node) + Buffer.
-vi.mock("react-native", () => ({ Platform: { OS: "ios" } }))
 vi.mock("react-native-quick-crypto", () => ({ Buffer }))
 vi.mock("expo-secure-store", () => ({
 	getItemAsync: vi.fn(),

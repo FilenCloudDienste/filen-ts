@@ -8,16 +8,13 @@ import { type InternalLinkData, openAttachmentPreview } from "@/features/chats/u
 export const VideoAttachment = ({
 	url,
 	name,
-	layout,
+	maxWidth,
 	linked,
 	fromSelf
 }: {
 	url: string
 	name: string
-	layout: {
-		width: number
-		height: number
-	}
+	maxWidth: number
 	linked?: InternalLinkData
 	fromSelf: boolean
 }) => {
@@ -26,11 +23,9 @@ export const VideoAttachment = ({
 		p.staysActiveInBackground = false
 	})
 
-	const maxWH = layout.width * 0.75 - 32 - 24
-
 	const style = {
-		width: maxWH,
-		height: maxWH,
+		width: maxWidth,
+		height: maxWidth,
 		borderRadius: 16
 	}
 

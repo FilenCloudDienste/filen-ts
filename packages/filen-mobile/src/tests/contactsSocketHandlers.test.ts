@@ -28,8 +28,6 @@ const { capturedUpdaters, mockContactRequestsQueryUpdate } = vi.hoisted(() => {
 // Module mocks — must be declared before any imports that pull in the modules
 // ---------------------------------------------------------------------------
 
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
-
 vi.mock("@/features/contacts/queries/useContactRequests.query", () => ({
 	contactRequestsQueryUpdate: mockContactRequestsQueryUpdate
 }))

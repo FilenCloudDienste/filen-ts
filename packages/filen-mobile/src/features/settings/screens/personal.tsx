@@ -118,7 +118,6 @@ function Personal() {
 			<ScreenBody>
 				<SettingsScrollView>
 					<Group
-						className="bg-background-tertiary"
 						buttons={[
 							makeFieldButton({
 								field: "firstName",

@@ -1,6 +1,7 @@
 import { type Chat, type ChatMessage } from "@/types"
 import { type BlockedUsers, EMPTY_BLOCKED_USERS, isBlocked, isMessageUnreadCore, chatHasUnreadCore } from "@filen/shared"
 import type { ChatMessageWithInflightId } from "@/features/chats/store/useChats.store"
+import { NO_INFLIGHT_ID } from "@/features/chats/chatsWrap"
 
 /**
  * Aggregated flags for a Chats selection, computed in a single pass.
@@ -88,7 +89,7 @@ export function cachedMessagesMatchLastMessage(chat: Chat, messages: readonly Ch
 	let newest: ChatMessageWithInflightId | undefined
 
 	for (const message of messages) {
-		if (message.inflightId !== "" && message.inner.uuid === message.inflightId) {
+		if (message.inflightId !== NO_INFLIGHT_ID && message.inner.uuid === message.inflightId) {
 			continue
 		}
 
@@ -126,6 +127,14 @@ export function isOneOnOneWithBlocked(chat: Chat, selfUserId: bigint | undefined
 	const other = others[0]
 
 	return other !== undefined && isBlocked(other, blocked)
+}
+
+/**
+ * The chats the list renders: owned by us or holding a message, minus 1:1s with a blocked user.
+ * The header's select-all and flags read the same set, so both call this.
+ */
+export function visibleChats(chats: readonly Chat[], selfUserId: bigint | undefined, blocked: BlockedUsers): Chat[] {
+	return chats.filter(chat => (chat.ownerId === selfUserId || chat.lastMessage) && !isOneOnOneWithBlocked(chat, selfUserId, blocked))
 }
 
 /**

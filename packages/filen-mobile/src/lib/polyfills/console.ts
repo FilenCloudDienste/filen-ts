@@ -17,52 +17,30 @@ const original = {
 // methods (as before); the difference is that the output now lands in the on-disk logger instead of
 // being discarded. The console object is mutated IN PLACE (rather than replaced with a spread clone)
 // so non-leveled methods (group/table/assert/dir/…) are preserved untouched.
-global.console.log = (...args: unknown[]): void => {
-	logger.captureConsole("debug", args)
+// Pass args RAW: the logger's enqueue-time freeze (freezeForLog, in serializer.ts) snapshots any live
+// FilenSdkError into plain { __sdkError } fields, identically for direct logger.* calls and this
+// tee — one code path, one shape. (Previously the tee pre-normalized here; that duplicated the
+// logic and emitted a different, numeric-kind shape.)
+for (const [method, level] of [
+	["log", "debug"],
+	["info", "info"],
+	["debug", "debug"],
+	["trace", "debug"],
+	["warn", "warn"]
+] as const) {
+	const forward = original[method]
 
-	if (__DEV__) {
-		original.log(...args)
-	}
-}
+	global.console[method] = (...args: unknown[]): void => {
+		logger.captureConsole(level, args)
 
-global.console.info = (...args: unknown[]): void => {
-	logger.captureConsole("info", args)
-
-	if (__DEV__) {
-		original.info(...args)
-	}
-}
-
-global.console.debug = (...args: unknown[]): void => {
-	logger.captureConsole("debug", args)
-
-	if (__DEV__) {
-		original.debug(...args)
-	}
-}
-
-global.console.trace = (...args: unknown[]): void => {
-	logger.captureConsole("debug", args)
-
-	if (__DEV__) {
-		original.trace(...args)
-	}
-}
-
-global.console.warn = (...args: unknown[]): void => {
-	// Pass args RAW: the logger's enqueue-time freeze (freezeForLog, in serializer.ts) snapshots any live
-	// FilenSdkError into plain { __sdkError } fields, identically for direct logger.* calls and this
-	// tee — one code path, one shape. (Previously the tee pre-normalized here; that duplicated the
-	// logic and emitted a different, numeric-kind shape.)
-	logger.captureConsole("warn", args)
-
-	if (__DEV__) {
-		original.warn(...args)
+		if (__DEV__) {
+			forward(...args)
+		}
 	}
 }
 
 global.console.error = (...args: unknown[]): void => {
-	// Pass args RAW — see the note on console.warn above (the logger freeze handles SDK errors).
+	// Pass args RAW — see the note on the loop above (the logger freeze handles SDK errors).
 	logger.captureConsole("error", args)
 
 	if (!__DEV__) {

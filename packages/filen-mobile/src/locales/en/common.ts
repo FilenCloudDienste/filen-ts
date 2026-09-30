@@ -76,7 +76,7 @@ export const common = {
 	view: "View",
 	/** Generic action: edit an item */
 	edit: "Edit",
-	/** Generic action: rename an item */
+	/** Generic action: rename an item; also the rename dialog title and confirm button */
 	rename: "Rename",
 	/** Generic action: save changes */
 	save: "Save",
@@ -156,8 +156,6 @@ export const common = {
 	trash_selected: "Trash selected",
 	/** Selection-mode bulk action: download every selected item to the device */
 	download_selected: "Download selected",
-	/** Selection-mode bulk action: make every selected item available offline */
-	make_available_offline_selected: "Make available offline",
 	/** Error when a selected item's parent directory can't be resolved for offline storage */
 	offline_location_unavailable: "Couldn't determine the location of a selected item. Open its directory once, then try again.",
 	/** Selection-mode bulk action: mark every selected item as a favorite */

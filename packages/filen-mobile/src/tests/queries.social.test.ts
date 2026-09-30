@@ -26,10 +26,6 @@ const { mockGetSdkClients, mockAuthedSdkClient, mockParseFilenPublicLink } = vi.
 // Module mocks — order matters: boundary mocks BEFORE real-module imports
 // ---------------------------------------------------------------------------
 
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
-
-vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
-
 vi.mock("@filen/shared", async () => {
 	const real = await import("@/tests/mocks/filenShared")
 

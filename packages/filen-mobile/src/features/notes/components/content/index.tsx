@@ -14,7 +14,11 @@ import { ActivityIndicator, Platform } from "react-native"
 import { useResolveClassNames } from "uniwind"
 import TextEditor from "@/components/textEditor"
 import { useStringifiedClient } from "@/lib/auth"
-import useNotesInflightStore, { type InflightContent } from "@/features/notes/store/useNotesInflight.store"
+import useNotesInflightStore, {
+	type InflightContent,
+	newestInflightEntry,
+	useNoteHasInflight
+} from "@/features/notes/store/useNotesInflight.store"
 import useNotesOfflineStore from "@/features/notes/store/useNotesOffline.store"
 import useTextEditorStore from "@/stores/useTextEditor.store"
 import { useShallow } from "zustand/shallow"
@@ -155,13 +159,6 @@ function getInflightContentForNote(noteUuid: string): InflightContent[string] | 
 	return inflightContent[noteUuid]
 }
 
-function newestInflightEntry(noteUuid: string): InflightContent[string][number] | undefined {
-	return (getInflightContentForNote(noteUuid) ?? []).reduce<InflightContent[string][number] | undefined>(
-		(latest, entry) => (latest === undefined || entry.timestamp > latest.timestamp ? entry : latest),
-		undefined
-	)
-}
-
 // A note's newest local content: its newest unsynced edit, else what its content query holds (the last push
 // or the seed).
 function latestLocalNoteContent(noteUuid: string): string | undefined {
@@ -169,13 +166,13 @@ function latestLocalNoteContent(noteUuid: string): string | undefined {
 		uuid: noteUuid
 	})
 
-	return newestInflightEntry(noteUuid)?.content ?? (typeof cached === "string" ? cached : undefined)
+	return newestInflightEntry(getInflightContentForNote(noteUuid))?.content ?? (typeof cached === "string" ? cached : undefined)
 }
 
 // Whether `cloud` differs from what this device last knew the note to hold: its unsynced edits' base, else
 // the content cache (the last push or read).
 export function movedPastBase(noteUuid: string, cloud: string): boolean {
-	const newest = newestInflightEntry(noteUuid)
+	const newest = newestInflightEntry(getInflightContentForNote(noteUuid))
 
 	if (newest?.baseContentHash !== undefined) {
 		return hashNoteContent(cloud) !== newest.baseContentHash
@@ -194,7 +191,7 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 	const insets = useSafeAreaInsets()
 	const headerHeight = useHeaderHeight()
 	const isOnline = useIsOnline()
-	const hasInflightContent = useNotesInflightStore(useShallow(state => (state.inflightContent[note.uuid] ?? []).length > 0))
+	const hasInflightContent = useNoteHasInflight(note.uuid)
 	const [hideCompleted] = useChecklistHideCompleted(note.uuid)
 
 	// Gate the query on three conditions to make editing race-free:
@@ -245,37 +242,7 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 	// / contentUnavailable below) rather than an editable empty editor whose first keystroke or
 	// checklist tap could push empty over the real note. (The pre-refactor "persisted list copy"
 	// fallback is gone — the notes list query is metadata-only and carries no content.)
-	const editorSeed = (() => {
-		if (history) {
-			return history.content
-		}
-
-		const entries = getInflightContentForNote(note.uuid)
-
-		if (entries && entries.length > 0) {
-			let latest: (typeof entries)[number] | null = null
-
-			for (const entry of entries) {
-				if (!latest || entry.timestamp > latest.timestamp) {
-					latest = entry
-				}
-			}
-
-			if (latest) {
-				return latest.content
-			}
-		}
-
-		const cached = noteContentQueryGet({
-			uuid: note.uuid
-		})
-
-		if (typeof cached === "string") {
-			return cached
-		}
-
-		return null
-	})()
+	const editorSeed = history ? history.content : (latestLocalNoteContent(note.uuid) ?? null)
 
 	const initialValue = editorSeed
 
@@ -364,21 +331,7 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 	// (enabled gate above) so refetch() can remount the editor with the fresh server content.
 	const reloadFromServer = useCallback(async () => {
 		const result = await run(async () => {
-			useNotesInflightStore.getState().setInflightContent(prev => {
-				const updated = {
-					...prev
-				}
-
-				delete updated[note.uuid]
-
-				return updated
-			})
-
-			// VC3: this clear happens outside a sync pass, so reset the note's strike count
-			// too — otherwise a stale count leaks into the next editing session.
-			sync.clearRejections(note.uuid)
-
-			await sync.flushToDisk(useNotesInflightStore.getState().inflightContent)
+			await sync.discardInflight(note.uuid)
 
 			return await refetch()
 		})
@@ -414,7 +367,7 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 			}
 
 			// Already answered: the unsynced edits were kept over exactly this content.
-			if (content !== undefined && newestInflightEntry(note.uuid)?.baseContentHash === hashNoteContent(content)) {
+			if (content !== undefined && newestInflightEntry(getInflightContentForNote(note.uuid))?.baseContentHash === hashNoteContent(content)) {
 				return
 			}
 

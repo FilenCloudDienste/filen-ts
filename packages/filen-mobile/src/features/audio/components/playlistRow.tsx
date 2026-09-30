@@ -1,25 +1,26 @@
 import { useState } from "react"
 import { Platform } from "react-native"
 import { router } from "@/lib/router"
-import { run, cn } from "@filen/shared"
-import alerts from "@/lib/alerts"
+import { cn } from "@filen/shared"
 import View from "@/components/ui/view"
 import AudioThumbnail from "@/components/ui/audioThumbnail"
 import Text from "@/components/ui/text"
-import audio, { type PlaylistWithItems, useAudioQueue } from "@/features/audio/audio"
+import { type PlaylistWithItems, useAudioQueue } from "@/features/audio/audio"
 import { PressableScale } from "@/components/ui/pressables"
 import { simpleDateNoTime } from "@/lib/time"
-import { confirmPrompt, inputPrompt } from "@/lib/promptFlow"
-import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import Menu, { type MenuButton } from "@/components/ui/menu"
-import { selectDriveItems } from "@/features/drive/driveSelectSession"
+import {
+	playlistPlaybackButtons,
+	addTracksButton,
+	renamePlaylistButton,
+	deletePlaylistButton
+} from "@/features/audio/components/playlistMenuButtons"
 import usePlaylistsStore from "@/features/audio/store/usePlaylists.store"
 import { useShallow } from "zustand/shallow"
 import { Checkbox } from "@/components/ui/checkbox"
 import { useTranslation } from "react-i18next"
 import { type TFunction } from "i18next"
 import type { SelectOptions } from "@/features/audio/playlistsSelect"
-import logger from "@/lib/logger"
 
 export function buildPlaylistRowButtons({ t, playlist }: { t: TFunction; playlist: PlaylistWithItems }): MenuButton[] {
 	return [
@@ -31,232 +32,10 @@ export function buildPlaylistRowButtons({ t, playlist }: { t: TFunction; playlis
 				usePlaylistsStore.getState().toggleSelectedPlaylist(playlist)
 			}
 		},
-		...(playlist.files.length > 0
-			? ([
-					{
-						id: "play",
-						title: t("play"),
-						icon: "play",
-						onPress: async () => {
-							const result = await runWithLoading(async () => {
-								// Plain play is deterministically in-order: clear any inherited shuffle
-								// mode so a previous "Shuffle play" doesn't bleed into this playback.
-								await audio.setShuffleEnabled(false)
-								await audio.clearQueue()
-
-								const { droppedUndecryptable } = await audio.replaceQueue({
-									items: playlist.files.map(file => ({
-										item: file.item,
-										playlistUuid: playlist.uuid
-									})),
-									startingPosition: 0
-								})
-
-								if (droppedUndecryptable) {
-									alerts.normal(t("cannot_decrypt_toast"))
-								}
-
-								await audio.play()
-							})
-
-							if (!result.success) {
-								logger.error("audio", "play playlist failed", { playlistUuid: playlist.uuid, error: result.error })
-								alerts.error(result.error)
-
-								return
-							}
-						}
-					},
-					{
-						id: "shufflePlay",
-						title: t("shuffle_play"),
-						icon: "listBullet",
-						onPress: async () => {
-							const result = await runWithLoading(async () => {
-								await audio.setShuffleEnabled(true)
-
-								// Start on a random track so "Shuffle play" actually begins shuffled —
-								// replaceQueue pins startingPosition first in the shuffle order and play()
-								// loads it; with position 0 the first track would always be track #1.
-								const { droppedUndecryptable } = await audio.replaceQueue({
-									items: playlist.files.map(file => ({
-										item: file.item,
-										playlistUuid: playlist.uuid
-									})),
-									startingPosition: Math.floor(Math.random() * playlist.files.length)
-								})
-
-								if (droppedUndecryptable) {
-									alerts.normal(t("cannot_decrypt_toast"))
-								}
-
-								await audio.play()
-							})
-
-							if (!result.success) {
-								logger.error("audio", "shuffle play playlist failed", { playlistUuid: playlist.uuid, error: result.error })
-								alerts.error(result.error)
-
-								return
-							}
-						}
-					},
-					{
-						id: "addToQueue",
-						title: t("add_to_queue"),
-						icon: "queue",
-						onPress: async () => {
-							const result = await runWithLoading(async () => {
-								const queueLengthBefore = audio.getQueue().length
-
-								const addedResults = await Promise.all(
-									playlist.files.map(async file => {
-										return await audio.addToQueue({
-											item: {
-												playlistUuid: playlist.uuid,
-												item: file.item
-											}
-										})
-									})
-								)
-
-								if (addedResults.some(added => !added)) {
-									alerts.normal(t("cannot_decrypt_toast"))
-								}
-
-								if (queueLengthBefore === 0) {
-									await audio.play()
-								}
-							})
-
-							if (!result.success) {
-								logger.error("audio", "add playlist to queue failed", { playlistUuid: playlist.uuid, error: result.error })
-								alerts.error(result.error)
-
-								return
-							}
-						}
-					}
-				] satisfies MenuButton[])
-			: []),
-		{
-			id: "addTracks",
-			title: t("add_tracks"),
-			icon: "plus",
-			requiresOnline: true,
-			onPress: async () => {
-				const selectDriveItemsResult = await run(async () => {
-					return await selectDriveItems({
-						type: "multiple",
-						files: true,
-						directories: false,
-						items: playlist.files.map(file => file.item),
-						previewType: "audio"
-					})
-				})
-
-				if (!selectDriveItemsResult.success) {
-					logger.error("audio", "drive item selection failed in add-tracks flow", { playlistUuid: playlist.uuid, error: selectDriveItemsResult.error })
-					alerts.error(selectDriveItemsResult.error)
-
-					return
-				}
-
-				if (selectDriveItemsResult.data.cancelled) {
-					return
-				}
-
-				const items = selectDriveItemsResult.data.selectedItems
-
-				const result = await runWithLoading(async () => {
-					await audio.addFilesToPlaylist({
-						playlist,
-						items
-					})
-				})
-
-				if (!result.success) {
-					logger.error("audio", "addFilesToPlaylist failed", { playlistUuid: playlist.uuid, error: result.error })
-					alerts.error(result.error)
-
-					return
-				}
-			}
-		},
-		{
-			id: "rename",
-			title: t("rename"),
-			icon: "edit",
-			requiresOnline: true,
-			onPress: async () => {
-				const newName = await inputPrompt(
-					{
-						title: t("rename_playlist"),
-						message: t("enter_playlist_name"),
-						placeholder: t("playlist_name_placeholder"),
-						cancelText: t("cancel"),
-						okText: t("rename"),
-						defaultValue: playlist.name
-					},
-					{ tag: "audio", message: "rename playlist prompt failed", level: "error", context: { playlistUuid: playlist.uuid } },
-					{ trim: true }
-				)
-
-				if (newName === null) {
-					return
-				}
-
-				const result = await runWithLoading(async () => {
-					await audio.renamePlaylist({
-						playlist,
-						name: newName
-					})
-				})
-
-				if (!result.success) {
-					logger.error("audio", "rename playlist failed", { playlistUuid: playlist.uuid, error: result.error })
-					alerts.error(result.error)
-
-					return
-				}
-			}
-		},
-		{
-			id: "delete",
-			title: t("delete"),
-			icon: "delete",
-			destructive: true,
-			requiresOnline: true,
-			onPress: async () => {
-				const confirmed = await confirmPrompt(
-					{
-						title: t("delete_playlist"),
-						message: t("delete_playlist_confirm"),
-						cancelText: t("cancel"),
-						okText: t("delete"),
-						destructive: true
-					},
-					{ tag: "audio", message: "delete playlist prompt failed", level: "error", context: { playlistUuid: playlist.uuid } }
-				)
-
-				if (!confirmed) {
-					return
-				}
-
-				const result = await runWithLoading(async () => {
-					await audio.deletePlaylist({
-						playlist
-					})
-				})
-
-				if (!result.success) {
-					logger.error("audio", "delete playlist failed", { playlistUuid: playlist.uuid, error: result.error })
-					alerts.error(result.error)
-
-					return
-				}
-			}
-		}
+		...playlistPlaybackButtons({ t, playlist }),
+		addTracksButton({ t, playlist, id: "addTracks" }),
+		renamePlaylistButton({ t, playlist, title: t("rename") }),
+		deletePlaylistButton({ t, playlist, title: t("delete") })
 	]
 }
 

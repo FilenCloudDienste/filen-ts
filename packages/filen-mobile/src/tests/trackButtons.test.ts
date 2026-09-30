@@ -5,8 +5,6 @@ vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 // Mocks — must be declared before any import of the module under test
 // ---------------------------------------------------------------------------
 
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
-vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
 vi.mock("@filen/shared", async () => await import("@/tests/mocks/filenShared"))
 
 vi.mock("@/lib/alerts", () => ({
@@ -38,6 +36,23 @@ vi.mock("@/features/audio/audio", () => ({
 
 vi.mock("@/features/audio/playlistsSelect", () => ({
 	selectPlaylists: vi.fn()
+}))
+
+// playTrack's shared helper lives in playlistMenuButtons, which imports these at module level.
+vi.mock("expo-router", () => ({
+	router: { push: vi.fn(), back: vi.fn() }
+}))
+
+vi.mock("@/lib/prompts", () => ({
+	default: { alert: vi.fn(), input: vi.fn() }
+}))
+
+vi.mock("@/features/drive/driveSelectSession", () => ({
+	selectDriveItems: vi.fn()
+}))
+
+vi.mock("@/lib/bulkOps", () => ({
+	runBulk: vi.fn()
 }))
 
 vi.mock("@/features/audio/store/usePlaylistTracks.store", () => ({

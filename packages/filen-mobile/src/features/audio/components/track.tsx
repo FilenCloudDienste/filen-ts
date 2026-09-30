@@ -10,6 +10,7 @@ import useAudioMetadataQuery from "@/features/audio/queries/useAudioMetadata.que
 import AudioThumbnail from "@/components/ui/audioThumbnail"
 import { useReorderableDrag } from "react-native-reorderable-list"
 import { selectPlaylists } from "@/features/audio/playlistsSelect"
+import { replaceQueueAndPlay } from "@/features/audio/components/playlistMenuButtons"
 import Menu, { type MenuButton } from "@/components/ui/menu"
 import EllipsisMenuTrigger from "@/components/ui/ellipsisMenuTrigger"
 import usePlaylistTracksStore from "@/features/audio/store/usePlaylistTracks.store"
@@ -27,19 +28,11 @@ async function playTrack({ t, track, playlist }: { t: TFunction; track: TrackTyp
 	const result = await runWithLoading(async () => {
 		const index = playlist.files.findIndex(f => f.uuid === track.uuid)
 
-		const { droppedUndecryptable } = await audio.replaceQueue({
-			items: playlist.files.map(file => ({
-				item: file.item,
-				playlistUuid: playlist.uuid
-			})),
+		await replaceQueueAndPlay({
+			t,
+			playlist,
 			startingPosition: index >= 0 ? index : 0
 		})
-
-		if (droppedUndecryptable) {
-			alerts.normal(t("cannot_decrypt_toast"))
-		}
-
-		await audio.play()
 	})
 
 	if (!result.success) {

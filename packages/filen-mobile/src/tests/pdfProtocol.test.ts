@@ -1,68 +1,11 @@
 import { describe, expect, test } from "vitest"
-import { PDF_EVENT_KEY, PDF_EXTERNAL_LINK_KEY, parsePdfExternalLink, parsePdfViewerEvent } from "@/components/pdfPreview/protocol"
-
-function linkEnvelope(url: unknown): unknown {
-	return {
-		[PDF_EXTERNAL_LINK_KEY]: {
-			url
-		}
-	}
-}
+import { PDF_EVENT_KEY, parsePdfViewerEvent } from "@/components/pdfPreview/protocol"
 
 function eventEnvelope(event: unknown): unknown {
 	return {
 		[PDF_EVENT_KEY]: event
 	}
 }
-
-/**
- * The WebView is the untrusted side of this bridge. Everything here is about what the native side
- * refuses to act on, not about what the viewer intends to send.
- */
-describe("parsePdfExternalLink", () => {
-	test("accepts an allowlisted external URL", () => {
-		expect(parsePdfExternalLink(linkEnvelope("https://filen.io/a?b=c"))).toBe("https://filen.io/a?b=c")
-		expect(parsePdfExternalLink(linkEnvelope("mailto:someone@example.com"))).toBe("mailto:someone@example.com")
-	})
-
-	test("rejects script and data schemes however they are spelled", () => {
-		for (const url of [
-			"javascript:alert(1)",
-			"JavaScript:alert(1)",
-			"  javascript:alert(1)  ",
-			"java\tscript:alert(1)",
-			"javascript:alert(1)",
-			"data:text/html;base64,PHNjcmlwdD4=",
-			"vbscript:msgbox(1)"
-		]) {
-			expect(parsePdfExternalLink(linkEnvelope(url))).toBeNull()
-		}
-	})
-
-	test("rejects ftp, which pdf.js itself permits and this app does not", () => {
-		expect(parsePdfExternalLink(linkEnvelope("ftp://example.com/x"))).toBeNull()
-	})
-
-	test("rejects local and protocol-relative targets", () => {
-		for (const url of ["file:///etc/passwd", "content://media/external/file/1", "intent://x#Intent;end", "blob:abc", "//example.com", "/etc/passwd"]) {
-			expect(parsePdfExternalLink(linkEnvelope(url))).toBeNull()
-		}
-	})
-
-	test("rejects a value that only starts with an allowlisted scheme", () => {
-		// The allowlist is a prefix test, so a smuggled tail must be caught by the control-character
-		// check rather than by the scheme test.
-		expect(parsePdfExternalLink(linkEnvelope("tel:+1\njavascript:alert(1)"))).toBeNull()
-	})
-
-	test("ignores anything that is not a link envelope", () => {
-		expect(parsePdfExternalLink(null)).toBeNull()
-		expect(parsePdfExternalLink("https://filen.io")).toBeNull()
-		expect(parsePdfExternalLink({})).toBeNull()
-		expect(parsePdfExternalLink(linkEnvelope(42))).toBeNull()
-		expect(parsePdfExternalLink({ [PDF_EXTERNAL_LINK_KEY]: "https://filen.io" })).toBeNull()
-	})
-})
 
 describe("parsePdfViewerEvent", () => {
 	test("accepts every member of the closed set", () => {

@@ -67,8 +67,6 @@ const H = vi.hoisted(() => {
 	return holders
 })
 
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
-
 vi.mock("expo-media-library/next", async () => await import("@/tests/mocks/expoMediaLibrary"))
 
 vi.mock("expo-media-library/legacy", async () => {
@@ -212,18 +210,12 @@ vi.mock("@/features/transfers/transfers", () => ({
 vi.mock("@/features/cameraUpload/store/useCameraUpload.store", () => {
 	const state = {
 		setSyncing: () => {},
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		setErrors: (fn: any) => {
-			// Surface unexpected error-path entries loudly — happy-path scenarios must not error.
-			const errors = typeof fn === "function" ? fn([]) : fn
-
-			// COLLECTED, not printed: vitest swallows console output on a passing run, so the loud
-			// channel was invisible exactly when it mattered. runScenario asserts this is empty after
-			// the timed loop.
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
-			for (const entry of errors as any[]) {
-				H.surfacedErrors.push(String(entry?.error))
-			}
+		// Surface unexpected error-path entries loudly — happy-path scenarios must not error.
+		// COLLECTED, not printed: vitest swallows console output on a passing run, so the loud
+		// channel was invisible exactly when it mattered. runScenario asserts this is empty after
+		// the timed loop.
+		addError: (entry: { error: unknown }) => {
+			H.surfacedErrors.push(String(entry.error))
 		},
 		addSkippedAsset: () => {},
 		removeSkippedAsset: () => {},

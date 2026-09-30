@@ -26,10 +26,6 @@ const {
 	}
 })
 
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
-
-vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
-
 // Mirrors the generated bindings: string-valued tags (filen_sdk_rs.ts:12241-12246).
 vi.mock("@filen/sdk-rs", () => ({
 	MakeThumbnailInMemoryResult_Tags: {

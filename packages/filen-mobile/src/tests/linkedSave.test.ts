@@ -2,7 +2,6 @@ import { vi, describe, it, expect, beforeEach } from "vitest"
 import { type TFunction } from "i18next"
 
 vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 vi.mock("@filen/shared", async () => await import("@/tests/mocks/filenShared"))
 // Tagged stand-ins for the uniffi enums, so a test can see which variant wraps which value.
 vi.mock("@filen/sdk-rs", () => {

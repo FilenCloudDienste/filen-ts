@@ -65,7 +65,8 @@ vi.mock("@/components/drivePreview/gallery", () => ({ galleryItemKey: () => "son
 vi.mock("@/components/drivePreview/unavailableOfflineNotice", async () => ({ default: await passthrough("offline-notice") }))
 vi.mock("@filen/shared", async () => ({
 	...(await import("@/tests/mocks/filenShared")),
-	formatSecondsToMediaClock: () => "0:00"
+	formatSecondsToMediaClock: () => "0:00",
+	cn: (...parts: (string | undefined)[]) => parts.filter(Boolean).join(" ")
 }))
 
 import PreviewAudio from "@/components/drivePreview/previewAudio"

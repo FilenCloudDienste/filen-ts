@@ -8,16 +8,13 @@ import { type InternalLinkData, openAttachmentPreview } from "@/features/chats/u
 export const ImageAttachment = ({
 	url,
 	name,
-	layout,
+	maxWidth,
 	onLoadFailed,
 	linked
 }: {
 	url: string
 	name: string
-	layout: {
-		width: number
-		height: number
-	}
+	maxWidth: number
 	onLoadFailed?: () => void
 	linked?: InternalLinkData
 }) => {
@@ -26,11 +23,9 @@ export const ImageAttachment = ({
 		height: number
 	} | null>(cache.chatAttachmentLayouts.get(url) ?? null, [url])
 
-	const maxWH = layout.width * 0.75 - 32 - 24
-
 	const style = {
-		width: imageLayout ? Math.min(imageLayout.width, maxWH) : 1,
-		height: imageLayout ? Math.min(imageLayout.height, Math.min(imageLayout.width, maxWH)) : 1
+		width: imageLayout ? Math.min(imageLayout.width, maxWidth) : 1,
+		height: imageLayout ? Math.min(imageLayout.height, Math.min(imageLayout.width, maxWidth)) : 1
 	}
 
 	return (

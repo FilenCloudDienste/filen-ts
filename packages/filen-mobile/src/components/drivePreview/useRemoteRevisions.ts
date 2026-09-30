@@ -228,20 +228,32 @@ export default function useRemoteRevisions({
 			}
 		}
 
-		async function ask(displayed: DriveItemFileExtracted, theirs: Revision): Promise<void> {
-			const { t } = latest.current
-			const name = displayed.data.decryptedMeta?.name ?? ""
+		// Holds `asking` (and so saves) for the prompt's lifetime, then replays what arrived meanwhile.
+		async function withPrompt(uuid: string, body: (key: string) => Promise<void>): Promise<void> {
 			const key = galleryItemKey(latest.current.item)
 
 			asking.current = true
-			askedAbout.current = theirs.item.data.uuid
+			askedAbout.current = uuid
 
 			const promptClosed = promptOpened()
 
 			try {
 				// A native alert, with the file's name, would draw over the biometric lock.
 				await whenUnlockedForeground()
+				await body(key)
+			} finally {
+				promptClosed()
+				asking.current = false
+				askedAbout.current = undefined
+				resumePending()
+			}
+		}
 
+		async function ask(displayed: DriveItemFileExtracted, theirs: Revision): Promise<void> {
+			const { t } = latest.current
+			const name = displayed.data.decryptedMeta?.name ?? ""
+
+			await withPrompt(theirs.item.data.uuid, async key => {
 				if (!answerable(key)) {
 					return
 				}
@@ -297,12 +309,7 @@ export default function useRemoteRevisions({
 
 				pending.current.revision = null
 				show(displayed, newest.item, false)
-			} finally {
-				promptClosed()
-				asking.current = false
-				askedAbout.current = undefined
-				resumePending()
-			}
+			})
 		}
 
 		// Whether `uuid` names the file on screen as the server has it: the version shown, a newer one kept
@@ -399,16 +406,8 @@ export default function useRemoteRevisions({
 			}
 
 			const name = displayed.data.decryptedMeta?.name ?? ""
-			const key = galleryItemKey(latest.current.item)
 
-			asking.current = true
-			askedAbout.current = uuid
-
-			const promptClosed = promptOpened()
-
-			try {
-				await whenUnlockedForeground()
-
+			await withPrompt(uuid, async key => {
 				if (!answerable(key) || restoredSince.current === uuid) {
 					return
 				}
@@ -469,12 +468,7 @@ export default function useRemoteRevisions({
 						}
 					}
 				}
-			} finally {
-				promptClosed()
-				asking.current = false
-				askedAbout.current = undefined
-				resumePending()
-			}
+			})
 		}
 
 		// Whether `from` and `to` are the same version of a file in different directories: a move elsewhere.

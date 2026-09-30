@@ -32,9 +32,9 @@ vi.mock("@/lib/auth", () => ({
 	}
 }))
 
-vi.mock("@/features/chats/chatsWrap", () => ({
-	wrapChat: (chat: unknown) => chat,
-	wrapMessage: (message: unknown) => message
+vi.mock("@/features/chats/chatsWrap", async importOriginal => ({
+	...(await importOriginal<typeof import("@/features/chats/chatsWrap")>()),
+	wrapChat: (chat: unknown) => chat
 }))
 
 import { noteSocketDataEvent, socketCoveredRefetchOnMount, trackServerReads, queryReadSinceSocketReconnect } from "@/queries/socketSession"
@@ -72,7 +72,7 @@ beforeEach(async () => {
 	holder.client = new QueryClient({ defaultOptions: { queries: { refetchOnMount: "always", retry: false } } })
 	trackServerReads(holder.client.getQueryCache())
 	mockListChats.mockReset().mockResolvedValue([chat])
-	mockListMessagesBefore.mockReset().mockResolvedValue([{ uuid: "m1" }])
+	mockListMessagesBefore.mockReset().mockResolvedValue([{ inner: { uuid: "m1", message: "hi" } }])
 	useSocketStore.setState({ state: "disconnected", connectedAt: 0 })
 	useSocketStore.getState().setState("connected")
 	await tick()

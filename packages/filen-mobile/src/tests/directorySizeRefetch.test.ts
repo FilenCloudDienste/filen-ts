@@ -10,10 +10,6 @@ const { mockGetDirSize, holder } = vi.hoisted(() => ({
 	holder: { client: null as unknown as import("@tanstack/react-query").QueryClient }
 }))
 
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
-
-vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
-
 vi.mock("@filen/shared", async () => {
 	const real = await import("@/tests/mocks/filenShared")
 	const { sortParams } = await import("@filen/shared")

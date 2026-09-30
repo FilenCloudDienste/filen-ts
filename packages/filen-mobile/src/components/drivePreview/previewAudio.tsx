@@ -11,6 +11,8 @@ import useFileUrlQuery from "@/queries/useFileUrl.query"
 import { galleryItemFileSource } from "@/components/drivePreview/galleryRenderName"
 import useIsOnline from "@/hooks/useIsOnline"
 import UnavailableOfflineNotice from "@/components/drivePreview/unavailableOfflineNotice"
+import PreviewLoadFailedNotice from "@/components/drivePreview/previewLoadFailedNotice"
+import { PreviewSpinner } from "@/components/drivePreview/previewStatus"
 import { isUnavailableOffline } from "@/components/drivePreview/previewAvailability"
 import { ImageBackground, Image } from "@/components/ui/image"
 import { useResolveClassNames } from "uniwind"
@@ -450,7 +452,6 @@ const PreviewAudioInner = ({ item, metadata, fileUrl }: { item: GalleryItemTagge
 }
 
 const PreviewAudio = ({ item }: { item: GalleryItemTagged }) => {
-	const { t } = useTranslation()
 	const isOnline = useIsOnline()
 	const source = galleryItemFileSource(item)
 	const audioMetadataQuery = useAudioMetadataQuery(source)
@@ -467,33 +468,15 @@ const PreviewAudio = ({ item }: { item: GalleryItemTagged }) => {
 
 	if (audioMetadataQuery.status === "error") {
 		return (
-			<View className="bg-transparent flex-1 items-center justify-center px-8">
-				<Ionicons
-					name="warning-outline"
-					size={48}
-					color="#9ca3af"
-				/>
-				<Text className="mt-4 text-center text-sm leading-5 text-muted-foreground">{t("preview_load_failed")}</Text>
-				<PressableScale
-					className="mt-4"
-					onPress={() => audioMetadataQuery.refetch()}
-					hitSlop={10}
-				>
-					<Text className="text-sm leading-5 text-primary">{t("retry")}</Text>
-				</PressableScale>
-			</View>
+			<PreviewLoadFailedNotice
+				className="bg-transparent"
+				onRetry={() => audioMetadataQuery.refetch()}
+			/>
 		)
 	}
 
 	if (audioMetadataQuery.status !== "success" || fileUrlQuery.status !== "success" || fileUrlQuery.data === null) {
-		return (
-			<View className="bg-transparent flex-1 items-center justify-center">
-				<ActivityIndicator
-					size="small"
-					color="white"
-				/>
-			</View>
-		)
+		return <PreviewSpinner className="bg-transparent" />
 	}
 
 	return (

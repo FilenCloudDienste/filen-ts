@@ -125,6 +125,19 @@ function finishedOutcome(job: CopyJob): Pick<FinishedTransfer, "outcome" | "erro
 	}
 }
 
+function copyRowBase(job: CopyJob) {
+	return {
+		id: job.id,
+		type: "copy" as const,
+		name: job.rowName,
+		size: job.totals.bytes,
+		bytesTransferred: job.counts.bytesDone,
+		startedAt: job.startedAt,
+		finishedAt: Date.now(),
+		copyGlyph: job.glyph
+	}
+}
+
 // A settled job's finished row; null for a cancelled one, whose row comes back only while "move to
 // trash" left items behind.
 function finishedRow(job: CopyJob): FinishedTransfer | null {
@@ -135,17 +148,10 @@ function finishedRow(job: CopyJob): FinishedTransfer | null {
 	}
 
 	return {
-		id: job.id,
-		type: "copy",
-		name: job.rowName,
-		size: job.totals.bytes,
-		bytesTransferred: job.counts.bytesDone,
-		startedAt: job.startedAt,
-		finishedAt: Date.now(),
+		...copyRowBase(job),
 		outcome: finished.outcome,
 		errorMessage: finished.errorMessage,
 		errorCount: job.failures.length,
-		copyGlyph: job.glyph,
 		copyNotes: {
 			skipped: job.counts.entriesSkipped,
 			renamed: job.renamedCount,
@@ -160,18 +166,15 @@ function finishedRow(job: CopyJob): FinishedTransfer | null {
 // The row of a stopped copy whose "move to trash" left items behind.
 function stoppedRow(job: CopyJob): FinishedTransfer {
 	return {
-		id: job.id,
-		type: "copy",
-		name: job.rowName,
-		size: job.totals.bytes,
-		bytesTransferred: job.counts.bytesDone,
-		startedAt: job.startedAt,
-		finishedAt: Date.now(),
+		...copyRowBase(job),
 		outcome: "errored",
 		errorMessage: null,
-		errorCount: 0,
-		copyGlyph: job.glyph
+		errorCount: 0
 	}
+}
+
+function dropCreated(id: string): void {
+	useCopyJobsStore.getState().update(id, settled => (settled.created.length === 0 ? settled : { ...settled, created: [] }))
 }
 
 // Jobs whose stop dialog is open: the job and what it made are kept for a "move to trash" answer even
@@ -337,7 +340,7 @@ class CopyRunner {
 			await this.trashCreated(jobId)
 		}
 
-		useCopyJobsStore.getState().update(jobId, settled => (settled.created.length === 0 ? settled : { ...settled, created: [] }))
+		dropCreated(jobId)
 
 		pruneSettledCopyJobs()
 	}
@@ -839,7 +842,7 @@ class CopyRunner {
 		// What it created was only needed for "move to trash", unless that question is still open;
 		// failures stay for "Retry failed items".
 		if (!choosingCancel.has(id)) {
-			useCopyJobsStore.getState().update(id, settled => (settled.created.length === 0 ? settled : { ...settled, created: [] }))
+			dropCreated(id)
 		}
 
 		const settled = getCopyJob(id)

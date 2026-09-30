@@ -46,8 +46,6 @@ const {
 // Module mocks — must be declared before any imports that pull in the modules
 // ---------------------------------------------------------------------------
 
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
-
 // socketHandlers reads the local user id to tell our own edits apart from another device's;
 // auth reaches expo-secure-store, so it is stubbed. null = "unknown", which the handler treats as
 // "came from elsewhere" — the safe reading, and the one that exercises the refresh path.
@@ -78,10 +76,11 @@ vi.mock("@/features/notes/notesOffline", () => ({
 		clearForLogout: vi.fn()
 	}
 }))
-vi.mock("@/features/notes/queries/useNotesQuery", () => ({
+vi.mock("@/features/notes/queries/useNotesQuery", async () => ({
 	notesQueryUpdate: mockNotesWithContentQueryUpdate,
 	fetchData: mockFetchData,
-	notesQueryGet: mockNotesWithContentQueryGet
+	notesQueryGet: mockNotesWithContentQueryGet,
+	...(await import("@/tests/mocks/notesQueryWriters")).notesQueryWriters(mockNotesWithContentQueryUpdate)
 }))
 
 vi.mock("@/lib/events", () => ({

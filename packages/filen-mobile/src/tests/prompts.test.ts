@@ -15,10 +15,6 @@ vi.mock("@blazejkustra/react-native-alert", () => ({
 
 vi.mock("@filen/shared", async () => await import("@/tests/mocks/filenShared"))
 
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
-
-vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
-
 import prompts from "@/lib/prompts"
 
 // ---------- type aliases for call argument shapes ----------

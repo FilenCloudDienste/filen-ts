@@ -101,7 +101,7 @@ export function Group({ buttons, className }: { buttons: Button[]; className?: s
 	const isOnline = useIsOnline()
 
 	return (
-		<View className={cn("bg-background-secondary rounded-3xl overflow-hidden", className)}>
+		<View className={cn("bg-background-tertiary rounded-3xl overflow-hidden", className)}>
 			{buttons.map(
 				(
 					{

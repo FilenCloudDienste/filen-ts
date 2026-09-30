@@ -20,7 +20,7 @@ import useDriveStore from "@/features/drive/store/useDrive.store"
 import { useStringifiedClient } from "@/lib/auth"
 import offlineSync from "@/features/offline/offlineSync"
 import useOfflineStore from "@/features/offline/store/useOffline.store"
-import { aggregateDriveSelectionFlags } from "@/features/drive/driveSelectors"
+import { aggregateDriveSelectionFlags, isPlainDrivePath } from "@/features/drive/driveSelectors"
 import { resolveDriveHeaderTitle } from "@/features/drive/utils"
 import { useDriveUpload } from "@/features/drive/hooks/useDriveUpload"
 import { buildSortMenuButton, buildBulkActionMenu, buildViewModeMenuButton } from "@/features/drive/components/headerMenuBuilders"
@@ -76,7 +76,7 @@ const Header = ({
 	// index 0 reliably means "first screen of this modal", any other value means
 	// "the user navigated deeper inside the same modal."
 	const navigation = useNavigation()
-	const inTabContext = drivePath.type === "drive" && !drivePath.selectOptions
+	const inTabContext = isPlainDrivePath(drivePath)
 	const isAtStackRoot = (navigation.getState()?.index ?? 0) === 0
 	const { sort: currentSort, setSort, sortable } = useDriveSortPreference(drivePath)
 	const { viewMode, setViewMode } = useDriveViewMode(drivePath)
@@ -340,12 +340,12 @@ const Header = ({
 			backVisible={leftItems.length === 0 && selectedDriveItems.length === 0}
 			shadowVisible={false}
 			backgroundColor={
-				drivePath.type !== "drive" || drivePath.selectOptions
-					? Platform.select({
+				inTabContext
+					? undefined
+					: Platform.select({
 							ios: undefined,
 							default: bgBackgroundSecondary.backgroundColor as string
 						})
-					: undefined
 			}
 			leftItems={leftItems}
 			rightItems={rightItems}

@@ -1,23 +1,21 @@
+import { type StyleProp, type ViewStyle } from "react-native"
 import { useTranslation } from "react-i18next"
-import View from "@/components/ui/view"
-import Text from "@/components/ui/text"
-import Ionicons from "@expo/vector-icons/Ionicons"
+import { cn } from "@filen/shared"
+import { PreviewMessage } from "@/components/drivePreview/previewStatus"
 
 // The gallery page for a file the device cannot serve right now: offline, and the item is in
-// neither the offline store nor a cache. Fills its parent: every caller renders inside galleryItem's
-// window-sized cell.
-const UnavailableOfflineNotice = () => {
+// neither the offline store nor a cache. Fills its parent. Transparent by default for galleryItem's
+// window-sized cell; opaque previews pass their own background.
+const UnavailableOfflineNotice = ({ className, style }: { className?: string; style?: StyleProp<ViewStyle> }) => {
 	const { t } = useTranslation()
 
 	return (
-		<View className="bg-transparent flex-1 items-center justify-center px-8">
-			<Ionicons
-				name="cloud-offline-outline"
-				size={48}
-				color="#9ca3af"
-			/>
-			<Text className="mt-4 text-center text-sm leading-5 text-muted-foreground">{t("unavailable_offline")}</Text>
-		</View>
+		<PreviewMessage
+			icon="cloud-offline-outline"
+			text={t("unavailable_offline")}
+			className={cn("bg-transparent", className)}
+			style={style}
+		/>
 	)
 }
 

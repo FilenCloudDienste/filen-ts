@@ -128,7 +128,6 @@ const CameraUpload = () => {
 				) : mediaPermissions.granted ? (
 					<SettingsScrollView>
 						<Group
-							className="bg-background-tertiary"
 							buttons={[
 								makeToggleButton({
 									field: "enabled",
@@ -140,7 +139,6 @@ const CameraUpload = () => {
 						{config.enabled && (
 							<Fragment>
 								<Group
-									className="bg-background-tertiary"
 									buttons={[
 										{
 											icon: "albums-outline",
@@ -280,7 +278,6 @@ const CameraUpload = () => {
 									]}
 								/>
 								<Group
-									className="bg-background-tertiary"
 									buttons={[
 										makeToggleButton({
 											field: "includeVideos",
@@ -346,7 +343,6 @@ const CameraUpload = () => {
 								/>
 								{config.background && isBatteryOptimized && (
 									<Group
-										className="bg-background-tertiary"
 										buttons={[
 											{
 												icon: "battery-charging-outline",

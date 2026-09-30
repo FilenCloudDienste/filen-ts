@@ -225,6 +225,68 @@ function removeSettledTransfer(
 		.catch(err => logger.error("transfers", "removeSettledTransfer cleanup chain rejected", { id, type, outcome, error: err }))
 }
 
+// Writes a thrown transfer error to its row, then settles the row as errored. The caller rethrows so the
+// error still reaches its alert path; the removal only stops the floating bar, foreground service and
+// speed interval from staying alive forever, keeping an errored snapshot in the finished list.
+function recordTransferFailure(args: {
+	id: string
+	type: "uploadDirectory" | "uploadFile" | "downloadDirectory" | "downloadFile"
+	uri: string
+	error: unknown
+	awaitExternal: (() => Promise<void>) | undefined
+}): void {
+	const { id, type, uri, error, awaitExternal } = args
+	const toUnknown = (): Error => (error instanceof Error ? error : new Error(String(error)))
+
+	if (type === "uploadDirectory" || type === "uploadFile") {
+		patchTransfer(id, type, t => ({
+			...t,
+			errors: {
+				...t.errors,
+				...(FilenSdkError.hasInner(error)
+					? {
+							upload: [
+								...t.errors.upload,
+								{
+									error: FilenSdkError.getInner(error),
+									path: normalizeFilePathForSdk(uri)
+								}
+							]
+						}
+					: {
+							unknown: [...t.errors.unknown, toUnknown()]
+						})
+			}
+		}))
+	} else {
+		patchTransfer(id, type, t => ({
+			...t,
+			errors: {
+				...t.errors,
+				...(FilenSdkError.hasInner(error)
+					? {
+							download: [
+								...t.errors.download,
+								{
+									path: normalizeFilePathForSdk(uri),
+									error: FilenSdkError.getInner(error)
+								}
+							]
+						}
+					: {
+							unknown: [...t.errors.unknown, toUnknown()]
+						})
+			}
+		}))
+	}
+
+	removeSettledTransfer(id, type, {
+		awaitExternal,
+		outcome: "errored",
+		errorMessage: finishedTransferErrorMessage(error)
+	})
+}
+
 // Registers a deferred cleanup that removes the transfer entry from the store once the transfer
 // succeeds or is aborted. The errored case is handled separately in the post-`run` error blocks:
 // the deferred callback runs inside `run`'s `finally` (before `await run(...)` resolves), so at this
@@ -266,6 +328,78 @@ function registerCompletionCleanup(args: {
 			outcome: didSucceed && !wasAborted ? (errorCount > 0 ? "completedWithErrors" : "succeeded") : undefined
 		})
 	})
+}
+
+// Per-transfer controller and composite signals, plus the row controls and settle wiring every branch shares.
+function createTransferSession(
+	globalAbortController: AbortController,
+	globalPauseSignal: PauseSignal,
+	{ signal, awaitExternal }: { signal: AbortSignal | undefined; awaitExternal: (() => Promise<void>) | undefined }
+) {
+	const id = randomUUID()
+	const transferAbortController = new AbortController()
+	// Its inner SdkPauseSignal is a uniffi (Rust Arc-backed) handle, disposed once the transfer settles.
+	const transferPauseSignal = new PauseSignal()
+	const compositePauseSignal = createCompositePauseSignal(globalPauseSignal, transferPauseSignal)
+	const compositeAbortSignal = signal
+		? createCompositeAbortSignal(globalAbortController.signal, transferAbortController.signal, signal)
+		: createCompositeAbortSignal(globalAbortController.signal, transferAbortController.signal)
+
+	const isAborted = (): boolean =>
+		transferAbortController.signal.aborted || globalAbortController.signal.aborted || (signal?.aborted ?? false)
+
+	return {
+		id,
+		compositePauseSignal,
+		compositeAbortSignal,
+		isAborted,
+		controls: {
+			abort: () => {
+				if (transferAbortController.signal.aborted) {
+					return
+				}
+
+				transferAbortController.abort()
+			},
+			pause: () => {
+				transferPauseSignal.pause()
+			},
+			resume: () => {
+				transferPauseSignal.resume()
+			}
+		},
+		// wrapAbortSignalForSdk allocates a uniffi (Rust Arc-backed) ManagedAbortSignal that must be released
+		// explicitly, and its `new ManagedAbortController()` can throw under memory pressure. Arm the disposal
+		// defer() BEFORE that allocation, or an early throw leaks the composite handles created above (TC-08).
+		// Returns the allocator; whatever it allocated is disposed with the rest.
+		armDisposal: (defer: (fn: () => void) => void): (() => ReturnType<typeof wrapAbortSignalForSdk>) => {
+			let wrappedAbortSignal: ReturnType<typeof wrapAbortSignalForSdk> | null = null
+
+			defer(() => {
+				compositePauseSignal.dispose()
+				compositeAbortSignal.dispose()
+				disposeSdkAbortSignal(wrappedAbortSignal)
+				transferPauseSignal.dispose()
+			})
+
+			return () => {
+				wrappedAbortSignal = wrapAbortSignalForSdk(compositeAbortSignal)
+
+				return wrappedAbortSignal
+			}
+		},
+		register: (defer: (fn: () => void) => void, type: Transfer["type"], succeeded: () => boolean): void => {
+			registerPauseListeners(id, type, transferPauseSignal, globalPauseSignal, defer)
+			registerCompletionCleanup({
+				id,
+				type,
+				succeeded,
+				aborted: isAborted,
+				awaitExternal,
+				defer
+			})
+		}
+	}
 }
 
 export type UploadParams = {
@@ -335,36 +469,19 @@ export async function uploadCore(
 	  }
 	| null
 > {
-	const id = randomUUID()
 	const { authedSdkClient } = await auth.getSdkClients()
-	const transferAbortController = new AbortController()
-	// Its inner SdkPauseSignal is a uniffi (Rust Arc-backed) handle, disposed once the transfer settles.
-	const transferPauseSignal = new PauseSignal()
-	const compositePauseSignal = createCompositePauseSignal(globalPauseSignal, transferPauseSignal)
-	const compositeAbortSignal = signal
-		? createCompositeAbortSignal(globalAbortController.signal, transferAbortController.signal, signal)
-		: createCompositeAbortSignal(globalAbortController.signal, transferAbortController.signal)
+	const session = createTransferSession(globalAbortController, globalPauseSignal, {
+		signal,
+		awaitExternal: awaitExternalCompletionBeforeMarkingAsFinished
+	})
+	const { id, compositePauseSignal, compositeAbortSignal, isAborted } = session
 
 	if (localFileOrDir instanceof FileSystem.Directory) {
 		// Summed per batch and added to the cached account once the upload settles, not per batch.
 		let ownBytesUploaded = 0n
 
 		const result = await run(async defer => {
-			// wrapAbortSignalForSdk allocates a uniffi (Rust Arc-backed) ManagedAbortSignal that must be
-			// released explicitly. Register the disposal defer() BEFORE the fallible uniffi allocation
-			// (wrapAbortSignalForSdk's `new ManagedAbortController()` can throw under memory pressure):
-			// otherwise an early throw would bypass disposal and leak the composite PauseSignal/AbortSignal
-			// handles created outside this block (TC-08). null-init then assign after the defer is armed.
-			let wrappedAbortSignal: ReturnType<typeof wrapAbortSignalForSdk> | null = null
-
-			defer(() => {
-				compositePauseSignal.dispose()
-				compositeAbortSignal.dispose()
-				disposeSdkAbortSignal(wrappedAbortSignal)
-				transferPauseSignal.dispose()
-			})
-
-			wrappedAbortSignal = wrapAbortSignalForSdk(compositeAbortSignal)
+			const wrappedAbortSignal = session.armDisposal(defer)()
 
 			if (!localFileOrDir.exists) {
 				throw new Error("Local directory does not exist or is empty.")
@@ -391,34 +508,13 @@ export async function uploadCore(
 						scan: [],
 						upload: []
 					},
-					abort: () => {
-						if (transferAbortController.signal.aborted) {
-							return
-						}
-
-						transferAbortController.abort()
-					},
-					pause: () => {
-						transferPauseSignal.pause()
-					},
-					resume: () => {
-						transferPauseSignal.resume()
-					}
+					...session.controls
 				}
 			])
 
-			registerPauseListeners(id, "uploadDirectory", transferPauseSignal, globalPauseSignal, defer)
-
 			let succeededUploadDirectory = false
 
-			registerCompletionCleanup({
-				id,
-				type: "uploadDirectory",
-				succeeded: () => succeededUploadDirectory,
-				aborted: () => transferAbortController.signal.aborted || globalAbortController.signal.aborted || (signal?.aborted ?? false),
-				awaitExternal: awaitExternalCompletionBeforeMarkingAsFinished,
-				defer
-			})
+			session.register(defer, "uploadDirectory", () => succeededUploadDirectory)
 
 			const parentDir = await (async () => {
 				const created = await drive.createDirectory({
@@ -598,44 +694,19 @@ export async function uploadCore(
 		}
 
 		if (!result.success) {
-			if (transferAbortController.signal.aborted || globalAbortController.signal.aborted || signal?.aborted) {
+			if (isAborted()) {
 				// Don't treat abort errors as actual errors to be shown in the UI
 				return null
 			}
 
 			logger.error("transfers", "Directory upload failed", { id, error: result.error })
 
-			patchTransfer(id, "uploadDirectory", t => ({
-				...t,
-				errors: {
-					...t.errors,
-					...(FilenSdkError.hasInner(result.error)
-						? {
-								upload: [
-									...t.errors.upload,
-									{
-										error: FilenSdkError.getInner(result.error),
-										path: normalizeFilePathForSdk(localFileOrDir.uri)
-									}
-								]
-							}
-						: {
-								unknown: [
-									...t.errors.unknown,
-									result.error instanceof Error ? result.error : new Error(String(result.error))
-								]
-							})
-				}
-			}))
-
-			// The error is now written to the store entry; remove the settled (errored) transfer so the
-			// floating bar, foreground service and speed interval don't stay alive forever, and keep an
-			// errored snapshot in the finished list. The thrown error below still surfaces to the
-			// caller's alert path, independent of this removal.
-			removeSettledTransfer(id, "uploadDirectory", {
-				awaitExternal: awaitExternalCompletionBeforeMarkingAsFinished,
-				outcome: "errored",
-				errorMessage: finishedTransferErrorMessage(result.error)
+			recordTransferFailure({
+				id,
+				type: "uploadDirectory",
+				uri: localFileOrDir.uri,
+				error: result.error,
+				awaitExternal: awaitExternalCompletionBeforeMarkingAsFinished
 			})
 
 			throw result.error
@@ -645,21 +716,7 @@ export async function uploadCore(
 	}
 
 	const result = await run(async defer => {
-		// wrapAbortSignalForSdk allocates a uniffi (Rust Arc-backed) ManagedAbortSignal that must be
-		// released explicitly. Register the disposal defer() BEFORE the fallible uniffi allocation
-		// (wrapAbortSignalForSdk's `new ManagedAbortController()` can throw under memory pressure):
-		// otherwise an early throw would bypass disposal and leak the composite PauseSignal/AbortSignal
-		// handles created outside this block (TC-08). null-init then assign after the defer is armed.
-		let wrappedAbortSignal: ReturnType<typeof wrapAbortSignalForSdk> | null = null
-
-		defer(() => {
-			compositePauseSignal.dispose()
-			compositeAbortSignal.dispose()
-			disposeSdkAbortSignal(wrappedAbortSignal)
-			transferPauseSignal.dispose()
-		})
-
-		wrappedAbortSignal = wrapAbortSignalForSdk(compositeAbortSignal)
+		const wrappedAbortSignal = session.armDisposal(defer)()
 
 		if (!localFileOrDir.exists) {
 			throw new Error("Local file does not exist.")
@@ -684,34 +741,13 @@ export async function uploadCore(
 					scan: [],
 					upload: []
 				},
-				abort: () => {
-					if (transferAbortController.signal.aborted) {
-						return
-					}
-
-					transferAbortController.abort()
-				},
-				pause: () => {
-					transferPauseSignal.pause()
-				},
-				resume: () => {
-					transferPauseSignal.resume()
-				}
+				...session.controls
 			}
 		])
 
-		registerPauseListeners(id, "uploadFile", transferPauseSignal, globalPauseSignal, defer)
-
 		let succeededUploadFile = false
 
-		registerCompletionCleanup({
-			id,
-			type: "uploadFile",
-			succeeded: () => succeededUploadFile,
-			aborted: () => transferAbortController.signal.aborted || globalAbortController.signal.aborted || (signal?.aborted ?? false),
-			awaitExternal: awaitExternalCompletionBeforeMarkingAsFinished,
-			defer
-		})
+		session.register(defer, "uploadFile", () => succeededUploadFile)
 
 		const transferred = await authedSdkClient.uploadFile(
 			{
@@ -750,41 +786,19 @@ export async function uploadCore(
 	})
 
 	if (!result.success) {
-		if (transferAbortController.signal.aborted || globalAbortController.signal.aborted || signal?.aborted) {
+		if (isAborted()) {
 			// Don't treat abort errors as actual errors to be shown in the UI
 			return null
 		}
 
 		logger.error("transfers", "File upload failed", { id, error: result.error })
 
-		patchTransfer(id, "uploadFile", t => ({
-			...t,
-			errors: {
-				...t.errors,
-				...(FilenSdkError.hasInner(result.error)
-					? {
-							upload: [
-								...t.errors.upload,
-								{
-									error: FilenSdkError.getInner(result.error),
-									path: normalizeFilePathForSdk(localFileOrDir.uri)
-								}
-							]
-						}
-					: {
-							unknown: [...t.errors.unknown, result.error instanceof Error ? result.error : new Error(String(result.error))]
-						})
-			}
-		}))
-
-		// The error is now written to the store entry; remove the settled (errored) transfer so the
-		// floating bar, foreground service and speed interval don't stay alive forever, and keep an
-		// errored snapshot in the finished list. The thrown error below still surfaces to the
-		// caller's alert path, independent of this removal.
-		removeSettledTransfer(id, "uploadFile", {
-			awaitExternal: awaitExternalCompletionBeforeMarkingAsFinished,
-			outcome: "errored",
-			errorMessage: finishedTransferErrorMessage(result.error)
+		recordTransferFailure({
+			id,
+			type: "uploadFile",
+			uri: localFileOrDir.uri,
+			error: result.error,
+			awaitExternal: awaitExternalCompletionBeforeMarkingAsFinished
 		})
 
 		throw result.error
@@ -924,33 +938,16 @@ export async function downloadCore(
 	  }
 	| null
 > {
-	const id = randomUUID()
 	const { authedSdkClient } = await auth.getSdkClients()
-	const transferAbortController = new AbortController()
-	// Its inner SdkPauseSignal is a uniffi (Rust Arc-backed) handle, disposed once the transfer settles.
-	const transferPauseSignal = new PauseSignal()
-	const compositePauseSignal = createCompositePauseSignal(globalPauseSignal, transferPauseSignal)
-	const compositeAbortSignal = signal
-		? createCompositeAbortSignal(globalAbortController.signal, transferAbortController.signal, signal)
-		: createCompositeAbortSignal(globalAbortController.signal, transferAbortController.signal)
+	const session = createTransferSession(globalAbortController, globalPauseSignal, {
+		signal,
+		awaitExternal: awaitExternalCompletionBeforeMarkingAsFinished
+	})
+	const { id, compositePauseSignal, compositeAbortSignal, isAborted } = session
 
 	if (isDirectoryItem(item)) {
 		const result = await run(async defer => {
-			// wrapAbortSignalForSdk allocates a uniffi (Rust Arc-backed) ManagedAbortSignal that must be
-			// released explicitly. Register the disposal defer() BEFORE the fallible uniffi allocation
-			// (wrapAbortSignalForSdk's `new ManagedAbortController()` can throw under memory pressure):
-			// otherwise an early throw would bypass disposal and leak the composite PauseSignal/AbortSignal
-			// handles created outside this block (TC-08). null-init then assign after the defer is armed.
-			let wrappedAbortSignal: ReturnType<typeof wrapAbortSignalForSdk> | null = null
-
-			defer(() => {
-				compositePauseSignal.dispose()
-				compositeAbortSignal.dispose()
-				disposeSdkAbortSignal(wrappedAbortSignal)
-				transferPauseSignal.dispose()
-			})
-
-			wrappedAbortSignal = wrapAbortSignalForSdk(compositeAbortSignal)
+			const wrappedAbortSignal = session.armDisposal(defer)()
 
 			if (destination instanceof FileSystem.File) {
 				throw new Error("Destination must be a directory for directory downloads.")
@@ -978,34 +975,13 @@ export async function downloadCore(
 						download: []
 					},
 					destination,
-					abort: () => {
-						if (transferAbortController.signal.aborted) {
-							return
-						}
-
-						transferAbortController.abort()
-					},
-					pause: () => {
-						transferPauseSignal.pause()
-					},
-					resume: () => {
-						transferPauseSignal.resume()
-					}
+					...session.controls
 				}
 			])
 
-			registerPauseListeners(id, "downloadDirectory", transferPauseSignal, globalPauseSignal, defer)
-
 			let succeededDownloadDirectory = false
 
-			registerCompletionCleanup({
-				id,
-				type: "downloadDirectory",
-				succeeded: () => succeededDownloadDirectory,
-				aborted: () => transferAbortController.signal.aborted || globalAbortController.signal.aborted || (signal?.aborted ?? false),
-				awaitExternal: awaitExternalCompletionBeforeMarkingAsFinished,
-				defer
-			})
+			session.register(defer, "downloadDirectory", () => succeededDownloadDirectory)
 
 			const transferred: {
 				files: (Omit<FileWithPath, "file"> & { file: File | SharedFile })[]
@@ -1115,44 +1091,19 @@ export async function downloadCore(
 				destination.delete()
 			}
 
-			if (transferAbortController.signal.aborted || globalAbortController.signal.aborted || signal?.aborted) {
+			if (isAborted()) {
 				// Don't treat abort errors as actual errors to be shown in the UI
 				return null
 			}
 
 			logger.error("transfers", "Directory download failed", { id, error: result.error })
 
-			patchTransfer(id, "downloadDirectory", t => ({
-				...t,
-				errors: {
-					...t.errors,
-					...(FilenSdkError.hasInner(result.error)
-						? {
-								download: [
-									...t.errors.download,
-									{
-										path: normalizeFilePathForSdk(destination.uri),
-										error: FilenSdkError.getInner(result.error)
-									}
-								]
-							}
-						: {
-								unknown: [
-									...t.errors.unknown,
-									result.error instanceof Error ? result.error : new Error(String(result.error))
-								]
-							})
-				}
-			}))
-
-			// The error is now written to the store entry; remove the settled (errored) transfer so the
-			// floating bar, foreground service and speed interval don't stay alive forever, and keep an
-			// errored snapshot in the finished list. The thrown error below still surfaces to the
-			// caller's alert path, independent of this removal.
-			removeSettledTransfer(id, "downloadDirectory", {
-				awaitExternal: awaitExternalCompletionBeforeMarkingAsFinished,
-				outcome: "errored",
-				errorMessage: finishedTransferErrorMessage(result.error)
+			recordTransferFailure({
+				id,
+				type: "downloadDirectory",
+				uri: destination.uri,
+				error: result.error,
+				awaitExternal: awaitExternalCompletionBeforeMarkingAsFinished
 			})
 
 			throw result.error
@@ -1162,17 +1113,7 @@ export async function downloadCore(
 	}
 
 	const result = await run(async defer => {
-		// wrapAbortSignalForSdk allocates a uniffi (Rust Arc-backed) ManagedAbortSignal that must be
-		// released explicitly. Allocate it lazily (cache hits below never reach the SDK download) and
-		// destroy whatever we allocated once the transfer settles.
-		let wrappedAbortSignal: ReturnType<typeof wrapAbortSignalForSdk> | null = null
-
-		defer(() => {
-			compositePauseSignal.dispose()
-			compositeAbortSignal.dispose()
-			disposeSdkAbortSignal(wrappedAbortSignal)
-			transferPauseSignal.dispose()
-		})
+		const wrapAbortSignal = session.armDisposal(defer)
 
 		if (!(destination instanceof FileSystem.File)) {
 			throw new Error("Destination must be a file for file downloads.")
@@ -1200,34 +1141,13 @@ export async function downloadCore(
 					download: []
 				},
 				destination,
-				abort: () => {
-					if (transferAbortController.signal.aborted) {
-						return
-					}
-
-					transferAbortController.abort()
-				},
-				pause: () => {
-					transferPauseSignal.pause()
-				},
-				resume: () => {
-					transferPauseSignal.resume()
-				}
+				...session.controls
 			}
 		])
 
-		registerPauseListeners(id, "downloadFile", transferPauseSignal, globalPauseSignal, defer)
-
 		let succeededDownloadFile = false
 
-		registerCompletionCleanup({
-			id,
-			type: "downloadFile",
-			succeeded: () => succeededDownloadFile,
-			aborted: () => transferAbortController.signal.aborted || globalAbortController.signal.aborted || (signal?.aborted ?? false),
-			awaitExternal: awaitExternalCompletionBeforeMarkingAsFinished,
-			defer
-		})
+		session.register(defer, "downloadFile", () => succeededDownloadFile)
 
 		const cachedOrOfflineFile = await run(async () => {
 			// TC-04: the offline self-heal's destination IS the offline file's own path, which the cache
@@ -1266,7 +1186,8 @@ export async function downloadCore(
 				bytesTransferred: Number(item.data.size)
 			}))
 		} else {
-			wrappedAbortSignal = wrapAbortSignalForSdk(compositeAbortSignal)
+			// Allocated lazily: cache hits above never reach the SDK download.
+			const wrappedAbortSignal = wrapAbortSignal()
 
 			await authedSdkClient.downloadFileToPath(
 				remoteAnyFile,
@@ -1309,41 +1230,19 @@ export async function downloadCore(
 			destination.delete()
 		}
 
-		if (transferAbortController.signal.aborted || globalAbortController.signal.aborted || signal?.aborted) {
+		if (isAborted()) {
 			// Don't treat abort errors as actual errors to be shown in the UI
 			return null
 		}
 
 		logger.error("transfers", "File download failed", { id, error: result.error })
 
-		patchTransfer(id, "downloadFile", t => ({
-			...t,
-			errors: {
-				...t.errors,
-				...(FilenSdkError.hasInner(result.error)
-					? {
-							download: [
-								...t.errors.download,
-								{
-									path: normalizeFilePathForSdk(destination.uri),
-									error: FilenSdkError.getInner(result.error)
-								}
-							]
-						}
-					: {
-							unknown: [...t.errors.unknown, result.error instanceof Error ? result.error : new Error(String(result.error))]
-						})
-			}
-		}))
-
-		// The error is now written to the store entry; remove the settled (errored) transfer so the
-		// floating bar, foreground service and speed interval don't stay alive forever, and keep an
-		// errored snapshot in the finished list. The thrown error below still surfaces to the
-		// caller's alert path, independent of this removal.
-		removeSettledTransfer(id, "downloadFile", {
-			awaitExternal: awaitExternalCompletionBeforeMarkingAsFinished,
-			outcome: "errored",
-			errorMessage: finishedTransferErrorMessage(result.error)
+		recordTransferFailure({
+			id,
+			type: "downloadFile",
+			uri: destination.uri,
+			error: result.error,
+			awaitExternal: awaitExternalCompletionBeforeMarkingAsFinished
 		})
 
 		throw result.error

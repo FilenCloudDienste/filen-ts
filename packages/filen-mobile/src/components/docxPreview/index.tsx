@@ -1,7 +1,7 @@
 import Dom from "@/components/docxPreview/dom"
 import DomKeyboardHost, { DOM_HOST_WEBVIEW_PROPS } from "@/components/domKeyboardHost"
 import { forwardDomConsoleLog } from "@/hooks/useDomEvents/forwardDomLog"
-import { parseDocxExternalLink } from "@/components/docxPreview/linkSafety"
+import { parseExternalLinkMessage } from "@/lib/domExternalLink"
 import useOpenExternalLink from "@/hooks/useOpenExternalLink"
 import type { WebViewMessageEvent } from "react-native-webview"
 import type { RangeReader } from "@/lib/rangeTransfer"
@@ -44,7 +44,7 @@ const DocxPreview = ({
 							// Re-classified here rather than trusted: the WebView is the untrusted side of
 							// this bridge. useOpenExternalLink then applies the same policy every other
 							// untrusted link in the app goes through, including the trusted-domain prompt.
-							const externalUrl = parseDocxExternalLink(parsed)
+							const externalUrl = parseExternalLinkMessage(parsed)
 
 							if (externalUrl !== null) {
 								openExternalLink(externalUrl).catch(err => {

@@ -22,9 +22,6 @@ vi.mock("burnt", () => ({
 	}
 }))
 
-// React / RN surface consumed by the NotifierErrorContainer component
-vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
-
 vi.mock("react-native-safe-area-context", () => ({
 	useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 })
 }))

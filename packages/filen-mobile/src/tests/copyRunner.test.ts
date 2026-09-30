@@ -69,8 +69,6 @@ const h = vi.hoisted(() => {
 	}
 })
 
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
-vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
 vi.mock("@filen/sdk-rs", async () => await import("@/tests/mocks/sdkCopy"))
 vi.mock("@/lib/i18n", () => ({
 	default: {

@@ -19,8 +19,6 @@ vi.hoisted(() => {
 	process.env["EXPO_PUBLIC_SECURE_STORE_UNSECURE_FALLBACK_ENCRYPTION_KEY"] = "hardening-fallback-key"
 })
 
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
-
 vi.mock("expo-crypto", async () => await import("@/tests/mocks/expoCrypto"))
 
 vi.mock("expo-secure-store", async () => await import("@/tests/mocks/expoSecureStore"))

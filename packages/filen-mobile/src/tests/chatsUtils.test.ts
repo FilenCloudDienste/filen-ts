@@ -41,6 +41,9 @@ import {
 	messageSenderLabel,
 	composeMessageList,
 	shouldSuppressKeyboardSuggestions,
+	attachmentMaxWidth,
+	typingNames,
+	typingLabel,
 	type SuccessfulLink
 } from "@/features/chats/utils"
 import type { ChatMessageWithInflightId } from "@/features/chats/store/useChats.store"
@@ -301,6 +304,34 @@ describe("messageSenderLabel", () => {
 	})
 })
 
+describe("typingNames", () => {
+	const participants = labelChat([
+		{ userId: SELF_ID, email: "me@example.com" },
+		{ userId: OTHER_ID, email: "other@example.com", nickName: "Ann" },
+		{ userId: THIRD_ID, email: "third@example.com" }
+	]).participants
+
+	it("maps typists to display names in typing order", () => {
+		expect(typingNames([{ senderId: THIRD_ID }, { senderId: OTHER_ID }] as never, participants)).toEqual(["third@example.com", "Ann"])
+	})
+
+	it("drops typists who are no longer participants", () => {
+		expect(typingNames([{ senderId: DEPARTED_ID }, { senderId: OTHER_ID }] as never, participants)).toEqual(["Ann"])
+	})
+})
+
+describe("typingLabel", () => {
+	const t = ((key: string, options?: { names?: string }) => (options?.names ? `${key}:${options.names}` : key)) as never
+
+	it("leaves a single typist unnamed", () => {
+		expect(typingLabel(["Ann"], t)).toBe("typing")
+	})
+
+	it("names every typist when more than one is typing", () => {
+		expect(typingLabel(["Ann", "Bob"], t)).toBe("typing_with_names:Ann, Bob")
+	})
+})
+
 // ─── composeMessageList (D4c) ───────────────────────────────────────────────────
 
 // Server messages carry a server uuid and an empty inflightId; optimistic/inflight messages use
@@ -445,5 +476,11 @@ describe("shouldSuppressKeyboardSuggestions", () => {
 	// of a message is typed — so no message could ever start with a capital letter.
 	it("does not suppress when nothing is open", () => {
 		expect(shouldSuppressKeyboardSuggestions([])).toBe(false)
+	})
+})
+
+describe("attachmentMaxWidth", () => {
+	it("is the 3/4 bubble width minus the wrapper and bubble paddings", () => {
+		expect(attachmentMaxWidth(400)).toBe(244)
 	})
 })

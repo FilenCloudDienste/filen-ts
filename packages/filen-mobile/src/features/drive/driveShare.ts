@@ -1,7 +1,7 @@
 import auth from "@/lib/auth"
 import { SharedRootItem, type Contact } from "@filen/sdk-rs"
 import type { DriveItem } from "@/types"
-import { driveItemsQueryUpdate } from "@/features/drive/queries/useDriveItems.query"
+import { driveItemsQueryUpdate, driveItemsQueryUpdateRoot } from "@/features/drive/queries/useDriveItems.query"
 import cache from "@/lib/cache"
 
 /**
@@ -41,45 +41,21 @@ export async function removeShare({ item, parentUuid }: { item: DriveItem; paren
 	// Item leaves the user's sharedIn/sharedOut view entirely — forget caches.
 	cache.forgetItem(item.data.uuid)
 
-	if (parentUuid) {
-		driveItemsQueryUpdate({
-			params: {
-				path: {
-					type: "sharedOut",
-					uuid: parentUuid
-				}
-			},
-			updater: prev => prev.filter(i => i.data.uuid !== item.data.uuid)
-		})
+	const withoutItem = (prev: DriveItem[]) => prev.filter(i => i.data.uuid !== item.data.uuid)
 
-		driveItemsQueryUpdate({
-			params: {
-				path: {
-					type: "sharedIn",
-					uuid: parentUuid
-				}
-			},
-			updater: prev => prev.filter(i => i.data.uuid !== item.data.uuid)
-		})
+	for (const type of ["sharedOut", "sharedIn"] as const) {
+		if (parentUuid) {
+			driveItemsQueryUpdate({
+				params: {
+					path: {
+						type,
+						uuid: parentUuid
+					}
+				},
+				updater: withoutItem
+			})
+		}
+
+		driveItemsQueryUpdateRoot(type, withoutItem)
 	}
-
-	driveItemsQueryUpdate({
-		params: {
-			path: {
-				type: "sharedOut",
-				uuid: null
-			}
-		},
-		updater: prev => prev.filter(i => i.data.uuid !== item.data.uuid)
-	})
-
-	driveItemsQueryUpdate({
-		params: {
-			path: {
-				type: "sharedIn",
-				uuid: null
-			}
-		},
-		updater: prev => prev.filter(i => i.data.uuid !== item.data.uuid)
-	})
 }

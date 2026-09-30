@@ -50,8 +50,6 @@ const H = vi.hoisted(() => {
 	return holders
 })
 
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
-
 vi.mock("expo-file-system", async () => await import("@/tests/mocks/fastExpoFileSystem"))
 
 vi.mock("expo-crypto", () => ({

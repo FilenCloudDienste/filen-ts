@@ -1,12 +1,7 @@
 import { vi, describe, it, expect, beforeEach, afterEach } from "vitest"
 
-// The real store only needs expo-file-system + the uniffi binding stubbed; everything else it
-// imports is type-only (erased) or pure (zustand).
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
-
 // screens/transfers.tsx pulls in heavy React + native deps transitively. None of their
 // implementations matter for the pure buildTransfersDisplayList builder under test here.
-vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
 vi.mock("expo-router", () => ({ router: {} }))
 vi.mock("react-native-safe-area-context", () => ({
 	useSafeAreaInsets: vi.fn(() => ({ top: 0, bottom: 0, left: 0, right: 0 }))

@@ -1,8 +1,7 @@
 import { ActivityIndicator } from "react-native"
 import { FadeOut } from "react-native-reanimated"
 import { AnimatedView } from "@/components/ui/animated"
-import Text from "@/components/ui/text"
-import Ionicons from "@expo/vector-icons/Ionicons"
+import { PreviewStatusMessage } from "@/components/drivePreview/previewStatus"
 import { useTranslation } from "react-i18next"
 
 const PreviewLoadingOverlay = ({ status }: { status: "loading" | "error" }) => {
@@ -20,14 +19,10 @@ const PreviewLoadingOverlay = ({ status }: { status: "loading" | "error" }) => {
 					color="white"
 				/>
 			) : (
-				<>
-					<Ionicons
-						name="warning-outline"
-						size={48}
-						color="#9ca3af"
-					/>
-					<Text className="mt-4 text-center text-sm leading-5 text-muted-foreground">{t("preview_load_failed")}</Text>
-				</>
+				<PreviewStatusMessage
+					icon="warning-outline"
+					text={t("preview_load_failed")}
+				/>
 			)}
 		</AnimatedView>
 	)

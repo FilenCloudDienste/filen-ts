@@ -8,7 +8,7 @@ import { router } from "@/lib/router"
 import { useResolveClassNames } from "uniwind"
 import { useShallow } from "zustand/shallow"
 import useNotesStore from "@/features/notes/store/useNotes.store"
-import useNotesInflightStore from "@/features/notes/store/useNotesInflight.store"
+import { useNoteHasInflight } from "@/features/notes/store/useNotesInflight.store"
 import useNotesOfflineStore from "@/features/notes/store/useNotesOffline.store"
 import { useStringifiedClient } from "@/lib/auth"
 import { formatRelativeTime } from "@/lib/time"
@@ -36,6 +36,28 @@ export type DataItem = Item & {
 
 export type ListItem = SectionHeader | DataItem
 
+const BADGE_CLASS_NAME = "flex-row items-center justify-center p-1 rounded-full size-8 bg-background-tertiary"
+
+// Plain helper, not a component: no extra fiber per badge in list rows.
+const renderBadge = (
+	name: React.ComponentProps<typeof Ionicons>["name"],
+	color: React.ComponentProps<typeof Ionicons>["color"],
+	accessibilityLabel?: string
+) => {
+	return (
+		<View
+			accessibilityLabel={accessibilityLabel}
+			className={BADGE_CLASS_NAME}
+		>
+			<Ionicons
+				name={name}
+				size={18}
+				color={color}
+			/>
+		</View>
+	)
+}
+
 const NoteSectionHeader = ({ item }: { item: SectionHeader }) => {
 	const textForeground = useResolveClassNames("text-foreground")
 
@@ -61,7 +83,7 @@ const NoteRow = ({ item, nextNote, prevNote }: { item: DataItem; nextNote?: List
 	// device" across the app.
 	const textGreen500 = useResolveClassNames("text-green-500")
 	const itemUuid = item.uuid
-	const isInflight = useNotesInflightStore(useShallow(state => (state.inflightContent[itemUuid]?.length ?? 0) > 0))
+	const isInflight = useNoteHasInflight(itemUuid)
 	const isAvailableOffline = useNotesOfflineStore(state => state.marked[itemUuid] === true)
 	const isActive = useNotesStore(useShallow(state => state.activeNote?.uuid === itemUuid))
 	const stringifiedClient = useStringifiedClient()
@@ -172,7 +194,7 @@ const NoteRow = ({ item, nextNote, prevNote }: { item: DataItem; nextNote?: List
 								</View>
 							)}
 							<View className="shrink-0 h-auto w-auto bg-transparent flex-col gap-2 items-center justify-start">
-								<View className="flex-row items-center justify-center p-1 rounded-full size-8 bg-background-tertiary">
+								<View className={BADGE_CLASS_NAME}>
 									{isInflight ? (
 										<ActivityIndicator
 											size="small"
@@ -185,48 +207,10 @@ const NoteRow = ({ item, nextNote, prevNote }: { item: DataItem; nextNote?: List
 										/>
 									)}
 								</View>
-								{item.pinned && (
-									<View className="flex-row items-center justify-center p-1 rounded-full size-8 bg-background-tertiary">
-										<Ionicons
-											name="pin-outline"
-											size={18}
-											color={textForeground.color}
-										/>
-									</View>
-								)}
-								{item.favorite && (
-									<View className="flex-row items-center justify-center p-1 rounded-full size-8 bg-background-tertiary">
-										<Ionicons
-											name="heart-outline"
-											size={18}
-											color={textRed500.color}
-										/>
-									</View>
-								)}
-								{isReadOnly && (
-									<View
-										accessibilityLabel={t("note_view_only")}
-										className="flex-row items-center justify-center p-1 rounded-full size-8 bg-background-tertiary"
-									>
-										<Ionicons
-											name="eye-outline"
-											size={18}
-											color={textForeground.color}
-										/>
-									</View>
-								)}
-								{isAvailableOffline && (
-									<View
-										accessibilityLabel={t("note_available_offline")}
-										className="flex-row items-center justify-center p-1 rounded-full size-8 bg-background-tertiary"
-									>
-										<Ionicons
-											name="download-outline"
-											size={18}
-											color={textGreen500.color}
-										/>
-									</View>
-								)}
+								{item.pinned && renderBadge("pin-outline", textForeground.color)}
+								{item.favorite && renderBadge("heart-outline", textRed500.color)}
+								{isReadOnly && renderBadge("eye-outline", textForeground.color, t("note_view_only"))}
+								{isAvailableOffline && renderBadge("download-outline", textGreen500.color, t("note_available_offline"))}
 							</View>
 							<View className="gap-1 w-full h-auto bg-transparent flex-col flex-1">
 								<Text

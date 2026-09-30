@@ -11,11 +11,9 @@ import { useEffect, useRef, useState } from "react"
 import { AnnotationLayer, AnnotationMode, getDocument, PDFDataRangeTransport, TextLayer } from "pdfjs-dist/legacy/build/pdf.mjs"
 import { CMAPS, STANDARD_FONTS, WASM_BINARIES } from "@/components/pdfPreview/assets.generated"
 import { buildPdfDocumentOptions } from "@/components/pdfPreview/options"
-import { classifyPdfError } from "@/components/pdfPreview/errors"
+import { classifyPdfError, passwordReasonFromCode, pdfErrorName } from "@/components/pdfPreview/errors"
 import {
 	PDF_EVENT_KEY,
-	PDF_EXTERNAL_LINK_KEY,
-	PDF_EXTERNAL_URL_ATTRIBUTE,
 	type PdfPasswordResponse,
 	type PdfSaveRequest,
 	type PdfViewerEvent
@@ -25,6 +23,7 @@ import { MAX_RANGE_LENGTH, base64ToBytes, writeAllBytes } from "@/lib/rangeTrans
 import { createFormWidgetScope, hardenFormWidgets } from "@/components/pdfPreview/formWidgets"
 import { attachTextLayerSelection } from "@/components/pdfPreview/textSelection"
 import { classifyUntrustedLinkHref } from "@/lib/untrustedLinks"
+import { EXTERNAL_URL_ATTRIBUTE, postExternalLink, postToNativeWebView } from "@/lib/domExternalLink"
 import { installDomConsoleProxy } from "@/hooks/useDomEvents/domConsoleProxy"
 import { installDomViewportReset } from "@/lib/domViewport"
 import useEffectOnce from "@/hooks/useEffectOnce"
@@ -214,38 +213,12 @@ class InlineBinaryDataFactory {
  * document-controlled fragments in its messages, and this string reaches the persisted log.
  */
 function describeError(error: unknown): string {
-	if (typeof error === "object" && error !== null && typeof (error as { name?: unknown }).name === "string") {
-		return (error as { name: string }).name
-	}
-
-	return "unknown"
-}
-
-function post(message: unknown): void {
-	const rnWebView = (globalThis as unknown as { ReactNativeWebView?: { postMessage?: (message: string) => void } }).ReactNativeWebView
-
-	if (!rnWebView || typeof rnWebView.postMessage !== "function") {
-		return
-	}
-
-	try {
-		rnWebView.postMessage(JSON.stringify(message))
-	} catch {
-		// Reporting must never throw out of the path that was reporting a failure.
-	}
+	return pdfErrorName(error) ?? "unknown"
 }
 
 function postEvent(event: PdfViewerEvent): void {
-	post({
+	postToNativeWebView({
 		[PDF_EVENT_KEY]: event
-	})
-}
-
-function postExternalLink(url: string): void {
-	post({
-		[PDF_EXTERNAL_LINK_KEY]: {
-			url
-		}
 	})
 }
 
@@ -268,7 +241,7 @@ function createLinkService(goToPage: (pageNumber: number) => void, getPdfDocumen
 			link.href = "#"
 
 			if (classification.action === "external") {
-				link.setAttribute(PDF_EXTERNAL_URL_ATTRIBUTE, classification.url)
+				link.setAttribute(EXTERNAL_URL_ATTRIBUTE, classification.url)
 			}
 		},
 		getAnchorUrl(): string {
@@ -745,7 +718,7 @@ const Dom = ({
 				postEvent({
 					event: "passwordRequired",
 					requestId,
-					reason: code === 2 ? "incorrect" : "required"
+					reason: passwordReasonFromCode(code)
 				})
 			}
 
@@ -1025,7 +998,7 @@ const Dom = ({
 				return
 			}
 
-			const external = anchor.getAttribute(PDF_EXTERNAL_URL_ATTRIBUTE)
+			const external = anchor.getAttribute(EXTERNAL_URL_ATTRIBUTE)
 
 			event.preventDefault()
 

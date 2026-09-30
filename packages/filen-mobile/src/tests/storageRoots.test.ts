@@ -7,10 +7,6 @@ import { vi, describe, it, expect, beforeEach, afterEach } from "vitest"
 // @/constants is node-safe — import the real one so IOS_APP_GROUP_IDENTIFIER is real.
 vi.mock("@/constants", async () => await import("@/tests/mocks/constants"))
 
-// react-native is globally aliased to the minimal mock — the mock exports a mutable
-// Platform object so we can control Platform.OS per test.
-vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
-
 // The version sweep warns on a failed removal — stub the sink so the assertions can read it.
 vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 

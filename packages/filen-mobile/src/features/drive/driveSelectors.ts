@@ -71,14 +71,15 @@ export function isFileItem(item: DriveItem): item is DriveItemFileExtracted {
 	return FILE_TYPES.has(item.type)
 }
 
-// Whether the drive screen renders on the BASE background (bg-background — the main drive tab) rather
-// than the secondary background used by every other variant (favorites/shared/links/offline/recents +
-// the driveSelect picker, which are modal-presented). Single source of truth for the screen bg AND for
-// any raised surface on it: the grid card sits one elevation step above — secondary on the base-bg tab,
-// tertiary on the secondary-bg screens — so it never blends into the screen.
-export function driveScreenUsesBaseBackground(drivePath: DrivePath): boolean {
+// The plain drive browser: the /drive tab, not the driveSelect picker. It alone hosts the cache-backed
+// search, and it renders on the BASE background (bg-background) rather than the secondary background of
+// every modal-presented variant (favorites/shared/links/offline/recents + the picker). Raised surfaces
+// sit one elevation step above the screen — secondary on the base-bg tab, tertiary elsewhere — so they
+// never blend into it.
+export function isPlainDrivePath(drivePath: DrivePath): boolean {
 	return drivePath.type === "drive" && !drivePath.selectOptions
 }
+
 
 export function isDirectoryItem(item: DriveItem): item is DriveItemDirectoryExtracted {
 	return DIRECTORY_TYPES.has(item.type)
@@ -421,7 +422,7 @@ export function resolveDriveContainingDirectoryTarget({
 	rootUuid: string | null
 	drivePath: DrivePath
 }) {
-	if (drivePath.type !== "drive" || drivePath.selectOptions) {
+	if (!isPlainDrivePath(drivePath)) {
 		return null
 	}
 
@@ -504,14 +505,13 @@ export function hiddenFilterAppliesTo(drivePath: DrivePath): boolean {
 }
 
 /**
- * Whether the list row renders a checkbox column ahead of its pressable — the picker's own checkbox
- * in select mode, otherwise the bulk-selection one.
+ * Whether a drive row or grid cell renders a selection checkbox — the picker's own in select mode,
+ * otherwise the bulk-selection one.
  *
- * Load-bearing for the row's gutter: on Android the pressable carries that gutter itself so its press
- * ripple can reach the row edges, and it must not also claim the left one when a checkbox already
- * owns it. Both checkboxes are siblings rather than children of the pressable (nesting them inside a
- * gesture-handler button lets the parent swallow their touch), so this has to mirror their render
- * conditions exactly.
+ * Also load-bearing for the list row's gutter: on Android the pressable carries that gutter itself so
+ * its press ripple can reach the row edges, and it must not also claim the left one when a checkbox
+ * already owns it. The checkbox is a sibling rather than a child of the pressable (nesting it inside a
+ * gesture-handler button lets the parent swallow its touch).
  */
 export function driveItemHasLeadingCheckbox({
 	drivePath,

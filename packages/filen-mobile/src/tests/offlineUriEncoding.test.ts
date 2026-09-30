@@ -15,8 +15,6 @@
  */
 import { vi, describe, it, expect, beforeEach } from "vitest"
 
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
-
 vi.mock("expo-crypto", async () => await import("@/tests/mocks/expoCrypto"))
 
 vi.mock("expo-file-system", async () => await import("@/tests/mocks/strictUriExpoFileSystem"))

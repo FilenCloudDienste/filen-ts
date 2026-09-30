@@ -136,7 +136,6 @@ function Developer() {
 			<ScreenBody>
 				<SettingsScrollView>
 					<Group
-						className="bg-background-tertiary"
 						buttons={[
 							{
 								icon: "alert-circle-outline",
@@ -163,7 +162,6 @@ function Developer() {
 						]}
 					/>
 					<Group
-						className="bg-background-tertiary"
 						buttons={[
 							{
 								icon: "flame-outline",
@@ -204,7 +202,6 @@ function Developer() {
 						]}
 					/>
 					<Group
-						className="bg-background-tertiary"
 						buttons={[
 							{
 								icon: "chatbox-ellipses-outline",
@@ -230,7 +227,6 @@ function Developer() {
 						]}
 					/>
 					<Group
-						className="bg-background-tertiary"
 						buttons={[
 							{
 								icon: "information-circle-outline",

@@ -13,19 +13,11 @@
  *  2. `PdfViewerEventKind` is CLOSED. No pdf.js error string ever reaches the UI or the log through
  *     this channel — a document controls parts of those strings.
  *
+ * The link-tap envelope is shared with the .docx preview and lives in `@/lib/domExternalLink`.
+ *
  * No DOM or native imports, so both sides share one definition and it is testable in node.
  */
 
-import { classifyUntrustedLinkHref } from "@/lib/untrustedLinks"
-
-/**
- * Marks an anchor whose href the viewer has already resolved to an allowlisted external URL. The tap
- * handler reads the URL from here rather than from `href`, because `href` is rewritten to "#" so the
- * anchor stays styled as a link without the WebView being able to navigate to it.
- */
-export const PDF_EXTERNAL_URL_ATTRIBUTE = "data-external-url"
-
-export const PDF_EXTERNAL_LINK_KEY = "__filenPdfExternalLink"
 export const PDF_EVENT_KEY = "__filenPdfEvent"
 
 /**
@@ -76,26 +68,6 @@ export type PdfSaveRequest = {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null
-}
-
-/**
- * Native-side parser for a link tap. Re-classifies rather than trusting the payload — the value ends
- * up at Linking.openURL, and this side of the bridge is the one that gets to decide.
- */
-export function parsePdfExternalLink(parsed: unknown): string | null {
-	if (!isRecord(parsed) || !(PDF_EXTERNAL_LINK_KEY in parsed)) {
-		return null
-	}
-
-	const envelope = parsed[PDF_EXTERNAL_LINK_KEY]
-
-	if (!isRecord(envelope)) {
-		return null
-	}
-
-	const classification = classifyUntrustedLinkHref(typeof envelope["url"] === "string" ? envelope["url"] : null)
-
-	return classification.action === "external" ? classification.url : null
 }
 
 const UNSUPPORTED_REASONS: readonly PdfUnsupportedReason[] = ["structuredClone", "canvas"]

@@ -11,11 +11,7 @@ const { mockWriteEmbeddedPreviewToPath, mockWriteEmbeddedPreviewFromPath, mockOf
 	})
 )
 
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
-
 vi.mock("expo-crypto", async () => await import("@/tests/mocks/expoCrypto"))
-
-vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
 
 vi.mock("@filen/sdk-rs", () => ({
 	AnyFile: {

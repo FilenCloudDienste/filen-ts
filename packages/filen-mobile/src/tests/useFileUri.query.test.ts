@@ -4,10 +4,6 @@ const { mockResolveFile } = vi.hoisted(() => ({
 	mockResolveFile: vi.fn()
 }))
 
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
-
-vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
-
 vi.mock("@filen/shared", async () => ({
 	...(await import("@/tests/mocks/filenShared")),
 	sortParams: (p: Record<string, unknown>) => {

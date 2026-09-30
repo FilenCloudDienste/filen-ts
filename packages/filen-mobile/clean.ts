@@ -1,15 +1,28 @@
 import fs from "fs"
 import path from "path"
 
-const expoDataPath = path.join(__dirname, ".expo")
+// --deep also wipes the machine-wide Xcode and Gradle caches (superclean)
+const deep = process.argv.includes("--deep")
+const home = process.env.HOME || ""
+const expoData: [label: string, targetPath: string] = ["Expo data", path.join(__dirname, ".expo")]
 
-if (fs.existsSync(expoDataPath)) {
-	console.log("Cleaning Expo data at:", expoDataPath)
+const targets: [label: string, targetPath: string][] = deep
+	? [
+			["Xcode Derived Data", path.join(home, "Library", "Developer", "Xcode", "DerivedData")],
+			expoData,
+			["Gradle cache", path.join(home, ".gradle")]
+		]
+	: [expoData]
 
-	fs.rmSync(expoDataPath, {
-		recursive: true,
-		force: true
-	})
+for (const [label, targetPath] of targets) {
+	if (fs.existsSync(targetPath)) {
+		console.log(`Cleaning ${label} at:`, targetPath)
 
-	console.log("Expo data cleaned successfully.")
+		fs.rmSync(targetPath, {
+			recursive: true,
+			force: true
+		})
+
+		console.log(`${label} cleaned successfully.`)
+	}
 }

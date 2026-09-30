@@ -276,7 +276,6 @@ function Advanced() {
 			<ScreenBody>
 				<SettingsScrollView>
 					<Group
-						className="bg-background-tertiary"
 						buttons={[
 							{
 								icon: "swap-horizontal-outline",
@@ -318,7 +317,6 @@ function Advanced() {
 					/>
 					{Platform.OS === "android" ? (
 						<Group
-							className="bg-background-tertiary"
 							buttons={[
 								{
 									icon: "notifications-outline",
@@ -368,7 +366,6 @@ function Advanced() {
 						/>
 					) : null}
 					<Group
-						className="bg-background-tertiary"
 						buttons={[
 							{
 								icon: "cloud-upload-outline",
@@ -436,7 +433,6 @@ function Advanced() {
 						]}
 					/>
 					<Group
-						className="bg-background-tertiary"
 						buttons={[
 							{
 								icon: "image-outline",
@@ -544,7 +540,6 @@ function Advanced() {
 						]}
 					/>
 					<Group
-						className="bg-background-tertiary"
 						buttons={[
 							{
 								icon: "sparkles-outline",
@@ -577,7 +572,6 @@ function Advanced() {
 						]}
 					/>
 					<Group
-						className="bg-background-tertiary"
 						buttons={[
 							{
 								icon: "cloud-offline-outline",
@@ -601,7 +595,6 @@ function Advanced() {
 						]}
 					/>
 					<Group
-						className="bg-background-tertiary"
 						buttons={[
 							{
 								icon: "list-outline",

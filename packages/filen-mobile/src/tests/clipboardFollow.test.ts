@@ -13,8 +13,6 @@ const h = vi.hoisted(() => ({
 	dirs: new Map<string, unknown>()
 }))
 
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
-vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
 vi.mock("@filen/sdk-rs", () => ({
 	AnyNormalDir_Tags: { Dir: "Dir", Root: "Root" },
 	NonRootItem_Tags: { File: "File", NormalDir: "NormalDir" },
@@ -76,6 +74,7 @@ vi.mock("@/lib/sdkUnwrap", () => ({
 vi.mock("@/features/drive/queries/useDriveItems.query", () => ({
 	driveItemsQueryUpdateGlobal: vi.fn(),
 	driveItemsQueryUpdate: vi.fn(),
+	driveItemsQueryUpdateRoot: vi.fn(),
 	driveItemsQueryUpdateForNormalParent: vi.fn(),
 	driveItemsQueryUpdateForPhotos: vi.fn(),
 	driveItemsQueryRemoveDirectoryFromPhotos: vi.fn(),

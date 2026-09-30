@@ -2,10 +2,6 @@
 
 import { vi, describe, it, expect, beforeEach } from "vitest"
 
-// ─── Mock dependencies ───────────────────────────────────────────────────────
-
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
-
 // ─── Imports ─────────────────────────────────────────────────────────────────
 
 import { renderHook, act } from "@testing-library/react"

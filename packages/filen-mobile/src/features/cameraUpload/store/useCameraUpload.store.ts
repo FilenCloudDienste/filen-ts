@@ -1,4 +1,5 @@
 import { create } from "zustand"
+import { randomUUID } from "expo-crypto"
 
 export type CameraUploadError = {
 	id: string
@@ -23,7 +24,8 @@ export type CameraUploadStore = {
 	errors: CameraUploadError[]
 	skippedAssets: CameraUploadSkippedAsset[]
 	setSyncing: (syncing: boolean) => void
-	setErrors: (fn: CameraUploadError[] | ((prev: CameraUploadError[]) => CameraUploadError[])) => void
+	addError: (entry: { error: unknown; assetId?: string }) => void
+	clearErrors: () => void
 	addSkippedAsset: (asset: CameraUploadSkippedAsset) => void
 	removeSkippedAsset: (assetId: string) => void
 	clearSkippedAssets: () => void
@@ -33,16 +35,24 @@ export type CameraUploadStore = {
 // syncs fire frequently (mount, every foreground transition, a debounce, reconnect, settings
 // focus-leave, the OS background task), so a durable failure would otherwise grow this array without
 // limit — memory creep, an unusable error screen, and a permanent warning badge that "Clear errors"
-// can't keep clear. setErrors keeps only the most recent N (oldest dropped from the front).
+// can't keep clear. addError keeps only the most recent N (oldest dropped from the front).
 export const MAX_CAMERA_UPLOAD_ERRORS = 100
 
 export const useCameraUploadStore = create<CameraUploadStore>(set => ({
 	syncing: false,
 	errors: [],
 	skippedAssets: [],
-	setErrors(fn) {
+	addError({ error, assetId }) {
 		set(state => {
-			const next = typeof fn === "function" ? fn(state.errors) : fn
+			const next = [
+				...state.errors,
+				{
+					id: randomUUID(),
+					timestamp: Date.now(),
+					error,
+					assetId
+				}
+			]
 
 			// Bound the log (CU-08): keep only the most recent MAX_CAMERA_UPLOAD_ERRORS so a durable
 			// per-pass failure can't grow it without limit. Slicing from the front drops the oldest.
@@ -50,6 +60,9 @@ export const useCameraUploadStore = create<CameraUploadStore>(set => ({
 				errors: next.length > MAX_CAMERA_UPLOAD_ERRORS ? next.slice(next.length - MAX_CAMERA_UPLOAD_ERRORS) : next
 			}
 		})
+	},
+	clearErrors() {
+		set({ errors: [] })
 	},
 	setSyncing(syncing) {
 		set({ syncing })

@@ -42,6 +42,18 @@ export function backgroundTransfersNotificationGap(enabled: boolean, status: Per
 	return enabled && status === "denied"
 }
 
+function toPermissionStatus(status: AuthorizationStatus): PermissionStatus {
+	switch (status) {
+		case AuthorizationStatus.AUTHORIZED:
+		case AuthorizationStatus.PROVISIONAL:
+			return "authorized"
+		case AuthorizationStatus.DENIED:
+			return "denied"
+		default:
+			return "notDetermined"
+	}
+}
+
 export type TransferProgressSnapshot = {
 	count: number
 	progress: number
@@ -116,15 +128,7 @@ class ForegroundService {
 
 		const settings = await notifee.getNotificationSettings()
 
-		switch (settings.authorizationStatus) {
-			case AuthorizationStatus.AUTHORIZED:
-			case AuthorizationStatus.PROVISIONAL:
-				return "authorized"
-			case AuthorizationStatus.DENIED:
-				return "denied"
-			default:
-				return "notDetermined"
-		}
+		return toPermissionStatus(settings.authorizationStatus)
 	}
 
 	public async openSettings(): Promise<void> {
@@ -298,9 +302,7 @@ class ForegroundService {
 		}
 
 		const settings = await withSystemPresentation(() => notifee.requestPermission())
-		const granted =
-			settings.authorizationStatus === AuthorizationStatus.AUTHORIZED ||
-			settings.authorizationStatus === AuthorizationStatus.PROVISIONAL
+		const granted = toPermissionStatus(settings.authorizationStatus) === "authorized"
 
 		if (!granted) {
 			this.deniedThisSession = true

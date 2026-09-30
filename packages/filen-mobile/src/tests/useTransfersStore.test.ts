@@ -1,7 +1,5 @@
 import { vi, describe, it, expect, beforeEach, afterEach } from "vitest"
 
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
-
 import { useTransfersStore, type Transfer } from "@/features/transfers/store/useTransfers.store"
 
 function makeUploadFileTransfer(id: string, size: number, bytesTransferred = 0, paused = false): Transfer {

@@ -82,15 +82,7 @@ export async function retryInflightMessage({ chat, message }: { chat: Chat; mess
 		}
 	})
 
-	useChatsStore.getState().setInflightErrors(prev => {
-		const updated = {
-			...prev
-		}
-
-		delete updated[message.inflightId]
-
-		return updated
-	})
+	useChatsStore.getState().clearInflightError(message.inflightId)
 
 	const retryFlushed = await sync.flushToDisk(useChatsStore.getState().inflightMessages)
 
@@ -105,48 +97,8 @@ export async function retryInflightMessage({ chat, message }: { chat: Chat; mess
 // entry, the optimistic copy in the messages query cache (so the bubble disappears immediately
 // instead of lingering until the next refetch) and persists the queue. Silent — callers own UX.
 export async function removeInflightMessage({ chat, message }: { chat: Chat; message: ChatMessageWithInflightId }): Promise<void> {
-	useChatsStore.getState().setInflightMessages(prev => {
-		const existing = prev[chat.uuid]
-
-		if (!existing) {
-			return prev
-		}
-
-		const remaining = existing.messages.filter(m => m.inflightId !== message.inflightId)
-
-		if (remaining.length === existing.messages.length) {
-			return prev
-		}
-
-		const updated = {
-			...prev
-		}
-
-		if (remaining.length === 0) {
-			delete updated[chat.uuid]
-		} else {
-			updated[chat.uuid] = {
-				...existing,
-				messages: remaining
-			}
-		}
-
-		return updated
-	})
-
-	useChatsStore.getState().setInflightErrors(prev => {
-		if (!prev[message.inflightId]) {
-			return prev
-		}
-
-		const updated = {
-			...prev
-		}
-
-		delete updated[message.inflightId]
-
-		return updated
-	})
+	useChatsStore.getState().dequeueInflightMessage(chat.uuid, message.inflightId)
+	useChatsStore.getState().clearInflightError(message.inflightId)
 
 	chatMessagesQueryUpdate({
 		params: {

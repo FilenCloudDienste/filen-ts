@@ -241,6 +241,17 @@ function buildDismissGesture(
 		})
 }
 
+// Android PiP resizes the ACTIVITY window while the list stays mounted (the remount key is
+// deliberately frozen during a session): clamp/settle scrolls against the tiny viewport fire
+// momentum-end with garbage geometry and would poison the anchor — the expand-back re-anchor
+// (onListContainerLayout, geometry-proof by design) then faithfully restores the WRONG page — and
+// viewability recomputed against it would churn currentItem / currentIndex (wrong header +
+// active-cell flips). A PiP session pins the pager on Android. iOS in-app PiP keeps the pager
+// interactive by design (its window never resizes), so its settles stay legitimate.
+function isPagerPinnedByPip(): boolean {
+	return Platform.OS === "android" && usePipStore.getState().activeKey !== null
+}
+
 function setHeaderOpacityValue(headerOpacity: SharedValue<number>, visible: boolean) {
 	headerOpacity.value = withSpring(visible ? 1 : 0, SPRING_HEADER)
 }
@@ -321,13 +332,7 @@ const Gallery = () => {
 			return
 		}
 
-		// Android PiP resizes the ACTIVITY window while the list stays mounted (the remount key is
-		// deliberately frozen during a session): clamp/settle scrolls against the tiny viewport
-		// fire momentum-end with garbage geometry and would poison the anchor — the expand-back
-		// re-anchor (onListContainerLayout, geometry-proof by design) then faithfully restores the
-		// WRONG page. A PiP session pins the pager on Android. iOS in-app PiP keeps the pager
-		// interactive by design (its window never resizes), so its settles stay legitimate.
-		if (Platform.OS === "android" && usePipStore.getState().activeKey !== null) {
+		if (isPagerPinnedByPip()) {
 			return
 		}
 
@@ -774,11 +779,7 @@ const Gallery = () => {
 						onScrollBeginDrag={onScrollBeginDrag}
 						onMomentumScrollEnd={onMomentumScrollEnd}
 						onViewableItemsChanged={info => {
-							// Same Android-PiP guard as onMomentumScrollEnd: viewability recomputed
-							// against the tiny PiP-resized viewport must not churn currentItem /
-							// currentIndex (wrong header + active-cell flips) while the session pins
-							// the pager.
-							if (Platform.OS === "android" && usePipStore.getState().activeKey !== null) {
+							if (isPagerPinnedByPip()) {
 								return
 							}
 

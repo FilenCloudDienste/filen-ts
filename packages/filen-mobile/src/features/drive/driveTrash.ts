@@ -5,7 +5,7 @@ import { unwrapParentUuid } from "@/lib/sdkUnwrap"
 import { itemFromModified } from "@/features/drive/driveModified"
 import {
 	driveItemsQueryUpdateGlobal,
-	driveItemsQueryUpdate,
+	driveItemsQueryUpdateRoot,
 	driveItemsQueryUpdateForNormalParent,
 	driveItemsQueryGet,
 	driveItemsQueryRemoveDirectoryFromPhotos
@@ -38,15 +38,7 @@ export async function deletePermanently({ item }: { item: DriveItem }) {
 	// Always remove from the trash listing — trash items carry `parent = Trash`
 	// sentinel, so unwrappedParentUuidPrevious is always null for them and the
 	// global block below never fires for this function's only real callers.
-	driveItemsQueryUpdate({
-		params: {
-			path: {
-				type: "trash",
-				uuid: null
-			}
-		},
-		updater: prev => prev.filter(i => i.data.uuid !== item.data.uuid)
-	})
+	driveItemsQueryUpdateRoot("trash", prev => prev.filter(i => i.data.uuid !== item.data.uuid))
 
 	if (unwrappedParentUuidPrevious) {
 		driveItemsQueryUpdateGlobal({
@@ -96,15 +88,7 @@ export async function trash({ item }: { item: DriveItem }) {
 	// Recents is intentionally not re-added here: the global update above already
 	// removed the item from every listing, and the recents query refetches on focus
 	// (listRecents returns recent trashed items), so recents stays server-authoritative.
-	driveItemsQueryUpdate({
-		params: {
-			path: {
-				type: "trash",
-				uuid: null
-			}
-		},
-		updater: prev => [...prev.filter(i => i.data.uuid !== item.data.uuid), item]
-	})
+	driveItemsQueryUpdateRoot("trash", prev => [...prev.filter(i => i.data.uuid !== item.data.uuid), item])
 
 	// Drop the item from an open preview showing it (now lives in trash).
 	events.emit("driveItemRemoved", {
@@ -140,15 +124,7 @@ export async function restore({ item }: { item: DriveItem }) {
 		})
 	}
 
-	driveItemsQueryUpdate({
-		params: {
-			path: {
-				type: "trash",
-				uuid: null
-			}
-		},
-		updater: prev => prev.filter(i => i.data.uuid !== item.data.uuid)
-	})
+	driveItemsQueryUpdateRoot("trash", prev => prev.filter(i => i.data.uuid !== item.data.uuid))
 
 	// Drop the item from an open preview showing it (restored out of trash).
 	events.emit("driveItemRemoved", {
@@ -188,15 +164,7 @@ export async function emptyTrash() {
 
 	markDirectorySizesStale()
 
-	driveItemsQueryUpdate({
-		params: {
-			path: {
-				type: "trash",
-				uuid: null
-			}
-		},
-		updater: () => []
-	})
+	driveItemsQueryUpdateRoot("trash", () => [])
 }
 
 export async function restoreFileVersion({ item, version }: { item: DriveItem; version: FileVersion }) {

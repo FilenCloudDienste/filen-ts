@@ -93,19 +93,36 @@ function rewriteMover(paths: Map<string, string>, uuid: string, from: string, to
 	rewritePrefix(paths, from, to)
 }
 
+// Depths are computed once per uuid; the sort is stable, so equal depths keep input order.
+function sortUuidsByPathDepth(uuids: readonly string[], pathOf: (uuid: string) => string, order: "asc" | "desc"): string[] {
+	const keyed = uuids.map(uuid => ({
+		uuid,
+		depth: pathSegmentDepth(pathOf(uuid))
+	}))
+
+	keyed.sort(order === "asc" ? (a, b) => a.depth - b.depth : (a, b) => b.depth - a.depth)
+
+	return keyed.map(({ uuid }) => uuid)
+}
+
+function pushMove(ops: TreeOp[], simulated: Map<string, string>, uuid: string, from: string, to: string, isDirectory: boolean): void {
+	ops.push({
+		type: "move",
+		uuid,
+		from,
+		to,
+		isDirectory
+	})
+	rewriteMover(simulated, uuid, from, to, isDirectory)
+}
+
 // Replays the full two-phase move plan for a candidate mover set on a COPY of the simulated map
 // and returns every uuid's FINAL path (non-movers ride along via the prefix rewrites). Used by
 // the degraded-pass deferral check to know where kept entries will actually sit when phase 2
 // runs — a mover's destination colliding with any such stay would make the executor throw.
 function simulateMoves(simulated: Map<string, string>, movers: string[], remote: Map<string, RemoteTreeEntry>): Map<string, string> {
 	const projected = new Map(simulated)
-	const phase1Depths = new Map<string, number>()
-
-	for (const uuid of movers) {
-		phase1Depths.set(uuid, pathSegmentDepth(projected.get(uuid) ?? ""))
-	}
-
-	const phase1 = [...movers].sort((a, b) => (phase1Depths.get(b) as number) - (phase1Depths.get(a) as number))
+	const phase1 = sortUuidsByPathDepth(movers, uuid => projected.get(uuid) ?? "", "desc")
 
 	for (const uuid of phase1) {
 		const from = projected.get(uuid)
@@ -117,13 +134,7 @@ function simulateMoves(simulated: Map<string, string>, movers: string[], remote:
 		rewriteMover(projected, uuid, from, tmpPathForUuid(uuid), remote.get(uuid)?.isDirectory === true)
 	}
 
-	const phase2Depths = new Map<string, number>()
-
-	for (const uuid of movers) {
-		phase2Depths.set(uuid, pathSegmentDepth(remote.get(uuid)?.path ?? ""))
-	}
-
-	const phase2 = [...movers].sort((a, b) => (phase2Depths.get(a) as number) - (phase2Depths.get(b) as number))
+	const phase2 = sortUuidsByPathDepth(movers, uuid => remote.get(uuid)?.path ?? "", "asc")
 
 	for (const uuid of phase2) {
 		const from = projected.get(uuid)
@@ -339,13 +350,7 @@ export function planTreeReconcile({
 	// Phase 1 — extract explicit movers to root-level temps, deepest CURRENT path first so an
 	// independently moving child leaves its moving ancestor before the ancestor is extracted.
 	// Non-moving children ride along inside moved directories.
-	const phase1Depths = new Map<string, number>()
-
-	for (const uuid of movers) {
-		phase1Depths.set(uuid, pathSegmentDepth(simulated.get(uuid) ?? ""))
-	}
-
-	const phase1 = [...movers].sort((a, b) => (phase1Depths.get(b) as number) - (phase1Depths.get(a) as number))
+	const phase1 = sortUuidsByPathDepth(movers, uuid => simulated.get(uuid) ?? "", "desc")
 
 	for (const uuid of phase1) {
 		const from = simulated.get(uuid)
@@ -355,16 +360,7 @@ export function planTreeReconcile({
 			continue
 		}
 
-		const to = tmpPathForUuid(uuid)
-
-		ops.push({
-			type: "move",
-			uuid,
-			from,
-			to,
-			isDirectory: remoteEntry.isDirectory
-		})
-		rewriteMover(simulated, uuid, from, to, remoteEntry.isDirectory)
+		pushMove(ops, simulated, uuid, from, tmpPathForUuid(uuid), remoteEntry.isDirectory)
 	}
 
 	// Rider rescue — remote-KEPT entries still sitting inside an only-local directory at this
@@ -446,16 +442,7 @@ export function planTreeReconcile({
 					continue
 				}
 
-				const to = tmpPathForUuid(uuid)
-
-				ops.push({
-					type: "move",
-					uuid,
-					from,
-					to,
-					isDirectory: remoteEntry.isDirectory
-				})
-				rewriteMover(simulated, uuid, from, to, remoteEntry.isDirectory)
+				pushMove(ops, simulated, uuid, from, tmpPathForUuid(uuid), remoteEntry.isDirectory)
 				allMovers.push(uuid)
 
 				if (remoteEntry.isDirectory) {
@@ -495,13 +482,7 @@ export function planTreeReconcile({
 	// Phase 2 — place movers (incl. rescued riders) at their remote paths, shallowest destination
 	// first so moving parent dirs land before children move into them. Executor creates missing
 	// destination parents.
-	const phase2Depths = new Map<string, number>()
-
-	for (const uuid of allMovers) {
-		phase2Depths.set(uuid, pathSegmentDepth(remote.get(uuid)?.path ?? ""))
-	}
-
-	const phase2 = [...allMovers].sort((a, b) => (phase2Depths.get(a) as number) - (phase2Depths.get(b) as number))
+	const phase2 = sortUuidsByPathDepth(allMovers, uuid => remote.get(uuid)?.path ?? "", "asc")
 
 	for (const uuid of phase2) {
 		const from = simulated.get(uuid)
@@ -511,14 +492,7 @@ export function planTreeReconcile({
 			continue
 		}
 
-		ops.push({
-			type: "move",
-			uuid,
-			from,
-			to: remoteEntry.path,
-			isDirectory: remoteEntry.isDirectory
-		})
-		rewriteMover(simulated, uuid, from, remoteEntry.path, remoteEntry.isDirectory)
+		pushMove(ops, simulated, uuid, from, remoteEntry.path, remoteEntry.isDirectory)
 	}
 
 	// After phase 2, `simulated` holds every surviving entry's FINAL planned path.

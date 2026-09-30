@@ -5,7 +5,7 @@ import { wrapSdkNote } from "@/features/notes/utils"
 import { noteContentQueryUpdate } from "@/features/notes/queries/useNoteContent.query"
 import { createNotePreviewFromContentText, hashNoteContent } from "@filen/shared"
 import { rememberNotePush } from "@/features/notes/pushEchoes"
-import { notesQueryUpdate } from "@/features/notes/queries/useNotesQuery"
+import { notesQueryReplace } from "@/features/notes/queries/useNotesQuery"
 import { toSignalOpts } from "@/lib/signals"
 
 export async function getContent({ note, signal }: { note: Note; signal?: AbortSignal }) {
@@ -46,9 +46,7 @@ export async function setContent({
 		)
 	)
 
-	notesQueryUpdate({
-		updater: prev => prev.map(n => (n.uuid === note.uuid ? note : n))
-	})
+	notesQueryReplace(note)
 
 	if (updateQuery) {
 		noteContentQueryUpdate({
@@ -93,9 +91,7 @@ export async function setType({
 		)
 	)
 
-	notesQueryUpdate({
-		updater: prev => prev.map(n => (n.uuid === note.uuid ? note : n))
-	})
+	notesQueryReplace(note)
 
 	return note
 }
@@ -115,9 +111,7 @@ export async function setTitle({ note, newTitle, signal }: { note: Note; newTitl
 		)
 	)
 
-	notesQueryUpdate({
-		updater: prev => prev.map(n => (n.uuid === note.uuid ? note : n))
-	})
+	notesQueryReplace(note)
 
 	return note
 }

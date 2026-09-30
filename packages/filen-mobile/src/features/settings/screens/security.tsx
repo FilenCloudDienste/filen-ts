@@ -44,7 +44,6 @@ function Security() {
 				) : (
 					<SettingsScrollView>
 						<Group
-							className="bg-background-tertiary"
 							buttons={[
 								{
 									icon: "key-outline",

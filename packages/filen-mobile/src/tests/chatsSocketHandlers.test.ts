@@ -9,6 +9,7 @@ const {
 	capturedChatsUpdaters,
 	capturedMessagesUpdaters,
 	mockChatsQueryUpdate,
+	mockReplaceChatInCache,
 	mockChatMessagesQueryUpdate,
 	mockChatsQueryGet,
 	mockChatMessagesQueryGet,
@@ -33,6 +34,7 @@ const {
 		capturedChatsUpdaters,
 		capturedMessagesUpdaters,
 		mockChatsQueryUpdate,
+		mockReplaceChatInCache: vi.fn(),
 		mockChatMessagesQueryUpdate,
 		mockChatsQueryGet: vi.fn().mockReturnValue([]),
 		mockChatMessagesQueryGet: vi.fn().mockReturnValue([]),
@@ -48,11 +50,10 @@ const {
 // Module mocks — must be before any imports that load the mocked modules
 // ---------------------------------------------------------------------------
 
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
-
 vi.mock("@/features/chats/queries/useChats.query", () => ({
 	chatsQueryUpdate: mockChatsQueryUpdate,
-	chatsQueryGet: mockChatsQueryGet
+	chatsQueryGet: mockChatsQueryGet,
+	replaceChatInCache: mockReplaceChatInCache
 }))
 
 vi.mock("@/features/chats/queries/useChatMessages.query", () => ({
@@ -70,8 +71,8 @@ vi.mock("@/features/chats/store/useChats.store", () => ({
 	}
 }))
 
-vi.mock("@/features/chats/chatsWrap", () => ({
-	wrapMessage: vi.fn((msg: unknown) => ({ ...(msg as Record<string, unknown>), undecryptable: false })),
+vi.mock("@/features/chats/chatsWrap", async importOriginal => ({
+	...(await importOriginal<typeof import("@/features/chats/chatsWrap")>()),
 	wrapChat: vi.fn((chat: unknown) => ({ ...(chat as Record<string, unknown>), undecryptable: false }))
 }))
 
@@ -92,6 +93,16 @@ vi.mock("@/lib/auth", () => ({
 // the purge itself is covered by chatsInflight.test.ts; here we only assert the wiring.
 vi.mock("@/features/chats/chatsInflight", () => ({
 	purgeChatInflightState: mockPurgeChatInflightState
+}))
+
+// The deferred cache drop comes from the real chats.ts; stub its upload-and-link deps so it loads.
+vi.mock("@/features/transfers/transfers", () => ({ default: { upload: vi.fn() } }))
+vi.mock("@/features/transfers/quota", () => ({ uploadQuotaRefusal: vi.fn(async () => null) }))
+vi.mock("@/features/drive/drive", () => ({ default: { enablePublicLink: vi.fn() } }))
+vi.mock("@/lib/sdkUnwrap", () => ({
+	unwrapFileMeta: vi.fn(),
+	unwrappedFileIntoDriveItem: vi.fn(),
+	makeDriveItemPublicLink: vi.fn()
 }))
 
 vi.mock("@filen/sdk-rs", () => ({
@@ -227,6 +238,7 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 		capturedChatsUpdaters.length = 0
 		capturedMessagesUpdaters.length = 0
 		mockChatsQueryUpdate.mockClear()
+		mockReplaceChatInCache.mockClear()
 		mockChatMessagesQueryUpdate.mockClear()
 		mockChatsQueryGet.mockReset()
 		mockChatMessagesQueryGet.mockReset()
@@ -896,17 +908,12 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 
 			await handleChatEvent({ event })
 
-			expect(mockChatsQueryUpdate).toHaveBeenCalledOnce()
+			expect(mockReplaceChatInCache).toHaveBeenCalledOnce()
 
-			const updater = capturedChatsUpdaters[0]!
-			const prev = [
-				{
-					uuid: "chat-1",
-					participants: [{ userId: OTHER_USER_ID }, { userId: 999n }]
-				}
-			]
-			const result = updater(prev) as Array<Record<string, unknown>>
-			const participants = result[0]?.["participants"] as Array<{ userId: bigint }>
+			const updated = mockReplaceChatInCache.mock.lastCall?.[0] as { uuid: string; participants: Array<{ userId: bigint }> }
+			const participants = updated.participants
+
+			expect(updated.uuid).toBe("chat-1")
 
 			expect(participants.some(p => p.userId === OTHER_USER_ID)).toBe(false)
 			expect(participants.some(p => p.userId === 999n)).toBe(true)
@@ -920,6 +927,7 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 			await handleChatEvent({ event })
 
 			expect(mockChatsQueryUpdate).not.toHaveBeenCalled()
+			expect(mockReplaceChatInCache).not.toHaveBeenCalled()
 		})
 
 		// The leaver is ourselves (left from another device/session) — the chat must be removed
@@ -959,6 +967,7 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 
 				// No immediate participants-filter update — removal is deferred like a deletion.
 				expect(mockChatsQueryUpdate).not.toHaveBeenCalled()
+				expect(mockReplaceChatInCache).not.toHaveBeenCalled()
 
 				vi.advanceTimersByTime(3000)
 
@@ -989,12 +998,12 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 
 			await handleChatEvent({ event })
 
-			expect(mockChatsQueryUpdate).toHaveBeenCalledOnce()
+			expect(mockReplaceChatInCache).toHaveBeenCalledOnce()
 
-			const updater = capturedChatsUpdaters[0]!
-			const prev = [{ uuid: "chat-1", participants: [{ userId: OTHER_USER_ID }] }]
-			const result = updater(prev) as Array<Record<string, unknown>>
-			const participants = result[0]?.["participants"] as Array<{ userId: bigint }>
+			const updated = mockReplaceChatInCache.mock.lastCall?.[0] as { uuid: string; participants: Array<{ userId: bigint }> }
+			const participants = updated.participants
+
+			expect(updated.uuid).toBe("chat-1")
 
 			expect(participants).toHaveLength(2)
 			expect(participants.some(p => p.userId === 500n)).toBe(true)
@@ -1008,10 +1017,8 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 
 			await handleChatEvent({ event })
 
-			const updater = capturedChatsUpdaters[0]!
-			const prev = [{ uuid: "chat-1", participants: [{ userId: OTHER_USER_ID, email: "old@example.com" }] }]
-			const result = updater(prev) as Array<Record<string, unknown>>
-			const participants = result[0]?.["participants"] as Array<{ userId: bigint; email: string }>
+			const updated = mockReplaceChatInCache.mock.lastCall?.[0] as { participants: Array<{ userId: bigint; email: string }> }
+			const participants = updated.participants
 
 			expect(participants).toHaveLength(1)
 			expect(participants[0]!.email).toBe("updated@example.com")
@@ -1025,6 +1032,7 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 			await handleChatEvent({ event })
 
 			expect(mockChatsQueryUpdate).not.toHaveBeenCalled()
+			expect(mockReplaceChatInCache).not.toHaveBeenCalled()
 		})
 	})
 

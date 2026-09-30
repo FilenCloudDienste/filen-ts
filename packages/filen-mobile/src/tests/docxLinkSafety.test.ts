@@ -1,8 +1,6 @@
 import { describe, it, expect } from "vitest"
 
-import { parseDocxExternalLink, DOCX_EXTERNAL_LINK_KEY } from "@/components/docxPreview/linkSafety"
-import { classifyUntrustedLinkHref } from "@/lib/untrustedLinks"
-import { EXTERNAL_LINK_PROTOCOLS } from "@/components/textEditor/linkUtils"
+import { classifyUntrustedLinkHref, EXTERNAL_LINK_PROTOCOLS } from "@/lib/untrustedLinks"
 
 describe("classifyUntrustedLinkHref", () => {
 	it("blocks a javascript: URL", () => {
@@ -32,6 +30,7 @@ describe("classifyUntrustedLinkHref", () => {
 		expect(classifyUntrustedLinkHref("content://media/external/file/1").action).toBe("block")
 		expect(classifyUntrustedLinkHref("intent://scan/#Intent;scheme=zxing;end").action).toBe("block")
 		expect(classifyUntrustedLinkHref("blob:https://example.com/uuid").action).toBe("block")
+		expect(classifyUntrustedLinkHref("ftp://example.com/file").action).toBe("block")
 	})
 
 	it("blocks an empty, whitespace-only or absent href", () => {
@@ -45,6 +44,7 @@ describe("classifyUntrustedLinkHref", () => {
 		expect(classifyUntrustedLinkHref("../../../etc/passwd").action).toBe("block")
 		expect(classifyUntrustedLinkHref("other.html").action).toBe("block")
 		expect(classifyUntrustedLinkHref("//evil.example.com").action).toBe("block")
+		expect(classifyUntrustedLinkHref("example.com/path").action).toBe("block")
 	})
 
 	it("treats a pure fragment as an in-document link", () => {
@@ -109,44 +109,5 @@ describe("classifyUntrustedLinkHref", () => {
 			action: "external",
 			url: "https://example.com/doc#section"
 		})
-	})
-})
-
-describe("parseDocxExternalLink", () => {
-	function envelope(url: unknown): unknown {
-		return {
-			[DOCX_EXTERNAL_LINK_KEY]: {
-				url
-			}
-		}
-	}
-
-	it("returns the URL for a well-formed envelope", () => {
-		expect(parseDocxExternalLink(envelope("https://example.com"))).toBe("https://example.com")
-	})
-
-	it("re-validates the URL rather than trusting the WebView", () => {
-		// The WebView is the untrusted side of this bridge and the value reaches Linking.openURL, so a
-		// payload that skipped the DOM-side check must still be rejected here.
-		expect(parseDocxExternalLink(envelope("javascript:alert(1)"))).toBeNull()
-		expect(parseDocxExternalLink(envelope("file:///etc/passwd"))).toBeNull()
-		expect(parseDocxExternalLink(envelope("#fragment"))).toBeNull()
-		expect(parseDocxExternalLink(envelope(""))).toBeNull()
-	})
-
-	it("returns null for a non-envelope message", () => {
-		expect(parseDocxExternalLink(null)).toBeNull()
-		expect(parseDocxExternalLink(undefined)).toBeNull()
-		expect(parseDocxExternalLink("a string")).toBeNull()
-		expect(parseDocxExternalLink(42)).toBeNull()
-		expect(parseDocxExternalLink({})).toBeNull()
-		expect(parseDocxExternalLink({ __filenLog: { level: "warn", message: "x" } })).toBeNull()
-	})
-
-	it("returns null for a malformed envelope payload", () => {
-		expect(parseDocxExternalLink({ [DOCX_EXTERNAL_LINK_KEY]: null })).toBeNull()
-		expect(parseDocxExternalLink({ [DOCX_EXTERNAL_LINK_KEY]: "https://example.com" })).toBeNull()
-		expect(parseDocxExternalLink(envelope(undefined))).toBeNull()
-		expect(parseDocxExternalLink(envelope(123))).toBeNull()
 	})
 })

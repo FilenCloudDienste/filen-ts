@@ -37,8 +37,6 @@ const { mockMediaLibraryPermissions, mockCameraPermissions, mockMediaLibraryRequ
 	}
 })
 
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
-
 vi.mock("react-native", () => ({
 	AppState: {
 		addEventListener: (_type: string, _handler: (state: string) => void) => ({

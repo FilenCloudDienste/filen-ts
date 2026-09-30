@@ -38,6 +38,50 @@ export type InflightChatMessageError = {
 
 export type InflightChatMessageErrors = Record<string, InflightChatMessageError>
 
+// Both return `prev` unchanged when there is nothing to remove, so no-op updates don't notify.
+export function withoutInflightMessage(prev: InflightChatMessages, chatUuid: string, inflightId: string): InflightChatMessages {
+	const existing = prev[chatUuid]
+
+	if (!existing) {
+		return prev
+	}
+
+	const remaining = existing.messages.filter(m => m.inflightId !== inflightId)
+
+	if (remaining.length === existing.messages.length) {
+		return prev
+	}
+
+	const updated = {
+		...prev
+	}
+
+	if (remaining.length === 0) {
+		delete updated[chatUuid]
+	} else {
+		updated[chatUuid] = {
+			...existing,
+			messages: remaining
+		}
+	}
+
+	return updated
+}
+
+export function withoutInflightError(prev: InflightChatMessageErrors, inflightId: string): InflightChatMessageErrors {
+	if (!prev[inflightId]) {
+		return prev
+	}
+
+	const updated = {
+		...prev
+	}
+
+	delete updated[inflightId]
+
+	return updated
+}
+
 export type ChatsStore = {
 	inputViewLayout: InputViewLayout
 	inputSelection: {
@@ -50,13 +94,15 @@ export type ChatsStore = {
 	inflightMessages: InflightChatMessages
 	inflightErrors: InflightChatMessageErrors
 	selectedChats: Chat[]
-	setSelectedChats: (fn: Chat[] | ((prev: Chat[]) => Chat[])) => void
+	setSelectedChats: (chats: Chat[]) => void
 	toggleSelectedChat: (chat: Chat) => void
 	removeFromSelection: (uuids: string[]) => void
 	clearSelectedChats: () => void
 	selectAllChats: (chats: Chat[]) => void
 	setInflightErrors: (fn: InflightChatMessageErrors | ((prev: InflightChatMessageErrors) => InflightChatMessageErrors)) => void
 	setInflightMessages: (fn: InflightChatMessages | ((prev: InflightChatMessages) => InflightChatMessages)) => void
+	dequeueInflightMessage: (chatUuid: string, inflightId: string) => void
+	clearInflightError: (inflightId: string) => void
 	setTyping: (fn: Record<string, Typing> | ((prev: Record<string, Typing>) => Record<string, Typing>)) => void
 	setInputFocused: (fn: boolean | ((prev: boolean) => boolean)) => void
 	setSuggestionsVisible: (fn: Suggestions[] | ((prev: Suggestions[]) => Suggestions[])) => void
@@ -90,9 +136,7 @@ export const useChatsStore = create<ChatsStore>(set => ({
 	inflightErrors: {},
 	selectedChats: [],
 	setSelectedChats(selectedChats) {
-		set(state => ({
-			selectedChats: typeof selectedChats === "function" ? selectedChats(state.selectedChats) : selectedChats
-		}))
+		set({ selectedChats })
 	},
 	toggleSelectedChat(chat) {
 		set(state => ({
@@ -126,6 +170,20 @@ export const useChatsStore = create<ChatsStore>(set => ({
 		set(state => ({
 			inflightMessages: typeof inflightMessages === "function" ? inflightMessages(state.inflightMessages) : inflightMessages
 		}))
+	},
+	dequeueInflightMessage(chatUuid, inflightId) {
+		set(state => {
+			const next = withoutInflightMessage(state.inflightMessages, chatUuid, inflightId)
+
+			return next === state.inflightMessages ? state : { inflightMessages: next }
+		})
+	},
+	clearInflightError(inflightId) {
+		set(state => {
+			const next = withoutInflightError(state.inflightErrors, inflightId)
+
+			return next === state.inflightErrors ? state : { inflightErrors: next }
+		})
 	},
 	setTyping(typing) {
 		set(state => ({

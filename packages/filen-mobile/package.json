@@ -22,7 +22,7 @@
 		"ncu": "expo install --fix && ncu --interactive --format group && expo install --fix",
 		"expo:install:fix": "expo install --fix",
 		"clean": "tsx ./clean.ts",
-		"superclean": "tsx ./superclean.ts",
+		"superclean": "tsx ./clean.ts --deep",
 		"test": "vitest run",
 		"translate-i18n": "tsx scripts/translate-i18n.ts",
 		"notices": "tsx scripts/generateThirdPartyNotices.ts",

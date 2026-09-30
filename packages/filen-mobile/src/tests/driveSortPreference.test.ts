@@ -3,8 +3,6 @@ import { vi, describe, it, expect } from "vitest"
 // driveSortPreference.ts uses useSecureStore (react hook), but we only test the
 // pure exported helpers here — no hook rendering is needed.
 
-vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
-
 vi.mock("@/lib/secureStore", () => ({
 	useSecureStore: vi.fn()
 }))

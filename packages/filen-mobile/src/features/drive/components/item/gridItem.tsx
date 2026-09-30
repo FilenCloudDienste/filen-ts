@@ -12,7 +12,7 @@ import { IndicatorBadge } from "@/features/drive/components/item/indicators"
 import useDriveItemInteraction from "@/features/drive/hooks/useDriveItemInteraction"
 import useDriveItemIndicators from "@/features/drive/hooks/useDriveItemIndicators"
 import { driveItemDisplayName } from "@/lib/decryption"
-import { driveScreenUsesBaseBackground } from "@/features/drive/driveSelectors"
+import { isPlainDrivePath } from "@/features/drive/driveSelectors"
 import { GRID_CELL_PADDING } from "@/features/drive/driveGrid"
 import { cn } from "@filen/shared"
 import { useIsDriveItemCut } from "@/features/drive/store/useDriveClipboard.store"
@@ -36,8 +36,7 @@ export default function GridItem({
 	// its tint plays out.
 	highlighted?: boolean
 }) {
-	const { onPress, disabled, navigateOnly, isSelected, isSelecting, isSelectedFromDriveSelect, onPressSelectForDriveSelect } =
-		useDriveItemInteraction({ info, drivePath, getListItems })
+	const { onPress, disabled, navigateOnly, hasCheckbox, checkbox } = useDriveItemInteraction({ info, drivePath, getListItems })
 	const { showFavorited, showOffline, isStoredOffline, hasSyncError } = useDriveItemIndicators({
 		item: info.item,
 		drivePath
@@ -45,15 +44,6 @@ export default function GridItem({
 
 	const cardSize = itemWidth - CELL_PADDING * 2
 	const isCut = useIsDriveItemCut(info.item.data.uuid)
-
-	// Differentiate the two selection modes so the checkbox wires the correct handler,
-	// matching the list row's per-mode Checkbox wiring exactly.
-	const isPickerSelect = drivePath.selectOptions?.intention === "select"
-
-	// In picker (driveSelect) mode the disabled gate must suppress both the value and the
-	// handler, with a transparent checkbox colour to signal unavailability — same as the row.
-	const checkboxValue = isPickerSelect ? (disabled ? false : isSelectedFromDriveSelect) : isSelected
-	const checkboxOnChange = isPickerSelect ? (disabled ? undefined : onPressSelectForDriveSelect) : onPress
 
 	return (
 		<View
@@ -90,7 +80,7 @@ export default function GridItem({
 					<View
 						className={cn(
 							"rounded-3xl items-center justify-center overflow-hidden",
-							driveScreenUsesBaseBackground(drivePath) ? "bg-background-secondary" : "bg-background-tertiary",
+							isPlainDrivePath(drivePath) ? "bg-background-secondary" : "bg-background-tertiary",
 							isCut && "opacity-50"
 						)}
 						style={{ width: cardSize, height: cardSize }}
@@ -120,13 +110,11 @@ export default function GridItem({
 								bgClassName="bg-background-tertiary"
 							/>
 						)}
-						{isSelecting && (
+						{hasCheckbox && (
 							<View className="absolute top-1.5 right-1.5 bg-transparent">
 								<Checkbox
-									value={checkboxValue}
-									onValueChange={checkboxOnChange}
+									{...checkbox}
 									hitSlop={12}
-									color={isPickerSelect && disabled ? "transparent" : undefined}
 								/>
 							</View>
 						)}

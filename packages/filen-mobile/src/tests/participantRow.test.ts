@@ -2,10 +2,6 @@ import { vi, describe, it, expect } from "vitest"
 
 // ─── Module boundary mocks ───────────────────────────────────────────────────
 
-vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
-
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
-
 vi.mock("@filen/shared", async () => await import("@/tests/mocks/filenShared"))
 
 // react-i18next — not needed for pure builder tests, but participantRow.tsx imports it at module level

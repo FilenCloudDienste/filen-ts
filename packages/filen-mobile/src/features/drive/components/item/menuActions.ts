@@ -3,7 +3,13 @@ import type { DriveItem } from "@/types"
 import { router } from "@/lib/router"
 import drive from "@/features/drive/drive"
 import alerts from "@/lib/alerts"
-import { confirmedDriveAction } from "@/features/drive/components/item/menuActionsShared"
+import {
+	buildDeletePermanentlyButton,
+	buildRestoreButton,
+	buildTrashButton,
+	confirmedDriveAction,
+	offersTrash
+} from "@/features/drive/components/item/menuActionsShared"
 import { notifyIfNameIsHidden } from "@/features/drive/components/hiddenNameNotice"
 import { buildUndecryptableMenuButtons } from "@/features/drive/components/item/menuActionsUndecryptable"
 import { buildDownloadSubButtons, buildExportButton, buildOpenWithButton } from "@/features/drive/components/item/menuActionsDownload"
@@ -302,7 +308,7 @@ export function createMenuButtons({
 			onPress: async () => {
 				const newName = await inputPrompt(
 					{
-						title: t("rename_item"),
+						title: t("rename"),
 						message: t("enter_new_name"),
 						defaultValue: item.data.decryptedMeta?.name ?? "",
 						cancelText: t("cancel"),
@@ -506,7 +512,7 @@ export function createMenuButtons({
 			destructive: true,
 			onPress: confirmedDriveAction({
 				item,
-				promptTitle: t("remove_share_item"),
+				promptTitle: t("remove_share"),
 				promptMessage: t("confirm_remove_share"),
 				promptOkText: t("remove_share"),
 				action: () =>
@@ -529,7 +535,7 @@ export function createMenuButtons({
 			destructive: true,
 			onPress: confirmedDriveAction({
 				item,
-				promptTitle: t("stop_sharing_item"),
+				promptTitle: t("stop_sharing"),
 				promptMessage: t("confirm_stop_sharing"),
 				promptOkText: t("stop_sharing"),
 				action: () => drive.removeShare({ item }),
@@ -631,7 +637,7 @@ export function createMenuButtons({
 			destructive: true,
 			onPress: confirmedDriveAction({
 				item,
-				promptTitle: t("remove_offline_item"),
+				promptTitle: t("remove_offline"),
 				promptMessage: t("confirm_remove_offline"),
 				promptOkText: t("remove_offline"),
 				action: () => offline.removeItem(item),
@@ -640,76 +646,12 @@ export function createMenuButtons({
 		})
 	}
 
-	if (drivePath.type !== "trash" && drivePath.type !== "sharedIn" && drivePath.type !== "offline" && drivePath.type !== "linked") {
-		menuButtons.push({
-			id: "trash",
-			requiresOnline: true,
-			title: t("trash"),
-			icon: "trash",
-			destructive: true,
-			// Note: this is the one destructive action whose confirm alert is NOT styled
-			// destructive (no `destructive: true` on the prompt) — preserved via promptDestructive: false.
-			onPress: confirmedDriveAction({
-				item,
-				promptTitle: t("trash_item"),
-				promptMessage: t("confirm_trash"),
-				promptOkText: t("trash"),
-				promptDestructive: false,
-				action: () => drive.trash({ item }),
-				// trash emits driveItemRemoved, which the gallery's own subscriber acts on —
-				// moving to a neighbour, or popping (once) when it was the last previewed item.
-				// So DON'T also self-pop here: in a single-item preview both pops fired (the
-				// gallery's navigateBack + confirmedAction's router.back) and double-popped past
-				// the gallery; in a multi-item gallery it closed instead of advancing.
-				dismissOnSuccess: false
-			})
-		})
+	if (offersTrash(drivePath)) {
+		menuButtons.push(buildTrashButton({ item, t }))
 	}
 
 	if ((item.type === "file" || item.type === "directory") && drivePath.type === "trash") {
-		menuButtons.push({
-			id: "restore",
-			requiresOnline: true,
-			title: t("restore"),
-			icon: "restore",
-			onPress: async () => {
-				const result = await runWithLoading(async () => {
-					await drive.restore({
-						item
-					})
-				})
-
-				if (!result.success) {
-					logger.error("drive", "restore failed", { error: result.error, uuid: item.data.uuid })
-					alerts.error(result.error)
-
-					return
-				}
-			}
-		})
-	}
-
-	if ((item.type === "file" || item.type === "directory") && drivePath.type === "trash") {
-		menuButtons.push({
-			id: "deletePermanently",
-			requiresOnline: true,
-			title: t("delete_permanently"),
-			icon: "delete",
-			destructive: true,
-			onPress: confirmedDriveAction({
-				item,
-				promptTitle: t("delete_permanently_item"),
-				promptMessage: t("confirm_delete_permanently"),
-				promptOkText: t("delete_permanently"),
-				action: () => drive.deletePermanently({ item }),
-				// deletePermanently emits driveItemRemoved → the gallery's subscriber owns the
-				// navigation (neighbour, or a single pop when it was the last previewed item).
-				// Don't also self-pop (would double-pop a single-item preview / close a
-				// multi-item gallery instead of advancing). From the trash LIST this is a no-op
-				// either way (isPreview was false there).
-				dismissOnSuccess: false
-			})
-		})
+		menuButtons.push(buildRestoreButton({ item, t }), buildDeletePermanentlyButton({ item, t }))
 	}
 
 	return menuButtons

@@ -1,5 +1,5 @@
 import { getPreviewType } from "@/lib/previewType"
-import { useWindowDimensions, ActivityIndicator } from "react-native"
+import { useWindowDimensions } from "react-native"
 import { type SharedValue } from "react-native-reanimated"
 import PreviewImage from "@/components/drivePreview/previewImage"
 import PreviewRawImage from "@/components/drivePreview/previewRawImage"
@@ -14,6 +14,7 @@ import useFileUrlQuery from "@/queries/useFileUrl.query"
 import PreviewPdf from "@/components/drivePreview/previewPdf"
 import PreviewDocx from "@/components/drivePreview/previewDocx"
 import PreviewSlot from "@/components/drivePreview/previewSlot"
+import { PreviewSpinner } from "@/components/drivePreview/previewStatus"
 import View from "@/components/ui/view"
 import { type ListRenderItemInfo } from "@shopify/flash-list"
 import { type GalleryItemTagged, galleryItemKey } from "@/components/drivePreview/gallery"
@@ -55,14 +56,7 @@ const GalleryItem = ({
 		height: dimensions.height
 	}
 
-	const spinner = (
-		<View className="bg-transparent flex-1 items-center justify-center">
-			<ActivityIndicator
-				size="small"
-				color="white"
-			/>
-		</View>
-	)
+	const spinner = <PreviewSpinner className="bg-transparent" />
 
 	const renderPage = () => {
 		if (previewType === "rawImage" && info.item.type === "drive") {

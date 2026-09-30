@@ -25,7 +25,10 @@ vi.mock("@/lib/cache", () => ({
 	}
 }))
 
-vi.mock("@/features/drive/queries/useDriveItems.query", () => ({ BASE_QUERY_KEY: "useDriveItemsQuery" }))
+vi.mock("@/features/drive/queries/useDriveItems.query", () => ({
+	BASE_QUERY_KEY: "useDriveItemsQuery",
+	driveItemsQueryPath: (query: { queryKey: readonly unknown[] }) => (query.queryKey[1] as { path?: unknown } | undefined)?.path
+}))
 
 // usePlaylists.query loads for real so the playlist pass runs its actual gap-fill rule.
 vi.mock("@/features/audio/audio", () => ({ default: {} }))

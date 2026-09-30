@@ -7,8 +7,6 @@ const h = vi.hoisted(() => ({
 }))
 
 vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
-vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 vi.mock("@filen/shared", async () => await import("@/tests/mocks/filenShared"))
 vi.mock("expo-crypto", () => ({ randomUUID: vi.fn(() => "mock-uuid") }))
 vi.mock("expo-clipboard", () => ({ setStringAsync: vi.fn() }))
@@ -58,7 +56,7 @@ vi.mock("@/features/drive/driveSelectors", () => ({
 	everyItemAlreadyIn: (items: { data: { parent?: string } }[], parentUuid: string) =>
 		items.length > 0 && items.every(item => item.data.parent === parentUuid)
 }))
-vi.mock("@/features/drive/components/item/menuActionsShared", () => ({ confirmedDriveAction: vi.fn(() => async () => {}) }))
+vi.mock("@/lib/confirmedAction", () => ({ confirmedAction: vi.fn(() => async () => {}) }))
 vi.mock("@/features/drive/components/hiddenNameNotice", () => ({ notifyIfNameIsHidden: vi.fn() }))
 vi.mock("@/features/drive/components/item/menuActionsUndecryptable", () => ({
 	buildUndecryptableMenuButtons: vi.fn(() => [{ id: "undecryptableOnly" }])

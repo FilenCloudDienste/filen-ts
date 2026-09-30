@@ -1,8 +1,9 @@
-import { DriveEvent_Tags, NonRootItem_Tags, SocketEvent_Tags, type SocketEvent } from "@filen/sdk-rs"
+import { DriveEvent_Tags, NonRootItem_Tags, SocketEvent_Tags, type SocketEvent, type ParentUuid, type File, type Dir } from "@filen/sdk-rs"
+import type { DriveItem } from "@/types"
 import { favoritesListingUpdater } from "@/features/drive/driveMetadata"
 import {
 	driveItemsQueryUpdateGlobal,
-	driveItemsQueryUpdate,
+	driveItemsQueryUpdateRoot,
 	driveItemsQueryUpdateForNormalParent,
 	driveItemsQueryUpdateForPhotos,
 	driveItemsQueryRemoveDirectoryFromPhotos,
@@ -47,6 +48,55 @@ export function handleDriveMalformedEvent(): void {
 	events.emit("driveChangesMissed")
 }
 
+// The item left its listing: also purged from the selection so the count, select-all toggle and bulk ops
+// never target a ghost.
+function leaveListings(uuid: string, parentUuid: string | null | undefined): void {
+	useDriveStore.getState().removeFromSelection([uuid])
+
+	if (parentUuid) {
+		driveItemsQueryUpdateGlobal({
+			parentUuid,
+			updater: prev => prev.filter(i => i.data.uuid !== uuid)
+		})
+	}
+}
+
+// Route the listing patch via the payload item's own parent — no cache read needed; the map updater
+// no-ops on any listing that doesn't already hold the item.
+function applyFavoriteEcho(driveItem: DriveItem, parent: ParentUuid, favorited: boolean): void {
+	const parentUuid = unwrapParentUuid(parent)
+
+	if (parentUuid) {
+		driveItemsQueryUpdateGlobal({
+			parentUuid,
+			// Same-type only: a role-stamped shared row must not be swapped for the payload's normal-typed rebuild.
+			updater: prev => prev.map(i => (i.data.uuid === driveItem.data.uuid && i.type === driveItem.type ? driveItem : i))
+		})
+	}
+
+	// The Favorites virtual root needs insert/remove semantics the replace-only global patch can't provide:
+	// a newly-favorited item isn't a row there yet and an unfavorited one must leave — favoritesListingUpdater
+	// (the local path's updater) handles both.
+	driveItemsQueryUpdateRoot("favorites", prev => favoritesListingUpdater(prev, driveItem, favorited))
+}
+
+// Builds the row for a raw normal file/directory and writes both through the session caches.
+function cacheFile(file: File): DriveItem {
+	const driveItem = unwrappedFileIntoDriveItem(unwrapFileMeta(file))
+
+	cache.cacheNewFile(file, driveItem)
+
+	return driveItem
+}
+
+function cacheDir(dir: Dir): DriveItem {
+	const driveItem = unwrappedDirIntoDriveItem(unwrapDirMeta(dir))
+
+	cache.cacheNewNormalDir(dir, driveItem)
+
+	return driveItem
+}
+
 export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): Promise<void> {
 	const [eventInner] = event.inner
 	// Captured while the union is intact — the switch below is exhaustive, so `eventInner.inner`
@@ -76,16 +126,13 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 					item: driveItem,
 					recent: true
 				})
-			} else if (driveItem.type === "file") {
+			} else {
 				cache.cacheNewFile(inner.file, driveItem)
 			}
 
 			// A content edit arrives as a new file of the same lineage.
 			followFileSuccessor(driveItem)
-
-			if (driveItem.type === "file") {
-				events.emit("driveFileRevised", { item: driveItem })
-			}
+			events.emit("driveFileRevised", { item: driveItem })
 
 			break
 		}
@@ -95,14 +142,8 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 			const [inner] = eventInner.inner.inner
 
 			const unwrappedParentUuid = unwrapParentUuid(inner.file.parent)
-			const unwrappedFileMeta = unwrapFileMeta(inner.file)
-			const driveItem = unwrappedFileIntoDriveItem(unwrappedFileMeta)
-
-			// Mirror into persistent caches so useFileUrlQuery /
-			// driveItemInfo / etc. resolve the item without a refetch.
-			if (driveItem.type === "file") {
-				cache.cacheNewFile(inner.file, driveItem)
-			}
+			// Cached so useFileUrlQuery / driveItemInfo / etc. resolve the item without a refetch.
+			const driveItem = cacheFile(inner.file)
 
 			if (unwrappedParentUuid) {
 				driveItemsQueryUpdateForNormalParent({
@@ -115,7 +156,7 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 				// there (an unrelated file must not be inserted into this recursive query).
 				driveItemsQueryUpdateForPhotos({
 					parentUuid: unwrappedParentUuid,
-					updater: prev => [...prev.filter(i => i.data.uuid !== unwrappedFileMeta.file.uuid), driveItem]
+					updater: prev => [...prev.filter(i => i.data.uuid !== inner.file.uuid), driveItem]
 				})
 			}
 
@@ -124,10 +165,7 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 				const [archiveRestored] = eventInner.inner.inner
 
 				followDriveItem(archiveRestored.currentUuid, driveItem)
-
-				if (driveItem.type === "file") {
-					events.emit("driveFileRevised", { item: driveItem, previousUuid: archiveRestored.currentUuid })
-				}
+				events.emit("driveFileRevised", { item: driveItem, previousUuid: archiveRestored.currentUuid })
 			}
 
 			// A restore leaves mtime unchanged, so it is not surfaced in Recents (a new file is, via the batcher).
@@ -135,61 +173,42 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 				events.emit("driveFileRestored", { uuid: inner.file.uuid, stableUuid: inner.file.stableUuid })
 
 				// In case of a restore from trash, we need to remove the item from the trash list
-				driveItemsQueryUpdate({
-					params: {
-						path: {
-							type: "trash",
-							uuid: null
-						}
-					},
-					updater: prev => prev.filter(i => i.data.uuid !== unwrappedFileMeta.file.uuid)
-				})
+				driveItemsQueryUpdateRoot("trash", prev => prev.filter(i => i.data.uuid !== inner.file.uuid))
 			}
 
 			break
 		}
 
-		case DriveEvent_Tags.FileArchived:
+		case DriveEvent_Tags.FileArchived: {
+			const [inner] = eventInner.inner.inner
+
+			// Not a forget: the file still exists in the archive listing and stays previewable there.
+			const fromCache = cache.fileUuidToNormalFile.get(inner.uuid)
+
+			leaveListings(inner.uuid, fromCache ? unwrapParentUuid(fromCache.parent) : null)
+
+			// Without newUuid another file replaced this one and its lineage ended; with it, the clipboard
+			// and an open editor follow the paired FileNew instead.
+			if (!inner.newUuid) {
+				dropDriveItem(inner.uuid)
+				events.emit("driveFileGone", { uuid: inner.uuid, reason: "replaced", stableUuid: fromCache?.stableUuid })
+			}
+
+			break
+		}
+
 		case DriveEvent_Tags.FileDeletedPermanent: {
 			const [inner] = eventInner.inner.inner
 
-			// The item left the current listing — purge it from the selection so
-			// the count / select-all toggle / bulk ops never target a ghost.
-			useDriveStore.getState().removeFromSelection([inner.uuid])
-
 			const fromCache = cache.fileUuidToNormalFile.get(inner.uuid)
 
-			if (fromCache) {
-				const unwrappedParentUuid = unwrapParentUuid(fromCache.parent)
+			leaveListings(inner.uuid, fromCache ? unwrapParentUuid(fromCache.parent) : null)
+			cache.forgetItem(inner.uuid)
 
-				if (unwrappedParentUuid) {
-					driveItemsQueryUpdateGlobal({
-						parentUuid: unwrappedParentUuid,
-						updater: prev => prev.filter(i => i.data.uuid !== fromCache.uuid)
-					})
-				}
-			}
-
-			// Permanent delete — forget all cache entries. FileArchived
-			// is NOT a forget (item still exists, just moves to the
-			// archive listing — left in cache so it's previewable there).
-			if (eventInner.inner.tag === DriveEvent_Tags.FileDeletedPermanent) {
-				cache.forgetItem(inner.uuid)
-
-				// Without a stableUuid only an old version went, not the file.
-				if (inner.stableUuid) {
-					dropDriveItem(inner.uuid)
-					events.emit("driveFileGone", { uuid: inner.uuid, reason: "deleted", stableUuid: inner.stableUuid })
-				}
-			} else {
-				const [archived] = eventInner.inner.inner
-
-				// Without newUuid another file replaced this one and its lineage ended; with it, the clipboard
-				// and an open editor follow the paired FileNew instead.
-				if (!archived.newUuid) {
-					dropDriveItem(archived.uuid)
-					events.emit("driveFileGone", { uuid: archived.uuid, reason: "replaced", stableUuid: fromCache?.stableUuid })
-				}
+			// Without a stableUuid only an old version went, not the file.
+			if (inner.stableUuid) {
+				dropDriveItem(inner.uuid)
+				events.emit("driveFileGone", { uuid: inner.uuid, reason: "deleted", stableUuid: inner.stableUuid })
 			}
 
 			break
@@ -198,22 +217,9 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 		case DriveEvent_Tags.FolderDeletedPermanent: {
 			const [inner] = eventInner.inner.inner
 
-			// The item left the current listing — purge it from the selection so
-			// the count / select-all toggle / bulk ops never target a ghost.
-			useDriveStore.getState().removeFromSelection([inner.uuid])
-
 			const fromCache = cache.getNormalDir(inner.uuid)
 
-			if (fromCache) {
-				const unwrappedParentUuid = unwrapParentUuid(fromCache.parent)
-
-				if (unwrappedParentUuid) {
-					driveItemsQueryUpdateGlobal({
-						parentUuid: unwrappedParentUuid,
-						updater: prev => prev.filter(i => i.data.uuid !== fromCache.uuid)
-					})
-				}
-			}
+			leaveListings(inner.uuid, fromCache ? unwrapParentUuid(fromCache.parent) : null)
 
 			driveItemsQueryRemoveDirectoryFromPhotos({
 				dirUuid: inner.uuid
@@ -247,24 +253,14 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 			}
 
 			if (fromCache) {
-				const updatedRawFile = {
-					...fromCache,
-					meta: inner.metadata
-				}
 				const unwrappedParentUuid = unwrapParentUuid(fromCache.parent)
-				const unwrappedFileMeta = unwrapFileMeta(updatedRawFile)
-				const driveItem = unwrappedFileIntoDriveItem(unwrappedFileMeta)
-
-				// Sync persistent caches — file metadata changed; downstream
-				// readers must see the new shape immediately.
-				if (driveItem.type === "file") {
-					cache.cacheNewFile(updatedRawFile, driveItem)
-				}
+				// Cached so downstream readers see the new metadata immediately.
+				const driveItem = cacheFile({ ...fromCache, meta: inner.metadata })
 
 				if (unwrappedParentUuid) {
 					driveItemsQueryUpdateGlobal({
 						parentUuid: unwrappedParentUuid,
-						updater: prev => prev.map(i => (i.data.uuid === unwrappedFileMeta.file.uuid ? driveItem : i))
+						updater: prev => prev.map(i => (i.data.uuid === inner.uuid ? driveItem : i))
 					})
 				}
 
@@ -293,18 +289,13 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 
 			const unwrappedParentUuidOld = fromCacheOld ? unwrapParentUuid(fromCacheOld.parent) : null
 			const unwrappedParentUuidNew = unwrapParentUuid(inner.file.parent)
-			const unwrappedFileMeta = unwrapFileMeta(inner.file)
-			const driveItem = unwrappedFileIntoDriveItem(unwrappedFileMeta)
-
-			// Sync persistent caches from the payload — File.parent changed.
-			if (driveItem.type === "file") {
-				cache.cacheNewFile(inner.file, driveItem)
-			}
+			// Cached from the payload: File.parent changed.
+			const driveItem = cacheFile(inner.file)
 
 			if (unwrappedParentUuidOld) {
 				driveItemsQueryUpdateForNormalParent({
 					parentUuid: unwrappedParentUuidOld,
-					updater: prev => prev.filter(i => i.data.uuid !== unwrappedFileMeta.file.uuid)
+					updater: prev => prev.filter(i => i.data.uuid !== inner.file.uuid)
 				})
 			}
 
@@ -338,18 +329,13 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 
 			const unwrappedParentUuidOld = fromCacheOldDir ? unwrapParentUuid(fromCacheOldDir.parent) : null
 			const unwrappedParentUuidNew = unwrapParentUuid(inner.dir.parent)
-			const unwrappedDirMeta = unwrapDirMeta(inner.dir)
-			const driveItem = unwrappedDirIntoDriveItem(unwrappedDirMeta)
-
-			// Sync persistent caches from the payload — Dir.parent changed.
-			if (driveItem.type === "directory") {
-				cache.cacheNewNormalDir(inner.dir, driveItem)
-			}
+			// Cached from the payload: Dir.parent changed.
+			const driveItem = cacheDir(inner.dir)
 
 			if (unwrappedParentUuidOld) {
 				driveItemsQueryUpdateForNormalParent({
 					parentUuid: unwrappedParentUuidOld,
-					updater: prev => prev.filter(i => i.data.uuid !== unwrappedDirMeta.uuid)
+					updater: prev => prev.filter(i => i.data.uuid !== inner.dir.uuid)
 				})
 			}
 
@@ -360,7 +346,7 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 				})
 
 				driveItemsQueryRemoveDirectoryFromPhotos({
-					dirUuid: unwrappedDirMeta.uuid,
+					dirUuid: inner.dir.uuid,
 					newParentUuid: unwrappedParentUuidNew,
 					previousParentUuid: unwrappedParentUuidOld
 				})
@@ -377,23 +363,13 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 			const fromCache = cache.getNormalDir(inner.uuid)
 
 			if (fromCache) {
-				const updatedRawDir = {
-					...fromCache,
-					meta: inner.meta
-				}
 				const unwrappedParentUuid = unwrapParentUuid(fromCache.parent)
-				const unwrappedDirMeta = unwrapDirMeta(updatedRawDir)
-				const driveItem = unwrappedDirIntoDriveItem(unwrappedDirMeta)
-
-				// Sync persistent caches — dir metadata (name etc.) changed.
-				if (driveItem.type === "directory") {
-					cache.cacheNewNormalDir(updatedRawDir, driveItem)
-				}
+				const driveItem = cacheDir({ ...fromCache, meta: inner.meta })
 
 				if (unwrappedParentUuid) {
 					driveItemsQueryUpdateGlobal({
 						parentUuid: unwrappedParentUuid,
-						updater: prev => prev.map(i => (i.data.uuid === unwrappedDirMeta.uuid ? driveItem : i))
+						updater: prev => prev.map(i => (i.data.uuid === inner.uuid ? driveItem : i))
 					})
 				}
 
@@ -413,33 +389,18 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 		case DriveEvent_Tags.FileTrash: {
 			const [inner] = eventInner.inner.inner
 
-			// The item left the current listing — purge it from the selection so
-			// the count / select-all toggle / bulk ops never target a ghost.
-			useDriveStore.getState().removeFromSelection([inner.uuid])
+			const fromCache = cache.fileUuidToNormalFile.get(inner.uuid)
 
 			// With newUuid it was an edit (see below), which the clipboard and an open editor follow through the
 			// paired FileNew.
 			if (!inner.newUuid) {
 				dropDriveItem(inner.uuid)
-				events.emit("driveFileGone", {
-					uuid: inner.uuid,
-					reason: "trashed",
-					stableUuid: cache.fileUuidToNormalFile.get(inner.uuid)?.stableUuid
-				})
+				events.emit("driveFileGone", { uuid: inner.uuid, reason: "trashed", stableUuid: fromCache?.stableUuid })
 			}
 
-			const fromCache = cache.fileUuidToNormalFile.get(inner.uuid)
+			leaveListings(inner.uuid, fromCache ? unwrapParentUuid(fromCache.parent) : null)
 
 			if (fromCache) {
-				const unwrappedParentUuid = unwrapParentUuid(fromCache.parent)
-
-				if (unwrappedParentUuid) {
-					driveItemsQueryUpdateGlobal({
-						parentUuid: unwrappedParentUuid,
-						updater: prev => prev.filter(i => i.data.uuid !== fromCache.uuid)
-					})
-				}
-
 				// `newUuid` means this uuid was superseded by an edit on a versioning-disabled account,
 				// NOT a user trash action — the server retires the old version through the same event.
 				// Dropping the superseded row above is right either way; showing it in Trash is not,
@@ -450,15 +411,7 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 					// Do NOT re-add to recents: the global removal above already
 					// removed the item from every listing including recents, which is
 					// correct — trashed files must not appear there.
-					driveItemsQueryUpdate({
-						params: {
-							path: {
-								type: "trash",
-								uuid: null
-							}
-						},
-						updater: prev => [...prev.filter(i => i.data.uuid !== fromCache.uuid), item]
-					})
+					driveItemsQueryUpdateRoot("trash", prev => [...prev.filter(i => i.data.uuid !== fromCache.uuid), item])
 				}
 			}
 
@@ -468,20 +421,12 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 		case DriveEvent_Tags.FolderTrash: {
 			const [inner] = eventInner.inner.inner
 
-			// The item left the current listing — purge it from the selection so
-			// the count / select-all toggle / bulk ops never target a ghost.
-			useDriveStore.getState().removeFromSelection([inner.uuid])
 			dropDriveItem(inner.uuid)
 
 			// The payload's `{ parent, uuid }` is enough to drop the item from its previous listing
 			// without the cache. Building the trash-listing ROW still needs the full Dir, so that half
 			// stays cache-gated (the `{ parent, uuid }` payload can't reconstruct a DriveItem).
-			if (inner.parent) {
-				driveItemsQueryUpdateGlobal({
-					parentUuid: inner.parent,
-					updater: prev => prev.filter(i => i.data.uuid !== inner.uuid)
-				})
-			}
+			leaveListings(inner.uuid, inner.parent)
 
 			driveItemsQueryRemoveDirectoryFromPhotos({
 				dirUuid: inner.uuid
@@ -496,15 +441,7 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 				// removed the item from every listing including recents, which is
 				// correct — trashed directories must not appear there (recents is
 				// files-only per the server contract).
-				driveItemsQueryUpdate({
-					params: {
-						path: {
-							type: "trash",
-							uuid: null
-						}
-					},
-					updater: prev => [...prev.filter(i => i.data.uuid !== inner.uuid), item]
-				})
+				driveItemsQueryUpdateRoot("trash", prev => [...prev.filter(i => i.data.uuid !== inner.uuid), item])
 			}
 
 			break
@@ -517,16 +454,8 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 
 			if (fromCache) {
 				const unwrappedParentUuid = unwrapParentUuid(fromCache.parent)
-				const updatedRawDir = {
-					...fromCache,
-					color: inner.color
-				}
-				const driveItem = unwrappedDirIntoDriveItem(unwrapDirMeta(updatedRawDir))
-
 				// The cached Dir keeps the colour too: a later metadata change rebuilds the row from it.
-				if (driveItem.type === "directory") {
-					cache.cacheNewNormalDir(updatedRawDir, driveItem)
-				}
+				const driveItem = cacheDir({ ...fromCache, color: inner.color })
 
 				if (unwrappedParentUuid) {
 					driveItemsQueryUpdateGlobal({
@@ -577,7 +506,7 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 					item: driveItem,
 					recent: false
 				})
-			} else if (driveItem.type === "directory") {
+			} else {
 				cache.cacheNewNormalDir(inner.dir, driveItem)
 			}
 
@@ -588,14 +517,8 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 			const [inner] = eventInner.inner.inner
 
 			const unwrappedParentUuid = unwrapParentUuid(inner.dir.parent)
-			const unwrappedDirMeta = unwrapDirMeta(inner.dir)
-			const driveItem = unwrappedDirIntoDriveItem(unwrappedDirMeta)
-
-			// Mirror into persistent caches so the new folder is
-			// immediately navigable / previewable without a refetch.
-			if (driveItem.type === "directory") {
-				cache.cacheNewNormalDir(inner.dir, driveItem)
-			}
+			// Cached so the directory is navigable / previewable without a refetch.
+			const driveItem = cacheDir(inner.dir)
 
 			if (unwrappedParentUuid) {
 				driveItemsQueryUpdateForNormalParent({
@@ -605,15 +528,7 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 			}
 
 			// In case of a restore from trash, we need to remove the item from the trash list
-			driveItemsQueryUpdate({
-				params: {
-					path: {
-						type: "trash",
-						uuid: null
-					}
-				},
-				updater: prev => prev.filter(i => i.data.uuid !== unwrappedDirMeta.uuid)
-			})
+			driveItemsQueryUpdateRoot("trash", prev => prev.filter(i => i.data.uuid !== inner.dir.uuid))
 
 			break
 		}
@@ -623,78 +538,19 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 
 			switch (inner.item.tag) {
 				case NonRootItem_Tags.File: {
-					// Route the listing patch via the payload item's own parent — no cache read needed;
-					// the map updater no-ops on any listing that doesn't already hold the item.
 					const file = inner.item.inner[0]
-					const unwrappedParentUuid = unwrapParentUuid(file.parent)
-					const unwrappedFileMeta = unwrapFileMeta(file)
-					const driveItem = unwrappedFileIntoDriveItem(unwrappedFileMeta)
 
 					// Mirror the local favorite() path: write the toggled state through the session
 					// caches too, not just the listings.
-					cache.cacheNewFile(file, driveItem)
-
-					if (unwrappedParentUuid) {
-						driveItemsQueryUpdateGlobal({
-							parentUuid: unwrappedParentUuid,
-							updater: prev =>
-								prev.map(i =>
-									// Same-type only: a role-stamped shared row must not be swapped
-									// for the payload's normal-typed rebuild.
-									i.data.uuid === unwrappedFileMeta.file.uuid && i.type === driveItem.type ? driveItem : i
-								)
-						})
-					}
-
-					// The Favorites virtual root needs insert/remove semantics the replace-only
-					// global patch can't provide: a newly-favorited item isn't a row there yet and
-					// an unfavorited one must leave — favoritesListingUpdater (the local path's
-					// updater) handles both.
-					driveItemsQueryUpdate({
-						params: {
-							path: {
-								type: "favorites",
-								uuid: null
-							}
-						},
-						updater: prev => favoritesListingUpdater(prev, driveItem, file.favorited)
-					})
+					applyFavoriteEcho(cacheFile(file), file.parent, file.favorited)
 
 					break
 				}
 
 				case NonRootItem_Tags.NormalDir: {
-					// Route the listing patch via the payload item's own parent — no cache read needed;
-					// the map updater no-ops on any listing that doesn't already hold the item.
 					const dir = inner.item.inner[0]
-					const unwrappedParentUuid = unwrapParentUuid(dir.parent)
-					const unwrappedDirMeta = unwrapDirMeta(dir)
-					const driveItem = unwrappedDirIntoDriveItem(unwrappedDirMeta)
 
-					// Mirror the local favorite() path: write the toggled state through the session
-					// caches too, not just the listings.
-					cache.cacheNewNormalDir(dir, driveItem)
-
-					if (unwrappedParentUuid) {
-						driveItemsQueryUpdateGlobal({
-							parentUuid: unwrappedParentUuid,
-							updater: prev =>
-								// Same-type only: a role-stamped shared row must not be swapped for
-								// the payload's normal-typed rebuild.
-								prev.map(i => (i.data.uuid === unwrappedDirMeta.uuid && i.type === driveItem.type ? driveItem : i))
-						})
-					}
-
-					// Same insert/remove fix-up for the Favorites virtual root as the File arm.
-					driveItemsQueryUpdate({
-						params: {
-							path: {
-								type: "favorites",
-								uuid: null
-							}
-						},
-						updater: prev => favoritesListingUpdater(prev, driveItem, dir.favorited)
-					})
+					applyFavoriteEcho(cacheDir(dir), dir.parent, dir.favorited)
 
 					break
 				}
@@ -704,15 +560,7 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 		}
 
 		case DriveEvent_Tags.TrashEmpty: {
-			driveItemsQueryUpdate({
-				params: {
-					path: {
-						type: "trash",
-						uuid: null
-					}
-				},
-				updater: () => []
-			})
+			driveItemsQueryUpdateRoot("trash", () => [])
 
 			break
 		}

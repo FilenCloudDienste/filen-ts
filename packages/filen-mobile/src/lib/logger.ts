@@ -37,6 +37,30 @@ const LEVEL_NAME: Record<number, LogLevel> = {
 
 const CURRENT_FILE_NAME = "current.ndjson"
 
+type RotatedLog = { file: FileSystem.File; ts: number; seq: number }
+
+// Rotated files with the (timestamp, sequence) their log-<ts>-<seq>.ndjson name encodes (0 when it doesn't
+// parse). Unsorted; the active file is excluded.
+function rotatedLogs(): RotatedLog[] {
+	const rotated: RotatedLog[] = []
+
+	for (const item of LOGS_DIRECTORY.list()) {
+		if (!(item instanceof FileSystem.File) || item.name === CURRENT_FILE_NAME || !item.name.endsWith(".ndjson")) {
+			continue
+		}
+
+		const match = /^log-(\d+)-(\d+)\.ndjson$/.exec(item.name)
+
+		rotated.push({
+			file: item,
+			ts: match ? Number(match[1]) : 0,
+			seq: match ? Number(match[2]) : 0
+		})
+	}
+
+	return rotated
+}
+
 // Cap for the in-app log VIEWER (readEntries). Bounds parse cost + memory; the export bundles the
 // full files regardless. 5000 newest entries is plenty for a diagnostic view and renders instantly
 // in a virtualized list.
@@ -460,25 +484,14 @@ export class Logger {
 		// nothing is protected — maxTotalBytes is a true ceiling for rotated logs. Ordered by the
 		// (timestamp, sequence) encoded in the filename, which is monotonic and collision-free (so ties
 		// on a coarse mtime can't keep the wrong file).
-		const rotated: { file: FileSystem.File; ts: number; seq: number; size: number }[] = []
+		const rotated = rotatedLogs().map(entry => ({
+			...entry,
+			size: entry.file.size ?? 0
+		}))
 		let total = 0
 
-		for (const item of LOGS_DIRECTORY.list()) {
-			if (!(item instanceof FileSystem.File) || item.name === CURRENT_FILE_NAME || !item.name.endsWith(".ndjson")) {
-				continue
-			}
-
-			const match = /^log-(\d+)-(\d+)\.ndjson$/.exec(item.name)
-			const size = item.size ?? 0
-
-			total += size
-
-			rotated.push({
-				file: item,
-				ts: match ? Number(match[1]) : 0,
-				seq: match ? Number(match[2]) : 0,
-				size
-			})
+		for (const entry of rotated) {
+			total += entry.size
 		}
 
 		if (total <= this.config.maxTotalBytes) {
@@ -521,32 +534,12 @@ export class Logger {
 
 	// Log files ordered newest-first: the active file, then rotated files by descending (ts, seq).
 	private logFilesNewestFirst(): FileSystem.File[] {
-		const current: FileSystem.File[] = []
-		const rotated: { file: FileSystem.File; ts: number; seq: number }[] = []
+		const current = new FileSystem.File(FileSystem.Paths.join(LOGS_DIRECTORY.uri, CURRENT_FILE_NAME))
+		const rotated = rotatedLogs()
+			.sort((a, b) => b.ts - a.ts || b.seq - a.seq)
+			.map(entry => entry.file)
 
-		for (const item of LOGS_DIRECTORY.list()) {
-			if (!(item instanceof FileSystem.File) || !item.name.endsWith(".ndjson")) {
-				continue
-			}
-
-			if (item.name === CURRENT_FILE_NAME) {
-				current.push(item)
-
-				continue
-			}
-
-			const match = /^log-(\d+)-(\d+)\.ndjson$/.exec(item.name)
-
-			rotated.push({
-				file: item,
-				ts: match ? Number(match[1]) : 0,
-				seq: match ? Number(match[2]) : 0
-			})
-		}
-
-		rotated.sort((a, b) => b.ts - a.ts || b.seq - a.seq)
-
-		return [...current, ...rotated.map(entry => entry.file)]
+		return current.exists ? [current, ...rotated] : rotated
 	}
 
 	// Reads the persisted log lines back for the in-app viewer, newest-first, capped at `limit`.

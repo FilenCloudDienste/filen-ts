@@ -200,12 +200,7 @@ export class Audio {
 
 			if (status.didJustFinish || this.statusIndicatesTrackEnded(status)) {
 				this.clearTrackEndWatchdog()
-				this.handleTrackEnd().catch(e =>
-					logger.error("audio", "handleTrackEnd failed from status listener", {
-						generation: this.loadGeneration,
-						error: e
-					})
-				)
+				this.fireTrackEnd()
 
 				return
 			}
@@ -345,6 +340,39 @@ export class Audio {
 		this.state.position = this.state.queue.length - 1
 	}
 
+	private fireTrackEnd(): void {
+		this.handleTrackEnd().catch(e =>
+			logger.error("audio", "handleTrackEnd failed from status listener", {
+				generation: this.loadGeneration,
+				error: e
+			})
+		)
+	}
+
+	// Loads the current position, resolving null once it plays, or on failure the generation the
+	// caller must re-sync `gen` to. That generation is OUR loadAndPlay's, captured synchronously — it
+	// does `++loadGeneration` before any await — NOT a re-read of loadGeneration, so an external
+	// next()/skipTo() that bumped the counter during our failed load is still detected as a supersede
+	// on the caller's next iteration (AU-03).
+	private async loadOwnGeneration(failureMessage: string): Promise<number | null> {
+		const loadPromise = this.loadAndPlay(this.state.position)
+		const ownGeneration = this.loadGeneration
+
+		try {
+			await loadPromise
+
+			return null
+		} catch (e) {
+			logger.warn("audio", failureMessage, {
+				position: this.state.position,
+				uuid: this.state.queue[this.state.position]?.item.data.uuid,
+				error: e
+			})
+
+			return ownGeneration
+		}
+	}
+
 	private async handleTrackEnd(forceAdvance: boolean = false): Promise<void> {
 		// Both the native didJustFinish event and the watchdog funnel through here, plus the playback-
 		// error branch (forceAdvance=true). Dedupe per loaded track so a late didJustFinish can't
@@ -401,27 +429,13 @@ export class Audio {
 				break
 			}
 
-			// Capture the generation OUR loadAndPlay assigns, synchronously — it does `++loadGeneration`
-			// on its first line, before any await, so reading loadGeneration right after the call (with
-			// no await in between) yields our own generation. On a load failure we re-sync `gen` to THAT,
-			// NOT a re-read of loadGeneration, so an external next()/skipTo() that bumped the counter
-			// during our failed load is still detected as a supersede on the next iteration (AU-03).
-			const loadPromise = this.loadAndPlay(this.state.position)
-			const ownGeneration = this.loadGeneration
+			const failedGeneration = await this.loadOwnGeneration("track skipped during auto-advance due to load failure")
 
-			try {
-				await loadPromise
-
+			if (failedGeneration === null) {
 				return
-			} catch (e) {
-				logger.warn("audio", "track skipped during auto-advance due to load failure", {
-					position: this.state.position,
-					uuid: this.state.queue[this.state.position]?.item.data.uuid,
-					error: e
-				})
-
-				gen = ownGeneration
 			}
+
+			gen = failedGeneration
 		}
 
 		// Reached the end with nothing playing. Loop back to the start if asked, again skipping
@@ -434,23 +448,13 @@ export class Audio {
 			}
 
 			for (let attempt = 0; attempt < this.state.queue.length; attempt++) {
-				// Same own-generation capture as the forward pass above (AU-03).
-				const loadPromise = this.loadAndPlay(this.state.position)
-				const ownGeneration = this.loadGeneration
+				const failedGeneration = await this.loadOwnGeneration("track skipped during queue loop-wrap due to load failure")
 
-				try {
-					await loadPromise
-
+				if (failedGeneration === null) {
 					return
-				} catch (e) {
-					logger.warn("audio", "track skipped during queue loop-wrap due to load failure", {
-						position: this.state.position,
-						uuid: this.state.queue[this.state.position]?.item.data.uuid,
-						error: e
-					})
-
-					gen = ownGeneration
 				}
+
+				gen = failedGeneration
 
 				const advanced = await this.advance(1)
 
@@ -658,12 +662,7 @@ export class Audio {
 				this.watchdogStalls++
 
 				if (this.watchdogStalls >= TRACK_END_WATCHDOG_MAX_STALLS) {
-					this.handleTrackEnd().catch(e =>
-						logger.error("audio", "handleTrackEnd failed from status listener", {
-							generation: this.loadGeneration,
-							error: e
-						})
-					)
+					this.fireTrackEnd()
 
 					return
 				}
@@ -677,12 +676,7 @@ export class Audio {
 		}
 
 		// Reached the end but didJustFinish never arrived — advance the queue.
-		this.handleTrackEnd().catch(e =>
-			logger.error("audio", "handleTrackEnd failed from status listener", {
-				generation: this.loadGeneration,
-				error: e
-			})
-		)
+		this.fireTrackEnd()
 	}
 
 	private statusIndicatesTrackEnded(status: AudioStatus): boolean {
@@ -723,12 +717,7 @@ export class Audio {
 			return
 		}
 
-		this.handleTrackEnd().catch(e =>
-			logger.error("audio", "handleTrackEnd failed from status listener", {
-				generation: this.loadGeneration,
-				error: e
-			})
-		)
+		this.fireTrackEnd()
 	}
 
 	private peekNextPlayIndex(shuffle: boolean, loopMode: LoopMode): number | null {
@@ -1149,6 +1138,13 @@ export class Audio {
 		return item
 	}
 
+	private playlistFileWithItem(file: PlaylistFile, now: number): PlaylistFile & { item: DriveItemFileExtracted } {
+		return {
+			...file,
+			item: this.playlistFileToDriveItem(file, now)
+		}
+	}
+
 	private parsePlaylistBytes(bytes: ArrayBuffer): Playlist | null {
 		let parsed: unknown
 
@@ -1202,22 +1198,10 @@ export class Audio {
 					const filesWithItems = (
 						await Promise.all(
 							result.files.map(async file => {
+								let exists = true
+
 								try {
-									const fileExists = await authedSdkClient.getFileOptional(
-										file.uuid,
-										toSignalOpts(signal)
-									)
-
-									if (!fileExists) {
-										nonExistentFileUuids.add(file.uuid)
-
-										return null
-									}
-
-									return {
-										...file,
-										item: this.playlistFileToDriveItem(file, now)
-									}
+									exists = Boolean(await authedSdkClient.getFileOptional(file.uuid, toSignalOpts(signal)))
 								} catch (e) {
 									// AU-05: a transient getFileOptional error is NOT a definitive not-found.
 									// Keep the track (present-unknown) rather than dropping it or feeding the
@@ -1226,12 +1210,15 @@ export class Audio {
 										uuid: file.uuid,
 										error: e
 									})
-
-									return {
-										...file,
-										item: this.playlistFileToDriveItem(file, now)
-									}
 								}
+
+								if (!exists) {
+									nonExistentFileUuids.add(file.uuid)
+
+									return null
+								}
+
+								return this.playlistFileWithItem(file, now)
 							})
 						)
 					).filter(file => file !== null)
@@ -1245,8 +1232,7 @@ export class Audio {
 						// playlistCleanupDone guard already caps this to once per playlist per session, so
 						// cleanup uploads stay rare.
 						this.mutatePlaylist({
-							uuid: result.uuid,
-							fallback: result,
+							playlist: result,
 							// The copy this read downloaded, not the cached one: that may be a restored row missing
 							// tracks added elsewhere since. Unless the playlist was saved here after the read began,
 							// so the cached copy is newer (one with no dead files left skips the upload, AU-06), or
@@ -1316,16 +1302,15 @@ export class Audio {
 	 * state, or `null` to skip the save entirely (a no-op patch) so we never pay an upload for nothing.
 	 */
 	private async mutatePlaylist({
-		uuid,
-		fallback,
+		playlist,
 		mutate,
 		signal
 	}: {
-		uuid: string
-		fallback: Playlist
+		playlist: Playlist
 		mutate: (current: Playlist) => Playlist | null
 		signal?: AbortSignal
 	}): Promise<void> {
+		const uuid = playlist.uuid
 		const mutex = this.playlistWriteMutex(uuid)
 
 		await mutex.acquire()
@@ -1333,7 +1318,7 @@ export class Audio {
 		try {
 			// playlistsQueryGet() is the local source of truth the UI renders from; prefer it over the
 			// caller's (possibly stale) snapshot. Fall back to the caller's copy if the cache is cold.
-			const freshest = (playlistsQueryGet()?.find(p => p.uuid === uuid) as Playlist | undefined) ?? fallback
+			const freshest = (playlistsQueryGet()?.find(p => p.uuid === uuid) as Playlist | undefined) ?? playlist
 			const next = mutate(freshest)
 
 			if (!next) {
@@ -1392,14 +1377,7 @@ export class Audio {
 		const now = Date.now()
 		const playlistWithItems = {
 			...playlist,
-			files: playlist.files.map(file => {
-				const item = this.playlistFileToDriveItem(file, now)
-
-				return {
-					...file,
-					item
-				}
-			})
+			files: playlist.files.map(file => this.playlistFileWithItem(file, now))
 		}
 
 		playlistsQueryUpdate({
@@ -1450,10 +1428,6 @@ export class Audio {
 			)
 			.map(item => item.data)
 
-		if (candidates.length === 0) {
-			return 0
-		}
-
 		// SDK-shaped projection done up front (base-independent — dedup against the FRESHEST copy
 		// happens inside the shared addTracksToPlaylist below); `playlist` is a placeholder the shared
 		// function always restamps to `current.uuid`.
@@ -1471,22 +1445,11 @@ export class Audio {
 			item
 		}))
 
-		let addedCount = 0
-
-		await this.mutatePlaylist({
-			uuid: playlist.uuid,
-			fallback: playlist,
-			mutate: current => {
-				const { next, added } = addTracksToPlaylistShared(current, projected, Date.now())
-
-				addedCount = added
-
-				return next
-			},
+		return this.addTracksToPlaylist({
+			playlist,
+			tracks: projected,
 			signal
 		})
-
-		return addedCount
 	}
 
 	/**
@@ -1512,8 +1475,7 @@ export class Audio {
 		let addedCount = 0
 
 		await this.mutatePlaylist({
-			uuid: playlist.uuid,
-			fallback: playlist,
+			playlist,
 			mutate: current => {
 				const { next, added } = addTracksToPlaylistShared(current, tracks, Date.now())
 
@@ -1546,8 +1508,7 @@ export class Audio {
 		}
 
 		await this.mutatePlaylist({
-			uuid: playlist.uuid,
-			fallback: playlist,
+			playlist,
 			mutate: current => removeTracksFromPlaylistShared(current, uuids, Date.now()),
 			signal
 		})
@@ -1574,8 +1535,7 @@ export class Audio {
 		}
 
 		await this.mutatePlaylist({
-			uuid: playlist.uuid,
-			fallback: playlist,
+			playlist,
 			mutate: current => reorderPlaylistFileShared(current, from, to, Date.now()),
 			signal
 		})
@@ -1587,8 +1547,7 @@ export class Audio {
 	 */
 	public async renamePlaylist({ playlist, name, signal }: { playlist: Playlist; name: string; signal?: AbortSignal }): Promise<void> {
 		await this.mutatePlaylist({
-			uuid: playlist.uuid,
-			fallback: playlist,
+			playlist,
 			mutate: current => renamePlaylistShared(current, name, Date.now()),
 			signal
 		})
@@ -1638,29 +1597,24 @@ export function useAudio() {
 	// freshly-mounted consumers (toolbar slider position, durations) empty until resume.
 	const [status, setStatus] = useState<AudioStatus | null>(audio.getStatus())
 	const [loading, setLoadingState] = useState<boolean>(audio.getLoading())
-	const [queue, setQueue] = useState<QueueItem[]>(audio.getQueue())
-	const [queuePosition, setQueuePosition] = useState<number>(audio.getPosition())
+	const { queueItem } = useAudioQueue()
 	const [shuffleEnabled] = useSecureStore<boolean>(audio.shuffleEnabledKey, false)
 	const [loopMode] = useSecureStore<LoopMode>(audio.loopModeKey, "none")
 
 	useEffect(() => {
 		const statusSubscription = events.subscribe("audioStatus", setStatus)
 		const loadingSubscription = events.subscribe("audioLoading", setLoadingState)
-		const queueSubscription = events.subscribe("audioQueue", setQueue)
-		const positionSubscription = events.subscribe("audioQueuePosition", setQueuePosition)
 
 		return () => {
 			statusSubscription.remove()
 			loadingSubscription.remove()
-			queueSubscription.remove()
-			positionSubscription.remove()
 		}
 	}, [])
 
 	return {
 		status,
 		loading,
-		queueItem: queue[queuePosition] ?? null,
+		queueItem,
 		shuffleEnabled,
 		loopMode
 	}
@@ -1691,20 +1645,7 @@ export function useAudioQueue() {
 // playlists, and only the row inside the playlist the queue was started from is "current"
 // (mirrors PlaylistRow's own playlistUuid comparison). Omitted = match by file alone.
 export function useIsCurrentTrack(trackUuid: string, playlistUuid?: string): boolean {
-	const [queue, setQueue] = useState<QueueItem[]>(audio.getQueue())
-	const [position, setPosition] = useState<number>(audio.getPosition())
-
-	useEffect(() => {
-		const queueSubscription = events.subscribe("audioQueue", setQueue)
-		const positionSubscription = events.subscribe("audioQueuePosition", setPosition)
-
-		return () => {
-			queueSubscription.remove()
-			positionSubscription.remove()
-		}
-	}, [])
-
-	const current = queue[position] ?? null
+	const { queueItem: current } = useAudioQueue()
 
 	if (!current || current.item.data.uuid !== trackUuid) {
 		return false

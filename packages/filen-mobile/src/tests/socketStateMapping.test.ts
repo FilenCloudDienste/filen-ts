@@ -22,8 +22,6 @@ const { mockSetTyping } = vi.hoisted(() => ({
 	mockSetTyping: vi.fn()
 }))
 
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
-vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
 vi.mock("@/lib/alerts", async () => await import("@/tests/mocks/alerts"))
 
 // Mock the @filen/sdk-rs package so that:

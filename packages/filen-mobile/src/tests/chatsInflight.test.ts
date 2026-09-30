@@ -36,16 +36,25 @@ const { chatsState, mockSetInflightMessages, mockSetInflightErrors, mockFlushToD
 
 vi.mock("@filen/shared", async () => await import("@/tests/mocks/filenShared"))
 
-vi.mock("@/features/chats/store/useChats.store", () => ({
-	default: {
-		getState: () => ({
-			inflightMessages: chatsState.inflightMessages,
-			setInflightMessages: mockSetInflightMessages,
-			inflightErrors: chatsState.inflightErrors,
-			setInflightErrors: mockSetInflightErrors
-		})
+// The dequeue/clear actions run the real pure reducers through the mocked setters.
+vi.mock("@/features/chats/store/useChats.store", async () => {
+	const actual = await vi.importActual<typeof import("@/features/chats/store/useChats.store")>("@/features/chats/store/useChats.store")
+
+	return {
+		...actual,
+		default: {
+			getState: () => ({
+				inflightMessages: chatsState.inflightMessages,
+				setInflightMessages: mockSetInflightMessages,
+				inflightErrors: chatsState.inflightErrors,
+				setInflightErrors: mockSetInflightErrors,
+				dequeueInflightMessage: (chatUuid: string, inflightId: string) =>
+					mockSetInflightMessages((prev: InflightChatMessages) => actual.withoutInflightMessage(prev, chatUuid, inflightId)),
+				clearInflightError: (inflightId: string) => mockSetInflightErrors((prev: InflightChatMessageErrors) => actual.withoutInflightError(prev, inflightId))
+			})
+		}
 	}
-}))
+})
 
 vi.mock("@/features/chats/components/sync", () => ({
 	sync: {
@@ -71,7 +80,7 @@ import {
 } from "@/features/chats/chatsInflight"
 import { chatDraftSecureStoreKeys } from "@/features/chats/chatDrafts"
 import type { Chat } from "@/types"
-import type { ChatMessageWithInflightId } from "@/features/chats/store/useChats.store"
+import type { ChatMessageWithInflightId, InflightChatMessages, InflightChatMessageErrors } from "@/features/chats/store/useChats.store"
 
 function mockChat(uuid: string): Chat {
 	return { uuid } as Chat

@@ -105,10 +105,6 @@ export const notes = {
 	note_content_unavailable_offline: "This note's content isn't available offline. Connect to the internet to load it.",
 
 	// ── Offline availability (note/menu + note row) ───────────────────────────
-	/** Note menu action: keep this note's content on the device so it stays readable without a connection */
-	make_note_available_offline: "Make available offline",
-	/** Note menu action: stop keeping this note on the device and free its cached content */
-	remove_note_offline: "Remove from offline",
 	/** Notes-list badge, and the toast confirming a note was marked from inside the editor (where no badge is visible) */
 	note_available_offline: "Available offline",
 	/** Error banner when marking a note available offline is attempted without a connection — its content has to be fetched first */
@@ -159,8 +155,6 @@ export const notes = {
 	delete_tag: "Delete tag",
 	/** Confirmation dialog message before deleting a single tag */
 	are_you_sure_delete_tag: "Are you sure you want to delete this tag? It will be removed from all notes.",
-	/** Bulk action confirm button: delete every selected tag */
-	delete_all_tags: "Delete",
 	/** Confirmation dialog title before deleting every selected tag */
 	delete_all_tags_title: "Delete tags",
 	/** Confirmation dialog message before deleting every selected tag */

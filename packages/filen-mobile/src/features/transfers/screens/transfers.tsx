@@ -1,4 +1,4 @@
-import { Fragment } from "react"
+import { Fragment, type ReactNode } from "react"
 import { type TFunction } from "i18next"
 import Text from "@/components/ui/text"
 import { ScreenBody } from "@/components/ui/safeAreaView"
@@ -17,7 +17,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context"
 import { router } from "@/lib/router"
 import { useTranslation } from "react-i18next"
 import Ionicons from "@expo/vector-icons/Ionicons"
-import Menu from "@/components/ui/menu"
+import Menu, { type MenuButton } from "@/components/ui/menu"
 import Thumbnail from "@/features/drive/components/item/thumbnail"
 import { ItemGlyph } from "@/components/itemIcons"
 import transfersLib from "@/features/transfers/transfers"
@@ -83,72 +83,85 @@ export function finishedTransferSubtitle(finished: TFinishedTransfer, t: TFuncti
 	return t("transfer_completed")
 }
 
+function pauseResumeButton(transfer: Pick<TTransfer, "paused" | "pause" | "resume">, t: TFunction): MenuButton {
+	return transfer.paused
+		? {
+				id: "resume",
+				title: t("resume"),
+				icon: "play",
+				onPress: () => {
+					transfer.resume()
+				}
+			}
+		: {
+				id: "pause",
+				title: t("pause"),
+				icon: "pause",
+				onPress: () => {
+					transfer.pause()
+				}
+			}
+}
+
+// children = leading icon + text, actions = trailing content.
+const TransferRowShell = ({ actions, children }: { actions: ReactNode; children: ReactNode }) => {
+	return (
+		<View className="bg-transparent px-4 flex-col py-2">
+			<View className="bg-transparent items-center justify-between flex-row gap-4">
+				<View className="flex-row items-center gap-3 bg-transparent flex-1">{children}</View>
+				<View className="flex-row items-center bg-transparent gap-3 shrink-0">{actions}</View>
+			</View>
+		</View>
+	)
+}
+
 // Same layout as an upload row, with the state as text under the title instead of a second icon.
 const CopyActiveRow = ({ transfer }: { transfer: CopyTransfer }) => {
 	const { t } = useTranslation()
 	const job = useCopyJobsStore(state => state.jobs[transfer.id])
 
 	return (
-		<View className="bg-transparent px-4 flex-col py-2">
-			<View className="bg-transparent items-center justify-between flex-row gap-4">
-				<View className="flex-row items-center gap-3 bg-transparent flex-1">
-					<ItemGlyph
-						isDirectory={transfer.glyph !== "file"}
-						name={transfer.name}
-					/>
-					<View className="flex-col bg-transparent flex-1">
-						<Text
-							className="text-foreground"
-							numberOfLines={1}
-							ellipsizeMode="middle"
-						>
-							{t("copy_row_title", { name: transfer.name })}
-						</Text>
-						<Text
-							className="text-muted-foreground text-xs"
-							numberOfLines={1}
-						>
-							{copyRowStatus(job, transfer.paused, t)}
-						</Text>
-					</View>
-				</View>
-				<View className="flex-row items-center bg-transparent gap-3 shrink-0">
-					<Menu
-						type="dropdown"
-						buttons={[
-							transfer.paused
-								? {
-										id: "resume",
-										title: t("resume"),
-										icon: "play",
-										onPress: () => {
-											transfer.resume()
-										}
-									}
-								: {
-										id: "pause",
-										title: t("pause"),
-										icon: "pause",
-										onPress: () => {
-											transfer.pause()
-										}
-									},
-							{
-								id: "cancel",
-								title: t("cancel"),
-								icon: "cancel",
-								destructive: true,
-								onPress: () => {
-									void stopCopyWithChoice(transfer.id, t)
-								}
+		<TransferRowShell
+			actions={
+				<Menu
+					type="dropdown"
+					buttons={[
+						pauseResumeButton(transfer, t),
+						{
+							id: "cancel",
+							title: t("cancel"),
+							icon: "cancel",
+							destructive: true,
+							onPress: () => {
+								void stopCopyWithChoice(transfer.id, t)
 							}
-						]}
-					>
-						<EllipsisMenuTrigger />
-					</Menu>
-				</View>
+						}
+					]}
+				>
+					<EllipsisMenuTrigger />
+				</Menu>
+			}
+		>
+			<ItemGlyph
+				isDirectory={transfer.glyph !== "file"}
+				name={transfer.name}
+			/>
+			<View className="flex-col bg-transparent flex-1">
+				<Text
+					className="text-foreground"
+					numberOfLines={1}
+					ellipsizeMode="middle"
+				>
+					{t("copy_row_title", { name: transfer.name })}
+				</Text>
+				<Text
+					className="text-muted-foreground text-xs"
+					numberOfLines={1}
+				>
+					{copyRowStatus(job, transfer.paused, t)}
+				</Text>
 			</View>
-		</View>
+		</TransferRowShell>
 	)
 }
 
@@ -161,89 +174,86 @@ const CopyFinishedRow = ({ finished }: { finished: TFinishedTransfer }) => {
 	const notes = copyNotesText(finished.copyNotes, t)
 
 	return (
-		<View className="bg-transparent px-4 flex-col py-2">
-			<View className="bg-transparent items-center justify-between flex-row gap-4">
-				<View className="flex-row items-center gap-3 bg-transparent flex-1">
-					<ItemGlyph
-						isDirectory={finished.copyGlyph !== "file"}
-						name={finished.name}
-					/>
-					<View className="flex-col bg-transparent flex-1">
-						<Text
-							className="text-foreground"
-							numberOfLines={1}
-							ellipsizeMode="middle"
-						>
-							{copyFinishedTitle(finished, t)}
-						</Text>
-						<Text
-							className="text-muted-foreground text-xs"
-							numberOfLines={1}
-							ellipsizeMode="middle"
-						>
-							{trashFailed > 0 ? t("copy_trash_failed", { count: trashFailed }) : finishedTransferSubtitle(finished, t)}
-						</Text>
-						{notes ? (
-							<Text
-								className="text-muted-foreground text-xs"
-								numberOfLines={2}
-							>
-								{notes}
-							</Text>
-						) : null}
-					</View>
-				</View>
-				<View className="flex-row items-center bg-transparent gap-3 shrink-0">
-					<Menu
-						type="dropdown"
-						buttons={[
-							...(trashFailed > 0
-								? [
-										{
-											id: "retryTrash",
-											title: t("retry"),
-											icon: "restore" as const,
-											requiresOnline: true,
-											onPress: () => {
-												copyRunner.retryTrash(finished.id).catch(err => {
-													logger.error("copy", "retrying move to trash failed", { id: finished.id, error: err })
-												})
+		<TransferRowShell
+			actions={
+				<Menu
+					type="dropdown"
+					buttons={[
+						...(trashFailed > 0
+							? [
+									{
+										id: "retryTrash",
+										title: t("retry"),
+										icon: "restore" as const,
+										requiresOnline: true,
+										onPress: () => {
+											copyRunner.retryTrash(finished.id).catch(err => {
+												logger.error("copy", "retrying move to trash failed", { id: finished.id, error: err })
+											})
+										}
+									}
+								]
+							: []),
+						...(canRetry
+							? [
+									{
+										id: "retryFailed",
+										title: t("copy_retry_failed"),
+										icon: "restore" as const,
+										requiresOnline: true,
+										onPress: () => {
+											// The retry is a new row; this one would only repeat its failures.
+											if (copyRunner.retryFailed(finished.id) !== null) {
+												removeFinishedTransfer(finished.id)
 											}
 										}
-									]
-								: []),
-							...(canRetry
-								? [
-										{
-											id: "retryFailed",
-											title: t("copy_retry_failed"),
-											icon: "restore" as const,
-											requiresOnline: true,
-											onPress: () => {
-												// The retry is a new row; this one would only repeat its failures.
-												if (copyRunner.retryFailed(finished.id) !== null) {
-													removeFinishedTransfer(finished.id)
-												}
-											}
-										}
-									]
-								: []),
-							{
-								id: "removeFromList",
-								title: t("transfer_remove_from_list"),
-								icon: "trash",
-								destructive: true,
-								onPress: () => {
-									removeFinishedTransfer(finished.id)
-								}
+									}
+								]
+							: []),
+						{
+							id: "removeFromList",
+							title: t("transfer_remove_from_list"),
+							icon: "trash",
+							destructive: true,
+							onPress: () => {
+								removeFinishedTransfer(finished.id)
 							}
-						]}
+						}
+					]}
+				>
+					<EllipsisMenuTrigger />
+				</Menu>
+			}
+		>
+			<ItemGlyph
+				isDirectory={finished.copyGlyph !== "file"}
+				name={finished.name}
+			/>
+			<View className="flex-col bg-transparent flex-1">
+				<Text
+					className="text-foreground"
+					numberOfLines={1}
+					ellipsizeMode="middle"
+				>
+					{copyFinishedTitle(finished, t)}
+				</Text>
+				<Text
+					className="text-muted-foreground text-xs"
+					numberOfLines={1}
+					ellipsizeMode="middle"
+				>
+					{trashFailed > 0 ? t("copy_trash_failed", { count: trashFailed }) : finishedTransferSubtitle(finished, t)}
+				</Text>
+				{notes ? (
+					<Text
+						className="text-muted-foreground text-xs"
+						numberOfLines={2}
 					>
-						<EllipsisMenuTrigger />
-					</Menu>
-				</View>
+						{notes}
+					</Text>
+				) : null}
 			</View>
-		</View>
+		</TransferRowShell>
 	)
 }
 
@@ -258,35 +268,9 @@ const ActiveTransferRow = ({
 	const textForeground = useResolveClassNames("text-foreground")
 
 	return (
-		<View className="bg-transparent px-4 flex-col py-2">
-			<View className="bg-transparent items-center justify-between flex-row gap-4">
-				<View className="flex-row items-center gap-3 bg-transparent flex-1">
-					{transfer.type === "uploadDirectory" || transfer.type === "uploadFile" ? (
-						<ItemGlyph
-							isDirectory={transfer.type === "uploadDirectory"}
-							name={transfer.name}
-						/>
-					) : (
-						<Thumbnail
-							item={transfer.item}
-							target={target}
-							size={{
-								icon: 32,
-								thumbnail: 32
-							}}
-							contentFit="cover"
-							className="rounded-lg"
-						/>
-					)}
-					<Text
-						className="text-foreground flex-1"
-						numberOfLines={1}
-						ellipsizeMode="middle"
-					>
-						{transfer.type === "uploadDirectory" || transfer.type === "uploadFile" ? transfer.name : driveItemDisplayName(transfer.item)}
-					</Text>
-				</View>
-				<View className="flex-row items-center bg-transparent gap-3 shrink-0">
+		<TransferRowShell
+			actions={
+				<Fragment>
 					{transfer.paused ? (
 						<Ionicons
 							name="pause-circle-outline"
@@ -299,27 +283,7 @@ const ActiveTransferRow = ({
 					<Menu
 						type="dropdown"
 						buttons={[
-							...(transfer.paused
-								? [
-										{
-											id: "resume",
-											title: t("resume"),
-											icon: "play" as const,
-											onPress: () => {
-												transfer.resume()
-											}
-										}
-									]
-								: [
-										{
-											id: "pause",
-											title: t("pause"),
-											icon: "pause" as const,
-											onPress: () => {
-												transfer.pause()
-											}
-										}
-									]),
+							pauseResumeButton(transfer, t),
 							{
 								id: "cancel",
 								title: t("cancel"),
@@ -348,9 +312,34 @@ const ActiveTransferRow = ({
 					>
 						<EllipsisMenuTrigger />
 					</Menu>
-				</View>
-			</View>
-		</View>
+				</Fragment>
+			}
+		>
+			{transfer.type === "uploadDirectory" || transfer.type === "uploadFile" ? (
+				<ItemGlyph
+					isDirectory={transfer.type === "uploadDirectory"}
+					name={transfer.name}
+				/>
+			) : (
+				<Thumbnail
+					item={transfer.item}
+					target={target}
+					size={{
+						icon: 32,
+						thumbnail: 32
+					}}
+					contentFit="cover"
+					className="rounded-lg"
+				/>
+			)}
+			<Text
+				className="text-foreground flex-1"
+				numberOfLines={1}
+				ellipsizeMode="middle"
+			>
+				{transfer.type === "uploadDirectory" || transfer.type === "uploadFile" ? transfer.name : driveItemDisplayName(transfer.item)}
+			</Text>
+		</TransferRowShell>
 	)
 }
 
@@ -359,50 +348,47 @@ const FinishedTransferRow = ({ finished }: { finished: TFinishedTransfer }) => {
 	const removeFinishedTransfer = useTransfersStore(state => state.removeFinishedTransfer)
 
 	return (
-		<View className="bg-transparent px-4 flex-col py-2">
-			<View className="bg-transparent items-center justify-between flex-row gap-4">
-				<View className="flex-row items-center gap-3 bg-transparent flex-1">
-					<ItemGlyph
-						isDirectory={finished.type === "uploadDirectory" || finished.type === "downloadDirectory"}
-						name={finished.name}
-					/>
-					<View className="flex-col bg-transparent flex-1">
-						<Text
-							className="text-foreground"
-							numberOfLines={1}
-							ellipsizeMode="middle"
-						>
-							{finished.name}
-						</Text>
-						<Text
-							className="text-muted-foreground text-xs"
-							numberOfLines={1}
-							ellipsizeMode="middle"
-						>
-							{finishedTransferSubtitle(finished, t)}
-						</Text>
-					</View>
-				</View>
-				<View className="flex-row items-center bg-transparent gap-3 shrink-0">
-					<Menu
-						type="dropdown"
-						buttons={[
-							{
-								id: "removeFromList",
-								title: t("transfer_remove_from_list"),
-								icon: "trash",
-								destructive: true,
-								onPress: () => {
-									removeFinishedTransfer(finished.id)
-								}
+		<TransferRowShell
+			actions={
+				<Menu
+					type="dropdown"
+					buttons={[
+						{
+							id: "removeFromList",
+							title: t("transfer_remove_from_list"),
+							icon: "trash",
+							destructive: true,
+							onPress: () => {
+								removeFinishedTransfer(finished.id)
 							}
-						]}
-					>
-						<EllipsisMenuTrigger />
-					</Menu>
-				</View>
+						}
+					]}
+				>
+					<EllipsisMenuTrigger />
+				</Menu>
+			}
+		>
+			<ItemGlyph
+				isDirectory={finished.type === "uploadDirectory" || finished.type === "downloadDirectory"}
+				name={finished.name}
+			/>
+			<View className="flex-col bg-transparent flex-1">
+				<Text
+					className="text-foreground"
+					numberOfLines={1}
+					ellipsizeMode="middle"
+				>
+					{finished.name}
+				</Text>
+				<Text
+					className="text-muted-foreground text-xs"
+					numberOfLines={1}
+					ellipsizeMode="middle"
+				>
+					{finishedTransferSubtitle(finished, t)}
+				</Text>
 			</View>
-		</View>
+		</TransferRowShell>
 	)
 }
 
@@ -463,16 +449,7 @@ const TransfersHeader = () => {
 														title: t("resume_all"),
 														icon: "play" as const,
 														onPress: () => {
-															// Iterate per-transfer instead of resuming the
-															// global signal: the store's `paused` flag is
-															// driven by the per-transfer signal, so a global
-															// resume would leave individually-paused transfers
-															// stuck (store says resumed, SDK still paused).
-															// Read the live array imperatively to avoid a stale
-															// closure (the header no longer subscribes to it).
-															for (const transfer of useTransfersStore.getState().transfers) {
-																transfer.resume()
-															}
+															transfersLib.resumeAll()
 														}
 													}
 												]
@@ -482,13 +459,7 @@ const TransfersHeader = () => {
 														title: t("pause_all"),
 														icon: "pause" as const,
 														onPress: () => {
-															// Same reason — iterate per-transfer so the
-															// per-transfer signal stays in sync with the store
-															// and so the global pause signal doesn't stay
-															// sticky and silently pause future uploads.
-															for (const transfer of useTransfersStore.getState().transfers) {
-																transfer.pause()
-															}
+															transfersLib.pauseAll()
 														}
 													}
 												]

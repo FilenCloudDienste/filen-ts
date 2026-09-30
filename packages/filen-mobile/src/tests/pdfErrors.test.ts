@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest"
-import { classifyPdfError } from "@/components/pdfPreview/errors"
+import { classifyPdfError, passwordReasonFromCode, pdfErrorName } from "@/components/pdfPreview/errors"
 
 function pdfjsError(name: string, extra: Record<string, unknown> = {}): unknown {
 	// Duck-typed the way the classifier sees them: these classes live in the DOM bundle, so the value
@@ -67,5 +67,22 @@ describe("classifyPdfError", () => {
 		const classification = classifyPdfError(pdfjsError("InvalidPDFException"))
 
 		expect(JSON.stringify(classification)).not.toContain("document may control")
+	})
+})
+
+describe("passwordReasonFromCode", () => {
+	test("maps pdf.js PasswordResponses", () => {
+		expect(passwordReasonFromCode(1)).toBe("required")
+		expect(passwordReasonFromCode(2)).toBe("incorrect")
+		expect(passwordReasonFromCode(undefined)).toBe("required")
+	})
+})
+
+describe("pdfErrorName", () => {
+	test("returns only a string name", () => {
+		expect(pdfErrorName(pdfjsError("InvalidPDFException"))).toBe("InvalidPDFException")
+		expect(pdfErrorName({ name: 42 })).toBeUndefined()
+		expect(pdfErrorName(null)).toBeUndefined()
+		expect(pdfErrorName("InvalidPDFException")).toBeUndefined()
 	})
 })

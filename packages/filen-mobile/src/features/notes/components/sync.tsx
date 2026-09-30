@@ -14,7 +14,12 @@ import alerts from "@/lib/alerts"
 import i18n from "@/lib/i18n"
 import { noteDisplayTitle } from "@/lib/decryption"
 import { AppState } from "react-native"
-import useNotesInflightStore, { type InflightContent, INFLIGHT_CONTENT_SQLITE_KV_KEY } from "@/features/notes/store/useNotesInflight.store"
+import useNotesInflightStore, {
+	type InflightContent,
+	INFLIGHT_CONTENT_SQLITE_KV_KEY,
+	hasInflightEntries,
+	newestInflightEntry
+} from "@/features/notes/store/useNotesInflight.store"
 import { type Note } from "@/types"
 import sqlite from "@/lib/sqlite"
 import { fetchData as notesQueryFetch, notesQueryGet } from "@/features/notes/queries/useNotesQuery"
@@ -27,10 +32,7 @@ import { OutboxSync } from "@/lib/outboxSync"
 
 // The note's newest outbox entry, when it was typed on `base` (none left, or rebased: undefined).
 function newestEntryOnBase(noteUuid: string, base: string): InflightContent[string][number] | undefined {
-	const newest = (useNotesInflightStore.getState().inflightContent[noteUuid] ?? []).reduce<InflightContent[string][number] | undefined>(
-		(latest, entry) => (latest === undefined || entry.timestamp > latest.timestamp ? entry : latest),
-		undefined
-	)
+	const newest = newestInflightEntry(useNotesInflightStore.getState().inflightContent[noteUuid])
 
 	return newest?.baseContentHash === base ? newest : undefined
 }
@@ -97,7 +99,7 @@ export class Sync extends OutboxSync<InflightContent> {
 
 		// A failed note whose edits went since (loaded over, deleted) needs nothing more.
 		for (const noteUuid of this.failed) {
-			if ((inflightContent[noteUuid] ?? []).length === 0) {
+			if (!hasInflightEntries(inflightContent, noteUuid)) {
 				this.failed.delete(noteUuid)
 			}
 		}
@@ -130,14 +132,23 @@ export class Sync extends OutboxSync<InflightContent> {
 		}, delay)
 	}
 
-	// VC3: drop a note's consecutive-rejection strike count. MUST be called whenever a note's
-	// inflight content is cleared OUTSIDE a sync pass (the remote-edit reload in
-	// components/content/index.tsx and restoreFromHistory in notesLifecycle.ts) — those paths
-	// delete inflight without kicking a sync, so the start-of-pass cleanup loop below never sees
-	// the empty state and would otherwise carry the stale count into the NEXT editing session,
-	// dropping a fresh edit after a single failure instead of MAX_NON_RETRYABLE_REJECTIONS.
-	public clearRejections(noteUuid: string): void {
+	// Drops a note's unsynced edits outside a sync pass (remote-edit reload, restoreFromHistory) so no pass
+	// pushes them over the version being loaded. VC3: resets its strike count too — no pass sees the empty
+	// state to clear it, so the next editing session would otherwise drop a fresh edit after one failure.
+	public async discardInflight(noteUuid: string): Promise<boolean> {
+		useNotesInflightStore.getState().setInflightContent(prev => {
+			const updated = {
+				...prev
+			}
+
+			delete updated[noteUuid]
+
+			return updated
+		})
+
 		this.nonRetryableRejections.delete(noteUuid)
+
+		return await this.flushToDisk(useNotesInflightStore.getState().inflightContent)
 	}
 
 	// The note is open in an editor until the returned detach(), which answers edits made elsewhere that a
@@ -166,7 +177,7 @@ export class Sync extends OutboxSync<InflightContent> {
 
 			// An edit made elsewhere a pass handed over may have gone unanswered: the next pass pushes over it,
 			// with the overwrite toast, rather than the edits waiting for an unrelated trigger.
-			if (this.handedOff.has(noteUuid) && (useNotesInflightStore.getState().inflightContent[noteUuid] ?? []).length > 0) {
+			if (this.handedOff.has(noteUuid) && hasInflightEntries(useNotesInflightStore.getState().inflightContent, noteUuid)) {
 				this.syncDebounced()
 			}
 		}
@@ -207,7 +218,7 @@ export class Sync extends OutboxSync<InflightContent> {
 				this.holds.delete(noteUuid)
 
 				// A pass skipped the note meanwhile: its edits would otherwise wait for the next keystroke.
-				if ((useNotesInflightStore.getState().inflightContent[noteUuid] ?? []).length > 0) {
+				if (hasInflightEntries(useNotesInflightStore.getState().inflightContent, noteUuid)) {
 					this.syncDebounced()
 				}
 			}
@@ -344,9 +355,7 @@ export class Sync extends OutboxSync<InflightContent> {
 				// edit on a previously-rejected note would inherit a stale count and lose part of
 				// its retry budget.
 				for (const trackedUuid of this.nonRetryableRejections.keys()) {
-					const entries = inflightContent[trackedUuid]
-
-					if (!entries || entries.length === 0) {
+					if (!hasInflightEntries(inflightContent, trackedUuid)) {
 						this.nonRetryableRejections.delete(trackedUuid)
 					}
 				}
@@ -362,11 +371,7 @@ export class Sync extends OutboxSync<InflightContent> {
 							return
 						}
 
-						if (contents.length === 0) {
-							return
-						}
-
-						const mostRecentContent = [...contents].sort((a, b) => b.timestamp - a.timestamp).at(0)
+						const mostRecentContent = newestInflightEntry(contents)
 
 						if (!mostRecentContent) {
 							return

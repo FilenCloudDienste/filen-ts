@@ -129,7 +129,7 @@ class SecureStore {
 			// failure propagates through this run() wrapper and init() rejects (retry next launch
 			// against the intact file). An UNDECRYPTABLE store no longer rejects — loadFromDisk's
 			// recovery ladder restores a valid backup or resets to empty (logged-out boot).
-			const [encryptionKey, current] = await Promise.all([this.getEncryptionKey(), (await this.readExisting()) ?? {}])
+			const [, current] = await Promise.all([this.getEncryptionKey(), (await this.readExisting()) ?? {}])
 
 			for (const key in current) {
 				const value = current[key]
@@ -143,11 +143,6 @@ class SecureStore {
 			}
 
 			this.initDone = true
-
-			return {
-				encryptionKey,
-				current
-			}
 		})
 
 		if (!result.success) {
@@ -232,7 +227,9 @@ class SecureStore {
 	// Enumerate the destination's parent directory and delete every .securestore.tmp.* /
 	// .securestore.bak.* staging sibling, leaving the canonical destination itself untouched.
 	// Best-effort: a failed listing or a failed per-entry delete is swallowed (orphans are
-	// harmless). Shared by cleanupStaleSiblings() (post-read tidy-up) and clear() (logout wipe).
+	// harmless). Shared by adopt() and the reset path of loadFromDisk() (post-read tidy-up) and clear()
+	// (logout wipe). Post-read it only ever runs AFTER a confirmed-valid decrypt or a reset, so it can
+	// never remove the only surviving copy.
 	private deleteStagingSiblings(): void {
 		try {
 			const destinationUri = this.secureStoreFile.uri
@@ -259,22 +256,15 @@ class SecureStore {
 		}
 	}
 
-	// Best-effort, post-recovery cleanup of leftover staging/backup siblings. Only ever invoked
-	// AFTER a confirmed-valid destination decrypt, so deleting these can never remove the only
-	// surviving copy. Any failure here is swallowed — orphans are harmless.
-	private cleanupStaleSiblings(): void {
-		this.deleteStagingSiblings()
-	}
-
 	// Cross-process crash-recovery scan (finding 52). write() commits in two non-atomic moveSync
 	// steps; a hard kill between them leaves the only intact copy under a UUID-named
 	// .securestore.bak.* sibling. When the destination is missing/zero-length, enumerate the
 	// backups, pick the newest by mtime, restore it into the canonical destination, and validate
 	// by decrypt (the AES-256-GCM auth tag is the integrity gate — a candidate that fails to
-	// decrypt is discarded and the next is tried). Returns the recovered bytes on success, or null
+	// decrypt is discarded and the next is tried). Returns the recovered store on success, or null
 	// when no valid backup exists. Never throws (a failed candidate is skipped, a failed restore
 	// is best-effort and the next candidate is attempted).
-	private recoverDestinationFromBackup(encryptionKey: string): Uint8Array | null {
+	private recoverDestinationFromBackup(encryptionKey: string): Record<string, unknown> | null {
 		const destinationUri = this.secureStoreFile.uri
 		const parentDirectory = this.secureStoreFile.parentDirectory
 
@@ -297,17 +287,15 @@ class SecureStore {
 			.sort((a, b) => b.mtime - a.mtime)
 
 		for (const { file } of candidates) {
-			let bytes: Uint8Array
+			let data: Record<string, unknown>
 
 			try {
 				if (!file.exists || file.size === 0) {
 					continue
 				}
 
-				bytes = file.bytesSync()
-
 				// Integrity gate: a candidate that fails to decrypt is corrupt/foreign — skip it.
-				this.decryptStorePayload(bytes, encryptionKey)
+				data = this.decryptStorePayload(file.bytesSync(), encryptionKey)
 			} catch {
 				continue
 			}
@@ -323,10 +311,19 @@ class SecureStore {
 				continue
 			}
 
-			return bytes
+			return data
 		}
 
 		return null
+	}
+
+	// Takes a confirmed-valid store as the live one, then discards the stale tmp/bak siblings.
+	private adopt(data: Record<string, unknown>): Record<string, unknown> {
+		this.readCache = data
+
+		this.deleteStagingSiblings()
+
+		return data
 	}
 
 	// Shared destination loader. Returns the decrypted store (caching it) on a present+valid
@@ -350,14 +347,7 @@ class SecureStore {
 			const bytes = this.secureStoreFile.bytesSync()
 
 			try {
-				const data = this.decryptStorePayload(bytes, encryptionKey)
-
-				this.readCache = data
-
-				// Destination is confirmed valid — now safe to discard stale tmp/bak siblings.
-				this.cleanupStaleSiblings()
-
-				return data
+				return this.adopt(this.decryptStorePayload(bytes, encryptionKey))
 			} catch (e) {
 				// RECOVERY LADDER (2026-06-12, supersedes the old throw-forever): a GCM
 				// auth-tag failure is deterministic — the payload is cryptographically dead
@@ -380,18 +370,12 @@ class SecureStore {
 				const recovered = this.recoverDestinationFromBackup(encryptionKey)
 
 				if (recovered !== null) {
-					const data = this.decryptStorePayload(recovered, encryptionKey)
-
-					this.readCache = data
-
-					this.cleanupStaleSiblings()
-
-					return data
+					return this.adopt(recovered)
 				}
 
 				logger.error("secure-store", "No recoverable backup found — store reset to empty, re-login required")
 
-				this.cleanupStaleSiblings()
+				this.deleteStagingSiblings()
 
 				return null
 			}
@@ -401,51 +385,21 @@ class SecureStore {
 		// recover from an orphaned backup left by an interrupted write().
 		const recovered = this.recoverDestinationFromBackup(encryptionKey)
 
-		if (recovered !== null) {
-			const data = this.decryptStorePayload(recovered, encryptionKey)
-
-			this.readCache = data
-
-			this.cleanupStaleSiblings()
-
-			return data
-		}
-
-		// Genuinely absent: no destination, no recoverable backup.
-		return null
+		// Genuinely absent when null: no destination, no recoverable backup.
+		return recovered !== null ? this.adopt(recovered) : null
 	}
 
 	// Non-destructive read used by get(): degrades a read/decrypt/IO failure to null (logs only).
 	// NEVER use this as the read-modify-write merge base — a degraded null there would clobber a
 	// present-but-unreadable store (finding 51); set()/remove()/init() use readExisting() instead.
 	private async read(): Promise<Record<string, unknown> | null> {
-		const result = await run(async defer => {
-			if (this.readCache) {
-				return this.readCache
-			}
-
-			await this.rwMutex.acquire()
-
-			defer(() => {
-				this.rwMutex.release()
-			})
-
-			if (this.readCache) {
-				return this.readCache
-			}
-
-			const encryptionKey = await this.getEncryptionKey()
-
-			return this.loadFromDisk(encryptionKey)
-		})
-
-		if (!result.success) {
-			logger.error("secure-store", "Read degraded to null after IO/decrypt failure", { error: result.error })
+		try {
+			return await this.readExisting()
+		} catch (e) {
+			logger.error("secure-store", "Read degraded to null after IO/decrypt failure", { error: e })
 
 			return null
 		}
-
-		return result.data
 	}
 
 	// Strict read used as the read-modify-write merge base by set()/remove() and by init(). Returns

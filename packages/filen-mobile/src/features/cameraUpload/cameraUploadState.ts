@@ -16,6 +16,17 @@ const APPLY_CHUNK_SIZE = 256
 
 type KvCommand = [string, (string | Uint8Array)[]]
 
+type Ledger<T> = {
+	prefix: string
+	// Capitalized; used in the scan-failure log lines.
+	label: string
+	map: Map<string, T>
+	// Throws on a corrupt row.
+	parse: (value: string) => T
+	loaded: boolean
+	promise: Promise<void> | null
+}
+
 /**
  * Value shape for a hash ledger entry. `md5` is the hash of the asset content as it
  * was last uploaded (or last verified against the cache); `verifiedModificationTime`
@@ -23,9 +34,9 @@ type KvCommand = [string, (string | Uint8Array)[]]
  * camera upload skip re-hashing (and re-downloading iCloud-offloaded assets) when the
  * mtime is unchanged. `-1` means "never verified" and always forces one hash.
  *
- * Entries persisted before this shape existed are plain md5 strings — readers treat a
- * string value as `{ md5: <string>, verifiedModificationTime: -1 }` and upgrade it in
- * place on the next write (lazy migration; no version bump / cache wipe needed).
+ * Entries persisted before this shape existed are plain md5 strings — they are read into
+ * memory as `{ md5: <string>, verifiedModificationTime: -1 }` and persisted in the object
+ * shape on the next write (lazy migration; no version bump / cache wipe needed).
  *
  * `paths` lists the tree paths this asset's content is known uploaded (or verified) under —
  * one asset can belong to several selected albums and must reach EVERY album folder, so the
@@ -45,6 +56,18 @@ export type CameraUploadHashEntry = {
 	paths?: string[]
 }
 
+// Legacy rows are bare md5 strings; "never verified" (-1) makes the next encounter hash once.
+function normalizeHashEntry(value: CameraUploadHashEntry | string): CameraUploadHashEntry {
+	if (typeof value === "string") {
+		return {
+			md5: value,
+			verifiedModificationTime: -1
+		}
+	}
+
+	return value
+}
+
 /**
  * Durable, feature-owned camera-upload ledger. Two per-entry kv stores, previously registered maps
  * on the shared cache: the md5/verified-mtime hash shield and the background-abort counter. Owning
@@ -62,11 +85,28 @@ export type CameraUploadHashEntry = {
 export class CameraUploadState {
 	// Public readonly for test introspection; the loaded-read contract is expressed by the methods
 	// below (getHashSync/hashKeys/getAbort), which are what callers use.
-	public readonly hashes = new Map<string, CameraUploadHashEntry | string>()
+	public readonly hashes = new Map<string, CameraUploadHashEntry>()
 	public readonly aborts = new Map<string, number>()
 
-	private hashesLoaded = false
-	private abortsLoaded = false
+	// Per-ledger load state. The maps are the public ones above; `loaded`/`promise` are reset by
+	// clearForLogout.
+	private readonly hashLedger: Ledger<CameraUploadHashEntry> = {
+		prefix: HASHES_PREFIX,
+		label: "Hash",
+		map: this.hashes,
+		parse: value => normalizeHashEntry(deserialize(value) as CameraUploadHashEntry | string),
+		loaded: false,
+		promise: null
+	}
+
+	private readonly abortLedger: Ledger<number> = {
+		prefix: ABORTS_PREFIX,
+		label: "Abort",
+		map: this.aborts,
+		parse: value => deserialize(value) as number,
+		loaded: false,
+		promise: null
+	}
 
 	// Set true by clearForLogout (account-scoped ledger). While locked, writes refuse so a worker-tail
 	// write that STARTS after the logout's global `DELETE FROM kv` can't re-insert into the next
@@ -78,89 +118,13 @@ export class CameraUploadState {
 	// its results if it changed, so stale disk rows never repopulate the next account's memory.
 	private generation = 0
 
-	private loadHashesPromise: Promise<void> | null = null
-	private loadAbortsPromise: Promise<void> | null = null
-
 	/**
 	 * Foreground: page the whole hash index into memory. Single-flight. Captures the generation before
 	 * the scan and discards its results if a clear bumped it mid-scan. A scan failure logs a warn,
 	 * range-deletes the corrupt prefix, and proceeds empty (the shield self-heals by re-verification).
 	 */
 	public loadHashes(): Promise<void> {
-		if (this.hashesLoaded) {
-			return Promise.resolve()
-		}
-
-		if (this.loadHashesPromise) {
-			return this.loadHashesPromise
-		}
-
-		const promise = this.doLoadHashes().finally(() => {
-			if (this.loadHashesPromise === promise) {
-				this.loadHashesPromise = null
-			}
-		})
-
-		this.loadHashesPromise = promise
-
-		return promise
-	}
-
-	private async doLoadHashes(): Promise<void> {
-		const generation = this.generation
-		const scanned = new Map<string, CameraUploadHashEntry | string>()
-
-		try {
-			const db = await sqlite.openDb()
-
-			const badKeys: string[] = []
-
-			await forEachKvRowByPrefix(db, HASHES_PREFIX, (rowKey, value) => {
-				// One corrupt row must not wipe the whole shield — skip and drop just that row.
-				try {
-					scanned.set(rowKey.slice(HASHES_PREFIX.length), deserialize(value) as CameraUploadHashEntry | string)
-				} catch {
-					badKeys.push(rowKey)
-				}
-			})
-
-			if (badKeys.length > 0) {
-				logger.warn("cameraUploadState", "Dropping corrupt hash ledger rows", { count: badKeys.length })
-
-				await db.executeBatch(badKeys.map(key => ["DELETE FROM kv WHERE key = ?", [key]] as KvCommand))
-			}
-		} catch (err) {
-			logger.warn("cameraUploadState", "Hash ledger scan failed — wiping corrupt prefix and proceeding empty", { error: err })
-
-			// Stale-generation zombie: the logout wipe already removed the prefix — never touch
-			// the next session's rows.
-			if (generation !== this.generation) {
-				return
-			}
-
-			await this.rangeDeletePrefix(HASHES_PREFIX).catch(() => {})
-
-			// Re-check: a logout landing during the wipe above must keep the latch closed.
-			if (generation === this.generation) {
-				this.hashesLoaded = true
-				this.locked = false
-			}
-
-			return
-		}
-
-		if (generation !== this.generation) {
-			return
-		}
-
-		for (const [key, value] of scanned) {
-			this.hashes.set(key, value)
-		}
-
-		this.hashesLoaded = true
-		// A fresh session's committed load re-enables writes; un-latching any earlier (before the
-		// generation check) would let a logout-window zombie load defeat the latch.
-		this.locked = false
+		return this.loadLedger(this.hashLedger)
 	}
 
 	/**
@@ -168,50 +132,54 @@ export class CameraUploadState {
 	 * loadHashes.
 	 */
 	public loadAborts(): Promise<void> {
-		if (this.abortsLoaded) {
+		return this.loadLedger(this.abortLedger)
+	}
+
+	private loadLedger<T>(ledger: Ledger<T>): Promise<void> {
+		if (ledger.loaded) {
 			return Promise.resolve()
 		}
 
-		if (this.loadAbortsPromise) {
-			return this.loadAbortsPromise
+		if (ledger.promise) {
+			return ledger.promise
 		}
 
-		const promise = this.doLoadAborts().finally(() => {
-			if (this.loadAbortsPromise === promise) {
-				this.loadAbortsPromise = null
+		const promise = this.scanLedger(ledger).finally(() => {
+			if (ledger.promise === promise) {
+				ledger.promise = null
 			}
 		})
 
-		this.loadAbortsPromise = promise
+		ledger.promise = promise
 
 		return promise
 	}
 
-	private async doLoadAborts(): Promise<void> {
+	private async scanLedger<T>(ledger: Ledger<T>): Promise<void> {
 		const generation = this.generation
-		const scanned = new Map<string, number>()
+		const scanned = new Map<string, T>()
 
 		try {
 			const db = await sqlite.openDb()
 
 			const badKeys: string[] = []
 
-			await forEachKvRowByPrefix(db, ABORTS_PREFIX, (rowKey, value) => {
+			await forEachKvRowByPrefix(db, ledger.prefix, (rowKey, value) => {
 				// One corrupt row must not wipe the whole ledger — skip and drop just that row.
 				try {
-					scanned.set(rowKey.slice(ABORTS_PREFIX.length), deserialize(value) as number)
+					scanned.set(rowKey.slice(ledger.prefix.length), ledger.parse(value))
 				} catch {
 					badKeys.push(rowKey)
 				}
 			})
 
 			if (badKeys.length > 0) {
-				logger.warn("cameraUploadState", "Dropping corrupt abort ledger rows", { count: badKeys.length })
+				logger.warn("cameraUploadState", `Dropping corrupt ${ledger.label.toLowerCase()} ledger rows`, { count: badKeys.length })
 
 				await db.executeBatch(badKeys.map(key => ["DELETE FROM kv WHERE key = ?", [key]] as KvCommand))
 			}
 		} catch (err) {
-			logger.warn("cameraUploadState", "Abort ledger scan failed — wiping corrupt prefix and proceeding empty", { error: err })
+			logger.warn("cameraUploadState", `${ledger.label} ledger scan failed — wiping corrupt prefix and proceeding empty`, { error: err })
 
 			// Stale-generation zombie: the logout wipe already removed the prefix — never touch
 			// the next session's rows.
@@ -219,11 +187,11 @@ export class CameraUploadState {
 				return
 			}
 
-			await this.rangeDeletePrefix(ABORTS_PREFIX).catch(() => {})
+			await this.rangeDeletePrefix(ledger.prefix).catch(() => {})
 
 			// Re-check: a logout landing during the wipe above must keep the latch closed.
 			if (generation === this.generation) {
-				this.abortsLoaded = true
+				ledger.loaded = true
 				this.locked = false
 			}
 
@@ -235,10 +203,12 @@ export class CameraUploadState {
 		}
 
 		for (const [key, value] of scanned) {
-			this.aborts.set(key, value)
+			ledger.map.set(key, value)
 		}
 
-		this.abortsLoaded = true
+		ledger.loaded = true
+		// A fresh session's committed load re-enables writes; un-latching any earlier (before the
+		// generation check) would let a logout-window zombie load defeat the latch.
 		this.locked = false
 	}
 
@@ -249,19 +219,21 @@ export class CameraUploadState {
 	}
 
 	// Foreground read contract: valid only after loadHashes(). Pure memory read, never throws.
-	public getHashSync(key: string): CameraUploadHashEntry | string | undefined {
+	public getHashSync(key: string): CameraUploadHashEntry | undefined {
 		return this.hashes.get(key)
 	}
 
 	// Background read: memory if the index was loaded, else a single kv point-read. A shield read must
 	// NEVER throw into the worker, so the kv path is internally guarded and degrades to undefined.
-	public async getHash(key: string): Promise<CameraUploadHashEntry | string | undefined> {
-		if (this.hashesLoaded) {
+	public async getHash(key: string): Promise<CameraUploadHashEntry | undefined> {
+		if (this.hashLedger.loaded) {
 			return this.hashes.get(key)
 		}
 
 		try {
-			return (await sqlite.kvAsync.get<CameraUploadHashEntry | string>(HASHES_PREFIX + key)) ?? undefined
+			const value = await sqlite.kvAsync.get<CameraUploadHashEntry | string>(HASHES_PREFIX + key)
+
+			return value === null ? undefined : normalizeHashEntry(value)
 		} catch (err) {
 			logger.warn("cameraUploadState", "Background hash read failed", { key, error: err })
 
@@ -277,14 +249,14 @@ export class CameraUploadState {
 	 * which deliberately does NOT page the whole ledger in — would otherwise pay one serial native
 	 * round trip per key, so it goes through a batched read instead.
 	 */
-	public async getHashMany(keys: string[]): Promise<Map<string, CameraUploadHashEntry | string>> {
-		const found = new Map<string, CameraUploadHashEntry | string>()
+	public async getHashMany(keys: string[]): Promise<Map<string, CameraUploadHashEntry>> {
+		const found = new Map<string, CameraUploadHashEntry>()
 
 		if (keys.length === 0) {
 			return found
 		}
 
-		if (this.hashesLoaded) {
+		if (this.hashLedger.loaded) {
 			for (const key of keys) {
 				const value = this.hashes.get(key)
 
@@ -300,7 +272,7 @@ export class CameraUploadState {
 			const rows = await sqlite.kvAsync.getMany<CameraUploadHashEntry | string>(keys.map(key => HASHES_PREFIX + key))
 
 			for (const [key, value] of rows) {
-				found.set(key.slice(HASHES_PREFIX.length), value)
+				found.set(key.slice(HASHES_PREFIX.length), normalizeHashEntry(value))
 			}
 		} catch (err) {
 			// Same policy as the point read: a failed shield lookup degrades to "not verified", which
@@ -321,7 +293,7 @@ export class CameraUploadState {
 		return this.aborts.get(id)
 	}
 
-	public async setHash(key: string, entry: CameraUploadHashEntry | string): Promise<void> {
+	public async setHash(key: string, entry: CameraUploadHashEntry): Promise<void> {
 		if (this.locked) {
 			return
 		}
@@ -353,7 +325,7 @@ export class CameraUploadState {
 
 	// One awaited kv round for a whole enumeration wave — a 50k-library re-key must not become O(n)
 	// serialized point writes. Memory first (synchronously), then chunked executeBatch.
-	public async applyHashBatch(batch: { upserts?: [string, CameraUploadHashEntry | string][]; deletes?: string[] }): Promise<void> {
+	public async applyHashBatch(batch: { upserts?: [string, CameraUploadHashEntry][]; deletes?: string[] }): Promise<void> {
 		if (this.locked) {
 			return
 		}
@@ -457,11 +429,11 @@ export class CameraUploadState {
 		this.hashes.clear()
 		this.aborts.clear()
 
-		this.hashesLoaded = false
-		this.abortsLoaded = false
+		this.hashLedger.loaded = false
+		this.abortLedger.loaded = false
 
-		this.loadHashesPromise = null
-		this.loadAbortsPromise = null
+		this.hashLedger.promise = null
+		this.abortLedger.promise = null
 	}
 }
 

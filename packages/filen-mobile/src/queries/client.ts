@@ -148,7 +148,7 @@ export function preserveArrayIdentity<T>(prev: T[], next: T[]): T[] {
 }
 
 export const shouldPersistQuery = (query: PersistedQuery): boolean => {
-	return !(query.queryKey as unknown[]).some(isUncachedKeyPart) && query.state.status === "success"
+	return query.state.status === "success" && !(query.queryKey as unknown[]).some(isUncachedKeyPart)
 }
 
 export class QueryPersisterKv {
@@ -477,25 +477,7 @@ export class QueryPersisterKv {
 			.catch(err => {
 				logger.error("queries-persist", "In-flight persist failed before flush", { error: err })
 
-				// Restore failed keys into the dirty sets so the next debounce retries them.
-				// Only re-add keys that have not been re-dirtied or removed in the interim
-				// (i.e. still absent from the dirty sets after buildCommands() cleared them).
-				for (const key of snapshotUpserts) {
-					// Same reasoning as runPersistAsync's catch: this batch never landed, so no key in it
-					// may look "just written" to shouldDeferLargeRow.
-					this.persistedAt.delete(key)
-
-					if (!this.dirtyUpserts.has(key) && !this.dirtyDeletes.has(key)) {
-						this.dirtyUpserts.add(key)
-					}
-				}
-
-				for (const key of snapshotDeletes) {
-					if (!this.dirtyDeletes.has(key) && !this.dirtyUpserts.has(key)) {
-						this.dirtyDeletes.add(key)
-					}
-				}
-
+				this.restoreFailedBatch(snapshotUpserts, snapshotDeletes)
 				this.persistDirty()
 			})
 			.then(() => undefined)
@@ -615,29 +597,34 @@ export class QueryPersisterKv {
 				deletes: snapshotDeletes.size
 			})
 
-			// Restore failed keys so the finally-block re-trigger actually retries them.
-			// Only re-add keys that were not re-dirtied or re-removed after the snapshot.
-			for (const key of snapshotUpserts) {
-				// Nothing in this batch reached disk, so no key in it may count as "just written" —
-				// otherwise a large row's retry would sit out the whole deferral interval for a write
-				// that failed. Clearing the stamp (not the size) puts the retry back on the fast path.
-				this.persistedAt.delete(key)
-
-				if (!this.dirtyUpserts.has(key) && !this.dirtyDeletes.has(key)) {
-					this.dirtyUpserts.add(key)
-				}
-			}
-
-			for (const key of snapshotDeletes) {
-				if (!this.dirtyDeletes.has(key) && !this.dirtyUpserts.has(key)) {
-					this.dirtyDeletes.add(key)
-				}
-			}
+			// Restored so the finally-block re-trigger actually retries them.
+			this.restoreFailedBatch(snapshotUpserts, snapshotDeletes)
 		} finally {
 			this.persisting = false
 
 			if (this.dirtyUpserts.size > 0 || this.dirtyDeletes.size > 0) {
 				this.persistDirty()
+			}
+		}
+	}
+
+	// Puts a batch that never reached disk back into the dirty sets, skipping keys re-dirtied or
+	// removed since the snapshot.
+	private restoreFailedBatch(snapshotUpserts: Set<string>, snapshotDeletes: Set<string>): void {
+		for (const key of snapshotUpserts) {
+			// No key in the batch may count as "just written" — otherwise a large row's retry would sit
+			// out the whole deferral interval for a write that failed. Clearing the stamp (not the size)
+			// puts the retry back on the fast path.
+			this.persistedAt.delete(key)
+
+			if (!this.dirtyUpserts.has(key) && !this.dirtyDeletes.has(key)) {
+				this.dirtyUpserts.add(key)
+			}
+		}
+
+		for (const key of snapshotDeletes) {
+			if (!this.dirtyDeletes.has(key) && !this.dirtyUpserts.has(key)) {
+				this.dirtyDeletes.add(key)
 			}
 		}
 	}
@@ -723,7 +710,7 @@ export const queryClientPersister = experimental_createQueryPersister({
 	storage: queryClientPersisterKv,
 	maxAge: QUERY_CLIENT_CACHE_TIME,
 	serialize: query => {
-		if (query.state.status !== "success" || !shouldPersistQuery(query)) {
+		if (!shouldPersistQuery(query)) {
 			return undefined
 		}
 
@@ -763,8 +750,7 @@ export async function restoreQueries(): Promise<void> {
 					!persistedQuery ||
 					!persistedQuery.state ||
 					!shouldPersistQuery(persistedQuery) ||
-					persistedQuery.state.dataUpdatedAt + QUERY_CLIENT_CACHE_TIME < expiryNow ||
-					persistedQuery.state.status !== "success"
+					persistedQuery.state.dataUpdatedAt + QUERY_CLIENT_CACHE_TIME < expiryNow
 				) {
 					queryClientPersisterKv.removeItem(key)
 

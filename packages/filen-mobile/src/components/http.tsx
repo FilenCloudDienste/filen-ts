@@ -8,6 +8,7 @@ import useHttpStore from "@/stores/useHttp.store"
 import usePipStore from "@/stores/usePip.store"
 import alerts from "@/lib/alerts"
 import { queryClient } from "@/queries/client"
+import { BASE_QUERY_KEY as FILE_URL_QUERY_KEY } from "@/queries/useFileUrl.query"
 import logger from "@/lib/logger"
 import { HTTP_PROVIDER_PRIMARY_PORT } from "@/constants"
 
@@ -126,7 +127,7 @@ async function startProviderLocked(sdkClient: JsClientInterface): Promise<void> 
 	})
 
 	queryClient.invalidateQueries({
-		queryKey: ["useFileUrlQuery"]
+		queryKey: [FILE_URL_QUERY_KEY]
 	})
 }
 

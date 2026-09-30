@@ -17,7 +17,7 @@ import { useNotesTagsSortBy } from "@/features/notes/notesTagsSortPreference"
 import { type DataItem as NoteDataItem } from "@/features/notes/components/note"
 import { type NoteTag } from "@/types"
 import { createNoteFlow } from "@/features/notes/components/notesActions"
-import { isUntaggedTagUuid, createUntaggedTag } from "@/features/notes/utils"
+import { isUntaggedTagUuid, resolveNotesTag } from "@/features/notes/utils"
 
 export const Header = ({
 	setSearchQuery,
@@ -64,20 +64,10 @@ export const Header = ({
 	})
 	const noteFlags = aggregateNoteSelectionFlags(selectedNotesLive, stringifiedClient?.userId, n => n.undecryptable)
 
-	const tag = (() => {
-		if (!tagUuid) {
-			return null
-		}
-
-		// #84: the virtual "Untagged" screen resolves to the synthesized tag (title via its
-		// name); it is stripped again before any real tag operation (createNote below).
-		if (isUntaggedTagUuid(tagUuid)) {
-			return createUntaggedTag(t("untagged"))
-		}
-
-		// A failed refetch keeps the data and only flips `status` (#103).
-		return notesTagsQuery.data?.find(noteTag => noteTag.uuid === tagUuid) ?? null
-	})()
+	// #84: the virtual "Untagged" screen resolves to the synthesized tag (title via its name); it is
+	// stripped again before any real tag operation (createNote below). A failed refetch keeps the
+	// data and only flips `status` (#103).
+	const tag = resolveNotesTag({ tagUuid, tags: notesTagsQuery.data, untaggedName: t("untagged") })
 
 	const viewMode = tag ? "notes" : notesViewMode
 

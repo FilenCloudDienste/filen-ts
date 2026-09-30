@@ -5,8 +5,6 @@ vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 // Mocks — must be declared before any import of the module under test
 // ---------------------------------------------------------------------------
 
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
-vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
 vi.mock("@filen/shared", async () => await import("@/tests/mocks/filenShared"))
 
 vi.mock("expo-router", () => ({
@@ -50,6 +48,16 @@ vi.mock("@/features/audio/audio", () => ({
 
 vi.mock("@/features/drive/driveSelectSession", () => ({
 	selectDriveItems: vi.fn()
+}))
+
+vi.mock("@/lib/bulkOps", () => ({
+	runBulk: vi.fn()
+}))
+
+vi.mock("@/features/audio/store/usePlaylistTracks.store", () => ({
+	default: {
+		getState: vi.fn(() => ({ clearSelectedTracks: vi.fn(), selectAllTracks: vi.fn(), selectedTracks: [] }))
+	}
 }))
 
 vi.mock("@/features/audio/store/usePlaylists.store", () => ({
@@ -128,8 +136,7 @@ function makePlaylist(): PlaylistWithItems {
 // Helpers
 // ---------------------------------------------------------------------------
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const fakeFile: any = {
+const fakeFile = {
 	uuid: "f1",
 	name: "track.mp3",
 	mime: "audio/mpeg",
@@ -141,7 +148,7 @@ const fakeFile: any = {
 	region: "de-1",
 	playlist: "pl-uuid",
 	item: {}
-}
+} as unknown as PlaylistWithItems["files"][number]
 
 // ---------------------------------------------------------------------------
 // Tests — BUG #20 (offline gating), migrated to the Menu contract:

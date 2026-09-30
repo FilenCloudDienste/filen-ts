@@ -9,7 +9,11 @@ import { type Note } from "@/types"
 import { fetchData as notesQueryFetch } from "@/features/notes/queries/useNotesQuery"
 import { noteContentQueryGet, noteContentQueryKey, noteContentQueryUpdate } from "@/features/notes/queries/useNoteContent.query"
 import { getContent } from "@/features/notes/notesContent"
-import useNotesInflightStore, { type InflightContent, INFLIGHT_CONTENT_SQLITE_KV_KEY } from "@/features/notes/store/useNotesInflight.store"
+import useNotesInflightStore, {
+	type InflightContent,
+	INFLIGHT_CONTENT_SQLITE_KV_KEY,
+	hasInflightEntries
+} from "@/features/notes/store/useNotesInflight.store"
 import useNotesOfflineStore from "@/features/notes/store/useNotesOffline.store"
 import useAppStore from "@/stores/useApp.store"
 import { removeQueryEverywhere, queryClientPersisterKv } from "@/queries/client"
@@ -177,7 +181,7 @@ function inflightUuidsFromContent(inflight: InflightContent): Set<string> {
 	const uuids = new Set<string>()
 
 	for (const uuid of Object.keys(inflight)) {
-		if ((inflight[uuid] ?? []).length > 0) {
+		if (hasInflightEntries(inflight, uuid)) {
 			uuids.add(uuid)
 		}
 	}

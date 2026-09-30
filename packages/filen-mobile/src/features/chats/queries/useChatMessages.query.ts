@@ -4,7 +4,7 @@ import auth from "@/lib/auth"
 import { sortParams } from "@filen/shared"
 import { type Chat } from "@/types"
 import type { ChatMessageWithInflightId } from "@/features/chats/store/useChats.store"
-import { wrapMessage } from "@/features/chats/chatsWrap"
+import { wrapQueryMessage } from "@/features/chats/chatsWrap"
 import { chatsQueryGet } from "@/features/chats/queries/useChats.query"
 import { socketCoveredRefetchOnMount } from "@/queries/socketSession"
 import { toSignalOpts } from "@/lib/signals"
@@ -43,10 +43,7 @@ export async function fetchData(
 		toSignalOpts(params?.signal)
 	)
 
-	return messages.map(m => ({
-		...wrapMessage(m),
-		inflightId: "" // Placeholder, actual inflightId is only needed for send sync
-	})) satisfies ChatMessageWithInflightId[]
+	return messages.map(wrapQueryMessage)
 }
 
 // Stable query key: identity (uuid) only, with the optional by-value chat stripped so its object

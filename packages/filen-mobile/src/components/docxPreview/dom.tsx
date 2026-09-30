@@ -6,38 +6,15 @@ import { readAllBytes, type RangeReader } from "@/lib/rangeTransfer"
 import useEffectOnce from "@/hooks/useEffectOnce"
 import { installDomConsoleProxy } from "@/hooks/useDomEvents/domConsoleProxy"
 import { installDomViewportReset } from "@/lib/domViewport"
-import { hardenDocxDom, DOCX_EXTERNAL_URL_ATTRIBUTE, DOCX_EXTERNAL_LINK_KEY } from "@/components/docxPreview/linkSafety"
+import { hardenDocxDom } from "@/components/docxPreview/linkSafety"
 import { classifyUntrustedLinkHref } from "@/lib/untrustedLinks"
+import { EXTERNAL_URL_ATTRIBUTE, postExternalLink } from "@/lib/domExternalLink"
 
 // Forward this WebView's console.* to the RN diagnostic logger (see domConsoleProxy).
 installDomConsoleProxy()
 
 // Reset the DOM shell's unstyled body and keep the page clear of the keyboard (#102).
 installDomViewportReset()
-
-/**
- * Hand an allowlisted URL to the native side, which opens it with the OS. Posts over the same
- * window.ReactNativeWebView channel the console proxy uses; the envelope key keeps the two apart.
- */
-function postExternalLink(url: string): void {
-	const rnWebView = (globalThis as unknown as { ReactNativeWebView?: { postMessage?: (message: string) => void } }).ReactNativeWebView
-
-	if (!rnWebView || typeof rnWebView.postMessage !== "function") {
-		return
-	}
-
-	try {
-		rnWebView.postMessage(
-			JSON.stringify({
-				[DOCX_EXTERNAL_LINK_KEY]: {
-					url
-				}
-			})
-		)
-	} catch {
-		// Tapping a link must never throw out of the event handler.
-	}
-}
 
 // The DOM-component shell ships `user-scalable=no` in its viewport meta, which blocks
 // pinch-zoom on both engines. Relax it for THIS component only — a document preview is
@@ -204,7 +181,7 @@ const Dom = ({
 				return
 			}
 
-			const external = anchor.getAttribute(DOCX_EXTERNAL_URL_ATTRIBUTE)
+			const external = anchor.getAttribute(EXTERNAL_URL_ATTRIBUTE)
 
 			if (external !== null) {
 				// Cancel the "#" the sweep left behind so the document does not jump to the top, then

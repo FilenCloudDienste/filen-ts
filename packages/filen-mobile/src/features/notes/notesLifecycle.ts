@@ -1,11 +1,9 @@
 import auth from "@/lib/auth"
 import { type Note, type NoteHistory } from "@/types"
 import { wrapSdkNote } from "@/features/notes/utils"
-import { noteContentQueryUpdate, noteContentQueryKey } from "@/features/notes/queries/useNoteContent.query"
-import { removeQueryEverywhere } from "@/queries/client"
-import { notesQueryUpdate } from "@/features/notes/queries/useNotesQuery"
-import useNotesInflightStore from "@/features/notes/store/useNotesInflight.store"
-import useNotesStore from "@/features/notes/store/useNotes.store"
+import { noteContentQueryUpdate } from "@/features/notes/queries/useNoteContent.query"
+import { notesQueryReplace } from "@/features/notes/queries/useNotesQuery"
+import { dropNoteLocally } from "@/features/notes/notesRemoval"
 import { sync } from "@/features/notes/components/sync"
 import { toSignalOpts } from "@/lib/signals"
 
@@ -24,9 +22,7 @@ export async function setPinned({ note, pinned, signal }: { note: Note; pinned: 
 		)
 	)
 
-	notesQueryUpdate({
-		updater: prev => prev.map(n => (n.uuid === note.uuid ? note : n))
-	})
+	notesQueryReplace(note)
 
 	return note
 }
@@ -46,9 +42,7 @@ export async function setFavorited({ note, favorite, signal }: { note: Note; fav
 		)
 	)
 
-	notesQueryUpdate({
-		updater: prev => prev.map(n => (n.uuid === note.uuid ? note : n))
-	})
+	notesQueryReplace(note)
 
 	return note
 }
@@ -67,9 +61,7 @@ export async function archive({ note, signal }: { note: Note; signal?: AbortSign
 		)
 	)
 
-	notesQueryUpdate({
-		updater: prev => prev.map(n => (n.uuid === note.uuid ? note : n))
-	})
+	notesQueryReplace(note)
 
 	return note
 }
@@ -88,9 +80,7 @@ export async function restore({ note, signal }: { note: Note; signal?: AbortSign
 		)
 	)
 
-	notesQueryUpdate({
-		updater: prev => prev.map(n => (n.uuid === note.uuid ? note : n))
-	})
+	notesQueryReplace(note)
 
 	return note
 }
@@ -106,9 +96,7 @@ export async function restoreFromHistory({ note, history, signal }: { note: Note
 		)
 	)
 
-	notesQueryUpdate({
-		updater: prev => prev.map(n => (n.uuid === note.uuid ? note : n))
-	})
+	notesQueryReplace(note)
 
 	// A restore makes the note's content the restored version's content. The
 	// history entry's content is optional: when present, optimistically paint it
@@ -128,25 +116,8 @@ export async function restoreFromHistory({ note, history, signal }: { note: Note
 		})
 	}
 
-	// Drop any unsynced local content for this note. Otherwise sync.tsx would
-	// later push the still-queued pre-restore inflight content back to the
-	// server, overwriting the version we just restored from history. Mirrors the
-	// onContentEditedRemotely teardown in components/content/index.tsx.
-	useNotesInflightStore.getState().setInflightContent(prev => {
-		const updated = {
-			...prev
-		}
-
-		delete updated[note.uuid]
-
-		return updated
-	})
-
-	// VC3: this clear happens outside a sync pass, so reset the note's strike count too —
-	// otherwise a stale count leaks into the next editing session.
-	sync.clearRejections(note.uuid)
-
-	await sync.flushToDisk(useNotesInflightStore.getState().inflightContent)
+	// Otherwise a pass would push the still-queued pre-restore edits back over the restored version.
+	await sync.discardInflight(note.uuid)
 
 	return note
 }
@@ -165,9 +136,7 @@ export async function trash({ note, signal }: { note: Note; signal?: AbortSignal
 		)
 	)
 
-	notesQueryUpdate({
-		updater: prev => prev.map(n => (n.uuid === note.uuid ? note : n))
-	})
+	notesQueryReplace(note)
 
 	return note
 }
@@ -184,22 +153,5 @@ export async function deleteNote({ note, signal }: { note: Note; signal?: AbortS
 		toSignalOpts(signal)
 	)
 
-	// Drop the note from the selection immediately so the list header's
-	// selectedNotes.length count stays correct and bulk ops can't target a note
-	// that no longer exists. The query cache update below runs inside a 3s
-	// timeout, so we must NOT wait for it to clear the selection.
-	useNotesStore.getState().setSelectedNotes(prev => prev.filter(n => n.uuid !== note.uuid))
-
-	// We have to set a timeout here, otherwise the main chat _layout redirect kicks in too early and which feels janky and messes with the navigation stack
-	setTimeout(() => {
-		notesQueryUpdate({
-			updater: prev => prev.filter(n => n.uuid !== note.uuid)
-		})
-
-		// removeQueryEverywhere, not `updater: () => undefined`: query-core's setQueryData bails out
-		// when the updater yields undefined (`if (data === void 0) return`), so the old form was a
-		// silent no-op and this note's decrypted body survived in memory and on disk. This also drops
-		// the persisted row, which removeQueries alone would leave behind.
-		removeQueryEverywhere(noteContentQueryKey({ uuid: note.uuid }))
-	}, 3000)
+	dropNoteLocally(note.uuid, { deferListRemoval: true })
 }

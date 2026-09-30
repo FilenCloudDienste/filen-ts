@@ -14,10 +14,6 @@ vi.mock("@blazejkustra/react-native-alert", () => ({
 	}
 }))
 
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
-
-vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
-
 import prompts from "@/lib/prompts"
 import useAppStore from "@/stores/useApp.store"
 import { unlockedForegroundGate } from "@/lib/unlockedForeground"

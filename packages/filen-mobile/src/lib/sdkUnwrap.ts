@@ -338,6 +338,27 @@ export function unwrappedFileIntoDriveItem(unwrappedFile: ReturnType<typeof unwr
 	}
 }
 
+// The user's own drive directory with this uuid, root included, as a parent context. Null when not cached.
+function normalParentContext(parent: ParentUuid): AnyDirWithContext | null {
+	const parentUuid = unwrapParentUuid(parent)
+
+	if (!parentUuid) {
+		return null
+	}
+
+	if (cache.rootUuid && parentUuid === cache.rootUuid) {
+		return new AnyDirWithContext.Normal(
+			new AnyNormalDir.Root({
+				uuid: cache.rootUuid
+			})
+		)
+	}
+
+	const fromCache = cache.directoryUuidToAnyNormalDir.get(parentUuid)
+
+	return fromCache ? new AnyDirWithContext.Normal(fromCache) : null
+}
+
 // Gets the real parent of a drive item.
 // For shared out items, this will be the parent in the users normal drive structure since that's where the item actually lives, even though the sdk may return a shared directory as the parent since it's a shared out item.
 export function getRealDriveItemParent({
@@ -350,88 +371,24 @@ export function getRealDriveItemParent({
 	switch (item.type) {
 		case "directory":
 		case "file": {
-			const unwrappedParentUuid = unwrapParentUuid(item.data.parent)
-
-			if (unwrappedParentUuid) {
-				if (cache.rootUuid && unwrappedParentUuid === cache.rootUuid) {
-					return new AnyDirWithContext.Normal(
-						new AnyNormalDir.Root({
-							uuid: cache.rootUuid
-						})
-					)
-				}
-
-				const fromCache = cache.directoryUuidToAnyNormalDir.get(unwrappedParentUuid)
-
-				if (fromCache) {
-					return new AnyDirWithContext.Normal(fromCache)
-				}
-			}
-
-			return null
+			return normalParentContext(item.data.parent)
 		}
 
-		case "sharedDirectory": {
-			const unwrappedParentUuid = unwrapParentUuid(item.data.inner.parent)
-
-			if (unwrappedParentUuid) {
-				if (drivePath.type === "sharedIn") {
-					const fromCache = cache.directoryUuidToAnySharedDirWithContext.get(unwrappedParentUuid)
-
-					if (fromCache) {
-						return new AnyDirWithContext.Shared(fromCache)
-					}
-				}
-
-				// We can use the users normal drive cache here since it's a shared out item that they are sharing, it belongs to their normal drive structure
-				if (drivePath.type === "sharedOut") {
-					if (cache.rootUuid && unwrappedParentUuid === cache.rootUuid) {
-						return new AnyDirWithContext.Normal(
-							new AnyNormalDir.Root({
-								uuid: cache.rootUuid
-							})
-						)
-					}
-
-					const fromCache = cache.directoryUuidToAnyNormalDir.get(unwrappedParentUuid)
-
-					if (fromCache) {
-						return new AnyDirWithContext.Normal(fromCache)
-					}
-				}
-			}
-
-			return null
-		}
-
+		case "sharedDirectory":
 		case "sharedFile": {
-			const unwrappedParentUuid = unwrapParentUuid(item.data.parent)
+			const parent = item.type === "sharedDirectory" ? item.data.inner.parent : item.data.parent
 
-			if (unwrappedParentUuid) {
-				if (drivePath.type === "sharedIn") {
-					const fromCache = cache.directoryUuidToAnySharedDirWithContext.get(unwrappedParentUuid)
+			if (drivePath.type === "sharedIn") {
+				const parentUuid = unwrapParentUuid(parent)
+				const fromCache = parentUuid ? cache.directoryUuidToAnySharedDirWithContext.get(parentUuid) : undefined
 
-					if (fromCache) {
-						return new AnyDirWithContext.Shared(fromCache)
-					}
-				}
+				// Never the normal drive cache: a shared-in item's parent is not in the user's own drive.
+				return fromCache ? new AnyDirWithContext.Shared(fromCache) : null
+			}
 
-				// We can use the users normal drive cache here since it's a shared out item that they are sharing, it belongs to their normal drive structure
-				if (drivePath.type === "sharedOut") {
-					if (cache.rootUuid && unwrappedParentUuid === cache.rootUuid) {
-						return new AnyDirWithContext.Normal(
-							new AnyNormalDir.Root({
-								uuid: cache.rootUuid
-							})
-						)
-					}
-
-					const fromCache = cache.directoryUuidToAnyNormalDir.get(unwrappedParentUuid)
-
-					if (fromCache) {
-						return new AnyDirWithContext.Normal(fromCache)
-					}
-				}
+			// We can use the users normal drive cache here since it's a shared out item that they are sharing, it belongs to their normal drive structure
+			if (drivePath.type === "sharedOut") {
+				return normalParentContext(parent)
 			}
 
 			return null
@@ -445,29 +402,7 @@ export function getRealDriveItemParent({
 			// We can use the users normal drive cache here since it's a shared out item that they are sharing, it belongs to their normal drive structure
 			const fromCache = cache.directoryUuidToAnyNormalDir.get(item.data.uuid)
 
-			if (fromCache) {
-				if (fromCache.tag === AnyNormalDir_Tags.Dir) {
-					const unwrappedParentUuid = unwrapParentUuid(fromCache.inner[0].parent)
-
-					if (unwrappedParentUuid) {
-						if (cache.rootUuid && unwrappedParentUuid === cache.rootUuid) {
-							return new AnyDirWithContext.Normal(
-								new AnyNormalDir.Root({
-									uuid: cache.rootUuid
-								})
-							)
-						}
-
-						const parentFromCache = cache.directoryUuidToAnyNormalDir.get(unwrappedParentUuid)
-
-						if (parentFromCache) {
-							return new AnyDirWithContext.Normal(parentFromCache)
-						}
-					}
-				}
-			}
-
-			return null
+			return fromCache?.tag === AnyNormalDir_Tags.Dir ? normalParentContext(fromCache.inner[0].parent) : null
 		}
 
 		case "sharedRootFile": {
@@ -478,27 +413,7 @@ export function getRealDriveItemParent({
 			// We can use the users normal drive cache here since it's a shared out item that they are sharing, it belongs to their normal drive structure
 			const fromCache = cache.fileUuidToNormalFile.get(item.data.uuid)
 
-			if (fromCache) {
-				const unwrappedParentUuid = unwrapParentUuid(fromCache.parent)
-
-				if (unwrappedParentUuid) {
-					if (cache.rootUuid && unwrappedParentUuid === cache.rootUuid) {
-						return new AnyDirWithContext.Normal(
-							new AnyNormalDir.Root({
-								uuid: cache.rootUuid
-							})
-						)
-					}
-
-					const parentFromCache = cache.directoryUuidToAnyNormalDir.get(unwrappedParentUuid)
-
-					if (parentFromCache) {
-						return new AnyDirWithContext.Normal(parentFromCache)
-					}
-				}
-			}
-
-			return null
+			return fromCache ? normalParentContext(fromCache.parent) : null
 		}
 	}
 }

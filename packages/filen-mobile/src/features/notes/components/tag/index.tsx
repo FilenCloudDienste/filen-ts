@@ -8,7 +8,7 @@ import { router } from "@/lib/router"
 import { useResolveClassNames } from "uniwind"
 import { useShallow } from "zustand/shallow"
 import useNotesStore from "@/features/notes/store/useNotes.store"
-import useNotesInflightStore from "@/features/notes/store/useNotesInflight.store"
+import useNotesInflightStore, { hasInflightEntries } from "@/features/notes/store/useNotesInflight.store"
 import { formatRelativeTime } from "@/lib/time"
 import { tagLastActivity } from "@/features/notes/notesTagsSortPreference"
 import Menu from "@/features/notes/components/tag/menu"
@@ -32,26 +32,14 @@ const Tag = ({ info, notesForTag }: { info: ListRenderItemInfo<NoteTag>; notesFo
 	const isActive = useNotesStore(useShallow(state => state.activeTag?.uuid === info.item.uuid))
 	const isSelected = useNotesStore(useShallow(state => state.selectedTags.some(selectedTag => selectedTag.uuid === info.item.uuid)))
 	const areTagsSelected = useNotesStore(useShallow(state => state.selectedTags.length > 0))
-	const isInflight = useNotesInflightStore(
-		useShallow(state => {
-			return notesForTag.some(n => (state.inflightContent[n.uuid] ?? []).length > 0)
-		})
-	)
+	const isInflight = useNotesInflightStore(state => notesForTag.some(n => hasInflightEntries(state.inflightContent, n.uuid)))
 
 	// The tag's "last activity" — same value the tags-view sort keys on (single source of truth).
 	const displayTimestamp = tagLastActivity(info.item, notesForTag)
 
 	const onPress = () => {
 		if (!isVirtual && useNotesStore.getState().selectedTags.length > 0) {
-			useNotesStore.getState().setSelectedTags(prev => {
-				const prevSelected = prev.some(selectedTag => selectedTag.uuid === info.item.uuid)
-
-				if (prevSelected) {
-					return prev.filter(selectedTag => selectedTag.uuid !== info.item.uuid)
-				}
-
-				return [...prev.filter(selectedTag => selectedTag.uuid !== info.item.uuid), info.item]
-			})
+			useNotesStore.getState().toggleSelectedTag(info.item)
 
 			return
 		}

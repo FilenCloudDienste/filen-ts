@@ -26,8 +26,6 @@ const {
 
 // ─── vi.mock declarations (must appear before any imports of the mocked modules) ─
 
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
-
 vi.mock("react-native", async () => {
 	const actual = await import("@/tests/mocks/reactNative")
 

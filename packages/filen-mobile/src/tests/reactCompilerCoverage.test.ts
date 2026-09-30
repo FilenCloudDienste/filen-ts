@@ -180,7 +180,10 @@ describe("the compiled drive Header", () => {
 			"@/lib/auth": { useStringifiedClient: () => client },
 			"@/features/offline/offlineSync": withDefault({}),
 			"@/features/offline/store/useOffline.store": withDefault((selector: (state: typeof storeState) => unknown) => selector(storeState)),
-			"@/features/drive/driveSelectors": { aggregateDriveSelectionFlags: () => ({}) },
+			"@/features/drive/driveSelectors": {
+				aggregateDriveSelectionFlags: () => ({}),
+				isPlainDrivePath: (drivePath: DrivePath) => drivePath.type === "drive" && !drivePath.selectOptions
+			},
 			"@/features/drive/utils": { resolveDriveHeaderTitle: resolveTitle },
 			"@/features/drive/hooks/useDriveUpload": { useDriveUpload: () => upload },
 			"@/features/drive/components/headerMenuBuilders": {

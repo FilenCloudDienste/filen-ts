@@ -4,12 +4,6 @@ import { vi, describe, it, expect } from "vitest"
 
 // ─── Mock dependencies ───────────────────────────────────────────────────────
 
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
-
-// react-native is globally aliased in vitest.config.ts but we need to control Platform.OS per test.
-// We import the mock object so we can mutate Platform.OS directly.
-vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
-
 const mockInsets = { top: 0, right: 0, bottom: 0, left: 0 }
 
 vi.mock("react-native-safe-area-context", () => ({

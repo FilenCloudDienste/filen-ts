@@ -10,8 +10,6 @@ const contactsQueryUpdates: Array<{ updater: (prev: unknown) => unknown }> = []
 const { contactsCache } = vi.hoisted(() => ({ contactsCache: { current: undefined as unknown } }))
 const contactRequestsQueryUpdates: Array<{ updater: (prev: unknown) => unknown }> = []
 
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
-
 vi.mock("@/lib/auth", () => ({
 	default: {
 		getSdkClients: vi.fn()

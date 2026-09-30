@@ -109,6 +109,20 @@ async function presentPrompt<T>(gate: PromptGate | undefined, show: (resolve: (v
 	}
 }
 
+// A dismiss (tap-outside / back) cancels, unless the alert is not cancellable.
+function dismissOptions(cancellable: boolean | undefined, onCancel: () => void): { cancelable: boolean; onDismiss: () => void } {
+	const cancelable = cancellable ?? true
+
+	return {
+		cancelable,
+		onDismiss: () => {
+			if (cancelable) {
+				onCancel()
+			}
+		}
+	}
+}
+
 const prompts = {
 	async alert(options?: AlertPromptOptions): Promise<AlertPromptResult> {
 		return await presentPrompt<AlertPromptResult>(undefined, resolve => {
@@ -135,18 +149,11 @@ const prompts = {
 						}
 					}
 				],
-				{
-					cancelable: options?.cancellable ?? true,
-					onDismiss: () => {
-						if (!(options?.cancellable ?? true)) {
-							return
-						}
-
-						resolve({
-							cancelled: true
-						})
-					}
-				}
+				dismissOptions(options?.cancellable, () => {
+					resolve({
+						cancelled: true
+					})
+				})
 			)
 		})
 	},
@@ -188,16 +195,9 @@ const prompts = {
 				Platform.OS === "android"
 					? [cancelButton, destructiveButton, primaryButton]
 					: [primaryButton, destructiveButton, cancelButton],
-				{
-					cancelable: options.cancellable ?? true,
-					onDismiss: () => {
-						if (!(options.cancellable ?? true)) {
-							return
-						}
-
-						resolve("cancel")
-					}
-				}
+				dismissOptions(options.cancellable, () => {
+					resolve("cancel")
+				})
 			)
 		})
 	},
@@ -263,18 +263,11 @@ const prompts = {
 				options?.inputType ?? "plain-text",
 				options?.defaultValue,
 				options?.keyboardType,
-				{
-					cancelable: options?.cancellable ?? true,
-					onDismiss: () => {
-						if (!(options?.cancellable ?? true)) {
-							return
-						}
-
-						resolve({
-							cancelled: true
-						})
-					}
-				}
+				dismissOptions(options?.cancellable, () => {
+					resolve({
+						cancelled: true
+					})
+				})
 			)
 		})
 	}

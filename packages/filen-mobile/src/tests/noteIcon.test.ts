@@ -15,8 +15,6 @@ vi.mock("@filen/sdk-rs", () => {
 	return { NoteType }
 })
 
-vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
-
 vi.mock("@expo/vector-icons/Ionicons", () => ({
 	default: () => null
 }))

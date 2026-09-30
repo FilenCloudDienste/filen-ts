@@ -2,7 +2,7 @@ import auth from "@/lib/auth"
 import { type Note, type NoteTag } from "@/types"
 import { wrapSdkNote, wrapSdkNoteTag } from "@/features/notes/utils"
 import { notesTagsQueryUpdate } from "@/features/notes/queries/useNotesTags.query"
-import { notesQueryUpdate } from "@/features/notes/queries/useNotesQuery"
+import { notesQueryUpdate, notesQueryReplace } from "@/features/notes/queries/useNotesQuery"
 import { toSignalOpts } from "@/lib/signals"
 
 export async function addTag({ note, tag, signal }: { note: Note; tag: NoteTag; signal?: AbortSignal }) {
@@ -19,9 +19,7 @@ export async function addTag({ note, tag, signal }: { note: Note; tag: NoteTag; 
 
 	const modifiedNote = wrapSdkNote(modifiedNoteSdk)
 
-	notesQueryUpdate({
-		updater: prev => prev.map(n => (n.uuid === modifiedNote.uuid ? modifiedNote : n))
-	})
+	notesQueryReplace(modifiedNote)
 
 	return modifiedNote
 }
@@ -41,9 +39,7 @@ export async function removeTag({ note, tag, signal }: { note: Note; tag: NoteTa
 		)
 	)
 
-	notesQueryUpdate({
-		updater: prev => prev.map(n => (n.uuid === note.uuid ? note : n))
-	})
+	notesQueryReplace(note)
 
 	return note
 }

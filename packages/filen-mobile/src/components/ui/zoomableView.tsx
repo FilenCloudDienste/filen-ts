@@ -222,6 +222,18 @@ type SharedValues = {
 	contentHeight: SharedValue<number>
 }
 
+function panBoundsFor(
+	sv: SharedValues,
+	scale: number
+): {
+	x: number
+	y: number
+} {
+	"worklet"
+
+	return getPanBounds(scale, sv.containerWidth.value, sv.containerHeight.value, sv.contentWidth.value, sv.contentHeight.value)
+}
+
 // One frame of the pinch transform, extracted as a pure UI-thread worklet so it
 // is unit-testable. Anchors on savedTranslateX/Y (the translate captured at pinch
 // start). With the Race composition the pan never runs during a pinch, so this
@@ -262,7 +274,7 @@ export function computePinchTransform(
 		}
 	}
 
-	const bounds = getPanBounds(newScale, sv.containerWidth.value, sv.containerHeight.value, sv.contentWidth.value, sv.contentHeight.value)
+	const bounds = panBoundsFor(sv, newScale)
 
 	return {
 		scale: newScale,
@@ -288,13 +300,7 @@ export function computePinchSettleTarget(sv: SharedValues): {
 	const ratio = targetScale / sv.scale.value
 	const centerX = sv.containerWidth.value / 2
 	const centerY = sv.containerHeight.value / 2
-	const bounds = getPanBounds(
-		targetScale,
-		sv.containerWidth.value,
-		sv.containerHeight.value,
-		sv.contentWidth.value,
-		sv.contentHeight.value
-	)
+	const bounds = panBoundsFor(sv, targetScale)
 
 	return {
 		scale: targetScale,
@@ -564,13 +570,7 @@ function buildComposedGesture(
 				return
 			}
 
-			const bounds = getPanBounds(
-				sv.scale.value,
-				sv.containerWidth.value,
-				sv.containerHeight.value,
-				sv.contentWidth.value,
-				sv.contentHeight.value
-			)
+			const bounds = panBoundsFor(sv, sv.scale.value)
 
 			sv.translateX.value = rubberBandClamp(sv.savedTranslateX.value + e.translationX, -bounds.x, bounds.x, sv.containerWidth.value)
 			sv.translateY.value = rubberBandClamp(sv.savedTranslateY.value + e.translationY, -bounds.y, bounds.y, sv.containerHeight.value)
@@ -582,13 +582,7 @@ function buildComposedGesture(
 				return
 			}
 
-			const bounds = getPanBounds(
-				sv.scale.value,
-				sv.containerWidth.value,
-				sv.containerHeight.value,
-				sv.contentWidth.value,
-				sv.contentHeight.value
-			)
+			const bounds = panBoundsFor(sv, sv.scale.value)
 
 			// In-bounds → momentum decay that ARRESTS at the edge (no rubber-band
 			// bounce). Released past the edge → a gentle critically-damped spring
@@ -625,13 +619,7 @@ function buildComposedGesture(
 			const targetScale = DOUBLE_TAP_ZOOM
 			const centerX = sv.containerWidth.value / 2
 			const centerY = sv.containerHeight.value / 2
-			const bounds = getPanBounds(
-				targetScale,
-				sv.containerWidth.value,
-				sv.containerHeight.value,
-				sv.contentWidth.value,
-				sv.contentHeight.value
-			)
+			const bounds = panBoundsFor(sv, targetScale)
 			const targetTx = clampNumber((e.x - centerX) * (1 - targetScale), -bounds.x, bounds.x)
 			const targetTy = clampNumber((e.y - centerY) * (1 - targetScale), -bounds.y, bounds.y)
 

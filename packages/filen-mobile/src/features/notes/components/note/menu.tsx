@@ -5,7 +5,7 @@ import { Menu as MenuComponent, type MenuButton } from "@/components/ui/menu"
 import View from "@/components/ui/view"
 import { useStringifiedClient } from "@/lib/auth"
 import useNotesStore from "@/features/notes/store/useNotes.store"
-import useNotesInflightStore from "@/features/notes/store/useNotesInflight.store"
+import { useNoteHasInflight } from "@/features/notes/store/useNotesInflight.store"
 import { useShallow } from "zustand/shallow"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import notes from "@/features/notes/notes"
@@ -18,6 +18,7 @@ import { router } from "@/lib/router"
 import { Platform } from "react-native"
 import { shareTmpFile } from "@/lib/share"
 import { t } from "@/lib/i18n"
+import { type TFunction } from "i18next"
 import * as Clipboard from "expo-clipboard"
 import logger from "@/lib/logger"
 
@@ -78,6 +79,99 @@ export function noteTypeToIcon(type: NoteType): "text" | "checklist" | "code" | 
 						: undefined
 }
 
+// The "create note" submenu shared by the notes header and the tag menu. Ids are `create_*` so they
+// never collide with the import submenu's `type_*` ids in the same header menu.
+export function createNoteSubButtons(translate: TFunction, createNote: (type: NoteType) => Promise<void>): MenuButton[] {
+	return NOTE_TYPE_OPTIONS.map(
+		({ type, typeString }) =>
+			({
+				id: `create_${typeString}`,
+				title: translate(NOTE_TYPE_LABEL_KEY[typeString]),
+				icon: noteTypeToIcon(type),
+				requiresOnline: true,
+				onPress: async () => {
+					await createNote(type)
+				}
+			}) satisfies MenuButton
+	)
+}
+
+// Entries shared by the undecryptable and normal branches of createMenuButtons.
+function restoreNoteButton(note: TNote): MenuButton {
+	return {
+		id: "restore",
+		requiresOnline: true,
+		title: t("restore"),
+		icon: "restore",
+		onPress: async () => {
+			const result = await runWithLoading(async () => {
+				await notes.restore({
+					note
+				})
+			})
+
+			if (!result.success) {
+				logger.error("notes", "restore note failed", { error: result.error, noteUuid: note.uuid })
+				alerts.error(result.error)
+
+				return
+			}
+		}
+	}
+}
+
+function trashNoteButton(note: TNote): MenuButton {
+	return {
+		id: "trash",
+		requiresOnline: true,
+		title: t("trash"),
+		icon: "trash",
+		destructive: true,
+		onPress: confirmedAction({
+			promptTitle: t("trash_note"),
+			promptMessage: t("are_you_sure_trash_note"),
+			promptOkText: t("trash"),
+			action: () => notes.trash({ note }),
+			dismissPathnamePrefix: `/note/${note.uuid}`
+		})
+	}
+}
+
+function deleteNoteButton(note: TNote): MenuButton {
+	return {
+		id: "delete",
+		requiresOnline: true,
+		title: t("delete"),
+		icon: "delete",
+		destructive: true,
+		onPress: confirmedAction({
+			promptTitle: t("delete_note"),
+			promptMessage: t("are_you_sure_delete_note"),
+			promptOkText: t("delete"),
+			action: () => notes.delete({ note }),
+			dismissPathnamePrefix: `/note/${note.uuid}`
+		})
+	}
+}
+
+// Leaving is an irreversible loss of access (until re-invited), so it is styled destructive.
+function leaveNoteButton(note: TNote): MenuButton {
+	return {
+		id: "leave",
+		requiresOnline: true,
+		title: t("leave"),
+		icon: "exit",
+		destructive: true,
+		onPress: confirmedAction({
+			promptTitle: t("leave_note"),
+			promptMessage: t("are_you_sure_leave_note"),
+			promptOkText: t("leave"),
+			action: () => notes.leave({ note }),
+			dismissPathnamePrefix: `/note/${note.uuid}`
+		})
+	}
+}
+
 export function createMenuButtons({
 	note,
 	isSelected = false,
@@ -115,7 +209,7 @@ export function createMenuButtons({
 		if (isAvailableOffline) {
 			buttons.push({
 				id: "removeOffline",
-				title: t("remove_note_offline"),
+				title: t("remove_offline"),
 				icon: "download",
 				destructive: true,
 				onPress: async () => {
@@ -136,71 +230,12 @@ export function createMenuButtons({
 		}
 
 		if (note.trash) {
-			buttons.push({
-				id: "restore",
-				requiresOnline: true,
-				title: t("restore"),
-				icon: "restore",
-				onPress: async () => {
-					const result = await runWithLoading(async () => {
-						await notes.restore({
-							note
-						})
-					})
-
-					if (!result.success) {
-						logger.error("notes", "restore undecryptable note failed", { error: result.error, noteUuid: note.uuid })
-						alerts.error(result.error)
-
-						return
-					}
-				}
-			})
-
-			buttons.push({
-				id: "delete",
-				requiresOnline: true,
-				title: t("delete"),
-				icon: "delete",
-				destructive: true,
-				onPress: confirmedAction({
-					promptTitle: t("delete_note"),
-					promptMessage: t("are_you_sure_delete_note"),
-					promptOkText: t("delete"),
-					action: () => notes.delete({ note }),
-					dismissPathnamePrefix: `/note/${note.uuid}`
-				})
-			})
+			buttons.push(restoreNoteButton(note))
+			buttons.push(deleteNoteButton(note))
 		} else if (isOwner) {
-			buttons.push({
-				id: "trash",
-				requiresOnline: true,
-				title: t("trash"),
-				icon: "trash",
-				destructive: true,
-				onPress: confirmedAction({
-					promptTitle: t("trash_note"),
-					promptMessage: t("are_you_sure_trash_note"),
-					promptOkText: t("trash"),
-					action: () => notes.trash({ note }),
-					dismissPathnamePrefix: `/note/${note.uuid}`
-				})
-			})
+			buttons.push(trashNoteButton(note))
 		} else {
-			buttons.push({
-				id: "leave",
-				requiresOnline: true,
-				title: t("leave"),
-				icon: "exit",
-				destructive: true,
-				onPress: confirmedAction({
-					promptTitle: t("leave_note"),
-					promptMessage: t("are_you_sure_leave_note"),
-					promptOkText: t("leave"),
-					action: () => notes.leave({ note }),
-					dismissPathnamePrefix: `/note/${note.uuid}`
-				})
-			})
+			buttons.push(leaveNoteButton(note))
 		}
 
 		return buttons
@@ -270,7 +305,7 @@ export function createMenuButtons({
 	// before the mark commits); un-marking is purely local and stays available offline.
 	buttons.push({
 		id: isAvailableOffline ? "removeOffline" : "makeAvailableOffline",
-		title: isAvailableOffline ? t("remove_note_offline") : t("make_note_available_offline"),
+		title: isAvailableOffline ? t("remove_offline") : t("make_available_offline"),
 		// "download", not the drive's "archive": this menu already carries an ARCHIVE action, and
 		// reusing that icon here would read as a second way to archive the note. The row BADGE does
 		// match the drive's (download-outline, green), which is where the shared visual language
@@ -564,78 +599,18 @@ export function createMenuButtons({
 		}
 
 		if (note.archive || note.trash) {
-			buttons.push({
-				id: "restore",
-				requiresOnline: true,
-				title: t("restore"),
-				icon: "restore",
-				onPress: async () => {
-					const result = await runWithLoading(async () => {
-						await notes.restore({
-							note
-						})
-					})
-
-					if (!result.success) {
-						logger.error("notes", "restore note failed", { error: result.error, noteUuid: note.uuid })
-						alerts.error(result.error)
-
-						return
-					}
-				}
-			})
+			buttons.push(restoreNoteButton(note))
 		}
 
 		if (!note.trash) {
-			buttons.push({
-				id: "trash",
-				requiresOnline: true,
-				title: t("trash"),
-				icon: "trash",
-				destructive: true,
-				onPress: confirmedAction({
-					promptTitle: t("trash_note"),
-					promptMessage: t("are_you_sure_trash_note"),
-					promptOkText: t("trash"),
-					action: () => notes.trash({ note }),
-					dismissPathnamePrefix: `/note/${note.uuid}`
-				})
-			})
+			buttons.push(trashNoteButton(note))
 		}
 
 		if (note.trash) {
-			buttons.push({
-				id: "delete",
-				requiresOnline: true,
-				title: t("delete"),
-				icon: "delete",
-				destructive: true,
-				onPress: confirmedAction({
-					promptTitle: t("delete_note"),
-					promptMessage: t("are_you_sure_delete_note"),
-					promptOkText: t("delete"),
-					action: () => notes.delete({ note }),
-					dismissPathnamePrefix: `/note/${note.uuid}`
-				})
-			})
+			buttons.push(deleteNoteButton(note))
 		}
 	} else {
-		buttons.push({
-			id: "leave",
-			requiresOnline: true,
-			title: t("leave"),
-			icon: "exit",
-			destructive: true,
-			onPress: confirmedAction({
-				promptTitle: t("leave_note"),
-				promptMessage: t("are_you_sure_leave_note"),
-				promptOkText: t("leave"),
-				// Leaving is an irreversible loss of access (until re-invited) — styled
-				// destructive like the bulk-leave and undecryptable-leave variants.
-				action: () => notes.leave({ note }),
-				dismissPathnamePrefix: `/note/${note.uuid}`
-			})
-		})
+		buttons.push(leaveNoteButton(note))
 	}
 
 	return buttons
@@ -653,7 +628,7 @@ const Menu = ({
 } & React.ComponentPropsWithoutRef<typeof MenuComponent>) => {
 	const stringifiedClient = useStringifiedClient()
 	const isSelected = useNotesStore(useShallow(state => state.selectedNotes.some(selectedNote => selectedNote.uuid === note.uuid)))
-	const isInflight = useNotesInflightStore(useShallow(state => (state.inflightContent[note.uuid] ?? []).length > 0))
+	const isInflight = useNoteHasInflight(note.uuid)
 	const isAvailableOffline = useNotesOfflineStore(state => state.marked[note.uuid] === true)
 
 	const writeAccess =

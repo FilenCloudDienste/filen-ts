@@ -33,15 +33,12 @@ import {
 	blake3ToHex,
 	parentTreePath,
 	shieldCoversModification,
-	modifyAssetPathOnCollision,
-	collisionNameSuffix,
+	resolveCollisionSlot,
 	albumFolderTitle,
 	dedupTreeKey,
-	collisionBaseName,
 	effectiveCreationTimestamp,
 	composeLocalTreePath,
 	rawRemoteTreePath,
-	normalizeCameraUploadHashEntry,
 	hashEntryCoversPath,
 	mergedHashEntryPaths,
 	isDirUsable,
@@ -188,7 +185,7 @@ export const MAX_BACKGROUND_UPLOAD_ABORTS = 2
 // CONFIGS (the secureStore key below rotates with it). Note this does NOT touch the camera-
 // upload hash ledger — cameraUploadState owns its own kv prefix and is never rotated from
 // here; its value-shape changes rely on in-place lazy migration instead (see
-// CameraUploadHashEntry / normalizeCameraUploadHashEntry).
+// CameraUploadHashEntry).
 export const VERSION = 1
 
 // Width of the per-delta upload worker pool in sync(). Bounds the pre-staging
@@ -644,15 +641,10 @@ class CameraUpload {
 							hadFilename: entry.filename !== null && entry.filename.length > 0
 						})
 
-						useCameraUploadStore.getState().setErrors(errors => [
-							...errors,
-							{
-								id: randomUUID(),
-								timestamp: Date.now(),
-								error: new Error(i18n.t("camera_upload_asset_filename_missing")),
-								assetId: entry.id
-							}
-						])
+						useCameraUploadStore.getState().addError({
+							error: new Error(i18n.t("camera_upload_asset_filename_missing")),
+							assetId: entry.id
+						})
 
 						continue
 					}
@@ -717,58 +709,39 @@ class CameraUpload {
 					const originalPath = composeLocalTreePath({ folderTitle, filename: info.filename })
 					// #15/HEIC: the upload may rewrite the extension — compress to .jpg when smaller
 					// (unpredictable ⇒ extension-agnostic key), convertHeic .heic → .jpg
-					// (deterministic ⇒ key NORMALIZED to the post-conversion name). dedupTreeKey +
-					// collisionBaseName apply the SAME transform here and on the remote side so the
+					// (deterministic ⇒ key NORMALIZED to the post-conversion name). dedupTreeKey
+					// applies the SAME transform here and on the remote side so the
 					// tree key (and any collision-resolved key) stays symmetric for one physical asset.
 					const fullPath = originalPath.toLowerCase()
 					let path = dedupTreeKey({ path: fullPath, compress: config.compress, convertHeic })
-					let iteration = 0
 					// #B2: remember the suffix the winning slot carries so the upload can
 					// reproduce it in the uploaded filename ("" = base slot, plain name).
 					let collisionSuffixApplied = ""
 
-					// Collision-only inputs, computed lazily on the first occupied slot.
-					// The collision identity is the seconds-floored creation timestamp
-					// (#B7: effectiveCreationTimestamp; sortSec IS that value, floored once
-					// during the pre-sort pass) — no per-asset file read at listing time.
-					// This suffix is baked into the uploaded filename (#B2), so the remote
-					// collision key is re-derived from the STORED name, which encodes this
-					// floored-seconds value verbatim. It does NOT rely on the remote
-					// `meta.created` matching: under EXIF-override (CU-01) that value can
-					// diverge from effectiveCreationTimestamp by the whole timezone offset.
-					let collisionName: string | null = null
-					let localContentHash: string | null = null
-
-					while (tree[path]) {
-						if (collisionName === null || localContentHash === null) {
-							collisionName = collisionBaseName({ name: info.filename, compress: config.compress, convertHeic })
-							localContentHash = String(sortSec)
-						}
-
-						const collisionAsset = {
-							name: collisionName,
-							contentHash: localContentHash
-						}
-						const resolvedPath = modifyAssetPathOnCollision({
-							iteration,
+					// The collision identity is the seconds-floored creation timestamp (#B7:
+					// effectiveCreationTimestamp; sortSec IS that value, floored once during the
+					// pre-sort pass) — no per-asset file read at listing time. This suffix is
+					// baked into the uploaded filename (#B2), so the remote collision key is
+					// re-derived from the STORED name, which encodes this floored-seconds value
+					// verbatim. It does NOT rely on the remote `meta.created` matching: under
+					// EXIF-override (CU-01) that value can diverge from
+					// effectiveCreationTimestamp by the whole timezone offset.
+					if (tree[path]) {
+						const slot = resolveCollisionSlot({
+							tree,
 							path,
-							asset: collisionAsset,
-							compress: config.compress
+							name: info.filename,
+							sortSec,
+							compress: config.compress,
+							convertHeic
 						})
 
-						if (resolvedPath === null || resolvedPath.length === 0) {
-							path = ""
-
-							break
+						if (slot === null) {
+							continue
 						}
 
-						path = resolvedPath
-						collisionSuffixApplied = collisionNameSuffix({ iteration, asset: collisionAsset }) ?? ""
-						iteration++
-					}
-
-					if (path.length === 0) {
-						continue
+						path = slot.path
+						collisionSuffixApplied = slot.suffix
 					}
 
 					tree[path] = {
@@ -797,18 +770,13 @@ class CameraUpload {
 
 			logger.error("cameraUpload", "Album assets query failed", { albumId: entry[0], albumTitle: entry[1], error: result.reason })
 
-			useCameraUploadStore.getState().setErrors(errors => [
-				...errors,
-				{
-					id: randomUUID(),
-					timestamp: Date.now(),
-					error: new Error(
-						i18n.t("camera_upload_album_listing_failed", {
-							album: entry[1]
-						})
-					)
-				}
-			])
+			useCameraUploadStore.getState().addError({
+				error: new Error(
+					i18n.t("camera_upload_album_listing_failed", {
+						album: entry[1]
+					})
+				)
+			})
 		}
 
 		return {
@@ -854,14 +822,9 @@ class CameraUpload {
 				firstError: scanErrors[0]
 			})
 
-			useCameraUploadStore.getState().setErrors(errors => [
-				...errors,
-				{
-					id: randomUUID(),
-					timestamp: Date.now(),
-					error: new Error(i18n.t("camera_upload_remote_listing_incomplete"))
-				}
-			])
+			useCameraUploadStore.getState().addError({
+				error: new Error(i18n.t("camera_upload_remote_listing_incomplete"))
+			})
 		}
 
 		for (const { dir } of dirs) {
@@ -929,50 +892,29 @@ class CameraUpload {
 			// literal "%2F" would gain a phantom "/" separator), or the key diverges from
 			// the local raw composition and the asset re-uploads forever.
 			const fullPath = rawRemoteTreePath(file.path).toLowerCase()
-			// Mirror listLocal's key transform exactly (dedupTreeKey + collisionBaseName):
+			// Mirror listLocal's key transform exactly (dedupTreeKey):
 			// compress ⇒ extension-agnostic stem; convertHeic ⇒ normalize to the post-
 			// conversion name. The remote listing already holds the uploaded name (the
 			// converted `.jpg`, or the compressed/original ext), so applying the same
 			// transform here keeps the remote key symmetric with the local key for one
 			// physical asset.
 			let path = dedupTreeKey({ path: fullPath, compress, convertHeic })
-			let iteration = 0
 
-			// Collision-only inputs, computed lazily on the first occupied slot. The
-			// contentHash is the seconds-floored creation timestamp, matching the local
-			// listLocal computation exactly for symmetric collision resolution — sortSec
-			// IS that value, floored once during the pre-sort pass.
-			let collisionName: string | null = null
-			let remoteContentHash: string | null = null
+			if (tree[path]) {
+				const slot = resolveCollisionSlot({
+					tree,
+					path,
+					name: meta?.name ?? FileSystem.Paths.basename(fullPath),
+					sortSec,
+					compress,
+					convertHeic
+				})
 
-			while (tree[path]) {
-				if (collisionName === null || remoteContentHash === null) {
-					const remoteName = meta?.name ?? FileSystem.Paths.basename(fullPath)
-
-					collisionName = collisionBaseName({ name: remoteName, compress, convertHeic })
-					remoteContentHash = String(sortSec)
+				if (slot === null) {
+					continue
 				}
 
-				path =
-					modifyAssetPathOnCollision({
-						iteration,
-						path,
-						asset: {
-							name: collisionName,
-							contentHash: remoteContentHash
-						},
-						compress
-					}) ?? ""
-
-				if (path.length === 0) {
-					break
-				}
-
-				iteration++
-			}
-
-			if (path.length === 0) {
-				continue
+				path = slot.path
 			}
 
 			tree[path] = file
@@ -994,11 +936,9 @@ class CameraUpload {
 	 * the kv where foreground reads the loaded index synchronously.
 	 */
 	private async shieldEntry(assetId: string, treePath: string, background: boolean): Promise<CameraUploadHashEntry | undefined> {
-		return normalizeCameraUploadHashEntry(
-			background
-				? ((await cameraUploadState.getHash(assetId)) ?? (await cameraUploadState.getHash(treePath)))
-				: (cameraUploadState.getHashSync(assetId) ?? cameraUploadState.getHashSync(treePath))
-		)
+		return background
+			? ((await cameraUploadState.getHash(assetId)) ?? (await cameraUploadState.getHash(treePath)))
+			: (cameraUploadState.getHashSync(assetId) ?? cameraUploadState.getHashSync(treePath))
 	}
 
 	private async deltas({
@@ -1123,7 +1063,7 @@ class CameraUpload {
 			])
 
 			for (const candidate of mtimeCandidates) {
-				const entry = normalizeCameraUploadHashEntry(entries.get(candidate.file.info.id) ?? entries.get(candidate.path))
+				const entry = entries.get(candidate.file.info.id) ?? entries.get(candidate.path)
 
 				if (shieldCoversModification(entry, candidate.modificationTime, candidate.path)) {
 					continue
@@ -1492,7 +1432,7 @@ class CameraUpload {
 				}
 
 				// One batch per wave: a 50k-library re-key must not become O(n) serialized kv writes.
-				const upserts: [string, CameraUploadHashEntry | string][] = []
+				const upserts: [string, CameraUploadHashEntry][] = []
 				const deletes: string[] = []
 				const rekeyed = new Set<string>()
 
@@ -1979,14 +1919,9 @@ class CameraUpload {
 							return
 						}
 
-						await cameraUploadState.setHash(localFile.info.id, {
-							md5,
-							verifiedModificationTime: modificationTime ?? -1,
-							paths: mergedHashEntryPaths(cachedEntry, localFile.path)
-						})
 						// Any completed upload proves the asset fits a window — forget its
 						// background-abort history (audit B4).
-						await cameraUploadState.deleteAbort(assetId)
+						await recordAsBackedUp()
 
 						uploaded++
 					})
@@ -2011,15 +1946,10 @@ class CameraUpload {
 							error: result.error
 						})
 
-						useCameraUploadStore.getState().setErrors(errors => [
-							...errors,
-							{
-								id: randomUUID(),
-								timestamp: Date.now(),
-								error: result.error,
-								assetId: localFile.info.id
-							}
-						])
+						useCameraUploadStore.getState().addError({
+							error: result.error,
+							assetId: localFile.info.id
+						})
 					}
 				}
 			}
@@ -2097,14 +2027,9 @@ class CameraUpload {
 
 			logger.error("cameraUpload", "Sync run failed unexpectedly", { error: result.error })
 
-			useCameraUploadStore.getState().setErrors(errors => [
-				...errors,
-				{
-					id: randomUUID(),
-					timestamp: Date.now(),
-					error: result.error
-				}
-			])
+			useCameraUploadStore.getState().addError({
+				error: result.error
+			})
 
 			// BG-01: surface the swallowed failure so the headless background task can record a camera-
 			// phase failure in its run log instead of reporting Success (the OS discards the return, but

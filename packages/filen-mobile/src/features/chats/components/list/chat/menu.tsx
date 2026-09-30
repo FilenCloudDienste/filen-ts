@@ -71,32 +71,8 @@ export function createMenuButtons({
 	unreadCount: number
 }): MenuButton[] {
 	const isOwner = chat.ownerId === userId
-
-	if (chat.undecryptable) {
-		const selectButton: MenuButton[] =
-			origin !== "chat"
-				? [
-						{
-							id: isSelected ? "deselect" : "select",
-							title: isSelected ? t("deselect") : t("select"),
-							icon: "select",
-							checked: isSelected,
-							onPress: () => {
-								useChatsStore.getState().toggleSelectedChat(chat)
-							}
-						}
-					]
-				: []
-
-		if (isOwner) {
-			return [...selectButton, deleteChatButton(chat)]
-		}
-
-		return [...selectButton, leaveChatButton(chat)]
-	}
-
-	return [
-		...(origin !== "chat"
+	const selectButton: MenuButton[] =
+		origin !== "chat"
 			? [
 					{
 						id: isSelected ? "deselect" : "select",
@@ -106,9 +82,20 @@ export function createMenuButtons({
 						onPress: () => {
 							useChatsStore.getState().toggleSelectedChat(chat)
 						}
-					} satisfies MenuButton
+					}
 				]
-			: []),
+			: []
+
+	if (chat.undecryptable) {
+		if (isOwner) {
+			return [...selectButton, deleteChatButton(chat)]
+		}
+
+		return [...selectButton, leaveChatButton(chat)]
+	}
+
+	return [
+		...selectButton,
 		...(unreadCount > 0
 			? [
 					{
@@ -118,14 +105,9 @@ export function createMenuButtons({
 						requiresOnline: true,
 						onPress: async () => {
 							const result = await runWithLoading(async () => {
-								return await Promise.all([
-									chats.updateLastFocusTimesNow({
-										chats: [chat]
-									}),
-									chats.markRead({
-										chat
-									})
-								])
+								await chats.markAsRead({
+									chat
+								})
 							})
 
 							if (!result.success) {

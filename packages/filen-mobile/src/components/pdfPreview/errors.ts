@@ -17,6 +17,20 @@ export type PdfErrorClassification = { type: "password"; reason: PdfPasswordReas
 // pdf.js PasswordResponses: 1 = NEED_PASSWORD, 2 = INCORRECT_PASSWORD.
 const INCORRECT_PASSWORD = 2
 
+export function passwordReasonFromCode(code: unknown): PdfPasswordReason {
+	return code === INCORRECT_PASSWORD ? "incorrect" : "required"
+}
+
+export function pdfErrorName(error: unknown): string | undefined {
+	if (typeof error !== "object" || error === null) {
+		return undefined
+	}
+
+	const name = (error as { name?: unknown }).name
+
+	return typeof name === "string" ? name : undefined
+}
+
 export function classifyPdfError(error: unknown): PdfErrorClassification {
 	if (typeof error !== "object" || error === null) {
 		return {
@@ -25,14 +39,11 @@ export function classifyPdfError(error: unknown): PdfErrorClassification {
 		}
 	}
 
-	const name = (error as { name?: unknown }).name
-	const code = (error as { code?: unknown }).code
-
-	switch (name) {
+	switch (pdfErrorName(error)) {
 		case "PasswordException": {
 			return {
 				type: "password",
-				reason: code === INCORRECT_PASSWORD ? "incorrect" : "required"
+				reason: passwordReasonFromCode((error as { code?: unknown }).code)
 			}
 		}
 

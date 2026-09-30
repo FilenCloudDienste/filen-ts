@@ -28,11 +28,11 @@ function Appearance() {
 	const [themeSetting, setThemeSetting] = useThemeSetting()
 
 	const startScreenLabels: Record<StartScreen, string> = {
-		drive: t("start_screen_drive"),
-		photos: t("start_screen_photos"),
-		notes: t("start_screen_notes"),
-		chats: t("start_screen_chats"),
-		more: t("start_screen_more")
+		drive: t("tab_drive"),
+		photos: t("tab_photos"),
+		notes: t("tab_notes"),
+		chats: t("tab_chats"),
+		more: t("tab_more")
 	}
 
 	const themeLabels: Record<ThemeSetting, string> = {
@@ -214,18 +214,9 @@ function Appearance() {
 			/>
 			<ScreenBody>
 				<SettingsScrollView>
-					<Group
-						className="bg-background-tertiary"
-						buttons={generalButtons}
-					/>
-					<Group
-						className="bg-background-tertiary"
-						buttons={sortButtons}
-					/>
-					<Group
-						className="bg-background-tertiary"
-						buttons={viewButtons}
-					/>
+					<Group buttons={generalButtons} />
+					<Group buttons={sortButtons} />
+					<Group buttons={viewButtons} />
 				</SettingsScrollView>
 			</ScreenBody>
 		</Fragment>

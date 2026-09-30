@@ -15,7 +15,7 @@
  * "use dom" bundle and the native side alike.
  */
 
-import { EXTERNAL_LINK_PROTOCOLS } from "@/components/textEditor/linkUtils"
+export const EXTERNAL_LINK_PROTOCOLS = ["http://", "https://", "mailto:", "tel:", "sms:", "whatsapp:", "geo:", "maps:"] as const
 
 /**
  * What a preview should do with one link.
@@ -54,7 +54,7 @@ function hasInteriorWhitespaceOrControl(url: string): boolean {
  * Classify one raw href value.
  *
  * `url` keeps its original casing — paths, query strings and tokens are case-sensitive (signed URLs,
- * reset tokens); only the scheme test is case-insensitive. Mirrors classifyExternalLinkHref.
+ * reset tokens); only the scheme test is case-insensitive.
  */
 export function classifyUntrustedLinkHref(raw: string | null | undefined): UntrustedLinkClassification {
 	if (typeof raw !== "string") {

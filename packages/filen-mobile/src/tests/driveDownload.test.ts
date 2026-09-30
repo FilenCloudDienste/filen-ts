@@ -29,10 +29,6 @@ const {
 	mockNewTmpDir: vi.fn()
 }))
 
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
-
-vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
-
 vi.mock("expo-crypto", async () => await import("@/tests/mocks/expoCrypto"))
 
 vi.mock("@filen/shared", async () => ({

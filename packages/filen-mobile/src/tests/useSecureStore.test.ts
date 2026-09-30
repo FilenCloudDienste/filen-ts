@@ -44,8 +44,6 @@ const { mockSecureStoreMap, mockEventEmitter, mockMmkvStore } = vi.hoisted(() =>
 	}
 })
 
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
-
 vi.mock("expo-crypto", async () => await import("@/tests/mocks/expoCrypto"))
 
 vi.mock("expo-secure-store", async () => await import("@/tests/mocks/expoSecureStore"))

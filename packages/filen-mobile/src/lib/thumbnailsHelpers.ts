@@ -21,6 +21,12 @@ export function abortError(signal?: AbortSignal): Error {
 	return new Error("Aborted")
 }
 
+export function throwIfAborted(signal?: AbortSignal): void {
+	if (signal?.aborted) {
+		throw abortError(signal)
+	}
+}
+
 export class OfflineAbortError extends Error {
 	public constructor() {
 		super("Offline")
@@ -42,8 +48,12 @@ export class ProviderUnavailableError extends Error {
 	}
 }
 
+export function getPathForUuid(uuid: string): string {
+	return FileSystem.Paths.join(DIRECTORY.uri, `${uuid}.webp`)
+}
+
 export function getPath(item: DriveItem): string {
-	return FileSystem.Paths.join(DIRECTORY.uri, `${item.data.uuid}.webp`)
+	return getPathForUuid(item.data.uuid)
 }
 
 export function ensureThumbnailsDirectory(): void {

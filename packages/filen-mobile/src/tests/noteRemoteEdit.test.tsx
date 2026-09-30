@@ -87,7 +87,13 @@ vi.mock("@/lib/unlockedForeground", async () => {
 vi.mock("@/features/notes/components/sync", () => ({
 	sync: {
 		flushToDisk: () => Promise.resolve(true),
-		clearRejections: vi.fn(),
+		discardInflight: (uuid: string) => {
+			const { [uuid]: _discarded, ...rest } = state.inflight
+
+			state.inflight = rest
+
+			return Promise.resolve(true)
+		},
 		syncDebounced,
 		hold,
 		attachEditor,
@@ -96,7 +102,10 @@ vi.mock("@/features/notes/components/sync", () => ({
 }))
 vi.mock("@/lib/auth", () => ({ useStringifiedClient: () => ({ userId: 1 }) }))
 vi.mock("@/features/notes/queries/useNotesQuery", () => ({ notesQueryGet: () => [] }))
-vi.mock("@/features/notes/store/useNotesInflight.store", () => {
+vi.mock("@/features/notes/store/useNotesInflight.store", async () => {
+	const { hasInflightEntries, newestInflightEntry } = await vi.importActual<typeof import("@/features/notes/store/useNotesInflight.store")>(
+		"@/features/notes/store/useNotesInflight.store"
+	)
 	const getState = () => ({
 		inflightContent: state.inflight,
 		setInflightContent: (updater: (prev: typeof state.inflight) => typeof state.inflight) => {
@@ -105,6 +114,9 @@ vi.mock("@/features/notes/store/useNotesInflight.store", () => {
 	})
 
 	return {
+		hasInflightEntries,
+		newestInflightEntry,
+		useNoteHasInflight: (uuid: string) => hasInflightEntries(state.inflight as Parameters<typeof hasInflightEntries>[0], uuid),
 		default: Object.assign((selector: (s: ReturnType<typeof getState>) => unknown) => selector(getState()), { getState })
 	}
 })

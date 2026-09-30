@@ -9,8 +9,9 @@ import { useSystemPresentationStore, systemPresentation } from "@/lib/systemPres
 import useAppStore from "@/stores/useApp.store"
 import usePipStore from "@/stores/usePip.store"
 import { shouldRedact } from "@/components/privacyScreenLogic"
+import { ROOT_OVERLAY_CLASSES } from "@/components/rootOverlay"
 
-const COVER_CLASSES = "absolute top-0 left-0 right-0 bottom-0 z-10000 w-full h-full bg-background"
+const COVER_CLASSES = `${ROOT_OVERLAY_CLASSES} bg-background`
 
 // expo-screen-capture key — scopes our prevent/allow pair so it never conflicts with any other caller.
 const SCREEN_CAPTURE_KEY = "privacy-screen"

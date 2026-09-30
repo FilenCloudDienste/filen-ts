@@ -2,10 +2,6 @@ import { vi, describe, it, expect, beforeEach } from "vitest"
 
 // ─── Module boundary mocks (must be top-level vi.mock calls, hoisted by Vitest) ─
 
-vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
-
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
-
 // @filen/sdk-rs loads a wasm worker that references the browser `self` global —
 // mock it out so the node test env can load our source modules.
 vi.mock("@filen/sdk-rs", () => ({
@@ -112,8 +108,7 @@ vi.mock("@/features/chats/chats", () => ({
 		delete: vi.fn(),
 		leave: vi.fn(),
 		rename: vi.fn(),
-		updateLastFocusTimesNow: vi.fn(),
-		markRead: vi.fn(),
+		markAsRead: vi.fn(),
 		sendTyping: vi.fn(),
 		getChatUploadsDirectory: vi.fn()
 	}

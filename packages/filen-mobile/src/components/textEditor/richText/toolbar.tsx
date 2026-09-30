@@ -8,7 +8,6 @@ import Menu, { type MenuButton } from "@/components/ui/menu"
 import useRichtextStore from "@/stores/useRichtext.store"
 import type { TextEditorEvents } from "@/components/textEditor"
 import type { QuillFormats, HeaderLevel } from "@/components/textEditor/richText/dom"
-import { classifyExternalLinkHref } from "@/components/textEditor/linkUtils"
 import Text from "@/components/ui/text"
 import prompts from "@/lib/prompts"
 import { cn } from "@filen/shared"
@@ -145,7 +144,7 @@ const Button = ({ type, dispatch }: { type: keyof QuillFormats; dispatch: (event
 
 									dispatch({
 										type: "quillAddLink",
-										data: classifyExternalLinkHref(response.value).url
+										data: response.value.trim()
 									})
 								})
 						}

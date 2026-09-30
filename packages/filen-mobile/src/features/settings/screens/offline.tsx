@@ -24,7 +24,6 @@ function OfflineSettings() {
 			<ScreenBody>
 				<SettingsScrollView>
 					<Group
-						className="bg-background-tertiary"
 						buttons={[
 							{
 								icon: "wifi-outline",

@@ -1,13 +1,6 @@
 // @vitest-environment happy-dom
 
-import { vi, describe, it, expect } from "vitest"
-
-// ─── Mock dependencies ───────────────────────────────────────────────────────
-
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
-
-// react-native is globally aliased to src/tests/mocks/reactNative.ts via vitest.config.ts.
-// The hook only imports type LayoutChangeEvent — no runtime value from react-native.
+import { describe, it, expect } from "vitest"
 
 // ─── Imports ─────────────────────────────────────────────────────────────────
 

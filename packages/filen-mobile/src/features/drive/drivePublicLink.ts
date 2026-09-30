@@ -1,7 +1,7 @@
 import auth from "@/lib/auth"
 import { type DirPublicLinkRw, type FilePublicLink, type PasswordState, type PublicLinkExpiration } from "@filen/sdk-rs"
 import type { DriveItem } from "@/types"
-import { driveItemsQueryUpdate } from "@/features/drive/queries/useDriveItems.query"
+import { driveItemsQueryUpdateRoot } from "@/features/drive/queries/useDriveItems.query"
 import { driveItemPublicLinkStatusQueryUpdate } from "@/features/drive/queries/useDriveItemPublicLinkStatus.query"
 
 // A status the caller already read (the Manage Public Link screen's query), passed to skip the SDK's
@@ -46,15 +46,7 @@ export async function enablePublicLink({
 						(await authedSdkClient.publicLinkFile(item.data))
 				}
 
-	driveItemsQueryUpdate({
-		params: {
-			path: {
-				type: "links",
-				uuid: null
-			}
-		},
-		updater: prev => [...prev.filter(i => i.data.uuid !== item.data.uuid), item]
-	})
+	driveItemsQueryUpdateRoot("links", prev => [...prev.filter(i => i.data.uuid !== item.data.uuid), item])
 
 	driveItemPublicLinkStatusQueryUpdate({
 		params: {
@@ -98,15 +90,7 @@ export async function disablePublicLink({ item, known }: { item: DriveItem; know
 	}
 
 	// No link to remove means it was disabled elsewhere, while the caches still show it.
-	driveItemsQueryUpdate({
-		params: {
-			path: {
-				type: "links",
-				uuid: null
-			}
-		},
-		updater: prev => prev.filter(i => i.data.uuid !== item.data.uuid)
-	})
+	driveItemsQueryUpdateRoot("links", prev => prev.filter(i => i.data.uuid !== item.data.uuid))
 
 	driveItemPublicLinkStatusQueryUpdate({
 		params: {
@@ -179,15 +163,7 @@ export async function updatePublicLink({
 		const current = await authedSdkClient.getFileLinkStatus(item.data)
 
 		if (!current) {
-			driveItemsQueryUpdate({
-				params: {
-					path: {
-						type: "links",
-						uuid: null
-					}
-				},
-				updater: prev => prev.filter(i => i.data.uuid !== item.data.uuid)
-			})
+			driveItemsQueryUpdateRoot("links", prev => prev.filter(i => i.data.uuid !== item.data.uuid))
 
 			driveItemPublicLinkStatusQueryUpdate({
 				params: {

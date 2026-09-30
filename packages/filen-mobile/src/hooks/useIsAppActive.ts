@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react"
-import { AppState } from "react-native"
+import { AppState, type AppStateStatus } from "react-native"
 
 function subscribe(listener: () => void): () => void {
 	const subscription = AppState.addEventListener("change", listener)
@@ -9,7 +9,11 @@ function subscribe(listener: () => void): () => void {
 	}
 }
 
-// Boolean snapshot: inactive <-> background transitions don't re-render consumers.
+// Boolean snapshot: transitions between the other states don't re-render consumers.
+export function useIsAppState(status: AppStateStatus): boolean {
+	return useSyncExternalStore(subscribe, () => AppState.currentState === status, () => status === "active")
+}
+
 export default function useIsAppActive(): boolean {
-	return useSyncExternalStore(subscribe, () => AppState.currentState === "active", () => true)
+	return useIsAppState("active")
 }

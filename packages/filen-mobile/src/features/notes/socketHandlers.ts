@@ -1,15 +1,15 @@
 import { NoteEvent_Tags, MaybeEncryptedUniffi_Tags, SocketEvent_Tags, type SocketEvent } from "@filen/sdk-rs"
 import {
 	notesQueryUpdate,
+	notesQueryPatch,
 	fetchData as notesQueryFetch,
 	notesQueryGet,
 	getNotesListGeneration
 } from "@/features/notes/queries/useNotesQuery"
 import events from "@/lib/events"
-import useNotesStore from "@/features/notes/store/useNotes.store"
+import { dropNoteLocally } from "@/features/notes/notesRemoval"
 import notesOffline from "@/features/notes/notesOffline"
-import { noteContentQueryKey, noteContentRemoteEditSeen } from "@/features/notes/queries/useNoteContent.query"
-import { removeQueryEverywhere } from "@/queries/client"
+import { noteContentRemoteEditSeen } from "@/features/notes/queries/useNoteContent.query"
 import logger from "@/lib/logger"
 import auth from "@/lib/auth"
 import { hashNoteContent } from "@filen/shared"
@@ -24,17 +24,9 @@ export async function handleNoteEvent({ event }: { event: NoteSocketEvent }): Pr
 		case NoteEvent_Tags.Archived: {
 			const [inner] = eventInner.inner.inner
 
-			notesQueryUpdate({
-				updater: prev =>
-					prev.map(n =>
-						n.uuid === inner.note
-							? {
-									...n,
-									archive: true
-								}
-							: n
-					)
-			})
+			notesQueryPatch(inner.note, () => ({
+				archive: true
+			}))
 
 			break
 		}
@@ -42,20 +34,10 @@ export async function handleNoteEvent({ event }: { event: NoteSocketEvent }): Pr
 		case NoteEvent_Tags.Deleted: {
 			const [inner] = eventInner.inner.inner
 
-			notesQueryUpdate({
-				updater: prev => prev.filter(n => n.uuid !== inner.note)
-			})
-
-			// Purge the deleted note from selectedNotes so a ghost can't inflate the
-			// selection count, break the select-all toggle, or cause bulk ops to call
-			// the SDK with a non-existent UUID (#42).
-			useNotesStore.getState().setSelectedNotes(prev => prev.filter(n => n.uuid !== inner.note))
-
-			// Same reclaim the local delete/leave paths do: the account no longer has this note, so
-			// holding its decrypted body in memory and in the persisted cache is retention of data
-			// that is gone. Without this only MARKED notes converged (via the sync pass's prune) —
-			// a note merely opened once kept its plaintext body until logout or the cache TTL.
-			removeQueryEverywhere(noteContentQueryKey({ uuid: inner.note }))
+			// Same reclaim the local delete/leave paths do, but immediate: the account no longer has
+			// this note, so holding its decrypted body in memory and in the persisted cache is retention
+			// of data that is gone. Without this only MARKED notes converged (via the sync pass's prune).
+			dropNoteLocally(inner.note, { deferListRemoval: false })
 
 			// The ledger must let go too, or the note stays badged and the pass keeps trying to
 			// refresh a note the account does not have.
@@ -69,18 +51,10 @@ export async function handleNoteEvent({ event }: { event: NoteSocketEvent }): Pr
 		case NoteEvent_Tags.Restored: {
 			const [inner] = eventInner.inner.inner
 
-			notesQueryUpdate({
-				updater: prev =>
-					prev.map(n =>
-						n.uuid === inner.note
-							? {
-									...n,
-									archive: false,
-									trash: false
-								}
-							: n
-					)
-			})
+			notesQueryPatch(inner.note, () => ({
+				archive: false,
+				trash: false
+			}))
 
 			break
 		}
@@ -92,17 +66,9 @@ export async function handleNoteEvent({ event }: { event: NoteSocketEvent }): Pr
 				case MaybeEncryptedUniffi_Tags.Decrypted: {
 					const [newTitle] = inner.newTitle.inner
 
-					notesQueryUpdate({
-						updater: prev =>
-							prev.map(n =>
-								n.uuid === inner.note
-									? {
-											...n,
-											title: newTitle
-										}
-									: n
-							)
-					})
+					notesQueryPatch(inner.note, () => ({
+						title: newTitle
+					}))
 
 					break
 				}
@@ -120,17 +86,9 @@ export async function handleNoteEvent({ event }: { event: NoteSocketEvent }): Pr
 		case NoteEvent_Tags.ParticipantNew: {
 			const [inner] = eventInner.inner.inner
 
-			notesQueryUpdate({
-				updater: prev =>
-					prev.map(n =>
-						n.uuid === inner.note
-							? {
-									...n,
-									participants: [...n.participants.filter(p => p.userId !== inner.participant.userId), inner.participant]
-								}
-							: n
-					)
-			})
+			notesQueryPatch(inner.note, live => ({
+				participants: [...live.participants.filter(p => p.userId !== inner.participant.userId), inner.participant]
+			}))
 
 			break
 		}
@@ -138,17 +96,9 @@ export async function handleNoteEvent({ event }: { event: NoteSocketEvent }): Pr
 		case NoteEvent_Tags.ParticipantRemoved: {
 			const [inner] = eventInner.inner.inner
 
-			notesQueryUpdate({
-				updater: prev =>
-					prev.map(n =>
-						n.uuid === inner.note
-							? {
-									...n,
-									participants: n.participants.filter(p => p.userId !== inner.userId)
-								}
-							: n
-					)
-			})
+			notesQueryPatch(inner.note, live => ({
+				participants: live.participants.filter(p => p.userId !== inner.userId)
+			}))
 
 			break
 		}
@@ -156,24 +106,16 @@ export async function handleNoteEvent({ event }: { event: NoteSocketEvent }): Pr
 		case NoteEvent_Tags.ParticipantPermissions: {
 			const [inner] = eventInner.inner.inner
 
-			notesQueryUpdate({
-				updater: prev =>
-					prev.map(n =>
-						n.uuid === inner.note
-							? {
-									...n,
-									participants: n.participants.map(p =>
-										p.userId === inner.userId
-											? {
-													...p,
-													permissionsWrite: inner.permissionsWrite
-												}
-											: p
-									)
-								}
-							: n
-					)
-			})
+			notesQueryPatch(inner.note, live => ({
+				participants: live.participants.map(p =>
+					p.userId === inner.userId
+						? {
+								...p,
+								permissionsWrite: inner.permissionsWrite
+							}
+						: p
+				)
+			}))
 
 			break
 		}

@@ -7,7 +7,7 @@ import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import alerts from "@/lib/alerts"
 import { type NoteParticipant } from "@/types"
 import { type MenuButton } from "@/components/ui/menu"
-import useNotesQuery from "@/features/notes/queries/useNotesQuery"
+import { useCachedNote } from "@/features/notes/queries/useNotesQuery"
 import notes from "@/features/notes/notes"
 import { selectContacts } from "@/features/contacts/contactsSelect"
 import DismissStack from "@/components/dismissStack"
@@ -34,13 +34,7 @@ const NoteParticipants = () => {
 
 	useClearSelectionOnFocusChange(clearSelectedNoteParticipants)
 
-	const notesQuery = useNotesQuery({
-		enabled: false
-	})
-
-	// A failed refetch keeps the data and only flips `status` (#103) — resolve from the cached
-	// list so an offline note still opens.
-	const note = uuid ? (notesQuery.data?.find(n => n.uuid === uuid) ?? null) : null
+	const note = useCachedNote(uuid)
 
 	const participants = note ? note.participants.filter(p => p.userId !== stringifiedClient?.userId) : []
 	const isOwner = note?.ownerId === stringifiedClient?.userId

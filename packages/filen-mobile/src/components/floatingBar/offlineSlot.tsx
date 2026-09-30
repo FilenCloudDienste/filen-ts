@@ -16,8 +16,8 @@ const BACK_ONLINE_DURATION_MS = 2000
 export type OfflineSlotStatus = "hidden" | "offline" | "back-online"
 
 /**
- * Owns the offline-slot state machine (replacing the old top-of-screen <OfflineBanner />): the
- * during-render connectivity transition + the 2s "back-online" decay, plus the root-overlay gates.
+ * Owns the offline state machine for both surfaces (this slot authed, <OfflineBanner /> unauthed):
+ * the during-render connectivity transition + the 2s "back-online" decay, plus the root-overlay gates.
  * Returns "hidden" when there is nothing to show — online, app backgrounded, or (authed and) the
  * biometric lock hasn't been cleared (so the chip never paints behind the lock overlay). The
  * FloatingBar uses the result both to decide whether to render at all and what the slot shows.
@@ -58,7 +58,7 @@ export function useOfflineSlotStatus(): OfflineSlotStatus {
 	}
 
 	// Gate on the root overlays: never surface behind the biometric lock, and not while the app is
-	// backgrounded (mirrors the old banner + the root-overlay-coordination invariant).
+	// backgrounded (the root-overlay-coordination invariant).
 	if (isAuthed && biometricUnlocked !== true) {
 		return "hidden"
 	}

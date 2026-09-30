@@ -45,8 +45,6 @@ const H = vi.hoisted(() => {
 	return { counters, kvStore }
 })
 
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
-
 vi.mock("react-native", () => ({
 	AppState: {
 		addEventListener: () => ({ remove: () => {} }),

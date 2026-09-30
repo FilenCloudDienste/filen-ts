@@ -9,8 +9,6 @@ const mocks = vi.hoisted(() => ({
 	searchParams: {} as Record<string, string | undefined>
 }))
 
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
-
 vi.mock("expo-router", () => ({
 	useLocalSearchParams: () => mocks.searchParams,
 	router: {

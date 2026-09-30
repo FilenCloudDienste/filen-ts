@@ -21,7 +21,7 @@ vi.mock("@/lib/auth", () => ({ default: {} }))
 
 vi.mock("@/features/chats/chatsWrap", () => ({ wrapChat: (c: unknown) => c }))
 
-import { chatsQueryUpdate } from "@/features/chats/queries/useChats.query"
+import { chatsQueryUpdate, replaceChatInCache } from "@/features/chats/queries/useChats.query"
 
 const makeChat = (uuid: string): Chat => ({ uuid, name: `chat-${uuid}` }) as unknown as Chat
 
@@ -48,5 +48,34 @@ describe("chatsQueryUpdate", () => {
 		chatsQueryUpdate({ updater: prev => [...prev, created] })
 
 		expect(mockQueryUpdaterSet.mock.results[0]?.value).toEqual([created])
+	})
+})
+
+describe("replaceChatInCache", () => {
+	beforeEach(() => {
+		mockQueryUpdaterSet.mockClear()
+	})
+
+	it("replaces only the chat with the same uuid, keeping order", () => {
+		const a = makeChat("a")
+		const b = makeChat("b")
+		const updatedB = { ...b, name: "renamed" } as Chat
+
+		mockQueryUpdaterSet.mockImplementationOnce((_key: unknown, updater: unknown) => (updater as (prev: Chat[]) => Chat[])([a, b]))
+
+		replaceChatInCache(updatedB)
+
+		expect(mockQueryUpdaterSet).toHaveBeenCalledTimes(1)
+		expect(mockQueryUpdaterSet.mock.results[0]?.value).toEqual([a, updatedB])
+	})
+
+	it("leaves the list unchanged when no chat matches", () => {
+		const a = makeChat("a")
+
+		mockQueryUpdaterSet.mockImplementationOnce((_key: unknown, updater: unknown) => (updater as (prev: Chat[]) => Chat[])([a]))
+
+		replaceChatInCache(makeChat("missing"))
+
+		expect(mockQueryUpdaterSet.mock.results[0]?.value).toEqual([a])
 	})
 })

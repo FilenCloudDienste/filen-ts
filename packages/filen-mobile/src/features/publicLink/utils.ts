@@ -1,34 +1,3 @@
-import { type PublicLinkExpiration } from "@filen/sdk-rs"
-
-/**
- * Returns whether an expiration enum value should be shown as checked in the
- * expiration dropdown.
- *
- * When the user has made a local selection (`editedExpiration` is defined) it
- * is the sole source of truth — the server's current value is ignored so that
- * exactly one item is checked while edits are pending.  When no local
- * selection exists, falls back to the server value.
- */
-export function isExpirationChecked({
-	candidate,
-	editedExpiration,
-	serverExpiration
-}: {
-	candidate: PublicLinkExpiration
-	editedExpiration: PublicLinkExpiration | undefined
-	serverExpiration: PublicLinkExpiration | undefined
-}): boolean {
-	if (editedExpiration !== undefined) {
-		return editedExpiration === candidate
-	}
-
-	if (serverExpiration !== undefined) {
-		return serverExpiration === candidate
-	}
-
-	return false
-}
-
 /**
  * Returns whether the public-link screen should show its error state rather
  * than a loading spinner: either query failing is enough, since the screen

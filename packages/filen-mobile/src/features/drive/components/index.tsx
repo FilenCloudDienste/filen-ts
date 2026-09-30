@@ -14,13 +14,13 @@ import Button from "@/components/ui/button"
 import Item from "@/features/drive/components/item"
 import Header from "@/features/drive/components/header"
 import DriveListFooter from "@/features/drive/components/listFooter"
-import { run, cn, isBlocked, filterHiddenItems } from "@filen/shared"
+import { run, cn, filterHiddenItems } from "@filen/shared"
 import alerts from "@/lib/alerts"
 import { Platform, ActivityIndicator } from "react-native"
 import useViewLayout from "@/hooks/useViewLayout"
 import { useDriveViewMode } from "@/features/drive/driveViewModePreference"
 import { gridColumnsForWidth, GRID_EDGE_PADDING } from "@/features/drive/driveGrid"
-import { driveScreenUsesBaseBackground, hiddenFilterAppliesTo } from "@/features/drive/driveSelectors"
+import { isPlainDrivePath, hiddenFilterAppliesTo } from "@/features/drive/driveSelectors"
 import GridItem from "@/features/drive/components/item/gridItem"
 import useClearSelectionOnFocusChange from "@/hooks/useClearSelectionOnFocusChange"
 import useDriveStore, { clearDriveSelection } from "@/features/drive/store/useDrive.store"
@@ -29,7 +29,7 @@ import { isSearchWindowTruncated, shouldRefetchListingAfterSearch } from "@/feat
 import { useDriveDirectorySizes } from "@/features/drive/hooks/useDriveDirectorySizes"
 import { useDriveHighlight } from "@/features/drive/hooks/useDriveHighlight"
 import useBlockedUsers from "@/features/contacts/hooks/useBlockedUsers"
-import { getSharerIdentity } from "@/features/drive/driveSharer"
+import { isSharerBlocked } from "@/features/drive/driveSharer"
 import { getDriveEmptyState, filterDriveItemsBySearchQuery } from "@/features/drive/utils"
 import offlineSync from "@/features/offline/offlineSync"
 import SyncErrorsHeaderRow from "@/features/offline/components/syncErrorsHeaderRow"
@@ -90,7 +90,7 @@ const Drive = () => {
 	// Before the first layout event layout.width is 0, so we fall back to list for that frame.
 	const isGridActive = isGrid && gridItemWidth > 0
 	const { t } = useTranslation()
-	const { searchQuery, setSearchQuery, searchResults, searchResultPaths, status, totalCount } = useDriveSearch({ drivePath })
+	const { searchQuery, setSearchQuery, searchResults, searchResultPaths, status, totalCount, isCacheSearch } = useDriveSearch({ drivePath })
 	const { sort } = useDriveSortPreference(drivePath)
 	const [hideHiddenItems] = useHideHiddenItems()
 	const blocked = useBlockedUsers()
@@ -112,15 +112,7 @@ const Drive = () => {
 		}
 	)
 
-	const isPlainDrive = drivePath.type === "drive" && !drivePath.selectOptions
 	const searchActive = searchQuery.trim().length > 0
-	// The cache-backed search is the SINGLE source for the list ONLY on the plain /drive
-	// browser with an active query — it already matched the whole subtree, so there's no
-	// merge with the directory listing and no local re-filter (that would double-filter an
-	// already-matched set). Every other context (favorites/trash/recents/select/…) keeps
-	// its local listing, locally filtered by the query — and the plain browser with no
-	// query falls through here too (empty query → filter is a no-op).
-	const isCacheSearch = isPlainDrive && searchActive
 
 	// Size sort needs the REAL directory sizes (items carry size: 0n for dirs — #49); the hook
 	// prefetches + reads them from the same query cache the rows display from, and returns
@@ -148,11 +140,7 @@ const Drive = () => {
 	// unopinionated). Only the sharedIn context carries a sharer identity to check.
 	const visibleItems =
 		drivePath.type === "sharedIn"
-			? sortedItems.filter(item => {
-					const sharer = getSharerIdentity(item)
-
-					return !sharer || !isBlocked(sharer, blocked)
-				})
+			? sortedItems.filter(item => !isSharerBlocked(item, blocked))
 			: sortedItems
 
 	// Dot-prefixed items, when the user has opted into hiding them. Applied last and to the single
@@ -267,11 +255,7 @@ const Drive = () => {
 		}
 
 		const selected = useDriveStore.getState().selectedItems
-		const kept = selected.filter(item => {
-			const sharer = getSharerIdentity(item)
-
-			return !sharer || !isBlocked(sharer, blocked)
-		})
+		const kept = selected.filter(item => !isSharerBlocked(item, blocked))
 
 		if (kept.length !== selected.length) {
 			useDriveStore.getState().setSelectedItems(kept)
@@ -291,7 +275,7 @@ const Drive = () => {
 			<SafeAreaView
 				className={cn(
 					"flex-1",
-					drivePath.type === "drive" && !drivePath.selectOptions ? "bg-background" : "bg-background-secondary"
+					isPlainDrivePath(drivePath) ? "bg-background" : "bg-background-secondary"
 				)}
 				edges={["left", "right"]}
 			>
@@ -309,7 +293,7 @@ const Drive = () => {
 						<VirtualList
 							ref={listRef}
 							key={isGridActive ? `grid-${columns}` : "list"}
-							className={cn("flex-1", driveScreenUsesBaseBackground(drivePath) ? "bg-background" : "bg-background-secondary")}
+							className={cn("flex-1", isPlainDrivePath(drivePath) ? "bg-background" : "bg-background-secondary")}
 							contentContainerClassName={cn("pb-80", Platform.OS === "android" && "pb-96", isGridActive && "px-2")}
 							keyExtractor={(item: DriveItem) => {
 								return item.data.uuid

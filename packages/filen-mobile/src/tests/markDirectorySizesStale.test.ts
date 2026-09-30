@@ -7,8 +7,6 @@ import { QueryClient } from "@tanstack/react-query"
 
 const holder = vi.hoisted(() => ({ client: null as unknown as import("@tanstack/react-query").QueryClient }))
 
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
-vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
 vi.mock("@filen/shared", async () => ({
 	...(await import("@/tests/mocks/filenShared")),
 	sortParams: (await import("@filen/shared")).sortParams

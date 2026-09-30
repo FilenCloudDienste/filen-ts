@@ -3,6 +3,7 @@ import { createFixedKeyQuery } from "@/queries/createFixedKeyQuery"
 import auth from "@/lib/auth"
 import { NOTES_REUSE_WINDOW_MS } from "@/features/notes/queries/useNotesQuery"
 import { toSignalOpts } from "@/lib/signals"
+import { wrapSdkNoteTag } from "@/features/notes/utils"
 
 export const BASE_QUERY_KEY = "useNotesTagsQuery"
 
@@ -22,10 +23,7 @@ export async function fetchData(params?: { signal?: AbortSignal }) {
 
 	lastServerReadAt = Date.now()
 
-	return tags.map(tag => ({
-		...tag,
-		undecryptable: tag.name === undefined
-	}))
+	return tags.map(wrapSdkNoteTag)
 }
 
 const notesTagsQuery = createFixedKeyQuery({

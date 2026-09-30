@@ -79,11 +79,16 @@ vi.mock("@/features/notes/checklistView", () => ({ useChecklistHideCompleted: ()
 // M3: flushToDisk is the controllable seam — the live flushInflightContentWithAlert helper
 // (exported from the component module) is exercised against it.
 vi.mock("@/features/notes/components/sync", () => ({
-	sync: { flushToDisk: mockFlushToDisk, clearRejections: vi.fn() }
+	sync: { flushToDisk: mockFlushToDisk, discardInflight: vi.fn() }
 }))
 vi.mock("@/lib/auth", () => ({ useStringifiedClient: () => null }))
 vi.mock("@/features/notes/queries/useNotesQuery", () => ({ notesQueryGet: () => [] }))
-vi.mock("@/features/notes/store/useNotesInflight.store", () => ({ default: { getState: () => ({ inflightContent: {} }) } }))
+vi.mock("@/features/notes/store/useNotesInflight.store", async () => ({
+	newestInflightEntry: (
+		await vi.importActual<typeof import("@/features/notes/store/useNotesInflight.store")>("@/features/notes/store/useNotesInflight.store")
+	).newestInflightEntry,
+	default: { getState: () => ({ inflightContent: {} }) }
+}))
 vi.mock("@/stores/useTextEditor.store", () => ({ default: () => false }))
 vi.mock("@/lib/events", () => ({ default: { subscribe: () => ({ remove: () => {} }) } }))
 vi.mock("@/lib/alerts", async () => await import("@/tests/mocks/alerts"))

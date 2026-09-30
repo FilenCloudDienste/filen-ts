@@ -4,7 +4,6 @@ vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 // Stub all native/expo modules pulled in transitively by biometric.tsx.
 // Only remainingMs (a pure function) is under test — none of these impls matter.
 
-vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
 vi.mock("expo-secure-store", async () => await import("@/tests/mocks/expoSecureStore"))
 vi.mock("expo-local-authentication", () => ({
 	authenticateAsync: vi.fn()

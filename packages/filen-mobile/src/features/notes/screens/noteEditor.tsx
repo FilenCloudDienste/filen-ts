@@ -3,15 +3,14 @@ import SafeAreaView from "@/components/ui/safeAreaView"
 import StackHeader from "@/components/ui/header"
 import { useLocalSearchParams } from "expo-router"
 import useDismissStack from "@/hooks/useDismissStack"
-import useNotesQuery from "@/features/notes/queries/useNotesQuery"
+import { useCachedNote } from "@/features/notes/queries/useNotesQuery"
 import { type Note as TNote, type NoteHistory } from "@/types"
 import { noteDisplayTitle } from "@/lib/decryption"
 import CannotDecryptScreen from "@/components/cannotDecryptScreen"
 import Content from "@/features/notes/components/content"
 import { Platform } from "react-native"
-import useNotesInflightStore from "@/features/notes/store/useNotesInflight.store"
+import { useNoteHasInflight } from "@/features/notes/store/useNotesInflight.store"
 import useNotesOfflineStore from "@/features/notes/store/useNotesOffline.store"
-import { useShallow } from "zustand/shallow"
 import { simpleDate } from "@/lib/time"
 import { useResolveClassNames } from "uniwind"
 import { confirmedAction } from "@/lib/confirmedAction"
@@ -61,7 +60,7 @@ const ReadOnlyTitle = ({ title }: { title: string }) => {
 
 const Header = ({ note, history }: { note: TNote; history?: NoteHistory | null }) => {
 	const { t } = useTranslation()
-	const isInflight = useNotesInflightStore(useShallow(state => (state.inflightContent[note.uuid] ?? []).length > 0))
+	const isInflight = useNoteHasInflight(note.uuid)
 	const isAvailableOffline = useNotesOfflineStore(state => state.marked[note.uuid] === true)
 	const textForeground = useResolveClassNames("text-foreground")
 	const stringifiedClient = useStringifiedClient()
@@ -184,13 +183,7 @@ const Note = () => {
 		history?: string
 	}>()
 
-	const notesQuery = useNotesQuery({
-		enabled: false
-	})
-
-	// A failed refetch keeps the data and only flips `status` (#103) — resolve from the cached
-	// list so an offline note still opens.
-	const note = notesQuery.data?.find(n => n.uuid === uuid) ?? null
+	const note = useCachedNote(uuid)
 
 	const history = deserializeRouteParam<NoteHistory>(historySerialized)
 

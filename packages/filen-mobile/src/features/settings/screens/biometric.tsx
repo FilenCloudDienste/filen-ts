@@ -12,27 +12,17 @@ import { LoadingView } from "@/components/ui/loadingView"
 import { SettingsScrollView } from "@/components/ui/settingsScrollView"
 import { enableBiometric } from "@/features/settings/biometricButtons"
 import { type Biometric, useBiometric } from "@/features/settings/biometric"
-import { type TFunction } from "i18next"
 import ListEmpty from "@/components/ui/listEmpty"
+import { type en } from "@/locales/en"
 
-function getLockAfterLabel(lockAfter: number, t: TFunction): string {
-	switch (lockAfter) {
-		case 0:
-			return t("immediately")
-		case 60:
-			return t("one_minute")
-		case 60 * 5:
-			return t("five_minutes")
-		case 60 * 15:
-			return t("fifteen_minutes")
-		case 60 * 30:
-			return t("thirty_minutes")
-		case 60 * 60:
-			return t("one_hour")
-		default:
-			return t("lock_app_after_description")
-	}
-}
+const LOCK_AFTER_OPTIONS = [
+	{ seconds: 0, labelKey: "immediately" },
+	{ seconds: 60, labelKey: "one_minute" },
+	{ seconds: 60 * 5, labelKey: "five_minutes" },
+	{ seconds: 60 * 15, labelKey: "fifteen_minutes" },
+	{ seconds: 60 * 30, labelKey: "thirty_minutes" },
+	{ seconds: 60 * 60, labelKey: "one_hour" }
+] as const satisfies readonly { seconds: number; labelKey: keyof typeof en }[]
 
 function BiometricComponent() {
 	const { t } = useTranslation()
@@ -52,7 +42,6 @@ function BiometricComponent() {
 					localAuthenticationQuery.data.hasHardware && localAuthenticationQuery.data.isEnrolled ? (
 						<SettingsScrollView>
 							<Group
-								className="bg-background-tertiary"
 								buttons={[
 									{
 										icon: "finger-print-outline",
@@ -81,7 +70,6 @@ function BiometricComponent() {
 							/>
 							{biometric.enabled && (
 								<Group
-									className="bg-background-tertiary"
 									buttons={[
 										{
 											icon: "keypad-outline",
@@ -107,36 +95,14 @@ function BiometricComponent() {
 										{
 											icon: "time-outline",
 											title: t("lock_app_after"),
-											subTitle: getLockAfterLabel(biometric.lockAfter, t),
+											subTitle: t(
+												LOCK_AFTER_OPTIONS.find(option => option.seconds === biometric.lockAfter)?.labelKey ??
+													"lock_app_after_description"
+											),
 											onPress: () => {
 												actionSheet.show({
-													buttons: [
-														{
-															title: t("immediately"),
-															seconds: 0
-														},
-														{
-															title: t("one_minute"),
-															seconds: 60
-														},
-														{
-															title: t("five_minutes"),
-															seconds: 60 * 5
-														},
-														{
-															title: t("fifteen_minutes"),
-															seconds: 60 * 15
-														},
-														{
-															title: t("thirty_minutes"),
-															seconds: 60 * 30
-														},
-														{
-															title: t("one_hour"),
-															seconds: 60 * 60
-														}
-													].map(option => ({
-														title: option.title,
+													buttons: LOCK_AFTER_OPTIONS.map(option => ({
+														title: t(option.labelKey),
 														onPress: () => {
 															setBiometric(prev => {
 																if (!prev.enabled) {

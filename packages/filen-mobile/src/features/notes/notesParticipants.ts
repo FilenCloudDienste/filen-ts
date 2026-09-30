@@ -2,10 +2,8 @@ import auth from "@/lib/auth"
 import { type Contact } from "@filen/sdk-rs"
 import { type Note, type NoteParticipant } from "@/types"
 import { wrapSdkNote } from "@/features/notes/utils"
-import { noteContentQueryKey } from "@/features/notes/queries/useNoteContent.query"
-import { removeQueryEverywhere } from "@/queries/client"
-import { notesQueryUpdate } from "@/features/notes/queries/useNotesQuery"
-import useNotesStore from "@/features/notes/store/useNotes.store"
+import { notesQueryReplace, notesQueryPatch } from "@/features/notes/queries/useNotesQuery"
+import { dropNoteLocally } from "@/features/notes/notesRemoval"
 import { toSignalOpts } from "@/lib/signals"
 
 export async function leave({ note, signal }: { note: Note; signal?: AbortSignal }) {
@@ -19,24 +17,7 @@ export async function leave({ note, signal }: { note: Note; signal?: AbortSignal
 		)
 	)
 
-	// Drop the note from the selection immediately so the list header's
-	// selectedNotes.length count stays correct and bulk ops can't target a note
-	// that no longer exists. The query cache update below runs inside a 3s
-	// timeout, so we must NOT wait for it to clear the selection.
-	useNotesStore.getState().setSelectedNotes(prev => prev.filter(n => n.uuid !== note.uuid))
-
-	// We have to set a timeout here, otherwise the main chat _layout redirect kicks in too early and which feels janky and messes with the navigation stack
-	setTimeout(() => {
-		notesQueryUpdate({
-			updater: prev => prev.filter(n => n.uuid !== note.uuid)
-		})
-
-		// removeQueryEverywhere, not `updater: () => undefined`: query-core's setQueryData bails out
-		// when the updater yields undefined (`if (data === void 0) return`), so the old form was a
-		// silent no-op and this note's decrypted body survived in memory and on disk. This also drops
-		// the persisted row, which removeQueries alone would leave behind.
-		removeQueryEverywhere(noteContentQueryKey({ uuid: note.uuid }))
-	}, 3000)
+	dropNoteLocally(note.uuid, { deferListRemoval: true })
 
 	return note
 }
@@ -64,22 +45,11 @@ export async function removeParticipant({
 		)
 	)
 
-	notesQueryUpdate({
-		updater: prev =>
-			prev.map(n =>
-				n.uuid === note.uuid
-					? {
-							// Patch onto the LIVE cache entry `n`, not the SDK-returned copy built from
-							// the closure-captured base note: under bulk concurrency (Promise.all) every
-							// call's returned note is "base minus its own participant", so a whole-note
-							// replace made the last write revert all the other removals until the next
-							// refetch. Mirrors setParticipantPermission.
-							...n,
-							participants: n.participants.filter(p => p.userId !== participantUserId)
-						}
-					: n
-			)
-	})
+	// Patched, not replaced with the SDK-returned note: under bulk concurrency each returned note is
+	// "base minus its own participant", so a whole-note replace would revert the other removals.
+	notesQueryPatch(note.uuid, live => ({
+		participants: live.participants.filter(p => p.userId !== participantUserId)
+	}))
 
 	return note
 }
@@ -120,9 +90,7 @@ export async function addParticipants({
 		)
 	}
 
-	notesQueryUpdate({
-		updater: prev => prev.map(n => (n.uuid === note.uuid ? updated : n))
-	})
+	notesQueryReplace(updated)
 
 	return updated
 }
@@ -175,21 +143,9 @@ export async function setParticipantPermission({
 		participants: note.participants.map(p => (p.userId === participant.userId ? participant : p))
 	}
 
-	notesQueryUpdate({
-		updater: prev =>
-			prev.map(n =>
-				n.uuid === note.uuid
-					? {
-							// Patch onto the LIVE cache entry `n`, not the closure-captured render-time
-							// `note`: under bulk concurrency (Promise.all) every call would otherwise
-							// rebuild participants from the same stale base array and the last write
-							// would revert all the others until the next refetch.
-							...n,
-							participants: n.participants.map(p => (p.userId === participant.userId ? participant : p))
-						}
-					: n
-			)
-	})
+	notesQueryPatch(note.uuid, live => ({
+		participants: live.participants.map(p => (p.userId === participant.userId ? participant : p))
+	}))
 
 	return updatedNote
 }

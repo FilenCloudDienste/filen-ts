@@ -122,16 +122,18 @@ const notes = {
 		title,
 		type,
 		tag,
-		signal
+		signal,
+		content
 	}: {
 		title: string
 		type: NoteType
 		tag?: NoteTag
 		signal?: AbortSignal
+		content?: string
 	}): Promise<Note> {
 		const note = await this.create({
 			title,
-			content: "",
+			content: content ?? "",
 			type,
 			signal
 		})
@@ -157,8 +159,8 @@ const notes = {
 		uri: string
 		title: string
 		type: NoteType
-		// Importing from a tag-filtered screen attaches that screen's tag — same semantics as
-		// createWithOptionalTag, so the imported note lands in the list being viewed.
+		// Importing from a tag-filtered screen attaches that screen's tag, so the imported note lands
+		// in the list being viewed.
 		tag?: NoteTag
 		signal?: AbortSignal
 	}): Promise<Note> {
@@ -168,24 +170,13 @@ const notes = {
 			throw new Error("Import file not found or empty")
 		}
 
-		const content = await file.text()
-
-		const note = await this.create({
+		return await this.createWithOptionalTag({
 			title,
-			content,
 			type,
-			signal
+			tag,
+			signal,
+			content: await file.text()
 		})
-
-		if (tag) {
-			return await this.addTag({
-				note,
-				tag,
-				signal
-			})
-		}
-
-		return note
 	},
 
 	async create({ title, content, type, signal }: { title: string; content: string; type: NoteType; signal?: AbortSignal }) {

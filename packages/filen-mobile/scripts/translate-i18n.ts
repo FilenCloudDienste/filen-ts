@@ -174,16 +174,15 @@ type Delta = {
 	removed: readonly string[]
 }
 
-// Read the English snapshot (the DELTA baseline) — the catalog as of the last translation. Returns
-// null when absent (first run / not yet seeded) so the caller re-baselines instead of retranslating
-// everything; throws on a malformed file so a corrupt baseline fails loudly rather than silently
+// Read a flat string-record JSON file (the English snapshot or a target catalog). Returns null when
+// absent or empty; throws on a non-object so a corrupt file fails loudly rather than silently
 // re-translating the whole catalog.
-function readSnapshot(): Record<string, string> | null {
-	if (!existsSync(EN_SNAPSHOT_PATH)) {
+function readStringRecord(path: string, label: string): Record<string, string> | null {
+	if (!existsSync(path)) {
 		return null
 	}
 
-	const raw = readFileSync(EN_SNAPSHOT_PATH, "utf8").trim()
+	const raw = readFileSync(path, "utf8").trim()
 
 	if (raw.length === 0) {
 		return null
@@ -192,7 +191,7 @@ function readSnapshot(): Record<string, string> | null {
 	const parsed: unknown = JSON.parse(raw)
 
 	if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-		throw new Error(".en-snapshot.json is not a JSON object")
+		throw new Error(`${label} is not a JSON object`)
 	}
 
 	return parsed as Record<string, string>
@@ -204,7 +203,7 @@ function readSnapshot(): Record<string, string> | null {
 // landed in. With no snapshot yet, assume the catalogs are in sync (empty delta); the per-language
 // missing-key fallback in keysToTranslate still fills any genuinely-absent key.
 function computeDelta(): Delta {
-	const snapshot = readSnapshot()
+	const snapshot = readStringRecord(EN_SNAPSHOT_PATH, ".en-snapshot.json")
 	const upsert: Record<string, string> = {}
 	const removed: string[] = []
 
@@ -236,28 +235,6 @@ function computeDelta(): Delta {
 // ---------------------------------------------------------------------------
 // Per-language merge planning
 // ---------------------------------------------------------------------------
-
-function readTargetCatalog(lang: TargetLanguage): Record<string, string> {
-	const path = join(LOCALES_DIR, `${lang}.json`)
-
-	if (!existsSync(path)) {
-		return {}
-	}
-
-	const raw = readFileSync(path, "utf8").trim()
-
-	if (raw.length === 0) {
-		return {}
-	}
-
-	const parsed: unknown = JSON.parse(raw)
-
-	if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-		throw new Error(`Catalog ${lang}.json is not a JSON object`)
-	}
-
-	return parsed as Record<string, string>
-}
 
 // --- CLDR plural expansion -------------------------------------------------
 //
@@ -707,17 +684,6 @@ function writeSortedJson(path: string, record: Record<string, string>): void {
 	writeFileSync(path, `${JSON.stringify(sorted, null, "\t")}\n`, "utf8")
 }
 
-function writeCatalog(lang: TargetLanguage, catalog: Record<string, string>): void {
-	writeSortedJson(join(LOCALES_DIR, `${lang}.json`), catalog)
-}
-
-// Rewrite the snapshot to the current English catalog (sorted + trailing newline, like the catalogs)
-// so the next DELTA diffs against this state. Written into the same PR as the translations, so the
-// baseline only advances once that PR is merged — an unmerged run keeps re-detecting the same delta.
-function writeSnapshot(): void {
-	writeSortedJson(EN_SNAPSHOT_PATH, EN_CATALOG)
-}
-
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
@@ -753,7 +719,8 @@ async function main(): Promise<void> {
 	}
 
 	for (const lang of args.languages) {
-		const existing = readTargetCatalog(lang)
+		const catalogPath = join(LOCALES_DIR, `${lang}.json`)
+		const existing = readStringRecord(catalogPath, `Catalog ${lang}.json`) ?? {}
 		const subset = keysToTranslate(args, delta, existing, lang)
 		const merged: Record<string, string> = {
 			...existing
@@ -793,14 +760,15 @@ async function main(): Promise<void> {
 			console.log(`[translate-i18n] ${lang}: nothing to translate`)
 		}
 
-		writeCatalog(lang, merged)
+		writeSortedJson(catalogPath, merged)
 
 		console.log(`[translate-i18n] ${lang}: wrote ${Object.keys(merged).length} keys`)
 	}
 
 	// Advance the baseline only after every language succeeded — a mid-run throw leaves the old
-	// snapshot in place, so a re-run re-detects the same delta and retries.
-	writeSnapshot()
+	// snapshot in place, so a re-run re-detects the same delta and retries. Written into the same PR
+	// as the translations, so the baseline only advances once that PR is merged.
+	writeSortedJson(EN_SNAPSHOT_PATH, EN_CATALOG)
 
 	console.log("[translate-i18n] done")
 }

@@ -10,7 +10,6 @@ const sdk = vi.hoisted(() => ({
 }))
 
 vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 vi.mock("@filen/sdk-rs", () => ({ AnyNormalDir: {}, AnySharedDir: {}, AnySharedDirWithContext: {}, AnyLinkedDir: {} }))
 vi.mock("@/lib/auth", () => ({ default: { getSdkClients: async () => ({ authedSdkClient: sdk }) } }))
 
