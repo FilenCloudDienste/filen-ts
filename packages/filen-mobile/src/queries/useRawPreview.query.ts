@@ -1,5 +1,4 @@
 import { useQuery, onlineManager, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
-import { DEFAULT_QUERY_OPTIONS } from "@/queries/client"
 import { sortParams } from "@filen/shared"
 import cache from "@/lib/cache"
 import rawPreviewCache, { type RawPreviewResult } from "@/lib/rawPreviewCache"
@@ -51,7 +50,6 @@ export function useRawPreviewQuery(
 	options?: Omit<UseQueryOptions, "queryKey" | "queryFn">
 ): UseQueryResult<RawPreviewQueryResult, Error> {
 	const query = useQuery({
-		...DEFAULT_QUERY_OPTIONS,
 		// Session-scoped like useFileUrlQuery: the cache may evict the JPEG on its own, so re-resolve on the next mount.
 		gcTime: 0,
 		staleTime: 0,

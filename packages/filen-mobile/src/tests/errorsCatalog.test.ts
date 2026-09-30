@@ -61,8 +61,6 @@ vi.mock("@filen/sdk-rs", () => {
 vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
 
-vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
-
 vi.mock("@/lib/cache", () => ({ default: { rootUuid: null } }))
 
 import { common } from "@/locales/en/common"

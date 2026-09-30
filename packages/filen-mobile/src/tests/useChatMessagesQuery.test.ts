@@ -46,7 +46,6 @@ vi.mock("@/features/chats/chatsWrap", () => ({
 }))
 
 vi.mock("@/queries/client", () => ({
-	DEFAULT_QUERY_OPTIONS: {},
 	queryUpdater: {
 		get: mockQueryUpdaterGet,
 		set: vi.fn()

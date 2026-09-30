@@ -1,4 +1,4 @@
-import { ExpoImage } from "@/components/ui/image"
+import Image from "@/components/ui/image"
 import { isValidHexColor, cn, fileIconKey, type FileIconKey } from "@filen/shared"
 import { memoize } from "es-toolkit/function"
 import { type DirColor, DirColor_Tags } from "@filen/sdk-rs"
@@ -56,7 +56,7 @@ export function resolveFileIconKey(name: string): FileIconKey {
 
 export const FileIcon = ({ name, width, height, className }: { name: string; width?: number; height?: number; className?: string }) => {
 	return (
-		<ExpoImage
+		<Image
 			className={cn("shrink-0 bg-transparent", className, "rounded-none")}
 			source={FILE_ICONS[resolveFileIconKey(name)]}
 			style={{
@@ -219,7 +219,7 @@ export const DirectoryIcon = ({
 	className?: string
 }) => {
 	return (
-		<ExpoImage
+		<Image
 			className={cn("shrink-0 bg-transparent", className, "rounded-none")}
 			source={{
 				uri: directorySvg({
@@ -234,6 +234,22 @@ export const DirectoryIcon = ({
 			}}
 			contentFit="contain"
 			cachePolicy="disk"
+		/>
+	)
+}
+
+// A 32pt default-color directory or file glyph for rows that show no thumbnail.
+export const ItemGlyph = ({ isDirectory, name }: { isDirectory: boolean; name: string }) => {
+	return isDirectory ? (
+		<DirectoryIcon
+			width={32}
+			height={32}
+		/>
+	) : (
+		<FileIcon
+			name={name}
+			width={32}
+			height={32}
 		/>
 	)
 }

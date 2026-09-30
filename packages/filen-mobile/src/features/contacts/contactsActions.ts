@@ -29,7 +29,7 @@ export async function addContactFlow({ t }: { t: TFunction }): Promise<void> {
 		return
 	}
 
-	if (promptResult.data.cancelled || promptResult.data.type !== "string") {
+	if (promptResult.data.cancelled) {
 		return
 	}
 

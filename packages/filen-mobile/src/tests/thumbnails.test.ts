@@ -95,8 +95,6 @@ const {
 
 vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 
-vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
-
 vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
 
 vi.mock("expo-image-manipulator", () => ({

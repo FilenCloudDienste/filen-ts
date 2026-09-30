@@ -3,8 +3,6 @@ import { vi, describe, it, expect, beforeEach } from "vitest"
 // @ts-expect-error __DEV__ is a React Native global
 globalThis.__DEV__ = true
 
-vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
-
 vi.mock("expo-image-manipulator", () => ({
 	ImageManipulator: {
 		manipulate: vi.fn()

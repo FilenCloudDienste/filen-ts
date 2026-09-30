@@ -1,5 +1,5 @@
 import { useQuery, type QueryCache, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
-import { DEFAULT_QUERY_OPTIONS, queryClient } from "@/queries/client"
+import { queryClient } from "@/queries/client"
 import { queryReadInCurrentSocketSession } from "@/queries/socketSession"
 import { markAccountStale } from "@/queries/useAccount.query"
 import { noteDriveContentChanged } from "@/lib/driveChanges"
@@ -272,7 +272,6 @@ export function useDirectorySizeQuery(
 	options?: Omit<UseQueryOptions, "queryKey" | "queryFn">
 ): UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error> {
 	const query = useQuery({
-		...DEFAULT_QUERY_OPTIONS,
 		...options,
 		...directorySizeQueryOptions(params),
 		// Let the staleTime decide only for a value read in the current socket session: before that (a

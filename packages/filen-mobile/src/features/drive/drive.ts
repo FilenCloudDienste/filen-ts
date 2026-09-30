@@ -19,10 +19,10 @@ import { router } from "@/lib/router"
 import { serialize } from "@/lib/serializer"
 import type { Linked } from "@/hooks/useDrivePath"
 import i18n from "@/lib/i18n"
-import { enablePublicLink, disablePublicLink, updatePublicLink, removeDirLink, removeFileLink } from "@/features/drive/drivePublicLink"
+import { enablePublicLink, disablePublicLink, updatePublicLink } from "@/features/drive/drivePublicLink"
 import { deletePermanently, trash, restore, emptyTrash, restoreFileVersion, deleteVersion } from "@/features/drive/driveTrash"
 import { createDirectory, move } from "@/features/drive/driveDirectory"
-import { favorite, rename, setDirColor, updateTimestamps } from "@/features/drive/driveMetadata"
+import { favorite, rename, setDirColor } from "@/features/drive/driveMetadata"
 import { shareWithFilenUser, removeShare } from "@/features/drive/driveShare"
 import { driveItemsQueryRefetchFailedLinkedListing } from "@/features/drive/queries/useDriveItems.query"
 import logger from "@/lib/logger"
@@ -40,11 +40,8 @@ const drive = {
 	deleteVersion,
 	restore,
 	removeShare,
-	removeDirLink,
-	removeFileLink,
 	createDirectory,
 	move,
-	updateTimestamps,
 	enablePublicLink,
 	disablePublicLink,
 	updatePublicLink,
@@ -53,38 +50,19 @@ const drive = {
 		linkUuid,
 		linkKey,
 		root,
-		password,
-		signal
+		password
 	}: {
 		linkUuid: string
 		linkKey: string
 		root: LinkedRootDir
 		password?: string
-		signal?: AbortSignal
 	}) {
 		const { authedSdkClient } = await auth.getSdkClients()
 
 		const result = await runWithLoading(async () => {
-			const info = await authedSdkClient.getDirPublicLinkInfo(
-				linkUuid,
-				linkKey,
-				signal
-					? {
-							signal
-						}
-					: undefined
-			)
+			const info = await authedSdkClient.getDirPublicLinkInfo(linkUuid, linkKey)
 			const linkedRoot = linkedRootOf(info, password)
-			const { dirs } = await authedSdkClient.listLinkedDir(
-				linkedRoot.dir,
-				linkedRoot.meta,
-				undefined,
-				signal
-					? {
-							signal
-						}
-					: undefined
-			)
+			const { dirs } = await authedSdkClient.listLinkedDir(linkedRoot.dir, linkedRoot.meta, undefined)
 
 			return {
 				linkedRoot,
@@ -114,7 +92,7 @@ const drive = {
 						return
 					}
 
-					if (promptResult.data.cancelled || promptResult.data.type !== "string") {
+					if (promptResult.data.cancelled) {
 						return
 					}
 
@@ -124,8 +102,7 @@ const drive = {
 						linkUuid,
 						linkKey,
 						root,
-						password,
-						signal
+						password
 					})
 
 					return
@@ -168,30 +145,11 @@ const drive = {
 		})
 	},
 
-	async openLinkedFile({
-		linkUuid,
-		fileKey,
-		password,
-		signal
-	}: {
-		linkUuid: string
-		fileKey: string
-		password?: string
-		signal?: AbortSignal
-	}) {
+	async openLinkedFile({ linkUuid, fileKey, password }: { linkUuid: string; fileKey: string; password?: string }) {
 		const { authedSdkClient } = await auth.getSdkClients()
 
 		const result = await runWithLoading(async () => {
-			return authedSdkClient.getLinkedFile(
-				linkUuid,
-				fileKey,
-				password,
-				signal
-					? {
-							signal
-						}
-					: undefined
-			)
+			return authedSdkClient.getLinkedFile(linkUuid, fileKey, password)
 		})
 
 		if (!result.success) {
@@ -216,7 +174,7 @@ const drive = {
 						return
 					}
 
-					if (promptResult.data.cancelled || promptResult.data.type !== "string") {
+					if (promptResult.data.cancelled) {
 						return
 					}
 
@@ -225,8 +183,7 @@ const drive = {
 					await this.openLinkedFile({
 						linkUuid,
 						fileKey,
-						password,
-						signal
+						password
 					})
 
 					return

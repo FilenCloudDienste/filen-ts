@@ -81,7 +81,7 @@ function Security() {
 											return
 										}
 
-										if (newPasswordPromptResult.data.cancelled || newPasswordPromptResult.data.type !== "string") {
+										if (newPasswordPromptResult.data.cancelled) {
 											return
 										}
 
@@ -108,10 +108,7 @@ function Security() {
 											return
 										}
 
-										if (
-											confirmNewPasswordPromptResult.data.cancelled ||
-											confirmNewPasswordPromptResult.data.type !== "string"
-										) {
+										if (confirmNewPasswordPromptResult.data.cancelled) {
 											return
 										}
 
@@ -144,10 +141,7 @@ function Security() {
 											return
 										}
 
-										if (
-											currentPasswordPromptResult.data.cancelled ||
-											currentPasswordPromptResult.data.type !== "string"
-										) {
+										if (currentPasswordPromptResult.data.cancelled) {
 											return
 										}
 

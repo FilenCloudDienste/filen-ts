@@ -72,10 +72,6 @@ describe("parsePdfViewerEvent", () => {
 			event: "unsupported",
 			reason: "structuredClone"
 		})
-		expect(parsePdfViewerEvent(eventEnvelope({ event: "documentOpened", pageCount: 12 }))).toStrictEqual({
-			event: "documentOpened",
-			pageCount: 12
-		})
 		expect(parsePdfViewerEvent(eventEnvelope({ event: "passwordRequired", requestId: "r1", reason: "incorrect" }))).toStrictEqual({
 			event: "passwordRequired",
 			requestId: "r1",
@@ -124,9 +120,6 @@ describe("parsePdfViewerEvent", () => {
 	})
 
 	test("rejects malformed payloads", () => {
-		expect(parsePdfViewerEvent(eventEnvelope({ event: "documentOpened", pageCount: 0 }))).toBeNull()
-		expect(parsePdfViewerEvent(eventEnvelope({ event: "documentOpened", pageCount: 1.5 }))).toBeNull()
-		expect(parsePdfViewerEvent(eventEnvelope({ event: "documentOpened", pageCount: "12" }))).toBeNull()
 		expect(parsePdfViewerEvent(eventEnvelope({ event: "passwordRequired", requestId: "", reason: "required" }))).toBeNull()
 		expect(parsePdfViewerEvent(eventEnvelope({ event: "passwordRequired", requestId: "x".repeat(65), reason: "required" }))).toBeNull()
 		expect(parsePdfViewerEvent(null)).toBeNull()

@@ -37,7 +37,7 @@ Native: Three git submodules at packages/filen-mobile/, integrated via custom Ex
 | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `drive`         | File/dir browser, ops (favorite, rename, move, delete, trash, restore, share, search, setDirColor, createDirectory, updateTimestamps), context variants (favorites/recents/trash/links/sharedIn/sharedOut/offline), select/move/copy, item info, versions, color picker, linked file. Lib: `drive.ts`, `driveDownload.ts`; also `driveSortPreference.ts`, `driveSelectors.ts`. Socket: `handleDriveEvent`. |
 | `photos`        | Photo grid timeline (5 per row, creationDesc sort), photo bulk actions.                                                                                                                                                                                                                                                                                                                                    |
-| `notes`         | CRUD, content editing, tags, participants, history, export (single .txt / bulk .zip via JSZip), in-flight content sync. Lib: `notes.ts`, `notesSelectors.ts`. Socket: `handleNoteEvent`.                                                                                                                                                                                                                   |
+| `notes`         | CRUD, content editing, tags, participants, history, export (single .txt / bulk .zip via JSZip), in-flight content sync. Lib: `notes.ts`. Socket: `handleNoteEvent`.                                                                                                                                                                                                                   |
 | `chats`         | Send/edit/delete messages, typing indicators, mark read, create/leave/delete chats, in-flight message sync, unread counts. Lib: `chats.ts` (Semaphore-protected refetch). Socket: `handleChatEvent`.                                                                                                                                                                                                       |
 | `contacts`      | Requests (accept/deny/cancel/send), block/unblock, delete; programmatic contact selection. Lib: `contacts.ts`, `contactsSelect.ts`.                                                                                                                                                                                                                                                                        |
 | `audio`         | Audio playback / playlist queue management with loop modes (track/list/off); metadata + cover art cache; playlists screens. Lib: `audio.ts` (singleton).                                                                                                                                                                                                                                                   |
@@ -231,7 +231,7 @@ moved into their features. Shared ones:
 | `useDrivePath`         | `() => DrivePath`                          | Parses route + URL params → {type, uuid, selectOptions}                                                            |
 | `useIsOnline`          | `() => boolean`                            | Reactive sync with TanStack `onlineManager` — single source of truth for online state                              |
 | `useIsAppActive`       | `() => boolean`                            | AppState listener (active/background/inactive)                                                                     |
-| `useViewLayout`        | `(ref) => {layout, onLayout}`              | Tracks View dimensions via onLayout/measureInWindow                                                                |
+| `useViewLayout`        | `() => {layout, onLayout}`                 | Tracks View width/height via onLayout                                                                              |
 | `useFloatingBarOffset` | `() => number`                             | Floating-bar offset above tabs (iOS 49pt + safe area, Android 80dp)                                                |
 | `useDeviceDiskSpace`   | `() => …`                                  | Device free/total disk space                                                                                       |
 | `useMediaPermissions`  | `({shouldRequest?}) => {loading, granted}` | Media library + image picker permissions w/ AppState refresh. Module also exports `hasAllNeededMediaPermissions()` |
@@ -255,8 +255,6 @@ Feature stores moved into `src/features/<feature>/store/`. What remains is share
 
 (`useFileVersions` → `features/drive/store/`, `useChecklist` → `features/notes/store/` — relocated to their owning feature.)
 
-`createSelectionSlice` — shared Zustand slice factory for `selectedItems` (composed by per-feature selection stores).
-
 ## Queries (src/queries/) — shared/infra only
 
 Feature queries (drive items, chats, notes, contacts, events, audio metadata, …) moved into
@@ -271,7 +269,6 @@ Eternal variant: staleTime/gcTime: Infinity, no refetch (for unchanging data).
 | `useFileUrlQuery`             | {item}             | HTTP URL via Http provider (use this for serving file bytes to webview/players)                                                                                                                                                                                                                                                                                                       |
 | `useFileUriQuery`             | {item}             | Local file URI (cached or freshly downloaded)                                                                                                                                                                                                                                                                                                                                         |
 | `useFileTextQuery`            | {item}             | UTF-8 text body                                                                                                                                                                                                                                                                                                                                                                       |
-| `useFileBase64Query`          | {item}             | base64 string body                                                                                                                                                                                                                                                                                                                                                                    |
 | `useRawPreviewQuery`          | {drive FileSource} | `{ kind: "uri", uri } \| { kind: "noPreview" } \| { kind: "offline" }` — cache hit serves offline; miss offline → `offline` (or `noPreview` when the RAW itself is stored offline); else the SDK extraction (`rawPreviewCache`). Transport errors throw (explicit Retry in the UI — no refetch-on-focus in this app); `ErrorKind.Cancelled` is suppressed by `decideQueryErrorAction` |
 | `useAccountQuery`             | —                  | account / user info (incl. `didExportMasterKeys`)                                                                                                                                                                                                                                                                                                                                     |
 | `useLocalAuthenticationQuery` | —                  | `{hasHardware, isEnrolled}` device biometric capability                                                                                                                                                                                                                                                                                                                               |
@@ -280,7 +277,7 @@ Eternal variant: staleTime/gcTime: Infinity, no refetch (for unchanging data).
 `client.ts` exports: `queryClient` (default), `queryUpdater` (plain object — get/set cache + persist), `QueryPersisterKv` / `queryClientPersisterKv` (the SQLite-backed persister storage), `restoreQueries()`, `removeQueryEverywhere()`, `persistedQueryStorageKey()`, `preserveArrayIdentity()`, `shouldPersistQuery()`, `decideQueryErrorAction()`, `DEFAULT_QUERY_OPTIONS`, `VERSION` / `QUERY_CLIENT_PERSISTER_PREFIX` / `QUERY_CLIENT_CACHE_TIME`.
 `onlineStatus.ts` adapts NetInfo → TanStack `onlineManager`.
 `fileSource.ts` — shared resolver feeding the file-access queries.
-Never persisted (`UNCACHED_QUERY_KEYS` in `client.ts` — a key part matching any of these is dropped by `shouldPersistQuery`): `useFileTextQuery`, `useFileBase64Query`, `useFileUriQuery`, `useFileUrlQuery`, `useRawPreviewQuery`, `useMediaPermissionsQuery`, `useCameraUploadAlbumsQuery`, `useCameraUploadAlbumLatestPhotoQuery`, `useLocalAuthenticationQuery`, `useCacheSizes`, `useFileProviderCacheBudget`, `useRegisterCheck`.
+Never persisted (`UNCACHED_QUERY_KEYS` in `client.ts` — a key part matching any of these is dropped by `shouldPersistQuery`): `useFileTextQuery`, `useFileUriQuery`, `useFileUrlQuery`, `useRawPreviewQuery`, `useMediaPermissionsQuery`, `useCameraUploadAlbumsQuery`, `useCameraUploadAlbumLatestPhotoQuery`, `useLocalAuthenticationQuery`, `useCacheSizes`, `useFileProviderCacheBudget`, `useRegisterCheck`.
 
 Write cadence: query rows are batched behind a 1s trailing debounce; a row whose serialized form exceeds 1MB (a whale account's recursive photos listing) is additionally held to one write per 30s on that path. Explicit flushes — AppState `background`, the background task's persist-before-suspend defer — always write everything.
 
@@ -301,17 +298,17 @@ DriveItemDirectoryExtracted = all dir/root types
 ### UI Base (`components/ui/`)
 
 - `View` / `KeyboardAvoidingView` / `KeyboardAwareScrollView` / `KeyboardStickyView` — Uniwind-wrapped
-- `LiquidGlassView` / `LiquidGlassContainerView` / `CrossGlassContainerView` — expo-glass-effect; where the real material is unavailable, a box-shadow fake (no blur: expo-blur crashes Android when nested in its BlurTargetView)
+- `LiquidGlassView` / `CrossGlassContainerView` — expo-glass-effect; where the real material is unavailable, a box-shadow fake (no blur: expo-blur crashes Android when nested in its BlurTargetView)
 - `Text` — Uniwind + foreground color default (react-native-boost)
 - `Image` — Uniwind-wrapped expo-image
-- `PressableOpacity` / `PressableScale` / `AndroidIconButton` — haptic via Pressto
+- `PressableOpacity` / `PressableScale` — haptic via Pressto
 - `Header` — stack header with typed items: text, menu, button, custom, loader
 - `Menu` — iOS (react-native-ios-context-menu) + Android (@react-native-menu/menu)
 - `VirtualList` — FlashList wrapper with search bar, pull-to-refresh, grid mode, header height caching
 - `ZoomableView` — pinch/pan/double-tap zoom with worklet-driven gestures, pinch-to-dismiss
 - `FullScreenLoadingModal` — event-driven overlay, `runWithLoading(fn)` utility
 - `settingsGroup` — grouped settings rows scaffold (used by features/settings)
-- `SafeAreaView`, `AnimatedView`, `Button`, `Checkbox`, `ListEmpty`, `Avatar`, `Measure`
+- `SafeAreaView`, `AnimatedView`, `Button`, `Checkbox`, `ListEmpty`, `Avatar`
 
 ### Drive (`features/drive/components/`)
 
@@ -393,7 +390,7 @@ Mounted by the root `_layout.tsx`. Pattern: subscribe to a single concern, never
 - **ESLint**: flat config (v9), react-compiler: error, no relative imports (enforced), TanStack Query plugin, exhaustive-deps with `useMemoDeep`/`useCallbackDeep`. Feature-architecture guardrails: selector-required store hooks, no `export *` barrels in `src/features/`, thin-route import restrictions (see "ESLint guardrails" above). Submodule trees (`filen-rs/`, `filen-ios-file-provider/`, `filen-android-documents-provider/`) and `plugins/` are ignored.
 - **Styling**: Tailwind CSS v4 + Uniwind, global.css with dark theme (OLED black #000000), iOS system color palette
 - **Metro**: crypto/stream/path polyfills, Uniwind CSS + TS type generation
-- **Babel**: babel-preset-expo + react-native-worklets/plugin. In production also `transform-remove-console` with `exclude: ["error", "warn"]` — strips `console.log/info/debug/trace` call sites (keeps prod lean) but KEEPS `console.warn`/`console.error` so they reach the diagnostic-logger tee. Removing the exclude would silently disable warn/error capture in prod. Applies to the WebView bundle too — `domConsoleProxy.ts` overrides via `globalThis.console` (immune to the plugin).
+- **Babel**: babel-preset-expo (which adds react-native-worklets/plugin itself). In production also `transform-remove-console` with `exclude: ["error", "warn"]` — strips `console.log/info/debug/trace` call sites (keeps prod lean) but KEEPS `console.warn`/`console.error` so they reach the diagnostic-logger tee. Removing the exclude would silently disable warn/error capture in prod. Applies to the WebView bundle too — `domConsoleProxy.ts` overrides via `globalThis.console` (immune to the plugin).
 - **iOS**: deployment target **26.0**, app group `group.io.filen.app`, iCloud, 26 localizations, UIBackgroundModes: audio/fetch/processing, Apple team `7YTW5D2K7P`
 - **Android**: min SDK **31** (Android 12; can lower to 26 with no code change, or 24 with a DocumentsProvider rework — hard dep floor is API 24), target SDK **36**, compile SDK 36, build tools 36.0.0; 23 permissions (incl. MANAGE_DOCUMENTS for the documents provider, ACTION_OPEN_DOCUMENT/\_TREE for incoming intents); Hermes; predictiveBackGestureEnabled: false; allowBackup: false
 - **Stock Expo plugins** (in app.config.ts plugins array): expo-plugin-ios-static-libraries (op-sqlite), expo-build-properties, expo-router (typed routes + React compiler), expo-splash-screen, expo-video, expo-audio, expo-media-library, expo-document-picker, expo-image-picker, expo-local-authentication, expo-sqlite, expo-localization, expo-background-task, expo-secure-store, expo-navigation-bar, expo-asset, expo-sharing (with iOS app-group activation rules), expo-web-browser, expo-image, react-native-edge-to-edge, react-native-document-scanner-plugin, @config-plugins/react-native-blob-util
@@ -401,7 +398,7 @@ Mounted by the root `_layout.tsx`. Pattern: subscribe to a single concern, never
     - `withFileProvider.ts` — iOS File Provider Extension target + Rust xcframework build (cargo + uniffi-bindgen-swift + xcodebuild)
     - `withAndroidRustBuild.ts` — Android `.so` build via cargo-ndk + uniffi-bindgen Kotlin + manifest `<provider>` injection
     - `withAndroidArchitectures.ts` — pins `reactNativeArchitectures` to the ABIs the Rust cache targets (`arm64-v8a,x86_64`)
-    - `withAndroidLargeHeapAndHardwareAcceleration.ts` — manifest tweaks
+    - `withAndroidApplicationAttributes.ts` — `<application>` attributes (largeHeap, hardwareAccelerated, supportsRtl=false)
     - `withAndroidNetworkSecurityConfig.ts` — restrictive network security policy
     - `withGradleMemory.ts` — `org.gradle.jvmargs` for big native builds
     - `withNotifeeForegroundServiceType.ts` — notifee FGS type for transfers
@@ -415,7 +412,7 @@ Mounted by the root `_layout.tsx`. Pattern: subscribe to a single concern, never
 - Vitest, node environment, `src/tests/*.test.ts` (`.tsx` when the test renders JSX); `pnpm test` runs once. Path alias `@` → `./src`; submodule trees excluded.
 - ESLint ignores `src/tests/**`, so `pnpm run typecheck` is the only static gate for tests. `vitest run` strips types, so a green test can still fail `pnpm run verify`. Style rules still apply (no `!`; `mock.calls[0]?.[0]`).
 - Hook and store-render tests start with `// @vitest-environment happy-dom` and use `renderHook`/`act`/`waitFor` from `@testing-library/react`. Pure logic stays in node.
-- `vitest.config.ts` aliases `react-native` to a minimal mock (`src/tests/mocks/reactNative.ts`: `AppState`, `Platform`, `Share`), plus `@/modules/filen-exif` and `uniffi-bindgen-react-native`. Tests are self-contained: needing more RN surface means an inline `vi.mock("react-native", ...)` (or a `vi.hoisted` mutable `Platform`) in that file, never a bigger shared mock. Other native modules are mocked per file, e.g. `vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))`.
+- `vitest.config.ts` aliases `react-native` to a minimal mock (`src/tests/mocks/reactNative.ts`: `AppState`, `Platform`, `Share`), plus `@/modules/filen-exif`, `uniffi-bindgen-react-native` and `expo-file-system` (the in-memory `src/tests/mocks/expoFileSystem.ts`; a per-file `vi.mock` still overrides it, as the fast/strict/inline variants do). Tests are self-contained: needing more RN surface means an inline `vi.mock("react-native", ...)` (or a `vi.hoisted` mutable `Platform`) in that file, never a bigger shared mock. Other native modules are mocked per file.
 - Lib-singleton tests follow `chats.test.ts`: `vi.hoisted` mocks, `vi.mock("@/lib/auth")` for the SDK clients, `vi.mock("@filen/sdk-rs", ...)` enum stubs; tests stub the SDK rather than call it.
 - `@/components/ui/view` pulls in native deps esbuild can't transform; `vi.mock` it when a tested module imports it.
 - The `vitest-svg-require-stub` plugin in `vitest.config.ts` rewrites `require("….svg")` to `0` so icon components load.

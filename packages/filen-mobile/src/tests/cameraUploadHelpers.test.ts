@@ -4,8 +4,6 @@ import pathModule from "path"
 // @ts-expect-error __DEV__ is a React Native global
 globalThis.__DEV__ = true
 
-vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
-
 // isDirUsable delegates the trash check to isTrashParent (real impl reads
 // parent.tag === ParentUuid_Tags.Trash). Stub @/lib/sdkUnwrap directly so the
 // helpers test stays light (the real module pulls the whole SDK + cache).

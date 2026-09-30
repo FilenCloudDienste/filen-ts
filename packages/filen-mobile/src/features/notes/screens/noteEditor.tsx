@@ -265,10 +265,7 @@ const Note = () => {
 					history={history}
 				/>
 				<SafeAreaView edges={["left", "right"]}>
-					<CannotDecryptScreen
-						uuid={note.uuid}
-						surface="note"
-					/>
+					<CannotDecryptScreen uuid={note.uuid} />
 				</SafeAreaView>
 			</Fragment>
 		)

@@ -17,14 +17,12 @@ import alerts from "@/lib/alerts"
 import { confirmedAction } from "@/lib/confirmedAction"
 import { router } from "@/lib/router"
 import { Platform } from "react-native"
-import useAppStore from "@/stores/useApp.store"
 import { shareTmpFile } from "@/lib/share"
-import { serialize } from "@/lib/serializer"
 import { t } from "@/lib/i18n"
 import * as Clipboard from "expo-clipboard"
 import logger from "@/lib/logger"
 
-export type NoteMenuOrigin = "notes" | "search" | "content"
+export type NoteMenuOrigin = "notes" | "content"
 
 export type NoteTypeString = "text" | "checklist" | "code" | "rich" | "md"
 
@@ -65,34 +63,6 @@ export const NOTE_TYPE_OPTIONS: { type: NoteType; typeString: NoteTypeString }[]
 	}
 ]
 
-// Shared shape for confirmed destructive note actions (trash / delete / leave):
-// prompt → guard cancel → runWithLoading(action) → guard failure → optionally pop
-// back if we're sitting on the note's detail route. Returns the onPress handler.
-function confirmedNoteAction({
-	note,
-	promptTitle,
-	promptMessage,
-	promptOkText,
-	action,
-	dismissOnSuccess
-}: {
-	note: TNote
-	promptTitle: string
-	promptMessage: string
-	promptOkText: string
-	// Return value is awaited then discarded (matches the original `await notes.X(...)`).
-	action: () => Promise<unknown>
-	dismissOnSuccess: boolean
-}): () => Promise<void> {
-	return confirmedAction({
-		promptTitle,
-		promptMessage,
-		promptOkText,
-		action,
-		dismiss: dismissOnSuccess ? () => useAppStore.getState().pathname.startsWith(`/note/${note.uuid}`) : undefined
-	})
-}
-
 // Maps a note's SDK NoteType to its menu icon. Shared by the notes header (create/convert
 // submenus) and the single-note menu, so the 5-way mapping lives in one place.
 export function noteTypeToIcon(type: NoteType): "text" | "checklist" | "code" | "richtext" | "markdown" | undefined {
@@ -131,7 +101,7 @@ export function createMenuButtons({
 	// the entry flips label the moment the ledger changes.
 	isAvailableOffline?: boolean
 	// Client-side "hide completed items" view toggle — only surfaced in the checklist editor
-	// (origin === "content"). Omitted by list/search callers, so the entry never appears there.
+	// (origin === "content"). Omitted by list callers, so the entry never appears there.
 	hideCompletedChecklistItems?: boolean
 	onToggleHideCompletedChecklistItems?: () => void
 }): MenuButton[] {
@@ -194,13 +164,12 @@ export function createMenuButtons({
 				title: t("delete"),
 				icon: "delete",
 				destructive: true,
-				onPress: confirmedNoteAction({
-					note,
+				onPress: confirmedAction({
 					promptTitle: t("delete_note"),
 					promptMessage: t("are_you_sure_delete_note"),
 					promptOkText: t("delete"),
 					action: () => notes.delete({ note }),
-					dismissOnSuccess: true
+					dismissPathnamePrefix: `/note/${note.uuid}`
 				})
 			})
 		} else if (isOwner) {
@@ -210,13 +179,12 @@ export function createMenuButtons({
 				title: t("trash"),
 				icon: "trash",
 				destructive: true,
-				onPress: confirmedNoteAction({
-					note,
+				onPress: confirmedAction({
 					promptTitle: t("trash_note"),
 					promptMessage: t("are_you_sure_trash_note"),
 					promptOkText: t("trash"),
 					action: () => notes.trash({ note }),
-					dismissOnSuccess: true
+					dismissPathnamePrefix: `/note/${note.uuid}`
 				})
 			})
 		} else {
@@ -226,13 +194,12 @@ export function createMenuButtons({
 				title: t("leave"),
 				icon: "exit",
 				destructive: true,
-				onPress: confirmedNoteAction({
-					note,
+				onPress: confirmedAction({
 					promptTitle: t("leave_note"),
 					promptMessage: t("are_you_sure_leave_note"),
 					promptOkText: t("leave"),
 					action: () => notes.leave({ note }),
-					dismissOnSuccess: true
+					dismissPathnamePrefix: `/note/${note.uuid}`
 				})
 			})
 		}
@@ -240,7 +207,7 @@ export function createMenuButtons({
 		return buttons
 	}
 
-	if (origin === "notes" || origin === "search") {
+	if (origin === "notes") {
 		buttons.push({
 			id: isSelected ? "deselect" : "select",
 			title: isSelected ? t("deselect") : t("select"),
@@ -414,10 +381,7 @@ export function createMenuButtons({
 			router.push({
 				pathname: "/noteTags",
 				params: {
-					// /noteTags accepts an array (single-note callers wrap as a one-
-					// element array). Keeps the route uniform between per-item edits
-					// and bulk tag edits from the notes list.
-					notes: serialize([note])
+					uuids: note.uuid
 				}
 			})
 		}
@@ -447,7 +411,7 @@ export function createMenuButtons({
 					return
 				}
 
-				if (promptResult.data.cancelled || promptResult.data.type !== "string") {
+				if (promptResult.data.cancelled) {
 					return
 				}
 
@@ -564,7 +528,7 @@ export function createMenuButtons({
 			router.push({
 				pathname: "/noteParticipants",
 				params: {
-					note: serialize(note)
+					uuid: note.uuid
 				}
 			})
 		}
@@ -580,7 +544,7 @@ export function createMenuButtons({
 				router.push({
 					pathname: "/noteHistory",
 					params: {
-						note: serialize(note)
+						uuid: note.uuid
 					}
 				})
 			}
@@ -641,13 +605,12 @@ export function createMenuButtons({
 				title: t("trash"),
 				icon: "trash",
 				destructive: true,
-				onPress: confirmedNoteAction({
-					note,
+				onPress: confirmedAction({
 					promptTitle: t("trash_note"),
 					promptMessage: t("are_you_sure_trash_note"),
 					promptOkText: t("trash"),
 					action: () => notes.trash({ note }),
-					dismissOnSuccess: true
+					dismissPathnamePrefix: `/note/${note.uuid}`
 				})
 			})
 		}
@@ -659,13 +622,12 @@ export function createMenuButtons({
 				title: t("delete"),
 				icon: "delete",
 				destructive: true,
-				onPress: confirmedNoteAction({
-					note,
+				onPress: confirmedAction({
 					promptTitle: t("delete_note"),
 					promptMessage: t("are_you_sure_delete_note"),
 					promptOkText: t("delete"),
 					action: () => notes.delete({ note }),
-					dismissOnSuccess: true
+					dismissPathnamePrefix: `/note/${note.uuid}`
 				})
 			})
 		}
@@ -676,15 +638,14 @@ export function createMenuButtons({
 			title: t("leave"),
 			icon: "exit",
 			destructive: true,
-			onPress: confirmedNoteAction({
-				note,
+			onPress: confirmedAction({
 				promptTitle: t("leave_note"),
 				promptMessage: t("are_you_sure_leave_note"),
 				promptOkText: t("leave"),
 				// Leaving is an irreversible loss of access (until re-invited) — styled
 				// destructive like the bulk-leave and undecryptable-leave variants.
 				action: () => notes.leave({ note }),
-				dismissOnSuccess: true
+				dismissPathnamePrefix: `/note/${note.uuid}`
 			})
 		})
 	}

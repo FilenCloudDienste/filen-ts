@@ -1,5 +1,5 @@
 import auth from "@/lib/auth"
-import { AnyNormalDir } from "@filen/sdk-rs"
+import type { AnyNormalDir } from "@filen/sdk-rs"
 import type { DriveItem } from "@/types"
 import { unwrapDirMeta, unwrapFileMeta, unwrapParentUuid, unwrappedDirIntoDriveItem, unwrappedFileIntoDriveItem } from "@/lib/sdkUnwrap"
 import { driveItemsQueryUpdateForNormalParent, driveItemsQueryRemoveDirectoryFromPhotos } from "@/features/drive/queries/useDriveItems.query"
@@ -14,37 +14,13 @@ export async function createDirectory({
 	signal,
 	name
 }: {
-	parent: DriveItem | "root" | AnyNormalDir
+	parent: AnyNormalDir
 	signal?: AbortSignal
 	name: string
 }) {
-	if (!AnyNormalDir.instanceOf(parent) && parent !== "root" && parent.type !== "directory") {
-		throw new Error("Invalid parent type")
-	}
-
 	const { authedSdkClient } = await auth.getSdkClients()
-	let parentDir: AnyNormalDir | null = AnyNormalDir.instanceOf(parent) ? parent : null
-
-	if (!parentDir && !AnyNormalDir.instanceOf(parent)) {
-		if (parent === "root" || parent.data.uuid === authedSdkClient.root().uuid) {
-			parentDir = new AnyNormalDir.Root(authedSdkClient.root())
-		} else {
-			const dir = cache.directoryUuidToAnyNormalDir.get(parent.data.uuid)
-
-			if (!dir) {
-				throw new Error("Parent not found in cache")
-			}
-
-			parentDir = dir
-		}
-	}
-
-	if (!parentDir) {
-		throw new Error("Parent directory not found")
-	}
-
 	const createdDir = await authedSdkClient.createDir(
-		parentDir,
+		parent,
 		name,
 		signal
 			? {
@@ -63,77 +39,31 @@ export async function createDirectory({
 	markDirectorySizesStale()
 
 	driveItemsQueryUpdateForNormalParent({
-		parentUuid: parentDir.inner[0].uuid,
+		parentUuid: parent.inner[0].uuid,
 		updater: prev => upsertItem(prev, createdDriveItem)
 	})
 
 	return createdDriveItem
 }
 
-export async function move({
-	item,
-	newParent,
-	signal
-}: {
-	item: DriveItem
-	newParent: DriveItem | "root" | AnyNormalDir
-	signal?: AbortSignal
-}) {
-	if (!AnyNormalDir.instanceOf(newParent) && newParent !== "root" && newParent.type !== "directory") {
-		throw new Error("Invalid parent type")
-	}
-
+export async function move({ item, newParent }: { item: DriveItem; newParent: AnyNormalDir }) {
 	if (item.type !== "directory" && item.type !== "file") {
 		throw new Error("Invalid item type")
 	}
 
 	const unwrappedParentUuidPrevious = unwrapParentUuid(item.data.parent)
 	const oldItemUuid = `${item.data.uuid}`
-	const { authedSdkClient } = await auth.getSdkClients()
-	let newParentDir: AnyNormalDir | null = AnyNormalDir.instanceOf(newParent) ? newParent : null
 
-	if (!newParentDir && !AnyNormalDir.instanceOf(newParent)) {
-		if (newParent === "root" || newParent.data.uuid === authedSdkClient.root().uuid) {
-			newParentDir = new AnyNormalDir.Root(authedSdkClient.root())
-		} else {
-			const dir = cache.directoryUuidToAnyNormalDir.get(newParent.data.uuid)
-
-			if (!dir) {
-				throw new Error("New parent not found in cache")
-			}
-
-			newParentDir = dir
-		}
-	}
-
-	if (!newParentDir) {
-		throw new Error("New parent directory not found")
-	}
-
-	if (unwrappedParentUuidPrevious === newParentDir.inner[0].uuid) {
+	if (unwrappedParentUuidPrevious === newParent.inner[0].uuid) {
 		return item
 	}
 
+	const { authedSdkClient } = await auth.getSdkClients()
+
 	const modifiedItem =
 		item.type === "directory"
-			? await authedSdkClient.moveDir(
-					item.data,
-					newParentDir,
-					signal
-						? {
-								signal
-							}
-						: undefined
-				)
-			: await authedSdkClient.moveFile(
-					item.data,
-					newParentDir,
-					signal
-						? {
-								signal
-							}
-						: undefined
-				)
+			? await authedSdkClient.moveDir(item.data, newParent)
+			: await authedSdkClient.moveFile(item.data, newParent)
 
 	// Ugly but works for now, until we have a better way
 	if (!("region" in modifiedItem)) {

@@ -45,9 +45,7 @@ vi.mock("@filen/shared", async () => {
 	}
 })
 
-vi.mock("@/queries/client", () => ({
-	DEFAULT_QUERY_OPTIONS: {}
-}))
+vi.mock("@/queries/client", () => ({}))
 
 vi.mock("@/lib/cache", () => ({
 	default: {

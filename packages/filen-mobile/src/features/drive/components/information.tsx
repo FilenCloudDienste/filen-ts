@@ -5,7 +5,7 @@ import View from "@/components/ui/view"
 import { useResolveClassNames } from "uniwind"
 import { formatBytes } from "@filen/shared"
 import useDirectorySizeQuery from "@/features/drive/queries/useDirectorySize.query"
-import useDriveItemStoredOfflineQuery from "@/features/drive/queries/useDriveItemStoredOffline.query"
+import useIsItemStoredOffline from "@/features/offline/hooks/useIsItemStoredOffline"
 import { simpleDate } from "@/lib/time"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import { getPreviewType } from "@/lib/previewType"
@@ -15,18 +15,16 @@ import { isFileItem, isDirectoryItem } from "@/features/drive/driveSelectors"
 import { rawUploadTimestamp, pickDisplayTimestamp, directorySizeTypeForDrivePath } from "@/features/drive/utils"
 import { type DrivePathType } from "@/hooks/useDrivePath"
 
-function OfflineStatusRow({ uuid, type }: { uuid: string; type: DriveItem["type"] }) {
+function OfflineStatusRow({ item }: { item: DriveItem }) {
 	const textRed500 = useResolveClassNames("text-red-500")
 	const textGreen500 = useResolveClassNames("text-green-500")
-	const driveItemStoredOfflineQuery = useDriveItemStoredOfflineQuery({ uuid, type })
+	const isStoredOffline = useIsItemStoredOffline(item)
 
 	return (
 		<Ionicons
 			name="cloud-download-outline"
 			size={16}
-			color={
-				driveItemStoredOfflineQuery.status === "success" && driveItemStoredOfflineQuery.data ? textGreen500.color : textRed500.color
-			}
+			color={isStoredOffline ? textGreen500.color : textRed500.color}
 		/>
 	)
 }
@@ -40,7 +38,7 @@ function useDriveItemInfoRows(
 
 	const directorySizeQuery = useDirectorySizeQuery(
 		{
-			uuid: item?.data.uuid ?? "",
+			uuid: item.data.uuid,
 			// The sharing role (sharedIn vs sharedOut) and the trash/offline/linked size
 			// computation can't be inferred from item.type — they depend on the screen the
 			// item is shown in — so derive the query mode from the originating DrivePath.
@@ -50,7 +48,7 @@ function useDriveItemInfoRows(
 			item
 		},
 		{
-			enabled: item !== null && isDirectoryItem(item)
+			enabled: isDirectoryItem(item)
 		}
 	)
 
@@ -192,12 +190,7 @@ function useDriveItemInfoRows(
 						{
 							type: "offline",
 							title: t("offline_status"),
-							value: (
-								<OfflineStatusRow
-									uuid={item.data.uuid}
-									type={item.type}
-								/>
-							)
+							value: <OfflineStatusRow item={item} />
 						}
 					]
 				: [])

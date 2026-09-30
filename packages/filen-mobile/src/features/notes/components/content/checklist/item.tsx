@@ -7,7 +7,6 @@ import { type ChecklistItem, checklistParser, cn, addChecklistLine, removeCheckl
 import { PressableOpacity } from "@/components/ui/pressables"
 import View from "@/components/ui/view"
 import { ChecklistStoreContext } from "@/features/notes/store/useChecklist.store"
-import { materializeChecklistGhost } from "@/features/notes/checklistEdit"
 import { useShallow } from "zustand/shallow"
 import { randomUUID } from "expo-crypto"
 
@@ -22,9 +21,7 @@ const Item = ({
 	onCheckedChange,
 	onChange,
 	readOnly,
-	onDidType,
-	autoFocus,
-	isLast
+	onDidType
 }: {
 	id: string
 	// #80 ghost row: render an empty UI-only row for an id that has no store item yet. The first
@@ -36,8 +33,6 @@ const Item = ({
 	onChange?: (value: string) => void
 	readOnly?: boolean
 	onDidType: () => void
-	autoFocus?: boolean
-	isLast?: boolean
 }) => {
 	const textInputRef = useRef<TextInput>(null)
 	// Dedupes one physical Enter press reaching us twice (native onSubmitEditing + the key event —
@@ -112,18 +107,24 @@ const Item = ({
 
 		// #80: first keystroke into the ghost — materialize it into a real appended item and
 		// propagate the structural edit immediately (mirrors addNewLine; onContentChange would
-		// silently no-op here since the id is not in parsed yet). The parent re-renders this SAME
-		// keyed position as a normal row, so the input keeps focus.
+		// silently no-op here since the id is not in parsed yet). Appended at the END (after the
+		// hidden checked items) so consecutive adds chain like Enter does; reusing the ghost's id
+		// keeps the same React key, so the SAME TextInput keeps focus. The id guard prevents a
+		// duplicate keystroke race from double-appending.
 		if (ghost && !store.getState().parsed.some(i => i.id === id)) {
-			const result = materializeChecklistGhost(store.getState().parsed, id, content)
-
-			if (result.changed) {
-				store.getState().setParsed(result.next)
-				store.getState().setIds(result.next.map(i => i.id))
-
-				if (onChange) {
-					onChange(checklistParser.stringify(store.getState().parsed))
+			const next = [
+				...store.getState().parsed,
+				{
+					id,
+					checked: false,
+					content
 				}
+			]
+
+			store.getState().setParsed(next)
+
+			if (onChange) {
+				onChange(checklistParser.stringify(next))
 			}
 
 			return
@@ -160,7 +161,6 @@ const Item = ({
 		}
 
 		store.getState().setParsed(result.next)
-		store.getState().setIds(result.next.map(i => i.id))
 
 		// Propagate the structural edit to the parent so the inflight-content sync fires immediately.
 		// Without this the new row is only persisted on the next keystroke (onChangeText), so a row
@@ -200,7 +200,6 @@ const Item = ({
 		}
 
 		store.getState().setParsed(result.next)
-		store.getState().setIds(result.next.map(i => i.id))
 
 		// Propagate the deletion (and the single-item reset) to the parent so the inflight-content
 		// sync fires. Without this the row is removed from the store/UI but never persisted, so the
@@ -338,7 +337,6 @@ const Item = ({
 				keyboardType="default"
 				keyboardAppearance="default"
 				enablesReturnKeyAutomatically={true}
-				autoFocus={autoFocus && isLast}
 				editable={!readOnly}
 			/>
 		</View>

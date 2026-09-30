@@ -49,15 +49,8 @@ export type InputPromptResult =
 			cancelled: true
 	  }
 	| {
-			type: "string"
 			cancelled: false
 			value: string
-	  }
-	| {
-			type: "credentials"
-			cancelled: false
-			login: string
-			password: string
 	  }
 
 export type InputPromptOptions = {
@@ -301,31 +294,10 @@ const prompts = {
 											password: string
 									  }
 							) => {
-								if (!value) {
-									resolve({
-										cancelled: false,
-										value: "",
-										type: "string"
-									})
-
-									return
-								}
-
-								if (typeof value === "string") {
-									resolve({
-										cancelled: false,
-										type: "string",
-										value
-									})
-
-									return
-								}
-
+								// Only login-password prompts hand back an object, and none is ever requested.
 								resolve({
 									cancelled: false,
-									type: "credentials",
-									login: value.login,
-									password: value.password
+									value: typeof value === "string" ? value : ""
 								})
 							}
 						}

@@ -85,6 +85,17 @@ type OwnParentResolution =
 // parent uuid; promise-valued so concurrently syncing items share the in-flight request.
 type ParentContextCache = Map<string, Promise<OwnParentResolution>>
 
+// Built once per pass and handed to every per-item method.
+type SyncPassContext = {
+	authedSdkClient: AuthedSdkClient
+	parentContextCache: ParentContextCache
+	thorough: boolean
+	background: boolean
+	signal: AbortSignal
+	pushError: (error: OfflineSyncError) => void
+	pushErrors: (errors: OfflineSyncError[]) => void
+}
+
 type ParentListingState =
 	| {
 			status: "ok"
@@ -107,6 +118,12 @@ type ParentListingState =
 			status: "failed"
 			message: string
 	  }
+
+type SyncItemArgs = {
+	item: DriveItem
+	parent: OfflineParent
+	listingState: ParentListingState | undefined
+}
 
 // Trash policy (shared isTrashParent from @/lib/sdkUnwrap): a getDirOptional / getFileOptional
 // result whose parent tag is Trash means the item is trashed ⇒ remove the local copy, same as a
@@ -249,17 +266,10 @@ export class OfflineSync {
 	// other uuid resolves via ONE getDirOptional — deduped per pass through parentContextCache.
 	// The same lookup doubles as the one-level trash-containment check: a parent dir whose OWN
 	// parent-tag is Trash means the item lives inside a trashed directory (see OwnParentResolution).
-	private async resolveOwnParentContext({
-		parentUuid,
-		authedSdkClient,
-		parentContextCache,
-		signal
-	}: {
+	private async resolveOwnParentContext(
+		{ authedSdkClient, parentContextCache, signal }: SyncPassContext,
 		parentUuid: string | null
-		authedSdkClient: AuthedSdkClient
-		parentContextCache: ParentContextCache
-		signal: AbortSignal
-	}): Promise<OwnParentResolution> {
+	): Promise<OwnParentResolution> {
 		if (!parentUuid) {
 			return {
 				status: "unresolvable"
@@ -445,29 +455,9 @@ export class OfflineSync {
 	// listings while still resolving alive itself) and the move re-anchor reuse that single lookup.
 	// A failed lookup (tree or parent) is inconclusive — record a `listing` error and keep
 	// everything (NO deletions on errors).
-	private async syncNormalTree({
-		item,
-		parent,
-		listingState,
-		authedSdkClient,
-		parentContextCache,
-		thorough,
-		background,
-		signal,
-		pushError,
-		pushErrors
-	}: {
-		item: DriveItem
-		parent: OfflineParent
-		listingState: ParentListingState | undefined
-		authedSdkClient: AuthedSdkClient
-		parentContextCache: ParentContextCache
-		thorough: boolean
-		background: boolean
-		signal: AbortSignal
-		pushError: (error: OfflineSyncError) => void
-		pushErrors: (errors: OfflineSyncError[]) => void
-	}): Promise<void> {
+	private async syncNormalTree(ctx: SyncPassContext, { item, parent, listingState }: SyncItemArgs): Promise<void> {
+		const { authedSdkClient, thorough, background, signal, pushError, pushErrors } = ctx
+
 		if (item.type !== "directory") {
 			return
 		}
@@ -516,12 +506,7 @@ export class OfflineSync {
 		// in trash (trashed dirs keep resolving their children as alive). At most one extra request
 		// per tree per pass (deduped via parentContextCache; trees are few — acceptable).
 		const remoteParentUuid = unwrapParentUuid(remoteDir.parent)
-		const parentResolution = await this.resolveOwnParentContext({
-			parentUuid: remoteParentUuid,
-			authedSdkClient,
-			parentContextCache,
-			signal
-		})
+		const parentResolution = await this.resolveOwnParentContext(ctx, remoteParentUuid)
 
 		if (parentResolution.status === "trashContained") {
 			// The containing directory was trashed ⇒ the tree is trash-contained. Trash policy:
@@ -593,25 +578,10 @@ export class OfflineSync {
 	// One stored shared-in tree root: shared items support no by-uuid fallbacks, so presence in the
 	// parent listing is the only signal. Gone/revoked parent or absence from a clean listing is
 	// positive evidence ⇒ remove; any other listing failure ⇒ `listing` error, keep everything.
-	private async syncListedTree({
-		item,
-		parent,
-		listingState,
-		thorough,
-		background,
-		signal,
-		pushError,
-		pushErrors
-	}: {
-		item: DriveItem
-		parent: OfflineParent
-		listingState: ParentListingState | undefined
-		thorough: boolean
-		background: boolean
-		signal: AbortSignal
-		pushError: (error: OfflineSyncError) => void
-		pushErrors: (errors: OfflineSyncError[]) => void
-	}): Promise<void> {
+	private async syncListedTree(
+		{ thorough, background, signal, pushError, pushErrors }: SyncPassContext,
+		{ item, parent, listingState }: SyncItemArgs
+	): Promise<void> {
 		if (!listingState) {
 			// Listing skipped (aborted) — silently leave this tree for the next pass.
 			return
@@ -684,21 +654,12 @@ export class OfflineSync {
 	// means the file was moved into a trashed folder ⇒ remove like any trashed item. Trashed/
 	// deleted → remove. Lookup failure → `listing` error, keep everything (retried next pass).
 	// Alive but undecryptable → never a deletion signal; keep untouched.
-	private async followStandaloneFileByUuid({
-		item,
-		parent,
-		authedSdkClient,
-		parentContextCache,
-		signal,
-		pushError
-	}: {
-		item: DriveItem
-		parent: OfflineParent
-		authedSdkClient: AuthedSdkClient
-		parentContextCache: ParentContextCache
-		signal: AbortSignal
-		pushError: (error: OfflineSyncError) => void
-	}): Promise<void> {
+	private async followStandaloneFileByUuid(
+		ctx: SyncPassContext,
+		{ item, parent }: { item: DriveItem; parent: OfflineParent }
+	): Promise<void> {
+		const { authedSdkClient, signal, pushError } = ctx
+
 		const lookup = await run(async () =>
 			authedSdkClient.getFileOptional(item.data.uuid, {
 				signal
@@ -736,12 +697,7 @@ export class OfflineSync {
 		}
 
 		const updated = unwrappedFileIntoDriveItem(unwrappedRemote)
-		const parentResolution = await this.resolveOwnParentContext({
-			parentUuid: unwrapParentUuid(remoteFile.parent),
-			authedSdkClient,
-			parentContextCache,
-			signal
-		})
+		const parentResolution = await this.resolveOwnParentContext(ctx, unwrapParentUuid(remoteFile.parent))
 
 		if (parentResolution.status === "trashContained") {
 			// Moved INTO a trashed directory: the file vanished from listings for good — remove the
@@ -763,27 +719,9 @@ export class OfflineSync {
 	// listing: byName version adoption → own-cloud by-uuid move-follow/trash/delete → shared ⇒
 	// positive evidence of removal. All those decisions are LISTING-driven and run on every pass;
 	// only the disk-stat heal below is gated on `thorough`.
-	private async syncStandaloneFile({
-		item,
-		parent,
-		listingState,
-		authedSdkClient,
-		parentContextCache,
-		thorough,
-		background,
-		signal,
-		pushError
-	}: {
-		item: DriveItem
-		parent: OfflineParent
-		listingState: ParentListingState | undefined
-		authedSdkClient: AuthedSdkClient
-		parentContextCache: ParentContextCache
-		thorough: boolean
-		background: boolean
-		signal: AbortSignal
-		pushError: (error: OfflineSyncError) => void
-	}): Promise<void> {
+	private async syncStandaloneFile(ctx: SyncPassContext, { item, parent, listingState }: SyncItemArgs): Promise<void> {
+		const { thorough, background, signal, pushError } = ctx
+
 		if (!isFileItem(item)) {
 			return
 		}
@@ -814,13 +752,9 @@ export class OfflineSync {
 			// before its old parent vanished — give it the same by-uuid move-follow that a
 			// vanished-from-a-clean-listing file gets before concluding removal.
 			if (isOwnCloudParent(parent)) {
-				await this.followStandaloneFileByUuid({
+				await this.followStandaloneFileByUuid(ctx, {
 					item,
-					parent,
-					authedSdkClient,
-					parentContextCache,
-					signal,
-					pushError
+					parent
 				})
 
 				return
@@ -947,13 +881,9 @@ export class OfflineSync {
 			return
 		}
 
-		await this.followStandaloneFileByUuid({
+		await this.followStandaloneFileByUuid(ctx, {
 			item,
-			parent,
-			authedSdkClient,
-			parentContextCache,
-			signal,
-			pushError
+			parent
 		})
 	}
 
@@ -964,17 +894,10 @@ export class OfflineSync {
 	// deleted/trash-contained/undecidable leftovers; leave lookup failures for the next pass.
 	// Prunes the backoff to the uuids still broken and returns those to look up this pass; the rest
 	// re-surface their last error. Thorough passes look up everything.
-	private healCandidates({
-		uuids,
-		backoff,
-		thorough,
-		pushError
-	}: {
-		uuids: string[]
-		backoff: HealBackoff
-		thorough: boolean
-		pushError: (error: OfflineSyncError) => void
-	}): Set<string> {
+	private healCandidates(
+		{ thorough, pushError }: SyncPassContext,
+		{ uuids, backoff }: { uuids: string[]; backoff: HealBackoff }
+	): Set<string> {
 		const broken = new Set(uuids)
 
 		for (const uuid of backoff.keys()) {
@@ -1001,26 +924,13 @@ export class OfflineSync {
 		return broken
 	}
 
-	private async healBrokenStandalones({
-		authedSdkClient,
-		parentContextCache,
-		thorough,
-		signal,
-		pushError
-	}: {
-		authedSdkClient: AuthedSdkClient
-		parentContextCache: ParentContextCache
-		thorough: boolean
-		signal: AbortSignal
-		pushError: (error: OfflineSyncError) => void
-	}): Promise<void> {
+	private async healBrokenStandalones(ctx: SyncPassContext): Promise<void> {
+		const { authedSdkClient, signal, pushError } = ctx
 		const brokenStandalones = await offline.listBrokenStandaloneUuids()
 		const backoff = this.standaloneHealBackoff
-		const candidates = this.healCandidates({
+		const candidates = this.healCandidates(ctx, {
 			uuids: brokenStandalones.map(broken => broken.uuid),
-			backoff,
-			thorough,
-			pushError
+			backoff
 		})
 
 		await Promise.all(
@@ -1078,12 +988,7 @@ export class OfflineSync {
 					resolvedName = unwrappedRemote.meta.name
 
 					const rebuilt = unwrappedFileIntoDriveItem(unwrappedRemote)
-					const parentResolution = await this.resolveOwnParentContext({
-						parentUuid: unwrapParentUuid(remoteFile.parent),
-						authedSdkClient,
-						parentContextCache,
-						signal
-					})
+					const parentResolution = await this.resolveOwnParentContext(ctx, unwrapParentUuid(remoteFile.parent))
 
 					if (parentResolution.status === "trashContained") {
 						// The file's parent dir sits in trash (one-level containment): the item is
@@ -1164,28 +1069,13 @@ export class OfflineSync {
 	// rebuilt from the listing — near-free; `thorough` simply follows the pass mode).
 	// Trashed/deleted/trash-contained/undecidable → removeTreeDirectory. Lookup failure →
 	// `listing` error, dir left for the next pass. Mirrors healBrokenStandalones.
-	private async healBrokenTrees({
-		authedSdkClient,
-		parentContextCache,
-		thorough,
-		signal,
-		pushError,
-		pushErrors
-	}: {
-		authedSdkClient: AuthedSdkClient
-		parentContextCache: ParentContextCache
-		thorough: boolean
-		signal: AbortSignal
-		pushError: (error: OfflineSyncError) => void
-		pushErrors: (errors: OfflineSyncError[]) => void
-	}): Promise<void> {
+	private async healBrokenTrees(ctx: SyncPassContext): Promise<void> {
+		const { authedSdkClient, thorough, signal, pushError, pushErrors } = ctx
 		const brokenTrees = await offline.listBrokenTreeUuids()
 		const backoff = this.treeHealBackoff
-		const candidates = this.healCandidates({
+		const candidates = this.healCandidates(ctx, {
 			uuids: brokenTrees,
-			backoff,
-			thorough,
-			pushError
+			backoff
 		})
 
 		await Promise.all(
@@ -1243,12 +1133,7 @@ export class OfflineSync {
 					resolvedName = unwrappedRemote.meta.name
 
 					const rebuilt = unwrappedDirIntoDriveItem(unwrappedRemote)
-					const parentResolution = await this.resolveOwnParentContext({
-						parentUuid: unwrapParentUuid(remoteDir.parent),
-						authedSdkClient,
-						parentContextCache,
-						signal
-					})
+					const parentResolution = await this.resolveOwnParentContext(ctx, unwrapParentUuid(remoteDir.parent))
 
 					if (parentResolution.status === "trashContained") {
 						// The tree's parent dir sits in trash (one-level containment): the tree is
@@ -1435,9 +1320,17 @@ export class OfflineSync {
 					signal
 				})
 
-				// ONE deduped getDirOptional per unique parent uuid for the trash-containment gate /
-				// re-anchor lookups (several trees and standalones can share a parent).
-				const parentContextCache: ParentContextCache = new Map()
+				const ctx: SyncPassContext = {
+					authedSdkClient,
+					// ONE deduped getDirOptional per unique parent uuid for the trash-containment gate /
+					// re-anchor lookups (several trees and standalones can share a parent).
+					parentContextCache: new Map(),
+					thorough,
+					background,
+					signal,
+					pushError,
+					pushErrors
+				}
 
 				// Unexpected per-item failures (lock/setup errors thrown by the offline methods) are
 				// converted into `store` errors so one bad item never aborts the whole pass.
@@ -1476,17 +1369,10 @@ export class OfflineSync {
 							item,
 							topLevelUuid: item.data.uuid,
 							fn: () =>
-								this.syncNormalTree({
+								this.syncNormalTree(ctx, {
 									item,
 									parent,
-									listingState: parentListings.get(parentCacheKey(parent)),
-									authedSdkClient,
-									parentContextCache,
-									thorough,
-									background,
-									signal,
-									pushError,
-									pushErrors
+									listingState: parentListings.get(parentCacheKey(parent))
 								})
 						})
 					),
@@ -1495,15 +1381,10 @@ export class OfflineSync {
 							item,
 							topLevelUuid: item.data.uuid,
 							fn: () =>
-								this.syncListedTree({
+								this.syncListedTree(ctx, {
 									item,
 									parent,
-									listingState: parentListings.get(parentCacheKey(parent)),
-									thorough,
-									background,
-									signal,
-									pushError,
-									pushErrors
+									listingState: parentListings.get(parentCacheKey(parent))
 								})
 						})
 					),
@@ -1512,16 +1393,10 @@ export class OfflineSync {
 							item,
 							topLevelUuid: null,
 							fn: () =>
-								this.syncStandaloneFile({
+								this.syncStandaloneFile(ctx, {
 									item,
 									parent,
-									listingState: parentListings.get(parentCacheKey(parent)),
-									authedSdkClient,
-									parentContextCache,
-									thorough,
-									background,
-									signal,
-									pushError
+									listingState: parentListings.get(parentCacheKey(parent))
 								})
 						})
 					)
@@ -1532,21 +1407,8 @@ export class OfflineSync {
 				// see it) — exactly the unbounded cost a background window must not pay.
 				if (!background) {
 					await Promise.all([
-						this.healBrokenStandalones({
-							authedSdkClient,
-							parentContextCache,
-							thorough,
-							signal,
-							pushError
-						}),
-						this.healBrokenTrees({
-							authedSdkClient,
-							parentContextCache,
-							thorough,
-							signal,
-							pushError,
-							pushErrors
-						})
+						this.healBrokenStandalones(ctx),
+						this.healBrokenTrees(ctx)
 					])
 				}
 

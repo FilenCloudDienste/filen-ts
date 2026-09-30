@@ -131,7 +131,6 @@ const List = ({ searchQuery }: { searchQuery: string }) => {
 	return (
 		<VirtualList
 			className="flex-1"
-			contentInsetAdjustmentBehavior="automatic"
 			contentContainerClassName={cn("pb-40", Platform.OS === "android" && "pb-96")}
 			loading={chatsQuery.status === "pending"}
 			keyExtractor={keyExtractor}

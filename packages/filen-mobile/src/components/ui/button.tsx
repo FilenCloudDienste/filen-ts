@@ -4,7 +4,6 @@ import { useResolveClassNames } from "uniwind"
 const Button = (
 	props: Omit<ButtonProps, "title"> & {
 		children: string
-		title?: string
 	}
 ) => {
 	const bgPrimary = useResolveClassNames("bg-primary")
@@ -12,7 +11,7 @@ const Button = (
 	return (
 		<RNButton
 			{...props}
-			title={props.title ?? props.children}
+			title={props.children}
 			color={props.color ?? (bgPrimary.backgroundColor as string)}
 		/>
 	)

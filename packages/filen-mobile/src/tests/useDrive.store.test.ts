@@ -1,7 +1,7 @@
 import { vi, describe, it, expect, beforeEach } from "vitest"
 
 // useDrive.store only depends on zustand + the (type-only) DriveItem type and the
-// pure toggleInArray helper from createSelectionSlice — no native modules. We still
+// pure toggleInArray helper from @filen/shared — no native modules. We still
 // stub @filen/sdk-rs so the type-only import chain never tries to evaluate it.
 vi.mock("@filen/sdk-rs", () => ({}))
 

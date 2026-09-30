@@ -331,16 +331,6 @@ export class CameraUploadState {
 		await sqlite.kvAsync.set(HASHES_PREFIX + key, entry)
 	}
 
-	public async deleteHash(key: string): Promise<void> {
-		if (this.locked) {
-			return
-		}
-
-		this.hashes.delete(key)
-
-		await sqlite.kvAsync.remove(HASHES_PREFIX + key)
-	}
-
 	public async setAbort(id: string, count: number): Promise<void> {
 		if (this.locked) {
 			return

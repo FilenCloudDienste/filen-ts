@@ -5,19 +5,21 @@ import alerts from "@/lib/alerts"
 import { router } from "@/lib/router"
 import { t } from "@/lib/i18n"
 import logger from "@/lib/logger"
+import useAppStore from "@/stores/useApp.store"
 
 // Shared shape for confirmed destructive actions across features (delete/leave/trash/remove):
 // prompt → guard cancel → runWithLoading(action) → guard failure → optionally pop back on
-// success. Each feature wraps this with its own `dismiss` predicate (drive checks item.type,
-// notes/chats check the current pathname). The helper adds the `router.canGoBack()` guard, so
-// `dismiss` only needs to express the feature-specific condition.
+// success. Pop-back is either a `dismiss` predicate (drive checks the item type) or a
+// `dismissPathnamePrefix` matched against the current route (notes/chats). The helper adds the
+// `router.canGoBack()` guard, so neither needs to.
 export function confirmedAction({
 	promptTitle,
 	promptMessage,
 	promptOkText,
 	promptDestructive = true,
 	action,
-	dismiss
+	dismiss,
+	dismissPathnamePrefix
 }: {
 	promptTitle: string
 	promptMessage: string
@@ -29,6 +31,8 @@ export function confirmedAction({
 	action: () => Promise<unknown>
 	// Whether to pop back on success. `router.canGoBack()` is checked by the helper.
 	dismiss?: () => boolean
+	// Pop back on success when the current pathname starts with this. Takes precedence over `dismiss`.
+	dismissPathnamePrefix?: string
 }): () => Promise<void> {
 	return async () => {
 		const promptResult = await run(async () => {
@@ -63,7 +67,9 @@ export function confirmedAction({
 			return
 		}
 
-		if (dismiss?.() && router.canGoBack()) {
+		const shouldDismiss = dismissPathnamePrefix ? useAppStore.getState().pathname.startsWith(dismissPathnamePrefix) : dismiss?.()
+
+		if (shouldDismiss && router.canGoBack()) {
 			router.back()
 		}
 	}

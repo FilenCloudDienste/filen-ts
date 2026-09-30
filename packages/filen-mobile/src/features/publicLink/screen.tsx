@@ -21,7 +21,7 @@ import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import alerts from "@/lib/alerts"
 import { Group } from "@/components/ui/settingsGroup"
 import { PressableOpacity } from "@/components/ui/pressables"
-import { PasswordState_Tags, PasswordState, PublicLinkExpiration, DirColor } from "@filen/sdk-rs"
+import { PasswordState_Tags, PasswordState, PublicLinkExpiration } from "@filen/sdk-rs"
 import prompts from "@/lib/prompts"
 import { run } from "@filen/shared"
 import { shareUrl } from "@/lib/share"
@@ -122,17 +122,19 @@ function PublicLink() {
 
 	const userIsSubbed = accountQuery.status === "success" && accountQuery.data.subs.filter(sub => Number(sub.activated) === 1).length > 0
 
+	// Only read inside the loaded-link branch, so the fallback is unreachable
+	const serverDownloadable = publicLinkStatusQuery.data
+		? publicLinkStatusQuery.data.type === "file"
+			? publicLinkStatusQuery.data.status.downloadable
+			: publicLinkStatusQuery.data.status.enableDownload
+		: false
+
 	if (!itemParsed || (itemParsed.type !== "file" && itemParsed.type !== "directory")) {
 		return <DismissStack />
 	}
 
 	if (itemParsed.data.undecryptable) {
-		return (
-			<CannotDecryptScreen
-				uuid={itemParsed.data.uuid}
-				surface="publicLink"
-			/>
-		)
+		return <CannotDecryptScreen uuid={itemParsed.data.uuid} />
 	}
 
 	return (
@@ -281,7 +283,7 @@ function PublicLink() {
 										<View className="bg-transparent items-center justify-center flex-col py-10 px-4">
 											{itemParsed.type === "directory" ? (
 												<DirectoryIcon
-													color={itemParsed.type === "directory" ? itemParsed.data.color : DirColor.Default.new()}
+													color={itemParsed.data.color}
 													width={128}
 													height={128}
 												/>
@@ -377,10 +379,7 @@ function PublicLink() {
 																			return
 																		}
 
-																		if (
-																			promptResult.data.cancelled ||
-																			promptResult.data.type !== "string"
-																		) {
+																		if (promptResult.data.cancelled) {
 																			return
 																		}
 
@@ -478,23 +477,11 @@ function PublicLink() {
 													title: t("downloadable"),
 													rightItem: {
 														type: "switch",
-														value:
-															edited && typeof edited.downloadable === "boolean"
-																? edited.downloadable
-																: publicLinkStatusQuery.data.type === "file"
-																	? publicLinkStatusQuery.data.status.downloadable
-																	: publicLinkStatusQuery.data.status.enableDownload,
+														value: edited?.downloadable ?? serverDownloadable,
 														onValueChange: async () => {
 															setEdited(prev => ({
 																...(prev ?? {}),
-																downloadable:
-																	prev && typeof prev.downloadable === "boolean"
-																		? !prev.downloadable
-																		: publicLinkStatusQuery.data
-																			? publicLinkStatusQuery.data.type === "file"
-																				? !publicLinkStatusQuery.data.status.downloadable
-																				: !publicLinkStatusQuery.data.status.enableDownload
-																			: true
+																downloadable: !(prev?.downloadable ?? serverDownloadable)
 															}))
 														}
 													}

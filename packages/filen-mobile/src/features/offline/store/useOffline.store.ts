@@ -3,21 +3,27 @@ import { type OfflineSyncError } from "@/features/offline/offlineHelpers"
 
 export type OfflineStore = {
 	syncing: boolean
-	setSyncing: (fn: boolean | ((prev: boolean) => boolean)) => void
+	setSyncing: (syncing: boolean) => void
 	syncErrors: OfflineSyncError[]
 	setSyncErrors: (syncErrors: OfflineSyncError[]) => void
+	// Bumped whenever offline.ts swaps its in-memory index, so row selectors reading the index
+	// synchronously re-run (and re-render only when their own answer flips).
+	storedVersion: number
+	bumpStoredVersion: () => void
 }
 
 export const useOfflineStore = create<OfflineStore>(set => ({
 	syncing: false,
-	setSyncing(fn) {
-		set(state => ({
-			syncing: typeof fn === "function" ? fn(state.syncing) : fn
-		}))
+	setSyncing(syncing) {
+		set({ syncing })
 	},
 	syncErrors: [],
 	setSyncErrors(syncErrors) {
 		set({ syncErrors })
+	},
+	storedVersion: 0,
+	bumpStoredVersion() {
+		set(state => ({ storedVersion: state.storedVersion + 1 }))
 	}
 }))
 

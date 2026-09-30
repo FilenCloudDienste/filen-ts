@@ -30,8 +30,6 @@ vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/u
 
 vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
 
-vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
-
 vi.mock("@filen/shared", async () => {
 	const real = await import("@/tests/mocks/filenShared")
 
@@ -55,7 +53,6 @@ vi.mock("@/lib/cache", () => ({
 }))
 
 vi.mock("@/queries/client", () => ({
-	DEFAULT_QUERY_OPTIONS: {},
 	queryUpdater: {
 		get: vi.fn(),
 		set: vi.fn()

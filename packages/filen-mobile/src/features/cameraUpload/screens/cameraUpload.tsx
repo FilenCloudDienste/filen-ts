@@ -1,7 +1,7 @@
 import { SettingsScrollView } from "@/components/ui/settingsScrollView"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import { Group, type Button } from "@/components/ui/settingsGroup"
-import cameraUpload, { useCameraUploadConfig, DEFAULT_CONFIG, type Config } from "@/features/cameraUpload/cameraUpload"
+import cameraUpload, { useCameraUploadConfig, type Config } from "@/features/cameraUpload/cameraUpload"
 import cameraUploadState from "@/features/cameraUpload/cameraUploadState"
 import { useCameraUploadDestination } from "@/features/cameraUpload/queries/useCameraUploadDestination.query"
 import { applyAfterActivationToggle, CAMERA_UPLOAD_REUPLOAD_DELETED_SECURE_STORE_KEY } from "@/features/cameraUpload/cameraUploadHelpers"
@@ -84,11 +84,6 @@ const CameraUpload = () => {
 			value: config[field],
 			onValueChange: () => {
 				setConfig(prev => {
-					prev = {
-						...DEFAULT_CONFIG,
-						...prev
-					}
-
 					if (field === "afterActivation") {
 						return applyAfterActivationToggle({
 							config: prev,
@@ -329,17 +324,10 @@ const CameraUpload = () => {
 													}
 												}
 
-												setConfig(prev => {
-													prev = {
-														...DEFAULT_CONFIG,
-														...prev
-													}
-
-													return {
-														...prev,
-														remoteDir
-													}
-												})
+												setConfig(prev => ({
+													...prev,
+													remoteDir
+												}))
 											}
 										}
 									]}

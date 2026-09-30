@@ -1,16 +1,16 @@
 import { NativeView } from "react-native-boost/runtime"
 import { withUniwind, useUniwind } from "uniwind"
-import { type ViewProps, type View as RNView, Platform, type StyleProp, type ViewStyle, StyleSheet } from "react-native"
+import { type ViewProps, type View as RNView, Platform, type ViewStyle, StyleSheet } from "react-native"
 import { cn } from "@filen/shared"
 import {
 	KeyboardAvoidingView as RNKeyboardControllerKeyboardAvoidingView,
 	KeyboardAwareScrollView as RNKeyboardControllerKeyboardAwareScrollView,
 	KeyboardStickyView as RNKeyboardControllerKeyboardStickyView
 } from "react-native-keyboard-controller"
-import { GlassView as ExpoGlassView, GlassContainer as ExpoGlassContainer } from "expo-glass-effect"
+import { GlassView as ExpoGlassView } from "expo-glass-effect"
 import { ScrollView as RNGestureHandlerScrollView } from "react-native-gesture-handler"
 
-export const UniwindView = withUniwind(NativeView) as React.FC<ViewProps>
+const UniwindView = withUniwind(NativeView) as React.FC<ViewProps>
 
 export const View = ((props: React.ComponentPropsWithRef<typeof RNView>) => {
 	return (
@@ -21,7 +21,7 @@ export const View = ((props: React.ComponentPropsWithRef<typeof RNView>) => {
 	)
 }) as unknown as React.FC<React.ComponentPropsWithRef<typeof RNView>>
 
-export const UniwindKeyboardAvoidingView = withUniwind(RNKeyboardControllerKeyboardAvoidingView) as React.FC<
+const UniwindKeyboardAvoidingView = withUniwind(RNKeyboardControllerKeyboardAvoidingView) as React.FC<
 	React.ComponentProps<typeof RNKeyboardControllerKeyboardAvoidingView>
 >
 
@@ -36,7 +36,7 @@ export const KeyboardAvoidingView = (
 	)
 }
 
-export const UniwindKeyboardAwareScrollView = withUniwind(RNKeyboardControllerKeyboardAwareScrollView) as React.FC<
+const UniwindKeyboardAwareScrollView = withUniwind(RNKeyboardControllerKeyboardAwareScrollView) as React.FC<
 	React.ComponentProps<typeof RNKeyboardControllerKeyboardAwareScrollView>
 >
 
@@ -51,7 +51,7 @@ export const KeyboardAwareScrollView = (
 	)
 }
 
-export const UniwindKeyboardStickyView = withUniwind(RNKeyboardControllerKeyboardStickyView) as React.FC<
+const UniwindKeyboardStickyView = withUniwind(RNKeyboardControllerKeyboardStickyView) as React.FC<
 	React.ComponentProps<typeof RNKeyboardControllerKeyboardStickyView>
 >
 
@@ -66,17 +66,7 @@ export const KeyboardStickyView = (
 	)
 }
 
-export const UniwindLiquidGlassView = withUniwind(ExpoGlassView) as React.FC<React.ComponentProps<typeof ExpoGlassView>>
-
-export const LiquidGlassView = (props: React.ComponentProps<typeof ExpoGlassView> & React.RefAttributes<RNView>) => {
-	return <UniwindLiquidGlassView {...props} />
-}
-
-export const UniwindGlassContainerView = withUniwind(ExpoGlassContainer) as React.FC<React.ComponentProps<typeof ExpoGlassContainer>>
-
-export const LiquidGlassContainerView = (props: React.ComponentProps<typeof ExpoGlassContainer> & React.RefAttributes<RNView>) => {
-	return <UniwindGlassContainerView {...props} />
-}
+export const LiquidGlassView = withUniwind(ExpoGlassView) as React.FC<React.ComponentProps<typeof ExpoGlassView> & React.RefAttributes<RNView>>
 
 // Single-View "liquid glass" approximation for everywhere the real material is unavailable
 // (Android, and iOS with disableLiquidGlass). No blur: expo-blur on Android needs the BlurView
@@ -135,14 +125,12 @@ const FAKE_GLASS_BOX_SHADOW_LIGHT: ViewStyle["boxShadow"] = [
 export const CrossGlassContainerView = ({
 	children,
 	className,
-	style,
 	disableLiquidGlass,
 	disableInteraction,
 	theme
 }: {
 	children: React.ReactNode
 	className?: string
-	style?: StyleProp<ViewStyle>
 	disableLiquidGlass?: boolean
 	disableInteraction?: boolean
 	theme?: "dark" | "light"
@@ -154,7 +142,6 @@ export const CrossGlassContainerView = ({
 			<LiquidGlassView
 				className={cn("rounded-full overflow-hidden", className)}
 				isInteractive={!disableInteraction}
-				style={style}
 			>
 				{children}
 			</LiquidGlassView>
@@ -164,25 +151,18 @@ export const CrossGlassContainerView = ({
 	return (
 		<View
 			className={cn("rounded-full overflow-hidden border bg-background-secondary/95 border-black/10 dark:border-white/15", className)}
-			style={[
-				style,
-				{
-					borderWidth: StyleSheet.hairlineWidth,
-					boxShadow: theme === "dark" || uniwindTheme === "dark" ? FAKE_GLASS_BOX_SHADOW_DARK : FAKE_GLASS_BOX_SHADOW_LIGHT
-				}
-			]}
+			style={{
+				borderWidth: StyleSheet.hairlineWidth,
+				boxShadow: theme === "dark" || uniwindTheme === "dark" ? FAKE_GLASS_BOX_SHADOW_DARK : FAKE_GLASS_BOX_SHADOW_LIGHT
+			}}
 		>
 			{children}
 		</View>
 	)
 }
 
-export const UniwindGestureHandlerScrollView = withUniwind(RNGestureHandlerScrollView) as React.FC<
-	React.ComponentProps<typeof RNGestureHandlerScrollView>
+export const GestureHandlerScrollView = withUniwind(RNGestureHandlerScrollView) as React.FC<
+	React.ComponentProps<typeof RNGestureHandlerScrollView> & React.RefAttributes<RNView>
 >
-
-export const GestureHandlerScrollView = (props: React.ComponentProps<typeof RNGestureHandlerScrollView> & React.RefAttributes<RNView>) => {
-	return <UniwindGestureHandlerScrollView {...props} />
-}
 
 export default View

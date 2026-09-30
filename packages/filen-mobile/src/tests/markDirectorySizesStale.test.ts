@@ -14,7 +14,6 @@ vi.mock("@filen/shared", async () => ({
 	sortParams: (await import("@filen/shared")).sortParams
 }))
 vi.mock("@/queries/client", () => ({
-	DEFAULT_QUERY_OPTIONS: {},
 	get queryClient() {
 		return holder.client
 	},

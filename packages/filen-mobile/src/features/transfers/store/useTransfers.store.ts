@@ -144,6 +144,11 @@ let lastTotalBytes = 0
 let cumulativeBytes = 0
 let samples: Sample[] = []
 
+const EMPTY_STATS: TransfersStore["stats"] = {
+	progress: 0,
+	speed: 0
+}
+
 function resetSpeedState(): void {
 	if (interval) {
 		clearInterval(interval)
@@ -174,20 +179,9 @@ function updateTransfers({
 	if (transfers.length === 0) {
 		resetSpeedState()
 
-		if (state.stats.count === 0 && state.stats.progress === 0 && state.stats.speed === 0) {
-			return {
-				transfers,
-				stats: state.stats
-			}
-		}
-
 		return {
 			transfers,
-			stats: {
-				progress: 0,
-				speed: 0,
-				count: 0
-			}
+			stats: state.stats.progress === 0 && state.stats.speed === 0 ? state.stats : EMPTY_STATS
 		}
 	}
 
@@ -293,8 +287,7 @@ function updateTransfers({
 		transfers,
 		stats: {
 			progress,
-			speed,
-			count: transfers.length
+			speed
 		}
 	}
 }
@@ -305,7 +298,6 @@ export type TransfersStore = {
 	stats: {
 		progress: number
 		speed: number
-		count: number
 	}
 	setTransfers: (fn: Transfer[] | ((prev: Transfer[]) => Transfer[])) => void
 	// Append a settled (succeeded/errored) snapshot, then cap at MAX_FINISHED_TRANSFERS by
@@ -320,11 +312,7 @@ export type TransfersStore = {
 export const useTransfersStore = create<TransfersStore>(set => ({
 	transfers: [],
 	finishedTransfers: [],
-	stats: {
-		progress: 0,
-		speed: 0,
-		count: 0
-	} satisfies TransfersStore["stats"],
+	stats: EMPTY_STATS,
 	setTransfers(fn) {
 		set(state => {
 			const transfers = typeof fn === "function" ? fn(state.transfers) : fn

@@ -1,5 +1,4 @@
-import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
-import { DEFAULT_QUERY_OPTIONS } from "@/queries/client"
+import { useQuery, type UseQueryResult } from "@tanstack/react-query"
 import * as MediaLibraryLegacy from "expo-media-library/legacy"
 
 export const BASE_QUERY_KEY = "useCameraUploadAlbumLatestPhotoQuery"
@@ -21,14 +20,13 @@ export async function fetchData(albumId: string, _signal?: AbortSignal): Promise
 	return page.assets.at(0)?.uri ?? null
 }
 
-export function useCameraUploadAlbumLatestPhotoQuery(
-	{ albumId }: { albumId: string },
-	options?: Omit<UseQueryOptions<Awaited<ReturnType<typeof fetchData>>, Error>, "queryKey" | "queryFn">
-): UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error> {
+export function useCameraUploadAlbumLatestPhotoQuery({
+	albumId
+}: {
+	albumId: string
+}): UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error> {
 	const query = useQuery<Awaited<ReturnType<typeof fetchData>>, Error>({
-		...DEFAULT_QUERY_OPTIONS,
 		staleTime: STALE_TIME_MS,
-		...options,
 		queryKey: [BASE_QUERY_KEY, albumId],
 		queryFn: ({ signal }) => fetchData(albumId, signal)
 	})

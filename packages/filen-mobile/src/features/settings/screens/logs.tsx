@@ -221,7 +221,6 @@ const Logs = () => {
 					data={visible}
 					extraData={expanded}
 					loading={loading}
-					contentInsetAdjustmentBehavior="automatic"
 					contentContainerStyle={{
 						paddingBottom: insets.bottom
 					}}

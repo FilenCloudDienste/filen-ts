@@ -54,7 +54,7 @@ const Menu = ({
 			return
 		}
 
-		if (result.data.cancelled || result.data.type !== "string") {
+		if (result.data.cancelled) {
 			return
 		}
 
@@ -253,7 +253,7 @@ const Menu = ({
 					return
 				}
 
-				if (promptResult.data.cancelled || promptResult.data.type !== "string") {
+				if (promptResult.data.cancelled) {
 					return
 				}
 

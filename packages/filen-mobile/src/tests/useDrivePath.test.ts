@@ -26,8 +26,6 @@ vi.mock("expo-router", () => ({
 	})
 }))
 
-vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
-
 vi.mock("expo-secure-store", async () => await import("@/tests/mocks/expoSecureStore"))
 
 vi.mock("react-native-mmkv", async () => await import("@/tests/mocks/reactNativeMMKV"))

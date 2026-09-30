@@ -8,7 +8,7 @@ import events from "@/lib/events"
 import useDriveSelectStore from "@/features/drive/store/useDriveSelect.store"
 import { serializeSelectOptions } from "@/features/drive/driveSelectParams"
 import type { CopyDestination } from "@/features/copy/copyAdapter"
-import { copyDestinationOf } from "@/features/drive/clipboard"
+import { copyDestinationOf } from "@/features/drive/copyDestination"
 
 // Opens a picker session over `options.items` and pushes its first screen at the drive root. The items
 // stay in the session store until that root screen unmounts; the route carries only the session id.
@@ -79,11 +79,8 @@ export async function selectDriveItems(options: Omit<SelectOptions, "intention" 
 }
 
 // Picks where `items` get copied to: the directory the picker is showing when "Copy here" is tapped, or
-// null when it is dismissed. The caller starts the copy. `rootName` names the drive root as a destination.
-export async function selectCopyDestination(
-	items: DriveItem[],
-	rootName: string
-): Promise<{ destinationDir: AnyNormalDir; destination: CopyDestination } | null> {
+// null when it is dismissed. The caller starts the copy.
+export async function selectCopyDestination(items: DriveItem[]): Promise<{ destinationDir: AnyNormalDir; destination: CopyDestination } | null> {
 	const { authedSdkClient } = await auth.getSdkClients()
 	const rootUuid = authedSdkClient.root().uuid
 
@@ -107,7 +104,7 @@ export async function selectCopyDestination(
 
 			resolve({
 				destinationDir: picked.data,
-				destination: copyDestinationOf(picked.data, rootUuid, rootName)
+				destination: copyDestinationOf(picked.data)
 			})
 		})
 

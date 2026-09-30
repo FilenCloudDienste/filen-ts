@@ -279,7 +279,6 @@ export type UploadParams = {
 	// foreground-initiated transfer, cancelled when the app backgrounds without an active foreground service.
 	background?: boolean
 	awaitExternalCompletionBeforeMarkingAsFinished?: () => Promise<void>
-	pauseSignal?: PauseSignal
 	signal?: AbortSignal
 	name?: string
 	created?: number
@@ -295,7 +294,6 @@ export type DownloadParams = {
 	// foreground-initiated transfer, cancelled when the app backgrounds without an active foreground service.
 	background?: boolean
 	awaitExternalCompletionBeforeMarkingAsFinished?: () => Promise<void>
-	pauseSignal?: PauseSignal
 	signal?: AbortSignal
 	// When true, a directory download must NOT pre-delete an existing populated destination before the
 	// recursive download starts (nor delete it again on a non-abort failure). Used by the offline layer's
@@ -322,7 +320,6 @@ export async function uploadCore(
 		localFileOrDir,
 		parent,
 		awaitExternalCompletionBeforeMarkingAsFinished,
-		pauseSignal,
 		signal,
 		name,
 		created,
@@ -344,10 +341,8 @@ export async function uploadCore(
 	const id = randomUUID()
 	const { authedSdkClient } = await auth.getSdkClients()
 	const transferAbortController = new AbortController()
-	// When no caller-owned pauseSignal is supplied we allocate one here. Its inner SdkPauseSignal is a
-	// uniffi (Rust Arc-backed) handle, so we must dispose() the ones we own once the transfer settles.
-	const ownsTransferPauseSignal = !pauseSignal
-	const transferPauseSignal = pauseSignal ?? new PauseSignal()
+	// Its inner SdkPauseSignal is a uniffi (Rust Arc-backed) handle, disposed once the transfer settles.
+	const transferPauseSignal = new PauseSignal()
 	const compositePauseSignal = createCompositePauseSignal(globalPauseSignal, transferPauseSignal)
 	const compositeAbortSignal = signal
 		? createCompositeAbortSignal(globalAbortController.signal, transferAbortController.signal, signal)
@@ -369,10 +364,7 @@ export async function uploadCore(
 				compositePauseSignal.dispose()
 				compositeAbortSignal.dispose()
 				disposeSdkAbortSignal(wrappedAbortSignal)
-
-				if (ownsTransferPauseSignal) {
-					transferPauseSignal.dispose()
-				}
+				transferPauseSignal.dispose()
 			})
 
 			wrappedAbortSignal = wrapAbortSignalForSdk(compositeAbortSignal)
@@ -703,10 +695,7 @@ export async function uploadCore(
 			compositePauseSignal.dispose()
 			compositeAbortSignal.dispose()
 			disposeSdkAbortSignal(wrappedAbortSignal)
-
-			if (ownsTransferPauseSignal) {
-				transferPauseSignal.dispose()
-			}
+			transferPauseSignal.dispose()
 		})
 
 		wrappedAbortSignal = wrapAbortSignalForSdk(compositeAbortSignal)
@@ -968,7 +957,6 @@ export async function downloadCore(
 		item,
 		destination,
 		awaitExternalCompletionBeforeMarkingAsFinished,
-		pauseSignal,
 		signal,
 		preserveDestinationOnStart,
 		bypassCache
@@ -993,10 +981,8 @@ export async function downloadCore(
 	const id = randomUUID()
 	const { authedSdkClient } = await auth.getSdkClients()
 	const transferAbortController = new AbortController()
-	// When no caller-owned pauseSignal is supplied we allocate one here. Its inner SdkPauseSignal is a
-	// uniffi (Rust Arc-backed) handle, so we must dispose() the ones we own once the transfer settles.
-	const ownsTransferPauseSignal = !pauseSignal
-	const transferPauseSignal = pauseSignal ?? new PauseSignal()
+	// Its inner SdkPauseSignal is a uniffi (Rust Arc-backed) handle, disposed once the transfer settles.
+	const transferPauseSignal = new PauseSignal()
 	const compositePauseSignal = createCompositePauseSignal(globalPauseSignal, transferPauseSignal)
 	const compositeAbortSignal = signal
 		? createCompositeAbortSignal(globalAbortController.signal, transferAbortController.signal, signal)
@@ -1015,10 +1001,7 @@ export async function downloadCore(
 				compositePauseSignal.dispose()
 				compositeAbortSignal.dispose()
 				disposeSdkAbortSignal(wrappedAbortSignal)
-
-				if (ownsTransferPauseSignal) {
-					transferPauseSignal.dispose()
-				}
+				transferPauseSignal.dispose()
 			})
 
 			wrappedAbortSignal = wrapAbortSignalForSdk(compositeAbortSignal)
@@ -1284,10 +1267,7 @@ export async function downloadCore(
 			compositePauseSignal.dispose()
 			compositeAbortSignal.dispose()
 			disposeSdkAbortSignal(wrappedAbortSignal)
-
-			if (ownsTransferPauseSignal) {
-				transferPauseSignal.dispose()
-			}
+			transferPauseSignal.dispose()
 		})
 
 		if (!(destination instanceof FileSystem.File)) {

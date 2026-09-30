@@ -3,7 +3,7 @@ import { Platform } from "react-native"
 import { onlineManager } from "@tanstack/react-query"
 import { useLocalSearchParams, useNavigation } from "expo-router"
 import { router } from "@/lib/router"
-import { deserializeRouteParam, serialize } from "@/lib/serializer"
+import { serialize } from "@/lib/serializer"
 import View from "@/components/ui/view"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import ListEmpty from "@/components/ui/listEmpty"
@@ -126,15 +126,13 @@ const History = ({ history, note }: { history: TNoteHistory; note: Note }) => {
 
 const NoteHistory = () => {
 	const { t } = useTranslation()
-	const { note: noteSerialized } = useLocalSearchParams<{
-		note?: string
+	const { uuid } = useLocalSearchParams<{
+		uuid?: string
 	}>()
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const textForeground = useResolveClassNames("text-foreground")
 	const insets = useSafeAreaInsets()
 	const navigation = useNavigation()
-
-	const noteParsed = deserializeRouteParam<Note>(noteSerialized)
 
 	const notesQuery = useNotesQuery({
 		enabled: false
@@ -142,7 +140,7 @@ const NoteHistory = () => {
 
 	// A failed refetch keeps the data and only flips `status` (#103) — resolve from the cached
 	// list so an offline note still opens.
-	const note = noteParsed ? (notesQuery.data?.find(n => n.uuid === noteParsed.uuid) ?? null) : null
+	const note = uuid ? (notesQuery.data?.find(n => n.uuid === uuid) ?? null) : null
 
 	const noteHistoryQuery = useNoteHistoryQuery(
 		{
@@ -226,7 +224,6 @@ const NoteHistory = () => {
 				<VirtualList
 					data={history}
 					loading={noteHistoryQuery.status === "pending"}
-					contentInsetAdjustmentBehavior="automatic"
 					contentContainerStyle={{
 						paddingBottom: insets.bottom
 					}}

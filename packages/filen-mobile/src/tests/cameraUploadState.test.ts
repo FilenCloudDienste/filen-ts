@@ -300,16 +300,6 @@ describe("write-through", () => {
 		expect(deserialize(kvStore.get(HASHES_PREFIX + "asset1") as string)).toEqual({ md5: "m1", verifiedModificationTime: 9 })
 	})
 
-	it("deleteHash removes from memory and kv", async () => {
-		const state = make()
-
-		await state.setHash("asset1", "x")
-		await state.deleteHash("asset1")
-
-		expect(state.getHashSync("asset1")).toBeUndefined()
-		expect(kvStore.has(HASHES_PREFIX + "asset1")).toBe(false)
-	})
-
 	it("applyHashBatch applies upserts and deletes to memory and kv in one wave", async () => {
 		const state = make()
 
@@ -488,7 +478,6 @@ describe("clearForLogout", () => {
 
 		await state.setHash("x", "v")
 		await state.setAbort("x", 1)
-		await state.deleteHash("x")
 		await state.deleteAbort("x")
 		await state.applyHashBatch({ upserts: [["y", "v"]], deletes: ["z"] })
 

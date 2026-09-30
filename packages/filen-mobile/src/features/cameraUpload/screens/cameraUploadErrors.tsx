@@ -232,7 +232,6 @@ const CameraUploadErrors = () => {
 			>
 				<VirtualList<Row>
 					data={rows}
-					contentInsetAdjustmentBehavior="automatic"
 					contentContainerStyle={{
 						paddingBottom: insets.bottom
 					}}

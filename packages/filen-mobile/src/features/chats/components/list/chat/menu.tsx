@@ -12,9 +12,8 @@ import { router } from "@/lib/router"
 import useChatsStore from "@/features/chats/store/useChats.store"
 import { useShallow } from "zustand/shallow"
 import useChatUnreadCount from "@/features/chats/hooks/useChatUnreadCount"
-import { serialize } from "@/lib/serializer"
 import { t } from "@/lib/i18n"
-import { confirmedChatAction } from "@/features/chats/components/confirmedChatAction"
+import { confirmedAction } from "@/lib/confirmedAction"
 import logger from "@/lib/logger"
 
 export type ChatMenuOrigin = "chats" | "search" | "chat"
@@ -29,7 +28,7 @@ function deleteChatButton(chat: TChat): MenuButton {
 		title: t("delete"),
 		destructive: true,
 		icon: "delete",
-		onPress: confirmedChatAction({
+		onPress: confirmedAction({
 			promptTitle: t("delete_chat"),
 			promptMessage: t("delete_chat_confirmation"),
 			promptOkText: t("delete"),
@@ -46,7 +45,7 @@ function leaveChatButton(chat: TChat): MenuButton {
 		title: t("leave"),
 		destructive: true,
 		icon: "exit",
-		onPress: confirmedChatAction({
+		onPress: confirmedAction({
 			promptTitle: t("leave_chat"),
 			promptMessage: t("leave_chat_confirmation"),
 			promptOkText: t("leave"),
@@ -170,7 +169,7 @@ export function createMenuButtons({
 				router.push({
 					pathname: "/chatParticipants",
 					params: {
-						chat: serialize(chat)
+						uuid: chat.uuid
 					}
 				})
 			}
@@ -184,7 +183,6 @@ export function createMenuButtons({
 						icon: "users",
 						onPress: async () => {
 							const selectContactsResult = await selectContacts({
-								multiple: true,
 								userIdsToExclude: chat.participants.map(p => Number(p.userId))
 							})
 
@@ -229,7 +227,7 @@ export function createMenuButtons({
 								return
 							}
 
-							if (promptResult.data.cancelled || promptResult.data.type !== "string") {
+							if (promptResult.data.cancelled) {
 								return
 							}
 

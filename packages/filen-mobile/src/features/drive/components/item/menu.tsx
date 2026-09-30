@@ -21,7 +21,6 @@ type MenuProps = {
 	isStoredOffline: boolean
 	disabled?: boolean
 	style?: StyleProp<ViewStyle>
-	showSelectToggle?: boolean
 	// Set by the preview (gallery) header so destructive actions close the preview on success.
 	isPreview?: boolean
 	previewBackground?: boolean
@@ -39,7 +38,6 @@ const MenuInner = ({
 	isStoredOffline,
 	disabled,
 	style,
-	showSelectToggle,
 	isPreview,
 	previewBackground,
 	linkSaveable
@@ -54,7 +52,6 @@ const MenuInner = ({
 				item,
 				drivePath,
 				isStoredOffline,
-				showSelectToggle,
 				isPreview,
 				clipboard,
 				linkSaveable,

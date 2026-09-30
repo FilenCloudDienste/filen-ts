@@ -1,7 +1,6 @@
 import Image from "@/components/ui/image"
 import View from "@/components/ui/view"
 import { cn } from "@filen/shared"
-import type { ViewStyle, StyleProp } from "react-native"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import { useResolveClassNames } from "uniwind"
 import { useRecyclingState } from "@shopify/flash-list"
@@ -10,7 +9,6 @@ const Avatar = (props: {
 	size?: number
 	source?: string | null | undefined
 	className?: string
-	style?: StyleProp<ViewStyle>
 	immediateFallback?: boolean
 	group?: number
 	lastActive?: number
@@ -34,13 +32,10 @@ const Avatar = (props: {
 					"flex-row overflow-hidden rounded-full bg-background-tertiary items-center justify-center shrink-0",
 					props.className
 				)}
-				style={[
-					props.style,
-					{
-						width: size,
-						height: size
-					}
-				]}
+				style={{
+					width: size,
+					height: size
+				}}
 			>
 				{props.group ? (
 					<Ionicons

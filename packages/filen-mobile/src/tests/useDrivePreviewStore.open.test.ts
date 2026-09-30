@@ -4,7 +4,6 @@ const { mockRouterPush } = vi.hoisted(() => ({
 	mockRouterPush: vi.fn()
 }))
 
-vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
 vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
 
@@ -351,41 +350,8 @@ describe("useDrivePreviewStore.open — uncovered spec cases", () => {
 		})
 	})
 
-	// -------------------------------------------------------------------------
-	// Finding #210 — photos path: image file with unsupported extension is excluded
-	// -------------------------------------------------------------------------
-	// The photos filter applies an extra allowlist gate: image-type files must also
-	// have an extension in EXPO_IMAGE_SUPPORTED_EXTENSIONS (the displayable set).
-	// The mock set contains .jpg .jpeg .png .gif .webp .avif .heic .heif .svg .ico;
-	// the getPreviewType mock classifies .bmp as "image" but it is absent from
-	// EXPO_IMAGE_SUPPORTED_EXTENSIONS — so .bmp is excluded from photos.
-	// .avif IS in EXPO_IMAGE_SUPPORTED_EXTENSIONS and must now be KEPT (finding #48).
-	describe("photos path: unsupported image extension gate", () => {
-		it("excludes an image file whose extension is not in EXPO_IMAGE_SUPPORTED_EXTENSIONS from the photos gallery", () => {
-			const photosDrivePath = makeDrivePath("photos")
-			// .bmp is classified as "image" by getPreviewType but is absent from
-			// EXPO_IMAGE_SUPPORTED_EXTENSIONS (the displayable set)
-			const unsupportedItem = makeDriveGalleryItem("bmp1", "photo.bmp")
-			const supportedItem = makeDriveGalleryItem("jpg1", "photo.jpg")
-			const items: GalleryItemTagged[] = [unsupportedItem, supportedItem]
-
-			useDrivePreviewStore.getState().open({
-				items,
-				initialItem: makeInitialDriveItem("jpg1", "photo.jpg", photosDrivePath)
-			})
-
-			const state = useDrivePreviewStore.getState()
-			const uuids = state.items.map(i => (i as Extract<GalleryItemTagged, { type: "drive" }>).data.data.uuid)
-
-			// Unsupported extension must be filtered out of the photos gallery
-			expect(uuids).not.toContain("bmp1")
-			// Supported extension must remain
-			expect(uuids).toContain("jpg1")
-		})
-
-		it("includes a .bmp image in the regular drive gallery even though it is excluded from photos", () => {
-			// For a regular 'drive' path the extra extension gate does not apply;
-			// .bmp is classified as "image" so it must appear in the drive gallery.
+	describe("regular drive gallery", () => {
+		it("includes a .bmp image classified as image", () => {
 			const bmpItem = makeDriveGalleryItem("bmp1", "photo.bmp")
 			const jpgItem = makeDriveGalleryItem("jpg1", "photo.jpg")
 			const items: GalleryItemTagged[] = [bmpItem, jpgItem]
@@ -398,27 +364,7 @@ describe("useDrivePreviewStore.open — uncovered spec cases", () => {
 			const state = useDrivePreviewStore.getState()
 			const uuids = state.items.map(i => (i as Extract<GalleryItemTagged, { type: "drive" }>).data.data.uuid)
 
-			// .bmp is image/video/audio → included in the regular gallery
 			expect(uuids).toContain("bmp1")
-			expect(uuids).toContain("jpg1")
-		})
-
-		it("excludes a .bmp image from the photos gallery (same extension, different path type)", () => {
-			const photosDrivePath = makeDrivePath("photos")
-			const bmpItem = makeDriveGalleryItem("bmp1", "photo.bmp")
-			const jpgItem = makeDriveGalleryItem("jpg1", "photo.jpg")
-			const items: GalleryItemTagged[] = [bmpItem, jpgItem]
-
-			useDrivePreviewStore.getState().open({
-				items,
-				initialItem: makeInitialDriveItem("jpg1", "photo.jpg", photosDrivePath)
-			})
-
-			const state = useDrivePreviewStore.getState()
-			const uuids = state.items.map(i => (i as Extract<GalleryItemTagged, { type: "drive" }>).data.data.uuid)
-
-			// .bmp is classified as "image" but is not in EXPO_IMAGE_SUPPORTED_EXTENSIONS
-			expect(uuids).not.toContain("bmp1")
 			expect(uuids).toContain("jpg1")
 		})
 	})
@@ -468,26 +414,6 @@ describe("useDrivePreviewStore.open — uncovered spec cases", () => {
 			expect(state.items).toHaveLength(1)
 			expect(state.currentIndex).toBe(0)
 			expect(mockRouterPush).toHaveBeenCalledTimes(1)
-		})
-
-		it("still excludes an image whose extension is outside the expo-image set (the gate stays for image/svg)", () => {
-			const photosDrivePath = makeDrivePath("photos")
-
-			useDrivePreviewStore.getState().open({
-				items: [
-					makeDriveGalleryItem("bmp1", "photo.bmp"),
-					makeDriveGalleryItem("raw1", "shot.dng"),
-					makeDriveGalleryItem("jpg1", "photo.jpg")
-				],
-				initialItem: makeInitialDriveItem("jpg1", "photo.jpg", photosDrivePath)
-			})
-
-			const uuids = useDrivePreviewStore
-				.getState()
-				.items.map(i => (i as Extract<GalleryItemTagged, { type: "drive" }>).data.data.uuid)
-
-			expect(uuids).not.toContain("bmp1")
-			expect(uuids).toContain("raw1")
 		})
 	})
 
@@ -568,12 +494,8 @@ describe("useDrivePreviewStore.open — uncovered spec cases", () => {
 
 	// -------------------------------------------------------------------------
 	// Finding #48 — photos path gallery filter: case-insensitive extension +
-	// EXPO_IMAGE_SUPPORTED_EXTENSIONS (not the ImageManipulator subset)
-	//
-	// The store's photos-path filter calls Paths.extname (case-preserving — the
-	// mock mirrors production: no .toLowerCase() in extname itself) then must
-	// lowercase before the Set.has() check.  IMG.HEIC and photo.avif must both
-	// be kept.  Grid and gallery predicates are identical by spec.
+	// EXPO_IMAGE_SUPPORTED_EXTENSIONS (not the ImageManipulator subset).
+	// The gallery shares the grid's isPhotoGridItem predicate.
 	// -------------------------------------------------------------------------
 	describe("finding #48 — photos path: case-insensitive extension + EXPO_IMAGE_SUPPORTED_EXTENSIONS", () => {
 		it("keeps IMG.HEIC (uppercase extension) in the photos gallery", () => {

@@ -6,10 +6,7 @@ import chatsLib from "@/features/chats/chats"
 import logger from "@/lib/logger"
 
 export async function createChatFlow(): Promise<void> {
-	const selectContactsResult = await selectContacts({
-		multiple: true,
-		userIdsToExclude: []
-	})
+	const selectContactsResult = await selectContacts()
 
 	if (selectContactsResult.cancelled) {
 		return

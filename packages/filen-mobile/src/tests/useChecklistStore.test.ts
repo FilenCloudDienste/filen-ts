@@ -14,8 +14,6 @@ describe("createChecklistStore", () => {
 		const state = store.getState()
 
 		expect(state.parsed).toEqual([])
-		expect(state.ids).toEqual([])
-		expect(state.initialIds).toEqual({})
 		expect(state.inputRefs).toEqual({})
 	})
 
@@ -36,24 +34,6 @@ describe("createChecklistStore", () => {
 		expect(store.getState().parsed.every(i => i.checked)).toBe(true)
 	})
 
-	it("setIds accepts a value and an updater fn", () => {
-		const store = createChecklistStore()
-
-		store.getState().setIds(["a", "b"])
-		store.getState().setIds(prev => [...prev, "c"])
-
-		expect(store.getState().ids).toEqual(["a", "b", "c"])
-	})
-
-	it("setInitialIds accepts a value and an updater fn", () => {
-		const store = createChecklistStore()
-
-		store.getState().setInitialIds({ a: true })
-		store.getState().setInitialIds(prev => ({ ...prev, b: true }))
-
-		expect(store.getState().initialIds).toEqual({ a: true, b: true })
-	})
-
 	it("setInputRefs accepts a value and an updater fn", () => {
 		const store = createChecklistStore()
 		const refA = { current: null }
@@ -72,16 +52,12 @@ describe("createChecklistStore", () => {
 		const historyStore = createChecklistStore()
 
 		liveStore.getState().setParsed(live)
-		liveStore.getState().setIds(live.map(i => i.id))
 
 		// Hydrating the history editor (as its initialValue useEffect would) must not touch the live store.
 		historyStore.getState().setParsed(history)
-		historyStore.getState().setIds(history.map(i => i.id))
 
 		expect(liveStore.getState().parsed).toEqual(live)
-		expect(liveStore.getState().ids).toEqual(["live-1", "live-2"])
 		expect(historyStore.getState().parsed).toEqual(history)
-		expect(historyStore.getState().ids).toEqual(["history-1"])
 	})
 
 	it("input refs are not shared across instances", () => {

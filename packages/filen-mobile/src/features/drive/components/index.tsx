@@ -16,7 +16,7 @@ import Header from "@/features/drive/components/header"
 import DriveListFooter from "@/features/drive/components/listFooter"
 import { run, cn, isBlocked, filterHiddenItems } from "@filen/shared"
 import alerts from "@/lib/alerts"
-import { type View as RNView, Platform, ActivityIndicator } from "react-native"
+import { Platform, ActivityIndicator } from "react-native"
 import useViewLayout from "@/hooks/useViewLayout"
 import { useDriveViewMode } from "@/features/drive/driveViewModePreference"
 import { gridColumnsForWidth, GRID_EDGE_PADDING } from "@/features/drive/driveGrid"
@@ -31,17 +31,12 @@ import { useDriveDirectorySizes } from "@/features/drive/hooks/useDriveDirectory
 import { useDriveHighlight } from "@/features/drive/hooks/useDriveHighlight"
 import useBlockedUsers from "@/features/contacts/hooks/useBlockedUsers"
 import { getSharerIdentity } from "@/features/drive/driveSharer"
-import {
-	getDriveEmptyStateIcon,
-	getDriveEmptyStateTitleKey,
-	getDriveEmptyStateDescriptionKey,
-	filterDriveItemsBySearchQuery
-} from "@/features/drive/utils"
+import { getDriveEmptyState, filterDriveItemsBySearchQuery } from "@/features/drive/utils"
 import offlineSync from "@/features/offline/offlineSync"
 import SyncErrorsHeaderRow from "@/features/offline/components/syncErrorsHeaderRow"
 import { LazyWrapper } from "@/components/lazyWrapper"
 import { getDriveParent, canShowDriveCreateMenu, buildDriveCreateMenuButtons } from "@/features/drive/components/driveCreateMenu"
-import { useDriveUpload, type UseDriveUpload } from "@/features/drive/hooks/useDriveUpload"
+import { useDriveUpload } from "@/features/drive/hooks/useDriveUpload"
 import useDriveClipboardStore from "@/features/drive/store/useDriveClipboard.store"
 import { type AnyNormalDir } from "@filen/sdk-rs"
 import View from "@/components/ui/view"
@@ -52,23 +47,12 @@ import Ionicons from "@expo/vector-icons/Ionicons"
 import logger from "@/lib/logger"
 import { useResolveClassNames } from "uniwind"
 
-// Height reserved below each grid card for the single-line filename label.
-const GRID_LABEL_HEIGHT = 28
-
 // Subscribes to the clipboard itself so a copy or cut re-renders this button, not the whole listing.
-const EmptyAddMenu = ({
-	parent,
-	upload,
-	drivePath,
-	primaryColor
-}: {
-	parent: AnyNormalDir | null
-	upload: UseDriveUpload
-	drivePath: DrivePath
-	primaryColor: string
-}) => {
+const EmptyAddMenu = ({ parent, drivePath }: { parent: AnyNormalDir | null; drivePath: DrivePath }) => {
 	const { t } = useTranslation()
 	const clipboard = useDriveClipboardStore(state => state.entry)
+	const upload = useDriveUpload({ parent, drivePath, t })
+	const primaryColor = useResolveClassNames("bg-primary").backgroundColor as string
 
 	return (
 		<Menu
@@ -99,14 +83,11 @@ const EmptyAddMenu = ({
 const Drive = () => {
 	const drivePath = useDrivePath()
 	const { viewMode } = useDriveViewMode(drivePath)
-	const containerRef = useRef<RNView>(null)
 	const listRef = useRef<ListRef<DriveItem>>(null)
-	const { layout, onLayout } = useViewLayout(containerRef)
+	const { layout, onLayout } = useViewLayout()
 	const isGrid = viewMode === "grid"
 	const columns = gridColumnsForWidth(layout.width)
 	const gridItemWidth = isGrid && layout.width > 0 ? (layout.width - GRID_EDGE_PADDING * 2) / columns : 0
-	const gridItemHeight = gridItemWidth + GRID_LABEL_HEIGHT
-	// Guard: VirtualList throws if grid=true but itemWidth/itemHeight are absent.
 	// Before the first layout event layout.width is 0, so we fall back to list for that frame.
 	const isGridActive = isGrid && gridItemWidth > 0
 	const { t } = useTranslation()
@@ -114,11 +95,7 @@ const Drive = () => {
 	const { sort } = useDriveSortPreference(drivePath)
 	const [hideHiddenItems] = useHideHiddenItems()
 	const blocked = useBlockedUsers()
-	const parent = getDriveParent(drivePath)
-	const upload = useDriveUpload({ parent, drivePath, t })
 	const textForegroundColor = useResolveClassNames("text-foreground").color as string
-	const primaryColor = useResolveClassNames("bg-primary").backgroundColor as string
-	const canCreate = canShowDriveCreateMenu({ drivePath, parent, selectionMode: false })
 
 	const driveItemsQuery = useDriveItemsQuery(
 		{
@@ -329,12 +306,11 @@ const Drive = () => {
 			>
 				{/*  disabled={!(drivePath.type === "drive" && !drivePath.uuid && !drivePath.selectOptions && !drivePath.linked)} */}
 				{/*
-				 * Measuring wrapper: ref + onLayout let useViewLayout track the available
+				 * Measuring wrapper: onLayout lets useViewLayout track the available
 				 * width so we can compute gridItemWidth before VirtualList renders. Mirrors
 				 * the same pattern used in features/photos/screens/photos.tsx.
 				 */}
 				<View
-					ref={containerRef}
 					onLayout={onLayout}
 					className="flex-1 bg-transparent"
 				>
@@ -343,7 +319,6 @@ const Drive = () => {
 							ref={listRef}
 							key={isGridActive ? `grid-${columns}` : "list"}
 							className={cn("flex-1", driveScreenUsesBaseBackground(drivePath) ? "bg-background" : "bg-background-secondary")}
-							contentInsetAdjustmentBehavior="automatic"
 							contentContainerClassName={cn("pb-80", Platform.OS === "android" && "pb-96", isGridActive && "px-2")}
 							keyExtractor={(item: DriveItem) => {
 								return item.data.uuid
@@ -353,9 +328,6 @@ const Drive = () => {
 							// the last sync pass's error count as a pressable row above the listing.
 							// The row hides itself while there are no errors.
 							headerComponent={drivePath.type === "offline" && !drivePath.uuid ? () => <SyncErrorsHeaderRow /> : undefined}
-							grid={isGridActive}
-							itemWidth={isGridActive ? gridItemWidth : undefined}
-							itemHeight={isGridActive ? gridItemHeight : undefined}
 							itemsPerRow={isGridActive ? columns : undefined}
 							renderItem={(info: ListRenderItemInfo<DriveItem>) => {
 								// getListItems is hoisted (see above): a fresh closure per row would be a new prop
@@ -539,18 +511,19 @@ const Drive = () => {
 									)
 								}
 
+								const emptyState = getDriveEmptyState(drivePath.type)
+								const parent = getDriveParent(drivePath)
+
 								return (
 									<ListEmpty
-										icon={getDriveEmptyStateIcon(drivePath.type)}
-										title={t(getDriveEmptyStateTitleKey(drivePath.type))}
-										description={t(getDriveEmptyStateDescriptionKey(drivePath.type))}
+										icon={emptyState.icon}
+										title={t(emptyState.titleKey)}
+										description={t(emptyState.descriptionKey)}
 										action={
-											canCreate ? (
+											canShowDriveCreateMenu({ drivePath, parent, selectionMode: false }) ? (
 												<EmptyAddMenu
 													parent={parent}
-													upload={upload}
 													drivePath={drivePath}
-													primaryColor={primaryColor}
 												/>
 											) : undefined
 										}

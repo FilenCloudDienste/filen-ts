@@ -2,7 +2,7 @@ import { create } from "zustand"
 
 export type AppStore = {
 	pathname: string
-	setPathname: (fn: string | ((prev: string) => string)) => void
+	setPathname: (pathname: string) => void
 	// null = unknown (initial). false = biometric/PIN lock is currently up.
 	// true = either biometric is not enabled, or it has been cleared.
 	// Initial null is critical: any side-effect that depends on the lock
@@ -14,10 +14,10 @@ export type AppStore = {
 
 export const useAppStore = create<AppStore>(set => ({
 	pathname: "/",
-	setPathname(fn) {
-		set(state => ({
-			pathname: typeof fn === "function" ? fn(state.pathname) : fn
-		}))
+	setPathname(pathname) {
+		set({
+			pathname
+		})
 	},
 	biometricUnlocked: null,
 	setBiometricUnlocked(value) {

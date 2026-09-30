@@ -51,7 +51,6 @@ vi.mock("@/queries/client", async () => {
 	return {
 		default: queryClient,
 		queryClient,
-		DEFAULT_QUERY_OPTIONS: {},
 		queryUpdater: {
 			get: (queryKey: unknown[]) => queryClient.getQueryData(queryKey),
 			set: (queryKey: unknown[], data: unknown) => queryClient.setQueryData(queryKey, data)

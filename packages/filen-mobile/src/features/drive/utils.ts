@@ -10,22 +10,6 @@ import { driveItemDisplayName } from "@/lib/decryption"
 
 type IoniconName = React.ComponentProps<typeof Ionicons>["name"]
 
-// Empty-state icon per drive variant. Variants without a bespoke icon
-// (drive / photos / linked) fall back to the generic open-folder glyph —
-// matching the original chained-ternary default.
-export const DRIVE_EMPTY_STATE_ICON: Record<DrivePathType, IoniconName> = {
-	trash: "trash-outline",
-	favorites: "heart-outline",
-	recents: "time-outline",
-	sharedIn: "people-outline",
-	sharedOut: "people-outline",
-	links: "link-outline",
-	offline: "cloud-offline-outline",
-	drive: "folder-open-outline",
-	photos: "folder-open-outline",
-	linked: "folder-open-outline"
-}
-
 type DriveEmptyStateTitleKey =
 	| "trash_is_empty"
 	| "no_favorites"
@@ -36,20 +20,33 @@ type DriveEmptyStateTitleKey =
 	| "no_offline_items"
 	| "folder_is_empty"
 
-// Empty-state title key per drive variant. The original used `t(...)` inline in
-// two chained ternaries; the lookup table keeps those keys in one place while the
-// caller still resolves the translation.
-export const DRIVE_EMPTY_STATE_TITLE_KEY: Record<DrivePathType, DriveEmptyStateTitleKey> = {
-	trash: "trash_is_empty",
-	favorites: "no_favorites",
-	recents: "no_recents",
-	sharedIn: "no_shared_in_items",
-	sharedOut: "no_shared_out_items",
-	links: "no_links",
-	offline: "no_offline_items",
-	drive: "folder_is_empty",
-	photos: "folder_is_empty",
-	linked: "folder_is_empty"
+type DriveEmptyState = {
+	icon: IoniconName
+	titleKey: DriveEmptyStateTitleKey
+	descriptionKey: `${DriveEmptyStateTitleKey}_description`
+}
+
+function emptyState(icon: IoniconName, titleKey: DriveEmptyStateTitleKey): DriveEmptyState {
+	return {
+		icon,
+		titleKey,
+		descriptionKey: `${titleKey}_description`
+	}
+}
+
+const FOLDER_EMPTY_STATE = emptyState("folder-open-outline", "folder_is_empty")
+
+const DRIVE_EMPTY_STATE: Record<DrivePathType, DriveEmptyState> = {
+	trash: emptyState("trash-outline", "trash_is_empty"),
+	favorites: emptyState("heart-outline", "no_favorites"),
+	recents: emptyState("time-outline", "no_recents"),
+	sharedIn: emptyState("people-outline", "no_shared_in_items"),
+	sharedOut: emptyState("people-outline", "no_shared_out_items"),
+	links: emptyState("link-outline", "no_links"),
+	offline: emptyState("cloud-offline-outline", "no_offline_items"),
+	drive: FOLDER_EMPTY_STATE,
+	photos: FOLDER_EMPTY_STATE,
+	linked: FOLDER_EMPTY_STATE
 }
 
 // Narrows a (sorted) DriveItem list to the subset matching the active search
@@ -69,53 +66,8 @@ export function filterDriveItemsBySearchQuery<T extends DriveItem>(items: T[], s
 	return items.filter(item => driveItemDisplayName(item).toLowerCase().includes(normalized))
 }
 
-export function getDriveEmptyStateIcon(type: DrivePathType | null): IoniconName {
-	if (type === null) {
-		return DRIVE_EMPTY_STATE_ICON.drive
-	}
-
-	return DRIVE_EMPTY_STATE_ICON[type]
-}
-
-export function getDriveEmptyStateTitleKey(type: DrivePathType | null): DriveEmptyStateTitleKey {
-	if (type === null) {
-		return DRIVE_EMPTY_STATE_TITLE_KEY.drive
-	}
-
-	return DRIVE_EMPTY_STATE_TITLE_KEY[type]
-}
-
-type DriveEmptyStateDescriptionKey =
-	| "trash_is_empty_description"
-	| "no_favorites_description"
-	| "no_recents_description"
-	| "no_shared_in_items_description"
-	| "no_shared_out_items_description"
-	| "no_links_description"
-	| "no_offline_items_description"
-	| "folder_is_empty_description"
-
-// Empty-state subtitle key per drive variant — mirrors DRIVE_EMPTY_STATE_TITLE_KEY
-// so the ListEmpty under each Drive variant gets a fitting one-line description.
-export const DRIVE_EMPTY_STATE_DESCRIPTION_KEY: Record<DrivePathType, DriveEmptyStateDescriptionKey> = {
-	trash: "trash_is_empty_description",
-	favorites: "no_favorites_description",
-	recents: "no_recents_description",
-	sharedIn: "no_shared_in_items_description",
-	sharedOut: "no_shared_out_items_description",
-	links: "no_links_description",
-	offline: "no_offline_items_description",
-	drive: "folder_is_empty_description",
-	photos: "folder_is_empty_description",
-	linked: "folder_is_empty_description"
-}
-
-export function getDriveEmptyStateDescriptionKey(type: DrivePathType | null): DriveEmptyStateDescriptionKey {
-	if (type === null) {
-		return DRIVE_EMPTY_STATE_DESCRIPTION_KEY.drive
-	}
-
-	return DRIVE_EMPTY_STATE_DESCRIPTION_KEY[type]
+export function getDriveEmptyState(type: DrivePathType | null): DriveEmptyState {
+	return type === null ? FOLDER_EMPTY_STATE : DRIVE_EMPTY_STATE[type]
 }
 
 /**
@@ -267,32 +219,16 @@ export function pickDisplayTimestamp(metaValue: bigint | number | null | undefin
 // so the item-info size query keys off the active DrivePath instead. Everything
 // not covered (drive / recents / favorites / links / photos / null) is a regular
 // remote directory → "normal".
+const DIRECTORY_SIZE_TYPE: Partial<Record<DrivePathType, UseDirectorySizeQueryParams["type"]>> = {
+	sharedIn: "sharedIn",
+	sharedOut: "sharedOut",
+	trash: "trash",
+	offline: "offline",
+	linked: "linked"
+}
+
 export function directorySizeTypeForDrivePath(type: DrivePathType | null | undefined): UseDirectorySizeQueryParams["type"] {
-	switch (type) {
-		case "sharedIn": {
-			return "sharedIn"
-		}
-
-		case "sharedOut": {
-			return "sharedOut"
-		}
-
-		case "trash": {
-			return "trash"
-		}
-
-		case "offline": {
-			return "offline"
-		}
-
-		case "linked": {
-			return "linked"
-		}
-
-		default: {
-			return "normal"
-		}
-	}
+	return (type ? DIRECTORY_SIZE_TYPE[type] : undefined) ?? "normal"
 }
 
 // Display sanitizer for the custom directory-color hex field: strips everything but hex

@@ -2,7 +2,7 @@ import { ChatTypingType } from "@filen/sdk-rs"
 import { useTranslation } from "react-i18next"
 import { type Chat } from "@/types"
 import { useRef, useEffect, Fragment, useCallback } from "react"
-import { TextInput, type View as TView, useWindowDimensions, type TextInputSelectionChangeEvent, type ScaledSize } from "react-native"
+import { TextInput, useWindowDimensions, type TextInputSelectionChangeEvent, type ScaledSize } from "react-native"
 import View, { KeyboardStickyView, CrossGlassContainerView } from "@/components/ui/view"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import { useResolveClassNames } from "uniwind"
@@ -139,8 +139,7 @@ export async function flushInflightMessagesWithAlert(): Promise<void> {
 const Input = ({ chat }: { chat: Chat }) => {
 	const { t } = useTranslation()
 	const insets = useSafeAreaInsets()
-	const inputViewRef = useRef<TView>(null)
-	const { onLayout: inputViewOnLayout, layout: inputViewLayout } = useViewLayout(inputViewRef)
+	const { onLayout: inputViewOnLayout, layout: inputViewLayout } = useViewLayout()
 	const textForeground = useResolveClassNames("text-foreground")
 	const windowDimensions = useWindowDimensions()
 	const [chatInputValue, setChatInputValue] = useSecureStore<string>(`chatInputValue:${chat.uuid}`, "")
@@ -443,7 +442,6 @@ const Input = ({ chat }: { chat: Chat }) => {
 			<ReplyTo chat={chat} />
 			<View
 				className="bg-transparent flex-row items-end gap-2 px-4"
-				ref={inputViewRef}
 				onLayout={inputViewOnLayout}
 			>
 				<Menu

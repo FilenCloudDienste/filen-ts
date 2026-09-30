@@ -302,14 +302,26 @@ export function isDriveItemNavigateOnly({
 }
 
 /**
+ * Whether `resolveDriveNavigationTarget` resolves a target: false for files, the trash view, and a
+ * linked view missing its `linked` payload (a picker resolves before the linked branch). Cheap, so
+ * menus can decide the "Open" button without serializing route params per row.
+ */
+export function canNavigateIntoDirectory({ item, drivePath }: { item: DriveItem; drivePath: DrivePath }): boolean {
+	return (
+		DIRECTORY_TYPES.has(item.type) &&
+		drivePath.type !== "trash" &&
+		!(drivePath.type === "linked" && !drivePath.selectOptions && !drivePath.linked)
+	)
+}
+
+/**
  * Resolves the router target for navigating INTO a directory row, keyed off the
- * current drive variant. Returns null when the item isn't a navigable directory
- * (files, trash view, or a linked view missing its `linked` payload).
+ * current drive variant. Returns null when `canNavigateIntoDirectory` is false.
  *
  * The returned object is a valid expo-router `Href` for `router.push`.
  */
 export function resolveDriveNavigationTarget({ item, drivePath }: { item: DriveItem; drivePath: DrivePath }) {
-	if (!DIRECTORY_TYPES.has(item.type) || drivePath.type === "trash") {
+	if (!canNavigateIntoDirectory({ item, drivePath })) {
 		return null
 	}
 
@@ -382,6 +394,7 @@ export function resolveDriveNavigationTarget({ item, drivePath }: { item: DriveI
 	}
 
 	if (drivePath.type === "linked") {
+		// Unreachable past canNavigateIntoDirectory; narrows `linked` for the serializer.
 		if (!drivePath.linked) {
 			return null
 		}

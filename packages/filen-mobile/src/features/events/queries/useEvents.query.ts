@@ -1,5 +1,5 @@
-import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
-import { DEFAULT_QUERY_OPTIONS, queryUpdater } from "@/queries/client"
+import { useQuery, type UseQueryResult } from "@tanstack/react-query"
+import { queryUpdater } from "@/queries/client"
 import auth from "@/lib/auth"
 
 export const BASE_QUERY_KEY = "useEvents"
@@ -18,12 +18,8 @@ export async function fetchData(params?: { signal?: AbortSignal; timestamp?: big
 	)
 }
 
-export function useEventsQuery(
-	options?: Omit<UseQueryOptions, "queryKey" | "queryFn">
-): UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error> {
-	const query = useQuery({
-		...DEFAULT_QUERY_OPTIONS,
-		...options,
+export function useEventsQuery(): UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error> {
+	const query = useQuery<Awaited<ReturnType<typeof fetchData>>, Error>({
 		queryKey: [BASE_QUERY_KEY],
 		queryFn: ({ signal }) =>
 			fetchData({
@@ -31,7 +27,7 @@ export function useEventsQuery(
 			})
 	})
 
-	return query as UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error>
+	return query
 }
 
 export function eventsQueryUpdate({
@@ -44,10 +40,6 @@ export function eventsQueryUpdate({
 	queryUpdater.set<Awaited<ReturnType<typeof fetchData>>>([BASE_QUERY_KEY], prev => {
 		return typeof updater === "function" ? updater(prev ?? []) : updater
 	})
-}
-
-export function eventsQueryGet() {
-	return queryUpdater.get<Awaited<ReturnType<typeof fetchData>>>([BASE_QUERY_KEY])
 }
 
 export default useEventsQuery

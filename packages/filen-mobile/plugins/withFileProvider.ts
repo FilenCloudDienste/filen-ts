@@ -1,4 +1,4 @@
-import { ConfigPlugin, ExportedConfigWithProps, XcodeProject } from "@expo/config-plugins"
+import { ConfigPlugin } from "@expo/config-plugins"
 import { withXcodeProject } from "@expo/config-plugins/build/plugins/ios-plugins"
 import { withDangerousMod } from "@expo/config-plugins/build/plugins/withDangerousMod"
 import { build } from "@expo/plist/build/build.js"
@@ -6,86 +6,22 @@ import { execSync } from "child_process"
 import fs from "node:fs"
 import path from "node:path"
 
-// Rust build functions
-
-export type IOSRustBuildPluginProps = {
+type FileProviderPluginProps = {
 	libName: string
 	crateName: string
 	targets: string[]
 	cargoArgs?: string
+	iosAppGroupIdentifier: string
+	developmentTeamId: string
 }
 
-// Main plugin
-export type FileProviderPluginProps = IOSRustBuildPluginProps & {
-	iosFileProviderName?: string
-	iosFileProviderBundleIdentifier?: string
-	iosAppGroupIdentifier?: string
-	developmentTeamId?: string
-}
+const EXTENSION_NAME = "FilenFileProvider"
 
-// Constants
-export const fileProviderName = "FilenFileProvider"
-export const fileProviderInfoFileName = `${fileProviderName}-Info.plist`
-export const fileProviderEntitlementsFileName = `${fileProviderName}.entitlements`
-
-// Helper functions
-export const getFileProviderName = (parameters?: FileProviderPluginProps) => {
-	if (!parameters?.iosFileProviderName) {
-		return fileProviderName
-	}
-
-	return parameters.iosFileProviderName.replace(/[^a-zA-Z0-9]/g, "")
-}
-
-export const getAppGroup = (identifier: string, parameters: FileProviderPluginProps) => {
-	return parameters.iosAppGroupIdentifier || `group.${identifier}`
-}
-
-export const getFileProviderBundledIdentifier = (appIdentifier: string, parameters: FileProviderPluginProps) => {
-	return parameters.iosFileProviderBundleIdentifier || `${appIdentifier}.FileProvider`
-}
-
-// File path helpers
-export const getFileProviderEntitlementsFilePath = (platformProjectRoot: string, parameters: FileProviderPluginProps) => {
-	return path.join(platformProjectRoot, getFileProviderName(parameters), fileProviderEntitlementsFileName)
-}
-
-export const getFileProviderInfoFilePath = (platformProjectRoot: string, parameters: FileProviderPluginProps) => {
-	return path.join(platformProjectRoot, getFileProviderName(parameters), fileProviderInfoFileName)
-}
-
-export const getFileProviderSwiftFilePath = (platformProjectRoot: string, parameters: FileProviderPluginProps, swiftFileName: string) => {
-	return path.join(platformProjectRoot, getFileProviderName(parameters), swiftFileName)
-}
-
-export const getPrivacyInfoFilePath = (platformProjectRoot: string, parameters: FileProviderPluginProps) => {
-	return path.join(platformProjectRoot, getFileProviderName(parameters), "PrivacyInfo.xcprivacy")
-}
-
-// Content generators
-export const getFileProviderEntitlements = (appIdentifier: string, parameters: FileProviderPluginProps) => {
-	return {
-		"com.apple.security.application-groups": [getAppGroup(appIdentifier, parameters)],
-		// Shared keychain access group so the extension can read the auth.json DEK the app wrote via
-		// expo-secure-store. Team-prefixed literal when the team id is known; otherwise the build-time
-		// $(AppIdentifierPrefix) form that Xcode expands at signing.
-		"keychain-access-groups": [
-			parameters.developmentTeamId
-				? `${parameters.developmentTeamId}.io.filen.sharedkeys`
-				: "$(AppIdentifierPrefix)io.filen.sharedkeys"
-		]
-	}
-}
-
-export const getFileProviderEntitlementsContent = (appIdentifier: string, parameters: FileProviderPluginProps) => {
-	return build(getFileProviderEntitlements(appIdentifier, parameters))
-}
-
-export const getFileProviderInfoContent = (appName: string, appIdentifier: string, parameters: FileProviderPluginProps) => {
+const getFileProviderInfoContent = (appName: string, props: FileProviderPluginProps) => {
 	return build({
-		AppGroup: getAppGroup(appIdentifier, parameters),
+		AppGroup: props.iosAppGroupIdentifier,
 		CFBundleName: "$(PRODUCT_NAME)",
-		CFBundleDisplayName: parameters.iosFileProviderName || `${appName} - File Provider`,
+		CFBundleDisplayName: `${appName} - File Provider`,
 		CFBundleIdentifier: "$(PRODUCT_BUNDLE_IDENTIFIER)",
 		CFBundleDevelopmentRegion: "$(DEVELOPMENT_LANGUAGE)",
 		CFBundleExecutable: "$(EXECUTABLE_NAME)",
@@ -115,35 +51,31 @@ export const getFileProviderInfoContent = (appName: string, appIdentifier: strin
 	})
 }
 
-// File writing function
-export const writeFileProviderFiles = async (
-	platformProjectRoot: string,
-	appIdentifier: string,
-	config: ExportedConfigWithProps<XcodeProject>,
-	props: IOSRustBuildPluginProps,
-	appName: string
+const writeFileProviderFiles = async (
+	extensionDir: string,
+	projectRoot: string,
+	swiftFiles: string[],
+	appName: string,
+	props: FileProviderPluginProps
 ) => {
-	// FileProvider-Info.plist
-	const infoPlistFilePath = getFileProviderInfoFilePath(platformProjectRoot, props)
-	const infoPlistContent = getFileProviderInfoContent(appName, appIdentifier, props)
-
-	await fs.promises.mkdir(path.dirname(infoPlistFilePath), {
+	await fs.promises.mkdir(extensionDir, {
 		recursive: true
 	})
 
-	await fs.promises.writeFile(infoPlistFilePath, infoPlistContent)
-
-	// FileProvider.entitlements
-	const entitlementsFilePath = getFileProviderEntitlementsFilePath(platformProjectRoot, props)
-	const entitlementsContent = getFileProviderEntitlementsContent(appIdentifier, props)
-
-	await fs.promises.writeFile(entitlementsFilePath, entitlementsContent)
-
-	// PrivacyInfo.xcprivacy
-	const privacyFilePath = getPrivacyInfoFilePath(platformProjectRoot, props)
+	await fs.promises.writeFile(path.join(extensionDir, `${EXTENSION_NAME}-Info.plist`), getFileProviderInfoContent(appName, props))
 
 	await fs.promises.writeFile(
-		privacyFilePath,
+		path.join(extensionDir, `${EXTENSION_NAME}.entitlements`),
+		build({
+			"com.apple.security.application-groups": [props.iosAppGroupIdentifier],
+			// Shared keychain access group so the extension can read the auth.json DEK the app wrote via
+			// expo-secure-store.
+			"keychain-access-groups": [`${props.developmentTeamId}.io.filen.sharedkeys`]
+		})
+	)
+
+	await fs.promises.writeFile(
+		path.join(extensionDir, "PrivacyInfo.xcprivacy"),
 		build({
 			NSPrivacyAccessedAPITypes: [
 				{
@@ -156,27 +88,19 @@ export const writeFileProviderFiles = async (
 		})
 	)
 
-	await fs.promises.mkdir(path.join(platformProjectRoot, getFileProviderName(props)), {
-		recursive: true
-	})
+	const swiftSrcDir = path.join(projectRoot, "filen-ios-file-provider", "FilenFileProviderExtension")
 
-	const fileProviderSwiftSrcPath = path.join(config.modRequest.projectRoot, "filen-ios-file-provider", "FilenFileProviderExtension")
-	for (const file of await fs.promises.readdir(fileProviderSwiftSrcPath)) {
-		if (!file.endsWith(".swift")) {
-			continue
-		}
-		const sourceFilePath = path.join(fileProviderSwiftSrcPath, file)
-		const targetFilePath = getFileProviderSwiftFilePath(config.modRequest.platformProjectRoot, props, file)
-		await fs.promises.copyFile(sourceFilePath, targetFilePath)
+	for (const file of swiftFiles) {
+		await fs.promises.copyFile(path.join(swiftSrcDir, file), path.join(extensionDir, file))
 	}
 
 	await fs.promises.copyFile(
-		path.join(config.modRequest.projectRoot, "filen-rs", "target", "uniffi-xcframework-staging", `${props.libName}.swift`),
-		getFileProviderSwiftFilePath(config.modRequest.platformProjectRoot, props, `${props.libName}.swift`)
+		path.join(projectRoot, "filen-rs", "target", "uniffi-xcframework-staging", `${props.libName}.swift`),
+		path.join(extensionDir, `${props.libName}.swift`)
 	)
 }
 
-async function buildRustForIOS(projectRoot: string, props: IOSRustBuildPluginProps) {
+async function buildRustForIOS(projectRoot: string, props: FileProviderPluginProps) {
 	const { libName, targets, cargoArgs } = props
 	const fullRustPath = path.join(projectRoot, "filen-rs")
 
@@ -213,49 +137,34 @@ async function buildRustForIOS(projectRoot: string, props: IOSRustBuildPluginPro
 	)
 }
 
-export const withFileProviderXcodeTarget: ConfigPlugin<FileProviderPluginProps> = (config, props) => {
-	const { targets } = props
-	const hasX86Target = targets.some(t => t === "x86_64-apple-ios-sim")
-	const hasArmTarget = targets.some(t => t === "aarch64-apple-ios-sim" || t === "aarch64-apple-ios")
-
-	if (hasArmTarget && hasX86Target) {
-		throw new Error(
-			"[file-provider] The iOS FileProvider plugin does not support both x86_64 and arm64 targets at the same time (due to limitations in the xcode node module used by expo). Please choose one of them."
-		)
-	}
-
+const withFileProviderXcodeTarget: ConfigPlugin<FileProviderPluginProps> = (config, props) => {
 	return withXcodeProject(config, async config => {
-		const extensionName = getFileProviderName(props)
-		const platformProjectRoot = config.modRequest.platformProjectRoot
+		const { projectRoot, platformProjectRoot } = config.modRequest
 		const appIdentifier = config.ios?.bundleIdentifier
+		const marketingVersion = config.version
 
-		if (!appIdentifier) {
-			throw new Error(
-				// eslint-disable-next-line quotes
-				'[expo-file-provider] The iOS bundle identifier is not set in your app.json/app.config.json file. Please set "ios.bundleIdentifier" to a valid identifier.'
-			)
+		if (!appIdentifier || !marketingVersion) {
+			throw new Error("[expo-file-provider] \"ios.bundleIdentifier\" and \"version\" must be set in app.config.ts.")
 		}
 
-		const fileProviderIdentifier = getFileProviderBundledIdentifier(appIdentifier, props)
-		const currentProjectVersion = config.ios!.buildNumber || "1"
-		const marketingVersion = config.version!
+		const currentProjectVersion = config.ios?.buildNumber || "1"
+		const extensionDir = path.join(platformProjectRoot, EXTENSION_NAME)
+		const infoPlistFilePath = path.join(extensionDir, `${EXTENSION_NAME}-Info.plist`)
+		const entitlementsFilePath = path.join(extensionDir, `${EXTENSION_NAME}.entitlements`)
+		const swiftFiles = (await fs.promises.readdir(path.join(projectRoot, "filen-ios-file-provider", "FilenFileProviderExtension"))).filter(
+			file => file.endsWith(".swift")
+		)
 
-		// FileProvider-Info.plist
-		const infoPlistFilePath = getFileProviderInfoFilePath(platformProjectRoot, props)
-		// FileProvider.entitlements
-		const entitlementsFilePath = getFileProviderEntitlementsFilePath(platformProjectRoot, props)
-
-		await writeFileProviderFiles(platformProjectRoot, appIdentifier, config, props, config.name)
+		await writeFileProviderFiles(extensionDir, projectRoot, swiftFiles, config.name, props)
 
 		const pbxProject = config.modResults
 
 		// Check if the extension target already exists. If so, abort the process since the steps below are already done.
-		// eslint-disable-next-line no-extra-boolean-cast
-		if (!!pbxProject.pbxTargetByName(extensionName)) {
+		if (pbxProject.pbxTargetByName(EXTENSION_NAME)) {
 			return config
 		}
 
-		const target = pbxProject.addTarget(extensionName, "app_extension", extensionName)
+		const target = pbxProject.addTarget(EXTENSION_NAME, "app_extension", EXTENSION_NAME)
 
 		// Add a new PBXSourcesBuildPhase for our FileProvider Swift files
 		pbxProject.addBuildPhase([], "PBXSourcesBuildPhase", "Sources", target.uuid)
@@ -267,7 +176,7 @@ export const withFileProviderXcodeTarget: ConfigPlugin<FileProviderPluginProps> 
 		pbxProject.addBuildPhase([], "PBXFrameworksBuildPhase", "Frameworks", target.uuid)
 
 		// Create a separate PBXGroup for the FileProvider's files
-		const pbxGroupKey = pbxProject.pbxCreateGroup(extensionName, extensionName)
+		const pbxGroupKey = pbxProject.pbxCreateGroup(EXTENSION_NAME, EXTENSION_NAME)
 
 		pbxProject.addFramework("UniformTypeIdentifiers.framework", {
 			target: target.uuid,
@@ -283,7 +192,7 @@ export const withFileProviderXcodeTarget: ConfigPlugin<FileProviderPluginProps> 
 		})
 
 		// Add the xcframework to the FileProvider target
-		const xcframeworkPath = path.join(config.modRequest.projectRoot, "filen-rs", "target", "ios", `lib${props.libName}.xcframework`)
+		const xcframeworkPath = path.join(projectRoot, "filen-rs", "target", "ios", `lib${props.libName}.xcframework`)
 
 		pbxProject.addFramework(xcframeworkPath, {
 			customFramework: true,
@@ -296,31 +205,21 @@ export const withFileProviderXcodeTarget: ConfigPlugin<FileProviderPluginProps> 
 		pbxProject.addFile(infoPlistFilePath, pbxGroupKey)
 
 		// Add all Swift source files to our PbxGroup and PBXSourcesBuildPhase
-		const fileProviderSwiftSrcPath = path.join(config.modRequest.projectRoot, "filen-ios-file-provider", "FilenFileProviderExtension")
-		for (const file of await fs.promises.readdir(fileProviderSwiftSrcPath)) {
-			if (file.endsWith(".swift")) {
-				pbxProject.addSourceFile(
-					getFileProviderSwiftFilePath(platformProjectRoot, props, file),
-					{
-						target: target.uuid
-					},
-					pbxGroupKey
-				)
-			}
+		for (const file of [...swiftFiles, `${props.libName}.swift`]) {
+			pbxProject.addSourceFile(
+				path.join(extensionDir, file),
+				{
+					target: target.uuid
+				},
+				pbxGroupKey
+			)
 		}
-		pbxProject.addSourceFile(
-			getFileProviderSwiftFilePath(platformProjectRoot, props, `${props.libName}.swift`),
-			{
-				target: target.uuid
-			},
-			pbxGroupKey
-		)
 
 		// Add the resource files
 		try {
 			// PrivacyInfo.xcprivacy
 			pbxProject.addResourceFile(
-				getPrivacyInfoFilePath(platformProjectRoot, props),
+				path.join(extensionDir, "PrivacyInfo.xcprivacy"),
 				{
 					target: target.uuid
 				},
@@ -330,10 +229,7 @@ export const withFileProviderXcodeTarget: ConfigPlugin<FileProviderPluginProps> 
 			if (e instanceof Error && e.message.includes("reading 'path'")) {
 				console.error(e)
 
-				throw new Error(
-					// eslint-disable-next-line quotes
-					'[expo-file-provider] Could not add resource files to the FileProvider; the xcode patch under patches/ did not apply'
-				)
+				throw new Error("[expo-file-provider] Could not add resource files to the FileProvider; the xcode patch under patches/ did not apply")
 			}
 
 			throw e
@@ -345,7 +241,7 @@ export const withFileProviderXcodeTarget: ConfigPlugin<FileProviderPluginProps> 
 			if (typeof configurations[key].buildSettings !== "undefined") {
 				const buildSettingsObj = configurations[key].buildSettings
 
-				if (typeof buildSettingsObj["PRODUCT_NAME"] !== "undefined" && buildSettingsObj["PRODUCT_NAME"] === `"${extensionName}"`) {
+				if (typeof buildSettingsObj["PRODUCT_NAME"] !== "undefined" && buildSettingsObj["PRODUCT_NAME"] === `"${EXTENSION_NAME}"`) {
 					buildSettingsObj["CLANG_ENABLE_MODULES"] = "YES"
 					buildSettingsObj["INFOPLIST_FILE"] = `"${infoPlistFilePath}"`
 					buildSettingsObj["CODE_SIGN_ENTITLEMENTS"] = `"${entitlementsFilePath}"`
@@ -353,25 +249,16 @@ export const withFileProviderXcodeTarget: ConfigPlugin<FileProviderPluginProps> 
 					buildSettingsObj["CURRENT_PROJECT_VERSION"] = `"${currentProjectVersion}"`
 					buildSettingsObj["GENERATE_INFOPLIST_FILE"] = "YES"
 					buildSettingsObj["MARKETING_VERSION"] = `"${marketingVersion}"`
-					buildSettingsObj["PRODUCT_BUNDLE_IDENTIFIER"] = `"${fileProviderIdentifier}"`
+					buildSettingsObj["PRODUCT_BUNDLE_IDENTIFIER"] = `"${appIdentifier}.FileProvider"`
 					buildSettingsObj["SWIFT_EMIT_LOC_STRINGS"] = "YES"
 					buildSettingsObj["SWIFT_VERSION"] = "5.0"
-					// eslint-disable-next-line quotes
-					buildSettingsObj["TARGETED_DEVICE_FAMILY"] = '"1,2"'
+					buildSettingsObj["TARGETED_DEVICE_FAMILY"] = "\"1,2\""
 					buildSettingsObj["IPHONEOS_DEPLOYMENT_TARGET"] = "16.0"
 				}
 
-				if (props.developmentTeamId) {
-					buildSettingsObj["DEVELOPMENT_TEAM"] = `"${props.developmentTeamId}"`
-				}
-
-				if (hasX86Target) {
-					// there's a bug in the xcode node module that prevents us from correctly specifying EXCLUDED_ARCHS[sdk=iphonesimulator*]
-					// so instead we have to exclude it completely
-					buildSettingsObj["EXCLUDED_ARCHS"] = "arm64"
-				} else {
-					buildSettingsObj["EXCLUDED_ARCHS"] = "x86_64"
-				}
+				buildSettingsObj["DEVELOPMENT_TEAM"] = `"${props.developmentTeamId}"`
+				// Only arm64 targets are built, and the xcode module cannot express a simulator-only exclusion.
+				buildSettingsObj["EXCLUDED_ARCHS"] = "x86_64"
 			}
 		}
 
@@ -379,7 +266,7 @@ export const withFileProviderXcodeTarget: ConfigPlugin<FileProviderPluginProps> 
 	})
 }
 
-export const withFileProvider: ConfigPlugin<FileProviderPluginProps> = (config, props) => {
+const withFileProvider: ConfigPlugin<FileProviderPluginProps> = (config, props) => {
 	// First handle the Rust build
 	config = withDangerousMod(config, [
 		"ios",

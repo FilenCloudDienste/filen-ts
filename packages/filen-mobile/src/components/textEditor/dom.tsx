@@ -10,7 +10,7 @@ import CodeMirror, { EditorView, type ReactCodeMirrorRef } from "@uiw/react-code
 import { xcodeLight, xcodeDark } from "@uiw/codemirror-theme-xcode"
 import { materialDark, materialLight } from "@uiw/codemirror-theme-material"
 import type { TextEditorType, Font, Colors, TextEditorEvents } from "@/components/textEditor"
-import { createTextThemes, parseExtension, loadLanguage } from "@/components/textEditor/codeMirror"
+import { createTextTheme, parseExtension, loadLanguage } from "@/components/textEditor/codeMirror"
 import type { DOMRef } from "@/hooks/useDomEvents/useNativeDomEvents"
 import useDomDomEvents from "@/hooks/useDomEvents/useDomDomEvents"
 import useEffectOnce from "@/hooks/useEffectOnce"
@@ -115,7 +115,6 @@ const TextEditorDOM = ({
 	readOnly,
 	fileName,
 	type,
-	autoFocus,
 	font,
 	colors,
 	markdownPreviewActive,
@@ -135,7 +134,6 @@ const TextEditorDOM = ({
 	readOnly?: boolean
 	fileName?: string
 	type: TextEditorType
-	autoFocus?: boolean
 	font?: Font
 	colors?: Colors
 	markdownPreviewActive?: boolean
@@ -340,12 +338,12 @@ const TextEditorDOM = ({
 
 	const theme = (() => {
 		if (isTextFile) {
-			const textThemes = createTextThemes({
+			return createTextTheme({
+				platform,
+				darkMode,
 				backgroundColor: colors?.background?.primary ?? (darkMode ? "#0d1118" : "#ffffff"),
 				textForegroundColor: colors?.text?.foreground ?? (darkMode ? "#c9d1d9" : "#24292e")
 			})
-
-			return textThemes[platform === "ios" ? "macOS" : "linux"][darkMode ? "dark" : "light"]
 		}
 
 		return platform === "android" ? (darkMode ? materialDark : materialLight) : darkMode ? xcodeDark : xcodeLight
@@ -638,7 +636,6 @@ const TextEditorDOM = ({
 			placeholder={placeholder}
 			indentWithTab={true}
 			theme={theme}
-			autoFocus={autoFocus}
 			style={{
 				width: CODE_MIRROR_WIDTH,
 				// The wrapper is a flex item of #root, which the viewport reset gives a definite

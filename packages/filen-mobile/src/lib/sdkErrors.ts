@@ -1,6 +1,7 @@
 import { FilenSdkError, ErrorKind } from "@filen/sdk-rs"
 import { isNetworkClassErrorKind } from "@filen/shared"
 import i18n from "@/lib/i18n"
+import { type en } from "@/locales/en"
 
 export function unwrapSdkError(error: unknown): FilenSdkError | null {
 	if (FilenSdkError.hasInner(error)) {
@@ -21,6 +22,36 @@ export function isNetworkClassError(error: unknown): boolean {
 	return isNetworkClassErrorKind(unwrapped !== null ? ErrorKind[unwrapped.kind()] : undefined)
 }
 
+const ERROR_KEY_BY_KIND: Partial<Record<ErrorKind, keyof typeof en>> = {
+	[ErrorKind.BadRecoveryKey]: "bad_recovery_key",
+	[ErrorKind.FolderNotFound]: "directory_not_found",
+	[ErrorKind.WrongPassword]: "wrong_password",
+	[ErrorKind.Cancelled]: "operation_cancelled",
+	[ErrorKind.ChunkTooLarge]: "chunk_too_large",
+	[ErrorKind.Conversion]: "conversion_error",
+	[ErrorKind.FileChangedDuringSync]: "file_changed_during_sync",
+	[ErrorKind.HeifError]: "heif_error",
+	[ErrorKind.ImageError]: "image_error",
+	[ErrorKind.InsufficientMemory]: "insufficient_memory",
+	[ErrorKind.Internal]: "internal_error",
+	[ErrorKind.InvalidName]: "invalid_name",
+	[ErrorKind.InvalidState]: "invalid_state",
+	[ErrorKind.InvalidType]: "invalid_type",
+	[ErrorKind.Io]: "fs_io_error",
+	[ErrorKind.MaxStorageReached]: "max_remote_storage_reached",
+	// A 404 on a stored chunk: carries no server message, and its inner text is a raw request URL.
+	[ErrorKind.FileChunkNotFound]: "file_data_not_found",
+	[ErrorKind.MetadataWasNotDecrypted]: "metadata_was_not_decrypted",
+	[ErrorKind.Reqwest]: "network_error",
+	[ErrorKind.Response]: "network_error",
+	[ErrorKind.RetryFailed]: "network_retry_failed",
+	[ErrorKind.Server]: "server_error",
+	[ErrorKind.Unauthenticated]: "unauthenticated",
+	[ErrorKind.Walk]: "fs_directory_walk_error",
+	[ErrorKind.StaleState]: "stale_state",
+	[ErrorKind.MissingStableUuid]: "item_not_modifiable"
+}
+
 // Produces the user-facing string for an SDK error. Priority: (1) SERVER/API errors show the
 // server's own human message (`serverMessage()`, SDK 0.4.26+); (2) any KNOWN error kind shows its
 // friendly localized label — this deliberately WINS over the raw inner Rust message, because for
@@ -30,118 +61,7 @@ export function isNetworkClassError(error: unknown): boolean {
 // message (`innerMessage()`), then the generic label. Module level (not a hook) → uses `i18n`.
 // The same priority for an SDK error already read into its parts (a copy job keeps its errors that way).
 export function sdkErrorPartsToHumanReadable(parts: { kind: ErrorKind; serverMessage: string | undefined; innerMessage: string | undefined }): string {
-	const errorKey = (() => {
-		switch (parts.kind) {
-			case ErrorKind.BadRecoveryKey: {
-				return "bad_recovery_key" as const
-			}
-
-			case ErrorKind.FolderNotFound: {
-				return "directory_not_found" as const
-			}
-
-			case ErrorKind.WrongPassword: {
-				return "wrong_password" as const
-			}
-
-			case ErrorKind.Cancelled: {
-				return "operation_cancelled" as const
-			}
-
-			case ErrorKind.ChunkTooLarge: {
-				return "chunk_too_large" as const
-			}
-
-			case ErrorKind.Conversion: {
-				return "conversion_error" as const
-			}
-
-			case ErrorKind.FileChangedDuringSync: {
-				return "file_changed_during_sync" as const
-			}
-
-			case ErrorKind.HeifError: {
-				return "heif_error" as const
-			}
-
-			case ErrorKind.ImageError: {
-				return "image_error" as const
-			}
-
-			case ErrorKind.InsufficientMemory: {
-				return "insufficient_memory" as const
-			}
-
-			case ErrorKind.Internal: {
-				return "internal_error" as const
-			}
-
-			case ErrorKind.InvalidName: {
-				return "invalid_name" as const
-			}
-
-			case ErrorKind.InvalidState: {
-				return "invalid_state" as const
-			}
-
-			case ErrorKind.InvalidType: {
-				return "invalid_type" as const
-			}
-
-			case ErrorKind.Io: {
-				return "fs_io_error" as const
-			}
-
-			case ErrorKind.MaxStorageReached: {
-				return "max_remote_storage_reached" as const
-			}
-
-			// A 404 on a stored chunk: carries no server message, and its inner text is a raw request URL.
-			case ErrorKind.FileChunkNotFound: {
-				return "file_data_not_found" as const
-			}
-
-			case ErrorKind.MetadataWasNotDecrypted: {
-				return "metadata_was_not_decrypted" as const
-			}
-
-			case ErrorKind.Reqwest: {
-				return "network_error" as const
-			}
-
-			case ErrorKind.Response: {
-				return "network_error" as const
-			}
-
-			case ErrorKind.RetryFailed: {
-				return "network_retry_failed" as const
-			}
-
-			case ErrorKind.Server: {
-				return "server_error" as const
-			}
-
-			case ErrorKind.Unauthenticated: {
-				return "unauthenticated" as const
-			}
-
-			case ErrorKind.Walk: {
-				return "fs_directory_walk_error" as const
-			}
-
-			case ErrorKind.StaleState: {
-				return "stale_state" as const
-			}
-
-			case ErrorKind.MissingStableUuid: {
-				return "item_not_modifiable" as const
-			}
-
-			default: {
-				return "error_generic" as const
-			}
-		}
-	})()
+	const errorKey = ERROR_KEY_BY_KIND[parts.kind] ?? "error_generic"
 
 	// Server/API errors → the server's own human-readable message (the most specific text we have).
 	const serverMessage = parts.serverMessage

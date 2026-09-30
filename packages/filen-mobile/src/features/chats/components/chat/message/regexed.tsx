@@ -2,7 +2,6 @@ import { Text } from "@/components/ui/text"
 import View from "@/components/ui/view"
 import { Platform } from "react-native"
 import { customEmojis } from "@/assets/customEmojis"
-import type { ChatParticipant } from "@filen/sdk-rs"
 import { type Chat } from "@/types"
 import useChatsStore, { type ChatMessageWithInflightId } from "@/features/chats/store/useChats.store"
 import Image from "@/components/ui/image"
@@ -14,43 +13,20 @@ import useOpenExternalLink from "@/hooks/useOpenExternalLink"
 import { useTranslation } from "react-i18next"
 import logger from "@/lib/logger"
 
-export const customEmojisSet = new Set(customEmojis.map(emoji => emoji.id))
-export const customEmojisListRecord: Record<string, string> = Object.fromEntries(
-	customEmojis.map(emoji => [emoji.id, emoji.skins[0] ? emoji.skins[0].src : ""])
-)
+export const customEmojiSrcById = new Map<string, string>()
 
-const Mention = ({
-	name,
-	participant,
-	inflight,
-	fromSelf
-}: {
-	name: string
-	participant?: ChatParticipant
-	inflight?: boolean
-	fromSelf?: boolean
-}) => {
-	const onPress = () => {
-		if (!participant) {
-			return
-		}
+for (const emoji of customEmojis) {
+	const src = emoji.skins[0]?.src
 
-		// TODO: profile popup
+	if (src) {
+		customEmojiSrcById.set(emoji.id, src)
 	}
+}
 
-	return (
-		<PressableScale
-			className="flex-row items-center shrink-0"
-			rippleColor="transparent"
-			onPress={onPress}
-		>
-			{/* Own bubbles are always blue regardless of theme — use a fixed light color, not the
-			    theme `text-foreground` (which is dark in light mode → unreadable on blue). */}
-			<Text className={cn("text-sm", fromSelf ? (inflight ? "text-gray-200" : "text-white") : inflight ? "text-muted-foreground" : "text-foreground")}>
-				@{name}
-			</Text>
-		</PressableScale>
-	)
+// Own bubbles are blue in both themes, so their text is a fixed white rather than the theme
+// `text-foreground` (dark in light mode, unreadable on blue).
+const Mention = ({ name, fromSelf }: { name: string; fromSelf: boolean }) => {
+	return <Text className={cn("text-sm shrink-0", fromSelf ? "text-white" : "text-foreground")}>@{name}</Text>
 }
 
 const CodeBlock = ({ code, fromSelf }: { code: string; fromSelf: boolean }) => {
@@ -71,32 +47,17 @@ const CodeBlock = ({ code, fromSelf }: { code: string; fromSelf: boolean }) => {
 	)
 }
 
-export const Link = ({ match, fromSelf, inflight }: { match: string; fromSelf: boolean; inflight?: boolean }) => {
+const Link = ({ match, fromSelf, inflight }: { match: string; fromSelf: boolean; inflight?: boolean }) => {
 	// Chat messages come from another user, so their links go through the app's single funnel for
 	// untrusted links (scheme allowlist -> https/private-host check -> trusted-domain prompt) rather
 	// than a local copy of it. This used to be an inline duplicate that also hard-coded the trust
 	// store's key, so a rename would have silently forked the remembered domains.
 	const openExternalLink = useOpenExternalLink("chats")
 
-	// Still parsed here, but only to decide whether this text is renderable AS a link at all.
-	const parsedDomain = (() => {
-		try {
-			const url = new URL(match)
-
-			return url.hostname
-		} catch {
-			return null
-		}
-	})()
-
 	const onPress = () => {
 		openExternalLink(match).catch(err => {
 			logger.error("chats", "failed to open a message link", { error: err })
 		})
-	}
-
-	if (!parsedDomain) {
-		return match
 	}
 
 	return (
@@ -221,28 +182,19 @@ const Regexed = ({ chat, message, fromSelf }: { chat: Chat; message: ChatMessage
 
 						// The mention text is the email itself — render it rather than "unknown" so
 						// mentions of users who since left the chat stay attributable.
-						if (!foundParticipant) {
-							return (
-								<Mention
-									key={index}
-									name={segment.email}
-									fromSelf={fromSelf}
-								/>
-							)
-						}
-
 						return (
 							<Mention
 								key={index}
-								name={contactDisplayName(foundParticipant)}
-								participant={foundParticipant}
+								name={foundParticipant ? contactDisplayName(foundParticipant) : segment.email}
 								fromSelf={fromSelf}
 							/>
 						)
 					}
 
 					case "emoji": {
-						if (customEmojisSet.has(segment.shortcode) && customEmojisListRecord[segment.shortcode]) {
+						const emojiSrc = customEmojiSrcById.get(segment.shortcode)
+
+						if (emojiSrc) {
 							return (
 								<Image
 									key={index}
@@ -253,7 +205,7 @@ const Regexed = ({ chat, message, fromSelf }: { chat: Chat; message: ChatMessage
 										height: emojiSize
 									}}
 									source={{
-										uri: customEmojisListRecord[segment.shortcode]
+										uri: emojiSrc
 									}}
 									className="shrink-0 bg-transparent"
 									recyclingKey={`emoji-${segment.shortcode}-${emojiSize}`}

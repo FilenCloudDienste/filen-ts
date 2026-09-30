@@ -28,12 +28,6 @@ export const PDF_EXTERNAL_URL_ATTRIBUTE = "data-external-url"
 export const PDF_EXTERNAL_LINK_KEY = "__filenPdfExternalLink"
 export const PDF_EVENT_KEY = "__filenPdfEvent"
 
-export type PdfExternalLinkEnvelope = {
-	[PDF_EXTERNAL_LINK_KEY]: {
-		url: string
-	}
-}
-
 /**
  * Why the viewer cannot run at all in this WebView. Distinct from a document-level error: the user
  * gets a "cannot preview here" state rather than a retry, because retrying cannot help.
@@ -58,14 +52,9 @@ export type PdfViewerEvent =
 	| { event: "saved"; requestId: string; byteLength: number }
 	| { event: "saveFailed"; requestId: string }
 	| { event: "unsupported"; reason: PdfUnsupportedReason }
-	| { event: "documentOpened"; pageCount: number }
 	| { event: "firstPagePainted" }
 	| { event: "passwordRequired"; requestId: string; reason: PdfPasswordReason }
 	| { event: "error"; kind: PdfErrorKind }
-
-export type PdfViewerEventEnvelope = {
-	[PDF_EVENT_KEY]: PdfViewerEvent
-}
 
 /**
  * Native -> WebView. Delivered as a prop AFTER mount, never at mount: mount-time props are serialized
@@ -175,17 +164,6 @@ export function parsePdfViewerEvent(parsed: unknown): PdfViewerEvent | null {
 				? {
 						event,
 						reason: reason as PdfUnsupportedReason
-					}
-				: null
-		}
-
-		case "documentOpened": {
-			const pageCount = envelope["pageCount"]
-
-			return typeof pageCount === "number" && Number.isInteger(pageCount) && pageCount > 0
-				? {
-						event,
-						pageCount
 					}
 				: null
 		}

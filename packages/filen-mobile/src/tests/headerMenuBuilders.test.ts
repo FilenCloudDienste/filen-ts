@@ -289,7 +289,8 @@ describe("buildSortMenuButton (Android)", () => {
 		const opts = mockActionSheetShow.mock.calls[0]?.[0]
 
 		expect(opts.title).toBe("sort_name")
-		expect(opts.buttons.map((b: { title: string }) => b.title)).toEqual(["sort_name_asc (current)", "sort_name_desc", "cancel"])
+		expect(opts.buttons.map((b: { title: string }) => b.title)).toEqual(["sort_name_asc (current)", "sort_name_desc"])
+		expect(opts.cancelTitle).toBe("cancel")
 
 		// Picking "Descending" routes the right SortByType.
 		opts.buttons[1].onPress()

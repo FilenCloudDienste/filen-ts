@@ -136,8 +136,6 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
 			"USE_FINGERPRINT",
 			"USE_BIOMETRIC",
 			"SYSTEM_ALERT_WINDOW",
-			"ACTION_OPEN_DOCUMENT",
-			"ACTION_OPEN_DOCUMENT_TREE",
 			"MANAGE_DOCUMENTS"
 		]
 	},
@@ -286,7 +284,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
 			}
 		],
 		"./plugins/withAndroidNetworkSecurityConfig",
-		"./plugins/withAndroidLargeHeapAndHardwareAcceleration",
+		"./plugins/withAndroidApplicationAttributes",
 		// Debug builds install as io.filen.app.debug so a dev build and the Play-Store app can
 		// coexist on one device — release builds are untouched.
 		"./plugins/withAndroidDebugSuffix",

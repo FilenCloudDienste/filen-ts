@@ -195,10 +195,10 @@ describe("saving", () => {
 
 		vi.mocked(selectCopyDestination).mockResolvedValueOnce(picked as never)
 
-		await saveLinkedToDrive({ items, name: "Holiday", t })
+		await saveLinkedToDrive({ items, name: "Holiday" })
 
 		// A link's sources aren't drive items; the picker gets none to exclude.
-		expect(selectCopyDestination).toHaveBeenCalledWith([], "drive")
+		expect(selectCopyDestination).toHaveBeenCalledWith([])
 		expect(copyRunner.startCopyItems).toHaveBeenCalledTimes(1)
 		expect(copyRunner.startCopyItems).toHaveBeenCalledWith({ items, name: "Holiday", ...picked })
 	})
@@ -206,7 +206,7 @@ describe("saving", () => {
 	it("starts nothing when the picker is dismissed, and alerts when the job can't start", async () => {
 		vi.mocked(selectCopyDestination).mockResolvedValueOnce(null)
 
-		await saveLinkedToDrive({ items: [{}] as AnyItemWithContext[], name: "x", t })
+		await saveLinkedToDrive({ items: [{}] as AnyItemWithContext[], name: "x" })
 
 		expect(copyRunner.startCopyItems).not.toHaveBeenCalled()
 
@@ -217,7 +217,7 @@ describe("saving", () => {
 			throw error
 		})
 
-		await saveLinkedToDrive({ items: [{}] as AnyItemWithContext[], name: "x", t })
+		await saveLinkedToDrive({ items: [{}] as AnyItemWithContext[], name: "x" })
 
 		expect(alerts.error).toHaveBeenCalledWith(error)
 	})
@@ -226,12 +226,12 @@ describe("saving", () => {
 		const dir = item("directory", "d-1")
 		const file = item("file", "f-1")
 
-		expect(buildSaveToCloudDriveButton({ id: "save", title: "save", items: [dir, file], t })).toBeNull()
+		expect(buildSaveToCloudDriveButton({ id: "save", title: "save", items: [dir, file] })).toBeNull()
 
 		cache.directoryUuidToAnyLinkedDirWithMeta.set("d-1", { dir: subDir, meta: meta(true) })
 
 		const onDone = vi.fn()
-		const button = buildSaveToCloudDriveButton({ id: "save", title: "save", items: [dir, file], onDone, t })
+		const button = buildSaveToCloudDriveButton({ id: "save", title: "save", items: [dir, file], onDone })
 
 		expect(button?.requiresOnline).toBe(true)
 

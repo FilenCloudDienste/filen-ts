@@ -1,6 +1,5 @@
 import { vi, describe, it, expect, beforeEach, afterEach } from "vitest"
 
-vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
 vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 
 import { useTransfersStore, type Transfer } from "@/features/transfers/store/useTransfers.store"
@@ -69,7 +68,7 @@ function makeUploadDirectoryTransfer(id: string, size: number, bytesTransferred 
 function resetStore(): void {
 	useTransfersStore.setState({
 		transfers: [],
-		stats: { progress: 0, speed: 0, count: 0 }
+		stats: { progress: 0, speed: 0 }
 	})
 	// Setting transfers via the public API runs the cleanup that clears the
 	// internal interval timer + module-level samples buffer.
@@ -93,24 +92,11 @@ describe("useTransfersStore", () => {
 			const state = useTransfersStore.getState()
 
 			expect(state.transfers).toEqual([])
-			expect(state.stats).toEqual({ progress: 0, speed: 0, count: 0 })
+			expect(state.stats).toEqual({ progress: 0, speed: 0 })
 		})
 	})
 
-	describe("count + progress", () => {
-		it("count reflects the number of active transfers", () => {
-			useTransfersStore.getState().setTransfers([makeUploadFileTransfer("a", 1000)])
-
-			expect(useTransfersStore.getState().stats.count).toBe(1)
-
-			// Advance past the 100ms throttle window before the next setTransfers
-			// so its stats recompute is actually allowed to run.
-			vi.advanceTimersByTime(150)
-			useTransfersStore.getState().setTransfers(prev => [...prev, makeUploadFileTransfer("b", 2000)])
-
-			expect(useTransfersStore.getState().stats.count).toBe(2)
-		})
-
+	describe("progress", () => {
 		it("progress is bytesTransferred / size, clamped to [0, 1]", () => {
 			useTransfersStore.getState().setTransfers([makeUploadFileTransfer("a", 1000, 250)])
 
@@ -128,17 +114,15 @@ describe("useTransfersStore", () => {
 			useTransfersStore.getState().setTransfers([makeUploadFileTransfer("z", 0, 0)])
 
 			expect(useTransfersStore.getState().stats.progress).toBe(0)
-			expect(useTransfersStore.getState().stats.count).toBe(1)
 		})
 	})
 
 	describe("transfer type variants", () => {
-		it("downloadFile: stats count and progress computed from bytesTransferred/size, not directoryQueryProgress", () => {
+		it("downloadFile: progress computed from bytesTransferred/size, not directoryQueryProgress", () => {
 			useTransfersStore.getState().setTransfers([makeDownloadFileTransfer("dl", 2000, 1000)])
 
 			const stats = useTransfersStore.getState().stats
 
-			expect(stats.count).toBe(1)
 			expect(stats.progress).toBe(0.5)
 		})
 
@@ -149,7 +133,6 @@ describe("useTransfersStore", () => {
 
 			const stats = useTransfersStore.getState().stats
 
-			expect(stats.count).toBe(1)
 			// Progress uses only the top-level bytesTransferred (2000) / size (4000)
 			expect(stats.progress).toBe(0.5)
 		})
@@ -159,11 +142,10 @@ describe("useTransfersStore", () => {
 
 			const stats = useTransfersStore.getState().stats
 
-			expect(stats.count).toBe(1)
 			expect(stats.progress).toBe(0.25)
 		})
 
-		it("mixed transfer types: count and progress aggregate correctly", () => {
+		it("mixed transfer types: progress aggregates correctly", () => {
 			useTransfersStore
 				.getState()
 				.setTransfers([
@@ -174,8 +156,6 @@ describe("useTransfersStore", () => {
 
 			const stats = useTransfersStore.getState().stats
 
-			// count = 3
-			expect(stats.count).toBe(3)
 			// totalBytes = 3000, transferred = 1500 → progress = 0.5
 			expect(stats.progress).toBeCloseTo(0.5)
 		})
@@ -275,8 +255,6 @@ describe("useTransfersStore", () => {
 			const stats = useTransfersStore.getState().stats
 			// pausedCount (1) < transfers.length (2) → speed must be computed
 			expect(stats.speed).toBeGreaterThan(0)
-			// count is still 2 (paused transfers are counted in count)
-			expect(stats.count).toBe(2)
 		})
 
 		it("does not blip negative or spike when a transfer completes and is removed", () => {
@@ -348,12 +326,11 @@ describe("useTransfersStore", () => {
 			useTransfersStore.getState().setTransfers([makeUploadFileTransfer("a", 1000, 0)])
 			vi.advanceTimersByTime(150)
 
-			// Use functional updater to append — count and progress should reflect both.
+			// Use functional updater to append — progress should reflect both.
 			useTransfersStore.getState().setTransfers(prev => [...prev, makeUploadFileTransfer("b", 1000, 500)])
 
 			const stats = useTransfersStore.getState().stats
 
-			expect(stats.count).toBe(2)
 			// totalBytes=2000, transferred=500 → 0.25
 			expect(stats.progress).toBe(0.25)
 
@@ -380,7 +357,7 @@ describe("useTransfersStore", () => {
 			useTransfersStore.getState().setTransfers([])
 
 			expect(vi.getTimerCount()).toBe(0)
-			expect(useTransfersStore.getState().stats).toEqual({ progress: 0, speed: 0, count: 0 })
+			expect(useTransfersStore.getState().stats).toEqual({ progress: 0, speed: 0 })
 		})
 
 		it("returns the same stats object reference when called repeatedly with no transfers", () => {
@@ -399,7 +376,7 @@ describe("useTransfersStore", () => {
 			useTransfersStore.getState().setTransfers([])
 
 			const statsAfterFirstClear = useTransfersStore.getState().stats
-			expect(statsAfterFirstClear).toEqual({ progress: 0, speed: 0, count: 0 })
+			expect(statsAfterFirstClear).toEqual({ progress: 0, speed: 0 })
 
 			// Second clear — the branch that returns state.stats when already zeroed.
 			useTransfersStore.getState().setTransfers([])

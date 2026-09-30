@@ -250,7 +250,7 @@ export function buildDangerZoneButtons({
 						return
 					}
 
-					if (twoFactorPromptResult.data.cancelled || twoFactorPromptResult.data.type !== "string") {
+					if (twoFactorPromptResult.data.cancelled) {
 						return
 					}
 
@@ -319,7 +319,7 @@ export function buildProfileButtons({
 					return
 				}
 
-				if (newEmailPromptResult.data.cancelled || newEmailPromptResult.data.type !== "string") {
+				if (newEmailPromptResult.data.cancelled) {
 					return
 				}
 
@@ -346,7 +346,7 @@ export function buildProfileButtons({
 					return
 				}
 
-				if (confirmNewEmailPromptResult.data.cancelled || confirmNewEmailPromptResult.data.type !== "string") {
+				if (confirmNewEmailPromptResult.data.cancelled) {
 					return
 				}
 
@@ -379,7 +379,7 @@ export function buildProfileButtons({
 					return
 				}
 
-				if (passwordPromptResult.data.cancelled || passwordPromptResult.data.type !== "string") {
+				if (passwordPromptResult.data.cancelled) {
 					return
 				}
 
@@ -428,7 +428,7 @@ export function buildProfileButtons({
 					return
 				}
 
-				if (promptResult.data.cancelled || promptResult.data.type !== "string") {
+				if (promptResult.data.cancelled) {
 					return
 				}
 
@@ -700,7 +700,7 @@ export function buildTwoFactorButtons({
 							return
 						}
 
-						if (twoFactorPromptResult.data.cancelled || twoFactorPromptResult.data.type !== "string") {
+						if (twoFactorPromptResult.data.cancelled) {
 							return
 						}
 
@@ -744,7 +744,7 @@ export function buildTwoFactorButtons({
 						return
 					}
 
-					if (twoFactorPromptResult.data.cancelled || twoFactorPromptResult.data.type !== "string") {
+					if (twoFactorPromptResult.data.cancelled) {
 						return
 					}
 

@@ -1,5 +1,4 @@
 import ZoomableView from "@/components/ui/zoomableView"
-import View from "@/components/ui/view"
 import PreviewLoadingOverlay from "@/components/drivePreview/previewLoadingOverlay"
 import { Component, type ReactNode, useMemo, useState } from "react"
 import { useWindowDimensions } from "react-native"
@@ -116,7 +115,7 @@ const PreviewSvg = ({
 	}
 
 	if (isUnavailableOffline(fileTextQuery, isOnline)) {
-		return <UnavailableOfflineNotice style={itemStyle} />
+		return <UnavailableOfflineNotice />
 	}
 
 	const status: "loading" | "loaded" | "error" =
@@ -128,11 +127,9 @@ const PreviewSvg = ({
 					? "error"
 					: "loaded"
 
+	// Renders straight into galleryItem's window-sized cell, which the overlay's absolute inset-0 resolves against.
 	return (
-		<View
-			className="bg-transparent"
-			style={itemStyle}
-		>
+		<>
 			<ZoomableView
 				style={[
 					{
@@ -148,7 +145,6 @@ const PreviewSvg = ({
 				onSingleTap={onSingleTap}
 				onPinchActiveChange={onPinchActiveChange}
 				contentSize={itemStyle}
-				maxZoom={10}
 			>
 				{status === "loaded" && xml !== null ? (
 					<SvgRenderBoundary
@@ -165,7 +161,7 @@ const PreviewSvg = ({
 				) : null}
 			</ZoomableView>
 			{status !== "loaded" ? <PreviewLoadingOverlay status={status === "error" ? "error" : "loading"} /> : null}
-		</View>
+		</>
 	)
 }
 

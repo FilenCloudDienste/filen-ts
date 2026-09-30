@@ -14,6 +14,7 @@ vi.mock("expo-crypto", () => ({ randomUUID: vi.fn(() => "mock-uuid") }))
 vi.mock("expo-clipboard", () => ({ setStringAsync: vi.fn() }))
 vi.mock("@/lib/router", () => ({ router: { push: vi.fn() } }))
 vi.mock("@/lib/alerts", () => ({ default: { error: vi.fn() } }))
+vi.mock("@/lib/i18n", () => ({ default: { t: (key: string) => key } }))
 vi.mock("@/lib/prompts", () => ({ default: { alert: vi.fn(), input: vi.fn() } }))
 vi.mock("@/lib/auth", () => ({ default: { getSdkClients: vi.fn() } }))
 vi.mock("@/lib/serializer", () => ({ serialize: vi.fn((x: unknown) => JSON.stringify(x)) }))
@@ -41,6 +42,7 @@ vi.mock("@/features/drive/store/useDrive.store", () => ({
 	default: { getState: () => ({ selectedItems: [], toggleSelectedItem: vi.fn() }) }
 }))
 vi.mock("@/features/drive/driveSelectors", () => ({
+	canNavigateIntoDirectory: vi.fn(() => false),
 	hiddenFilterAppliesTo: vi.fn(() => false),
 	isFileItem: (item: { type: string }) => item.type === "file" || item.type === "sharedFile" || item.type === "sharedRootFile",
 	isDirectoryItem: (item: { type: string }) =>
@@ -151,7 +153,6 @@ describe("item menu Copy submenu gating", () => {
 					item: makeItem(itemType),
 					drivePath: makeDrivePath(pathType),
 					isStoredOffline: false,
-					showSelectToggle: false,
 					t
 				})
 				const ids = flatIds(buttons)
@@ -289,7 +290,6 @@ describe("directory-row Paste into", () => {
 						item,
 						drivePath: makeDrivePath(pathType),
 						isStoredOffline: false,
-						showSelectToggle: false,
 						clipboard: copied,
 						t
 					})
@@ -350,7 +350,7 @@ describe("Copy submenu actions", () => {
 
 		await sub("copyTo", onDone).onPress?.()
 
-		expect(selectCopyDestination).toHaveBeenCalledWith(items, "drive")
+		expect(selectCopyDestination).toHaveBeenCalledWith(items)
 		expect(copyRunner.start).toHaveBeenCalledTimes(1)
 		expect(copyRunner.start).toHaveBeenCalledWith({ items, ...picked })
 		expect(onDone).toHaveBeenCalledTimes(1)

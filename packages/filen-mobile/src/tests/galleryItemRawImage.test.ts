@@ -19,8 +19,6 @@ vi.mock("react-native", async () => {
 	}
 })
 
-vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
-
 // galleryItem reaches the REAL previewType.ts, which reads EXPO_AUDIO_SUPPORTED_EXTENSIONS from
 // @/constants (previewType.ts:5); the shared mock lacks it — spread it in rather than widening the
 // shared file, so classification never depends on which branch evaluates first.

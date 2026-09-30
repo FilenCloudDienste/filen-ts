@@ -72,7 +72,6 @@ vi.mock("@/features/notes/components/sync", () => ({
 }))
 
 // expo-file-system: use the full in-memory mock
-vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
 
 // expo-crypto: just needs randomUUID
 vi.mock("expo-crypto", () => ({

@@ -17,17 +17,13 @@ function LazyFallback() {
 	)
 }
 
-export function LazyWrapper({ children, disabled = false }: { children: React.ReactNode; disabled?: boolean }) {
+export function LazyWrapper({ children }: { children: React.ReactNode }) {
 	const isFocused = useIsFocused()
 	const didFocusOnce = useRef(false)
 
 	if (isFocused) {
 		// eslint-disable-next-line react-hooks/refs
 		didFocusOnce.current = true
-	}
-
-	if (disabled) {
-		return children
 	}
 
 	// eslint-disable-next-line react-hooks/refs

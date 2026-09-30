@@ -1,11 +1,6 @@
 import { describe, it, expect } from "vitest"
 import {
 	cannotDecryptPlaceholder,
-	isDriveItemUndecryptable,
-	isNoteUndecryptable,
-	isChatUndecryptable,
-	isMessageUndecryptable,
-	isTagUndecryptable,
 	driveItemDisplayName,
 	noteDisplayTitle,
 	chatDisplayName,
@@ -87,56 +82,6 @@ function message(uuid: string, undecryptable: boolean, body?: string): ChatMessa
 describe("cannotDecryptPlaceholder", () => {
 	it("returns the snake_case placeholder for a given uuid", () => {
 		expect(cannotDecryptPlaceholder("abc")).toBe("cannot_decrypt_abc")
-	})
-})
-
-describe("isDriveItemUndecryptable", () => {
-	it("returns true when item.data.undecryptable is true", () => {
-		expect(isDriveItemUndecryptable(driveFile("a", true))).toBe(true)
-	})
-
-	it("returns false when item.data.undecryptable is false", () => {
-		expect(isDriveItemUndecryptable(driveFile("a", false, "file.txt"))).toBe(false)
-	})
-})
-
-describe("isNoteUndecryptable", () => {
-	it("returns true when note.undecryptable is true", () => {
-		expect(isNoteUndecryptable(note("n", true))).toBe(true)
-	})
-
-	it("returns false when note.undecryptable is false", () => {
-		expect(isNoteUndecryptable(note("n", false, "Note"))).toBe(false)
-	})
-})
-
-describe("isChatUndecryptable", () => {
-	it("returns true when chat.undecryptable is true", () => {
-		expect(isChatUndecryptable(chat("c", true))).toBe(true)
-	})
-
-	it("returns false when chat.undecryptable is false", () => {
-		expect(isChatUndecryptable(chat("c", false))).toBe(false)
-	})
-})
-
-describe("isMessageUndecryptable", () => {
-	it("returns true when message.undecryptable is true", () => {
-		expect(isMessageUndecryptable(message("m", true))).toBe(true)
-	})
-
-	it("returns false when message.undecryptable is false", () => {
-		expect(isMessageUndecryptable(message("m", false, "hi"))).toBe(false)
-	})
-})
-
-describe("isTagUndecryptable", () => {
-	it("returns true when tag.undecryptable is true", () => {
-		expect(isTagUndecryptable(tag("t", true))).toBe(true)
-	})
-
-	it("returns false when tag.undecryptable is false", () => {
-		expect(isTagUndecryptable(tag("t", false, "Work"))).toBe(false)
 	})
 })
 

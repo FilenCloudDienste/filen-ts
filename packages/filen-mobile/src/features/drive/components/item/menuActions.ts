@@ -27,6 +27,7 @@ import { selectContacts } from "@/features/contacts/contactsSelect"
 import useDriveStore from "@/features/drive/store/useDrive.store"
 import { type TFunction } from "i18next"
 import {
+	canNavigateIntoDirectory,
 	hiddenFilterAppliesTo,
 	isFileItem,
 	resolveDriveContainingDirectoryTarget,
@@ -52,7 +53,6 @@ export function createMenuButtons({
 	item,
 	drivePath,
 	isStoredOffline,
-	showSelectToggle,
 	isPreview,
 	clipboard,
 	linkSaveable,
@@ -61,7 +61,6 @@ export function createMenuButtons({
 	item: DriveItem
 	drivePath: DrivePath
 	isStoredOffline: boolean
-	showSelectToggle?: boolean
 	// True when the menu is rendered inside the full-screen preview (gallery) — so
 	// destructive actions that remove the previewed item pop the preview on success.
 	// List-row menus leave this false (they must NOT pop the underlying list).
@@ -73,7 +72,7 @@ export function createMenuButtons({
 	t: TFunction
 }): MenuButton[] {
 	if (item.data.undecryptable) {
-		return buildUndecryptableMenuButtons({ item, drivePath, isPreview, t })
+		return buildUndecryptableMenuButtons({ item, drivePath, t })
 	}
 
 	const menuButtons: MenuButton[] = []
@@ -96,8 +95,8 @@ export function createMenuButtons({
 	// so we can't add an onLongPress to the inner Pressable. The Menu's
 	// "Select" item is the entry point — matches the pattern in notes / chats
 	// / file versions / contacts. Suppress in picker mode (driveSelect uses a
-	// different store) and when the caller explicitly opts out (drive preview).
-	if (showSelectToggle !== false && !drivePath.selectOptions) {
+	// different store) and in the preview (nothing to select there).
+	if (!isPreview && !drivePath.selectOptions) {
 		const isSelected = useDriveStore.getState().selectedItems.some(i => i.data.uuid === item.data.uuid)
 
 		menuButtons.push({
@@ -111,19 +110,20 @@ export function createMenuButtons({
 		})
 	}
 
-	{
-		const openTarget = resolveDriveNavigationTarget({ item, drivePath })
+	// Resolved on press: the target serializes route params only a tap needs.
+	if (canNavigateIntoDirectory({ item, drivePath })) {
+		menuButtons.push({
+			id: "open",
+			title: t("open"),
+			icon: "folder",
+			onPress: () => {
+				const openTarget = resolveDriveNavigationTarget({ item, drivePath })
 
-		if (openTarget) {
-			menuButtons.push({
-				id: "open",
-				title: t("open"),
-				icon: "folder",
-				onPress: () => {
+				if (openTarget) {
 					router.push(openTarget)
 				}
-			})
-		}
+			}
+		})
 	}
 
 	{
@@ -314,7 +314,7 @@ export function createMenuButtons({
 					return
 				}
 
-				if (promptResult.data.cancelled || promptResult.data.type !== "string") {
+				if (promptResult.data.cancelled) {
 					return
 				}
 
@@ -395,7 +395,7 @@ export function createMenuButtons({
 	}
 
 	if (drivePath.type === "linked" && linkSaveable) {
-		const saveButton = buildSaveToCloudDriveButton({ id: "saveToCloudDrive", title: t("save_to_cloud_drive"), items: [item], t })
+		const saveButton = buildSaveToCloudDriveButton({ id: "saveToCloudDrive", title: t("save_to_cloud_drive"), items: [item] })
 
 		if (saveButton) {
 			menuButtons.push(saveButton)
@@ -473,10 +473,7 @@ export function createMenuButtons({
 					icon: "users",
 					onPress: async () => {
 						const pickResult = await run(async () => {
-							return await selectContacts({
-								multiple: true,
-								userIdsToExclude: []
-							})
+							return await selectContacts()
 						})
 
 						if (!pickResult.success) {
@@ -641,11 +638,10 @@ export function createMenuButtons({
 	// Removing offline only makes sense on items that are TOP-LEVEL stored entries.
 	// `updateIndex()` flattens every nested child of a stored directory into
 	// `index.files` / `index.directories`, so a plain "is stored offline" check
-	// (the query backing `isStoredOffline`) returns true for nested children too —
+	// (the index read backing `isStoredOffline`) returns true for nested children too —
 	// but `removeItem` only operates on top-level entries, so showing the button
 	// there is a silent no-op. The sync top-level check fixes that. Cold-cache
-	// falls back to undefined → hidden, which is acceptable: the per-row query
-	// (`useDriveItemStoredOfflineQuery`) warms the caches on first read.
+	// falls back to undefined → hidden until the next index rebuild fills the caches.
 	//
 	//   - At /offline (virtual root) we know every item shown IS top-level, so
 	//     skip the per-item check.

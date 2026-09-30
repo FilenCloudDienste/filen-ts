@@ -72,7 +72,7 @@ describe("disablePublicLink", () => {
 		await disablePublicLink({ item: file, known: { type: "file", status: fileLink } })
 
 		expect(statusCalls()).toBe(0)
-		expect(sdk.removeFileLink).toHaveBeenCalledWith(file.data, fileLink, undefined)
+		expect(sdk.removeFileLink).toHaveBeenCalledWith(file.data, fileLink)
 	})
 
 	it("without a status (context menu, bulk disable): still reads it once per item", async () => {
@@ -81,7 +81,7 @@ describe("disablePublicLink", () => {
 
 		expect(sdk.getDirLinkStatus).toHaveBeenCalledTimes(1)
 		expect(sdk.getFileLinkStatus).toHaveBeenCalledTimes(1)
-		expect(sdk.removeFileLink).toHaveBeenCalledWith(file.data, fileLink, undefined)
+		expect(sdk.removeFileLink).toHaveBeenCalledWith(file.data, fileLink)
 	})
 
 	it("a status of the other item type is ignored and the status is read", async () => {
@@ -108,7 +108,7 @@ describe("updatePublicLink", () => {
 		const written = { ...dirLink, enableDownload: false }
 
 		expect(statusCalls()).toBe(0)
-		expect(sdk.updateDirLink).toHaveBeenCalledWith(dir.data, written, undefined)
+		expect(sdk.updateDirLink).toHaveBeenCalledWith(dir.data, written)
 		expect(statusUpdates()).toEqual([{ type: "directory", status: written }])
 	})
 
@@ -119,7 +119,7 @@ describe("updatePublicLink", () => {
 
 		expect(outcome).toBe("updated")
 		expect(sdk.getFileLinkStatus).toHaveBeenCalledTimes(1)
-		expect(sdk.updateFileLink).toHaveBeenCalledWith(file.data, written, undefined)
+		expect(sdk.updateFileLink).toHaveBeenCalledWith(file.data, written)
 		expect(statusUpdates()).toEqual([{ type: "file", status: written }])
 	})
 
@@ -153,7 +153,7 @@ describe("updatePublicLink", () => {
 
 		await updatePublicLink({ item: file, held: { type: "file", status: fileLink }, edits: { downloadable: false } })
 
-		expect(sdk.updateFileLink).toHaveBeenCalledWith(file.data, { ...changedElsewhere, downloadable: false }, undefined)
+		expect(sdk.updateFileLink).toHaveBeenCalledWith(file.data, { ...changedElsewhere, downloadable: false })
 	})
 })
 

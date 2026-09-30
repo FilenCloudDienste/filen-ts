@@ -8,24 +8,14 @@
 			--color-background: #000000; /* pure black for OLED */
 			--color-background-secondary: #1c1c1e;
 			--color-background-tertiary: #2c2c2e;
-			--color-card: #1c1c1e;
-			--color-card-hover: #2c2c2e;
-			--color-popover: #2c2c2e;
-			--color-modal: #1c1c1e;
 
 			/* Labels (actual Apple semantic values) */
 			--color-foreground: #ffffff;
-			--color-foreground-secondary: #ebebf599; /* secondaryLabel */
-			--color-foreground-tertiary: #ebebf54c; /* tertiaryLabel */
 			--color-muted: #ebebf54c;
-			--color-muted-foreground: #ebebf599;
-			--color-placeholder: #ebebf54c;
+			--color-muted-foreground: #ebebf599; /* secondaryLabel */
 
 			/* Borders */
 			--color-border: #38383a; /* separator dark */
-			--color-border-subtle: #2c2c2e;
-			--color-border-hover: #48484a;
-			--color-divider: #38383a;
 			/* Row separators / divider lines, measured against the iOS Files app's
 			   dark-mode list separator (1 logical px at ~#2c2c2c over black — Apple
 			   gets visibility from width with a dim color, NOT a brighter hairline).
@@ -33,55 +23,13 @@
 			   an opaque dim gray vanishes on the #2c2c2e settings-group cards.
 			   #545458 at 50% ≈ 42 over black (Files: 44) and ≈ 64 over cards. */
 			--color-separator: #54545880;
-			--color-input: #38383a;
-			--color-ring: #0a84ff;
 
 			/* iOS system tints */
 			--color-primary: #0a84ff;
 			--color-primary-foreground: #ffffff;
-			--color-primary-hover: #0077ed;
-			--color-primary-active: #006edb;
-
 			--color-secondary: #5e5ce6; /* real systemIndigo dark */
-			--color-secondary-foreground: #ffffff;
-			--color-secondary-hover: #4d4bd0;
-
-			--color-accent: #bf5af2; /* systemPurple */
-			--color-accent-foreground: #ffffff;
-			--color-accent-hover: #ac44e0;
-
-			--color-destructive: #ff453a; /* systemRed dark */
-			--color-destructive-foreground: #ffffff;
-			--color-destructive-hover: #ff3b30;
-
-			--color-danger: #ff453a;
-			--color-danger-foreground: #ffffff;
-			--color-danger-hover: #ff3b30;
-
 			--color-success: #30d158; /* systemGreen dark */
-			--color-success-foreground: #ffffff;
-			--color-success-hover: #28b94a;
-
 			--color-warning: #ff9f0a;
-			--color-warning-foreground: #000000;
-			--color-warning-hover: #ff9500;
-
-			--color-info: #64d2ff; /* systemBlue secondary tint */
-			--color-info-foreground: #000000;
-			--color-info-hover: #5ac8fa;
-
-			/* State */
-			--color-link: #0a84ff;
-			--color-link-hover: #0077ed;
-			--color-selected: #0a84ff;
-			--color-selected-foreground: #ffffff;
-			--color-disabled: #3a3a3c;
-			--color-disabled-foreground: #8e8e93;
-
-			/* FX */
-			--color-overlay: rgba(0, 0, 0, 0.7);
-			--color-shadow: rgba(0, 0, 0, 0.55);
-			--color-backdrop: rgba(0, 0, 0, 0.6);
 		}
 
 		@variant light {
@@ -89,76 +37,23 @@
 			--color-background: #ffffff;
 			--color-background-secondary: #f2f2f7;
 			--color-background-tertiary: #e5e5ea;
-			--color-card: #ffffff;
-			--color-card-hover: #f2f2f7;
-			--color-popover: #ffffff;
-			--color-modal: #ffffff;
 
 			/* Labels */
 			--color-foreground: #000000;
-			--color-foreground-secondary: #3c3c4399; /* secondaryLabel */
-			--color-foreground-tertiary: #3c3c434c; /* tertiaryLabel */
 			--color-muted: #3c3c434c;
-			--color-muted-foreground: #3c3c4399;
-			--color-placeholder: #3c3c434c;
+			--color-muted-foreground: #3c3c4399; /* secondaryLabel */
 
 			/* Borders */
 			--color-border: #c6c6c8; /* separator */
-			--color-border-subtle: #e5e5ea;
-			--color-border-hover: #aeaeb2;
-			--color-divider: #c6c6c8;
 			/* iOS light-mode UIColor.separator (translucent for any surface). */
 			--color-separator: #3c3c435c;
-			--color-input: #d1d1d6;
-			--color-ring: #007aff;
 
 			/* Tints */
 			--color-primary: #007aff; /* systemBlue */
 			--color-primary-foreground: #ffffff;
-			--color-primary-hover: #0071e3;
-			--color-primary-active: #0068d1;
-
 			--color-secondary: #5856d6; /* systemIndigo */
-			--color-secondary-foreground: #ffffff;
-			--color-secondary-hover: #4947c2;
-
-			--color-accent: #af52de; /* systemPurple */
-			--color-accent-foreground: #ffffff;
-			--color-accent-hover: #9d42cc;
-
-			--color-destructive: #ff3b30; /* systemRed */
-			--color-destructive-foreground: #ffffff;
-			--color-destructive-hover: #ff2d20;
-
-			--color-danger: #ff3b30;
-			--color-danger-foreground: #ffffff;
-			--color-danger-hover: #ff2d20;
-
 			--color-success: #34c759;
-			--color-success-foreground: #ffffff;
-			--color-success-hover: #30b34a;
-
 			--color-warning: #ff9500;
-			/* Black like the dark variant — white on systemOrange is ~2:1 contrast. */
-			--color-warning-foreground: #000000;
-			--color-warning-hover: #ff8800;
-
-			--color-info: #5ac8fa;
-			--color-info-foreground: #000000;
-			--color-info-hover: #32aee8;
-
-			/* States */
-			--color-link: #007aff;
-			--color-link-hover: #0071e3;
-			--color-selected: #e7f0ff;
-			--color-selected-foreground: #0068d1;
-			--color-disabled: #e5e5ea;
-			--color-disabled-foreground: #c7c7cc;
-
-			/* FX */
-			--color-overlay: rgba(0, 0, 0, 0.4);
-			--color-shadow: rgba(0, 0, 0, 0.08);
-			--color-backdrop: rgba(0, 0, 0, 0.3);
 		}
 	}
 }

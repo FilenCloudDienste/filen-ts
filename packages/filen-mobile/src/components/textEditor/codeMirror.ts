@@ -1,6 +1,7 @@
 import { langs, langNames } from "@uiw/codemirror-extensions-langs"
 import { tags as t } from "@lezer/highlight"
 import { createTheme } from "@uiw/codemirror-themes"
+import type { Platform } from "react-native"
 
 // No eager "preload every language" pass here on purpose. The upstream loadLanguage is a plain
 // `langs[name]?.()` lookup — it registers nothing, so its return value is the only thing it
@@ -23,334 +24,211 @@ export function parseExtension(name: string) {
 }
 
 export function loadLanguage(name: string) {
-	const ext = parseExtension(name)
+	const lang = parseExtension(name).replace(".", "")
 
-	if (!ext.includes(".") || !langNames.includes(ext.replace(".", "") as keyof typeof langs)) {
+	// Own-key guard: a bare langs[...] lookup would resolve "constructor"/"__proto__"
+	if (!langNames.includes(lang as keyof typeof langs)) {
 		return null
 	}
 
-	const lang = langs[ext.replace(".", "") as keyof typeof langs]
+	const load = langs[lang as keyof typeof langs]
 
-	if (!lang) {
+	if (!load) {
 		return null
 	}
 
-	return lang()
+	return load()
 }
 
-export function createTextThemes({ backgroundColor, textForegroundColor }: { backgroundColor: string; textForegroundColor: string }) {
-	const macOSLightTheme = createTheme({
-		theme: "light",
-		settings: {
-			background: backgroundColor,
-			foreground: textForegroundColor,
-			// caret: "#007AFF", // macOS system blue
+type TextThemePalette = {
+	selection: string
+	gutterBorder: string
+	gutterBackground: string
+	gutterForeground: string
+	comment: string
+	variableName: string
+	string: string
+	number: string
+	boolNull: string
+	keyword: string
+	keywordWeight: string
+	operator: string
+	typeName: string
+	definition: string
+	angleBracket: string
+	tagName: string
+	attributeName: string
+}
+
+// macOS system colors on iOS, GNOME palette elsewhere
+const PALETTES: Record<"macOS" | "linux", Record<"light" | "dark", TextThemePalette>> = {
+	macOS: {
+		light: {
 			selection: "#007AFF40",
-			selectionMatch: "#007AFF40",
-			lineHighlight: "transparent",
-			gutterBorder: "1px solid #C7C7CC", // macOS system gray 3
+			gutterBorder: "#C7C7CC",
 			gutterBackground: "#FFFFFF",
-			gutterForeground: "#8E8E93", // macOS system gray
-			fontFamily: "var(--font-sans)"
+			gutterForeground: "#8E8E93",
+			comment: "#8E8E93",
+			variableName: "#007AFF",
+			string: "#34C759",
+			number: "#FF9500",
+			boolNull: "#5856D6",
+			keyword: "#FF2D55",
+			keywordWeight: "600",
+			operator: "#8E8E93",
+			typeName: "#5856D6",
+			definition: "#FF3B30",
+			angleBracket: "#8E8E93",
+			tagName: "#FF9500",
+			attributeName: "#007AFF"
 		},
-		styles: [
-			{
-				tag: t.comment,
-				color: "#8E8E93", // macOS system gray
-				fontStyle: "italic"
-			},
-			{
-				tag: t.variableName,
-				color: "#007AFF" // macOS system blue
-			},
-			{
-				tag: [t.string, t.special(t.brace)],
-				color: "#34C759" // macOS system green
-			},
-			{
-				tag: t.number,
-				color: "#FF9500" // macOS system orange
-			},
-			{
-				tag: t.bool,
-				color: "#5856D6" // macOS system purple
-			},
-			{
-				tag: t.null,
-				color: "#5856D6" // macOS system purple
-			},
-			{
-				tag: t.keyword,
-				color: "#FF2D55", // macOS system pink
-				fontWeight: "600"
-			},
-			{
-				tag: t.operator,
-				color: "#8E8E93" // macOS system gray
-			},
-			{
-				tag: t.className,
-				color: "#5856D6" // macOS system purple
-			},
-			{
-				tag: t.definition(t.typeName),
-				color: "#FF3B30" // macOS system red
-			},
-			{
-				tag: t.typeName,
-				color: "#5856D6" // macOS system purple
-			},
-			{
-				tag: t.angleBracket,
-				color: "#8E8E93" // macOS system gray
-			},
-			{
-				tag: t.tagName,
-				color: "#FF9500" // macOS system orange
-			},
-			{
-				tag: t.attributeName,
-				color: "#007AFF" // macOS system blue
-			}
-		]
-	})
-
-	const macOSDarkTheme = createTheme({
-		theme: "dark",
-		settings: {
-			background: backgroundColor,
-			foreground: textForegroundColor,
-			// caret: "#0A84FF", // macOS dark mode blue
+		dark: {
 			selection: "#0A84FF40",
-			selectionMatch: "#0A84FF40",
-			lineHighlight: "transparent",
-			gutterBorder: "1px solid #3A3A3C", // macOS dark mode gray 5
+			gutterBorder: "#3A3A3C",
 			gutterBackground: "transparent",
-			gutterForeground: "#8E8E93", // macOS system gray
-			fontFamily: "var(--font-sans)"
-		},
-		styles: [
-			{
-				tag: t.comment,
-				color: "#8E8E93", // macOS system gray
-				fontStyle: "italic"
-			},
-			{
-				tag: t.variableName,
-				color: "#0A84FF" // macOS dark mode blue
-			},
-			{
-				tag: [t.string, t.special(t.brace)],
-				color: "#30D158" // macOS dark mode green
-			},
-			{
-				tag: t.number,
-				color: "#FF9F0A" // macOS dark mode orange
-			},
-			{
-				tag: t.bool,
-				color: "#BF5AF2" // macOS dark mode purple
-			},
-			{
-				tag: t.null,
-				color: "#BF5AF2" // macOS dark mode purple
-			},
-			{
-				tag: t.keyword,
-				color: "#FF375F", // macOS dark mode pink
-				fontWeight: "600"
-			},
-			{
-				tag: t.operator,
-				color: "#8E8E93" // macOS system gray
-			},
-			{
-				tag: t.className,
-				color: "#BF5AF2" // macOS dark mode purple
-			},
-			{
-				tag: t.definition(t.typeName),
-				color: "#FF453A" // macOS dark mode red
-			},
-			{
-				tag: t.typeName,
-				color: "#BF5AF2" // macOS dark mode purple
-			},
-			{
-				tag: t.angleBracket,
-				color: "#8E8E93" // macOS system gray
-			},
-			{
-				tag: t.tagName,
-				color: "#FF9F0A" // macOS dark mode orange
-			},
-			{
-				tag: t.attributeName,
-				color: "#0A84FF" // macOS dark mode blue
-			}
-		]
-	})
-
-	const linuxLightTheme = createTheme({
-		theme: "light",
-		settings: {
-			background: backgroundColor,
-			foreground: textForegroundColor,
-			// caret: "#3584E4", // GNOME blue
+			gutterForeground: "#8E8E93",
+			comment: "#8E8E93",
+			variableName: "#0A84FF",
+			string: "#30D158",
+			number: "#FF9F0A",
+			boolNull: "#BF5AF2",
+			keyword: "#FF375F",
+			keywordWeight: "600",
+			operator: "#8E8E93",
+			typeName: "#BF5AF2",
+			definition: "#FF453A",
+			angleBracket: "#8E8E93",
+			tagName: "#FF9F0A",
+			attributeName: "#0A84FF"
+		}
+	},
+	linux: {
+		light: {
 			selection: "#3584E440",
-			selectionMatch: "#3584E440",
-			lineHighlight: "transparent",
-			gutterBorder: "1px solid #CDC7C2", // GNOME light border
-			gutterBackground: "#FAFAFA", // GNOME light background
-			gutterForeground: "#77767B", // GNOME dark 4
-			fontFamily: "var(--font-sans)"
+			gutterBorder: "#CDC7C2",
+			gutterBackground: "#FAFAFA",
+			gutterForeground: "#77767B",
+			comment: "#77767B",
+			variableName: "#3584E4",
+			string: "#33D17A",
+			number: "#F57C00",
+			boolNull: "#9141AC",
+			keyword: "#E01B24",
+			keywordWeight: "bold",
+			operator: "#5E5C64",
+			typeName: "#1C71D8",
+			definition: "#C01C28",
+			angleBracket: "#77767B",
+			tagName: "#F57C00",
+			attributeName: "#613583"
 		},
-		styles: [
-			{
-				tag: t.comment,
-				color: "#77767B", // GNOME dark 4
-				fontStyle: "italic"
-			},
-			{
-				tag: t.variableName,
-				color: "#3584E4" // GNOME blue
-			},
-			{
-				tag: [t.string, t.special(t.brace)],
-				color: "#33D17A" // GNOME green
-			},
-			{
-				tag: t.number,
-				color: "#F57C00" // Material orange
-			},
-			{
-				tag: t.bool,
-				color: "#9141AC" // GNOME purple
-			},
-			{
-				tag: t.null,
-				color: "#9141AC" // GNOME purple
-			},
-			{
-				tag: t.keyword,
-				color: "#E01B24", // GNOME red
-				fontWeight: "bold"
-			},
-			{
-				tag: t.operator,
-				color: "#5E5C64" // GNOME dark 3
-			},
-			{
-				tag: t.className,
-				color: "#1C71D8" // GNOME blue (dark)
-			},
-			{
-				tag: t.definition(t.typeName),
-				color: "#C01C28" // GNOME red (dark)
-			},
-			{
-				tag: t.typeName,
-				color: "#1C71D8" // GNOME blue (dark)
-			},
-			{
-				tag: t.angleBracket,
-				color: "#77767B" // GNOME dark 4
-			},
-			{
-				tag: t.tagName,
-				color: "#F57C00" // Material orange
-			},
-			{
-				tag: t.attributeName,
-				color: "#613583" // GNOME purple (dark)
-			}
-		]
-	})
-
-	const linuxDarkTheme = createTheme({
-		theme: "dark",
-		settings: {
-			background: backgroundColor,
-			foreground: textForegroundColor,
-			// caret: "#62A0EA", // GNOME blue (light)
+		dark: {
 			selection: "#62A0EA40",
-			selectionMatch: "#62A0EA40",
-			lineHighlight: "transparent",
-			gutterBorder: "1px solid #3D3846", // GNOME dark 5
+			gutterBorder: "#3D3846",
 			gutterBackground: "transparent",
-			gutterForeground: "#9A9996", // GNOME light 4
-			fontFamily: "var(--font-sans)"
-		},
-		styles: [
-			{
-				tag: t.comment,
-				color: "#9A9996", // GNOME light 4
-				fontStyle: "italic"
-			},
-			{
-				tag: t.variableName,
-				color: "#62A0EA" // GNOME blue (light)
-			},
-			{
-				tag: [t.string, t.special(t.brace)],
-				color: "#8FF0A4" // GNOME green (light)
-			},
-			{
-				tag: t.number,
-				color: "#FFBE6F" // GNOME orange (light)
-			},
-			{
-				tag: t.bool,
-				color: "#DC8ADD" // GNOME purple (light)
-			},
-			{
-				tag: t.null,
-				color: "#DC8ADD" // GNOME purple (light)
-			},
-			{
-				tag: t.keyword,
-				color: "#F66151", // GNOME red (light)
-				fontWeight: "bold"
-			},
-			{
-				tag: t.operator,
-				color: "#C0BFBC" // GNOME light 3
-			},
-			{
-				tag: t.className,
-				color: "#99C1F1" // GNOME blue (lighter)
-			},
-			{
-				tag: t.definition(t.typeName),
-				color: "#F8E45C" // GNOME yellow (light)
-			},
-			{
-				tag: t.typeName,
-				color: "#99C1F1" // GNOME blue (lighter)
-			},
-			{
-				tag: t.angleBracket,
-				color: "#9A9996" // GNOME light 4
-			},
-			{
-				tag: t.tagName,
-				color: "#FFBE6F" // GNOME orange (light)
-			},
-			{
-				tag: t.attributeName,
-				color: "#62A0EA" // GNOME blue (light)
-			}
-		]
-	})
-
-	return {
-		macOS: {
-			light: macOSLightTheme,
-			dark: macOSDarkTheme
-		},
-		linux: {
-			light: linuxLightTheme,
-			dark: linuxDarkTheme
+			gutterForeground: "#9A9996",
+			comment: "#9A9996",
+			variableName: "#62A0EA",
+			string: "#8FF0A4",
+			number: "#FFBE6F",
+			boolNull: "#DC8ADD",
+			keyword: "#F66151",
+			keywordWeight: "bold",
+			operator: "#C0BFBC",
+			typeName: "#99C1F1",
+			definition: "#F8E45C",
+			angleBracket: "#9A9996",
+			tagName: "#FFBE6F",
+			attributeName: "#62A0EA"
 		}
 	}
+}
+
+export function createTextTheme({
+	platform,
+	darkMode,
+	backgroundColor,
+	textForegroundColor
+}: {
+	platform: Platform["OS"]
+	darkMode: boolean
+	backgroundColor: string
+	textForegroundColor: string
+}) {
+	const p = PALETTES[platform === "ios" ? "macOS" : "linux"][darkMode ? "dark" : "light"]
+
+	return createTheme({
+		theme: darkMode ? "dark" : "light",
+		settings: {
+			background: backgroundColor,
+			foreground: textForegroundColor,
+			selection: p.selection,
+			selectionMatch: p.selection,
+			lineHighlight: "transparent",
+			gutterBorder: `1px solid ${p.gutterBorder}`,
+			gutterBackground: p.gutterBackground,
+			gutterForeground: p.gutterForeground,
+			fontFamily: "var(--font-sans)"
+		},
+		styles: [
+			{
+				tag: t.comment,
+				color: p.comment,
+				fontStyle: "italic"
+			},
+			{
+				tag: t.variableName,
+				color: p.variableName
+			},
+			{
+				tag: [t.string, t.special(t.brace)],
+				color: p.string
+			},
+			{
+				tag: t.number,
+				color: p.number
+			},
+			{
+				tag: t.bool,
+				color: p.boolNull
+			},
+			{
+				tag: t.null,
+				color: p.boolNull
+			},
+			{
+				tag: t.keyword,
+				color: p.keyword,
+				fontWeight: p.keywordWeight
+			},
+			{
+				tag: t.operator,
+				color: p.operator
+			},
+			{
+				tag: t.className,
+				color: p.typeName
+			},
+			{
+				tag: t.definition(t.typeName),
+				color: p.definition
+			},
+			{
+				tag: t.typeName,
+				color: p.typeName
+			},
+			{
+				tag: t.angleBracket,
+				color: p.angleBracket
+			},
+			{
+				tag: t.tagName,
+				color: p.tagName
+			},
+			{
+				tag: t.attributeName,
+				color: p.attributeName
+			}
+		]
+	})
 }

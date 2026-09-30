@@ -8,9 +8,10 @@
  * so un-awaited callers race exactly like production; copySync()/moveSync()
  * hold the synchronous implementations.
  *
- * Usage in test files:
+ * vitest.config.ts aliases "expo-file-system" to this file, so tests need no
+ * vi.mock for it; only the fast/strict/inline variants declare their own.
  *
- *   vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
+ * Usage in test files:
  *
  *   import { fs } from "@/tests/mocks/expoFileSystem"
  *

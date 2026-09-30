@@ -59,7 +59,6 @@ vi.mock("@/queries/client", async () => {
 	return {
 		default: queryClient,
 		queryClient,
-		DEFAULT_QUERY_OPTIONS: {},
 		queryUpdater: { get: vi.fn(), set: vi.fn() },
 		preserveArrayIdentity: <T>(_prev: T[], next: T[]): T[] => next
 	}

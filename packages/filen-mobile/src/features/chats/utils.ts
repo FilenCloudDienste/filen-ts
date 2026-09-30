@@ -130,85 +130,71 @@ export type SuccessfulLink = Extract<
 	}
 >
 
-export type ResolvedLinkMedia = {
-	type: "image" | "video" | "internal" | null
-	url: string | null
-	name: string | null
-	linked: InternalLinkData | null
-}
+export type ResolvedLinkMedia =
+	| {
+			type: "image" | "video"
+			url: string
+			name: string
+			linked: InternalLinkData | null
+	  }
+	| {
+			type: "internal"
+			url: null
+			name: null
+			linked: InternalLinkData
+	  }
+	| {
+			type: null
+			url: null
+			name: null
+			linked: null
+	  }
 
-// Pure classifier shared by the single- and multi-attachment render paths. Collapses the
-// 4× (single|multi × image|video) duplication plus the internal/none fall-through into one
-// decision. Mirrors the original branch order exactly: image → video → internal → none.
-// `getFileUrl` is the only effectful dependency (it builds an AnyFile.Linked HTTP url); when
-// absent, internal media cannot be served so those links fall through to the internal/none path.
+// Pure classifier shared by the single- and multi-attachment render paths. `getFileUrl` builds
+// the AnyFile.Linked HTTP url; without it internal media cannot be served and degrades to the
+// generic internal attachment.
 export function resolveLinkMedia(link: SuccessfulLink, getFileUrl: ((file: AnyFile) => string) | null | undefined): ResolvedLinkMedia {
-	const internalData = link.type === "internal" ? link.data : null
+	if (link.type === "external") {
+		const { previewType, url, name } = link.data
 
-	const linkedFileName = (data: InternalLinkData): string | null => {
-		if (data.type !== "file") {
-			return null
-		}
-
-		return data.file.name.tag === MaybeEncryptedUniffi_Tags.Decrypted ? data.file.name.inner[0] : data.file.uuid
-	}
-
-	const linkedFileUrl = (data: InternalLinkData): string | null => {
-		if (!getFileUrl || data.type !== "file") {
-			return null
-		}
-
-		return getFileUrl(new AnyFile.Linked(data.file))
-	}
-
-	if (
-		(link.type === "external" && link.data.previewType === "image") ||
-		(link.type === "internal" && link.data.type === "file" && link.data.previewType === "image" && Boolean(getFileUrl))
-	) {
-		const url = link.type === "external" ? link.data.url : link.data.type === "file" ? linkedFileUrl(link.data) : null
-		const name = link.type === "external" ? link.data.name : link.data.type === "file" ? linkedFileName(link.data) : null
-
-		if (url && name) {
+		if ((previewType === "image" || previewType === "video") && url && name) {
 			return {
-				type: "image",
+				type: previewType,
 				url,
 				name,
-				linked: internalData
+				linked: null
 			}
 		}
-	}
 
-	if (
-		(link.type === "external" && link.data.previewType === "video") ||
-		(link.type === "internal" && link.data.type === "file" && link.data.previewType === "video" && Boolean(getFileUrl))
-	) {
-		const url = link.type === "external" ? link.data.url : link.data.type === "file" ? linkedFileUrl(link.data) : null
-		const name = link.type === "external" ? link.data.name : link.data.type === "file" ? linkedFileName(link.data) : null
-
-		if (url && name) {
-			return {
-				type: "video",
-				url,
-				name,
-				linked: internalData
-			}
-		}
-	}
-
-	if (link.type === "internal") {
 		return {
-			type: "internal",
+			type: null,
 			url: null,
 			name: null,
-			linked: link.data
+			linked: null
+		}
+	}
+
+	const data = link.data
+
+	if (data.type === "file" && getFileUrl && (data.previewType === "image" || data.previewType === "video")) {
+		const url = getFileUrl(new AnyFile.Linked(data.file))
+		const name = data.file.name.tag === MaybeEncryptedUniffi_Tags.Decrypted ? data.file.name.inner[0] : data.file.uuid
+
+		if (url && name) {
+			return {
+				type: data.previewType,
+				url,
+				name,
+				linked: data
+			}
 		}
 	}
 
 	return {
-		type: null,
+		type: "internal",
 		url: null,
 		name: null,
-		linked: null
+		linked: data
 	}
 }
 

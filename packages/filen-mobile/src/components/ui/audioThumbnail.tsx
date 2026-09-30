@@ -6,13 +6,11 @@ import Image from "@/components/ui/image"
 
 export function AudioThumbnail({
 	pictureUri,
-	size = 40,
 	active = false,
 	recyclingKey,
 	className
 }: {
 	pictureUri?: string | null
-	size?: number
 	active?: boolean
 	recyclingKey?: string
 	className?: string
@@ -28,8 +26,8 @@ export function AudioThumbnail({
 					className
 				)}
 				style={{
-					width: size,
-					height: size
+					width: 40,
+					height: 40
 				}}
 				source={{
 					uri: pictureUri
@@ -49,8 +47,8 @@ export function AudioThumbnail({
 				className
 			)}
 			style={{
-				width: size,
-				height: size
+				width: 40,
+				height: 40
 			}}
 		>
 			<Ionicons

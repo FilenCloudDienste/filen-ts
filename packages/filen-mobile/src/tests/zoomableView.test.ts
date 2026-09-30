@@ -310,9 +310,7 @@ describe("computePinchTransform", () => {
 			1.5,
 			275,
 			405,
-			false,
-			1,
-			5
+			false
 		)
 
 		expect(next.scale).toBeCloseTo(1.5)
@@ -330,7 +328,7 @@ describe("computePinchTransform", () => {
 		const anchorPointX = (260 - centerX - 0) / 1
 		const anchorPointY = (400 - centerY - 0) / 1
 
-		const next = computePinchTransform(makeSv({ ...BASE, savedTranslateX: 0, savedTranslateY: 0 }), 1.5, 275, 405, false, 1, 5)
+		const next = computePinchTransform(makeSv({ ...BASE, savedTranslateX: 0, savedTranslateY: 0 }), 1.5, 275, 405, false)
 
 		expect(next.scale).toBeCloseTo(1.5)
 		expect(next.translateX + next.scale * anchorPointX).toBeCloseTo(275 - centerX)
@@ -353,7 +351,7 @@ describe("computePinchTransform", () => {
 		]
 
 		for (const frame of frames) {
-			const next = computePinchTransform(sv, frame.scale, frame.focalX, 400, false, 1, 5)
+			const next = computePinchTransform(sv, frame.scale, frame.focalX, 400, false)
 
 			expect(next.translateX + next.scale * anchorPointX).toBeCloseTo(frame.focalX - centerX)
 		}
@@ -405,7 +403,7 @@ describe("planAxisRelease", () => {
 })
 
 // ─── computePinchSettleTarget: focal-anchored rest position on pinch release ──
-// The rest position a pinch settles to: scale clamped into [minZoom, maxZoom],
+// The rest position a pinch settles to: scale clamped into [MIN_ZOOM, MAX_ZOOM],
 // translation re-derived focal-anchored AT THE CLAMPED SCALE, then hard-clamped
 // into pan bounds. Settling all three to this single target (one critically-
 // damped spring) is what removes the snap-back.
@@ -448,14 +446,14 @@ const SETTLE_BASE = {
 }
 
 describe("computePinchSettleTarget", () => {
-	it("clamps an over-zoomed scale back to maxZoom", () => {
-		const target = computePinchSettleTarget(makeSettleSv({ ...SETTLE_BASE, scale: 12 }), 1, 10)
+	it("clamps an over-zoomed scale back to MAX_ZOOM", () => {
+		const target = computePinchSettleTarget(makeSettleSv({ ...SETTLE_BASE, scale: 12 }))
 
 		expect(target.scale).toBe(10)
 	})
 
-	it("clamps an under-zoomed scale back to minZoom and recenters (bounds collapse to 0)", () => {
-		const target = computePinchSettleTarget(makeSettleSv({ ...SETTLE_BASE, scale: 0.8, translateX: 30, translateY: 40 }), 1, 10)
+	it("clamps an under-zoomed scale back to MIN_ZOOM and recenters (bounds collapse to 0)", () => {
+		const target = computePinchSettleTarget(makeSettleSv({ ...SETTLE_BASE, scale: 0.8, translateX: 30, translateY: 40 }))
 
 		expect(target.scale).toBe(1)
 		expect(target.translateX).toBe(0)
@@ -463,7 +461,7 @@ describe("computePinchSettleTarget", () => {
 	})
 
 	it("keeps an in-range scale and hard-clamps an over-panned translation into pan bounds", () => {
-		const target = computePinchSettleTarget(makeSettleSv({ ...SETTLE_BASE, scale: 2, translateX: 99999, translateY: 99999 }), 1, 10)
+		const target = computePinchSettleTarget(makeSettleSv({ ...SETTLE_BASE, scale: 2, translateX: 99999, translateY: 99999 }))
 
 		expect(target.scale).toBe(2)
 		expect(target.translateX).toBe(150)

@@ -12,14 +12,6 @@ vi.mock("expo-local-authentication", () => ({
 	supportedAuthenticationTypesAsync: mockSupportedAuthenticationTypesAsync
 }))
 
-vi.mock("@/queries/client", () => ({
-	DEFAULT_QUERY_OPTIONS: {},
-	queryUpdater: {
-		get: vi.fn(),
-		set: vi.fn()
-	}
-}))
-
 import { fetchData } from "@/queries/useLocalAuthentication.query"
 
 describe("fetchData (useLocalAuthentication.query)", () => {

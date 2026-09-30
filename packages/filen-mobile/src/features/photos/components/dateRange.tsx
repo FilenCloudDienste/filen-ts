@@ -1,22 +1,15 @@
 import View, { CrossGlassContainerView } from "@/components/ui/view"
 import Text from "@/components/ui/text"
 import { Platform } from "react-native"
-import { useShallow } from "zustand/shallow"
 import usePhotosStore from "@/features/photos/store/usePhotos.store"
 import { simpleDateNoTime } from "@/lib/time"
 import { useHeaderHeight } from "expo-router/react-navigation"
 
 export const DateRange = () => {
-	const visibleDateRange = usePhotosStore(useShallow(state => state.visibleDateRange))
+	const visibleDate = usePhotosStore(state => state.visibleDate)
 	const headerHeight = useHeaderHeight()
 
-	if (!visibleDateRange) {
-		return null
-	}
-
-	const startDate = visibleDateRange.start !== null ? new Date(visibleDateRange.start) : null
-
-	if (!startDate) {
+	if (visibleDate === null) {
 		return null
 	}
 
@@ -34,7 +27,7 @@ export const DateRange = () => {
 			}}
 		>
 			<CrossGlassContainerView className="p-2 items-center justify-center">
-				<Text className="text-sm">{simpleDateNoTime(startDate)}</Text>
+				<Text className="text-sm">{simpleDateNoTime(new Date(visibleDate))}</Text>
 			</CrossGlassContainerView>
 		</View>
 	)

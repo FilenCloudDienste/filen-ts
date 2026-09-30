@@ -8,15 +8,11 @@ import { cn } from "@filen/shared"
 
 export const PopupContainerView = ({
 	children,
-	className,
 	scrollViewClassName,
-	containerClassName,
 	scrollViewProps
 }: {
 	children: React.ReactNode
-	className?: string
 	scrollViewClassName?: string
-	containerClassName?: string
 	scrollViewProps?: React.ComponentProps<typeof GestureHandlerScrollView>
 }) => {
 	const inputViewLayout = useChatsStore(useShallow(state => state.inputViewLayout))
@@ -26,13 +22,13 @@ export const PopupContainerView = ({
 		<AnimatedView
 			entering={SlideInDown}
 			exiting={SlideOutDown}
-			className={cn("absolute left-0 right-0 px-4 z-20", className)}
+			className="absolute left-0 right-0 px-4 z-20"
 			style={{
 				bottom: inputViewLayout.height + 8
 			}}
 		>
 			<CrossGlassContainerView
-				className={cn("rounded-3xl w-full overflow-hidden", containerClassName)}
+				className="rounded-3xl w-full overflow-hidden"
 				disableLiquidGlass={true}
 			>
 				<GestureHandlerScrollView

@@ -2,7 +2,7 @@ import { Checkbox as ExpoCheckbox } from "expo-checkbox"
 import { withUniwind, useResolveClassNames } from "uniwind"
 import { cn } from "@filen/shared"
 
-export const UniwindCheckbox = withUniwind(ExpoCheckbox) as React.FC<React.ComponentProps<typeof ExpoCheckbox>>
+const UniwindCheckbox = withUniwind(ExpoCheckbox) as React.FC<React.ComponentProps<typeof ExpoCheckbox>>
 
 export const Checkbox = (props: React.ComponentProps<typeof ExpoCheckbox> & React.RefAttributes<typeof ExpoCheckbox>) => {
 	const textPrimary = useResolveClassNames("text-primary")

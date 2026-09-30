@@ -1,5 +1,5 @@
 import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
-import { DEFAULT_QUERY_OPTIONS, queryClient, queryUpdater } from "@/queries/client"
+import { queryClient, queryUpdater } from "@/queries/client"
 import auth from "@/lib/auth"
 import type { QuotaCheckDeps } from "@filen/shared"
 
@@ -171,7 +171,6 @@ export function addAccountStorageUsed(bytes: bigint): void {
 
 export function useAccountQuery(options?: Omit<UseQueryOptions, "queryKey" | "queryFn">): UseQueryResult<Account, Error> {
 	const query = useQuery({
-		...DEFAULT_QUERY_OPTIONS,
 		staleTime: ACCOUNT_STALE_TIME,
 		refetchOnMount: true,
 		...options,

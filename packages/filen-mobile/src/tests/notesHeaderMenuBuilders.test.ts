@@ -82,10 +82,6 @@ vi.mock("expo-clipboard", () => ({
 	setStringAsync: vi.fn()
 }))
 
-vi.mock("@/lib/serializer", () => ({
-	serialize: vi.fn(x => JSON.stringify(x))
-}))
-
 vi.mock("@/components/ui/fullScreenLoadingModal", () => ({
 	runWithLoading: vi.fn(async (fn: () => Promise<unknown>) => {
 		try {
@@ -164,7 +160,6 @@ vi.mock("@/lib/share", () => ({
 import { buildNotesHeaderRightItems, buildTagsSortMenuButton } from "@/features/notes/components/notesHeaderMenuBuilders"
 import { Platform } from "react-native"
 import { type NoteSelectionFlags } from "@filen/shared"
-import { type NoteTagSelectionFlags, EMPTY_NOTE_TAG_FLAGS } from "@/features/notes/notesSelectors"
 import { type Note, type NoteTag } from "@/types"
 import { type MenuButton } from "@/components/ui/menu"
 
@@ -222,13 +217,6 @@ function makeNoteFlags(overrides: Partial<NoteSelectionFlags> = {}): NoteSelecti
 	}
 }
 
-function makeTagFlags(overrides: Partial<NoteTagSelectionFlags> = {}): NoteTagSelectionFlags {
-	return {
-		...EMPTY_NOTE_TAG_FLAGS,
-		...overrides
-	} as NoteTagSelectionFlags
-}
-
 /** Extract all button ids recursively (top-level only — not subButtons). */
 function topLevelIds(items: ReturnType<typeof buildNotesHeaderRightItems>): string[] {
 	if (items.length === 0) {
@@ -258,7 +246,6 @@ function defaultParams() {
 		setNotesViewMode: vi.fn(),
 		tagsSortBy: "lastActivityDesc" as const,
 		setTagsSortBy: vi.fn(),
-		tagFlags: makeTagFlags(),
 		noteFlags: makeNoteFlags(),
 		markedOffline: {} as Record<string, true>,
 		tag: null,
@@ -863,7 +850,6 @@ describe("buildNotesHeaderRightItems", () => {
 				viewMode: "tags",
 				notesViewMode: "tags",
 				selectedTags: [tag],
-				tagFlags: makeTagFlags({ count: 1, includesFavorited: false }),
 				notesTags: [tag]
 			})
 			const ids = topLevelIds(items)
@@ -878,7 +864,6 @@ describe("buildNotesHeaderRightItems", () => {
 				viewMode: "tags",
 				notesViewMode: "tags",
 				selectedTags: [tag],
-				tagFlags: makeTagFlags({ count: 1 }),
 				notesTags: [tag]
 			})
 			const ids = topLevelIds(items)
@@ -893,7 +878,6 @@ describe("buildNotesHeaderRightItems", () => {
 				viewMode: "tags",
 				notesViewMode: "tags",
 				selectedTags: [tag],
-				tagFlags: makeTagFlags({ count: 1 }),
 				notesTags: [tag]
 			})
 			const buttons = (items[0]?.type === "menu" ? (items[0].props?.buttons ?? []) : []) as MenuButton[]
@@ -909,8 +893,23 @@ describe("buildNotesHeaderRightItems", () => {
 				viewMode: "tags",
 				notesViewMode: "tags",
 				selectedTags: [tag],
-				tagFlags: makeTagFlags({ count: 1, includesFavorited: true }),
 				notesTags: [tag]
+			})
+			const buttons = (items[0]?.type === "menu" ? (items[0].props?.buttons ?? []) : []) as MenuButton[]
+			const fav = buttons.find(b => b.id === "bulkFavorite")
+
+			expect(fav?.title).toBe("unfavorite_selected")
+		})
+
+		it("bulkFavorite title is 'unfavorite_selected' when any selected tag is favorited", () => {
+			const plain = makeTag({ uuid: "tag-1", favorite: false })
+			const favorited = makeTag({ uuid: "tag-2", favorite: true })
+			const items = buildNotesHeaderRightItems({
+				...defaultParams(),
+				viewMode: "tags",
+				notesViewMode: "tags",
+				selectedTags: [plain, favorited],
+				notesTags: [plain, favorited]
 			})
 			const buttons = (items[0]?.type === "menu" ? (items[0].props?.buttons ?? []) : []) as MenuButton[]
 			const fav = buttons.find(b => b.id === "bulkFavorite")
@@ -925,7 +924,6 @@ describe("buildNotesHeaderRightItems", () => {
 				viewMode: "tags",
 				notesViewMode: "tags",
 				selectedTags: [tag],
-				tagFlags: makeTagFlags({ count: 1, includesFavorited: false }),
 				notesTags: [tag]
 			})
 			const buttons = (items[0]?.type === "menu" ? (items[0].props?.buttons ?? []) : []) as MenuButton[]
@@ -1358,9 +1356,9 @@ describe("buildTagsSortMenuButton", () => {
 			expect(opts.title).toBe("sort_last_activity")
 			expect(opts.buttons.map((b: { title: string }) => b.title)).toEqual([
 				"sort_last_activity_newest (current)",
-				"sort_last_activity_oldest",
-				"cancel"
+				"sort_last_activity_oldest"
 			])
+			expect(opts.cancelTitle).toBe("cancel")
 
 			opts.buttons[1].onPress()
 

@@ -1,7 +1,6 @@
 import { create } from "zustand"
-import { removeSelectedIds } from "@filen/shared"
+import { removeSelectedIds, toggleInArray } from "@filen/shared"
 import type { DriveItem } from "@/types"
-import { toggleInArray } from "@/stores/createSelectionSlice"
 
 export type DriveStore = {
 	selectedItems: DriveItem[]

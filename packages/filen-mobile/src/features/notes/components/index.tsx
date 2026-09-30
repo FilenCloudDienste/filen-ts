@@ -158,30 +158,25 @@ const Notes = () => {
 	// otherwise they'd silently target search-hidden notes (#15).
 	const visibleNotes = notes.filter((note): note is NoteDataItem => note.type === "note")
 
-	// Stale-selection purge: if a note's owner becomes blocked while it's selected, the note is
-	// hidden from the list, so drop it from the selection too — keeps bulk actions honest.
-	useEffect(() => {
-		const selected = useNotesStore.getState().selectedNotes
-		const kept = pruneSelection(selected, note => !blocked.userIds.has(note.ownerId))
-
-		if (kept !== selected) {
-			useNotesStore.getState().setSelectedNotes(kept)
-		}
-	}, [blocked])
-
-	// Same purge against the view's own membership rather than the note's existence: in a narrowed
-	// view a note can leave the list while still existing, and the header's bulk actions must not keep
-	// counting it. Offline membership IS the ledger (un-mark a note and it goes); shared membership is
-	// the participant list (remove the last participant, or be removed yourself, and it goes).
+	// Stale-selection purge against the view's own membership. narrowedNotes only holds live notes
+	// whose owner is not blocked, so this one rule also drops notes that were deleted (#42 — a remote
+	// delete can slip past the socket handler's synchronous prune) or whose owner became blocked. In a
+	// narrowed view a note can also leave the list while still existing, and the header's bulk actions
+	// must not keep counting it. Offline membership IS the ledger (un-mark a note and it goes); shared
+	// membership is the participant list (remove the last participant, or be removed yourself, and it
+	// goes).
 	//
 	// Reachable when a bulk removal fails partway — runBulk is fail-fast and deliberately keeps the
 	// selection so the user can retry, but the notes it already un-marked are gone from this list.
 	//
-	// Keyed on the narrowed set, not on the ledger, so every view is covered by one rule; in the
-	// unnarrowed views this converges to the same answer the blocked/live purges already give.
-	const narrowedNoteUuidsKey = narrowedNotes.map(note => note.uuid).join(",")
+	// Null while the query holds no data, so an unloaded list never clears the selection.
+	const narrowedNoteUuidsKey = notesData ? narrowedNotes.map(note => note.uuid).join(",") : null
 
 	useEffect(() => {
+		if (narrowedNoteUuidsKey === null) {
+			return
+		}
+
 		const narrowedUuids = new Set(narrowedNoteUuidsKey.length > 0 ? narrowedNoteUuidsKey.split(",") : [])
 		const selected = useNotesStore.getState().selectedNotes
 		const kept = pruneSelection(selected, note => narrowedUuids.has(note.uuid))
@@ -314,24 +309,6 @@ const Notes = () => {
 		useNotesStore.getState().setSelectedTags(prev => pruneSelection(prev, selectedTag => liveTagUuids.has(selectedTag.uuid)))
 	}, [liveTagUuidsKey])
 
-	// Selection-ghost purge (#42): a remote NoteEvent_Tags.Deleted removes the note from
-	// the query cache but selectedNotes is only pruned synchronously in the socket handler
-	// for the primary case. This reconciliation effect is the defense-in-depth mirror of
-	// the selectedTags purge above — it prunes selectedNotes against the UNFILTERED live
-	// note uuid set so any ghost that slips through (e.g. from other removal paths) is
-	// caught before it can inflate the count, break select-all, or fail a bulk op.
-	const liveNoteUuidsKey = notesData ? notesData.map(note => note.uuid).join(",") : null
-
-	useEffect(() => {
-		if (liveNoteUuidsKey === null) {
-			return
-		}
-
-		const liveNoteUuids = new Set(liveNoteUuidsKey.length > 0 ? liveNoteUuidsKey.split(",") : [])
-
-		useNotesStore.getState().setSelectedNotes(prev => pruneSelection(prev, selectedNote => liveNoteUuids.has(selectedNote.uuid)))
-	}, [liveNoteUuidsKey])
-
 	const searchActive = searchQuery.trim().length > 0
 
 	// One empty state for every note-row view, resolved through the same table as the title and the
@@ -415,7 +392,6 @@ const Notes = () => {
 					{viewMode !== "tags" ? (
 						<VirtualList
 							className="flex-1"
-							contentInsetAdjustmentBehavior="automatic"
 							contentContainerClassName={cn("pb-40", Platform.OS === "android" && "pb-96")}
 							keyExtractor={keyExtractorNotesView}
 							data={notes}
@@ -430,7 +406,6 @@ const Notes = () => {
 					) : (
 						<VirtualList
 							className="flex-1"
-							contentInsetAdjustmentBehavior="automatic"
 							contentContainerClassName={cn("pb-40", Platform.OS === "android" && "pb-96")}
 							keyExtractor={keyExtractorTagsView}
 							data={notesTags}

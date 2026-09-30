@@ -201,7 +201,7 @@ beforeEach(() => {
 	vi.clearAllMocks()
 	// sensible defaults
 	mockPromptsAlert.mockResolvedValue({ cancelled: false })
-	mockPromptsInput.mockResolvedValue({ cancelled: false, type: "string", value: "" })
+	mockPromptsInput.mockResolvedValue({ cancelled: false, value: "" })
 	mockRunWithLoading.mockResolvedValue({ success: true, data: undefined })
 	mockCanOpenURL.mockResolvedValue(true)
 	mockOpenURL.mockResolvedValue(undefined)
@@ -410,7 +410,7 @@ describe("buildDangerZoneButtons", () => {
 		it("shows 2FA input and forwards code when twoFactorEnabled===true", async () => {
 			// Confirm the two alert prompts then provide 2FA code
 			mockPromptsAlert.mockResolvedValueOnce({ cancelled: false }).mockResolvedValueOnce({ cancelled: false })
-			mockPromptsInput.mockResolvedValueOnce({ cancelled: false, type: "string", value: "123456" })
+			mockPromptsInput.mockResolvedValueOnce({ cancelled: false, value: "123456" })
 			runWithLoadingPassthrough()
 
 			const accountQuery = makeAccountQuery({ twoFactorEnabled: true })
@@ -450,7 +450,7 @@ describe("buildDangerZoneButtons", () => {
 
 		it("aborts when 2FA code is empty string", async () => {
 			mockPromptsAlert.mockResolvedValueOnce({ cancelled: false }).mockResolvedValueOnce({ cancelled: false })
-			mockPromptsInput.mockResolvedValueOnce({ cancelled: false, type: "string", value: "" })
+			mockPromptsInput.mockResolvedValueOnce({ cancelled: false, value: "" })
 			runWithLoadingPassthrough()
 
 			const accountQuery = makeAccountQuery({ twoFactorEnabled: true })
@@ -489,9 +489,9 @@ describe("buildProfileButtons", () => {
 		it("calls alerts.error with email_addresses_do_not_match and does NOT call getSdkClients", async () => {
 			// newEmail prompt
 			mockPromptsInput
-				.mockResolvedValueOnce({ cancelled: false, type: "string", value: "new@example.com" })
+				.mockResolvedValueOnce({ cancelled: false, value: "new@example.com" })
 				// confirmNewEmail prompt (different value)
-				.mockResolvedValueOnce({ cancelled: false, type: "string", value: "other@example.com" })
+				.mockResolvedValueOnce({ cancelled: false, value: "other@example.com" })
 
 			const buttons = buildProfileButtons({
 				t,
@@ -509,10 +509,10 @@ describe("buildProfileButtons", () => {
 
 		it("does NOT call alerts.error when emails match", async () => {
 			mockPromptsInput
-				.mockResolvedValueOnce({ cancelled: false, type: "string", value: "new@example.com" })
-				.mockResolvedValueOnce({ cancelled: false, type: "string", value: "new@example.com" })
+				.mockResolvedValueOnce({ cancelled: false, value: "new@example.com" })
+				.mockResolvedValueOnce({ cancelled: false, value: "new@example.com" })
 				// password prompt
-				.mockResolvedValueOnce({ cancelled: false, type: "string", value: "secret" })
+				.mockResolvedValueOnce({ cancelled: false, value: "secret" })
 			runWithLoadingPassthrough()
 
 			const buttons = buildProfileButtons({
@@ -530,7 +530,7 @@ describe("buildProfileButtons", () => {
 
 	describe("change email — empty newEmail guard", () => {
 		it("short-circuits without calling confirmEmail prompt when newEmail is empty after trim", async () => {
-			mockPromptsInput.mockResolvedValueOnce({ cancelled: false, type: "string", value: "   " })
+			mockPromptsInput.mockResolvedValueOnce({ cancelled: false, value: "   " })
 
 			const buttons = buildProfileButtons({
 				t,
@@ -550,8 +550,8 @@ describe("buildProfileButtons", () => {
 	describe("change email — empty confirmNewEmail guard", () => {
 		it("short-circuits without calling password prompt when confirmNewEmail is empty after trim", async () => {
 			mockPromptsInput
-				.mockResolvedValueOnce({ cancelled: false, type: "string", value: "new@example.com" })
-				.mockResolvedValueOnce({ cancelled: false, type: "string", value: "   " })
+				.mockResolvedValueOnce({ cancelled: false, value: "new@example.com" })
+				.mockResolvedValueOnce({ cancelled: false, value: "   " })
 
 			const buttons = buildProfileButtons({
 				t,
@@ -571,10 +571,10 @@ describe("buildProfileButtons", () => {
 	describe("change email — empty password guard", () => {
 		it("short-circuits without calling getSdkClients when password is empty", async () => {
 			mockPromptsInput
-				.mockResolvedValueOnce({ cancelled: false, type: "string", value: "new@example.com" })
-				.mockResolvedValueOnce({ cancelled: false, type: "string", value: "new@example.com" })
+				.mockResolvedValueOnce({ cancelled: false, value: "new@example.com" })
+				.mockResolvedValueOnce({ cancelled: false, value: "new@example.com" })
 				// empty password
-				.mockResolvedValueOnce({ cancelled: false, type: "string", value: "" })
+				.mockResolvedValueOnce({ cancelled: false, value: "" })
 
 			const buttons = buildProfileButtons({
 				t,
@@ -778,7 +778,7 @@ describe("buildTwoFactorButtons", () => {
 		it("calls disable2fa with the provided code", async () => {
 			// Confirm the disable alert, then provide 2FA code via input
 			mockPromptsAlert.mockResolvedValueOnce({ cancelled: false })
-			mockPromptsInput.mockResolvedValueOnce({ cancelled: false, type: "string", value: "654321" })
+			mockPromptsInput.mockResolvedValueOnce({ cancelled: false, value: "654321" })
 			runWithLoadingPassthrough()
 
 			const accountQuery = makeAccountQuery({ twoFactorEnabled: true })
@@ -839,7 +839,7 @@ describe("buildTwoFactorButtons", () => {
 
 	describe("enable flow (twoFactorEnabled===false)", () => {
 		it("calls enable2faGetRecoveryKey with the provided code", async () => {
-			mockPromptsInput.mockResolvedValueOnce({ cancelled: false, type: "string", value: "123456" })
+			mockPromptsInput.mockResolvedValueOnce({ cancelled: false, value: "123456" })
 			mockAuthedSdkClient.enable2faGetRecoveryKey.mockResolvedValueOnce("recovery-key-abc")
 			runWithLoadingPassthrough()
 
@@ -879,7 +879,7 @@ describe("buildTwoFactorButtons", () => {
 		})
 
 		it("aborts enable when 2FA code is empty string", async () => {
-			mockPromptsInput.mockResolvedValueOnce({ cancelled: false, type: "string", value: "" })
+			mockPromptsInput.mockResolvedValueOnce({ cancelled: false, value: "" })
 			runWithLoadingPassthrough()
 
 			const accountQuery = makeAccountQuery({ twoFactorEnabled: false })
@@ -954,7 +954,7 @@ describe("account writes — patch vs reread", () => {
 	})
 
 	it("nickname: patches the trimmed name it sent, no reread", async () => {
-		mockPromptsInput.mockResolvedValueOnce({ cancelled: false, type: "string", value: "  new name  " })
+		mockPromptsInput.mockResolvedValueOnce({ cancelled: false, value: "  new name  " })
 
 		const buttons = buildProfileButtons({ t, accountQuery: makeAccountQuery(), isOnline: true })
 		const nicknameBtn = buttons.find(b => b.title === "change_nickname")
@@ -967,7 +967,7 @@ describe("account writes — patch vs reread", () => {
 	})
 
 	it("enabling 2FA patches it on and withholds the key like getUserInfo does, no reread", async () => {
-		mockPromptsInput.mockResolvedValueOnce({ cancelled: false, type: "string", value: "123456" })
+		mockPromptsInput.mockResolvedValueOnce({ cancelled: false, value: "123456" })
 		mockAuthedSdkClient.enable2faGetRecoveryKey.mockResolvedValueOnce("recovery-key")
 
 		const buttons = buildTwoFactorButtons({ t, accountQuery: makeAccountQuery({ twoFactorEnabled: false }), isOnline: true })
@@ -982,7 +982,7 @@ describe("account writes — patch vs reread", () => {
 
 	it("disabling 2FA rereads (the next setup key only comes from the server)", async () => {
 		mockPromptsAlert.mockResolvedValueOnce({ cancelled: false })
-		mockPromptsInput.mockResolvedValueOnce({ cancelled: false, type: "string", value: "654321" })
+		mockPromptsInput.mockResolvedValueOnce({ cancelled: false, value: "654321" })
 
 		const buttons = buildTwoFactorButtons({ t, accountQuery: makeAccountQuery({ twoFactorEnabled: true }), isOnline: true })
 
@@ -1013,9 +1013,9 @@ describe("account writes — patch vs reread", () => {
 
 	it("changing email still rereads (whether it applies before confirmation is the server's call)", async () => {
 		mockPromptsInput
-			.mockResolvedValueOnce({ cancelled: false, type: "string", value: "new@example.com" })
-			.mockResolvedValueOnce({ cancelled: false, type: "string", value: "new@example.com" })
-			.mockResolvedValueOnce({ cancelled: false, type: "string", value: "secret" })
+			.mockResolvedValueOnce({ cancelled: false, value: "new@example.com" })
+			.mockResolvedValueOnce({ cancelled: false, value: "new@example.com" })
+			.mockResolvedValueOnce({ cancelled: false, value: "secret" })
 
 		await buildProfileButtons({ t, accountQuery: makeAccountQuery(), isOnline: true })[0]?.onPress?.()
 

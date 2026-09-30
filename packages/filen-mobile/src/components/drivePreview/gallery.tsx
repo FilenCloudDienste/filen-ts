@@ -484,14 +484,13 @@ const Gallery = () => {
 		}
 	}
 
-	const { isImage, isVideo, isAudio, isExternal } = useDrivePreviewStore(
+	const { isImage, isVideo, isAudio } = useDrivePreviewStore(
 		useShallow(state => {
 			if (!state.currentItem) {
 				return {
 					isImage: false,
 					isVideo: false,
-					isAudio: false,
-					isExternal: false
+					isAudio: false
 				}
 			}
 
@@ -500,8 +499,7 @@ const Gallery = () => {
 			return {
 				isImage: isImagePreviewType(previewType),
 				isVideo: previewType === "video",
-				isAudio: previewType === "audio",
-				isExternal: state.currentItem.type === "external"
+				isAudio: previewType === "audio"
 			}
 		})
 	)
@@ -586,7 +584,7 @@ const Gallery = () => {
 		goBackFromGestureDismiss,
 		onDismissGestureStart,
 		onDismissGestureEnd
-	).enabled(isImage || isVideo || isAudio || items.length === 0 || (isExternal && (isImage || isVideo || isAudio)))
+	).enabled(isImage || isVideo || isAudio || items.length === 0)
 
 	// The single point where this gallery commits to leaving. Every exit funnels through the route pop
 	// — the header close button, the swipe-down/pinch dismiss, the Android hardware back button, the

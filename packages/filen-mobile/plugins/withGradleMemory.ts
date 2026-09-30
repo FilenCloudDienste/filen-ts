@@ -1,22 +1,15 @@
 import { ConfigPlugin } from "@expo/config-plugins"
 import { withGradleProperties } from "@expo/config-plugins/build/plugins/android-plugins"
 
-type GradleMemoryOptions = {
-	heapSize?: string
-	metaspaceSize?: string
-}
-
-const withGradleMemory: ConfigPlugin<GradleMemoryOptions> = (config, options = {}) => {
-	const { heapSize = "6g", metaspaceSize = "1g" } = options
-
+const withGradleMemory: ConfigPlugin = config => {
 	return withGradleProperties(config, config => {
-		const { modResults } = config
+		// Replace the template's entry, otherwise gradle.properties carries the key twice.
+		config.modResults = config.modResults.filter(item => item.type !== "property" || item.key !== "org.gradle.jvmargs")
 
-		// Memory settings
-		modResults.push({
+		config.modResults.push({
 			type: "property",
 			key: "org.gradle.jvmargs",
-			value: `-Xmx${heapSize} -XX:MaxMetaspaceSize=${metaspaceSize} -XX:+HeapDumpOnOutOfMemoryError`
+			value: "-Xmx6g -XX:MaxMetaspaceSize=1g -XX:+HeapDumpOnOutOfMemoryError"
 		})
 
 		return config

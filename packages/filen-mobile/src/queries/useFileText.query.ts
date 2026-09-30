@@ -1,5 +1,4 @@
-import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
-import { DEFAULT_QUERY_OPTIONS } from "@/queries/client"
+import { useQuery, type UseQueryResult } from "@tanstack/react-query"
 import { sortParams } from "@filen/shared"
 import { Buffer } from "react-native-quick-crypto"
 import { type FileSource, resolveFile, fileSourceKey } from "@/queries/fileSource"
@@ -24,15 +23,10 @@ export async function fetchData(
 	return Buffer.from(await file.bytes()).toString("utf8")
 }
 
-export function useFileTextQuery(
-	params: UseFileTextQueryParams,
-	options?: Omit<UseQueryOptions, "queryKey" | "queryFn">
-): UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error> {
-	const query = useQuery({
-		...DEFAULT_QUERY_OPTIONS,
+export function useFileTextQuery(params: UseFileTextQueryParams): UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error> {
+	const query = useQuery<Awaited<ReturnType<typeof fetchData>>, Error>({
 		// File contents can be MB-sized; evict immediately when the last subscriber unmounts. fileCache backs us on disk, so refetch is cheap.
 		gcTime: 0,
-		...options,
 		// Key off identity only (fileSourceKey strips the by-value item).
 		queryKey: [BASE_QUERY_KEY, sortParams(fileSourceKey(params))],
 		queryFn: ({ signal }) =>
@@ -42,7 +36,7 @@ export function useFileTextQuery(
 			})
 	})
 
-	return query as UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error>
+	return query
 }
 
 export default useFileTextQuery

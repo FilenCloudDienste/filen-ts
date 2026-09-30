@@ -66,16 +66,11 @@ export function buildSortFieldButton<T extends string>({
 		onPress: () =>
 			actionSheet.show({
 				title,
-				buttons: [
-					...options.map(option => ({
-						title: option.value === current ? `${option.title} (${t("current")})` : option.title,
-						onPress: () => setSort(option.value)
-					})),
-					{
-						title: t("cancel"),
-						cancel: true
-					}
-				]
+				buttons: options.map(option => ({
+					title: option.value === current ? `${option.title} (${t("current")})` : option.title,
+					onPress: () => setSort(option.value)
+				})),
+				cancelTitle: t("cancel")
 			})
 	}
 }

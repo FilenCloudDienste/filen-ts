@@ -54,7 +54,6 @@ vi.mock("@/components/textEditor/richText/dom", () => ({
 	}
 }))
 
-vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
 vi.mock("expo-crypto", async () => await import("@/tests/mocks/expoCrypto"))
 
 vi.mock("expo-router", () => ({

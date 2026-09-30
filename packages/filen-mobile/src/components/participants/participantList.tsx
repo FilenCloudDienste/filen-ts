@@ -1,7 +1,6 @@
-import { Platform, ActivityIndicator } from "react-native"
+import { Platform } from "react-native"
 import { Fragment } from "react"
 import { useResolveClassNames } from "uniwind"
-import View from "@/components/ui/view"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import ListEmpty from "@/components/ui/listEmpty"
 import Header, { type HeaderItem } from "@/components/ui/header"
@@ -18,12 +17,10 @@ export type ParticipantListProps<T> = {
 	toRowProps: (participant: T) => ParticipantRowProps
 	headerLeftItems?: HeaderItem[]
 	headerRightItems?: HeaderItem[]
-	isLoading?: boolean
 }
 
 export const ParticipantList = <T,>(props: ParticipantListProps<T>) => {
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
-	const textForeground = useResolveClassNames("text-foreground")
 	const insets = useSafeAreaInsets()
 
 	return (
@@ -44,33 +41,23 @@ export const ParticipantList = <T,>(props: ParticipantListProps<T>) => {
 				className="flex-1 bg-background-secondary"
 				edges={["left", "right"]}
 			>
-				{props.isLoading ? (
-					<View className="flex-1 bg-transparent items-center justify-center">
-						<ActivityIndicator
-							size="large"
-							color={textForeground.color as string}
+				<VirtualList
+					data={props.participants as T[]}
+					contentContainerStyle={{
+						paddingBottom: insets.bottom
+					}}
+					emptyComponent={() => (
+						<ListEmpty
+							icon="people-outline"
+							title={props.emptyTitle}
+							description={props.emptyDescription}
 						/>
-					</View>
-				) : (
-					<VirtualList
-						data={props.participants as T[]}
-						contentInsetAdjustmentBehavior="automatic"
-						contentContainerStyle={{
-							paddingBottom: insets.bottom
-						}}
-						emptyComponent={() => (
-							<ListEmpty
-								icon="people-outline"
-								title={props.emptyTitle}
-								description={props.emptyDescription}
-							/>
-						)}
-						renderItem={({ item: participant }) => {
-							return <ParticipantRow {...props.toRowProps(participant)} />
-						}}
-						keyExtractor={participant => props.keyExtractor(participant)}
-					/>
-				)}
+					)}
+					renderItem={({ item: participant }) => {
+						return <ParticipantRow {...props.toRowProps(participant)} />
+					}}
+					keyExtractor={participant => props.keyExtractor(participant)}
+				/>
 			</SafeAreaView>
 		</Fragment>
 	)

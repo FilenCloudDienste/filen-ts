@@ -1,5 +1,5 @@
 import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
-import { DEFAULT_QUERY_OPTIONS, queryUpdater } from "@/queries/client"
+import { queryUpdater } from "@/queries/client"
 import { sortParams } from "@filen/shared"
 import cache from "@/lib/cache"
 import auth from "@/lib/auth"
@@ -83,7 +83,6 @@ export function useDriveItemPublicLinkStatusQuery(
 	options?: Omit<UseQueryOptions, "queryKey" | "queryFn">
 ): UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error> {
 	const query = useQuery({
-		...DEFAULT_QUERY_OPTIONS,
 		...options,
 		queryKey: [BASE_QUERY_KEY, sortParams(publicLinkStatusQueryKey(params))],
 		queryFn: ({ signal }) =>

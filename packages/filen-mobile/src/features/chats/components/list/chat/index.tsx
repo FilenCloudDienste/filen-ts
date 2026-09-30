@@ -168,9 +168,7 @@ const Chat = ({ info }: { info: ListRenderItemInfo<TChat> }) => {
 												: "text-muted-foreground"
 									)}
 								>
-									{lastMessageFromBlocked
-										? t("message_hidden_blocked")
-										: (info.item.lastMessage?.inner.message ?? t("no_messages_yet"))}
+									{lastMessageFromBlocked ? t("message_hidden_blocked") : info.item.lastMessage.inner.message}
 								</Text>
 							) : (
 								<Text

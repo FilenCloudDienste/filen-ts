@@ -1,7 +1,6 @@
 import Text from "@/components/ui/text"
 import { Platform, ActivityIndicator } from "react-native"
 import { useLocalSearchParams, useNavigation } from "expo-router"
-import { deserializeRouteParam } from "@/lib/serializer"
 import View, { GestureHandlerScrollView } from "@/components/ui/view"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import ListEmpty from "@/components/ui/listEmpty"
@@ -118,7 +117,7 @@ const Tag = ({ tag, targetNotes }: { tag: NoteTag; targetNotes: readonly Note[] 
 							return
 						}
 
-						if (promptResult.data.cancelled || promptResult.data.type !== "string") {
+						if (promptResult.data.cancelled) {
 							return
 						}
 
@@ -219,35 +218,28 @@ const Tag = ({ tag, targetNotes }: { tag: NoteTag; targetNotes: readonly Note[] 
 const NoteTags = () => {
 	const { t } = useTranslation()
 	const isOnline = useIsOnline()
-	const { notes: notesSerialized } = useLocalSearchParams<{
-		notes?: string
+	// Comma-joined uuids: one for the per-note menu, the whole selection for the bulk action.
+	const { uuids } = useLocalSearchParams<{
+		uuids?: string
 	}>()
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const textForeground = useResolveClassNames("text-foreground")
 	const insets = useSafeAreaInsets()
 	const navigation = useNavigation()
 
-	// Deserialize the navigation payload. Single-note callers (per-item context
-	// menu) and bulk callers (notes-list bulk action) both serialize a Note[] —
-	// even a single note is wrapped as a one-element array so the route stays
-	// uniform.
-	const notesParsed = deserializeRouteParam<Note[]>(notesSerialized)
-
-	// Re-anchor the navigated notes against the live query result. Selection /
-	// route params are snapshots; a tag change after this screen opens (or a
-	// note moved into trash via another client) must reflect in the tri-state
-	// without requiring a re-navigation.
+	// Resolve the notes from the live query result, so a tag change after this screen opens (or a
+	// note moved into trash via another client) reflects in the tri-state without re-navigation.
 	const notesQuery = useNotesQuery({
 		enabled: false
 	})
 
 	const liveNotes = (() => {
 		// A failed refetch keeps the data and only flips `status` (#103).
-		if (!notesParsed || notesParsed.length === 0 || !notesQuery.data) {
+		if (!uuids || !notesQuery.data) {
 			return []
 		}
 
-		const wantedUuids = new Set(notesParsed.map(n => n.uuid))
+		const wantedUuids = new Set(uuids.split(","))
 
 		return notesQuery.data.filter(n => wantedUuids.has(n.uuid))
 	})()

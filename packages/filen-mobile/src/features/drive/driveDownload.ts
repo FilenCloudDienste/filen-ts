@@ -4,9 +4,10 @@ import * as ReactNativeBlobUtil from "react-native-blob-util"
 import mimeTypes from "mime-types"
 import { run, type Result, driveItemName } from "@filen/shared"
 import type { DriveItem } from "@/types"
-import { listLocalDirectoryRecursive } from "@/lib/utils"
+import { listLocalDirectoryRecursive } from "@/lib/fsUtils"
 import { normalizeFilePathForBlobUtil } from "@/lib/paths"
 import { newTmpDir } from "@/lib/tmp"
+import { isFileItem } from "@/features/drive/driveSelectors"
 import transfers from "@/features/transfers/transfers"
 import i18n from "@/lib/i18n"
 import logger from "@/lib/logger"
@@ -44,6 +45,30 @@ async function removeExistingPublicCopy(relativePath: string): Promise<void> {
 	}
 }
 
+async function copyToPublicDownloads({
+	name,
+	parentFolder,
+	mimeType,
+	sourceUri
+}: {
+	name: string
+	parentFolder: string
+	mimeType: string
+	sourceUri: string
+}): Promise<void> {
+	await removeExistingPublicCopy(`${parentFolder}/${name}`)
+
+	await ReactNativeBlobUtil.default.MediaCollection.copyToMediaStore(
+		{
+			name,
+			parentFolder,
+			mimeType
+		},
+		"Download",
+		sourceUri
+	)
+}
+
 /**
  * Download a single Drive item (file or directory) to the device's downloads
  * area. Encapsulates the platform-specific destination + post-download
@@ -58,16 +83,14 @@ export async function downloadDriveItemToDevice({ item }: { item: DriveItem }): 
 			throw new Error("Missing decrypted metadata")
 		}
 
-		const isFile = item.type === "file" || item.type === "sharedFile" || item.type === "sharedRootFile"
-
-		const destination = Platform.select({
-			ios: isFile
-				? new FileSystem.File(FileSystem.Paths.join(FileSystem.Paths.document, "Downloads", item.data.decryptedMeta.name))
-				: new FileSystem.Directory(FileSystem.Paths.join(FileSystem.Paths.document, "Downloads", item.data.decryptedMeta.name)),
-			default: isFile
-				? new FileSystem.File(FileSystem.Paths.join(newTmpDir().uri, item.data.decryptedMeta.name))
-				: new FileSystem.Directory(FileSystem.Paths.join(newTmpDir().uri, item.data.decryptedMeta.name))
-		})
+		const { name } = item.data.decryptedMeta
+		// Only a file has a mime of its own; a directory's entries resolve theirs by name.
+		const fileMime = isFileItem(item) ? item.data.decryptedMeta.mime : null
+		const path = FileSystem.Paths.join(
+			Platform.OS === "ios" ? FileSystem.Paths.join(FileSystem.Paths.document, "Downloads") : newTmpDir().uri,
+			name
+		)
+		const destination = fileMime === null ? new FileSystem.Directory(path) : new FileSystem.File(path)
 
 		defer(() => {
 			if (Platform.OS === "android" && destination.parentDirectory.exists) {
@@ -123,31 +146,22 @@ export async function downloadDriveItemToDevice({ item }: { item: DriveItem }): 
 
 		if (Platform.OS === "android") {
 			mediaStoreCopyResult = await run<void>(async defer => {
-				if (!item.data.decryptedMeta) {
-					throw new Error("Missing decrypted metadata")
-				}
-
 				defer(() => {
 					resolveCompletion?.()
 				})
 
-				if (isFile && destination instanceof FileSystem.File) {
-					await removeExistingPublicCopy(`Filen/${item.data.decryptedMeta.name}`)
-
-					await ReactNativeBlobUtil.default.MediaCollection.copyToMediaStore(
-						{
-							name: item.data.decryptedMeta.name,
-							parentFolder: "Filen",
-							mimeType: item.data.decryptedMeta.mime
-						},
-						"Download",
-						normalizeFilePathForBlobUtil(destination.uri)
-					)
+				if (fileMime !== null && destination instanceof FileSystem.File) {
+					await copyToPublicDownloads({
+						name,
+						parentFolder: "Filen",
+						mimeType: fileMime,
+						sourceUri: normalizeFilePathForBlobUtil(destination.uri)
+					})
 
 					return
 				}
 
-				if (!isFile && destination instanceof FileSystem.Directory) {
+				if (destination instanceof FileSystem.Directory) {
 					const entries = listLocalDirectoryRecursive(destination)
 
 					const files = entries.filter(entry => entry instanceof FileSystem.File)
@@ -195,17 +209,12 @@ export async function downloadDriveItemToDevice({ item }: { item: DriveItem }): 
 							// Replace-then-copy per entry (see removeExistingPublicCopy): keeps retries
 							// duplicate-free WITHOUT the old session cache, and recreates entries the
 							// user deleted from Downloads.
-							await removeExistingPublicCopy(`${normalizedParentFolder}/${entry.name}`)
-
-							await ReactNativeBlobUtil.default.MediaCollection.copyToMediaStore(
-								{
-									name: entry.name,
-									parentFolder: normalizedParentFolder,
-									mimeType: mimeTypes.lookup(entry.name) || "application/octet-stream"
-								},
-								"Download",
-								normalizedEntryPath
-							)
+							await copyToPublicDownloads({
+								name: entry.name,
+								parentFolder: normalizedParentFolder,
+								mimeType: mimeTypes.lookup(entry.name) || "application/octet-stream",
+								sourceUri: normalizedEntryPath
+							})
 						})
 					)
 

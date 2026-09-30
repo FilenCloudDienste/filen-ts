@@ -349,8 +349,6 @@ const Dom = ({
 	readOnly,
 	paddingTop,
 	paddingBottom,
-	paddingLeft,
-	paddingRight,
 	background
 }: {
 	dom?: import("expo/dom").DOMProps
@@ -362,9 +360,7 @@ const Dom = ({
 	readOnly: boolean
 	paddingTop?: number
 	paddingBottom?: number
-	paddingLeft?: number
-	paddingRight?: number
-	background?: string
+	background: string
 }) => {
 	const scrollRef = useRef<HTMLDivElement>(null)
 	const entriesRef = useRef<Map<number, PageEntry>>(new Map())
@@ -779,11 +775,6 @@ const Dom = ({
 				return
 			}
 
-			postEvent({
-				event: "documentOpened",
-				pageCount: pdfDocument.numPages
-			})
-
 			const firstPage = await pdfDocument.getPage(1)
 			const baseViewport = firstPage.getViewport({
 				scale: 1
@@ -792,12 +783,7 @@ const Dom = ({
 			// clientWidth can be 0 if layout has not settled; a zero scale renders a zero-size canvas and
 			// dismisses the spinner over a blank document, which looks like a corrupt file.
 			const computeScale = () => {
-				// clientWidth includes padding, but the page divs are laid out in the content box. Using the
-				// padded width overstates the available space by the safe-area insets, which squashes every
-				// page horizontally in landscape and drags the text layer out of alignment with it.
-				const style = globalThis.getComputedStyle(scrollElement)
-				const horizontalPadding = parseFloat(style.paddingLeft || "0") + parseFloat(style.paddingRight || "0")
-				const width = scrollElement.clientWidth - horizontalPadding
+				const width = scrollElement.clientWidth
 
 				return width > 0 ? width / baseViewport.width : 1
 			}
@@ -1088,11 +1074,9 @@ const Dom = ({
 				// paddingTop+paddingBottom of the document sits below the cut — reachable only as a
 				// rubber-band that springs back. Same rule the editors state for .cm-content/.ql-editor.
 				boxSizing: "border-box",
-				background: background ? background : "#1c1c1e",
+				background,
 				paddingTop: paddingTop ? `${paddingTop}px` : undefined,
 				paddingBottom: paddingBottom ? `${paddingBottom}px` : undefined,
-				paddingLeft: paddingLeft ? `${paddingLeft}px` : undefined,
-				paddingRight: paddingRight ? `${paddingRight}px` : undefined,
 				// Panning alone suppresses pinch-zoom at the element level, so it has to be re-allowed
 				// explicitly alongside it.
 				touchAction: "pan-x pan-y pinch-zoom",

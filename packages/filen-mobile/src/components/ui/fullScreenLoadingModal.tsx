@@ -86,16 +86,6 @@ export const FullScreenLoadingModal = () => {
 			defer(() => {
 				hideFullScreenLoadingModalListener.remove()
 			})
-
-			const forceHideFullScreenLoadingModalListener = events.subscribe("forceHideFullScreenLoadingModal", () => {
-				// The recovery escape hatch dismisses immediately — no linger.
-				setCount(0)
-				setLingering(false)
-			})
-
-			defer(() => {
-				forceHideFullScreenLoadingModalListener.remove()
-			})
 		})
 
 		return () => {
@@ -123,34 +113,18 @@ export const FullScreenLoadingModal = () => {
 	)
 }
 
-export function forceHide(): void {
-	events.emit("forceHideFullScreenLoadingModal")
-}
-
 export async function runWithLoading<TResult, E = unknown>(
-	fn: (defer: DeferFn, hideLoader?: () => void) => TResult | Promise<TResult>,
+	fn: (defer: DeferFn) => TResult | Promise<TResult>,
 	options?: Options
 ): Promise<Result<TResult, E>> {
 	return await run<TResult, E>(async defer => {
 		events.emit("showFullScreenLoadingModal")
 
-		let hidden = false
-
-		const hide = () => {
-			if (hidden) {
-				return
-			}
-
-			hidden = true
-
-			events.emit("hideFullScreenLoadingModal")
-		}
-
 		defer(() => {
-			hide()
+			events.emit("hideFullScreenLoadingModal")
 		})
 
-		return await fn(defer, hide)
+		return await fn(defer)
 	}, options)
 }
 

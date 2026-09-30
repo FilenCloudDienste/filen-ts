@@ -4,8 +4,6 @@ vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/u
 
 vi.mock("expo-crypto", async () => await import("@/tests/mocks/expoCrypto"))
 
-vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
-
 vi.mock("@/features/transfers/transfers", () => ({
 	default: {
 		download: vi.fn().mockResolvedValue({
@@ -54,17 +52,17 @@ vi.mock("@/lib/events", () => ({
 	}
 }))
 
+const { mockBumpStoredVersion } = vi.hoisted(() => ({
+	mockBumpStoredVersion: vi.fn()
+}))
+
 vi.mock("@/features/offline/store/useOffline.store", () => ({
 	default: {
 		getState: vi.fn().mockReturnValue({
-			setSyncing: vi.fn()
+			setSyncing: vi.fn(),
+			bumpStoredVersion: mockBumpStoredVersion
 		})
 	}
-}))
-
-vi.mock("@/features/drive/queries/useDriveItemStoredOffline.query", () => ({
-	driveItemStoredOfflineQueryUpdate: vi.fn(),
-	getStoredOfflineQueryCacheEntries: vi.fn(() => [])
 }))
 
 vi.mock("@/features/drive/queries/useDriveItems.query", () => ({
@@ -257,10 +255,6 @@ import { fs, File } from "@/tests/mocks/expoFileSystem"
 import type { DriveItem } from "@/types"
 import { AnyDirWithContext, AnyNormalDir, SharingRole_Tags, NonRootDir_Tags, type Dir } from "@filen/sdk-rs"
 import transfers from "@/features/transfers/transfers"
-import {
-	driveItemStoredOfflineQueryUpdate,
-	getStoredOfflineQueryCacheEntries
-} from "@/features/drive/queries/useDriveItemStoredOffline.query"
 import { driveItemsQueryUpdate } from "@/features/drive/queries/useDriveItems.query"
 import auth from "@/lib/auth"
 import cache from "@/lib/cache"
@@ -268,11 +262,7 @@ import cache from "@/lib/cache"
 type OfflineInstance = any
 
 import { VERSION as OFFLINE_VERSION } from "@/features/offline/offline"
-import {
-	findStaleStoredOfflineEntries,
-	shouldSkipOfflineSyncForConnection,
-	type StoredOfflineQueryCacheEntry
-} from "@/features/offline/offlineHelpers"
+import { shouldSkipOfflineSyncForConnection } from "@/features/offline/offlineHelpers"
 
 const BASE_DIR_URI = `file:///shared/group.io.filen.app/offline/v${OFFLINE_VERSION}`
 const FILES_DIR_URI = `${BASE_DIR_URI}/files`
@@ -1124,75 +1114,6 @@ describe("Offline", () => {
 
 			const first = await offline.getLocalFile(fileItem)
 			const second = await offline.getLocalFile(fileItem)
-
-			expect(first).toBe(second)
-		})
-	})
-
-	describe("getLocalDirectory", () => {
-		it("returns the local directory for a stored top-level directory", async () => {
-			const uuid = "11111111-1111-1111-1111-111111111111"
-			const dirItem = makeDirItem(uuid, "Offline")
-			const parent = makeParent("22222222-2222-2222-2222-222222222222")
-
-			writeDirectoryMeta(uuid, {
-				item: dirItem,
-				parent,
-				entries: {}
-			})
-
-			// Ensure the directory exists on disk
-			fs.set(`${DIRECTORIES_DIR_URI}/${uuid}`, "dir")
-
-			// Need to build index for listDirectories to work
-			writeIndex({
-				files: {},
-				directories: { [uuid]: { item: dirItem, parent } }
-			})
-
-			const offline = await createOffline()
-			const dir = await offline.getLocalDirectory(dirItem)
-
-			expect(dir).not.toBeNull()
-			expect(dir?.uri).toContain(uuid)
-		})
-
-		it("returns null for a file item", async () => {
-			const offline = await createOffline()
-			const dir = await offline.getLocalDirectory(makeFileItem("11111111-1111-1111-1111-111111111111", "file.txt"))
-
-			expect(dir).toBeNull()
-		})
-
-		it("returns null for a directory not stored offline", async () => {
-			const offline = await createOffline()
-			const dir = await offline.getLocalDirectory(makeDirItem("99999999-9999-9999-9999-999999999999", "missing"))
-
-			expect(dir).toBeNull()
-		})
-
-		it("caches the result", async () => {
-			const uuid = "11111111-1111-1111-1111-111111111111"
-			const dirItem = makeDirItem(uuid, "CachedDir")
-			const parent = makeParent("22222222-2222-2222-2222-222222222222")
-
-			writeDirectoryMeta(uuid, {
-				item: dirItem,
-				parent,
-				entries: {}
-			})
-
-			fs.set(`${DIRECTORIES_DIR_URI}/${uuid}`, "dir")
-
-			writeIndex({
-				files: {},
-				directories: { [uuid]: { item: dirItem, parent } }
-			})
-
-			const offline = await createOffline()
-
-			const first = await offline.getLocalDirectory(dirItem)
-			const second = await offline.getLocalDirectory(dirItem)
 
 			expect(first).toBe(second)
 		})
@@ -2146,8 +2067,8 @@ describe("Offline", () => {
 		})
 	})
 
-	describe("updateIndex query updates", () => {
-		it("sets query cache to true for each standalone file", async () => {
+	describe("updateIndex publishes the index to isItemStoredSync", () => {
+		it("reads true for each standalone file and bumps storedVersion", async () => {
 			const uuid = "11111111-1111-1111-1111-111111111111"
 			const fileItem = makeFileItem(uuid, "standalone.txt")
 			const parent = makeParent("22222222-2222-2222-2222-222222222222")
@@ -2157,19 +2078,15 @@ describe("Offline", () => {
 
 			const offline = await createOffline()
 
-			vi.mocked(driveItemStoredOfflineQueryUpdate).mockClear()
+			mockBumpStoredVersion.mockClear()
 
 			await offline.updateIndex()
 
-			expect(driveItemStoredOfflineQueryUpdate).toHaveBeenCalledWith(
-				expect.objectContaining({
-					updater: true,
-					params: expect.objectContaining({ uuid, type: "file" })
-				})
-			)
+			expect(offline.isItemStoredSync(fileItem)).toBe(true)
+			expect(mockBumpStoredVersion).toHaveBeenCalledTimes(1)
 		})
 
-		it("sets query cache to true for top-level directory and its nested entries", async () => {
+		it("reads true for a top-level directory and its nested entries", async () => {
 			const dirUuid = "11111111-1111-1111-1111-111111111111"
 			const nestedFileUuid = "22222222-2222-2222-2222-222222222222"
 			const dirItem = makeDirItem(dirUuid, "my-dir")
@@ -2190,210 +2107,46 @@ describe("Offline", () => {
 
 			const offline = await createOffline()
 
-			vi.mocked(driveItemStoredOfflineQueryUpdate).mockClear()
+			await offline.updateIndex()
+
+			expect(offline.isItemStoredSync(dirItem)).toBe(true)
+			expect(offline.isItemStoredSync(nestedFile)).toBe(true)
+		})
+
+		it("reads false for a uuid missing from the rebuilt index, even if the stale on-disk index had it", async () => {
+			const ghostUuid = "99999999-9999-9999-9999-999999999999"
+			const ghostItem = makeDirItem(ghostUuid, "ghost")
+			const parent = makeParent("22222222-2222-2222-2222-222222222222")
+
+			writeIndex({
+				files: {},
+				directories: { [ghostUuid]: { item: ghostItem, parent } }
+			})
+
+			const offline = await createOffline()
+
+			expect(await offline.isItemStored(ghostItem)).toBe(true)
 
 			await offline.updateIndex()
 
-			const calls = vi.mocked(driveItemStoredOfflineQueryUpdate).mock.calls
-			const updatedUuids = calls.filter(([arg]) => arg.updater === true).map(([arg]) => arg.params.uuid)
+			expect(offline.isItemStoredSync(ghostItem)).toBe(false)
+		})
 
-			expect(updatedUuids).toContain(dirUuid)
-			expect(updatedUuids).toContain(nestedFileUuid)
+		it("does not bump storedVersion on a no-mutation rebuild", async () => {
+			const offline = await createOffline()
+
+			await offline.updateIndex()
+
+			mockBumpStoredVersion.mockClear()
+
+			await offline.updateIndex()
+
+			expect(mockBumpStoredVersion).not.toHaveBeenCalled()
 		})
 	})
 
-	describe("updateIndex stale storedOffline query reconciliation", () => {
-		const GHOST_UUID = "99999999-9999-9999-9999-999999999999"
-
-		it("broadcasts false for a cached true entry whose uuid is not in the rebuilt index", async () => {
-			const storedUuid = "11111111-1111-1111-1111-111111111111"
-			const fileItem = makeFileItem(storedUuid, "kept.txt")
-			const parent = makeParent("22222222-2222-2222-2222-222222222222")
-
-			writeFileData(storedUuid, "kept.txt")
-			writeFileMeta(storedUuid, { item: fileItem, parent })
-
-			const offline = await createOffline()
-
-			vi.mocked(driveItemStoredOfflineQueryUpdate).mockClear()
-			vi.mocked(getStoredOfflineQueryCacheEntries).mockReturnValueOnce([
-				{
-					queryKey: [
-						"useDriveItemStoredOfflineQuery",
-						{
-							type: "directory",
-							uuid: GHOST_UUID
-						}
-					],
-					state: {
-						data: true
-					}
-				}
-			])
-
-			await offline.updateIndex()
-
-			expect(driveItemStoredOfflineQueryUpdate).toHaveBeenCalledWith(
-				expect.objectContaining({
-					updater: false,
-					params: expect.objectContaining({
-						uuid: GHOST_UUID,
-						type: "directory"
-					})
-				})
-			)
-		})
-
-		it("does not broadcast false for a cached true entry whose uuid is in the rebuilt index", async () => {
-			const storedUuid = "11111111-1111-1111-1111-111111111111"
-			const fileItem = makeFileItem(storedUuid, "kept.txt")
-			const parent = makeParent("22222222-2222-2222-2222-222222222222")
-
-			writeFileData(storedUuid, "kept.txt")
-			writeFileMeta(storedUuid, { item: fileItem, parent })
-
-			const offline = await createOffline()
-
-			vi.mocked(driveItemStoredOfflineQueryUpdate).mockClear()
-			vi.mocked(getStoredOfflineQueryCacheEntries).mockReturnValueOnce([
-				{
-					queryKey: [
-						"useDriveItemStoredOfflineQuery",
-						{
-							type: "file",
-							uuid: storedUuid
-						}
-					],
-					state: {
-						data: true
-					}
-				}
-			])
-
-			await offline.updateIndex()
-
-			const falseCalls = vi.mocked(driveItemStoredOfflineQueryUpdate).mock.calls.filter(([arg]) => arg.updater === false)
-
-			expect(falseCalls).toHaveLength(0)
-
-			// The regular per-item loop still broadcast true for it.
-			expect(driveItemStoredOfflineQueryUpdate).toHaveBeenCalledWith(
-				expect.objectContaining({
-					updater: true,
-					params: expect.objectContaining({
-						uuid: storedUuid,
-						type: "file"
-					})
-				})
-			)
-		})
-
-		it("skips malformed cache keys without throwing and still reconciles valid ones", async () => {
-			const offline = await createOffline()
-
-			vi.mocked(driveItemStoredOfflineQueryUpdate).mockClear()
-			vi.mocked(getStoredOfflineQueryCacheEntries).mockReturnValueOnce([
-				// Missing uuid.
-				{
-					queryKey: [
-						"useDriveItemStoredOfflineQuery",
-						{
-							type: "directory"
-						}
-					],
-					state: {
-						data: true
-					}
-				},
-				// Missing params object entirely.
-				{
-					queryKey: ["useDriveItemStoredOfflineQuery"],
-					state: {
-						data: true
-					}
-				},
-				// Unknown (non-normalized) type value.
-				{
-					queryKey: [
-						"useDriveItemStoredOfflineQuery",
-						{
-							type: "banana",
-							uuid: GHOST_UUID
-						}
-					],
-					state: {
-						data: true
-					}
-				},
-				// Valid ghost entry.
-				{
-					queryKey: [
-						"useDriveItemStoredOfflineQuery",
-						{
-							type: "file",
-							uuid: GHOST_UUID
-						}
-					],
-					state: {
-						data: true
-					}
-				}
-			])
-
-			await expect(offline.updateIndex()).resolves.toBeUndefined()
-
-			const falseCalls = vi.mocked(driveItemStoredOfflineQueryUpdate).mock.calls.filter(([arg]) => arg.updater === false)
-
-			expect(falseCalls).toHaveLength(1)
-			expect(falseCalls[0]?.[0]?.params).toEqual(
-				expect.objectContaining({
-					uuid: GHOST_UUID,
-					type: "file"
-				})
-			)
-		})
-
-		it("does not broadcast false for cached entries whose data is not true", async () => {
-			const offline = await createOffline()
-
-			vi.mocked(driveItemStoredOfflineQueryUpdate).mockClear()
-			vi.mocked(getStoredOfflineQueryCacheEntries).mockReturnValueOnce([
-				{
-					queryKey: [
-						"useDriveItemStoredOfflineQuery",
-						{
-							type: "file",
-							uuid: GHOST_UUID
-						}
-					],
-					state: {
-						data: false
-					}
-				},
-				{
-					queryKey: [
-						"useDriveItemStoredOfflineQuery",
-						{
-							type: "directory",
-							uuid: GHOST_UUID
-						}
-					],
-					state: {
-						data: undefined
-					}
-				}
-			])
-
-			await offline.updateIndex()
-
-			const falseCalls = vi.mocked(driveItemStoredOfflineQueryUpdate).mock.calls.filter(([arg]) => arg.updater === false)
-
-			expect(falseCalls).toHaveLength(0)
-		})
-	})
-
-	describe("removeItem query updates", () => {
-		it("calls driveItemStoredOfflineQueryUpdate when removing a file", async () => {
+	describe("removeItem index updates", () => {
+		it("reads false for a removed file", async () => {
 			const uuid = "11111111-1111-1111-1111-111111111111"
 			const fileItem = makeFileItem(uuid, "tracked.txt")
 			const parent = makeParent("22222222-2222-2222-2222-222222222222")
@@ -2405,31 +2158,25 @@ describe("Offline", () => {
 
 			await offline.updateIndex()
 
-			vi.mocked(driveItemStoredOfflineQueryUpdate).mockClear()
+			expect(offline.isItemStoredSync(fileItem)).toBe(true)
 
 			await offline.removeItem(fileItem)
 
-			// Should be called with updater: false for the removed item
-			expect(driveItemStoredOfflineQueryUpdate).toHaveBeenCalledWith(
-				expect.objectContaining({
-					updater: false,
-					params: expect.objectContaining({ uuid })
-				})
-			)
+			expect(offline.isItemStoredSync(fileItem)).toBe(false)
 		})
 
-		it("calls driveItemStoredOfflineQueryUpdate even when item is not found", async () => {
+		it("does not throw when the item is not stored", async () => {
 			const offline = await createOffline()
 			const missingItem = makeFileItem("99999999-9999-9999-9999-999999999999", "ghost.txt")
 
-			vi.mocked(driveItemStoredOfflineQueryUpdate).mockClear()
+			await offline.updateIndex()
 
-			await offline.removeItem(missingItem)
+			await expect(offline.removeItem(missingItem)).resolves.toBeUndefined()
 
-			expect(driveItemStoredOfflineQueryUpdate).toHaveBeenCalledWith(expect.objectContaining({ updater: false }))
+			expect(offline.isItemStoredSync(missingItem)).toBe(false)
 		})
 
-		it("invalidates query cache for all nested entries when removing a directory", async () => {
+		it("reads false for all nested entries when removing a directory", async () => {
 			const dirUuid = "11111111-1111-1111-1111-111111111111"
 			const nestedFileUuid = "22222222-2222-2222-2222-222222222222"
 			const nestedSubdirUuid = "33333333-3333-3333-3333-333333333333"
@@ -2455,18 +2202,13 @@ describe("Offline", () => {
 
 			await offline.updateIndex()
 
-			vi.mocked(driveItemStoredOfflineQueryUpdate).mockClear()
+			expect(offline.isItemStoredSync(dirItem)).toBe(true)
 
 			await offline.removeItem(dirItem)
 
-			const calls = vi.mocked(driveItemStoredOfflineQueryUpdate).mock.calls
-
-			// Should have invalidated: nested file, nested subdir, and the top-level dir itself
-			const invalidatedUuids = calls.filter(([arg]) => arg.updater === false).map(([arg]) => arg.params.uuid)
-
-			expect(invalidatedUuids).toContain(nestedFileUuid)
-			expect(invalidatedUuids).toContain(nestedSubdirUuid)
-			expect(invalidatedUuids).toContain(dirUuid)
+			expect(offline.isItemStoredSync(dirItem)).toBe(false)
+			expect(offline.isItemStoredSync(nestedFile)).toBe(false)
+			expect(offline.isItemStoredSync(nestedSubdir)).toBe(false)
 		})
 
 		it("optimistically prunes the /offline virtual-root listing when removing a stored file", async () => {
@@ -2781,33 +2523,6 @@ describe("Offline", () => {
 		})
 	})
 
-	describe("getLocalDirectory for nested directory", () => {
-		it("finds a nested directory inside a stored directory tree", async () => {
-			const topUuid = "11111111-1111-1111-1111-111111111111"
-			const nestedDirUuid = "22222222-2222-2222-2222-222222222222"
-			const parent = makeParent("33333333-3333-3333-3333-333333333333")
-
-			writeDirectoryMeta(topUuid, {
-				item: makeDirItem(topUuid, "Root"),
-				parent,
-				entries: makeEntries({
-					"/nested": makeDirItem(nestedDirUuid, "nested")
-				})
-			})
-
-			// Create the nested directory on disk
-			fs.set(`${DIRECTORIES_DIR_URI}/${topUuid}/nested`, "dir")
-
-			const offline = await createOffline()
-			const nestedDirItem = makeDirItem(nestedDirUuid, "nested")
-			const dir = await offline.getLocalDirectory(nestedDirItem)
-
-			expect(dir).not.toBeNull()
-			expect(dir?.uri).toContain(topUuid)
-			expect(dir?.uri).toContain("nested")
-		})
-	})
-
 	describe("integration: file lifecycle", () => {
 		it("store → verify stored → get local → remove → verify removed", async () => {
 			const uuid = "11111111-1111-1111-1111-111111111111"
@@ -3118,23 +2833,6 @@ describe("Offline", () => {
 			const localFile = await offline.getLocalFile(fileItem)
 
 			expect(localFile).toBeNull()
-		})
-
-		it("getLocalDirectory returns null when directory exists in index but not on disk", async () => {
-			const uuid = "11111111-1111-1111-1111-111111111111"
-			const dirItem = makeDirItem(uuid, "GhostDir")
-			const parent = makeParent("22222222-2222-2222-2222-222222222222")
-
-			// Write index entry but no actual directory data
-			writeIndex({
-				files: {},
-				directories: { [uuid]: { item: dirItem, parent } }
-			})
-
-			const offline = await createOffline()
-			const localDir = await offline.getLocalDirectory(dirItem)
-
-			expect(localDir).toBeNull()
 		})
 
 		it("listDirectoriesRecursive continues when one directory meta is corrupted", async () => {
@@ -4530,7 +4228,7 @@ describe("Offline", () => {
 			expect(fs.has(`${DIRECTORIES_DIR_URI}/${dirUuid}`)).toBe(false)
 		})
 
-		it("calls driveItemStoredOfflineQueryUpdate(false) for every stored item after clearAll", async () => {
+		it("reads false for every previously stored item after clearAll", async () => {
 			const fileUuid = "ff111111-ffff-1111-ffff-111111111111"
 			const dirUuid = "dd222222-dddd-2222-dddd-222222222222"
 			const fileItem = makeFileItem(fileUuid, "doc.txt")
@@ -4545,17 +4243,13 @@ describe("Offline", () => {
 
 			await offline.updateIndex()
 
-			vi.mocked(driveItemStoredOfflineQueryUpdate).mockClear()
+			expect(offline.isItemStoredSync(fileItem)).toBe(true)
+			expect(offline.isItemStoredSync(dirItem)).toBe(true)
 
 			await offline.clearAll()
 
-			const calls = vi.mocked(driveItemStoredOfflineQueryUpdate).mock.calls
-			const falseCalls = calls.filter(([arg]) => arg.updater === false)
-			const invalidatedUuids = falseCalls.map(([arg]) => arg.params.uuid)
-
-			// Both items must be broadcast as no-longer-offline
-			expect(invalidatedUuids).toContain(fileUuid)
-			expect(invalidatedUuids).toContain(dirUuid)
+			expect(offline.isItemStoredSync(fileItem)).toBe(false)
+			expect(offline.isItemStoredSync(dirItem)).toBe(false)
 		})
 	})
 
@@ -4754,27 +4448,41 @@ describe("Offline", () => {
 	})
 
 	describe("isItemStoredSync", () => {
-		it("returns undefined when the cache is cold (before any isItemStored call)", async () => {
-			const offline = await createOffline()
-			const item = makeFileItem("11111111-1111-1111-1111-111111111111", "cold-cache.txt")
+		it("returns undefined while the index is not in memory, then seeds it from disk once", async () => {
+			const uuid = "11111111-1111-1111-1111-111111111111"
+			const fileItem = makeFileItem(uuid, "cold.txt")
+			const parent = makeParent("22222222-2222-2222-2222-222222222222")
 
-			// No isItemStored or updateIndex has run — cache is empty.
-			expect(offline.isItemStoredSync(item)).toBeUndefined()
+			writeIndex({
+				files: { [uuid]: { item: fileItem, parent } },
+				directories: {}
+			})
+
+			const offline = await createOffline()
+
+			mockBumpStoredVersion.mockClear()
+
+			expect(offline.isItemStoredSync(fileItem)).toBeUndefined()
+
+			await vi.waitFor(() => {
+				expect(offline.isItemStoredSync(fileItem)).toBe(true)
+			})
+
+			expect(mockBumpStoredVersion).toHaveBeenCalledTimes(1)
 		})
 
-		it("returns false for an item that is not in the index after cache is warmed", async () => {
+		it("returns false for an item that is not in the index", async () => {
 			writeIndex({ files: {}, directories: {} })
 
 			const offline = await createOffline()
 			const item = makeFileItem("99999999-9999-9999-9999-999999999999", "absent.txt")
 
-			// Warm the cache by checking a specific (absent) item.
 			await offline.isItemStored(item)
 
 			expect(offline.isItemStoredSync(item)).toBe(false)
 		})
 
-		it("returns true for a file after isItemStored populates the cache", async () => {
+		it("matches isItemStored for a stored file", async () => {
 			const uuid = "11111111-1111-1111-1111-111111111111"
 			const fileItem = makeFileItem(uuid, "warm.txt")
 			const parent = makeParent("22222222-2222-2222-2222-222222222222")
@@ -4786,10 +4494,7 @@ describe("Offline", () => {
 
 			const offline = await createOffline()
 
-			// Async variant warms the isItemStoredCache.
 			expect(await offline.isItemStored(fileItem)).toBe(true)
-
-			// Sync variant must now return the cached value, not re-read disk.
 			expect(offline.isItemStoredSync(fileItem)).toBe(true)
 		})
 	})
@@ -4869,8 +4574,9 @@ describe("Offline", () => {
 
 			const offline = await createOffline()
 
-			// Warm the stored cache so we can observe invalidateCaches() afterwards.
 			expect(await offline.isItemStored(fileItem)).toBe(true)
+
+			const mutationCounterBefore = offline.mutationCounter
 
 			await expect(offline.redownloadStandaloneFile({ item: fileItem, parent })).resolves.toBe(true)
 
@@ -4885,7 +4591,7 @@ describe("Offline", () => {
 			expect(meta.item.data.uuid).toBe(uuid)
 
 			// Caches were invalidated after the heal.
-			expect(offline.isItemStoredSync(fileItem)).toBeUndefined()
+			expect(offline.mutationCounter).toBeGreaterThan(mutationCounterBefore)
 		})
 
 		it("keeps the meta byte-identical and the data dir intact when the download fails", async () => {
@@ -6673,7 +6379,7 @@ describe("Offline", () => {
 			const dirItem = makeDirItem(treeUuid, "Tree")
 			const treeUri = `${DIRECTORIES_DIR_URI}/${treeUuid}`
 
-			// Committed tree on disk so removeItem's listDirectories sees it.
+			// Committed tree on disk so removeItem finds its meta.
 			writeDirectoryMeta(treeUuid, {
 				item: dirItem,
 				parent,
@@ -6757,108 +6463,5 @@ describe("shouldSkipOfflineSyncForConnection", () => {
 		expect(shouldSkipOfflineSyncForConnection({ wifiOnly: true, connectionType: "unknown" })).toBe(false)
 		expect(shouldSkipOfflineSyncForConnection({ wifiOnly: true, connectionType: null })).toBe(false)
 		expect(shouldSkipOfflineSyncForConnection({ wifiOnly: true, connectionType: undefined })).toBe(false)
-	})
-})
-
-describe("findStaleStoredOfflineEntries", () => {
-	const BASE_KEY = "useDriveItemStoredOfflineQuery"
-	const FILE_UUID = "11111111-1111-1111-1111-111111111111"
-	const DIR_UUID = "22222222-2222-2222-2222-222222222222"
-	const GHOST_UUID = "99999999-9999-9999-9999-999999999999"
-
-	const index = {
-		files: {
-			[FILE_UUID]: {}
-		},
-		directories: {
-			[DIR_UUID]: {}
-		}
-	}
-
-	function entry(params: unknown, data: unknown): StoredOfflineQueryCacheEntry {
-		return {
-			queryKey: params === undefined ? [BASE_KEY] : [BASE_KEY, params],
-			state: {
-				data
-			}
-		}
-	}
-
-	it("returns a true entry whose uuid is missing from the index (file and directory)", () => {
-		expect(findStaleStoredOfflineEntries([entry({ type: "file", uuid: GHOST_UUID }, true)], index)).toEqual([
-			{ uuid: GHOST_UUID, type: "file" }
-		])
-		expect(findStaleStoredOfflineEntries([entry({ type: "directory", uuid: GHOST_UUID }, true)], index)).toEqual([
-			{ uuid: GHOST_UUID, type: "directory" }
-		])
-	})
-
-	it("does not return a true entry whose uuid is present in its type's index section", () => {
-		expect(findStaleStoredOfflineEntries([entry({ type: "file", uuid: FILE_UUID }, true)], index)).toEqual([])
-		expect(findStaleStoredOfflineEntries([entry({ type: "directory", uuid: DIR_UUID }, true)], index)).toEqual([])
-	})
-
-	it("checks the index section matching the entry's type — a files-only uuid is stale as a directory", () => {
-		expect(findStaleStoredOfflineEntries([entry({ type: "directory", uuid: FILE_UUID }, true)], index)).toEqual([
-			{ uuid: FILE_UUID, type: "directory" }
-		])
-		expect(findStaleStoredOfflineEntries([entry({ type: "file", uuid: DIR_UUID }, true)], index)).toEqual([
-			{ uuid: DIR_UUID, type: "file" }
-		])
-	})
-
-	it("ignores entries whose data is not exactly true", () => {
-		expect(
-			findStaleStoredOfflineEntries(
-				[
-					entry({ type: "file", uuid: GHOST_UUID }, false),
-					entry({ type: "file", uuid: GHOST_UUID }, undefined),
-					entry({ type: "file", uuid: GHOST_UUID }, "true"),
-					entry({ type: "file", uuid: GHOST_UUID }, 1)
-				],
-				index
-			)
-		).toEqual([])
-	})
-
-	it("skips malformed keys without throwing", () => {
-		expect(
-			findStaleStoredOfflineEntries(
-				[
-					entry(undefined, true),
-					entry(null, true),
-					entry("not-an-object", true),
-					entry({}, true),
-					entry({ type: "file" }, true),
-					entry({ type: "file", uuid: "" }, true),
-					entry({ type: "file", uuid: 42 }, true),
-					entry({ uuid: GHOST_UUID }, true),
-					entry({ type: "sharedFile", uuid: GHOST_UUID }, true),
-					entry({ type: "banana", uuid: GHOST_UUID }, true)
-				],
-				index
-			)
-		).toEqual([])
-	})
-
-	it("returns every stale entry across a mixed cache snapshot", () => {
-		const result = findStaleStoredOfflineEntries(
-			[
-				entry({ type: "file", uuid: FILE_UUID }, true),
-				entry({ type: "file", uuid: GHOST_UUID }, true),
-				entry({ type: "directory", uuid: GHOST_UUID }, true),
-				entry({ type: "directory", uuid: DIR_UUID }, true)
-			],
-			index
-		)
-
-		expect(result).toEqual([
-			{ uuid: GHOST_UUID, type: "file" },
-			{ uuid: GHOST_UUID, type: "directory" }
-		])
-	})
-
-	it("returns an empty array for an empty cache snapshot", () => {
-		expect(findStaleStoredOfflineEntries([], index)).toEqual([])
 	})
 })

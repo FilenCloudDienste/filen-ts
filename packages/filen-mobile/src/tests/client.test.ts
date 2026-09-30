@@ -43,8 +43,6 @@ vi.mock("react-native", async () => {
 
 vi.mock("@filen/shared", async () => await import("@/tests/mocks/filenShared"))
 
-vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
-
 vi.mock("@/constants", async () => await import("@/tests/mocks/constants"))
 
 vi.mock("@/lib/utils", () => ({}))
@@ -86,14 +84,16 @@ vi.mock("@/stores/useApp.store", () => ({
 
 vi.mock("@tanstack/react-query", () => ({
 	QueryClient: class {
-		defaultOptions = {}
+		defaultOptions: { queries?: Record<string, unknown> }
 		queryCache: unknown
 		setQueryData: typeof mockSetQueryData = mockSetQueryData
 		getQueryData: typeof mockGetQueryData = mockGetQueryData
 		getQueryState = () => undefined
 		getQueryCache = () => ({ get: mockQueryCacheGet })
-		constructor(opts?: { queryCache?: unknown }) {
+		getDefaultOptions = () => this.defaultOptions
+		constructor(opts?: { queryCache?: unknown; defaultOptions?: { queries?: Record<string, unknown> } }) {
 			this.queryCache = opts?.queryCache
+			this.defaultOptions = opts?.defaultOptions ?? {}
 		}
 	},
 	QueryCache: class {
@@ -127,7 +127,7 @@ import { type PersistedQuery } from "@tanstack/query-persist-client-core"
 import { ErrorKind } from "@filen/sdk-rs"
 import {
 	shouldPersistQuery,
-	DEFAULT_QUERY_OPTIONS,
+	queryClient,
 	decideQueryErrorAction,
 	queryUpdater,
 	QUERY_CLIENT_CACHE_TIME,
@@ -252,67 +252,34 @@ describe("shouldPersistQuery", () => {
 
 		expect(shouldPersistQuery(query)).toBe(false)
 	})
-
-	it("returns false for useFileBase64Query (another UNCACHED key)", () => {
-		const query = makePersistedQuery(["useFileBase64Query"])
-
-		expect(shouldPersistQuery(query)).toBe(false)
-	})
 })
 
-// ─── DEFAULT_QUERY_OPTIONS.retry (SDK owns retries — see client.ts) ─────────────
+// ─── QueryClient default query options (SDK owns retries — see client.ts) ──────
 
-describe("DEFAULT_QUERY_OPTIONS.retry", () => {
+describe("queryClient default query options", () => {
+	const defaults = queryClient.getDefaultOptions().queries ?? {}
+
 	it("disables JS-level retries — the Rust SDK retry stack (10/request, budget-limited, transient-only) owns retrying", () => {
-		expect(DEFAULT_QUERY_OPTIONS.retry).toBe(false)
+		expect(defaults.retry).toBe(false)
 	})
 
 	it("does not configure a retryDelay (nothing to delay with retries disabled)", () => {
-		expect(DEFAULT_QUERY_OPTIONS.retryDelay).toBeUndefined()
+		expect(defaults.retryDelay).toBeUndefined()
 	})
 
-	it("keeps retryOnMount so errored queries still refetch when a new observer mounts", () => {
-		expect(DEFAULT_QUERY_OPTIONS.retryOnMount).toBe(true)
-	})
-})
-
-// ─── DEFAULT_QUERY_OPTIONS.throwOnError (pure render-phase predicate, Bug #49) ──
-
-describe("DEFAULT_QUERY_OPTIONS.throwOnError", () => {
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	const throwOnError = DEFAULT_QUERY_OPTIONS.throwOnError as (err: unknown, query: any) => boolean
-	const fakeQuery = { queryKey: ["testKey"] }
-
-	beforeEach(() => {
-		mockIsNetworkClassError.mockReset().mockReturnValue(false)
-		mockUnwrapSdkError.mockReset().mockReturnValue(null)
-		mockIsOnline.mockReset().mockReturnValue(true)
-		mockLogout.mockReset().mockResolvedValue(undefined)
-		mockAlertsError.mockReset()
+	it("keeps TanStack's retryOnMount so errored queries still refetch when a new observer mounts", () => {
+		expect(defaults.retryOnMount).toBeUndefined()
 	})
 
-	it("always returns false (never throws to an error boundary)", () => {
-		expect(throwOnError(new Error("network"), fakeQuery)).toBe(false)
-		expect(throwOnError(new Error("plain"), fakeQuery)).toBe(false)
+	it("never throws to an error boundary (error UX lives in the QueryCache onError sink)", () => {
+		expect(defaults.throwOnError).toBeUndefined()
 	})
 
-	it("has ZERO side effects — never calls alerts.error, auth.logout regardless of error/connectivity", () => {
-		// Network + online would historically have alerted; the pure predicate must not.
-		mockIsNetworkClassError.mockReturnValue(true)
-		mockIsOnline.mockReturnValue(true)
-		throwOnError(new Error("network online"), fakeQuery)
-
-		// Unauthenticated + online would historically have logged out; the pure predicate must not.
-		mockIsNetworkClassError.mockReturnValue(false)
-		mockUnwrapSdkError.mockReturnValue({ kind: () => ErrorKind.Unauthenticated })
-		throwOnError(new Error("unauth online"), fakeQuery)
-
-		// Plain error would historically have alerted; the pure predicate must not.
-		mockUnwrapSdkError.mockReturnValue(null)
-		throwOnError(new Error("plain"), fakeQuery)
-
-		expect(mockAlertsError).not.toHaveBeenCalled()
-		expect(mockLogout).not.toHaveBeenCalled()
+	it("always refetches on mount and reconnect, offline-first, with the persisted gcTime", () => {
+		expect(defaults.refetchOnMount).toBe("always")
+		expect(defaults.refetchOnReconnect).toBe("always")
+		expect(defaults.networkMode).toBe("offlineFirst")
+		expect(defaults.gcTime).toBe(QUERY_CLIENT_CACHE_TIME)
 	})
 })
 
@@ -875,7 +842,7 @@ describe("QueryPersisterKv dirty-set restoration on write failure", () => {
 			default: {
 				openDb: mockOpenDb,
 				kvAsync: {
-					removeByPrefix: vi.fn().mockResolvedValue(undefined)
+					removeByPrefixRange: vi.fn().mockResolvedValue(undefined)
 				}
 			}
 		}))
@@ -929,7 +896,7 @@ describe("QueryPersisterKv dirty-set restoration on write failure", () => {
 			default: {
 				openDb: mockOpenDb,
 				kvAsync: {
-					removeByPrefix: vi.fn().mockResolvedValue(undefined)
+					removeByPrefixRange: vi.fn().mockResolvedValue(undefined)
 				}
 			}
 		}))
@@ -973,7 +940,7 @@ describe("QueryPersisterKv dirty-set restoration on write failure", () => {
 			default: {
 				openDb: mockOpenDb,
 				kvAsync: {
-					removeByPrefix: vi.fn().mockResolvedValue(undefined)
+					removeByPrefixRange: vi.fn().mockResolvedValue(undefined)
 				}
 			}
 		}))
@@ -1008,7 +975,7 @@ describe("QueryPersisterKv dirty-set restoration on write failure", () => {
 			default: {
 				openDb: mockOpenDb,
 				kvAsync: {
-					removeByPrefix: vi.fn().mockResolvedValue(undefined)
+					removeByPrefixRange: vi.fn().mockResolvedValue(undefined)
 				}
 			}
 		}))
@@ -1057,7 +1024,7 @@ describe("QueryPersisterKv oversized-row write cadence", () => {
 			default: {
 				openDb: vi.fn().mockResolvedValue({ executeBatch }),
 				kvAsync: {
-					removeByPrefix: vi.fn().mockResolvedValue(undefined)
+					removeByPrefixRange: vi.fn().mockResolvedValue(undefined)
 				}
 			}
 		}))

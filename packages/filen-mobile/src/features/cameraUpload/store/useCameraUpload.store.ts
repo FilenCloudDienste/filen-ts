@@ -22,7 +22,7 @@ export type CameraUploadStore = {
 	syncing: boolean
 	errors: CameraUploadError[]
 	skippedAssets: CameraUploadSkippedAsset[]
-	setSyncing: (fn: boolean | ((prev: boolean) => boolean)) => void
+	setSyncing: (syncing: boolean) => void
 	setErrors: (fn: CameraUploadError[] | ((prev: CameraUploadError[]) => CameraUploadError[])) => void
 	addSkippedAsset: (asset: CameraUploadSkippedAsset) => void
 	removeSkippedAsset: (assetId: string) => void
@@ -51,10 +51,8 @@ export const useCameraUploadStore = create<CameraUploadStore>(set => ({
 			}
 		})
 	},
-	setSyncing(fn) {
-		set(state => ({
-			syncing: typeof fn === "function" ? fn(state.syncing) : fn
-		}))
+	setSyncing(syncing) {
+		set({ syncing })
 	},
 	addSkippedAsset(asset) {
 		set(state => {

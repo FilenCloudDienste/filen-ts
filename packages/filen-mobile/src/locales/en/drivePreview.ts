@@ -104,8 +104,6 @@ export const drivePreview = {
 	/** Error shown when saving public-link settings finds the link was replaced by a new one on another device; the screen now shows the new link */
 	public_link_replaced_elsewhere:
 		"This link was replaced on another device, so your changes were not saved. Its current settings are shown.",
-	/** Error shown when the device does not support the system share sheet */
-	sharing_not_available: "Sharing is not available on this device.",
 
 	// ── File versions route (fileVersions/index.tsx) ───────────────────────────
 	/** File-versions screen header title (the history of past versions of a file) */

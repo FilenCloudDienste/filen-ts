@@ -197,11 +197,8 @@ export const TextEditor = ({
 	placeholder,
 	type,
 	readOnly,
-	onReady,
-	disableMarkdownPreview,
 	id,
 	fileName,
-	autoFocus,
 	readRange,
 	fileSize,
 	saveHandleRef,
@@ -216,13 +213,10 @@ export const TextEditor = ({
 	placeholder?: string
 	type: TextEditorType
 	readOnly?: boolean
-	onReady?: () => void
-	disableMarkdownPreview?: boolean
 	id?: string
 	// Real filename of the previewed file, threaded to TextEditorDOM so it can pick the CodeMirror
 	// language by extension (loadLanguage). Without it every code file defaults to "file.tsx" (TSX).
 	fileName?: string
-	autoFocus?: boolean
 	/**
 	 * Chunked-document mode, for previewing a file on disk rather than editing a note.
 	 *
@@ -290,8 +284,6 @@ export const TextEditor = ({
 				}
 
 				case "ready": {
-					onReady?.()
-
 					useTextEditorStore.getState().setReady(true)
 
 					break
@@ -524,12 +516,9 @@ export const TextEditor = ({
 							onMessage: onDomMessage
 						}}
 						onValueChange={onValueChange}
-						darkMode={theme === "dark"}
-						platform={Platform.OS}
 						initialValue={encodedInitialValue}
 						placeholder={placeholder}
 						readOnly={readOnly}
-						autoFocus={autoFocus}
 						font={{
 							family: text.fontFamily as string,
 							size: text.fontSize as number,
@@ -573,7 +562,6 @@ export const TextEditor = ({
 							readOnly={readOnly}
 							fileName={fileName}
 							markdownPreviewActive={markdownPreviewActive}
-							autoFocus={autoFocus}
 							// Top-level, never grouped: expo/dom only treats a top-level prop as a callable
 							// action, so a nested function would be JSON-serialized away to undefined.
 							readRange={chunked ? readRange : undefined}
@@ -606,7 +594,7 @@ export const TextEditor = ({
 					</View>
 				)}
 			</DomKeyboardHost>
-			{!disableMarkdownPreview && type === "markdown" && <MarkdownPreviewButton id={id ?? "textEditor"} />}
+			{type === "markdown" && <MarkdownPreviewButton id={id ?? "textEditor"} />}
 		</Fragment>
 	)
 }

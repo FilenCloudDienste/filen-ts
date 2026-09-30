@@ -100,7 +100,7 @@ export function buildCopyMenuButton({
 		requiresOnline: true,
 		onPress: async () => {
 			const picked = await run(async () => {
-				return await selectCopyDestination(items, t("drive"))
+				return await selectCopyDestination(items)
 			})
 
 			if (!picked.success) {

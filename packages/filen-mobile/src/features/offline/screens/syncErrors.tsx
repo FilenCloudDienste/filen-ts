@@ -14,7 +14,7 @@ import logger from "@/lib/logger"
 import offlineSync from "@/features/offline/offlineSync"
 import { useTranslation } from "react-i18next"
 import ListRow from "@/components/ui/listRow"
-import { FileIcon, DirectoryIcon } from "@/components/itemIcons"
+import { ItemGlyph } from "@/components/itemIcons"
 import { DIRECTORY_TYPES } from "@/features/drive/driveSelectors"
 import { type OfflineSyncError } from "@/features/offline/offlineHelpers"
 
@@ -46,18 +46,10 @@ const Err = ({ error }: { error: OfflineSyncError }) => {
 			separator={true}
 			density="relaxed"
 			leading={
-				DIRECTORY_TYPES.has(error.itemType) ? (
-					<DirectoryIcon
-						width={32}
-						height={32}
-					/>
-				) : (
-					<FileIcon
-						name={error.name}
-						width={32}
-						height={32}
-					/>
-				)
+				<ItemGlyph
+					isDirectory={DIRECTORY_TYPES.has(error.itemType)}
+					name={error.name}
+				/>
 			}
 			title={error.name}
 			subtitle={<Text className="text-muted-foreground text-xs">{`${kindLabel} · ${error.message}`}</Text>}
@@ -145,7 +137,6 @@ const SyncErrors = () => {
 			>
 				<VirtualList
 					data={syncErrors}
-					contentInsetAdjustmentBehavior="automatic"
 					contentContainerStyle={{
 						paddingBottom: insets.bottom
 					}}

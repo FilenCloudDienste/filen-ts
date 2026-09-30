@@ -8,23 +8,18 @@ import { type Checklist } from "@filen/shared"
 // editor-header toggle and the checklist renderer (secureStore is event-driven cross-instance reactive).
 export const CHECKLIST_HIDE_COMPLETED_SECURE_STORE_KEY = "notesChecklistHideCompleted"
 
-// Pure filter: the subset of `ids` to render. When hideCompleted is off, returns the SAME array
-// reference so a useShallow selector stays render-stable; when on, drops the ids of checked items
-// while preserving order. Ids without a matching parsed item are kept (treated as not-completed).
-export function visibleChecklistIds(ids: string[], parsed: Checklist, hideCompleted: boolean): string[] {
-	if (!hideCompleted) {
-		return ids
-	}
-
-	const checkedIds = new Set<string>()
+// Pure projection: the ids to render, in `parsed` order, minus checked items when hideCompleted is on.
+// Allocates per call; callers select it under useShallow so an unchanged id list keeps the render stable.
+export function visibleChecklistIds(parsed: Checklist, hideCompleted: boolean): string[] {
+	const ids: string[] = []
 
 	for (const item of parsed) {
-		if (item.checked) {
-			checkedIds.add(item.id)
+		if (!hideCompleted || !item.checked) {
+			ids.push(item.id)
 		}
 	}
 
-	return ids.filter(id => !checkedIds.has(id))
+	return ids
 }
 
 // Reactive accessor for the per-note preference. Returns [hideCompleted, toggle]. Used by both the

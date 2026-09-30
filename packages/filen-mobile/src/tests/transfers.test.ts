@@ -176,8 +176,6 @@ vi.mock("@/queries/useAccount.query", () => ({
 	addAccountStorageUsed: mockAddAccountStorageUsed
 }))
 
-vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
-
 vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
 
 vi.mock("@filen/sdk-rs", () => {
@@ -316,7 +314,8 @@ vi.mock("@/lib/thumbnails", () => ({
 	}
 }))
 
-vi.mock("@/lib/utils", () => ({
+vi.mock("@/lib/fsUtils", async importOriginal => ({
+	...(await importOriginal<typeof import("@/lib/fsUtils")>()),
 	listLocalDirectoryRecursive: vi.fn(() => [])
 }))
 
@@ -647,12 +646,11 @@ describe("Transfers", () => {
 				expect(mockUploadFile).not.toHaveBeenCalled()
 			})
 
-			it("disposes the self-created pause signal but not a caller-supplied one", async () => {
+			it("disposes the per-transfer pause signal it allocates", async () => {
 				const file = new FsFile("file:///document/test.txt")
 				fs.set(file.uri, new Uint8Array([1, 2, 3]))
 				const parent = makeParentDir("parent-uuid")
 
-				// No pauseSignal passed: transfers owns the one it allocates and must dispose it.
 				await transfers.upload({
 					localFileOrDir: file,
 					parent
@@ -661,19 +659,6 @@ describe("Transfers", () => {
 				const owned = mockCreateCompositePauseSignal.mock.calls[0]?.[1] as { dispose: ReturnType<typeof vi.fn> }
 
 				expect(owned.dispose).toHaveBeenCalledTimes(1)
-
-				mockCreateCompositePauseSignal.mockClear()
-
-				// Caller-supplied pauseSignal: transfers must NOT dispose it (the caller owns its lifecycle).
-				const callerPauseSignal = new MockPauseSignal()
-
-				await transfers.upload({
-					localFileOrDir: file,
-					parent,
-					pauseSignal: callerPauseSignal as unknown as Parameters<typeof transfers.upload>[0]["pauseSignal"]
-				})
-
-				expect(callerPauseSignal.dispose).not.toHaveBeenCalled()
 			})
 
 			it("throws when local file does not exist", async () => {

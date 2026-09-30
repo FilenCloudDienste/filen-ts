@@ -54,19 +54,13 @@ function Appearance() {
 			},
 			onPress: () => {
 				actionSheet.show({
-					buttons: [
-						...THEME_SETTINGS.map(option => ({
-							title: themeLabels[option],
-							onPress: () => {
-								setThemeSetting(option)
-								changeAppTheme(option)
-							}
-						})),
-						{
-							title: t("close"),
-							cancel: true
+					buttons: THEME_SETTINGS.map(option => ({
+						title: themeLabels[option],
+						onPress: () => {
+							setThemeSetting(option)
+							changeAppTheme(option)
 						}
-					]
+					}))
 				})
 			}
 		},
@@ -80,18 +74,12 @@ function Appearance() {
 			},
 			onPress: () => {
 				actionSheet.show({
-					buttons: [
-						...START_SCREENS.map(option => ({
-							title: startScreenLabels[option],
-							onPress: () => {
-								setStartScreen(option)
-							}
-						})),
-						{
-							title: t("close"),
-							cancel: true
+					buttons: START_SCREENS.map(option => ({
+						title: startScreenLabels[option],
+						onPress: () => {
+							setStartScreen(option)
 						}
-					]
+					}))
 				})
 			}
 		},
@@ -111,19 +99,13 @@ function Appearance() {
 				const offeredLanguages = SUPPORTED_LANGUAGES.filter(option => hasTranslations(option) || option === language)
 
 				actionSheet.show({
-					buttons: [
-						...offeredLanguages.map(option => ({
-							title: LANGUAGE_LABELS[option],
-							onPress: () => {
-								setLanguage(option)
-								changeAppLanguage(option)
-							}
-						})),
-						{
-							title: t("close"),
-							cancel: true
+					buttons: offeredLanguages.map(option => ({
+						title: LANGUAGE_LABELS[option],
+						onPress: () => {
+							setLanguage(option)
+							changeAppLanguage(option)
 						}
-					]
+					}))
 				})
 			}
 		}

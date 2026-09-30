@@ -451,7 +451,6 @@ const PreviewAudioInner = ({ item, metadata, fileUrl }: { item: GalleryItemTagge
 
 const PreviewAudio = ({ item }: { item: GalleryItemTagged }) => {
 	const { t } = useTranslation()
-	const dimensions = useWindowDimensions()
 	const isOnline = useIsOnline()
 	const source: FileSource =
 		item.type === "drive"
@@ -479,14 +478,7 @@ const PreviewAudio = ({ item }: { item: GalleryItemTagged }) => {
 	})
 
 	if (isUnavailableOffline(audioMetadataQuery, isOnline) || (fileUrlQuery.status === "success" && fileUrlQuery.data === null)) {
-		return (
-			<UnavailableOfflineNotice
-				style={{
-					width: dimensions.width,
-					height: dimensions.height
-				}}
-			/>
-		)
+		return <UnavailableOfflineNotice />
 	}
 
 	if (audioMetadataQuery.status === "error") {

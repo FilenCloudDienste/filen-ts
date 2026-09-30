@@ -33,8 +33,6 @@ const {
 
 vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 
-vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
-
 vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
 
 vi.mock("@filen/shared", async () => ({
@@ -127,14 +125,6 @@ vi.mock("@/lib/utils", () => ({
 vi.mock("@/lib/paths", () => ({
 	normalizeFilePathForExpo: vi.fn((path: string) => (path.startsWith("file://") ? path : `file://${path}`)),
 	normalizeFilePathForSdk: vi.fn((path: string) => path.replace("file://", ""))
-}))
-
-vi.mock("@/queries/client", () => ({
-	DEFAULT_QUERY_OPTIONS: {},
-	queryUpdater: {
-		get: vi.fn(),
-		set: vi.fn()
-	}
 }))
 
 import { fetchData } from "@/queries/useFileUrl.query"

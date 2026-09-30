@@ -25,7 +25,6 @@ const {
 		sendChatMessage: vi.fn(),
 		sendTypingSignal: vi.fn(),
 		markChatRead: vi.fn(),
-		updateChatOnlineStatus: vi.fn(),
 		updateLastChatFocusTimesNow: vi.fn(),
 		listMessagesBefore: vi.fn(),
 		createChat: vi.fn(),
@@ -92,7 +91,6 @@ vi.mock("@filen/sdk-rs", () => ({
 
 // chats.ts now pulls in the upload-and-link helper deps. They're only exercised by the
 // uploadAssetsAndGenerateLinks path (not covered here) — mock them so the module loads.
-vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
 vi.mock("@/features/transfers/transfers", () => ({ default: { upload: vi.fn() } }))
 vi.mock("@/features/transfers/quota", () => ({ uploadQuotaRefusal: vi.fn(async () => null) }))
 vi.mock("@/features/drive/drive", () => ({ default: { enablePublicLink: vi.fn() } }))
@@ -554,23 +552,11 @@ describe("chats.disableMessageEmbed", () => {
 	})
 })
 
-describe("chats.addParticipant", () => {
+describe("chats.addParticipants (single contact)", () => {
 	beforeEach(() => {
 		mockGetSdkClients.mockClear()
 		mockChatsQueryUpdate.mockClear()
 		mockSdkClient.addChatParticipant.mockClear()
-	})
-
-	it("returns the original chat without calling SDK when participant already exists", async () => {
-		const existingParticipant = makeParticipant(42n, "existing@test.com")
-		const chat = makeChat({ participants: [existingParticipant] })
-		const contact = { userId: 42n, email: "existing@test.com" } as unknown as Contact
-
-		const result = await chats.addParticipant({ chat, contact })
-
-		expect(result).toBe(chat)
-		expect(mockGetSdkClients).not.toHaveBeenCalled()
-		expect(mockChatsQueryUpdate).not.toHaveBeenCalled()
 	})
 
 	it("calls SDK addChatParticipant and returns wrapped result when participant is new", async () => {
@@ -580,7 +566,7 @@ describe("chats.addParticipant", () => {
 
 		mockSdkClient.addChatParticipant.mockResolvedValueOnce(sdkResult)
 
-		const result = await chats.addParticipant({ chat, contact })
+		const result = await chats.addParticipants({ chat, contacts: [contact] })
 
 		expect(mockSdkClient.addChatParticipant).toHaveBeenCalledWith(chat, contact, undefined)
 		expect(result.participants).toHaveLength(1)
@@ -594,7 +580,7 @@ describe("chats.addParticipant", () => {
 
 		mockSdkClient.addChatParticipant.mockResolvedValueOnce(sdkResult)
 
-		await chats.addParticipant({ chat, contact })
+		await chats.addParticipants({ chat, contacts: [contact] })
 
 		expect(mockChatsQueryUpdate).toHaveBeenCalledTimes(1)
 	})
@@ -608,7 +594,7 @@ describe("chats.addParticipant", () => {
 
 		mockSdkClient.addChatParticipant.mockResolvedValueOnce(sdkResult)
 
-		await chats.addParticipant({ chat, contact })
+		await chats.addParticipants({ chat, contacts: [contact] })
 
 		const updater = getLastChatsUpdater()
 		const updated = updater([other, chat])
@@ -1259,37 +1245,6 @@ describe("chats.markRead", () => {
 		await chats.markRead({ chat })
 
 		expect(mockSdkClient.markChatRead).toHaveBeenCalledWith(chat, undefined)
-	})
-})
-
-describe("chats.updateOnlineStatus", () => {
-	beforeEach(() => {
-		mockGetSdkClients.mockClear()
-		mockChatsQueryUpdate.mockClear()
-		mockSdkClient.updateChatOnlineStatus.mockClear()
-	})
-
-	it("calls SDK updateChatOnlineStatus and returns wrapped result", async () => {
-		const chat = makeChat({ uuid: "chat-online" })
-		const sdkResult = { ...chat, key: "some-key" }
-
-		mockSdkClient.updateChatOnlineStatus.mockResolvedValueOnce(sdkResult)
-
-		const result = await chats.updateOnlineStatus({ chat })
-
-		expect(mockSdkClient.updateChatOnlineStatus).toHaveBeenCalledWith(chat, undefined)
-		expect(result.uuid).toBe("chat-online")
-		expect(result.undecryptable).toBe(false)
-	})
-
-	it("invokes chatsQueryUpdate after updating online status", async () => {
-		const chat = makeChat({ uuid: "chat-online2" })
-
-		mockSdkClient.updateChatOnlineStatus.mockResolvedValueOnce({ ...chat, key: "some-key" })
-
-		await chats.updateOnlineStatus({ chat })
-
-		expect(mockChatsQueryUpdate).toHaveBeenCalledTimes(1)
 	})
 })
 

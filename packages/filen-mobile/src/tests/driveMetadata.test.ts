@@ -36,10 +36,6 @@ vi.mock("@/features/drive/queries/useDriveItems.query", () => ({
 	driveItemsQueryUpdateGlobal: vi.fn()
 }))
 
-vi.mock("@/lib/signals", () => ({
-	toSignalOpts: vi.fn()
-}))
-
 // ─── Actual imports ──────────────────────────────────────────────────────────
 
 import { favoritesListingUpdater, setDirColor } from "@/features/drive/driveMetadata"

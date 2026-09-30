@@ -1,16 +1,13 @@
 import { create } from "zustand"
 import { type ChatTyping, FilenSdkError } from "@filen/sdk-rs"
-import { removeSelectedIds } from "@filen/shared"
+import { removeSelectedIds, toggleInArray } from "@filen/shared"
 import { type Chat, type ChatMessage } from "@/types"
-import { toggleInArray } from "@/stores/createSelectionSlice"
 
 const chatId = (chat: Chat): string => chat.uuid
 
 export type InputViewLayout = {
 	width: number
 	height: number
-	x: number
-	y: number
 }
 
 export type Suggestions = "mentions" | "reply" | "emojis"
@@ -80,9 +77,7 @@ export type ChatsStore = {
 export const useChatsStore = create<ChatsStore>(set => ({
 	inputViewLayout: {
 		width: 0,
-		height: 0,
-		x: 0,
-		y: 0
+		height: 0
 	},
 	inputSelection: {
 		start: 0,

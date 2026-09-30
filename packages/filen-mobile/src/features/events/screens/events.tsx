@@ -127,7 +127,6 @@ const Events = () => {
 				<VirtualList
 					data={events}
 					loading={eventsQuery.status === "pending"}
-					contentInsetAdjustmentBehavior="automatic"
 					contentContainerStyle={{
 						paddingBottom: insets.bottom
 					}}

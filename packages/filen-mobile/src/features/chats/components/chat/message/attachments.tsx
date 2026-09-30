@@ -10,7 +10,68 @@ import useHttpStore from "@/stores/useHttp.store"
 import VideoAttachment from "@/features/chats/components/chat/message/videoAttachment"
 import ImageAttachment from "@/features/chats/components/chat/message/imageAttachment"
 import InternalAttachment from "@/features/chats/components/chat/message/internalAttachment"
-import { resolveLinkMedia } from "@/features/chats/utils"
+import { resolveLinkMedia, type SuccessfulLink } from "@/features/chats/utils"
+import { type AnyFile } from "@filen/sdk-rs"
+
+// A plain function rather than a component so each attachment costs no extra fiber.
+function renderLinkMedia({
+	link,
+	fromSelf,
+	layout,
+	getFileUrl,
+	onLoadFailed
+}: {
+	link: SuccessfulLink
+	fromSelf: boolean
+	layout: {
+		width: number
+		height: number
+	}
+	getFileUrl: ((file: AnyFile) => string) | null
+	onLoadFailed?: () => void
+}) {
+	const media = resolveLinkMedia(link, getFileUrl)
+
+	switch (media.type) {
+		case "image": {
+			return (
+				<ImageAttachment
+					url={media.url}
+					name={media.name}
+					layout={layout}
+					onLoadFailed={onLoadFailed}
+					linked={media.linked ?? undefined}
+				/>
+			)
+		}
+
+		case "video": {
+			return (
+				<VideoAttachment
+					url={media.url}
+					name={media.name}
+					layout={layout}
+					linked={media.linked ?? undefined}
+					fromSelf={fromSelf}
+				/>
+			)
+		}
+
+		case "internal": {
+			return (
+				<InternalAttachment
+					data={media.linked}
+					layout={layout}
+					fromSelf={fromSelf}
+				/>
+			)
+		}
+
+		default: {
+			return null
+		}
+	}
+}
 
 export const Attachments = ({
 	chat,
@@ -60,51 +121,25 @@ export const Attachments = ({
 
 	if (single) {
 		const link = chatMessageLinksQuery.data[0]
-
-		if (link && link.success && !singleAttachmentLoadFailed) {
-			const media = resolveLinkMedia(link, getHttpProviderFileUrl)
-
-			if (media.type === "image" && media.url && media.name) {
-				return (
-					<ImageAttachment
-						url={media.url}
-						name={media.name}
-						layout={layout}
-						onLoadFailed={() => setSingleAttachmentLoadFailed(true)}
-						linked={media.linked ?? undefined}
-					/>
-				)
-			}
-
-			if (media.type === "video" && media.url && media.name) {
-				return (
-					<VideoAttachment
-						url={media.url}
-						name={media.name}
-						layout={layout}
-						linked={media.linked ?? undefined}
-						fromSelf={fromSelf}
-					/>
-				)
-			}
-
-			if (media.type === "internal" && media.linked) {
-				return (
-					<InternalAttachment
-						data={media.linked}
-						layout={layout}
-						fromSelf={fromSelf}
-					/>
-				)
-			}
-		}
+		const media =
+			link && link.success && !singleAttachmentLoadFailed
+				? renderLinkMedia({
+						link,
+						fromSelf,
+						layout,
+						getFileUrl: getHttpProviderFileUrl,
+						onLoadFailed: () => setSingleAttachmentLoadFailed(true)
+					})
+				: null
 
 		return (
-			<Regexed
-				chat={chat}
-				message={message}
-				fromSelf={fromSelf}
-			/>
+			media ?? (
+				<Regexed
+					chat={chat}
+					message={message}
+					fromSelf={fromSelf}
+				/>
+			)
 		)
 	}
 
@@ -119,63 +154,20 @@ export const Attachments = ({
 						: `link-external-${link.data.url}`
 					: `link-unsuccessful-${index}`
 
-				if (link.success) {
-					const media = resolveLinkMedia(link, getHttpProviderFileUrl)
-
-					if (media.type === "image" && media.url && media.name) {
-						return (
-							<View
-								key={mappingHelper.getMappingKey(linkKey, index)}
-								className="bg-transparent basis-full"
-							>
-								<ImageAttachment
-									url={media.url}
-									name={media.name}
-									layout={layout}
-									linked={media.linked ?? undefined}
-								/>
-							</View>
-						)
-					}
-
-					if (media.type === "video" && media.url && media.name) {
-						return (
-							<View
-								key={mappingHelper.getMappingKey(linkKey, index)}
-								className="bg-transparent basis-full"
-							>
-								<VideoAttachment
-									url={media.url}
-									name={media.name}
-									layout={layout}
-									linked={media.linked ?? undefined}
-									fromSelf={fromSelf}
-								/>
-							</View>
-						)
-					}
-
-					if (media.type === "internal" && media.linked) {
-						return (
-							<View
-								key={mappingHelper.getMappingKey(linkKey, index)}
-								className="bg-transparent basis-full"
-							>
-								<InternalAttachment
-									data={media.linked}
-									layout={layout}
-									fromSelf={fromSelf}
-								/>
-							</View>
-						)
-					}
-				}
-
 				return (
 					<View
-						className="bg-transparent basis-full"
 						key={mappingHelper.getMappingKey(linkKey, index)}
-					/>
+						className="bg-transparent basis-full"
+					>
+						{link.success
+							? renderLinkMedia({
+									link,
+									fromSelf,
+									layout,
+									getFileUrl: getHttpProviderFileUrl
+								})
+							: null}
+					</View>
 				)
 			})}
 		</View>

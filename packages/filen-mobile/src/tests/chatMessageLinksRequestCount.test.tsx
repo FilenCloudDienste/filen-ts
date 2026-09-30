@@ -14,7 +14,6 @@ const sdk = vi.hoisted(() => ({
 
 vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
-vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
 vi.mock("@filen/sdk-rs", () => ({
 	MaybeEncryptedUniffi_Tags: { Decrypted: "Decrypted", Encrypted: "Encrypted" }
 }))
@@ -44,21 +43,17 @@ vi.mock("@/lib/auth", () => ({
 vi.mock("@/queries/client", async () => {
 	const { QueryClient } = await import("@tanstack/react-query")
 
-	const DEFAULT_QUERY_OPTIONS = {
-		refetchOnMount: "always",
-		refetchOnReconnect: "always",
-		staleTime: 0,
-		retry: false,
-		networkMode: "offlineFirst"
-	} as const
-
 	return {
 		default: new QueryClient({
 			defaultOptions: {
-				queries: DEFAULT_QUERY_OPTIONS
+				queries: {
+					refetchOnMount: "always",
+					refetchOnReconnect: "always",
+					retry: false,
+					networkMode: "offlineFirst"
+				}
 			}
-		}),
-		DEFAULT_QUERY_OPTIONS
+		})
 	}
 })
 

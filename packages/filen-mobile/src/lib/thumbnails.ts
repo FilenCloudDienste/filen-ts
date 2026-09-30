@@ -57,7 +57,7 @@ const SLOW_RESTORE_WARN_MS = 250
 
 // Critical: When changing anything related to storage index/store/persistence/width/height/quality format, bump THUMBNAILS_VERSION in storageRoots.ts to invalidate old caches and prevent potential issues from stale or incompatible data.
 export const VERSION = THUMBNAILS_VERSION
-export const DIRECTORY = THUMBNAILS_DIRECTORY
+const DIRECTORY = THUMBNAILS_DIRECTORY
 
 class Thumbnails {
 	private readonly pending = new InFlight<string, string | null>()

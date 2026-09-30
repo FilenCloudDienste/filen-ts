@@ -39,8 +39,8 @@ export type SelectOptions = {
 	items: DriveItem[]
 	itemUuids: ReadonlySet<string>
 	// Rows the picker opens with already ticked — the caller's current value (e.g. the
-	// configured camera-upload directory). Pure selection-store seeding; unlike `items`
-	// (which DISABLES rows in select intent), these stay fully interactive.
+	// configured camera-upload directory). Input only: it seeds the session's selection and is
+	// never read back. Unlike `items` (which DISABLES rows in select intent), these stay fully interactive.
 	initiallySelected?: DriveItem[]
 	previewType?: PreviewType
 	id: string
@@ -48,6 +48,19 @@ export type SelectOptions = {
 
 // What a picker screen's route param carries: everything but the session's items and preselection.
 export type SelectOptionsParam = Omit<SelectOptions, "items" | "itemUuids" | "initiallySelected">
+
+// No prefix here is a prefix of another, so the order never decides a match.
+const ROUTE_PREFIX_TYPES: readonly (readonly [string, Exclude<DrivePathType, "linked">])[] = [
+	["/tabs/drive", "drive"],
+	["/offline", "offline"],
+	["/sharedIn", "sharedIn"],
+	["/sharedOut", "sharedOut"],
+	["/tabs/photos", "photos"],
+	["/favorites", "favorites"],
+	["/links", "links"],
+	["/trash", "trash"],
+	["/recents", "recents"]
+]
 
 const NO_ITEMS: DriveItem[] = []
 const NO_UUIDS: ReadonlySet<string> = new Set()
@@ -126,7 +139,6 @@ export default function useDrivePath(): DrivePath {
 				intention: parsedSelectOptions.intention,
 				items: selectSession?.items ?? NO_ITEMS,
 				itemUuids: selectSession?.itemUuids ?? NO_UUIDS,
-				initiallySelected: selectSession?.initiallySelected,
 				id: parsedSelectOptions.id,
 				previewType: parsedSelectOptions.previewType
 			}
@@ -162,64 +174,34 @@ export default function useDrivePath(): DrivePath {
 			} satisfies DrivePath
 		}
 
-		const isDriveScreen = navigationId.startsWith("/tabs/drive")
-		const isPhotosScreen = navigationId.startsWith("/tabs/photos")
-		const isOfflineScreen = navigationId.startsWith("/offline")
-		const isTrashScreen = navigationId.startsWith("/trash")
-		const isFavoritesScreen = navigationId.startsWith("/favorites")
-		const isRecentsScreen = navigationId.startsWith("/recents")
-		const isLinksScreen = navigationId.startsWith("/links")
-		const isSharedInScreen = navigationId.startsWith("/sharedIn")
-		const isSharedOutScreen = navigationId.startsWith("/sharedOut")
+		const type = ROUTE_PREFIX_TYPES.find(([prefix]) => navigationId.startsWith(prefix))?.[1]
 
-		if (
-			isDriveScreen ||
-			isOfflineScreen ||
-			isLinksScreen ||
-			isSharedInScreen ||
-			isSharedOutScreen ||
-			isFavoritesScreen ||
-			isPhotosScreen
-		) {
-			const type = isDriveScreen
-				? "drive"
-				: isOfflineScreen
-					? "offline"
-					: isSharedInScreen
-						? "sharedIn"
-						: isSharedOutScreen
-							? "sharedOut"
-							: isPhotosScreen
-								? "photos"
-								: isFavoritesScreen
-									? "favorites"
-									: "links"
-
+		if (!type) {
 			return {
-				type,
-				uuid: isPhotosScreen
-					? cameraUploadConfig.enabled && cameraUploadConfig.remoteDir
-						? cameraUploadConfig.remoteDir.inner[0].uuid
-						: null
-					: uuid,
-				// Only the shared variants carry a share context; other variants resolve by uuid alone.
-				...((isSharedInScreen || isSharedOutScreen) && shared ? { shared } : {})
-			}
-		} else if (isTrashScreen) {
-			return {
-				type: "trash",
-				uuid: null
-			}
-		} else if (isRecentsScreen) {
-			return {
-				type: "recents",
+				type: null,
 				uuid: null
 			}
 		}
 
+		if (type === "trash" || type === "recents") {
+			return {
+				type,
+				uuid: null
+			}
+		}
+
+		if (type === "photos") {
+			return {
+				type,
+				uuid: cameraUploadConfig.enabled && cameraUploadConfig.remoteDir ? cameraUploadConfig.remoteDir.inner[0].uuid : null
+			}
+		}
+
 		return {
-			type: null,
-			uuid: null
+			type,
+			uuid,
+			// Only the shared variants carry a share context; other variants resolve by uuid alone.
+			...((type === "sharedIn" || type === "sharedOut") && shared ? { shared } : {})
 		}
 	})()
 

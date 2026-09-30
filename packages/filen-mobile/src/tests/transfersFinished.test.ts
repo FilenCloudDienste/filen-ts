@@ -2,7 +2,6 @@ import { vi, describe, it, expect, beforeEach, afterEach } from "vitest"
 
 // The real store only needs expo-file-system + the uniffi binding stubbed; everything else it
 // imports is type-only (erased) or pure (zustand).
-vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
 vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 
 // screens/transfers.tsx pulls in heavy React + native deps transitively. None of their
@@ -36,7 +35,7 @@ vi.mock("@/components/ui/virtualList", () => ({ default: "VirtualList" }))
 vi.mock("@/components/ui/view", () => ({ default: "View", CrossGlassContainerView: "CrossGlassContainerView" }))
 vi.mock("@/components/ui/pressables", () => ({ PressableScale: "PressableScale" }))
 vi.mock("@/components/ui/menu", () => ({ default: "Menu" }))
-vi.mock("@/components/itemIcons", () => ({ DirectoryIcon: "DirectoryIcon", FileIcon: "FileIcon" }))
+vi.mock("@/components/itemIcons", () => ({ ItemGlyph: "ItemGlyph" }))
 vi.mock("@/features/drive/components/item/thumbnail", () => ({ default: "Thumbnail" }))
 vi.mock("@expo/vector-icons/Ionicons", () => ({ default: "Ionicons" }))
 
@@ -84,7 +83,7 @@ function resetStore(): void {
 	useTransfersStore.setState({
 		transfers: [],
 		finishedTransfers: [],
-		stats: { progress: 0, speed: 0, count: 0 }
+		stats: { progress: 0, speed: 0 }
 	})
 	// Run the public setter once so the speed interval / samples buffer are torn down.
 	useTransfersStore.getState().setTransfers([])
@@ -197,14 +196,6 @@ describe("finished transfers store", () => {
 
 			// stats is the same object: addFinishedTransfer/clearFinishedTransfers never call updateTransfers.
 			expect(useTransfersStore.getState().stats).toBe(statsBefore)
-		})
-
-		it("stats.count stays scoped to active transfers, ignoring finished entries", () => {
-			useTransfersStore.getState().setTransfers([makeActiveTransfer("active-1", 50)])
-			useTransfersStore.getState().addFinishedTransfer(makeFinished("done-1", 100))
-			useTransfersStore.getState().addFinishedTransfer(makeFinished("done-2", 200))
-
-			expect(useTransfersStore.getState().stats.count).toBe(1)
 		})
 	})
 })

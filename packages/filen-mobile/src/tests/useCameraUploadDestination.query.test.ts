@@ -1,11 +1,6 @@
 import { vi, describe, it, expect, beforeEach } from "vitest"
 
-// Pure fetchData test — no React. Mock the heavy infra modules the query file pulls in at
-// module load (the real @/queries/client drags in sqlite/alerts/etc) and the SDK + sdkUnwrap.
-
-vi.mock("@/queries/client", () => ({
-	DEFAULT_QUERY_OPTIONS: {}
-}))
+// Pure fetchData test — no React. Mock the SDK, auth and sdkUnwrap the query file pulls in at module load.
 
 vi.mock("@filen/sdk-rs", () => ({
 	AnyNormalDir_Tags: { Dir: "Dir", Root: "Root" }

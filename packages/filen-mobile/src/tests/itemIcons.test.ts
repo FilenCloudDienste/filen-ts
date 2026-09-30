@@ -2,8 +2,6 @@ import { vi, describe, it, expect, beforeEach } from "vitest"
 
 vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
 
-vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
-
 vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 
 vi.mock("@filen/shared", async () => {
@@ -56,9 +54,10 @@ vi.mock("@/components/itemIcons/svg/ppt.svg", () => ({ default: "icon:ppt" }))
 vi.mock("@/components/itemIcons/svg/xls.svg", () => ({ default: "icon:xls" }))
 vi.mock("@/components/itemIcons/svg/other.svg", () => ({ default: "icon:other" }))
 
-// ExpoImage: not needed for pure-fn tests, but required so the module loads without error
+// Image: not needed for pure-fn tests, but required so the module loads without error
 vi.mock("@/components/ui/image", () => ({
-	ExpoImage: () => null
+	default: () => null,
+	Image: () => null
 }))
 
 // es-toolkit/function memoize — use the real one (it's a pure JS function, safe in node)

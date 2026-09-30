@@ -1,7 +1,1 @@
-import Drive from "@/features/drive/components"
-
-const Offline = () => {
-	return <Drive />
-}
-
-export default Offline
+export { default } from "@/features/drive/components"

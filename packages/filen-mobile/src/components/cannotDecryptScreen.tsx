@@ -3,9 +3,7 @@ import View from "@/components/ui/view"
 import Text from "@/components/ui/text"
 import { cannotDecryptPlaceholder } from "@/lib/decryption"
 
-export type CannotDecryptScreenSurface = "note" | "drive" | "linkedFile" | "linkedDir" | "publicLink" | "driveInfo"
-
-export const CannotDecryptScreen = ({ uuid }: { uuid: string; surface?: CannotDecryptScreenSurface }) => {
+export const CannotDecryptScreen = ({ uuid }: { uuid: string }) => {
 	const { t } = useTranslation()
 
 	return (

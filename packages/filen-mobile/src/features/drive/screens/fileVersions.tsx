@@ -389,7 +389,6 @@ const FileVersions = () => {
 				<VirtualList
 					data={versions}
 					loading={driveItemVersionsQuery.status === "pending"}
-					contentInsetAdjustmentBehavior="automatic"
 					contentContainerStyle={{
 						paddingBottom: insets.bottom
 					}}

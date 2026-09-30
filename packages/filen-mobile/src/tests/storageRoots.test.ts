@@ -4,8 +4,6 @@ import { vi, describe, it, expect, beforeEach, afterEach } from "vitest"
 // Platform.OS and expo-file-system.  We test different platform branches by
 // resetting modules and dynamically re-importing after patching the mocks.
 
-vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
-
 // @/constants is node-safe — import the real one so IOS_APP_GROUP_IDENTIFIER is real.
 vi.mock("@/constants", async () => await import("@/tests/mocks/constants"))
 

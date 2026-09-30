@@ -21,8 +21,6 @@ vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/u
 
 vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
 
-vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
-
 vi.mock("expo-crypto", async () => await import("@/tests/mocks/expoCrypto"))
 
 vi.mock("@filen/shared", async () => ({
@@ -53,10 +51,9 @@ vi.mock("@/features/transfers/transfers", () => ({
 	}
 }))
 
-// Provide only the functions that driveDownload.ts actually imports from utils.
 // listLocalDirectoryRecursive uses the real expo-file-system mock internally so we
 // implement it faithfully.
-vi.mock("@/lib/utils", async () => {
+vi.mock("@/lib/fsUtils", async importOriginal => {
 	const { File, Directory } = await import("@/tests/mocks/expoFileSystem")
 
 	function walkDir(dir: InstanceType<typeof Directory>): (InstanceType<typeof File> | InstanceType<typeof Directory>)[] {
@@ -89,6 +86,7 @@ vi.mock("@/lib/utils", async () => {
 	}
 
 	return {
+		...(await importOriginal<typeof import("@/lib/fsUtils")>()),
 		listLocalDirectoryRecursive: walkDir
 	}
 })

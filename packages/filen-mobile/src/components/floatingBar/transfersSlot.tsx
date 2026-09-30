@@ -64,15 +64,14 @@ const SpeedDisplay = () => {
 
 const TransfersSlot = () => {
 	const { t } = useTranslation()
-	const { transfersActive, count, copyingItems } = useTransfersStore(
+	const { count, copyingItems } = useTransfersStore(
 		useShallow(state => ({
-			transfersActive: state.transfers.length > 0,
-			count: state.stats.count,
+			count: state.transfers.length,
 			copyingItems: copyingItemCount(state.transfers)
 		}))
 	)
 
-	if (!transfersActive) {
+	if (count === 0) {
 		return null
 	}
 

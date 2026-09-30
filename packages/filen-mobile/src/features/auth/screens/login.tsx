@@ -97,7 +97,7 @@ const Login = () => {
 			return null
 		}
 
-		if (promptResult.data.cancelled || promptResult.data.type !== "string") {
+		if (promptResult.data.cancelled) {
 			return null
 		}
 
@@ -199,7 +199,7 @@ const Login = () => {
 			return
 		}
 
-		if (promptResult.data.cancelled || promptResult.data.type !== "string") {
+		if (promptResult.data.cancelled) {
 			return
 		}
 

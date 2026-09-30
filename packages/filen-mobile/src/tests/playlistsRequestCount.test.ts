@@ -10,13 +10,8 @@ const { mockGetPlaylists, holder } = vi.hoisted(() => ({
 	holder: { client: null as unknown as import("@tanstack/react-query").QueryClient }
 }))
 
-// The production defaults that matter here, and queryUpdater.set's restamp-unless-given contract.
+// queryUpdater.set's restamp-unless-given contract.
 vi.mock("@/queries/client", () => ({
-	DEFAULT_QUERY_OPTIONS: {
-		refetchOnMount: "always",
-		staleTime: 0,
-		retry: false
-	},
 	get queryClient() {
 		return holder.client
 	},
@@ -105,7 +100,7 @@ function restoreOldRow(playlists: (typeof playlist)[]): void {
 }
 
 beforeEach(() => {
-	holder.client = new QueryClient()
+	holder.client = new QueryClient({ defaultOptions: { queries: { refetchOnMount: "always", retry: false } } })
 	mockGetPlaylists.mockReset()
 	mockGetPlaylists.mockResolvedValue([playlist])
 })

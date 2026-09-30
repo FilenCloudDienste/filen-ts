@@ -11,7 +11,7 @@ import cache from "@/lib/cache"
  * lifting; we pass a `undefined` progress callback for now). Throws on
  * error so callers can wrap in `run()` / `runBulk` for UI feedback.
  */
-export async function shareWithFilenUser({ item, contact, signal }: { item: DriveItem; contact: Contact; signal?: AbortSignal }) {
+export async function shareWithFilenUser({ item, contact }: { item: DriveItem; contact: Contact }) {
 	if (item.type !== "directory" && item.type !== "file") {
 		throw new Error("Invalid item type for share")
 	}
@@ -19,15 +19,15 @@ export async function shareWithFilenUser({ item, contact, signal }: { item: Driv
 	const { authedSdkClient } = await auth.getSdkClients()
 
 	if (item.type === "directory") {
-		await authedSdkClient.shareDir(item.data, contact, undefined, signal ? { signal } : undefined)
+		await authedSdkClient.shareDir(item.data, contact, undefined)
 
 		return
 	}
 
-	await authedSdkClient.shareFile(item.data, contact, signal ? { signal } : undefined)
+	await authedSdkClient.shareFile(item.data, contact)
 }
 
-export async function removeShare({ item, signal, parentUuid }: { item: DriveItem; signal?: AbortSignal; parentUuid?: string }) {
+export async function removeShare({ item, parentUuid }: { item: DriveItem; parentUuid?: string }) {
 	if (item.type !== "sharedRootDirectory" && item.type !== "sharedFile" && item.type !== "sharedRootFile") {
 		throw new Error("Invalid item type")
 	}
@@ -35,12 +35,7 @@ export async function removeShare({ item, signal, parentUuid }: { item: DriveIte
 	const { authedSdkClient } = await auth.getSdkClients()
 
 	await authedSdkClient.removeSharedItem(
-		item.type === "sharedRootDirectory" ? new SharedRootItem.Dir(item.data) : new SharedRootItem.File(item.data),
-		signal
-			? {
-					signal
-				}
-			: undefined
+		item.type === "sharedRootDirectory" ? new SharedRootItem.Dir(item.data) : new SharedRootItem.File(item.data)
 	)
 
 	// Item leaves the user's sharedIn/sharedOut view entirely — forget caches.

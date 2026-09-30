@@ -1,8 +1,6 @@
 import { vi, describe, it, expect } from "vitest"
 
-// codeMirror.ts runs a module-level loop over langNames calling uiwLoadLanguage.
-// We mock the entire @uiw/codemirror-extensions-langs module so the loop is a no-op
-// and langs['ts']() can be trivially tested without a real CodeMirror setup.
+// Mock the langs module so langs['ts']() can be tested without a real CodeMirror setup.
 vi.mock("@uiw/codemirror-extensions-langs", () => {
 	const langNames: string[] = ["ts", "tsx", "js", "jsx", "json", "python", "rust", "css", "html", "sql"]
 
@@ -29,15 +27,16 @@ vi.mock("@lezer/highlight", () => ({
 		{},
 		{
 			get(_target, prop) {
-				// Return a special function for 'special' since it's called with args
-				if (prop === "special") return (tag: unknown) => tag
+				// Tag modifiers are called with a tag
+				if (prop === "special" || prop === "definition") return (tag: unknown) => tag
 				return {}
 			}
 		}
 	)
 }))
 
-import { parseExtension, loadLanguage } from "@/components/textEditor/codeMirror"
+import { createTheme } from "@uiw/codemirror-themes"
+import { parseExtension, loadLanguage, createTextTheme } from "@/components/textEditor/codeMirror"
 
 describe("parseExtension", () => {
 	it("returns empty string for a string with no dot", () => {
@@ -119,11 +118,36 @@ describe("loadLanguage", () => {
 	})
 
 	it("returns null for a filename with no dot (parseExtension returns empty string)", () => {
-		// 'file' has no dot -> parseExtension returns '' -> !ext.includes('.') -> returns null
+		// 'file' has no dot -> parseExtension returns '' -> not in langNames -> returns null
 		expect(loadLanguage("file")).toBeNull()
 	})
 
 	it("returns null for empty string input", () => {
 		expect(loadLanguage("")).toBeNull()
+	})
+})
+
+describe("createTextTheme", () => {
+	it("builds only the selected platform/mode theme", () => {
+		vi.mocked(createTheme).mockClear()
+
+		createTextTheme({ platform: "ios", darkMode: true, backgroundColor: "#000", textForegroundColor: "#fff" })
+
+		expect(createTheme).toHaveBeenCalledTimes(1)
+		expect(vi.mocked(createTheme).mock.calls[0]?.[0]).toMatchObject({
+			theme: "dark",
+			settings: { background: "#000", foreground: "#fff", selection: "#0A84FF40", gutterBorder: "1px solid #3A3A3C" }
+		})
+	})
+
+	it("uses the GNOME palette off iOS", () => {
+		vi.mocked(createTheme).mockClear()
+
+		createTextTheme({ platform: "android", darkMode: false, backgroundColor: "#fff", textForegroundColor: "#000" })
+
+		expect(vi.mocked(createTheme).mock.calls[0]?.[0]).toMatchObject({
+			theme: "light",
+			settings: { selection: "#3584E440", gutterBackground: "#FAFAFA", gutterForeground: "#77767B" }
+		})
 	})
 })

@@ -148,9 +148,7 @@ describe("buildContactSections", () => {
 
 	it("in picker mode keeps only the contacts section and its header", () => {
 		const selectOptions: SelectOptions = {
-			id: "pick-1",
-			multiple: true,
-			userIdsToExclude: []
+			id: "pick-1"
 		}
 
 		const items = buildContactSections({

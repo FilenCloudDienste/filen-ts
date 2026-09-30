@@ -1,6 +1,6 @@
 import { create } from "zustand"
 import type { FileVersion } from "@filen/sdk-rs"
-import { toggleInArray } from "@/stores/createSelectionSlice"
+import { toggleInArray } from "@filen/shared"
 
 export type FileVersionsStore = {
 	selectedVersions: FileVersion[]

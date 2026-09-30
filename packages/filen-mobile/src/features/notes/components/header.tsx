@@ -11,7 +11,6 @@ import useNotesTagsQuery from "@/features/notes/queries/useNotesTags.query"
 import { useSecureStore } from "@/lib/secureStore"
 import { useStringifiedClient } from "@/lib/auth"
 import { aggregateNoteSelectionFlags } from "@filen/shared"
-import { aggregateNoteTagSelectionFlags } from "@/features/notes/notesSelectors"
 import { useTranslation } from "react-i18next"
 import { buildNotesHeaderRightItems } from "@/features/notes/components/notesHeaderMenuBuilders"
 import { NOTES_VIEW_MODES, type NotesViewMode } from "@/features/notes/notesViewModes"
@@ -46,7 +45,6 @@ export const Header = ({
 	const { tagUuid } = useLocalSearchParams<{
 		tagUuid?: string
 	}>()
-	const tagFlags = aggregateNoteTagSelectionFlags(selectedTags)
 
 	const notesTagsQuery = useNotesTagsQuery({
 		enabled: false
@@ -102,7 +100,6 @@ export const Header = ({
 		setNotesViewMode,
 		tagsSortBy,
 		setTagsSortBy,
-		tagFlags,
 		noteFlags,
 		tag,
 		viewMode,

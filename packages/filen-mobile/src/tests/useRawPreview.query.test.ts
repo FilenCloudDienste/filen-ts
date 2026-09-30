@@ -10,8 +10,6 @@ const { mockCacheMap, mockHas, mockGet, mockIsOnline, mockOfflineGetLocalFile } 
 
 vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 
-vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
-
 vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
 
 vi.mock("@filen/shared", async () => ({
@@ -81,10 +79,6 @@ vi.mock("@/lib/rawPreviewCache", () => ({
 		has: mockHas,
 		get: mockGet
 	}
-}))
-
-vi.mock("@/queries/client", () => ({
-	DEFAULT_QUERY_OPTIONS: {}
 }))
 
 import { fetchData, BASE_QUERY_KEY, type UseRawPreviewQueryParams } from "@/queries/useRawPreview.query"

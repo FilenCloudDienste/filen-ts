@@ -8,7 +8,7 @@ import { useTranslation } from "react-i18next"
 import type { DriveItem } from "@/types"
 import { isDirectoryItem } from "@/features/drive/driveSelectors"
 
-const DriveItemHero = ({ item, size = 128 }: { item: DriveItem; size?: number }) => {
+const DriveItemHero = ({ item }: { item: DriveItem }) => {
 	const { t } = useTranslation()
 
 	return (
@@ -16,15 +16,15 @@ const DriveItemHero = ({ item, size = 128 }: { item: DriveItem; size?: number })
 			{isDirectoryItem(item) ? (
 				<DirectoryIcon
 					color={item.type === "directory" ? item.data.color : DirColor.Default.new()}
-					width={size}
-					height={size}
+					width={128}
+					height={128}
 				/>
 			) : (
 				<Thumbnail
 					item={item}
 					size={{
-						icon: size,
-						thumbnail: size
+						icon: 128,
+						thumbnail: 128
 					}}
 					contentFit="cover"
 					className="rounded-3xl"

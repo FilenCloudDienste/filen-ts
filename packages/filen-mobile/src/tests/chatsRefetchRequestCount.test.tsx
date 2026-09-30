@@ -14,7 +14,6 @@ const sdk = vi.hoisted(() => ({
 
 vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
-vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
 vi.mock("@/features/transfers/transfers", () => ({ default: { upload: vi.fn() } }))
 vi.mock("@/features/transfers/quota", () => ({ uploadQuotaRefusal: vi.fn(async () => null) }))
 vi.mock("@/features/drive/drive", () => ({ default: { enablePublicLink: vi.fn() } }))
@@ -41,24 +40,20 @@ vi.mock("@/lib/auth", () => ({
 vi.mock("@/queries/client", async () => {
 	const { QueryClient } = await import("@tanstack/react-query")
 
-	const DEFAULT_QUERY_OPTIONS = {
-		refetchOnMount: "always",
-		refetchOnReconnect: "always",
-		staleTime: 0,
-		retry: false,
-		networkMode: "offlineFirst"
-	} as const
-
 	const queryClient = new QueryClient({
 		defaultOptions: {
-			queries: DEFAULT_QUERY_OPTIONS
+			queries: {
+				refetchOnMount: "always",
+				refetchOnReconnect: "always",
+				retry: false,
+				networkMode: "offlineFirst"
+			}
 		}
 	})
 
 	return {
 		default: queryClient,
 		queryClient,
-		DEFAULT_QUERY_OPTIONS,
 		queryUpdater: {
 			get: (queryKey: unknown[]) => queryClient.getQueryData(queryKey),
 			set: (queryKey: unknown[], updater: unknown) =>

@@ -16,31 +16,7 @@
  * bundle and the native side can share one definition of the envelope below.
  */
 
-import { classifyUntrustedLinkHref, type UntrustedLinkClassification } from "@/lib/untrustedLinks"
-
-/**
- * What the preview should do with one anchor.
- *
- * - `internal` — a pure `#fragment`. `renderHyperlink` emits these for in-document bookmarks
- *   (TOC entries, cross references); the browser resolves them without leaving the page, so they
- *   are left completely alone.
- * - `external` — an allowlisted user-navigable scheme. Handed to the OS, never navigated in the
- *   preview WebView.
- * - `block` — everything else. The href is removed so the anchor renders as inert text.
- */
-export type DocxLinkClassification = UntrustedLinkClassification
-
-/**
- * Classify one raw href attribute value.
- *
- * Delegates to the shared classifier in `@/lib/untrustedLinks` — the .docx preview and the PDF viewer
- * face the same threat (attacker-authored hrefs rendered inside a WebView that holds the user's
- * session) and must not drift apart. Kept as a named export so the docx call sites and their tests
- * continue to read in terms of the format they belong to.
- */
-export function classifyDocxLinkHref(raw: string | null | undefined): DocxLinkClassification {
-	return classifyUntrustedLinkHref(raw)
-}
+import { classifyUntrustedLinkHref } from "@/lib/untrustedLinks"
 
 export const DOCX_EXTERNAL_URL_ATTRIBUTE = "data-external-url"
 
@@ -72,7 +48,7 @@ export function parseDocxExternalLink(parsed: unknown): string | null {
 		return null
 	}
 
-	const classification = classifyDocxLinkHref(envelope.url)
+	const classification = classifyUntrustedLinkHref(envelope.url)
 
 	return classification.action === "external" ? classification.url : null
 }
@@ -84,7 +60,7 @@ export function parseDocxExternalLink(parsed: unknown): string | null {
  */
 export function hardenDocxAnchors(root: ParentNode): void {
 	for (const anchor of Array.from(root.querySelectorAll("a"))) {
-		const classification = classifyDocxLinkHref(anchor.getAttribute("href"))
+		const classification = classifyUntrustedLinkHref(anchor.getAttribute("href"))
 
 		// Cleared for EVERY anchor, before anything else and regardless of classification: this
 		// attribute is the click handler's trusted input, and the handler reads it before it re-checks

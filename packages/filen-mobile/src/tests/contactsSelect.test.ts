@@ -80,7 +80,6 @@ describe("useSelectOptions", () => {
 	it("returns parsed SelectOptions when a valid serialized value is provided", () => {
 		const opts: SelectOptions = {
 			id: "abc-123",
-			multiple: true,
 			userIdsToExclude: [1, 2, 3]
 		}
 
@@ -90,7 +89,6 @@ describe("useSelectOptions", () => {
 
 		expect(result.current).not.toBeNull()
 		expect(result.current?.id).toBe("abc-123")
-		expect(result.current?.multiple).toBe(true)
 		expect(result.current?.userIdsToExclude).toEqual([1, 2, 3])
 	})
 
@@ -110,10 +108,9 @@ describe("useSelectOptions", () => {
 		expect(result.current).toBeNull()
 	})
 
-	it("strips extra fields — only multiple, id, userIdsToExclude are returned", () => {
+	it("strips extra fields — only id and userIdsToExclude are returned", () => {
 		const rawWithExtras = {
 			id: "strip-test",
-			multiple: false,
 			userIdsToExclude: [99],
 			extraField: "should-not-appear",
 			anotherExtra: 42
@@ -125,18 +122,15 @@ describe("useSelectOptions", () => {
 
 		expect(result.current).not.toBeNull()
 		expect(result.current?.id).toBe("strip-test")
-		expect(result.current?.multiple).toBe(false)
 		expect(result.current?.userIdsToExclude).toEqual([99])
 		// Extra fields must not leak through
 		expect((result.current as unknown as Record<string, unknown>)?.["extraField"]).toBeUndefined()
 		expect((result.current as unknown as Record<string, unknown>)?.["anotherExtra"]).toBeUndefined()
 	})
 
-	it("returns correct shape when multiple=false and userIdsToExclude is empty", () => {
+	it("returns undefined userIdsToExclude when none were passed", () => {
 		const opts: SelectOptions = {
-			id: "no-excludes",
-			multiple: false,
-			userIdsToExclude: []
+			id: "no-excludes"
 		}
 
 		mocks.searchParams = { selectOptions: serialize(opts) }
@@ -144,14 +138,12 @@ describe("useSelectOptions", () => {
 		const { result } = renderHook(() => useSelectOptions())
 
 		expect(result.current?.id).toBe("no-excludes")
-		expect(result.current?.multiple).toBe(false)
-		expect(result.current?.userIdsToExclude).toEqual([])
+		expect(result.current?.userIdsToExclude).toBeUndefined()
 	})
 
-	it("returned object contains exactly three keys: multiple, id, userIdsToExclude", () => {
+	it("returned object contains exactly two keys: id, userIdsToExclude", () => {
 		const opts: SelectOptions = {
 			id: "key-count-test",
-			multiple: true,
 			userIdsToExclude: [5]
 		}
 
@@ -161,9 +153,8 @@ describe("useSelectOptions", () => {
 
 		const keys = Object.keys(result.current as object)
 
-		expect(keys).toHaveLength(3)
+		expect(keys).toHaveLength(2)
 		expect(keys).toContain("id")
-		expect(keys).toContain("multiple")
 		expect(keys).toContain("userIdsToExclude")
 	})
 })

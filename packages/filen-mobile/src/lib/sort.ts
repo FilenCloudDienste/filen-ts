@@ -51,7 +51,6 @@ export type SortByType =
 	| "uploadDateDesc"
 	| "creationAsc"
 	| "creationDesc"
-	| "captureAsc"
 	| "captureDesc"
 
 // Delegate kept so the existing logout wiring (src/lib/auth.ts) is untouched.
@@ -150,7 +149,6 @@ const sortModes: Record<string, SortMode<DriveItem>> = {
 	uploadDateDesc: { kind: "timestamp", isAsc: false, timestampKey: uploadDateSortKey },
 	creationAsc: { kind: "timestamp", isAsc: true, timestampKey: creationSortKey },
 	creationDesc: { kind: "timestamp", isAsc: false, timestampKey: creationSortKey },
-	captureAsc: { kind: "timestamp", isAsc: true, timestampKey: captureTimestamp },
 	captureDesc: { kind: "timestamp", isAsc: false, timestampKey: captureTimestamp }
 }
 

@@ -1,6 +1,5 @@
 import { vi, describe, it, expect, beforeEach } from "vitest"
 
-vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
 vi.mock("expo-image-manipulator", () => ({
 	ImageManipulator: { manipulate: vi.fn() },
 	SaveFormat: { JPEG: "jpeg" }

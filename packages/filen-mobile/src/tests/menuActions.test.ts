@@ -555,16 +555,15 @@ describe("confirmedDriveAction (#34)", () => {
 // #40 — preview-context dismiss threading (buildUndecryptableMenuButtons)
 // ---------------------------------------------------------------------------
 
-describe("buildUndecryptableMenuButtons preview dismiss (#40)", () => {
+describe("buildUndecryptableMenuButtons dismiss (#40)", () => {
 	beforeEach(() => {
 		mockConfirmedAction.mockClear()
 	})
 
-	it("never self-dismisses deletePermanently from the preview — the gallery owns navigation via driveItemRemoved", () => {
+	it("never self-dismisses deletePermanently — the gallery owns preview navigation via driveItemRemoved", () => {
 		buildUndecryptableMenuButtons({
 			item: makeFile(),
 			drivePath: makeDrivePath("trash"),
-			isPreview: true,
 			t
 		})
 
@@ -576,23 +575,10 @@ describe("buildUndecryptableMenuButtons preview dismiss (#40)", () => {
 		expect(callArgs.dismiss).toBeUndefined()
 	})
 
-	it("omits dismiss for deletePermanently when not in preview (stays on the trash list)", () => {
-		buildUndecryptableMenuButtons({
-			item: makeFile(),
-			drivePath: makeDrivePath("trash"),
-			t
-		})
-
-		const callArgs = mockConfirmedAction.mock.calls[0]?.[0] as { dismiss: (() => boolean) | undefined }
-
-		expect(callArgs.dismiss).toBeUndefined()
-	})
-
-	it("never self-dismisses the trash action from the preview (drive variant)", () => {
+	it("never self-dismisses the trash action (drive variant)", () => {
 		buildUndecryptableMenuButtons({
 			item: makeFile(),
 			drivePath: makeDrivePath("drive"),
-			isPreview: true,
 			t
 		})
 

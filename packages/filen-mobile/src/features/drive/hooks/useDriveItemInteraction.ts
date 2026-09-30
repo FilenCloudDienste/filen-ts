@@ -2,7 +2,7 @@ import type { ListRenderItemInfo } from "@/components/ui/virtualList"
 import type { DriveItem } from "@/types"
 import type { DrivePath } from "@/hooks/useDrivePath"
 import useDriveStore from "@/features/drive/store/useDrive.store"
-import useDriveSelectStore from "@/features/drive/store/useDriveSelect.store"
+import useDriveSelectStore, { selectDriveSelectSelection } from "@/features/drive/store/useDriveSelect.store"
 import { useShallow } from "zustand/shallow"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
 import { getPreviewType } from "@/lib/previewType"
@@ -32,8 +32,11 @@ export default function useDriveItemInteraction({
 		useShallow(state => state.selectedItems.some(i => i.data.uuid === info.item.data.uuid && i.type === info.item.type))
 	)
 	const areDriveItemsSelected = useDriveStore(useShallow(state => state.selectedItems.length > 0))
+	const selectSessionId = drivePath.selectOptions?.id
 	const isSelectedFromDriveSelect = useDriveSelectStore(
-		useShallow(state => state.selectedItems.some(i => i.data.uuid === info.item.data.uuid && i.type === info.item.type))
+		useShallow(state =>
+			selectDriveSelectSelection(state, selectSessionId).some(i => i.data.uuid === info.item.data.uuid && i.type === info.item.type)
+		)
 	)
 	const previewType =
 		info.item.type === "file" || info.item.type === "sharedFile" || info.item.type === "sharedRootFile"
@@ -60,7 +63,7 @@ export default function useDriveItemInteraction({
 		if (drivePath.selectOptions && drivePath.selectOptions.intention === "select") {
 			const selectionType = drivePath.selectOptions.type
 
-			useDriveSelectStore.getState().setSelectedItems(prev =>
+			useDriveSelectStore.getState().setSelectedItems(drivePath.selectOptions.id, prev =>
 				nextDriveSelectSelection({
 					prev,
 					item: info.item,

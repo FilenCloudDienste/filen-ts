@@ -45,7 +45,7 @@ function TwoFactorRecoveryKey() {
 				) : (
 					<SettingsScrollView>
 						<View className="bg-transparent flex-col gap-6 px-4 pt-4">
-							<Text className="text-foreground-secondary text-base leading-6">
+							<Text className="text-muted-foreground text-base leading-6">
 								{t("two_factor_recovery_key_save_description")}
 							</Text>
 							<View className="bg-background-tertiary rounded-2xl p-4">

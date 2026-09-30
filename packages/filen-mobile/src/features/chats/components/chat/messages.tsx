@@ -11,7 +11,7 @@ import { interpolate, useAnimatedStyle } from "react-native-reanimated"
 import useChatsStore, { type ChatMessageWithInflightId } from "@/features/chats/store/useChats.store"
 import { useShallow } from "zustand/shallow"
 import Message from "@/features/chats/components/chat/message"
-import { ActivityIndicator, type NativeSyntheticEvent, type NativeScrollEvent, type View as TView } from "react-native"
+import { ActivityIndicator, type NativeSyntheticEvent, type NativeScrollEvent } from "react-native"
 import { useResolveClassNames } from "uniwind"
 import { run } from "@filen/shared"
 import chats from "@/features/chats/chats"
@@ -40,8 +40,7 @@ const Messages = ({ chat }: { chat: TChat }) => {
 	const [isFetchingMore, setIsFetchingMore] = useState<boolean>(false)
 	const isFetchingMoreRef = useRef<boolean>(false)
 	const hasMoreRef = useRef<boolean>(true)
-	const viewRef = useRef<TView>(null)
-	const { onLayout, layout } = useViewLayout(viewRef)
+	const { onLayout, layout } = useViewLayout()
 	const [scrolledUp, setScrolledUp] = useState<boolean>(false)
 	const scrolledUpRef = useRef<boolean>(false)
 
@@ -58,14 +57,9 @@ const Messages = ({ chat }: { chat: TChat }) => {
 		listRef.current?.scrollToOffset({ offset: 0, animated: true })
 	}
 
-	const chatMessagesQuery = useChatMessagesQuery(
-		{
-			uuid: chat.uuid
-		},
-		{
-			enabled: !!chat
-		}
-	)
+	const chatMessagesQuery = useChatMessagesQuery({
+		uuid: chat.uuid
+	})
 
 	// D4c: the chat's pending sends (inflight queue) and failed-send snapshots (error entries,
 	// incl. messages already dropped from the queue by the 3-strike bound) — narrow per-chat
@@ -117,7 +111,6 @@ const Messages = ({ chat }: { chat: TChat }) => {
 	return (
 		<View className="bg-transparent flex-1">
 			<View
-				ref={viewRef}
 				onLayout={onLayout}
 				className="bg-transparent flex-1"
 				style={{
@@ -131,17 +124,12 @@ const Messages = ({ chat }: { chat: TChat }) => {
 				<VirtualList
 					ref={listRef}
 					className="flex-1"
-					contentInsetAdjustmentBehavior="automatic"
 					contentContainerClassName="android:pb-8"
 					keyExtractor={item => {
 						return item.inner.uuid
 					}}
 					data={messages}
 					renderItem={info => {
-						if (!chat) {
-							return null
-						}
-
 						return (
 							<Message
 								chat={chat}

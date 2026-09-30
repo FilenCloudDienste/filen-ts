@@ -74,13 +74,19 @@ const GalleryItem = ({
 		height: dimensions.height
 	}
 
-	if (previewType === "rawImage" && info.item.type === "drive") {
-		// Inside PreviewSlot so a neighbouring page never triggers a 2–10 MB extraction.
-		return (
-			<View
-				className="bg-transparent"
-				style={itemStyle}
-			>
+	const spinner = (
+		<View className="bg-transparent flex-1 items-center justify-center">
+			<ActivityIndicator
+				size="small"
+				color="white"
+			/>
+		</View>
+	)
+
+	const renderPage = () => {
+		if (previewType === "rawImage" && info.item.type === "drive") {
+			// Inside PreviewSlot so a neighbouring page never triggers a 2–10 MB extraction.
+			return (
 				<PreviewSlot isActive={isActive}>
 					<PreviewRawImage
 						item={info.item.data}
@@ -92,70 +98,57 @@ const GalleryItem = ({
 						onPinchActiveChange={onPinchActiveChange}
 					/>
 				</PreviewSlot>
-			</View>
-		)
-	}
-
-	// Resolver succeeded but produced no URL — happens when the device is
-	// offline AND the item is in neither the offline store nor the file cache.
-	// Render an explicit "unavailable offline" state instead of an indefinite spinner.
-	if (rendersFromUrl && fileUrlQuery.status === "success" && fileUrl === null) {
-		return <UnavailableOfflineNotice style={itemStyle} />
-	}
-
-	if (previewType === "unknown" || previewType === "rawImage" || (rendersFromUrl && fileUrl === null)) {
-		return (
-			<View
-				className="bg-transparent"
-				style={itemStyle}
-			>
-				<View className="bg-transparent flex-1 items-center justify-center">
-					<ActivityIndicator
-						size="small"
-						color="white"
-					/>
-				</View>
-			</View>
-		)
-	}
-
-	switch (previewType) {
-		case "image": {
-			if (fileUrl === null) {
-				return null
-			}
-
-			return (
-				<View
-					className="bg-transparent"
-					style={itemStyle}
-				>
-					<PreviewImage
-						fileUrl={fileUrl}
-						zoomScale={galleryZoomScale}
-						onPinchDismiss={goBack}
-						onZoomChange={onZoomChange}
-						onSingleTap={onSingleTap}
-						onPinchActiveChange={onPinchActiveChange}
-					/>
-				</View>
 			)
 		}
 
-		case "svg": {
-			// Rendered via react-native-svg rather than expo-image — expo-image decodes SVG
-			// through the unmaintained androidsvg 1.4 on Android, which can recurse into an
-			// uncatchable native OOM abort on adversarial/complex SVGs. See PreviewSvg.
-			//
-			// Gated on focus like the other heavy types: react-native-svg draws on the UI thread,
-			// and FlashList lays out a screen-width of neighbours ahead of the viewport, so an
-			// unfocused SVG would otherwise run a full native draw pass for a page the reader has
-			// not opened — paying its cost, and taking any native draw fault, on the way past.
-			return (
-				<View
-					className="bg-transparent"
-					style={itemStyle}
-				>
+		switch (previewType) {
+			case "unknown":
+			case "rawImage": {
+				return spinner
+			}
+
+			case "image":
+			case "video": {
+				if (fileUrl === null) {
+					// Resolver succeeded but produced no URL — happens when the device is offline AND the
+					// item is in neither the offline store nor the file cache. An explicit "unavailable
+					// offline" state instead of an indefinite spinner.
+					return fileUrlQuery.status === "success" ? <UnavailableOfflineNotice /> : spinner
+				}
+
+				if (previewType === "image") {
+					return (
+						<PreviewImage
+							fileUrl={fileUrl}
+							zoomScale={galleryZoomScale}
+							onPinchDismiss={goBack}
+							onZoomChange={onZoomChange}
+							onSingleTap={onSingleTap}
+							onPinchActiveChange={onPinchActiveChange}
+						/>
+					)
+				}
+
+				return (
+					<PreviewSlot isActive={isActive}>
+						<PreviewVideo
+							cacheKey={galleryItemKey(info.item)}
+							fileUrl={fileUrl}
+						/>
+					</PreviewSlot>
+				)
+			}
+
+			case "svg": {
+				// Rendered via react-native-svg rather than expo-image — expo-image decodes SVG
+				// through the unmaintained androidsvg 1.4 on Android, which can recurse into an
+				// uncatchable native OOM abort on adversarial/complex SVGs. See PreviewSvg.
+				//
+				// Gated on focus like the other heavy types: react-native-svg draws on the UI thread,
+				// and FlashList lays out a screen-width of neighbours ahead of the viewport, so an
+				// unfocused SVG would otherwise run a full native draw pass for a page the reader has
+				// not opened — paying its cost, and taking any native draw fault, on the way past.
+				return (
 					<PreviewSlot isActive={isActive}>
 						<PreviewSvg
 							item={info.item}
@@ -166,89 +159,59 @@ const GalleryItem = ({
 							onPinchActiveChange={onPinchActiveChange}
 						/>
 					</PreviewSlot>
-				</View>
-			)
-		}
+				)
+			}
 
-		case "pdf": {
-			return (
-				<View
-					className="bg-transparent"
-					style={itemStyle}
-				>
+			case "pdf": {
+				return (
 					<PreviewSlot isActive={isActive}>
 						<PreviewPdf item={info.item} />
 					</PreviewSlot>
-				</View>
-			)
-		}
+				)
+			}
 
-		case "docx": {
-			return (
-				<View
-					className="bg-transparent"
-					style={itemStyle}
-				>
+			case "docx": {
+				return (
 					<PreviewSlot isActive={isActive}>
 						<PreviewDocx item={info.item} />
 					</PreviewSlot>
-				</View>
-			)
-		}
-
-		case "video": {
-			if (fileUrl === null) {
-				return null
+				)
 			}
 
-			return (
-				<View
-					className="bg-transparent"
-					style={itemStyle}
-				>
-					<PreviewSlot isActive={isActive}>
-						<PreviewVideo
-							cacheKey={galleryItemKey(info.item)}
-							fileUrl={fileUrl}
-						/>
-					</PreviewSlot>
-				</View>
-			)
-		}
-
-		case "audio": {
-			return (
-				<View
-					className="bg-transparent"
-					style={itemStyle}
-				>
+			case "audio": {
+				return (
 					<PreviewSlot isActive={isActive}>
 						<PreviewAudio item={info.item} />
 					</PreviewSlot>
-				</View>
-			)
-		}
+				)
+			}
 
-		case "text":
-		case "code": {
-			return (
-				<View
-					className="bg-transparent"
-					style={itemStyle}
-				>
+			case "text":
+			case "code": {
+				return (
 					<PreviewSlot isActive={isActive}>
 						<PreviewText item={info.item} />
 					</PreviewSlot>
-				</View>
-			)
-		}
+				)
+			}
 
-		default: {
-			// Every PreviewType has a renderer above; a new member fails to compile here rather than
-			// rendering an empty page.
-			return previewType satisfies never
+			default: {
+				// Every PreviewType has a renderer above; a new member fails to compile here rather than
+				// rendering an empty page.
+				return previewType satisfies never
+			}
 		}
 	}
+
+	// The one window-sized cell per page; every renderer above fills it via flex-1 or explicit size.
+	return (
+		<View
+			className="bg-transparent"
+			style={itemStyle}
+		>
+			{renderPage()}
+		</View>
+	)
 }
 
 export default GalleryItem

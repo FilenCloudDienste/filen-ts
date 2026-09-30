@@ -7,9 +7,9 @@ vi.mock("@/lib/cache", () => ({ default: { directoryUuidToAnySharedDirWithContex
 vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 vi.mock("@/constants", () => ({ EXPO_IMAGE_SUPPORTED_EXTENSIONS: new Set(), EXPO_VIDEO_SUPPORTED_EXTENSIONS: new Set() }))
 
-import { copyGlyphForCopyItems, copyGlyphForEntries, copyGlyphForItems, driveItemToCopyItem } from "@/features/copy/copySource"
+import { copyGlyph, driveItemToCopyItem } from "@/features/copy/copySource"
 import { AnyItemWithContext_Tags } from "@/tests/mocks/sdkCopy"
-import type { AnyItemWithContext, CopyEntry } from "@filen/sdk-rs"
+import type { AnyItemWithContext } from "@filen/sdk-rs"
 import type { DriveItem } from "@/types"
 
 function item(type: DriveItem["type"], data: Record<string, unknown> = {}): DriveItem {
@@ -50,14 +50,15 @@ describe("driveItemToCopyItem", () => {
 	})
 })
 
-describe("copy glyphs", () => {
+describe("copyGlyph", () => {
 	it("one directory, one file, or several items", () => {
-		expect(copyGlyphForItems([item("directory")])).toBe("directory")
-		expect(copyGlyphForItems([item("sharedRootDirectory")])).toBe("directory")
-		expect(copyGlyphForItems([item("file")])).toBe("file")
-		expect(copyGlyphForItems([item("file"), item("file")])).toBe("items")
-		expect(copyGlyphForCopyItems([{ tag: AnyItemWithContext_Tags.Dir } as unknown as AnyItemWithContext])).toBe("directory")
-		expect(copyGlyphForEntries([{ item: { tag: AnyItemWithContext_Tags.File } } as unknown as CopyEntry])).toBe("file")
-		expect(copyGlyphForEntries([])).toBe("items")
+		const dir = { tag: AnyItemWithContext_Tags.Dir } as unknown as AnyItemWithContext
+		const file = { tag: AnyItemWithContext_Tags.File } as unknown as AnyItemWithContext
+
+		expect(copyGlyph(0, undefined)).toBe("items")
+		expect(copyGlyph(1, dir)).toBe("directory")
+		expect(copyGlyph(1, file)).toBe("file")
+		expect(copyGlyph(1, driveItemToCopyItem(item("sharedRootDirectory")))).toBe("directory")
+		expect(copyGlyph(2, file)).toBe("items")
 	})
 })

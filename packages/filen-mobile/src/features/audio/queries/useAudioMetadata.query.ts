@@ -1,5 +1,4 @@
 import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
-import { DEFAULT_QUERY_OPTIONS } from "@/queries/client"
 import { sortParams } from "@filen/shared"
 import cache from "@/lib/cache"
 import { type DriveItemFileExtracted } from "@/types"
@@ -62,7 +61,6 @@ export function useAudioMetadataQuery(
 	options?: Omit<UseQueryOptions, "queryKey" | "queryFn">
 ): UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error> {
 	const query = useQuery({
-		...DEFAULT_QUERY_OPTIONS,
 		...options,
 		// Key off identity only — strip the optional by-value item so the object instance
 		// that carried it here can't destabilize the key (metadata is the same per uuid).

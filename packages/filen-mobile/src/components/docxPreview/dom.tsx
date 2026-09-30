@@ -6,12 +6,8 @@ import { readAllBytes, type RangeReader } from "@/lib/rangeTransfer"
 import useEffectOnce from "@/hooks/useEffectOnce"
 import { installDomConsoleProxy } from "@/hooks/useDomEvents/domConsoleProxy"
 import { installDomViewportReset } from "@/lib/domViewport"
-import {
-	classifyDocxLinkHref,
-	hardenDocxDom,
-	DOCX_EXTERNAL_URL_ATTRIBUTE,
-	DOCX_EXTERNAL_LINK_KEY
-} from "@/components/docxPreview/linkSafety"
+import { hardenDocxDom, DOCX_EXTERNAL_URL_ATTRIBUTE, DOCX_EXTERNAL_LINK_KEY } from "@/components/docxPreview/linkSafety"
+import { classifyUntrustedLinkHref } from "@/lib/untrustedLinks"
 
 // Forward this WebView's console.* to the RN diagnostic logger (see domConsoleProxy).
 installDomConsoleProxy()
@@ -220,7 +216,7 @@ const Dom = ({
 				return
 			}
 
-			const classification = classifyDocxLinkHref(anchor.getAttribute("href"))
+			const classification = classifyUntrustedLinkHref(anchor.getAttribute("href"))
 
 			// In-document fragment: let the browser scroll to it as normal.
 			if (classification.action === "internal") {

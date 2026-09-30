@@ -2,15 +2,10 @@ import { open, type DB } from "@op-engineering/op-sqlite"
 import { Semaphore, run } from "@filen/shared"
 import { serialize, deserialize } from "@/lib/serializer"
 import { normalizeFilePathForSdk } from "@/lib/paths"
-import { SQLITE_VERSION, SQLITE_DB_FILE_NAME, SQLITE_DB_FILE_DIRECTORY } from "@/lib/storageRoots"
+import { SQLITE_DB_FILE_NAME, SQLITE_DB_FILE_DIRECTORY } from "@/lib/storageRoots"
 import { prefixUpperBound } from "@/lib/kvScan"
 import logger from "@/lib/logger"
 import * as FileSystem from "expo-file-system"
-
-// Critical: When changing anything related to the on-disk database file format, bump SQLITE_VERSION in storageRoots.ts to invalidate old databases and prevent potential issues from stale or incompatible data.
-export const VERSION = SQLITE_VERSION
-export const DB_FILE_NAME = SQLITE_DB_FILE_NAME
-export const DB_FILE_DIRECTORY = SQLITE_DB_FILE_DIRECTORY
 
 const OPEN_DB_MAX_ATTEMPTS = 10
 const OPEN_DB_BASE_BACKOFF_MS = 100
@@ -84,9 +79,6 @@ export const initQueries = (tmpDir: string): string[] => [
 	"CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL) WITHOUT ROWID",
 	"PRAGMA optimize = 0x10002"
 ]
-// prefixUpperBound moved to @/lib/kvScan (pure, dependency-free) together with the paged
-// restore walker; re-exported here because it is part of this module's historical surface.
-export { prefixUpperBound }
 
 /** Keys per batched IN read — well under the 999-variable floor SQLite guarantees. */
 const KV_GET_MANY_CHUNK_SIZE = 256
@@ -97,7 +89,7 @@ class Sqlite {
 
 	private initMutex: Semaphore = new Semaphore(1)
 
-	// Bumped by every kv wipe (clearAsync / kvAsync.clear). kv writes capture the generation
+	// Bumped by every kv wipe (clearAsync). kv writes capture the generation
 	// when they start and silently no-op if a wipe landed before their INSERT executed —
 	// defense-in-depth so an aborted sync's late
 	// `INSERT OR REPLACE` cannot re-INSERT decrypted metadata AFTER the logout Phase 6 wipe.
@@ -156,16 +148,17 @@ class Sqlite {
 			}
 
 			if (!this.db) {
-				if (!DB_FILE_DIRECTORY.exists) {
-					DB_FILE_DIRECTORY.create({
+				if (!SQLITE_DB_FILE_DIRECTORY.exists) {
+					SQLITE_DB_FILE_DIRECTORY.create({
 						idempotent: true,
 						intermediates: true
 					})
 				}
 
+				// Changing the on-disk database file format requires bumping SQLITE_VERSION in storageRoots.ts.
 				this.db = open({
-					name: DB_FILE_NAME,
-					location: normalizeFilePathForSdk(DB_FILE_DIRECTORY.uri)
+					name: SQLITE_DB_FILE_NAME,
+					location: normalizeFilePathForSdk(SQLITE_DB_FILE_DIRECTORY.uri)
 				})
 			}
 
@@ -177,15 +170,6 @@ class Sqlite {
 		if (!result.success) {
 			throw result.error
 		}
-	}
-
-	// Release page cache and non-essential allocations. Call on memory warnings.
-	public async shrinkMemory(): Promise<void> {
-		if (!this.db) {
-			return
-		}
-
-		await this.db.execute("PRAGMA shrink_memory")
 	}
 
 	/**
@@ -321,37 +305,10 @@ class Sqlite {
 
 			return result.insertId ?? null
 		},
-		keys: async (): Promise<string[]> => {
-			const db = await this.openDb()
-			const result = (await db.executeRaw("SELECT key FROM kv")).rawRows
-
-			return result.map(row => row[0] as string)
-		},
-		clear: async (): Promise<void> => {
-			// Same wipe as clearAsync() — bump the generation so in-flight writes are superseded.
-			this.clearGeneration++
-
-			const db = await this.openDb()
-
-			await db.execute("DELETE FROM kv")
-
-			await this.reclaimAfterWipe(db)
-		},
-		contains: async (key: string): Promise<boolean> => {
-			const db = await this.openDb()
-			const result = (await db.executeRaw("SELECT EXISTS(SELECT 1 FROM kv WHERE key = ?)", [key])).rawRows
-
-			return (result[0]?.[0] as number) === 1
-		},
 		remove: async (key: string): Promise<void> => {
 			const db = await this.openDb()
 
 			await db.execute("DELETE FROM kv WHERE key = ?", [key])
-		},
-		removeByPrefix: async (prefix: string): Promise<void> => {
-			const db = await this.openDb()
-
-			await db.execute("DELETE FROM kv WHERE key LIKE ?", [prefix + "%"])
 		},
 		removeByPrefixRange: async (prefix: string): Promise<void> => {
 			const db = await this.openDb()

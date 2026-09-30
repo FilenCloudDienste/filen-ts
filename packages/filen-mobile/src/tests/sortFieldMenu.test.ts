@@ -157,7 +157,7 @@ describe("buildSortFieldButton", () => {
 			expect(btn.checked).toBe(false)
 		})
 
-		it("onPress opens an action sheet titled with the field, listing the directions then cancel", () => {
+		it("onPress opens an action sheet titled with the field, listing the directions with a cancel title", () => {
 			const btn = buildSortFieldButton({
 				id: "field",
 				title: "Name",
@@ -174,8 +174,8 @@ describe("buildSortFieldButton", () => {
 			const opts = mockShow.mock.calls[0]?.[0]
 
 			expect(opts.title).toBe("Name")
-			expect(opts.buttons.map((b: { title: string }) => b.title)).toEqual(["Ascending (current)", "Descending", "cancel"])
-			expect(opts.buttons.at(-1).cancel).toBe(true)
+			expect(opts.buttons.map((b: { title: string }) => b.title)).toEqual(["Ascending (current)", "Descending"])
+			expect(opts.cancelTitle).toBe("cancel")
 		})
 
 		it("marks the current direction with (current) and leaves the other unmarked", () => {
@@ -215,23 +215,6 @@ describe("buildSortFieldButton", () => {
 
 			expect(setSort).toHaveBeenCalledTimes(1)
 			expect(setSort).toHaveBeenCalledWith("nameDesc")
-		})
-
-		it("the cancel button has no onPress (pure dismiss)", () => {
-			const btn = buildSortFieldButton({
-				id: "field",
-				title: "Name",
-				options: makeOptions(),
-				current: "nameAsc",
-				setSort: vi.fn(),
-				t: t as never
-			})
-
-			btn.onPress?.()
-
-			const opts = mockShow.mock.calls[0]?.[0]
-
-			expect(opts.buttons.at(-1).onPress).toBeUndefined()
 		})
 	})
 })

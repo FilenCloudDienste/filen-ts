@@ -14,7 +14,6 @@ import { quillV2ToLegacyV1 } from "@filen/shared/dom"
 import Quill from "quill"
 import DOMPurify from "dompurify"
 import QuillThemeCustomizer, { getThemeOptions } from "@/components/textEditor/richText/quillTheme"
-import type { Platform } from "react-native"
 import type { TextEditorEvents, Colors, Font } from "@/components/textEditor"
 
 // How long after a flush request (and its optional composition-committing blur) the document
@@ -79,12 +78,9 @@ const RichTextEditorDom = ({
 	initialValue,
 	onValueChange,
 	placeholder,
-	darkMode,
-	platform,
 	readOnly,
 	colors,
 	font,
-	autoFocus,
 	paddingTop,
 	paddingBottom
 }: {
@@ -93,12 +89,9 @@ const RichTextEditorDom = ({
 	initialValue?: string
 	onValueChange?: (value: string) => void
 	placeholder?: string
-	darkMode: boolean
-	platform: Platform["OS"]
 	readOnly?: boolean
 	colors: Colors
 	font?: Font
-	autoFocus?: boolean
 	paddingTop?: number
 	paddingBottom?: number
 }) => {
@@ -418,17 +411,15 @@ const RichTextEditorDom = ({
 
 		quillThemeRef.current = new QuillThemeCustomizer(
 			getThemeOptions({
-				darkMode,
 				colors,
-				platform,
 				font,
 				paddingTop,
 				paddingBottom
 			})
 		)
 
-		quillThemeRef.current.apply(quillRef.current, editorRef.current?.id)
-	}, [darkMode, platform, readOnly, colors, font, paddingTop, paddingBottom])
+		quillThemeRef.current.apply()
+	}, [readOnly, colors, font, paddingTop, paddingBottom])
 
 	useEffect(() => {
 		if (!quillRef.current) {
@@ -463,24 +454,13 @@ const RichTextEditorDom = ({
 			})
 
 			quillRef.current.clipboard.dangerouslyPasteHTML(sanitized, "silent")
-
-			// #40 fix: never focus / place a caret in a read-only editor.
-			if (autoFocus && !readOnlyRef.current) {
-				quillRef.current.setSelection(sanitized.length, 0)
-				quillRef.current.focus()
-			}
 		}
 
 		// Baseline for the flush divergence check: the seeded (or empty) document as rendered.
 		// Without it, the first flush of an untouched note would report the initial content as
 		// an edit.
 		lastReportedHtmlRef.current = quillV2ToLegacyV1(quillRef.current.root.innerHTML)
-		// readOnly is read via a ref ON PURPOSE: re-running this effect re-pastes the
-		// (mount-frozen) initialValue, so a mid-session readOnly flip (e.g. a permission
-		// change arriving over the socket) would visually revert everything typed since
-		// mount while the inflight store still holds the real text. Re-seeding is the
-		// remount key's job; readOnly changes are applied by the theme effect above.
-	}, [initialValue, autoFocus])
+	}, [initialValue])
 
 	const postMessageRef = useRef(postMessage)
 

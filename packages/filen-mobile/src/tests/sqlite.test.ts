@@ -15,20 +15,6 @@ const { mockDb, open } = vi.hoisted(() => {
 			return { rows: [], insertId: 1, rowsAffected: 1 }
 		}
 
-		if (query.startsWith("DELETE FROM kv WHERE key LIKE")) {
-			const prefix = stripWildcard(params![0])
-			let rowsAffected = 0
-
-			for (const key of [...store.keys()]) {
-				if (key.startsWith(prefix)) {
-					store.delete(key)
-					rowsAffected++
-				}
-			}
-
-			return { rows: [], insertId: undefined, rowsAffected }
-		}
-
 		if (query.startsWith("DELETE FROM kv WHERE key =")) {
 			const existed = store.delete(params![0] as string)
 
@@ -68,10 +54,6 @@ const { mockDb, open } = vi.hoisted(() => {
 			return value !== undefined ? [[value]] : []
 		}
 
-		if (query.startsWith("SELECT EXISTS")) {
-			return [[store.has(params![0] as string) ? 1 : 0]]
-		}
-
 		if (query.startsWith("SELECT key, value")) {
 			const prefix = stripWildcard(params![0])
 
@@ -82,10 +64,6 @@ const { mockDb, open } = vi.hoisted(() => {
 			const prefix = stripWildcard(params![0])
 
 			return [...store.keys()].filter(key => key.startsWith(prefix)).map(key => [key])
-		}
-
-		if (query.startsWith("SELECT key FROM kv")) {
-			return [...store.keys()].map(key => [key])
 		}
 
 		return []
@@ -117,8 +95,6 @@ const { mockDb, open } = vi.hoisted(() => {
 })
 
 vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
-
-vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
 
 // Minimal react-native mock — storageRoots (imported transitively) reads Platform at module
 // evaluation. iOS branch keeps the shared-container base distinct from the private base, which
@@ -218,7 +194,7 @@ describe("Sqlite", () => {
 			expect(open).toHaveBeenCalledTimes(1)
 		})
 
-		it("creates the DB_FILE_DIRECTORY when it does not exist", async () => {
+		it("creates the SQLITE_DB_FILE_DIRECTORY when it does not exist", async () => {
 			// expoFsModule.fs is cleared in beforeEach, so Directory.exists === false
 			// on any URI not yet present in the map. The spy must be set before init().
 			const sqlite = await createSqlite()
@@ -323,46 +299,6 @@ describe("Sqlite", () => {
 		})
 	})
 
-	describe("kvAsync.keys", () => {
-		it("returns all keys when entries exist", async () => {
-			const sqlite = await createSqlite()
-
-			await sqlite.kvAsync.set("alpha", "1")
-			await sqlite.kvAsync.set("beta", "2")
-			await sqlite.kvAsync.set("gamma", "3")
-
-			const keys = await sqlite.kvAsync.keys()
-
-			expect([...keys].sort()).toEqual(["alpha", "beta", "gamma"])
-		})
-
-		it("returns empty array when no rows", async () => {
-			const sqlite = await createSqlite()
-			const keys = await sqlite.kvAsync.keys()
-
-			expect(keys).toEqual([])
-		})
-	})
-
-	describe("kvAsync.contains", () => {
-		it("returns true when key exists", async () => {
-			const sqlite = await createSqlite()
-
-			await sqlite.kvAsync.set("existing", "value")
-
-			const result = await sqlite.kvAsync.contains("existing")
-
-			expect(result).toBe(true)
-		})
-
-		it("returns false when key does not exist", async () => {
-			const sqlite = await createSqlite()
-			const result = await sqlite.kvAsync.contains("missing")
-
-			expect(result).toBe(false)
-		})
-	})
-
 	describe("kvAsync.remove", () => {
 		it("removes the key", async () => {
 			const sqlite = await createSqlite()
@@ -370,32 +306,7 @@ describe("Sqlite", () => {
 			await sqlite.kvAsync.set("doomed-key", "value")
 			await sqlite.kvAsync.remove("doomed-key")
 
-			const result = await sqlite.kvAsync.contains("doomed-key")
-
-			expect(result).toBe(false)
-		})
-	})
-
-	describe("kvAsync.clear", () => {
-		it("removes all entries from the store", async () => {
-			const sqlite = await createSqlite()
-
-			await sqlite.kvAsync.set("a", "1")
-			await sqlite.kvAsync.set("b", "2")
-
-			await sqlite.kvAsync.clear()
-
-			expect(await sqlite.kvAsync.keys()).toEqual([])
-			expect(await sqlite.kvAsync.contains("a")).toBe(false)
-			expect(await sqlite.kvAsync.contains("b")).toBe(false)
-		})
-
-		it("is a no-op when the store is already empty", async () => {
-			const sqlite = await createSqlite()
-
-			await sqlite.kvAsync.clear()
-
-			expect(await sqlite.kvAsync.keys()).toEqual([])
+			expect(await sqlite.kvAsync.get("doomed-key")).toBeNull()
 		})
 	})
 
@@ -408,9 +319,7 @@ describe("Sqlite", () => {
 
 			await sqlite.clearAsync()
 
-			expect(await sqlite.kvAsync.keys()).toEqual([])
-			expect(await sqlite.kvAsync.contains("one")).toBe(false)
-			expect(await sqlite.kvAsync.contains("two")).toBe(false)
+			expect(mockDb._store.size).toBe(0)
 		})
 	})
 
@@ -457,41 +366,7 @@ describe("Sqlite", () => {
 
 			// The superseded write is discarded silently.
 			expect(result).toBeNull()
-			expect(await sqlite.kvAsync.contains("stale-key")).toBe(false)
-		})
-
-		it("kvAsync.clear also supersedes in-flight writes", async () => {
-			const sqlite = await createSqlite()
-
-			await sqlite.init()
-
-			const originalOpenDb = sqlite.openDb.bind(sqlite)
-			let releaseStalledOpen!: () => void
-			const stalledOpenGate = new Promise<void>(resolve => {
-				releaseStalledOpen = resolve
-			})
-			let openCalls = 0
-
-			sqlite.openDb = vi.fn().mockImplementation(async () => {
-				openCalls++
-
-				if (openCalls === 1) {
-					await stalledOpenGate
-				}
-
-				return await originalOpenDb()
-			})
-
-			const writePromise = sqlite.kvAsync.set("stale-key", "stale-value")
-
-			await new Promise(resolve => setTimeout(resolve, 0))
-
-			await sqlite.kvAsync.clear()
-
-			releaseStalledOpen()
-
-			expect(await writePromise).toBeNull()
-			expect(await sqlite.kvAsync.contains("stale-key")).toBe(false)
+			expect(await sqlite.kvAsync.get("stale-key")).toBeNull()
 		})
 
 		it("normal writes after a wipe are unaffected", async () => {
@@ -536,31 +411,12 @@ describe("Sqlite", () => {
 			releaseStalledOpen()
 
 			expect(await writePromise).toBeNull()
-			expect(await sqlite.kvAsync.contains("stale-key")).toBe(false)
+			expect(await sqlite.kvAsync.get("stale-key")).toBeNull()
 
 			// And the store still accepts new writes afterwards.
 			await sqlite.kvAsync.set("post-wipe", "ok")
 
 			expect(await sqlite.kvAsync.get("post-wipe")).toBe("ok")
-		})
-	})
-
-	describe("shrinkMemory", () => {
-		it("executes PRAGMA shrink_memory after db is open", async () => {
-			const sqlite = await createSqlite()
-
-			await sqlite.openDb()
-			await sqlite.shrinkMemory()
-
-			expect(mockDb.execute).toHaveBeenCalledWith("PRAGMA shrink_memory")
-		})
-
-		it("does nothing when db is not yet initialized", async () => {
-			const sqlite = await createSqlite()
-
-			await sqlite.shrinkMemory()
-
-			expect(mockDb.execute).not.toHaveBeenCalledWith("PRAGMA shrink_memory")
 		})
 	})
 
@@ -623,22 +479,6 @@ describe("Sqlite", () => {
 		})
 	})
 
-	describe("removeByPrefix", () => {
-		it("removes all entries matching prefix and leaves others", async () => {
-			const sqlite = await createSqlite()
-
-			await sqlite.kvAsync.set("prefix_a", "one")
-			await sqlite.kvAsync.set("prefix_b", "two")
-			await sqlite.kvAsync.set("other_c", "three")
-
-			await sqlite.kvAsync.removeByPrefix("prefix_")
-
-			expect(await sqlite.kvAsync.get("prefix_a")).toBeNull()
-			expect(await sqlite.kvAsync.get("prefix_b")).toBeNull()
-			expect(await sqlite.kvAsync.get("other_c")).toBe("three")
-		})
-	})
-
 	describe("removeByPrefixRange", () => {
 		it("removes exactly the prefix range (RANGE predicate) and leaves neighbors", async () => {
 			const sqlite = await createSqlite()
@@ -680,14 +520,14 @@ describe("Sqlite", () => {
 
 describe("prefixUpperBound", () => {
 	it("increments the final character to form an exclusive upper bound", async () => {
-		const { prefixUpperBound } = await import("@/lib/sqlite")
+		const { prefixUpperBound } = await import("@/lib/kvScan")
 
 		expect(prefixUpperBound("cache:v1:foo:")).toBe("cache:v1:foo;")
 		expect(prefixUpperBound("reactQuery_v1:")).toBe("reactQuery_v1;")
 	})
 
 	it("captures exactly the keys sharing the prefix under BINARY ordering", async () => {
-		const { prefixUpperBound } = await import("@/lib/sqlite")
+		const { prefixUpperBound } = await import("@/lib/kvScan")
 		const prefix = "cache:v1:foo:"
 		const upper = prefixUpperBound(prefix)
 		const keys = ["cache:v1:foo:1", "cache:v1:foo:2", "cache:v1:foobar:1", "cache:v1:fon:1", "cache:v1:foo:"]
@@ -697,7 +537,7 @@ describe("prefixUpperBound", () => {
 	})
 
 	it("rejects prefixes that cannot form a valid exclusive upper bound", async () => {
-		const { prefixUpperBound } = await import("@/lib/sqlite")
+		const { prefixUpperBound } = await import("@/lib/kvScan")
 
 		expect(() => prefixUpperBound("")).toThrow()
 		expect(() => prefixUpperBound("abc\uffff")).toThrow()

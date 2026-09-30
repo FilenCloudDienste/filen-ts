@@ -1,41 +1,20 @@
-import type { View, LayoutChangeEvent } from "react-native"
+import type { LayoutChangeEvent } from "react-native"
 import { useState } from "react"
 
-export default function useViewLayout(ref: React.RefObject<View | null>) {
+export default function useViewLayout() {
 	const [layout, setLayout] = useState<{
 		width: number
 		height: number
-		x: number
-		y: number
 	}>({
 		width: 0,
-		height: 0,
-		x: 0,
-		y: 0
+		height: 0
 	})
 
-	const onLayout = (e?: LayoutChangeEvent) => {
-		if (e) {
-			const { layout } = e.nativeEvent
+	const onLayout = (e: LayoutChangeEvent) => {
+		const { width, height } = e.nativeEvent.layout
 
-			setLayout({
-				width: layout.width,
-				height: layout.height,
-				x: layout.x,
-				y: layout.y
-			})
-
-			return
-		}
-
-		ref?.current?.measureInWindow?.((x, y, width, height) => {
-			setLayout({
-				width,
-				height,
-				x,
-				y
-			})
-		})
+		// Position-only layout passes keep the same state object, so React bails out of the update.
+		setLayout(prev => (prev.width === width && prev.height === height ? prev : { width, height }))
 	}
 
 	return {

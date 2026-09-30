@@ -9,11 +9,10 @@ import { NonRootDir_Tags, AnyDirWithContext, AnySharedDir, AnySharedDirWithConte
 import { unwrapFileMeta, unwrapDirMeta, unwrapAnyDirUuid, unwrappedDirIntoDriveItem, unwrappedFileIntoDriveItem } from "@/lib/sdkUnwrap"
 import { sumLocalDirectoryFileBytes } from "@/lib/fsUtils"
 import { ClearBarrier } from "@/lib/clearBarrier"
+import { atomicWrite } from "@/lib/fsAtomic"
 import {
-	atomicWrite,
 	parentCacheKey,
 	directoryDriveItemToAnyDirWithContext,
-	findStaleStoredOfflineEntries,
 	makeSyncError,
 	type OfflineParent,
 	type OfflineUuidParent,
@@ -21,12 +20,9 @@ import {
 } from "@/features/offline/offlineHelpers"
 import { planTreeReconcile, uuidFromSyncTmpName, type LocalTreeEntry, type RemoteTreeEntry } from "@/features/offline/offlineSyncPlanner"
 import { validateUuid } from "@/lib/uuid"
-import {
-	driveItemStoredOfflineQueryUpdate,
-	getStoredOfflineQueryCacheEntries
-} from "@/features/drive/queries/useDriveItemStoredOffline.query"
 import { driveItemsQueryUpdate } from "@/features/drive/queries/useDriveItems.query"
 import { isFileItem, isDirectoryItem } from "@/features/drive/driveSelectors"
+import useOfflineStore from "@/features/offline/store/useOffline.store"
 import {
 	OFFLINE_VERSION,
 	OFFLINE_PARENT_DIRECTORY,
@@ -89,6 +85,10 @@ export const FILES_DIRECTORY = OFFLINE_FILES_DIRECTORY
 export const DIRECTORIES_DIRECTORY = OFFLINE_DIRECTORIES_DIRECTORY
 export const INDEX_FILE = OFFLINE_INDEX_FILE
 
+function indexHasItem(index: Index, item: DriveItem): boolean {
+	return isDirectoryItem(item) ? Boolean(index.directories[item.data.uuid]) : Boolean(index.files[item.data.uuid])
+}
+
 // Root URIs are stable for the process lifetime — read the (native-backed) uri getters once
 // instead of per call site in entry loops.
 const FILES_DIRECTORY_URI = FILES_DIRECTORY.uri
@@ -146,6 +146,8 @@ export class Offline {
 	// indexMutex(1): serializes index read/write to prevent concurrent corruption.
 	private readonly indexMutex = new Semaphore(1)
 	private indexCache: Index | null = null
+	// One-shot: the first render-time read before any rebuild seeds indexCache from disk.
+	private indexWarmStarted = false
 	// storeMutex(3): allows up to 3 concurrent file/directory downloads while still bounding I/O.
 	private readonly storeMutex = new Semaphore(3)
 	// storeItemMutexes: per-UUID Semaphore(1) lock serializing storeFile/storeDirectory/reconcileTree
@@ -167,9 +169,7 @@ export class Offline {
 			dirs: number
 		}
 	>()
-	private readonly isItemStoredCache = new Map<string, boolean>()
 	private readonly getLocalFileCache = new Map<string, FileSystem.File>()
-	private readonly getLocalDirectoryCache = new Map<string, FileSystem.Directory>()
 	private directoriesEnsured = false
 	private versionSweepDone = false
 	private readonly directoryMetaCache = new Map<string, DirectoryOfflineMeta>()
@@ -285,9 +285,7 @@ export class Offline {
 		this.listDirectoriesCache.clear()
 		this.listDirectoriesRecursiveCache = null
 		this.itemSizeCache.clear()
-		this.isItemStoredCache.clear()
 		this.getLocalFileCache.clear()
-		this.getLocalDirectoryCache.clear()
 		this.directoryMetaCache.clear()
 		this.uuidToTopLevelCache = null
 		this.directoriesEnsured = false
@@ -459,28 +457,18 @@ export class Offline {
 					this.indexMutex.release()
 				})
 
-				// Previous in-memory index — the diff base for the query-cache broadcasts and the
-				// fixed-point base for the index write below. It survives invalidateCaches (only
-				// clearAll and readIndex assign indexCache).
+				// Previous in-memory index — the fixed-point base for the index write below. It
+				// survives invalidateCaches (only rebuildIndex, clearAll and readIndex assign it).
 				const previousIndex = this.indexCache
 
 				// NO-MUTATION SKIP: this process is the offline store's only writer and every
 				// disk-mutation path bumps mutationCounter (via invalidateCaches). An unchanged
 				// counter since the last FULL in-process rebuild proves this rebuild would produce
-				// the identical index — skip the meta re-reads, broadcasts and write entirely.
-				// The cheap cross-session ghost healing (stale storedOffline reconciliation) still
-				// runs: it needs only the in-memory index and the query-cache entries. The first
+				// the identical index — skip the meta re-reads and write entirely. The first
 				// updateIndex of a session never skips (indexRebuildMutationCounter starts -1), so
-				// staleness left by a crashed previous session heals exactly like before.
+				// staleness left by a crashed previous session is rebuilt away.
 				if (previousIndex !== null && this.indexRebuildMutationCounter === this.mutationCounter) {
 					this.ensureDirectories()
-
-					for (const staleEntry of findStaleStoredOfflineEntries(getStoredOfflineQueryCacheEntries(), previousIndex)) {
-						driveItemStoredOfflineQueryUpdate({
-							updater: false,
-							params: staleEntry
-						})
-					}
 
 					await this.buildUuidToTopLevelIndex()
 
@@ -494,25 +482,10 @@ export class Offline {
 				const indexFiles: Index["files"] = {}
 				const indexDirectories: Index["directories"] = {}
 
-				// Broadcast only NEWLY indexed uuids when a previous index exists this session: an
-				// already-indexed uuid's storedOffline query value is already true (this lib is the
-				// query's only writer), so re-pushing tens of thousands of unchanged `true`s every
-				// pass is pure overhead. A null previous index (first rebuild this session)
-				// broadcasts everything, healing whatever the persisted query cache holds.
 				for (const { item, parent } of files) {
 					indexFiles[item.data.uuid] = {
 						item,
 						parent
-					}
-
-					if (!previousIndex || !previousIndex.files[item.data.uuid]) {
-						driveItemStoredOfflineQueryUpdate({
-							updater: true,
-							params: {
-								uuid: item.data.uuid,
-								type: item.type
-							}
-						})
 					}
 				}
 
@@ -521,32 +494,12 @@ export class Offline {
 						item,
 						parent
 					}
-
-					if (!previousIndex || !previousIndex.directories[item.data.uuid]) {
-						driveItemStoredOfflineQueryUpdate({
-							updater: true,
-							params: {
-								uuid: item.data.uuid,
-								type: item.type
-							}
-						})
-					}
 				}
 
 				for (const { item, parent } of directories.files) {
 					indexFiles[item.data.uuid] = {
 						item,
 						parent
-					}
-
-					if (!previousIndex || !previousIndex.files[item.data.uuid]) {
-						driveItemStoredOfflineQueryUpdate({
-							updater: true,
-							params: {
-								uuid: item.data.uuid,
-								type: item.type
-							}
-						})
 					}
 				}
 
@@ -561,29 +514,18 @@ export class Offline {
 				// back to the write.
 				const indexUnchanged = previousIndex !== null && INDEX_FILE.info().exists && serializeEquals(index, previousIndex)
 
-				if (!indexUnchanged) {
+				if (indexUnchanged) {
+					// Structurally equal: no stored-offline answer can flip, so skip the selector re-runs.
+					this.indexCache = index
+				} else {
 					atomicWrite(INDEX_FILE, serialize(index satisfies Index))
-				}
 
-				this.indexCache = index
-
-				// Reconcile the push-only storedOffline query cache against the rebuilt index:
-				// broadcast `false` for every cached `true` whose uuid is no longer indexed.
-				// The per-item loops above only ever broadcast `true`, so without this an item
-				// that vanished from the store wholesale (e.g. an OFFLINE_VERSION sweep) keeps
-				// its persisted `true` forever — a ghost "stored offline" badge for an item the
-				// offline screen doesn't list and whose menu offers neither offline action.
-				for (const staleEntry of findStaleStoredOfflineEntries(getStoredOfflineQueryCacheEntries(), index)) {
-					driveItemStoredOfflineQueryUpdate({
-						updater: false,
-						params: staleEntry
-					})
+					this.setIndexCache(index)
 				}
 
 				// Eagerly warm uuidToTopLevelCache so the sync isItemTopLevelStoredSync
 				// used by drive item menus returns a defined answer immediately after
-				// boot, not after the per-row isStoredOffline query lazily triggers it.
-				// We just walked every top-level directory above; this re-reads their
+				// boot. We just walked every top-level directory above; this re-reads their
 				// meta but is the price for a clean cache invariant: "indexCache set
 				// ⇒ uuidToTopLevelCache set".
 				await this.buildUuidToTopLevelIndex()
@@ -596,6 +538,13 @@ export class Offline {
 				throw: true
 			}
 		)
+	}
+
+	// Every swap goes through here so useOfflineStore's stored-offline selectors re-run.
+	private setIndexCache(index: Index | null): void {
+		this.indexCache = index
+
+		useOfflineStore.getState().bumpStoredVersion()
 	}
 
 	private async readIndex(): Promise<Index> {
@@ -636,7 +585,7 @@ export class Offline {
 			})
 
 			if (readResult.success) {
-				this.indexCache = readResult.data
+				this.setIndexCache(readResult.data)
 
 				return readResult.data
 			}
@@ -660,12 +609,24 @@ export class Offline {
 		return result.data
 	}
 
-	// Cache-only sync variant of isItemStored. Returns the cached value if known,
-	// or undefined if not yet populated. For render-time menu gating where an
-	// async lookup is too expensive. Callers that prefer to err on "show the
-	// action" should treat undefined as "not known offline".
+	// Sync variant of isItemStored over the in-memory index, for render-time reads. Returns
+	// undefined until the index is in memory; callers that prefer to err on "show the action"
+	// treat undefined as "not known offline". The first such miss seeds the index from disk
+	// (headless tasks never call this), so badges don't wait for a sync pass's rebuild.
 	public isItemStoredSync(item: DriveItem): boolean | undefined {
-		return this.isItemStoredCache.get(item.data.uuid)
+		if (!this.indexCache) {
+			if (!this.indexWarmStarted) {
+				this.indexWarmStarted = true
+
+				this.readIndex().catch(e => {
+					logger.warn("offline", "Index warm read failed", { error: e })
+				})
+			}
+
+			return undefined
+		}
+
+		return indexHasItem(this.indexCache, item)
 	}
 
 	// Synchronously checks whether an item is a TOP-LEVEL stored offline entry.
@@ -680,8 +641,7 @@ export class Offline {
 	//   true  — item itself is a top-level stored entry (safe to expose remove).
 	//   false — item is either not stored, or is a nested child of a stored
 	//           tree. Either way, removeItem is not the right action.
-	//   undefined — caches not yet populated; caller should re-render after
-	//               the per-item isItemStored query warms them.
+	//   undefined — caches not yet populated (the next index rebuild fills them).
 	public isItemTopLevelStoredSync(item: DriveItem): boolean | undefined {
 		if (!this.indexCache || !this.uuidToTopLevelCache) {
 			return undefined
@@ -714,12 +674,6 @@ export class Offline {
 	}
 
 	public async isItemStored(item: DriveItem): Promise<boolean> {
-		const cachedStored = this.isItemStoredCache.get(item.data.uuid)
-
-		if (cachedStored !== undefined) {
-			return cachedStored
-		}
-
 		this.ensureDirectories()
 
 		const index = await this.readIndex()
@@ -729,27 +683,7 @@ export class Offline {
 		// Idempotent: short-circuits once populated.
 		await this.buildUuidToTopLevelIndex()
 
-		switch (item.type) {
-			case "directory":
-			case "sharedRootDirectory":
-			case "sharedDirectory": {
-				const storedDir = Boolean(index.directories[item.data.uuid])
-
-				this.isItemStoredCache.set(item.data.uuid, storedDir)
-
-				return storedDir
-			}
-
-			case "file":
-			case "sharedFile":
-			case "sharedRootFile": {
-				const storedFile = Boolean(index.files[item.data.uuid])
-
-				this.isItemStoredCache.set(item.data.uuid, storedFile)
-
-				return storedFile
-			}
-		}
+		return indexHasItem(index, item)
 	}
 
 	// Keyed on the META, not the data file: one entry per uuid-named files/ dir with a readable,
@@ -3034,79 +2968,22 @@ export class Offline {
 	}
 
 	public async clearAll(): Promise<void> {
-		// Snapshot every uuid+type that's about to disappear so we can invalidate the
-		// "is item stored offline?" queries after deletion. Match removeItem's pattern of
-		// walking nested directory-meta entries pessimistically.
-		const stored = await this.clearBarrier.runExclusive(async () => {
-			const collected: {
-				uuid: string
-				type: DriveItem["type"]
-			}[] = []
-
-			if (INDEX_FILE.exists) {
-				const index = await this.readIndex()
-
-				for (const fileEntry of Object.values(index.files)) {
-					collected.push({
-						uuid: fileEntry.item.data.uuid,
-						type: fileEntry.item.type
-					})
-				}
-
-				for (const directoryEntry of Object.values(index.directories)) {
-					collected.push({
-						uuid: directoryEntry.item.data.uuid,
-						type: directoryEntry.item.type
-					})
-
-					const meta = await this.readDirectoryMeta(directoryEntry.item.data.uuid)
-
-					if (!meta) {
-						continue
-					}
-
-					for (const entry of Object.values(meta.entries ?? {})) {
-						if (!entry) {
-							continue
-						}
-
-						collected.push({
-							uuid: entry.item.data.uuid,
-							type: entry.item.type
-						})
-					}
-				}
-			}
-
+		await this.clearBarrier.runExclusive(async () => {
 			if (DIRECTORY.exists) {
 				DIRECTORY.delete()
 			}
 
 			this.directoriesEnsured = false
-			this.indexCache = null
+			this.setIndexCache(null)
 
 			this.ensureDirectories()
 			this.invalidateCaches()
-
-			return collected
 		})
 
 		// Rebuild the index after leaving the exclusive section. updateIndex() re-takes the
 		// clearBarrier, which is free here (runExclusive has already returned, so there is no
 		// nesting) — and the rebuild reflects the just-wiped (empty) store.
 		await this.updateIndex()
-
-		// Broadcast offline=false for every item that was previously stored so badges update
-		// without waiting for the next isItemStored() refetch.
-		for (const { uuid, type } of stored) {
-			driveItemStoredOfflineQueryUpdate({
-				updater: false,
-				params: {
-					uuid,
-					type
-				}
-			})
-		}
 	}
 
 	public async size(): Promise<{
@@ -3165,47 +3042,18 @@ export class Offline {
 					didDelete = true
 				}
 			} else {
-				const { directories: topLevelDirectories } = await this.listDirectories()
+				// Trees live at directories/{topLevelUuid}: a nested or unknown uuid has no meta there,
+				// so it stays a no-op. A tree with a corrupt meta is removeTreeDirectory's job.
+				const directoryMeta = await this.readDirectoryMeta(item.data.uuid)
 
-				for (const { item: directoryItem } of topLevelDirectories) {
-					if (!isDirectoryItem(directoryItem)) {
-						continue
+				if (directoryMeta && isDirectoryItem(directoryMeta.item)) {
+					const dataDirectory = new FileSystem.Directory(FileSystem.Paths.join(DIRECTORIES_DIRECTORY_URI, item.data.uuid))
+
+					if (dataDirectory.exists) {
+						dataDirectory.delete()
+
+						didDelete = true
 					}
-
-					if (directoryItem.data.uuid !== item.data.uuid) {
-						continue
-					}
-
-					// Read meta before deletion to get all nested entries for query invalidation
-					const directoryMeta = await this.readDirectoryMeta(directoryItem.data.uuid)
-
-					if (directoryMeta) {
-						for (const uuid in directoryMeta.entries) {
-							const entry = directoryMeta.entries[uuid]
-
-							if (entry) {
-								driveItemStoredOfflineQueryUpdate({
-									updater: false,
-									params: {
-										uuid: entry.item.data.uuid,
-										type: entry.item.type
-									}
-								})
-							}
-						}
-					}
-
-					const dataDirectory = new FileSystem.Directory(
-						FileSystem.Paths.join(DIRECTORIES_DIRECTORY.uri, directoryItem.data.uuid)
-					)
-
-					if (!dataDirectory.exists) {
-						continue
-					}
-
-					dataDirectory.delete()
-
-					didDelete = true
 				}
 			}
 
@@ -3223,9 +3071,7 @@ export class Offline {
 				// Optimistically prune the /offline virtual-root listing so the row
 				// disappears without waiting for the next mount-driven refetch.
 				// removeItem only operates on top-level entries, so the root list is
-				// the only place where the removed item is directly visible; nested
-				// children already had their per-item driveItemStoredOfflineQuery
-				// invalidated above.
+				// the only place where the removed item is directly visible.
 				driveItemsQueryUpdate({
 					params: {
 						path: {
@@ -3242,14 +3088,6 @@ export class Offline {
 					}
 				})
 			}
-
-			driveItemStoredOfflineQueryUpdate({
-				updater: false,
-				params: {
-					uuid: item.data.uuid,
-					type: item.type
-				}
-			})
 		})
 
 		if (!result.success) {
@@ -3319,62 +3157,6 @@ export class Offline {
 		// Tree bytes missing (or tree meta unreadable): a standalone copy may still exist — keep
 		// the old standalone-first behavior's reachability as a last resort.
 		return tryStandalone()
-	}
-
-	public async getLocalDirectory(item: DriveItem): Promise<FileSystem.Directory | null> {
-		const cachedLocalDir = this.getLocalDirectoryCache.get(item.data.uuid)
-
-		if (cachedLocalDir) {
-			return cachedLocalDir
-		}
-
-		if (!isDirectoryItem(item)) {
-			return null
-		}
-
-		this.ensureDirectories()
-
-		const uuidToTopLevel = await this.buildUuidToTopLevelIndex()
-		const topLevelUuid = uuidToTopLevel.get(item.data.uuid)
-
-		if (!topLevelUuid) {
-			return null
-		}
-
-		const directoryMeta = await this.readDirectoryMeta(topLevelUuid)
-
-		if (!directoryMeta) {
-			return null
-		}
-
-		// Check if this is the top-level directory itself
-		if (directoryMeta.item.data.uuid === item.data.uuid) {
-			const foundDirectory = new FileSystem.Directory(`${DIRECTORIES_DIRECTORY_URI}/${topLevelUuid}`)
-
-			if (foundDirectory.exists) {
-				this.getLocalDirectoryCache.set(item.data.uuid, foundDirectory)
-
-				return foundDirectory
-			}
-		}
-
-		// Nested entries are uuid-keyed — direct lookup, then the raw name-bearing path goes in
-		// as a separate constructor arg so expo's encoder runs on it.
-		const entryMeta = directoryMeta.entries[item.data.uuid]
-
-		if (!entryMeta || !isDirectoryItem(entryMeta.item)) {
-			return null
-		}
-
-		const foundDirectory = new FileSystem.Directory(DIRECTORIES_DIRECTORY_URI, topLevelUuid, entryMeta.path)
-
-		if (foundDirectory.exists) {
-			this.getLocalDirectoryCache.set(item.data.uuid, foundDirectory)
-
-			return foundDirectory
-		}
-
-		return null
 	}
 }
 

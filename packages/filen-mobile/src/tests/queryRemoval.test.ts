@@ -20,12 +20,11 @@ vi.mock("react-native", async () => {
 
 // @filen/shared is deliberately REAL: sortParams is what shapes the query key this suite is pinning,
 // so a stub would make the assertions circular.
-vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
 vi.mock("@/constants", async () => await import("@/tests/mocks/constants"))
 vi.mock("@/lib/utils", () => ({}))
 vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 
-// The persister's clear() reaches removeByPrefix, which the shared kv mock doesn't carry — the
+// The persister's clear() reaches removeByPrefixRange, which the shared kv mock doesn't carry — the
 // in-memory buffer is what this suite asserts on, so the SQLite side just needs to not throw.
 vi.mock("@/lib/sqlite", () => ({
 	default: {
@@ -34,7 +33,7 @@ vi.mock("@/lib/sqlite", () => ({
 			get: vi.fn(async () => null),
 			set: vi.fn(async () => undefined),
 			remove: vi.fn(async () => undefined),
-			removeByPrefix: vi.fn(async () => undefined)
+			removeByPrefixRange: vi.fn(async () => undefined)
 		}
 	}
 }))

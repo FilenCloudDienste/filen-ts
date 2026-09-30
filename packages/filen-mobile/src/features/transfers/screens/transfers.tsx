@@ -20,8 +20,7 @@ import { useTranslation } from "react-i18next"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import Menu from "@/components/ui/menu"
 import Thumbnail from "@/features/drive/components/item/thumbnail"
-import { DirectoryIcon, FileIcon } from "@/components/itemIcons"
-import { DirColor } from "@filen/sdk-rs"
+import { ItemGlyph } from "@/components/itemIcons"
 import transfersLib from "@/features/transfers/transfers"
 import { driveItemDisplayName } from "@/lib/decryption"
 import { run, clampedRatio } from "@filen/shared"
@@ -105,22 +104,6 @@ const RowMenuTrigger = () => {
 	)
 }
 
-const CopyGlyph = ({ glyph, name }: { glyph: CopyTransfer["glyph"] | undefined; name: string }) => {
-	return glyph === "file" ? (
-		<FileIcon
-			name={name}
-			width={32}
-			height={32}
-		/>
-	) : (
-		<DirectoryIcon
-			color={DirColor.Default.new()}
-			width={32}
-			height={32}
-		/>
-	)
-}
-
 // Same layout as an upload row, with the state as text under the title instead of a second icon.
 const CopyActiveRow = ({ transfer }: { transfer: CopyTransfer }) => {
 	const { t } = useTranslation()
@@ -130,8 +113,8 @@ const CopyActiveRow = ({ transfer }: { transfer: CopyTransfer }) => {
 		<View className="bg-transparent px-4 flex-col py-2">
 			<View className="bg-transparent items-center justify-between flex-row gap-4">
 				<View className="flex-row items-center gap-3 bg-transparent flex-1">
-					<CopyGlyph
-						glyph={transfer.glyph}
+					<ItemGlyph
+						isDirectory={transfer.glyph !== "file"}
 						name={transfer.name}
 					/>
 					<View className="flex-col bg-transparent flex-1">
@@ -202,8 +185,8 @@ const CopyFinishedRow = ({ finished }: { finished: TFinishedTransfer }) => {
 		<View className="bg-transparent px-4 flex-col py-2">
 			<View className="bg-transparent items-center justify-between flex-row gap-4">
 				<View className="flex-row items-center gap-3 bg-transparent flex-1">
-					<CopyGlyph
-						glyph={finished.copyGlyph}
+					<ItemGlyph
+						isDirectory={finished.copyGlyph !== "file"}
 						name={finished.name}
 					/>
 					<View className="flex-col bg-transparent flex-1">
@@ -285,7 +268,13 @@ const CopyFinishedRow = ({ finished }: { finished: TFinishedTransfer }) => {
 	)
 }
 
-const ActiveTransferRow = ({ transfer, target }: { transfer: TTransfer; target: ListRenderItemInfo<TransfersListItem>["target"] }) => {
+const ActiveTransferRow = ({
+	transfer,
+	target
+}: {
+	transfer: Exclude<TTransfer, { type: "copy" }>
+	target: ListRenderItemInfo<TransfersListItem>["target"]
+}) => {
 	const { t } = useTranslation()
 	const textForeground = useResolveClassNames("text-foreground")
 
@@ -293,22 +282,11 @@ const ActiveTransferRow = ({ transfer, target }: { transfer: TTransfer; target: 
 		<View className="bg-transparent px-4 flex-col py-2">
 			<View className="bg-transparent items-center justify-between flex-row gap-4">
 				<View className="flex-row items-center gap-3 bg-transparent flex-1">
-					{transfer.type === "uploadDirectory" || transfer.type === "uploadFile" || transfer.type === "copy" ? (
-						<Fragment>
-							{transfer.type === "uploadDirectory" || (transfer.type === "copy" && transfer.glyph !== "file") ? (
-								<DirectoryIcon
-									color={DirColor.Default.new()}
-									width={32}
-									height={32}
-								/>
-							) : (
-								<FileIcon
-									name={transfer.name}
-									width={32}
-									height={32}
-								/>
-							)}
-						</Fragment>
+					{transfer.type === "uploadDirectory" || transfer.type === "uploadFile" ? (
+						<ItemGlyph
+							isDirectory={transfer.type === "uploadDirectory"}
+							name={transfer.name}
+						/>
 					) : (
 						<Thumbnail
 							item={transfer.item}
@@ -326,9 +304,7 @@ const ActiveTransferRow = ({ transfer, target }: { transfer: TTransfer; target: 
 						numberOfLines={1}
 						ellipsizeMode="middle"
 					>
-						{transfer.type === "uploadDirectory" || transfer.type === "uploadFile" || transfer.type === "copy"
-							? transfer.name
-							: driveItemDisplayName(transfer.item)}
+						{transfer.type === "uploadDirectory" || transfer.type === "uploadFile" ? transfer.name : driveItemDisplayName(transfer.item)}
 					</Text>
 				</View>
 				<View className="flex-row items-center bg-transparent gap-3 shrink-0">
@@ -413,19 +389,10 @@ const FinishedTransferRow = ({ finished }: { finished: TFinishedTransfer }) => {
 		<View className="bg-transparent px-4 flex-col py-2">
 			<View className="bg-transparent items-center justify-between flex-row gap-4">
 				<View className="flex-row items-center gap-3 bg-transparent flex-1">
-					{finished.type === "uploadDirectory" || finished.type === "downloadDirectory" ? (
-						<DirectoryIcon
-							color={DirColor.Default.new()}
-							width={32}
-							height={32}
-						/>
-					) : (
-						<FileIcon
-							name={finished.name}
-							width={32}
-							height={32}
-						/>
-					)}
+					<ItemGlyph
+						isDirectory={finished.type === "uploadDirectory" || finished.type === "downloadDirectory"}
+						name={finished.name}
+					/>
 					<View className="flex-col bg-transparent flex-1">
 						<Text
 							className="text-foreground"
@@ -670,7 +637,6 @@ const Transfers = () => {
 			>
 				<VirtualList
 					className="flex-1 bg-transparent"
-					contentInsetAdjustmentBehavior="automatic"
 					keyExtractor={item =>
 						item.kind === "active" ? `active-${item.transfer.type}-${item.transfer.id}` : `finished-${item.finished.id}`
 					}

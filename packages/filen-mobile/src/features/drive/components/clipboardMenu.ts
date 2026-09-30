@@ -6,18 +6,18 @@ import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import type { DriveItem } from "@/types"
 import type { DrivePath } from "@/hooks/useDrivePath"
 import alerts from "@/lib/alerts"
-import cache from "@/lib/cache"
 import logger from "@/lib/logger"
 import drive from "@/features/drive/drive"
 import copyRunner from "@/features/copy/copyRunner"
-import { canPasteInto, copyDestinationOf } from "@/features/drive/clipboard"
+import { canPasteInto } from "@/features/drive/clipboard"
+import { copyDestinationOf } from "@/features/drive/copyDestination"
 import { restoreFailedCut, takeCutForPaste } from "@/features/drive/clipboardFollow"
 import useDriveClipboardStore, { type DriveClipboardEntry } from "@/features/drive/store/useDriveClipboard.store"
 
 // Pastes the clipboard into `targetDir`. A copy starts one copy job and stays on the clipboard for more
 // pastes; a cut moves each item behind the full-screen loader like Move, leaves the clipboard as it
 // starts, and puts back whatever failed to move (as it is by then).
-export async function pasteClipboard({ targetDir, allowCut, t }: { targetDir: AnyNormalDir; allowCut: boolean; t: TFunction }): Promise<void> {
+export async function pasteClipboard({ targetDir, allowCut }: { targetDir: AnyNormalDir; allowCut: boolean }): Promise<void> {
 	const entry = useDriveClipboardStore.getState().entry
 
 	// The menu may be older than the clipboard.
@@ -29,7 +29,7 @@ export async function pasteClipboard({ targetDir, allowCut, t }: { targetDir: An
 		const started = await run(async () => {
 			return copyRunner.start({
 				items: entry.items,
-				destination: copyDestinationOf(targetDir, cache.rootUuid, t("drive")),
+				destination: copyDestinationOf(targetDir),
 				destinationDir: targetDir
 			})
 		})
@@ -111,7 +111,7 @@ export function buildPasteHereMenuButtons({
 			disabled: targetDir === null || !canPasteInto({ entry, targetUuid: targetDir.inner[0].uuid, allowCut }),
 			onPress: async () => {
 				if (targetDir) {
-					await pasteClipboard({ targetDir, allowCut, t })
+					await pasteClipboard({ targetDir, allowCut })
 				}
 			}
 		},
@@ -160,7 +160,7 @@ export function buildPasteIntoMenuButton({
 		icon: "paste",
 		requiresOnline: true,
 		onPress: async () => {
-			await pasteClipboard({ targetDir, allowCut, t })
+			await pasteClipboard({ targetDir, allowCut })
 		}
 	}
 }

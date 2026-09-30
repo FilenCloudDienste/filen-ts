@@ -30,9 +30,13 @@ import Ionicons from "@expo/vector-icons/Ionicons"
 import logger from "@/lib/logger"
 import { isIncomingShareLoading, incomingShareAction } from "@/features/incomingShare/utils"
 
-function Payload({ payload }: { payload: ResolvedSharePayload }) {
-	const previewType =
-		payload.contentUri && payload.originalName && payload.contentUri.startsWith("file://") ? getPreviewType(payload.originalName) : null
+type UploadableSharePayload = ResolvedSharePayload & {
+	contentUri: string
+	originalName: string
+}
+
+function Payload({ payload }: { payload: UploadableSharePayload }) {
+	const previewType = payload.contentUri.startsWith("file://") ? getPreviewType(payload.originalName) : null
 
 	return (
 		<ListRow
@@ -43,7 +47,7 @@ function Payload({ payload }: { payload: ResolvedSharePayload }) {
 					<Image
 						className="bg-transparent"
 						source={{
-							uri: payload.contentUri ?? undefined
+							uri: payload.contentUri
 						}}
 						style={{
 							width: 32,
@@ -55,7 +59,7 @@ function Payload({ payload }: { payload: ResolvedSharePayload }) {
 					/>
 				) : (
 					<FileIcon
-						name={payload.originalName ?? "file"}
+						name={payload.originalName}
 						width={32}
 						height={32}
 					/>
@@ -122,7 +126,7 @@ function IncomingShare() {
 	const isOnline = useIsOnline()
 
 	const payloads = resolvedSharedPayloads.filter(
-		payload => typeof payload.contentUri === "string" && typeof payload.originalName === "string"
+		(payload): payload is UploadableSharePayload => Boolean(payload.contentUri) && Boolean(payload.originalName)
 	)
 
 	// One decision drives both the confirm button and the offline notice — see incomingShareAction.
@@ -243,15 +247,6 @@ function IncomingShare() {
 			const assetsResult = await runWithLoading(async defer => {
 				return await Promise.all(
 					payloads.map(async payload => {
-						if (!payload.contentUri || !payload.originalName) {
-							logger.warn("incomingShare", "payload missing contentUri or originalName, skipping", {
-								contentUri: payload.contentUri ?? null,
-								originalName: payload.originalName ?? null
-							})
-
-							return null
-						}
-
 						const file = new FileSystem.File(payload.contentUri)
 
 						defer(() => {
@@ -286,14 +281,7 @@ function IncomingShare() {
 				return
 			}
 
-			const assets = assetsResult.data.filter(
-				(
-					asset
-				): asset is {
-					name: string
-					file: FileSystem.File
-				} => asset !== null
-			)
+			const assets = assetsResult.data
 
 			clear(batch)
 
@@ -415,7 +403,6 @@ function IncomingShare() {
 					data={payloads}
 					loading={isLoadingPayloads}
 					headerComponent={action === "offlineNotice" ? () => <OfflineNotice /> : undefined}
-					contentInsetAdjustmentBehavior="automatic"
 					contentContainerStyle={{
 						paddingBottom: insets.bottom
 					}}
@@ -437,7 +424,7 @@ function IncomingShare() {
 					renderItem={({ item: payload }) => {
 						return <Payload payload={payload} />
 					}}
-					keyExtractor={payload => payload.contentUri ?? payload.originalName ?? JSON.stringify(payload)}
+					keyExtractor={payload => payload.contentUri}
 				/>
 			</SafeAreaView>
 		</Fragment>

@@ -160,7 +160,7 @@ export function buildBulkActionMenu({
 						okText: t("restore"),
 						cancelText: t("cancel")
 					},
-					op: item => drive.restore({ item, signal: undefined })
+					op: item => drive.restore({ item })
 				})
 			}
 		})
@@ -182,7 +182,7 @@ export function buildBulkActionMenu({
 						cancelText: t("cancel"),
 						destructive: true
 					},
-					op: item => drive.deletePermanently({ item, signal: undefined })
+					op: item => drive.deletePermanently({ item })
 				})
 			}
 		})
@@ -209,8 +209,7 @@ export function buildBulkActionMenu({
 					op: item =>
 						drive.favorite({
 							item,
-							favorited: !driveFlags.includesFavorited,
-							signal: undefined
+							favorited: !driveFlags.includesFavorited
 						})
 				})
 			}
@@ -269,8 +268,7 @@ export function buildBulkActionMenu({
 			id: "bulkSaveToCloudDrive",
 			title: t("save_selected_to_cloud_drive"),
 			items: selectedDriveItems,
-			onDone: () => useDriveStore.getState().clearSelectedItems(),
-			t
+			onDone: () => useDriveStore.getState().clearSelectedItems()
 		})
 
 		if (saveButton) {
@@ -418,10 +416,7 @@ export function buildBulkActionMenu({
 			requiresOnline: true,
 			onPress: async () => {
 				const pickResult = await run(async () => {
-					return await selectContacts({
-						multiple: true,
-						userIdsToExclude: []
-					})
+					return await selectContacts()
 				})
 
 				if (!pickResult.success) {
@@ -450,8 +445,7 @@ export function buildBulkActionMenu({
 
 	// Make offline / Remove offline — keep them as two separate buttons
 	// instead of a single toggle. Toggling would need per-item offline
-	// status (via N useDriveItemStoredOfflineQuery calls or a query
-	// helper) and the user's intent for a mixed selection is
+	// status (read from the in-memory offline index) and the user's intent for a mixed selection is
 	// ambiguous anyway. The lib's idempotent semantics make
 	// already-offline / already-online items no-ops, so showing both
 	// is safe.
@@ -586,7 +580,7 @@ export function buildBulkActionMenu({
 						cancelText: t("cancel"),
 						destructive: true
 					},
-					op: item => drive.trash({ item, signal: undefined })
+					op: item => drive.trash({ item })
 				})
 			}
 		})
@@ -611,7 +605,7 @@ export function buildBulkActionMenu({
 						cancelText: t("cancel"),
 						destructive: true
 					},
-					op: item => drive.removeShare({ item, signal: undefined })
+					op: item => drive.removeShare({ item })
 				})
 			}
 		})
@@ -636,7 +630,7 @@ export function buildBulkActionMenu({
 						cancelText: t("cancel"),
 						destructive: true
 					},
-					op: item => drive.removeShare({ item, signal: undefined })
+					op: item => drive.removeShare({ item })
 				})
 			}
 		})
@@ -661,7 +655,7 @@ export function buildBulkActionMenu({
 						cancelText: t("cancel"),
 						destructive: true
 					},
-					op: item => drive.disablePublicLink({ item, signal: undefined })
+					op: item => drive.disablePublicLink({ item })
 				})
 			}
 		})

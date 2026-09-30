@@ -7,8 +7,6 @@ const { mockCacheMap, mockAudioCacheGetMetadata } = vi.hoisted(() => ({
 
 vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 
-vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
-
 vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
 
 vi.mock("@filen/shared", async () => ({
@@ -48,14 +46,6 @@ vi.mock("@/lib/cache", () => ({
 vi.mock("@/features/audio/audioCache", () => ({
 	default: {
 		getMetadata: mockAudioCacheGetMetadata
-	}
-}))
-
-vi.mock("@/queries/client", () => ({
-	DEFAULT_QUERY_OPTIONS: {},
-	queryUpdater: {
-		get: vi.fn(),
-		set: vi.fn()
 	}
 }))
 

@@ -1,6 +1,7 @@
-import { useEffect, useRef, useCallback } from "react"
+import { useEffect, useRef, useCallback, type RefObject } from "react"
 import type { DriveItem, DriveItemFileExtracted, DriveItemDirectoryExtracted } from "@/types"
-import thumbnails, { DIRECTORY as THUMBNAILS_DIRECTORY } from "@/lib/thumbnails"
+import thumbnails from "@/lib/thumbnails"
+import { getPath } from "@/lib/thumbnailsHelpers"
 import { run, runEffect } from "@filen/shared"
 import Image from "@/components/ui/image"
 import { FileIcon, DirectoryIcon } from "@/components/itemIcons"
@@ -9,7 +10,6 @@ import { type RenderTarget, useRecyclingState } from "@shopify/flash-list"
 import { AppState } from "react-native"
 import useHttpStore from "@/stores/useHttp.store"
 import { useFocusEffect } from "expo-router"
-import * as FileSystem from "expo-file-system"
 import logger from "@/lib/logger"
 
 const MAX_ERROR_RETRIES = 3
@@ -18,6 +18,13 @@ const MAX_GENERATE_RETRIES = 3
 type ThumbnailSize = {
 	icon: number
 	thumbnail: number
+}
+
+function cancelGenerate(abortControllerRef: RefObject<AbortController | null>, isGeneratingRef: RefObject<boolean>): void {
+	abortControllerRef.current?.abort()
+
+	abortControllerRef.current = null
+	isGeneratingRef.current = false
 }
 
 const DirectoryThumbnail = ({ item, size, className }: { item: DriveItemDirectoryExtracted; size: ThumbnailSize; className?: string }) => {
@@ -55,20 +62,12 @@ const FileThumbnailWithGenerate = ({
 	const failedPermanentlyRef = useRef<boolean>(false)
 
 	const [localPath, setLocalPath] = useRecyclingState<string | null>(
-		() => {
-			if (!thumbnails.hasThumbnail(item.data.uuid)) {
-				return null
-			}
-
-			return FileSystem.Paths.join(THUMBNAILS_DIRECTORY.uri, `${item.data.uuid}.webp`)
-		},
+		() => (thumbnails.hasThumbnail(item.data.uuid) ? getPath(item) : null),
 		[item.data.uuid],
 		() => {
-			abortControllerRef.current?.abort()
+			cancelGenerate(abortControllerRef, isGeneratingRef)
 
-			abortControllerRef.current = null
 			errorRetryCountRef.current = 0
-			isGeneratingRef.current = false
 			localPathRef.current = null
 			failedPermanentlyRef.current = false
 		}
@@ -212,10 +211,7 @@ const FileThumbnailWithGenerate = ({
 		const { cleanup } = runEffect(defer => {
 			const appStateSubscription = AppState.addEventListener("change", nextAppState => {
 				if (nextAppState === "background") {
-					abortControllerRef.current?.abort()
-
-					abortControllerRef.current = null
-					isGeneratingRef.current = false
+					cancelGenerate(abortControllerRef, isGeneratingRef)
 				} else if (nextAppState === "active") {
 					if (!localPathRef.current && !failedPermanentlyRef.current) {
 						generateRef.current?.()
@@ -231,10 +227,7 @@ const FileThumbnailWithGenerate = ({
 				state => state.port,
 				port => {
 					if (!port) {
-						abortControllerRef.current?.abort()
-
-						abortControllerRef.current = null
-						isGeneratingRef.current = false
+						cancelGenerate(abortControllerRef, isGeneratingRef)
 					}
 				}
 			)
@@ -251,11 +244,7 @@ const FileThumbnailWithGenerate = ({
 
 	useEffect(() => {
 		return () => {
-			abortControllerRef.current?.abort()
-
-			abortControllerRef.current = null
-			errorRetryCountRef.current = 0
-			isGeneratingRef.current = false
+			cancelGenerate(abortControllerRef, isGeneratingRef)
 		}
 	}, [])
 
@@ -266,10 +255,7 @@ const FileThumbnailWithGenerate = ({
 			}
 
 			return () => {
-				abortControllerRef.current?.abort()
-
-				abortControllerRef.current = null
-				isGeneratingRef.current = false
+				cancelGenerate(abortControllerRef, isGeneratingRef)
 			}
 		}, [])
 	)
@@ -311,13 +297,7 @@ const FileThumbnail = ({
 	contentFit?: React.ComponentProps<typeof Image>["contentFit"]
 	target?: RenderTarget
 }) => {
-	const [localPath] = useRecyclingState<string | null>(() => {
-		if (!thumbnails.hasThumbnail(item.data.uuid)) {
-			return null
-		}
-
-		return FileSystem.Paths.join(THUMBNAILS_DIRECTORY.uri, `${item.data.uuid}.webp`)
-	}, [item.data.uuid])
+	const [localPath] = useRecyclingState<string | null>(() => (thumbnails.hasThumbnail(item.data.uuid) ? getPath(item) : null), [item.data.uuid])
 
 	const [didFail, setDidFail] = useRecyclingState<boolean>(false, [item.data.uuid])
 

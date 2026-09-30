@@ -62,9 +62,7 @@ const PdfPreview = ({
 	onEditedChange,
 	saveHandleRef,
 	paddingTop,
-	paddingBottom,
-	paddingLeft,
-	paddingRight
+	paddingBottom
 }: {
 	readRange: (offset: number, length: number) => Promise<string>
 	fileSize: number
@@ -74,8 +72,6 @@ const PdfPreview = ({
 	saveHandleRef: { current: (() => Promise<File | null>) | null }
 	paddingTop?: number
 	paddingBottom?: number
-	paddingLeft?: number
-	paddingRight?: number
 }) => {
 	const { t } = useTranslation()
 	const openExternalLink = useOpenExternalLink("pdfPreview")
@@ -150,7 +146,7 @@ const PdfPreview = ({
 			return
 		}
 
-		if (result.data.cancelled || result.data.type !== "string" || result.data.value.length === 0) {
+		if (result.data.cancelled || result.data.value.length === 0) {
 			// Not an error: the user declined to answer. The old viewer offered a way back in and this
 			// keeps that, because otherwise the only recovery from a mistyped tap is closing the preview.
 			setPhase("passwordCancelled")
@@ -249,8 +245,6 @@ const PdfPreview = ({
 				saveRequest={saveRequest}
 				paddingTop={paddingTop}
 				paddingBottom={paddingBottom}
-				paddingLeft={paddingLeft}
-				paddingRight={paddingRight}
 				background={bgBackground.backgroundColor as string}
 				dom={{
 					...DOM_HOST_WEBVIEW_PROPS,

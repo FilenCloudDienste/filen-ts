@@ -9,11 +9,10 @@ import logger from "@/lib/logger"
 
 export type SelectOptions = {
 	id: string
-	multiple: boolean
-	userIdsToExclude: number[]
+	userIdsToExclude?: number[]
 }
 
-export async function selectContacts(options: Omit<SelectOptions, "id">): Promise<
+export async function selectContacts(options?: Omit<SelectOptions, "id">): Promise<
 	| {
 			cancelled: true
 	  }
@@ -74,11 +73,8 @@ export function useSelectOptions() {
 				const parsed = deserialize(searchParams.selectOptions) as SelectOptions
 
 				return {
-					multiple: parsed.multiple,
 					id: parsed.id,
-					// Default to [] so a stale/legacy serialized param missing this field can never reach
-					// render as undefined (consumers call .some/.includes on it synchronously).
-					userIdsToExclude: parsed.userIdsToExclude ?? []
+					userIdsToExclude: parsed.userIdsToExclude
 				}
 			} catch (e) {
 				logger.error("contacts-select", "Failed to deserialize selectOptions param", { error: e })

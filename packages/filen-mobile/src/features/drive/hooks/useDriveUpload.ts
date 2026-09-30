@@ -538,7 +538,7 @@ export function useDriveUpload({
 			return
 		}
 
-		if (promptResult.data.cancelled || promptResult.data.type !== "string") {
+		if (promptResult.data.cancelled) {
 			return
 		}
 

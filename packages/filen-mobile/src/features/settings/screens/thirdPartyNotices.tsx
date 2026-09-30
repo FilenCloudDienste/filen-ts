@@ -143,7 +143,6 @@ export const ThirdPartyNotices = () => {
 					data={visible}
 					renderItem={renderItem}
 					keyExtractor={keyExtractor}
-					contentInsetAdjustmentBehavior="automatic"
 					contentContainerClassName="pb-40"
 					emptyComponent={() => (
 						<ListEmpty

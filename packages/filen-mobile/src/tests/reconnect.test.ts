@@ -1,7 +1,6 @@
 import { vi, describe, it, expect, beforeEach } from "vitest"
 
 const {
-	mockIsOnline,
 	capturedSubscribers,
 	mockCameraUploadSync,
 	mockOfflineSync,
@@ -9,17 +8,7 @@ const {
 	mockChatsSyncNow,
 	mockNotesOfflineSync
 } = vi.hoisted(() => {
-	let _online = false
-
 	return {
-		mockIsOnline: {
-			set online(v: boolean) {
-				_online = v
-			},
-			get online() {
-				return _online
-			}
-		},
 		capturedSubscribers: [] as ((isOnline: boolean) => void)[],
 		mockCameraUploadSync: vi.fn().mockResolvedValue(undefined),
 		mockOfflineSync: vi.fn().mockResolvedValue(undefined),
@@ -31,7 +20,6 @@ const {
 
 vi.mock("@tanstack/react-query", () => ({
 	onlineManager: {
-		isOnline: () => mockIsOnline.online,
 		subscribe: (fn: (isOnline: boolean) => void) => {
 			capturedSubscribers.push(fn)
 			return () => {
@@ -60,7 +48,6 @@ function fireOnlineEvent(isOnline: boolean) {
 beforeEach(() => {
 	vi.resetModules()
 	capturedSubscribers.length = 0
-	mockIsOnline.online = false
 	mockCameraUploadSync.mockClear()
 	mockOfflineSync.mockClear()
 	mockNotesExecuteNow.mockClear()
@@ -107,7 +94,6 @@ describe("startReconnectListener", () => {
 	})
 
 	it("does not fire syncs when the device goes offline (online->offline transition)", async () => {
-		mockIsOnline.online = true
 		const { startReconnectListener } = await import("@/lib/reconnect")
 		startReconnectListener()
 		fireOnlineEvent(false)
@@ -115,17 +101,6 @@ describe("startReconnectListener", () => {
 		expect(mockOfflineSync).not.toHaveBeenCalled()
 		expect(mockNotesExecuteNow).not.toHaveBeenCalled()
 		expect(mockChatsSyncNow).not.toHaveBeenCalled()
-	})
-
-	it("deduplicates events — subscriber with same value twice only fires syncs once", async () => {
-		const { startReconnectListener } = await import("@/lib/reconnect")
-		startReconnectListener()
-		fireOnlineEvent(true)
-		fireOnlineEvent(true)
-		expect(mockCameraUploadSync).toHaveBeenCalledTimes(1)
-		expect(mockOfflineSync).toHaveBeenCalledTimes(1)
-		expect(mockNotesExecuteNow).toHaveBeenCalledTimes(1)
-		expect(mockChatsSyncNow).toHaveBeenCalledTimes(1)
 	})
 
 	it("is idempotent — calling startReconnectListener twice registers only one subscriber", async () => {
@@ -176,19 +151,5 @@ describe("startReconnectListener", () => {
 		expect(mockCameraUploadSync).toHaveBeenCalledTimes(1)
 		expect(mockNotesExecuteNow).toHaveBeenCalledTimes(1)
 		expect(mockChatsSyncNow).toHaveBeenCalledTimes(1)
-	})
-
-	it("suppresses sync when the module boots while already online and receives a duplicate online event (booted-online dedup)", async () => {
-		// Simulate: module is imported while device is already online — lastOnline starts true.
-		// A stale focus event immediately fires isOnline=true again. The dedup guard must suppress it.
-		mockIsOnline.online = true
-		const { startReconnectListener } = await import("@/lib/reconnect")
-		startReconnectListener()
-		// Fire the same online=true event (stale NetInfo focus event)
-		fireOnlineEvent(true)
-		expect(mockCameraUploadSync).not.toHaveBeenCalled()
-		expect(mockOfflineSync).not.toHaveBeenCalled()
-		expect(mockNotesExecuteNow).not.toHaveBeenCalled()
-		expect(mockChatsSyncNow).not.toHaveBeenCalled()
 	})
 })

@@ -23,7 +23,6 @@ export type Events = {
 	logout: void
 	showFullScreenLoadingModal: void
 	hideFullScreenLoadingModal: void
-	forceHideFullScreenLoadingModal: void
 	showActionSheet: ShowActionSheetOptions
 	chatConversationDeleted: {
 		uuid: string
@@ -133,24 +132,6 @@ class TypedEventEmitter<T> {
 
 	public emit<K extends keyof T>(event: K, payload?: T[K]): boolean {
 		return this.emitter.emit(event as string, payload)
-	}
-
-	public on<K extends keyof T>(event: K, listener: (payload: T[K]) => void): this {
-		this.emitter.on(event as string, listener)
-
-		return this
-	}
-
-	public once<K extends keyof T>(event: K, listener: (payload: T[K]) => void): this {
-		this.emitter.once(event as string, listener)
-
-		return this
-	}
-
-	public off<K extends keyof T>(event: K, listener: (payload: T[K]) => void): this {
-		this.emitter.off(event as string, listener)
-
-		return this
 	}
 }
 

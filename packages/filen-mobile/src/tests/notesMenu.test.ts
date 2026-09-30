@@ -82,10 +82,6 @@ vi.mock("expo-clipboard", () => ({
 	setStringAsync: vi.fn()
 }))
 
-vi.mock("@/lib/serializer", () => ({
-	serialize: vi.fn(x => JSON.stringify(x))
-}))
-
 vi.mock("@/components/ui/fullScreenLoadingModal", () => ({
 	runWithLoading: vi.fn(async (fn: () => Promise<unknown>) => {
 		try {
@@ -131,7 +127,7 @@ vi.mock("@/hooks/useIsOnline", () => ({
 	default: () => true
 }))
 
-// @/components/ui/view transitively imports native-only modules (react-native-boost, expo-blur,
+// @/components/ui/view transitively imports native-only modules (react-native-boost,
 // expo-glass-effect, react-native-keyboard-controller, react-native-gesture-handler) that contain
 // syntax vitest cannot transform. Mock it to avoid the transformation failure.
 vi.mock("@/components/ui/view", () => ({
@@ -259,22 +255,6 @@ describe("createMenuButtons", () => {
 
 			expect(ids).not.toContain("select")
 			expect(ids).not.toContain("deselect")
-		})
-	})
-
-	describe("origin='search' select/deselect", () => {
-		it("select button is first in the list for origin='search'", () => {
-			const note = makeNote()
-			const buttons = createMenuButtons({ note, writeAccess: true, origin: "search", isOwner: true })
-
-			expect(buttons[0]?.id).toBe("select")
-		})
-
-		it("deselect button is first when note is already selected with origin='search'", () => {
-			const note = makeNote()
-			const buttons = createMenuButtons({ note, isSelected: true, writeAccess: true, origin: "search", isOwner: true })
-
-			expect(buttons[0]?.id).toBe("deselect")
 		})
 	})
 

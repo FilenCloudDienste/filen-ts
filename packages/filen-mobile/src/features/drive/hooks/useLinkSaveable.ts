@@ -36,9 +36,7 @@ export function useLinkSaveable(target: LinkSaveTarget | null): boolean {
 		enabled: target !== null,
 		staleTime: Infinity,
 		refetchOnMount: false,
-		refetchOnReconnect: false,
-		refetchOnWindowFocus: false,
-		retry: false
+		refetchOnReconnect: false
 	})
 
 	return target !== null && owned.data === false

@@ -6,7 +6,7 @@ export type HttpStore = {
 	port: number | null
 	getFileUrl: ((file: AnyFile) => string) | null
 	setGetFileUrl: (fn: ((file: AnyFile) => string) | null) => void
-	setPort: (fn: number | null | ((prev: number | null) => number | null)) => void
+	setPort: (port: number | null) => void
 }
 
 export const useHttpStore = create<HttpStore>()(
@@ -16,10 +16,8 @@ export const useHttpStore = create<HttpStore>()(
 		setGetFileUrl(fn) {
 			set({ getFileUrl: fn })
 		},
-		setPort(fn) {
-			set(state => ({
-				port: typeof fn === "function" ? fn(state.port) : fn
-			}))
+		setPort(port) {
+			set({ port })
 		}
 	}))
 )

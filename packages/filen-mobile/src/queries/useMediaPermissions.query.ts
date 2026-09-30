@@ -1,5 +1,4 @@
-import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
-import { DEFAULT_QUERY_OPTIONS } from "@/queries/client"
+import { useQuery, type UseQueryResult } from "@tanstack/react-query"
 import * as MediaLibraryLegacy from "expo-media-library/legacy"
 import * as ImagePicker from "expo-image-picker"
 
@@ -17,17 +16,13 @@ export async function fetchData(_signal?: AbortSignal) {
 	}
 }
 
-export function useMediaPermissionsQuery(
-	options?: Omit<UseQueryOptions, "queryKey" | "queryFn">
-): UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error> {
-	const query = useQuery({
-		...DEFAULT_QUERY_OPTIONS,
-		...options,
+export function useMediaPermissionsQuery(): UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error> {
+	const query = useQuery<Awaited<ReturnType<typeof fetchData>>, Error>({
 		queryKey: [BASE_QUERY_KEY],
 		queryFn: ({ signal }) => fetchData(signal)
 	})
 
-	return query as UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error>
+	return query
 }
 
 export default useMediaPermissionsQuery

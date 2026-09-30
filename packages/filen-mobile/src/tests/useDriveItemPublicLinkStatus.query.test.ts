@@ -34,7 +34,6 @@ vi.mock("@filen/shared", async () => {
 })
 
 vi.mock("@/queries/client", () => ({
-	DEFAULT_QUERY_OPTIONS: {},
 	queryUpdater: {
 		set: vi.fn(),
 		get: vi.fn()

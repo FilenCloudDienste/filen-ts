@@ -1,4 +1,4 @@
-import { QueryClient, QueryCache, onlineManager, notifyManager, type UseQueryOptions } from "@tanstack/react-query"
+import { QueryClient, QueryCache, onlineManager, notifyManager } from "@tanstack/react-query"
 import { experimental_createQueryPersister, type PersistedQuery } from "@tanstack/query-persist-client-core"
 import sqlite from "@/lib/sqlite"
 import { forEachKvRowByPrefix, prefixUpperBound } from "@/lib/kvScan"
@@ -89,7 +89,6 @@ function persistedQueryFields(value: unknown): { data: unknown; dataUpdatedAt: n
 
 const UNCACHED_QUERY_KEYS = new Map<string, true>([
 	["useFileTextQuery", true],
-	["useFileBase64Query", true],
 	["useFileUriQuery", true],
 	["useFileUrlQuery", true],
 	["useRawPreviewQuery", true],
@@ -311,7 +310,7 @@ export class QueryPersisterKv {
 		this.persistedAt.clear()
 		this.restoredOnce = false
 
-		sqlite.kvAsync.removeByPrefix(`${QUERY_CLIENT_PERSISTER_PREFIX}:`).catch(err => {
+		sqlite.kvAsync.removeByPrefixRange(`${QUERY_CLIENT_PERSISTER_PREFIX}:`).catch(err => {
 			logger.error("queries-persist", "Failed to clear persisted query cache from SQLite", { error: err })
 		})
 	}
@@ -796,37 +795,6 @@ export async function restoreQueries(): Promise<void> {
 	}
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export const DEFAULT_QUERY_OPTIONS: Omit<UseQueryOptions<any, any, any, any>, "queryKey" | "queryFn"> = {
-	refetchOnMount: "always",
-	refetchOnReconnect: "always",
-	staleTime: 0,
-	gcTime: QUERY_CLIENT_CACHE_TIME,
-	refetchInterval: false,
-	experimental_prefetchInRender: true,
-	refetchIntervalInBackground: false,
-	// NO JS-level retries — the Rust SDK owns retrying (CLAUDE.md: "Never add retry logic in JS").
-	// Every SDK request already runs behind filen-rs' tower retry stack (auth/http/retry.rs): up to
-	// 10 retries per request, rate-limited by a shared TpsBudget, and CLASSIFIED — only transient
-	// failures (5xx/408/429/timeouts/safe transport errors) retry; permanent errors fail fast.
-	// The previous `retry: 5` + exponential backoff multiplied wire attempts (×6 on top of the
-	// SDK's own cycles, re-running EVERY SDK call in the queryFn) and delayed deterministic
-	// failures by ~31s of backoff before the error surfaced. Recovery is owned by
-	// refetchOnMount/Reconnect ("always" above), socket invalidations, and reconnect.ts — not by
-	// queryFn re-runs. Non-SDK queryFns (local FS, permissions) fail deterministically anyway.
-	// One exception, outside queries: the notes sync re-drives a failed push on a backoff timer.
-	retry: false,
-	retryOnMount: true,
-	networkMode: "offlineFirst",
-	// PURE render-phase predicate: only decides whether to throw to an error boundary.
-	// TanStack v5 invokes throwOnError on EVERY render (twice with experimental_prefetchInRender),
-	// so it must have zero side effects. None of our queries throw to an error boundary, hence
-	// a constant `false`. All error UX (logout, banners, logging) now lives in the once-per-settled-error
-	// QueryCache `onError` sink below.
-	throwOnError: () => false
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-} as Omit<UseQueryOptions<any, any, any, any>, "queryKey" | "queryFn">
-
 // Discriminated decision derived purely from the error + connectivity. No side effects, no I/O,
 // no global reads — fully unit-testable. The QueryCache `onError` sink interprets the result.
 export type QueryErrorAction = "suppress" | "logout" | "alert"
@@ -948,7 +916,22 @@ export const queryClient = new QueryClient({
 	queryCache,
 	defaultOptions: {
 		queries: {
-			...DEFAULT_QUERY_OPTIONS,
+			refetchOnMount: "always",
+			refetchOnReconnect: "always",
+			gcTime: QUERY_CLIENT_CACHE_TIME,
+			// NO JS-level retries — the Rust SDK owns retrying (CLAUDE.md: "Never add retry logic in JS").
+			// Every SDK request already runs behind filen-rs' tower retry stack (auth/http/retry.rs): up to
+			// 10 retries per request, rate-limited by a shared TpsBudget, and CLASSIFIED — only transient
+			// failures (5xx/408/429/timeouts/safe transport errors) retry; permanent errors fail fast.
+			// The previous `retry: 5` + exponential backoff multiplied wire attempts (×6 on top of the
+			// SDK's own cycles, re-running EVERY SDK call in the queryFn) and delayed deterministic
+			// failures by ~31s of backoff before the error surfaced. Recovery is owned by
+			// refetchOnMount/Reconnect ("always" above), socket invalidations, and reconnect.ts — not by
+			// queryFn re-runs. Non-SDK queryFns (local FS, permissions) fail deterministically anyway.
+			// One exception, outside queries: the notes sync re-drives a failed push on a backoff timer.
+			retry: false,
+			networkMode: "offlineFirst",
+			// throwOnError stays unset: all error UX lives in the QueryCache `onError` sink above.
 			persister: queryClientPersister.persisterFn,
 			queryKeyHashFn: queryKey => serialize(queryKey)
 		}

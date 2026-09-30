@@ -6,8 +6,6 @@ const { mockResolveFile } = vi.hoisted(() => ({
 
 vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 
-vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
-
 vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
 
 vi.mock("@filen/shared", async () => ({
@@ -40,14 +38,6 @@ vi.mock("@filen/sdk-rs", () => ({
 
 vi.mock("@/queries/fileSource", () => ({
 	resolveFile: mockResolveFile
-}))
-
-vi.mock("@/queries/client", () => ({
-	DEFAULT_QUERY_OPTIONS: {},
-	queryUpdater: {
-		get: vi.fn(),
-		set: vi.fn()
-	}
 }))
 
 import { fetchData } from "@/queries/useFileUri.query"

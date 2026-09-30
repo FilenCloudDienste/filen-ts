@@ -1,4 +1,4 @@
-import { Fragment } from "react"
+import type { ComponentProps } from "react"
 import { useTranslation } from "react-i18next"
 import View, { GestureHandlerScrollView, CrossGlassContainerView } from "@/components/ui/view"
 import { useResolveClassNames } from "uniwind"
@@ -22,6 +22,54 @@ import useOpenExternalLink from "@/hooks/useOpenExternalLink"
 // ScrollView absorbs the rest on narrow devices.
 const ICON_SIZE = 16
 const BUTTON_CLASS = "flex-row items-center justify-center shrink-0 size-8"
+
+type IconName = ComponentProps<typeof FontAwesome6>["name"]
+
+type ToggleEventType = Extract<
+	TextEditorEvents["type"],
+	"quillToggleBold" | "quillToggleItalic" | "quillToggleUnderline" | "quillToggleCodeBlock" | "quillToggleBlockquote"
+>
+
+const TOGGLE_EVENT: Partial<Record<keyof QuillFormats, ToggleEventType>> = {
+	bold: "quillToggleBold",
+	italic: "quillToggleItalic",
+	underline: "quillToggleUnderline",
+	"code-block": "quillToggleCodeBlock",
+	blockquote: "quillToggleBlockquote"
+}
+
+const ICON: Partial<Record<keyof QuillFormats, IconName>> = {
+	header: "heading",
+	bold: "bold",
+	italic: "italic",
+	underline: "underline",
+	link: "link",
+	"code-block": "code",
+	blockquote: "quote-right"
+}
+
+function listIcon(active: unknown): IconName {
+	switch (active) {
+		case "ordered": {
+			return "list-ol"
+		}
+
+		case "bullet": {
+			return "list-ul"
+		}
+
+		case "checked":
+		case "unchecked": {
+			return "list-check"
+		}
+
+		default: {
+			return "list"
+		}
+	}
+}
+
+const BUTTON_TYPES: (keyof QuillFormats)[] = ["header", "bold", "italic", "underline", "code-block", "link", "blockquote", "list"]
 
 const Button = ({ type, dispatch }: { type: keyof QuillFormats; dispatch: (event: TextEditorEvents) => void }) => {
 	const openExternalLink = useOpenExternalLink("textEditor")
@@ -67,10 +115,6 @@ const Button = ({ type, dispatch }: { type: keyof QuillFormats; dispatch: (event
 						title: t("open"),
 						icon: "openExternal" as const,
 						onPress: () => {
-							if (type !== "link" || !active) {
-								return
-							}
-
 							// The href comes from note content, which can be authored by another user, and
 							// arrives over the WebView bridge. It goes through the same funnel as every
 							// other untrusted link rather than straight to the OS — this was the one link
@@ -85,10 +129,6 @@ const Button = ({ type, dispatch }: { type: keyof QuillFormats; dispatch: (event
 						title: t("edit"),
 						icon: "edit" as const,
 						onPress: () => {
-							if (type !== "link" || !active) {
-								return
-							}
-
 							prompts
 								.input({
 									title: t("edit_link"),
@@ -99,7 +139,7 @@ const Button = ({ type, dispatch }: { type: keyof QuillFormats; dispatch: (event
 									cancelText: t("cancel")
 								})
 								.then(response => {
-									if (response.cancelled || response.type !== "string" || !response.value.trim()) {
+									if (response.cancelled || !response.value.trim()) {
 										return
 									}
 
@@ -115,10 +155,6 @@ const Button = ({ type, dispatch }: { type: keyof QuillFormats; dispatch: (event
 						title: t("remove"),
 						icon: "minus" as const,
 						onPress: () => {
-							if (type !== "link" || !active) {
-								return
-							}
-
 							dispatch({
 								type: "quillRemoveLink"
 							})
@@ -186,74 +222,40 @@ const Button = ({ type, dispatch }: { type: keyof QuillFormats; dispatch: (event
 	})()
 
 	const onPress = () => {
-		switch (type) {
-			case "bold": {
-				dispatch({
-					type: "quillToggleBold"
-				})
+		if (type !== "link") {
+			const event = TOGGLE_EVENT[type]
 
-				break
+			if (event) {
+				dispatch({
+					type: event
+				})
 			}
 
-			case "italic": {
-				dispatch({
-					type: "quillToggleItalic"
-				})
+			return
+		}
 
-				break
-			}
+		if (active) {
+			return
+		}
 
-			case "underline": {
-				dispatch({
-					type: "quillToggleUnderline"
-				})
-
-				break
-			}
-
-			case "link": {
-				if (active) {
-					break
+		prompts
+			.input({
+				title: t("insert_link"),
+				message: t("enter_url"),
+				placeholder: t("url_placeholder"),
+				okText: t("insert"),
+				cancelText: t("cancel")
+			})
+			.then(response => {
+				if (response.cancelled || !response.value.trim()) {
+					return
 				}
 
-				prompts
-					.input({
-						title: t("insert_link"),
-						message: t("enter_url"),
-						placeholder: t("url_placeholder"),
-						okText: t("insert"),
-						cancelText: t("cancel")
-					})
-					.then(response => {
-						if (response.cancelled || response.type !== "string" || !response.value.trim()) {
-							return
-						}
-
-						dispatch({
-							type: "quillAddLink",
-							data: response.value.trim()
-						})
-					})
-
-				break
-			}
-
-			case "code-block": {
 				dispatch({
-					type: "quillToggleCodeBlock"
+					type: "quillAddLink",
+					data: response.value.trim()
 				})
-
-				break
-			}
-
-			case "blockquote": {
-				dispatch({
-					type: "quillToggleBlockquote"
-				})
-
-				break
-			}
-		}
+			})
 	}
 
 	return (
@@ -269,53 +271,15 @@ const Button = ({ type, dispatch }: { type: keyof QuillFormats; dispatch: (event
 				onPress={onPress}
 				hitSlop={5}
 			>
-				{type === "header" ? (
-					<Fragment>
-						<FontAwesome6
-							name="heading"
-							size={ICON_SIZE}
-							color={active ? (textPrimary.color as string) : (textForeground.color as string)}
-						/>
-						{active && (
-							<View className="flex-row items-center justify-center absolute rounded-full size-4 -mt-4 -mr-4 overflow-hidden bg-background-secondary border border-border">
-								<Text className="text-foreground text-xs">{active}</Text>
-							</View>
-						)}
-					</Fragment>
-				) : type === "list" ? (
-					<FontAwesome6
-						name={
-							active === "ordered"
-								? "list-ol"
-								: active === "bullet"
-									? "list-ul"
-									: active === "checked" || active === "unchecked"
-										? "list-check"
-										: "list"
-						}
-						size={ICON_SIZE}
-						color={active ? (textPrimary.color as string) : (textForeground.color as string)}
-					/>
-				) : (
-					<FontAwesome6
-						name={
-							type === "bold"
-								? "bold"
-								: type === "italic"
-									? "italic"
-									: type === "underline"
-										? "underline"
-										: type === "link"
-											? "link"
-											: type === "code-block"
-												? "code"
-												: type === "blockquote"
-													? "quote-right"
-													: "question"
-						}
-						size={ICON_SIZE}
-						color={active ? (textPrimary.color as string) : (textForeground.color as string)}
-					/>
+				<FontAwesome6
+					name={type === "list" ? listIcon(active) : (ICON[type] ?? "question")}
+					size={ICON_SIZE}
+					color={active ? (textPrimary.color as string) : (textForeground.color as string)}
+				/>
+				{type === "header" && active && (
+					<View className="flex-row items-center justify-center absolute rounded-full size-4 -mt-4 -mr-4 overflow-hidden bg-background-secondary border border-border">
+						<Text className="text-foreground text-xs">{active}</Text>
+					</View>
 				)}
 			</PressableOpacity>
 		</Menu>
@@ -337,38 +301,13 @@ export const RichTextHeaderToolbar = ({ dispatch }: { dispatch: (event: TextEdit
 					className="flex-1"
 					contentContainerClassName="flex-row items-center px-2"
 				>
-					<Button
-						type="header"
-						dispatch={dispatch}
-					/>
-					<Button
-						type="bold"
-						dispatch={dispatch}
-					/>
-					<Button
-						type="italic"
-						dispatch={dispatch}
-					/>
-					<Button
-						type="underline"
-						dispatch={dispatch}
-					/>
-					<Button
-						type="code-block"
-						dispatch={dispatch}
-					/>
-					<Button
-						type="link"
-						dispatch={dispatch}
-					/>
-					<Button
-						type="blockquote"
-						dispatch={dispatch}
-					/>
-					<Button
-						type="list"
-						dispatch={dispatch}
-					/>
+					{BUTTON_TYPES.map(type => (
+						<Button
+							key={type}
+							type={type}
+							dispatch={dispatch}
+						/>
+					))}
 				</GestureHandlerScrollView>
 			</CrossGlassContainerView>
 		</View>

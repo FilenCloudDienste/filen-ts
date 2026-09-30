@@ -23,14 +23,12 @@ ${locales.map(l => `	<locale android:name="${l}"/>`).join("\n")}
  * 2. Generates `res/xml/locales_config.xml` during prebuild from the
  *    `locales` option passed in app.config.ts (the SUPPORTED_LANGUAGES array),
  *    so the locale list stays driven by the single source of truth rather than
- *    a separate on-disk folder. Defaults to ["en"] if none are provided.
+ *    a separate on-disk folder.
  *
  * With this plugin, Android 13+ devices can show the app in the system
  * per-app language settings.
  */
 const withAndroidLocaleConfig: ConfigPlugin<AndroidLocaleConfigOptions> = (config, options) => {
-	const locales = options.locales && options.locales.length > 0 ? options.locales : ["en"]
-
 	// 1) Add android:localeConfig attribute to <application>
 	config = withAndroidManifest(config, cfg => {
 		const application = cfg.modResults.manifest.application?.[0]
@@ -46,7 +44,7 @@ const withAndroidLocaleConfig: ConfigPlugin<AndroidLocaleConfigOptions> = (confi
 	config = withDangerousMod(config, [
 		"android",
 		async cfg => {
-			const xml = generateLocaleConfigXml(locales)
+			const xml = generateLocaleConfigXml(options.locales)
 			const resXmlDir = path.join(cfg.modRequest.platformProjectRoot, "app", "src", "main", "res", "xml")
 
 			await fs.promises.mkdir(resXmlDir, {

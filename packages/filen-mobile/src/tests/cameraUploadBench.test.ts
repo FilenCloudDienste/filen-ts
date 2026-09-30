@@ -85,7 +85,6 @@ vi.mock("expo-media-library/legacy", async () => {
 	}
 })
 
-vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
 vi.mock("react-native-blob-util", async () => await import("@/tests/mocks/reactNativeBlobUtil"))
 vi.mock("@preeternal/react-native-file-hash", async () => await import("@/tests/mocks/reactNativeFileHash"))
 
@@ -319,9 +318,6 @@ vi.mock("@/features/cameraUpload/cameraUploadState", () => {
 			setHash: async (key: string, entry: unknown) => {
 				hashes.set(key, entry)
 			},
-			deleteHash: async (key: string) => {
-				hashes.delete(key)
-			},
 			getAbort: (id: string) => aborts.get(id),
 			setAbort: async (id: string, count: number) => {
 				aborts.set(id, count)
@@ -405,19 +401,6 @@ vi.mock("@/lib/paths", () => ({
 		const queryIndex = withoutFragment.indexOf("?")
 
 		return queryIndex === -1 ? withoutFragment : withoutFragment.slice(0, queryIndex)
-	}
-}))
-
-vi.mock("@/lib/signals", () => ({
-	PauseSignal: class {
-		pause() {}
-		resume() {}
-		dispose() {}
-		// A background pass consults this before doing any work; without it the call threw and the
-		// whole pass was swallowed by sync()'s catch, which no foreground-only scenario could reveal.
-		isPaused() {
-			return false
-		}
 	}
 }))
 

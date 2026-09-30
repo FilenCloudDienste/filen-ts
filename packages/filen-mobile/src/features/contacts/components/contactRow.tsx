@@ -21,10 +21,6 @@ import EllipsisMenuTrigger from "@/components/ui/ellipsisMenuTrigger"
 import useIsOnline from "@/hooks/useIsOnline"
 import logger from "@/lib/logger"
 
-export const ContactSectionHeader = ({ title }: { title: string }) => {
-	return <ListRowSectionHeader title={title} />
-}
-
 export const Contact = ({
 	info,
 	nextItem
@@ -36,10 +32,9 @@ export const Contact = ({
 	const selectOptions = useSelectOptions()
 	const isOnline = useIsOnline()
 	const inFlightRef = useRef(false)
-	const { isSelected, selectedCount, bulkMode } = useContactsStore(
+	const { isSelected, bulkMode } = useContactsStore(
 		useShallow(state => ({
 			isSelected: state.selectedContacts.some(c => c.type === info.item.type && c.data.uuid === info.item.data.uuid),
-			selectedCount: state.selectedContacts.length,
 			bulkMode: state.bulkMode
 		}))
 	)
@@ -502,11 +497,7 @@ export const Contact = ({
 			return false
 		}
 
-		if ((selectOptions.userIdsToExclude ?? []).some(c => c === Number(item.data.userId))) {
-			return true
-		}
-
-		return selectOptions.multiple ? false : selectedCount >= 1 && !isSelected
+		return selectOptions.userIdsToExclude?.some(c => c === Number(item.data.userId)) ?? false
 	})()
 
 	const onPress = () => {
@@ -534,7 +525,7 @@ export const Contact = ({
 	}
 
 	if (info.item.type === "header") {
-		return <ContactSectionHeader title={info.item.data.title} />
+		return <ListRowSectionHeader title={info.item.data.title} />
 	}
 
 	const showTrailing = info.item.type === "incomingRequest" || info.item.type === "outgoingRequest" || menuButtons.length > 0

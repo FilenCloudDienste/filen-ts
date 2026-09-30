@@ -95,7 +95,6 @@ vi.mock("expo-image-picker", () => ({
 	launchCameraAsync: vi.fn(),
 	UIImagePickerPresentationStyle: { PAGE_SHEET: "pageSheet" }
 }))
-vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
 vi.mock("@expo/vector-icons/Ionicons", () => ({ default: () => null }))
 
 // ── Internal lib mocks ────────────────────────────────────────────────────────
@@ -231,7 +230,6 @@ vi.mock("@/components/itemIcons", () => ({
 // NOTE: do NOT mock @/features/chats/components/chat/message/regexed — we test its exports directly.
 vi.mock("@/features/chats/components/chat/message/menu", () => ({ default: () => null }))
 vi.mock("@/features/drive/driveSelectSession", () => ({ selectDriveItems: vi.fn() }))
-vi.mock("@/lib/serializer", () => ({ serialize: vi.fn(x => JSON.stringify(x)) }))
 // chat/input subcomponents + the system-presentation wrapper — not under test, the input
 // module is imported only for its flushInflightMessagesWithAlert helper (M3).
 vi.mock("@/features/chats/components/chat/input/mentionSuggestions", () => ({ default: () => null }))
@@ -243,7 +241,7 @@ vi.mock("@/lib/systemPresentation", () => ({
 
 // ─── Actual imports ───────────────────────────────────────────────────────────
 
-import { customEmojisSet } from "@/features/chats/components/chat/message/regexed"
+import { customEmojiSrcById } from "@/features/chats/components/chat/message/regexed"
 
 import { createMenuButtons } from "@/features/chats/components/list/chat/menu"
 import { flushInflightMessagesWithAlert } from "@/features/chats/components/chat/input"
@@ -267,20 +265,20 @@ function makeChat(overrides: Partial<Chat> = {}): Chat {
 	} as Chat
 }
 
-// ─── customEmojisSet ─────────────────────────────────────────────────────────
+// ─── customEmojiSrcById ──────────────────────────────────────────────────────
 
-describe("customEmojisSet", () => {
-	it("contains known emoji ids (gigachad, catjam)", () => {
-		expect(customEmojisSet.has("gigachad")).toBe(true)
-		expect(customEmojisSet.has("catjam")).toBe(true)
+describe("customEmojiSrcById", () => {
+	it("maps known emoji ids (gigachad, catjam) to a non-empty src", () => {
+		expect(customEmojiSrcById.get("gigachad")).toBeTruthy()
+		expect(customEmojiSrcById.get("catjam")).toBeTruthy()
 	})
 
 	it("does NOT contain a fabricated id", () => {
-		expect(customEmojisSet.has("nonexistent_emoji_abc123")).toBe(false)
+		expect(customEmojiSrcById.get("nonexistent_emoji_abc123")).toBeUndefined()
 	})
 
-	it("is a Set instance", () => {
-		expect(customEmojisSet).toBeInstanceOf(Set)
+	it("does NOT resolve Object.prototype keys", () => {
+		expect(customEmojiSrcById.get("constructor")).toBeUndefined()
 	})
 })
 

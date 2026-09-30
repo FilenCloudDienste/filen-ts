@@ -1,18 +1,20 @@
 import { vi, describe, it, expect, beforeEach } from "vitest"
 vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 
-const { mockAlert, mockRunWithLoading, mockAlertsError, mockCanGoBack, mockBack } = vi.hoisted(() => ({
+const { mockAlert, mockRunWithLoading, mockAlertsError, mockCanGoBack, mockBack, mockGetState } = vi.hoisted(() => ({
 	mockAlert: vi.fn(),
 	mockRunWithLoading: vi.fn(),
 	mockAlertsError: vi.fn(),
 	mockCanGoBack: vi.fn(() => true),
-	mockBack: vi.fn()
+	mockBack: vi.fn(),
+	mockGetState: vi.fn(() => ({ pathname: "/" }))
 }))
 
 vi.mock("@/lib/prompts", () => ({ default: { alert: mockAlert } }))
 vi.mock("@/lib/alerts", () => ({ default: { error: mockAlertsError } }))
 vi.mock("@/lib/i18n", () => ({ t: (key: string) => key }))
 vi.mock("expo-router", () => ({ router: { canGoBack: mockCanGoBack, back: mockBack } }))
+vi.mock("@/stores/useApp.store", () => ({ default: { getState: mockGetState } }))
 vi.mock("@/components/ui/fullScreenLoadingModal", () => ({ runWithLoading: mockRunWithLoading }))
 vi.mock("@filen/shared", () => ({
 	run: async (fn: () => Promise<unknown>) => {
@@ -26,6 +28,10 @@ vi.mock("@filen/shared", () => ({
 
 import { confirmedAction } from "@/lib/confirmedAction"
 
+let navClock = 0
+
+vi.spyOn(performance, "now").mockImplementation(() => navClock)
+
 const PROMPT = { promptTitle: "title", promptMessage: "message", promptOkText: "ok" }
 
 describe("confirmedAction", () => {
@@ -34,6 +40,9 @@ describe("confirmedAction", () => {
 		mockAlertsError.mockReset()
 		mockCanGoBack.mockReset().mockReturnValue(true)
 		mockBack.mockReset()
+		mockGetState.mockReset().mockReturnValue({ pathname: "/" })
+		// Each test's router.back() must land outside the router's double-tap dedupe window.
+		navClock += 10_000
 		mockRunWithLoading.mockReset().mockImplementation(async (fn: () => Promise<void>) => {
 			try {
 				await fn()
@@ -160,5 +169,50 @@ describe("confirmedAction", () => {
 		expect(mockAlert).toHaveBeenCalledTimes(1)
 		const callArg = mockAlert.mock.calls[0]?.[0] as Record<string, unknown>
 		expect(callArg?.["destructive"]).toBe(true)
+	})
+
+	it("pops back when the current pathname starts with dismissPathnamePrefix", async () => {
+		mockAlert.mockResolvedValue({ cancelled: false })
+		mockGetState.mockReturnValue({ pathname: "/chat/abc-123/participants" })
+		const action = vi.fn().mockResolvedValue(undefined)
+
+		await confirmedAction({ ...PROMPT, action, dismissPathnamePrefix: "/chat/abc-123" })()
+
+		expect(mockBack).toHaveBeenCalledTimes(1)
+	})
+
+	it("does not pop back when the current pathname does not start with dismissPathnamePrefix", async () => {
+		mockAlert.mockResolvedValue({ cancelled: false })
+		mockGetState.mockReturnValue({ pathname: "/not-chat/abc-123" })
+		const action = vi.fn().mockResolvedValue(undefined)
+
+		await confirmedAction({ ...PROMPT, action, dismissPathnamePrefix: "/chat/abc-123" })()
+
+		expect(action).toHaveBeenCalledTimes(1)
+		expect(mockBack).not.toHaveBeenCalled()
+	})
+
+	it("reads the pathname only after the action succeeded", async () => {
+		mockAlert.mockResolvedValue({ cancelled: false })
+		const action = vi.fn(() => {
+			mockGetState.mockReturnValue({ pathname: "/note/n1" })
+
+			return Promise.resolve()
+		})
+
+		await confirmedAction({ ...PROMPT, action, dismissPathnamePrefix: "/note/n1" })()
+
+		expect(mockBack).toHaveBeenCalledTimes(1)
+	})
+
+	it("does not pop back on a matching pathname when the router cannot go back", async () => {
+		mockAlert.mockResolvedValue({ cancelled: false })
+		mockCanGoBack.mockReturnValue(false)
+		mockGetState.mockReturnValue({ pathname: "/note/n1" })
+		const action = vi.fn().mockResolvedValue(undefined)
+
+		await confirmedAction({ ...PROMPT, action, dismissPathnamePrefix: "/note/n1" })()
+
+		expect(mockBack).not.toHaveBeenCalled()
 	})
 })

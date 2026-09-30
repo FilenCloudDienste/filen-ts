@@ -1,7 +1,1 @@
-import Drive from "@/features/drive/components"
-
-const Recents = () => {
-	return <Drive />
-}
-
-export default Recents
+export { default } from "@/features/drive/components"

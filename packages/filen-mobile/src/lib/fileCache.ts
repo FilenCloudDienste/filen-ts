@@ -13,7 +13,7 @@ import { sumLocalDirectoryFileBytes } from "@/lib/fsUtils"
 import { ClearBarrier } from "@/lib/clearBarrier"
 import offline from "@/features/offline/offline"
 import { xxHash32 } from "js-xxhash"
-import { FILE_CACHE_VERSION, FILE_CACHE_PARENT_DIRECTORY } from "@/lib/storageRoots"
+import { FILE_CACHE_PARENT_DIRECTORY } from "@/lib/storageRoots"
 import { CACHE_MAX_SIZE_BYTES } from "@/lib/cacheEviction"
 import logger from "@/lib/logger"
 
@@ -33,8 +33,7 @@ export type Metadata = (
 	cachedAt: number
 }
 
-// Critical: When changing anything related to storage index/store/persistence format, bump FILE_CACHE_VERSION in storageRoots.ts to invalidate old caches and prevent potential issues from stale or incompatible data.
-export const VERSION = FILE_CACHE_VERSION
+// Changing the storage index/persistence format requires bumping FILE_CACHE_VERSION in storageRoots.ts.
 
 const DEFAULT_GC_AGE_MS = 24 * 60 * 60 * 1000
 const GC_DEBOUNCE_MS = 30 * 1000

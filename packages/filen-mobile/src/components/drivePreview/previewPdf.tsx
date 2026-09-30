@@ -341,8 +341,6 @@ const PreviewPdf = ({ item }: { item: GalleryItemTagged }) => {
 					readOnly={readOnly}
 					onEditedChange={setHasEdits}
 					saveHandleRef={saveHandleRef}
-					// No paddingLeft/paddingRight: DomKeyboardHost now stops the VIEW short of the
-					// horizontal safe area for every DOM host, so padding the page too would inset twice.
 					paddingTop={headerHeight ? headerHeight : undefined}
 					paddingBottom={insets.bottom}
 				/>

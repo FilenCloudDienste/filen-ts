@@ -119,20 +119,20 @@ export function buildSaveLinkedDirectoryButton({
 			const source = linkedDirectoryCopySource(drivePath)
 
 			if (source) {
-				await saveLinkedToDrive({ items: [source.item], name: source.name, t })
+				await saveLinkedToDrive({ items: [source.item], name: source.name })
 			}
 		}
 	}
 }
 
 // Picks a directory in the own drive and copies the link's items into it as one job.
-export async function saveLinkedToDrive({ items, name, t }: { items: AnyItemWithContext[]; name: string; t: TFunction }): Promise<void> {
+export async function saveLinkedToDrive({ items, name }: { items: AnyItemWithContext[]; name: string }): Promise<void> {
 	if (items.length === 0) {
 		return
 	}
 
 	const picked = await run(async () => {
-		return await selectCopyDestination([], t("drive"))
+		return await selectCopyDestination([])
 	})
 
 	if (!picked.success) {
@@ -168,14 +168,12 @@ export function buildSaveToCloudDriveButton({
 	id,
 	title,
 	items,
-	onDone,
-	t
+	onDone
 }: {
 	id: string
 	title: string
 	items: DriveItem[]
 	onDone?: () => void
-	t: TFunction
 }): MenuButton | null {
 	const first = items[0]
 
@@ -198,7 +196,7 @@ export function buildSaveToCloudDriveButton({
 				return
 			}
 
-			await saveLinkedToDrive({ items: copyItems, name: driveItemDisplayName(first), t })
+			await saveLinkedToDrive({ items: copyItems, name: driveItemDisplayName(first) })
 		}
 	}
 }

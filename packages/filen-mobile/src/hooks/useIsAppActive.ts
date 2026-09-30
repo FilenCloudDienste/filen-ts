@@ -1,25 +1,15 @@
-import { useEffect, useState } from "react"
-import { AppState, type AppStateStatus } from "react-native"
-import { runEffect } from "@filen/shared"
+import { useSyncExternalStore } from "react"
+import { AppState } from "react-native"
 
+function subscribe(listener: () => void): () => void {
+	const subscription = AppState.addEventListener("change", listener)
+
+	return () => {
+		subscription.remove()
+	}
+}
+
+// Boolean snapshot: inactive <-> background transitions don't re-render consumers.
 export default function useIsAppActive(): boolean {
-	const [appState, setAppState] = useState<AppStateStatus>(() => AppState.currentState)
-
-	useEffect(() => {
-		const { cleanup } = runEffect(defer => {
-			const subscription = AppState.addEventListener("change", next => {
-				setAppState(next)
-			})
-
-			defer(() => {
-				subscription.remove()
-			})
-		})
-
-		return () => {
-			cleanup()
-		}
-	}, [])
-
-	return appState === "active"
+	return useSyncExternalStore(subscribe, () => AppState.currentState === "active", () => true)
 }

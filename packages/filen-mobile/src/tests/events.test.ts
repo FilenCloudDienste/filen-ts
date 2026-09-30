@@ -4,7 +4,7 @@ import { describe, it, expect, beforeEach } from "vitest"
 // We test the class directly by importing the singleton and exercising its public API.
 // No mocks required; eventemitter3 is pure JS.
 
-import events, { type Events } from "@/lib/events"
+import events from "@/lib/events"
 
 // Helper: cast to avoid TypeScript complaining about accessing private class members
 // when we want a fresh instance per-suite.  We import the singleton and call the
@@ -50,51 +50,6 @@ describe("TypedEventEmitter", () => {
 			expect(calls).toHaveLength(1)
 
 			sub.remove()
-			events.emit("secureStoreChange", { key: "k", value: "v" })
-
-			expect(calls).toHaveLength(1)
-		})
-	})
-
-	describe("on() / off()", () => {
-		it("on() registers a listener that fires on emit", () => {
-			const calls: string[] = []
-			const handler = (payload: Events["secureStoreRemove"]) => {
-				calls.push(payload.key)
-			}
-
-			events.on("secureStoreRemove", handler)
-			events.emit("secureStoreRemove", { key: "removed" })
-
-			expect(calls).toEqual(["removed"])
-		})
-
-		it("off() with the same reference removes the listener — subsequent emits do not fire", () => {
-			const calls: number[] = []
-			const handler = () => {
-				calls.push(1)
-			}
-
-			events.on("secureStoreRemove", handler)
-			events.emit("secureStoreRemove", { key: "k" })
-			expect(calls).toHaveLength(1)
-
-			events.off("secureStoreRemove", handler)
-			events.emit("secureStoreRemove", { key: "k" })
-
-			expect(calls).toHaveLength(1)
-		})
-	})
-
-	describe("once()", () => {
-		it("fires exactly once even when the event is emitted multiple times", () => {
-			const calls: number[] = []
-			events.once("secureStoreChange", () => {
-				calls.push(1)
-			})
-
-			events.emit("secureStoreChange", { key: "k", value: "v" })
-			events.emit("secureStoreChange", { key: "k", value: "v" })
 			events.emit("secureStoreChange", { key: "k", value: "v" })
 
 			expect(calls).toHaveLength(1)

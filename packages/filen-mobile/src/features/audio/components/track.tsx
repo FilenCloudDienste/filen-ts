@@ -148,7 +148,6 @@ export function buildTrackButtons({ t, track, playlist }: { t: TFunction; track:
 			onPress: async () => {
 				const selectResult = await run(async () => {
 					return await selectPlaylists({
-						multiple: true,
 						playlistUuidsToExclude: [playlist.uuid]
 					})
 				})

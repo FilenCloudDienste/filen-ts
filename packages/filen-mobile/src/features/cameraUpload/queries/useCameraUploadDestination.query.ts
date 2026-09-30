@@ -1,5 +1,4 @@
 import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
-import { DEFAULT_QUERY_OPTIONS } from "@/queries/client"
 import { type AnyNormalDir, AnyNormalDir_Tags } from "@filen/sdk-rs"
 import auth from "@/lib/auth"
 import { unwrapDirMeta, isTrashParent } from "@/lib/sdkUnwrap"
@@ -37,7 +36,6 @@ export function useCameraUploadDestinationQuery(
 	options?: Omit<UseQueryOptions<Awaited<ReturnType<typeof fetchData>>, Error>, "queryKey" | "queryFn">
 ): UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error> {
 	const query = useQuery<Awaited<ReturnType<typeof fetchData>>, Error>({
-		...DEFAULT_QUERY_OPTIONS,
 		...options,
 		queryKey: [BASE_QUERY_KEY, params],
 		queryFn: ({ signal }) =>

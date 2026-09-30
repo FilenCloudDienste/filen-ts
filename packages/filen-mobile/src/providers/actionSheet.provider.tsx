@@ -4,8 +4,9 @@ import { runEffect } from "@filen/shared"
 import { ActionSheetProvider as ExpoActionSheetProvider, useActionSheet } from "@expo/react-native-action-sheet"
 import { useResolveClassNames, useUniwind } from "uniwind"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
-import { BackHandler, useWindowDimensions, type ViewStyle, Platform } from "react-native"
+import { BackHandler, useWindowDimensions, Platform } from "react-native"
 import { actionSheetNeedsTopInset } from "@/providers/actionSheetLayout"
+import { t } from "@/lib/i18n"
 
 export type ShowActionSheetOptions = {
 	// Optional sheet header. Rendered with the already-wired titleTextStyle. Used e.g. by the
@@ -14,12 +15,10 @@ export type ShowActionSheetOptions = {
 	buttons: {
 		title: string
 		destructive?: boolean
-		cancel?: boolean
-		disabled?: boolean
 		onPress?: () => void
 	}[]
-	containerStyle?: ViewStyle
-	userInterfaceStyle?: "light" | "dark"
+	// Title of the dismiss-only cancel button the provider appends last. Defaults to t("close").
+	cancelTitle?: string
 }
 
 const ActionSheetProviderInner = ({ children }: { children: React.ReactNode }) => {
@@ -31,7 +30,6 @@ const ActionSheetProviderInner = ({ children }: { children: React.ReactNode }) =
 	const insets = useSafeAreaInsets()
 	const windowHeight = useWindowDimensions().height
 	const visibleRef = useRef<boolean>(false)
-	const cancelActionRef = useRef<(() => void) | undefined>(undefined)
 
 	useEffect(() => {
 		const { cleanup } = runEffect(defer => {
@@ -40,14 +38,7 @@ const ActionSheetProviderInner = ({ children }: { children: React.ReactNode }) =
 					return false
 				}
 
-				const action = cancelActionRef.current
-
 				visibleRef.current = false
-				cancelActionRef.current = undefined
-
-				if (action) {
-					action()
-				}
 
 				return true
 			})
@@ -69,21 +60,17 @@ const ActionSheetProviderInner = ({ children }: { children: React.ReactNode }) =
 				const destructiveButtonIndex = options.buttons
 					.map((button, index) => (button.destructive ? index : -1))
 					.filter(index => index !== -1)
-				const cancelButtonIndex = options.buttons
-					.map((button, index) => (button.cancel ? index : -1))
-					.filter(index => index !== -1)
-					.at(-1)
-				const disabledButtonIndices = options.buttons
-					.map((button, index) => (button.disabled ? index : -1))
-					.filter(index => index !== -1)
-				const disabledSet = new Set<number>(disabledButtonIndices)
+				const cancelButtonIndex = buttons.length
+
+				buttons.push(options.cancelTitle ?? t("close"))
+
 				const buttonActions = options.buttons.map(button => button.onPress)
 				// Mirror exactly what we hand the library as `title` so the height estimate matches what renders.
 				const sheetTitle = Platform.OS === "android" ? undefined : options.title
 				// Pad the top by the safe-area inset only when the sheet is tall enough to reach the status
 				// bar / notch; on a short sheet the inset would just be an empty gap above the first row.
 				const needsTopInset = actionSheetNeedsTopInset({
-					buttonCount: options.buttons.length,
+					buttonCount: buttons.length,
 					hasTitle: typeof sheetTitle === "string" && sheetTitle.length > 0,
 					windowHeight,
 					insetTop: insets.top,
@@ -91,7 +78,6 @@ const ActionSheetProviderInner = ({ children }: { children: React.ReactNode }) =
 				})
 
 				visibleRef.current = true
-				cancelActionRef.current = cancelButtonIndex !== undefined ? buttonActions[cancelButtonIndex] : undefined
 
 				showActionSheetWithOptions(
 					{
@@ -99,8 +85,7 @@ const ActionSheetProviderInner = ({ children }: { children: React.ReactNode }) =
 						title: sheetTitle,
 						cancelButtonIndex,
 						destructiveButtonIndex,
-						disabledButtonIndices,
-						containerStyle: options.containerStyle ?? {
+						containerStyle: {
 							backgroundColor: bgBackgroundSecondary.backgroundColor,
 							borderTopLeftRadius: 16,
 							borderTopRightRadius: 16,
@@ -118,22 +103,15 @@ const ActionSheetProviderInner = ({ children }: { children: React.ReactNode }) =
 						messageTextStyle: {
 							color: textMutedForeground.color
 						},
-						userInterfaceStyle: options.userInterfaceStyle ?? (theme === "dark" ? "dark" : "light"),
+						userInterfaceStyle: theme === "dark" ? "dark" : "light",
 						useModal: false
 					},
 					(selectedIndex?: number) => {
 						const wasVisible = visibleRef.current
 
 						visibleRef.current = false
-						cancelActionRef.current = undefined
 
 						if (!wasVisible) {
-							return
-						}
-
-						if (selectedIndex !== undefined && disabledSet.has(selectedIndex)) {
-							// Belt-and-suspenders against any platform where
-							// disabledButtonIndices doesn't visually disable.
 							return
 						}
 

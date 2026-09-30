@@ -8,7 +8,6 @@ export const Image = (props: React.ComponentProps<typeof ExpoImageNative> & Reac
 	return (
 		<UniwindImage
 			{...props}
-			style={props.style}
 			className={cn("bg-background", props.className)}
 		/>
 	)
@@ -21,17 +20,6 @@ export const ImageBackground = (
 ) => {
 	return (
 		<UniwindImageBackground
-			{...props}
-			className={cn("bg-background", props.className)}
-		/>
-	)
-}
-
-const UniwindExpoImage = withUniwind(ExpoImageNative) as React.FC<React.ComponentProps<typeof ExpoImageNative>>
-
-export const ExpoImage = (props: React.ComponentProps<typeof ExpoImageNative> & React.RefAttributes<typeof ExpoImageNative>) => {
-	return (
-		<UniwindExpoImage
 			{...props}
 			className={cn("bg-background", props.className)}
 		/>

@@ -14,7 +14,7 @@ let started = false
  * startReconnectListener() twice is a no-op.
  *
  * What it does NOT need to do:
- * - Refetch TanStack queries — DEFAULT_QUERY_OPTIONS.refetchOnReconnect:
+ * - Refetch TanStack queries — the QueryClient default refetchOnReconnect:
  *   "always" handles that automatically. TanStack also serializes refetches
  *   per query key so there's no thunder-herd risk.
  *
@@ -40,17 +40,8 @@ export function startReconnectListener(): void {
 
 	started = true
 
-	let lastOnline = onlineManager.isOnline()
-
+	// onlineManager only notifies on a value change, so every true here is a false -> true transition.
 	onlineManager.subscribe(isOnline => {
-		// Guard against duplicate events from NetInfo edge cases (initial
-		// state, focus changes that fire stale values).
-		if (lastOnline === isOnline) {
-			return
-		}
-
-		lastOnline = isOnline
-
 		if (!isOnline) {
 			return
 		}

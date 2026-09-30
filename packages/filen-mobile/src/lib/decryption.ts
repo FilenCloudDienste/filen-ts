@@ -5,26 +5,6 @@ export function cannotDecryptPlaceholder(uuid: string): string {
 	return `cannot_decrypt_${uuid}`
 }
 
-export function isDriveItemUndecryptable(item: DriveItem): boolean {
-	return item.data.undecryptable
-}
-
-export function isNoteUndecryptable(note: Note): boolean {
-	return note.undecryptable
-}
-
-export function isChatUndecryptable(chat: Chat): boolean {
-	return chat.undecryptable
-}
-
-export function isMessageUndecryptable(message: ChatMessage): boolean {
-	return message.undecryptable
-}
-
-export function isTagUndecryptable(tag: NoteTag): boolean {
-	return tag.undecryptable
-}
-
 export function driveItemDisplayName(item: DriveItem): string {
 	if (item.data.undecryptable) {
 		return cannotDecryptPlaceholder(item.data.uuid)

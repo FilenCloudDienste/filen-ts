@@ -102,9 +102,7 @@ async function testInputPrompt(): Promise<void> {
 		return
 	}
 
-	if (result.data.type === "string") {
-		alerts.normal(`Got: ${result.data.value}`)
-	}
+	alerts.normal(`Got: ${result.data.value}`)
 }
 
 async function showEnvironmentInfo(): Promise<void> {

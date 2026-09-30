@@ -9,7 +9,6 @@ import { type UnwrapFileMetaResult, unwrapFileMeta, unwrapDirMeta, unwrappedDirI
 import { normalizeFilePathForExpo, stripUriFragmentAndQuery } from "@/lib/paths"
 import { isConvertHeicToJpgEnabled, convertHeicToJpg } from "@/lib/imageConversion"
 import { transplantMetadata } from "@/modules/filen-exif"
-import { PauseSignal } from "@/lib/signals"
 import transfers from "@/features/transfers/transfers"
 import * as FileSystem from "expo-file-system"
 import { fileHash } from "@preeternal/react-native-file-hash"
@@ -134,11 +133,6 @@ export type RemoteListing = {
 	degraded: boolean
 }
 
-export type Delta = {
-	type: "upload"
-	file: LocalFile
-}
-
 export type Config = {
 	enabled: boolean
 	remoteDir: AnyNormalDir | null
@@ -165,11 +159,6 @@ export const DEFAULT_CONFIG: Config = {
 	compress: false
 }
 
-type AlbumEntry = {
-	id: string
-	title: string
-}
-
 /**
  * Why a sync pass ended before reaching the upload pipeline.
  *
@@ -184,7 +173,6 @@ export type CameraUploadSkipReason =
 	| "coalesced"
 	| "notConfigured"
 	| "backgroundDisabled"
-	| "paused"
 	| "noPermissions"
 	| "offline"
 	| "cellularBlocked"
@@ -359,11 +347,10 @@ async function hashAsset(uri: string, algorithm: "MD5" | "BLAKE3", signal?: Abor
 
 class CameraUpload {
 	private globalAbortController = new AbortController()
-	private globalPauseSignal = new PauseSignal()
 	private syncing: boolean = false
 	// BG-05: timestamp of the last completed FOREGROUND pass, for the min-interval coalescing gate.
 	// Only stamped after a pass reaches the upload pipeline (not on early skips) so a sync that
-	// bailed (offline/disabled/paused) never suppresses a retry once conditions improve.
+	// bailed (offline/disabled) never suppresses a retry once conditions improve.
 	private lastCompletedAt: number = 0
 	// BG-03: whether the in-flight pass is a budgeted BACKGROUND pass (deadline-bounded), and whether a
 	// foreground sync arrived and was dropped by the in-flight guard while one was running — so the
@@ -418,12 +405,6 @@ class CameraUpload {
 	public cancel(): void {
 		this.globalAbortController.abort()
 		this.globalAbortController = new AbortController()
-		// Replace the pause signal so the next sync starts unpaused. The aborted
-		// controller above will already stop any in-flight transfers before they
-		// can block on the old (possibly paused) signal. Free the old signal's SDK
-		// handle first — uniffi handles are not GC'd.
-		this.globalPauseSignal.dispose()
-		this.globalPauseSignal = new PauseSignal()
 		this.syncing = false
 		this.syncingBackground = false
 		this.foregroundRerunRequested = false
@@ -436,14 +417,6 @@ class CameraUpload {
 		this.lastCompletedAt = 0
 
 		useCameraUploadStore.getState().clearSkippedAssets()
-	}
-
-	public pause(): void {
-		this.globalPauseSignal.pause()
-	}
-
-	public resume(): void {
-		this.globalPauseSignal.resume()
 	}
 
 	// CU-09: a permanently-skipped asset (one that burned MAX_UPLOAD_FAILURES) is otherwise dropped
@@ -594,21 +567,18 @@ class CameraUpload {
 		// selected albums. A selected id no longer on the device (album deleted in Photos
 		// but still in our config) is skipped below; the next sync heals when the UI
 		// re-saves the selection.
-		const deviceAlbumById = new Map<string, AlbumEntry>()
+		const deviceAlbumTitleById = new Map<string, string>()
 
 		for (const album of await MediaLibraryLegacy.getAlbumsAsync({ includeSmartAlbums: true })) {
-			deviceAlbumById.set(album.id, {
-				id: album.id,
-				title: album.title
-			})
+			deviceAlbumTitleById.set(album.id, album.title)
 		}
 
 		const folderTitleByAlbumId = new Map<string, string>()
 
 		for (const id of selectedIds) {
-			const deviceAlbum = deviceAlbumById.get(id)
+			const deviceAlbumTitle = deviceAlbumTitleById.get(id)
 
-			if (!deviceAlbum) {
+			if (deviceAlbumTitle === undefined) {
 				continue
 			}
 
@@ -618,7 +588,7 @@ class CameraUpload {
 			// titles the SDK would reject (e.g. "2024: Japan") into their encoded remote
 			// form — used for BOTH createDir and the local tree keys, so the folder the
 			// listing returns reproduces the keys byte-for-byte (see canonicalRemoteName).
-			const rawFolderTitle = albumFolderTitle(deviceAlbum.title)
+			const rawFolderTitle = albumFolderTitle(deviceAlbumTitle)
 			const folderTitle = rawFolderTitle === null ? null : canonicalRemoteName(rawFolderTitle)
 
 			if (folderTitle === null) {
@@ -1084,7 +1054,7 @@ class CameraUpload {
 		signal: AbortSignal
 		remoteListingSince: number
 	}): Promise<{
-		deltas: Delta[]
+		deltas: LocalFile[]
 		localListing: LocalListing
 		remoteListing: RemoteListing
 	}> {
@@ -1128,7 +1098,7 @@ class CameraUpload {
 
 		const localTree = localListing.tree
 		const remoteTree = remoteListing.tree
-		const deltas: Delta[] = []
+		const deltas: LocalFile[] = []
 
 		// Assets whose remote copy looks older. Whether each is a REAL delta or an already-verified
 		// modification time is decided below, once the ledger has been read for all of them at once.
@@ -1144,10 +1114,7 @@ class CameraUpload {
 			const remoteFile = remoteTree[path]
 
 			if (!remoteFile) {
-				deltas.push({
-					type: "upload",
-					file: localFile
-				})
+				deltas.push(localFile)
 
 				continue
 			}
@@ -1204,10 +1171,7 @@ class CameraUpload {
 					continue
 				}
 
-				deltas.push({
-					type: "upload",
-					file: candidate.file
-				})
+				deltas.push(candidate.file)
 			}
 		}
 
@@ -1226,13 +1190,6 @@ class CameraUpload {
 		}
 
 		return config
-	}
-
-	public async setConfig(fn: Config | ((prev: Config) => Config)): Promise<void> {
-		const currentConfig = await this.getConfig()
-		const newConfig = typeof fn === "function" ? fn(currentConfig) : fn
-
-		await secureStore.set(this.secureStoreKey, newConfig)
 	}
 
 	private async ensureParentDirectoryExists({
@@ -1331,12 +1288,10 @@ class CameraUpload {
 		deadlineAt?: number
 	}): Promise<{ success: boolean; error?: unknown; skipped?: CameraUploadSkipReason; uploaded?: number }> {
 		const remoteListingSince = params?.remoteListingSince ?? remoteListingPosition()
-		// Capture both signals once so that cancel() — which aborts the current
-		// controller and creates fresh instances for future syncs — reliably
-		// stops every operation in this sync via the captured references,
-		// regardless of when during execution cancel() fires.
+		// Capture the controller once so that cancel() — which aborts it and creates a
+		// fresh one for future syncs — reliably stops every operation in this sync via
+		// the captured reference, regardless of when during execution cancel() fires.
 		const abortController = this.globalAbortController
-		const pauseSignal = this.globalPauseSignal
 		let skipped: CameraUploadSkipReason | undefined = undefined
 		let uploaded = 0
 
@@ -1382,16 +1337,6 @@ class CameraUpload {
 
 			if (params?.background && !config.background) {
 				skipped = "backgroundDisabled"
-
-				return
-			}
-
-			// Respect a pause left armed in the foreground (audit B5, 2026-06-11): sync()
-			// captures the live globalPauseSignal below, so a background upload would park
-			// on it until the run-budget deadline — a whole OS window wasted, reported as
-			// Success. The user asked for uploads to pause; skip, never auto-resume.
-			if (params?.background && this.globalPauseSignal.isPaused()) {
-				skipped = "paused"
 
 				return
 			}
@@ -1694,13 +1639,13 @@ class CameraUpload {
 			const deltas = prioritised
 				? allDeltas
 						.filter(
-							delta =>
-								!params?.background || (cameraUploadState.getAbort(delta.file.info.id) ?? 0) < MAX_BACKGROUND_UPLOAD_ABORTS
+							localFile =>
+								!params?.background || (cameraUploadState.getAbort(localFile.info.id) ?? 0) < MAX_BACKGROUND_UPLOAD_ABORTS
 						)
 						.sort(
 							(a, b) =>
-								(b.file.info.modificationTime ?? b.file.info.creationTime ?? 0) -
-								(a.file.info.modificationTime ?? a.file.info.creationTime ?? 0)
+								(b.info.modificationTime ?? b.info.creationTime ?? 0) -
+								(a.info.modificationTime ?? a.info.creationTime ?? 0)
 						)
 						.slice(0, params?.maxUploads ?? allDeltas.length)
 				: allDeltas
@@ -1712,10 +1657,10 @@ class CameraUpload {
 			if (reuploadDeleted && !remoteListing.degraded && params?.background) {
 				const mirrorDeletes: string[] = []
 
-				for (const delta of deltas) {
-					if (!remoteListing.tree[delta.file.path]) {
-						mirrorDeletes.push(delta.file.info.id)
-						mirrorDeletes.push(delta.file.path)
+				for (const localFile of deltas) {
+					if (!remoteListing.tree[localFile.path]) {
+						mirrorDeletes.push(localFile.info.id)
+						mirrorDeletes.push(localFile.path)
 					}
 				}
 
@@ -1780,8 +1725,8 @@ class CameraUpload {
 						return
 					}
 
-					const delta = deltas[index] as Delta
-					const assetId = delta.file.info.id
+					const localFile = deltas[index] as LocalFile
+					const assetId = localFile.info.id
 
 					if ((this.uploadFailures.get(assetId) ?? 0) >= MAX_UPLOAD_FAILURES) {
 						logger.warn("cameraUpload", "Asset skipped after max upload failures", {
@@ -1794,7 +1739,7 @@ class CameraUpload {
 						// a UI-surfacing list only.
 						useCameraUploadStore.getState().addSkippedAsset({
 							id: assetId,
-							name: delta.file.info.filename
+							name: localFile.info.filename
 						})
 
 						continue
@@ -1814,10 +1759,10 @@ class CameraUpload {
 					// (and then pruned) on every toggle — re-uploading already-backed-up content in both
 					// toggle directions. The path lookup is the LEGACY fallback until a clean foreground
 					// pass migrates old entries to id keys (see the hygiene prune in sync()).
-					const cachedEntry = await this.shieldEntry(delta.file.info.id, delta.file.path, params?.background === true)
-					const modificationTime = delta.file.info.modificationTime
+					const cachedEntry = await this.shieldEntry(localFile.info.id, localFile.path, params?.background === true)
+					const modificationTime = localFile.info.modificationTime
 
-					if (shieldCoversModification(cachedEntry, modificationTime, delta.file.path)) {
+					if (shieldCoversModification(cachedEntry, modificationTime, localFile.path)) {
 						shieldSkips++
 
 						continue
@@ -1836,282 +1781,271 @@ class CameraUpload {
 					}
 
 					const result = await run(async defer => {
-						switch (delta.type) {
-							case "upload": {
-								// Reconstruct the Asset on demand (synchronous constructor — race-free)
-								// instead of holding a shared object per pending delta across the whole
-								// sync; the retry shields the one remaining async shared-object call (#40).
-								const assetUri = await withReleasedSharedObjectRetry(() => new MediaLibrary.Asset(delta.file.info.id).getUri())
+						// Reconstruct the Asset on demand (synchronous constructor — race-free)
+						// instead of holding a shared object per pending delta across the whole
+						// sync; the retry shields the one remaining async shared-object call (#40).
+						const assetUri = await withReleasedSharedObjectRetry(() => new MediaLibrary.Asset(localFile.info.id).getUri())
 
-								if (!assetUri) {
-									throw new Error(i18n.t("camera_upload_file_missing"))
-								}
-
-								// getUri() hands back a URL, not a path. Reduce it to one here, at the single
-								// point where a platform URI enters the pipeline, so everything downstream deals
-								// only in paths — see stripUriFragmentAndQuery for why the two cannot be treated
-								// alike, and why this belongs here rather than in the normalize helpers.
-								const uri = stripUriFragmentAndQuery(assetUri)
-
-								const assetFile = new FileSystem.File(uri)
-
-								if (!assetFile.exists) {
-									throw new Error(i18n.t("camera_upload_file_missing"))
-								}
-
-								// Counted so a pass whose cost is dominated by hashing is visible in the
-								// field log (see SLOW_PIPELINE_WARN_HASHES).
-								hashed++
-
-								const md5 = await hashAsset(uri, "MD5", abortController.signal)
-
-								if (cachedEntry && md5 === cachedEntry.md5 && hashEntryCoversPath(cachedEntry, delta.file.path)) {
-									// Content unchanged (view-touched mtime bump or a remotely-
-									// deleted photo with mirror mode off). Record the mtime this
-									// md5 was just verified against so the next pass takes the
-									// fast path above — this also upgrades legacy string entries
-									// to the object shape (and re-keys legacy path entries by id).
-									// Path coverage is part of the guard: unchanged content still
-									// uploads to an album folder the entry doesn't cover yet.
-									await cameraUploadState.setHash(delta.file.info.id, {
-										md5,
-										verifiedModificationTime: modificationTime ?? -1,
-										paths: cachedEntry.paths
-									})
-
-									break
-								}
-
-								// Past here an upload is certain, which is what makes one more hash worth
-								// paying for: if this exact content already sits in the destination folder
-								// under another name, it cancels a whole file transfer. Recording the shield
-								// entry is what an upload would have done, so the next pass takes the mtime
-								// fast path instead of hashing again.
-								const alreadyInDestination = async (file: FileSystem.File): Promise<boolean> => {
-									// Mirror mode ("Re-upload deleted photos") asks for anything missing from its
-									// remote path to be put back. Cancelling that because the same bytes sit in the
-									// folder under another name both overrides the setting and never converges: the
-									// mirror wave drops the shield entry every pass, this re-creates it, and the
-									// asset pays a full MD5 + BLAKE3 read forever. Only this branch is affected —
-									// with mirror off, skipping a duplicate is exactly what should happen.
-									if (reuploadDeleted && !remoteListing.tree[delta.file.path]) {
-										return false
-									}
-
-									const candidates = remoteContentHashesIn(delta.file.path, file.size)
-
-									// Nothing of this length is up there, so nothing of this content is either.
-									if (candidates.size === 0) {
-										return false
-									}
-
-									// The check is an OPTIMISATION, so a hash failure falls through to the upload
-									// rather than failing the asset. BLAKE3 runs through a different native path than
-									// MD5, so an engine-specific read failure would otherwise error this asset on
-									// every pass instead of merely skipping a shortcut.
-									const digest = await run(async () => await hashAsset(file.uri, "BLAKE3", abortController.signal))
-
-									if (!digest.success) {
-										return false
-									}
-
-									return candidates.has(digest.data)
-								}
-
-								const recordAsBackedUp = async (): Promise<void> => {
-									await cameraUploadState.setHash(delta.file.info.id, {
-										md5,
-										verifiedModificationTime: modificationTime ?? -1,
-										paths: mergedHashEntryPaths(cachedEntry, delta.file.path)
-									})
-
-									await cameraUploadState.deleteAbort(assetId)
-								}
-
-								// The hash has to cover the bytes that would actually be UPLOADED, and
-								// convertHeic/compress rewrite them. With neither ENABLED the staged copy is
-								// byte-identical to the asset, so the check runs here and saves the staging
-								// copy too; otherwise it waits until the transforms have produced the real
-								// payload, below. Hashing the original in that case would compare bytes that
-								// are never sent.
-								//
-								// Deliberately keyed on the settings rather than on whether THIS asset would
-								// actually be rewritten: a JPEG under an enabled convertHeic passes through
-								// untouched, but predicting that here would put a second copy of
-								// convertHeicToJpg's own eligibility rules on the correctness path. The cost
-								// of being conservative is only that the check waits until after staging.
-								const transformsUploadBytes = convertHeic || config.compress
-
-								if (!transformsUploadBytes && (await alreadyInDestination(assetFile))) {
-									remoteSkips++
-
-									await recordAsBackedUp()
-
-									break
-								}
-
-								// Bound the staged-on-disk set: without this, every pending delta
-								// copied its full asset into filen-tmp before its upload got an SDK
-								// slot, staging the whole camera roll at once. run() executes
-								// deferred functions LIFO, so this release runs AFTER the tmp-file
-								// cleanup registered below — the slot is freed only once the staged
-								// bytes are gone, keeping disk usage truly bounded.
-								await this.stagingMutex.acquire()
-
-								defer(() => {
-									this.stagingMutex.release()
-								})
-
-								// Last soft-stop checkpoint, and deliberately AFTER the acquire rather than
-								// before it. This mutex serialises the pipeline, so waiting on it is where a
-								// worker spends the most wall-clock without doing anything interruptible:
-								// checking before the wait would let a worker that queued microseconds inside
-								// the window go on to stage, transform and upload long after it closed.
-								// Checking once the permit is actually in hand measures the moment the work
-								// would really start. The release defer is already armed above, so breaking
-								// here hands the slot straight to the next waiter instead of stranding it.
-								//
-								// The ABORT arm is the live one here, and it is a foreground concern. A
-								// background pass sizes its pool to the mutex so nothing ever parks, which
-								// makes the window arm belt-and-braces (kept so the invariant does not
-								// depend on those two constants staying equal). A FOREGROUND pass has the
-								// wide pool and no deadline at all, so parking is normal — and on cancel()
-								// (logout, or a newer sync superseding this one) a parked worker would
-								// otherwise wake, copy the asset and run the full HEIC/compress transform,
-								// none of it abort-aware, before no-oping at the upload. That is a whole
-								// batch of pointless IO in front of logout's cancel-then-wipe.
-								if (windowSpent() || abortController.signal.aborted) {
-									break
-								}
-
-								// Create the staging tmp file WITH the original extension so that
-								// compress() can pass the supported-extension gate (it checks
-								// extname(file.uri) — a bare UUID with no extension always fails).
-								const srcExt = FileSystem.Paths.extname(delta.file.info.filename).toLowerCase()
-								const tmpFile = newTmpFile(`${randomUUID()}${srcExt}`)
-
-								defer(() => {
-									if (tmpFile.exists) {
-										tmpFile.delete()
-									}
-								})
-
-								if (tmpFile.exists) {
-									tmpFile.delete()
-								}
-
-								await assetFile.copy(tmpFile)
-
-								let uploadFile = tmpFile
-
-								// HEIC→JPG runs BEFORE compress so the two compose: convert at max
-								// quality, then (optionally) compress for size. convertHeicToJpg
-								// returns a SEPARATE tmp file (compress renames in place), so it is
-								// cleaned up below alongside the staging file.
-								if (convertHeic) {
-									uploadFile = await convertHeicToJpg(uploadFile)
-								}
-
-								if (config.compress) {
-									uploadFile = await this.compress(uploadFile)
-								}
-
-								if (uploadFile.uri !== tmpFile.uri) {
-									defer(() => {
-										if (uploadFile.exists) {
-											uploadFile.delete()
-										}
-									})
-								}
-
-								// When compress() rewrites the content to JPEG (e.g. .png → .jpg),
-								// it renames the file to have a .jpg extension.  Mirror that rename
-								// in the upload's `name` parameter so the remote filename and MIME
-								// type stay consistent with the actual bytes.
-								const uploadExt = FileSystem.Paths.extname(uploadFile.uri).toLowerCase()
-								const plainUploadName =
-									uploadExt !== "" && uploadExt !== srcExt
-										? `${FileSystem.Paths.basename(delta.file.info.filename, FileSystem.Paths.extname(delta.file.info.filename))}${uploadExt}`
-										: delta.file.info.filename
-								// #B2: a collision member uploads under its collision-resolved name
-								// (`name_<suffix>.ext`) so the remote listing's base key reproduces
-								// this asset's local tree key — uploading the plain name would
-								// silently REPLACE the base member as a new version (backend: same
-								// name + same parent = new version). The suffix composes onto the
-								// FINAL name, AFTER the compress extension rewrite, and adds only
-								// [a-z0-9_-] characters, so it needs no sanitization beyond the
-								// plain name's. Non-colliding assets keep their plain name.
-								const plainUploadExt = FileSystem.Paths.extname(plainUploadName)
-								const uploadName =
-									delta.file.collisionSuffix.length > 0
-										? `${FileSystem.Paths.basename(plainUploadName, plainUploadExt)}${delta.file.collisionSuffix}${plainUploadExt}`
-										: plainUploadName
-
-								// The transformed payload only exists now, so this is the earliest the check
-								// can run for it. Re-encoding is not bit-reproducible in general, so a match
-								// here is not guaranteed even for content that IS backed up — it costs one
-								// hash and cancels the transfer whenever it does hit.
-								if (transformsUploadBytes && (await alreadyInDestination(uploadFile))) {
-									remoteSkips++
-
-									await recordAsBackedUp()
-
-									break
-								}
-
-								const parentDir = await this.ensureParentDirectoryExists({
-									config,
-									signal: abortController.signal,
-									originalPath: delta.file.originalPath
-								})
-
-								// #B7: `created` is effectiveCreationTimestamp — the SAME value the
-								// dedup key suffix and the tree sort are derived from. NOTE (CU-01):
-								// the upload runs with EXIF-override ON, so the remote `meta.created`
-								// can differ from this value (EXIF wins, read as UTC). Dedup stability
-								// comes from the name-encoded collision suffix + the md5 content cache,
-								// not from `meta.created` round-tripping (epoch 0 for both-null assets).
-								const transferResult = await transfers.upload({
-									localFileOrDir: uploadFile,
-									parent: parentDir,
-									signal: abortController.signal,
-									pauseSignal,
-									name: uploadName,
-									modified: delta.file.info.modificationTime ?? delta.file.info.creationTime ?? undefined,
-									created: effectiveCreationTimestamp(delta.file.info),
-									background: params?.background ?? false
-								})
-
-								if (!transferResult) {
-									// Null ⇔ the upload was aborted mid-flight. In a background run
-									// that means the budget deadline / OS expiration killed it —
-									// count it persistently (audit B4): cancel() wipes the in-memory
-									// failure counter and the next run may be a fresh process.
-									if (params?.background && abortController.signal.aborted) {
-										await cameraUploadState.setAbort(assetId, (cameraUploadState.getAbort(assetId) ?? 0) + 1)
-									}
-
-									break
-								}
-
-								await cameraUploadState.setHash(delta.file.info.id, {
-									md5,
-									verifiedModificationTime: modificationTime ?? -1,
-									paths: mergedHashEntryPaths(cachedEntry, delta.file.path)
-								})
-								// Any completed upload proves the asset fits a window — forget its
-								// background-abort history (audit B4).
-								await cameraUploadState.deleteAbort(assetId)
-
-								uploaded++
-
-								break
-							}
-
-							default: {
-								throw new Error(i18n.t("error_generic"))
-							}
+						if (!assetUri) {
+							throw new Error(i18n.t("camera_upload_file_missing"))
 						}
+
+						// getUri() hands back a URL, not a path. Reduce it to one here, at the single
+						// point where a platform URI enters the pipeline, so everything downstream deals
+						// only in paths — see stripUriFragmentAndQuery for why the two cannot be treated
+						// alike, and why this belongs here rather than in the normalize helpers.
+						const uri = stripUriFragmentAndQuery(assetUri)
+
+						const assetFile = new FileSystem.File(uri)
+
+						if (!assetFile.exists) {
+							throw new Error(i18n.t("camera_upload_file_missing"))
+						}
+
+						// Counted so a pass whose cost is dominated by hashing is visible in the
+						// field log (see SLOW_PIPELINE_WARN_HASHES).
+						hashed++
+
+						const md5 = await hashAsset(uri, "MD5", abortController.signal)
+
+						if (cachedEntry && md5 === cachedEntry.md5 && hashEntryCoversPath(cachedEntry, localFile.path)) {
+							// Content unchanged (view-touched mtime bump or a remotely-
+							// deleted photo with mirror mode off). Record the mtime this
+							// md5 was just verified against so the next pass takes the
+							// fast path above — this also upgrades legacy string entries
+							// to the object shape (and re-keys legacy path entries by id).
+							// Path coverage is part of the guard: unchanged content still
+							// uploads to an album folder the entry doesn't cover yet.
+							await cameraUploadState.setHash(localFile.info.id, {
+								md5,
+								verifiedModificationTime: modificationTime ?? -1,
+								paths: cachedEntry.paths
+							})
+
+							return
+						}
+
+						// Past here an upload is certain, which is what makes one more hash worth
+						// paying for: if this exact content already sits in the destination folder
+						// under another name, it cancels a whole file transfer. Recording the shield
+						// entry is what an upload would have done, so the next pass takes the mtime
+						// fast path instead of hashing again.
+						const alreadyInDestination = async (file: FileSystem.File): Promise<boolean> => {
+							// Mirror mode ("Re-upload deleted photos") asks for anything missing from its
+							// remote path to be put back. Cancelling that because the same bytes sit in the
+							// folder under another name both overrides the setting and never converges: the
+							// mirror wave drops the shield entry every pass, this re-creates it, and the
+							// asset pays a full MD5 + BLAKE3 read forever. Only this branch is affected —
+							// with mirror off, skipping a duplicate is exactly what should happen.
+							if (reuploadDeleted && !remoteListing.tree[localFile.path]) {
+								return false
+							}
+
+							const candidates = remoteContentHashesIn(localFile.path, file.size)
+
+							// Nothing of this length is up there, so nothing of this content is either.
+							if (candidates.size === 0) {
+								return false
+							}
+
+							// The check is an OPTIMISATION, so a hash failure falls through to the upload
+							// rather than failing the asset. BLAKE3 runs through a different native path than
+							// MD5, so an engine-specific read failure would otherwise error this asset on
+							// every pass instead of merely skipping a shortcut.
+							const digest = await run(async () => await hashAsset(file.uri, "BLAKE3", abortController.signal))
+
+							if (!digest.success) {
+								return false
+							}
+
+							return candidates.has(digest.data)
+						}
+
+						const recordAsBackedUp = async (): Promise<void> => {
+							await cameraUploadState.setHash(localFile.info.id, {
+								md5,
+								verifiedModificationTime: modificationTime ?? -1,
+								paths: mergedHashEntryPaths(cachedEntry, localFile.path)
+							})
+
+							await cameraUploadState.deleteAbort(assetId)
+						}
+
+						// The hash has to cover the bytes that would actually be UPLOADED, and
+						// convertHeic/compress rewrite them. With neither ENABLED the staged copy is
+						// byte-identical to the asset, so the check runs here and saves the staging
+						// copy too; otherwise it waits until the transforms have produced the real
+						// payload, below. Hashing the original in that case would compare bytes that
+						// are never sent.
+						//
+						// Deliberately keyed on the settings rather than on whether THIS asset would
+						// actually be rewritten: a JPEG under an enabled convertHeic passes through
+						// untouched, but predicting that here would put a second copy of
+						// convertHeicToJpg's own eligibility rules on the correctness path. The cost
+						// of being conservative is only that the check waits until after staging.
+						const transformsUploadBytes = convertHeic || config.compress
+
+						if (!transformsUploadBytes && (await alreadyInDestination(assetFile))) {
+							remoteSkips++
+
+							await recordAsBackedUp()
+
+							return
+						}
+
+						// Bound the staged-on-disk set: without this, every pending delta
+						// copied its full asset into filen-tmp before its upload got an SDK
+						// slot, staging the whole camera roll at once. run() executes
+						// deferred functions LIFO, so this release runs AFTER the tmp-file
+						// cleanup registered below — the slot is freed only once the staged
+						// bytes are gone, keeping disk usage truly bounded.
+						await this.stagingMutex.acquire()
+
+						defer(() => {
+							this.stagingMutex.release()
+						})
+
+						// Last soft-stop checkpoint, and deliberately AFTER the acquire rather than
+						// before it. This mutex serialises the pipeline, so waiting on it is where a
+						// worker spends the most wall-clock without doing anything interruptible:
+						// checking before the wait would let a worker that queued microseconds inside
+						// the window go on to stage, transform and upload long after it closed.
+						// Checking once the permit is actually in hand measures the moment the work
+						// would really start. The release defer is already armed above, so returning
+						// here hands the slot straight to the next waiter instead of stranding it.
+						//
+						// The ABORT arm is the live one here, and it is a foreground concern. A
+						// background pass sizes its pool to the mutex so nothing ever parks, which
+						// makes the window arm belt-and-braces (kept so the invariant does not
+						// depend on those two constants staying equal). A FOREGROUND pass has the
+						// wide pool and no deadline at all, so parking is normal — and on cancel()
+						// (logout, or a newer sync superseding this one) a parked worker would
+						// otherwise wake, copy the asset and run the full HEIC/compress transform,
+						// none of it abort-aware, before no-oping at the upload. That is a whole
+						// batch of pointless IO in front of logout's cancel-then-wipe.
+						if (windowSpent() || abortController.signal.aborted) {
+							return
+						}
+
+						// Create the staging tmp file WITH the original extension so that
+						// compress() can pass the supported-extension gate (it checks
+						// extname(file.uri) — a bare UUID with no extension always fails).
+						const srcExt = FileSystem.Paths.extname(localFile.info.filename).toLowerCase()
+						const tmpFile = newTmpFile(`${randomUUID()}${srcExt}`)
+
+						defer(() => {
+							if (tmpFile.exists) {
+								tmpFile.delete()
+							}
+						})
+
+						if (tmpFile.exists) {
+							tmpFile.delete()
+						}
+
+						await assetFile.copy(tmpFile)
+
+						let uploadFile = tmpFile
+
+						// HEIC→JPG runs BEFORE compress so the two compose: convert at max
+						// quality, then (optionally) compress for size. convertHeicToJpg
+						// returns a SEPARATE tmp file (compress renames in place), so it is
+						// cleaned up below alongside the staging file.
+						if (convertHeic) {
+							uploadFile = await convertHeicToJpg(uploadFile)
+						}
+
+						if (config.compress) {
+							uploadFile = await this.compress(uploadFile)
+						}
+
+						if (uploadFile.uri !== tmpFile.uri) {
+							defer(() => {
+								if (uploadFile.exists) {
+									uploadFile.delete()
+								}
+							})
+						}
+
+						// When compress() rewrites the content to JPEG (e.g. .png → .jpg),
+						// it renames the file to have a .jpg extension.  Mirror that rename
+						// in the upload's `name` parameter so the remote filename and MIME
+						// type stay consistent with the actual bytes.
+						const uploadExt = FileSystem.Paths.extname(uploadFile.uri).toLowerCase()
+						const plainUploadName =
+							uploadExt !== "" && uploadExt !== srcExt
+								? `${FileSystem.Paths.basename(localFile.info.filename, FileSystem.Paths.extname(localFile.info.filename))}${uploadExt}`
+								: localFile.info.filename
+						// #B2: a collision member uploads under its collision-resolved name
+						// (`name_<suffix>.ext`) so the remote listing's base key reproduces
+						// this asset's local tree key — uploading the plain name would
+						// silently REPLACE the base member as a new version (backend: same
+						// name + same parent = new version). The suffix composes onto the
+						// FINAL name, AFTER the compress extension rewrite, and adds only
+						// [a-z0-9_-] characters, so it needs no sanitization beyond the
+						// plain name's. Non-colliding assets keep their plain name.
+						const plainUploadExt = FileSystem.Paths.extname(plainUploadName)
+						const uploadName =
+							localFile.collisionSuffix.length > 0
+								? `${FileSystem.Paths.basename(plainUploadName, plainUploadExt)}${localFile.collisionSuffix}${plainUploadExt}`
+								: plainUploadName
+
+						// The transformed payload only exists now, so this is the earliest the check
+						// can run for it. Re-encoding is not bit-reproducible in general, so a match
+						// here is not guaranteed even for content that IS backed up — it costs one
+						// hash and cancels the transfer whenever it does hit.
+						if (transformsUploadBytes && (await alreadyInDestination(uploadFile))) {
+							remoteSkips++
+
+							await recordAsBackedUp()
+
+							return
+						}
+
+						const parentDir = await this.ensureParentDirectoryExists({
+							config,
+							signal: abortController.signal,
+							originalPath: localFile.originalPath
+						})
+
+						// #B7: `created` is effectiveCreationTimestamp — the SAME value the
+						// dedup key suffix and the tree sort are derived from. NOTE (CU-01):
+						// the upload runs with EXIF-override ON, so the remote `meta.created`
+						// can differ from this value (EXIF wins, read as UTC). Dedup stability
+						// comes from the name-encoded collision suffix + the md5 content cache,
+						// not from `meta.created` round-tripping (epoch 0 for both-null assets).
+						const transferResult = await transfers.upload({
+							localFileOrDir: uploadFile,
+							parent: parentDir,
+							signal: abortController.signal,
+							name: uploadName,
+							modified: localFile.info.modificationTime ?? localFile.info.creationTime ?? undefined,
+							created: effectiveCreationTimestamp(localFile.info),
+							background: params?.background ?? false
+						})
+
+						if (!transferResult) {
+							// Null ⇔ the upload was aborted mid-flight. In a background run
+							// that means the budget deadline / OS expiration killed it —
+							// count it persistently (audit B4): cancel() wipes the in-memory
+							// failure counter and the next run may be a fresh process.
+							if (params?.background && abortController.signal.aborted) {
+								await cameraUploadState.setAbort(assetId, (cameraUploadState.getAbort(assetId) ?? 0) + 1)
+							}
+
+							return
+						}
+
+						await cameraUploadState.setHash(localFile.info.id, {
+							md5,
+							verifiedModificationTime: modificationTime ?? -1,
+							paths: mergedHashEntryPaths(cachedEntry, localFile.path)
+						})
+						// Any completed upload proves the asset fits a window — forget its
+						// background-abort history (audit B4).
+						await cameraUploadState.deleteAbort(assetId)
+
+						uploaded++
 					})
 
 					if (!result.success) {
@@ -2130,7 +2064,7 @@ class CameraUpload {
 
 						logger.error("cameraUpload", "Upload pipeline failed for asset", {
 							assetId,
-							filename: delta.file.info.filename,
+							filename: localFile.info.filename,
 							error: result.error
 						})
 
@@ -2140,7 +2074,7 @@ class CameraUpload {
 								id: randomUUID(),
 								timestamp: Date.now(),
 								error: result.error,
-								assetId: delta.file.info.id
+								assetId: localFile.info.id
 							}
 						])
 					}
@@ -2254,8 +2188,6 @@ export function useCameraUpload() {
 
 	const sync = (params?: Parameters<CameraUpload["sync"]>[0]) => cameraUpload.sync(params)
 	const cancel = () => cameraUpload.cancel()
-	const pause = () => cameraUpload.pause()
-	const resume = () => cameraUpload.resume()
 
 	return {
 		syncing,
@@ -2263,9 +2195,7 @@ export function useCameraUpload() {
 		config,
 		sync,
 		setConfig,
-		cancel,
-		pause,
-		resume
+		cancel
 	}
 }
 

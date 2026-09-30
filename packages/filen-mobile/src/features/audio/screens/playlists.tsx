@@ -49,7 +49,6 @@ export function Playlists() {
 			const parsed = deserialize(selectOptionsSerialized) as SelectOptions
 
 			return {
-				multiple: parsed.multiple,
 				playlistUuidsToExclude: parsed.playlistUuidsToExclude,
 				id: parsed.id
 			}
@@ -151,7 +150,7 @@ export function Playlists() {
 			return
 		}
 
-		if (promptResult.data.cancelled || promptResult.data.type !== "string") {
+		if (promptResult.data.cancelled) {
 			return
 		}
 
@@ -328,7 +327,6 @@ export function Playlists() {
 					className="flex-1 bg-background-secondary"
 					data={visiblePlaylists}
 					loading={playlistsQuery.status === "pending"}
-					contentInsetAdjustmentBehavior="automatic"
 					contentContainerStyle={{
 						paddingBottom: 300
 					}}

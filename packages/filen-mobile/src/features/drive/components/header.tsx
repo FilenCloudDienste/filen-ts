@@ -252,9 +252,7 @@ const Header = ({
 					}
 
 					const result = await runWithLoading(async () => {
-						await drive.emptyTrash({
-							signal: undefined
-						})
+						await drive.emptyTrash()
 					})
 
 					if (!result.success) {

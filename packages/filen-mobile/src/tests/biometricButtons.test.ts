@@ -46,7 +46,7 @@ vi.mock("@filen/shared", () => ({
 // t() is a pass-through identity so assertions can use raw keys.
 const t = ((key: string) => key) as unknown as TFunction
 
-import { enableBiometric, disableBiometric } from "@/features/settings/biometricButtons"
+import { enableBiometric } from "@/features/settings/biometricButtons"
 
 // Helpers for common prompt results.
 function alertConfirmed() {
@@ -58,7 +58,7 @@ function alertCancelled() {
 }
 
 function inputReturns(value: string) {
-	mockPromptsInput.mockResolvedValueOnce({ cancelled: false, type: "string", value })
+	mockPromptsInput.mockResolvedValueOnce({ cancelled: false, value })
 }
 
 function inputCancelled() {
@@ -68,18 +68,6 @@ function inputCancelled() {
 beforeEach(() => {
 	vi.clearAllMocks()
 	mockFileProviderDisable.mockResolvedValue(undefined)
-})
-
-// ────────────────────────────────────────────────────────────────────────────
-// disableBiometric — trivial one-liner setter
-// ────────────────────────────────────────────────────────────────────────────
-describe("disableBiometric", () => {
-	it("calls setBiometric with enabled: false", () => {
-		disableBiometric({ setBiometric: mockSetBiometric as unknown as (value: Biometric) => void })
-
-		expect(mockSetBiometric).toHaveBeenCalledOnce()
-		expect(mockSetBiometric).toHaveBeenCalledWith({ enabled: false })
-	})
 })
 
 // ────────────────────────────────────────────────────────────────────────────

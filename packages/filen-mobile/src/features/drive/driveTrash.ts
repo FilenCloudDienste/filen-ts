@@ -17,7 +17,7 @@ import useFileVersionsStore from "@/features/drive/store/useFileVersions.store"
 import cache from "@/lib/cache"
 import events from "@/lib/events"
 
-export async function deletePermanently({ item, signal }: { item: DriveItem; signal?: AbortSignal }) {
+export async function deletePermanently({ item }: { item: DriveItem }) {
 	if (item.type !== "directory" && item.type !== "file") {
 		throw new Error("Invalid item type")
 	}
@@ -26,23 +26,9 @@ export async function deletePermanently({ item, signal }: { item: DriveItem; sig
 	const unwrappedParentUuidPrevious = unwrapParentUuid(item.data.parent)
 
 	if (item.type === "directory") {
-		await authedSdkClient.deleteDirPermanently(
-			item.data,
-			signal
-				? {
-						signal
-					}
-				: undefined
-		)
+		await authedSdkClient.deleteDirPermanently(item.data)
 	} else {
-		await authedSdkClient.deleteFilePermanently(
-			item.data,
-			signal
-				? {
-						signal
-					}
-				: undefined
-		)
+		await authedSdkClient.deleteFilePermanently(item.data)
 	}
 
 	cache.forgetItem(item.data.uuid)
@@ -76,7 +62,7 @@ export async function deletePermanently({ item, signal }: { item: DriveItem; sig
 	return item
 }
 
-export async function trash({ item, signal }: { item: DriveItem; signal?: AbortSignal }) {
+export async function trash({ item }: { item: DriveItem }) {
 	if (item.type !== "directory" && item.type !== "file") {
 		throw new Error("Invalid item type")
 	}
@@ -84,24 +70,7 @@ export async function trash({ item, signal }: { item: DriveItem; signal?: AbortS
 	const { authedSdkClient } = await auth.getSdkClients()
 	const unwrappedParentUuidPrevious = unwrapParentUuid(item.data.parent)
 
-	const modifiedItem =
-		item.type === "directory"
-			? await authedSdkClient.trashDir(
-					item.data,
-					signal
-						? {
-								signal
-							}
-						: undefined
-				)
-			: await authedSdkClient.trashFile(
-					item.data,
-					signal
-						? {
-								signal
-							}
-						: undefined
-				)
+	const modifiedItem = item.type === "directory" ? await authedSdkClient.trashDir(item.data) : await authedSdkClient.trashFile(item.data)
 
 	// Ugly but works for now, until we have a better way
 	if (!("region" in modifiedItem)) {
@@ -156,7 +125,7 @@ export async function trash({ item, signal }: { item: DriveItem; signal?: AbortS
 	return item
 }
 
-export async function restore({ item, signal }: { item: DriveItem; signal?: AbortSignal }) {
+export async function restore({ item }: { item: DriveItem }) {
 	if (item.type !== "directory" && item.type !== "file") {
 		throw new Error("Invalid item type")
 	}
@@ -167,23 +136,7 @@ export async function restore({ item, signal }: { item: DriveItem; signal?: Abor
 
 	const { authedSdkClient } = await auth.getSdkClients()
 	const modifiedItem =
-		item.type === "directory"
-			? await authedSdkClient.restoreDir(
-					item.data,
-					signal
-						? {
-								signal
-							}
-						: undefined
-				)
-			: await authedSdkClient.restoreFile(
-					item.data,
-					signal
-						? {
-								signal
-							}
-						: undefined
-				)
+		item.type === "directory" ? await authedSdkClient.restoreDir(item.data) : await authedSdkClient.restoreFile(item.data)
 
 	// Ugly but works for now, until we have a better way
 	if (!("region" in modifiedItem)) {
@@ -240,16 +193,10 @@ export async function restore({ item, signal }: { item: DriveItem; signal?: Abor
 	})
 }
 
-export async function emptyTrash({ signal }: { signal?: AbortSignal }) {
+export async function emptyTrash() {
 	const { authedSdkClient } = await auth.getSdkClients()
 
-	await authedSdkClient.emptyTrash(
-		signal
-			? {
-					signal
-				}
-			: undefined
-	)
+	await authedSdkClient.emptyTrash()
 
 	// Forget every previously-trashed item so cache.uuidToAnyDriveItem doesn't
 	// retain zombies. Read the trash listing before clearing it.
@@ -279,7 +226,7 @@ export async function emptyTrash({ signal }: { signal?: AbortSignal }) {
 	})
 }
 
-export async function restoreFileVersion({ item, version, signal }: { item: DriveItem; version: FileVersion; signal?: AbortSignal }) {
+export async function restoreFileVersion({ item, version }: { item: DriveItem; version: FileVersion }) {
 	if (item.type !== "file") {
 		throw new Error("Invalid item type")
 	}
@@ -289,15 +236,7 @@ export async function restoreFileVersion({ item, version, signal }: { item: Driv
 	const previousUuid = item.data.uuid
 
 	const { authedSdkClient } = await auth.getSdkClients()
-	const modifiedFile = await authedSdkClient.restoreFileVersion(
-		item.data,
-		version,
-		signal
-			? {
-					signal
-				}
-			: undefined
-	)
+	const modifiedFile = await authedSdkClient.restoreFileVersion(item.data, version)
 
 	item = unwrappedFileIntoDriveItem(unwrapFileMeta(modifiedFile))
 
@@ -343,21 +282,14 @@ export async function restoreFileVersion({ item, version, signal }: { item: Driv
 	return item
 }
 
-export async function deleteVersion({ item, version, signal }: { item: DriveItem; version: FileVersion; signal?: AbortSignal }) {
+export async function deleteVersion({ item, version }: { item: DriveItem; version: FileVersion }) {
 	if (item.type !== "file") {
 		throw new Error("Invalid item type")
 	}
 
 	const { authedSdkClient } = await auth.getSdkClients()
 
-	await authedSdkClient.deleteFileVersion(
-		version,
-		signal
-			? {
-					signal
-				}
-			: undefined
-	)
+	await authedSdkClient.deleteFileVersion(version)
 
 	driveItemVersionsQueryUpdate({
 		params: {

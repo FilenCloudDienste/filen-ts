@@ -13,7 +13,7 @@ import useNotesOfflineStore from "@/features/notes/store/useNotesOffline.store"
 import { useStringifiedClient } from "@/lib/auth"
 import { formatRelativeTime } from "@/lib/time"
 import Icon from "@/features/notes/components/note/icon"
-import Menu, { NoteMenuOrigin } from "@/features/notes/components/note/menu"
+import Menu from "@/features/notes/components/note/menu"
 import { cn, fastLocaleCompare } from "@filen/shared"
 import { PressableScale } from "@/components/ui/pressables"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -53,24 +53,14 @@ const NoteSectionHeader = ({ item }: { item: SectionHeader }) => {
 	)
 }
 
-const NoteRow = ({
-	info,
-	menuOrigin,
-	nextNote,
-	prevNote
-}: {
-	info: ListRenderItemInfo<ListItem>
-	menuOrigin?: NoteMenuOrigin
-	nextNote?: ListItem
-	prevNote?: ListItem
-}) => {
+const NoteRow = ({ item, nextNote, prevNote }: { item: DataItem; nextNote?: ListItem; prevNote?: ListItem }) => {
 	const { t } = useTranslation()
 	const textForeground = useResolveClassNames("text-foreground")
 	const textRed500 = useResolveClassNames("text-red-500")
 	// Same icon + colour as the drive's offline indicator — one visual language for "this is on the
 	// device" across the app.
 	const textGreen500 = useResolveClassNames("text-green-500")
-	const itemUuid = info.item.type === "header" ? info.item.id : info.item.uuid
+	const itemUuid = item.uuid
 	const isInflight = useNotesInflightStore(useShallow(state => (state.inflightContent[itemUuid]?.length ?? 0) > 0))
 	const isAvailableOffline = useNotesOfflineStore(state => state.marked[itemUuid] === true)
 	const isActive = useNotesStore(useShallow(state => state.activeNote?.uuid === itemUuid))
@@ -83,16 +73,12 @@ const NoteRow = ({
 	)
 
 	const onPress = () => {
-		if (info.item.type === "header") {
-			return
-		}
-
-		if (info.item.undecryptable) {
+		if (item.undecryptable) {
 			return
 		}
 
 		if (useNotesStore.getState().selectedNotes.length > 0) {
-			useNotesStore.getState().toggleSelectedNote(info.item)
+			useNotesStore.getState().toggleSelectedNote(item)
 
 			return
 		}
@@ -100,23 +86,17 @@ const NoteRow = ({
 		router.push(`/note/${itemUuid}`)
 	}
 
-	const participantsWithoutCurrentUser =
-		info.item.type === "header" ? [] : info.item.participants.filter(participant => participant.userId !== stringifiedClient?.userId)
+	const participantsWithoutCurrentUser = item.participants.filter(participant => participant.userId !== stringifiedClient?.userId)
 	// A note we don't own was shared TO us (we're a participant on someone else's note); surface
 	// the owner's email (from the isOwner participant) on its own metadata row when so.
-	const isSharedToMe = info.item.type !== "header" && !!stringifiedClient && info.item.ownerId !== stringifiedClient.userId
-	const sharedByOwnerEmail =
-		isSharedToMe && info.item.type !== "header"
-			? (info.item.participants.find(participant => participant.isOwner)?.email ?? null)
-			: null
+	const isSharedToMe = !!stringifiedClient && item.ownerId !== stringifiedClient.userId
+	const sharedByOwnerEmail = isSharedToMe ? (item.participants.find(participant => participant.isOwner)?.email ?? null) : null
 	// A note shared TO us without write permission is view-only; surface it with an eye badge in the
 	// left column (alongside pin/favorite) so it reads as non-editable before the editor even opens.
 	const isReadOnly =
 		isSharedToMe &&
-		info.item.type !== "header" &&
-		!info.item.participants.some(participant => participant.userId === stringifiedClient?.userId && participant.permissionsWrite)
-	const tags =
-		info.item.type === "header" ? [] : [...info.item.tags].sort((a, b) => fastLocaleCompare(a.name ?? a.uuid, b.name ?? b.uuid))
+		!item.participants.some(participant => participant.userId === stringifiedClient?.userId && participant.permissionsWrite)
+	const tags = [...item.tags].sort((a, b) => fastLocaleCompare(a.name ?? a.uuid, b.name ?? b.uuid))
 
 	// Notes are rendered inside a sectioned list (pinned / favorited /
 	// time-bucketed / archived / trashed) where each section starts with a
@@ -133,10 +113,6 @@ const NoteRow = ({
 	const isLastInSection = !nextNote || nextNote.type === "header"
 	const roundedCn = cn(isFirstInSection && "rounded-t-4xl", isLastInSection && "rounded-b-4xl")
 
-	if (info.item.type === "header") {
-		return null
-	}
-
 	return (
 		<View className="w-full h-auto flex-col">
 			<Menu
@@ -145,8 +121,8 @@ const NoteRow = ({
 					Platform.OS === "android" && cn("px-4", nextNote?.type === "note" ? "pb-0" : "pb4")
 				)}
 				type="context"
-				note={info.item}
-				origin={menuOrigin ?? "notes"}
+				note={item}
+				origin="notes"
 				isAnchoredToRight={true}
 			>
 				<PressableScale
@@ -204,12 +180,12 @@ const NoteRow = ({
 										/>
 									) : (
 										<Icon
-											note={info.item}
+											note={item}
 											iconSize={18}
 										/>
 									)}
 								</View>
-								{info.item.pinned && (
+								{item.pinned && (
 									<View className="flex-row items-center justify-center p-1 rounded-full size-8 bg-background-tertiary">
 										<Ionicons
 											name="pin-outline"
@@ -218,7 +194,7 @@ const NoteRow = ({
 										/>
 									</View>
 								)}
-								{info.item.favorite && (
+								{item.favorite && (
 									<View className="flex-row items-center justify-center p-1 rounded-full size-8 bg-background-tertiary">
 										<Ionicons
 											name="heart-outline"
@@ -257,15 +233,15 @@ const NoteRow = ({
 									numberOfLines={1}
 									ellipsizeMode="middle"
 								>
-									{noteDisplayTitle(info.item)}
+									{noteDisplayTitle(item)}
 								</Text>
-								{info.item.preview && (
+								{item.preview && (
 									<Text
 										numberOfLines={2}
 										ellipsizeMode="tail"
 										className="text-muted-foreground text-xs"
 									>
-										{info.item.preview}
+										{item.preview}
 									</Text>
 								)}
 								<Text
@@ -273,7 +249,7 @@ const NoteRow = ({
 									ellipsizeMode="tail"
 									className="text-muted-foreground text-xs"
 								>
-									{formatRelativeTime(Number(info.item.editedTimestamp), t)}
+									{formatRelativeTime(Number(item.editedTimestamp), t)}
 								</Text>
 								{sharedByOwnerEmail && (
 									<Text
@@ -332,23 +308,12 @@ const NoteRow = ({
 	)
 }
 
-const Note = ({
-	info,
-	menuOrigin,
-	nextNote,
-	prevNote
-}: {
-	info: ListRenderItemInfo<ListItem>
-	menuOrigin?: NoteMenuOrigin
-	nextNote?: ListItem
-	prevNote?: ListItem
-}) => {
+const Note = ({ info, nextNote, prevNote }: { info: ListRenderItemInfo<ListItem>; nextNote?: ListItem; prevNote?: ListItem }) => {
 	return info.item.type === "header" ? (
 		<NoteSectionHeader item={info.item} />
 	) : (
 		<NoteRow
-			info={info}
-			menuOrigin={menuOrigin}
+			item={info.item}
 			nextNote={nextNote}
 			prevNote={prevNote}
 		/>

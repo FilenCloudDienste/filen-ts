@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next"
-import { useWindowDimensions, ActivityIndicator } from "react-native"
+import { ActivityIndicator } from "react-native"
 import { type SharedValue } from "react-native-reanimated"
 import useRawPreviewQuery from "@/queries/useRawPreview.query"
 import PreviewImage from "@/components/drivePreview/previewImage"
@@ -11,7 +11,8 @@ import { type GalleryItemTagged } from "@/components/drivePreview/gallery"
 
 // A RAW camera file's own bytes are never rendered: the page shows the JPEG the SDK extracts from
 // the container (2–10 MB for a CR3 full-size track), so the extraction runs only for the page on
-// screen — the caller mounts this inside PreviewSlot and the query is enabled on isActive.
+// screen — the caller mounts this inside PreviewSlot and the query is enabled on isActive. Renders
+// into galleryItem's window-sized cell, so no wrapper of its own.
 const PreviewRawImage = ({
 	item,
 	isActive,
@@ -30,7 +31,6 @@ const PreviewRawImage = ({
 	onPinchActiveChange?: (active: boolean) => void
 }) => {
 	const { t } = useTranslation()
-	const dimensions = useWindowDimensions()
 
 	const rawPreviewQuery = useRawPreviewQuery(
 		{
@@ -46,38 +46,23 @@ const PreviewRawImage = ({
 		}
 	)
 
-	const itemStyle = {
-		width: dimensions.width,
-		height: dimensions.height
-	}
-
 	if (rawPreviewQuery.status === "error") {
 		// Transport failure during extraction — the shared notice with its explicit Retry.
 		return (
-			<View
+			<PreviewLoadFailedNotice
 				className="bg-transparent"
-				style={itemStyle}
-			>
-				<PreviewLoadFailedNotice
-					className="bg-transparent"
-					onRetry={() => rawPreviewQuery.refetch()}
-				/>
-			</View>
+				onRetry={() => rawPreviewQuery.refetch()}
+			/>
 		)
 	}
 
 	if (rawPreviewQuery.status !== "success") {
 		return (
-			<View
-				className="bg-transparent"
-				style={itemStyle}
-			>
-				<View className="bg-transparent flex-1 items-center justify-center">
-					<ActivityIndicator
-						size="small"
-						color="white"
-					/>
-				</View>
+			<View className="bg-transparent flex-1 items-center justify-center">
+				<ActivityIndicator
+					size="small"
+					color="white"
+				/>
 			</View>
 		)
 	}
@@ -86,19 +71,14 @@ const PreviewRawImage = ({
 		case "uri": {
 			// expo-image honours the EXIF orientation the SDK splices into the extracted JPEG.
 			return (
-				<View
-					className="bg-transparent"
-					style={itemStyle}
-				>
-					<PreviewImage
-						fileUrl={rawPreviewQuery.data.uri}
-						zoomScale={zoomScale}
-						onPinchDismiss={onPinchDismiss}
-						onZoomChange={onZoomChange}
-						onSingleTap={onSingleTap}
-						onPinchActiveChange={onPinchActiveChange}
-					/>
-				</View>
+				<PreviewImage
+					fileUrl={rawPreviewQuery.data.uri}
+					zoomScale={zoomScale}
+					onPinchDismiss={onPinchDismiss}
+					onZoomChange={onZoomChange}
+					onSingleTap={onSingleTap}
+					onPinchActiveChange={onPinchActiveChange}
+				/>
 			)
 		}
 
@@ -106,20 +86,15 @@ const PreviewRawImage = ({
 			// The container embeds no JPEG a viewer could show — the gallery's own empty state, title
 			// only (no_preview_description is the empty-GALLERY subtitle: "There's nothing here to preview.").
 			return (
-				<View
-					className="bg-transparent"
-					style={itemStyle}
-				>
-					<ListEmpty
-						icon="eye-off-outline"
-						title={t("no_preview")}
-					/>
-				</View>
+				<ListEmpty
+					icon="eye-off-outline"
+					title={t("no_preview")}
+				/>
 			)
 		}
 
 		case "offline": {
-			return <UnavailableOfflineNotice style={itemStyle} />
+			return <UnavailableOfflineNotice />
 		}
 
 		default: {

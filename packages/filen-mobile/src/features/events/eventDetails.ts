@@ -17,7 +17,7 @@ import { type en } from "@/locales/en"
 // translator accepts. Callers may pass their own `t` (e.g. the useTranslation() hook in eventInfo)
 // so the resolved label stays reactive to an in-app language change; otherwise the module-level
 // i18n.t is used for non-React callers.
-export const EVENT_KIND_KEY = {
+const EVENT_KIND_KEY = {
 	[UserEventKind_Tags.FileUploaded]: "file_uploaded",
 	[UserEventKind_Tags.FileVersioned]: "file_versioned",
 	[UserEventKind_Tags.FileRestored]: "file_restored",

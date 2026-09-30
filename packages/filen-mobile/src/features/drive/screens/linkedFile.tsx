@@ -45,12 +45,7 @@ const LinkedFile = () => {
 	}
 
 	if (item.data.undecryptable) {
-		return (
-			<CannotDecryptScreen
-				uuid={item.data.uuid}
-				surface="linkedFile"
-			/>
-		)
+		return <CannotDecryptScreen uuid={item.data.uuid} />
 	}
 
 	return (

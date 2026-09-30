@@ -342,7 +342,7 @@ async function promptPin(biometric: EnabledBiometric): Promise<PinResult> {
 		})
 	)
 
-	if (pinPromptResult.cancelled || pinPromptResult.type !== "string") {
+	if (pinPromptResult.cancelled) {
 		return {
 			success: false,
 			error: "cancelled"

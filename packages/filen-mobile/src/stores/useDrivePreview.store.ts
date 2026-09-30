@@ -3,8 +3,8 @@ import type { GalleryItemTagged, InitialItem } from "@/components/drivePreview/g
 import { router } from "@/lib/router"
 import type { DrivePath } from "@/hooks/useDrivePath"
 import { getPreviewType, isImagePreviewType } from "@/lib/previewType"
-import { EXPO_IMAGE_SUPPORTED_EXTENSIONS } from "@/constants"
-import { Paths } from "expo-file-system"
+import { isPhotoGridItem } from "@/features/photos/utils"
+import { isFileItem } from "@/features/drive/driveSelectors"
 
 export type OpenPreviewParams = {
 	items: GalleryItemTagged[]
@@ -35,16 +35,14 @@ export type DrivePreviewStore = {
 	// An open() that landed during the leaving window. Replayed by endSession() once the outgoing
 	// gallery unmounts; only the newest is kept, so the user's last tap wins.
 	pendingOpen: OpenPreviewParams | null
-	setHeaderHeight: (fn: number | null | ((prev: number | null) => number | null)) => void
-	setCurrentIndex: (fn: number | null | ((prev: number | null) => number | null)) => void
+	setHeaderHeight: (headerHeight: number | null) => void
+	setCurrentIndex: (currentIndex: number | null) => void
 	reset: () => void
 	// Called by the gallery when it unmounts: clears the session and replays a parked open.
 	endSession: () => void
 	setCurrentItem: (fn: GalleryItemTagged | null | ((prev: GalleryItemTagged | null) => GalleryItemTagged | null)) => void
 	setCurrentItems: (fn: GalleryItemTagged[] | ((prev: GalleryItemTagged[]) => GalleryItemTagged[])) => void
 	open(params: OpenPreviewParams): void
-	setInitialScrollIndex: (fn: number | ((prev: number) => number)) => void
-	setDrivePath: (fn: DrivePath | null | ((prev: DrivePath | null) => DrivePath | null)) => void
 	// Whether the currently-open editable text preview has unsaved edits. Published by previewText;
 	// read by the route-level unsaved-changes guard to decide whether to prompt on navigate-away.
 	hasUnsavedEdits: boolean
@@ -65,16 +63,16 @@ export type DrivePreviewStore = {
 
 export const useDrivePreviewStore = create<DrivePreviewStore>((set, get) => ({
 	headerHeight: null,
-	setHeaderHeight(fn) {
-		set(state => ({
-			headerHeight: typeof fn === "function" ? fn(state.headerHeight) : fn
-		}))
+	setHeaderHeight(headerHeight) {
+		set({
+			headerHeight
+		})
 	},
 	currentIndex: null,
-	setCurrentIndex(fn) {
-		set(state => ({
-			currentIndex: typeof fn === "function" ? fn(state.currentIndex) : fn
-		}))
+	setCurrentIndex(currentIndex) {
+		set({
+			currentIndex
+		})
 	},
 	reset() {
 		set({
@@ -120,17 +118,7 @@ export const useDrivePreviewStore = create<DrivePreviewStore>((set, get) => ({
 		}))
 	},
 	initialScrollIndex: 0,
-	setInitialScrollIndex(fn) {
-		set(state => ({
-			initialScrollIndex: typeof fn === "function" ? fn(state.initialScrollIndex) : fn
-		}))
-	},
 	drivePath: null,
-	setDrivePath(fn) {
-		set(state => ({
-			drivePath: typeof fn === "function" ? fn(state.drivePath) : fn
-		}))
-	},
 	hasUnsavedEdits: false,
 	setHasUnsavedEdits(value) {
 		set({
@@ -191,38 +179,15 @@ export const useDrivePreviewStore = create<DrivePreviewStore>((set, get) => ({
 			}
 
 			if (initialItem.data.drivePath.type === "photos") {
-				return items.filter(item => {
-					if (
-						item.type !== "drive" ||
-						!item.data.data.decryptedMeta ||
-						(item.data.type !== "file" && item.data.type !== "sharedFile" && item.data.type !== "sharedRootFile")
-					) {
-						return false
-					}
-
-					const previewType = getPreviewType(item.data.data.decryptedMeta.name)
-
-					return (
-						(isImagePreviewType(previewType) || previewType === "video") &&
-						// The expo-image allowlist applies to what expo-image renders; a RAW file's
-						// extension is never in that set and its preview is the SDK-extracted JPEG.
-						(previewType === "image" || previewType === "svg"
-							? EXPO_IMAGE_SUPPORTED_EXTENSIONS.has(Paths.extname(item.data.data.decryptedMeta.name).toLowerCase())
-							: true)
-					)
-				})
+				return items.filter(item => item.type === "drive" && isPhotoGridItem(item.data))
 			}
 
 			return items.filter(item => {
-				if (
-					item.type !== "drive" ||
-					!item.data.data.decryptedMeta ||
-					(item.data.type !== "file" && item.data.type !== "sharedFile" && item.data.type !== "sharedRootFile")
-				) {
+				if (item.type !== "drive" || !isFileItem(item.data) || !item.data.data.decryptedMeta) {
 					return false
 				}
 
-				const type = getPreviewType(item.data.data.decryptedMeta?.name ?? "")
+				const type = getPreviewType(item.data.data.decryptedMeta.name)
 
 				return isImagePreviewType(type) || type === "video" || type === "audio"
 			})

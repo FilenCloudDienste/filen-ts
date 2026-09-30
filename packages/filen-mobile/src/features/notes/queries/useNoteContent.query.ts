@@ -1,5 +1,5 @@
 import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
-import queryClient, { DEFAULT_QUERY_OPTIONS, queryUpdater } from "@/queries/client"
+import queryClient, { queryUpdater } from "@/queries/client"
 import { sortParams } from "@filen/shared"
 import auth from "@/lib/auth"
 import logger from "@/lib/logger"
@@ -100,7 +100,6 @@ export function useNoteContentQuery(
 	const sortedParams = sortParams(params)
 
 	const query = useQuery({
-		...DEFAULT_QUERY_OPTIONS,
 		// A reopened note whose body is still current defers to staleTime (the editor passes Infinity),
 		// which only an invalidation beats. Anything else re-reads, as every mount did before.
 		refetchOnMount: cached => (noteContentReadIsCurrent(sortedParams.uuid, cached.state) ? true : "always"),

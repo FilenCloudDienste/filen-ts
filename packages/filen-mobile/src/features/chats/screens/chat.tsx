@@ -147,10 +147,6 @@ const Unread = ({ chat }: { chat: TChat }) => {
 	const unreadCount = useChatUnreadCount(chat)
 
 	const markAsRead = async () => {
-		if (!chat) {
-			return
-		}
-
 		const result = await runWithLoading(async () => {
 			return await Promise.all([
 				chats.updateLastFocusTimesNow({

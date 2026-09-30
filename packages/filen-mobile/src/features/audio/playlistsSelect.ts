@@ -6,7 +6,6 @@ import type { PlaylistWithItems } from "@/features/audio/audio"
 
 export type SelectOptions = {
 	id: string
-	multiple: boolean
 	playlistUuidsToExclude?: string[]
 }
 

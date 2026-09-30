@@ -1,4 +1,4 @@
-import { Fragment, useRef, useCallback } from "react"
+import { Fragment, useCallback } from "react"
 import { onlineManager } from "@tanstack/react-query"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import View from "@/components/ui/view"
@@ -6,11 +6,9 @@ import useDriveItemsQuery from "@/features/drive/queries/useDriveItems.query"
 import { itemSorter, captureTimestamp } from "@/lib/sort"
 import VirtualList from "@/components/ui/virtualList"
 import ListEmpty from "@/components/ui/listEmpty"
-import { type View as RNView } from "react-native"
 import { run } from "@filen/shared"
 import alerts from "@/lib/alerts"
 import useViewLayout from "@/hooks/useViewLayout"
-import { getPreviewType } from "@/lib/previewType"
 import useDrivePath from "@/hooks/useDrivePath"
 import { useFocusEffect } from "expo-router"
 import { router } from "@/lib/router"
@@ -20,21 +18,18 @@ import { useCameraUploadDestination } from "@/features/cameraUpload/queries/useC
 import Button from "@/components/ui/button"
 import usePhotosStore from "@/features/photos/store/usePhotos.store"
 import { useSecureStore } from "@/lib/secureStore"
-import { EXPO_IMAGE_SUPPORTED_EXTENSIONS } from "@/constants"
-import * as FileSystem from "expo-file-system"
 import useDriveStore from "@/features/drive/store/useDrive.store"
 import { useTranslation } from "react-i18next"
 import Header from "@/features/photos/components/photosHeader"
 import Photo from "@/features/photos/components/photoItem"
 import DateRange from "@/features/photos/components/dateRange"
-import { filterPhotoGridItems } from "@/features/photos/utils"
+import { isPhotoGridItem } from "@/features/photos/utils"
 import { LazyWrapper } from "@/components/lazyWrapper"
 import logger from "@/lib/logger"
 
 const Photos = () => {
 	const { t } = useTranslation()
-	const viewRef = useRef<RNView>(null)
-	const { layout, onLayout } = useViewLayout(viewRef)
+	const { layout, onLayout } = useViewLayout()
 	const [config] = useSecureStore<Config>(cameraUpload.secureStoreKey, DEFAULT_CONFIG)
 	const drivePath = useDrivePath()
 	const [photosGridTiles] = useSecureStore<number>("photosGridTiles", 4)
@@ -43,7 +38,7 @@ const Photos = () => {
 	useFocusEffect(
 		useCallback(() => {
 			useDriveStore.getState().clearSelectedItems()
-			usePhotosStore.getState().setVisibleDateRange(null)
+			usePhotosStore.getState().setVisibleDate(null)
 
 			return () => {
 				useDriveStore.getState().clearSelectedItems()
@@ -69,12 +64,7 @@ const Photos = () => {
 
 	const items = driveItemsQuery.data
 		? itemSorter.sortItems(
-				filterPhotoGridItems({
-					items: driveItemsQuery.data,
-					getPreviewType,
-					supportedImageExtensions: EXPO_IMAGE_SUPPORTED_EXTENSIONS,
-					extname: name => FileSystem.Paths.extname(name)
-				}),
+				driveItemsQuery.data.filter(isPhotoGridItem),
 				"captureDesc"
 			)
 		: []
@@ -87,7 +77,6 @@ const Photos = () => {
 			/>
 			<SafeAreaView edges={["left", "right"]}>
 				<View
-					ref={viewRef}
 					onLayout={onLayout}
 					className="flex-1"
 				>
@@ -103,36 +92,23 @@ const Photos = () => {
 						) : config.enabled && config.remoteDir ? (
 							<VirtualList
 								className="flex-1"
-								contentInsetAdjustmentBehavior="automatic"
 								contentContainerClassName="pb-40"
-								itemHeight={size}
-								grid={true}
 								itemWidth={size}
 								keyExtractor={item => item.data.uuid}
 								viewabilityConfig={{
 									itemVisiblePercentThreshold: 99
 								}}
 								onViewableItemsChanged={info => {
-									const items = info.viewableItems
+									const firstItem = info.viewableItems[0]
 
-									if (items.length === 0) {
-										return
-									}
-
-									const firstItem = items[0]
-									const lastItem = items[items.length - 1]
-
-									if (!firstItem || !lastItem) {
+									if (!firstItem) {
 										return
 									}
 
 									// Same best-effort capture timestamp the grid is SORTED by (#43) —
 									// labeling rows with the raw `created` resurfaced the exact garbage
 									// dates (upload-stamped, epoch-zero) the capture key clamps away.
-									usePhotosStore.getState().setVisibleDateRange({
-										start: captureTimestamp(firstItem.item),
-										end: captureTimestamp(lastItem.item)
-									})
+									usePhotosStore.getState().setVisibleDate(captureTimestamp(firstItem.item))
 								}}
 								data={items}
 								renderItem={info => {

@@ -33,7 +33,6 @@ vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/u
 
 vi.mock("expo-media-library/next", async () => await import("@/tests/mocks/expoMediaLibrary"))
 
-vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
 vi.mock("react-native-blob-util", async () => await import("@/tests/mocks/reactNativeBlobUtil"))
 vi.mock("@preeternal/react-native-file-hash", async () => await import("@/tests/mocks/reactNativeFileHash"))
 
@@ -225,9 +224,6 @@ vi.mock("@/features/cameraUpload/cameraUploadState", () => {
 			setHash: async (key: string, entry: unknown) => {
 				hashes.set(key, entry)
 			},
-			deleteHash: async (key: string) => {
-				hashes.delete(key)
-			},
 			getAbort: (id: string) => aborts.get(id),
 			setAbort: async (id: string, count: number) => {
 				aborts.set(id, count)
@@ -280,20 +276,6 @@ vi.mock("@/lib/paths", async () => {
 		stripUriFragmentAndQuery: actual.stripUriFragmentAndQuery
 	}
 })
-
-vi.mock("@/lib/signals", () => ({
-	PauseSignal: class {
-		pause() {}
-		resume() {}
-		dispose() {}
-		// A background pass consults this before doing any work. Omitting it makes every such pass
-		// throw into sync()'s catch and vanish — which is exactly how the benchmark's background
-		// scenario was silently voided, and no foreground-only test can reveal it.
-		isPaused() {
-			return false
-		}
-	}
-}))
 
 vi.mock("@/constants", async () => await import("@/tests/mocks/constants"))
 

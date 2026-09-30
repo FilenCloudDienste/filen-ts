@@ -91,7 +91,7 @@ TaskManager.defineTask(TASK_NAME, async () => {
 	let cameraSkipReason: CameraUploadSkipReason | undefined = undefined
 
 	const result = await run(async defer => {
-		// Persist-before-suspend: the storedOffline query broadcasts still debounce through
+		// Persist-before-suspend: query-cache writes (e.g. driveItemsQueryUpdate) still debounce through
 		// QueryPersisterKv, which normally flushes on the AppState "background" transition —
 		// never fired in a headless run (the app is ALREADY backgrounded), and the OS may suspend
 		// the process the moment this callback returns. The camera-upload ledger now writes through

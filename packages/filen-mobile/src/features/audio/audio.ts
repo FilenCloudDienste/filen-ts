@@ -27,6 +27,7 @@ import { markDirectorySizesStale } from "@/features/drive/queries/useDirectorySi
 import secureStore, { useSecureStore } from "@/lib/secureStore"
 import { convertBigInts } from "@/lib/utils"
 import logger from "@/lib/logger"
+import { shuffle } from "es-toolkit/array"
 
 export type LoopMode = "none" | "track" | "queue"
 
@@ -261,11 +262,10 @@ export class Audio {
 	}
 
 	/**
-	 * Generates a shuffled list of queue indices.
-	 * If `firstIdx` is provided, that index is placed first (used when toggling
-	 * shuffle on so the current track keeps playing). Otherwise full random.
+	 * Rebuilds the shuffle order from the start of a new pass. If `firstIdx` is provided, that index
+	 * is placed first (used when toggling shuffle on so the current track keeps playing).
 	 */
-	private generateShuffleOrder(firstIdx?: number): number[] {
+	private reshuffleFrom(firstIdx?: number): void {
 		const indices = Array.from(
 			{
 				length: this.state.queue.length
@@ -273,92 +273,42 @@ export class Audio {
 			(_, i) => i
 		)
 
-		if (firstIdx === undefined) {
-			for (let i = indices.length - 1; i > 0; i--) {
-				const j = Math.floor(Math.random() * (i + 1))
-
-				const tmp = indices[i] ?? 0
-				indices[i] = indices[j] ?? 0
-				indices[j] = tmp
-			}
-
-			return indices
-		}
-
-		const others = indices.filter(i => i !== firstIdx)
-
-		for (let i = others.length - 1; i > 0; i--) {
-			const j = Math.floor(Math.random() * (i + 1))
-
-			const tmp = others[i] ?? 0
-			others[i] = others[j] ?? 0
-			others[j] = tmp
-		}
-
-		return [firstIdx, ...others]
+		this.shuffleOrder = firstIdx === undefined ? shuffle(indices) : [firstIdx, ...shuffle(indices.filter(i => i !== firstIdx))]
+		this.shufflePosition = 0
 	}
 
-	private async advanceToNext(): Promise<boolean> {
-		const shuffle = await this.isShuffleEnabled()
+	private clearShuffle(): void {
+		this.shuffleOrder = []
+		this.shufflePosition = 0
+	}
 
-		if (shuffle) {
+	private async advance(delta: 1 | -1): Promise<boolean> {
+		if (await this.isShuffleEnabled()) {
 			// Stale order (queue changed without shuffle being aware) — rebuild from current position.
 			if (this.shuffleOrder.length !== this.state.queue.length) {
-				this.shuffleOrder = this.generateShuffleOrder(this.state.position)
-				this.shufflePosition = 0
+				this.reshuffleFrom(this.state.position)
 			}
 
-			const next = this.shufflePosition + 1
+			const target = this.shufflePosition + delta
+			const position = this.shuffleOrder[target]
 
-			if (next >= this.shuffleOrder.length) {
+			if (position === undefined) {
 				return false
 			}
 
-			this.shufflePosition = next
-			this.state.position = this.shuffleOrder[next]!
+			this.shufflePosition = target
+			this.state.position = position
 
 			return true
 		}
 
-		const next = this.state.position + 1
+		const target = this.state.position + delta
 
-		if (next >= this.state.queue.length) {
+		if (target < 0 || target >= this.state.queue.length) {
 			return false
 		}
 
-		this.state.position = next
-
-		return true
-	}
-
-	private async advanceToPrevious(): Promise<boolean> {
-		const shuffle = await this.isShuffleEnabled()
-
-		if (shuffle) {
-			if (this.shuffleOrder.length !== this.state.queue.length) {
-				this.shuffleOrder = this.generateShuffleOrder(this.state.position)
-				this.shufflePosition = 0
-			}
-
-			const prev = this.shufflePosition - 1
-
-			if (prev < 0) {
-				return false
-			}
-
-			this.shufflePosition = prev
-			this.state.position = this.shuffleOrder[prev]!
-
-			return true
-		}
-
-		const prev = this.state.position - 1
-
-		if (prev < 0) {
-			return false
-		}
-
-		this.state.position = prev
+		this.state.position = target
 
 		return true
 	}
@@ -368,8 +318,7 @@ export class Audio {
 
 		if (shuffle && this.state.queue.length > 0) {
 			// Reshuffle on loop so the second pass isn't the same order.
-			this.shuffleOrder = this.generateShuffleOrder()
-			this.shufflePosition = 0
+			this.reshuffleFrom()
 			this.state.position = this.shuffleOrder[0] ?? 0
 
 			return
@@ -383,7 +332,7 @@ export class Audio {
 
 		if (shuffle && this.state.queue.length > 0) {
 			if (this.shuffleOrder.length !== this.state.queue.length) {
-				this.shuffleOrder = this.generateShuffleOrder(this.state.position)
+				this.reshuffleFrom(this.state.position)
 			}
 
 			this.shufflePosition = this.shuffleOrder.length - 1
@@ -441,7 +390,7 @@ export class Audio {
 		// track can't stall the whole queue. Bounded by the queue length so a queue where every
 		// remaining track fails can't loop forever.
 		for (let attempt = 0; attempt < this.state.queue.length; attempt++) {
-			const advanced = await this.advanceToNext()
+			const advanced = await this.advance(1)
 
 			if (gen !== this.loadGeneration) {
 				return
@@ -502,7 +451,7 @@ export class Audio {
 					gen = ownGeneration
 				}
 
-				const advanced = await this.advanceToNext()
+				const advanced = await this.advance(1)
 
 				if (gen !== this.loadGeneration) {
 					return
@@ -891,8 +840,7 @@ export class Audio {
 				if (this.shuffleOrder.length + 1 === this.state.queue.length) {
 					this.shuffleOrder = [...this.shuffleOrder.map(i => i + 1), 0]
 				} else {
-					this.shuffleOrder = this.generateShuffleOrder(this.state.position)
-					this.shufflePosition = 0
+					this.reshuffleFrom(this.state.position)
 				}
 			}
 		} else {
@@ -909,8 +857,7 @@ export class Audio {
 
 					this.shuffleOrder = [...this.shuffleOrder.slice(0, insertAt), newIdx, ...this.shuffleOrder.slice(insertAt)]
 				} else {
-					this.shuffleOrder = this.generateShuffleOrder(this.state.position)
-					this.shufflePosition = 0
+					this.reshuffleFrom(this.state.position)
 				}
 			}
 		}
@@ -948,11 +895,9 @@ export class Audio {
 		const shuffle = await this.isShuffleEnabled()
 
 		if (shuffle && filteredItems.length > 0) {
-			this.shuffleOrder = this.generateShuffleOrder(adjustedPosition)
-			this.shufflePosition = 0
+			this.reshuffleFrom(adjustedPosition)
 		} else {
-			this.shuffleOrder = []
-			this.shufflePosition = 0
+			this.clearShuffle()
 		}
 
 		return {
@@ -965,8 +910,7 @@ export class Audio {
 
 		this.state.queue = []
 		this.state.position = 0
-		this.shuffleOrder = []
-		this.shufflePosition = 0
+		this.clearShuffle()
 		// Nothing is loaded anymore — don't let consumers hydrate from the cleared track's status.
 		this.lastStatus = null
 	}
@@ -1012,7 +956,7 @@ export class Audio {
 	}
 
 	public async next(): Promise<void> {
-		if (await this.advanceToNext()) {
+		if (await this.advance(1)) {
 			await this.loadAndPlay(this.state.position)
 
 			return
@@ -1035,7 +979,7 @@ export class Audio {
 			return
 		}
 
-		if (await this.advanceToPrevious()) {
+		if (await this.advance(-1)) {
 			await this.loadAndPlay(this.state.position)
 
 			return
@@ -1086,8 +1030,7 @@ export class Audio {
 				this.shufflePosition = shufIdx
 			} else {
 				// Stale order — regenerate with this index first so playback continues from here.
-				this.shuffleOrder = this.generateShuffleOrder(index)
-				this.shufflePosition = 0
+				this.reshuffleFrom(index)
 			}
 		}
 
@@ -1102,16 +1045,10 @@ export class Audio {
 		await secureStore.set(this.shuffleEnabledKey, enabled)
 
 		if (enabled) {
-			this.shuffleOrder = this.generateShuffleOrder(this.state.position)
-			this.shufflePosition = 0
+			this.reshuffleFrom(this.state.position)
 		} else {
-			this.shuffleOrder = []
-			this.shufflePosition = 0
+			this.clearShuffle()
 		}
-	}
-
-	public getCurrentQueueItem() {
-		return this.state.queue[this.state.position] ?? null
 	}
 
 	public getQueue() {

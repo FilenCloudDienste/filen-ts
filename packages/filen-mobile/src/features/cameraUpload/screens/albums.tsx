@@ -1,6 +1,6 @@
 import SafeAreaView from "@/components/ui/safeAreaView"
 import { Group } from "@/components/ui/settingsGroup"
-import { useCameraUploadConfig, DEFAULT_CONFIG } from "@/features/cameraUpload/cameraUpload"
+import { useCameraUploadConfig } from "@/features/cameraUpload/cameraUpload"
 import View, { GestureHandlerScrollView } from "@/components/ui/view"
 import { Fragment, useEffect } from "react"
 import { useResolveClassNames } from "uniwind"
@@ -157,15 +157,10 @@ const Albums = () => {
 											badgeColor: bgBackgroundSecondary.backgroundColor as string | undefined,
 											rightItem: {
 												type: "switch",
-												value: config.albumIds?.includes(album.id) ?? false,
+												value: config.albumIds.includes(album.id),
 												onValueChange: () => {
 													setConfig(prev => {
-														prev = {
-															...DEFAULT_CONFIG,
-															...prev
-														}
-
-														const albumIds = new Set(prev.albumIds ?? [])
+														const albumIds = new Set(prev.albumIds)
 
 														if (albumIds.has(album.id)) {
 															albumIds.delete(album.id)

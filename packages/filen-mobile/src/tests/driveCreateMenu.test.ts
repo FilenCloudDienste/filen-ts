@@ -52,6 +52,8 @@ vi.mock("@/lib/alerts", () => ({
 	}
 }))
 
+vi.mock("@/lib/i18n", () => ({ default: { t: (key: string) => key } }))
+
 vi.mock("@/lib/prompts", () => ({
 	default: {
 		alert: vi.fn(),

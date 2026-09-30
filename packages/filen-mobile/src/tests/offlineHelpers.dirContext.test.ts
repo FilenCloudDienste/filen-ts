@@ -52,10 +52,6 @@ vi.mock("@/lib/storageRoots", () => ({
 	OFFLINE_DIRECTORIES_DIRECTORY: { uri: "file:///offline" }
 }))
 
-vi.mock("@/lib/fsAtomic", () => ({
-	atomicWrite: vi.fn()
-}))
-
 import { directoryDriveItemToAnyDirWithContext } from "@/features/offline/offlineHelpers"
 
 describe("directoryDriveItemToAnyDirWithContext", () => {

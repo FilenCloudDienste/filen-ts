@@ -3,7 +3,7 @@ import { CrossGlassContainerView } from "@/components/ui/view"
 import { PressableScale } from "@/components/ui/pressables"
 import Ionicons from "@expo/vector-icons/Ionicons"
 
-const EllipsisMenuTrigger = ({ size = 20 }: { size?: number }) => {
+const EllipsisMenuTrigger = () => {
 	const textForeground = useResolveClassNames("text-foreground")
 
 	return (
@@ -14,7 +14,7 @@ const EllipsisMenuTrigger = ({ size = 20 }: { size?: number }) => {
 			>
 				<Ionicons
 					name="ellipsis-horizontal"
-					size={size}
+					size={20}
 					color={textForeground.color}
 				/>
 			</PressableScale>

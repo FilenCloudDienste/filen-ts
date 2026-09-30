@@ -19,9 +19,6 @@ export function buildUndecryptableMenuButtons({
 }: {
 	item: DriveItem
 	drivePath: DrivePath
-	// Accepted for signature parity with createMenuButtons; unused — the gallery owns
-	// preview navigation for these destructive actions via driveItemRemoved.
-	isPreview?: boolean
 	t: TFunction
 }): MenuButton[] {
 	const undecryptableButtons: MenuButton[] = []

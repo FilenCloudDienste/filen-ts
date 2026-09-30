@@ -13,7 +13,8 @@ vi.mock("@filen/sdk-rs", () => ({ AnyNormalDir_Tags: { Dir: "Dir", Root: "Root" 
 vi.mock("@/lib/router", () => ({ router: { push: h.push } }))
 vi.mock("@/lib/serializer", () => ({ serialize: (value: unknown) => JSON.stringify(value) }))
 vi.mock("expo-crypto", () => ({ randomUUID: () => "session-1" }))
-vi.mock("@/lib/cache", () => ({ default: { uuidToAnyDriveItem: h.cacheItems } }))
+vi.mock("@/lib/cache", () => ({ default: { rootUuid: "root-uuid", uuidToAnyDriveItem: h.cacheItems } }))
+vi.mock("@/lib/i18n", () => ({ default: { t: (key: string) => key } }))
 vi.mock("@/lib/auth", () => ({
 	default: { getSdkClients: async () => ({ authedSdkClient: { root: () => ({ uuid: "root-uuid" }) } }) }
 }))
@@ -70,7 +71,7 @@ describe("openDriveSelect", () => {
 			options: { type: "single", files: false, directories: true, intention: "select", items: [], initiallySelected: [item], id: "p" }
 		})
 
-		expect(useDriveSelectStore.getState().sessions["p"]?.initiallySelected).toEqual([item])
+		expect(useDriveSelectStore.getState().sessions["p"]?.selectedItems).toEqual([item])
 		expect(h.push.mock.calls[0]?.[0].params.selectOptions).not.toContain("item-1")
 	})
 
@@ -95,7 +96,7 @@ describe("selectCopyDestination", () => {
 	}
 
 	it("opens a copy session over the items at the drive root", async () => {
-		void selectCopyDestination([item], "Drive")
+		void selectCopyDestination([item])
 
 		await opened()
 
@@ -110,7 +111,7 @@ describe("selectCopyDestination", () => {
 	})
 
 	it("resolves with the directory 'Copy here' was tapped in", async () => {
-		const picked = selectCopyDestination([item], "Drive")
+		const picked = selectCopyDestination([item])
 
 		await opened()
 
@@ -124,7 +125,7 @@ describe("selectCopyDestination", () => {
 	})
 
 	it("the drive root is the null destination", async () => {
-		const picked = selectCopyDestination([item], "Drive")
+		const picked = selectCopyDestination([item])
 
 		await opened()
 
@@ -132,11 +133,11 @@ describe("selectCopyDestination", () => {
 
 		events.emit("driveSelect", { id: "session-1", cancelled: false, selectedItems: [{ type: "root", data: root }] })
 
-		await expect(picked).resolves.toEqual({ destinationDir: root, destination: { uuid: null, name: "Drive" } })
+		await expect(picked).resolves.toEqual({ destinationDir: root, destination: { uuid: null, name: "drive" } })
 	})
 
 	it("a dismissed picker resolves null, and a later event for the same session is ignored", async () => {
-		const picked = selectCopyDestination([item], "Drive")
+		const picked = selectCopyDestination([item])
 
 		await opened()
 

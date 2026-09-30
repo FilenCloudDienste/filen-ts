@@ -1,60 +1,33 @@
 import { withAndroidManifest, withDangerousMod, AndroidConfig, type ConfigPlugin } from "@expo/config-plugins"
-import fs from "fs"
-import pathModule from "path"
+import fs from "node:fs"
+import path from "node:path"
 
 const isDevelopment = process.env["APP_ENV"] === "development" || process.env["NODE_ENV"] === "development"
+
+const DEV_HOSTS = [
+	"192.168.178.39",
+	"192.168.178.51",
+	"192.168.178.79",
+	"192.168.178.82",
+	"192.168.178.107",
+	"192.168.100.124",
+	"192.168.100.162",
+	"192.168.100.110",
+	"192.168.0.94",
+	"192.168.178.103",
+	"10.0.2.2",
+	"192.168.178.80",
+	"192.168.0.15",
+	"192.168.0.152"
+]
+
+const CLEARTEXT_HOSTS = ["127.0.0.1", ...(isDevelopment ? DEV_HOSTS : [])]
 
 const networkSecurityConfigContent = `<?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
 	<domain-config cleartextTrafficPermitted="true">
-		<domain includeSubdomains="true">127.0.0.1</domain>
+${CLEARTEXT_HOSTS.map(host => `		<domain includeSubdomains="true">${host}</domain>`).join("\n")}
 	</domain-config>
-	${
-		isDevelopment
-			? `<domain-config cleartextTrafficPermitted="true">
-		<domain includeSubdomains="true">192.168.178.39</domain>
-	</domain-config>
-	<domain-config cleartextTrafficPermitted="true">
-		<domain includeSubdomains="true">192.168.178.51</domain>
-	</domain-config>
-	<domain-config cleartextTrafficPermitted="true">
-		<domain includeSubdomains="true">192.168.178.79</domain>
-	</domain-config>
-	<domain-config cleartextTrafficPermitted="true">
-		<domain includeSubdomains="true">192.168.178.82</domain>
-	</domain-config>
-	<domain-config cleartextTrafficPermitted="true">
-		<domain includeSubdomains="true">192.168.178.107</domain>
-	</domain-config>
-	<domain-config cleartextTrafficPermitted="true">
-		<domain includeSubdomains="true">192.168.100.124</domain>
-	</domain-config>
-	<domain-config cleartextTrafficPermitted="true">
-		<domain includeSubdomains="true">192.168.100.162</domain>
-	</domain-config>
-	<domain-config cleartextTrafficPermitted="true">
-		<domain includeSubdomains="true">192.168.100.110</domain>
-	</domain-config>
-	<domain-config cleartextTrafficPermitted="true">
-		<domain includeSubdomains="true">192.168.0.94</domain>
-	</domain-config>
-	<domain-config cleartextTrafficPermitted="true">
-		<domain includeSubdomains="true">192.168.178.103</domain>
-	</domain-config>
-	<domain-config cleartextTrafficPermitted="true">
-		<domain includeSubdomains="true">10.0.2.2</domain>
-	</domain-config>
-	<domain-config cleartextTrafficPermitted="true">
-		<domain includeSubdomains="true">192.168.178.80</domain>
-	</domain-config>
-	<domain-config cleartextTrafficPermitted="true">
-		<domain includeSubdomains="true">192.168.0.15</domain>
-	</domain-config>
-    <domain-config cleartextTrafficPermitted="true">
-		<domain includeSubdomains="true">192.168.0.152</domain>
-	</domain-config>`
-			: ""
-	}
 </network-security-config>`
 
 function setNetworkSecurityConfig(
@@ -77,12 +50,12 @@ const withAndroidNetworkSecurityConfig: ConfigPlugin = config => {
 	return withDangerousMod(config, [
 		"android",
 		async config => {
-			const networkSecurityConfigPath = pathModule.join(
+			const networkSecurityConfigPath = path.join(
 				config.modRequest.platformProjectRoot,
 				"app/src/main/res/xml/network_security_config.xml"
 			)
 
-			fs.mkdirSync(pathModule.dirname(networkSecurityConfigPath), {
+			fs.mkdirSync(path.dirname(networkSecurityConfigPath), {
 				recursive: true
 			})
 

@@ -4,7 +4,6 @@ module.exports = function (api) {
 	return {
 		presets: ["babel-preset-expo"],
 		plugins: [
-			"react-native-worklets/plugin",
 			// In production strip console.log/info/debug/trace (dev noise — keeps the prod log lean),
 			// but KEEP console.warn/console.error via `exclude`: those MUST survive to reach the
 			// diagnostic-logger tee (src/lib/polyfills/console.ts), which records them to disk. Removing

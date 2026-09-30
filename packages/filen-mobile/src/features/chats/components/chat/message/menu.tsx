@@ -13,7 +13,7 @@ import { retryInflightMessage, removeInflightMessage } from "@/features/chats/ch
 import { simpleDate } from "@/lib/time"
 import events from "@/lib/events"
 import { useTranslation } from "react-i18next"
-import { confirmedChatAction } from "@/features/chats/components/confirmedChatAction"
+import { confirmedAction } from "@/lib/confirmedAction"
 import contacts from "@/features/contacts/contacts"
 import useBlockedUsers from "@/features/contacts/hooks/useBlockedUsers"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
@@ -95,8 +95,7 @@ export const Menu = ({
 		icon: "delete" as const,
 		destructive: true,
 		requiresOnline: true,
-		// Message deletes never pop a route, so no dismissPathnamePrefix.
-		onPress: confirmedChatAction({
+		onPress: confirmedAction({
 			promptTitle: t("delete_message"),
 			promptMessage: t("delete_message_confirmation"),
 			promptOkText: t("delete"),

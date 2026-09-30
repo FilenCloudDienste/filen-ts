@@ -1,6 +1,6 @@
 import { create } from "zustand"
 import type { PlaylistWithItems } from "@/features/audio/audio"
-import { toggleInArray } from "@/stores/createSelectionSlice"
+import { toggleInArray } from "@filen/shared"
 
 export type PlaylistTrack = PlaylistWithItems["files"][number]
 

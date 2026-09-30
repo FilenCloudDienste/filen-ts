@@ -93,7 +93,6 @@ vi.mock("@filen/shared", async () => {
 })
 
 vi.mock("@/queries/client", () => ({
-	DEFAULT_QUERY_OPTIONS: {},
 	queryUpdater: {
 		set: mockQueryUpdaterSet,
 		get: mockQueryUpdaterGet

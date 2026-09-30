@@ -48,6 +48,47 @@ SplashScreen.setOptions({
 
 SplashScreen.preventAutoHideAsync().catch(e => logger.warn("layout", "SplashScreen.preventAutoHideAsync failed", { error: e }))
 
+// Routes presented as a sheet with the shared modal options; register and drivePreview carry their own.
+const MODAL_SCREEN_NAMES = [
+	"transfers",
+	"offline",
+	"driveItemInfo",
+	"changeDirectoryColor",
+	"trash",
+	"recents",
+	"favorites",
+	"sharedIn",
+	"sharedOut",
+	"links",
+	"driveSelect",
+	"contacts",
+	"cameraUpload",
+	"fileVersions",
+	"noteHistory",
+	"noteParticipants",
+	"chatParticipants",
+	"noteTags",
+	"cameraUploadErrors",
+	"incomingShare",
+	"publicLink",
+	"linkedDir",
+	"linkedFile",
+	"playlists",
+	"selectPlaylists",
+	"account",
+	"security",
+	"fileProvider",
+	"offlineSettings",
+	"offlineSyncErrors",
+	"advanced",
+	"appearance",
+	"events",
+	"eventInfo",
+	"logViewer",
+	"thirdPartyNotices",
+	"developer"
+] as const
+
 const RootLayout = () => {
 	const bgBackground = useResolveClassNames("bg-background")
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
@@ -160,54 +201,13 @@ const RootLayout = () => {
 												}
 											}}
 										>
-											<Stack.Screen
-												name="transfers"
-												options={modalOptions}
-											/>
-											<Stack.Screen
-												name="offline"
-												options={modalOptions}
-											/>
-											<Stack.Screen
-												name="driveItemInfo"
-												options={modalOptions}
-											/>
-											<Stack.Screen
-												name="changeDirectoryColor"
-												options={modalOptions}
-											/>
-											<Stack.Screen
-												name="trash"
-												options={modalOptions}
-											/>
-											<Stack.Screen
-												name="recents"
-												options={modalOptions}
-											/>
-											<Stack.Screen
-												name="favorites"
-												options={modalOptions}
-											/>
-											<Stack.Screen
-												name="sharedIn"
-												options={modalOptions}
-											/>
-											<Stack.Screen
-												name="sharedOut"
-												options={modalOptions}
-											/>
-											<Stack.Screen
-												name="links"
-												options={modalOptions}
-											/>
-											<Stack.Screen
-												name="driveSelect"
-												options={modalOptions}
-											/>
-											<Stack.Screen
-												name="contacts"
-												options={modalOptions}
-											/>
+											{MODAL_SCREEN_NAMES.map(name => (
+												<Stack.Screen
+													key={name}
+													name={name}
+													options={modalOptions}
+												/>
+											))}
 											<Stack.Screen
 												name="register"
 												options={{
@@ -217,106 +217,6 @@ const RootLayout = () => {
 														backgroundColor: bgBackground.backgroundColor
 													}
 												}}
-											/>
-											<Stack.Screen
-												name="cameraUpload"
-												options={modalOptions}
-											/>
-											<Stack.Screen
-												name="fileVersions"
-												options={modalOptions}
-											/>
-											<Stack.Screen
-												name="noteHistory"
-												options={modalOptions}
-											/>
-											<Stack.Screen
-												name="noteParticipants"
-												options={modalOptions}
-											/>
-											<Stack.Screen
-												name="chatParticipants"
-												options={modalOptions}
-											/>
-											<Stack.Screen
-												name="noteTags"
-												options={modalOptions}
-											/>
-											<Stack.Screen
-												name="cameraUploadErrors"
-												options={modalOptions}
-											/>
-											<Stack.Screen
-												name="incomingShare"
-												options={modalOptions}
-											/>
-											<Stack.Screen
-												name="publicLink"
-												options={modalOptions}
-											/>
-											<Stack.Screen
-												name="linkedDir"
-												options={modalOptions}
-											/>
-											<Stack.Screen
-												name="linkedFile"
-												options={modalOptions}
-											/>
-											<Stack.Screen
-												name="playlists"
-												options={modalOptions}
-											/>
-											<Stack.Screen
-												name="selectPlaylists"
-												options={modalOptions}
-											/>
-											<Stack.Screen
-												name="account"
-												options={modalOptions}
-											/>
-											<Stack.Screen
-												name="security"
-												options={modalOptions}
-											/>
-											<Stack.Screen
-												name="fileProvider"
-												options={modalOptions}
-											/>
-											<Stack.Screen
-												name="offlineSettings"
-												options={modalOptions}
-											/>
-											<Stack.Screen
-												name="offlineSyncErrors"
-												options={modalOptions}
-											/>
-											<Stack.Screen
-												name="advanced"
-												options={modalOptions}
-											/>
-											<Stack.Screen
-												name="appearance"
-												options={modalOptions}
-											/>
-											<Stack.Screen
-												name="events"
-												options={modalOptions}
-											/>
-											<Stack.Screen
-												name="eventInfo"
-												options={modalOptions}
-											/>
-											<Stack.Screen
-												name="logViewer"
-												options={modalOptions}
-											/>
-											<Stack.Screen
-												name="thirdPartyNotices"
-												options={modalOptions}
-											/>
-											<Stack.Screen
-												name="developer"
-												options={modalOptions}
 											/>
 											<Stack.Screen
 												name="drivePreview"

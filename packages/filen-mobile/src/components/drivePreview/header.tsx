@@ -7,11 +7,11 @@ import { PressableScale } from "@/components/ui/pressables"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
 import useViewLayout from "@/hooks/useViewLayout"
-import { useRef, useEffect, Fragment } from "react"
+import { useEffect, Fragment } from "react"
 import { useTranslation } from "react-i18next"
-import { type View as TView, Platform, StyleSheet } from "react-native"
+import { Platform, StyleSheet } from "react-native"
 import DriveItemMenu from "@/features/drive/components/item/menu"
-import useDriveItemStoredOfflineQuery from "@/features/drive/queries/useDriveItemStoredOffline.query"
+import useIsItemStoredOffline from "@/features/offline/hooks/useIsItemStoredOffline"
 import { useShallow } from "zustand/shallow"
 import { getPreviewType } from "@/lib/previewType"
 import { driveItemDisplayName } from "@/lib/decryption"
@@ -38,8 +38,7 @@ const GalleryHeader = ({
 }) => {
 	const { t } = useTranslation()
 	const insets = useSafeAreaInsets()
-	const viewRef = useRef<TView>(null)
-	const { onLayout, layout } = useViewLayout(viewRef)
+	const { onLayout, layout } = useViewLayout()
 	const textForeground = useResolveClassNames("text-foreground")
 	const openExternalLink = useOpenExternalLink("drivePreview")
 	const currentItem = useDrivePreviewStore(useShallow(state => state.currentItem))
@@ -79,15 +78,7 @@ const GalleryHeader = ({
 		}
 	}, [contentScrolled])
 
-	const driveItemStoredOfflineQuery = useDriveItemStoredOfflineQuery(
-		{
-			uuid: currentItem && currentItem.type === "drive" ? currentItem.data.data.uuid : "",
-			type: "file"
-		},
-		{
-			enabled: currentItem?.type === "drive"
-		}
-	)
+	const isStoredOffline = useIsItemStoredOffline(currentItem && currentItem.type === "drive" ? currentItem.data : null)
 
 	// The full height this header occupies, on both platforms: the measured row PLUS the top inset its
 	// SafeAreaView puts above it. Consumers overlay content under the header and offset by this, so a
@@ -120,7 +111,6 @@ const GalleryHeader = ({
 						"flex-row items-center px-4 py-3 pt-0 min-h-11 gap-10 justify-between",
 						solidHeader ? "bg-background" : "bg-transparent"
 					)}
-					ref={viewRef}
 					onLayout={onLayout}
 				>
 					<PressableScale
@@ -169,10 +159,7 @@ const GalleryHeader = ({
 											uuid: null
 										}
 									}
-									isStoredOffline={
-										driveItemStoredOfflineQuery.status === "success" ? driveItemStoredOfflineQuery.data : false
-									}
-									showSelectToggle={false}
+									isStoredOffline={isStoredOffline}
 									isPreview={true}
 								>
 									{currentItemPreviewType === "audio" ? (

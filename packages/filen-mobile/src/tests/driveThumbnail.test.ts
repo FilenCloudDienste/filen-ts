@@ -35,8 +35,6 @@ vi.mock("react-native", async () => {
 	}
 })
 
-vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
-
 vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 
 vi.mock("@/lib/thumbnails", () => ({
@@ -46,8 +44,11 @@ vi.mock("@/lib/thumbnails", () => ({
 		hasThumbnail: mockHasThumbnail,
 		isUnavailable: mockIsUnavailable,
 		invalidateFile: mockInvalidateFile
-	},
-	DIRECTORY: { uri: "file:///shared/group.io.filen.app/thumbnails/v4" }
+	}
+}))
+
+vi.mock("@/lib/thumbnailsHelpers", () => ({
+	getPath: (item: { data: { uuid: string } }) => `file:///shared/group.io.filen.app/thumbnails/v4/${item.data.uuid}.webp`
 }))
 
 vi.mock("@filen/sdk-rs", () => ({

@@ -26,7 +26,6 @@ import { writeFileSync } from "node:fs"
 
 const H = vi.hoisted(() => {
 	const counts = {
-		storedOfflineUpdates: 0,
 		driveItemsUpdates: 0,
 		downloads: 0
 	}
@@ -118,18 +117,10 @@ vi.mock("@/features/offline/store/useOffline.store", () => ({
 	default: {
 		getState: () => ({
 			setSyncing: () => {},
-			setSyncErrors: () => {}
+			setSyncErrors: () => {},
+			bumpStoredVersion: () => {}
 		})
 	}
-}))
-
-const EMPTY_CACHE_ENTRIES: never[] = []
-
-vi.mock("@/features/drive/queries/useDriveItemStoredOffline.query", () => ({
-	driveItemStoredOfflineQueryUpdate: () => {
-		H.counts.storedOfflineUpdates++
-	},
-	getStoredOfflineQueryCacheEntries: () => EMPTY_CACHE_ENTRIES
 }))
 
 vi.mock("@/features/drive/queries/useDriveItems.query", () => ({
@@ -305,13 +296,7 @@ import { benchFs, resetFsOpCounts, snapshotFsOpCounts } from "@/tests/mocks/fast
 import offlineSingleton, { Offline } from "@/features/offline/offline"
 import offlineSyncSingleton from "@/features/offline/offlineSync"
 import { planTreeReconcile, type RemoteTreeEntry, type LocalTreeEntry } from "@/features/offline/offlineSyncPlanner"
-import {
-	parentCacheKey,
-	makeSyncError,
-	findStaleStoredOfflineEntries,
-	type OfflineParent,
-	type StoredOfflineQueryCacheEntry
-} from "@/features/offline/offlineHelpers"
+import { parentCacheKey, makeSyncError, type OfflineParent } from "@/features/offline/offlineHelpers"
 import { OFFLINE_FILES_DIRECTORY, OFFLINE_DIRECTORIES_DIRECTORY, OFFLINE_INDEX_FILE } from "@/lib/storageRoots"
 import { AnyDirWithContext, AnyNormalDir } from "@filen/sdk-rs"
 import { validateUuid } from "@/lib/uuid"
@@ -1985,43 +1970,6 @@ describe.runIf(BENCH)("offline lib benchmark", () => {
 				return acc
 			}
 		})
-
-		{
-			const index = {
-				files: {} as Record<string, unknown>,
-				directories: {} as Record<string, unknown>
-			}
-			const cacheEntries: StoredOfflineQueryCacheEntry[] = []
-
-			for (let i = 0; i < 5000; i++) {
-				const uuid = makeUuid()
-
-				if (i % 2 === 0) {
-					index.files[uuid] = true
-				}
-
-				cacheEntries.push({
-					queryKey: [
-						"driveItemStoredOffline",
-						{
-							uuid,
-							type: "file"
-						}
-					],
-					state: {
-						data: true
-					}
-				})
-			}
-
-			await runScenario({
-				name: "helpers/03-findStale-5k",
-				run: () => findStaleStoredOfflineEntries(cacheEntries, index),
-				validate: result => {
-					assertBench((result as unknown[]).length === 2500, "stale count mismatch")
-				}
-			})
-		}
 
 		{
 			const uuids: string[] = []

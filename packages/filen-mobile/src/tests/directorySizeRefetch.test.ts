@@ -24,13 +24,7 @@ vi.mock("@filen/shared", async () => {
 	}
 })
 
-// The production defaults that matter here: every mount refetches unless a query overrides it.
 vi.mock("@/queries/client", () => ({
-	DEFAULT_QUERY_OPTIONS: {
-		refetchOnMount: "always",
-		staleTime: 0,
-		retry: false
-	},
 	get queryClient() {
 		return holder.client
 	}
@@ -140,7 +134,8 @@ async function mountAndSettle(params: UseDirectorySizeQueryParams): Promise<void
 const normal: UseDirectorySizeQueryParams = { uuid: "dir-1", type: "normal", item: dirItem }
 
 beforeEach(() => {
-	holder.client = new QueryClient()
+	// The production defaults that matter here: every mount refetches unless a query overrides it.
+	holder.client = new QueryClient({ defaultOptions: { queries: { refetchOnMount: "always", retry: false } } })
 	trackServerReads(holder.client.getQueryCache())
 	mockGetDirSize.mockReset()
 	mockGetDirSize.mockResolvedValue({ size: 10n, files: 1n, dirs: 0n })

@@ -27,17 +27,14 @@ vi.mock("@/queries/client", async () => {
 	const { QueryClient } = await import("@tanstack/react-query")
 	const { trackServerReads } = await import("@/queries/socketSession")
 
-	const DEFAULT_QUERY_OPTIONS = {
-		refetchOnMount: "always",
-		refetchOnReconnect: "always",
-		staleTime: 0,
-		retry: false,
-		networkMode: "offlineFirst"
-	} as const
-
 	const queryClient = new QueryClient({
 		defaultOptions: {
-			queries: DEFAULT_QUERY_OPTIONS
+			queries: {
+				refetchOnMount: "always",
+				refetchOnReconnect: "always",
+				retry: false,
+				networkMode: "offlineFirst"
+			}
 		}
 	})
 
@@ -45,7 +42,6 @@ vi.mock("@/queries/client", async () => {
 
 	return {
 		default: queryClient,
-		DEFAULT_QUERY_OPTIONS,
 		queryUpdater: {
 			get: (queryKey: unknown[]) => queryClient.getQueryData(queryKey),
 			set: (queryKey: unknown[], updater: unknown) =>

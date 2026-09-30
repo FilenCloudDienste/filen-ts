@@ -43,7 +43,7 @@ function FileProviderSettings() {
 	const [biometric, setBiometric] = useSecureStore<Biometric>("biometric", {
 		enabled: false
 	})
-	const { availableBytes } = useDeviceDiskSpace()
+	const availableBytes = useDeviceDiskSpace()
 	const cacheBudgetQuery = useFileProviderCacheBudgetQuery({ enabled })
 	const currentCacheBudgetBytes = cacheBudgetQuery.data
 
@@ -200,34 +200,28 @@ function FileProviderSettings() {
 				const sorted = Array.from(valueSet).sort((a, b) => a - b)
 
 				actionSheet.show({
-					buttons: [
-						...sorted.map(bytes => {
-							const title = bytes === currentCacheBudgetBytes ? `${formatBytes(bytes)} (${t("current")})` : formatBytes(bytes)
+					buttons: sorted.map(bytes => {
+						const title = bytes === currentCacheBudgetBytes ? `${formatBytes(bytes)} (${t("current")})` : formatBytes(bytes)
 
-							return {
-								title,
-								onPress: async () => {
-									if (bytes === currentCacheBudgetBytes) {
-										return
-									}
+						return {
+							title,
+							onPress: async () => {
+								if (bytes === currentCacheBudgetBytes) {
+									return
+								}
 
-									const result = await run(async () => {
-										await fileProvider.setCacheBudget(bytes)
-										await invalidateFileProviderCacheBudgetQuery()
-									})
+								const result = await run(async () => {
+									await fileProvider.setCacheBudget(bytes)
+									await invalidateFileProviderCacheBudgetQuery()
+								})
 
-									if (!result.success) {
-										logger.error("file-provider", "setCacheBudget() failed", { bytes, error: result.error })
-										alerts.error(result.error)
-									}
+								if (!result.success) {
+									logger.error("file-provider", "setCacheBudget() failed", { bytes, error: result.error })
+									alerts.error(result.error)
 								}
 							}
-						}),
-						{
-							title: t("close"),
-							cancel: true
 						}
-					]
+					})
 				})
 			}
 		})

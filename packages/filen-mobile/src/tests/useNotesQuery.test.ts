@@ -14,7 +14,6 @@ const { mockQueryUpdaterSet } = vi.hoisted(() => ({
 }))
 
 vi.mock("@/queries/client", () => ({
-	DEFAULT_QUERY_OPTIONS: {},
 	queryUpdater: { set: mockQueryUpdaterSet }
 }))
 

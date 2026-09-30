@@ -9,7 +9,6 @@ import { cn } from "@filen/shared"
 export type Button = {
 	icon?: React.ComponentProps<typeof Ionicons>["name"]
 	iconColor?: string
-	iconSize?: number
 	// Custom leading slot (e.g. an image preview). Takes the icon's place;
 	// when set, `icon` is ignored.
 	leading?: React.ReactNode
@@ -101,7 +100,6 @@ export function Group({ buttons, className }: { buttons: Button[]; className?: s
 					{
 						onPress,
 						icon,
-						iconSize,
 						iconColor,
 						leading,
 						title,
@@ -131,7 +129,7 @@ export function Group({ buttons, className }: { buttons: Button[]; className?: s
 									<View className="bg-transparent flex-row items-center">
 										<Ionicons
 											name={icon}
-											size={iconSize ?? 22}
+											size={22}
 											color={iconColor ?? textForeground.color}
 										/>
 									</View>

@@ -146,7 +146,6 @@ export function buildSelectionMenuButtons({
 		onPress: async () => {
 			const selectResult = await run(async () => {
 				return await selectPlaylists({
-					multiple: true,
 					playlistUuidsToExclude: [playlist.uuid]
 				})
 			})
@@ -368,7 +367,7 @@ export function buildPlaylistMenuButtons({ t, playlist }: { t: TFunction; playli
 					return
 				}
 
-				if (promptResult.data.cancelled || promptResult.data.type !== "string") {
+				if (promptResult.data.cancelled) {
 					return
 				}
 

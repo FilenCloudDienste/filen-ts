@@ -84,9 +84,7 @@ vi.mock("@/components/itemIcons", () => ({ FileIcon: () => null, DirectoryIcon: 
 vi.mock("@/features/drive/drivePublicLink", () => ({
 	enablePublicLink: vi.fn(),
 	disablePublicLink: vi.fn(),
-	updatePublicLink: vi.fn(),
-	removeDirLink: vi.fn(),
-	removeFileLink: vi.fn()
+	updatePublicLink: vi.fn()
 }))
 vi.mock("@/features/drive/driveTrash", () => ({
 	deletePermanently: vi.fn(),
@@ -97,7 +95,7 @@ vi.mock("@/features/drive/driveTrash", () => ({
 	deleteVersion: vi.fn()
 }))
 vi.mock("@/features/drive/driveDirectory", () => ({ createDirectory: vi.fn(), move: vi.fn() }))
-vi.mock("@/features/drive/driveMetadata", () => ({ favorite: vi.fn(), rename: vi.fn(), setDirColor: vi.fn(), updateTimestamps: vi.fn() }))
+vi.mock("@/features/drive/driveMetadata", () => ({ favorite: vi.fn(), rename: vi.fn(), setDirColor: vi.fn() }))
 vi.mock("@/features/drive/driveShare", () => ({ shareWithFilenUser: vi.fn(), removeShare: vi.fn() }))
 vi.mock("@/features/drive/driveSelectSession", () => ({ selectCopyDestination: vi.fn() }))
 vi.mock("@/features/copy/copyRunner", () => ({ default: { startCopyItems: vi.fn() } }))

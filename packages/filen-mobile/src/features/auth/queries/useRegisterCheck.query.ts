@@ -52,7 +52,6 @@ export function useRegisterCheckQuery(
 		networkMode: "always",
 		refetchOnMount: "always",
 		refetchOnReconnect: false,
-		refetchOnWindowFocus: false,
 		...options,
 		queryKey: [BASE_QUERY_KEY],
 		queryFn: () => fetchData()

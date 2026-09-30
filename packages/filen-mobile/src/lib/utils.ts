@@ -1,7 +1,5 @@
 import mimeTypes from "mime-types"
 
-export { listLocalDirectoryRecursive } from "@/lib/fsUtils"
-
 export function normalizeModificationTimestampForComparison(timestamp: number): number {
 	return Math.floor(timestamp / 1000)
 }

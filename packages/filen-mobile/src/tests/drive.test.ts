@@ -17,7 +17,6 @@ const {
 	mockDriveItemsQueryUpdateForNormalParent,
 	mockDriveItemsQueryGet,
 	mockCacheForgetItem,
-	mockCacheDirectoryUuidToAnyNormalDir,
 	mockUnwrapParentUuid,
 	mockUnwrappedDirIntoDriveItem,
 	mockUnwrappedFileIntoDriveItem,
@@ -25,7 +24,6 @@ const {
 	mockUnwrapDirMeta,
 	mockUnwrapFileMeta,
 	MockAnyNormalDirDir,
-	MockCreatedTimeSet,
 	MockCreatedTimeKeep,
 	mockSdkModule
 } = vi.hoisted(() => {
@@ -48,8 +46,6 @@ const {
 		cacheNewNormalDir: vi.fn()
 	}
 
-	const mockCacheDirectoryUuidToAnyNormalDir = new Map<string, unknown>()
-
 	class HoistedAnyNormalDirRoot {
 		tag = "Root"
 		inner: unknown[]
@@ -65,19 +61,6 @@ const {
 
 		constructor(v: unknown) {
 			this.inner = [v]
-		}
-	}
-
-	class HoistedCreatedTimeSet {
-		tag = "Set"
-		inner: bigint[]
-
-		constructor(v: bigint) {
-			this.inner = [v]
-		}
-
-		static new(v: bigint) {
-			return new HoistedCreatedTimeSet(v)
 		}
 	}
 
@@ -136,7 +119,6 @@ const {
 			}
 		},
 		CreatedTime: {
-			Set: HoistedCreatedTimeSet,
 			Keep: HoistedCreatedTimeKeep
 		},
 		DirColor: {},
@@ -156,7 +138,6 @@ const {
 		mockDriveItemsQueryUpdateForNormalParent: vi.fn(),
 		mockDriveItemsQueryGet: vi.fn().mockReturnValue(null),
 		mockCacheForgetItem: vi.fn(),
-		mockCacheDirectoryUuidToAnyNormalDir,
 		mockUnwrapParentUuid: vi.fn().mockReturnValue("parent-uuid-0001"),
 		mockUnwrappedDirIntoDriveItem: vi.fn(),
 		mockUnwrappedFileIntoDriveItem: vi.fn(),
@@ -164,7 +145,6 @@ const {
 		mockUnwrapDirMeta: vi.fn(x => x),
 		mockUnwrapFileMeta: vi.fn(x => x),
 		MockAnyNormalDirDir: HoistedAnyNormalDirDir,
-		MockCreatedTimeSet: HoistedCreatedTimeSet,
 		MockCreatedTimeKeep: HoistedCreatedTimeKeep,
 		mockSdkModule
 	}
@@ -187,7 +167,7 @@ vi.mock("@/lib/cache", () => ({
 		forgetItem: mockCacheForgetItem,
 		cacheNewFile: vi.fn(),
 		cacheNewNormalDir: vi.fn(),
-		directoryUuidToAnyNormalDir: mockCacheDirectoryUuidToAnyNormalDir
+		directoryUuidToAnyNormalDir: new Map()
 	}
 }))
 
@@ -402,11 +382,10 @@ describe("drive.rename", () => {
 
 		await drive.rename({ item, newName: "NewName" })
 
-		expect(mockAuthedSdkClient.updateDirMetadata).toHaveBeenCalledWith(
-			item.data,
-			{ name: "NewName", created: expect.any(MockCreatedTimeKeep) },
-			undefined
-		)
+		expect(mockAuthedSdkClient.updateDirMetadata).toHaveBeenCalledWith(item.data, {
+			name: "NewName",
+			created: expect.any(MockCreatedTimeKeep)
+		})
 	})
 
 	it("calls SDK updateFileMetadata when newName differs (file)", async () => {
@@ -418,11 +397,7 @@ describe("drive.rename", () => {
 
 		await drive.rename({ item, newName: "summary.txt" })
 
-		expect(mockAuthedSdkClient.updateFileMetadata).toHaveBeenCalledWith(
-			item.data,
-			expect.objectContaining({ name: "summary.txt" }),
-			undefined
-		)
+		expect(mockAuthedSdkClient.updateFileMetadata).toHaveBeenCalledWith(item.data, expect.objectContaining({ name: "summary.txt" }))
 	})
 
 	it("proceeds with SDK call when decryptedMeta is null and newName is non-empty (dir)", async () => {
@@ -445,11 +420,10 @@ describe("drive.rename", () => {
 
 		await drive.rename({ item, newName: "FreshName" })
 
-		expect(mockAuthedSdkClient.updateDirMetadata).toHaveBeenCalledWith(
-			item.data,
-			{ name: "FreshName", created: expect.any(MockCreatedTimeKeep) },
-			undefined
-		)
+		expect(mockAuthedSdkClient.updateDirMetadata).toHaveBeenCalledWith(item.data, {
+			name: "FreshName",
+			created: expect.any(MockCreatedTimeKeep)
+		})
 	})
 
 	it("throws 'Invalid item type' for sharedRootDirectory", async () => {
@@ -497,7 +471,7 @@ describe("drive.favorite", () => {
 
 		await drive.favorite({ item, favorited: true })
 
-		expect(mockAuthedSdkClient.setFavorite).toHaveBeenCalledWith(expect.objectContaining({ tag: "File" }), true, undefined)
+		expect(mockAuthedSdkClient.setFavorite).toHaveBeenCalledWith(expect.objectContaining({ tag: "File" }), true)
 	})
 
 	it("calls SDK setFavorite when toggling true→false (directory)", async () => {
@@ -508,7 +482,7 @@ describe("drive.favorite", () => {
 
 		await drive.favorite({ item, favorited: false })
 
-		expect(mockAuthedSdkClient.setFavorite).toHaveBeenCalledWith(expect.objectContaining({ tag: "Dir" }), false, undefined)
+		expect(mockAuthedSdkClient.setFavorite).toHaveBeenCalledWith(expect.objectContaining({ tag: "Dir" }), false)
 	})
 
 	it("favorites query updater adds item on favorite, de-duping by uuid", async () => {
@@ -562,113 +536,6 @@ describe("drive.favorite", () => {
 
 		await expect(drive.favorite({ item, favorited: true })).rejects.toThrow("Invalid item type")
 		expect(mockGetSdkClients).not.toHaveBeenCalled()
-	})
-})
-
-// ============================================================================
-// Drive.updateTimestamps (including BUGFIX: created=0 / modified=0)
-// ============================================================================
-
-describe("drive.updateTimestamps", () => {
-	beforeEach(() => {
-		vi.clearAllMocks()
-		mockGetSdkClients.mockResolvedValue({ authedSdkClient: mockAuthedSdkClient })
-		mockUnwrapParentUuid.mockReturnValue("parent-uuid-0001")
-	})
-
-	it("sends CreatedTime.Set(0n) for created=0 on a directory (BUGFIX: epoch-0 not falsy)", async () => {
-		const item = makeDirItem()
-		const returned = { ...item.data }
-		mockAuthedSdkClient.updateDirMetadata.mockResolvedValue(returned)
-		mockUnwrappedDirIntoDriveItem.mockReturnValue({ type: "directory", data: item.data })
-
-		await drive.updateTimestamps({ item, created: 0 })
-
-		const callArgs = mockAuthedSdkClient.updateDirMetadata.mock.calls[0]![1] as {
-			created: InstanceType<typeof MockCreatedTimeSet> | InstanceType<typeof MockCreatedTimeKeep>
-		}
-
-		expect(callArgs.created).toBeInstanceOf(MockCreatedTimeSet)
-		expect((callArgs.created as InstanceType<typeof MockCreatedTimeSet>).inner[0]).toBe(BigInt(0))
-	})
-
-	it("sends BigInt(0) for modified=0 on a file (BUGFIX: epoch-0 not falsy)", async () => {
-		const item = makeFileItem()
-		const returned = { region: "us-east-1", ...item.data }
-		mockAuthedSdkClient.updateFileMetadata.mockResolvedValue(returned)
-		mockUnwrappedFileIntoDriveItem.mockReturnValue({ type: "file", data: item.data })
-
-		await drive.updateTimestamps({ item, modified: 0 })
-
-		expect(mockAuthedSdkClient.updateFileMetadata).toHaveBeenCalledWith(
-			item.data,
-			expect.objectContaining({ lastModified: BigInt(0) }),
-			undefined
-		)
-	})
-
-	it("sends CreatedTime.Set for created=0 on a file (BUGFIX: uses Set not Keep)", async () => {
-		const item = makeFileItem()
-		const returned = { region: "us-east-1", ...item.data }
-		mockAuthedSdkClient.updateFileMetadata.mockResolvedValue(returned)
-		mockUnwrappedFileIntoDriveItem.mockReturnValue({ type: "file", data: item.data })
-
-		await drive.updateTimestamps({ item, created: 0 })
-
-		const callArgs = mockAuthedSdkClient.updateFileMetadata.mock.calls[0]![1] as {
-			created: InstanceType<typeof MockCreatedTimeSet> | InstanceType<typeof MockCreatedTimeKeep>
-		}
-
-		expect(callArgs.created).toBeInstanceOf(MockCreatedTimeSet)
-		expect((callArgs.created as InstanceType<typeof MockCreatedTimeSet>).inner[0]).toBe(BigInt(0))
-	})
-
-	it("sends CreatedTime.Set(1700000000000n) for created=1700000000000", async () => {
-		const item = makeDirItem()
-		const returned = { ...item.data }
-		mockAuthedSdkClient.updateDirMetadata.mockResolvedValue(returned)
-		mockUnwrappedDirIntoDriveItem.mockReturnValue({ type: "directory", data: item.data })
-
-		await drive.updateTimestamps({ item, created: 1700000000000 })
-
-		const callArgs = mockAuthedSdkClient.updateDirMetadata.mock.calls[0]![1] as {
-			created: InstanceType<typeof MockCreatedTimeSet> | InstanceType<typeof MockCreatedTimeKeep>
-		}
-
-		expect(callArgs.created).toBeInstanceOf(MockCreatedTimeSet)
-		expect((callArgs.created as InstanceType<typeof MockCreatedTimeSet>).inner[0]).toBe(BigInt(1700000000000))
-	})
-
-	it("sends CreatedTime.Keep when created is not provided (directory)", async () => {
-		const item = makeDirItem()
-		const returned = { ...item.data }
-		mockAuthedSdkClient.updateDirMetadata.mockResolvedValue(returned)
-		mockUnwrappedDirIntoDriveItem.mockReturnValue({ type: "directory", data: item.data })
-
-		await drive.updateTimestamps({ item })
-
-		expect(mockAuthedSdkClient.updateDirMetadata).toHaveBeenCalledWith(
-			item.data,
-			{ name: undefined, created: expect.any(MockCreatedTimeKeep) },
-			undefined
-		)
-	})
-
-	it("uses CreatedTime.Keep when both created and modified are undefined (file)", async () => {
-		const item = makeFileItem()
-		const returned = { region: "us-east-1", ...item.data }
-		mockAuthedSdkClient.updateFileMetadata.mockResolvedValue(returned)
-		mockUnwrappedFileIntoDriveItem.mockReturnValue({ type: "file", data: item.data })
-
-		await drive.updateTimestamps({ item })
-
-		const callArgs = mockAuthedSdkClient.updateFileMetadata.mock.calls[0]![1] as {
-			created: InstanceType<typeof MockCreatedTimeSet> | InstanceType<typeof MockCreatedTimeKeep>
-			lastModified: bigint | undefined
-		}
-
-		expect(callArgs.created).toBeInstanceOf(MockCreatedTimeKeep)
-		expect(callArgs.lastModified).toBeUndefined()
 	})
 })
 
@@ -799,14 +666,6 @@ describe("drive.move", () => {
 		const newParentDir = new MockAnyNormalDirDir({ uuid: "new-parent-uuid" })
 
 		await expect(drive.move({ item, newParent: newParentDir as any })).rejects.toThrow("Invalid item type")
-		expect(mockGetSdkClients).not.toHaveBeenCalled()
-	})
-
-	it("throws 'Invalid parent type' for sharedRootDirectory parent", async () => {
-		const item = makeDirItem()
-		const invalidParent = makeSharedRootDirItem()
-
-		await expect(drive.move({ item, newParent: invalidParent })).rejects.toThrow("Invalid parent type")
 		expect(mockGetSdkClients).not.toHaveBeenCalled()
 	})
 })
@@ -1001,43 +860,21 @@ describe("drive.trash", () => {
 describe("drive.createDirectory", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
-		mockAuthedSdkClient.root.mockReturnValue({ uuid: "root-uuid-0001" })
 		mockGetSdkClients.mockResolvedValue({ authedSdkClient: mockAuthedSdkClient })
-		mockUnwrapParentUuid.mockReturnValue("root-uuid-0001")
-		mockCacheDirectoryUuidToAnyNormalDir.clear()
 	})
 
-	it("uses AnyNormalDir.Root when parent is the string 'root'", async () => {
+	it("creates under the given parent and updates that parent's listing", async () => {
+		const parent = new MockAnyNormalDirDir({ uuid: "parent-dir-uuid" })
 		const createdData = { uuid: "new-dir-uuid", size: 0n, decryptedMeta: { name: "NewDir" } }
-		const createdDir = { ...createdData }
-		mockAuthedSdkClient.createDir.mockResolvedValue(createdDir)
+
+		mockAuthedSdkClient.createDir.mockResolvedValue({ ...createdData })
 		mockUnwrappedDirIntoDriveItem.mockReturnValue({ type: "directory", data: createdData } as any)
 		mockUnwrapDirMeta.mockReturnValue({ uuid: "new-dir-uuid" })
 
-		await drive.createDirectory({ parent: "root", name: "NewDir" })
+		await drive.createDirectory({ parent: parent as any, name: "NewDir" })
 
-		expect(mockAuthedSdkClient.createDir).toHaveBeenCalledWith(expect.objectContaining({ tag: "Root" }), "NewDir", undefined)
-	})
-
-	it("uses AnyNormalDir.Root when parent uuid matches root uuid", async () => {
-		const rootDir = makeDirItem({ uuid: "root-uuid-0001" })
-		const createdData = { uuid: "new-dir-uuid", size: 0n, decryptedMeta: { name: "AnotherDir" } }
-		const createdDir = { ...createdData }
-
-		mockAuthedSdkClient.createDir.mockResolvedValue(createdDir)
-		mockUnwrappedDirIntoDriveItem.mockReturnValue({ type: "directory", data: createdData } as any)
-		mockUnwrapDirMeta.mockReturnValue({ uuid: "new-dir-uuid" })
-
-		await drive.createDirectory({ parent: rootDir, name: "AnotherDir" })
-
-		expect(mockAuthedSdkClient.createDir).toHaveBeenCalledWith(expect.objectContaining({ tag: "Root" }), "AnotherDir", undefined)
-	})
-
-	it("throws 'Parent not found in cache' when parent uuid is not in cache and not root", async () => {
-		const unknownParent = makeDirItem({ uuid: "unknown-dir-uuid" })
-		// directoryUuidToAnyNormalDir is empty
-
-		await expect(drive.createDirectory({ parent: unknownParent, name: "Child" })).rejects.toThrow("Parent not found in cache")
+		expect(mockAuthedSdkClient.createDir).toHaveBeenCalledWith(parent, "NewDir", undefined)
+		expect(mockDriveItemsQueryUpdateForNormalParent).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ parentUuid: "parent-dir-uuid" }))
 	})
 
 	it("post-create updater removes uuid-match and name-match before appending (dedup)", async () => {
@@ -1055,7 +892,7 @@ describe("drive.createDirectory", () => {
 		mockUnwrappedDirIntoDriveItem.mockReturnValue(createdItem)
 		mockUnwrapDirMeta.mockReturnValue({ uuid: "new-dir-uuid" })
 
-		await drive.createDirectory({ parent: "root", name: "Report" })
+		await drive.createDirectory({ parent: new MockAnyNormalDirDir({ uuid: "parent-dir-uuid" }) as any, name: "Report" })
 
 		const updateCall = mockDriveItemsQueryUpdateForNormalParent.mock.calls[0]
 
@@ -1070,13 +907,6 @@ describe("drive.createDirectory", () => {
 		expect(after.some(i => i.data.uuid === "other-dir-uuid")).toBe(true)
 		// new item appended
 		expect(after[after.length - 1]).toBe(createdItem)
-	})
-
-	it("throws 'Invalid parent type' for sharedRootDirectory parent", async () => {
-		const invalidParent = makeSharedRootDirItem()
-
-		await expect(drive.createDirectory({ parent: invalidParent, name: "Child" })).rejects.toThrow("Invalid parent type")
-		expect(mockGetSdkClients).not.toHaveBeenCalled()
 	})
 })
 
@@ -1182,7 +1012,7 @@ describe("drive.emptyTrash", () => {
 	it("does NOT call cache.forgetItem when trash query is null/undefined", async () => {
 		mockDriveItemsQueryGet.mockReturnValue(null)
 
-		await drive.emptyTrash({})
+		await drive.emptyTrash()
 
 		expect(mockCacheForgetItem).not.toHaveBeenCalled()
 	})
@@ -1194,7 +1024,7 @@ describe("drive.emptyTrash", () => {
 
 		mockDriveItemsQueryGet.mockReturnValue([item1, item2, item3])
 
-		await drive.emptyTrash({})
+		await drive.emptyTrash()
 
 		expect(mockCacheForgetItem).toHaveBeenCalledTimes(3)
 		expect(mockCacheForgetItem).toHaveBeenCalledWith("trashed-uuid-1")
@@ -1205,7 +1035,7 @@ describe("drive.emptyTrash", () => {
 	it("trash query updater returns empty array after emptyTrash", async () => {
 		mockDriveItemsQueryGet.mockReturnValue([makeFileItem({ uuid: "trashed-uuid-1" })])
 
-		await drive.emptyTrash({})
+		await drive.emptyTrash()
 
 		const trashUpdate = mockDriveItemsQueryUpdate.mock.calls.find(call => call[0]?.params?.path?.type === "trash")
 

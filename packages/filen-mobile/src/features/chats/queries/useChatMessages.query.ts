@@ -1,5 +1,5 @@
 import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
-import queryClient, { DEFAULT_QUERY_OPTIONS, queryUpdater } from "@/queries/client"
+import queryClient, { queryUpdater } from "@/queries/client"
 import auth from "@/lib/auth"
 import { sortParams } from "@filen/shared"
 import { type Chat } from "@/types"
@@ -63,7 +63,6 @@ export function useChatMessagesQuery(
 	options?: Omit<UseQueryOptions, "queryKey" | "queryFn">
 ): UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error> {
 	const query = useQuery({
-		...DEFAULT_QUERY_OPTIONS,
 		// Every message change arrives as a socket event, so reopening a chat reuses a read from the
 		// current socket session.
 		refetchOnMount: socketCoveredRefetchOnMount(),

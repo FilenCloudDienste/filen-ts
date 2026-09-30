@@ -1,5 +1,5 @@
 import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
-import { DEFAULT_QUERY_OPTIONS, queryUpdater, preserveArrayIdentity, queryClient } from "@/queries/client"
+import { queryUpdater, preserveArrayIdentity, queryClient } from "@/queries/client"
 import auth from "@/lib/auth"
 import cache from "@/lib/cache"
 import { sortParams, run, upsertItems } from "@filen/shared"
@@ -678,11 +678,8 @@ export function useDriveItemsQuery(
 	// The offline branch of fetchData reads only from the local offline.* store
 	// and never touches the network — it must not be paused by TanStack's
 	// "offlineFirst" gating. All other path types use the global default.
-	const networkMode = params.path.type === "offline" ? "always" : DEFAULT_QUERY_OPTIONS.networkMode
-
 	const query = useQuery({
-		...DEFAULT_QUERY_OPTIONS,
-		networkMode,
+		...(params.path.type === "offline" ? { networkMode: "always" as const } : undefined),
 		...options,
 		// The key must stay context-free + byte-compatible with the `{ type, uuid }` keys the updaters
 		// write, so it drops every fetch-only param; fetchData, by contrast, gets the FULL params

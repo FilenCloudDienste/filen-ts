@@ -65,10 +65,11 @@ const Message = ({
 	const showTombstone = senderBlocked && !isRevealed
 	const textMutedForeground = useResolveClassNames("text-muted-foreground")
 	const senderLabel = senderBlocked ? null : messageSenderLabel(chat, info.item, stringifiedClient?.userId, t("unknown"))
+	const fromSelf = info.item.inner.senderId === stringifiedClient?.userId
 
 	return (
 		<View
-			className={cn("w-full h-auto", info.item.inner.senderId === stringifiedClient?.userId ? "items-end" : "items-start")}
+			className={cn("w-full h-auto", fromSelf ? "items-end" : "items-start")}
 			style={{
 				transform: [
 					{
@@ -90,7 +91,7 @@ const Message = ({
 			)}
 			{chat.lastFocus &&
 				info.item.sentTimestamp > chat.lastFocus &&
-				info.item.inner.senderId !== stringifiedClient?.userId &&
+				!fromSelf &&
 				!senderBlocked &&
 				!(prevMessage && prevMessage.sentTimestamp > chat.lastFocus) && (
 					<View className="flex-1 flex-row px-4 items-center pb-2">
@@ -133,19 +134,17 @@ const Message = ({
 						chat={chat}
 						info={info}
 						className="w-full h-auto pb-2 px-4"
-						isAnchoredToRight={info.item.inner.senderId !== stringifiedClient?.userId}
+						isAnchoredToRight={!fromSelf}
 					>
 						<View
 							className={cn(
 								"p-3 rounded-3xl w-auto h-auto flex-row shadow-sm",
-								info.item.inner.senderId === stringifiedClient?.userId
-									? cn(isInflightError ? "bg-red-500" : "bg-blue-500")
-									: "bg-background-secondary"
+								fromSelf ? cn(isInflightError ? "bg-red-500" : "bg-blue-500") : "bg-background-secondary"
 							)}
 						>
 							{nextMessage?.inner.senderId !== info.item.inner.senderId && (
 								<Fragment>
-									{info.item.inner.senderId === stringifiedClient?.userId ? (
+									{fromSelf ? (
 										<View className="absolute right-2 -bottom-1.75 overflow-hidden bg-transparent w-5 h-3.75">
 											<View
 												className={cn(
@@ -174,7 +173,7 @@ const Message = ({
 								<Attachments
 									chat={chat}
 									message={info.item}
-									fromSelf={info.item.inner.senderId === stringifiedClient?.userId}
+									fromSelf={fromSelf}
 									single={true}
 									layout={layout}
 								/>
@@ -185,9 +184,7 @@ const Message = ({
 											<Text
 												className={cn(
 													"text-sm shrink-0 flex-wrap text-wrap items-center break-all",
-													info.item.inner.senderId === stringifiedClient?.userId
-														? "text-white"
-														: "text-foreground"
+													fromSelf ? "text-white" : "text-foreground"
 												)}
 											>
 												{messageDisplayBody(info.item)}
@@ -196,14 +193,14 @@ const Message = ({
 											<Regexed
 												chat={chat}
 												message={info.item}
-												fromSelf={info.item.inner.senderId === stringifiedClient?.userId}
+												fromSelf={fromSelf}
 											/>
 										)}
 									</View>
 									<Attachments
 										chat={chat}
 										message={info.item}
-										fromSelf={info.item.inner.senderId === stringifiedClient?.userId}
+										fromSelf={fromSelf}
 										single={false}
 										layout={layout}
 									/>

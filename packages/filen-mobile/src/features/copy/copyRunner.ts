@@ -47,7 +47,7 @@ import {
 	type CopyJobGlyph,
 	type CopySettlement
 } from "@/features/copy/copyAdapter"
-import { copyGlyphForCopyItems, copyGlyphForEntries, copyGlyphForItems, driveItemToCopyItem } from "@/features/copy/copySource"
+import { copyGlyph, driveItemToCopyItem } from "@/features/copy/copySource"
 import copyActivity from "@/features/drive/copyActivity"
 import socketCreateBatcher from "@/features/drive/socketCreateBatcher"
 import { markDirectorySizesStale } from "@/features/drive/queries/useDirectorySize.query"
@@ -225,9 +225,7 @@ class CopyRunner {
 				destination: destinationDir
 			},
 			destination,
-			itemCount: items.length,
-			name: copyRowName(items.length, driveItemDisplayName(first)),
-			glyph: copyGlyphForItems(items)
+			singleName: driveItemDisplayName(first)
 		})
 	}
 
@@ -254,9 +252,7 @@ class CopyRunner {
 				destination: destinationDir
 			},
 			destination,
-			itemCount: items.length,
-			name: copyRowName(items.length, name),
-			glyph: copyGlyphForCopyItems(items)
+			singleName: name
 		})
 	}
 
@@ -269,17 +265,13 @@ class CopyRunner {
 			return null
 		}
 
-		const entries = retryEntries(job.retryable)
-
 		return this.launch({
 			source: {
 				kind: "entries",
-				entries
+				entries: retryEntries(job.retryable)
 			},
 			destination: job.destination,
-			itemCount: entries.length,
-			name: copyRowName(entries.length, first.info.destName),
-			glyph: copyGlyphForEntries(entries)
+			singleName: first.info.destName
 		})
 	}
 
@@ -354,11 +346,16 @@ class CopyRunner {
 		this.controls.get(jobId)?.pause.resume()
 	}
 
-	private launch(request: Omit<CopyRequest, "id">): string {
+	private launch({ source, destination, singleName }: { source: CopySource; destination: CopyDestination; singleName: string }): string {
 		const id = randomUUID()
+		const itemCount = source.kind === "items" ? source.items.length : source.entries.length
 		const job = this.run({
-			...request,
-			id
+			id,
+			source,
+			destination,
+			itemCount,
+			name: copyRowName(itemCount, singleName),
+			glyph: copyGlyph(itemCount, source.kind === "items" ? source.items[0] : source.entries[0]?.item)
 		}).catch((e: unknown) => {
 			logger.error("copy", "copy job threw", { id, error: e })
 

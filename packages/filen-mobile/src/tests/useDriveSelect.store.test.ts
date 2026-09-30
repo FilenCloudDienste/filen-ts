@@ -4,7 +4,7 @@ import { vi, describe, it, expect, beforeEach } from "vitest"
 // type-only import chain never evaluates it.
 vi.mock("@filen/sdk-rs", () => ({}))
 
-import useDriveSelectStore from "@/features/drive/store/useDriveSelect.store"
+import useDriveSelectStore, { selectDriveSelectSelection } from "@/features/drive/store/useDriveSelect.store"
 import type { DriveItem } from "@/types"
 
 function makeDriveItem(uuid: string): DriveItem {
@@ -17,47 +17,66 @@ function makeDriveItem(uuid: string): DriveItem {
 }
 
 beforeEach(() => {
-	useDriveSelectStore.getState().endSelectSession()
+	useDriveSelectStore.setState({ sessions: {} })
 })
 
+function selection(sessionId: string | undefined): string[] {
+	return selectDriveSelectSelection(useDriveSelectStore.getState(), sessionId).map(i => i.data.uuid)
+}
+
 describe("useDriveSelectStore select sessions", () => {
-	it("seeds the initial selection on the session's first screen", () => {
-		useDriveSelectStore.getState().seedSelectSession("session-1", [makeDriveItem("a")])
+	it("opening a session seeds its selection with the preselection", () => {
+		useDriveSelectStore.getState().openSession("session-1", [], [makeDriveItem("a")])
 
-		expect(useDriveSelectStore.getState().selectedItems.map(i => i.data.uuid)).toEqual(["a"])
-		expect(useDriveSelectStore.getState().seededSelectId).toBe("session-1")
+		expect(selection("session-1")).toEqual(["a"])
 	})
 
-	it("a later screen of the SAME session never reseeds — accumulated selection survives subfolder navigation", () => {
-		useDriveSelectStore.getState().seedSelectSession("session-1", [])
-		useDriveSelectStore.getState().setSelectedItems([makeDriveItem("a")])
+	it("a session opened without a preselection starts empty", () => {
+		useDriveSelectStore.getState().openSession("session-1", [makeDriveItem("x")])
 
-		// Browsing into a subfolder mounts another screen which seeds with the same session id.
-		useDriveSelectStore.getState().seedSelectSession("session-1", [])
-
-		expect(useDriveSelectStore.getState().selectedItems.map(i => i.data.uuid)).toEqual(["a"])
+		expect(selection("session-1")).toEqual([])
 	})
 
-	it("a NEW session id reseeds, replacing the previous session's selection", () => {
-		useDriveSelectStore.getState().seedSelectSession("session-1", [])
-		useDriveSelectStore.getState().setSelectedItems([makeDriveItem("a")])
+	it("sessions keep separate selections", () => {
+		useDriveSelectStore.getState().openSession("session-1", [])
+		useDriveSelectStore.getState().openSession("session-2", [], [makeDriveItem("b")])
+		useDriveSelectStore.getState().setSelectedItems("session-1", prev => [...prev, makeDriveItem("a")])
 
-		useDriveSelectStore.getState().seedSelectSession("session-2", [makeDriveItem("b")])
+		expect(selection("session-1")).toEqual(["a"])
+		expect(selection("session-2")).toEqual(["b"])
 
-		expect(useDriveSelectStore.getState().selectedItems.map(i => i.data.uuid)).toEqual(["b"])
-		expect(useDriveSelectStore.getState().seededSelectId).toBe("session-2")
+		// Closing one session never touches another's selection.
+		useDriveSelectStore.getState().closeSession("session-1")
+
+		expect(selection("session-1")).toEqual([])
+		expect(selection("session-2")).toEqual(["b"])
 	})
 
-	it("endSelectSession clears both the selection and the session marker", () => {
-		useDriveSelectStore.getState().seedSelectSession("session-1", [makeDriveItem("a")])
-		useDriveSelectStore.getState().endSelectSession()
+	it("setting the selection of a closed or unknown session changes nothing", () => {
+		const before = useDriveSelectStore.getState()
 
-		expect(useDriveSelectStore.getState().selectedItems).toEqual([])
-		expect(useDriveSelectStore.getState().seededSelectId).toBeNull()
+		useDriveSelectStore.getState().setSelectedItems("gone", [makeDriveItem("a")])
 
-		// The next session (even with a reused id) seeds fresh.
-		useDriveSelectStore.getState().seedSelectSession("session-1", [makeDriveItem("c")])
+		expect(useDriveSelectStore.getState()).toBe(before)
+		expect(selection("gone")).toEqual([])
+	})
 
-		expect(useDriveSelectStore.getState().selectedItems.map(i => i.data.uuid)).toEqual(["c"])
+	it("a missing session or id reads as one stable empty selection", () => {
+		const state = useDriveSelectStore.getState()
+
+		expect(selectDriveSelectSelection(state, undefined)).toBe(selectDriveSelectSelection(state, "missing"))
+	})
+
+	it("updating the selection keeps the session's items", () => {
+		const item = makeDriveItem("x")
+
+		useDriveSelectStore.getState().openSession("session-1", [item])
+
+		const { items, itemUuids } = useDriveSelectStore.getState().sessions["session-1"] ?? {}
+
+		useDriveSelectStore.getState().setSelectedItems("session-1", [makeDriveItem("a")])
+
+		expect(useDriveSelectStore.getState().sessions["session-1"]?.items).toBe(items)
+		expect(useDriveSelectStore.getState().sessions["session-1"]?.itemUuids).toBe(itemUuids)
 	})
 })

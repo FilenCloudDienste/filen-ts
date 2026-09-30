@@ -60,8 +60,7 @@ export function usePhotoBulkActions({ items, drivePath }: { items: DriveItemFile
 				op: item =>
 					drive.favorite({
 						item,
-						favorited: !driveFlags.includesFavorited,
-						signal: undefined
+						favorited: !driveFlags.includesFavorited
 					})
 			})
 		}
@@ -221,7 +220,7 @@ export function usePhotoBulkActions({ items, drivePath }: { items: DriveItemFile
 					cancelText: t("cancel"),
 					destructive: true
 				},
-				op: item => drive.trash({ item, signal: undefined })
+				op: item => drive.trash({ item })
 			})
 		}
 	})

@@ -19,6 +19,8 @@ const { mockAppState } = vi.hoisted(() => {
 			}
 		},
 		emit: (state: string) => {
+			appState.currentState = state
+
 			for (const l of listeners) {
 				l(state)
 			}
@@ -33,30 +35,6 @@ const { mockAppState } = vi.hoisted(() => {
 		mockAppState: appState
 	}
 })
-
-vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
-
-vi.mock("@filen/shared", async () => ({
-	...(await import("@/tests/mocks/filenShared")),
-	// runEffect is used by useIsAppActive — provide a real-ish implementation
-	// that calls the setup function and returns a cleanup wrapper.
-	runEffect: (fn: (defer: (cleanup: () => void) => void) => void) => {
-		const cleanups: (() => void)[] = []
-		const defer = (cleanup: () => void) => {
-			cleanups.push(cleanup)
-		}
-
-		fn(defer)
-
-		return {
-			cleanup: () => {
-				for (const c of cleanups) {
-					c()
-				}
-			}
-		}
-	}
-}))
 
 vi.mock("react-native", () => ({
 	AppState: mockAppState
@@ -137,6 +115,34 @@ describe("useIsAppActive", () => {
 		})
 
 		expect(result.current).toBe(false)
+	})
+
+	it("does not re-render on inactive <-> background transitions (boolean snapshot unchanged)", () => {
+		mockAppState.currentState = "active"
+
+		let renders = 0
+
+		renderHook(() => {
+			renders++
+
+			return useIsAppActive()
+		})
+
+		act(() => {
+			mockAppState.emit("inactive")
+		})
+
+		const afterInactive = renders
+
+		act(() => {
+			mockAppState.emit("background")
+		})
+
+		act(() => {
+			mockAppState.emit("inactive")
+		})
+
+		expect(renders).toBe(afterInactive)
 	})
 
 	it("stops updating state after unmount — subscription is removed on cleanup", () => {

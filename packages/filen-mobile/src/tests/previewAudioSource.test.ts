@@ -52,7 +52,6 @@ vi.mock("react-native-reanimated", () => ({
 	withSpring: (value: unknown) => value
 }))
 vi.mock("react-native-worklets", () => ({ runOnJS: (fn: unknown) => fn }))
-vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
 vi.mock("expo-audio", () => ({
 	useAudioPlayer: mockUseAudioPlayer,
 	useAudioPlayerStatus: () => ({ isLoaded: true, isBuffering: false, playing: false, currentTime: 0, duration: 10 })

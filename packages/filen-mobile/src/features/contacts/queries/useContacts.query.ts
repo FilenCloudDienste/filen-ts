@@ -1,5 +1,5 @@
 import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
-import { DEFAULT_QUERY_OPTIONS, queryUpdater } from "@/queries/client"
+import { queryUpdater } from "@/queries/client"
 import auth from "@/lib/auth"
 
 export const BASE_QUERY_KEY = "useContactsQuery"
@@ -34,7 +34,6 @@ export function useContactsQuery(
 	options?: Omit<UseQueryOptions, "queryKey" | "queryFn">
 ): UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error> {
 	const query = useQuery({
-		...DEFAULT_QUERY_OPTIONS,
 		...options,
 		queryKey: [BASE_QUERY_KEY],
 		queryFn: ({ signal }) =>

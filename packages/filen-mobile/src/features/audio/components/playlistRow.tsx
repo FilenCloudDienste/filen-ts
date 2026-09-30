@@ -206,7 +206,7 @@ export function buildPlaylistRowButtons({ t, playlist }: { t: TFunction; playlis
 					return
 				}
 
-				if (promptResult.data.cancelled || promptResult.data.type !== "string") {
+				if (promptResult.data.cancelled) {
 					return
 				}
 
@@ -285,9 +285,7 @@ export function PlaylistRow({ playlist, selectOptions }: { playlist: PlaylistWit
 	const [isMenuOpen, setIsMenuOpen] = useState<boolean>(false)
 
 	const isCurrent = !!queueItem && playlist.uuid === queueItem.playlistUuid
-	const disabled =
-		(selectOptions?.playlistUuidsToExclude?.includes(playlist.uuid) ?? false) ||
-		(selectOptions ? !isSelected && !selectOptions.multiple : false)
+	const disabled = selectOptions?.playlistUuidsToExclude?.includes(playlist.uuid) ?? false
 
 	// The context menu (long-press) is only available in normal browse mode. In
 	// picker mode (`selectOptions`) or bulk-selection mode (`arePlaylistsSelected`)

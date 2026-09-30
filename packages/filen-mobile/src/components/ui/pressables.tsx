@@ -1,11 +1,5 @@
 import { withUniwind } from "uniwind"
-import {
-	PressableOpacity as PresstoPressableOpacity,
-	PressableScale as PresstoPressableScale,
-	PressableWithoutFeedback as PresstoPressableWithoutFeedback,
-	PressablesGroup as PresstoPressablesGroup
-} from "pressto"
-import { cn } from "@filen/shared"
+import { PressableOpacity as PresstoPressableOpacity, PressableScale as PresstoPressableScale } from "pressto"
 import { useLongPressGuard } from "@/components/ui/longPressMenuGuard"
 
 const PressableOpacityUniwind = withUniwind(PresstoPressableOpacity)
@@ -60,22 +54,5 @@ export const PressableScale = ({
 			onPress={guarded.onPress}
 			onPressIn={guarded.onPressIn}
 		/>
-	)
-}
-
-export const PressableWithoutFeedback = withUniwind(PresstoPressableWithoutFeedback)
-
-export const PressablesGroup = withUniwind(PresstoPressablesGroup)
-
-export const AndroidIconButton = (
-	props: React.ComponentProps<typeof PressableOpacity> & { className?: string; children?: React.ReactNode }
-) => {
-	return (
-		<PressableOpacity
-			{...props}
-			className={cn("rounded-full p-1.5", props.className)}
-		>
-			{props.children}
-		</PressableOpacity>
 	)
 }

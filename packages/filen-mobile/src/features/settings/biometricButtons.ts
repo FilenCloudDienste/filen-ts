@@ -7,22 +7,16 @@ import fileProvider from "@/features/settings/fileProvider"
 import { type Biometric } from "@/features/settings/screens/biometric"
 import logger from "@/lib/logger"
 
-export function disableBiometric({ setBiometric }: { setBiometric: (value: Biometric) => void }) {
-	setBiometric({ enabled: false })
-}
-
 export async function enableBiometric({
 	setBiometric,
 	fileProviderEnabled,
 	setFileProviderEnabled,
-	t,
-	biometric: _biometric
+	t
 }: {
 	setBiometric: (value: Biometric | ((prev: Biometric) => Biometric)) => void
 	fileProviderEnabled: boolean
 	setFileProviderEnabled: (value: boolean) => void
 	t: TFunction
-	biometric?: Biometric
 }) {
 	// If the file/documents provider is on, warn the user
 	// that enabling biometric will disable it. The native
@@ -74,7 +68,7 @@ export async function enableBiometric({
 		return
 	}
 
-	if (fallbackPromptResult.data.cancelled || fallbackPromptResult.data.type !== "string") {
+	if (fallbackPromptResult.data.cancelled) {
 		return
 	}
 
@@ -101,7 +95,7 @@ export async function enableBiometric({
 		return
 	}
 
-	if (confirmFallbackPasswordPromptResult.data.cancelled || confirmFallbackPasswordPromptResult.data.type !== "string") {
+	if (confirmFallbackPasswordPromptResult.data.cancelled) {
 		return
 	}
 

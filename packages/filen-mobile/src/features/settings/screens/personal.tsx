@@ -64,7 +64,7 @@ function Personal() {
 					return
 				}
 
-				if (promptResult.data.cancelled || promptResult.data.type !== "string") {
+				if (promptResult.data.cancelled) {
 					return
 				}
 
@@ -194,28 +194,22 @@ function Personal() {
 								subTitleNumberOfLines: 1,
 								onPress: () => {
 									actionSheet.show({
-										buttons: [
-											...COUNTRIES.map(country => ({
-												title: country,
-												onPress: () => {
-													setModified(true)
-													setPersonal(prev => {
-														if (!prev) {
-															return prev
-														}
+										buttons: COUNTRIES.map(country => ({
+											title: country,
+											onPress: () => {
+												setModified(true)
+												setPersonal(prev => {
+													if (!prev) {
+														return prev
+													}
 
-														return {
-															...prev,
-															country
-														}
-													})
-												}
-											})),
-											{
-												title: t("close"),
-												cancel: true
+													return {
+														...prev,
+														country
+													}
+												})
 											}
-										]
+										}))
 									})
 								}
 							}

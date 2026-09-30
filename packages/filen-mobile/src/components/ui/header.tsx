@@ -11,10 +11,6 @@ import { PressableScale } from "@/components/ui/pressables"
 
 export type HeaderItem =
 	| {
-			type: "text"
-			props?: React.ComponentProps<typeof Text>
-	  }
-	| {
 			type: "menu"
 			props?: Omit<React.ComponentProps<typeof Menu>, "children">
 			text?: React.ComponentProps<typeof Text>
@@ -28,26 +24,44 @@ export type HeaderItem =
 			icon?: React.ComponentProps<typeof Ionicons>
 	  }
 	| {
-			type: "custom"
-			children: React.ReactNode
-	  }
-	| {
 			type: "loader"
 			props?: React.ComponentProps<typeof ActivityIndicator>
 	  }
 
-export const ICON_SIZE = Platform.select({
-	ios: 24,
-	default: 24
-})
+const HeaderItemButton = ({
+	icon,
+	text,
+	className,
+	...props
+}: React.ComponentProps<typeof PressableScale> & {
+	icon?: React.ComponentProps<typeof Ionicons>
+	text?: React.ComponentProps<typeof Text>
+}) => {
+	return (
+		<PressableScale
+			{...props}
+			className={cn(
+				"size-9 items-center justify-center rounded-full",
+				!icon && Platform.OS === "ios" ? cn("px-2", className) : className
+			)}
+		>
+			{icon ? (
+				<Ionicons
+					{...icon}
+					size={24}
+				/>
+			) : (
+				<Text {...text} />
+			)}
+		</PressableScale>
+	)
+}
 
 export const HeaderLeftRightWrapper = ({
-	className,
 	isLeft,
 	isRight,
 	items
 }: {
-	className?: string
 	isLeft?: boolean
 	isRight?: boolean
 	items?: HeaderItem[]
@@ -66,42 +80,19 @@ export const HeaderLeftRightWrapper = ({
 					default: ""
 				}),
 				isLeft && Platform.OS === "android" ? "pr-4" : "",
-				isRight && Platform.OS === "android" ? "pl-4" : "",
-				className
+				isRight && Platform.OS === "android" ? "pl-4" : ""
 			)}
 		>
 			{items?.map((item, index) => {
 				switch (item.type) {
-					case "text": {
-						return (
-							<View
-								className="bg-transparent min-h-9 min-w-9 flex-row items-center"
-								key={index}
-							>
-								<Text {...item.props} />
-							</View>
-						)
-					}
-
 					case "button": {
 						return (
-							<PressableScale
+							<HeaderItemButton
 								key={index}
 								{...item.props}
-								className={cn(
-									"size-9 items-center justify-center rounded-full",
-									!item.icon && Platform.OS === "ios" ? cn("px-2", item.props?.className) : item.props?.className
-								)}
-							>
-								{item.icon ? (
-									<Ionicons
-										{...item.icon}
-										size={ICON_SIZE}
-									/>
-								) : (
-									<Text {...item.text} />
-								)}
-							</PressableScale>
+								icon={item.icon}
+								text={item.text}
+							/>
 						)
 					}
 
@@ -112,34 +103,12 @@ export const HeaderLeftRightWrapper = ({
 								{...item.props}
 								type="dropdown"
 							>
-								<PressableScale
+								<HeaderItemButton
 									{...item.triggerProps}
-									className={cn(
-										"size-9 items-center justify-center rounded-full",
-										!item.icon && Platform.OS === "ios" ? cn("px-2", item.props?.className) : item.props?.className
-									)}
-								>
-									{item.icon ? (
-										<Ionicons
-											{...item.icon}
-											size={ICON_SIZE}
-										/>
-									) : (
-										<Text {...item.text} />
-									)}
-								</PressableScale>
+									icon={item.icon}
+									text={item.text}
+								/>
 							</Menu>
-						)
-					}
-
-					case "custom": {
-						return (
-							<View
-								className="bg-transparent min-h-9 min-w-9 flex-row items-center"
-								key={index}
-							>
-								{item.children}
-							</View>
 						)
 					}
 
@@ -165,8 +134,6 @@ export const HeaderLeftRightWrapper = ({
 
 export const Header = ({
 	title,
-	shown,
-	largeTitle,
 	backVisible,
 	shadowVisible,
 	transparent,
@@ -176,8 +143,6 @@ export const Header = ({
 	backgroundColor
 }: {
 	title: string | React.ReactNode | ((props: { children: string; tintColor?: ColorValue | undefined }) => React.ReactNode)
-	shown?: boolean
-	largeTitle?: boolean
 	backVisible?: boolean
 	shadowVisible?: boolean
 	transparent?: boolean
@@ -213,14 +178,12 @@ export const Header = ({
 		<Stack.Screen
 			options={{
 				headerTitle: typeof title === "function" ? props => title(props) : typeof title === "string" ? title : () => title,
-				headerShown: shown ?? true,
+				headerShown: true,
 				headerShadowVisible: shadowVisible,
-				headerBlurEffect: undefined,
 				headerBackVisible: backVisible,
 				headerTransparent: transparent,
 				headerBackTitle: "",
 				headerBackButtonDisplayMode: "minimal",
-				headerLargeTitle: largeTitle,
 				headerTitleAlign: "left",
 				headerStyle: backgroundColor
 					? {

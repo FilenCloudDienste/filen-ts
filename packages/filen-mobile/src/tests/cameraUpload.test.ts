@@ -8,7 +8,6 @@ vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/u
 
 vi.mock("expo-media-library/next", async () => await import("@/tests/mocks/expoMediaLibrary"))
 
-vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
 vi.mock("react-native-blob-util", async () => await import("@/tests/mocks/reactNativeBlobUtil"))
 vi.mock("@preeternal/react-native-file-hash", async () => await import("@/tests/mocks/reactNativeFileHash"))
 
@@ -248,9 +247,6 @@ vi.mock("@/features/cameraUpload/cameraUploadState", () => {
 			setHash: async (key: string, entry: unknown) => {
 				hashes.set(key, entry)
 			},
-			deleteHash: async (key: string) => {
-				hashes.delete(key)
-			},
 			getAbort: (id: string) => aborts.get(id),
 			setAbort: async (id: string, count: number) => {
 				aborts.set(id, count)
@@ -321,29 +317,6 @@ vi.mock("@/lib/paths", () => ({
 		const queryIndex = withoutFragment.indexOf("?")
 
 		return queryIndex === -1 ? withoutFragment : withoutFragment.slice(0, queryIndex)
-	}
-}))
-
-vi.mock("@/lib/signals", () => ({
-	// Faithful to src/lib/signals.ts: pause()/resume() flip state, isPaused() reads it
-	// (sync's B5 background gate calls isPaused() — a mock without it throws into the
-	// run() wrapper and silently kills every background sync).
-	PauseSignal: class {
-		private paused = false
-
-		pause() {
-			this.paused = true
-		}
-
-		resume() {
-			this.paused = false
-		}
-
-		isPaused() {
-			return this.paused
-		}
-
-		dispose() {}
 	}
 }))
 
@@ -759,28 +732,6 @@ describe("config management", () => {
 		await cameraUpload.sync()
 
 		expect(mockSetSyncing).not.toHaveBeenCalled()
-	})
-
-	it("setConfig stores a direct config value", async () => {
-		vi.mocked(secureStore.get).mockResolvedValueOnce({ enabled: false })
-
-		await cameraUpload.setConfig(ENABLED_CONFIG)
-
-		expect(secureStore.set).toHaveBeenCalledWith("cameraUploadConfig:v1", ENABLED_CONFIG)
-	})
-
-	it("setConfig stores result of function updater", async () => {
-		vi.mocked(secureStore.get).mockResolvedValueOnce(ENABLED_CONFIG)
-
-		await cameraUpload.setConfig(prev => {
-			if (!prev || !("cellular" in prev)) {
-				return prev
-			}
-
-			return { ...prev, cellular: false }
-		})
-
-		expect(secureStore.set).toHaveBeenCalledWith("cameraUploadConfig:v1", expect.objectContaining({ cellular: false }))
 	})
 })
 
@@ -1322,9 +1273,9 @@ describe("sync cleanup", () => {
 	})
 })
 
-// ─── Cancel / pause / resume ─────────────────────────────────────────────────
+// ─── Cancel ─────────────────────────────────────────────────────────────────
 
-describe("cancel / pause / resume", () => {
+describe("cancel", () => {
 	it("cancel aborts the current controller and creates a fresh one", () => {
 		const firstController = (cameraUpload as any).globalAbortController as AbortController
 
@@ -1338,16 +1289,6 @@ describe("cancel / pause / resume", () => {
 
 		expect(secondController).not.toBe(firstController)
 		expect(secondController.signal.aborted).toBe(false)
-	})
-
-	it("cancel replaces the pause signal", () => {
-		const firstSignal = (cameraUpload as any).globalPauseSignal
-
-		cameraUpload.cancel()
-
-		const secondSignal = (cameraUpload as any).globalPauseSignal
-
-		expect(secondSignal).not.toBe(firstSignal)
 	})
 })
 
@@ -2423,33 +2364,6 @@ describe("sync flow", () => {
 		await cameraUpload.sync()
 
 		expect(cameraUploadState.aborts.get("a1")).toBeUndefined()
-	})
-
-	// ─── Audit B5 (2026-06-11): foreground pause must not bleed into background ───
-	// sync() captures the live globalPauseSignal; a pause left armed in the foreground
-	// would park the background upload until the deadline — a whole OS window wasted,
-	// reported as Success. Respect the user's pause: skip the run, don't auto-resume.
-
-	it("B5: a background sync is skipped (before any work starts) while the global pause signal is paused", async () => {
-		setupLocalAssets([{ id: "a1", filename: "photo.jpg" }])
-
-		cameraUpload.pause()
-
-		await cameraUpload.sync({ background: true, maxUploads: 1 })
-
-		expect(transfers.upload).not.toHaveBeenCalled()
-		expect(mockSetSyncing).not.toHaveBeenCalled()
-	})
-
-	it("B5: resume() re-enables background sync", async () => {
-		setupLocalAssets([{ id: "a1", filename: "photo.jpg" }])
-
-		cameraUpload.pause()
-		cameraUpload.resume()
-
-		await cameraUpload.sync({ background: true, maxUploads: 1 })
-
-		expect(transfers.upload).toHaveBeenCalledTimes(1)
 	})
 
 	it("upload returns null (abort) does not update MD5 cache", async () => {
@@ -4777,50 +4691,6 @@ describe("falsy-bigint: modified=0n and modificationTime=0 are valid epoch times
 		await cameraUpload.sync()
 
 		expect(transfers.upload).not.toHaveBeenCalled()
-	})
-})
-
-// ─── pause() and resume() ─────────────────────────────────────────────────────
-
-describe("pause() and resume()", () => {
-	it("pause() delegates to pause() on the current globalPauseSignal", () => {
-		// The utils mock provides a PauseSignal class with a no-op pause() method.
-		// Spy on the instance currently held by the singleton.
-		const pauseSignal = (cameraUpload as any).globalPauseSignal
-
-		const pauseSpy = vi.spyOn(pauseSignal, "pause")
-
-		cameraUpload.pause()
-
-		expect(pauseSpy).toHaveBeenCalledOnce()
-	})
-
-	it("resume() delegates to resume() on the current globalPauseSignal", () => {
-		const pauseSignal = (cameraUpload as any).globalPauseSignal
-
-		const resumeSpy = vi.spyOn(pauseSignal, "resume")
-
-		cameraUpload.resume()
-
-		expect(resumeSpy).toHaveBeenCalledOnce()
-	})
-
-	it("pause() after cancel() targets the replacement signal, not the discarded one", () => {
-		const originalSignal = (cameraUpload as any).globalPauseSignal
-		const originalPauseSpy = vi.spyOn(originalSignal, "pause")
-
-		cameraUpload.cancel()
-
-		const replacementSignal = (cameraUpload as any).globalPauseSignal
-
-		expect(replacementSignal).not.toBe(originalSignal)
-
-		const replacementPauseSpy = vi.spyOn(replacementSignal, "pause")
-
-		cameraUpload.pause()
-
-		expect(replacementPauseSpy).toHaveBeenCalledOnce()
-		expect(originalPauseSpy).not.toHaveBeenCalled()
 	})
 })
 

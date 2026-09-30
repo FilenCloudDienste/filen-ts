@@ -1,7 +1,1 @@
-import Drive from "@/features/drive/components"
-
-const LinkedDir = () => {
-	return <Drive />
-}
-
-export default LinkedDir
+export { default } from "@/features/drive/components"

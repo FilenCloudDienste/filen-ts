@@ -1,5 +1,4 @@
 import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
-import { DEFAULT_QUERY_OPTIONS, queryUpdater } from "@/queries/client"
 import { sortParams } from "@filen/shared"
 import auth from "@/lib/auth"
 import logger from "@/lib/logger"
@@ -45,7 +44,6 @@ export function useNoteHistoryQuery(
 	const sortedParams = sortParams(params)
 
 	const query = useQuery({
-		...DEFAULT_QUERY_OPTIONS,
 		...options,
 		queryKey: [BASE_QUERY_KEY, sortedParams],
 		queryFn: ({ signal }) =>
@@ -56,31 +54,6 @@ export function useNoteHistoryQuery(
 	})
 
 	return query as UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error>
-}
-
-export function noteHistoryQueryUpdate({
-	updater,
-	params,
-	dataUpdatedAt
-}: {
-	params: Parameters<typeof fetchData>[0]
-} & {
-	updater:
-		| Awaited<ReturnType<typeof fetchData>>
-		| ((prev: Awaited<ReturnType<typeof fetchData>>) => Awaited<ReturnType<typeof fetchData>>)
-	dataUpdatedAt?: number
-}): void {
-	const sortedParams = sortParams(params)
-
-	queryUpdater.set<Awaited<ReturnType<typeof fetchData>>>(
-		[BASE_QUERY_KEY, sortedParams],
-		prev => {
-			const currentData = prev ?? ([] satisfies Awaited<ReturnType<typeof fetchData>>)
-
-			return typeof updater === "function" ? updater(currentData) : updater
-		},
-		dataUpdatedAt
-	)
 }
 
 export default useNoteHistoryQuery

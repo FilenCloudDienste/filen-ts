@@ -198,22 +198,16 @@ function Advanced() {
 		const options: (number | null)[] = [null, ...TRANSFER_BANDWIDTH_PRESETS_KBPS]
 
 		actionSheet.show({
-			buttons: [
-				...options.map(value => ({
-					title: value === current ? `${bandwidthLabel(value)} (${t("current")})` : bandwidthLabel(value),
-					onPress: () => {
-						if (value === current) {
-							return
-						}
-
-						apply(value)
+			buttons: options.map(value => ({
+				title: value === current ? `${bandwidthLabel(value)} (${t("current")})` : bandwidthLabel(value),
+				onPress: () => {
+					if (value === current) {
+						return
 					}
-				})),
-				{
-					title: t("close"),
-					cancel: true
+
+					apply(value)
 				}
-			]
+			}))
 		})
 	}
 
@@ -435,31 +429,25 @@ function Advanced() {
 								},
 								onPress: () => {
 									actionSheet.show({
-										buttons: [
-											...TRANSFER_PERFORMANCE_PRESETS.map(preset => ({
-												title:
-													preset === transferPreset
-														? `${presetLabels[preset]} (${t("current")})`
-														: presetLabels[preset],
-												onPress: () => {
-													if (preset === transferPreset) {
-														return
-													}
-
-													setTransferPreset(preset)
-
-													void prompts.alert({
-														title: t("transfer_performance_updated_title"),
-														message: t("transfer_performance_restart_required"),
-														singleButton: true
-													})
+										buttons: TRANSFER_PERFORMANCE_PRESETS.map(preset => ({
+											title:
+												preset === transferPreset
+													? `${presetLabels[preset]} (${t("current")})`
+													: presetLabels[preset],
+											onPress: () => {
+												if (preset === transferPreset) {
+													return
 												}
-											})),
-											{
-												title: t("close"),
-												cancel: true
+
+												setTransferPreset(preset)
+
+												void prompts.alert({
+													title: t("transfer_performance_updated_title"),
+													message: t("transfer_performance_restart_required"),
+													singleButton: true
+												})
 											}
-										]
+										}))
 									})
 								}
 							}

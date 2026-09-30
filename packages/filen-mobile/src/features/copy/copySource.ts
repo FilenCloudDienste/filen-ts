@@ -1,6 +1,5 @@
-import { AnyItemWithContext, AnyItemWithContext_Tags, type CopyEntry } from "@filen/sdk-rs"
+import { AnyItemWithContext, AnyItemWithContext_Tags } from "@filen/sdk-rs"
 import type { DriveItem } from "@/types"
-import { isDirectoryItem } from "@/features/drive/driveSelectors"
 import { driveItemToAnyDirWithContext, driveItemToAnyFile } from "@/lib/sdkSources"
 import type { CopyJobGlyph } from "@/features/copy/copyAdapter"
 
@@ -28,32 +27,11 @@ export function driveItemToCopyItem(item: DriveItem): AnyItemWithContext {
 	}
 }
 
-export function copyGlyphForItems(items: readonly DriveItem[]): CopyJobGlyph {
-	const [only] = items
-
-	if (only === undefined || items.length > 1) {
+// Takes the count and the first item so a retry's entries need no mapped array.
+export function copyGlyph(itemCount: number, first: AnyItemWithContext | undefined): CopyJobGlyph {
+	if (itemCount !== 1 || first === undefined) {
 		return "items"
 	}
 
-	return isDirectoryItem(only) ? "directory" : "file"
-}
-
-export function copyGlyphForCopyItems(items: readonly AnyItemWithContext[]): CopyJobGlyph {
-	const [only] = items
-
-	if (only === undefined || items.length > 1) {
-		return "items"
-	}
-
-	return only.tag === AnyItemWithContext_Tags.Dir ? "directory" : "file"
-}
-
-export function copyGlyphForEntries(entries: readonly CopyEntry[]): CopyJobGlyph {
-	const [only] = entries
-
-	if (only === undefined || entries.length > 1) {
-		return "items"
-	}
-
-	return only.item.tag === AnyItemWithContext_Tags.Dir ? "directory" : "file"
+	return first.tag === AnyItemWithContext_Tags.Dir ? "directory" : "file"
 }

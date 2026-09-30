@@ -3,7 +3,7 @@ import type { TextEditorEvents } from "@/components/textEditor"
 
 export type TextEditorStore = {
 	ready: boolean
-	setReady: (fn: boolean | ((prev: boolean) => boolean)) => void
+	setReady: (ready: boolean) => void
 	/**
 	 * Stable dispatch wrapper installed by the live `<TextEditor>`. The route's
 	 * header reads it to render the rich-text toolbar inside the navigation bar
@@ -19,10 +19,10 @@ export type TextEditorStore = {
 
 export const useTextEditorStore = create<TextEditorStore>(set => ({
 	ready: false,
-	setReady(fn) {
-		set(state => ({
-			ready: typeof fn === "function" ? fn(state.ready) : fn
-		}))
+	setReady(ready) {
+		set({
+			ready
+		})
 	},
 	dispatch: null,
 	setDispatch(fn) {

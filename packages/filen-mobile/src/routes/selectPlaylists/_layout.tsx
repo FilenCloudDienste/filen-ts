@@ -34,7 +34,6 @@ function Toolbar() {
 			}
 
 			return {
-				multiple: parsed.multiple,
 				playlistUuidsToExclude: parsed.playlistUuidsToExclude,
 				id: parsed.id
 			}

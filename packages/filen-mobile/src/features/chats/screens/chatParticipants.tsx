@@ -2,18 +2,15 @@ import { Platform } from "react-native"
 import { useLocalSearchParams, useFocusEffect } from "expo-router"
 import { router } from "@/lib/router"
 import { useTranslation } from "react-i18next"
-import { deserializeRouteParam } from "@/lib/serializer"
 import { type HeaderItem } from "@/components/ui/header"
 import { useCallback } from "react"
 import { useResolveClassNames } from "uniwind"
-import { run, contactDisplayName } from "@filen/shared"
+import { contactDisplayName } from "@filen/shared"
 import { useStringifiedClient } from "@/lib/auth"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import alerts from "@/lib/alerts"
 import useIsOnline from "@/hooks/useIsOnline"
-import prompts from "@/lib/prompts"
 import type { ChatParticipant } from "@filen/sdk-rs"
-import { type Chat } from "@/types"
 import { type MenuButton } from "@/components/ui/menu"
 import useChatsQuery from "@/features/chats/queries/useChats.query"
 import chats from "@/features/chats/chats"
@@ -28,11 +25,12 @@ import useBlockedUsers from "@/features/contacts/hooks/useBlockedUsers"
 import { contactsQueryGet } from "@/features/contacts/queries/useContacts.query"
 import { buildBlockToggleMenuAction } from "@/features/contacts/contactsActions"
 import logger from "@/lib/logger"
+import { confirmedAction } from "@/lib/confirmedAction"
 
 const ChatParticipants = () => {
 	const { t } = useTranslation()
-	const { chat: chatSerialized } = useLocalSearchParams<{
-		chat?: string
+	const { uuid } = useLocalSearchParams<{
+		uuid?: string
 	}>()
 	const textForeground = useResolveClassNames("text-foreground")
 	const stringifiedClient = useStringifiedClient()
@@ -50,14 +48,12 @@ const ChatParticipants = () => {
 		}, [])
 	)
 
-	const chatParsed = deserializeRouteParam<Chat>(chatSerialized)
-
 	const chatsQuery = useChatsQuery({
 		enabled: false
 	})
 
 	// Read the DATA (#103): gating on status dismissed this screen whenever the device was offline.
-	const chat = chatParsed ? (chatsQuery.data?.find(n => n.uuid === chatParsed.uuid) ?? null) : null
+	const chat = uuid ? (chatsQuery.data?.find(n => n.uuid === uuid) ?? null) : null
 
 	const participants = chat ? chat.participants.filter(p => p.userId !== stringifiedClient?.userId) : []
 	const isOwner = chat?.ownerId === stringifiedClient?.userId
@@ -107,42 +103,16 @@ const ChatParticipants = () => {
 								destructive: true,
 								icon: "delete",
 								requiresOnline: true,
-								onPress: async () => {
-									const promptResponse = await run(async () => {
-										return await prompts.alert({
-											title: t("remove_participant"),
-											message: t("remove_participant_confirmation"),
-											cancelText: t("cancel"),
-											okText: t("remove"),
-											destructive: true
-										})
-									})
-
-									if (!promptResponse.success) {
-										logger.error("chats", "remove participant prompt failed", { error: promptResponse.error })
-										alerts.error(promptResponse.error)
-
-										return
-									}
-
-									if (promptResponse.data.cancelled) {
-										return
-									}
-
-									const result = await runWithLoading(async () => {
-										return await chats.removeParticipant({
+								onPress: confirmedAction({
+									promptTitle: t("remove_participant"),
+									promptMessage: t("remove_participant_confirmation"),
+									promptOkText: t("remove"),
+									action: () =>
+										chats.removeParticipant({
 											chat,
 											participant
 										})
-									})
-
-									if (!result.success) {
-										logger.error("chats", "removeParticipant failed", { error: result.error })
-										alerts.error(result.error)
-
-										return
-									}
-								}
+								})
 							}
 						] satisfies MenuButton[]
 					}
@@ -270,7 +240,6 @@ const ChatParticipants = () => {
 					enabled: isOnline,
 					onPress: async () => {
 						const selectContactsResult = await selectContacts({
-							multiple: true,
 							userIdsToExclude: chat.participants.map(p => Number(p.userId))
 						})
 

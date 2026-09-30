@@ -1,7 +1,6 @@
-import { AnyNormalDir_Tags, type AnyNormalDir } from "@filen/sdk-rs"
+import { AnyNormalDir_Tags } from "@filen/sdk-rs"
 import type { DriveItem } from "@/types"
 import { isDirectoryItem } from "@/features/drive/driveSelectors"
-import type { CopyDestination } from "@/features/copy/copyAdapter"
 import type { DriveClipboardEntry } from "@/features/drive/store/useDriveClipboard.store"
 import { unwrapParentUuid } from "@/lib/sdkUnwrap"
 import cache from "@/lib/cache"
@@ -112,13 +111,4 @@ export function canPasteInto({
 	}
 
 	return guard.dirUuids.size === 0 || ancestryHits(target, guard.dirUuids, rootUuid) === false
-}
-
-// The copy destination a directory stands for: the root as { uuid: null } under `rootName`.
-export function copyDestinationOf(dir: AnyNormalDir, rootUuid: string | null, rootName: string): CopyDestination {
-	const uuid = dir.inner[0].uuid
-
-	return dir.tag === AnyNormalDir_Tags.Root || uuid === rootUuid
-		? { uuid: null, name: rootName }
-		: { uuid, name: cache.uuidToAnyDriveItem.get(uuid)?.data.decryptedMeta?.name ?? uuid }
 }

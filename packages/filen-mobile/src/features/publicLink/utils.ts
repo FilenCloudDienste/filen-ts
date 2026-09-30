@@ -31,12 +31,8 @@ export function isExpirationChecked({
 
 /**
  * Returns whether the public-link screen should show its error state rather
- * than a loading spinner.
- *
- * Both queries must have settled into an error status (not just one) before
- * we switch from spinner to error, because a single slow query may still
- * succeed.  However, if either is in error and the other has already succeeded
- * there is no benefit in continuing to spin — show the error immediately.
+ * than a loading spinner: either query failing is enough, since the screen
+ * needs both.
  */
 export function isPublicLinkQueryError(
 	publicLinkStatus: "pending" | "error" | "success",

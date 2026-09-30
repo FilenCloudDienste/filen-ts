@@ -27,8 +27,6 @@ vi.mock("@filen/sdk-rs", () => {
 	}
 })
 
-vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
-
 vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
 
 // Mock storageRoots — use the mock Directory from the already-mocked expo-file-system

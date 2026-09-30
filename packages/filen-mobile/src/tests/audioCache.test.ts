@@ -3,7 +3,6 @@ import { vi, describe, it, expect, beforeEach } from "vitest"
 vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 
 vi.mock("expo-crypto", async () => await import("@/tests/mocks/expoCrypto"))
-vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
 
 vi.mock("@/lib/fileCache", () => ({
 	default: {
@@ -767,85 +766,6 @@ describe("AudioCache", () => {
 			expect(result).not.toBeNull()
 			expect(result!.title).toBe("Solo Song")
 			expect(fileCache.get).not.toHaveBeenCalled()
-		})
-	})
-
-	describe("remove", () => {
-		it("deletes only the metadata file when no pictureUri is stored", async () => {
-			const cache = await createAudioCache()
-			const item = wrapDrive(makeFileItem("uuid-16", "song.mp3"))
-
-			const audioPath = `${FILE_CACHE_BASE_DIR}/uuid-16/uuid-16.mp3`
-			const metaPath = `${AUDIO_BASE_DIR}/uuid-16.filenmeta`
-
-			fs.set(audioPath, new Uint8Array([1, 2, 3]))
-			fs.set(metaPath, new Uint8Array(new TextEncoder().encode(serialize({ artist: "X", cachedAt: Date.now() }))))
-
-			await cache.remove(item)
-
-			// Only sidecar is deleted; audio in fileCache is untouched
-			expect(fs.has(metaPath)).toBe(false)
-			expect(fs.has(audioPath)).toBe(true)
-		})
-
-		it("also deletes the picture file when pictureUri is stored in metadata", async () => {
-			const cache = await createAudioCache()
-			const uuid = "uuid-remove-picture"
-			const item = wrapDrive(makeFileItem(uuid, "song.mp3"))
-
-			const audioPath = `${FILE_CACHE_BASE_DIR}/${uuid}/${uuid}.mp3`
-			const picturePath = `${AUDIO_BASE_DIR}/${uuid}.jpg`
-			const metaPath = `${AUDIO_BASE_DIR}/${uuid}.filenmeta`
-
-			const metadata: Metadata = {
-				artist: "PicArtist",
-				title: "PicSong",
-				album: null,
-				date: null,
-				duration: 60,
-				pictureUri: picturePath,
-				pictureBlurhash: "some-blurhash",
-				cachedAt: Date.now()
-			}
-
-			fs.set(audioPath, new Uint8Array([1, 2, 3]))
-			fs.set(picturePath, new Uint8Array([0xff, 0xd8]))
-			fs.set(metaPath, new Uint8Array(new TextEncoder().encode(serialize(metadata))))
-
-			await cache.remove(item)
-
-			// Both sidecar and picture file are deleted; audio in fileCache stays
-			expect(fs.has(metaPath)).toBe(false)
-			expect(fs.has(picturePath)).toBe(false)
-			expect(fs.has(audioPath)).toBe(true)
-		})
-
-		it("throws for non-file items", async () => {
-			const cache = await createAudioCache()
-			const item = wrapDrive(makeDirItem("uuid-17"))
-
-			await expect(cache.remove(item)).rejects.toThrow("Item must be a file or shared file")
-		})
-
-		it("does not throw when metadata doesn't exist", async () => {
-			const cache = await createAudioCache()
-			const item = wrapDrive(makeFileItem("uuid-18", "song.mp3"))
-
-			await expect(cache.remove(item)).resolves.toBeUndefined()
-		})
-
-		it("throws for sharedRootFile items that reference directories", async () => {
-			// Verify the guard: remove() must accept sharedRootFile types (not throw "must be file")
-			const cache = await createAudioCache()
-			const uuid = "uuid-remove-shared-root"
-			const item = wrapDrive(makeSharedRootFileItem(uuid, "song.mp3"))
-			const metaPath = `${AUDIO_BASE_DIR}/${uuid}.filenmeta`
-
-			fs.set(metaPath, new Uint8Array(new TextEncoder().encode(serialize({ artist: "R", cachedAt: Date.now() }))))
-
-			// remove() should succeed (not throw) for sharedRootFile
-			await expect(cache.remove(item)).resolves.toBeUndefined()
-			expect(fs.has(metaPath)).toBe(false)
 		})
 	})
 

@@ -1,5 +1,5 @@
 import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
-import queryClient, { DEFAULT_QUERY_OPTIONS, queryUpdater } from "@/queries/client"
+import queryClient, { queryUpdater } from "@/queries/client"
 import auth from "@/lib/auth"
 import { type Chat } from "@/types"
 import { wrapChat } from "@/features/chats/chatsWrap"
@@ -31,7 +31,6 @@ export function useChatsQuery(
 	options?: Omit<UseQueryOptions, "queryKey" | "queryFn">
 ): UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error> {
 	const query = useQuery({
-		...DEFAULT_QUERY_OPTIONS,
 		refetchOnMount: socketCoveredRefetchOnMount(CHATS_LIST_REUSE_MS),
 		...options,
 		queryKey: [BASE_QUERY_KEY],

@@ -1,6 +1,5 @@
 import ZoomableView from "@/components/ui/zoomableView"
 import Image from "@/components/ui/image"
-import View from "@/components/ui/view"
 import PreviewLoadingOverlay from "@/components/drivePreview/previewLoadingOverlay"
 import { useState } from "react"
 import { useWindowDimensions } from "react-native"
@@ -37,11 +36,9 @@ const PreviewImage = ({
 		height: dimensions.height
 	}
 
+	// Renders straight into galleryItem's window-sized cell, which the overlay's absolute inset-0 resolves against.
 	return (
-		<View
-			className="bg-transparent"
-			style={imageStyle}
-		>
+		<>
 			<ZoomableView
 				style={[
 					{
@@ -57,7 +54,6 @@ const PreviewImage = ({
 				onSingleTap={onSingleTap}
 				onPinchActiveChange={onPinchActiveChange}
 				contentSize={contentSize ?? undefined}
-				maxZoom={10}
 			>
 				<Image
 					className="flex-1 bg-transparent"
@@ -79,7 +75,7 @@ const PreviewImage = ({
 				/>
 			</ZoomableView>
 			{loadStatus !== "loaded" ? <PreviewLoadingOverlay status={loadStatus} /> : null}
-		</View>
+		</>
 	)
 }
 

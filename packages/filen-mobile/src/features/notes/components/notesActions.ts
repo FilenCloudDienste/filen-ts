@@ -34,7 +34,7 @@ export const createNoteFlow = async ({
 		return
 	}
 
-	if (result.data.cancelled || result.data.type !== "string") {
+	if (result.data.cancelled) {
 		return
 	}
 
@@ -79,7 +79,7 @@ export const createTagFlow = async ({ t }: { t: TFunction }): Promise<void> => {
 		return
 	}
 
-	if (result.data.cancelled || result.data.type !== "string") {
+	if (result.data.cancelled) {
 		return
 	}
 

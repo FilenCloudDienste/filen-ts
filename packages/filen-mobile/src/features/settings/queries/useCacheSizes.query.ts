@@ -1,4 +1,4 @@
-import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
+import { useQuery, type UseQueryResult } from "@tanstack/react-query"
 import { queryClient } from "@/queries/client"
 import thumbnails from "@/lib/thumbnails"
 import fileCache from "@/lib/fileCache"
@@ -73,9 +73,7 @@ export async function fetchData(): Promise<CacheSizes> {
 	}
 }
 
-export function useCacheSizesQuery(
-	options?: Omit<UseQueryOptions<CacheSizes, Error>, "queryKey" | "queryFn">
-): UseQueryResult<CacheSizes, Error> {
+export function useCacheSizesQuery(): UseQueryResult<CacheSizes, Error> {
 	return useQuery<CacheSizes, Error>({
 		// Sizes are derived from on-disk state — recompute on mount, don't persist.
 		staleTime: 0,
@@ -83,8 +81,6 @@ export function useCacheSizesQuery(
 		networkMode: "always",
 		refetchOnMount: "always",
 		refetchOnReconnect: false,
-		refetchOnWindowFocus: false,
-		...options,
 		queryKey: [BASE_QUERY_KEY],
 		queryFn: () => fetchData()
 	})

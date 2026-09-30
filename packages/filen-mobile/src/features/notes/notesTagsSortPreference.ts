@@ -2,7 +2,6 @@ import { useSecureStore } from "@/lib/secureStore"
 import { tagDisplayName } from "@/lib/decryption"
 import { type Note, type NoteTag } from "@/types"
 import {
-	NOTE_TAGS_SORT_OPTIONS,
 	DEFAULT_NOTE_TAGS_SORT_BY,
 	tagLastActivity as sharedTagLastActivity,
 	sortNoteTags as sharedSortNoteTags,
@@ -10,8 +9,6 @@ import {
 } from "@filen/shared"
 
 export const NOTES_TAGS_SORT_BY_SECURE_STORE_KEY = "notes.tagsSortBy"
-
-export const NOTES_TAGS_SORT_OPTIONS = NOTE_TAGS_SORT_OPTIONS
 
 export type NotesTagsSortBy = NoteTagsSortBy
 

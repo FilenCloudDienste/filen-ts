@@ -7,7 +7,6 @@
 import { vi, describe, it, expect, beforeEach } from "vitest"
 import { renderHook } from "@testing-library/react"
 
-vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
 vi.mock("expo-crypto", async () => await import("@/tests/mocks/expoCrypto"))
 
 vi.mock("@/lib/logger", () => ({

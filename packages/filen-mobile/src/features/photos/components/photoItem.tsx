@@ -7,7 +7,7 @@ import { getPreviewType } from "@/lib/previewType"
 import { driveItemDisplayName } from "@/lib/decryption"
 import Thumbnail from "@/features/drive/components/item/thumbnail"
 import Ionicons from "@expo/vector-icons/Ionicons"
-import useDriveItemStoredOfflineQuery from "@/features/drive/queries/useDriveItemStoredOffline.query"
+import useIsItemStoredOffline from "@/features/offline/hooks/useIsItemStoredOffline"
 import { PressableOpacity } from "@/components/ui/pressables"
 import { type DrivePath } from "@/hooks/useDrivePath"
 import Menu from "@/features/drive/components/item/menu"
@@ -77,10 +77,7 @@ export const Photo = ({
 	const isSelected = useDriveStore(useShallow(state => state.selectedItems.some(i => i.data.uuid === info.item.data.uuid)))
 	const arePhotosSelected = useDriveStore(useShallow(state => state.selectedItems.length > 0))
 
-	const driveItemStoredOfflineQuery = useDriveItemStoredOfflineQuery({
-		uuid: info.item.data.uuid,
-		type: info.item.type
-	})
+	const isStoredOffline = useIsItemStoredOffline(info.item)
 
 	const viewStyle: ViewStyle = {
 		width: size,
@@ -122,7 +119,7 @@ export const Photo = ({
 				previewBackground={true}
 				item={info.item}
 				drivePath={drivePath}
-				isStoredOffline={driveItemStoredOfflineQuery.status === "success" ? driveItemStoredOfflineQuery.data : false}
+				isStoredOffline={isStoredOffline}
 			>
 				<View style={viewStyle}>
 					<PressableOpacity
@@ -135,7 +132,7 @@ export const Photo = ({
 					>
 						{previewType === "video" && <VideoIndicator />}
 						{info.item.type === "file" && info.item.data.favorited && <FavoritedIndicator />}
-						{driveItemStoredOfflineQuery.status === "success" && driveItemStoredOfflineQuery.data && <OfflineIndicator />}
+						{isStoredOffline && <OfflineIndicator />}
 						{arePhotosSelected && (
 							<View
 								className={cn(

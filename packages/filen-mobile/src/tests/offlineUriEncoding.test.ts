@@ -81,11 +81,6 @@ vi.mock("@/lib/secureStore", () => ({ default: { get: vi.fn().mockResolvedValue(
 vi.mock("@react-native-community/netinfo", () => ({ default: { fetch: vi.fn().mockResolvedValue({ type: "wifi" }) } }))
 vi.mock("@/lib/events", () => ({ default: { subscribe: vi.fn() } }))
 
-vi.mock("@/features/drive/queries/useDriveItemStoredOffline.query", () => ({
-	driveItemStoredOfflineQueryUpdate: vi.fn(),
-	getStoredOfflineQueryCacheEntries: vi.fn(() => [])
-}))
-
 vi.mock("@/features/drive/queries/useDriveItems.query", () => ({
 	driveItemsQueryUpdate: vi.fn()
 }))

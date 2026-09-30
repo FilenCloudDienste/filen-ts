@@ -516,9 +516,9 @@ describe("itemSorter", () => {
 				const broken = makeItem("file", "broken.jpg", { created: Date.UTC(2099, 0, 1), modified: 0, timestamp: T_2021 })
 				const anchor = makeItem("file", "anchor.jpg", { created: T_2022, modified: T_2022, timestamp: T_2024 })
 
-				const result = itemSorter.sortItems([broken, anchor], "captureAsc")
+				const result = itemSorter.sortItems([broken, anchor], "captureDesc")
 
-				expect(result.map((i: DriveItem) => i.data.decryptedMeta?.name)).toEqual(["broken.jpg", "anchor.jpg"])
+				expect(result.map((i: DriveItem) => i.data.decryptedMeta?.name)).toEqual(["anchor.jpg", "broken.jpg"])
 			})
 
 			it("a sharedFile with no qualifying candidate falls through to creationSortKey (no server timestamp ceiling to fall back to)", () => {

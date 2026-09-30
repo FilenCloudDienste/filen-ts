@@ -1,6 +1,6 @@
 import { create } from "zustand"
 import { type Note, type NoteTag } from "@/types"
-import { toggleInArray } from "@/stores/createSelectionSlice"
+import { toggleInArray } from "@filen/shared"
 
 export { type InflightContent } from "@/features/notes/store/useNotesInflight.store"
 
@@ -16,13 +16,11 @@ export type NotesStore = {
 	toggleSelectedNote: (note: Note) => void
 	clearSelectedNotes: () => void
 	selectAllNotes: (notes: Note[]) => void
-	toggleSelectedTag: (tag: NoteTag) => void
 	clearSelectedTags: () => void
 	selectAllTags: (tags: NoteTag[]) => void
 }
 
 const noteId = (n: Note) => n.uuid
-const tagId = (t: NoteTag) => t.uuid
 
 export const useNotesStore = create<NotesStore>(set => ({
 	selectedNotes: [],
@@ -59,11 +57,6 @@ export const useNotesStore = create<NotesStore>(set => ({
 	},
 	selectAllNotes(notes) {
 		set({ selectedNotes: notes })
-	},
-	toggleSelectedTag(tag) {
-		set(state => ({
-			selectedTags: toggleInArray(state.selectedTags, tag, tagId)
-		}))
 	},
 	clearSelectedTags() {
 		set({ selectedTags: [] })

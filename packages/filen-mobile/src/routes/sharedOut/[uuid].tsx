@@ -1,7 +1,1 @@
-import Drive from "@/features/drive/components"
-
-const SharedOut = () => {
-	return <Drive />
-}
-
-export default SharedOut
+export { default } from "@/features/drive/components"

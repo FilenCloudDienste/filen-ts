@@ -1,7 +1,1 @@
-import DriveComponent from "@/features/drive/components"
-
-const Drive = () => {
-	return <DriveComponent />
-}
-
-export default Drive
+export { default } from "@/features/drive/components"

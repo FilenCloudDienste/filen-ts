@@ -4,7 +4,6 @@ const { mockRouterPush } = vi.hoisted(() => ({
 	mockRouterPush: vi.fn()
 }))
 
-vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
 vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
 
@@ -588,14 +587,6 @@ describe("useContactsStore.clearSelectedContacts", () => {
 
 		expect(useContactsStore.getState().bulkMode).toBe(false)
 	})
-
-	it("selectAllContacts does NOT reset bulkMode — only clearSelectedContacts does", () => {
-		useContactsStore.getState().setBulkMode(true)
-		useContactsStore.getState().selectAllContacts([makeContact("c1", "contact")])
-
-		// bulkMode should remain true since selectAllContacts doesn't touch it
-		expect(useContactsStore.getState().bulkMode).toBe(true)
-	})
 })
 
 describe("useContactsStore — contactItemId semantics via toggleSelectedContact", () => {
@@ -662,19 +653,19 @@ describe("useHttpStore.setGetFileUrl", () => {
 		expect(useHttpStore.getState().getFileUrl).toBeNull()
 	})
 
-	it("setPort with a functional updater correctly updates port from previous value", () => {
+	it("setPort stores the port and setPort(null) clears it", () => {
 		useHttpStore.getState().setPort(3000)
 
 		expect(useHttpStore.getState().port).toBe(3000)
 
-		useHttpStore.getState().setPort(prev => (prev ?? 0) + 1)
+		useHttpStore.getState().setPort(null)
 
-		expect(useHttpStore.getState().port).toBe(3001)
+		expect(useHttpStore.getState().port).toBeNull()
 	})
 })
 
 // ---------------------------------------------------------------------------
-// useAppStore — setPathname (plain string + functional-updater branches)
+// useAppStore — setPathname
 // ---------------------------------------------------------------------------
 
 describe("useAppStore.setPathname", () => {
@@ -686,27 +677,6 @@ describe("useAppStore.setPathname", () => {
 		useAppStore.getState().setPathname("/foo")
 
 		expect(useAppStore.getState().pathname).toBe("/foo")
-	})
-
-	it("setPathname with a functional updater receives the current pathname and applies the result", () => {
-		useAppStore.getState().setPathname("/base")
-		useAppStore.getState().setPathname(prev => prev + "/bar")
-
-		expect(useAppStore.getState().pathname).toBe("/base/bar")
-	})
-
-	it("functional updater identity function is a no-op", () => {
-		useAppStore.getState().setPathname("/existing")
-		useAppStore.getState().setPathname(prev => prev)
-
-		expect(useAppStore.getState().pathname).toBe("/existing")
-	})
-
-	it("plain string overwrite after functional update works correctly", () => {
-		useAppStore.getState().setPathname(prev => prev + "/child")
-		useAppStore.getState().setPathname("/reset")
-
-		expect(useAppStore.getState().pathname).toBe("/reset")
 	})
 })
 

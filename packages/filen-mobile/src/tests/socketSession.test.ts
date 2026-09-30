@@ -12,11 +12,6 @@ const { mockListChats, mockListMessagesBefore, holder } = vi.hoisted(() => ({
 }))
 
 vi.mock("@/queries/client", () => ({
-	DEFAULT_QUERY_OPTIONS: {
-		refetchOnMount: "always",
-		staleTime: 0,
-		retry: false
-	},
 	get default() {
 		return holder.client
 	},
@@ -74,7 +69,7 @@ async function reconnect(): Promise<void> {
 }
 
 beforeEach(async () => {
-	holder.client = new QueryClient()
+	holder.client = new QueryClient({ defaultOptions: { queries: { refetchOnMount: "always", retry: false } } })
 	trackServerReads(holder.client.getQueryCache())
 	mockListChats.mockReset().mockResolvedValue([chat])
 	mockListMessagesBefore.mockReset().mockResolvedValue([{ uuid: "m1" }])

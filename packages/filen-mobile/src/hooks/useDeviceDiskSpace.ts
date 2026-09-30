@@ -2,28 +2,20 @@ import { useEffect, useState } from "react"
 import { AppState } from "react-native"
 import * as FileSystem from "expo-file-system"
 
-export type DeviceDiskSpace = {
-	availableBytes: number
-	totalBytes: number
-}
-
-function readDiskSpace(): DeviceDiskSpace {
+function readAvailableDiskSpace(): number {
 	const available = FileSystem.Paths.availableDiskSpace
-	const total = FileSystem.Paths.totalDiskSpace
 
-	return {
-		availableBytes: Number.isFinite(available) ? Math.max(0, available) : 0,
-		totalBytes: Number.isFinite(total) ? Math.max(0, total) : 0
-	}
+	return Number.isFinite(available) ? Math.max(0, available) : 0
 }
 
-export default function useDeviceDiskSpace(): DeviceDiskSpace {
-	const [diskSpace, setDiskSpace] = useState<DeviceDiskSpace>(() => readDiskSpace())
+// Available bytes on the device volume, re-read on every foreground.
+export default function useDeviceDiskSpace(): number {
+	const [availableBytes, setAvailableBytes] = useState<number>(readAvailableDiskSpace)
 
 	useEffect(() => {
 		const subscription = AppState.addEventListener("change", next => {
 			if (next === "active") {
-				setDiskSpace(readDiskSpace())
+				setAvailableBytes(readAvailableDiskSpace())
 			}
 		})
 
@@ -32,5 +24,5 @@ export default function useDeviceDiskSpace(): DeviceDiskSpace {
 		}
 	}, [])
 
-	return diskSpace
+	return availableBytes
 }

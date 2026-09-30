@@ -1,5 +1,4 @@
 import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
-import { DEFAULT_QUERY_OPTIONS } from "@/queries/client"
 import auth from "@/lib/auth"
 import { sortParams, parseFilenPublicLink, run } from "@filen/shared"
 import { getPreviewType } from "@/lib/previewType"
@@ -201,12 +200,11 @@ export function chatMessageLinksStaleTime(data: LinkResult[] | undefined): numbe
 
 export function useChatMessageLinksQuery(
 	params: useChatMessageLinksQueryParams,
-	options?: Omit<UseQueryOptions, "queryKey" | "queryFn">
+	options?: Omit<UseQueryOptions<Awaited<ReturnType<typeof fetchData>>, Error>, "queryKey" | "queryFn">
 ): UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error> {
 	const sortedParams = sortParams(params)
 
 	const query = useQuery({
-		...DEFAULT_QUERY_OPTIONS,
 		refetchOnMount: true,
 		staleTime: cached => chatMessageLinksStaleTime(cached.state.data),
 		...options,

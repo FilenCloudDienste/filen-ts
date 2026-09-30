@@ -24,6 +24,7 @@ vi.mock("@/lib/cache", () => ({
 		directoryUuidToAnyNormalDir: h.dirs
 	}
 }))
+vi.mock("@/lib/i18n", () => ({ default: { t: (key: string) => key } }))
 vi.mock("@/lib/alerts", () => ({ default: { error: vi.fn() } }))
 vi.mock("@/components/ui/fullScreenLoadingModal", () => ({
 	runWithLoading: vi.fn(async (fn: () => Promise<unknown>) => {
@@ -37,7 +38,8 @@ vi.mock("@/components/ui/fullScreenLoadingModal", () => ({
 vi.mock("@/features/drive/drive", () => ({ default: { move: vi.fn() } }))
 vi.mock("@/features/copy/copyRunner", () => ({ default: { start: vi.fn(() => "job-1") } }))
 
-import { ancestryHits, canPasteInto, copyDestinationOf } from "@/features/drive/clipboard"
+import { ancestryHits, canPasteInto } from "@/features/drive/clipboard"
+import { copyDestinationOf } from "@/features/drive/copyDestination"
 import { buildPasteHereMenuButtons, buildPasteIntoMenuButton, pasteClipboard } from "@/features/drive/components/clipboardMenu"
 import useDriveClipboardStore, { type DriveClipboardEntry } from "@/features/drive/store/useDriveClipboard.store"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
@@ -172,10 +174,10 @@ describe("canPasteInto", () => {
 
 describe("copyDestinationOf", () => {
 	it("names the root and cached directories", () => {
-		expect(copyDestinationOf(normalDir("root", "Root"), "root", "Drive")).toEqual({ uuid: null, name: "Drive" })
-		expect(copyDestinationOf(normalDir("root"), "root", "Drive")).toEqual({ uuid: null, name: "Drive" })
-		expect(copyDestinationOf(normalDir("b"), "root", "Drive")).toEqual({ uuid: "b", name: "name-b" })
-		expect(copyDestinationOf(normalDir("zz"), "root", "Drive")).toEqual({ uuid: "zz", name: "zz" })
+		expect(copyDestinationOf(normalDir("root", "Root"))).toEqual({ uuid: null, name: "drive" })
+		expect(copyDestinationOf(normalDir("root"))).toEqual({ uuid: null, name: "drive" })
+		expect(copyDestinationOf(normalDir("b"))).toEqual({ uuid: "b", name: "name-b" })
+		expect(copyDestinationOf(normalDir("zz"))).toEqual({ uuid: "zz", name: "zz" })
 	})
 })
 
@@ -185,8 +187,8 @@ describe("pasteClipboard", () => {
 
 		useDriveClipboardStore.getState().set({ mode: "copy", items })
 
-		await pasteClipboard({ targetDir: normalDir("b"), allowCut: false, t })
-		await pasteClipboard({ targetDir: normalDir("c"), allowCut: false, t })
+		await pasteClipboard({ targetDir: normalDir("b"), allowCut: false })
+		await pasteClipboard({ targetDir: normalDir("c"), allowCut: false })
 
 		expect(copyRunner.start).toHaveBeenCalledTimes(2)
 		expect(copyRunner.start).toHaveBeenCalledWith({ items, destination: { uuid: "b", name: "name-b" }, destinationDir: normalDir("b") })
@@ -205,11 +207,11 @@ describe("pasteClipboard", () => {
 		// The replaced entry is guarded afresh: the directory still can't land in itself or below.
 		expect(canPasteInto({ entry: useDriveClipboardStore.getState().entry, targetUuid: "c", allowCut: false })).toBe(false)
 
-		await pasteClipboard({ targetDir: normalDir("c"), allowCut: false, t })
+		await pasteClipboard({ targetDir: normalDir("c"), allowCut: false })
 
 		expect(copyRunner.start).not.toHaveBeenCalled()
 
-		await pasteClipboard({ targetDir: normalDir("root", "Root"), allowCut: false, t })
+		await pasteClipboard({ targetDir: normalDir("root", "Root"), allowCut: false })
 
 		expect(copyRunner.start).toHaveBeenCalledExactlyOnceWith({
 			items: [saved, renamedDir],
@@ -223,7 +225,7 @@ describe("pasteClipboard", () => {
 
 		useDriveClipboardStore.getState().set({ mode: "cut", items })
 
-		await pasteClipboard({ targetDir: normalDir("b"), allowCut: true, t })
+		await pasteClipboard({ targetDir: normalDir("b"), allowCut: true })
 
 		expect(runWithLoading).toHaveBeenCalledTimes(1)
 		expect(drive.move).toHaveBeenCalledTimes(2)
@@ -247,7 +249,7 @@ describe("pasteClipboard", () => {
 
 		useDriveClipboardStore.getState().set({ mode: "cut", items })
 
-		await pasteClipboard({ targetDir: normalDir("b"), allowCut: true, t })
+		await pasteClipboard({ targetDir: normalDir("b"), allowCut: true })
 
 		expect(useDriveClipboardStore.getState().entry).toEqual({ mode: "cut", items: [items[1]] })
 		expect(useDriveClipboardStore.getState().cutUuids).toEqual(new Set(["f2"]))
@@ -265,7 +267,7 @@ describe("pasteClipboard", () => {
 
 		expect(useDriveClipboardStore.getState().cutUuids).toEqual(new Set(["f2"]))
 
-		await pasteClipboard({ targetDir: normalDir("b"), allowCut: true, t })
+		await pasteClipboard({ targetDir: normalDir("b"), allowCut: true })
 
 		expect(drive.move).toHaveBeenCalledExactlyOnceWith({ item: saved, newParent: normalDir("b") })
 	})
@@ -288,7 +290,7 @@ describe("pasteClipboard", () => {
 
 		useDriveClipboardStore.getState().set({ mode: "cut", items })
 
-		await pasteClipboard({ targetDir: normalDir("b"), allowCut: true, t })
+		await pasteClipboard({ targetDir: normalDir("b"), allowCut: true })
 
 		expect(useDriveClipboardStore.getState().entry).toEqual({ mode: "cut", items: [renamed, items[2]] })
 
@@ -298,7 +300,7 @@ describe("pasteClipboard", () => {
 	it("re-checks the guard against the current clipboard", async () => {
 		useDriveClipboardStore.getState().set({ mode: "cut", items: [dir("a", "root")] })
 
-		await pasteClipboard({ targetDir: normalDir("c"), allowCut: true, t })
+		await pasteClipboard({ targetDir: normalDir("c"), allowCut: true })
 
 		expect(drive.move).not.toHaveBeenCalled()
 		expect(useDriveClipboardStore.getState().entry).not.toBeNull()

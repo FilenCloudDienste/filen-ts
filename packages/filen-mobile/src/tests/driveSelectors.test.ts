@@ -24,6 +24,7 @@ import {
 	isDriveItemDisabled,
 	isDriveItemNavigateOnly,
 	nextDriveSelectSelection,
+	canNavigateIntoDirectory,
 	resolveDriveNavigationTarget,
 	everyItemAlreadyIn,
 	resolveDriveContainingDirectoryTarget,
@@ -669,6 +670,28 @@ describe("isDriveItemNavigateOnly", () => {
 				disabled: true
 			})
 		).toBe(false)
+	})
+})
+
+describe("canNavigateIntoDirectory", () => {
+	it("agrees with resolveDriveNavigationTarget resolving a target", () => {
+		const linked = { uuid: "root", key: "k", rootName: "Root" }
+		const cases: { item: DriveItem; drivePath: DrivePath }[] = [
+			{ item: file("a"), drivePath: drivePath("drive") },
+			{ item: dir("a"), drivePath: drivePath("trash") },
+			{ item: sharedRootDir("r"), drivePath: drivePath("trash") },
+			{ item: dir("a"), drivePath: drivePath("drive") },
+			{ item: dir("a"), drivePath: drivePath("offline") },
+			{ item: sharedDirectory("a"), drivePath: drivePath("sharedIn") },
+			{ item: dir("a"), drivePath: drivePath("linked") },
+			{ item: dir("a"), drivePath: drivePath("linked", { linked }) },
+			{ item: dir("a"), drivePath: drivePath("linked", { selectOptions: selectOptions({}) }) },
+			{ item: file("a"), drivePath: drivePath("linked", { linked }) }
+		]
+
+		for (const args of cases) {
+			expect(canNavigateIntoDirectory(args)).toBe(resolveDriveNavigationTarget(args) !== null)
+		}
 	})
 })
 

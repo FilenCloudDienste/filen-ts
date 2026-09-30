@@ -99,6 +99,11 @@ function mockMessage(text: string | undefined): ChatMessageWithInflightId {
 	return { inflightId: "inflight-1", chat: "chat-1", inner: { uuid: "msg-1", message: text } } as unknown as ChatMessageWithInflightId
 }
 
+// Mentions render as plain text, so find the one text run that starts with "@".
+function mentionText(container: HTMLElement): string | null | undefined {
+	return [...container.querySelectorAll("span")].find(span => span.textContent.startsWith("@"))?.textContent
+}
+
 describe("Regexed — segment mapping", () => {
 	it("renders null for an undefined/empty message", () => {
 		const { container } = render(createElement(Regexed, { chat: mockChat(), message: mockMessage(undefined), fromSelf: false }))
@@ -113,8 +118,8 @@ describe("Regexed — segment mapping", () => {
 			createElement(Regexed, { chat, message: mockMessage("hey @alice@example.com nice"), fromSelf: false })
 		)
 
-		const button = container.querySelector("button")
-		expect(button?.textContent).toBe("@Alice")
+		expect(mentionText(container)).toBe("@Alice")
+		expect(container.querySelector("button")).toBeNull()
 	})
 
 	it("renders a mention of a departed (non-participant) user as the raw email, not 'unknown'", () => {
@@ -122,16 +127,14 @@ describe("Regexed — segment mapping", () => {
 			createElement(Regexed, { chat: mockChat(), message: mockMessage("hey @gone@example.com nice"), fromSelf: false })
 		)
 
-		const button = container.querySelector("button")
-		expect(button?.textContent).toBe("@gone@example.com")
+		expect(mentionText(container)).toBe("@gone@example.com")
 		expect(container.textContent).not.toContain("unknown")
 	})
 
 	it("renders @everyone via the translation key", () => {
 		const { container } = render(createElement(Regexed, { chat: mockChat(), message: mockMessage("@everyone hi"), fromSelf: false }))
 
-		const button = container.querySelector("button")
-		expect(button?.textContent).toBe("@everyone")
+		expect(mentionText(container)).toBe("@everyone")
 	})
 
 	it("renders a code fence as its extracted (fence-stripped) code, not linkified", () => {
@@ -203,24 +206,17 @@ describe("Regexed — segment mapping", () => {
 		expect(container.querySelector("img")).toBeNull()
 	})
 
-	// Named case from the batch: the shared URL source (https?:// only) no longer swallows a
-	// zero-separator www.-prefixed run together with an immediately-following @mention the way
-	// mobile's old broader URL_REGEX did — it now renders an inert "www.example.com" text run
-	// followed by a highlighted (pressable) mention, not one unstyled blob.
-	it("splits a no-separator www.-prefixed run + mention into inert text + a highlighted mention", () => {
+	// The shared URL source (https?:// only) does not swallow a zero-separator www.-prefixed run
+	// together with an immediately-following @mention: it renders an inert "www.example.com" text
+	// run followed by a separate mention, not one unstyled blob.
+	it("splits a no-separator www.-prefixed run + mention into inert text + a separate mention", () => {
 		const { container } = render(
 			createElement(Regexed, { chat: mockChat(), message: mockMessage("www.example.com@user@host.com"), fromSelf: false })
 		)
 
-		const buttons = container.querySelectorAll("button")
-		expect(buttons).toHaveLength(1)
-		expect(buttons[0]?.textContent).toBe("@user@host.com")
-
-		// The remaining (non-button) text is the inert "www.example.com" run, proving it rendered as
-		// plain text rather than being fused into the mention or swallowed as one inert blob.
-		const withoutButton = container.cloneNode(true) as HTMLElement
-		withoutButton.querySelector("button")?.remove()
-		expect(withoutButton.textContent).toBe("www.example.com")
+		const spans = [...container.querySelectorAll("span")].map(span => span.textContent)
+		expect(spans).toEqual(["www.example.com", "@user@host.com"])
+		expect(container.querySelector("button")).toBeNull()
 	})
 })
 

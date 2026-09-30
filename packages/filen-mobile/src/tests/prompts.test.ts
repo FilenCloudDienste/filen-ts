@@ -78,7 +78,7 @@ function lastAlertOptions(): AlertOptions {
  * with an optional value argument.
  * Must be called after `await tick()`.
  */
-function pressPromptButton(index: number, value?: string | { login: string; password: string }): void {
+function pressPromptButton(index: number, value?: string): void {
 	const [, , buttons] = mockAlertPrompt.mock.lastCall as [string, string | undefined, PromptButton[], ...unknown[]]
 	buttons[index]?.onPress?.(value)
 }
@@ -112,36 +112,28 @@ beforeEach(() => {
 // ---------------------------------------------------------------------------
 
 describe("Prompts.input — onPress value dispatch", () => {
-	it("resolves {cancelled: false, type: 'string', value: ''} when value is undefined", async () => {
+	it("resolves {cancelled: false, value: ''} when value is undefined", async () => {
 		const promise = prompts.input()
 		await tick()
 		pressPromptButton(1, undefined)
 		const result = await promise
-		expect(result).toEqual({ cancelled: false, type: "string", value: "" })
+		expect(result).toEqual({ cancelled: false, value: "" })
 	})
 
-	it("resolves {cancelled: false, type: 'string', value: ''} when value is empty string", async () => {
+	it("resolves {cancelled: false, value: ''} when value is empty string", async () => {
 		const promise = prompts.input()
 		await tick()
 		pressPromptButton(1, "")
 		const result = await promise
-		expect(result).toEqual({ cancelled: false, type: "string", value: "" })
+		expect(result).toEqual({ cancelled: false, value: "" })
 	})
 
-	it("resolves {cancelled: false, type: 'string', value: <the string>} for a non-empty string", async () => {
+	it("resolves {cancelled: false, value: <the string>} for a non-empty string", async () => {
 		const promise = prompts.input()
 		await tick()
 		pressPromptButton(1, "hello world")
 		const result = await promise
-		expect(result).toEqual({ cancelled: false, type: "string", value: "hello world" })
-	})
-
-	it("resolves {cancelled: false, type: 'credentials', login, password} for a credential object", async () => {
-		const promise = prompts.input()
-		await tick()
-		pressPromptButton(1, { login: "user@example.com", password: "s3cr3t" })
-		const result = await promise
-		expect(result).toEqual({ cancelled: false, type: "credentials", login: "user@example.com", password: "s3cr3t" })
+		expect(result).toEqual({ cancelled: false, value: "hello world" })
 	})
 
 	it("resolves {cancelled: true} when the Cancel button is pressed", async () => {

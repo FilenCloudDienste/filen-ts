@@ -17,14 +17,12 @@ import { pickDocuments } from "@/lib/documentPicker"
 import * as FileSystem from "expo-file-system"
 import { runBulk } from "@/lib/bulkOps"
 import notesOffline from "@/features/notes/notesOffline"
-import { serialize } from "@/lib/serializer"
 import { NOTE_TYPE_LABEL_KEY, NOTE_TYPE_OPTIONS, noteTypeToIcon } from "@/features/notes/components/note/menu"
 import { createTagFlow } from "@/features/notes/components/notesActions"
 import { type NotesTagsSortBy } from "@/features/notes/notesTagsSortPreference"
 import { type TFunction } from "i18next"
 import type { Note, NoteTag } from "@/types"
 import { useResolveClassNames } from "uniwind"
-import { aggregateNoteTagSelectionFlags } from "@/features/notes/notesSelectors"
 import { NOTES_VIEW_MODES, NOTES_VIEW_MODE_ORDER, type NotesViewMode } from "@/features/notes/notesViewModes"
 import logger from "@/lib/logger"
 
@@ -90,7 +88,6 @@ export function buildNotesHeaderRightItems({
 	setNotesViewMode,
 	tagsSortBy,
 	setTagsSortBy,
-	tagFlags,
 	noteFlags,
 	markedOffline,
 	tag,
@@ -113,7 +110,6 @@ export function buildNotesHeaderRightItems({
 	setNotesViewMode: (fn: NotesViewMode | ((prev: NotesViewMode) => NotesViewMode)) => void
 	tagsSortBy: NotesTagsSortBy
 	setTagsSortBy: (next: NotesTagsSortBy) => void
-	tagFlags: ReturnType<typeof aggregateNoteTagSelectionFlags>
 	noteFlags: NoteSelectionFlags
 	// uuid -> true for every note kept on the device. Read reactively by the caller from the
 	// offline-notes store, so the entries below flip the moment the ledger changes.
@@ -281,7 +277,7 @@ export function buildNotesHeaderRightItems({
 										return
 									}
 
-									if (promptResult.data.cancelled || promptResult.data.type !== "string") {
+									if (promptResult.data.cancelled) {
 										return
 									}
 
@@ -463,7 +459,7 @@ export function buildNotesHeaderRightItems({
 						router.push({
 							pathname: "/noteTags",
 							params: {
-								notes: serialize(selectedNotesLive)
+								uuids: selectedNotesLive.map(n => n.uuid).join(",")
 							}
 						})
 					}
@@ -656,16 +652,18 @@ export function buildNotesHeaderRightItems({
 		}
 
 		if (selectedTags.length > 0) {
+			const anyTagFavorited = selectedTags.some(selectedTag => selectedTag.favorite)
+
 			menuButtons.push({
 				id: "bulkFavorite",
-				title: tagFlags.includesFavorited ? t("unfavorite_selected") : t("favorite_selected"),
+				title: anyTagFavorited ? t("unfavorite_selected") : t("favorite_selected"),
 				icon: "heart",
 				requiresOnline: true,
 				onPress: async () => {
 					await runBulk({
 						items: selectedTags,
 						clearSelection: () => useNotesStore.getState().clearSelectedTags(),
-						op: selectedTag => notesLib.favoriteTag({ tag: selectedTag, favorite: !tagFlags.includesFavorited })
+						op: selectedTag => notesLib.favoriteTag({ tag: selectedTag, favorite: !anyTagFavorited })
 					})
 				}
 			})

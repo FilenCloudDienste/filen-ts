@@ -16,7 +16,7 @@ import cache from "@/lib/cache"
 import { AnyNormalDir } from "@filen/sdk-rs"
 import { useSdkClients } from "@/lib/auth"
 import { unwrapParentUuid } from "@/lib/sdkUnwrap"
-import useDriveSelectStore from "@/features/drive/store/useDriveSelect.store"
+import useDriveSelectStore, { selectDriveSelectSelection } from "@/features/drive/store/useDriveSelect.store"
 import { everyItemAlreadyIn } from "@/features/drive/driveSelectors"
 import { useShallow } from "zustand/shallow"
 import events from "@/lib/events"
@@ -30,7 +30,8 @@ const DriveSelectToolbar = () => {
 	const insets = useSafeAreaInsets()
 	const drivePath = useDrivePath()
 	const { authedSdkClient } = useSdkClients()
-	const selectedItems = useDriveSelectStore(useShallow(state => state.selectedItems))
+	const selectSessionId = drivePath.selectOptions?.id
+	const selectedItems = useDriveSelectStore(useShallow(state => selectDriveSelectSelection(state, selectSessionId)))
 	const navigation = useNavigation()
 	const { t } = useTranslation()
 	const isOnline = useIsOnline()
@@ -100,7 +101,7 @@ const DriveSelectToolbar = () => {
 			return
 		}
 
-		if (promptResult.data.cancelled || promptResult.data.type !== "string") {
+		if (promptResult.data.cancelled) {
 			return
 		}
 
@@ -142,48 +143,74 @@ const DriveSelectToolbar = () => {
 			return
 		}
 
-		if (isSubmitting.current) {
-			return
-		}
-
-		isSubmitting.current = true
-
-		try {
-			switch (drivePath.selectOptions.intention) {
-				case "move": {
-					if (!parentDir || drivePath.selectOptions.items.length === 0 || isSameParentAsSelectedItems) {
-						return
-					}
-
-					const items = drivePath.selectOptions.items
-					const result = await runWithLoading(async () => {
-						await Promise.all(
-							items.map(async item => {
-								await drive.move({
-									newParent: parentDir,
-									item
-								})
-							})
-						)
-					})
-
-					if (!result.success) {
-						logger.error("driveSelect", "Move operation failed", { error: result.error })
-						alerts.error(result.error)
-
-						return
-					}
-
-					navigation.getParent()?.goBack()
-
-					break
+		switch (drivePath.selectOptions.intention) {
+			case "move": {
+				if (!parentDir || drivePath.selectOptions.items.length === 0 || isSameParentAsSelectedItems || isSubmitting.current) {
+					return
 				}
 
-				// Copying into the items' own directory is allowed (the copies get "name (1)"). The caller
-				// starts the job; the picker only hands back where. A public link's sources aren't drive
-				// items, so a copy session may carry none.
-				case "copy": {
-					if (!parentDir) {
+				isSubmitting.current = true
+
+				const items = drivePath.selectOptions.items
+				// runWithLoading returns a Result and never throws, so the guard always resets.
+				const result = await runWithLoading(async () => {
+					await Promise.all(
+						items.map(async item => {
+							await drive.move({
+								newParent: parentDir,
+								item
+							})
+						})
+					)
+				})
+
+				isSubmitting.current = false
+
+				if (!result.success) {
+					logger.error("driveSelect", "Move operation failed", { error: result.error })
+					alerts.error(result.error)
+
+					return
+				}
+
+				navigation.getParent()?.goBack()
+
+				break
+			}
+
+			// Copying into the items' own directory is allowed (the copies get "name (1)"). The caller
+			// starts the job; the picker only hands back where. A public link's sources aren't drive
+			// items, so a copy session may carry none.
+			case "copy": {
+				if (!parentDir) {
+					return
+				}
+
+				events.emit("driveSelect", {
+					id: drivePath.selectOptions.id,
+					selectedItems: [
+						{
+							type: "root",
+							data: parentDir
+						}
+					],
+					cancelled: false
+				})
+
+				navigation.getParent()?.goBack()
+
+				break
+			}
+
+			case "select": {
+				if (!canSelect) {
+					return
+				}
+
+				navigation.getParent()?.goBack()
+
+				if (selectedItems.length === 0) {
+					if (!parentDir || !drivePath.selectOptions.directories) {
 						return
 					}
 
@@ -198,51 +225,20 @@ const DriveSelectToolbar = () => {
 						cancelled: false
 					})
 
-					navigation.getParent()?.goBack()
-
-					break
+					return
 				}
 
-				case "select": {
-					if (!canSelect) {
-						return
-					}
+				events.emit("driveSelect", {
+					id: drivePath.selectOptions.id,
+					selectedItems: selectedItems.map(item => ({
+						type: "driveItem",
+						data: item
+					})),
+					cancelled: false
+				})
 
-					navigation.getParent()?.goBack()
-
-					if (selectedItems.length === 0) {
-						if (!parentDir || !drivePath.selectOptions.directories) {
-							return
-						}
-
-						events.emit("driveSelect", {
-							id: drivePath.selectOptions.id,
-							selectedItems: [
-								{
-									type: "root",
-									data: parentDir
-								}
-							],
-							cancelled: false
-						})
-
-						return
-					}
-
-					events.emit("driveSelect", {
-						id: drivePath.selectOptions.id,
-						selectedItems: selectedItems.map(item => ({
-							type: "driveItem",
-							data: item
-						})),
-						cancelled: false
-					})
-
-					break
-				}
+				break
 			}
-		} finally {
-			isSubmitting.current = false
 		}
 	}
 

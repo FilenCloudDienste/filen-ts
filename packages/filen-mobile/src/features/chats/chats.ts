@@ -444,14 +444,6 @@ class Chats {
 		return updated
 	}
 
-	public async addParticipant({ chat, contact, signal }: { chat: Chat; contact: Contact; signal?: AbortSignal }) {
-		return await this.addParticipants({
-			chat,
-			contacts: [contact],
-			signal
-		})
-	}
-
 	public async removeParticipant({ chat, participant, signal }: { chat: Chat; participant: ChatParticipant; signal?: AbortSignal }) {
 		if (!chat.participants.find(p => p.userId === participant.userId)) {
 			return chat
@@ -489,27 +481,6 @@ class Chats {
 					}
 				: undefined
 		)
-	}
-
-	public async updateOnlineStatus({ chat, signal }: { chat: Chat; signal?: AbortSignal }) {
-		const { authedSdkClient } = await auth.getSdkClients()
-
-		chat = wrapChat(
-			await authedSdkClient.updateChatOnlineStatus(
-				chat,
-				signal
-					? {
-							signal
-						}
-					: undefined
-			)
-		)
-
-		chatsQueryUpdate({
-			updater: prev => prev.map(c => (c.uuid === chat.uuid ? chat : c))
-		})
-
-		return chat
 	}
 
 	public async updateLastFocusTimesNow({ chats, signal }: { chats: Chat[]; signal?: AbortSignal }) {

@@ -1,6 +1,5 @@
 import { vi, describe, it, expect, beforeEach } from "vitest"
 
-vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
 vi.mock("expo-crypto", async () => await import("@/tests/mocks/expoCrypto"))
 
 import { fs } from "@/tests/mocks/expoFileSystem"

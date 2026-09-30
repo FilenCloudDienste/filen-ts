@@ -806,13 +806,13 @@ describe("Audio", () => {
 
 			await audio.skipTo(1)
 
-			const currentItemBefore = audio.getCurrentQueueItem()
+			const currentItemBefore = audio.getQueue()[audio.getPosition()]
 
 			await audio.setShuffleEnabled(true)
 
 			// Position stays the same — shuffle places current track at the front of the
 			// shuffle order, so the currently-playing item is unchanged.
-			const currentItemAfter = audio.getCurrentQueueItem()
+			const currentItemAfter = audio.getQueue()[audio.getPosition()]
 
 			expect(currentItemAfter!.item).toBe(currentItemBefore!.item)
 		})
@@ -857,7 +857,7 @@ describe("Audio", () => {
 			//    suspends at the getLoopMode() await (secureStore read).
 			// 2. User taps next() while handleTrackEnd is suspended → next() calls
 			//    loadAndPlay() which bumps loadGeneration.
-			// 3. handleTrackEnd resumes → without the fix it would advanceToNext() again,
+			// 3. handleTrackEnd resumes → without the fix it would advance(1) again,
 			//    skipping an extra track. With the fix it detects gen !== loadGeneration and
 			//    returns early.
 			//
@@ -1239,28 +1239,6 @@ describe("Audio", () => {
 			expect(queue[0]!.item).toBe(qi.item)
 		})
 
-		it("getCurrentQueueItem returns item at effective index", async () => {
-			const { audio } = await createAudio()
-
-			const qiA = makeQueueItem("a", "a.mp3")
-			const qiB = makeQueueItem("b", "b.mp3")
-
-			await audio.addToQueue({ item: qiA })
-			await audio.addToQueue({ item: qiB })
-
-			expect(audio.getCurrentQueueItem()!.item).toBe(qiA.item)
-
-			await audio.skipTo(1)
-
-			expect(audio.getCurrentQueueItem()!.item).toBe(qiB.item)
-		})
-
-		it("getCurrentQueueItem returns null when queue is empty", async () => {
-			const { audio } = await createAudio()
-
-			expect(audio.getCurrentQueueItem()).toBeNull()
-		})
-
 		it("getLoading is true while a track is loading and false after it finishes", async () => {
 			const { audio } = await createAudio()
 
@@ -1304,7 +1282,7 @@ describe("Audio", () => {
 
 			expect(audio.getQueue()).toHaveLength(3)
 			expect(audio.getPosition()).toBe(2)
-			expect(audio.getCurrentQueueItem()!.item).toBe(items[2]!.item)
+			expect(audio.getQueue()[audio.getPosition()]!.item).toBe(items[2]!.item)
 		})
 
 		it("regenerates shuffle order when shuffle is enabled", async () => {
@@ -1387,7 +1365,7 @@ describe("Audio", () => {
 		it("advances correctly in shuffle mode after replaceQueue changes the queue size", async () => {
 			// NOTE: replaceQueue regenerates shuffleOrder to match the new queue length, so by the
 			// time next() runs, shuffleOrder.length === queue.length (the stale-order guard inside
-			// advanceToNext is not triggered here). This test verifies the normal happy-path of
+			// advance is not triggered here). This test verifies the normal happy-path of
 			// shuffled next() following a replaceQueue call.
 			const { audio } = await createAudio()
 
@@ -1448,7 +1426,7 @@ describe("Audio", () => {
 			playlist.currentTime = 0
 			await audio.previous()
 
-			// generateShuffleOrder(firstIdx=0) places 0 first, so going back to
+			// reshuffleFrom(firstIdx=0) places 0 first, so going back to
 			// shufflePosition=0 always resolves to queue index 0.
 			expect(audio.getPosition()).toBe(0)
 			// previous() must have called loadAndPlay, which replaces the track.
@@ -3123,7 +3101,7 @@ describe("Audio", () => {
 
 			// good-b is now at index 1
 			expect(audio.getPosition()).toBe(1)
-			expect(audio.getCurrentQueueItem()!.item.data.uuid).toBe("b")
+			expect(audio.getQueue()[audio.getPosition()]!.item.data.uuid).toBe("b")
 		})
 
 		it("results in empty queue and position 0 when all items are undecryptable", async () => {

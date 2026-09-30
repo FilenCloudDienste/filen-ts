@@ -1,5 +1,4 @@
 import { describe, it, expect, vi } from "vitest"
-import { materializeChecklistGhost } from "@/features/notes/checklistEdit"
 import { addChecklistLine, removeChecklistItem, checklistParser, type Checklist } from "@filen/shared"
 
 const base: Checklist = [
@@ -63,46 +62,6 @@ describe("checklist edit -> onChange propagation", () => {
 		applyAndPropagate(withEmpty, addChecklistLine(withEmpty, "a", "new"), onChange)
 
 		expect(onChange).not.toHaveBeenCalled()
-	})
-})
-
-// ── #80 ghost materialization ────────────────────────────────────────────────
-
-describe("materializeChecklistGhost", () => {
-	const parsed: Checklist = [
-		{ id: "a", checked: true, content: "done 1" },
-		{ id: "b", checked: true, content: "done 2" }
-	]
-
-	it("appends the ghost as an UNCHECKED item at the END, under the ghost's own id, with the typed content", () => {
-		const result = materializeChecklistGhost(parsed, "seed-ghost-0", "h")
-
-		expect(result.changed).toBe(true)
-		expect(result.next).toHaveLength(3)
-		expect(result.next[2]).toEqual({ id: "seed-ghost-0", checked: false, content: "h" })
-		// The hidden completed items are untouched.
-		expect(result.next[0]).toBe(parsed[0])
-		expect(result.next[1]).toBe(parsed[1])
-	})
-
-	it("no-ops when the id already exists (duplicate keystroke race must not double-append)", () => {
-		const withGhost = [...parsed, { id: "seed-ghost-0", checked: false, content: "h" }]
-		const result = materializeChecklistGhost(withGhost, "seed-ghost-0", "he")
-
-		expect(result.changed).toBe(false)
-		expect(result.next).toBe(withGhost)
-	})
-
-	it("round-trips through the parser: hidden completed items AND the materialized row all serialize", () => {
-		const result = materializeChecklistGhost(parsed, "seed-ghost-0", "new task")
-		const html = checklistParser.stringify(result.next)
-		const reparsed = checklistParser.parse(html)
-
-		expect(reparsed.map(i => ({ checked: i.checked, content: i.content }))).toEqual([
-			{ checked: true, content: "done 1" },
-			{ checked: true, content: "done 2" },
-			{ checked: false, content: "new task" }
-		])
 	})
 })
 

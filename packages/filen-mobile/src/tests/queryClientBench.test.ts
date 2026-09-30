@@ -93,7 +93,7 @@ vi.mock("@/lib/sqlite", async () => {
 		default: {
 			openDb: async () => benchDb,
 			kvAsync: {
-				removeByPrefix: async () => 0
+				removeByPrefixRange: async () => undefined
 			}
 		},
 		prefixUpperBound: (prefix: string) => {

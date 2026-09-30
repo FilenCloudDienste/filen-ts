@@ -10,7 +10,7 @@ import { FILE_PROVIDER_ENABLED_SECURE_STORE_KEY } from "@/features/settings/file
 import { useTranslation } from "react-i18next"
 import { SettingsLoadingView } from "@/components/ui/settingsLoadingView"
 import { SettingsScrollView } from "@/components/ui/settingsScrollView"
-import { disableBiometric, enableBiometric } from "@/features/settings/biometricButtons"
+import { enableBiometric } from "@/features/settings/biometricButtons"
 import { type TFunction } from "i18next"
 import ListEmpty from "@/components/ui/listEmpty"
 
@@ -84,13 +84,12 @@ function BiometricComponent() {
 											value: biometric.enabled,
 											onValueChange: async () => {
 												if (biometric.enabled) {
-													disableBiometric({ setBiometric })
+													setBiometric({ enabled: false })
 
 													return
 												}
 
 												await enableBiometric({
-													biometric,
 													setBiometric,
 													fileProviderEnabled,
 													setFileProviderEnabled,
@@ -133,51 +132,45 @@ function BiometricComponent() {
 											onPress: () => {
 												actionSheet.show({
 													buttons: [
-														...[
-															{
-																title: t("immediately"),
-																seconds: 0
-															},
-															{
-																title: t("one_minute"),
-																seconds: 60
-															},
-															{
-																title: t("five_minutes"),
-																seconds: 60 * 5
-															},
-															{
-																title: t("fifteen_minutes"),
-																seconds: 60 * 15
-															},
-															{
-																title: t("thirty_minutes"),
-																seconds: 60 * 30
-															},
-															{
-																title: t("one_hour"),
-																seconds: 60 * 60
-															}
-														].map(option => ({
-															title: option.title,
-															onPress: () => {
-																setBiometric(prev => {
-																	if (!prev.enabled) {
-																		return prev
-																	}
-
-																	return {
-																		...prev,
-																		lockAfter: option.seconds
-																	} satisfies Biometric
-																})
-															}
-														})),
 														{
-															title: t("close"),
-															cancel: true
+															title: t("immediately"),
+															seconds: 0
+														},
+														{
+															title: t("one_minute"),
+															seconds: 60
+														},
+														{
+															title: t("five_minutes"),
+															seconds: 60 * 5
+														},
+														{
+															title: t("fifteen_minutes"),
+															seconds: 60 * 15
+														},
+														{
+															title: t("thirty_minutes"),
+															seconds: 60 * 30
+														},
+														{
+															title: t("one_hour"),
+															seconds: 60 * 60
 														}
-													]
+													].map(option => ({
+														title: option.title,
+														onPress: () => {
+															setBiometric(prev => {
+																if (!prev.enabled) {
+																	return prev
+																}
+
+																return {
+																	...prev,
+																	lockAfter: option.seconds
+																} satisfies Biometric
+															})
+														}
+													}))
 												})
 											}
 										}

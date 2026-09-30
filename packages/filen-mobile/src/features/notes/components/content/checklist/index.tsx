@@ -15,13 +15,11 @@ const Checklist = ({
 	initialValue,
 	onChange,
 	readOnly,
-	autoFocus,
 	hideCompleted
 }: {
 	initialValue?: string
 	onChange?: (value: string) => void
 	readOnly?: boolean
-	autoFocus?: boolean
 	hideCompleted?: boolean
 }) => {
 	// didType gates onChange so programmatic hydration (the initialValue useEffect below, which
@@ -35,19 +33,19 @@ const Checklist = ({
 	const [store] = useState(() => createChecklistStore())
 	// Client-side filter only: hideCompleted drops checked items from the rendered list without
 	// touching `parsed` (the source of truth that gets stringified back into the note), so the
-	// original note content is preserved. useShallow keeps the render stable when off (same ids ref)
-	// and only re-renders when the visible set actually changes (e.g. an item is checked/unchecked),
-	// not on every keystroke.
+	// original note content is preserved. useShallow compares the derived ids element-wise, so it
+	// only re-renders when the visible set actually changes (e.g. an item is checked/unchecked or a
+	// row is added/removed), not on every keystroke.
 	const visibleIds = useStore(
 		store,
-		useShallow(state => visibleChecklistIds(state.ids, state.parsed, hideCompleted ?? false))
+		useShallow(state => visibleChecklistIds(state.parsed, hideCompleted ?? false))
 	)
 	const initialValueFrozen = useState(() => initialValue)[0]
 	// Ghost row (#80): with "hide completed" on and every item checked, zero rows render and the
 	// checklist becomes uneditable. Render one ghost row instead — see checklistView.ts for the
 	// activation predicate and the pure id derivation (stability + focus-continuity properties).
 	const ghostMountSeed = useState(() => randomUUID())[0]
-	const hasHydratedIds = useStore(store, state => state.ids.length > 0)
+	const hasHydratedIds = useStore(store, state => state.parsed.length > 0)
 	const ghostId = useStore(store, state => checklistGhostRowId(ghostMountSeed, state.parsed))
 	const ghostActive = isChecklistGhostActive(hasHydratedIds, visibleIds.length, hideCompleted ?? false, readOnly ?? false)
 	const renderIds = ghostActive ? [ghostId] : visibleIds
@@ -91,18 +89,7 @@ const Checklist = ({
 		}
 
 		store.getState().setInputRefs({})
-		store.getState().setInitialIds(
-			parsed.reduce(
-				(acc, item) => {
-					acc[item.id] = true
-
-					return acc
-				},
-				{} as Record<string, boolean>
-			)
-		)
 		store.getState().setParsed(parsed)
-		store.getState().setIds(parsed.map(i => i.id))
 	}, [store, initialValueFrozen])
 
 	return (
@@ -133,7 +120,7 @@ const Checklist = ({
 				keyboardDismissMode="interactive"
 				bottomOffset={32}
 			>
-				{renderIds.map((id, index) => {
+				{renderIds.map(id => {
 					return (
 						<Item
 							key={id}
@@ -147,8 +134,6 @@ const Checklist = ({
 							onChange={onChange}
 							readOnly={readOnly}
 							onDidType={onTyped}
-							isLast={index === renderIds.length - 1}
-							autoFocus={autoFocus}
 						/>
 					)
 				})}

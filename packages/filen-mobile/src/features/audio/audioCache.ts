@@ -12,7 +12,7 @@ import { Image, type ImageRef } from "expo-image"
 import { xxHash32 } from "js-xxhash"
 import mimeTypes from "mime-types"
 import type { CacheItem } from "@/types"
-import { AUDIO_CACHE_VERSION, AUDIO_CACHE_PARENT_DIRECTORY } from "@/lib/storageRoots"
+import { AUDIO_CACHE_PARENT_DIRECTORY } from "@/lib/storageRoots"
 import { CACHE_MAX_SIZE_BYTES } from "@/lib/cacheEviction"
 import logger from "@/lib/logger"
 
@@ -27,9 +27,8 @@ export type Metadata = {
 	cachedAt: number
 } | null
 
-// Critical: When changing anything related to storage index/store/persistence format, bump AUDIO_CACHE_VERSION in storageRoots.ts to invalidate old caches and prevent potential issues from stale or incompatible data.
-export const VERSION = AUDIO_CACHE_VERSION
-export const PARENT_DIRECTORY = AUDIO_CACHE_PARENT_DIRECTORY
+// Changing the storage index/persistence format requires bumping AUDIO_CACHE_VERSION in storageRoots.ts.
+const PARENT_DIRECTORY = AUDIO_CACHE_PARENT_DIRECTORY
 
 const GC_DEBOUNCE_MS = 30 * 1000
 // AU-09: bound gc's three fan-out passes so a large cache (hundreds of small sidecars/pictures)
@@ -372,50 +371,6 @@ export class AudioCache {
 		return result.data
 	}
 
-	public async remove(item: CacheItem): Promise<void> {
-		if (item.type === "drive" && item.data.type !== "file" && item.data.type !== "sharedFile" && item.data.type !== "sharedRootFile") {
-			throw new Error("Item must be a file or shared file")
-		}
-
-		const result = await run(async defer => {
-			await this.clearBarrier.enter()
-
-			defer(() => {
-				this.clearBarrier.leave()
-			})
-
-			const mutex = this.getMutexForKey(item.type === "drive" ? item.data.data.uuid : this.getExternalItemId(item))
-
-			await mutex.acquire()
-
-			defer(() => {
-				mutex.release()
-			})
-
-			const { metadata: metadataFile } = this.getFiles(item)
-
-			if (metadataFile.exists) {
-				const parseResult = await run(async () => {
-					return parseMetadata(await metadataFile.text())
-				})
-
-				if (parseResult.success && parseResult.data?.pictureUri) {
-					const pictureFile = new FileSystem.File(parseResult.data.pictureUri)
-
-					if (pictureFile.exists) {
-						pictureFile.delete()
-					}
-				}
-
-				metadataFile.delete()
-			}
-		})
-
-		if (!result.success) {
-			throw result.error
-		}
-	}
-
 	public async gc(age?: number): Promise<void> {
 		if (!PARENT_DIRECTORY.exists) {
 			return
@@ -423,7 +378,7 @@ export class AudioCache {
 
 		// AU-11: participate in the ClearBarrier so a concurrent clear() (logout / "clear music metadata" /
 		// "clear all disk caches") waits for this gc pass to drain instead of deleting+recreating
-		// PARENT_DIRECTORY mid-sweep — matching getMetadata/get/remove, which already bracket their disk
+		// PARENT_DIRECTORY mid-sweep — matching getMetadata/get, which already bracket their disk
 		// work with enter()/leave().
 		await this.clearBarrier.enter()
 

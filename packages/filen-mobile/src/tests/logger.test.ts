@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
 
-vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
 // The logger now imports the shared serializer, which imports uniffi-bindgen-react-native (CJS,
 // unloadable in Node) — mock it the same way serializer.test.ts does.
 vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))

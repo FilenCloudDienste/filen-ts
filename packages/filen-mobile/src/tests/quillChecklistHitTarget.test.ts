@@ -17,17 +17,12 @@ import { vi, describe, it, expect, beforeEach } from "vitest"
 
 vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
 
-vi.mock("quill", () => ({
-	default: class Quill {}
-}))
-
 import { QuillThemeCustomizer } from "@/components/textEditor/richText/quillTheme"
-import type Quill from "quill"
 
 function generatedCss(): string {
 	const customizer = new QuillThemeCustomizer({})
 
-	customizer.apply({} as Quill)
+	customizer.apply()
 
 	return document.getElementById("quill-custom-styles")?.textContent ?? ""
 }

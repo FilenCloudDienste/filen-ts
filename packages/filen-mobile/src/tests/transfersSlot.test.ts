@@ -1,6 +1,5 @@
 import { vi } from "vitest"
 
-vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
 vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 
 vi.mock("@expo/vector-icons/Ionicons", () => ({ default: () => null }))

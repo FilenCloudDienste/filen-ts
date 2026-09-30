@@ -13,7 +13,8 @@ import useContactsStore, { type ContactListItemWithHeader } from "@/features/con
 import { useFocusEffect } from "expo-router"
 import events from "@/lib/events"
 import Header from "@/features/contacts/components/contactsHeader"
-import Contact, { ContactSectionHeader } from "@/features/contacts/components/contactRow"
+import Contact from "@/features/contacts/components/contactRow"
+import { ListRowSectionHeader } from "@/components/ui/listRow"
 import { useSelectOptions } from "@/features/contacts/contactsSelect"
 import useContactSections from "@/features/contacts/hooks/useContactSections"
 import useIsOnline from "@/hooks/useIsOnline"
@@ -87,7 +88,7 @@ const Contacts = () => {
 
 	const renderItem = (info: ListRenderItemInfo<ContactListItemWithHeader>) => {
 		if (info.item.type === "header") {
-			return <ContactSectionHeader title={info.item.data.title} />
+			return <ListRowSectionHeader title={info.item.data.title} />
 		}
 
 		return (
@@ -183,7 +184,6 @@ const Contacts = () => {
 			>
 				<VirtualList
 					className="flex-1 bg-background-secondary"
-					contentInsetAdjustmentBehavior="automatic"
 					contentContainerClassName={cn("pb-40", Platform.OS === "android" && "pb-96")}
 					keyExtractor={keyExtractor}
 					data={items}

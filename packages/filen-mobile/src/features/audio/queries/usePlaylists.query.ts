@@ -1,5 +1,5 @@
 import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
-import { DEFAULT_QUERY_OPTIONS, queryClient, queryUpdater } from "@/queries/client"
+import { queryClient, queryUpdater } from "@/queries/client"
 import { driveContentChangedSince } from "@/lib/driveChanges"
 import audio from "@/features/audio/audio"
 import cache from "@/lib/cache"
@@ -108,7 +108,6 @@ export function usePlaylistsQuery(
 	options?: Omit<UseQueryOptions, "queryKey" | "queryFn">
 ): UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error> {
 	const query = useQuery({
-		...DEFAULT_QUERY_OPTIONS,
 		staleTime: PLAYLISTS_STALE_TIME,
 		refetchOnMount: q => (cachedReadReusable(q.state) ? false : "always"),
 		...options,

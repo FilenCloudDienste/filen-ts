@@ -102,8 +102,6 @@ export const media = {
 	// ── Camera upload issues (errors + skipped assets) ────────────────────────
 	/** Camera upload issues screen — header title (covers both the errors list and the skipped-assets list) */
 	camera_upload_issues: "Camera upload issues",
-	/** Camera upload errors screen — header title */
-	camera_upload_errors: "Camera upload errors",
 	/** Camera upload issues — section header above the list of sync errors */
 	camera_upload_errors_section: "Errors",
 	/** Camera upload issues — section header above the list of assets skipped after repeated upload failures */

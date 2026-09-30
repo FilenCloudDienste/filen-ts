@@ -48,10 +48,7 @@ vi.mock("@filen/sdk-rs", () => ({
 // ---------------------------------------------------------------------------
 
 import {
-	getDriveEmptyStateIcon,
-	getDriveEmptyStateTitleKey,
-	DRIVE_EMPTY_STATE_ICON,
-	DRIVE_EMPTY_STATE_TITLE_KEY,
+	getDriveEmptyState,
 	resolveDriveHeaderTitle,
 	rawUploadTimestamp,
 	pickDisplayTimestamp,
@@ -107,100 +104,28 @@ function decryptableItem(uuid: string, name: string): DriveItem {
 }
 
 // ---------------------------------------------------------------------------
-// #29 — getDriveEmptyStateIcon / getDriveEmptyStateTitleKey null-input fallback
+// #29 — getDriveEmptyState per variant + null-input fallback
 // ---------------------------------------------------------------------------
 
-describe("getDriveEmptyStateIcon", () => {
-	it("null input falls back to the drive (folder-open-outline) icon", () => {
-		expect(getDriveEmptyStateIcon(null)).toBe("folder-open-outline")
-		expect(getDriveEmptyStateIcon(null)).toBe(DRIVE_EMPTY_STATE_ICON.drive)
-	})
-
-	it("trash → trash-outline", () => {
-		expect(getDriveEmptyStateIcon("trash")).toBe("trash-outline")
-	})
-
-	it("favorites → heart-outline", () => {
-		expect(getDriveEmptyStateIcon("favorites")).toBe("heart-outline")
-	})
-
-	it("recents → time-outline", () => {
-		expect(getDriveEmptyStateIcon("recents")).toBe("time-outline")
-	})
-
-	it("offline → cloud-offline-outline", () => {
-		expect(getDriveEmptyStateIcon("offline")).toBe("cloud-offline-outline")
-	})
-
-	it("links → link-outline", () => {
-		expect(getDriveEmptyStateIcon("links")).toBe("link-outline")
-	})
-
-	it("sharedIn → people-outline", () => {
-		expect(getDriveEmptyStateIcon("sharedIn")).toBe("people-outline")
-	})
-
-	it("sharedOut → people-outline", () => {
-		expect(getDriveEmptyStateIcon("sharedOut")).toBe("people-outline")
-	})
-
-	it("drive → folder-open-outline", () => {
-		expect(getDriveEmptyStateIcon("drive")).toBe("folder-open-outline")
-	})
-
-	it("photos → folder-open-outline", () => {
-		expect(getDriveEmptyStateIcon("photos")).toBe("folder-open-outline")
-	})
-
-	it("linked → folder-open-outline", () => {
-		expect(getDriveEmptyStateIcon("linked")).toBe("folder-open-outline")
-	})
-})
-
-describe("getDriveEmptyStateTitleKey", () => {
-	it("null input falls back to folder_is_empty (drive variant)", () => {
-		expect(getDriveEmptyStateTitleKey(null)).toBe("folder_is_empty")
-		expect(getDriveEmptyStateTitleKey(null)).toBe(DRIVE_EMPTY_STATE_TITLE_KEY.drive)
-	})
-
-	it("trash → trash_is_empty", () => {
-		expect(getDriveEmptyStateTitleKey("trash")).toBe("trash_is_empty")
-	})
-
-	it("favorites → no_favorites", () => {
-		expect(getDriveEmptyStateTitleKey("favorites")).toBe("no_favorites")
-	})
-
-	it("recents → no_recents", () => {
-		expect(getDriveEmptyStateTitleKey("recents")).toBe("no_recents")
-	})
-
-	it("sharedIn → no_shared_in_items", () => {
-		expect(getDriveEmptyStateTitleKey("sharedIn")).toBe("no_shared_in_items")
-	})
-
-	it("sharedOut → no_shared_out_items", () => {
-		expect(getDriveEmptyStateTitleKey("sharedOut")).toBe("no_shared_out_items")
-	})
-
-	it("links → no_links", () => {
-		expect(getDriveEmptyStateTitleKey("links")).toBe("no_links")
-	})
-
-	it("offline → no_offline_items", () => {
-		expect(getDriveEmptyStateTitleKey("offline")).toBe("no_offline_items")
-	})
-
-	it("drive → folder_is_empty", () => {
-		expect(getDriveEmptyStateTitleKey("drive")).toBe("folder_is_empty")
-	})
-
-	it("photos → folder_is_empty", () => {
-		expect(getDriveEmptyStateTitleKey("photos")).toBe("folder_is_empty")
-	})
-
-	it("linked → folder_is_empty", () => {
-		expect(getDriveEmptyStateTitleKey("linked")).toBe("folder_is_empty")
+describe("getDriveEmptyState", () => {
+	it.each([
+		[null, "folder-open-outline", "folder_is_empty"],
+		["trash", "trash-outline", "trash_is_empty"],
+		["favorites", "heart-outline", "no_favorites"],
+		["recents", "time-outline", "no_recents"],
+		["sharedIn", "people-outline", "no_shared_in_items"],
+		["sharedOut", "people-outline", "no_shared_out_items"],
+		["links", "link-outline", "no_links"],
+		["offline", "cloud-offline-outline", "no_offline_items"],
+		["drive", "folder-open-outline", "folder_is_empty"],
+		["photos", "folder-open-outline", "folder_is_empty"],
+		["linked", "folder-open-outline", "folder_is_empty"]
+	] as const)("%s → %s / %s", (type, icon, titleKey) => {
+		expect(getDriveEmptyState(type)).toEqual({
+			icon,
+			titleKey,
+			descriptionKey: `${titleKey}_description`
+		})
 	})
 })
 

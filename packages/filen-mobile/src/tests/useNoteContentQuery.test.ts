@@ -42,7 +42,6 @@ vi.mock("@/queries/client", () => ({
 		getQueryState: vi.fn(),
 		getQueryData: vi.fn()
 	},
-	DEFAULT_QUERY_OPTIONS: {},
 	queryUpdater: {
 		get: vi.fn(),
 		set: vi.fn()

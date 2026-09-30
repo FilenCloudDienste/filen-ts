@@ -4,7 +4,6 @@ import type { DriveItem } from "@/types"
 import { unwrapDirMeta, unwrapFileMeta, unwrapParentUuid, unwrappedDirIntoDriveItem, unwrappedFileIntoDriveItem } from "@/lib/sdkUnwrap"
 import { driveItemsQueryUpdateGlobal, driveItemsQueryUpdate } from "@/features/drive/queries/useDriveItems.query"
 import cache from "@/lib/cache"
-import { toSignalOpts } from "@/lib/signals"
 import events from "@/lib/events"
 import { applyMembershipPatch } from "@filen/shared"
 
@@ -18,7 +17,7 @@ export function favoritesListingUpdater(prev: DriveItem[], item: DriveItem, favo
 	return applyMembershipPatch(prev, item, favorited)
 }
 
-export async function favorite({ item, favorited, signal }: { item: DriveItem; favorited: boolean; signal?: AbortSignal }) {
+export async function favorite({ item, favorited }: { item: DriveItem; favorited: boolean }) {
 	if (item.type !== "directory" && item.type !== "file") {
 		throw new Error("Invalid item type")
 	}
@@ -35,8 +34,7 @@ export async function favorite({ item, favorited, signal }: { item: DriveItem; f
 	const { authedSdkClient } = await auth.getSdkClients()
 	const modifiedItem = await authedSdkClient.setFavorite(
 		item.type === "directory" ? new NonRootNormalItem.Dir(item.data) : new NonRootNormalItem.File(item.data),
-		favorited,
-		toSignalOpts(signal)
+		favorited
 	)
 
 	if (modifiedItem.tag === NonRootNormalItem_Tags.Dir) {
@@ -84,7 +82,7 @@ export async function favorite({ item, favorited, signal }: { item: DriveItem; f
 	return item
 }
 
-export async function rename({ item, newName, signal }: { item: DriveItem; newName: string; signal?: AbortSignal }) {
+export async function rename({ item, newName }: { item: DriveItem; newName: string }) {
 	if (item.type !== "directory" && item.type !== "file") {
 		throw new Error("Invalid item type")
 	}
@@ -100,24 +98,16 @@ export async function rename({ item, newName, signal }: { item: DriveItem; newNa
 
 	const modifiedItem =
 		item.type === "directory"
-			? await authedSdkClient.updateDirMetadata(
-					item.data,
-					{
-						name: newName,
-						created: CreatedTime.Keep.new()
-					},
-					toSignalOpts(signal)
-				)
-			: await authedSdkClient.updateFileMetadata(
-					item.data,
-					{
-						name: newName,
-						mime: undefined,
-						lastModified: undefined,
-						created: CreatedTime.Keep.new()
-					},
-					toSignalOpts(signal)
-				)
+			? await authedSdkClient.updateDirMetadata(item.data, {
+					name: newName,
+					created: CreatedTime.Keep.new()
+				})
+			: await authedSdkClient.updateFileMetadata(item.data, {
+					name: newName,
+					mime: undefined,
+					lastModified: undefined,
+					created: CreatedTime.Keep.new()
+				})
 
 	// Ugly but works for now, until we have a better way
 	if (!("region" in modifiedItem)) {
@@ -155,7 +145,7 @@ export async function rename({ item, newName, signal }: { item: DriveItem; newNa
 	return item
 }
 
-export async function setDirColor({ item, color, signal }: { item: DriveItem; color: DirColor; signal?: AbortSignal }) {
+export async function setDirColor({ item, color }: { item: DriveItem; color: DirColor }) {
 	if (item.type !== "directory") {
 		throw new Error("Invalid item type")
 	}
@@ -164,7 +154,7 @@ export async function setDirColor({ item, color, signal }: { item: DriveItem; co
 	const previousUuid = item.data.uuid
 
 	const { authedSdkClient } = await auth.getSdkClients()
-	const modifiedDir = await authedSdkClient.setDirColor(item.data, color, toSignalOpts(signal))
+	const modifiedDir = await authedSdkClient.setDirColor(item.data, color)
 
 	item = unwrappedDirIntoDriveItem(unwrapDirMeta(modifiedDir))
 
@@ -190,74 +180,6 @@ export async function setDirColor({ item, color, signal }: { item: DriveItem; co
 		previousUuid,
 		item
 	})
-
-	return item
-}
-
-export async function updateTimestamps({
-	item,
-	created,
-	modified,
-	signal
-}: {
-	item: DriveItem
-	created?: number
-	modified?: number
-	signal?: AbortSignal
-}) {
-	if (item.type !== "directory" && item.type !== "file") {
-		throw new Error("Invalid item type")
-	}
-
-	const { authedSdkClient } = await auth.getSdkClients()
-
-	const modifiedItem =
-		item.type === "directory"
-			? await authedSdkClient.updateDirMetadata(
-					item.data,
-					{
-						name: undefined,
-						created: created !== undefined ? CreatedTime.Set.new(BigInt(created)) : CreatedTime.Keep.new()
-					},
-					toSignalOpts(signal)
-				)
-			: await authedSdkClient.updateFileMetadata(
-					item.data,
-					{
-						name: undefined,
-						mime: undefined,
-						lastModified: modified !== undefined ? BigInt(modified) : undefined,
-						created: created !== undefined ? CreatedTime.Set.new(BigInt(created)) : CreatedTime.Keep.new()
-					},
-					toSignalOpts(signal)
-				)
-
-	// Ugly but works for now, until we have a better way
-	if (!("region" in modifiedItem)) {
-		item = unwrappedDirIntoDriveItem(unwrapDirMeta(modifiedItem))
-	} else {
-		item = unwrappedFileIntoDriveItem(unwrapFileMeta(modifiedItem))
-	}
-
-	if (item.type !== "directory" && item.type !== "file") {
-		throw new Error("Invalid item type")
-	}
-
-	// Sync persistent caches — timestamps changed on the raw Dir/File.
-	if (item.type === "file" && "region" in modifiedItem) {
-		cache.cacheNewFile(modifiedItem, item)
-	} else if (item.type === "directory" && !("region" in modifiedItem)) {
-		cache.cacheNewNormalDir(modifiedItem, item)
-	}
-
-	const unwrappedParentUuid = unwrapParentUuid(item.data.parent)
-
-	if (unwrappedParentUuid) {
-		driveItemsQueryUpdateGlobal({
-			parentUuid: unwrappedParentUuid,
-			updater: prev => prev.map(i => (i.data.uuid === item.data.uuid ? item : i))
-		})
-	}
 
 	return item
 }

@@ -14,12 +14,10 @@ import {
 	AnyDirWithContext,
 	AnyDirWithContext_Tags,
 	AnyNormalDir_Tags,
-	AnySharedDir_Tags,
 	AnyNormalDir,
 	AnySharedDir,
 	AnyFile,
 	AnyFile_Tags,
-	AnyLinkedDir_Tags,
 	type LinkedFile,
 	FileMeta,
 	MaybeEncryptedUniffi_Tags
@@ -32,52 +30,13 @@ import type { DrivePath } from "@/hooks/useDrivePath"
 
 export function unwrapAnyDirUuid(dir: AnyDirWithContext): string | null {
 	switch (dir.tag) {
-		case AnyDirWithContext_Tags.Linked: {
-			switch (dir.inner[0].dir.tag) {
-				case AnyLinkedDir_Tags.Dir: {
-					return dir.inner[0].dir.inner[0].inner.uuid
-				}
-
-				case AnyLinkedDir_Tags.Root: {
-					return dir.inner[0].dir.inner[0].inner.uuid
-				}
-
-				default: {
-					return null
-				}
-			}
+		case AnyDirWithContext_Tags.Linked:
+		case AnyDirWithContext_Tags.Shared: {
+			return dir.inner[0].dir.inner[0].inner.uuid
 		}
 
 		case AnyDirWithContext_Tags.Normal: {
-			switch (dir.inner[0].tag) {
-				case AnyNormalDir_Tags.Dir: {
-					return dir.inner[0].inner[0].uuid
-				}
-
-				case AnyNormalDir_Tags.Root: {
-					return dir.inner[0].inner[0].uuid
-				}
-
-				default: {
-					return null
-				}
-			}
-		}
-
-		case AnyDirWithContext_Tags.Shared: {
-			switch (dir.inner[0].dir.tag) {
-				case AnySharedDir_Tags.Dir: {
-					return dir.inner[0].dir.inner[0].inner.uuid
-				}
-
-				case AnySharedDir_Tags.Root: {
-					return dir.inner[0].dir.inner[0].inner.uuid
-				}
-
-				default: {
-					return null
-				}
-			}
+			return dir.inner[0].inner[0].uuid
 		}
 
 		default: {
@@ -142,19 +101,7 @@ export function unwrapDirMeta(dir: Dir | SharedDir | SharedRootDir | AnyDirWithC
 			}
 
 			case AnyDirWithContext_Tags.Shared: {
-				switch (dir.inner[0].dir.tag) {
-					case AnySharedDir_Tags.Dir: {
-						return unwrapDirMeta(dir.inner[0].dir.inner[0])
-					}
-
-					case AnySharedDir_Tags.Root: {
-						return unwrapDirMeta(dir.inner[0].dir.inner[0])
-					}
-
-					default: {
-						throw new Error("Unknown AnySharedDir tag")
-					}
-				}
+				return unwrapDirMeta(dir.inner[0].dir.inner[0])
 			}
 
 			case AnyDirWithContext_Tags.Normal: {
@@ -184,103 +131,43 @@ export function unwrapDirMeta(dir: Dir | SharedDir | SharedRootDir | AnyDirWithC
 	}
 
 	if (AnySharedDir.instanceOf(dir)) {
-		switch (dir.tag) {
-			case AnySharedDir_Tags.Dir: {
-				return unwrapDirMeta(dir.inner[0])
-			}
-
-			case AnySharedDir_Tags.Root: {
-				return unwrapDirMeta(dir.inner[0])
-			}
-
-			default: {
-				throw new Error("Unknown AnySharedDir tag")
-			}
-		}
+		return unwrapDirMeta(dir.inner[0])
 	}
 
 	if ("uuid" in dir) {
-		switch (dir.meta.tag) {
-			case DirMeta_Tags.Decoded: {
-				const [decoded] = dir.meta.inner
+		const meta = dir.meta.tag === DirMeta_Tags.Decoded ? dir.meta.inner[0] : null
 
-				return {
-					meta: decoded,
-					shared: false,
-					dir,
-					uuid: dir.uuid,
-					undecryptable: false
-				}
-			}
-
-			default: {
-				return {
-					meta: null,
-					shared: false,
-					dir,
-					uuid: dir.uuid,
-					undecryptable: true
-				}
-			}
+		return {
+			meta,
+			shared: false,
+			dir,
+			uuid: dir.uuid,
+			undecryptable: meta === null
 		}
 	}
+
+	const meta = dir.inner.meta.tag === DirMeta_Tags.Decoded ? dir.inner.meta.inner[0] : null
 
 	if ("sharedTag" in dir) {
-		switch (dir.inner.meta.tag) {
-			case DirMeta_Tags.Decoded: {
-				const [decoded] = dir.inner.meta.inner
-
-				return {
-					meta: decoded,
-					shared: true,
-					root: false,
-					dir,
-					uuid: dir.inner.uuid,
-					sharedTag: dir.sharedTag,
-					undecryptable: false
-				}
-			}
-
-			default: {
-				return {
-					meta: null,
-					shared: true,
-					root: false,
-					sharedTag: dir.sharedTag,
-					dir,
-					uuid: dir.inner.uuid,
-					undecryptable: true
-				}
-			}
+		return {
+			meta,
+			shared: true,
+			root: false,
+			sharedTag: dir.sharedTag,
+			dir,
+			uuid: dir.inner.uuid,
+			undecryptable: meta === null
 		}
 	}
 
-	switch (dir.inner.meta.tag) {
-		case DirMeta_Tags.Decoded: {
-			const [decoded] = dir.inner.meta.inner
-
-			return {
-				meta: decoded,
-				shared: true,
-				root: true,
-				sharingRole: dir.sharingRole,
-				dir,
-				uuid: dir.inner.uuid,
-				undecryptable: false
-			}
-		}
-
-		default: {
-			return {
-				meta: null,
-				shared: true,
-				root: true,
-				sharingRole: dir.sharingRole,
-				dir,
-				uuid: dir.inner.uuid,
-				undecryptable: true
-			}
-		}
+	return {
+		meta,
+		shared: true,
+		root: true,
+		sharingRole: dir.sharingRole,
+		dir,
+		uuid: dir.inner.uuid,
+		undecryptable: meta === null
 	}
 }
 
@@ -375,86 +262,37 @@ export function unwrapFileMeta(
 		}
 	}
 
+	const meta = file.meta.tag === FileMeta_Tags.Decoded ? file.meta.inner[0] : null
+
 	if (!("favorited" in file)) {
-		switch (file.meta.tag) {
-			case FileMeta_Tags.Decoded: {
-				const [decoded] = file.meta.inner
-
-				return {
-					meta: decoded,
-					shared: true,
-					root: true,
-					file,
-					undecryptable: false
-				}
-			}
-
-			default: {
-				return {
-					meta: null,
-					shared: true,
-					root: true,
-					file,
-					undecryptable: true
-				}
-			}
+		return {
+			meta,
+			shared: true,
+			root: true,
+			file,
+			undecryptable: meta === null
 		}
 	}
 
 	if ("sharingRole" in file) {
-		switch (file.meta.tag) {
-			case FileMeta_Tags.Decoded: {
-				const [decoded] = file.meta.inner
-
-				return {
-					meta: decoded,
-					shared: true,
-					root: false,
-					file: {
-						...file,
-						sharedTag: true
-					},
-					undecryptable: false
-				}
-			}
-
-			default: {
-				return {
-					meta: null,
-					shared: true,
-					root: false,
-					file: {
-						...file,
-						sharedTag: true
-					},
-					undecryptable: true
-				}
-			}
+		return {
+			meta,
+			shared: true,
+			root: false,
+			file: {
+				...file,
+				sharedTag: true
+			},
+			undecryptable: meta === null
 		}
 	}
 
-	switch (file.meta.tag) {
-		case FileMeta_Tags.Decoded: {
-			const [decoded] = file.meta.inner
-
-			return {
-				meta: decoded,
-				shared: false,
-				root: false,
-				file,
-				undecryptable: false
-			}
-		}
-
-		default: {
-			return {
-				meta: null,
-				shared: false,
-				root: false,
-				file,
-				undecryptable: true
-			}
-		}
+	return {
+		meta,
+		shared: false,
+		root: false,
+		file,
+		undecryptable: meta === null
 	}
 }
 

@@ -35,12 +35,7 @@ const DriveItemInfo = () => {
 	// item, show the cannot-decrypt screen instead of an info sheet that would
 	// surface uuid-only fallbacks for every metadata row.
 	if (item.data.undecryptable) {
-		return (
-			<CannotDecryptScreen
-				uuid={item.data.uuid}
-				surface="driveInfo"
-			/>
-		)
+		return <CannotDecryptScreen uuid={item.data.uuid} />
 	}
 
 	return (

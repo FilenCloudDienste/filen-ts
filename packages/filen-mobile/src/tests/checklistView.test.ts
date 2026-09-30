@@ -13,31 +13,24 @@ const parsed: Checklist = [
 	{ id: "c", checked: false, content: "three" },
 	{ id: "d", checked: true, content: "four" }
 ]
-const ids = ["a", "b", "c", "d"]
 
 describe("visibleChecklistIds", () => {
-	it("returns the same array reference when hideCompleted is off", () => {
-		expect(visibleChecklistIds(ids, parsed, false)).toBe(ids)
+	it("returns every id in parsed order when hideCompleted is off", () => {
+		expect(visibleChecklistIds(parsed, false)).toEqual(["a", "b", "c", "d"])
 	})
 
 	it("drops checked items (preserving order) when hideCompleted is on", () => {
-		expect(visibleChecklistIds(ids, parsed, true)).toEqual(["a", "c"])
+		expect(visibleChecklistIds(parsed, true)).toEqual(["a", "c"])
 	})
 
 	it("returns an empty array when every item is checked and hideCompleted is on", () => {
 		const allChecked: Checklist = parsed.map(item => ({ ...item, checked: true }))
 
-		expect(visibleChecklistIds(ids, allChecked, true)).toEqual([])
+		expect(visibleChecklistIds(allChecked, true)).toEqual([])
 	})
 
-	it("preserves the ids order, not the parsed order, when filtering", () => {
-		const reordered = ["c", "a", "d", "b"]
-
-		expect(visibleChecklistIds(reordered, parsed, true)).toEqual(["c", "a"])
-	})
-
-	it("keeps ids that have no matching parsed item (treated as not completed)", () => {
-		expect(visibleChecklistIds(["a", "b", "x"], parsed, true)).toEqual(["a", "x"])
+	it("returns an empty array for an unhydrated (empty) checklist", () => {
+		expect(visibleChecklistIds([], false)).toEqual([])
 	})
 })
 

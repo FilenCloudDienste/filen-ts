@@ -1,48 +1,18 @@
-import { describe, it, expect } from "vitest"
+import { vi, describe, it, expect } from "vitest"
 
-import { isPhotoGridItem, filterPhotoGridItems } from "@/features/photos/utils"
-import { type PreviewType } from "@/lib/previewType"
+vi.mock("@/constants", () => ({
+	EXPO_IMAGE_SUPPORTED_EXTENSIONS: new Set<string>([".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".heic", ".heif", ".svg"]),
+	EXPO_VIDEO_SUPPORTED_EXTENSIONS: new Set<string>([".mp4", ".mov", ".m4v", ".3gp", ".webm", ".mkv"]),
+	EXPO_AUDIO_SUPPORTED_EXTENSIONS: new Set<string>([".mp3", ".m4a", ".aac", ".wav", ".ogg", ".flac"])
+}))
+
+// driveSelectors pulls in the serializer, which would otherwise load uniffi-bindgen-react-native.
+vi.mock("@/lib/serializer", () => ({
+	serialize: (value: unknown) => JSON.stringify(value)
+}))
+
+import { isPhotoGridItem } from "@/features/photos/utils"
 import { type DriveItem } from "@/types"
-import { Paths } from "@/tests/mocks/expoFileSystem"
-import { EXPO_IMAGE_SUPPORTED_EXTENSIONS } from "@/tests/mocks/constants"
-
-// Minimal injected dependencies — kept in the test so the helper stays free of
-// heavy SDK / native imports.
-const supportedImageExtensions = new Set<string>([".jpg", ".jpeg", ".png", ".gif", ".heic"])
-
-function extname(path: string): string {
-	const dot = path.lastIndexOf(".")
-
-	return dot === -1 ? "" : path.slice(dot).toLowerCase()
-}
-
-// Production-faithful extname: case-preserving (no .toLowerCase()), matching
-// FileSystem.Paths.extname from expo-file-system used in production code.
-function extnameProduction(path: string): string {
-	return Paths.extname(path)
-}
-
-function getPreviewType(name: string): PreviewType {
-	const ext = extname(name)
-
-	if ([".jpg", ".jpeg", ".png", ".gif", ".heic", ".tiff"].includes(ext)) {
-		return "image"
-	}
-
-	if ([".cr2", ".dng"].includes(ext)) {
-		return "rawImage"
-	}
-
-	if ([".mp4", ".mov", ".mkv"].includes(ext)) {
-		return "video"
-	}
-
-	if (ext === ".pdf") {
-		return "pdf"
-	}
-
-	return "unknown"
-}
 
 function makeItem({ type, name }: { type: string; name: string | null }): DriveItem {
 	return {
@@ -53,95 +23,52 @@ function makeItem({ type, name }: { type: string; name: string | null }): DriveI
 	} as unknown as DriveItem
 }
 
-const deps = {
-	getPreviewType,
-	supportedImageExtensions,
-	extname
-}
-
 describe("isPhotoGridItem", () => {
 	it("accepts a supported image file", () => {
-		expect(
-			isPhotoGridItem({
-				item: makeItem({ type: "file", name: "photo.jpg" }),
-				...deps
-			})
-		).toBe(true)
+		expect(isPhotoGridItem(makeItem({ type: "file", name: "photo.jpg" }))).toBe(true)
 	})
 
-	it("accepts a video file regardless of the supported-image set", () => {
-		expect(
-			isPhotoGridItem({
-				item: makeItem({ type: "file", name: "clip.mp4" }),
-				...deps
-			})
-		).toBe(true)
+	it("accepts a video file", () => {
+		expect(isPhotoGridItem(makeItem({ type: "file", name: "clip.mp4" }))).toBe(true)
 	})
 
-	it("accepts a RAW camera file regardless of the supported-image set (previewed via the SDK-extracted JPEG)", () => {
-		// .cr2 is deliberately NOT in supportedImageExtensions — that set gates expo-image inputs only.
-		expect(
-			isPhotoGridItem({
-				item: makeItem({ type: "file", name: "shot.cr2" }),
-				...deps
-			})
-		).toBe(true)
+	it("accepts a RAW camera file (previewed via the SDK-extracted JPEG)", () => {
+		expect(isPhotoGridItem(makeItem({ type: "file", name: "shot.cr2" }))).toBe(true)
+	})
+
+	it("accepts an svg (image-equivalent, renders via react-native-svg)", () => {
+		expect(isPhotoGridItem(makeItem({ type: "file", name: "logo.svg" }))).toBe(true)
 	})
 
 	it("accepts shared file types", () => {
-		expect(
-			isPhotoGridItem({
-				item: makeItem({ type: "sharedFile", name: "photo.png" }),
-				...deps
-			})
-		).toBe(true)
-		expect(
-			isPhotoGridItem({
-				item: makeItem({ type: "sharedRootFile", name: "photo.png" }),
-				...deps
-			})
-		).toBe(true)
+		expect(isPhotoGridItem(makeItem({ type: "sharedFile", name: "photo.png" }))).toBe(true)
+		expect(isPhotoGridItem(makeItem({ type: "sharedRootFile", name: "photo.png" }))).toBe(true)
 	})
 
-	it("rejects an image whose extension is not in the supported set", () => {
-		expect(
-			isPhotoGridItem({
-				item: makeItem({ type: "file", name: "scan.tiff" }),
-				...deps
-			})
-		).toBe(false)
+	it("matches extensions case-insensitively", () => {
+		expect(isPhotoGridItem(makeItem({ type: "file", name: "IMG.HEIC" }))).toBe(true)
+		expect(isPhotoGridItem(makeItem({ type: "file", name: "photo.JPG" }))).toBe(true)
+		expect(isPhotoGridItem(makeItem({ type: "file", name: "photo.AVIF" }))).toBe(true)
+	})
+
+	it("rejects an image whose extension expo-image cannot render", () => {
+		expect(isPhotoGridItem(makeItem({ type: "file", name: "scan.tiff" }))).toBe(false)
 	})
 
 	it("rejects directories", () => {
-		expect(
-			isPhotoGridItem({
-				item: makeItem({ type: "directory", name: "vacation.jpg" }),
-				...deps
-			})
-		).toBe(false)
+		expect(isPhotoGridItem(makeItem({ type: "directory", name: "vacation.jpg" }))).toBe(false)
 	})
 
 	it("rejects items without decrypted metadata", () => {
-		expect(
-			isPhotoGridItem({
-				item: makeItem({ type: "file", name: null }),
-				...deps
-			})
-		).toBe(false)
+		expect(isPhotoGridItem(makeItem({ type: "file", name: null }))).toBe(false)
 	})
 
 	it("rejects non-image / non-video files", () => {
-		expect(
-			isPhotoGridItem({
-				item: makeItem({ type: "file", name: "document.pdf" }),
-				...deps
-			})
-		).toBe(false)
+		expect(isPhotoGridItem(makeItem({ type: "file", name: "document.pdf" }))).toBe(false)
+		expect(isPhotoGridItem(makeItem({ type: "file", name: "song.mp3" }))).toBe(false)
 	})
-})
 
-describe("filterPhotoGridItems", () => {
-	it("keeps only supported photo-grid items", () => {
+	it("filters a mixed listing down to the grid items", () => {
 		const items = [
 			makeItem({ type: "file", name: "photo.jpg" }),
 			makeItem({ type: "file", name: "clip.mp4" }),
@@ -153,123 +80,11 @@ describe("filterPhotoGridItems", () => {
 			makeItem({ type: "file", name: null })
 		]
 
-		const result = filterPhotoGridItems({
-			items,
-			...deps
-		})
-
-		expect(result.map(item => item.data.decryptedMeta?.name)).toEqual(["photo.jpg", "clip.mp4", "shot.dng", "shared.png"])
-	})
-
-	it("returns an empty array when nothing matches", () => {
-		const items = [makeItem({ type: "directory", name: "album" }), makeItem({ type: "file", name: "document.pdf" })]
-
-		expect(
-			filterPhotoGridItems({
-				items,
-				...deps
-			})
-		).toEqual([])
-	})
-})
-
-// ---------------------------------------------------------------------------
-// Finding #48 — case-sensitive extension match + wrong extension set
-//
-// These tests inject the REAL production extname (Paths.extname — case-preserving,
-// no .toLowerCase()) together with EXPO_IMAGE_SUPPORTED_EXTENSIONS (the displayable
-// set, not the ImageManipulator subset).  IMG.HEIC (uppercase) and photo.avif must
-// both be KEPT by the predicate after the fix.
-// ---------------------------------------------------------------------------
-
-function getPreviewTypeForFinding48(name: string): PreviewType {
-	const ext = extnameProduction(name).toLowerCase()
-
-	// Faithful to production getPreviewType: .svg is its own type (renders via react-native-svg,
-	// not expo-image), NOT "image".
-	if (ext === ".svg") {
-		return "svg"
-	}
-
-	if ([".jpg", ".jpeg", ".png", ".gif", ".heic", ".heif", ".webp", ".avif", ".ico", ".icns"].includes(ext)) {
-		return "image"
-	}
-
-	if ([".mp4", ".mov", ".m4v", ".3gp", ".webm", ".mkv"].includes(ext)) {
-		return "video"
-	}
-
-	return "unknown"
-}
-
-describe("finding #48 — case-insensitive extension + EXPO_IMAGE_SUPPORTED_EXTENSIONS", () => {
-	const productionDeps = {
-		getPreviewType: getPreviewTypeForFinding48,
-		supportedImageExtensions: EXPO_IMAGE_SUPPORTED_EXTENSIONS,
-		extname: extnameProduction
-	}
-
-	it("keeps IMG.HEIC (uppercase extension) — real production extname, displayable set", () => {
-		expect(
-			isPhotoGridItem({
-				item: makeItem({ type: "file", name: "IMG.HEIC" }),
-				...productionDeps
-			})
-		).toBe(true)
-	})
-
-	it("keeps logo.svg — svg is image-equivalent for grid eligibility (renders via react-native-svg, not expo-image)", () => {
-		// getPreviewType → "svg"; isPhotoGridItem must treat svg like an image (in-grid), gated on
-		// the svg extension being present in EXPO_IMAGE_SUPPORTED_EXTENSIONS.
-		expect(
-			isPhotoGridItem({
-				item: makeItem({ type: "file", name: "logo.svg" }),
-				...productionDeps
-			})
-		).toBe(true)
-	})
-
-	it("keeps photo.JPG (uppercase) — real production extname, displayable set", () => {
-		expect(
-			isPhotoGridItem({
-				item: makeItem({ type: "file", name: "photo.JPG" }),
-				...productionDeps
-			})
-		).toBe(true)
-	})
-
-	it("keeps photo.avif — present in EXPO_IMAGE_SUPPORTED_EXTENSIONS but absent from ImageManipulator subset", () => {
-		expect(
-			isPhotoGridItem({
-				item: makeItem({ type: "file", name: "photo.avif" }),
-				...productionDeps
-			})
-		).toBe(true)
-	})
-
-	it("keeps photo.AVIF (uppercase avif) — case-insensitive + displayable set", () => {
-		expect(
-			isPhotoGridItem({
-				item: makeItem({ type: "file", name: "photo.AVIF" }),
-				...productionDeps
-			})
-		).toBe(true)
-	})
-
-	it("filterPhotoGridItems keeps mixed-case and avif items together", () => {
-		const items = [
-			makeItem({ type: "file", name: "IMG.HEIC" }),
-			makeItem({ type: "file", name: "photo.JPG" }),
-			makeItem({ type: "file", name: "shot.avif" }),
-			makeItem({ type: "file", name: "clip.mp4" }),
-			makeItem({ type: "file", name: "document.pdf" })
-		]
-
-		const result = filterPhotoGridItems({
-			items,
-			...productionDeps
-		})
-
-		expect(result.map(item => item.data.decryptedMeta?.name)).toEqual(["IMG.HEIC", "photo.JPG", "shot.avif", "clip.mp4"])
+		expect(items.filter(isPhotoGridItem).map(item => item.data.decryptedMeta?.name)).toEqual([
+			"photo.jpg",
+			"clip.mp4",
+			"shot.dng",
+			"shared.png"
+		])
 	})
 })

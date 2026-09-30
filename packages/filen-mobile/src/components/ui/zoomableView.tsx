@@ -13,9 +13,9 @@ import Animated, {
 } from "react-native-reanimated"
 import { runOnJS } from "react-native-worklets"
 
-const DEFAULT_MIN_ZOOM = 1
-const DEFAULT_MAX_ZOOM = 5
-const DEFAULT_DOUBLE_TAP_ZOOM = 2
+const MIN_ZOOM = 1
+const MAX_ZOOM = 10
+const DOUBLE_TAP_ZOOM = 2
 const PINCH_DISMISS_THRESHOLD = 0.75
 const PINCH_DISMISS_VELOCITY = -1.5
 const PINCH_DISMISS_VELOCITY_MAX_SCALE = 0.95
@@ -176,12 +176,8 @@ export function rubberBandScale(raw: number, min: number, max: number): number {
 
 export type ZoomableViewProps = {
 	children: React.ReactNode
-	minZoom?: number
-	maxZoom?: number
-	doubleTapZoom?: number
 	onZoomChange?: (zoom: number) => void
 	onSingleTap?: () => void
-	enabled?: boolean
 	style?: StyleProp<ViewStyle>
 	scaleValue?: SharedValue<number>
 	onPinchDismiss?: () => void
@@ -239,9 +235,7 @@ export function computePinchTransform(
 	eScale: number,
 	eFocalX: number,
 	eFocalY: number,
-	hasDismiss: boolean,
-	minZoom: number,
-	maxZoom: number
+	hasDismiss: boolean
 ): {
 	scale: number
 	translateX: number
@@ -250,7 +244,7 @@ export function computePinchTransform(
 	"worklet"
 
 	const raw = (sv.savedScale.value * eScale) / sv.pinchBaseScale.value
-	const newScale = rubberBandScale(raw, hasDismiss ? PINCH_DISMISS_SCALE_FLOOR : minZoom, maxZoom)
+	const newScale = rubberBandScale(raw, hasDismiss ? PINCH_DISMISS_SCALE_FLOOR : MIN_ZOOM, MAX_ZOOM)
 	const ratio = newScale / sv.savedScale.value
 	const centerX = sv.containerWidth.value / 2
 	const centerY = sv.containerHeight.value / 2
@@ -259,7 +253,7 @@ export function computePinchTransform(
 	const rawTy =
 		sv.savedTranslateY.value + (sv.focalY.value - centerY - sv.savedTranslateY.value) * (1 - ratio) + (eFocalY - sv.focalY.value)
 
-	if (newScale < minZoom) {
+	if (newScale < MIN_ZOOM) {
 		// Shrinking towards dismissal — the image follows the fingers freely.
 		return {
 			scale: newScale,
@@ -278,23 +272,19 @@ export function computePinchTransform(
 }
 
 // The rest position a pinch settles to on release: scale clamped into
-// [minZoom, maxZoom], translation re-derived focal-anchored AT THE CLAMPED SCALE
+// [MIN_ZOOM, MAX_ZOOM], translation re-derived focal-anchored AT THE CLAMPED SCALE
 // (so the pinch origin stays put), then hard-clamped into pan bounds. Pure so
 // the settle target is unit-testable and identical to the live math — settling
 // scale + both axes to this single target with one critically-damped spring is
 // what removes the snap-back.
-export function computePinchSettleTarget(
-	sv: SharedValues,
-	minZoom: number,
-	maxZoom: number
-): {
+export function computePinchSettleTarget(sv: SharedValues): {
 	scale: number
 	translateX: number
 	translateY: number
 } {
 	"worklet"
 
-	const targetScale = clampNumber(sv.scale.value, minZoom, maxZoom)
+	const targetScale = clampNumber(sv.scale.value, MIN_ZOOM, MAX_ZOOM)
 	const ratio = targetScale / sv.scale.value
 	const centerX = sv.containerWidth.value / 2
 	const centerY = sv.containerHeight.value / 2
@@ -311,12 +301,6 @@ export function computePinchSettleTarget(
 		translateX: clampNumber(sv.translateX.value + (sv.focalX.value - centerX - sv.translateX.value) * (1 - ratio), -bounds.x, bounds.x),
 		translateY: clampNumber(sv.translateY.value + (sv.focalY.value - centerY - sv.translateY.value) * (1 - ratio), -bounds.y, bounds.y)
 	}
-}
-
-function resetZoom(scale: SharedValue<number>, translateX: SharedValue<number>, translateY: SharedValue<number>) {
-	scale.value = withSpring(1, SPRING_SETTLE)
-	translateX.value = withSpring(0, SPRING_SETTLE)
-	translateY.value = withSpring(0, SPRING_SETTLE)
 }
 
 // Module scope so the React Compiler does not analyse the shared-value write
@@ -361,16 +345,12 @@ function applyContentSize(
  * Transform model: the content is translated then scaled about the container
  * center. During gestures nothing is hard-clamped — out-of-bounds translation
  * and scale get rubber-band resistance and spring back into bounds on release,
- * matching the iOS scroll/zoom feel. Below minZoom (pinch-to-dismiss) the
+ * matching the iOS scroll/zoom feel. Below MIN_ZOOM (pinch-to-dismiss) the
  * content follows the fingers freely and the release either commits the
  * dismiss (shrink + fade, then notify) or springs back to rest.
  */
 function buildComposedGesture(
 	sv: SharedValues,
-	enabled: boolean,
-	minZoom: number,
-	maxZoom: number,
-	doubleTapZoom: number,
 	notifyZoomChange: (zoom: number) => void,
 	onSingleTap: (() => void) | undefined,
 	notifySingleTap: () => void,
@@ -379,7 +359,6 @@ function buildComposedGesture(
 	notifyPinchActive: (active: boolean) => void
 ) {
 	const pinchGesture = Gesture.Pinch()
-		.enabled(enabled)
 		.manualActivation(true)
 		.onTouchesDown((e, stateManager) => {
 			"worklet"
@@ -450,7 +429,7 @@ function buildComposedGesture(
 				return
 			}
 
-			const next = computePinchTransform(sv, e.scale, e.focalX, e.focalY, !!onPinchDismiss, minZoom, maxZoom)
+			const next = computePinchTransform(sv, e.scale, e.focalX, e.focalY, !!onPinchDismiss)
 
 			sv.translateX.value = next.translateX
 			sv.translateY.value = next.translateY
@@ -498,7 +477,7 @@ function buildComposedGesture(
 			// focal point so over-zoom releases zoom back where you pinched. One
 			// critically-damped settle for all three values (SPRING_SETTLE) — the
 			// underdamped, three-independent-spring version was the snap-back.
-			const target = computePinchSettleTarget(sv, minZoom, maxZoom)
+			const target = computePinchSettleTarget(sv)
 
 			if (target.scale !== sv.scale.value) {
 				sv.scale.value = withSpring(target.scale, SPRING_SETTLE)
@@ -525,7 +504,6 @@ function buildComposedGesture(
 		})
 
 	const panGesture = Gesture.Pan()
-		.enabled(enabled)
 		.manualActivation(true)
 		.maxPointers(1)
 		.onTouchesDown(e => {
@@ -540,7 +518,7 @@ function buildComposedGesture(
 
 			// Catch a decaying/settling image under the finger (iOS behavior:
 			// touching a moving scroll view stops it immediately).
-			if (sv.scale.value > minZoom) {
+			if (sv.scale.value > MIN_ZOOM) {
 				cancelAnimation(sv.translateX)
 				cancelAnimation(sv.translateY)
 			}
@@ -551,7 +529,7 @@ function buildComposedGesture(
 			// Zoomed in → this single finger pans the image: activate (also blocks
 			// the pager). maxPointers(1) makes a second finger FAIL this pan, handing
 			// the stream to the pinch — that is the pan→pinch transition.
-			if (sv.scale.value > minZoom && sv.dismissCommitted.value === 0) {
+			if (sv.scale.value > MIN_ZOOM && sv.dismissCommitted.value === 0) {
 				stateManager.activate()
 
 				return
@@ -582,7 +560,7 @@ function buildComposedGesture(
 		.onUpdate(e => {
 			"worklet"
 
-			if (sv.scale.value <= minZoom || sv.dismissCommitted.value === 1) {
+			if (sv.scale.value <= MIN_ZOOM || sv.dismissCommitted.value === 1) {
 				return
 			}
 
@@ -600,7 +578,7 @@ function buildComposedGesture(
 		.onEnd((e, success) => {
 			"worklet"
 
-			if (!success || sv.scale.value <= minZoom || sv.dismissCommitted.value === 1) {
+			if (!success || sv.scale.value <= MIN_ZOOM || sv.dismissCommitted.value === 1) {
 				return
 			}
 
@@ -625,7 +603,6 @@ function buildComposedGesture(
 		})
 
 	const doubleTapGesture = Gesture.Tap()
-		.enabled(enabled)
 		.numberOfTaps(2)
 		.maxDelay(300)
 		.onEnd(e => {
@@ -635,17 +612,17 @@ function buildComposedGesture(
 				return
 			}
 
-			if (sv.scale.value > minZoom) {
-				sv.scale.value = withSpring(minZoom, SPRING_TOGGLE)
+			if (sv.scale.value > MIN_ZOOM) {
+				sv.scale.value = withSpring(MIN_ZOOM, SPRING_TOGGLE)
 				sv.translateX.value = withSpring(0, SPRING_TOGGLE)
 				sv.translateY.value = withSpring(0, SPRING_TOGGLE)
 
-				runOnJS(notifyZoomChange)(minZoom)
+				runOnJS(notifyZoomChange)(MIN_ZOOM)
 
 				return
 			}
 
-			const targetScale = doubleTapZoom
+			const targetScale = DOUBLE_TAP_ZOOM
 			const centerX = sv.containerWidth.value / 2
 			const centerY = sv.containerHeight.value / 2
 			const bounds = getPanBounds(
@@ -666,7 +643,7 @@ function buildComposedGesture(
 		})
 
 	const singleTapGesture = Gesture.Tap()
-		.enabled(enabled && !!onSingleTap)
+		.enabled(!!onSingleTap)
 		.numberOfTaps(1)
 		.requireExternalGestureToFail(doubleTapGesture)
 		.onEnd(() => {
@@ -686,12 +663,8 @@ function buildComposedGesture(
 
 const ZoomableView = ({
 	children,
-	minZoom = DEFAULT_MIN_ZOOM,
-	maxZoom = DEFAULT_MAX_ZOOM,
-	doubleTapZoom = DEFAULT_DOUBLE_TAP_ZOOM,
 	onZoomChange,
 	onSingleTap,
-	enabled = true,
 	style,
 	scaleValue,
 	onPinchDismiss,
@@ -768,10 +741,6 @@ const ZoomableView = ({
 			contentWidth,
 			contentHeight
 		},
-		enabled,
-		minZoom,
-		maxZoom,
-		doubleTapZoom,
 		notifyZoomChange,
 		onSingleTap,
 		notifySingleTap,
@@ -798,12 +767,6 @@ const ZoomableView = ({
 			]
 		}
 	})
-
-	useEffect(() => {
-		if (!enabled && scale.value !== 1) {
-			resetZoom(scale, translateX, translateY)
-		}
-	}, [enabled, scale, translateX, translateY])
 
 	return (
 		<GestureDetector gesture={composed}>

@@ -516,7 +516,7 @@ describe("hardening — budgeted offline phase wiring", () => {
 })
 
 describe("hardening — persist-before-suspend flushes", () => {
-	// The storedOffline query broadcasts still debounce through QueryPersisterKv, which normally
+	// Query-cache writes (e.g. driveItemsQueryUpdate) still debounce through QueryPersisterKv, which normally
 	// flushes on the AppState "background" transition — never fired in a headless task run (the app
 	// is ALREADY backgrounded). The OS may suspend the process the moment the task callback returns,
 	// so the task must flush the query persister and AWAIT the write landing. (The camera-upload

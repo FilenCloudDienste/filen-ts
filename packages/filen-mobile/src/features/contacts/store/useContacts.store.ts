@@ -1,6 +1,6 @@
 import { create } from "zustand"
 import type { Contact, BlockedContact, ContactRequestIn, ContactRequestOut } from "@filen/sdk-rs"
-import { toggleInArray } from "@/stores/createSelectionSlice"
+import { toggleInArray } from "@filen/shared"
 
 export type ContactListItem =
 	| {
@@ -43,7 +43,6 @@ export type ContactsStore = {
 	setBulkMode: (next: boolean) => void
 	toggleSelectedContact: (item: ContactListItem) => void
 	clearSelectedContacts: () => void
-	selectAllContacts: (items: ContactListItem[]) => void
 }
 
 const contactItemId = (i: ContactListItem) => `${i.type}:${i.data.uuid}`
@@ -78,9 +77,6 @@ export const useContactsStore = create<ContactsStore>(set => ({
 	},
 	clearSelectedContacts() {
 		set({ selectedContacts: [], bulkMode: false })
-	},
-	selectAllContacts(items) {
-		set({ selectedContacts: items })
 	}
 }))
 

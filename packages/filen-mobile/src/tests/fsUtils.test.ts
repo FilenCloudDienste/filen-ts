@@ -1,7 +1,5 @@
 import { vi, describe, it, expect, beforeEach } from "vitest"
 
-vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
-
 vi.mock("react-native", () => ({
 	Platform: { OS: "android", select: <T>(specifics: { ios?: T; default: T }) => specifics.default }
 }))

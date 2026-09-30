@@ -48,7 +48,10 @@ export default defineConfig({
 			// shared serializer imports it (UniffiEnum), and the diagnostic logger now imports the
 			// serializer, so it reaches nearly every test. Alias it to the minimal mock globally (like
 			// react-native) instead of per-file vi.mock.
-			"uniffi-bindgen-react-native": path.resolve(__dirname, "./src/tests/mocks/uniffiBindgenReactNative.ts")
+			"uniffi-bindgen-react-native": path.resolve(__dirname, "./src/tests/mocks/uniffiBindgenReactNative.ts"),
+			// The real expo-file-system reads __DEV__ at import, so it cannot load in Node. A per-file
+			// vi.mock("expo-file-system", ...) still overrides this (the fast/strict/inline variants).
+			"expo-file-system": path.resolve(__dirname, "./src/tests/mocks/expoFileSystem.ts")
 		}
 	}
 })

@@ -21,10 +21,6 @@ vi.mock("@/hooks/useMediaPermissions", () => ({
 	hasAllNeededMediaPermissions: mockHasPermissions
 }))
 
-vi.mock("@/queries/client", () => ({
-	DEFAULT_QUERY_OPTIONS: {}
-}))
-
 import { fetchData } from "@/features/cameraUpload/queries/useCameraUploadAlbums.query"
 
 function album(id: string, assetCount: number) {

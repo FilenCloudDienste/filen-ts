@@ -20,8 +20,6 @@ const { mockDb, open, mockAppStateListeners } = vi.hoisted(() => {
 
 vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 
-vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
-
 vi.mock("react-native", () => ({
 	AppState: {
 		addEventListener: (_type: string, handler: (state: string) => void) => {
@@ -138,12 +136,13 @@ function setupMockDb(): void {
 			return { rows: [], insertId: 1, rowsAffected: 1 }
 		}
 
-		if (query.startsWith("DELETE FROM kv WHERE") && query.includes("LIKE")) {
-			const pattern = params![0] as string
+		if (query.startsWith("DELETE FROM kv WHERE key >= ?")) {
+			const lower = params![0] as string
+			const upper = params![1] as string
 			let count = 0
 
 			for (const key of [...kvStore.keys()]) {
-				if (matchesLike(key, pattern)) {
+				if (key >= lower && key < upper) {
 					kvStore.delete(key)
 
 					count++
@@ -625,7 +624,7 @@ describe("QueryPersisterKv", () => {
 
 			kv.clear()
 
-			// Wait for the async removeByPrefix to complete
+			// Wait for the async removeByPrefixRange to complete
 			await vi.advanceTimersByTimeAsync(0)
 
 			expect(kvStore.has(kvKey("key-1"))).toBe(false)
@@ -1131,7 +1130,6 @@ describe("shouldPersistQuery()", () => {
 	it("returns false for a top-level UNCACHED_QUERY_KEYS string key", () => {
 		const uncachedKeys = [
 			"useFileTextQuery",
-			"useFileBase64Query",
 			"useFileUriQuery",
 			"useFileUrlQuery",
 			"useMediaPermissionsQuery",

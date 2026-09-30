@@ -8,8 +8,6 @@ const { mockSecureStoreData } = vi.hoisted(() => {
 	}
 })
 
-vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
-
 vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
 
 // Use the REAL Semaphore here (not the no-op mock) so writeMutex actually

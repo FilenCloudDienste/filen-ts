@@ -3,7 +3,6 @@ import { Fragment, useEffect, useRef } from "react"
 import DriveSelectToolbar from "@/components/driveSelectToolbar"
 import { useSdkClients } from "@/lib/auth"
 import events from "@/lib/events"
-import useEffectOnce from "@/hooks/useEffectOnce"
 import useDrivePath from "@/hooks/useDrivePath"
 import useDriveSelectStore from "@/features/drive/store/useDriveSelect.store"
 
@@ -38,31 +37,6 @@ const DriveSelectListener = () => {
 			}
 		}
 	}, [])
-
-	// Seed the selection once per picker SESSION, not per screen instance: browsing into a
-	// subfolder pushes another /driveSelect screen carrying the SAME selectOptions, and a
-	// per-instance reset wiped the selection accumulated on parent screens (and again on pop,
-	// via the unmount cleanup). The session id keys the seed; only the session's ROOT screen
-	// (the one selectDriveItems pushed at the account root) ends the session on unmount, so no
-	// selection leaks into the next session. selectOptions is a route param — immutable for the
-	// screen's lifetime — so the first-render closure useEffectOnce captures is exact.
-	useEffectOnce(() => {
-		const sessionId = drivePath.selectOptions?.id ?? null
-		const isSessionRoot = authedSdkClient?.root().uuid === drivePath.uuid
-
-		if (sessionId === null) {
-			// No parseable session (defensive): the plain per-instance reset it always was.
-			useDriveSelectStore.getState().setSelectedItems([])
-		} else {
-			useDriveSelectStore.getState().seedSelectSession(sessionId, drivePath.selectOptions?.initiallySelected ?? [])
-		}
-
-		return () => {
-			if (sessionId === null || isSessionRoot) {
-				useDriveSelectStore.getState().endSelectSession()
-			}
-		}
-	})
 
 	return null
 }

@@ -1,5 +1,5 @@
 import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
-import { DEFAULT_QUERY_OPTIONS, queryUpdater } from "@/queries/client"
+import { queryUpdater } from "@/queries/client"
 import auth from "@/lib/auth"
 import { NOTES_REUSE_WINDOW_MS } from "@/features/notes/queries/useNotesQuery"
 
@@ -35,7 +35,6 @@ export function useNotesTagsQuery(
 	options?: Omit<UseQueryOptions, "queryKey" | "queryFn">
 ): UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error> {
 	const query = useQuery({
-		...DEFAULT_QUERY_OPTIONS,
 		...options,
 		queryKey: [BASE_QUERY_KEY],
 		queryFn: ({ signal }) =>
@@ -57,10 +56,6 @@ export function notesTagsQueryUpdate({
 	queryUpdater.set<Awaited<ReturnType<typeof fetchData>>>([BASE_QUERY_KEY], prev => {
 		return typeof updater === "function" ? updater(prev ?? []) : updater
 	})
-}
-
-export function notesTagsQueryGet() {
-	return queryUpdater.get<Awaited<ReturnType<typeof fetchData>>>([BASE_QUERY_KEY])
 }
 
 export default useNotesTagsQuery

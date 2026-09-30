@@ -41,6 +41,14 @@ const NO_DOCUMENT_PICKER_IMPORT = {
 		"Import { pickDocuments } from '@/lib/documentPicker' — it owns the withSystemPresentation wrapping and the per-platform copyToCacheDirectory setting. Don't call expo-document-picker directly."
 }
 
+const BASE_SYNTAX_RULES = [ZUSTAND_SELECTOR_RULE, NO_GLOBAL_RANDOM_UUID_RULE]
+
+// Overrides REPLACE rule options rather than merging, so every override builds on this base.
+const BASE_RESTRICTED_IMPORTS = {
+	paths: [NO_EXPO_ROUTER_NAV_IMPORT, NO_DOCUMENT_PICKER_IMPORT],
+	patterns: [{ group: [".*"] }]
+}
+
 export default [
 	js.configs.recommended,
 	...compat.extends(
@@ -53,25 +61,17 @@ export default [
 	),
 	{
 		ignores: [
-			"node_modules/**/*",
 			"android/**/*",
 			"ios/**/*",
-			".vscode/**/*",
 			".expo/**/*",
-			".git/**/*",
-			".maestro/**/*",
 			"filen-rs/**/*",
 			"filen-android-documents-provider/**/*",
 			"filen-ios-file-provider/**/*",
-			".github/**/*",
 			"metro.config.js",
-			"tailwind.config.js",
-			"index.js",
 			"eslint.config.mjs",
 			"plugins/**/*",
 			"scripts/**/*",
 			"src/uniwind-types.d.ts",
-			"src/global.css",
 			"src/tests/**/*"
 		]
 	},
@@ -107,14 +107,8 @@ export default [
 					destructuredArrayIgnorePattern: "^_"
 				}
 			],
-			"no-restricted-imports": [
-				"error",
-				{
-					paths: [NO_EXPO_ROUTER_NAV_IMPORT, NO_DOCUMENT_PICKER_IMPORT],
-					patterns: [".*"]
-				}
-			],
-			"no-restricted-syntax": ["error", ZUSTAND_SELECTOR_RULE, NO_GLOBAL_RANDOM_UUID_RULE],
+			"no-restricted-imports": ["error", BASE_RESTRICTED_IMPORTS],
+			"no-restricted-syntax": ["error", ...BASE_SYNTAX_RULES],
 			"react-hooks/exhaustive-deps": [
 				"error",
 				{
@@ -135,7 +129,7 @@ export default [
 		// No barrel re-exports inside features/ (in addition to the project-wide zustand rule).
 		files: ["src/features/**/*.ts", "src/features/**/*.tsx"],
 		rules: {
-			"no-restricted-syntax": ["error", ZUSTAND_SELECTOR_RULE, NO_GLOBAL_RANDOM_UUID_RULE, NO_FEATURE_BARREL_RULE]
+			"no-restricted-syntax": ["error", ...BASE_SYNTAX_RULES, NO_FEATURE_BARREL_RULE]
 		}
 	},
 	{
@@ -149,11 +143,9 @@ export default [
 			"no-restricted-imports": [
 				"error",
 				{
-					paths: [NO_EXPO_ROUTER_NAV_IMPORT, NO_DOCUMENT_PICKER_IMPORT],
+					...BASE_RESTRICTED_IMPORTS,
 					patterns: [
-						{
-							group: [".*"]
-						},
+						...BASE_RESTRICTED_IMPORTS.patterns,
 						{
 							group: ["@/features/*/store", "@/features/*/store/*", "@/features/*/queries", "@/features/*/queries/*"],
 							message:
@@ -167,32 +159,18 @@ export default [
 	{
 		// The guarded router itself is the one sanctioned site that imports expo-router's navigation
 		// singleton — it wraps it. Keep the project-wide relative-import ban; lift only the expo-router
-		// navigation restriction here. Overrides REPLACE rule options rather than merging, so every
-		// restriction that should still apply has to be restated.
+		// navigation restriction here.
 		files: ["src/lib/router.ts"],
 		rules: {
-			"no-restricted-imports": [
-				"error",
-				{
-					paths: [NO_DOCUMENT_PICKER_IMPORT],
-					patterns: [".*"]
-				}
-			]
+			"no-restricted-imports": ["error", { ...BASE_RESTRICTED_IMPORTS, paths: [NO_DOCUMENT_PICKER_IMPORT] }]
 		}
 	},
 	{
 		// The document-picker wrapper is the one sanctioned site that imports expo-document-picker —
-		// it wraps it. Same replace-not-merge caveat as above: restate everything except the ban
-		// being lifted.
+		// it wraps it.
 		files: ["src/lib/documentPicker.ts"],
 		rules: {
-			"no-restricted-imports": [
-				"error",
-				{
-					paths: [NO_EXPO_ROUTER_NAV_IMPORT],
-					patterns: [".*"]
-				}
-			]
+			"no-restricted-imports": ["error", { ...BASE_RESTRICTED_IMPORTS, paths: [NO_EXPO_ROUTER_NAV_IMPORT] }]
 		}
 	},
 	{
