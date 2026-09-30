@@ -776,6 +776,25 @@ describe("useDriveSearch — own-action optimistic patch (Effect D)", () => {
 		expect(removeFromSelection).toHaveBeenCalledWith(["f1"])
 	})
 
+	it("keeps the results identity when the removed uuid is not a hit", () => {
+		const { result } = render()
+
+		act(() => {
+			result.current.setSearchQuery("x")
+		})
+
+		deliver(snapshot({ results: [fileResult("f1"), fileResult("f2")], total: 2n, live: true }))
+
+		const before = result.current.searchResults
+
+		act(() => {
+			events.emit("driveItemRemoved", { uuid: "not-a-hit" })
+		})
+
+		expect(result.current.searchResults).toBe(before)
+		expect(removeFromSelection).toHaveBeenCalledWith(["not-a-hit"])
+	})
+
 	it("keeps a removed item suppressed even if a later snapshot still contains it (tombstone holds)", () => {
 		const { result } = render()
 

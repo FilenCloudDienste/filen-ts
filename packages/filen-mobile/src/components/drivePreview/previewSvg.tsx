@@ -3,7 +3,7 @@ import PreviewLoadingOverlay from "@/components/drivePreview/previewLoadingOverl
 import { Component, type ReactNode, useMemo, useState } from "react"
 import { useWindowDimensions } from "react-native"
 import { type SharedValue } from "react-native-reanimated"
-import { SvgXml, parse } from "react-native-svg"
+import { SvgAst, parse, type JsxAST } from "react-native-svg"
 import useFileTextQuery from "@/queries/useFileText.query"
 import { type GalleryItemTagged, galleryItemKey } from "@/components/drivePreview/gallery"
 import { galleryItemFileSource } from "@/components/drivePreview/galleryRenderName"
@@ -19,10 +19,10 @@ import useIsOnline from "@/hooks/useIsOnline"
 const MAX_SVG_SOURCE_LENGTH = 8 * 1024 * 1024
 
 // Guards the rarer failure mode: react-native-svg PARSES fine but throws while reconciling the
-// resulting tree into native elements (that throw escapes <SvgXml>, unlike parse errors which it
-// swallows — see the parse pre-check below). Contain it here, render nothing, and notify the
-// parent to show the "failed" overlay. Keyed with key={xml} at the call site so a recycled cell
-// mounts a fresh boundary per source and never inherits a prior item's failure.
+// resulting tree into native elements (parse errors are caught by the parse below, reconcile errors
+// are not). Contain it here, render nothing, and notify the parent to show the "failed" overlay.
+// Keyed with key={xml} at the call site so a recycled cell mounts a fresh boundary per source and
+// never inherits a prior item's failure.
 class SvgRenderBoundary extends Component<{ onError: () => void; children: ReactNode }, { failed: boolean }> {
 	override state = { failed: false }
 
@@ -67,25 +67,27 @@ const PreviewSvg = ({
 	// recycled cell mounts a fresh boundary and never inherits a prior item's failure.
 	const itemKey = galleryItemKey(item)
 
-	// <SvgXml> wraps parse() in its OWN try/catch and, on a malformed document, silently returns
-	// null (a blank page) instead of throwing — so an error boundary around it never fires for
-	// parse errors. Pre-parse here to detect that case and drive the error overlay. parse() is
-	// pure, so a document that validates here won't throw inside <SvgXml> below.
-	const parseFailed = useMemo(() => {
+	// Parsed once here and rendered via <SvgAst>; <SvgXml> would parse the document a second time
+	// and swallow parse errors into a blank page instead of driving the error overlay.
+	const parsed = useMemo((): { ast: JsxAST | null; failed: boolean } => {
 		if (xml === null || tooLarge) {
-			return false
+			return { ast: null, failed: false }
 		}
 
 		try {
 			// A well-formed but ROOTLESS document (whitespace-, comment-, or XML-declaration-only)
-			// parses to null WITHOUT throwing → <SvgXml> would render an empty tree (silent blank).
+			// parses to null WITHOUT throwing, which would render an empty tree (silent blank).
 			// Treat a null root as a failure so it shows the error overlay too; parse() returns
 			// non-null for any document that actually has an <svg> root.
-			return parse(xml) === null
+			const ast = parse(xml)
+
+			return { ast, failed: ast === null }
 		} catch {
-			return true
+			return { ast: null, failed: true }
 		}
 	}, [xml, tooLarge])
+
+	const parseFailed = parsed.failed
 
 	// Latched when react-native-svg throws while reconciling this specific (parseable) source.
 	// Keyed to the source string so a recycled cell re-attempts its new item.
@@ -134,11 +136,13 @@ const PreviewSvg = ({
 						key={itemKey}
 						onError={() => setRenderFailedFor(xml)}
 					>
-						<SvgXml
-							xml={xml}
-							width={dimensions.width}
-							height={dimensions.height}
-							preserveAspectRatio="xMidYMid meet"
+						<SvgAst
+							ast={parsed.ast}
+							override={{
+								width: dimensions.width,
+								height: dimensions.height,
+								preserveAspectRatio: "xMidYMid meet"
+							}}
 						/>
 					</SvgRenderBoundary>
 				) : null}

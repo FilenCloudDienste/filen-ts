@@ -63,8 +63,14 @@ beforeEach(() => {
 	mockNotifee.requestPermission.mockResolvedValue({ authorizationStatus: 2 })
 	mockNotifee.createChannel.mockResolvedValue(undefined)
 	mockFormatBytesPerSecond.mockImplementation((speed: number) => `${speed}B/s`)
+	mockT.mockImplementation((key: string) => key)
 	mockSecureStoreGet.mockResolvedValue(null)
 })
+
+// Renders the interpolation values into the body, as the real catalog does.
+function interpolateT(): void {
+	mockT.mockImplementation((key: string, options?: Record<string, unknown>) => `${key} ${JSON.stringify(options)}`)
+}
 
 afterEach(() => {
 	platformMock.OS = "android"
@@ -82,6 +88,40 @@ describe("foregroundService", () => {
 		expect(mockNotifee.onForegroundEvent).toHaveBeenCalledTimes(1)
 		expect(mockNotifee.createChannel).toHaveBeenCalledWith(expect.objectContaining({ id: "transfers" }))
 		expect(mockNotifee.requestPermission).not.toHaveBeenCalled()
+	})
+
+	it("the registered runner never resolves and schedules no timers", async () => {
+		const { default: fgs } = await import("@/features/transfers/foregroundService")
+
+		await fgs.init()
+
+		const runner = mockNotifee.registerForegroundService.mock.calls[0]?.[0] as () => Promise<void>
+
+		// As while the service runs: nothing may poll for the service's lifetime.
+		Object.assign(fgs, { running: true })
+		vi.useFakeTimers()
+
+		try {
+			let settled = false
+
+			runner().then(
+				() => {
+					settled = true
+				},
+				() => {
+					settled = true
+				}
+			)
+
+			expect(vi.getTimerCount()).toBe(0)
+
+			await vi.advanceTimersByTimeAsync(5000)
+
+			expect(settled).toBe(false)
+			expect(vi.getTimerCount()).toBe(0)
+		} finally {
+			vi.useRealTimers()
+		}
 	})
 
 	it("start with AUTHORIZED status displays a DATA_SYNC FGS notification", async () => {
@@ -585,6 +625,131 @@ describe("foregroundService", () => {
 
 		expect(await fgs.requestPermission()).toBe(false)
 		expect(mockNotifee.requestPermission).not.toHaveBeenCalled()
+	})
+})
+
+describe("notification dedupe", () => {
+	it("notificationContent derives the displayed percent, body and indeterminate flag", async () => {
+		const { notificationContent } = await import("@/features/transfers/foregroundService")
+
+		expect(notificationContent({ count: 2, progress: 0.426, speed: 2048, copyingItems: null })).toEqual({
+			body: "transfers_progress",
+			percent: 43,
+			indeterminate: false
+		})
+		expect(mockT).toHaveBeenLastCalledWith("transfers_progress", { count: 2, percent: "43", speed: "2048B/s" })
+
+		expect(notificationContent({ count: 1, progress: 0, speed: 0, copyingItems: 5 })).toEqual({
+			body: "copying_progress",
+			percent: 0,
+			indeterminate: true
+		})
+		expect(mockT).toHaveBeenLastCalledWith("copying_progress", { count: 5, percent: "0", speed: "—" })
+
+		// Rounds to 0 but is not indeterminate: only an exact 0 ratio is.
+		expect(notificationContent({ count: 1, progress: 0.004, speed: 0, copyingItems: null })).toMatchObject({
+			percent: 0,
+			indeterminate: false
+		})
+	})
+
+	it("update skips a re-post whose rendered content is unchanged", async () => {
+		interpolateT()
+		mockFormatBytesPerSecond.mockImplementation((speed: number) => `${(speed / 1024).toFixed(1)} KiB/s`)
+
+		const { default: fgs } = await import("@/features/transfers/foregroundService")
+
+		await fgs.start({ count: 1, progress: 0.251, speed: 2048, copyingItems: null })
+
+		expect(mockNotifee.displayNotification).toHaveBeenCalledTimes(1)
+
+		// Raw floats moved, but the percent and one-decimal speed text did not.
+		await fgs.update({ count: 1, progress: 0.2512, speed: 2049, copyingItems: null })
+		await fgs.update({ count: 1, progress: 0.2534, speed: 2050, copyingItems: null })
+
+		expect(mockNotifee.displayNotification).toHaveBeenCalledTimes(1)
+
+		// The speed text changes.
+		await fgs.update({ count: 1, progress: 0.2534, speed: 4096, copyingItems: null })
+
+		expect(mockNotifee.displayNotification).toHaveBeenCalledTimes(2)
+
+		// The percent changes.
+		await fgs.update({ count: 1, progress: 0.26, speed: 4096, copyingItems: null })
+
+		expect(mockNotifee.displayNotification).toHaveBeenCalledTimes(3)
+
+		// The count changes.
+		await fgs.update({ count: 2, progress: 0.26, speed: 4096, copyingItems: null })
+
+		expect(mockNotifee.displayNotification).toHaveBeenCalledTimes(4)
+		expect(mockNotifee.displayNotification).toHaveBeenLastCalledWith(
+			expect.objectContaining({
+				body: `transfers_progress ${JSON.stringify({ count: 2, percent: "26", speed: "4.0 KiB/s" })}`,
+				android: expect.objectContaining({ progress: { max: 100, current: 26, indeterminate: false } })
+			})
+		)
+	})
+
+	it("update re-posts when only the indeterminate flag changes", async () => {
+		interpolateT()
+
+		const { default: fgs } = await import("@/features/transfers/foregroundService")
+
+		await fgs.start({ count: 1, progress: 0, speed: 0, copyingItems: null })
+		await fgs.update({ count: 1, progress: 0.001, speed: 0, copyingItems: null })
+
+		expect(mockNotifee.displayNotification).toHaveBeenCalledTimes(2)
+		expect(mockNotifee.displayNotification).toHaveBeenLastCalledWith(
+			expect.objectContaining({
+				android: expect.objectContaining({ progress: { max: 100, current: 0, indeterminate: false } })
+			})
+		)
+	})
+
+	it("start always posts, even with content identical to the last post", async () => {
+		interpolateT()
+
+		const { default: fgs } = await import("@/features/transfers/foregroundService")
+		const snapshot = { count: 1, progress: 0.5, speed: 1024, copyingItems: null }
+
+		await fgs.start(snapshot)
+		await fgs.stop()
+		await fgs.start(snapshot)
+
+		expect(mockNotifee.displayNotification).toHaveBeenCalledTimes(2)
+
+		// After an OS timeout the re-armed start posts again too.
+		const onForegroundEvent = mockNotifee.onForegroundEvent.mock.calls[0]?.[0] as (event: { type: number }) => void
+
+		onForegroundEvent({ type: 9 })
+
+		await fgs.start(snapshot)
+
+		expect(mockNotifee.displayNotification).toHaveBeenCalledTimes(3)
+
+		await fgs.update(snapshot)
+
+		expect(mockNotifee.displayNotification).toHaveBeenCalledTimes(3)
+	})
+
+	it("a rejected update is not recorded as posted", async () => {
+		interpolateT()
+
+		const { default: fgs } = await import("@/features/transfers/foregroundService")
+
+		await fgs.start({ count: 1, progress: 0.25, speed: 1024, copyingItems: null })
+
+		mockNotifee.displayNotification.mockRejectedValueOnce(new Error("service not live"))
+
+		await fgs.update({ count: 1, progress: 0.5, speed: 1024, copyingItems: null })
+
+		expect(fgs.isRunning()).toBe(false)
+
+		await fgs.start({ count: 1, progress: 0.5, speed: 1024, copyingItems: null })
+
+		expect(mockNotifee.displayNotification).toHaveBeenCalledTimes(3)
+		expect(fgs.isRunning()).toBe(true)
 	})
 })
 

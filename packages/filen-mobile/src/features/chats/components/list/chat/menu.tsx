@@ -10,7 +10,6 @@ import { addChatParticipantsFlow } from "@/features/chats/chatsActions"
 import { router } from "@/lib/router"
 import useChatsStore from "@/features/chats/store/useChats.store"
 import { useShallow } from "zustand/shallow"
-import useChatUnreadCount from "@/features/chats/hooks/useChatUnreadCount"
 import { t } from "@/lib/i18n"
 import { confirmedAction } from "@/lib/confirmedAction"
 import logger from "@/lib/logger"
@@ -212,6 +211,7 @@ const Menu = ({
 	className,
 	isAnchoredToRight,
 	origin,
+	unreadCount,
 	previewBackground,
 	onOpenMenu,
 	onCloseMenu
@@ -221,13 +221,14 @@ const Menu = ({
 	className?: string
 	isAnchoredToRight?: boolean
 	origin: ChatMenuOrigin
+	// Passed in: the row already subscribes to this chat's count.
+	unreadCount: number
 	previewBackground?: boolean
 	onOpenMenu?: () => void
 	onCloseMenu?: () => void
 }) => {
 	const stringifiedClient = useStringifiedClient()
 	const isSelected = useChatsStore(useShallow(state => state.selectedChats.some(n => n.uuid === info.item.uuid)))
-	const chatUnreadCount = useChatUnreadCount(info.item)
 
 	const buttons = stringifiedClient
 		? createMenuButtons({
@@ -235,7 +236,7 @@ const Menu = ({
 				userId: stringifiedClient.userId,
 				origin,
 				isSelected,
-				unreadCount: chatUnreadCount
+				unreadCount
 			})
 		: []
 

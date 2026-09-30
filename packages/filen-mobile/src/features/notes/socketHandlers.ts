@@ -190,9 +190,11 @@ export async function handleNoteEvent({ event }: { event: NoteSocketEvent }): Pr
 			//
 			// The note the user is currently viewing is excluded inside refreshAfterRemoteEdit: its editor
 			// answers the event above itself — reloading when nothing is being edited, asking otherwise —
-			// so the user decides when their edits are replaced, not the network. The event
-			// carries the new content, but as MaybeEncryptedStatic, so the refresh re-fetches through
-			// the SDK rather than opening a second decryption path here.
+			// so the user decides when their edits are replaced, not the network. The event's content is
+			// already decrypted by the SDK with the same decrypt getNoteContent uses, so it is committed
+			// as is; only an undecryptable or empty event, or one arriving while this device still awaits
+			// the echo of its own push, re-fetches. Called after `ownEcho` above has consumed this
+			// event's own echo, so the refresh sees only pushes still unheard.
 			//
 			// Deliberately NOT gated on `editorId !== auth.currentUserId()`. `editorId` is a USER id, not
 			// a device id, so that test also suppresses an edit this account made on ANOTHER device —
@@ -200,7 +202,7 @@ export async function handleNoteEvent({ event }: { event: NoteSocketEvent }): Pr
 			// refresh exists to catch. The "we already wrote it during the push" rationale only holds
 			// for the device that pushed; on every other device the cache was never written.
 			//
-			// The cost of not filtering is one redundant fetch after the pushing device's own editing
+			// The cost of not filtering is one redundant commit after the pushing device's own editing
 			// session (while it is still typing the note is open, so nothing fires), and commitContent
 			// no-ops an identical body — it even advances the ledger stamp early, saving a fetch on the
 			// next pass. The event above keeps its own-echo filter: that one is about not interrupting
@@ -214,7 +216,8 @@ export async function handleNoteEvent({ event }: { event: NoteSocketEvent }): Pr
 					note: {
 						...note,
 						editedTimestamp: inner.editedTimestamp
-					}
+					},
+					content
 				})
 				.catch((e: unknown) => {
 					logger.warn("notes", "refresh after remote content edit failed", { noteUuid: inner.note, error: e })

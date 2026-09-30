@@ -131,7 +131,7 @@ import {
 	mockClearSkippedAssets
 } from "@/tests/mocks/useCameraUploadStore"
 import { fs, File } from "@/tests/mocks/expoFileSystem"
-import { mockFileHash, blake3BytesForContent, fileHashImplementation } from "@/tests/mocks/reactNativeFileHash"
+import { mockFileHash, blake3BytesForContent, blake3HexForContent, fileHashImplementation } from "@/tests/mocks/reactNativeFileHash"
 import * as FileSystem from "expo-file-system"
 
 // #103 — capture the constructor-registered subscription in beforeAll (after module
@@ -1156,6 +1156,35 @@ describe("sync flow", () => {
 			await cameraUpload.sync()
 
 			expect(mockFileHash.mock.calls.map(call => call[1]?.algorithm)).toEqual(["MD5", "BLAKE3"])
+		})
+
+		it("answers every delta in a shared bucket with the bucket's full membership", async () => {
+			// The index encodes a bucket on its first lookup and reuses that Set; a later asset in the
+			// same folder and size must see exactly what the first did.
+			setupLocalAssets([
+				{ id: "a1", filename: "photo1.jpg" },
+				{ id: "a2", filename: "photo2.jpg" },
+				{ id: "a3", filename: "photo3.jpg" }
+			])
+			setupRemote([
+				{ path: "/Camera Roll/other.jpg", uuid: "remote-1", hash: blake3BytesForContent("different") },
+				{ path: "/Camera Roll/renamed1.jpg", uuid: "remote-2", hash: blake3BytesForContent("content-a1") },
+				{ path: "/Camera Roll/renamed3.jpg", uuid: "remote-3", hash: blake3BytesForContent("content-a3") },
+				{ path: "/Camera Roll/bigger.jpg", uuid: "remote-4", hash: blake3BytesForContent("content-a2"), size: 999 }
+			])
+
+			mockFileHash.mockImplementation(async (path: string, request?: { algorithm?: string }) => {
+				const content = `content-${path.slice(path.lastIndexOf("/") + 1)}`
+
+				return request?.algorithm === "BLAKE3" ? blake3HexForContent(content) : content
+			})
+
+			await cameraUpload.sync()
+
+			const uploadedNames = vi.mocked(transfers.upload).mock.calls.map(call => (call[0] as { name: string }).name)
+
+			expect(uploadedNames).toEqual(["photo2.jpg"])
+			expect(mockFileHash.mock.calls.filter(call => call[1]?.algorithm === "BLAKE3")).toHaveLength(3)
 		})
 
 		it("does not hash BLAKE3 at all when nothing in the destination has the same size", async () => {
@@ -3205,6 +3234,39 @@ describe("CameraUpload.compress()", () => {
 		expect(fs.has(manipulatedUri)).toBe(false)
 	})
 
+	it("relocates the smaller .jpg output onto the staging file by move, never a byte copy", async () => {
+		const { File: MockFile, Paths } = await import("@/tests/mocks/expoFileSystem")
+		const { ImageManipulator } = await import("expo-image-manipulator")
+
+		const originalUri = `${Paths.cache.uri}/filen-tmp/photo.jpg`
+		const manipulatedUri = `${Paths.cache.uri}/filen-tmp/photo-manip.jpg`
+
+		fs.set(originalUri, new Uint8Array(new Array(10).fill(1)))
+		fs.set(manipulatedUri, new Uint8Array([7, 7, 7]))
+
+		const file = new MockFile(originalUri)
+		const fakeContext = {
+			renderAsync: vi.fn(async () => ({ saveAsync: vi.fn(async () => ({ uri: manipulatedUri })), release: vi.fn() })),
+			release: vi.fn()
+		}
+
+		vi.mocked(ImageManipulator.manipulate).mockReturnValueOnce(fakeContext as any)
+
+		const copy = vi.spyOn(MockFile.prototype, "copy")
+
+		try {
+			const result = await (cameraUpload as any).compress(file)
+
+			expect(result).toBe(file)
+			expect(result.uri).toBe(originalUri)
+			expect(Array.from(fs.get(originalUri) as Uint8Array)).toEqual([7, 7, 7])
+			expect(fs.has(manipulatedUri)).toBe(false)
+			expect(copy).not.toHaveBeenCalled()
+		} finally {
+			copy.mockRestore()
+		}
+	})
+
 	it("transplants the source's metadata into the compressed output BEFORE overwriting the source", async () => {
 		const { File: MockFile, Paths } = await import("@/tests/mocks/expoFileSystem")
 		const { ImageManipulator } = await import("expo-image-manipulator")
@@ -3244,7 +3306,7 @@ describe("CameraUpload.compress()", () => {
 		fs.set(originalUri, originalBytes)
 		fs.set(manipulatedUri, new Uint8Array([1, 2, 3]))
 
-		// Snapshot the source file's bytes at the moment the transplant is invoked. If the copy
+		// Snapshot the source file's bytes at the moment the transplant is invoked. If the move
 		// had already overwritten `file` with the compressed bytes, this would capture [1,2,3].
 		let sourceBytesAtCall: number[] | null = null
 
@@ -5308,15 +5370,15 @@ describe("B4 — md5-cache pruning and mirror mode", () => {
 	})
 })
 
-// ─── B1 regression: compress copy must overwrite the staging file ─────────────
-// compress() copies the compressed output back onto the tmp staging file, which
-// ALWAYS exists by construction (the asset was copied into it first). Native copy
+// ─── B1 regression: compress move must overwrite the staging file ─────────────
+// compress() moves the compressed output back onto the tmp staging file, which
+// ALWAYS exists by construction (the asset was copied into it first). Native move
 // throws when the destination exists unless { overwrite: true } — without it every
 // compression-wins upload failed and the asset was silently skipped after
 // MAX_UPLOAD_FAILURES strikes.
 
-describe("B1 regression — compress copy overwrites the existing staging file", () => {
-	it("mock parity: File.copy onto an existing destination throws without overwrite and succeeds with it", async () => {
+describe("B1 regression — compress move overwrites the existing staging file", () => {
+	it("mock parity: File.move onto an existing destination throws without overwrite and succeeds with it", async () => {
 		const { File: MockFile } = await import("@/tests/mocks/expoFileSystem")
 
 		fs.set("file:///cache/src.bin", new Uint8Array([1]))
@@ -5325,14 +5387,16 @@ describe("B1 regression — compress copy overwrites the existing staging file",
 		const src = new MockFile("file:///cache/src.bin")
 		const dst = new MockFile("file:///cache/dst.bin")
 
-		// copy() is async since expo-file-system 56 (the mock mirrors that): overwrite
+		// move() is async since expo-file-system 56 (the mock mirrors that): overwrite
 		// conflicts surface as rejections, not synchronous throws.
-		await expect(src.copy(dst)).rejects.toThrow("Destination already exists")
-		await expect(src.copy(dst, { overwrite: true })).resolves.toBeUndefined()
+		await expect(src.move(dst)).rejects.toThrow("Destination already exists")
+		await expect(src.move(dst, { overwrite: true })).resolves.toBeUndefined()
 		expect(fs.get("file:///cache/dst.bin")).toEqual(new Uint8Array([1]))
+		expect(fs.has("file:///cache/src.bin")).toBe(false)
+		expect(src.uri).toBe("file:///cache/dst.bin")
 	})
 
-	it("compression-wins path copies the compressed output onto the existing staging file and the upload proceeds", async () => {
+	it("compression-wins path moves the compressed output onto the existing staging file and the upload proceeds", async () => {
 		const { Paths } = await import("@/tests/mocks/expoFileSystem")
 		const { ImageManipulator } = await import("expo-image-manipulator")
 
@@ -5349,7 +5413,7 @@ describe("B1 regression — compress copy overwrites the existing staging file",
 
 		vi.mocked(secureStore.get).mockResolvedValueOnce({ ...ENABLED_CONFIG, compress: true })
 
-		// Manipulated output is smaller — compression wins and gets copied onto the
+		// Manipulated output is smaller — compression wins and gets moved onto the
 		// staging file (which still holds the 100-byte original).
 		const manipulatedUri = `${Paths.cache.uri}/filen-tmp/photo-manip.jpg`
 
@@ -5372,11 +5436,12 @@ describe("B1 regression — compress copy overwrites the existing staging file",
 
 		await cameraUpload.sync()
 
-		// The staging file existed when compress() copied onto it — the upload still
+		// The staging file existed when compress() moved onto it — the upload still
 		// ran, with the compressed bytes, and no error was recorded.
 		expect(transfers.upload).toHaveBeenCalledTimes(1)
 		expect(uploadedBytes).toEqual(new Uint8Array([9, 9, 9]))
 		expect(mockAddError).not.toHaveBeenCalled()
+		expect(fs.has(manipulatedUri)).toBe(false)
 	})
 })
 

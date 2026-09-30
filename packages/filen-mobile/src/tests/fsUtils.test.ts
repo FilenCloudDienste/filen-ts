@@ -38,7 +38,13 @@ vi.mock("@/lib/storageRoots", async () => {
 
 import { type Directory as ExpoDirectory } from "expo-file-system"
 import { Directory, File, fs } from "@/tests/mocks/expoFileSystem"
-import { walkLocalDirectory, sumLocalDirectoryFileBytes, listLocalDirectoryRecursive, sweepStrayDownloadFiles } from "@/lib/fsUtils"
+import {
+	walkLocalDirectory,
+	sumLocalDirectoryFileBytes,
+	flatDirectoryFileBytes,
+	listLocalDirectoryRecursive,
+	sweepStrayDownloadFiles
+} from "@/lib/fsUtils"
 
 /** Cast a mock Directory to the real expo-file-system Directory type for call sites. */
 function asDir(uri: string): ExpoDirectory {
@@ -306,6 +312,67 @@ describe("sumLocalDirectoryFileBytes", () => {
 		fs.set(`${ROOT}/data.bin`, new Uint8Array([1, 2, 3])) // 3 bytes
 
 		expect(sumLocalDirectoryFileBytes(asDir(ROOT))).toBe(3)
+	})
+})
+
+// ─── flatDirectoryFileBytes ───────────────────────────────────────────────────
+
+describe("flatDirectoryFileBytes", () => {
+	beforeEach(() => {
+		fs.clear()
+	})
+
+	it("returns 0 for a non-existent directory", () => {
+		expect(flatDirectoryFileBytes(asDir("file:///document/flat-nonexistent"))).toBe(0)
+	})
+
+	it("returns 0 for an empty directory", () => {
+		const ROOT = "file:///document/flat-empty"
+		fs.set(ROOT, "dir")
+
+		expect(flatDirectoryFileBytes(asDir(ROOT))).toBe(0)
+	})
+
+	it("matches sumLocalDirectoryFileBytes for a flat directory", () => {
+		const ROOT = "file:///document/flat-sum"
+		fs.set(ROOT, "dir")
+		fs.set(`${ROOT}/a.webp`, new Uint8Array([1, 2, 3]))
+		fs.set(`${ROOT}/b.webp`, new Uint8Array([4, 5]))
+		fs.set(`${ROOT}/c.webp.tmp`, new Uint8Array([]))
+
+		expect(flatDirectoryFileBytes(asDir(ROOT))).toBe(5)
+		expect(flatDirectoryFileBytes(asDir(ROOT))).toBe(sumLocalDirectoryFileBytes(asDir(ROOT)))
+	})
+
+	it("returns 0 when the native size read throws", () => {
+		const ROOT = "file:///document/flat-throws"
+		fs.set(ROOT, "dir")
+		fs.set(`${ROOT}/a.webp`, new Uint8Array([1]))
+
+		const dir = new Directory(ROOT)
+
+		Object.defineProperty(dir, "size", {
+			get() {
+				throw new Error("EACCES")
+			}
+		})
+
+		expect(flatDirectoryFileBytes(dir as unknown as ExpoDirectory)).toBe(0)
+	})
+
+	it("returns 0 when the native size is null", () => {
+		const ROOT = "file:///document/flat-null"
+		fs.set(ROOT, "dir")
+
+		const dir = new Directory(ROOT)
+
+		Object.defineProperty(dir, "size", {
+			get() {
+				return null
+			}
+		})
+
+		expect(flatDirectoryFileBytes(dir as unknown as ExpoDirectory)).toBe(0)
 	})
 })
 

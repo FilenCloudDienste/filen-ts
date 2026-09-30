@@ -14,7 +14,8 @@ describe("createChecklistStore", () => {
 		const state = store.getState()
 
 		expect(state.parsed).toEqual([])
-		expect(state.inputRefs).toEqual({})
+		expect(state.byId.size).toBe(0)
+		expect(state.inputRefs.size).toBe(0)
 	})
 
 	it("setParsed accepts a value", () => {
@@ -34,15 +35,64 @@ describe("createChecklistStore", () => {
 		expect(store.getState().parsed.every(i => i.checked)).toBe(true)
 	})
 
-	it("setInputRefs accepts a value and an updater fn", () => {
+	it("byId mirrors parsed after setParsed with a value and with an updater", () => {
 		const store = createChecklistStore()
-		const refA = { current: null }
-		const refB = { current: null }
 
-		store.getState().setInputRefs({ a: refA })
-		store.getState().setInputRefs(prev => ({ ...prev, b: refB }))
+		store.getState().setParsed(live)
 
-		expect(store.getState().inputRefs).toEqual({ a: refA, b: refB })
+		for (const item of live) {
+			expect(store.getState().byId.get(item.id)).toBe(item)
+		}
+
+		store.getState().setParsed(prev => prev.filter(i => i.id !== "live-1"))
+
+		const { parsed, byId } = store.getState()
+
+		expect(byId.size).toBe(1)
+		expect(byId.get("live-1")).toBeUndefined()
+		expect(byId.get("live-2")).toBe(parsed[0])
+	})
+
+	it("byId returns the same item Array.prototype.find would, even for duplicate ids", () => {
+		const store = createChecklistStore()
+		const dupes: Checklist = [
+			{ id: "dup", checked: false, content: "first" },
+			{ id: "dup", checked: true, content: "second" }
+		]
+
+		store.getState().setParsed(dupes)
+
+		const { parsed, byId } = store.getState()
+
+		expect(byId.get("dup")).toBe(parsed.find(i => i.id === "dup"))
+		expect(byId.get("missing")).toBe(parsed.find(i => i.id === "missing"))
+	})
+
+	it("inputRefs is mutated in place without notifying subscribers", () => {
+		const store = createChecklistStore()
+		const inputRefs = store.getState().inputRefs
+		const ref = { current: null }
+		let notified = 0
+		const unsub = store.subscribe(() => {
+			notified++
+		})
+
+		store.getState().inputRefs.set("a", ref)
+
+		expect(store.getState().inputRefs.get("a")).toBe(ref)
+
+		store.getState().setParsed(live)
+
+		// setParsed must not replace the Map a mounted row registered into.
+		expect(store.getState().inputRefs).toBe(inputRefs)
+		expect(store.getState().inputRefs.get("a")).toBe(ref)
+
+		store.getState().inputRefs.delete("a")
+
+		expect(store.getState().inputRefs.size).toBe(0)
+		expect(notified).toBe(1)
+
+		unsub()
 	})
 
 	// The core of finding #3: two mounted editors (a live note + a history "View" of the same uuid)
@@ -65,10 +115,12 @@ describe("createChecklistStore", () => {
 		const b = createChecklistStore()
 		const ref = { current: null }
 
-		a.getState().setInputRefs({ shared: ref })
+		expect(a.getState().inputRefs).not.toBe(b.getState().inputRefs)
 
-		expect(b.getState().inputRefs).toEqual({})
-		expect(a.getState().inputRefs).toEqual({ shared: ref })
+		a.getState().inputRefs.set("shared", ref)
+
+		expect(b.getState().inputRefs.size).toBe(0)
+		expect(a.getState().inputRefs.get("shared")).toBe(ref)
 	})
 
 	it("a mutation after subscribe notifies only its own subscribers", () => {

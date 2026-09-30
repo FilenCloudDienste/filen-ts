@@ -7,7 +7,7 @@
 // `handle.offset = offset` would have made every PDF range read return the wrong bytes, and nothing
 // would have failed.
 
-import { vi, describe, it, expect, beforeEach } from "vitest"
+import { vi, describe, it, expect, beforeEach, afterEach } from "vitest"
 import { renderHook, waitFor } from "@testing-library/react"
 
 vi.mock("expo-crypto", async () => await import("@/tests/mocks/expoCrypto"))
@@ -16,7 +16,7 @@ vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 
 import useRangeSource, { type RangeSource } from "@/hooks/useRangeSource"
 import { PDF_MAGIC, base64ToBytes } from "@/lib/rangeTransfer"
-import { fs } from "@/tests/mocks/expoFileSystem"
+import { File, fs } from "@/tests/mocks/expoFileSystem"
 
 const URI = "file:///cache/probe.bin"
 
@@ -61,6 +61,10 @@ beforeEach(() => {
 	vi.clearAllMocks()
 })
 
+afterEach(() => {
+	vi.restoreAllMocks()
+})
+
 describe("useRangeSource", () => {
 	it("returns the bytes at the requested offset, not the next bytes in sequence", async () => {
 		// The whole point of a range reader. pdf.js reads randomly, so a reader that ignored the offset
@@ -84,6 +88,35 @@ describe("useRangeSource", () => {
 
 		expect(source.size).toBe(333)
 		expect(base64ToBytes(await source.readRange(332, 1))).toEqual(pattern(1, 332))
+	})
+
+	it("encodes only the returned view when the handle hands back a window into a larger buffer", async () => {
+		// The encoder reads the handle's bytes in place rather than copying them first, so it must honour
+		// the view's offset and length instead of encoding the whole backing store.
+		seed(pattern(1000))
+
+		const realOpen = File.prototype.open
+
+		vi.spyOn(File.prototype, "open").mockImplementation(function (this: File, mode?: unknown) {
+			const handle = realOpen.call(this, mode)
+			const readBytes = handle.readBytes
+
+			handle.readBytes = (length: number) => {
+				const bytes = readBytes(length)
+				const padded = new Uint8Array(bytes.byteLength + 16).fill(0xff)
+
+				padded.set(bytes, 8)
+
+				return padded.subarray(8, 8 + bytes.byteLength)
+			}
+
+			return handle
+		})
+
+		const source = ready((await open()).current)
+
+		expect(File.prototype.open).toHaveBeenCalled()
+		expect(base64ToBytes(await source.readRange(500, 7))).toEqual(pattern(7, 500))
 	})
 
 	it("refuses a read outside the file rather than returning short", async () => {

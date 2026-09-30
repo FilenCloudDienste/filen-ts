@@ -12,6 +12,7 @@ import ImageAttachment from "@/features/chats/components/chat/message/imageAttac
 import InternalAttachment from "@/features/chats/components/chat/message/internalAttachment"
 import { resolveLinkMedia, type SuccessfulLink } from "@/features/chats/utils"
 import { type AnyFile } from "@filen/sdk-rs"
+import { parseFilenPublicLink } from "@filen/shared"
 
 // A plain function rather than a component so each attachment costs no extra fiber.
 function renderLinkMedia({
@@ -87,14 +88,20 @@ export const Attachments = ({
 	const mappingHelper = useMappingHelper()
 	const [singleAttachmentLoadFailed, setSingleAttachmentLoadFailed] = useRecyclingState<boolean>(false, [message.inner.uuid])
 
-	const links = message.undecryptable ? [] : extractLinks(message.inner.message ?? "")
+	// Only Filen public links can resolve to a preview; external URLs are never fetched (see fetchData),
+	// so querying them would only persist a constant failure.
+	const urls = message.undecryptable
+		? []
+		: extractLinks(message.inner.message ?? "")
+				.map(link => link.url)
+				.filter(url => parseFilenPublicLink(url) !== null)
 
 	const chatMessageLinksQuery = useChatMessageLinksQuery(
 		{
-			links
+			urls
 		},
 		{
-			enabled: links.length > 0
+			enabled: urls.length > 0
 		}
 	)
 
@@ -137,30 +144,34 @@ export const Attachments = ({
 		)
 	}
 
+	// Failed links render nothing, so they must not open the gapped container either.
+	const successfulLinks = chatMessageLinksQuery.data.filter(link => link.success)
+
+	if (successfulLinks.length === 0) {
+		return null
+	}
+
 	return (
 		<View className="bg-transparent flex-col gap-4 mt-4">
-			{chatMessageLinksQuery.data.map((link, index) => {
-				const linkKey = link.success
-					? link.type === "internal"
+			{successfulLinks.map((link, index) => {
+				const linkKey =
+					link.type === "internal"
 						? link.data.type === "file"
 							? `link-internal-file-${link.data.file.uuid}`
 							: `link-internal-directory-${link.data.info.link.linkUuid}`
 						: `link-external-${link.data.url}`
-					: `link-unsuccessful-${index}`
 
 				return (
 					<View
 						key={mappingHelper.getMappingKey(linkKey, index)}
 						className="bg-transparent basis-full"
 					>
-						{link.success
-							? renderLinkMedia({
-									link,
-									fromSelf,
-									maxWidth,
-									getFileUrl: getHttpProviderFileUrl
-								})
-							: null}
+						{renderLinkMedia({
+							link,
+							fromSelf,
+							maxWidth,
+							getFileUrl: getHttpProviderFileUrl
+						})}
 					</View>
 				)
 			})}

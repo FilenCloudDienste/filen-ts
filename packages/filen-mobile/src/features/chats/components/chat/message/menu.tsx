@@ -1,7 +1,7 @@
 import { type Chat as TChat } from "@/types"
 import type { ListRenderItemInfo } from "@/components/ui/virtualList"
 import MenuComponent, { type MenuButton } from "@/components/ui/menu"
-import { useSecureStore } from "@/lib/secureStore"
+import { setSecureStoreValue } from "@/lib/secureStore"
 import { chatInputValueKey, chatReplyToKey, chatEditMessageKey } from "@/features/chats/chatDrafts"
 import useChatsStore, { type ChatMessageWithInflightId } from "@/features/chats/store/useChats.store"
 import { useShallow } from "zustand/shallow"
@@ -32,10 +32,7 @@ export const Menu = ({
 	isAnchoredToRight?: boolean
 }) => {
 	const { t } = useTranslation()
-	const [, setChatReplyTo] = useSecureStore<ChatMessageWithInflightId | null>(chatReplyToKey(chat.uuid), null)
-	const [, setChatEditMessage] = useSecureStore<ChatMessageWithInflightId | null>(chatEditMessageKey(chat.uuid), null)
 	const stringifiedClient = useStringifiedClient()
-	const [, setChatInputValue] = useSecureStore<string>(chatInputValueKey(chat.uuid), "")
 	const isFailedInflight = useChatsStore(useShallow(state => state.inflightErrors[info.item.inflightId ?? ""] !== undefined))
 
 	const isOwner = info.item.inner.senderId === stringifiedClient?.userId
@@ -125,7 +122,7 @@ export const Menu = ({
 						title: t("reply"),
 						icon: "reply" as const,
 						onPress: () => {
-							setChatReplyTo(info.item)
+							setSecureStoreValue<ChatMessageWithInflightId | null>(chatReplyToKey(chat.uuid), info.item)
 
 							events.emit("focusChatInput", {
 								chatUuid: chat.uuid
@@ -145,8 +142,8 @@ export const Menu = ({
 											return
 										}
 
-										setChatEditMessage(info.item)
-										setChatInputValue(info.item.inner.message)
+										setSecureStoreValue<ChatMessageWithInflightId | null>(chatEditMessageKey(chat.uuid), info.item)
+										setSecureStoreValue<string>(chatInputValueKey(chat.uuid), info.item.inner.message)
 
 										useChatsStore.getState().setInputSelection({
 											start: 0,

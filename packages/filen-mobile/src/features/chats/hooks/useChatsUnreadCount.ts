@@ -4,7 +4,7 @@ import chats from "@/features/chats/chats"
 import { useEffect } from "react"
 import { useStringifiedClient } from "@/lib/auth"
 import useEffectOnce from "@/hooks/useEffectOnce"
-import { isMessageUnread } from "@/features/chats/chatSelectors"
+import { countUnreadMessages } from "@/features/chats/chatSelectors"
 import useBlockedUsers from "@/features/contacts/hooks/useBlockedUsers"
 import logger from "@/lib/logger"
 
@@ -43,7 +43,7 @@ export function useChatsUnreadCount() {
 				continue
 			}
 
-			count += messages.filter(message => isMessageUnread(message, chat, stringifiedClient?.userId, blocked)).length
+			count += countUnreadMessages(messages, chat, stringifiedClient.userId, blocked)
 		}
 
 		return {

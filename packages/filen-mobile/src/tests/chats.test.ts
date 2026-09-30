@@ -88,8 +88,7 @@ vi.mock("@filen/sdk-rs", () => ({
 	DirMeta_Tags: { Decoded: "Decoded" }
 }))
 
-// chats.ts now pulls in the upload-and-link helper deps. They're only exercised by the
-// uploadAssetsAndGenerateLinks path (not covered here) — mock them so the module loads.
+// Upload-and-link helper deps, exercised only by the uploadAssetsAndGenerateLinks block.
 vi.mock("@/features/transfers/transfers", () => ({ default: { upload: vi.fn() } }))
 vi.mock("@/features/transfers/quota", () => ({ uploadQuotaRefusal: vi.fn(async () => null) }))
 vi.mock("@/features/drive/drive", () => ({ default: { enablePublicLink: vi.fn() } }))
@@ -110,8 +109,12 @@ vi.mock("@/features/chats/chatsInflight", () => ({
 import chats from "@/features/chats/chats"
 import type { Chat } from "@/types"
 import type { Contact } from "@filen/sdk-rs"
-import type { ChatMessageWithInflightId } from "@/features/chats/store/useChats.store"
+import useChatsStore, { type ChatMessageWithInflightId } from "@/features/chats/store/useChats.store"
 import { makeChat, makeChatMessage, makeParticipant } from "@/tests/fixtures/chats"
+import transfers from "@/features/transfers/transfers"
+import drive from "@/features/drive/drive"
+import { makeDriveItemPublicLink, unwrappedFileIntoDriveItem } from "@/lib/sdkUnwrap"
+import { fs } from "@/tests/mocks/expoFileSystem"
 
 // `inner` overrides REPLACE the inner object here (callers pass `{ inner: { uuid } }` and rely on it).
 function makeMessage(messageText: string | undefined, overrides: Partial<ChatMessageWithInflightId> = {}): ChatMessageWithInflightId {
@@ -335,6 +338,35 @@ describe("chats.editMessage", () => {
 	})
 })
 
+describe("chats.editMessage (older pages)", () => {
+	it("replaces the message on an open screen's older page too", async () => {
+		const chat = makeChat()
+		const original = makeMessage("hello", { inner: { uuid: "msg-older-edit" } } as Partial<ChatMessageWithInflightId>)
+		const untouched = makeMessage("other", { inner: { uuid: "msg-older-other" } } as Partial<ChatMessageWithInflightId>)
+
+		useChatsStore.getState().appendOlderMessages("screen-edit", chat.uuid, [original, untouched])
+		mockSdkClient.editMessage.mockResolvedValueOnce({
+			chat: chat.uuid,
+			inner: { uuid: "msg-older-edit", message: "edited", senderId: 1n, senderEmail: "test@test.com", senderNickName: undefined },
+			embedDisabled: false,
+			edited: true,
+			editedTimestamp: 300n,
+			sentTimestamp: 0n,
+			replyTo: undefined
+		})
+
+		await chats.editMessage({ chat, message: original, newMessage: "edited" })
+
+		const messages = useChatsStore.getState().olderMessages["screen-edit"]?.messages
+
+		expect(messages?.[0]?.inner.message).toBe("edited")
+		expect(messages?.[0]?.inflightId).toBe("")
+		expect(messages?.[1]).toBe(untouched)
+
+		useChatsStore.getState().clearOlderMessages("screen-edit")
+	})
+})
+
 describe("chats.mute", () => {
 	beforeEach(() => {
 		mockGetSdkClients.mockClear()
@@ -498,6 +530,27 @@ describe("chats.disableMessageEmbed", () => {
 		expect(disabledMsg?.embedDisabled).toBe(true)
 		// Other message should remain unchanged
 		expect(updated.find(m => m.inner.uuid === "other-msg")).toBeDefined()
+	})
+
+	it("disables the embed on an open screen's older page too", async () => {
+		const message = makeMessage("hello", { embedDisabled: false, inner: { uuid: "msg-embed-older" } } as Partial<ChatMessageWithInflightId>)
+
+		useChatsStore.getState().appendOlderMessages("screen-embed", "chat-1", [message])
+		mockSdkClient.disableMessageEmbed.mockResolvedValueOnce({
+			chat: "chat-1",
+			inner: { uuid: "msg-embed-older", message: "hello", senderId: 1n, senderEmail: "test@test.com", senderNickName: undefined },
+			embedDisabled: true,
+			edited: false,
+			editedTimestamp: 0n,
+			sentTimestamp: 0n,
+			replyTo: undefined
+		})
+
+		await chats.disableMessageEmbed({ message })
+
+		expect(useChatsStore.getState().olderMessages["screen-embed"]?.messages[0]?.embedDisabled).toBe(true)
+
+		useChatsStore.getState().clearOlderMessages("screen-embed")
 	})
 })
 
@@ -688,6 +741,21 @@ describe("chats.deleteMessage", () => {
 
 		expect(updated).toHaveLength(1)
 		expect(updated[0]!.inner.uuid).toBe("keep-msg")
+	})
+
+	it("removes the message from an open screen's older pages too", async () => {
+		const chat = makeChat({ uuid: "chat-del-older" })
+		const older = makeMessage("old", { inner: { uuid: "older-msg" } } as Partial<ChatMessageWithInflightId>)
+		const keeper = makeMessage("keep", { inner: { uuid: "older-keep" } } as Partial<ChatMessageWithInflightId>)
+
+		useChatsStore.getState().appendOlderMessages("screen-del", chat.uuid, [older, keeper])
+		mockSdkClient.deleteMessage.mockResolvedValueOnce({ ...chat, key: "some-key" })
+
+		await chats.deleteMessage({ chat, message: older })
+
+		expect(useChatsStore.getState().olderMessages["screen-del"]?.messages.map(m => m.inner.uuid)).toEqual(["older-keep"])
+
+		useChatsStore.getState().clearOlderMessages("screen-del")
 	})
 })
 
@@ -936,7 +1004,9 @@ describe("chats.sendMessage", () => {
 		mockSdkClient.updateLastChatFocusTimesNow.mockClear()
 	})
 
-	it("calls sendTypingSignal and sendChatMessage during sendMessage (typing is best-effort, not awaited)", async () => {
+	// The composer's typing sender already sent the Up for any outstanding Down, and MessageNew clears the
+	// sender's indicator on every receiver, so sending (outbox resends included) costs no typing request.
+	it("sends no typing signal during sendMessage", async () => {
 		const chat = makeChat({ uuid: "chat-send" })
 		const sdkLastMessage = {
 			chat: "chat-send",
@@ -949,15 +1019,13 @@ describe("chats.sendMessage", () => {
 		}
 		const updatedChat = { ...chat, key: "some-key", lastMessage: sdkLastMessage }
 
-		mockSdkClient.sendTypingSignal.mockResolvedValueOnce(undefined)
 		mockSdkClient.sendChatMessage.mockResolvedValueOnce(updatedChat)
 		mockSdkClient.updateLastChatFocusTimesNow.mockResolvedValueOnce([updatedChat])
 		mockSdkClient.markChatRead.mockResolvedValueOnce(undefined)
 
 		await chats.sendMessage({ chat, message: "hi", inflightId: "inflight-1" })
 
-		// Both are invoked — typing is fire-and-forget, message delivery is not gated on it
-		expect(mockSdkClient.sendTypingSignal).toHaveBeenCalledTimes(1)
+		expect(mockSdkClient.sendTypingSignal).not.toHaveBeenCalled()
 		expect(mockSdkClient.sendChatMessage).toHaveBeenCalledTimes(1)
 	})
 
@@ -974,7 +1042,6 @@ describe("chats.sendMessage", () => {
 		}
 		const sdkChat = { ...chat, key: "some-key", lastMessage: sdkLastMessage }
 
-		mockSdkClient.sendTypingSignal.mockResolvedValueOnce(undefined)
 		mockSdkClient.sendChatMessage.mockResolvedValueOnce(sdkChat)
 		mockSdkClient.updateLastChatFocusTimesNow.mockResolvedValueOnce([sdkChat])
 		mockSdkClient.markChatRead.mockResolvedValueOnce(undefined)
@@ -1003,7 +1070,6 @@ describe("chats.sendMessage", () => {
 		}
 		const sdkChat = { ...chat, key: "some-key", lastMessage: sdkLastMessage }
 
-		mockSdkClient.sendTypingSignal.mockResolvedValueOnce(undefined)
 		mockSdkClient.sendChatMessage.mockResolvedValueOnce(sdkChat)
 		// Housekeeping rejects AFTER the commit — must be swallowed, not bubbled.
 		mockSdkClient.updateLastChatFocusTimesNow.mockRejectedValueOnce(new Error("focus-times network error"))
@@ -1032,7 +1098,6 @@ describe("chats.sendMessage", () => {
 		}
 		const sdkChat = { ...chat, key: "some-key", lastMessage: sdkLastMessage }
 
-		mockSdkClient.sendTypingSignal.mockResolvedValueOnce(undefined)
 		mockSdkClient.sendChatMessage.mockResolvedValueOnce(sdkChat)
 		mockSdkClient.updateLastChatFocusTimesNow.mockResolvedValueOnce([sdkChat])
 		mockSdkClient.markChatRead.mockRejectedValueOnce(new Error("mark-read network error"))
@@ -1058,7 +1123,6 @@ describe("chats.sendMessage", () => {
 		}
 		const sdkChat = { ...chat, key: "some-key", lastMessage: sdkLastMessage }
 
-		mockSdkClient.sendTypingSignal.mockResolvedValueOnce(undefined)
 		mockSdkClient.sendChatMessage.mockResolvedValueOnce(sdkChat)
 		// Housekeeping rejects to prove the reconcile already happened independently of it.
 		mockSdkClient.updateLastChatFocusTimesNow.mockRejectedValueOnce(new Error("boom"))
@@ -1086,33 +1150,6 @@ describe("chats.sendMessage", () => {
 		expect(updated.some((m: ChatMessageWithInflightId) => m.inner.uuid === "committed-uuid")).toBe(true)
 	})
 
-	it("sendMessage succeeds even when sendTypingSignal rejects (typing failure must not gate delivery)", async () => {
-		const chat = makeChat({ uuid: "chat-send-typing-fail" })
-		const sdkLastMessage = {
-			chat: "chat-send-typing-fail",
-			inner: { uuid: "msg-tf", message: "hi", senderId: 1n, senderEmail: "test@test.com", senderNickName: undefined },
-			embedDisabled: false,
-			edited: false,
-			editedTimestamp: 0n,
-			sentTimestamp: 0n,
-			replyTo: undefined
-		}
-		const sdkChat = { ...chat, key: "some-key", lastMessage: sdkLastMessage }
-
-		// Typing signal rejects with a transient network error
-		mockSdkClient.sendTypingSignal.mockRejectedValueOnce(new Error("network timeout"))
-		mockSdkClient.sendChatMessage.mockResolvedValueOnce(sdkChat)
-		mockSdkClient.updateLastChatFocusTimesNow.mockResolvedValueOnce([sdkChat])
-		mockSdkClient.markChatRead.mockResolvedValueOnce(undefined)
-
-		// Must resolve successfully, not throw
-		const result = await chats.sendMessage({ chat, message: "hi", inflightId: "inf-tf" })
-
-		expect(mockSdkClient.sendChatMessage).toHaveBeenCalledTimes(1)
-		expect(result.message).not.toBeNull()
-		expect(result.message?.inner.message).toBe("hi")
-	})
-
 	it("chatMessagesQueryUpdate deduplicates by uuid and inflightId", async () => {
 		const chat = makeChat({ uuid: "chat-send5" })
 		const inflightId = "inflight-dedup"
@@ -1127,7 +1164,6 @@ describe("chats.sendMessage", () => {
 		}
 		const sdkChat = { ...chat, key: "some-key", lastMessage: sdkLastMessage }
 
-		mockSdkClient.sendTypingSignal.mockResolvedValueOnce(undefined)
 		mockSdkClient.sendChatMessage.mockResolvedValueOnce(sdkChat)
 		mockSdkClient.updateLastChatFocusTimesNow.mockResolvedValueOnce([sdkChat])
 		mockSdkClient.markChatRead.mockResolvedValueOnce(undefined)
@@ -1519,5 +1555,31 @@ describe("wrapChat / wrapMessage (undecryptable derivation)", () => {
 		const result = await chats.disableMessageEmbed({ message })
 
 		expect(result.undecryptable).toBe(true)
+	})
+})
+
+describe("chats.uploadAssetsAndGenerateLinks", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+		fs.clear()
+	})
+
+	it("links each freshly uploaded file without a prior link-status read", async () => {
+		const assetUri = "file:///cache/photo.jpg"
+		const item = { type: "file", data: { uuid: "file-uuid" } }
+
+		fs.set(assetUri, new Uint8Array([1, 2, 3]))
+		vi.spyOn(chats, "getChatUploadsDirectory").mockResolvedValueOnce({ uuid: "uploads-uuid" } as never)
+		vi.mocked(transfers.upload).mockResolvedValueOnce({ files: [{}] } as never)
+		vi.mocked(unwrappedFileIntoDriveItem).mockReturnValueOnce(item as never)
+		vi.mocked(drive.enablePublicLink).mockResolvedValueOnce({ type: "file", link: { linkUuid: "link-uuid" } } as never)
+		vi.mocked(makeDriveItemPublicLink).mockReturnValueOnce("https://link")
+
+		const links = await chats.uploadAssetsAndGenerateLinks([{ uri: assetUri, name: "photo.jpg" }])
+
+		expect(links).toEqual(["https://link"])
+		expect(drive.enablePublicLink).toHaveBeenCalledExactlyOnceWith({ item, knownAbsent: true })
+		expect(makeDriveItemPublicLink).toHaveBeenCalledWith({ item, linkUuid: "link-uuid" })
+		expect(fs.has(assetUri)).toBe(false)
 	})
 })

@@ -504,11 +504,14 @@ export class Sync extends OutboxSync<InflightContent> {
 			return
 		}
 
+		const pushedContentHash = hashNoteContent(mostRecentContent.content)
+
 		try {
 			await notes.setContent({
 				note: liveNote,
 				content: mostRecentContent.content,
-				signal
+				signal,
+				contentHash: pushedContentHash
 			})
 		} catch (e) {
 			// #40 hardening: a read-only / shared / history note whose edit
@@ -613,8 +616,6 @@ export class Sync extends OutboxSync<InflightContent> {
 		// base for every entry typed during the round trip (they survive the prune
 		// below). Without this refresh the next pass would compare those entries
 		// against their stale session base and flag our OWN push as a conflict.
-		const pushedContentHash = hashNoteContent(mostRecentContent.content)
-
 		useNotesInflightStore.getState().setInflightContent(prev => {
 			const updated = {
 				...prev

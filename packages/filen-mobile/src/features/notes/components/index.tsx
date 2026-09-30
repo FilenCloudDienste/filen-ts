@@ -139,38 +139,6 @@ const Notes = () => {
 	// otherwise they'd silently target search-hidden notes (#15).
 	const visibleNotes = notes.filter((note): note is NoteDataItem => note.type === "note")
 
-	// Stale-selection purge against the view's own membership. narrowedNotes only holds live notes
-	// whose owner is not blocked, so this one rule also drops notes that were deleted (#42 — a remote
-	// delete can slip past the socket handler's synchronous prune) or whose owner became blocked. In a
-	// narrowed view a note can also leave the list while still existing, and the header's bulk actions
-	// must not keep counting it. Offline membership IS the ledger (un-mark a note and it goes); shared
-	// membership is the participant list (remove the last participant, or be removed yourself, and it
-	// goes).
-	//
-	// Reachable when a bulk removal fails partway — runBulk is fail-fast and deliberately keeps the
-	// selection so the user can retry, but the notes it already un-marked are gone from this list.
-	//
-	// Null while the query holds no data, so an unloaded list never clears the selection.
-	const narrowedNoteUuidsKey = notesData ? narrowedNotes.map(note => note.uuid).join(",") : null
-
-	useEffect(() => {
-		if (narrowedNoteUuidsKey === null) {
-			return
-		}
-
-		const narrowedUuids = new Set(narrowedNoteUuidsKey.length > 0 ? narrowedNoteUuidsKey.split(",") : [])
-		const selected = useNotesStore.getState().selectedNotes
-		const kept = pruneSelection(selected, note => narrowedUuids.has(note.uuid))
-
-		if (kept !== selected) {
-			useNotesStore.getState().setSelectedNotes(kept)
-		}
-		// `selectedNotes` is in the deps so a selection WRITE is re-checked too, not just a membership
-		// change: the native header menu snapshots its closure when it opens, so "Select all" can
-		// write a row that left the view while the menu was up. The length guard makes the re-run a
-		// no-op once converged, so this cannot loop.
-	}, [narrowedNoteUuidsKey, selectedNoteUuidsKey])
-
 	// Built before notesTags: the tags sort (by "last activity" / note count) reads this index.
 	const notesForTag = (() => {
 		if (!notesData || !notesTagsData) {
@@ -210,6 +178,38 @@ const Notes = () => {
 		// bottom regardless of the sort preference; hidden when nothing is untagged.
 		return filterNoteTagsBySearchQuery(withUntaggedTag(sorted, untaggedNotes.length, t("untagged")), searchQuery)
 	})()
+
+	// Stale-selection purge against the view's own membership. narrowedNotes only holds live notes
+	// whose owner is not blocked, so this one rule also drops notes that were deleted (#42 — a remote
+	// delete can slip past the socket handler's synchronous prune) or whose owner became blocked. In a
+	// narrowed view a note can also leave the list while still existing, and the header's bulk actions
+	// must not keep counting it. Offline membership IS the ledger (un-mark a note and it goes); shared
+	// membership is the participant list (remove the last participant, or be removed yourself, and it
+	// goes).
+	//
+	// Reachable when a bulk removal fails partway — runBulk is fail-fast and deliberately keeps the
+	// selection so the user can retry, but the notes it already un-marked are gone from this list.
+	//
+	// Null while the query holds no data, so an unloaded list never clears the selection.
+	const narrowedNoteUuidsKey = notesData ? narrowedNotes.map(note => note.uuid).join(",") : null
+
+	useEffect(() => {
+		if (narrowedNoteUuidsKey === null) {
+			return
+		}
+
+		const narrowedUuids = new Set(narrowedNoteUuidsKey.length > 0 ? narrowedNoteUuidsKey.split(",") : [])
+		const selected = useNotesStore.getState().selectedNotes
+		const kept = pruneSelection(selected, note => narrowedUuids.has(note.uuid))
+
+		if (kept !== selected) {
+			useNotesStore.getState().setSelectedNotes(kept)
+		}
+		// `selectedNotes` is in the deps so a selection WRITE is re-checked too, not just a membership
+		// change: the native header menu snapshots its closure when it opens, so "Select all" can
+		// write a row that left the view while the menu was up. The length guard makes the re-run a
+		// no-op once converged, so this cannot loop.
+	}, [narrowedNoteUuidsKey, selectedNoteUuidsKey])
 
 	const renderItemNotesView = (info: ListRenderItemInfo<NoteListItem>) => {
 		return (

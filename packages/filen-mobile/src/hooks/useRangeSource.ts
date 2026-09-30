@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react"
-import { Buffer } from "buffer"
 import { File, type FileHandle } from "expo-file-system"
 import { CUMULATIVE_READ_FACTOR, checkRangeRequest, hasMagic, type RangeReader } from "@/lib/rangeTransfer"
 import { normalizeFilePathForExpo } from "@/lib/paths"
@@ -185,7 +184,7 @@ export default function useRangeSource(
 
 							bytesReadRef.current += bytes.byteLength
 
-							return Buffer.from(bytes).toString("base64")
+							return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString("base64")
 						}
 					}
 				})

@@ -978,6 +978,135 @@ describe("AudioCache", () => {
 			expect(peak).toBeLessThanOrEqual(8)
 		})
 
+		it("skips a default pass after one that deleted nothing, until a write", async () => {
+			const cache = await createAudioCache()
+			const freshMeta: Metadata = {
+				artist: "Fresh",
+				title: "Fresh",
+				album: null,
+				date: null,
+				duration: 1,
+				pictureUri: null,
+				pictureBlurhash: null,
+				cachedAt: Date.now()
+			}
+
+			fs.set(`${AUDIO_BASE_DIR}/fresh-uuid.filenmeta`, new Uint8Array(new TextEncoder().encode(serialize(freshMeta))))
+
+			const listSpy = vi.spyOn(Directory.prototype, "list")
+			const listCalls = (): number => listSpy.mock.contexts.filter(dir => (dir as Directory).uri === AUDIO_BASE_DIR).length
+
+			try {
+				await cache.gc()
+				await cache.gc()
+
+				expect(listCalls()).toBe(1)
+
+				// Explicit-age passes are never skipped.
+				await cache.gc(86400 * 1000)
+
+				expect(listCalls()).toBe(2)
+
+				const audioPath = `${FILE_CACHE_BASE_DIR}/new-uuid/new-uuid.mp3`
+
+				fs.set(audioPath, new Uint8Array([1, 2, 3]))
+				vi.mocked(fileCache.get).mockResolvedValueOnce(new File(audioPath) as any)
+
+				await cache.get({ item: wrapDrive(makeFileItem("new-uuid", "new.mp3")) })
+				await cache.gc()
+
+				expect(listCalls()).toBe(3)
+			} finally {
+				listSpy.mockRestore()
+			}
+		})
+
+		it("runs again once a survivor reaches its TTL", async () => {
+			const cache = await createAudioCache()
+			const now = Date.now()
+			const metaPath = `${AUDIO_BASE_DIR}/aging-uuid.filenmeta`
+			const agingMeta: Metadata = {
+				artist: "Aging",
+				title: "Aging",
+				album: null,
+				date: null,
+				duration: 1,
+				pictureUri: null,
+				pictureBlurhash: null,
+				cachedAt: now - 23 * 60 * 60 * 1000
+			}
+
+			fs.set(metaPath, new Uint8Array(new TextEncoder().encode(serialize(agingMeta))))
+
+			await cache.gc()
+
+			expect(fs.has(metaPath)).toBe(true)
+
+			const nowSpy = vi.spyOn(Date, "now").mockReturnValue(now + 60 * 60 * 1000)
+
+			try {
+				await cache.gc()
+			} finally {
+				nowSpy.mockRestore()
+			}
+
+			expect(fs.has(metaPath)).toBe(false)
+		})
+
+		it("a get() whose writes land after an overlapping no-op pass keeps the next pass from being skipped", async () => {
+			const cache = await createAudioCache()
+			const uuid = "overlap-uuid"
+			const audioPath = `${FILE_CACHE_BASE_DIR}/${uuid}/${uuid}.mp3`
+			const picturePath = `${AUDIO_BASE_DIR}/${uuid}.jpg`
+			let finishDownload!: () => void
+
+			fs.set(audioPath, new Uint8Array([1, 2, 3]))
+			vi.mocked(fileCache.get).mockImplementationOnce(
+				() =>
+					new Promise(resolve => {
+						finishDownload = () => {
+							resolve(new File(audioPath) as any)
+						}
+					})
+			)
+			vi.mocked(parseWebStream).mockResolvedValueOnce({
+				common: {
+					artist: "A",
+					title: "T",
+					album: null,
+					date: null,
+					picture: [{ format: "image/jpeg", data: new Uint8Array([1]), type: "Cover (front)", description: "" }]
+				},
+				format: { duration: 1 }
+			} as any)
+
+			const getPromise = cache.get({ item: wrapDrive(makeFileItem(uuid, "song.mp3")) })
+
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			// The download is still in flight: the directory holds nothing to delete.
+			await cache.gc()
+
+			// The sidecar write fails after the picture landed, orphaning the picture.
+			const moveSpy = vi.spyOn(File.prototype, "moveSync").mockImplementationOnce(() => {
+				throw new Error("move failed")
+			})
+
+			try {
+				finishDownload()
+
+				await getPromise
+			} finally {
+				moveSpy.mockRestore()
+			}
+
+			expect(fs.has(picturePath)).toBe(true)
+
+			await cache.gc()
+
+			expect(fs.has(picturePath)).toBe(false)
+		})
+
 		it("AU-11: a concurrent clear() waits for an in-flight gc to finish (gc holds the ClearBarrier)", async () => {
 			const cache = await createAudioCache()
 			const now = Date.now()
@@ -1088,6 +1217,35 @@ describe("AudioCache", () => {
 			fs.set(`${AUDIO_BASE_DIR}/uuid-pic.jpg`, new Uint8Array(new Array(200).fill(0)))
 
 			expect(cache.size()).toBe(8 + 200)
+		})
+	})
+
+	describe("isMetadataServable", () => {
+		const base = { title: "Song", cachedAt: 1 }
+
+		it("is false for undefined and null (null may be a swallowed transient failure)", async () => {
+			const { isMetadataServable } = await import("@/features/audio/audioCache")
+
+			expect(isMetadataServable(undefined)).toBe(false)
+			expect(isMetadataServable(null)).toBe(false)
+		})
+
+		it("is true for parsed tags without a cover", async () => {
+			const { isMetadataServable } = await import("@/features/audio/audioCache")
+
+			expect(isMetadataServable(base)).toBe(true)
+			expect(isMetadataServable({ ...base, pictureUri: null })).toBe(true)
+		})
+
+		it("tracks whether the cover file is still on disk", async () => {
+			const { isMetadataServable } = await import("@/features/audio/audioCache")
+			const pictureUri = `${AUDIO_BASE_DIR}/cover.jpg`
+
+			expect(isMetadataServable({ ...base, pictureUri })).toBe(false)
+
+			fs.set(pictureUri, new Uint8Array([1]))
+
+			expect(isMetadataServable({ ...base, pictureUri })).toBe(true)
 		})
 	})
 })

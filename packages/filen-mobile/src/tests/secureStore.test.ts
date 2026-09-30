@@ -379,6 +379,60 @@ describe("SecureStore", () => {
 
 			expect(result).toBe("")
 		})
+
+		it("a deep-equal value skips the rewrite but still caches and emits", async () => {
+			const store = createSecureStore()
+
+			await store.init()
+			await store.set("biometric", { enabled: true, lockedUntil: 0 })
+
+			const writeSpy = vi.spyOn(File.prototype, "write")
+
+			mockEvents.emit.mockClear()
+			mockSecureStoreMap.clear()
+
+			try {
+				await store.set("biometric", { enabled: true, lockedUntil: 0 })
+
+				expect(writeSpy).not.toHaveBeenCalled()
+			} finally {
+				writeSpy.mockRestore()
+			}
+
+			expect(mockSecureStoreMap.get("biometric")).toEqual({ enabled: true, lockedUntil: 0 })
+			expect(mockEvents.emit).toHaveBeenCalledWith("secureStoreChange", {
+				key: "biometric",
+				value: { enabled: true, lockedUntil: 0 }
+			})
+		})
+
+		it("a changed value, and a first null for a key, still write", async () => {
+			const store = createSecureStore()
+
+			await store.init()
+			await store.set("biometric", { enabled: true, lockedUntil: 0 })
+
+			const writeSpy = vi.spyOn(File.prototype, "write")
+
+			try {
+				await store.set("biometric", { enabled: true, lockedUntil: 5 })
+				await store.set("replyTo", null)
+
+				expect(writeSpy).toHaveBeenCalledTimes(2)
+			} finally {
+				writeSpy.mockRestore()
+			}
+
+			const setCall = setItemAsync.mock.calls[0] as [string, string]
+
+			getItemAsync.mockResolvedValue(setCall[1])
+
+			const store2 = createSecureStore()
+
+			await store2.init()
+
+			expect(await store2.get("biometric")).toEqual({ enabled: true, lockedUntil: 5 })
+		})
 	})
 
 	describe("get", () => {
@@ -584,6 +638,27 @@ describe("SecureStore", () => {
 			await store.remove("never-set")
 
 			expect(await store.get("existing")).toBe("data")
+		})
+
+		it("removing a non-existent key skips the rewrite and still clears the cache", async () => {
+			const store = createSecureStore()
+
+			await store.init()
+			await store.set("existing", "data")
+
+			mockSecureStoreMap.set("never-set", "stale")
+
+			const writeSpy = vi.spyOn(File.prototype, "write")
+
+			try {
+				await store.remove("never-set")
+
+				expect(writeSpy).not.toHaveBeenCalled()
+			} finally {
+				writeSpy.mockRestore()
+			}
+
+			expect(mockSecureStoreMap.has("never-set")).toBe(false)
 		})
 	})
 

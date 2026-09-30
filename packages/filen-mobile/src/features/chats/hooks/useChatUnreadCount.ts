@@ -1,7 +1,7 @@
 import { type Chat } from "@/types"
 import useChatMessagesQuery from "@/features/chats/queries/useChatMessages.query"
 import { useStringifiedClient } from "@/lib/auth"
-import { isMessageUnread } from "@/features/chats/chatSelectors"
+import { countUnreadMessages } from "@/features/chats/chatSelectors"
 import useBlockedUsers from "@/features/contacts/hooks/useBlockedUsers"
 
 export function useChatUnreadCount(chat: Chat): number {
@@ -25,7 +25,7 @@ export function useChatUnreadCount(chat: Chat): number {
 		return 0
 	}
 
-	return chatMessagesQuery.data.filter(message => isMessageUnread(message, chat, stringifiedClient.userId, blocked)).length
+	return countUnreadMessages(chatMessagesQuery.data, chat, stringifiedClient.userId, blocked)
 }
 
 export default useChatUnreadCount

@@ -527,16 +527,19 @@ class SecureStore {
 				// readExisting() (not read()) so a present-but-unreadable store rejects here WITHOUT ever
 				// reaching write({ [key]: value }) — which would destroy every other stored secret (finding 51).
 				const current = this.readCache ?? (await this.readExisting()) ?? {}
-				// Fresh merged object (never mutate `current`): a failed write() must leave
-				// readCache consistent with what is actually on disk. The spread stays —
-				// benchmarked AGAINST Object.assign at 10k/100k-entry stores and the spread
-				// won (+8%/+42% regressions with assign; engines fast-path object spread).
-				const modified = {
-					...current,
-					[key]: value
-				}
+				// `current` mirrors disk, so an unchanged value is already persisted: skip the whole-store reseal.
+				if (!(Object.hasOwn(current, key) && isEqual(current[key], value))) {
+					// Fresh merged object (never mutate `current`): a failed write() must leave
+					// readCache consistent with what is actually on disk. The spread stays —
+					// benchmarked AGAINST Object.assign at 10k/100k-entry stores and the spread
+					// won (+8%/+42% regressions with assign; engines fast-path object spread).
+					const modified = {
+						...current,
+						[key]: value
+					}
 
-				await this.write(modified)
+					await this.write(modified)
+				}
 
 				cache.secureStore.set(key, value)
 
@@ -574,18 +577,21 @@ class SecureStore {
 				// readExisting() (not read()) so a present-but-unreadable store rejects here WITHOUT ever
 				// reaching write({ ...rest }) — which would destroy every other stored secret (finding 51).
 				const current = this.readCache ?? (await this.readExisting()) ?? {}
-				// Single-pass copy skipping the removed key — the rest-destructuring it
-				// replaces paid the destructuring machinery on top of the copy. Store keys
-				// are plain strings (serialized JSON), so for-in covers the full domain.
-				const modified: Record<string, unknown> = {}
+				// An absent key leaves nothing to rewrite.
+				if (Object.hasOwn(current, key)) {
+					// Single-pass copy skipping the removed key — the rest-destructuring it
+					// replaces paid the destructuring machinery on top of the copy. Store keys
+					// are plain strings (serialized JSON), so for-in covers the full domain.
+					const modified: Record<string, unknown> = {}
 
-				for (const currentKey in current) {
-					if (currentKey !== key) {
-						modified[currentKey] = current[currentKey]
+					for (const currentKey in current) {
+						if (currentKey !== key) {
+							modified[currentKey] = current[currentKey]
+						}
 					}
-				}
 
-				await this.write(modified)
+					await this.write(modified)
+				}
 
 				cache.secureStore.delete(key)
 
@@ -673,6 +679,20 @@ const secureStore = new SecureStore()
 
 // Non-pruning: every hook on a key holds the same instance in a ref.
 const secureStoreFlushMutexes = new KeyedSemaphores()
+
+/**
+ * Fire-and-forget write for callers that never read the key: subscribers still see the change, but
+ * the caller holds no subscription of its own. Shares the hooks' per-key flush mutex so ordering is kept.
+ */
+export function setSecureStoreValue<T>(key: string, value: T): void {
+	;(async () => {
+		const result = await run(() => secureStoreFlushMutexes.for(key).withPermit(() => secureStore.set(key, value)))
+
+		if (!result.success) {
+			logger.error("secure-store", "useSecureStore: set failed", { key, error: result.error })
+		}
+	})()
+}
 
 export function useSecureStore<T>(key: string, initialValue: T): [T, (fn: T | ((prev: T) => T)) => void] {
 	const [state, setState] = useState<T>(() => (cache.secureStore.get(key) as T | undefined) ?? initialValue)

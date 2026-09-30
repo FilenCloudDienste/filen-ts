@@ -2,7 +2,6 @@ import { Platform } from "react-native"
 import * as FileSystem from "expo-file-system"
 import * as ReactNativeBlobUtil from "react-native-blob-util"
 import * as MediaLibrary from "expo-media-library/legacy"
-import mimeTypes from "mime-types"
 import { type TFunction } from "i18next"
 import { run, runOrThrow, type Result, driveItemName } from "@filen/shared"
 import type { DriveItem } from "@/types"
@@ -16,6 +15,7 @@ import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
 import alerts from "@/lib/alerts"
 import i18n from "@/lib/i18n"
 import logger from "@/lib/logger"
+import { loadMimeTypes } from "@/lib/utils"
 
 /**
  * Remove an existing public copy at the target path before re-inserting (#86).
@@ -155,6 +155,7 @@ export async function downloadDriveItemToDevice({ item }: { item: DriveItem }): 
 					const entries = listLocalDirectoryRecursive(destination)
 
 					const files = entries.filter(entry => entry instanceof FileSystem.File)
+					const mimeTypes = await loadMimeTypes()
 
 					// Use allSettled so a single failure does not abort sibling copies that are
 					// still in flight, and so the defer does not delete the staging dir while a
@@ -302,7 +303,7 @@ export async function downloadFileItemToTmp(item: DriveItem): Promise<FileSystem
 		return null
 	}
 
-	if (downloadResult.files.length === 0 || downloadResult.directories.length > 0 || !downloadResult.files[0] || !destination.exists) {
+	if (!("files" in downloadResult) || downloadResult.files.length === 0 || downloadResult.directories.length > 0 || !downloadResult.files[0] || !destination.exists) {
 		throw new Error("Downloaded item is not a file")
 	}
 

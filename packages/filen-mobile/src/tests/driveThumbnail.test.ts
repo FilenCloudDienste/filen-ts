@@ -212,4 +212,30 @@ describe("drive Thumbnail — settled contract", () => {
 
 		expect(mockGenerate).toHaveBeenCalledTimes(2)
 	}, 5000)
+
+	it("renders the FileIcon without mounting the generator for an item the lib can never thumbnail", async () => {
+		mockCanGenerate.mockReturnValue(false)
+
+		const { container } = renderThumbnail()
+
+		await new Promise(resolve => setTimeout(resolve, 0))
+
+		expect(appStateListeners.size).toBe(0)
+		expect(mockGenerate).not.toHaveBeenCalled()
+		expect(container.querySelector("[data-testid='file-icon']")?.getAttribute("data-name")).toBe("shot.cr2")
+	})
+
+	it("still renders a cached thumbnail for an item the lib can no longer thumbnail", async () => {
+		mockCanGenerate.mockReturnValue(false)
+		mockHasThumbnail.mockReturnValue(true)
+
+		const { container } = renderThumbnail()
+
+		await new Promise(resolve => setTimeout(resolve, 0))
+
+		expect(mockGenerate).not.toHaveBeenCalled()
+		expect(container.querySelector("[data-testid='thumbnail-image']")?.getAttribute("src")).toBe(
+			"file:///shared/group.io.filen.app/thumbnails/v4/raw-uuid.webp"
+		)
+	})
 })

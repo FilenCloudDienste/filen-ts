@@ -373,6 +373,153 @@ describe("Audio", () => {
 		})
 	})
 
+	describe("appendToQueue", () => {
+		type ShuffleInternals = { shuffleOrder: number[]; shufflePosition: number }
+
+		function makeUndecryptableItem(uuid: string): QueueItem {
+			return {
+				playlistUuid: "test-playlist",
+				item: {
+					type: "file",
+					data: {
+						uuid,
+						decryptedMeta: null,
+						undecryptable: true,
+						size: 0n
+					}
+				} as unknown as DriveItemFileExtracted
+			}
+		}
+
+		// Deterministic Math.random so a batch and the equivalent sequential adds draw the same numbers.
+		function seedRandom(): void {
+			let state = 42
+
+			vi.spyOn(Math, "random").mockImplementation(() => {
+				state = (state * 1103515245 + 12345) % 2147483648
+
+				return state / 2147483648
+			})
+		}
+
+		function queueEmits(): number {
+			return vi.mocked(events.emit).mock.calls.filter(call => call[0] === "audioQueue").length
+		}
+
+		const batch = [
+			makeQueueItem("d", "d.mp3"),
+			makeUndecryptableItem("bad"),
+			makeQueueItem("e", "e.mp3"),
+			makeQueueItem("f", "f.mp3"),
+			makeQueueItem("g", "g.mp3")
+		]
+
+		async function seededAudio(): Promise<AudioTestContext["audio"]> {
+			// Each comparison run starts from shuffle off; prepare() sets the flag it needs.
+			secureStoreMap.clear()
+
+			const { audio } = await createAudio()
+
+			for (const uuid of ["a", "b", "c"]) {
+				await audio.addToQueue({ item: makeQueueItem(uuid, `${uuid}.mp3`) })
+			}
+
+			await audio.skipTo(1)
+
+			return audio
+		}
+
+		async function compareWithSequential(prepare: (audio: AudioTestContext["audio"]) => Promise<void>): Promise<void> {
+			const sequential = await seededAudio()
+
+			seedRandom()
+			await prepare(sequential)
+			seedRandom()
+
+			const sequentialResults = await Promise.all(batch.map(item => sequential.addToQueue({ item })))
+
+			vi.restoreAllMocks()
+
+			const batched = await seededAudio()
+
+			seedRandom()
+			await prepare(batched)
+			seedRandom()
+			vi.mocked(events.emit).mockClear()
+
+			const batchedResults = await batched.appendToQueue(batch)
+
+			expect(queueEmits()).toBe(1)
+			expect(batchedResults).toEqual([true, false, true, true, true])
+			expect(batchedResults).toEqual(sequentialResults)
+			expect(batched.getQueue().map(i => i.item.data.uuid)).toEqual(sequential.getQueue().map(i => i.item.data.uuid))
+			expect(batched.getPosition()).toBe(sequential.getPosition())
+
+			const batchedShuffle = batched as unknown as ShuffleInternals
+			const sequentialShuffle = sequential as unknown as ShuffleInternals
+
+			expect(batchedShuffle.shuffleOrder).toEqual(sequentialShuffle.shuffleOrder)
+			expect(batchedShuffle.shufflePosition).toBe(sequentialShuffle.shufflePosition)
+		}
+
+		it("matches sequential adds with shuffle off", async () => {
+			await compareWithSequential(async () => {})
+		})
+
+		it("matches sequential adds with shuffle on and a current shuffle order", async () => {
+			await compareWithSequential(async audio => {
+				await audio.setShuffleEnabled(true)
+			})
+		})
+
+		it("matches sequential adds when the shuffle order is stale and rebuilt mid-batch", async () => {
+			await compareWithSequential(async audio => {
+				// Shuffle flag on without an order for the current queue: the first append rebuilds it.
+				secureStoreMap.set(audio.shuffleEnabledKey, true)
+			})
+		})
+
+		it("keeps the current track first after a mid-batch rebuild and yields a full permutation", async () => {
+			const audio = await seededAudio()
+
+			secureStoreMap.set(audio.shuffleEnabledKey, true)
+
+			await audio.appendToQueue(batch)
+
+			const { shuffleOrder } = audio as unknown as ShuffleInternals
+
+			expect(shuffleOrder[0]).toBe(audio.getPosition())
+			expect(shuffleOrder.slice().sort((a, b) => a - b)).toEqual(audio.getQueue().map((_, i) => i))
+		})
+
+		it("does not emit or read shuffle when every item is undecryptable", async () => {
+			const audio = await seededAudio()
+			const queueBefore = audio.getQueue()
+			const { default: secureStore } = await import("@/lib/secureStore")
+
+			vi.mocked(events.emit).mockClear()
+			vi.mocked(secureStore.get).mockClear()
+
+			const results = await audio.appendToQueue([makeUndecryptableItem("x"), makeUndecryptableItem("y")])
+
+			expect(results).toEqual([false, false])
+			expect(audio.getQueue()).toBe(queueBefore)
+			expect(queueEmits()).toBe(0)
+			expect(secureStore.get).not.toHaveBeenCalled()
+		})
+
+		it("returns an empty result for empty input without emitting", async () => {
+			const audio = await seededAudio()
+			const queueBefore = audio.getQueue()
+
+			vi.mocked(events.emit).mockClear()
+
+			expect(await audio.appendToQueue([])).toEqual([])
+			expect(audio.getQueue()).toBe(queueBefore)
+			expect(queueEmits()).toBe(0)
+		})
+	})
+
 	describe("clearQueue", () => {
 		it("empties queue and resets position", async () => {
 			const { audio } = await createAudio()
@@ -2023,6 +2170,118 @@ describe("Audio", () => {
 		})
 	})
 
+	describe("getPlaylists — one existence check per track per read", () => {
+		const track = (uuid: string, playlist: string) => ({
+			uuid,
+			name: `${uuid}.mp3`,
+			mime: "audio/mpeg",
+			size: 100,
+			bucket: "b",
+			key: "k",
+			version: 2,
+			chunks: 1,
+			region: "r",
+			playlist
+		})
+
+		// Two playlists sharing a track; the second also lists it twice.
+		const setupOverlap = () => {
+			const playlists: Record<string, unknown> = {
+				"playlist-1": {
+					uuid: "p1",
+					name: "All",
+					created: Date.now(),
+					updated: Date.now(),
+					files: [track("shared", "p1"), track("only-1", "p1")]
+				},
+				"playlist-2": {
+					uuid: "p2",
+					name: "Mood",
+					created: Date.now(),
+					updated: Date.now(),
+					files: [track("shared", "p2"), track("only-2", "p2"), track("shared", "p2")]
+				}
+			}
+
+			mockSdkClient.listDir.mockImplementation(async () => ({
+				dirs: [
+					{ meta: { tag: "Decoded", inner: [{ name: ".filen" }] } },
+					{ meta: { tag: "Decoded", inner: [{ name: "Playlists" }] } }
+				],
+				files: [
+					{ uuid: "playlist-1", meta: { tag: "Decoded", inner: [{ name: "playlist-1.json" }] } },
+					{ uuid: "playlist-2", meta: { tag: "Decoded", inner: [{ name: "playlist-2.json" }] } }
+				]
+			}))
+
+			mockSdkClient.downloadFileToBytes.mockImplementation(async (file: { inner: { uuid: string } }) =>
+				Buffer.from(JSON.stringify(playlists[file.inner.uuid]), "utf-8")
+			)
+		}
+
+		const checkedUuids = () => mockSdkClient.getFileOptional.mock.calls.map(call => call[0] as string).sort()
+
+		it("checks a track shared by several playlists once and keeps it in each", async () => {
+			const { audio } = await createAudio()
+
+			setupOverlap()
+			mockSdkClient.getFileOptional.mockImplementation(async (uuid: string) => ({ uuid }))
+
+			const result = await audio.getPlaylists()
+
+			expect(checkedUuids()).toEqual(["only-1", "only-2", "shared"])
+			expect(result.map(p => p.files.map(f => f.uuid))).toEqual([
+				["shared", "only-1"],
+				["shared", "only-2", "shared"]
+			])
+		})
+
+		it("drops a missing shared track from every playlist holding it", async () => {
+			const { audio } = await createAudio()
+
+			setupOverlap()
+			mockSdkClient.getFileOptional.mockImplementation(async (uuid: string) => (uuid === "shared" ? undefined : { uuid }))
+
+			const result = await audio.getPlaylists()
+
+			expect(checkedUuids()).toEqual(["only-1", "only-2", "shared"])
+			expect(result.map(p => p.files.map(f => f.uuid))).toEqual([["only-1"], ["only-2"]])
+		})
+
+		it("keeps a shared track whose check fails transiently in every playlist", async () => {
+			const { audio } = await createAudio()
+
+			setupOverlap()
+			mockSdkClient.getFileOptional.mockImplementation(async (uuid: string) => {
+				if (uuid === "shared") {
+					throw new Error("decrypt blip")
+				}
+
+				return { uuid }
+			})
+
+			const result = await audio.getPlaylists()
+
+			expect(checkedUuids()).toEqual(["only-1", "only-2", "shared"])
+			expect(result.map(p => p.files.map(f => f.uuid))).toEqual([
+				["shared", "only-1"],
+				["shared", "only-2", "shared"]
+			])
+		})
+
+		it("checks again on the next read", async () => {
+			const { audio } = await createAudio()
+
+			setupOverlap()
+			mockSdkClient.getFileOptional.mockImplementation(async (uuid: string) => ({ uuid }))
+
+			await audio.getPlaylists()
+			await audio.getPlaylists()
+
+			expect(mockSdkClient.getFileOptional).toHaveBeenCalledTimes(6)
+		})
+	})
+
 	describe("getPlaylists (fix #2 - rewrite-on-load)", () => {
 		const setupCleanupScenario = () => {
 			const playlistWithMissingFile = {
@@ -3553,11 +3812,32 @@ describe("Audio", () => {
 		}
 
 		// Read the persisted playlist from the query cache — savePlaylist mirrors every write there via
-		// playlistsQueryUpdate. (Decoding the uploaded ArrayBuffer is unreliable in node: Buffer.from(str)
-		// allocates from a shared pool, so the passed `.buffer` is the whole pool, not just the JSON slice.)
+		// playlistsQueryUpdate.
 		function savedPlaylist(uuid = "pl1") {
 			return (playlistsCache.current as { uuid: string; name: string; files: { uuid: string }[] }[]).find(p => p.uuid === uuid)
 		}
+
+		it("uploads the playlist as exactly the UTF-8 bytes of its JSON", async () => {
+			const { audio } = await createAudio()
+
+			setupPlaylistsDir()
+
+			playlistsCache.current = [makePlaylist("pl1", [file("a", "Ünïcödé 音楽 🎵.mp3")])]
+
+			await audio.renamePlaylist({
+				playlist: makePlaylist("pl1", [file("a", "Ünïcödé 音楽 🎵.mp3")]),
+				name: "Mix 🎧 ß"
+			})
+
+			const uploaded = mockSdkClient.uploadFileFromBytes.mock.calls.at(-1)?.[0] as ArrayBuffer
+			const json = Buffer.from(uploaded).toString("utf-8")
+			const parsed = JSON.parse(json) as { name: string; files: { name: string }[] }
+
+			expect(uploaded).toBeInstanceOf(ArrayBuffer)
+			expect(Buffer.from(uploaded).equals(Buffer.from(json, "utf-8"))).toBe(true)
+			expect(parsed.name).toBe("Mix 🎧 ß")
+			expect(parsed.files.map(f => f.name)).toEqual(["Ünïcödé 音楽 🎵.mp3"])
+		})
 
 		it("AU-07: renamePlaylist persists the freshest file list, not the caller's stale snapshot", async () => {
 			const { audio } = await createAudio()

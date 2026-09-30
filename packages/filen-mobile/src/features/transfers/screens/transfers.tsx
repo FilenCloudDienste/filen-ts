@@ -32,39 +32,20 @@ import { stopCopyWithChoice } from "@/features/copy/copyCancel"
 
 type CopyTransfer = Extract<TTransfer, { type: "copy" }>
 
-// Discriminated wrapper so the list can hold both still-running ("active") transfers and
-// settled ("finished") snapshots and the renderer can branch on `kind`.
-export type TransfersListItem = { kind: "active"; transfer: TTransfer } | { kind: "finished"; finished: TFinishedTransfer }
+// The list holds the store's row objects themselves, never wrappers: FlashList's cell memo compares item
+// identity, so an unpatched row keeps its cell un-rendered across progress events. Only FinishedTransfer
+// carries finishedAt, which is what tells the two apart.
+export type TransfersListItem = TTransfer | TFinishedTransfer
 
-// Pure, unit-testable builder for the merged display list: active transfers on top ordered by
-// startedAt ascending (insertion order), finished transfers below ordered by finishedAt descending
-// (most recently finished first). Does not mutate its inputs.
-export function buildTransfersDisplayList(args: { transfers: TTransfer[]; finishedTransfers: TFinishedTransfer[] }): TransfersListItem[] {
-	const { transfers, finishedTransfers } = args
+// Active transfers render on top in startedAt ascending (insertion) order. Does not mutate its input.
+export function sortActiveTransfers(transfers: TTransfer[]): TTransfer[] {
+	return transfers.slice().sort((a, b) => a.startedAt - b.startedAt)
+}
 
-	// Built into one output array instead of sort→map→map→concat. Every in-flight progress event
-	// replaces the store's `transfers` array, so this runs per event while the screen is open, and
-	// the old shape allocated five arrays (two copies, two map results, the concat) plus a full
-	// element copy per stage. Two sorted copies and the result are all that is actually needed.
-	// `slice()` over `[...]` for the same reason: no iterator protocol on a plain array. Same
-	// comparators over the same inputs, so ordering (and sort stability) is unchanged.
-	const result: TransfersListItem[] = []
-
-	for (const transfer of transfers.slice().sort((a, b) => a.startedAt - b.startedAt)) {
-		result.push({
-			kind: "active",
-			transfer
-		})
-	}
-
-	for (const finished of finishedTransfers.slice().sort((a, b) => b.finishedAt - a.finishedAt)) {
-		result.push({
-			kind: "finished",
-			finished
-		})
-	}
-
-	return result
+// Finished transfers render below, most recently finished first. Kept apart from the active sort so the
+// compiler caches it on finishedTransfers, which progress events leave untouched. Does not mutate its input.
+export function sortFinishedTransfers(finishedTransfers: TFinishedTransfer[]): TFinishedTransfer[] {
+	return finishedTransfers.slice().sort((a, b) => b.finishedAt - a.finishedAt)
 }
 
 // Pure, unit-testable subtitle for a finished-transfer row. Errored rows prefer the captured
@@ -395,21 +376,17 @@ const FinishedTransferRow = ({ finished }: { finished: TFinishedTransfer }) => {
 const TransfersRow = ({ info }: { info: ListRenderItemInfo<TransfersListItem> }) => {
 	const item = info.item
 
-	if (item.kind === "finished") {
-		return item.finished.type === "copy" ? (
-			<CopyFinishedRow finished={item.finished} />
-		) : (
-			<FinishedTransferRow finished={item.finished} />
-		)
+	if ("finishedAt" in item) {
+		return item.type === "copy" ? <CopyFinishedRow finished={item} /> : <FinishedTransferRow finished={item} />
 	}
 
-	if (item.transfer.type === "copy") {
-		return <CopyActiveRow transfer={item.transfer} />
+	if (item.type === "copy") {
+		return <CopyActiveRow transfer={item} />
 	}
 
 	return (
 		<ActiveTransferRow
-			transfer={item.transfer}
+			transfer={item}
 			target={info.target}
 		/>
 	)
@@ -524,10 +501,9 @@ const Transfers = () => {
 		}))
 	)
 	const insets = useSafeAreaInsets()
-	const items = buildTransfersDisplayList({
-		transfers,
-		finishedTransfers
-	})
+	const active = sortActiveTransfers(transfers)
+	const finished = sortFinishedTransfers(finishedTransfers)
+	const items: TransfersListItem[] = [...active, ...finished]
 
 	return (
 		<Fragment>
@@ -535,9 +511,7 @@ const Transfers = () => {
 			<ScreenBody>
 				<VirtualList
 					className="flex-1 bg-transparent"
-					keyExtractor={item =>
-						item.kind === "active" ? `active-${item.transfer.type}-${item.transfer.id}` : `finished-${item.finished.id}`
-					}
+					keyExtractor={item => ("finishedAt" in item ? `finished-${item.id}` : `active-${item.type}-${item.id}`)}
 					data={items}
 					renderItem={info => <TransfersRow info={info} />}
 					emptyComponent={() => (

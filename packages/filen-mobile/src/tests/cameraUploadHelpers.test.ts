@@ -1238,6 +1238,13 @@ describe("blake3ToHex", () => {
 
 		expect(blake3ToHex(new Uint8Array(32).fill(0x7f).buffer)).toHaveLength(64)
 	})
+
+	it("encodes every byte value as toString(16) padded to two digits", async () => {
+		const { blake3ToHex } = await import("@/features/cameraUpload/cameraUploadHelpers")
+		const bytes = Array.from({ length: 256 }, (_, byte) => byte)
+
+		expect(blake3ToHex(new Uint8Array(bytes).buffer)).toBe(bytes.map(byte => byte.toString(16).padStart(2, "0")).join(""))
+	})
 })
 
 describe("parentTreePath", () => {

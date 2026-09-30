@@ -62,6 +62,7 @@ vi.mock("@/lib/sqlite", () => ({
 // The real pager walks a DB cursor; here it just replays the fake store's matching rows in the same
 // (key, serializedValue) shape the caller deserializes.
 vi.mock("@/lib/kvScan", () => ({
+	KV_SMALL_ROW_PAGE_SIZE: 4096,
 	forEachKvRowByPrefix: async (_db: unknown, prefix: string, onRow: (key: string, value: string) => void) => {
 		scanHook()
 
@@ -110,6 +111,7 @@ import { NotesOffline, planNoteOfflineSync, noteEditedStamp, isNoteScreenOpen } 
 import useNotesInflightStore from "@/features/notes/store/useNotesInflight.store"
 import useNotesOfflineStore from "@/features/notes/store/useNotesOffline.store"
 import useAppStore from "@/stores/useApp.store"
+import { rememberNotePush, isOwnNotePush } from "@/features/notes/pushEchoes"
 import type { Note } from "@/types"
 
 function note(uuid: string, editedTimestamp: number): Note {
@@ -592,6 +594,163 @@ describe("refreshAfterRemoteEdit", () => {
 
 		expect(getContentMock).not.toHaveBeenCalled()
 		expect(kvStore.get("notesOffline:marked:a")).toEqual({ editedTimestamp: "10" })
+	})
+})
+
+// The socket event already carries the edit's body, decrypted by the SDK with the same decrypt
+// getNoteContent uses, so the refresh commits it instead of downloading it again.
+describe("refreshAfterRemoteEdit with the event's own body", () => {
+	it("commits the event body without a download or a fetch slot", async () => {
+		seedCachedBody("a", "stale")
+
+		const notesOffline = new NotesOffline()
+		const acquire = vi.spyOn((notesOffline as unknown as { refreshSemaphore: { acquire: () => Promise<void> } }).refreshSemaphore, "acquire")
+
+		await notesOffline.refreshAfterRemoteEdit({ note: note("a", 20), content: "from the event" })
+
+		expect(getContentMock).not.toHaveBeenCalled()
+		expect(acquire).not.toHaveBeenCalled()
+		expect(contentCache.get("a")).toBe("from the event")
+	})
+
+	it("stamps a marked note's ledger with the event's edit", async () => {
+		kvStore.set("notesOffline:marked:a", { editedTimestamp: "10" })
+
+		const notesOffline = new NotesOffline()
+
+		await notesOffline.refreshAfterRemoteEdit({ note: note("a", 20), content: "from the event" })
+
+		expect(getContentMock).not.toHaveBeenCalled()
+		expect(contentCache.get("a")).toBe("from the event")
+		expect(kvStore.get("notesOffline:marked:a")).toEqual({ editedTimestamp: "20" })
+	})
+
+	it("still downloads when the event carried no body", async () => {
+		seedCachedBody("a", "stale")
+		getContentMock.mockResolvedValue("fetched")
+
+		const notesOffline = new NotesOffline()
+
+		await notesOffline.refreshAfterRemoteEdit({ note: note("a", 20), content: undefined })
+
+		expect(getContentMock).toHaveBeenCalledOnce()
+		expect(contentCache.get("a")).toBe("fetched")
+	})
+
+	// A foreign edit delivered after this device's own push landed would replace the newer body.
+	it("downloads instead while a push of the note still awaits its echo", async () => {
+		seedCachedBody("a", "what this device pushed")
+		getContentMock.mockResolvedValue("server truth")
+		rememberNotePush("a", "pending-push")
+
+		try {
+			const notesOffline = new NotesOffline()
+
+			await notesOffline.refreshAfterRemoteEdit({ note: note("a", 20), content: "older foreign edit" })
+
+			expect(getContentMock).toHaveBeenCalledOnce()
+			expect(contentCache.get("a")).toBe("server truth")
+		} finally {
+			// The registry is module state; later tests must not inherit the pending push.
+			isOwnNotePush("a", "pending-push")
+		}
+	})
+
+	it("keeps every gate the download path has", async () => {
+		const notesOffline = new NotesOffline()
+
+		// Neither held nor marked.
+		await notesOffline.refreshAfterRemoteEdit({ note: note("a", 20), content: "x" })
+
+		expect(contentCache.has("a")).toBe(false)
+
+		// On screen.
+		seedCachedBody("b", "on screen")
+		useAppStore.getState().setPathname("/note/b")
+
+		await notesOffline.refreshAfterRemoteEdit({ note: note("b", 20), content: "x" })
+
+		expect(contentCache.get("b")).toBe("on screen")
+
+		// Unsynced edits.
+		seedCachedBody("c", "stale")
+		setInflight("c", "draft")
+
+		await notesOffline.refreshAfterRemoteEdit({ note: note("c", 20), content: "x" })
+
+		expect(contentCache.get("c")).toBe("stale")
+
+		// Offline: the ledger keeps its pre-edit stamp so the reconnect pass retries.
+		kvStore.set("notesOffline:marked:d", { editedTimestamp: "10" })
+		seedCachedBody("d", "stale")
+		onlineManager.setOnline(false)
+
+		await notesOffline.refreshAfterRemoteEdit({ note: note("d", 20), content: "x" })
+
+		expect(contentCache.get("d")).toBe("stale")
+		expect(kvStore.get("notesOffline:marked:d")).toEqual({ editedTimestamp: "10" })
+
+		onlineManager.setOnline(true)
+
+		// Logged out.
+		seedCachedBody("e", "stale")
+		notesOffline.clearForLogout()
+
+		await notesOffline.refreshAfterRemoteEdit({ note: note("e", 20), content: "x" })
+
+		expect(contentCache.get("e")).toBe("stale")
+		expect(getContentMock).not.toHaveBeenCalled()
+	})
+
+	// No fetch window, so nothing is dropped: events commit in the order they arrived.
+	it("commits back-to-back events in order, the last one winning", async () => {
+		seedCachedBody("a", "old")
+
+		const notesOffline = new NotesOffline()
+		const stampBefore = contentStamps.get("a") ?? 0
+
+		await Promise.all([
+			notesOffline.refreshAfterRemoteEdit({ note: note("a", 20), content: "first" }),
+			notesOffline.refreshAfterRemoteEdit({ note: note("a", 21), content: "second" })
+		])
+
+		expect(contentStamps.get("a")).toBe(stampBefore + 2)
+		expect(contentCache.get("a")).toBe("second")
+		expect(getContentMock).not.toHaveBeenCalled()
+	})
+
+	it("is not collapsed into a download already in flight for the note", async () => {
+		seedCachedBody("a", "old")
+
+		let resolveFetch: (value: string) => void = () => undefined
+		let fetchStarted: () => void = () => undefined
+		const started = new Promise<void>(resolve => {
+			fetchStarted = resolve
+		})
+		const inFlightFetch = new Promise<string>(resolve => {
+			resolveFetch = resolve
+		})
+
+		getContentMock.mockImplementation(async () => {
+			fetchStarted()
+
+			return await inFlightFetch
+		})
+
+		const notesOffline = new NotesOffline()
+		const fetching = notesOffline.refreshAfterRemoteEdit({ note: note("a", 20) })
+
+		await started
+		await notesOffline.refreshAfterRemoteEdit({ note: note("a", 21), content: "newer" })
+
+		expect(contentCache.get("a")).toBe("newer")
+
+		// The body changed under the download, so its older copy is not written over the newer one.
+		resolveFetch("older")
+
+		await fetching
+
+		expect(contentCache.get("a")).toBe("newer")
 	})
 })
 

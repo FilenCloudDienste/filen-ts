@@ -548,7 +548,11 @@ export function useDriveSearch({ drivePath }: { drivePath: DrivePath }): UseDriv
 			tombstonesRef.current.add(uuid)
 			mapCacheRef.current.delete(uuid)
 
-			setSearchResults(prev => prev.filter(item => item.data.uuid !== uuid))
+			setSearchResults(prev => {
+				const next = prev.filter(item => item.data.uuid !== uuid)
+
+				return next.length === prev.length ? prev : next
+			})
 
 			useDriveStore.getState().removeFromSelection([uuid])
 		})

@@ -11,9 +11,8 @@ import useIsItemStoredOffline from "@/features/offline/hooks/useIsItemStoredOffl
 import { PressableOpacity } from "@/components/ui/pressables"
 import { type DrivePath } from "@/hooks/useDrivePath"
 import Menu from "@/features/drive/components/item/menu"
-import { useShallow } from "zustand/shallow"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
-import useDriveStore from "@/features/drive/store/useDrive.store"
+import useDriveStore, { isUuidSelected } from "@/features/drive/store/useDrive.store"
 import { IndicatorBadge } from "@/features/drive/components/item/indicators"
 
 function VideoIndicator() {
@@ -42,8 +41,8 @@ export const Photo = ({
 	getListItems: () => DriveItemFileExtracted[]
 }) => {
 	const previewType = getPreviewType(driveItemDisplayName(info.item))
-	const isSelected = useDriveStore(useShallow(state => state.selectedItems.some(i => i.data.uuid === info.item.data.uuid)))
-	const arePhotosSelected = useDriveStore(useShallow(state => state.selectedItems.length > 0))
+	const isSelected = useDriveStore(state => isUuidSelected(state.selectedItems, info.item.data.uuid))
+	const arePhotosSelected = useDriveStore(state => state.selectedItems.length > 0)
 
 	const isStoredOffline = useIsItemStoredOffline(info.item)
 
@@ -60,6 +59,7 @@ export const Photo = ({
 			return
 		}
 
+		// items must be the isPhotoGridItem-filtered grid; the store's photos branch does not re-filter.
 		useDrivePreviewStore.getState().open({
 			initialItem: {
 				type: "drive",
@@ -88,6 +88,7 @@ export const Photo = ({
 				item={info.item}
 				drivePath={drivePath}
 				isStoredOffline={isStoredOffline}
+				isSelected={isSelected}
 			>
 				<View style={viewStyle}>
 					<PressableOpacity

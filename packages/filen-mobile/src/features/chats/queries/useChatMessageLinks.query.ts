@@ -2,7 +2,6 @@ import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/r
 import auth from "@/lib/auth"
 import { parseFilenPublicLink, run } from "@filen/shared"
 import { getPreviewType } from "@/lib/previewType"
-import { extractLinks } from "@/lib/linkParser"
 import { MaybeEncryptedUniffi_Tags, type DirPublicInfo, type LinkedFile } from "@filen/sdk-rs"
 import logger from "@/lib/logger"
 import { toSignalOpts } from "@/lib/signals"
@@ -26,8 +25,11 @@ export type ExternalLinkPreview = {
 
 export const BASE_QUERY_KEY = "useChatMessageLinksQuery"
 
+// URLs only, in document order with duplicates kept so results stay index-aligned. Text offsets stay
+// out of the key: the result depends on the URLs alone, so a link re-posted or shifted by an edit
+// reuses the same entry.
 export type useChatMessageLinksQueryParams = {
-	links: ReturnType<typeof extractLinks>
+	urls: string[]
 }
 
 export type LinkResult =
@@ -66,15 +68,15 @@ export async function fetchData(
 		signal?: AbortSignal
 	}
 ) {
-	if (params.links.length === 0) {
+	if (params.urls.length === 0) {
 		return []
 	}
 
 	const { authedSdkClient } = await auth.getSdkClients()
 
 	const parsed = await Promise.allSettled<LinkResult>(
-		params.links.map(async link => {
-			const filenPublicLink = parseFilenPublicLink(link.url)
+		params.urls.map(async url => {
+			const filenPublicLink = parseFilenPublicLink(url)
 
 			if (filenPublicLink) {
 				if (filenPublicLink.type === "directory") {

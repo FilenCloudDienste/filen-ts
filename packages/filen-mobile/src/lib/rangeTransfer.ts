@@ -18,7 +18,8 @@
  */
 
 /**
- * Bytes pulled per request by default. Larger than a filesystem block because every request is a
+ * pdf.js's range-request granularity: it fetches only the regions it needs, so this bounds how much
+ * each miss over-reads. Whole-file transfers use MAX_RANGE_LENGTH instead, because every request is a
  * bridge round trip with a base64 encode/decode on each side, so fewer, bigger reads win.
  */
 export const RANGE_CHUNK_SIZE = 256 * 1024
@@ -114,7 +115,7 @@ export function hasMagic(header: string, magic: string): boolean {
 }
 
 /**
- * Chars per String.fromCharCode.apply call when encoding. Applying it to a whole 2 MiB chunk blows
+ * Chars per String.fromCharCode call when encoding. Applying it to a whole 2 MiB chunk blows
  * the argument limit; a per-char loop is correct but markedly slower on both engines.
  */
 const BASE64_ENCODE_STRIDE = 8192
@@ -136,7 +137,7 @@ export function bytesToBase64(bytes: Uint8Array): string {
 	let binary = ""
 
 	for (let offset = 0; offset < bytes.length; offset += BASE64_ENCODE_STRIDE) {
-		binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(offset, offset + BASE64_ENCODE_STRIDE)))
+		binary += Reflect.apply(String.fromCharCode, null, bytes.subarray(offset, offset + BASE64_ENCODE_STRIDE))
 	}
 
 	return btoa(binary)
@@ -160,7 +161,7 @@ async function forEachChunk(
 	options: TransferOptions,
 	onChunk: (chunk: Uint8Array, offset: number) => void
 ): Promise<boolean> {
-	const { isCancelled, onProgress, chunkSize = RANGE_CHUNK_SIZE } = options
+	const { isCancelled, onProgress, chunkSize = MAX_RANGE_LENGTH } = options
 	let offset = 0
 
 	while (offset < size) {

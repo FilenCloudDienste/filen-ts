@@ -1,6 +1,6 @@
 import auth from "@/lib/auth"
 import { ensureDotFilenSubdirectory } from "@/lib/dotFilenDirectory"
-import { type ChatMessagePartial, ChatTypingType, type Contact, type ChatParticipant, AnyNormalDir } from "@filen/sdk-rs"
+import { type ChatMessagePartial, type ChatTypingType, type Contact, type ChatParticipant, AnyNormalDir } from "@filen/sdk-rs"
 import { type Chat, type ChatMessage } from "@/types"
 import { chatsQueryUpdate, chatsQueryFetch, chatsQueryGet, replaceChatInCache } from "@/features/chats/queries/useChats.query"
 import {
@@ -17,6 +17,7 @@ import drive from "@/features/drive/drive"
 import { unwrapFileMeta, unwrappedFileIntoDriveItem, makeDriveItemPublicLink } from "@/lib/sdkUnwrap"
 import * as FileSystem from "expo-file-system"
 import { purgeChatInflightState } from "@/features/chats/chatsInflight"
+import useChatsStore, { applyChatMessagePatch, type ChatMessagePatch } from "@/features/chats/store/useChats.store"
 import logger from "@/lib/logger"
 import { uploadQuotaRefusal } from "@/features/transfers/quota"
 import { toSignalOpts } from "@/lib/signals"
@@ -38,6 +39,18 @@ export function dropChatFromCachesDeferred(uuid: string): void {
 			updater: () => []
 		})
 	}, CHAT_CACHE_REMOVAL_DELAY_MS)
+}
+
+// Older paginated pages live outside the query, so every per-message patch has to reach both.
+export function patchChatMessage({ chatUuid, messageUuid, patch }: { chatUuid: string; messageUuid: string; patch: ChatMessagePatch }): void {
+	chatMessagesQueryUpdate({
+		params: {
+			uuid: chatUuid
+		},
+		updater: prev => applyChatMessagePatch(prev, messageUuid, patch)
+	})
+
+	useChatsStore.getState().patchOlderMessage(messageUuid, patch)
 }
 
 class Chats {
@@ -69,12 +82,6 @@ class Chats {
 		inflightId: string
 	}) {
 		const { authedSdkClient } = await auth.getSdkClients()
-
-		this.sendTyping({
-			chat,
-			type: ChatTypingType.Up,
-			signal
-		}).catch(() => {})
 
 		// sendChatMessage is the single commit boundary: once it resolves the message is
 		// irreversibly accepted server-side and carried back on the returned chat's lastMessage.
@@ -161,11 +168,10 @@ class Chats {
 
 		replaceChatInCache(chat)
 
-		chatMessagesQueryUpdate({
-			params: {
-				uuid: chat.uuid
-			},
-			updater: prev => prev.filter(m => m.inner.uuid !== message.inner.uuid)
+		patchChatMessage({
+			chatUuid: chat.uuid,
+			messageUuid: message.inner.uuid,
+			patch: "delete"
 		})
 
 		return chat
@@ -209,11 +215,12 @@ class Chats {
 				)
 		})
 
-		chatMessagesQueryUpdate({
-			params: {
-				uuid: chat.uuid
-			},
-			updater: prev => prev.map(m => (m.inner.uuid === message.inner.uuid ? withoutInflight(message) : m))
+		const edited = withoutInflight(message)
+
+		patchChatMessage({
+			chatUuid: chat.uuid,
+			messageUuid: message.inner.uuid,
+			patch: () => edited
 		})
 
 		return message
@@ -233,11 +240,12 @@ class Chats {
 			)
 		)
 
-		chatMessagesQueryUpdate({
-			params: {
-				uuid: message.chat
-			},
-			updater: prev => prev.map(m => (m.inner.uuid === message.inner.uuid ? withoutInflight(message) : m))
+		const disabled = withoutInflight(message)
+
+		patchChatMessage({
+			chatUuid: message.chat,
+			messageUuid: message.inner.uuid,
+			patch: () => disabled
 		})
 
 		return message
@@ -560,8 +568,10 @@ class Chats {
 						const links = (
 							await Promise.all(
 								items.map(async item => {
+									// The uuid was minted by this upload, so no link can exist yet.
 									const link = await drive.enablePublicLink({
-										item
+										item,
+										knownAbsent: true
 									})
 
 									if (link.type !== "file") {

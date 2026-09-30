@@ -562,7 +562,8 @@ describe("Sync (Notes)", () => {
 			expect(mockNotesSetContent).toHaveBeenCalledWith({
 				note: mockNote("note-1"),
 				content: "latest",
-				signal: expect.any(AbortSignal)
+				signal: expect.any(AbortSignal),
+				contentHash: hashNoteContent("latest")
 			})
 		})
 
@@ -2034,7 +2035,8 @@ describe("Sync (Notes)", () => {
 			expect(mockNotesSetContent).toHaveBeenCalledWith({
 				note: mockNote("note-1"),
 				content: "reconnect-content",
-				signal: expect.any(AbortSignal)
+				signal: expect.any(AbortSignal),
+				contentHash: hashNoteContent("reconnect-content")
 			})
 			// And cleaned it from the store after success.
 			expect(notesState.inflightContent["note-1"]).toBeUndefined()

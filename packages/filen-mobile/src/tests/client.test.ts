@@ -274,11 +274,11 @@ describe("queryClient default query options", () => {
 		expect(defaults.throwOnError).toBeUndefined()
 	})
 
-	it("always refetches on mount and reconnect, offline-first, with the persisted gcTime", () => {
+	it("always refetches on mount and reconnect, offline-first, never garbage-collecting", () => {
 		expect(defaults.refetchOnMount).toBe("always")
 		expect(defaults.refetchOnReconnect).toBe("always")
 		expect(defaults.networkMode).toBe("offlineFirst")
-		expect(defaults.gcTime).toBe(QUERY_CLIENT_CACHE_TIME)
+		expect(defaults.gcTime).toBe(Infinity)
 	})
 })
 

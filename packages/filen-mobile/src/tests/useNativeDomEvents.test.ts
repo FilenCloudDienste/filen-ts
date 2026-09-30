@@ -1,4 +1,6 @@
+// @vitest-environment happy-dom
 import { vi, describe, it, expect, beforeEach, afterEach } from "vitest"
+import { cleanup, renderHook } from "@testing-library/react"
 vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 
 // ─── Imports ─────────────────────────────────────────────────────────────────
@@ -7,6 +9,10 @@ import { useNativeDomEvents, type DOMRef } from "@/hooks/useDomEvents/useNativeD
 import logger from "@/lib/logger"
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function mountHook<T>(params: Parameters<typeof useNativeDomEvents<T>>[0]): ReturnType<typeof useNativeDomEvents<T>> {
+	return renderHook(() => useNativeDomEvents<T>(params)).result.current
+}
 
 function makeRef(impl?: Partial<DOMRef>): { current: DOMRef | null } {
 	return { current: impl ? ({ postMessage: vi.fn(), ...impl } as DOMRef) : null }
@@ -29,6 +35,7 @@ describe("useNativeDomEvents", () => {
 	})
 
 	afterEach(() => {
+		cleanup()
 		vi.useRealTimers()
 		vi.restoreAllMocks()
 	})
@@ -40,7 +47,7 @@ describe("useNativeDomEvents", () => {
 
 		const onMessage = vi.fn()
 		const ref = makeRef()
-		const { onDomMessage } = useNativeDomEvents<{ x: number }>({ ref, onMessage })
+		const { onDomMessage } = mountHook<{ x: number }>({ ref, onMessage })
 
 		onDomMessage(makeWebViewMessageEvent({ __filenLog: { level: "warn", message: "from webview" } }) as never)
 
@@ -53,7 +60,7 @@ describe("useNativeDomEvents", () => {
 
 		const onMessage = vi.fn()
 		const ref = makeRef()
-		const { onDomMessage } = useNativeDomEvents<{ x: number }>({ ref, onMessage })
+		const { onDomMessage } = mountHook<{ x: number }>({ ref, onMessage })
 
 		onDomMessage(makeWebViewMessageEvent({ x: 5 }) as never)
 
@@ -67,7 +74,7 @@ describe("useNativeDomEvents", () => {
 		const mockPostMsg = vi.fn()
 		const ref = makeRef({ postMessage: mockPostMsg })
 
-		const { postMessage } = useNativeDomEvents<{ value: number }>({ ref })
+		const { postMessage } = mountHook<{ value: number }>({ ref })
 
 		postMessage({ value: 42 })
 
@@ -85,7 +92,7 @@ describe("useNativeDomEvents", () => {
 		const mockPostMsg = vi.fn()
 		const ref: { current: DOMRef | null } = { current: null }
 
-		const { postMessage } = useNativeDomEvents<{ id: string }>({ ref })
+		const { postMessage } = mountHook<{ id: string }>({ ref })
 
 		postMessage({ id: "late" })
 
@@ -109,7 +116,7 @@ describe("useNativeDomEvents", () => {
 	it("postMessage resolves silently without calling ref.current.postMessage when ref stays null for 100+ iterations", async () => {
 		const ref: { current: DOMRef | null } = { current: null }
 
-		const { postMessage } = useNativeDomEvents<{ x: number }>({ ref })
+		const { postMessage } = mountHook<{ x: number }>({ ref })
 
 		postMessage({ x: 1 })
 
@@ -130,7 +137,7 @@ describe("useNativeDomEvents", () => {
 
 		const ref = makeRef({ postMessage: throwingPost })
 
-		const { postMessage } = useNativeDomEvents<{ n: number }>({ ref })
+		const { postMessage } = mountHook<{ n: number }>({ ref })
 
 		postMessage({ n: 7 })
 
@@ -145,7 +152,7 @@ describe("useNativeDomEvents", () => {
 	it("onDomMessage does not throw when params.onMessage is undefined", () => {
 		const ref = makeRef()
 
-		const { onDomMessage } = useNativeDomEvents<{ y: number }>({ ref })
+		const { onDomMessage } = mountHook<{ y: number }>({ ref })
 
 		expect(() => onDomMessage(makeWebViewMessageEvent({ y: 5 }) as never)).not.toThrow()
 	})
@@ -156,7 +163,7 @@ describe("useNativeDomEvents", () => {
 		const onMessage = vi.fn()
 		const ref = makeRef()
 
-		const { onDomMessage } = useNativeDomEvents<{ z: number }>({ ref, onMessage })
+		const { onDomMessage } = mountHook<{ z: number }>({ ref, onMessage })
 
 		expect(() => onDomMessage(makeRawWebViewMessageEvent("NOT JSON {{{") as never)).not.toThrow()
 
@@ -170,7 +177,7 @@ describe("useNativeDomEvents", () => {
 		const onMessage = vi.fn()
 		const ref = makeRef()
 
-		const { onDomMessage, postMessage } = useNativeDomEvents<{ key: string }>({ ref, onMessage })
+		const { onDomMessage, postMessage } = mountHook<{ key: string }>({ ref, onMessage })
 
 		onDomMessage(makeWebViewMessageEvent({ key: "hello" }) as never)
 
@@ -188,10 +195,42 @@ describe("useNativeDomEvents", () => {
 		})
 
 		const ref = makeRef()
-		const { onDomMessage, postMessage } = useNativeDomEvents<{ v: number }>({ ref, onMessage })
+		const { onDomMessage, postMessage } = mountHook<{ v: number }>({ ref, onMessage })
 
 		onDomMessage(makeWebViewMessageEvent({ v: 99 }) as never)
 
 		expect(capturedPm).toBe(postMessage)
+	})
+
+	// ── Identity across renders ───────────────────────────────────────────────
+
+	it("returns the same functions across re-renders so the DOM element's props stay stable", () => {
+		const ref = makeRef()
+		const { result, rerender } = renderHook(({ onMessage }) => useNativeDomEvents<{ n: number }>({ ref, onMessage }), {
+			initialProps: { onMessage: vi.fn() }
+		})
+		const first = result.current
+
+		rerender({ onMessage: vi.fn() })
+
+		expect(result.current.onDomMessage).toBe(first.onDomMessage)
+		expect(result.current.postMessage).toBe(first.postMessage)
+	})
+
+	it("delivers messages to the latest onMessage after a re-render", () => {
+		const ref = makeRef()
+		const stale = vi.fn()
+		const latest = vi.fn()
+		const { result, rerender } = renderHook(({ onMessage }) => useNativeDomEvents<{ n: number }>({ ref, onMessage }), {
+			initialProps: { onMessage: stale }
+		})
+		const { onDomMessage } = result.current
+
+		rerender({ onMessage: latest })
+
+		onDomMessage(makeWebViewMessageEvent({ n: 1 }) as never)
+
+		expect(stale).not.toHaveBeenCalled()
+		expect(latest).toHaveBeenCalledWith({ n: 1 }, result.current.postMessage)
 	})
 })

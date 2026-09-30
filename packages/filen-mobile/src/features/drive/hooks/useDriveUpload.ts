@@ -1,5 +1,5 @@
 import { type TFunction } from "i18next"
-import { run, type Result } from "@filen/shared"
+import { run, Semaphore, type Result } from "@filen/shared"
 import { AnyNormalDir } from "@filen/sdk-rs"
 import * as FileSystem from "expo-file-system"
 import { ensureDirectory } from "@/lib/fsUtils"
@@ -9,7 +9,7 @@ import DocumentScanner, {
 	ScanDocumentResponseStatus
 } from "react-native-document-scanner-plugin"
 import { normalizeFilePathForExpo } from "@/lib/paths"
-import { isConvertHeicToJpgEnabled, convertHeicToJpg } from "@/lib/imageConversion"
+import { isConvertHeicToJpgEnabled, convertHeicToJpg, isHeicFile } from "@/lib/imageConversion"
 import { withSystemPresentation } from "@/lib/systemPresentation"
 import { pickDocuments } from "@/lib/documentPicker"
 import { pickMedia, pickedAssetName, requireMediaPermissions, type MediaSource } from "@/lib/mediaPicker"
@@ -213,6 +213,9 @@ export function useDriveUpload({
 		}
 
 		const convertHeicEnabled = convertHeic && (await isConvertHeicToJpgEnabled())
+		// Android decodes each conversion to a full-resolution bitmap the moment it starts, so an unbounded
+		// fan-out holds one per picked HEIC at once. Non-HEIC assets never wait on it.
+		const conversionLimit = new Semaphore(2)
 
 		const transferResult = await run(async () => {
 			return await Promise.allSettled(
@@ -233,12 +236,16 @@ export function useDriveUpload({
 
 							const { name, mime, created, modified } = describe(asset)
 
-							const converted = await maybeConvertHeicForUpload({
-								file: assetFile,
-								name,
-								mime,
-								enabled: convertHeicEnabled
-							})
+							const convert = () =>
+								maybeConvertHeicForUpload({
+									file: assetFile,
+									name,
+									mime,
+									enabled: convertHeicEnabled
+								})
+
+							const converted =
+								convertHeicEnabled && isHeicFile(assetFile.uri) ? await conversionLimit.withPermit(convert) : await convert()
 
 							if (converted.convertedTmpFile) {
 								const convertedTmpFile = converted.convertedTmpFile

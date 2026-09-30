@@ -1,14 +1,12 @@
 import * as FileSystem from "expo-file-system"
 import { extnameOf } from "@/lib/previewType"
 import { Semaphore, run, runOrThrow, normalizeTrackTags } from "@filen/shared"
-import { DiskCache, cacheItemId, planGcCapEviction, type GcSurvivor } from "@/lib/diskCache"
+import { DiskCache, cacheItemId, gcIdleUntil, planGcCapEviction, type GcSurvivor } from "@/lib/diskCache"
 import { MUSIC_METADATA_SUPPORTED_EXTENSIONS, AUDIO_METADATA_MAX_PARSE_SIZE_BYTES, AUDIO_METADATA_MAX_CONCURRENT_PARSES } from "@/constants"
 import { serialize, deserialize } from "@/lib/serializer"
 import { atomicWrite } from "@/lib/fsAtomic"
 import fileCache from "@/lib/fileCache"
-import { parseWebStream } from "music-metadata"
 import { Image, type ImageRef } from "expo-image"
-import mimeTypes from "mime-types"
 import type { CacheItem } from "@/types"
 import { AUDIO_CACHE_PARENT_DIRECTORY } from "@/lib/storageRoots"
 import { META_FILE_SUFFIX, metaFileName } from "@/lib/metaFile"
@@ -16,6 +14,7 @@ import { CACHE_MAX_SIZE_BYTES } from "@/lib/cacheEviction"
 import { GC_AGE_MS, GC_CONCURRENCY } from "@/lib/cacheGc"
 import logger from "@/lib/logger"
 import { isFileItem } from "@/features/drive/driveSelectors"
+import { loadMimeTypes } from "@/lib/utils"
 
 export type Metadata = {
 	pictureUri?: string | null
@@ -41,6 +40,12 @@ function parseMetadata(raw: string): Metadata {
 
 function hasMetadata(m: Metadata): m is NonNullable<Metadata> {
 	return m !== null && Object.keys(m).length > 0
+}
+
+// Tags are immutable per uuid, so a parsed result only needs refetching once its cover file is gone.
+// null is not servable: get() also returns null after swallowed transient parse/IO failures, which must keep retrying.
+export function isMetadataServable(data: Metadata | undefined): boolean {
+	return !!data && (!data.pictureUri || new FileSystem.File(data.pictureUri).exists)
 }
 
 function isExpired(metadata: Metadata, now: number, ttlMs: number): boolean {
@@ -154,7 +159,6 @@ export class AudioCache extends DiskCache {
 			}
 
 			const name = item.type === "drive" ? item.data.data.decryptedMeta?.name : item.data.name
-			const mime = mimeTypes.lookup(name ?? "")
 
 			if (!name) {
 				throw new Error("Item metadata is not decrypted")
@@ -194,6 +198,14 @@ export class AudioCache extends DiskCache {
 				}
 			}
 
+			// Covers the corrupt-sidecar delete above (same synchronous run); the deferred bump covers the
+			// picture and sidecar writes (and the failure-path sidecar delete) that land after the download.
+			this.noteWrite()
+
+			defer(() => {
+				this.noteWrite()
+			})
+
 			const audioFile = await fileCache.get({
 				item,
 				signal
@@ -215,6 +227,10 @@ export class AudioCache extends DiskCache {
 						defer(() => {
 							this.parseSemaphore.release()
 						})
+
+						// Loaded on first parse: both are only needed here, and cache hits never reach it.
+						const [{ parseWebStream }, mimeTypes] = await Promise.all([import("music-metadata"), loadMimeTypes()])
+						const mime = mimeTypes.lookup(name)
 
 						const parsedMetadata = await parseWebStream(audioFile.stream(), {
 							mimeType: mime ? mime : undefined,
@@ -308,11 +324,12 @@ export class AudioCache extends DiskCache {
 		})
 	}
 
-	protected async runGc(age?: number): Promise<void> {
+	protected async runGc(age?: number): Promise<number | null> {
 		const now = Date.now()
 		const ttlMs = age ?? GC_AGE_MS
 		const entries = PARENT_DIRECTORY.list()
 		const survivors: GcSurvivor[] = []
+		let hadCandidates = false
 		// AU-09: shared cap across all three passes (created per gc run).
 		const gcSemaphore = new Semaphore(GC_CONCURRENCY)
 
@@ -356,6 +373,10 @@ export class AudioCache extends DiskCache {
 					} else {
 						// A corrupted sidecar is a deletion candidate too.
 						shouldDelete = true
+					}
+
+					if (shouldDelete) {
+						hadCandidates = true
 					}
 
 					if (!shouldDelete) {
@@ -414,6 +435,10 @@ export class AudioCache extends DiskCache {
 
 		// Pass 1.5: soft size-cap eviction over the survivors (sidecars and their pictures).
 		const { evict: capEvict, plannedCachedAt: capCachedAt } = planGcCapEviction(survivors, CACHE_MAX_SIZE_BYTES)
+
+		if (capEvict.length > 0) {
+			hadCandidates = true
+		}
 
 		await Promise.all(
 			capEvict.map(async cacheId => {
@@ -487,6 +512,8 @@ export class AudioCache extends DiskCache {
 						return
 					}
 
+					hadCandidates = true
+
 					// Block against a concurrent get() racing to write a fresh sidecar
 					// for this key. After the mutex is held, re-check the sidecar so a
 					// just-finished get() isn't undone.
@@ -508,6 +535,8 @@ export class AudioCache extends DiskCache {
 				})
 			})
 		)
+
+		return gcIdleUntil(hadCandidates, survivors, ttlMs)
 	}
 }
 

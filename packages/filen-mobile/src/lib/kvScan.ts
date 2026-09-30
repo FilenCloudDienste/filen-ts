@@ -27,6 +27,10 @@ export function prefixUpperBound(prefix: string): string {
 // (Play crash: GCBase::oom during drainJobs). Paging bounds raw-string residency to one page.
 export const KV_RESTORE_PAGE_SIZE = 256
 
+// Page size for prefixes of tiny fixed-shape rows (ledgers). Each page still yields one display frame
+// (a 0 ms timer waits for the next frame), so small rows page wider to keep those waits few.
+export const KV_SMALL_ROW_PAGE_SIZE = 4096
+
 /**
  * Visit every kv row in a prefix range in key order, one bounded page at a time, yielding a
  * macrotask between pages so young-gen collections can run between parse bursts instead of
@@ -35,7 +39,12 @@ export const KV_RESTORE_PAGE_SIZE = 256
  * caller mid-iteration (per-row isolation is the caller's policy, not this walker's).
  * Returns the number of rows visited.
  */
-export async function forEachKvRowByPrefix(db: DB, prefix: string, onRow: (key: string, value: string) => void): Promise<number> {
+export async function forEachKvRowByPrefix(
+	db: DB,
+	prefix: string,
+	onRow: (key: string, value: string) => void,
+	pageSize: number = KV_RESTORE_PAGE_SIZE
+): Promise<number> {
 	const upperBound = prefixUpperBound(prefix)
 
 	let lastKey: string | null = null
@@ -48,7 +57,7 @@ export async function forEachKvRowByPrefix(db: DB, prefix: string, onRow: (key: 
 				lastKey === null
 					? "SELECT key, value FROM kv WHERE key >= ? AND key < ? ORDER BY key LIMIT ?"
 					: "SELECT key, value FROM kv WHERE key > ? AND key < ? ORDER BY key LIMIT ?",
-				[lastKey ?? prefix, upperBound, KV_RESTORE_PAGE_SIZE]
+				[lastKey ?? prefix, upperBound, pageSize]
 			)
 		).rawRows
 
@@ -60,7 +69,7 @@ export async function forEachKvRowByPrefix(db: DB, prefix: string, onRow: (key: 
 
 		const lastRow = rows[rows.length - 1]
 
-		if (rows.length < KV_RESTORE_PAGE_SIZE || !lastRow) {
+		if (rows.length < pageSize || !lastRow) {
 			return total
 		}
 

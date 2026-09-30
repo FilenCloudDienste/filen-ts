@@ -1,7 +1,7 @@
 import { run, Semaphore } from "@filen/shared"
 import { onlineManager } from "@tanstack/react-query"
 import sqlite from "@/lib/sqlite"
-import { forEachKvRowByPrefix } from "@/lib/kvScan"
+import { forEachKvRowByPrefix, KV_SMALL_ROW_PAGE_SIZE } from "@/lib/kvScan"
 import { deserialize } from "@/lib/serializer"
 import logger from "@/lib/logger"
 import i18n from "@/lib/i18n"
@@ -9,6 +9,7 @@ import { type Note } from "@/types"
 import { fetchData as notesQueryFetch } from "@/features/notes/queries/useNotesQuery"
 import { noteContentQueryGet, noteContentQueryKey, noteContentQueryUpdate } from "@/features/notes/queries/useNoteContent.query"
 import { getContent } from "@/features/notes/notesContent"
+import { hasPendingNotePush } from "@/features/notes/pushEchoes"
 import useNotesInflightStore, {
 	type InflightContent,
 	INFLIGHT_CONTENT_SQLITE_KV_KEY,
@@ -215,7 +216,7 @@ export class NotesOffline {
 	// Shared by the socket-driven refresh AND the sync pass's fan-out, so their combined concurrency
 	// respects one bound rather than two independent ones.
 	private readonly refreshSemaphore = new Semaphore(FETCH_CONCURRENCY)
-	// Notes with a socket-driven refresh in flight, so a burst for the same note collapses.
+	// Notes with a socket-driven refresh FETCH in flight, so a burst for the same note collapses.
 	private readonly refreshing = new Set<string>()
 
 	private loaded = false
@@ -285,14 +286,19 @@ export class NotesOffline {
 			const db = await sqlite.openDb()
 			const badKeys: string[] = []
 
-			await forEachKvRowByPrefix(db, MARKED_PREFIX, (rowKey, value) => {
-				// One corrupt row must not cost the user every other mark — drop just that row.
-				try {
-					scanned.set(rowKey.slice(MARKED_PREFIX.length), deserialize(value) as NoteOfflineEntry)
-				} catch {
-					badKeys.push(rowKey)
-				}
-			})
+			await forEachKvRowByPrefix(
+				db,
+				MARKED_PREFIX,
+				(rowKey, value) => {
+					// One corrupt row must not cost the user every other mark — drop just that row.
+					try {
+						scanned.set(rowKey.slice(MARKED_PREFIX.length), deserialize(value) as NoteOfflineEntry)
+					} catch {
+						badKeys.push(rowKey)
+					}
+				},
+				KV_SMALL_ROW_PAGE_SIZE
+			)
 
 			if (badKeys.length > 0) {
 				logger.warn("notes-offline", "Dropping corrupt offline ledger rows", { count: badKeys.length })
@@ -669,9 +675,14 @@ export class NotesOffline {
 				const db = await sqlite.openDb()
 				const pending: string[] = []
 
-				await forEachKvRowByPrefix(db, PENDING_EVICTION_PREFIX, rowKey => {
-					pending.push(rowKey.slice(PENDING_EVICTION_PREFIX.length))
-				})
+				await forEachKvRowByPrefix(
+					db,
+					PENDING_EVICTION_PREFIX,
+					rowKey => {
+						pending.push(rowKey.slice(PENDING_EVICTION_PREFIX.length))
+					},
+					KV_SMALL_ROW_PAGE_SIZE
+				)
 
 				if (pending.length === 0) {
 					return
@@ -752,9 +763,15 @@ export class NotesOffline {
 	 * currently on screen is deliberately excluded (see isNoteScreenOpen) — that one gets the reload
 	 * prompt instead, so the user decides when their editor is replaced.
 	 *
+	 * `content` is the event's own body, already decrypted by the SDK with the same NoteContent decrypt
+	 * getContent uses, so it is committed without a download. Only an event without one (undecryptable
+	 * or empty) re-fetches, as does one arriving while a push of this note still awaits its echo: a
+	 * foreign edit delivered after our push landed would otherwise replace our newer body with its
+	 * older one.
+	 *
 	 * Never throws: this runs from the socket dispatcher.
 	 */
-	public async refreshAfterRemoteEdit({ note }: { note: Note }): Promise<void> {
+	public async refreshAfterRemoteEdit({ note, content }: { note: Note; content?: string }): Promise<void> {
 		// Captured before any await — cancel() installs a FRESH controller, so reading it later would
 		// hand a refresh that started before a cancel the next controller's un-aborted signal.
 		const signal = this.abortController.signal
@@ -763,26 +780,32 @@ export class NotesOffline {
 			return
 		}
 
-		// Collapse a burst for the SAME note. Another device's editor pushes on a 3s debounce
-		// (components/sync), so a collaborator typing in a shared note emits a ContentEdited every few
-		// seconds — and every one of them lands a full body download here. The semaphore bounds
-		// concurrency, not volume: ten minutes of co-editing is ~200 downloads for a note the user may
-		// never have marked and is not looking at. One in-flight refresh per note; an event arriving
-		// during that fetch is dropped rather than queued, so a marked note converges via its ledger
-		// stamp on the next pass and an unmarked-but-cached one stays one edit stale until it is
-		// opened or edited again.
-		if (this.refreshing.has(note.uuid)) {
-			return
+		const eventBody = typeof content === "string" && !hasPendingNotePush(note.uuid) ? content : undefined
+		const fetches = typeof eventBody !== "string"
+
+		if (fetches) {
+			// Collapse a burst for the SAME note. Another device's editor pushes on a 3s debounce
+			// (components/sync), so a collaborator typing in a shared note emits a ContentEdited every few
+			// seconds, and every one that cannot use its own body lands a full download here. The semaphore
+			// bounds concurrency, not volume. One in-flight fetch per note; an event arriving during that
+			// fetch is dropped rather than queued, so a marked note converges via its ledger stamp on the
+			// next pass and an unmarked-but-cached one stays one edit stale until it is opened or edited
+			// again. The event-body path needs no latch: it never waits between reading and committing.
+			if (this.refreshing.has(note.uuid)) {
+				return
+			}
+
+			// Latched HERE, before the first await, so the guard covers the whole operation. Adding it
+			// after `load()` left a window in which a burst slipped past and every event still fetched.
+			this.refreshing.add(note.uuid)
 		}
 
-		// Latched HERE, before the first await, so the guard covers the whole operation. Adding it
-		// after `load()` left a window in which a burst slipped past and every event still fetched.
-		this.refreshing.add(note.uuid)
-
 		const result = await run(async defer => {
-			defer(() => {
-				this.refreshing.delete(note.uuid)
-			})
+			if (fetches) {
+				defer(() => {
+					this.refreshing.delete(note.uuid)
+				})
+			}
 
 			await this.load()
 
@@ -796,6 +819,18 @@ export class NotesOffline {
 				// The ledger still carries the pre-edit stamp, so the next pass refetches. For an
 				// unmarked-but-cached note the stale body simply persists until it is opened online —
 				// unchanged from before this refresh existed.
+				return
+			}
+
+			if (typeof eventBody === "string") {
+				if (signal.aborted || this.locked) {
+					return
+				}
+
+				// No await between reading the cached body and committing, so events commit in socket order
+				// and the last one wins.
+				await this.commitRemoteEdit({ note, content: eventBody, observedBody: noteContentQueryGet({ uuid: note.uuid }) })
+
 				return
 			}
 
@@ -813,7 +848,7 @@ export class NotesOffline {
 			}
 
 			const observedBody = noteContentQueryGet({ uuid: note.uuid })
-			const content = await getContent({ note, signal })
+			const fetched = await getContent({ note, signal })
 
 			// Re-checked after the round trip, not only before it. Without this, an un-mark landing
 			// mid-fetch is undone: the body is written back with no ledger row to account for it, and
@@ -827,7 +862,7 @@ export class NotesOffline {
 			}
 
 			// Undecryptable body — leave whatever we hold rather than replacing it with a blank.
-			if (!isCacheableBody(content)) {
+			if (!isCacheableBody(fetched)) {
 				logger.warn("notes-offline", "Remote-edit refresh returned an undecryptable body; keeping the existing copy", {
 					noteUuid: note.uuid
 				})
@@ -835,21 +870,7 @@ export class NotesOffline {
 				return
 			}
 
-			if (!this.commitContent({ uuid: note.uuid, content, observedBody })) {
-				return
-			}
-
-			if (this.marked.has(note.uuid)) {
-				await this.writeEntry(
-					note.uuid,
-					{
-						editedTimestamp: noteEditedStamp(note)
-					},
-					{
-						requireExisting: true
-					}
-				)
-			}
+			await this.commitRemoteEdit({ note, content: fetched, observedBody })
 		})
 
 		if (!result.success && !signal.aborted) {
@@ -857,6 +878,34 @@ export class NotesOffline {
 				noteUuid: note.uuid,
 				error: result.error
 			})
+		}
+	}
+
+	// Commits a remote edit's body (synchronously, before the first await) and stamps a marked note's
+	// ledger with that edit.
+	private async commitRemoteEdit({
+		note,
+		content,
+		observedBody
+	}: {
+		note: Note
+		content: string
+		observedBody: string | undefined
+	}): Promise<void> {
+		if (!this.commitContent({ uuid: note.uuid, content, observedBody })) {
+			return
+		}
+
+		if (this.marked.has(note.uuid)) {
+			await this.writeEntry(
+				note.uuid,
+				{
+					editedTimestamp: noteEditedStamp(note)
+				},
+				{
+					requireExisting: true
+				}
+			)
 		}
 	}
 

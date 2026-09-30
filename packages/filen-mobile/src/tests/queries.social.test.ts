@@ -64,18 +64,6 @@ vi.mock("@filen/sdk-rs", () => ({
 
 vi.mock("@/lib/utils", () => ({}))
 
-// safeParseUrl runs the REAL implementation via the @/lib/linkParser mock, so the SSRF blocklist
-// (the full fc00::/7 ULA range etc.) is exercised faithfully and can never drift from @/constants
-// PRIVATE_HOST.
-vi.mock("@/lib/linkParser", async () => {
-	const actual = await vi.importActual<typeof import("@/lib/linkParser")>("@/lib/linkParser")
-
-	return {
-		safeParseUrl: actual.safeParseUrl,
-		extractLinks: vi.fn()
-	}
-})
-
 // ---------------------------------------------------------------------------
 // Imports under test (placed AFTER all vi.mock() calls)
 // ---------------------------------------------------------------------------
@@ -99,8 +87,8 @@ describe("fetchData (useChatMessageLinks)", () => {
 		mockAuthedSdkClient.getLinkedFile.mockReset()
 	})
 
-	it("returns [] immediately for empty links array without calling getSdkClients", async () => {
-		const result = await fetchChatMessageLinks({ links: [] })
+	it("returns [] immediately for empty urls array without calling getSdkClients", async () => {
+		const result = await fetchChatMessageLinks({ urls: [] })
 
 		expect(result).toEqual([])
 		expect(mockGetSdkClients).not.toHaveBeenCalled()
@@ -116,7 +104,7 @@ describe("fetchData (useChatMessageLinks)", () => {
 		mockParseFilenPublicLink.mockReturnValue(null)
 
 		const result = await fetchChatMessageLinks({
-			links: [{ url: "https://example.com/photo.jpg", start: 0, end: 35 }]
+			urls: ["https://example.com/photo.jpg"]
 		})
 
 		expect(fetchSpy).not.toHaveBeenCalled()
@@ -133,9 +121,9 @@ describe("fetchData (useChatMessageLinks)", () => {
 		mockParseFilenPublicLink.mockReturnValue(null)
 
 		const result = await fetchChatMessageLinks({
-			links: [
-				{ url: "https://example.com/img.jpg", start: 0, end: 30 },
-				{ url: "https://tracker.example/beacon.png", start: 31, end: 70 }
+			urls: [
+				"https://example.com/img.jpg",
+				"https://tracker.example/beacon.png"
 			]
 		})
 
@@ -154,7 +142,7 @@ describe("fetchData (useChatMessageLinks)", () => {
 		mockAuthedSdkClient.getDirPublicLinkInfo.mockResolvedValue(dirInfo)
 
 		const result = await fetchChatMessageLinks({
-			links: [{ url: "https://app.filen.io/#/f/dir-uuid#dir-key", start: 0, end: 40 }]
+			urls: ["https://app.filen.io/#/f/dir-uuid#dir-key"]
 		})
 
 		expect(result).toHaveLength(1)
@@ -171,7 +159,7 @@ describe("fetchData (useChatMessageLinks)", () => {
 		mockAuthedSdkClient.getDirPublicLinkInfo.mockRejectedValue(new Error("not found"))
 
 		const result = await fetchChatMessageLinks({
-			links: [{ url: "https://app.filen.io/#/f/dir-uuid#dir-key", start: 0, end: 40 }]
+			urls: ["https://app.filen.io/#/f/dir-uuid#dir-key"]
 		})
 
 		expect(result).toHaveLength(1)
@@ -188,7 +176,7 @@ describe("fetchData (useChatMessageLinks)", () => {
 		})
 
 		const result = await fetchChatMessageLinks({
-			links: [{ url: "https://app.filen.io/#/d/file-uuid#file-key", start: 0, end: 40 }]
+			urls: ["https://app.filen.io/#/d/file-uuid#file-key"]
 		})
 
 		expect(result).toHaveLength(1)
@@ -205,7 +193,7 @@ describe("fetchData (useChatMessageLinks)", () => {
 		})
 
 		const result = await fetchChatMessageLinks({
-			links: [{ url: "https://app.filen.io/#/d/file-uuid#file-key", start: 0, end: 40 }]
+			urls: ["https://app.filen.io/#/d/file-uuid#file-key"]
 		})
 
 		expect(result).toHaveLength(1)
@@ -224,7 +212,7 @@ describe("fetchData (useChatMessageLinks)", () => {
 		})
 
 		const result = await fetchChatMessageLinks({
-			links: [{ url: "https://app.filen.io/#/d/file-uuid#file-key", start: 0, end: 40 }]
+			urls: ["https://app.filen.io/#/d/file-uuid#file-key"]
 		})
 
 		expect(result).toHaveLength(1)
@@ -564,10 +552,8 @@ describe("fetchData (useChats)", () => {
 // ---------------------------------------------------------------------------
 // safeParseUrl — real implementation (finding #174)
 //
-// @/lib/linkParser is mocked above to feed the useChatMessageLinks tests,
-// so we reach the real safeParseUrl via vi.importActual.  These tests lock
-// in the SSRF-filtering contract that the inline copy in the mock tries to
-// approximate but could silently diverge from.
+// Loaded via vi.importActual so the real SSRF blocklist (the full fc00::/7
+// ULA range etc.) is exercised and can never drift from @/constants PRIVATE_HOST.
 // ---------------------------------------------------------------------------
 
 describe("safeParseUrl (real implementation — SSRF guard)", () => {

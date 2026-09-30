@@ -688,6 +688,42 @@ function invalidateListingActive(queryKey: unknown[], message: string): void {
 		})
 }
 
+// Whether the cache already holds the uuid under this item's type, with every derived view that
+// re-caching the row would write.
+function isCachedAsType(item: DriveItem, offlineListing: boolean): boolean {
+	const cached = cache.uuidToAnyDriveItem.get(item.data.uuid)
+
+	if (cached === undefined || cached.type !== item.type) {
+		return false
+	}
+
+	if (offlineListing) {
+		return true
+	}
+
+	switch (item.type) {
+		case "file": {
+			return cache.fileUuidToNormalFile.has(item.data.uuid)
+		}
+
+		case "directory": {
+			return cache.directoryUuidToAnyNormalDir.has(item.data.uuid)
+		}
+
+		case "sharedDirectory": {
+			return !item.data.sharingRole || cache.directoryUuidToAnySharedDirWithContext.has(item.data.uuid)
+		}
+
+		case "sharedRootDirectory": {
+			return cache.directoryUuidToAnySharedDirWithContext.has(item.data.uuid)
+		}
+
+		default: {
+			return true
+		}
+	}
+}
+
 function updateListing(
 	params: UseDriveItemsQueryParams,
 	updater: QueryUpdater<Awaited<ReturnType<typeof fetchData>>>,
@@ -713,21 +749,46 @@ function updateListing(
 		return
 	}
 
-	// Keep the caches in sync with the optimistic listing update — the notes/chats pattern, but
-	// richer: a DriveItem carries its SDK type (item.data) and a type discriminator, so cacheDriveItem
-	// derives EVERY cache the item's type allows (uuid→item + the type-specific dir/file caches) in one
-	// place, shared with fetchData via the same cacheNew* helpers. Context-only extras (the sharedOut
-	// normal-view, linked meta) stay with fetchData — see cacheDriveItem.
-	// Offline listings keep reference-only parity with fetchData/warm-seed — their items are
-	// index copies that must not overwrite fresher fetch-derived dir views.
-	// Runs over every item, before the cache write, exactly as it did inside the updater: it is the one
-	// place that keeps the uuid caches coherent with an optimistic listing, and skipping it would rest
-	// on an assumption about who populated them first. A bulk upsert whose caller cached its own delta
-	// skips it — the rest of the listing was cached when it got there.
+	// Keep the caches in sync with the optimistic listing update: rows the write introduced are cached
+	// exactly as fetchData caches them (cacheDriveItem derives every cache the item's type allows).
+	// An unchanged row is re-cached only when the cache lacks it or a view it derives (forgetItem, e.g.
+	// removeShare on an item still listed here, or a uuid-only reference from another listing) or holds it
+	// under another item type (e.g. a sharedOut write). Otherwise it can be older than the cache entry,
+	// because moves patch only parent listings, and would roll it back.
+	// Offline listings stay reference-only: their items are index copies that must not overwrite fresher
+	// fetch-derived dir views. A bulk upsert whose caller cached its own delta skips all of it.
 	if (cacheNext) {
 		const offlineListing = params.path.type === "offline"
+		const min = Math.min(next.length, currentData.length)
+		let prefix = 0
 
-		for (const item of next) {
+		// Rows before the first mismatch are the references the listing already held.
+		while (prefix < min && next[prefix] === currentData[prefix]) {
+			prefix++
+		}
+
+		// The rest of the old listing, built only when a filter or map broke the prefix.
+		let kept: Set<DriveItem> | undefined = undefined
+
+		if (prefix < currentData.length && prefix < next.length) {
+			kept = new Set<DriveItem>()
+
+			for (let i = prefix; i < currentData.length; i++) {
+				const item = currentData[i]
+
+				if (item !== undefined) {
+					kept.add(item)
+				}
+			}
+		}
+
+		for (let i = 0; i < next.length; i++) {
+			const item = next[i]
+
+			if (item === undefined || ((i < prefix || kept?.has(item)) && isCachedAsType(item, offlineListing))) {
+				continue
+			}
+
 			if (offlineListing) {
 				cache.cacheDriveItemReference(item)
 			} else {

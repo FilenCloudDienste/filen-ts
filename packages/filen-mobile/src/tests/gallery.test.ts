@@ -118,6 +118,7 @@ vi.mock("zustand/shallow", async () => await import("@/tests/mocks/zustandShallo
 // ─── Actual import ───────────────────────────────────────────────────────────
 
 import { galleryItemKey, type GalleryItemTagged } from "@/components/drivePreview/gallery"
+import { compileWithReactCompiler, compilerFailures, memoDependencies, memoSlotsOf } from "@/tests/compileWithReactCompiler"
 
 // ─── #81: galleryItemKey type-discriminated key builder ──────────────────────
 
@@ -174,5 +175,27 @@ describe("galleryItemKey", () => {
 		}
 
 		expect(galleryItemKey(item)).toBe(url)
+	})
+})
+
+// The gallery re-renders on every pager and zoom change; an unmemoized callback here rebuilds the dismiss gesture and
+// hands FlashList a new renderItem, re-rendering every mounted page.
+describe("the compiled Gallery", () => {
+	const { events, code } = compileWithReactCompiler("components/drivePreview/gallery.tsx")
+
+	it("compiles Gallery", () => {
+		expect(compilerFailures(events)).toEqual([])
+		expect(memoSlotsOf(events, null)).toBeGreaterThan(0)
+	})
+
+	// useDismissGesture is hook-named so its callback arguments stay frozen, and onPinchActiveChange reads the shared
+	// value and the anchor ref only when it runs.
+	it.each([
+		["goBack", /var goBack=(t\d+);/, ["didNavigateBack", "isDismissing"]],
+		["goBackFromGestureDismiss", /var goBackFromGestureDismiss=(t\d+);/, ["didNavigateBack", "isDismissing", "navigation"]],
+		["onPinchActiveChange", /var onPinchActiveChange=(t\d+);/, ["width", "zoomScale"]],
+		["renderItem", /renderItem:(t\d+),/, ["goBackFromGestureDismiss", "onPinchActiveChange", "onSingleTap", "zoomScale"]]
+	])("memoizes %s on its stable inputs", (_name, binding, dependencies) => {
+		expect(memoDependencies(code, binding)).toEqual(dependencies)
 	})
 })

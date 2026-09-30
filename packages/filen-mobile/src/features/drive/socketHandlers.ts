@@ -24,6 +24,7 @@ import {
 } from "@/features/drive/clipboardFollow"
 import logger from "@/lib/logger"
 import events from "@/lib/events"
+import { clearDotFilenDirectoryMemo } from "@/lib/dotFilenDirectory"
 
 export type DriveSocketEvent = Extract<SocketEvent, { tag: typeof SocketEvent_Tags.Drive }>
 
@@ -39,9 +40,21 @@ const SIZE_NEUTRAL_TAGS = new Set<DriveEvent_Tags>([
 // Applied in batches per parent (socketCreateBatcher), which also marks sizes stale once per batch.
 const BATCHED_CREATE_TAGS = new Set<DriveEvent_Tags>([DriveEvent_Tags.FileNew, DriveEvent_Tags.FolderSubCreated])
 
+// Any of these may change which directory a fresh listing of the root or ".filen" returns.
+const FOLDER_STRUCTURE_TAGS = new Set<DriveEvent_Tags>([
+	DriveEvent_Tags.FolderTrash,
+	DriveEvent_Tags.FolderMove,
+	DriveEvent_Tags.FolderMetadataChanged,
+	DriveEvent_Tags.FolderDeletedPermanent,
+	DriveEvent_Tags.FolderRestore,
+	DriveEvent_Tags.FolderSubCreated,
+	DriveEvent_Tags.DeleteAll
+])
+
 // A drive event the SDK couldn't read (SocketEvent_Tags.DriveMalformed): some change happened that no
 // listing got, so every listing reads again on its next mount.
 export function handleDriveMalformedEvent(): void {
+	clearDotFilenDirectoryMemo()
 	driveItemsQueryMarkAllStale()
 	// An open editor, too, can no longer take its file for current: its next save checks.
 	events.emit("driveChangesMissed")
@@ -101,6 +114,10 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 	// narrows to `never` in the default branch, which is kept only as runtime defense against a
 	// future SDK tag the pinned bindings don't yet know about.
 	const eventTag = eventInner.inner.tag
+
+	if (FOLDER_STRUCTURE_TAGS.has(eventTag)) {
+		clearDotFilenDirectoryMemo()
+	}
 
 	if (!BATCHED_CREATE_TAGS.has(eventTag)) {
 		// Queued creates land first, so nothing this event removes, moves or edits is re-added after it.

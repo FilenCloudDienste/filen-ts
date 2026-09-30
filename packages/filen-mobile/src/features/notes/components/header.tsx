@@ -53,12 +53,13 @@ export const Header = ({
 
 	// A failed refetch keeps the data and only flips `status` (#103).
 	const liveNotes = notesQuery.data ?? []
-	const liveByUuid = new Map(liveNotes.map(note => [note.uuid, note]))
+	// Built only with a selection: notes data changes on every push and note socket event.
+	const liveByUuid = selectedNotes.length > 0 ? new Map(liveNotes.map(note => [note.uuid, note])) : undefined
 	// Drop stale-snapshot entries rather than falling back to them (#42): if the note is
 	// no longer in the live query result it has been deleted and must not influence flags
 	// or bulk ops — returning the stale object keeps a ghost in the aggregation.
 	const selectedNotesLive = selectedNotes.flatMap(sel => {
-		const live = liveByUuid.get(sel.uuid)
+		const live = liveByUuid?.get(sel.uuid)
 
 		return live ? [live] : []
 	})

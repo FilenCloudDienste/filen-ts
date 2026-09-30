@@ -155,10 +155,12 @@ export function buildExportButton({ item, id, t }: { item: DriveItem; id: string
 				return
 			}
 
+			const mimeType = await resolveMimeType({ mime: item.data.decryptedMeta?.mime, name: result.data.name })
+
 			const shareResult = await shareTmpFile({
 				uri: result.data.uri,
 				name: result.data.name,
-				mimeType: resolveMimeType({ mime: item.data.decryptedMeta?.mime, name: result.data.name }),
+				mimeType,
 				cleanup: () => {
 					if (result.data && result.data.parentDirectory.exists) {
 						result.data.parentDirectory.delete()
@@ -221,16 +223,15 @@ export function buildOpenWithButton({ item, id, t }: { item: DriveItem; id: stri
 			// the file:// scheme). filen-tmp/ lives under the app cache dir, which blob-util's FileProvider
 			// cache-path root covers.
 			const openResult = await run(async () => {
+				const mimeType = await resolveMimeType({ mime: item.data.decryptedMeta?.mime, name: destination.name })
+
 				// No chooserTitle argument on purpose: passing one makes blob-util wrap the intent in
 				// Intent.createChooser(), which returns a fresh ACTION_CHOOSER intent WITHOUT the
 				// FLAG_ACTIVITY_NEW_TASK that the underlying ACTION_VIEW intent carries — startActivity()
 				// from our (non-Activity) app context then throws. Omitting it keeps the flagged VIEW intent;
 				// Android still shows its own "Open with" picker when more than one app can handle the type.
 				await withSystemPresentation(() =>
-					ReactNativeBlobUtil.default.android.actionViewIntent(
-						normalizeFilePathForSdk(destination.uri),
-						resolveMimeType({ mime: item.data.decryptedMeta?.mime, name: destination.name })
-					)
+					ReactNativeBlobUtil.default.android.actionViewIntent(normalizeFilePathForSdk(destination.uri), mimeType)
 				)
 			})
 

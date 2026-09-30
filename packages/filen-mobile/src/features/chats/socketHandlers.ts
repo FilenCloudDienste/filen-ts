@@ -1,11 +1,11 @@
 import { ChatEvent_Tags, ChatTypingType, MaybeEncryptedUniffi_Tags, SocketEvent_Tags, type SocketEvent } from "@filen/sdk-rs"
-import useChatsStore, { type Typing } from "@/features/chats/store/useChats.store"
+import useChatsStore, { olderMessagesChatUuid, type ChatMessageWithInflightId, type Typing } from "@/features/chats/store/useChats.store"
 import { chatMessagesQueryUpdate, chatMessagesQueryGet } from "@/features/chats/queries/useChatMessages.query"
 import { chatsQueryGet, chatsQueryUpdate, replaceChatInCache } from "@/features/chats/queries/useChats.query"
 import { wrapChat, wrapQueryMessage, NO_INFLIGHT_ID } from "@/features/chats/chatsWrap"
 import events from "@/lib/events"
 import { purgeChatInflightState } from "@/features/chats/chatsInflight"
-import { dropChatFromCachesDeferred } from "@/features/chats/chats"
+import { dropChatFromCachesDeferred, patchChatMessage } from "@/features/chats/chats"
 import logger from "@/lib/logger"
 import auth from "@/lib/auth"
 import { newestMessage } from "@filen/shared"
@@ -94,6 +94,13 @@ export async function handleChatEvent({ event }: { event: ChatSocketEvent }): Pr
 							useChatsStore.getState().setTyping(prev => withoutTypingSender(prev, inner.chat, inner.senderId))
 						}, 10000)
 
+						const current = prev[inner.chat]
+
+						// Already the last typer: keeping the array identity spares the useShallow readers a re-render per keystroke.
+						if (current !== undefined && current[current.length - 1]?.senderId === inner.senderId) {
+							return prev
+						}
+
 						return {
 							...prev,
 							[inner.chat]: [...(prev[inner.chat] ?? []).filter(t => t.senderId !== inner.senderId), inner]
@@ -118,41 +125,54 @@ export async function handleChatEvent({ event }: { event: ChatSocketEvent }): Pr
 
 			setTimeout(
 				() => {
-					chatMessagesQueryUpdate({
-						params: {
-							uuid: inner.msg.chat
-						},
-						// Dedupe by server uuid: if the message is already present (e.g. chats.sendMessage already
-						// reconciled the optimistic in-flight copy into the cache for our own message), leave it
-						// untouched instead of removing and re-appending it, which would cause a brief duplicate.
-						updater: prev => {
-							if (prev.some(m => m.inner.uuid === inner.msg.inner.uuid)) {
-								return prev
-							}
+					// The own echo usually lands after chats.sendMessage already reconciled the committed message;
+					// skipping the no-op update spares a full persist of the messages array.
+					const alreadyCached =
+						userId === inner.msg.inner.senderId &&
+						chatMessagesQueryGet({ uuid: inner.msg.chat })?.some(m => m.inner.uuid === inner.msg.inner.uuid) === true
 
-							const committed = wrapQueryMessage(inner.msg)
-
-							// Slow own send (longer than the 3s self-delay): the optimistic copy still
-							// carries its inflight uuid, invisible to the server-uuid dedupe above — swap
-							// the first matching in-flight copy (same sender + content) for the committed
-							// message instead of appending a duplicate. sendMessage's post-commit
-							// reconcile later drops either shape idempotently.
-							if (userId === inner.msg.inner.senderId) {
-								const inflightIndex = prev.findIndex(
-									m => m.inflightId !== NO_INFLIGHT_ID && m.inner.senderId === userId && m.inner.message === inner.msg.inner.message
-								)
-
-								if (inflightIndex !== -1) {
-									return prev.map((m, index) => (index === inflightIndex ? committed : m))
+					if (!alreadyCached) {
+						chatMessagesQueryUpdate({
+							params: {
+								uuid: inner.msg.chat
+							},
+							// Dedupe by server uuid: if the message is already present (e.g. chats.sendMessage already
+							// reconciled the optimistic in-flight copy into the cache for our own message), leave it
+							// untouched instead of removing and re-appending it, which would cause a brief duplicate.
+							updater: prev => {
+								if (prev.some(m => m.inner.uuid === inner.msg.inner.uuid)) {
+									return prev
 								}
-							}
 
-							return [...prev, committed]
-						}
-					})
+								const committed = wrapQueryMessage(inner.msg)
+
+								// Slow own send (longer than the 3s self-delay): the optimistic copy still
+								// carries its inflight uuid, invisible to the server-uuid dedupe above — swap
+								// the first matching in-flight copy (same sender + content) for the committed
+								// message instead of appending a duplicate. sendMessage's post-commit
+								// reconcile later drops either shape idempotently.
+								if (userId === inner.msg.inner.senderId) {
+									const inflightIndex = prev.findIndex(
+										m => m.inflightId !== NO_INFLIGHT_ID && m.inner.senderId === userId && m.inner.message === inner.msg.inner.message
+									)
+
+									if (inflightIndex !== -1) {
+										return prev.map((m, index) => (index === inflightIndex ? committed : m))
+									}
+								}
+
+								return [...prev, committed]
+							}
+						})
+					}
 
 					// Update messages query first, then chats query to ensure our unread count logic works correctly
 					setTimeout(() => {
+						// Same uuid: the preview already holds this message, so skip the full chats-list persist.
+						if (chatsQueryGet()?.find(c => c.uuid === inner.msg.chat)?.lastMessage?.inner.uuid === inner.msg.inner.uuid) {
+							return
+						}
+
 						chatsQueryUpdate({
 							updater: prev =>
 								prev.map(c =>
@@ -211,24 +231,18 @@ export async function handleChatEvent({ event }: { event: ChatSocketEvent }): Pr
 				case MaybeEncryptedUniffi_Tags.Decrypted: {
 					const [newContent] = inner.newContent.inner
 
-					chatMessagesQueryUpdate({
-						params: {
-							uuid: inner.chat
-						},
-						updater: prev =>
-							prev.map(m =>
-								m.inner.uuid === inner.uuid
-									? {
-											...m,
-											edited: true,
-											editedTimestamp: inner.editedTimestamp,
-											inner: {
-												...m.inner,
-												message: newContent
-											}
-										}
-									: m
-							)
+					patchChatMessage({
+						chatUuid: inner.chat,
+						messageUuid: inner.uuid,
+						patch: m => ({
+							...m,
+							edited: true,
+							editedTimestamp: inner.editedTimestamp,
+							inner: {
+								...m.inner,
+								message: newContent
+							}
+						})
 					})
 
 					// If the edited message is the chat's lastMessage, the chats-list preview reads it from the
@@ -273,16 +287,22 @@ export async function handleChatEvent({ event }: { event: ChatSocketEvent }): Pr
 			const chat = findChatByMessageUuid(inner.uuid)
 
 			if (!chat) {
-				logger.warn("chats", "MessageDelete: message not found in cache", { msgUuid: inner.uuid })
+				// Only an open screen's older pages hold it; the query and chat preview never did.
+				if (olderMessagesChatUuid(useChatsStore.getState().olderMessages, inner.uuid) === undefined) {
+					logger.warn("chats", "MessageDelete: message not found in cache", { msgUuid: inner.uuid })
+
+					break
+				}
+
+				useChatsStore.getState().patchOlderMessage(inner.uuid, "delete")
 
 				break
 			}
 
-			chatMessagesQueryUpdate({
-				params: {
-					uuid: chat.uuid
-				},
-				updater: prev => prev.filter(m => m.inner.uuid !== inner.uuid)
+			patchChatMessage({
+				chatUuid: chat.uuid,
+				messageUuid: inner.uuid,
+				patch: "delete"
 			})
 
 			// If the deleted message was the chat's lastMessage, the chats-list preview (a SEPARATE query)
@@ -305,25 +325,24 @@ export async function handleChatEvent({ event }: { event: ChatSocketEvent }): Pr
 		case ChatEvent_Tags.MessageEmbedDisabled: {
 			const [inner] = eventInner.inner.inner
 
+			const patch = (m: ChatMessageWithInflightId): ChatMessageWithInflightId => ({
+				...m,
+				embedDisabled: true
+			})
+
 			const chat = findChatByMessageUuid(inner.uuid)
 
 			if (!chat) {
+				// Only an open screen's older pages can still hold it.
+				useChatsStore.getState().patchOlderMessage(inner.uuid, patch)
+
 				break
 			}
 
-			chatMessagesQueryUpdate({
-				params: {
-					uuid: chat.uuid
-				},
-				updater: prev =>
-					prev.map(m =>
-						m.inner.uuid === inner.uuid
-							? {
-									...m,
-									embedDisabled: true
-								}
-							: m
-					)
+			patchChatMessage({
+				chatUuid: chat.uuid,
+				messageUuid: inner.uuid,
+				patch
 			})
 
 			break

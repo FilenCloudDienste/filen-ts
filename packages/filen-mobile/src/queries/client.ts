@@ -21,7 +21,7 @@ import { trackServerReads } from "@/queries/socketSession"
 // migration; restoreQueries prunes the abandoned range.
 export const VERSION = 2
 export const QUERY_CLIENT_PERSISTER_PREFIX = `reactQuery_v${VERSION}`
-// 365 days. Drives gcTime + the persister maxAge + the boot restore-drop (an entry is evicted at
+// 365 days. Drives the persister maxAge + the boot restore-drop (an entry is evicted at
 // restore when dataUpdatedAt + this < now). dataUpdatedAt = last online view OR optimistic touch
 // (staleTime:0 + refetchOnMount:"always" restamp it every online view, and queryUpdater.set restamps
 // it on every optimistic/socket update; networkMode:"offlineFirst" freezes it while offline), so this
@@ -897,7 +897,9 @@ export const queryClient = new QueryClient({
 		queries: {
 			refetchOnMount: "always",
 			refetchOnReconnect: "always",
-			gcTime: QUERY_CLIENT_CACHE_TIME,
+			// Infinity, not QUERY_CLIENT_CACHE_TIME: any finite gcTime arms a native timer per unobserved
+			// query (thousands once restored) that never fires in a real session anyway.
+			gcTime: Infinity,
 			// NO JS-level retries — the Rust SDK owns retrying (CLAUDE.md: "Never add retry logic in JS").
 			// Every SDK request already runs behind filen-rs' tower retry stack (auth/http/retry.rs): up to
 			// 10 retries per request, rate-limited by a shared TpsBudget, and CLASSIFIED — only transient

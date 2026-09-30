@@ -1,7 +1,6 @@
-import { ChatTypingType } from "@filen/sdk-rs"
 import { useTranslation } from "react-i18next"
 import { type Chat } from "@/types"
-import { useRef, useEffect, Fragment, useCallback } from "react"
+import { useRef, useEffect, Fragment } from "react"
 import { TextInput, useWindowDimensions, type TextInputSelectionChangeEvent, type ScaledSize } from "react-native"
 import View, { KeyboardStickyView, CrossGlassContainerView } from "@/components/ui/view"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
@@ -15,12 +14,13 @@ import useChatsStore, { type ChatMessageWithInflightId } from "@/features/chats/
 import { useShallow } from "zustand/shallow"
 import { useSecureStore } from "@/lib/secureStore"
 import { chatInputValueKey, chatReplyToKey, chatEditMessageKey } from "@/features/chats/chatDrafts"
-import { cn, run, Semaphore, runEffect } from "@filen/shared"
+import { cn, run, runOrThrow, runEffect } from "@filen/shared"
 import { useStringifiedClient } from "@/lib/auth"
 import { makeDriveItemPublicLink } from "@/lib/sdkUnwrap"
 import useEffectOnce from "@/hooks/useEffectOnce"
 import { randomUUID } from "expo-crypto"
 import chats from "@/features/chats/chats"
+import { signalTyping, signalStopped } from "@/features/chats/typing"
 import { sync } from "@/features/chats/components/sync"
 import useIsOnline from "@/hooks/useIsOnline"
 import alerts from "@/lib/alerts"
@@ -144,8 +144,6 @@ const Input = ({ chat }: { chat: Chat }) => {
 	const inputRef = useRef<TextInput>(null)
 	const isSendingRef = useRef(false)
 	const stringifiedClient = useStringifiedClient()
-	const typingTimeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined)
-	const sendTypingEventSemaphoreRef = useRef<Semaphore>(new Semaphore(1))
 	const [chatReplyTo, setChatReplyTo] = useSecureStore<ChatMessageWithInflightId | null>(chatReplyToKey(chat.uuid), null)
 	const [chatEditMessage, setChatEditMessage] = useSecureStore<ChatMessageWithInflightId | null>(chatEditMessageKey(chat.uuid), null)
 	const isOnline = useIsOnline()
@@ -154,8 +152,17 @@ const Input = ({ chat }: { chat: Chat }) => {
 
 	const userIsSubbed = isAccountSubscribed(accountQuery)
 
+	// Read through a ref so the attach menu's handlers, and the native menu config built from them, don't change on
+	// every keystroke. Links land only after an upload behind the full-screen loader, so the committed draft is current.
+	const chatInputValueRef = useRef(chatInputValue)
+
+	useEffect(() => {
+		chatInputValueRef.current = chatInputValue
+	})
+
 	const insertLinksIntoInput = (links: string[]) => {
-		const replacedMessage = chatInputValue.trim().length === 0 ? `${links.join("\n")} ` : `${chatInputValue} ${links.join("\n")}`
+		const draft = chatInputValueRef.current
+		const replacedMessage = draft.trim().length === 0 ? `${links.join("\n")} ` : `${draft} ${links.join("\n")}`
 
 		if (replacedMessage.length === 0) {
 			return
@@ -220,26 +227,6 @@ const Input = ({ chat }: { chat: Chat }) => {
 		return chat.participants.find(p => p.userId === stringifiedClient.userId)
 	})()
 
-	const sendTypingEvent = useCallback(
-		async (type: ChatTypingType) => {
-			const result = await run(() =>
-				sendTypingEventSemaphoreRef.current.withPermit(() =>
-					chats.sendTyping({
-						chat,
-						type
-					})
-				)
-			)
-
-			if (!result.success) {
-				logger.warn("chats", "sendTypingEvent failed", { error: result.error })
-
-				return
-			}
-		},
-		[chat]
-	)
-
 	const send = async () => {
 		if (isSendingRef.current) {
 			return
@@ -257,9 +244,13 @@ const Input = ({ chat }: { chat: Chat }) => {
 
 		isSendingRef.current = true
 
-		try {
-			clearTimeout(typingTimeoutRef.current)
-			sendTypingEvent(ChatTypingType.Up).catch(e => logger.warn("chats", "sendTypingEvent Up (on send) failed", { error: e }))
+		// runOrThrow, not try/finally: the React Compiler skips a component containing try/finally.
+		await runOrThrow(async defer => {
+			defer(() => {
+				isSendingRef.current = false
+			})
+
+			signalStopped(chat)
 
 			inputRef.current?.clear()
 
@@ -349,26 +340,17 @@ const Input = ({ chat }: { chat: Chat }) => {
 			await flushInflightMessagesWithAlert()
 
 			sync.syncNow()
-		} finally {
-			isSendingRef.current = false
-		}
+		})
 	}
 
 	const onKeyPress = () => {
-		sendTypingEvent(ChatTypingType.Down).catch(e => logger.warn("chats", "sendTypingEvent Down failed", { error: e }))
-
-		clearTimeout(typingTimeoutRef.current)
-
-		typingTimeoutRef.current = setTimeout(() => {
-			sendTypingEvent(ChatTypingType.Up).catch(e => logger.warn("chats", "sendTypingEvent Up (timeout) failed", { error: e }))
-		}, 3000)
+		signalTyping(chat)
 	}
 
 	const onBlur = () => {
 		useChatsStore.getState().setInputFocused(false)
 
-		clearTimeout(typingTimeoutRef.current)
-		sendTypingEvent(ChatTypingType.Up).catch(e => logger.warn("chats", "sendTypingEvent Up (onBlur) failed", { error: e }))
+		signalStopped(chat)
 	}
 
 	const onFocus = () => {
@@ -416,22 +398,19 @@ const Input = ({ chat }: { chat: Chat }) => {
 		useChatsStore.getState().setInputViewLayout(inputViewLayout)
 	}, [inputViewLayout])
 
-	// Latest callback in a ref so the cleanup below runs on UNMOUNT only. Depending on
-	// sendTypingEvent directly re-ran the cleanup whenever the chat object was replaced in the
-	// query (any incoming message rewrites it), firing a spurious Typing.Up mid-typing — peers
-	// saw the indicator flicker off while the user never stopped.
-	const sendTypingEventRef = useRef(sendTypingEvent)
+	// Latest chat in a ref so the cleanup below runs on UNMOUNT only. Depending on chat directly
+	// re-ran the cleanup whenever the chat object was replaced in the query (any incoming message
+	// rewrites it), firing a spurious Typing.Up mid-typing — peers saw the indicator flicker off
+	// while the user never stopped.
+	const chatRef = useRef(chat)
 
 	useEffect(() => {
-		sendTypingEventRef.current = sendTypingEvent
+		chatRef.current = chat
 	})
 
 	useEffect(() => {
 		return () => {
-			clearTimeout(typingTimeoutRef.current)
-			sendTypingEventRef
-				.current(ChatTypingType.Up)
-				.catch(e => logger.warn("chats", "sendTypingEvent Up (cleanup) failed", { error: e }))
+			signalStopped(chatRef.current)
 		}
 	}, [])
 

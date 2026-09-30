@@ -126,13 +126,18 @@ export function galleryItemKey(item: GalleryItemTagged): string {
  * already invisible at that point, so animating its removal would only keep
  * an untouchable transparent overlay over the app for the transition's
  * duration (500ms on iOS).
+ *
+ * Hook-named (it calls no hooks) so the React Compiler freezes its arguments;
+ * as a plain call it assumes they may be mutated and leaves the callbacks passed
+ * in, and everything keyed on them, unmemoized.
  */
-function buildDismissGesture(
+function useDismissGesture(
 	sv: DismissSharedValues,
 	screenHeight: number,
 	goBack: () => void,
 	onDismissStart: () => void,
-	onDismissCancel: () => void
+	onDismissCancel: () => void,
+	enabled: boolean
 ) {
 	return Gesture.Pan()
 		.manualActivation(true)
@@ -239,6 +244,7 @@ function buildDismissGesture(
 
 			runOnJS(onDismissCancel)()
 		})
+		.enabled(enabled)
 }
 
 // Android PiP resizes the ACTIVITY window while the list stays mounted (the remount key is
@@ -472,7 +478,7 @@ const Gallery = () => {
 	// onto the page it happened on. A clean pinch never moved the pager → target
 	// equals the current offset → no visible jump.
 	const onPinchActiveChange = (active: boolean) => {
-		if (active || zoomScale.value > 1) {
+		if (active || zoomScale.get() > 1) {
 			return
 		}
 
@@ -480,7 +486,7 @@ const Gallery = () => {
 
 		if (itemCount > 1 && width > 0) {
 			listRef.current?.scrollToOffset({
-				offset: Math.max(0, Math.min(anchorIndex, itemCount - 1)) * width,
+				offset: Math.max(0, Math.min(anchorIndexRef.current, itemCount - 1)) * width,
 				animated: false
 			})
 		}
@@ -571,7 +577,7 @@ const Gallery = () => {
 		}
 	})
 
-	const dismissGesture = buildDismissGesture(
+	const dismissGesture = useDismissGesture(
 		{
 			zoomScale,
 			dismissTranslateX,
@@ -585,8 +591,9 @@ const Gallery = () => {
 		dimensions.height,
 		goBackFromGestureDismiss,
 		onDismissGestureStart,
-		onDismissGestureEnd
-	).enabled(isImage || isVideo || isAudio || items.length === 0)
+		onDismissGestureEnd,
+		isImage || isVideo || isAudio || items.length === 0
+	)
 
 	// The single point where this gallery commits to leaving. Every exit funnels through the route pop
 	// — the header close button, the swipe-down/pinch dismiss, the Android hardware back button, the

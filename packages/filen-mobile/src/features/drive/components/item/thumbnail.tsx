@@ -327,9 +327,14 @@ const FileThumbnail = ({
 		)
 	}
 
-	// A session verdict (until the next online flip): the static icon, with no generator mounted —
-	// its effects would only call generate() to be told null again.
-	if (thumbnails.isUnavailable(item.data.uuid)) {
+	// The static icon with no generator mounted, whose effects would only call generate() to be told
+	// null again: a session verdict (until the next online flip), or, with no cached path, an item the
+	// lib can never thumbnail (canGenerate is a pure function of the item). The hasThumbnail guard
+	// keeps a generator mounted for a thumbnail generated in-cell before a rename to a non-media name.
+	if (
+		thumbnails.isUnavailable(item.data.uuid) ||
+		(!source && !thumbnails.hasThumbnail(item.data.uuid) && !thumbnails.canGenerate(item))
+	) {
 		return (
 			<FileIcon
 				name={item.data.decryptedMeta?.name ?? ""}

@@ -4,25 +4,40 @@ import { vi, describe, it, expect, beforeEach } from "vitest"
 // Hoisted mocks (must be defined before any imports)
 // ------------------------------------------------------------------
 
-const { mockTransfersUpload, mockAlertsError, mockAlertsNormal, mockPickDocuments, mockUploadQuotaRefusal } = vi.hoisted(() => ({
+const {
+	mockTransfersUpload,
+	mockAlertsError,
+	mockAlertsNormal,
+	mockPickDocuments,
+	mockUploadQuotaRefusal,
+	mockIsConvertHeicToJpgEnabled,
+	mockConvertHeicToJpg
+} = vi.hoisted(() => ({
 	mockTransfersUpload: vi.fn(),
 	mockAlertsError: vi.fn(),
 	mockAlertsNormal: vi.fn(),
 	mockPickDocuments: vi.fn(),
-	mockUploadQuotaRefusal: vi.fn(async (): Promise<string | null> => null)
+	mockUploadQuotaRefusal: vi.fn(async (): Promise<string | null> => null),
+	mockIsConvertHeicToJpgEnabled: vi.fn(async () => false),
+	mockConvertHeicToJpg: vi.fn(async (file: { uri: string }): Promise<unknown> => file)
 }))
 
 vi.mock("@/features/transfers/quota", () => ({
 	uploadQuotaRefusal: mockUploadQuotaRefusal
 }))
 
-vi.mock("@filen/shared", async () => await import("@/tests/mocks/filenShared"))
+// The real Semaphore, so the HEIC conversion bound is observable.
+vi.mock("@filen/shared", async () => ({
+	...(await import("@/tests/mocks/filenShared")),
+	Semaphore: (await vi.importActual<typeof import("@filen/shared")>("@filen/shared")).Semaphore
+}))
 
 vi.mock("expo-crypto", async () => await import("@/tests/mocks/expoCrypto"))
 
 vi.mock("@/lib/imageConversion", () => ({
-	isConvertHeicToJpgEnabled: vi.fn().mockResolvedValue(false),
-	convertHeicToJpg: vi.fn(async (file: unknown) => file)
+	isConvertHeicToJpgEnabled: mockIsConvertHeicToJpgEnabled,
+	convertHeicToJpg: mockConvertHeicToJpg,
+	isHeicFile: (uri: string) => /\.heic$/i.test(uri)
 }))
 
 vi.mock("@filen/sdk-rs", () => ({
@@ -328,5 +343,101 @@ describe("useDriveUpload reportTransferResults wiring (C2)", () => {
 		expect(mockAlertsNormal).not.toHaveBeenCalled()
 		expect(fs.has("file:///document/a.bin")).toBe(false)
 		expect(fs.has("file:///document/b.bin")).toBe(false)
+	})
+})
+
+// ------------------------------------------------------------------
+// 3. HEIC conversion fan-out is bounded; non-HEIC assets never wait on it
+// ------------------------------------------------------------------
+
+describe("useDriveUpload HEIC conversion bound", () => {
+	const t = ((key: string) => key) as unknown as TFunction
+	const parent = { tag: "Dir", inner: [{ uuid: "parent-uuid" }] } as never
+	const drivePath = { type: "drive", uuid: null } as unknown as DrivePath
+
+	beforeEach(() => {
+		fs.clear()
+		mockUploadQuotaRefusal.mockReset().mockResolvedValue(null)
+		mockTransfersUpload.mockReset().mockResolvedValue(uploadOk)
+		mockAlertsError.mockClear()
+		mockAlertsNormal.mockClear()
+		mockPickDocuments.mockReset()
+		mockIsConvertHeicToJpgEnabled.mockReset().mockResolvedValue(true)
+		mockConvertHeicToJpg.mockReset()
+	})
+
+	it("keeps at most 2 conversions in flight, uploads every asset, and does not delay non-HEIC uploads", async () => {
+		const heicUris = Array.from({ length: 6 }, (_, i) => `file:///document/${i}.heic`)
+		const plainUri = "file:///document/plain.bin"
+		const uris = [...heicUris, plainUri]
+
+		mockPickDocuments.mockResolvedValue({
+			canceled: false,
+			documents: uris.map(uri => ({
+				uri,
+				name: uri.split("/").pop() ?? "file",
+				lastModified: 1000,
+				mimeType: "application/octet-stream"
+			}))
+		})
+
+		for (const uri of uris) {
+			fs.set(uri, new Uint8Array([1]))
+		}
+
+		let inFlight = 0
+		let maxInFlight = 0
+		const pending: (() => void)[] = []
+
+		// Mirrors the real no-op on non-HEIC input.
+		mockConvertHeicToJpg.mockImplementation(async (file: { uri: string }) => {
+			if (!file.uri.endsWith(".heic")) {
+				return file
+			}
+
+			inFlight++
+			maxInFlight = Math.max(maxInFlight, inFlight)
+
+			await new Promise<void>(resolve => pending.push(resolve))
+
+			inFlight--
+
+			return file
+		})
+
+		const { uploadFiles } = useDriveUpload({
+			parent,
+			drivePath,
+			t
+		})
+
+		const done = uploadFiles()
+
+		await vi.waitFor(() => {
+			expect(pending).toHaveLength(2)
+		})
+
+		// The non-HEIC asset uploaded while every conversion is still pending.
+		expect(mockTransfersUpload).toHaveBeenCalledTimes(1)
+		expect(mockTransfersUpload.mock.calls[0]?.[0]).toMatchObject({ name: "plain.bin" })
+
+		let released = 0
+
+		while (released < heicUris.length) {
+			await vi.waitFor(() => {
+				expect(pending.length).toBeGreaterThan(released)
+			})
+
+			pending[released]?.()
+			released++
+		}
+
+		await done
+
+		expect(maxInFlight).toBe(2)
+		expect(mockConvertHeicToJpg).toHaveBeenCalledTimes(uris.length)
+		expect(mockTransfersUpload).toHaveBeenCalledTimes(uris.length)
+		expect(mockAlertsError).not.toHaveBeenCalled()
+		expect(mockAlertsNormal).toHaveBeenCalledWith("upload_complete")
 	})
 })

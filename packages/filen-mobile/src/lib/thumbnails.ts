@@ -3,7 +3,7 @@ import { type DriveItem } from "@/types"
 import { normalizeFilePathForExpo, normalizeFilePathForSdk } from "@/lib/paths"
 import { run, Semaphore, isAbortError, InFlight } from "@filen/shared"
 import { ClearBarrier } from "@/lib/clearBarrier"
-import { resetDirectory, sumLocalDirectoryFileBytes } from "@/lib/fsUtils"
+import { resetDirectory, flatDirectoryFileBytes } from "@/lib/fsUtils"
 import { Platform } from "react-native"
 import useHttpStore from "@/stores/useHttp.store"
 import { onlineManager } from "@tanstack/react-query"
@@ -721,7 +721,7 @@ class Thumbnails {
 	}
 
 	public size(): number {
-		return sumLocalDirectoryFileBytes(DIRECTORY)
+		return flatDirectoryFileBytes(DIRECTORY)
 	}
 }
 

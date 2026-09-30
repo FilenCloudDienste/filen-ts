@@ -82,6 +82,58 @@ export function withoutInflightError(prev: InflightChatMessageErrors, inflightId
 	return updated
 }
 
+// Older paginated pages, keyed per mounted message list (not per chat) so two screens on one chat
+// keep independent pages. Lives here only so message patches can reach it.
+export type OlderChatMessages = Record<
+	string,
+	{
+		chatUuid: string
+		messages: ChatMessageWithInflightId[]
+	}
+>
+
+export type ChatMessagePatch = ((message: ChatMessageWithInflightId) => ChatMessageWithInflightId) | "delete"
+
+export function applyChatMessagePatch(
+	messages: ChatMessageWithInflightId[],
+	messageUuid: string,
+	patch: ChatMessagePatch
+): ChatMessageWithInflightId[] {
+	return patch === "delete" ? messages.filter(m => m.inner.uuid !== messageUuid) : messages.map(m => (m.inner.uuid === messageUuid ? patch(m) : m))
+}
+
+export function olderMessagesChatUuid(prev: OlderChatMessages, messageUuid: string): string | undefined {
+	for (const entry of Object.values(prev)) {
+		if (entry.messages.some(m => m.inner.uuid === messageUuid)) {
+			return entry.chatUuid
+		}
+	}
+
+	return undefined
+}
+
+// Returns `prev` when no page holds the message, and keeps untouched entries by reference.
+export function withPatchedOlderMessage(prev: OlderChatMessages, messageUuid: string, patch: ChatMessagePatch): OlderChatMessages {
+	let next: OlderChatMessages | null = null
+
+	for (const [instanceId, entry] of Object.entries(prev)) {
+		if (!entry.messages.some(m => m.inner.uuid === messageUuid)) {
+			continue
+		}
+
+		next ??= {
+			...prev
+		}
+
+		next[instanceId] = {
+			...entry,
+			messages: applyChatMessagePatch(entry.messages, messageUuid, patch)
+		}
+	}
+
+	return next ?? prev
+}
+
 export type ChatsStore = {
 	inputViewLayout: InputViewLayout
 	inputSelection: {
@@ -93,6 +145,10 @@ export type ChatsStore = {
 	typing: Record<string, Typing>
 	inflightMessages: InflightChatMessages
 	inflightErrors: InflightChatMessageErrors
+	olderMessages: OlderChatMessages
+	appendOlderMessages: (instanceId: string, chatUuid: string, messages: ChatMessageWithInflightId[]) => void
+	clearOlderMessages: (instanceId: string) => void
+	patchOlderMessage: (messageUuid: string, patch: ChatMessagePatch) => void
 	selectedChats: Chat[]
 	setSelectedChats: (chats: Chat[]) => void
 	toggleSelectedChat: (chat: Chat) => void
@@ -134,6 +190,40 @@ export const useChatsStore = create<ChatsStore>(set => ({
 	typing: {},
 	inflightMessages: {},
 	inflightErrors: {},
+	olderMessages: {},
+	appendOlderMessages(instanceId, chatUuid, messages) {
+		set(state => ({
+			olderMessages: {
+				...state.olderMessages,
+				[instanceId]: {
+					chatUuid,
+					messages: [...(state.olderMessages[instanceId]?.messages ?? []), ...messages]
+				}
+			}
+		}))
+	},
+	clearOlderMessages(instanceId) {
+		set(state => {
+			if (!state.olderMessages[instanceId]) {
+				return state
+			}
+
+			const olderMessages = {
+				...state.olderMessages
+			}
+
+			delete olderMessages[instanceId]
+
+			return { olderMessages }
+		})
+	},
+	patchOlderMessage(messageUuid, patch) {
+		set(state => {
+			const next = withPatchedOlderMessage(state.olderMessages, messageUuid, patch)
+
+			return next === state.olderMessages ? state : { olderMessages: next }
+		})
+	},
 	selectedChats: [],
 	setSelectedChats(selectedChats) {
 		set({ selectedChats })

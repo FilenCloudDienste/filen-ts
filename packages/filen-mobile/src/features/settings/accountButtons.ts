@@ -10,6 +10,7 @@ import auth from "@/lib/auth"
 import { markDirectorySizesStale } from "@/features/drive/queries/useDirectorySize.query"
 import { driveItemsQueryInvalidateAfterDeleteAll } from "@/features/drive/queries/useDriveItems.query"
 import { clearClipboardAfterDeleteAll } from "@/features/drive/clipboardFollow"
+import { clearDotFilenDirectoryMemo } from "@/lib/dotFilenDirectory"
 import { router } from "@/lib/router"
 import { serialize } from "@/lib/serializer"
 import { shareTmpFile } from "@/lib/share"
@@ -145,6 +146,7 @@ export function buildDangerZoneButtons({
 					// The socket echo does the same, but not while the socket is down.
 					driveItemsQueryInvalidateAfterDeleteAll()
 					clearClipboardAfterDeleteAll()
+					clearDotFilenDirectoryMemo()
 					await accountQuery.refetch()
 				})
 

@@ -96,7 +96,7 @@ export function resolveScrollEnabled({
 	return dataLength > 0 || hasOnRefresh
 }
 
-const VirtualListInner = (<T,>(props: FlashListProps<T> & React.RefAttributes<ListRef<T>> & VirtualListExtraProps) => {
+function VirtualListInner<T>(props: FlashListProps<T> & React.RefAttributes<ListRef<T>> & VirtualListExtraProps) {
 	const { layout, onLayout } = useViewLayout()
 	const [refreshing, setRefreshing] = useState<boolean>(false)
 	const textForeground = useResolveClassNames("text-foreground")
@@ -206,8 +206,6 @@ const VirtualListInner = (<T,>(props: FlashListProps<T> & React.RefAttributes<Li
 			</View>
 		</Fragment>
 	)
-}) as (<T>(props: FlashListProps<T> & React.RefAttributes<ListRef<T>> & VirtualListExtraProps) => React.JSX.Element) & {
-	displayName?: string
 }
 
 const VirtualList = withUniwind(VirtualListInner) as typeof VirtualListInner as (<T>(

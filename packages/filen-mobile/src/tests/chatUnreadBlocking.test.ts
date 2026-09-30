@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { isMessageUnread, chatHasUnread } from "@/features/chats/chatSelectors"
+import { countUnreadMessages, chatHasUnread } from "@/features/chats/chatSelectors"
 import { deriveBlockedUsers } from "@filen/shared"
 import { type Chat, type ChatMessage } from "@/types"
 
@@ -17,13 +17,13 @@ function chat(lastFocus: bigint | undefined, lastMessage?: ChatMessage): Chat {
 	return { uuid: "c", muted: false, lastFocus, lastMessage, participants: [] } as unknown as Chat
 }
 
-describe("isMessageUnread blocked-aware", () => {
+describe("countUnreadMessages blocked-aware", () => {
 	it("is unread for a non-blocked sender", () => {
-		expect(isMessageUnread(msg(5n, 100n), chat(50n, msg(5n, 100n)), 1n, blocked)).toBe(true)
+		expect(countUnreadMessages([msg(5n, 100n)], chat(50n, msg(5n, 100n)), 1n, blocked)).toBe(1)
 	})
 
 	it("is NOT unread for a blocked sender", () => {
-		expect(isMessageUnread(msg(99n, 100n), chat(50n, msg(99n, 100n)), 1n, blocked)).toBe(false)
+		expect(countUnreadMessages([msg(99n, 100n)], chat(50n, msg(99n, 100n)), 1n, blocked)).toBe(0)
 	})
 
 	it("is NOT unread for a sender matched by email only (userId differs)", () => {
@@ -34,7 +34,7 @@ describe("isMessageUnread blocked-aware", () => {
 			edited: false
 		} as unknown as ChatMessage
 
-		expect(isMessageUnread(m, chat(50n, m), 1n, blocked)).toBe(false)
+		expect(countUnreadMessages([m], chat(50n, m), 1n, blocked)).toBe(0)
 	})
 })
 

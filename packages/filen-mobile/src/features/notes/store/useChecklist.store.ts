@@ -1,17 +1,17 @@
 import { createStore, type StoreApi } from "zustand"
 import { createContext } from "react"
-import type { Checklist } from "@filen/shared"
+import type { Checklist, ChecklistItem } from "@filen/shared"
 import type { TextInput } from "react-native"
 
 export type ChecklistStore = {
 	parsed: Checklist
-	inputRefs: Record<string, React.RefObject<TextInput | null>>
+	// Derived from `parsed` by setParsed (first occurrence wins, matching Array.prototype.find) so
+	// per-row selectors are O(1) instead of scanning `parsed` on every notify.
+	byId: Map<string, ChecklistItem>
+	// Mutated in place and never replaced: nothing subscribes to it, so a reactive `set` would only
+	// re-run every row selector on each row mount/unmount.
+	inputRefs: Map<string, React.RefObject<TextInput | null>>
 	setParsed: (fn: Checklist | ((prev: Checklist) => Checklist)) => void
-	setInputRefs: (
-		fn:
-			| Record<string, React.RefObject<TextInput | null>>
-			| ((prev: Record<string, React.RefObject<TextInput | null>>) => Record<string, React.RefObject<TextInput | null>>)
-	) => void
 }
 
 export type ChecklistStoreApi = StoreApi<ChecklistStore>
@@ -24,16 +24,24 @@ export type ChecklistStoreApi = StoreApi<ChecklistStore>
 export function createChecklistStore(): ChecklistStoreApi {
 	return createStore<ChecklistStore>(set => ({
 		parsed: [],
-		inputRefs: {},
-		setInputRefs(fn) {
-			set(state => ({
-				inputRefs: typeof fn === "function" ? fn(state.inputRefs) : fn
-			}))
-		},
+		byId: new Map(),
+		inputRefs: new Map(),
 		setParsed(fn) {
-			set(state => ({
-				parsed: typeof fn === "function" ? fn(state.parsed) : fn
-			}))
+			set(state => {
+				const parsed = typeof fn === "function" ? fn(state.parsed) : fn
+				const byId = new Map<string, ChecklistItem>()
+
+				for (const item of parsed) {
+					if (!byId.has(item.id)) {
+						byId.set(item.id, item)
+					}
+				}
+
+				return {
+					parsed,
+					byId
+				}
+			})
 		}
 	}))
 }

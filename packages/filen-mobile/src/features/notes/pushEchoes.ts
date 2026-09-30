@@ -13,3 +13,7 @@ export function rememberNotePush(uuid: string, hash: string): void {
 export function isOwnNotePush(uuid: string, hash: string): boolean {
 	return pushes.isOwn(uuid, hash)
 }
+
+export function hasPendingNotePush(uuid: string): boolean {
+	return pushes.hasPending(uuid)
+}

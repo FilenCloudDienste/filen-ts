@@ -1,6 +1,6 @@
 import { router } from "@/lib/router"
 import { ActivityIndicator } from "react-native"
-import audio, { useAudio } from "@/features/audio/audio"
+import audio, { useAudioLoading, useAudioPlaying, useAudioQueue } from "@/features/audio/audio"
 import View from "@/components/ui/view"
 import Text from "@/components/ui/text"
 import { PressableScale } from "@/components/ui/pressables"
@@ -11,11 +11,11 @@ import useNowPlayingDisplay from "@/features/audio/hooks/useNowPlayingDisplay"
 import AudioProgressBar from "@/components/floatingBar/audioProgressBar"
 
 const AudioSlot = () => {
-	const { status, loading, queueItem } = useAudio()
+	const { queueItem } = useAudioQueue()
+	const playing = useAudioPlaying()
+	const loading = useAudioLoading()
 	const textForeground = useResolveClassNames("text-foreground")
 	const { pictureUri, titleLabel, artistLabel } = useNowPlayingDisplay(queueItem ?? null)
-
-	const playing = status?.playing ?? false
 
 	const onBodyPress = () => {
 		router.push("/playlists")

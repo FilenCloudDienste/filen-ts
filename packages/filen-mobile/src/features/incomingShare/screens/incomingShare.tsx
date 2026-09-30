@@ -223,13 +223,24 @@ function IncomingShare() {
 			}
 
 			const assetsResult = await runWithLoading(async defer => {
+				// Both share extensions name a staged source by display name only, so same-named items share one
+				// file: those copy, and a unique one moves (a same-volume rename) instead of duplicating its bytes.
+				const sourceCounts = new Map<string, number>()
+
+				for (const payload of payloads) {
+					sourceCounts.set(payload.contentUri, (sourceCounts.get(payload.contentUri) ?? 0) + 1)
+				}
+
 				return await Promise.all(
 					payloads.map(async payload => {
 						const file = new FileSystem.File(payload.contentUri)
 
+						// A fresh handle: move() rebinds `file` to the tmp path.
 						defer(() => {
-							if (file.exists) {
-								file.delete()
+							const source = new FileSystem.File(payload.contentUri)
+
+							if (source.exists) {
+								source.delete()
 							}
 						})
 
@@ -239,7 +250,11 @@ function IncomingShare() {
 							tmpFile.delete()
 						}
 
-						await file.copy(tmpFile)
+						if ((sourceCounts.get(payload.contentUri) ?? 0) > 1) {
+							await file.copy(tmpFile)
+						} else {
+							await file.move(tmpFile)
+						}
 
 						return {
 							name: payload.originalName,
@@ -250,7 +265,7 @@ function IncomingShare() {
 			})
 
 			if (!assetsResult.success) {
-				logger.error("incomingShare", "failed to copy share payloads to tmp dir", {
+				logger.error("incomingShare", "failed to stage share payloads in tmp dir", {
 					error: assetsResult.error,
 					payloadCount: payloads.length
 				})

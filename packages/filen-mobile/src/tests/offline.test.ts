@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach } from "vitest"
+import { vi, describe, it, expect, beforeEach, afterEach } from "vitest"
 
 vi.mock("expo-crypto", async () => await import("@/tests/mocks/expoCrypto"))
 
@@ -513,6 +513,47 @@ describe("Offline", () => {
 
 			expect(first).toBe(second) // Same reference
 		})
+
+		it("concurrent cold calls share one scan", async () => {
+			const uuid = "11111111-1111-1111-1111-111111111111"
+
+			writeFileData(uuid, "shared.txt")
+			writeFileMeta(uuid, { item: makeFileItem(uuid, "shared.txt"), parent: makeParent("22222222-2222-2222-2222-222222222222") })
+
+			const offline = await createOffline()
+			const textSpy = vi.spyOn(File.prototype, "text")
+
+			const [first, second] = await Promise.all([offline.listFiles(), offline.listFiles()])
+
+			expect(first).toBe(second)
+			expect(first).toHaveLength(1)
+			expect(textSpy).toHaveBeenCalledTimes(1)
+
+			textSpy.mockRestore()
+		})
+
+		it("a call after invalidation does not join the in-flight scan", async () => {
+			const uuid = "11111111-1111-1111-1111-111111111111"
+
+			writeFileData(uuid, "fresh.txt")
+			writeFileMeta(uuid, { item: makeFileItem(uuid, "fresh.txt"), parent: makeParent("22222222-2222-2222-2222-222222222222") })
+
+			const offline = await createOffline()
+			const textSpy = vi.spyOn(File.prototype, "text")
+
+			const before = offline.listFiles()
+
+			offline.invalidateCaches()
+
+			const after = offline.listFiles()
+			const [first, second] = await Promise.all([before, after])
+
+			expect(first).not.toBe(second)
+			expect(second).toHaveLength(1)
+			expect(textSpy).toHaveBeenCalledTimes(2)
+
+			textSpy.mockRestore()
+		})
 	})
 
 	describe("updateIndex", () => {
@@ -1006,6 +1047,55 @@ describe("Offline", () => {
 
 			expect(result1.directories).toHaveLength(1)
 			expect(result2.directories).toHaveLength(1)
+		})
+
+		it("concurrent cold readers parse each tree meta once", async () => {
+			const uuid = "11111111-1111-1111-1111-111111111111"
+
+			writeDirectoryMeta(uuid, {
+				item: makeDirItem(uuid, "Shared"),
+				parent: makeParent("22222222-2222-2222-2222-222222222222"),
+				entries: makeEntries({
+					"/file.txt": makeFileItem("33333333-3333-3333-3333-333333333333", "file.txt")
+				})
+			})
+
+			const offline = await createOffline()
+			const textSpy = vi.spyOn(File.prototype, "text")
+
+			const [a, b, c, index] = await Promise.all([
+				offline.readDirectoryMeta(uuid),
+				offline.readDirectoryMeta(uuid),
+				offline.listDirectories(),
+				offline.buildUuidToTopLevelIndex()
+			])
+
+			expect(a).not.toBeNull()
+			expect(a).toBe(b)
+			expect(c.directories).toHaveLength(1)
+			expect(index.get("33333333-3333-3333-3333-333333333333")).toBe(uuid)
+			expect(await offline.buildUuidToTopLevelIndex()).toBe(index)
+			expect(textSpy).toHaveBeenCalledTimes(1)
+
+			textSpy.mockRestore()
+		})
+
+		it("a null (missing) meta is not cached after a shared read settles", async () => {
+			const uuid = "11111111-1111-1111-1111-111111111111"
+			const offline = await createOffline()
+
+			const [a, b] = await Promise.all([offline.readDirectoryMeta(uuid), offline.readDirectoryMeta(uuid)])
+
+			expect(a).toBeNull()
+			expect(b).toBeNull()
+
+			writeDirectoryMeta(uuid, {
+				item: makeDirItem(uuid, "Late"),
+				parent: makeParent("22222222-2222-2222-2222-222222222222"),
+				entries: makeEntries({})
+			})
+
+			expect(await offline.readDirectoryMeta(uuid)).not.toBeNull()
 		})
 	})
 
@@ -2343,6 +2433,174 @@ describe("Offline", () => {
 			expect(size.size).toBe(700) // 300 + 400
 			expect(size.files).toBe(2) // inner.txt + deep.txt
 			expect(size.dirs).toBe(1) // deep
+		})
+	})
+
+	describe("per-tree derived views", () => {
+		const topUuid = "11111111-1111-1111-1111-111111111111"
+		const uuid = (n: number): string => `${n.toString(16).padStart(8, "0")}-0000-0000-0000-000000000000`
+
+		// The per-call scan the views replace: an entry counts toward P when its dirname is P or lies below it.
+		function referenceSize(entries: DirectoryOfflineMeta["entries"], targetPath: string) {
+			const prefix = targetPath === "/" ? "/" : `${targetPath}/`
+			let size = 0
+			let files = 0
+			let dirs = 0
+
+			for (const entryUuid of Object.keys(entries)) {
+				const entry = entries[entryUuid]
+
+				if (!entry) {
+					continue
+				}
+
+				const index = entry.path.lastIndexOf("/")
+				const rawDirname = index === -1 ? null : entry.path.slice(0, index)
+				const dirname = rawDirname === null || rawDirname === "" ? "/" : rawDirname
+
+				if (dirname !== targetPath && !dirname.startsWith(prefix)) {
+					continue
+				}
+
+				if (entry.item.type === "file") {
+					size += Number(entry.item.data.decryptedMeta?.size ?? 0)
+					files += 1
+				} else {
+					dirs += 1
+				}
+			}
+
+			return {
+				size,
+				files,
+				dirs
+			}
+		}
+
+		it("itemSize matches the per-entry predicate for every directory, including odd paths", async () => {
+			const byPath: Record<string, DriveItem> = {}
+			let n = 1
+
+			for (const dirPath of ["/a", "/ab", "/a/b", "/a/b/c", "/a/", "/x", "noroot", "noroot/inner"]) {
+				byPath[dirPath] = makeDirItem(uuid(n++), dirPath)
+			}
+
+			for (const filePath of [
+				"/root.txt",
+				"/a/f.txt",
+				"/ab/f.txt",
+				"/a/b/f.txt",
+				"/a/b/c/f.txt",
+				"/a/b/c/g.txt",
+				"/a//odd.txt",
+				"/x/f.txt",
+				"noroot/f.txt",
+				"noroot/inner/f.txt",
+				"bare.txt"
+			]) {
+				byPath[filePath] = makeFileItem(uuid(n), filePath, BigInt(n * 10))
+				n++
+			}
+
+			const entries = makeEntries(byPath)
+
+			writeDirectoryMeta(topUuid, {
+				item: makeDirItem(topUuid, "Root"),
+				parent: makeParent("99999999-9999-9999-9999-999999999999"),
+				entries
+			})
+
+			const offline = await createOffline()
+
+			expect(await offline.itemSize(makeDirItem(topUuid, "Root"))).toEqual(referenceSize(entries, "/"))
+
+			for (const entry of Object.values(entries)) {
+				if (entry.item.type !== "directory") {
+					continue
+				}
+
+				expect(await offline.itemSize(entry.item), entry.path).toEqual(referenceSize(entries, entry.path))
+			}
+		})
+
+		it("itemSize returns a fresh object per directory", async () => {
+			const subUuid = "22222222-2222-2222-2222-222222222222"
+
+			writeDirectoryMeta(topUuid, {
+				item: makeDirItem(topUuid, "Root"),
+				parent: makeParent("99999999-9999-9999-9999-999999999999"),
+				entries: makeEntries({
+					"/sub": makeDirItem(subUuid, "sub"),
+					"/sub/f.txt": makeFileItem("33333333-3333-3333-3333-333333333333", "f.txt", 50n)
+				})
+			})
+
+			const offline = await createOffline()
+			const sub = await offline.itemSize(makeDirItem(subUuid, "sub"))
+
+			sub.size = 999
+
+			const root = await offline.itemSize(makeDirItem(topUuid, "Root"))
+
+			expect(root).toEqual({
+				size: 50,
+				files: 1,
+				dirs: 1
+			})
+		})
+
+		it("listDirectories keeps entry order and gives every child the same parent", async () => {
+			const subUuid = "22222222-2222-2222-2222-222222222222"
+
+			writeDirectoryMeta(topUuid, {
+				item: makeDirItem(topUuid, "Root"),
+				parent: makeParent("99999999-9999-9999-9999-999999999999"),
+				entries: makeEntries({
+					"/b.txt": makeFileItem(uuid(1), "b.txt"),
+					"/sub": makeDirItem(subUuid, "sub"),
+					"/a.txt": makeFileItem(uuid(2), "a.txt"),
+					"/sub/x.txt": makeFileItem(uuid(3), "x.txt"),
+					"/other": makeDirItem(uuid(4), "other"),
+					"/c.txt": makeFileItem(uuid(5), "c.txt")
+				})
+			})
+
+			const offline = await createOffline()
+			const result = await offline.listDirectories({ kind: "uuid", uuid: topUuid })
+
+			expect(result.files.map((e: { item: DriveItem }) => e.item.data.uuid)).toEqual([uuid(1), uuid(2), uuid(5)])
+			expect(result.directories.map((e: { item: DriveItem }) => e.item.data.uuid)).toEqual([subUuid, uuid(4)])
+
+			for (const entry of [...result.files, ...result.directories]) {
+				expect(entry.parent).toEqual(result.files[0].parent)
+			}
+
+			const sub = await offline.listDirectories({ kind: "uuid", uuid: subUuid })
+
+			expect(sub.files.map((e: { item: DriveItem }) => e.item.data.uuid)).toEqual([uuid(3)])
+			expect(sub.directories).toHaveLength(0)
+		})
+
+		it("listDirectoriesRecursive keeps entry order across dirnames", async () => {
+			const subUuid = "22222222-2222-2222-2222-222222222222"
+
+			writeDirectoryMeta(topUuid, {
+				item: makeDirItem(topUuid, "Root"),
+				parent: makeParent("99999999-9999-9999-9999-999999999999"),
+				entries: makeEntries({
+					"/b.txt": makeFileItem(uuid(1), "b.txt"),
+					"/sub": makeDirItem(subUuid, "sub"),
+					"/sub/x.txt": makeFileItem(uuid(2), "x.txt"),
+					"/a.txt": makeFileItem(uuid(3), "a.txt"),
+					"/sub/y.txt": makeFileItem(uuid(4), "y.txt")
+				})
+			})
+
+			const offline = await createOffline()
+			const result = await offline.listDirectoriesRecursive()
+
+			expect(result.files.map((e: { item: DriveItem }) => e.item.data.uuid)).toEqual([uuid(1), uuid(2), uuid(3), uuid(4)])
+			expect(result.directories.map((e: { item: DriveItem }) => e.item.data.uuid)).toEqual([topUuid, subUuid])
 		})
 	})
 
@@ -5401,6 +5659,49 @@ describe("Offline", () => {
 			expect(fs.has(`${treeUri}/ok.txt`)).toBe(true)
 		})
 
+		it("attributes a download error to the LONGEST matching remote path suffix and falls back to the tree root on no match", async () => {
+			const { dirItem, parent } = seedTree({
+				entries: {},
+				disk: {}
+			})
+
+			const offline = await createOffline()
+
+			// "/x.txt" is also a suffix of ".../sub/x.txt" — the longer "/sub/x.txt" must win.
+			mockListing({
+				files: [makeListingFile(fileAUuid, "x.txt", "x.txt", 1n), makeListingFile(fileBUuid, "sub/x.txt", "x.txt", 1n)]
+			})
+
+			vi.mocked(transfers.download).mockImplementationOnce(async ({ destination }): Promise<any> => {
+				const base = (destination as { uri: string }).uri.replace(/^file:\/+/, "/private/")
+
+				return {
+					files: [],
+					directories: [],
+					errors: [
+						{
+							error: { message: () => "nested failed", kind: () => "IO" },
+							path: `${base}/sub/x.txt`,
+							item: {}
+						},
+						{
+							error: { message: () => "unknown failed", kind: () => "IO" },
+							path: `${base}/elsewhere/nothing.bin`,
+							item: {}
+						}
+					]
+				}
+			})
+
+			const errors = await offline.reconcileTree({ directory: dirItem, parent, skipIndexUpdate: true })
+			const downloadErrors = errors.filter((e: { kind: string }) => e.kind === "download")
+
+			expect(downloadErrors.map((e: { itemUuid: string; message: string }) => [e.itemUuid, e.message])).toEqual([
+				[fileBUuid, "nested failed"],
+				[treeUuid, "unknown failed"]
+			])
+		})
+
 		it("fails the pass with a verify error when a remote entry is missing after the download", async () => {
 			const { dirItem, parent } = seedTree({
 				entries: {},
@@ -6101,6 +6402,246 @@ describe("Offline", () => {
 
 			expect(await offline.listBrokenStandaloneUuids()).toEqual([])
 		})
+
+		it("skips re-reading metas listFiles already read, with the same result as a cold scan", async () => {
+			const healthyUuid = "11111111-1111-1111-1111-111111111111"
+			const dirMetaUuid = "22222222-2222-2222-2222-222222222222"
+			const missingMetaUuid = "33333333-3333-3333-3333-333333333333"
+			const parent = makeParent("99999999-9999-9999-9999-999999999999")
+
+			writeFileData(healthyUuid, "ok.txt")
+			writeFileMeta(healthyUuid, { item: makeFileItem(healthyUuid, "ok.txt"), parent })
+			// Readable meta holding a non-file item: not listed, but listFiles already parsed it
+			writeFileMeta(dirMetaUuid, { item: makeDirItem(dirMetaUuid, "dir"), parent })
+			writeFileData(missingMetaUuid, "data.txt")
+
+			const cold = await (await createOffline()).listBrokenStandaloneUuids()
+
+			const offline = await createOffline()
+
+			await offline.listFiles()
+
+			const textSpy = vi.spyOn(File.prototype, "text")
+			const warm = await offline.listBrokenStandaloneUuids()
+
+			expect(warm).toEqual(cold)
+			expect(warm.map((entry: { uuid: string }) => entry.uuid)).toEqual([missingMetaUuid])
+			// Every meta listFiles read (incl. the missing one's null) is served from the parsed-meta cache
+			expect(textSpy).not.toHaveBeenCalled()
+
+			textSpy.mockRestore()
+		})
+
+		it("re-reads every meta after invalidation", async () => {
+			const uuid = "11111111-1111-1111-1111-111111111111"
+			const parent = makeParent("99999999-9999-9999-9999-999999999999")
+
+			writeFileData(uuid, "ok.txt")
+			writeFileMeta(uuid, { item: makeFileItem(uuid, "ok.txt"), parent })
+
+			const offline = await createOffline()
+
+			await offline.listFiles()
+
+			// What every in-process meta writer does
+			offline.invalidateStandaloneMeta(uuid)
+			offline.invalidateCaches()
+			fs.set(`${FILES_DIR_URI}/${uuid}/${uuid}.filenmeta`, new Uint8Array([0xff, 0xfe]))
+
+			expect((await offline.listBrokenStandaloneUuids()).map((entry: { uuid: string }) => entry.uuid)).toEqual([uuid])
+		})
+	})
+
+	describe("parsed metas are invalidated per uuid", () => {
+		const treeA = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+		const treeB = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+		const fileS = "cccccccc-cccc-cccc-cccc-cccccccccccc"
+		const parent = makeParent("99999999-9999-9999-9999-999999999999")
+
+		function writeStore(): void {
+			writeDirectoryMeta(treeA, {
+				item: makeDirItem(treeA, "A"),
+				parent,
+				entries: makeEntries({ "/a.txt": makeFileItem("dddddddd-dddd-dddd-dddd-dddddddddddd", "a.txt") })
+			})
+			writeDirectoryMeta(treeB, {
+				item: makeDirItem(treeB, "B"),
+				parent,
+				entries: makeEntries({ "/b.txt": makeFileItem("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee", "b.txt") })
+			})
+			writeFileData(fileS, "s.txt")
+			writeFileMeta(fileS, { item: makeFileItem(fileS, "s.txt"), parent })
+		}
+
+		it("a standalone rename re-reads only its own meta and rebuilds the same index as a cold instance", async () => {
+			writeStore()
+
+			const offline = await createOffline()
+
+			await offline.updateIndex()
+
+			const textSpy = vi.spyOn(File.prototype, "text")
+
+			await offline.renameStandaloneFile({ item: makeFileItem(fileS, "renamed.txt"), parent })
+			await offline.updateIndex()
+
+			expect(textSpy).toHaveBeenCalledTimes(1)
+
+			textSpy.mockRestore()
+
+			const cold = await createOffline()
+
+			await cold.updateIndex()
+
+			expect(serialize(offline.indexCache)).toBe(serialize(cold.indexCache))
+			expect(offline.indexCache.files[fileS].item.data.decryptedMeta.name).toBe("renamed.txt")
+		})
+
+		it("storeFile re-reads only the new file's meta, not every tree and standalone", async () => {
+			writeStore()
+
+			const offline = await createOffline()
+
+			await offline.updateIndex()
+
+			const newUuid = "ffffffff-ffff-ffff-ffff-ffffffffffff"
+
+			vi.mocked(transfers.download).mockImplementationOnce(async ({ destination }) => {
+				if (destination instanceof File) {
+					destination.write(new Uint8Array([1]))
+				}
+
+				return { files: [], directories: [] }
+			})
+
+			const textSpy = vi.spyOn(File.prototype, "text")
+
+			await expect(offline.storeFile({ file: makeFileItem(newUuid, "new.txt"), parent })).resolves.toBe(true)
+
+			expect(textSpy).toHaveBeenCalledTimes(1)
+
+			textSpy.mockRestore()
+
+			expect(offline.indexCache.files[newUuid]).toBeDefined()
+			expect(offline.indexCache.files[fileS]).toBeDefined()
+			expect(offline.indexCache.directories[treeA]).toBeDefined()
+			expect(offline.indexCache.directories[treeB]).toBeDefined()
+		})
+
+		it("updateTreeRootMeta re-parses only its own tree", async () => {
+			writeStore()
+
+			const offline = await createOffline()
+			const metaB = await offline.readDirectoryMeta(treeB)
+
+			await offline.readDirectoryMeta(treeA)
+
+			const textSpy = vi.spyOn(File.prototype, "text")
+
+			await offline.updateTreeRootMeta({ uuid: treeA, item: makeDirItem(treeA, "A2"), parent })
+
+			expect((await offline.readDirectoryMeta(treeA)).item.data.decryptedMeta.name).toBe("A2")
+			expect(await offline.readDirectoryMeta(treeB)).toBe(metaB)
+			expect(textSpy).toHaveBeenCalledTimes(1)
+
+			textSpy.mockRestore()
+		})
+
+		it("removeItem drops the removed tree's meta and keeps the other tree's", async () => {
+			writeStore()
+
+			const offline = await createOffline()
+
+			await offline.updateIndex()
+
+			const metaB = await offline.readDirectoryMeta(treeB)
+
+			await offline.removeItem(makeDirItem(treeA, "A"))
+
+			expect(await offline.readDirectoryMeta(treeA)).toBeNull()
+			expect(await offline.readDirectoryMeta(treeB)).toBe(metaB)
+			expect(offline.indexCache.directories[treeA]).toBeUndefined()
+		})
+
+		it("caches a broken standalone meta until this class rewrites it", async () => {
+			writeFileData(fileS, "s.txt")
+			fs.set(`${FILES_DIR_URI}/${fileS}/${fileS}.filenmeta`, new Uint8Array([0xff, 0xfe]))
+
+			const offline = await createOffline()
+			const textSpy = vi.spyOn(File.prototype, "text")
+
+			expect((await offline.listBrokenStandaloneUuids()).map((entry: { uuid: string }) => entry.uuid)).toEqual([fileS])
+			expect((await offline.listBrokenStandaloneUuids()).map((entry: { uuid: string }) => entry.uuid)).toEqual([fileS])
+			expect(textSpy).toHaveBeenCalledTimes(1)
+
+			textSpy.mockRestore()
+
+			await offline.renameStandaloneFile({ item: makeFileItem(fileS, "s.txt"), parent })
+
+			expect(await offline.listBrokenStandaloneUuids()).toEqual([])
+		})
+
+		it("an in-flight standalone read racing a write does not cache the old meta", async () => {
+			writeFileMeta(fileS, { item: makeFileItem(fileS, "old.txt"), parent })
+
+			const offline = await createOffline()
+			const pending = offline.readStandaloneMeta(fileS)
+
+			writeFileMeta(fileS, { item: makeFileItem(fileS, "new.txt"), parent })
+			offline.invalidateStandaloneMeta(fileS)
+
+			await pending
+
+			expect((await offline.readStandaloneMeta(fileS)).item.data.decryptedMeta.name).toBe("new.txt")
+		})
+
+		it("an in-flight tree read racing a write does not cache the old meta", async () => {
+			writeDirectoryMeta(treeA, { item: makeDirItem(treeA, "Old"), parent, entries: makeEntries({}) })
+
+			const offline = await createOffline()
+			const pending = offline.readDirectoryMeta(treeA)
+
+			writeDirectoryMeta(treeA, { item: makeDirItem(treeA, "New"), parent, entries: makeEntries({}) })
+			offline.invalidateTreeMeta(treeA)
+
+			await pending
+
+			expect((await offline.readDirectoryMeta(treeA)).item.data.decryptedMeta.name).toBe("New")
+		})
+
+		it("a read in flight across a full clear does not cache", async () => {
+			writeDirectoryMeta(treeA, { item: makeDirItem(treeA, "Old"), parent, entries: makeEntries({}) })
+			writeFileMeta(fileS, { item: makeFileItem(fileS, "old.txt"), parent })
+
+			const offline = await createOffline()
+			const pendingTree = offline.readDirectoryMeta(treeA)
+			const pendingFile = offline.readStandaloneMeta(fileS)
+
+			offline.invalidateAllMetas()
+			writeDirectoryMeta(treeA, { item: makeDirItem(treeA, "New"), parent, entries: makeEntries({}) })
+			writeFileMeta(fileS, { item: makeFileItem(fileS, "new.txt"), parent })
+
+			await Promise.all([pendingTree, pendingFile])
+
+			expect((await offline.readDirectoryMeta(treeA)).item.data.decryptedMeta.name).toBe("New")
+			expect((await offline.readStandaloneMeta(fileS)).item.data.decryptedMeta.name).toBe("new.txt")
+		})
+
+		it("clearAll drops every parsed meta", async () => {
+			writeStore()
+
+			const offline = await createOffline()
+
+			await offline.updateIndex()
+
+			expect(await offline.readDirectoryMeta(treeA)).not.toBeNull()
+			expect(await offline.readStandaloneMeta(fileS)).not.toBeNull()
+
+			await offline.clearAll()
+
+			expect(await offline.readDirectoryMeta(treeA)).toBeNull()
+			expect(await offline.readStandaloneMeta(fileS)).toBeNull()
+		})
 	})
 
 	describe("listBrokenTreeUuids", () => {
@@ -6189,6 +6730,84 @@ describe("Offline", () => {
 			const offline = await createOffline()
 
 			await expect(offline.removeTreeDirectory("22222222-2222-2222-2222-222222222222")).resolves.toBeUndefined()
+		})
+	})
+
+	describe("reads racing a commit", () => {
+		const uuid = "11111111-1111-1111-1111-111111111111"
+		const parent = makeParent("22222222-2222-2222-2222-222222222222")
+
+		// Holds the next meta text() read open: its content is taken at call time, as a native read
+		// that opened the file before an atomic rename would return the pre-commit bytes.
+		function gateNextTextRead(): { started: Promise<void>; release: () => void } {
+			let release!: () => void
+			let markStarted!: () => void
+			const gate = new Promise<void>(resolve => {
+				release = resolve
+			})
+			const started = new Promise<void>(resolve => {
+				markStarted = resolve
+			})
+
+			vi.spyOn(File.prototype, "text").mockImplementationOnce(function (this: File) {
+				const content = this.textSync()
+
+				markStarted()
+
+				return gate.then(() => content)
+			})
+
+			return { started, release }
+		}
+
+		afterEach(() => {
+			vi.restoreAllMocks()
+		})
+
+		it("a listing that started before a commit does not repopulate the cleared cache", async () => {
+			writeFileData(uuid, "old.txt")
+			writeFileMeta(uuid, { item: makeFileItem(uuid, "old.txt"), parent })
+
+			const offline = await createOffline()
+			const { started, release } = gateNextTextRead()
+			const listing = offline.listFiles()
+
+			await started
+			await offline.renameStandaloneFile({ item: makeFileItem(uuid, "new.txt"), parent })
+
+			release()
+
+			// The racing read itself still answers with what it read.
+			expect((await listing)[0].item.data.decryptedMeta.name).toBe("old.txt")
+			expect(offline.listFilesCache).toBeNull()
+			expect((await offline.listFiles())[0].item.data.decryptedMeta.name).toBe("new.txt")
+		})
+
+		it("a commit landing mid-rebuild is not covered by that rebuild's no-mutation skip", async () => {
+			writeFileData(uuid, "old.txt")
+			writeFileMeta(uuid, { item: makeFileItem(uuid, "old.txt"), parent })
+
+			const offline = await createOffline()
+
+			await offline.updateIndex()
+			await offline.renameStandaloneFile({ item: makeFileItem(uuid, "mid.txt"), parent })
+
+			const { started, release } = gateNextTextRead()
+			const rebuild = offline.updateIndex()
+
+			await started
+			await offline.renameStandaloneFile({ item: makeFileItem(uuid, "new.txt"), parent })
+
+			release()
+
+			await rebuild
+
+			expect(offline.indexCache.files[uuid].item.data.decryptedMeta.name).toBe("mid.txt")
+			expect(offline.uuidToTopLevelCache).not.toBeNull()
+
+			await offline.updateIndex()
+
+			expect(offline.indexCache.files[uuid].item.data.decryptedMeta.name).toBe("new.txt")
 		})
 	})
 

@@ -9,7 +9,7 @@ import auth from "@/lib/auth"
 import { normalizeFilePathForSdk } from "@/lib/paths"
 import { wrapAbortSignalForSdk, disposeSdkAbortSignal, toSignalOpts } from "@/lib/signals"
 import { ensureDirectory, sumLocalDirectoryFileBytes } from "@/lib/fsUtils"
-import { DiskCache, cacheItemId, planGcCapEviction, type GcSurvivor } from "@/lib/diskCache"
+import { DiskCache, cacheItemId, gcIdleUntil, planGcCapEviction, type GcSurvivor } from "@/lib/diskCache"
 import offline from "@/features/offline/offline"
 import { FILE_CACHE_PARENT_DIRECTORY } from "@/lib/storageRoots"
 import { metaFileName } from "@/lib/metaFile"
@@ -195,6 +195,8 @@ export class FileCache extends DiskCache {
 						// Still torn under the lock — fall through to the delete.
 					}
 
+					this.noteWrite()
+
 					try {
 						metadata.delete()
 					} catch {
@@ -257,6 +259,14 @@ export class FileCache extends DiskCache {
 					}
 				}
 			}
+
+			// Covers the corrupt-sidecar delete above and getFiles' directory creation: both only happen
+			// on this miss path, in the same synchronous run.
+			this.noteWrite()
+
+			defer(() => {
+				this.noteWrite()
+			})
 
 			ensureDirectory(parentDirectory)
 
@@ -374,7 +384,7 @@ export class FileCache extends DiskCache {
 		})
 	}
 
-	protected async runGc(age?: number): Promise<void> {
+	protected async runGc(age?: number): Promise<number | null> {
 		const toDelete: string[] = []
 		const survivors: GcSurvivor[] = []
 		const now = Date.now()
@@ -436,6 +446,7 @@ export class FileCache extends DiskCache {
 		)
 
 		const { evict: capEvict, plannedCachedAt: capCachedAt } = planGcCapEviction(survivors, CACHE_MAX_SIZE_BYTES)
+		const idleUntil = gcIdleUntil(toDelete.length > 0 || capEvict.length > 0, survivors, ttlMs)
 
 		await Promise.all(
 			[...toDelete, ...capEvict].map(async uuid => {
@@ -483,6 +494,8 @@ export class FileCache extends DiskCache {
 				})
 			})
 		)
+
+		return idleUntil
 	}
 }
 

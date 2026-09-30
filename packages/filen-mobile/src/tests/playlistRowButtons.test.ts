@@ -31,7 +31,7 @@ vi.mock("@/features/audio/audio", () => ({
 		addFilesToPlaylist: vi.fn(),
 		savePlaylist: vi.fn()
 	},
-	useAudioQueue: vi.fn(() => ({ queueItem: null }))
+	useAudioQueueSelector: vi.fn(() => false)
 }))
 
 vi.mock("@/features/drive/driveSelectSession", () => ({

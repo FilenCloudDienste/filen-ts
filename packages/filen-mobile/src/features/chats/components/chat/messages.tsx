@@ -1,4 +1,4 @@
-import { useRef, useState } from "react"
+import { useEffect, useId, useRef, useState } from "react"
 import { type Chat as TChat } from "@/types"
 import View, { CrossGlassContainerView } from "@/components/ui/view"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
@@ -35,7 +35,10 @@ const Messages = ({ chat }: { chat: TChat }) => {
 	const keyboardAnimation = useReanimatedKeyboardAnimation()
 	const inputViewLayout = useChatsStore(useShallow(state => state.inputViewLayout))
 	const listRef = useRef<ListRef<ChatMessageWithInflightId>>(null)
-	const [fetchedMessages, setFetchedMessages] = useState<ChatMessageWithInflightId[]>([])
+	// Older pages sit in the store so edits, deletes and embed toggles reach them; still per mount.
+	const olderMessagesId = useId()
+	const fetchedMessages = useChatsStore(state => state.olderMessages[olderMessagesId]?.messages ?? EMPTY_MESSAGES)
+	const mountedRef = useRef<boolean>(false)
 	const textMutedForeground = useResolveClassNames("text-muted-foreground")
 	const textForeground = useResolveClassNames("text-foreground")
 	const [isFetchingMore, setIsFetchingMore] = useState<boolean>(false)
@@ -44,6 +47,16 @@ const Messages = ({ chat }: { chat: TChat }) => {
 	const { onLayout, layout } = useViewLayout()
 	const [scrolledUp, setScrolledUp] = useState<boolean>(false)
 	const scrolledUpRef = useRef<boolean>(false)
+
+	useEffect(() => {
+		mountedRef.current = true
+
+		return () => {
+			mountedRef.current = false
+
+			useChatsStore.getState().clearOlderMessages(olderMessagesId)
+		}
+	}, [olderMessagesId])
 
 	const onScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
 		const next = e.nativeEvent.contentOffset.y > SCROLL_THRESHOLD
@@ -209,9 +222,16 @@ const Messages = ({ chat }: { chat: TChat }) => {
 
 						if (result.data.length === 0) {
 							hasMoreRef.current = false
+
+							return
 						}
 
-						setFetchedMessages(prev => [...prev, ...result.data])
+						// A page landing after unmount would otherwise outlive the screen in the store.
+						if (!mountedRef.current) {
+							return
+						}
+
+						useChatsStore.getState().appendOlderMessages(olderMessagesId, chat.uuid, result.data)
 					}}
 					maintainVisibleContentPosition={{
 						disabled: true

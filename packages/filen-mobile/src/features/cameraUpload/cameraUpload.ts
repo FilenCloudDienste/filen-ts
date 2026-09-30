@@ -216,6 +216,9 @@ const remoteFileMetaCache = new WeakMap<object, UnwrapFileMetaResult>()
 
 const NO_REMOTE_CONTENT_HASHES: ReadonlySet<string> = new Set()
 
+// directory -> content size -> BLAKE3 hashes, raw until the bucket is first looked up.
+type RemoteContentHashIndex = Map<string, Map<number, ArrayBuffer[] | Set<string>>>
+
 /**
  * Remote content hashes for each directory, grouped by the SIZE of the content they belong to.
  *
@@ -236,8 +239,8 @@ const NO_REMOTE_CONTENT_HASHES: ReadonlySet<string> = new Set()
  * here. That is the safe direction: an absent hash can only fail to cancel an upload, never cancel
  * one it should not have.
  */
-function buildRemoteContentHashIndex(tree: RemoteTree): Map<string, Map<number, Set<string>>> {
-	const index = new Map<string, Map<number, Set<string>>>()
+function buildRemoteContentHashIndex(tree: RemoteTree): RemoteContentHashIndex {
+	const index: RemoteContentHashIndex = new Map()
 
 	for (const path in tree) {
 		const entry = tree[path]
@@ -256,7 +259,7 @@ function buildRemoteContentHashIndex(tree: RemoteTree): Map<string, Map<number, 
 		let bySize = index.get(directory)
 
 		if (!bySize) {
-			bySize = new Map<number, Set<string>>()
+			bySize = new Map()
 
 			index.set(directory, bySize)
 		}
@@ -264,14 +267,36 @@ function buildRemoteContentHashIndex(tree: RemoteTree): Map<string, Map<number, 
 		const size = Number(meta.size)
 		const hashes = bySize.get(size)
 
-		if (hashes) {
-			hashes.add(blake3ToHex(meta.hash))
+		// Raw until first lookup (see remoteContentHashBucket): only the buckets a delta actually asks
+		// about pay the hex encoding. The buffers are uniffi's own copies, already held by the listing.
+		if (Array.isArray(hashes)) {
+			hashes.push(meta.hash)
 		} else {
-			bySize.set(size, new Set([blake3ToHex(meta.hash)]))
+			bySize.set(size, [meta.hash])
 		}
 	}
 
 	return index
+}
+
+// Hex-encodes a bucket once, on first lookup, and keeps the Set in its place.
+function remoteContentHashBucket(index: RemoteContentHashIndex, directory: string, size: number): ReadonlySet<string> {
+	const bySize = index.get(directory)
+	const bucket = bySize?.get(size)
+
+	if (!bySize || !bucket) {
+		return NO_REMOTE_CONTENT_HASHES
+	}
+
+	if (!Array.isArray(bucket)) {
+		return bucket
+	}
+
+	const hexes = new Set(bucket.map(blake3ToHex))
+
+	bySize.set(size, hexes)
+
+	return hexes
 }
 
 // Both of these scale with library size and are the two pre-upload phases that hold the JS thread —
@@ -465,15 +490,13 @@ class CameraUpload {
 		}
 
 		// The destination is the tmp staging file, which ALWAYS exists by construction
-		// (the asset was copied into it before compress() was called). Native copy throws
-		// when the destination exists unless overwrite is requested.
-		await manipulatedFile.copy(file, {
+		// (the asset was copied into it before compress() was called). Native move throws
+		// when the destination exists unless overwrite is requested. Both live under the
+		// cache dir, so this is a rename rather than a second full write. After the move
+		// `manipulatedFile` points at `file`'s path, so it must not be deleted.
+		await manipulatedFile.move(file, {
 			overwrite: true
 		})
-
-		if (manipulatedFile.exists) {
-			manipulatedFile.delete()
-		}
 
 		// Correct the extension to .jpg since the content is now JPEG.
 		// File.move() updates the uri property in place.
@@ -1568,7 +1591,7 @@ class CameraUpload {
 
 			// Built on FIRST USE, not up front: a steady-state pass answers every delta from the mtime
 			// shield and never reaches the content check, so it must not pay to walk the remote tree.
-			let remoteContentHashes: Map<string, Map<number, Set<string>>> | null = null
+			let remoteContentHashes: RemoteContentHashIndex | null = null
 
 			// Candidates are narrowed by SIZE before anything is read: only content of the same length
 			// can share a hash, so an empty result means the check provably cannot hit and the caller
@@ -1581,7 +1604,7 @@ class CameraUpload {
 
 				remoteContentHashes ??= buildRemoteContentHashIndex(remoteListing.tree)
 
-				return remoteContentHashes.get(parentTreePath(treePath))?.get(size) ?? NO_REMOTE_CONTENT_HASHES
+				return remoteContentHashBucket(remoteContentHashes, parentTreePath(treePath), size)
 			}
 
 			// One definition for all three soft-stop checkpoints below (see deadlineAt on sync()). A pass

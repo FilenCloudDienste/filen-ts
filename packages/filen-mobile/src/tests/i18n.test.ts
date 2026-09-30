@@ -1,19 +1,31 @@
 import { vi, describe, it, expect, beforeEach } from "vitest"
+import type { createInstance as CreateInstance } from "i18next"
 
-const { mockSecureStoreGet, mockSecureStoreSet, mockGetLocales, mockSetIntlLanguage, mockI18nInit, mockI18nChangeLanguage } = vi.hoisted(
-	() => {
-		const mockI18nInit = vi.fn().mockResolvedValue(undefined)
-		const mockI18nChangeLanguage = vi.fn().mockResolvedValue(undefined)
-		return {
-			mockSecureStoreGet: vi.fn(),
-			mockSecureStoreSet: vi.fn(),
-			mockGetLocales: vi.fn(),
-			mockSetIntlLanguage: vi.fn(),
-			mockI18nInit,
-			mockI18nChangeLanguage
-		}
+const {
+	mockSecureStoreGet,
+	mockSecureStoreSet,
+	mockGetLocales,
+	mockSetIntlLanguage,
+	mockI18nInit,
+	mockI18nChangeLanguage,
+	mockI18nHasResourceBundle,
+	mockI18nAddResourceBundle,
+	mockLoadCatalog
+} = vi.hoisted(() => {
+	const mockI18nInit = vi.fn().mockResolvedValue(undefined)
+	const mockI18nChangeLanguage = vi.fn().mockResolvedValue(undefined)
+	return {
+		mockSecureStoreGet: vi.fn(),
+		mockSecureStoreSet: vi.fn(),
+		mockGetLocales: vi.fn(),
+		mockSetIntlLanguage: vi.fn(),
+		mockI18nInit,
+		mockI18nChangeLanguage,
+		mockI18nHasResourceBundle: vi.fn(),
+		mockI18nAddResourceBundle: vi.fn(),
+		mockLoadCatalog: vi.fn()
 	}
-)
+})
 
 vi.mock("@/lib/secureStore", () => ({
 	default: {
@@ -37,6 +49,8 @@ vi.mock("i18next", () => {
 	const i18nMock = {
 		use: vi.fn().mockReturnValue(useReturn),
 		changeLanguage: mockI18nChangeLanguage,
+		hasResourceBundle: mockI18nHasResourceBundle,
+		addResourceBundle: mockI18nAddResourceBundle,
 		t: vi.fn((key: string) => key)
 	}
 	return { default: i18nMock }
@@ -49,10 +63,16 @@ vi.mock("react-i18next", () => ({
 	initReactI18next: { type: "3rdParty", init: vi.fn() }
 }))
 
-// Mock @/locales/vi.json as an empty stub so we can exercise the "no translations yet"
-// branch of hasTranslations without relying on the CI pipeline ever producing an empty
-// bundle in production. Vietnamese is chosen arbitrarily; any target language would do.
-vi.mock("@/locales/vi.json", () => ({ default: {} }))
+// The real loaders are Metro inline requires, which Node's resolver cannot follow through the
+// "@/" alias. Each mocked loader records which catalog was evaluated; vi stands in for an empty
+// stub catalog (the "no translations yet" branch of hasTranslations).
+vi.mock("@/locales/catalogs", async () => {
+	const { SUPPORTED_LANGUAGES } = await import("@/locales/languages")
+
+	return {
+		CATALOG_LOADERS: Object.fromEntries(SUPPORTED_LANGUAGES.filter(lang => lang !== "en").map(lang => [lang, () => mockLoadCatalog(lang)]))
+	}
+})
 
 import { getInitialLanguage, initI18n, changeAppLanguage, hasTranslations } from "@/lib/i18n"
 import { LANGUAGE_SECURE_STORE_KEY } from "@/lib/language"
@@ -64,6 +84,8 @@ beforeEach(() => {
 	mockGetLocales.mockReturnValue([])
 	mockI18nInit.mockResolvedValue(undefined)
 	mockI18nChangeLanguage.mockResolvedValue(undefined)
+	mockI18nHasResourceBundle.mockReturnValue(false)
+	mockLoadCatalog.mockImplementation((lang: string) => (lang === "vi" ? {} : { key: `${lang}-value` }))
 })
 
 describe("getInitialLanguage", () => {
@@ -262,17 +284,34 @@ describe("initI18n", () => {
 		expect(initArg["nsSeparator"]).toBe(false)
 	})
 
-	it("registers every supported language in the resources bundle", async () => {
-		mockSecureStoreGet.mockResolvedValue(null)
+	it.each([
+		["en", ["en"]],
+		["de", ["en", "de"]],
+		["pt-BR", ["en", "pt-BR"]],
+		["zh", ["en", "zh"]],
+		["zh-TW", ["en", "zh-TW", "zh"]]
+	])("registers only en plus the resolve chain of %s at init", async (lng, expected) => {
+		mockSecureStoreGet.mockResolvedValue(lng)
 
 		await initI18n()
 
 		const initArg: Record<string, unknown> = mockI18nInit.mock.calls[0]?.[0]
-		const resources = initArg["resources"] as Record<string, unknown>
+		const resources = initArg["resources"] as Record<string, { translation: unknown }>
 
-		for (const lang of SUPPORTED_LANGUAGES) {
-			expect(resources).toHaveProperty(lang)
+		expect(Object.keys(resources).sort()).toEqual([...expected].sort())
+		expect(mockLoadCatalog.mock.calls.map(call => call[0]).sort()).toEqual(expected.filter(lang => lang !== "en").sort())
+
+		for (const lang of expected.filter(lang => lang !== "en")) {
+			expect(resources[lang]?.translation).toEqual({ key: `${lang}-value` })
 		}
+	})
+
+	it("keeps supportedLngs as the full language list", async () => {
+		await initI18n()
+
+		const initArg: Record<string, unknown> = mockI18nInit.mock.calls[0]?.[0]
+
+		expect(initArg["supportedLngs"]).toEqual([...SUPPORTED_LANGUAGES])
 	})
 
 	it("calls setIntlLanguage with the device languageTag (not the bare language code) after init", async () => {
@@ -307,6 +346,95 @@ describe("changeAppLanguage", () => {
 		const i18nMock = (await import("i18next")).default
 		expect(i18nMock.changeLanguage).toHaveBeenCalledTimes(1)
 		expect(i18nMock.changeLanguage).toHaveBeenCalledWith("de")
+	})
+
+	it("registers the target catalog and its supported base before changeLanguage (zh-TW → zh-TW, zh)", async () => {
+		await changeAppLanguage("zh-TW")
+
+		expect(mockI18nAddResourceBundle).toHaveBeenCalledTimes(2)
+		expect(mockI18nAddResourceBundle).toHaveBeenNthCalledWith(1, "zh-TW", "translation", { key: "zh-TW-value" }, false, true, {
+			silent: true,
+			skipCopy: true
+		})
+		expect(mockI18nAddResourceBundle).toHaveBeenNthCalledWith(2, "zh", "translation", { key: "zh-value" }, false, true, {
+			silent: true,
+			skipCopy: true
+		})
+
+		const lastAdd = Math.max(...mockI18nAddResourceBundle.mock.invocationCallOrder)
+
+		expect(mockI18nChangeLanguage.mock.invocationCallOrder[0]).toBeGreaterThan(lastAdd)
+	})
+
+	it("does not reload a catalog that is already registered", async () => {
+		mockI18nHasResourceBundle.mockImplementation((lng: string) => lng === "zh")
+
+		await changeAppLanguage("zh-TW")
+
+		expect(mockLoadCatalog).toHaveBeenCalledTimes(1)
+		expect(mockLoadCatalog).toHaveBeenCalledWith("zh-TW")
+		expect(mockI18nAddResourceBundle).toHaveBeenCalledTimes(1)
+	})
+
+	it("registers nothing when switching to en", async () => {
+		await changeAppLanguage("en")
+
+		expect(mockLoadCatalog).not.toHaveBeenCalled()
+		expect(mockI18nAddResourceBundle).not.toHaveBeenCalled()
+		expect(mockI18nChangeLanguage).toHaveBeenCalledWith("en")
+	})
+
+	it("a catalog chain registered before changeLanguage resolves exactly like preloaded resources (real i18next)", async () => {
+		const { createInstance } = await vi.importActual<{ createInstance: typeof CreateInstance }>("i18next")
+		const keys = ["name", "message", "error"] as const
+		const catalogs = {
+			en: { name: "A", message: "B", error: "C" },
+			zh: { name: "zhA", message: "zhB" },
+			"zh-TW": { name: "twA" }
+		}
+		const options = {
+			fallbackLng: "en",
+			supportedLngs: ["en", "zh", "zh-TW"],
+			keySeparator: false as const,
+			nsSeparator: false as const,
+			interpolation: {
+				escapeValue: false
+			}
+		}
+		const preloaded = createInstance()
+
+		await preloaded.init({
+			...options,
+			lng: "zh-TW",
+			resources: {
+				en: { translation: catalogs.en },
+				zh: { translation: catalogs.zh },
+				"zh-TW": { translation: catalogs["zh-TW"] }
+			}
+		})
+
+		const lazy = createInstance()
+
+		await lazy.init({
+			...options,
+			lng: "en",
+			resources: {
+				en: { translation: catalogs.en }
+			}
+		})
+
+		lazy.addResourceBundle("zh-TW", "translation", catalogs["zh-TW"], false, true, { silent: true, skipCopy: true })
+		lazy.addResourceBundle("zh", "translation", catalogs.zh, false, true, { silent: true, skipCopy: true })
+
+		await lazy.changeLanguage("zh-TW")
+
+		expect(lazy.languages).toEqual(preloaded.languages)
+
+		for (const key of keys) {
+			expect(lazy.t(key)).toBe(preloaded.t(key))
+		}
+
+		expect(keys.map(key => lazy.t(key))).toEqual(["twA", "zhB", "C"])
 	})
 
 	it("calls setIntlLanguage with the device languageTag (not the bare language code) as a side effect", async () => {
@@ -374,14 +502,13 @@ describe("hasTranslations", () => {
 		expect(hasTranslations("en")).toBe(true)
 	})
 
-	it("returns true for a target language whose bundle has at least one key (de)", () => {
-		// de.json is fully translated; Object.keys(bundle).length > 0 must be true.
+	it("returns true for a target language whose catalog has at least one key (de)", () => {
 		expect(hasTranslations("de")).toBe(true)
+		expect(mockLoadCatalog).toHaveBeenCalledWith("de")
 	})
 
-	it("returns false for a target language whose bundle is an empty stub (vi mocked as {})", () => {
-		// vi.json is mocked to {} at the top of this file to simulate the CI pipeline
-		// pre-filling a new-language stub. The picker must not offer it.
+	it("returns false for a target language whose catalog is an empty stub (vi mocked as {})", () => {
+		// Simulates the CI pipeline pre-filling a new-language stub. The picker must not offer it.
 		expect(hasTranslations("vi")).toBe(false)
 	})
 })

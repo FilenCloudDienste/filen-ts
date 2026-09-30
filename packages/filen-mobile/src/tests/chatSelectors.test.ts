@@ -4,9 +4,10 @@ import {
 	allVisibleChatsSelected,
 	EMPTY_CHAT_FLAGS,
 	chatHasUnread,
-	isMessageUnread,
+	countUnreadMessages,
 	cachedMessagesMatchLastMessage
 } from "@/features/chats/chatSelectors"
+import { deriveBlockedUsers, isBlocked, isMessageUnreadCore, type BlockedUsers } from "@filen/shared"
 import type { ChatParticipant } from "@filen/sdk-rs"
 import type { Chat, ChatMessage } from "@/types"
 import type { ChatMessageWithInflightId } from "@/features/chats/store/useChats.store"
@@ -309,51 +310,88 @@ describe("aggregateChatSelectionFlags includesUndecryptable", () => {
 	})
 })
 
-// Raw predicate coverage (muted/lastFocus/self/boundary matrices) moved to @filen/shared's
+// Raw predicate coverage (muted/lastFocus/self/boundary matrices) lives in @filen/shared's
 // src/tests/chatUnread.test.ts (isMessageUnreadCore) — these are thin adapter tests proving mobile's
 // nested `.inner.senderId`/`.inner.senderEmail` shape and `lastFocus`/`lastMessage` mapping wire
 // correctly into the shared core.
-describe("isMessageUnread", () => {
-	it("returns false when userId is undefined (settled behaviour: userId === undefined ⇒ not unread)", () => {
-		// Previously asserted `true` (mobile's own predicate had no undefined-userId guard). The
-		// shared core settles this the other way — see chatUnread.test.ts for the full rationale.
+describe("countUnreadMessages adapter mapping", () => {
+	it("0 when userId is undefined (settled behaviour: userId === undefined ⇒ not unread)", () => {
 		const msg = chatMessage(SOMEONE_ELSE, 200n)
 		const c = chat({
 			lastFocus: 100n as unknown as Chat["lastFocus"],
 			lastMessage: chatMessage(SOMEONE_ELSE, 200n)
 		})
 
-		expect(isMessageUnread(msg, c, undefined)).toBe(false)
+		expect(countUnreadMessages([msg], c, undefined)).toBe(0)
 	})
 
-	it("returns false when chat.lastFocus is explicitly null (defensive null-guard mapping)", () => {
+	it("0 when chat.lastFocus is explicitly null (defensive null-guard mapping)", () => {
 		const msg = chatMessage(SOMEONE_ELSE, 200n)
 		const c = chat({
 			lastFocus: null as unknown as Chat["lastFocus"],
 			lastMessage: chatMessage(SOMEONE_ELSE, 200n)
 		})
 
-		expect(isMessageUnread(msg, c, ME)).toBe(false)
+		expect(countUnreadMessages([msg], c, ME)).toBe(0)
 	})
 
-	it("returns false when chat has no lastMessage (hasLastMessage derived from `!!chat.lastMessage`)", () => {
+	it("0 when chat has no lastMessage (hasLastMessage derived from `!!chat.lastMessage`)", () => {
 		const msg = chatMessage(SOMEONE_ELSE, 200n)
 		const c = chat({
 			lastFocus: 100n as unknown as Chat["lastFocus"]
 			// no lastMessage
 		})
 
-		expect(isMessageUnread(msg, c, ME)).toBe(false)
+		expect(countUnreadMessages([msg], c, ME)).toBe(0)
 	})
 
-	it("returns true when sentTimestamp > lastFocus and sender is someone else", () => {
+	it("1 when sentTimestamp > lastFocus and sender is someone else", () => {
 		const msg = chatMessage(SOMEONE_ELSE, 200n)
 		const c = chat({
 			lastFocus: 100n as unknown as Chat["lastFocus"],
 			lastMessage: msg
 		})
 
-		expect(isMessageUnread(msg, c, ME)).toBe(true)
+		expect(countUnreadMessages([msg], c, ME)).toBe(1)
+	})
+})
+
+// The per-message predicate countUnreadMessages must match: the shared core behind mobile's adapter mapping.
+function isMessageUnreadOracle(message: ChatMessage, c: Chat, userId: bigint | undefined, blocked: BlockedUsers): boolean {
+	return isMessageUnreadCore(
+		{ sentTimestamp: message.sentTimestamp, senderId: message.inner.senderId, senderEmail: message.inner.senderEmail },
+		{ muted: c.muted, lastFocus: c.lastFocus ?? undefined, hasLastMessage: !!c.lastMessage },
+		userId,
+		sender => isBlocked(sender, blocked)
+	)
+}
+
+describe("countUnreadMessages", () => {
+	const BLOCKED = 99n
+	const blocked = deriveBlockedUsers([{ uuid: "x", userId: BLOCKED, email: "spam@x.com", avatar: undefined, nickName: "S", timestamp: 0n }] as never)
+	const byEmail = { ...chatMessage(300n, 500n), inner: { senderId: 300n, senderEmail: "spam@x.com" } } as unknown as ChatMessage
+	const messages = [
+		chatMessage(SOMEONE_ELSE, 200n),
+		chatMessage(SOMEONE_ELSE, 50n),
+		chatMessage(ME, 300n),
+		chatMessage(BLOCKED, 400n),
+		byEmail,
+		chatMessage(SOMEONE_ELSE, 600n)
+	]
+	const lastMessage = chatMessage(SOMEONE_ELSE, 600n)
+
+	it.each([
+		["plain", chat({ lastFocus: 100n as unknown as Chat["lastFocus"], lastMessage }), ME],
+		["muted", chat({ muted: true, lastFocus: 100n as unknown as Chat["lastFocus"], lastMessage }), ME],
+		["null lastFocus", chat({ lastFocus: null as unknown as Chat["lastFocus"], lastMessage }), ME],
+		["no lastMessage", chat({ lastFocus: 100n as unknown as Chat["lastFocus"] }), ME],
+		["no user", chat({ lastFocus: 100n as unknown as Chat["lastFocus"], lastMessage }), undefined]
+	])("equals the per-message predicate filter: %s", (_, c, userId) => {
+		expect(countUnreadMessages(messages, c, userId, blocked)).toBe(messages.filter(m => isMessageUnreadOracle(m, c, userId, blocked)).length)
+	})
+
+	it("skips own, already-read and blocked (by id or email) senders", () => {
+		expect(countUnreadMessages(messages, chat({ lastFocus: 100n as unknown as Chat["lastFocus"], lastMessage }), ME, blocked)).toBe(2)
 	})
 })
 

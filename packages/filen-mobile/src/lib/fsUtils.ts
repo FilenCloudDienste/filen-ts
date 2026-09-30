@@ -80,6 +80,16 @@ export function sumLocalDirectoryFileBytes(directory: FileSystem.Directory): num
 	return total
 }
 
+// One native call instead of a per-entry list() walk. Exact ONLY for a directory that holds no
+// subdirectories: iOS counts the size of directory entries too.
+export function flatDirectoryFileBytes(directory: FileSystem.Directory): number {
+	try {
+		return directory.exists ? (directory.size ?? 0) : 0
+	} catch {
+		return 0
+	}
+}
+
 // Returns a flat array of every entry. Use when the caller needs random access
 // to the array (e.g., `Promise.all(entries.map(...))`). For pure aggregation,
 // prefer `walkLocalDirectory` / `sumLocalDirectoryFileBytes`.

@@ -1,4 +1,4 @@
-import { useRef, Fragment, useEffect, useState } from "react"
+import { useRef, Fragment, useEffect, useLayoutEffect, useState } from "react"
 import TextEditorDOM from "@/components/textEditor/dom"
 import RichTextEditorDOM, { type QuillFormats, type HeaderLevel } from "@/components/textEditor/richText/dom"
 import { encodeEditorInitialValue } from "@/components/textEditor/initialValueCodec"
@@ -366,10 +366,8 @@ export const TextEditor = ({
 	}, [])
 
 	// Expose a STABLE dispatch wrapper to the route's header so it can render
-	// the rich-text toolbar inside the navigation bar. postMessage itself is
-	// re-created every render (onMessage is an inline closure), so we keep
-	// the latest in a ref and publish a single stable wrapper to the store.
-	// Cleared on unmount to prevent stale-closure invocations.
+	// the rich-text toolbar inside the navigation bar. Cleared on unmount to
+	// prevent stale-closure invocations.
 	const postMessageRef = useRef(postMessage)
 
 	useEffect(() => {
@@ -502,13 +500,25 @@ export const TextEditor = ({
 		}
 	}, [type, readOnly])
 
+	// Hosts pass a fresh closure per render; forwarding it directly would change the DOM element and
+	// re-send every prop, including the encoded seed, over the bridge.
+	const onValueChangeRef = useRef(onValueChange)
+
+	useLayoutEffect(() => {
+		onValueChangeRef.current = onValueChange
+	})
+
+	const forwardValueChange = useState(() => (value: string) => {
+		onValueChangeRef.current?.(value)
+	})[0]
+
 	const sharedProps = {
 		ref,
 		dom: {
 			...DOM_HOST_WEBVIEW_PROPS,
 			onMessage: onDomMessage
 		},
-		onValueChange,
+		onValueChange: onValueChange ? forwardValueChange : undefined,
 		initialValue: encodedInitialValue,
 		placeholder,
 		readOnly,

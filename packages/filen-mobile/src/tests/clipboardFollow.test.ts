@@ -14,6 +14,7 @@ const h = vi.hoisted(() => ({
 }))
 
 vi.mock("@filen/sdk-rs", async () => await import("@/tests/mocks/sdkRs"))
+vi.mock("@/lib/dotFilenDirectory", () => ({ clearDotFilenDirectoryMemo: vi.fn() }))
 vi.mock("@/lib/cache", () => ({
 	default: {
 		rootUuid: "root",

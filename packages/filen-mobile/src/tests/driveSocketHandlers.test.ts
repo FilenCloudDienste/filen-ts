@@ -113,11 +113,15 @@ vi.mock("@/features/drive/store/useDrive.store", () => ({
 
 vi.mock("@filen/sdk-rs", async () => await import("@/tests/mocks/sdkRs"))
 
+const { mockClearDotFilenDirectoryMemo } = vi.hoisted(() => ({ mockClearDotFilenDirectoryMemo: vi.fn() }))
+
+vi.mock("@/lib/dotFilenDirectory", () => ({ clearDotFilenDirectoryMemo: mockClearDotFilenDirectoryMemo }))
+
 // ---------------------------------------------------------------------------
 // Import the unit under test AFTER all vi.mock declarations
 // ---------------------------------------------------------------------------
 
-import { handleDriveEvent, type DriveSocketEvent } from "@/features/drive/socketHandlers"
+import { handleDriveEvent, handleDriveMalformedEvent, type DriveSocketEvent } from "@/features/drive/socketHandlers"
 import { DriveEvent_Tags, AnyNormalDir_Tags, NonRootItem_Tags, SocketEvent_Tags } from "@filen/sdk-rs"
 import logger from "@/lib/logger"
 import events from "@/lib/events"
@@ -1490,6 +1494,41 @@ describe("handleDriveEvent — drive socket handler", () => {
 				newParentUuid: "new-parent",
 				previousParentUuid: "old-parent"
 			})
+		})
+	})
+
+	describe(".filen directory memo", () => {
+		beforeEach(() => {
+			mockClearDotFilenDirectoryMemo.mockClear()
+		})
+
+		it("a directory trash, delete, move, rename, restore or create, or a delete-all, clears it", async () => {
+			mockUnwrapDirMeta.mockReturnValue({ uuid: "dir-1", meta: null })
+			mockUnwrappedDirIntoDriveItem.mockReturnValue({ type: "directory", data: { uuid: "dir-1" } })
+
+			await handleDriveEvent({ event: makeFolderTrashEvent("dir-1") })
+			await handleDriveEvent({ event: makeFolderDeletedPermanentEvent("dir-1") })
+			await handleDriveEvent({ event: makeFolderMoveEvent({ uuid: "dir-1", parent: {} }) })
+			await handleDriveEvent({ event: makeFolderMetadataChangedEvent("dir-1", {}) })
+			await handleDriveEvent({ event: makeDirWithParentEvent(DriveEvent_Tags.FolderRestore, { uuid: "dir-1", parent: {} }) })
+			await handleDriveEvent({ event: makeDirWithParentEvent(DriveEvent_Tags.FolderSubCreated, { uuid: "dir-1", parent: {} }) })
+			await handleDriveEvent({ event: makeEvent(DriveEvent_Tags.DeleteAll, {}) })
+
+			expect(mockClearDotFilenDirectoryMemo).toHaveBeenCalledTimes(7)
+		})
+
+		it("file events and directory colours leave it", async () => {
+			await handleDriveEvent({ event: makeFileDeletedPermanentEvent("file-1") })
+			await handleDriveEvent({ event: makeFileTrashEvent("file-1") })
+			await handleDriveEvent({ event: makeFolderColorChangedEvent("dir-1", "blue") })
+
+			expect(mockClearDotFilenDirectoryMemo).not.toHaveBeenCalled()
+		})
+
+		it("a drive event the SDK could not read clears it", () => {
+			handleDriveMalformedEvent()
+
+			expect(mockClearDotFilenDirectoryMemo).toHaveBeenCalledOnce()
 		})
 	})
 

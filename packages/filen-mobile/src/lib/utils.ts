@@ -1,11 +1,18 @@
-import mimeTypes from "mime-types"
-
 export function normalizeModificationTimestampForComparison(timestamp: number): number {
 	return Math.floor(timestamp / 1000)
 }
 
-export function resolveMimeType({ mime, name }: { mime: string | null | undefined; name: string }): string {
-	return mime || mimeTypes.lookup(name) || "application/octet-stream"
+// mime-types materializes all of mime-db at module load, so it stays out of the startup graph.
+export async function loadMimeTypes() {
+	return await import("mime-types")
+}
+
+export async function resolveMimeType({ mime, name }: { mime: string | null | undefined; name: string }): Promise<string> {
+	if (mime) {
+		return mime
+	}
+
+	return (await loadMimeTypes()).lookup(name) || "application/octet-stream"
 }
 
 export type BigIntToNumber<T> = T extends bigint

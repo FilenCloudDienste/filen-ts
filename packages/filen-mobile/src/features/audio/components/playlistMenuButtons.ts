@@ -108,18 +108,19 @@ export function buildSelectionMenuButtons({
 
 			let droppedUndecryptable = false
 
+			// One batch op: a single queue append instead of one per track.
 			await runBulk({
-				items: selectedTracks,
+				items: selectedTracks.length > 0 ? [selectedTracks] : [],
 				clearSelection: () => usePlaylistTracksStore.getState().clearSelectedTracks(),
-				op: async track => {
-					const added = await audio.addToQueue({
-						item: {
+				op: async tracks => {
+					const addedResults = await audio.appendToQueue(
+						tracks.map(track => ({
 							playlistUuid,
 							item: track.item
-						}
-					})
+						}))
+					)
 
-					if (!added) {
+					if (addedResults.some(added => !added)) {
 						droppedUndecryptable = true
 					}
 				}
@@ -311,15 +312,11 @@ export function playlistPlaybackButtons({ t, playlist }: { t: TFunction; playlis
 				const result = await runWithLoading(async () => {
 					const queueLengthBefore = audio.getQueue().length
 
-					const addedResults = await Promise.all(
-						playlist.files.map(async file => {
-							return await audio.addToQueue({
-								item: {
-									playlistUuid: playlist.uuid,
-									item: file.item
-								}
-							})
-						})
+					const addedResults = await audio.appendToQueue(
+						playlist.files.map(file => ({
+							playlistUuid: playlist.uuid,
+							item: file.item
+						}))
 					)
 
 					if (addedResults.some(added => !added)) {

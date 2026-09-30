@@ -31,8 +31,6 @@ export type Transfer = {
 } & (
 	| {
 			type: "uploadDirectory"
-			knownFiles: number
-			knownDirectories: number
 			errors: UploadErrors
 			localFileOrDir: FileSystem.File | FileSystem.Directory
 			parent: AnyNormalDir
@@ -64,12 +62,6 @@ export type Transfer = {
 	  }
 	| {
 			type: "downloadDirectory"
-			knownFiles: number
-			knownDirectories: number
-			directoryQueryProgress: {
-				bytesTransferred: number
-				totalBytes: number
-			}
 			errors: DownloadErrors
 			item: DriveItem
 			destination: FileSystem.Directory
@@ -186,13 +178,17 @@ function updateTransfers({
 	// toward 0 on a stalled connection.
 	if (!interval) {
 		interval = setInterval(() => {
-			useTransfersStore.setState(s =>
-				updateTransfers({
+			useTransfersStore.setState(s => {
+				const next = updateTransfers({
 					transfers: s.transfers,
 					state: s,
 					addToNextUpdateAt: false
 				})
-			)
+
+				// Returning the current state skips zustand's notify, so paused or stalled queues don't wake
+				// every subscriber 10x/s. The speed window above still advanced.
+				return next.stats === s.stats ? s : next
+			})
 		}, STATS_UPDATE_THROTTLE_MS)
 
 		// Establish a baseline anchor so the first measured interval produces
@@ -280,10 +276,13 @@ function updateTransfers({
 
 	return {
 		transfers,
-		stats: {
-			progress,
-			speed
-		}
+		stats:
+			progress === state.stats.progress && speed === state.stats.speed
+				? state.stats
+				: {
+						progress,
+						speed
+					}
 	}
 }
 

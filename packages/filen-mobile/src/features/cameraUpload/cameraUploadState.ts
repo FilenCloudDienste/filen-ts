@@ -1,5 +1,5 @@
 import sqlite from "@/lib/sqlite"
-import { forEachKvRowByPrefix, prefixUpperBound } from "@/lib/kvScan"
+import { forEachKvRowByPrefix, KV_SMALL_ROW_PAGE_SIZE, prefixUpperBound } from "@/lib/kvScan"
 import { serialize, deserialize } from "@/lib/serializer"
 import logger from "@/lib/logger"
 
@@ -164,14 +164,19 @@ export class CameraUploadState {
 
 			const badKeys: string[] = []
 
-			await forEachKvRowByPrefix(db, ledger.prefix, (rowKey, value) => {
-				// One corrupt row must not wipe the whole ledger — skip and drop just that row.
-				try {
-					scanned.set(rowKey.slice(ledger.prefix.length), ledger.parse(value))
-				} catch {
-					badKeys.push(rowKey)
-				}
-			})
+			await forEachKvRowByPrefix(
+				db,
+				ledger.prefix,
+				(rowKey, value) => {
+					// One corrupt row must not wipe the whole ledger — skip and drop just that row.
+					try {
+						scanned.set(rowKey.slice(ledger.prefix.length), ledger.parse(value))
+					} catch {
+						badKeys.push(rowKey)
+					}
+				},
+				KV_SMALL_ROW_PAGE_SIZE
+			)
 
 			if (badKeys.length > 0) {
 				logger.warn("cameraUploadState", `Dropping corrupt ${ledger.label.toLowerCase()} ledger rows`, { count: badKeys.length })

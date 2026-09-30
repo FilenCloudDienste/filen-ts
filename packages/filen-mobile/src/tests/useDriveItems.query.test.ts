@@ -364,6 +364,7 @@ vi.mock("@filen/sdk-rs", () => ({
 }))
 
 import {
+	driveItemsQueryUpdate,
 	driveItemsQueryUpdateForNormalParent,
 	driveItemsQueryUpdateRoot,
 	driveItemsQueryFindFileInNormalParent,
@@ -376,6 +377,7 @@ import { unwrapDirMeta, unwrapFileMeta, type UnwrapDirMetaResult, type UnwrapFil
 import { unwrapSdkError } from "@/lib/sdkErrors"
 import socketCreateBatcher from "@/features/drive/socketCreateBatcher"
 import { type DriveItem } from "@/types"
+import cache from "@/lib/cache"
 
 beforeEach(() => {
 	mockQueryUpdaterSet.mockClear()
@@ -645,6 +647,122 @@ describe("driveItemsQueryUpdateForNormalParent", () => {
 		driveItemsQueryUpdateForNormalParent({ parentUuid: "read-dir", updater: prev => prev.filter(i => i.data.uuid !== "absent") })
 
 		expect(mockQueryUpdaterSet.mock.calls.filter(c => (c[0] as unknown[])[0] === BASE_QUERY_KEY)).toHaveLength(0)
+	})
+})
+
+// ─── updateListing cache pass ───────────────────────────────────────────────
+
+describe("updateListing cache pass: rows the write introduced, not rows it kept", () => {
+	function fileItem(uuid: string, parent: string, name = uuid): DriveItem {
+		return { type: "file", data: { uuid, parent, decryptedMeta: { name } } } as unknown as DriveItem
+	}
+
+	it("an append keeps a fresher cache entry for an unchanged row and caches the new row", () => {
+		const stale = fileItem("x", "A")
+		const fresh = fileItem("x", "B")
+		const added = fileItem("y", "B")
+
+		cache.cacheDriveItem(fresh)
+		mockGetQueryState.mockReturnValue({ data: [stale] })
+
+		driveItemsQueryUpdateForNormalParent({ parentUuid: "some-parent", updater: prev => [...prev, added] })
+
+		expect(cacheUuidToAnyDriveItem.get("x")).toBe(fresh)
+		expect(cacheFileUuidToNormalFile.get("x")).toBe(fresh.data)
+		expect(cacheUuidToAnyDriveItem.get("y")).toBe(added)
+		expect(cacheFileUuidToNormalFile.get("y")).toBe(added.data)
+	})
+
+	it("re-caches an unchanged row whose uuid was forgotten", () => {
+		const kept = fileItem("x", "A")
+
+		mockGetQueryState.mockReturnValue({ data: [kept] })
+
+		driveItemsQueryUpdateForNormalParent({ parentUuid: "some-parent", updater: prev => [...prev, fileItem("y", "A")] })
+
+		expect(cacheUuidToAnyDriveItem.get("x")).toBe(kept)
+		expect(cacheFileUuidToNormalFile.get("x")).toBe(kept.data)
+	})
+
+	it("re-caches an unchanged row whose derived view is missing (a uuid-only reference from elsewhere)", () => {
+		const kept = fileItem("x", "A")
+
+		cache.cacheDriveItemReference(kept)
+		mockGetQueryState.mockReturnValue({ data: [kept] })
+
+		driveItemsQueryUpdateForNormalParent({ parentUuid: "some-parent", updater: prev => [...prev, fileItem("y", "A")] })
+
+		expect(cacheFileUuidToNormalFile.get("x")).toBe(kept.data)
+	})
+
+	it("caches a row a map replaced", () => {
+		const before = fileItem("x", "A", "old")
+		const after = fileItem("x", "A", "new")
+
+		cache.cacheDriveItem(before)
+		mockGetQueryState.mockReturnValue({ data: [before] })
+
+		driveItemsQueryUpdateForNormalParent({
+			parentUuid: "some-parent",
+			updater: prev => prev.map(item => (item.data.uuid === "x" ? after : item))
+		})
+
+		expect(cacheUuidToAnyDriveItem.get("x")).toBe(after)
+		expect(cacheFileUuidToNormalFile.get("x")).toBe(after.data)
+	})
+
+	it("re-caches an unchanged row the cache holds under another item type", () => {
+		const dir = { type: "directory", data: { uuid: "d", parent: "A" } } as unknown as DriveItem
+		const sharedOut = { type: "sharedDirectory", data: { uuid: "d", sharingRole: {} } } as unknown as DriveItem
+
+		cache.cacheDriveItem(sharedOut)
+		mockGetQueryState.mockReturnValue({ data: [dir] })
+
+		driveItemsQueryUpdateForNormalParent({ parentUuid: "some-parent", updater: prev => [...prev, fileItem("y", "A")] })
+
+		expect(cacheUuidToAnyDriveItem.get("d")).toBe(dir)
+		expect(cacheDirectoryUuidToAnyNormalDir.get("d")).toBe(dir)
+	})
+
+	it("a filter does not rewrite the rows it kept", () => {
+		const a = fileItem("a", "A")
+		const b = fileItem("b", "A")
+		const c = fileItem("c", "A")
+
+		for (const item of [a, b, c]) {
+			cache.cacheDriveItem(item)
+		}
+
+		mockGetQueryState.mockReturnValue({ data: [a, b, c] })
+
+		const spy = vi.spyOn(cache, "cacheDriveItem")
+
+		try {
+			driveItemsQueryUpdateForNormalParent({ parentUuid: "some-parent", updater: prev => prev.filter(item => item !== b) })
+
+			expect(spy).not.toHaveBeenCalled()
+			expect(mockQueryUpdaterSet.mock.calls.filter(call => (call[0] as unknown[])[0] === BASE_QUERY_KEY).at(-1)?.[1]).toEqual([
+				a,
+				c
+			])
+		} finally {
+			spy.mockRestore()
+		}
+	})
+
+	it("an offline listing references a new row and leaves an unchanged row's same-type entry alone", () => {
+		const kept = fileItem("x", "A")
+		const fresh = fileItem("x", "B")
+		const added = fileItem("y", "A")
+
+		cache.cacheDriveItem(fresh)
+		mockGetQueryState.mockReturnValue({ data: [kept] })
+
+		driveItemsQueryUpdate({ params: { path: { type: "offline", uuid: "" } }, updater: prev => [...prev, added] })
+
+		expect(cacheUuidToAnyDriveItem.get("x")).toBe(fresh)
+		expect(cacheUuidToAnyDriveItem.get("y")).toBe(added)
+		expect(cacheFileUuidToNormalFile.has("y")).toBe(false)
 	})
 })
 

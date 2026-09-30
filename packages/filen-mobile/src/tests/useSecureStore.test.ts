@@ -84,7 +84,7 @@ vi.mock("@/lib/paths", () => ({
 }))
 
 import { renderHook, act, waitFor } from "@testing-library/react"
-import secureStore, { useSecureStore } from "@/lib/secureStore"
+import secureStore, { useSecureStore, setSecureStoreValue } from "@/lib/secureStore"
 import { fs } from "@/tests/mocks/expoFileSystem"
 import * as expoSecureStoreMock from "@/tests/mocks/expoSecureStore"
 
@@ -749,6 +749,40 @@ describe("useSecureStore", () => {
 			// Both hooks must converge on the fully-merged value.
 			expect(hook1.current[0]).toEqual({ a: true, b: true })
 			expect(hook2.current[0]).toEqual({ a: true, b: true })
+		})
+	})
+
+	describe("setSecureStoreValue", () => {
+		it("persists the value and delivers it to hook instances on the key", async () => {
+			const { result } = renderHook(() => useSecureStore("writerKey", "initial"))
+
+			await act(async () => {
+				setSecureStoreValue("writerKey", "fromWriter")
+			})
+
+			await waitFor(() => {
+				expect(result.current[0]).toBe("fromWriter")
+			})
+
+			expect(await secureStore.get<string>("writerKey")).toBe("fromWriter")
+		})
+
+		it("queues behind a hook set on the same key, so the later call wins", async () => {
+			const { result: writer } = renderHook(() => useSecureStore("writerKey", ""))
+			const { result: observer } = renderHook(() => useSecureStore("writerKey", ""))
+
+			await act(async () => {
+				writer.current[1]("fromHook")
+				setSecureStoreValue("writerKey", "fromWriter")
+			})
+
+			await waitFor(async () => {
+				expect(await secureStore.get<string>("writerKey")).toBe("fromWriter")
+			})
+
+			await waitFor(() => {
+				expect(observer.current[0]).toBe("fromWriter")
+			})
 		})
 	})
 })

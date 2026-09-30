@@ -121,7 +121,7 @@ import loggerMock from "@/tests/mocks/logger"
 import { handleNoteEvent, type NoteSocketEvent } from "@/features/notes/socketHandlers"
 import { NoteEvent_Tags, SocketEvent_Tags } from "@filen/sdk-rs"
 import { hashNoteContent } from "@filen/shared"
-import { rememberNotePush } from "@/features/notes/pushEchoes"
+import { rememberNotePush, hasPendingNotePush } from "@/features/notes/pushEchoes"
 import { socketEvent } from "@/tests/fixtures/socketEvents"
 
 // ---------------------------------------------------------------------------
@@ -749,7 +749,51 @@ describe("handleNoteEvent — notes socket handler", () => {
 
 			expect(mockRefreshAfterRemoteEdit).toHaveBeenCalledOnce()
 			expect(mockRefreshAfterRemoteEdit).toHaveBeenCalledWith({
-				note: expect.objectContaining({ uuid: "uuid-1", editedTimestamp: 20n })
+				note: expect.objectContaining({ uuid: "uuid-1", editedTimestamp: 20n }),
+				content: "server text"
+			})
+		})
+
+		// The event's decrypted body is handed over so the refresh can commit it without a download;
+		// an undecryptable one is not, and the refresh fetches.
+		it("hands the refresh the event's body only when it was decrypted", async () => {
+			mockNotesWithContentQueryGet.mockReturnValueOnce([{ uuid: "uuid-1", title: "My Note", editedTimestamp: 10n }])
+
+			await handleNoteEvent({
+				event: makeContentEditedEvent("uuid-1", { content: { tag: "Encrypted", inner: ["x"] }, editorId: 5n, editedTimestamp: 20n })
+			})
+
+			expect(mockRefreshAfterRemoteEdit).toHaveBeenCalledWith({
+				note: expect.objectContaining({ uuid: "uuid-1" }),
+				content: undefined
+			})
+		})
+
+		// The own-echo check consumes this device's push before the refresh runs, so the refresh does
+		// not mistake the echo itself for a push still awaiting one.
+		it("consumes this device's own echo before refreshing", async () => {
+			mockCurrentUserId.mockReturnValue(999n)
+			rememberNotePush("uuid-1", hashNoteContent("pushed here"))
+			mockNotesWithContentQueryGet.mockReturnValueOnce([{ uuid: "uuid-1", title: "My Note", editedTimestamp: 10n }])
+
+			let pendingAtRefresh: boolean | undefined
+
+			mockRefreshAfterRemoteEdit.mockImplementationOnce(async () => {
+				pendingAtRefresh = hasPendingNotePush("uuid-1")
+			})
+
+			await handleNoteEvent({
+				event: makeContentEditedEvent("uuid-1", {
+					content: { tag: "Decrypted", inner: ["pushed here"] },
+					editorId: 999n,
+					editedTimestamp: 20n
+				})
+			})
+
+			expect(pendingAtRefresh).toBe(false)
+			expect(mockRefreshAfterRemoteEdit).toHaveBeenCalledWith({
+				note: expect.objectContaining({ uuid: "uuid-1", editedTimestamp: 20n }),
+				content: "pushed here"
 			})
 		})
 

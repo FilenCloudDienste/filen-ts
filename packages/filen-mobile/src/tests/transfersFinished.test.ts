@@ -1,7 +1,7 @@
 import { vi, describe, it, expect, beforeEach, afterEach } from "vitest"
 
 // screens/transfers.tsx pulls in heavy React + native deps transitively. None of their
-// implementations matter for the pure buildTransfersDisplayList builder under test here.
+// implementations matter for the pure list sorters under test here.
 vi.mock("expo-router", () => ({ router: {} }))
 vi.mock("react-native-safe-area-context", () => ({
 	useSafeAreaInsets: vi.fn(() => ({ top: 0, bottom: 0, left: 0, right: 0 }))
@@ -38,7 +38,7 @@ import {
 	type Transfer,
 	type FinishedTransfer
 } from "@/features/transfers/store/useTransfers.store"
-import { buildTransfersDisplayList, finishedTransferSubtitle } from "@/features/transfers/screens/transfers"
+import { sortActiveTransfers, sortFinishedTransfers, finishedTransferSubtitle } from "@/features/transfers/screens/transfers"
 import { type TFunction } from "i18next"
 
 function makeFinished(id: string, finishedAt: number, overrides: Partial<FinishedTransfer> = {}): FinishedTransfer {
@@ -193,37 +193,26 @@ describe("finished transfers store", () => {
 	})
 })
 
-describe("buildTransfersDisplayList", () => {
-	it("places active transfers on top ordered by startedAt ascending", () => {
-		const result = buildTransfersDisplayList({
-			transfers: [makeActiveTransfer("c", 300), makeActiveTransfer("a", 100), makeActiveTransfer("b", 200)],
-			finishedTransfers: []
-		})
+describe("transfers list sorters", () => {
+	it("orders active transfers by startedAt ascending", () => {
+		const result = sortActiveTransfers([makeActiveTransfer("c", 300), makeActiveTransfer("a", 100), makeActiveTransfer("b", 200)])
 
-		expect(result.map(item => (item.kind === "active" ? item.transfer.id : item.finished.id))).toEqual(["a", "b", "c"])
+		expect(result.map(transfer => transfer.id)).toEqual(["a", "b", "c"])
 	})
 
-	it("places finished transfers below active ones, ordered by finishedAt descending", () => {
-		const result = buildTransfersDisplayList({
-			transfers: [],
-			finishedTransfers: [makeFinished("old", 100), makeFinished("newest", 300), makeFinished("mid", 200)]
-		})
+	it("orders finished transfers by finishedAt descending", () => {
+		const result = sortFinishedTransfers([makeFinished("old", 100), makeFinished("newest", 300), makeFinished("mid", 200)])
 
-		expect(result.map(item => (item.kind === "finished" ? item.finished.id : item.transfer.id))).toEqual(["newest", "mid", "old"])
+		expect(result.map(finished => finished.id)).toEqual(["newest", "mid", "old"])
 	})
 
-	it("merges both: active (startedAt asc) first, then finished (finishedAt desc)", () => {
-		const result = buildTransfersDisplayList({
-			transfers: [makeActiveTransfer("act-late", 200), makeActiveTransfer("act-early", 100)],
-			finishedTransfers: [makeFinished("fin-old", 100), makeFinished("fin-new", 400)]
-		})
+	it("keeps each row's identity so FlashList can skip unchanged cells", () => {
+		const transfers = [makeActiveTransfer("b", 200), makeActiveTransfer("a", 100)]
+		const finishedTransfers = [makeFinished("y", 100), makeFinished("z", 300)]
 
-		expect(result.map(item => (item.kind === "active" ? `active:${item.transfer.id}` : `finished:${item.finished.id}`))).toEqual([
-			"active:act-early",
-			"active:act-late",
-			"finished:fin-new",
-			"finished:fin-old"
-		])
+		expect(sortActiveTransfers(transfers)).toEqual([transfers[1], transfers[0]])
+		expect(sortActiveTransfers(transfers)[0]).toBe(transfers[1])
+		expect(sortFinishedTransfers(finishedTransfers)[0]).toBe(finishedTransfers[1])
 	})
 
 	it("does not mutate its input arrays", () => {
@@ -232,7 +221,8 @@ describe("buildTransfersDisplayList", () => {
 		const transfersCopy = [...transfers]
 		const finishedCopy = [...finishedTransfers]
 
-		buildTransfersDisplayList({ transfers, finishedTransfers })
+		sortActiveTransfers(transfers)
+		sortFinishedTransfers(finishedTransfers)
 
 		expect(transfers).toEqual(transfersCopy)
 		expect(finishedTransfers).toEqual(finishedCopy)

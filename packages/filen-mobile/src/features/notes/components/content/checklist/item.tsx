@@ -58,7 +58,7 @@ const Item = ({
 
 	const storeItem = useStore(
 		store,
-		useShallow(state => state.parsed.find(i => i.id === id))
+		useShallow(state => state.byId.get(id))
 	)
 
 	// A ghost id has no store item until materialized — synthesize the empty row it renders as.
@@ -141,8 +141,8 @@ const Item = ({
 	}
 
 	const focusItem = (id: string) => {
-		const ref = store.getState().inputRefs[id]
-		const content = store.getState().parsed.find(i => i.id === id)?.content ?? ""
+		const ref = store.getState().inputRefs.get(id)
+		const content = store.getState().byId.get(id)?.content ?? ""
 
 		ref?.current?.setSelection(content.length, content.length)
 		ref?.current?.focus()
@@ -171,7 +171,7 @@ const Item = ({
 		}
 
 		// Defer focus: the new <Item> for the added row has not mounted yet, so its ref-registration
-		// useEffect has not run and inputRefs[id] is still undefined. A macrotask runs after React
+		// useEffect has not run and inputRefs has no entry for it yet. A macrotask runs after React
 		// has committed the render and flushed the passive effect, so the ref is registered by then
 		// (matches the focus-after-mount deferral used by the chat input).
 		if (result.focusId) {
@@ -261,24 +261,13 @@ const Item = ({
 			return
 		}
 
-		store.getState().setInputRefs(prev => ({
-			...prev,
-			[id]: textInputRef
-		}))
+		store.getState().inputRefs.set(id, textInputRef)
 
 		// Drop this item's ref on unmount (or id change) so a dismissed editor leaves no foreign refs
 		// in the store. With the per-instance store this is also collected with the component, but the
 		// explicit cleanup keeps inputRefs accurate while the editor stays mounted (rows added/removed).
 		return () => {
-			store.getState().setInputRefs(prev => {
-				const next = {
-					...prev
-				}
-
-				delete next[id]
-
-				return next
-			})
+			store.getState().inputRefs.delete(id)
 		}
 	}, [item?.id, id, store])
 

@@ -60,22 +60,27 @@ describe("useDrivePreviewStore.open — uncovered spec cases", () => {
 			expect(uuids).toContain("valid")
 		})
 
-		it("excludes drive items with null decryptedMeta from the photos path filter", () => {
+		// The photos grid filters with isPhotoGridItem (photosUtils.test.ts pins its exclusions) and hands
+		// that list over; the store does not classify it a second time.
+		it("passes the photos grid list through unchanged, in order", () => {
 			const photosDrivePath = makeDrivePath("photos")
-			const nullMetaItem = makeDriveGalleryItem("null-meta", "photo.jpg", "file", null)
-			const validItem = makeDriveGalleryItem("valid", "valid.jpg")
-			const items: GalleryItemTagged[] = [nullMetaItem, validItem]
+			const items: GalleryItemTagged[] = [
+				makeDriveGalleryItem("vid1", "clip.mp4"),
+				makeDriveGalleryItem("raw1", "shot.cr2"),
+				makeDriveGalleryItem("jpg1", "photo.jpg")
+			]
 
 			useDrivePreviewStore.getState().open({
 				items,
-				initialItem: makeInitialDriveItem("valid", "valid.jpg", photosDrivePath)
+				initialItem: makeInitialDriveItem("raw1", "shot.cr2", photosDrivePath)
 			})
 
 			const state = useDrivePreviewStore.getState()
-			const uuids = state.items.map(i => (i as Extract<GalleryItemTagged, { type: "drive" }>).data.data.uuid)
 
-			expect(uuids).not.toContain("null-meta")
-			expect(uuids).toContain("valid")
+			expect(state.items).toEqual(items)
+			expect(state.currentIndex).toBe(1)
+			expect(uuidOf(state.currentItem)).toBe("raw1")
+			expect(mockRouterPush).toHaveBeenCalledTimes(1)
 		})
 
 		it("returns early (no navigation) when the only matching item has null decryptedMeta and initialItem is missing", () => {
@@ -114,23 +119,6 @@ describe("useDrivePreviewStore.open — uncovered spec cases", () => {
 			expect((state.currentItem as Extract<GalleryItemTagged, { type: "drive" }>).data.data.uuid).toBe("svg1")
 		})
 
-		it("includes a .svg item in the photos path filter", () => {
-			const photosDrivePath = makeDrivePath("photos")
-			const svgItem = makeDriveGalleryItem("svg1", "logo.svg")
-			const jpgItem = makeDriveGalleryItem("jpg1", "photo.jpg")
-			const items: GalleryItemTagged[] = [svgItem, jpgItem]
-
-			useDrivePreviewStore.getState().open({
-				items,
-				initialItem: makeInitialDriveItem("svg1", "logo.svg", photosDrivePath)
-			})
-
-			const uuids = useDrivePreviewStore
-				.getState()
-				.items.map(i => (i as Extract<GalleryItemTagged, { type: "drive" }>).data.data.uuid)
-
-			expect(uuids).toContain("svg1")
-		})
 	})
 
 	describe("directory and sharedDirectory exclusion", () => {
@@ -167,24 +155,6 @@ describe("useDrivePreviewStore.open — uncovered spec cases", () => {
 			const uuids = state.items.map(i => (i as Extract<GalleryItemTagged, { type: "drive" }>).data.data.uuid)
 
 			expect(uuids).not.toContain("sdir1")
-			expect(uuids).toContain("file1")
-		})
-
-		it("excludes directory items from the photos path filter as well", () => {
-			const photosDrivePath = makeDrivePath("photos")
-			const dirItem = makeDriveGalleryItem("dir1", "photo.jpg", "directory")
-			const fileItem = makeDriveGalleryItem("file1", "valid.jpg")
-			const items: GalleryItemTagged[] = [dirItem, fileItem]
-
-			useDrivePreviewStore.getState().open({
-				items,
-				initialItem: makeInitialDriveItem("file1", "valid.jpg", photosDrivePath)
-			})
-
-			const state = useDrivePreviewStore.getState()
-			const uuids = state.items.map(i => (i as Extract<GalleryItemTagged, { type: "drive" }>).data.data.uuid)
-
-			expect(uuids).not.toContain("dir1")
 			expect(uuids).toContain("file1")
 		})
 	})
@@ -267,22 +237,6 @@ describe("useDrivePreviewStore.open — uncovered spec cases", () => {
 	// RAW camera files carry an extension the expo-image set does NOT contain; they are admitted on
 	// the strength of their "rawImage" classification alone (the preview is the SDK-extracted JPEG).
 	describe("rawImage admission", () => {
-		it("keeps a .cr2 in the photos gallery even though .cr2 is absent from EXPO_IMAGE_SUPPORTED_EXTENSIONS", () => {
-			const photosDrivePath = makeDrivePath("photos")
-
-			useDrivePreviewStore.getState().open({
-				items: [makeDriveGalleryItem("raw1", "shot.cr2"), makeDriveGalleryItem("jpg1", "photo.jpg")],
-				initialItem: makeInitialDriveItem("jpg1", "photo.jpg", photosDrivePath)
-			})
-
-			const uuids = useDrivePreviewStore
-				.getState()
-				.items.map(i => (i as Extract<GalleryItemTagged, { type: "drive" }>).data.data.uuid)
-
-			expect(uuids).toContain("raw1")
-			expect(uuids).toContain("jpg1")
-		})
-
 		it("keeps a .nef in the regular drive gallery and can open ON it", () => {
 			useDrivePreviewStore.getState().open({
 				items: [makeDriveGalleryItem("jpg1", "photo.jpg"), makeDriveGalleryItem("raw1", "shot.nef")],
@@ -384,85 +338,6 @@ describe("useDrivePreviewStore.open — uncovered spec cases", () => {
 
 			// currentIndex must remain the pre-set value, not the new call's value
 			expect(useDrivePreviewStore.getState().currentIndex).toBe(5)
-		})
-	})
-
-	// -------------------------------------------------------------------------
-	// Finding #48 — photos path gallery filter: case-insensitive extension +
-	// EXPO_IMAGE_SUPPORTED_EXTENSIONS (not the ImageManipulator subset).
-	// The gallery shares the grid's isPhotoGridItem predicate.
-	// -------------------------------------------------------------------------
-	describe("finding #48 — photos path: case-insensitive extension + EXPO_IMAGE_SUPPORTED_EXTENSIONS", () => {
-		it("keeps IMG.HEIC (uppercase extension) in the photos gallery", () => {
-			const photosDrivePath = makeDrivePath("photos")
-			const heicItem = makeDriveGalleryItem("heic1", "IMG.HEIC")
-			const jpgItem = makeDriveGalleryItem("jpg1", "photo.jpg")
-			const items: GalleryItemTagged[] = [heicItem, jpgItem]
-
-			useDrivePreviewStore.getState().open({
-				items,
-				initialItem: makeInitialDriveItem("jpg1", "photo.jpg", photosDrivePath)
-			})
-
-			const state = useDrivePreviewStore.getState()
-			const uuids = state.items.map(i => (i as Extract<GalleryItemTagged, { type: "drive" }>).data.data.uuid)
-
-			expect(uuids).toContain("heic1")
-			expect(uuids).toContain("jpg1")
-		})
-
-		it("keeps photo.avif in the photos gallery — present in EXPO_IMAGE_SUPPORTED_EXTENSIONS but absent from the ImageManipulator subset", () => {
-			const photosDrivePath = makeDrivePath("photos")
-			const avifItem = makeDriveGalleryItem("avif1", "photo.avif")
-			const jpgItem = makeDriveGalleryItem("jpg1", "photo.jpg")
-			const items: GalleryItemTagged[] = [avifItem, jpgItem]
-
-			useDrivePreviewStore.getState().open({
-				items,
-				initialItem: makeInitialDriveItem("jpg1", "photo.jpg", photosDrivePath)
-			})
-
-			const state = useDrivePreviewStore.getState()
-			const uuids = state.items.map(i => (i as Extract<GalleryItemTagged, { type: "drive" }>).data.data.uuid)
-
-			expect(uuids).toContain("avif1")
-			expect(uuids).toContain("jpg1")
-		})
-
-		it("keeps photo.AVIF (uppercase avif) in the photos gallery", () => {
-			const photosDrivePath = makeDrivePath("photos")
-			const avifItem = makeDriveGalleryItem("avif2", "photo.AVIF")
-			const jpgItem = makeDriveGalleryItem("jpg1", "photo.jpg")
-			const items: GalleryItemTagged[] = [avifItem, jpgItem]
-
-			useDrivePreviewStore.getState().open({
-				items,
-				initialItem: makeInitialDriveItem("jpg1", "photo.jpg", photosDrivePath)
-			})
-
-			const state = useDrivePreviewStore.getState()
-			const uuids = state.items.map(i => (i as Extract<GalleryItemTagged, { type: "drive" }>).data.data.uuid)
-
-			expect(uuids).toContain("avif2")
-			expect(uuids).toContain("jpg1")
-		})
-
-		it("keeps photo.JPG (uppercase) in the photos gallery", () => {
-			const photosDrivePath = makeDrivePath("photos")
-			const upperJpgItem = makeDriveGalleryItem("upper1", "PHOTO.JPG")
-			const lowerJpgItem = makeDriveGalleryItem("lower1", "photo.jpg")
-			const items: GalleryItemTagged[] = [upperJpgItem, lowerJpgItem]
-
-			useDrivePreviewStore.getState().open({
-				items,
-				initialItem: makeInitialDriveItem("lower1", "photo.jpg", photosDrivePath)
-			})
-
-			const state = useDrivePreviewStore.getState()
-			const uuids = state.items.map(i => (i as Extract<GalleryItemTagged, { type: "drive" }>).data.data.uuid)
-
-			expect(uuids).toContain("upper1")
-			expect(uuids).toContain("lower1")
 		})
 	})
 })

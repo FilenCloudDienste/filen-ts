@@ -84,8 +84,8 @@ can land independently. To add one (example: Korean `ko`):
 
 1. `src/locales/languages.ts` — add `"ko"` to `SUPPORTED_LANGUAGES`.
 2. `src/lib/language.ts` — add a native `LANGUAGE_LABELS` entry (e.g. `ko: "한국어"`).
-3. `src/lib/i18n.ts` — `import koJson from "@/locales/ko.json"` and add
-   `ko: { translation: koJson }` to `resources`.
+3. `src/locales/catalogs.ts` — add `ko: () => require("@/locales/ko.json") as Record<string, string>`
+   to `CATALOG_LOADERS` — typed `Record<Exclude<Language, "en">, …>`, so this is a compile error until you do.
 4. `scripts/translate-i18n.ts` — add the English name to `LANGUAGE_NAMES` (e.g. `ko: "Korean"`)
    — typed `Record<TargetLanguage, string>`, so this is a compile error until you do.
 5. Create the empty stub: `echo '{}' > src/locales/ko.json`.

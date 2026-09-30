@@ -50,17 +50,17 @@ import useChatMessageLinksQuery, {
 	type LinkResult
 } from "@/features/chats/queries/useChatMessageLinks.query"
 
-const FILE_LINK = { url: "https://app.filen.io/file/f1", start: 0, end: 30 }
-const DIR_LINK = { url: "https://app.filen.io/dir/d1", start: 31, end: 60 }
-const EXTERNAL_LINK = { url: "https://example.com/a.png", start: 61, end: 90 }
+const FILE_LINK = "https://app.filen.io/file/f1"
+const DIR_LINK = "https://app.filen.io/dir/d1"
+const EXTERNAL_LINK = "https://example.com/a.png"
 
 function wrapper({ children }: { children: ReactNode }) {
 	return createElement(QueryClientProvider, { client: queryClient }, children)
 }
 
 // What Attachments does for one message row; unmounting it is FlashList recycling the cell away.
-function mountRow(links: (typeof FILE_LINK)[]) {
-	return renderHook(() => useChatMessageLinksQuery({ links }, { enabled: links.length > 0 }), { wrapper })
+function mountRow(urls: string[]) {
+	return renderHook(() => useChatMessageLinksQuery({ urls }, { enabled: urls.length > 0 }), { wrapper })
 }
 
 // Lets a mount-triggered fetch (async getSdkClients hop included) reach the SDK before asserting none did.
@@ -100,8 +100,20 @@ describe("useChatMessageLinksQuery request counts", () => {
 		expect(sdk.getDirPublicLinkInfo).toHaveBeenCalledTimes(1)
 	})
 
+	it("two rows carrying the same links share one resolve", async () => {
+		const first = mountRow([FILE_LINK, DIR_LINK])
+		const second = mountRow([FILE_LINK, DIR_LINK])
+
+		await waitFor(() => expect(first.result.current.data).toHaveLength(2))
+		await waitFor(() => expect(second.result.current.data).toHaveLength(2))
+
+		expect(second.result.current.data).toEqual(first.result.current.data)
+		expect(sdk.getLinkedFile).toHaveBeenCalledTimes(1)
+		expect(sdk.getDirPublicLinkInfo).toHaveBeenCalledTimes(1)
+	})
+
 	it("a persisted entry older than an hour re-resolves once on first mount", async () => {
-		const key = [BASE_QUERY_KEY, { links: [FILE_LINK] }]
+		const key = [BASE_QUERY_KEY, { urls: [FILE_LINK] }]
 
 		queryClient.setQueryData(key, [{ type: "internal", success: false }], { updatedAt: Date.now() - LINK_PREVIEW_STALE_TIME - 1000 })
 
@@ -120,7 +132,7 @@ describe("useChatMessageLinksQuery request counts", () => {
 
 	it("an entry resolved within the hour is served from cache", async () => {
 		queryClient.setQueryData(
-			[BASE_QUERY_KEY, { links: [DIR_LINK] }],
+			[BASE_QUERY_KEY, { urls: [DIR_LINK] }],
 			[{ type: "internal", success: true, data: { type: "directory", info: { uuid: "d1" } } }],
 			{ updatedAt: Date.now() - 10 * 60 * 1000 }
 		)

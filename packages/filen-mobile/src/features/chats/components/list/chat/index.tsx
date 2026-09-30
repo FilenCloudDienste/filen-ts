@@ -66,6 +66,7 @@ const Chat = ({ info }: { info: ListRenderItemInfo<TChat> }) => {
 				isAnchoredToRight={true}
 				info={info}
 				origin="chats"
+				unreadCount={unreadCount}
 				previewBackground={true}
 				onOpenMenu={() => setIsMenuOpen(true)}
 				onCloseMenu={() => setIsMenuOpen(false)}

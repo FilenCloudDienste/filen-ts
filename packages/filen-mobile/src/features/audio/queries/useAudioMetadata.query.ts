@@ -1,7 +1,7 @@
-import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
+import { useQuery, type Query, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
 import { sortParams } from "@filen/shared"
 import { type FileSource, fileSourceKey, resolveDriveFileItem } from "@/queries/fileSource"
-import audioCache from "@/features/audio/audioCache"
+import audioCache, { isMetadataServable, type Metadata } from "@/features/audio/audioCache"
 
 export const BASE_QUERY_KEY = "useAudioMetadataQuery"
 
@@ -35,11 +35,18 @@ export async function fetchData(
 	})
 }
 
+// Mounts and reconnects otherwise re-read the sidecar, or re-download the whole track once it expired.
+function refetchUnlessServable(query: Query<Metadata, Error>): boolean | "always" {
+	return query.state.status === "success" && isMetadataServable(query.state.data) ? false : "always"
+}
+
 export function useAudioMetadataQuery(
 	params: FileSource,
-	options?: Omit<UseQueryOptions, "queryKey" | "queryFn">
+	options?: Omit<UseQueryOptions<Metadata, Error>, "queryKey" | "queryFn">
 ): UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error> {
 	const query = useQuery({
+		refetchOnMount: refetchUnlessServable,
+		refetchOnReconnect: refetchUnlessServable,
 		...options,
 		// Key off identity only (fileSourceKey strips the by-value item).
 		queryKey: [BASE_QUERY_KEY, sortParams(fileSourceKey(params))],
@@ -50,7 +57,7 @@ export function useAudioMetadataQuery(
 			})
 	})
 
-	return query as UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error>
+	return query
 }
 
 export default useAudioMetadataQuery

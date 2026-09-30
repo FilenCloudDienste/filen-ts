@@ -209,7 +209,7 @@ describe("itemSorter", () => {
 		})
 
 		it("sorts identical-name items by uuid numeric value as tiebreaker (uuid 111 < uuid 222)", () => {
-			// compareName returns 0 for identical names; the uuid tiebreaker is applied in compareName via getLowerName fallback.
+			// Identical names tie in the name compare; the engine then falls through to the uuid tiebreak.
 			// Since compareName uses string comparison on the name/uuid fallback, we verify a distinct case:
 			// items with identical names are ordered by uuid numeric value via compareStringsNumeric.
 			const a = makeItem("file", "same.txt", { uuid: "aaa-111" })
@@ -600,6 +600,20 @@ describe("notesSorter", () => {
 
 		it("returns empty array for empty input", () => {
 			expect(notesSorter.group([])).toEqual([])
+		})
+
+		it("reuses an unchanged note's row across regroups and rebuilds a replaced one", () => {
+			const stable = makeNote({ uuid: "stable-1", editedTimestamp: BigInt(Date.now()) })
+			const changing = makeNote({ uuid: "changing-1", editedTimestamp: BigInt(Date.now()) })
+			const first = notesSorter.group([stable, changing])
+			const replaced = { ...changing, title: "renamed" }
+			const second = notesSorter.group([stable, replaced])
+			const rowFor = (items: typeof first, uuid: string) => items.find(item => item.type === "note" && item.uuid === uuid)
+
+			expect(rowFor(second, "stable-1")).toBe(rowFor(first, "stable-1"))
+			expect(rowFor(second, "changing-1")).not.toBe(rowFor(first, "changing-1"))
+			expect(rowFor(second, "changing-1")).toEqual({ ...replaced, type: "note" })
+			expect(rowFor(first, "stable-1")).toEqual({ ...stable, type: "note" })
 		})
 
 		it("groups pinned notes under a pinned header", () => {

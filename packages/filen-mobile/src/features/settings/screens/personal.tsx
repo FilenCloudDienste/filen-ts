@@ -7,7 +7,7 @@ import { goBackIfPossible } from "@/lib/router"
 import { COUNTRIES } from "@filen/shared"
 import { useResolveClassNames } from "uniwind"
 import SettingsHeader from "@/components/ui/settingsHeader"
-import { type fetchData } from "@/queries/useAccount.query"
+import { type fetchData, accountQueryPatch } from "@/queries/useAccount.query"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import { inputPrompt } from "@/lib/promptFlow"
 import alerts from "@/lib/alerts"
@@ -109,6 +109,9 @@ function Personal() {
 
 										return
 									}
+
+									// The Account screen seeds this route from the cache; stale fields would be resent on the next save.
+									accountQueryPatch({ personal })
 								}
 							}
 						}

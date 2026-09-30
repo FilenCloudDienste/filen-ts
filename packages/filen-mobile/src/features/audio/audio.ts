@@ -3,7 +3,7 @@ import { AppState } from "react-native"
 import { Asset } from "expo-asset"
 import audioCache, { type Metadata } from "@/features/audio/audioCache"
 import type { DriveItem, DriveItemFileExtracted } from "@/types"
-import { useEffect, useState } from "react"
+import { useEffect, useState, useSyncExternalStore } from "react"
 import events from "@/lib/events"
 import {
 	run,
@@ -75,6 +75,9 @@ const TRACK_END_STATUS_EPSILON_S = 0.75
 // the watchdog would otherwise re-arm forever. A track the player still reports as `playing`
 // (buffering) is never stall-skipped.
 const TRACK_END_WATCHDOG_MAX_STALLS = 3
+
+// Hermes' native encoder; the quick-crypto Buffer UTF-8-encodes in interpreted JS, twice per call.
+const playlistEncoder = new TextEncoder()
 
 export class Audio {
 	private readonly player = createAudioPlayer(undefined, {
@@ -262,10 +265,10 @@ export class Audio {
 	 * Rebuilds the shuffle order from the start of a new pass. If `firstIdx` is provided, that index
 	 * is placed first (used when toggling shuffle on so the current track keeps playing).
 	 */
-	private reshuffleFrom(firstIdx?: number): void {
+	private reshuffleFrom(firstIdx?: number, length: number = this.state.queue.length): void {
 		const indices = Array.from(
 			{
-				length: this.state.queue.length
+				length
 			},
 			(_, i) => i
 		)
@@ -817,43 +820,77 @@ export class Audio {
 			return false
 		}
 
+		if (position === "end") {
+			return (await this.appendToQueue([item]))[0] ?? false
+		}
+
 		const shuffle = await this.isShuffleEnabled()
 
-		if (position === "start") {
-			this.state.queue = [item, ...this.state.queue]
+		this.state.queue = [item, ...this.state.queue]
 
-			if (this.state.queue.length > 1) {
-				this.state.position++
-			}
+		if (this.state.queue.length > 1) {
+			this.state.position++
+		}
 
-			if (shuffle) {
-				// Existing entries pointed to old indices — bump each by 1, then add new index 0 at the end.
-				if (this.shuffleOrder.length + 1 === this.state.queue.length) {
-					this.shuffleOrder = [...this.shuffleOrder.map(i => i + 1), 0]
-				} else {
-					this.reshuffleFrom(this.state.position)
-				}
-			}
-		} else {
-			this.state.queue = [...this.state.queue, item]
-
-			if (shuffle) {
-				const newIdx = this.state.queue.length - 1
-
-				if (this.shuffleOrder.length === newIdx) {
-					// Insert at a uniformly random slot strictly after the current shufflePosition so the
-					// new track is reachable within the remaining shuffle pass.
-					const insertAt =
-						this.shufflePosition + 1 + Math.floor(Math.random() * (this.shuffleOrder.length - this.shufflePosition))
-
-					this.shuffleOrder = [...this.shuffleOrder.slice(0, insertAt), newIdx, ...this.shuffleOrder.slice(insertAt)]
-				} else {
-					this.reshuffleFrom(this.state.position)
-				}
+		if (shuffle) {
+			// Existing entries pointed to old indices — bump each by 1, then add new index 0 at the end.
+			if (this.shuffleOrder.length + 1 === this.state.queue.length) {
+				this.shuffleOrder = [...this.shuffleOrder.map(i => i + 1), 0]
+			} else {
+				this.reshuffleFrom(this.state.position)
 			}
 		}
 
 		return true
+	}
+
+	/**
+	 * Appends items to the end of the queue with a single queue emit. Per-item results match
+	 * addToQueue: false for an undecryptable item, which is skipped.
+	 */
+	public async appendToQueue(items: QueueItem[]): Promise<boolean[]> {
+		const results = items.map(i => !i.item.data.undecryptable)
+
+		// Nothing to append: no shuffle read and no emit, as with individual undecryptable adds.
+		if (!results.includes(true)) {
+			return results
+		}
+
+		const shuffleEnabled = await this.isShuffleEnabled()
+		const queue = this.state.queue.slice()
+
+		if (shuffleEnabled) {
+			// Spliced in place below.
+			this.shuffleOrder = this.shuffleOrder.slice()
+		}
+
+		for (const item of items) {
+			if (item.item.data.undecryptable) {
+				continue
+			}
+
+			const newIdx = queue.length
+
+			queue.push(item)
+
+			if (!shuffleEnabled) {
+				continue
+			}
+
+			if (this.shuffleOrder.length === newIdx) {
+				// Insert at a uniformly random slot strictly after the current shufflePosition so the
+				// new track is reachable within the remaining shuffle pass.
+				const insertAt = this.shufflePosition + 1 + Math.floor(Math.random() * (this.shuffleOrder.length - this.shufflePosition))
+
+				this.shuffleOrder.splice(insertAt, 0, newIdx)
+			} else {
+				this.reshuffleFrom(this.state.position, queue.length)
+			}
+		}
+
+		this.state.queue = queue
+
+		return results
 	}
 
 	public async replaceQueue({
@@ -1131,6 +1168,9 @@ export class Audio {
 			toSignalOpts(signal)
 		)
 
+		// One existence check per track uuid per read: a track shared by several playlists costs one request.
+		const existence = new Map<string, Promise<boolean>>()
+
 		const parsedPlaylists = await Promise.all(
 			playlists.files.map(async file => {
 				// AU-05: isolate each playlist. A transient SDK error (network/decrypt/rate-limit) on one
@@ -1163,21 +1203,28 @@ export class Audio {
 					const filesWithItems = (
 						await Promise.all(
 							result.files.map(async file => {
-								let exists = true
+								let check = existence.get(file.uuid)
 
-								try {
-									exists = Boolean(await authedSdkClient.getFileOptional(file.uuid, toSignalOpts(signal)))
-								} catch (e) {
-									// AU-05: a transient getFileOptional error is NOT a definitive not-found.
-									// Keep the track (present-unknown) rather than dropping it or feeding the
-									// cleanup deletion path — only an explicit not-found (undefined) removes it.
-									logger.warn("audio", "getFileOptional failed for playlist track; keeping it", {
-										uuid: file.uuid,
-										error: e
-									})
+								if (!check) {
+									check = authedSdkClient.getFileOptional(file.uuid, toSignalOpts(signal)).then(
+										found => Boolean(found),
+										e => {
+											// AU-05: a transient getFileOptional error is NOT a definitive not-found.
+											// Keep the track (present-unknown) rather than dropping it or feeding the
+											// cleanup deletion path — only an explicit not-found (undefined) removes it.
+											logger.warn("audio", "getFileOptional failed for playlist track; keeping it", {
+												uuid: file.uuid,
+												error: e
+											})
+
+											return true
+										}
+									)
+
+									existence.set(file.uuid, check)
 								}
 
-								if (!exists) {
+								if (!(await check)) {
 									nonExistentFileUuids.add(file.uuid)
 
 									return null
@@ -1304,7 +1351,7 @@ export class Audio {
 		const wrappedAbortSignal = signal ? wrapAbortSignalForSdk(signal) : undefined
 
 		try {
-			await authedSdkClient.uploadFileFromBytes(Buffer.from(JSON.stringify(playlistToSerialize), "utf-8").buffer, {
+			await authedSdkClient.uploadFileFromBytes(playlistEncoder.encode(JSON.stringify(playlistToSerialize)).buffer, {
 				fileBuilderParams: {
 					parent: new AnyNormalDir.Dir(playlistsDir),
 					name: `${playlist.uuid}.json`,
@@ -1545,18 +1592,16 @@ export function useAudio() {
 	// Seed from the cached status: a paused player emits no events, so a null seed would leave
 	// freshly-mounted consumers (toolbar slider position, durations) empty until resume.
 	const [status, setStatus] = useState<AudioStatus | null>(audio.getStatus())
-	const [loading, setLoadingState] = useState<boolean>(audio.getLoading())
+	const loading = useAudioLoading()
 	const { queueItem } = useAudioQueue()
 	const [shuffleEnabled] = useSecureStore<boolean>(audio.shuffleEnabledKey, false)
 	const [loopMode] = useSecureStore<LoopMode>(audio.loopModeKey, "none")
 
 	useEffect(() => {
-		const statusSubscription = events.subscribe("audioStatus", setStatus)
-		const loadingSubscription = events.subscribe("audioLoading", setLoadingState)
+		const subscription = events.subscribe("audioStatus", setStatus)
 
 		return () => {
-			statusSubscription.remove()
-			loadingSubscription.remove()
+			subscription.remove()
 		}
 	}, [])
 
@@ -1569,38 +1614,71 @@ export function useAudio() {
 	}
 }
 
+function subscribeAudioQueue(listener: () => void): () => void {
+	const queueSubscription = events.subscribe("audioQueue", listener)
+	const positionSubscription = events.subscribe("audioQueuePosition", listener)
+
+	return () => {
+		queueSubscription.remove()
+		positionSubscription.remove()
+	}
+}
+
+// Stable reference: queue[position] keeps its identity until the current item actually changes.
+function getCurrentQueueItem(): QueueItem | null {
+	return audio.getQueue()[audio.getPosition()] ?? null
+}
+
+// Consumers re-render only when their selected snapshot changes (Object.is); select must return a primitive or a stable reference.
+export function useAudioQueueSelector<T>(select: (current: QueueItem | null) => T): T {
+	return useSyncExternalStore(subscribeAudioQueue, () => select(getCurrentQueueItem()))
+}
+
 export function useAudioQueue() {
-	const [queue, setQueue] = useState<QueueItem[]>(audio.getQueue())
-	const [position, setPosition] = useState<number>(audio.getPosition())
+	return {
+		queueItem: useAudioQueueSelector(current => current)
+	}
+}
+
+export function useAudioLoading(): boolean {
+	const [loading, setLoading] = useState<boolean>(audio.getLoading())
 
 	useEffect(() => {
-		const queueSubscription = events.subscribe("audioQueue", setQueue)
-		const positionSubscription = events.subscribe("audioQueuePosition", setPosition)
+		const subscription = events.subscribe("audioLoading", setLoading)
 
 		return () => {
-			queueSubscription.remove()
-			positionSubscription.remove()
+			subscription.remove()
 		}
 	}, [])
 
-	return {
-		queue,
-		position,
-		queueItem: queue[position] ?? null
-	}
+	return loading
+}
+
+// Boolean state so consumers skip the 1 Hz status ticks during playback (useState bails out on equal values).
+export function useAudioPlaying(): boolean {
+	const [playing, setPlaying] = useState<boolean>(() => audio.getStatus()?.playing ?? false)
+
+	useEffect(() => {
+		const subscription = events.subscribe("audioStatus", status => {
+			setPlaying(status.playing)
+		})
+
+		return () => {
+			subscription.remove()
+		}
+	}, [])
+
+	return playing
 }
 
 // `playlistUuid` scopes the check to one playlist: the same file can live in several
 // playlists, and only the row inside the playlist the queue was started from is "current"
 // (mirrors PlaylistRow's own playlistUuid comparison). Omitted = match by file alone.
 export function useIsCurrentTrack(trackUuid: string, playlistUuid?: string): boolean {
-	const { queueItem: current } = useAudioQueue()
-
-	if (!current || current.item.data.uuid !== trackUuid) {
-		return false
-	}
-
-	return playlistUuid === undefined || current.playlistUuid === playlistUuid
+	return useAudioQueueSelector(
+		current =>
+			!!current && current.item.data.uuid === trackUuid && (playlistUuid === undefined || current.playlistUuid === playlistUuid)
+	)
 }
 
 export default audio

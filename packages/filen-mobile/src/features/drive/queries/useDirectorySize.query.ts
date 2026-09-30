@@ -20,6 +20,7 @@ import offline from "@/features/offline/offline"
 import { isDirectoryItem } from "@/features/drive/driveSelectors"
 import { type DriveItem } from "@/types"
 import { toSignalOpts } from "@/lib/signals"
+import { serialize } from "@/lib/serializer"
 
 export const BASE_QUERY_KEY = "useDirectorySizeQuery"
 
@@ -211,6 +212,12 @@ export function directorySizeQueryOptions(params: UseDirectorySizeQueryParams): 
 	}
 }
 
+// The cache hash of a size query's key, for direct QueryCache.get lookups. The app's global
+// queryKeyHashFn serializes the key (see getCachedQuery), so this equals the hash getQueryData computes.
+export function directorySizeQueryHash(uuid: string, type: UseDirectorySizeQueryParams["type"]): string {
+	return serialize(directorySizeQueryOptions({ uuid, type }).queryKey)
+}
+
 // Types whose size only changes through the user's own drive, i.e. through socket events and local
 // writes that call markDirectorySizesStale. Changes inside a shared-in or public-link directory reach
 // no socket, and offline sizes are a free local read, so those keep refetching on every mount.
@@ -264,16 +271,27 @@ export function markDirectorySizesStale(): void {
 	noteDriveContentChanged()
 }
 
+// What a caller without a directory observes: one shared, never-fetched entry, rather than a disabled query
+// per uuid kept for the cache's whole gcTime. Real uuids are never empty, so it cannot collide.
+const INERT_PARAMS: UseDirectorySizeQueryParams = {
+	uuid: "",
+	type: "normal"
+}
+
+// Pass null for a non-directory. The observer stays mounted either way, so a recycled list cell that turns
+// into a directory changes key like any other rather than mounting afresh.
 export function useDirectorySizeQuery(
-	params: UseDirectorySizeQueryParams,
+	params: UseDirectorySizeQueryParams | null,
 	options?: Omit<UseQueryOptions, "queryKey" | "queryFn">
 ): UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error> {
+	const queryParams = params ?? INERT_PARAMS
 	const query = useQuery({
 		...options,
-		...directorySizeQueryOptions(params),
+		...directorySizeQueryOptions(queryParams),
+		...(params ? {} : { enabled: false }),
 		// Let the staleTime decide only for a value read in the current socket session: before that (a
 		// persisted row, or events missed while disconnected) nothing marked it stale.
-		refetchOnMount: q => (SOCKET_COVERED_TYPES.has(params.type) && queryReadInCurrentSocketSession(q) ? true : "always")
+		refetchOnMount: q => (SOCKET_COVERED_TYPES.has(queryParams.type) && queryReadInCurrentSocketSession(q) ? true : "always")
 	})
 
 	return query as UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error>

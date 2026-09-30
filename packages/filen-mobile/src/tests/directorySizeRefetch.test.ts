@@ -231,6 +231,38 @@ describe("useDirectorySizeQuery — request count", () => {
 	})
 })
 
+describe("useDirectorySizeQuery — non-directory callers", () => {
+	function sizeQueries() {
+		return holder.client.getQueryCache().findAll({ queryKey: ["useDirectorySizeQuery"] })
+	}
+
+	it("share one disabled entry and never fetch", async () => {
+		const first = renderHook(() => useDirectorySizeQuery(null), { wrapper })
+		const second = renderHook(() => useDirectorySizeQuery(null), { wrapper })
+
+		await new Promise(resolve => setTimeout(resolve, 10))
+
+		expect(first.result.current.fetchStatus).toBe("idle")
+		expect(second.result.current.data).toBeUndefined()
+		expect(sizeQueries()).toHaveLength(1)
+		expect(mockGetDirSize).not.toHaveBeenCalled()
+	})
+
+	it("a recycled row that becomes a directory fetches its size once", async () => {
+		const { result, rerender } = renderHook(({ params }: { params: UseDirectorySizeQueryParams | null }) => useDirectorySizeQuery(params), {
+			wrapper,
+			initialProps: { params: null as UseDirectorySizeQueryParams | null }
+		})
+
+		rerender({ params: normal })
+
+		await waitFor(() => expect(result.current.data).toEqual({ size: 10, files: 1, dirs: 0 }))
+
+		expect(mockGetDirSize).toHaveBeenCalledTimes(1)
+		expect(holder.client.getQueryData(directorySizeQueryOptions(normal).queryKey)).toEqual({ size: 10, files: 1, dirs: 0 })
+	})
+})
+
 describe("useSocketStore — connectedAt", () => {
 	it("stamps only the transition into connected", () => {
 		useSocketStore.setState({ state: "disconnected", connectedAt: 0 })

@@ -8,16 +8,15 @@ import { directorySizeTypeForDrivePath } from "@/features/drive/utils"
 
 const Size = ({ info, drivePath }: { info: ListRenderItemInfo<DriveItem>; drivePath: DrivePath }) => {
 	const directorySizeQuery = useDirectorySizeQuery(
-		{
-			uuid: info.item.data.uuid,
-			type: directorySizeTypeForDrivePath(drivePath.type),
-			// Thread the row's own item so the size resolves by value even when the session-scoped
-			// uuid cache never observed this directory.
-			item: info.item
-		},
-		{
-			enabled: isDirectoryItem(info.item)
-		}
+		isDirectoryItem(info.item)
+			? {
+					uuid: info.item.data.uuid,
+					type: directorySizeTypeForDrivePath(drivePath.type),
+					// Thread the row's own item so the size resolves by value even when the session-scoped
+					// uuid cache never observed this directory.
+					item: info.item
+				}
+			: null
 	)
 
 	if (isFileItem(info.item)) {

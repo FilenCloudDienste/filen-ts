@@ -65,6 +65,7 @@ export function createMenuButtons({
 	isPreview,
 	clipboard,
 	linkSaveable,
+	isSelected,
 	t
 }: {
 	item: DriveItem
@@ -78,6 +79,8 @@ export function createMenuButtons({
 	clipboard?: DriveClipboardEntry | null
 	// A link view whose link may be saved (useLinkSaveable): not the account's own, downloads allowed.
 	linkSaveable?: boolean
+	// Passed in rather than read from the store so it is part of the callers' compiler memo key.
+	isSelected?: boolean
 	t: TFunction
 }): MenuButton[] {
 	if (item.data.undecryptable) {
@@ -100,8 +103,6 @@ export function createMenuButtons({
 	// / file versions / contacts. Suppress in picker mode (driveSelect uses a
 	// different store) and in the preview (nothing to select there).
 	if (!isPreview && !drivePath.selectOptions) {
-		const isSelected = useDriveStore.getState().selectedItems.some(i => i.data.uuid === item.data.uuid)
-
 		menuButtons.push({
 			id: isSelected ? "deselect" : "select",
 			title: isSelected ? t("deselect") : t("select"),

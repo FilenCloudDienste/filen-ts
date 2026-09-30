@@ -24,6 +24,7 @@ type MenuProps = {
 	// Set by the preview (gallery) header so destructive actions close the preview on success.
 	isPreview?: boolean
 	previewBackground?: boolean
+	isSelected?: boolean
 }
 
 const MenuInner = ({
@@ -40,6 +41,7 @@ const MenuInner = ({
 	style,
 	isPreview,
 	previewBackground,
+	isSelected,
 	linkSaveable
 }: MenuProps & { linkSaveable?: boolean }) => {
 	const { t } = useTranslation()
@@ -55,6 +57,7 @@ const MenuInner = ({
 				isPreview,
 				clipboard,
 				linkSaveable,
+				isSelected,
 				t
 			})
 

@@ -73,9 +73,8 @@ const HeaderTitle = ({ chat }: { chat: TChat }) => {
 	)
 }
 
-const Header = ({ chat }: { chat: TChat }) => {
+const Header = ({ chat, unreadCount }: { chat: TChat; unreadCount: number }) => {
 	const stringigiedClient = useStringifiedClient()
-	const unreadCount = useChatUnreadCount(chat)
 
 	const headerRightItems = (() => {
 		if (!stringigiedClient) {
@@ -108,9 +107,8 @@ const Header = ({ chat }: { chat: TChat }) => {
 	)
 }
 
-const Unread = ({ chat }: { chat: TChat }) => {
+const Unread = ({ chat, unreadCount }: { chat: TChat; unreadCount: number }) => {
 	const { t } = useTranslation()
-	const unreadCount = useChatUnreadCount(chat)
 
 	const markAsRead = async () => {
 		const result = await runWithLoading(async () => {
@@ -179,17 +177,10 @@ const DisconnectedBanner = () => {
 	)
 }
 
-const Chat = () => {
-	const { uuid } = useLocalSearchParams<{
-		uuid: string
-	}>()
+// Split from Chat so the unread count is read once, below the missing-chat bail-out, for Header and Unread.
+const Content = ({ chat }: { chat: TChat }) => {
 	const keyboardAnimation = useReanimatedKeyboardAnimation()
-
-	const chatsQuery = useChatsQuery({
-		enabled: false
-	})
-
-	const chat = chatsQuery.data?.find(c => c.uuid === uuid)
+	const unreadCount = useChatUnreadCount(chat)
 
 	const containerStyle = useAnimatedStyle(() => {
 		return {
@@ -200,6 +191,41 @@ const Chat = () => {
 			)
 		}
 	}, [keyboardAnimation])
+
+	return (
+		<Fragment>
+			<Header
+				chat={chat}
+				unreadCount={unreadCount}
+			/>
+			<SafeAreaView edges={["left", "right"]}>
+				<AnimatedView
+					className="flex-1 bg-transparent"
+					style={containerStyle}
+				>
+					<DisconnectedBanner />
+					<Unread
+						chat={chat}
+						unreadCount={unreadCount}
+					/>
+					<Messages chat={chat} />
+				</AnimatedView>
+			</SafeAreaView>
+			<Input chat={chat} />
+		</Fragment>
+	)
+}
+
+const Chat = () => {
+	const { uuid } = useLocalSearchParams<{
+		uuid: string
+	}>()
+
+	const chatsQuery = useChatsQuery({
+		enabled: false
+	})
+
+	const chat = chatsQuery.data?.find(c => c.uuid === uuid)
 
 	useEffect(() => {
 		const { cleanup } = runEffect(defer => {
@@ -233,22 +259,7 @@ const Chat = () => {
 		return <DismissStack />
 	}
 
-	return (
-		<Fragment>
-			<Header chat={chat} />
-			<SafeAreaView edges={["left", "right"]}>
-				<AnimatedView
-					className="flex-1 bg-transparent"
-					style={containerStyle}
-				>
-					<DisconnectedBanner />
-					<Unread chat={chat} />
-					<Messages chat={chat} />
-				</AnimatedView>
-			</SafeAreaView>
-			<Input chat={chat} />
-		</Fragment>
-	)
+	return <Content chat={chat} />
 }
 
 export default Chat

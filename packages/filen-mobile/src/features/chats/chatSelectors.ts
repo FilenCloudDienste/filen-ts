@@ -3,7 +3,7 @@ import {
 	type BlockedUsers,
 	EMPTY_BLOCKED_USERS,
 	isBlocked,
-	isMessageUnreadCore,
+	countUnreadCore,
 	chatHasUnreadCore,
 	isListedChat,
 	isOneOnOneWithBlocked
@@ -53,17 +53,20 @@ export const EMPTY_CHAT_FLAGS: ChatSelectionFlags = Object.freeze({
 	includesUndecryptable: false
 }) as ChatSelectionFlags
 
-export function isMessageUnread(
-	message: ChatMessage,
+// isMessageUnreadCore summed over `messages`, without per-message adapter objects.
+export function countUnreadMessages(
+	messages: readonly ChatMessage[],
 	chat: Chat,
 	userId: bigint | undefined,
 	blocked: BlockedUsers = EMPTY_BLOCKED_USERS
-): boolean {
-	return isMessageUnreadCore(
-		{ sentTimestamp: message.sentTimestamp, senderId: message.inner.senderId, senderEmail: message.inner.senderEmail },
+): number {
+	return countUnreadCore(
+		messages,
 		{ muted: chat.muted, lastFocus: chat.lastFocus ?? undefined, hasLastMessage: !!chat.lastMessage },
 		userId,
-		sender => isBlocked(sender, blocked)
+		message => message.sentTimestamp,
+		message => message.inner.senderId,
+		message => isBlocked({ userId: message.inner.senderId, email: message.inner.senderEmail }, blocked)
 	)
 }
 

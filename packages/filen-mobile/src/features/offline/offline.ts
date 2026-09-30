@@ -82,6 +82,20 @@ type OfflineSizeStats = {
 	dirs: number
 }
 
+type TreeEntry = DirectoryOfflineMeta["entries"][Uuid]
+
+// Lookups derived from one parsed tree meta, built on first need. Parsed metas are never mutated
+// (every write replaces the object), so a view keyed on the meta object cannot go stale.
+type TreeView = {
+	// Directory entries only, last write wins, tree root preset to "/".
+	uuidToPath: Record<string, string>
+	pathToItem: Record<string, DriveItem>
+	// Entries grouped by dirname, each bucket in Object.keys order.
+	childrenByDir: Map<string, TreeEntry[]> | null
+	// Totals per directory path, counting every entry whose dirname is that path or lies below it.
+	subtreeStats: Map<string, OfflineSizeStats> | null
+}
+
 // Critical: When changing anything related to offline storage index/store/persistence format, bump OFFLINE_VERSION in storageRoots.ts to invalidate old caches and prevent potential issues from stale or incompatible data.
 export const VERSION = OFFLINE_VERSION
 export const DIRECTORY = OFFLINE_DIRECTORY
@@ -196,13 +210,29 @@ export class Offline {
 	private listFilesCache: Awaited<ReturnType<Offline["listFiles"]>> | null = null
 	private listDirectoriesRecursiveCache: Awaited<ReturnType<Offline["listDirectoriesRecursive"]>> | null = null
 	private readonly itemSizeCache = new Map<string, OfflineSizeStats>()
+	private readonly treeViews = new WeakMap<DirectoryOfflineMeta, TreeView>()
 	private readonly getLocalFileCache = new Map<string, FileSystem.File>()
 	private directoriesEnsured = false
 	private versionSweepDone = false
+	// Parsed metas survive invalidateCaches: this class is the only writer, and every write or
+	// delete of a meta drops just that uuid (invalidateTreeMeta / invalidateStandaloneMeta), so a
+	// mutation never discards the multi-MB parses of unrelated trees. A read fills a cache only if
+	// neither its key's generation nor metaEpoch (clearAll) moved while it was in flight.
 	private readonly directoryMetaCache = new Map<string, DirectoryOfflineMeta>()
+	// Caches null too: a missing or undecodable meta stays that way until this class writes it.
+	private readonly standaloneMetaCache = new Map<string, FileOrDirectoryOfflineMeta | null>()
+	private readonly metaGenerations = new Map<string, number>()
+	private metaEpoch = 0
 	private uuidToTopLevelCache: Map<string, string> | null = null
+	// In-flight reads shared by concurrent cold callers (startup rebuild + first sync pass) so each
+	// multi-MB tree meta is parsed once. Dropped with the uuid's meta so later calls read fresh.
+	private readonly directoryMetaReads = new Map<string, Promise<DirectoryOfflineMeta | null>>()
+	private listFilesRead: Promise<OfflineEntry[]> | null = null
+	private uuidToTopLevelBuild: Promise<Map<string, string>> | null = null
 	// Monotonic count of cache invalidations — every disk mutation path calls invalidateCaches,
 	// so an unchanged counter proves the store is byte-identical to the last in-process rebuild.
+	// Derived-cache fills capture it before their first await and store only if it is unchanged,
+	// so a read that raced a commit never writes pre-commit data back into the cleared cache.
 	private mutationCounter = 0
 	// mutationCounter value captured after the last FULL in-process index rebuild. -1 until the
 	// first rebuild this session: an index loaded from disk is never trusted as rebuild-fresh
@@ -289,6 +319,12 @@ export class Offline {
 					dir.delete()
 				}
 
+				if (rootUri === FILES_DIRECTORY_URI) {
+					this.invalidateStandaloneMeta(uuid)
+				} else {
+					this.invalidateTreeMeta(uuid)
+				}
+
 				this.invalidateCaches()
 			},
 			{
@@ -297,7 +333,8 @@ export class Offline {
 		)
 	}
 
-	// Called after any mutation to offline storage. Must be aggressive because the filesystem changed.
+	// Called after any mutation to offline storage. Drops every derived cache; the mutator drops
+	// the parsed metas it touched itself (invalidateTreeMeta / invalidateStandaloneMeta).
 	private invalidateCaches(): void {
 		this.mutationCounter++
 		this.listFilesCache = null
@@ -305,22 +342,73 @@ export class Offline {
 		this.listDirectoriesRecursiveCache = null
 		this.itemSizeCache.clear()
 		this.getLocalFileCache.clear()
-		this.directoryMetaCache.clear()
+		this.listFilesRead = null
 		this.uuidToTopLevelCache = null
+		this.uuidToTopLevelBuild = null
 		this.directoriesEnsured = false
+	}
+
+	private invalidateTreeMeta(uuid: string): void {
+		this.directoryMetaCache.delete(uuid)
+		this.directoryMetaReads.delete(uuid)
+		this.bumpMetaGeneration(`d:${uuid}`)
+	}
+
+	private invalidateStandaloneMeta(uuid: string): void {
+		this.standaloneMetaCache.delete(uuid)
+		this.bumpMetaGeneration(`f:${uuid}`)
+	}
+
+	private bumpMetaGeneration(key: string): void {
+		this.metaGenerations.set(key, (this.metaGenerations.get(key) ?? 0) + 1)
+	}
+
+	private invalidateAllMetas(): void {
+		this.directoryMetaCache.clear()
+		this.directoryMetaReads.clear()
+		this.standaloneMetaCache.clear()
+		this.metaGenerations.clear()
+		this.metaEpoch++
+	}
+
+	// Captured before a meta read's first await: true afterwards only if nothing invalidated the key.
+	private metaReadGuard(key: string): () => boolean {
+		const generation = this.metaGenerations.get(key)
+		const epoch = this.metaEpoch
+
+		return () => this.metaGenerations.get(key) === generation && this.metaEpoch === epoch
 	}
 
 	/**
 	 * Read and cache a directory's .filenmeta file. Returns null if the file
 	 * doesn't exist or can't be decoded.
 	 */
-	private async readDirectoryMeta(topLevelUuid: string): Promise<DirectoryOfflineMeta | null> {
+	private readDirectoryMeta(topLevelUuid: string): Promise<DirectoryOfflineMeta | null> {
 		const cached = this.directoryMetaCache.get(topLevelUuid)
 
 		if (cached) {
-			return cached
+			return Promise.resolve(cached)
 		}
 
+		const pending = this.directoryMetaReads.get(topLevelUuid)
+
+		if (pending) {
+			return pending
+		}
+
+		const read: Promise<DirectoryOfflineMeta | null> = this.readDirectoryMetaFromDisk(topLevelUuid).finally(() => {
+			if (this.directoryMetaReads.get(topLevelUuid) === read) {
+				this.directoryMetaReads.delete(topLevelUuid)
+			}
+		})
+
+		this.directoryMetaReads.set(topLevelUuid, read)
+
+		return read
+	}
+
+	private async readDirectoryMetaFromDisk(topLevelUuid: string): Promise<DirectoryOfflineMeta | null> {
+		const isCurrent = this.metaReadGuard(`d:${topLevelUuid}`)
 		const metaFile = new FileSystem.File(`${DIRECTORIES_DIRECTORY_URI}/${topLevelUuid}/${metaFileName(topLevelUuid)}`)
 		const metaInfo = metaFile.info()
 
@@ -356,7 +444,9 @@ export class Offline {
 			return null
 		}
 
-		this.directoryMetaCache.set(topLevelUuid, readResult.data)
+		if (isCurrent()) {
+			this.directoryMetaCache.set(topLevelUuid, readResult.data)
+		}
 
 		return readResult.data
 	}
@@ -364,6 +454,23 @@ export class Offline {
 	// Reads a standalone files/{uuid}/{uuid}.filenmeta — null when missing, empty, or undecodable.
 	// Callers treat null as "no usable meta"; broken-entry handling lives in listBrokenStandaloneUuids.
 	private async readStandaloneMeta(uuid: string): Promise<FileOrDirectoryOfflineMeta | null> {
+		const cached = this.standaloneMetaCache.get(uuid)
+
+		if (cached !== undefined) {
+			return cached
+		}
+
+		const isCurrent = this.metaReadGuard(`f:${uuid}`)
+		const meta = await this.readStandaloneMetaFromDisk(uuid)
+
+		if (isCurrent()) {
+			this.standaloneMetaCache.set(uuid, meta)
+		}
+
+		return meta
+	}
+
+	private async readStandaloneMetaFromDisk(uuid: string): Promise<FileOrDirectoryOfflineMeta | null> {
 		const metaFile = new FileSystem.File(`${FILES_DIRECTORY_URI}/${uuid}/${metaFileName(uuid)}`)
 		const metaInfo = metaFile.info()
 
@@ -405,11 +512,28 @@ export class Offline {
 	 * directory UUID that contains it. Used for O(1) lookups instead of
 	 * scanning all top-level directories.
 	 */
-	private async buildUuidToTopLevelIndex(): Promise<Map<string, string>> {
+	private buildUuidToTopLevelIndex(): Promise<Map<string, string>> {
 		if (this.uuidToTopLevelCache) {
-			return this.uuidToTopLevelCache
+			return Promise.resolve(this.uuidToTopLevelCache)
 		}
 
+		if (this.uuidToTopLevelBuild) {
+			return this.uuidToTopLevelBuild
+		}
+
+		const build: Promise<Map<string, string>> = this.buildUuidToTopLevelIndexFromDisk().finally(() => {
+			if (this.uuidToTopLevelBuild === build) {
+				this.uuidToTopLevelBuild = null
+			}
+		})
+
+		this.uuidToTopLevelBuild = build
+
+		return build
+	}
+
+	private async buildUuidToTopLevelIndexFromDisk(): Promise<Map<string, string>> {
+		const epoch = this.mutationCounter
 		const index = new Map<string, string>()
 		const topLevelEntries = DIRECTORIES_DIRECTORY.list()
 
@@ -437,7 +561,9 @@ export class Offline {
 			}
 		}
 
-		this.uuidToTopLevelCache = index
+		if (epoch === this.mutationCounter) {
+			this.uuidToTopLevelCache = index
+		}
 
 		return index
 	}
@@ -490,6 +616,9 @@ export class Offline {
 			this.ensureDirectories()
 			this.invalidateCaches()
 
+			// A mutation landing mid-rebuild may not be reflected below, so it must not be covered by
+			// this rebuild's no-mutation skip marker.
+			const rebuildEpoch = this.mutationCounter
 			const [files, directories] = await Promise.all([this.listFiles(), this.listDirectoriesRecursive()])
 			const indexFiles: Index["files"] = {}
 			const indexDirectories: Index["directories"] = {}
@@ -536,7 +665,7 @@ export class Offline {
 
 			// Mark this rebuild as current — updateIndex calls with no interleaving mutation
 			// take the no-mutation skip above.
-			this.indexRebuildMutationCounter = this.mutationCounter
+			this.indexRebuildMutationCounter = rebuildEpoch
 		})
 	}
 
@@ -682,10 +811,28 @@ export class Offline {
 	// routes it through the normal sync decision flow (the heal re-downloads missing bytes, gone
 	// remotes get removed). Dirs with missing/empty/undecodable metas are listBrokenStandaloneUuids
 	// territory.
-	public async listFiles(): Promise<OfflineEntry[]> {
+	public listFiles(): Promise<OfflineEntry[]> {
 		if (this.listFilesCache) {
-			return this.listFilesCache
+			return Promise.resolve(this.listFilesCache)
 		}
+
+		if (this.listFilesRead) {
+			return this.listFilesRead
+		}
+
+		const read: Promise<OfflineEntry[]> = this.listFilesFromDisk().finally(() => {
+			if (this.listFilesRead === read) {
+				this.listFilesRead = null
+			}
+		})
+
+		this.listFilesRead = read
+
+		return read
+	}
+
+	private async listFilesFromDisk(): Promise<OfflineEntry[]> {
+		const epoch = this.mutationCounter
 
 		this.ensureDirectories()
 
@@ -711,7 +858,9 @@ export class Offline {
 			})
 		)
 
-		this.listFilesCache = files
+		if (epoch === this.mutationCounter) {
+			this.listFilesCache = files
+		}
 
 		return files
 	}
@@ -726,9 +875,16 @@ export class Offline {
 		this.ensureDirectories()
 
 		const broken: { uuid: string; hasDataFile: boolean; dataFileSize: number | null }[] = []
+		// A listed uuid's meta was read successfully in this process, and every in-process mutation
+		// either deletes its directory or rewrites the meta atomically, so re-reading it proves nothing.
+		const knownReadable = this.listFilesCache ? new Set(this.listFilesCache.map(e => e.item.data.uuid)) : null
 
 		for (const entry of FILES_DIRECTORY.list()) {
 			if (!(entry instanceof FileSystem.Directory) || !validateUuid(entry.name)) {
+				continue
+			}
+
+			if (knownReadable?.has(entry.name)) {
 				continue
 			}
 
@@ -806,6 +962,7 @@ export class Offline {
 					} satisfies DirectoryOfflineMeta)
 				)
 
+				this.invalidateTreeMeta(uuid)
 				this.invalidateCaches()
 			},
 			{
@@ -887,6 +1044,7 @@ export class Offline {
 					diskSize: priorDiskSize
 				})
 
+				this.invalidateStandaloneMeta(item.data.uuid)
 				this.invalidateCaches()
 			},
 			{
@@ -1058,6 +1216,7 @@ export class Offline {
 				// derived caches.
 				logger.warn("offline", "Crash recovery: .sync-tmp residue found — escalating to disk-verified pass", { uuid: topLevelUuid })
 
+				this.invalidateTreeMeta(topLevelUuid)
 				this.invalidateCaches()
 			}
 
@@ -1082,6 +1241,7 @@ export class Offline {
 						liveDir.delete()
 					}
 
+					this.invalidateTreeMeta(topLevelUuid)
 					this.invalidateCaches()
 
 					logger.error("offline", "Initial directory store failed — partial tree deleted", {
@@ -1107,6 +1267,7 @@ export class Offline {
 						liveDir.delete()
 					}
 
+					this.invalidateTreeMeta(topLevelUuid)
 					this.invalidateCaches()
 				}
 
@@ -1418,6 +1579,7 @@ export class Offline {
 
 			if (plan.ops.length > 0) {
 				// The physical tree (possibly) changed underneath the existing meta — drop derived caches.
+				this.invalidateTreeMeta(topLevelUuid)
 				this.invalidateCaches()
 			}
 
@@ -1488,14 +1650,29 @@ export class Offline {
 				}
 
 				if ("errors" in transferred && transferred.errors.length > 0) {
+					// First insertion wins, matching a first-seen tie-break between identical paths.
+					const remoteByPath = new Map<string, RemoteTreeEntry & { item: DriveItem }>()
+
+					for (const remoteEntry of remote.values()) {
+						if (!remoteByPath.has(remoteEntry.path)) {
+							remoteByPath.set(remoteEntry.path, remoteEntry)
+						}
+					}
+
 					for (const downloadError of transferred.errors) {
 						// Resolve the failed entry by matching the error's absolute local path against the
-						// raw remote listing paths (longest suffix wins); fall back to the tree root.
+						// raw remote listing paths (longest suffix wins); fall back to the tree root. Remote
+						// paths all start with "/", so the leftmost "/"-anchored suffix that is a key is
+						// the longest match.
 						let matched: (RemoteTreeEntry & { item: DriveItem }) | null = null
 
-						for (const remoteEntry of remote.values()) {
-							if (downloadError.path.endsWith(remoteEntry.path) && remoteEntry.path.length > (matched?.path.length ?? -1)) {
-								matched = remoteEntry
+						for (let i = downloadError.path.indexOf("/"); i !== -1; i = downloadError.path.indexOf("/", i + 1)) {
+							const hit = remoteByPath.get(downloadError.path.slice(i))
+
+							if (hit) {
+								matched = hit
+
+								break
 							}
 						}
 
@@ -1796,6 +1973,8 @@ export class Offline {
 			} else {
 				atomicWrite(metaFile, serialized)
 
+				this.invalidateTreeMeta(topLevelUuid)
+
 				// Overlap dedup: entries of this tree (incl. degraded-pass preserved ones) subsume
 				// their standalone copies. The flattened index contains EVERY nested entry of this
 				// tree, so gating on the index alone would degenerate into one existence stat per
@@ -1821,6 +2000,8 @@ export class Offline {
 						if (standaloneFileDir.exists) {
 							standaloneFileDir.delete()
 						}
+
+						this.invalidateStandaloneMeta(entryUuid)
 					}
 
 					// Don't delete ourselves — we're reconciling this tree, not a nested one.
@@ -1830,6 +2011,8 @@ export class Offline {
 						if (standaloneDirDir.exists) {
 							standaloneDirDir.delete()
 						}
+
+						this.invalidateTreeMeta(entryUuid)
 					}
 				}
 
@@ -1963,6 +2146,8 @@ export class Offline {
 				dataFile.parentDirectory.delete()
 			}
 
+			this.invalidateStandaloneMeta(file.data.uuid)
+
 			dataFile.parentDirectory.create({
 				intermediates: true,
 				idempotent: true
@@ -1992,6 +2177,7 @@ export class Offline {
 					diskSize: deliveredDiskSize(file, dataFile)
 				})
 
+				this.invalidateStandaloneMeta(file.data.uuid)
 				this.invalidateCaches()
 
 				if (!skipIndexUpdate) {
@@ -2008,6 +2194,8 @@ export class Offline {
 					dataFile.parentDirectory.delete()
 				}
 
+				this.invalidateStandaloneMeta(file.data.uuid)
+
 				throw innerResult.error
 			}
 
@@ -2017,6 +2205,8 @@ export class Offline {
 				if (dataFile.parentDirectory.exists) {
 					dataFile.parentDirectory.delete()
 				}
+
+				this.invalidateStandaloneMeta(file.data.uuid)
 
 				return false
 			}
@@ -2092,6 +2282,7 @@ export class Offline {
 			if (deletedStaleData) {
 				// The physical data changed underneath the derived caches (getLocalFile may have
 				// cached the old-name file) — drop them even if the download below fails.
+				this.invalidateStandaloneMeta(item.data.uuid)
 				this.invalidateCaches()
 			}
 
@@ -2121,6 +2312,7 @@ export class Offline {
 				diskSize: deliveredDiskSize(item, dataFile)
 			})
 
+			this.invalidateStandaloneMeta(item.data.uuid)
 			this.invalidateCaches()
 
 			return true
@@ -2175,6 +2367,137 @@ export class Offline {
 		return errors
 	}
 
+	private treeView(topLevelUuid: string, meta: DirectoryOfflineMeta): TreeView {
+		const cached = this.treeViews.get(meta)
+
+		if (cached) {
+			return cached
+		}
+
+		const entryUuids = Object.keys(meta.entries)
+		const uuidToPath: Record<string, string> = {
+			[topLevelUuid]: "/"
+		}
+		const pathToItem: Record<string, DriveItem> = {
+			"/": meta.item
+		}
+
+		for (let i = 0; i < entryUuids.length; i++) {
+			const entryMeta = meta.entries[entryUuids[i] as string]
+
+			if (!entryMeta || !isDirectoryItem(entryMeta.item)) {
+				continue
+			}
+
+			pathToItem[entryMeta.path] = entryMeta.item
+			uuidToPath[entryMeta.item.data.uuid] = entryMeta.path
+		}
+
+		const view: TreeView = {
+			uuidToPath,
+			pathToItem,
+			childrenByDir: null,
+			subtreeStats: null
+		}
+
+		this.treeViews.set(meta, view)
+
+		return view
+	}
+
+	private treeChildrenByDir(meta: DirectoryOfflineMeta, view: TreeView): Map<string, TreeEntry[]> {
+		if (view.childrenByDir) {
+			return view.childrenByDir
+		}
+
+		const entryUuids = Object.keys(meta.entries)
+		const childrenByDir = new Map<string, TreeEntry[]>()
+
+		for (let i = 0; i < entryUuids.length; i++) {
+			const entryMeta = meta.entries[entryUuids[i] as string]
+
+			if (!entryMeta) {
+				continue
+			}
+
+			const dirname = rawPathDirname(entryMeta.path)
+			const bucket = childrenByDir.get(dirname)
+
+			if (bucket) {
+				bucket.push(entryMeta)
+			} else {
+				childrenByDir.set(dirname, [entryMeta])
+			}
+		}
+
+		view.childrenByDir = childrenByDir
+
+		return childrenByDir
+	}
+
+	// An entry with dirname D counts toward target P exactly when D === P, or D starts with P + "/"
+	// (with "/" itself matching any D that starts with "/"). Those targets are D, every prefix of D
+	// ending before a "/", and "/" — each counted once per entry.
+	private treeSubtreeStats(meta: DirectoryOfflineMeta, view: TreeView): Map<string, OfflineSizeStats> {
+		if (view.subtreeStats) {
+			return view.subtreeStats
+		}
+
+		const subtreeStats = new Map<string, OfflineSizeStats>()
+		const add = (path: string, size: number, files: number, dirs: number): void => {
+			const stats = subtreeStats.get(path)
+
+			if (stats) {
+				stats.size += size
+				stats.files += files
+				stats.dirs += dirs
+			} else {
+				subtreeStats.set(path, {
+					size,
+					files,
+					dirs
+				})
+			}
+		}
+
+		for (const [dirname, children] of this.treeChildrenByDir(meta, view)) {
+			let size = 0
+			let files = 0
+			let dirs = 0
+
+			for (let i = 0; i < children.length; i++) {
+				const child = children[i] as TreeEntry
+
+				if (isDirectoryItem(child.item)) {
+					dirs += 1
+				} else {
+					size += Number(child.item.data.decryptedMeta?.size ?? 0)
+					files += 1
+				}
+			}
+
+			add(dirname, size, files, dirs)
+
+			const rooted = dirname.charCodeAt(0) === 47
+
+			// From 1: a prefix of length 0 is "", which never resolves as a target. A length-1 prefix
+			// of a rooted dirname is "/", added once below instead.
+			for (let i = rooted ? 2 : 1; i < dirname.length; i++) {
+				if (dirname.charCodeAt(i) === 47) {
+					add(dirname.slice(0, i), size, files, dirs)
+				}
+			}
+
+			if (rooted && dirname !== "/") {
+				add("/", size, files, dirs)
+			}
+		}
+
+		view.subtreeStats = subtreeStats
+
+		return subtreeStats
+	}
+
 	// Converts a directory DriveItem at the given path into an AnyDirWithContext for SDK calls.
 	// Needed because listDirectories returns DriveItems but SDK listing APIs require AnyDirWithContext.
 	private findParentAnyDirWithContext(pathToItem: Record<string, DriveItem>, dirname: string): OfflineParent | null {
@@ -2227,6 +2550,8 @@ export class Offline {
 			return cached
 		}
 
+		const epoch = this.mutationCounter
+
 		this.ensureDirectories()
 
 		const directories: OfflineEntry[] = []
@@ -2262,7 +2587,9 @@ export class Offline {
 				directories
 			}
 
-			this.listDirectoriesCache.set(cacheKey, noParentResult)
+			if (epoch === this.mutationCounter) {
+				this.listDirectoriesCache.set(cacheKey, noParentResult)
+			}
 
 			return noParentResult
 		}
@@ -2299,26 +2626,8 @@ export class Offline {
 			}
 		}
 
-		const entryUuids = Object.keys(directoryMeta.entries)
-		const uuidToPath: Record<string, string> = {
-			[topLevelUuid]: "/"
-		}
-		const pathToItem: Record<string, DriveItem> = {
-			"/": directoryMeta.item
-		}
-
-		for (let i = 0; i < entryUuids.length; i++) {
-			const entryMeta = directoryMeta.entries[entryUuids[i] as string]
-
-			if (!entryMeta || !isDirectoryItem(entryMeta.item)) {
-				continue
-			}
-
-			pathToItem[entryMeta.path] = entryMeta.item
-			uuidToPath[entryMeta.item.data.uuid] = entryMeta.path
-		}
-
-		const targetPath = uuidToPath[parentUuid]
+		const view = this.treeView(topLevelUuid, directoryMeta)
+		const targetPath = view.uuidToPath[parentUuid]
 
 		if (!targetPath) {
 			return {
@@ -2327,31 +2636,21 @@ export class Offline {
 			}
 		}
 
-		for (let i = 0; i < entryUuids.length; i++) {
-			const entryMeta = directoryMeta.entries[entryUuids[i] as string]
+		const children = this.treeChildrenByDir(directoryMeta, view).get(targetPath)
+		// Every child shares this parent. Resolved per call, never stored in the view: the share
+		// context it reads is session-mutable.
+		const childParent = children ? this.findParentAnyDirWithContext(view.pathToItem, targetPath) : null
 
-			if (!entryMeta) {
-				continue
+		if (children && childParent) {
+			for (let i = 0; i < children.length; i++) {
+				const entryMeta = children[i] as TreeEntry
+				const target = isDirectoryItem(entryMeta.item) ? directories : files
+
+				target.push({
+					item: entryMeta.item,
+					parent: childParent
+				})
 			}
-
-			const dirname = rawPathDirname(entryMeta.path)
-
-			if (dirname !== targetPath) {
-				continue
-			}
-
-			const parent = this.findParentAnyDirWithContext(pathToItem, dirname)
-
-			if (!parent) {
-				continue
-			}
-
-			const target = isDirectoryItem(entryMeta.item) ? directories : files
-
-			target.push({
-				item: entryMeta.item,
-				parent
-			})
 		}
 
 		const parentResult = {
@@ -2359,7 +2658,9 @@ export class Offline {
 			directories
 		}
 
-		this.listDirectoriesCache.set(cacheKey, parentResult)
+		if (epoch === this.mutationCounter) {
+			this.listDirectoriesCache.set(cacheKey, parentResult)
+		}
 
 		return parentResult
 	}
@@ -2379,6 +2680,8 @@ export class Offline {
 		if (this.listDirectoriesRecursiveCache) {
 			return this.listDirectoriesRecursiveCache
 		}
+
+		const epoch = this.mutationCounter
 
 		this.ensureDirectories()
 
@@ -2415,19 +2718,9 @@ export class Offline {
 				})
 
 				const entryUuids = Object.keys(directoryMeta.entries)
-				const pathToItem: Record<string, DriveItem> = {
-					"/": directoryMeta.item
-				}
-
-				for (let i = 0; i < entryUuids.length; i++) {
-					const entryMeta = directoryMeta.entries[entryUuids[i] as string]
-
-					if (!entryMeta || !isDirectoryItem(entryMeta.item)) {
-						continue
-					}
-
-					pathToItem[entryMeta.path] = entryMeta.item
-				}
+				const { pathToItem } = this.treeView(topLevelEntry.name, directoryMeta)
+				// Siblings share a parent; the loop never awaits, so the share context stays put.
+				const parentByDirname = new Map<string, OfflineParent | null>()
 
 				for (let i = 0; i < entryUuids.length; i++) {
 					const entryMeta = directoryMeta.entries[entryUuids[i] as string]
@@ -2442,7 +2735,13 @@ export class Offline {
 						continue
 					}
 
-					const parent = this.findParentAnyDirWithContext(pathToItem, dirname)
+					let parent = parentByDirname.get(dirname)
+
+					if (parent === undefined) {
+						parent = this.findParentAnyDirWithContext(pathToItem, dirname)
+
+						parentByDirname.set(dirname, parent)
+					}
 
 					if (!parent) {
 						continue
@@ -2465,7 +2764,9 @@ export class Offline {
 			directories
 		}
 
-		this.listDirectoriesRecursiveCache = recursiveResult
+		if (epoch === this.mutationCounter) {
+			this.listDirectoriesRecursiveCache = recursiveResult
+		}
 
 		return recursiveResult
 	}
@@ -2476,6 +2777,8 @@ export class Offline {
 		if (cachedSize) {
 			return cachedSize
 		}
+
+		const epoch = this.mutationCounter
 
 		this.ensureDirectories()
 
@@ -2497,7 +2800,9 @@ export class Offline {
 				dirs: 0
 			}
 
-			this.itemSizeCache.set(item.data.uuid, sizeResult)
+			if (epoch === this.mutationCounter) {
+				this.itemSizeCache.set(item.data.uuid, sizeResult)
+			}
 
 			return sizeResult
 		}
@@ -2523,22 +2828,8 @@ export class Offline {
 			}
 		}
 
-		const entryUuids = Object.keys(directoryMeta.entries)
-		const uuidToPath: Record<string, string> = {
-			[topLevelUuid]: "/"
-		}
-
-		for (let i = 0; i < entryUuids.length; i++) {
-			const entryMeta = directoryMeta.entries[entryUuids[i] as string]
-
-			if (!entryMeta || !isDirectoryItem(entryMeta.item)) {
-				continue
-			}
-
-			uuidToPath[entryMeta.item.data.uuid] = entryMeta.path
-		}
-
-		const targetPath = uuidToPath[item.data.uuid]
+		const view = this.treeView(topLevelUuid, directoryMeta)
+		const targetPath = view.uuidToPath[item.data.uuid]
 
 		if (!targetPath) {
 			return {
@@ -2548,39 +2839,17 @@ export class Offline {
 			}
 		}
 
-		let size = 0
-		let files = 0
-		let dirs = 0
-		const targetPrefix = targetPath === "/" ? "/" : `${targetPath}/`
-
-		for (let i = 0; i < entryUuids.length; i++) {
-			const entryMeta = directoryMeta.entries[entryUuids[i] as string]
-
-			if (!entryMeta) {
-				continue
-			}
-
-			const dirname = rawPathDirname(entryMeta.path)
-
-			if (dirname !== targetPath && !dirname.startsWith(targetPrefix)) {
-				continue
-			}
-
-			if (isDirectoryItem(entryMeta.item)) {
-				dirs += 1
-			} else {
-				size += Number(entryMeta.item.data.decryptedMeta?.size ?? 0)
-				files += 1
-			}
-		}
-
+		const stats = this.treeSubtreeStats(directoryMeta, view).get(targetPath)
+		// A copy: callers must never hold the view's accumulator.
 		const sizeResult = {
-			size,
-			files,
-			dirs
+			size: stats?.size ?? 0,
+			files: stats?.files ?? 0,
+			dirs: stats?.dirs ?? 0
 		}
 
-		this.itemSizeCache.set(item.data.uuid, sizeResult)
+		if (epoch === this.mutationCounter) {
+			this.itemSizeCache.set(item.data.uuid, sizeResult)
+		}
 
 		return sizeResult
 	}
@@ -2595,6 +2864,7 @@ export class Offline {
 			this.setIndexCache(null)
 
 			this.ensureDirectories()
+			this.invalidateAllMetas()
 			this.invalidateCaches()
 		})
 
@@ -2635,6 +2905,8 @@ export class Offline {
 
 					didDelete = true
 				}
+
+				this.invalidateStandaloneMeta(item.data.uuid)
 			} else {
 				// Trees live at directories/{topLevelUuid}: a nested or unknown uuid has no meta there,
 				// so it stays a no-op. A tree with a corrupt meta is removeTreeDirectory's job.
@@ -2648,6 +2920,8 @@ export class Offline {
 
 						didDelete = true
 					}
+
+					this.invalidateTreeMeta(item.data.uuid)
 				}
 			}
 
@@ -2698,6 +2972,8 @@ export class Offline {
 			return null
 		}
 
+		const epoch = this.mutationCounter
+
 		this.ensureDirectories()
 
 		const index = await this.readIndex()
@@ -2718,7 +2994,9 @@ export class Offline {
 			)
 
 			if (file.exists) {
-				this.getLocalFileCache.set(item.data.uuid, file)
+				if (epoch === this.mutationCounter) {
+					this.getLocalFileCache.set(item.data.uuid, file)
+				}
 
 				return file
 			}
@@ -2738,7 +3016,9 @@ export class Offline {
 			const foundFile = new FileSystem.File(DIRECTORIES_DIRECTORY_URI, topLevelUuid, entryMeta.path)
 
 			if (foundFile.exists) {
-				this.getLocalFileCache.set(item.data.uuid, foundFile)
+				if (epoch === this.mutationCounter) {
+					this.getLocalFileCache.set(item.data.uuid, foundFile)
+				}
 
 				return foundFile
 			}

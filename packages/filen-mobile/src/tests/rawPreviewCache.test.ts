@@ -79,7 +79,7 @@ vi.mock("@/features/offline/offline", () => ({
 
 vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 
-import { fs, setMtime, clearMtimes, File as MockFile } from "@/tests/mocks/expoFileSystem"
+import { fs, setMtime, clearMtimes, File as MockFile, Directory as MockDirectory } from "@/tests/mocks/expoFileSystem"
 import { wrapAbortSignalForSdk, disposeSdkAbortSignal } from "@/lib/signals"
 import { type DriveItemFileExtracted } from "@/types"
 
@@ -516,6 +516,92 @@ describe("RawPreviewCache", () => {
 			// uri get() just handed out still resolves.
 			expect(fs.has(`${DIR}/u1.jpg`)).toBe(true)
 			expect(Array.from(fs.get(`${DIR}/u1.jpg`) as Uint8Array)).toEqual([0xff, 0xd8, 0xff, 0xe1])
+		})
+
+		it("skips a default pass after one that deleted nothing, until a write", async () => {
+			const cache = await createCache()
+
+			writePreview("fresh")
+			setMtime(`${DIR}/fresh.jpg`, Date.now())
+
+			const listSpy = vi.spyOn(MockDirectory.prototype, "list")
+
+			try {
+				await cache.gc()
+				await cache.gc()
+
+				expect(listSpy).toHaveBeenCalledTimes(1)
+
+				// Explicit-age passes are never skipped.
+				await cache.gc(24 * 60 * 60 * 1000)
+
+				expect(listSpy).toHaveBeenCalledTimes(2)
+
+				mockWriteEmbeddedPreviewToPath.mockImplementationOnce(previewWriter())
+
+				await cache.get({ item: makeItem("u1") })
+				await cache.gc()
+
+				expect(listSpy).toHaveBeenCalledTimes(3)
+			} finally {
+				listSpy.mockRestore()
+			}
+		})
+
+		it("runs again once a survivor reaches its TTL", async () => {
+			const cache = await createCache()
+			const now = Date.now()
+
+			writePreview("aging")
+			setMtime(`${DIR}/aging.jpg`, now - 23 * 60 * 60 * 1000)
+
+			await cache.gc()
+
+			expect(fs.has(`${DIR}/aging.jpg`)).toBe(true)
+
+			const nowSpy = vi.spyOn(Date, "now").mockReturnValue(now + 60 * 60 * 1000)
+
+			try {
+				await cache.gc()
+			} finally {
+				nowSpy.mockRestore()
+			}
+
+			expect(fs.has(`${DIR}/aging.jpg`)).toBe(false)
+		})
+
+		it("a write overlapping a no-op pass keeps the next pass from being skipped", async () => {
+			const cache = await createCache()
+			let finishExtraction!: () => void
+
+			mockWriteEmbeddedPreviewToPath.mockImplementationOnce(
+				(_file: unknown, sdkPath: string) =>
+					new Promise(resolve => {
+						finishExtraction = () => {
+							fs.set(`file://${sdkPath}`, new Uint8Array(0))
+
+							resolve({ tag: "Preview", inner: { width: 1, height: 1, orientation: 1, bytes: 0n } })
+						}
+					})
+			)
+
+			const getPromise = cache.get({ item: makeItem("u1") })
+
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			// Sees an empty directory: nothing to delete.
+			await cache.gc()
+
+			finishExtraction()
+
+			await getPromise
+
+			// The write left a 0-byte preview behind; the next default pass must still collect it.
+			expect(fs.has(`${DIR}/u1.jpg`)).toBe(true)
+
+			await cache.gc()
+
+			expect(fs.has(`${DIR}/u1.jpg`)).toBe(false)
 		})
 
 		it("returns immediately when the directory does not exist", async () => {

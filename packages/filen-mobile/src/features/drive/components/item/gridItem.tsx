@@ -36,7 +36,7 @@ export default function GridItem({
 	// its tint plays out.
 	highlighted?: boolean
 }) {
-	const { onPress, disabled, navigateOnly, hasCheckbox, checkbox } = useDriveItemInteraction({ info, drivePath, getListItems })
+	const { onPress, isSelected, disabled, navigateOnly, hasCheckbox, checkbox } = useDriveItemInteraction({ info, drivePath, getListItems })
 	const { showFavorited, showOffline, isStoredOffline, hasSyncError } = useDriveItemIndicators({
 		item: info.item,
 		drivePath
@@ -64,6 +64,7 @@ export default function GridItem({
 				item={info.item}
 				drivePath={drivePath}
 				isStoredOffline={isStoredOffline}
+				isSelected={isSelected}
 			>
 				<PressableScale
 					className="bg-transparent items-center w-full rounded-3xl"

@@ -103,5 +103,6 @@ export const {
 	newestMessage,
 	mergeInflightQueuesByUnion,
 	isPermanentRejection,
-	MAX_NON_RETRYABLE_REJECTIONS
+	MAX_NON_RETRYABLE_REJECTIONS,
+	createTypingSender
 } = await vi.importActual<typeof import("@filen/shared")>("@filen/shared")

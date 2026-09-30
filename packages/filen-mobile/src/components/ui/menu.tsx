@@ -291,16 +291,18 @@ type MenuInnerPlatformProps = Omit<MenuProps, "buttons"> & {
 	buttons: MenuButton[]
 }
 
-const MenuInnerIos = ({ children, ...props }: MenuInnerPlatformProps) => {
+// buttons and title are destructured so the compiler caches the menu config and press handler on them;
+// memos keyed on a rest object miss on every render.
+const MenuInnerIos = ({ children, buttons, title, ...props }: MenuInnerPlatformProps) => {
 	const bgBackgroundTertiary = useResolveClassNames("bg-background-tertiary")
 
 	const onPressMenuItem = (e: OnPressMenuItemEventObject) => {
-		findButtonById(props.buttons, e.nativeEvent.actionKey)?.onPress?.()
+		findButtonById(buttons, e.nativeEvent.actionKey)?.onPress?.()
 	}
 
 	const menuConfig = toIosMenuConfig({
-		buttons: props.buttons,
-		title: props.title
+		buttons,
+		title
 	})
 
 	if (props.type === "dropdown") {
@@ -358,17 +360,17 @@ const MenuInnerIos = ({ children, ...props }: MenuInnerPlatformProps) => {
 	)
 }
 
-const MenuInnerAndroid = ({ children, ...props }: MenuInnerPlatformProps) => {
+const MenuInnerAndroid = ({ children, buttons, ...props }: MenuInnerPlatformProps) => {
 	const textForeground = useResolveClassNames("text-foreground")
 	const textRed500 = useResolveClassNames("text-red-500")
 	const textMutedForeground = useResolveClassNames("text-muted-foreground")
 
 	const onPressAction = (e: NativeActionEvent) => {
-		findButtonById(props.buttons, e.nativeEvent.event)?.onPress?.()
+		findButtonById(buttons, e.nativeEvent.event)?.onPress?.()
 	}
 
 	const actions = toReactNativeMenuActions({
-		buttons: props.buttons,
+		buttons,
 		colors: {
 			normal: (textForeground.color as string) ?? "white",
 			destructive: (textRed500.color as string) ?? "white",
@@ -408,7 +410,7 @@ const MenuInnerAndroid = ({ children, ...props }: MenuInnerPlatformProps) => {
 	)
 }
 
-const MenuInner = ({ children, ...props }: MenuProps) => {
+const MenuInner = ({ children, buttons, ...props }: MenuProps) => {
 	const isOnline = useIsOnline()
 
 	if (props.disabled) {
@@ -417,11 +419,8 @@ const MenuInner = ({ children, ...props }: MenuProps) => {
 
 	// Apply the per-button requiresOnline gate once; downstream iOS/Android
 	// rendering paths see a fully-resolved `disabled` value per button.
-	const gatedButtons = props.buttons?.map(button => applyOfflineGate(button, isOnline))
-	const effectiveProps = {
-		...props,
-		buttons: gatedButtons && checkIfButtonIdsAreUnique(gatedButtons) ? gatedButtons : []
-	}
+	const gatedButtons = buttons?.map(button => applyOfflineGate(button, isOnline))
+	const effectiveButtons = gatedButtons && checkIfButtonIdsAreUnique(gatedButtons) ? gatedButtons : []
 
 	// A long-press (context) menu shares the press with the row's own tap handler. Flag the subtree so
 	// the shared pressables drop a press held long enough to engage the menu — a long-press can then
@@ -431,10 +430,24 @@ const MenuInner = ({ children, ...props }: MenuProps) => {
 		props.type === "dropdown" ? children : <InsideContextMenuContext.Provider value={true}>{children}</InsideContextMenuContext.Provider>
 
 	if (Platform.OS === "ios") {
-		return <MenuInnerIos {...effectiveProps}>{content}</MenuInnerIos>
+		return (
+			<MenuInnerIos
+				{...props}
+				buttons={effectiveButtons}
+			>
+				{content}
+			</MenuInnerIos>
+		)
 	}
 
-	return <MenuInnerAndroid {...effectiveProps}>{content}</MenuInnerAndroid>
+	return (
+		<MenuInnerAndroid
+			{...props}
+			buttons={effectiveButtons}
+		>
+			{content}
+		</MenuInnerAndroid>
+	)
 }
 
 export const Menu = withUniwind(MenuInner) as typeof MenuInner

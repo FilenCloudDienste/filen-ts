@@ -29,6 +29,7 @@ import { useContactsStore } from "@/features/contacts/store/useContacts.store"
 import { useHttpStore } from "@/stores/useHttp.store"
 import { useAppStore } from "@/stores/useApp.store"
 import type { GalleryItemTagged } from "@/components/drivePreview/gallery"
+import { isPhotoGridItem } from "@/features/photos/utils"
 import {
 	makeDrivePath,
 	makeDriveGalleryItem,
@@ -183,13 +184,15 @@ describe("useDrivePreviewStore.open", () => {
 		const photosDrivePath = makeDrivePath("photos")
 		// The photos filter uses EXPO_IMAGE_SUPPORTED_EXTENSIONS (the displayable set),
 		// which includes .gif — expo-image renders gifs, so they belong in the gallery (#48).
-		const items: GalleryItemTagged[] = [
+		const listing: GalleryItemTagged[] = [
 			makeDriveGalleryItem("img1", "photo.jpg"), // image + displayable ext → included
 			makeDriveGalleryItem("img2", "photo.gif"), // image + displayable ext (gif) → included
 			makeDriveGalleryItem("vid1", "clip.mp4"), // video → included
 			makeDriveGalleryItem("aud1", "track.mp3"), // audio → excluded
 			makeDriveGalleryItem("doc1", "readme.txt") // text → excluded
 		]
+		// The photos grid applies the filter and opens the gallery with its own list.
+		const items = listing.filter(item => item.type === "drive" && isPhotoGridItem(item.data))
 
 		useDrivePreviewStore.getState().open({
 			items,

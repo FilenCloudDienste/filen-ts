@@ -30,8 +30,8 @@ import {
 	createCompositePauseSignal
 } from "@/lib/signals"
 import {
-	driveItemsQueryUpdateForNormalParent,
-	driveItemsQueryUpdateForPhotos,
+	driveItemsQueryUpsertManyForNormalParent,
+	driveItemsQueryUpsertManyIntoPhotos,
 	driveItemsQueryUpdateForRecents
 } from "@/features/drive/queries/useDriveItems.query"
 import { markDirectorySizesStale } from "@/features/drive/queries/useDirectorySize.query"
@@ -494,8 +494,6 @@ export async function uploadCore(
 					// createDirectory below) — the display name must match that outcome.
 					name: localFileOrDir.name,
 					size: 0,
-					knownDirectories: 0,
-					knownFiles: 0,
 					bytesTransferred: 0,
 					startedAt: Date.now(),
 					paused: false,
@@ -538,12 +536,10 @@ export async function uploadCore(
 			await authedSdkClient.uploadDirRecursively(
 				normalizeFilePathForSdk(localFileOrDir.uri),
 				{
-					onScanComplete(totalDirs, totalFiles, totalBytes) {
+					onScanComplete(_totalDirs, _totalFiles, totalBytes) {
 						patchTransfer(id, "uploadDirectory", t => ({
 							...t,
-							size: Number(totalBytes),
-							knownDirectories: Number(totalDirs),
-							knownFiles: Number(totalFiles)
+							size: Number(totalBytes)
 						}))
 					},
 					onScanErrors(errors) {
@@ -555,12 +551,10 @@ export async function uploadCore(
 							}
 						}))
 					},
-					onScanProgress(knownDirs, knownFiles, knownBytes) {
+					onScanProgress(_knownDirs, _knownFiles, knownBytes) {
 						patchTransfer(id, "uploadDirectory", t => ({
 							...t,
-							size: Number(knownBytes),
-							knownDirectories: Number(knownDirs),
-							knownFiles: Number(knownFiles)
+							size: Number(knownBytes)
 						}))
 					},
 					onUploadErrors(errors) {
@@ -601,21 +595,10 @@ export async function uploadCore(
 
 								cache.cacheNewNormalDir(uploadedDir, driveItem)
 
-								// Hoisted: the right-hand side is fixed for the whole call, but sat inside the
-								// predicate, so it was recomputed for every item in the parent listing (and again
-								// for the root-mirror invocation).
-								const uploadedDirName = unwrappedDirMeta.meta?.name.toLowerCase().trim()
-
-								driveItemsQueryUpdateForNormalParent({
+								// Cached just above; the listing's other rows were cached when they got there.
+								driveItemsQueryUpsertManyForNormalParent({
 									parentUuid: dirParentUuid,
-									updater: prev => [
-										...prev.filter(
-											item =>
-												item.data.uuid !== unwrappedDirMeta.uuid &&
-												item.data.decryptedMeta?.name.toLowerCase().trim() !== uploadedDirName
-										),
-										driveItem
-									]
+									items: [driveItem]
 								})
 							}
 						}
@@ -638,19 +621,9 @@ export async function uploadCore(
 
 								cache.cacheNewFile(uploadedFile, driveItem)
 
-								// Hoisted for the same reason as the directory branch above.
-								const uploadedFileName = unwrappedFileMeta.meta?.name.toLowerCase().trim()
-
-								driveItemsQueryUpdateForNormalParent({
+								driveItemsQueryUpsertManyForNormalParent({
 									parentUuid: fileParentUuid,
-									updater: prev => [
-										...prev.filter(
-											item =>
-												item.data.uuid !== unwrappedFileMeta.file.uuid &&
-												item.data.decryptedMeta?.name.toLowerCase().trim() !== uploadedFileName
-										),
-										driveItem
-									]
+									items: [driveItem]
 								})
 							}
 
@@ -826,18 +799,11 @@ export async function uploadCore(
 		// does inline on each fetch.
 		cache.cacheNewFile(result.data, driveItem)
 
-		// Hoisted out of the predicate: fixed for the whole call, previously recomputed per item in the
-		// parent listing — once per uploaded file, so it multiplies across a camera-upload backfill.
-		const uploadedName = unwrappedFileMeta.meta?.name.toLowerCase().trim()
-
-		driveItemsQueryUpdateForNormalParent({
+		// The upsert helpers leave the listings' other rows uncached again: they were cached when they got
+		// there, and re-caching the whole Photos grid per file multiplies across a camera-upload backfill.
+		driveItemsQueryUpsertManyForNormalParent({
 			parentUuid: parent.inner[0].uuid,
-			updater: prev => [
-				...prev.filter(
-					item => item.data.uuid !== result.data.uuid && item.data.decryptedMeta?.name.toLowerCase().trim() !== uploadedName
-				),
-				driveItem
-			]
+			items: [driveItem]
 		})
 
 		// Surface the new file in the two virtual-root queries it can belong to — both SEPARATE from the
@@ -845,10 +811,12 @@ export async function uploadCore(
 		// upload OUTSIDE that subtree is never wrongly inserted (it would linger until the grid refetches).
 		// Recents: any new file is recent, so it always qualifies. Dedupe by uuid (the flat/recursive lists
 		// can hold the same name twice).
-		driveItemsQueryUpdateForPhotos({
-			parentUuid: parent.inner[0].uuid,
-			updater: prev => [...prev.filter(item => item.data.uuid !== result.data.uuid), driveItem]
-		})
+		driveItemsQueryUpsertManyIntoPhotos([
+			{
+				parentUuid: parent.inner[0].uuid,
+				item: driveItem
+			}
+		])
 
 		driveItemsQueryUpdateForRecents({
 			updater: prev => [...prev.filter(item => item.data.uuid !== result.data.uuid), driveItem]
@@ -905,6 +873,13 @@ export async function uploadCore(
 	}
 }
 
+type DownloadFileResult = {
+	files: (Omit<FileWithPath, "file"> & {
+		file: File | SharedFile
+	})[]
+	directories: DirWithPath[]
+}
+
 // Performs a download against the SDK with full progress tracking. Mirrors uploadCore.
 export async function downloadCore(
 	globalAbortController: AbortController,
@@ -919,19 +894,10 @@ export async function downloadCore(
 	}: DownloadParams
 ): Promise<
 	| {
-			files: (Omit<FileWithPath, "file"> & {
-				file: File | SharedFile
-			})[]
-			directories: DirWithPath[]
 			errors: DownloadError[]
 			scanErrors: FilenSdkErrorInterface[]
 	  }
-	| {
-			files: (Omit<FileWithPath, "file"> & {
-				file: File | SharedFile
-			})[]
-			directories: DirWithPath[]
-	  }
+	| DownloadFileResult
 	| null
 > {
 	const { authedSdkClient } = await auth.getSdkClients()
@@ -956,15 +922,9 @@ export async function downloadCore(
 					item,
 					type: "downloadDirectory",
 					size: 0,
-					knownDirectories: 0,
-					knownFiles: 0,
 					bytesTransferred: 0,
 					startedAt: Date.now(),
 					paused: false,
-					directoryQueryProgress: {
-						totalBytes: 0,
-						bytesTransferred: 0
-					},
 					errors: {
 						unknown: [],
 						scan: [],
@@ -979,17 +939,15 @@ export async function downloadCore(
 
 			session.register(defer, "downloadDirectory", () => succeededDownloadDirectory)
 
+			// Downloaded items are not retained: no directory caller reads them, and a large tree would
+			// hold every lifted SDK record until the transfer settles.
 			const transferred: {
-				files: (Omit<FileWithPath, "file"> & { file: File | SharedFile })[]
-				directories: DirWithPath[]
 				errors: DownloadError[]
 				// SDK-side tree-scan errors. A failed scan silently DROPS the affected subtree from
 				// the download set while the call still resolves Ok — callers that verify
 				// completeness (the offline layer) need these to tell "scan-degraded" from "done".
 				scanErrors: FilenSdkErrorInterface[]
 			} = {
-				files: [],
-				directories: [],
 				errors: [],
 				scanErrors: []
 			}
@@ -1013,35 +971,18 @@ export async function downloadCore(
 						}))
 						transferred.errors.push(...errors)
 					},
-					onDownloadUpdate(downloadedDirs, downloadedFiles, downloadedBytes) {
-						for (const downloadedDir of downloadedDirs) {
-							transferred.directories.push(downloadedDir)
-						}
-
-						for (const downloadedFile of downloadedFiles) {
-							transferred.files.push(downloadedFile)
-						}
-
+					onDownloadUpdate(_downloadedDirs, _downloadedFiles, downloadedBytes) {
 						patchTransfer(id, "downloadDirectory", t => ({
 							...t,
 							bytesTransferred: t.bytesTransferred + Number(downloadedBytes)
 						}))
 					},
-					onQueryDownloadProgress(knownBytes, totalBytes) {
+					// Required by the callback interface; listing-fetch progress has no reader.
+					onQueryDownloadProgress() {},
+					onScanComplete(_totalDirs, _totalFiles, totalBytes) {
 						patchTransfer(id, "downloadDirectory", t => ({
 							...t,
-							directoryQueryProgress: {
-								bytesTransferred: Number(knownBytes),
-								totalBytes: Number(totalBytes)
-							}
-						}))
-					},
-					onScanComplete(totalDirs, totalFiles, totalBytes) {
-						patchTransfer(id, "downloadDirectory", t => ({
-							...t,
-							size: Number(totalBytes),
-							knownDirectories: Number(totalDirs),
-							knownFiles: Number(totalFiles)
+							size: Number(totalBytes)
 						}))
 					},
 					onScanErrors(errors) {
@@ -1055,12 +996,10 @@ export async function downloadCore(
 							}
 						}))
 					},
-					onScanProgress(knownDirs, knownFiles, knownBytes) {
+					onScanProgress(_knownDirs, _knownFiles, knownBytes) {
 						patchTransfer(id, "downloadDirectory", t => ({
 							...t,
-							size: Number(knownBytes),
-							knownDirectories: Number(knownDirs),
-							knownFiles: Number(knownFiles)
+							size: Number(knownBytes)
 						}))
 					}
 				},
@@ -1206,7 +1145,7 @@ export async function downloadCore(
 			)
 		}
 
-		const transferred: Awaited<ReturnType<typeof downloadCore>> = {
+		const transferred: DownloadFileResult = {
 			files: [
 				{
 					path: normalizeFilePathForSdk(destination.uri),

@@ -20,6 +20,7 @@ import type { DrivePath } from "@/hooks/useDrivePath"
 import useLinkSaveable from "@/features/drive/hooks/useLinkSaveable"
 import { linkSaveTarget } from "@/features/drive/linkedSave"
 import { ITEM_DETAIL_CONTENT_CLASS } from "@/features/drive/components/itemDetailLayout"
+import useDriveStore from "@/features/drive/store/useDrive.store"
 
 // A standalone file link: a link view with no directory behind it.
 const LINKED_FILE_PATH: DrivePath = {
@@ -37,6 +38,7 @@ const LinkedFile = () => {
 
 	const item = deserializeRouteParam<Extract<DriveItem, { type: "file" }>>(itemSerialized)
 	const linkSaveable = useLinkSaveable(item?.type === "file" ? linkSaveTarget(LINKED_FILE_PATH, item) : null)
+	const isSelected = useDriveStore(state => (item ? state.selectedItems.some(i => i.data.uuid === item.data.uuid) : false))
 
 	if (!item || item.type !== "file") {
 		return <DismissStack />
@@ -61,6 +63,7 @@ const LinkedFile = () => {
 									drivePath: LINKED_FILE_PATH,
 									isStoredOffline: false,
 									linkSaveable,
+									isSelected,
 									t
 								})
 							: []

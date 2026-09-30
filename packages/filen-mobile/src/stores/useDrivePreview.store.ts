@@ -3,7 +3,6 @@ import type { GalleryItemTagged, InitialItem } from "@/components/drivePreview/g
 import { router } from "@/lib/router"
 import type { DrivePath } from "@/hooks/useDrivePath"
 import { getPreviewType, isImagePreviewType } from "@/lib/previewType"
-import { isPhotoGridItem } from "@/features/photos/utils"
 import { isFileItem } from "@/features/drive/driveSelectors"
 
 export type OpenPreviewParams = {
@@ -174,8 +173,9 @@ export const useDrivePreviewStore = create<DrivePreviewStore>((set, get) => ({
 				]
 			}
 
+			// The photos grid (its only opener) is already filtered with isPhotoGridItem.
 			if (initialItem.data.drivePath.type === "photos") {
-				return items.filter(item => item.type === "drive" && isPhotoGridItem(item.data))
+				return items
 			}
 
 			return items.filter(item => {

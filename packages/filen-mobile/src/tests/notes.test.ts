@@ -22,10 +22,15 @@ const {
 // Module mocks
 // ---------------------------------------------------------------------------
 
-vi.mock("@filen/shared", async () => ({
-	...(await import("@/tests/mocks/filenShared")),
-	createNotePreviewFromContentText: vi.fn().mockReturnValue("preview-text")
-}))
+vi.mock("@filen/shared", async () => {
+	const shared = await import("@/tests/mocks/filenShared")
+
+	return {
+		...shared,
+		createNotePreviewFromContentText: vi.fn().mockReturnValue("preview-text"),
+		hashNoteContent: vi.fn(shared.hashNoteContent)
+	}
+})
 
 vi.mock("@/lib/auth", () => ({
 	default: {
@@ -1614,6 +1619,20 @@ describe("notes.setContent", () => {
 		expect(createNotePreviewFromContentText).toHaveBeenCalledWith("other", "plain")
 	})
 
+	it("records the caller-supplied contentHash as this device's push without rehashing", async () => {
+		const { hashNoteContent } = await import("@filen/shared")
+		const { isOwnNotePush } = await import("@/features/notes/pushEchoes")
+		const sdkClient = makeMockSdkClient()
+		mockGetSdkClients.mockResolvedValue({ authedSdkClient: sdkClient })
+		vi.mocked(hashNoteContent).mockClear()
+
+		const note = makeNote({ uuid: "note-uuid-prehashed" })
+		await notes.setContent({ note, content: "prehashed", contentHash: hashNoteContent("prehashed") })
+
+		expect(hashNoteContent).toHaveBeenCalledTimes(1)
+		expect(isOwnNotePush("note-uuid-prehashed", hashNoteContent("prehashed"))).toBe(true)
+	})
+
 	it("updateQuery=true causes noteContentQueryUpdate to be called with the content string", async () => {
 		const sdkClient = makeMockSdkClient()
 		mockGetSdkClients.mockResolvedValue({ authedSdkClient: sdkClient })
@@ -1846,6 +1865,24 @@ describe("notes.create", () => {
 			setNoteType: true,
 			setNoteContent: true
 		})
+	})
+
+	it("hashes the content once and records it as this device's push for both setType and setContent", async () => {
+		const { hashNoteContent } = await import("@filen/shared")
+		const { isOwnNotePush } = await import("@/features/notes/pushEchoes")
+		const sdkClient = makeMockSdkClient({
+			createNote: vi.fn().mockResolvedValue(makeSdkNote("note-uuid-hash-once")),
+			setNoteType: vi.fn().mockResolvedValue(makeSdkNote("note-uuid-hash-once", { noteType: "md" as unknown as NoteType })),
+			setNoteContent: vi.fn().mockResolvedValue(makeSdkNote("note-uuid-hash-once"))
+		})
+		mockGetSdkClients.mockResolvedValue({ authedSdkClient: sdkClient })
+		vi.mocked(hashNoteContent).mockClear()
+
+		await notes.create({ title: "New Note", content: "hash me once", type: "md" as unknown as NoteType })
+
+		expect(hashNoteContent).toHaveBeenCalledTimes(1)
+		expect(hashNoteContent).toHaveBeenCalledWith("hash me once")
+		expect(isOwnNotePush("note-uuid-hash-once", hashNoteContent("hash me once"))).toBe(true)
 	})
 
 	it("setType is skipped when newly created note already has the requested type", async () => {

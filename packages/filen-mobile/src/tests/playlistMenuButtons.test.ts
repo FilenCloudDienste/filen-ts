@@ -27,7 +27,7 @@ vi.mock("@/features/audio/audio", () => ({
 		replaceQueue: vi.fn(),
 		play: vi.fn(),
 		setShuffleEnabled: vi.fn(),
-		addToQueue: vi.fn(),
+		appendToQueue: vi.fn(async (items: unknown[]) => items.map(() => true)),
 		getQueue: vi.fn(() => []),
 		renamePlaylist: vi.fn(),
 		deletePlaylist: vi.fn(),
@@ -261,6 +261,67 @@ describe("buildSelectionMenuButtons — bulkAddToQueue #51", () => {
 	})
 })
 
+describe("buildSelectionMenuButtons — bulkAddToQueue batching", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+	})
+
+	it("hands runBulk the whole selection as one item and appends it in a single call", async () => {
+		vi.mocked(runBulk).mockResolvedValue(true)
+
+		const playlist = makePlaylist([makeTrack("a"), makeTrack("b")])
+		const selectedTracks = [makeTrack("a"), makeTrack("b")]
+		const buttons = buildSelectionMenuButtons({ t, playlist, selectedTracks })
+
+		await buttons.find((b: MenuButton) => b.id === "bulkAddToQueue")?.onPress?.()
+
+		const runBulkArg = vi.mocked(runBulk).mock.calls[0]?.[0] as unknown as {
+			items: PlaylistTrack[][]
+			op: (tracks: PlaylistTrack[]) => Promise<void>
+		}
+
+		expect(runBulkArg.items).toEqual([selectedTracks])
+
+		await runBulkArg.op(selectedTracks)
+
+		expect(audio.appendToQueue).toHaveBeenCalledOnce()
+		expect(audio.appendToQueue).toHaveBeenCalledWith(
+			selectedTracks.map(track => ({
+				playlistUuid: playlist.uuid,
+				item: track.item
+			}))
+		)
+	})
+
+	it("passes no items to runBulk for an empty selection", async () => {
+		vi.mocked(runBulk).mockResolvedValue(false)
+
+		const buttons = buildSelectionMenuButtons({ t, playlist: makePlaylist([makeTrack("a")]), selectedTracks: [] })
+
+		await buttons.find((b: MenuButton) => b.id === "bulkAddToQueue")?.onPress?.()
+
+		expect(vi.mocked(runBulk).mock.calls[0]?.[0]?.items).toEqual([])
+	})
+
+	it("shows the cannot-decrypt toast when any track was dropped", async () => {
+		const { default: alerts } = await import("@/lib/alerts")
+
+		vi.mocked(audio.appendToQueue).mockResolvedValueOnce([true, false])
+		vi.mocked(runBulk).mockImplementationOnce(async ({ items, op }) => {
+			await Promise.all(items.map(item => op(item)))
+
+			return true
+		})
+
+		const selectedTracks = [makeTrack("a"), makeTrack("b")]
+		const buttons = buildSelectionMenuButtons({ t, playlist: makePlaylist(selectedTracks), selectedTracks })
+
+		await buttons.find((b: MenuButton) => b.id === "bulkAddToQueue")?.onPress?.()
+
+		expect(alerts.normal).toHaveBeenCalledWith("cannot_decrypt_toast")
+	})
+})
+
 describe("buildSelectionMenuButtons — bulkAddToPlaylist selection snapshot (AU-13)", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
@@ -451,6 +512,29 @@ describe("buildPlaylistMenuButtons", () => {
 		const buttons = buildPlaylistMenuButtons({ t, playlist })
 
 		expect(buttons.some((b: MenuButton) => b.id === "addToQueue")).toBe(false)
+	})
+
+	it("addToQueue appends every playlist file in one call and toasts dropped tracks", async () => {
+		const { default: alerts } = await import("@/lib/alerts")
+		const playlist = makePlaylist([makeTrack("a"), makeTrack("b")])
+
+		vi.mocked(audio.appendToQueue).mockResolvedValueOnce([true, false])
+		vi.mocked(audio.getQueue).mockReturnValueOnce([])
+
+		const buttons = buildPlaylistMenuButtons({ t, playlist })
+
+		await buttons.find((b: MenuButton) => b.id === "addToQueue")?.onPress?.()
+
+		expect(audio.appendToQueue).toHaveBeenCalledOnce()
+		expect(audio.appendToQueue).toHaveBeenCalledWith(
+			playlist.files.map(file => ({
+				playlistUuid: playlist.uuid,
+				item: file.item
+			}))
+		)
+		expect(alerts.normal).toHaveBeenCalledWith("cannot_decrypt_toast")
+		// Queue was empty before the add.
+		expect(audio.play).toHaveBeenCalledOnce()
 	})
 
 	it("single-file playlist still yields 6 buttons", () => {

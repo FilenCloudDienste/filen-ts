@@ -1,4 +1,5 @@
-import { vi, describe, it, expect, beforeEach } from "vitest"
+import { vi, describe, it, expect, beforeEach, afterEach } from "vitest"
+import { PathUtilities } from "../../node_modules/expo-file-system/src/pathUtilities"
 
 vi.mock("@filen/sdk-rs", async () => await import("@/tests/mocks/sdkRs"))
 
@@ -340,5 +341,77 @@ describe("getThumbnailKind", () => {
 		expect(
 			getThumbnailKind({ type: "directory", data: { uuid: "d", size: 0n, decryptedMeta: { name: "photos.jpg" } } } as never)
 		).toBeNull()
+	})
+})
+
+// ---------------------------------------------------------------------------
+// getPathForUuid — the cached-prefix fast path must equal expo's real Paths.join
+// ---------------------------------------------------------------------------
+
+describe("getPathForUuid against the real expo Paths.join", () => {
+	async function loadWithRealJoin(directoryUri: string) {
+		vi.resetModules()
+
+		const efs = await import("@/tests/mocks/expoFileSystem")
+		const join = vi.fn(PathUtilities.join)
+
+		vi.doMock("expo-file-system", () => ({
+			...efs,
+			Paths: {
+				join
+			}
+		}))
+		vi.doMock("@/lib/storageRoots", () => ({
+			THUMBNAILS_DIRECTORY: {
+				uri: directoryUri
+			}
+		}))
+
+		const helpers = await import("@/lib/thumbnailsHelpers")
+
+		return {
+			helpers,
+			join
+		}
+	}
+
+	afterEach(() => {
+		vi.doUnmock("expo-file-system")
+		vi.doUnmock("@/lib/storageRoots")
+		vi.resetModules()
+	})
+
+	const directoryUris = [
+		"file:///shared/group.io.filen.app/thumbnails/v5",
+		"file:///data/user/0/io.filen.app/files/thumbnails/v5/",
+		"file:///var/mobile/Containers/Shared/AppGroup/1A2B-3C4D/Library/Application%20Support/thumbnails/v5"
+	]
+
+	const uuids = ["3fa85f64-5717-4562-b3fc-2c963f66afa6", "ABCDEF01-2345-6789-ABCD-EF0123456789", "0", "abc-123"]
+
+	it.each(directoryUris)("returns exactly Paths.join(dir, `${uuid}.webp`) for URL-safe uuids under %s", async directoryUri => {
+		const { helpers } = await loadWithRealJoin(directoryUri)
+
+		for (const uuid of uuids) {
+			expect(helpers.getPathForUuid(uuid)).toBe(PathUtilities.join(directoryUri, `${uuid}.webp`))
+		}
+	})
+
+	it("joins once for the prefix and not again per URL-safe uuid", async () => {
+		const { helpers, join } = await loadWithRealJoin(directoryUris[0] ?? "")
+
+		for (const uuid of uuids) {
+			helpers.getPathForUuid(uuid)
+		}
+
+		expect(join).toHaveBeenCalledTimes(1)
+	})
+
+	it.each(["a b", "x%20y", "a/b", "..", "q?x", "h#x", "caf\u00e9", ""])("takes the exact join for %j", async uuid => {
+		const directoryUri = directoryUris[2] ?? ""
+		const { helpers, join } = await loadWithRealJoin(directoryUri)
+
+		expect(helpers.getPathForUuid(uuid)).toBe(PathUtilities.join(directoryUri, `${uuid}.webp`))
+		expect(join).toHaveBeenLastCalledWith(directoryUri, `${uuid}.webp`)
 	})
 })

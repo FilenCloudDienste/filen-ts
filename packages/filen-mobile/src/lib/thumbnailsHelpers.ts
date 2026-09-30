@@ -48,7 +48,30 @@ export class ProviderUnavailableError extends Error {
 	}
 }
 
+// Paths.join runs Expo's pure-JS URL polyfill (parse, setters, serialize) on every call. For a
+// `${uuid}.webp` name of URL-safe characters the join is exactly a constant prefix plus the name, so the
+// prefix is derived once from the same join. Anything else takes the exact join.
+const SAFE_UUID = /^[0-9A-Za-z-]+$/
+const PREFIX_SAMPLE = "0.webp"
+let thumbnailPathPrefix: string | null | undefined = undefined
+
+function getThumbnailPathPrefix(): string | null {
+	if (thumbnailPathPrefix === undefined) {
+		const joined = FileSystem.Paths.join(DIRECTORY.uri, PREFIX_SAMPLE)
+
+		thumbnailPathPrefix = joined.endsWith(`/${PREFIX_SAMPLE}`) ? joined.slice(0, -PREFIX_SAMPLE.length) : null
+	}
+
+	return thumbnailPathPrefix
+}
+
 export function getPathForUuid(uuid: string): string {
+	const prefix = getThumbnailPathPrefix()
+
+	if (prefix !== null && SAFE_UUID.test(uuid)) {
+		return `${prefix}${uuid}.webp`
+	}
+
 	return FileSystem.Paths.join(DIRECTORY.uri, `${uuid}.webp`)
 }
 

@@ -8,7 +8,7 @@ import { wrapAbortSignalForSdk, disposeSdkAbortSignal, toSignalOpts } from "@/li
 import { driveItemToAnyFile } from "@/lib/sdkSources"
 import offline from "@/features/offline/offline"
 import { newTmpFile } from "@/lib/tmp"
-import { DiskCache, planGcCapEviction, type GcSurvivor } from "@/lib/diskCache"
+import { DiskCache, gcIdleUntil, planGcCapEviction, type GcSurvivor } from "@/lib/diskCache"
 import { RAW_PREVIEW_CACHE_DIRECTORY } from "@/lib/storageRoots"
 import { RAW_PREVIEW_CACHE_MAX_SIZE_BYTES } from "@/lib/cacheEviction"
 import { GC_AGE_MS, GC_CONCURRENCY } from "@/lib/cacheGc"
@@ -73,6 +73,12 @@ export class RawPreviewCache extends DiskCache {
 					uri: normalizeFilePathForExpo(file.uri)
 				} satisfies RawPreviewResult
 			}
+
+			this.noteWrite()
+
+			defer(() => {
+				this.noteWrite()
+			})
 
 			if (file.exists) {
 				file.delete()
@@ -185,7 +191,7 @@ export class RawPreviewCache extends DiskCache {
 		})
 	}
 
-	protected async runGc(age?: number): Promise<void> {
+	protected async runGc(age?: number): Promise<number | null> {
 		const now = Date.now()
 		const ttlMs = age ?? GC_AGE_MS
 		const gcSemaphore = new Semaphore(GC_CONCURRENCY)
@@ -221,6 +227,7 @@ export class RawPreviewCache extends DiskCache {
 		}
 
 		const { evict: capEvict, plannedCachedAt: capCachedAt } = planGcCapEviction(survivors, RAW_PREVIEW_CACHE_MAX_SIZE_BYTES)
+		const idleUntil = gcIdleUntil(toDelete.length > 0 || capEvict.length > 0, survivors, ttlMs)
 
 		await Promise.all(
 			[...toDelete, ...capEvict].map(async name => {
@@ -264,6 +271,8 @@ export class RawPreviewCache extends DiskCache {
 				})
 			})
 		)
+
+		return idleUntil
 	}
 }
 

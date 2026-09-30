@@ -311,6 +311,16 @@ type PageEntry = {
 	detachSelection: (() => void) | null
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	page: any | null
+	canvas: HTMLCanvasElement | null
+}
+
+// A detached canvas keeps its full backing store until GC; zeroing it frees the bitmap now.
+const discardCanvas = (entry: PageEntry) => {
+	if (entry.canvas) {
+		entry.canvas.width = 0
+		entry.canvas.height = 0
+		entry.canvas = null
+	}
 }
 
 const Dom = ({
@@ -468,6 +478,8 @@ const Dom = ({
 				entry.container.style.height = `${Math.floor(viewport.height)}px`
 				// The layers position themselves against this; it is the CSS scale of this page.
 				entry.container.style.setProperty("--total-scale-factor", `${scaleRef.current}`)
+				discardCanvas(entry)
+				entry.canvas = canvas
 				entry.container.replaceChildren(canvas)
 
 				const renderViewport = page.getViewport({
@@ -648,6 +660,7 @@ const Dom = ({
 
 			// Frees the decoded images and the operator list this page was holding.
 			entry.page?.cleanup()
+			discardCanvas(entry)
 			entry.container.replaceChildren()
 		}
 
@@ -874,7 +887,8 @@ const Dom = ({
 					task: null,
 					textLayer: null,
 					detachSelection: null,
-					page: null
+					page: null,
+					canvas: null
 				})
 
 				observer.observe(container)

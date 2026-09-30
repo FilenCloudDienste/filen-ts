@@ -1,7 +1,7 @@
 import type { ListRenderItemInfo } from "@/components/ui/virtualList"
 import type { DriveItem } from "@/types"
 import type { DrivePath } from "@/hooks/useDrivePath"
-import useDriveStore from "@/features/drive/store/useDrive.store"
+import useDriveStore, { isDriveItemInSelection } from "@/features/drive/store/useDrive.store"
 import useDriveSelectStore, { selectDriveSelectSelection } from "@/features/drive/store/useDriveSelect.store"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
 import { getPreviewType } from "@/lib/previewType"
@@ -26,6 +26,7 @@ export default function useDriveItemInteraction({
 	getListItems: () => DriveItem[]
 }): {
 	onPress: () => void
+	isSelected: boolean
 	disabled: boolean
 	navigateOnly: boolean
 	areDriveItemsSelected: boolean
@@ -36,9 +37,7 @@ export default function useDriveItemInteraction({
 		color: "transparent" | undefined
 	}
 } {
-	const isSelected = useDriveStore(state =>
-		state.selectedItems.some(i => i.data.uuid === info.item.data.uuid && i.type === info.item.type)
-	)
+	const isSelected = useDriveStore(state => isDriveItemInSelection(state.selectedItems, info.item))
 	const areDriveItemsSelected = useDriveStore(state => state.selectedItems.length > 0)
 	const selectSessionId = drivePath.selectOptions?.id
 	const isSelectedFromDriveSelect = useDriveSelectStore(state =>
@@ -162,6 +161,7 @@ export default function useDriveItemInteraction({
 
 	return {
 		onPress,
+		isSelected,
 		disabled,
 		navigateOnly,
 		areDriveItemsSelected,

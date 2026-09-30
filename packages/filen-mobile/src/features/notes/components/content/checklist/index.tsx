@@ -78,7 +78,7 @@ const Checklist = ({
 	useEffect(() => {
 		const parsed = parseChecklistOrBlank(initialValueFrozen, randomUUID)
 
-		store.getState().setInputRefs({})
+		store.getState().inputRefs.clear()
 		store.getState().setParsed(parsed)
 	}, [store, initialValueFrozen])
 

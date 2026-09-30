@@ -4,8 +4,7 @@ import { NoteType } from "@filen/sdk-rs"
 import { type Note, type NoteTag } from "@/types"
 import { noteExportFileName, wrapSdkNote } from "@/features/notes/utils"
 import { notesQueryUpdate } from "@/features/notes/queries/useNotesQuery"
-import JSZip from "jszip"
-import { sanitizeFileName } from "@filen/shared"
+import { hashNoteContent, sanitizeFileName } from "@filen/shared"
 import { writeTmpFile } from "@/lib/tmp"
 import * as FileSystem from "expo-file-system"
 import { addTag, removeTag, createTag, renameTag, deleteTag, favoriteTag } from "@/features/notes/notesTags"
@@ -88,6 +87,7 @@ const notes = {
 			throw new Error("No exportable notes provided")
 		}
 
+		const { default: JSZip } = await import("jszip")
 		const zip = new JSZip()
 
 		await Promise.all(
@@ -194,18 +194,22 @@ const notes = {
 			updater: prev => [...prev.filter(n => n.uuid !== note.uuid), note]
 		})
 
+		const contentHash = hashNoteContent(content)
+
 		note = await this.setType({
 			note,
 			type,
 			signal,
-			knownContent: content
+			knownContent: content,
+			knownContentHash: contentHash
 		})
 
 		note = await this.setContent({
 			note,
 			content,
 			signal,
-			updateQuery: true
+			updateQuery: true,
+			contentHash
 		})
 
 		notesQueryUpdate({

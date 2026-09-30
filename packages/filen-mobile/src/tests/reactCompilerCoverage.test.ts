@@ -1,6 +1,4 @@
 import { vi, describe, it, expect, beforeEach } from "vitest"
-import { createRequire } from "node:module"
-import { fileURLToPath } from "node:url"
 import { compileFunction } from "node:vm"
 import { type TFunction } from "i18next"
 import { type FetchStatus } from "@tanstack/react-query"
@@ -24,89 +22,73 @@ vi.mock("@expo/vector-icons/Ionicons", () => ({ default: {} }))
 vi.mock("@filen/sdk-rs", () => ({ PasswordState: {}, AnyLinkedDir: {} }))
 
 import { resolveDriveHeaderTitle } from "@/features/drive/utils"
+import { compileWithReactCompiler, compilerFailures, requireFromBabelPreset } from "@/tests/compileWithReactCompiler"
 
-type CompilerEvent = {
-	kind: string
-	fnName: string | null
-	memoSlots?: number
-	detail?: unknown
+function withDefault<T>(value: T): { __esModule: true; default: T } {
+	return { __esModule: true, default: value }
 }
 
-type BabelCore = {
-	transformFileSync: (filename: string, options: Record<string, unknown>) => { code?: string | null } | null
-}
-
-const requireHere = createRequire(import.meta.url)
-// babel-preset-expo only peers @babel/core; Metro's comes through expo's own metro-config.
-const requireMetroConfig = createRequire(createRequire(requireHere.resolve("expo/package.json")).resolve("@expo/metro-config/package.json"))
-const babel = requireMetroConfig("@babel/core") as BabelCore
-const babelPresetExpo = requireHere.resolve("babel-preset-expo")
-// The @babel/runtime helpers the compiled output requires, as the preset that emits them resolves them.
-const requireFromPreset = createRequire(babelPresetExpo)
-
-function compile(file: string): { events: CompilerEvent[]; code: string } {
-	const events: CompilerEvent[] = []
-
-	const result = babel.transformFileSync(fileURLToPath(new URL(`../${file}`, import.meta.url)), {
-		babelrc: false,
-		configFile: false,
-		presets: [
-			[
-				babelPresetExpo,
-				{
-					"react-compiler": {
-						logger: {
-							logEvent: (_filename: string | null, event: CompilerEvent) => {
-								events.push(event)
-							}
-						}
-					}
-				}
-			]
-		],
-		caller: {
-			name: "metro",
-			bundler: "metro",
-			platform: "ios",
-			isDev: false,
-			isServer: false,
-			supportsReactCompiler: true
+// The compiled output is CommonJS: run it with its require answered from the stubs.
+function runCompiled<T>(code: string, modules: Record<string, unknown>, label: string): T {
+	const module = { exports: {} as T }
+	const load = (id: string): unknown => {
+		if (id in modules) {
+			return modules[id]
 		}
-	})
 
-	if (!result?.code) {
-		throw new Error(`${file} produced no output`)
+		if (id.startsWith("@babel/runtime/")) {
+			return requireFromBabelPreset(id)
+		}
+
+		throw new Error(`The compiled ${label} imports ${id}, which this test doesn't stub`)
 	}
 
-	return {
-		events,
-		code: result.code
-	}
-}
+	compileFunction(code, ["require", "module", "exports"])(load, module, module.exports)
 
-function failures(events: CompilerEvent[]): CompilerEvent[] {
-	return events.filter(event => event.kind !== "CompileSuccess")
+	return module.exports
 }
 
 describe("React Compiler coverage of the drive hot path", () => {
 	it("compiles useDrivePath", () => {
-		const { events } = compile("hooks/useDrivePath.ts")
+		const { events } = compileWithReactCompiler("hooks/useDrivePath.ts")
 
-		expect(failures(events)).toEqual([])
+		expect(compilerFailures(events)).toEqual([])
 		expect(events.some(event => event.kind === "CompileSuccess" && event.fnName === "useDrivePath" && (event.memoSlots ?? 0) > 0)).toBe(
 			true
 		)
 	})
 
-	it.each(["features/drive/components/index.tsx", "features/drive/components/header.tsx", "features/drive/components/item/index.tsx", "features/drive/components/item/menu.tsx"])(
-		"compiles every component in %s",
-		file => {
-			const { events } = compile(file)
+	it.each([
+		"features/drive/components/index.tsx",
+		"features/drive/components/header.tsx",
+		"features/drive/components/item/index.tsx",
+		"features/drive/components/item/menu.tsx",
+		"features/drive/hooks/useSortedDriveItems.ts"
+	])("compiles every component in %s", file => {
+		const { events } = compileWithReactCompiler(file)
 
-			expect(failures(events)).toEqual([])
-			expect(events.some(event => event.kind === "CompileSuccess")).toBe(true)
-		}
-	)
+		expect(compilerFailures(events)).toEqual([])
+		expect(events.some(event => event.kind === "CompileSuccess")).toBe(true)
+	})
+
+	// renderItem captures getListItems, so a getter keyed on the listing would hand FlashList a new renderItem on every
+	// listing update and re-render every visible row.
+	it("caches Drive's getListItems once for the screen's lifetime", () => {
+		const { code } = compileWithReactCompiler("features/drive/components/index.tsx")
+
+		expect(code).toMatch(
+			/===\s*Symbol\.for\("react\.memo_cache_sentinel"\)\s*\)\s*\{\s*\w+\s*=\s*\(\)\s*=>\s*listItemsRef\.current\s*;/
+		)
+	})
+
+	// A component the compiler skips runs unmemoized: every row menu rebuilds its native config on each render, and the
+	// text editor reconfigures CodeMirror on every keystroke.
+	it.each(["components/ui/menu.tsx", "components/textEditor/dom.tsx"])("compiles every component in %s", file => {
+		const { events } = compileWithReactCompiler(file)
+
+		expect(compilerFailures(events)).toEqual([])
+		expect(events.some(event => event.kind === "CompileSuccess")).toBe(true)
+	})
 })
 
 // The compiled Header, rendered through one memo cache the way React keeps it across renders. Its title, create menu
@@ -137,11 +119,7 @@ describe("the compiled drive Header", () => {
 	const viewMode = { viewMode: "list", setViewMode: () => {} }
 	const upload = {}
 	const setSearchQuery = () => {}
-	const { code } = compile("features/drive/components/header.tsx")
-
-	function withDefault<T>(value: T): { __esModule: true; default: T } {
-		return { __esModule: true, default: value }
-	}
+	const { code } = compileWithReactCompiler("features/drive/components/header.tsx")
 
 	// Mounts the compiled Header with every import stubbed to return the same values each render, like the real
 	// hooks do while nothing changes; the drive path is the stable one the compiled useDrivePath returns.
@@ -179,7 +157,9 @@ describe("the compiled drive Header", () => {
 			"@/features/drive/store/useDrive.store": withDefault((selector: (state: typeof storeState) => unknown) => selector(storeState)),
 			"@/lib/auth": { useStringifiedClient: () => client },
 			"@/features/offline/offlineSync": withDefault({}),
-			"@/features/offline/store/useOffline.store": withDefault((selector: (state: typeof storeState) => unknown) => selector(storeState)),
+			"@/features/offline/store/useOffline.store": withDefault((selector: (state: typeof storeState) => unknown) =>
+				selector(storeState)
+			),
 			"@/features/drive/driveSelectors": {
 				aggregateDriveSelectionFlags: () => ({}),
 				isPlainDrivePath: (drivePath: DrivePath) => drivePath.type === "drive" && !drivePath.selectOptions
@@ -204,23 +184,7 @@ describe("the compiled drive Header", () => {
 			"@/features/drive/linkedSave": { buildSaveLinkedDirectoryButton: buildSaveButton, linkSaveTarget: () => null },
 			"@/lib/logger": withDefault({})
 		}
-		const module = { exports: {} as { default?: (props: HeaderProps) => { props: StackHeaderProps } } }
-		const load = (id: string): unknown => {
-			if (id in modules) {
-				return modules[id]
-			}
-
-			if (id.startsWith("@babel/runtime/")) {
-				return requireFromPreset(id)
-			}
-
-			throw new Error(`The compiled Header imports ${id}, which this test doesn't stub`)
-		}
-
-		// The compiled output is CommonJS: run it with its require answered from the stubs.
-		compileFunction(code, ["require", "module", "exports"])(load, module, module.exports)
-
-		const Header = module.exports.default
+		const Header = runCompiled<{ default?: (props: HeaderProps) => { props: StackHeaderProps } }>(code, modules, "Header").default
 
 		if (!Header) {
 			throw new Error("The compiled Header has no default export")
@@ -268,7 +232,9 @@ describe("the compiled drive Header", () => {
 
 		h.directoryUuidToAnyNormalDir.set(DIRECTORY_UUID, { tag: "Dir", inner: [{ uuid: DIRECTORY_UUID }] })
 
-		expect(header.menuIds({ setSearchQuery, listItems: NO_ITEMS, searchStatus: "idle", listingFetchStatus: "idle" })).toContain("createFolder")
+		expect(header.menuIds({ setSearchQuery, listItems: NO_ITEMS, searchStatus: "idle", listingFetchStatus: "idle" })).toContain(
+			"createFolder"
+		)
 	})
 
 	it("resolves the title once while nothing it depends on changes", () => {
@@ -306,5 +272,92 @@ describe("the compiled drive Header", () => {
 		header.menuIds(props)
 
 		expect(header.buildSaveButton).toHaveBeenCalledOnce()
+	})
+})
+
+// The compiled Menu, each component rendered through its own memo cache the way React keeps them across renders. A
+// drive row's menu re-renders whenever its children change (selection mode, the checkbox) while its buttons stay the
+// same array.
+describe("the compiled Menu", () => {
+	type Element = {
+		type: unknown
+		props: Record<string, unknown>
+	}
+
+	type IosMenuConfig = {
+		menuItems?: { actionKey: string; menuAttributes?: string[] }[]
+	}
+
+	const { code } = compileWithReactCompiler("components/ui/menu.tsx")
+
+	function mountMenu() {
+		const memoSentinel = Symbol.for("react.memo_cache_sentinel")
+		const caches: unknown[][] = []
+		let cursor = 0
+		const connectivity = { online: true }
+		const modules: Record<string, unknown> = {
+			"react/compiler-runtime": {
+				c: (size: number) => (caches[cursor++] ??= new Array<unknown>(size).fill(memoSentinel))
+			},
+			"react/jsx-runtime": {
+				jsx: (type: unknown, props: Record<string, unknown>): Element => ({ type, props })
+			},
+			uniwind: { withUniwind: (component: unknown) => component, useResolveClassNames: () => ({}) },
+			"react-native": { Platform: { OS: "ios" } },
+			"@react-native-menu/menu": { MenuView: "MenuView" },
+			"react-native-ios-context-menu": { ContextMenuView: "ContextMenuView", ContextMenuButton: "ContextMenuButton" },
+			"@/components/ui/menuIcons": { iconToSwiftUiIcon: (icon: string) => icon },
+			"@/hooks/useIsOnline": withDefault(() => connectivity.online),
+			"@/components/ui/longPressMenuGuard": { InsideContextMenuContext: { Provider: "InsideContextMenuContext.Provider" } }
+		}
+		const Menu = runCompiled<{ default?: (props: Record<string, unknown>) => Element }>(code, modules, "Menu").default
+
+		if (!Menu) {
+			throw new Error("The compiled Menu has no default export")
+		}
+
+		return {
+			connectivity,
+			// Renders Menu, then the platform menu it returns, and hands back the native menu config.
+			menuConfig: (props: Record<string, unknown>) => {
+				cursor = 0
+
+				const inner = Menu(props)
+
+				if (typeof inner.type !== "function") {
+					throw new Error("The compiled Menu did not render a platform menu")
+				}
+
+				return (inner.type as (props: Record<string, unknown>) => Element)(inner.props).props["menuConfig"] as IosMenuConfig
+			}
+		}
+	}
+
+	const buttons = [
+		{ id: "open", title: "Open" },
+		{ id: "share", title: "Share", requiresOnline: true }
+	]
+
+	it("builds the native menu config once while only its children change", () => {
+		const menu = mountMenu()
+		const first = menu.menuConfig({ children: "row", buttons })
+
+		expect(menu.menuConfig({ children: "selected row", buttons })).toBe(first)
+		expect(first.menuItems?.map(item => item.actionKey)).toEqual(["open", "share"])
+	})
+
+	it("rebuilds it when the buttons or connectivity change", () => {
+		const menu = mountMenu()
+		const first = menu.menuConfig({ children: "row", buttons })
+		const changed = menu.menuConfig({ children: "row", buttons: [...buttons, { id: "delete", title: "Delete" }] })
+
+		expect(changed).not.toBe(first)
+		expect(changed.menuItems?.map(item => item.actionKey)).toEqual(["open", "share", "delete"])
+
+		menu.connectivity.online = false
+
+		const offline = menu.menuConfig({ children: "row", buttons })
+
+		expect(offline.menuItems?.[1]?.menuAttributes).toEqual(["disabled"])
 	})
 })

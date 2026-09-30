@@ -101,6 +101,17 @@ const keepCaretVisible = (() => {
 	})
 })()
 
+// The next two are hoisted out of the component because the React Compiler skips a component whose
+// try/catch contains a conditional, optional chain or logical expression, which here would rebuild the
+// CodeMirror extensions and reconfigure the editor on every keystroke.
+function liveDocument(ref: ReactCodeMirrorRef | null, fallback: string): string {
+	return ref?.view?.state.doc.toString() ?? fallback
+}
+
+function errorName(e: unknown): string {
+	return e instanceof Error ? e.name : "unknown"
+}
+
 const TextEditorDOM = ({
 	ref,
 	initialValue,
@@ -301,7 +312,7 @@ const TextEditorDOM = ({
 		await new Promise(resolve => setTimeout(resolve, FLUSH_COMPOSITION_COMMIT_MS))
 
 		try {
-			const doc = codeMirrorRef.current?.view?.state.doc.toString() ?? lastReportedValueRef.current
+			const doc = liveDocument(codeMirrorRef.current, lastReportedValueRef.current)
 
 			if (!(await writeAllBytes(new TextEncoder().encode(doc), write, { isCancelled: superseded }))) {
 				return
@@ -325,13 +336,20 @@ const TextEditorDOM = ({
 				}
 			})
 		} catch (e) {
-			console.warn(`[textEditor] failed to serialise the document: ${e instanceof Error ? e.name : "unknown"}`)
+			console.warn(`[textEditor] failed to serialise the document: ${errorName(e)}`)
 
 			fail()
 		}
 	}
 
-	const isTextFile = type === "text" || parseExtension(fileName ?? "file.tsx") === ".txt"
+	// Markdown notes carry no fileName; they need the markdown grammar that drive .md files get.
+	const languageFileName = fileName ?? (type === "markdown" ? "file.md" : "file.tsx")
+	const isTextFile = type === "text" || parseExtension(languageFileName) === ".txt"
+	// Every props delivery over the DOM bridge deserializes a new `font` object, so the layout theme is
+	// keyed on its values rather than its identity.
+	const fontFamily = font?.family
+	const fontSize = font?.size
+	const fontLineHeight = font?.lineHeight
 
 	const theme = (() => {
 		if (isTextFile) {
@@ -360,14 +378,18 @@ const TextEditorDOM = ({
 				createLayoutThemeSpec({
 					type,
 					isTextFile,
-					font,
+					font: {
+						family: fontFamily,
+						size: fontSize,
+						lineHeight: fontLineHeight
+					},
 					paddingTop,
 					paddingBottom
 				})
 			)
 		]
 
-		const lang = loadLanguage(fileName ?? "file.tsx")
+		const lang = loadLanguage(languageFileName)
 
 		if (isTextFile || !lang) {
 			return base
@@ -416,7 +438,11 @@ const TextEditorDOM = ({
 					isCancelled: () => cancelled
 				})
 
-				if (text === null || cancelled) {
+				if (text === null) {
+					return
+				}
+
+				if (cancelled) {
 					return
 				}
 
@@ -443,7 +469,7 @@ const TextEditorDOM = ({
 					type: "documentLoaded"
 				})
 			} catch (e) {
-				console.warn(`[textEditor] failed to load the document: ${e instanceof Error ? e.name : "unknown"}`)
+				console.warn(`[textEditor] failed to load the document: ${errorName(e)}`)
 
 				postMessageRef.current({
 					type: "documentUnavailable",

@@ -1,11 +1,10 @@
-import { Fragment, useEffect, useRef } from "react"
+import { Fragment, useEffect, useLayoutEffect, useRef } from "react"
 import { useTranslation } from "react-i18next"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import useDrivePath, { type DrivePath } from "@/hooks/useDrivePath"
 import useDriveItemsQuery from "@/features/drive/queries/useDriveItems.query"
 import { socketCoveredRefetchOnMount } from "@/queries/socketSession"
 import type { DriveItem } from "@/types"
-import { itemSorter } from "@/lib/sort"
 import { useDriveSortPreference } from "@/features/drive/driveSortPreference"
 import { useHideHiddenItems } from "@/features/drive/driveHiddenItems"
 import VirtualList, { type ListRef, type ListRenderItemInfo } from "@/components/ui/virtualList"
@@ -26,7 +25,7 @@ import useClearSelectionOnFocusChange from "@/hooks/useClearSelectionOnFocusChan
 import useDriveStore, { clearDriveSelection } from "@/features/drive/store/useDrive.store"
 import { useDriveSearch } from "@/features/drive/hooks/useDriveSearch"
 import { isSearchWindowTruncated, shouldRefetchListingAfterSearch } from "@/features/drive/hooks/driveSearchStatus"
-import { useDriveDirectorySizes } from "@/features/drive/hooks/useDriveDirectorySizes"
+import { useSortedDriveItems } from "@/features/drive/hooks/useSortedDriveItems"
 import { useDriveHighlight } from "@/features/drive/hooks/useDriveHighlight"
 import useBlockedUsers from "@/features/contacts/hooks/useBlockedUsers"
 import { isSharerBlocked } from "@/features/drive/driveSharer"
@@ -114,27 +113,23 @@ const Drive = () => {
 
 	const searchActive = searchQuery.trim().length > 0
 
-	// Size sort needs the REAL directory sizes (items carry size: 0n for dirs — #49); the hook
-	// prefetches + reads them from the same query cache the rows display from, and returns
-	// undefined for every other sort mode (zero cost there).
-	const directorySizes = useDriveDirectorySizes({
-		items: isCacheSearch ? searchResults : driveItemsQuery.data,
-		drivePathType: drivePath.type,
-		enabled: sort === "sizeAsc" || sort === "sizeDesc"
-	})
-
 	// #26 — use retained data unconditionally (stale-while-error); status "error"
 	// with prior data keeps the listing visible instead of flipping to "empty".
-	const sortedItems = isCacheSearch
-		? // Truncated window (more matches than the loaded CEILING): the SDK loaded the
-			// alphabetically-FIRST slice, so re-sorting it by a non-name preference (newest/largest)
-			// would show "the newest of the alphabetically-first 1000" and silently hide the true
-			// top-N. Keep the SDK's name-ascending order (the footer states it); below the cap the
-			// whole match set is loaded, so the user's sort is honoured.
-			isSearchWindowTruncated(totalCount, searchResults.length)
-			? searchResults
-			: itemSorter.sortItems(searchResults, sort, { directorySizes })
-		: filterDriveItemsBySearchQuery(itemSorter.sortItems(driveItemsQuery.data ?? [], sort, { directorySizes }), searchQuery)
+	const sortedSource = useSortedDriveItems({
+		items: isCacheSearch ? searchResults : driveItemsQuery.data,
+		drivePathType: drivePath.type,
+		sort,
+		// Truncated window (more matches than the loaded CEILING): the SDK loaded the
+		// alphabetically-FIRST slice, so re-sorting it by a non-name preference (newest/largest)
+		// would show "the newest of the alphabetically-first 1000" and silently hide the true
+		// top-N. Keep the SDK's name-ascending order (the footer states it); below the cap the
+		// whole match set is loaded, so the user's sort is honoured.
+		keepOrder: isCacheSearch && isSearchWindowTruncated(totalCount, searchResults.length)
+	})
+
+	// Cache search results are already the matches; only the local listings filter by the query.
+	const localSearchQuery = isCacheSearch ? "" : searchQuery
+	const sortedItems = filterDriveItemsBySearchQuery(sortedSource, localSearchQuery)
 
 	// Hide shared-in items shared by a blocked user (virtual-root filter — the query stays
 	// unopinionated). Only the sharedIn context carries a sharer identity to check.
@@ -159,10 +154,16 @@ const Drive = () => {
 	})
 	const hiddenCount = visibleItems.length - items.length
 
-	// One instance for the whole list rather than one per row: the row components take this as a prop,
-	// so a fresh closure per cell would change the prop identity on every render and defeat FlashList's
-	// per-cell memo. The compiler caches it on [items], which renderItem already depends on.
-	const getListItems = () => items
+	// Stable for the screen's lifetime: the rows read the list only at press time, so a getter over a
+	// ref keeps renderItem's identity across listing updates and FlashList's per-cell memo skips rows
+	// whose own item didn't change. The layout effect lands in the same commit, before any press.
+	const listItemsRef = useRef(items)
+
+	useLayoutEffect(() => {
+		listItemsRef.current = items
+	}, [items])
+
+	const getListItems = () => listItemsRef.current
 
 	// The filter emptied a listing that wasn't empty. Without its own empty state this reads as
 	// "this directory is empty" or, worse, "no results" for a search whose term WAS matched —
@@ -305,8 +306,8 @@ const Drive = () => {
 							headerComponent={drivePath.type === "offline" && !drivePath.uuid ? () => <SyncErrorsHeaderRow /> : undefined}
 							itemsPerRow={isGridActive ? columns : undefined}
 							renderItem={(info: ListRenderItemInfo<DriveItem>) => {
-								// getListItems is hoisted (see above): a fresh closure per row would be a new prop
-								// identity on every cell, defeating FlashList's per-cell memo.
+								// getListItems is hoisted and stable (see above): a fresh or items-keyed closure
+								// would change renderItem on every listing update, defeating FlashList's per-cell memo.
 								if (isGridActive) {
 									return (
 										<GridItem

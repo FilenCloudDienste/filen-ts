@@ -1,6 +1,7 @@
 import { NativeTabs } from "expo-router/unstable-native-tabs"
 import MaterialIcons from "@expo/vector-icons/MaterialIcons"
-import { Platform } from "react-native"
+import { useState } from "react"
+import { Platform, type ColorValue } from "react-native"
 import { useResolveClassNames } from "uniwind"
 import { useIsAuthed } from "@/lib/auth"
 import useChatsUnreadCount from "@/features/chats/hooks/useChatsUnreadCount"
@@ -41,6 +42,36 @@ const TABS = [
 	}
 ] as const
 
+type MaterialIconName = Parameters<typeof MaterialIcons.getImageSource>[0]
+
+// expo-router rasterizes a VectorIcon to a new PNG file in cacheDir on every tab-children change
+// (badge, label), and hands native a new URI each time. Reusing the promise keeps the icon's
+// identity. Failed loads are evicted so the next conversion retries.
+function createCachingMaterialIcons() {
+	const cache = new Map<string, ReturnType<typeof MaterialIcons.getImageSource>>()
+
+	return {
+		getImageSource: (name: MaterialIconName, size: number, color: ColorValue) => {
+			const key = `${name}:${size}:${String(color)}`
+			const cached = cache.get(key)
+
+			if (cached) {
+				return cached
+			}
+
+			const promise = MaterialIcons.getImageSource(name, size, color)
+
+			cache.set(key, promise)
+
+			promise.catch(() => {
+				cache.delete(key)
+			})
+
+			return promise
+		}
+	}
+}
+
 const TabsLayout = () => {
 	const bgBackground = useResolveClassNames("bg-background")
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
@@ -57,6 +88,20 @@ const TabsLayout = () => {
 		enabled: false
 	})
 	const { t } = useTranslation()
+	// Per mount, never module-level: clearing the cache (manual or on logout) deletes the PNGs.
+	// Theme changes and auth flips start a fresh cache, so icons regenerate there as before.
+	const iconFamilyKey = `${isAuthed}|${String(textForeground.color)}|${String(bgBackground.backgroundColor)}|${String(bgBackgroundSecondary.backgroundColor)}`
+	const [iconFamily, setIconFamily] = useState(() => ({
+		key: iconFamilyKey,
+		family: createCachingMaterialIcons()
+	}))
+
+	if (iconFamily.key !== iconFamilyKey) {
+		setIconFamily({
+			key: iconFamilyKey,
+			family: createCachingMaterialIcons()
+		})
+	}
 
 	if (!isAuthed) {
 		return null
@@ -104,7 +149,7 @@ const TabsLayout = () => {
 							<NativeTabs.Trigger.Icon
 								src={
 									<NativeTabs.Trigger.VectorIcon
-										family={MaterialIcons}
+										family={iconFamily.family}
 										name={tab.md}
 									/>
 								}

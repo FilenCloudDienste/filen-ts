@@ -49,7 +49,7 @@ vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 vi.mock("@filen/shared", async () => await import("@/tests/mocks/filenShared"))
 
 import sqlite from "@/lib/sqlite"
-import { forEachKvRowByPrefix, KV_RESTORE_PAGE_SIZE } from "@/lib/kvScan"
+import { forEachKvRowByPrefix, KV_RESTORE_PAGE_SIZE, KV_SMALL_ROW_PAGE_SIZE } from "@/lib/kvScan"
 import { isKvRangeScanQuery, kvRangeScanRows } from "@/tests/mocks/kvExecuteRaw"
 import type { DB } from "@op-engineering/op-sqlite"
 
@@ -121,6 +121,26 @@ describe("forEachKvRowByPrefix", () => {
 		expect(visited[599]).toEqual(["p:000599", "value-599"])
 		// 600 rows = 256 + 256 + 88 → three page queries.
 		expect(queryCount()).toBe(Math.ceil(600 / KV_RESTORE_PAGE_SIZE))
+	})
+
+	it("a wider page size visits the same rows in the same order with fewer page queries", async () => {
+		const expected = seedRows("p:", KV_SMALL_ROW_PAGE_SIZE + 10)
+
+		const { db, queryCount } = pagerDb()
+		const visited: string[] = []
+
+		const total = await forEachKvRowByPrefix(
+			db,
+			"p:",
+			key => {
+				visited.push(key)
+			},
+			KV_SMALL_ROW_PAGE_SIZE
+		)
+
+		expect(total).toBe(expected.length)
+		expect(visited).toEqual(expected)
+		expect(queryCount()).toBe(2)
 	})
 
 	it("ends cleanly on an exact page multiple without duplicating the boundary row", async () => {

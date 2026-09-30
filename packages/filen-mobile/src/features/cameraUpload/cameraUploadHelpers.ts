@@ -382,6 +382,9 @@ export function shieldCoversModification(
 	)
 }
 
+// Two-digit lowercase hex per byte value, built once so a digest costs 32 lookups instead of 32 toString+padStart.
+const BYTE_HEX: readonly string[] = Array.from({ length: 256 }, (_, byte) => byte.toString(16).padStart(2, "0"))
+
 /**
  * Lowercase hex of a BLAKE3 digest as the SDK hands it over.
  *
@@ -392,8 +395,8 @@ export function blake3ToHex(hash: ArrayBuffer): string {
 	const bytes = new Uint8Array(hash)
 	let hex = ""
 
-	for (const byte of bytes) {
-		hex += byte.toString(16).padStart(2, "0")
+	for (let index = 0; index < bytes.length; index++) {
+		hex += BYTE_HEX[bytes[index] ?? 0] ?? ""
 	}
 
 	return hex

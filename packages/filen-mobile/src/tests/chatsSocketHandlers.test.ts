@@ -17,7 +17,8 @@ const {
 	mockSetTyping,
 	mockSetSelectedChats,
 	mockRemoveFromSelection,
-	mockPurgeChatInflightState
+	mockPurgeChatInflightState,
+	mockOlderMessagesState
 } = vi.hoisted(() => {
 	const capturedChatsUpdaters: Array<(prev: unknown[]) => unknown[]> = []
 	const capturedMessagesUpdaters: Array<(prev: unknown[]) => unknown[]> = []
@@ -42,7 +43,9 @@ const {
 		mockSetTyping: vi.fn(),
 		mockSetSelectedChats: vi.fn(),
 		mockRemoveFromSelection: vi.fn(),
-		mockPurgeChatInflightState: vi.fn().mockResolvedValue(undefined)
+		mockPurgeChatInflightState: vi.fn().mockResolvedValue(undefined),
+		// Older paginated pages: the real pure patch runs against this, so assertions see the result.
+		mockOlderMessagesState: { olderMessages: {} as Record<string, { chatUuid: string; messages: unknown[] }> }
 	}
 })
 
@@ -61,15 +64,28 @@ vi.mock("@/features/chats/queries/useChatMessages.query", () => ({
 	chatMessagesQueryGet: mockChatMessagesQueryGet
 }))
 
-vi.mock("@/features/chats/store/useChats.store", () => ({
-	default: {
-		getState: vi.fn().mockReturnValue({
-			setTyping: mockSetTyping,
-			setSelectedChats: mockSetSelectedChats,
-			removeFromSelection: mockRemoveFromSelection
-		})
+vi.mock("@/features/chats/store/useChats.store", async importOriginal => {
+	const actual = await importOriginal<typeof import("@/features/chats/store/useChats.store")>()
+
+	return {
+		...actual,
+		default: {
+			getState: () => ({
+				setTyping: mockSetTyping,
+				setSelectedChats: mockSetSelectedChats,
+				removeFromSelection: mockRemoveFromSelection,
+				olderMessages: mockOlderMessagesState.olderMessages,
+				patchOlderMessage: (messageUuid: string, patch: Parameters<typeof actual.withPatchedOlderMessage>[2]) => {
+					mockOlderMessagesState.olderMessages = actual.withPatchedOlderMessage(
+						mockOlderMessagesState.olderMessages as Parameters<typeof actual.withPatchedOlderMessage>[0],
+						messageUuid,
+						patch
+					)
+				}
+			})
+		}
 	}
-}))
+})
 
 vi.mock("@/features/chats/chatsWrap", async importOriginal => ({
 	...(await importOriginal<typeof import("@/features/chats/chatsWrap")>()),
@@ -218,6 +234,17 @@ function makeUnknownTagEvent(): ChatSocketEvent {
 	return makeEvent("UnknownTagThatDoesNotExist_xyz", {})
 }
 
+function olderPage(instanceId: string, chatUuid: string, messages: unknown[]) {
+	mockOlderMessagesState.olderMessages = {
+		...mockOlderMessagesState.olderMessages,
+		[instanceId]: { chatUuid, messages }
+	}
+}
+
+function olderMessagesOf(instanceId: string) {
+	return mockOlderMessagesState.olderMessages[instanceId]?.messages as Array<Record<string, unknown>> | undefined
+}
+
 const USER_ID = 100n
 const OTHER_USER_ID = 200n
 
@@ -239,6 +266,7 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 		mockSetSelectedChats.mockClear()
 		mockRemoveFromSelection.mockClear()
 		mockPurgeChatInflightState.mockClear()
+		mockOlderMessagesState.olderMessages = {}
 		// Clear any pending timeouts
 		for (const key of Object.keys(chatTypingTimeoutsRef)) {
 			clearTimeout(chatTypingTimeoutsRef[key])
@@ -286,6 +314,52 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 			const senderIds = (result["chat-1"] as Array<{ senderId: bigint }>).map(t => t.senderId)
 			const matchingCount = senderIds.filter(id => id === OTHER_USER_ID).length
 			expect(matchingCount).toBe(1)
+		})
+
+		it("returns prev unchanged when the sender is already the last typer", async () => {
+			await handleChatEvent({ event: makeTypingEvent(ChatTypingType.Down, "chat-1", OTHER_USER_ID) })
+
+			const updater = mockSetTyping.mock.calls[0]?.[0] as (prev: Record<string, unknown[]>) => Record<string, unknown[]>
+			const prev = { "chat-1": [{ senderId: 999n, chat: "chat-1" }, { senderId: OTHER_USER_ID, chat: "chat-1" }] }
+
+			expect(updater(prev)).toBe(prev)
+		})
+
+		it("moves the sender to the end when another sender typed last", async () => {
+			await handleChatEvent({ event: makeTypingEvent(ChatTypingType.Down, "chat-1", OTHER_USER_ID) })
+
+			const updater = mockSetTyping.mock.calls[0]?.[0] as (prev: Record<string, unknown[]>) => Record<string, unknown[]>
+			const prev = { "chat-1": [{ senderId: OTHER_USER_ID, chat: "chat-1" }, { senderId: 999n, chat: "chat-1" }] }
+			const result = updater(prev)
+
+			expect(result).not.toBe(prev)
+			expect((result["chat-1"] as Array<{ senderId: bigint }>).map(t => t.senderId)).toEqual([999n, OTHER_USER_ID])
+		})
+
+		it("re-arms the watchdog on a repeated Down from the last typer", async () => {
+			let typingState: Record<string, Array<{ senderId: bigint; chat: string }>> = {}
+
+			mockSetTyping.mockImplementation((fn: Record<string, unknown[]> | ((prev: typeof typingState) => typeof typingState)) => {
+				typingState = typeof fn === "function" ? fn(typingState) : (fn as typeof typingState)
+			})
+
+			await handleChatEvent({ event: makeTypingEvent(ChatTypingType.Down, "chat-1", OTHER_USER_ID) })
+
+			const afterFirst = typingState
+
+			vi.advanceTimersByTime(8000)
+
+			await handleChatEvent({ event: makeTypingEvent(ChatTypingType.Down, "chat-1", OTHER_USER_ID) })
+
+			expect(typingState).toBe(afterFirst)
+
+			vi.advanceTimersByTime(8000)
+
+			expect((typingState["chat-1"] ?? []).map(t => t.senderId)).toEqual([OTHER_USER_ID])
+
+			vi.advanceTimersByTime(2000)
+
+			expect(typingState["chat-1"] ?? []).toEqual([])
 		})
 
 		it("sets a 10-second timeout that auto-removes the typing indicator", async () => {
@@ -461,9 +535,48 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 
 			expect(mockChatsQueryUpdate).toHaveBeenCalledOnce()
 		})
+
+		it("never pre-reads the messages cache for a peer message (the updater's dedupe covers it)", async () => {
+			await handleChatEvent({ event: makeMessageNewEvent("chat-1", "msg-1", OTHER_USER_ID) })
+			vi.advanceTimersByTime(1)
+
+			expect(mockChatMessagesQueryGet).not.toHaveBeenCalled()
+			expect(mockChatMessagesQueryUpdate).toHaveBeenCalledOnce()
+		})
 	})
 
 	describe("ChatEvent_Tags.MessageNew — from self (3000ms delay)", () => {
+		it("skips both cache writes when sendMessage already reconciled the echoed message", async () => {
+			mockChatMessagesQueryGet.mockReturnValue([{ inner: { uuid: "msg-1" }, inflightId: "", undecryptable: false }])
+			mockChatsQueryGet.mockReturnValue([{ uuid: "chat-1", lastMessage: { sentTimestamp: 0n, inner: { uuid: "msg-1", senderId: USER_ID } } }])
+
+			await handleChatEvent({ event: makeMessageNewEvent("chat-1", "msg-1", USER_ID) })
+			vi.advanceTimersByTime(3001)
+
+			expect(mockChatMessagesQueryGet).toHaveBeenCalledWith({ uuid: "chat-1" })
+			expect(mockChatMessagesQueryUpdate).not.toHaveBeenCalled()
+			expect(mockChatsQueryUpdate).not.toHaveBeenCalled()
+		})
+
+		it("still writes both caches when neither is populated (seeds them as before)", async () => {
+			await handleChatEvent({ event: makeMessageNewEvent("chat-1", "msg-1", USER_ID) })
+			vi.advanceTimersByTime(3001)
+
+			expect(mockChatMessagesQueryUpdate).toHaveBeenCalledOnce()
+			expect(mockChatsQueryUpdate).toHaveBeenCalledOnce()
+		})
+
+		it("still updates the chats list when the chat's lastMessage is a different message", async () => {
+			mockChatMessagesQueryGet.mockReturnValue([{ inner: { uuid: "msg-1" }, inflightId: "", undecryptable: false }])
+			mockChatsQueryGet.mockReturnValue([{ uuid: "chat-1", lastMessage: { sentTimestamp: 0n, inner: { uuid: "msg-0", senderId: USER_ID } } }])
+
+			await handleChatEvent({ event: makeMessageNewEvent("chat-1", "msg-1", USER_ID) })
+			vi.advanceTimersByTime(3001)
+
+			expect(mockChatMessagesQueryUpdate).not.toHaveBeenCalled()
+			expect(mockChatsQueryUpdate).toHaveBeenCalledOnce()
+		})
+
 		it("does NOT call chatMessagesQueryUpdate before 3 seconds", async () => {
 			const event = makeMessageNewEvent("chat-1", "msg-1", USER_ID)
 
@@ -650,6 +763,24 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 
 			expect(mockChatMessagesQueryUpdate).not.toHaveBeenCalled()
 		})
+
+		it("Decrypted: also updates the message on an open screen's older page", async () => {
+			olderPage("screen-1", "chat-1", [{ inner: { uuid: "msg-old", message: "Original" } }, { inner: { uuid: "msg-x", message: "Keep" } }])
+
+			await handleChatEvent({
+				event: makeMessageEditedEvent("chat-1", "msg-old", {
+					tag: MaybeEncryptedUniffi_Tags.Decrypted,
+					inner: ["Updated"]
+				})
+			})
+
+			const older = olderMessagesOf("screen-1")
+
+			expect((older?.[0]?.["inner"] as Record<string, unknown>)["message"]).toBe("Updated")
+			expect(older?.[0]?.["edited"]).toBe(true)
+			expect(older?.[0]?.["editedTimestamp"]).toBe(777n)
+			expect((older?.[1]?.["inner"] as Record<string, unknown>)["message"]).toBe("Keep")
+		})
 	})
 
 	// ---------------------------------------------------------------------------
@@ -706,6 +837,29 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 
 			expect(mockChatMessagesQueryUpdate).not.toHaveBeenCalled()
 		})
+
+		it("removes a message held only by an open screen's older page, leaving the query alone", async () => {
+			mockChatsQueryGet.mockReturnValue([{ uuid: "chat-1" }])
+			mockChatMessagesQueryGet.mockReturnValue([{ inner: { uuid: "msg-new" } }])
+			olderPage("screen-1", "chat-1", [{ inner: { uuid: "msg-old" } }, { inner: { uuid: "msg-keep" } }])
+
+			await handleChatEvent({ event: makeMessageDeleteEvent("msg-old") })
+
+			expect(olderMessagesOf("screen-1")?.map(m => (m["inner"] as { uuid: string }).uuid)).toEqual(["msg-keep"])
+			expect(mockChatMessagesQueryUpdate).not.toHaveBeenCalled()
+			expect(mockChatsQueryUpdate).not.toHaveBeenCalled()
+		})
+
+		it("removes the message from older pages too when the query holds it", async () => {
+			mockChatsQueryGet.mockReturnValue([{ uuid: "chat-1" }])
+			mockChatMessagesQueryGet.mockReturnValue([{ inner: { uuid: "msg-del" } }])
+			olderPage("screen-1", "chat-1", [{ inner: { uuid: "msg-del" } }])
+
+			await handleChatEvent({ event: makeMessageDeleteEvent("msg-del") })
+
+			expect(mockChatMessagesQueryUpdate).toHaveBeenCalledOnce()
+			expect(olderMessagesOf("screen-1")).toEqual([])
+		})
 	})
 
 	// ---------------------------------------------------------------------------
@@ -745,6 +899,17 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 
 			await handleChatEvent({ event })
 
+			expect(mockChatMessagesQueryUpdate).not.toHaveBeenCalled()
+		})
+
+		it("disables the embed on a message held only by an open screen's older page", async () => {
+			mockChatsQueryGet.mockReturnValue([{ uuid: "chat-1" }])
+			mockChatMessagesQueryGet.mockReturnValue([])
+			olderPage("screen-1", "chat-1", [{ inner: { uuid: "msg-old" }, embedDisabled: false }])
+
+			await handleChatEvent({ event: makeMessageEmbedDisabledEvent("msg-old") })
+
+			expect(olderMessagesOf("screen-1")?.[0]?.["embedDisabled"]).toBe(true)
 			expect(mockChatMessagesQueryUpdate).not.toHaveBeenCalled()
 		})
 	})

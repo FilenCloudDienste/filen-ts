@@ -33,6 +33,7 @@ vi.mock("@/hooks/useViewLayout", () => ({
 // ─── Actual imports ──────────────────────────────────────────────────────────
 
 import { resolveItemsPerRow, resolveScrollEnabled, validateVirtualListProps } from "@/components/ui/virtualList"
+import { compileWithReactCompiler, compilerFailures, memoSlotsOf } from "@/tests/compileWithReactCompiler"
 
 // ─── resolveItemsPerRow ───────────────────────────────────────────────────────
 
@@ -194,5 +195,16 @@ describe("resolveScrollEnabled", () => {
 
 	it("treats an undefined loading flag as not-loading", () => {
 		expect(resolveScrollEnabled({ dataLength: 0, hasOnRefresh: true })).toBe(true)
+	})
+})
+
+// Every list screen renders through VirtualListInner. Written as a cast arrow the compiler skipped it without logging a
+// failure, so only its memo cache shows it compiled.
+describe("the compiled VirtualList", () => {
+	it("memoizes VirtualListInner", () => {
+		const { events } = compileWithReactCompiler("components/ui/virtualList.tsx")
+
+		expect(compilerFailures(events)).toEqual([])
+		expect(memoSlotsOf(events, "VirtualListInner")).toBeGreaterThan(0)
 	})
 })

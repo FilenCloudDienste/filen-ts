@@ -125,10 +125,42 @@ describe("TextEditor chunked-document mode", () => {
 		)
 
 		expect(props()["initialValue"]).toBe("# note")
-		expect(props()["onValueChange"]).toBe(onValueChange)
+
+		const forwarded = props()["onValueChange"] as (value: string) => void
+
+		forwarded("# edited")
+
+		expect(onValueChange).toHaveBeenCalledWith("# edited")
 		expect(props()["readRange"]).toBeUndefined()
 		// No write RPC is offered, so nothing in that WebView can stage a file.
 		expect(props()["writeChunk"]).toBeUndefined()
+	})
+
+	it("keeps one onValueChange identity across host renders and forwards to the latest callback", () => {
+		// A fresh identity would change the DOM element, and expo/dom then re-sends every prop, the
+		// encoded seed included, over the bridge.
+		const first = vi.fn()
+		const latest = vi.fn()
+		const { rerender } = render(createElement(TextEditor, { type: "markdown", initialValue: "# note", onValueChange: first }))
+
+		rerender(createElement(TextEditor, { type: "markdown", initialValue: "# note", onValueChange: latest }))
+
+		const calls = domPropsSpy.mock.calls
+		const last = calls[calls.length - 1]?.[0] as Record<string, unknown>
+
+		expect(calls.length).toBeGreaterThan(1)
+		expect(last["onValueChange"]).toBe(props()["onValueChange"])
+
+		;(last["onValueChange"] as (value: string) => void)("# edited")
+
+		expect(first).not.toHaveBeenCalled()
+		expect(latest).toHaveBeenCalledWith("# edited")
+	})
+
+	it("offers no onValueChange action when the host passes none", () => {
+		render(createElement(TextEditor, { type: "markdown", initialValue: "# note" }))
+
+		expect(props()["onValueChange"]).toBeUndefined()
 	})
 
 	it("arms no save handle for a read-only document", () => {

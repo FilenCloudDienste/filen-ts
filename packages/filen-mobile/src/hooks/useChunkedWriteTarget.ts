@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react"
-import { Buffer } from "buffer"
 import { File, FileMode, type FileHandle } from "expo-file-system"
 import { MAX_RANGE_LENGTH, hasMagic, type ChunkWriter } from "@/lib/rangeTransfer"
 

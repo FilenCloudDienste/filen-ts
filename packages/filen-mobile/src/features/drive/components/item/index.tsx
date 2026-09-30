@@ -43,7 +43,7 @@ const Item = ({
 	const { t } = useTranslation()
 	const textForeground = useResolveClassNames("text-foreground")
 	const [isMenuOpen, setIsMenuOpen] = useRecyclingState<boolean>(false, [info.item.data.uuid])
-	const { onPress, disabled, navigateOnly, areDriveItemsSelected, hasCheckbox, checkbox } = useDriveItemInteraction({
+	const { onPress, isSelected, disabled, navigateOnly, areDriveItemsSelected, hasCheckbox, checkbox } = useDriveItemInteraction({
 		info,
 		drivePath,
 		getListItems
@@ -80,6 +80,7 @@ const Item = ({
 				onOpenMenu={() => setIsMenuOpen(true)}
 				drivePath={drivePath}
 				isStoredOffline={isStoredOffline}
+				isSelected={isSelected}
 			>
 				<View
 					className={cn(
@@ -185,6 +186,7 @@ const Item = ({
 										item={info.item}
 										drivePath={drivePath}
 										isStoredOffline={isStoredOffline}
+										isSelected={isSelected}
 									>
 										<View className="pl-4 h-full items-center justify-center flex-row bg-transparent">
 											<Ionicons

@@ -1081,28 +1081,28 @@ describe("unwrapParentUuid", () => {
 })
 
 describe("resolveMimeType", () => {
-	it("returns the explicit mime when present", () => {
-		expect(resolveMimeType({ mime: "image/jpeg", name: "photo.jpg" })).toBe("image/jpeg")
+	it("returns the explicit mime when present", async () => {
+		await expect(resolveMimeType({ mime: "image/jpeg", name: "photo.jpg" })).resolves.toBe("image/jpeg")
 	})
 
-	it("falls back to a lookup by filename when mime is undefined", () => {
-		expect(resolveMimeType({ mime: undefined, name: "doc.pdf" })).toBe("application/pdf")
+	it("falls back to a lookup by filename when mime is undefined", async () => {
+		await expect(resolveMimeType({ mime: undefined, name: "doc.pdf" })).resolves.toBe("application/pdf")
 	})
 
-	it("falls back to a lookup when mime is null", () => {
-		expect(resolveMimeType({ mime: null, name: "image.png" })).toBe("image/png")
+	it("falls back to a lookup when mime is null", async () => {
+		await expect(resolveMimeType({ mime: null, name: "image.png" })).resolves.toBe("image/png")
 	})
 
-	it("falls back to a lookup when mime is an empty string", () => {
-		expect(resolveMimeType({ mime: "", name: "clip.mp4" })).toBe("video/mp4")
+	it("falls back to a lookup when mime is an empty string", async () => {
+		await expect(resolveMimeType({ mime: "", name: "clip.mp4" })).resolves.toBe("video/mp4")
 	})
 
-	it("returns application/octet-stream when neither mime nor a known extension is available", () => {
-		expect(resolveMimeType({ mime: undefined, name: "archive.unknownext" })).toBe("application/octet-stream")
+	it("returns application/octet-stream when neither mime nor a known extension is available", async () => {
+		await expect(resolveMimeType({ mime: undefined, name: "archive.unknownext" })).resolves.toBe("application/octet-stream")
 	})
 
-	it("returns application/octet-stream for a name with no extension and no mime", () => {
-		expect(resolveMimeType({ mime: null, name: "Makefile" })).toBe("application/octet-stream")
+	it("returns application/octet-stream for a name with no extension and no mime", async () => {
+		await expect(resolveMimeType({ mime: null, name: "Makefile" })).resolves.toBe("application/octet-stream")
 	})
 })
 

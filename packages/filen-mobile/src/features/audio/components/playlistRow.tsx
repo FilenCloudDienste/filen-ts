@@ -5,7 +5,7 @@ import { cn } from "@filen/shared"
 import View from "@/components/ui/view"
 import AudioThumbnail from "@/components/ui/audioThumbnail"
 import Text from "@/components/ui/text"
-import { type PlaylistWithItems, useAudioQueue } from "@/features/audio/audio"
+import { type PlaylistWithItems, useAudioQueueSelector } from "@/features/audio/audio"
 import { PressableScale } from "@/components/ui/pressables"
 import { simpleDateNoTime } from "@/lib/time"
 import Menu, { type MenuButton } from "@/components/ui/menu"
@@ -41,12 +41,11 @@ export function buildPlaylistRowButtons({ t, playlist }: { t: TFunction; playlis
 
 export function PlaylistRow({ playlist, selectOptions }: { playlist: PlaylistWithItems; selectOptions?: SelectOptions }) {
 	const { t } = useTranslation()
-	const { queueItem } = useAudioQueue()
+	const isCurrent = useAudioQueueSelector(current => !!current && current.playlistUuid === playlist.uuid)
 	const isSelected = usePlaylistsStore(useShallow(state => state.selectedPlaylists.some(p => p.uuid === playlist.uuid)))
 	const arePlaylistsSelected = usePlaylistsStore(useShallow(state => state.selectedPlaylists.length > 0))
 	const [isMenuOpen, setIsMenuOpen] = useState<boolean>(false)
 
-	const isCurrent = !!queueItem && playlist.uuid === queueItem.playlistUuid
 	const disabled = selectOptions?.playlistUuidsToExclude?.includes(playlist.uuid) ?? false
 
 	// The context menu (long-press) is only available in normal browse mode. In

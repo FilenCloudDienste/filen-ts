@@ -21,18 +21,21 @@ export async function setContent({
 	note,
 	content,
 	signal,
-	updateQuery
+	updateQuery,
+	contentHash
 }: {
 	note: Note
 	content: string
 	signal?: AbortSignal
 	updateQuery?: boolean
+	// hashNoteContent(content), when the caller already has it
+	contentHash?: string
 }) {
 	const { authedSdkClient } = await auth.getSdkClients()
 
 	// Before the push goes out: its socket echo can beat the response back, and must never read as an
 	// edit made elsewhere.
-	rememberNotePush(note.uuid, hashNoteContent(content))
+	rememberNotePush(note.uuid, contentHash ?? hashNoteContent(content))
 
 	note = wrapSdkNote(
 		await authedSdkClient.setNoteContent(
@@ -64,12 +67,15 @@ export async function setType({
 	note,
 	type,
 	signal,
-	knownContent
+	knownContent,
+	knownContentHash
 }: {
 	note: Note
 	type: NoteType
 	signal?: AbortSignal
 	knownContent?: string
+	// hashNoteContent(knownContent), when the caller already has it
+	knownContentHash?: string
 }) {
 	if (type === note.noteType) {
 		return note
@@ -79,7 +85,7 @@ export async function setType({
 
 	// A type change re-sends the content it was given, which echoes back like any content push.
 	if (knownContent !== undefined) {
-		rememberNotePush(note.uuid, hashNoteContent(knownContent))
+		rememberNotePush(note.uuid, knownContentHash ?? hashNoteContent(knownContent))
 	}
 
 	note = wrapSdkNote(

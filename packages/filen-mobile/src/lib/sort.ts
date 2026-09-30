@@ -10,7 +10,7 @@ import {
 	type SortEngineAccessors
 } from "@filen/shared"
 import { type DriveItem, type Note } from "@/types"
-import type { ListItem as NoteListItem, Item as NoteItem } from "@/features/notes/components/note"
+import type { ListItem as NoteListItem, Item as NoteItem, DataItem as NoteDataItem } from "@/features/notes/components/note"
 import i18n from "@/lib/i18n"
 import { intlLanguage } from "@/lib/time"
 import { isDirectoryItem, isFileItem } from "@/features/drive/driveSelectors"
@@ -286,6 +286,27 @@ function headerForBucket(bucketId: NoteBucketId): NoteListItem {
 	}
 }
 
+// Row wrappers keyed by the note object, which is replaced (never mutated) on change: an unchanged note
+// keeps its row identity across regroups, so its memoized list cell does not re-render.
+const noteItemCache = new WeakMap<NoteItem, NoteDataItem>()
+
+function noteItem(note: NoteItem): NoteDataItem {
+	const cached = noteItemCache.get(note)
+
+	if (cached) {
+		return cached
+	}
+
+	const item: NoteDataItem = {
+		...note,
+		type: "note"
+	}
+
+	noteItemCache.set(note, item)
+
+	return item
+}
+
 // Pinned/favorited/archived/trashed are always their own tier (the app's single production
 // caller always wants all four — see @filen/shared's partitionNotesByBucket); tag pre-filtering
 // now lives with this function's caller, which already has the tag in hand.
@@ -320,10 +341,7 @@ function group(
 		result.push(headerForBucket(bucket.bucketId))
 
 		for (const entry of bucket.notes) {
-			result.push({
-				...entry.note,
-				type: "note"
-			})
+			result.push(noteItem(entry.note))
 		}
 	}
 

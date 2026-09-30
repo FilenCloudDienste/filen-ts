@@ -491,6 +491,16 @@ describe("downloadDriveItemToDevice — segment-decode pipeline (Android directo
 		expect(folders[0]).toBe("Filen/dirName/subdir")
 	})
 
+	it("each entry's MediaStore mime type is looked up from its name", async () => {
+		await runAndCapture("dirName", "subdir/file.txt")
+		await runAndCapture("otherDir", "subdir/blob.unknownext")
+
+		expect(mockCopyToMediaStore.mock.calls.map(call => (call[0] as { mimeType: string }).mimeType)).toEqual([
+			"text/plain",
+			"application/octet-stream"
+		])
+	})
+
 	it("path with space-encoded segment ('%20'): decoded back to 'Sub Folder'", async () => {
 		// The entry path has a literal space in fs key, but Paths.join re-encodes it to %20.
 		// We simulate what actually happens: the entry uri coming from the mock fs will have
@@ -1743,6 +1753,12 @@ describe("downloadFileItemToTmp", () => {
 
 	it("throws when the download did not produce a single file", async () => {
 		mockTransfersDownload.mockResolvedValueOnce({ files: [], directories: [] })
+
+		await expect(downloadFileItemToTmp(makeFileItem({ name: "doc.pdf" }))).rejects.toThrow("Downloaded item is not a file")
+	})
+
+	it("throws when the download resolved a directory result", async () => {
+		mockTransfersDownload.mockResolvedValueOnce({ errors: [], scanErrors: [] })
 
 		await expect(downloadFileItemToTmp(makeFileItem({ name: "doc.pdf" }))).rejects.toThrow("Downloaded item is not a file")
 	})

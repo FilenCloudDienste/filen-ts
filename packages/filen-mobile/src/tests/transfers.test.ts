@@ -10,6 +10,7 @@ const {
 	mockSetTransfers,
 	mockAddFinishedTransfer,
 	mockDriveItemsQueryUpdate,
+	mockUpsertManyIntoPhotos,
 	mockGetSdkClients,
 	mockTransfersState,
 	mockCreateCompositePauseSignal,
@@ -53,6 +54,8 @@ const {
 	const mockAddFinishedTransfer = vi.fn()
 
 	const mockDriveItemsQueryUpdate = vi.fn()
+
+	const mockUpsertManyIntoPhotos = vi.fn()
 
 	// Tracks every MockPauseSignal instance created via `new PauseSignal()` in the source.
 	// Plain array — not a vi.fn() — so vi.clearAllMocks() does not clear it.
@@ -148,6 +151,7 @@ const {
 		mockSetTransfers,
 		mockAddFinishedTransfer,
 		mockDriveItemsQueryUpdate,
+		mockUpsertManyIntoPhotos,
 		mockGetSdkClients,
 		mockTransfersState: state,
 		mockCreateCompositePauseSignal,
@@ -203,9 +207,8 @@ vi.mock("@/features/transfers/store/useTransfers.store", () => ({
 }))
 
 vi.mock("@/features/drive/queries/useDriveItems.query", () => ({
-	driveItemsQueryUpdate: mockDriveItemsQueryUpdate,
-	driveItemsQueryUpdateForNormalParent: mockDriveItemsQueryUpdate,
-	driveItemsQueryUpdateForPhotos: vi.fn(),
+	driveItemsQueryUpsertManyForNormalParent: mockDriveItemsQueryUpdate,
+	driveItemsQueryUpsertManyIntoPhotos: mockUpsertManyIntoPhotos,
 	driveItemsQueryUpdateForRecents: vi.fn()
 }))
 
@@ -399,11 +402,27 @@ describe("Transfers", () => {
 				expect(mockUploadFile).toHaveBeenCalledTimes(1)
 				expect(result!.files).toHaveLength(1)
 				expect(result!.directories).toHaveLength(0)
-				expect(mockDriveItemsQueryUpdate).toHaveBeenCalledWith(
-					expect.objectContaining({
-						parentUuid: "parent-uuid"
-					})
-				)
+
+				// Upserted through the helpers that cache only the new item, not the whole listing again.
+				const driveItem = {
+					type: "file",
+					data: {
+						uuid: "uploaded-file-uuid",
+						decryptedMeta: { name: "test.txt" },
+						undecryptable: false
+					}
+				}
+
+				expect(mockDriveItemsQueryUpdate).toHaveBeenCalledExactlyOnceWith({
+					parentUuid: "parent-uuid",
+					items: [driveItem]
+				})
+				expect(mockUpsertManyIntoPhotos).toHaveBeenCalledExactlyOnceWith([
+					{
+						parentUuid: "parent-uuid",
+						item: driveItem
+					}
+				])
 			})
 
 			it("adds transfer to store", async () => {
@@ -642,6 +661,7 @@ describe("Transfers", () => {
 				})
 
 				expect(mockDriveItemsQueryUpdate).not.toHaveBeenCalled()
+				expect(mockUpsertManyIntoPhotos).not.toHaveBeenCalled()
 			})
 
 			it("writes the error to the store entry then removes the settled (errored) transfer and upload throws a non-abort error", async () => {
@@ -1094,11 +1114,33 @@ describe("Transfers", () => {
 
 				expect(mockDriveItemsQueryUpdate).toHaveBeenCalledTimes(2)
 
-				const dirCall = mockDriveItemsQueryUpdate.mock.calls[0] as [{ parentUuid: string }]
-				expect(dirCall[0].parentUuid).toBe(subDirParentUuid)
-
-				const fileCall = mockDriveItemsQueryUpdate.mock.calls[1] as [{ parentUuid: string }]
-				expect(fileCall[0].parentUuid).toBe(subFileParentUuid)
+				expect(mockDriveItemsQueryUpdate).toHaveBeenNthCalledWith(1, {
+					parentUuid: subDirParentUuid,
+					items: [
+						{
+							type: "directory",
+							data: {
+								...uploadedDir,
+								size: 0n,
+								decryptedMeta: { name: "subdir" },
+								undecryptable: false
+							}
+						}
+					]
+				})
+				expect(mockDriveItemsQueryUpdate).toHaveBeenNthCalledWith(2, {
+					parentUuid: subFileParentUuid,
+					items: [
+						{
+							type: "file",
+							data: {
+								...uploadedFile,
+								decryptedMeta: { name: "file.txt" },
+								undecryptable: false
+							}
+						}
+					]
+				})
 			})
 
 			it("skips cache update for shared directories", async () => {
@@ -1321,8 +1363,8 @@ describe("Transfers", () => {
 				})
 
 				expect(mockDownloadFileToPath).toHaveBeenCalledTimes(1)
-				expect(result!.files).toHaveLength(1)
-				expect(result!.directories).toHaveLength(0)
+				expect((result && "files" in result ? result.files : null)).toHaveLength(1)
+				expect((result && "files" in result ? result.directories : null)).toHaveLength(0)
 			})
 
 			it("serves file from cache when fileCache has a cached copy", async () => {
@@ -1342,7 +1384,7 @@ describe("Transfers", () => {
 
 				expect(mockDownloadFileToPath).not.toHaveBeenCalled()
 				expect(result).not.toBeNull()
-				expect(result!.files).toHaveLength(1)
+				expect((result && "files" in result ? result.files : null)).toHaveLength(1)
 			})
 
 			it("does NOT call wrapAbortSignalForSdk on a fileCache cache hit (no handle allocated)", async () => {
@@ -1421,7 +1463,7 @@ describe("Transfers", () => {
 				})
 
 				expect(result).not.toBeNull()
-				expect(result!.files).toHaveLength(1)
+				expect((result && "files" in result ? result.files : null)).toHaveLength(1)
 			})
 
 			it("returns null (not a non-null result) when file download is aborted", async () => {
@@ -1548,8 +1590,7 @@ describe("Transfers", () => {
 				})
 
 				expect(mockDownloadDirRecursively).toHaveBeenCalledTimes(1)
-				expect(result!.files).toHaveLength(0)
-				expect(result!.directories).toHaveLength(0)
+				expect(result).toEqual({ errors: [], scanErrors: [] })
 			})
 
 			// TC-08: directory-download branch — the disposal defer() must be armed before the fallible
@@ -1582,16 +1623,22 @@ describe("Transfers", () => {
 			// per-entry failures arrive ONLY via the onDownloadErrors callback (the SDK call still
 			// resolves Ok) and MUST be included in the resolved value — offline treats a non-empty
 			// errors array as pass failure for that tree.
-			it("resolves { files, directories, errors } with callback-fed download errors and updates included", async () => {
+			// Downloaded items are not retained in the resolved value; progress still reaches the store.
+			it("resolves { errors, scanErrors } with callback-fed download errors and patches update bytes", async () => {
 				const dest = new FsDirectory("file:///document/destdir")
 				const item = makeDirItem("dir-uuid")
 				const entryError = { error: { message: () => "entry failed" }, path: "/private/destdir/sub/f.txt" }
 				const downloadedDir = { path: "/private/destdir/sub", dir: {} }
 				const downloadedFile = { path: "/private/destdir/sub/g.txt", file: {} }
+				let bytesAfterUpdate: number | undefined
 
 				mockDownloadDirRecursively.mockImplementationOnce(async (_path: string, callbacks: any) => {
 					callbacks.onDownloadErrors([entryError])
 					callbacks.onDownloadUpdate([downloadedDir], [downloadedFile], 128n)
+
+					bytesAfterUpdate = (mockTransfersState.transfers as { type?: string; bytesTransferred?: number }[]).find(
+						t => t.type === "downloadDirectory"
+					)?.bytesTransferred
 				})
 
 				const result = await transfers.download({
@@ -1600,9 +1647,9 @@ describe("Transfers", () => {
 				})
 
 				expect(result).not.toBeNull()
+				expect(result && "files" in result).toBe(false)
 				expect(result && "errors" in result ? result.errors : null).toEqual([entryError])
-				expect(result!.files).toEqual([downloadedFile])
-				expect(result!.directories).toEqual([downloadedDir])
+				expect(bytesAfterUpdate).toBe(128)
 			})
 
 			// Offline's in-place tree reconcile contract: the destination IS the live stored tree.

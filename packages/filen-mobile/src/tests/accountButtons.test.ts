@@ -1,10 +1,17 @@
 import { vi, describe, it, expect, beforeEach } from "vitest"
 vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 
-const { mockMarkDirectorySizesStale, mockAccountQueryPatch, mockInvalidateAfterDeleteAll } = vi.hoisted(() => ({
-	mockMarkDirectorySizesStale: vi.fn(),
-	mockAccountQueryPatch: vi.fn(),
-	mockInvalidateAfterDeleteAll: vi.fn()
+const { mockMarkDirectorySizesStale, mockAccountQueryPatch, mockInvalidateAfterDeleteAll, mockClearDotFilenDirectoryMemo } = vi.hoisted(
+	() => ({
+		mockMarkDirectorySizesStale: vi.fn(),
+		mockAccountQueryPatch: vi.fn(),
+		mockInvalidateAfterDeleteAll: vi.fn(),
+		mockClearDotFilenDirectoryMemo: vi.fn()
+	})
+)
+
+vi.mock("@/lib/dotFilenDirectory", () => ({
+	clearDotFilenDirectoryMemo: mockClearDotFilenDirectoryMemo
 }))
 
 vi.mock("@/features/drive/queries/useDirectorySize.query", () => ({
@@ -324,6 +331,7 @@ describe("buildDangerZoneButtons", () => {
 			expect(mockAuthedSdkClient.deleteAllItems).toHaveBeenCalledTimes(1)
 			// Drive listings don't wait for the socket echo, which a down socket never delivers.
 			expect(mockInvalidateAfterDeleteAll).toHaveBeenCalledTimes(1)
+			expect(mockClearDotFilenDirectoryMemo).toHaveBeenCalledTimes(1)
 		})
 
 		it("empties the drive clipboard once the items are deleted, and only then", async () => {

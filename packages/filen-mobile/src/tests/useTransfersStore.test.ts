@@ -8,13 +8,8 @@ const downloadExtras = () => ({ errors: { download: [], scan: [], unknown: [] },
 const TRANSFER_EXTRAS = {
 	uploadFile: uploadExtras,
 	downloadFile: downloadExtras,
-	downloadDirectory: () => ({
-		...downloadExtras(),
-		knownFiles: 0,
-		knownDirectories: 0,
-		directoryQueryProgress: { bytesTransferred: 9999999, totalBytes: 9999999 }
-	}),
-	uploadDirectory: () => ({ ...uploadExtras(), knownFiles: 0, knownDirectories: 0 })
+	downloadDirectory: downloadExtras,
+	uploadDirectory: uploadExtras
 }
 
 function makeTransfer(type: keyof typeof TRANSFER_EXTRAS, id: string, size: number, bytesTransferred = 0, paused = false): Transfer {
@@ -82,7 +77,7 @@ describe("useTransfersStore", () => {
 	})
 
 	describe("transfer type variants", () => {
-		it("downloadFile: progress computed from bytesTransferred/size, not directoryQueryProgress", () => {
+		it("downloadFile: progress computed from bytesTransferred/size", () => {
 			useTransfersStore.getState().setTransfers([makeTransfer("downloadFile", "dl", 2000, 1000)])
 
 			const stats = useTransfersStore.getState().stats
@@ -90,14 +85,12 @@ describe("useTransfersStore", () => {
 			expect(stats.progress).toBe(0.5)
 		})
 
-		it("downloadDirectory: directoryQueryProgress bytes are excluded; only top-level bytesTransferred/size count", () => {
-			// directoryQueryProgress has a huge value — it must not contaminate totalBytesTransferred
+		it("downloadDirectory: stats computed from top-level bytesTransferred/size", () => {
 			const transfer = makeTransfer("downloadDirectory", "dldir", 4000, 2000)
 			useTransfersStore.getState().setTransfers([transfer])
 
 			const stats = useTransfersStore.getState().stats
 
-			// Progress uses only the top-level bytesTransferred (2000) / size (4000)
 			expect(stats.progress).toBe(0.5)
 		})
 
@@ -308,6 +301,42 @@ describe("useTransfersStore", () => {
 			const transfers = useTransfersStore.getState().transfers
 			expect(transfers).toHaveLength(2)
 			expect(transfers.every(t => t.bytesTransferred === 800)).toBe(true)
+		})
+
+		it("back-stop ticks that change no stats keep the stats reference and notify no subscriber", () => {
+			useTransfersStore.getState().setTransfers([makeTransfer("uploadFile", "a", 1000, 500, true)])
+
+			// Let the paused transfer's speed settle at 0.
+			vi.advanceTimersByTime(200)
+
+			const stats = useTransfersStore.getState().stats
+			const listener = vi.fn()
+			const unsubscribe = useTransfersStore.subscribe(listener)
+
+			vi.advanceTimersByTime(1000)
+			unsubscribe()
+
+			expect(listener).not.toHaveBeenCalled()
+			expect(useTransfersStore.getState().stats).toBe(stats)
+			expect(stats).toEqual({ progress: 0.5, speed: 0 })
+		})
+
+		it("back-stop ticks still notify while the smoothed speed decays", () => {
+			useTransfersStore.getState().setTransfers([makeTransfer("uploadFile", "a", 100000, 0)])
+
+			for (let i = 1; i <= 10; i++) {
+				vi.advanceTimersByTime(100)
+				useTransfersStore.getState().setTransfers([makeTransfer("uploadFile", "a", 100000, i * 1000)])
+			}
+
+			const listener = vi.fn()
+			const unsubscribe = useTransfersStore.subscribe(listener)
+
+			// No more SDK events: only the interval runs, and the speed window keeps widening.
+			vi.advanceTimersByTime(300)
+			unsubscribe()
+
+			expect(listener).toHaveBeenCalled()
 		})
 	})
 

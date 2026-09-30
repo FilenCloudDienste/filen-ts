@@ -44,7 +44,7 @@ vi.mock("@/features/offline/offline", () => ({
 }))
 
 import { serialize, deserialize } from "@/lib/serializer"
-import { fs, File } from "@/tests/mocks/expoFileSystem"
+import { fs, File, Directory } from "@/tests/mocks/expoFileSystem"
 import { type DriveItem, type CacheItem } from "@/types"
 import auth from "@/lib/auth"
 import { wrapAbortSignalForSdk } from "@/lib/signals"
@@ -1201,6 +1201,94 @@ describe("FileCache", () => {
 
 			expect(result).toBe(true)
 			expect(fs.has(metaPath)).toBe(true)
+		})
+
+		it("skips a default pass after one that deleted nothing, until a write", async () => {
+			const cache = await createFileCache()
+			const item = wrapDrive(makeFileItem("fresh-uuid", "fresh.txt"))
+
+			writeFile("fresh-uuid", "fresh.txt")
+			writeMetadata("fresh-uuid", item)
+
+			vi.mocked(auth.getSdkClients).mockResolvedValue({
+				authedSdkClient: {
+					downloadFileToPath: vi.fn().mockImplementation(async (_anyFile: unknown, path: string) => {
+						fs.set("file://" + path, new Uint8Array([1]))
+					})
+				}
+			} as never)
+
+			const listSpy = vi.spyOn(Directory.prototype, "list")
+			const listCalls = (): number => listSpy.mock.contexts.filter(dir => (dir as Directory).uri === BASE_DIR).length
+
+			try {
+				await cache.gc()
+				await cache.gc()
+
+				expect(listCalls()).toBe(1)
+
+				// Explicit-age passes are never skipped.
+				await cache.gc(86400 * 1000)
+
+				expect(listCalls()).toBe(2)
+
+				await cache.get({ item: wrapDrive(makeFileItem("new-uuid", "new.txt")) })
+				await cache.gc()
+
+				expect(listCalls()).toBe(3)
+			} finally {
+				listSpy.mockRestore()
+			}
+		})
+
+		it("runs again once a survivor reaches its TTL", async () => {
+			const cache = await createFileCache()
+			const now = Date.now()
+			const uuid = "aging-uuid"
+			const item = wrapDrive(makeFileItem(uuid, "aging.txt"))
+			const dir = `${BASE_DIR}/${uuid}`
+
+			writeFile(uuid, "aging.txt")
+			fs.set(
+				`${dir}/${uuid}.filenmeta`,
+				new Uint8Array(new TextEncoder().encode(serialize({ ...item, cachedAt: now - 23 * 60 * 60 * 1000 })))
+			)
+
+			await cache.gc()
+
+			expect(fs.has(dir)).toBe(true)
+
+			const nowSpy = vi.spyOn(Date, "now").mockReturnValue(now + 60 * 60 * 1000)
+
+			try {
+				await cache.gc()
+			} finally {
+				nowSpy.mockRestore()
+			}
+
+			expect(fs.has(dir)).toBe(false)
+		})
+
+		it("has()'s torn-sidecar self-heal counts as a write for the next pass", async () => {
+			const cache = await createFileCache()
+			const uuid = "torn-uuid"
+			const item = wrapDrive(makeFileItem(uuid, "torn.txt"))
+			const dir = `${BASE_DIR}/${uuid}`
+
+			writeFile(uuid, "torn.txt")
+			writeMetadata(uuid, item)
+
+			await cache.gc()
+
+			fs.set(`${dir}/${uuid}.filenmeta`, new Uint8Array(new TextEncoder().encode("{torn")))
+
+			expect(await cache.has(item)).toBe(false)
+			expect(fs.has(`${dir}/${uuid}.filenmeta`)).toBe(false)
+
+			// The entry is now sidecar-less, which the next default pass must still collect.
+			await cache.gc()
+
+			expect(fs.has(dir)).toBe(false)
 		})
 
 		it("TC-14: a concurrent clear() waits for an in-flight gc to finish (gc holds the ClearBarrier)", async () => {

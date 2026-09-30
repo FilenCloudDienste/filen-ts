@@ -43,7 +43,7 @@ vi.mock("@/features/drive/drive", () => ({ default: { getRootUuid: vi.fn() } }))
 vi.mock("@/features/offline/offline", () => ({ default: { isItemTopLevelStoredSync: vi.fn(() => false) } }))
 vi.mock("@/features/contacts/contactsSelect", () => ({ selectContacts: vi.fn() }))
 vi.mock("@/features/drive/store/useDrive.store", () => ({
-	default: { getState: () => ({ selectedItems: [], toggleSelectedItem: vi.fn() }) }
+	default: { getState: () => ({ toggleSelectedItem: vi.fn() }) }
 }))
 vi.mock("@/features/drive/driveSelectors", async () => {
 	const actual = await vi.importActual<typeof import("@/features/drive/driveSelectors")>("@/features/drive/driveSelectors")
@@ -392,5 +392,35 @@ describe("Copy submenu actions", () => {
 
 		expect(alerts.error).toHaveBeenCalledWith(error)
 		expect(onDone).not.toHaveBeenCalled()
+	})
+})
+
+// The selection comes in as a prop: a store read here would be invisible to the callers' compiler memo keys.
+describe("select button", () => {
+	const selectButton = (isSelected: boolean | undefined) =>
+		createMenuButtons({ item: makeItem("file"), drivePath: makeDrivePath("drive"), isStoredOffline: false, isSelected, t }).find(
+			button => button.id === "select" || button.id === "deselect"
+		)
+
+	it("isSelected=true produces a checked deselect button", () => {
+		expect(selectButton(true)).toMatchObject({ id: "deselect", title: "deselect", checked: true })
+	})
+
+	it("isSelected false or omitted produces an unchecked select button", () => {
+		for (const isSelected of [false, undefined]) {
+			const button = selectButton(isSelected)
+
+			expect(button).toMatchObject({ id: "select", title: "select" })
+			expect(button?.checked).toBeFalsy()
+		}
+	})
+
+	it("is suppressed in the preview", () => {
+		const ids = flatIds(
+			createMenuButtons({ item: makeItem("file"), drivePath: makeDrivePath("drive"), isStoredOffline: false, isPreview: true, isSelected: true, t })
+		)
+
+		expect(ids).not.toContain("select")
+		expect(ids).not.toContain("deselect")
 	})
 })

@@ -167,6 +167,25 @@ describe("readAllBytes", () => {
 		expect(read).not.toHaveBeenCalled()
 	})
 
+	test("defaults to the per-call bridge bound, since every chunk is a round trip", async () => {
+		const bytes = new Uint8Array(MAX_RANGE_LENGTH * 2 + 3)
+
+		for (let index = 0; index < bytes.length; index++) {
+			bytes[index] = index % 251
+		}
+
+		const lengths: number[] = []
+		const inner = readerOver(bytes)
+		const read: RangeReader = async (offset, length) => {
+			lengths.push(length)
+
+			return inner(offset, length)
+		}
+
+		expect(await readAllBytes(read, bytes.byteLength)).toEqual(bytes)
+		expect(lengths).toEqual([MAX_RANGE_LENGTH, MAX_RANGE_LENGTH, 3])
+	})
+
 	test("never asks for more than the bridge allows, even when told to", async () => {
 		const lengths: number[] = []
 		const read: RangeReader = async (_offset, length) => {

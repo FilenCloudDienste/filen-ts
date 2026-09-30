@@ -79,6 +79,7 @@ vi.mock("@/lib/sqlite", async () => {
 })
 
 vi.mock("@/lib/kvScan", () => ({
+	KV_SMALL_ROW_PAGE_SIZE: 4096,
 	// Mirrors the real prefixUpperBound contract: an empty or U+FFFF-terminated prefix cannot form a
 	// valid exclusive upper bound, so the real function throws — the fake must too, or it could drift.
 	prefixUpperBound: (prefix: string): string => {
@@ -160,6 +161,16 @@ describe("loadHashes", () => {
 		await state.loadHashes()
 
 		expect(vi.mocked(forEachKvRowByPrefix)).toHaveBeenCalledTimes(1)
+	})
+
+	it("pages the small-row ledgers at the wide page size", async () => {
+		const state = make()
+
+		await state.loadHashes()
+		await state.loadAborts()
+
+		expect(vi.mocked(forEachKvRowByPrefix)).toHaveBeenNthCalledWith(1, expect.anything(), HASHES_PREFIX, expect.any(Function), 4096)
+		expect(vi.mocked(forEachKvRowByPrefix)).toHaveBeenNthCalledWith(2, expect.anything(), ABORTS_PREFIX, expect.any(Function), 4096)
 	})
 
 	it("discards results when a clear bumps the generation mid-scan", async () => {

@@ -46,6 +46,23 @@ export function planGcCapEviction(
 	}
 }
 
+// What runGc hands back to gc(): null when the pass had any deletion candidate (even one the
+// under-mutex re-check then spared), else the earliest survivor expiry (Infinity with no survivors).
+// Until that instant, and absent a write into the directory, another default pass deletes nothing.
+export function gcIdleUntil(hadCandidates: boolean, survivors: GcSurvivor[], ttlMs: number): number | null {
+	if (hadCandidates) {
+		return null
+	}
+
+	let earliest = Infinity
+
+	for (const survivor of survivors) {
+		earliest = Math.min(earliest, survivor.cachedAt + ttlMs)
+	}
+
+	return earliest
+}
+
 // Lifecycle shared by the disk caches rooted at one directory: per-key mutexes, a ClearBarrier that
 // clear() uses to drain readers/writers/gc, and debounced + app-background gc.
 export abstract class DiskCache {
@@ -53,6 +70,11 @@ export abstract class DiskCache {
 	protected readonly clearBarrier = new ClearBarrier()
 	protected readonly directory: FileSystem.Directory
 	private readonly tag: string
+	// Bumped by every write path (see noteWrite). A default gc pass that deleted nothing records the
+	// epoch it started at and the earliest survivor expiry; later default passes skip while both hold.
+	private writeEpoch = 0
+	private idleEpoch = -1
+	private idleUntil = 0
 
 	// Debounced gc after fresh writes + immediate gc on app-background: reclamation runs where growth
 	// happens instead of competing with startup. Log-only on failure — gc hygiene isn't user-actionable.
@@ -89,10 +111,23 @@ export abstract class DiskCache {
 		ensureDirectory(this.directory)
 	}
 
-	protected abstract runGc(age?: number): Promise<void>
+	// Write paths call this synchronously next to their first directory mutation AND again once the
+	// write settles (success or failure), so a gc that overlapped any part of the write never leaves
+	// the cache marked idle.
+	protected noteWrite(): void {
+		this.writeEpoch++
+	}
+
+	protected abstract runGc(age?: number): Promise<number | null>
 
 	public async gc(age?: number): Promise<void> {
 		if (!this.directory.exists) {
+			return
+		}
+
+		const epoch = this.writeEpoch
+
+		if (age === undefined && epoch === this.idleEpoch && Date.now() < this.idleUntil) {
 			return
 		}
 
@@ -101,7 +136,12 @@ export abstract class DiskCache {
 		await this.clearBarrier.enter()
 
 		try {
-			await this.runGc(age)
+			const idleUntil = await this.runGc(age)
+
+			if (age === undefined && idleUntil !== null) {
+				this.idleEpoch = epoch
+				this.idleUntil = idleUntil
+			}
 		} finally {
 			this.clearBarrier.leave()
 		}

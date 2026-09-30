@@ -37,19 +37,18 @@ function useDriveItemInfoRows(
 	const { t } = useTranslation()
 
 	const directorySizeQuery = useDirectorySizeQuery(
-		{
-			uuid: item.data.uuid,
-			// The sharing role (sharedIn vs sharedOut) and the trash/offline/linked size
-			// computation can't be inferred from item.type — they depend on the screen the
-			// item is shown in — so derive the query mode from the originating DrivePath.
-			type: directorySizeTypeForDrivePath(drivePathType),
-			// The info sheet holds the full item — thread it so the size resolves by value even
-			// when the session-scoped uuid cache never observed this directory.
-			item
-		},
-		{
-			enabled: isDirectoryItem(item)
-		}
+		isDirectoryItem(item)
+			? {
+					uuid: item.data.uuid,
+					// The sharing role (sharedIn vs sharedOut) and the trash/offline/linked size
+					// computation can't be inferred from item.type — they depend on the screen the
+					// item is shown in — so derive the query mode from the originating DrivePath.
+					type: directorySizeTypeForDrivePath(drivePathType),
+					// The info sheet holds the full item — thread it so the size resolves by value even
+					// when the session-scoped uuid cache never observed this directory.
+					item
+				}
+			: null
 	)
 
 	return (

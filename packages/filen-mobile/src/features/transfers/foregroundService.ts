@@ -62,9 +62,49 @@ export type TransferProgressSnapshot = {
 	copyingItems: number | null
 }
 
+export type TransferNotificationContent = {
+	body: string
+	percent: number
+	indeterminate: boolean
+}
+
+// Everything the notification shows. Raw progress/speed floats change on nearly every stats tick; this does not.
+export function notificationContent({ count, progress, speed, copyingItems }: TransferProgressSnapshot): TransferNotificationContent {
+	const percent = Math.round(progress * 100)
+	const speedText = speed > 0 ? formatBytesPerSecond(speed) : "—"
+	// `count` stays a number so i18next selects the right plural form; `percent` is passed as a
+	// string because i18next's TS types collapse the interpolation overload once a key has 3+
+	// variables and one is numeric — stringifying it keeps the call fully typed.
+	const body =
+		copyingItems === null
+			? i18n.t("transfers_progress", {
+					count,
+					percent: percent.toString(),
+					speed: speedText
+				})
+			: i18n.t("copying_progress", {
+					count: copyingItems,
+					percent: percent.toString(),
+					speed: speedText
+				})
+
+	return {
+		body,
+		percent,
+		indeterminate: count > 0 && progress === 0
+	}
+}
+
+function contentKey({ body, percent, indeterminate }: TransferNotificationContent): string {
+	return `${body}|${percent}|${indeterminate}`
+}
+
 class ForegroundService {
 	private initPromise: Promise<void> | null = null
 	private running = false
+	// What the live notification shows. update() skips identical re-posts: each one is a bridge call plus
+	// a native rebuild and system post, and Android sheds a package's updates above ~5/s anyway.
+	private lastPostedKey: string | null = null
 	private deniedThisSession = false
 	private openTransfersRequested = false
 	private readonly openTransfersListeners = new Set<() => void>()
@@ -80,16 +120,10 @@ class ForegroundService {
 
 		this.initPromise = (async () => {
 			notifee.registerForegroundService(() => {
-				return new Promise<void>(() => {
-					// Keep the foreground service alive until stopForegroundService() is called.
-					// The promise never resolves, so the service never stops on its own.
-					// The host's running mirror is cleared when stopForegroundService() is called (or if it throws), so the host can re-arm a fresh start() on the next count/foreground edge.
-					;(async () => {
-						while (this.running) {
-							await new Promise(resolve => setTimeout(resolve, 1000))
-						}
-					})()
-				})
+				// Keep the foreground service alive until stopForegroundService() is called.
+				// The promise never resolves, so the service never stops on its own.
+				// The host's running mirror is cleared when stopForegroundService() is called (or if it throws), so the host can re-arm a fresh start() on the next count/foreground edge.
+				return new Promise<void>(() => {})
 			})
 
 			// The ongoing transfers notification emits events (e.g. dismissal) while the app is backgrounded.
@@ -171,9 +205,12 @@ class ForegroundService {
 			return
 		}
 
-		await this.display(progress)
+		const content = notificationContent(progress)
+
+		await this.display(content)
 
 		this.running = true
+		this.lastPostedKey = contentKey(content)
 	}
 
 	// Whether the foreground-service notification is currently displayed. Used by the host to retry
@@ -201,8 +238,17 @@ class ForegroundService {
 			return
 		}
 
+		const content = notificationContent(progress)
+		const key = contentKey(content)
+
+		if (key === this.lastPostedKey) {
+			return
+		}
+
 		try {
-			await this.display(progress)
+			await this.display(content)
+
+			this.lastPostedKey = key
 		} catch (err) {
 			// A reissued display can be rejected if the service is no longer live (OS timeout) or if
 			// the app is backgrounded (background-start rejection). Drop the stale `running` mirror so
@@ -213,6 +259,7 @@ class ForegroundService {
 			})
 
 			this.running = false
+			this.lastPostedKey = null
 		}
 	}
 
@@ -224,6 +271,7 @@ class ForegroundService {
 		// Clear the mirror unconditionally: even if stopForegroundService() throws, the JS FSM must not
 		// keep believing a service is live (that would block every future start() and update() forever).
 		this.running = false
+		this.lastPostedKey = null
 
 		try {
 			await notifee.stopForegroundService()
@@ -280,6 +328,7 @@ class ForegroundService {
 		logger.warn("transfers-fgs", "Android timed the foreground service out; clearing running state to allow re-arm")
 
 		this.running = false
+		this.lastPostedKey = null
 	}
 
 	// Whether the user has the "Background transfers" setting enabled. Absent → on by default,
@@ -311,26 +360,7 @@ class ForegroundService {
 		return granted
 	}
 
-	private async display(progress: TransferProgressSnapshot): Promise<void> {
-		const { count, progress: ratio, speed, copyingItems } = progress
-		const percent = Math.round(ratio * 100)
-		const speedText = speed > 0 ? formatBytesPerSecond(speed) : "—"
-		// `count` stays a number so i18next selects the right plural form; `percent` is passed as a
-		// string because i18next's TS types collapse the interpolation overload once a key has 3+
-		// variables and one is numeric — stringifying it keeps the call fully typed.
-		const body =
-			copyingItems === null
-				? i18n.t("transfers_progress", {
-						count,
-						percent: percent.toString(),
-						speed: speedText
-					})
-				: i18n.t("copying_progress", {
-						count: copyingItems,
-						percent: percent.toString(),
-						speed: speedText
-					})
-
+	private async display({ body, percent, indeterminate }: TransferNotificationContent): Promise<void> {
 		await notifee.displayNotification({
 			id: NOTIFICATION_ID,
 			title: "Filen",
@@ -344,7 +374,7 @@ class ForegroundService {
 				progress: {
 					max: 100,
 					current: Math.max(0, Math.min(100, percent)),
-					indeterminate: count > 0 && ratio === 0
+					indeterminate
 				}
 			}
 		})
